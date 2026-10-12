@@ -5,8 +5,10 @@ import {
   adoptionDocReadIsDue,
   adoptionPreflightRefusal,
   adoptionReplacementRefusal,
+  creditFloorExceptionId,
   creditFloorExceptionVerdict,
   GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION,
+  HAIKU_LINE_GUEST_CREDIT_EXCEPTION,
   adoptionSaleProposal,
   adoptionSaveBlock,
   blankTokenFieldValues,
@@ -1772,4 +1774,78 @@ test("a provider without a machine-readable price page names its official page",
   assert.match(draft.unknowns.join("\n"), /ai\.google\.dev\/gemini-api\/docs\/pricing/);
   assert.equal(draft.pricingProfileProposal, null);
   assert.equal(draft.fields.inputUsdPerMillionTokens, null);
+});
+
+// The Haiku line exception (operator decision 2026-10-12): a guest's lineup
+// always holds one OpenAI, one Anthropic and one Gemini model, so a Claude
+// Haiku model is saved at Standard and one credit even below the floor.
+const haikuWorkItem = {
+  id: "wi_haiku_next",
+  status: "discovered",
+  action: "add",
+  provider: "anthropic",
+  apiModel: "claude-haiku-6",
+  modelId: null as string | null,
+};
+
+// Long-context-tier rates, which is what the 128,000-token worst turn prices.
+const haikuBody = {
+  id: "claude-haiku-6",
+  apiModel: "claude-haiku-6",
+  provider: "anthropic",
+  status: "coming-soon",
+  publiclyListed: true,
+  usageClass: "standard",
+  creditWeight: 1,
+  inputUsdPerMillionTokens: 0.5,
+  outputUsdPerMillionTokens: 2.5,
+  cachedInputPriceMultiplier: 0.1,
+  maxOutputTokens: 128_000,
+};
+
+test("a Claude Haiku model at one standard credit below the floor needs the Haiku line acknowledgement", () => {
+  const refusal = adoptionPreflightRefusal({ workItem: haikuWorkItem, body: haikuBody });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /at least \d+ credits/);
+  assert.equal(
+    creditFloorExceptionVerdict({ ...haikuBody, acknowledgement: null }),
+    "needs_acknowledgement"
+  );
+  assert.equal(
+    adoptionPreflightRefusal({
+      workItem: haikuWorkItem,
+      body: haikuBody,
+      creditFloorExceptionAck: HAIKU_LINE_GUEST_CREDIT_EXCEPTION.id,
+    }),
+    null
+  );
+  assert.equal(creditFloorExceptionId(haikuBody), HAIKU_LINE_GUEST_CREDIT_EXCEPTION.id);
+});
+
+test("the Haiku line exception is the Anthropic Haiku line at standard and one credit, and nothing else", () => {
+  const ack = HAIKU_LINE_GUEST_CREDIT_EXCEPTION.id;
+  // Another Anthropic model is not the line.
+  assert.equal(
+    creditFloorExceptionVerdict({ ...haikuBody, apiModel: "claude-sonnet-6", acknowledgement: ack }),
+    "not_applicable"
+  );
+  // A Haiku-named model from another provider is not either.
+  assert.equal(
+    creditFloorExceptionVerdict({ ...haikuBody, provider: "openrouter", acknowledgement: ack }),
+    "not_applicable"
+  );
+  // The exception is for the Standard, one-credit sale; any other shape is
+  // judged by the floor alone.
+  assert.equal(
+    creditFloorExceptionVerdict({ ...haikuBody, creditWeight: 2, acknowledgement: ack }),
+    "not_applicable"
+  );
+  // The Gemini acknowledgement does not open the Haiku line.
+  assert.equal(
+    creditFloorExceptionVerdict({
+      ...haikuBody,
+      acknowledgement: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id,
+    }),
+    "needs_acknowledgement"
+  );
 });

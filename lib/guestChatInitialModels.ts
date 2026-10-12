@@ -3,6 +3,7 @@ import {
   normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
   type WebSearchMode,
+  type ReplacementResolver,
 } from "@/lib/appDefaults";
 
 // Same keys app/(site)/(application)/chat/ChatPageClient.tsx persists guest state
@@ -11,6 +12,34 @@ import {
 // never drift apart.
 export const GUEST_ACTIVE_CHAT_STORAGE_KEY = "tomverse_active_chat_id";
 export const GUEST_CONVERSATIONS_STORAGE_KEY = "guest_conversations";
+export const GUEST_CHAT_ACTIVE_CHAT_STORAGE_KEY =
+  "tomverse_chat_active_chat_id";
+export const GUEST_CHAT_CONVERSATIONS_STORAGE_KEY =
+  "guest_chat_conversations";
+
+export type GuestWorkspaceProduct = "chat" | "review";
+
+/**
+ * Guest Review predates Tomverse Chat and keeps its existing storage keys.
+ * Chat uses a separate namespace so changing products cannot reinterpret a
+ * one-model Chat as a comparison, or delete Review history from this browser.
+ */
+export const guestWorkspaceStorageKeys = (
+  product: GuestWorkspaceProduct = "review"
+) => product === "chat"
+  ? {
+      activeChatKey: GUEST_CHAT_ACTIVE_CHAT_STORAGE_KEY,
+      conversationsKey: GUEST_CHAT_CONVERSATIONS_STORAGE_KEY,
+    }
+  : {
+      activeChatKey: GUEST_ACTIVE_CHAT_STORAGE_KEY,
+      conversationsKey: GUEST_CONVERSATIONS_STORAGE_KEY,
+    };
+
+export const newGuestConversationId = (
+  product: GuestWorkspaceProduct,
+  now = Date.now()
+) => product === "chat" ? `guest_chat_${now}` : `guest_${now}`;
 
 /** Which rule produced the selection -- surfaced for tests and diagnostics. */
 export type GuestInitialModelSource =
@@ -43,6 +72,18 @@ export type GuestCatalogueAccess = {
   isEnabledModelId: (modelId: string) => boolean;
   /** Additionally guest-plan and Standard-tier, per lib/appDefaults. */
   isGuestEligible: (modelId: string) => boolean;
+  /**
+   * isGuestEligible narrowed to what a default may name
+   * (lib/appDefaults `createDefaultLineupEligibilityCheck`). Only the default
+   * selection uses it; a guest's own selection is clamped by isGuestEligible.
+   */
+  isDefaultEligible: (modelId: string) => boolean;
+  /**
+   * A retired model's successor, per the same catalogue
+   * (lib/appDefaults `createReplacementResolver`). Optional only so a caller
+   * without a catalogue lookup still resolves; the chat client always binds it.
+   */
+  resolveReplacement?: ReplacementResolver;
 };
 
 export const readGuestInitialModelEnvironment =
@@ -108,15 +149,17 @@ export const createGuestSelectionClamp =
 
 /** The guest conversation this tab had open, as stored, if there is one. */
 const readRestoredGuestConversation = (
-  environment: GuestInitialModelEnvironment
+  environment: GuestInitialModelEnvironment,
+  product: GuestWorkspaceProduct
 ): { selectedModels?: unknown; webSearchMode?: unknown } | undefined => {
+  const storageKeys = guestWorkspaceStorageKeys(product);
   const activeChatId = readItem(
     environment.sessionStorage,
-    GUEST_ACTIVE_CHAT_STORAGE_KEY
+    storageKeys.activeChatKey
   );
   const rawConversations = readItem(
     environment.localStorage,
-    GUEST_CONVERSATIONS_STORAGE_KEY
+    storageKeys.conversationsKey
   );
   if (!activeChatId || !rawConversations) return undefined;
   let parsed: unknown;
@@ -149,9 +192,10 @@ const readRestoredGuestConversation = (
  * of the conversation it opens into, not its search switch.
  */
 export const resolveGuestInitialWebSearchMode = (
-  environment: GuestInitialModelEnvironment = {}
+  environment: GuestInitialModelEnvironment = {},
+  product: GuestWorkspaceProduct = "review"
 ): WebSearchMode => {
-  const restored = readRestoredGuestConversation(environment);
+  const restored = readRestoredGuestConversation(environment, product);
   return restored
     ? normalizeWebSearchMode(restored.webSearchMode)
     : APP_DEFAULTS.defaultWebSearchMode;
@@ -176,21 +220,32 @@ export const resolveGuestInitialWebSearchMode = (
 export const resolveGuestInitialSelectedModels = ({
   catalogue,
   leadModelId = APP_DEFAULTS.guestDefaultModelId,
+  trio,
   environment = {},
+  product = "review",
 }: {
   catalogue: GuestCatalogueAccess;
   leadModelId?: string;
+  /** The effective default lineup (lib/appSettings); the compiled trio when omitted. */
+  trio?: readonly string[];
   environment?: GuestInitialModelEnvironment;
+  product?: GuestWorkspaceProduct;
 }): GuestInitialModelSelection => {
   const clamp = createGuestSelectionClamp(catalogue);
-  const guestDefault = clamp(
+  const clampForProduct = (models: string[]) => {
+    const clamped = clamp(models);
+    return product === "chat" ? clamped.slice(0, 1) : clamped;
+  };
+  const guestDefault = clampForProduct(
     resolveGuestDefaultSelectedModels({
-      isEligible: catalogue.isGuestEligible,
+      isEligible: catalogue.isDefaultEligible,
       leadModelId,
+      resolveReplacement: catalogue.resolveReplacement,
+      trio,
     })
   );
 
-  const requestedModels = clamp(
+  const requestedModels = clampForProduct(
     Array.from(
       new Set(
         (new URLSearchParams(environment.search || "").get("models") || "")
@@ -204,10 +259,10 @@ export const resolveGuestInitialSelectedModels = ({
     return { models: requestedModels, source: "url_models_param" };
   }
 
-  const restored = readRestoredGuestConversation(environment);
+  const restored = readRestoredGuestConversation(environment, product);
   if (restored) {
     const savedModels = normalizeStringArray(restored.selectedModels);
-    const restoredModels = savedModels ? clamp(savedModels) : [];
+    const restoredModels = savedModels ? clampForProduct(savedModels) : [];
     // A saved selection that is empty, unreadable, or names only models the
     // catalogue no longer serves falls through to the guest default rather
     // than to an empty composer -- the same deterministic answer the server

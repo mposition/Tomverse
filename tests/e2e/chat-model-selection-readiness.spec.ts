@@ -55,7 +55,7 @@ test.describe("desktop model selection readiness", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const panel = page.getByTestId("desktop-model-panel").first();
     await expect(panel).toBeVisible();
@@ -69,11 +69,13 @@ test.describe("desktop model selection readiness", () => {
     await expect(select).toBeEnabled();
     await expect(select).toHaveAttribute("aria-busy", "false");
     // /chat lands on the welcome screen without opening a conversation, so the
-    // panel settles on the compiled-in default rather than on the seeded
-    // conversation's selectedModels. This read gpt-5-4-mini until 2026-08-01
-    // and passed only because DEFAULT_MODEL_ID happened to be the same id the
-    // fixture seeds -- the assertion proved the select had a usable value once
-    // the gate lifted, not that conversation data had been applied.
+    // panel settles on the account default the settings fixture returns rather
+    // than on the seeded conversation's selectedModels. This read gpt-5-4-mini
+    // until 2026-08-01 and passed only because DEFAULT_MODEL_ID happened to be
+    // the same id the fixture seeds -- the assertion proved the select had a
+    // usable value once the gate lifted, not that conversation data had been
+    // applied. DEFAULT_MODEL_ID moved to gpt-6-luna on 2026-10-12; the fixture's
+    // stored account default did not.
     await expect(select).toHaveValue("gpt-5-6-luna");
   });
 
@@ -81,7 +83,7 @@ test.describe("desktop model selection readiness", () => {
     page,
   }) => {
     await prepareGuestPage(page, "en");
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const panel = page.getByTestId("desktop-model-panel").first();
     await expect(panel).toBeVisible();
@@ -128,7 +130,7 @@ test.describe("desktop model selection readiness", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const firstPanel = page.getByTestId("desktop-model-panel").first();
     await expect(firstPanel.locator("select")).toBeDisabled();

@@ -28,7 +28,7 @@ import { installChatModelStub } from "./support/chat-state-fixtures";
  * same script rather than only the lead, so this spec does not quietly depend
  * on how many panels a guest conversation opens with.
  */
-const GUEST_MODEL_IDS = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-flash-lite-latest"];
+const GUEST_MODEL_IDS = ["gpt-6-luna", "claude-haiku-5-5", "gemini-flash-lite-latest"];
 const NUL = String.fromCharCode(0);
 const KEEPALIVE_MARKER = `${NUL}TOMVERSE_STREAM_KEEPALIVE`;
 const TRAILER_MARKER = `${NUL}TOMVERSE_SEARCH_METADATA`;
@@ -64,7 +64,7 @@ test("a keepalive torn across chunks never reaches the screen or the transcript"
     )
   );
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "Summarise the attached deck.");
 
   const answer = page.getByTestId("chat-message-list").first();

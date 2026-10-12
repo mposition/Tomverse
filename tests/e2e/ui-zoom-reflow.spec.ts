@@ -147,7 +147,7 @@ for (const zoom of ZOOM_LEVELS) {
 
     await page.setViewportSize(zoomed({ width: 390, height: 844 }, zoom));
     await prepareGuestPage(page, "ko");
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
 
     await modelMenuTrigger(page).click();
     const dialog = page.locator("#chat-input-popover");

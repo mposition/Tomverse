@@ -345,6 +345,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/amux-decision-maker.md §10",
   },
   {
+    table: "AmuxWorkerRegistryEvent",
+    delegate: "amuxWorkerRegistryEvent",
+    writers: ["lib/amux/workerRegistryStore.ts"],
+    contract: "docs/policy/development-agent-orchestration.md 버전 31",
+  },
+  {
     table: "AmuxDecisionMakerRequest",
     delegate: "amuxDecisionMakerRequest",
     writers: ["lib/amux/decisionMakerRequestStore.ts"],
@@ -522,6 +528,12 @@ export const DELEGATE_NAME_ALLOWLIST = [
   },
   {
     path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxWorkerRegistryEvent",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     delegate: "amuxDecisionMakerBody",
     count: 1,
     reason: "The data-domain registry's domain key. No client is indexed with it.",
@@ -551,6 +563,38 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the worker registry model as its domain key and as prismaModel, and other domains' prose uses delete and update. It builds no SQL and opens no database connection.",
+  },
+  {
+    path: "prisma/migrations/20261012100000_amux_worker_registry/migration.sql",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 9,
+    writeVerbs: 23,
+    reason:
+      "Creates the registry event table, its indexes, its foreign key to the audit log and the guard trigger that holds the change rule, binds an insert to its audit row and refuses every update and delete. It names those verbs to constrain or refuse them, reads the worker's newest event in the guard, and writes no row.",
+  },
+  {
+    path: "lib/amux/workerRegistryStore.ts",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "The registry event table's single writer (orchestration policy version 31, section 3). Its raw SQL is two constant SELECTs (the newest event of every worker, and of one worker) and one constant INSERT ... RETURNING; every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261012100000_amux_worker_registry/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 23,
+    reason:
+      "The worker registry migration (orchestration policy version 31, sections 3, 5 and 7). Its four AdminAuditLog mentions are the restrictive foreign keys from the registry event's, the trial evidence's and the latch event's auditLogId, and the one SELECT EXISTS read in the registry guard that refuses an event whose audit row of the same transaction, person and action is missing. It never writes AdminAuditLog; its write verbs are the ALTER TABLEs adding those keys with their ON DELETE / ON UPDATE RESTRICT, the four triggers' events, the guards' TG_OP comparison and words of comments.",
+  },
   {
     path: "lib/promptRefinerVnextOneShotTerminalReceipt.ts",
     table: "AdminAuditLog",
@@ -1351,32 +1395,32 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerBody",
-    tableMentions: 10,
-    writeVerbs: 10,
+    tableMentions: 12,
+    writeVerbs: 11,
     reason:
-      "The Decision Maker body store's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the body table in four constant SELECTs (a request's retention read, its bodies, a key period's state, the purge candidates), two constant DELETE ... RETURNING statements (the expiry purge of a request's bodies and the privacy erase of named fields, each under its audit of the same transaction, which the trigger requires) and, in the one statement that records an accepted result's detail, a constant INSERT ... SELECT FROM unnest(...) RETURNING of a DM output's bodies, written only with the detail; since S1e it also reads a proposal's body digests for a person's judgment and writes an edited answer in one constant INSERT ... SELECT ... WHERE the registry holds the key, RETURNING its digest, under the judgment's audit; every value is a bound parameter. The other verbs are the retention and key event INSERTs and the word in the errors raised when an insert returns no row or rows change under the lock. It never updates a body, and it writes the audit log only through writeAdminAuditLog and lib/amux/decisionMakerBodySystemAudit.ts.",
+      "The Decision Maker body store's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the body table in four constant SELECTs (a request's retention read, its bodies, a key period's state, the purge candidates), two constant DELETE ... RETURNING statements (the expiry purge of a request's bodies and the privacy erase of named fields, each under its audit of the same transaction, which the trigger requires) and, in the one statement that records an accepted result's detail, a constant INSERT ... SELECT FROM unnest(...) RETURNING of a DM output's bodies, written only with the detail; since S1e it also reads a proposal's body digests for a person's judgment and writes an edited answer in one constant INSERT ... SELECT ... WHERE the registry holds the key, RETURNING its digest, under the judgment's audit; since 2026-10-09 the routing composition writes a new DM request's card text in one constant INSERT ... SELECT ... WHERE the registry holds the key, RETURNING its digest, under the route audit the routing wrote in the same transaction, and a constant SELECT reads that card text back for Admin; every value is a bound parameter. The other verbs are the retention and key event INSERTs and the word in the errors raised when an insert returns no row or rows change under the lock. It never updates a body, and it writes the audit log only through writeAdminAuditLog and lib/amux/decisionMakerBodySystemAudit.ts.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerRetentionEvent",
     tableMentions: 7,
-    writeVerbs: 10,
+    writeVerbs: 11,
     reason:
       "The same module names the retention event table in its constant SELECTs (a request's retention and hold counts, a key period's open holds, the purge candidates) and in one constant INSERT ... RETURNING of a person's hold_set or hold_release; every value is a bound parameter. retention_set is written by the closing trigger, never here. It never updates or deletes a retention event.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerDigestKeyEvent",
-    tableMentions: 9,
-    writeVerbs: 10,
+    tableMentions: 11,
+    writeVerbs: 11,
     reason:
-      "The same module names the digest-key registry in a key period's state read (its rotation's key check value and whether its destruction is recorded), in the two EXISTS conditions under which a result's detail is written (the key it was digested under is registered and its period not destroyed), the same two under which an edited answer is written and the registry entry a judgment's proposal read returns (S1e), and in two constant INSERT ... RETURNING statements, a rotation and a destruction; every value is a bound parameter. It never updates or deletes a registry event, and never writes a key.",
+      "The same module names the digest-key registry in a key period's state read (its rotation's key check value and whether its destruction is recorded), in the two EXISTS conditions under which a result's detail is written (the key it was digested under is registered and its period not destroyed), the same two under which an edited answer is written and the registry entry a judgment's proposal read returns (S1e), the same two under which a routing's card text is written (2026-10-09), and in two constant INSERT ... RETURNING statements, a rotation and a destruction; every value is a bound parameter. It never updates or deletes a registry event, and never writes a key.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerResultDetail",
     tableMentions: 3,
-    writeVerbs: 10,
+    writeVerbs: 11,
     reason:
       "The same module writes a terminal result's structured detail in one constant data-modifying statement, INSERT ... SELECT ... WHERE the registry holds the key, with the bodies in a second CTE that inserts only beside it, and reads it in two constant SELECTs, the second the proposal a person's judgment checks (S1e); every value is a bound parameter. It never updates or deletes a detail.",
   },
@@ -1920,6 +1964,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 3,
     reason:
       "Three reads in the Decision Maker switch event guard, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the newest event of the inserted event's scope, read after a transaction advisory lock on that scope, and one SELECT EXISTS on AdminAuditLog for a person's event or for a latch. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261012100000_amux_worker_registry/migration.sql",
+    count: 2,
+    reason:
+      "Two reads in the worker registry event guard, both with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the inserted worker's newest event, read after a transaction advisory lock on that worker, and one SELECT EXISTS on AdminAuditLog for the person's audit row of the same transaction. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",

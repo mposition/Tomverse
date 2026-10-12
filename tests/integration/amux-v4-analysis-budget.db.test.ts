@@ -376,10 +376,11 @@ test("owner cancels only an unused hold, releasing the reservation with one audi
     if (previousOpsEmails === undefined) delete process.env.ADMIN_OPS_EMAILS;
     else process.env.ADMIN_OPS_EMAILS = previousOpsEmails;
   }
+  // One minute past the step-up window this run actually uses. A fixed age went
+  // stale-to-fresh when the default window grew from 30 minutes to two hours.
   const staleOwner = { ...session, user: { ...session.user,
     authenticatedAt: new Date(Date.now() -
-      (resolveRecentAuthMinutes(process.env.ADMIN_RECENT_AUTH_MINUTES) + 1) * 60_000)
-      .toISOString() } } as Session;
+      (resolveRecentAuthMinutes(process.env.ADMIN_RECENT_AUTH_MINUTES) + 1) * 60_000).toISOString() } } as Session;
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
       { session: staleOwner, request, holdId })), isAdminReauthenticationError);

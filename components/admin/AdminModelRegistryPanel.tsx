@@ -29,11 +29,11 @@ import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, creditFloorExceptionShapeKey, creditFloorExceptionVerdict, GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION, isCreditFloor, suggestCreditFloor, type AdoptionPriceView } from "@/lib/modelAdoptionDraft";
+import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, creditFloorExceptionId, creditFloorExceptionShapeKey, creditFloorExceptionVerdict, GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION, isCreditFloor, suggestCreditFloor, type AdoptionPriceView } from "@/lib/modelAdoptionDraft";
 import { partitionAdoptionGuidance, priceHintsForView } from "@/lib/adoptionDialogGuidance";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
-import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck } from "@/lib/appDefaults";
+import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createDefaultLineupEligibilityCheck, createGuestEligibilityCheck, createReplacementResolver } from "@/lib/appDefaults";
 import {
   APPLICATION_FALLBACK_PROTECTED,
   GUEST_LEAD_PROTECTED,
@@ -508,7 +508,10 @@ export function AdminModelRegistryPanel() {
   const [lookupSettledForKey, setLookupSettledForKey] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
-  const [guestLead, setGuestLead] = useState<{ stored: string | null; effective: string | null } | null>(null);
+  const [guestLead, setGuestLead] = useState<{ stored: string | null; effective: string | null; trio?: string[] } | null>(null);
+  // The effective default lineup (lib/guestLeadFacts), so the trio role and
+  // the adoption warning describe what guests are actually shown.
+  const guestTrio: readonly string[] = guestLead?.trio ?? GUEST_BRAND_TRIO_MODEL_IDS;
   const [saving, setSaving] = useState(false);
   const [validation, setValidation] = useState<EnvironmentStatus | null>(null);
   // When the server said it read this list. Sent back on a save so the server
@@ -525,7 +528,7 @@ export function AdminModelRegistryPanel() {
         models?: AdminModel[];
         securityFindings?: RegistrySecurityFinding[];
         readAt?: string;
-        guestLead?: { stored: string | null; effective: string | null };
+        guestLead?: { stored: string | null; effective: string | null; trio?: string[] };
         error?: string;
       } | null;
       if (!response.ok || !data?.models) throw new Error(data?.error || m.toast.loadFailed);
@@ -550,7 +553,7 @@ export function AdminModelRegistryPanel() {
   // from an effect: writing state in that effect fails the hook lint that CI
   // runs, and a stale id must not ride into the replace request.
   const selectedReplacesModelId = replacementOptionDisabled(
-    replacementRole(adoptReplacesModelId, guestLead?.effective ?? null)
+    replacementRole(adoptReplacesModelId, guestLead?.effective ?? null, guestTrio)
   )
     ? ""
     : adoptReplacesModelId;
@@ -979,13 +982,14 @@ export function AdminModelRegistryPanel() {
   const floorExceptionShapeKey = adoptWorkItemId
     ? creditFloorExceptionShapeKey(floorExceptionInput)
     : null;
+  // The acknowledgement a matched shape needs: the Gemini Flash-Lite exception
+  // or the Haiku line exception, whichever this body is.
+  const floorExceptionId = creditFloorExceptionId(floorExceptionInput);
   const floorException = floorExceptionShapeKey
     ? creditFloorExceptionVerdict({
         ...floorExceptionInput,
         acknowledgement:
-          acknowledgedFloorExceptionKey === floorExceptionShapeKey
-            ? GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id
-            : null,
+          acknowledgedFloorExceptionKey === floorExceptionShapeKey ? floorExceptionId : null,
       })
     : "not_applicable";
   const adoptBlock = adoptWorkItemId
@@ -1140,8 +1144,8 @@ export function AdminModelRegistryPanel() {
               workItemId: adoptWorkItemId,
               reason: adoptReason.trim(),
               ...(replacesId ? { replacesModelId: replacesId } : {}),
-              ...(floorException === "accepted"
-                ? { creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id }
+              ...(floorException === "accepted" && floorExceptionId
+                ? { creditFloorExceptionAck: floorExceptionId }
                 : {}),
             })}`
           : "/api/admin/models";
@@ -1432,7 +1436,7 @@ export function AdminModelRegistryPanel() {
                     <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.usageClass}</span>
                     {model.id === APP_DEFAULTS.defaultModelId ? <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-blue-200">{m.adopt.roleFallback}</span> : null}
                     {guestLead?.effective === model.id ? <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-blue-200">{m.adopt.roleGuestLead}</span> : null}
-                    {(GUEST_BRAND_TRIO_MODEL_IDS as readonly string[]).includes(model.id) ? <span className="rounded-lg bg-zinc-900 px-2 py-1 text-zinc-300">{m.adopt.roleGuestTrio}</span> : null}
+                    {guestTrio.includes(model.id) ? <span className="rounded-lg bg-zinc-900 px-2 py-1 text-zinc-300">{m.adopt.roleGuestTrio}</span> : null}
                     <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 ${model.environment.apiKeyConfigured ? "bg-emerald-500/10 text-emerald-300" : "bg-red-500/10 text-red-300"}`}>
                       <KeyRound className="h-3 w-3" /> {model.environment.apiKeyEnvName}
                     </span>
@@ -1530,7 +1534,7 @@ export function AdminModelRegistryPanel() {
                         value={selectedReplacesModelId}
                         onChange={(event) => {
                           const next = event.target.value;
-                          const role = replacementRole(next, guestLead?.effective ?? null);
+                          const role = replacementRole(next, guestLead?.effective ?? null, guestTrio);
                           if (replacementOptionDisabled(role)) return;
                           setAdoptReplacesModelId(next);
                         }}
@@ -1541,7 +1545,7 @@ export function AdminModelRegistryPanel() {
                         {models
                           .filter((model) => model.provider === form.provider && model.id !== form.id && !model.catalogDeleted)
                           .map((model) => {
-                            const role = replacementRole(model.id, guestLead?.effective ?? null);
+                            const role = replacementRole(model.id, guestLead?.effective ?? null, guestTrio);
                             const mark =
                               role === "application_fallback"
                                 ? m.adopt.replaceFallback
@@ -1572,11 +1576,39 @@ export function AdminModelRegistryPanel() {
                     {(() => {
                       const selected = models.find((model) => model.id === selectedReplacesModelId);
                       if (!selected) return null;
-                      const eligible = createGuestEligibilityCheck((id) => models.find((model) => model.id === id));
+                      // The save retires `selected` with the model being
+                      // adopted as its replacement, so the guest screen will
+                      // try that model in the slot first. It is not in
+                      // `models` yet: judge it from the form, on top of the
+                      // predecessor's row for every field the form lacks.
+                      const successorId = form.id.trim();
+                      const successor: AiModel | undefined = successorId
+                        ? {
+                            ...selected,
+                            id: successorId,
+                            enabled: form.status === "enabled",
+                            status: form.status,
+                            minimumPlan: form.minimumPlan,
+                            usageClass: form.usageClass,
+                            creditWeight: form.creditWeight,
+                            publiclyListed: form.publiclyListed,
+                            catalogDeleted: false,
+                            replacementModelId: undefined,
+                          }
+                        : undefined;
+                      const lookup = (id: string) =>
+                        successor && id === successor.id ? successor : models.find((model) => model.id === id);
+                      const eligible = createDefaultLineupEligibilityCheck(lookup, createGuestEligibilityCheck(lookup));
+                      const catalogueReplacement = createReplacementResolver(lookup);
                       const substituteId = substituteIfTrioMemberRemoved(
                         selected.id,
                         guestLead?.effective ?? null,
-                        eligible
+                        eligible,
+                        (id, accept) => (successor && id === selected.id ? successor.id : catalogueReplacement(id, accept)),
+                        guestTrio,
+                        // Today's slot: if the member already fails the
+                        // default rule, its current chain fills it now.
+                        catalogueReplacement
                       );
                       if (!substituteId) return null;
                       const substitute = models.find((model) => model.id === substituteId);
@@ -1792,7 +1824,11 @@ export function AdminModelRegistryPanel() {
                       );
                     }}
                   />
-                  <span>{m.adopt.flashLiteStandardException}</span>
+                  <span>
+                    {floorExceptionId === GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id
+                      ? m.adopt.flashLiteStandardException
+                      : m.adopt.haikuLineGuestException}
+                  </span>
                 </label>
               ) : null}
               {adoptWorkItemId && (adoptBlockText || (saveRefusal === "replace" && replaceMissing)) ? (

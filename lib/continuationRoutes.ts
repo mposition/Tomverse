@@ -5,9 +5,7 @@
  *
  * ## Why this is its own path and not `/chat`
  *
- * `/chat` and `/review` both render the Tomverse Review workspace
- * (`lib/productSurfaceRoutes.ts` says so, and says why: the cutover to
- * Tomverse Chat waits on `productKey` reaching strict read mode).
+ * `/chat` renders Tomverse Chat and `/review` renders Tomverse Review.
  *
  * A continuation is `productKey = "review"`
  * (docs/policy/external-conversation-continuation.md §3.1), so the product is
@@ -16,15 +14,12 @@
  * snapshot lock -- and teaching it would mean rewiring a six-thousand-line
  * client for a feature that is off by default.
  *
- * So this is additive: no existing route changes meaning, the Review workspace
- * is not rewired, and when it can hold an imported transcript this constant is
- * the single place that moves.
+ * The continuation screen remains additive: neither product workspace is
+ * taught to render an imported transcript, and this constant remains the
+ * single place that moves if that boundary changes.
  *
- * `PRODUCT_SURFACE_PATH.chat` is deliberately *not* reused. That constant is a
- * decision about where Chat will live after the cutover; this one is a fact
- * about where a continuation opens today. They are equal at neither end, and
- * writing one in terms of the other would make the cutover silently move these
- * conversations.
+ * `PRODUCT_SURFACE_PATH.chat` is deliberately *not* reused. A continuation is
+ * a Review product with a dedicated provenance screen, not a Chat workspace.
  */
 
 import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
@@ -37,9 +32,8 @@ export const continuationPath = (conversationId: string): string =>
 /**
  * Which surface a conversation opens at.
  *
- * `"workspace"` is the Review workspace every conversation has always opened
- * in; `"continuation"` is `/continuations/[id]`, and `"chat"` is the additive
- * gated Chat workspace (not the future `/chat` cutover).
+ * `"workspace"` is the Review workspace; `"continuation"` is
+ * `/continuations/[id]`; and `"chat"` is the gated Chat workspace at `/chat`.
  *
  * Server-decided, from a row rather than from a URL or a request body. That is
  * the whole point of it existing: a continuation is an ordinary `Conversation`
@@ -49,7 +43,7 @@ export const continuationPath = (conversationId: string): string =>
  * time it was opened, which is the worst shape a defect can have.
  *
  * The continuation bridge takes precedence. Otherwise only a stored Chat
- * product selects the additive Chat surface; legacy rows retain the incumbent
+ * product selects the Chat surface; legacy rows retain the incumbent
  * workspace. No client query or inferred conversation kind supplies authority.
  */
 export type ConversationSurface = "workspace" | "continuation" | "chat";

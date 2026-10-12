@@ -60,25 +60,25 @@ type Case = {
 const SERVED_LANGUAGE_CASES: Case[] = [
   // Dynamic application routes: resolved per request.
   {
-    path: "/chat?lang=ko",
+    path: "/review?lang=ko",
     acceptLanguage: ENGLISH_BROWSER,
     expected: "ko",
     why: "an explicit ?lang is what the server renders, whatever the browser prefers",
   },
   {
-    path: "/chat?lang=en",
+    path: "/review?lang=en",
     acceptLanguage: KOREAN_BROWSER,
     expected: "en",
     why: "an explicit ?lang overrides the browser preference in both directions",
   },
   {
-    path: "/chat",
+    path: "/review",
     acceptLanguage: KOREAN_BROWSER,
     expected: "ko",
     why: "with no ?lang the application layout renders the browser's language",
   },
   {
-    path: "/chat",
+    path: "/review",
     acceptLanguage: ENGLISH_BROWSER,
     expected: "en",
     why: "with no ?lang the application layout renders the browser's language",
@@ -244,7 +244,7 @@ const LANGUAGE_REDIRECTS: Array<{
     why: "unlocalized legal routes keep their English page without a redirect",
   },
   {
-    path: "/chat",
+    path: "/review",
     headers: { "accept-language": KOREAN_BROWSER },
     to: null,
     why: "application routes resolve their own language and are never redirected",
@@ -310,8 +310,8 @@ const readLangState = (page: Page) =>
   }));
 
 const HYDRATION_CASES = [
-  { path: "/chat?lang=ko", acceptLanguage: ENGLISH_BROWSER, expected: "ko", cjk: true },
-  { path: "/chat?lang=en", acceptLanguage: KOREAN_BROWSER, expected: "en", cjk: false },
+  { path: "/review?lang=ko", acceptLanguage: ENGLISH_BROWSER, expected: "ko", cjk: true },
+  { path: "/review?lang=en", acceptLanguage: KOREAN_BROWSER, expected: "en", cjk: false },
   { path: "/auth/signin?lang=ko", acceptLanguage: ENGLISH_BROWSER, expected: "ko", cjk: true },
 ] as const;
 

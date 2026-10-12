@@ -241,7 +241,7 @@ test("selecting a conversation on another surface navigates instead of swapping"
     // workspace's restore reopen the continuation the user had just left.
     assert.match(
         source,
-        /conversationHandoffHref\(targetSurface, id, LEGACY_REVIEW_PATH\)/
+        /conversationHandoffHref\(targetSurface, id, REVIEW_WORKSPACE_PATH\)/
     );
 });
 

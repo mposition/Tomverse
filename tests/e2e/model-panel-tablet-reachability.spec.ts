@@ -19,8 +19,9 @@ import { prepareGuestPage } from "./support/app-fixtures";
 const TABS_BOUNDARY = 1058;
 
 // Mirrors GUEST_BRAND_TRIO_MODEL_IDS in lib/appDefaults.ts, whose OpenAI slot
-// moved to gpt-5-6-luna with the app default on 2026-08-01.
-const GUEST_MODELS = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-flash-lite-latest"];
+// moved to gpt-5-6-luna with the app default on 2026-08-01 and to gpt-6-luna on
+// 2026-10-12, when the Anthropic slot moved to claude-haiku-5-5.
+const GUEST_MODELS = ["gpt-6-luna", "claude-haiku-5-5", "gemini-flash-lite-latest"];
 
 const TABLET_WIDTHS = [768, 834, 1024, TABS_BOUNDARY - 1] as const;
 
@@ -35,7 +36,7 @@ async function openEmptyChat(
       window.localStorage.setItem("tomverse_sidebar_collapsed_v1", preference as string);
     }, options.sidebar);
   }
-  await page.goto(`/chat?lang=${options.lang}`);
+  await page.goto(`/review?lang=${options.lang}`);
   await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
   // The empty state is the condition under test, not an incidental starting
   // point: the defect only existed while it was showing.

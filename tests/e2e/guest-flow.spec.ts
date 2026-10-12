@@ -26,7 +26,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("guest can change and persist language", async ({ page }) => {
-  await page.goto("/chat");
+  await page.goto("/review");
   await openMobileDrawerIfNeeded(page);
 
   await languageSelect(page).selectOption("en");
@@ -68,7 +68,7 @@ test("a guest-usage read that fails still finishes its request", { tag: "@smoke"
     timeout: 20_000,
   });
 
-  await page.goto("/chat");
+  await page.goto("/review");
 
   const request = await finished;
   const response = await request.response();
@@ -78,7 +78,7 @@ test("a guest-usage read that fails still finishes its request", { tag: "@smoke"
 });
 
 test("guest message appears immediately with mocked response", { tag: ["@smoke", "@review-parity"] }, async ({ page }, testInfo) => {
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await sendChatMessage(page, testInfo, "First QA message");
 
@@ -91,7 +91,7 @@ test("guest message appears immediately with mocked response", { tag: ["@smoke",
 });
 
 test("guest cannot activate a paid model", { tag: "@smoke" }, async ({ page }) => {
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await openModelPickerCatalogue(page);
   const selectedModels = page.locator('[data-testid="model-option"][aria-pressed="true"]');

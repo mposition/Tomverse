@@ -24,6 +24,8 @@ export function startLandingChatCapabilityRead({
 
   void (async () => {
     try {
+      // Marketing only reads an account offer. The workspace capability API
+      // can mint Guest authority if a browser session is stale.
       const response = await fetcher("/api/marketing/chat-entry", {
         method: "GET",
         cache: "no-store",

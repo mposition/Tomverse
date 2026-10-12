@@ -15,6 +15,8 @@
  * the route handler and the unit tests all read the same rules.
  */
 
+import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
+
 export const PURCHASE_INTENTS = ["subscription", "credit_pack"] as const;
 export type PurchaseIntentType = (typeof PURCHASE_INTENTS)[number];
 
@@ -64,7 +66,11 @@ const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign"] as const;
  * outcome, and adding one means deciding what it shows on success and on
  * cancel -- not just that it exists.
  */
-const RETURN_TO_PATHS = new Set(["/pricing", "/chat"]);
+const RETURN_TO_PATHS = new Set([
+  "/pricing",
+  PRODUCT_SURFACE_PATH.chat,
+  PRODUCT_SURFACE_PATH.review,
+]);
 
 /**
  * Query keys a `returnTo` may carry. Anything else is dropped rather than
@@ -295,9 +301,11 @@ export function buildCreditPackReturnUrls({
   packId: string;
   language?: string | null;
 }): CreditPackReturnUrls {
-  const returnPath = sanitizeReturnTo(returnTo) || "/chat";
+  const returnPath = sanitizeReturnTo(returnTo) || PRODUCT_SURFACE_PATH.review;
   const [pathAndQuery, hash] = returnPath.split("#");
-  const [pathname, query] = (pathAndQuery || "/chat").split("?");
+  const [pathname, query] = (
+    pathAndQuery || PRODUCT_SURFACE_PATH.review
+  ).split("?");
 
   const build = (billing: "credits-success" | "credits-cancelled") => {
     const params = new URLSearchParams(query || "");

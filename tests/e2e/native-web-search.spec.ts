@@ -138,27 +138,38 @@ const seedFreshAccount = async (page: Page) => {
   });
 };
 
-// A fresh account starts on the single compiled-in default model, which moved
-// from gpt-5-4-mini to gpt-5-6-luna on 2026-08-01. toggleModel() refuses to
-// drop the last remaining model, so the default can only be removed once at
-// least one target is already selected -- add the first target, drop the
-// default, then add the rest.
-const COMPILED_IN_DEFAULT_MODEL_ID = "gpt-5-6-luna";
-
+// The signed-in fixture account starts on a single model, and which one depends
+// on the URL. `/chat` reads `/api/user/settings`, which mockAuthenticatedApi
+// answers with its stored default (gpt-5-6-luna); `/chat?lang=en` reads
+// `/api/user/settings?lang=en`, which that route does not match, so the E2E
+// server answers with APP_DEFAULTS.defaultModelId. The two were the same model
+// until the default moved to gpt-6-luna on 2026-10-12, which is why the helper
+// below reads the starting selection from the picker instead of naming it.
+// toggleModel() refuses to drop the last remaining model, so a starting model
+// can only be removed once at least one target is selected -- add the first
+// target, drop everything that is not a target, then add the rest.
 const selectModelsViaPicker = async (page: Page, models: string[]) => {
   // STG-F008: specific models are picked from the full catalogue, which is the
   // picker's second step.
   await openModelPickerCatalogue(page);
   const optionFor = (modelId: string) =>
     page.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`);
-  await optionFor(models[0]).click();
-  // Skipped when the default is itself one of the targets, so this never
-  // deselects a model the caller asked for.
-  if (!models.includes(COMPILED_IN_DEFAULT_MODEL_ID)) {
-    await optionFor(COMPILED_IN_DEFAULT_MODEL_ID).click();
+  const select = async (modelId: string) => {
+    if ((await optionFor(modelId).getAttribute("aria-pressed")) !== "true") {
+      await optionFor(modelId).click();
+    }
+    // Settled before the starting selection is read below.
+    await expect(optionFor(modelId)).toHaveAttribute("aria-pressed", "true");
+  };
+  await select(models[0]);
+  const startedOn = await page
+    .locator('[data-testid="model-option"][aria-pressed="true"]')
+    .evaluateAll((options) => options.map((option) => option.getAttribute("data-model-id")));
+  for (const modelId of startedOn) {
+    if (modelId && !models.includes(modelId)) await optionFor(modelId).click();
   }
   for (const modelId of models.slice(1)) {
-    await optionFor(modelId).click();
+    await select(modelId);
   }
   // Escape only steps back one level in the two-step picker, so close via the
   // completion control -- the dialog's backdrop blocks the tools menu until it
@@ -277,7 +288,7 @@ test.describe("native web search (webSearchMode: always)", () => {
       await route.fallback();
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     // The per-panel model <select> starts disabled with a transient default
     // until the initial conversation state resolves (see
     // chat-model-selection-readiness spec) -- wait for it before touching
@@ -377,7 +388,7 @@ test.describe("native web search (webSearchMode: always)", () => {
 
     // A new conversation starts with web search on, so it is switched off
     // here -- the state under test is the one a user chose.
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.locator('[data-testid="desktop-model-panel"] select').first()).toBeEnabled();
     await selectModelsViaPicker(page, models);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
@@ -466,7 +477,7 @@ test.describe("native web search (webSearchMode: always)", () => {
       });
     });
 
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page, { title: "Native search test" });
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 
@@ -561,7 +572,7 @@ test.describe("native web search (webSearchMode: always)", () => {
       });
     });
 
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page, { title: "App-managed refund" });
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 
@@ -644,7 +655,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     await mockAuthenticatedApi(page);
     await asProPlan(page);
     await seedFreshAccount(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(
       page.locator('[data-testid="desktop-model-panel"] select').first()
     ).toBeEnabled();
@@ -856,7 +867,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     await asProPlan(page);
     await seedFreshAccount(page);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.locator('[data-testid="desktop-model-panel"] select').first()).toBeEnabled();
     await selectModelsViaPicker(page, models);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
@@ -998,7 +1009,7 @@ test.describe("Perplexity citations and incomplete answers", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(
       page.locator('[data-testid="desktop-model-panel"] select').first()
     ).toBeEnabled();
@@ -1037,7 +1048,7 @@ test.describe("Perplexity citations and incomplete answers", () => {
       ],
     });
 
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page, { title: "QA conversation" });
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 

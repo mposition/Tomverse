@@ -60,7 +60,7 @@ const openConversation = async (
   await mockAuthenticatedApi(page, { selectedModels: MODELS, messages: seeded });
   await restoreActiveConversation(page);
   await page.setViewportSize(viewport);
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
 };
 
 test.describe("keyboard reach", () => {

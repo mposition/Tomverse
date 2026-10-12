@@ -4,7 +4,7 @@ import Link from "next/link";
 import { displayHeadingClass } from "@/lib/displayHeading";
 import { ArrowRight } from "lucide-react";
 import { useSession } from "next-auth/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
@@ -16,7 +16,12 @@ import { AnswerRails } from "./AnswerRails";
 import { ProductCapture } from "./ProductCapture";
 import { TrustSection } from "./TrustSection";
 import { WorkflowContinuitySection } from "./WorkflowContinuitySection";
-import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
+import {
+  chatProductDestination,
+  workspaceDestination,
+} from "@/lib/productEntryDestination";
+import { chatProductUiCopy } from "@/lib/chatProductUiCopy";
+import { startLandingChatCapabilityRead } from "@/lib/landingChatCapabilityClient";
 
 /**
  * The landing page shell: the hero, and the order the sections run in.
@@ -25,11 +30,11 @@ import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
  *
  * This page introduces Tomverse Review. Tomverse is the brand, Tomverse Chat
  * is the conversational product, and AI Review is a comparison feature inside
- * Tomverse Review. The hero CTA names the comparison it actually opens.
+ * Tomverse Review. Product choices keep their names and entry points distinct.
  *
- * So the hero states the product once, promises guest access once, and its
- * CTA says what pressing it starts: a comparison. The destination and the
- * analytics event are unchanged.
+ * The hero now names both product jobs once. Its primary guest action still
+ * starts Review, while Chat has a distinct single-model guest trial entry and
+ * server-owned authenticated availability boundary.
  *
  * Eight sections became five. Three of the eight were retellings of the hero
  * demonstration rather than new facts, and two more pairs were answering one
@@ -41,13 +46,16 @@ import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
  * `min-w-0`, so the hero reflows at a 200% root font size on a 320px viewport
  * instead of being cropped by this element's `overflow-x-hidden`.
  */
-export function LandingPageContent() {
-  const { lang } = useLanguage();
-  const { status } = useSession();
-  const content = getLandingCopy(lang);
-  const primaryChatHref = marketingProductEntryHref("review", lang);
-  const primaryCtaLabel =
-    status === "authenticated" ? content.signedInCta : content.primaryCta;
+export function LandingPageContent({
+  guestTrialAvailable = false,
+}: {
+  /** Public static trial entry, not an account, Auto or Refiner capability. */
+  guestTrialAvailable?: boolean;
+} = {}) {
+  const { data: session, status } = useSession();
+  const isAuthenticated = status === "authenticated";
+  const accountUserId = isAuthenticated && typeof session?.user?.id === "string"
+    && session.user.id.length > 0 ? session.user.id : null;
   const landingTrackedRef = useRef(false);
 
   useEffect(() => {
@@ -55,6 +63,51 @@ export function LandingPageContent() {
     landingTrackedRef.current = true;
     trackProductEvent("landing_view");
   }, []);
+
+  return (
+    <LandingPageContentForIdentity
+      // A new resolved identity starts unavailable in the same render. A late
+      // capability response cannot repaint another account, even A-to-B-to-A.
+      key={`${status}:${accountUserId ?? ""}`}
+      accountUserId={accountUserId}
+      isAuthenticated={isAuthenticated}
+      guestTrialAvailable={guestTrialAvailable}
+    />
+  );
+}
+
+function LandingPageContentForIdentity({
+  accountUserId,
+  isAuthenticated,
+  guestTrialAvailable,
+}: {
+  accountUserId: string | null;
+  isAuthenticated: boolean;
+  guestTrialAvailable: boolean;
+}) {
+  const { lang } = useLanguage();
+  const [chatSurfaceAvailable, setChatSurfaceAvailable] = useState(false);
+  useEffect(() => startLandingChatCapabilityRead({
+    accountUserId,
+    onResolved: setChatSurfaceAvailable,
+  }), [accountUserId]);
+  const content = getLandingCopy(lang);
+  const productCopy = chatProductUiCopy[lang];
+  const reviewHref = workspaceDestination({
+    chatSurfaceAvailable: false,
+    lang,
+    isAuthenticated,
+  });
+  // This page introduces Review; Chat has its separate capability-gated card.
+  const primaryChatHref = reviewHref;
+  const primaryCtaLabel = isAuthenticated ? content.signedInCta : content.primaryCta;
+  const chatProductHref = chatProductDestination({
+    chatSurfaceAvailable,
+    guestTrialAvailable,
+    lang,
+    isAuthenticated,
+  });
+  const isGuestChatTrial = !isAuthenticated && guestTrialAvailable;
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -127,6 +180,69 @@ export function LandingPageContent() {
             <p className="mt-5 max-w-2xl whitespace-pre-line break-words text-lg leading-8 text-zinc-600 dark:text-zinc-300">
               {content.description}
             </p>
+            <p
+              data-testid="landing-product-intro"
+              className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400"
+            >
+              {productCopy.landingIntro}
+            </p>
+
+            <div
+              data-testid="landing-product-choices"
+              className="mt-7 grid max-w-4xl gap-3 md:grid-cols-2"
+            >
+              <article className="flex min-w-0 flex-col rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+                  {productCopy.chat.feature}
+                </p>
+                <h2 className="mt-1 text-lg font-black">{productCopy.chat.name}</h2>
+                <p
+                  data-testid="landing-chat-product-description"
+                  className="mt-2 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300"
+                >
+                  {isGuestChatTrial
+                    ? productCopy.guestChatDescription
+                    : productCopy.chat.description}
+                </p>
+                {chatProductHref ? (
+                  <Link
+                    href={chatProductHref}
+                    data-testid="landing-chat-product-cta"
+                    className="mt-4 inline-flex min-h-11 items-center justify-center rounded-xl border border-blue-600 px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                  >
+                    {isGuestChatTrial
+                      ? productCopy.tryGuestChat
+                      : isAuthenticated
+                        ? productCopy.chat.open
+                        : productCopy.signInToOpenChat}
+                  </Link>
+                ) : (
+                  <p
+                    data-testid="landing-chat-unavailable"
+                    className="mt-4 rounded-xl bg-zinc-100 px-3 py-2 text-sm font-semibold text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300"
+                  >
+                    {productCopy.unavailable}
+                  </p>
+                )}
+              </article>
+
+              <article className="flex min-w-0 flex-col rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+                  {productCopy.review.feature}
+                </p>
+                <h2 className="mt-1 text-lg font-black">{productCopy.review.name}</h2>
+                <p className="mt-2 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                  {productCopy.review.description}
+                </p>
+                <Link
+                  href={reviewHref}
+                  data-testid="landing-review-product-cta"
+                  className="mt-4 inline-flex min-h-11 items-center justify-center rounded-xl border border-zinc-300 px-4 text-sm font-bold text-zinc-800 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  {productCopy.review.open}
+                </Link>
+              </article>
+            </div>
 
             <div className="mt-7 flex flex-col items-start gap-3">
               <div className="flex w-full min-w-0 flex-wrap items-center gap-x-6 gap-y-3">
@@ -167,7 +283,7 @@ export function LandingPageContent() {
                 V1 rendered this promise twice, once above the CTA and once
                 below it, in near-identical words. One line, one place.
               */}
-              {status !== "authenticated" && (
+              {!isAuthenticated && (
                 <p
                   data-testid="landing-hero-signup-note"
                   className="max-w-2xl break-words text-sm font-semibold text-zinc-700 dark:text-zinc-200"

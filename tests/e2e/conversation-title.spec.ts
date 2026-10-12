@@ -90,7 +90,7 @@ test.describe("conversation auto-title generation (logged-in)", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await sendChatMessage(page, testInfo, "Plan a weekend trip");
 
     // Interim title (the client-side 30-char slice) shows immediately.
@@ -126,7 +126,7 @@ test.describe("conversation auto-title generation (logged-in)", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     // Selecting the pre-existing conversation (its own selectedModels
     // already has all 3 models baked in) restores the panel selection
     // directly -- avoids depending on the model-picker UI, which is
@@ -169,7 +169,7 @@ test.describe("conversation auto-title generation (logged-in)", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await sendChatMessage(page, testInfo, "First question");
     await expect(sidebarList(page).getByText("First Turn Title")).toBeVisible();
 
@@ -208,7 +208,7 @@ test.describe("conversation auto-title generation (logged-in)", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await sendChatMessage(page, testInfo, "Rename race test");
     await expect(sidebarList(page).getByText("Rename race test")).toBeVisible();
     await expect(page.getByText("An answer.")).toBeVisible();
@@ -256,7 +256,7 @@ test.describe("conversation auto-title generation (logged-in)", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await sendChatMessage(page, testInfo, "Title generation will fail");
     await expect(page.getByText("An answer despite the title failure.")).toBeVisible();
 
@@ -295,7 +295,7 @@ test.describe("conversation auto-title generation (logged-in)", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await sendChatMessage(page, testInfo, "First message while title generates slowly");
     await expect(page.getByText("First answer.")).toBeVisible();
 
@@ -330,7 +330,7 @@ test.describe("conversation auto-title generation (guest)", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await sendChatMessage(page, testInfo, "Plan my weekend as a guest");
     await expect(page.getByText("A guest answer.").first()).toBeVisible();
 
@@ -383,7 +383,7 @@ test.describe("conversation auto-title generation (guest)", () => {
       });
     });
 
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByRole("dialog", { name: "Import your guest conversations?" })).toBeVisible();
     await page.getByRole("button", { name: "Import current conversation only" }).click();
 

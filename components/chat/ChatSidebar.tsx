@@ -9,7 +9,7 @@ import {
 } from "@/lib/conversationListGrouping";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
-import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from "react";
 import {
     forgetMissingPins,
     getLegacyPins,
@@ -65,6 +65,7 @@ import { externalProviderBrand } from "@/lib/externalProviderBranding";
 import { providerLabel } from "@/components/imports/importFormatting";
 import { SearchSnippetText } from "@/components/chat/SearchSnippetText";
 import { requestContinuationFocus } from "@/lib/continuationFocusHandoff";
+import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 
 /** A search answer resting on unlock grants is dropped this long before they lapse. */
 const SEARCH_GRANT_MARGIN_MS = 5_000;
@@ -104,6 +105,10 @@ type ChatSidebarProps = {
     currentModelId?: string | null;
     attachmentCount?: number;
     isMobileDrawer?: boolean;
+    /** Product navigation shares the drawer's scroll owner and pinned footer. */
+    mobileProductSwitcher?: ReactNode;
+    /** Keeps account and purchase returns on the workspace that opened them. */
+    currentProduct?: ChatWorkspaceProduct;
     // Set by DesktopChatShell once it measures that expanding the sidebar
     // would leave too little room for the current model comparison. Only
     // takes effect while the user's own preference is "auto".
@@ -235,6 +240,8 @@ export function ChatSidebar({
     currentModelId,
     attachmentCount = 0,
     isMobileDrawer = false,
+    mobileProductSwitcher,
+    currentProduct = "review",
     autoCollapseSuggested = false,
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -1288,7 +1295,10 @@ export function ChatSidebar({
                     <Search className="h-4 w-4" aria-hidden="true" />
                 </button>
                 <div className="mt-auto w-8 border-t border-zinc-200 pt-3 dark:border-zinc-800">
-                    <SidebarAccountRailButton accountUsage={accountUsage} />
+                    <SidebarAccountRailButton
+                        accountUsage={accountUsage}
+                        currentProduct={currentProduct}
+                    />
                 </div>
             </aside>
         );
@@ -1442,6 +1452,12 @@ export function ChatSidebar({
                 <HelpGuideDialog open={showHelpGuide} onClose={() => setShowHelpGuide(false)} returnFocusRef={helpButtonRef} />
                 </div>
             </div>
+
+            {isMobileDrawer && mobileProductSwitcher && (
+                <div className="shrink-0 border-b border-zinc-200 p-2 dark:border-zinc-800">
+                    {mobileProductSwitcher}
+                </div>
+            )}
 
             <div className={`${isMobileDrawer ? "p-2.5" : "p-3"} border-b border-zinc-200/60 dark:border-zinc-800/40`}>
                 <NewConversationLauncher
@@ -2595,6 +2611,7 @@ export function ChatSidebar({
                             guestMessageCount={guestMessageCount}
                             maxGuestMessages={maxGuestMessages}
                             compact
+                            currentProduct={currentProduct}
                             headerAction={
                                 <FeatureHelpPopover
                                     title={helpCopy.creditsTitle}
@@ -2619,7 +2636,10 @@ export function ChatSidebar({
                   shells, which is what lets the overlay go away entirely.
                 */}
                 <div className="shrink-0" data-testid="sidebar-account-controls">
-                    <AuthButton showAnalyticsCookieButton />
+                    <AuthButton
+                        showAnalyticsCookieButton
+                        currentProduct={currentProduct}
+                    />
                 </div>
                 <div className="shrink-0">
                     <FeedbackButton

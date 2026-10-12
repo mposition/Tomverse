@@ -12,6 +12,7 @@ import {
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { localizedPath } from "@/lib/seo";
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 
 type ReviewDemoCopy = {
   eyebrow: string;
@@ -186,7 +187,7 @@ export function AiReviewDemo({
   const { lang } = useLanguage();
   const text = copy[lang];
   const reviewPath = lang === "en" ? "/ai-answer-review" : localizedPath(lang, "/ai-answer-review");
-  const chatPath = `/review?lang=${encodeURIComponent(lang)}`;
+  const chatPath = `${REVIEW_WORKSPACE_PATH}?lang=${encodeURIComponent(lang)}`;
 
   return (
     <div className="overflow-hidden rounded-[2rem] border border-tomverse-review-border bg-white shadow-xl shadow-blue-950/5 dark:bg-zinc-950">

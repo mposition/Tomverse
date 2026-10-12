@@ -9,7 +9,7 @@ test.describe("compact sidebar layout", () => {
     );
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 

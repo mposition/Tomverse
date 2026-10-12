@@ -203,7 +203,7 @@ const downloadRoute = readFileSync(
 
 test("issuing a link requires a session, a step-up and a rate limit", () => {
   assert.match(issueRoute, /getServerSession/);
-  assert.match(issueRoute, /assertRecentAdminAuthentication/);
+  assert.match(issueRoute, /assertRecentAccountAuthentication/);
   assert.match(issueRoute, /consumeApiRateLimit/);
   assert.match(issueRoute, /status: 428/, "there is no re-authentication path");
 });

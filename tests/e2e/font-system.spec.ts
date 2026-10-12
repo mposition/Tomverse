@@ -137,21 +137,24 @@ test.describe("font system: locale families", () => {
       await page.goto("/");
       await selectLanguage(page, "en");
 
-      const title = page.getByTestId("landing-hero-title");
-      await expect(title).toBeVisible();
-      expect(await declaredFontFamily(title)).toMatch(/^Geist\b/);
+      // Read the live headline through session hydration, retaining declared and rasterized font assertions.
+      await expect(async () => {
+        const title = page.getByTestId("landing-hero-title");
+        await expect(title).toBeVisible();
+        expect(await declaredFontFamily(title)).toMatch(/^Geist\b/);
 
-      // Mobile WebKit reports `-webkit-standard` for the body element even
-      // when rendered descendants resolve the author family. Check body and
-      // rasterized platform fonts only where CDP can report them reliably;
-      // every engine still checks the real headline above.
-      if (!testInfo.project.name.includes("chromium")) return;
-      const body = page.locator("body");
-      expect(await declaredFontFamily(body)).toMatch(/^Geist\b/);
-      expect(await declaredFontFamily(body)).not.toMatch(/Arial/);
-      const used = await renderedFonts(page, "[data-testid='landing-hero-title']");
-      expect(used[0]).toMatch(/^Geist\b/);
-      expect(used).not.toContain("Arial");
+        // Mobile WebKit reports `-webkit-standard` for the body element even
+        // when rendered descendants resolve the author family. Check body and
+        // rasterized platform fonts only where CDP can report them reliably;
+        // every engine still checks the real headline above.
+        if (!testInfo.project.name.includes("chromium")) return;
+        const body = page.locator("body");
+        expect(await declaredFontFamily(body)).toMatch(/^Geist\b/);
+        expect(await declaredFontFamily(body)).not.toMatch(/Arial/);
+        const used = await renderedFonts(page, "[data-testid='landing-hero-title']");
+        expect(used[0]).toMatch(/^Geist\b/);
+        expect(used).not.toContain("Arial");
+      }).toPass({ timeout: 5_000 });
     }
   );
 
@@ -220,7 +223,7 @@ test.describe("font system: monospace scope", () => {
     page,
   }) => {
     await prepareGuestPage(page, "en");
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
     await waitForFonts(page);
 
     const textarea = page.getByTestId("chat-textarea");
@@ -299,7 +302,7 @@ test.describe("font system: accessibility and reflow", () => {
   test("customer chat surfaces keep text at 11px or larger", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
     await waitForFonts(page);
 
     const tooSmall = await page.evaluate(() => {
@@ -324,7 +327,7 @@ test.describe("font system: accessibility and reflow", () => {
   test("the mobile composer input stays at 16px so iOS does not zoom", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
     await waitForFonts(page);
 
     const textarea = page.getByTestId("chat-textarea");

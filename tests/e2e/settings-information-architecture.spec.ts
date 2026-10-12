@@ -43,6 +43,16 @@ const settingsDialog = (page: Page) =>
   page.getByRole("dialog", { name: /User Settings|사용자 설정/ });
 
 async function mockSettingsEntryApis(page: Page) {
+  // Chat still has its own loopback fixture gate. Keep the cookie because
+  // settings can render shared Chat chrome during this suite, while the
+  // generic settings destination itself is canonical Tomverse Review.
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_chat_workspace",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
   await page.route(
     (url) => url.pathname === "/api/imports/external/capacity",
     (route) =>
@@ -126,11 +136,11 @@ async function openSettingsTab(
   await expect(settingsDialog(page)).toBeVisible();
 }
 
-async function gotoChatWithSettings(page: Page) {
+async function gotoReviewWithSettings(page: Page) {
   await prepareGuestPage(page, "ko");
   await mockAuthenticatedApi(page);
   await mockSettingsEntryApis(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect(page.getByTestId("chat-input")).toBeVisible();
 }
 
@@ -138,7 +148,7 @@ test.describe("settings information architecture", () => {
   test("each feature sits in the group its tab owns, as a row @ui-risk", async ({
     page,
   }) => {
-    await gotoChatWithSettings(page);
+    await gotoReviewWithSettings(page);
     await openSettingsTab(page, "data");
 
     // Data keeps the features that move conversations in and out of the
@@ -214,7 +224,7 @@ test.describe("settings information architecture", () => {
   test("the whole row is one keyboard-reachable link with a focus ring", async ({
     page,
   }) => {
-    await gotoChatWithSettings(page);
+    await gotoReviewWithSettings(page);
     await openSettingsTab(page, "ai");
 
     const memoryLink = page.getByTestId("memory-entry-link");
@@ -244,7 +254,7 @@ test.describe("settings information architecture", () => {
     },
   ]) {
     test(`the ${entry.name} row opens its own detail page`, async ({ page }) => {
-      await gotoChatWithSettings(page);
+      await gotoReviewWithSettings(page);
       await openSettingsTab(page, entry.tab);
       await page.getByTestId(entry.linkTestId).click();
       await expect(page).toHaveURL(entry.urlPattern);
@@ -259,7 +269,7 @@ test.describe("settings information architecture", () => {
       backTestId: "memory-back",
       entryTestId: "memory-entry",
       entryLinkTestId: "memory-entry-link",
-      href: "/chat?settings=ai&settingsSection=memory",
+      href: "/review?settings=ai&settingsSection=memory",
       group: "AI 개인화",
       crumb: "계정 장기 기억",
     },
@@ -273,7 +283,7 @@ test.describe("settings information architecture", () => {
       // tab.
       entryTestId: "assistants-content",
       entryLinkTestId: null,
-      href: "/chat?settings=assistants&settingsSection=assistants",
+      href: "/review?settings=assistants&settingsSection=assistants",
       group: "AI 어시스턴트",
       crumb: "나의 AI 어시스턴트",
     },
@@ -283,7 +293,7 @@ test.describe("settings information architecture", () => {
       backTestId: "external-import-back",
       entryTestId: "external-import-entry",
       entryLinkTestId: "external-import-entry-link",
-      href: "/chat?settings=data&settingsSection=external-import",
+      href: "/review?settings=data&settingsSection=external-import",
       group: "데이터",
       crumb: "다른 AI 서비스에서 가져오기",
     },
@@ -313,16 +323,16 @@ test.describe("settings information architecture", () => {
       for (const href of await nav.getByRole("link").evaluateAll((links) =>
         links.map((link) => link.getAttribute("href") ?? "")
       )) {
-        // `/chat?settings=...` is the settings panel, which is where this page
-        // goes up to; a bare `/chat` would be the chat itself.
-        expect(href === "/chat").toBe(false);
+        // `/review?settings=...` is the settings panel, which is where this
+        // page goes up to; bare `/review` leaves the settings hierarchy.
+        expect(href === "/review").toBe(false);
       }
 
       // Leaving settings entirely is a separate control, rendered by the route
       // shell beside this nav rather than inside it.
       await expect(page.getByTestId(RETURN_TO_CHAT)).toHaveAttribute(
         "href",
-        "/chat"
+        "/review"
       );
     });
 
@@ -344,7 +354,7 @@ test.describe("settings information architecture", () => {
       if (detail.entryLinkTestId) {
         await expect(page.getByTestId(detail.entryLinkTestId)).toBeFocused();
       }
-      await expect(page).toHaveURL(/\/chat$/);
+      await expect(page).toHaveURL(/\/review$/);
     });
 
     test(`${detail.name} shows the same hierarchy on both shells`, async ({
@@ -386,7 +396,7 @@ test.describe("settings information architecture", () => {
   test("the recommendation CTA lives inside the combination card @ui-risk", async ({
     page,
   }) => {
-    await gotoChatWithSettings(page);
+    await gotoReviewWithSettings(page);
     await openSettingsTab(page, "ai");
 
     const card = page.getByTestId("settings-new-conversation-models");
@@ -405,7 +415,7 @@ test.describe("settings information architecture", () => {
   test("the CTA does not assume the visitor has used the finder before", async ({
     page,
   }) => {
-    await gotoChatWithSettings(page);
+    await gotoReviewWithSettings(page);
     await openSettingsTab(page, "ai");
 
     const cta = page.getByTestId("settings-model-finder-cta");
@@ -420,7 +430,7 @@ test.describe("settings information architecture", () => {
   test("the CTA opens the finder once and moves focus into it", async ({
     page,
   }) => {
-    await gotoChatWithSettings(page);
+    await gotoReviewWithSettings(page);
     await openSettingsTab(page, "ai");
 
     const cta = page.getByTestId("settings-model-finder-cta");
@@ -440,7 +450,7 @@ test.describe("settings information architecture", () => {
   test("unsaved combination changes are named before they are lost @ui-risk", async ({
     page,
   }) => {
-    await gotoChatWithSettings(page);
+    await gotoReviewWithSettings(page);
     await openSettingsTab(page, "ai");
 
     // Edit the combination and do not save.
@@ -467,7 +477,7 @@ test.describe("settings information architecture", () => {
   test("the CTA is reachable and activatable from the keyboard", async ({
     page,
   }) => {
-    await gotoChatWithSettings(page);
+    await gotoReviewWithSettings(page);
     await openSettingsTab(page, "ai");
 
     const cta = page.getByTestId("settings-model-finder-cta");
@@ -480,7 +490,7 @@ test.describe("settings information architecture", () => {
   test("the AI tab is named for personalization, not settings @ui-risk", async ({
     page,
   }) => {
-    await gotoChatWithSettings(page);
+    await gotoReviewWithSettings(page);
     await openSettingsTab(page, "ai");
 
     const dialog = settingsDialog(page);
@@ -494,7 +504,7 @@ test.describe("settings information architecture", () => {
   test("the assistants tab is the management home, not a signpost @ui-risk", async ({
     page,
   }) => {
-    await gotoChatWithSettings(page);
+    await gotoReviewWithSettings(page);
     await openSettingsTab(page, "assistants");
 
     const tab = page.getByTestId("settings-assistants-tab");
@@ -508,7 +518,7 @@ test.describe("settings information architecture", () => {
   test("the user-facing word is assistant, not profile @ui-risk", async ({
     page,
   }) => {
-    await gotoChatWithSettings(page);
+    await gotoReviewWithSettings(page);
     await openSettingsTab(page, "assistants");
 
     const dialog = settingsDialog(page);
@@ -580,7 +590,7 @@ async function gotoSettingsDepth(page: Page, path: string) {
 // deep rows failed on the merge for exactly that reason.
 //
 // What the test below checks is unchanged by it: every settings detail page
-// still offers an up-link, and no up-link is bare `/chat`.
+// still offers an up-link, and no up-link is bare `/review`.
 const SETTINGS_DEPTHS = [
   {
     name: "import list",
@@ -648,9 +658,9 @@ test.describe("returning to the chat from settings", () => {
 
       const exit = page.getByTestId(RETURN_TO_CHAT);
       await expect(exit).toBeVisible();
-      // Exactly /chat. A settings deep link here would reopen the panel
+      // Exactly /review. A settings deep link here would reopen the panel
       // the visitor just asked to leave.
-      await expect(exit).toHaveAttribute("href", "/chat");
+      await expect(exit).toHaveAttribute("href", "/review");
       // The visible label shortens on a narrow viewport; the name does
       // not, so a screen reader hears the same control at every width.
       await expect(exit).toHaveAccessibleName("대화로 돌아가기");
@@ -662,8 +672,8 @@ test.describe("returning to the chat from settings", () => {
       const up = page.getByTestId(depth.upTestId);
       await expect(up).toBeVisible();
       const upHref = await up.getAttribute("href");
-      expect(upHref).not.toBe("/chat");
-      expect(upHref).toMatch(/^(\/settings\/|\/chat\?settings=)/);
+      expect(upHref).not.toBe("/review");
+      expect(upHref).toMatch(/^(\/settings\/|\/review\?settings=)/);
 
       // Two different controls, and they never occupy the same space.
       const exitBox = await exit.boundingBox();
@@ -683,7 +693,7 @@ test.describe("returning to the chat from settings", () => {
 
       await page.getByTestId(RETURN_TO_CHAT).click();
 
-      await expect(page).toHaveURL(/\/chat$/);
+      await expect(page).toHaveURL(/\/review$/);
       await expect(page.getByTestId("chat-input")).toBeVisible();
       // Out of settings, not back into it: the panel stays closed.
       await expect(settingsDialog(page)).toHaveCount(0);
@@ -705,7 +715,7 @@ test.describe("returning to the chat from settings", () => {
     expect(outline).not.toBe("none none");
 
     await page.keyboard.press("Enter");
-    await expect(page).toHaveURL(/\/chat$/);
+    await expect(page).toHaveURL(/\/review$/);
   });
 
   test("the exit stays reachable without scrolling back up", async ({
@@ -790,7 +800,7 @@ test.describe("returning to the chat from settings", () => {
 
     await page.goto("/settings/memory");
     await page.getByTestId(RETURN_TO_CHAT).click();
-    await expect(page).toHaveURL(/\/chat$/);
+    await expect(page).toHaveURL(/\/review$/);
 
     // The existing restore path runs untouched: the same conversation is
     // reopened rather than a new one created or the selection cleared.

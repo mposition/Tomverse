@@ -9,7 +9,10 @@ import { AmuxExecutionSupportingRecords } from "@/components/admin/AmuxExecution
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
+import { AmuxDecisionMakerReportPanel } from "@/components/admin/AmuxDecisionMakerReportPanel";
+import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
+import { AmuxWorkerRegistryPanel } from "@/components/admin/AmuxWorkerRegistryPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
@@ -21,12 +24,17 @@ import {
 } from "@/lib/adminNavigationCounts";
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
 import { readAmuxCliUsageSummaryForAdmin } from "@/lib/amux/adminCliUsageSummary";
+import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { readDecisionMakerDeclarationAccuracyReport } from "@/lib/amux/decisionMakerJudgmentStore";
+import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import {
   AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
   AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT,
   countOpenAmuxOrchestratorHalts,
   readAmuxOrchestratorHaltsForAdmin,
 } from "@/lib/amux/orchestratorHaltStore";
+import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
+import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("amux-execution");
@@ -61,6 +69,7 @@ export default async function AdminAmuxExecutionPage({
     countOpenAmuxOrchestratorHalts().catch(() => null),
   ]);
   const isOwner = Boolean(session?.user?.id) && role === "owner";
+  const canChangeDmSwitches = hasAdminPermission(session, "ops:write");
   const statuses: Record<string, AmuxTabStatus | undefined> = {
     // The owner can request guarded admission; the supplementary card list
     // remains read-only. Every command checks owner authorization again.
@@ -71,6 +80,12 @@ export default async function AdminAmuxExecutionPage({
     // step-up that the clear route checks and the panel offers the way back
     // to (orchestration policy version 20, section 7).
     halts: isOwner ? undefined : "read_only",
+    // A Decision Maker switch change takes the permission and the step-up its
+    // route checks (docs/policy/amux-decision-maker.md §8).
+    "decision-maker": canChangeDmSwitches ? undefined : "read_only",
+    // A registry change takes the owner role, the stage's code latch and a
+    // recent step-up (orchestration policy version 31, sections 3 and 8).
+    workers: !isOwner ? "read_only" : amuxWorkerRegistryWritesOpen() ? undefined : "behind_server_switch",
   };
 
   const tabs = (
@@ -124,6 +139,53 @@ export default async function AdminAmuxExecutionPage({
             human: AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT,
           }}
         />
+      </div>
+    );
+  }
+
+  if (tab.id === "decision-maker") {
+    // Every admin role reads the switches, as the switch route's GET answers
+    // them: reading Decision Maker records stays open under the kill switch
+    // (docs/policy/amux-decision-maker.md §6). A read that fails is shown as
+    // such, never as a default state. §4's report is a second, independent
+    // read: either may fail without taking the other with it, and a failed
+    // report shows no figure rather than a zero.
+    const [state, report] = await Promise.all([
+      withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead, (tx) =>
+        readDecisionMakerSwitchesOrThrow(tx),
+      ).catch(() => null),
+      withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerReportRead, (tx) =>
+        readDecisionMakerDeclarationAccuracyReport(tx),
+      ).catch((error: unknown) => {
+        console.warn(
+          JSON.stringify({
+            subsystem: "amux",
+            event: "decision_maker_report_read_failed",
+            code: error instanceof AmuxDbBoundaryError ? error.code : null,
+          }),
+        );
+        return null;
+      }),
+    ]);
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        <AmuxDecisionMakerSwitchPanel state={state} canChange={canChangeDmSwitches} />
+        <AmuxDecisionMakerReportPanel report={report} />
+      </div>
+    );
+  }
+
+  if (tab.id === "workers") {
+    // Every admin role reads the registry and its comparison with the
+    // catalog; only the owner is offered registration, and the route decides
+    // that again. A read that fails is shown as such, never as an empty
+    // registry.
+    const view = await readAmuxWorkerRegistryForAdmin().catch(() => null);
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        <AmuxWorkerRegistryPanel view={view} isOwner={isOwner} />
       </div>
     );
   }

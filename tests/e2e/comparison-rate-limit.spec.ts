@@ -92,7 +92,7 @@ test.describe("a rate-limited comparison", { tag: "@ui-risk" }, () => {
     await mockChatStream(page, "QA mock response");
     const world = await mockRateLimitedPreflight(page);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await sendChatMessage(page, testInfo, DRAFT);
 
     await expect.poll(() => world.preflightCalls).toBe(1);
@@ -118,7 +118,7 @@ test.describe("a rate-limited comparison", { tag: "@ui-risk" }, () => {
     await mockChatStream(page, "QA mock response");
     const world = await mockRateLimitedPreflight(page);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await sendChatMessage(page, testInfo, DRAFT);
 
     await expect.poll(() => world.preflightCalls).toBe(1);
@@ -135,7 +135,7 @@ test.describe("a rate-limited comparison", { tag: "@ui-risk" }, () => {
     await mockChatStream(page, "QA mock response");
     const world = await mockRateLimitedPreflight(page);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await sendChatMessage(page, testInfo, DRAFT);
 
     await expect(toast(page)).toContainText(String(RETRY_AFTER_SECONDS));

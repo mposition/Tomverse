@@ -1,6 +1,7 @@
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { LandingPageContent } from "@/components/marketing/LandingPageContent";
 import { REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
+import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { createPageMetadata, reviewOgCopy, reviewSeoCopy } from "@/lib/seo";
 
 export const metadata = createPageMetadata({
@@ -15,7 +16,7 @@ export const metadata = createPageMetadata({
 export default function ReviewProductPage() {
   return (
     <LanguageProvider initialLang="en" forceInitialLang>
-      <LandingPageContent />
+      <LandingPageContent guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE} />
     </LanguageProvider>
   );
 }

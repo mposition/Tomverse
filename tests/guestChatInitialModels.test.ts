@@ -1,18 +1,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
+  createReplacementResolver,
   getGuestDefaultSelectedModels,
   GUEST_BRAND_TRIO_MODEL_IDS,
 } from "@/lib/appDefaults";
 import {
   GUEST_ACTIVE_CHAT_STORAGE_KEY,
+  GUEST_CHAT_ACTIVE_CHAT_STORAGE_KEY,
+  GUEST_CHAT_CONVERSATIONS_STORAGE_KEY,
   GUEST_CONVERSATIONS_STORAGE_KEY,
+  guestWorkspaceStorageKeys,
+  newGuestConversationId,
   resolveGuestInitialSelectedModels,
   resolveGuestInitialWebSearchMode,
   type GuestInitialModelEnvironment,
 } from "@/lib/guestChatInitialModels";
-import { getModel, isEnabledModelId } from "@/lib/models";
+import { getModel, isEnabledModelId, type AiModel } from "@/lib/models";
 
 // This resolver runs during the chat page's first render on both the server
 // and the client, so what it returns *is* the guest's first painted model
@@ -22,6 +28,7 @@ import { getModel, isEnabledModelId } from "@/lib/models";
 const catalogue = {
   isEnabledModelId,
   isGuestEligible: createGuestEligibilityCheck(getModel),
+  isDefaultEligible: createDefaultLineupEligibilityCheck(getModel, createGuestEligibilityCheck(getModel)),
 };
 
 const resolve = (environment: GuestInitialModelEnvironment = {}) =>
@@ -33,13 +40,14 @@ const storage = (entries: Record<string, string>) => ({
 
 const guestConversationEnvironment = (
   conversationId: string,
-  conversation: Record<string, unknown>
+  conversation: Record<string, unknown>,
+  product: "chat" | "review" = "review"
 ): GuestInitialModelEnvironment => ({
   sessionStorage: storage({
-    [GUEST_ACTIVE_CHAT_STORAGE_KEY]: conversationId,
+    [guestWorkspaceStorageKeys(product).activeChatKey]: conversationId,
   }),
   localStorage: storage({
-    [GUEST_CONVERSATIONS_STORAGE_KEY]: JSON.stringify([
+    [guestWorkspaceStorageKeys(product).conversationsKey]: JSON.stringify([
       { id: conversationId, ...conversation },
     ]),
   }),
@@ -52,6 +60,73 @@ test("a brand-new guest starts on the full brand trio", () => {
 
   assert.equal(resolved.source, "guest_default");
   assert.deepEqual(resolved.models, guestDefault);
+});
+
+test("Guest Chat has its own storage namespace and starts on one eligible model", () => {
+  assert.deepEqual(guestWorkspaceStorageKeys("review"), {
+    activeChatKey: GUEST_ACTIVE_CHAT_STORAGE_KEY,
+    conversationsKey: GUEST_CONVERSATIONS_STORAGE_KEY,
+  });
+  assert.deepEqual(guestWorkspaceStorageKeys("chat"), {
+    activeChatKey: GUEST_CHAT_ACTIVE_CHAT_STORAGE_KEY,
+    conversationsKey: GUEST_CHAT_CONVERSATIONS_STORAGE_KEY,
+  });
+  assert.equal(newGuestConversationId("review", 42), "guest_42");
+  assert.equal(newGuestConversationId("chat", 42), "guest_chat_42");
+
+  const resolved = resolveGuestInitialSelectedModels({
+    catalogue,
+    product: "chat",
+  });
+  assert.equal(resolved.source, "guest_default");
+  assert.deepEqual(resolved.models, guestDefault.slice(0, 1));
+});
+
+test("Guest Chat clamps URL and restored selections to one without reading Review storage", () => {
+  const requested = resolveGuestInitialSelectedModels({
+    catalogue,
+    product: "chat",
+    environment: {
+      ...guestConversationEnvironment("guest_chat_1", {
+        selectedModels: GUEST_BRAND_TRIO_MODEL_IDS,
+      }, "chat"),
+      search: `?models=${GUEST_BRAND_TRIO_MODEL_IDS.join(",")}`,
+    },
+  });
+  assert.equal(requested.source, "url_models_param");
+  assert.deepEqual(requested.models, GUEST_BRAND_TRIO_MODEL_IDS.slice(0, 1));
+
+  const restored = resolveGuestInitialSelectedModels({
+    catalogue,
+    product: "chat",
+    environment: guestConversationEnvironment("guest_chat_2", {
+      selectedModels: GUEST_BRAND_TRIO_MODEL_IDS,
+    }, "chat"),
+  });
+  assert.equal(restored.source, "restored_conversation");
+  assert.deepEqual(restored.models, GUEST_BRAND_TRIO_MODEL_IDS.slice(0, 1));
+
+  const reviewOnlyEnvironment = guestConversationEnvironment("guest_review", {
+    selectedModels: [GUEST_BRAND_TRIO_MODEL_IDS[2]],
+  });
+  const isolated = resolveGuestInitialSelectedModels({
+    catalogue,
+    product: "chat",
+    environment: reviewOnlyEnvironment,
+  });
+  assert.equal(isolated.source, "guest_default");
+  assert.deepEqual(isolated.models, guestDefault.slice(0, 1));
+});
+
+test("Guest Chat restores web search only from its own product namespace", () => {
+  assert.equal(resolveGuestInitialWebSearchMode(
+    guestConversationEnvironment("guest_chat_3", { webSearchMode: "off" }, "chat"),
+    "chat"
+  ), "off");
+  assert.equal(resolveGuestInitialWebSearchMode(
+    guestConversationEnvironment("guest_review", { webSearchMode: "off" }),
+    "chat"
+  ), "always");
 });
 
 test("server rendering resolves the same selection as the browser", () => {
@@ -304,4 +379,60 @@ test("a models link does not change the restored conversation's search switch", 
     search: "?models=gpt-5-6-luna",
   };
   assert.equal(resolveGuestInitialWebSearchMode(environment), "off");
+});
+
+test("the first paint succeeds a retired trio member through the catalogue's resolver", () => {
+  const [openai, anthropic, google] = GUEST_BRAND_TRIO_MODEL_IDS;
+  const successor: AiModel = { ...getModel(anthropic)!, id: "claude-haiku-next", replacementModelId: undefined };
+  const rows = new Map<string, AiModel>([
+    [anthropic, { ...getModel(anthropic)!, enabled: false, status: "disabled" as const, publiclyListed: false, replacementModelId: successor.id }],
+    [successor.id, successor],
+  ]);
+  const lookup = (id: string) => rows.get(id) ?? getModel(id);
+  const retiredCatalogue = {
+    isEnabledModelId: (id: string) => Boolean(lookup(id)?.enabled),
+    isGuestEligible: createGuestEligibilityCheck(lookup),
+    isDefaultEligible: createDefaultLineupEligibilityCheck(lookup, createGuestEligibilityCheck(lookup)),
+    resolveReplacement: createReplacementResolver(lookup),
+  };
+  const selection = resolveGuestInitialSelectedModels({
+    catalogue: retiredCatalogue,
+    leadModelId: openai,
+  });
+  assert.deepEqual(selection.models, [openai, successor.id, google]);
+});
+
+test("a lineup member later limited or unlisted is succeeded in the default, but a guest who picks it keeps it", () => {
+  const [openai, anthropic, google] = GUEST_BRAND_TRIO_MODEL_IDS;
+  const successor: AiModel = { ...getModel(anthropic)!, id: "claude-haiku-next", replacementModelId: undefined };
+  for (const change of [{ status: "limited" as const }, { publiclyListed: false }]) {
+    // Still enabled, guest and Standard: the plain guest check passes it.
+    const rows = new Map<string, AiModel>([
+      [anthropic, { ...getModel(anthropic)!, ...change, replacementModelId: successor.id }],
+      [successor.id, successor],
+    ]);
+    const lookup = (id: string) => rows.get(id) ?? getModel(id);
+    const isGuestEligible = createGuestEligibilityCheck(lookup);
+    assert.equal(isGuestEligible(anthropic), true);
+    const limitedCatalogue = {
+      isEnabledModelId: (id: string) => Boolean(lookup(id)?.enabled),
+      isGuestEligible,
+      isDefaultEligible: createDefaultLineupEligibilityCheck(lookup, isGuestEligible),
+      resolveReplacement: createReplacementResolver(lookup),
+    };
+    assert.deepEqual(
+      resolveGuestInitialSelectedModels({ catalogue: limitedCatalogue, leadModelId: openai }).models,
+      [openai, successor.id, google],
+      JSON.stringify(change)
+    );
+    // A models link that names it is the guest's own pick, clamped by the
+    // plain guest check, so a runnable model is not taken away.
+    assert.ok(
+      resolveGuestInitialSelectedModels({
+        catalogue: limitedCatalogue,
+        environment: { search: `?models=${anthropic}` },
+      }).models.includes(anthropic),
+      JSON.stringify(change)
+    );
+  }
 });

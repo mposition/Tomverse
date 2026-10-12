@@ -129,7 +129,7 @@ test.describe("a conversation started with an assistant", () => {
 
         // The new-conversation screen: no server row yet, which is the branch
         // where the choice is held and sent with the create.
-        await page.goto("/chat");
+        await page.goto("/review");
         await expect(page.getByTestId("chat-input")).toBeVisible();
 
         await page.locator('button[aria-controls="chat-input-popover"]').first().click();
@@ -169,7 +169,7 @@ test.describe("a conversation started with an assistant", () => {
         await mockChatStream(page, "Assistant QA response");
         const recorder = await recordProfileCreate(page);
 
-        await page.goto("/chat");
+        await page.goto("/review");
         await expect(page.getByTestId("chat-input")).toBeVisible();
 
         await page.locator('button[aria-controls="chat-input-popover"]').first().click();
@@ -290,7 +290,7 @@ test.describe("a comparison started with an assistant", () => {
             });
         });
 
-        await page.goto("/chat");
+        await page.goto("/review");
         await expect(page.getByTestId("chat-input")).toBeVisible();
 
         await page.locator('button[aria-controls="chat-input-popover"]').first().click();

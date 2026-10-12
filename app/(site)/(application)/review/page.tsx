@@ -19,9 +19,8 @@ export default async function ReviewPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  // Same handoff `/chat` reads, for the same reason: both routes render this
-  // workspace, so a conversation handed to one of them has to be honoured by
-  // whichever one the user was sent to.
+  // Same handoff `/chat` reads, for the same reason: the stored product owns
+  // the conversation, so this canonical Review route must honour its id.
   const params = await searchParams;
   const handoff = params[CONVERSATION_HANDOFF_PARAM];
   return (

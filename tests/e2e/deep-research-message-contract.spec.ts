@@ -213,7 +213,7 @@ test("a Deep Research first question posts only the user turn, then renders the 
   await selectOnlyDeepResearch(page);
   const job = await mockDeepResearchJob(page);
 
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
 
   // A brand-new conversation -- the state whose panel holds the UI-only
   // greeting message that used to poison the request. The centred welcome

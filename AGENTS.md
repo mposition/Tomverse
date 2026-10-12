@@ -694,7 +694,7 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   초기화하지도, 추가 지급하지도, 이미 쓴 크레딧을 회수하지도 않습니다.
   업그레이드와 다운그레이드가 같은 함수를 씁니다.
 
-# Default model (GPT-5.6 Luna)
+# Default model (GPT 6 Luna)
 
 `DEFAULT_MODEL_ID`, 게스트 기본값, `gpt-5-4-mini`의 lifecycle을 건드리기 전에
 읽습니다.
@@ -710,9 +710,34 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **trio 밖의 모델은 `guestDefaultModelId`로 저장할 수 없습니다.** resolver가
   무시하므로 저장은 되고 효과는 없는 설정이 됩니다. `guestDefaultLeadRejection()`
   이 거부합니다.
-- **기본 모델은 `gpt-5-6-luna`입니다.** `lib/models.ts`의 `DEFAULT_MODEL_ID`,
-  `lib/appDefaults.ts`의 `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`,
-  Prisma 컬럼 기본값이 함께 움직입니다. 한쪽만 바꾸지 않습니다.
+- **기본 모델은 `gpt-6-luna`입니다**(2026-10-12, 이전 `gpt-5-6-luna`).
+  `lib/models.ts`의 `DEFAULT_MODEL_ID`, `lib/appDefaults.ts`의
+  `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`, Prisma 컬럼 기본값이
+  함께 움직입니다. 한쪽만 바꾸지 않습니다. 같은 날 trio의 Anthropic 자리는
+  `claude-haiku-5-5`로 옮겼습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
+- **게스트 기본 3모델은 OpenAI 1개 · Anthropic 1개 · Gemini 1개입니다**(플랫폼
+  전략, 2026-10-12 운영자 결정). 그래서 Anthropic 자리의 **Claude Haiku 계열만**
+  가격이 게스트 개방 조건(최악 턴 ≤ standard 1크레딧의 3배 커버)에 맞지 않아도
+  허용합니다. Haiku 5.5의 100,000토큰 장문 tier가 입력 상한 안에서 원가를 낮게
+  기록할 수 있다는 위험까지 수용한 결정이며, 다른 모델의 같은 경계는 이 예외가
+  아닙니다: docs/policy/credit-and-cost-limits.md "Haiku 계열을 게스트 Anthropic
+  자리로 여는 예외".
+- **기본 3모델 구성은 Admin 설정입니다**(2026-10-12 운영자 결정, 정책 문서
+  "기본 3모델 구성은 Admin 설정입니다"). `AppSetting["guestBrandTrioModelIds"]`가
+  정하고, 코드 trio는 행이 없거나 읽을 수 없을 때의 비상값입니다. 저장 검증은
+  `guestBrandTrioRejection()`(활성 · 공개 · Guest · Standard · 검증된 가격 · 서로
+  다른 3개 · OpenAI · Anthropic · Gemini 각 1개) 한 곳이고, 선두는 그 구성 안에서만 고르며 구성과 한 트랜잭션으로 저장합니다.
+  구성을 쓰는 모든 곳(첫 렌더, 신규 계정, Admin 설명, 서버 선두 판정,
+  `check:default-models`)은 `getPublicAppSettings()` 또는 `readGuestLeadFacts()`가
+  해석한 같은 구성을 받습니다 — 컴파일된 trio를 직접 읽지 않습니다.
+- **은퇴한 구성원의 자리는 대체 모델이 이어받습니다.** resolver에
+  `resolveReplacement`를 넘기면 비활성 구성원의 `replacementModelId` 체인을 따라가
+  같은 자리·같은 순서에 넣고, 자격이 없을 때만 fallback 목록으로 채웁니다. 서버와
+  브라우저가 같은 catalogue에 묶어야 첫 렌더가 어긋나지 않습니다.
+- **기본 선택을 계산할 때는 `createDefaultLineupEligibilityCheck()`를 씁니다.**
+  호출자의 자격 검사(새 계정 첫 비교는 Free, 나머지는 게스트)에
+  `isDefaultLineupServable`을 더한 것이라 `limited`·비공개가 된 구성 모델은
+  승계됩니다. 사람이 고른 선택의 clamp는 게스트 자격 그대로입니다.
 - **`gpt-5-4-mini`는 은퇴하지 않았습니다.** enabled·publiclyListed 상태를
   유지하는 것은 의도된 관찰 기간입니다.
 - **수치 eval 통과는 은퇴의 필요조건이지 충분조건이 아닙니다.** 정책 문서
@@ -1319,8 +1344,14 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   docs/policy/amux-decision-maker.md §6의 표대로 이 단계의 쓰기는 kill switch 중에도 모두 허용되므로
   스위치를 읽지 않습니다. 같은 변경에서 S1c의 스위치 읽기 실패는 트랜잭션을 이미 중단시키므로 writer가
   그 자리에서 `settings_unreadable`을 던지고 아무것도 쓰지 않습니다(SAVEPOINT는
-  docs/policy/amux-decision-maker.md §9의 12문장을 넘깁니다). 결과 제출과 배정은 이 store의 두 조합을
-  거쳐서만 부릅니다. cron·route·Admin 화면은 없습니다.
+  docs/policy/amux-decision-maker.md §9의 12문장을 넘깁니다). 라우팅·결과 제출·배정은 이 store의 세
+  조합을 거쳐서만 부릅니다. **카드 본문은 라우팅이 같은 트랜잭션에서 씁니다**(2026-10-09) —
+  `recordDecisionMakerRequestWithCardText()`가 DM으로 라우팅된 새 요청에만 `dmCardText()`(S1a의 JSON
+  직렬화, `format` 표시 포함)를 그 route 감사에 묶어 저장하고, 운영자 라우팅은 본문이 없습니다. 본문
+  guard가 카드를 그 요청의 route 트랜잭션에만 받으므로 나중에 채울 수 없습니다.
+  docs/policy/amux-decision-maker.md §5의 16 KiB와 카드 secret 검사는 이 직렬화 바이트로 판정하므로 DM으로
+  가는 카드는 언제나 본문 store가 받습니다. Admin은
+  `readDecisionMakerCardText()`로 읽습니다. cron·route·Admin 화면은 없습니다.
 - **S1e(운영자 판정·전달)**: `lib/amux/decisionMakerJudgmentCore.ts`,
   `lib/amux/decisionMakerJudgmentStore.ts`, `lib/amux/decisionMakerJudgmentSystemAudit.ts`,
   `prisma/migrations/20261008130000_amux_decision_maker_stale_close_hours/migration.sql`,
@@ -1342,6 +1373,54 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   stale close를 `720 hours`로 고정했습니다(이전 `30 days`는 DST에서 한 시간 어긋남). 함수 네 개를
   교체하는 migration은 header 선언이 하나뿐이라 이전 본문 digest를 첫 DO 블록에서 대조합니다.
   route·Admin 화면·bridge는 없습니다.
+- **S1f1(스위치 route)**: `app/api/admin/amux/decision-maker/switches/route.ts`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerSwitchRead`·`decisionMakerSwitchChange`,
+  `tests/server-contract/admin-amux-decision-maker-switches-route.test.ts`. 읽기는 관리자 누구나이고
+  (kill switch 중에도 DM 기록 열람은 허용), 변경은 `ops:write`와 최근 step-up을 body보다 먼저 검사합니다.
+  두 handler는 첫 줄부터 `withAmuxRouteBudget` 안에서 돌므로 세션·rate limit·body에 쓴 시간이 15초
+  예산에서 빠지고, 남은 시간이 경계 예산보다 짧으면 트랜잭션을 시작하지 않습니다
+  (`tests/server-contract/admin-amux-decision-maker-switches-route-budget.test.ts`).
+  route는 S1b store를 AMUX DB 경계 안에서 직접 부르며 감사는 store가 씁니다. **경계 상한은 store의 가장
+  긴 문장 수 + setup + fence입니다** — `tests/amuxDecisionMakerSwitch.test.mjs`가 그 셈을, switch DB
+  테스트가 하나 줄인 상한의 거부를 고정하므로 store에 문장을 더하면 상한도 함께 올립니다. 결과를 모르면
+  `outcome_unknown`(503)으로 답하고 다시 보내지 않고 GET으로 확인합니다. Admin 화면·라우팅 route·bridge는
+  없습니다.
+- **S1f2(스위치 화면)**: `components/admin/AmuxDecisionMakerSwitchPanel.tsx`,
+  `lib/adminMessages/amuxDecisionMaker.ts`, `/admin/amux-execution?tab=decision-maker`(`lib/adminNavigation.ts`,
+  `lib/adminNavigationLocale.ts`, `app/(site)/(application)/admin/amux-execution/page.tsx`),
+  `tests/client/amuxDecisionMakerSwitchRender.test.tsx`. 화면은 S1f1 route만 부르고, 바꿀 수 있는 값은
+  `dmSwitchChangesFor()`가 정책 목록에서 지금 값만 뺀 것입니다(읽을 수 없는 scope는 전부). 권한이 없으면
+  상태와 이유만 보이고, 428은 `AdminApiFailureNotice`로 재인증 링크를 보입니다. **표시 중인 상태를
+  유지하는 것은 아무것도 쓰지 않았음이 증명된 답뿐입니다** — 쓰기 전 거절(400·403·404·413·428·429)과
+  본문까지 읽은 503 `switch_change_failed`. 그 밖의 모든 답(저장, `outcome_unknown`, 본문을 못 읽은 503,
+  다른 status, 응답 없음) 뒤에는 `runDmSwitchChange()`가 GET으로 상태를 다시 읽고, 그 읽기가 끝나기
+  전에는 어떤 버튼도 풀지 않습니다. 다시 읽기에 실패하면 상태를 표시하지 않고 "다시 읽기"만
+  남깁니다 — 확인되지 않은 상태 위에서 같은 변경을 다시 보내 latch를 풀 수 없게 하기 위해서입니다. 탭에
+  badge는 없습니다.
+- **S1f3(라우팅 route)**: `app/api/internal/amux/decision-maker/requests/route.ts`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerRouting`(상한 12),
+  `tests/server-contract/amux-decision-maker-routing-route.test.ts`,
+  `tests/server-contract/amux-decision-maker-routing-route-budget.test.ts`. bridge가 부를 판정 route이며
+  **`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409 `dm_routing_disabled`입니다** — 이
+  route를 부르는 bridge 경로가 S2(docs/policy/amux-decision-maker.md §12)이므로, 그 승인 전에는 스위치와
+  상관없이 요청 원장에 아무것도 쓰지 않습니다. 판정은 body store의
+  `recordDecisionMakerRequestWithCardText()` 하나이고(route는 인증·body·key ring·예산·경계만), 같은 (카드,
+  질문 revision)은 기존 요청을 돌려주므로 결과 불명 뒤 같은 질문을 다시 보내는 것은 조회입니다. key ring
+  오류는 DB에 닿기 전에 503이며 로그에는 코드만 남깁니다. 응답과 로그에 카드 문구·digest·감사 id는
+  없습니다. **경계 상한 12는 라우팅의 가장 긴 경우(무결성 키, DM으로 가는 새 질문과 그 카드 본문) +
+  setup + fence와 같고**, `tests/amuxDecisionMakerBody.test.mjs`가 그 셈을, body DB 테스트가 하나 줄인
+  상한의 거부를 고정합니다. bridge·DM 호출은 없습니다.
+- **S1f4(선언 정확도 보고 화면)**: `components/admin/AmuxDecisionMakerReportPanel.tsx`,
+  `lib/adminMessages/amuxDecisionMaker.ts`의 `adminAmuxDecisionMakerReportMessages`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerReportRead`(상한 4), Decision Maker 탭
+  (`app/(site)/(application)/admin/amux-execution/page.tsx`),
+  `tests/client/amuxDecisionMakerReportRender.test.tsx`. 화면은 S1e의
+  `readDecisionMakerDeclarationAccuracyReport()`를 페이지가 AMUX DB 경계 안에서 읽어 넘긴 값만 그립니다 —
+  요청도 버튼도 없습니다. 수치는 각자의 분자/분모로 보이고, 분모가 비면 `insufficient_evidence`를 말로
+  보이며 0%로 쓰지 않습니다. 읽기에 실패하면 수치 없이 그 사실만 보이고, 스위치 읽기와 따로 실패합니다.
+  docs/policy/amux-decision-maker.md §0-2의 졸업 기준과 비교하지 않습니다. **경계 상한 4는 보고의 두 문장 +
+  setup + fence이고**, `tests/amuxDecisionMakerJudgment.test.mjs`가 그 셈을, judgment DB 테스트가 kill
+  switch 중의 읽기와 하나 줄인 상한의 거부를 고정합니다. 제안 열람·판정 화면은 S2입니다.
 
 # AI Review (교차검토) 품질과 M5
 
@@ -1570,6 +1649,8 @@ Non-negotiable requirements:
 Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`, `lib/autoRoutingUi.ts`, `lib/autoProductBoundary.ts`, `lib/autoRoutingCopy.ts`, or the `selectionMode` handling in `app/api/conversations/[conversationId]/route.ts`, read:
 
 - `docs/ui-contracts/auto-model-selection.md`
+- `docs/ui-contracts/chat-product-switcher.md` for Chat/Review entry routes,
+  product navigation, draft isolation and Smart Adaptive presentation.
 
 Non-negotiable requirements:
 

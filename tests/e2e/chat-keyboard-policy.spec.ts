@@ -34,7 +34,7 @@ const dispatchComposingEnter = (page: Page) =>
 async function prepareSingleModelChat(page: Page) {
   await prepareGuestPage(page, "ko");
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
 }
 
@@ -122,7 +122,7 @@ test.describe("mobile chat keyboard policy", { tag: "@ui-risk" }, () => {
   test("Enter inserts a newline and never sends (guest)", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await mockChatStream(page, "Mobile keyboard QA response");
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
     const textarea = page.getByTestId("chat-textarea");
@@ -137,7 +137,7 @@ test.describe("mobile chat keyboard policy", { tag: "@ui-risk" }, () => {
   test("multiple Enter presses produce multiple newlines (guest)", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await mockChatStream(page, "Mobile keyboard QA response");
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
     const textarea = page.getByTestId("chat-textarea");
@@ -152,7 +152,7 @@ test.describe("mobile chat keyboard policy", { tag: "@ui-risk" }, () => {
   test("Shift+Enter inserts a newline and does not send (guest)", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await mockChatStream(page, "Mobile keyboard QA response");
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
     const textarea = page.getByTestId("chat-textarea");
@@ -169,7 +169,7 @@ test.describe("mobile chat keyboard policy", { tag: "@ui-risk" }, () => {
   }) => {
     await prepareGuestPage(page, "ko");
     await mockChatStream(page, "Mobile keyboard QA response");
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
     const textarea = page.getByTestId("chat-textarea");
@@ -188,7 +188,7 @@ test.describe("mobile chat keyboard policy", { tag: "@ui-risk" }, () => {
     // cover the box the user is reading their own text in.
     await prepareGuestPage(page, "ko");
     await mockChatStream(page, "Mobile keyboard QA response");
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
     const textarea = page.getByTestId("chat-textarea");
@@ -225,7 +225,7 @@ test.describe("mobile chat keyboard policy", { tag: "@ui-risk" }, () => {
   test("a whitespace/newline-only message is not sendable (guest)", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await mockChatStream(page, "Mobile keyboard QA response");
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
     const textarea = page.getByTestId("chat-textarea");

@@ -288,7 +288,7 @@ for (const path of ["/", "/ko"] as const) {
       expect(name.length).toBeGreaterThan(0);
     }
 
-    // Both product CTAs go to the same resolved workspace entry. The
+    // Both primary CTAs go to the same resolved workspace entry. The
     // destination is decided on the server; this only checks the link the
     // page actually rendered has not been swapped for a different surface.
     for (const testId of ["landing-primary-cta", "landing-final-cta"]) {
@@ -300,7 +300,7 @@ for (const path of ["/", "/ko"] as const) {
   });
 }
 
-test("the hero names Tomverse Review and sends its CTA to a comparison", async ({
+test("the hero names both products and keeps the primary guest CTA on Review", async ({
   page,
 }) => {
   // The first screen has to answer four questions: Tomverse is the brand,
@@ -316,6 +316,18 @@ test("the hero names Tomverse Review and sends its CTA to a comparison", async (
   // This page introduces Review, so its CTA must name that comparison.
   expect(cta.toLowerCase()).not.toContain("chat");
   expect(cta.toLowerCase()).toContain("compar");
+  await expect(page.getByTestId("landing-chat-product-cta")).toHaveAttribute(
+    "href",
+    "/chat?lang=en"
+  );
+  await expect(page.getByTestId("landing-chat-product-cta")).toHaveText("Try Chat free");
+  await expect(page.getByTestId("landing-chat-product-description")).toHaveText(
+    /When Smart Adaptive is available.*text questions.*existing guest limit.*browser.*Attachments use manual model selection/
+  );
+  await expect(page.getByTestId("landing-review-product-cta")).toHaveAttribute(
+    "href",
+    "/review?lang=en&entry=guest-preview"
+  );
 });
 
 test("the hero keeps its guest-start and AI Review messages", async ({ page }) => {

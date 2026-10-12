@@ -12,7 +12,7 @@ const actionMenuTrigger = (page: import("@playwright/test").Page) =>
 test.beforeEach(async ({ page }) => {
   await prepareGuestPage(page, "ko");
   await page.setViewportSize({ width: 1366, height: 768 });
-  await page.goto("/chat");
+  await page.goto("/review");
 });
 
 test("desktop shell fits compact viewport", async ({ page }) => {

@@ -1,7 +1,8 @@
 "use client";
 
-import { Loader2, RefreshCw, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { CheckCircle2, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { z } from "zod";
 import { AdminPromptRefinerAutoResumeControl } from
   "@/components/admin/AdminPromptRefinerAutoResumeControl";
 
@@ -31,6 +32,83 @@ import {
 type Failure = "request_failed" | "invalid_response" | null;
 type MutationKind = "activate" | "enable" | "disable";
 const ADMIN_PATH = "/admin/prompt-refiner-shadow";
+const GUEST_CHAT_AUTO_ACTIVATION_PATH =
+  "/api/admin/prompt-refiner/guest-chat-auto-activation";
+const GUEST_CHAT_AUTO_ACTIVATION_CONFIRMATION =
+  "ACTIVATE_EXACT_GUEST_CHAT_SMART_ADAPTIVE_DEPLOYMENT";
+
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
+const guestChatAutoReleaseSchema = z.object({
+  state: z.literal("active"),
+  binding: z.object({
+    runtimeCommitSha: z.string().regex(/^[0-9a-f]{40}$/),
+    runtimeDeploymentId: z.string().uuid(),
+    configDigest: sha256Schema,
+    baseRouterConfigDigest: sha256Schema,
+    promptRefinerCandidateDigest: sha256Schema,
+    promptRefinerPricePinDigest: sha256Schema,
+    promptRefinerAdapterConfigDigest: sha256Schema,
+  }).strict(),
+  activationAuditLogId: z.string().min(1).max(240),
+  activationPairDigest: sha256Schema,
+  baseRouterActivationAuditLogId: z.string().min(1).max(240),
+  baseProductActivationAuditLogId: z.string().min(1).max(240),
+  actorUserId: z.string().min(1).max(240),
+  approvedAt: z.string().datetime(),
+}).strict();
+const guestChatAutoReadbackSchema = z.object({
+  release: guestChatAutoReleaseSchema.nullable(),
+}).strict();
+const guestChatAutoActivationResponseSchema = z.object({
+  releaseKind: z.literal("guest_chat_smart_adaptive_v1"),
+  activationAuditLogId: z.string().min(1).max(240),
+  activationPairDigest: sha256Schema,
+  runtimeCommitSha: z.string().regex(/^[0-9a-f]{40}$/),
+  runtimeDeploymentId: z.string().uuid(),
+  rolloutChanged: z.literal(false),
+}).strict();
+
+export type GuestChatAutoRelease = z.infer<typeof guestChatAutoReleaseSchema>;
+type GuestChatAutoActivationResponse =
+  z.infer<typeof guestChatAutoActivationResponseSchema>;
+type GuestReadState = "loading" | "absent" | "active" | "unavailable" | "mismatch";
+type GuestMutationResult =
+  | "confirmed"
+  | "confirmed_by_readback"
+  | "failed"
+  | "reauth"
+  | "unknown"
+  | "runtime_changed"
+  | null;
+
+export function parseGuestChatAutoReleaseReadback(value: unknown) {
+  return guestChatAutoReadbackSchema.safeParse(value);
+}
+
+export function guestChatAutoReleaseMatches(
+  release: GuestChatAutoRelease,
+  runtime: { runtimeCommitSha: string; runtimeDeploymentId: string },
+  expected?: Pick<GuestChatAutoActivationResponse,
+    "activationAuditLogId" | "activationPairDigest">,
+) {
+  return release.binding.runtimeCommitSha === runtime.runtimeCommitSha &&
+    release.binding.runtimeDeploymentId === runtime.runtimeDeploymentId &&
+    (!expected || (
+      release.activationAuditLogId === expected.activationAuditLogId &&
+      release.activationPairDigest === expected.activationPairDigest
+    ));
+}
+
+export function guestChatAutoActivationDisabled(input: {
+  confirmed: boolean;
+  hasExactRuntime: boolean;
+  readState: GuestReadState;
+  pending: boolean;
+  postAttempted: boolean;
+}) {
+  return !input.confirmed || !input.hasExactRuntime ||
+    input.readState !== "absent" || input.pending || input.postAttempted;
+}
 
 const StatusField = ({ label, value }: { label: string; value: string }) => (
   <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2.5">
@@ -212,6 +290,281 @@ export function AdminChatRefinerInitialAutoReleaseControls({ snapshot, onRefresh
   );
 }
 
+export function AdminGuestChatSmartAdaptiveActivationControl({ snapshot,
+  onRefresh, messages: m }: {
+  snapshot: PromptRefinerProductStatus;
+  onRefresh: () => Promise<void>;
+  messages: typeof adminPromptRefinerProductStatusMessages.en;
+}) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [postAttempted, setPostAttempted] = useState(false);
+  const [readState, setReadState] = useState<GuestReadState>("loading");
+  const [release, setRelease] = useState<GuestChatAutoRelease | null>(null);
+  const [result, setResult] = useState<GuestMutationResult>(null);
+  const requestGeneration = useRef(0);
+  const activeRequest = useRef<AbortController | null>(null);
+  const mutationInFlight = useRef(false);
+  const runtime = useMemo(() =>
+    snapshot.serving.commitSha && snapshot.serving.deploymentId
+      ? { runtimeCommitSha: snapshot.serving.commitSha,
+        runtimeDeploymentId: snapshot.serving.deploymentId }
+      : null,
+  [snapshot.serving.commitSha, snapshot.serving.deploymentId]);
+
+  const applyReadback = useCallback((value: unknown,
+    expectedRuntime: typeof runtime) => {
+    const parsed = parseGuestChatAutoReleaseReadback(value);
+    if (!parsed.success) {
+      setRelease(null);
+      setReadState("unavailable");
+      return null;
+    }
+    if (!parsed.data.release) {
+      setRelease(null);
+      setReadState("absent");
+      return parsed.data;
+    }
+    setRelease(parsed.data.release);
+    setReadState(expectedRuntime && guestChatAutoReleaseMatches(
+      parsed.data.release, expectedRuntime) ? "active" : "mismatch");
+    return parsed.data;
+  }, []);
+
+  const readGuestRelease = useCallback(async (
+    expectedRuntime: typeof runtime,
+    signal?: AbortSignal,
+  ) => {
+    const response = await adminFetch(GUEST_CHAT_AUTO_ACTIVATION_PATH, {
+      cache: "no-store",
+      signal,
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      setRelease(null);
+      setReadState("unavailable");
+      return null;
+    }
+    return applyReadback(body, expectedRuntime);
+  }, [applyReadback]);
+
+  const load = useCallback(async () => {
+    const generation = ++requestGeneration.current;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    setReadState("loading");
+    try {
+      const readback = await readGuestRelease(runtime, controller.signal);
+      if (readback?.release && runtime &&
+          guestChatAutoReleaseMatches(readback.release, runtime)) {
+        setResult((current) => current === "unknown" || current === "failed"
+          ? "confirmed_by_readback"
+          : current);
+      }
+    } catch (error) {
+      if (generation === requestGeneration.current &&
+          !isAdminFetchAbort(error)) {
+        setRelease(null);
+        setReadState("unavailable");
+      }
+    }
+  }, [readGuestRelease, runtime]);
+
+  useEffect(() => {
+    queueMicrotask(() => void load());
+    return () => {
+      requestGeneration.current += 1;
+      activeRequest.current?.abort();
+    };
+  }, [load]);
+
+  const activate = async () => {
+    if (mutationInFlight.current) return;
+    if (guestChatAutoActivationDisabled({ confirmed,
+      hasExactRuntime: Boolean(runtime && snapshot.serving.exactProductIdentity),
+      readState, pending, postAttempted })) return;
+    mutationInFlight.current = true;
+    setPending(true);
+    setResult(null);
+    setConfirmed(false);
+    let writeIssued = false;
+    try {
+      const statusResponse = await adminFetch(
+        PROMPT_REFINER_PRODUCT_STATUS_PATH, { cache: "no-store" });
+      const statusBody = await statusResponse.json().catch(() => null);
+      const freshSnapshot = statusResponse.ok
+        ? parsePromptRefinerProductStatus(statusBody)
+        : null;
+      const freshRuntime = freshSnapshot?.serving.commitSha &&
+          freshSnapshot.serving.deploymentId
+        ? { runtimeCommitSha: freshSnapshot.serving.commitSha,
+          runtimeDeploymentId: freshSnapshot.serving.deploymentId }
+        : null;
+      if (!freshSnapshot?.serving.exactProductIdentity || !freshRuntime ||
+          !runtime || freshRuntime.runtimeCommitSha !== runtime.runtimeCommitSha ||
+          freshRuntime.runtimeDeploymentId !== runtime.runtimeDeploymentId) {
+        setResult("runtime_changed");
+        await onRefresh();
+        return;
+      }
+
+      const preflight = await readGuestRelease(freshRuntime);
+      if (!preflight) {
+        setResult("failed");
+        return;
+      }
+      if (preflight.release) {
+        setResult(guestChatAutoReleaseMatches(preflight.release, freshRuntime)
+          ? "confirmed_by_readback" : "runtime_changed");
+        await onRefresh();
+        return;
+      }
+
+      writeIssued = true;
+      setPostAttempted(true);
+      let activationResponse: GuestChatAutoActivationResponse | null = null;
+      let responseStatus: number | null = null;
+      let responseCode: string | null = null;
+      try {
+        const response = await adminFetch(GUEST_CHAT_AUTO_ACTIVATION_PATH, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...freshRuntime,
+            confirmation: GUEST_CHAT_AUTO_ACTIVATION_CONFIRMATION }),
+        });
+        responseStatus = response.status;
+        const body = await response.json().catch(() => null);
+        responseCode = typeof (body as { code?: unknown } | null)?.code === "string"
+          ? (body as { code: string }).code
+          : null;
+        const parsed = guestChatAutoActivationResponseSchema.safeParse(body);
+        if (response.ok && parsed.success) activationResponse = parsed.data;
+      } catch {
+        // A transport error after the POST is an unknown outcome. The single
+        // read below is verification, never a retry of the write.
+      }
+
+      if (responseStatus === 428 ||
+          responseCode === "ADMIN_REAUTHENTICATION_REQUIRED") {
+        setPostAttempted(false);
+        setResult("reauth");
+        return;
+      }
+
+      let readback: Awaited<ReturnType<typeof readGuestRelease>> = null;
+      try {
+        readback = await readGuestRelease(freshRuntime);
+      } catch {
+        setRelease(null);
+        setReadState("unavailable");
+      }
+      if (readback?.release && guestChatAutoReleaseMatches(
+        readback.release, freshRuntime, activationResponse ?? undefined)) {
+        setResult(activationResponse ? "confirmed" : "confirmed_by_readback");
+        await onRefresh();
+        return;
+      }
+      setResult(responseStatus && responseStatus < 500 ? "failed" : "unknown");
+    } catch {
+      setResult(writeIssued ? "unknown" : "failed");
+    } finally {
+      mutationInFlight.current = false;
+      setPending(false);
+    }
+  };
+
+  const disabled = guestChatAutoActivationDisabled({ confirmed,
+    hasExactRuntime: Boolean(runtime && snapshot.serving.exactProductIdentity),
+    readState, pending, postAttempted });
+
+  return (
+    <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4"
+      data-testid="guest-chat-smart-adaptive-activation-control">
+      <h3 className="text-sm font-bold text-white">{m.guestActivationTitle}</h3>
+      <p className="mt-1 text-sm leading-6 text-zinc-400">
+        {m.guestActivationDescription}
+      </p>
+      <p className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs leading-5 text-zinc-300">
+        {m.guestActivationScope}
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => void load()} disabled={pending || readState === "loading"}
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm font-semibold text-zinc-200 disabled:opacity-50"
+          data-testid="guest-chat-smart-adaptive-readback-refresh">
+          {readState === "loading"
+            ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            : <RefreshCw className="h-4 w-4" aria-hidden />}
+          {m.guestActivationRefresh}
+        </button>
+        <span role="status" className="text-xs text-zinc-400"
+          data-testid="guest-chat-smart-adaptive-readback-state">
+          {readState === "loading" ? m.guestActivationLoading
+            : readState === "active" ? m.guestActivationActive
+              : readState === "absent" ? m.guestActivationAbsent
+                : readState === "mismatch" ? m.guestActivationMismatch
+                  : m.guestActivationUnreadable}
+        </span>
+      </div>
+
+      {release && readState === "active" ? (
+        <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+          <StatusField label={m.guestActivationAudit}
+            value={release.activationAuditLogId} />
+          <StatusField label={m.guestActivationPair}
+            value={release.activationPairDigest} />
+          <StatusField label={m.commit}
+            value={release.binding.runtimeCommitSha} />
+          <StatusField label={m.deployment}
+            value={release.binding.runtimeDeploymentId} />
+          <StatusField label={m.guestActivationApprovedAt}
+            value={release.approvedAt} />
+        </dl>
+      ) : null}
+
+      <label className="mt-3 flex items-start gap-3 text-sm text-zinc-200">
+        <input type="checkbox" checked={confirmed}
+          disabled={readState !== "absent" || pending || postAttempted}
+          onChange={(event) => setConfirmed(event.target.checked)}
+          className="mt-1 h-4 w-4" />
+        <span>{m.guestActivationConfirm}</span>
+      </label>
+      <button type="button" disabled={disabled}
+        onClick={() => void activate()}
+        className="mt-4 min-h-11 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-100 disabled:opacity-50"
+        data-testid="guest-chat-smart-adaptive-activate">
+        {pending ? m.guestActivationSaving : m.guestActivationAction}
+      </button>
+
+      {result === "confirmed" || result === "confirmed_by_readback" ? (
+        <p role="status" className="mt-3 flex items-start gap-2 text-sm text-emerald-200">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          {result === "confirmed" ? m.guestActivationConfirmed
+            : m.guestActivationConfirmedByReadback}
+        </p>
+      ) : null}
+      {result === "runtime_changed" ? (
+        <p role="alert" className="mt-3 text-sm text-amber-100">
+          {m.guestActivationRuntimeChanged}
+        </p>
+      ) : null}
+      {result === "failed" || result === "unknown" ? (
+        <p role="alert" className="mt-3 text-sm text-red-200">
+          {result === "unknown" ? m.guestActivationUnknown
+            : m.guestActivationFailed}
+        </p>
+      ) : null}
+      {result === "reauth" ? (
+        <a href={adminRecentAuthenticationHref(ADMIN_PATH)}
+          className="mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-red-100 underline underline-offset-4">
+          {m.reauthenticate}
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 export function AdminPromptRefinerProductStatusPanel() {
   const m = useAdminMessages(adminPromptRefinerProductStatusMessages);
   const [snapshot, setSnapshot] =
@@ -307,6 +660,8 @@ export function AdminPromptRefinerProductStatusPanel() {
       {snapshot ? <>
         <AdminPromptRefinerProductStatusReadback snapshot={snapshot} messages={m} />
         <AdminChatRefinerInitialAutoReleaseControls
+          snapshot={snapshot} onRefresh={load} messages={m} />
+        <AdminGuestChatSmartAdaptiveActivationControl
           snapshot={snapshot} onRefresh={load} messages={m} />
         <AdminPromptRefinerAutoResumeControl
           snapshot={snapshot} onRefresh={load} messages={m} />

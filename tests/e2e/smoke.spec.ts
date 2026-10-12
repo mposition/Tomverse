@@ -87,7 +87,7 @@ test("signed-in homepage keeps the page visible and offers one continue action",
 test("guest preview opens a 3-model comparison chat by default", { tag: "@smoke" }, async ({ page }, testInfo) => {
   await prepareGuestPage(page, "en");
   await mockChatStream(page, "Guest preview answer");
-  await page.goto("/chat?lang=en&entry=guest-preview");
+  await page.goto("/review?lang=en&entry=guest-preview");
 
   await expect(page.getByTestId("guest-quick-start")).toHaveCount(0);
   if ((page.viewportSize()?.width ?? 1024) < 768) {

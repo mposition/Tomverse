@@ -149,7 +149,7 @@ test.describe("CSP: the client bundle never reaches for eval", () => {
     async ({ page }) => {
       await recordViolations(page);
       await prepareGuestPage(page);
-      const response = await page.goto("/chat");
+      const response = await page.goto("/review");
 
       // Hydration, not just first paint: the probe fired while client modules
       // evaluated, so the page has to have actually run them.

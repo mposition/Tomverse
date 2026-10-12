@@ -18,6 +18,7 @@ import {
 import { useEffect } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import {
   trackProductEvent,
   trackProductEventOnce,
@@ -329,7 +330,7 @@ export function ChatWorkspaceGuide() {
               {copy.allHelp}
             </Link>
             <Link
-              href={`/review?lang=${encodeURIComponent(lang)}`}
+              href={`${REVIEW_WORKSPACE_PATH}?lang=${encodeURIComponent(lang)}`}
               onClick={() =>
                 trackProductEvent("cta_start_click", 0, {
                   cta_location: "chat_workspace_guide",

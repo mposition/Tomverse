@@ -288,7 +288,7 @@ async function startGuestJourney(page: Page, options: JourneyOptions) {
   const watch = watchConsole(page);
 
   await page.setViewportSize(viewport);
-  await page.goto(`/chat?lang=${lang}`);
+  await page.goto(`/review?lang=${lang}`);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   if (options.textScalePercent) {
     const size = (16 * options.textScalePercent) / 100;
@@ -454,6 +454,9 @@ test.describe("guest journey: attach a file, compare, review", { tag: "@ui-risk"
     // forced past Playwright's enabled-ness heuristic rather than skipped.
     await button.click({ force: true });
     await expect(page.locator("#guest-compare-signin-title")).toBeVisible();
+    await expect(
+      page.locator('[aria-labelledby="guest-compare-signin-title"]').locator("a").first()
+    ).toHaveAttribute("href", "/auth/signin?callbackUrl=%2Freview%3Flang%3Den");
 
     expect(watch.hydration).toEqual([]);
     expect(watch.errors).toEqual([]);

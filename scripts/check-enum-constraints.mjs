@@ -71,6 +71,13 @@ const REGISTRY = {
     reason:
       "Manual or Auto, per conversation (routing policy \u00a75). The application reads an unrecognised stored value as manual, so a mode the constraint allows but the list does not know would silently route nobody rather than fail loudly \u2014 which is exactly the drift this check exists to catch.",
   },
+  ChatCreditReservation_phase_check: {
+    owner: "list",
+    module: "lib/guestChatAutoCreditClaim.ts",
+    list: "CHAT_CREDIT_RESERVATION_PHASES",
+    reason:
+      "Historical and ordinary reservations are exact. Guest Smart Adaptive alone may begin as a model-agnostic guest_auto_prehold and the database guard permits only its one-way conversion to exact; a third phase would otherwise evade both settlement and unknown-hold recovery.",
+  },
   MessageArtifact_format_check: {
     owner: "list",
     module: "lib/generatedArtifactCore.ts",
@@ -1068,6 +1075,55 @@ const REGISTRY = {
     list: "DM_SWITCH_ACTOR_KINDS",
     reason:
       "human or system. The guard trigger binds each to its own audit entry of the same transaction: a person's under amux.decision.mode or amux.decision.latch_release, a latch under amux.decision.latch by the instance's own system actor.",
+  },
+  AmuxWorkerRegistryEvent_provider_class_check: {
+    owner: "list",
+    module: "lib/amux/workerRegistryCore.ts",
+    list: "AMUX_WORKER_PROVIDER_CLASSES",
+    reason:
+      "Orchestration policy version 31, section 2: the four provider classes. A fifth class, or a ceiling raised for one, is a new policy version; a second CHECK keeps the unverified cursor and copilot below contract, and a third ties the class to the worker name's prefix.",
+  },
+  AmuxWorkerRegistryEvent_role_ceiling_check: {
+    owner: "list",
+    module: "lib/amux/workerRegistryCore.ts",
+    list: "AMUX_WORKER_ROLE_CEILINGS",
+    reason:
+      "Version 16's three routing roles, chore < implementation < contract, as the highest role a worker may hold (version 31, section 3). Review is a stage, not a ceiling: only a verified class takes it.",
+  },
+  AmuxWorkerRegistryEvent_desired_state_check: {
+    owner: "list",
+    module: "lib/amux/workerRegistryCore.ts",
+    list: "AMUX_WORKER_DESIRED_STATES",
+    reason:
+      "Version 31, section 3's four desired states, set only by a person. The guard trigger holds the change rule: a first event is requested (or active for the seven catalog workers), nothing follows retired, and no later event activates a worker until section 5's trial evidence exists.",
+  },
+  AmuxWorkerObservation_status_check: {
+    owner: "list",
+    module: "lib/amux/workerRegistryCore.ts",
+    list: "AMUX_WORKER_OBSERVATION_STATUSES",
+    reason:
+      "What the reconciler and invariant monitor report of a worker (version 31, sections 4 and 7). Only ok counts toward assignment; the table is closed to writes until R4.",
+  },
+  AmuxWorkerTrialEvidence_outcome_check: {
+    owner: "list",
+    module: "lib/amux/workerRegistryCore.ts",
+    list: "AMUX_WORKER_TRIAL_OUTCOMES",
+    reason:
+      "Version 31, section 5(1): only passed passes; failed and unknown do not, and an unknown result is never retried. The table is closed to writes until R5.",
+  },
+  AmuxWorkerLatchEvent_event_kind_check: {
+    owner: "list",
+    module: "lib/amux/workerRegistryCore.ts",
+    list: "AMUX_WORKER_LATCH_EVENT_KINDS",
+    reason:
+      "Version 31, section 7: the system opens an automatic stop latch and only a person releases it. A latch is open while a worker's newest event is an opening. The table is closed to writes until R4.",
+  },
+  AmuxWorkerLatchEvent_actor_kind_check: {
+    owner: "list",
+    module: "lib/amux/workerRegistryCore.ts",
+    list: "AMUX_WORKER_LATCH_ACTOR_KINDS",
+    reason:
+      "system for an opening and human for a release; a second CHECK pairs each kind with its actor and requires the person's id on a release only.",
   },
   AmuxDecisionMakerRequest_route_check: {
     owner: "list",

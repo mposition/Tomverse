@@ -276,6 +276,12 @@ export type Conversation = {
     selectedModels?: string[];
     disabledPanels?: string[];
     webSearchMode?: "off" | "auto" | "always";
+    /**
+     * Server-owned for account conversations; browser-owned for a Guest
+     * product-scoped conversation. An absent Guest value is a legacy/new
+     * draft that still needs the current server capability decision.
+     */
+    selectionMode?: "manual" | "auto";
     isLocked?: boolean;
     shareEnabled?: boolean;
     shareExpiresAt?: string | null;

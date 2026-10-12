@@ -80,7 +80,7 @@ test.describe("guest", () => {
   });
 
   test("no chip exists while the feature flag is off", async ({ page }) => {
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await type(page, RASTER_DRAFT);
     await expect(chip(page)).toHaveCount(0);
   });
@@ -89,7 +89,7 @@ test.describe("guest", () => {
     page,
   }) => {
     await enableImageGenerationFlag(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await type(page, RASTER_DRAFT);
 
     await expect(chip(page)).toBeVisible();
@@ -102,7 +102,7 @@ test.describe("guest", () => {
 
   test("the chip never blocks an ordinary chat submit", async ({ page }) => {
     await enableImageGenerationFlag(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await type(page, RASTER_DRAFT);
     await expect(chip(page)).toBeVisible();
 
@@ -117,7 +117,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, INFOGRAPHIC_DRAFT);
     // It was excluded while the destination was an open product question. What
@@ -131,7 +131,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     // The workspace starts from text, so it cannot edit or describe a picture
     // that is already here. Offering it would send the person somewhere that
@@ -144,7 +144,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, "what foods help with high blood pressure?");
     await expect(chip(page)).toHaveCount(0);
@@ -156,7 +156,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, "draw it in ASCII art please");
     await expect(chip(page)).toHaveCount(0);
@@ -168,7 +168,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, RASTER_DRAFT);
     await expect(chip(page)).toBeVisible();
@@ -191,7 +191,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, RASTER_DRAFT);
     await expect(chip(page)).toBeVisible();
@@ -209,7 +209,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, "draw a cat");
     await expect(chip(page)).toBeVisible();
@@ -238,7 +238,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, RASTER_DRAFT);
     await expect(chip(page)).toBeVisible();
@@ -260,7 +260,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, RASTER_DRAFT);
     await expect(chip(page)).toBeVisible();
@@ -285,7 +285,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, RASTER_DRAFT);
     await page.getByTestId("image-intent-handoff-dismiss").click();
@@ -302,7 +302,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, RASTER_DRAFT);
     await page.getByTestId("chat-send-button").click();
@@ -328,7 +328,7 @@ test.describe("signed in", () => {
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
     const submitted = await countGenerationRequests(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, RASTER_DRAFT);
     await page.getByTestId("image-intent-handoff-accept").click();
@@ -346,7 +346,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, RASTER_DRAFT);
     await page.getByTestId("image-intent-handoff-accept").click();
@@ -378,7 +378,7 @@ test.describe("signed in", () => {
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
     const submitted = await countGenerationRequests(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     // Turned on the way a person turns it on: in the workspace, beside the
     // price, before going back to ask for a picture.
@@ -406,7 +406,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, RASTER_DRAFT);
     await page.getByTestId("image-intent-handoff-accept").click();
@@ -431,7 +431,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await type(page, RASTER_DRAFT);
     await expect(chip(page)).toBeVisible();
@@ -449,7 +449,7 @@ test.describe("signed in", () => {
     await enableImageGenerationFlag(page);
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
 
     const textarea = composer(page);
     await textarea.click();

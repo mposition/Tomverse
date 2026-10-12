@@ -49,7 +49,7 @@ const openMobileConversation = async (page: Page) => {
   });
   await restoreActiveConversation(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("mobile-model-tab").first()).toBeVisible();
 };
@@ -163,7 +163,7 @@ test.describe("sidebar popups", () => {
     });
     await restoreActiveConversation(page);
     await page.setViewportSize({ width: 1366, height: 768 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("sidebar-help-button")).toBeVisible();
   };
 

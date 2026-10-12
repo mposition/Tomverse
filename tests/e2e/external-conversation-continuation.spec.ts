@@ -474,7 +474,7 @@ const openConversationList = async (page: Page): Promise<Locator> => {
     //
     // The disclosure only exists on the welcome screen, which is the state a
     // mobile shell with *no* conversation open renders. With one open --
-    // `/continuations/[id]` always, and `/chat` after a selection -- the
+    // `/continuations/[id]` always, and `/review` after a selection -- the
     // header's own button is the control a user has, so this waits for either
     // and prefers the disclosure when both could be there.
     const disclosure = page.getByTestId("recent-conversations-disclosure");
@@ -719,7 +719,7 @@ test.describe("continuing an imported conversation", () => {
         await prepareGuestPage(page, "ko");
         await mockAuthenticatedApi(page);
 
-        await page.goto("/chat");
+        await page.goto("/review");
         await expect(page.getByTestId("chat-welcome-greeting")).toBeVisible();
     });
 
@@ -1152,11 +1152,11 @@ test.describe("continuing an imported conversation", () => {
     }) => {
         // The regression this guards: a prelude that rendered a shell of
         // itself for every conversation would put an empty imported section on
-        // top of `/chat`.
+        // top of `/review`.
         await prepareGuestPage(page, "ko");
         await mockAuthenticatedApi(page);
 
-        await page.goto("/chat");
+        await page.goto("/review");
         await expect(page.getByTestId("chat-input")).toBeVisible();
         await expect(
             page.getByTestId("continuation-provenance")
@@ -1175,7 +1175,7 @@ test.describe("continuing an imported conversation", () => {
             extraRows: [{ id: "qa-ordinary", title: "An ordinary conversation" }],
         });
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const list = await openConversationList(page);
         await list
             .getByTestId("sidebar-conversation-item")
@@ -1258,7 +1258,7 @@ test.describe("continuing an imported conversation", () => {
             { id: "qa-ordinary", title: "An ordinary conversation" },
         ]);
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const list = await openConversationList(page);
         const row = list
             .getByTestId("sidebar-conversation-item")
@@ -1655,7 +1655,7 @@ test.describe("a continuation among ordinary conversations", () => {
                 { id: "qa-ordinary", title: "An ordinary conversation" },
             ]);
 
-            await page.goto("/chat");
+            await page.goto("/review");
             const list = await openConversationList(page);
             const row = rowIn(list, SOURCE_CONVERSATION_TITLE);
             const icon = row.getByTestId("sidebar-conversation-provider-icon");
@@ -1692,7 +1692,7 @@ test.describe("a continuation among ordinary conversations", () => {
             },
         ]);
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const list = await openConversationList(page);
         const row = rowIn(list, SOURCE_CONVERSATION_TITLE);
         await expect(row).toBeVisible();
@@ -1731,7 +1731,7 @@ test.describe("a continuation among ordinary conversations", () => {
         const continued = await shape();
 
         await mockOrdinaryTwoModelConversation(page);
-        await page.goto("/chat?conversation=qa-two-model");
+        await page.goto("/review?conversation=qa-two-model");
         await expect(page.getByTestId("chat-input")).toBeVisible();
         // `.first()`: with two models the same question is drawn in both
         // panels, which is exactly the shape being compared against.
@@ -1849,7 +1849,7 @@ test.describe("sharing a continuation", () => {
             }
         );
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const dialog = await openShareDialogFor(
             page,
             "A continued conversation"
@@ -1875,7 +1875,7 @@ test.describe("sharing a continuation", () => {
             { id: "qa-ordinary-share", title: "An ordinary conversation" },
         ]);
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const dialog = await openShareDialogFor(page, "An ordinary conversation");
 
         await expect(
@@ -1926,7 +1926,7 @@ test.describe("sharing a continuation", () => {
             )
         );
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const dialog = await openShareDialogFor(page, "A row with no surface");
         await dialog.getByTestId("share-confirmation-submit").click();
 
@@ -2068,7 +2068,7 @@ test.describe("searching an imported original @ui-risk", () => {
         const reads = await openWithLongSource(page);
         await mockSearch(page, { results: [importedHit(`ext${TARGET_INDEX}`)] });
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const results = await searchFor(page, "narwhal");
         const hit = results.getByTestId("message-search-result");
         await expect(hit).toHaveAttribute("data-result-kind", "imported");
@@ -2096,7 +2096,7 @@ test.describe("searching an imported original @ui-risk", () => {
         await openWithLongSource(page);
         await mockSearch(page, { results: [importedHit("gone")] });
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const results = await searchFor(page, "narwhal");
         await results.getByTestId("message-search-result").click();
 
@@ -2112,7 +2112,7 @@ test.describe("searching an imported original @ui-risk", () => {
         await openWithLongSource(page);
         await mockSearch(page, { results: [], sourceSearch: "timed_out" });
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const results = await searchFor(page, "narwhal");
         await expect(results.getByTestId("message-search-source-timeout")).toHaveText(
             "원문 검색 시간이 초과되어 Tomverse 메시지 결과만 표시합니다"
@@ -2140,7 +2140,7 @@ test.describe("searching an imported original @ui-risk", () => {
             );
         });
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const results = await searchFor(page, "narwhal");
         await expect(results.getByTestId("message-search-result")).toHaveCount(1);
         // Gone at the lapse, and asked again rather than left blank forever.
@@ -2165,7 +2165,7 @@ test.describe("searching an imported original @ui-risk", () => {
             );
         });
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const list = await openConversationList(page);
         await list.getByRole("textbox", { name: /검색|Search/ }).first().fill("narwhal");
         // The second answer carries no grant and is shown; the first never was.
@@ -2185,7 +2185,7 @@ test.describe("searching an imported original @ui-risk", () => {
             })),
         });
 
-        await page.goto("/chat");
+        await page.goto("/review");
         const results = await searchFor(page, "narwhal");
         await expect(results.getByTestId("message-search-result")).toHaveCount(4);
         await results.getByTestId("message-search-toggle-all").click();
