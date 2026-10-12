@@ -71,6 +71,32 @@ Standard 요율(입력 US$0.30, 캐시 입력 배수 0.1, 출력 US$2.50, 출력
 65,536, 예약 4,096)입니다. 레지스트리 가격 컬럼이 비어 있지 않으면 그 값이
 이 profile을 덮습니다.
 
+2026-10-12에 Tommy가 기본 모델을 `gpt-5-6-luna`에서 `gpt-6-luna`로, trio의
+Anthropic 자리를 `claude-haiku-4-5`에서 `claude-haiku-5-5`로 옮겼습니다. 두 모델은
+운영 레지스트리에 먼저 채택돼 있었고(Guest · Standard · 1크레딧), 이 변경이 코드
+카탈로그와 가격 profile에 넣었습니다. 운영은 이미 `claude-haiku-4-5`를 비활성화하고
+`claude-haiku-5-5`를 replacement로 지정해 둔 상태였으므로, 그 사이 trio의
+Anthropic 자리는 fallback 목록으로 채워졌습니다. 기본값 이전은 2026-08-01과 같은
+범위입니다 — `DEFAULT_MODEL_ID` · `GUEST_DEFAULT_MODEL_ID` · trio · Prisma 컬럼
+기본값이 함께 움직였고(`prisma/migrations/20261012090000_default_model_gpt_6_luna`),
+기존 사용자의 저장값과 기존 대화의 선택은 다시 쓰지 않으며 reconciliation도 돌리지
+않습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
+
+- 컴파일된 가격: `gpt-6-luna`는 OpenAI 공개 Standard 요율(272K 이하 입력
+  US$0.10 · 캐시 US$0.01 · 캐시 쓰기 US$0.125 · 출력 US$0.50, 초과 시 입력 x2 ·
+  출력 x1.5), `claude-haiku-5-5`는 Anthropic 공개 요율(prompt 100,000 토큰 이하
+  입력 US$0.10 · 캐시 US$0.01 · 5분 캐시 쓰기 US$0.125 · 출력 US$0.50, 초과 시 모두
+  x5)이며 둘 다 출력 상한 128,000, 예약 4,096입니다. Haiku 5.5의 장문 tier는
+  로그인 계정 입력 상한(128,000) 안에서 실제로 도달합니다. 그 결과 Haiku 5.5는
+  게스트 개방 조건을 넘고 장문 요청의 원가가 낮게 기록될 수 있는데, 게스트 3모델을
+  OpenAI · Anthropic · Gemini 각 1개로 유지하는 플랫폼 전략에 따라 Haiku 계열만
+  예외로 허용합니다(같은 날 운영자 결정, docs/policy/credit-and-cost-limits.md
+  "Haiku 계열을 게스트 Anthropic 자리로 여는 예외").
+- 두 모델은 웹 검색 등록표와 파일 생성 tool 등록표에 아직 없습니다. 검색은 운영과
+  같이 앱 관리형 경로로 추론되고, 파일 생성은 fail-closed(`model_unverified`)입니다.
+  네이티브 검색 등록과 파일 생성 확인은 각 모델로 실제 호출을 확인한 뒤 별도
+  변경으로 합니다.
+
 ### `npm run check:default-models`
 
 읽기 전용 감사입니다. 아무것도 쓰지 않습니다 — AppSetting을 건드리지 않고,

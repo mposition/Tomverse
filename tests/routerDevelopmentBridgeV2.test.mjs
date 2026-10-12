@@ -7,14 +7,14 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test, { before, after } from "node:test";
 import "./routerDevelopmentOfflineGuard.mjs";
-import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
+import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { benchmarkDigest, canonicalBenchmarkJson, parseBenchmarkJson, DEVELOPMENT_LIMITS } from "../lib/routerDevelopmentBenchmark.ts";
 import { parseDevelopmentCorpusV2, parseDevelopmentPartitionsV2 } from "../lib/routerDevelopmentCorpusV2.ts";
 import { buildMockManifestV2, validateMockManifestV2, mockApprovalV2, collectionExecutionContractsV2,
   validateExecutionObservationSetV2, exportMockResultsV2, replayMockDevelopmentV2, selectReplayModelsV2 } from "../lib/routerDevelopmentBridgeV2.ts";
 import { buildDevelopmentExecutionObservation } from "../lib/routerDevelopmentExecution.ts";
 import { collectDevelopment, collectorPaths, replayCollectionJournal } from "../lib/routerDevelopmentCollectorJournal.ts";
-import { runV2Bridge, V2_BRIDGE_SOURCE_PATHS } from "../scripts/router-development-v2-bridge.mjs";
+import { BRIDGE_CONTROL_MODEL_ID, runV2Bridge, V2_BRIDGE_SOURCE_PATHS } from "../scripts/router-development-v2-bridge.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = mkdtempSync(join(tmpdir(), "router-v2-bridge-test-"));
@@ -42,7 +42,7 @@ after(() => {
 });
 const replayInput = () => ({ ...context, manifest, answers, candidate: policy(),
   replaySource: report.implementationSource, contracts, observations, journalText, approval });
-const policy = () => ({ schemaVersion: "router-development-replay-policy-v1", purpose: "development-only", policyId: "v2-test-control", preferences: { general: [DEFAULT_MODEL_ID] }, fallback: "original-router" });
+const policy = () => ({ schemaVersion: "router-development-replay-policy-v1", purpose: "development-only", policyId: "v2-test-control", preferences: { general: [BRIDGE_CONTROL_MODEL_ID] }, fallback: "original-router" });
 
 test("48-case bridge retains all catalogue rows, 96 calls and 2/94/0 durable resume", () => {
   assert.equal(report.providerCalls, 0);
@@ -54,14 +54,14 @@ test("48-case bridge retains all catalogue rows, 96 calls and 2/94/0 durable res
   assert.equal(report.mockCollection.repeatedCompletedCalls, 0);
   assert.equal(report.mockCollection.finalTerminalRecords, 96);
   assert.equal(report.score.summary.catalogueRows, 48 * AVAILABLE_MODELS.length);
-  assert.equal(report.score.summary.catalogueRows, 2064);
+  assert.equal(report.score.summary.catalogueRows, 2160);
   assert.equal(report.score.summary.submitted, 96);
   assert.deepEqual({ passed: report.score.summary.passed, incorrect: report.score.summary.incorrect,
     blank: report.score.summary.blank, invalidJson: report.score.summary.invalidJson, failed: report.score.summary.failed },
   { passed: 92, incorrect: 1, blank: 1, invalidJson: 1, failed: 1 });
   assert.equal(report.score.summary.correctnessRate, null);
-  assert.equal(report.selectionCoverage.overall.planned + report.selectionCoverage.overall.refused, 2064);
-  assert.equal(report.selectionCoverage.overall.planned, 768);
+  assert.equal(report.selectionCoverage.overall.planned + report.selectionCoverage.overall.refused, 2160);
+  assert.equal(report.selectionCoverage.overall.planned, 864);
   assert.equal(report.selectionCoverage.overall.refused, 1296);
   assert.equal(report.selectionCoverage.overall.selected + report.selectionCoverage.overall.unselectedEligible, report.selectionCoverage.overall.planned);
 });
@@ -74,7 +74,7 @@ test("eight cells, twelve families and whole-family 24/24 partitions retain sele
   assert.equal(report.selectionCoverage.byFamily.length, 12);
   assert.ok(report.selectionCoverage.byFamily.every((family) => family.selected === 8));
   assert.equal(report.selectionCoverage.byModel.length, AVAILABLE_MODELS.length);
-  assert.equal(report.selectionCoverage.byModel.reduce((sum, model) => sum + model.catalogueRows, 0), 2064);
+  assert.equal(report.selectionCoverage.byModel.reduce((sum, model) => sum + model.catalogueRows, 0), 2160);
   assert.equal(report.selectionCoverage.byModel.reduce((sum, model) => sum + model.selected, 0), 96);
   assert.equal(report.selectionCoverage.byModel.filter((model) => model.selected === 48).length, 2);
   assert.ok(report.selectionCoverage.byModel.every((model) => model.selectedNotObserved === 0));

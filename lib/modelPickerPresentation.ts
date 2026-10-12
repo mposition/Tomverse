@@ -14,10 +14,11 @@ export type ModelPickerFeature = "image" | "reasoning" | "search" | "code";
 // visitor sees should not be two-thirds unreachable. Explicit reasoning is
 // still reachable below Pro through deepseek-v4-pro and gpt-5-6-terra.
 // The OpenAI slot follows DEFAULT_MODEL_ID, which moved to gpt-5-6-luna on
-// 2026-08-01. gpt-5-4-mini stays enabled and selectable from the full list;
-// it is simply no longer the model this filter puts in front of everyone.
+// 2026-08-01 and to gpt-6-luna on 2026-10-12. The models it displaced stay
+// enabled and selectable from the full list; they are simply no longer the
+// model this filter puts in front of everyone.
 export const RECOMMENDED_MODEL_IDS = [
-  "gpt-5-6-luna",
+  "gpt-6-luna",
   "claude-sonnet-5",
   "gemini-3-6-flash",
 ] as const;
@@ -25,6 +26,7 @@ export const RECOMMENDED_MODEL_IDS = [
 const koreanDescriptions: Record<string, string> = {
   "gpt-5-6-sol": "최고 수준의 추론, 코딩과 복잡한 전문 작업",
   "gpt-5-6-terra": "성능과 비용의 균형을 맞춘 분석과 코딩",
+  "gpt-6-luna": "효율적인 대량 질문과 문서 작업",
   "gpt-5-6-luna": "효율적인 대량 질문과 문서 작업",
   "gpt-5-5": "복잡한 분석과 중요한 의사결정",
   "gpt-5-5-thinking": "단계적인 사고가 필요한 어려운 문제",
@@ -32,6 +34,7 @@ const koreanDescriptions: Record<string, string> = {
   "claude-fable-5": "완성도 높은 글쓰기, 기획안과 긴 문서 분석",
   "claude-opus-4-8": "까다롭고 중요한 작업의 섬세한 추론",
   "claude-sonnet-5": "글쓰기, 구조화된 분석과 상세 문서 작업",
+  "claude-haiku-5-5": "빠른 요약, 초안 작성과 가벼운 분석",
   "claude-haiku-4-5": "빠른 요약, 초안 작성과 가벼운 분석",
   "gemini-3-7-flash": "복잡한 코딩과 연속된 단계를 거치는 작업",
   "gemini-3-6-flash": "빠른 에이전트 작업, 코딩과 멀티모달 분석",

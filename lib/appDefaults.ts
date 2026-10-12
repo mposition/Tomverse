@@ -9,11 +9,13 @@ import {
 
 // Kept in step with DEFAULT_MODEL_ID so a guest's leading model is the same
 // model a signed-in account gets by default. It was gemini-2-5-flash while
-// the app default was gpt-5-4-mini; both moved to gpt-5-6-luna on 2026-08-01.
+// the app default was gpt-5-4-mini; both moved to gpt-5-6-luna on 2026-08-01,
+// and to gpt-6-luna on 2026-10-12.
 // Operational deployments may still hold an older guestDefaultModelId in
 // AppSetting -- prisma/migrations/20260801200000_default_model_gpt_5_6_luna
-// realigns that exact key rather than relying on this constant alone.
-const GUEST_DEFAULT_MODEL_ID = "gpt-5-6-luna";
+// and 20261012090000_default_model_gpt_6_luna realign that exact key rather
+// than relying on this constant alone.
+const GUEST_DEFAULT_MODEL_ID = "gpt-6-luna";
 
 // The three most recognizable frontier brands, shown for every guest so
 // their first chat immediately demonstrates Tomverse's core comparison
@@ -28,9 +30,16 @@ const GUEST_DEFAULT_MODEL_ID = "gpt-5-6-luna";
 //
 // The Gemini slot moved from gemini-2-5-flash to gemini-flash-lite-latest on
 // 2026-09-28. The old id stays in the catalogue; this only changes which
-// Google model a new guest comparison opens with. The lead stays
-// gpt-5-6-luna unless an administrator reorders the trio.
-export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-flash-lite-latest"];
+// Google model a new guest comparison opens with.
+//
+// On 2026-10-12 the OpenAI slot moved to gpt-6-luna with the default switch,
+// and the Anthropic slot from claude-haiku-4-5 to claude-haiku-5-5 --
+// production had already disabled Haiku 4.5 with 5.5 as its replacement, so
+// that slot was being backfilled from the fallback list. All three are still
+// Guest-tier Standard models at 1 credit: a comparison still costs a guest
+// exactly 3 credits. The lead is gpt-6-luna unless an administrator reorders
+// the trio.
+export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-6-luna", "claude-haiku-5-5", "gemini-flash-lite-latest"];
 
 // Backstops used only if one of the brand trio above is itself disabled or
 // ineligible, so the guest default still comes out to 3 distinct models
