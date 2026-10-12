@@ -43,6 +43,12 @@ export type GuestCatalogueAccess = {
   isEnabledModelId: (modelId: string) => boolean;
   /** Additionally guest-plan and Standard-tier, per lib/appDefaults. */
   isGuestEligible: (modelId: string) => boolean;
+  /**
+   * A retired model's successor, per the same catalogue
+   * (lib/appDefaults `createReplacementResolver`). Optional only so a caller
+   * without a catalogue lookup still resolves; the chat client always binds it.
+   */
+  resolveReplacement?: (modelId: string) => string | undefined;
 };
 
 export const readGuestInitialModelEnvironment =
@@ -187,6 +193,7 @@ export const resolveGuestInitialSelectedModels = ({
     resolveGuestDefaultSelectedModels({
       isEligible: catalogue.isGuestEligible,
       leadModelId,
+      resolveReplacement: catalogue.resolveReplacement,
     })
   );
 

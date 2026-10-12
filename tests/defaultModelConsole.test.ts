@@ -72,6 +72,39 @@ test("a guest-trio member that is not the lead is a warning, not a block", () =>
   assert.equal(typeof substitute, "string");
 });
 
+test("an adoption that retires a trio member names its guest-eligible successor as the substitute", () => {
+  const member = GUEST_BRAND_TRIO_MODEL_IDS.find((id) => id !== APP_DEFAULTS.defaultModelId)!;
+  const isEligible = (id: string) =>
+    id === "successor-guest" ||
+    eligible(id) ||
+    (GUEST_FALLBACK_MODEL_IDS as readonly string[]).includes(id);
+  // The save sets the member's replacement to the adopted model.
+  const toSuccessor = (successor: string) => (id: string) =>
+    id === member ? successor : undefined;
+
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, toSuccessor("successor-guest")),
+    "successor-guest"
+  );
+  // A successor guests cannot use (a Pro model, or one saved disabled) leaves
+  // the slot to the fallback list, exactly as the guest screen does.
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, toSuccessor("successor-pro")),
+    GUEST_FALLBACK_MODEL_IDS.find((id) => isEligible(id))
+  );
+});
+
+test("the effective lead follows a retired lead's successor", () => {
+  const lead = APP_DEFAULTS.guestDefaultModelId;
+  const isEligible = (id: string) => id !== lead && (id === "lead-successor" || eligible(id));
+  assert.equal(
+    effectiveGuestLeadModelId(lead, isEligible, (id) => (id === lead ? "lead-successor" : undefined)),
+    "lead-successor"
+  );
+  // Without the resolver the next trio member leads instead.
+  assert.notEqual(effectiveGuestLeadModelId(lead, isEligible), "lead-successor");
+});
+
 test("a fallback transition check fails a registry-only model and the copy does not apply it", () => {
   const checks = assessFallbackTransition({
     candidate: {

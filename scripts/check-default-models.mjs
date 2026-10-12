@@ -19,6 +19,7 @@ import { join } from "node:path";
 import {
   APP_DEFAULTS,
   createGuestEligibilityCheck,
+  createReplacementResolver,
   GUEST_BRAND_TRIO_MODEL_IDS,
   resolveGuestDefaultSelectedModels,
 } from "../lib/appDefaults.ts";
@@ -82,6 +83,9 @@ if (databaseUrl) {
 const byId = new Map(models.map((model) => [model.id, model]));
 const lookup = (modelId) => byId.get(modelId);
 const isGuestEligible = createGuestEligibilityCheck(lookup);
+// The chat client binds the same resolver to the same catalogue, so a retired
+// trio member's successor is audited in its slot exactly as guests see it.
+const resolveReplacement = createReplacementResolver(lookup);
 const isEnabled = (modelId) => {
   const model = lookup(modelId);
   return model ? isPubliclySelectableModel(model) : false;
@@ -108,12 +112,13 @@ const normalizedGuestDefaultModelId = storedIsUsable
 const effectiveGuestSelectedModelIds = resolveGuestDefaultSelectedModels({
   isEligible: isGuestEligible,
   leadModelId: normalizedGuestDefaultModelId,
+  resolveReplacement,
 });
 
 // Hydration: the same function the server calls with no browser, and the same
 // one the client's first render calls with an empty browser. They must agree,
 // because the composer's credit estimate is summed from whichever it gets.
-const catalogue = { isEnabledModelId: isEnabled, isGuestEligible };
+const catalogue = { isEnabledModelId: isEnabled, isGuestEligible, resolveReplacement };
 const ssrGuestSelectedModelIds = resolveGuestInitialSelectedModels({
   catalogue,
   leadModelId: normalizedGuestDefaultModelId,

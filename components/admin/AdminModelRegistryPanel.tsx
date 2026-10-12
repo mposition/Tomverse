@@ -33,7 +33,7 @@ import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankT
 import { partitionAdoptionGuidance, priceHintsForView } from "@/lib/adoptionDialogGuidance";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
-import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck } from "@/lib/appDefaults";
+import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck, createReplacementResolver } from "@/lib/appDefaults";
 import {
   APPLICATION_FALLBACK_PROTECTED,
   GUEST_LEAD_PROTECTED,
@@ -1573,11 +1573,35 @@ export function AdminModelRegistryPanel() {
                     {(() => {
                       const selected = models.find((model) => model.id === selectedReplacesModelId);
                       if (!selected) return null;
-                      const eligible = createGuestEligibilityCheck((id) => models.find((model) => model.id === id));
+                      // The save retires `selected` with the model being
+                      // adopted as its replacement, so the guest screen will
+                      // try that model in the slot first. It is not in
+                      // `models` yet: judge it from the form, on top of the
+                      // predecessor's row for every field the form lacks.
+                      const successorId = form.id.trim();
+                      const successor: AiModel | undefined = successorId
+                        ? {
+                            ...selected,
+                            id: successorId,
+                            enabled: form.status === "enabled",
+                            status: form.status,
+                            minimumPlan: form.minimumPlan,
+                            usageClass: form.usageClass,
+                            creditWeight: form.creditWeight,
+                            publiclyListed: form.publiclyListed,
+                            catalogDeleted: false,
+                            replacementModelId: undefined,
+                          }
+                        : undefined;
+                      const lookup = (id: string) =>
+                        successor && id === successor.id ? successor : models.find((model) => model.id === id);
+                      const eligible = createGuestEligibilityCheck(lookup);
+                      const catalogueReplacement = createReplacementResolver(lookup);
                       const substituteId = substituteIfTrioMemberRemoved(
                         selected.id,
                         guestLead?.effective ?? null,
-                        eligible
+                        eligible,
+                        (id) => (successor && id === selected.id ? successor.id : catalogueReplacement(id))
                       );
                       if (!substituteId) return null;
                       const substitute = models.find((model) => model.id === substituteId);

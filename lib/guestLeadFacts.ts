@@ -5,6 +5,7 @@ import {
   GUEST_BRAND_TRIO_MODEL_IDS,
   GUEST_FALLBACK_MODEL_IDS,
   createGuestEligibilityCheck,
+  createReplacementResolver,
 } from "@/lib/appDefaults";
 import { effectiveGuestLeadModelId } from "@/lib/defaultModelConsole";
 import { registryRowToModel } from "@/lib/modelRegistry";
@@ -14,6 +15,8 @@ type LeadDb = PrismaClient | Prisma.TransactionClient;
 type LeadRow = Parameters<typeof registryRowToModel>[0];
 
 const LEAD_LOOKUP_IDS = [...GUEST_BRAND_TRIO_MODEL_IDS, ...GUEST_FALLBACK_MODEL_IDS];
+/** The same bound as lib/models.ts `resolveSelectableModelId`. */
+const REPLACEMENT_CHAIN_MAX_HOPS = 8;
 
 /**
  * Rows the guest screen can actually resolve.
@@ -60,9 +63,28 @@ export async function readGuestLeadFacts(db: LeadDb = prisma): Promise<{
     }),
   ]);
   const byId = indexGuestLeadRows(rows);
+  // A retired trio member's successor takes its slot on the guest screen, so
+  // the rows of each replacement chain are read too. Bounded like
+  // resolveSelectableModelId's own walk; usually one extra query or none.
+  for (let hop = 0; hop < REPLACEMENT_CHAIN_MAX_HOPS; hop += 1) {
+    const missing = [
+      ...new Set(
+        [...byId.values()]
+          .map((model) => model.replacementModelId)
+          .filter((id): id is string => typeof id === "string" && !byId.has(id))
+      ),
+    ];
+    if (missing.length === 0) break;
+    const next = indexGuestLeadRows(
+      await db.modelRegistryEntry.findMany({ where: { id: { in: missing } } })
+    );
+    if (next.size === 0) break;
+    for (const [id, model] of next) byId.set(id, model);
+  }
+  const lookup = (id: string) => byId.get(id);
   const isEligible = (modelId: string) => {
     try {
-      return createGuestEligibilityCheck((id) => byId.get(id))(modelId);
+      return createGuestEligibilityCheck(lookup)(modelId);
     } catch (error) {
       console.error("Ignoring invalid model registry row:", {
         modelId,
@@ -74,6 +96,10 @@ export async function readGuestLeadFacts(db: LeadDb = prisma): Promise<{
   const stored = setting?.value ?? null;
   return {
     stored,
-    effective: effectiveGuestLeadModelId(stored, isEligible),
+    effective: effectiveGuestLeadModelId(
+      stored,
+      isEligible,
+      createReplacementResolver(lookup)
+    ),
   };
 }

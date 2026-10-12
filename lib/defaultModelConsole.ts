@@ -42,14 +42,21 @@ export const replacementOptionDisabled = (role: ReplacementRole | null) =>
  * `storedLead` is the raw `AppSetting` value, including a missing row
  * (`null`). A missing or ineligible value is not "no lead": resolution falls
  * through to the compiled trio, which is what the guest screen does.
+ *
+ * `resolveReplacement` is the one the guest screen binds to the same
+ * catalogue (lib/appDefaults `createReplacementResolver`): a retired member's
+ * successor takes its slot there, so it must here as well, or the console
+ * names a lead guests never see.
  */
 export const effectiveGuestLeadModelId = (
   storedLead: string | null | undefined,
-  isEligible: (modelId: string) => boolean
+  isEligible: (modelId: string) => boolean,
+  resolveReplacement?: (modelId: string) => string | undefined
 ): string | null =>
   resolveGuestDefaultSelectedModels({
     isEligible,
     leadModelId: storedLead || APP_DEFAULTS.guestDefaultModelId,
+    resolveReplacement,
   })[0] ?? null;
 
 export type GuestDefaultDescription = {
@@ -64,13 +71,16 @@ export type GuestDefaultDescription = {
 export const describeGuestDefault = ({
   storedLead,
   isEligible,
+  resolveReplacement,
 }: {
   storedLead: string | null;
   isEligible: (modelId: string) => boolean;
+  resolveReplacement?: (modelId: string) => string | undefined;
 }): GuestDefaultDescription => {
   const visibleIds = resolveGuestDefaultSelectedModels({
     isEligible,
     leadModelId: storedLead || APP_DEFAULTS.guestDefaultModelId,
+    resolveReplacement,
   });
   const effectiveLeadId = visibleIds[0] ?? null;
   return {
@@ -88,20 +98,28 @@ export const describeGuestDefault = ({
  * Who appears in the guest trio if `modelId` is no longer eligible.
  * Null when the id is not a trio member the operator can still turn off
  * (the fallback and the current lead are refused, not warned).
+ *
+ * An adoption that replaces `modelId` passes a `resolveReplacement` that
+ * answers with the model being adopted, and an `isEligible` that knows it:
+ * when the successor is guest-eligible it is the substitute, otherwise the
+ * fallback list is -- the same order the guest screen resolves.
  */
 export const substituteIfTrioMemberRemoved = (
   modelId: string,
   effectiveGuestLeadId: string | null,
-  isEligible: (modelId: string) => boolean
+  isEligible: (modelId: string) => boolean,
+  resolveReplacement?: (modelId: string) => string | undefined
 ): string | null => {
   if (replacementRole(modelId, effectiveGuestLeadId) !== "guest_trio") return null;
   const after = resolveGuestDefaultSelectedModels({
     isEligible: (id) => (id === modelId ? false : isEligible(id)),
     leadModelId: effectiveGuestLeadId || APP_DEFAULTS.guestDefaultModelId,
+    resolveReplacement,
   });
   const before = resolveGuestDefaultSelectedModels({
     isEligible,
     leadModelId: effectiveGuestLeadId || APP_DEFAULTS.guestDefaultModelId,
+    resolveReplacement,
   });
   return after.find((id) => !before.includes(id)) ?? null;
 };
