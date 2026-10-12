@@ -1,3 +1,5 @@
+import { CHAT_WORKSPACE_PATH, PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
+
 const exactMarketingPaths = new Set([
   "/",
   "/about",
@@ -48,7 +50,7 @@ export const marketingProductEntryHref = (
   lang: string,
   isAuthenticated = false,
 ) => {
-  const path = product === "chat" ? "/chat/workspace" : "/review";
+  const path = product === "chat" ? CHAT_WORKSPACE_PATH : PRODUCT_SURFACE_PATH.review;
   const guestEntry = product === "review" && !isAuthenticated ? "&entry=guest-preview" : "";
   return `${path}?lang=${encodeURIComponent(lang)}${guestEntry}`;
 };

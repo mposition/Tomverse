@@ -12,6 +12,7 @@ import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 import { LocaleSupportNotice } from "./LocaleSupportNotice";
 import { marketingProductEntryHref, REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
+import { useMarketingChatEntry } from "./MarketingChatAvailability";
 
 // Only these paths actually have a `/[locale]` route (app/[locale]), so only
 // these may be prefixed. `/models`, `/pricing`, `/faq`, `/terms` and the rest
@@ -253,13 +254,10 @@ function LegacyMarketingHeader({
   const { status: sessionStatus } = useSession();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isHeroCtaVisible, setIsHeroCtaVisible] = useState(false);
-  const chatHref = marketingProductEntryHref("review", lang, sessionStatus === "authenticated");
-  // "Try it" is wrong for someone who already has an account open in another
-  // tab -- on /pricing it read as an invitation to sign up again. Both labels
-  // lead to the same place, so the loading state keeps the signed-out wording
-  // rather than flashing a neutral placeholder on every prerendered marketing
-  // page; only the wording changes once the session resolves, never the
-  // destination.
+  // The generic marketing entry has no guest-preview marker. Review handles
+  // the visitor's session itself, so resolving a session changes the label
+  // without replacing the link under a visitor about to activate it.
+  const chatHref = marketingProductEntryHref("review", lang, true);
   const appCtaLabel =
     sessionStatus === "authenticated" ? labels.appSignedIn : labels.app;
 
@@ -624,19 +622,23 @@ function LaunchMarketingHeader({
   const copy = launchChrome[lang];
   const menuCopy = chrome[lang];
   const { status } = useSession();
+  const entry = useMarketingChatEntry();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuId = useId();
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLElement>(null);
-  const chatHref = suppliedChatHref ?? marketingProductEntryHref("chat", lang, status === "authenticated");
+  const chatHref = entry.chatAvailable ? suppliedChatHref ?? entry.chatHref : entry.chatHref;
   const items = [
     { label: "Chat", href: chatHref, key: "chat" },
     { label: "Review", href: reviewInfoHref ?? localizedPath(lang, REVIEW_PRODUCT_PATH), key: "review" },
     { label: copy.pricing, href: "/pricing", key: "pricing" },
     { label: copy.models, href: "/models", key: "models" },
   ];
-  const loginHref = `/auth/signin?callbackUrl=${encodeURIComponent(chatHref)}`;
-  const appLabel = status === "authenticated" ? copy.back : copy.start;
+  const primaryHref = entry.chatAvailable ? chatHref : entry.reviewHref;
+  const loginHref = `/auth/signin?callbackUrl=${encodeURIComponent(primaryHref)}`;
+  const appLabel = entry.primaryProduct === "chat"
+    ? status === "authenticated" ? copy.back : copy.start
+    : status === "authenticated" ? menuCopy.appSignedIn : menuCopy.app;
 
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -677,8 +679,8 @@ function LaunchMarketingHeader({
             <div className="min-w-0 [&>label]:h-[44px] [&>label]:max-w-[126px] [&>label]:border-zinc-700 [&>label]:bg-zinc-900 [&>label]:text-zinc-100 [&_select]:text-zinc-100 [&_select]:[color-scheme:dark]">
               <MarketingLanguageSwitcher />
             </div>
-            {status !== "authenticated" && <Link href={loginHref} className={`hidden px-2 py-3 text-sm font-semibold text-zinc-300 hover:text-white xl:inline-flex ${launchFocus}`}>{copy.login}</Link>}
-            <Link href={chatHref} data-testid="marketing-header-app-cta" data-session-state={status} onClick={() => trackStart("marketing_header")} className={`hidden min-h-[44px] items-center gap-2 rounded-full bg-blue-600 px-5 py-2 text-center text-sm font-bold hover:bg-blue-500 lg:inline-flex ${launchFocus}`}>
+            {status !== "authenticated" && <Link href={loginHref} className={`hidden px-2 py-3 text-sm font-semibold text-zinc-300 hover:text-white lg:inline-flex ${launchFocus}`}>{copy.login}</Link>}
+            <Link href={primaryHref} data-testid="marketing-header-app-cta" data-session-state={status} onClick={() => trackStart("marketing_header")} className={`hidden min-h-[44px] items-center gap-2 rounded-full bg-blue-600 px-5 py-2 text-center text-sm font-bold hover:bg-blue-500 lg:inline-flex ${launchFocus}`}>
               {appLabel}<ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
             </Link>
             <button ref={menuButtonRef} type="button" aria-label={isMenuOpen ? menuCopy.close : menuCopy.menu} aria-controls={menuId} aria-expanded={isMenuOpen} onClick={() => setIsMenuOpen((open) => !open)} data-testid="marketing-menu-button" className={`inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 lg:hidden ${launchFocus}`}>
@@ -689,7 +691,7 @@ function LaunchMarketingHeader({
         {isMenuOpen && <nav id={menuId} ref={menuRef} aria-label={copy.navigation} className={`mx-auto grid ${maxWidth} gap-1 border-t border-white/10 px-[16px] py-4 lg:hidden`}>
           {items.map((item) => <Link key={item.key} href={item.href} data-testid={`mobile-${item.key}-link`} onClick={() => setIsMenuOpen(false)} className={`rounded-lg px-3 py-3 font-semibold hover:bg-zinc-900 ${launchFocus}`}>{item.label}</Link>)}
           {status !== "authenticated" && <Link href={loginHref} onClick={() => setIsMenuOpen(false)} className={`rounded-lg px-3 py-3 font-semibold hover:bg-zinc-900 ${launchFocus}`}>{copy.login}</Link>}
-          <Link href={chatHref} data-testid="marketing-mobile-app-cta" data-session-state={status} onClick={() => { setIsMenuOpen(false); trackStart("marketing_mobile_menu"); }} className={`mt-3 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-sm font-bold hover:bg-blue-500 ${launchFocus}`}>
+          <Link href={primaryHref} data-testid="marketing-mobile-app-cta" data-session-state={status} onClick={() => { setIsMenuOpen(false); trackStart("marketing_mobile_menu"); }} className={`mt-3 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-sm font-bold hover:bg-blue-500 ${launchFocus}`}>
             {appLabel}<ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
           </Link>
         </nav>}
@@ -702,10 +704,11 @@ function LaunchMarketingHeader({
 
 function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps) {
   const { lang } = useLanguage();
+  const entry = useMarketingChatEntry();
   const copy = launchChrome[lang];
   const columns = [
     { title: copy.products, items: [
-      { label: "Tomverse Chat", href: marketingProductEntryHref("chat", lang) },
+      { label: "Tomverse Chat", href: entry.chatHref },
       { label: "Tomverse Review", href: localizedPath(lang, REVIEW_PRODUCT_PATH) },
       { label: copy.models, href: "/models" }, { label: copy.pricing, href: "/pricing" },
     ] },

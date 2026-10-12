@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import {
   mockChatStream,
   mockPublicBillingConfig,
@@ -13,31 +14,35 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
+  await prepareGuestPage(page, "en");
   await page.goto("/");
   await expect(page.locator("main")).toBeVisible();
   await expect(page.locator("main")).toHaveCount(1);
   await expect(page.getByTestId("landing-hero-title")).toContainText("AI");
-  if ((page.viewportSize()?.width ?? 1024) >= 768) {
+  await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "unauthenticated");
+  const guestChatAvailable = await page.getByTestId("launch-homepage").getAttribute("data-guest-chat-trial-available") === "true";
+  const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/review?lang=en&entry=guest-preview";
+  if ((page.viewportSize()?.width ?? 1024) >= 1024) {
     await expect(
       page.getByTestId("marketing-header-app-cta")
     ).toHaveAttribute(
       "href",
-      "/chat/workspace?lang=en"
+      startHref
     );
   }
-  // The launch homepage offers the two products explicitly.
+  // A start action opens only an available product.
   await expect(page.getByTestId("landing-primary-cta")).toHaveText(
-    /Chat/
+    guestChatAvailable ? /Chat/ : /Review/
   );
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
-    "/chat/workspace?lang=en"
+    startHref
   );
   // The hero states the no-sign-up promise once. It used to carry it twice,
   // in the signup note and again in a guest note, in near-identical words;
   // the second element is gone.
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(
-    /Chat.*Review/
+    /Review/
   );
   await expect(page.getByTestId("landing-guest-note")).toHaveCount(0);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
@@ -59,17 +64,23 @@ test("signed-in homepage keeps the page visible and offers one continue action",
       }),
     })
   );
+  await page.route("**/api/products/chat/capabilities", route => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ autoSelection: { offered: false } }),
+  }));
 
   await page.goto("/");
   await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "authenticated");
   await expect(page.getByTestId("landing-primary-cta")).toHaveText(
-    /Chat/
+    /Review/
   );
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
-    "/chat/workspace?lang=en"
+    "/review?lang=en"
   );
-  await expect(page.getByTestId("landing-hero-signup-note")).toContainText(/Chat.*Review/);
+  await expect(page.getByTestId("landing-hero-signup-note")).toContainText(/Review/);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 });
 

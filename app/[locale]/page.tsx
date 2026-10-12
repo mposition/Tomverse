@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import LaunchHomepage from "@/components/marketing/LaunchHomepage";
 import { homepageProductLinks } from "@/lib/homepageProductLinks";
+import { MarketingChatAvailabilityProvider } from "@/components/marketing/MarketingChatAvailability";
+import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { LanguageProvider, type Language } from "@/components/LanguageProvider";
 import {
   SEO_LOCALES,
   createPageMetadata,
-  homeOgCopy,
-  homeSeoCopy,
+  getHomeOgCopy,
+  getHomeSeoCopy,
   localizedPath,
 } from "@/lib/seo";
 
@@ -51,8 +53,8 @@ export async function generateMetadata({
   const normalizedLocale = normalizeLocale(locale);
   if (!normalizedLocale) return {};
 
-  const copy = homeSeoCopy[normalizedLocale];
-  const ogCopy = homeOgCopy[normalizedLocale];
+  const copy = getHomeSeoCopy(normalizedLocale, PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE);
+  const ogCopy = getHomeOgCopy(normalizedLocale, PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE);
   return createPageMetadata({
     title: copy.title,
     description: copy.description,
@@ -80,7 +82,9 @@ export default async function LocalizedLandingPage({ params }: LocalePageProps) 
   return (
     <div lang={normalizedLocale}>
       <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
-        <LaunchHomepage {...homepageProductLinks(normalizedLocale)} />
+        <MarketingChatAvailabilityProvider guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
+          <LaunchHomepage {...homepageProductLinks(normalizedLocale)} />
+        </MarketingChatAvailabilityProvider>
       </LanguageProvider>
     </div>
   );

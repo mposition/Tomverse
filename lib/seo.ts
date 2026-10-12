@@ -271,7 +271,25 @@ export const homeSeoCopy: Record<Language, { title: string; description: string 
 
 export const homeOgCopy: Record<Language, { title: string; description: string }> = Object.fromEntries(
   SEO_LOCALES.map((locale) => [locale, {
-    title: "Tomverse | Chat & Review",
+    title: homeSeoCopy[locale].title,
     description: homeSeoCopy[locale].description,
   }]),
 ) as Record<Language, { title: string; description: string }>;
+
+const homeReviewEntryDescription: Record<Language, string> = {
+  en: "Use multiple AI models in Tomverse. Explore Smart Adaptive's cost and quality-aware selection in Chat and compare different perspectives in Review. Try Review without an account; Chat access depends on availability.",
+  ko: "여러 AI를 Tomverse 한곳에서 사용하세요. Chat의 Smart Adaptive는 모델 비용과 품질을 고려하고, Review는 서로 다른 답변의 관점을 비교합니다. Review는 비회원으로 체험할 수 있으며 Chat은 제공되는 환경에서 이용할 수 있습니다.",
+  zh: "在 Tomverse 一个地方使用多个 AI。了解 Chat 中兼顾费用与质量的 Smart Adaptive，在 Review 中比较不同视角。Review 可访客体验，Chat 需视提供情况使用。",
+  fr: "Utilisez plusieurs IA dans Tomverse. Découvrez Smart Adaptive dans Chat et comparez les points de vue dans Review. Essayez Review sans compte ; l’accès à Chat dépend de sa disponibilité.",
+  de: "Nutzen Sie mehrere KIs in Tomverse. Entdecken Sie Smart Adaptive in Chat und vergleichen Sie Perspektiven in Review. Testen Sie Review ohne Konto; Chat-Zugang hängt von der Verfügbarkeit ab.",
+  es: "Usa varias IA en Tomverse. Explora Smart Adaptive en Chat y compara perspectivas en Review. Prueba Review sin cuenta; el acceso a Chat depende de su disponibilidad.",
+  pt: "Use várias IAs no Tomverse. Conheça o Smart Adaptive no Chat e compare perspectivas no Review. Experimente o Review sem conta; o acesso ao Chat depende da disponibilidade.",
+};
+
+/** Static metadata uses only the public guest offer, never account capability. */
+export const getHomeSeoCopy = (locale: Language, guestChatTrialAvailable: boolean) => ({
+  title: homeSeoCopy[locale].title,
+  description: guestChatTrialAvailable ? homeSeoCopy[locale].description : homeReviewEntryDescription[locale],
+});
+
+export const getHomeOgCopy = getHomeSeoCopy;
