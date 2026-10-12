@@ -9,6 +9,7 @@ import { AmuxExecutionSupportingRecords } from "@/components/admin/AmuxExecution
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
+import { AmuxDecisionMakerReportPanel } from "@/components/admin/AmuxDecisionMakerReportPanel";
 import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
 import { AmuxWorkerRegistryPanel } from "@/components/admin/AmuxWorkerRegistryPanel";
@@ -23,7 +24,8 @@ import {
 } from "@/lib/adminNavigationCounts";
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
 import { readAmuxCliUsageSummaryForAdmin } from "@/lib/amux/adminCliUsageSummary";
-import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { readDecisionMakerDeclarationAccuracyReport } from "@/lib/amux/decisionMakerJudgmentStore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import {
   AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
@@ -145,14 +147,31 @@ export default async function AdminAmuxExecutionPage({
     // Every admin role reads the switches, as the switch route's GET answers
     // them: reading Decision Maker records stays open under the kill switch
     // (docs/policy/amux-decision-maker.md §6). A read that fails is shown as
-    // such, never as a default state.
-    const state = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead, (tx) =>
-      readDecisionMakerSwitchesOrThrow(tx),
-    ).catch(() => null);
+    // such, never as a default state. §4's report is a second, independent
+    // read: either may fail without taking the other with it, and a failed
+    // report shows no figure rather than a zero.
+    const [state, report] = await Promise.all([
+      withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead, (tx) =>
+        readDecisionMakerSwitchesOrThrow(tx),
+      ).catch(() => null),
+      withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerReportRead, (tx) =>
+        readDecisionMakerDeclarationAccuracyReport(tx),
+      ).catch((error: unknown) => {
+        console.warn(
+          JSON.stringify({
+            subsystem: "amux",
+            event: "decision_maker_report_read_failed",
+            code: error instanceof AmuxDbBoundaryError ? error.code : null,
+          }),
+        );
+        return null;
+      }),
+    ]);
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
         <AmuxDecisionMakerSwitchPanel state={state} canChange={canChangeDmSwitches} />
+        <AmuxDecisionMakerReportPanel report={report} />
       </div>
     );
   }
