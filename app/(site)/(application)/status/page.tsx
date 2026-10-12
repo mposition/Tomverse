@@ -21,7 +21,7 @@ import {
   type PublicProviderStatus,
 } from "@/lib/providerPublicStatusCore";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
-import { createPageMetadata } from "@/lib/seo";
+import { createPageMetadata, SEO_LOCALES, SITE_ORIGIN } from "@/lib/seo";
 import { DOCUMENT_LANGUAGE_HEADER } from "@/lib/documentLanguage";
 import { describeProbeSchedulerDelay } from "@/lib/statusPageEvidence";
 import {
@@ -50,12 +50,24 @@ const statusPageLanguage = async (searchParams: StatusPageProps["searchParams"])
 export async function generateMetadata({ searchParams }: StatusPageProps): Promise<Metadata> {
   const language = await statusPageLanguage(searchParams);
   const copy = getPublicStatusCopy(language);
-  return createPageMetadata({
+  const localePath = (locale: string) => locale === "en" ? "/status" : `/status?lang=${locale}`;
+  const metadata = createPageMetadata({
     title: copy.metadataTitle,
     description: copy.metadataDescription,
     locale: language,
-    path: "/status",
+    path: localePath(language),
   });
+  return {
+    ...metadata,
+    alternates: {
+      ...metadata.alternates,
+      languages: {
+        "x-default": `${SITE_ORIGIN}/status`,
+        ...Object.fromEntries(SEO_LOCALES.map(locale => [locale === "zh" ? "zh-Hans" : locale,
+          `${SITE_ORIGIN}${localePath(locale)}`])),
+      },
+    },
+  };
 }
 
 // Unknown is deliberately styled as neutral (zinc), never green/emerald --

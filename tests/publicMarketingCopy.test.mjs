@@ -6,6 +6,15 @@ import { searchIntentPages } from "../components/marketing/searchIntentContent.t
 import { launchHomepageContent } from "../components/marketing/launchHomepageContent.ts";
 import { chatWorkspaceGuideContent } from "../components/marketing/chatWorkspaceGuideContent.ts";
 import { assistantKnowledgeGuideContent } from "../components/marketing/assistantKnowledgeGuideContent.ts";
+import { landingCopy } from "../components/marketing/landingContent.ts";
+
+test("two-reviewer explanation reports quote evidence without promising provider independence or a correct-answer consensus", () => {
+  const copy = landingCopy.en.loop;
+  assert.doesNotMatch(copy.dualReviewerLabel, /different providers/);
+  assert.match(copy.dualReviewer, /quote-match grades/);
+  assert.match(copy.dualReviewer, /exact quotes/);
+  assert.match(copy.dualReviewer, /does not mean they agree about which answer is correct/);
+});
 
 test("public information and guides have complete localized bodies rather than English fallback", () => {
   const tables = {
