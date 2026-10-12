@@ -1145,7 +1145,10 @@ test.describe("guest initial cost hydration", () => {
     // model by id means stepping into the full catalogue first.
     await openModelCatalogue(page);
 
-    const removed = "claude-haiku-4-5";
+    // A member of the guest default, so clicking it deselects rather than
+    // asking to swap at the three-model cap. It named claude-haiku-4-5 until
+    // the trio's Anthropic slot moved to claude-haiku-5-5 on 2026-10-12.
+    const removed = GUEST_BRAND_TRIO_MODEL_IDS[1];
     const option = dialog.locator(
       `[data-testid="model-option"][data-model-id="${removed}"]`
     );

@@ -3,6 +3,7 @@ import {
   normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
   type WebSearchMode,
+  type ReplacementResolver,
 } from "@/lib/appDefaults";
 
 // Same keys app/(site)/(application)/chat/ChatPageClient.tsx persists guest state
@@ -71,6 +72,18 @@ export type GuestCatalogueAccess = {
   isEnabledModelId: (modelId: string) => boolean;
   /** Additionally guest-plan and Standard-tier, per lib/appDefaults. */
   isGuestEligible: (modelId: string) => boolean;
+  /**
+   * isGuestEligible narrowed to what a default may name
+   * (lib/appDefaults `createDefaultLineupEligibilityCheck`). Only the default
+   * selection uses it; a guest's own selection is clamped by isGuestEligible.
+   */
+  isDefaultEligible: (modelId: string) => boolean;
+  /**
+   * A retired model's successor, per the same catalogue
+   * (lib/appDefaults `createReplacementResolver`). Optional only so a caller
+   * without a catalogue lookup still resolves; the chat client always binds it.
+   */
+  resolveReplacement?: ReplacementResolver;
 };
 
 export const readGuestInitialModelEnvironment =
@@ -207,11 +220,14 @@ export const resolveGuestInitialWebSearchMode = (
 export const resolveGuestInitialSelectedModels = ({
   catalogue,
   leadModelId = APP_DEFAULTS.guestDefaultModelId,
+  trio,
   environment = {},
   product = "review",
 }: {
   catalogue: GuestCatalogueAccess;
   leadModelId?: string;
+  /** The effective default lineup (lib/appSettings); the compiled trio when omitted. */
+  trio?: readonly string[];
   environment?: GuestInitialModelEnvironment;
   product?: GuestWorkspaceProduct;
 }): GuestInitialModelSelection => {
@@ -222,8 +238,10 @@ export const resolveGuestInitialSelectedModels = ({
   };
   const guestDefault = clampForProduct(
     resolveGuestDefaultSelectedModels({
-      isEligible: catalogue.isGuestEligible,
+      isEligible: catalogue.isDefaultEligible,
       leadModelId,
+      resolveReplacement: catalogue.resolveReplacement,
+      trio,
     })
   );
 

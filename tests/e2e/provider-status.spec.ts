@@ -22,11 +22,12 @@ type StatusRecord = {
 const SELECTED = {
   gemini: { id: "gemini-flash-lite-latest", provider: "google", name: "Gemini Flash-Lite" },
   // The OpenAI slot of the guest default selection. Tracks
-  // GUEST_BRAND_TRIO_MODEL_IDS, which moved to gpt-5-6-luna with the app
-  // default: a model this fixture names but the trio no longer selects would
-  // never reach the banner these tests are about.
-  gpt: { id: "gpt-5-6-luna", provider: "openai", name: "GPT-5.6 Luna" },
-  claude: { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5" },
+  // GUEST_BRAND_TRIO_MODEL_IDS, which moved to gpt-6-luna with the app default
+  // on 2026-10-12 (the Anthropic slot moved to claude-haiku-5-5 the same day):
+  // a model this fixture names but the trio no longer selects would never
+  // reach the banner these tests are about.
+  gpt: { id: "gpt-6-luna", provider: "openai", name: "GPT 6 Luna" },
+  claude: { id: "claude-haiku-5-5", provider: "anthropic", name: "Claude Haiku 5.5" },
 } as const;
 
 /**
@@ -854,6 +855,11 @@ test("clicking the banner's suggestion swaps the failed model instead of silentl
     "The 3-panel cap assertion only applies to the desktop chat shell."
   );
   await mockAuthenticatedApi(page);
+  // Signed in at `/chat?lang=en`, so the settings read carries `?lang=en`,
+  // which mockAuthenticatedApi's `**/api/user/settings` route does not match:
+  // the E2E server answers it, and the workspace opens on the compiled default,
+  // APP_DEFAULTS.defaultModelId -- the trio's OpenAI slot, SELECTED.gpt. It
+  // named gpt-5-6-luna until the default moved to gpt-6-luna on 2026-10-12.
   await mockProviderStatus(page, [
     {
       id: SELECTED.gpt.id,
@@ -881,14 +887,14 @@ test("clicking the banner's suggestion swaps the failed model instead of silentl
 
   await expect(banner(page)).toBeVisible();
   const swapButton = banner(page).getByRole("button", {
-    name: "Switch GPT-5.6 Luna for Mistral Small 4",
+    name: `Switch ${SELECTED.gpt.name} for Mistral Small 4`,
   });
   await expect(swapButton).toBeVisible();
 
   await swapButton.click();
 
   await expect(
-    page.locator('[data-testid="desktop-model-panel"][data-model-id="gpt-5-6-luna"]')
+    page.locator(`[data-testid="desktop-model-panel"][data-model-id="${SELECTED.gpt.id}"]`)
   ).toHaveCount(0);
   await expect(
     page.locator('[data-testid="desktop-model-panel"][data-model-id="mistral-small-4"]')

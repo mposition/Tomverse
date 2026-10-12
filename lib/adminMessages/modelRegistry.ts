@@ -138,7 +138,7 @@ export const adminModelRegistryMessages = defineAdminMessages({
       guestLeadWarning: (name: string) =>
         `${name} is the guest leading model. Change that lead in Platform settings before replacing it.`,
       trioWarning: (name: string, substitute: string) =>
-        `Turning off ${name} shows ${substitute} to guests in its place. Changing the guest trio is a code change.`,
+        `Turning off ${name} shows ${substitute} to guests in its place. The default lineup itself is under Platform settings.`,
       successorStatus: (status: string, listing: string) =>
         `New model: ${status} · ${listing}`,
       unlisted: "unlisted",
@@ -161,6 +161,8 @@ export const adminModelRegistryMessages = defineAdminMessages({
         "Save gemini-flash-lite-latest or gemini-3.5-flash-lite at the published Standard rates (US$0.30 in, cache multiplier 0.1, US$2.50 out, 65,536 output tokens) for 1 standard credit. This exception is only those two ids, and it ends after 2026-12-27 UTC.",
       flashLiteStandardExceptionExpired: (credits: number, usageClass: string) =>
         `The 1-credit exception for Gemini 3.5 Flash-Lite ended after 2026-12-27 UTC. This price needs at least ${credits} credits (${usageClass}).`,
+      haikuLineGuestException:
+        "Save this Claude Haiku model at Standard for 1 credit although its price is below the credit floor. Operator decision 2026-10-12: a guest's lineup always holds one OpenAI, one Anthropic and one Gemini model, and the Haiku line fills the Anthropic slot.",
     },
     floor: {
       title: "Credit floor from base token prices",
@@ -403,7 +405,7 @@ export const adminModelRegistryMessages = defineAdminMessages({
       guestLeadWarning: (name: string) =>
         `${name}은 게스트 선두 모델입니다. 대체하기 전에 플랫폼 설정에서 선두를 바꾸세요.`,
       trioWarning: (name: string, substitute: string) =>
-        `${name}을 끄면 게스트에게는 그 자리에 ${substitute}가 보입니다. 게스트 3종 변경은 코드 변경입니다.`,
+        `${name}을 끄면 게스트에게는 그 자리에 ${substitute}가 보입니다. 기본 3모델 구성은 플랫폼 설정에서 바꿉니다.`,
       successorStatus: (status: string, listing: string) =>
         `새 모델: ${status} · ${listing}`,
       unlisted: "비공개",
@@ -426,6 +428,8 @@ export const adminModelRegistryMessages = defineAdminMessages({
         "gemini-flash-lite-latest 또는 gemini-3.5-flash-lite를 공개된 Standard 가격(입력 US$0.30, 캐시 입력 배수 0.1, 출력 US$2.50, 출력 상한 65,536)으로 standard 1크레딧에 저장합니다. 이 예외는 이 두 ID뿐이며, 2026-12-27(UTC)이 지나면 끝납니다.",
       flashLiteStandardExceptionExpired: (credits: number, usageClass: string) =>
         `Gemini 3.5 Flash-Lite의 1크레딧 예외는 2026-12-27(UTC)에 끝났습니다. 이 가격은 최소 ${credits}크레딧(${usageClass})이 필요합니다.`,
+      haikuLineGuestException:
+        "이 Claude Haiku 모델을 가격이 크레딧 하한에 못 미쳐도 standard 1크레딧으로 저장합니다. 2026-10-12 운영자 결정: 게스트 기본 3모델은 항상 OpenAI · Anthropic · Gemini 각 1개이고, Anthropic 자리는 Haiku 계열이 채웁니다.",
     },
     floor: {
       title: "기본 토큰 가격 기준 크레딧 하한",

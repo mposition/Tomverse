@@ -7,7 +7,7 @@ import {
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
-import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck } from "@/lib/appDefaults";
+import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createDefaultLineupEligibilityCheck, createGuestEligibilityCheck, createReplacementResolver, isDefaultLineupServable, isOnePerLineupProvider, lineupSlotProviders } from "@/lib/appDefaults";
 import {
   assessFallbackTransition,
   describeGuestDefault,
@@ -122,6 +122,14 @@ type Props = {
   storedGuestDefaultModelId?: string | null;
 };
 
+// How a lineup slot names its provider. One model per provider is the rule
+// (GUEST_LINEUP_PROVIDERS in lib/appDefaults.ts); Google's models are Gemini.
+const PROVIDER_LABELS: ReadonlyMap<string, string> = new Map([
+  ["openai", "OpenAI"],
+  ["anthropic", "Anthropic"],
+  ["google", "Gemini"],
+]);
+
 export function PlatformSettingsPanel({
   settings,
   assistantPackageImportEnabled: initialAssistantPackageImportEnabled = false,
@@ -139,20 +147,46 @@ export function PlatformSettingsPanel({
   const m = useAdminMessages(adminPlatformSettingsMessages);
   const memoryCopy = useAdminMessages(adminPlatformMemoryMessages);
   const { models } = useModelCatalog();
+  // The effective default lineup, as the server resolved it (lib/appSettings).
+  // A response without the field -- an older build answering -- keeps the
+  // compiled trio rather than an empty lineup.
+  const [guestTrio, setGuestTrio] = useState<string[]>(
+    settings.guestBrandTrioModelIds ?? [...GUEST_BRAND_TRIO_MODEL_IDS]
+  );
+  const [lineupDraft, setLineupDraft] = useState<string[]>(guestTrio);
+  const [lineupError, setLineupError] = useState<string | null>(null);
+  const [lineupSaving, setLineupSaving] = useState(false);
+  const isGuestStandard = (model: (typeof models)[number]) =>
+    model.enabled &&
+    !model.catalogDeleted &&
+    model.publiclyListed !== false &&
+    canUseModelWithPlan("Guest", model) &&
+    getModelUsageProfile(model).category === "Standard";
   const guestModels = useMemo(
     () =>
       models.filter(
         (model) =>
-          GUEST_BRAND_TRIO_MODEL_IDS.includes(model.id) &&
+          guestTrio.includes(model.id) &&
           model.enabled &&
           canUseModelWithPlan("Guest", model) &&
           getModelUsageProfile(model).category === "Standard"
       ),
-    [models]
+    [guestTrio, models]
+  );
+  // What a lineup slot may name: the lifecycle the save checks
+  // (isDefaultLineupServable -- a limited row is not offered) plus guest and
+  // Standard. The server also checks the price (guestBrandTrioRejection), so a
+  // model with no verified price is offered here and refused with its reason
+  // there.
+  const lineupCandidates = models.filter(
+    (model) => isGuestStandard(model) && isDefaultLineupServable(model)
   );
   const [guestDefaultModelId, setGuestDefaultModelId] = useState(
     settings.guestDefaultModelId
   );
+  // The lead as last saved, kept apart from the dropdown above: a lineup save
+  // carries the saved lead, never an unsaved pick in that dropdown.
+  const [appliedLead, setAppliedLead] = useState(settings.guestDefaultModelId);
   const [storedGuestLead, setStoredGuestLead] = useState<string | null>(
     storedGuestDefaultModelId
   );
@@ -295,7 +329,12 @@ export function PlatformSettingsPanel({
 
   const applyLeadSettings = (nextSettings: PublicAppSettings) => {
     setGuestDefaultModelId(nextSettings.guestDefaultModelId);
+    setAppliedLead(nextSettings.guestDefaultModelId);
+    const nextTrio = nextSettings.guestBrandTrioModelIds ?? [...GUEST_BRAND_TRIO_MODEL_IDS];
+    setGuestTrio(nextTrio);
+    setLineupDraft(nextTrio);
     setLeadError(null);
+    setLineupError(null);
     touchSyncedAt();
   };
 
@@ -517,6 +556,60 @@ export function PlatformSettingsPanel({
     }
   };
 
+  // The lead travels with the lineup: the saved one if the new lineup keeps
+  // it, otherwise the lineup's first model, stated before the click. The
+  // server refuses a lineup that would strand the stored lead, so sending it
+  // explicitly is what keeps the two settings one decision.
+  const lineupLead = lineupDraft.includes(appliedLead) ? appliedLead : lineupDraft[0];
+  const providerOf = (id: string) => models.find((model) => model.id === id)?.provider ?? null;
+  // Each slot offers one provider of the rule: the saved model's own when it
+  // keeps the rule, otherwise one the saved lineup is missing -- so a lineup
+  // that breaks the rule is repaired here rather than locked to the providers
+  // that break it.
+  const slotProviders = lineupSlotProviders(guestTrio.map(providerOf));
+  const slotProvider = (index: number) => slotProviders[index] || null;
+  const lineupChanged = lineupDraft.some((id, index) => id !== guestTrio[index]);
+  const lineupComplete =
+    lineupDraft.length === guestTrio.length &&
+    lineupDraft.every(Boolean) &&
+    new Set(lineupDraft).size === lineupDraft.length &&
+    isOnePerLineupProvider(lineupDraft.map(providerOf));
+
+  const saveLineup = async () => {
+    if (isLoading || isSaving || lineupSaving || reauthenticationRequired) return;
+    setLineupSaving(true);
+    setLineupError(null);
+    try {
+      const response = await adminFetch("/api/admin/app-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          guestBrandTrioModelIds: lineupDraft,
+          guestDefaultModelId: lineupLead,
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as AdminAppSettingsResponse | null;
+      if (response.status === 428) {
+        setReauthenticationRequired(true);
+        dispatchAppToast(m.toast.saveNeedsSignIn, "error");
+        return;
+      }
+      if (!response.ok || !data?.settings) {
+        setLineupError(data?.error || m.toast.lineupNotSaved);
+        dispatchAppToast(m.toast.lineupNotSaved, "error");
+        return;
+      }
+      applyLeadSettings(data.settings);
+      setStoredGuestLead(data.guestLead?.stored ?? data.settings.guestDefaultModelId);
+      dispatchAppToast(m.toast.lineupSaved, "success");
+    } catch {
+      setLineupError(m.toast.sendFailed);
+      dispatchAppToast(m.toast.sendFailed, "error");
+    } finally {
+      setLineupSaving(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     void adminFetch("/api/admin/models", { cache: "no-store" })
@@ -533,12 +626,20 @@ export function PlatformSettingsPanel({
     };
   }, []);
 
-  const guestEligibility = createGuestEligibilityCheck((id) =>
-    models.find((model) => model.id === id)
+  const lookupModel = (id: string) => models.find((model) => model.id === id);
+  // What a default may name, as every default resolver judges it.
+  const guestEligibility = createDefaultLineupEligibilityCheck(
+    lookupModel,
+    createGuestEligibilityCheck(lookupModel)
   );
   const guestDescription = describeGuestDefault({
     storedLead: storedGuestLead,
     isEligible: guestEligibility,
+    resolveReplacement: createReplacementResolver((id) =>
+      models.find((model) => model.id === id)
+    ),
+    trio: guestTrio,
+    providerOf,
   });
   const leadInList = guestModels.some((model) => model.id === guestDefaultModelId);
   const labelFor = (id: string) =>
@@ -564,7 +665,7 @@ export function PlatformSettingsPanel({
       !model.catalogDeleted &&
       model.minimumPlan === "Guest" &&
       model.usageClass === "standard" &&
-      !(GUEST_BRAND_TRIO_MODEL_IDS as readonly string[]).includes(model.id)
+      !guestTrio.includes(model.id)
   );
 
   return (
@@ -963,8 +1064,81 @@ export function PlatformSettingsPanel({
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
                   {m.guestDefault.description}
                 </p>
-                <p className="mt-3 text-sm text-zinc-300">{m.guestDefault.trioFixed(GUEST_BRAND_TRIO_MODEL_IDS.join(", "))}</p>
+                <fieldset className="mt-4 rounded-xl border border-zinc-800 p-4" data-testid="admin-guest-lineup">
+                  <legend className="px-1 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                    {m.guestDefault.lineupTitle}
+                  </legend>
+                  <p className="text-sm leading-6 text-zinc-400">{m.guestDefault.lineupDescription}</p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    {lineupDraft.map((slotId, index) => (
+                      <label key={index} className="block">
+                        <span className="mb-2 block text-xs font-semibold text-zinc-500">
+                          {m.guestDefault.lineupSlot(index + 1, PROVIDER_LABELS.get(slotProvider(index) ?? "") ?? slotProvider(index) ?? "")}
+                        </span>
+                        <select
+                          value={slotId}
+                          disabled={lineupSaving}
+                          data-testid={`admin-guest-lineup-slot-${index}`}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setLineupError(null);
+                            setLineupDraft((current) =>
+                              current.map((id, slot) => (slot === index ? value : id))
+                            );
+                          }}
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:opacity-60"
+                        >
+                          {lineupCandidates.some(
+                            (model) => model.id === slotId && model.provider === slotProvider(index)
+                          ) ? null : (
+                            <option value={slotId}>{labelFor(slotId)}</option>
+                          )}
+                          {lineupCandidates
+                            .filter((model) => !slotProvider(index) || model.provider === slotProvider(index))
+                            .map((model) => (
+                            <option
+                              key={model.id}
+                              value={model.id}
+                              disabled={model.id !== slotId && lineupDraft.includes(model.id)}
+                            >
+                              {model.name} - {model.provider}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                  {lineupChanged && lineupLead && lineupLead !== appliedLead ? (
+                    <p className="mt-2 text-sm text-amber-200" data-testid="admin-guest-lineup-lead-moves">
+                      {m.guestDefault.lineupLeadMoves(labelFor(lineupLead))}
+                    </p>
+                  ) : null}
+                  {lineupError ? (
+                    <p className="mt-2 text-sm font-bold text-amber-200" data-testid="admin-guest-lineup-error">
+                      {lineupError}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void saveLineup()}
+                    disabled={lineupSaving || !lineupChanged || !lineupComplete}
+                    data-testid="admin-guest-lineup-save"
+                    className="mt-3 inline-flex items-center gap-2 rounded-xl border border-blue-500/40 px-4 py-2 text-sm font-bold text-blue-100 hover:bg-blue-500/10 disabled:opacity-50"
+                  >
+                    {lineupSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    {m.guestDefault.saveLineup}
+                  </button>
+                </fieldset>
                 <p className="mt-1 text-sm text-zinc-300">{m.guestDefault.visibleOrder(guestDescription.visibleIds.map(labelFor).join(", "))}</p>
+                {guestDescription.missingProviders.length > 0 ? (
+                  <p className="mt-2 text-sm font-bold text-amber-200" data-testid="admin-guest-lineup-provider-missing">
+                    {m.guestDefault.lineupProviderMissing(
+                      guestDescription.missingProviders
+                        .map((provider) => PROVIDER_LABELS.get(provider) ?? provider)
+                        .join(", ")
+                    )}
+                  </p>
+                ) : null}
                 {guestDescription.storedNotApplied && storedGuestLead && guestDescription.effectiveLeadId ? (
                   <p className="mt-2 text-sm font-bold text-amber-200">
                     {m.guestDefault.storedNotApplied(storedGuestLead, guestDescription.effectiveLeadId)}
