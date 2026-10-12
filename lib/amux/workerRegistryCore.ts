@@ -632,7 +632,12 @@ const parseComparison = (value: unknown): AmuxWorkerCatalogComparison | null => 
     }
     if (typeof row.catalog !== "string" || !CATALOG_STATES.includes(row.catalog)) return null;
     if (!isOneOf(AMUX_WORKER_CATALOG_VERDICTS, row.verdict)) return null;
-    if (row.verdict === "exempt" && (!isCatalogExempt(row.workerName) || row.registryState !== null)) return null;
+    // The server marks a row exempt only for an exempt name the catalog lists
+    // and the registry cannot hold.
+    if (row.verdict === "exempt" &&
+        (!isCatalogExempt(row.workerName) || row.registryState !== null || row.catalog === "absent")) {
+      return null;
+    }
   }
   return value as AmuxWorkerCatalogComparison;
 };

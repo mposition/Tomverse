@@ -407,4 +407,8 @@ test("an exempt row reads back only on the exempt name, and shows why", () => {
   const rows = body.comparison.rows.map((entry: { workerName: string }) =>
     entry.workerName === "engineering-runner" ? { ...entry, workerName: "devin-worker" } : entry);
   assert.equal(parseAmuxWorkerRegistryAdminView({ ...body, comparison: { ...body.comparison, rows } }), null);
+  // Nor on a row the catalog does not list: the server never emits one.
+  const absent = body.comparison.rows.map((entry: { workerName: string }) =>
+    entry.workerName === "engineering-runner" ? { ...entry, catalog: "absent" } : entry);
+  assert.equal(parseAmuxWorkerRegistryAdminView({ ...body, comparison: { ...body.comparison, rows: absent } }), null);
 });
