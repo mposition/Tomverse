@@ -4,12 +4,22 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
+import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { benchmarkDigest, canonicalBenchmarkJson, parseBenchmarkJson, DEVELOPMENT_LIMITS } from "../lib/routerDevelopmentBenchmark.ts";
 import { parseDevelopmentCorpusV2, parseDevelopmentPartitionsV2, developmentCorpusV2Coverage } from "../lib/routerDevelopmentCorpusV2.ts";
 import { buildDevelopmentPlanV2 } from "../lib/routerDevelopmentPlanV2.ts";
 import { scoreDevelopmentResultsV2 } from "../lib/routerDevelopmentResultsV2.ts";
 import { emptyCollectionObservation } from "../lib/routerDevelopmentCollector.ts";
+
+// The fixture's control model: the requested model, one of the two observed
+// models, and the model the control replay policy prefers. Pinned, not
+// DEFAULT_MODEL_ID. Offline there are no cost signals, so the router breaks
+// quality-band ties by model id, and in eight cases its own fallback lands on
+// gpt-5-6-luna; the fixture observes exactly the control and DeepSeek, so the
+// control has to be the model the offline router agrees with. While it
+// followed the default it held only by coincidence, and the 2026-10-12 move to
+// gpt-6-luna left those eight cases unobserved.
+export const BRIDGE_CONTROL_MODEL_ID = "gpt-5-6-luna";
 import { collectDevelopment, collectorPaths, replayCollectionJournal } from "../lib/routerDevelopmentCollectorJournal.ts";
 import { buildDevelopmentExecutionObservation, executionObservationCompatibility } from "../lib/routerDevelopmentExecution.ts";
 import { REPLAY_COLLECTOR_SOURCE_PATHS } from "../lib/routerDevelopmentReplaySource.ts";
@@ -56,8 +66,8 @@ export async function runV2Bridge({ outputDirectory = null } = {}) {
   const corpus = parseDevelopmentCorpusV2(readFileSync(resolve(root, "docs/ops/router-development-benchmark/development-v2.json"), "utf8"));
   const partitions = parseDevelopmentPartitionsV2(readFileSync(resolve(root, "docs/ops/router-development-benchmark/development-v2-partitions.json"), "utf8"), corpus);
   const context = { corpus, partitions, models: AVAILABLE_MODELS, benchmarkSource: fixtureSource, collectorSource: fixtureSource };
-  const plan = buildDevelopmentPlanV2({ corpus, partitions, models: AVAILABLE_MODELS, source: fixtureSource, createdAt: AT, plan: "Pro", requestedModelId: DEFAULT_MODEL_ID });
-  const selected = plan.rows.filter((row) => [DEFAULT_MODEL_ID, "deepseek-v4-flash"].includes(row.modelId) && row.benchmarkEligibility.eligible);
+  const plan = buildDevelopmentPlanV2({ corpus, partitions, models: AVAILABLE_MODELS, source: fixtureSource, createdAt: AT, plan: "Pro", requestedModelId: BRIDGE_CONTROL_MODEL_ID });
+  const selected = plan.rows.filter((row) => [BRIDGE_CONTROL_MODEL_ID, "deepseek-v4-flash"].includes(row.modelId) && row.benchmarkEligibility.eligible);
   if (selected.length !== 96 || new Set(selected.map((row) => row.caseId)).size !== 48) throw new Error("bridge_v2_expected_ninety_six_rows");
   const manifest = buildMockManifestV2({ ...context, plan, selectedRowIds: selected.map((row) => row.rowId),
     limits: { maxTotalMicroUsd: 100_000_000_000, maxRequestMicroUsd: 100_000_000_000, maxCalls: 96,
@@ -112,7 +122,7 @@ export async function runV2Bridge({ outputDirectory = null } = {}) {
     const answers = await exportMockResultsV2(input);
     const score = scoreDevelopmentResultsV2(corpus, partitions, plan, answers);
     const candidate = { schemaVersion: "router-development-replay-policy-v1", purpose: "development-only", policyId: "mock-v2-default-control",
-      preferences: { general: [DEFAULT_MODEL_ID] }, fallback: "original-router" };
+      preferences: { general: [BRIDGE_CONTROL_MODEL_ID] }, fallback: "original-router" };
     const replay = replayMockDevelopmentV2({ ...context, manifest, answers, candidate, replaySource: implementationSource,
       contracts, observations, journalText, approval });
     const heldApproval = mockApprovalV2(manifest, "unknown");

@@ -85,6 +85,25 @@ models:
     catalogueDeclaredTokens: 1050000
     notes: ""
 
+  - modelId: "gpt-6-luna"
+    apiModel: "gpt-6-luna"
+    provider: openai
+    status: unverified
+    contextWindowTokens: null
+    contextWindowIncludesOutput: null
+    maxInputTokens: null
+    maxOutputTokens: null
+    aliasOrLatest: null
+    sourceUrl: null
+    sourceTitle: null
+    verifiedAt: null
+    verifiedBy: null
+    catalogueDeclaredTokens: 1050000
+    notes: >-
+      The default model from 2026-10-12, compiled into the catalogue after it
+      was adopted in the production registry. The catalogue declares 1,050,000
+      tokens; that declaration is not evidence, so this row stays unverified.
+
   - modelId: "gpt-5-5"
     apiModel: "gpt-5.5"
     provider: openai
@@ -247,6 +266,26 @@ models:
       Guessing is the failure this field exists to prevent: a window that is
       too large passes the guard by inventing headroom, which is worse than
       declaring none.
+
+  - modelId: "claude-haiku-5-5"
+    apiModel: "claude-haiku-5-5"
+    provider: anthropic
+    status: unverified
+    contextWindowTokens: null
+    contextWindowIncludesOutput: null
+    maxInputTokens: null
+    maxOutputTokens: null
+    aliasOrLatest: null
+    sourceUrl: null
+    sourceTitle: null
+    verifiedAt: null
+    verifiedBy: null
+    catalogueDeclaredTokens: 1000000
+    notes: >-
+      The guest lineup's Anthropic slot from 2026-10-12, compiled into the
+      catalogue after it was adopted in the production registry. The
+      catalogue declares 1,000,000 tokens; that declaration is not evidence,
+      so this row stays unverified.
 
   - modelId: "claude-haiku-4-5"
     apiModel: "claude-haiku-4-5-20251001"

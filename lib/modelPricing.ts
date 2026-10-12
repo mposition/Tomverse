@@ -603,6 +603,34 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
+        // Published Standard-tier rates, USD per million tokens, read off
+        // OpenAI's pricing and gpt-6-luna model pages on 2026-10-12:
+        //   short context (<=272K prompt): 0.10 in / 0.01 cached / 0.125 cache
+        //                                  write / 0.50 out
+        //   long context  (> 272K prompt): 0.20 in / 0.02 cached / 0.25 cache
+        //                                  write / 0.75 out
+        // The long tier is the GPT-5.6 shape (x2 input, x1.5 output), so
+        // gpt56Tiers derives it exactly. 128,000 is the published output cap.
+        //
+        // The default model from 2026-10-12. The production registry row was
+        // adopted first; a non-null registry price column overrides these
+        // numbers.
+        modelId: "gpt-6-luna",
+        provider: "openai",
+        apiModelId: "gpt-6-luna",
+        ...DIRECT_STANDARD,
+        tiers: gpt56Tiers(0.1, 0.5, 0.125),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 10_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "openai_gpt_6_luna_model_page",
+        pricingVersion: "openai-gpt-6-luna-2026-10-12",
+        effectiveDate: "2026-10-12",
+    },
+    {
         modelId: "gpt-5-5",
         provider: "openai",
         apiModelId: "gpt-5.5",
@@ -1160,6 +1188,51 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
                 verifiedAt: "2026-08-10",
             },
         ],
+    },
+    {
+        // Published rates, USD per million tokens, read off Anthropic's pricing
+        // page on 2026-10-12. Haiku 5.5 is priced by prompt length, and the
+        // whole request moves at once:
+        //   prompt <= 100,000 tokens: 0.10 in / 0.01 cache hit / 0.125 5m
+        //                             cache write / 0.50 out
+        //   prompt  > 100,000 tokens: 0.50 in / 0.05 cache hit / 0.625 5m
+        //                             cache write / 2.50 out
+        // Anthropic counts cache reads and writes in the prompt length. Unlike
+        // the 272K tiers elsewhere in this file, this one is reachable: a
+        // signed-in account's input cap is 128,000 tokens
+        // (lib/chatSecurity.ts).
+        //
+        // 128,000 is the published synchronous output cap. The production
+        // registry row was adopted first; a non-null registry price column
+        // overrides these numbers.
+        modelId: "claude-haiku-5-5",
+        provider: "anthropic",
+        apiModelId: "claude-haiku-5-5",
+        ...DIRECT_STANDARD,
+        tiers: [
+            {
+                maxPromptTokens: 100_000,
+                inputUsdPerMillionTokens: 0.1,
+                outputUsdPerMillionTokens: 0.5,
+                cachedInputPriceMultiplier: 0.1,
+                cacheWriteUsdPerMillionTokens: 0.125,
+            },
+            {
+                maxPromptTokens: null,
+                inputUsdPerMillionTokens: 0.5,
+                outputUsdPerMillionTokens: 2.5,
+                cachedInputPriceMultiplier: 0.1,
+                cacheWriteUsdPerMillionTokens: 0.625,
+            },
+        ],
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "anthropic_claude_haiku_5_5_list_price",
+        pricingVersion: "anthropic-claude-haiku-5.5-2026-10-12",
+        effectiveDate: "2026-10-12",
     },
     {
         modelId: "claude-haiku-4-5",

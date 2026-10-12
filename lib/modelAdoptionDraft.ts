@@ -244,6 +244,30 @@ export const GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION = {
   reviewBy: "2026-12-27",
 } as const;
 
+/**
+ * The Claude Haiku line in a guest's Anthropic slot, sold at Standard and one
+ * credit below the floor.
+ *
+ * Operator decision 2026-10-12 (docs/policy/credit-and-cost-limits.md, "Haiku
+ * 계열을 게스트 Anthropic 자리로 여는 예외"): a guest's default lineup always
+ * holds one OpenAI, one Anthropic and one Gemini model, so the Haiku model
+ * filling the Anthropic slot is allowed even when its price fails the floor.
+ * Claude Haiku 5.5 is why: the floor prices a 128,000-token turn, which is past
+ * its 100,000-token step to 5x every rate.
+ *
+ * A line, not one model: any Anthropic api model named `claude-haiku-*` at
+ * standard and weight 1. No price is pinned and there is no review date,
+ * because the decision is about the slot rather than a price. The
+ * acknowledgement is still this id, so the operator says so on every adoption.
+ */
+export const HAIKU_LINE_GUEST_CREDIT_EXCEPTION = {
+  id: "claude-haiku-line-guest-2026-10-12",
+  provider: "anthropic",
+  apiModelPrefix: "claude-haiku-",
+  usageClass: "standard",
+  creditWeight: 1,
+} as const;
+
 export type CreditFloorExceptionVerdict =
   | "not_applicable"
   | "needs_acknowledgement"
@@ -276,8 +300,22 @@ const flashLiteStandardShapeMatches = (input: {
   );
 };
 
-/** The exception id when the body is this shape, otherwise null. Date and acknowledgement are separate. */
-export const creditFloorExceptionShapeKey = (input: {
+const haikuLineShapeMatches = (input: {
+  provider: string;
+  apiModel: string;
+  usageClass: string;
+  creditWeight: number;
+}) => {
+  const rule = HAIKU_LINE_GUEST_CREDIT_EXCEPTION;
+  return (
+    input.provider.trim().toLowerCase() === rule.provider &&
+    input.apiModel.trim().startsWith(rule.apiModelPrefix) &&
+    input.usageClass === rule.usageClass &&
+    input.creditWeight === rule.creditWeight
+  );
+};
+
+type CreditFloorExceptionInput = {
   provider: string;
   apiModel: string;
   usageClass: string;
@@ -286,10 +324,21 @@ export const creditFloorExceptionShapeKey = (input: {
   outputUsdPerMillionTokens: number | null;
   cachedInputPriceMultiplier: number | null;
   maxOutputTokens: number | null;
-}): string | null =>
+};
+
+/** Which named floor exception this body is, or null. The id is also the acknowledgement it needs. */
+export const creditFloorExceptionId = (input: CreditFloorExceptionInput): string | null =>
   flashLiteStandardShapeMatches(input)
-    ? `${GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id}:${input.apiModel.trim()}`
-    : null;
+    ? GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id
+    : haikuLineShapeMatches(input)
+      ? HAIKU_LINE_GUEST_CREDIT_EXCEPTION.id
+      : null;
+
+/** The exception id when the body is a named shape, otherwise null. Date and acknowledgement are separate. */
+export const creditFloorExceptionShapeKey = (input: CreditFloorExceptionInput): string | null => {
+  const id = creditFloorExceptionId(input);
+  return id ? `${id}:${input.apiModel.trim()}` : null;
+};
 
 /**
  * Whether this adoption may sell below the floor.
@@ -310,7 +359,12 @@ export const creditFloorExceptionVerdict = (input: {
   acknowledgement: string | null;
   now?: Date;
 }): CreditFloorExceptionVerdict => {
-  if (!flashLiteStandardShapeMatches(input)) return "not_applicable";
+  if (!flashLiteStandardShapeMatches(input)) {
+    if (!haikuLineShapeMatches(input)) return "not_applicable";
+    return input.acknowledgement === HAIKU_LINE_GUEST_CREDIT_EXCEPTION.id
+      ? "accepted"
+      : "needs_acknowledgement";
+  }
   const rule = GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION;
   const reviewEndsAt = Date.parse(`${rule.reviewBy}T00:00:00.000Z`) + 86_400_000;
   const now = input.now ?? new Date();
