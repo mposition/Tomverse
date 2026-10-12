@@ -150,6 +150,7 @@ export const ROUTER_SCORE_SNAPSHOT: readonly RouterScoreSnapshotEntry[] = [
     { modelId: "gpt-5-6-sol", providerId: "openai" },
     { modelId: "gpt-5-6-terra", providerId: "openai" },
     { modelId: "gpt-5-6-luna", providerId: "openai" },
+    { modelId: "gpt-6-luna", providerId: "openai" },
     { modelId: "gpt-5-5", providerId: "openai" },
     { modelId: "gpt-5-5-thinking", providerId: "openai" },
     { modelId: "gpt-5-4-mini", providerId: "openai" },
@@ -157,6 +158,7 @@ export const ROUTER_SCORE_SNAPSHOT: readonly RouterScoreSnapshotEntry[] = [
     { modelId: "claude-fable-5", providerId: "anthropic" },
     { modelId: "claude-opus-4-8", providerId: "anthropic" },
     { modelId: "claude-sonnet-5", providerId: "anthropic" },
+    { modelId: "claude-haiku-5-5", providerId: "anthropic" },
     { modelId: "claude-haiku-4-5", providerId: "anthropic" },
 
     { modelId: "gemini-3-7-flash", providerId: "google" },

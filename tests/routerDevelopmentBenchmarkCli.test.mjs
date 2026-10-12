@@ -31,7 +31,7 @@ test("CLI defaults to offline full matrix and writes a new plan with no provider
   assert.equal(result.status, 0, result.stderr);
   plan = JSON.parse(readFileSync(planPath, "utf8"));
   assert.equal(plan.inputs.plan, "Pro");
-  assert.equal(plan.inputs.requestedModelId, "gpt-5-6-luna");
+  assert.equal(plan.inputs.requestedModelId, "gpt-6-luna");
   assert.equal(plan.summary.cases, 24);
   assert.equal(plan.summary.catalogueRows, 24 * plan.models.length);
   assert.equal(plan.summary.completedActualGenerations, 0);

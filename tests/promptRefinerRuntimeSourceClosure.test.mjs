@@ -444,12 +444,29 @@ const compilerOptions = parsedConfig.options;
 // lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
 // below it. Count 228 and the position-free inventory remain unchanged; only
 // their source positions are repinned.
+// 2026-10-12, default model GPT 6 Luna and the guest trio's Haiku 5.5: two
+// pricing profiles inserted in `lib/modelPricing.ts` move the twelve accesses
+// below them by 73 lines, and two catalogue rows plus the DEFAULT_MODEL_ID note
+// in `lib/models.ts` move its two `MODEL_ACCESS_RANK[...]` accesses by 16
+// lines. No access is added; count 228 and the position-free inventory are
+// unchanged, so this repins positions only.
+// 2026-10-12, the default lineup as an Admin setting: the lineup reader, its
+// save-time checks and its writer in `lib/appSettings.ts` sit above that file's
+// one access, `flags[feature]`, and move it by 184 lines. The replacement walk,
+// lineup rules and lead helper in `lib/appDefaults.ts` add no access. Count 228 and the
+// position-free inventory are unchanged; positions only.
+// 2026-10-12, selective release of both to main: the same commits on the main
+// base. The four files they move (`lib/modelPricing.ts`, `lib/models.ts`,
+// `lib/appSettings.ts`, `lib/appDefaults.ts`) are identical on main and on the
+// develop they were reviewed on, so the moves above hold; this repins only the
+// final positions main's other closure files give, after main's own
+// AMUX worker registry record above.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "544a9e33f60a03a051f80f59857c15f1",
-  "4f23cdc0fe0078268dcf57626bf7b665",
+  "19acae9eb62389880916fbb19072995e",
+  "79dfb3ad588211328d66d24d68b3a653",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

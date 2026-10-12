@@ -688,10 +688,12 @@ export async function mockAuthenticatedApi(
     locked: false,
     shared: false,
     title: "QA conversation",
-    // Stands in for the compiled-in default selection, so it tracks
-    // DEFAULT_MODEL_ID rather than naming a model in its own right. Moved to
-    // gpt-5-6-luna with the app default on 2026-08-01; a spec that needs a
-    // specific model still passes `selectedModels` explicitly.
+    // Stood in for the compiled-in default selection, and moved to
+    // gpt-5-6-luna with the app default on 2026-08-01. It stayed there when
+    // DEFAULT_MODEL_ID moved to gpt-6-luna on 2026-10-12: a seeded account's
+    // conversation keeps the model it was created with, and the specs built on
+    // this fixture exercise gpt-5-6-luna's verified native search. A spec that
+    // needs a specific model still passes `selectedModels` explicitly.
     selectedModels: options.selectedModels || ["gpt-5-6-luna"],
     disabledPanels: [],
     memoryMode: options.memoryMode || "inherit",
@@ -824,9 +826,10 @@ export async function mockAuthenticatedApi(
       json({
         theme: state.theme,
         language: "ko",
-        // Tracks DEFAULT_MODEL_ID, not a model chosen for its own sake: this
-        // is "the account default a seeded QA user still has". Moved to
-        // gpt-5-6-luna on 2026-08-01.
+        // "The account default a seeded QA user still has". Moved to
+        // gpt-5-6-luna on 2026-08-01 and deliberately not to gpt-6-luna on
+        // 2026-10-12: an existing account keeps its stored default when the
+        // compiled one moves, and the welcome screen settles on this value.
         defaultModel: "gpt-5-6-luna",
         timeZone: state.timeZone,
         timeZoneInitializedAt: state.timeZoneInitializedAt,
