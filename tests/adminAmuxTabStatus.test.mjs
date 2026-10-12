@@ -27,14 +27,39 @@ import {
 } from "../lib/amux/boardReconciliationCore.ts";
 import { AMUX_INTAKE_APPLY_CODE_LATCH, AMUX_INTAKE_APPLY_ENV } from "../lib/amux/intakeCore.ts";
 import { RECOMMENDATION_APPLY_ENV, RECOMMENDATION_CODE_LATCH } from "../lib/amux/recommendationPoolCore.ts";
+import {
+  AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
+  AMUX_V22_AUTO_PROMOTION_ENV,
+} from "../lib/amux/v22AutoPromotionCore.ts";
 
 const read = (path) => readFileSync(join(process.cwd(), path), "utf8");
 
-test("auto-promotion chip includes the independently enabled v22 writer", () => {
-  assert.equal(amuxSwitchedTabStatus("auto-promotion", {
+test("legacy auto-promotion and v22 automatic admission have independent chips", () => {
+  const v22Only = {
     TOMVERSE_AMUX_BOARD_AUTO_PROMOTE: "disabled",
     TOMVERSE_AMUX_V22_AUTO_PROMOTE: "enabled",
-  }), "server_switch_on");
+  };
+  assert.equal(
+    amuxSwitchedTabStatus("auto-promotion", v22Only),
+    "behind_server_switch"
+  );
+  assert.equal(
+    amuxSwitchedTabStatus("automatic-admission", v22Only),
+    "server_switch_on"
+  );
+
+  const legacyOnly = {
+    TOMVERSE_AMUX_BOARD_AUTO_PROMOTE: "enabled",
+    TOMVERSE_AMUX_V22_AUTO_PROMOTE: "disabled",
+  };
+  assert.equal(
+    amuxSwitchedTabStatus("auto-promotion", legacyOnly),
+    "server_switch_on"
+  );
+  assert.equal(
+    amuxSwitchedTabStatus("automatic-admission", legacyOnly),
+    "behind_server_switch"
+  );
 });
 
 /**
@@ -91,7 +116,17 @@ const SWITCHES = {
     latchName: "AUTO_PROMOTION_CODE_LATCH",
     reader: "lib/amux/autoPromotionService.ts",
   },
+  "automatic-admission": {
+    env: AMUX_V22_AUTO_PROMOTION_ENV,
+    envName: "AMUX_V22_AUTO_PROMOTION_ENV",
+    latch: AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
+    permitName: "amuxV22AutoPromotionEnabled",
+    reader: "lib/amux/v22AutoPromotionService.ts",
+  },
 };
+
+const isServerSwitch = (tab) =>
+  tab === "auto-promotion" || tab === "automatic-admission";
 
 test("every gated AMUX tab has a switch, and nothing else does", () => {
   assert.deepEqual(Object.keys(AMUX_TAB_SWITCHES).sort(), Object.keys(SWITCHES).sort());
@@ -110,6 +145,10 @@ test("each chip reads the variable its section's own route reads", () => {
       assert.ok(reader.includes(entry.latchName), `${tab}: ${entry.reader} does not pass ${entry.latchName}`);
       assert.ok(status.includes(entry.latchName), `${tab}: the chip does not pass ${entry.latchName}`);
     }
+    if (entry.permitName) {
+      assert.ok(reader.includes(entry.permitName), `${tab}: ${entry.reader} does not use ${entry.permitName}`);
+      assert.ok(status.includes(entry.permitName), `${tab}: the chip does not use ${entry.permitName}`);
+    }
   }
 });
 
@@ -117,7 +156,7 @@ test("with the variable unset every chip says the writes are closed", () => {
   for (const tab of Object.keys(SWITCHES)) {
     assert.equal(
       amuxSwitchedTabStatus(tab, {}),
-      tab === "auto-promotion" ? "behind_server_switch" : "preview_apply_off",
+      isServerSwitch(tab) ? "behind_server_switch" : "preview_apply_off",
       tab
     );
   }
@@ -127,7 +166,7 @@ test("with the variable enabled a chip says open exactly when the shipped latch 
   for (const [tab, entry] of Object.entries(SWITCHES)) {
     const status = amuxSwitchedTabStatus(tab, { [entry.env]: "enabled" });
     const expected =
-      tab === "auto-promotion"
+      isServerSwitch(tab)
         ? entry.latch
           ? "server_switch_on"
           : "behind_server_switch"
@@ -143,7 +182,7 @@ test("only the exact value opens a switch", () => {
     for (const value of ["Enabled", "true", "1", " enabled", ""]) {
       assert.equal(
         amuxSwitchedTabStatus(tab, { [entry.env]: value }),
-        tab === "auto-promotion" ? "behind_server_switch" : "preview_apply_off",
+        isServerSwitch(tab) ? "behind_server_switch" : "preview_apply_off",
         `${tab}=${JSON.stringify(value)}`
       );
     }
@@ -172,6 +211,9 @@ test("an open switch is drawn for attention and a closed one is not", () => {
   assert.deepEqual(amuxSwitchedTabStatuses(["auto-promotion"], {}), {
     "auto-promotion": "behind_server_switch",
   });
+  assert.deepEqual(amuxSwitchedTabStatuses(["automatic-admission"], {}), {
+    "automatic-admission": "behind_server_switch",
+  });
 });
 
 test("the pages ask the switches rather than writing the state", () => {
@@ -186,6 +228,14 @@ test("the pages ask the switches rather than writing the state", () => {
     );
     assert.doesNotMatch(page, /apply off|apply_off"|server switch/i, `${segment} writes a state`);
   }
+  const settings = read("app/(site)/(application)/admin/amux-settings/page.tsx");
+  assert.match(
+    settings,
+    /amuxSwitchedTabStatus\("automatic-admission"\)/
+  );
+  assert.match(settings, /<AmuxV22PromotionControl \/>/);
+  const promotion = read("app/(site)/(application)/admin/amux-promotion/page.tsx");
+  assert.doesNotMatch(promotion, /AmuxV22PromotionControl/);
   const execution = read("app/(site)/(application)/admin/amux-execution/page.tsx");
   // Assignment is read only exactly when the escalation routes would refuse
   // this viewer's decisions.
