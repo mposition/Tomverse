@@ -1,4 +1,6 @@
 import { notFound } from "next/navigation";
+import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
+import { AdminLocaleProvider } from "@/components/admin/AdminLocaleProvider";
 import { AdminConsoleShell } from "@/components/admin/AdminConsoleShell";
 import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
 import { AdminMemoryImportPanel } from "@/components/admin/AdminMemoryImportPanel";
@@ -148,8 +150,11 @@ export default async function AdminConsoleFixturePage({
         in a `flex flex-col` stack on the console's own routes.
       */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <AdminUserSecurityHarness initialUser={initialUser} />
+        {view !== "amux" && <AdminUserSecurityHarness initialUser={initialUser} />}
       </div>
+      {view === "amux" && <AdminLocaleProvider locale={single(params.locale) === "ko" ? "ko" : "en"}>
+        <AmuxExecutionWorkspace initialTaskId={single(params.taskId) || null} />
+      </AdminLocaleProvider>}
       {view === "narrow" ? (
         <section className="mt-4 flex flex-col gap-4">
           <AdminPrivacyRequestsPanel />
