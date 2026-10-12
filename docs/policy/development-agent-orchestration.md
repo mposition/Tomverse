@@ -8,7 +8,10 @@
 상태(v27 이력): **v27 전용 Ubuntu runner worker 목록·Decision Maker 실행 주체 승인, 운영 활성화 별도.** 2026-10-09 운영자 `mposition`이 아래 v27 절을 승인했다. 이전 v25 상태 줄은 이력이다. 아래 v27 절은 전용 Ubuntu runner의 worker 목록을 바꾸고(Devin 제거, Cursor·GitHub Copilot worker 여섯 추가) Decision Maker 실행 주체 둘을 더하는 후보다. 운영자가 승인을 기록하기 전에는 효력이 없고 `상태(최신)`은 v25로 남는다. 이 후보는 코드, 래치, 환경 변수를 바꾸지 않는다.
 상태(v28 이력): **v28 AMUX Orchestrator의 Railway 선언을 `Tomverse Agents` project의 IaC로 승인, 이전은 운영자 단계.** 2026-10-09 운영자 `mposition`이 아래 v28 절을 승인했다. 그 절의 이전 절차를 마치기 전에는 버전 20 9·10항대로 `Tomverse` project의 대시보드가 이 서비스의 설정을 정한다. 이전 v27 상태 줄은 이력이다.
 상태(v29 이력): **v29 v22 자동 편입·worker claim·Task 실행 활성화 범위 승인.** 운영자 `mposition`의 2026-10-10 요청을 아래 v29 절에 기록한다. 코드 래치 변경은 실제 운영 활성화나 완료 증거가 아니다.
-상태(최신): **v32 worker 등록부 R1 코드 래치 승인.** 2026-10-12 운영자 `mposition`이 아래 v32 절을 승인했다. `AMUX_WORKER_REGISTRY_WRITES_LATCH`는 true가 되어 owner가 Admin에서 등록부에 쓸 수 있다. 배정은 R2 전까지 카탈로그 환경 변수를 따른다. v30·v31의 승인 기록은 각 절에 있다. 이전 v29 상태 줄은 이력이다.
+상태(v30 이력): **v30 초기 v22 활성화의 졸업 근거 예외 승인.** 운영자 `mposition`이 2026-10-11에 아래 v30 절의 닫힌 bootstrap 예외를 승인했다. 이전 v29 상태 줄은 이력이다.
+상태(v31 이력): **v31 worker 등록부와 공급사 종류 승인.** 운영자 `mposition`이 2026-10-12에 아래 v31 절과 그 활성화 게이트 값을 승인했다. 이전 v30 상태 줄은 이력이다.
+상태(v32 이력): **v32 worker 등록부 R1 코드 래치 승인.** 2026-10-12 운영자 `mposition`이 아래 v32 절을 승인했다. `AMUX_WORKER_REGISTRY_WRITES_LATCH`는 true가 되어 owner가 Admin에서 등록부에 쓸 수 있다. 배정은 R2 전까지 카탈로그 환경 변수를 따른다.
+상태(최신): **v33 DB로 미반영이 확정된 Orchestrator halt의 자동 종결 승인.** 운영자 `mposition`이 2026-10-12에 아래 v33 절의 동일 요청 `no_commit` 범위와 운영 안내 화면을 승인했다. 자동 종결은 원래 쓰기의 재시도가 아니며, 증거 없는 정지와 사람 확인 대상은 계속 사람이 해제한다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -35,8 +38,10 @@ approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 24
 approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 25
 approvedBy: mposition · approvedAt: 2026-10-09 · 정책 버전: 28
 approvedBy: mposition · approvedAt: 2026-10-10 · 정책 버전: 29
+approvedBy: mposition · approvedAt: 2026-10-11 · 정책 버전: 30
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 31
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 32
+approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 33
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -69,8 +74,11 @@ approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 32
 | 25 | 2026-10-07 mposition | engineering adapter의 코드 래치 `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`를 켠다. adapter의 모든 AMUX writer 호출은 이 래치, 버전 18의 실행 API 게이트, `off`가 아닌 engineering 운영 mode가 모두 참일 때만 열린다(Authority 절). 버전 12의 허용 동작 목록, 환경 변수, worker catalog, 용량 행, 자동 승격, Railway 서비스, 게시 App, engineering mode는 바꾸지 않는다. |
 | 27 | 2026-10-09 mposition | 전용 Ubuntu runner의 worker 목록 변경. 2026-10-09 운영자 지시로 제거한 `devin-worker`를 기록하고 `cursor-chore`·`cursor-impl`·`cursor-worker`·`copilot-chore`·`copilot-impl`·`copilot-worker`를 더해 13개로 한다. 새 로그인 둘의 권한 목록, 실행마다의 실제 모델·공급사 기록, v22의 사용량 사건이 확인되고 운영자가 따로 활성화하기 전에는 여섯이 제품 claim·dispatch 대상이 아니며, v16 교차 검토와 Decision Maker 라우팅에는 별도 버전 전까지 들지 않는다. Decision Maker 실행 주체 둘을 docs/policy/amux-decision-maker.md §5의 격리 조건 그대로 더한다. 이 버전 자체로 bridge·claim·실행 API·DM 스위치를 켜지 않는다. |
 | 28 | 2026-10-09 mposition | Railway 서비스 `AMUX Orchestrator`를 `Tomverse` project의 대시보드 관리에서 `Tomverse Agents` project의 IaC 선언(`.railway/agent-runners.ts`)으로 옮긴다. 버전 20 9항의 재시작 정책(`On Failure`, 최대 10회)과 10항의 `checkSuites: false`를 그 선언이 정한다. 변수 목록은 다섯 이름이며 명령 실행을 여는 이름은 없다. orchestrator 코드, 정지·재시작 동작, claim·실행 API·worker catalog 값은 바꾸지 않는다. |
+| 29 | 2026-10-10 mposition | v22 자동 편입·worker claim·Task 실행의 코드 래치를 켠다. 환경 값과 기존 졸업·비용·승인·감사·정지 게이트를 면제하지 않고, 게시·병합·배포와 운영자 완료 판정 자동화는 열지 않는다. |
+| 30 | 2026-10-11 mposition | 초기 v22 활성화에 `owner-bootstrap-2026-10-11` 졸업 근거 예외 하나를 둔다. owner 재인증·동일 transaction 감사·매 회차 재확인을 요구하고 다른 졸업·비용·권한·결과 불명 게이트는 유지한다. |
 | 31 | 2026-10-12 mposition | worker 등록부와 공급사 종류. 공급사 종류를 한 번 승인하고 그 종류의 worker는 owner의 운영 행위로 더한다. 등록부(사람만 씀)와 시스템의 관측·시험·자동 정지 래치 표, 서버 조정기, 시험 기간(카드 3회, worker당 US$5), 연속 3회 실패 래치, R1~R6 전환 순서. 이 승인 자체로 어떤 코드 래치나 환경 변수도 켜지 않는다. |
 | 32 | 2026-10-12 mposition | 버전 31 R1의 코드 래치 `AMUX_WORKER_REGISTRY_WRITES_LATCH`를 켠다. owner의 등록부 쓰기만 열리고, R1의 관측 기간은 열셋 등록 뒤 3일(72시간)이다. 배정, 환경 변수, worker catalog, bridge, 관측·시험·래치 표는 바꾸지 않는다. |
+| 33 | 2026-10-12 mposition | 같은 요청의 admission row lock, deadline+grace, 영수증 0, `no_commit` resolution과 결속된 시스템 감사를 DB가 검증한 결과 불명 halt만 자동 종결한다. 그 밖의 정지는 사람 해제 그대로이며 원래 쓰기를 재시도하지 않는다. 운영 화면은 자동 복구와 사람 판단을 구분해 증거와 확인 순서를 설명한다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1561,6 +1569,48 @@ v27의 여섯은 R5의 활성화 전까지 v27 절 5의 제약을 그대로 받�
   - v27의 여섯은 `requested`로 등록되어도 v27 절 5의 제약을 그대로 받는다.
   - 환경 변수, worker catalog, bridge, 용량 행, 비용 상한, 동시 실행 상한은 바꾸지 않는다.
 - **되돌리기.** 래치를 false로 되돌리는 변경은 쓰기만 다시 닫는다. 이미 쓴 사건은 append-only라 남는다. 등록부를 비우는 경로는 없다.
+
+## 버전 33 — 검증된 `no_commit` Orchestrator halt 자동 종결
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-12`. 운영자는 서버가 동일 요청의 결과 미반영을 확정한 경우 정지를 자동으로 풀고, 운영 화면에서 자동 복구와 사람 판단 대상을 구분해 무엇을 확인할지 설명하도록 요청했다. 이 버전은 v20의 Orchestrator halt만 개정한다. v20 11항의 bridge 종료 코드 3, v31의 worker 자동 정지 래치, worker 등록·heartbeat 결과 불명은 바꾸지 않는다.
+
+### 1. 자동 종결의 유일한 허용 경로
+
+서버는 아래 조건을 **모두 같은 transaction에서** 확인하고 쓸 때만 halt를 자동 종결한다.
+
+1. halt가 요청 id를 가지며 `haltKey = requestId`이고, 같은 `AmuxOrchestratorWrite` 접수 행을 `FOR UPDATE`로 잠갔다.
+2. DB 시계로 `deadlineAt + 5초`가 지났고 접수는 ack·resolution 전이며, 같은 요청의 `AmuxOrchestratorWriteReceipt`가 0개다.
+3. halt 사유가 `claim_outcome_unknown`, `recovery_outcome_unknown`, `promotion_outcome_unknown` 중 하나다.
+4. 접수를 `resolution = no_commit`으로 닫으며 시스템 감사 `amux.orchestrator.write_resolved`를 쓴다.
+5. halt에 `clearKind = system_no_commit`, 시스템 감사 `amux.orchestrator.halt_auto_cleared`, 그리고 4의 resolution 감사 id를 쓴다.
+
+DB trigger는 1~5의 행 모양과 두 감사의 action·target·system actor, `no_commit`, 영수증 0, 사유 allowlist를 다시 검사한다. 애플리케이션이 `clearedAt`이나 `clearKind`만 쓰거나 시스템 actor를 사람 행위로 꾸며도 거절해야 한다. 이미 `no_commit`으로 닫힌 접수에 열린 halt가 남은 경우도 동일 증거를 재검증해 자동 종결한다. 이 경우 원래 쓰기를 다시 판정하거나 실행하지 않고, 기존 `write_resolved` 감사를 evidence로 결속한 새 `halt_auto_cleared` 감사만 같은 자동 종결 transaction에 남긴다.
+
+`unacked_write_receipt`, `contract_violation`, `selection_read_failures`, 접수 없음, deadline 전, ack된 접수, `human_confirmed`, 영수증 1개 이상, 일치하지 않는 request·halt, 감사 또는 증거 부재는 자동 종결하지 않는다. 단순 시간 경과, 빈 halt 목록, 개발 서버 재호출은 근거가 아니다.
+
+### 2. 사람 해제와 기록
+
+v20 7항의 사람 해제는 유지한다. `clearKind = human`, `clearedByUserId`, 사람 감사 `amux.orchestrator.halt_cleared`를 같은 transaction에 남긴다. 관련 접수가 아직 열려 있으면 `human_confirmed`로 닫는다. 자동 종결은 관리자 id를 만들지 않고, 사람 감사를 시스템 감사로 대체해 쓰지 않는다.
+
+halt read model은 `clearKind`, clear audit id, 자동 종결이면 resolution evidence audit id를 돌려준다. Rust Orchestrator는 자기 메모리 halt를 놓기 전에 `system_no_commit`의 reason allowlist, 동일 halt·request key, `no_commit`, 두 감사 id가 모두 있는 서버 증거를 확인한다. `cleared: true`만으로 자동 종결을 믿지 않는다. 사람 해제도 `human` clear kind와 사람 감사 id가 있어야 한다. 다른 열린 halt, 미정 접수, 사람 확인 필요 접수가 하나라도 있으면 전체 scheduling은 계속 막는다.
+
+### 3. 운영 화면
+
+v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 모든 관리자가 읽을 수 있는 AMUX 운영 설정 안의 한 섹션으로 합칠 수 있고, 기존 URL은 필요한 경우 그 섹션으로 이동시킨다. 별도 내비게이션 항목이나 독립 페이지를 유지할 의무는 없다.
+
+화면은 저장된 증거만으로 다음을 구분한다.
+
+- **자동 복구 완료:** `system_no_commit`, 영수증 0, resolution·자동 종결 감사 결속. 운영자 조작이 필요 없고 원래 쓰기는 재시도되지 않았음을 표시한다.
+- **운영 확인 필요:** 영수증이 있거나 접수·결과가 미정이다. 대상 종류와 id, 실제 카드·attempt·grant·소비 상태를 대조한 뒤 사람 해제를 결정한다.
+- **원인 수정 필요:** 접수 없는 `contract_violation`·`selection_read_failures`다. 인증·응답 계약·반복 읽기 실패 원인을 확인한 뒤 사람 해제한다.
+
+사람 해제 UI는 기존 owner·recent step-up·haltKey 앞 8자 확인을 유지한다. 화면은 “해제”를 안전 판정처럼 표현하지 않고, 확인할 증거와 자동 종결 불가 사유를 먼저 보여 준다. 관측되지 않은 원인이나 결과를 추측해 적지 않는다.
+
+### 4. 경계와 활성화
+
+이 버전은 새 환경 변수, 외부 알림, provider 호출, 비용, 카드 lifecycle·owner·attempt·promotion 상태, worker 등록부·bridge·sidecar, Publisher·병합·배포 권한을 바꾸지 않는다. 자동 종결과 사람 해제 어느 쪽도 claim·recover·promotion 원래 작업을 다시 실행하지 않는다.
+
+작성자와 다른 provider의 독립 검토, append migration을 적용한 PostgreSQL 통합 테스트, Rust 계약 테스트가 배포 전 차단 조건이다. 구현·검토·병합·배포와 운영 read-back은 따로 보고한다.
 
 ## CLI 사용량 보존·집계 부속 계약 — 2026-10-02 승인
 

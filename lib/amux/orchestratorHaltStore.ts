@@ -7,6 +7,7 @@ import type { Session } from "next-auth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   AMUX_ORCHESTRATOR_AUDIT_ACTIONS,
+  AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES,
   AMUX_ORCHESTRATOR_DEADLINE_GRACE_MS,
   AMUX_ORCHESTRATOR_RECEIPT_TARGET_KINDS,
   amuxOrchestratorAuditMetadata,
@@ -16,12 +17,14 @@ import {
   type AmuxOrchestratorAckDecision,
   type AmuxOrchestratorAckKind,
   type AmuxOrchestratorCallKind,
+  type AmuxOrchestratorHaltClearKind,
   type AmuxOrchestratorHaltReasonCode,
   type AmuxOrchestratorHaltRecord,
   type AmuxOrchestratorJudgement,
   type AmuxOrchestratorReceiptTargetKind,
 } from "@/lib/amux/orchestratorHaltCore";
 import { writeAmuxOrchestratorSystemAudit } from "@/lib/amux/orchestratorHaltSystemAudit";
+import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -219,17 +222,109 @@ export async function listAmuxOrchestratorResolveCandidates(
   const rows = await tx.$queryRaw<Array<{ requestId: string }>>`
     SELECT w."requestId"
     FROM "AmuxOrchestratorWrite" w
-    WHERE w."ackedAt" IS NULL
+    WHERE (
+      w."ackedAt" IS NULL
       AND w."resolvedAt" IS NULL
       AND w."deadlineAt" + ${AMUX_ORCHESTRATOR_DEADLINE_GRACE_MS} * INTERVAL '1 millisecond'
         <= clock_timestamp()
       AND NOT EXISTS (
         SELECT 1 FROM "AmuxOrchestratorWriteReceipt" r WHERE r."requestId" = w."requestId"
       )
+    ) OR (
+      w."ackedAt" IS NULL
+      AND w."resolvedAt" IS NOT NULL
+      AND w."resolution" = 'no_commit'
+      AND EXISTS (
+        SELECT 1
+        FROM "AmuxOrchestratorHalt" h
+        WHERE h."requestId" = w."requestId"
+          AND h."clearedAt" IS NULL
+          AND h."reasonCode" IN (${Prisma.join([...AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES])})
+      )
+    )
     ORDER BY w."deadlineAt" ASC, w."requestId" ASC
     LIMIT ${limit}
   `;
   return rows.map((row) => row.requestId);
+}
+
+async function findNoCommitResolutionAuditId(
+  tx: Prisma.TransactionClient,
+  requestId: string,
+): Promise<string | null> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id"
+    FROM "AdminAuditLog"
+    WHERE "action" = ${AMUX_ORCHESTRATOR_AUDIT_ACTIONS.writeResolved}
+      AND "targetId" = ${requestId}
+      AND "actorUserId" IS NULL
+      AND "metadata"->>'systemActor' = ${AMUX_SYSTEM_AUDIT_ACTOR}
+      AND "metadata"->>'request_id' = ${requestId}
+      AND "metadata"->>'resolution' = 'no_commit'
+    ORDER BY "createdAt" ASC, "id" ASC
+    LIMIT 1
+  `;
+  return rows[0]?.id ?? null;
+}
+
+/**
+ * Version 33: with the admission row already locked and resolved no_commit,
+ * closes its one eligible open halt. The receipt count is checked again under
+ * the same admission lock. The evidence audit, automatic-clear audit and halt
+ * columns are bound in this transaction; the append migration's trigger
+ * independently verifies the same facts.
+ */
+async function autoClearNoCommitHaltLocked(
+  tx: Prisma.TransactionClient,
+  input: {
+    requestId: string;
+    callKind: string;
+    resolutionAuditId: string;
+  },
+): Promise<string | null> {
+  if ((await countAmuxOrchestratorReceipts(tx, input.requestId)) !== 0) return null;
+  const halts = await tx.$queryRaw<
+    Array<{ id: string; haltKey: string; reasonCode: string }>
+  >`
+    SELECT "id", "haltKey", "reasonCode"
+    FROM "AmuxOrchestratorHalt"
+    WHERE "requestId" = ${input.requestId}
+      AND "clearedAt" IS NULL
+      AND "reasonCode" IN (${Prisma.join([...AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES])})
+    FOR UPDATE
+  `;
+  const halt = halts[0];
+  if (!halt) return null;
+  const clearAuditId = await writeAmuxOrchestratorSystemAudit(tx, {
+    action: AMUX_ORCHESTRATOR_AUDIT_ACTIONS.haltAutoCleared,
+    targetType: "AmuxOrchestratorHalt",
+    targetId: halt.id,
+    summary: "Automatically cleared an AMUX orchestrator halt after verified no-commit resolution.",
+    metadata: amuxOrchestratorAuditMetadata({
+      halt_id: halt.id,
+      halt_key: halt.haltKey,
+      request_id: input.requestId,
+      reason_code: halt.reasonCode,
+      call_kind: input.callKind,
+      resolution: "no_commit",
+      clear_kind: "system_no_commit",
+      evidence_audit_id: input.resolutionAuditId,
+    }),
+  });
+  const cleared = await tx.$executeRaw`
+    UPDATE "AmuxOrchestratorHalt"
+    SET
+      "clearedAt" = clock_timestamp(),
+      "clearKind" = 'system_no_commit',
+      "clearedByUserId" = NULL,
+      "clearAuditLogId" = ${clearAuditId},
+      "clearEvidenceAuditLogId" = ${input.resolutionAuditId}
+    WHERE "id" = ${halt.id} AND "clearedAt" IS NULL
+  `;
+  if (cleared !== 1) {
+    throw new Error("AMUX orchestrator halt changed under its own row lock");
+  }
+  return halt.id;
 }
 
 /**
@@ -248,20 +343,37 @@ export async function resolveAmuxOrchestratorWriteLocked(
   const locked = await tx.$queryRaw<
     Array<{
       callKind: string;
+      acked: boolean;
       open: boolean;
+      resolution: string | null;
       deadlineAtEpochMs: bigint;
     }>
   >`
     SELECT
       "callKind",
+      ("ackedAt" IS NOT NULL) AS "acked",
       ("ackedAt" IS NULL AND "resolvedAt" IS NULL) AS "open",
+      "resolution",
       floor(extract(epoch FROM "deadlineAt") * 1000)::bigint AS "deadlineAtEpochMs"
     FROM "AmuxOrchestratorWrite"
     WHERE "requestId" = ${requestId}
     FOR UPDATE
   `;
   const row = locked[0];
-  if (!row || row.open !== true) return "closed";
+  if (!row) return "closed";
+  if (row.open !== true) {
+    if (row.acked || row.resolution !== "no_commit") return "closed";
+    const resolutionAuditId = await findNoCommitResolutionAuditId(tx, requestId);
+    if (!resolutionAuditId) {
+      throw new Error("AMUX orchestrator no-commit resolution audit is missing");
+    }
+    await autoClearNoCommitHaltLocked(tx, {
+      requestId,
+      callKind: row.callKind,
+      resolutionAuditId,
+    });
+    return "no_commit";
+  }
   // A second statement, after the lock: it reads what the transaction the
   // lock waited for committed (see acknowledgeAmuxOrchestratorWriteLocked).
   const counted = await tx.$queryRaw<
@@ -278,7 +390,7 @@ export async function resolveAmuxOrchestratorWriteLocked(
     receiptCount: Number(counted[0]?.receiptCount ?? 0),
   });
   if (judgement !== "no_commit") return judgement;
-  await writeAmuxOrchestratorSystemAudit(tx, {
+  const resolutionAuditId = await writeAmuxOrchestratorSystemAudit(tx, {
     action: AMUX_ORCHESTRATOR_AUDIT_ACTIONS.writeResolved,
     targetType: "AmuxOrchestratorWrite",
     targetId: requestId,
@@ -297,6 +409,11 @@ export async function resolveAmuxOrchestratorWriteLocked(
   if (updated !== 1) {
     throw new Error("AMUX orchestrator write changed under its own row lock");
   }
+  await autoClearNoCommitHaltLocked(tx, {
+    requestId,
+    callKind: row.callKind,
+    resolutionAuditId,
+  });
   return "no_commit";
 }
 
@@ -307,6 +424,10 @@ export type AmuxOrchestratorHaltRow = {
   requestId: string | null;
   openedAt: string;
   cleared: boolean;
+  clearKind: AmuxOrchestratorHaltClearKind | null;
+  clearAuditLogId: string | null;
+  clearEvidenceAuditLogId: string | null;
+  resolution: string | null;
 };
 
 type RawHaltRow = {
@@ -316,6 +437,10 @@ type RawHaltRow = {
   requestId: string | null;
   openedAtEpochMs: bigint;
   cleared: boolean;
+  clearKind: string | null;
+  clearAuditLogId: string | null;
+  clearEvidenceAuditLogId: string | null;
+  resolution: string | null;
 };
 
 const haltRow = (row: RawHaltRow): AmuxOrchestratorHaltRow => ({
@@ -325,12 +450,16 @@ const haltRow = (row: RawHaltRow): AmuxOrchestratorHaltRow => ({
   requestId: row.requestId,
   openedAt: new Date(epochMs(row.openedAtEpochMs)).toISOString(),
   cleared: row.cleared === true,
+  clearKind: row.clearKind as AmuxOrchestratorHaltClearKind | null,
+  clearAuditLogId: row.clearAuditLogId,
+  clearEvidenceAuditLogId: row.clearEvidenceAuditLogId,
+  resolution: row.resolution,
 });
 
 /**
- * A halt counts as cleared only when all three clear columns are written and
- * the audit entry they name is the human `amux.orchestrator.halt_cleared`
- * (section 6: "사람 감사 amux.orchestrator.halt_cleared가 있을 때만").
+ * A halt counts as cleared only when its path-specific proof is complete:
+ * the existing human audit and actor, or version 32's no-commit resolution
+ * audit plus automatic-clear system audit and zero receipts.
  */
 const selectHaltsByKeys = (tx: Prisma.TransactionClient, haltKeys: readonly string[]) =>
   tx.$queryRaw<RawHaltRow[]>`
@@ -339,17 +468,56 @@ const selectHaltsByKeys = (tx: Prisma.TransactionClient, haltKeys: readonly stri
       h."haltKey",
       h."reasonCode",
       h."requestId",
+      h."clearKind",
+      h."clearAuditLogId",
+      h."clearEvidenceAuditLogId",
+      w."resolution",
       floor(extract(epoch FROM h."openedAt") * 1000)::bigint AS "openedAtEpochMs",
       (
         h."clearedAt" IS NOT NULL
-        AND h."clearedByUserId" IS NOT NULL
-        AND a."id" IS NOT NULL
+        AND (
+          (
+            h."clearKind" = 'human'
+            AND h."clearedByUserId" IS NOT NULL
+            AND clear_audit."id" IS NOT NULL
+            AND clear_audit."action" = ${AMUX_ORCHESTRATOR_AUDIT_ACTIONS.haltCleared}
+            AND clear_audit."targetId" = h."id"
+            AND clear_audit."actorUserId" = h."clearedByUserId"
+            AND h."clearEvidenceAuditLogId" IS NULL
+          ) OR (
+            h."clearKind" = 'system_no_commit'
+            AND h."clearedByUserId" IS NULL
+            AND h."reasonCode" IN (${Prisma.join([...AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES])})
+            AND h."requestId" = h."haltKey"
+            AND w."ackedAt" IS NULL
+            AND w."resolution" = 'no_commit'
+            AND clear_audit."id" IS NOT NULL
+            AND clear_audit."action" = ${AMUX_ORCHESTRATOR_AUDIT_ACTIONS.haltAutoCleared}
+            AND clear_audit."targetId" = h."id"
+            AND clear_audit."actorUserId" IS NULL
+            AND clear_audit."metadata"->>'systemActor' = ${AMUX_SYSTEM_AUDIT_ACTOR}
+            AND clear_audit."metadata"->>'request_id' = h."requestId"
+            AND clear_audit."metadata"->>'resolution' = 'no_commit'
+            AND clear_audit."metadata"->>'clear_kind' = 'system_no_commit'
+            AND clear_audit."metadata"->>'evidence_audit_id' = h."clearEvidenceAuditLogId"
+            AND evidence_audit."id" IS NOT NULL
+            AND evidence_audit."action" = ${AMUX_ORCHESTRATOR_AUDIT_ACTIONS.writeResolved}
+            AND evidence_audit."targetId" = h."requestId"
+            AND evidence_audit."actorUserId" IS NULL
+            AND evidence_audit."metadata"->>'systemActor' = ${AMUX_SYSTEM_AUDIT_ACTOR}
+            AND evidence_audit."metadata"->>'request_id' = h."requestId"
+            AND evidence_audit."metadata"->>'resolution' = 'no_commit'
+            AND NOT EXISTS (
+              SELECT 1 FROM "AmuxOrchestratorWriteReceipt" receipt
+              WHERE receipt."requestId" = h."requestId"
+            )
+          )
+        )
       ) AS "cleared"
     FROM "AmuxOrchestratorHalt" h
-    LEFT JOIN "AdminAuditLog" a
-      ON a."id" = h."clearAuditLogId"
-     AND a."action" = ${AMUX_ORCHESTRATOR_AUDIT_ACTIONS.haltCleared}
-     AND a."actorUserId" = h."clearedByUserId"
+    LEFT JOIN "AmuxOrchestratorWrite" w ON w."requestId" = h."requestId"
+    LEFT JOIN "AdminAuditLog" clear_audit ON clear_audit."id" = h."clearAuditLogId"
+    LEFT JOIN "AdminAuditLog" evidence_audit ON evidence_audit."id" = h."clearEvidenceAuditLogId"
     WHERE h."haltKey" IN (${Prisma.join([...haltKeys])})
   `;
 
@@ -401,6 +569,10 @@ export async function openAmuxOrchestratorHaltLocked(
       "haltKey",
       "reasonCode",
       "requestId",
+      "clearKind",
+      "clearAuditLogId",
+      "clearEvidenceAuditLogId",
+      NULL::text AS "resolution",
       floor(extract(epoch FROM "openedAt") * 1000)::bigint AS "openedAtEpochMs",
       false AS "cleared"
   `;
@@ -423,7 +595,17 @@ export type AmuxOrchestratorHaltState = {
     callKind: AmuxOrchestratorCallKind;
     receiptCount: number;
   }>;
-  halts: Array<{ haltKey: string; haltId: string; cleared: boolean }>;
+  halts: Array<{
+    haltKey: string;
+    haltId: string;
+    reasonCode: AmuxOrchestratorHaltReasonCode;
+    requestId: string | null;
+    cleared: boolean;
+    clearKind: AmuxOrchestratorHaltClearKind | null;
+    clearAuditLogId: string | null;
+    clearEvidenceAuditLogId: string | null;
+    resolution: string | null;
+  }>;
 };
 
 /**
@@ -443,6 +625,10 @@ export async function readAmuxOrchestratorHaltState(
       "haltKey",
       "reasonCode",
       "requestId",
+      "clearKind",
+      "clearAuditLogId",
+      "clearEvidenceAuditLogId",
+      NULL::text AS "resolution",
       floor(extract(epoch FROM "openedAt") * 1000)::bigint AS "openedAtEpochMs",
       false AS "cleared"
     FROM "AmuxOrchestratorHalt"
@@ -536,7 +722,13 @@ export async function readAmuxOrchestratorHaltState(
     halts: keyed.map((row) => ({
       haltKey: row.haltKey,
       haltId: row.id,
+      reasonCode: row.reasonCode as AmuxOrchestratorHaltReasonCode,
+      requestId: row.requestId,
       cleared: row.cleared === true,
+      clearKind: row.clearKind as AmuxOrchestratorHaltClearKind | null,
+      clearAuditLogId: row.clearAuditLogId,
+      clearEvidenceAuditLogId: row.clearEvidenceAuditLogId,
+      resolution: row.resolution,
     })),
   };
 }
@@ -560,7 +752,7 @@ const CLEAR_STATEMENT_TIMEOUT_MS = 5_000;
  * owner role and a recent step-up. In one transaction, in this lock order
  * (halt row, then the admission, then the audit chain): the typed halt key
  * prefix is compared, the human audit `amux.orchestrator.halt_cleared` is
- * written, the three clear columns are written once, and the related
+ * written, the human clear columns are written once, and the related
  * admission, if it exists and is not resolved, is closed `human_confirmed`,
  * which closes its receipts with it. Nothing here claims, recovers or ticks:
  * the original operation is never run again.
@@ -576,6 +768,28 @@ export async function clearAmuxOrchestratorHalt(input: {
   return prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', ${String(CLEAR_STATEMENT_TIMEOUT_MS)}, true)`;
+      // Version 32's automatic clear locks admission then halt. Read the
+      // immutable request id first and take the same lock order here so a
+      // simultaneous owner decision cannot deadlock with the resolver.
+      const identified = (
+        await tx.$queryRaw<Array<{ requestId: string | null }>>`
+          SELECT "requestId"
+          FROM "AmuxOrchestratorHalt"
+          WHERE "id" = ${input.haltId}
+        `
+      )[0];
+      if (!identified) throw new AmuxOrchestratorHaltClearError("not_found", 404);
+      const admission =
+        identified.requestId === null
+          ? null
+          : ((
+              await tx.$queryRaw<Array<{ resolved: boolean }>>`
+                SELECT ("resolvedAt" IS NOT NULL) AS "resolved"
+                FROM "AmuxOrchestratorWrite"
+                WHERE "requestId" = ${identified.requestId}
+                FOR UPDATE
+              `
+            )[0] ?? null);
       const halts = await tx.$queryRaw<
         Array<{
           id: string;
@@ -596,17 +810,6 @@ export async function clearAmuxOrchestratorHalt(input: {
       if (!amuxOrchestratorHaltKeyPrefixMatches(halt.haltKey, input.haltKeyPrefix)) {
         throw new AmuxOrchestratorHaltClearError("halt_key_mismatch", 409);
       }
-      const admission =
-        halt.requestId === null
-          ? null
-          : ((
-              await tx.$queryRaw<Array<{ resolved: boolean }>>`
-                SELECT ("resolvedAt" IS NOT NULL) AS "resolved"
-                FROM "AmuxOrchestratorWrite"
-                WHERE "requestId" = ${halt.requestId}
-                FOR UPDATE
-              `
-            )[0] ?? null);
       const closesAdmission = admission !== null && admission.resolved !== true;
       const auditId = await writeAdminAuditLog({
         session: input.session,
@@ -628,8 +831,10 @@ export async function clearAmuxOrchestratorHalt(input: {
         UPDATE "AmuxOrchestratorHalt"
         SET
           "clearedAt" = clock_timestamp(),
+          "clearKind" = 'human',
           "clearedByUserId" = ${userId},
-          "clearAuditLogId" = ${auditId}
+          "clearAuditLogId" = ${auditId},
+          "clearEvidenceAuditLogId" = NULL
         WHERE "id" = ${halt.id} AND "clearedAt" IS NULL
       `;
       if (cleared !== 1) throw new Error("AMUX orchestrator halt changed under its own row lock");
@@ -689,6 +894,10 @@ export type AmuxOrchestratorAdminHalt = {
   requestId: string | null;
   openedAt: string;
   clearedAt: string | null;
+  clearKind: AmuxOrchestratorHaltClearKind | null;
+  clearedByUserId: string | null;
+  clearAuditLogId: string | null;
+  clearEvidenceAuditLogId: string | null;
   write: AmuxOrchestratorAdminWrite | null;
 };
 
@@ -790,6 +999,10 @@ export async function readAmuxOrchestratorHaltsForAdmin(): Promise<AmuxOrchestra
     requestId: row.requestId,
     openedAt: row.openedAt.toISOString(),
     clearedAt: iso(row.clearedAt),
+    clearKind: row.clearKind as AmuxOrchestratorHaltClearKind | null,
+    clearedByUserId: row.clearedByUserId,
+    clearAuditLogId: row.clearAuditLogId,
+    clearEvidenceAuditLogId: row.clearEvidenceAuditLogId,
     write: row.requestId ? (byRequest.get(row.requestId) ?? null) : null,
   });
   return {

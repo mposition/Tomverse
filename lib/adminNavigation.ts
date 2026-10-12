@@ -788,16 +788,12 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     description: "AMUX cards, their execution state, and why AMUX assigned the work",
     group: "AMUX",
     // Assignment decisions take `ops:write` (every /api/admin/amux/escalations
-    // route checks it); the card list writes nothing. Clearing an orchestrator
-    // halt takes the owner role and a recent step-up in its own route. A worker
+    // route checks it); the card list writes nothing. A worker
     // registry change takes the owner role and a recent step-up in its route
-    // (orchestration policy version 31, section 3). A Decision Maker switch
-    // change takes ops:write and a recent step-up
-    // (docs/policy/amux-decision-maker.md §8).
+    // (orchestration policy version 31, section 3).
     writeRoles: ["owner", "ops"],
-    // Escalations plus open orchestrator halts (orchestration policy
-    // version 20, section 7).
-    badge: "amuxExecution",
+    // Halts belong to Operations settings, so this counts escalations only.
+    badge: "amuxEscalations",
     aliases: [
       "amux",
       "cards",
@@ -809,13 +805,8 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "human review",
       "review",
       "incident",
-      "orchestrator",
-      "halt",
-      "outcome unknown",
       "registry",
       "worker registry",
-      "decision maker",
-      "kill switch",
     ],
     tabs: [
       {
@@ -831,21 +822,24 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         badge: "amuxEscalations",
       },
       {
-        id: "halts",
-        label: "Halts",
-        description: "Orchestrator halts, the writes a person has to confirm, and clearing a halt",
-        badge: "amuxOrchestratorHalts",
-      },
-      {
         id: "workers",
         label: "Workers",
         description: "The worker registry, each worker's desired and effective state, and whether the assignment catalog agrees",
       },
-      {
-        id: "decision-maker",
-        label: "Decision Maker",
-        description: "The Decision Maker kill switch and the mode of each instance",
-      },
+    ],
+  },
+  {
+    id: "amux-settings",
+    label: "Operations settings",
+    href: "/admin/amux-settings",
+    description: "AMUX execution safety, recovery evidence and Decision Maker controls",
+    group: "AMUX",
+    writeRoles: ["owner", "ops"],
+    badge: "amuxOrchestratorHalts",
+    aliases: ["amux", "settings", "recovery", "halt", "orchestrator", "outcome unknown", "decision maker", "kill switch"],
+    tabs: [
+      { id: "safety", label: "Execution safety and recovery", description: "Automatic recovery, evidence to inspect and operator halt decisions", badge: "amuxOrchestratorHalts" },
+      { id: "decision-maker", label: "Decision Maker", description: "The Decision Maker kill switch and the mode of each instance" },
     ],
   },
   {
@@ -1196,6 +1190,12 @@ export const adminRedirectTarget = (
   }
   const search = params.toString();
   return search ? `${path}?${search}` : path;
+};
+
+/** The old section links remain bookmarks, never a second control surface. */
+export const ADMIN_AMUX_EXECUTION_LEGACY_TABS: Readonly<Record<string, string>> = {
+  halts: "/admin/amux-settings?tab=safety",
+  "decision-maker": "/admin/amux-settings?tab=decision-maker",
 };
 
 /**

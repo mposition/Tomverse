@@ -52,10 +52,11 @@ const NAVIGATION = [
   { group: "Operations", label: "Agent office", href: "/admin/office" },
   { group: "Operations", label: "Platform settings", href: "/admin/platform" },
   // Listed to the owner, who is who this describe block signs in as. Every
-  // other role sees Execution alone (the "AMUX group by role" block below).
+  // other role sees Execution and Operations settings (the role checks below).
   { group: "AMUX", label: "Backlog", href: "/admin/amux-backlog" },
   { group: "AMUX", label: "Promotion", href: "/admin/amux-promotion" },
   { group: "AMUX", label: "Execution", href: "/admin/amux-execution" },
+  { group: "AMUX", label: "Operations settings", href: "/admin/amux-settings" },
   { group: "Governance", label: "Email policy", href: "/admin/email-policy" },
   { group: "Governance", label: "Audit log", href: "/admin/audit" },
   { group: "Governance", label: "Retention", href: "/admin/retention" },
@@ -622,11 +623,11 @@ test.describe("admin console shell", () => {
   }) => {
     await page.goto("/admin/amux-execution");
     const strip = page.getByRole("navigation", { name: "Execution sections" });
-    // Cards, Assignment, Halts, Workers and Decision Maker.
-    await expect(strip.getByRole("link")).toHaveCount(5);
-    await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(1);
+    // Cards, Assignment and Workers; recovery and Decision Maker are settings sections.
+    await expect(strip.getByRole("link")).toHaveCount(3);
+    await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(1);
-    await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(1);
+    await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
       /tab=cards$/
@@ -675,7 +676,7 @@ test.describe("the AMUX group by role", () => {
     });
   }
 
-  test("another role sees Execution alone, opening on Assignment", async ({
+  test("another role sees Execution and Operations settings, opening Execution on Assignment", async ({
     page,
     signInAs,
   }) => {
@@ -685,6 +686,7 @@ test.describe("the AMUX group by role", () => {
 
     await expect(navigation.getByRole("button", { name: "AMUX" })).toBeVisible();
     await expect(navigation.locator('a[href="/admin/amux-execution"]')).toHaveCount(1);
+    await expect(navigation.locator('a[href="/admin/amux-settings"]')).toHaveCount(1);
     // Not advertised: these answer 404 to this role.
     await expect(navigation.locator('a[href="/admin/amux-backlog"]')).toHaveCount(0);
     await expect(navigation.locator('a[href="/admin/amux-promotion"]')).toHaveCount(0);
@@ -692,11 +694,11 @@ test.describe("the AMUX group by role", () => {
     await page.goto("/admin/amux-execution");
     await expect(consoleHeading(page)).toHaveText("Execution");
     const strip = page.getByRole("navigation", { name: "Execution sections" });
-    // Assignment, Halts, Workers and Decision Maker are readable by every role.
-    await expect(strip.getByRole("link")).toHaveCount(4);
-    await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(1);
+    // Assignment and Workers remain here; safety and switches belong to Operations settings.
+    await expect(strip.getByRole("link")).toHaveCount(2);
+    await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(1);
-    await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(1);
+    await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
       /tab=assignment$/
@@ -755,7 +757,7 @@ test.describe("the AMUX group by role", () => {
     await page.getByTestId("amux-dm-switch-set-kill_switch-on").click();
     await expect(panel.getByTestId("admin-api-reauthenticate-link")).toHaveAttribute(
       "href",
-      "/auth/admin-reauthenticate?callbackUrl=%2Fadmin%2Famux-execution&mode=recent"
+      "/auth/admin-reauthenticate?callbackUrl=%2Fadmin%2Famux-settings%3Ftab%3Ddecision-maker&mode=recent"
     );
     expect(await adminFixtureDatabase().amuxDecisionMakerSwitchEvent.count()).toBe(0);
     await expect(page.getByTestId("amux-dm-switch-value-kill_switch")).toHaveText("Off (off)");

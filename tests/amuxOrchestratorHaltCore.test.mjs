@@ -13,15 +13,18 @@ import test from "node:test";
 
 import {
   AMUX_ORCHESTRATOR_AUDIT_METADATA_KEYS,
+  AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES,
   AMUX_ORCHESTRATOR_CALL_KINDS,
   AMUX_ORCHESTRATOR_DEADLINE_GRACE_MS,
   AMUX_ORCHESTRATOR_HALT_REASON_CODES,
+  AMUX_ORCHESTRATOR_HALT_CLEAR_KINDS,
   AMUX_ORCHESTRATOR_NOTHING_COMMITTED_REASONS,
   AMUX_ORCHESTRATOR_RECEIPT_TARGET_HREFS,
   AMUX_ORCHESTRATOR_RECEIPT_TARGET_KINDS,
   AMUX_ORCHESTRATOR_REQUEST_HALT_REASONS,
   AMUX_ORCHESTRATOR_RESOLUTIONS,
   amuxOrchestratorAuditMetadata,
+  amuxOrchestratorHaltReasonAllowsAutoClear,
   amuxOrchestratorHaltKeyPrefixMatches,
   decideAmuxOrchestratorAck,
   judgeAmuxOrchestratorWrite,
@@ -61,6 +64,11 @@ test("the closed lists are the ones section 2 and section 4 name", () => {
     "quota_observation_batch",
   ]);
   assert.deepEqual(AMUX_ORCHESTRATOR_RESOLUTIONS, ["no_commit", "human_confirmed"]);
+  assert.deepEqual(AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES, AMUX_ORCHESTRATOR_HALT_REASON_CODES.slice(0, 3));
+  assert.deepEqual(AMUX_ORCHESTRATOR_HALT_CLEAR_KINDS, ["human", "system_no_commit"]);
+  for (const reason of AMUX_ORCHESTRATOR_HALT_REASON_CODES) {
+    assert.equal(amuxOrchestratorHaltReasonAllowsAutoClear(reason), AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES.includes(reason));
+  }
   assert.deepEqual(AMUX_ORCHESTRATOR_NOTHING_COMMITTED_REASONS, [
     "amux_database_busy",
     "amux_database_deadline_exceeded",
@@ -214,6 +222,8 @@ test("audit metadata holds only the allowlisted identifiers and codes", () => {
     "reason_code",
     "call_kind",
     "resolution",
+    "clear_kind",
+    "evidence_audit_id",
   ]);
   assert.deepEqual(
     amuxOrchestratorAuditMetadata({ halt_id: INSTANCE, request_id: REQUEST, call_kind: null }),

@@ -505,7 +505,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       <span>{m.activeTasks} <strong>{board ? board.counts.in_progress : m.unknown}</strong></span>
       <span>{m.awaitingWorker} <strong>{board ? board.counts.amux_backlog : m.unknown}</strong></span>
       <span>{m.awaitingReview} <strong>{board ? board.counts.in_review : m.unknown}</strong></span>
-      <Link href="/admin/amux-execution?tab=halts">{m.haltsLink}</Link>
+      <Link href="/admin/amux-settings?tab=safety">{m.haltsLink}</Link>
     </div>
     {activation && <details data-testid="amux-v22-activation-diagnostic"
       className="rounded border border-zinc-300 p-3 text-sm dark:border-zinc-700">

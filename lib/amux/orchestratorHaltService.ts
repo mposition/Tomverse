@@ -23,8 +23,8 @@ import {
 } from "@/lib/amux/orchestratorHaltStore";
 
 /**
- * The orchestrator's three internal calls of policy version 20, each inside
- * the bounded AMUX transactions of lib/amux/dbBoundary.ts. The SQL is in
+ * The orchestrator's three internal calls of policy versions 20 and 33, each
+ * inside the bounded AMUX transactions of lib/amux/dbBoundary.ts. The SQL is in
  * lib/amux/orchestratorHaltStore.ts; this module only decides which
  * transactions run and in what order.
  */
@@ -57,12 +57,12 @@ const stateReadBudgetMs = amuxDbTransactionBudgetMs(
 /**
  * Section 5: "판정을 먼저 적용한 뒤" -- the resolver first, then the state.
  *
- * Each admission past its deadline plus the grace is decided in its own
- * transaction under its own row lock, oldest first, as long as the route
- * still has room for one more decision and the read after it. A decision that
- * fails leaves its admission as it was, and the read that follows reports it
- * as undecided or as needing a person from what is actually stored, so no
- * failure here is reported as a decision.
+ * Each admission past its deadline plus the grace, and each already-resolved
+ * no-commit request with an eligible open halt, is handled in its own
+ * transaction under its own row lock, oldest first, as long as the route still
+ * has room for one more decision and the read after it. A decision that fails
+ * leaves its durable state as it was, so no failure here is reported as a
+ * decision or a clear.
  */
 export async function readAmuxOrchestratorHaltStateResolved(
   haltKeys: readonly string[],
