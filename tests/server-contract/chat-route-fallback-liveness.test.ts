@@ -2564,7 +2564,6 @@ const resetGuestHarness = (preserveClaims = false) => {
   injectPrimaryFault = false;
   fallbackBehaviour = "answers";
   failDispatchStart = false;
-  throwAfterFallbackDispatchRecord = false;
   throwBeforeFallbackStreamReturn = false;
   attempts.length = 0;
   attemptLifecycle.length = 0;
@@ -2592,8 +2591,6 @@ const resetGuestHarness = (preserveClaims = false) => {
   world.messages = [];
   world.terminals = [];
   ledger.settlements = [];
-  ledger.settledAttempts = [];
-  ledger.attemptBudgetReleasesAtSettlement = [];
   ledger.releases = [];
   ledger.attemptBudgetReservations = 0;
   ledger.attemptBudgetReleases = 0;
