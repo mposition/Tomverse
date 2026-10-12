@@ -1,0 +1,11 @@
+[Unit]
+Description=Tomverse AMUX bridge watchdog, every five minutes
+Documentation=https://github.com/mposition/Tomverse/blob/develop/docs/ops/amux/bridge-monitoring.md
+
+[Timer]
+# Matches the monitor's period. Its grace period covers a late run.
+OnCalendar=*:0/5
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
