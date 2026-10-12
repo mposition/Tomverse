@@ -200,15 +200,32 @@ const json = (status: number, body: unknown) =>
 
 const SEED = AMUX_WORKER_REGISTRY_V31_SEED.map(({ workerName, roleCeiling, desiredState }) => ({ workerName, roleCeiling, desiredState }));
 
-const runWith = async (answers: Array<() => Promise<Response>>, readResult: AmuxWorkerRegistryAdminView | null) => {
+const receipt = (entry: AmuxWorkerSeedEntry) =>
+  json(200, { workerName: entry.workerName, revision: 1, action: "amux.worker.register", eventId: "event-1", sequence: "1", createdAt: "2026-10-12T00:00:00.000Z" });
+
+/** A response whose headers arrived and whose body then broke off. */
+const brokenBody = (status: number) =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.error(new Error("connection reset"));
+      },
+    }),
+    { status, headers: { "content-type": "application/json" } },
+  );
+
+const runWith = async (
+  answers: Array<(entry: AmuxWorkerSeedEntry) => Promise<Response>>,
+  readResult: AmuxWorkerRegistryAdminView | null,
+) => {
   const updates: AmuxWorkerRegistryUpdate[] = [];
   const posted: string[] = [];
   let reads = 0;
   const io: AmuxWorkerRegistryIo = {
     post: async (entry) => {
       posted.push(entry.workerName);
-      const answer = answers[posted.length - 1] ?? (() => Promise.resolve(json(200, {})));
-      return answer();
+      const answer = answers[posted.length - 1] ?? ((sent: AmuxWorkerSeedEntry) => Promise.resolve(receipt(sent)));
+      return answer(entry);
     },
     read: async () => {
       reads += 1;
@@ -235,7 +252,7 @@ test("all answered: each worker sent once, in seed order, then the registry read
 
 test("a refusal by the change rule stops the run on that worker; nothing more is sent", async () => {
   const { posted, reads, last } = await runWith(
-    [() => Promise.resolve(json(200, {})), () => Promise.resolve(json(409, { error: "stale_revision" }))],
+    [(entry) => Promise.resolve(receipt(entry)), () => Promise.resolve(json(409, { error: "stale_revision" }))],
     PARTIAL,
   );
   assert.deepEqual(posted, SEED.slice(0, 2).map((entry) => entry.workerName));
@@ -271,9 +288,15 @@ for (const [label, answer] of [
   ["a 500", () => Promise.resolve(json(500, { error: "internal" }))],
   ["a 502 from a proxy", () => Promise.resolve(new Response("bad gateway", { status: 502 }))],
   ["no answer", () => Promise.reject(new TypeError("fetch failed"))],
+  // A 2xx is a success only with this worker's receipt.
+  ["a 200 whose body broke off", () => Promise.resolve(brokenBody(200))],
+  ["a 200 that is not JSON", () => Promise.resolve(new Response("ok", { status: 200 }))],
+  ["a 200 with an empty body object", () => Promise.resolve(json(200, {}))],
+  ["a 200 naming another worker", () => Promise.resolve(json(200, { workerName: "claude-chore", revision: 1, action: "amux.worker.register", eventId: "e" }))],
+  ["a 200 at another revision", (entry: AmuxWorkerSeedEntry) => Promise.resolve(json(200, { workerName: entry.workerName, revision: 2, action: "amux.worker.change", eventId: "e" }))],
 ] as const) {
   test(`${label}: the outcome is unknown, so nothing more is sent and the registry is read before release`, async () => {
-    const { posted, reads, last, updates } = await runWith([() => Promise.resolve(json(200, {})), answer], PARTIAL);
+    const { posted, reads, last, updates } = await runWith([(entry) => Promise.resolve(receipt(entry)), answer], PARTIAL);
     assert.equal(posted.length, 2);
     assert.equal(reads, 1);
     assert.equal(last("notice"), "outcome_unknown");

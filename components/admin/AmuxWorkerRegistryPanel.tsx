@@ -298,11 +298,35 @@ const refusalError = async (response: Response): Promise<unknown> => {
 };
 
 /**
+ * A 2xx proves only what its body says: the receipt of a registration of this
+ * very worker at revision 1. A body that broke off, does not parse, or names
+ * anything else is not a success -- the change may or may not have been
+ * recorded.
+ */
+const isRegistrationReceipt = async (response: Response, entry: AmuxWorkerSeedEntry): Promise<boolean> => {
+  try {
+    const body = (await response.json()) as Record<string, unknown> | null;
+    return (
+      body !== null &&
+      typeof body === "object" &&
+      body.workerName === entry.workerName &&
+      body.revision === 1 &&
+      body.action === "amux.worker.register" &&
+      typeof body.eventId === "string" &&
+      body.eventId.length > 0
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Registers the given seed entries one by one, each sent once with revision 0.
- * The first answer that is not a success stops the run: a refusal or a
- * pre-transaction status wrote nothing for that worker; any other answer --
- * `outcome_unknown`, an unreadable body, another status, or no answer at all
- * -- may have written it, so nothing more is sent (foundation principle 7).
+ * Only a verified receipt (`isRegistrationReceipt()`) lets the run go on. A
+ * refusal or a pre-transaction status wrote nothing for that worker and stops
+ * the run; any other answer -- `outcome_unknown`, a 2xx whose receipt cannot
+ * be read or verified, another status, or no answer at all -- may have written
+ * it, so nothing more is sent (foundation principle 7).
  * Whatever happened, the registry is read again before anything is released,
  * and the next run registers only what that read shows is missing.
  */
@@ -324,8 +348,12 @@ export async function runAmuxWorkerSeedRegistration(
         break;
       }
       if (response.ok) {
-        update({ pending: { done: index + 1, total: entries.length } });
-        continue;
+        if (await isRegistrationReceipt(response, entry)) {
+          update({ pending: { done: index + 1, total: entries.length } });
+          continue;
+        }
+        outcome = "outcome_unknown";
+        break;
       }
       const error = await refusalError(response);
       if (response.status === 409 && typeof error === "string" && REFUSAL_CODES.has(error)) {

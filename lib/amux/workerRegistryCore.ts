@@ -324,11 +324,12 @@ export const AMUX_WORKER_LATCH_CONSECUTIVE_FAILURES = 3;
 
 /**
  * Section 7: the latch is open when its newest event is an opening. `null`
- * means the latch could not be read, which is never "closed".
+ * is a worker with no latch event at all. This cannot express a latch that
+ * could not be read: `amuxWorkerEffectiveState()` takes that as `undefined`
+ * and reports `latch_unreadable` before it ever asks this function.
  */
-export const amuxWorkerLatchOpen = (
-  newestKind: AmuxWorkerLatchEventKind | null | undefined,
-): boolean => newestKind === "opened";
+export const amuxWorkerLatchOpen = (newestKind: AmuxWorkerLatchEventKind | null): boolean =>
+  newestKind === "opened";
 
 export const AMUX_WORKER_UNASSIGNABLE_REASONS = [
   "not_registered",

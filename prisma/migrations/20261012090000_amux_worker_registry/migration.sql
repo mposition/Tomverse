@@ -225,7 +225,9 @@ CREATE UNIQUE INDEX "AmuxWorkerObservation_sequence_key"
 CREATE INDEX "AmuxWorkerObservation_workerName_sequence_idx"
   ON "AmuxWorkerObservation"("workerName", "sequence");
 
--- Section 5(1): one row per trial card. R5.
+-- Section 5(1): a trial card's result. R5 decides with its writer how a trial
+-- number may repeat (a re-trial after a pause or a wider role) and adds the
+-- uniqueness that rule needs before it replaces this table's guard.
 CREATE TABLE "AmuxWorkerTrialEvidence" (
     "id" TEXT NOT NULL,
     "sequence" BIGSERIAL NOT NULL,
