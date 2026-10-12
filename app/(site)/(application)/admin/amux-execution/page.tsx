@@ -66,9 +66,8 @@ export default async function AdminAmuxExecutionPage({
   const isOwner = Boolean(session?.user?.id) && role === "owner";
   const canChangeDmSwitches = hasAdminPermission(session, "ops:write");
   const statuses: Record<string, AmuxTabStatus | undefined> = {
-    // The card list issues no request and writes nothing
-    // (tests/amuxAdminCardList.test.mjs pins both), so there is no switch for
-    // Card admission is an explicit owner action with server-side gates.
+    // The owner can request guarded admission; the supplementary card list
+    // remains read-only. Every command checks owner authorization again.
     cards: isOwner ? undefined : "read_only",
     // The same permission every escalation, proposal and review route checks.
     assignment: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
@@ -105,7 +104,7 @@ export default async function AdminAmuxExecutionPage({
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AmuxExecutionWorkspace initialTaskId={typeof query.taskId === "string" &&
+        <AmuxExecutionWorkspace canMoveCards={isOwner} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxExecutionSupportingRecords>
           <AmuxCardListPanel rows={rows} total={total} limit={limit} />

@@ -27,7 +27,8 @@ const audits = new Map<string, Record<string, unknown>>();
 const world = { candidates: [] as Array<{ id: string; taskId: string;
   scoreTotal: number }>, controlActive: true, humanAudits: 0,
   systemAudits: 0, updates: [] as string[], loseAfterCommit: false,
-  loseBeforeCommit: false };
+  loseBeforeCommit: false, costExceeded: false, lifecycleWrite: false,
+  halts: [] as Array<Record<string, unknown>> };
 
 const reset = () => {
   cards.clear(); receipts.clear(); unknowns.clear(); audits.clear();
@@ -42,6 +43,7 @@ const reset = () => {
   world.controlActive = true; world.humanAudits = 0;
   world.systemAudits = 0; world.updates = [];
   world.loseAfterCommit = false; world.loseBeforeCommit = false;
+  world.costExceeded = false; world.lifecycleWrite = false; world.halts = [];
   audits.set("activation-audit", { action: "amux.v22.auto_promotion.activated",
     actorUserId: "owner-1", targetType: "AmuxV22PromotionControl",
     targetId: "queue", entryHash: "activation-hash", metadata: {
@@ -99,9 +101,16 @@ const dbDelegates = {
     approvedByUserId: "owner-1", authorizationAuditLogId: "activation-audit" }) },
   adminAuditLog: { findUnique: async ({ where }: { where: { id: string } }) =>
     audits.get(where.id) ?? null },
-  amuxRecommendationAutoHalt: { findFirst: async () => null },
+  amuxRecommendationAutoHalt: {
+    findFirst: async () => world.halts.length ?
+      { id: world.halts.at(-1)?.id as string } : null,
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      world.halts.push(data); return data;
+    },
+  },
   amuxRecommendationDecision: { findMany: async () => [] },
-  amuxRecommendationAutoCostEntry: { findMany: async () => [] },
+  amuxRecommendationAutoCostEntry: { findMany: async () =>
+    world.costExceeded ? [{ amountCents: 1_501, recordedAt: now }] : [] },
   amuxRecommendationAutoUnknown: { findMany: async () => [] },
   amuxRecommendationAutoConsumption: { findMany: async () => [] },
   appSetting: { findUnique: async () => ({ value: JSON.stringify({
@@ -111,7 +120,7 @@ const dbDelegates = {
   amuxRecommendationCapacity: { findUnique: async () => ({
     id: "queue", active: true, wipLimit: 9 }) },
   amuxWorkerRuntime: { count: async () => 3 },
-  amuxExecutionAttempt: { count: async () => 0 },
+  amuxExecutionAttempt: { count: async () => world.lifecycleWrite ? 1 : 0 },
   amuxWorkDelivery: { count: async () => 0 },
   amuxRouteDecision: { count: async () => 0 },
   amuxPortfolioScoreSnapshot: { findUnique: async ({ where }:
@@ -263,6 +272,29 @@ test("stale revisions and closed activation fail before a lifecycle write", asyn
   world.controlActive = true;
   assert.equal((await move(taskA, requestB)).state, "promoted");
 });
+
+test("critical halts bind owner intent to the system audit without moving the card",
+  async () => {
+    for (const violationCode of ["cost_exceeded", "lifecycle_write"] as const) {
+      reset();
+      world.costExceeded = violationCode === "cost_exceeded";
+      world.lifecycleWrite = violationCode === "lifecycle_write";
+      const result = await move() as { promoted: boolean; reason: string };
+      assert.equal(result.promoted, false);
+      assert.equal(result.reason, "auto_halted");
+      assert.deepEqual(world.updates, []);
+      assert.equal(cards.get(taskA)?.status, "backlog");
+      assert.equal(receipts.size, 0);
+      assert.equal(world.humanAudits, 1);
+      assert.equal(world.systemAudits, 1);
+      assert.equal(world.halts.length, 1);
+      const metadata = audits.get("system-audit-1")?.metadata as
+        Record<string, unknown>;
+      assert.equal(metadata.violationCode, violationCode);
+      assert.equal(metadata.requestId, requestA);
+      assert.equal(metadata.humanIntentAuditId, "human-audit-1");
+    }
+  });
 
 test("a lost success is read back and an unknown request is never rerun", async () => {
   const service = await loadService();
