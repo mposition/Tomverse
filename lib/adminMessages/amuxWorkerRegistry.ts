@@ -20,7 +20,7 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
     reading: "Reading…",
     comparisonTitle: "Registry and assignment catalog",
     comparisonHelp:
-      "Stage R1 ends when these agree for the agreed period. A worker agrees when the registry says active and the catalog lists it assignable, or when neither does. A catalog entry with no registry entry never agrees, even when the catalog holds it, and neither does one whose provider is not its name's class. Roles are not compared.",
+      "Stage R1 ends when these agree for the agreed period. A worker agrees when the registry says active and the catalog lists it assignable, or when neither does. A catalog entry with no registry entry never agrees, even when the catalog holds it, and neither does one whose provider is not its name's class; the only exception is a name version 34 excludes, which counts as agreement. Roles are not compared.",
     comparisonStatus: {
       match: "They agree",
       mismatch: "They disagree",
@@ -29,6 +29,7 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
     },
     verdict: {
       match: "Agrees",
+      exempt: "Excluded: the engineering agent's runner, governed by its own policy (version 34)",
       registry_only: "Active in the registry, not assignable in the catalog",
       catalog_only: "Assignable in the catalog, not active in the registry",
       unregistered: "In the catalog with no registry entry",
@@ -94,7 +95,7 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
     reading: "읽는 중…",
     comparisonTitle: "등록부와 배정 카탈로그",
     comparisonHelp:
-      "R1 단계는 정해진 기간 동안 둘이 일치하면 끝납니다. 등록부가 active이고 카탈로그가 배정 가능으로 두거나, 둘 다 아닐 때 일치입니다. 등록부에 없는 카탈로그 항목은 카탈로그가 보류 중이어도 불일치이고, 공급사가 이름의 종류와 다른 항목도 불일치입니다. 역할은 비교하지 않습니다.",
+      "R1 단계는 정해진 기간 동안 둘이 일치하면 끝납니다. 등록부가 active이고 카탈로그가 배정 가능으로 두거나, 둘 다 아닐 때 일치입니다. 등록부에 없는 카탈로그 항목은 카탈로그가 보류 중이어도 불일치이고, 공급사가 이름의 종류와 다른 항목도 불일치입니다. 예외는 버전 34가 제외한 이름뿐이며 일치로 셉니다. 역할은 비교하지 않습니다.",
     comparisonStatus: {
       match: "일치",
       mismatch: "불일치",
@@ -103,6 +104,7 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
     },
     verdict: {
       match: "일치",
+      exempt: "제외: engineering agent의 runner로, 그 정책이 관리합니다(버전 34)",
       registry_only: "등록부는 active, 카탈로그는 배정 불가",
       catalog_only: "카탈로그는 배정 가능, 등록부는 active 아님",
       unregistered: "카탈로그에 있으나 등록부에 없음",
