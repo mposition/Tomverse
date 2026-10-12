@@ -121,6 +121,15 @@ test("replacing a member that is already limited still names the adoption's succ
     substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, current, undefined, current),
     null
   );
+  // The savable case: no replacement today, so the slot is a fallback model
+  // now, and the adoption's successor takes it.
+  const fallbackNow = GUEST_FALLBACK_MODEL_IDS.find((id) => isEligible(id) && !eligible(id));
+  assert.ok(fallbackNow);
+  const none = () => undefined;
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, adoption, undefined, none),
+    "adopted-successor"
+  );
 });
 
 test("the effective lead follows a retired lead's successor", () => {
