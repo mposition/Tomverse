@@ -182,10 +182,13 @@ export const resolveGuestInitialWebSearchMode = (
 export const resolveGuestInitialSelectedModels = ({
   catalogue,
   leadModelId = APP_DEFAULTS.guestDefaultModelId,
+  trio,
   environment = {},
 }: {
   catalogue: GuestCatalogueAccess;
   leadModelId?: string;
+  /** The effective default lineup (lib/appSettings); the compiled trio when omitted. */
+  trio?: readonly string[];
   environment?: GuestInitialModelEnvironment;
 }): GuestInitialModelSelection => {
   const clamp = createGuestSelectionClamp(catalogue);
@@ -194,6 +197,7 @@ export const resolveGuestInitialSelectedModels = ({
       isEligible: catalogue.isGuestEligible,
       leadModelId,
       resolveReplacement: catalogue.resolveReplacement,
+      trio,
     })
   );
 

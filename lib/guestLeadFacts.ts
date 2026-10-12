@@ -6,6 +6,7 @@ import {
   GUEST_FALLBACK_MODEL_IDS,
   createGuestEligibilityCheck,
   createReplacementResolver,
+  parseGuestBrandTrio,
 } from "@/lib/appDefaults";
 import { effectiveGuestLeadModelId } from "@/lib/defaultModelConsole";
 import { registryRowToModel } from "@/lib/modelRegistry";
@@ -15,6 +16,7 @@ type LeadDb = PrismaClient | Prisma.TransactionClient;
 type LeadRow = Parameters<typeof registryRowToModel>[0];
 
 const LEAD_LOOKUP_IDS = [...GUEST_BRAND_TRIO_MODEL_IDS, ...GUEST_FALLBACK_MODEL_IDS];
+const GUEST_BRAND_TRIO_KEY = "guestBrandTrioModelIds";
 /** The same bound as lib/models.ts `resolveSelectableModelId`. */
 const REPLACEMENT_CHAIN_MAX_HOPS = 8;
 
@@ -43,25 +45,34 @@ export function indexGuestLeadRows(rows: readonly LeadRow[]) {
 }
 
 /**
- * The stored guest-lead setting and the lead guests actually see.
+ * The stored guest-lead setting, the lineup it orders, and the lead guests
+ * actually see.
  *
- * A missing row is not "no lead". Resolution uses the compiled trio, which is
- * the same answer the guest screen gives when the setting has never been
- * saved. Callers that only compared the raw row missed that lead.
+ * A missing row is not "no lead". Resolution uses the effective lineup -- the
+ * stored AppSetting["guestBrandTrioModelIds"] when it parses, otherwise the
+ * compiled trio -- which is the same answer the guest screen gives. Callers
+ * that only compared the raw row missed that lead.
  */
 export async function readGuestLeadFacts(db: LeadDb = prisma): Promise<{
   stored: string | null;
   effective: string | null;
+  /** The effective lineup, in the order an administrator saved it. */
+  trio: string[];
 }> {
-  const [setting, rows] = await Promise.all([
+  const [setting, trioSetting] = await Promise.all([
     db.appSetting.findUnique({
       where: { key: "guestDefaultModelId" },
       select: { value: true },
     }),
-    db.modelRegistryEntry.findMany({
-      where: { id: { in: LEAD_LOOKUP_IDS } },
+    db.appSetting.findUnique({
+      where: { key: GUEST_BRAND_TRIO_KEY },
+      select: { value: true },
     }),
   ]);
+  const trio = parseGuestBrandTrio(trioSetting?.value) ?? [...GUEST_BRAND_TRIO_MODEL_IDS];
+  const rows = await db.modelRegistryEntry.findMany({
+    where: { id: { in: [...new Set([...trio, ...LEAD_LOOKUP_IDS])] } },
+  });
   const byId = indexGuestLeadRows(rows);
   // A retired trio member's successor takes its slot on the guest screen, so
   // the rows of each replacement chain are read too. Bounded like
@@ -99,7 +110,9 @@ export async function readGuestLeadFacts(db: LeadDb = prisma): Promise<{
     effective: effectiveGuestLeadModelId(
       stored,
       isEligible,
-      createReplacementResolver(lookup)
+      createReplacementResolver(lookup),
+      trio
     ),
+    trio,
   };
 }

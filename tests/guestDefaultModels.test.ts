@@ -6,8 +6,10 @@ import {
   createReplacementResolver,
   getGuestDefaultSelectedModels,
   GUEST_BRAND_TRIO_MODEL_IDS,
+  guestBrandTrioRejection,
   guestDefaultLeadRejection,
   GUEST_FALLBACK_MODEL_IDS,
+  parseGuestBrandTrio,
   resolveGuestDefaultSelectedModels,
 } from "@/lib/appDefaults";
 import {
@@ -295,4 +297,70 @@ test("without a resolver a retired member still falls to the fallback list", () 
     resolveGuestDefaultSelectedModels({ isEligible, leadModelId: OPENAI_SLOT }),
     [OPENAI_SLOT, GOOGLE_SLOT, GUEST_FALLBACK_MODEL_IDS[0]]
   );
+});
+
+// The administrator's default lineup (AppSetting["guestBrandTrioModelIds"]).
+
+test("a stored lineup parses only as exactly three distinct ids", () => {
+  const lineup = ["gpt-5-6-luna", "claude-sonnet-5", "gemini-2-5-flash"];
+  assert.deepEqual(parseGuestBrandTrio(JSON.stringify(lineup)), lineup);
+  assert.deepEqual(parseGuestBrandTrio(lineup), lineup);
+  assert.deepEqual(parseGuestBrandTrio([" gpt-5-6-luna ", "claude-sonnet-5", "gemini-2-5-flash"]), lineup);
+  for (const bad of [
+    null,
+    undefined,
+    "",
+    "not json",
+    "{}",
+    JSON.stringify(lineup.slice(0, 2)),
+    JSON.stringify([...lineup, "mistral-small-4"]),
+    JSON.stringify(["gpt-5-6-luna", "gpt-5-6-luna", "gemini-2-5-flash"]),
+    JSON.stringify(["gpt-5-6-luna", "", "gemini-2-5-flash"]),
+    JSON.stringify(["gpt-5-6-luna", 7, "gemini-2-5-flash"]),
+  ]) {
+    assert.equal(parseGuestBrandTrio(bad), null, String(bad));
+  }
+});
+
+test("the resolver opens on the administrator's lineup, in its order", () => {
+  const lineup = ["gemini-flash-lite-latest", "deepseek-v4-flash", "mistral-small-4"];
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ isEligible: isGuestEligible, trio: lineup, leadModelId: lineup[0] }),
+    lineup
+  );
+  // The lead reorders within that lineup, and a lead outside it is ignored.
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ isEligible: isGuestEligible, trio: lineup, leadModelId: "mistral-small-4" }),
+    ["mistral-small-4", "gemini-flash-lite-latest", "deepseek-v4-flash"]
+  );
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ isEligible: isGuestEligible, trio: lineup, leadModelId: GUEST_BRAND_TRIO_MODEL_IDS[0] }),
+    lineup
+  );
+});
+
+test("a lead is checked against the lineup it would order", () => {
+  const lineup = ["gemini-flash-lite-latest", "deepseek-v4-flash", "mistral-small-4"];
+  const base = { exists: true, guestEligible: true, usageCategory: "Standard" };
+  assert.equal(guestDefaultLeadRejection({ ...base, modelId: "deepseek-v4-flash", trio: lineup }), null);
+  assert.match(
+    guestDefaultLeadRejection({ ...base, modelId: GUEST_BRAND_TRIO_MODEL_IDS[0], trio: lineup }) ?? "",
+    /not one of the guest brand trio/
+  );
+});
+
+test("a lineup is refused for a wrong size, a repeat, or any member guests could not be shown or priced", () => {
+  const good = { exists: true, guestEligible: true, usageCategory: "Standard", priced: true };
+  const factsFor = (overrides: Record<string, Partial<typeof good>>) => (id: string) => ({
+    ...good,
+    ...(overrides[id] ?? {}),
+  });
+  const lineup = ["a", "b", "c"];
+  assert.equal(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({}) }), null);
+  assert.match(guestBrandTrioRejection({ modelIds: ["a", "b"], facts: factsFor({}) }) ?? "", /exactly 3/);
+  assert.match(guestBrandTrioRejection({ modelIds: ["a", "a", "c"], facts: factsFor({}) }) ?? "", /same model twice/);
+  assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ b: { exists: false } }) }) ?? "", /"b" is not an enabled model/);
+  assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ b: { guestEligible: false } }) }) ?? "", /not available to guests/);
+  assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ c: { usageCategory: "Premium" } }) }) ?? "", /not Standard/);
+  assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ a: { priced: false } }) }) ?? "", /no verified price/);
 });

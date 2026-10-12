@@ -23,11 +23,12 @@ export const GUEST_LEAD_PROTECTED = "GUEST_LEAD_PROTECTED";
 
 export const replacementRole = (
   modelId: string,
-  effectiveGuestLeadId: string | null
+  effectiveGuestLeadId: string | null,
+  trio: readonly string[] = GUEST_BRAND_TRIO_MODEL_IDS
 ): ReplacementRole | null => {
   if (modelId === APP_DEFAULTS.defaultModelId) return "application_fallback";
   if (effectiveGuestLeadId && modelId === effectiveGuestLeadId) return "guest_lead";
-  if ((GUEST_BRAND_TRIO_MODEL_IDS as readonly string[]).includes(modelId)) {
+  if (trio.includes(modelId)) {
     return "guest_trio";
   }
   return null;
@@ -51,12 +52,14 @@ export const replacementOptionDisabled = (role: ReplacementRole | null) =>
 export const effectiveGuestLeadModelId = (
   storedLead: string | null | undefined,
   isEligible: (modelId: string) => boolean,
-  resolveReplacement?: (modelId: string) => string | undefined
+  resolveReplacement?: (modelId: string) => string | undefined,
+  trio: readonly string[] = GUEST_BRAND_TRIO_MODEL_IDS
 ): string | null =>
   resolveGuestDefaultSelectedModels({
     isEligible,
     leadModelId: storedLead || APP_DEFAULTS.guestDefaultModelId,
     resolveReplacement,
+    trio,
   })[0] ?? null;
 
 export type GuestDefaultDescription = {
@@ -72,25 +75,27 @@ export const describeGuestDefault = ({
   storedLead,
   isEligible,
   resolveReplacement,
+  trio = GUEST_BRAND_TRIO_MODEL_IDS,
 }: {
   storedLead: string | null;
   isEligible: (modelId: string) => boolean;
   resolveReplacement?: (modelId: string) => string | undefined;
+  /** The effective lineup (lib/guestLeadFacts `trio`); the compiled trio when omitted. */
+  trio?: readonly string[];
 }): GuestDefaultDescription => {
   const visibleIds = resolveGuestDefaultSelectedModels({
     isEligible,
     leadModelId: storedLead || APP_DEFAULTS.guestDefaultModelId,
     resolveReplacement,
+    trio,
   });
   const effectiveLeadId = visibleIds[0] ?? null;
   return {
     visibleIds,
     effectiveLeadId,
     storedNotApplied: Boolean(storedLead) && storedLead !== effectiveLeadId,
-    ineligibleTrioIds: GUEST_BRAND_TRIO_MODEL_IDS.filter((id) => !isEligible(id)),
-    substituteIds: visibleIds.filter(
-      (id) => !(GUEST_BRAND_TRIO_MODEL_IDS as readonly string[]).includes(id)
-    ),
+    ineligibleTrioIds: trio.filter((id) => !isEligible(id)),
+    substituteIds: visibleIds.filter((id) => !trio.includes(id)),
   };
 };
 
@@ -108,18 +113,21 @@ export const substituteIfTrioMemberRemoved = (
   modelId: string,
   effectiveGuestLeadId: string | null,
   isEligible: (modelId: string) => boolean,
-  resolveReplacement?: (modelId: string) => string | undefined
+  resolveReplacement?: (modelId: string) => string | undefined,
+  trio: readonly string[] = GUEST_BRAND_TRIO_MODEL_IDS
 ): string | null => {
-  if (replacementRole(modelId, effectiveGuestLeadId) !== "guest_trio") return null;
+  if (replacementRole(modelId, effectiveGuestLeadId, trio) !== "guest_trio") return null;
   const after = resolveGuestDefaultSelectedModels({
     isEligible: (id) => (id === modelId ? false : isEligible(id)),
     leadModelId: effectiveGuestLeadId || APP_DEFAULTS.guestDefaultModelId,
     resolveReplacement,
+    trio,
   });
   const before = resolveGuestDefaultSelectedModels({
     isEligible,
     leadModelId: effectiveGuestLeadId || APP_DEFAULTS.guestDefaultModelId,
     resolveReplacement,
+    trio,
   });
   return after.find((id) => !before.includes(id)) ?? null;
 };
