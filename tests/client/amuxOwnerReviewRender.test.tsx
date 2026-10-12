@@ -9,6 +9,7 @@ import {
   AMUX_OWNER_EXECUTION_READ_TIMEOUT_MS,
   bindAmuxOwnerExecutionMetadata,
   formatAmuxMicrousd,
+  isValidAmuxReviewArtifact,
   readAmuxOwnerExecutionMetadata,
   visibleAmuxOwnerReviewOutcomes,
   type AmuxEscalationSummary,
@@ -185,6 +186,28 @@ test("verified report renders assignment, worker evidence and the exact owner qu
   assert.match(textOf(tree), /succeeded terminal outcome[\s\S]*not quality approval/);
 });
 
+test("approve requires the exact backend review attempt source even when evidence and permission claim it", () => {
+  const cases: AmuxReviewDetail[] = [
+    review({ last_attempt: { ...review().last_attempt!, outcome: "failed", to_status: "todo" } }),
+    review({
+      last_attempt: { ...review().last_attempt!, outcome: "failed", to_status: "blocked" },
+      review_context: { ...review().review_context, escalation_reason: "execution_blocked",
+        last_attempt_reason: "attempts" },
+    }),
+    review({ last_attempt: { ...review().last_attempt!, outcome: "blocked", to_status: "blocked" } }),
+    review({ last_attempt: { ...review().last_attempt!, outcome: "succeeded", to_status: "done" } }),
+    review({ task: { ...review().task, status: "blocked" } }),
+    review({ last_attempt: { ...review().last_attempt!, task_revision: review().task.revision } }),
+    review({ task: { ...review().task, revision: Number.MAX_SAFE_INTEGER + 1 } }),
+  ];
+  for (const item of cases) {
+    assert.equal(item.allowed_outcomes.includes("approve"), true);
+    assert.equal(item.review_report?.worker_report_verified, true);
+    assert.equal(visibleAmuxOwnerReviewOutcomes(item).includes("approve"), false);
+    assert.equal(byTestId(render(item), "admin-amux-select-approve").length, 0);
+  }
+});
+
 test("the queue treats unread evidence as unread and leads with the meaningful task title", () => {
   const opened: string[] = [];
   const sourceUuid = "c20b91ea-81a7-4d9b-a2c1-ea80e3baae67";
@@ -264,7 +287,7 @@ test("a disconnected report is not described as never existing", () => {
   assert.equal(byTestId(tree, "admin-amux-select-block").length, 1);
   assert.equal(byTestId(tree, "admin-amux-technical-recovery").length, 0);
   assert.match(textOf(byTestId(tree, "admin-amux-block-without-result")[0]?.children as ReactNode),
-    /No completion evidence is connected.*review → blocked.*does not prove that a host process stopped/i);
+    /connected assignment and permitted decisions.*review → blocked.*does not prove that a host process stopped.*nor that no process ran/i);
 });
 
 test("a contradictory payload cannot offer approve for an unverified worker report", () => {
@@ -400,6 +423,163 @@ test("ambiguous and nonterminal attempts stay read-only even with verified outpu
   assert.equal(byTestId(missingAssignmentTree, "admin-amux-technical-recovery").length, 1);
 });
 
+test("the actual attempt-budget terminal failure preserves only the server block choice", () => {
+  for (const lastAttemptReason of ["attempt_budget_exhausted", "attempts"]) {
+    const item = review({
+      task: { ...review().task, status: "blocked" },
+      last_attempt: {
+        ...review().last_attempt!,
+        outcome: "failed",
+        to_status: "blocked",
+      },
+      review_context: {
+        ...review().review_context,
+        result_sha256: null,
+        escalation_reason: lastAttemptReason === "attempts"
+          ? "execution_blocked"
+          : "attempt_budget_exhausted",
+        last_attempt_reason: lastAttemptReason,
+      },
+      review_report: null,
+      allowed_outcomes: ["block"],
+      proposed_transitions: { block: "blocked" },
+    });
+    assert.deepEqual(visibleAmuxOwnerReviewOutcomes(item), ["block"]);
+    const tree = render(item);
+    assert.equal(byTestId(tree, "admin-amux-select-block").length, 1);
+    assert.equal(byTestId(tree, "admin-amux-select-approve").length, 0);
+    assert.equal(byTestId(tree, "admin-amux-select-retry").length, 0);
+    assert.equal(byTestId(tree, "admin-amux-technical-recovery").length, 0);
+  }
+});
+
+test("an exact no-attempt human review keeps meaningful block authority but never completion or retry", () => {
+  const item = review({
+    task: { ...review().task, status: "blocked" },
+    last_attempt: null,
+    review_context: {
+      ...review().review_context,
+      result_sha256: null,
+      escalation_reason: "human_review_required",
+      last_attempt_reason: null,
+    },
+    review_report: null,
+    review_artifact: null,
+    allowed_outcomes: ["approve", "retry", "block"],
+    proposed_transitions: { approve: "done", retry: "todo", block: "blocked" },
+  });
+  assert.deepEqual(visibleAmuxOwnerReviewOutcomes(item), ["block"]);
+  const tree = render(item);
+  assert.equal(byTestId(tree, "admin-amux-select-block").length, 1);
+  assert.equal(byTestId(tree, "admin-amux-select-approve").length, 0);
+  assert.equal(byTestId(tree, "admin-amux-select-retry").length, 0);
+  const notice = textOf(
+    byTestId(tree, "admin-amux-block-without-result")[0]?.children as ReactNode,
+  );
+  assert.match(notice, /connected assignment and permitted decisions/i);
+  assert.match(notice, /does not prove that a host process stopped, nor that no process ran/i);
+  assert.doesNotMatch(notice, /protected terminal outcome|only .*→/i);
+  const koreanNotice = adminAmuxRoutingMessages.ko.blockWithoutResultNotice(
+    "blocked", "blocked",
+  );
+  assert.match(koreanNotice, /확인할 수 있는 요청과 허용된 결정/);
+  assert.match(koreanNotice, /멈췄거나 애초에 실행되지 않았다고 단정하지 않/);
+  assert.doesNotMatch(koreanNotice, /종결된|종료 결과|선택만/);
+
+  for (const unsupported of [
+    review({
+      ...item,
+      review_context: { ...item.review_context, description: null },
+    }),
+    review({
+      ...item,
+      review_context: {
+        ...item.review_context,
+        escalation_reason: "canonical_deadline_review_required",
+      },
+    }),
+    review({
+      ...item,
+      task: { ...item.task, status: "review" },
+    }),
+    review({
+      ...item,
+      last_attempt: {
+        id: "attempt-revision-only",
+        task_revision: 7,
+        outcome: null,
+        to_status: null,
+        ended_at: null,
+      } as unknown as NonNullable<AmuxReviewDetail["last_attempt"]>,
+    }),
+  ]) {
+    assert.deepEqual(visibleAmuxOwnerReviewOutcomes(unsupported), []);
+    const unsupportedTree = render(unsupported);
+    assert.equal(byTestId(unsupportedTree, "admin-amux-select-block").length, 0);
+    assert.equal(byTestId(unsupportedTree, "admin-amux-owner-decision").length, 0);
+    assert.equal(byTestId(unsupportedTree, "admin-amux-technical-recovery").length, 1);
+  }
+});
+
+test("malformed PR artifacts never become completion or retry evidence", () => {
+  const artifact = {
+    pr_number: 812,
+    base_sha: "c".repeat(40),
+    head_sha: "d".repeat(40),
+    diff_digest: "e".repeat(64),
+    diff_text: "diff --git a/a b/a",
+    html_url: "https://github.com/mposition/Tomverse/pull/812",
+  };
+  assert.equal(isValidAmuxReviewArtifact(artifact), true);
+  const malformed = [
+    { ...artifact, pr_number: 0 },
+    { ...artifact, pr_number: -1 },
+    { ...artifact, pr_number: Number.NaN },
+    { ...artifact, pr_number: 1.5 },
+    { ...artifact, pr_number: Number.MAX_SAFE_INTEGER + 1 },
+    { ...artifact, base_sha: "c".repeat(39) },
+    { ...artifact, base_sha: `${"c".repeat(39)}z` },
+    { ...artifact, head_sha: "d".repeat(41) },
+    { ...artifact, head_sha: `${"d".repeat(39)}z` },
+    { ...artifact, diff_digest: "e".repeat(63) },
+    { ...artifact, diff_digest: `${"e".repeat(63)}z` },
+  ];
+  for (const invalid of malformed) {
+    assert.equal(isValidAmuxReviewArtifact(invalid), false);
+    const evidence = {
+      scope_and_completion_criteria: "Show the evidence and decision effects.",
+      approved_execution_brief: "Preserve server authority.",
+      worker_report: null,
+      worker_report_verified: false,
+    };
+    const completion = review({
+      review_report: evidence,
+      review_artifact: invalid,
+      allowed_outcomes: ["approve", "block"],
+      proposed_transitions: { approve: "done", block: "blocked" },
+    });
+    assert.deepEqual(visibleAmuxOwnerReviewOutcomes(completion), ["block"]);
+    const completionTree = render(completion);
+    assert.equal(byTestId(completionTree, "admin-amux-select-approve").length, 0);
+    assert.equal(byTestId(completionTree, "admin-amux-review-artifact").length, 0);
+
+    const retry = review({
+      task: { ...review().task, status: "blocked" },
+      last_attempt: {
+        ...review().last_attempt!, outcome: "blocked", to_status: "blocked",
+      },
+      review_report: evidence,
+      review_artifact: invalid,
+      allowed_outcomes: ["retry", "block"],
+      proposed_transitions: { retry: "todo", block: "blocked" },
+    });
+    assert.deepEqual(visibleAmuxOwnerReviewOutcomes(retry), ["block"]);
+    const retryTree = render(retry);
+    assert.equal(byTestId(retryTree, "admin-amux-select-retry").length, 0);
+    assert.equal(byTestId(retryTree, "admin-amux-select-block").length, 1);
+  }
+});
+
 test("terminal blocked context without output preserves only the server block choice", () => {
   const item = review({
     task: { ...review().task, status: "blocked" },
@@ -424,7 +604,7 @@ test("terminal blocked context without output preserves only the server block ch
   assert.equal(byTestId(tree, "admin-amux-select-block").length, 1);
   assert.equal(byTestId(tree, "admin-amux-technical-recovery").length, 0);
   assert.match(textOf(byTestId(tree, "admin-amux-block-without-result")[0]?.children as ReactNode),
-    /blocked → blocked.*does not prove that a host process stopped.*delete or cancel.*force a requeue/i);
+    /connected assignment and permitted decisions.*blocked → blocked.*does not prove that a host process stopped.*nor that no process ran.*does not delete, cancel, requeue, or run/i);
 });
 
 test("a legitimate existing retry shows exact scope, nonzero prior cost and explicit read confirmation", () => {

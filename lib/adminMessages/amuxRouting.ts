@@ -167,7 +167,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerQuestionRetry: "Has the reported blocker been corrected enough to requeue this same task?",
     ownerQuestionBlock: "Should this task remain blocked with this recorded reason?",
     blockWithoutResultNotice: (source: string, target: string) =>
-      `No completion evidence is connected, so approval and retry are unavailable. The protected terminal outcome and server permission allow only ${source} → ${target}. This does not prove that a host process stopped, delete or cancel the Task, or force a requeue.`,
+      `No completion or retry evidence is connected. From the connected assignment and permitted decisions, this review shows the ${source} → ${target} block choice. This does not prove that a host process stopped, nor that no process ran, and does not delete, cancel, requeue, or run the Task.`,
     unknownNoRetry:
       "No decision is offered while the prior execution outcome is unknown. Verify it before any retry or replacement task.",
     closeReview: "Close",
@@ -479,9 +479,9 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerQuestionBlock: "기록된 사유로 이 작업을 차단 상태에 유지해야 합니까?",
     blockWithoutResultNotice: (source: string, target: string) => {
       const effect = source === "blocked" && target === "blocked"
-        ? "현재 작업을 차단 상태로 남기는 선택만 할 수 있습니다."
-        : "현재 작업을 차단 상태로 옮기는 선택만 할 수 있습니다.";
-      return `완료를 판단할 결과 기록은 연결돼 있지 않아 승인하거나 다시 맡길 수는 없습니다. ${effect} 실행 중인 프로그램이 멈췄다는 뜻이 아니며 작업을 삭제·취소하거나 실행 대기로 옮기지 않습니다.`;
+        ? "차단 상태 유지 선택"
+        : "차단 상태 전환 선택";
+      return `이 검토 화면에서는 확인할 수 있는 요청과 허용된 결정에 따라 ${effect}을 표시합니다. 완료 또는 재실행을 판단할 결과 근거는 연결돼 있지 않습니다. 실행 프로그램이 멈췄거나 애초에 실행되지 않았다고 단정하지 않으며, Task를 삭제·취소하거나 실행 대기로 옮기지 않습니다.`;
     },
     unknownNoRetry:
       "이전 실행 결과가 불명확한 동안에는 결정을 제공하지 않습니다. 재시도나 대체 작업 전에 결과를 검증하세요.",

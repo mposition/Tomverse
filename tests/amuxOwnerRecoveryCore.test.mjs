@@ -5,8 +5,11 @@ import { amuxOwnerRecoveryPreparation } from
   "../lib/amux/ownerRecoveryCore.ts";
 
 const prepare = (overrides = {}) => amuxOwnerRecoveryPreparation({
+  taskStatus: "blocked",
+  taskRevision: 8,
   escalationReason: "operator_review_required",
   lastAttemptReason: "reported_result",
+  lastAttemptTaskRevision: 7,
   lastAttemptOutcome: "blocked",
   lastAttemptToStatus: "blocked",
   lastAttemptEndedAt: "2026-10-12T01:00:00.000Z",
@@ -31,6 +34,7 @@ test("legacy local done and closed flags do not stand in for execution or output
       executionOutcomeKnown: false,
       outputState: "missing",
       decisionContextReady: false,
+      approvalExecutionSourceReady: false,
       retryPreviewReady: false,
       missingEvidence: ["execution_outcome", "worker_output"],
     });
@@ -59,6 +63,8 @@ test("only protected terminal outcome and target pairs count as known execution"
     { lastAttemptOutcome: "running", lastAttemptToStatus: "blocked" },
     { lastAttemptOutcome: "arbitrary-terminal", lastAttemptToStatus: "blocked" },
     { lastAttemptOutcome: "succeeded", lastAttemptToStatus: "todo" },
+    { lastAttemptOutcome: "failed", lastAttemptToStatus: "blocked",
+      lastAttemptReason: "execution_failed" },
     { lastAttemptOutcome: "blocked", lastAttemptToStatus: "blocked",
       lastAttemptEndedAt: null },
   ]) {
@@ -77,6 +83,87 @@ test("only protected terminal outcome and target pairs count as known execution"
     lastAttemptOutcome: "failed",
     lastAttemptToStatus: "todo",
   }).executionOutcomeKnown, true);
+  for (const lastAttemptReason of ["attempt_budget_exhausted", "attempts"]) {
+    assert.equal(prepare({
+      escalationReason: "execution_blocked",
+      lastAttemptOutcome: "failed",
+      lastAttemptToStatus: "blocked",
+      lastAttemptReason,
+    }).executionOutcomeKnown, true);
+  }
+});
+
+test("an exact no-attempt human review preserves block context without inventing execution", () => {
+  const result = prepare({
+    escalationReason: "human_review_required",
+    lastAttemptReason: null,
+    lastAttemptTaskRevision: null,
+    lastAttemptOutcome: null,
+    lastAttemptToStatus: null,
+    lastAttemptEndedAt: null,
+    workerReportConnected: false,
+    workerReportVerified: false,
+  });
+  assert.equal(result.assignmentConnected, true);
+  assert.equal(result.executionOutcomeKnown, false);
+  assert.equal(result.reason, "evidence_missing");
+  assert.equal(result.decisionContextReady, true);
+  assert.equal(result.approvalExecutionSourceReady, false);
+  assert.equal(result.retryPreviewReady, false);
+  assert.deepEqual(result.missingEvidence,
+    ["execution_outcome", "worker_output"]);
+
+  for (const overrides of [
+    { assignmentConnected: false },
+    { taskStatus: "review" },
+    { escalationReason: "canonical_deadline_review_required" },
+    { lastAttemptTaskRevision: 7 },
+    { lastAttemptOutcome: "running" },
+  ]) {
+    const unsupported = prepare({
+      escalationReason: "human_review_required",
+      lastAttemptReason: null,
+      lastAttemptTaskRevision: null,
+      lastAttemptOutcome: null,
+      lastAttemptToStatus: null,
+      lastAttemptEndedAt: null,
+      ...overrides,
+    });
+    assert.equal(unsupported.executionOutcomeKnown, false);
+    assert.equal(unsupported.decisionContextReady, false);
+    assert.equal(unsupported.retryPreviewReady, false);
+  }
+});
+
+test("approval execution source matches the backend review attempt exactly", () => {
+  const approved = prepare({
+    taskStatus: "review",
+    lastAttemptOutcome: "succeeded",
+    lastAttemptToStatus: "review",
+  });
+  assert.equal(approved.approvalExecutionSourceReady, true);
+
+  for (const overrides of [
+    { assignmentConnected: false },
+    { taskStatus: "blocked" },
+    { lastAttemptReason: "outcome_unknown" },
+    { lastAttemptEndedAt: null },
+    { lastAttemptOutcome: "succeeded", lastAttemptToStatus: "done" },
+    { lastAttemptOutcome: "failed", lastAttemptToStatus: "todo" },
+    { escalationReason: "execution_blocked", lastAttemptReason: "attempts",
+      lastAttemptOutcome: "failed", lastAttemptToStatus: "blocked" },
+    { lastAttemptOutcome: "blocked", lastAttemptToStatus: "blocked" },
+    { lastAttemptTaskRevision: 8 },
+    { lastAttemptTaskRevision: 8.5 },
+    { taskRevision: Number.MAX_SAFE_INTEGER + 1 },
+  ]) {
+    assert.equal(prepare({
+      taskStatus: "review",
+      lastAttemptOutcome: "succeeded",
+      lastAttemptToStatus: "review",
+      ...overrides,
+    }).approvalExecutionSourceReady, false);
+  }
 });
 
 test("existing retry preparation requires server permission and bound decision evidence", () => {
@@ -86,6 +173,7 @@ test("existing retry preparation requires server permission and bound decision e
     executionOutcomeKnown: true,
     outputState: "verified",
     decisionContextReady: true,
+    approvalExecutionSourceReady: false,
     retryPreviewReady: true,
     missingEvidence: [],
   });
