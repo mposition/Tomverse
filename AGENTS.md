@@ -1425,7 +1425,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   닫습니다** — 판정 표의 trigger가 같은 문장에서 같은 종류의 닫힘 사건을 원장에 쓰고, 원장의 event
   guard는 그 판정 행 옆에서만 받으며, S1d 닫힘 trigger가 그때부터 보존(2160시간)을 시작합니다. 원장의
   닫힘 종류는 다섯이고(request core의 닫힘 목록과 같음), event guard·본문 guard·보존 guard·키 guard와
-  request store의 두 읽기가 같은 목록을 씁니다 — 한쪽만 바꾸지 않습니다. 확정(`confirm`·`edit_confirm`)은 kill switch 중 거부되고 거절은
+  request store의 세 읽기(상태, 열린 요청 수, stale 후보)가 같은 목록을 씁니다 — 한쪽만 바꾸지 않습니다. 확정(`confirm`·`edit_confirm`)은 kill switch 중 거부되고 거절은
   허용되며, Admin이 보여 준 값(답·근거 본문의 keyed digest, select의 선택지, `irreversible`, 스냅샷
   상태·SHA·manifest digest)이 저장값과 모두 같을 때만 됩니다. 고친 답은 S1d 본문 store가 판정 직전 같은
   트랜잭션에 쓰고 판정이 그 digest를 기록합니다. 선언 정확도는 기본 `not_judged`, `mismatched`면
@@ -1484,6 +1484,19 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   docs/policy/amux-decision-maker.md §0-2의 졸업 기준과 비교하지 않습니다. **경계 상한 4는 보고의 두 문장 +
   setup + fence이고**, `tests/amuxDecisionMakerJudgment.test.mjs`가 그 셈을, judgment DB 테스트가 kill
   switch 중의 읽기와 하나 줄인 상한의 거부를 고정합니다. 제안 열람·판정 화면은 S2입니다.
+- **S1g(보존 정리 sweep)**: `lib/amux/decisionMakerRetentionSweep.ts`, request store의
+  `listDecisionMakerStaleCloseCandidates()`, body store의 `readDecisionMakerDigestKeyRegistry()`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerRetentionRead`(상한 5)·`decisionMakerStaleClose`(9)·
+  `decisionMakerBodyPurge`(9)·`decisionMakerDigestKeyRotate`(9)·`decisionMakerDigestKeyDestroy`(10),
+  `app/api/internal/maintenance/credit-reservations/route.ts`의 연결, `tests/amuxDecisionMakerRetentionSweep.test.mjs`.
+  docs/policy/amux-decision-maker.md §10의 시스템 정리를 15분 maintenance 실행에 붙였습니다: 현재·다음 key period
+  키를 쓰기 시작하고(ring에 있고 registry에 없을 때), 720시간 열린 요청을 `stale_close`로 닫고, 보존이 지난 본문을
+  지우고, 본문이 남지 않은 끝난 period의 키 파기를 기록합니다. **후보는 한 읽기 트랜잭션에서 읽고 쓰기는 항목마다
+  자기 경계 트랜잭션에서 store가 lock 아래 다시 판정합니다** — sweep 파일에는 SQL이 없고 스위치를 읽지 않습니다
+  (docs/policy/amux-decision-maker.md §6 표상 kill switch 중에도 허용). 오류가 나면 그 자리에서 멈추고 같은 실행에서 다시 보내지 않으며, 결과를 모르는
+  쓰기는 다음 실행의 읽기가 정합니다. 경계 상한은 각 쓰기의 무결성 키 포함 최대 문장 수 + setup + fence이고,
+  request·body 테스트의 문장 수 loop가 고정합니다. 키 파기 기록 뒤 `AMUX_DM_DIGEST_KEYS`에서 그 period를 지우는 것은
+  운영자입니다.
 
 # AI Review (교차검토) 품질과 M5
 

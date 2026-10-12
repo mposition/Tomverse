@@ -69,6 +69,7 @@ import {
   staleCloseDecisionMakerRequest,
   submitDecisionMakerResult,
 } from "../lib/amux/decisionMakerRequestStore.ts";
+import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
 import { DM_INSTANCE_SCOPES, DM_SWITCH_LATCH_ACTOR_FOR_INSTANCE } from "../lib/amux/decisionMakerSwitchCore.ts";
 import { dmKeyPeriodOf, dmOptionSetDigest, dmRequestDigestKey } from "../lib/amux/decisionMakerBodyCore.ts";
 
@@ -1443,6 +1444,12 @@ for (const [label, key] of [
         const expected = (entry.switchRead ? 7 : 6) + extra;
         assert.equal(sent.length, expected, entry.name);
         assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12, entry.name);
+        // The retention sweep closes stale requests in their own boundary:
+        // this write at its largest, with an integrity key, plus setup and fence.
+        if (entry.name === "stale_close") {
+          assert.ok(sent.length + BOUNDARY_STATEMENTS <= AMUX_DB_BOUNDARIES.decisionMakerStaleClose.prismaCallCeiling);
+          if (extra > 0) assert.equal(sent.length + BOUNDARY_STATEMENTS, AMUX_DB_BOUNDARIES.decisionMakerStaleClose.prismaCallCeiling);
+        }
         assert.deepEqual(
           kindsOf(sent),
           ["execute", "query", ...(entry.switchRead ? ["query"] : []), ...auditKinds, "query"],

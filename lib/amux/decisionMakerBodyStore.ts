@@ -344,6 +344,64 @@ export async function listDecisionMakerPurgeCandidates(
   return rows.map((row) => requireRequestId(row.requestId));
 }
 
+export type DecisionMakerDigestKeyRegistry = {
+  /** The database clock when the registry was read. */
+  dbNowMs: number;
+  periods: Array<{ keyPeriod: number; rotated: boolean; destroyed: boolean; hasBodies: boolean }>;
+};
+
+/**
+ * Every key period the registry names -- whether its key was put in use,
+ * whether it was destroyed, and whether a body of the period remains -- oldest
+ * first, with the database clock, in one statement. For the system sweep
+ * (lib/amux/decisionMakerRetentionSweep.ts), which rotates in the current and
+ * the next period's key when the ring holds one and the registry does not,
+ * and asks to destroy an ended period's key once no body of it remains. Each
+ * is then decided again, under the audit chain lock, by
+ * `rotateDecisionMakerDigestKey()` or `destroyDecisionMakerDigestKey()`.
+ */
+export async function readDecisionMakerDigestKeyRegistry(client: BodyReader): Promise<DecisionMakerDigestKeyRegistry> {
+  const rows = await client.$queryRaw<unknown[]>`
+    WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS "now"),
+    periods AS (
+      SELECT
+        k."keyPeriod",
+        bool_or(k."kind" = 'rotate') AS "rotated",
+        bool_or(k."kind" = 'destroy') AS "destroyed",
+        EXISTS (SELECT 1 FROM "AmuxDecisionMakerBody" b WHERE b."keyPeriod" = k."keyPeriod") AS "hasBodies"
+      FROM "AmuxDecisionMakerDigestKeyEvent" k
+      GROUP BY k."keyPeriod"
+    )
+    SELECT
+      floor(extract(epoch FROM c."now") * 1000)::bigint AS "dbNowEpochMs",
+      p."keyPeriod", p."rotated", p."destroyed", p."hasBodies"
+    FROM db_clock c
+    LEFT JOIN periods p ON true
+    ORDER BY p."keyPeriod"
+  `;
+  const first = rows[0] as Record<string, unknown> | undefined;
+  if (!first) throw new DecisionMakerBodyWriteError("state_unreadable");
+  const dbNowMs = safeInteger(first.dbNowEpochMs as bigint | number, "clock");
+  const periods: DecisionMakerDigestKeyRegistry["periods"] = [];
+  for (const row of rows as Array<Record<string, unknown>>) {
+    if (row.keyPeriod === null) {
+      if (rows.length !== 1) throw new DecisionMakerBodyWriteError("state_unreadable");
+      continue;
+    }
+    const keyPeriod = Number(row.keyPeriod);
+    if (
+      !isDmKeyPeriod(keyPeriod) ||
+      typeof row.rotated !== "boolean" ||
+      typeof row.destroyed !== "boolean" ||
+      typeof row.hasBodies !== "boolean"
+    ) {
+      throw new DecisionMakerBodyWriteError("state_unreadable");
+    }
+    periods.push({ keyPeriod, rotated: row.rotated, destroyed: row.destroyed, hasBodies: row.hasBodies });
+  }
+  return { dbNowMs, periods };
+}
+
 // ---------------------------------------------------------------------------
 // Retention: legal hold, expiry purge, privacy erase
 // ---------------------------------------------------------------------------

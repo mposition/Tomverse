@@ -9,6 +9,7 @@ import { dmInstanceForProvider, routeDmQuestion } from "@/lib/amux/decisionMaker
 import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
   DM_ROUTING_BINDING_KEYS,
+  DM_STALE_CLOSE_AFTER_MS,
   DM_VENDOR_FOR_INSTANCE,
   dmEventAuditMetadata,
   dmEventRefusal,
@@ -278,6 +279,37 @@ export async function countOpenDecisionMakerRequestsCreatedBetween(
   const row = rows[0];
   if (!row) throw new Error("AMUX Decision Maker open request count returned no row");
   return safeInteger(row.open, "count");
+}
+
+/**
+ * Requests routed to a DM that no closing event has closed and that are at
+ * least 720 hours old by the database clock -- the ones §10's stale close
+ * applies to -- oldest first, at most `limit` (1 to 100), in one statement.
+ * For the system sweep (lib/amux/decisionMakerRetentionSweep.ts); each is then
+ * closed in a transaction of its own, which decides again under the request
+ * lock. The closing kinds are the same list the open-request count reads.
+ */
+export async function listDecisionMakerStaleCloseCandidates(
+  client: LedgerReader,
+  input: { limit: number },
+): Promise<string[]> {
+  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  const rows = await client.$queryRaw<Array<{ id: string }>>`
+    SELECT r."id"
+    FROM "AmuxDecisionMakerRequest" r
+    WHERE r."route" = 'dm_proposal'
+      AND r."createdAt" <= clock_timestamp() - ${DM_STALE_CLOSE_AFTER_MS} * INTERVAL '1 millisecond'
+      AND NOT EXISTS (
+        SELECT 1 FROM "AmuxDecisionMakerRequestEvent" ev
+        WHERE ev."requestId" = r."id"
+          AND ev."kind" IN ('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject')
+      )
+    ORDER BY r."createdAt", r."id"
+    LIMIT ${input.limit}
+  `;
+  return rows.map((row) => requireRequestId(row.id));
 }
 
 export type DecisionMakerProposalTimeline = {

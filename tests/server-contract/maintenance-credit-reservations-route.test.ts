@@ -191,6 +191,19 @@ const loadRoute = () => {
         }),
       },
     });
+    mock.module(mod("lib/amux/decisionMakerRetentionSweep.ts"), {
+      namedExports: {
+        runDecisionMakerRetentionMaintenanceQuietly: quiet({
+          keyRing: "not_configured",
+          keysRotated: 38,
+          staleClosed: 39,
+          purged: 40,
+          keysDestroyed: 41,
+          refused: 42,
+          stopped: null,
+        }),
+      },
+    });
     mock.module(mod("lib/externalImportService.ts"), {
       namedExports: {
         reconcileExpiredExternalImportStaging: quiet({ expiredImports: 26 }),
@@ -365,6 +378,9 @@ test("every ride-along sweep's result reaches the response body and the run row"
   assert.equal(body.generatedArtifacts.orphans.examined, 24);
   assert.equal(body.generatedArtifacts.orphans.deleted, 25);
   assert.deepEqual(body.externalImportStaging, { expiredImports: 26 });
+  assert.equal(body.decisionMakerRetention.staleClosed, 39);
+  assert.equal(body.decisionMakerRetention.purged, 40);
+  assert.equal(body.decisionMakerRetention.keysDestroyed, 41);
   assert.equal(body.messageAttachments.cleanup.examined, 36);
   assert.equal(body.messageAttachments.cleanup.deleted, 37);
   assert.deepEqual(body.memoryExtractionProviderCalls, { settled: 31 });
@@ -390,6 +406,7 @@ test("every ride-along sweep's result reaches the response body and the run row"
     "generatedArtifacts",
     "messageAttachments",
     "knowledge",
+    "decisionMakerRetention",
     "externalImportStaging",
     "memoryExtractionProviderCalls",
     "memoryExtractionDispatch",
