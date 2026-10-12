@@ -4,7 +4,7 @@ import {
   getModel,
   getModelUsageProfile,
   isEnabledModelId,
-  resolveSelectableModelId,
+  isPubliclySelectableModel,
   type AiModel,
 } from "@/lib/models";
 
@@ -66,11 +66,26 @@ export const createGuestEligibilityCheck =
     );
   };
 
+/** The same bound as lib/models.ts `resolveSelectableModelId`. */
+const REPLACEMENT_CHAIN_MAX_HOPS = 8;
+
 /**
- * Where a default slot goes when its model is retired: the model's bounded
- * `replacementModelId` chain (lib/models.ts `resolveSelectableModelId`),
- * against the same catalogue the caller holds. Undefined when the chain ends
- * nowhere the catalogue still serves.
+ * Who takes a retired model's default slot. `accept` is the caller's own rule
+ * for the slot -- the guest resolver passes its `isEligible`.
+ */
+export type ReplacementResolver = (
+  modelId: string,
+  accept?: (modelId: string) => boolean
+) => string | undefined;
+
+/**
+ * Where a default slot goes when its model is retired: along the model's
+ * bounded, cycle-safe `replacementModelId` chain, against the same catalogue
+ * the caller holds, to the first model that is publicly selectable *and*
+ * passes `accept`. A hop that is servable but fails `accept` (a Pro-only
+ * successor, say) is walked past rather than ending the search, so a later
+ * guest-qualified hop still keeps the slot. Undefined when the chain ends
+ * without one.
  *
  * An administrator retires a model by disabling it with a replacement. Before
  * this, the guest trio ignored that and backfilled the slot from
@@ -78,8 +93,20 @@ export const createGuestEligibilityCheck =
  * how claude-haiku-4-5's slot showed a DeepSeek model in production.
  */
 export const createReplacementResolver =
-  (lookup: ModelLookup) => (modelId: string) =>
-    resolveSelectableModelId(modelId, lookup);
+  (lookup: ModelLookup): ReplacementResolver =>
+  (modelId, accept = () => true) => {
+    const visited = new Set<string>([modelId]);
+    let candidateId = lookup(modelId)?.replacementModelId;
+    for (let hop = 0; candidateId && hop < REPLACEMENT_CHAIN_MAX_HOPS; hop += 1) {
+      if (visited.has(candidateId)) return undefined;
+      visited.add(candidateId);
+      const model = lookup(candidateId);
+      if (!model) return undefined;
+      if (isPubliclySelectableModel(model) && accept(candidateId)) return candidateId;
+      candidateId = model.replacementModelId;
+    }
+    return undefined;
+  };
 
 const isGuestEligibleModel = createGuestEligibilityCheck(getModel);
 const resolveStaticReplacement = createReplacementResolver(getModel);
@@ -212,14 +239,14 @@ export const resolveGuestDefaultSelectedModels = ({
   isEligible: (modelId: string) => boolean;
   leadModelId?: string;
   maxModels?: number;
-  resolveReplacement?: (modelId: string) => string | undefined;
+  resolveReplacement?: ReplacementResolver;
   trio?: readonly string[];
 }) => {
   const orderedTrio = lineup.includes(leadModelId)
     ? [leadModelId, ...lineup.filter((id) => id !== leadModelId)]
     : lineup;
   const slots = orderedTrio.map((modelId) =>
-    isEligible(modelId) ? modelId : (resolveReplacement?.(modelId) ?? modelId)
+    isEligible(modelId) ? modelId : (resolveReplacement?.(modelId, isEligible) ?? modelId)
   );
 
   const trio: string[] = [];
@@ -272,6 +299,23 @@ export const guestDefaultLeadRejection = ({
 };
 
 /**
+ * The lead the chat client is handed for a lineup.
+ *
+ * A stored lead that is a member of the lineup passes through even when that
+ * model is retired: the resolver then succeeds it in its own slot, which keeps
+ * it the lead -- what readGuestLeadFacts reports and the console shows.
+ * Swapping it for the compiled default before the resolver runs is how a
+ * retired lead used to lose its place. Anything outside the lineup is not a
+ * lead and gives way to the compiled default. lib/appSettings serves this;
+ * check:default-models audits with it.
+ */
+export const guestLeadForLineup = (
+  stored: string | null | undefined,
+  lineup: readonly string[]
+): string =>
+  stored && lineup.includes(stored) ? stored : APP_DEFAULTS.guestDefaultModelId;
+
+/**
  * Reads a stored AppSetting["guestBrandTrioModelIds"]: a JSON array of exactly
  * APP_DEFAULTS.maxGuestSelectedModels distinct ids. Anything else -- including
  * a missing row -- is `null`, which every reader treats as "use the compiled
@@ -295,13 +339,22 @@ export const parseGuestBrandTrio = (value: unknown): string[] | null => {
   return ids;
 };
 
+/**
+ * The providers a default lineup holds, one model each. Platform strategy,
+ * operator decision 2026-10-12: a guest always gets one OpenAI, one Anthropic
+ * and one Gemini model (docs/policy/credit-and-cost-limits.md).
+ */
+export const GUEST_LINEUP_PROVIDERS = ["openai", "anthropic", "google"] as const;
+
 /** What a lineup check needs to know about one model, from the runtime catalogue. */
 export type GuestBrandTrioCandidateFacts = {
+  /** Enabled, publicly listed, not disabled or coming soon, not deleted. */
   exists: boolean;
   guestEligible: boolean;
   usageCategory: string | null;
-  /** Its price resolves to a verified profile or an administrator's override, not the class fallback. */
+  /** Every rate resolves to a verified profile or an administrator's override -- none to the class fallback. */
   priced: boolean;
+  provider: string | null;
 };
 
 /**
@@ -339,6 +392,15 @@ export const guestBrandTrioRejection = ({
     if (!fact.priced) {
       return `"${modelId}" has no verified price yet (it would be costed at the conservative fallback).`;
     }
+  }
+  const providers = modelIds.map((modelId) => facts(modelId).provider ?? "unknown");
+  const oneEach =
+    providers.length === GUEST_LINEUP_PROVIDERS.length &&
+    GUEST_LINEUP_PROVIDERS.every(
+      (provider) => providers.filter((candidate) => candidate === provider).length === 1
+    );
+  if (!oneEach) {
+    return `The default lineup must hold one OpenAI, one Anthropic and one Gemini model; this one is ${providers.join(", ")}.`;
   }
   return null;
 };

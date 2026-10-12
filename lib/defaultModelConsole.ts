@@ -2,6 +2,7 @@ import {
   APP_DEFAULTS,
   GUEST_BRAND_TRIO_MODEL_IDS,
   resolveGuestDefaultSelectedModels,
+  type ReplacementResolver,
 } from "@/lib/appDefaults";
 
 /**
@@ -52,7 +53,7 @@ export const replacementOptionDisabled = (role: ReplacementRole | null) =>
 export const effectiveGuestLeadModelId = (
   storedLead: string | null | undefined,
   isEligible: (modelId: string) => boolean,
-  resolveReplacement?: (modelId: string) => string | undefined,
+  resolveReplacement?: ReplacementResolver,
   trio: readonly string[] = GUEST_BRAND_TRIO_MODEL_IDS
 ): string | null =>
   resolveGuestDefaultSelectedModels({
@@ -79,7 +80,7 @@ export const describeGuestDefault = ({
 }: {
   storedLead: string | null;
   isEligible: (modelId: string) => boolean;
-  resolveReplacement?: (modelId: string) => string | undefined;
+  resolveReplacement?: ReplacementResolver;
   /** The effective lineup (lib/guestLeadFacts `trio`); the compiled trio when omitted. */
   trio?: readonly string[];
 }): GuestDefaultDescription => {
@@ -113,7 +114,7 @@ export const substituteIfTrioMemberRemoved = (
   modelId: string,
   effectiveGuestLeadId: string | null,
   isEligible: (modelId: string) => boolean,
-  resolveReplacement?: (modelId: string) => string | undefined,
+  resolveReplacement?: ReplacementResolver,
   trio: readonly string[] = GUEST_BRAND_TRIO_MODEL_IDS
 ): string | null => {
   if (replacementRole(modelId, effectiveGuestLeadId, trio) !== "guest_trio") return null;

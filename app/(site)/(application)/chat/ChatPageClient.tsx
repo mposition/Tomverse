@@ -2662,22 +2662,22 @@ export function ChatPageClient({
 
   // Shown the first time a freshly created account loads chat, so a new
   // signed-in user starts with the same 3-model side-by-side comparison a
-  // guest already sees instead of a single panel. The same resolver as
-  // guestDefaultSelectedModels above -- including a retired member's
-  // successor -- just checked against "Free" (every guest-eligible model is
-  // Free-eligible too), in the trio's own order rather than the guest lead's.
+  // guest already sees instead of a single panel. The same resolver, lineup
+  // and lead as guestDefaultSelectedModels above -- including a retired
+  // member's successor -- just checked against "Free" (every guest-eligible
+  // model is Free-eligible too).
   const newAccountDefaultSelectedModels = useMemo(
     () =>
       clampSelectedModels(
         resolveGuestDefaultSelectedModels({
           isEligible: isNewAccountEligibleModel,
-          leadModelId: guestBrandTrioModelIds[0],
+          leadModelId: guestDefaultModelId,
           maxModels: APP_DEFAULTS.maxSelectedModels,
           resolveReplacement: guestCatalogue.resolveReplacement,
           trio: guestBrandTrioModelIds,
         })
       ),
-    [clampSelectedModels, guestBrandTrioModelIds, guestCatalogue, isNewAccountEligibleModel]
+    [clampSelectedModels, guestBrandTrioModelIds, guestCatalogue, guestDefaultModelId, isNewAccountEligibleModel]
   );
 
   // The guest default lead model used to be fetched here after mount, which

@@ -1604,7 +1604,7 @@ export function AdminModelRegistryPanel() {
                         selected.id,
                         guestLead?.effective ?? null,
                         eligible,
-                        (id) => (successor && id === selected.id ? successor.id : catalogueReplacement(id)),
+                        (id, accept) => (successor && id === selected.id ? successor.id : catalogueReplacement(id, accept)),
                         guestTrio
                       );
                       if (!substituteId) return null;

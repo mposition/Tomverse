@@ -15,6 +15,7 @@ import {
   GUEST_BRAND_TRIO_MODEL_IDS,
   guestBrandTrioRejection,
   guestDefaultLeadRejection,
+  guestLeadForLineup,
   parseGuestBrandTrio,
 } from "@/lib/appDefaults";
 import {
@@ -92,6 +93,7 @@ import {
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
+  isPubliclySelectableModel,
 } from "@/lib/models";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
@@ -207,15 +209,24 @@ export const guestBrandTrioModelRejection = async (
     facts: (id) => {
       const model = models.get(id);
       return {
-        exists: Boolean(model && !model.catalogDeleted),
+        // The lifecycle the picker uses, not just enabled: an unlisted,
+        // disabled-status or coming-soon row must not become every guest's
+        // default through the API, whatever the editor offers.
+        exists: Boolean(model && isPubliclySelectableModel(model)),
         guestEligible: Boolean(model && canUseModelWithPlan("Guest", model)),
         usageCategory: model ? getModelUsageProfile(model).category : null,
+        // Verified means a code profile, or both an input and an output
+        // override on the row. A row with one override column still costs its
+        // other rate at the class fallback, which costSource alone does not say.
         priced: Boolean(
           model &&
-            !resolveModelPricing(model).costSource.startsWith(
-              "conservative_fallback"
-            )
+            (!resolveModelPricing(model).isFallbackPricing ||
+              (model.inputUsdPerMillionTokens !== undefined &&
+                model.inputUsdPerMillionTokens !== null &&
+                model.outputUsdPerMillionTokens !== undefined &&
+                model.outputUsdPerMillionTokens !== null))
         ),
+        provider: model?.provider ?? null,
       };
     },
   });
@@ -249,7 +260,7 @@ export async function getPublicAppSettings(): Promise<PublicAppSettings> {
   );
 
   return {
-    guestDefaultModelId: await normalizeGuestDefaultModel(
+    guestDefaultModelId: guestLeadForLineup(
       values.get(GUEST_DEFAULT_MODEL_KEY),
       guestBrandTrioModelIds
     ),
