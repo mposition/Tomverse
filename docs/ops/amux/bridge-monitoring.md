@@ -45,7 +45,7 @@ bridge는 하나가 아니다. `tomverse-bridge.service`가 codex 세션을 맡�
 어느 unit이 왜 그런지는 watchdog의 journal에 unit마다 한 줄로 남는다. 상태를 읽지 못하면 `systemctl`의 오류 첫 줄을
 함께 적는다(`journalctl -u tomverse-bridge-watchdog.service -n 20`). 이 내용은 호스트 밖으로 나가지 않는다.
 
-- ping URL은 systemd credential(`LoadCredential=ping-url`)로만 전달되고 unit의 동적 사용자만 읽는다. curl에도
+- ping URL은 systemd credential(`LoadCredential=ping-url`)로만 전달되고 unit의 전용 시스템 계정 `tomverse-bridge-watchdog`(로그인 셸 없음, 자기 그룹만)만 읽는다. 설치 스크립트가 이 계정을 만들고, 이미 있으면 셸과 그룹을 확인만 한다. 동적 사용자(`DynamicUser=`)는 쓰지 않는다 — 이 호스트의 system bus가 동적 사용자의 연결을 끊어 `systemctl`이 매번 "Transport endpoint is not connected"로 실패했다(2026-10-12 첫 설치). curl에도
   인자가 아니라 stdin 설정으로 넘긴다 — 프로세스 인자는 `/proc/<pid>/cmdline`으로 다른 사용자가 읽을 수 있고, 이
   호스트의 `/proc`에는 `hidepid`가 없다. 그래서 worker 계정 `tommy`는 이 값을 읽을 수도, 성공 신호를 위조할 수도
   없다. 스크립트와 설치 스크립트는 값을 출력하지 않는다.

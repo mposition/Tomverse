@@ -252,7 +252,10 @@ test("the ping URL never reaches the output", { skip: noBash }, () => {
 
 test("the unit runs the installed script with the URL as a credential", () => {
   assert.match(service, /^ExecStart=\/usr\/local\/libexec\/tomverse-bridge-watchdog$/m);
-  assert.match(service, /^DynamicUser=yes$/m);
+  // Its own system account, never a dynamic user: the system bus dropped the
+  // dynamic user's connection on the first install, 2026-10-12.
+  assert.match(service, /^User=tomverse-bridge-watchdog$/m);
+  assert.doesNotMatch(service, /^DynamicUser=/m);
   assert.match(
     service,
     /^LoadCredential=ping-url:\/etc\/tomverse-bridge-watchdog\/ping-url$/m
@@ -315,7 +318,13 @@ test("the install fails unless its own run sent a signal", () => {
  * `test` is wrapped only to say the credential is already installed, the
  * re-install case; every other test runs as written.
  */
-const runInstall = ({ start = 0, verify = 0, runLog }) => {
+const runInstall = ({
+  start = 0,
+  verify = 0,
+  runLog,
+  shell = "/usr/sbin/nologin",
+  groups = "tomverse-bridge-watchdog",
+}) => {
   const dir = mkdtempSync(join(tmpdir(), "bridge-watchdog-install-"));
   try {
     const bundle = join(dir, "bundle");
@@ -330,7 +339,9 @@ const runInstall = ({ start = 0, verify = 0, runLog }) => {
     writeFileSync(join(dir, "install.sh"), install.replace(/\r\n/g, "\n"));
     writeFileSync(join(dir, "run.log"), `${runLog}\n`);
     const prelude = [
-      "id() { echo 0; }",
+      'id() { if [ "$1" = -u ]; then echo 0; else echo "$FAKE_GROUPS"; fi; }',
+      'getent() { printf "tomverse-bridge-watchdog:x:990:990::/nonexistent:%s\n" "$FAKE_SHELL"; }',
+      'useradd() { printf "useradd %s\n" "$*" >> actions.log; }',
       'realpath() { printf "%s\n" "${@: -1}"; }',
       "stat() { echo tomverse-admin; }",
       "find() { :; }",
@@ -341,13 +352,22 @@ const runInstall = ({ start = 0, verify = 0, runLog }) => {
       '  printf "systemctl %s\n" "$*" >> actions.log',
       '  case "$1" in start) return "$FAKE_START" ;; show) echo invocation-1 ;; esac',
       "}",
-      'test() { [ "$*" = "! -s /etc/tomverse-bridge-watchdog/ping-url" ] && return 1; builtin test "$@"; }',
+      // `|| return`: a bare failing last command would end the shell inside
+      // the function under set -e, before the script's ERR trap could run --
+      // which the real builtin, called at top level, never does.
+      'test() { if [ "$*" = "! -s /etc/tomverse-bridge-watchdog/ping-url" ]; then return 1; fi; builtin test "$@" || return; }',
       "source ./install.sh bundle",
     ].join("\n");
     const result = spawnSync(bash, ["-c", prelude], {
       cwd: dir,
       encoding: "utf8",
-      env: { ...process.env, FAKE_START: String(start), FAKE_VERIFY: String(verify) },
+      env: {
+        ...process.env,
+        FAKE_START: String(start),
+        FAKE_VERIFY: String(verify),
+        FAKE_SHELL: shell,
+        FAKE_GROUPS: groups,
+      },
     });
     const actions = existsSync(join(dir, "actions.log"))
       ? readFileSync(join(dir, "actions.log"), "utf8").split("\n").filter(Boolean)
@@ -381,6 +401,9 @@ for (const [name, options] of [
     { start: 1, runLog: "tomverse-bridge-watchdog: 9 unit(s), 1 down, 0 in transition or unreadable; the down signal was not delivered" },
   ],
   ["a unit that does not verify", { verify: 1, runLog: "" }],
+  // The account the unit runs as is checked, never trusted by name.
+  ["an existing account with a login shell", { shell: "/bin/bash", runLog: "" }],
+  ["an existing account in another group", { groups: "tomverse-bridge-watchdog sudo", runLog: "" }],
 ]) {
   test(`${name} fails the install and leaves the timer off`, { skip: noBash }, () => {
     const result = runInstall(options);

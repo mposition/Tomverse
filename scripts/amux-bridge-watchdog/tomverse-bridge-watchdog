@@ -25,7 +25,7 @@
 # unit stopped, and why, is read on the host (this unit's journal names it).
 #
 # The URL arrives as a systemd credential (LoadCredential=ping-url), readable
-# only by this service's dynamic user. The worker account can neither read it
+# only by this service's own system account. The worker account can neither read it
 # nor forge the success signal with it. This script never prints it.
 set -euo pipefail
 

@@ -64,6 +64,17 @@ timer_off() {
 }
 trap 'timer_off; echo "install.sh: failed; the timer is off. Pause the Healthchecks check" >&2' ERR
 
+# The unit's own system account. Created once; an existing one is checked, not
+# changed: it must have no login shell and no group but its own, so it can
+# never be the worker account or one that holds sudo.
+watch_user=tomverse-bridge-watchdog
+if ! getent passwd "$watch_user" >/dev/null; then
+  useradd --system --user-group --no-create-home --home-dir /nonexistent \
+    --shell /usr/sbin/nologin "$watch_user"
+fi
+test "$(getent passwd "$watch_user" | cut -d: -f7)" = /usr/sbin/nologin
+test "$(id -nG "$watch_user")" = "$watch_user"
+
 install -d -o root -g root -m 0755 /usr/local/libexec
 install -o root -g root -m 0755 "$src/tomverse-bridge-watchdog" \
   /usr/local/libexec/tomverse-bridge-watchdog
