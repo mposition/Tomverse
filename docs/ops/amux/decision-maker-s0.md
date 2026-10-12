@@ -74,7 +74,10 @@ sudo bash scripts/amux-decision-maker-s0/measure-isolation /root/amux-dm-s0.conf
   남지 않는다.
 - root가 DM 계정과 broker 홈의 자격증명 파일이 **있는지만** 본다. 내용은 읽지 않는다.
 - git credential helper는 그 계정으로 `git config --includes --get-regexp`를 실행해 Git이 실제로 읽는 설정에서
-  찾는다. 시스템 설정과 include된 파일도 포함한다. helper를 실행하지 않고 값을 출력하지 않는다.
+  찾는다. 시스템 설정과 include된 파일도 포함한다.
+  - 조건부 include(`includeIf "gitdir:..."`, `onbranch:` 등)는 그 저장소 안에서만 읽힌다. 그래서 여기서는 비어 보여도
+    스냅샷 clone 안에서는 helper를 켤 수 있다. 하나라도 있으면 `unverifiable`이고 누출로 센다.
+  - helper를 실행하지 않고 값을 출력하지 않는다.
 
 ### 결과 읽기
 

@@ -126,6 +126,8 @@ runuser() {
   esac
   target=$(printf '%s' "$target" | sed -E 's/amux-dm-s0-[0-9]+-[0-9]+-/amux-dm-s0-RUN-/')
   printf '%s %s %s\n' "$user" "$kind" "$target" >> "$FAKE_ROOT/attempts"
+  # githelper's third answer: a conditional include it cannot evaluate.
+  if [ "$kind" = githelper ] && grep -qxF -- "$user githelper-3 $target" "$FAKE_ROOT/allow"; then return 3; fi
   grep -qxF -- "$user $kind $target" "$FAKE_ROOT/allow" || return 1
   case $kind in
     mkreq) mkdir -p -- "$actual" && printf 'probe\n' > "$actual/card" ;;
@@ -432,7 +434,57 @@ test("a git credential helper is read as git reads it, includes followed, and ne
     run.report.checks.filter((check) => !check.pass).map((check) => [check.subject, check.target]),
     [["decision-maker-anthropic", "git credential.helper"]],
   );
-  assert.match(script, /githelper\) snippet='cd \/ && git config --includes --get-regexp /);
+});
+
+/**
+ * The script's own githelper snippet, run as written against real git with a
+ * throwaway HOME: what it answers for each way a helper can be configured.
+ * System config is left out (GIT_CONFIG_NOSYSTEM) because the machine's own
+ * -- Git for Windows ships a credential.helper -- is not the case under test;
+ * on the host the snippet reads it, as the account's git would.
+ */
+const githelperSnippet = (() => {
+  const match = script.match(/githelper\) snippet='([^']*)' ;;/);
+  assert.ok(match, "githelper snippet");
+  return match[1];
+})();
+const hasGit = spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0;
+
+const githelper = (files) => {
+  const home = mkdtempSync(join(tmpdir(), "amux-dm-s0-git-"));
+  try {
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(home, name), content);
+    return spawnSync(bash, ["-c", githelperSnippet, "amux-dm-s0-githelper", "-"], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: home, GIT_CONFIG_NOSYSTEM: "1" },
+    }).status;
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+};
+
+test("the git snippet: a helper set directly or by an include is present, a conditional include is unverifiable", { skip: noBash || (!hasGit && "no git") }, () => {
+  assert.equal(githelper({}), 1);
+  assert.equal(githelper({ ".gitconfig": "[user]\n\tname = dm\n" }), 1);
+  assert.equal(githelper({ ".gitconfig": "[credential]\n\thelper = store\n" }), 0);
+  assert.equal(githelper({ ".gitconfig": '[credential "https://github.com"]\n\thelper = store\n' }), 0);
+  assert.equal(githelper({ ".gitconfig": "[include]\n\tpath = more.inc\n", "more.inc": "[credential]\n\thelper = cache\n" }), 0);
+  // Loaded only inside a matching repository or branch: absent from / and
+  // present in the snapshot clone, so it cannot be called absent.
+  assert.equal(githelper({ ".gitconfig": '[includeIf "gitdir:/srv/snapshots/"]\n\tpath = snap.inc\n', "snap.inc": "[credential]\n\thelper = store\n" }), 3);
+  assert.equal(githelper({ ".gitconfig": '[includeIf "onbranch:main"]\n\tpath = branch.inc\n' }), 3);
+  // A helper beside a conditional include is still reported as present.
+  assert.equal(githelper({ ".gitconfig": '[credential]\n\thelper = store\n[includeIf "gitdir:/x/"]\n\tpath = x.inc\n' }), 0);
+});
+
+test("an unverifiable git config counts as a leak", { skip: noBash }, () => {
+  // The stub answers the githelper attempt with 3 for this account.
+  const run = measure({ allow: [...CONTROLS, "amux-dm-broker githelper-3 -"] });
+  assert.equal(run.status, 1);
+  assert.deepEqual(
+    run.report.checks.filter((check) => !check.pass).map((check) => [check.subject, check.target, check.observed]),
+    [["broker", "git credential.helper", "unverifiable"]],
+  );
 });
 
 test("a shared UID or a shared vendor group is not isolated", { skip: noBash }, () => {

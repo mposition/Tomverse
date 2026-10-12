@@ -219,8 +219,15 @@ attempt() {
     cmdline) snippet='head -c 1 -- "/proc/$1/cmdline"' ;;
     ptrace) snippet='python3 -c "$AMUX_DM_S0_PTRACE" "$1"' ;;
     # Git's own reading of every config the account sees, includes followed;
-    # exit 0 means a helper is set, 1 none. The helper is never run.
-    githelper) snippet='cd / && git config --includes --get-regexp "^credential(\..+)?\.helper\$"' ;;
+    # exit 0 means a helper is set, 1 none. A conditional include
+    # (includeIf gitdir:, onbranch:, hasconfig:) loads only in a context this
+    # cannot stand in, so it can hide a helper here and switch it on in the
+    # snapshot clone: exit 3, unverifiable, which counts as a leak. The helper
+    # is never run.
+    githelper) snippet='cd / || exit 2
+      git config --includes --get-regexp "^credential(\..+)?\.helper\$" >/dev/null && exit 0
+      git config --includes --get-regexp "^includeif\." >/dev/null && exit 3
+      exit 1' ;;
     *) return 2 ;;
   esac
   timeout --kill-after=1 "$PROBE_TIMEOUT_SECONDS" \
@@ -484,7 +491,7 @@ for role in broker decision-maker-openai decision-maker-anthropic; do
   helper=absent
   if command -v git >/dev/null 2>&1; then
     attempt "$role" githelper -
-    case $? in 0) helper=present ;; 1) helper=absent ;; *) helper=unreadable ;; esac
+    case $? in 0) helper=present ;; 1) helper=absent ;; 3) helper=unverifiable ;; *) helper=unreadable ;; esac
   fi
   record isolation "${role}_holds_no_credential" "$role" credential_file "git credential.helper" absent "$helper"
 done
