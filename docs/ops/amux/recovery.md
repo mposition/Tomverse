@@ -286,12 +286,15 @@ queue와 routing-snapshot 두 selection read를 모두 지난다.
 
 정책 v33에서 같은 요청의 `no_commit`, 영수증 0건과 종결 감사 증거를 서버가 검증한 결과 불명 정지는 자동 해제한다. 접수 기록 없음·미확정 결과·반영된 변경·인증/계약 오류는 자동 해제하지 않는다. 해제는 원래의 claim·회수·승격을 다시 실행하지 않는다. 사람 확인 대상은 운영자가 영수증의 실제 대상을 대조한다.
 
-**혼합 버전 호환성.** v33의 orchestrator는 `KeyedHalt`에서 `reason_code`와
-`clear_kind`·종결 감사 id·증거 감사 id·resolution의 완전한 증명을 요구하고, 모르는 필드도
-허용하지 않는다. 따라서 이전 웹과 새 orchestrator, 또는 새 웹과 이전 orchestrator가 섞이면
-정지 상태 응답은 계약 위반으로 닫히며 scheduler는 쓰기를 허용하지 않는다. 웹과 orchestrator를
-같은 v33 기능 revision으로 맞춘 뒤 정지 상태 read-back이 그 revision의 계약으로 읽히는지
-확인해야 쓰기를 다시 허용할 수 있다. 혼합 버전에서 생긴 정지를 자동 해제로 간주하거나, 빈 목록·
+**혼합 버전 호환성.** v33의 orchestrator는 `KeyedHalt`에서 `reason_code`를 필수로 읽고
+모르는 필드를 허용하지 않는다. `clear_kind`·종결 감사 id·증거 감사 id·resolution은 열린
+정지에서는 생략되거나 null일 수 있지만, `cleared = true`인 행은 사람 해제 또는
+`system_no_commit` 경로에 맞는 완전한 증명이 있어야 한다. 따라서 이전 앱이 새 `clear_kind`
+증명 없이 남긴 사람 해제는 새 orchestrator의 검증을 통과하지 않는다. 이전 웹과 새
+orchestrator, 또는 새 웹과 이전 orchestrator가 섞이면 응답 모양에 따라 사람 확인이 필요한
+`contract_violation` 정지가 생길 수 있으며, 열린 정지 전부가 실패하는 것은 아니다. 웹과
+orchestrator를 같은 v33 기능 revision으로 맞추고 정지 상태 read-back이 그 revision의 계약으로
+읽힌 뒤에만 쓰기를 다시 허용한다. 혼합 버전에서 생긴 정지를 자동 해제로 간주하거나, 빈 목록·
 불완전한 증명만 보고 수동 해제하지 않는다.
 
 1. Admin Console에 owner로 로그인하고 `/admin/amux-settings?tab=safety`를 연다.

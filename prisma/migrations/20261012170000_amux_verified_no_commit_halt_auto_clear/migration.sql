@@ -1,4 +1,4 @@
--- Orchestration policy version 33: a halt may close automatically only when
+-- Orchestration policy version 32: a halt may close automatically only when
 -- the same admitted write is locked and already proven to have committed no
 -- state change. Existing human clears are labelled without changing their
 -- actor or audit evidence. No halt, admission, receipt or audit is deleted.
@@ -11,7 +11,7 @@ ALTER TABLE "AmuxOrchestratorHalt"
 
 -- The version 20 trigger rejects every update of a cleared row. Replace it in
 -- this transaction so the one-time label backfill can run before the stricter
--- version 33 trigger is installed.
+-- version 32 trigger is installed.
 DROP TRIGGER "amux_orchestrator_halt_guard" ON "AmuxOrchestratorHalt";
 
 UPDATE "AmuxOrchestratorHalt"
