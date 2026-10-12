@@ -13,7 +13,7 @@ import {
   resolveGuestInitialWebSearchMode,
   type GuestInitialModelEnvironment,
 } from "@/lib/guestChatInitialModels";
-import { getModel, isEnabledModelId } from "@/lib/models";
+import { getModel, isEnabledModelId, type AiModel } from "@/lib/models";
 
 // This resolver runs during the chat page's first render on both the server
 // and the client, so what it returns *is* the guest's first painted model
@@ -309,8 +309,8 @@ test("a models link does not change the restored conversation's search switch", 
 
 test("the first paint succeeds a retired trio member through the catalogue's resolver", () => {
   const [openai, anthropic, google] = GUEST_BRAND_TRIO_MODEL_IDS;
-  const successor = { ...getModel(anthropic)!, id: "claude-haiku-next", replacementModelId: undefined };
-  const rows = new Map([
+  const successor: AiModel = { ...getModel(anthropic)!, id: "claude-haiku-next", replacementModelId: undefined };
+  const rows = new Map<string, AiModel>([
     [anthropic, { ...getModel(anthropic)!, enabled: false, status: "disabled" as const, publiclyListed: false, replacementModelId: successor.id }],
     [successor.id, successor],
   ]);
