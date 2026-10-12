@@ -335,13 +335,15 @@ impl Scheduler {
         self.instance_id
     }
 
-    /// The scheduler's whole life (policy version 20, section 6).
+    /// The scheduler's whole life (policy version 20, section 6, with version
+    /// 33's verified no-commit clear proof).
     ///
     /// Its first call is the halt state read, before any write or selection
     /// read. It then schedules only while the resume sentence holds, and every
     /// answer that is not a known one is a halt: it waits, reads the halt
     /// state every 30 seconds, and resumes only when every halt has a verified
-    /// human or no-commit clear. It never returns except with the one exit section 3 keeps
+    /// human clear or version 33 no-commit clear. It never returns except with
+    /// the one exit section 3 keeps
     /// here -- a 401 or 403 on the halt state read before the schedule has
     /// ever started, which is a configuration error.
     pub async fn run(mut self) -> Result<Infallible> {

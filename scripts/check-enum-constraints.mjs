@@ -1053,7 +1053,7 @@ const REGISTRY = {
     module: "lib/amux/orchestratorHaltCore.ts",
     list: "AMUX_ORCHESTRATOR_HALT_CLEAR_KINDS",
     reason:
-      "Policy version 32 distinguishes the existing human clear from the system_no_commit path whose trigger requires the same request's no-commit resolution audit and zero receipts.",
+      "Policy version 33 distinguishes the existing human clear from the system_no_commit path whose trigger requires the same request's no-commit resolution audit and zero receipts.",
   },
   AmuxDecisionMakerSwitchEvent_scope_check: {
     owner: "list",

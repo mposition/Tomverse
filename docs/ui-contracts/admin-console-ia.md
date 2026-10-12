@@ -249,8 +249,11 @@ own route; a stale step-up is answered with the exact section to return to
 instance's mode to every admin role, as the switch route's read does; a change
 takes `ops:write` and a recent step-up in that route, a stale step-up is
 answered with the way back (rule 7), and an unknown outcome reads the state
-again rather than sending the change twice. It carries no badge: a switch is a
-setting, not work waiting for a person. Operations settings carries the halt
+again rather than sending the change twice. The same section also shows the
+read-only declaration accuracy report from its own bounded read. A failed
+report read shows no figures and does not replace an independently readable
+switch state. It carries no badge: a switch is a setting, not work waiting for
+a person. Operations settings carries the halt
 count; a failed halt read is shown as unknown, never as zero. Legacy Execution
 `?tab=halts` and `?tab=decision-maker` links redirect to their corresponding
 settings sections and preserve the remaining query fields. Each gated section's tab carries a chip

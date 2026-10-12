@@ -23,7 +23,7 @@ import {
 } from "@/lib/amux/orchestratorHaltStore";
 
 /**
- * The orchestrator's three internal calls of policy versions 20 and 32, each
+ * The orchestrator's three internal calls of policy versions 20 and 33, each
  * inside the bounded AMUX transactions of lib/amux/dbBoundary.ts. The SQL is in
  * lib/amux/orchestratorHaltStore.ts; this module only decides which
  * transactions run and in what order.

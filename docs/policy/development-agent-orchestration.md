@@ -1610,7 +1610,7 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
 
 이 버전은 새 환경 변수, 외부 알림, provider 호출, 비용, 카드 lifecycle·owner·attempt·promotion 상태, worker 등록부·bridge·sidecar, Publisher·병합·배포 권한을 바꾸지 않는다. 자동 종결과 사람 해제 어느 쪽도 claim·recover·promotion 원래 작업을 다시 실행하지 않는다.
 
-append migration `20261012170000_amux_verified_no_commit_halt_auto_clear`에 남은 v32 표기는 승인 전 초안 주석이며, 이미 적용해 검증한 migration checksum을 보존하기 위해 바꾸지 않는다. 현재 승인과 런타임 계약은 이 v33 절이다.
+`20261012170000_amux_verified_no_commit_halt_auto_clear` migration은 main의 worker 등록부 v32와 번호 충돌을 조정하기 전에 draft v32 표기로 처음 게시되었다. migration checksum을 보존하기 위해 원본 주석의 v32 표기는 그대로 두며, 이는 실행 중인 정책 버전을 뜻하지 않는다. 현재 승인과 runtime 계약은 이 절의 v33이다.
 
 작성자와 다른 provider의 독립 검토, append migration을 적용한 PostgreSQL 통합 테스트, Rust 계약 테스트가 배포 전 차단 조건이다. 구현·검토·병합·배포와 운영 read-back은 따로 보고한다.
 
