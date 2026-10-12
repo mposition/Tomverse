@@ -116,8 +116,8 @@ test("a switch that stays in the same document reports itself as a client one", 
   await prepareGuestPage(page, "en");
   await mockPublicProofMetrics(page);
   const captured = await captureAnalytics(page);
-  // /pricing has no localized variant, so the switcher does not navigate.
-  await page.goto("/pricing?lang=en");
+  // Legal pages remain unlocalized, so their switcher does not navigate.
+  await page.goto("/privacy?lang=en");
   await waitForAnalyticsClient(page);
 
   await page.getByTestId("marketing-language-switcher").selectOption("ko");
@@ -128,5 +128,5 @@ test("a switch that stays in the same document reports itself as a client one", 
   const event = captured.find((e) => e.event_name === "marketing_language_switched")!;
   expect(event.properties.navigation).toBe("client");
   expect(event.properties.language_to).toBe("ko");
-  expect(new URL(page.url()).pathname).toBe("/pricing");
+  expect(new URL(page.url()).pathname).toBe("/privacy");
 });
