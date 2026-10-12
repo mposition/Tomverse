@@ -87,6 +87,47 @@ function expectInlineHashes(html: string, headers: Record<string, string>, path:
   }
 }
 
+function expectDynamicNonces(html: string, headers: Record<string, string>, path: string) {
+  const policies = [headers["content-security-policy"], headers["content-security-policy-report-only"]].filter(Boolean);
+  expect(policies.length, `${path} must serve a request-time CSP`).toBeGreaterThan(0);
+  let trustedNonce: string | undefined;
+  for (const policy of policies) {
+    const directives = new Map(policy.split(";").map(part => {
+      const [name, ...sources] = part.trim().split(/\s+/);
+      return [name, sources] as const;
+    }));
+    const sources = directives.get("script-src-elem") ?? directives.get("script-src") ?? [];
+    expect(sources).not.toContain("'unsafe-inline'");
+    expect(sources).not.toContain("'unsafe-eval'");
+    const nonces = sources.filter(source => /^'nonce-[^']+'$/.test(source));
+    expect(nonces, `${path} must expose exactly one server-generated script nonce`).toHaveLength(1);
+    const nonce = nonces[0].slice("'nonce-".length, -1);
+    if (trustedNonce) expect(nonce, `${path}: enforcing and reporting policies disagree`).toBe(trustedNonce);
+    trustedNonce = nonce;
+  }
+  // Derive the expected value from the delivered CSP, never from a script's
+  // own attribute: both Next's bootstrap and our inline scripts must match it.
+  const roles = new Set<string>();
+  let checkedScripts = 0;
+  for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+    const attrs = attributes(match[1]);
+    const hasSource = Object.prototype.hasOwnProperty.call(attrs, "src");
+    if (hasSource) expect(attrs.src.trim().length, `${path}: an empty src is not an inline script`).toBeGreaterThan(0);
+    const content = match[2].trim();
+    // Empty inline placeholders execute nothing. External scripts still need
+    // the nonce even though their script element has no inline body.
+    if (!hasSource && !content) continue;
+    checkedScripts++;
+    expect(attrs.nonce, `${path}: ${attrs.src || attrs.type || "inline script"} misses the response nonce`).toBe(trustedNonce);
+    if (!hasSource && content.startsWith("(function") && content.includes(".dataset.theme")) roles.add("theme");
+    if (!hasSource && content.startsWith("(function") && content.includes("data-consent-pending")) roles.add("consent");
+    if (attrs.type === "application/ld+json" && content) roles.add("jsonld");
+    if (!hasSource && /(?:self|window)\.__next_f\b/.test(content)) roles.add("rsc");
+  }
+  expect(checkedScripts, `${path}: check actual HTML scripts, not only a policy header`).toBeGreaterThanOrEqual(4);
+  expect([...roles].sort(), `${path}: all script surfaces must be present`).toEqual(["consent", "jsonld", "rsc", "theme"]);
+}
+
 function expectLocalizedLinks(hrefs: string[], language: Language) {
   const supported = LOCALIZED_MARKETING_BASE_PATHS as readonly string[];
   const queryLinks = new Map<string, string>();
@@ -162,7 +203,8 @@ for (const language of SEO_LOCALES) {
     await test.step(`${language}: dynamic Knowledge guide`, async () => {
       const response = await request.get(`/guides/assistant-knowledge?lang=${language}`);
       expect(response.status()).toBe(200);
-      const document = servedDocument(await response.text());
+      const html = await response.text();
+      const document = servedDocument(html);
       const metadata = assistantKnowledgeMetadata(language);
       expect(document.language).toBe(language);
       expect(document.title).toBe((metadata.title as { absolute: string }).absolute);
@@ -170,7 +212,7 @@ for (const language of SEO_LOCALES) {
       expect(document.canonical).toBe(`${SITE_ORIGIN}/guides/assistant-knowledge?lang=${language}`);
       expect(document.alternates).toEqual(metadata.alternates?.languages);
       expect(document.h1).toEqual([normalize(assistantKnowledgeGuideContent[language].title)]);
-      expect(response.headers()["content-security-policy"] ?? response.headers()["content-security-policy-report-only"]).toBeTruthy();
+      expectDynamicNonces(html, response.headers(), `/guides/assistant-knowledge?lang=${language}`);
     });
   });
 }
@@ -251,9 +293,14 @@ test("FAQ explains both products and French Knowledge identifies its English med
   await expect(page.getByText(productQuestion.body, { exact: true })).toBeVisible();
   expect(productQuestion.body).toContain("Chat");
   expect(productQuestion.body).toContain("Review");
-  await page.goto("/guides/assistant-knowledge?lang=fr");
+  const response = await page.goto("/guides/assistant-knowledge?lang=fr");
+  expect(response).not.toBeNull();
+  const html = await response!.text();
+  expect(servedDocument(html).language, "French must be present before hydration").toBe("fr");
+  expectDynamicNonces(html, response!.headers(), "/guides/assistant-knowledge?lang=fr");
   const knowledge = assistantKnowledgeGuideContent.fr;
   await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await expect(page.getByTestId("marketing-language-switcher").first()).toHaveValue("fr");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(knowledge.title);
   await expect(page.locator("article[lang='fr']")).toBeVisible();
   await expect(page.getByText(knowledge.videoLabel, { exact: true })).toBeVisible();
@@ -264,6 +311,7 @@ test("FAQ explains both products and French Knowledge identifies its English med
   await expect(page.getByText(knowledge.exampleMaterial, { exact: true })).toBeVisible();
   await expect(page.getByText(knowledge.exampleOutput, { exact: true })).toBeVisible();
   await expectNoHorizontalOverflow(page);
+  expect(await page.evaluate(() => (window as ScriptViolationWindow).__publicMarketingScriptViolations)).toEqual([]);
   expect(generationPosts).toEqual([]);
 });
 
