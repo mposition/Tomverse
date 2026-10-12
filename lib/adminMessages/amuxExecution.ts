@@ -2,7 +2,7 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 
 export const adminAmuxExecutionMessages = defineAdminMessages({
   en: {
-    moveTitle: "Move processing", moveToQueue: "Move to AMUX queue",
+    moveTitle: "Move processing", moveToQueue: "Move to AMUX queue", dragToQueue: "Drag card to AMUX queue",
     moveScope: "Only an approved, eligible Task can enter the enabled execution pool. Assignment and actual execution are separate.",
     moveBinding: "Checking the current card and revision", moveChecks: "The server checks approval, dependencies, score, budget, capacity and halts.",
     moveReading: "Checking current evidence…", moveApplying: "Processing the move…",
@@ -129,7 +129,7 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
     expand: (title: string) => `Expand or collapse ${title}`,
   },
   ko: {
-    moveTitle: "이동 처리 내역", moveToQueue: "AMUX 대기열로 이동",
+    moveTitle: "이동 처리 내역", moveToQueue: "AMUX 대기열로 이동", dragToQueue: "카드를 AMUX 대기열로 드래그",
     moveScope: "승인된 실행 조건을 갖춘 Task만 활성화된 실행 풀에 편입됩니다. 배정과 실제 실행은 별도로 확인합니다.",
     moveBinding: "현재 카드와 revision 확인", moveChecks: "서버에서 승인·의존성·점수·예산·용량·정지를 확인합니다.",
     moveReading: "현재 근거 확인 중…", moveApplying: "이동 처리 중…",
