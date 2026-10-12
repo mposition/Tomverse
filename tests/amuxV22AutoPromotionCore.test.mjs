@@ -54,15 +54,12 @@ test("exception uses the owner audit writer and keeps the existing safety gates"
   }
 });
 
-test("owner control is separate from the read-only board and stops on unknown writes", () => {
+test("owner control reuses canonical failure handling and stays separate from the read-only board", () => {
   const ui = readFileSync("components/admin/AmuxV22PromotionControl.tsx", "utf8");
   const board = readFileSync("components/admin/AmuxExecutionWorkspace.tsx", "utf8");
-  assert.match(ui, /expectedAuditLogId: control\.authorizationAuditLogId/);
-  assert.match(ui, /graduationExceptionId: control\.graduationExceptionId/);
-  assert.match(ui, /active && !confirmed/);
-  assert.match(ui, /result\.error === "outcome_unknown"/);
-  assert.match(ui, /if \(!control \|\| busy \|\| unknown/);
-  assert.match(ui, /adminRecentAuthenticationHref\("\/admin\/amux-promotion\?tab=auto-promotion"\)/);
+  assert.match(ui, /runAmuxAutoAdmissionChange/);
+  assert.match(ui, /AdminApiFailureNotice failure=\{failure\}/);
+  assert.match(ui, /readAdminApiFailure/);
   assert.doesNotMatch(board, /method: "POST"/);
 });
 

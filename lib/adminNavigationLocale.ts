@@ -298,12 +298,15 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   "amux-promotion": {
     label: "승격",
-    description: "backlog 카드의 추천 풀, 수동 승격, 자동 승격",
+    description: "backlog 카드의 추천 풀, 수동 승격, 기존 grant 기반 자동 승격",
     aliases: ["승격", "추천", "추천 풀", "수동 승격", "자동 승격", "grant", "중지", "재개"],
     tabs: {
       recommendation: { label: "추천 풀", description: "backlog snapshot과 카드별 사람의 결정" },
       promotion: { label: "수동 승격", description: "사람이 고른 backlog 카드 1~3건 승격" },
-      "auto-promotion": { label: "자동 승격", description: "제한 자동 승격의 grant, halt와 재개" },
+      "auto-promotion": {
+        label: "자동 승격",
+        description: "기존 제한 자동 승격의 grant, halt와 재개",
+      },
     },
   },
   "amux-execution": {
@@ -317,9 +320,13 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   "amux-settings": {
     label: "운영 설정",
-    description: "AMUX 실행 안전, 복구 증거와 Decision Maker 제어",
-    aliases: ["운영 설정", "실행 안전", "복구", "자동 복구", "정지", "해제", "결과 불명", "확인할 쓰기", "Decision Maker", "결정 도우미", "킬 스위치"],
+    description: "AMUX 자동 편입, 실행 안전, 복구 증거와 Decision Maker 제어",
+    aliases: ["운영 설정", "자동 편입", "실행 안전", "복구", "자동 복구", "정지", "해제", "결과 불명", "확인할 쓰기", "Decision Maker", "결정 도우미", "킬 스위치"],
     tabs: {
+      "automatic-admission": {
+        label: "자동 편입",
+        description: "준비된 Task를 담당 없는 Todo에 편입하는 owner 승인",
+      },
       safety: { label: "실행 안전·복구", description: "자동 복구, 확인할 증거와 운영자 정지 해제 판단" },
       "decision-maker": { label: "Decision Maker", description: "Decision Maker kill switch와 인스턴스별 모드" },
     },

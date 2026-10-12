@@ -5,7 +5,12 @@ import { getServerSession } from "next-auth/next";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
-import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
+import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
+import {
+  amuxSwitchedTabStatus,
+  amuxTabChips,
+  type AmuxTabStatus,
+} from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
@@ -40,6 +45,9 @@ export default async function AdminAmuxSettingsPage({
   const isOwner = role === "owner";
   const canChange = hasAdminPermission(session, "ops:write");
   const statuses: Record<string, AmuxTabStatus | undefined> = {
+    "automatic-admission": isOwner
+      ? amuxSwitchedTabStatus("automatic-admission")
+      : undefined,
     safety: isOwner ? undefined : "read_only",
     "decision-maker": canChange ? undefined : "read_only",
   };
@@ -47,6 +55,10 @@ export default async function AdminAmuxSettingsPage({
     activeTabId={tab.id} label="AMUX operations settings sections" query={query} role={role}
     counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxOrchestratorHalts }}
     chips={amuxTabChips(statuses, m.status)} />;
+  if (tab.id === "automatic-admission") {
+    return <div className="flex min-w-0 flex-col gap-5">{tabs}
+      <AmuxV22PromotionControl /></div>;
+  }
   if (tab.id === "decision-maker") {
     const state = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead,
       (tx) => readDecisionMakerSwitchesOrThrow(tx)).catch(() => null);
