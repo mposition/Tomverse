@@ -192,6 +192,11 @@ export const clampGuestSelectedModels = (models: string[]) =>
 // rule. Only when it does not, or is already selected, does the slot fall to
 // the fallback list. Omitting `resolveReplacement` keeps the old behaviour.
 //
+// `trio` is the effective lineup: the administrator's
+// AppSetting["guestBrandTrioModelIds"] when it is stored and valid, otherwise
+// the compiled GUEST_BRAND_TRIO_MODEL_IDS (lib/appSettings resolves which and
+// serves it with the public settings). Omitting it means the compiled trio.
+//
 // Deliberately pure and catalogue-injected: the server
 // (app/(site)/(application)/chat/page.tsx via lib/appSettings) and the client's
 // very first render (app/(site)/(application)/chat/ChatPageClient.tsx) both
@@ -202,15 +207,17 @@ export const resolveGuestDefaultSelectedModels = ({
   leadModelId = APP_DEFAULTS.guestDefaultModelId,
   maxModels = APP_DEFAULTS.maxGuestSelectedModels,
   resolveReplacement,
+  trio: lineup = GUEST_BRAND_TRIO_MODEL_IDS,
 }: {
   isEligible: (modelId: string) => boolean;
   leadModelId?: string;
   maxModels?: number;
   resolveReplacement?: (modelId: string) => string | undefined;
+  trio?: readonly string[];
 }) => {
-  const orderedTrio = GUEST_BRAND_TRIO_MODEL_IDS.includes(leadModelId)
-    ? [leadModelId, ...GUEST_BRAND_TRIO_MODEL_IDS.filter((id) => id !== leadModelId)]
-    : GUEST_BRAND_TRIO_MODEL_IDS;
+  const orderedTrio = lineup.includes(leadModelId)
+    ? [leadModelId, ...lineup.filter((id) => id !== leadModelId)]
+    : lineup;
   const slots = orderedTrio.map((modelId) =>
     isEligible(modelId) ? modelId : (resolveReplacement?.(modelId) ?? modelId)
   );
@@ -234,32 +241,104 @@ export const resolveGuestDefaultSelectedModels = ({
  * above. Storing one succeeded, read back, and served through
  * `/api/app-settings` while changing nothing a guest ever saw: an
  * administrator had no way to tell a setting that works from a setting that
- * silently does not. Which three models guests see is a product decision that
- * moves `GUEST_BRAND_TRIO_MODEL_IDS` together with the picker, the credit
- * estimate and the E2E expectations -- not something this setting can do from
- * the side.
+ * silently does not. `trio` is the effective lineup the lead is checked
+ * against; changing the lineup itself is `guestBrandTrioRejection` below.
  */
 export const guestDefaultLeadRejection = ({
   modelId,
   exists,
   guestEligible,
   usageCategory,
+  trio = GUEST_BRAND_TRIO_MODEL_IDS,
 }: {
   modelId: string;
   exists: boolean;
   guestEligible: boolean;
   usageCategory: string | null;
+  trio?: readonly string[];
 }): string | null => {
   if (!exists) return `"${modelId}" is not an enabled model.`;
   if (!guestEligible) return `"${modelId}" is not available to guests.`;
   if (usageCategory !== "Standard") {
     return `"${modelId}" is priced as ${usageCategory ?? "unknown"}, not Standard, so a guest could not pay for it.`;
   }
-  if (!GUEST_BRAND_TRIO_MODEL_IDS.includes(modelId)) {
+  if (!trio.includes(modelId)) {
     return (
-      `"${modelId}" is not one of the guest brand trio (${GUEST_BRAND_TRIO_MODEL_IDS.join(", ")}), ` +
+      `"${modelId}" is not one of the guest brand trio (${trio.join(", ")}), ` +
       "so it would be stored but never applied: this setting only chooses which of those three leads."
     );
+  }
+  return null;
+};
+
+/**
+ * Reads a stored AppSetting["guestBrandTrioModelIds"]: a JSON array of exactly
+ * APP_DEFAULTS.maxGuestSelectedModels distinct ids. Anything else -- including
+ * a missing row -- is `null`, which every reader treats as "use the compiled
+ * trio". Pure; whether each id is still servable is the caller's catalogue
+ * check, because a model can be retired after the lineup was saved.
+ */
+export const parseGuestBrandTrio = (value: unknown): string[] | null => {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(parsed)) return null;
+  const ids = parsed.map((item) => (typeof item === "string" ? item.trim() : ""));
+  if (ids.length !== APP_DEFAULTS.maxGuestSelectedModels) return null;
+  if (ids.some((id) => id.length === 0 || id.length > 120)) return null;
+  if (new Set(ids).size !== ids.length) return null;
+  return ids;
+};
+
+/** What a lineup check needs to know about one model, from the runtime catalogue. */
+export type GuestBrandTrioCandidateFacts = {
+  exists: boolean;
+  guestEligible: boolean;
+  usageCategory: string | null;
+  /** Its price resolves to a verified profile or an administrator's override, not the class fallback. */
+  priced: boolean;
+};
+
+/**
+ * Why a lineup may not be stored as AppSetting["guestBrandTrioModelIds"], or
+ * `null` when it may. Pure; `facts` comes from the runtime catalogue.
+ *
+ * Every member must be something the guest screen would actually show -- the
+ * same rule as a lead (enabled, guest plan, Standard) -- so a saved lineup is
+ * never a setting that stores and then silently backfills. And its price must
+ * not be the conservative class fallback: the composer quotes credits from
+ * the model and the provider budget reserves from its price, so a default
+ * every new conversation opens on must have a price someone verified.
+ */
+export const guestBrandTrioRejection = ({
+  modelIds,
+  facts,
+}: {
+  modelIds: readonly string[];
+  facts: (modelId: string) => GuestBrandTrioCandidateFacts;
+}): string | null => {
+  const expected = APP_DEFAULTS.maxGuestSelectedModels;
+  if (modelIds.length !== expected) {
+    return `The default lineup needs exactly ${expected} models.`;
+  }
+  if (new Set(modelIds).size !== modelIds.length) {
+    return "The default lineup names the same model twice.";
+  }
+  for (const modelId of modelIds) {
+    const fact = facts(modelId);
+    if (!fact.exists) return `"${modelId}" is not an enabled model.`;
+    if (!fact.guestEligible) return `"${modelId}" is not available to guests.`;
+    if (fact.usageCategory !== "Standard") {
+      return `"${modelId}" is priced as ${fact.usageCategory ?? "unknown"}, not Standard, so a guest could not pay for it.`;
+    }
+    if (!fact.priced) {
+      return `"${modelId}" has no verified price yet (it would be costed at the conservative fallback).`;
+    }
   }
   return null;
 };

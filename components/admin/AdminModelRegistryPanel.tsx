@@ -508,7 +508,10 @@ export function AdminModelRegistryPanel() {
   const [lookupSettledForKey, setLookupSettledForKey] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
-  const [guestLead, setGuestLead] = useState<{ stored: string | null; effective: string | null } | null>(null);
+  const [guestLead, setGuestLead] = useState<{ stored: string | null; effective: string | null; trio?: string[] } | null>(null);
+  // The effective default lineup (lib/guestLeadFacts), so the trio role and
+  // the adoption warning describe what guests are actually shown.
+  const guestTrio: readonly string[] = guestLead?.trio ?? GUEST_BRAND_TRIO_MODEL_IDS;
   const [saving, setSaving] = useState(false);
   const [validation, setValidation] = useState<EnvironmentStatus | null>(null);
   // When the server said it read this list. Sent back on a save so the server
@@ -525,7 +528,7 @@ export function AdminModelRegistryPanel() {
         models?: AdminModel[];
         securityFindings?: RegistrySecurityFinding[];
         readAt?: string;
-        guestLead?: { stored: string | null; effective: string | null };
+        guestLead?: { stored: string | null; effective: string | null; trio?: string[] };
         error?: string;
       } | null;
       if (!response.ok || !data?.models) throw new Error(data?.error || m.toast.loadFailed);
@@ -550,7 +553,7 @@ export function AdminModelRegistryPanel() {
   // from an effect: writing state in that effect fails the hook lint that CI
   // runs, and a stale id must not ride into the replace request.
   const selectedReplacesModelId = replacementOptionDisabled(
-    replacementRole(adoptReplacesModelId, guestLead?.effective ?? null)
+    replacementRole(adoptReplacesModelId, guestLead?.effective ?? null, guestTrio)
   )
     ? ""
     : adoptReplacesModelId;
@@ -1433,7 +1436,7 @@ export function AdminModelRegistryPanel() {
                     <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.usageClass}</span>
                     {model.id === APP_DEFAULTS.defaultModelId ? <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-blue-200">{m.adopt.roleFallback}</span> : null}
                     {guestLead?.effective === model.id ? <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-blue-200">{m.adopt.roleGuestLead}</span> : null}
-                    {(GUEST_BRAND_TRIO_MODEL_IDS as readonly string[]).includes(model.id) ? <span className="rounded-lg bg-zinc-900 px-2 py-1 text-zinc-300">{m.adopt.roleGuestTrio}</span> : null}
+                    {guestTrio.includes(model.id) ? <span className="rounded-lg bg-zinc-900 px-2 py-1 text-zinc-300">{m.adopt.roleGuestTrio}</span> : null}
                     <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 ${model.environment.apiKeyConfigured ? "bg-emerald-500/10 text-emerald-300" : "bg-red-500/10 text-red-300"}`}>
                       <KeyRound className="h-3 w-3" /> {model.environment.apiKeyEnvName}
                     </span>
@@ -1531,7 +1534,7 @@ export function AdminModelRegistryPanel() {
                         value={selectedReplacesModelId}
                         onChange={(event) => {
                           const next = event.target.value;
-                          const role = replacementRole(next, guestLead?.effective ?? null);
+                          const role = replacementRole(next, guestLead?.effective ?? null, guestTrio);
                           if (replacementOptionDisabled(role)) return;
                           setAdoptReplacesModelId(next);
                         }}
@@ -1542,7 +1545,7 @@ export function AdminModelRegistryPanel() {
                         {models
                           .filter((model) => model.provider === form.provider && model.id !== form.id && !model.catalogDeleted)
                           .map((model) => {
-                            const role = replacementRole(model.id, guestLead?.effective ?? null);
+                            const role = replacementRole(model.id, guestLead?.effective ?? null, guestTrio);
                             const mark =
                               role === "application_fallback"
                                 ? m.adopt.replaceFallback
@@ -1601,7 +1604,8 @@ export function AdminModelRegistryPanel() {
                         selected.id,
                         guestLead?.effective ?? null,
                         eligible,
-                        (id) => (successor && id === selected.id ? successor.id : catalogueReplacement(id))
+                        (id) => (successor && id === selected.id ? successor.id : catalogueReplacement(id)),
+                        guestTrio
                       );
                       if (!substituteId) return null;
                       const substitute = models.find((model) => model.id === substituteId);

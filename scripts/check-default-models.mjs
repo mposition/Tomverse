@@ -21,6 +21,7 @@ import {
   createGuestEligibilityCheck,
   createReplacementResolver,
   GUEST_BRAND_TRIO_MODEL_IDS,
+  parseGuestBrandTrio,
   resolveGuestDefaultSelectedModels,
 } from "../lib/appDefaults.ts";
 import {
@@ -49,19 +50,25 @@ const databaseUrl = process.env.DATABASE_URL?.trim();
 let catalogueSource = "compiled_default";
 let models = AVAILABLE_MODELS;
 let storedGuestDefaultModelId = null;
+let storedGuestBrandTrio = null;
 let databaseNote =
   "No DATABASE_URL: the compiled catalogue was audited and no AppSetting was read.";
 
 if (databaseUrl) {
   try {
     const { prisma } = await import("../lib/prisma.ts");
-    const [rows, setting] = await Promise.all([
+    const [rows, setting, trioSetting] = await Promise.all([
       prisma.modelRegistryEntry.findMany(),
       prisma.appSetting.findUnique({
         where: { key: "guestDefaultModelId" },
         select: { value: true },
       }),
+      prisma.appSetting.findUnique({
+        where: { key: "guestBrandTrioModelIds" },
+        select: { value: true },
+      }),
     ]);
+    storedGuestBrandTrio = parseGuestBrandTrio(trioSetting?.value);
     if (rows.length > 0) {
       const { registryRowToModel } = await import("../lib/modelRegistry.ts");
       models = rows.map((row) => registryRowToModel(row));
@@ -109,10 +116,15 @@ const normalizedGuestDefaultModelId = storedIsUsable
   ? storedGuestDefaultModelId
   : APP_DEFAULTS.guestDefaultModelId;
 
+// The lineup the lead orders: the stored AppSetting when it parses, else the
+// compiled trio -- getPublicAppSettings()'s rule.
+const effectiveGuestBrandTrio = storedGuestBrandTrio ?? [...GUEST_BRAND_TRIO_MODEL_IDS];
+
 const effectiveGuestSelectedModelIds = resolveGuestDefaultSelectedModels({
   isEligible: isGuestEligible,
   leadModelId: normalizedGuestDefaultModelId,
   resolveReplacement,
+  trio: effectiveGuestBrandTrio,
 });
 
 // Hydration: the same function the server calls with no browser, and the same
@@ -122,10 +134,12 @@ const catalogue = { isEnabledModelId: isEnabled, isGuestEligible, resolveReplace
 const ssrGuestSelectedModelIds = resolveGuestInitialSelectedModels({
   catalogue,
   leadModelId: normalizedGuestDefaultModelId,
+  trio: effectiveGuestBrandTrio,
 }).models;
 const hydratedGuestSelectedModelIds = resolveGuestInitialSelectedModels({
   catalogue,
   leadModelId: normalizedGuestDefaultModelId,
+  trio: effectiveGuestBrandTrio,
   environment: { search: "", sessionStorage: null, localStorage: null },
 }).models;
 
@@ -246,7 +260,7 @@ const newConversation = {
 
 const interesting = Array.from(
   new Set([
-    ...GUEST_BRAND_TRIO_MODEL_IDS,
+    ...effectiveGuestBrandTrio,
     ...effectiveGuestSelectedModelIds,
     ...(storedGuestDefaultModelId ? [storedGuestDefaultModelId] : []),
     normalizedGuestDefaultModelId,
@@ -274,7 +288,7 @@ const report = auditDefaultModels({
   storedGuestDefaultModelId,
   normalizedGuestDefaultModelId,
   effectiveGuestSelectedModelIds,
-  guestBrandTrioModelIds: GUEST_BRAND_TRIO_MODEL_IDS,
+  guestBrandTrioModelIds: effectiveGuestBrandTrio,
   defaultModelId: DEFAULT_MODEL_ID,
   appDefaultsDefaultModelId: APP_DEFAULTS.defaultModelId,
   prismaUserSettingsDefaultModel,
@@ -330,7 +344,7 @@ if (json) {
         ? "   (no AppSetting row; the compiled default leads)"
         : "")
   );
-  console.log(`  ${"guestBrandTrio".padEnd(38)} ${JSON.stringify(GUEST_BRAND_TRIO_MODEL_IDS)}   [compiled_default]`);
+  console.log(`  ${"guestBrandTrio".padEnd(38)} ${JSON.stringify(effectiveGuestBrandTrio)}   [${storedGuestBrandTrio ? "app_setting" : "compiled_default"}]`);
 
   console.log("\nB. Newly signed-in account");
   for (const [label, entry] of Object.entries(report.authenticated)) {

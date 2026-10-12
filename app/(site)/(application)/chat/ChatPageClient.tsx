@@ -695,6 +695,7 @@ export function ChatPageClient({
   // Resolved on the server (see page.tsx) rather than fetched after mount, so
   // this component's very first render already knows the guest default.
   guestDefaultModelId,
+  guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
   voiceInputEnabled = false,
   promptRefinerMode = "off",
@@ -709,6 +710,11 @@ export function ChatPageClient({
   mountedSurface = "workspace",
 }: {
   guestDefaultModelId: string;
+  /**
+   * The effective default lineup (lib/appSettings PublicAppSettings), resolved
+   * on the server like the lead so the first render and the server agree.
+   */
+  guestBrandTrioModelIds?: readonly string[];
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
   /**
@@ -1729,6 +1735,7 @@ export function ChatPageClient({
       ? resolveGuestInitialSelectedModels({
           catalogue: guestCatalogue,
           leadModelId: guestDefaultModelId,
+          trio: guestBrandTrioModelIds,
           environment: readGuestInitialModelEnvironment(),
         })
       : null
@@ -2637,9 +2644,10 @@ export function ChatPageClient({
           isEligible: guestCatalogue.isGuestEligible,
           leadModelId: guestDefaultModelId,
           resolveReplacement: guestCatalogue.resolveReplacement,
+          trio: guestBrandTrioModelIds,
         })
       ),
-    [clampGuestSelectedModels, guestCatalogue, guestDefaultModelId]
+    [clampGuestSelectedModels, guestBrandTrioModelIds, guestCatalogue, guestDefaultModelId]
   );
 
   const isNewAccountEligibleModel = useCallback(
@@ -2665,12 +2673,13 @@ export function ChatPageClient({
       clampSelectedModels(
         resolveGuestDefaultSelectedModels({
           isEligible: isNewAccountEligibleModel,
-          leadModelId: GUEST_BRAND_TRIO_MODEL_IDS[0],
+          leadModelId: guestBrandTrioModelIds[0],
           maxModels: APP_DEFAULTS.maxSelectedModels,
           resolveReplacement: guestCatalogue.resolveReplacement,
+          trio: guestBrandTrioModelIds,
         })
       ),
-    [clampSelectedModels, guestCatalogue, isNewAccountEligibleModel]
+    [clampSelectedModels, guestBrandTrioModelIds, guestCatalogue, isNewAccountEligibleModel]
   );
 
   // The guest default lead model used to be fetched here after mount, which

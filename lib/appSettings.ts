@@ -10,7 +10,13 @@ import {
 } from "@/lib/adminAuth";
 import { hasRecentAdminAuthentication } from "@/lib/adminReauthentication";
 
-import { APP_DEFAULTS, guestDefaultLeadRejection } from "@/lib/appDefaults";
+import {
+  APP_DEFAULTS,
+  GUEST_BRAND_TRIO_MODEL_IDS,
+  guestBrandTrioRejection,
+  guestDefaultLeadRejection,
+  parseGuestBrandTrio,
+} from "@/lib/appDefaults";
 import {
   ASSISTANT_KNOWLEDGE_FLAG_KEY,
   ASSISTANT_PROFILES_FLAG_KEY,
@@ -87,6 +93,7 @@ import {
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
+import { resolveModelPricing } from "@/lib/modelPricing";
 import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import {
@@ -96,12 +103,39 @@ import {
 
 export type PublicAppSettings = {
   guestDefaultModelId: string;
+  /**
+   * The default lineup a guest's and a new account's first comparison opens
+   * on: AppSetting["guestBrandTrioModelIds"] when it parses, otherwise the
+   * compiled GUEST_BRAND_TRIO_MODEL_IDS. Resolved here so the server render
+   * and the browser hand the resolver the same three ids (STG-F006).
+   */
+  guestBrandTrioModelIds: string[];
   aiChatEnabled: boolean;
   attachmentsEnabled: boolean;
   publicSharingEnabled: boolean;
 };
 
 const GUEST_DEFAULT_MODEL_KEY = "guestDefaultModelId";
+const GUEST_BRAND_TRIO_KEY = "guestBrandTrioModelIds";
+
+/**
+ * The effective lineup for a stored value. A parse is enough: whether each
+ * member is still servable is decided per slot by the resolver, which follows
+ * a retired member's replacement and otherwise backfills -- exactly what it
+ * does for the compiled trio. Eligibility and price are checked when a lineup
+ * is saved (`guestBrandTrioModelRejection`), not on every read.
+ */
+const effectiveGuestBrandTrio = (stored: string | null | undefined): string[] =>
+  parseGuestBrandTrio(stored) ?? [...GUEST_BRAND_TRIO_MODEL_IDS];
+
+const readEffectiveGuestBrandTrio = async (): Promise<string[]> => {
+  if (e2eDatabaseDisabled()) return [...GUEST_BRAND_TRIO_MODEL_IDS];
+  const row = await prisma.appSetting.findUnique({
+    where: { key: GUEST_BRAND_TRIO_KEY },
+    select: { value: true },
+  });
+  return effectiveGuestBrandTrio(row?.value);
+};
 const OPERATIONAL_FLAG_KEYS = {
   aiChatEnabled: "feature.aiChatEnabled",
   attachmentsEnabled: "feature.attachmentsEnabled",
@@ -127,7 +161,8 @@ const e2eDatabaseDisabled = isE2EDatabaseDisabled;
  * sees. That is rejected rather than accepted.
  */
 export const guestDefaultModelRejection = async (
-  modelId: string
+  modelId: string,
+  trio?: readonly string[]
 ): Promise<string | null> => {
   const model = await getEnabledRuntimeModel(modelId);
   return guestDefaultLeadRejection({
@@ -135,21 +170,62 @@ export const guestDefaultModelRejection = async (
     exists: Boolean(model),
     guestEligible: Boolean(model && canUseModelWithPlan("Guest", model)),
     usageCategory: model ? getModelUsageProfile(model).category : null,
+    trio: trio ?? (await readEffectiveGuestBrandTrio()),
   });
 };
 
-export const isValidGuestDefaultModel = async (modelId: string) =>
-  (await guestDefaultModelRejection(modelId)) === null;
+export const isValidGuestDefaultModel = async (
+  modelId: string,
+  trio?: readonly string[]
+) => (await guestDefaultModelRejection(modelId, trio)) === null;
 
-const normalizeGuestDefaultModel = async (modelId: string | null | undefined) =>
-  modelId && (await isValidGuestDefaultModel(modelId))
+const normalizeGuestDefaultModel = async (
+  modelId: string | null | undefined,
+  trio?: readonly string[]
+) =>
+  modelId && (await isValidGuestDefaultModel(modelId, trio))
     ? modelId
     : APP_DEFAULTS.guestDefaultModelId;
+
+/**
+ * Why `modelIds` may not be stored as the default lineup, or `null` when it
+ * may. The rule is `guestBrandTrioRejection` (pure); this resolves each id
+ * against the runtime registry, including its price.
+ */
+export const guestBrandTrioModelRejection = async (
+  modelIds: readonly string[]
+): Promise<string | null> => {
+  const models = new Map(
+    await Promise.all(
+      [...new Set(modelIds)].map(
+        async (id) => [id, await getEnabledRuntimeModel(id)] as const
+      )
+    )
+  );
+  return guestBrandTrioRejection({
+    modelIds,
+    facts: (id) => {
+      const model = models.get(id);
+      return {
+        exists: Boolean(model && !model.catalogDeleted),
+        guestEligible: Boolean(model && canUseModelWithPlan("Guest", model)),
+        usageCategory: model ? getModelUsageProfile(model).category : null,
+        priced: Boolean(
+          model &&
+            !resolveModelPricing(model).costSource.startsWith(
+              "conservative_fallback"
+            )
+        ),
+      };
+    },
+  });
+};
 
 export async function getPublicAppSettings(): Promise<PublicAppSettings> {
   if (e2eDatabaseDisabled()) {
     return {
       guestDefaultModelId: APP_DEFAULTS.guestDefaultModelId,
+      guestBrandTrioModelIds: [...GUEST_BRAND_TRIO_MODEL_IDS],
       aiChatEnabled: true,
       attachmentsEnabled: true,
       publicSharingEnabled: true,
@@ -157,16 +233,27 @@ export async function getPublicAppSettings(): Promise<PublicAppSettings> {
   }
   const rows = await prisma.appSetting.findMany({
     where: {
-      key: { in: [GUEST_DEFAULT_MODEL_KEY, ...Object.values(OPERATIONAL_FLAG_KEYS)] },
+      key: {
+        in: [
+          GUEST_DEFAULT_MODEL_KEY,
+          GUEST_BRAND_TRIO_KEY,
+          ...Object.values(OPERATIONAL_FLAG_KEYS),
+        ],
+      },
     },
     select: { key: true, value: true },
   });
   const values = new Map(rows.map((row) => [row.key, row.value]));
+  const guestBrandTrioModelIds = effectiveGuestBrandTrio(
+    values.get(GUEST_BRAND_TRIO_KEY)
+  );
 
   return {
     guestDefaultModelId: await normalizeGuestDefaultModel(
-      values.get(GUEST_DEFAULT_MODEL_KEY)
+      values.get(GUEST_DEFAULT_MODEL_KEY),
+      guestBrandTrioModelIds
     ),
+    guestBrandTrioModelIds,
     aiChatEnabled: enabledFromValue(values.get(OPERATIONAL_FLAG_KEYS.aiChatEnabled)),
     attachmentsEnabled: enabledFromValue(
       values.get(OPERATIONAL_FLAG_KEYS.attachmentsEnabled)
@@ -228,7 +315,92 @@ export async function updateOperationalFeatureFlags(flags: OperationalFeatureFla
   return getOperationalFeatureFlags();
 }
 
-export async function updatePublicAppSettings(settings: PublicAppSettings) {
+const readStoredGuestLead = async () =>
+  (
+    await prisma.appSetting.findUnique({
+      where: { key: GUEST_DEFAULT_MODEL_KEY },
+      select: { value: true },
+    })
+  )?.value ?? null;
+
+/**
+ * Why a lineup save -- the three ids and, optionally, which of them leads --
+ * may not be stored, or `null` when it may.
+ *
+ * The lead is checked against the new lineup, not the old one. Without a lead
+ * in the request, the stored lead must still pass against the new lineup: if
+ * the lineup drops it, the resolver would ignore it, and that is the "saved
+ * but never applied" state guestDefaultLeadRejection exists to prevent.
+ */
+export const guestDefaultLineupRejection = async ({
+  modelIds,
+  leadModelId,
+}: {
+  modelIds: readonly string[];
+  leadModelId?: string;
+}): Promise<string | null> => {
+  const lineup = parseGuestBrandTrio([...modelIds]);
+  if (!lineup) {
+    return `The default lineup needs exactly ${APP_DEFAULTS.maxGuestSelectedModels} distinct model ids.`;
+  }
+  const lineupRejection = await guestBrandTrioModelRejection(lineup);
+  if (lineupRejection) return lineupRejection;
+  if (leadModelId) return guestDefaultModelRejection(leadModelId, lineup);
+  const storedLead = await readStoredGuestLead();
+  if (!storedLead) return null;
+  const storedRejection = await guestDefaultModelRejection(storedLead, lineup);
+  return storedRejection
+    ? `The stored leading model "${storedLead}" would no longer apply (${storedRejection}). Choose which of the three leads.`
+    : null;
+};
+
+/**
+ * Stores the default lineup, and with it the lead when one is given, in one
+ * transaction. Refuses with the same reasons as guestDefaultLineupRejection.
+ */
+export async function updateGuestDefaultLineup({
+  modelIds,
+  leadModelId,
+}: {
+  modelIds: readonly string[];
+  leadModelId?: string;
+}): Promise<{ guestBrandTrioModelIds: string[]; guestDefaultModelId: string | null }> {
+  const lineup = parseGuestBrandTrio([...modelIds]);
+  if (e2eDatabaseDisabled()) {
+    return {
+      guestBrandTrioModelIds: lineup ?? [...GUEST_BRAND_TRIO_MODEL_IDS],
+      guestDefaultModelId: leadModelId ?? null,
+    };
+  }
+  const rejection = await guestDefaultLineupRejection({ modelIds, leadModelId });
+  if (rejection || !lineup) {
+    throw new Error(`Default lineup rejected: ${rejection ?? "unreadable lineup"}`);
+  }
+  const lead = leadModelId ?? (await readStoredGuestLead());
+
+  await prisma.$transaction([
+    prisma.appSetting.upsert({
+      where: { key: GUEST_BRAND_TRIO_KEY },
+      create: { key: GUEST_BRAND_TRIO_KEY, value: JSON.stringify(lineup) },
+      update: { value: JSON.stringify(lineup) },
+    }),
+    ...(leadModelId
+      ? [
+          prisma.appSetting.upsert({
+            where: { key: GUEST_DEFAULT_MODEL_KEY },
+            create: { key: GUEST_DEFAULT_MODEL_KEY, value: leadModelId },
+            update: { value: leadModelId },
+          }),
+        ]
+      : []),
+  ]);
+  invalidatePublicSnapshot("app-settings");
+  return { guestBrandTrioModelIds: lineup, guestDefaultModelId: lead };
+}
+
+export async function updatePublicAppSettings(
+  settings: Omit<PublicAppSettings, "guestBrandTrioModelIds">
+) {
   if (e2eDatabaseDisabled()) return settings;
   const rejection = await guestDefaultModelRejection(
     settings.guestDefaultModelId
