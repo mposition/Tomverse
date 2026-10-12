@@ -59,6 +59,11 @@ test("status chrome preserves saved language and language changes reload the bod
   await select.selectOption("en");
   await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "en");
   await expect(page.locator("main")).toHaveAttribute("lang", "en");
+  await page.goBack();
+  await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "ko");
+  await expect(page.locator("main")).toHaveAttribute("lang", "ko");
+  await page.getByTestId("marketing-language-switcher").selectOption("en");
+  await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "en");
   await page.setExtraHTTPHeaders({ "Accept-Language": "ko-KR,ko;q=0.9" });
   await page.goto("/status");
   await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "en");
