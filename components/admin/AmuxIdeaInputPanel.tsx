@@ -80,6 +80,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [idea, setIdea] = useState("");
   const [repositories, setRepositories] = useState("");
   const [pullRequests, setPullRequests] = useState("");
+  const hasUnsavedInput = !!(idea.trim() || repositories.trim() || pullRequests.trim());
   const [pending, setPending] = useState(false);
   const [readBackPending, setReadBackPending] = useState(false);
   const [savedRequestId, setSavedRequestId] = useState("");
@@ -182,7 +183,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     const requestId = savedRequestId.trim().toLowerCase();
     if (!recoveryChecked || !canOpenSavedIdea(submission.kind,
       pending || readBackPending || sourceScopePending ||
-        (submission.kind !== "submitted" && !!idea.trim()), requestId)) return;
+        (submission.kind !== "submitted" && hasUnsavedInput), requestId)) return;
     setReadBackPending(true); setSavedRequestError(false); setSavedRequestReauth(false);
     try {
       const response = await adminFetch(`/api/admin/amux/ideas/submissions?${
@@ -326,7 +327,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         <button type="button" onClick={() => void openSavedIdea()}
           disabled={!recoveryChecked || !canOpenSavedIdea(submission.kind,
             pending || readBackPending || sourceScopePending ||
-              (submission.kind !== "submitted" && !!idea.trim()), savedRequestId.trim().toLowerCase())}
+              (submission.kind !== "submitted" && hasUnsavedInput), savedRequestId.trim().toLowerCase())}
           className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
           {messages.openSavedButton}</button>
         {savedRequestError ? <p role="alert">{messages.openSavedFailed}</p> : null}
