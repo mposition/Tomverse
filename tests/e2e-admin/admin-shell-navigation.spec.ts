@@ -633,6 +633,8 @@ test.describe("admin console shell", () => {
       "href",
       /tab=cards$/
     );
+    await expect(page.getByTestId("amux-execution-workspace")).toBeVisible();
+    await page.getByText("Additional card and usage records", { exact: true }).click();
     await expect(page.getByTestId("amux-card-list-panel")).toBeVisible();
     // One heading per page: the panel's title no longer competes with it.
     await expect(consoleHeading(page)).toHaveCount(1);

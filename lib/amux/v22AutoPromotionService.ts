@@ -5,6 +5,7 @@ import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
 import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
@@ -34,12 +35,99 @@ import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
 import { writeV22AutoPromotionAudit } from "./v22AutoPromotionAudit.ts";
 
 type Candidate = { id: string; taskId: string; scoreTotal: number };
+type OwnerMoveCommand = {
+  session: Session;
+  request: Request;
+  taskId: string;
+  expectedRevision: number;
+  requestId: string;
+  writeHumanIntent: (tx: Prisma.TransactionClient,
+    taskId: string) => Promise<string>;
+};
+type OwnerMoveAuditBinding = {
+  requestId: string;
+  humanIntentAuditId: string;
+};
 const MAX_CANDIDATES_PER_TICK = 8;
 const V22_AUDIT_ACTION = "amux.v22.auto_promotion.consumed";
+const V22_OWNER_MOVE_DESTINATION = "amux_unassigned_todo";
+
+const metadataRecord = (value: Prisma.JsonValue | null):
+  Record<string, Prisma.JsonValue> | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value) ?
+    value as Record<string, Prisma.JsonValue> : null;
+
+async function readMoveRequestBinding(tx: Prisma.TransactionClient,
+  requestId: string) {
+  const [receipt, unknown] = await Promise.all([
+    tx.amuxV22PromotionReceipt.findUnique({ where: { id: requestId },
+      select: { id: true, workItemId: true, taskRevision: true,
+        authorizationAuditLogId: true,
+        workItem: { select: { v22ReceiptId: true } } },
+    }),
+    tx.amuxV22PromotionUnknown.findUnique({ where: { id: requestId },
+      select: { id: true, workItemId: true, authorizationAuditLogId: true },
+    }),
+  ]);
+  if (receipt) {
+    const audit = await tx.adminAuditLog.findUnique({
+      where: { id: receipt.authorizationAuditLogId },
+      select: { action: true, targetId: true, entryHash: true },
+    });
+    const verified = Boolean(audit?.entryHash &&
+      audit.action === V22_AUDIT_ACTION && audit.targetId === requestId &&
+      receipt.workItem.v22ReceiptId === requestId);
+    return { kind: "receipt" as const, verified, receipt };
+  }
+  if (unknown) {
+    const audit = await tx.adminAuditLog.findUnique({
+      where: { id: unknown.authorizationAuditLogId },
+      select: { action: true, targetId: true, entryHash: true, metadata: true },
+    });
+    const metadata = metadataRecord(audit?.metadata ?? null);
+    const expectedRevision = metadata?.expectedRevision;
+    return { kind: "unknown" as const,
+      verified: Boolean(audit?.entryHash &&
+        audit.action === "amux.v22.auto_promotion.outcome_unknown" &&
+        audit.targetId === requestId),
+      taskId: unknown.workItemId,
+      expectedRevision: typeof expectedRevision === "number" &&
+        Number.isSafeInteger(expectedRevision) ? expectedRevision : null };
+  }
+  return { kind: "not_found" as const };
+}
+
+function resolveMoveReplay(binding: Awaited<ReturnType<
+  typeof readMoveRequestBinding>>, command: Pick<OwnerMoveCommand,
+    "taskId" | "expectedRevision" | "requestId">) {
+  if (binding.kind === "not_found") return null;
+  if (binding.kind === "receipt") {
+    if (binding.receipt.workItemId !== command.taskId ||
+        binding.receipt.taskRevision !== command.expectedRevision) {
+      throw new BoardImportError("request_conflict", 409);
+    }
+    if (!binding.verified) {
+      throw new BoardImportError("outcome_unknown", 409, command.requestId);
+    }
+    return { promoted: true as const, state: "promoted" as const,
+      taskId: command.taskId, requestId: command.requestId,
+      receiptId: command.requestId,
+      destination: V22_OWNER_MOVE_DESTINATION,
+      fromRevision: binding.receipt.taskRevision,
+      revision: binding.receipt.taskRevision + 1,
+      replayed: true as const };
+  }
+  if (binding.taskId !== command.taskId ||
+      binding.expectedRevision !== command.expectedRevision) {
+    throw new BoardImportError("request_conflict", 409);
+  }
+  throw new BoardImportError("outcome_unknown", 409, command.requestId);
+}
 
 async function openV22CriticalHalt(tx: Prisma.TransactionClient, now: Date,
   code: "cost_exceeded" | "lifecycle_write",
-  recordReceipt: AmuxOrchestratorReceiptRecorder) {
+  recordReceipt: AmuxOrchestratorReceiptRecorder,
+  ownerMoveAudit?: OwnerMoveAuditBinding) {
   const already = await tx.amuxRecommendationAutoHalt.findFirst({
     where: { clearedAt: null }, select: { id: true },
   });
@@ -50,7 +138,7 @@ async function openV22CriticalHalt(tx: Prisma.TransactionClient, now: Date,
     action: "amux.auto_promotion.halted",
     targetType: "AmuxRecommendationAutoHalt", targetId: haltId,
     summary: "Halted v22 promotion after a critical violation.",
-    metadata: { violationCode: code },
+    metadata: { violationCode: code, ...(ownerMoveAudit ?? {}) },
   });
   await tx.amuxRecommendationAutoHalt.create({ data: { id: haltId,
     reason: "critical_violation", violationCode: code,
@@ -287,13 +375,28 @@ async function readCapacity(tx: Prisma.TransactionClient, now: Date) {
 }
 
 async function commitCandidate(input: { candidate: Candidate; receiptId: string;
-  context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>> }) {
+  context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>;
+  ownerMove?: OwnerMoveCommand }) {
   return withAutoTransaction(input.receiptId, TICK_TRANSACTION_LIMITS,
     async (tx, now, recordReceipt) => {
+      if (input.ownerMove) {
+        const replay = resolveMoveReplay(
+          await readMoveRequestBinding(tx, input.receiptId), input.ownerMove);
+        if (replay) return replay;
+      }
+      const openCandidateCriticalHalt = async (
+        code: "cost_exceeded" | "lifecycle_write", taskId: string) => {
+        const ownerMoveAudit = input.ownerMove ? {
+          requestId: input.ownerMove.requestId,
+          humanIntentAuditId: await input.ownerMove.writeHumanIntent(tx, taskId),
+        } : undefined;
+        return openV22CriticalHalt(tx, now, code, recordReceipt,
+          ownerMoveAudit);
+      };
       // The same queue lock as v8 serializes the total occupancy calculation.
       const critical = await requireV22GlobalGate(tx, now);
       if (critical === "cost_exceeded") {
-        return openV22CriticalHalt(tx, now, critical, recordReceipt);
+        return openCandidateCriticalHalt(critical, input.candidate.taskId);
       }
       const capacity = await readCapacity(tx, now);
       if (capacity.occupied > capacity.decision.queueLimit &&
@@ -314,6 +417,9 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
       if (!current || current.id !== input.candidate.id) {
         throw new BoardImportError("score_changed", 409);
       }
+      if (input.ownerMove && top[0]?.taskId !== current.taskId) {
+        throw new BoardImportError("scheduler_priority", 409);
+      }
       const locked = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "AmuxWorkItem"
         WHERE "id" = ${current.taskId} FOR UPDATE`;
@@ -324,6 +430,10 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
           !ready.sourceApprovalDigest || !ready.briefDigest ||
           !ready.parentFeatureNodeId) {
         throw new BoardImportError("task_not_ready", 409);
+      }
+      if (input.ownerMove &&
+          ready.taskRevision !== input.ownerMove.expectedRevision) {
+        throw new BoardImportError("stale_revision", 409);
       }
       const score = await tx.amuxPortfolioScoreSnapshot.findUnique({
         where: { id: current.id },
@@ -394,8 +504,10 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
       if (await tx.amuxExecutionAttempt.count({ where: { taskId: current.taskId } }) ||
           await tx.amuxWorkDelivery.count({ where: { taskId: current.taskId } }) ||
           await tx.amuxRouteDecision.count({ where: { taskId: current.taskId } })) {
-        return openV22CriticalHalt(tx, now, "lifecycle_write", recordReceipt);
+        return openCandidateCriticalHalt("lifecycle_write", current.taskId);
       }
+      const humanIntentAuditId = input.ownerMove ?
+        await input.ownerMove.writeHumanIntent(tx, current.taskId) : null;
       const auditId = await writeV22AutoPromotionAudit(tx, {
         action: V22_AUDIT_ACTION, targetType: "AmuxV22PromotionReceipt",
         targetId: input.receiptId,
@@ -405,7 +517,9 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
           scoreVersion: score.scoreVersion, scoreTotal: score.scoreTotal,
           policyVersion: AMUX_V22_AUTO_PROMOTION_POLICY_VERSION,
           queueLimit: capacity.decision.queueLimit,
-          capacityOccupied: capacity.occupied, workerCount: capacity.workers },
+          capacityOccupied: capacity.occupied, workerCount: capacity.workers,
+          requestId: input.receiptId,
+          humanIntentAuditId },
       });
       await tx.amuxV22PromotionReceipt.create({ data: {
         id: input.receiptId, workItemId: current.taskId,
@@ -437,6 +551,14 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
       if (updated.count !== 1) throw new BoardImportError("conflict", 409);
       recordReceipt("work_item", current.taskId, 1);
       recordReceipt("v22_promotion_receipt", input.receiptId, 1);
+      if (input.ownerMove) {
+        return { promoted: true as const, state: "promoted" as const,
+          taskId: current.taskId, requestId: input.ownerMove.requestId,
+          receiptId: input.receiptId,
+          destination: V22_OWNER_MOVE_DESTINATION,
+          fromRevision: ready.taskRevision,
+          revision: ready.taskRevision + 1, replayed: false as const };
+      }
       return { promoted: true as const, taskId: current.taskId,
         receiptId: input.receiptId };
     });
@@ -444,7 +566,8 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
 
 /** The queue lock makes this read-back final with respect to the attempted
  * transaction. A missing receipt is recorded as unknown, never retried. */
-async function readBackLostPromotion(receiptId: string, taskId: string) {
+async function readBackLostPromotion(receiptId: string, taskId: string,
+  expectedRevision: number | null = null) {
   return withAutoTransaction(receiptId, TICK_TRANSACTION_LIMITS,
     async (tx, now, recordReceipt) => {
       const existing = await tx.amuxV22PromotionUnknown.findUnique({
@@ -475,6 +598,7 @@ async function readBackLostPromotion(receiptId: string, taskId: string) {
         targetType: "AmuxV22PromotionUnknown", targetId: receiptId,
         summary: "Stopped a v22 promotion with an unconfirmed result.",
         metadata: { receiptId, taskId,
+          expectedRevision,
           receiptFound: receipt ? 1 : 0,
           policyVersion: AMUX_V22_AUTO_PROMOTION_POLICY_VERSION },
       });
@@ -519,6 +643,103 @@ async function readBackLostPromotion(receiptId: string, taskId: string) {
       return { promoted: false as const, reason: "outcome_unknown",
         receiptId, taskId };
     });
+}
+
+/** Exact, mutation-free read-back for one owner move command. A request id
+ * bound to another Task is deliberately indistinguishable from not found. */
+export async function readV22ExecutionMove(taskId: string, requestId: string) {
+  const binding = await prisma.$transaction((tx) =>
+    readMoveRequestBinding(tx, requestId));
+  if (binding.kind === "not_found") {
+    return { state: "not_found" as const, taskId, requestId };
+  }
+  if (binding.kind === "receipt") {
+    if (binding.receipt.workItemId !== taskId) {
+      return { state: "not_found" as const, taskId, requestId };
+    }
+    if (!binding.verified) {
+      return { state: "outcome_unknown" as const, taskId, requestId };
+    }
+    return { state: "promoted" as const, taskId, requestId,
+      receiptId: requestId, destination: V22_OWNER_MOVE_DESTINATION,
+      fromRevision: binding.receipt.taskRevision,
+      revision: binding.receipt.taskRevision + 1 };
+  }
+  if (binding.taskId !== taskId) {
+    return { state: "not_found" as const, taskId, requestId };
+  }
+  return { state: "outcome_unknown" as const, taskId, requestId };
+}
+
+/** Owner-requested board move through the same v22 automatic-admission
+ * transaction. It can move only the current scheduler head and never claims
+ * a worker or advances execution. */
+export async function requestV22ExecutionMove(input: OwnerMoveCommand) {
+  const actorUserId = input.session.user?.id;
+  if (!actorUserId || !isAdminSession(input.session) ||
+      getAdminRole(input.session) !== "owner") {
+    throw new BoardImportError("forbidden", 403);
+  }
+  const prior = await prisma.$transaction((tx) =>
+    readMoveRequestBinding(tx, input.requestId));
+  const replay = resolveMoveReplay(prior, input);
+  if (replay) return replay;
+  if (!amuxV22AutoPromotionEnabled(
+    process.env[AMUX_V22_AUTO_PROMOTION_ENV])) {
+    throw new BoardImportError("apply_disabled", 409);
+  }
+  const card = await prisma.amuxWorkItem.findUnique({
+    where: { id: input.taskId },
+    select: { sourceSystem: true, cardType: true, status: true,
+      archivedAt: true, owner: true, claimedAt: true, v22ReceiptId: true,
+      revision: true },
+  });
+  if (!card || card.sourceSystem !== "admin-idea-v4" ||
+      card.cardType !== "task" || card.archivedAt || card.owner ||
+      card.claimedAt || card.v22ReceiptId || card.status !== "backlog") {
+    throw new BoardImportError("not_backlog", 409);
+  }
+  if (card.revision !== input.expectedRevision) {
+    throw new BoardImportError("stale_revision", 409);
+  }
+  const candidates = await prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT clock_timestamp() AS now`;
+    return latestCandidates(tx, rows[0]?.now ?? new Date());
+  });
+  const candidate = candidates.find((row) => row.taskId === input.taskId);
+  if (!candidate || candidates[0]?.taskId !== input.taskId) {
+    throw new BoardImportError("scheduler_priority", 409);
+  }
+  let context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>;
+  try { context = await loadAmuxV4TaskReadyContext(input.taskId); }
+  catch { throw new BoardImportError("candidate_unavailable", 503); }
+  try {
+    return await commitCandidate({ candidate, receiptId: input.requestId,
+      context, ownerMove: input });
+  } catch (error) {
+    if (!(error instanceof BoardImportError) ||
+        error.code !== "outcome_unknown") throw error;
+    try {
+      const recovered = await readBackLostPromotion(input.requestId,
+        input.taskId, input.expectedRevision);
+      if (recovered.promoted) {
+        const result = await readV22ExecutionMove(input.taskId,
+          input.requestId);
+        if (result.state === "promoted") {
+          return { promoted: true as const, ...result,
+            replayed: true as const };
+        }
+      }
+    } catch (readbackError) {
+      console.error(JSON.stringify({
+        event: "amux_v22_owner_move_readback_unavailable",
+        code: readbackError instanceof BoardImportError ?
+          readbackError.code : "unexpected",
+      }));
+    }
+    throw new BoardImportError("outcome_unknown", 409, input.requestId);
+  }
 }
 
 /** One tick moves at most one card. A cryptographically invalid high-score
