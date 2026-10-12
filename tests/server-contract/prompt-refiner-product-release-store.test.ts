@@ -283,7 +283,7 @@ test("initial release resume records the current policy and exact authority pair
       policySha256:
         "a9dbe509a056152015a59a45fd6438304fac36f36521a1319c11f8d1704970f9",
       continuityPolicySha256:
-        "b7a3a7da53cebd12530d0609bd6967297390a53e3b1d95408f20b0ae0757309c",
+        "1624ea972b907448dbe13ae9739c96a7854e2dbd777bbfb8dece36ba5d1f7838",
       operatorConfirmedReasonCode: "unknown_dispatch_or_cost",
       pauseAuditLogId: "pause-audit",
       priorGeneration: 7,

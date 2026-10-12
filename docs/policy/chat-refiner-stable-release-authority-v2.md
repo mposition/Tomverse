@@ -39,8 +39,10 @@ source fingerprint covers the checked-in Chat, Auto, Router, Refiner, Guest,
 model/pricing, provider, manifest, credit and audit execution modules, their
 local import closure, the Chat and release routes, the relevant Prisma model
 definitions, and the lockfile entries for dependencies reached by that
-execution graph. The shared proxy is hashed as a whole, including its imports,
-matcher and forwarded headers, along with selected request-boundary helpers.
+execution graph. The shared proxy file is hashed as a whole, including its
+import statements, matcher and forwarded headers. Imported source is followed
+only for the listed request-boundary helpers and the Chat execution closure;
+marketing, theme and CSP helper source is not pulled in through the proxy.
 A proxy change, even one made for marketing, therefore needs a new Owner
 activation because that file also gates Chat requests. The shared maintenance
 route is excluded; its Chat credit settlement implementation is already in the

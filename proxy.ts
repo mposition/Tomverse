@@ -370,9 +370,11 @@ export function proxy(request: NextRequest) {
     return redirect;
   }
 
-  const isStaticMarketingRequest = isStaticMarketingPathname(
-    request.nextUrl.pathname
-  );
+  // A catalogue change must never classify an API response as public,
+  // shared-cacheable marketing content.
+  const isStaticMarketingRequest =
+    !isApiPathname(request.nextUrl.pathname) &&
+    isStaticMarketingPathname(request.nextUrl.pathname);
   const staticMarketingHashes = isStaticMarketingRequest
     ? getStaticMarketingCspHashes(request.nextUrl.pathname)
     : null;
