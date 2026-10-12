@@ -4020,13 +4020,13 @@ export function ChatInput({
         </div>
 
         {/*
-          This group wraps too, and it may not shrink below its widest control.
-          At 200% text and 320-360px its 44px circles were wider than the
-          space beside "+": with `min-w-0` the group squeezed below one
-          control, and `justify-end` overflowed that control leftwards over
-          "+" (two overlaps at 320px, one at 360px, measured 2026-09-15). With
-          the default minimum the outer row breaks first and the group takes a
-          line of its own.
+          This group and the localized credit label both wrap. The group's
+          width is bounded by the composer, the credit button may shrink, and
+          its visible copy may take another line; the fixed 44px voice/send
+          actions then wrap as whole controls. This keeps a long translation
+          from creating a min-content width wider than the composer, while the
+          outer row still moves the group below the tools before either group
+          can squeeze across the other.
         */}
         <div
           data-testid="composer-submit-actions"
