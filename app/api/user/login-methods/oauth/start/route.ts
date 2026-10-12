@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { consumeApiRateLimit, apiSecurityResponse } from "@/lib/apiSecurity";
-import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
+import { assertRecentAccountAuthentication, isAccountReauthenticationError } from "@/lib/adminReauthentication";
 import { buildOAuthLinkAuthorizeRedirect, OAuthLinkError, type LinkableProvider } from "@/lib/oauthLink";
 
 const isLinkableProvider = (value: string | null): value is LinkableProvider =>
@@ -21,7 +21,7 @@ export async function GET(req: Request) {
       minute: 5,
       day: 20,
     });
-    await assertRecentAdminAuthentication(session);
+    await assertRecentAccountAuthentication(session);
 
     const provider = new URL(req.url).searchParams.get("provider");
     if (!isLinkableProvider(provider)) {
@@ -33,7 +33,7 @@ export async function GET(req: Request) {
     response.headers.append("Set-Cookie", cookie);
     return response;
   } catch (error) {
-    if (isAdminReauthenticationError(error)) {
+    if (isAccountReauthenticationError(error)) {
       return NextResponse.json(
         { error: "Sign in again before linking a login method.", code: "ACCOUNT_REAUTHENTICATION_REQUIRED" },
         { status: 428 }

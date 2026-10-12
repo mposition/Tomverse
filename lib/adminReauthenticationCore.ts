@@ -2,13 +2,30 @@ import type { AdminSessionAccessState } from "@/lib/adminAuthCore";
 
 const FALLBACK_ADMIN_PATH = "/admin/overview";
 const PUBLIC_ORIGIN = "https://tomverse.app";
+const MIN_RECENT_AUTH_MINUTES = 5;
+const MAX_RECENT_AUTH_MINUTES = 240;
 
-export const resolveRecentAuthMinutes = (raw: string | undefined) => {
-  const parsed = Number(raw || 30);
+export const DEFAULT_ADMIN_RECENT_AUTH_MINUTES = 120;
+export const DEFAULT_ACCOUNT_RECENT_AUTH_MINUTES = 30;
+
+const resolveBoundedRecentAuthMinutes = (
+  raw: string | undefined,
+  fallback: number
+) => {
+  const parsed = Number(raw || fallback);
   return Number.isFinite(parsed)
-    ? Math.min(240, Math.max(5, Math.trunc(parsed)))
-    : 30;
+    ? Math.min(
+        MAX_RECENT_AUTH_MINUTES,
+        Math.max(MIN_RECENT_AUTH_MINUTES, Math.trunc(parsed))
+      )
+    : fallback;
 };
+
+export const resolveRecentAuthMinutes = (raw: string | undefined) =>
+  resolveBoundedRecentAuthMinutes(raw, DEFAULT_ADMIN_RECENT_AUTH_MINUTES);
+
+export const resolveAccountRecentAuthMinutes = (raw: string | undefined) =>
+  resolveBoundedRecentAuthMinutes(raw, DEFAULT_ACCOUNT_RECENT_AUTH_MINUTES);
 
 /**
  * Decides whether a step-up (re-authentication) prompt is required.
@@ -74,7 +91,7 @@ export const adminReauthenticationHref = (callbackPath: unknown) => {
  *   the console is unreachable, so the reauthentication page can tell from the
  *   access state alone.
  * - `recent-auth` is the step-up window a high-risk write requires:
- *   `ADMIN_RECENT_AUTH_MINUTES`, 30 minutes by default, decided by
+ *   `ADMIN_RECENT_AUTH_MINUTES`, 120 minutes by default, decided by
  *   `isRecentAdminAuthentication`. The console session is still perfectly
  *   valid while this one is expired -- which is why a page that only looked at
  *   the access state sent the operator straight back to the screen that had
