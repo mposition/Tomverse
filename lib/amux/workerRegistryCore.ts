@@ -462,11 +462,13 @@ export function compareAmuxWorkerRegistryWithCatalog(
 
 /**
  * Section 8: each stage ships with its code latch off; the operator's
- * activation record turns it on. While this is false the registry route
- * refuses every write, so R1's registration of the thirteen waits for that
- * record. Reading is never latched.
+ * activation record turns it on. R1 shipped it false; version 32 (approved
+ * 2026-10-12) is that record and sets it true, so the owner may write the
+ * registry -- and nothing else opens: assignment still follows the catalog
+ * variable until R2. While it is false the registry route refuses every
+ * write. Reading is never latched.
  */
-export const AMUX_WORKER_REGISTRY_WRITES_LATCH = false;
+export const AMUX_WORKER_REGISTRY_WRITES_LATCH = true;
 
 /** The latch as the route and the page read it: one place to look. */
 export const amuxWorkerRegistryWritesOpen = (): boolean => AMUX_WORKER_REGISTRY_WRITES_LATCH;
