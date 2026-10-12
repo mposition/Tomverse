@@ -1828,7 +1828,7 @@ export function MobileChatShell({
         createPortal(
           <ChatInput
             currentProduct={currentProduct}
-            showProductSwitcher={false}
+            showProductSwitcher={!isCompactBottomDock}
             productSwitchDisabled={productSwitchDisabled}
             onProductSwitch={onProductSwitch}
             singleModelSelection={singleTranscript}

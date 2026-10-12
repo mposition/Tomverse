@@ -66,6 +66,9 @@ test("the switcher has one named navigation region and 44px product targets", ()
     new RegExp(`aria-label="${chatProductUiCopy.en.selectorLabel}"`)
   );
   assert.equal((html.match(/min-h-11/g) ?? []).length, 2);
+  assert.match(html, /max-w-\[236px\]/);
+  assert.match(html, /lucide-message-square/);
+  assert.match(html, /lucide-panels-top-left/);
 });
 
 test("a Review visitor can enter the Chat trial directly in every locale", () => {

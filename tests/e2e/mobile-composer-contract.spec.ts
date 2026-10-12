@@ -413,6 +413,12 @@ test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" },
       "data-unsupported-count",
       "0"
     );
+    await expect(
+      page
+        .getByTestId("composer-primary-tools")
+        .getByTestId("web-search-mode-chip")
+    ).toBeVisible();
+    await expect(page.getByTestId("tool-status-chip-row")).toHaveCount(0);
     await expectComposerContract(page, "390x680 full support");
   });
 
@@ -498,12 +504,11 @@ test.describe("Mobile composer: disabled actions state their reason", { tag: "@u
   });
 });
 
-test.describe("Mobile composer: two chips at once", { tag: "@ui-risk" }, () => {
-  // Web search *and* a pending deep-research job is the widest tool state the
-  // composer can be in. The chips wrap onto a second chip row; what they must
-  // never do is wrap into -- or scroll across -- the input row.
+test.describe("Mobile composer: two tools at once", { tag: "@ui-risk" }, () => {
+  // Fully supported web search stays in the footer while a pending
+  // deep-research job owns the status row. Neither may enter the input row.
   for (const width of [390, 320]) {
-    test(`${width}px wraps a second chip instead of taking the input row`, async ({
+    test(`${width}px keeps footer and status tools out of the input row`, async ({
       page,
     }) => {
       // Three models that search, at the cap: the run has to ask which one to
@@ -517,7 +522,11 @@ test.describe("Mobile composer: two chips at once", { tag: "@ui-risk" }, () => {
 
       await startDeepResearch(page);
       await expect(page.getByTestId("deep-research-chip")).toBeVisible();
-      await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
+      await expect(
+        page
+          .getByTestId("composer-primary-tools")
+          .getByTestId("web-search-mode-chip")
+      ).toBeVisible();
 
       const geometry = await expectComposerContract(page, `${width}x680 two chips`);
       expect(geometry.overlaps).toEqual([]);
