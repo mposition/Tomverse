@@ -29,6 +29,9 @@ async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUn
       lanes:lanes.map(lane=>({lane,cards:lane==="tomverse_backlog"?(promoted?[b]:[a,b]):
         lane==="amux_backlog"&&promoted?[{...a,status:"todo"}]:[]})),
     }});
+    if(p.get("view")==="hierarchy") return route.fulfill({json:{
+      page:0,pageSize:8,total:1,items:[{type:"card",...a}],
+    }});
     return route.fulfill({json:{cards:[],counts:{}}});
   });
   await page.route("**/api/admin/amux/execution-move**", async route => {
@@ -177,15 +180,23 @@ test("Korean board and detail render with the console theme",async({page})=>{
   await page.goto("/e2e/admin-console-fixture?view=amux&locale=ko");
   await expect(page.getByRole("region",{name:"AMUX 대기열"})).toBeVisible();
   await expect(page.getByTestId("amux-execution-workspace")).toHaveCSS("background-color","rgb(11, 15, 22)");
+  await expect(page.getByTestId("amux-execution-workspace")).toHaveCSS("color-scheme","dark");
   await page.screenshot({path:test.info().outputPath("ko-board-desktop.png")});
   await page.getByRole("button",{name:"AMUX-104",exact:true}).click();
   await expect(page.getByRole("dialog").getByRole("tab",{name:"개요",exact:true})).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCSS("background-color","rgb(23, 30, 42)");
+  await expect(page.getByRole("dialog")).toHaveCSS("color-scheme","dark");
   await page.getByRole("tab",{name:"개요",exact:true}).focus();
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("tab",{name:"실행 이력",exact:true})).toBeFocused();
   await page.keyboard.press("Home");
   await expect(page.getByRole("tab",{name:"개요",exact:true})).toBeFocused();
   await page.screenshot({path:test.info().outputPath("ko-card-modal-desktop.png")});
+});
+
+test("hierarchy metadata stays readable in the console's own dark theme",async({page})=>{
+  await setup(page);
+  await page.getByRole("button",{name:"Hierarchy",exact:true}).click();
+  await expect(page.getByText(/backlog · impl · standard/)).toHaveCSS("color","rgb(162, 174, 192)");
 });
 
