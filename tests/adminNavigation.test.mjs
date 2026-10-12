@@ -324,7 +324,7 @@ test("the AMUX group holds Backlog, Promotion, Execution and Operations settings
   );
   assert.deepEqual(
     adminNavItemTabs("amux-execution").map((tab) => tab.id),
-    ["cards", "assignment"]
+    ["cards", "assignment", "workers"]
   );
   assert.deepEqual(
     adminNavItemTabs("amux-settings").map((tab) => tab.id),
@@ -400,13 +400,12 @@ test("the owner sees every AMUX section while other roles cannot see owner opera
     const visible = adminNavigationFor(role);
     const amux = visible.filter((item) => item.group === "AMUX");
     assert.deepEqual(amux.map((item) => item.id), ["amux-execution", "amux-settings"], `${role}: AMUX entries`);
-    // Halts (orchestration policy version 20, section 7) is read by every
-    // role the Execution badge counts it for; only the owner may clear one.
-    // Decision Maker is read by every role; a change takes ops:write
-    // (docs/policy/amux-decision-maker.md §8).
+    // Workers is read by every role; a registry change takes the owner role
+    // (orchestration policy version 31, section 3). Safety and Decision Maker
+    // remain in Operations settings and are also readable by every role.
     assert.deepEqual(
       amux[0].tabs.map((tab) => tab.id),
-      ["assignment"],
+      ["assignment", "workers"],
       `${role}: Execution sections`
     );
     assert.deepEqual(
@@ -431,7 +430,7 @@ test("a role that cannot be determined sees only what every role sees", () => {
       adminNavigationFor(role)
         .filter((item) => item.group === "AMUX")
         .map((item) => [item.id, item.tabs.map((tab) => tab.id)]),
-      [["amux-execution", ["assignment"]], ["amux-settings", ["safety", "decision-maker"]]]
+      [["amux-execution", ["assignment", "workers"]], ["amux-settings", ["safety", "decision-maker"]]]
     );
   }
 });
@@ -498,11 +497,13 @@ test("Execution and Operations settings open on the first section each role may 
   const tabs = adminNavItemTabs("amux-execution");
   assert.equal(resolveAdminTabFor(tabs, "owner", undefined).tab.id, "cards");
   assert.equal(resolveAdminTabFor(tabs, "owner", "assignment").tab.id, "assignment");
+  assert.equal(resolveAdminTabFor(tabs, "owner", "workers").tab.id, "workers");
   assert.equal(resolveAdminTabFor(tabs, "owner", "not-a-tab").tab.id, "cards");
   for (const role of [...NON_OWNER_ROLES, null]) {
     const opened = resolveAdminTabFor(tabs, role, undefined);
     assert.equal(opened.tab.id, "assignment", String(role));
-    assert.deepEqual(opened.visible.map((tab) => tab.id), ["assignment"]);
+    assert.deepEqual(opened.visible.map((tab) => tab.id), ["assignment", "workers"]);
+    assert.equal(resolveAdminTabFor(tabs, role, "workers").tab.id, "workers", String(role));
     assert.equal(resolveAdminTabFor(adminNavItemTabs("amux-settings"), role, "safety").tab.id, "safety", String(role));
     assert.equal(resolveAdminTabFor(adminNavItemTabs("amux-settings"), role, "decision-maker").tab.id, "decision-maker", String(role));
     // A stale value that names no section still falls back...

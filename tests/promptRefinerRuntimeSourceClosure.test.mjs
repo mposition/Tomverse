@@ -501,12 +501,17 @@ const compilerOptions = parsedConfig.options;
 // in `lib/models.ts` move its two `MODEL_ACCESS_RANK[...]` accesses by 16
 // lines. No access is added; count 228 and the position-free inventory are
 // unchanged, so this repins positions only.
+// 2026-10-12, AMUX worker registry R1 (orchestration policy version 31): the
+// marketing webhook fingerprint's history comment in
+// lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
+// below it. Count 228 and the position-free inventory remain unchanged; only
+// their source positions are repinned.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "7de28c2af4b0884b02b29539976e49d5",
-  "623171917914c0fb253d7ee6d7d66547",
+  "ef477daaa1e18310a4d5cd458aa2b9f2",
+  "dd0a87ce5b6cf018c4c99f7f41f84578",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

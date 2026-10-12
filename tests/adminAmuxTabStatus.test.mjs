@@ -250,7 +250,8 @@ test("the pages ask the switches rather than writing the state", () => {
   ]) {
     assert.match(read(route), /hasAdminPermission\(session, "ops:write"\)/, route);
   }
-  // Cards is read only by construction; tests/amuxAdminCardList.test.mjs pins
-  // that the panel issues no request and the loader writes nothing.
-  assert.match(execution, /cards: "read_only"/);
+  // The guarded move is owner-only; the supplementary card list remains
+  // read-only as pinned by tests/amuxAdminCardList.test.mjs.
+  assert.match(execution, /cards: isOwner \? undefined : "read_only"/);
+  assert.match(execution, /AmuxExecutionWorkspace canMoveCards=\{isOwner\}/);
 });

@@ -1,6 +1,6 @@
 # AMUX 실행 bridge 감시
 
-전용 Ubuntu 호스트의 `tomverse-bridge.service`가 멈추면 Slack과 이메일로 알리는 장치와, 알림을 받은 뒤의
+전용 Ubuntu 호스트의 AMUX 실행 bridge가 멈추면 Slack과 이메일로 알리는 장치와, 알림을 받은 뒤의
 순서다. bridge 자체의 계약과 재시작 규칙은 `wsl-execution-bridge.md`가 정하고, 이 문서는 그것을 바꾸지 않는다.
 
 ## 왜 있는가
@@ -14,13 +14,17 @@ bridge는 결과를 모르면 종료 코드 3으로 halt하고, systemd는 이�
 | 2026-10-07 02:02 | 2026-10-08 08:07 | 30시간 | 없음(app 로그로 409 `runtime_lease_lost` 확인) |
 | 2026-10-08 12:01 | 2026-10-08 12:56 | 55분 | 없음(app 로그로 owned queue 500 확인) |
 | 2026-10-09 03:37 | 2026-10-10 00:59 | 21시간 | 없음 |
+| 2026-10-12 03:44 | 2026-10-12 04:26~04:32 | 42~48분 | 없음(production 배포 중 앱이 응답하지 않음. bridge 5개가 함께 halt) |
+
+bridge는 하나가 아니다. `tomverse-bridge.service`가 codex 세션을 맡고, v22 worker마다
+`tomverse-amux-v22-bridge@<worker>`와 `tomverse-amux-v22-sidecar@<worker>`가 한 쌍씩 돈다(2026-10-12 기준 claude 4쌍).
 
 ## 신호 셋
 
 | | 어디서 | 무엇을 보는가 | 잡는 것 | 알림 |
 |---|---|---|---|---|
-| 1. box watchdog | Ubuntu 호스트의 systemd timer, 5분마다 | `systemctl is-active tomverse-bridge.service` | halt, 정지, 호스트 꺼짐, 네트워크 끊김 | Healthchecks.io → Slack·이메일 |
-| 2. lease 판정 | 앱의 15분 인프라 감시 | `AmuxWorkerRuntime.leaseExpiresAt` | 위 전부, 그리고 프로세스는 살아 있지만 heartbeat가 앱에 닿지 않는 경우 | 앱 운영 알림 → Slack·운영자 이메일·Sentry |
+| 1. box watchdog | Ubuntu 호스트의 systemd timer, 5분마다 | bridge·sidecar unit 전부의 `systemctl is-active` | 어느 하나의 halt·정지, 호스트 꺼짐, 네트워크 끊김 | Healthchecks.io → Slack·이메일 |
+| 2. lease 판정 | 앱의 15분 인프라 감시 | `AmuxWorkerRuntime.leaseExpiresAt` | **모든** lease가 끊긴 경우 — 호스트·네트워크·전체 halt, 그리고 프로세스는 살아 있지만 heartbeat가 앱에 닿지 않는 경우. bridge 일부만 멈춘 것은 1이 잡는다 | 앱 운영 알림 → Slack·운영자 이메일·Sentry |
 | 3. halt 원인 줄 | bridge 자신 | 처음 halt한 이유 | — | 알림이 아니라 journal 한 줄 |
 
 1과 2는 서로 독립이다. 1은 앱이 죽어도 동작하고, 2는 호스트에 아무것도 설치하지 않아도 동작한다.
@@ -29,15 +33,19 @@ bridge는 결과를 모르면 종료 코드 3으로 halt하고, systemd는 이�
 
 파일: `scripts/amux-bridge-watchdog/`. 테스트: `tests/amuxBridgeWatchdog.test.mjs`.
 
-한 번 실행할 때 bridge unit의 상태를 읽고 본문 없는 요청 하나를 보낸다.
+한 번 실행할 때 bridge unit 전부의 상태를 읽고 본문 없는 요청 하나를 보낸다. 대상은 `tomverse-bridge.service`(항상)와,
+로드된 `tomverse-amux-v22-bridge@*`·`tomverse-amux-v22-sidecar@*` 인스턴스 전부다.
 
-| `is-active` | 보내는 것 | monitor |
+| 상태 | 보내는 것 | monitor |
 |---|---|---|
-| `active` | ping URL | up 유지 |
-| `failed`, `inactive` | ping URL + `/fail` | 즉시 down 알림 |
+| 전부 `active` | ping URL | up 유지 |
+| 하나라도 `failed`, `inactive` | ping URL + `/fail` | 즉시 down 알림 |
 | 그 밖(`activating` 등, 읽기 실패) | 없음 | 유예 시간이 지나면 down 알림 |
 
-- ping URL은 systemd credential(`LoadCredential=ping-url`)로만 전달되고 unit의 동적 사용자만 읽는다. curl에도
+어느 unit이 왜 그런지는 watchdog의 journal에 unit마다 한 줄로 남는다. 상태를 읽지 못하면 `systemctl`의 오류 첫 줄을
+함께 적는다(`journalctl -u tomverse-bridge-watchdog.service -n 20`). 이 내용은 호스트 밖으로 나가지 않는다.
+
+- ping URL은 systemd credential(`LoadCredential=ping-url`)로만 전달되고 unit의 전용 시스템 계정 `tomverse-bridge-watchdog`(로그인 셸 없음, 자기 그룹만)만 읽는다. 설치 스크립트가 이 계정을 만들고, 이미 있으면 셸과 그룹을 확인만 한다. 동적 사용자(`DynamicUser=`)는 쓰지 않는다 — 이 호스트의 system bus가 동적 사용자의 연결을 끊어 `systemctl`이 매번 "Transport endpoint is not connected"로 실패했다(2026-10-12 첫 설치). curl에도
   인자가 아니라 stdin 설정으로 넘긴다 — 프로세스 인자는 `/proc/<pid>/cmdline`으로 다른 사용자가 읽을 수 있고, 이
   호스트의 `/proc`에는 `hidepid`가 없다. 그래서 worker 계정 `tommy`는 이 값을 읽을 수도, 성공 신호를 위조할 수도
   없다. 스크립트와 설치 스크립트는 값을 출력하지 않는다.
@@ -72,8 +80,11 @@ sudo bash "$d/install.sh" "$d"
 - 고정 commit에서 받아 관리자만 들어갈 수 있는 `mktemp -d` 디렉터리에 둔다. 설치 스크립트는 worker 소유이거나
   그룹·다른 사용자에게 열린 디렉터리를 거절한다.
 - ping URL을 물으면 붙여 넣는다. 화면에 보이지 않는다. `/etc/tomverse-bridge-watchdog/ping-url`(root, 0600)에 저장된다.
-- 설치는 watchdog을 한 번 실행하고 끝난다. URL이 답하지 않거나 bridge 상태를 읽지 못하면 설치가 실패한다.
-  마지막 줄이 `TOMVERSE_BRIDGE_WATCHDOG_INSTALLED`이고 Healthchecks 대시보드에 첫 ping이 보이면 끝이다.
+- 설치는 watchdog을 한 번 실행하고, 그 실행이 신호(`sent up` 또는 `sent down`)를 보냈는지 그 실행의 journal로
+  확인한다. URL이 답하지 않거나 bridge 상태를 읽지 못해 아무것도 보내지 않았으면 설치가 실패하고 timer를 끈다.
+  (첫 버전은 아무것도 보내지 않은 실행도 성공으로 보고했다.) 마지막 줄이 `TOMVERSE_BRIDGE_WATCHDOG_INSTALLED`이고
+  Healthchecks 대시보드에 첫 ping이 보이면 끝이다.
+- 이미 설치돼 있으면 같은 명령을 새 SHA로 다시 실행한다. URL은 다시 묻지 않는다.
 - 바꾸는 것: 위 파일 세 개와 credential 파일, timer 활성화. 되돌리기는 1.4절.
 
 확인(읽기 전용, `tommy`로도 된다):
@@ -169,8 +180,8 @@ amux wsl bridge halted: no new assignments; cause=<원인>; restart only after c
 
 자동 재시작은 없다. 순서는 `wsl-execution-bridge.md` "halt와 재시작"과 같다.
 
-1. 호스트에서 원인 줄을 읽는다(읽기 전용, `tommy`로 된다):
-   `journalctl -u tomverse-bridge.service -n 20 --no-pager -o short-iso`
+1. 어느 unit인지 본다(읽기 전용, `tommy`로 된다): `journalctl -u tomverse-bridge-watchdog.service -n 12 --no-pager -o cat`.
+   그 unit의 원인 줄을 읽는다: `journalctl -u <unit> -n 20 --no-pager -o short-iso`
 2. `/admin/office`의 AMUX 방과 Tomverse의 attempt 상태를 확인한다.
-3. 다시 시작해도 된다고 판단하면 관리자 계정에서 `sudo systemctl restart tomverse-bridge.service`.
+3. 다시 시작해도 된다고 판단하면 관리자 계정에서 `sudo systemctl restart <unit>`.
 4. 5분 안에 Healthchecks가 up으로 돌아오고, 다음 인프라 감시에서 앱이 복구 알림을 보낸다.

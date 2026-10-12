@@ -8,6 +8,7 @@ import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
+import { AmuxWorkerRegistryPanel } from "@/components/admin/AmuxWorkerRegistryPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
@@ -19,6 +20,8 @@ import {
 } from "@/lib/adminNavigationCounts";
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
 import { readAmuxCliUsageSummaryForAdmin } from "@/lib/amux/adminCliUsageSummary";
+import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
+import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("amux-execution");
@@ -62,6 +65,9 @@ export default async function AdminAmuxExecutionPage({
     cards: "read_only",
     // The same permission every escalation, proposal and review route checks.
     assignment: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
+    // A registry change takes the owner role, the stage's code latch and a
+    // recent step-up (orchestration policy version 31, sections 3 and 8).
+    workers: !isOwner ? "read_only" : amuxWorkerRegistryWritesOpen() ? undefined : "behind_server_switch",
   };
 
   const tabs = (
@@ -92,6 +98,20 @@ export default async function AdminAmuxExecutionPage({
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxCardListPanel rows={rows} total={total} limit={limit} />
         <AmuxCliUsagePanel view={usage} />
+      </div>
+    );
+  }
+
+  if (tab.id === "workers") {
+    // Every admin role reads the registry and its comparison with the
+    // catalog; only the owner is offered registration, and the route decides
+    // that again. A read that fails is shown as such, never as an empty
+    // registry.
+    const view = await readAmuxWorkerRegistryForAdmin().catch(() => null);
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        <AmuxWorkerRegistryPanel view={view} isOwner={isOwner} />
       </div>
     );
   }

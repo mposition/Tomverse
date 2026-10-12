@@ -20,7 +20,7 @@ import { prepareGuestPage } from "./support/app-fixtures";
 
 const openLanding = async (page: Page) => {
   await prepareGuestPage(page, "en");
-  await page.goto("/");
+  await page.goto("/products/review");
   await expect(page.getByTestId("landing-hero-title")).toBeVisible();
 };
 

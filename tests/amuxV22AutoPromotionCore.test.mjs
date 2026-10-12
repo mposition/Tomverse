@@ -54,13 +54,15 @@ test("exception uses the owner audit writer and keeps the existing safety gates"
   }
 });
 
-test("owner control reuses canonical failure handling and stays separate from the read-only board", () => {
+test("owner control uses canonical failure handling and stays separate from guarded board admission", () => {
   const ui = readFileSync("components/admin/AmuxV22PromotionControl.tsx", "utf8");
   const board = readFileSync("components/admin/AmuxExecutionWorkspace.tsx", "utf8");
   assert.match(ui, /runAmuxAutoAdmissionChange/);
   assert.match(ui, /AdminApiFailureNotice failure=\{failure\}/);
   assert.match(ui, /readAdminApiFailure/);
   assert.doesNotMatch(board, /method: "POST"/);
+  assert.doesNotMatch(board, /\/api\/admin\/amux\/v22\/promotion-control/);
+  assert.match(board, /AmuxExecutionMovePanel/);
 });
 
 test("v22 admission requires the exact explicit environment flag", () => {

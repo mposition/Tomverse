@@ -1,29 +1,37 @@
 #!/bin/bash
-# One dead-man signal for the AMUX execution bridge on the Ubuntu host.
+# One dead-man signal for the AMUX execution bridges on the Ubuntu host.
 #
 # docs/ops/amux/bridge-monitoring.md is the runbook. A systemd timer runs this
-# every five minutes. It reads one thing -- the bridge unit's state -- and
-# sends one request without a body:
+# every five minutes. It reads one thing -- the state of every bridge unit --
+# and sends one request without a body:
 #
-#   active            -> <ping URL>        the monitor stays up
-#   failed / inactive -> <ping URL>/fail   the monitor alerts now
-#   anything else     -> nothing           activating, deactivating, or a state
-#                                          systemctl could not read
+#   all active                  -> <ping URL>        the monitor stays up
+#   any failed / inactive       -> <ping URL>/fail   the monitor alerts now
+#   otherwise (some activating,
+#   deactivating, unreadable)   -> nothing
+#
+# The units are tomverse-bridge.service (the codex sessions), which must always
+# be there, and every loaded instance of tomverse-amux-v22-bridge@ and
+# tomverse-amux-v22-sidecar@ (one pair per v22 worker). A production deploy on
+# 2026-10-12 halted all five bridges at once; one unit alone would have missed
+# four of them.
 #
 # Sending nothing is a signal too: the monitor turns a silence longer than its
 # grace period into an alert, which is also what the host going down, losing
 # its network, or this timer stopping looks like.
 #
-# Nothing about the bridge leaves the host -- no journal line, worker name,
-# card or exit code. The alert carries the check's name; the cause is read on
-# the host (journalctl -u tomverse-bridge.service).
+# Nothing about the bridges leaves the host -- no unit name, journal line,
+# worker name, card or exit code. The alert carries the check's name; which
+# unit stopped, and why, is read on the host (this unit's journal names it).
 #
 # The URL arrives as a systemd credential (LoadCredential=ping-url), readable
-# only by this service's dynamic user. The worker account can neither read it
+# only by this service's own system account. The worker account can neither read it
 # nor forge the success signal with it. This script never prints it.
 set -euo pipefail
 
-unit=tomverse-bridge.service
+main_unit=tomverse-bridge.service
+unit_patterns=('tomverse-amux-v22-bridge@*.service' 'tomverse-amux-v22-sidecar@*.service')
+unit_name='^tomverse-amux-v22-(bridge|sidecar)@[A-Za-z0-9_.-]+\.service$'
 # A plain https URL: host, optional port, path segments. No query string, no
 # fragment, no credentials -- the check's own ping URL never needs them.
 url_pattern='^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)+$'
@@ -38,17 +46,58 @@ if [[ ! "$url" =~ $url_pattern ]]; then
   exit 2
 fi
 
-# `is-active` exits non-zero for every state but active; the state it prints
-# is the answer either way.
-state=$(systemctl is-active "$unit" 2>/dev/null || true)
-case "$state" in
-  active) target="$url" signal=up ;;
-  failed | inactive) target="$url/fail" signal=down ;;
-  *)
-    echo "tomverse-bridge-watchdog: $unit is ${state:-unreadable}; no signal this run"
-    exit 0
-    ;;
-esac
+down=0
+pending=0
+
+# The main unit is always checked, listed or not: a unit that is not loaded
+# reads as inactive, which is a stop. The v22 instances are whatever is loaded.
+# A listing that fails is not an empty listing: it leaves the v22 units
+# unknown, so it counts as unreadable and the run cannot send up.
+units=("$main_unit")
+if listing=$(systemctl list-units --all --plain --no-legend --type=service \
+  "${unit_patterns[@]}" 2>&1); then
+  while read -r name _; do
+    [[ "$name" =~ $unit_name ]] && units+=("$name")
+  done <<<"$listing"
+else
+  pending=$((pending + 1))
+  reason=${listing%%$'\n'*}
+  echo "tomverse-bridge-watchdog: the v22 unit list is unreadable (systemctl: ${reason:0:200})"
+fi
+
+for unit in "${units[@]}"; do
+  # `is-active` exits non-zero for every state but active; the state it
+  # prints is the answer either way. Anything else it prints is an error, and
+  # its first line goes to this host's journal: an unreadable state with no
+  # reason was the first installed version's only report of what went wrong.
+  answer=$(systemctl is-active "$unit" 2>&1 || true)
+  case "$answer" in
+    active) ;;
+    failed | inactive)
+      down=$((down + 1))
+      echo "tomverse-bridge-watchdog: $unit is $answer"
+      ;;
+    activating | deactivating | reloading | refreshing | maintenance)
+      pending=$((pending + 1))
+      echo "tomverse-bridge-watchdog: $unit is $answer"
+      ;;
+    *)
+      pending=$((pending + 1))
+      reason=${answer%%$'\n'*}
+      echo "tomverse-bridge-watchdog: $unit is unreadable (systemctl: ${reason:0:200})"
+      ;;
+  esac
+done
+
+summary="${#units[@]} unit(s), $down down, $pending in transition or unreadable"
+if ((down > 0)); then
+  target="$url/fail" signal=down
+elif ((pending > 0)); then
+  echo "tomverse-bridge-watchdog: $summary; no signal this run"
+  exit 0
+else
+  target="$url" signal=up
+fi
 
 # The URL goes to curl as a config line on stdin, never as an argument: any
 # local user, the worker account included, can read a process's arguments
@@ -56,8 +105,8 @@ esac
 # URL pattern above admits no quote or backslash, so the line is literal.
 if printf 'url = "%s"\n' "$target" | curl --config - --fail --silent --show-error \
   --max-time 10 --retry 3 --retry-delay 2 --proto '=https' --output /dev/null; then
-  echo "tomverse-bridge-watchdog: $unit is $state; sent $signal"
+  echo "tomverse-bridge-watchdog: $summary; sent $signal"
 else
-  echo "tomverse-bridge-watchdog: $unit is $state; the $signal signal was not delivered" >&2
+  echo "tomverse-bridge-watchdog: $summary; the $signal signal was not delivered" >&2
   exit 1
 fi

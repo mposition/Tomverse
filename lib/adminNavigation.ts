@@ -787,7 +787,10 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     href: "/admin/amux-execution",
     description: "AMUX cards, their execution state, and why AMUX assigned the work",
     group: "AMUX",
-    // Assignment decisions take ops:write; the owner-only card list writes nothing.
+    // Assignment decisions take `ops:write` (every /api/admin/amux/escalations
+    // route checks it); the owner-only card list writes nothing. A worker
+    // registry change takes the owner role and a recent step-up in its route
+    // (orchestration policy version 31, section 3).
     writeRoles: ["owner", "ops"],
     // Halts belong to Operations settings, so this counts escalations only.
     badge: "amuxEscalations",
@@ -802,6 +805,8 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "human review",
       "review",
       "incident",
+      "registry",
+      "worker registry",
     ],
     tabs: [
       {
@@ -815,6 +820,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Assignment",
         description: "Why AMUX assigned the work, and escalations waiting on a person",
         badge: "amuxEscalations",
+      },
+      {
+        id: "workers",
+        label: "Workers",
+        description: "The worker registry, each worker's desired and effective state, and whether the assignment catalog agrees",
       },
     ],
   },
