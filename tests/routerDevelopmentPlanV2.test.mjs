@@ -53,11 +53,14 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
   // joined the catalogue (two models, so 96 more rows) and DEFAULT_MODEL_ID --
   // the plan's requested model -- moved to `gpt-6-luna`. Every digest below
   // moved for that reason alone; the previous plan digest was 4e6f769a…892784.
+  // The new pair is exactly develop's v4 counterfactual for the same catalogue
+  // (develop also carries D03's v5 diagnostic label): the same plan, byte for
+  // byte, with only that label taken out.
   assert.equal(legacy.versions.router.taskProfile, "task-profile-v4");
   assert.equal(legacy.versions.router.selection, "router-selection-v3");
   assert.equal(legacy.versions.diagnostic, "router-full-catalog-diagnostic-v4");
-  assert.equal(legacy.planDigest, "4e6f769a31a7fcdcf7db0f2b4f4d627a86f1b6bb913ebec9be2774f9d5892784");
-  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "839c980f0ecde4a064ca2d42472f3ab2c010529e627fc75af8ab4478acf1912f");
+  assert.equal(legacy.planDigest, "1bb44ad1d5802e97413d8376e99c33237e52b1354b936b2dd668ef043293a92c");
+  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "e71f9adc8e6f694949046d7854e23b68c4f40d9148d71dbf179f90b2b28f76a6");
 
   // The digest covers the body without itself, and it is written last, so
   // dropping it leaves the remaining keys in the order they were built in.

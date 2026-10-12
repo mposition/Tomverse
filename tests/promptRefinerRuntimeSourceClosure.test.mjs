@@ -450,12 +450,17 @@ const compilerOptions = parsedConfig.options;
 // one access, `flags[feature]`, and move it by 184 lines. The replacement walk,
 // lineup rules and lead helper in `lib/appDefaults.ts` add no access. Count 228 and the
 // position-free inventory are unchanged; positions only.
+// 2026-10-12, selective release of both to main: the same commits on the main
+// base. The four files they move (`lib/modelPricing.ts`, `lib/models.ts`,
+// `lib/appSettings.ts`, `lib/appDefaults.ts`) are identical on main and on the
+// develop they were reviewed on, so the moves above hold; this repins only the
+// final positions main's other closure files give.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "54518b09e096d37dfe4fd70a69fddec2",
-  "8633c118fd3e3cda5c900aeea2838205",
+  "52858d2ed70c017ebb0b18e13f1415c2",
+  "042fe67829975d56101ac24beb8d6a29",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
