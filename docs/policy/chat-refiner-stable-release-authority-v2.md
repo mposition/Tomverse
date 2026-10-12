@@ -1,9 +1,9 @@
 ---
-status: implementation_review_pending
+status: approved
 policyVersion: 2
 workId: CHAT-01
-approvedBy: null
-approvedAt: null
+approvedBy: mposition
+approvedAt: 2026-10-13
 scopeAuthorizedBy: mposition
 scopeAuthorizedAt: 2026-10-13
 approvalTimezone: Australia/Brisbane
