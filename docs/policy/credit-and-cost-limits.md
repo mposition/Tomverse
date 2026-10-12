@@ -126,9 +126,10 @@ Flash-Lite, API 모델 `gemini-3.5-flash-lite`, Guest, standard)는 이 하한�
 - **넘는 조건.** 게스트 개방 조건은 위 채택 하한 — 최악 턴(입력 128,000토큰 ×
   입력 단가 + 출력 상한 × 출력 단가)이 standard 1크레딧의 3배 커버(US$0.12)
   안에 들어오는 것 — 입니다. Claude Haiku 5.5는 prompt가 100,000토큰을 넘으면 모든
-  요율이 5배(입력 US$0.50 · 출력 US$2.50)가 되므로 최악 턴이 약 US$0.384입니다.
-  채택 저장 때의 하한 계산은 단문 요율(US$0.10 · US$0.50)로 하므로 이 차이를 보지
-  못하며, 이 예외는 그 차이를 알고 받아들이는 결정입니다.
+  요율이 5배(입력 US$0.50 · 출력 US$2.50)가 됩니다. 채택 하한은 128,000토큰 최악
+  턴을 그 장문 요율로 계산하므로, Anthropic 5분 캐시 쓰기 1.25배까지 넣으면 최악 턴이
+  약 US$0.400이고 하한은 advanced 4크레딧을 요구합니다. 이 예외가 없으면 Haiku
+  5.5를 Guest · Standard · 1크레딧으로 채택하는 저장은 거절됩니다.
 - **남는 위험(수용).** 100,000토큰 경계는 로그인 계정 입력 상한(128,000) 안이라
   실제로 도달합니다. 예약은 자기 토큰 **추정치**로 tier를 고르고 정산은 그
   tier의 요율을 그대로 쓰며, 레지스트리 행에 평탄한 가격이 저장돼 있으면 tier가
@@ -136,10 +137,19 @@ Flash-Lite, API 모델 `gemini-3.5-flash-lite`, Guest, standard)는 이 하한�
   요율로 낮게 기록될 수 있습니다.** 사용자 크레딧(standard 1크레딧 가중)은 이
   예외로 바뀌지 않습니다. 원가를 낮게 잡는 방향은 이 코드베이스가 받아들이지 않는
   방향이므로, 이 예외는 Haiku 계열에만 이름을 붙여 둡니다.
-- **강제 지점.** `tests/modelPricing.test.mjs`의 "no tier boundary sits below
-  the input ceiling except a named exception"이 입력 상한 아래의 tier 경계를
-  Anthropic `claude-haiku-*` 외에는 실패로 만듭니다. 다른 모델의 경계가 상한 아래로
-  들어오면 그 모델에 대한 같은 결정이 먼저 필요합니다.
+- **강제 지점은 둘입니다.**
+  - 채택 저장: `lib/modelAdoptionDraft.ts`의 `HAIKU_LINE_GUEST_CREDIT_EXCEPTION`.
+    공급자 `anthropic` · API 모델 `claude-haiku-*` · `standard` · 가중치 1일 때만
+    하한 미달 저장을 허용하며, 운영자 확인은 쿼리 매개변수
+    `creditFloorExceptionAck`가 예외 id `claude-haiku-line-guest-2026-10-12`와
+    같을 때만 인정됩니다(Gemini 예외의 id로는 열리지 않습니다). 통과한 저장은
+    `model.registry.create_started` 감사 기록에 그 id를 남깁니다. Gemini 예외와 달리
+    가격을 고정하지 않고 종료일도 두지 않습니다 — 결정이 특정 가격이 아니라 게스트
+    Anthropic 자리에 관한 것이기 때문입니다.
+  - 가격 registry: `tests/modelPricing.test.mjs`의 "no tier boundary sits below
+    the input ceiling except a named exception"이 입력 상한 아래의 tier 경계를
+    Anthropic `claude-haiku-*` 외에는 실패로 만듭니다. 다른 모델의 경계가 상한
+    아래로 들어오면 그 모델에 대한 같은 결정이 먼저 필요합니다.
 - **범위.** 이 예외는 Haiku 계열의 **가격 조건**만 넘깁니다. 활성 · 공개 · Guest
   플랜 · Standard 등급 조건은 그대로이고, 다른 Anthropic 모델이나 다른 공급자는
   이 예외가 아닙니다. 정산이 실측 토큰으로 tier를 다시 고르게 하는 수정은 이
