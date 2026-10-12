@@ -11,7 +11,7 @@
  *
  * Every vocabulary here is compared with its CHECK by `npm run
  * check:enum-constraints`, and the change rule is the one the guard trigger of
- * migration 20261012090000_amux_worker_registry holds;
+ * migration 20261012100000_amux_worker_registry holds;
  * tests/amuxWorkerRegistryCore.test.mjs reads that migration and fails when
  * the two drift.
  *

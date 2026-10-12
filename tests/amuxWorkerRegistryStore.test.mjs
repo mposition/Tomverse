@@ -36,7 +36,7 @@ import {
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
 const STORE = "lib/amux/workerRegistryStore.ts";
-const MIGRATION = "prisma/migrations/20261012090000_amux_worker_registry/migration.sql";
+const MIGRATION = "prisma/migrations/20261012100000_amux_worker_registry/migration.sql";
 const TABLES = ["AmuxWorkerRegistryEvent", "AmuxWorkerObservation", "AmuxWorkerTrialEvidence", "AmuxWorkerLatchEvent"];
 
 const withoutSqlComments = (sql) =>
