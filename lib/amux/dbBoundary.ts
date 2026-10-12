@@ -252,6 +252,21 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // Decision Maker switches (docs/policy/amux-decision-maker.md §8): setup +
+  // the newest event of every scope + fence.
+  decisionMakerSwitchRead: {
+    operation: "decision_maker_switch_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // setup + a person's change at its largest (audit chain lock, the scope's
+  // newest event, the administrator audit's 4 with an integrity key, the
+  // event insert: 7, pinned by tests/amuxDecisionMakerSwitch.test.mjs) + fence
+  decisionMakerSwitchChange: {
+    operation: "decision_maker_switch_change",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // setup + the newest registry, latch and observation of each worker (3,
   // pinned by tests/amuxWorkerRegistryStore.test.mjs) + fence
   workerRegistryRead: {
@@ -267,6 +282,24 @@ export const AMUX_DB_BOUNDARIES = {
     operation: "worker_registry_change",
     prismaCallCeiling: 9,
     isolation: "mutation",
+  },
+  // setup + a question's routing at its largest (audit chain lock, the
+  // request read, the switch read, the throughput read, the router's audit 4
+  // with an integrity key, the request insert, the card text insert: 10,
+  // pinned by tests/amuxDecisionMakerBody.test.mjs) + fence. 12 is also
+  // docs/policy/amux-decision-maker.md §9's ceiling for one DM operation.
+  decisionMakerRouting: {
+    operation: "decision_maker_routing",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment
+  // tallies + the proposal timeline with the database clock + fence, pinned
+  // by tests/amuxDecisionMakerJudgment.test.mjs.
+  decisionMakerReportRead: {
+    operation: "decision_maker_report_read",
+    prismaCallCeiling: 4,
+    isolation: "read",
   },
 } as const satisfies Record<string, AmuxDbBoundary>;
 

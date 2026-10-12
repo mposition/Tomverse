@@ -354,6 +354,12 @@ export type DecisionMakerRequestRecord = {
   sameBinding: boolean;
   createdAt: string;
   assignmentDeadlineAt: string;
+  /**
+   * The router's `amux.decision.route` audit this call wrote with a new
+   * request -- the row a `card_text` body of the same transaction is bound
+   * to (lib/amux/decisionMakerBodyStore.ts). Null for an existing request.
+   */
+  routeAuditLogId: string | null;
 };
 
 /** The routing read: the database clock, and the request of this card revision when there is one. */
@@ -382,7 +388,12 @@ type ExistingRequestRow = Record<string, unknown> & {
  * The decision is made here, on reads taken after the lock that every switch
  * change and every other routing also takes, so neither a stale switch nor a
  * concurrent routing of the same instance can let a question through. The
- * card is routed and never stored.
+ * card is not stored here: the application routes only through
+ * `recordDecisionMakerRequestWithCardText()` in
+ * lib/amux/decisionMakerBodyStore.ts, the body table's one writer, which calls
+ * this and then stores the card text of a new request routed to a DM in the
+ * same transaction under `routeAuditLogId` (§10, added 2026-10-09).
+ * tests/amuxDecisionMakerBody.test.mjs fails on any other caller.
  *
  * The option set digest of §9's binding is the store's own (stage S1d,
  * 2026-10-08), never the caller's: an HMAC under the new request's key K_R
@@ -406,7 +417,8 @@ type ExistingRequestRow = Record<string, unknown> & {
  * -- 2 for an existing request or a key the ring lacks; then the switch read
  * -- 3 when it fails; then the throughput read (none for a provider without
  * an instance), the system writer's 3 (4 with an integrity key) and 1 insert
- * -- 8, or 9 (7, or 8, without an instance).
+ * -- 8, or 9 (7, or 8, without an instance). The body store's card text adds
+ * 1 to a new request routed to a DM.
  */
 export async function recordDecisionMakerRequest(
   tx: Prisma.TransactionClient,
@@ -454,6 +466,7 @@ export async function recordDecisionMakerRequest(
       sameBinding: sameOptions && DM_ROUTING_BINDING_KEYS.every((key) => found[key] === binding[key]),
       createdAt: isoOf(foundCreatedAtMs),
       assignmentDeadlineAt: isoOf(safeInteger(found.assignmentDeadlineAtEpochMs, "clock")),
+      routeAuditLogId: null,
     };
   }
   const keyPeriod = dmKeyPeriodOf(safeInteger(found.dbNowEpochMs, "clock"));
@@ -516,6 +529,7 @@ export async function recordDecisionMakerRequest(
     sameBinding: true,
     createdAt: isoOf(createdAtMs),
     assignmentDeadlineAt: isoOf(safeInteger(row.assignmentDeadlineAtEpochMs, "clock")),
+    routeAuditLogId: auditLogId,
   };
 }
 
