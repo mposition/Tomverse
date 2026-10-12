@@ -10,6 +10,7 @@ import test from "node:test";
 
 import {
   AMUX_CATALOG_WORKER_NAME_PATTERN,
+  AMUX_WORKER_CATALOG_EXEMPT,
   AMUX_WORKER_DESIRED_STATES,
   AMUX_WORKER_LATCH_CONSECUTIVE_FAILURES,
   AMUX_WORKER_PROVIDER_CLASSES,
@@ -393,4 +394,49 @@ test("the catalog name rule is the AMUX machine-id rule, and wider than the regi
   for (const name of ["claude-impl", "devin-worker", "Codex.Impl:2"]) {
     assert.ok(AMUX_CATALOG_WORKER_NAME_PATTERN.test(name), name);
   }
+});
+
+test("version 34: the engineering adapter's runner is exempt by name and counts as agreement; devin-worker is not", () => {
+  assert.deepEqual([...AMUX_WORKER_CATALOG_EXEMPT], ["engineering-runner"]);
+  assert.ok(Object.isFrozen(AMUX_WORKER_CATALOG_EXEMPT));
+  // An exempt name can never also be a registry entry: the grammar (and the
+  // migration's CHECK) refuse it, so "exempt only when unregistered" is the
+  // whole rule, not a gap.
+  for (const name of AMUX_WORKER_CATALOG_EXEMPT) {
+    assert.equal(isAmuxWorkerName(name), false, name);
+    assert.equal(parseAmuxWorkerRegistryChange({ workerName: name, roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 }), null, name);
+  }
+  // The production catalog read on 2026-10-13: the seven, devin-worker and engineering-runner.
+  const registry = AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => registration(entry.workerName, entry.desiredState, entry.roleCeiling));
+  const seven = AMUX_WORKER_REGISTRY_V31_SEED.filter((entry) => entry.desiredState === "active")
+    .map((entry) => catalogEntry(entry.workerName, amuxWorkerProviderClassOf(entry.workerName)));
+  const production = compareAmuxWorkerRegistryWithCatalog(registry, [
+    ...seven,
+    catalogEntry("devin-worker", "devin"),
+    catalogEntry("engineering-runner", "claude"),
+  ]);
+  assert.equal(production.status, "mismatch");
+  const verdicts = Object.fromEntries(production.rows.map((row) => [row.workerName, row.verdict]));
+  assert.equal(verdicts["engineering-runner"], "exempt");
+  assert.equal(verdicts["devin-worker"], "unregistered");
+  // With devin-worker removed from the catalog, the two agree.
+  const cleaned = compareAmuxWorkerRegistryWithCatalog(registry, [...seven, catalogEntry("engineering-runner", "claude")]);
+  assert.equal(cleaned.status, "match");
+  // Exemption is by name only: a held runner is still exempt, and no other name is.
+  assert.equal(
+    compareAmuxWorkerRegistryWithCatalog(registry, [...seven, catalogEntry("engineering-runner", "claude", { paused: true })]).status,
+    "match",
+  );
+  assert.equal(
+    compareAmuxWorkerRegistryWithCatalog(registry, [...seven, catalogEntry("engineering-runner-2", "claude")]).status,
+    "mismatch",
+  );
+});
+
+test("version 34 is recorded in the policy with the exempt name", () => {
+  const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8")
+    .split(String.fromCharCode(13)).join("");
+  assert.ok(policy.includes(["## 버전 34 — engineering adapter runner의 등록부 비교 제외", "", "승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`"].join(String.fromCharCode(10))));
+  assert.ok(policy.includes("`AMUX_WORKER_CATALOG_EXEMPT`"));
+  assert.ok(policy.includes("`engineering-runner`"));
 });

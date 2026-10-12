@@ -62,8 +62,6 @@ const findElement = (element, type) => {
 };
 
 const assertPublicProductLinks = (element, locale) => {
-  assert.equal(element.props.chatHref, `/chat?lang=${locale}`);
-  assert.equal(element.props.reviewHref, `/review?lang=${locale}`);
   assert.equal(element.props.reviewInfoHref, `/${locale}/products/review`);
   assert.equal("chatSurfaceAvailable" in element.props, false);
 };

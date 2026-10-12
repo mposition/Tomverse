@@ -368,6 +368,7 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         sourceKey: true, status: true } } } },
       executionAttempts: { orderBy: { startedAt: "desc" as const }, take: 20,
         select: { id: true, worker: true, attemptNumber: true,
+          taskRevision: true,
           startedAt: true, endedAt: true, outcome: true, toStatus: true,
           reason: true, reservedCostMicrousd: true,
           settledCostMicrousd: true, costConfirmed: true } },

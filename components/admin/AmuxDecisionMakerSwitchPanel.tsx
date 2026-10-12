@@ -221,7 +221,7 @@ export function AmuxDecisionMakerSwitchView({
           {m.invalidChange}
         </p>
       ) : null}
-      {failure ? <AdminApiFailureNotice failure={failure} /> : null}
+      {failure ? <AdminApiFailureNotice failure={failure} returnTo="/admin/amux-settings?tab=decision-maker" /> : null}
     </section>
   );
 }

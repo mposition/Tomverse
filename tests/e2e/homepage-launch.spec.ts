@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
-import { launchAccountEntryCopy } from "@/components/marketing/launchHomepageContent";
+import { launchAccountEntryCopy, launchReviewEntryCopy } from "@/components/marketing/launchHomepageContent";
 
 const guides = [
   "compare-ai-models",
@@ -156,6 +156,10 @@ test("the real marketing offer read is private and closed without an authenticat
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("href", "/review?lang=en");
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveText("Back to Review");
   await expect(page.getByTestId("header-chat-link")).toHaveAttribute("href", "/en#chat");
+  await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(launchReviewEntryCopy.en.heroAccess);
+  await expect(page.locator("#launch-plans-title").locator("..").locator("p").nth(1)).toHaveText(launchReviewEntryCopy.en.plansBody);
+  await expect(page.locator("#launch-guest-title")).toHaveText(launchAccountEntryCopy.en.guestTitle);
+  await expect(page.locator("#launch-guest-title").locator("..").locator("p")).toHaveText(launchReviewEntryCopy.en.guestBody);
 });
 
 test("an offered account opens Chat and sees account-specific access copy", async ({ page }) => {

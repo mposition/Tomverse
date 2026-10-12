@@ -278,20 +278,31 @@ queue와 routing-snapshot 두 selection read를 모두 지난다.
 프로세스는 같은 조건을 다시 만나면 다시 정지한다(selection read 횟수는 0부터 다시 센다).
 접수가 있는 네 사유는 접수가 남아 있어 새 프로세스의 시작 판정이 다시 찾는다.
 
-**정지를 알아채는 곳.** Admin Console › AMUX › Execution의 badge(escalation 수 + 열린 정지
-수)와 Halts 탭(`/admin/amux-execution?tab=halts`), 그리고 orchestrator 로그의 ERROR 줄이다.
+**정지를 알아채는 곳.** Admin Console › AMUX › 운영 설정의 badge(열린 정지
+수)와 실행 안전·복구 섹션(`/admin/amux-settings?tab=safety`), 그리고 orchestrator 로그의 ERROR 줄이다.
 외부 알림은 없다(정책 8). 개수를 읽지 못하면 badge는 그려지지 않는다 -- 0이 아니다.
 
 #### 운영자의 해제 절차
 
-해제는 사람만 한다. 해제는 원래의 claim·회수·승격을 다시 실행하지 않는다. 결과 불명의 확정은
-사람이 영수증의 대상을 읽고 한다.
+정책 v33에서 같은 요청의 `no_commit`, 영수증 0건과 종결 감사 증거를 서버가 검증한 결과 불명 정지는 자동 해제한다. 접수 기록 없음·미확정 결과·반영된 변경·인증/계약 오류는 자동 해제하지 않는다. 해제는 원래의 claim·회수·승격을 다시 실행하지 않는다. 사람 확인 대상은 운영자가 영수증의 실제 대상을 대조한다.
 
-1. Admin Console에 owner로 로그인하고 `/admin/amux-execution?tab=halts`를 연다.
+**혼합 버전 호환성.** v33의 orchestrator는 `KeyedHalt`에서 `reason_code`를 필수로 읽고
+모르는 필드를 허용하지 않는다. `clear_kind`·종결 감사 id·증거 감사 id·resolution은 열린
+정지에서는 생략되거나 null일 수 있지만, `cleared = true`인 행은 사람 해제 또는
+`system_no_commit` 경로에 맞는 완전한 증명이 있어야 한다. 따라서 이전 앱이 새 `clear_kind`
+증명 없이 남긴 사람 해제는 새 orchestrator의 검증을 통과하지 않는다. 이전 웹과 새
+orchestrator, 또는 새 웹과 이전 orchestrator가 섞이면 응답 모양에 따라 사람 확인이 필요한
+`contract_violation` 정지가 생길 수 있으며, 열린 정지 전부가 실패하는 것은 아니다. 웹과
+orchestrator를 같은 v33 기능 revision으로 맞추고 정지 상태 read-back이 그 revision의 계약으로
+읽힌 뒤에만 쓰기를 다시 허용한다. 혼합 버전에서 생긴 정지를 자동 해제로 간주하거나, 빈 목록·
+불완전한 증명만 보고 수동 해제하지 않는다.
+
+1. Admin Console에 owner로 로그인하고 `/admin/amux-settings?tab=safety`를 연다.
 2. **열린 정지**에서 사유 코드와 요청 id를 읽는다. 요청이 있으면 그 접수의 호출 종류, 접수
    시각·기한, ack·해결 여부와 **영수증**(대상 종류, 대상 id, 행 수)이 함께 보인다.
    - 영수증이 없고 접수가 `no_commit`으로 해결됐으면: DB가 롤백을 확정한 것이다. 원래 작업은
-     일어나지 않았다.
+     일어나지 않았다. 자동 복구 이력에서 시스템 해제와 미반영 확정 감사 증거를 확인한다.
+   - 접수 기록 자체가 없으면: 미반영 확정이 아니다. 늦은 요청과 실제 worker 상태를 조사한다.
    - 영수증이 있으면: 그 쓰기는 커밋됐다. 대상 링크(카드·배정·자동 승격 화면)에서 카드의 owner·
      status, attempt, grant·소비 행이 기대와 맞는지 확인한다. 필요한 조치(예: 카드를 되돌리는
      일)는 그 화면의 기존 도구로 따로 한다. 해제가 대신하지 않는다.
@@ -299,7 +310,7 @@ queue와 routing-snapshot 두 selection read를 모두 지난다.
      시각 WARN/ERROR(`class`)로 원인(인증, 배포 중 404, 서버 결함)을 확인하고 먼저 고친다.
 3. **확인할 쓰기**(사람 확인 필요) 목록에 남은 요청도 같은 방법으로 확인한다. orchestrator는
    이런 요청마다 `unacked_write_receipt` 정지를 기록하므로, 곧 열린 정지 목록에도 나타난다.
-4. 해제: 정지 행의 입력 칸에 **정지 키의 앞 8자**를 직접 입력하고 "정지 해제"를 누른다.
+4. 수동 해제: 서버 종결 결과, 실제 대상 상태, 미해결 쓰기·worker 중복 위험의 세 항목을 확인한다. 정지 행의 입력 칸에 **정지 키의 앞 8자**를 직접 입력하고 "확인 후 정지 해제"를 누른다.
    - 로그인이 오래됐으면 428과 함께 재인증 링크가 나온다. 링크로 다시 로그인한 뒤 같은 화면에서
      다시 한다.
    - 앞 8자가 틀리면 거절되고 아무것도 바뀌지 않는다.

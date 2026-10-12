@@ -511,6 +511,10 @@ const compilerOptions = parsedConfig.options;
 // lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
 // below it. Count 228 and the position-free inventory remain unchanged; only
 // their source positions are repinned.
+// 2026-10-12, merge pinned main after the integrated AMUX source: both
+// histories above remain, while their combined comments and audit helpers
+// reposition only already-reviewed accesses. The count and position-free
+// inventory remain unchanged, so this repins source positions only.
 // 2026-10-12, Guest Smart Adaptive plus AMUX worker registry merge: both
 // fingerprint provenance notes coexist. Access count 228 and position-free
 // digest are unchanged; the positions below the combined note are repinned.
@@ -520,12 +524,19 @@ const compilerOptions = parsedConfig.options;
 // lineup rules and lead helper in `lib/appDefaults.ts` add no access. Count 228 and the
 // position-free inventory are unchanged; positions only. Repinned after the AMUX
 // record above merged in from develop.
+// 2026-10-12, merge frozen develop c9c557f3 into the integrated AMUX source:
+// both reviewed histories remain and the combined app-setting offsets only
+// reposition existing accesses. Count and position-free inventory are unchanged.
+// 2026-10-13, merge frozen develop 709ccb7a into the verified halt source:
+// the Guest, default-model and worker histories above remain alongside the
+// no-commit halt changes. Count and position-free inventory remain unchanged;
+// only the actual merged source positions are repinned below.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a038e5fce33a369b089a4777202eef2b",
-  "0c7f30535222ec440f1a8a05816560ec",
+  "15bf37335c6eb15c4f162e2d96e6eaaf",
+  "36a41ab31c58c7fe85df4b02e3cdb34f",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

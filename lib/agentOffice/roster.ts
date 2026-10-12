@@ -218,7 +218,7 @@ export const AGENT_OFFICE_ROOM_POLICIES: Readonly<Record<"amux" | "review" | "de
 };
 
 /** The Decision Maker's record: its section of the AMUX execution screen, while the console has it. */
-export const AGENT_OFFICE_DECISION_RECORD_HREF = linkIfOnConsole("/admin/amux-execution?tab=decision-maker");
+export const AGENT_OFFICE_DECISION_RECORD_HREF = linkIfOnConsole("/admin/amux-settings?tab=decision-maker");
 
 /**
  * Clothes for the AMUX workers, by desk: the office's palette, not the

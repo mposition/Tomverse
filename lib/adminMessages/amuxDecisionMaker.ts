@@ -1,7 +1,7 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
- * Copy for AMUX › Execution › Decision Maker
+ * Copy for AMUX › Operations settings › Decision Maker
  * (docs/policy/amux-decision-maker.md §6, §8). Scope ids and switch values
  * are identifiers and render as stored beside their sentence.
  */

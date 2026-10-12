@@ -128,6 +128,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // tables. A registry change runs in an ordinary mutation boundary, whose
   // fence is the existing commit deadline; no deadline guard changes.
   "20261012100000_amux_worker_registry",
+  // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
+  // no commit deadline and continues to use the existing mutation fence.
+  "20261012170000_amux_verified_no_commit_halt_auto_clear",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
