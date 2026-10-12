@@ -16,7 +16,7 @@
  */
 
 use std::collections::{BTreeMap, HashSet};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use uuid::Uuid;
@@ -51,15 +51,132 @@ pub const START_DATABASE_BUSY: &str = "execution_start_database_busy";
 /// timing.
 pub const START_WORKER_EXECUTION_PENDING_LOCALLY: &str = "worker_execution_pending_locally";
 
-/// An attempt Tomverse started whose delivery pull or ack answered the exact
-/// database-busy body. That call wrote nothing; the attempt is open on the
-/// server with its delivery still queued or leased. The next tick pulls it
-/// again for the same worker, instance and generation, and the server returns
-/// the same live receipt (or a fresh one if the receipt lease ran out).
+/// The app's execution lease is 90 seconds. Unknown delivery bookkeeping may
+/// never keep a start alive longer than one original lease measured from the
+/// response receipt, even if the server timestamp is far in the future or the
+/// wall clock moves backwards.
+const UNDELIVERED_HEARTBEAT_CAP: Duration = Duration::from_secs(90);
+
+/// Exact server-confirmed execution identity retained before delivery. It is
+/// not proof that a local CLI started. `heartbeat_until` is the original
+/// server lease deadline and `response_received_at` starts an independent
+/// monotonic 90-second cap, so an undelivered execution cannot be renewed
+/// forever after the bridge halts or a wall-clock change.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AwaitingDelivery {
+pub struct StartedExecution {
     pub worker: String,
     pub attempt_id: String,
+    pub task_revision: i64,
+    pub assignment_id: Option<String>,
+    pub heartbeat_until: String,
+    pub response_received_at: Instant,
+    pub heartbeat_enabled: bool,
+}
+
+/// A confirmed start whose delivery pull or ack answered exact database busy.
+/// That answer wrote nothing, so only this state may pull delivery again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AwaitingDelivery {
+    pub started: StartedExecution,
+}
+
+impl StartedExecution {
+    fn heartbeat_window_open(&self, now: HeartbeatNow) -> bool {
+        let server_window_open = chrono::DateTime::parse_from_rfc3339(&self.heartbeat_until)
+            .is_ok_and(|deadline| now.wall_unix_ms < deadline.timestamp_millis());
+        let monotonic_window_open = now
+            .monotonic
+            .checked_duration_since(self.response_received_at)
+            .is_some_and(|elapsed| elapsed < UNDELIVERED_HEARTBEAT_CAP);
+        server_window_open && monotonic_window_open
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HeartbeatNow {
+    wall_unix_ms: i64,
+    monotonic: Instant,
+}
+
+fn heartbeat_now() -> HeartbeatNow {
+    HeartbeatNow {
+        wall_unix_ms: unix_now_ms(),
+        monotonic: Instant::now(),
+    }
+}
+
+async fn heartbeat_undelivered_started_with_clock<F>(
+    api: &crate::tomverse_api::TomverseApi,
+    sessions: &ExistingSessionAdapter,
+    entries: Vec<StartedExecution>,
+    halt_cause: &mut Option<String>,
+    mut now: F,
+) -> Vec<StartedExecution>
+where
+    F: FnMut() -> HeartbeatNow,
+{
+    let mut retained = Vec::new();
+    for mut entry in entries {
+        // Take a fresh wall and monotonic reading for every attempt. A slow
+        // earlier heartbeat must not let a later entry cross either bound.
+        if !entry.heartbeat_window_open(now()) {
+            note_halt(halt_cause, "undelivered_heartbeat_window_elapsed");
+            continue;
+        }
+        if !entry.heartbeat_enabled {
+            retained.push(entry);
+            continue;
+        }
+        let Some(session) = sessions.presence(&entry.worker) else {
+            note_halt(halt_cause, "undelivered_session_missing");
+            retained.push(entry);
+            continue;
+        };
+        if !session.running {
+            note_halt(halt_cause, "undelivered_session_not_running");
+            retained.push(entry);
+            continue;
+        }
+        let answer = api
+            .execution_heartbeat_started(
+                &entry.attempt_id,
+                entry.assignment_id.as_deref(),
+                &entry.worker,
+                &session.instance_id,
+                session.generation,
+                entry.task_revision,
+            )
+            .await
+            .map(|response| response.accepted);
+        match plan_heartbeat_answer(&answer) {
+            PendingHeartbeat::Keep | PendingHeartbeat::RetryNextTick => retained.push(entry),
+            PendingHeartbeat::KeepAndHalt => {
+                let class = match &answer {
+                    Err(error) => bridge_error_class(error),
+                    Ok(_) => "other".to_owned(),
+                };
+                note_halt(halt_cause, format!("undelivered_heartbeat_{class}"));
+                // The write may have committed. Preserve identity for the
+                // bounded handoff, but never issue this unknown write again.
+                entry.heartbeat_enabled = false;
+                retained.push(entry);
+            }
+            PendingHeartbeat::DropAndHalt => {
+                note_halt(halt_cause, "undelivered_heartbeat_refused");
+            }
+        }
+    }
+    retained
+}
+
+async fn heartbeat_undelivered_started(
+    api: &crate::tomverse_api::TomverseApi,
+    sessions: &ExistingSessionAdapter,
+    entries: Vec<StartedExecution>,
+    halt_cause: &mut Option<String>,
+) -> Vec<StartedExecution> {
+    heartbeat_undelivered_started_with_clock(api, sessions, entries, halt_cause, heartbeat_now)
+        .await
 }
 
 pub const WSL_BRIDGE_CODE_LATCH: bool = true;
@@ -195,23 +312,26 @@ pub enum BridgeTickResult {
     ResultRejected {
         attempt_id: String,
     },
-    /// Started, not yet delivered: see `AwaitingDelivery`. Not a halt.
+    /// Started, not yet delivered after an exact no-commit answer. Not a halt.
     AwaitingDelivery {
-        worker: String,
-        attempt_id: String,
+        started: StartedExecution,
+    },
+    /// The start is known, but delivery's outcome is unknown. The run loop
+    /// halts new work and only heartbeats this exact attempt until its bounded
+    /// original lease window, its response-receipt monotonic cap, or an
+    /// explicit server fence.
+    DeliveryOutcomeUnknown {
+        started: StartedExecution,
     },
 }
 
 /// `bridge_tick_sourced` failed with an unknown outcome after it may already
-/// have acked and locally sent some work this tick. `partial` is exactly what
-/// a success would have returned up to the failure — including any
-/// `input.awaiting_delivery` entries this tick never got to attempt, carried
-/// forward as `AwaitingDelivery` so the caller still knows to pull them next
-/// tick. Discarding `partial` on error is the bug this type exists to make
-/// impossible: an attempt that already reached the local session (a
-/// `Pending` result) must keep getting execution heartbeats even after this
-/// halts, or the server's lease expires under a session that is still
-/// running the work.
+/// have started, delivered or locally sent work this tick. `partial` retains
+/// every exact known attempt: locally sent work remains `Pending`, while a
+/// confirmed start with an unknown delivery outcome becomes
+/// `DeliveryOutcomeUnknown`. Discarding `partial` on error would either let a
+/// real local execution lose its heartbeat or forget app state that must be
+/// bounded and handed off without replaying delivery.
 #[derive(Debug)]
 pub struct BridgeTickError {
     pub error: anyhow::Error,
@@ -231,7 +351,8 @@ pub struct BridgeTickInput<'a> {
     pub now: i64,
     pub worker_outcome: Option<&'a str>,
     /// Started attempts whose delivery an earlier tick could not pull or ack
-    /// because Tomverse answered busy. Pulled again before new work.
+    /// because Tomverse answered exact database busy. Pulled again before new
+    /// work; unknown delivery outcomes are never put in this retry list.
     pub awaiting_delivery: &'a [AwaitingDelivery],
     /// Workers this process already has an unsettled local execution for (a
     /// `PendingExecution` from an earlier tick, still being heartbeaten).
@@ -1029,38 +1150,41 @@ where
     // tick never got to attempt: both come back in `BridgeTickError::partial`
     // for the caller to record before it halts.
     for (index, awaiting) in input.awaiting_delivery.iter().enumerate() {
-        if halted {
-            break;
-        }
         let result = match deliver_started(
             input,
             &snapshot,
             prompts,
             local,
-            &awaiting.worker,
-            &awaiting.attempt_id,
+            &awaiting.started,
         )
         .await
         {
             Ok(result) => result,
             Err(error) => {
-                let mut partial = results;
+                let mut partial = undelivered_halt_results(results);
+                partial.push(BridgeTickResult::DeliveryOutcomeUnknown {
+                    started: awaiting.started.clone(),
+                });
                 partial.extend(input.awaiting_delivery[index + 1..].iter().map(|remaining| {
-                    BridgeTickResult::AwaitingDelivery {
-                        worker: remaining.worker.clone(),
-                        attempt_id: remaining.attempt_id.clone(),
+                    BridgeTickResult::DeliveryOutcomeUnknown {
+                        started: remaining.started.clone(),
                     }
                 }));
-                return Err(BridgeTickError { error, partial });
+                return Err(bridge_tick_error(error, partial));
             }
         };
         if matches!(result, BridgeTickResult::Halted { .. }) {
             halted = true;
         }
         results.push(result);
-    }
-    if halted {
-        return Ok(results);
+        if halted {
+            results.extend(input.awaiting_delivery[index + 1..].iter().map(|remaining| {
+                BridgeTickResult::DeliveryOutcomeUnknown {
+                    started: remaining.started.clone(),
+                }
+            }));
+            return Ok(undelivered_halt_results(results));
+        }
     }
 
     // A board too large for one complete owned-queue response, and a database
@@ -1084,7 +1208,7 @@ where
             });
             return Ok(results);
         }
-        Err(error) => return Err(BridgeTickError { error, partial: results }),
+        Err(error) => return Err(bridge_tick_error(error, results)),
     };
     let mut seen = HashSet::new();
     // A worker whose earlier attempt is still pending locally, or whose start
@@ -1099,7 +1223,7 @@ where
         .iter()
         .map(String::as_str)
         .collect();
-    busy_workers.extend(input.awaiting_delivery.iter().map(|entry| entry.worker.as_str()));
+    busy_workers.extend(input.awaiting_delivery.iter().map(|entry| entry.started.worker.as_str()));
 
     for task in tasks {
         if !seen.insert(task.owner.clone()) {
@@ -1126,7 +1250,7 @@ where
         .await
         {
             Ok(outcomes) => outcomes,
-            Err(error) => return Err(BridgeTickError { error, partial: results }),
+            Err(error) => return Err(bridge_tick_error(error, results)),
         };
 
         for outcome in outcomes {
@@ -1134,10 +1258,28 @@ where
                 DriveOutcome::ExecutionStarted {
                     worker,
                     attempt_id,
+                    task_revision,
+                    lease_expires_at,
+                    response_received_at,
                     ..
-                } => match deliver_started(input, &snapshot, prompts, local, &worker, &attempt_id).await {
-                    Ok(result) => result,
-                    Err(error) => return Err(BridgeTickError { error, partial: results }),
+                } => {
+                    let started = StartedExecution {
+                        worker,
+                        attempt_id,
+                        task_revision,
+                        assignment_id: task.assignment_id.clone(),
+                        heartbeat_until: lease_expires_at,
+                        response_received_at,
+                        heartbeat_enabled: true,
+                    };
+                    match deliver_started(input, &snapshot, prompts, local, &started).await {
+                        Ok(result) => result,
+                        Err(error) => {
+                            let mut partial = undelivered_halt_results(results);
+                            partial.push(BridgeTickResult::DeliveryOutcomeUnknown { started });
+                            return Err(bridge_tick_error(error, partial));
+                        }
+                    }
                 },
                 DriveOutcome::ExecutionStartDeferred { .. } => BridgeTickResult::Idle {
                     reason: START_DATABASE_BUSY,
@@ -1159,7 +1301,30 @@ where
         }
     }
 
-    Ok(results)
+    Ok(if halted {
+        undelivered_halt_results(results)
+    } else {
+        results
+    })
+}
+
+fn undelivered_halt_results(results: Vec<BridgeTickResult>) -> Vec<BridgeTickResult> {
+    results
+        .into_iter()
+        .map(|result| match result {
+            BridgeTickResult::AwaitingDelivery { started } => {
+                BridgeTickResult::DeliveryOutcomeUnknown { started }
+            }
+            other => other,
+        })
+        .collect()
+}
+
+fn bridge_tick_error(error: anyhow::Error, results: Vec<BridgeTickResult>) -> BridgeTickError {
+    BridgeTickError {
+        error,
+        partial: undelivered_halt_results(results),
+    }
 }
 
 /// Pulls and acks a started attempt's delivery, then hands it to the local
@@ -1171,37 +1336,38 @@ async fn deliver_started<P, L>(
     snapshot: &ExistingSessionAdapter,
     prompts: &mut P,
     local: &mut L,
-    worker: &str,
-    attempt_id: &str,
+    started: &StartedExecution,
 ) -> Result<BridgeTickResult>
 where
     P: AttemptPrompts,
     L: LocalAmux,
 {
-    let prompt = match prompts.prompt_for(worker, attempt_id).await {
+    let prompt = match prompts
+        .prompt_for(&started.worker, &started.attempt_id)
+        .await
+    {
         Ok(prompt) => prompt.unwrap_or_default(),
         Err(error) if is_database_busy(&error) => {
             return Ok(BridgeTickResult::AwaitingDelivery {
-                worker: worker.to_owned(),
-                attempt_id: attempt_id.to_owned(),
+                started: started.clone(),
             });
         }
         Err(error) => return Err(error),
     };
-    let presence = snapshot.presence(worker);
-    if let Some(delivery) = prompts.v22_delivery(attempt_id) {
+    let presence = snapshot.presence(&started.worker);
+    if let Some(delivery) = prompts.v22_delivery(&started.attempt_id) {
         if !presence.is_some_and(|session| session.running) {
             return Ok(BridgeTickResult::Halted {
-                attempt_id: attempt_id.to_owned(),
+                attempt_id: started.attempt_id.clone(),
             });
         }
         return Ok(dispatch_v22(delivery, local).await);
     }
     Ok(dispatch_started(
         input,
-        presence.map(|_| worker),
+        presence.map(|_| started.worker.as_str()),
         presence.is_some_and(|session| session.running),
-        attempt_id,
+        &started.attempt_id,
         &prompt,
         local,
     )
@@ -1878,6 +2044,7 @@ pub async fn run_from_env() -> i32 {
     let mut halt_cause: Option<String> = None;
     let empty_prompts = BTreeMap::new();
     let mut awaiting_delivery: Vec<AwaitingDelivery> = Vec::new();
+    let mut undelivered_started: Vec<StartedExecution> = Vec::new();
     let mut quota_checked: BTreeMap<String, std::time::Instant> = BTreeMap::new();
 
     loop {
@@ -1889,7 +2056,8 @@ pub async fn run_from_env() -> i32 {
         let pending_workers: HashSet<String> = pending
             .iter()
             .map(|entry| entry.delivery.worker.clone())
-            .chain(awaiting_delivery.iter().map(|entry| entry.worker.clone()))
+            .chain(awaiting_delivery.iter().map(|entry| entry.started.worker.clone()))
+            .chain(undelivered_started.iter().map(|entry| entry.worker.clone()))
             .collect();
         for name in sessions.names() {
             let Some(session) = sessions.presence(&name).cloned() else {
@@ -1933,6 +2101,18 @@ pub async fn run_from_env() -> i32 {
                 }
             }
         }
+
+        // A start confirmed before an unknown delivery outcome is real app
+        // state, but not proof that a CLI started. Keep only that exact
+        // attempt alive while halted, and only until the original lease
+        // deadline. Delivery is never replayed from this state.
+        undelivered_started = heartbeat_undelivered_started(
+            &api,
+            &sessions,
+            std::mem::take(&mut undelivered_started),
+            &mut halt_cause,
+        )
+        .await;
 
         // Execution heartbeats run before any new start this tick (not after,
         // as an earlier version had it). `bridge_tick_sourced` below can
@@ -2051,6 +2231,7 @@ pub async fn run_from_env() -> i32 {
                         &results,
                         &prompts.deliveries,
                         &mut awaiting_delivery,
+                        &mut undelivered_started,
                         &mut accepted,
                         &mut halted,
                     );
@@ -2075,6 +2256,7 @@ pub async fn run_from_env() -> i32 {
                         &err.partial,
                         &prompts.deliveries,
                         &mut awaiting_delivery,
+                        &mut undelivered_started,
                         &mut accepted,
                         &mut halted,
                     );
@@ -2304,11 +2486,18 @@ pub async fn run_from_env() -> i32 {
             }
             pending = still_running;
         }
+        if halted {
+            // A halted process will never run delivery again. Convert every
+            // exact-busy retry entry, including entries retained before this
+            // tick's failure, into bounded unknown-outcome tracking before
+            // the exit decision.
+            promote_awaiting_delivery(&mut awaiting_delivery, &mut undelivered_started);
+        }
         if halted && !halt_reported {
             eprintln!("{}", halt_line(halt_cause.as_deref()));
             halt_reported = true;
         }
-        if should_exit_halted_bridge(halted, pending.len()) {
+        if should_exit_halted_bridge(halted, pending.len() + undelivered_started.len()) {
             return BRIDGE_HALT_EXIT_CODE;
         }
 
@@ -2327,14 +2516,16 @@ pub async fn run_from_env() -> i32 {
 /// the `partial` results carried by its `BridgeTickError` — to the run loop's
 /// bookkeeping. A `Halted` result sets `halted`; a skip-without-halt result
 /// gets its stderr warning; a still-open `AwaitingDelivery` is queued so the
-/// next tick pulls it before any new work; a `Pending` result's matching
-/// delivery is queued to start execution heartbeats. Using the same function
-/// for both the success and the failure path is what keeps a genuine error
-/// from discarding whatever the tick already committed.
+/// next tick pulls it before any new work; a `DeliveryOutcomeUnknown` halts
+/// and retains only its exact started identity for bounded heartbeats; a
+/// `Pending` result's matching delivery is queued to start execution
+/// heartbeats. Using the same function for both the success and failure path
+/// keeps a genuine error from discarding whatever the tick already committed.
 fn record_bridge_tick_results(
     results: &[BridgeTickResult],
     deliveries: &[PulledDelivery],
     awaiting_delivery: &mut Vec<AwaitingDelivery>,
+    undelivered_started: &mut Vec<StartedExecution>,
     accepted: &mut Vec<(String, PulledDelivery)>,
     halted: &mut bool,
 ) {
@@ -2345,11 +2536,14 @@ fn record_bridge_tick_results(
         if let Some(warning) = bridge_tick_warning(result) {
             eprintln!("{warning}");
         }
-        if let BridgeTickResult::AwaitingDelivery { worker, attempt_id } = result {
+        if let BridgeTickResult::AwaitingDelivery { started } = result {
             awaiting_delivery.push(AwaitingDelivery {
-                worker: worker.clone(),
-                attempt_id: attempt_id.clone(),
+                started: started.clone(),
             });
+        }
+        if let BridgeTickResult::DeliveryOutcomeUnknown { started } = result {
+            *halted = true;
+            retain_started_once(undelivered_started, started.clone());
         }
         if let BridgeTickResult::Pending { attempt_id } = result {
             if let Some(delivery) = deliveries
@@ -2359,6 +2553,24 @@ fn record_bridge_tick_results(
                 accepted.push((attempt_id.clone(), delivery.clone()));
             }
         }
+    }
+}
+
+fn retain_started_once(entries: &mut Vec<StartedExecution>, started: StartedExecution) {
+    if !entries
+        .iter()
+        .any(|entry| entry.attempt_id == started.attempt_id)
+    {
+        entries.push(started);
+    }
+}
+
+fn promote_awaiting_delivery(
+    awaiting_delivery: &mut Vec<AwaitingDelivery>,
+    undelivered_started: &mut Vec<StartedExecution>,
+) {
+    for awaiting in awaiting_delivery.drain(..) {
+        retain_started_once(undelivered_started, awaiting.started);
     }
 }
 
@@ -2378,8 +2590,9 @@ fn bridge_tick_warning(result: &BridgeTickResult) -> Option<String> {
         BridgeTickResult::Idle { reason } if *reason == START_WORKER_EXECUTION_PENDING_LOCALLY => Some(format!(
             "amux wsl bridge warn: owned queue offered a task whose worker still has an unsettled local execution ({reason}); not started, not halted"
         )),
-        BridgeTickResult::AwaitingDelivery { attempt_id, .. } => Some(format!(
-            "amux wsl bridge warn: delivery for attempt {attempt_id} answered 503 {DATABASE_BUSY}; pulling again next tick, not halted"
+        BridgeTickResult::AwaitingDelivery { started } => Some(format!(
+            "amux wsl bridge warn: delivery for attempt {} answered 503 {DATABASE_BUSY}; pulling again next tick, not halted",
+            started.attempt_id,
         )),
         _ => None,
     }
@@ -2420,6 +2633,13 @@ fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn unix_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as i64)
         .unwrap_or(0)
 }
 
@@ -2570,8 +2790,9 @@ fn contains_database_url_scheme(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::tomverse_api::{ExecutionStartResponse, OwnedTodoTask};
@@ -2615,8 +2836,28 @@ mod tests {
             started: true,
             attempt_id: Some(ATTEMPT_ID.into()),
             task_revision: Some(3),
-            lease_expires_at: None,
+            lease_expires_at: Some("2099-09-30T00:01:30.000Z".into()),
             reason: None,
+        }
+    }
+
+    fn started_execution(worker: &str, attempt_id: &str) -> StartedExecution {
+        started_execution_at(worker, attempt_id, Instant::now())
+    }
+
+    fn started_execution_at(
+        worker: &str,
+        attempt_id: &str,
+        response_received_at: Instant,
+    ) -> StartedExecution {
+        StartedExecution {
+            worker: worker.into(),
+            attempt_id: attempt_id.into(),
+            task_revision: 3,
+            assignment_id: None,
+            heartbeat_until: "2099-09-30T00:01:30.000Z".into(),
+            response_received_at,
+            heartbeat_enabled: true,
         }
     }
 
@@ -2669,16 +2910,22 @@ mod tests {
     }
 
     fn running_session() -> ExistingSessionAdapter {
+        running_sessions(&["claude-impl"])
+    }
+
+    fn running_sessions(names: &[&str]) -> ExistingSessionAdapter {
         let mut sessions = BTreeMap::new();
-        sessions.insert(
-            "claude-impl".into(),
-            SessionPresence {
-                running: true,
-                at_boundary: true,
-                instance_id: "00000000-0000-4000-8000-000000000001".into(),
-                generation: 4,
-            },
-        );
+        for (index, name) in names.iter().enumerate() {
+            sessions.insert(
+                (*name).into(),
+                SessionPresence {
+                    running: true,
+                    at_boundary: true,
+                    instance_id: format!("00000000-0000-4000-8000-{index:012}"),
+                    generation: 4,
+                },
+            );
+        }
         ExistingSessionAdapter::new(sessions)
     }
 
@@ -3363,6 +3610,46 @@ mod tests {
         format!("http://{address}")
     }
 
+    fn tomverse_sequence(
+        answers: Vec<(String, String)>,
+        paths: Arc<Mutex<Vec<String>>>,
+    ) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for (status, body) in answers {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let mut buffer = [0_u8; 4096];
+                    let read = std::io::Read::read(&mut socket, &mut buffer).unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                    if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let request_line = std::str::from_utf8(&request)
+                    .unwrap()
+                    .lines()
+                    .next()
+                    .unwrap();
+                paths
+                    .lock()
+                    .unwrap()
+                    .push(request_line.split_whitespace().nth(1).unwrap().to_owned());
+                let reply = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                std::io::Write::write_all(&mut socket, reply.as_bytes()).unwrap();
+            }
+        });
+        format!("http://{address}")
+    }
+
     fn tomverse_api(base_url: String) -> crate::tomverse_api::TomverseApi {
         crate::tomverse_api::TomverseApi::for_test_with_timeouts(
             base_url,
@@ -3800,11 +4087,11 @@ mod tests {
         )
         .await
         .expect("a busy pull is not an error that halts");
-        let waiting = BridgeTickResult::AwaitingDelivery {
-            worker: "claude-impl".into(),
-            attempt_id: ATTEMPT_ID.into(),
+        let BridgeTickResult::AwaitingDelivery { started: waiting } = &first[0] else {
+            panic!("the exact busy answer must retain the started attempt");
         };
-        assert_eq!(first, vec![waiting.clone()]);
+        assert_eq!(waiting.worker, "claude-impl");
+        assert_eq!(waiting.attempt_id, ATTEMPT_ID);
         assert!(local.sends.is_empty());
         assert_eq!(
             bridge_tick_warning(&first[0]).as_deref(),
@@ -3814,8 +4101,7 @@ mod tests {
         // Tick 2: the same attempt is pulled again before any new work, and
         // delivered. The task is Doing now, so the owned queue is empty.
         let carried = vec![AwaitingDelivery {
-            worker: "claude-impl".into(),
-            attempt_id: ATTEMPT_ID.into(),
+            started: waiting.clone(),
         }];
         let mut second_input = input(true, &empty, None);
         second_input.awaiting_delivery = &carried;
@@ -3877,6 +4163,422 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert!(local.sends.is_empty());
+    }
+
+    #[tokio::test]
+    async fn confirmed_start_survives_lost_delivery_until_bounded_fence() {
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let base = tomverse_sequence(
+            vec![
+                (
+                    "200 OK".into(),
+                    r#"[{"id":"TASK-1","owner":"claude-impl","revision":2}]"#.into(),
+                ),
+                (
+                    "200 OK".into(),
+                    format!(
+                        r#"{{"started":true,"attempt_id":"{ATTEMPT_ID}","task_revision":3,"lease_expires_at":"2099-09-30T00:01:30.000Z","reason":null}}"#
+                    ),
+                ),
+                (
+                    "503 Service Unavailable".into(),
+                    OUTCOME_UNKNOWN_BODY.into(),
+                ),
+                (
+                    "200 OK".into(),
+                    r#"{"accepted":true,"reason":null}"#.into(),
+                ),
+            ],
+            paths.clone(),
+        );
+        let api = tomverse_api(base);
+        let sessions = running_session();
+        let mut local = LocalExchange::accepting();
+        let empty = BTreeMap::new();
+        let mut prompts = DeliveryPrompts {
+            api: &api,
+            sessions: &sessions,
+            deliveries: Vec::new(),
+        };
+
+        let result = bridge_tick_sourced(
+            &input(true, &empty, None),
+            api.clone(),
+            sessions.clone(),
+            &mut prompts,
+            &mut local,
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("the lost delivery response must halt the bridge");
+        };
+        let [BridgeTickResult::DeliveryOutcomeUnknown { started: tracked }] =
+            error.partial.as_slice()
+        else {
+            panic!("the exact app-confirmed start must survive in the partial result");
+        };
+        let tracked = tracked.clone();
+
+        let mut awaiting = Vec::new();
+        let mut undelivered = Vec::new();
+        let mut accepted = Vec::new();
+        let mut halted = false;
+        record_bridge_tick_results(
+            &error.partial,
+            &prompts.deliveries,
+            &mut awaiting,
+            &mut undelivered,
+            &mut accepted,
+            &mut halted,
+        );
+        assert!(halted);
+        assert!(awaiting.is_empty());
+        assert!(accepted.is_empty());
+        assert_eq!(undelivered, vec![tracked.clone()]);
+
+        // The halt short-circuits before another delivery pull, owned-queue
+        // read or execution start.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut halted_input = input(true, &empty, None);
+        halted_input.halt = BridgeHalt::Halted;
+        let halted_tick = bridge_tick(
+            &halted_input,
+            FlagControl {
+                calls: calls.clone(),
+                tasks: vec![task()],
+                start: started(),
+            },
+            sessions.clone(),
+            &mut local,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            halted_tick,
+            vec![BridgeTickResult::Idle {
+                reason: "assignments_halted",
+            }]
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        // Only the exact known attempt is heartbeaten. At the original lease
+        // deadline it is dropped without a fifth request, preventing an
+        // unverified local execution from being renewed forever.
+        let mut cause = None;
+        undelivered = heartbeat_undelivered_started_with_clock(
+            &api,
+            &sessions,
+            undelivered,
+            &mut cause,
+            || HeartbeatNow {
+                wall_unix_ms: 0,
+                monotonic: tracked.response_received_at,
+            },
+        )
+        .await;
+        assert_eq!(undelivered, vec![tracked.clone()]);
+        let deadline = chrono::DateTime::parse_from_rfc3339(&tracked.heartbeat_until)
+            .unwrap()
+            .timestamp_millis();
+        undelivered = heartbeat_undelivered_started_with_clock(
+            &api,
+            &sessions,
+            undelivered,
+            &mut cause,
+            || HeartbeatNow {
+                wall_unix_ms: deadline,
+                monotonic: tracked.response_received_at + Duration::from_secs(1),
+            },
+        )
+        .await;
+        assert!(undelivered.is_empty());
+        assert_eq!(
+            paths.lock().unwrap().as_slice(),
+            [
+                "/api/internal/amux/owned-queue",
+                "/api/internal/amux/execution/start",
+                "/api/internal/amux/delivery/pull",
+                "/api/internal/amux/execution/heartbeat",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn busy_delivery_then_unknown_queue_read_promotes_every_started_attempt() {
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let base = tomverse_sequence(
+            vec![
+                (
+                    "503 Service Unavailable".into(),
+                    LIFECYCLE_DATABASE_BUSY_BODY.into(),
+                ),
+                (
+                    "503 Service Unavailable".into(),
+                    OUTCOME_UNKNOWN_BODY.into(),
+                ),
+            ],
+            paths.clone(),
+        );
+        let api = tomverse_api(base);
+        let sessions = running_session();
+        let tracked = started_execution("claude-impl", ATTEMPT_ID);
+        let carried = vec![AwaitingDelivery {
+            started: tracked.clone(),
+        }];
+        let empty = BTreeMap::new();
+        let mut tick_input = input(true, &empty, None);
+        tick_input.awaiting_delivery = &carried;
+        let mut prompts = DeliveryPrompts {
+            api: &api,
+            sessions: &sessions,
+            deliveries: Vec::new(),
+        };
+        let mut local = LocalExchange::accepting();
+
+        let Err(error) = bridge_tick_sourced(
+            &tick_input,
+            api.clone(),
+            sessions.clone(),
+            &mut prompts,
+            &mut local,
+        )
+        .await
+        else {
+            panic!("the unknown owned-queue response must halt the tick");
+        };
+        assert_eq!(
+            error.partial,
+            vec![BridgeTickResult::DeliveryOutcomeUnknown {
+                started: tracked.clone(),
+            }]
+        );
+
+        let mut awaiting = Vec::new();
+        let mut undelivered = Vec::new();
+        let mut accepted = Vec::new();
+        let mut halted = true;
+        record_bridge_tick_results(
+            &error.partial,
+            &prompts.deliveries,
+            &mut awaiting,
+            &mut undelivered,
+            &mut accepted,
+            &mut halted,
+        );
+        promote_awaiting_delivery(&mut awaiting, &mut undelivered);
+        assert!(awaiting.is_empty());
+        assert_eq!(undelivered, vec![tracked]);
+        assert_eq!(
+            paths.lock().unwrap().as_slice(),
+            [
+                "/api/internal/amux/delivery/pull",
+                "/api/internal/amux/owned-queue",
+            ]
+        );
+    }
+
+    #[test]
+    fn successful_tick_halt_promotes_all_awaiting_workers() {
+        let first = started_execution("claude-impl", ATTEMPT_ID);
+        let second = started_execution("claude-review", ATTEMPT_ID_2);
+        let results = vec![
+            BridgeTickResult::AwaitingDelivery {
+                started: first.clone(),
+            },
+            BridgeTickResult::AwaitingDelivery {
+                started: second.clone(),
+            },
+            BridgeTickResult::Halted {
+                attempt_id: ATTEMPT_ID_3.into(),
+            },
+        ];
+        let mut awaiting = Vec::new();
+        let mut undelivered = Vec::new();
+        let mut accepted = Vec::new();
+        let mut halted = false;
+        record_bridge_tick_results(
+            &results,
+            &[],
+            &mut awaiting,
+            &mut undelivered,
+            &mut accepted,
+            &mut halted,
+        );
+        assert!(halted);
+        promote_awaiting_delivery(&mut awaiting, &mut undelivered);
+        assert!(awaiting.is_empty());
+        assert_eq!(undelivered, vec![first, second]);
+    }
+
+    #[tokio::test]
+    async fn each_undelivered_heartbeat_uses_a_fresh_clock_reading() {
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let api = tomverse_api(tomverse_sequence(
+            vec![(
+                "200 OK".into(),
+                r#"{"accepted":true,"reason":null}"#.into(),
+            )],
+            paths.clone(),
+        ));
+        let observed = Instant::now();
+        let first = started_execution_at("claude-impl", ATTEMPT_ID, observed);
+        let second = started_execution_at("claude-review", ATTEMPT_ID_2, observed);
+        let mut clocks = VecDeque::from([
+            HeartbeatNow {
+                wall_unix_ms: 0,
+                monotonic: observed,
+            },
+            HeartbeatNow {
+                wall_unix_ms: 0,
+                monotonic: observed + UNDELIVERED_HEARTBEAT_CAP,
+            },
+        ]);
+        let mut cause = None;
+
+        let retained = heartbeat_undelivered_started_with_clock(
+            &api,
+            &running_sessions(&["claude-impl", "claude-review"]),
+            vec![first.clone(), second],
+            &mut cause,
+            || clocks.pop_front().unwrap(),
+        )
+        .await;
+
+        assert_eq!(retained, vec![first]);
+        assert_eq!(
+            paths.lock().unwrap().as_slice(),
+            ["/api/internal/amux/execution/heartbeat"]
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_heartbeat_is_never_written_a_second_time() {
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let api = tomverse_api(tomverse_sequence(
+            vec![
+                (
+                    "503 Service Unavailable".into(),
+                    OUTCOME_UNKNOWN_BODY.into(),
+                ),
+                (
+                    "200 OK".into(),
+                    r#"{"accepted":true,"reason":null}"#.into(),
+                ),
+            ],
+            paths.clone(),
+        ));
+        let observed = Instant::now();
+        let tracked = started_execution_at("claude-impl", ATTEMPT_ID, observed);
+        let sessions = running_session();
+        let mut cause = None;
+
+        let retained = heartbeat_undelivered_started_with_clock(
+            &api,
+            &sessions,
+            vec![tracked],
+            &mut cause,
+            || HeartbeatNow {
+                wall_unix_ms: 0,
+                monotonic: observed,
+            },
+        )
+        .await;
+        assert_eq!(retained.len(), 1);
+        assert!(!retained[0].heartbeat_enabled);
+        let retained = heartbeat_undelivered_started_with_clock(
+            &api,
+            &sessions,
+            retained,
+            &mut cause,
+            || HeartbeatNow {
+                wall_unix_ms: 0,
+                monotonic: observed + Duration::from_secs(30),
+            },
+        )
+        .await;
+
+        assert_eq!(retained.len(), 1);
+        assert!(!retained[0].heartbeat_enabled);
+        assert_eq!(
+            paths.lock().unwrap().as_slice(),
+            ["/api/internal/amux/execution/heartbeat"]
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_session_retains_identity_without_a_heartbeat_write() {
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let api = tomverse_api(tomverse_sequence(
+            vec![(
+                "200 OK".into(),
+                r#"{"accepted":true,"reason":null}"#.into(),
+            )],
+            paths.clone(),
+        ));
+        let observed = Instant::now();
+        let tracked = started_execution_at("claude-impl", ATTEMPT_ID, observed);
+        let mut cause = None;
+
+        let retained = heartbeat_undelivered_started_with_clock(
+            &api,
+            &ExistingSessionAdapter::new(BTreeMap::new()),
+            vec![tracked.clone()],
+            &mut cause,
+            || HeartbeatNow {
+                wall_unix_ms: 0,
+                monotonic: observed,
+            },
+        )
+        .await;
+
+        assert_eq!(retained, vec![tracked]);
+        assert!(paths.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn stopped_session_marker_retains_identity_without_a_heartbeat_write() {
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let api = tomverse_api(tomverse_sequence(
+            vec![(
+                "200 OK".into(),
+                r#"{"accepted":true,"reason":null}"#.into(),
+            )],
+            paths.clone(),
+        ));
+        let observed = Instant::now();
+        let tracked = started_execution_at("claude-impl", ATTEMPT_ID, observed);
+        let mut sessions = running_session();
+        sessions.observe("claude-impl", false, false);
+        let mut cause = None;
+
+        let retained = heartbeat_undelivered_started_with_clock(
+            &api,
+            &sessions,
+            vec![tracked.clone()],
+            &mut cause,
+            || HeartbeatNow {
+                wall_unix_ms: 0,
+                monotonic: observed,
+            },
+        )
+        .await;
+
+        assert_eq!(retained, vec![tracked]);
+        assert!(paths.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn monotonic_cap_closes_a_future_deadline_after_wall_clock_regression() {
+        let observed = Instant::now();
+        let tracked = started_execution_at("claude-impl", ATTEMPT_ID, observed);
+        assert!(tracked.heartbeat_window_open(HeartbeatNow {
+            wall_unix_ms: 1_000,
+            monotonic: observed + Duration::from_secs(89),
+        }));
+        assert!(!tracked.heartbeat_window_open(HeartbeatNow {
+            wall_unix_ms: 0,
+            monotonic: observed + UNDELIVERED_HEARTBEAT_CAP,
+        }));
     }
 
     /// Regression for the review finding on execution-heartbeat/start
@@ -3961,16 +4663,13 @@ mod tests {
         let mut local = LocalExchange::accepting();
         let carried = vec![
             AwaitingDelivery {
-                worker: "claude-impl".into(),
-                attempt_id: ATTEMPT_ID.into(),
+                started: started_execution("claude-impl", ATTEMPT_ID),
             },
             AwaitingDelivery {
-                worker: "claude-review".into(),
-                attempt_id: ATTEMPT_ID_2.into(),
+                started: started_execution("claude-review", ATTEMPT_ID_2),
             },
             AwaitingDelivery {
-                worker: "claude-ops".into(),
-                attempt_id: ATTEMPT_ID_3.into(),
+                started: started_execution("claude-ops", ATTEMPT_ID_3),
             },
         ];
         let mut tick_input = input(true, &empty, None);
@@ -3992,18 +4691,22 @@ mod tests {
         let Err(err) = result else {
             panic!("expected the second entry's pull failure to return Err");
         };
+        let second = carried[1].started.clone();
+        let third = carried[2].started.clone();
         assert_eq!(
             err.partial,
             vec![
                 BridgeTickResult::Pending {
                     attempt_id: ATTEMPT_ID.into(),
                 },
-                BridgeTickResult::AwaitingDelivery {
-                    worker: "claude-ops".into(),
-                    attempt_id: ATTEMPT_ID_3.into(),
+                BridgeTickResult::DeliveryOutcomeUnknown {
+                    started: second,
+                },
+                BridgeTickResult::DeliveryOutcomeUnknown {
+                    started: third,
                 },
             ],
-            "the first entry's Pending and the never-attempted third entry must both survive the second entry's failure"
+            "the local Pending and every exact undelivered start must survive the delivery failure"
         );
         // The first entry's local send actually happened; the second and
         // third never reached dispatch.
