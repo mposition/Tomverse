@@ -1385,6 +1385,17 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   없습니다. **경계 상한 12는 라우팅의 가장 긴 경우(무결성 키, DM으로 가는 새 질문과 그 카드 본문) +
   setup + fence와 같고**, `tests/amuxDecisionMakerBody.test.mjs`가 그 셈을, body DB 테스트가 하나 줄인
   상한의 거부를 고정합니다. bridge·DM 호출은 없습니다.
+- **S1f4(선언 정확도 보고 화면)**: `components/admin/AmuxDecisionMakerReportPanel.tsx`,
+  `lib/adminMessages/amuxDecisionMaker.ts`의 `adminAmuxDecisionMakerReportMessages`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerReportRead`(상한 4), Decision Maker 탭
+  (`app/(site)/(application)/admin/amux-execution/page.tsx`),
+  `tests/client/amuxDecisionMakerReportRender.test.tsx`. 화면은 S1e의
+  `readDecisionMakerDeclarationAccuracyReport()`를 페이지가 AMUX DB 경계 안에서 읽어 넘긴 값만 그립니다 —
+  요청도 버튼도 없습니다. 수치는 각자의 분자/분모로 보이고, 분모가 비면 `insufficient_evidence`를 말로
+  보이며 0%로 쓰지 않습니다. 읽기에 실패하면 수치 없이 그 사실만 보이고, 스위치 읽기와 따로 실패합니다.
+  docs/policy/amux-decision-maker.md §0-2의 졸업 기준과 비교하지 않습니다. **경계 상한 4는 보고의 두 문장 +
+  setup + fence이고**, `tests/amuxDecisionMakerJudgment.test.mjs`가 그 셈을, judgment DB 테스트가 kill
+  switch 중의 읽기와 하나 줄인 상한의 거부를 고정합니다. 제안 열람·판정 화면은 S2입니다.
 
 # AI Review (교차검토) 품질과 M5
 
