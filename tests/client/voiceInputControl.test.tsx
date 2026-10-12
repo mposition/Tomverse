@@ -193,7 +193,6 @@ test("the button names what it will do, and says so to assistive tech", () => {
   const idle = VoiceInputButton({
     copy,
     state: { status: "idle" },
-    isMobileShell: false,
     disabled: false,
     onStart: () => {},
     onStop: () => {},
@@ -201,7 +200,6 @@ test("the button names what it will do, and says so to assistive tech", () => {
   const recording = VoiceInputButton({
     copy,
     state: { status: "recording", sessionId: 1, elapsedMs: 0, stoppedByLimit: false },
-    isMobileShell: false,
     disabled: false,
     onStart: () => {},
     onStop: () => {},
@@ -226,7 +224,6 @@ test("the button keeps a 44px touch target on the mobile shell", () => {
     VoiceInputButton({
       copy,
       state: { status: "idle" },
-      isMobileShell: true,
       disabled: false,
       onStart: () => {},
       onStop: () => {},
@@ -248,7 +245,6 @@ test("the button is unavailable while the machine is between states", () => {
       VoiceInputButton({
         copy,
         state,
-        isMobileShell: false,
         disabled: false,
         onStart: () => {},
         onStop: () => {},
@@ -264,7 +260,6 @@ test("a disabled composer disables the microphone", () => {
     VoiceInputButton({
       copy,
       state: { status: "idle" },
-      isMobileShell: false,
       disabled: true,
       onStart: () => {},
       onStop: () => {},

@@ -5,7 +5,7 @@ import {
   mockAuthenticatedApi,
   prepareGuestPage,
 } from "./support/app-fixtures";
-import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage } from "./support/chat-state-fixtures";
+import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage, restoreActiveConversation } from "./support/chat-state-fixtures";
 
 async function openProductSwitcher(page: Page) {
   const mobileMenu = page.getByTestId("mobile-sidebar-open");
@@ -108,6 +108,25 @@ test.describe("Tomverse Chat and Review product switcher", () => {
     await composer.getByTestId("composer-model-select").click();
     await expect(page.locator("#chat-input-popover")).toBeVisible();
     expect(conversationWrites).toEqual([]);
+  });
+
+  test("desktop full-support search sits in the footer beside a dedicated input row", async ({ page }) => {
+    await mockAuthenticatedApi(page, { webSearchMode: "always" });
+    await restoreActiveConversation(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/review?lang=en");
+    const composer = page.getByTestId("chat-input");
+    await expect(composer.getByTestId("composer-product-context")).toContainText("Model Compare");
+    const chip = composer.getByTestId("composer-primary-tools").getByTestId("web-search-mode-chip");
+    await expect(chip).toBeVisible();
+    await expect(composer.getByTestId("tool-status-chip-row")).toHaveCount(0);
+    const textarea = composer.getByTestId("chat-textarea");
+    const inputBox = (await textarea.boundingBox())!;
+    const chipBox = (await chip.boundingBox())!;
+    expect(inputBox.height).toBeGreaterThanOrEqual(112);
+    expect(inputBox.y + inputBox.height).toBeLessThanOrEqual(chipBox.y + 0.5);
+    expect(await textarea.evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
+    await expectNoHorizontalOverflow(page);
   });
 
   test(
