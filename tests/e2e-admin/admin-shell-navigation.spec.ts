@@ -192,7 +192,7 @@ test.describe("admin console shell", () => {
     }
     for (const group of new Set(NAVIGATION.map((item) => item.group))) {
       await expect(
-        navigation.getByRole("button", { name: group })
+        navigation.getByRole("button", { name: group, exact: true })
       ).toBeVisible();
     }
   });
