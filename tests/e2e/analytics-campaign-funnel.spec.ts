@@ -114,9 +114,10 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
   const guestChatAvailable = await page.getByTestId("launch-homepage")
     .getAttribute("data-guest-chat-trial-available") === "true";
   const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/review?lang=en";
+  const destination = new URL(startHref, page.url()).href;
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", startHref);
   await page.getByTestId("landing-primary-cta").click();
-  await expect(page).toHaveURL(new URL(startHref, "http://127.0.0.1:3100").href);
+  await expect(page).toHaveURL(destination);
 
   // A full reload proves queued events and the first-touch UTM do not depend on
   // module memory or on UTM parameters remaining in the current URL.
