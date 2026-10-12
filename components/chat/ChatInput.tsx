@@ -3267,7 +3267,7 @@ export function ChatInput({
   return (
       <div className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
-        : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-[clamp(0.25rem,2vw,0.5rem)] py-2 pb-[0.3rem] transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-4 md:pb-4 ${
+        : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-[clamp(0.25rem,2vw,0.5rem)] py-2 pb-[0.3rem] transition-colors min-[300px]:max-[430px]:[@media(max-height:600px)]:py-1.5 min-[300px]:max-[430px]:[@media(max-height:600px)]:pb-0.5 dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-4 md:pb-4 ${
             hideTopBorder ? "" : "border-t border-zinc-200 dark:border-zinc-800"
           }`
       }>
@@ -3305,7 +3305,7 @@ export function ChatInput({
             onDragOver={handleDropZoneDragOver}
             onDragLeave={handleDropZoneDragLeave}
             onDrop={handleDropZoneDrop}
-            className={`relative mx-auto w-full max-w-5xl overflow-hidden rounded-[1.25rem] border bg-white p-[clamp(0.375rem,5vw,1rem)] shadow-[0_8px_24px_-6px_rgba(23,28,46,0.08)] transition-colors has-[textarea[data-focus-ring=container]:focus-visible]:outline-2 has-[textarea[data-focus-ring=container]:focus-visible]:-outline-offset-3 has-[textarea[data-focus-ring=container]:focus-visible]:outline-blue-500 dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:p-6 ${
+            className={`relative mx-auto w-full max-w-5xl overflow-hidden rounded-[1.25rem] border bg-white p-[clamp(0.375rem,5vw,1rem)] shadow-[0_8px_24px_-6px_rgba(23,28,46,0.08)] transition-colors has-[textarea[data-focus-ring=container]:focus-visible]:outline-2 has-[textarea[data-focus-ring=container]:focus-visible]:-outline-offset-3 has-[textarea[data-focus-ring=container]:focus-visible]:outline-blue-500 min-[300px]:max-[430px]:[@media(max-height:600px)]:py-[min(0.75rem,3vw)] dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:p-6 ${
               isDragActive
                 ? "border-blue-500 bg-blue-50/70 dark:border-blue-400 dark:bg-blue-950/30"
                 : "border-zinc-200 dark:border-zinc-800"
@@ -3807,7 +3807,7 @@ export function ChatInput({
               aria-expanded={isMenuOpen && menuView === "models"}
               aria-controls="chat-input-popover"
               aria-haspopup="dialog"
-              className="flex min-h-11 min-w-0 max-w-full flex-wrap touch-manipulation items-center justify-center gap-1 rounded-xl px-2 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+              className="flex min-h-11 min-w-11 max-w-full flex-wrap touch-manipulation items-center justify-center gap-1 rounded-xl px-2 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
             >
               <span className="hidden min-w-0 max-w-full whitespace-normal break-words text-center leading-4 md:inline">
                 {t("chat.modelSelect")}

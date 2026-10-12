@@ -87,6 +87,11 @@ test.describe("Tomverse Chat and Review product switcher", () => {
       "aria-current",
       "page"
     );
+    const drawer = page.getByTestId("mobile-sidebar-drawer");
+    if (await drawer.isVisible()) {
+      await page.keyboard.press("Escape");
+      await expect(drawer).not.toBeVisible();
+    }
     await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveCount(0);
     await expect(composer.getByTestId("chat-send-button")).toHaveClass(
       /bg-blue-600/
