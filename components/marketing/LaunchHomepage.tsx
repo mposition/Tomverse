@@ -61,8 +61,8 @@ function HeroPreview({ copy, motionLabel, motionDisabled, onMotionToggle }: {
   </figure>;
 }
 
-function ExampleResult({ example, index }: { example: EverydayExample; index: number }) {
-  return <div className={`${styles.exampleResult} ${index === 2 ? styles.writingResult : ""}`}>
+function ExampleResult({ example }: { example: EverydayExample }) {
+  return <div className={styles.exampleResult}>
     <p className={styles.resultType}>{example.type}</p>
     <h3>{example.title}</h3>
     <p className={styles.resultIntro}>{example.intro}</p>
@@ -115,7 +115,7 @@ function EverydayGallery({ copy }: { copy: LaunchHomepageCopy["gallery"] }) {
           {copy.examples.map((example, i) => <div key={exampleIds[i]} role="tabpanel"
             id={`${galleryId}-${exampleIds[i]}-panel`} aria-labelledby={`${galleryId}-${exampleIds[i]}-tab`}
             hidden={selected !== i} tabIndex={0} data-testid={`launch-gallery-panel-${exampleIds[i]}`}>
-            <ExampleResult example={example} index={i} />
+            <ExampleResult example={example} />
           </div>)}
         </div>
       </div>

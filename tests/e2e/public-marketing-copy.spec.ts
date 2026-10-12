@@ -89,19 +89,28 @@ function expectInlineHashes(html: string, headers: Record<string, string>, path:
 
 function expectLocalizedLinks(hrefs: string[], language: Language) {
   const supported = LOCALIZED_MARKETING_BASE_PATHS as readonly string[];
+  const queryLinks = new Map<string, string>();
   let marketingLinks = 0;
   for (const href of hrefs) {
     if (!href.startsWith("/")) continue;
-    const path = new URL(href, SITE_ORIGIN).pathname;
+    const url = new URL(href, SITE_ORIGIN);
+    const path = url.pathname;
     const parts = path.split("/").filter(Boolean);
     const hasLocale = SEO_LOCALES.includes(parts[0] as Language);
     const base = hasLocale ? (parts.length === 1 ? "/" : `/${parts.slice(1).join("/")}`) : path;
     if (!supported.includes(base)) continue;
     marketingLinks++;
-    if (language === "en") expect(hasLocale ? parts[0] : "en").toBe("en");
-    else expect(parts[0], `${language} link loses its locale: ${href}`).toBe(language);
+    if (hasLocale) {
+      expect(parts[0], `${language} link loses its locale: ${href}`).toBe(language);
+    } else if (url.searchParams.has("lang")) {
+      expect(url.searchParams.get("lang"), `${language} link has a different query language: ${href}`).toBe(language);
+      queryLinks.set(`${url.pathname}${url.search}`, base);
+    } else {
+      expect(language, `${language} link loses both its locale prefix and query: ${href}`).toBe("en");
+    }
   }
   expect(marketingLinks).toBeGreaterThan(0);
+  return [...queryLinks].map(([href, base]) => ({ href, base }));
 }
 
 for (const language of SEO_LOCALES) {
@@ -128,7 +137,20 @@ for (const language of SEO_LOCALES) {
         expect(document.alternates, path).toEqual(localizedLanguageAlternates(base));
         expect(document.h1, `${path}: primary heading must be in served HTML`).toHaveLength(1);
         expect(document.h1[0].length).toBeGreaterThan(3);
-        expectLocalizedLinks(document.anchors, language);
+        for (const target of expectLocalizedLinks(document.anchors, language)) {
+          const linkedResponse = await request.get(target.href);
+          expect(linkedResponse.status(), `${path} -> ${target.href}`).toBe(200);
+          const finalPath = new URL(linkedResponse.url()).pathname;
+          const allowedPaths = language === "en"
+            ? [target.base, localizedPath(language, target.base)]
+            : [localizedPath(language, target.base)];
+          expect(allowedPaths, `${target.href} redirects to the wrong locale`).toContain(finalPath);
+          expect(linkedResponse.headers()["content-type"]).toContain("text/html");
+          const linkedDocument = servedDocument(await linkedResponse.text());
+          expect(linkedDocument.language, `${target.href} serves the wrong document language`).toBe(language);
+          expect(linkedDocument.h1, `${target.href} must serve the destination body`).toHaveLength(1);
+          expect(linkedDocument.h1[0].length).toBeGreaterThan(3);
+        }
         expectInlineHashes(html, response.headers(), path);
         if (language !== "en") {
           const english = await request.get(localizedPath("en", base));

@@ -106,7 +106,8 @@ test("operating usage warnings are not presented as failed user traffic or deple
     const combined = describePublicStatusEvidence(both, language, now).reason;
     assert.ok(combined.includes(warningText) && combined.includes(failureText));
   }
-  assert.match(describePublicStatusEvidence(usage, "en", now).reason, /does not mean user plan credits have run out/);
+  assert.match(describePublicStatusEvidence(usage, "en", now).reason, /does not mean requests failed or user plan credits have run out/);
+  assert.doesNotMatch(describePublicStatusEvidence(usage, "en", now).reason, /budget|operating usage|80%/i);
   assert.doesNotMatch(describePublicStatusEvidence(usage, "en", now).reason, /request failure rate/);
 });
 

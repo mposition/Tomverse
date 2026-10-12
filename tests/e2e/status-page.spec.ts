@@ -116,6 +116,9 @@ for (const language of ["ko", "fr"] as const) {
     await expect(page).toHaveTitle(new RegExp(copy.metadataTitle));
     await expect(page.locator('meta[name="description"]')).toHaveAttribute("content", copy.metadataDescription);
     await expect(page.locator('meta[property="og:locale"]')).toHaveAttribute("content", language === "ko" ? "ko_KR" : "fr_FR");
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", `https://tomverse.app/status?lang=${language}`);
+    await expect(page.locator('link[rel="alternate"][hreflang]')).toHaveCount(8);
+    await expect(page.locator(`link[rel="alternate"][hreflang="${language}"]`)).toHaveAttribute("href", `https://tomverse.app/status?lang=${language}`);
     await expect(page.getByRole("link", { name: copy.backHome })).toHaveAttribute("href", `/${language}`);
     const heading = page.getByRole("heading", { level: 1 });
     await expect(heading).toHaveText(copy.dataUnavailableHeadline);
