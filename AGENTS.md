@@ -779,8 +779,8 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **기본 3모델 구성은 Admin 설정입니다**(2026-10-12 운영자 결정, 정책 문서
   "기본 3모델 구성은 Admin 설정입니다"). `AppSetting["guestBrandTrioModelIds"]`가
   정하고, 코드 trio는 행이 없거나 읽을 수 없을 때의 비상값입니다. 저장 검증은
-  `guestBrandTrioRejection()`(활성 · Guest · Standard · 검증된 가격 · 서로 다른
-  3개) 한 곳이고, 선두는 그 구성 안에서만 고르며 구성과 한 트랜잭션으로 저장합니다.
+  `guestBrandTrioRejection()`(활성 · 공개 · Guest · Standard · 검증된 가격 · 서로
+  다른 3개 · OpenAI · Anthropic · Gemini 각 1개) 한 곳이고, 선두는 그 구성 안에서만 고르며 구성과 한 트랜잭션으로 저장합니다.
   구성을 쓰는 모든 곳(첫 렌더, 신규 계정, Admin 설명, 서버 선두 판정,
   `check:default-models`)은 `getPublicAppSettings()` 또는 `readGuestLeadFacts()`가
   해석한 같은 구성을 받습니다 — 컴파일된 trio를 직접 읽지 않습니다.

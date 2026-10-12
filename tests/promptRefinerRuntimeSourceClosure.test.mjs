@@ -503,15 +503,15 @@ const compilerOptions = parsedConfig.options;
 // unchanged, so this repins positions only.
 // 2026-10-12, the default lineup as an Admin setting: the lineup reader, its
 // save-time checks and its writer in `lib/appSettings.ts` sit above that file's
-// one access, `flags[feature]`, and move it by 172 lines. The replacement and
-// lineup parameters in `lib/appDefaults.ts` add no access. Count 228 and the
+// one access, `flags[feature]`, and move it by 183 lines. The replacement walk,
+// lineup rules and lead helper in `lib/appDefaults.ts` add no access. Count 228 and the
 // position-free inventory are unchanged; positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "5f660609a840621a15d421c91afe2cc9",
-  "b1c71ad801cc083f8a791145e0d922f6",
+  "c8fc94294a04710a7705851e3feb0dee",
+  "f6dfc7a0e19cab68e8b7a3bd010b0f4c",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
