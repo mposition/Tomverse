@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { startLandingChatCapabilityRead } from "@/lib/landingChatCapabilityClient";
-import { marketingProductEntryHref } from "@/lib/marketingRoutes";
+import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
 import { localizedPath } from "@/lib/seo";
 
 type MarketingChatAvailability = {

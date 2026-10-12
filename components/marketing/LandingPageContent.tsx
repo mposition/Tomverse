@@ -16,7 +16,7 @@ import { AnswerRails } from "./AnswerRails";
 import { ProductCapture } from "./ProductCapture";
 import { TrustSection } from "./TrustSection";
 import { WorkflowContinuitySection } from "./WorkflowContinuitySection";
-import { marketingProductEntryHref } from "@/lib/marketingRoutes";
+import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
 
 /**
  * The landing page shell: the hero, and the order the sections run in.

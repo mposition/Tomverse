@@ -11,7 +11,8 @@ import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 import { LocaleSupportNotice } from "./LocaleSupportNotice";
-import { marketingProductEntryHref, REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
+import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
+import { REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
 import { useMarketingChatEntry } from "./MarketingChatAvailability";
 
 // Only these paths actually have a `/[locale]` route (app/[locale]), so only

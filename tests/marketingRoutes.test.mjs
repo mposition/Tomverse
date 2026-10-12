@@ -3,8 +3,8 @@ import test from "node:test";
 import {
   isStaticMarketingPathname,
   localizedMarketingRedirect,
-  marketingProductEntryHref,
 } from "../lib/marketingRoutes.ts";
+import { marketingProductEntryHref } from "../lib/marketingProductEntry.ts";
 
 /**
  * R-05-LANG. The redirect that stops `/` being served in English to a visitor
