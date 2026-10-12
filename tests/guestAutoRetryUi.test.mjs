@@ -5,7 +5,7 @@ import test from "node:test";
 import {
   guestAutoRetryMetadata,
   isGuestAutoRetryBlocked,
-} from "../components/chat/ChatApp.tsx";
+} from "../lib/guestAutoRetry.ts";
 
 test("only a Guest Auto send records the one-shot retry boundary", () => {
   const guestAuto = guestAutoRetryMetadata(true, "signed-authority");

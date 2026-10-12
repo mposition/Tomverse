@@ -117,6 +117,11 @@ import {
 } from
   "@/components/chat/promptRefinerProductClient";
 import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
+import {
+  guestAutoRetryMetadata,
+  isGuestAutoRetryBlocked,
+  type GuestAutoRetryMetadata,
+} from "@/lib/guestAutoRetry";
 
 const processedPromptKeys = new Set<string>();
 const DURABLE_ATTEMPT_POLL_INTERVAL_MS = 1_000;
@@ -125,23 +130,7 @@ const DURABLE_ATTEMPT_MAX_BACKOFF_MS = 15_000;
 
 type ChatAppRetryPrompt = NonNullable<
   ReturnType<typeof getChatRuntimeLastPrompt>
-> & {
-  /** A Guest Auto authority is single-turn and may never be replaced by a manual retry. */
-  guestAutoRetryBlocked?: true;
-};
-
-export const guestAutoRetryMetadata = (
-  isGuestMode: boolean,
-  guestAutoCapability?: string
-): Pick<ChatAppRetryPrompt, "guestAutoRetryBlocked"> =>
-  isGuestMode && Boolean(guestAutoCapability)
-    ? { guestAutoRetryBlocked: true }
-    : {};
-
-export const isGuestAutoRetryBlocked = (
-  isGuestMode: boolean,
-  prompt: Pick<ChatAppRetryPrompt, "guestAutoRetryBlocked"> | null
-) => isGuestMode && prompt?.guestAutoRetryBlocked === true;
+> & GuestAutoRetryMetadata;
 
 const getChatAppRetryPrompt = (runtimeKey: string) =>
   getChatRuntimeLastPrompt(runtimeKey) as ChatAppRetryPrompt | null;
