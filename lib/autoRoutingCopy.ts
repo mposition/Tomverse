@@ -30,6 +30,12 @@ export type AutoRoutingCopy = {
   description: string;
   /** Shown on the picker row while Auto is on, in place of a model name. */
   activeSummary: string;
+  /** The stored manual choice remains available, but is not the active answer model. */
+  manualFallbackLabel: string;
+  /** Explains why a model is still listed while Auto is active. */
+  manualFallbackDescription: string;
+  /** Auto cannot quote the stored manual model's price as its own estimate. */
+  variableCreditNotice: string;
   /** Announced when the mode changes, for a screen reader. */
   turnedOn: string;
   turnedOff: string;
@@ -39,65 +45,86 @@ export type AutoRoutingCopy = {
 
 export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
   en: {
-    label: "Auto",
+    label: "Smart Adaptive",
     description:
       "Tomverse picks a model for each message. The one that answered is shown on the reply.",
-    activeSummary: "Auto — a model is chosen per message",
-    turnedOn: "Auto is on. A model will be chosen for each message.",
-    turnedOff: "Auto is off. Your selected model answers every message.",
+    activeSummary: "Smart Adaptive — a model is chosen per message",
+    manualFallbackLabel: "Manual return model",
+    manualFallbackDescription: "Used after Smart Adaptive is turned off.",
+    variableCreditNotice: "Credits depend on the model that answers.",
+    turnedOn: "Smart Adaptive is on. A model will be chosen for each message.",
+    turnedOff: "Smart Adaptive is off. Your selected model answers every message.",
     answeredBy: "Answered by",
   },
   ko: {
-    label: "자동",
+    label: "스마트 자동",
     description:
       "메시지마다 Tomverse가 모델을 고릅니다. 답변한 모델은 답변에 표시됩니다.",
-    activeSummary: "자동 — 메시지마다 모델을 고릅니다",
-    turnedOn: "자동이 켜졌습니다. 메시지마다 모델을 고릅니다.",
-    turnedOff: "자동이 꺼졌습니다. 선택한 모델이 모든 메시지에 답변합니다.",
+    activeSummary: "스마트 자동 — 메시지마다 모델을 고릅니다",
+    manualFallbackLabel: "수동 전환 모델",
+    manualFallbackDescription: "스마트 자동을 끄면 이 모델을 사용합니다.",
+    variableCreditNotice: "답변한 모델에 따라 크레딧이 달라집니다.",
+    turnedOn: "스마트 자동이 켜졌습니다. 메시지마다 모델을 고릅니다.",
+    turnedOff: "스마트 자동이 꺼졌습니다. 선택한 모델이 모든 메시지에 답변합니다.",
     answeredBy: "답변한 모델",
   },
   zh: {
-    label: "自动",
+    label: "智能自动",
     description: "Tomverse 会为每条消息挑选模型。回答的模型会显示在回复上。",
-    activeSummary: "自动 — 每条消息挑选一个模型",
-    turnedOn: "自动已开启。每条消息都会挑选一个模型。",
-    turnedOff: "自动已关闭。你选择的模型将回答所有消息。",
+    activeSummary: "智能自动 — 每条消息挑选一个模型",
+    manualFallbackLabel: "手动模式模型",
+    manualFallbackDescription: "关闭智能自动后使用此模型。",
+    variableCreditNotice: "额度取决于回答的模型。",
+    turnedOn: "智能自动已开启。每条消息都会挑选一个模型。",
+    turnedOff: "智能自动已关闭。你选择的模型将回答所有消息。",
     answeredBy: "回答模型",
   },
   fr: {
-    label: "Auto",
+    label: "Adaptation intelligente",
     description:
       "Tomverse choisit un modèle pour chaque message. Celui qui a répondu est indiqué sur la réponse.",
-    activeSummary: "Auto — un modèle est choisi par message",
-    turnedOn: "Auto est activé. Un modèle sera choisi pour chaque message.",
-    turnedOff: "Auto est désactivé. Le modèle que vous avez choisi répond à tous les messages.",
+    activeSummary: "Adaptation intelligente — un modèle est choisi par message",
+    manualFallbackLabel: "Modèle de retour manuel",
+    manualFallbackDescription: "Utilisé après la désactivation de l’adaptation intelligente.",
+    variableCreditNotice: "Les crédits dépendent du modèle qui répond.",
+    turnedOn: "L’adaptation intelligente est activée. Un modèle sera choisi pour chaque message.",
+    turnedOff: "L’adaptation intelligente est désactivée. Le modèle que vous avez choisi répond à tous les messages.",
     answeredBy: "Répondu par",
   },
   de: {
-    label: "Auto",
+    label: "Intelligente Automatik",
     description:
       "Tomverse wählt für jede Nachricht ein Modell. Das antwortende Modell steht an der Antwort.",
-    activeSummary: "Auto — pro Nachricht wird ein Modell gewählt",
-    turnedOn: "Auto ist an. Für jede Nachricht wird ein Modell gewählt.",
-    turnedOff: "Auto ist aus. Das von dir gewählte Modell beantwortet jede Nachricht.",
+    activeSummary: "Intelligente Automatik — pro Nachricht wird ein Modell gewählt",
+    manualFallbackLabel: "Modell für den manuellen Modus",
+    manualFallbackDescription: "Wird nach dem Ausschalten der intelligenten Automatik verwendet.",
+    variableCreditNotice: "Die Credits hängen vom antwortenden Modell ab.",
+    turnedOn: "Die intelligente Automatik ist an. Für jede Nachricht wird ein Modell gewählt.",
+    turnedOff: "Die intelligente Automatik ist aus. Das von dir gewählte Modell beantwortet jede Nachricht.",
     answeredBy: "Beantwortet von",
   },
   es: {
-    label: "Auto",
+    label: "Adaptación inteligente",
     description:
       "Tomverse elige un modelo para cada mensaje. El que respondió aparece en la respuesta.",
-    activeSummary: "Auto — se elige un modelo por mensaje",
-    turnedOn: "Auto está activado. Se elegirá un modelo para cada mensaje.",
-    turnedOff: "Auto está desactivado. El modelo que elegiste responde a todos los mensajes.",
+    activeSummary: "Adaptación inteligente — se elige un modelo por mensaje",
+    manualFallbackLabel: "Modelo para el modo manual",
+    manualFallbackDescription: "Se usa después de desactivar la adaptación inteligente.",
+    variableCreditNotice: "Los créditos dependen del modelo que responda.",
+    turnedOn: "La adaptación inteligente está activada. Se elegirá un modelo para cada mensaje.",
+    turnedOff: "La adaptación inteligente está desactivada. El modelo que elegiste responde a todos los mensajes.",
     answeredBy: "Respondió",
   },
   pt: {
-    label: "Auto",
+    label: "Adaptação inteligente",
     description:
       "O Tomverse escolhe um modelo para cada mensagem. O que respondeu aparece na resposta.",
-    activeSummary: "Auto — um modelo é escolhido por mensagem",
-    turnedOn: "Auto está ligado. Um modelo será escolhido para cada mensagem.",
-    turnedOff: "Auto está desligado. O modelo que você escolheu responde a todas as mensagens.",
+    activeSummary: "Adaptação inteligente — um modelo é escolhido por mensagem",
+    manualFallbackLabel: "Modelo para o modo manual",
+    manualFallbackDescription: "Usado após desligar a adaptação inteligente.",
+    variableCreditNotice: "Os créditos dependem do modelo que responder.",
+    turnedOn: "A adaptação inteligente está ligada. Um modelo será escolhido para cada mensagem.",
+    turnedOff: "A adaptação inteligente está desligada. O modelo que você escolheu responde a todas as mensagens.",
     answeredBy: "Respondido por",
   },
 };

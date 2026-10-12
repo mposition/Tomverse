@@ -17,6 +17,10 @@ import { ProductCapture } from "./ProductCapture";
 import { TrustSection } from "./TrustSection";
 import { WorkflowContinuitySection } from "./WorkflowContinuitySection";
 import { workspaceDestination } from "@/lib/productEntryDestination";
+import {
+  chatProductUiCopy,
+  localizedProductHref,
+} from "@/lib/chatProductUiCopy";
 
 /**
  * The landing page shell: the hero, and the order the sections run in.
@@ -31,9 +35,9 @@ import { workspaceDestination } from "@/lib/productEntryDestination";
  * not released. A visitor could not tell from the first screen which of the
  * four brand-tree products the button was going to open.
  *
- * So the hero states the product once, promises guest access once, and its
- * CTA says what pressing it starts: a comparison. The destination and the
- * analytics event are unchanged.
+ * The hero now names both product jobs once. Its primary guest action still
+ * starts Review, while Chat has a distinct sign-in entry and server-owned
+ * availability boundary.
  *
  * Eight sections became five. Three of the eight were retellings of the hero
  * demonstration rather than new facts, and two more pairs were answering one
@@ -52,11 +56,11 @@ export function LandingPageContent({
    * Resolved on the server (`lib/landingWorkspaceEntry.ts`), because the CTA's
    * destination has to be decided per visitor before the link is rendered.
    *
-   * Decision record v1.2 §3: once `/chat` is bound to the Chat cohort, a CTA
-   * that sends everybody there bounces everybody outside it, and the bounce is
-   * the only part the visitor sees. Defaults to false so a caller that has not
-   * resolved it yet gets the Review workspace, which is where everybody goes
-   * today.
+   * Entry and availability: docs/ui-contracts/chat-product-switcher.md. A Chat
+   * link that is shown outside the eligible
+   * account set bounces the visitor, and the bounce is the only part the user
+   * sees. Defaults to false so an unresolved caller gets the canonical Review
+   * entry instead.
    *
    * A boolean, not a reason. Which bucket, what share and which readiness gate
    * stay on the server (UI contract §2).
@@ -66,6 +70,7 @@ export function LandingPageContent({
   const { lang } = useLanguage();
   const { status } = useSession();
   const content = getLandingCopy(lang);
+  const productCopy = chatProductUiCopy[lang];
   const isAuthenticated = status === "authenticated";
   const chatHref = workspaceDestination({
     chatSurfaceAvailable,
@@ -79,7 +84,20 @@ export function LandingPageContent({
   });
   const primaryChatHref = isAuthenticated ? chatHref : guestChatHref;
   const primaryCtaLabel =
-    status === "authenticated" ? content.signedInCta : content.primaryCta;
+    isAuthenticated && chatSurfaceAvailable
+      ? productCopy.chat.open
+      : status === "authenticated"
+        ? content.signedInCta
+        : content.primaryCta;
+  const reviewHref = workspaceDestination({
+    chatSurfaceAvailable: false,
+    lang,
+    isAuthenticated,
+  });
+  const canonicalChatHref = localizedProductHref("chat", lang);
+  const chatProductHref = isAuthenticated
+    ? (chatSurfaceAvailable ? canonicalChatHref : null)
+    : `/auth/signin?callbackUrl=${encodeURIComponent(canonicalChatHref)}`;
   const landingTrackedRef = useRef(false);
 
   useEffect(() => {
@@ -159,6 +177,62 @@ export function LandingPageContent({
             <p className="mt-5 max-w-2xl whitespace-pre-line break-words text-lg leading-8 text-zinc-600 dark:text-zinc-300">
               {content.description}
             </p>
+            <p
+              data-testid="landing-product-intro"
+              className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400"
+            >
+              {productCopy.landingIntro}
+            </p>
+
+            <div
+              data-testid="landing-product-choices"
+              className="mt-7 grid max-w-4xl gap-3 md:grid-cols-2"
+            >
+              <article className="flex min-w-0 flex-col rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+                  {productCopy.chat.feature}
+                </p>
+                <h2 className="mt-1 text-lg font-black">{productCopy.chat.name}</h2>
+                <p className="mt-2 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                  {productCopy.chat.description}
+                </p>
+                {chatProductHref ? (
+                  <Link
+                    href={chatProductHref}
+                    data-testid="landing-chat-product-cta"
+                    className="mt-4 inline-flex min-h-11 items-center justify-center rounded-xl border border-blue-600 px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                  >
+                    {isAuthenticated
+                      ? productCopy.chat.open
+                      : productCopy.signInToOpenChat}
+                  </Link>
+                ) : (
+                  <p
+                    data-testid="landing-chat-unavailable"
+                    className="mt-4 rounded-xl bg-zinc-100 px-3 py-2 text-sm font-semibold text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300"
+                  >
+                    {productCopy.unavailable}
+                  </p>
+                )}
+              </article>
+
+              <article className="flex min-w-0 flex-col rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+                  {productCopy.review.feature}
+                </p>
+                <h2 className="mt-1 text-lg font-black">{productCopy.review.name}</h2>
+                <p className="mt-2 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                  {productCopy.review.description}
+                </p>
+                <Link
+                  href={reviewHref}
+                  data-testid="landing-review-product-cta"
+                  className="mt-4 inline-flex min-h-11 items-center justify-center rounded-xl border border-zinc-300 px-4 text-sm font-bold text-zinc-800 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  {productCopy.review.open}
+                </Link>
+              </article>
+            </div>
 
             <div className="mt-7 flex flex-col items-start gap-3">
               <div className="flex w-full min-w-0 flex-wrap items-center gap-x-6 gap-y-3">

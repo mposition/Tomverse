@@ -43,6 +43,17 @@ const settingsDialog = (page: Page) =>
   page.getByRole("dialog", { name: /User Settings|사용자 설정/ });
 
 async function mockSettingsEntryApis(page: Page) {
+  // Settings exits now return to canonical Tomverse Chat. The loopback E2E
+  // server keeps that product behind an explicit fixture cookie, so these
+  // tests retain their `/chat` contract without falling through to the real
+  // session/database admission path.
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_chat_workspace",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
   await page.route(
     (url) => url.pathname === "/api/imports/external/capacity",
     (route) =>

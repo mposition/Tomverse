@@ -68,7 +68,7 @@ test.beforeEach(async ({ page }, testInfo) => {
     await restoreActiveConversation(page);
   }
   await mockChatStream(page, "Mobile QA response");
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   if (needsMultipleModels) {

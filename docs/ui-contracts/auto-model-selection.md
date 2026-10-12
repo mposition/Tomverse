@@ -1,13 +1,14 @@
-# Auto model selection — UI contract
+# Smart Adaptive model selection — UI contract
 
-- Status: **default off; release authority requires serving readback.** The three
+- Status: **server-offered blank Chat drafts default to Smart Adaptive intent;
+  release authority still requires serving readback.** The three
   readiness attestations in `lib/autoRolloutReadiness.ts` remain `pending`.
   The owner-approved initial release may authorize Auto through
   [its exact-deployment activation](../policy/chat-refiner-initial-auto-release-v1.md),
   while the separate limited-release path requires its exact reviewed artifact
   and runtime tuple. This document is not evidence that either path is active.
   The controls are mounted
-  (`ModelPickerPanel` and `ChatMessageList`), which is what makes §1 a rule
+  (`ChatInput`, `ModelPickerPanel` and `ChatMessageList`), which is what makes §1 a rule
   something executes rather than a claim about components nothing rendered.
   Coverage: `tests/client/autoRoutingRender.test.tsx` and
   `tests/e2e/auto-routing-toggle.spec.ts`.
@@ -15,16 +16,21 @@
 - Server side: `docs/ops/tomverse-chat-auto-router-rollout.md`
 - Policy: `docs/policy/tomverse-chat-routing.md` §5
 
-Auto is a mode, not a model. It replaces "which model answers this
+Smart Adaptive is a mode inside Tomverse Chat, not a model and not the product
+switch to Tomverse Review. It replaces "which model answers this
 conversation" with "a model is chosen for each message", and that is a change
 to what the product promises — so what the interface says about it is a
 contract, not a styling decision.
 
 ## 1. Offered means it would actually route
 
-`autoSelection.offered` in the conversation response is one boolean, and it is
-the conjunction of the feature flag, **the conversation's product**, and
-cohort eligibility (`lib/autoRoutingUi.ts`). The control renders when it is
+`autoSelection.offered` in a stored conversation response is one boolean, and
+it is the conjunction of the feature flag, **the conversation's product**, and
+cohort eligibility (`lib/autoRoutingUi.ts`). A signed-in blank Chat draft may
+receive the same single `offered` boolean from the server's read-only Chat
+draft capability. That capability means the account may start a stored Chat in
+Auto; it does not pretend the blank draft already has a conversation row or a
+stored product. The control renders when its server-owned `offered` value is
 true and does not exist when it is false.
 
 ```
@@ -69,6 +75,21 @@ during the transition, a reported defect under `strict` — and Auto refuses it
 either way. A turn with *no conversation at all* is a different thing:
 `no_conversation`, not a product refusal.
 
+A server-offered blank Chat draft paints Smart Adaptive ON as its default
+**draft intent**. That display is not a claim that a conversation row or stored
+mode already exists: merely entering Chat creates no row and performs no paid
+call. Before the first Send, the client must create the owned Chat row, read
+its canonical detail, store `selectionMode: auto`, and adopt that confirmed
+row. Send waits for this sequence.
+
+If the user has chosen manual on the blank draft and explicitly switches Smart
+Adaptive back on, the same server-confirmation sequence runs immediately. In
+that explicit transition only, the switch remains pending or returns to manual
+until every step succeeds. These network steps are deliberately not described
+as one database transaction. An unknown outcome stops for readback and is never
+retried blindly. Review, guest and other product surfaces do not gain this
+draft capability, and routing itself still requires the stored owned row.
+
 There is no disabled state, no "coming soon", no greyed row. A control that
 flips, saves and changes nothing is worse than an absent one: the user cannot
 tell "Auto chose my model again" from "Auto never ran", and neither can
@@ -85,7 +106,7 @@ operator-facing reason is logged server-side by `describeAutoCohortRefusal`.
 
 ## 3. What the copy may promise
 
-Auto picks a model per message. It does **not** promise the pick is good, and
+Smart Adaptive picks a model per message. It does **not** promise the pick is good, and
 no locale may say better, best, optimal, smartest or their translations —
 `tests/autoRoutingUi.test.mjs` fails the build on any of them.
 
@@ -123,6 +144,10 @@ which the database expects gone
 While Auto is on, the model list stays visible and selectable. Turning Auto off
 has to return the conversation to a model the user recognises, and hiding what
 that would be makes the switch a door with no handle on the other side.
+The stored manual model is shown as a neutral return choice rather than as the
+model currently answering. Selecting any model first waits for the server to
+confirm `manual`; only a successful response may paint that model as selected.
+A refused, failed or identity-stale write leaves the confirmed Auto UI intact.
 
 ## 6. Accessibility
 
@@ -130,6 +155,9 @@ that would be makes the switch a door with no handle on the other side.
   never in colour alone — the same rule `ModelSelectionBadge` follows.
 - The mode change is announced through a polite live region, so a screen reader
   is told what happened rather than re-reading the control.
+- The composer switch is a separate 44px control, not nested inside the model
+  picker trigger. Each action has one accessible name and remains operable when
+  the action row wraps on a narrow screen.
 - The badge's icon is `aria-hidden`; the model name is text.
 
 ## 7. Non-negotiable requirements
@@ -138,7 +166,8 @@ that would be makes the switch a door with no handle on the other side.
   no price and no provider, and the credit estimate under the picker would have
   nothing to show for it.
 - No surface may derive availability from the flag alone. `offered` is the only
-  input, and it is computed server-side.
+  input, and it is computed server-side for either the owned stored
+  conversation or the signed-in blank Chat capability described in §1.
 - No user-facing string may name a bucket, a percentage, a salt, a cohort or a
   readiness gate.
 - A change that violates this contract is a release blocker.

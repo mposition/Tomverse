@@ -1,0 +1,136 @@
+"use client";
+
+import Link from "next/link";
+import { useId } from "react";
+
+import { useLanguage } from "@/components/LanguageProvider";
+import {
+  chatProductUiCopy,
+  localizedProductHref,
+  type ChatWorkspaceProduct,
+} from "@/lib/chatProductUiCopy";
+import type { Language } from "@/lib/language";
+
+/**
+ * Navigation between the two Chat-family products.
+ *
+ * This control changes routes only. It never rewrites the open conversation's
+ * product, model selection, draft, or selection mode. Smart Adaptive has its
+ * own switch beside the send controls because it is a mode inside Chat, not a
+ * third product.
+ */
+export function ChatProductSwitcher({
+  currentProduct,
+  chatRequiresSignIn = false,
+  disabled = false,
+  onProductSwitch,
+}: {
+  currentProduct: ChatWorkspaceProduct;
+  chatRequiresSignIn?: boolean;
+  disabled?: boolean;
+  onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
+}) {
+  const { lang } = useLanguage();
+
+  return (
+    <ChatProductSwitcherView
+      currentProduct={currentProduct}
+      language={lang}
+      chatRequiresSignIn={chatRequiresSignIn}
+      disabled={disabled}
+      onProductSwitch={onProductSwitch}
+    />
+  );
+}
+
+/** Pure view exported so the navigation contract can be rendered in Node. */
+export function ChatProductSwitcherView({
+  currentProduct,
+  language,
+  chatRequiresSignIn = false,
+  disabled = false,
+  onProductSwitch,
+}: {
+  currentProduct: ChatWorkspaceProduct;
+  language: Language;
+  chatRequiresSignIn?: boolean;
+  disabled?: boolean;
+  onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
+}) {
+  const copy = chatProductUiCopy[language];
+  const instanceId = useId();
+  const disabledDescriptionId = `chat-product-switch-disabled-description-${instanceId}`;
+
+  return (
+    <nav
+      data-testid="chat-product-switcher"
+      aria-label={copy.selectorLabel}
+      className="w-full min-w-0"
+    >
+      <div className="grid min-w-0 grid-cols-2 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-950">
+        {(["chat", "review"] as const).map((product) => {
+          const item = copy[product];
+          const current = currentProduct === product;
+          const productHref = localizedProductHref(product, language);
+          const href = product === "chat" && chatRequiresSignIn
+            ? `/auth/signin?callbackUrl=${encodeURIComponent(productHref)}`
+            : productHref;
+          return (
+            <Link
+              key={product}
+              href={href}
+              aria-current={current ? "page" : undefined}
+              aria-disabled={disabled || undefined}
+              aria-describedby={disabled ? disabledDescriptionId : undefined}
+              aria-label={`${item.name}. ${item.feature}. ${item.description}`}
+              data-testid={`chat-product-${product}`}
+              onClick={(event) => {
+                if (!allowProductSwitchNavigation({
+                  currentProduct,
+                  nextProduct: product,
+                  disabled,
+                  onProductSwitch,
+                })) {
+                  event.preventDefault();
+                }
+              }}
+              className={`flex min-h-11 min-w-0 touch-manipulation items-center justify-center rounded-lg border px-2 text-center text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
+                current
+                  ? "border-zinc-300 bg-white text-zinc-950 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+                  : disabled
+                    ? "cursor-wait border-transparent text-zinc-400 dark:text-zinc-600"
+                    : "border-transparent text-zinc-600 hover:bg-white/70 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900/70 dark:hover:text-white"
+              }`}
+            >
+              <span className="truncate">{item.shortLabel}</span>
+              <span className="ml-1 hidden truncate md:inline" aria-hidden="true">
+                · {item.feature}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+      {disabled && (
+        <p id={disabledDescriptionId} className="sr-only" role="status">
+          {copy.switchPendingDescription}
+        </p>
+      )}
+    </nav>
+  );
+}
+
+/** Pure click admission shared by pointer, keyboard and modifier-click events. */
+export const allowProductSwitchNavigation = ({
+  currentProduct,
+  nextProduct,
+  disabled,
+  onProductSwitch,
+}: {
+  currentProduct: ChatWorkspaceProduct;
+  nextProduct: ChatWorkspaceProduct;
+  disabled: boolean;
+  onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
+}): boolean => {
+  if (disabled || currentProduct === nextProduct) return false;
+  return onProductSwitch ? onProductSwitch(nextProduct) : true;
+};

@@ -94,7 +94,7 @@ async function openTwoConversationWorkspace(page: Page) {
   await suppressTransientUi(page);
   await restoreActiveConversation(page);
   await page.setViewportSize(DESKTOP_VIEWPORT);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
   return authState;
 }
@@ -334,7 +334,7 @@ async function openStreamWorkspace(page: Page, shell: Shell) {
   await suppressTransientUi(page);
   await restoreActiveConversation(page);
   await page.setViewportSize(shell.viewport);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(
     page.getByTestId(
       shell.name === "mobile" ? "mobile-chat-shell" : "desktop-chat-shell"
@@ -634,7 +634,7 @@ async function openDeepResearchWorkspace(
   await suppressTransientUi(page);
   await restoreActiveConversation(page);
   await page.setViewportSize(shell.viewport);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(
     page.getByTestId(
       shell.name === "mobile" ? "mobile-chat-shell" : "desktop-chat-shell"
@@ -870,7 +870,7 @@ async function openComparisonWorkspace(
   await suppressTransientUi(page);
   await restoreActiveConversation(page);
   await page.setViewportSize(shell.viewport);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(
     page.getByTestId(
       shell.name === "mobile" ? "mobile-chat-shell" : "desktop-chat-shell"
@@ -1055,7 +1055,7 @@ async function openAttachmentWorkspace(
   await suppressTransientUi(page);
   await restoreActiveConversation(page);
   await page.setViewportSize(shell.viewport);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(
     page.getByTestId(
       shell.name === "mobile" ? "mobile-chat-shell" : "desktop-chat-shell"

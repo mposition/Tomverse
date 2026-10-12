@@ -55,7 +55,7 @@ test.describe("desktop model selection readiness", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const panel = page.getByTestId("desktop-model-panel").first();
     await expect(panel).toBeVisible();
@@ -81,7 +81,7 @@ test.describe("desktop model selection readiness", () => {
     page,
   }) => {
     await prepareGuestPage(page, "en");
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const panel = page.getByTestId("desktop-model-panel").first();
     await expect(panel).toBeVisible();
@@ -128,7 +128,7 @@ test.describe("desktop model selection readiness", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const firstPanel = page.getByTestId("desktop-model-panel").first();
     await expect(firstPanel.locator("select")).toBeDisabled();

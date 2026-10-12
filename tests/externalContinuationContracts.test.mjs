@@ -507,20 +507,20 @@ async function assertClientSurfaceRouting(client) {
             { name: "a same-id cross-surface departure promotes before routing", currentId: "clicked", row: "continuation", path: `/continuations/${encodedId}`, events: ["promote:account:test", "settle", "push"] },
             { name: "two continuations navigate to the clicked id", row: "continuation", mounted: "continuation", path: `/continuations/${encodedId}` },
             { name: "the current continuation does not push itself", row: "continuation", mounted: "continuation", pathname: `/continuations/${encodedId}`, workspace: true },
-            { name: "leaving a continuation preserves the workspace id", row: "workspace", mounted: "continuation", path: `/chat?conversation=${encodedId}` },
-            { name: "a Chat hint crosses to the additive Chat path", hint: "chat", path: `/chat/workspace?conversation=${encodedId}` },
+            { name: "leaving a continuation preserves the workspace id", row: "workspace", mounted: "continuation", path: `/review?conversation=${encodedId}` },
+            { name: "a Chat hint crosses to canonical Chat", hint: "chat", path: `/chat?conversation=${encodedId}` },
             { name: "the current workspace selects in place", row: "workspace", workspace: true },
             { name: "the matching list row is selected after a decoy", rows: [{ id: "other", surface: "continuation" }, { surface: "workspace" }], workspace: true },
             { name: "the matching list row is selected before a decoy", rows: [{ surface: "workspace" }, { id: "other", surface: "continuation" }], workspace: true },
             { name: "the matching list row routes its own continuation", rows: [{ id: "other", surface: "workspace" }, { surface: "continuation" }], path: `/continuations/${encodedId}` },
             { name: "a refused lookup never promotes before acceptance", mounted: "chat", status: 403, lookup: true, discarded: true },
-            { name: "a Chat list miss ignores a decoy and reads the owned row", rows: [{ id: "other", surface: "continuation" }], mounted: "chat", detail: "workspace", lookup: true, path: `/chat?conversation=${encodedId}` },
+            { name: "a Chat list miss ignores a decoy and reads the owned row", rows: [{ id: "other", surface: "continuation" }], mounted: "chat", detail: "workspace", lookup: true, path: `/review?conversation=${encodedId}` },
             { name: "a workspace list miss ignores a decoy and resolves in place", rows: [{ id: "other", surface: "continuation" }], workspace: true },
             { name: "an unresolved workspace mount resolves in place without an early owned read", detail: "workspace", workspace: true },
             { name: "an unresolved continuation mount resolves in place without an early owned read", mounted: "continuation", detail: "continuation", pathname: `/continuations/${encodedId}`, workspace: true },
             { name: "a Chat list miss reads the owned continuation", mounted: "chat", detail: "continuation", lookup: true, path: `/continuations/${encodedId}` },
             { name: "an owned lookup promotes only after its accepted answer", mounted: "chat", detail: "continuation", lookup: true, path: `/continuations/${encodedId}`, events: ["fetch", "promote:account:test", "settle", "push"] },
-            { name: "a Chat list miss reads the owned workspace", mounted: "chat", detail: "workspace", lookup: true, path: `/chat?conversation=${encodedId}` },
+            { name: "a Chat list miss reads the owned workspace", mounted: "chat", detail: "workspace", lookup: true, path: `/review?conversation=${encodedId}` },
             { name: "an owned Chat proceeds in place", mounted: "chat", detail: "chat", lookup: true, workspace: true },
             { name: "a non-account id cannot start an owned read", mounted: "chat", accountId: null },
             { name: "a refused owned read cannot select or navigate", mounted: "chat", status: 403, lookup: true, discarded: true },
@@ -599,7 +599,8 @@ async function assertClientSurfaceRouting(client) {
                     promotions.push(namespace);
                     events.push(`promote:${namespace}`);
                 },
-                conversationSurfaceHref, conversationHandoffHref, LEGACY_REVIEW_PATH: "/chat",
+                conversationSurfaceHref, conversationHandoffHref,
+                REVIEW_WORKSPACE_PATH: "/review", LEGACY_REVIEW_PATH: "/chat",
                 PRODUCT_SURFACE_PATH: { ...PRODUCT_SURFACE_PATH, review: "/future-review" },
                 router: { push: (path) => {
                     events.push("push");
@@ -672,12 +673,13 @@ async function assertClientSurfaceRouting(client) {
                             committed.push(forceRouteTransition);
                             promotions.push("account:test");
                         },
-                        conversationHandoffHref, LEGACY_REVIEW_PATH: "/chat",
+                        conversationHandoffHref,
+                        REVIEW_WORKSPACE_PATH: "/review", LEGACY_REVIEW_PATH: "/chat",
                         PRODUCT_SURFACE_PATH: { ...PRODUCT_SURFACE_PATH, review: "/future-review" },
                     })();
                     const fresh = navigationAttempt === currentAttempt;
                     const expected = fresh && valid && currentId === id && surface !== mountedSurface
-                        ? [conversationHandoffHref(surface, id, "/chat")] : [];
+                        ? [conversationHandoffHref(surface, id, "/review")] : [];
                     const message = !valid ? "trailing handoff rejects an invalid server surface"
                         : currentId !== id ? "trailing handoff rejects a stale origin"
                         : !fresh ? `trailing handoff rejects ${navigationState.name}`
@@ -794,7 +796,7 @@ const routingMutations = [
         "const ownPath = null; /* conversationSurfaceHref(targetSurface, id) */"), /two continuations navigate/],
     ["string destination decoy", (f) => f.replaceAnchor("ownPath",
         'const ownPath = "conversationSurfaceHref(targetSurface, id)";'), /search hint wins/],
-    ["handoff drops the clicked id", (f) => f.replaceAnchor("prefixHandoff", "LEGACY_REVIEW_PATH"), /preserves the workspace id/],
+    ["handoff drops the clicked id", (f) => f.replaceAnchor("prefixHandoff", "REVIEW_WORKSPACE_PATH"), /preserves the workspace id/],
     ["owned answer is ignored", (f) => f.replaceAnchor("targetAssignment", "/* targetSurface = detail.surface */"), /a Chat list miss ignores a decoy and reads the owned row/],
     ["owned refusal falls through", (f) => f.replaceRouting("if (!response.ok) {", "if (false) {"), /refused owned read|refused lookup never promotes/],
     ["refused response return is removed", (f) => f.replaceRouting(/return;(?=\s*\}\s*const detail = await response\.json\(\);)/, ""), /refused owned read/],
@@ -820,18 +822,18 @@ const routingMutations = [
     ["trailing detail derives from product", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface", "data.productKey !== mountedSurface"), /derived from productKey/],
     ["trailing detail derives from id prefix", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface", 'id.startsWith("continuation_")'), /derived from startsWith/],
     ["trailing handoff argument derives from kind", (f) => f.replaceAnchor("trailingHandoff",
-        "router.push(conversationHandoffHref(data.kind, id, LEGACY_REVIEW_PATH));"), /derived from kind/],
+        "router.push(conversationHandoffHref(data.kind, id, REVIEW_WORKSPACE_PATH));"), /derived from kind/],
     ["trailing handoff drops the departure barrier", (f) => f.replaceTrailingRouting(
         "commitConversationSelection(true);", ""), /trailing handoff commits the selection/],
     ["trailing handoff runs the departure barrier after push", (f) => f.replaceTrailingRouting(
-        "commitConversationSelection(true);\n          router.push(conversationHandoffHref(data.surface, id, LEGACY_REVIEW_PATH));",
-        "router.push(conversationHandoffHref(data.surface, id, LEGACY_REVIEW_PATH));\n          commitConversationSelection(true);"), /trailing handoff barrier order/],
+        "commitConversationSelection(true);\n          router.push(conversationHandoffHref(data.surface, id, REVIEW_WORKSPACE_PATH));",
+        "router.push(conversationHandoffHref(data.surface, id, REVIEW_WORKSPACE_PATH));\n          commitConversationSelection(true);"), /trailing handoff barrier order/],
     ["missing trailing handoff", (f) => f.replaceAnchor("trailingHandoff", ""), /exactly one trailing owned handoff/],
     ["duplicate trailing handoff", (f) => f.replaceAnchor("trailingHandoff", `${f.trailingHandoffText}\n${f.trailingHandoffText}`), /exactly one trailing owned handoff/],
     ["comment trailing handoff decoy", (f) => f.replaceAnchor("trailingHandoff", `/* ${f.trailingHandoffText} */`), /exactly one trailing owned handoff/],
     ["string trailing handoff decoy", (f) => f.replaceAnchor("trailingHandoff", `${JSON.stringify(f.trailingHandoffText)};`), /exactly one trailing owned handoff/],
-    ["handoff uses the future Review path", (f) => f.replaceAnchor("prefixHandoff",
-        "conversationHandoffHref(targetSurface, id, PRODUCT_SURFACE_PATH.review)"), /preserves the workspace id/],
+    ["handoff uses the historical Review path", (f) => f.replaceAnchor("prefixHandoff",
+        "conversationHandoffHref(targetSurface, id, LEGACY_REVIEW_PATH)"), /preserves the workspace id/],
     ["an arbitrary first row supplies the surface", (f) => f.replaceAnchor("listSurface", "conversations[0]?.surface"), /matching list row|list miss/],
     ["trailing allowlist is removed", (f) => f.removeConjunct("trailingAllowlist"), /trailing handoff rejects an invalid/],
     ["trailing origin check is removed", (f) => f.removeConjunct("trailingOrigin"), /trailing handoff rejects a stale/],

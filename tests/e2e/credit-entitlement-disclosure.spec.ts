@@ -47,7 +47,7 @@ async function prepareChat(page: Page, patch: Parameters<typeof mockUserUsage>[1
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
     await mockUserUsage(page, patch);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-input")).toBeVisible();
 }
 

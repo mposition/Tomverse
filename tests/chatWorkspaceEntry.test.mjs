@@ -12,7 +12,7 @@ test("stored Chat routes additively while bridge, legacy and Review remain on th
   assert.equal(conversationSurface({ productKey: null, hasContinuationBridge: false }), "workspace");
   assert.equal(conversationSurface({ productKey: "review", hasContinuationBridge: false }), "workspace");
   assert.equal(conversationSurface({ productKey: "studio", hasContinuationBridge: false }), "workspace");
-  assert.equal(conversationHandoffHref("chat", "a/b", "/chat"), "/chat/workspace?conversation=a%2Fb");
+  assert.equal(conversationHandoffHref("chat", "a/b", "/review"), "/chat?conversation=a%2Fb");
   assert.equal(surfaceHasContinuationBridge("chat"), false);
 });
 test("an offered gate is not ownership and legacy product is not Chat authority", () => {

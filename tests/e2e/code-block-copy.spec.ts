@@ -96,7 +96,7 @@ async function openAnswerWithCodeBlocks(page: Page) {
     });
   });
 
-  await page.goto("/chat");
+  await page.goto("/review");
   // A fresh chat starts blank -- open the mocked conversation from the welcome
   // screen the way a user would, which is what loads its messages.
   await openRecentConversation(page);

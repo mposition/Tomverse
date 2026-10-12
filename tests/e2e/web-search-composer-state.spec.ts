@@ -112,13 +112,13 @@ const openProConversation = async (page: Page, models: string[]) => {
     ],
   });
   await mockUserUsage(page, { plan: "Pro" });
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openRecentConversation(page);
   await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 };
 
 const open = async (page: Page) => {
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openRecentConversation(page, { title: TITLE });
   await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 };

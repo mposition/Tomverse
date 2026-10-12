@@ -100,6 +100,10 @@ import {
   ModelPickerPanel,
   type ModelPickerAnalyticsEvent,
 } from "@/components/chat/ModelPickerPanel";
+import { AutoRoutingComposerToggle } from "@/components/chat/AutoRoutingToggle";
+import { ChatProductSwitcher } from "@/components/chat/ChatProductSwitcher";
+import { autoRoutingCopy } from "@/lib/autoRoutingCopy";
+import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import {
@@ -559,6 +563,14 @@ const loadExternalScript = (src: string) =>
   });
 
 type ChatInputProps = {
+  /** The product this composer belongs to; switches navigate without rewriting it. */
+  currentProduct?: ChatWorkspaceProduct;
+  /** Mobile product navigation lives in the drawer to preserve the input dock. */
+  showProductSwitcher?: boolean;
+  /** Locks product navigation while the page owns an unknown or pre-send action. */
+  productSwitchDisabled?: boolean;
+  /** Stages an idle draft snapshot; false cancels navigation. */
+  onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
   singleModelSelection?: boolean;
   value: string;
   onChange: (value: string) => void;
@@ -653,7 +665,8 @@ type ChatInputProps = {
   autoSelectionOffered?: boolean;
   selectionMode?: "manual" | "auto";
   selectionModePending?: boolean;
-  onSelectionModeChange?: (next: boolean) => void;
+  /** Resolves true only after the server confirms the stored mode. */
+  onSelectionModeChange?: (next: boolean) => Promise<boolean>;
   /**
    * Pre-send Prompt Refiner suggestion UI. `offered` is one server-owned
    * decision; false leaves no disabled teaser. The caller owns the request and
@@ -852,6 +865,10 @@ const isGooglePickerConfig = (value: unknown): value is GooglePickerConfig => {
 };
 
 export function ChatInput({
+  currentProduct,
+  showProductSwitcher = true,
+  productSwitchDisabled = false,
+  onProductSwitch,
   singleModelSelection = false,
   value,
   onChange,
@@ -999,9 +1016,14 @@ export function ChatInput({
   const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
+    const autoCopy = autoRoutingCopy[lang];
+    const isAutoMode = selectionMode === "auto";
     const modelsSelectedLabel = (count: number) =>
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
-    const signInCallbackUrl = withChatLanguage("/chat", lang);
+    const signInCallbackUrl = withChatLanguage(
+      currentProduct === "review" ? "/review" : "/chat",
+      lang
+    );
     const accountUsage = useUserUsage(!isGuestMode);
     // Local files and Google Drive are two separate permissions: a guest gets
     // the first (one ephemeral file, validated and parsed server-side) and not
@@ -3149,6 +3171,16 @@ export function ChatInput({
                 : "border-zinc-200 dark:border-zinc-800"
             }`}
           >
+          {currentProduct && showProductSwitcher && (
+            <div className="mb-2 md:mb-3">
+              <ChatProductSwitcher
+                currentProduct={currentProduct}
+                chatRequiresSignIn={isGuestMode}
+                disabled={productSwitchDisabled || isSending || draftLocked}
+                onProductSwitch={onProductSwitch}
+              />
+            </div>
+          )}
           {isDragActive && (
             <div
               data-testid="chat-composer-drop-overlay"
@@ -3753,6 +3785,17 @@ export function ChatInput({
           line of its own.
         */}
         <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5">
+          {autoSelectionOffered && onSelectionModeChange && (
+            <AutoRoutingComposerToggle
+              offered={autoSelectionOffered}
+              enabled={isAutoMode}
+              pending={selectionModePending}
+              language={lang}
+              onChange={(next) => {
+                void onSelectionModeChange(next);
+              }}
+            />
+          )}
           <button
             ref={modelMenuButtonRef}
             type="button"
@@ -3772,8 +3815,12 @@ export function ChatInput({
             // selector when a swap or a recovered provider unmounts the
             // control the user was standing on (ProviderStatusBanner).
             data-testid="composer-model-select"
-            title={activeModelNames.join(", ")}
-            aria-label={t("chat.modelSelect")}
+            title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
+            aria-label={
+              isAutoMode
+                ? `${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
+                : t("chat.modelSelect")
+            }
             aria-expanded={isMenuOpen && menuView === "models"}
             aria-controls="chat-input-popover"
             aria-haspopup="dialog"
@@ -3781,7 +3828,14 @@ export function ChatInput({
             {/* Counts what will actually be sent and billed -- the same basis
                 as the credit estimate beside it and as the mobile header's
                 "+N", so a paused panel cannot make the two disagree. */}
-            {activeSelectedModels.length === 1 ? (
+            {isAutoMode ? (
+              <span
+                aria-hidden="true"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-status-switch-on-500 text-white"
+              >
+                <Sparkles className="h-3 w-3" />
+              </span>
+            ) : activeSelectedModels.length === 1 ? (
               <ModelLogo
                 model={AVAILABLE_MODELS.find((item) => item.id === activeSelectedModels[0])}
                 size="xs"
@@ -3809,12 +3863,14 @@ export function ChatInput({
               data-testid="composer-active-model-count"
               className="min-w-0 line-clamp-2 break-keep"
             >
-              {modelsSelectedLabel(activeSelectedModels.length)}
+              {isAutoMode
+                ? autoCopy.label
+                : modelsSelectedLabel(activeSelectedModels.length)}
             </span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
           </button>
 
-          {activeSelectedModels.length > 0 && (
+          {!isAutoMode && activeSelectedModels.length > 0 && (
             <button
               type="button"
               data-testid="request-credit-estimate"
@@ -3844,6 +3900,14 @@ export function ChatInput({
                 <span className="text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
               )}
             </button>
+          )}
+          {isAutoMode && (
+            <span
+              data-testid="auto-variable-credit-notice"
+              className="max-w-[132px] text-pretty text-[11px] font-medium leading-4 text-zinc-500 dark:text-zinc-400"
+            >
+              {autoCopy.variableCreditNotice}
+            </span>
           )}
           {/*
             The microphone is the control immediately left of Send.
@@ -3909,8 +3973,16 @@ export function ChatInput({
                 (!value.trim() && attachments.length === 0)
               }
               className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
-              title={`${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`}
-              aria-label={`${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`}
+              title={
+                isAutoMode
+                  ? `${t("chat.send")} · ${autoCopy.variableCreditNotice}`
+                  : `${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`
+              }
+              aria-label={
+                isAutoMode
+                  ? `${t("chat.send")} · ${autoCopy.variableCreditNotice}`
+                  : `${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`
+              }
               aria-describedby={
                 sendDisabledReason ? "chat-send-disabled-reason" : undefined
               }

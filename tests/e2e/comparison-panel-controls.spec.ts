@@ -64,7 +64,7 @@ const openWithPanels = async (page: Page, modelCount: number) => {
   );
 
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openRecentConversation(page, { title: "Panel controls" });
   await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);

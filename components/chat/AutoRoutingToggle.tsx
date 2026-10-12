@@ -29,19 +29,9 @@ import {
  * hiding what that would be makes the switch feel like a door with no handle
  * on the other side.
  *
- * ## Why this is plain blue and not an accent role
- *
- * It used to carry the three-stop gradient AGENTS.md reserves for AI Review.
- * Nothing caught it because this file had never been mounted and was therefore
- * not in `check:accent-tokens`'s guarded list -- it is now, so the reservation
- * is enforced here from this point on.
- *
- * The replacement is the neutral primary (`blue`), which is deliberately not a
- * role hue and needs no token. Auto is a *mode*, not a feature with its own
- * identity in the palette, and inventing an `accent-auto-*` role would be a
- * design decision this change is not entitled to make. If Auto is later given
- * one, AGENTS.md sets the order: define the namespace in `app/globals.css`,
- * register it in `KNOWN_ROLES`, and only then use it.
+ * The on state uses the approved `status-switch-on-*` role. The state is also
+ * carried by `aria-checked` and the knob position, so colour is never the only
+ * signal.
  */
 export function AutoRoutingToggle({
   offered,
@@ -70,7 +60,7 @@ export function AutoRoutingToggle({
         aria-hidden="true"
         className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
           enabled
-            ? "border-transparent bg-blue-600 text-white"
+            ? "border-transparent bg-status-switch-on-500 text-white"
             : "border-zinc-300 text-zinc-400 dark:border-zinc-600 dark:text-zinc-500"
         }`}
       >
@@ -97,7 +87,7 @@ export function AutoRoutingToggle({
         // the colour alone -- the same rule the selection badge follows.
         className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full border transition-colors disabled:opacity-50 ${
           enabled
-            ? "border-transparent bg-blue-600"
+            ? "border-transparent bg-status-switch-on-500"
             : "border-zinc-300 bg-zinc-200 dark:border-zinc-600 dark:bg-zinc-700"
         }`}
       >
@@ -115,5 +105,64 @@ export function AutoRoutingToggle({
         {enabled ? copy.turnedOn : copy.turnedOff}
       </span>
     </div>
+  );
+}
+
+/**
+ * The same server-owned Auto mode, exposed at the point where a message is
+ * sent. This is deliberately its own button rather than a button nested in the
+ * model-picker trigger: each control keeps one action and one accessible name.
+ */
+export function AutoRoutingComposerToggle({
+  offered,
+  enabled,
+  pending,
+  language,
+  onChange,
+}: {
+  offered: boolean;
+  enabled: boolean;
+  pending?: boolean;
+  language: AutoRoutingLanguage;
+  onChange: (next: boolean) => void;
+}) {
+  if (!offered) return null;
+  const copy = autoRoutingCopy[language] ?? autoRoutingCopy.en;
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      data-testid="composer-auto-routing-toggle"
+      aria-checked={enabled}
+      aria-label={copy.label}
+      disabled={pending}
+      onClick={() => onChange(!enabled)}
+      className={`flex h-11 shrink-0 touch-manipulation items-center gap-1.5 rounded-full border px-2 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-50 ${
+        enabled
+          ? "border-status-switch-on-500 bg-status-switch-on-500 text-white"
+          : "border-zinc-300 bg-zinc-50 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+      }`}
+    >
+      <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>{copy.label}</span>
+      <span
+        aria-hidden="true"
+        className={`relative h-5 w-9 shrink-0 rounded-full border transition-colors ${
+          enabled
+            ? "border-white/50 bg-white/25"
+            : "border-zinc-300 bg-zinc-200 dark:border-zinc-600 dark:bg-zinc-700"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+            enabled ? "translate-x-[17px]" : "translate-x-1"
+          }`}
+        />
+      </span>
+      <span className="sr-only" role="status" aria-live="polite">
+        {enabled ? copy.turnedOn : copy.turnedOff}
+      </span>
+    </button>
   );
 }

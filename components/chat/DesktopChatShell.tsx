@@ -3,7 +3,7 @@
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, X } from "lucide-react";
+import { Check, Sparkles, X } from "lucide-react";
 import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { ChatApp } from "@/components/chat/ChatApp";
@@ -74,6 +74,8 @@ import type {
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
 import type { PromptRefinerProductChatDecision } from
   "@/lib/promptRefinerProductApiContract";
+import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
+import { autoRoutingCopy } from "@/lib/autoRoutingCopy";
 
 const interpolate = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce(
@@ -100,6 +102,10 @@ type PromptPayload = {
 };
 
 type DesktopChatShellProps = {
+  /** Current product chrome; switching routes never rewrites this conversation. */
+  currentProduct?: ChatWorkspaceProduct;
+  productSwitchDisabled?: boolean;
+  onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
   transcriptScope?: "model" | "conversation";
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   conversations: Conversation[];
@@ -262,7 +268,7 @@ type DesktopChatShellProps = {
   autoSelectionOffered?: boolean;
   selectionMode?: "manual" | "auto";
   selectionModePending?: boolean;
-  onSelectionModeChange?: (next: boolean) => void;
+  onSelectionModeChange?: (next: boolean) => Promise<boolean>;
   /** §14. Passed straight through to the composer's tools menu. */
   assistantProfile?: ChatAssistantProfile | null;
   /** ISO time this conversation's assistant was deleted, if it was. */
@@ -395,6 +401,9 @@ type DesktopChatShellProps = {
 };
 
 export function DesktopChatShell({
+  currentProduct,
+  productSwitchDisabled = false,
+  onProductSwitch,
   transcriptScope = "model",
   onRestorePrompt,
   conversations,
@@ -518,6 +527,8 @@ export function DesktopChatShell({
     enabledModels: ENABLED_MODELS,
   } = useModelCatalog();
   const { t, lang } = useLanguage();
+  const autoCopy = autoRoutingCopy[lang];
+  const isAutoMode = singleTranscript && selectionMode === "auto";
   // Identity of the conversation currently on screen, used to scope
   // per-conversation UI state (the active tab below).
   const conversationStateKey = currentChatId || "new";
@@ -1111,9 +1122,30 @@ export function DesktopChatShell({
               >
                 <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
                   <div className={`flex min-w-0 flex-1 items-center gap-2 transition-opacity ${isPanelDisabled ? "opacity-50" : ""}`}>
-                    <ModelLogo model={modelInfo} size="md" />
-
-                    {isPanelDisabled ? (
+                    {isAutoMode ? (
+                      <>
+                        <span
+                          aria-hidden="true"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-status-switch-on-500 text-white"
+                        >
+                          <Sparkles className="h-4 w-4" />
+                        </span>
+                        <span
+                          data-testid="desktop-auto-panel-summary"
+                          className="flex min-w-0 flex-col"
+                        >
+                          <span className="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                            {autoCopy.label}
+                          </span>
+                          <span className="line-clamp-2 text-[11px] font-medium leading-4 text-zinc-500 dark:text-zinc-400">
+                            {autoCopy.description}
+                          </span>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <ModelLogo model={modelInfo} size="md" />
+                        {isPanelDisabled ? (
                       <span className="flex min-w-0 select-none flex-col truncate">
                         <span className="truncate text-sm font-semibold text-zinc-600 dark:text-zinc-300">{modelInfo?.name}</span>
                         <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
@@ -1127,7 +1159,7 @@ export function DesktopChatShell({
                           )}
                         </span>
                       </span>
-                    ) : (
+                        ) : (
                       <span className="flex min-w-0 flex-col">
                         {/*
                           RECON-A11Y-001: the selected model name is this
@@ -1181,6 +1213,8 @@ export function DesktopChatShell({
                           )}
                         </span>
                       </span>
+                        )}
+                      </>
                     )}
                   </div>
 
@@ -1389,6 +1423,9 @@ export function DesktopChatShell({
         {composerPortalHost &&
           createPortal(
             <ChatInput
+              currentProduct={currentProduct}
+              productSwitchDisabled={productSwitchDisabled}
+              onProductSwitch={onProductSwitch}
               singleModelSelection={singleTranscript}
               value={inputValue}
               onChange={setInputValue}

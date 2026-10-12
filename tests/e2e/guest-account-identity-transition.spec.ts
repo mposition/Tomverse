@@ -55,7 +55,7 @@ const createGuestConversation = async (
   testInfo: Parameters<typeof sendChatMessage>[1],
   text = "Guest question before signing in"
 ) => {
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, text);
   await expect(
     page.locator('[data-message-role="user"]').filter({ hasText: text }).first()
@@ -95,7 +95,7 @@ test("signing in with a guest conversation open never calls an account API with 
 
   const log = trackConversationRequests(page);
   await mockAuthenticatedApi(page);
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await expect(page.getByTestId("guest-import-current")).toBeVisible();
   // Three comparison panels each load their own history; under the reported
@@ -128,7 +128,7 @@ test("accepting the import selects the conversation id the server returned", { t
       }),
     })
   );
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await page.getByTestId("guest-import-current").click();
 
@@ -148,7 +148,7 @@ test("skipping the import lands on a usable account screen, with no guest id in 
 
   const log = trackConversationRequests(page);
   await mockAuthenticatedApi(page);
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await page.getByTestId("guest-import-skip").click();
 
@@ -173,7 +173,7 @@ test("dismissing the import modal never leaks the guest id either", { tag: "@ui-
 
   const log = trackConversationRequests(page);
   await mockAuthenticatedApi(page);
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await page.getByTestId("guest-import-close").click();
 
@@ -206,7 +206,7 @@ test("a conversation this account cannot open is released once, without retrying
     });
   });
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await page.evaluate(
     ([key]) => window.sessionStorage.setItem(key, "qa-conversation"),
     [ACTIVE_CHAT_KEY] as const

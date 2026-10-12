@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }, testInfo) => {
     "Model-only input visibility by model count is a desktop-only rule."
   );
   await prepareGuestPage(page, "en");
-  await page.goto("/chat");
+  await page.goto("/review");
 });
 
 test("model-only follow-up input is hidden with one model and appears once a second is added", async ({

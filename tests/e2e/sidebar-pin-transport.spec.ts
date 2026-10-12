@@ -101,7 +101,7 @@ test.describe("pin writes through the real transport", () => {
     await mockAuthenticatedApi(page);
     await serveSequencedList(page);
     await page.setViewportSize({ width: 1366, height: 768 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 
