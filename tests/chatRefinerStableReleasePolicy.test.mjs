@@ -23,9 +23,9 @@ test("release policy binds body but not mutable status frontmatter", () => {
   assert.ok(constant);
   assert.equal(digest(policyBody(document)), constant[1]);
   assert.ok(document.includes(
-    "status: implementation_review_pending"));
+    "status: approved"));
   assert.equal(digest(policyBody(document.replace(
-    "status: implementation_review_pending",
+    "status: approved",
     "status: implementation_merged_activation_pending"))), constant[1]);
   assert.notEqual(digest(`${policyBody(document)}\nDifferent policy body.\n`),
     constant[1]);
