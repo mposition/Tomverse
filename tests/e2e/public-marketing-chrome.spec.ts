@@ -82,7 +82,7 @@ test("status chrome preserves saved language and language changes reload the bod
   } finally { await englishPage.close(); }
 });
 
-for (const width of [390, 1024, 1440]) {
+for (const width of [160, 320, 390, 1024, 1440]) {
   for (const language of SEO_LOCALES) {
     test(`${language}: pricing and models share readable chrome at ${width}px`, async ({ page }) => {
       await prepareGuestPage(page, "en");
