@@ -305,7 +305,15 @@ test("an unreadable unit names systemctl's error, and sends nothing", { skip: no
 });
 
 test("the install fails unless its own run sent a signal", () => {
-  assert.match(install, /_SYSTEMD_INVOCATION_ID=\$invocation/);
+  // Found after a journal cursor taken with the timer off and no run in
+  // progress. Never by InvocationID (a oneshot clears it when the run ends)
+  // and never by a time bound (an earlier run can end in the same second).
+  assert.match(
+    install,
+    /journalctl -u tomverse-bridge-watchdog\.service --after-cursor="\$cursor"/
+  );
+  assert.doesNotMatch(install, /--since/);
+  assert.doesNotMatch(install, /-p InvocationID|_SYSTEMD_INVOCATION_ID=/);
   assert.match(install, /grep -qE '; sent \(up\|down\)\$'/);
   // The timer is enabled only after the check, and switched off on failure.
   const check = install.indexOf("grep -qE");
@@ -324,6 +332,7 @@ const runInstall = ({
   start = 0,
   verify = 0,
   runLog,
+  priorLog = "",
   shell = "/usr/sbin/nologin",
   groups = "tomverse-bridge-watchdog",
 }) => {
@@ -340,6 +349,7 @@ const runInstall = ({
     }
     writeFileSync(join(dir, "install.sh"), install.replace(/\r\n/g, "\n"));
     writeFileSync(join(dir, "run.log"), `${runLog}\n`);
+    writeFileSync(join(dir, "prior.log"), priorLog ? `${priorLog}\n` : "");
     const prelude = [
       'id() { if [ "$1" = -u ]; then echo 0; else echo "$FAKE_GROUPS"; fi; }',
       'getent() { printf "tomverse-bridge-watchdog:x:990:990::/nonexistent:%s\n" "$FAKE_SHELL"; }',
@@ -349,7 +359,16 @@ const runInstall = ({
       "find() { :; }",
       'install() { printf "install %s\n" "${@: -1}" >> actions.log; }',
       'systemd-analyze() { printf "verify\n" >> actions.log; return "$FAKE_VERIFY"; }',
-      'journalctl() { case "$1" in --sync) return 0 ;; *) cat run.log ;; esac; }',
+      // The journal as a cursor sees it: prior.log is everything already
+      // written when the cursor is taken, run.log what this run adds after.
+      "journalctl() {",
+      '  case "$*" in',
+      "    --sync) return 0 ;;",
+      '    *--show-cursor*) cat prior.log; echo "-- cursor: c-before-run" ;;',
+      '    *--after-cursor=c-before-run*) cat run.log ;;',
+      "    *) cat prior.log run.log ;;",
+      "  esac",
+      "}",
       "systemctl() {",
       '  printf "systemctl %s\n" "$*" >> actions.log',
       '  case "$1" in start) return "$FAKE_START" ;; show) echo invocation-1 ;; esac',
@@ -387,8 +406,12 @@ test("an install whose run sent a signal turns the timer on", { skip: noBash }, 
   const result = runInstall({ runLog: "tomverse-bridge-watchdog: 9 unit(s), 0 down, 0 in transition or unreadable; sent up" });
   assert.equal(result.status, 0, result.output);
   assert.match(result.output, /TOMVERSE_BRIDGE_WATCHDOG_INSTALLED/);
-  assert.ok(result.actions.includes(TIMER_ON), result.actions.join("\n"));
-  assert.ok(!result.actions.includes(TIMER_OFF), result.actions.join("\n"));
+  // The timer is off for the verification run, so no other run can land in
+  // the journal window it reads, and on again only once the run is proven.
+  const start = result.actions.indexOf("systemctl start tomverse-bridge-watchdog.service");
+  assert.ok(start > 0, result.actions.join("\n"));
+  assert.ok(result.actions.slice(0, start).includes(TIMER_OFF), result.actions.join("\n"));
+  assert.equal(result.actions.at(-1), TIMER_ON, result.actions.join("\n"));
 });
 
 for (const [name, options] of [
@@ -415,3 +438,25 @@ for (const [name, options] of [
     assert.ok(!result.actions.includes(TIMER_ON), result.actions.join("\n"));
   });
 }
+
+// Review of the time-bound version: an earlier run's "sent up" in the same
+// second would have passed an install whose own run sent nothing.
+test("an earlier run's signal never counts for this install's run", { skip: noBash }, () => {
+  const result = runInstall({
+    priorLog: "tomverse-bridge-watchdog: 9 unit(s), 0 down, 0 in transition or unreadable; sent up",
+    runLog: "tomverse-bridge-watchdog: tomverse-bridge.service is unreadable (systemctl: x); no signal this run",
+  });
+  assert.notEqual(result.status, 0, result.output);
+  assert.equal(result.actions.at(-1), TIMER_OFF, result.actions.join("\n"));
+  assert.ok(!result.actions.includes(TIMER_ON), result.actions.join("\n"));
+});
+
+test("no run is in progress when the cursor is taken", { skip: noBash }, () => {
+  const result = runInstall({
+    runLog: "tomverse-bridge-watchdog: 9 unit(s), 0 down, 0 in transition or unreadable; sent up",
+  });
+  const stop = result.actions.indexOf("systemctl stop tomverse-bridge-watchdog.service");
+  const start = result.actions.indexOf("systemctl start tomverse-bridge-watchdog.service");
+  assert.ok(stop >= 0 && stop < start, result.actions.join("\n"));
+  assert.ok(result.actions.indexOf(TIMER_OFF) < stop, result.actions.join("\n"));
+});
