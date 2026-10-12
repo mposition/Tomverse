@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 
 import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AmuxExecutionSupportingRecords } from "@/components/admin/AmuxExecutionSupportingRecords";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
@@ -95,8 +96,10 @@ export default async function AdminAmuxExecutionPage({
         {tabs}
         <AmuxExecutionWorkspace canMoveCards={isOwner} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
-        <AmuxCardListPanel rows={rows} total={total} limit={limit} />
-        <AmuxCliUsagePanel view={usage} />
+        <AmuxExecutionSupportingRecords>
+          <AmuxCardListPanel rows={rows} total={total} limit={limit} />
+          <AmuxCliUsagePanel view={usage} />
+        </AmuxExecutionSupportingRecords>
       </div>
     );
   }
