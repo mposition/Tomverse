@@ -177,7 +177,7 @@ for (const unit of V22) {
     assert.equal(result.status, 0, result.output);
     assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
     // Which unit stopped stays in the host's journal.
-    assert.match(result.output, new RegExp(`${unit.replace(/[.@]/g, "\\$&")} is failed`));
+    assert.ok(result.output.includes(`${unit} is failed`), result.output);
   });
 }
 
