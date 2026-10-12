@@ -7,7 +7,8 @@
 상태(v25 이력): **v25 engineering adapter 코드 래치 승인.** 2026-10-07 운영자 `mposition`이 아래 v25 절을 승인했다. `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`는 true가 된다. engineering 운영 mode는 `off`로 남으므로 이 승인 자체로 어떤 adapter 호출도 AMUX에 닿지 않는다. 이전 v24 상태 줄은 이력이다.
 상태(v27 이력): **v27 전용 Ubuntu runner worker 목록·Decision Maker 실행 주체 승인, 운영 활성화 별도.** 2026-10-09 운영자 `mposition`이 아래 v27 절을 승인했다. 이전 v25 상태 줄은 이력이다. 아래 v27 절은 전용 Ubuntu runner의 worker 목록을 바꾸고(Devin 제거, Cursor·GitHub Copilot worker 여섯 추가) Decision Maker 실행 주체 둘을 더하는 후보다. 운영자가 승인을 기록하기 전에는 효력이 없고 `상태(최신)`은 v25로 남는다. 이 후보는 코드, 래치, 환경 변수를 바꾸지 않는다.
 상태(v28 이력): **v28 AMUX Orchestrator의 Railway 선언을 `Tomverse Agents` project의 IaC로 승인, 이전은 운영자 단계.** 2026-10-09 운영자 `mposition`이 아래 v28 절을 승인했다. 그 절의 이전 절차를 마치기 전에는 버전 20 9·10항대로 `Tomverse` project의 대시보드가 이 서비스의 설정을 정한다. 이전 v27 상태 줄은 이력이다.
-상태(최신): **v29 v22 자동 편입·worker claim·Task 실행 활성화 범위 승인.** 운영자 `mposition`의 2026-10-10 요청을 아래 v29 절에 기록한다. 코드 래치 변경은 실제 운영 활성화나 완료 증거가 아니다.
+상태(v29 이력): **v29 v22 자동 편입·worker claim·Task 실행 활성화 범위 승인.** 운영자 `mposition`의 2026-10-10 요청을 아래 v29 절에 기록한다. 코드 래치 변경은 실제 운영 활성화나 완료 증거가 아니다.
+상태(최신): **v32 worker 등록부 R1 코드 래치 승인.** 2026-10-12 운영자 `mposition`이 아래 v32 절을 승인했다. `AMUX_WORKER_REGISTRY_WRITES_LATCH`는 true가 되어 owner가 Admin에서 등록부에 쓸 수 있다. 배정은 R2 전까지 카탈로그 환경 변수를 따른다. v30·v31의 승인 기록은 각 절에 있다. 이전 v29 상태 줄은 이력이다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -34,6 +35,8 @@ approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 24
 approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 25
 approvedBy: mposition · approvedAt: 2026-10-09 · 정책 버전: 28
 approvedBy: mposition · approvedAt: 2026-10-10 · 정책 버전: 29
+approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 31
+approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 32
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -66,6 +69,8 @@ approvedBy: mposition · approvedAt: 2026-10-10 · 정책 버전: 29
 | 25 | 2026-10-07 mposition | engineering adapter의 코드 래치 `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`를 켠다. adapter의 모든 AMUX writer 호출은 이 래치, 버전 18의 실행 API 게이트, `off`가 아닌 engineering 운영 mode가 모두 참일 때만 열린다(Authority 절). 버전 12의 허용 동작 목록, 환경 변수, worker catalog, 용량 행, 자동 승격, Railway 서비스, 게시 App, engineering mode는 바꾸지 않는다. |
 | 27 | 2026-10-09 mposition | 전용 Ubuntu runner의 worker 목록 변경. 2026-10-09 운영자 지시로 제거한 `devin-worker`를 기록하고 `cursor-chore`·`cursor-impl`·`cursor-worker`·`copilot-chore`·`copilot-impl`·`copilot-worker`를 더해 13개로 한다. 새 로그인 둘의 권한 목록, 실행마다의 실제 모델·공급사 기록, v22의 사용량 사건이 확인되고 운영자가 따로 활성화하기 전에는 여섯이 제품 claim·dispatch 대상이 아니며, v16 교차 검토와 Decision Maker 라우팅에는 별도 버전 전까지 들지 않는다. Decision Maker 실행 주체 둘을 docs/policy/amux-decision-maker.md §5의 격리 조건 그대로 더한다. 이 버전 자체로 bridge·claim·실행 API·DM 스위치를 켜지 않는다. |
 | 28 | 2026-10-09 mposition | Railway 서비스 `AMUX Orchestrator`를 `Tomverse` project의 대시보드 관리에서 `Tomverse Agents` project의 IaC 선언(`.railway/agent-runners.ts`)으로 옮긴다. 버전 20 9항의 재시작 정책(`On Failure`, 최대 10회)과 10항의 `checkSuites: false`를 그 선언이 정한다. 변수 목록은 다섯 이름이며 명령 실행을 여는 이름은 없다. orchestrator 코드, 정지·재시작 동작, claim·실행 API·worker catalog 값은 바꾸지 않는다. |
+| 31 | 2026-10-12 mposition | worker 등록부와 공급사 종류. 공급사 종류를 한 번 승인하고 그 종류의 worker는 owner의 운영 행위로 더한다. 등록부(사람만 씀)와 시스템의 관측·시험·자동 정지 래치 표, 서버 조정기, 시험 기간(카드 3회, worker당 US$5), 연속 3회 실패 래치, R1~R6 전환 순서. 이 승인 자체로 어떤 코드 래치나 환경 변수도 켜지 않는다. |
+| 32 | 2026-10-12 mposition | 버전 31 R1의 코드 래치 `AMUX_WORKER_REGISTRY_WRITES_LATCH`를 켠다. owner의 등록부 쓰기만 열리고, R1의 관측 기간은 열셋 등록 뒤 3일(72시간)이다. 배정, 환경 변수, worker catalog, bridge, 관측·시험·래치 표는 바꾸지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1529,6 +1534,33 @@ v27의 여섯은 R5의 활성화 전까지 v27 절 5의 제약을 그대로 받�
    - 이 버전 5항의 시험 카드 3회, worker당 시험 비용 상한 US$5
    - 7항의 자동 정지 연속 실패 3회
 3. 각 단계(R1~R6)는 독립 검토와 그 단계의 운영자 활성화 기록 뒤에만 켠다.
+
+## 버전 32 — worker 등록부 R1 코드 래치
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-12`. 2026-10-12 작성, 작성자 Claude. 운영자는 2026-10-12에 R1의 관측 기간을 3일로 정하고, R1 코드 래치를 켜라고 지시했다. 이 승인과 같은 변경에서 래치 상수를 true로 바꾼다.
+
+이 버전은 버전 31 8항의 R1을 켠다. 버전 31 8항에서 R1은 코드 래치 `AMUX_WORKER_REGISTRY_WRITES_LATCH`(`lib/amux/workerRegistryCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다. 이 기록이 버전 31 8항이 말하는 그 단계의 운영자 활성화 기록이다.
+
+- **열리는 것.**
+  - 래치가 여는 것은 하나다. owner가 Admin(AMUX › 실행 › Worker)에서 최근 step-up을 거쳐 등록부에 쓰는 것이다.
+  - 등록부에 무엇이 들어갈 수 있는지는 버전 31대로 DB가 강제한다.
+    - 첫 사건은 `requested`다. 처음부터 `active`가 될 수 있는 것은 카탈로그의 일곱뿐이다.
+    - `retired` 뒤에는 어떤 사건도 붙지 않는다.
+    - 첫 사건 뒤에 `active`로 바꿀 수 없다. 그 전환은 R5의 시험 증거가 있어야 한다.
+    - 역할 확대는 `requested`일 때만 된다.
+    - 같은 트랜잭션에 사람 감사 `amux.worker.register` 또는 `amux.worker.change`가 있어야 한다.
+- **R1 등록.** owner는 버전 27 절 1의 열셋을 등록한다. 카탈로그의 일곱은 `active`로, Cursor·Copilot의 여섯은 `requested`로 등록한다.
+- **관측 기간.**
+  - 버전 31 8항 R1의 "정해진 기간"은 3일, 곧 72시간이다.
+  - production에서 열셋의 등록을 마친 시각부터 센다.
+  - 그 사이 Admin의 일치 보고(등록부와 `TOMVERSE_AMUX_WORKER_CATALOG_JSON`)가 일치가 아닌 것을 관측하면, 원인을 고친 뒤 처음부터 다시 센다.
+  - 기간을 채우면 운영자가 R1 종료를 기록하고, 그 뒤에 R2로 간다.
+- **바뀌지 않는 것.**
+  - 배정은 R2 전까지 그대로 `TOMVERSE_AMUX_WORKER_CATALOG_JSON`을 따른다. 등록부의 `active`는 아무것도 배정하지 않는다.
+  - 관측·시험·래치 표는 계속 모든 쓰기를 거부한다. 그 writer는 R4와 R5에서 만든다.
+  - v27의 여섯은 `requested`로 등록되어도 v27 절 5의 제약을 그대로 받는다.
+  - 환경 변수, worker catalog, bridge, 용량 행, 비용 상한, 동시 실행 상한은 바꾸지 않는다.
+- **되돌리기.** 래치를 false로 되돌리는 변경은 쓰기만 다시 닫는다. 이미 쓴 사건은 append-only라 남는다. 등록부를 비우는 경로는 없다.
 
 ## CLI 사용량 보존·집계 부속 계약 — 2026-10-02 승인
 
