@@ -61,12 +61,20 @@ sudo bash scripts/amux-decision-maker-s0/measure-isolation /root/amux-dm-s0.conf
   ptrace할 수 있는지 재는 대상이다.
 
 되돌릴 것이 없는 일도 한다.
-- 각 계정으로 설정된 host에 TCP 연결을 연다.
+- 각 계정과 root로 설정된 host에 TCP 연결을 연다.
 - 각 계정의 CLI에 `--version`만 묻는다.
+- 보호 경로(worker 홈, clone, `~/.amux`, bridge 환경 파일, 다른 DM 계정 홈)를 계정마다 세 가지로 잰다:
+  - 목록 조회
+  - 디렉터리 안으로 들어가기
+  - root가 찾은 안쪽 파일 최대 다섯 개의 첫 바이트 읽기
+
+  목록만 막히고 들어갈 수 있는 디렉터리(`0711` 등)는 이름을 아는 파일을 다 열어 주기 때문이다. 읽은 바이트는 버리고,
+  파일은 번호로만 보고하며 이름은 남기지 않는다.
 - root가 각 계정의 sudo 권한을 `sudo -l -U`로 조회한다. 계정 자신은 sudo를 실행하지 않으므로 auth log에 시도로
   남지 않는다.
-- root가 DM 계정과 broker 홈의 자격증명 파일이 **있는지만** 본다. 내용은 읽지 않는다. git credential helper가
-  설정됐는지만 본다.
+- root가 DM 계정과 broker 홈의 자격증명 파일이 **있는지만** 본다. 내용은 읽지 않는다.
+- git credential helper는 그 계정으로 `git config --includes --get-regexp`를 실행해 Git이 실제로 읽는 설정에서
+  찾는다. 시스템 설정과 include된 파일도 포함한다. helper를 실행하지 않고 값을 출력하지 않는다.
 
 ### 결과 읽기
 
@@ -84,6 +92,16 @@ sudo bash scripts/amux-decision-maker-s0/measure-isolation /root/amux-dm-s0.conf
 
 **control 실패가 있으면 `isolated`가 나오지 않는다.** 예를 들어 DM 계정이 자기 공급사 host에 닿지 못하는 호스트에서는
 모든 연결이 막히므로 격리처럼 보이지만, 그 거부는 아무것도 증명하지 않는다.
+
+그래서 거부를 보는 대상마다 그 대상이 실재한다는 control을 먼저 둔다.
+
+| 대상 | control |
+|---|---|
+| 보호 경로, bridge 환경 파일, 요청 상위 디렉터리, 각 홈 | root가 보기에 존재한다 |
+| 설정된 모든 host | root에서 연결된다 |
+| DM 프로세스 읽기와 ptrace 검사 | root로는 된다 |
+
+설정의 오타, DNS 실패, 동작하지 않는 검사는 이 control에서 걸려 `incomplete`가 된다.
 
 `observations`는 판정하지 않고 기록만 한다.
 - worker가 DM 프로세스의 command line을 읽을 수 있는지. `/proc`의 `hidepid`만 이것을 숨긴다.

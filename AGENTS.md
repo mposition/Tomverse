@@ -1354,7 +1354,8 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `scripts/amux-decision-maker-s0/isolation.conf.example`, `docs/ops/amux/decision-maker-s0.md`,
   `tests/amuxDecisionMakerS0Isolation.test.mjs`. 운영자가 Ubuntu runner에서 root로 실행하며 유료 turn이 없습니다
   (CLI에는 `--version`만). **`isolated`는 모든 control이 성공하고 모든 격리 검사가 막혔을 때뿐입니다** — control이
-  하나라도 실패하면 거부가 아무것도 증명하지 않으므로 `incomplete`입니다. 설정은 해석만 하고 실행하지 않으며, 출력에
+  하나라도 실패하면 거부가 아무것도 증명하지 않으므로 `incomplete`입니다. 거부를 보는 대상마다 그 대상이 실재한다는 control(경로 존재, root에서의
+  endpoint 응답, root로의 process 읽기)이 먼저입니다. 보호 디렉터리는 목록·진입·안쪽 파일 읽기를 따로 잽니다. 설정은 해석만 하고 실행하지 않으며, 출력에
   파일 내용·환경·자격증명이 없습니다. sudo 권한은 root가 `sudo -l -U`로 묻고 계정이 직접 시도하지 않습니다.
 - **S1a(결정적 핵심)**: `lib/amux/decisionMakerCore.ts`, `tests/amuxDecisionMakerCore.test.mjs`.
   I/O가 없습니다. DB·route·DM 호출은 다음 단계입니다.

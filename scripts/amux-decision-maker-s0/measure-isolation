@@ -9,9 +9,10 @@
 #
 #   sudo bash measure-isolation <config>
 #
-# It runs as root only to act as each account in turn (runuser, setpriv). Every
-# attempt is made by the account under test, with an empty environment, under
-# a five-second timeout. It sends no paid turn: a vendor CLI is only asked for
+# It runs as root to act as each account in turn (runuser, setpriv), and to
+# make the controls that say a refusal means something: the target exists, the
+# endpoint answers, the process can be read. Every other attempt is made by the
+# account under test, with an empty environment, under a five-second timeout. It sends no paid turn: a vendor CLI is only asked for
 # `--version`. What it changes on the host, and undoes on every exit path: one
 # probe request directory per vendor under REQUEST_ROOT (made and removed by
 # the broker, then by root if the broker could not), and one `sleep` process
@@ -19,9 +20,10 @@
 #
 # It prints one JSON document on stdout -- every check with what it expected
 # and what it observed, and a verdict -- and nothing secret: no file content,
-# no environment, no credential. A credential file is reported by its name
-# relative to the account's home, as present or absent, and a git credential
-# helper only as configured or not.
+# no environment, no credential, no name of a file found under a protected
+# directory. A credential file is reported by its name relative to the
+# account's home, as present or absent, and a git credential helper only as
+# configured or not.
 #
 # The verdict is `isolated` only when every control succeeded and every
 # isolation check was refused. A control that fails (an account cannot read
@@ -116,6 +118,10 @@ declare -A USER_OF=(
   [decision-maker-anthropic]=${CFG[ANTHROPIC_USER]}
 )
 declare -A UID_OF=() GID_OF=() HOME_OF=() GROUP_OF=() SLEEPER_OF=()
+# root is not a subject. It makes the controls that say whether a probe can
+# work at all: the endpoint answers, the process can be read.
+USER_OF[root]=root
+HOME_OF[root]=/root
 REASONS=()
 CHECKS=()
 PROBE_DIRS=()
@@ -199,7 +205,9 @@ fi
 attempt() {
   local role=$1 kind=$2 target=$3 extra=${4:-} snippet
   case $kind in
-    read) snippet='if [ -d "$1" ]; then ls -A -- "$1"; else head -c 1 -- "$1"; fi' ;;
+    read) snippet='head -c 1 -- "$1"' ;;
+    list) snippet='ls -A -- "$1"' ;;
+    traverse) snippet='cd -- "$1"' ;;
     write) snippet='p="$1/.amux-dm-s0-write"; (set -C; : >"$p") && rm -f -- "$p"' ;;
     exec) snippet='"$1" --version' ;;
     connect) snippet='exec 3<>"/dev/tcp/${1%:*}/${1##*:}"' ;;
@@ -210,6 +218,9 @@ attempt() {
     cwd) snippet='ls -A -- "/proc/$1/cwd/"' ;;
     cmdline) snippet='head -c 1 -- "/proc/$1/cmdline"' ;;
     ptrace) snippet='python3 -c "$AMUX_DM_S0_PTRACE" "$1"' ;;
+    # Git's own reading of every config the account sees, includes followed;
+    # exit 0 means a helper is set, 1 none. The helper is never run.
+    githelper) snippet='cd / && git config --includes --get-regexp "^credential(\..+)?\.helper\$"' ;;
     *) return 2 ;;
   esac
   timeout --kill-after=1 "$PROBE_TIMEOUT_SECONDS" \
@@ -241,6 +252,33 @@ probe() {
   [ "$class" = control ] && expect=allowed || expect=denied
   attempt "$role" "$kind" "$target" "$extra" && observed=allowed
   record "$class" "$id" "$role" "$kind" "$label" "$expect" "$observed"
+}
+
+# A protected path is measured three ways, because refusing a listing does not
+# refuse a lookup: a directory the role can enter (search permission, as with
+# 0711) still opens every readable file under it to anyone who knows a name.
+# So it is listed, entered, and up to five files root finds under it are read;
+# the files are reported by number, never by name.
+protected() { # <id-prefix> <role> <path> <label>
+  local prefix=$1 role=$2 path=$3 label=$4 n=0 file
+  if [ -d "$path" ]; then
+    probe isolation "${prefix}_list" "$role" list "$path" "$label"
+    probe isolation "${prefix}_enter" "$role" traverse "$path" "$label"
+    while IFS= read -r -d '' file; do
+      n=$((n + 1))
+      probe isolation "${prefix}_read" "$role" read "$file" "$label/file-$n"
+    done < <(find "$path" -maxdepth 3 -type f -print0 2>/dev/null | head -z -n 5)
+  else
+    probe isolation "${prefix}_read" "$role" read "$path" "$label"
+  fi
+}
+
+# A refusal proves something only about a target that is there: a path that
+# does not exist refuses everyone.
+exists_control() { # <id> <path> <label>
+  local observed=denied
+  [ -e "$2" ] && observed=allowed
+  record control "$1" root exists "$3" allowed "$observed"
 }
 
 cleanup() {
@@ -307,6 +345,36 @@ for vendor in $VENDORS; do
   done
 done
 
+# What the isolation checks below point at has to be there, and the probes
+# have to be able to succeed at all: the paths exist, every endpoint answers
+# root, and root can read and ptrace a DM process. Without these a refusal
+# from a typo, a DNS failure or a broken probe would read as isolation.
+for path in ${CFG[WORKER_PATHS]}; do
+  exists_control worker_path_exists "$path" "$path"
+done
+exists_control bridge_env_exists "${CFG[BRIDGE_ENV_FILE]}" "${CFG[BRIDGE_ENV_FILE]}"
+exists_control request_root_exists "${CFG[REQUEST_ROOT]}" "${CFG[REQUEST_ROOT]}"
+for role in worker decision-maker-openai decision-maker-anthropic; do
+  exists_control "${role}_home_exists" "${HOME_OF[$role]}" "home:$role"
+done
+declare -A SEEN_ENDPOINT=()
+for endpoint in ${CFG[OPENAI_HOSTS]} ${CFG[ANTHROPIC_HOSTS]} ${CFG[GITHUB_HOSTS]} ${CFG[OUTSIDE_HOSTS]}; do
+  [ -z "${SEEN_ENDPOINT[$endpoint]+set}" ] || continue
+  SEEN_ENDPOINT[$endpoint]=1
+  probe control endpoint_answers root connect "$endpoint"
+done
+for kind in environ fd cwd ptrace; do
+  probe control "probe_${kind}_works" root "$kind" "${SLEEPER_OF[decision-maker-openai]}" "process:decision-maker-openai"
+done
+probe control worker_lists_own_home worker list "${HOME_OF[worker]}" "home:worker"
+for path in ${CFG[WORKER_PATHS]}; do
+  if [ -d "$path" ]; then
+    probe control worker_reads_worker_path worker list "$path"
+  else
+    probe control worker_reads_worker_path worker read "$path"
+  fi
+done
+
 # The broker makes each vendor's request directory, broker-owned and readable
 # by that vendor's group only (§5: 0750, files 0640).
 for vendor in $VENDORS; do
@@ -327,13 +395,13 @@ for vendor in $VENDORS; do
 
   probe isolation "${vendor}_cannot_write_request" "$role" write "${REQUEST_DIR[$vendor]}"
   probe isolation "${vendor}_cannot_read_${other}_request" "$role" read "${REQUEST_DIR[$other]}/card"
-  probe isolation "${vendor}_cannot_read_${other}_home" "$role" read "${HOME_OF[decision-maker-$other]}" "home:decision-maker-$other"
+  protected "${vendor}_cannot_${other}_home" "$role" "${HOME_OF[decision-maker-$other]}" "home:decision-maker-$other"
   probe isolation "${vendor}_cannot_run_${other}_cli" "$role" exec "${CLI_OF[$other]}"
-  probe isolation "${vendor}_cannot_read_worker_home" "$role" read "${HOME_OF[worker]}" "home:worker"
+  protected "${vendor}_cannot_worker_home" "$role" "${HOME_OF[worker]}" "home:worker"
   for path in ${CFG[WORKER_PATHS]}; do
-    probe isolation "${vendor}_cannot_read_worker_path" "$role" read "$path"
+    protected "${vendor}_cannot_worker_path" "$role" "$path" "$path"
   done
-  probe isolation "${vendor}_cannot_read_bridge_env" "$role" read "${CFG[BRIDGE_ENV_FILE]}"
+  protected "${vendor}_cannot_bridge_env" "$role" "${CFG[BRIDGE_ENV_FILE]}" "${CFG[BRIDGE_ENV_FILE]}"
   for endpoint in ${HOSTS_OF[$other]} ${CFG[GITHUB_HOSTS]} ${CFG[OUTSIDE_HOSTS]}; do
     probe isolation "${vendor}_cannot_reach_outside_own_vendor" "$role" connect "$endpoint"
   done
@@ -342,13 +410,13 @@ done
 for endpoint in ${CFG[GITHUB_HOSTS]}; do
   probe control broker_reaches_github broker connect "$endpoint"
 done
-probe isolation broker_cannot_read_worker_home broker read "${HOME_OF[worker]}" "home:worker"
+protected broker_cannot_worker_home broker "${HOME_OF[worker]}" "home:worker"
 for path in ${CFG[WORKER_PATHS]}; do
-  probe isolation broker_cannot_read_worker_path broker read "$path"
+  protected broker_cannot_worker_path broker "$path" "$path"
 done
-probe isolation broker_cannot_read_bridge_env broker read "${CFG[BRIDGE_ENV_FILE]}"
+protected broker_cannot_bridge_env broker "${CFG[BRIDGE_ENV_FILE]}" "${CFG[BRIDGE_ENV_FILE]}"
 for vendor in $VENDORS; do
-  probe isolation "broker_cannot_read_${vendor}_home" broker read "${HOME_OF[decision-maker-$vendor]}" "home:decision-maker-$vendor"
+  protected "broker_cannot_${vendor}_home" broker "${HOME_OF[decision-maker-$vendor]}" "home:decision-maker-$vendor"
   for endpoint in ${HOSTS_OF[$vendor]}; do
     probe isolation broker_cannot_reach_vendors broker connect "$endpoint"
   done
@@ -357,9 +425,8 @@ for endpoint in ${CFG[OUTSIDE_HOSTS]}; do
   probe isolation broker_cannot_reach_outside broker connect "$endpoint"
 done
 
-probe control worker_reads_own_home worker read "${HOME_OF[worker]}" "home:worker"
-probe isolation worker_cannot_list_requests worker read "${CFG[REQUEST_ROOT]}"
-probe isolation bridge_cannot_list_requests bridge read "${CFG[REQUEST_ROOT]}"
+probe isolation worker_cannot_list_requests worker list "${CFG[REQUEST_ROOT]}"
+probe isolation bridge_cannot_list_requests bridge list "${CFG[REQUEST_ROOT]}"
 for vendor in $VENDORS; do
   probe isolation "worker_cannot_read_${vendor}_request" worker read "${REQUEST_DIR[$vendor]}/card"
   probe isolation "bridge_cannot_read_${vendor}_request" bridge read "${REQUEST_DIR[$vendor]}/card"
@@ -382,7 +449,9 @@ done
 for role in worker broker decision-maker-openai decision-maker-anthropic; do
   rights=absent
   if command -v sudo >/dev/null 2>&1; then
-    answer=$(LC_ALL=C sudo -n -l -U "${USER_OF[$role]}" 2>/dev/null) || answer=""
+    # sudo exits non-zero for an account it allows nothing; the answer is
+    # read either way.
+    answer=$(LC_ALL=C sudo -n -l -U "${USER_OF[$role]}" 2>&1) || :
     case $answer in
       *"is not allowed to run sudo"*) rights=absent ;;
       *"may run the following commands"*) rights=present ;;
@@ -413,7 +482,10 @@ for role in broker decision-maker-openai decision-maker-anthropic; do
     credential_absent "$role" "$rel"
   done
   helper=absent
-  grep -qsE '^[[:space:]]*helper[[:space:]]*=' "$home/.gitconfig" "$home/.config/git/config" && helper=present
+  if command -v git >/dev/null 2>&1; then
+    attempt "$role" githelper -
+    case $? in 0) helper=present ;; 1) helper=absent ;; *) helper=unreadable ;; esac
+  fi
   record isolation "${role}_holds_no_credential" "$role" credential_file "git credential.helper" absent "$helper"
 done
 for rel in .claude .claude.json; do

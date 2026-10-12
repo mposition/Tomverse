@@ -57,8 +57,8 @@ const CONFIG = {
   OPENAI_USER: "amux-dm-openai",
   ANTHROPIC_USER: "amux-dm-anthropic",
   REQUEST_ROOT: REQUESTS,
-  WORKER_PATHS: "/home/tommy /home/tommy/Tomverse /home/tommy/.amux",
-  BRIDGE_ENV_FILE: "/etc/tomverse-bridge/bridge.env",
+  WORKER_PATHS: "@ROOT@/homes/tommy @ROOT@/homes/tommy/Tomverse @ROOT@/homes/tommy/.amux",
+  BRIDGE_ENV_FILE: "@ROOT@/etc/bridge.env",
   OPENAI_CLI: "/home/amux-dm-openai/.local/bin/codex",
   ANTHROPIC_CLI: "/home/amux-dm-anthropic/.local/bin/claude",
   OPENAI_HOSTS: "api.openai.com:443 chatgpt.com:443",
@@ -80,7 +80,14 @@ const CONTROLS = [
   "amux-dm-anthropic connect api.anthropic.com:443",
   "amux-dm-broker connect api.github.com:443",
   "amux-dm-broker connect raw.githubusercontent.com:443",
-  "tommy read @ROOT@/homes/tommy",
+  "tommy list @ROOT@/homes/tommy",
+  "tommy list @ROOT@/homes/tommy/Tomverse",
+  "tommy list @ROOT@/homes/tommy/.amux",
+  // root's controls: every endpoint answers, and a DM process can be read.
+  ...["api.openai.com:443", "chatgpt.com:443", "api.anthropic.com:443", "api.github.com:443", "raw.githubusercontent.com:443", "example.com:443"].map(
+    (endpoint) => `root connect ${endpoint}`,
+  ),
+  ...["environ", "fd", "cwd", "ptrace"].map((kind) => `root ${kind} pid-of-2001`),
   `amux-dm-broker rmreq ${requestDir("openai")}`,
   `amux-dm-broker rmreq ${requestDir("anthropic")}`,
 ];
@@ -143,6 +150,7 @@ sudo() {
     printf 'User %s may run the following commands on host:\n    (ALL : ALL) ALL\n' "$4"
   else
     printf 'User %s is not allowed to run sudo on host.\n' "$4"
+    return 1
   fi
 }
 export FAKE_ROOT
@@ -174,6 +182,7 @@ const measure = ({
   euid = 0,
   homes = {},
   sudoers = [],
+  bridgeEnv = true,
 } = {}) => {
   const dir = mkdtempSync(join(tmpdir(), "amux-dm-s0-"));
   try {
@@ -193,6 +202,13 @@ const measure = ({
         .join("\n") + "\n",
     );
     mkdirSync(join(dir, "requests"));
+    for (const user of Object.keys(users)) mkdirSync(join(dir, "homes", user), { recursive: true });
+    mkdirSync(join(dir, "homes", "tommy", "Tomverse"), { recursive: true });
+    mkdirSync(join(dir, "homes", "tommy", ".amux"), { recursive: true });
+    writeFileSync(join(dir, "homes", "tommy", "Tomverse", "README.md"), "clone\n");
+    writeFileSync(join(dir, "homes", "tommy", ".amux", "amux.db"), "state\n");
+    mkdirSync(join(dir, "etc"));
+    if (bridgeEnv) writeFileSync(join(dir, "etc", "bridge.env"), "TOMVERSE_AMUX_SYNC_SECRET=S0-BRIDGE-SECRET\n");
     writeFileSync(join(dir, "sudoers"), sudoers.map((user) => `${user}\n`).join(""));
     for (const [user, files] of Object.entries(homes)) {
       for (const [relative, content] of Object.entries(files)) {
@@ -233,6 +249,7 @@ const failing = (report) => report.checks.filter((check) => !check.pass).map((ch
 test("an isolated host: every control succeeds, every isolation check is refused", { skip: noBash }, () => {
   const run = measure();
   assert.equal(run.status, 0, run.stderr);
+  const ids = new Set(run.report.checks.map((check) => check.id));
   assert.equal(run.report.verdict, "isolated");
   assert.equal(run.report.schema, "amux-dm-s0-isolation/1");
   assert.equal(run.report.policyVersion, 1);
@@ -260,15 +277,24 @@ test("an isolated host: every control succeeds, every isolation check is refused
     assert.equal(check.expect, check.class === "control" ? "allowed" : check.expect === "absent" ? "absent" : "denied", check.id);
   }
   const controls = run.report.checks.filter((check) => check.class === "control");
-  assert.equal(controls.length, CONTROLS.length);
+  assert.ok(controls.every((check) => check.pass));
+  for (const id of ["worker_path_exists", "bridge_env_exists", "request_root_exists", "endpoint_answers", "probe_ptrace_works", "worker_lists_own_home"]) {
+    assert.ok(controls.some((check) => check.id === id), id);
+  }
+  // Every protected directory is listed, entered and read into, by number.
+  for (const prefix of ["openai_cannot_worker_home", "broker_cannot_worker_path", "anthropic_cannot_openai_home"]) {
+    for (const suffix of ["_list", "_enter"]) assert.ok(ids.has(prefix + suffix), prefix + suffix);
+  }
+  const reads = run.report.checks.filter((check) => check.id === "openai_cannot_worker_home_read");
+  assert.deepEqual(reads.map((check) => check.target), ["home:worker/file-1", "home:worker/file-2"]);
+  assert.doesNotMatch(run.stdout, /README|amux\.db|S0-BRIDGE-SECRET/);
   // The policy's two directions are both measured.
-  const ids = new Set(run.report.checks.map((check) => check.id));
   for (const id of [
-    "openai_cannot_read_worker_home",
+    "openai_cannot_worker_home_enter",
     "openai_cannot_run_anthropic_cli",
     "openai_cannot_reach_outside_own_vendor",
     "anthropic_cannot_read_openai_request",
-    "broker_cannot_read_bridge_env",
+    "broker_cannot_bridge_env_read",
     "broker_cannot_reach_vendors",
     "worker_cannot_read_openai_request",
     "worker_cannot_ptrace_decision-maker-openai",
@@ -279,10 +305,15 @@ test("an isolated host: every control succeeds, every isolation check is refused
   ]) {
     assert.ok(ids.has(id), id);
   }
-  // Every attempt was made by one of the five accounts, of a closed kind.
-  const kinds = new Set(["read", "write", "exec", "connect", "mkreq", "rmreq", "environ", "fd", "cwd", "cmdline", "ptrace"]);
+  // Every attempt was made by one of the five accounts, of a closed kind --
+  // or by root, and then only a control: an endpoint or a process read.
+  const kinds = new Set(["read", "list", "traverse", "write", "exec", "connect", "mkreq", "rmreq", "environ", "fd", "cwd", "cmdline", "ptrace", "githelper"]);
   for (const line of run.attempts) {
     const [user, kind] = line.split(" ");
+    if (user === "root") {
+      assert.ok(["connect", "environ", "fd", "cwd", "ptrace"].includes(kind), line);
+      continue;
+    }
     assert.ok(Object.hasOwn(USERS, user), line);
     assert.ok(kinds.has(kind), line);
   }
@@ -318,8 +349,8 @@ test("a credential in a DM account's home is a leak, named and never quoted", { 
     homes: {
       "amux-dm-openai": { ".netrc": "machine example.com login dm password S0-SECRET-VALUE\n" },
       "amux-dm-anthropic": { ".ssh/id_ed25519": "-----BEGIN OPENSSH PRIVATE KEY----- S0-SECRET-KEY\n", ".ssh/known_hosts": "github.com ssh-ed25519 AAAA\n" },
-      "amux-dm-broker": { ".gitconfig": "[credential]\n\thelper = store\n" },
     },
+    allow: [...CONTROLS, "amux-dm-broker githelper -"],
   });
   assert.equal(run.status, 1);
   const leaks = run.report.checks.filter((check) => !check.pass);
@@ -331,7 +362,7 @@ test("a credential in a DM account's home is a leak, named and never quoted", { 
       ["decision-maker-anthropic", "~/.ssh/*", "present"],
     ],
   );
-  assert.doesNotMatch(run.stdout, /S0-SECRET|BEGIN OPENSSH|helper = store/);
+  assert.doesNotMatch(run.stdout, /S0-SECRET|BEGIN OPENSSH/);
 });
 
 test("the other vendor's login in a DM account's home is a leak", { skip: noBash }, () => {
@@ -354,6 +385,56 @@ test("sudo rights for the worker, the broker or a DM account are a leak, asked b
   assert.ok(run.attempts.every((line) => !line.startsWith("unexpected sudo")), run.attempts.join("\n"));
 });
 
+test("a directory that refuses a listing but lets a DM account in is a leak", { skip: noBash }, () => {
+  // 0711: no listing, but a known name opens.
+  const run = measure({
+    allow: [
+      ...CONTROLS,
+      "amux-dm-openai traverse @ROOT@/homes/tommy",
+      "amux-dm-openai read @ROOT@/homes/tommy/Tomverse/README.md",
+    ],
+  });
+  assert.equal(run.status, 1);
+  const leaks = run.report.checks.filter((check) => !check.pass);
+  const leakIds = new Set(leaks.map((check) => check.id));
+  // The worker's home is entered, and a file under it is read, though nothing lists it.
+  for (const id of ["openai_cannot_worker_home_enter", "openai_cannot_worker_home_read"]) assert.ok(leakIds.has(id), id);
+  assert.ok(!leakIds.has("openai_cannot_worker_home_list"));
+  assert.ok(leaks.every((check) => check.subject === "decision-maker-openai" && ["traverse", "read"].includes(check.kind)));
+  assert.ok(leaks.filter((check) => check.kind === "read").every((check) => /\/file-\d$/.test(check.target)));
+});
+
+test("a refusal of a target that is not there proves nothing: the run is incomplete", { skip: noBash }, () => {
+  {
+    const run = measure({ bridgeEnv: false });
+    assert.equal(run.status, 2);
+    assert.deepEqual(run.report.summary.reasons, ["control_failed"]);
+    assert.deepEqual(failing(run.report), ["bridge_env_exists"]);
+  }
+  {
+    // An outside endpoint nobody can reach (a typo, a DNS failure) is not a refusal.
+    const run = measure({ allow: CONTROLS.filter((entry) => entry !== "root connect example.com:443") });
+    assert.equal(run.status, 2);
+    assert.deepEqual(failing(run.report), ["endpoint_answers"]);
+  }
+  {
+    // A ptrace probe that cannot attach even as root measures nothing.
+    const run = measure({ allow: CONTROLS.filter((entry) => entry !== "root ptrace pid-of-2001") });
+    assert.equal(run.status, 2);
+    assert.deepEqual(failing(run.report), ["probe_ptrace_works"]);
+  }
+});
+
+test("a git credential helper is read as git reads it, includes followed, and never run", { skip: noBash }, () => {
+  const run = measure({ allow: [...CONTROLS, "amux-dm-anthropic githelper -"] });
+  assert.equal(run.status, 1);
+  assert.deepEqual(
+    run.report.checks.filter((check) => !check.pass).map((check) => [check.subject, check.target]),
+    [["decision-maker-anthropic", "git credential.helper"]],
+  );
+  assert.match(script, /githelper\) snippet='cd \/ && git config --includes --get-regexp /);
+});
+
 test("a shared UID or a shared vendor group is not isolated", { skip: noBash }, () => {
   {
     const run = measure({ users: { ...USERS, "tomverse-bridge": USERS.tommy } });
@@ -370,7 +451,7 @@ test("a shared UID or a shared vendor group is not isolated", { skip: noBash }, 
 test("a failed control makes the run incomplete, never isolated, whatever was refused", { skip: noBash }, () => {
   // No route to the vendor: every connection refused looks like isolation
   // and proves nothing.
-  for (const missing of ["amux-dm-openai connect api.openai.com:443", "amux-dm-anthropic exec /home/amux-dm-anthropic/.local/bin/claude", "tommy read @ROOT@/homes/tommy"]) {
+  for (const missing of ["amux-dm-openai connect api.openai.com:443", "amux-dm-anthropic exec /home/amux-dm-anthropic/.local/bin/claude", "tommy list @ROOT@/homes/tommy"]) {
     const run = measure({ allow: CONTROLS.filter((entry) => entry !== missing) });
     assert.equal(run.status, 2, missing);
     assert.equal(run.report.verdict, "incomplete", missing);
