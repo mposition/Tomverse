@@ -87,7 +87,7 @@ test("chat workspace guide exposes the full help structure", async ({ page }) =>
     })
   ).toBeVisible();
   // The Chat introduction, the tour heading and eight Review help sections.
-  await expect(page.getByRole("heading", { level: 2 })).toHaveCount(10);
+  await expect(page.getByRole("main").getByRole("heading", { level: 2 })).toHaveCount(10);
   await expect(page.getByText("AI Review compares only the supplied answers.")).toBeVisible();
 });
 

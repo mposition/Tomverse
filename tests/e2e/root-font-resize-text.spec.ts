@@ -137,19 +137,27 @@ test.describe("WCAG 1.4.4 resize text: 200% root font size", () => {
     await applyRootFont200(page);
 
     const brand = page.getByTestId("marketing-brand-name");
-    const visibleText = await brand.evaluate((element) => {
-      // Only the branch that is actually rendered at this breakpoint.
-      const spans = Array.from(element.querySelectorAll("span"));
-      const shown = spans.find((span) => {
-        const style = getComputedStyle(span);
-        return style.display !== "none";
-      });
-      return (shown?.textContent ?? "").trim();
+    await expect(brand).toHaveText("Tomverse");
+    const textBounds = await brand.evaluate((element) => {
+      // Measure the rendered text, independently of the header's span structure.
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const text = range.getBoundingClientRect();
+      const box = element.getBoundingClientRect();
+      return {
+        width: text.width,
+        fits: text.left >= box.left - 1 && text.right <= box.right + 1,
+        right: text.right,
+        clientWidth: document.documentElement.clientWidth,
+      };
     });
-    expect(visibleText).toMatch(/^Tomverse( Insight)?$/);
+    expect(textBounds.width).toBeGreaterThan(1);
+    expect(textBounds.fits, "the full brand text must fit its visible container").toBe(true);
+    expect(textBounds.right).toBeLessThanOrEqual(textBounds.clientWidth + 1);
 
-    const homeLink = page.getByRole("link", { name: /Tomverse/ }).first();
+    const homeLink = page.getByTestId("marketing-brand-link");
     await expect(homeLink).toBeVisible();
+    await expect(homeLink).toHaveAccessibleName("Tomverse");
   });
 
   test("header navigation stays operable at 200% on /pricing", async ({ page }) => {
