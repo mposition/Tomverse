@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { prisma } from "@/lib/prisma";
 import { estimatedCountryFromHeader } from "@/lib/signupConsentCore";
 import {
@@ -158,7 +159,16 @@ export async function recordEstimatedCountry(input: {
     return { recorded: updated.count > 0, country: updated.count > 0 ? country : null };
   }
   await db.userSettings.create({
-    data: { userId: input.userId, country, countrySource: "ip_estimated", countryUpdatedAt: now },
+    data: {
+      userId: input.userId,
+      // Written, not left to a column default: the account default is
+      // code (APP_DEFAULTS.defaultModelId), and a row an email path creates
+      // first must carry the same value the settings route would have.
+      defaultModel: APP_DEFAULTS.defaultModelId,
+      country,
+      countrySource: "ip_estimated",
+      countryUpdatedAt: now,
+    },
   });
   return { recorded: true, country };
 }
@@ -181,6 +191,10 @@ export async function setSelfDeclaredCountry(input: {
     where: { userId: input.userId },
     create: {
       userId: input.userId,
+      // Written, not left to a column default: the account default is
+      // code (APP_DEFAULTS.defaultModelId), and a row an email path creates
+      // first must carry the same value the settings route would have.
+      defaultModel: APP_DEFAULTS.defaultModelId,
       country,
       countrySource: "self_declared",
       countryUpdatedAt: input.now ?? new Date(),
@@ -220,7 +234,15 @@ export async function recordBillingCountry(input: {
   try {
     await prisma.userSettings.upsert({
       where: { userId: input.userId },
-      create: { userId: input.userId, billingCountry: country, billingCountryUpdatedAt: at },
+      create: {
+        userId: input.userId,
+        // Written, not left to a column default: the account default is
+        // code (APP_DEFAULTS.defaultModelId), and a row an email path creates
+        // first must carry the same value the settings route would have.
+        defaultModel: APP_DEFAULTS.defaultModelId,
+        billingCountry: country,
+        billingCountryUpdatedAt: at,
+      },
       update: { billingCountry: country, billingCountryUpdatedAt: at },
     });
   } catch (error) {
