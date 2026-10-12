@@ -62,6 +62,9 @@ test("status chrome preserves saved language and language changes reload the bod
   await page.goBack();
   await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "ko");
   await expect(page.locator("main")).toHaveAttribute("lang", "ko");
+  await expect(page.getByTestId("marketing-language-switcher")).toHaveValue("ko");
+  expect(await page.evaluate(() => localStorage.getItem("tomverse_language"))).toBe("ko");
+  expect((await page.context().cookies()).find(cookie => cookie.name === "tomverse_lang")?.value).toBe("ko");
   await page.getByTestId("marketing-language-switcher").selectOption("en");
   await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "en");
   await page.setExtraHTTPHeaders({ "Accept-Language": "ko-KR,ko;q=0.9" });
