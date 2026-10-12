@@ -55,6 +55,7 @@ if test ! -s "$url_file"; then
   unset url
 fi
 
+install -d -o root -g root -m 0755 /usr/local/libexec
 install -o root -g root -m 0755 "$src/tomverse-bridge-watchdog" \
   /usr/local/libexec/tomverse-bridge-watchdog
 install -o root -g root -m 0644 "$src/tomverse-bridge-watchdog.service" \

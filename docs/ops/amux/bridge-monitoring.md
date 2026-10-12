@@ -37,8 +37,10 @@ bridge는 결과를 모르면 종료 코드 3으로 halt하고, systemd는 이�
 | `failed`, `inactive` | ping URL + `/fail` | 즉시 down 알림 |
 | 그 밖(`activating` 등, 읽기 실패) | 없음 | 유예 시간이 지나면 down 알림 |
 
-- ping URL은 systemd credential(`LoadCredential=ping-url`)로만 전달되고 unit의 동적 사용자만 읽는다. worker 계정
-  `tommy`는 이 값을 읽을 수도, 성공 신호를 위조할 수도 없다. 스크립트와 설치 스크립트는 값을 출력하지 않는다.
+- ping URL은 systemd credential(`LoadCredential=ping-url`)로만 전달되고 unit의 동적 사용자만 읽는다. curl에도
+  인자가 아니라 stdin 설정으로 넘긴다 — 프로세스 인자는 `/proc/<pid>/cmdline`으로 다른 사용자가 읽을 수 있고, 이
+  호스트의 `/proc`에는 `hidepid`가 없다. 그래서 worker 계정 `tommy`는 이 값을 읽을 수도, 성공 신호를 위조할 수도
+  없다. 스크립트와 설치 스크립트는 값을 출력하지 않는다.
 - 호스트 밖으로 나가는 것은 그 요청 하나뿐이다. journal 줄, worker 이름, 카드, 종료 코드는 나가지 않는다.
   monitor가 기록하는 것은 수신 시각, 호스트의 공인 IP, curl의 User-Agent다.
 
@@ -89,7 +91,8 @@ journalctl -u tomverse-bridge-watchdog.service -n 5 --no-pager -o short-iso
 
 bridge를 일부러 멈추기 전에 Healthchecks 대시보드에서 check를 **Pause**한다. 다시 켠 뒤 첫 ping이 오면 자동으로
 풀린다. 앱 쪽 신호에는 끄는 스위치가 없다. 멈춰 있는 동안 3시간마다 다시 알리고, lease가 끝난 지 48시간이
-지나면 그 bridge를 폐기된 것으로 보고 알리지 않는다.
+지나면 그 bridge를 폐기된 것으로 보고 더 알리지 않는다. 그때 복구 알림도 보내지 않는다 — 복구는 살아 있는 lease가
+실제로 보일 때만 알린다.
 
 ### 1.4 URL 교체와 제거
 
@@ -117,9 +120,9 @@ bridge는 세션마다 `AmuxWorkerRuntime` lease(90초)를 약 31초마다 갱�
 
 | 상태 | 조건 | 알림 |
 |---|---|---|
-| `unwatched` | 48시간 안의 lease가 없음 — 이 환경에 bridge가 없음 | 없음 |
+| `unwatched` | 48시간 안의 lease가 없음 — 이 환경에 bridge가 없거나 폐기됨 | 없음(복구 알림도 없음) |
 | `live` | 하나라도 아직 유효 | 직전이 `lost`였으면 복구 알림 |
-| `lapsing` | 전부 끝났고 5분 미만 | 없음 |
+| `lapsing` | 전부 끝났고 5분 미만 | 없음(복구 알림도 없음) |
 | `lost` | 전부 끝난 지 5분 이상 | 처음 발견하면 즉시, 그 뒤 3시간마다 |
 
 - 알림은 기존 운영 알림 경로(`reportOperationalDependencyStatus`)다. production에는 Slack

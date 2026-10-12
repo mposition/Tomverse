@@ -41,7 +41,9 @@ const run = ({ state, url = URL_VALUE, credential = true, curlStatus = 0 }) => {
     if (credential) writeFileSync(join(dir, "ping-url"), `${url}\n`);
     const prelude = [
       'systemctl() { printf "%s\\n" "$FAKE_STATE"; [ "$FAKE_STATE" = active ]; }',
-      'curl() { printf "%s\\n" "${@: -1}" >> curl.log; return "$FAKE_CURL_STATUS"; }',
+      // Arguments and the stdin config are kept apart: the URL may only ever
+      // be in the second.
+      'curl() { printf "%s\\n" "$*" >> args.log; while IFS= read -r line; do printf "%s\\n" "$line" >> config.log; done; return "$FAKE_CURL_STATUS"; }',
       "export -f systemctl curl",
       "bash ./watchdog",
     ].join("\n");
@@ -55,11 +57,19 @@ const run = ({ state, url = URL_VALUE, credential = true, curlStatus = 0 }) => {
         FAKE_CURL_STATUS: String(curlStatus),
       },
     });
-    const log = join(dir, "curl.log");
-    const requests = existsSync(log)
-      ? readFileSync(log, "utf8").split("\n").filter(Boolean)
-      : [];
-    return { status: result.status, output: `${result.stdout}${result.stderr}`, requests };
+    const lines = (name) =>
+      existsSync(join(dir, name))
+        ? readFileSync(join(dir, name), "utf8").split("\n").filter(Boolean)
+        : [];
+    const requests = lines("config.log").map(
+      (line) => line.match(/^url = "(.*)"$/)?.[1] ?? `unparsed: ${line}`
+    );
+    return {
+      status: result.status,
+      output: `${result.stdout}${result.stderr}`,
+      requests,
+      args: lines("args.log"),
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -125,6 +135,11 @@ test("the ping URL never reaches the output", { skip: noBash }, () => {
     const result = run(options);
     assert.ok(!result.output.includes("hc-ping.example"), result.output);
     assert.ok(!result.output.includes("0f3c5a8e"), result.output);
+    // Nor curl's arguments, which any local user can read from /proc.
+    for (const args of result.args) {
+      assert.ok(!args.includes("hc-ping.example"), args);
+      assert.match(args, /^--config - /);
+    }
   }
 });
 
@@ -136,6 +151,8 @@ test("the unit runs the installed script with the URL as a credential", () => {
     /^LoadCredential=ping-url:\/etc\/tomverse-bridge-watchdog\/ping-url$/m
   );
   assert.match(install, /\/usr\/local\/libexec\/tomverse-bridge-watchdog\b/);
+  // A host without /usr/local/libexec must not fail the install half-way.
+  assert.match(install, /^install -d -o root -g root -m 0755 \/usr\/local\/libexec$/m);
   assert.match(install, /url_file="\$config\/ping-url"/);
   assert.match(install, /^config=\/etc\/tomverse-bridge-watchdog$/m);
   // Never an environment variable: a unit's environment is readable by any

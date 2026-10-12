@@ -502,3 +502,31 @@ test("a bridge check that cannot read records null and pages on its own behalf",
     null
   );
 });
+
+// Only `lost` and `live` reach the dependency reporter. Reporting the other
+// two as healthy would announce a recovery that did not happen.
+for (const [name, leases, state] of [
+  ["no lease in the horizon", () => [], "unwatched"],
+  ["every lease out for under five minutes", () => [minutesAgo(2)], "lapsing"],
+  [
+    "a halted bridge's last lease ageing out of the horizon",
+    () => [new Date(Date.now() - 49 * 60 * 60_000)],
+    "unwatched",
+  ],
+] as const) {
+  test(`${name} reports nothing, so no recovery is announced`, async () => {
+    resetWorld();
+    const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+    world.dashboard = dashboard();
+    world.bridgeLeases = leases();
+
+    const result = await monitorInfrastructureThresholdsIfDue();
+
+    assert.deepEqual(result, { checked: true, alerts: 0, advisories: 0 });
+    assert.deepEqual(world.dependencyReports, []);
+    assert.equal(
+      (world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge,
+      state
+    );
+  });
+}
