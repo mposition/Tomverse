@@ -34,7 +34,24 @@ export const AMUX_BRIDGE_WATCH_HORIZON_MS = 48 * 60 * 60 * 1_000;
 /** How often a bridge that stays lost is reported again. */
 export const AMUX_BRIDGE_REMINDER_MS = 3 * 60 * 60 * 1_000;
 
-export type AmuxBridgeLease = { readonly leaseExpiresAt: Date };
+/**
+ * Worker runtimes that something other than a host bridge registers, and so
+ * say nothing about whether the bridges are running.
+ *
+ * `engineering-runner` is registered by the app itself
+ * (lib/engineeringAgentAmuxAdapter.ts, ENGINEERING_AGENT_AMUX_WORKER) for the
+ * ninety seconds of each engineering agent run, every thirty minutes. Counted
+ * as a bridge, its lease made a fleet that had halted at 13:01Z on 2026-10-12
+ * read live three times overnight: three false recovery notices, each
+ * followed by a fresh page. tests/amuxBridgeLivenessCore.test.mjs fails if
+ * any other code path starts registering a runtime without being listed here.
+ */
+export const AMUX_NON_BRIDGE_WORKERS: readonly string[] = ["engineering-runner"];
+
+export type AmuxBridgeLease = {
+  readonly workerName: string;
+  readonly leaseExpiresAt: Date;
+};
 
 export type AmuxBridgeLiveness =
   /** No lease inside the horizon: no bridge in this environment to watch. */
@@ -58,6 +75,7 @@ export function judgeAmuxBridgeLiveness(
 ): AmuxBridgeLiveness {
   const horizon = amuxBridgeWatchHorizonStart(now).getTime();
   const watched = leases
+    .filter((lease) => !AMUX_NON_BRIDGE_WORKERS.includes(lease.workerName))
     .map((lease) => lease.leaseExpiresAt.getTime())
     .filter((expiresAt) => Number.isFinite(expiresAt) && expiresAt > horizon);
   if (watched.length === 0) return { state: "unwatched" };

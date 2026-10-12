@@ -51,6 +51,10 @@ type World = {
   publisherQueryError: Error | null;
   /** Lease expiries the bridge check reads from AmuxWorkerRuntime. */
   bridgeLeases: Date[];
+  /** The worker name every lease in bridgeLeases carries. */
+  bridgeWorker: string;
+  /** Leases of runtimes no bridge runs, returned alongside. */
+  otherLeases: Array<{ workerName: string; leaseExpiresAt: Date }>;
   bridgeQueryError: Error | null;
   /** What the dependency reporter answers; by default, whether it was unhealthy. */
   bridgeNotified: boolean | null;
@@ -67,6 +71,8 @@ const world: World = {
   silentTotal: null,
   publisherQueryError: null,
   bridgeLeases: [],
+  bridgeWorker: "codex-impl",
+  otherLeases: [],
   bridgeQueryError: null,
   bridgeNotified: null,
   dependencyReports: [],
@@ -82,6 +88,8 @@ const resetWorld = () => {
   world.silentTotal = null;
   world.publisherQueryError = null;
   world.bridgeLeases = [];
+  world.bridgeWorker = "codex-impl";
+  world.otherLeases = [];
   world.bridgeQueryError = null;
   world.bridgeNotified = null;
   world.dependencyReports = [];
@@ -125,7 +133,13 @@ const loadMonitor = () => {
           amuxWorkerRuntime: {
             findMany: async () => {
               if (world.bridgeQueryError) throw world.bridgeQueryError;
-              return world.bridgeLeases.map((leaseExpiresAt) => ({ leaseExpiresAt }));
+              return [
+                ...world.bridgeLeases.map((leaseExpiresAt) => ({
+                  workerName: world.bridgeWorker,
+                  leaseExpiresAt,
+                })),
+                ...world.otherLeases,
+              ];
             },
           },
         },
@@ -530,3 +544,25 @@ for (const [name, leases, state] of [
     );
   });
 }
+
+// 2026-10-12 overnight: every bridge had halted, and the engineering agent's
+// own ninety-second runtime every thirty minutes read as a recovery.
+test("a runtime no bridge runs is neither a recovery nor a live bridge", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  world.bridgeLeases = [minutesAgo(40), minutesAgo(41)];
+  world.otherLeases = [
+    { workerName: "engineering-runner", leaseExpiresAt: new Date(Date.now() + 60_000) },
+  ];
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  assert.equal(world.dependencyReports.length, 1);
+  assert.equal(world.dependencyReports[0].healthy, false);
+  assert.equal(
+    (world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge,
+    "lost"
+  );
+});

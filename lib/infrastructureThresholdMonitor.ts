@@ -86,8 +86,9 @@ async function reportAmuxBridgeLiveness(
 ): Promise<{ state: AmuxBridgeLiveness["state"]; notified: boolean }> {
   const leases = await prisma.amuxWorkerRuntime.findMany({
     where: { leaseExpiresAt: { gt: amuxBridgeWatchHorizonStart(now) } },
-    select: { leaseExpiresAt: true },
+    select: { workerName: true, leaseExpiresAt: true },
   });
+  // The judgement drops runtimes no bridge runs (AMUX_NON_BRIDGE_WORKERS).
   const verdict = judgeAmuxBridgeLiveness(leases, now);
   if (verdict.state !== "lost" && verdict.state !== "live") {
     return { state: verdict.state, notified: false };

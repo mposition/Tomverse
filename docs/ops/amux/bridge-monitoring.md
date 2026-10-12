@@ -129,6 +129,11 @@ sudo systemctl daemon-reload
 bridge는 세션마다 `AmuxWorkerRuntime` lease(90초)를 약 31초마다 갱신한다. `Credit Reconciliation` cron(15분)이
 부르는 인프라 감시가 최근 48시간 안에 끝난 lease를 읽고 판정한다.
 
+bridge가 돌리지 않는 runtime은 판정에서 뺀다(`AMUX_NON_BRIDGE_WORKERS`). 지금은 `engineering-runner` 하나다 —
+engineering Agent가 30분마다 실행할 때 앱이 직접 90초짜리 runtime을 등록한다. 2026-10-12 밤 bridge가 모두 멈춘
+동안 이 lease가 세 번 "복구"로 읽혀 거짓 복구 알림과 재알림이 나갔다. 앱 코드에 runtime을 등록하는 곳이 새로
+생기면 `tests/amuxBridgeLivenessCore.test.mjs`가 실패하므로, 그 worker를 이 목록에 넣는다.
+
 | 상태 | 조건 | 알림 |
 |---|---|---|
 | `unwatched` | 48시간 안의 lease가 없음 — 이 환경에 bridge가 없거나 폐기됨 | 없음(복구 알림도 없음) |
