@@ -88,3 +88,16 @@ test("only explicit pre-decision refusals release the pending-decision lock", ()
   assert.match(messages, /before committing it/);
   assert.match(messages, /기록하기 전에 명시적으로 거절/);
 });
+
+test("failed detail reads offer an explicit read-only retry without clearing an unknown decision", () => {
+  assert.match(panel, /amuxReviewReadError\(response\.status, code\)/);
+  assert.match(panel, /m\.reviewProxyConfigurationFailed/);
+  assert.match(panel, /m\.reviewAccessRefused/);
+  assert.match(panel, /m\.reviewTemporarilyUnavailable/);
+  const retry = panel.split('data-testid="admin-amux-retry-review-read"')[1]?.split("</button>")[0];
+  assert.ok(retry);
+  assert.match(retry, /disabled=\{reviewBusy \|\| decisionStatusUnknown \|\| pendingDecision !== null\}/);
+  assert.match(retry, /onClick=\{\(\) => void openReview\(selectedEscalationId\)\}/);
+  assert.doesNotMatch(retry, /resolve|clearPendingDecision|POST/);
+  assert.match(messages, /Task 승인·재실행·차단 해제·실행은 하지 않습니다/);
+});
