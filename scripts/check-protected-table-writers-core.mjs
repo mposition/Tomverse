@@ -534,6 +534,12 @@ export const DELEGATE_NAME_ALLOWLIST = [
   },
   {
     path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxWorkerRegistryEvent",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     delegate: "amuxDecisionMakerBody",
     count: 1,
     reason: "The data-domain registry's domain key. No client is indexed with it.",
@@ -563,6 +569,14 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the worker registry model as its domain key and as prismaModel, and other domains' prose uses delete and update. It builds no SQL and opens no database connection.",
+  },
   {
     path: "prisma/migrations/20261012090000_amux_worker_registry/migration.sql",
     table: "AmuxWorkerRegistryEvent",

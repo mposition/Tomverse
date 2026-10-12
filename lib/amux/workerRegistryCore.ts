@@ -455,3 +455,176 @@ export function compareAmuxWorkerRegistryWithCatalog(
   });
   return { status: rows.every((row) => row.verdict === "match") ? "match" : "mismatch", rows };
 }
+
+// ---------------------------------------------------------------------------
+// The Admin screen (R1)
+
+/**
+ * Section 8: each stage ships with its code latch off; the operator's
+ * activation record turns it on. While this is false the registry route
+ * refuses every write, so R1's registration of the thirteen waits for that
+ * record. Reading is never latched.
+ */
+export const AMUX_WORKER_REGISTRY_WRITES_LATCH = false;
+
+/** The latch as the route and the page read it: one place to look. */
+export const amuxWorkerRegistryWritesOpen = (): boolean => AMUX_WORKER_REGISTRY_WRITES_LATCH;
+
+export type AmuxWorkerRegistryAdminRow = {
+  workerName: string;
+  providerClass: AmuxWorkerProviderClass;
+  verified: boolean;
+  classMaxRole: AmuxWorkerRoleCeiling;
+  roleCeiling: AmuxWorkerRoleCeiling;
+  desiredState: AmuxWorkerDesiredState;
+  revision: number;
+  changedAt: string;
+  latch: AmuxWorkerLatchEventKind | null;
+  observation: AmuxWorkerObservationStatus | null;
+  assignable: boolean;
+  reasons: AmuxWorkerUnassignableReason[];
+};
+
+export type AmuxWorkerRegistryAdminSeedRow = AmuxWorkerSeedEntry & { registered: boolean };
+
+export type AmuxWorkerRegistryAdminView = {
+  writesLatch: boolean;
+  /** False when a stored registry row is one the guard would not have accepted. */
+  registryReadable: boolean;
+  rows: AmuxWorkerRegistryAdminRow[];
+  comparison: AmuxWorkerCatalogComparison;
+  /** Null while the registry cannot be read: nothing is offered for registration. */
+  seed: AmuxWorkerRegistryAdminSeedRow[] | null;
+};
+
+/**
+ * What AMUX › Execution › Workers shows, from one read of the registry and
+ * the catalog environment variable. Section 3: the desired state and the
+ * effective state are shown apart.
+ */
+export function buildAmuxWorkerRegistryAdminView(input: {
+  registrations: ReadonlyArray<AmuxWorkerRegistration & { changedAt: string }> | null;
+  latches: ReadonlyMap<string, AmuxWorkerLatchEventKind>;
+  observations: ReadonlyMap<string, AmuxWorkerObservationStatus>;
+  catalog: readonly AmuxCatalogWorker[] | null;
+  writesLatch?: boolean;
+}): AmuxWorkerRegistryAdminView {
+  const writesLatch = input.writesLatch ?? amuxWorkerRegistryWritesOpen();
+  const registrations = input.registrations;
+  const comparison = compareAmuxWorkerRegistryWithCatalog(registrations, input.catalog);
+  if (registrations === null) {
+    return { writesLatch, registryReadable: false, rows: [], comparison, seed: null };
+  }
+  const rows = [...registrations]
+    .sort((a, b) => a.workerName.localeCompare(b.workerName))
+    .map((registration): AmuxWorkerRegistryAdminRow => {
+      const latch = input.latches.get(registration.workerName) ?? null;
+      const observation = input.observations.get(registration.workerName) ?? null;
+      const effective = amuxWorkerEffectiveState({
+        registration,
+        latchNewestKind: latch,
+        latestObservationStatus: observation,
+      });
+      const definition = AMUX_WORKER_PROVIDER_CLASS_TABLE[registration.providerClass];
+      return {
+        workerName: registration.workerName,
+        providerClass: registration.providerClass,
+        verified: definition.verified,
+        classMaxRole: definition.maxRole,
+        roleCeiling: registration.roleCeiling,
+        desiredState: registration.desiredState,
+        revision: registration.revision,
+        changedAt: registration.changedAt,
+        latch,
+        observation,
+        assignable: effective.assignable,
+        reasons: effective.reasons,
+      };
+    });
+  const registered = new Set(registrations.map((row) => row.workerName));
+  const seed = AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => ({
+    ...entry,
+    registered: registered.has(entry.workerName),
+  }));
+  return { writesLatch, registryReadable: true, rows, comparison, seed };
+}
+
+/** The seed entries an owner may still register, in seed order. */
+export const amuxWorkerSeedEntriesToRegister = (
+  view: Pick<AmuxWorkerRegistryAdminView, "seed">,
+): AmuxWorkerSeedEntry[] =>
+  (view.seed ?? [])
+    .filter((entry) => !entry.registered)
+    .map(({ workerName, roleCeiling, desiredState }) => ({ workerName, roleCeiling, desiredState }));
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const isBool = (value: unknown): value is boolean => typeof value === "boolean";
+const isIso = (value: unknown): value is string =>
+  typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value));
+const CATALOG_STATES: readonly string[] = ["assignable", "held", "absent"];
+
+const parseAdminRow = (value: unknown): AmuxWorkerRegistryAdminRow | null => {
+  if (!isRecord(value)) return null;
+  const providerClass = amuxWorkerProviderClassOf(value.workerName);
+  if (providerClass === null || value.providerClass !== providerClass) return null;
+  if (!isAmuxWorkerRoleCeiling(value.roleCeiling) || !isAmuxWorkerRoleCeiling(value.classMaxRole)) return null;
+  if (!isAmuxWorkerDesiredState(value.desiredState)) return null;
+  if (typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 1) return null;
+  if (!isIso(value.changedAt) || !isBool(value.verified) || !isBool(value.assignable)) return null;
+  if (value.latch !== null && !isAmuxWorkerLatchEventKind(value.latch)) return null;
+  if (value.observation !== null && !isAmuxWorkerObservationStatus(value.observation)) return null;
+  if (!Array.isArray(value.reasons) ||
+      !value.reasons.every((reason) => isOneOf(AMUX_WORKER_UNASSIGNABLE_REASONS, reason))) {
+    return null;
+  }
+  return value as AmuxWorkerRegistryAdminRow;
+};
+
+const parseComparison = (value: unknown): AmuxWorkerCatalogComparison | null => {
+  if (!isRecord(value) || !Array.isArray(value.rows)) return null;
+  if (value.status === "registry_unreadable" || value.status === "catalog_unreadable") {
+    return value.rows.length === 0 ? { status: value.status, rows: [] } : null;
+  }
+  if (value.status !== "match" && value.status !== "mismatch") return null;
+  for (const row of value.rows) {
+    if (!isRecord(row) || !isAmuxWorkerName(row.workerName)) return null;
+    if (row.registryState !== null && !isAmuxWorkerDesiredState(row.registryState)) return null;
+    if (typeof row.catalog !== "string" || !CATALOG_STATES.includes(row.catalog)) return null;
+    if (!isOneOf(AMUX_WORKER_CATALOG_VERDICTS, row.verdict)) return null;
+  }
+  return value as AmuxWorkerCatalogComparison;
+};
+
+/**
+ * The registry route's GET body, or null when it is not exactly that shape.
+ * A body that does not parse is a failed read, never a guessed registry.
+ */
+export function parseAmuxWorkerRegistryAdminView(body: unknown): AmuxWorkerRegistryAdminView | null {
+  if (!isRecord(body) || !isBool(body.writesLatch) || !isBool(body.registryReadable)) return null;
+  if (!Array.isArray(body.rows)) return null;
+  const rows: AmuxWorkerRegistryAdminRow[] = [];
+  for (const row of body.rows) {
+    const parsed = parseAdminRow(row);
+    if (parsed === null) return null;
+    rows.push(parsed);
+  }
+  const comparison = parseComparison(body.comparison);
+  if (comparison === null) return null;
+  let seed: AmuxWorkerRegistryAdminSeedRow[] | null = null;
+  if (body.seed !== null) {
+    if (!Array.isArray(body.seed) || body.seed.length !== AMUX_WORKER_REGISTRY_V31_SEED.length) return null;
+    seed = [];
+    for (const [index, entry] of body.seed.entries()) {
+      const expected = AMUX_WORKER_REGISTRY_V31_SEED[index];
+      if (!isRecord(entry) || entry.workerName !== expected.workerName ||
+          entry.roleCeiling !== expected.roleCeiling || entry.desiredState !== expected.desiredState ||
+          !isBool(entry.registered)) {
+        return null;
+      }
+      seed.push({ ...expected, registered: entry.registered });
+    }
+  }
+  if (!body.registryReadable && (seed !== null || rows.length > 0)) return null;
+  return { writesLatch: body.writesLatch, registryReadable: body.registryReadable, rows, comparison, seed };
+}
