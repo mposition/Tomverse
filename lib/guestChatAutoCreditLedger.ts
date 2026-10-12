@@ -103,6 +103,12 @@ export class GuestAutoCreditLedgerError extends Error {
   }
 }
 
+/** Preserve the closed known-refusal boundary across module callers. */
+export const isGuestAutoCreditLedgerError = (
+  error: unknown,
+): error is GuestAutoCreditLedgerError =>
+  error instanceof GuestAutoCreditLedgerError;
+
 export type GuestAutoCreditBinding = Readonly<{
   authority: GuestChatAutoAuthorityPayload;
   candidateDigest: string;
@@ -609,15 +615,28 @@ export async function convertGuestAutoCreditPrehold(input: Readonly<{
   });
 }
 
+export type GuestAutoCreditReleaseReason =
+  | "authority_refused"
+  | "refiner_confirmed_undispatched"
+  | "router_refused_before_dispatch";
+
+const GUEST_AUTO_CREDIT_RELEASE_SCOPE = Object.freeze({
+  authority_refused: "pre_paid_full",
+  refiner_confirmed_undispatched: "paid_refiner_financial_only",
+  router_refused_before_dispatch: "paid_refiner_financial_only",
+} as const satisfies Record<GuestAutoCreditReleaseReason,
+  "pre_paid_full" | "paid_refiner_financial_only">);
+
 export async function releaseGuestAutoCreditPrehold(input: Readonly<{
   access: ChatAccess;
   binding: GuestAutoCreditBinding;
   proofId: string;
-  reason: "authority_refused" | "refiner_confirmed_undispatched" |
-    "router_refused_before_dispatch";
+  reason: GuestAutoCreditReleaseReason;
 }>): Promise<GuestAutoCreditLedgerState> {
   assertBinding(input.access, input.binding);
   if (!UUID.test(input.proofId)) throw new GuestAutoCreditLedgerError("invalid_binding");
+  const releaseScope = GUEST_AUTO_CREDIT_RELEASE_SCOPE[input.reason];
+  if (!releaseScope) throw new GuestAutoCreditLedgerError("invalid_binding");
   const requestKey = guestAutoCreditRequestKey(input.access.subjectKey,
     input.binding.authority.authorityId);
   return prisma.$transaction(async (tx) => {
@@ -639,7 +658,15 @@ export async function releaseGuestAutoCreditPrehold(input: Readonly<{
       throw new GuestAutoCreditLedgerError("transition_invalid");
     }
     const payload = parsePrehold(row.reservationPayload);
-    for (const entry of [...payload.minuteEntries, ...payload.creditEntries]) {
+    // The minute entries count the request that bought the Refiner call, while
+    // the credit entries fund the still-undispatched Chat model. Before paid
+    // work both are unused. After a known Refiner spend, only the Chat credit
+    // hold is unused: releasing the minute entries as well would let one Guest
+    // repeat paid Refiner work without consuming the existing request throttle.
+    const releasedEntries = releaseScope === "pre_paid_full"
+      ? [...payload.minuteEntries, ...payload.creditEntries]
+      : payload.creditEntries;
+    for (const entry of releasedEntries) {
       await decrementEntry(tx, { ...entry, periodStart: new Date(entry.periodStart) });
     }
     const observedAt = new Date();
@@ -657,7 +684,9 @@ export async function releaseGuestAutoCreditPrehold(input: Readonly<{
       targetId: row.id,
       summary: "Released one confirmed-undispatched Guest Smart Adaptive credit prehold.",
       metadata: { authorityId: payload.authorityId, requestKey, proofId: input.proofId,
-        reason: input.reason, heldCredits: payload.heldCredits },
+        reason: input.reason, releaseScope,
+        requestThrottle: releaseScope === "pre_paid_full" ? "released" : "retained",
+        heldCredits: payload.heldCredits },
     });
     return stateFromRow({ ...row, status: "guest_auto_released" });
   }, { maxWait: 5_000, timeout: 15_000 });

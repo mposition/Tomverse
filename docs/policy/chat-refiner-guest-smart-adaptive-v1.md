@@ -127,6 +127,14 @@ reservation. The minute unit is not charged twice. The conversion never
 increases the held Guest amount and never borrows from an account, add-on lot or
 another product.
 
+A refusal proved before the Refiner service is entered releases both the
+request unit and the financial hold. Once that service has been entered, a
+later known undispatched refusal refunds the day/month financial credit because
+no Chat answer ran, but retains the already consumed subject and IP minute
+request units. Those are the existing Guest request-throttle buckets, not a new
+allowance. Guest day/month buckets remain weighted answer entitlement and are
+not repurposed as a hidden request counter.
+
 Chat and Review continue sharing the same existing Guest allowance. The
 product label does not create a second quota namespace.
 
@@ -155,12 +163,14 @@ and release identity before any paid work. Repeating the HTTP body, losing a
 response, opening another tab or changing the local conversation id cannot
 claim another attempt.
 
-A known refusal before paid work releases a deterministic Guest hold. A known
-undispatched failure after the Refiner follows the separately defined
-settlement for the work that actually ran and releases only amounts proved
-unused. An unknown Refiner, Guest-hold conversion, manifest, provider-dispatch
-or settlement outcome stops the request. It retains the relevant Guest and
-Refiner holds, performs a read-only receipt check and never retries blindly.
+A known refusal before the Refiner service is entered releases the deterministic
+Guest hold. A known undispatched failure after that boundary follows the
+separately defined settlement for the work that actually ran: it returns the
+unused Guest financial credit while retaining the existing subject/IP request
+throttle unit. An unknown Refiner, Guest-hold conversion, manifest,
+provider-dispatch or settlement outcome stops the request. It retains the
+relevant Guest and Refiner holds, performs a read-only receipt check and never
+retries blindly.
 
 Expiry is not evidence that an unknown operation did not run. No expiry sweep,
 TTL or ordinary Guest-session reset may automatically refund or delete an
@@ -262,8 +272,13 @@ max-minus-exact Guest credit difference, and writes the selected provider,
 model, price snapshot and ordinary exact financial holds. The transition is
 one-way and at most once; the immutable subject, trace, idempotency key and
 original period starts cannot change. The exact amount cannot exceed the
-prehold. A known pre-dispatch refusal may release the prehold once. An unknown
-conversion leaves the row non-dispatchable and held for read-only recovery.
+prehold. A deterministic application refusal raised before the conversion
+transaction commits, including the normal Chat access refusals and a validated
+prehold mismatch, proves that PostgreSQL rolled the conversion back. It may
+release the unused financial prehold once under the request-throttle rule in
+section 4. A database, transport or commit result without that rollback proof
+is an unknown conversion: the row remains non-dispatchable and held for
+read-only recovery.
 
 This reuse is a financial contract change and requires migration, generated
 client, protected-writer and local no-provider transition tests before review.
