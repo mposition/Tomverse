@@ -149,6 +149,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
   const dragGhostRef = useRef<HTMLDivElement>(null);
   const moveRequests = useRef(new Map<string, string>());
   const settledMoveRequests = useRef(new Set<string>());
+  const activeMoveTarget = useRef<AmuxBoardMove | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<"overview" | "execution" | "review" | "activity">("overview");
@@ -288,9 +289,11 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       const url = new URL(window.location.href);
       const id = url.searchParams.get("taskId"); const requestId = url.searchParams.get("moveRequest");
       if (id && /^[A-Za-z0-9_-]{1,80}$/.test(id) && requestId && /^[0-9a-f-]{36}$/i.test(requestId)) {
+        const target = { taskId: id, requestId, readOnly: true };
         moveRequests.current.set(id, requestId); closeCard(false);
-        setMoveTarget({ taskId: id, requestId, readOnly: true }); return;
+        activeMoveTarget.current = target; setMoveTarget(target); return;
       }
+      activeMoveTarget.current = null;
       setMoveTarget(null);
       if (id && /^[A-Za-z0-9_-]{1,80}$/.test(id)) void openCard(id, false);
       else closeCard(false);
@@ -325,7 +328,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     if (prior) url.searchParams.set("moveRequest", requestId);
     else url.searchParams.delete("moveRequest");
     window.history.replaceState(window.history.state, "", url);
-    setMoveTarget({ taskId, requestId, readOnly: Boolean(prior) });
+    const target = { taskId, requestId, readOnly: Boolean(prior) };
+    activeMoveTarget.current = target; setMoveTarget(target);
   };
   useEffect(() => {
     if (!pointerTask) return;
@@ -373,6 +377,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     if (!cancelled && drag.moved && destination?.getAttribute('data-amux-lane') === 'amux_backlog') openMove(drag.taskId);
   };
   const closeMove = () => {
+    activeMoveTarget.current = null;
     if (moveTarget && (moveRequests.current.get(moveTarget.taskId) !==
         moveTarget.requestId || settledMoveRequests.current.has(moveTarget.requestId))) {
       const url = new URL(window.location.href);
@@ -388,7 +393,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     const taskId = url.searchParams.get("taskId"); const requestId = url.searchParams.get("moveRequest");
     if (taskId && /^[A-Za-z0-9_-]{1,80}$/.test(taskId) && requestId && /^[0-9a-f-]{36}$/i.test(requestId))
       queueMicrotask(() => { moveRequests.current.set(taskId, requestId);
-        closeCard(false); setMoveTarget({ taskId, requestId, readOnly: true }); });
+        const target = { taskId, requestId, readOnly: true };
+        activeMoveTarget.current = target; closeCard(false); setMoveTarget(target); });
   }, [closeCard]);
 
   const renderTree = (parent: Parent, depth: number): React.ReactNode => {
@@ -626,7 +632,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       onClose={closeMove} returnFocusRef={returnFocusRef}>
       <AmuxExecutionMovePanel key={moveTarget.requestId} move={moveTarget}
         onWriteStarting={() => {
-          if (moveTarget.readOnly ||
+          if (activeMoveTarget.current !== moveTarget || moveTarget.readOnly ||
               settledMoveRequests.current.has(moveTarget.requestId)) return false;
           moveRequests.current.set(moveTarget.taskId, moveTarget.requestId);
           const url = new URL(window.location.href);
@@ -636,6 +642,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
           return true;
         }}
         onKnownRefusal={() => {
+          activeMoveTarget.current = null;
           settledMoveRequests.current.add(moveTarget.requestId);
           moveRequests.current.delete(moveTarget.taskId);
           const url = new URL(window.location.href);
@@ -644,7 +651,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
             window.history.replaceState(window.history.state, "", url);
           }
         }}
-        onMoved={() => { settledMoveRequests.current.add(moveTarget.requestId); void refreshBoard(); }} />
+        onMoved={() => { activeMoveTarget.current = null;
+          settledMoveRequests.current.add(moveTarget.requestId); void refreshBoard(); }} />
     </AmuxExecutionDialog>}
     {detailOpen && <AmuxExecutionDialog title={m.detail} closeLabel={m.close}
       onClose={() => closeCard()} returnFocusRef={returnFocusRef}
