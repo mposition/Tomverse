@@ -1,6 +1,8 @@
 import {
   APP_DEFAULTS,
   GUEST_BRAND_TRIO_MODEL_IDS,
+  expectedLeadForStored,
+  missingLineupProviders,
   resolveGuestDefaultSelectedModels,
   type ReplacementResolver,
 } from "@/lib/appDefaults";
@@ -70,6 +72,13 @@ export type GuestDefaultDescription = {
   storedNotApplied: boolean;
   ineligibleTrioIds: string[];
   substituteIds: string[];
+  /**
+   * Providers the visible selection does not hold exactly once. Empty when no
+   * `providerOf` was given. The resolver backfills a retired member with no
+   * eligible successor from the fallback list, which can break the
+   * one-per-provider rule; this is how the console says so.
+   */
+  missingProviders: string[];
 };
 
 export const describeGuestDefault = ({
@@ -77,10 +86,13 @@ export const describeGuestDefault = ({
   isEligible,
   resolveReplacement,
   trio = GUEST_BRAND_TRIO_MODEL_IDS,
+  providerOf,
 }: {
   storedLead: string | null;
   isEligible: (modelId: string) => boolean;
   resolveReplacement?: ReplacementResolver;
+  /** The runtime catalogue's provider for an id; omitting it skips the provider check. */
+  providerOf?: (modelId: string) => string | null;
   /** The effective lineup (lib/guestLeadFacts `trio`); the compiled trio when omitted. */
   trio?: readonly string[];
 }): GuestDefaultDescription => {
@@ -94,9 +106,19 @@ export const describeGuestDefault = ({
   return {
     visibleIds,
     effectiveLeadId,
-    storedNotApplied: Boolean(storedLead) && storedLead !== effectiveLeadId,
+    // Applied means the selection leads with what the stored id should put
+    // first -- itself, or its successor when it is a retired member.
+    storedNotApplied:
+      Boolean(storedLead) &&
+      expectedLeadForStored({
+        stored: storedLead as string,
+        lineup: trio,
+        isEligible,
+        resolveReplacement,
+      }) !== effectiveLeadId,
     ineligibleTrioIds: trio.filter((id) => !isEligible(id)),
     substituteIds: visibleIds.filter((id) => !trio.includes(id)),
+    missingProviders: providerOf ? missingLineupProviders(visibleIds.map(providerOf)) : [],
   };
 };
 

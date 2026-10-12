@@ -4,7 +4,6 @@ import {
   getModel,
   getModelUsageProfile,
   isEnabledModelId,
-  isPubliclySelectableModel,
   type AiModel,
 } from "@/lib/models";
 
@@ -70,6 +69,22 @@ export const createGuestEligibilityCheck =
 const REPLACEMENT_CHAIN_MAX_HOPS = 8;
 
 /**
+ * Whether a model may be a default-lineup member or a member's successor:
+ * exactly what lib/models.ts `resolveSelectableModelId` calls selectable --
+ * enabled, status "enabled", listed, not deleted. The chat client's clamp maps
+ * every default through that function, so a laxer rule here (a "limited"
+ * model, say) would let a model lead for guests and then be dropped from a new
+ * account's first comparison. Save-time lineup validation uses it too.
+ */
+export const isDefaultLineupServable = (
+  model: Pick<AiModel, "enabled" | "status" | "publiclyListed" | "catalogDeleted">
+) =>
+  model.enabled &&
+  model.status === "enabled" &&
+  model.publiclyListed !== false &&
+  !model.catalogDeleted;
+
+/**
  * Who takes a retired model's default slot. `accept` is the caller's own rule
  * for the slot -- the guest resolver passes its `isEligible`.
  */
@@ -102,7 +117,7 @@ export const createReplacementResolver =
       visited.add(candidateId);
       const model = lookup(candidateId);
       if (!model) return undefined;
-      if (isPubliclySelectableModel(model) && accept(candidateId)) return candidateId;
+      if (isDefaultLineupServable(model) && accept(candidateId)) return candidateId;
       candidateId = model.replacementModelId;
     }
     return undefined;
@@ -316,6 +331,28 @@ export const guestLeadForLineup = (
   stored && lineup.includes(stored) ? stored : APP_DEFAULTS.guestDefaultModelId;
 
 /**
+ * The model a stored lead should put first: the stored id itself, or -- when
+ * it is a lineup member that is no longer eligible -- the successor the
+ * resolver puts in its slot. A stored lead is applied when the guest
+ * selection leads with this; the console and check:default-models both judge
+ * it this way, so a retired lead that was succeeded does not read as ignored.
+ */
+export const expectedLeadForStored = ({
+  stored,
+  lineup,
+  isEligible,
+  resolveReplacement,
+}: {
+  stored: string;
+  lineup: readonly string[];
+  isEligible: (modelId: string) => boolean;
+  resolveReplacement?: ReplacementResolver;
+}): string =>
+  lineup.includes(stored) && !isEligible(stored)
+    ? (resolveReplacement?.(stored, isEligible) ?? stored)
+    : stored;
+
+/**
  * Reads a stored AppSetting["guestBrandTrioModelIds"]: a JSON array of exactly
  * APP_DEFAULTS.maxGuestSelectedModels distinct ids. Anything else -- including
  * a missing row -- is `null`, which every reader treats as "use the compiled
@@ -345,6 +382,45 @@ export const parseGuestBrandTrio = (value: unknown): string[] | null => {
  * and one Gemini model (docs/policy/credit-and-cost-limits.md).
  */
 export const GUEST_LINEUP_PROVIDERS = ["openai", "anthropic", "google"] as const;
+
+/**
+ * Which provider each editor slot offers, given the saved lineup's providers
+ * in slot order.
+ *
+ * A slot keeps its model's provider when that provider is one of
+ * GUEST_LINEUP_PROVIDERS and no other slot holds it. Every other slot -- a
+ * duplicate, a provider outside the rule, an unknown model -- is handed one of
+ * the providers the lineup is missing, in GUEST_LINEUP_PROVIDERS order. So a
+ * lineup that breaks the rule can still be repaired in the editor rather than
+ * locked to the providers that break it.
+ */
+export const lineupSlotProviders = (
+  providers: readonly (string | null | undefined)[]
+): string[] => {
+  const allowed: readonly string[] = GUEST_LINEUP_PROVIDERS;
+  const kept = providers.map((provider) =>
+    provider &&
+    allowed.includes(provider) &&
+    providers.filter((candidate) => candidate === provider).length === 1
+      ? provider
+      : null
+  );
+  const missing = allowed.filter((provider) => !kept.includes(provider));
+  return kept.map((provider) => provider ?? missing.shift() ?? "");
+};
+
+/** The GUEST_LINEUP_PROVIDERS these providers do not hold exactly once: missing or doubled. */
+export const missingLineupProviders = (
+  providers: readonly (string | null | undefined)[]
+): string[] =>
+  GUEST_LINEUP_PROVIDERS.filter(
+    (provider) => providers.filter((candidate) => candidate === provider).length !== 1
+  );
+
+/** Whether these providers are exactly one of each of GUEST_LINEUP_PROVIDERS. */
+export const isOnePerLineupProvider = (providers: readonly (string | null | undefined)[]) =>
+  providers.length === GUEST_LINEUP_PROVIDERS.length &&
+  missingLineupProviders(providers).length === 0;
 
 /** What a lineup check needs to know about one model, from the runtime catalogue. */
 export type GuestBrandTrioCandidateFacts = {
@@ -394,12 +470,7 @@ export const guestBrandTrioRejection = ({
     }
   }
   const providers = modelIds.map((modelId) => facts(modelId).provider ?? "unknown");
-  const oneEach =
-    providers.length === GUEST_LINEUP_PROVIDERS.length &&
-    GUEST_LINEUP_PROVIDERS.every(
-      (provider) => providers.filter((candidate) => candidate === provider).length === 1
-    );
-  if (!oneEach) {
+  if (!isOnePerLineupProvider(providers)) {
     return `The default lineup must hold one OpenAI, one Anthropic and one Gemini model; this one is ${providers.join(", ")}.`;
   }
   return null;

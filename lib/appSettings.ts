@@ -16,6 +16,7 @@ import {
   guestBrandTrioRejection,
   guestDefaultLeadRejection,
   guestLeadForLineup,
+  isDefaultLineupServable,
   parseGuestBrandTrio,
 } from "@/lib/appDefaults";
 import {
@@ -93,7 +94,6 @@ import {
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
-  isPubliclySelectableModel,
 } from "@/lib/models";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
@@ -209,10 +209,11 @@ export const guestBrandTrioModelRejection = async (
     facts: (id) => {
       const model = models.get(id);
       return {
-        // The lifecycle the picker uses, not just enabled: an unlisted,
-        // disabled-status or coming-soon row must not become every guest's
-        // default through the API, whatever the editor offers.
-        exists: Boolean(model && isPubliclySelectableModel(model)),
+        // The lifecycle a default needs, not just enabled: an unlisted, not
+        // fully enabled or deleted row must not become every guest's default
+        // through the API, whatever the editor offers. The same rule the chat
+        // client's clamp applies (isDefaultLineupServable).
+        exists: Boolean(model && isDefaultLineupServable(model)),
         guestEligible: Boolean(model && canUseModelWithPlan("Guest", model)),
         usageCategory: model ? getModelUsageProfile(model).category : null,
         // Verified means a code profile, or both an input and an output

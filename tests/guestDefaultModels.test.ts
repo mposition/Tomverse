@@ -4,6 +4,7 @@ import {
   APP_DEFAULTS,
   createGuestEligibilityCheck,
   createReplacementResolver,
+  expectedLeadForStored,
   getGuestDefaultSelectedModels,
   GUEST_BRAND_TRIO_MODEL_IDS,
   GUEST_LINEUP_PROVIDERS,
@@ -11,6 +12,9 @@ import {
   guestDefaultLeadRejection,
   guestLeadForLineup,
   GUEST_FALLBACK_MODEL_IDS,
+  isOnePerLineupProvider,
+  lineupSlotProviders,
+  missingLineupProviders,
   parseGuestBrandTrio,
   resolveGuestDefaultSelectedModels,
 } from "@/lib/appDefaults";
@@ -427,4 +431,73 @@ test("a stored lead inside the lineup is handed over even when retired, so its s
     }),
     ["claude-haiku-next", OPENAI_SLOT, GOOGLE_SLOT]
   );
+});
+
+test("a successor that is only limited is walked past, as the selection would drop it", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-limited"),
+    "claude-haiku-limited": {
+      enabled: true,
+      status: "limited",
+      publiclyListed: true,
+      replacementModelId: "claude-haiku-after",
+    },
+    "claude-haiku-after": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.equal(catalogue.resolveReplacement(ANTHROPIC_SLOT), "claude-haiku-after");
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, "claude-haiku-after", GOOGLE_SLOT]
+  );
+});
+
+test("a stored lead that was succeeded expects its successor; any other stored lead expects itself", () => {
+  const lineup = [OPENAI_SLOT, ANTHROPIC_SLOT, GOOGLE_SLOT];
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.equal(
+    expectedLeadForStored({ ...catalogue, stored: ANTHROPIC_SLOT, lineup }),
+    "claude-haiku-next"
+  );
+  assert.equal(expectedLeadForStored({ ...catalogue, stored: OPENAI_SLOT, lineup }), OPENAI_SLOT);
+  // Outside the lineup the resolver never reads it, so nothing is succeeded.
+  assert.equal(
+    expectedLeadForStored({ ...catalogue, stored: "not-in-the-lineup", lineup }),
+    "not-in-the-lineup"
+  );
+  // A retired lead with no successor guests can use expects itself, so the
+  // audit still reports it as not applied.
+  const stranded = catalogueWith({ [ANTHROPIC_SLOT]: retired("missing-model") });
+  assert.equal(expectedLeadForStored({ ...stranded, stored: ANTHROPIC_SLOT, lineup }), ANTHROPIC_SLOT);
+});
+
+test("an editor slot offers a provider the lineup is missing instead of the one that breaks the rule", () => {
+  assert.deepEqual(lineupSlotProviders(["openai", "anthropic", "google"]), ["openai", "anthropic", "google"]);
+  assert.deepEqual(lineupSlotProviders(["google", "openai", "anthropic"]), ["google", "openai", "anthropic"]);
+  // A provider outside the rule is handed the missing one.
+  assert.deepEqual(lineupSlotProviders(["openai", "mistral", "google"]), ["openai", "anthropic", "google"]);
+  // A duplicate gives up both slots to the missing providers, in rule order.
+  assert.deepEqual(lineupSlotProviders(["openai", "openai", "google"]), ["openai", "anthropic", "google"]);
+  assert.deepEqual(lineupSlotProviders(["anthropic", "anthropic", null]), ["openai", "anthropic", "google"]);
+  // Every slot names a provider of the rule, and together they are one each.
+  for (const providers of [
+    ["openai", "mistral", "google"],
+    ["openai", "openai", "google"],
+    ["anthropic", "anthropic", null],
+    [null, null, null],
+    ["xai", "deepseek", "mistral"],
+  ]) {
+    const slots = lineupSlotProviders(providers);
+    assert.ok(isOnePerLineupProvider(slots), `${providers.join(",")} -> ${slots.join(",")}`);
+  }
+});
+
+test("a selection's missing providers name both an absent and a doubled provider", () => {
+  assert.deepEqual(missingLineupProviders(["openai", "anthropic", "google"]), []);
+  assert.deepEqual(missingLineupProviders(["openai", "google", "deepseek"]), ["anthropic"]);
+  assert.deepEqual(missingLineupProviders(["openai", "openai", "google"]), ["openai", "anthropic"]);
+  assert.equal(isOnePerLineupProvider(["openai", "anthropic", "google"]), true);
+  assert.equal(isOnePerLineupProvider(["openai", "anthropic", "google", "xai"]), false);
 });

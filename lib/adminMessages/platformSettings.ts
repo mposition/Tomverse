@@ -104,6 +104,8 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       lineupLeadMoves: (lead: string) =>
         `Saving also makes ${lead} the leading model, because the current lead is not in this lineup.`,
       saveLineup: "Save lineup",
+      lineupProviderMissing: (providers: string) =>
+        `Guests do not see one model from each provider right now: ${providers} is missing or doubled. A lineup model left without an eligible replacement was backfilled. Choose an eligible model for that slot and save the lineup.`,
       visibleOrder: (ids: string) => `Order guests see now: ${ids}`,
       noEligible: "No model can be chosen as the lead.",
       outsideTrio: (name: string, id: string) =>
@@ -272,6 +274,8 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       lineupLeadMoves: (lead: string) =>
         `현재 선두가 이 구성에 없으므로, 저장하면 ${lead}가 선두 모델이 됩니다.`,
       saveLineup: "구성 저장",
+      lineupProviderMissing: (providers: string) =>
+        `지금 게스트에게 공급사별 1개씩 보이지 않습니다: ${providers}가 빠졌거나 중복됐습니다. 사용할 수 있는 대체 모델이 없는 구성 모델 자리가 다른 모델로 채워졌습니다. 그 자리에 쓸 수 있는 모델을 골라 구성을 저장하세요.`,
       visibleOrder: (ids: string) => `지금 게스트에게 보이는 순서: ${ids}`,
       noEligible: "선두로 고를 수 있는 모델이 없습니다.",
       outsideTrio: (name: string, id: string) =>
