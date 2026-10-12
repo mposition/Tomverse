@@ -439,6 +439,12 @@ const compilerOptions = parsedConfig.options;
 // readiness and audit scopes move existing accesses in the already-reviewed
 // closure. The 228-entry count and position-free inventory remain unchanged;
 // this repins only their final source positions on the main release base.
+// 2026-10-12, default model GPT 6 Luna and the guest trio's Haiku 5.5: two
+// pricing profiles inserted in `lib/modelPricing.ts` move the twelve accesses
+// below them by 73 lines, and two catalogue rows plus the DEFAULT_MODEL_ID note
+// in `lib/models.ts` move its two `MODEL_ACCESS_RANK[...]` accesses by 16
+// lines. No access is added; count 228 and the position-free inventory are
+// unchanged, so this repins positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
