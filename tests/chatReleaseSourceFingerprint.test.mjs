@@ -26,6 +26,7 @@ test("unrelated deployment source is stable; execution drift and missing source 
       "lib/mobileAccessToken.ts",
       "lib/nativeAppCors.ts",
       "lib/apiCacheControlPolicy.ts",
+      "lib/proxyMarketingBoundary.ts",
       "lib/originProtection.ts",
       "lib/requestOrigin.ts",
       "lib/deepResearchSettlement.ts",
