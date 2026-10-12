@@ -18,7 +18,11 @@ import {
   AMUX_WORKER_ROLE_CEILINGS,
   AMUX_WORKER_TRIAL_CARD_COUNT,
   AMUX_WORKER_TRIAL_COST_CAP_MICRO_USD,
+  AMUX_WORKER_REGISTRY_WRITES_LATCH,
   amuxCatalogProviderClass,
+  amuxWorkerRegistryWritesOpen,
+  amuxWorkerSeedEntriesToRegister,
+  buildAmuxWorkerRegistryAdminView,
   amuxWorkerEffectiveState,
   amuxWorkerLatchOpen,
   amuxWorkerProviderClassOf,
@@ -320,4 +324,53 @@ test("an unreadable side is reported as unreadable, never as empty", () => {
   assert.deepEqual(compareAmuxWorkerRegistryWithCatalog(null, []), { status: "registry_unreadable", rows: [] });
   assert.deepEqual(compareAmuxWorkerRegistryWithCatalog([], null), { status: "catalog_unreadable", rows: [] });
   assert.deepEqual(compareAmuxWorkerRegistryWithCatalog([], []), { status: "match", rows: [] });
+});
+
+test("R1 ships with registry writes latched off (section 8)", () => {
+  assert.equal(AMUX_WORKER_REGISTRY_WRITES_LATCH, false);
+  assert.equal(amuxWorkerRegistryWritesOpen(), false);
+});
+
+test("the Admin view shows desired and effective state apart, and offers only unregistered seed entries", () => {
+  const view = buildAmuxWorkerRegistryAdminView({
+    registrations: [
+      { ...registration("cursor-impl", "requested", "implementation"), changedAt: "2026-10-12T05:00:00.000Z" },
+      { ...registration("claude-impl", "active", "implementation", 2), changedAt: "2026-10-12T06:00:00.000Z" },
+    ],
+    latches: new Map([["claude-impl", "opened"]]),
+    observations: new Map([["claude-impl", "ok"]]),
+    catalog: [catalogEntry("claude-impl", "claude")],
+  });
+  assert.equal(view.writesLatch, false);
+  assert.equal(view.registryReadable, true);
+  assert.deepEqual(view.rows.map((row) => row.workerName), ["claude-impl", "cursor-impl"]);
+  const claude = view.rows[0];
+  assert.equal(claude.verified, true);
+  assert.equal(claude.classMaxRole, "contract");
+  assert.equal(claude.latch, "opened");
+  assert.equal(claude.observation, "ok");
+  assert.deepEqual(claude.reasons, ["latch_open"]);
+  assert.equal(view.rows[1].verified, false);
+  assert.deepEqual(view.rows[1].reasons, ["not_active", "no_observation"]);
+  assert.equal(view.comparison.status, "match");
+  assert.equal(amuxWorkerSeedEntriesToRegister(view).length, 11);
+  assert.equal(view.seed.filter((entry) => entry.registered).length, 2);
+});
+
+test("an unreadable registry offers nothing to register", () => {
+  const view = buildAmuxWorkerRegistryAdminView({
+    registrations: null,
+    latches: new Map(),
+    observations: new Map(),
+    catalog: [],
+    writesLatch: true,
+  });
+  assert.deepEqual(view, {
+    writesLatch: true,
+    registryReadable: false,
+    rows: [],
+    comparison: { status: "registry_unreadable", rows: [] },
+    seed: null,
+  });
+  assert.deepEqual(amuxWorkerSeedEntriesToRegister(view), []);
 });
