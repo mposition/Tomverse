@@ -20,7 +20,9 @@ import {
   APP_DEFAULTS,
   createGuestEligibilityCheck,
   createReplacementResolver,
+  expectedLeadForStored,
   GUEST_BRAND_TRIO_MODEL_IDS,
+  GUEST_LINEUP_PROVIDERS,
   guestLeadForLineup,
   parseGuestBrandTrio,
   resolveGuestDefaultSelectedModels,
@@ -277,6 +279,19 @@ const modelStates = interesting.map((modelId) => {
 
 const report = auditDefaultModels({
   storedGuestDefaultModelId,
+  storedGuestLeadExpectedId:
+    storedGuestDefaultModelId === null
+      ? null
+      : expectedLeadForStored({
+          stored: storedGuestDefaultModelId,
+          lineup: effectiveGuestBrandTrio,
+          isEligible: isGuestEligible,
+          resolveReplacement,
+        }),
+  guestLineupProviders: {
+    required: [...GUEST_LINEUP_PROVIDERS],
+    effective: effectiveGuestSelectedModelIds.map((modelId) => lookup(modelId)?.provider ?? null),
+  },
   normalizedGuestDefaultModelId,
   effectiveGuestSelectedModelIds,
   guestBrandTrioModelIds: effectiveGuestBrandTrio,

@@ -7,7 +7,7 @@ import {
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
-import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck, createReplacementResolver } from "@/lib/appDefaults";
+import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck, createReplacementResolver, isOnePerLineupProvider, lineupSlotProviders } from "@/lib/appDefaults";
 import {
   assessFallbackTransition,
   describeGuestDefault,
@@ -557,15 +557,19 @@ export function PlatformSettingsPanel({
   // server refuses a lineup that would strand the stored lead, so sending it
   // explicitly is what keeps the two settings one decision.
   const lineupLead = lineupDraft.includes(appliedLead) ? appliedLead : lineupDraft[0];
-  // Each slot keeps the provider of the saved lineup's model in that slot, so
-  // the editor cannot build a lineup the one-per-provider rule refuses.
-  const slotProvider = (index: number) =>
-    models.find((model) => model.id === guestTrio[index])?.provider ?? null;
+  const providerOf = (id: string) => models.find((model) => model.id === id)?.provider ?? null;
+  // Each slot offers one provider of the rule: the saved model's own when it
+  // keeps the rule, otherwise one the saved lineup is missing -- so a lineup
+  // that breaks the rule is repaired here rather than locked to the providers
+  // that break it.
+  const slotProviders = lineupSlotProviders(guestTrio.map(providerOf));
+  const slotProvider = (index: number) => slotProviders[index] || null;
   const lineupChanged = lineupDraft.some((id, index) => id !== guestTrio[index]);
   const lineupComplete =
     lineupDraft.length === guestTrio.length &&
     lineupDraft.every(Boolean) &&
-    new Set(lineupDraft).size === lineupDraft.length;
+    new Set(lineupDraft).size === lineupDraft.length &&
+    isOnePerLineupProvider(lineupDraft.map(providerOf));
 
   const saveLineup = async () => {
     if (isLoading || isSaving || lineupSaving || reauthenticationRequired) return;
@@ -628,6 +632,7 @@ export function PlatformSettingsPanel({
       models.find((model) => model.id === id)
     ),
     trio: guestTrio,
+    providerOf,
   });
   const leadInList = guestModels.some((model) => model.id === guestDefaultModelId);
   const labelFor = (id: string) =>
@@ -1076,7 +1081,9 @@ export function PlatformSettingsPanel({
                           }}
                           className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:opacity-60"
                         >
-                          {lineupCandidates.some((model) => model.id === slotId) ? null : (
+                          {lineupCandidates.some(
+                            (model) => model.id === slotId && model.provider === slotProvider(index)
+                          ) ? null : (
                             <option value={slotId}>{labelFor(slotId)}</option>
                           )}
                           {lineupCandidates
@@ -1116,6 +1123,15 @@ export function PlatformSettingsPanel({
                   </button>
                 </fieldset>
                 <p className="mt-1 text-sm text-zinc-300">{m.guestDefault.visibleOrder(guestDescription.visibleIds.map(labelFor).join(", "))}</p>
+                {guestDescription.missingProviders.length > 0 ? (
+                  <p className="mt-2 text-sm font-bold text-amber-200" data-testid="admin-guest-lineup-provider-missing">
+                    {m.guestDefault.lineupProviderMissing(
+                      guestDescription.missingProviders
+                        .map((provider) => PROVIDER_LABELS.get(provider) ?? provider)
+                        .join(", ")
+                    )}
+                  </p>
+                ) : null}
                 {guestDescription.storedNotApplied && storedGuestLead && guestDescription.effectiveLeadId ? (
                   <p className="mt-2 text-sm font-bold text-amber-200">
                     {m.guestDefault.storedNotApplied(storedGuestLead, guestDescription.effectiveLeadId)}

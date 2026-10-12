@@ -105,6 +105,40 @@ test("the effective lead follows a retired lead's successor", () => {
   assert.notEqual(effectiveGuestLeadModelId(lead, isEligible), "lead-successor");
 });
 
+test("a stored lead succeeded in its slot is applied, and a lost provider is named", () => {
+  const [openai, anthropic, google] = GUEST_BRAND_TRIO_MODEL_IDS;
+  const isEligible = (id: string) => id !== anthropic && (id === "claude-successor" || eligible(id));
+  const resolveReplacement = (id: string, accept: (candidate: string) => boolean = () => true) =>
+    id === anthropic && accept("claude-successor") ? "claude-successor" : undefined;
+  const providers: Record<string, string> = {
+    [openai]: "openai",
+    [anthropic]: "anthropic",
+    "claude-successor": "anthropic",
+    [google]: "google",
+  };
+  const succeeded = describeGuestDefault({
+    storedLead: anthropic,
+    isEligible,
+    resolveReplacement,
+    providerOf: (id) => providers[id] ?? null,
+  });
+  assert.equal(succeeded.effectiveLeadId, "claude-successor");
+  assert.equal(succeeded.storedNotApplied, false);
+  assert.deepEqual(succeeded.missingProviders, []);
+
+  // No successor: the slot is backfilled from the fallback list, the stored
+  // lead is not what leads, and the Anthropic slot is gone.
+  const stranded = describeGuestDefault({
+    storedLead: anthropic,
+    isEligible: (id) => id !== anthropic && (eligible(id) || (GUEST_FALLBACK_MODEL_IDS as readonly string[]).includes(id)),
+    providerOf: (id) => providers[id] ?? "other",
+  });
+  assert.equal(stranded.storedNotApplied, true);
+  assert.deepEqual(stranded.missingProviders, ["anthropic"]);
+  // Without a provider lookup the console does not guess.
+  assert.deepEqual(describeGuestDefault({ storedLead: null, isEligible }).missingProviders, []);
+});
+
 test("a fallback transition check fails a registry-only model and the copy does not apply it", () => {
   const checks = assessFallbackTransition({
     candidate: {
