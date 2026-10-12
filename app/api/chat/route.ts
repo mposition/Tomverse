@@ -1105,6 +1105,62 @@ async function handleChatPost(
               unknownMarked: boolean;
           }
         | null = null;
+    const returnKnownUndispatchedGuestAutoRefusal = async (
+        response: Response
+    ): Promise<Response> => {
+        const run = guestAutoRun;
+        if (!run || run.converted || run.unknownMarked) return response;
+        try {
+            await releaseGuestAutoCreditPrehold({
+                access: run.access,
+                binding: run.binding,
+                proofId: randomUUID(),
+                reason: "refiner_confirmed_undispatched",
+            });
+            guestAutoRun = null;
+        } catch (releaseError) {
+            logRequestError(
+                "guest_auto_credit_prehold_release_failed",
+                traceId,
+                releaseError,
+                dispatchModelIdForLog
+            );
+            // The release may have committed even though its response was
+            // lost. Never retry it. One content-free receipt read distinguishes
+            // a confirmed release from the hold that must remain unknown.
+            try {
+                const receipt = await readGuestAutoCreditState({
+                    subjectKey: run.access.subjectKey,
+                    authorityId: run.binding.authority.authorityId,
+                });
+                if (receipt?.status === "guest_auto_released") {
+                    guestAutoRun = null;
+                    return response;
+                }
+                logRequestError(
+                    "guest_auto_credit_release_receipt_unconfirmed",
+                    traceId,
+                    new Error("Guest Auto release receipt was not confirmed."),
+                    dispatchModelIdForLog
+                );
+            } catch (receiptError) {
+                logRequestError(
+                    "guest_auto_credit_release_receipt_read_failed",
+                    traceId,
+                    receiptError,
+                    dispatchModelIdForLog
+                );
+            }
+            run.unknownMarked = true;
+            return tracedJsonError(
+                "Guest Smart Adaptive could not verify this turn. No retry was attempted.",
+                "GUEST_AUTO_OUTCOME_UNKNOWN",
+                503,
+                traceId
+            );
+        }
+        return response;
+    };
     let durableAttempt:
         | {
               userId: string;
@@ -2016,18 +2072,18 @@ async function handleChatPost(
             ? routedCatalogModel
             : requestedModelConfig;
         if (hasUnsupportedGeminiPrefill(modelConfig, executionMessages)) {
-            return tracedJsonError(
+            return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
                 "Gemini 3.6 and later requests must end with a user message.",
                 "GEMINI_PREFILLED_MODEL_TURN_UNSUPPORTED",
                 400,
                 traceId
-            );
+            ));
         }
         // The model that will answer, not the one that was asked for: Auto's
         // choice passes the same operational gate as a manual one.
         const adminModelAccess = await assertModelRuntimeAvailable(modelConfig.id);
         if (!adminModelAccess.allowed) {
-            return tracedJsonError(
+            return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
                 adminModelAccess.reason || "This model is temporarily unavailable.",
                 "MODEL_TEMPORARILY_UNAVAILABLE",
                 503,
@@ -2052,7 +2108,7 @@ async function handleChatPost(
                           }
                         : { noticeText: adminModelAccess.notice.text }
                     : undefined
-            );
+            ));
         }
         dispatchProviderForLog = modelConfig.provider;
         dispatchModelIdForLog = modelConfig.id;
@@ -2404,12 +2460,12 @@ async function handleChatPost(
         } catch (error) {
             const code = catalogueHostRefusalCode(error);
             if (!code) throw error;
-            return tracedJsonError(
+            return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
                 "이 모델은 카탈로그 경로로 보낼 수 없습니다.",
                 code,
                 409,
                 traceId
-            );
+            ));
         }
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;

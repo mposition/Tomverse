@@ -8875,7 +8875,7 @@ export function ChatPageClient({
         : Info;
   const trialCopy = guestTrialCopy[lang];
   const guestCompareSignInHref = `/auth/signin?callbackUrl=${encodeURIComponent(
-    `/chat?lang=${encodeURIComponent(lang)}`
+    `${REVIEW_WORKSPACE_PATH}?lang=${encodeURIComponent(lang)}`
   )}`;
   const quickModelNames = new Map(
     (compareSummary?.responseMap || []).map((response) => [

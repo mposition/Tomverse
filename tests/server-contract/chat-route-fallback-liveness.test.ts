@@ -287,6 +287,12 @@ mock.module(mod("lib/turnstile.ts"), {
 
 type GuestRefinerMode = "refined" | "unknown" | "budget_refusal" | "held";
 let guestRefinerMode: GuestRefinerMode = "refined";
+type GuestKnownUndispatchedRefusalMode =
+  | "none"
+  | "gemini_prefill"
+  | "runtime_unavailable"
+  | "catalogue_host";
+let guestKnownUndispatchedRefusalMode: GuestKnownUndispatchedRefusalMode = "none";
 let guestRefinerGate: Readonly<{
   entered: () => void;
   continue: Promise<void>;
@@ -347,7 +353,15 @@ mock.module(mod("lib/guestChatAutoSelection.ts"), {
     ) => {
       guestSelectionInputs.push(input);
       guestLifecycle.push("router");
-      const output = realGuestAutoSelection.selectGuestChatAutoModel(input);
+      const selected = realGuestAutoSelection.selectGuestChatAutoModel(input);
+      const output =
+        guestKnownUndispatchedRefusalMode === "gemini_prefill" && selected.routed
+          ? {
+              ...selected,
+              modelId: "gemini-flash-lite-latest",
+              fallbackCandidateModelIds: [],
+            }
+          : selected;
       guestSelectionOutputs.push(output);
       return output;
     },
@@ -915,6 +929,9 @@ const guestConvertInputs: Array<Record<string, unknown>> = [];
 const guestReleaseInputs: Array<Record<string, unknown>> = [];
 const guestUnknownInputs: Array<Record<string, unknown>> = [];
 const guestReadInputs: Array<Record<string, unknown>> = [];
+type GuestReleaseOutcome = "normal" | "ambiguous_before_commit" |
+  "ambiguous_after_commit";
+let guestReleaseOutcome: GuestReleaseOutcome = "normal";
 
 class TestGuestAutoCreditLedgerError extends Error {
   constructor(readonly code:
@@ -1072,11 +1089,17 @@ mock.module(mod("lib/guestChatAutoCreditLedger.ts"), {
       binding: { authority: { authorityId: string } };
     }) => {
       guestReleaseInputs.push(input as unknown as Record<string, unknown>);
+      if (guestReleaseOutcome === "ambiguous_before_commit") {
+        throw new Error("SYNTHETIC_GUEST_AUTO_RELEASE_OUTCOME_UNKNOWN");
+      }
       const claim = guestClaimsByAuthority.get(
         `${input.access.subjectKey}:${input.binding.authority.authorityId}`
       );
       assert.ok(claim, "release requires the preheld dual claim");
       claim.status = "guest_auto_released";
+      if (guestReleaseOutcome === "ambiguous_after_commit") {
+        throw new Error("SYNTHETIC_GUEST_AUTO_RELEASE_RESPONSE_LOST");
+      }
       return { phase: claim.phase, status: claim.status };
     },
     isGuestAutoCreditLedgerError: (error: unknown) =>
@@ -1214,13 +1237,37 @@ mock.module(mod("lib/billingEntitlements.ts"), {
   },
 });
 
+const realModelAvailability = require(
+  resolve(ROOT, "lib/modelAvailability.ts")
+) as typeof import("../../lib/modelAvailability");
+mock.module(mod("lib/modelAvailability.ts"), {
+  namedExports: {
+    ...realModelAvailability,
+    assertModelRuntimeAvailable: async (modelId: string) =>
+      guestKnownUndispatchedRefusalMode === "runtime_unavailable"
+        ? {
+            allowed: false,
+            reason: "Synthetic runtime refusal.",
+            notice: null,
+          }
+        : realModelAvailability.assertModelRuntimeAvailable(modelId),
+  },
+});
+
 // Constructing a provider client reads API keys and is not what is under test.
 // Both attempts go through it, which is also how each one's model id is seen.
 mock.module(mod("lib/activeAiModel.ts"), {
   namedExports: {
-    getActiveAiModel: (model: { id?: string }) => ({
-      modelId: model?.id ?? REQUESTED_MODEL_ID,
-    }),
+    getActiveAiModel: (model: { id?: string }) => {
+      if (guestKnownUndispatchedRefusalMode === "catalogue_host") {
+        const refusal = new Error("DEPLOYMENT_HOST_NOT_A_CATALOGUE_PROVIDER") as
+          Error & { code: string };
+        refusal.name = "DeploymentHostRefusal";
+        refusal.code = "DEPLOYMENT_HOST_NOT_A_CATALOGUE_PROVIDER";
+        throw refusal;
+      }
+      return { modelId: model?.id ?? REQUESTED_MODEL_ID };
+    },
   },
 });
 
@@ -2610,8 +2657,10 @@ test("an accepted Refiner decision stops safely when durable dispatch-start reco
 const resetGuestHarness = (preserveClaims = false) => {
   activeSession = null;
   guestRefinerMode = "refined";
+  guestKnownUndispatchedRefusalMode = "none";
   guestRefinerGate = null;
   guestLedgerMode = "normal";
+  guestReleaseOutcome = "normal";
   throwGuestProviderUnknown = false;
   injectPrimaryFault = false;
   fallbackBehaviour = "answers";
@@ -2665,6 +2714,8 @@ const askGuestAuto = async (options: {
   refinerMode?: GuestRefinerMode;
   ledgerMode?: GuestLedgerMode;
   providerUnknown?: boolean;
+  knownUndispatchedRefusal?: GuestKnownUndispatchedRefusalMode;
+  releaseOutcome?: GuestReleaseOutcome;
   resetHarness?: boolean;
 } = {}) => {
   if (options.resetHarness !== false) {
@@ -2678,6 +2729,9 @@ const askGuestAuto = async (options: {
   guestRefinerMode = options.refinerMode ?? "refined";
   guestLedgerMode = options.ledgerMode ?? "normal";
   throwGuestProviderUnknown = options.providerUnknown ?? false;
+  guestKnownUndispatchedRefusalMode =
+    options.knownUndispatchedRefusal ?? "none";
+  guestReleaseOutcome = options.releaseOutcome ?? "normal";
   const authority = Object.prototype.hasOwnProperty.call(options, "authority")
     ? options.authority
     : "guest-authority-a";
@@ -2690,12 +2744,21 @@ const askGuestAuto = async (options: {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: [{
-          id: clientTurnId ?? GUEST_TURN_A,
-          role: "user",
-          content: "새 Guest 대화에서 자동으로 가장 알맞은 모델을 골라 답해 줘.",
-          ...(options.attachments ? { attachments: options.attachments } : {}),
-        }],
+        messages: [
+          {
+            id: clientTurnId ?? GUEST_TURN_A,
+            role: "user",
+            content: "새 Guest 대화에서 자동으로 가장 알맞은 모델을 골라 답해 줘.",
+            ...(options.attachments ? { attachments: options.attachments } : {}),
+          },
+          ...(options.knownUndispatchedRefusal === "gemini_prefill"
+            ? [{
+                id: "guest-prefilled-assistant",
+                role: "assistant",
+                content: "Synthetic non-empty assistant prefill.",
+              }]
+            : []),
+        ],
         modelId: REQUESTED_MODEL_ID,
         turnstileToken: "synthetic-turnstile",
         ...(authority !== undefined ? { guestAutoAuthority: authority } : {}),
@@ -2961,6 +3024,98 @@ for (const [name, ledgerMode, code] of [
     assert.equal(
       (guestReleaseInputs[0] as { reason?: string }).reason,
       "refiner_confirmed_undispatched"
+    );
+  });
+}
+
+for (const [name, knownUndispatchedRefusal, status, code] of [
+  [
+    "strict Gemini prefill refusal",
+    "gemini_prefill",
+    400,
+    "GEMINI_PREFILLED_MODEL_TURN_UNSUPPORTED",
+  ],
+  [
+    "runtime availability refusal",
+    "runtime_unavailable",
+    503,
+    "MODEL_TEMPORARILY_UNAVAILABLE",
+  ],
+  [
+    "catalogue host refusal",
+    "catalogue_host",
+    409,
+    "DEPLOYMENT_HOST_NOT_A_CATALOGUE_PROVIDER",
+  ],
+] as const) {
+  test(`Guest Auto releases only the confirmed-undispatched financial prehold after ${name}`, async () => {
+    const { body } = await askGuestAuto({
+      knownUndispatchedRefusal,
+      expectedStatus: status,
+    });
+
+    assert.equal((JSON.parse(body) as { code?: string }).code, code);
+    assert.equal(guestRefinerInputs.length, 1);
+    assert.equal(guestSelectionInputs.length, 1);
+    assert.equal(guestConvertInputs.length, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(guestUnknownInputs.length, 0);
+    assert.equal(guestReadInputs.length, 0);
+    assert.equal(guestReleaseInputs.length, 1);
+    assert.equal(
+      (guestReleaseInputs[0] as { reason?: string }).reason,
+      "refiner_confirmed_undispatched"
+    );
+    assert.deepEqual(
+      guestLifecycle.filter((phase) => phase === "provider"),
+      []
+    );
+    const releasedClaim = guestClaimsByAuthority.get(
+      `${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`
+    );
+    assert.equal(releasedClaim?.phase, "guest_auto_prehold");
+    assert.equal(releasedClaim?.status, "guest_auto_released");
+  });
+}
+
+for (const [name, releaseOutcome, status, code, claimStatus] of [
+  [
+    "a release that did not commit",
+    "ambiguous_before_commit",
+    503,
+    "GUEST_AUTO_OUTCOME_UNKNOWN",
+    "guest_auto_preheld",
+  ],
+  [
+    "a committed release whose response was lost",
+    "ambiguous_after_commit",
+    409,
+    "DEPLOYMENT_HOST_NOT_A_CATALOGUE_PROVIDER",
+    "guest_auto_released",
+  ],
+] as const) {
+  test("Guest Auto reads the financial receipt once without retrying after " + name, async () => {
+    const { body } = await askGuestAuto({
+      knownUndispatchedRefusal: "catalogue_host",
+      releaseOutcome,
+      expectedStatus: status,
+    });
+
+    assert.equal((JSON.parse(body) as { code?: string }).code, code);
+    assert.equal(guestRefinerInputs.length, 1);
+    assert.equal(guestConvertInputs.length, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(guestReleaseInputs.length, 1);
+    assert.equal(guestUnknownInputs.length, 0);
+    assert.deepEqual(guestReadInputs, [{
+      subjectKey: GUEST_SUBJECT_KEY,
+      authorityId: GUEST_AUTHORITY_A,
+    }]);
+    assert.equal(
+      guestClaimsByAuthority.get(
+        GUEST_SUBJECT_KEY + ":" + GUEST_AUTHORITY_A
+      )?.status,
+      claimStatus
     );
   });
 }

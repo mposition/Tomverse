@@ -454,6 +454,9 @@ test.describe("guest journey: attach a file, compare, review", { tag: "@ui-risk"
     // forced past Playwright's enabled-ness heuristic rather than skipped.
     await button.click({ force: true });
     await expect(page.locator("#guest-compare-signin-title")).toBeVisible();
+    await expect(
+      page.locator('[aria-labelledby="guest-compare-signin-title"]').locator("a").first()
+    ).toHaveAttribute("href", "/auth/signin?callbackUrl=%2Freview%3Flang%3Den");
 
     expect(watch.hydration).toEqual([]);
     expect(watch.errors).toEqual([]);
