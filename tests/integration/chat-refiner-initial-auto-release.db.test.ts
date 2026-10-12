@@ -61,8 +61,9 @@ test("initial Auto owner activation and rollout use one real audit chain",
       select: { value: true },
     })).value, "false");
     const rows = await prisma.adminAuditLog.findMany({ where: {
-      targetType: "RailwayDeployment",
-      targetId: runtime.RAILWAY_DEPLOYMENT_ID,
+      targetType: "ChatReleaseFingerprint",
+      targetId: (await import("@/lib/chatRefinerInitialAutoRelease"))
+        .chatRefinerInitialAutoRuntimeBinding(runtime).releaseFingerprint,
       action: { in: ["chat_auto.initial_release_exception_activated",
         "prompt_refiner.product_initial_auto_release_activated"] },
     }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
@@ -79,8 +80,9 @@ test("initial Auto owner activation and rollout use one real audit chain",
       /activation_duplicate/,
     );
     assert.equal(await prisma.adminAuditLog.count({ where: {
-      targetType: "RailwayDeployment",
-      targetId: runtime.RAILWAY_DEPLOYMENT_ID,
+      targetType: "ChatReleaseFingerprint",
+      targetId: (await import("@/lib/chatRefinerInitialAutoRelease"))
+        .chatRefinerInitialAutoRuntimeBinding(runtime).releaseFingerprint,
       action: { in: ["chat_auto.initial_release_exception_activated",
         "prompt_refiner.product_initial_auto_release_activated"] },
     } }), 2);
@@ -92,9 +94,10 @@ test("initial Auto owner activation and rollout use one real audit chain",
       where: { key: "feature.promptRefinerEnabled" },
       select: { value: true },
     })).value, "true");
-    assert.equal(await release.readChatRefinerInitialAutoRouterAuthority({
+    assert.ok(await release.readChatRefinerInitialAutoRouterAuthority({
       ...runtime, RAILWAY_GIT_COMMIT_SHA: "b".repeat(40),
-    }), null);
+      RAILWAY_DEPLOYMENT_ID: randomUUID(),
+    }));
     const otherDeployment = { ...runtime, RAILWAY_DEPLOYMENT_ID: randomUUID() };
     const disabled = await rollout.setChatRefinerInitialAutoRollout({
       session, request, enabled: false,

@@ -25,7 +25,7 @@ test("recorded capability stays distinct from admission and pending Router gates
       runtimeCommitSha: commitSha,
       runtimeDeploymentId: deploymentId,
       approvalAuditLogId: "approval-audit-1",
-      releaseKind: "initial_auto_v1" as const,
+      releaseKind: "initial_auto_v2" as const,
       routerExceptionAuditLogId: "router-audit-1",
     }),
   });
@@ -38,7 +38,7 @@ test("recorded capability stays distinct from admission and pending Router gates
     explicitEnabled: true,
     autoEnabled: false,
     approvalAuditLogId: "approval-audit-1",
-    releaseKind: "initial_auto_v1",
+    releaseKind: "initial_auto_v2",
     routerExceptionAuditLogId: "router-audit-1",
   });
   assert.equal(snapshot.router.ready, false);
@@ -231,7 +231,7 @@ test("stored rollout off preserves recorded authority without claiming availabil
       runtimeCommitSha: commitSha,
       runtimeDeploymentId: deploymentId,
       approvalAuditLogId: "product-audit-1",
-      releaseKind: "initial_auto_v1" as const,
+      releaseKind: "initial_auto_v2" as const,
       routerExceptionAuditLogId: "router-audit-1",
     }),
   });
@@ -241,7 +241,7 @@ test("stored rollout off preserves recorded authority without claiming availabil
     explicitEnabled: false,
     autoEnabled: false,
     approvalAuditLogId: "product-audit-1",
-    releaseKind: "initial_auto_v1",
+    releaseKind: "initial_auto_v2",
     routerExceptionAuditLogId: "router-audit-1",
   });
 });

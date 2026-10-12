@@ -234,11 +234,13 @@ test("initial release resume records the current policy and exact authority pair
     });
     assert.equal(result.generation, 8);
     assert.deepEqual(capturedAuditMetadata, {
-      version: "prompt-refiner-product-auto-resume-v2",
-      releaseKind: "initial_auto_v1",
+      version: "prompt-refiner-product-auto-resume-v3",
+      releaseKind: "initial_auto_v2",
       policyCommit: "3aeb001a4abde2d93e945ed5e5de61b10c412c0b",
       policySha256:
         "a9dbe509a056152015a59a45fd6438304fac36f36521a1319c11f8d1704970f9",
+      continuityPolicySha256:
+        "91bb9c880c270355a857481f0015b7176dc17cd3fe46091a86c15a20e6d45cec",
       operatorConfirmedReasonCode: "unknown_dispatch_or_cost",
       pauseAuditLogId: "pause-audit",
       priorGeneration: 7,

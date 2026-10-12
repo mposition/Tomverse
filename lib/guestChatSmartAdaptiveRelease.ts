@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import { chatRefinerInitialAutoRuntimeBinding } from
   "@/lib/chatRefinerInitialAutoRelease";
+import { CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256 } from
+  "@/lib/chatRefinerInitialAutoRelease";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 import { ROUTER_VERSIONS } from "@/lib/routerDecision";
 import {
@@ -16,7 +18,7 @@ export const GUEST_CHAT_SMART_ADAPTIVE_POLICY_SHA256 =
 export const GUEST_CHAT_SMART_ADAPTIVE_ACTION =
   "chat_guest.smart_adaptive_release_activated" as const;
 export const GUEST_CHAT_SMART_ADAPTIVE_SUMMARY =
-  "Activated Guest Chat Smart Adaptive and Prompt Refiner for the exact deployment." as const;
+  "Activated Guest Chat Smart Adaptive and Prompt Refiner for the stable release." as const;
 export const GUEST_CHAT_SMART_ADAPTIVE_ROLLOUT_ENV =
   "CHAT_GUEST_SMART_ADAPTIVE_ROLLOUT_ENABLED" as const;
 export const GUEST_CHAT_SMART_ADAPTIVE_WRITER_ENV =
@@ -34,6 +36,7 @@ const sha256 = (value: unknown) => createHash("sha256")
 export type GuestChatSmartAdaptiveRuntimeBinding = Readonly<{
   runtimeCommitSha: string;
   runtimeDeploymentId: string;
+  releaseFingerprint: string;
   configDigest: string;
   baseRouterConfigDigest: string;
   promptRefinerCandidateDigest: string;
@@ -56,7 +59,7 @@ export function guestChatSmartAdaptiveAuthorityTtlSeconds(
   return value;
 }
 
-/** Exact deployment controls. Secrets are checked for presence, never hashed. */
+/** Serving controls. Secrets are checked for presence, never hashed. */
 export function guestChatSmartAdaptiveRuntimeBinding(
   runtime: Record<string, string | undefined> = process.env,
 ): GuestChatSmartAdaptiveRuntimeBinding {
@@ -70,11 +73,11 @@ export function guestChatSmartAdaptiveRuntimeBinding(
   guestChatSmartAdaptiveAuthorityTtlSeconds(runtime);
   const base = chatRefinerInitialAutoRuntimeBinding(runtime);
   const configDigest = sha256({
-    version: "guest-chat-smart-adaptive-config-v1",
+    version: "guest-chat-smart-adaptive-config-v2",
     policyVersion: GUEST_CHAT_SMART_ADAPTIVE_POLICY_VERSION,
     policySha256: GUEST_CHAT_SMART_ADAPTIVE_POLICY_SHA256,
-    runtimeCommitSha: base.runtimeCommitSha,
-    runtimeDeploymentId: base.runtimeDeploymentId,
+    continuityPolicySha256: CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256,
+    releaseFingerprint: base.releaseFingerprint,
     baseRouterConfigDigest: base.routerConfigDigest,
     routerVersions: ROUTER_VERSIONS,
     promptRefinerCandidateDigest: PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
@@ -90,6 +93,7 @@ export function guestChatSmartAdaptiveRuntimeBinding(
   }
   return Object.freeze({ runtimeCommitSha: base.runtimeCommitSha,
     runtimeDeploymentId: base.runtimeDeploymentId,
+    releaseFingerprint: base.releaseFingerprint,
     configDigest, baseRouterConfigDigest: base.routerConfigDigest,
     promptRefinerCandidateDigest: PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
     promptRefinerPricePinDigest: PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
@@ -103,11 +107,13 @@ export function guestChatSmartAdaptiveActivationMetadata(input: Readonly<{
   baseProductActivationAuditLogId: string;
 }>) {
   return Object.freeze({
-    version: "guest-chat-smart-adaptive-release-v1",
+    version: "guest-chat-smart-adaptive-release-v2",
     policyVersion: GUEST_CHAT_SMART_ADAPTIVE_POLICY_VERSION,
     policySha256: GUEST_CHAT_SMART_ADAPTIVE_POLICY_SHA256,
+    continuityPolicySha256: CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256,
     runtimeCommitSha: input.binding.runtimeCommitSha,
     runtimeDeploymentId: input.binding.runtimeDeploymentId,
+    releaseFingerprint: input.binding.releaseFingerprint,
     configDigest: input.binding.configDigest,
     baseRouterConfigDigest: input.binding.baseRouterConfigDigest,
     promptRefinerCandidateDigest:

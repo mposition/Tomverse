@@ -52,6 +52,7 @@ const guestRelease = {
   binding: {
     runtimeCommitSha: "a".repeat(40),
     runtimeDeploymentId: "123e4567-e89b-42d3-a456-426614174000",
+    releaseFingerprint: "0".repeat(64),
     configDigest: "1".repeat(64),
     baseRouterConfigDigest: "2".repeat(64),
     promptRefinerCandidateDigest: "3".repeat(64),
@@ -105,7 +106,7 @@ test("the owner control keeps activation and rollout as separate actions", () =>
     release: { state: "disabled_by_rollout" as const,
       explicitEnabled: false, autoEnabled: false,
       approvalAuditLogId: "product-audit",
-      releaseKind: "initial_auto_v1" as const,
+      releaseKind: "initial_auto_v2" as const,
       routerExceptionAuditLogId: "router-audit" },
   };
   for (const messages of [

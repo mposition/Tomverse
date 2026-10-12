@@ -28,7 +28,7 @@ export type ChatRefinerInitialAutoEvidenceRefs = z.infer<
   typeof chatRefinerInitialAutoEvidenceRefsSchema>;
 
 export const chatRefinerInitialAutoActivationRequestSchema = z.object({
-  releaseKind: z.literal("initial_auto_v1"),
+  releaseKind: z.literal("initial_auto_v2"),
   ...runtime,
   evidenceRefs: chatRefinerInitialAutoEvidenceRefsSchema,
   confirmation: z.literal(CHAT_REFINER_INITIAL_AUTO_ACTIVATION_CONFIRMATION),
@@ -49,7 +49,7 @@ export const chatRefinerInitialAutoRolloutRequestSchema = z.discriminatedUnion(
 );
 
 export const chatRefinerInitialAutoActivationResponseSchema = z.object({
-  releaseKind: z.literal("initial_auto_v1"),
+  releaseKind: z.literal("initial_auto_v2"),
   routerActivationAuditLogId: z.string().min(1).max(128),
   productActivationAuditLogId: z.string().min(1).max(128),
   runtimeCommitSha: z.string().regex(/^[0-9a-f]{40}$/),

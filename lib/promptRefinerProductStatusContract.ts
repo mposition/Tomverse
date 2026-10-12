@@ -36,7 +36,7 @@ export const promptRefinerProductStatusSchema = z.object({
     explicitEnabled: z.boolean().nullable(),
     autoEnabled: z.boolean().nullable(),
     approvalAuditLogId: z.string().min(1).max(128).nullable(),
-    releaseKind: z.enum(["latency_only_v1", "initial_auto_v1"]).nullable(),
+    releaseKind: z.enum(["latency_only_v1", "initial_auto_v2"]).nullable(),
     routerExceptionAuditLogId: z.string().min(1).max(128).nullable(),
   }).strict(),
   router: z.object({

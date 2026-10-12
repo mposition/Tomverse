@@ -45,7 +45,7 @@ test("an unread Auto guard has no enabled confirmation or resume action", () => 
       exactProductIdentity: true },
     controls: { rollout: "enabled", killSwitchEngaged: false },
     release: { state: "recorded", explicitEnabled: true, autoEnabled: false,
-      approvalAuditLogId: "product-audit", releaseKind: "initial_auto_v1",
+      approvalAuditLogId: "product-audit", releaseKind: "initial_auto_v2",
       routerExceptionAuditLogId: "router-audit" },
     router: { version: "auto-rollout-readiness-v1", ready: false, outstanding: [], problems: [] },
     completionClaim: "not_established_by_status_readback",

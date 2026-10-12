@@ -150,8 +150,15 @@ measurement 판정은 원래 상태로 보존한다. 실제 제품 감사 무결
 원문 보존, 비용·fallback·kill·latch와 finalized manifest는 면제하지 않는다.
 기존 activation shape는 latency-only 조건을 그대로 검증한다.
 
+2026-10-13 릴리스 연속성 v2(`docs/policy/chat-refiner-stable-release-authority-v2.md`)
+부터 새 Owner activation은 검증한 현재 commit/deployment를 감사 provenance로
+남기되, 이후 요청의 지속 권한은 같은 실행 소스 지문과 유효 제어값에 결속한다.
+배포 UUID나 전체 commit만 바뀌어도 소스 지문이 같으면 재활성화하지 않는다.
+실행 소스·관련 schema·가격·Router/Refiner/Guest 설정이 바뀌거나 지문을 읽지
+못하면 닫는다. 이전 v1 exact-deployment 감사 기록은 소급해서 확장하지 않는다.
+
 초기 activation과 rollout은 별도 owner action이다. activation은 flag를 자동으로 켜지
-않으며, 별도 제어는 유효한 exact activation을 확인한 뒤
+않으며, 별도 제어는 유효한 v2 릴리스 권한을 확인한 뒤
 `feature.promptRefinerEnabled`만 canonical 감사와 같은 transaction에서 변경한다.
 끄기는 권한이 닫힌 뒤에도 가능하다. kill switch와 Auto pause latch를 변경하거나
 자동 재개하지 않는다.
@@ -293,16 +300,16 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
 4. 기존 출시의 승인된 품질 증거와 release gate disposition. 별도 초기 Auto 출시는
    새 정책의 네 가지 필수 확인과 exact owner activation을 사용하며, 기존 품질 실패를
    통과로 바꾸지 않고 후속 개선 항목으로 보존한다.
-5. server-owned offered 결정, exact-deployment release readback과 kill switch
+5. server-owned offered 결정, v2 stable-release readback과 kill switch
 
 1·2·5번의 제품 경계는 구현됐다. `feature.promptRefinerEnabled`는 literal `"true"`만
 허용하는 default-off AppSetting이며, `PROMPT_REFINER_KILL_SWITCH`에 공백이 아닌
 값이 하나라도 있으면 rollout보다 먼저 꺼진다. 그러나 rollout 허용만으로는 UI가
 나오지 않는다. 같은 서버 요청에서 실제 adapter readiness까지 참이어야 하며,
-adapter code가 존재해도 exact release readback이 false면 UI와 dispatch는 닫힌다.
+adapter code가 존재해도 v2 release readback이 false면 UI와 dispatch는 닫힌다.
 `promptRefinerProductAdapterReady()`는 release 결과 없이 false이며 AppSetting만으로
 제품 mode를 만들 수 없다. kill switch, DB-disabled fixture, invalid/missing Railway
-commit/deployment는 release DB를 읽기 전 닫히고, stored flag false·DB read 오류·서명
+commit/deployment 또는 실행 소스 지문은 release DB를 읽기 전 닫히고, stored flag false·DB read 오류·서명
 또는 pin 불일치도 안전하게 false다. 활성화 API는 운영자 owner의 최근 인증과 exact
 serving deployment를 요구하며, evidence id나 request boolean 존재만으로 통과하지 않는다.
 
