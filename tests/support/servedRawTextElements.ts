@@ -20,6 +20,7 @@ export function servedRawTextElements(html: string): ServedRawTextElement[] {
         body: html.slice(location.startTag.endOffset, location.endTag?.startOffset ?? location.endOffset),
       });
     }
+    // Template content is inert, outside the active document's CSP bodies.
     if ("childNodes" in node) node.childNodes.forEach(visit);
   };
   visit(parse(html, { sourceCodeLocationInfo: true }));

@@ -14,6 +14,7 @@ test("script body extraction handles HTML casing and malformed closing tags", ()
   assert.equal(scriptBody("<script>first()</script><script>second()</script>"), "first()");
   assert.equal(scriptBody("<!-- <script>fake()</script> --><script>real()</script>"), "real()");
   assert.equal(scriptBody("<script-example>fake()</script-example>"), undefined);
+  assert.equal(scriptBody("<template><script>inert()</script></template><script>active()</script>"), "active()");
 });
 
 test("raw-text extraction keeps source bytes and parsed attributes for CSP checks", () => {

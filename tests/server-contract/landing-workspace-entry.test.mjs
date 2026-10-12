@@ -69,8 +69,7 @@ test("the static marketing shell supplies public Guest entry without an account 
 test("the root static document supplies product links without a build-time account offer", () => {
   const element = LandingPage();
   assert.equal(element.type, LaunchHomepage);
-  assert.equal(element.props.chatHref, "/chat?lang=en");
-  assert.equal(element.props.reviewHref, "/review?lang=en");
+  assert.equal(element.props.reviewInfoHref, "/en/products/review");
   assert.equal("chatSurfaceAvailable" in element.props, false);
   assert.equal(sessionReads, 0);
   assert.equal(availabilityReads, 0);
@@ -81,8 +80,7 @@ test("each localized static document carries product links without account reads
     const element = await LocalizedLandingPage({ params: Promise.resolve({ locale }) });
     const landing = element.props.children.props.children;
     assert.equal(landing.type, LaunchHomepage);
-    assert.equal(landing.props.chatHref, `/chat?lang=${locale}`);
-    assert.equal(landing.props.reviewHref, `/review?lang=${locale}`);
+    assert.equal(landing.props.reviewInfoHref, `/${locale}/products/review`);
     assert.equal("chatSurfaceAvailable" in landing.props, false);
   }
   assert.equal(sessionReads, 0);
