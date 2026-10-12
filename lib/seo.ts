@@ -85,6 +85,15 @@ export const localizedLanguageAlternates = (basePath: string) => {
   return languages;
 };
 
+export const localizedQueryPath = (locale: Language, basePath: string) =>
+  `${basePath}?lang=${locale}`;
+
+export const queryLanguageAlternates = (basePath: string) => ({
+  "x-default": `${SITE_ORIGIN}${localizedQueryPath("en", basePath)}`,
+  ...Object.fromEntries(SEO_LOCALES.map(locale => [hreflangByLocale[locale],
+    `${SITE_ORIGIN}${localizedQueryPath(locale, basePath)}`])),
+});
+
 type PageMetadataOptions = {
   title: string;
   description: string;

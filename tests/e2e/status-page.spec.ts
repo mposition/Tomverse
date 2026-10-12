@@ -3,6 +3,16 @@ import { getPublicStatusCopy } from "../../lib/publicStatusCopy";
 
 const english = getPublicStatusCopy("en");
 
+test("English status query stays English despite another preferred browser language", async ({ request }) => {
+  const response = await request.get("/status?lang=en", { headers: { "accept-language": "ko-KR" } });
+  expect(response.status()).toBe(200);
+  const html = await response.text();
+  expect(html).toMatch(/<html\b[^>]*lang="en"/);
+  expect(html).toContain('href="https://tomverse.app/status?lang=en"');
+  expect(html).toContain(english.dataUnavailableHeadline);
+  expect(html).toMatch(/hreflang="en"[^>]*href="https:\/\/tomverse\.app\/status\?lang=en"|href="https:\/\/tomverse\.app\/status\?lang=en"[^>]*hreflang="en"/);
+});
+
 // The E2E environment deliberately points DATABASE_URL at an unreachable
 // host (see playwright.config.ts), which makes this the real integration
 // test for the "provider health data can't be loaded" fallback path

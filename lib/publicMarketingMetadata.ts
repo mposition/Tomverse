@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { Language } from "@/lib/language";
 import { MARKETING_LOCALE_ALIASES, marketingLocaleFor } from "@/lib/marketingLocale";
-import { SEO_LOCALES, SITE_ORIGIN, createPageMetadata, localizedPath } from "@/lib/seo";
+import { SEO_LOCALES, createPageMetadata, localizedPath, localizedQueryPath, queryLanguageAlternates } from "@/lib/seo";
 
 type Copy = { title: string; description: string };
 type LocalizedPairs = [[string, string], [string, string], [string, string], [string, string], [string, string], [string, string], [string, string]];
@@ -148,17 +148,13 @@ const knowledgeCopy = localized(
 
 export const assistantKnowledgeMetadata = (locale: Language): Metadata => {
   const basePath = "/guides/assistant-knowledge";
-  const path = locale === "en" ? basePath : `${basePath}?lang=${locale}`;
+  const path = localizedQueryPath(locale, basePath);
   const metadata = createPageMetadata({ ...knowledgeCopy[locale], path, locale, absoluteTitle: true });
   return {
     ...metadata,
     alternates: {
       ...metadata.alternates,
-      languages: {
-        "x-default": `${SITE_ORIGIN}${basePath}`,
-        ...Object.fromEntries(SEO_LOCALES.map((lang) => [lang === "zh" ? "zh-Hans" : lang,
-          `${SITE_ORIGIN}${lang === "en" ? basePath : `${basePath}?lang=${lang}`}`])),
-      },
+      languages: queryLanguageAlternates(basePath),
     },
   };
 };

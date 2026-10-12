@@ -75,7 +75,7 @@ test("Knowledge query metadata points only to supported query-language pages", (
     const metadata = assistantKnowledgeMetadata(locale);
     const url = new URL(metadata.alternates.canonical);
     assert.equal(url.pathname, "/guides/assistant-knowledge");
-    assert.equal(url.searchParams.get("lang"), locale === "en" ? null : locale);
+    assert.equal(url.searchParams.get("lang"), locale);
     for (const alternate of Object.values(metadata.alternates.languages)) assert.equal(new URL(alternate).pathname, url.pathname);
     assert.equal(metadata.alternates.languages["zh-CN"], undefined);
   }
