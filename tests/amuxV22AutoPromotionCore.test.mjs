@@ -54,7 +54,7 @@ test("exception uses the owner audit writer and keeps the existing safety gates"
   }
 });
 
-test("owner control is separate from the read-only board and stops on unknown writes", () => {
+test("owner activation is separate from guarded board admission and stops on unknown writes", () => {
   const ui = readFileSync("components/admin/AmuxV22PromotionControl.tsx", "utf8");
   const board = readFileSync("components/admin/AmuxExecutionWorkspace.tsx", "utf8");
   assert.match(ui, /expectedAuditLogId: control\.authorizationAuditLogId/);
@@ -64,6 +64,8 @@ test("owner control is separate from the read-only board and stops on unknown wr
   assert.match(ui, /if \(!control \|\| busy \|\| unknown/);
   assert.match(ui, /adminRecentAuthenticationHref\("\/admin\/amux-promotion\?tab=auto-promotion"\)/);
   assert.doesNotMatch(board, /method: "POST"/);
+  assert.doesNotMatch(board, /\/api\/admin\/amux\/v22\/promotion-control/);
+  assert.match(board, /AmuxExecutionMovePanel/);
 });
 
 test("v22 admission requires the exact explicit environment flag", () => {
