@@ -143,9 +143,9 @@ test("Review information is localized static marketing while the workspace remai
   assert.equal(localizedMarketingRedirect({ pathname: "/ko/products/review", language: "fr", source: "search" }), null);
 });
 
-test("explicit product entry keeps Review separate and gives only guest Review its preview marker", () => {
-  assert.equal(marketingProductEntryHref("review", "ko"), "/review?lang=ko&entry=guest-preview");
-  assert.equal(marketingProductEntryHref("review", "ko", true), "/review?lang=ko");
+test("explicit product entry keeps Review separate without changing a visitor's workspace preferences", () => {
+  assert.equal(marketingProductEntryHref("review", "ko"), "/review?lang=ko");
   assert.equal(marketingProductEntryHref("chat", "ko"), "/chat/workspace?lang=ko");
-  assert.equal(marketingProductEntryHref("review", "a&b", true), "/review?lang=a%26b");
+  assert.equal(marketingProductEntryHref("review", "a&b"), "/review?lang=a%26b");
+  assert.equal(new URL(marketingProductEntryHref("review", "ko"), "https://tomverse.test").searchParams.has("entry"), false);
 });

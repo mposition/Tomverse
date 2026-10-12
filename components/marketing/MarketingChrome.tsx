@@ -140,7 +140,7 @@ const chrome = {
   },
   fr: {
     app: "Ouvrir Review",
-    appSignedIn: "Revenir a Review",
+    appSignedIn: "Revenir à Review",
     menu: "Menu",
     close: "Fermer le menu",
     topMenu: [
@@ -159,8 +159,8 @@ const chrome = {
     ],
   },
   de: {
-    app: "Review oeffnen",
-    appSignedIn: "Zurueck zu Review",
+    app: "Review öffnen",
+    appSignedIn: "Zurück zu Review",
     menu: "Menu",
     close: "Menu schliessen",
     topMenu: [
@@ -257,7 +257,7 @@ function LegacyMarketingHeader({
   // The generic marketing entry has no guest-preview marker. Review handles
   // the visitor's session itself, so resolving a session changes the label
   // without replacing the link under a visitor about to activate it.
-  const chatHref = marketingProductEntryHref("review", lang, true);
+  const chatHref = marketingProductEntryHref("review", lang);
   const appCtaLabel =
     sessionStatus === "authenticated" ? labels.appSignedIn : labels.app;
 

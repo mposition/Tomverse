@@ -54,9 +54,9 @@ export function useMarketingChatEntry() {
   const { lang } = useLanguage();
   const chatInfoHref = `${localizedPath(lang, "/")}#chat`;
   const chatHref = availability.chatAvailable
-    ? marketingProductEntryHref("chat", lang, availability.isAuthenticated)
+    ? marketingProductEntryHref("chat", lang)
     : chatInfoHref;
-  const reviewHref = marketingProductEntryHref("review", lang, availability.isAuthenticated);
+  const reviewHref = marketingProductEntryHref("review", lang);
   return {
     ...availability,
     chatInfoHref,

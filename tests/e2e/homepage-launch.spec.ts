@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { prepareGuestPage } from "./support/app-fixtures";
+import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 
 const guides = [
@@ -22,6 +22,7 @@ for (const width of [1024, 1100, 1279]) {
     expect(loginUrl.pathname).toBe("/auth/signin");
     expect(loginUrl.searchParams.get("callbackUrl"))
       .toBe(await page.getByTestId("marketing-header-app-cta").getAttribute("href"));
+    expect(new URL(loginUrl.searchParams.get("callbackUrl")!, "https://tomverse.test").searchParams.has("entry")).toBe(false);
     const box = await login.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);
@@ -71,7 +72,7 @@ for (const lang of ["en", "ko"] as const) {
     await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "unauthenticated");
     const guestChatAvailable = await page.getByTestId("launch-homepage").getAttribute("data-guest-chat-trial-available") === "true";
     await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
-      "href", guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=${lang}` : `/review?lang=${lang}&entry=guest-preview`
+      "href", guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=${lang}` : `/review?lang=${lang}`
     );
     const menuReview = page.getByTestId("header-review-link");
     if (!await menuReview.isVisible()) {
@@ -87,7 +88,7 @@ for (const lang of ["en", "ko"] as const) {
     await expect(page.getByTestId("landing-quick-summary-card")).toBeVisible();
     await expect(page.getByTestId("landing-item-verification-card")).toBeVisible();
     await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
-      "href", `/review?lang=${lang}&entry=guest-preview`
+      "href", `/review?lang=${lang}`
     );
   });
 }
@@ -124,7 +125,7 @@ test("Guest Chat either opens its introduction or starts the available workspace
     await expect(page.locator("#chat")).toBeVisible();
   }
   const destination = await page.getByTestId("landing-primary-cta").getAttribute("href");
-  expect(destination).toBe(guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=ko` : "/review?lang=ko&entry=guest-preview");
+  expect(destination).toBe(guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=ko` : "/review?lang=ko");
   const destinationUrl = new URL(destination!, "https://tomverse.test");
   const loaded = page.waitForResponse(response => response.request().isNavigationRequest() && new URL(response.url()).pathname === destinationUrl.pathname);
   await page.getByTestId("landing-primary-cta").click();
@@ -133,7 +134,7 @@ test("Guest Chat either opens its introduction or starts the available workspace
   await expect(page.getByTestId("landing-hero-title")).toHaveCount(0);
 });
 
-test("a missing or unavailable capability keeps authenticated marketing on the Review alternative", async ({ page }) => {
+test("the real marketing offer read is private and closed without an authenticated server session", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.unroute("**/api/auth/session**");
@@ -142,17 +143,52 @@ test("a missing or unavailable capability keeps authenticated marketing on the R
     contentType: "application/json",
     body: JSON.stringify({ user: { id: "qa-user", name: "QA User", email: "qa@tomverse.app" }, expires: "2099-01-01T00:00:00.000Z" }),
   }));
-  // Keep the actual capability route. This base returns 404; a product build
-  // may return a closed offer, but neither is an offered authenticated Chat.
-  const read = page.waitForResponse(response => new URL(response.url()).pathname === "/api/products/chat/capabilities");
+  // Browser session mocking cannot grant the server an authenticated offer.
+  const read = page.waitForResponse(response => new URL(response.url()).pathname === "/api/marketing/chat-entry");
   await page.goto("/");
   const response = await read;
-  if (response.ok()) expect((await response.json()).autoSelection?.offered).toBe(false);
-  else expect(response.status()).toBe(404);
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toEqual({ offered: false });
+  expect(response.headers()["cache-control"]).toContain("private");
+  expect(response.headers()["cache-control"]).toContain("no-store");
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "authenticated");
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("href", "/review?lang=en");
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveText("Back to Review");
   await expect(page.getByTestId("header-chat-link")).toHaveAttribute("href", "/en#chat");
+});
+
+test("an offered account opens Chat and sees account-specific access copy", async ({ page }) => {
+  await prepareGuestPage(page, "ko");
+  await mockAuthenticatedApi(page);
+  await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3114" }]);
+  await page.route("**/api/marketing/chat-entry", route => route.fulfill({
+    status: 200, contentType: "application/json", body: JSON.stringify({ offered: true }),
+  }));
+  await page.goto("/ko");
+  await expect(page.getByTestId("landing-primary-cta")).toHaveAccessibleName("Chat 시작하기");
+  await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", `${CHAT_WORKSPACE_PATH}?lang=ko`);
+  await expect(page.getByTestId("landing-hero-signup-note")).toContainText("현재 계정에서 Chat");
+  await expect(page.locator("#launch-guest-title")).toHaveText("나에게 맞는 AI, 한곳에서 시작하세요.");
+  const loaded = page.waitForResponse(response => response.request().isNavigationRequest() && new URL(response.url()).pathname === CHAT_WORKSPACE_PATH);
+  await page.getByTestId("landing-primary-cta").click();
+  expect((await loaded).status()).toBe(200);
+  await expect(page).toHaveURL(url => url.pathname === CHAT_WORKSPACE_PATH && url.searchParams.get("lang") === "ko");
+});
+
+test("a marketing Review entry preserves an authenticated organizer preference", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await mockAuthenticatedApi(page);
+  await page.route("**/api/marketing/chat-entry", route => route.fulfill({
+    status: 200, contentType: "application/json", body: JSON.stringify({ offered: false }),
+  }));
+  await page.goto("/");
+  await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "authenticated");
+  await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", "/review?lang=en");
+  await page.evaluate(() => localStorage.setItem("tomverse_sidebar_organizer_v1", "expanded"));
+  await page.getByTestId("landing-primary-cta").click();
+  await expect(page).toHaveURL(url => url.pathname === "/review" && !url.searchParams.has("entry"));
+  await expect(page.getByTestId("chat-input")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("tomverse_sidebar_organizer_v1"))).toBe("expanded");
 });
 
 test("resolving a session preserves the selected example and the mounted hero", async ({ page }) => {
