@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   GUEST_BRAND_TRIO_MODEL_IDS,
   GUEST_FALLBACK_MODEL_IDS,
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
   createReplacementResolver,
   parseGuestBrandTrio,
@@ -109,7 +110,7 @@ export async function readGuestLeadFacts(db: LeadDb = prisma): Promise<{
     stored,
     effective: effectiveGuestLeadModelId(
       stored,
-      isEligible,
+      createDefaultLineupEligibilityCheck(lookup, isEligible),
       createReplacementResolver(lookup),
       trio
     ),

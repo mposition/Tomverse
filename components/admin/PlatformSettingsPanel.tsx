@@ -7,7 +7,7 @@ import {
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
-import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck, createReplacementResolver, isOnePerLineupProvider, lineupSlotProviders } from "@/lib/appDefaults";
+import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createDefaultLineupEligibilityCheck, createGuestEligibilityCheck, createReplacementResolver, isDefaultLineupServable, isOnePerLineupProvider, lineupSlotProviders } from "@/lib/appDefaults";
 import {
   assessFallbackTransition,
   describeGuestDefault,
@@ -173,10 +173,14 @@ export function PlatformSettingsPanel({
       ),
     [guestTrio, models]
   );
-  // What a lineup slot may name. The server checks the same three conditions
-  // and the price as well (guestBrandTrioRejection), so a model with no
-  // verified price is offered here and refused with its reason there.
-  const lineupCandidates = models.filter(isGuestStandard);
+  // What a lineup slot may name: the lifecycle the save checks
+  // (isDefaultLineupServable -- a limited row is not offered) plus guest and
+  // Standard. The server also checks the price (guestBrandTrioRejection), so a
+  // model with no verified price is offered here and refused with its reason
+  // there.
+  const lineupCandidates = models.filter(
+    (model) => isGuestStandard(model) && isDefaultLineupServable(model)
+  );
   const [guestDefaultModelId, setGuestDefaultModelId] = useState(
     settings.guestDefaultModelId
   );
@@ -622,8 +626,11 @@ export function PlatformSettingsPanel({
     };
   }, []);
 
-  const guestEligibility = createGuestEligibilityCheck((id) =>
-    models.find((model) => model.id === id)
+  const lookupModel = (id: string) => models.find((model) => model.id === id);
+  // What a default may name, as every default resolver judges it.
+  const guestEligibility = createDefaultLineupEligibilityCheck(
+    lookupModel,
+    createGuestEligibilityCheck(lookupModel)
   );
   const guestDescription = describeGuestDefault({
     storedLead: storedGuestLead,

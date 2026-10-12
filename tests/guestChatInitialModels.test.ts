@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
   createReplacementResolver,
   getGuestDefaultSelectedModels,
@@ -23,6 +24,7 @@ import { getModel, isEnabledModelId, type AiModel } from "@/lib/models";
 const catalogue = {
   isEnabledModelId,
   isGuestEligible: createGuestEligibilityCheck(getModel),
+  isDefaultEligible: createDefaultLineupEligibilityCheck(getModel, createGuestEligibilityCheck(getModel)),
 };
 
 const resolve = (environment: GuestInitialModelEnvironment = {}) =>
@@ -318,6 +320,7 @@ test("the first paint succeeds a retired trio member through the catalogue's res
   const retiredCatalogue = {
     isEnabledModelId: (id: string) => Boolean(lookup(id)?.enabled),
     isGuestEligible: createGuestEligibilityCheck(lookup),
+    isDefaultEligible: createDefaultLineupEligibilityCheck(lookup, createGuestEligibilityCheck(lookup)),
     resolveReplacement: createReplacementResolver(lookup),
   };
   const selection = resolveGuestInitialSelectedModels({
@@ -325,4 +328,39 @@ test("the first paint succeeds a retired trio member through the catalogue's res
     leadModelId: openai,
   });
   assert.deepEqual(selection.models, [openai, successor.id, google]);
+});
+
+test("a lineup member later limited or unlisted is succeeded in the default, but a guest who picks it keeps it", () => {
+  const [openai, anthropic, google] = GUEST_BRAND_TRIO_MODEL_IDS;
+  const successor: AiModel = { ...getModel(anthropic)!, id: "claude-haiku-next", replacementModelId: undefined };
+  for (const change of [{ status: "limited" as const }, { publiclyListed: false }]) {
+    // Still enabled, guest and Standard: the plain guest check passes it.
+    const rows = new Map<string, AiModel>([
+      [anthropic, { ...getModel(anthropic)!, ...change, replacementModelId: successor.id }],
+      [successor.id, successor],
+    ]);
+    const lookup = (id: string) => rows.get(id) ?? getModel(id);
+    const isGuestEligible = createGuestEligibilityCheck(lookup);
+    assert.equal(isGuestEligible(anthropic), true);
+    const limitedCatalogue = {
+      isEnabledModelId: (id: string) => Boolean(lookup(id)?.enabled),
+      isGuestEligible,
+      isDefaultEligible: createDefaultLineupEligibilityCheck(lookup, isGuestEligible),
+      resolveReplacement: createReplacementResolver(lookup),
+    };
+    assert.deepEqual(
+      resolveGuestInitialSelectedModels({ catalogue: limitedCatalogue, leadModelId: openai }).models,
+      [openai, successor.id, google],
+      JSON.stringify(change)
+    );
+    // A models link that names it is the guest's own pick, clamped by the
+    // plain guest check, so a runnable model is not taken away.
+    assert.ok(
+      resolveGuestInitialSelectedModels({
+        catalogue: limitedCatalogue,
+        environment: { search: `?models=${anthropic}` },
+      }).models.includes(anthropic),
+      JSON.stringify(change)
+    );
+  }
 });

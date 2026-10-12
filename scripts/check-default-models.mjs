@@ -18,6 +18,7 @@ import { join } from "node:path";
 
 import {
   APP_DEFAULTS,
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
   createReplacementResolver,
   expectedLeadForStored,
@@ -92,6 +93,9 @@ if (databaseUrl) {
 const byId = new Map(models.map((model) => [model.id, model]));
 const lookup = (modelId) => byId.get(modelId);
 const isGuestEligible = createGuestEligibilityCheck(lookup);
+// What a default may name: the rule every default resolver uses, so a lineup
+// member that is limited or unlisted is audited as succeeded, not as leading.
+const isDefaultEligible = createDefaultLineupEligibilityCheck(lookup, isGuestEligible);
 // The chat client binds the same resolver to the same catalogue, so a retired
 // trio member's successor is audited in its slot exactly as guests see it.
 const resolveReplacement = createReplacementResolver(lookup);
@@ -114,7 +118,7 @@ const normalizedGuestDefaultModelId = guestLeadForLineup(
 );
 
 const effectiveGuestSelectedModelIds = resolveGuestDefaultSelectedModels({
-  isEligible: isGuestEligible,
+  isEligible: isDefaultEligible,
   leadModelId: normalizedGuestDefaultModelId,
   resolveReplacement,
   trio: effectiveGuestBrandTrio,
@@ -123,7 +127,7 @@ const effectiveGuestSelectedModelIds = resolveGuestDefaultSelectedModels({
 // Hydration: the same function the server calls with no browser, and the same
 // one the client's first render calls with an empty browser. They must agree,
 // because the composer's credit estimate is summed from whichever it gets.
-const catalogue = { isEnabledModelId: isEnabled, isGuestEligible, resolveReplacement };
+const catalogue = { isEnabledModelId: isEnabled, isGuestEligible, isDefaultEligible, resolveReplacement };
 const ssrGuestSelectedModelIds = resolveGuestInitialSelectedModels({
   catalogue,
   leadModelId: normalizedGuestDefaultModelId,
@@ -285,7 +289,7 @@ const report = auditDefaultModels({
       : expectedLeadForStored({
           stored: storedGuestDefaultModelId,
           lineup: effectiveGuestBrandTrio,
-          isEligible: isGuestEligible,
+          isEligible: isDefaultEligible,
           resolveReplacement,
         }),
   guestLineupProviders: {

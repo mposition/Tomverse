@@ -99,6 +99,17 @@ Tomverse Review의 OpenAI 기본 모델을 `gpt-5-4-mini`에서 `gpt-5-6-luna`�
   따라 첫 번째로 게스트 자격을 갖춘 모델을 같은 자리·같은 순서에 넣습니다. 그런
   모델이 없거나 이미 선택돼 있을 때만 fallback 목록으로 채웁니다. 2026-10-12에
   `claude-haiku-4-5` 자리가 DeepSeek으로 채워졌던 것이 이 규칙이 고친 결함입니다.
+- **기본값이 될 수 있는 모델은 게스트 자격보다 좁습니다.** 기본 선택을 계산하는
+  모든 곳(게스트 기본값, 새 계정 첫 비교, 선두 판정, 콘솔, `check:default-models`)은
+  게스트 자격에 `isDefaultLineupServable`(enabled · status `enabled` · 공개 · 삭제
+  안 됨)을 더한 `createDefaultLineupEligibilityCheck()`를 씁니다. 그래서 구성 모델이
+  나중에 `limited`나 비공개가 되면 자리에서 승계됩니다 — 게스트에게만 남고 새 계정의
+  clamp에서 빠지는 일이 없습니다. 사람이 직접 고른 선택(복원된 대화, `?models=`)은
+  계속 게스트 자격만 봅니다. `limited`는 실행 가능한 상태이기 때문입니다.
+- **구성이 공급사 하나를 잃으면 보고합니다.** 대체 모델이 없어 fallback으로 채워진
+  결과가 OpenAI · Anthropic · Gemini 1개씩이 아니면 콘솔이 경고하고
+  `check:default-models`가 `guest_lineup_provider_missing`을 냅니다. 편집기 슬롯은
+  저장된 구성이 빠뜨린 공급사를 제시하므로 그 상태에서도 고칠 수 있습니다.
 - **서버 첫 렌더와 브라우저가 같은 답을 냅니다**(STG-F006). 구성은
   `getPublicAppSettings()`가 해석해 선두와 함께 prop으로 내려 주고, 대체 모델
   해석은 클라이언트와 서버가 같은 catalogue에 묶습니다. Admin 콘솔의 설명·채택

@@ -33,7 +33,7 @@ import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankT
 import { partitionAdoptionGuidance, priceHintsForView } from "@/lib/adoptionDialogGuidance";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
-import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck, createReplacementResolver } from "@/lib/appDefaults";
+import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createDefaultLineupEligibilityCheck, createGuestEligibilityCheck, createReplacementResolver } from "@/lib/appDefaults";
 import {
   APPLICATION_FALLBACK_PROTECTED,
   GUEST_LEAD_PROTECTED,
@@ -1598,7 +1598,7 @@ export function AdminModelRegistryPanel() {
                         : undefined;
                       const lookup = (id: string) =>
                         successor && id === successor.id ? successor : models.find((model) => model.id === id);
-                      const eligible = createGuestEligibilityCheck(lookup);
+                      const eligible = createDefaultLineupEligibilityCheck(lookup, createGuestEligibilityCheck(lookup));
                       const catalogueReplacement = createReplacementResolver(lookup);
                       const substituteId = substituteIfTrioMemberRemoved(
                         selected.id,
