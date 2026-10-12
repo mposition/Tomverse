@@ -2,22 +2,32 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Activity, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
+import {
+  Activity,
+  CheckCircle2,
+  FileText,
+  Loader2,
+  RefreshCw,
+  ShieldAlert,
+  Wrench,
+} from "lucide-react";
 
 import {
   useAdminLocale,
   useAdminMessages,
 } from "@/components/admin/AdminLocaleProvider";
-import { adminIntlLocale } from "@/lib/adminLocale";
+import { adminIntlLocale, type AdminMessageShape } from "@/lib/adminLocale";
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminFetch } from "@/lib/adminFetch";
+import { amuxOwnerRecoveryPreparation } from "@/lib/amux/ownerRecoveryCore";
 import { amuxReviewReadError } from "@/lib/amux/reviewReadErrorCore";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
 // first; an unknown outcome freezes writes until decision ID/digest lookup.
 const AMUX_REVIEW_CLIENT_TIMEOUT_MS = 45_000;
+export const AMUX_OWNER_EXECUTION_READ_TIMEOUT_MS = 10_000;
 
 type Metric = { value: number; observed: boolean };
 type MetricEvidence = {
@@ -29,6 +39,20 @@ type MetricEvidence = {
   sample_size: number | null;
   observed_at: string | null;
 } | null;
+export type AmuxEscalationSummary = {
+  id: string;
+  specialty: string | null;
+  reason_code: "human_review_required" | "task_blocked" | "operator_review_required" | null;
+  status: string;
+  createdAt: string;
+  task: {
+    id: string;
+    title: string;
+    sourceKey?: string | null;
+    priority: string;
+    status: string;
+  };
+};
 type AmuxReport = {
   generated_at: string;
   limits: { decisions: number; attempts: number };
@@ -56,14 +80,7 @@ type AmuxReport = {
   }>;
   escalations_total?: number;
   escalations_limit?: number;
-  escalations: Array<{
-    id: string;
-    specialty: string | null;
-    reason_code: "human_review_required" | "task_blocked" | "operator_review_required" | null;
-    status: string;
-    createdAt: string;
-    task: { id: string; title: string; sourceKey?: string | null; priority: string; status: string };
-  }>;
+  escalations: AmuxEscalationSummary[];
   workers: Array<{
     name: string;
     status: string;
@@ -134,7 +151,7 @@ type AmuxReport = {
 };
 
 type ReviewOutcome = "approve" | "retry" | "block";
-type ReviewDetail = {
+export type AmuxReviewDetail = {
   available: boolean;
   escalation: {
     id: string;
@@ -152,6 +169,7 @@ type ReviewDetail = {
   };
   last_attempt: {
     id: string;
+    task_revision: number;
     outcome: string;
     to_status: string;
     ended_at: string | null;
@@ -166,6 +184,12 @@ type ReviewDetail = {
     last_attempt_reason: string | null;
     previous_block_reason: string | null;
   };
+  review_report: {
+    scope_and_completion_criteria: string | null;
+    approved_execution_brief: string | null;
+    worker_report: string | null;
+    worker_report_verified: boolean;
+  } | null;
   review_artifact: {
     pr_number: number;
     base_sha: string;
@@ -178,6 +202,28 @@ type ReviewDetail = {
   retry: { used: number; limit: number; remaining: number };
   proposed_transitions: Partial<Record<ReviewOutcome, string>>;
 };
+type ReviewDetail = AmuxReviewDetail;
+
+export type AmuxOwnerExecutionMetadata = {
+  worker: string;
+  attemptNumber: number;
+  reservedCostMicrousd: string;
+  actualCostMicrousd: string | null;
+  actualCostConfirmed: boolean;
+};
+
+type OwnerExecutionState =
+  | { state: "idle" | "loading" | "unavailable" }
+  | { state: "ready"; metadata: AmuxOwnerExecutionMetadata };
+
+export type AmuxOwnerExecutionReadFetcher = (
+  input: RequestInfo | URL,
+  init?: RequestInit & { timeoutMs?: number | null },
+) => Promise<Response>;
+
+type RoutingMessages = AdminMessageShape<
+  (typeof adminAmuxRoutingMessages)["en"]
+>;
 type ReviewProposal = {
   id: string;
   decision_id: string;
@@ -241,6 +287,741 @@ const readable = (value: string) => value.replaceAll("_", " ");
 const pct = (numerator: number, denominator: number) =>
   denominator === 0 ? "—" : `${((numerator / denominator) * 100).toFixed(1)}%`;
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+export const isValidAmuxReviewArtifact = (value: unknown): value is NonNullable<
+  AmuxReviewDetail["review_artifact"]
+> => isRecord(value) && Number.isSafeInteger(value.pr_number) &&
+  (value.pr_number as number) > 0 &&
+  typeof value.base_sha === "string" && /^[0-9a-f]{40}$/i.test(value.base_sha) &&
+  typeof value.head_sha === "string" && /^[0-9a-f]{40}$/i.test(value.head_sha) &&
+  typeof value.diff_digest === "string" && /^[0-9a-f]{64}$/i.test(value.diff_digest);
+
+const isMicrousd = (value: unknown): value is string =>
+  typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
+
+/** Owner-only execution data is useful only when it describes the exact task,
+ * revision, attempt and retained result that the protected review describes. */
+export const bindAmuxOwnerExecutionMetadata = (
+  review: AmuxReviewDetail,
+  value: unknown,
+): AmuxOwnerExecutionMetadata | null => {
+  if (!isRecord(value) || value.id !== review.task.id ||
+      value.revision !== review.task.revision || !review.last_attempt ||
+      !Array.isArray(value.attempts)) return null;
+  const attempt = value.attempts.find((candidate) => isRecord(candidate) &&
+    candidate.id === review.last_attempt?.id &&
+    candidate.taskRevision === review.last_attempt?.task_revision);
+  if (!isRecord(attempt) || typeof attempt.worker !== "string" ||
+      !Number.isInteger(attempt.attemptNumber) ||
+      !isMicrousd(attempt.reservedCostMicrousd)) return null;
+  if (review.review_context.result_sha256) {
+    if (!isRecord(value.result) || value.result.state !== "available" ||
+        value.result.attemptId !== review.last_attempt.id ||
+        value.result.sha256 !== review.review_context.result_sha256) return null;
+  }
+  const actualCostConfirmed = attempt.costConfirmed === true &&
+    isMicrousd(attempt.settledCostMicrousd);
+  return {
+    worker: attempt.worker,
+    attemptNumber: attempt.attemptNumber as number,
+    reservedCostMicrousd: attempt.reservedCostMicrousd,
+    actualCostMicrousd: actualCostConfirmed ?
+      attempt.settledCostMicrousd as string : null,
+    actualCostConfirmed,
+  };
+};
+
+export const formatAmuxMicrousd = (value: string) => {
+  if (!isMicrousd(value)) return null;
+  const amount = BigInt(value);
+  const microusdPerUsd = BigInt(1_000_000);
+  const whole = amount / microusdPerUsd;
+  const fraction = (amount % microusdPerUsd).toString().padStart(6, "0")
+    .replace(/0+$/, "");
+  return `US$${whole}${fraction ? `.${fraction}` : ""}`;
+};
+
+/** Reads supplemental owner-only attempt metadata without letting an older
+ * response overwrite a newer review. The caller owns the controller so close,
+ * replacement and unmount can cancel the read; this function owns its bounded
+ * deadline and rechecks identity after every awaited response body. */
+export async function readAmuxOwnerExecutionMetadata({
+  review,
+  controller,
+  isCurrent,
+  fetcher = adminFetch,
+  timeoutMs = AMUX_OWNER_EXECUTION_READ_TIMEOUT_MS,
+}: {
+  review: AmuxReviewDetail;
+  controller: AbortController;
+  isCurrent: () => boolean;
+  fetcher?: AmuxOwnerExecutionReadFetcher;
+  timeoutMs?: number;
+}): Promise<OwnerExecutionState | null> {
+  if (!isCurrent()) return null;
+  if (controller.signal.aborted) return { state: "unavailable" };
+  const deadline = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetcher(
+      `/api/admin/amux/execution-view?view=detail&taskId=${encodeURIComponent(review.task.id)}`,
+      { cache: "no-store", signal: controller.signal, timeoutMs },
+    );
+    if (!isCurrent()) return null;
+    if (controller.signal.aborted) return { state: "unavailable" };
+    if (!response.ok) {
+      await discardResponseBody(response);
+      if (!isCurrent()) return null;
+      return { state: "unavailable" };
+    }
+    const body: unknown = await response.json();
+    if (!isCurrent()) return null;
+    if (controller.signal.aborted) return { state: "unavailable" };
+    const metadata = bindAmuxOwnerExecutionMetadata(review, body);
+    return metadata ? { state: "ready", metadata } : { state: "unavailable" };
+  } catch {
+    if (!isCurrent()) return null;
+    return { state: "unavailable" };
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
+const isOutcomeUnknown = (review: ReviewDetail) => {
+  const attemptOutcome = review.last_attempt?.outcome?.toLowerCase() ?? "";
+  const attemptReason = review.review_context.last_attempt_reason?.toLowerCase() ?? "";
+  return attemptOutcome === "expired" || attemptOutcome.includes("unknown") ||
+    attemptReason.includes("outcome_unknown");
+};
+
+const recoveryPreparationForReview = (review: ReviewDetail) =>
+  amuxOwnerRecoveryPreparation({
+    taskStatus: review.task.status,
+    taskRevision: review.task.revision,
+    escalationReason: review.review_context.escalation_reason,
+    lastAttemptReason: review.review_context.last_attempt_reason,
+    lastAttemptTaskRevision: review.last_attempt?.task_revision ?? null,
+    lastAttemptOutcome: review.last_attempt?.outcome ?? null,
+    lastAttemptToStatus: review.last_attempt?.to_status ?? null,
+    lastAttemptEndedAt: review.last_attempt?.ended_at ?? null,
+    assignmentConnected: Boolean(
+      review.review_report?.scope_and_completion_criteria ||
+      review.review_context.description,
+    ),
+    workerReportConnected: Boolean(review.review_report?.worker_report),
+    workerReportVerified:
+      review.review_report?.worker_report_verified === true,
+    artifactConnected: isValidAmuxReviewArtifact(review.review_artifact),
+    serverAllowsRetry: review.allowed_outcomes.includes("retry") &&
+      review.proposed_transitions.retry === "todo",
+  });
+
+export const visibleAmuxOwnerReviewOutcomes = (review: ReviewDetail) => {
+  if (!hasReviewSubject(review)) return [];
+  const recovery = recoveryPreparationForReview(review);
+  const validArtifact = isValidAmuxReviewArtifact(review.review_artifact);
+  const hasApprovalEvidence = Boolean(
+    (review.review_report?.worker_report &&
+      review.review_report.worker_report_verified) || validArtifact,
+  );
+  const unknown = isOutcomeUnknown(review);
+  if (!recovery.decisionContextReady) return [];
+  return review.allowed_outcomes.filter(isReviewOutcome)
+    .filter((outcome) => outcome !== "approve" ||
+      (recovery.approvalExecutionSourceReady && hasApprovalEvidence))
+    .filter((outcome) => outcome !== "retry" ||
+      (!unknown && recovery.retryPreviewReady));
+};
+
+export type AmuxOwnerQueueClassification =
+  | "needs_read"
+  | "owner_decision"
+  | "technical_recovery";
+
+const UUID_TITLE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const GENERIC_CARD_TITLE = /^(?:legacy\s+)?(?:closed\s+)?card(?:\s+[0-9a-f-]{8,64})?$/i;
+
+export const amuxQueueTaskTitle = (task: AmuxEscalationSummary["task"]) => {
+  const title = task.title.trim();
+  if (!title || UUID_TITLE.test(title) || GENERIC_CARD_TITLE.test(title)) return null;
+  return title;
+};
+
+/** Queue summaries never prove that an owner decision is ready. Only the exact
+ * protected review currently open for the same escalation and task can promote
+ * one loaded row from evidence-check to a real, server-permitted decision. */
+export const classifyAmuxOwnerQueueItem = (
+  escalation: AmuxEscalationSummary,
+  currentReview: ReviewDetail | null,
+): AmuxOwnerQueueClassification => {
+  if (!currentReview || currentReview.escalation.id !== escalation.id ||
+      currentReview.task.id !== escalation.task.id) return "needs_read";
+  const recovery = recoveryPreparationForReview(currentReview);
+  if (isOutcomeUnknown(currentReview) || !recovery.decisionContextReady) {
+    return "technical_recovery";
+  }
+  return visibleAmuxOwnerReviewOutcomes(currentReview).length > 0
+    ? "owner_decision"
+    : "needs_read";
+};
+
+export function AmuxOwnerReviewView({
+  m,
+  review,
+  ownerExecution,
+  canInspectCards,
+  selectedOutcome,
+  retryReadConfirmed,
+  reviewBusy,
+  reauthenticationRequired,
+  decisionStatusUnknown,
+  date,
+  number,
+  onSelectOutcome,
+  onRetryReadConfirmed,
+  onReread,
+}: {
+  m: RoutingMessages;
+  review: ReviewDetail;
+  ownerExecution: OwnerExecutionState;
+  canInspectCards: boolean;
+  selectedOutcome: ReviewOutcome | null;
+  retryReadConfirmed: boolean;
+  reviewBusy: boolean;
+  reauthenticationRequired: boolean;
+  decisionStatusUnknown: boolean;
+  date: (value: string) => string;
+  number: (value: number) => string;
+  onSelectOutcome: (outcome: ReviewOutcome) => void;
+  onRetryReadConfirmed: (confirmed: boolean) => void;
+  onReread: () => void;
+}) {
+  const outcomes = visibleAmuxOwnerReviewOutcomes(review);
+  const report = review.review_report;
+  const recovery = recoveryPreparationForReview(review);
+  const unknown = isOutcomeUnknown(review);
+  const succeeded = review.last_attempt?.outcome === "succeeded";
+  const validArtifact = isValidAmuxReviewArtifact(review.review_artifact)
+    ? review.review_artifact
+    : null;
+  const hasWorkerEvidence = Boolean(report?.worker_report || validArtifact);
+  const technicalOnly = !recovery.decisionContextReady;
+  const decisionQuestion = outcomes.includes("approve")
+    ? m.ownerQuestionApprove
+    : outcomes.includes("retry")
+      ? m.ownerQuestionRetry
+      : outcomes.includes("block")
+        ? m.ownerQuestionBlock
+        : null;
+  const cost = ownerExecution.state === "ready" ? ownerExecution.metadata : null;
+  const retryScope = report?.scope_and_completion_criteria ??
+    review.review_context.description;
+  const previousReservation = ownerExecution.state === "loading"
+    ? m.costLoading
+    : cost
+      ? formatAmuxMicrousd(cost.reservedCostMicrousd) ?? m.unknownValue
+      : m.unknownValue;
+  const previousSettlement = ownerExecution.state === "loading"
+    ? m.costLoading
+    : cost?.actualCostConfirmed && cost.actualCostMicrousd
+      ? formatAmuxMicrousd(cost.actualCostMicrousd) ?? m.unknownValue
+      : m.unknownValue;
+  const outputEvidence = recovery.outputState === "verified"
+    ? m.outputVerified
+    : recovery.outputState === "unverified"
+      ? m.outputUnverified
+      : m.outputMissing;
+  const recoveryChecklist = [
+    { label: m.checklistAssignment, ready: recovery.assignmentConnected },
+    { label: m.checklistExecution, ready: recovery.executionOutcomeKnown },
+    { label: m.checklistOutput, ready: recovery.outputState !== "missing" },
+  ];
+  const blockEffect = review.task.status === "blocked"
+    ? m.blockDecisionWarning.blocked
+    : m.blockDecisionWarning.review;
+
+  return (
+    <div className="mt-4 space-y-4" data-testid="admin-amux-owner-review">
+      <header className="rounded-xl border border-zinc-700 bg-zinc-900/70 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-300">
+              {m.ownerReviewEyebrow}
+            </p>
+            <h4 className="mt-2 break-words text-xl font-black text-white">
+              {review.review_context.title ?? review.task.title}
+            </h4>
+          </div>
+          <span className="rounded-full border border-zinc-600 bg-zinc-950 px-3 py-1 text-xs font-semibold text-zinc-300"
+            data-testid="admin-amux-task-lifecycle">
+            {m.taskLifecycleStatus(review.task.status)}
+          </span>
+        </div>
+        <p className="mt-3 text-sm leading-6 text-zinc-400">{m.ownerReviewIntro}</p>
+        {review.review_content?.truncated && (
+          <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-bold text-amber-100">
+            {m.reviewContentTruncated}
+          </p>
+        )}
+        {review.review_content?.display_mismatch && (
+          <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-bold text-amber-100">
+            {m.reviewDisplayMismatch}
+          </p>
+        )}
+      </header>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rounded-xl border border-zinc-700 bg-zinc-950 p-5" data-testid="admin-amux-assigned-work">
+          <div className="flex items-center gap-2 text-zinc-100">
+            <FileText aria-hidden="true" className="h-5 w-5 text-blue-300" />
+            <h5 className="font-bold">{m.assignedWork}</h5>
+          </div>
+          {report?.scope_and_completion_criteria ? (
+            <pre className="mt-4 max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans text-sm leading-6 text-zinc-300 [overflow-wrap:anywhere]">
+              {report.scope_and_completion_criteria}
+            </pre>
+          ) : review.review_context.description ? (
+            <pre className="mt-4 max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans text-sm leading-6 text-zinc-300 [overflow-wrap:anywhere]">
+              {review.review_context.description}
+            </pre>
+          ) : (
+            <p className="mt-4 text-sm leading-6 text-amber-200">{m.assignmentNotConnected}</p>
+          )}
+          {report?.approved_execution_brief && (
+            <details className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+              <summary className="min-h-11 cursor-pointer py-2 font-semibold text-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">
+                {m.approvedBrief}
+              </summary>
+              <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-sm leading-6 text-zinc-300 [overflow-wrap:anywhere]">
+                {report.approved_execution_brief}
+              </pre>
+            </details>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-zinc-700 bg-zinc-950 p-5" data-testid="admin-amux-worker-report">
+          <div className="flex items-center gap-2 text-zinc-100">
+            <CheckCircle2 aria-hidden="true" className="h-5 w-5 text-blue-300" />
+            <h5 className="font-bold">{m.workerReport}</h5>
+          </div>
+          {report?.worker_report ? (
+            <>
+              <p className="mt-3 text-xs font-semibold text-zinc-400">
+                {report.worker_report_verified ? m.verifiedResultBinding : m.unverifiedResultBinding}
+              </p>
+              <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans text-sm leading-6 text-zinc-300 [overflow-wrap:anywhere]">
+                {report.worker_report}
+              </pre>
+            </>
+          ) : validArtifact ? (
+            <div className="mt-4">
+              <a href={`https://github.com/mposition/Tomverse/pull/${validArtifact.pr_number}`} target="_blank" rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center rounded-lg border border-blue-500/40 px-3 py-2 font-bold text-blue-200 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">
+                {m.reviewPr} #{validArtifact.pr_number}
+              </a>
+              <p className="mt-2 text-sm text-zinc-400">{m.prIsWorkerEvidence}</p>
+            </div>
+          ) : (
+            <p className="mt-4 text-sm leading-6 text-amber-200" data-testid="admin-amux-report-not-connected">
+              {m.workerReportNotConnected}
+            </p>
+          )}
+          {succeeded && (
+            <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
+              {m.succeededNotApproved}
+            </p>
+          )}
+        </section>
+      </div>
+
+      <section className="rounded-xl border border-zinc-700 bg-zinc-950 p-5" data-testid="admin-amux-review-progress">
+        <h5 className="font-bold text-zinc-100">{m.reviewProgress}</h5>
+        <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+            <dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">{m.finished}</dt>
+            <dd className="mt-2 text-sm leading-5 text-zinc-200">
+              {hasWorkerEvidence ? m.resultSubmitted : m.noResultConnected}
+            </dd>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+            <dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">{m.remainingWork}</dt>
+            <dd className="mt-2 text-sm leading-5 text-zinc-200">
+              {outcomes.length > 0 ? m.ownerDecisionRemaining : m.noDecisionAvailable}
+            </dd>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+            <dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">{m.unverified}</dt>
+            <dd className="mt-2 text-sm leading-5 text-zinc-200">{m.qualityStillUnverified}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="rounded-xl border border-zinc-700 bg-zinc-950 p-5" data-testid="admin-amux-cost-summary">
+        <h5 className="font-bold text-zinc-100">{m.attemptAndCost}</h5>
+        {ownerExecution.state === "loading" ? (
+          <p className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-400">
+            <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> {m.costLoading}
+          </p>
+        ) : cost ? (
+          <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div><dt className="text-xs text-zinc-500">{m.worker}</dt><dd className="mt-1 break-words text-zinc-200">{cost.worker}</dd></div>
+            <div><dt className="text-xs text-zinc-500">{m.reservedMaximum}</dt><dd className="mt-1 text-zinc-200">{formatAmuxMicrousd(cost.reservedCostMicrousd) ?? m.unknownValue}</dd></div>
+            <div><dt className="text-xs text-zinc-500">{m.actualSettledCost}</dt><dd className="mt-1 text-zinc-200">{cost.actualCostConfirmed && cost.actualCostMicrousd ? formatAmuxMicrousd(cost.actualCostMicrousd) : m.unknownValue}</dd></div>
+          </dl>
+        ) : (
+          <p className="mt-3 text-sm leading-6 text-zinc-400">{m.costUnavailable}</p>
+        )}
+        <p className="mt-3 text-xs leading-5 text-zinc-500">{m.costBoundary}</p>
+      </section>
+
+      {(unknown || technicalOnly) && (
+        <section className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5" data-testid="admin-amux-technical-recovery">
+          <div className="flex items-center gap-2 text-amber-100">
+            <Wrench aria-hidden="true" className="h-5 w-5" />
+            <h5 className="font-bold">{m.technicalRecovery}</h5>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-amber-100/90">{m.recoveryPreparationIntro}</p>
+          <div className="mt-4 rounded-lg border border-amber-300/20 bg-zinc-950/40 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-amber-200">{m.recoveryWhyStopped}</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-200">
+              {m.recoveryReason[recovery.reason]}
+            </p>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/60 p-4"
+            data-testid="admin-amux-recovery-evidence">
+            <h6 className="font-bold text-zinc-100">{m.recoveryKnownUnknown}</h6>
+            <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-[minmax(9rem,0.7fr)_minmax(0,1.3fr)]">
+              <dt className="text-zinc-400">{m.originalWorkEvidence}</dt>
+              <dd className="text-zinc-200">{recovery.assignmentConnected
+                ? m.originalWorkConnected : m.originalWorkMissing}</dd>
+              <dt className="text-zinc-400">{m.previousExecutionEvidence}</dt>
+              <dd className="text-zinc-200">{recovery.executionOutcomeKnown
+                ? m.executionKnown : m.executionUnknown}</dd>
+              <dt className="text-zinc-400">{m.workerOutputEvidence}</dt>
+              <dd className="text-zinc-200">{outputEvidence}</dd>
+              <dt className="text-zinc-400">{m.reservedMaximum}</dt>
+              <dd className="text-zinc-200">{previousReservation}</dd>
+              <dt className="text-zinc-400">{m.actualSettledCost}</dt>
+              <dd className="text-zinc-200">{previousSettlement}</dd>
+            </dl>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/60 p-4"
+            data-testid="admin-amux-recovery-checklist">
+            <h6 className="font-bold text-zinc-100">{m.recoveryChecklist}</h6>
+            <p className="mt-2 text-xs leading-5 text-zinc-400">{m.recoveryChecklistBoundary}</p>
+            <ul className="mt-3 space-y-2 text-sm">
+              {recoveryChecklist.map((item) => (
+                <li key={item.label} className="flex min-h-11 flex-col justify-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-zinc-200">{item.label}</span>
+                  <span className={item.ready ? "font-semibold text-emerald-300" : "font-semibold text-amber-200"}>
+                    {item.ready ? m.checklistReady : m.checklistMissing}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {recovery.missingEvidence.length > 0 && (
+              <p className="mt-3 text-sm leading-6 text-amber-100" data-testid="admin-amux-missing-evidence">
+                {m.missingEvidence}: {recovery.missingEvidence
+                  .map((item) => m.missingEvidenceItem[item]).join(" · ")}
+              </p>
+            )}
+          </div>
+
+          <p className="mt-4 text-sm leading-6 text-amber-100">{m.duplicateCostRisk}</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-zinc-700 bg-zinc-950/60 p-4">
+              <p className="font-bold text-zinc-100">{m.amuxNextStep}</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-300">{m.amuxNextStepDetail}</p>
+            </div>
+            <div className="rounded-lg border border-zinc-700 bg-zinc-950/60 p-4">
+              <p className="font-bold text-zinc-100">{m.operatorNextStep}</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-300">{m.operatorNextStepDetail}</p>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <button type="button" onClick={onReread}
+              className="min-h-11 rounded-lg border border-amber-300/40 px-4 py-2 font-semibold text-amber-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300"
+              data-testid="admin-amux-owner-reread">
+              {m.retryReviewRead}
+            </button>
+            {canInspectCards && (
+              <Link href={`/admin/amux-execution?tab=cards&taskId=${encodeURIComponent(review.task.id)}`}
+                className="inline-flex min-h-11 items-center justify-center rounded-lg border border-zinc-600 px-4 py-2 font-semibold text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">
+                {m.openCardDetail}
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
+
+      {recovery.retryPreviewReady && retryScope && (
+        <section className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5"
+          data-testid="admin-amux-retry-preview">
+          <h5 className="text-lg font-black text-white">{m.retryPreviewTitle}</h5>
+          <p className="mt-2 text-sm leading-6 text-zinc-300">{m.retryPreviewIntro}</p>
+          <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/70 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryScope}</p>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-sans text-sm leading-6 text-zinc-200 [overflow-wrap:anywhere]">
+              {retryScope}
+            </pre>
+          </div>
+          <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryAttemptLimit}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">
+                {m.retryAttemptLimitValue(review.retry.used, review.retry.limit, review.retry.remaining)}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryCorrectionEvidence}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">{m.retryCorrectionUnavailable}</dd>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryPreviousReservation}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">{previousReservation}</dd>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryPreviousSettlement}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">{previousSettlement}</dd>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryNewCost}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">{m.retryNewCostUnavailable}</dd>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryDuplicateControl}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">{m.retryDuplicateControlDetail}</dd>
+            </div>
+          </dl>
+          <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/70 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryEffect}</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-200">
+              {m.retryEffectDetail(review.task.status,
+                review.proposed_transitions.retry ?? "todo")}
+            </p>
+          </div>
+          <label className="mt-4 flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm font-semibold leading-6 text-blue-100">
+            <input type="checkbox" checked={retryReadConfirmed}
+              onChange={(event) => onRetryReadConfirmed(event.target.checked)}
+              disabled={reviewBusy || decisionStatusUnknown}
+              className="mt-1 h-4 w-4 shrink-0 accent-blue-500"
+              data-testid="admin-amux-retry-read-confirmation" />
+            <span>{m.retryReadConfirmation}</span>
+          </label>
+        </section>
+      )}
+
+      <details className="rounded-xl border border-zinc-700 bg-zinc-950 p-4" data-testid="admin-amux-developer-details">
+        <summary className="min-h-11 cursor-pointer py-2 font-bold text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">
+          {m.developerDetails}
+        </summary>
+        <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+          <dt className="text-zinc-500">{m.taskId}</dt><dd className="break-all font-mono text-zinc-300">{review.task.id}</dd>
+          <dt className="text-zinc-500">{m.revision}</dt><dd className="font-mono text-zinc-300">{review.task.revision}</dd>
+          <dt className="text-zinc-500">{m.escalationId}</dt><dd className="break-all font-mono text-zinc-300">{review.escalation.id}</dd>
+          <dt className="text-zinc-500">{m.specialty}</dt><dd className="break-words font-mono text-zinc-300">{review.escalation.specialty ?? m.general}</dd>
+          <dt className="text-zinc-500">{m.dueParseState}</dt><dd className="break-words font-mono text-zinc-300">{review.task.due_parse_state}</dd>
+          <dt className="text-zinc-500">{m.lastAttempt}</dt><dd className="break-all font-mono text-zinc-300">{review.last_attempt?.id ?? m.noAttempt}</dd>
+          <dt className="text-zinc-500">{m.lastAttemptState}</dt><dd className="break-words font-mono text-zinc-300">{review.last_attempt ? `${review.last_attempt.outcome} → ${review.last_attempt.to_status}` : "—"}</dd>
+          <dt className="text-zinc-500">{m.attemptBudget}</dt><dd className="text-zinc-300">{number(review.retry.used)} / {number(review.retry.limit)} · {m.remaining} {number(review.retry.remaining)}</dd>
+          <dt className="text-zinc-500">{m.serverAllowedOutcomes}</dt><dd className="break-words font-mono text-zinc-300">{review.allowed_outcomes.join(", ") || "—"}</dd>
+          {review.review_content && <><dt className="text-zinc-500">{m.subjectDigest}</dt><dd className="break-all font-mono text-zinc-300">{review.review_content.digest}</dd></>}
+          {review.review_context.result_sha256 && <><dt className="text-zinc-500">{m.reviewResultSha256}</dt><dd className="break-all font-mono text-zinc-300">{review.review_context.result_sha256}</dd></>}
+          <dt className="text-zinc-500">{m.lastAttemptReason}</dt><dd className="break-words font-mono text-zinc-300 [overflow-wrap:anywhere]">{review.review_context.last_attempt_reason ?? "—"}</dd>
+          <dt className="text-zinc-500">{m.escalationReason}</dt><dd className="break-words font-mono text-zinc-300 [overflow-wrap:anywhere]">{review.review_context.escalation_reason}</dd>
+          <dt className="text-zinc-500">{m.previousBlockReason}</dt><dd className="break-words font-mono text-zinc-300 [overflow-wrap:anywhere]">{review.review_context.previous_block_reason ?? "—"}</dd>
+          <dt className="text-zinc-500">{m.attemptEndedAt}</dt><dd className="text-zinc-300">{review.last_attempt?.ended_at ? date(review.last_attempt.ended_at) : "—"}</dd>
+        </dl>
+        {review.review_content && (
+          <div className="mt-4 border-t border-zinc-800 pt-4" data-testid="admin-amux-review-content">
+            <p className="text-xs font-bold text-zinc-500">{m.reviewContent}</p>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-sans text-xs leading-5 text-zinc-300 [overflow-wrap:anywhere]">
+              {review.review_content.text}
+            </pre>
+          </div>
+        )}
+        {validArtifact && (
+          <div className="mt-4 border-t border-zinc-800 pt-4" data-testid="admin-amux-review-artifact">
+            <p className="break-all font-mono text-xs text-zinc-300">{m.reviewBaseSha}: {validArtifact.base_sha}</p>
+            <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewHeadSha}: {validArtifact.head_sha}</p>
+            <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewDiffDigest}: {validArtifact.diff_digest}</p>
+            <p className="mt-3 text-xs font-bold text-zinc-500">{m.reviewPrDiff}</p>
+            <pre dir="ltr" className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
+              {validArtifact.diff_text}
+            </pre>
+          </div>
+        )}
+      </details>
+
+      {!review.allowed_outcomes.includes("approve") && (
+        <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-sm text-amber-200">
+          {m.approveUnavailable}
+        </p>
+      )}
+      {outcomes.length === 0 ? (
+        <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-sm text-amber-200" data-testid="admin-amux-no-owner-decision">
+          {unknown ? m.unknownNoRetry : m.noAllowedOutcome}
+        </p>
+      ) : (
+        <section className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5" data-testid="admin-amux-owner-decision">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-300">{m.ownerDecision}</p>
+          <h5 className="mt-2 text-lg font-black text-white">{decisionQuestion}</h5>
+          {outcomes.includes("block") && recovery.outputState === "missing" && (
+            <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100"
+              data-testid="admin-amux-block-without-result">
+              {m.blockWithoutResultNotice(review.task.status,
+                review.proposed_transitions.block ?? "blocked")}
+            </p>
+          )}
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {outcomes.map((outcome) => (
+              <button key={outcome} type="button"
+                onClick={() => onSelectOutcome(outcome)}
+                disabled={reviewBusy || reauthenticationRequired || decisionStatusUnknown}
+                aria-pressed={selectedOutcome === outcome}
+                className="min-h-11 rounded-lg border border-zinc-600 px-4 py-3 text-left font-bold text-zinc-100 transition-colors hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 aria-pressed:border-blue-400 aria-pressed:bg-blue-500/10 disabled:opacity-50"
+                data-testid={`admin-amux-select-${outcome}`}>
+                <span className="block">{m.outcome[outcome]} · {review.proposed_transitions[outcome] ?? "—"}</span>
+                <span className="mt-1 block text-xs font-normal leading-5 text-zinc-400">
+                  {outcome === "block" ? blockEffect : m.decisionWarning[outcome]}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+const QUEUE_CLASSIFICATION_ORDER: AmuxOwnerQueueClassification[] = [
+  "needs_read",
+  "owner_decision",
+  "technical_recovery",
+];
+
+const queueClassificationTone = (classification: AmuxOwnerQueueClassification) =>
+  classification === "owner_decision"
+    ? "border-blue-500/30 bg-blue-500/10 text-blue-200"
+    : classification === "technical_recovery"
+      ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+      : "border-zinc-700 bg-zinc-900 text-zinc-300";
+
+export function AmuxOwnerReviewQueueView({
+  m,
+  escalations,
+  escalationsTotal,
+  currentReview,
+  canInspectCards,
+  reviewBusy,
+  writesFrozen,
+  onOpenReview,
+}: {
+  m: RoutingMessages;
+  escalations: AmuxEscalationSummary[];
+  escalationsTotal?: number;
+  currentReview: ReviewDetail | null;
+  canInspectCards: boolean;
+  reviewBusy: boolean;
+  writesFrozen: boolean;
+  onOpenReview: (escalationId: string) => void;
+}) {
+  const items = escalations.map((escalation) => ({
+    escalation,
+    classification: classifyAmuxOwnerQueueItem(escalation, currentReview),
+  }));
+  const counts = Object.fromEntries(QUEUE_CLASSIFICATION_ORDER.map((classification) => [
+    classification,
+    items.filter((item) => item.classification === classification).length,
+  ])) as Record<AmuxOwnerQueueClassification, number>;
+
+  return (
+    <div data-testid="admin-amux-owner-queue-view">
+      <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3"
+        data-testid="admin-amux-queue-classifications">
+        <p className="text-xs leading-5 text-zinc-400">{m.queueLoadedScope(escalations.length)}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {QUEUE_CLASSIFICATION_ORDER.map((classification) => (
+            <span key={classification}
+              className={`rounded-lg border px-3 py-2 text-xs font-semibold ${queueClassificationTone(classification)}`}
+              data-testid={`admin-amux-queue-count-${classification}`}>
+              {m.queueClassification[classification]} · {counts[classification]}
+            </span>
+          ))}
+        </div>
+        {typeof escalationsTotal === "number" && escalationsTotal > escalations.length ? (
+          <p className="mt-3 text-xs text-zinc-400" data-testid="admin-amux-escalations-bounded">
+            {m.escalationsBounded(escalations.length, escalationsTotal)}
+          </p>
+        ) : null}
+      </div>
+
+      {items.length === 0 ? (
+        <p className="mt-3 text-sm text-zinc-500">{m.noEscalations}</p>
+      ) : (
+        <ul className="mt-3 space-y-3">
+          {items.map(({ escalation, classification }) => {
+            const taskTitle = amuxQueueTaskTitle(escalation.task);
+            return (
+              <li key={escalation.id}
+                className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 text-sm"
+                data-testid={`admin-amux-queue-item-${classification}`}>
+                <span className={`inline-flex rounded-lg border px-2.5 py-1 text-xs font-semibold ${queueClassificationTone(classification)}`}
+                  data-testid="admin-amux-queue-classification">
+                  {m.queueClassification[classification]}
+                </span>
+                <strong className="mt-3 block break-words text-base text-zinc-100"
+                  data-testid="admin-amux-queue-task-title">
+                  {taskTitle ?? m.taskPurposeUnavailable}
+                </strong>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">
+                  {m.queueClassificationDescription[classification]}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-zinc-500">
+                  {escalation.reason_code
+                    ? m.reasonCode[escalation.reason_code] ?? m.reasonUnspecified
+                    : m.reasonUnspecified}
+                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <button type="button"
+                    onClick={() => onOpenReview(escalation.id)}
+                    disabled={reviewBusy || writesFrozen}
+                    className="min-h-11 rounded-lg border border-zinc-600 px-4 py-2 text-left text-xs font-semibold text-zinc-100 hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 disabled:opacity-60"
+                    data-testid="admin-amux-open-review">
+                    {m.openReview}
+                  </button>
+                  {canInspectCards && <Link
+                    href={`/admin/amux-execution?tab=cards&taskId=${encodeURIComponent(escalation.task.id)}`}
+                    className="inline-flex min-h-11 items-center text-xs underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">
+                    {m.openCardDetail}
+                  </Link>}
+                </div>
+                <details className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/70 px-3"
+                  data-testid="admin-amux-queue-developer-details">
+                  <summary className="min-h-11 cursor-pointer py-3 text-xs font-semibold text-zinc-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">
+                    {m.queueDeveloperIdentifiers}
+                  </summary>
+                  <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 pb-3 text-xs">
+                    <dt className="text-zinc-600">{m.sourceKey}</dt><dd className="break-all font-mono text-zinc-400">{escalation.task.sourceKey ?? "—"}</dd>
+                    <dt className="text-zinc-600">{m.taskId}</dt><dd className="break-all font-mono text-zinc-400">{escalation.task.id}</dd>
+                    <dt className="text-zinc-600">{m.taskState}</dt><dd className="break-words text-zinc-400">{m.taskLifecycleStatus(escalation.task.status)}</dd>
+                    <dt className="text-zinc-600">{m.escalationId}</dt><dd className="break-all font-mono text-zinc-400">{escalation.id}</dd>
+                    <dt className="text-zinc-600">{m.escalationState}</dt><dd className="break-words font-mono text-zinc-400">{escalation.status}</dd>
+                    <dt className="text-zinc-600">{m.specialty}</dt><dd className="break-words font-mono text-zinc-400">{escalation.specialty ?? m.general}</dd>
+                  </dl>
+                </details>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCards = false }: {
   focusEscalationId?: string | null;
   canInspectCards?: boolean;
@@ -265,12 +1046,14 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
   const [error, setError] = useState<string | null>(null);
   const [selectedEscalationId, setSelectedEscalationId] = useState<string | null>(null);
   const [review, setReview] = useState<ReviewDetail | null>(null);
+  const [ownerExecution, setOwnerExecution] = useState<OwnerExecutionState>({ state: "idle" });
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewUnavailable, setReviewUnavailable] = useState(false);
   const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
   const [selectedOutcome, setSelectedOutcome] = useState<ReviewOutcome | null>(null);
+  const [retryReadConfirmed, setRetryReadConfirmed] = useState(false);
   const [resolution, setResolution] = useState("");
   const [proposal, setProposal] = useState<ReviewProposal | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -278,18 +1061,23 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
   const [decisionStatusChecking, setDecisionStatusChecking] = useState(false);
   const [pendingDecision, setPendingDecision] = useState<PendingDecision | null>(null);
   const reviewRequestId = useRef(0);
+  const ownerExecutionController = useRef<AbortController | null>(null);
   const openedFocus = useRef<string | null>(null);
 
   const closeReview = useCallback(() => {
     reviewRequestId.current += 1;
+    ownerExecutionController.current?.abort();
+    ownerExecutionController.current = null;
     setSelectedEscalationId(null);
     setReview(null);
+    setOwnerExecution({ state: "idle" });
     setReviewLoading(false);
     setReviewBusy(false);
     setReviewError(null);
     setReviewUnavailable(false);
     setReauthenticationRequired(false);
     setSelectedOutcome(null);
+    setRetryReadConfirmed(false);
     setResolution("");
     setProposal(null);
     setIdempotencyKey(null);
@@ -336,6 +1124,12 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
     }
   }, []);
 
+  useEffect(() => () => {
+    reviewRequestId.current += 1;
+    ownerExecutionController.current?.abort();
+    ownerExecutionController.current = null;
+  }, []);
+
   const clearPendingDecision = () => {
     try { window.sessionStorage.removeItem(PENDING_DECISION_KEY); } catch { /* no-op */ }
     setPendingDecision(null);
@@ -344,14 +1138,18 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
 
   const openReview = useCallback(async (escalationId: string) => {
     if (pendingDecision) return;
+    ownerExecutionController.current?.abort();
+    ownerExecutionController.current = null;
     const requestId = ++reviewRequestId.current;
     setSelectedEscalationId(escalationId);
     setReview(null);
+    setOwnerExecution({ state: "idle" });
     setReviewLoading(true);
     setReviewError(null);
     setReviewUnavailable(false);
     setReauthenticationRequired(false);
     setSelectedOutcome(null);
+    setRetryReadConfirmed(false);
     setResolution("");
     setProposal(null);
     setIdempotencyKey(null);
@@ -389,12 +1187,28 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
         return;
       }
       setReview(detail);
+      if (canInspectCards) {
+        const controller = new AbortController();
+        ownerExecutionController.current = controller;
+        const isCurrent = () => requestId === reviewRequestId.current &&
+          ownerExecutionController.current === controller;
+        setOwnerExecution({ state: "loading" });
+        void readAmuxOwnerExecutionMetadata({
+          review: detail,
+          controller,
+          isCurrent,
+        }).then((nextOwnerExecution) => {
+          if (!isCurrent()) return;
+          if (nextOwnerExecution) setOwnerExecution(nextOwnerExecution);
+          ownerExecutionController.current = null;
+        });
+      }
     } catch {
       if (requestId === reviewRequestId.current) setReviewError(m.reviewLoadFailed);
     } finally {
       if (requestId === reviewRequestId.current) setReviewLoading(false);
     }
-  }, [pendingDecision, m.reviewLoadFailed, m.reviewProxyConfigurationFailed,
+  }, [pendingDecision, canInspectCards, m.reviewLoadFailed, m.reviewProxyConfigurationFailed,
     m.reviewAccessRefused, m.reviewNotFound, m.reviewTemporarilyUnavailable]);
 
   useEffect(() => {
@@ -407,6 +1221,10 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
   const prepareProposal = async () => {
     if (!review || !selectedOutcome || reviewBusy || pendingDecision || !review.allowed_outcomes.includes(selectedOutcome)) return;
     if (!hasReviewSubject(review)) return;
+    if (selectedOutcome === "retry" && !retryReadConfirmed) {
+      setReviewError(m.retryConfirmationRequired);
+      return;
+    }
     if (resolution.trim().length < 3 || resolution.trim().length > 1_000) {
       setReviewError(m.resolutionLength);
       return;
@@ -462,6 +1280,10 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
   const confirmDecision = async () => {
     if (!review || !proposal || !idempotencyKey || reviewBusy || decisionStatusUnknown || pendingDecision ||
       !selectedOutcome || selectedOutcome !== proposal.outcome) return;
+    if (selectedOutcome === "retry" && !retryReadConfirmed) {
+      setReviewError(m.retryConfirmationRequired);
+      return;
+    }
     if (!Number.isFinite(Date.parse(proposal.expires_at)) ||
       Date.parse(proposal.expires_at) <= Date.now()) {
       setReviewError(m.proposalExpired);
@@ -602,9 +1424,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
     : report.incident.blocks_admission
       ? m.incidentFrozen
       : m.incidentNormal;
-  const reviewOutcomes = hasReviewSubject(review)
-    ? review.allowed_outcomes.filter(isReviewOutcome)
-    : [];
+  const reviewOutcomes = review ? visibleAmuxOwnerReviewOutcomes(review) : [];
 
   return (
     <section
@@ -752,55 +1572,16 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                 <p className="mt-2 text-xs leading-5 text-amber-200/80">
                   {m.resolutionAvailability}
                 </p>
-                {typeof report.escalations_total === "number" &&
-                report.escalations_total > report.escalations.length ? (
-                  <p className="mt-2 text-xs text-zinc-400" data-testid="admin-amux-escalations-bounded">
-                    {m.escalationsBounded(report.escalations.length, report.escalations_total)}
-                  </p>
-                ) : null}
-                {report.escalations.length === 0 ? (
-                  <p className="mt-2 text-sm text-zinc-500">
-                    {m.noEscalations}
-                  </p>
-                ) : (
-                  <ul className="mt-3 space-y-2">
-                    {report.escalations.map((escalation) => (
-                      <li
-                        key={escalation.id}
-                        className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-sm"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <strong className="text-amber-100">
-                            {escalation.task.sourceKey ?? escalation.task.title}
-                          </strong>
-                          <span className="text-xs text-amber-200">
-                            {escalation.status}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-xs leading-5 text-amber-100/70">
-                          {escalation.specialty ?? m.general} ·{" "}
-                          {escalation.reason_code
-                            ? m.reasonCode[escalation.reason_code] ?? m.reasonUnspecified
-                            : m.reasonUnspecified}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => void openReview(escalation.id)}
-                          disabled={reviewBusy || Boolean(pendingDecision)}
-                          className="mt-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-500/10 disabled:opacity-60"
-                          data-testid="admin-amux-open-review"
-                        >
-                          {m.openReview}
-                        </button>
-                        {canInspectCards && <Link
-                          href={`/admin/amux-execution?tab=cards&taskId=${encodeURIComponent(escalation.task.id)}`}
-                          className="ml-3 text-xs underline underline-offset-2">
-                          {m.openCardDetail}
-                        </Link>}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <AmuxOwnerReviewQueueView
+                  m={m}
+                  escalations={report.escalations}
+                  escalationsTotal={report.escalations_total}
+                  currentReview={review}
+                  canInspectCards={canInspectCards}
+                  reviewBusy={reviewBusy}
+                  writesFrozen={Boolean(pendingDecision)}
+                  onOpenReview={(escalationId) => void openReview(escalationId)}
+                />
                 {selectedEscalationId && (
                   <div
                     className="mt-4 rounded-xl border border-zinc-700 bg-zinc-900 p-4 text-xs text-zinc-300"
@@ -813,6 +1594,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                         onClick={closeReview}
                         disabled={reviewBusy || decisionStatusUnknown || decisionStatusChecking}
                         className="rounded-md border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+                        data-testid="admin-amux-close-review"
                       >
                         {m.closeReview}
                       </button>
@@ -821,7 +1603,8 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                       {m.escalationId}: {selectedEscalationId}
                     </p>
                     {reviewLoading && (
-                      <p className="mt-3 inline-flex items-center gap-2">
+                      <p className="mt-3 inline-flex items-center gap-2"
+                        data-testid="admin-amux-review-loading">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" /> {m.reviewLoading}
                       </p>
                     )}
@@ -862,125 +1645,40 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                     )}
                     {review && !reviewUnavailable && (
                       <>
-                        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                          <dt className="text-zinc-500">{m.taskId}</dt>
-                          <dd className="break-all font-mono">{review.task.id}</dd>
-                          <dt className="text-zinc-500">{m.taskState}</dt>
-                          <dd>{review.task.status} · r{review.task.revision}</dd>
-                          <dt className="text-zinc-500">{m.specialty}</dt>
-                          <dd>{review.escalation.specialty ?? m.general}</dd>
-                          <dt className="text-zinc-500">{m.dueParseState}</dt>
-                          <dd>{review.task.due_parse_state}</dd>
-                          <dt className="text-zinc-500">{m.lastAttempt}</dt>
-                          <dd>
-                            {review.last_attempt
-                              ? `${review.last_attempt.id} · ${review.last_attempt.outcome} → ${review.last_attempt.to_status} · ${review.last_attempt.ended_at ? date(review.last_attempt.ended_at) : "—"}`
-                              : m.noAttempt}
-                          </dd>
-                          <dt className="text-zinc-500">{m.attemptBudget}</dt>
-                          <dd>{number(review.retry.used)} / {number(review.retry.limit)} · {m.remaining} {number(review.retry.remaining)}</dd>
-                        </dl>
                         {review.retry.remaining === 0 && (
                           <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100" data-testid="admin-amux-exhausted-task-notice">
                             {m.exhaustedRequiresNewTask} {m.taskId}: <span className="font-mono">{review.task.id}</span>
                           </p>
                         )}
-                        <div className="mt-3 grid gap-2 rounded-lg border border-zinc-700 p-3" data-testid="admin-amux-review-context">
-                          <p className="font-bold text-zinc-100">{m.reviewTaskContext}</p>
-                          <p className="text-zinc-300">{review.review_context.title ?? "—"}</p>
-                          {review.review_context.description && (
-                            <div>
-                              <p className="text-xs font-bold text-zinc-400">{m.taskDescription}</p>
-                              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-zinc-300">{review.review_context.description}</pre>
-                            </div>
-                          )}
-                          {review.review_context.result_sha256 &&
-                            <p className="break-all font-mono text-xs text-zinc-400">
-                              {m.reviewResultSha256}: {review.review_context.result_sha256}
-                            </p>}
-                          {review.review_content?.truncated && (
-                            <p className="text-sm font-bold text-amber-200">{m.reviewContentTruncated}</p>
-                          )}
-                          {review.review_content?.display_mismatch && (
-                            <p className="text-sm font-bold text-amber-200">{m.reviewDisplayMismatch}</p>
-                          )}
-                          <p className="text-sm text-zinc-400">{m.escalationReason}: {review.review_context.escalation_reason}</p>
-                          {review.review_context.last_attempt_reason && (
-                            <p className="text-sm text-zinc-400">{m.lastAttemptReason}: {review.review_context.last_attempt_reason}</p>
-                          )}
-                          {review.review_context.previous_block_reason && (
-                            <p className="text-sm text-zinc-400">{m.previousBlockReason}: {review.review_context.previous_block_reason}</p>
-                          )}
-                        </div>
-                        {review.review_artifact &&
-                          Number.isSafeInteger(review.review_artifact.pr_number) &&
-                          review.review_artifact.pr_number > 0 &&
-                          /^[a-f0-9]{40}$/.test(review.review_artifact.base_sha) &&
-                          /^[a-f0-9]{40}$/.test(review.review_artifact.head_sha) &&
-                          /^[a-f0-9]{64}$/.test(review.review_artifact.diff_digest) && (
-                            <div className="mt-3 rounded-lg border border-zinc-700 p-3" data-testid="admin-amux-review-artifact">
-                              <a
-                                href={`https://github.com/mposition/Tomverse/pull/${review.review_artifact.pr_number}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-bold text-blue-300 underline"
-                              >
-                                {m.reviewPr} #{review.review_artifact.pr_number}
-                              </a>
-                              <p className="mt-2 break-all font-mono text-zinc-300">{m.reviewBaseSha}: {review.review_artifact.base_sha}</p>
-                              <p className="mt-2 break-all font-mono text-zinc-300">{m.reviewHeadSha}: {review.review_artifact.head_sha}</p>
-                              <p className="mt-1 break-all font-mono text-zinc-300">{m.reviewDiffDigest}: {review.review_artifact.diff_digest}</p>
-                              <p className="mt-3 text-xs font-bold text-zinc-400">{m.reviewPrDiff}</p>
-                              <pre dir="ltr" className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-zinc-300">{review.review_artifact.diff_text}</pre>
-                            </div>
-                          )}
-                        {hasReviewSubject(review) ? (
-                          <div className="mt-3 rounded-lg border border-zinc-700 bg-zinc-950 p-3" data-testid="admin-amux-review-content">
-                            <p className="font-bold text-zinc-100">{m.reviewContent}</p>
-                            <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words font-sans leading-5 text-zinc-300">
-                              {review.review_content.text}
-                            </pre>
-                            <p className="mt-2 break-all font-mono text-zinc-500">
-                              {m.subjectDigest}: {review.review_content.digest}
-                            </p>
-                          </div>
-                        ) : (
-                          <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100" data-testid="admin-amux-review-no-content">
-                            {m.reviewContentMissing}
-                          </p>
-                        )}
-                        {!review.allowed_outcomes.includes("approve") && (
-                          <p className="mt-3 text-amber-200">{m.approveUnavailable}</p>
-                        )}
-                        {reviewOutcomes.length === 0 ? (
-                          <p className="mt-3 text-amber-200">{m.noAllowedOutcome}</p>
-                        ) : (
-                          <>
-                            <p className="mt-3 font-bold text-zinc-100">{m.chooseDecision}</p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {reviewOutcomes.map((outcome) => (
-                                <button
-                                  key={outcome}
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedOutcome(outcome);
-                                    setProposal(null);
-                                    setIdempotencyKey(null);
-                                    setDecisionStatusUnknown(false);
-                                    setReviewError(null);
-                                  }}
-                                  disabled={reviewBusy || reauthenticationRequired || decisionStatusUnknown}
-                                  aria-pressed={selectedOutcome === outcome}
-                                  className="rounded-lg border border-zinc-600 px-3 py-1.5 font-bold text-zinc-100 hover:bg-zinc-800 aria-pressed:border-blue-400 aria-pressed:bg-blue-500/10 disabled:opacity-50"
-                                  data-testid={`admin-amux-select-${outcome}`}
-                                >
-                                  {m.outcome[outcome]} · {review.proposed_transitions[outcome] ?? "—"}
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                        {selectedOutcome && review.allowed_outcomes.includes(selectedOutcome) && (
+                        <AmuxOwnerReviewView
+                          m={m}
+                          review={review}
+                          ownerExecution={ownerExecution}
+                          canInspectCards={canInspectCards}
+                          selectedOutcome={selectedOutcome}
+                          retryReadConfirmed={retryReadConfirmed}
+                          reviewBusy={reviewBusy}
+                          reauthenticationRequired={reauthenticationRequired}
+                          decisionStatusUnknown={decisionStatusUnknown}
+                          date={date}
+                          number={number}
+                          onReread={() => void openReview(review.escalation.id)}
+                          onRetryReadConfirmed={(confirmed) => {
+                            setRetryReadConfirmed(confirmed);
+                            setProposal(null);
+                            setIdempotencyKey(null);
+                            setReviewError(null);
+                          }}
+                          onSelectOutcome={(outcome) => {
+                            setSelectedOutcome(outcome);
+                            if (outcome !== "retry") setRetryReadConfirmed(false);
+                            setProposal(null);
+                            setIdempotencyKey(null);
+                            setDecisionStatusUnknown(false);
+                            setReviewError(null);
+                          }}
+                        />
+                        {selectedOutcome && reviewOutcomes.includes(selectedOutcome) && (
                           <div className="mt-3 border-t border-zinc-700 pt-3">
                             <p className="font-bold text-zinc-100">
                               {m.outcome[selectedOutcome]} · {review.task.status} → {review.proposed_transitions[selectedOutcome] ?? "—"}
@@ -1003,7 +1701,8 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                               <button
                                 type="button"
                                 onClick={() => void prepareProposal()}
-                                disabled={reviewBusy || resolution.trim().length < 3}
+                                disabled={reviewBusy || resolution.trim().length < 3 ||
+                                  (selectedOutcome === "retry" && !retryReadConfirmed)}
                                 className="mt-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 font-bold text-blue-100 disabled:opacity-50"
                                 data-testid="admin-amux-prepare-proposal"
                               >

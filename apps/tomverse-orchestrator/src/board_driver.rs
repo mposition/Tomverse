@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Instant;
 
 use anyhow::Result;
 
@@ -48,6 +49,8 @@ pub enum DriveOutcome {
         worker: String,
         attempt_id: String,
         task_revision: i64,
+        lease_expires_at: String,
+        response_received_at: Instant,
     },
 }
 
@@ -262,6 +265,7 @@ where
                 return Err(anyhow::anyhow!("AMUX execution-start outcome unknown"));
             }
         };
+        let response_received_at = Instant::now();
 
         if !start.started {
             return Ok(DriveOutcome::ExecutionStartRefused {
@@ -279,6 +283,10 @@ where
             anyhow::bail!("execution start reported success without task_revision");
         };
 
+        let Some(lease_expires_at) = start.lease_expires_at else {
+            anyhow::bail!("execution start reported success without lease_expires_at");
+        };
+
         /*
          * started=true means the server atomically committed:
          * Todo -> Doing, runtime -> Busy, execution attempt, durable delivery
@@ -289,6 +297,8 @@ where
             worker: task.owner.clone(),
             attempt_id,
             task_revision,
+            lease_expires_at,
+            response_received_at,
         })
     }
 }
@@ -327,7 +337,7 @@ mod tests {
                     started: true,
                     attempt_id: Some("attempt-1".into()),
                     task_revision: Some(8),
-                    lease_expires_at: None,
+                    lease_expires_at: Some("2026-09-30T00:01:30.000Z".into()),
                     reason: None,
                 },
                 start_error: false,
@@ -428,9 +438,12 @@ mod tests {
                 worker,
                 attempt_id,
                 task_revision: 8,
+                lease_expires_at,
+                ..
             }] if task_id == "TASK-1"
                 && worker == "worker-a"
                 && attempt_id == "attempt-1"
+                && lease_expires_at == "2026-09-30T00:01:30.000Z"
         ));
     }
 

@@ -41,6 +41,197 @@ const claimRouteSource = readFileSync(
   "utf8",
 );
 
+const maskRustCommentsAndStrings = (source) => {
+  const masked = source.split("");
+  const erase = (start, end) => {
+    for (let index = start; index < end; index += 1) {
+      if (masked[index] !== "\n" && masked[index] !== "\r") {
+        masked[index] = " ";
+      }
+    }
+  };
+
+  let index = 0;
+  while (index < source.length) {
+    if (source.startsWith("//", index)) {
+      const end = source.indexOf("\n", index + 2);
+      const boundary = end < 0 ? source.length : end;
+      erase(index, boundary);
+      index = boundary;
+      continue;
+    }
+    if (source.startsWith("/*", index)) {
+      let depth = 1;
+      let end = index + 2;
+      while (end < source.length && depth > 0) {
+        if (source.startsWith("/*", end)) {
+          depth += 1;
+          end += 2;
+        } else if (source.startsWith("*/", end)) {
+          depth -= 1;
+          end += 2;
+        } else {
+          end += 1;
+        }
+      }
+      erase(index, end);
+      index = end;
+      continue;
+    }
+
+    const rawString = source
+      .slice(index)
+      .match(/^(?:br|r)(#*)"/);
+    if (rawString) {
+      const terminator = `"${rawString[1]}`;
+      const close = source.indexOf(
+        terminator,
+        index + rawString[0].length,
+      );
+      const end = close < 0 ? source.length : close + terminator.length;
+      erase(index, end);
+      index = end;
+      continue;
+    }
+
+    if (source[index] === '"') {
+      let end = index + 1;
+      while (end < source.length) {
+        if (source[end] === "\\") {
+          end += 2;
+        } else if (source[end] === '"') {
+          end += 1;
+          break;
+        } else {
+          end += 1;
+        }
+      }
+      erase(index, end);
+      index = end;
+      continue;
+    }
+
+    const character = source
+      .slice(index)
+      .match(/^'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^'\\\r\n])'/);
+    if (character) {
+      const end = index + character[0].length;
+      erase(index, end);
+      index = end;
+      continue;
+    }
+    index += 1;
+  }
+
+  return masked.join("");
+};
+
+const rustPublicAsyncMethodSource = (source, method) => {
+  const executable = maskRustCommentsAndStrings(source);
+  const escapedMethod = method.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const signature = new RegExp(
+    `\\bpub\\s+async\\s+fn\\s+${escapedMethod}\\s*\\(`,
+  ).exec(executable);
+  if (!signature) return undefined;
+  const bodyStart = executable.indexOf("{", signature.index + signature[0].length);
+  if (bodyStart < 0) return undefined;
+
+  let depth = 0;
+  for (let index = bodyStart; index < executable.length; index += 1) {
+    if (executable[index] === "{") depth += 1;
+    else if (executable[index] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(signature.index, index + 1);
+    }
+  }
+  return undefined;
+};
+
+const matchingDelimiterEnd = (source, openIndex, open, close) => {
+  let depth = 0;
+  for (let index = openIndex; index < source.length; index += 1) {
+    if (source[index] === open) depth += 1;
+    else if (source[index] === close) {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+};
+
+const rustHttpRequestChains = (source) => {
+  const executable = maskRustCommentsAndStrings(source);
+  const starts = [
+    ...executable.matchAll(/\.\s*client\s*\.\s*(?:post|get)\s*\(/g),
+  ];
+  return starts.map((start) => {
+    const callOpen = start.index + start[0].lastIndexOf("(");
+    const callClose = matchingDelimiterEnd(executable, callOpen, "(", ")");
+    if (callClose < 0) return { complete: false, source: start[0] };
+
+    let cursor = callClose + 1;
+    let end = cursor;
+    let lastCall;
+    let complete = false;
+    let hasLifecycleDeadline = false;
+    while (cursor < executable.length) {
+      while (/\s/.test(executable[cursor])) cursor += 1;
+      if (executable[cursor] !== ".") break;
+      cursor += 1;
+      while (/\s/.test(executable[cursor])) cursor += 1;
+      const identifier = /^[A-Za-z_][A-Za-z0-9_]*/.exec(
+        executable.slice(cursor),
+      )?.[0];
+      if (!identifier) break;
+      cursor += identifier.length;
+
+      if (identifier === "await") {
+        end = cursor;
+        complete = lastCall === "send";
+        break;
+      }
+
+      while (/\s/.test(executable[cursor])) cursor += 1;
+      if (executable[cursor] !== "(") break;
+      const methodOpen = cursor;
+      const methodClose = matchingDelimiterEnd(
+        executable,
+        methodOpen,
+        "(",
+        ")",
+      );
+      if (methodClose < 0) break;
+      if (
+        identifier === "timeout" &&
+        /^\(\s*TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT\s*\)$/.test(
+          executable.slice(methodOpen, methodClose + 1),
+        )
+      ) {
+        hasLifecycleDeadline = true;
+      }
+      cursor = methodClose + 1;
+      end = cursor;
+      lastCall = identifier;
+    }
+
+    return {
+      complete,
+      hasLifecycleDeadline,
+      source: executable.slice(start.index, end),
+    };
+  });
+};
+
+const everyRustHttpRequestHasLifecycleDeadline = (source) => {
+  const requests = rustHttpRequestChains(source);
+  return (
+    requests.length > 0 &&
+    requests.every(
+      (request) => request.complete && request.hasLifecycleDeadline,
+    )
+  );
+};
+
 const enumBody = rustSource.match(
   /pub enum ClaimRefusalReason \{([\s\S]*?)\n\}/,
 )?.[1];
@@ -50,6 +241,96 @@ const mappingBody = rustSource.match(
 const closedBody = rustSource.match(
   /pub const CLOSED:[\s\S]*?= &\[([\s\S]*?)\n\s*\];/,
 )?.[1];
+
+test("Rust method extraction is balanced and does not borrow the next helper's deadline", () => {
+  const fixture = `impl Client {
+    pub async fn wrapper(&self) {
+        let closing_brace = "}";
+        self.client.post("/lifecycle")
+            .send().await
+    }
+
+    pub async fn bounded_helper(&self) {
+        self.client.post("/route")
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .send().await
+    }
+}`;
+  const wrapper = rustPublicAsyncMethodSource(fixture, "wrapper");
+  const helper = rustPublicAsyncMethodSource(fixture, "bounded_helper");
+  assert.ok(wrapper);
+  assert.ok(helper);
+  assert.doesNotMatch(wrapper, /TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT/);
+  assert.match(helper, /TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT/);
+  assert.equal(everyRustHttpRequestHasLifecycleDeadline(wrapper), false);
+  assert.equal(everyRustHttpRequestHasLifecycleDeadline(helper), true);
+});
+
+test("Rust lifecycle deadlines come from each executable HTTP request chain", () => {
+  const fixtures = [
+    [
+      "comment-only deadline",
+      `pub async fn comment_only(&self) {
+          self.client.post("/lifecycle")
+              // .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+              .send().await;
+      }`,
+    ],
+    [
+      "string-only deadline",
+      `pub async fn string_only(&self) {
+          self.client.post("/lifecycle")
+              .header("note", ".timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)")
+              .send().await;
+      }`,
+    ],
+    [
+      "a bounded health GET beside an unbounded lifecycle POST",
+      `pub async fn mixed_requests(&self) {
+          self.client.get("/health")
+              .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+              .send().await;
+          self.client.post("/lifecycle")
+              .send().await;
+      }`,
+    ],
+    [
+      "a nested timeout call that is not on the request builder",
+      `pub async fn nested_timeout(&self) {
+          self.client.post("/lifecycle")
+              .json(&payload.timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT))
+              .send().await;
+      }`,
+    ],
+  ];
+
+  for (const [name, fixture] of fixtures) {
+    assert.equal(
+      everyRustHttpRequestHasLifecycleDeadline(fixture),
+      false,
+      name,
+    );
+  }
+
+  const bounded = `pub async fn bounded(&self) {
+      self.client.post("/lifecycle")
+          .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+          .send().await;
+  }`;
+  assert.equal(everyRustHttpRequestHasLifecycleDeadline(bounded), true);
+
+  const actualHeartbeat = rustPublicAsyncMethodSource(
+    rustSource,
+    "execution_heartbeat_started",
+  );
+  assert.ok(actualHeartbeat);
+  const withoutDeadline = actualHeartbeat.replace(
+    ".timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)",
+    "",
+  );
+  assert.notEqual(withoutDeadline, actualHeartbeat);
+  assert.equal(everyRustHttpRequestHasLifecycleDeadline(withoutDeadline), false);
+});
 
 test("TypeScript and Rust keep one exact closed claim-refusal vocabulary", () => {
   assert.ok(enumBody, "Rust ClaimRefusalReason enum was not found");
@@ -248,7 +529,11 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
     ["delivery/pull", ["deliveryPull"], "delivery_pull"],
     ["delivery/ack", ["deliveryAck"], "delivery_ack"],
     ["execution/start", ["executionStart"], "execution_start"],
-    ["execution/heartbeat", ["executionHeartbeat"], "execution_heartbeat"],
+    [
+      "execution/heartbeat",
+      ["executionHeartbeat"],
+      "execution_heartbeat_started",
+    ],
     // execution_settle delegates to this one, which makes the HTTP call.
     ["execution/settle", ["executionSettle"], "execution_settle_with_review_pr"],
     [
@@ -304,12 +589,23 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
       "utf8",
     );
     assert.match(routeSource, /\}, AMUX_LIFECYCLE_ROUTE_BUDGET_MS\);/);
-    const start = rustSource.indexOf(`pub async fn ${method}(`);
-    assert.ok(start >= 0, method);
-    const next = rustSource.indexOf("\n    pub async fn ", start + 1);
-    const source = rustSource.slice(start, next < 0 ? undefined : next);
-    assert.match(source, /\.timeout\(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT\)/);
+    const source = rustPublicAsyncMethodSource(rustSource, method);
+    assert.ok(source, method);
+    assert.equal(
+      everyRustHttpRequestHasLifecycleDeadline(source),
+      true,
+      `${method} must apply the lifecycle deadline to its HTTP request`,
+    );
   }
+
+  const heartbeat = rustPublicAsyncMethodSource(rustSource, "execution_heartbeat");
+  assert.ok(heartbeat);
+  assert.match(
+    heartbeat,
+    /self\.execution_heartbeat_started\(\s*&delivery\.attempt_id,\s*delivery\.assignment_id\.as_deref\(\),\s*&delivery\.worker,\s*instance_id,\s*generation,\s*delivery\.task_revision,\s*\)\s*\.await/,
+  );
+  assert.doesNotMatch(heartbeat, /\.(?:post|get)\(/);
+  assert.doesNotMatch(heartbeat, /\.send\(\)/);
 
   // The plain settle carries no request of its own: it only forwards.
   const settleStart = rustSource.indexOf("pub async fn execution_settle(");

@@ -14,6 +14,7 @@ import {
   amuxReviewTargetStatus,
   amuxV22ReviewRetryHasVerifiedOutcome,
   amuxV4ReviewEvidenceMatches,
+  amuxV4ReviewReportProjection,
   isAmuxAgentApprovalEnabled,
 } from "../lib/amux/reviewApprovalCore.ts";
 
@@ -116,6 +117,39 @@ test("multibyte ingress text is not mistaken for a 50k-byte display limit", () =
   assert.equal(amuxReviewTextExceedsDisplay("x".repeat(200_001)), true);
   assert.equal(amuxReviewTextExceedsDisplay("제".repeat(100_000)), true);
   assert.equal(amuxReviewTextExceedsDisplay(null), false);
+});
+
+test("v4 report projection separates the digest-bound assignment and worker report", () => {
+  const evidence = {
+    scopeAndCompletionCriteria: "Deliver the owner review.",
+    approvedBrief: "Keep decisions inside the existing server authority.",
+    workerReport: "Implemented and verified the report view.",
+  };
+  assert.deepEqual(amuxV4ReviewReportProjection({
+    contentValid: true,
+    evidence,
+    workerReportVerified: true,
+  }), {
+    scope_and_completion_criteria: evidence.scopeAndCompletionCriteria,
+    approved_execution_brief: evidence.approvedBrief,
+    worker_report: evidence.workerReport,
+    worker_report_verified: true,
+  });
+  assert.equal(amuxV4ReviewReportProjection({
+    contentValid: false,
+    evidence,
+    workerReportVerified: true,
+  }), null);
+  assert.deepEqual(amuxV4ReviewReportProjection({
+    contentValid: true,
+    evidence: { ...evidence, workerReport: null },
+    workerReportVerified: true,
+  }), {
+    scope_and_completion_criteria: evidence.scopeAndCompletionCriteria,
+    approved_execution_brief: evidence.approvedBrief,
+    worker_report: null,
+    worker_report_verified: false,
+  });
 });
 
 test("subject digest binds content and does not depend on caller key insertion order", () => {

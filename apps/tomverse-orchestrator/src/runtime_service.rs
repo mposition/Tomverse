@@ -354,6 +354,7 @@ async fn run_board_loop(api: TomverseApi, registry: RuntimeRegistry) -> Result<(
                         worker,
                         attempt_id,
                         task_revision,
+                        ..
                     } = outcome
                     {
                         info!(
