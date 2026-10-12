@@ -1253,7 +1253,7 @@ export function PricingPageContent() {
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader />
 
-      <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
+      <section className="mx-auto max-w-7xl px-4 py-14 [overflow-wrap:anywhere] sm:px-6 lg:px-8 lg:py-20">
         <div className="mx-auto max-w-4xl text-center">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
