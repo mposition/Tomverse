@@ -49,6 +49,13 @@ The mobile composer must preserve this vertical structure:
 
 Optional rows may be compacted or conditionally hidden. The textarea row may not be merged with another row.
 
+On an active multi-model conversation below 800px of measured visible height,
+the composer may omit its duplicate product row and expanded Review model row
+when the drawer still provides product navigation and the shell's visible model
+strip still identifies every selection. The footer keeps the canonical model
+picker trigger and actual selected count. Empty/new conversations and the
+approved 844px presentation keep both expanded rows.
+
 As implemented, that is:
 
 ```

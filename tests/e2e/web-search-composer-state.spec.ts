@@ -127,21 +127,19 @@ const chip = (page: Page) => page.getByTestId("web-search-mode-chip");
 
 /**
  * The chip says the same thing in two lengths. The mobile shell shortens the
- * *label* -- dropping the separator and the word "supported" -- but never the
- * row: the chip owns its own row above the textarea in both shells, per
- * docs/ui-contracts/mobile-chat-composer.md. Every state stays
+ * *label* -- dropping the separator and the word "supported". Full support
+ * sits with footer tools; partial/blocked search keeps its status row above
+ * the textarea, per docs/ui-contracts/mobile-chat-composer.md. Every state stays
  * distinguishable, and the full sentence is still what
  * `#web-search-state-description` carries. Which length is on screen is read
- * from the row's own `data-label-variant` rather than from the project name,
+ * from the chip's own `data-label-variant` rather than from the project name,
  * so this holds wherever the shell decides to mount.
  */
 async function expectChipLabel(
   page: Page,
   labels: { full: string; compact: string }
 ) {
-  const variant = await page
-    .getByTestId("tool-status-chip-row")
-    .getAttribute("data-label-variant");
+  const variant = await chip(page).getAttribute("data-label-variant");
   await expect(chip(page)).toContainText(
     variant === "compact" ? labels.compact : labels.full
   );
@@ -193,7 +191,7 @@ test("the composer does not grow extra rows just to say the normal state", { tag
   await open(page);
   const before = (await page.getByTestId("chat-input").boundingBox())!.height;
 
-  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  await page.getByTestId("composer-tools-button").click();
   await page.getByTestId("tools-web-search-row").click();
   await page.keyboard.press("Escape");
 
@@ -261,7 +259,7 @@ test(
   await expect(page.getByTestId("web-search-unavailable-notice")).toHaveCount(0);
   await expect(page.getByTestId("web-search-exception-toggle")).toHaveCount(0);
 
-  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  await page.getByTestId("composer-tools-button").click();
   await expect(page.getByTestId("tools-web-search-row")).toHaveAttribute(
     "aria-checked",
     "false"

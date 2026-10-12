@@ -304,17 +304,11 @@ test.describe("model selection stays available before the first question", () =>
       .locator('[data-testid="model-option"][aria-pressed="true"]:not([disabled])')
       .first();
     await expect(option).toBeVisible();
-    const before = await page
-      .locator('button[aria-controls="chat-input-popover"]')
-      .nth(1)
-      .innerText();
+    const before = await page.getByTestId("composer-active-model-count").innerText();
     await option.click();
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
-    const after = await page
-      .locator('button[aria-controls="chat-input-popover"]')
-      .nth(1)
-      .innerText();
+    const after = await page.getByTestId("composer-active-model-count").innerText();
     expect(
       after,
       "choosing a model from the front picker must change the selection"

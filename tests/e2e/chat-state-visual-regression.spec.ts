@@ -151,7 +151,7 @@ async function readShellShape(page: Page, viewportWidth: number) {
     await page.getByTestId("request-credit-estimate").first().innerText()
   ).trim();
   const modelButton = (
-    await page.locator('button[aria-controls="chat-input-popover"]').nth(1).innerText()
+    await page.getByTestId("composer-active-model-count").innerText()
   ).trim();
   return { modelIds, creditEstimate, modelButton };
 }
@@ -716,7 +716,7 @@ async function enterProConversation(page: Page, theme: Theme, viewport: { width:
   });
 }
 
-const toolsMenuTrigger = (page: Page) => page.locator('button[aria-controls="chat-input-popover"]').nth(0);
+const toolsMenuTrigger = (page: Page) => page.getByTestId("composer-tools-button");
 
 async function startDeepResearch(page: Page, viewportWidth: number, depth: "quick" | "standard" | "deep" = "standard") {
   await page.getByTestId("chat-textarea").fill("Compare renewable energy adoption across three regions.");
@@ -846,7 +846,7 @@ test.describe("Deep Research state", () => {
 // ===========================================================================
 // 9. File attachments
 // ===========================================================================
-const actionMenuTrigger = (page: Page) => page.locator('button[aria-controls="chat-input-popover"]').first();
+const actionMenuTrigger = (page: Page) => page.getByTestId("composer-tools-button");
 
 async function attachFromComputer(page: Page, file: { name: string; mimeType: string; buffer: Buffer }) {
   await actionMenuTrigger(page).click();

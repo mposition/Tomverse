@@ -1066,7 +1066,7 @@ async function openAttachmentWorkspace(
 
 /** Attaches one file through the composer's own tools menu. */
 async function attachSpreadsheet(page: Page) {
-  await page.locator('button[aria-controls="chat-input-popover"]').first().click();
+  await page.getByTestId("composer-tools-button").click();
   await page.getByTestId("tools-attach-row").click();
   const chooserPromise = page.waitForEvent("filechooser");
   await page.getByTestId("attach-local-file-row").click();

@@ -519,7 +519,7 @@ test("the composer's own deep research still asks every selected model", async (
   // Straight to the setup sheet, with a question of its own -- no expansion
   // card involved.
   await page.getByTestId("chat-textarea").fill(RESEARCH_QUESTION);
-  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  await page.getByTestId("composer-tools-button").click();
   await page.getByTestId("tools-deep-research-row").click();
   await page.getByTestId("deep-research-depth-standard").click();
   await page.getByTestId("deep-research-confirm-start").click();

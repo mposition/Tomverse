@@ -96,7 +96,7 @@ async function assertMinHitArea(locator: Locator, label: string) {
 }
 
 const modelSelectorTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+  page.getByTestId("composer-model-select");
 
 test.describe("mobile touch targets (STG-F005)", () => {
   // These assertions are only meaningful on a touch-emulating project:
@@ -124,7 +124,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
       await expect(page.getByTestId("chat-input")).toBeVisible();
 
       await assertMinTouchTarget(
-        page.locator('button[aria-controls="chat-input-popover"]').first(),
+        page.getByTestId("composer-tools-button"),
         `[${viewport.width}x${viewport.height}] Add and tools`
       );
       await assertMinTouchTarget(
@@ -153,7 +153,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
     await expect(page.getByTestId("chat-input")).toBeVisible();
 
     await assertHitTestReturnsSelf(
-      page.locator('button[aria-controls="chat-input-popover"]').first(),
+      page.getByTestId("composer-tools-button"),
       "Add and tools"
     );
     await assertHitTestReturnsSelf(modelSelectorTrigger(page), "Choose AI models");
@@ -377,7 +377,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
     await expect(page.getByTestId("chat-input")).toBeVisible();
 
     await assertMinTouchTarget(
-      page.locator('button[aria-controls="chat-input-popover"]').first(),
+      page.getByTestId("composer-tools-button"),
       "[ko] Add and tools"
     );
     await assertMinTouchTarget(modelSelectorTrigger(page), "[ko] Choose AI models");

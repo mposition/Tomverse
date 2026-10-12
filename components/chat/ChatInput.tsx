@@ -264,6 +264,7 @@ export function ChatInputWebSearchChipView({
       <div
         data-testid="web-search-mode-chip"
         data-selection-mode={isAutoMode ? "auto" : "manual"}
+        data-label-variant={isMobileShell ? "compact" : "full"}
         data-tone={tone}
         data-supported-count={isAutoMode ? undefined : state.supportedCount}
         data-unsupported-count={isAutoMode ? undefined : state.unsupportedCount}
@@ -706,6 +707,12 @@ type ChatInputProps = {
   currentProduct?: ChatWorkspaceProduct;
   /** Product navigation may also remain in the mobile drawer as a second route. */
   showProductSwitcher?: boolean;
+  /**
+   * Shows Review's expanded selected-model row above the textarea. A compact
+   * mobile shell may omit this duplicate when its model strip is already
+   * visible; the footer then keeps the canonical model-picker trigger.
+   */
+  showReviewModelRow?: boolean;
   /** Locks product navigation while the page owns an unknown or pre-send action. */
   productSwitchDisabled?: boolean;
   /** Stages an idle draft snapshot; false cancels navigation. */
@@ -1006,6 +1013,7 @@ const isGooglePickerConfig = (value: unknown): value is GooglePickerConfig => {
 export function ChatInput({
   currentProduct,
   showProductSwitcher = true,
+  showReviewModelRow = true,
   productSwitchDisabled = false,
   onProductSwitch,
   singleModelSelection = false,
@@ -2273,6 +2281,7 @@ export function ChatInput({
       if (
         menuRef.current &&
         !menuRef.current.contains(target) &&
+        !modelMenuButtonRef.current?.contains(target) &&
         !menuPopoverRef.current?.contains(target)
       ) {
         closeMenu(false);
@@ -3299,9 +3308,9 @@ export function ChatInput({
           {currentProduct && showProductSwitcher && (
             <div
               data-testid="composer-product-mode-row"
-              className="mb-4 flex min-w-0 items-center justify-between gap-2 md:mb-5"
+              className="mb-4 flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 md:mb-5"
             >
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 basis-[236px] grow">
                 <ChatProductSwitcher
                   currentProduct={currentProduct}
                   disabled={productSwitchDisabled || isSending || draftLocked}
@@ -3311,14 +3320,16 @@ export function ChatInput({
               {currentProductCopy && (
                 <span
                   data-testid="composer-product-context"
-                  className="hidden min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl text-xs font-medium text-zinc-500 dark:text-zinc-400 md:flex"
+                  className="hidden min-h-11 min-w-0 max-w-full flex-wrap items-center justify-center gap-1.5 rounded-xl text-xs font-medium text-zinc-500 dark:text-zinc-400 md:flex"
                 >
                   {isReviewProduct ? (
-                    <PanelsTopLeft className="h-4 w-4" aria-hidden="true" />
+                    <PanelsTopLeft className="h-4 w-4 shrink-0" aria-hidden="true" />
                   ) : (
-                    <Sparkles className="h-4 w-4" aria-hidden="true" />
+                    <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />
                   )}
-                  <span>{currentProductCopy.feature}</span>
+                  <span className="min-w-0 max-w-full whitespace-normal break-words text-center leading-4">
+                    {currentProductCopy.feature}
+                  </span>
                 </span>
               )}
             </div>
@@ -3757,7 +3768,7 @@ export function ChatInput({
             </div>
           )}
           <div className="flex flex-col gap-2">
-        {isReviewProduct && (
+        {isReviewProduct && showReviewModelRow && (
           <div
             data-testid="composer-review-models"
             className="flex min-w-0 flex-wrap items-center gap-2"
@@ -3956,7 +3967,7 @@ export function ChatInput({
             )}
           </button>
           {showWebSearchInFooter && webSearchChip}
-          {autoSelectionOffered && onSelectionModeChange && (
+          {!isReviewProduct && autoSelectionOffered && onSelectionModeChange && (
             <AutoRoutingComposerToggle
               offered={autoSelectionOffered}
               enabled={isAutoMode}
@@ -3967,7 +3978,7 @@ export function ChatInput({
               }}
             />
           )}
-          {!isReviewProduct && (
+          {(!isReviewProduct || !showReviewModelRow) && (
             <button
               ref={modelMenuButtonRef}
               type="button"
@@ -3978,7 +3989,9 @@ export function ChatInput({
               aria-label={
                 isAutoMode
                   ? `${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
-                  : t("chat.modelSelect")
+                  : isReviewProduct
+                    ? `${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}`
+                    : t("chat.modelSelect")
               }
               aria-expanded={isMenuOpen && menuView === "models"}
               aria-controls="chat-input-popover"

@@ -15,7 +15,7 @@ import {
  */
 
 const toolsMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(0);
+  page.getByTestId("composer-tools-button");
 
 const openMemoryMenu = async (page: Page) => {
   await toolsMenuTrigger(page).click();

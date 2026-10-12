@@ -103,6 +103,8 @@ type EnterOptions = {
   webSearchMode?: "off" | "auto" | "always";
   /** Install the stubs a deep-research run needs (see startDeepResearch). */
   deepResearch?: boolean;
+  /** A saved selection whose answer canvas is still empty. */
+  emptyConversation?: boolean;
 };
 
 async function enterMobileComposer(page: Page, options: EnterOptions) {
@@ -112,12 +114,13 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
     viewport,
     webSearchMode = "always",
     deepResearch = false,
+    emptyConversation = false,
   } = options;
 
   await prepareGuestPage(page, "en");
   await mockAuthenticatedApi(page, {
     selectedModels: models,
-    messages: seededMessages(models),
+    messages: emptyConversation ? [] : seededMessages(models),
     webSearchMode,
   });
   await setDeterministicTheme(page, "light");
@@ -155,7 +158,7 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
 /** Puts a pending Deep Research job (and so its chip) in the composer. */
 async function startDeepResearch(page: Page) {
   await page.getByTestId("chat-textarea").fill("Compare three regions.");
-  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  await page.getByTestId("composer-tools-button").click();
   await page.getByTestId("tools-deep-research-row").click();
   await page.getByTestId("deep-research-depth-standard").click();
   await page.getByTestId("deep-research-confirm-start").click();
@@ -350,8 +353,14 @@ async function expectComposerControlsContained(page: Page) {
       }
     }
     for (const label of composer.querySelectorAll<HTMLElement>("nav a span")) {
-      if (label.scrollWidth > label.clientWidth + 1 || label.scrollHeight > label.clientHeight + 1) {
-        failures.push(`product label ${label.textContent} clipped`);
+      const linkBox = label.closest("a")!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      for (const line of Array.from(range.getClientRects())) {
+        if (line.left < linkBox.left - 1 || line.right > linkBox.right + 1 ||
+            line.top < linkBox.top - 1 || line.bottom > linkBox.bottom + 1) {
+          failures.push(`product label ${label.textContent} leaves link`);
+        }
       }
     }
     const credit = composer.querySelector<HTMLElement>('[data-testid="request-credit-estimate"]');
@@ -794,6 +803,26 @@ test.describe("Mobile composer: focus indicator", { tag: "@ui-risk" }, () => {
 });
 
 test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-risk" }, () => {
+  test("short active Review keeps models in the header and a usable footer picker", async ({ page }) => {
+    await enterMobileComposer(page, {
+      models: ALL_SEARCH_MODELS,
+      viewport: { width: 390, height: 680 },
+      webSearchMode: "off",
+    });
+    const composer = page.getByTestId("chat-input");
+    await expect(composer.getByTestId("composer-product-mode-row")).toHaveCount(0);
+    await expect(composer.getByTestId("composer-review-models")).toHaveCount(0);
+    await expect(page.getByTestId("mobile-header-model-count")).toContainText("3");
+    await expect(page.getByTestId("mobile-model-tab")).toHaveCount(3);
+    await expect(composer.getByTestId("composer-model-select")).toHaveAccessibleName(/3/);
+    await composer.getByTestId("composer-model-select").click();
+    await expect(page.locator("#chat-input-popover")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expectComposerContract(page, "short active Review with header model strip");
+    await page.getByTestId("mobile-sidebar-open").click();
+    await expect(page.getByTestId("mobile-sidebar-drawer").getByTestId("chat-product-review")).toHaveAttribute("href", "/review?lang=ko");
+  });
+
   for (const lang of ["en", "de", "fr", "es", "pt", "ko", "zh"] as const) {
     for (const mode of ["text", "page"] as const) {
       test(`${lang} credit estimate and three Review models reflow at 200% ${mode} scaling`, async ({ page }) => {
@@ -802,6 +831,7 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
           models: ALL_SEARCH_MODELS,
           viewport: { width: mode === "text" ? 320 : 195, height: 680 },
           webSearchMode: "off",
+          emptyConversation: true,
         });
         if (mode === "text") await setRootFontSize(page, 32);
         const composer = page.getByTestId("chat-input");
@@ -824,6 +854,7 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
       models: ALL_SEARCH_MODELS,
       viewport: { width: 390, height: 680 },
       webSearchMode: "off",
+      emptyConversation: true,
     });
     const composer = page.getByTestId("chat-input");
     const textarea = page.getByTestId("chat-textarea");
@@ -1376,7 +1407,7 @@ const guestTextFile = (name = "guest-notes.txt") => ({
 
 test.describe("Mobile composer: guest attachments", { tag: "@ui-risk" }, () => {
   const openActions = async (page: Page) => {
-    await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+    await page.getByTestId("composer-tools-button").click();
   };
 
   test("a guest can attach a local file, and Drive stays behind sign-in", async ({

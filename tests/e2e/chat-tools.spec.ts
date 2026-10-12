@@ -4,11 +4,10 @@ import {
   openRecentConversation,
 } from "./support/app-fixtures";
 
-// The "+" trigger (opens the tools/actions sheet) is the first of the two
-// chat-input-popover triggers; the model-selector button (used by
-// model-finder.spec.ts) is the second. Mixing these up opens the wrong sheet.
+// The "+" trigger opens the tools/actions sheet. Target its component identity
+// so adding another popover trigger cannot silently open the wrong sheet.
 const toolsMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(0);
+  page.getByTestId("composer-tools-button");
 
 const asProPlan = async (page: Page) => {
   await page.unroute("**/api/user/usage**");

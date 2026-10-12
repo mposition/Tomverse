@@ -71,6 +71,8 @@ test.describe("Tomverse Chat and Review product switcher", () => {
   test("Review is current and does not present Smart Adaptive as a product", async ({
     page,
   }) => {
+    // Open the fixture's saved selection instead of relying on the new-chat catalogue default.
+    await restoreActiveConversation(page);
     await page.goto("/review?lang=en");
 
     const composer = page.locator('[data-testid="chat-input"]:visible');
@@ -107,6 +109,14 @@ test.describe("Tomverse Chat and Review product switcher", () => {
     });
     await composer.getByTestId("composer-model-select").click();
     await expect(page.locator("#chat-input-popover")).toBeVisible();
+    expect(conversationWrites).toEqual([]);
+    await composer.getByTestId("composer-model-select").click();
+    await expect(page.locator("#chat-input-popover")).toHaveCount(0);
+    await composer.getByTestId("composer-model-select").click();
+    await expect(page.locator("#chat-input-popover")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#chat-input-popover")).toHaveCount(0);
+    await expect(composer.getByTestId("composer-model-select")).toBeFocused();
     expect(conversationWrites).toEqual([]);
   });
 

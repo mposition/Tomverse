@@ -269,7 +269,7 @@ async function drive(page: Page, index: number, action: "push" | "finish" | "fai
 }
 
 const actionMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').first();
+  page.getByTestId("composer-tools-button");
 
 async function attachDraftFile(page: Page) {
   await actionMenuTrigger(page).click();
