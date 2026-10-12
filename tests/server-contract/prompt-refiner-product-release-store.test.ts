@@ -6,7 +6,14 @@ import { pathToFileURL } from "node:url";
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const runtime = { RAILWAY_GIT_COMMIT_SHA: "a".repeat(40),
-  RAILWAY_DEPLOYMENT_ID: "22222222-2222-4222-8222-222222222222" };
+  RAILWAY_DEPLOYMENT_ID: "22222222-2222-4222-8222-222222222222",
+  AUTO_ROUTER_ROLLOUT_PERCENT: "5",
+  AUTO_ROUTER_ELIGIBLE_PLANS: "Max,Plus",
+  AUTO_ROUTER_COHORT_SALT: "product-release-store-test-cohort",
+  TOMVERSE_AUTO_ROUTER_UI_ENABLED: "true",
+  ROUTING_DISPATCH_INSTRUMENTATION: "enforce",
+  MANIFEST_HASH_KEYS: `test-key:${"m".repeat(32)}`,
+  MANIFEST_HASH_ACTIVE_KEY_ID: "test-key" };
 const target = { stageId: "prompt-refiner-vnext-one-shot-v4",
   gateAuditLogId: "gate-audit", dispositionAuditLogId: "disposition-audit",
   limitedAuditReceiptId: "limited-audit",
@@ -240,7 +247,7 @@ test("initial release resume records the current policy and exact authority pair
       policySha256:
         "a9dbe509a056152015a59a45fd6438304fac36f36521a1319c11f8d1704970f9",
       continuityPolicySha256:
-        "91bb9c880c270355a857481f0015b7176dc17cd3fe46091a86c15a20e6d45cec",
+        "6763aaf7be51144325f372656cdd10977f79fb30a4ee4519982b2aca0f348ff9",
       operatorConfirmedReasonCode: "unknown_dispatch_or_cost",
       pauseAuditLogId: "pause-audit",
       priorGeneration: 7,

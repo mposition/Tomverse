@@ -27,7 +27,7 @@ export const CHAT_REFINER_INITIAL_AUTO_POLICY_COMMIT =
 export const CHAT_REFINER_INITIAL_AUTO_POLICY_SHA256 =
   "a9dbe509a056152015a59a45fd6438304fac36f36521a1319c11f8d1704970f9" as const;
 export const CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256 =
-  "91bb9c880c270355a857481f0015b7176dc17cd3fe46091a86c15a20e6d45cec" as const;
+  "6763aaf7be51144325f372656cdd10977f79fb30a4ee4519982b2aca0f348ff9" as const;
 export const CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION =
   "chat_auto.initial_release_exception_activated" as const;
 export const CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION =
@@ -58,6 +58,7 @@ export type ChatRefinerInitialAutoRuntimeBinding = Readonly<{
   runtimeCommitSha: string;
   runtimeDeploymentId: string;
   releaseFingerprint: string;
+  releaseAuthorityDigest: string;
   routerConfigDigest: string;
   rolloutPercent: number;
   eligiblePlans: readonly string[];
@@ -104,8 +105,18 @@ export const chatRefinerInitialAutoRuntimeBinding = (
     manifestHashKeyId,
   });
   const releaseFingerprint = currentChatReleaseSourceFingerprint();
+  const releaseAuthorityDigest = sha256({
+    version: "chat-release-authority-v2",
+    releaseFingerprint,
+    routerConfigDigest,
+    candidateDigest: PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
+    pricePinDigest: PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
+    adapterConfigDigest: PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST,
+    continuityPolicySha256: CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256,
+  });
   return Object.freeze({ runtimeCommitSha, runtimeDeploymentId,
-    releaseFingerprint, routerConfigDigest, rolloutPercent: cohort.rolloutPercent,
+    releaseFingerprint, releaseAuthorityDigest, routerConfigDigest,
+    rolloutPercent: cohort.rolloutPercent,
     eligiblePlans, cohortSaltDigest, manifestHashKeyId });
 };
 
@@ -117,6 +128,7 @@ const sharedMetadata = (binding: ChatRefinerInitialAutoRuntimeBinding,
   runtimeCommitSha: binding.runtimeCommitSha,
   runtimeDeploymentId: binding.runtimeDeploymentId,
   releaseFingerprint: binding.releaseFingerprint,
+  releaseAuthorityDigest: binding.releaseAuthorityDigest,
   candidateDigest: PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
   pricePinDigest: PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
   adapterConfigDigest: PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST,

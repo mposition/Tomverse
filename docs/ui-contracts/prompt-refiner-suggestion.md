@@ -3,10 +3,12 @@
 - 상태: **제품 코드 연결 완료, 활성 배포 default-off**. 서버가 보관한 exact draft와
   검증된 adapter 결과만 1회 소비해 Router/provider 공통 execution view를 만들고,
   저장 Message에는 저작 원문을 유지한다. explicit proposal과 Auto prepare, 공통 운영
-  예산·정산, immutable receipt와 exact-deployment activation authority가 연결됐다.
+  예산·정산, immutable receipt와 버전별 activation authority가 연결됐다.
   기존 activation은 signed B03G/limited-audit 조건을 계속 요구한다. 별도
   [초기 Auto 출시 정책](../policy/chat-refiner-initial-auto-release-v1.md)은 실패한
-  품질 기록을 보존하면서 exact-deployment owner activation으로 이번 출시를 허용한다.
+  품질 기록을 보존하면서 v1 exact-deployment owner activation으로 이번 출시를 허용한다.
+  이후 [릴리스 연속성 v2](../policy/chat-refiner-stable-release-authority-v2.md)는
+  별도 Owner 감사 기록을 실행 소스와 유효 제어값에 결속한다.
   실제 활성 여부는 serving readback으로 확인하며 문서·fixture·E04 합성 QA는 권한이 아니다.
 - 사용자 표면: `components/chat/PromptRefinerSuggestionPanel.tsx`
 - 요청·결정 계약: `lib/promptRefinerSuggestion.ts`
@@ -46,7 +48,7 @@ adapter가 준비됐다는 뜻이 아니다. 전체 allowlist, 종료 규칙, �
 
 Refiner는 답을 만들지 않고 현재 composer 문장을 다시 쓰는 제안을 만든다. 결과는
 전송 전에 별도 행에 표시된다. 수동 모드의 선택은 `이 문장 사용` 또는 `원문 유지`다.
-승인된 자동 적용 예외 또는 별도 초기 Auto 출시 권한은 Chat 대화가 이미 Auto mode이고 exact-deployment release가
+승인된 자동 적용 예외 또는 별도 초기 Auto 출시 권한은 Chat 대화가 이미 Auto mode이고 유효한 버전별 release가
 auto를 허용할 때 사용자의 통상 Send 준비 과정에서만 서버가 `accepted` 결정을 만든다.
 브라우저의 boolean이나 제안문은 이 결정을 만들 수 없다. 현재 fixture 버튼은
 `제안 미리보기 확인`이다. fixture 확인은

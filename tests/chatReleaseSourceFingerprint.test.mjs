@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { appendFileSync, cpSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, mkdirSync, readFileSync,
+  rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
-import { chatReleaseSourceFingerprint } from
+import { chatReleaseSourceFingerprint, chatReleaseSourcePaths } from
   "../lib/chatReleaseSourceFingerprint.ts";
 
 const repository = resolve(import.meta.dirname, "..");
@@ -18,14 +19,35 @@ test("unrelated deployment source is stable; execution drift and missing source 
       { recursive: true });
   };
   try {
-    copy("lib");
-    copy("app/api/chat/route.ts");
-    copy("app/api/products/chat/capabilities/route.ts");
-    copy("app/api/admin/prompt-refiner");
-    copy("packages/chat-core/src");
-    copy("docs/policy/chat-refiner-stable-release-authority-v2.md");
+    const paths = chatReleaseSourcePaths(repository);
+    for (const path of [
+      "lib/anthropicPromptCaching.ts",
+      "lib/servedProcessingTier.ts",
+      "lib/webSearchNativeCostReservation.ts",
+      "lib/webSearchCredits.ts",
+      "lib/perplexityUsageCapture.ts",
+      "lib/pinnedDeploymentExecution.ts",
+      "lib/conversationKindGuard.ts",
+    ]) assert.ok(paths.includes(path), `execution closure omits ${path}`);
+    for (const path of paths) copy(path);
+    copy("lib/amux/workerRegistryCore.ts");
     copy("prisma/schema.prisma");
-    const original = chatReleaseSourceFingerprint(root);
+    copy("package-lock.json");
+    let original;
+    try { original = chatReleaseSourceFingerprint(root); }
+    catch (error) { throw error.cause ?? error; }
+    const lockPath = join(root, "package-lock.json");
+    const originalLock = readFileSync(lockPath);
+    const lock = JSON.parse(originalLock.toString("utf8"));
+    assert.ok(lock.packages["node_modules/eslint"]);
+    assert.ok(lock.packages["node_modules/ai"]);
+    lock.packages["node_modules/eslint"].version = "0.0.0-unrelated";
+    writeFileSync(lockPath, JSON.stringify(lock));
+    assert.equal(chatReleaseSourceFingerprint(root), original);
+    lock.packages["node_modules/ai"].version = "0.0.0-provider-drift";
+    writeFileSync(lockPath, JSON.stringify(lock));
+    assert.notEqual(chatReleaseSourceFingerprint(root), original);
+    writeFileSync(lockPath, originalLock);
     appendFileSync(join(root, "lib", "amux", "workerRegistryCore.ts"),
       "\n// Unrelated AMUX change.\n");
     assert.equal(chatReleaseSourceFingerprint(root), original);
@@ -33,9 +55,13 @@ test("unrelated deployment source is stable; execution drift and missing source 
       "\n// Execution boundary changed.\n");
     const changedExecution = chatReleaseSourceFingerprint(root);
     assert.notEqual(changedExecution, original);
+    appendFileSync(join(root, "lib", "anthropicPromptCaching.ts"),
+      "\n// Provider execution drift.\n");
+    const changedProvider = chatReleaseSourceFingerprint(root);
+    assert.notEqual(changedProvider, changedExecution);
     appendFileSync(join(root, "packages", "chat-core", "src",
       "completionStatus.ts"), "\n// Shared execution drift.\n");
-    assert.notEqual(chatReleaseSourceFingerprint(root), changedExecution);
+    assert.notEqual(chatReleaseSourceFingerprint(root), changedProvider);
     rmSync(join(root, "app", "api", "chat", "route.ts"));
     assert.throws(() => chatReleaseSourceFingerprint(root),
       /chat_release_source_unavailable/);
