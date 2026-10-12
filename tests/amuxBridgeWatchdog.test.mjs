@@ -34,13 +34,46 @@ const URL_VALUE = "https://hc-ping.example/0f3c5a8e-1b2d-4c6e-9f00-123456789abc"
  * One watchdog run. Every path handed to bash is relative to the temporary
  * working directory, so no Windows path has to survive the trip.
  */
-const run = ({ state, url = URL_VALUE, credential = true, curlStatus = 0 }) => {
+const MAIN = "tomverse-bridge.service";
+const V22 = [
+  "tomverse-amux-v22-bridge@claude-impl.service",
+  "tomverse-amux-v22-sidecar@claude-impl.service",
+  "tomverse-amux-v22-bridge@claude-review.service",
+];
+
+/**
+ * `systemctl` as the host answers it: `list-units` prints every fake unit but
+ * the main one (which, being enabled, the script checks by name anyway), and
+ * `is-active` answers from FAKE_STATES, `inactive` for a unit it does not know.
+ * FAKE_STATES is space-separated, so a space inside an answer travels as `~`.
+ */
+const SYSTEMCTL_STUB = [
+  "systemctl() {",
+  '  if [ "$1" = list-units ]; then',
+  '    for pair in $FAKE_STATES; do unit=${pair%%=*}; [ "$unit" = tomverse-bridge.service ] || printf "%s loaded active running fake\\n" "$unit"; done',
+  "    return 0",
+  "  fi",
+  '  if [ "$1" = is-active ]; then',
+  '    for pair in $FAKE_STATES; do if [ "${pair%%=*}" = "$2" ]; then answer=${pair#*=}; printf "%s\\n" "${answer//\\~/ }"; [ "$answer" = active ]; return; fi; done',
+  '    printf "inactive\\n"; return 3',
+  "  fi",
+  "  return 1",
+  "}",
+].join("\n");
+
+const run = ({
+  state,
+  states = { [MAIN]: state },
+  url = URL_VALUE,
+  credential = true,
+  curlStatus = 0,
+}) => {
   const dir = mkdtempSync(join(tmpdir(), "bridge-watchdog-"));
   try {
     writeFileSync(join(dir, "watchdog"), script.replace(/\r\n/g, "\n"));
     if (credential) writeFileSync(join(dir, "ping-url"), `${url}\n`);
     const prelude = [
-      'systemctl() { printf "%s\\n" "$FAKE_STATE"; [ "$FAKE_STATE" = active ]; }',
+      SYSTEMCTL_STUB,
       // Arguments and the stdin config are kept apart: the URL may only ever
       // be in the second.
       'curl() { printf "%s\\n" "$*" >> args.log; while IFS= read -r line; do printf "%s\\n" "$line" >> config.log; done; return "$FAKE_CURL_STATUS"; }',
@@ -53,7 +86,9 @@ const run = ({ state, url = URL_VALUE, credential = true, curlStatus = 0 }) => {
       env: {
         ...process.env,
         CREDENTIALS_DIRECTORY: credential ? "." : "",
-        FAKE_STATE: state,
+        FAKE_STATES: Object.entries(states)
+          .map(([unit, unitState]) => `${unit}=${unitState}`)
+          .join(" "),
         FAKE_CURL_STATUS: String(curlStatus),
       },
     });
@@ -99,6 +134,54 @@ for (const state of ["activating", "deactivating", "reloading", ""]) {
     assert.deepEqual(result.requests, []);
   });
 }
+
+// The v22 workers each run their own bridge and sidecar. On 2026-10-12 a
+// production deploy halted all five bridges; watching the main unit alone
+// would have missed four.
+const allActive = Object.fromEntries([MAIN, ...V22].map((unit) => [unit, "active"]));
+
+test("every bridge and sidecar active sends the success signal", { skip: noBash }, () => {
+  const result = run({ states: allActive });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(result.requests, [URL_VALUE]);
+  assert.match(result.output, /4 unit\(s\), 0 down, 0 in transition; sent up/);
+});
+
+for (const unit of V22) {
+  test(`a failed ${unit} sends the failure signal`, { skip: noBash }, () => {
+    const result = run({ states: { ...allActive, [unit]: "failed" } });
+    assert.equal(result.status, 0, result.output);
+    assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+    // Which unit stopped stays in the host's journal.
+    assert.match(result.output, new RegExp(`${unit.replace(/[.@]/g, "\\$&")} is failed`));
+  });
+}
+
+test("a failure outranks a unit still in transition", { skip: noBash }, () => {
+  const result = run({
+    states: { ...allActive, [V22[0]]: "activating", [V22[1]]: "failed" },
+  });
+  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+});
+
+test("a v22 unit in transition with nothing down sends nothing", { skip: noBash }, () => {
+  const result = run({ states: { ...allActive, [V22[2]]: "activating" } });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(result.requests, []);
+});
+
+test("a main unit that is not loaded at all is down", { skip: noBash }, () => {
+  const { [MAIN]: _main, ...withoutMain } = allActive;
+  const result = run({ states: withoutMain });
+  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+});
+
+test("a listed unit outside the bridge names is ignored", { skip: noBash }, () => {
+  const result = run({
+    states: { ...allActive, "tomverse-amux-v22-bridge@x;y.service": "failed" },
+  });
+  assert.deepEqual(result.requests, [URL_VALUE]);
+});
 
 test("no credential sends nothing and fails the run", { skip: noBash }, () => {
   const result = run({ state: "active", credential: false });
@@ -177,4 +260,26 @@ test("the install script reads the URL without echoing it", () => {
     .split("\n")
     .filter((line) => /\b(echo|printf)\b.*"\$url"/.test(line));
   assert.deepEqual(writes, [`  printf '%s\\n' "$url" >"$url_file.new"`]);
+});
+
+// The first installed version read every unit as "unreadable" and said
+// nothing more, and the install reported success because a run that sends
+// nothing exits 0.
+test("an unreadable unit names systemctl's error, and sends nothing", { skip: noBash }, () => {
+  const result = run({ states: { ...allActive, [MAIN]: "Failed~to~connect~to~bus:~Permission~denied" } });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(result.requests, []);
+  assert.match(
+    result.output,
+    /tomverse-bridge\.service is unreadable \(systemctl: Failed to connect to bus: Permission denied\)/
+  );
+});
+
+test("the install fails unless its own run sent a signal", () => {
+  assert.match(install, /_SYSTEMD_INVOCATION_ID=\$invocation/);
+  assert.match(install, /grep -qE '; sent \(up\|down\)\$'/);
+  // The timer is enabled only after the check, and switched off on failure.
+  const check = install.indexOf("grep -qE");
+  assert.ok(check > 0 && install.lastIndexOf("systemctl enable --now") > check);
+  assert.match(install, /systemctl disable --now tomverse-bridge-watchdog\.timer/);
 });
