@@ -2170,7 +2170,7 @@ export function PricingPageContent() {
           </div>
         </section>
 
-        <section className="mt-16 grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
+        <section className="mt-16 grid grid-cols-1 gap-5 lg:grid-cols-[0.7fr_1.3fr]">
           {/*
             UI-005. `break-words` lets a long word wrap, but by spec it does
             not lower the element's min-content width -- so as a grid item this
@@ -2179,12 +2179,12 @@ export function PricingPageContent() {
             the size fall below ~375px of CSS width fixes the cause; every real
             phone width still renders it at 30px.
           */}
-          <h2 className={`text-[clamp(1.5rem,8vw,1.875rem)] font-black ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
-          <div className="grid gap-4">
+          <h2 className={`min-w-0 text-[clamp(1.5rem,8vw,1.875rem)] font-black ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
+          <div className="grid min-w-0 grid-cols-1 gap-4">
             {content.faqs
               .filter((faq) => !faq.promotionOnly || featuredPromotion)
               .map((faq) => (
-              <article key={faq.question} className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <article key={faq.question} className="min-w-0 break-words rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
                 <h3 className="font-bold">{faq.question}</h3>
                 <p className="mt-2 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{faq.answer}</p>
               </article>
@@ -2192,7 +2192,7 @@ export function PricingPageContent() {
           </div>
         </section>
 
-        <div className="mt-10 rounded-2xl border border-zinc-200 bg-zinc-50 p-5 text-sm leading-7 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
+        <div className="mt-10 break-words rounded-2xl border border-zinc-200 bg-zinc-50 p-5 text-sm leading-7 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
           {content.note}
         </div>
       </section>
