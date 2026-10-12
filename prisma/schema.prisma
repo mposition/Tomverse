@@ -10418,7 +10418,7 @@ model SupportTriageDecisionRecordLink {
 /// AMUX worker registry events (orchestration policy version 31, section 3):
 /// append-only, and a worker's desired state is its newest event. Only a
 /// person writes it, the owner with a recent step-up. Single writer:
-/// lib/amux/workerRegistryStore.ts. Migration 20261012090000_amux_worker_registry
+/// lib/amux/workerRegistryStore.ts. Migration 20261012100000_amux_worker_registry
 /// holds the CHECKs (name grammar, class prefix, version 16's roles with
 /// Cursor and Copilot below contract, the four desired states) and the trigger
 /// that holds the change rule, the per-worker revision, the audit row of the

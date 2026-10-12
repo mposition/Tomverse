@@ -578,7 +578,7 @@ export const RAW_SQL_ALLOWLIST = [
       "The data-domain registry names the worker registry model as its domain key and as prismaModel, and other domains' prose uses delete and update. It builds no SQL and opens no database connection.",
   },
   {
-    path: "prisma/migrations/20261012090000_amux_worker_registry/migration.sql",
+    path: "prisma/migrations/20261012100000_amux_worker_registry/migration.sql",
     table: "AmuxWorkerRegistryEvent",
     tableMentions: 9,
     writeVerbs: 23,
@@ -594,7 +594,7 @@ export const RAW_SQL_ALLOWLIST = [
       "The registry event table's single writer (orchestration policy version 31, section 3). Its raw SQL is two constant SELECTs (the newest event of every worker, and of one worker) and one constant INSERT ... RETURNING; every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
   },
   {
-    path: "prisma/migrations/20261012090000_amux_worker_registry/migration.sql",
+    path: "prisma/migrations/20261012100000_amux_worker_registry/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 4,
     writeVerbs: 23,
@@ -2036,7 +2036,7 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "Three reads in the Decision Maker switch event guard, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the newest event of the inserted event's scope, read after a transaction advisory lock on that scope, and one SELECT EXISTS on AdminAuditLog for a person's event or for a latch. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
-    path: "prisma/migrations/20261012090000_amux_worker_registry/migration.sql",
+    path: "prisma/migrations/20261012100000_amux_worker_registry/migration.sql",
     count: 2,
     reason:
       "Two reads in the worker registry event guard, both with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the inserted worker's newest event, read after a transaction advisory lock on that worker, and one SELECT EXISTS on AdminAuditLog for the person's audit row of the same transaction. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",

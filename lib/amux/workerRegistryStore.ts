@@ -34,7 +34,7 @@ import {
  * them (`AMUX_DB_BOUNDARIES.workerRegistryRead`, `.workerRegistryChange`).
  *
  * The rules a stored event must satisfy are the database's (migration
- * 20261012090000_amux_worker_registry); this module refuses the same cases
+ * 20261012100000_amux_worker_registry); this module refuses the same cases
  * first, so a refused change writes no audit entry. Permission is the
  * caller's: the owner role and a recent step-up (section 3), checked before
  * this is called.

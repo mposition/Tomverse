@@ -15,7 +15,7 @@ import {
 import { prisma } from "@/lib/prisma";
 
 // Orchestration policy version 31, stage R1, against PostgreSQL through the
-// migration history (20261012090000_amux_worker_registry), in the agents lane
+// migration history (20261012100000_amux_worker_registry), in the agents lane
 // of the DB integration suite.
 //
 // What the migration header says the database enforces: the name grammar and
