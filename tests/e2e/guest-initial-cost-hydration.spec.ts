@@ -125,8 +125,8 @@ async function installFirstPaintRecorder(page: Page) {
     };
 
     const sample = () => {
-      const modelButton = document.querySelector(
-        'button[aria-label="Choose AI models"]'
+      const modelCountLabel = document.querySelector(
+        '[data-testid="chat-input"] [data-testid="composer-active-model-count"]'
       );
       const estimate = document.querySelector(
         '[data-testid="request-credit-estimate"]'
@@ -135,11 +135,8 @@ async function installFirstPaintRecorder(page: Page) {
         '[data-testid="chat-send-button"]'
       );
 
-      // The button also renders a count badge, so its combined textContent
-      // reads "33 AIs" for three models. Read the label span on its own.
-      const modelCountLabel = Array.from(
-        modelButton?.querySelectorAll("span") ?? []
-      ).find((node) => /^\d+\s+AIs?$/.test(node.textContent?.trim() ?? ""));
+      // The count label is shared by the Review row and compact footer picker.
+      // Read it directly so accessible names can also name the selected count.
 
       const entry: FirstPaintSample = {
         modelCount: numberFrom(modelCountLabel?.textContent?.trim(), /^(\d+)\s+AIs?$/),

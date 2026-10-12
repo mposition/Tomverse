@@ -380,7 +380,7 @@ export function ComparisonActionRail({
         positioned, out of flow) in the steady state, and a flex gap would keep
         charging the rail for a row that is no longer painted.
       */}
-      <div className="mx-auto flex w-full max-w-4xl flex-col">
+      <div className="mx-auto flex w-full max-w-5xl flex-col">
         <h2 id={titleId} className="sr-only">
           {t("chat.comparisonRailTitle")}
         </h2>

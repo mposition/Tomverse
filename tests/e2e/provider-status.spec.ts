@@ -955,7 +955,7 @@ test.describe("outage banner touch targets (UI-TOUCH-001)", () => {
         banner(page).getByTestId("provider-status-choose-model"),
       ];
       let checked = 0;
-      const boxes: Array<{ x: number; y: number; width: number; height: number }> = [];
+      const checkedActions: (typeof actions)[number][] = [];
       for (const action of actions) {
         const count = await action.count();
         for (let index = 0; index < count; index++) {
@@ -989,7 +989,7 @@ test.describe("outage banner touch targets (UI-TOUCH-001)", () => {
               `${label} hit-test at (${dx}, ${dy}) must resolve to this action`
             ).toBe(true);
           }
-          boxes.push(box);
+          checkedActions.push(item);
           checked += 1;
         }
       }
@@ -997,6 +997,12 @@ test.describe("outage banner touch targets (UI-TOUCH-001)", () => {
 
       // No two actions may overlap: growing a chip must not steal its
       // neighbour's taps.
+      // Each scrollIntoView can move the bounded banner. Compare every box
+      // at the same final scroll offset, rather than mixing earlier positions.
+      const boxes = (await Promise.all(checkedActions.map((item) => item.boundingBox()))).map((box) => {
+        expect(box).not.toBeNull();
+        return box!;
+      });
       for (let a = 0; a < boxes.length; a++) {
         for (let b = a + 1; b < boxes.length; b++) {
           const overlaps =
