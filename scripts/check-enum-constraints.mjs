@@ -1041,6 +1041,13 @@ const REGISTRY = {
     reason:
       "The six halt reasons of policy version 20, section 2. The first four carry the write's request id as the halt key; contract_violation and selection_read_failures carry none. The orchestrator's Rust list is pinned to the same six by tests/amuxOrchestratorHaltCore.test.mjs.",
   },
+  AmuxOrchestratorHalt_clear_kind_check: {
+    owner: "list",
+    module: "lib/amux/orchestratorHaltCore.ts",
+    list: "AMUX_ORCHESTRATOR_HALT_CLEAR_KINDS",
+    reason:
+      "Policy version 32 distinguishes the existing human clear from the system_no_commit path whose trigger requires the same request's no-commit resolution audit and zero receipts.",
+  },
   AmuxDecisionMakerSwitchEvent_scope_check: {
     owner: "list",
     module: "lib/amux/decisionMakerSwitchCore.ts",

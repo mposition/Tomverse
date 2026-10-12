@@ -46,6 +46,7 @@ const NAV_LABELS = [
   "Backlog",
   "Promotion",
   "Execution",
+  "Operations settings",
   "Email policy",
   "Audit log",
   "Retention",

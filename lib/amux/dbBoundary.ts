@@ -233,10 +233,11 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 3,
     isolation: "read",
   },
-  // setup + admission lock + receipt count + system audit (4) + update + fence
+  // setup + admission lock + receipt count + resolution audit (4) + update +
+  // receipt recheck + halt lock + automatic-clear audit (4) + update + fence
   orchestratorResolve: {
     operation: "orchestrator_resolve",
-    prismaCallCeiling: 9,
+    prismaCallCeiling: 16,
     isolation: "mutation",
   },
   // setup + open halts + counts + people's list + requested keys + fence

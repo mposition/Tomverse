@@ -25,19 +25,20 @@ import type { AmuxOrchestratorHaltRow } from "@/lib/amux/orchestratorHaltStore";
 
 /**
  * The orchestrator's halt record and halt state
- * (docs/policy/development-agent-orchestration.md, version 20, section 5).
+ * (docs/policy/development-agent-orchestration.md, versions 20 and 32).
  *
  * `POST` opens one halt with the system audit `amux.orchestrator.halted` in
  * the same transaction; sending the same `halt_key` again returns the halt
- * already recorded. It inserts only: there is no field, action or path here
- * that clears a halt, which only a person can do from the Admin console.
+ * already recorded. The POST itself only inserts; the GET resolver may close
+ * one result-unknown halt when the same request has verified no-commit proof.
  *
  * `GET` first applies the resolver to admissions past their deadline, then
  * returns the open halts, the undecided admissions (count, latest deadline and
  * how long until it has passed plus the grace), the requests a person has to
  * confirm, and -- for each `halt_key` asked about -- whether that halt is
- * recorded and cleared by a person. An empty list is not a clear: the
- * orchestrator releases a halt it recorded only on reading it as cleared.
+ * recorded and has complete human or system clear evidence. An empty list is
+ * not a clear: the orchestrator releases a halt it recorded only on reading
+ * the matching proof.
  */
 
 const OPERATION = "orchestrator_halt";
@@ -115,7 +116,13 @@ export async function GET(request: Request) {
         halts: state.halts.map((row) => ({
           halt_key: row.haltKey,
           halt_id: row.haltId,
+          reason_code: row.reasonCode,
+          request_id: row.requestId,
           cleared: row.cleared,
+          clear_kind: row.clearKind,
+          clear_audit_log_id: row.clearAuditLogId,
+          clear_evidence_audit_log_id: row.clearEvidenceAuditLogId,
+          resolution: row.resolution,
         })),
       });
     } catch (error) {

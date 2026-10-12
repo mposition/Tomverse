@@ -64,6 +64,7 @@ export const ADMIN_NAV_ICONS = {
   "amux-backlog": Inbox,
   "amux-promotion": ArrowUpFromLine,
   "amux-execution": Workflow,
+  "amux-settings": Settings2,
   "email-policy": Mail,
   audit: ShieldCheck,
   retention: Database,

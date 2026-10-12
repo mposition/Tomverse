@@ -1449,7 +1449,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `outcome_unknown`(503)으로 답하고 다시 보내지 않고 GET으로 확인합니다. Admin 화면·라우팅 route·bridge는
   없습니다.
 - **S1f2(스위치 화면)**: `components/admin/AmuxDecisionMakerSwitchPanel.tsx`,
-  `lib/adminMessages/amuxDecisionMaker.ts`, `/admin/amux-execution?tab=decision-maker`(`lib/adminNavigation.ts`,
+  `lib/adminMessages/amuxDecisionMaker.ts`, `/admin/amux-settings?tab=decision-maker`(`lib/adminNavigation.ts`,
   `lib/adminNavigationLocale.ts`, `app/(site)/(application)/admin/amux-execution/page.tsx`),
   `tests/client/amuxDecisionMakerSwitchRender.test.tsx`. 화면은 S1f1 route만 부르고, 바꿀 수 있는 값은
   `dmSwitchChangesFor()`가 정책 목록에서 지금 값만 뺀 것입니다(읽을 수 없는 scope는 전부). 권한이 없으면

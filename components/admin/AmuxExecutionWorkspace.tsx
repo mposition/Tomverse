@@ -307,7 +307,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
       </div>
     </div>
     <p className="text-xs text-zinc-500">{m.globalAttention} <Link
-      href="/admin/amux-execution?tab=halts" className="underline">{m.haltsLink}</Link></p>
+      href="/admin/amux-settings?tab=safety" className="underline">{m.haltsLink}</Link></p>
     {activation && <details data-testid="amux-v22-activation-diagnostic"
       className="rounded border border-zinc-300 p-3 text-sm dark:border-zinc-700">
       <summary className="cursor-pointer font-semibold">{m.activationReadout}</summary>

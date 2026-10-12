@@ -296,7 +296,7 @@ pub struct Scheduler {
     /// What this tick's selection reads did so far. Set by
     /// `handle_selection_read`, read once by `tick` when the tick ends.
     tick_selection: TickSelection,
-    /// The halts this process holds until a person clears them.
+    /// The halts this process holds until the server returns a verified clear.
     halts: HaltBook,
     error_log: ErrorLogClock,
 }
@@ -340,8 +340,8 @@ impl Scheduler {
     /// Its first call is the halt state read, before any write or selection
     /// read. It then schedules only while the resume sentence holds, and every
     /// answer that is not a known one is a halt: it waits, reads the halt
-    /// state every 30 seconds, and resumes only when a person has cleared
-    /// every halt. It never returns except with the one exit section 3 keeps
+    /// state every 30 seconds, and resumes only when every halt has a verified
+    /// human or no-commit clear. It never returns except with the one exit section 3 keeps
     /// here -- a 401 or 403 on the halt state read before the schedule has
     /// ever started, which is a configuration error.
     pub async fn run(mut self) -> Result<Infallible> {
@@ -410,7 +410,7 @@ impl Scheduler {
             class,
             measured = false,
             verdict = "halted",
-            "Tomverse AMUX orchestrator halted; no write call or selection read until a person clears the halt"
+            "Tomverse AMUX orchestrator halted; no write call or selection read until the server returns verified clear evidence"
         );
     }
 
@@ -553,7 +553,7 @@ impl Scheduler {
                         info!(
                             instance_id = %self.instance_id,
                             released,
-                            "Tomverse AMUX orchestrator read its halts cleared by a person"
+                            "Tomverse AMUX orchestrator read verified clear evidence for its halts"
                         );
                     }
                     let mut opened = false;
@@ -579,7 +579,7 @@ impl Scheduler {
                             info!(
                                 instance_id = %self.instance_id,
                                 verdict = "scheduling",
-                                "Tomverse AMUX orchestrator is scheduling: no halt, no undecided write, nothing waiting on a person"
+                                "Tomverse AMUX orchestrator is scheduling: no halt, no undecided write, nothing waiting on an operator"
                             );
                             return Resume::Resumed;
                         }
@@ -2119,7 +2119,92 @@ mod tests {
             "retry_after_ms": if pending > 0 { serde_json::json!(1) } else { serde_json::Value::Null },
             "human_required_count": human.len(),
             "human_required": human.iter().map(|id| serde_json::json!({"request_id": id, "call_kind": "claim", "receipt_count": 1})).collect::<Vec<_>>(),
-            "halts": halts.iter().map(|(key, cleared)| serde_json::json!({"halt_key": key, "halt_id": key, "cleared": cleared})).collect::<Vec<_>>(),
+            "halts": halts.iter().map(|(key, cleared)| {
+                let request_halt = human.contains(key);
+                serde_json::json!({
+                    "halt_key": key,
+                    "halt_id": key,
+                    "reason_code": if request_halt { "unacked_write_receipt" } else { "selection_read_failures" },
+                    "request_id": if request_halt { serde_json::json!(key) } else { serde_json::Value::Null },
+                    "cleared": cleared,
+                    "clear_kind": if *cleared { serde_json::json!("human") } else { serde_json::Value::Null },
+                    "clear_audit_log_id": if *cleared { serde_json::json!("cm1amuxhuman00000000000001") } else { serde_json::Value::Null },
+                    "clear_evidence_audit_log_id": serde_json::Value::Null,
+                    "resolution": if *cleared && request_halt { serde_json::json!("human_confirmed") } else { serde_json::Value::Null },
+                })
+            }).collect::<Vec<_>>(),
+        })
+        .to_string()
+    }
+
+    fn system_no_commit_state(key: &str, halt_id: &str) -> String {
+        serde_json::json!({
+            "open_halt_count": 0,
+            "open_halts": [],
+            "pending_count": 0,
+            "latest_deadline_at": null,
+            "retry_after_ms": null,
+            "human_required_count": 0,
+            "human_required": [],
+            "halts": [{
+                "halt_key": key,
+                "halt_id": halt_id,
+                "reason_code": "claim_outcome_unknown",
+                "request_id": key,
+                "cleared": true,
+                "clear_kind": "system_no_commit",
+                "clear_audit_log_id": "cm1amuxclear00000000000003",
+                "clear_evidence_audit_log_id": "cm1amuxevidence00000000003",
+                "resolution": "no_commit",
+            }],
+        })
+        .to_string()
+    }
+
+    fn human_request_clear_state(key: &str, halt_id: &str) -> String {
+        serde_json::json!({
+            "open_halt_count": 0,
+            "open_halts": [],
+            "pending_count": 0,
+            "latest_deadline_at": null,
+            "retry_after_ms": null,
+            "human_required_count": 0,
+            "human_required": [],
+            "halts": [{
+                "halt_key": key,
+                "halt_id": halt_id,
+                "reason_code": "unacked_write_receipt",
+                "request_id": key,
+                "cleared": true,
+                "clear_kind": "human",
+                "clear_audit_log_id": "cm1amuxhuman00000000000002",
+                "clear_evidence_audit_log_id": null,
+                "resolution": "human_confirmed",
+            }],
+        })
+        .to_string()
+    }
+
+    fn missing_admission_human_clear_state(key: &str, halt_id: &str) -> String {
+        serde_json::json!({
+            "open_halt_count": 0,
+            "open_halts": [],
+            "pending_count": 0,
+            "latest_deadline_at": null,
+            "retry_after_ms": null,
+            "human_required_count": 0,
+            "human_required": [],
+            "halts": [{
+                "halt_key": key,
+                "halt_id": halt_id,
+                "reason_code": "claim_outcome_unknown",
+                "request_id": key,
+                "cleared": true,
+                "clear_kind": "human",
+                "clear_audit_log_id": "cm1amuxhuman00000000000003",
+                "clear_evidence_audit_log_id": null,
+                "resolution": null,
+            }],
         })
         .to_string()
     }
@@ -2212,7 +2297,7 @@ mod tests {
                 return None;
             }
             Some(if flag.load(Ordering::SeqCst) {
-                ("200 OK", state_body(0, 0, &[], &[(key.clone(), true)]))
+                ("200 OK", human_request_clear_state(&key, &key))
             } else if seen.query.contains(&key) {
                 ("200 OK", state_body(1, 0, &[key.clone()], &[(key.clone(), false)]))
             } else {
@@ -2266,6 +2351,56 @@ mod tests {
         cleared.store(true, Ordering::SeqCst);
         assert!(run_for(&mut scheduler, Duration::from_millis(100)).await.is_none());
         assert!(!writes_or_reads(&log).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_matching_verified_no_commit_clear_releases_the_memory_halt() {
+        let request_id = Uuid::new_v4();
+        let halt_id = Uuid::new_v4().to_string();
+        let key = request_id.to_string();
+        let expected_halt_id = halt_id.clone();
+        let (base_url, _) = serve(handler(move |seen| {
+            seen.is("GET", HALT_PATH)
+                .then(|| ("200 OK", system_no_commit_state(&key, &expected_halt_id)))
+        }))
+        .await;
+        let mut scheduler = scheduler_for(base_url);
+        scheduler.halts.open(
+            HaltReason::ClaimOutcomeUnknown,
+            request_id,
+            Some(request_id),
+        );
+        scheduler.halts.mark_recorded(request_id, halt_id);
+
+        tokio::time::timeout(Duration::from_millis(200), scheduler.await_resume(false))
+            .await
+            .expect("verified no-commit proof resumes the scheduler");
+        assert!(scheduler.halts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_missing_admission_human_clear_releases_the_memory_halt() {
+        let request_id = Uuid::new_v4();
+        let halt_id = Uuid::new_v4().to_string();
+        let key = request_id.to_string();
+        let expected_halt_id = halt_id.clone();
+        let (base_url, _) = serve(handler(move |seen| {
+            seen.is("GET", HALT_PATH)
+                .then(|| ("200 OK", missing_admission_human_clear_state(&key, &expected_halt_id)))
+        }))
+        .await;
+        let mut scheduler = scheduler_for(base_url);
+        scheduler.halts.open(
+            HaltReason::ClaimOutcomeUnknown,
+            request_id,
+            Some(request_id),
+        );
+        scheduler.halts.mark_recorded(request_id, halt_id);
+
+        tokio::time::timeout(Duration::from_millis(200), scheduler.await_resume(false))
+            .await
+            .expect("the audited owner clear resumes a halt whose admission is missing");
+        assert!(scheduler.halts.is_empty());
     }
 
     #[tokio::test]

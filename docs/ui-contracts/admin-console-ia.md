@@ -64,7 +64,8 @@ owner-only (rule 14).
 | Operations | Platform settings | `/admin/platform` | — |
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
-| AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment`, `halts`, `decision-maker` |
+| AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment` |
+| AMUX | Operations settings | `/admin/amux-settings` | `safety`, `decision-maker` |
 | Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
 | Governance | Audit log | `/admin/audit` | — |
 | Governance | Retention | `/admin/retention` | — |
@@ -227,21 +228,27 @@ neither deletes data nor grants execution.
 
 Its Assignment tab carries the count of AMUX escalations still `open` or
 `acknowledged`, from the same status list the section reads
-(`AMUX_ESCALATION_AWAITING_STATUSES`). Its **Halts** tab (orchestration policy
-version 20, section 7) lists the AMUX Orchestrator's halts, the writes a person
-has to confirm with their receipts, and the owner's clear, and carries the count
-of halts no person has cleared (`amuxOrchestratorHalts`). Every admin role reads
-it, because the Execution entry's badge counts it for every role; the clear
-takes the owner role and a recent step-up in its own route, and a stale step-up
-is answered with the way back (rule 7). Its **Decision Maker** tab
+(`AMUX_ESCALATION_AWAITING_STATUSES`). The Execution entry carries that count
+(`amuxEscalations`). **Operations settings** opens to every admin role on its
+**Safety & recovery** section (orchestration policy version 32, section 7).
+It explains stop reasons and evidence, shows receipt confirmation and the
+owner's clear, and carries the count of open halts (`amuxOrchestratorHalts`).
+The server automatically clears only a request-bound outcome-unknown halt
+after the same admitted write is confirmed `no_commit` with no receipts and
+the resolution and clear audits are recorded together. Missing admission is
+not evidence for automatic clearance. Manual clearance takes the owner role,
+three evidence checks, the halt confirmation key, and a recent step-up in its
+own route; a stale step-up is answered with the exact section to return to
+(rule 7). Its **Decision Maker** section
 (docs/policy/amux-decision-maker.md §8) shows the kill switch and each
 instance's mode to every admin role, as the switch route's read does; a change
 takes `ops:write` and a recent step-up in that route, a stale step-up is
 answered with the way back (rule 7), and an unknown outcome reads the state
 again rather than sending the change twice. It carries no badge: a switch is a
-setting, not work waiting for a person. The Execution entry's badge
-(`amuxExecution`) is the escalation count plus the halt count, and is drawn only
-when both are known: a partial sum would read as "no halt". Each gated section's tab carries a chip
+setting, not work waiting for a person. Operations settings carries the halt
+count; a failed halt read is shown as unknown, never as zero. Legacy Execution
+`?tab=halts` and `?tab=decision-maker` links redirect to their corresponding
+settings sections and preserve the remaining query fields. Each gated section's tab carries a chip
 -- "Preview · apply off" or "Apply on", and "Behind server switch" or "Server
 switch on" for auto-promotion -- computed by `lib/adminAmuxTabStatus.ts` from
 the environment variable and shipped code latch that section's own route
@@ -550,3 +557,10 @@ console has no copy for (French, German, …) reads English.
 | `syncBillingDefaultsToDatabase()` on every admin page render | `/admin/billing` only (and `/api/admin/billing`, which already called it) |
 | `ALL_ITEMS.slice(0, 9)` in the empty palette | Pinned, Recent, and every page grouped exactly as the sidebar groups them |
 | `AdminMemoryImportPanel` stacked under the product funnel, so opening either fetched both | its own `?tab=imports` section |
+
+
+### AMUX operations settings (2026-10-12)
+
+The operator approved grouping execution safety and recovery with Decision Maker controls in Operations settings. Execution retains cards and assignment; its badge counts escalations. Operations settings counts open orchestrator halts, without adding those halts to the Execution badge again. The legacy `?tab=halts` and `?tab=decision-maker` addresses on Execution redirect to their respective settings sections while preserving other query parameters. Both settings sections remain readable to every admin role. Halt clear remains owner-only; Decision Maker changes retain `ops:write`. Both mutations require their existing recent authentication checks. Reauthentication returns to the exact settings section.
+
+The safety section distinguishes automatic recovery checks, operator confirmation and causes that need fixing. A missing admission is never presented as a confirmed non-commit. Automatic history is labelled only with the server-provided system clear kind and matching no-commit/audit evidence. Read failure is shown as unknown, never as an empty or healthy state. The existing 50 open / 20 cleared / 50 human-required display ceilings remain visible. Confirmation checkboxes guide the operator and confer no server authority; the clear endpoint still verifies role, recent authentication and the halt key.
