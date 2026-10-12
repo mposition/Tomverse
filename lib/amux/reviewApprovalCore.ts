@@ -28,6 +28,24 @@ export const safeReviewDisplayText = (value: string | null) => {
 export const amuxReviewDisplayIsExact = (value: string | null) =>
   value === null || cleanedReviewDisplayText(value) === value;
 
+export const amuxV4ReviewReportProjection = (input: {
+  contentValid: boolean;
+  evidence: {
+    scopeAndCompletionCriteria: string;
+    approvedBrief: string;
+    workerReport: string | null;
+  } | null;
+  workerReportVerified: boolean;
+}) => input.contentValid && input.evidence ? {
+  scope_and_completion_criteria:
+    safeReviewDisplayText(input.evidence.scopeAndCompletionCriteria),
+  approved_execution_brief:
+    safeReviewDisplayText(input.evidence.approvedBrief),
+  worker_report: safeReviewDisplayText(input.evidence.workerReport),
+  worker_report_verified:
+    input.evidence.workerReport !== null && input.workerReportVerified,
+} : null;
+
 export const isAmuxAgentApprovalEnabled = (value: string | undefined) =>
   value === "true";
 

@@ -14,6 +14,7 @@ import {
   amuxReviewTargetStatus,
   amuxV22ReviewRetryHasVerifiedOutcome,
   amuxV4ReviewEvidenceMatches,
+  amuxV4ReviewReportProjection,
   sha256Hex,
   safeReviewDisplayText,
   type AmuxReviewOutcome,
@@ -37,6 +38,8 @@ export class AmuxReviewRefusal extends Error {
 type Client = Prisma.TransactionClient;
 type V4ReviewEvidence = {
   taskId: string; revision: number; title: string; description: string;
+  scopeAndCompletionCriteria: string; approvedBrief: string;
+  workerReport: string | null;
   titleDigest: string | null; bodyDigest: string | null;
   briefDigest: string | null; resultAttemptId: string | null;
   resultSha256: string | null;
@@ -63,6 +66,9 @@ async function v4EvidenceForEscalation(escalationId: string):
     return {
       taskId: escalation.task.id, revision: detail.revision,
       title: detail.title,
+      scopeAndCompletionCriteria: detail.body,
+      approvedBrief: detail.brief,
+      workerReport: escalation.task.reviewPrNumber === null ? retainedResultText : null,
       description: `Scope and completion criteria:\n${detail.body}\n\nApproved brief:\n${detail.brief}` +
         (escalation.task.reviewPrNumber === null && retainedResultText ?
           `\n\nVerified worker result:\n${retainedResultText}` : ""),
@@ -274,8 +280,16 @@ async function snapshot(
     last_attempt_reason: attemptReason,
     previous_block_reason: previousBlockReason,
   };
+  // This is a presentation projection of the same private v4 values already
+  // bound by `description` and `v4_evidence` in the v6 subject digest. It does
+  // not introduce a second evidence source or weaken the existing match gates.
+  const report = amuxV4ReviewReportProjection({
+    contentValid: v4ContentValid,
+    evidence: fetchedV4,
+    workerReportVerified: v4Valid,
+  });
   return { escalation, task, lastAttempt, budget, used, subject, digest, text,
-    context, displayTruncated, displayExact, outcomes, artifact };
+    context, report, displayTruncated, displayExact, outcomes, artifact };
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
@@ -283,7 +297,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
     artifactForEscalation(escalationId), v4EvidenceForEscalation(escalationId),
   ]);
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
-  const { escalation, task, lastAttempt, used, digest, text, context,
+  const { escalation, task, lastAttempt, used, digest, text, context, report,
     displayTruncated, displayExact, outcomes, artifact } = state;
   return {
     available: true,
@@ -303,6 +317,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
     },
     last_attempt: lastAttempt ? {
       id: lastAttempt.id,
+      task_revision: lastAttempt.taskRevision,
       outcome: lastAttempt.outcome,
       to_status: lastAttempt.toStatus,
       ended_at: lastAttempt.endedAt?.toISOString() ?? null,
@@ -310,6 +325,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
     review_content: { text, digest, truncated: displayTruncated,
       display_mismatch: !displayExact },
     review_context: context,
+    review_report: report,
     review_artifact: artifact ? {
       pr_number: artifact.prNumber,
       base_sha: artifact.baseSha,

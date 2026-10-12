@@ -6,7 +6,8 @@ const panel = readFileSync("components/admin/AdminAmuxRoutingPanel.tsx", "utf8")
 const messages = readFileSync("lib/adminMessages/amuxRouting.ts", "utf8");
 
 test("general routing cards use only safe reason codes, not the raw escalation reason", () => {
-  const escalationType = panel.split("  escalations: Array<{")[1]?.split("  workers: Array<{")[0];
+  const escalationType = panel.split("export type AmuxEscalationSummary = {")[1]
+    ?.split("type AmuxReport = {")[0];
   assert.ok(escalationType);
   assert.match(panel, /reason_code:/);
   assert.match(panel, /m\.reasonCode\[escalation\.reason_code\]/);
@@ -17,6 +18,7 @@ test("general routing cards use only safe reason codes, not the raw escalation r
 test("raw review content loads only from the protected endpoint and is not persisted", () => {
   assert.match(panel, /\/api\/admin\/amux\/escalations\/review\?escalation_id=/);
   assert.match(panel, /data-testid="admin-amux-review-content"/);
+  assert.match(panel, /data-testid="admin-amux-developer-details"/);
   assert.match(panel, /hasReviewSubject\(review\)/);
   assert.match(panel, /setReview\(null\)/);
   assert.doesNotMatch(panel, /localStorage|console\.(log|warn|error)/);
@@ -30,13 +32,13 @@ test("review UI identifies the exact GitHub PR, head, and diff digest", () => {
   assert.match(panel, /review\.review_artifact\.head_sha/);
   assert.match(panel, /review\.review_artifact\.base_sha/);
   assert.match(panel, /review\.review_artifact\.diff_digest/);
-  assert.match(panel, /data-testid="admin-amux-review-context"/);
+  assert.match(panel, /data-testid="admin-amux-assigned-work"/);
   assert.match(panel, /review\.review_artifact\.diff_text/);
   assert.match(panel, /review\.review_context\.previous_block_reason/);
   assert.match(panel, /review\.retry\.remaining === 0 && \(/);
   assert.match(panel, /review\.review_content\?\.truncated/);
   assert.match(panel, /m\.reviewContentTruncated/);
-  assert.match(panel, /\{m\.subjectDigest\}: \{review\.review_content\.digest\}/);
+  assert.match(panel, /\{review\.review_content\.digest\}/);
   assert.match(messages, /GitHub review PR/);
   assert.match(messages, /GitHub 검토 PR/);
 });
@@ -61,7 +63,7 @@ test("disabled approval and stale step-up have explicit bilingual operator guida
     /adminRecentAuthenticationHref\("\/admin\/amux-execution\?tab=assignment"\)/
   );
   assert.doesNotMatch(panel, /adminRecentAuthenticationHref\("\/admin\/routing"\)/);
-  assert.match(panel, /reviewOutcomes = hasReviewSubject\(review\)/);
+  assert.match(panel, /reviewOutcomes = review \? visibleAmuxOwnerReviewOutcomes\(review\) : \[\]/);
   assert.match(messages, /No review subject with a verifiable digest/);
   assert.match(messages, /검증 가능한 digest를 가진 검토 대상/);
 });
