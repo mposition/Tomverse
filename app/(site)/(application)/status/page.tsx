@@ -23,10 +23,8 @@ import {
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
 import { createPageMetadata, localizedQueryPath, queryLanguageAlternates } from "@/lib/seo";
 import { DOCUMENT_LANGUAGE_HEADER } from "@/lib/documentLanguage";
-import { MarketingFooter, MarketingHeader } from "@/components/marketing/MarketingChrome";
-import { MarketingChatAvailabilityProvider } from "@/components/marketing/MarketingChatAvailability";
+import { StatusPageChrome } from "@/components/marketing/StatusPageChrome";
 import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
-import { LanguageProvider } from "@/components/LanguageProvider";
 import { describeProbeSchedulerDelay } from "@/lib/statusPageEvidence";
 import {
   describePublicStatusAffectedModels,
@@ -161,9 +159,7 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
   };
 
   return (
-    <LanguageProvider key={language} initialLang={language} forceInitialLang>
-    <MarketingChatAvailabilityProvider guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
-    <MarketingHeader maxWidth="max-w-7xl" />
+    <StatusPageChrome language={language} guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
     <main lang={language} className="min-h-screen bg-zinc-950 px-5 py-8 text-zinc-100">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
         <header className="rounded-3xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-6">
@@ -317,8 +313,6 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
         </section>
       </div>
     </main>
-    <MarketingFooter maxWidth="max-w-7xl" />
-    </MarketingChatAvailabilityProvider>
-    </LanguageProvider>
+    </StatusPageChrome>
   );
 }
