@@ -239,10 +239,10 @@ test.describe("admin console on a narrow viewport", () => {
       ).toHaveAttribute("aria-expanded", "true");
     }
 
-    const operations = navigation.getByRole("button", {
-      name: "Operations",
-      exact: true,
-    });
+    // The collapsed group's badge changes its accessible name.
+    const operations = navigation.locator(
+      'button[aria-controls="admin-nav-group-operations"]'
+    );
     await operations.click();
     await expect(operations).toHaveAttribute("aria-expanded", "false");
     await expect(navigation.getByRole("link", { name: "Alerts" })).toBeHidden();
