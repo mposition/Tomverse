@@ -8,6 +8,8 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { inspectChatRefinerInitialAutoRelease } from
   "@/lib/chatRefinerInitialAutoReleaseStore";
+import { currentChatReleaseSourceFingerprint } from
+  "@/lib/chatReleaseSourceFingerprint";
 import { CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
   CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
   chatRefinerInitialAutoResumeMetadata } from
@@ -296,10 +298,13 @@ async function resolvePromptRefinerProductRelease(
     action: ACTIVATION_ACTION, targetType: "RailwayDeployment",
     targetId: runtimeDeploymentId,
   } });
+  let releaseFingerprint: string;
+  try { releaseFingerprint = currentChatReleaseSourceFingerprint(); }
+  catch { return closed(); }
   const initialRows = await tx.adminAuditLog.findMany({ where: {
     action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
       CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION] },
-    targetType: "RailwayDeployment", targetId: runtimeDeploymentId,
+    targetType: "ChatReleaseFingerprint", targetId: releaseFingerprint,
   }, select: { id: true }, take: 3 });
   const initial = initialRows.length === 0
     ? ({ state: "absent" } as const)
@@ -311,7 +316,7 @@ async function resolvePromptRefinerProductRelease(
       autoEnabled: operational.active,
       runtimeCommitSha, runtimeDeploymentId,
       approvalAuditLogId: initial.productActivationAuditLogId,
-      releaseKind: "initial_auto_v1" as const,
+      releaseKind: "initial_auto_v2" as const,
       routerExceptionAuditLogId: initial.routerActivationAuditLogId });
   }
   if (initial.state === "invalid") {
@@ -427,7 +432,7 @@ export async function resumePromptRefinerProductAuto(input: {
         guard.transitionAuditLogId !== input.expectedPauseAuditLogId) {
       throw new Error("prompt_refiner_product_auto_resume_not_allowed");
     }
-    const metadata = release.releaseKind === "initial_auto_v1" &&
+    const metadata = release.releaseKind === "initial_auto_v2" &&
       release.routerExceptionAuditLogId && release.approvalAuditLogId
       ? chatRefinerInitialAutoResumeMetadata({
         operatorConfirmedReasonCode: guard.reasonCode,

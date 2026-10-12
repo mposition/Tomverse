@@ -127,7 +127,7 @@ mock.module(mod("lib/chatRefinerInitialAutoReleaseStore.ts"), { namedExports: {
     if (world.activationOutcome === "unknown") {
       throw new Error("synthetic database outcome unknown");
     }
-    return { releaseKind: "initial_auto_v1",
+    return { releaseKind: "initial_auto_v2",
       routerActivationAuditLogId: "router-audit",
       productActivationAuditLogId: "product-audit",
       runtimeCommitSha: "a".repeat(40),
@@ -176,7 +176,7 @@ const auditBody = {
   confirmation: "RECORD_CONTENT_FREE_REFINER_LIMITED_AUDIT",
 };
 const initialActivationBody = {
-  releaseKind: "initial_auto_v1",
+  releaseKind: "initial_auto_v2",
   runtimeCommitSha: "a".repeat(40),
   runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
   evidenceRefs: {
