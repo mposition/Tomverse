@@ -10,7 +10,7 @@ test("English status query stays English despite another preferred browser langu
   expect(html).toMatch(/<html\b[^>]*lang="en"/);
   expect(html).toContain('href="https://tomverse.app/status?lang=en"');
   expect(html).toContain(english.dataUnavailableHeadline);
-  expect(html).toMatch(/hreflang="en"[^>]*href="https:\/\/tomverse\.app\/status\?lang=en"|href="https:\/\/tomverse\.app\/status\?lang=en"[^>]*hreflang="en"/);
+  expect(html).toMatch(/hreflang="en"[^>]*href="https:\/\/tomverse\.app\/status\?lang=en"|href="https:\/\/tomverse\.app\/status\?lang=en"[^>]*hreflang="en"/i);
 });
 
 // The E2E environment deliberately points DATABASE_URL at an unreachable
