@@ -681,12 +681,12 @@ export const RAW_SQL_ALLOWLIST = [
       "The local-intake read-back selects the audit row that writeAdminAuditLog already wrote. The two INSERT statements write AmuxLocalIntakeNormalized and AmuxLocalIntakeApproval only. This file never writes AdminAuditLog.",
   },
   {
-    path: "lib/amux/orchestratorHaltStore.ts",
+    path: "prisma/migrations/20261012170000_amux_verified_no_commit_halt_auto_clear/migration.sql",
     table: "AdminAuditLog",
-    tableMentions: 1,
-    writeVerbs: 12,
+    tableMentions: 4,
+    writeVerbs: 10,
     reason:
-      "The orchestrator halt store (orchestration policy version 20). Its one mention is the LEFT JOIN in the halt read, which counts a halt as cleared only when the audit row the clear wrote is there. The halt clear writes its audit row through writeAdminAuditLog and the halt system audits go through writeSystemAuditLog in orchestratorHaltSystemAudit.ts; the INSERT, UPDATE and FOR UPDATE statements touch AmuxOrchestratorWrite, AmuxOrchestratorWriteReceipt and AmuxOrchestratorHalt only. This file never writes AdminAuditLog.",
+      "The version 33 migration replaces the halt guard and reads four audit rows through constant dynamic SELECT EXISTS statements: halt opening, human clear, no-commit resolution evidence and automatic clear evidence. Its DDL and one UPDATE backfill only add and constrain halt clear evidence; it never inserts, updates or deletes AdminAuditLog.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
@@ -1863,6 +1863,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261012170000_amux_verified_no_commit_halt_auto_clear/migration.sql",
+    count: 6,
+    reason:
+      "Six constant reads in the version 33 halt guard use the trigger's own schema quoted with %I: the opening audit, the human-clear audit, the admitted write FOR SHARE, the receipt existence check, the no-commit resolution audit and the automatic-clear audit. Every variable value is bound with USING, search_path is pinned to pg_catalog and pg_temp, and none of the dynamic statements writes any table.",
+  },
   {
     path: "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
     count: 5,

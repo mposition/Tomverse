@@ -1386,8 +1386,8 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `outcome_unknown`(503)으로 답하고 다시 보내지 않고 GET으로 확인합니다. Admin 화면·라우팅 route·bridge는
   없습니다.
 - **S1f2(스위치 화면)**: `components/admin/AmuxDecisionMakerSwitchPanel.tsx`,
-  `lib/adminMessages/amuxDecisionMaker.ts`, `/admin/amux-execution?tab=decision-maker`(`lib/adminNavigation.ts`,
-  `lib/adminNavigationLocale.ts`, `app/(site)/(application)/admin/amux-execution/page.tsx`),
+  `lib/adminMessages/amuxDecisionMaker.ts`, `/admin/amux-settings?tab=decision-maker`(`lib/adminNavigation.ts`,
+  `lib/adminNavigationLocale.ts`, `app/(site)/(application)/admin/amux-settings/page.tsx`),
   `tests/client/amuxDecisionMakerSwitchRender.test.tsx`. 화면은 S1f1 route만 부르고, 바꿀 수 있는 값은
   `dmSwitchChangesFor()`가 정책 목록에서 지금 값만 뺀 것입니다(읽을 수 없는 scope는 전부). 권한이 없으면
   상태와 이유만 보이고, 428은 `AdminApiFailureNotice`로 재인증 링크를 보입니다. **표시 중인 상태를
@@ -1413,7 +1413,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
 - **S1f4(선언 정확도 보고 화면)**: `components/admin/AmuxDecisionMakerReportPanel.tsx`,
   `lib/adminMessages/amuxDecisionMaker.ts`의 `adminAmuxDecisionMakerReportMessages`,
   `lib/amux/dbBoundary.ts`의 `decisionMakerReportRead`(상한 4), Decision Maker 탭
-  (`app/(site)/(application)/admin/amux-execution/page.tsx`),
+  (`app/(site)/(application)/admin/amux-settings/page.tsx`),
   `tests/client/amuxDecisionMakerReportRender.test.tsx`. 화면은 S1e의
   `readDecisionMakerDeclarationAccuracyReport()`를 페이지가 AMUX DB 경계 안에서 읽어 넘긴 값만 그립니다 —
   요청도 버튼도 없습니다. 수치는 각자의 분자/분모로 보이고, 분모가 비면 `insufficient_evidence`를 말로

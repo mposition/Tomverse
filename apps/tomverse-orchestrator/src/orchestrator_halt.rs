@@ -5,7 +5,8 @@
 //! Every write call (claim, recover, automatic promotion tick) carries a new
 //! request id; a known answer is acknowledged to the server before the next
 //! write; anything else is a halt, recorded in the app database and cleared
-//! only by a person. This module holds the closed lists and every decision
+//! by a person or by version 33's verified no-commit proof. This module holds
+//! the closed lists and every decision
 //! that does not need the network, so each one is tested on its own:
 //!
 //! - which answers are known (section 1) and what they are acknowledged as;
@@ -69,6 +70,21 @@ impl HaltReason {
                 | Self::RecoveryOutcomeUnknown
                 | Self::PromotionOutcomeUnknown
                 | Self::UnackedWriteReceipt
+        )
+    }
+
+    fn from_str(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|reason| reason.as_str() == value)
+    }
+
+    const fn permits_no_commit_clear(self) -> bool {
+        matches!(
+            self,
+            Self::ClaimOutcomeUnknown
+                | Self::RecoveryOutcomeUnknown
+                | Self::PromotionOutcomeUnknown
         )
     }
 }
@@ -380,7 +396,71 @@ pub struct HumanRequired {
 pub struct KeyedHalt {
     pub halt_key: String,
     pub halt_id: String,
+    pub reason_code: String,
+    pub request_id: Option<String>,
     pub cleared: bool,
+    pub clear_kind: Option<String>,
+    pub clear_audit_log_id: Option<String>,
+    pub clear_evidence_audit_log_id: Option<String>,
+    pub resolution: Option<String>,
+}
+
+impl KeyedHalt {
+    fn proof_is_valid(&self) -> bool {
+        let uuid = |value: &str| Uuid::parse_str(value).is_ok();
+        // AdminAuditLog ids are Prisma CUIDs. Keep them opaque here so
+        // historical CUID generations remain readable, while rejecting an
+        // absent, oversized or non-identifier value.
+        let audit_id = |value: &str| {
+            !value.is_empty()
+                && value.len() <= 191
+                && value.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+                })
+        };
+        let Some(reason) = HaltReason::from_str(&self.reason_code) else {
+            return false;
+        };
+        let request_is_valid = match (&self.request_id, reason.has_request()) {
+            (Some(request_id), true) => uuid(request_id) && request_id == &self.halt_key,
+            (None, false) => true,
+            _ => false,
+        };
+        if !request_is_valid {
+            return false;
+        }
+        let resolution_is_valid = matches!(
+            self.resolution.as_deref(),
+            None | Some("human_confirmed" | "no_commit")
+        );
+        if !resolution_is_valid {
+            return false;
+        }
+
+        if !self.cleared {
+            return self.clear_kind.is_none()
+                && self.clear_audit_log_id.is_none()
+                && self.clear_evidence_audit_log_id.is_none();
+        }
+
+        match self.clear_kind.as_deref() {
+            Some("human") => {
+                self.clear_audit_log_id.as_deref().is_some_and(audit_id)
+                    && self.clear_evidence_audit_log_id.is_none()
+            }
+            Some("system_no_commit") => {
+                reason.permits_no_commit_clear()
+                    && self.request_id.as_deref() == Some(self.halt_key.as_str())
+                    && self.clear_audit_log_id.as_deref().is_some_and(audit_id)
+                    && self
+                        .clear_evidence_audit_log_id
+                        .as_deref()
+                        .is_some_and(audit_id)
+                    && self.resolution.as_deref() == Some("no_commit")
+            }
+            _ => false,
+        }
+    }
 }
 
 /// `GET /api/internal/amux/orchestrator/halt`, after the server has applied
@@ -423,7 +503,7 @@ pub fn halt_state_is_valid(state: &HaltState) -> bool {
         && state
             .halts
             .iter()
-            .all(|halt| uuid(&halt.halt_key) && uuid(&halt.halt_id))
+            .all(|halt| uuid(&halt.halt_key) && uuid(&halt.halt_id) && halt.proof_is_valid())
 }
 
 /// How a halt state read was answered (sections 5 and 6).
@@ -453,7 +533,7 @@ pub fn classify_state(answer: &RawAnswer) -> StateAnswer {
 }
 
 /// One halt this process opened. It stays until a state read shows it
-/// recorded and cleared by a person (section 6: "빈 목록을 읽었다는 사실만으로는
+/// recorded and cleared by a person or verified no-commit proof (section 6: "빈 목록을 읽었다는 사실만으로는
 /// 사라지지 않는다").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryHalt {
@@ -534,8 +614,9 @@ impl HaltBook {
     }
 
     /// Releases every halt this process recorded that the read shows cleared
-    /// by a person. An unrecorded halt, and a key the read does not report,
-    /// stay. Returns how many were released.
+    /// with its complete human or system proof. An unrecorded halt, a key the
+    /// read does not report, and a mismatched reason/request stay. Returns how
+    /// many were released.
     pub fn release_cleared(&mut self, state: &HaltState) -> usize {
         let before = self.halts.len();
         self.halts.retain(|halt| {
@@ -543,7 +624,13 @@ impl HaltBook {
                 return true;
             };
             !state.halts.iter().any(|read| {
-                read.cleared && read.halt_key == halt.halt_key.to_string() && read.halt_id == halt_id
+                read.proof_is_valid()
+                    && read.cleared
+                    && read.halt_key == halt.halt_key.to_string()
+                    && read.halt_id == halt_id
+                    && read.reason_code == halt.reason.as_str()
+                    && read.request_id.as_deref()
+                        == halt.request_id.as_ref().map(Uuid::to_string).as_deref()
             })
         });
         before - self.halts.len()
@@ -554,7 +641,7 @@ impl HaltBook {
 /// process holds no halt in memory, and a successful state read shows no open
 /// halt, no undecided admission and no request needing a person. Every halt
 /// this process recorded is released only on reading it cleared, so an empty
-/// book means each of them has its human clear.
+/// book means each of them has a verified clear.
 pub fn resume_permitted(book: &HaltBook, state: &HaltState) -> bool {
     book.is_empty()
         && state.open_halt_count == 0
@@ -949,7 +1036,7 @@ mod tests {
     }
 
     #[test]
-    fn a_memory_halt_is_released_only_by_reading_it_recorded_and_cleared() {
+    fn a_memory_halt_is_released_only_by_reading_matching_verified_clear_proof() {
         let key = Uuid::parse_str(KEY).unwrap();
         let mut book = HaltBook::default();
         book.open(HaltReason::ClaimOutcomeUnknown, key, Some(key));
@@ -959,17 +1046,77 @@ mod tests {
 
         // Not yet recorded: a read that says it is cleared still does not
         // release it, and neither does an empty read.
-        let cleared = format!(r#"{{"halt_key":"{KEY}","halt_id":"{HALT_ID}","cleared":true}}"#);
+        let cleared = format!(
+            r#"{{"halt_key":"{KEY}","halt_id":"{HALT_ID}","reason_code":"claim_outcome_unknown","request_id":"{KEY}","cleared":true,"clear_kind":"system_no_commit","clear_audit_log_id":"{}","clear_evidence_audit_log_id":"{}","resolution":"no_commit"}}"#,
+            "cm1amuxclear00000000000001", "cm1amuxevidence00000000001"
+        );
         assert_eq!(book.release_cleared(&state(0, 0, 0, &cleared)), 0);
         assert_eq!(book.release_cleared(&state(0, 0, 0, "")), 0);
 
         book.mark_recorded(key, HALT_ID.into());
         assert_eq!(book.release_cleared(&state(0, 0, 0, "")), 0, "an empty read releases nothing");
-        let open = format!(r#"{{"halt_key":"{KEY}","halt_id":"{HALT_ID}","cleared":false}}"#);
+        let open = format!(
+            r#"{{"halt_key":"{KEY}","halt_id":"{HALT_ID}","reason_code":"claim_outcome_unknown","request_id":"{KEY}","cleared":false,"clear_kind":null,"clear_audit_log_id":null,"clear_evidence_audit_log_id":null,"resolution":null}}"#
+        );
         assert_eq!(book.release_cleared(&state(0, 0, 0, &open)), 0);
         assert!(!book.is_empty());
         assert_eq!(book.release_cleared(&state(0, 0, 0, &cleared)), 1);
         assert!(book.is_empty());
+    }
+
+    #[test]
+    fn a_keyed_halt_rejects_incomplete_or_ineligible_system_clear_proof() {
+        let valid = format!(
+            r#"{{"halt_key":"{KEY}","halt_id":"{HALT_ID}","reason_code":"claim_outcome_unknown","request_id":"{KEY}","cleared":true,"clear_kind":"system_no_commit","clear_audit_log_id":"{}","clear_evidence_audit_log_id":"{}","resolution":"no_commit"}}"#,
+            "cm1amuxclear00000000000002", "cm1amuxevidence00000000002"
+        );
+        assert!(matches!(
+            classify_state(&raw(200, &state_json(0, 0, 0, &valid))),
+            StateAnswer::State(_)
+        ));
+        for forged in [
+            valid.replace(
+                r#""clear_evidence_audit_log_id":"#,
+                r#""missing_evidence_audit_log_id":"#,
+            ),
+            valid.replace("claim_outcome_unknown", "unacked_write_receipt"),
+            valid.replace(
+                r#""resolution":"no_commit""#,
+                r#""resolution":"human_confirmed""#,
+            ),
+            valid.replace(
+                r#""request_id":"0b8e9a52-6d8c-4f0e-9b1a-2c3d4e5f6a7b""#,
+                r#""request_id":"1c9f0b63-7e9d-4a1f-8c2b-3d4e5f6a7b8c""#,
+            ),
+        ] {
+            assert!(matches!(
+                classify_state(&raw(200, &state_json(0, 0, 0, &forged))),
+                StateAnswer::ContractViolation(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn human_clear_and_open_manual_review_accept_only_closed_resolution_values() {
+        let human_without_admission = format!(
+            r#"{{"halt_key":"{KEY}","halt_id":"{HALT_ID}","reason_code":"claim_outcome_unknown","request_id":"{KEY}","cleared":true,"clear_kind":"human","clear_audit_log_id":"{}","clear_evidence_audit_log_id":null,"resolution":null}}"#,
+            "cm1amuxhuman00000000000003"
+        );
+        let open_after_no_commit = format!(
+            r#"{{"halt_key":"{KEY}","halt_id":"{HALT_ID}","reason_code":"unacked_write_receipt","request_id":"{KEY}","cleared":false,"clear_kind":null,"clear_audit_log_id":null,"clear_evidence_audit_log_id":null,"resolution":"no_commit"}}"#
+        );
+        for valid in [&human_without_admission, &open_after_no_commit] {
+            assert!(matches!(
+                classify_state(&raw(200, &state_json(0, 0, 0, valid))),
+                StateAnswer::State(_)
+            ));
+        }
+
+        let unknown_resolution = open_after_no_commit.replace("no_commit", "future_resolution");
+        assert!(matches!(
+            classify_state(&raw(200, &state_json(0, 0, 0, &unknown_resolution))),
+            StateAnswer::ContractViolation(_)
+        ));
     }
 
     #[test]

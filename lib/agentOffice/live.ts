@@ -1039,7 +1039,7 @@ export type AgentOfficeOperatorQueue = Record<OperatorQueueKey, number | null>;
 export const OPERATOR_QUEUE_HREFS: Record<OperatorQueueKey, string> = {
   marketing: "/admin/marketing",
   amuxEscalations: "/admin/amux-execution?tab=assignment",
-  amuxHalts: "/admin/amux-execution?tab=halts",
+  amuxHalts: "/admin/amux-settings?tab=safety",
   autoFix: "/admin/support",
 };
 

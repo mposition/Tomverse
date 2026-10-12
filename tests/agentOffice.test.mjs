@@ -148,7 +148,7 @@ test("a record link is kept only while the console has its page and tab", () => 
   );
   assert.equal(
     AGENT_OFFICE_DECISION_RECORD_HREF,
-    consoleHasRecord("/admin/amux-execution?tab=decision-maker") ? "/admin/amux-execution?tab=decision-maker" : null
+    consoleHasRecord("/admin/amux-settings?tab=decision-maker") ? "/admin/amux-settings?tab=decision-maker" : null
   );
   const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
   // A room's header links its record: the AMUX room, the Decision Maker, and a

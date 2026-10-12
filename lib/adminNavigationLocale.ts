@@ -298,24 +298,38 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   "amux-promotion": {
     label: "승격",
-    description: "backlog 카드의 추천 풀, 수동 승격, 자동 승격",
+    description: "backlog 카드의 추천 풀, 수동 승격, 기존 grant 기반 자동 승격",
     aliases: ["승격", "추천", "추천 풀", "수동 승격", "자동 승격", "grant", "중지", "재개"],
     tabs: {
       recommendation: { label: "추천 풀", description: "backlog snapshot과 카드별 사람의 결정" },
       promotion: { label: "수동 승격", description: "사람이 고른 backlog 카드 1~3건 승격" },
-      "auto-promotion": { label: "자동 승격", description: "제한 자동 승격의 grant, halt와 재개" },
+      "auto-promotion": {
+        label: "자동 승격",
+        description: "기존 제한 자동 승격의 grant, halt와 재개",
+      },
     },
   },
   "amux-execution": {
     label: "실행",
     description: "AMUX 카드와 실행 상태, AMUX가 작업을 배정한 이유",
-    aliases: ["실행", "카드", "워커", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "사고", "정지", "결과 불명", "결정 도우미", "킬 스위치", "등록부", "워커 등록부"],
+    aliases: ["실행", "카드", "워커", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "사고", "등록부", "워커 등록부"],
     tabs: {
       cards: { label: "카드", description: "Tomverse에 저장된 모든 AMUX 카드와 실행 상태" },
       assignment: { label: "배정", description: "AMUX가 작업을 배정한 이유와 사람을 기다리는 에스컬레이션" },
-      halts: { label: "정지", description: "orchestrator 정지, 사람 확인이 필요한 쓰기, 정지 해제" },
-      "decision-maker": { label: "Decision Maker", description: "Decision Maker kill switch와 인스턴스별 모드" },
       workers: { label: "Worker", description: "worker 등록부, worker별 원하는 상태와 실제 상태, 배정 카탈로그와의 일치" },
+    },
+  },
+  "amux-settings": {
+    label: "운영 설정",
+    description: "AMUX 자동 편입, 실행 안전, 복구 증거와 Decision Maker 제어",
+    aliases: ["운영 설정", "자동 편입", "실행 안전", "복구", "자동 복구", "정지", "해제", "결과 불명", "확인할 쓰기", "Decision Maker", "결정 도우미", "킬 스위치"],
+    tabs: {
+      "automatic-admission": {
+        label: "자동 편입",
+        description: "준비된 Task를 담당 없는 Todo에 편입하는 owner 승인",
+      },
+      safety: { label: "실행 안전·복구", description: "자동 복구, 확인할 증거와 운영자 정지 해제 판단" },
+      "decision-maker": { label: "Decision Maker", description: "Decision Maker kill switch와 인스턴스별 모드" },
     },
   },
   "email-policy": {

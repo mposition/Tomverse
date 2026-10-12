@@ -46,6 +46,7 @@ const NAV_LABELS = [
   "Backlog",
   "Promotion",
   "Execution",
+  "Operations settings",
   "Email policy",
   "Audit log",
   "Retention",
@@ -234,11 +235,14 @@ test.describe("admin console on a narrow viewport", () => {
 
     for (const group of NAV_GROUPS) {
       await expect(
-        navigation.getByRole("button", { name: group })
+        navigation.getByRole("button", { name: group, exact: true })
       ).toHaveAttribute("aria-expanded", "true");
     }
 
-    const operations = navigation.getByRole("button", { name: "Operations" });
+    // The collapsed group's badge changes its accessible name.
+    const operations = navigation.locator(
+      'button[aria-controls="admin-nav-group-operations"]'
+    );
     await operations.click();
     await expect(operations).toHaveAttribute("aria-expanded", "false");
     await expect(navigation.getByRole("link", { name: "Alerts" })).toBeHidden();

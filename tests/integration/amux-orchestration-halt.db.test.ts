@@ -240,7 +240,17 @@ const readState = async (haltKeys: string[] = []) => {
   return json as {
     open_halts: Array<{ halt_id: string }>;
     human_required: Array<{ request_id: string; call_kind: string; receipt_count: number }>;
-    halts: Array<{ halt_key: string; halt_id: string; cleared: boolean }>;
+    halts: Array<{
+      halt_key: string;
+      halt_id: string;
+      reason_code: string;
+      request_id: string | null;
+      cleared: boolean;
+      clear_kind: string | null;
+      clear_audit_log_id: string | null;
+      clear_evidence_audit_log_id: string | null;
+      resolution: string | null;
+    }>;
   };
 };
 
@@ -490,6 +500,123 @@ test("the resolver leaves an admission undecided before its deadline plus five s
   });
 });
 
+test("the resolver atomically auto-clears the same result-unknown halt after verified no_commit", async () => {
+  const { requestId } = await admit(1_000, "claim");
+  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret }, async () => {
+    const halt = await recordHalt({
+      halt_key: requestId,
+      reason_code: "claim_outcome_unknown",
+      request_id: requestId,
+    });
+    await delay(1_000 + GRACE_MS + 500);
+    const state = await readState([requestId]);
+    const stored = await prisma.amuxOrchestratorHalt.findUniqueOrThrow({ where: { id: halt.halt_id } });
+    const write = await writeRow(requestId);
+
+    assert.equal(write.ackedAt, null);
+    assert.equal(write.resolution, "no_commit");
+    assert.equal((await receiptsOf(requestId)).length, 0);
+    assert.equal(stored.clearKind, "system_no_commit");
+    assert.equal(stored.clearedByUserId, null);
+    assert.notEqual(stored.clearAuditLogId, null);
+    assert.notEqual(stored.clearEvidenceAuditLogId, null);
+    assert.deepEqual(state.halts, [
+      {
+        halt_key: requestId,
+        halt_id: halt.halt_id,
+        reason_code: "claim_outcome_unknown",
+        request_id: requestId,
+        cleared: true,
+        clear_kind: "system_no_commit",
+        clear_audit_log_id: stored.clearAuditLogId,
+        clear_evidence_audit_log_id: stored.clearEvidenceAuditLogId,
+        resolution: "no_commit",
+      },
+    ]);
+    const audits = await prisma.adminAuditLog.findMany({
+      where: { id: { in: [stored.clearAuditLogId!, stored.clearEvidenceAuditLogId!] } },
+      orderBy: { action: "asc" },
+    });
+    assert.deepEqual(
+      audits.map((audit) => [audit.action, audit.actorUserId]),
+      [
+        ["amux.orchestrator.halt_auto_cleared", null],
+        ["amux.orchestrator.write_resolved", null],
+      ],
+    );
+  });
+});
+
+test("an existing no_commit resolution can close a later halt, while forged clear evidence is refused", async () => {
+  const { requestId } = await admit(1_000, "recover");
+  await delay(1_000 + GRACE_MS + 500);
+  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret }, async () => {
+    await readState();
+    const resolutionAudit = await prisma.adminAuditLog.findFirstOrThrow({
+      where: { action: "amux.orchestrator.write_resolved", targetId: requestId },
+    });
+    const halt = await recordHalt({
+      halt_key: requestId,
+      reason_code: "recovery_outcome_unknown",
+      request_id: requestId,
+    });
+    await rejectsWith(
+      prisma.$executeRaw`
+        UPDATE "AmuxOrchestratorHalt"
+        SET
+          "clearedAt" = clock_timestamp(),
+          "clearKind" = 'system_no_commit',
+          "clearAuditLogId" = ${randomUUID()},
+          "clearEvidenceAuditLogId" = ${resolutionAudit.id}
+        WHERE "id" = ${halt.halt_id}
+      `,
+      /AMUX_ORCHESTRATOR_HALT_AUTO_CLEAR_UNAUDITED/,
+    );
+    assert.equal((await prisma.amuxOrchestratorHalt.findUniqueOrThrow({ where: { id: halt.halt_id } })).clearedAt, null);
+
+    const state = await readState([requestId]);
+    assert.equal(state.halts[0]?.clear_kind, "system_no_commit");
+    assert.equal(state.halts[0]?.clear_evidence_audit_log_id, resolutionAudit.id);
+    assert.equal(state.halts[0]?.cleared, true);
+  });
+});
+
+test("missing admission, acknowledged, receipt-bearing, and non-request halts never auto-clear", async () => {
+  const missing = randomUUID();
+  const acknowledged = await admit(12_000, "claim");
+  const receiptBearing = await admit(1_000, "auto_promotion_tick");
+  const nonRequest = randomUUID();
+  await prisma.$transaction(async (tx) => {
+    await lockAmuxOrchestratorAdmission(tx, receiptBearing.requestId);
+    await tx.$executeRaw`
+      INSERT INTO "AmuxOrchestratorWriteReceipt" ("id", "requestId", "targetKind", "targetId", "rowCount", "committedAt")
+      VALUES (${randomUUID()}, ${receiptBearing.requestId}, 'auto_promotion_grant', ${randomUUID()}, 1, clock_timestamp())
+    `;
+  });
+  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret }, async () => {
+    const ack = await ackPost(
+      post("/api/internal/amux/orchestrator/ack", {}, { request_id: acknowledged.requestId, kind: "no_commit" }),
+    );
+    assert.equal(ack.status, 200);
+    const halts = await Promise.all([
+      recordHalt({ halt_key: missing, reason_code: "claim_outcome_unknown", request_id: missing }),
+      recordHalt({ halt_key: acknowledged.requestId, reason_code: "claim_outcome_unknown", request_id: acknowledged.requestId }),
+      recordHalt({ halt_key: receiptBearing.requestId, reason_code: "promotion_outcome_unknown", request_id: receiptBearing.requestId }),
+      recordHalt({ halt_key: nonRequest, reason_code: "selection_read_failures" }),
+    ]);
+    await delay(1_000 + GRACE_MS + 500);
+    const state = await readState([missing, acknowledged.requestId, receiptBearing.requestId, nonRequest]);
+    assert.equal(state.halts.every((halt) => halt.cleared === false && halt.clear_kind === null), true);
+    assert.equal(state.human_required.some((row) => row.request_id === receiptBearing.requestId), true);
+    assert.equal(
+      await prisma.amuxOrchestratorHalt.count({
+        where: { id: { in: halts.map((halt) => halt.halt_id) }, clearedAt: null },
+      }),
+      4,
+    );
+  });
+});
+
 test("the resolver waits for a write holding the admission lock and then counts its committed receipt", async () => {
   // 완료 조건: 접수 행을 잡은 채 커밋 중인 쓰기 트랜잭션이 있으면 판정은 그 커밋 뒤에
   // 영수증을 센다. Without the resolver's row lock -- or with the count read in
@@ -620,6 +747,14 @@ test("a halt record is idempotent by key, audited in its own transaction, and ne
         SET "clearedAt" = clock_timestamp(), "clearedByUserId" = 'someone', "clearAuditLogId" = 'no-such-audit'
         WHERE "id" = ${first.halt_id}
       `,
+      /AMUX_ORCHESTRATOR_HALT_CLEAR_INCOMPLETE/,
+    );
+    await rejectsWith(
+      prisma.$executeRaw`
+        UPDATE "AmuxOrchestratorHalt"
+        SET "clearedAt" = clock_timestamp(), "clearKind" = 'human', "clearedByUserId" = 'someone', "clearAuditLogId" = 'no-such-audit'
+        WHERE "id" = ${first.halt_id}
+      `,
       /AMUX_ORCHESTRATOR_HALT_CLEAR_UNAUDITED/,
     );
     await rejectsWith(
@@ -640,7 +775,18 @@ test("a halt record is idempotent by key, audited in its own transaction, and ne
       /AMUX_ORCHESTRATOR_HALT_CLEARED_ONCE/,
     );
     const state = await readState([haltKey]);
-    assert.deepEqual(state.halts, [{ halt_key: haltKey, halt_id: first.halt_id, cleared: true }]);
+    const stored = await prisma.amuxOrchestratorHalt.findUniqueOrThrow({ where: { id: first.halt_id } });
+    assert.deepEqual(state.halts, [{
+      halt_key: haltKey,
+      halt_id: first.halt_id,
+      reason_code: "selection_read_failures",
+      request_id: null,
+      cleared: true,
+      clear_kind: "human",
+      clear_audit_log_id: stored.clearAuditLogId,
+      clear_evidence_audit_log_id: null,
+      resolution: null,
+    }]);
   });
 });
 
@@ -672,7 +818,9 @@ test("clearing needs the typed halt key prefix, audits the person in the same tr
     const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: stored.clearAuditLogId! } });
     assert.equal(audit.action, "amux.orchestrator.halt_cleared");
     assert.equal(audit.actorUserId, session.user!.id);
+    assert.equal(stored.clearKind, "human");
     assert.equal(stored.clearedByUserId, session.user!.id);
+    assert.equal(stored.clearEvidenceAuditLogId, null);
     const write = await writeRow(requestId);
     assert.equal(write.resolution, "human_confirmed");
     // Nothing was claimed, recovered or promoted by the clear.
@@ -682,6 +830,70 @@ test("clearing needs the typed halt key prefix, audits the person in the same tr
       clearAmuxOrchestratorHalt({ session, request: adminRequest(), haltId: halt.halt_id, haltKeyPrefix: requestId.slice(0, 8) }),
       (error) => (error as { code?: string }).code === "already_cleared",
     );
+  });
+});
+
+test("human clear remains readable without an admission and after an admission was acknowledged", async () => {
+  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret }, async () => {
+    const missingRequestId = randomUUID();
+    const missingHalt = await recordHalt({
+      halt_key: missingRequestId,
+      reason_code: "claim_outcome_unknown",
+      request_id: missingRequestId,
+    });
+    const acknowledged = await admit(12_000, "claim");
+    const ack = await ackPost(
+      post("/api/internal/amux/orchestrator/ack", {}, {
+        request_id: acknowledged.requestId,
+        kind: "no_commit",
+      }),
+    );
+    assert.equal(ack.status, 200);
+    assert.deepEqual(await ack.json(), { acked: true });
+    assert.notEqual((await writeRow(acknowledged.requestId)).ackedAt, null);
+    const acknowledgedHalt = await recordHalt({
+      halt_key: acknowledged.requestId,
+      reason_code: "claim_outcome_unknown",
+      request_id: acknowledged.requestId,
+    });
+
+    const session = ownerSession();
+    assert.deepEqual(
+      await clearAmuxOrchestratorHalt({
+        session,
+        request: adminRequest(),
+        haltId: missingHalt.halt_id,
+        haltKeyPrefix: missingRequestId.slice(0, 8),
+      }),
+      { haltId: missingHalt.halt_id, admissionClosed: false },
+    );
+    assert.deepEqual(
+      await clearAmuxOrchestratorHalt({
+        session,
+        request: adminRequest(),
+        haltId: acknowledgedHalt.halt_id,
+        haltKeyPrefix: acknowledged.requestId.slice(0, 8),
+      }),
+      { haltId: acknowledgedHalt.halt_id, admissionClosed: true },
+    );
+    assert.equal((await writeRow(acknowledged.requestId)).resolution, "human_confirmed");
+
+    const state = await readState([missingRequestId, acknowledged.requestId]);
+    for (const [haltId, haltKey, resolution] of [
+      [missingHalt.halt_id, missingRequestId, null],
+      [acknowledgedHalt.halt_id, acknowledged.requestId, "human_confirmed"],
+    ] as const) {
+      const row = state.halts.find((halt) => halt.halt_key === haltKey);
+      assert.ok(row);
+      assert.equal(row.halt_id, haltId);
+      assert.equal(row.cleared, true);
+      assert.equal(row.clear_kind, "human");
+      assert.notEqual(row.clear_audit_log_id, null);
+      assert.equal(row.clear_evidence_audit_log_id, null);
+      assert.equal(row.resolution, resolution);
+      const stored = await prisma.amuxOrchestratorHalt.findUniqueOrThrow({ where: { id: haltId } });
+      assert.equal(row.clear_audit_log_id, stored.clearAuditLogId);
+    }
   });
 });
 
