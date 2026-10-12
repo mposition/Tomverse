@@ -383,3 +383,32 @@ test("a catalog entry outside the registry's name grammar still reads back, as u
   const rows = body.comparison.rows.map((row: object, index: number) => (index === at ? { ...row, registryState: "active" } : row));
   assert.equal(parseAmuxWorkerRegistryAdminView({ ...body, comparison: { ...body.comparison, rows } }), null);
 });
+
+test("an exempt row reads back only on the exempt name, and shows why", () => {
+  const view = buildAmuxWorkerRegistryAdminView({
+    registrations: AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => registration(entry.workerName, entry.desiredState, entry.roleCeiling)),
+    latches: new Map(),
+    observations: new Map(),
+    catalog: [
+      ...AMUX_WORKER_REGISTRY_V31_SEED.filter((entry) => entry.desiredState === "active")
+        .map((entry) => catalogEntry(entry.workerName, amuxWorkerProviderClassOf(entry.workerName)!)),
+      catalogEntry("engineering-runner", "claude"),
+    ],
+    writesLatch: true,
+  });
+  assert.equal(view.comparison.status, "match");
+  assert.deepEqual(parseAmuxWorkerRegistryAdminView(JSON.parse(JSON.stringify(view))), view);
+  const tree = render({ view });
+  const [row] = byTestId(tree, "amux-worker-comparison-engineering-runner");
+  assert.equal(row["data-verdict"], "exempt");
+  assert.match(textOf(row.children as ReactNode), /version 34/);
+  // The parser refuses exempt on any other name.
+  const body = JSON.parse(JSON.stringify(view));
+  const rows = body.comparison.rows.map((entry: { workerName: string }) =>
+    entry.workerName === "engineering-runner" ? { ...entry, workerName: "devin-worker" } : entry);
+  assert.equal(parseAmuxWorkerRegistryAdminView({ ...body, comparison: { ...body.comparison, rows } }), null);
+  // Nor on a row the catalog does not list: the server never emits one.
+  const absent = body.comparison.rows.map((entry: { workerName: string }) =>
+    entry.workerName === "engineering-runner" ? { ...entry, catalog: "absent" } : entry);
+  assert.equal(parseAmuxWorkerRegistryAdminView({ ...body, comparison: { ...body.comparison, rows: absent } }), null);
+});
