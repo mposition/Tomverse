@@ -25,6 +25,7 @@ const evidenceRefs = {
 
 let rows: Array<Record<string, unknown>> = [];
 let priceMatches = true;
+let guardActive = true;
 let guardInitializations = 0;
 let nextAudit = 0;
 let transactionCount = 0;
@@ -33,11 +34,13 @@ let storedRollout: string | null = null;
 const tx = {
   adminAuditLog: {
     findMany: async ({ where, take }: { where: {
-      action: string | { in: string[] }; targetId?: string;
+      action: string | { in: string[] }; targetType?: string;
+      targetId?: string;
     }; take?: number }) => {
       const actions = typeof where.action === "string"
         ? [where.action] : where.action.in;
       return rows.filter((row) => actions.includes(String(row.action)) &&
+        (where.targetType === undefined || row.targetType === where.targetType) &&
         (where.targetId === undefined || row.targetId === where.targetId))
         .slice(0, take);
     },
@@ -83,6 +86,7 @@ mock.module(mod("lib/promptRefinerProductOperationalGuard.ts"), { namedExports: 
     guardInitializations += 1;
     return { active: false, generation: 7, reasonCode: "unknown_dispatch_or_cost" };
   },
+  readPromptRefinerProductAutoGuard: async () => ({ active: guardActive }),
 } });
 mock.module(mod("lib/promptRefinerVnextOneShotAuditReadback.ts"), { namedExports: {
   promptRefinerVnextOneShotAuditReceiptIsValid: async () => true,
@@ -97,9 +101,11 @@ mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts"
 const corePromise = import(mod("lib/chatRefinerInitialAutoRelease.ts"));
 const storePromise = import(mod("lib/chatRefinerInitialAutoReleaseStore.ts"));
 const rolloutStorePromise = import(mod("lib/chatRefinerInitialAutoRolloutStore.ts"));
+const guestStorePromise = import(mod("lib/guestChatSmartAdaptiveReleaseStore.ts"));
 
 beforeEach(() => {
-  rows = []; priceMatches = true; guardInitializations = 0; nextAudit = 0;
+  rows = []; priceMatches = true; guardActive = true;
+  guardInitializations = 0; nextAudit = 0;
   transactionCount = 0;
   storedRollout = null;
 });
@@ -146,6 +152,101 @@ test("activation writes one adjacent pair, leaves rollout untouched and does not
     evidenceRefs);
   assert.deepEqual((rows[1].metadata as Record<string, unknown>).evidenceRefs,
     evidenceRefs);
+  assert.equal(rows[0].targetType, "ChatReleaseAuthority");
+  assert.equal(rows[0].targetId, rows[1].targetId);
+});
+
+test("a changed Router control closes the old pair but allows a new exact Owner pair", async () => {
+  const store = await storePromise;
+  const core = await corePromise;
+  const input = {
+    session: { user: { id: "owner-id", email: "owner@example.test" } } as never,
+    request: new Request("https://tomverse.test", { method: "POST" }),
+    runtimeCommitSha: runtime.RAILWAY_GIT_COMMIT_SHA,
+    runtimeDeploymentId: runtime.RAILWAY_DEPLOYMENT_ID,
+    evidenceRefs,
+  };
+  await store.activateChatRefinerInitialAutoRelease(input, runtime);
+  const changed = { ...runtime, AUTO_ROUTER_ROLLOUT_PERCENT: "10" };
+  assert.equal(await store.readChatRefinerInitialAutoRouterAuthority(changed), null);
+  await store.activateChatRefinerInitialAutoRelease(input, changed);
+  assert.equal(rows.length, 4);
+  assert.notEqual(rows[0].targetId, rows[2].targetId);
+  assert.equal(rows[2].targetId,
+    core.chatRefinerInitialAutoRuntimeBinding(changed).releaseAuthorityDigest);
+  assert.ok(await store.readChatRefinerInitialAutoRouterAuthority(changed));
+  assert.equal(rows[2].previousHash, rows[1].entryHash);
+});
+
+test("unchanged source remains authorized across commit and deployment changes", async () => {
+  const store = await storePromise;
+  await store.activateChatRefinerInitialAutoRelease({
+    session: { user: { id: "owner-id", email: "owner@example.test" } } as never,
+    request: new Request("https://tomverse.test", { method: "POST" }),
+    runtimeCommitSha: runtime.RAILWAY_GIT_COMMIT_SHA,
+    runtimeDeploymentId: runtime.RAILWAY_DEPLOYMENT_ID,
+    evidenceRefs,
+  }, runtime);
+  const successor = { ...runtime,
+    RAILWAY_GIT_COMMIT_SHA: "c".repeat(40),
+    RAILWAY_DEPLOYMENT_ID: "22222222-2222-4222-8222-222222222222" };
+  const authority = await store.readChatRefinerInitialAutoRouterAuthority(
+    successor);
+  assert.equal(authority?.runtimeCommitSha, successor.RAILWAY_GIT_COMMIT_SHA);
+  assert.equal(authority?.runtimeDeploymentId, successor.RAILWAY_DEPLOYMENT_ID);
+  assert.equal(rows.length, 2);
+  assert.equal((rows[0].metadata as Record<string, unknown>).runtimeCommitSha,
+    runtime.RAILWAY_GIT_COMMIT_SHA);
+  assert.equal(await store.readChatRefinerInitialAutoRouterAuthority({
+    ...successor, AUTO_ROUTER_ROLLOUT_PERCENT: "10" }), null);
+  priceMatches = false;
+  assert.equal(await store.readChatRefinerInitialAutoRouterAuthority(
+    successor), null);
+});
+
+test("deployment-bound v1 records do not silently become v2 authority", async () => {
+  const store = await storePromise;
+  await store.activateChatRefinerInitialAutoRelease({
+    session: { user: { id: "owner-id", email: "owner@example.test" } } as never,
+    request: new Request("https://tomverse.test", { method: "POST" }),
+    runtimeCommitSha: runtime.RAILWAY_GIT_COMMIT_SHA,
+    runtimeDeploymentId: runtime.RAILWAY_DEPLOYMENT_ID,
+    evidenceRefs,
+  }, runtime);
+  rows = rows.map((row) => ({ ...row, targetType: "RailwayDeployment",
+    targetId: runtime.RAILWAY_DEPLOYMENT_ID }));
+  assert.equal(await store.readChatRefinerInitialAutoRouterAuthority(runtime),
+    null);
+});
+
+test("Guest release remains active on a new deployment but closes on guard drift", async () => {
+  const base = await storePromise;
+  const guest = await guestStorePromise;
+  const session = { user: { id: "owner-id", email: "owner@example.test" } } as never;
+  const request = new Request("https://tomverse.test", { method: "POST" });
+  const guestRuntime = { ...runtime,
+    CHAT_GUEST_SMART_ADAPTIVE_ROLLOUT_ENABLED: "1",
+    CHAT_GUEST_SMART_ADAPTIVE_AUTHORITY_SECRET: "s".repeat(32) };
+  await base.activateChatRefinerInitialAutoRelease({ session, request,
+    runtimeCommitSha: runtime.RAILWAY_GIT_COMMIT_SHA,
+    runtimeDeploymentId: runtime.RAILWAY_DEPLOYMENT_ID,
+    evidenceRefs }, guestRuntime);
+  const activation = await guest.activateGuestChatSmartAdaptiveRelease({
+    session, request, runtimeCommitSha: runtime.RAILWAY_GIT_COMMIT_SHA,
+    runtimeDeploymentId: runtime.RAILWAY_DEPLOYMENT_ID,
+  }, guestRuntime);
+  assert.equal(activation.releaseKind, "guest_chat_smart_adaptive_v2");
+  assert.equal(rows[2].targetType, "GuestChatReleaseFingerprint");
+  const successor = { ...guestRuntime,
+    RAILWAY_GIT_COMMIT_SHA: "c".repeat(40),
+    RAILWAY_DEPLOYMENT_ID: "22222222-2222-4222-8222-222222222222" };
+  const current = await guest.readGuestChatSmartAdaptiveRelease(successor);
+  assert.equal(current?.binding.runtimeDeploymentId,
+    successor.RAILWAY_DEPLOYMENT_ID);
+  assert.equal(current?.activationAuditLogId, rows[2].id);
+  assert.equal(rows.length, 3);
+  guardActive = false;
+  assert.equal(await guest.readGuestChatSmartAdaptiveRelease(successor), null);
 });
 
 test("activation rejects malformed evidence before opening a transaction", async () => {
@@ -227,7 +328,7 @@ test("missing, ambiguous, drifted and current-price-invalid pairs mint no author
   const binding = core.chatRefinerInitialAutoRuntimeBinding(runtime);
   const router = { id: "router", actorUserId: "owner", actorEmail: null,
     action: core.CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
-    targetType: "RailwayDeployment", targetId: binding.runtimeDeploymentId,
+    targetType: "ChatReleaseAuthority", targetId: binding.releaseAuthorityDigest,
     summary: core.CHAT_REFINER_INITIAL_AUTO_ROUTER_SUMMARY,
     metadata: core.chatRefinerInitialAutoRouterMetadata(binding, evidenceRefs),
     ipAddress: null, userAgent: null, previousHash: "prior",

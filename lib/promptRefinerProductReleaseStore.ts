@@ -8,9 +8,12 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { inspectChatRefinerInitialAutoRelease } from
   "@/lib/chatRefinerInitialAutoReleaseStore";
+import { currentChatReleaseSourceFingerprint } from
+  "@/lib/chatReleaseSourceFingerprint";
 import { CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
   CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
-  chatRefinerInitialAutoResumeMetadata } from
+  chatRefinerInitialAutoResumeMetadata,
+  chatRefinerInitialAutoRuntimeBinding } from
   "@/lib/chatRefinerInitialAutoRelease";
 import { prisma } from "@/lib/prisma";
 import { initializePromptRefinerProductAutoGuard,
@@ -296,11 +299,26 @@ async function resolvePromptRefinerProductRelease(
     action: ACTIVATION_ACTION, targetType: "RailwayDeployment",
     targetId: runtimeDeploymentId,
   } });
-  const initialRows = await tx.adminAuditLog.findMany({ where: {
-    action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
-      CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION] },
-    targetType: "RailwayDeployment", targetId: runtimeDeploymentId,
-  }, select: { id: true }, take: 3 });
+  let releaseAuthorityDigest: string | null = null;
+  let releaseFingerprint: string | null = null;
+  try {
+    const binding = chatRefinerInitialAutoRuntimeBinding(runtime);
+    releaseAuthorityDigest = binding.releaseAuthorityDigest;
+    releaseFingerprint = binding.releaseFingerprint;
+  } catch {
+    // V1 keeps its original deployment-bound path only while source proof is
+    // readable. For an activated v2 source, invalid controls still latch on
+    // dispatch instead of silently resuming when an env value is restored.
+    try { releaseFingerprint = currentChatReleaseSourceFingerprint(); }
+    catch { return closed(); }
+  }
+  const initialRows = releaseAuthorityDigest
+    ? await tx.adminAuditLog.findMany({ where: {
+      action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
+        CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION] },
+      targetType: "ChatReleaseAuthority", targetId: releaseAuthorityDigest,
+    }, select: { id: true }, take: 3 })
+    : [];
   const initial = initialRows.length === 0
     ? ({ state: "absent" } as const)
     : await inspectChatRefinerInitialAutoRelease(tx, runtime);
@@ -311,7 +329,7 @@ async function resolvePromptRefinerProductRelease(
       autoEnabled: operational.active,
       runtimeCommitSha, runtimeDeploymentId,
       approvalAuditLogId: initial.productActivationAuditLogId,
-      releaseKind: "initial_auto_v1" as const,
+      releaseKind: "initial_auto_v2" as const,
       routerExceptionAuditLogId: initial.routerActivationAuditLogId });
   }
   if (initial.state === "invalid") {
@@ -319,6 +337,17 @@ async function resolvePromptRefinerProductRelease(
       ? "unknown_dispatch_or_cost" : initial.reason === "runtime_controls_invalid"
         ? "critical_safety_failure" : "audit_failure";
     return latchDrift(reason);
+  }
+  if (releaseFingerprint) {
+    const previousSourceActivation = await tx.adminAuditLog.findMany({ where: {
+      action: CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
+      targetType: "ChatReleaseAuthority",
+      metadata: { path: ["releaseFingerprint"], equals: releaseFingerprint },
+    }, select: { id: true }, take: 1 });
+    if (previousSourceActivation.length !== 0) {
+      return latchDrift(releaseAuthorityDigest
+        ? "audit_failure" : "critical_safety_failure");
+    }
   }
   const row = rows.length === 1 ? rows[0] : null;
   if (rows.length === 0) return closed();
@@ -427,7 +456,7 @@ export async function resumePromptRefinerProductAuto(input: {
         guard.transitionAuditLogId !== input.expectedPauseAuditLogId) {
       throw new Error("prompt_refiner_product_auto_resume_not_allowed");
     }
-    const metadata = release.releaseKind === "initial_auto_v1" &&
+    const metadata = release.releaseKind === "initial_auto_v2" &&
       release.routerExceptionAuditLogId && release.approvalAuditLogId
       ? chatRefinerInitialAutoResumeMetadata({
         operatorConfirmedReasonCode: guard.reasonCode,

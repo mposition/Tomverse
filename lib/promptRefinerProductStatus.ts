@@ -23,7 +23,7 @@ type ProductRelease = Readonly<{
   runtimeCommitSha: string | null | undefined;
   runtimeDeploymentId: string | null | undefined;
   approvalAuditLogId: string | null;
-  releaseKind?: "latency_only_v1" | "initial_auto_v1" | null;
+  releaseKind?: "latency_only_v1" | "initial_auto_v2" | null;
   routerExceptionAuditLogId?: string | null;
 }>;
 
