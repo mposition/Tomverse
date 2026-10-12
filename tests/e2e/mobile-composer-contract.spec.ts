@@ -372,6 +372,10 @@ async function expectComposerControlsContained(page: Page) {
     const walker = document.createTreeWalker(credit, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       if (!walker.currentNode.textContent?.trim()) continue;
+      const parent = walker.currentNode.parentElement!;
+      const style = getComputedStyle(parent);
+      // Screen-reader copy is deliberately clipped; measure the visible numeric label instead.
+      if (style.position === "absolute" && parent.clientWidth <= 1 && parent.clientHeight <= 1 && style.overflow === "hidden") continue;
       const range = document.createRange();
       range.selectNodeContents(walker.currentNode);
       for (const line of Array.from(range.getClientRects())) {
@@ -561,10 +565,10 @@ test.describe("Mobile composer: disabled actions state their reason", { tag: "@u
 });
 
 test.describe("Mobile composer: two tools at once", { tag: "@ui-risk" }, () => {
-  // Fully supported web search stays in the footer while a pending
-  // deep-research job owns the status row. Neither may enter the input row.
+  // Starting Deep Research replaces a search-capable model. The resulting
+  // partial-search warning and the independent job both own the status row.
   for (const width of [390, 320]) {
-    test(`${width}px keeps footer and status tools out of the input row`, async ({
+    test(`${width}px keeps partial search and Deep Research out of the input row`, async ({
       page,
     }) => {
       // Three models that search, at the cap: the run has to ask which one to
@@ -578,11 +582,10 @@ test.describe("Mobile composer: two tools at once", { tag: "@ui-risk" }, () => {
 
       await startDeepResearch(page);
       await expect(page.getByTestId("deep-research-chip")).toBeVisible();
-      await expect(
-        page
-          .getByTestId("composer-primary-tools")
-          .getByTestId("web-search-mode-chip")
-      ).toBeVisible();
+      const statusRow = page.getByTestId("tool-status-chip-row");
+      await expect(statusRow.getByTestId("web-search-mode-chip")).toBeVisible();
+      await expect(statusRow.getByTestId("web-search-mode-chip")).toHaveAttribute("data-tone", "warning");
+      await expect(statusRow.getByTestId("deep-research-chip")).toBeVisible();
 
       const geometry = await expectComposerContract(page, `${width}x680 two chips`);
       expect(geometry.overlaps).toEqual([]);
@@ -821,6 +824,30 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
     await expectComposerContract(page, "short active Review with header model strip");
     await page.getByTestId("mobile-sidebar-open").click();
     await expect(page.getByTestId("mobile-sidebar-drawer").getByTestId("chat-product-review")).toHaveAttribute("href", "/review?lang=ko");
+  });
+
+  test("137px zoom keeps visible model and credit numbers in 44px controls", async ({ page }) => {
+    await enterMobileComposer(page, {
+      models: ALL_SEARCH_MODELS,
+      viewport: { width: 137, height: 247 },
+      webSearchMode: "off",
+    });
+    const composer = page.getByTestId("chat-input");
+    const model = composer.getByTestId("composer-model-select");
+    await expect(model.getByText("3", { exact: true })).toBeVisible();
+    await expect(model).toHaveAccessibleName(/3/);
+    const credit = composer.getByTestId("request-credit-estimate");
+    const accessibleLabel = (await credit.getAttribute("aria-label"))!;
+    const value = accessibleLabel.match(/\d+/)?.[0];
+    expect(value).toBeTruthy();
+    await expect(credit.getByText(value!, { exact: true })).toBeVisible();
+    for (const control of [composer.getByTestId("composer-tools-button"), model, credit, composer.getByTestId("chat-send-button")]) {
+      const box = (await control.boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    await expectComposerControlsContained(page);
+    await expectComposerContract(page, "137px with visible actual count and credits");
   });
 
   for (const lang of ["en", "de", "fr", "es", "pt", "ko", "zh"] as const) {
