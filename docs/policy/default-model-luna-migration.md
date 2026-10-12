@@ -78,13 +78,19 @@ Tomverse Review의 OpenAI 기본 모델을 `gpt-5-4-mini`에서 `gpt-5-6-luna`�
 배열)가 정하고, 플랫폼 설정의 "기본 3모델 구성"에서 바꿉니다.
 
 - **저장할 때 검증합니다**(`guestBrandTrioRejection()`, `lib/appDefaults.ts`).
-  각 모델은 활성 · 게스트 접근 가능 · Standard이고, 가격이 클래스 fallback이
-  아니라 코드 profile 또는 관리자 override로 확인돼 있어야 합니다. 새 대화마다
+  OpenAI · Anthropic · Gemini 모델이 각 1개여야 하고(플랫폼 전략,
+  docs/policy/credit-and-cost-limits.md "Haiku 계열을 게스트 Anthropic 자리로 여는
+  예외"), 각 모델은 picker와 같은 공개 상태(활성 · 공개 · disabled/coming-soon 아님
+  · 삭제 아님) · 게스트 접근 가능 · Standard이며, 가격이 클래스 fallback이 아니라
+  코드 profile 또는 입력·출력 두 override로 확인돼 있어야 합니다. 새 대화마다
   여는 기본값이 아무도 확인하지 않은 가격으로 예약되지 않게 하기 위해서입니다.
 - **선두는 그 구성 안에서만 고릅니다.** 구성 저장은 선두와 함께 한 트랜잭션으로
   하며, 저장된 선두를 떨어뜨리는 구성은 선두를 같이 보내지 않으면 거부합니다
   (`guestDefaultLineupRejection()`). "저장됐지만 적용되지 않는 설정"을 만들지
   않는다는 위 규칙의 연장입니다.
+- **저장된 선두가 구성 안에 있으면 은퇴했더라도 그대로 넘깁니다**
+  (`guestLeadForLineup()`). 그래야 resolver가 그 자리에서 승계하고 대체 모델이
+  선두가 됩니다. 신규 계정의 첫 대화도 같은 선두를 씁니다.
 - **읽을 때는 파싱만 합니다.** 저장 뒤에 구성원이 은퇴하는 것은 막을 수 없으므로
   자리별 처리는 resolver가 합니다. 행이 없거나 읽을 수 없으면 코드의
   `GUEST_BRAND_TRIO_MODEL_IDS`가 쓰입니다 — 코드 trio는 이제 비상값입니다.
