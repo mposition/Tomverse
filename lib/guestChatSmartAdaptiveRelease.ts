@@ -12,7 +12,7 @@ import {
 
 export const GUEST_CHAT_SMART_ADAPTIVE_POLICY_VERSION = 1 as const;
 export const GUEST_CHAT_SMART_ADAPTIVE_POLICY_SHA256 =
-  "a371c603b63348960c7f72312a9ae82f8821418e86f972b6d4f004597e482c41" as const;
+  "b9bc0fe3d3a489d4acc576aaef607431d9ad42a08db70a498296b3fcedad2a7b" as const;
 export const GUEST_CHAT_SMART_ADAPTIVE_ACTION =
   "chat_guest.smart_adaptive_release_activated" as const;
 export const GUEST_CHAT_SMART_ADAPTIVE_SUMMARY =

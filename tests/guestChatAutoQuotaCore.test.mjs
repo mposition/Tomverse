@@ -54,17 +54,17 @@ test("Guest Auto converts the maximum hold to one exact reachable model and refu
     prehold: hold,
     selectedModelId: "guest-mid",
     selectedProvider: "provider-b",
-    selectedUsageCredits: 3,
+    selectedUsageCredits: 2,
   });
 
   assert.deepEqual(conversion, {
     selected: candidates[1],
     heldDayCredits: 8,
     heldMonthCredits: 8,
-    exactDayCredits: 3,
-    exactMonthCredits: 3,
-    refundDayCredits: 5,
-    refundMonthCredits: 5,
+    exactDayCredits: 2,
+    exactMonthCredits: 2,
+    refundDayCredits: 6,
+    refundMonthCredits: 6,
   });
 });
 
@@ -78,7 +78,9 @@ test("Guest Auto refuses a model, provider or credit weight outside the frozen r
   for (const input of [
     { selectedModelId: "guest-expensive", selectedProvider: "provider-c", selectedUsageCredits: 8 },
     { selectedModelId: "guest-mid", selectedProvider: "provider-x", selectedUsageCredits: 3 },
-    { selectedModelId: "guest-mid", selectedProvider: "provider-b", selectedUsageCredits: 2 },
+    { selectedModelId: "guest-mid", selectedProvider: "provider-b", selectedUsageCredits: 0 },
+    { selectedModelId: "guest-mid", selectedProvider: "provider-b", selectedUsageCredits: 4 },
+    { selectedModelId: "guest-mid", selectedProvider: "provider-b", selectedUsageCredits: 1.5 },
   ]) {
     assert.throws(
       () => planGuestAutoCreditConversion({ prehold: hold, ...input }),
@@ -146,8 +148,8 @@ test("Guest Auto prehold covers the existing input multiplier and exact search s
     prehold: hold,
     selectedModelId: candidate.modelId,
     selectedProvider: candidate.provider,
-    selectedUsageCredits: candidate.usageCredits,
-  }).exactDayCredits, candidate.usageCredits);
+    selectedUsageCredits: beforeThreshold.totalCredits,
+  }).exactDayCredits, beforeThreshold.totalCredits);
   assert.throws(() => planGuestAutoCreditConversion({
     prehold: hold,
     selectedModelId: candidate.modelId,
@@ -200,12 +202,24 @@ test("Guest Auto uses the existing Guest input ceiling before filtering reachabl
       hold.reachableCandidates.map((entry) => entry.modelId),
       ["guest-cheap"]
     );
+    const exactShortPrompt = estimateRequestCredits({
+      models: [
+        { id: cheap.modelId, usageClass: "standard", creditWeight: 1 },
+      ],
+      estimatedInputTokens: 100,
+      webSearchMode: "off",
+      backendReadiness: { brave: true },
+    }).models[0].totalCredits;
+    assert.ok(exactShortPrompt < cheap.usageCredits);
     const conversion = planGuestAutoCreditConversion({
       prehold: hold,
       selectedModelId: cheap.modelId,
       selectedProvider: cheap.provider,
-      selectedUsageCredits: cheap.usageCredits,
+      selectedUsageCredits: exactShortPrompt,
     });
+    assert.equal(conversion.exactDayCredits, exactShortPrompt);
+    assert.equal(conversion.refundDayCredits,
+      hold.dayAmount - exactShortPrompt);
     assert.ok(conversion.exactDayCredits <= hold.dayAmount);
     assert.ok(conversion.exactMonthCredits <= hold.monthAmount);
   } finally {

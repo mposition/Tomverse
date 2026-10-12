@@ -1689,6 +1689,17 @@ async function handleChatPost(
                 candidates,
                 traceId,
             });
+            if (reserved.claim !== "new") {
+                // A live request already owns this exact subject, authority
+                // and logical turn. Reusing its content-free prehold is a
+                // receipt, not permission for another Refiner or Chat attempt.
+                // Leave the original row untouched so its owner can finish.
+                throw new ChatAccessError(
+                    409,
+                    "GUEST_AUTO_TURN_IN_PROGRESS",
+                    "This Guest Smart Adaptive turn is already in progress."
+                );
+            }
             guestAutoRun = {
                 access: earlyAccess,
                 binding,

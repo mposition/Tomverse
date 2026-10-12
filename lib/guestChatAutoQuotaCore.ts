@@ -146,7 +146,13 @@ export type GuestAutoCreditConversion = Readonly<{
   refundMonthCredits: number;
 }>;
 
-/** Convert one maximum credit hold to one exact selected model, at most once. */
+/**
+ * Convert one maximum credit hold to one exact selected model, at most once.
+ *
+ * The frozen candidate amount is that model's server-computed request ceiling.
+ * Its exact budget may be smaller after the actual bounded prompt is measured,
+ * but it may never exceed either that per-model ceiling or the aggregate hold.
+ */
 export function planGuestAutoCreditConversion(input: Readonly<{
   prehold: GuestAutoCreditPrehold;
   selectedModelId: string;
@@ -169,7 +175,9 @@ export function planGuestAutoCreditConversion(input: Readonly<{
   if (
     !selected ||
     selected.provider !== input.selectedProvider ||
-    selected.usageCredits !== input.selectedUsageCredits
+    !Number.isSafeInteger(input.selectedUsageCredits) ||
+    input.selectedUsageCredits <= 0 ||
+    input.selectedUsageCredits > selected.usageCredits
   ) {
     throw new GuestAutoQuotaError("selected_candidate_unreachable");
   }
@@ -181,9 +189,9 @@ export function planGuestAutoCreditConversion(input: Readonly<{
     selected,
     heldDayCredits: prehold.dayAmount,
     heldMonthCredits: prehold.monthAmount,
-    exactDayCredits: selected.usageCredits,
-    exactMonthCredits: selected.usageCredits,
-    refundDayCredits: prehold.dayAmount - selected.usageCredits,
-    refundMonthCredits: prehold.monthAmount - selected.usageCredits,
+    exactDayCredits: input.selectedUsageCredits,
+    exactMonthCredits: input.selectedUsageCredits,
+    refundDayCredits: prehold.dayAmount - input.selectedUsageCredits,
+    refundMonthCredits: prehold.monthAmount - input.selectedUsageCredits,
   });
 }

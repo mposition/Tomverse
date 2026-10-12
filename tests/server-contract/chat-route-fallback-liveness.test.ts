@@ -285,8 +285,12 @@ mock.module(mod("lib/turnstile.ts"), {
   },
 });
 
-type GuestRefinerMode = "refined" | "unknown" | "budget_refusal";
+type GuestRefinerMode = "refined" | "unknown" | "budget_refusal" | "held";
 let guestRefinerMode: GuestRefinerMode = "refined";
+let guestRefinerGate: Readonly<{
+  entered: () => void;
+  continue: Promise<void>;
+}> | null = null;
 const guestRefinerInputs: Array<{ authorityId: string; sourcePrompt: string }> = [];
 mock.module(mod("lib/promptRefinerGuestProductService.ts"), {
   namedExports: {
@@ -296,6 +300,11 @@ mock.module(mod("lib/promptRefinerGuestProductService.ts"), {
     }) => {
       guestRefinerInputs.push(input);
       guestLifecycle.push("refiner");
+      if (guestRefinerMode === "held") {
+        assert.ok(guestRefinerGate, "held Refiner requires an explicit gate");
+        guestRefinerGate.entered();
+        await guestRefinerGate.continue;
+      }
       if (guestRefinerMode === "unknown") {
         return {
           outcome: "original_fallback" as const,
@@ -948,7 +957,14 @@ mock.module(mod("lib/guestChatAutoCreditLedger.ts"), {
         throw new TestGuestAutoCreditLedgerError("duplicate_binding");
       }
       if (authorityClaim) {
+        if (
+          authorityClaim.phase !== "guest_auto_prehold" ||
+          authorityClaim.status !== "guest_auto_preheld"
+        ) {
+          throw new TestGuestAutoCreditLedgerError("transition_invalid");
+        }
         return {
+          claim: "replay_preheld" as const,
           state: {
             reservationId: "guest-auto-reservation",
             phase: authorityClaim.phase,
@@ -983,6 +999,7 @@ mock.module(mod("lib/guestChatAutoCreditLedger.ts"), {
       guestClaimsByAuthority.set(authorityKey, claim);
       guestClaimsByTurn.set(turnKey, claim);
       return {
+        claim: "new" as const,
         state: {
           reservationId: "guest-auto-reservation",
           phase: claim.phase,
@@ -2541,6 +2558,7 @@ test("an accepted Refiner decision stops safely when durable dispatch-start reco
 const resetGuestHarness = (preserveClaims = false) => {
   activeSession = null;
   guestRefinerMode = "refined";
+  guestRefinerGate = null;
   guestLedgerMode = "normal";
   throwGuestProviderUnknown = false;
   injectPrimaryFault = false;
@@ -2595,8 +2613,11 @@ const askGuestAuto = async (options: {
   refinerMode?: GuestRefinerMode;
   ledgerMode?: GuestLedgerMode;
   providerUnknown?: boolean;
+  resetHarness?: boolean;
 } = {}) => {
-  resetGuestHarness(options.preserveClaims ?? false);
+  if (options.resetHarness !== false) {
+    resetGuestHarness(options.preserveClaims ?? false);
+  }
   if (options.authenticated) {
     activeSession = {
       user: { id: USER_ID, email: "fallback-qa@tomverse.app" },
@@ -2771,6 +2792,60 @@ test("Guest Auto refuses one authority rebound to a fresh logical turn before a 
   assert.equal(guestRefinerInputs.length, 0);
   assert.equal(guestConvertInputs.length, 0);
   assert.equal(attempts.length, 0);
+});
+
+test("Guest Auto refuses an in-progress exact replay before paid work while the original request completes once", async () => {
+  resetGuestHarness(false);
+  let signalEntered!: () => void;
+  let releaseOriginal!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    signalEntered = resolve;
+  });
+  const continueOriginal = new Promise<void>((resolve) => {
+    releaseOriginal = resolve;
+  });
+  guestRefinerGate = {
+    entered: signalEntered,
+    continue: continueOriginal,
+  };
+
+  const original = askGuestAuto({
+    expectedStatus: 200,
+    refinerMode: "held",
+    resetHarness: false,
+  });
+  await entered;
+
+  const replay = await askGuestAuto({
+    expectedStatus: 409,
+    resetHarness: false,
+  });
+  assert.equal(
+    (JSON.parse(replay.body) as { code?: string }).code,
+    "GUEST_AUTO_TURN_IN_PROGRESS"
+  );
+  assert.equal(guestRefinerInputs.length, 1);
+  assert.equal(guestSelectionInputs.length, 0);
+  assert.equal(guestConvertInputs.length, 0);
+  assert.equal(guestReleaseInputs.length, 0);
+  assert.equal(guestUnknownInputs.length, 0);
+  assert.equal(attempts.length, 0);
+  assert.equal(
+    guestClaimsByAuthority.get(
+      `${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`
+    )?.status,
+    "guest_auto_preheld"
+  );
+
+  releaseOriginal();
+  const completed = await original;
+  assert.ok(completed.body.includes(ANSWER));
+  assert.equal(guestRefinerInputs.length, 1);
+  assert.equal(guestSelectionInputs.length, 1);
+  assert.equal(guestConvertInputs.length, 1);
+  assert.equal(attempts.length, 1);
+  assert.equal(guestReleaseInputs.length, 0);
+  assert.equal(guestUnknownInputs.length, 0);
 });
 
 test("Guest Auto retains a Refiner-unknown prehold and confirms its readonly receipt once", async () => {
