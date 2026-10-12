@@ -71,6 +71,9 @@ const INTERNAL_ERROR_MARKERS = [
   // function", with neither marker above. The panic site is the persisted task
   // store, which is what a cold cache replaces.
   "panicked at turbopack/crates/turbo-tasks-backend/",
+  // 2026-10-11 (staging d9efa670): Next.js 16.3.8 aborted outside the
+  // per-task panic boundary, with this line and the cache-restore lines below.
+  "This is a bug in turbo-tasks/Turbopack",
 ];
 
 const CACHE_RESTORE_MARKERS = [

@@ -3,12 +3,36 @@
 export const AMUX_V22_AUTO_PROMOTION_POLICY_VERSION = 22;
 export const AMUX_V22_AUTO_PROMOTION_ENV = "TOMVERSE_AMUX_V22_AUTO_PROMOTE";
 export const AMUX_V22_AUTO_PROMOTION_CODE_LATCH = true;
+export const AMUX_V22_GRADUATION_EXCEPTION_ENV = "TOMVERSE_AMUX_V22_GRADUATION_EXCEPTION";
+export const AMUX_V22_GRADUATION_EXCEPTION_ID = "owner-bootstrap-2026-10-11";
+export const AMUX_V22_GRADUATION_EXCEPTION_POLICY_VERSION = 30;
 export const AMUX_V22_WORKER_QUEUE_MULTIPLIER = 3;
 export const AMUX_V22_PARALLEL_RESERVED = 1;
 export const AMUX_V22_SEV1_RESERVED = 1;
 
 export const amuxV22AutoPromotionEnabled = (value: string | undefined) =>
   AMUX_V22_AUTO_PROMOTION_CODE_LATCH && value === "enabled";
+
+export const amuxV22GraduationExceptionEnabled = (value: string | undefined) =>
+  value === AMUX_V22_GRADUATION_EXCEPTION_ID;
+
+/** This accepts a separately authorized exception, never changes graduation
+ * measurements. The caller must first verify the canonical owner audit binding. */
+export function amuxV22GraduationPermitted(input: {
+  graduated: boolean; environmentValue: string | undefined;
+  authorization: unknown;
+}) {
+  if (input.graduated) return true;
+  const metadata = input.authorization;
+  return amuxV22GraduationExceptionEnabled(input.environmentValue) &&
+    metadata !== null && typeof metadata === "object" &&
+    !Array.isArray(metadata) &&
+    "graduationExceptionId" in metadata &&
+    metadata.graduationExceptionId === AMUX_V22_GRADUATION_EXCEPTION_ID &&
+    "graduationExceptionPolicyVersion" in metadata &&
+    metadata.graduationExceptionPolicyVersion ===
+      AMUX_V22_GRADUATION_EXCEPTION_POLICY_VERSION;
+}
 
 /** The two lanes are held empty until their owner-declared classification and
  * worker-claim contract ships. Never lend an unclassified slot to a normal

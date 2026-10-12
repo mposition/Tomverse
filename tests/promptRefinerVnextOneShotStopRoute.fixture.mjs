@@ -35,6 +35,19 @@ const request = (payload, bearer = token) => new Request("http://localhost/inter
   method: "POST", headers: { "content-type": "application/json",
     authorization: `Bearer ${bearer}` }, body: JSON.stringify(payload),
 });
+const withExpectedToken = async (expected, run) => {
+  const before = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN = expected;
+  try {
+    return await run();
+  } finally {
+    if (before === undefined) {
+      delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
+    } else {
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN = before;
+    }
+  }
+};
 
 test("runner stop route records a content-free unknown receipt exactly once", async () => {
   calls = [];
@@ -68,6 +81,39 @@ test("invalid bearer and malformed body never reach the stop writer", async () =
     process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN = token;
   }
   assert.equal((await POST(request(body, "short"))).status, 404);
+  assert.deepEqual(calls, []);
+});
+
+test("unequal UTF-8 byte lengths refuse without throwing or writing", async () => {
+  calls = [];
+  for (const bearer of ["x".repeat(32), "é".repeat(token.length)]) {
+    const response = await POST(request(body, bearer));
+    assert.equal(response.status, 404);
+  }
+  assert.deepEqual(calls, []);
+});
+
+test("the exact 32 and 256 character token boundaries remain authorized", async () => {
+  for (const length of [32, 256]) {
+    calls = [];
+    const boundaryToken = "b".repeat(length);
+    await withExpectedToken(boundaryToken, async () => {
+      const response = await POST(request(body, boundaryToken));
+      assert.equal(response.status, 201);
+    });
+    assert.deepEqual(calls, [body]);
+  }
+});
+
+test("tokens outside the 32 to 256 character range stay closed", async () => {
+  calls = [];
+  for (const length of [31, 257]) {
+    const outOfRange = "o".repeat(length);
+    await withExpectedToken(outOfRange, async () => {
+      assert.equal((await POST(request(body, outOfRange))).status, 404);
+    });
+    assert.equal((await POST(request(body, outOfRange))).status, 404);
+  }
   assert.deepEqual(calls, []);
 });
 
