@@ -12,6 +12,7 @@ import { suppressionCheck } from "@/lib/emailSuppression";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES } from "@/lib/policyChangeNoticeEmail";
 import {
+  CHANGE_NOTICE_OWED_BEFORE,
   CHANGE_NOTICE_WINDOW_DAYS,
   TOLD_STATUSES,
   UNREACHABLE_REPORT_LIMIT,
@@ -229,7 +230,13 @@ export const noticeFactsFor = async (
   templateKey: string | null,
   approvedContentHashes: readonly string[],
   effective: Date | null,
-  now: Date
+  now: Date,
+  /**
+   * Accounts created before this are owed the notice; defaults to the
+   * effective date. The amendment's own report passes
+   * `CHANGE_NOTICE_OWED_BEFORE`, the moment it was published.
+   */
+  owedBefore: Date | null = null
 ): Promise<ChangeNoticeFacts> => {
   if (
     templateKey === null ||
@@ -252,6 +259,10 @@ export const noticeFactsFor = async (
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   );
   const windowStart = new Date(anchor.getTime() - CHANGE_NOTICE_WINDOW_DAYS * DAY_MS);
+  // Never later than the anchor: an account created after the effective date
+  // is not owed a notice about it whatever the publication instant says.
+  const owedCutoff =
+    owedBefore !== null && owedBefore.getTime() < anchor.getTime() ? owedBefore : anchor;
 
   const [row] = await prisma.$queryRaw<
     {
@@ -271,12 +282,13 @@ export const noticeFactsFor = async (
              (${utc(deadline)}::timestamptz AT TIME ZONE 'UTC')    AS "deadline",
              (${utc(ownPeriodCutoff)}::timestamptz AT TIME ZONE 'UTC') AS "ownPeriodCutoff",
              (${utc(windowStart)}::timestamptz AT TIME ZONE 'UTC') AS "windowStart",
-             (${utc(now)}::timestamptz AT TIME ZONE 'UTC')         AS "now"
+             (${utc(now)}::timestamptz AT TIME ZONE 'UTC')         AS "now",
+             (${utc(owedCutoff)}::timestamptz AT TIME ZONE 'UTC')  AS "owedBefore"
     ),
     owed AS (
       SELECT u."id", u."email", u."createdAt"
         FROM "User" u, params p
-       WHERE u."createdAt" IS NULL OR u."createdAt" < p."effective"
+       WHERE u."createdAt" IS NULL OR u."createdAt" < p."owedBefore"
     ),
     notice AS (
       SELECT d."userId", d."status", d."deliveredAt", d."createdAt"
@@ -405,7 +417,8 @@ export async function publicationReport(now: Date = new Date()): Promise<Publica
     CHANGE_NOTICE_TEMPLATE_KEY,
     CHANGE_NOTICE_APPROVED_CONTENT_HASHES,
     effectiveDateOf(documents),
-    now
+    now,
+    new Date(CHANGE_NOTICE_OWED_BEFORE)
   );
   return {
     problems: publicationProblems({ documents, notice, now }),
