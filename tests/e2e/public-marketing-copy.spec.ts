@@ -75,7 +75,7 @@ function expectInlineHashes(html: string, headers: Record<string, string>, path:
       expect(sources, `${path} ${tag} must use hashes, not blanket inline permission`).not.toContain("'unsafe-inline'");
       if (tag === "script") expect(sources).not.toContain("'unsafe-eval'");
       let inlineCount = 0;
-      for (const match of html.matchAll(new RegExp(`<${tag}\\b([^>]*)>([\\s\\S]*?)<\\/${tag}>`, "gi"))) {
+      for (const match of html.matchAll(new RegExp(`<${tag}\\b([^>]*)>([\\s\\S]*?)<\\/${tag}\\s*>`, "gi"))) {
         if (tag === "script" && attributes(match[1]).src) continue;
         if (!match[2]) continue;
         inlineCount++;
@@ -109,7 +109,7 @@ function expectDynamicNonces(html: string, headers: Record<string, string>, path
   // own attribute: both Next's bootstrap and our inline scripts must match it.
   const roles = new Set<string>();
   let checkedScripts = 0;
-  for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+  for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
     const attrs = attributes(match[1]);
     const hasSource = Object.prototype.hasOwnProperty.call(attrs, "src");
     if (hasSource) expect(attrs.src.trim().length, `${path}: an empty src is not an inline script`).toBeGreaterThan(0);

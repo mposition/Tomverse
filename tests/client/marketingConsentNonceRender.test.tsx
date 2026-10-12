@@ -4,7 +4,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MarketingConsentReservation } from "@/components/analytics/MarketingConsentReservation";
 import { StructuredData } from "@/components/seo/StructuredData";
 
-const scriptBody = (html: string) => html.match(/<script\b[^>]*>([\s\S]*)<\/script>/)?.[1];
+const scriptBody = (html: string) => html.match(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/i)?.[1];
+
+test("script body extraction handles HTML casing and closing-tag whitespace", () => {
+  assert.equal(scriptBody('<SCRIPT nonce="test">first()</SCRIPT >'), "first()");
+  assert.equal(scriptBody("<script>first()</script><script>second()</script>"), "first()");
+});
 
 test("request-time marketing passes the nonce without changing consent logic", () => {
   const staticMarkup = renderToStaticMarkup(<MarketingConsentReservation />);
