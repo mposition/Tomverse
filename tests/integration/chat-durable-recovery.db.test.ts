@@ -66,6 +66,7 @@ async function seedChat(label = "owner"): Promise<SeededChat> {
   await prisma.user.create({ data: { id: userId, email } });
   await prisma.conversation.create({
     data: {
+      selectedModels: '["gpt-6-luna"]',
       id: conversationId,
       userId,
       title: `Durable recovery ${label}`,

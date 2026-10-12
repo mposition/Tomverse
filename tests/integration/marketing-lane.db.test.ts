@@ -202,6 +202,7 @@ const subscriber = async (options?: {
   });
   await prisma.userSettings.create({
     data: {
+      defaultModel: "gpt-6-luna",
       userId: user.id,
       // Self-declared: an inferred country is not a declaration, and marketing
       // refuses anything that is not high confidence (§6.3).

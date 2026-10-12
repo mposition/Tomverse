@@ -269,6 +269,7 @@ test("deleting the profile leaves the conversation readable and unbound", async 
     const { profile, version } = await createProfile(user.id);
     const conversation = await prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId: user.id,
             title: "Planning",
             assistantProfileVersionId: version.id,

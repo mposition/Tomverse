@@ -773,17 +773,22 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **"기본 모델"은 두 개의 다른 결정입니다.** 게스트 첫 대화는 DB의
   `AppSetting["guestDefaultModelId"]`이고 brand trio 중 **선두만** 정합니다.
   신규 로그인 계정은 `DEFAULT_MODEL_ID` → `APP_DEFAULTS.defaultModelId` →
-  `UserSettings.defaultModel` 컬럼 기본값 → `app/api/user/settings/route.ts`가
-  만드는 행입니다. 둘을 섞지 않습니다. `npm run check:default-models`가 양쪽을
+  `app/api/user/settings/route.ts`가 만드는 행입니다. 둘을 섞지 않습니다. `npm run check:default-models`가 양쪽을
   함께 읽고 PR Fast Gate에서 검사합니다.
 - **trio 밖의 모델은 `guestDefaultModelId`로 저장할 수 없습니다.** resolver가
   무시하므로 저장은 되고 효과는 없는 설정이 됩니다. `guestDefaultLeadRejection()`
   이 거부합니다.
 - **기본 모델은 `gpt-6-luna`입니다**(2026-10-12, 이전 `gpt-5-6-luna`).
   `lib/models.ts`의 `DEFAULT_MODEL_ID`, `lib/appDefaults.ts`의
-  `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`, Prisma 컬럼 기본값이
-  함께 움직입니다. 한쪽만 바꾸지 않습니다. 같은 날 trio의 Anthropic 자리는
+  `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`가 함께 움직입니다.
+  한쪽만 바꾸지 않습니다. 같은 날 trio의 Anthropic 자리는
   `claude-haiku-5-5`로 옮겼습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
+- **기본 모델을 가리키는 DB 컬럼 기본값은 없습니다**(2026-10-12). `UserSettings.defaultModel`과
+  `Conversation.selectedModels`는 NOT NULL이지만 `@default`가 없어서, 기본 모델 변경에
+  migration이 필요하지 않습니다. 대신 모든 쓰기 경로가 값을 직접 넣습니다 —
+  `tests/userSettingsDefaultModelWriters.test.mjs`와 `createConversation`의 필수
+  `selectedModels`, 그리고 기본값이 없어져 필수가 된 Prisma create 타입이 이를 지킵니다.
+  `npm run check:default-models`는 두 컬럼에 `@default`가 다시 생기면 실패합니다.
 - **게스트 기본 3모델은 OpenAI 1개 · Anthropic 1개 · Gemini 1개입니다**(플랫폼
   전략, 2026-10-12 운영자 결정). 그래서 Anthropic 자리의 **Claude Haiku 계열만**
   가격이 게스트 개방 조건(최악 턴 ≤ standard 1크레딧의 3배 커버)에 맞지 않아도

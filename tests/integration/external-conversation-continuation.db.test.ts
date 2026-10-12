@@ -355,7 +355,7 @@ test("the surface a conversation opens at is decided from the row", async () => 
         request: requestWithGrant(),
     });
     const ordinary = await prisma.conversation.create({
-        data: { userId: user.id, title: "ordinary", productKey: "review" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "ordinary", productKey: "review" },
     });
 
     // The exact shape the list, detail and search routes select: relation
@@ -728,7 +728,7 @@ test("deleting the account leaves no bridge behind", async () => {
 test("an ordinary conversation has no bridge and no timeline", async () => {
     const user = await createUser();
     const conversation = await prisma.conversation.create({
-        data: { userId: user.id, title: "ordinary", productKey: "review" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "ordinary", productKey: "review" },
     });
 
     assert.equal(await getContinuationBridge(user.id, conversation.id), null);
@@ -966,7 +966,7 @@ test("the list counts this account's continuations and nobody else's", async () 
         request: requestWithGrant(),
     });
     const strangerConversation = await prisma.conversation.create({
-        data: { userId: stranger.id, title: "theirs", productKey: "chat" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: stranger.id, title: "theirs", productKey: "chat" },
     });
     await prisma.conversationContinuationBridge.create({
         data: {
@@ -1164,13 +1164,13 @@ test("the correction moves bridged chat rows and nothing else", async () => {
     // The control group: an ordinary Chat conversation with no bridge. §15.1
     // says the join is what keeps it out, so a row is put in its way.
     const ordinary = await prisma.conversation.create({
-        data: { userId: user.id, title: "ordinary chat", productKey: "chat" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "ordinary chat", productKey: "chat" },
         select: { id: true },
     });
     // A row that has not been classified yet. NULL is the backfill's work, and
     // this migration must leave it exactly as it found it (§15.1).
     const undecided = await prisma.conversation.create({
-        data: { userId: user.id, title: "undecided", productKey: "chat" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "undecided", productKey: "chat" },
         select: { id: true },
     });
     await prisma.$executeRawUnsafe(

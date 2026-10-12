@@ -76,7 +76,7 @@ test("scheduling a deletion sets pending_deletion and cancel-at-period-end witho
 test("scheduling returns the account's own language for the notice", async () => {
   const user = await createUser({});
   await prisma.userSettings.create({
-    data: { userId: user.id, language: "ko" },
+    data: { defaultModel: "gpt-6-luna", userId: user.id, language: "ko" },
   });
 
   const result = await scheduleTomverseAccountDeletion(user.id);

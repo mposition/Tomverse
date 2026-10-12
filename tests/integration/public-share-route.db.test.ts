@@ -70,6 +70,7 @@ const seedShare = async (overrides: {
     });
     return prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId: owner.id,
             title: "A private conversation",
             shareToken: overrides.shareToken,

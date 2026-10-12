@@ -281,7 +281,7 @@ test("each row is pinned to its own language and policy version", async () => {
   // renders under.
   const ids = await accounts(2);
   await prisma.userSettings.create({
-    data: { userId: ids[0], language: "ko" },
+    data: { defaultModel: "gpt-6-luna", userId: ids[0], language: "ko" },
   });
   const eventId = await segmentEvent({ userIds: ids });
 

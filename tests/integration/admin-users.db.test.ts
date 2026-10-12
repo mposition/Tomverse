@@ -30,13 +30,13 @@ const createUser = async (label: string, timeZone: string) =>
   prisma.user.create({
     data: {
       email: `${label}-${randomUUID()}@example.test`,
-      settings: { create: { timeZone } },
+      settings: { create: { defaultModel: "gpt-6-luna", timeZone } },
     },
   });
 
 const seedMessage = async (userId: string, createdAt: string) => {
   const conversation = await prisma.conversation.create({
-    data: { userId, title: "QA" },
+    data: { selectedModels: '["gpt-6-luna"]', userId, title: "QA" },
   });
   await prisma.message.create({
     data: {

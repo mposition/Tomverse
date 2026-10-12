@@ -378,7 +378,7 @@ test("the product update cohort reaches only active accounts with recorded conse
             ? null
             : (input.email ?? `subscriber-${seq}@example.test`),
         accountStatus: input.accountStatus ?? "active",
-        settings: { create: { language: "ko" } },
+        settings: { create: { defaultModel: "gpt-6-luna", language: "ko" } },
         emailPreferences: {
           create: {
             purpose: "product_updates",

@@ -98,14 +98,18 @@ export type DefaultModelAuditInput = {
   defaultModelId: string;
   /** lib/appDefaults.ts */
   appDefaultsDefaultModelId: string;
-  /** The `@default(...)` on UserSettings.defaultModel in schema.prisma. */
-  prismaUserSettingsDefaultModel: string;
-  /** The `@default(...)` on Conversation.selectedModels, parsed as JSON. */
-  prismaConversationSelectedModels: readonly string[];
+  /**
+   * The `@default(...)` on UserSettings.defaultModel in schema.prisma, or null
+   * when the column has none -- which is what it must be. The default model is
+   * code alone; a column default would be a second copy only a migration moves.
+   */
+  prismaUserSettingsDefaultModel: string | null;
+  /** The `@default(...)` on Conversation.selectedModels, parsed as JSON, or null when there is none. */
+  prismaConversationSelectedModels: readonly string[] | null;
   /**
    * What app/api/user/settings/route.ts writes when it creates a row for an
-   * account that has none. Must equal the compiled default, or the column
-   * default and the application default disagree about the same new account.
+   * account that has none. Must equal the compiled default: with no column
+   * default, this write is what a new account's default model is.
    */
   userSettingsCreateDefaultModel: string;
   /** The guest selection rendered by the server, before hydration. */
@@ -140,7 +144,7 @@ export type DefaultModelFinding = {
     | "guest_default_not_standard"
     | "default_model_unusable"
     | "compiled_defaults_disagree"
-    | "prisma_schema_default_disagrees"
+    | "prisma_column_default_names_model"
     | "user_settings_create_disagrees"
     | "guest_hydration_mismatch"
     | "new_conversation_column_missing"
@@ -170,8 +174,8 @@ export type DefaultModelAuditReport = {
   authenticated: {
     compiledAuthenticatedDefaultModelId: DefaultModelValue<string>;
     appDefaultsDefaultModelId: DefaultModelValue<string>;
-    prismaUserSettingsDefaultModel: DefaultModelValue<string>;
-    prismaConversationSelectedModels: DefaultModelValue<readonly string[]>;
+    prismaUserSettingsDefaultModel: DefaultModelValue<string | null>;
+    prismaConversationSelectedModels: DefaultModelValue<readonly string[] | null>;
     userSettingsCreateDefaultModel: DefaultModelValue<string>;
   };
   newConversation: NewConversationAuditInput;
@@ -273,7 +277,8 @@ export const auditDefaultModels = (
     }
   }
 
-  // B. One value, four places. Any disagreement means a new account gets a
+  // B. One value, three places in code -- and none in the schema. Any
+  //    disagreement means a new account gets a
   //    different model depending on which path created its row.
   if (input.defaultModelId !== input.appDefaultsDefaultModelId) {
     findings.push({
@@ -281,24 +286,27 @@ export const auditDefaultModels = (
       message: `DEFAULT_MODEL_ID is "${input.defaultModelId}" but APP_DEFAULTS.defaultModelId is "${input.appDefaultsDefaultModelId}".`,
     });
   }
-  if (input.defaultModelId !== input.prismaUserSettingsDefaultModel) {
+  // The default model lives in code alone (2026-10-12). A column default that
+  // names a model is a second copy, and only a migration can move it -- which
+  // is how the schema said gpt-5-6-luna for a release after the code moved on.
+  // Every writer names the value instead (tests/userSettingsDefaultModelWriters,
+  // createConversation's required selectedModels).
+  if (input.prismaUserSettingsDefaultModel !== null) {
     findings.push({
-      code: "prisma_schema_default_disagrees",
-      message: `DEFAULT_MODEL_ID is "${input.defaultModelId}" but UserSettings.defaultModel defaults to "${input.prismaUserSettingsDefaultModel}" in schema.prisma.`,
+      code: "prisma_column_default_names_model",
+      message: `UserSettings.defaultModel has @default("${input.prismaUserSettingsDefaultModel}") in schema.prisma. The default model is DEFAULT_MODEL_ID and every writer names it; the column carries no default.`,
     });
   }
-  if (
-    !sameOrder(input.prismaConversationSelectedModels, [input.defaultModelId])
-  ) {
+  if (input.prismaConversationSelectedModels !== null) {
     findings.push({
-      code: "prisma_schema_default_disagrees",
-      message: `Conversation.selectedModels defaults to ${JSON.stringify(input.prismaConversationSelectedModels)} but the compiled default is "${input.defaultModelId}".`,
+      code: "prisma_column_default_names_model",
+      message: `Conversation.selectedModels has a default of ${JSON.stringify(input.prismaConversationSelectedModels)} in schema.prisma. createConversation requires the selection; the column carries no default.`,
     });
   }
   if (input.userSettingsCreateDefaultModel !== input.defaultModelId) {
     findings.push({
       code: "user_settings_create_disagrees",
-      message: `A new UserSettings row is created with "${input.userSettingsCreateDefaultModel}" while the column default is "${input.prismaUserSettingsDefaultModel}".`,
+      message: `A new UserSettings row is created with "${input.userSettingsCreateDefaultModel}" while the compiled default is "${input.defaultModelId}".`,
     });
   }
 
@@ -478,7 +486,9 @@ export const parsePrismaFieldContract = (
     schema
   );
   if (!block) return { present: false, nullable: false, hasDefault: false };
-  const line = new RegExp(`^\\s*${field}\\s+(\\S+)(.*)$`, "m").exec(block[1]);
+  // [ \t] rather than \s around the field: \s crosses a newline, so a field
+  // with no attributes would be read together with the next line.
+  const line = new RegExp(`^[ \\t]*${field}[ \\t]+(\\S+)(.*)$`, "m").exec(block[1]);
   if (!line) return { present: false, nullable: false, hasDefault: false };
   return {
     present: true,
@@ -501,8 +511,10 @@ export const parsePrismaStringDefault = (
     schema
   );
   if (!block) return null;
+  // [ \t] and [^\n] rather than \s and .: \s crosses a newline, and a field
+  // with no default then read the next field's @default as its own.
   const line = new RegExp(
-    `^\\s*${field}\\s+\\S+\\s+.*@default\\("((?:[^"\\\\]|\\\\.)*)"\\)`,
+    `^[ \\t]*${field}[ \\t]+\\S+[ \\t]+[^\\n]*@default\\("((?:[^"\\\\]|\\\\.)*)"\\)`,
     "m"
   ).exec(block[1]);
   if (!line) return null;

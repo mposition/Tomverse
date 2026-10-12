@@ -116,7 +116,7 @@ const seedOwner = async (productKey: string | null = "chat") => {
     data: { email: `auto-ui-${randomUUID()}@example.test`, plan: "Pro" },
   });
   const conversation = await prisma.conversation.create({
-    data: { userId: user.id, title: "auto selection fixture", productKey },
+    data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "auto selection fixture", productKey },
   });
   return { user, conversation };
 };

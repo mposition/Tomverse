@@ -71,7 +71,7 @@ test("Refiner execution with migrated schema, canonical audit and durable recove
   const original = "  authored Cafe\u0301 🙂\r\nunchanged  ";
   try {
     await prisma.user.create({ data: { id: userId, email: `${userId}@example.invalid` } });
-    await prisma.conversation.create({ data: { id: conversationId, userId, title: "Synthetic Refiner", kind: "chat", productKey: "chat" } });
+    await prisma.conversation.create({ data: { selectedModels: '["gpt-6-luna"]', id: conversationId, userId, title: "Synthetic Refiner", kind: "chat", productKey: "chat" } });
     const scope = await store.advancePromptRefinerChatScope({ userId, conversationId, mountId: randomUUID(), surface: "chat" });
     await prisma.chatComposerDraft.create({ data: { userId, scopeKey: conversationId, conversationId, text: original, attachmentReferences: [] } });
     const snapshot = await store.capturePromptRefinerChatDraft({ userId, conversationId, scopeId: scope.id, epoch: scope.epoch });

@@ -88,6 +88,7 @@ const seed = async (
     });
     const conversation = await prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId,
             title: "A continued conversation",
             productKey: "review",
@@ -235,7 +236,7 @@ test("a deleted, unfinalized or foreign source is refused, never quietly dropped
     assert.ok(!JSON.stringify(crossedBuild).includes("private turn"));
 
     const ordinary = await prisma.conversation.create({
-        data: { userId: user.id, title: "no bridge", productKey: "chat", kind: "chat" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "no bridge", productKey: "chat", kind: "chat" },
     });
     assert.equal(
         await build(user.id, ordinary.id).then((r) => (r.ok ? null : "refusal" in r ? r.refusal.code : null)),
