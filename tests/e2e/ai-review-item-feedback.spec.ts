@@ -72,7 +72,7 @@ for (const viewport of [
     await mockConversationHistory(page);
     await mockComparisonReview(page);
     const feedback = await mockItemFeedback(page);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openReviewConversation(page);
 
     const dialog = await openReview(page);
@@ -108,7 +108,7 @@ test("selecting the same verdict again withdraws it", async ({ page }) => {
   await mockConversationHistory(page);
   await mockComparisonReview(page);
   const feedback = await mockItemFeedback(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   const dialog = await openReview(page);
@@ -130,7 +130,7 @@ test("the three negative verdicts stay separate reports", async ({ page }) => {
   await mockConversationHistory(page);
   await mockComparisonReview(page);
   const feedback = await mockItemFeedback(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   const dialog = await openReview(page);
@@ -155,7 +155,7 @@ test("each claim carries its own control, and the two reviewers' claims are sepa
   await mockConversationHistory(page);
   await mockComparisonReview(page, { withSecondary: true });
   const feedback = await mockItemFeedback(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   const dialog = await openReview(page);
@@ -189,7 +189,7 @@ test("the control is reachable and operable by keyboard, and names its own group
   await mockConversationHistory(page);
   await mockComparisonReview(page);
   const feedback = await mockItemFeedback(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   const dialog = await openReview(page);
@@ -235,7 +235,7 @@ test("a failed submission restores the previous state and says so", async ({
       });
     }
   );
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   const dialog = await openReview(page);
@@ -257,7 +257,7 @@ test("the control never claims the review itself is right or wrong", async ({
   await mockConversationHistory(page);
   await mockComparisonReview(page);
   await mockItemFeedback(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   const dialog = await openReview(page);

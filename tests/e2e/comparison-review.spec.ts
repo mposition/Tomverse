@@ -128,7 +128,7 @@ test("AI comparison review does not flash an unavailable setup before loading", 
   await mockAuthenticatedApi(page, { selectedModels: reviewModels });
   await mockConversationHistory(page);
   const reviewApi = await mockComparisonReview(page, { deferSetup: true });
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   const reviewButton = page.getByRole("button", { name: "AI 답변 교차검토" });
@@ -162,7 +162,7 @@ for (const viewport of [
     await mockAuthenticatedApi(page, { selectedModels: reviewModels });
     await mockConversationHistory(page);
     const reviewApi = await mockComparisonReview(page);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openReviewConversation(page);
 
     const reviewEntryButton = page.getByRole("button", { name: "AI 답변 교차검토" });
@@ -199,7 +199,7 @@ test("AI comparison review with two reviewers shows a tab switcher and agreement
   await mockAuthenticatedApi(page, { selectedModels: reviewModels });
   await mockConversationHistory(page);
   await mockComparisonReview(page, { withSecondary: true });
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   await page.getByRole("button", { name: "AI 답변 교차검토" }).click();
@@ -252,7 +252,7 @@ test("a verificationNeeded item can be checked with a separate, per-item web sea
       });
     }
   );
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   await page.getByRole("button", { name: "AI 답변 교차검토" }).click();
@@ -278,7 +278,7 @@ test("quick comparison performs a structured AI analysis on mobile", async ({
   await mockAuthenticatedApi(page, { selectedModels: reviewModels });
   await mockConversationHistory(page);
   const quickApi = await mockQuickComparison(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   const quickButton = page.getByTestId("quick-comparison-button");

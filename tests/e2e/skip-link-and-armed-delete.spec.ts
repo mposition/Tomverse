@@ -5,7 +5,7 @@ import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
  * UX-016 and UX-018.
  *
  * UX-016: there was no skip link anywhere. WCAG 2.4.1 is Level A, and on
- * `/chat` with a populated sidebar it was roughly thirty tab stops to the
+ * `/review` with a populated sidebar it was roughly thirty tab stops to the
  * composer on every load.
  *
  * UX-018: the project delete button armed on first press and never disarmed.
@@ -24,7 +24,7 @@ const firstTabLandsOnSkipLink = async (page: Page) => {
 };
 
 test.describe("skip link", () => {
-  for (const route of ["/", "/pricing", "/chat", "/auth/signin", "/ko"]) {
+  for (const route of ["/", "/pricing", "/review", "/auth/signin", "/ko"]) {
     test(
       `${route} exposes a skip link as the first tab stop`,
       { tag: "@ui-risk" },
@@ -104,7 +104,7 @@ test.describe("project delete arming", () => {
     );
 
     await page.setViewportSize({ width: 1366, height: 768 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     const organizer = page.getByTestId("sidebar-organizer-toggle");
     if ((await organizer.getAttribute("aria-expanded")) !== "true") {
       await organizer.click();
@@ -192,7 +192,7 @@ test(
   async ({ page }) => {
     await prepareGuestPage(page, "en");
     await page.setViewportSize({ width: 1366, height: 768 });
-    await page.goto("/chat");
+    await page.goto("/review");
 
     // The sweep below is only meaningful once the fields it sweeps exist. An
     // earlier version ran straight after `goto` and passed against a page that
@@ -243,7 +243,7 @@ test(
     // fields, so the count of distinct names has to match the count of fields.
     await prepareGuestPage(page, "en");
     await page.setViewportSize({ width: 1366, height: 768 });
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const inputs = page.getByTestId("model-only-input");
     await expect(inputs.first()).toBeAttached();

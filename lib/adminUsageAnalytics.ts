@@ -24,7 +24,7 @@ import {
  * Who actually used Tomverse, read for the Admin Console usage tab.
  *
  * The source of "use" is `ChatCreditReservation`: `acquireChatAccess()` writes
- * one row for every model request -- signed-in or guest, chat or AI Review,
+ * one `exact` row for every model request -- signed-in or guest, chat or AI Review,
  * completed or failed -- before the provider is called. It is the only record
  * that sees guests at all, since a guest conversation lives in the browser.
  * Messages and conversations come from their own tables and therefore describe
@@ -190,7 +190,8 @@ const readWindowCounts = async (db: Db, start: Date, end: Date) => {
         COUNT(*) FILTER (WHERE "outcome" IS NOT NULL) AS finished,
         COALESCE(SUM("settledCredits"), 0)::bigint AS credits
       FROM "ChatCreditReservation"
-      WHERE "createdAt" >= ${start} AND "createdAt" < ${end}
+      WHERE "phase" = 'exact'
+        AND "createdAt" >= ${start} AND "createdAt" < ${end}
     ) r,
     (
       -- What providers were actually paid for: every dispatched attempt,
@@ -303,7 +304,9 @@ const readActiveSegments = (db: Db, start: Date, end: Date) =>
   db.$queryRaw<SegmentRow[]>`
     WITH population AS (
       SELECT DISTINCT "userId" FROM "ChatCreditReservation"
-      WHERE "createdAt" >= ${start} AND "createdAt" < ${end} AND "userId" IS NOT NULL
+      WHERE "phase" = 'exact'
+        AND "createdAt" >= ${start} AND "createdAt" < ${end}
+        AND "userId" IS NOT NULL
     )
     ${SEGMENT_SELECT}
   `;
@@ -333,7 +336,9 @@ const readEngagement = async (db: Db, start: Date, end: Date) => {
     WITH per_account AS (
       SELECT "userId", COUNT(*) AS requests
       FROM "ChatCreditReservation"
-      WHERE "createdAt" >= ${start} AND "createdAt" < ${end} AND "userId" IS NOT NULL
+      WHERE "phase" = 'exact'
+        AND "createdAt" >= ${start} AND "createdAt" < ${end}
+        AND "userId" IS NOT NULL
       GROUP BY "userId"
     ),
     ranked AS (
@@ -380,7 +385,8 @@ const readModels = async (db: Db, start: Date, end: Date) => {
       COUNT(*) FILTER (WHERE "outcome" IS NOT NULL) AS finished,
       COALESCE(SUM("settledCredits"), 0)::bigint AS credits
     FROM "ChatCreditReservation"
-    WHERE "createdAt" >= ${start} AND "createdAt" < ${end}
+    WHERE "phase" = 'exact'
+      AND "createdAt" >= ${start} AND "createdAt" < ${end}
     GROUP BY "modelId", "provider", "source"
   `;
   // Cost comes from the attempt ledger, keyed by the model each attempt was
@@ -461,7 +467,8 @@ const readActivityMatrix = async (db: Db, start: Date, end: Date, timeZone: stri
       EXTRACT(HOUR FROM ${local})::int AS hour,
       COUNT(*) AS count
     FROM "ChatCreditReservation"
-    WHERE "createdAt" >= ${start} AND "createdAt" < ${end}
+    WHERE "phase" = 'exact'
+      AND "createdAt" >= ${start} AND "createdAt" < ${end}
     GROUP BY 1, 2
   `;
   const matrix = weekHourMatrix(
@@ -481,7 +488,8 @@ const readTrend = async (db: Db, now: Date, timeZone: string) => {
         COUNT(DISTINCT "subjectKey") FILTER (WHERE "subjectKey" LIKE 'guest:%') AS guests,
         COUNT(*) AS requests
       FROM "ChatCreditReservation"
-      WHERE "createdAt" >= ${trendWindow.start} AND "createdAt" < ${trendWindow.end}
+      WHERE "phase" = 'exact'
+        AND "createdAt" >= ${trendWindow.start} AND "createdAt" < ${trendWindow.end}
       GROUP BY 1
     `;
   const messageDays = await db.$queryRaw<Array<{ day: string; messages: bigint }>>`
@@ -496,7 +504,8 @@ const readTrend = async (db: Db, now: Date, timeZone: string) => {
         COUNT(DISTINCT "userId") FILTER (WHERE "createdAt" >= ${weekWindow.start}) AS wau,
         COUNT(DISTINCT "userId") AS mau
       FROM "ChatCreditReservation"
-      WHERE "createdAt" >= ${trendWindow.start} AND "createdAt" < ${trendWindow.end}
+      WHERE "phase" = 'exact'
+        AND "createdAt" >= ${trendWindow.start} AND "createdAt" < ${trendWindow.end}
     `;
   const days = denseDailySeries(windowDayKeys(trendWindow), [
     ...reservationDays.map((row) => ({
@@ -541,17 +550,20 @@ const readRetention = async (db: Db, now: Date) => {
       COUNT(*) FILTER (WHERE EXISTS (
         SELECT 1 FROM "ChatCreditReservation" r
         WHERE r."userId" = u."id"
+          AND r."phase" = 'exact'
           AND r."createdAt" >= u."createdAt"
           AND r."createdAt" < u."createdAt" + INTERVAL '1 day'
       )) AS activated,
       COUNT(*) FILTER (WHERE EXISTS (
         SELECT 1 FROM "ChatCreditReservation" r
         WHERE r."userId" = u."id"
+          AND r."phase" = 'exact'
           AND r."createdAt" >= u."createdAt"
           AND r."createdAt" < u."createdAt" + INTERVAL '1 day'
       ) AND EXISTS (
         SELECT 1 FROM "ChatCreditReservation" r
         WHERE r."userId" = u."id"
+          AND r."phase" = 'exact'
           AND r."createdAt" >= u."createdAt" + INTERVAL '1 day'
           AND r."createdAt" < u."createdAt" + INTERVAL '8 days'
       )) AS retained

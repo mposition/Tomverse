@@ -60,7 +60,7 @@ test("the document opts into safe-area insets and themed browser chrome", async 
   page,
 }) => {
   await prepareGuestPage(page, "en");
-  await page.goto("/chat");
+  await page.goto("/review");
 
   const viewportMeta = await page
     .locator('meta[name="viewport"]')
@@ -84,7 +84,7 @@ test("Enter during a Korean IME composition does not send the message", { tag: "
     await route.fallback();
   });
 
-  await page.goto("/chat");
+  await page.goto("/review");
   const textarea = page.getByTestId("chat-textarea");
   await textarea.click();
 
@@ -150,7 +150,7 @@ test("Enter during a Korean IME composition does not send the message", { tag: "
 // accessibility tree.
 test("credit costs are exposed to assistive technology", async ({ page }) => {
   await prepareGuestPage(page, "en");
-  await page.goto("/chat");
+  await page.goto("/review");
 
   const badge = page.getByTestId("request-credit-estimate");
   await expect(badge).toBeVisible();
@@ -164,7 +164,7 @@ test("the response lifecycle is announced to assistive technology", async ({
 }) => {
   await prepareGuestPage(page, "en");
   await mockChatStream(page, "QA streamed answer");
-  await page.goto("/chat");
+  await page.goto("/review");
 
   // Send first: on the mobile shell the transcript (and therefore the live
   // region) mounts with the active model panel rather than on first paint.
@@ -187,7 +187,7 @@ test("the response lifecycle is announced to assistive technology", async ({
 test("a conversation can be opened with the keyboard alone", async ({ page }) => {
   await mockAuthenticatedApi(page);
   await page.setViewportSize({ width: 1366, height: 768 });
-  await page.goto("/chat");
+  await page.goto("/review");
 
   const firstRow = page.locator('[role="button"][aria-current], aside [role="button"]').first();
   await expect(firstRow).toBeVisible();
@@ -222,7 +222,7 @@ test("assistant markdown renders headings and tables as distinct blocks", async 
     page,
     "## Comparison heading\n\nIntro paragraph.\n\n| Model | Cost |\n| --- | --- |\n| A | 1 |\n| B | 2 |\n"
   );
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await page.getByTestId("chat-textarea").fill("Compare A and B in a table");
   // Send by click for the same reason as above -- Enter does not submit on the
@@ -265,7 +265,7 @@ test("assistant markdown renders headings and tables as distinct blocks", async 
 // rounded container so the composer's overflow cannot clip it.
 test("the composer shows a focus indicator when focused", async ({ page }) => {
   await prepareGuestPage(page, "en");
-  await page.goto("/chat");
+  await page.goto("/review");
 
   const focusState = await page
     .getByTestId("chat-textarea")

@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AssistantProfileEditor } from "@/components/assistants/AssistantProfileEditor";
 import {
-    ASSISTANT_PROFILE_CHAT_PATH,
+    ASSISTANT_PROFILE_REVIEW_PATH,
     ASSISTANT_PROFILE_RETURN_CHAT,
     ASSISTANT_PROFILE_RETURN_PARAM,
     stashPendingChatProfile,
@@ -24,7 +24,7 @@ import { isLanguage } from "@/lib/language";
  * cannot choose a destination. `lib/assistantProfileReturn.ts` carries the
  * chat handoff argument in full.
  *
- * The conversation is not named anywhere in this trip. `/chat` restores the
+ * The conversation is not named anywhere in this trip. `/review` restores the
  * one the visitor left from its own session storage, so a conversation id
  * never has to survive the navigation — and an id that never travels cannot be
  * swapped for somebody else's.
@@ -63,7 +63,7 @@ function NewAssistantProfileFlow() {
                 // grants nothing; a tampered value earns the same 403 a
                 // hand-picked one would.
                 stashPendingChatProfile(profileId);
-                router.replace(ASSISTANT_PROFILE_CHAT_PATH);
+                router.replace(ASSISTANT_PROFILE_REVIEW_PATH);
             }}
         />
     );

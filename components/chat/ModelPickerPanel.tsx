@@ -33,7 +33,11 @@ import { AutoRoutingToggle } from "@/components/chat/AutoRoutingToggle";
 import { ModelSelectionBadge } from "@/components/chat/ModelSelectionBadge";
 import { useHasCoarsePointer } from "@/components/chat/useHasCoarsePointer";
 import { useLanguage } from "@/components/LanguageProvider";
-import type { AiModel, ModelTier } from "@/lib/models";
+import {
+  canUseModelWithPlan,
+  type AiModel,
+  type ModelTier,
+} from "@/lib/models";
 import {
   modelPickerCopy,
   modelPickerFeatureLabels,
@@ -47,6 +51,7 @@ import {
 } from "@/lib/modelRecommendations";
 import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { deriveModelSelectionLimit } from "@/lib/modelSelectionLimit";
+import { autoRoutingCopy } from "@/lib/autoRoutingCopy";
 import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
   countActiveModelCatalogueFilters,
@@ -159,7 +164,7 @@ export type ModelPickerPanelProps = {
   autoSelectionOffered?: boolean;
   selectionMode?: "manual" | "auto";
   selectionModePending?: boolean;
-  onSelectionModeChange?: (next: boolean) => void;
+  onSelectionModeChange?: (next: boolean) => Promise<boolean>;
   comboFinderSlot?: React.ReactNode;
   /**
    * Image generation entry (policy v2 section 13). Absent when the feature flag
@@ -214,6 +219,8 @@ export function ModelPickerPanel({
   const touchTarget = isMobileShell || hasCoarsePointer;
   const language = lang as ModelPickerLanguage;
   const pickerCopy = modelPickerCopy[language];
+  const autoCopy = autoRoutingCopy[language];
+  const isAutoMode = selectionMode === "auto";
   const stepCopy = modelPickerStepCopy[language];
   const useCaseLabels = modelPickerUseCaseLabels[language];
   const featureLabels = modelPickerFeatureLabels[language];
@@ -368,12 +375,35 @@ export function ModelPickerPanel({
     }
   };
 
-  const selectModel = (
+  const selectModel = async (
     model: AiModel,
     trigger: HTMLButtonElement,
     rank?: number
   ) => {
+    if (selectionModePending) return;
     const isSelected = selectedModelIds.includes(model.id);
+    if (isAutoMode) {
+      if (!canUseModelWithPlan(currentPlan, model)) {
+        // Preserve the existing sign-in/upgrade affordance without claiming a
+        // locked model replaced Auto. The owner reports that refusal.
+        onToggleModel(model.id);
+        return;
+      }
+      if (!onSelectionModeChange) return;
+      let returnedToManual = false;
+      try {
+        returnedToManual = await onSelectionModeChange(false);
+      } catch {
+        // The owner reports the failure. Keep the picker on the last
+        // server-confirmed mode and do not claim this model is selected.
+        return;
+      }
+      if (!returnedToManual) return;
+      // The stored manual choice is already this model. Leaving Auto is the
+      // complete action; toggling it again would remove the model the person
+      // just chose and could leave Send without an answer model.
+      if (isSelected) return;
+    }
     onRememberRecentModel(model.id);
     if (!singleModelSelection && !isSelected && isAtCapacity) {
       onTrackEvent("model_picker_max_reached", { model_id: model.id });
@@ -541,10 +571,16 @@ export function ModelPickerPanel({
               data-testid="model-picker-selection-count"
               className="block text-xs text-zinc-500"
             >
-              {selectedModelIds.length}/{maxSelectableModels}{" "}
-              {selectedModelIds.length === 1
-                ? t("chat.modelsSelectedOne")
-                : t("chat.modelsSelectedOther")}
+              {isAutoMode ? (
+                autoCopy.activeSummary
+              ) : (
+                <>
+                  {selectedModelIds.length}/{maxSelectableModels}{" "}
+                  {selectedModelIds.length === 1
+                    ? t("chat.modelsSelectedOne")
+                    : t("chat.modelsSelectedOther")}
+                </>
+              )}
             </span>
           )}
         </div>
@@ -710,15 +746,22 @@ export function ModelPickerPanel({
             enabled={selectionMode === "auto"}
             pending={selectionModePending}
             language={language}
-            onChange={onSelectionModeChange}
+            onChange={(next) => {
+              void onSelectionModeChange(next);
+            }}
           />
         </div>
       )}
       {selectedModelIds.length > 0 && (
         <div className="mb-2 shrink-0 px-1">
           <p className="mb-1 px-1 text-[11px] font-bold uppercase tracking-wide text-zinc-400">
-            {pickerCopy.selectedModelsLabel}
+            {isAutoMode ? autoCopy.manualFallbackLabel : pickerCopy.selectedModelsLabel}
           </p>
+          {isAutoMode && (
+            <p className="mb-1 px-1 text-xs text-zinc-500 dark:text-zinc-400">
+              {autoCopy.manualFallbackDescription}
+            </p>
+          )}
           {/*
             On the compact sheet the wrapped chip list cost three rows (~110px)
             at 320px -- with the sticky footer, that left zero model rows fully
@@ -744,20 +787,29 @@ export function ModelPickerPanel({
                 <span
                   key={modelId}
                   data-testid="selected-model-chip"
-                  className={`inline-flex max-w-full items-center gap-1 rounded-full border border-blue-300 bg-zinc-100 pl-2 pr-1 text-[11px] font-bold text-zinc-700 dark:border-blue-800 dark:bg-zinc-800 dark:text-zinc-200 ${
+                  className={`inline-flex max-w-full items-center gap-1 rounded-full border bg-zinc-100 pl-2 pr-1 text-[11px] font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 ${
+                    isAutoMode
+                      ? "border-zinc-300 dark:border-zinc-700"
+                      : "border-blue-300 dark:border-blue-800"
+                  } ${
                     isCompactLayout ? "h-11 shrink-0" : "py-1"
                   }`}
                 >
-                  <Check
-                    className="h-3 w-3 shrink-0 text-blue-600 dark:text-blue-400"
-                    aria-hidden="true"
-                  />
+                  {!isAutoMode && (
+                    <Check
+                      className="h-3 w-3 shrink-0 text-blue-600 dark:text-blue-400"
+                      aria-hidden="true"
+                    />
+                  )}
                   <ModelLogo model={model} size="xs" />
                   <span className="max-w-[120px] truncate">{model?.name || modelId}</span>
-                  {!singleModelSelection && <button
+                  {!singleModelSelection && !isAutoMode && <button
                     type="button"
                     aria-label={t("chat.removeModelFromComparison")}
-                    onClick={() => onToggleModel(modelId)}
+                    onClick={(event) => {
+                      if (model) void selectModel(model, event.currentTarget);
+                    }}
+                    disabled={selectionModePending}
                     className={
                       isCompactLayout
                         ? "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-300/60 dark:text-zinc-400 dark:hover:bg-zinc-700"
@@ -805,7 +857,7 @@ export function ModelPickerPanel({
           onFiltersChange={handleFiltersChange}
           isFilterSheetOpen={isFilterSheetOpen}
           onFilterSheetOpenChange={handleFilterSheetOpenChange}
-          selectedModelIds={selectedModelIds}
+          selectedModelIds={isAutoMode ? [] : selectedModelIds}
           currentPlan={currentPlan}
           isGuestMode={isGuestMode}
           isMobileShell={isMobileShell}
@@ -817,7 +869,9 @@ export function ModelPickerPanel({
           isAtCapacity={isAtCapacity}
           limitDescriptionId={limitDescriptionId}
           onToggleFavorite={onToggleFavorite}
-          onSelectModel={(model, trigger) => selectModel(model, trigger)}
+          onSelectModel={(model, trigger) => {
+            void selectModel(model, trigger);
+          }}
         />
       ) : (
         <div
@@ -851,6 +905,8 @@ export function ModelPickerPanel({
                 <RecommendationCard
                   key={recommendation.modelId}
                   recommendation={recommendation}
+                  isVisuallySelected={!isAutoMode && recommendation.isSelected}
+                  disabled={selectionModePending}
                   rank={index + 1}
                   model={models.find((item) => item.id === recommendation.modelId)}
                   reasonLabel={useCaseLabels[recommendation.source]}
@@ -874,7 +930,7 @@ export function ModelPickerPanel({
                       : undefined
                   }
                   onSelect={(model, trigger) =>
-                    selectModel(model, trigger, index + 1)
+                    void selectModel(model, trigger, index + 1)
                   }
                 />
               ))}
@@ -929,20 +985,31 @@ export function ModelPickerPanel({
           </p>
         ) : (
         <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
-          {activeSelectedCount}{" "}
-          {activeSelectedCount === 1
-            ? t("chat.modelsSelectedOne")
-            : t("chat.modelsSelectedOther")}{" "}
-          · {pickerCopy.baseEstimate}{" "}
-          <CreditCostBadge
-            credits={selectedBaseCredits}
-            size="xs"
-            label={
-              language === "ko"
-                ? `기본 예상 ${selectedBaseCredits}크레딧`
-                : `Base estimate ${formatCountedUnit(selectedBaseCredits, englishCreditUnit, "en")}`
-            }
-          />
+          {isAutoMode ? (
+            <>
+              <span data-testid="model-picker-auto-summary">{autoCopy.activeSummary}</span>
+              <span className="mt-0.5 block font-medium text-zinc-500 dark:text-zinc-400">
+                {autoCopy.variableCreditNotice}
+              </span>
+            </>
+          ) : (
+            <>
+              {activeSelectedCount}{" "}
+              {activeSelectedCount === 1
+                ? t("chat.modelsSelectedOne")
+                : t("chat.modelsSelectedOther")}{" "}
+              · {pickerCopy.baseEstimate}{" "}
+              <CreditCostBadge
+                credits={selectedBaseCredits}
+                size="xs"
+                label={
+                  language === "ko"
+                    ? `기본 예상 ${selectedBaseCredits}크레딧`
+                    : `Base estimate ${formatCountedUnit(selectedBaseCredits, englishCreditUnit, "en")}`
+                }
+              />
+            </>
+          )}
         </p>
         )}
         <button
@@ -960,6 +1027,8 @@ export function ModelPickerPanel({
 
 function RecommendationCard({
   recommendation,
+  isVisuallySelected,
+  disabled,
   rank,
   model,
   reasonLabel,
@@ -971,6 +1040,8 @@ function RecommendationCard({
   onSelect,
 }: {
   recommendation: ModelRecommendation;
+  isVisuallySelected: boolean;
+  disabled?: boolean;
   rank: number;
   model: AiModel | undefined;
   reasonLabel: string;
@@ -991,11 +1062,12 @@ function RecommendationCard({
       data-model-plan-locked={recommendation.lock !== "none"}
       data-recommendation-rank={rank}
       data-recommendation-source={recommendation.source}
-      aria-pressed={recommendation.isSelected}
+      aria-pressed={isVisuallySelected}
       aria-describedby={limitDescriptionId}
+      disabled={disabled}
       onClick={(event) => onSelect(model, event.currentTarget)}
-      className={`flex min-h-16 w-full items-start gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
-        recommendation.isSelected
+      className={`flex min-h-16 w-full items-start gap-2 rounded-xl border px-3 py-2.5 text-left transition disabled:cursor-wait disabled:opacity-60 ${
+        isVisuallySelected
           ? "border-blue-300 bg-blue-50/70 dark:border-blue-900/60 dark:bg-blue-950/20"
           : "border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
       }`}
@@ -1046,7 +1118,7 @@ function RecommendationCard({
           label={creditsLabel}
         />
         <ModelSelectionBadge
-          isSelected={recommendation.isSelected}
+          isSelected={isVisuallySelected}
           isLocked={recommendation.lock !== "none"}
         />
       </span>

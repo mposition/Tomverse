@@ -62,6 +62,15 @@ test("recovery restores the selected failed question, never the later last quest
   });
   assert.equal(recoveryPromptForMessage(messages, "a2", "c"), null);
 });
+test("Guest Auto unknown outcome cannot be restored into a new paid turn", () => {
+  const rows = [
+    { id: "guest-u", role: "user", content: "Preserve these authored bytes" },
+    { id: "guest-a", role: "assistant", content: "Outcome unknown", status: "error",
+      errorCode: "GUEST_AUTO_OUTCOME_UNKNOWN" },
+  ];
+  assert.equal(recoveryPromptForMessage(rows, "guest-a", "guest-chat"), null);
+  assert.equal(transcriptRecovery.recoveryPromptsForMessages(rows, "guest-chat").size, 0);
+});
 test("reloaded trailing question can be restored without inferring failure or generating", () => {
   assert.equal(recoveryPromptForMessage(messages.slice(0, 3), "u2", "c").text, "Later question");
   assert.equal(recoveryPromptForMessage(messages, "u1", "c"), null);

@@ -439,6 +439,11 @@ const compilerOptions = parsedConfig.options;
 // readiness and audit scopes move existing accesses in the already-reviewed
 // closure. The 228-entry count and position-free inventory remain unchanged;
 // this repins only their final source positions on the main release base.
+// 2026-10-12, Guest Smart Adaptive main compatibility repair: the reviewed
+// Guest audit actor joins the marketing schema fingerprint provenance. That
+// moves existing accesses in `lib/marketingAutomationAccess.ts`; capability
+// naming changes no access expression. The 228-entry count and position-free
+// digest remain unchanged, so this repins source positions only.
 // 2026-10-12, AMUX worker registry R1 (orchestration policy version 31), main
 // selective release: the marketing webhook fingerprint's history comment in
 // lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
@@ -461,12 +466,17 @@ const compilerOptions = parsedConfig.options;
 // develop they were reviewed on, so the moves above hold; this repins only the
 // final positions main's other closure files give, after main's own
 // AMUX worker registry record above.
+// 2026-10-12, merge the reviewed Guest Chat release with the current main
+// default-model tree: `ChatPageClient.tsx` keeps the Guest Chat single-answer
+// clamp while adopting the server-managed guest trio and retirement replacement
+// resolver. Those additions move downstream accesses only. Count 228 and the
+// position-free inventory remain unchanged; positions are repinned here.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "19acae9eb62389880916fbb19072995e",
-  "79dfb3ad588211328d66d24d68b3a653",
+  "4729bcc022aefee670e5dd4cc10d1010",
+  "73bd77dd2a44364bb323c6b61bb6088e",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

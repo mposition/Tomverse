@@ -242,7 +242,7 @@ test.describe("theme is correct on the first paint", () => {
   // The half CSS answers on its own: no cookie, no stored value, so the OS
   // decides and a statically cached page is still correct.
   for (const colorScheme of ["light", "dark"] as const) {
-    for (const path of ["/about", "/chat"]) {
+    for (const path of ["/about", "/review"]) {
       test(`no explicit choice follows the OS (${colorScheme}, ${path})`, async ({
         page,
       }) => {
@@ -264,7 +264,7 @@ test.describe("theme is correct on the first paint", () => {
     ["light", "dark", LIGHT_BACKGROUND],
     ["dark", "light", DARK_BACKGROUND],
   ] as const) {
-    for (const path of ["/about", "/chat"]) {
+    for (const path of ["/about", "/review"]) {
       test(`an explicit ${choice} choice overrides an OS set to ${colorScheme} (${path})`, async ({
         page,
         context,
@@ -314,7 +314,7 @@ test.describe("theme is correct on the first paint", () => {
     }, LEGACY_STORAGE_KEY);
     await page.emulateMedia({ colorScheme: "light" });
 
-    const observation = await observe(page, "/chat");
+    const observation = await observe(page, "/review");
     expectNoFlash(observation, "migration");
     expect(observation.hydrated.backgroundColor).toBe(DARK_BACKGROUND);
 
@@ -336,7 +336,7 @@ test.describe("theme is correct on the first paint", () => {
     }, LEGACY_STORAGE_KEY);
     await page.emulateMedia({ colorScheme: "dark" });
 
-    const observation = await observe(page, "/chat");
+    const observation = await observe(page, "/review");
     expectNoFlash(observation, "cookie vs storage");
     expect(observation.hydrated.backgroundColor).toBe(LIGHT_BACKGROUND);
   });

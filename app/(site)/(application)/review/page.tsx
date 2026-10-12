@@ -4,24 +4,23 @@ import { ReviewWorkspaceShell } from "@/components/chat/ReviewWorkspaceShell";
 import { CONVERSATION_HANDOFF_PARAM } from "@/lib/continuationRoutes";
 
 /**
- * `/review` — the canonical Tomverse Review URL, prepared but not announced.
+ * `/review` — the canonical Tomverse Review URL.
  *
  * Decision record v1.2 §7 (합류) and §8. The same shell as `/chat`, not a copy:
  * a second implementation would drift, and the parity job would end up
  * comparing two implementations rather than two URLs.
  *
- * Private for now. The layout marks it `noindex` exactly as `/chat` is, no
- * navigation points at it, and no redirect moves anybody here yet. Making it
- * canonical is a later change that carries its own URL and deep-link evidence.
+ * The product selector and stored-product handoff both navigate here. The
+ * layout remains `noindex` exactly as `/chat` is; route visibility and search
+ * indexing are separate decisions.
  */
 export default async function ReviewPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  // Same handoff `/chat` reads, for the same reason: both routes render this
-  // workspace, so a conversation handed to one of them has to be honoured by
-  // whichever one the user was sent to.
+  // Same handoff `/chat` reads, for the same reason: the stored product owns
+  // the conversation, so this canonical Review route must honour its id.
   const params = await searchParams;
   const handoff = params[CONVERSATION_HANDOFF_PARAM];
   return (

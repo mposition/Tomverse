@@ -677,7 +677,7 @@ test.describe("Insufficient credits state", () => {
     await prepareGuestPage(page, "ko");
     await mockGuestUsage(page, 20, 20); // used === limit -> isGuestLimitReached
     await page.setViewportSize(DESKTOP_VIEWPORT);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await freezeAnimations(page);
 
     await expect(page.getByTestId("chat-textarea")).toBeDisabled();
@@ -1445,7 +1445,7 @@ test.describe("UI-004: AI Review dialog states", () => {
     const reviewApi = await mockComparisonReview(page, { failRun, deferSetup });
 
     await page.setViewportSize(viewport);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await freezeAnimations(page);
     await openReviewConversation(page);
     await expectThemeApplied(page, theme);

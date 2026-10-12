@@ -133,8 +133,8 @@ test("the fallback's model comes from a plan the Router's own filters produced",
   );
   assert.match(
     source,
-    /const fallbackCandidates = autoSelection\.routed\s*\n?\s*\? autoSelection\.fallbackCandidateModelIds/,
-    "fallbackCandidates must be the Router's eligible set, not a local list"
+    /const fallbackCandidates = !guestAutoRun && autoSelection\.routed\s*\n?\s*\? autoSelection\.fallbackCandidateModelIds\s*\n?\s*:\s*\[\];/,
+    "fallbackCandidates must be the signed-in Router's eligible set, while the initial Guest scope remains no-fallback"
   );
 });
 

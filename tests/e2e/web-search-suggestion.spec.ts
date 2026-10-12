@@ -238,7 +238,7 @@ const openChat = async (
   // Routes have to be in place before the first load: the settings a new
   // conversation is seeded from are read once, on mount.
   await withDefaultCombination(page, selectedModels, language);
-  await page.goto(`/chat?lang=${language}`);
+  await page.goto(`/review?lang=${language}`);
   // The offer exists for a conversation whose switch is off. A new
   // conversation starts with it on, so it is turned off here -- the state a
   // user who chose not to search is in.

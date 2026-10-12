@@ -11,8 +11,17 @@ export function decideChatWorkspaceEntry(input: {
   requestedConversation: boolean;
   ownedConversation: { productKey: string | null; hasContinuationBridge: boolean } | null;
   offered: boolean;
+  /** Guest Chat trial entry; independent of authenticated Auto availability. */
+  guestTrialAvailable?: boolean;
 }): ChatWorkspaceEntryDecision {
-  if (!input.authenticated) return { action: "not_found" };
+  if (!input.authenticated) {
+    // A guest has no database row to own. A URL that names one must therefore
+    // fail closed without probing the database; only a blank local trial may
+    // enter Chat.
+    return input.guestTrialAvailable && !input.requestedConversation
+      ? { action: "open" }
+      : { action: "not_found" };
+  }
   if (input.requestedConversation) {
     if (!input.ownedConversation) return { action: "not_found" };
     const surface = conversationSurface(input.ownedConversation);

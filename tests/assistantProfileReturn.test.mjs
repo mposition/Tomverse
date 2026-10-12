@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     ASSISTANT_PROFILE_CHAT_PATH,
+    ASSISTANT_PROFILE_REVIEW_PATH,
     assistantProfileCreateHref,
     consumePendingChatProfile,
     isChatReturnRequest,
@@ -15,8 +16,9 @@ import {
  * literal and never followed, and the return path is a constant.
  */
 
-test("the return path is a constant, not something the caller supplies", () => {
-    assert.equal(ASSISTANT_PROFILE_CHAT_PATH, "/chat");
+test("the generic return path is the canonical Review route, not something the caller supplies", () => {
+    assert.equal(ASSISTANT_PROFILE_REVIEW_PATH, "/review");
+    assert.equal(ASSISTANT_PROFILE_CHAT_PATH, ASSISTANT_PROFILE_REVIEW_PATH);
     // The create href is the only URL this module builds, and its only
     // variable part is a flag with two possible values.
     assert.equal(assistantProfileCreateHref(), "/settings/assistants/new");

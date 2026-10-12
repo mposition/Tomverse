@@ -98,7 +98,11 @@ test("Router, shadow and provider formatting use the consumed view; signed conte
   assert.match(route, /executionMessages = \[\.\.\.view.executionMessages\]/);
   assert.match(route, /const autoRoutingMessages = executionMessages/);
   assert.match(route, /reservedInputTokens: preflightInputEstimate\(autoRoutingMessages\)/);
-  assert.equal((route.match(/text: profileTextFor\(autoRoutingMessages\)/g) ?? []).length, 2);
+  assert.equal((route.match(/text: profileTextFor\(autoRoutingMessages\)/g) ?? []).length, 3);
+  assert.match(
+    route,
+    /const guestAutoSelection = guestAutoRun[\s\S]*?text: profileTextFor\(autoRoutingMessages\)/,
+  );
   assert.match(route, /const latestMessage = executionMessages\[executionMessages.length - 1\]/);
   assert.match(route, /query: latestUserPromptText\(messages\)/);
   assert.match(route, /for \(const msg of executionMessages\)/);

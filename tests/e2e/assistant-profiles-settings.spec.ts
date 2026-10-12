@@ -669,7 +669,7 @@ test.describe("assistant profile settings", () => {
         await page.getByTestId("assistant-instructions").fill("Be brief.");
         await create.click();
 
-        await expect(page).toHaveURL(/\/chat$/);
+        await expect(page).toHaveURL(/\/review$/);
     });
 
     test("the edit screen says save, not publish a revision", async ({
@@ -790,7 +790,7 @@ test.describe("assistant profile settings", () => {
         await page.goto("/settings/assistants/new?from=chat");
 
         const back = page.getByTestId("assistant-create-back");
-        await expect(back).toHaveAttribute("href", "/chat");
+        await expect(back).toHaveAttribute("href", "/review");
         await expect(back).toContainText(/채팅으로 돌아가기|Back to the chat/);
         await expect(page.getByTestId("settings-breadcrumb")).toHaveCount(0);
     });

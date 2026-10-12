@@ -269,7 +269,7 @@ async function openReviewResult(page: Page, options: GroundingOptions = {}) {
   await mockAuthenticatedApi(page, { selectedModels: reviewModels });
   await mockConversationHistory(page);
   await mockComparisonReview(page, grounding);
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   await page
@@ -473,7 +473,7 @@ test("the quick summary reports the metric for the summary, not for one section"
   await mockAuthenticatedApi(page, { selectedModels: reviewModels });
   await mockConversationHistory(page);
   await mockQuickComparison(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await openReviewConversation(page);
 
   await page.getByTestId("quick-comparison-button").click();

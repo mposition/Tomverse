@@ -84,7 +84,7 @@ const gallery = (page: Page) => page.getByTestId("chat-starter-gallery");
 const cards = (page: Page) => page.getByTestId("chat-starter-card");
 
 const openWelcome = async (page: Page) => {
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect(page.getByTestId("chat-empty-state")).toBeVisible();
 };
 

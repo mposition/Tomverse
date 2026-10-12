@@ -21,7 +21,7 @@ import { expect, test } from "@playwright/test";
  *
  * ## What is asserted
  *
- * 1. the real `/chat` document response allows the microphone for its own
+ * 1. the real `/review` document response allows the microphone for its own
  *    origin, and still disables everything else it disabled before;
  * 2. a real `getUserMedia` succeeds on that document and produces recordable
  *    audio;
@@ -86,7 +86,7 @@ test.describe("microphone Permissions-Policy", () => {
   test("the real chat document allows the microphone for its own origin only", async ({
     page,
   }) => {
-    const response = await page.goto("/chat", { waitUntil: "domcontentloaded" });
+    const response = await page.goto("/review", { waitUntil: "domcontentloaded" });
     expect(response, "no response for /chat").toBeTruthy();
 
     const policy = response!.headers()["permissions-policy"];
@@ -129,7 +129,7 @@ test.describe("microphone Permissions-Policy", () => {
       baseURL,
     }) => {
       await context.grantPermissions(["microphone"], { origin: baseURL! });
-      await page.goto("/chat", { waitUntil: "domcontentloaded" });
+      await page.goto("/review", { waitUntil: "domcontentloaded" });
 
       // No stub anywhere: this is the browser's own `getUserMedia`, subject to
       // the header the previous test read off the wire.
@@ -180,7 +180,7 @@ test.describe("microphone Permissions-Policy", () => {
       // ignores Permissions-Policy altogether, and proves nothing about the
       // header.
       await context.grantPermissions(["microphone"], { origin: baseURL! });
-      await page.route("**/chat", async (route) => {
+      await page.route("**/review", async (route) => {
         if (route.request().resourceType() !== "document") {
           await route.continue();
           return;
@@ -193,7 +193,7 @@ test.describe("microphone Permissions-Policy", () => {
         await route.fulfill({ response, headers });
       });
 
-      const response = await page.goto("/chat", {
+      const response = await page.goto("/review", {
         waitUntil: "domcontentloaded",
       });
       expect(response!.headers()["permissions-policy"]).toContain(

@@ -1,5 +1,5 @@
 import { LandingPageContent } from "@/components/marketing/LandingPageContent";
-import { landingChatSurfaceAvailable } from "@/lib/landingWorkspaceEntry";
+import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { createPageMetadata, homeOgCopy, homeSeoCopy } from "@/lib/seo";
 
 export const metadata = createPageMetadata({
@@ -11,9 +11,12 @@ export const metadata = createPageMetadata({
   ogDescription: homeOgCopy.en.description,
 });
 
-export default async function LandingPage() {
-  // The CTA's destination is decided here, per visitor, rather than by the
-  // client reading a flag it is not allowed to have (decision record v1.2 §3).
-  const { chatSurfaceAvailable } = await landingChatSurfaceAvailable();
-  return <LandingPageContent chatSurfaceAvailable={chatSurfaceAvailable} />;
+export default function LandingPage() {
+  // Public Guest entry belongs to this static document. Account availability
+  // is read privately only after the client session resolves.
+  return (
+    <LandingPageContent
+      guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}
+    />
+  );
 }

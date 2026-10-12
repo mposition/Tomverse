@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { CHATGPT_VS_CLAUDE_MODEL_IDS } from "@/lib/marketingModelReferences";
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
 type TaskRow = {
@@ -335,7 +336,7 @@ export function ChatGptVsClaudeGuide() {
     prompt: copy.samplePrompt,
     source: "chatgpt-vs-claude",
   });
-  const comparisonPath = `/chat?${comparisonParams.toString()}`;
+  const comparisonPath = `${REVIEW_WORKSPACE_PATH}?${comparisonParams.toString()}`;
   const comparisonHref =
     status === "authenticated"
       ? comparisonPath

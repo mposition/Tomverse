@@ -79,7 +79,7 @@ test.describe("marketing routes announce toast events", () => {
     "the chat shell keeps its own single listener and adds no second viewport",
     { tag: "@ui-risk" },
     async ({ page }) => {
-      await page.goto("/chat");
+      await page.goto("/review");
       // The chat shell renders its own toast element rather than mounting
       // AppToastViewport. What must never happen is both, which would announce
       // every event twice to a screen reader.

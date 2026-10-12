@@ -140,7 +140,7 @@ test.describe("build-info UI", () => {
   test("staging shows a visible STAGING badge pre-login", async ({ page }, testInfo) => {
     await prepareGuestPage(page, "en");
     await mockBuildInfo(page, VALID_BUILD_INFO);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openSidebarIfNeeded(page, testInfo);
 
     await expect(page.getByTestId("build-staging-badge")).toBeVisible();
@@ -150,7 +150,7 @@ test.describe("build-info UI", () => {
   test("production shows no staging badge", async ({ page }, testInfo) => {
     await prepareGuestPage(page, "en");
     await mockBuildInfo(page, { ...VALID_BUILD_INFO, environment: "production" });
-    await page.goto("/chat");
+    await page.goto("/review");
     await openSidebarIfNeeded(page, testInfo);
 
     await expect(page.getByTestId("build-staging-badge")).toHaveCount(0);
@@ -165,7 +165,7 @@ test.describe("build-info UI", () => {
     );
     await prepareGuestPage(page, "en");
     await mockBuildInfo(page, VALID_BUILD_INFO);
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await clickSidebarHelpButton(page);
     await expect(page.getByTestId("build-info-panel")).toHaveCount(0);
@@ -192,7 +192,7 @@ test.describe("build-info UI", () => {
   }, testInfo) => {
     await prepareGuestPage(page, "en");
     await mockBuildInfo(page, VALID_BUILD_INFO);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openSidebarIfNeeded(page, testInfo);
 
     await clickSidebarHelpButton(page);
@@ -212,7 +212,7 @@ test.describe("build-info UI", () => {
   }, testInfo) => {
     await prepareGuestPage(page, "en");
     await mockBuildInfo(page, STARTED_ONLY_BUILD_INFO);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openSidebarIfNeeded(page, testInfo);
 
     await clickSidebarHelpButton(page);
@@ -239,7 +239,7 @@ test.describe("build-info UI", () => {
       deployedAt: null,
       deploymentStatus: "unknown",
     });
-    await page.goto("/chat");
+    await page.goto("/review");
     await openSidebarIfNeeded(page, testInfo);
 
     await clickSidebarHelpButton(page);
@@ -268,7 +268,7 @@ test.describe("build-info UI", () => {
     // the assertion below runs everywhere. See support/engine-capabilities.ts.
     const clipboardReadable = await grantClipboardAccess(page);
     await recordClipboardWrites(page);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openSidebarIfNeeded(page, testInfo);
 
     await clickSidebarHelpButton(page);
@@ -307,7 +307,7 @@ test.describe("build-info UI", () => {
     page,
   }, testInfo) => {
     await prepareGuestPage(page, "en");
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const live = await page.evaluate(async () => {
       const response = await fetch("/api/build-info", { cache: "no-store" });
@@ -366,7 +366,7 @@ test.describe("build-info UI", () => {
     await page.setViewportSize({ width: 320, height: 640 });
     await prepareGuestPage(page, "en");
     await mockBuildInfo(page, VALID_BUILD_INFO);
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await page.getByTestId("mobile-sidebar-open").click();
     await clickSidebarHelpButton(page);
@@ -384,7 +384,7 @@ test.describe("build-info UI", () => {
   test("the build-info toggle is keyboard operable", async ({ page }, testInfo) => {
     await prepareGuestPage(page, "en");
     await mockBuildInfo(page, VALID_BUILD_INFO);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openSidebarIfNeeded(page, testInfo);
 
     await clickSidebarHelpButton(page);

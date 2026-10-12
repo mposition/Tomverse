@@ -9,6 +9,7 @@ import {
   ASSISTANT_KNOWLEDGE_GUIDE_STEPS,
   type AssistantKnowledgeGuideStep,
 } from "@/lib/assistantKnowledgeGuide";
+import { ASSISTANT_PROFILE_REVIEW_PATH } from "@/lib/assistantProfileReturn";
 
 type SetupStage = AssistantKnowledgeGuideStep;
 
@@ -183,7 +184,7 @@ export function AssistantKnowledgeSetupGuide({
 
       {stage === "start_chat" && onStartChat ? (
         <Link
-          href="/chat"
+          href={ASSISTANT_PROFILE_REVIEW_PATH}
           onClick={onStartChat}
           className="mt-4 inline-flex min-h-10 items-center rounded-xl bg-teal-700 px-4 text-sm font-bold text-white transition hover:bg-teal-600"
           data-testid="assistant-knowledge-start-chat"
