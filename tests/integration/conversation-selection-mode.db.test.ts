@@ -32,7 +32,7 @@ const createUser = () =>
 
 const seed = (userId: string, data: Record<string, unknown> = {}) =>
   prisma.conversation.create({
-    data: { userId, title: "selection mode fixture", ...data },
+    data: { selectedModels: '["gpt-6-luna"]', userId, title: "selection mode fixture", ...data },
   });
 
 beforeEach(resetData);

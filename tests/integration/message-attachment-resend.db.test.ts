@@ -49,7 +49,7 @@ async function seed() {
   const userId = randomUUID(), conversationId = randomUUID(), sourceMessageId = randomUUID();
   const email = `${userId}@example.invalid`, ownPrefix = accountAttachmentPrefix(email);
   await prisma.user.create({ data: { id: userId, email } });
-  await prisma.conversation.create({ data: { id: conversationId, userId, title: "Resend fixture" } });
+  await prisma.conversation.create({ data: { selectedModels: '["gpt-6-luna"]', id: conversationId, userId, title: "Resend fixture" } });
   await prisma.message.create({ data: { id: sourceMessageId, conversationId, role: "user", content: "Original" } });
   const objectKey = `${ownPrefix}original.txt`;
   objects.set(objectKey, Buffer.from("test"));
@@ -120,7 +120,7 @@ test("fully persisted reference retry reads back at capacity without quota check
 test("another user's or another conversation's source and missing ids are refused before I/O", async () => {
   const first = await seed(), second = await seed();
   const otherConversation = randomUUID();
-  await prisma.conversation.create({ data: { id: otherConversation, userId: first.input.userId, title: "Other" } });
+  await prisma.conversation.create({ data: { selectedModels: '["gpt-6-luna"]', id: otherConversation, userId: first.input.userId, title: "Other" } });
   for (const candidate of [
     { ...first.input, messages: [{ ...first.input.messages[0], attachmentReferences: [{ attachmentId: second.source.id }] }] },
     { ...first.input, conversationId: otherConversation },

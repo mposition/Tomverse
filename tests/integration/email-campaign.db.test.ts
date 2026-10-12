@@ -187,9 +187,9 @@ test("a campaign sends the authored locale payload that was approved", async () 
   const ids = await accounts(2);
   await prisma.userSettings.createMany({
     data: [
-      { userId: ids[0], language: "ko" },
+      { defaultModel: "gpt-6-luna", userId: ids[0], language: "ko" },
       // French was not authored. It may only fall back to approved English.
-      { userId: ids[1], language: "fr" },
+      { defaultModel: "gpt-6-luna", userId: ids[1], language: "fr" },
     ],
   });
   const campaign = await createCampaignDraft({

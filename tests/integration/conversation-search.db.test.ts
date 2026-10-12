@@ -91,6 +91,7 @@ const seedConversation = (
 ) =>
     prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId,
             title: "A conversation",
             productKey: "review",

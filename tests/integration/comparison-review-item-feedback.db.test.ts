@@ -53,7 +53,7 @@ const seed = async () => {
     data: { email: `${randomUUID()}@example.test`, plan: "Pro" },
   });
   const conversation = await prisma.conversation.create({
-    data: { userId: user.id, title: "t" },
+    data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "t" },
   });
   const review = await prisma.comparisonReview.create({
     data: {
