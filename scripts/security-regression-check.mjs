@@ -2627,9 +2627,12 @@ const checks = [
         // hero: signup is still offered only after the page has shown what an
         // account is for.
         !source.includes('data-testid="landing-signup-cta"') &&
-        read("components/marketing/WorkflowContinuitySection.tsx").includes(
-          'href="/auth/signin?callbackUrl=%2Fchat"'
+        // Review has its own canonical workspace now; signing in must return
+        // to the same product that the comparison page demonstrated.
+        continuity.includes(
+          'href="/auth/signin?callbackUrl=%2Freview"'
         ) &&
+        !continuity.includes('href="/auth/signin?callbackUrl=%2Fchat"') &&
         source.includes("const primaryChatHref =") &&
         source.includes('cta_location: "landing_hero_chat"')
       );

@@ -90,7 +90,7 @@ export function WorkflowContinuitySection() {
             {copy.accountNote}
           </p>
           <Link
-            href="/auth/signin?callbackUrl=%2Fchat"
+            href="/auth/signin?callbackUrl=%2Freview"
             data-testid="landing-signup-cta"
             className="inline-flex min-h-12 max-w-full shrink-0 items-center gap-2 rounded-lg bg-zinc-950 px-5 text-center text-sm font-bold text-white transition hover:bg-zinc-800 active:translate-y-px dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
           >

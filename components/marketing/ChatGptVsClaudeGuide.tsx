@@ -335,7 +335,7 @@ export function ChatGptVsClaudeGuide() {
     prompt: copy.samplePrompt,
     source: "chatgpt-vs-claude",
   });
-  const comparisonPath = `/chat?${comparisonParams.toString()}`;
+  const comparisonPath = `/review?${comparisonParams.toString()}`;
   const comparisonHref =
     status === "authenticated"
       ? comparisonPath

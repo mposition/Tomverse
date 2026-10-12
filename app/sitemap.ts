@@ -41,7 +41,7 @@ const publicPages: Array<{
 export default function sitemap(): MetadataRoute.Sitemap {
   const localizedEntries = LOCALIZED_SEO_PATHS.flatMap((basePath) => {
     const alternates = { languages: localizedLanguageAlternates(basePath) };
-    const priority = basePath === "/" ? 1 : 0.85;
+    const priority = basePath === "/" ? 1 : basePath === "/products/review" ? 0.9 : 0.85;
     return [
       {
         url: `${SITE_ORIGIN}${basePath}`,

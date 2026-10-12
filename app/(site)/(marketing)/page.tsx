@@ -1,19 +1,25 @@
-import { LandingPageContent } from "@/components/marketing/LandingPageContent";
-import { landingChatSurfaceAvailable } from "@/lib/landingWorkspaceEntry";
-import { createPageMetadata, homeOgCopy, homeSeoCopy } from "@/lib/seo";
+import LaunchHomepage from "@/components/marketing/LaunchHomepage";
+import { homepageProductLinks } from "@/lib/homepageProductLinks";
+import { MarketingChatAvailabilityProvider } from "@/components/marketing/MarketingChatAvailability";
+import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
+import { createPageMetadata, getHomeOgCopy, getHomeSeoCopy } from "@/lib/seo";
+
+const seoCopy = getHomeSeoCopy("en", PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE);
+const ogCopy = getHomeOgCopy("en", PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE);
 
 export const metadata = createPageMetadata({
-  title: homeSeoCopy.en.title,
-  description: homeSeoCopy.en.description,
+  title: seoCopy.title,
+  description: seoCopy.description,
   path: "/",
   localizedBasePath: "/",
-  ogTitle: homeOgCopy.en.title,
-  ogDescription: homeOgCopy.en.description,
+  ogTitle: ogCopy.title,
+  ogDescription: ogCopy.description,
 });
 
-export default async function LandingPage() {
-  // The CTA's destination is decided here, per visitor, rather than by the
-  // client reading a flag it is not allowed to have (decision record v1.2 §3).
-  const { chatSurfaceAvailable } = await landingChatSurfaceAvailable();
-  return <LandingPageContent chatSurfaceAvailable={chatSurfaceAvailable} />;
+export default function LandingPage() {
+  return (
+    <MarketingChatAvailabilityProvider guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
+      <LaunchHomepage {...homepageProductLinks("en")} />
+    </MarketingChatAvailabilityProvider>
+  );
 }

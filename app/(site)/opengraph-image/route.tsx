@@ -15,8 +15,7 @@ export function GET() {
           justifyContent: "space-between",
           padding: "72px 80px",
           color: "white",
-          background:
-            "linear-gradient(135deg, #050816 0%, #111827 52%, #172554 100%)",
+          background: "#09090b",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
@@ -28,7 +27,7 @@ export function GET() {
               alignItems: "center",
               justifyContent: "center",
               borderRadius: 22,
-              background: "linear-gradient(135deg, #38bdf8, #6366f1)",
+              background: "#155dfb",
               fontSize: 38,
               fontWeight: 900,
             }}
@@ -47,10 +46,10 @@ export function GET() {
               letterSpacing: "-2px",
             }}
           >
-            Tomverse · Multi-AI Comparison & Review
+            Many AIs. One subscription.
           </div>
           <div style={{ fontSize: 28, color: "#bfdbfe" }}>
-            Compare GPT, Claude, and Gemini side by side, run AI Review, then check what still needs verifying
+            Tomverse Chat + Review. Choose models with Smart Adaptive and compare different perspectives.
           </div>
         </div>
       </div>
