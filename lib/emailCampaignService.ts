@@ -28,6 +28,7 @@ import {
 import {
   expandEmailEvent,
   policyChangeNoticeAudienceWhere,
+  policyChangeNoticeOwedWhere,
   type ExpansionOutcome,
 } from "@/lib/emailAudienceExpansion";
 import { prisma } from "@/lib/prisma";
@@ -312,9 +313,18 @@ export const campaignSendRefusal = async (
       contentByLocale: true,
       templateVersionIds: true,
       claimsAutomaticTransition: true,
+      audienceSpec: true,
     },
   });
   const locales = readLocales(campaign.locales);
+  // Asked only for the amendment notice: it is the one planned send that goes
+  // out without a footer rather than being held (campaignRunRefusal).
+  const activePolicyProfileCount =
+    readExpansionSpec(campaign.audienceSpec).cohort?.kind === "policy_change_notice"
+      ? await prisma.jurisdictionProfile.count({
+          where: { policyVersion: { status: "active" } },
+        })
+      : undefined;
   // Read only when the campaign makes the promise. The twelve conditions cost
   // half a dozen queries, and a campaign that promises nothing owes none of
   // them.
@@ -334,6 +344,7 @@ export const campaignSendRefusal = async (
       claimed: campaign.claimsAutomaticTransition,
       unmet: transition?.unmet ?? [],
     },
+    ...(activePolicyProfileCount === undefined ? {} : { activePolicyProfileCount }),
   });
 };
 
@@ -1091,12 +1102,7 @@ export const estimateCampaignAudience = async (input: {
 
   if (spec.cohort.kind === "policy_change_notice") {
     const effectiveDate = spec.cohort.effectiveDate;
-    const owedWhere: Prisma.UserWhereInput = {
-      OR: [
-        { createdAt: null },
-        { createdAt: { lt: new Date(`${effectiveDate}T00:00:00.000Z`) } },
-      ],
-    };
+    const owedWhere = policyChangeNoticeOwedWhere(effectiveDate);
     const audience = policyChangeNoticeAudienceWhere(effectiveDate, input.now ?? new Date());
     // One snapshot, so the two differences below cannot go negative when an
     // account or a notice row lands between the counts.
