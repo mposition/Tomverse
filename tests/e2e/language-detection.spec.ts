@@ -23,12 +23,13 @@ test("a fresh private-style session uses the browser language before opening a p
   const guestChatAvailable = await page.getByTestId("launch-homepage")
     .getAttribute("data-guest-chat-trial-available") === "true";
   const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=ko` : "/review?lang=ko";
+  const destination = new URL(startHref, page.url()).href;
   const startProduct = page.getByTestId("landing-primary-cta");
   await expect(startProduct).toContainText(guestChatAvailable ? "Chat 시작하기" : "Review 시작하기");
   await expect(startProduct).toHaveAttribute("href", startHref);
 
   await startProduct.click();
-  await expect(page).toHaveURL(new URL(startHref, "http://127.0.0.1:3100").href);
+  await expect(page).toHaveURL(destination);
   await expect(page.locator("html")).toHaveAttribute("lang", "ko");
 });
 
