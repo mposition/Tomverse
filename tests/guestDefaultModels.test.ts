@@ -2,11 +2,21 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   APP_DEFAULTS,
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
+  createReplacementResolver,
+  expectedLeadForStored,
   getGuestDefaultSelectedModels,
   GUEST_BRAND_TRIO_MODEL_IDS,
+  GUEST_LINEUP_PROVIDERS,
+  guestBrandTrioRejection,
   guestDefaultLeadRejection,
+  guestLeadForLineup,
   GUEST_FALLBACK_MODEL_IDS,
+  isOnePerLineupProvider,
+  lineupSlotProviders,
+  missingLineupProviders,
+  parseGuestBrandTrio,
   resolveGuestDefaultSelectedModels,
 } from "@/lib/appDefaults";
 import {
@@ -189,4 +199,336 @@ test("disabled, non-guest and non-Standard leads are each rejected on their own 
     guestDefaultLeadRejection({ ...base, usageCategory: null }) ?? "",
     /not Standard/
   );
+});
+
+// Platform strategy, operator decision 2026-10-12: a guest's default lineup
+// always holds one OpenAI, one Anthropic and one Gemini model
+// (docs/policy/credit-and-cost-limits.md).
+test("the compiled trio is one OpenAI, one Anthropic and one Gemini model", () => {
+  const providers = GUEST_BRAND_TRIO_MODEL_IDS.map((id) => getModel(id)?.provider);
+  assert.deepEqual([...providers].sort(), ["anthropic", "google", "openai"]);
+});
+
+// A catalogue in which the trio's members can be retired. Every row starts as
+// the compiled row, so only the fields a test names differ from production.
+const catalogueWith = (overrides: Record<string, Partial<AiModel>>) => {
+  const rows = new Map<string, AiModel>();
+  for (const [id, change] of Object.entries(overrides)) {
+    const base = getModel(id) ?? getModel(GUEST_BRAND_TRIO_MODEL_IDS[0])!;
+    rows.set(id, { ...base, id, ...change } as AiModel);
+  }
+  const lookup = (id: string) => rows.get(id) ?? getModel(id);
+  return {
+    isEligible: createGuestEligibilityCheck(lookup),
+    resolveReplacement: createReplacementResolver(lookup),
+  };
+};
+const retired = (replacementModelId: string): Partial<AiModel> => ({
+  enabled: false,
+  status: "disabled",
+  publiclyListed: false,
+  replacementModelId,
+});
+const [OPENAI_SLOT, ANTHROPIC_SLOT, GOOGLE_SLOT] = GUEST_BRAND_TRIO_MODEL_IDS;
+
+test("a retired trio member is succeeded in its own slot", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, "claude-haiku-next", GOOGLE_SLOT]
+  );
+});
+
+test("a retired lead is succeeded as the lead", () => {
+  const catalogue = catalogueWith({
+    [OPENAI_SLOT]: retired("gpt-luna-next"),
+    "gpt-luna-next": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    ["gpt-luna-next", ANTHROPIC_SLOT, GOOGLE_SLOT]
+  );
+});
+
+test("the chain is followed through a retired successor", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": retired("claude-haiku-after"),
+    "claude-haiku-after": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, "claude-haiku-after", GOOGLE_SLOT]
+  );
+});
+
+test("a successor guests cannot use leaves the slot to the fallback list", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": { enabled: true, status: "enabled", publiclyListed: true, minimumPlan: "Pro", replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, GOOGLE_SLOT, GUEST_FALLBACK_MODEL_IDS[0]]
+  );
+});
+
+test("a successor already selected is not counted twice", () => {
+  const catalogue = catalogueWith({ [ANTHROPIC_SLOT]: retired(GOOGLE_SLOT) });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, GOOGLE_SLOT, GUEST_FALLBACK_MODEL_IDS[0]]
+  );
+});
+
+test("a replacement cycle ends in the fallback list, not in a loop", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": retired(ANTHROPIC_SLOT),
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, GOOGLE_SLOT, GUEST_FALLBACK_MODEL_IDS[0]]
+  );
+});
+
+test("without a resolver a retired member still falls to the fallback list", () => {
+  const { isEligible } = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ isEligible, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, GOOGLE_SLOT, GUEST_FALLBACK_MODEL_IDS[0]]
+  );
+});
+
+// The administrator's default lineup (AppSetting["guestBrandTrioModelIds"]).
+
+test("a stored lineup parses only as exactly three distinct ids", () => {
+  const lineup = ["gpt-5-6-luna", "claude-sonnet-5", "gemini-2-5-flash"];
+  assert.deepEqual(parseGuestBrandTrio(JSON.stringify(lineup)), lineup);
+  assert.deepEqual(parseGuestBrandTrio(lineup), lineup);
+  assert.deepEqual(parseGuestBrandTrio([" gpt-5-6-luna ", "claude-sonnet-5", "gemini-2-5-flash"]), lineup);
+  for (const bad of [
+    null,
+    undefined,
+    "",
+    "not json",
+    "{}",
+    JSON.stringify(lineup.slice(0, 2)),
+    JSON.stringify([...lineup, "mistral-small-4"]),
+    JSON.stringify(["gpt-5-6-luna", "gpt-5-6-luna", "gemini-2-5-flash"]),
+    JSON.stringify(["gpt-5-6-luna", "", "gemini-2-5-flash"]),
+    JSON.stringify(["gpt-5-6-luna", 7, "gemini-2-5-flash"]),
+  ]) {
+    assert.equal(parseGuestBrandTrio(bad), null, String(bad));
+  }
+});
+
+test("the resolver opens on the administrator's lineup, in its order", () => {
+  const lineup = ["gemini-flash-lite-latest", "deepseek-v4-flash", "mistral-small-4"];
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ isEligible: isGuestEligible, trio: lineup, leadModelId: lineup[0] }),
+    lineup
+  );
+  // The lead reorders within that lineup, and a lead outside it is ignored.
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ isEligible: isGuestEligible, trio: lineup, leadModelId: "mistral-small-4" }),
+    ["mistral-small-4", "gemini-flash-lite-latest", "deepseek-v4-flash"]
+  );
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ isEligible: isGuestEligible, trio: lineup, leadModelId: GUEST_BRAND_TRIO_MODEL_IDS[0] }),
+    lineup
+  );
+});
+
+test("a lead is checked against the lineup it would order", () => {
+  const lineup = ["gemini-flash-lite-latest", "deepseek-v4-flash", "mistral-small-4"];
+  const base = { exists: true, guestEligible: true, usageCategory: "Standard" };
+  assert.equal(guestDefaultLeadRejection({ ...base, modelId: "deepseek-v4-flash", trio: lineup }), null);
+  assert.match(
+    guestDefaultLeadRejection({ ...base, modelId: GUEST_BRAND_TRIO_MODEL_IDS[0], trio: lineup }) ?? "",
+    /not one of the guest brand trio/
+  );
+});
+
+test("a lineup is refused for a wrong size, a repeat, or any member guests could not be shown or priced", () => {
+  const good = { exists: true, guestEligible: true, usageCategory: "Standard", priced: true, provider: "openai" as string | null };
+  const providerOf: Record<string, string> = { a: "openai", b: "anthropic", c: "google" };
+  const factsFor = (overrides: Record<string, Partial<typeof good>>) => (id: string) => ({
+    ...good,
+    provider: providerOf[id] ?? null,
+    ...(overrides[id] ?? {}),
+  });
+  const lineup = ["a", "b", "c"];
+  assert.equal(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({}) }), null);
+  assert.match(guestBrandTrioRejection({ modelIds: ["a", "b"], facts: factsFor({}) }) ?? "", /exactly 3/);
+  assert.match(guestBrandTrioRejection({ modelIds: ["a", "a", "c"], facts: factsFor({}) }) ?? "", /same model twice/);
+  assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ b: { exists: false } }) }) ?? "", /"b" is not an enabled model/);
+  assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ b: { guestEligible: false } }) }) ?? "", /not available to guests/);
+  assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ c: { usageCategory: "Premium" } }) }) ?? "", /not Standard/);
+  assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ a: { priced: false } }) }) ?? "", /no verified price/);
+});
+
+test("a lineup must hold one OpenAI, one Anthropic and one Gemini model", () => {
+  const facts = (provider: string) => () => ({
+    exists: true,
+    guestEligible: true,
+    usageCategory: "Standard",
+    priced: true,
+    provider,
+  });
+  const providers: Record<string, string> = { a: "openai", b: "anthropic", c: "google", d: "openai", e: "deepseek" };
+  const factsById = (id: string) => facts(providers[id])();
+  assert.equal(guestBrandTrioRejection({ modelIds: ["a", "b", "c"], facts: factsById }), null);
+  assert.match(
+    guestBrandTrioRejection({ modelIds: ["a", "d", "c"], facts: factsById }) ?? "",
+    /one OpenAI, one Anthropic and one Gemini model; this one is openai, openai, google/
+  );
+  assert.match(
+    guestBrandTrioRejection({ modelIds: ["a", "b", "e"], facts: factsById }) ?? "",
+    /one OpenAI, one Anthropic and one Gemini/
+  );
+  assert.deepEqual([...GUEST_LINEUP_PROVIDERS].sort(), ["anthropic", "google", "openai"]);
+});
+
+test("the chain walks past a successor guests cannot use to a later one they can", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-pro-only"),
+    "claude-haiku-pro-only": {
+      enabled: true,
+      status: "enabled",
+      publiclyListed: true,
+      minimumPlan: "Pro",
+      replacementModelId: "claude-haiku-after",
+    },
+    "claude-haiku-after": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, "claude-haiku-after", GOOGLE_SLOT]
+  );
+});
+
+test("a stored lead inside the lineup is handed over even when retired, so its successor leads", () => {
+  const lineup = [OPENAI_SLOT, ANTHROPIC_SLOT, GOOGLE_SLOT];
+  assert.equal(guestLeadForLineup(ANTHROPIC_SLOT, lineup), ANTHROPIC_SLOT);
+  assert.equal(guestLeadForLineup("not-in-the-lineup", lineup), APP_DEFAULTS.guestDefaultModelId);
+  assert.equal(guestLeadForLineup(null, lineup), APP_DEFAULTS.guestDefaultModelId);
+  // End to end with the resolver: the retired lead's successor leads.
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({
+      ...catalogue,
+      trio: lineup,
+      leadModelId: guestLeadForLineup(ANTHROPIC_SLOT, lineup),
+    }),
+    ["claude-haiku-next", OPENAI_SLOT, GOOGLE_SLOT]
+  );
+});
+
+test("a successor that is only limited is walked past, as the selection would drop it", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-limited"),
+    "claude-haiku-limited": {
+      enabled: true,
+      status: "limited",
+      publiclyListed: true,
+      replacementModelId: "claude-haiku-after",
+    },
+    "claude-haiku-after": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.equal(catalogue.resolveReplacement(ANTHROPIC_SLOT), "claude-haiku-after");
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, "claude-haiku-after", GOOGLE_SLOT]
+  );
+});
+
+test("a stored lead that was succeeded expects its successor; any other stored lead expects itself", () => {
+  const lineup = [OPENAI_SLOT, ANTHROPIC_SLOT, GOOGLE_SLOT];
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.equal(
+    expectedLeadForStored({ ...catalogue, stored: ANTHROPIC_SLOT, lineup }),
+    "claude-haiku-next"
+  );
+  assert.equal(expectedLeadForStored({ ...catalogue, stored: OPENAI_SLOT, lineup }), OPENAI_SLOT);
+  // Outside the lineup the resolver never reads it, so nothing is succeeded.
+  assert.equal(
+    expectedLeadForStored({ ...catalogue, stored: "not-in-the-lineup", lineup }),
+    "not-in-the-lineup"
+  );
+  // A retired lead with no successor guests can use expects itself, so the
+  // audit still reports it as not applied.
+  const stranded = catalogueWith({ [ANTHROPIC_SLOT]: retired("missing-model") });
+  assert.equal(expectedLeadForStored({ ...stranded, stored: ANTHROPIC_SLOT, lineup }), ANTHROPIC_SLOT);
+});
+
+test("an editor slot offers a provider the lineup is missing instead of the one that breaks the rule", () => {
+  assert.deepEqual(lineupSlotProviders(["openai", "anthropic", "google"]), ["openai", "anthropic", "google"]);
+  assert.deepEqual(lineupSlotProviders(["google", "openai", "anthropic"]), ["google", "openai", "anthropic"]);
+  // A provider outside the rule is handed the missing one.
+  assert.deepEqual(lineupSlotProviders(["openai", "mistral", "google"]), ["openai", "anthropic", "google"]);
+  // A duplicate gives up both slots to the missing providers, in rule order.
+  assert.deepEqual(lineupSlotProviders(["openai", "openai", "google"]), ["openai", "anthropic", "google"]);
+  assert.deepEqual(lineupSlotProviders(["anthropic", "anthropic", null]), ["openai", "anthropic", "google"]);
+  // Every slot names a provider of the rule, and together they are one each.
+  for (const providers of [
+    ["openai", "mistral", "google"],
+    ["openai", "openai", "google"],
+    ["anthropic", "anthropic", null],
+    [null, null, null],
+    ["xai", "deepseek", "mistral"],
+  ]) {
+    const slots = lineupSlotProviders(providers);
+    assert.ok(isOnePerLineupProvider(slots), `${providers.join(",")} -> ${slots.join(",")}`);
+  }
+});
+
+test("a selection's missing providers name both an absent and a doubled provider", () => {
+  assert.deepEqual(missingLineupProviders(["openai", "anthropic", "google"]), []);
+  assert.deepEqual(missingLineupProviders(["openai", "google", "deepseek"]), ["anthropic"]);
+  assert.deepEqual(missingLineupProviders(["openai", "openai", "google"]), ["openai", "anthropic"]);
+  assert.equal(isOnePerLineupProvider(["openai", "anthropic", "google"]), true);
+  assert.equal(isOnePerLineupProvider(["openai", "anthropic", "google", "xai"]), false);
+});
+
+test("a lineup member that is limited or unlisted but still guest-eligible is succeeded, and audited so", () => {
+  const lineup = [OPENAI_SLOT, ANTHROPIC_SLOT, GOOGLE_SLOT];
+  for (const change of [{ status: "limited" as const }, { publiclyListed: false }]) {
+    const rows = new Map<string, AiModel>([
+      [ANTHROPIC_SLOT, { ...getModel(ANTHROPIC_SLOT)!, ...change, replacementModelId: "claude-haiku-next" }],
+      ["claude-haiku-next", { ...getModel(ANTHROPIC_SLOT)!, id: "claude-haiku-next", replacementModelId: undefined }],
+    ]);
+    const lookup = (id: string) => rows.get(id) ?? getModel(id);
+    const isGuest = createGuestEligibilityCheck(lookup);
+    const isEligible = createDefaultLineupEligibilityCheck(lookup, isGuest);
+    const resolveReplacement = createReplacementResolver(lookup);
+    // The plain guest check would keep it -- the defect a default must not have.
+    assert.equal(isGuest(ANTHROPIC_SLOT), true, JSON.stringify(change));
+    assert.equal(isEligible(ANTHROPIC_SLOT), false, JSON.stringify(change));
+    assert.deepEqual(
+      resolveGuestDefaultSelectedModels({ isEligible, resolveReplacement, trio: lineup, leadModelId: OPENAI_SLOT }),
+      [OPENAI_SLOT, "claude-haiku-next", GOOGLE_SLOT]
+    );
+    // Stored as the lead, it expects its successor -- and leads with it.
+    assert.equal(
+      expectedLeadForStored({ stored: ANTHROPIC_SLOT, lineup, isEligible, resolveReplacement }),
+      "claude-haiku-next"
+    );
+    assert.equal(
+      resolveGuestDefaultSelectedModels({ isEligible, resolveReplacement, trio: lineup, leadModelId: ANTHROPIC_SLOT })[0],
+      "claude-haiku-next"
+    );
+  }
 });

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
+  createReplacementResolver,
   getGuestDefaultSelectedModels,
   GUEST_BRAND_TRIO_MODEL_IDS,
 } from "@/lib/appDefaults";
@@ -12,7 +14,7 @@ import {
   resolveGuestInitialWebSearchMode,
   type GuestInitialModelEnvironment,
 } from "@/lib/guestChatInitialModels";
-import { getModel, isEnabledModelId } from "@/lib/models";
+import { getModel, isEnabledModelId, type AiModel } from "@/lib/models";
 
 // This resolver runs during the chat page's first render on both the server
 // and the client, so what it returns *is* the guest's first painted model
@@ -22,6 +24,7 @@ import { getModel, isEnabledModelId } from "@/lib/models";
 const catalogue = {
   isEnabledModelId,
   isGuestEligible: createGuestEligibilityCheck(getModel),
+  isDefaultEligible: createDefaultLineupEligibilityCheck(getModel, createGuestEligibilityCheck(getModel)),
 };
 
 const resolve = (environment: GuestInitialModelEnvironment = {}) =>
@@ -304,4 +307,60 @@ test("a models link does not change the restored conversation's search switch", 
     search: "?models=gpt-5-6-luna",
   };
   assert.equal(resolveGuestInitialWebSearchMode(environment), "off");
+});
+
+test("the first paint succeeds a retired trio member through the catalogue's resolver", () => {
+  const [openai, anthropic, google] = GUEST_BRAND_TRIO_MODEL_IDS;
+  const successor: AiModel = { ...getModel(anthropic)!, id: "claude-haiku-next", replacementModelId: undefined };
+  const rows = new Map<string, AiModel>([
+    [anthropic, { ...getModel(anthropic)!, enabled: false, status: "disabled" as const, publiclyListed: false, replacementModelId: successor.id }],
+    [successor.id, successor],
+  ]);
+  const lookup = (id: string) => rows.get(id) ?? getModel(id);
+  const retiredCatalogue = {
+    isEnabledModelId: (id: string) => Boolean(lookup(id)?.enabled),
+    isGuestEligible: createGuestEligibilityCheck(lookup),
+    isDefaultEligible: createDefaultLineupEligibilityCheck(lookup, createGuestEligibilityCheck(lookup)),
+    resolveReplacement: createReplacementResolver(lookup),
+  };
+  const selection = resolveGuestInitialSelectedModels({
+    catalogue: retiredCatalogue,
+    leadModelId: openai,
+  });
+  assert.deepEqual(selection.models, [openai, successor.id, google]);
+});
+
+test("a lineup member later limited or unlisted is succeeded in the default, but a guest who picks it keeps it", () => {
+  const [openai, anthropic, google] = GUEST_BRAND_TRIO_MODEL_IDS;
+  const successor: AiModel = { ...getModel(anthropic)!, id: "claude-haiku-next", replacementModelId: undefined };
+  for (const change of [{ status: "limited" as const }, { publiclyListed: false }]) {
+    // Still enabled, guest and Standard: the plain guest check passes it.
+    const rows = new Map<string, AiModel>([
+      [anthropic, { ...getModel(anthropic)!, ...change, replacementModelId: successor.id }],
+      [successor.id, successor],
+    ]);
+    const lookup = (id: string) => rows.get(id) ?? getModel(id);
+    const isGuestEligible = createGuestEligibilityCheck(lookup);
+    assert.equal(isGuestEligible(anthropic), true);
+    const limitedCatalogue = {
+      isEnabledModelId: (id: string) => Boolean(lookup(id)?.enabled),
+      isGuestEligible,
+      isDefaultEligible: createDefaultLineupEligibilityCheck(lookup, isGuestEligible),
+      resolveReplacement: createReplacementResolver(lookup),
+    };
+    assert.deepEqual(
+      resolveGuestInitialSelectedModels({ catalogue: limitedCatalogue, leadModelId: openai }).models,
+      [openai, successor.id, google],
+      JSON.stringify(change)
+    );
+    // A models link that names it is the guest's own pick, clamped by the
+    // plain guest check, so a runnable model is not taken away.
+    assert.ok(
+      resolveGuestInitialSelectedModels({
+        catalogue: limitedCatalogue,
+        environment: { search: `?models=${anthropic}` },
+      }).models.includes(anthropic),
+      JSON.stringify(change)
+    );
+  }
 });

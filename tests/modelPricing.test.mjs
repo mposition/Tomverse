@@ -231,11 +231,95 @@ test("raising the input ceiling past a long-context boundary is not silent", () 
   );
 });
 
+test("Claude Haiku 5.5 moves every rate by 5x past a 100,000-token prompt", () => {
+  // Anthropic's pricing page, 2026-10-12: the whole request moves when its
+  // prompt -- cache reads and writes included -- exceeds 100,000 tokens.
+  const below = resolveModelPricing(model("claude-haiku-5-5"), {
+    estimatedPromptTokens: 100_000,
+  });
+  assert.equal(below.inputUsdPerMillionTokens, 0.1);
+  assert.equal(below.outputUsdPerMillionTokens, 0.5);
+  assert.equal(below.cachedInputPriceMultiplier, 0.1);
+  assert.equal(below.cacheWriteUsdPerMillionTokens, 0.125);
+  assert.equal(below.costSource, "registry");
+
+  const above = resolveModelPricing(model("claude-haiku-5-5"), {
+    estimatedPromptTokens: 100_001,
+  });
+  assert.equal(above.inputUsdPerMillionTokens, 0.5);
+  assert.equal(above.outputUsdPerMillionTokens, 2.5);
+  assert.equal(above.cachedInputPriceMultiplier, 0.1);
+  assert.equal(above.cacheWriteUsdPerMillionTokens, 0.625);
+  assert.equal(above.costSource, "registry_long_context");
+  assert.equal(above.longContextThresholdTokens, 100_000);
+});
+
+test("GPT 6 Luna takes the GPT-5.6 long-context shape past 272,000 tokens", () => {
+  const above = resolveModelPricing(model("gpt-6-luna"), {
+    estimatedPromptTokens: 272_001,
+  });
+  assert.equal(above.inputUsdPerMillionTokens, 0.2);
+  assert.equal(above.outputUsdPerMillionTokens, 0.75);
+  assert.equal(above.cacheWriteUsdPerMillionTokens, 0.25);
+  assert.equal(above.longContextThresholdTokens, 272_000);
+});
+
+// A tier boundary below the user input ceiling is reachable, and two things
+// then price it at the short rate: a flat price stored on the registry row
+// (see the Gemini test above), and settlement, which uses the tier the
+// reservation chose from its own token estimate rather than re-choosing from
+// the provider's count. That understates cost, the direction this codebase
+// does not accept -- so a reachable boundary is a named, dated exception, never
+// a silent one.
+//
+// The one exception is the Anthropic Haiku line. Operator decision
+// 2026-10-12: a guest's default lineup always holds one OpenAI, one Anthropic
+// and one Gemini model, so the Haiku model in the Anthropic slot is allowed
+// even when its price does not meet the guest-open conditions
+// (docs/policy/credit-and-cost-limits.md, "Haiku 계열을 게스트 Anthropic 자리로
+// 여는 예외"). Any other model with a reachable boundary needs that decision
+// again, for that model.
+const acceptsReachableTierBoundary = (profile) =>
+  profile.provider === "anthropic" && profile.modelId.startsWith("claude-haiku-");
+
+test("no tier boundary sits below the input ceiling except a named exception", () => {
+  const source = readFileSync(
+    join(import.meta.dirname, "..", "lib", "chatInputLimits.ts"),
+    "utf8"
+  );
+  const ceiling = /CHAT_USER_MAX_INPUT_TOKENS_DEFAULT\s*=\s*([\d_]+)/.exec(source);
+  assert.ok(ceiling, "could not read the default user input ceiling");
+  const maxInputTokens = Number(ceiling[1].replace(/_/g, ""));
+
+  const reachable = [];
+  for (const profile of MODEL_PRICING) {
+    const tierSets = [profile.tiers, ...(profile.priceSchedule ?? []).map((revision) => revision.tiers)];
+    for (const tiers of tierSets) {
+      const boundary = tiers.length > 1 ? tiers[0].maxPromptTokens : null;
+      if (boundary !== null && boundary < maxInputTokens && !acceptsReachableTierBoundary(profile)) {
+        reachable.push(profile.modelId);
+      }
+    }
+  }
+  // The exception is not vacuous: Haiku 5.5's boundary really is reachable.
+  const haiku = getModelPricingProfile("claude-haiku-5-5");
+  assert.ok(haiku && haiku.tiers[0].maxPromptTokens < maxInputTokens);
+  assert.deepEqual(
+    [...new Set(reachable)].sort(),
+    [],
+    "a tier boundary below the input ceiling understates cost at settlement; " +
+      "keep the boundary out of reach or record the decision that accepts it"
+  );
+});
+
 test("new catalogue models use their exact provider prices and output caps", () => {
   const expected = {
     "gpt-5-6-sol": [5, 30, 128_000],
     "gpt-5-6-terra": [2, 12, 128_000],
     "gpt-5-6-luna": [0.2, 1.2, 128_000],
+    // Read off the providers' pages on 2026-10-12 (short-context rates).
+    "gpt-6-luna": [0.1, 0.5, 128_000],
+    "claude-haiku-5-5": [0.1, 0.5, 128_000],
     "gemini-3-6-flash": [1.5, 7.5, 65_536],
     "gemini-3-5-flash": [1.5, 9, 65_536],
     "gemini-2-5-flash": [0.3, 2.5, 65_536],
