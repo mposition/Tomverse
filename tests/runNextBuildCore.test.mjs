@@ -80,6 +80,38 @@ test("the panic-boundary marker does not retry unrelated failures", () => {
     PANIC_BOUNDARY_CACHE_FAILURE.replace(marker, "An unrelated process panicked")), false);
 });
 
+// Production, Railway deployment 40fda894 (main f08502b3e), 2026-10-12: only
+// the other threads' panics reached the log, each naming the failed restore,
+// then the abort. Shortened from twenty-odd identical thread lines.
+const OTHER_THREAD_RESTORE_FAILURE = `
+  Creating an optimized production build ...
+
+thread 'tokio-rt-worker' (90) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:292:17:
+Restore of All for task TaskId 4560720 failed in another thread: restoring failed
+note: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace
+
+thread 'tokio-rt-worker' (87) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:292:17:
+Restore of All for task TaskId 4547133 failed in another thread: restoring failed
+
+turbo-tasks: an internal panic occurred outside the per-task panic boundary. This is a bug in turbo-tasks/Turbopack — please report it at https://github.com/vercel/next.js/discussions and include the panic message and stack trace above.
+
+Aborting.
+[build] next build terminated by signal SIGABRT.
+`;
+
+test("a restore that failed in another thread is recognised", () => {
+  assert.equal(isRecoverableTurbopackCacheFailure(OTHER_THREAD_RESTORE_FAILURE), true);
+});
+
+test("the other-thread restore line alone is not enough", () => {
+  assert.equal(
+    isRecoverableTurbopackCacheFailure(
+      "Restore of All for task TaskId 1 failed in another thread: restoring failed"
+    ),
+    false
+  );
+});
+
 // A wrapper that retried on anything would hide real breakage and take twice
 // as long to report it. These are the failures that must still exit on the
 // first attempt.
