@@ -7,6 +7,7 @@ import {
   expect,
   test,
 } from "./support/console";
+import { adminFixtureDatabase } from "./support/database";
 
 /**
  * The Admin Console shell: routing, navigation state, and the header controls.
