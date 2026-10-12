@@ -54,8 +54,8 @@ test("status chrome preserves saved language and language changes reload the bod
   await expect(page.locator("main")).toHaveAttribute("lang", "ko");
   const select = page.getByTestId("marketing-language-switcher");
   await expect(select).toHaveValue("ko");
-  expect(await page.evaluate(() => localStorage.getItem("tomverse_language"))).toBe("ko");
-  expect((await page.context().cookies()).find(cookie => cookie.name === "tomverse_lang")?.value).toBe("ko");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("tomverse_language"))).toBe("ko");
+  await expect.poll(async () => (await page.context().cookies()).find(cookie => cookie.name === "tomverse_lang")?.value).toBe("ko");
   await select.selectOption("en");
   await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "en");
   await expect(page.locator("main")).toHaveAttribute("lang", "en");
@@ -63,18 +63,23 @@ test("status chrome preserves saved language and language changes reload the bod
   await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "ko");
   await expect(page.locator("main")).toHaveAttribute("lang", "ko");
   await expect(page.getByTestId("marketing-language-switcher")).toHaveValue("ko");
-  expect(await page.evaluate(() => localStorage.getItem("tomverse_language"))).toBe("ko");
-  expect((await page.context().cookies()).find(cookie => cookie.name === "tomverse_lang")?.value).toBe("ko");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("tomverse_language"))).toBe("ko");
+  await expect.poll(async () => (await page.context().cookies()).find(cookie => cookie.name === "tomverse_lang")?.value).toBe("ko");
   await page.getByTestId("marketing-language-switcher").selectOption("en");
   await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "en");
-  await page.setExtraHTTPHeaders({ "Accept-Language": "ko-KR,ko;q=0.9" });
-  await page.goto("/status");
-  await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "en");
-  await expect(page.locator("main")).toHaveAttribute("lang", "en");
-  await expect(page.getByTestId("marketing-language-switcher")).toHaveValue("en");
-  await expect(page.locator("html")).toHaveAttribute("lang", "en");
-  expect(await page.evaluate(() => localStorage.getItem("tomverse_language"))).toBe("en");
-  expect((await page.context().cookies()).find(cookie => cookie.name === "tomverse_lang")?.value).toBe("en");
+  // prepareGuestPage seeds its language on every document load. Use a separate
+  // English fixture for the opposite preference instead of reseeding Korean.
+  const englishPage = await page.context().newPage();
+  try {
+    await prepareGuestPage(englishPage, "en");
+    await englishPage.setExtraHTTPHeaders({ "Accept-Language": "ko-KR,ko;q=0.9" });
+    await englishPage.goto("/status");
+    await expect(englishPage.locator("main")).toHaveAttribute("lang", "en");
+    await expect(englishPage.getByTestId("marketing-language-switcher")).toHaveValue("en");
+    await expect(englishPage.locator("html")).toHaveAttribute("lang", "en");
+    await expect.poll(() => englishPage.evaluate(() => localStorage.getItem("tomverse_language"))).toBe("en");
+    await expect.poll(async () => (await englishPage.context().cookies()).find(cookie => cookie.name === "tomverse_lang")?.value).toBe("en");
+  } finally { await englishPage.close(); }
 });
 
 for (const width of [390, 1024, 1440]) {
