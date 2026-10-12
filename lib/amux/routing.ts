@@ -10,6 +10,8 @@ import {
 } from "@/lib/amux/store";
 import { amuxWorkerRuntimeByName } from "@/lib/amux/workerRuntime";
 import { getAmuxWorkerTelemetry } from "@/lib/amux/telemetry";
+import { AMUX_V22_WORKER_CATALOG_ENV, parseAmuxV22WorkerCatalog } from
+  "@/lib/amux/v22WorkerCatalogCore";
 
 const classificationSchema = z
   .object({
@@ -175,6 +177,12 @@ export const getConfiguredAmuxWorkerCatalog = () => {
     return null;
   }
 };
+
+/** Separate Task-role/vendor/model metadata; legacy routing stays unchanged.
+ * Missing metadata is a hold, never an inferred profile or fleet enrollment. */
+export const getConfiguredAmuxV22WorkerCatalog = () =>
+  parseAmuxV22WorkerCatalog(process.env[AMUX_V22_WORKER_CATALOG_ENV],
+    getConfiguredAmuxWorkerCatalog());
 
 export async function buildAmuxRoutingSnapshot(
   taskId: string,

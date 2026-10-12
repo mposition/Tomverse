@@ -11,7 +11,7 @@ import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
 import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from
   "./incidentCore.ts";
-import { getConfiguredAmuxWorkerCatalog } from "./routing.ts";
+import { getConfiguredAmuxV22WorkerCatalog } from "./routing.ts";
 import { AUTO_PROMOTION_APPLY_ENV, AUTO_PROMOTION_CODE_LATCH,
   AUTO_UNKNOWN_BURST_COUNT, AUTO_UNKNOWN_BURST_MS,
   autoCostAccepted, autoGraduationAccepted, autoUnknownEvents,
@@ -211,7 +211,7 @@ async function latestCandidates(tx: Prisma.TransactionClient, now: Date):
 }
 
 async function verifiedWorkerCount(tx: Prisma.TransactionClient, now: Date) {
-  const catalog = getConfiguredAmuxWorkerCatalog();
+  const catalog = getConfiguredAmuxV22WorkerCatalog();
   if (!catalog) return 0;
   const names = [...new Set(catalog.filter((worker) => !worker.archived &&
     !worker.paused && !worker.isolated && !worker.blocked).map(
