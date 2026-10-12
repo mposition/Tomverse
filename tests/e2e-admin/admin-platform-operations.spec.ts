@@ -10,6 +10,7 @@ import {
   test,
 } from "./support/console";
 import { adminFixtureDatabase } from "./support/database";
+import { GUEST_BRAND_TRIO_MODEL_IDS } from "../../lib/appDefaults";
 
 /**
  * The `ops:write` journeys: provider incidents, the model registry, platform
@@ -311,6 +312,42 @@ test.describe("platform operations", () => {
     await page.reload();
     await expect(page.getByLabel("Leading model")).toHaveValue(
       FIXTURE_APP_SETTINGS.alternateGuestDefaultModelId
+    );
+  });
+
+  test("the default lineup is saved with its lead and read back", async ({ page }) => {
+    // No lineup row is seeded, so the compiled trio is what the card starts
+    // from. The second slot is replaced; the seeded lead stays in the lineup,
+    // so it travels unchanged with the save.
+    await page.goto("/admin/platform");
+    const secondSlot = page.getByTestId("admin-guest-lineup-slot-1");
+    await expect(secondSlot).toHaveValue(GUEST_BRAND_TRIO_MODEL_IDS[1]);
+    const save = page.getByTestId("admin-guest-lineup-save");
+    await expect(save).toBeDisabled();
+
+    await secondSlot.selectOption("mistral-small-4");
+    await expect(save).toBeEnabled();
+    await save.click();
+
+    await expect(
+      page.getByText("Default lineup saved and is live for new conversations.")
+    ).toBeVisible();
+    const lineup = await adminFixtureDatabase().appSetting.findUniqueOrThrow({
+      where: { key: "guestBrandTrioModelIds" },
+    });
+    expect(JSON.parse(lineup.value)).toEqual([
+      GUEST_BRAND_TRIO_MODEL_IDS[0],
+      "mistral-small-4",
+      GUEST_BRAND_TRIO_MODEL_IDS[2],
+    ]);
+    const lead = await adminFixtureDatabase().appSetting.findUniqueOrThrow({
+      where: { key: "guestDefaultModelId" },
+    });
+    expect(lead.value).toBe(FIXTURE_APP_SETTINGS.guestDefaultModelId);
+
+    await page.reload();
+    await expect(page.getByTestId("admin-guest-lineup-slot-1")).toHaveValue(
+      "mistral-small-4"
     );
   });
 
