@@ -60,7 +60,7 @@ const seed = async (): Promise<Seeded> => {
   const objectKey = `${prefix}2026-08-26/${randomUUID()}-nda.jpg`;
   await prisma.user.create({ data: { id: userId, email } });
   await prisma.conversation.create({
-    data: { id: conversationId, userId, title: "비밀유지계약" },
+    data: { selectedModels: '["gpt-6-luna"]', id: conversationId, userId, title: "비밀유지계약" },
   });
   await prisma.message.create({
     data: { id: messageId, conversationId, role: "user", content: "" },

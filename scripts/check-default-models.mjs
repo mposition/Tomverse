@@ -145,22 +145,32 @@ const hydratedGuestSelectedModelIds = resolveGuestInitialSelectedModels({
 // own right, and neither can be imported without a database or a Next server.
 // ---------------------------------------------------------------------------
 const schema = readFileSync(join(process.cwd(), "prisma/schema.prisma"), "utf8");
-const prismaUserSettingsDefaultModel =
-  parsePrismaStringDefault(schema, "UserSettings", "defaultModel") ?? "";
-const rawConversationDefault =
-  parsePrismaStringDefault(schema, "Conversation", "selectedModels") ?? "[]";
-let prismaConversationSelectedModels = [];
-try {
-  const parsed = JSON.parse(rawConversationDefault);
-  if (Array.isArray(parsed)) prismaConversationSelectedModels = parsed;
-} catch {
-  prismaConversationSelectedModels = [`unparseable:${rawConversationDefault}`];
+// Null means the column has no default, which is what both must be: the
+// default model is code alone. Any @default counts, not only a string one.
+const prismaUserSettingsDefaultModel = parsePrismaFieldContract(
+  schema,
+  "UserSettings",
+  "defaultModel"
+).hasDefault
+  ? (parsePrismaStringDefault(schema, "UserSettings", "defaultModel") ?? "a non-string default")
+  : null;
+let prismaConversationSelectedModels = null;
+if (parsePrismaFieldContract(schema, "Conversation", "selectedModels").hasDefault) {
+  const rawConversationDefault = parsePrismaStringDefault(schema, "Conversation", "selectedModels");
+  try {
+    const parsed = JSON.parse(rawConversationDefault ?? "");
+    prismaConversationSelectedModels = Array.isArray(parsed)
+      ? parsed
+      : [`unparseable:${rawConversationDefault}`];
+  } catch {
+    prismaConversationSelectedModels = [`unparseable:${rawConversationDefault ?? "a non-string default"}`];
+  }
 }
 
 // app/api/user/settings/route.ts creates a missing row with
 // `defaultModel: APP_DEFAULTS.defaultModelId`. Asserted from the source rather
-// than assumed, because that literal is the only thing tying the row it
-// creates to the column default beside it.
+// than assumed: with no column default, that write is what a new account's
+// default model is.
 const settingsRoute = readFileSync(
   join(process.cwd(), "app/api/user/settings/route.ts"),
   "utf8"
@@ -264,7 +274,7 @@ const interesting = Array.from(
     DEFAULT_MODEL_ID,
     APP_DEFAULTS.defaultModelId,
     prismaUserSettingsDefaultModel,
-    ...prismaConversationSelectedModels,
+    ...(prismaConversationSelectedModels ?? []),
   ])
 ).filter(Boolean);
 

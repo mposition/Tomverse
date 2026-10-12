@@ -49,7 +49,7 @@ const seed = async () => {
     data: { id: userId, email: `${userId}@example.invalid` },
   });
   await prisma.conversation.create({
-    data: { id: conversationId, userId, title: "Quarterly revenue" },
+    data: { selectedModels: '["gpt-6-luna"]', id: conversationId, userId, title: "Quarterly revenue" },
   });
   await prisma.message.create({
     data: {

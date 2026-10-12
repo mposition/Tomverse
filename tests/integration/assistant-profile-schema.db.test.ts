@@ -171,6 +171,7 @@ test("a conversation pinned to a deleted profile survives, unpinned", async () =
     });
     const conversation = await prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId: user.id,
             title: "Pinned",
             assistantProfileVersionId: version.id,
@@ -221,7 +222,7 @@ test("a version is reachable by its own owner column, not only through its profi
 test("an existing conversation is unpinned, which is what every row before release C is", async () => {
     const user = await createUser();
     const conversation = await prisma.conversation.create({
-        data: { userId: user.id, title: "Ordinary" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "Ordinary" },
     });
     assert.equal(
         (

@@ -77,7 +77,7 @@ const createUser = () =>
 
 const createConversation = (userId: string, password: string | null) =>
   prisma.conversation.create({
-    data: { userId, title: `Locked ${randomUUID()}`, password },
+    data: { selectedModels: '["gpt-6-luna"]', userId, title: `Locked ${randomUUID()}`, password },
   });
 
 const storedPassword = async (id: string) =>

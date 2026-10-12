@@ -64,7 +64,7 @@ const seed = async (): Promise<Seeded> => {
   const promptMessageId = randomUUID();
   await prisma.user.create({ data: { id: userId, email } });
   await prisma.conversation.create({
-    data: { id: conversationId, userId, title: "근로계약서" },
+    data: { selectedModels: '["gpt-6-luna"]', id: conversationId, userId, title: "근로계약서" },
   });
   await prisma.message.create({
     data: {
@@ -327,7 +327,7 @@ test("an attachment from another conversation is not carried forward", async () 
   const { attachment } = await bindOne(seeded);
   const otherConversation = randomUUID();
   await prisma.conversation.create({
-    data: { id: otherConversation, userId: seeded.userId, title: "다른 대화" },
+    data: { selectedModels: '["gpt-6-luna"]', id: otherConversation, userId: seeded.userId, title: "다른 대화" },
   });
 
   await assert.rejects(

@@ -74,7 +74,7 @@ const australian = async () => {
     select: { id: true, email: true },
   });
   await prisma.userSettings.create({
-    data: { userId: user.id, country: "AU", countrySource: "self_declared", countryUpdatedAt: new Date() },
+    data: { defaultModel: "gpt-6-luna", userId: user.id, country: "AU", countrySource: "self_declared", countryUpdatedAt: new Date() },
   });
   return user as { id: string; email: string };
 };

@@ -961,7 +961,7 @@ test("a token names one subject and one purpose and nothing else", async () => {
 test("a jurisdiction resolves from the payment method and the declaration", async () => {
   const user = await someone();
   await prisma.userSettings.create({
-    data: { userId: user.id, language: "en", timeZone: "UTC" },
+    data: { defaultModel: "gpt-6-luna", userId: user.id, language: "en", timeZone: "UTC" },
   });
 
   // Nothing known yet: honest rather than guessed, and marketing will not send.
@@ -985,7 +985,7 @@ test("a jurisdiction resolves from the payment method and the declaration", asyn
 test("a payment method from elsewhere is a conflict, not a move", async () => {
   const user = await someone();
   await prisma.userSettings.create({
-    data: { userId: user.id, language: "en", timeZone: "UTC" },
+    data: { defaultModel: "gpt-6-luna", userId: user.id, language: "en", timeZone: "UTC" },
   });
   await setSelfDeclaredCountry({ userId: user.id, country: "KR" });
   await recordBillingCountry({ userId: user.id, country: "SG" });
@@ -1034,7 +1034,7 @@ test("a billing country is kept for an account that has no settings row yet", as
 test("a fresh country confirmation resolves a later billing mismatch", async () => {
   const user = await someone();
   await prisma.userSettings.create({
-    data: { userId: user.id, language: "en", timeZone: "UTC" },
+    data: { defaultModel: "gpt-6-luna", userId: user.id, language: "en", timeZone: "UTC" },
   });
   await setSelfDeclaredCountry({
     userId: user.id,
@@ -1063,7 +1063,7 @@ test("a fresh country confirmation resolves a later billing mismatch", async () 
 test("an inferred country is never read back as a declaration", async () => {
   const user = await someone();
   await prisma.userSettings.create({
-    data: { userId: user.id, language: "ko", timeZone: "Asia/Seoul" },
+    data: { defaultModel: "gpt-6-luna", userId: user.id, language: "ko", timeZone: "Asia/Seoul" },
   });
 
   const resolved = await jurisdictionForUser({ userId: user.id });
@@ -1077,7 +1077,7 @@ test("an inferred country is never read back as a declaration", async () => {
 test("an IP is observed and changes nothing", async () => {
   const user = await someone();
   await prisma.userSettings.create({
-    data: { userId: user.id, language: "en", timeZone: "UTC" },
+    data: { defaultModel: "gpt-6-luna", userId: user.id, language: "en", timeZone: "UTC" },
   });
   await setSelfDeclaredCountry({ userId: user.id, country: "KR" });
 
@@ -1092,7 +1092,7 @@ test("an IP is observed and changes nothing", async () => {
 test("a withdrawn consent does not tell us where somebody is", async () => {
   const user = await someone();
   await prisma.userSettings.create({
-    data: { userId: user.id, language: "en", timeZone: "UTC" },
+    data: { defaultModel: "gpt-6-luna", userId: user.id, language: "en", timeZone: "UTC" },
   });
   await setSelfDeclaredCountry({ userId: user.id, country: "KR" });
   await agree({

@@ -26,7 +26,7 @@ const createUser = () =>
 
 const createConversation = (userId: string, title: string) =>
   prisma.conversation.create({
-    data: { userId, title },
+    data: { selectedModels: '["gpt-6-luna"]', userId, title },
   });
 
 test("applyGeneratedTitle updates the title when it still matches expectedTitle", async () => {

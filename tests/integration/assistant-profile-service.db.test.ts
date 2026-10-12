@@ -439,6 +439,7 @@ test("deleting a profile tombstones its knowledge bytes and unpins conversations
     assert.ok(published.outcome === "published");
     const conversation = await prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId: user.id,
             title: "Pinned",
             assistantProfileVersionId: published.version.id,
@@ -513,6 +514,7 @@ test("deleting a profile leaves other conversations alone", async () => {
 
     const affected = await prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId: owner.id,
             title: "Uses the doomed profile",
             assistantProfileVersionId: doomedVersion.version.id,
@@ -520,16 +522,17 @@ test("deleting a profile leaves other conversations alone", async () => {
     });
     const otherProfile = await prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId: owner.id,
             title: "Uses a different profile",
             assistantProfileVersionId: keptVersion.version.id,
         },
     });
     const noProfile = await prisma.conversation.create({
-        data: { userId: owner.id, title: "Never had one" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: owner.id, title: "Never had one" },
     });
     const strangers = await prisma.conversation.create({
-        data: { userId: stranger.id, title: "Someone else's" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: stranger.id, title: "Someone else's" },
     });
 
     await deleteAssistantProfile({ userId: owner.id, profileId: doomed.id });
@@ -756,6 +759,7 @@ test("a conversation pinned at creation stays on that revision after an edit", a
 
     const conversation = await prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId: user.id,
             title: "Pinned conversation",
             assistantProfileVersionId: pinned.id,

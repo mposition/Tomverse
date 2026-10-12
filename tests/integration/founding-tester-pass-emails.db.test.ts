@@ -67,7 +67,7 @@ const redemption = async (input: {
       email: `${randomUUID()}@example.test`,
       name: "Tester",
       ...(input.language
-        ? { settings: { create: { language: input.language } } }
+        ? { settings: { create: { defaultModel: "gpt-6-luna", language: input.language } } }
         : {}),
     },
   });

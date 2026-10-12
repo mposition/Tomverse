@@ -52,7 +52,7 @@ const subscribed = async (language = "ko") => {
     data: { email: `result-${randomUUID().slice(0, 8)}@example.test` },
     select: { id: true, email: true },
   });
-  await prisma.userSettings.create({ data: { userId: user.id, language } });
+  await prisma.userSettings.create({ data: { defaultModel: "gpt-6-luna", userId: user.id, language } });
   await ensureDefaultPreferences(user.id);
   const policyVersionId = await ensureBootstrapPolicyVersion();
   const now = new Date();
@@ -171,7 +171,7 @@ test("an unsubscribe by somebody who never consented is reported too", async () 
     data: { email: `cohort-${randomUUID().slice(0, 8)}@example.test` },
     select: { id: true, email: true },
   });
-  await prisma.userSettings.create({ data: { userId: user.id, language: "ko" } });
+  await prisma.userSettings.create({ data: { defaultModel: "gpt-6-luna", userId: user.id, language: "ko" } });
   await ensureDefaultPreferences(user.id);
   await withdrawAllMarketing({
     userId: user.id,
@@ -192,7 +192,7 @@ test("turning off switches that were on without a confirmation is reported once,
     data: { email: `legacy-${randomUUID().slice(0, 8)}@example.test` },
     select: { id: true },
   });
-  await prisma.userSettings.create({ data: { userId: user.id, language: "en" } });
+  await prisma.userSettings.create({ data: { defaultModel: "gpt-6-luna", userId: user.id, language: "en" } });
   await ensureDefaultPreferences(user.id);
   for (const purpose of ["product_updates", "newsletter", "promotions"]) {
     await prisma.emailPreference.update({

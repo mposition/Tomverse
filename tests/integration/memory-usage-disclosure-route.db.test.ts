@@ -75,7 +75,7 @@ const seedOwner = async () => {
         data: { email: `disclosure-${randomUUID()}@example.test` },
     });
     const conversation = await prisma.conversation.create({
-        data: { userId: user.id, title: "disclosure fixture" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "disclosure fixture" },
     });
     return { user, conversation };
 };

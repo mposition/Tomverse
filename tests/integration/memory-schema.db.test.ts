@@ -119,7 +119,7 @@ test("the closed vocabularies are enforced by CHECK constraints", async () => {
 test("conversation memoryMode defaults to inherit and rejects unknown modes", async () => {
     const user = await createUser();
     const conversation = await prisma.conversation.create({
-        data: { userId: user.id, title: "memory mode fixture" },
+        data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "memory mode fixture" },
     });
     assert.equal(conversation.memoryMode, "inherit");
 

@@ -336,7 +336,7 @@ const seedThread = async (
     followedBy: Array<{ role: "user" | "assistant"; afterSeconds: number }> = []
 ) => {
     const conversation = await prisma.conversation.create({
-        data: { userId, title: "proxy fixture" },
+        data: { selectedModels: '["gpt-6-luna"]', userId, title: "proxy fixture" },
     });
     await prisma.message.create({
         data: {
