@@ -123,7 +123,9 @@ async function getJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId?: string | null }) {
+export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false }: {
+  initialTaskId?: string | null; canMoveCards?: boolean;
+}) {
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const [view, setView] = useState<"board" | "hierarchy">("board");
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
@@ -141,6 +143,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
   const [moveTarget, setMoveTarget] = useState<AmuxBoardMove | null>(null);
   const dragCard = useRef<string | null>(null);
   const moveRequests = useRef(new Map<string, string>());
+  const settledMoveRequests = useRef(new Set<string>());
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<"overview" | "execution" | "review" | "activity">("overview");
@@ -277,7 +280,13 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
 
   useEffect(() => {
     const onPop = () => {
-      const id = new URL(window.location.href).searchParams.get("taskId");
+      const url = new URL(window.location.href);
+      const id = url.searchParams.get("taskId"); const requestId = url.searchParams.get("moveRequest");
+      if (id && /^[A-Za-z0-9_-]{1,80}$/.test(id) && requestId && /^[0-9a-f-]{36}$/i.test(requestId)) {
+        moveRequests.current.set(id, requestId); closeCard(false);
+        setMoveTarget({ taskId: id, requestId, readOnly: true }); return;
+      }
+      setMoveTarget(null);
       if (id && /^[A-Za-z0-9_-]{1,80}$/.test(id)) void openCard(id, false);
       else closeCard(false);
     };
@@ -295,11 +304,13 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
   const adjacent = selected ? uniqueCards.findIndex((card) => card.id === selected.id) : -1;
   const tabs = ["overview", "execution", "review", "activity"] as const;
   const copyLink = async () => {
-    try { await navigator.clipboard.writeText(window.location.href); setCopyNotice(m.copied); }
+    try { const url = new URL(window.location.href); url.searchParams.delete("moveRequest");
+      await navigator.clipboard.writeText(url.href); setCopyNotice(m.copied); }
     catch { setCopyNotice(m.copyFailed); }
   };
 
   const openMove = (taskId: string) => {
+    if (!canMoveCards) return;
     closeCard(false);
     const url = new URL(window.location.href);
     const prior = moveRequests.current.get(taskId) ??
@@ -309,6 +320,16 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
     window.history.replaceState(window.history.state, "", url);
     moveRequests.current.set(taskId, requestId);
     setMoveTarget({ taskId, requestId, readOnly: Boolean(prior) });
+  };
+  const closeMove = () => {
+    if (moveTarget && settledMoveRequests.current.has(moveTarget.requestId)) {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("taskId") === moveTarget.taskId) {
+        url.searchParams.delete("taskId"); url.searchParams.delete("moveRequest");
+        window.history.replaceState(window.history.state, "", url);
+      }
+    }
+    setMoveTarget(null);
   };
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -337,7 +358,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
             <span className="text-xs uppercase text-zinc-500">{item.type === "node" ?
               item.level : item.storyKind === "bug" ? "Bug" : item.cardType ?? "Task"}</span>
             {item.type === "card" ? <button type="button" className="text-left underline"
-              onClick={() => void openCard(item.id)}>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</button> :
+              onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(item.id); }}>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</button> :
               <span>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</span>}
             {item.type === "card" && <span className="text-xs text-zinc-500">
               {item.status} · {item.taskRole ?? m.noRole} · {item.executionGrade ?? m.noGrade}
@@ -463,7 +484,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
               <ol className={styles.cards}>{matches.map((card) =>
                 <li key={card.id} className={styles.card + (lane === "attention" ? " " + styles.attention : "")}
                   data-testid={"amux-board-card-" + card.id}
-                  draggable={lane === "tomverse_backlog" && card.cardType === "task"}
+                  draggable={canMoveCards && lane === "tomverse_backlog" && card.cardType === "task"}
                   onDragStart={(event) => { dragCard.current = card.id;
                     event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", card.id); }}
                   onDragEnd={() => { dragCard.current = null; }}>
@@ -472,7 +493,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
                       onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
                       {amuxVisibleInspectionText(card.sourceKey ?? card.id)}</button>
                     {card.sev1 && <span className={styles.cardWarning}>SEV1</span>}
-                    {lane === "tomverse_backlog" && card.cardType === "task" &&
+                    {canMoveCards && lane === "tomverse_backlog" && card.cardType === "task" &&
                       <button type="button" className={styles.iconButton} aria-label={m.moveToQueue}
                         onClick={(event) => { returnFocusRef.current = event.currentTarget; openMove(card.id); }}>
                         <MoveRight size={14} aria-hidden="true" /></button>}
@@ -505,7 +526,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
         <summary className="cursor-pointer text-sm font-semibold">{m.archive}
           {board ? ` (${board.counts.archive})` : ""}</summary>
         <ul className="mt-3 space-y-2 text-sm">{archive.map((card) => <li key={card.id}>
-          <button type="button" className="underline" onClick={() => void openCard(card.id)}>
+          <button type="button" className="underline" onClick={(event) => {
+            returnFocusRef.current = event.currentTarget; void openCard(card.id);
+          }}>
             {amuxVisibleInspectionText(card.title ?? m.protectedTitle)}</button> · {card.status}
         </li>)}</ul>
         {board && archive.length < board.counts.archive && <button type="button"
@@ -528,9 +551,10 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
       </div>
     </section>}
     {moveTarget && <AmuxExecutionDialog title={m.moveTitle} closeLabel={m.close}
-      onClose={() => setMoveTarget(null)} returnFocusRef={returnFocusRef}>
+      onClose={closeMove} returnFocusRef={returnFocusRef}>
       <AmuxExecutionMovePanel key={moveTarget.requestId} move={moveTarget}
         onKnownRefusal={() => {
+          settledMoveRequests.current.add(moveTarget.requestId);
           moveRequests.current.delete(moveTarget.taskId);
           const url = new URL(window.location.href);
           if (url.searchParams.get("moveRequest") === moveTarget.requestId) {
@@ -538,7 +562,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId
             window.history.replaceState(window.history.state, "", url);
           }
         }}
-        onMoved={() => { void refreshBoard(); }} />
+        onMoved={() => { settledMoveRequests.current.add(moveTarget.requestId); void refreshBoard(); }} />
     </AmuxExecutionDialog>}
     {detailOpen && <AmuxExecutionDialog title={m.detail} closeLabel={m.close}
       onClose={() => closeCard()} returnFocusRef={returnFocusRef}

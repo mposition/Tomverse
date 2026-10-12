@@ -13,7 +13,8 @@ const detail = (card=a) => ({ ...card, revision:3, body:JSON.stringify({
   brief:"Approved fixture brief", feedback:null, outcomeWriteEnabled:false, result:null,
   dependencies:[],dependents:[],attempts:[],escalations:[],score:null,usage:[],reviews:[],publications:[] });
 
-async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUnknown?:boolean; moveRefused?:boolean }={}) {
+async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUnknown?:boolean;
+  moveRefused?:boolean; moveHalted?:boolean; readOnly?:boolean }={}) {
   let promoted=false; let posts=0; let reads=0;
   await page.route("**/api/admin/amux/execution-view?**", async route => {
     const p=new URL(route.request().url()).searchParams;
@@ -34,14 +35,15 @@ async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUn
     if(route.request().method()==="POST") {
       posts++;const body=route.request().postDataJSON();
       expect(body.taskId).toBe(a.id);expect(body.expectedRevision).toBe(3);
-      if(opts.moveRefused) return route.fulfill({status:409,json:{error:"promotion_not_active"}});
-      if(opts.moveUnknown) return route.fulfill({status:503,json:{state:"outcome_unknown",taskId:a.id,requestId:body.requestId}});
+      if(opts.moveRefused) return route.fulfill({status:409,json:{error:"stale_revision"}});
+      if(opts.moveHalted) return route.fulfill({json:{promoted:false,reason:"auto_halted"}});
+      if(opts.moveUnknown) return route.fulfill({status:409,json:{error:"outcome_unknown",retry:false}});
       promoted=true;
       return route.fulfill({json:{state:"promoted",taskId:a.id,requestId:body.requestId,receiptId:body.requestId}});
     }
     reads++;return route.fulfill({json:{state:"outcome_unknown",taskId:a.id}});
   });
-  await page.goto("/e2e/admin-console-fixture?view=amux");
+  await page.goto("/e2e/admin-console-fixture?view=amux" + (opts.readOnly ? "&readOnly=true" : ""));
   await expect(page.getByTestId("amux-board-card-"+a.id)).toBeVisible();
   return {posts:()=>posts,reads:()=>reads};
 }
@@ -88,6 +90,10 @@ test("move button calls one guarded write then refreshes the actual lane",async(
   await expect(page.getByRole("dialog").getByRole("status")).toContainText("unassigned Todo");
   expect(state.posts()).toBe(1);
   await expect(page.getByRole("region",{name:"AMUX Backlog"}).getByTestId("amux-board-card-"+a.id)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).not.toHaveURL(/taskId=|moveRequest=/);
+  await page.reload();await expect(page.getByTestId("amux-board-card-"+a.id)).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("dragging to the queue runs the same guarded card command",async({page})=>{
@@ -100,11 +106,26 @@ test("dragging to the queue runs the same guarded card command",async({page})=>{
 test("known refusal releases the receipt so corrected conditions can be tried",async({page})=>{
   const state=await setup(page,{moveRefused:true});
   const move=page.getByTestId("amux-board-card-"+a.id).getByRole("button",{name:"Move to AMUX queue"});
-  await move.click();await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
+  await move.click();await expect(page.getByRole("dialog").getByRole("alert")).toContainText("card changed");
   await expect(page).not.toHaveURL(/moveRequest=/);
   await page.keyboard.press("Escape");await move.click();
   await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
   expect(state.posts()).toBe(2);expect(state.reads()).toBe(0);
+});
+
+test("a halted admission response shows the actual reason without claiming success",async({page})=>{
+  const state=await setup(page,{moveHalted:true});
+  await page.getByTestId("amux-board-card-"+a.id).getByRole("button",{name:"Move to AMUX queue"}).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Admission is halted");
+  expect(state.posts()).toBe(1);expect(state.reads()).toBe(0);
+  await expect(page.getByRole("region",{name:"Tomverse Backlog"}).getByTestId("amux-board-card-"+a.id)).toBeVisible();
+});
+
+test("a read-only viewer has no move button or drag affordance",async({page})=>{
+  const state=await setup(page,{readOnly:true});
+  await expect(page.getByRole("button",{name:"Move to AMUX queue"})).toHaveCount(0);
+  await expect(page.getByTestId("amux-board-card-"+a.id)).toHaveAttribute("draggable","false");
+  expect(state.posts()).toBe(0);
 });
 
 test("unknown move uses readback and reopening never replays the write",async({page})=>{

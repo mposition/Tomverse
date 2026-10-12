@@ -153,7 +153,8 @@ export default async function AdminConsoleFixturePage({
         {view !== "amux" && <AdminUserSecurityHarness initialUser={initialUser} />}
       </div>
       {view === "amux" && <AdminLocaleProvider locale={single(params.locale) === "ko" ? "ko" : "en"}>
-        <AmuxExecutionWorkspace initialTaskId={single(params.taskId) || null} />
+        <AmuxExecutionWorkspace canMoveCards={single(params.readOnly) !== "true"}
+          initialTaskId={single(params.taskId) || null} />
       </AdminLocaleProvider>}
       {view === "narrow" ? (
         <section className="mt-4 flex flex-col gap-4">

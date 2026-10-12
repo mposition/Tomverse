@@ -12,7 +12,7 @@ import styles from "./AmuxExecutionWorkspace.module.css";
 
 export type AmuxBoardMove = { taskId: string; requestId: string; readOnly: boolean };
 type MoveResult = { state?: "promoted" | "outcome_unknown" | "not_found";
-  code?: string; error?: string; taskId?: string; receiptId?: string; requestId?: string };
+  code?: string; error?: string; reason?: string; taskId?: string; receiptId?: string; requestId?: string };
 export function AmuxExecutionMovePanel({ move, onMoved, onKnownRefusal }: {
   move: AmuxBoardMove; onMoved: () => void; onKnownRefusal: () => void;
 }) {
@@ -82,7 +82,7 @@ export function AmuxExecutionMovePanel({ move, onMoved, onKnownRefusal }: {
               result.error === "outcome_unknown" || response.status >= 500) {
             await readback(current); return;
           }
-          onRefusedRef.current(); setCode(result.code ?? result.error ?? "move_refused"); setPhase("refused");
+          onRefusedRef.current(); setCode(result.code ?? result.error ?? result.reason ?? "move_refused"); setPhase("refused");
         } catch {
           if (cancelled) return;
           if (attempted) await readback(current);

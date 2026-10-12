@@ -44,6 +44,10 @@ type OwnerMoveCommand = {
   writeHumanIntent: (tx: Prisma.TransactionClient,
     taskId: string) => Promise<string>;
 };
+type OwnerMoveAuditBinding = {
+  requestId: string;
+  humanIntentAuditId: string;
+};
 const MAX_CANDIDATES_PER_TICK = 8;
 const V22_AUDIT_ACTION = "amux.v22.auto_promotion.consumed";
 const V22_OWNER_MOVE_DESTINATION = "amux_unassigned_todo";
@@ -122,7 +126,8 @@ function resolveMoveReplay(binding: Awaited<ReturnType<
 
 async function openV22CriticalHalt(tx: Prisma.TransactionClient, now: Date,
   code: "cost_exceeded" | "lifecycle_write",
-  recordReceipt: AmuxOrchestratorReceiptRecorder) {
+  recordReceipt: AmuxOrchestratorReceiptRecorder,
+  ownerMoveAudit?: OwnerMoveAuditBinding) {
   const already = await tx.amuxRecommendationAutoHalt.findFirst({
     where: { clearedAt: null }, select: { id: true },
   });
@@ -133,7 +138,7 @@ async function openV22CriticalHalt(tx: Prisma.TransactionClient, now: Date,
     action: "amux.auto_promotion.halted",
     targetType: "AmuxRecommendationAutoHalt", targetId: haltId,
     summary: "Halted v22 promotion after a critical violation.",
-    metadata: { violationCode: code },
+    metadata: { violationCode: code, ...(ownerMoveAudit ?? {}) },
   });
   await tx.amuxRecommendationAutoHalt.create({ data: { id: haltId,
     reason: "critical_violation", violationCode: code,
@@ -379,10 +384,19 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
           await readMoveRequestBinding(tx, input.receiptId), input.ownerMove);
         if (replay) return replay;
       }
+      const openCandidateCriticalHalt = async (
+        code: "cost_exceeded" | "lifecycle_write", taskId: string) => {
+        const ownerMoveAudit = input.ownerMove ? {
+          requestId: input.ownerMove.requestId,
+          humanIntentAuditId: await input.ownerMove.writeHumanIntent(tx, taskId),
+        } : undefined;
+        return openV22CriticalHalt(tx, now, code, recordReceipt,
+          ownerMoveAudit);
+      };
       // The same queue lock as v8 serializes the total occupancy calculation.
       const critical = await requireV22GlobalGate(tx, now);
       if (critical === "cost_exceeded") {
-        return openV22CriticalHalt(tx, now, critical, recordReceipt);
+        return openCandidateCriticalHalt(critical, input.candidate.taskId);
       }
       const capacity = await readCapacity(tx, now);
       if (capacity.occupied > capacity.decision.queueLimit &&
@@ -490,7 +504,7 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
       if (await tx.amuxExecutionAttempt.count({ where: { taskId: current.taskId } }) ||
           await tx.amuxWorkDelivery.count({ where: { taskId: current.taskId } }) ||
           await tx.amuxRouteDecision.count({ where: { taskId: current.taskId } })) {
-        return openV22CriticalHalt(tx, now, "lifecycle_write", recordReceipt);
+        return openCandidateCriticalHalt("lifecycle_write", current.taskId);
       }
       const humanIntentAuditId = input.ownerMove ?
         await input.ownerMove.writeHumanIntent(tx, current.taskId) : null;
