@@ -21,6 +21,7 @@ import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminFetch } from "@/lib/adminFetch";
+import { amuxOwnerRecoveryPreparation } from "@/lib/amux/ownerRecoveryCore";
 import { amuxReviewReadError } from "@/lib/amux/reviewReadErrorCore";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
@@ -386,24 +387,38 @@ const isOutcomeUnknown = (review: ReviewDetail) => {
     attemptReason.includes("outcome_unknown");
 };
 
+const recoveryPreparationForReview = (review: ReviewDetail) =>
+  amuxOwnerRecoveryPreparation({
+    escalationReason: review.review_context.escalation_reason,
+    lastAttemptReason: review.review_context.last_attempt_reason,
+    lastAttemptOutcome: review.last_attempt?.outcome ?? null,
+    lastAttemptToStatus: review.last_attempt?.to_status ?? null,
+    lastAttemptEndedAt: review.last_attempt?.ended_at ?? null,
+    assignmentConnected: Boolean(
+      review.review_report?.scope_and_completion_criteria ||
+      review.review_context.description,
+    ),
+    workerReportConnected: Boolean(review.review_report?.worker_report),
+    workerReportVerified:
+      review.review_report?.worker_report_verified === true,
+    artifactConnected: Boolean(review.review_artifact),
+    serverAllowsRetry: review.allowed_outcomes.includes("retry") &&
+      review.proposed_transitions.retry === "todo",
+  });
+
 export const visibleAmuxOwnerReviewOutcomes = (review: ReviewDetail) => {
   if (!hasReviewSubject(review)) return [];
-  const hasAssignment = Boolean(
-    review.review_report?.scope_and_completion_criteria ||
-    review.review_context.description,
-  );
-  const hasResult = Boolean(
-    review.review_report?.worker_report || review.review_artifact,
-  );
+  const recovery = recoveryPreparationForReview(review);
   const hasApprovalEvidence = Boolean(
     (review.review_report?.worker_report &&
       review.review_report.worker_report_verified) || review.review_artifact,
   );
   const unknown = isOutcomeUnknown(review);
-  if ((!hasAssignment && !hasResult) || (unknown && !hasResult)) return [];
+  if (!recovery.decisionContextReady) return [];
   return review.allowed_outcomes.filter(isReviewOutcome)
     .filter((outcome) => outcome !== "approve" || hasApprovalEvidence)
-    .filter((outcome) => outcome !== "retry" || !unknown);
+    .filter((outcome) => outcome !== "retry" ||
+      (!unknown && recovery.retryPreviewReady));
 };
 
 export type AmuxOwnerQueueClassification =
@@ -429,14 +444,8 @@ export const classifyAmuxOwnerQueueItem = (
 ): AmuxOwnerQueueClassification => {
   if (!currentReview || currentReview.escalation.id !== escalation.id ||
       currentReview.task.id !== escalation.task.id) return "needs_read";
-  const hasAssignment = Boolean(
-    currentReview.review_report?.scope_and_completion_criteria ||
-    currentReview.review_context.description,
-  );
-  const hasWorkerEvidence = Boolean(
-    currentReview.review_report?.worker_report || currentReview.review_artifact,
-  );
-  if (isOutcomeUnknown(currentReview) || (!hasAssignment && !hasWorkerEvidence)) {
+  const recovery = recoveryPreparationForReview(currentReview);
+  if (isOutcomeUnknown(currentReview) || !recovery.decisionContextReady) {
     return "technical_recovery";
   }
   return visibleAmuxOwnerReviewOutcomes(currentReview).length > 0
@@ -450,12 +459,14 @@ export function AmuxOwnerReviewView({
   ownerExecution,
   canInspectCards,
   selectedOutcome,
+  retryReadConfirmed,
   reviewBusy,
   reauthenticationRequired,
   decisionStatusUnknown,
   date,
   number,
   onSelectOutcome,
+  onRetryReadConfirmed,
   onReread,
 }: {
   m: RoutingMessages;
@@ -463,23 +474,23 @@ export function AmuxOwnerReviewView({
   ownerExecution: OwnerExecutionState;
   canInspectCards: boolean;
   selectedOutcome: ReviewOutcome | null;
+  retryReadConfirmed: boolean;
   reviewBusy: boolean;
   reauthenticationRequired: boolean;
   decisionStatusUnknown: boolean;
   date: (value: string) => string;
   number: (value: number) => string;
   onSelectOutcome: (outcome: ReviewOutcome) => void;
+  onRetryReadConfirmed: (confirmed: boolean) => void;
   onReread: () => void;
 }) {
   const outcomes = visibleAmuxOwnerReviewOutcomes(review);
   const report = review.review_report;
+  const recovery = recoveryPreparationForReview(review);
   const unknown = isOutcomeUnknown(review);
   const succeeded = review.last_attempt?.outcome === "succeeded";
   const hasWorkerEvidence = Boolean(report?.worker_report || review.review_artifact);
-  const hasAssignment = Boolean(
-    report?.scope_and_completion_criteria || review.review_context.description,
-  );
-  const technicalOnly = !hasAssignment && !hasWorkerEvidence;
+  const technicalOnly = !recovery.decisionContextReady;
   const decisionQuestion = outcomes.includes("approve")
     ? m.ownerQuestionApprove
     : outcomes.includes("retry")
@@ -488,6 +499,28 @@ export function AmuxOwnerReviewView({
         ? m.ownerQuestionBlock
         : null;
   const cost = ownerExecution.state === "ready" ? ownerExecution.metadata : null;
+  const retryScope = report?.scope_and_completion_criteria ??
+    review.review_context.description;
+  const previousReservation = ownerExecution.state === "loading"
+    ? m.costLoading
+    : cost
+      ? formatAmuxMicrousd(cost.reservedCostMicrousd) ?? m.unknownValue
+      : m.unknownValue;
+  const previousSettlement = ownerExecution.state === "loading"
+    ? m.costLoading
+    : cost?.actualCostConfirmed && cost.actualCostMicrousd
+      ? formatAmuxMicrousd(cost.actualCostMicrousd) ?? m.unknownValue
+      : m.unknownValue;
+  const outputEvidence = recovery.outputState === "verified"
+    ? m.outputVerified
+    : recovery.outputState === "unverified"
+      ? m.outputUnverified
+      : m.outputMissing;
+  const recoveryChecklist = [
+    { label: m.checklistAssignment, ready: recovery.assignmentConnected },
+    { label: m.checklistExecution, ready: recovery.executionOutcomeKnown },
+    { label: m.checklistOutput, ready: recovery.outputState !== "missing" },
+  ];
   const blockEffect = review.task.status === "blocked"
     ? m.blockDecisionWarning.blocked
     : m.blockDecisionWarning.review;
@@ -632,9 +665,66 @@ export function AmuxOwnerReviewView({
             <Wrench aria-hidden="true" className="h-5 w-5" />
             <h5 className="font-bold">{m.technicalRecovery}</h5>
           </div>
-          <p className="mt-3 text-sm leading-6 text-amber-100/90">
-            {unknown ? m.unknownExecutionGuidance : m.noEvidenceGuidance}
-          </p>
+          <p className="mt-3 text-sm leading-6 text-amber-100/90">{m.recoveryPreparationIntro}</p>
+          <div className="mt-4 rounded-lg border border-amber-300/20 bg-zinc-950/40 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-amber-200">{m.recoveryWhyStopped}</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-200">
+              {m.recoveryReason[recovery.reason]}
+            </p>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/60 p-4"
+            data-testid="admin-amux-recovery-evidence">
+            <h6 className="font-bold text-zinc-100">{m.recoveryKnownUnknown}</h6>
+            <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-[minmax(9rem,0.7fr)_minmax(0,1.3fr)]">
+              <dt className="text-zinc-400">{m.originalWorkEvidence}</dt>
+              <dd className="text-zinc-200">{recovery.assignmentConnected
+                ? m.originalWorkConnected : m.originalWorkMissing}</dd>
+              <dt className="text-zinc-400">{m.previousExecutionEvidence}</dt>
+              <dd className="text-zinc-200">{recovery.executionOutcomeKnown
+                ? m.executionKnown : m.executionUnknown}</dd>
+              <dt className="text-zinc-400">{m.workerOutputEvidence}</dt>
+              <dd className="text-zinc-200">{outputEvidence}</dd>
+              <dt className="text-zinc-400">{m.reservedMaximum}</dt>
+              <dd className="text-zinc-200">{previousReservation}</dd>
+              <dt className="text-zinc-400">{m.actualSettledCost}</dt>
+              <dd className="text-zinc-200">{previousSettlement}</dd>
+            </dl>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/60 p-4"
+            data-testid="admin-amux-recovery-checklist">
+            <h6 className="font-bold text-zinc-100">{m.recoveryChecklist}</h6>
+            <p className="mt-2 text-xs leading-5 text-zinc-400">{m.recoveryChecklistBoundary}</p>
+            <ul className="mt-3 space-y-2 text-sm">
+              {recoveryChecklist.map((item) => (
+                <li key={item.label} className="flex min-h-11 flex-col justify-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/70 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-zinc-200">{item.label}</span>
+                  <span className={item.ready ? "font-semibold text-emerald-300" : "font-semibold text-amber-200"}>
+                    {item.ready ? m.checklistReady : m.checklistMissing}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {recovery.missingEvidence.length > 0 && (
+              <p className="mt-3 text-sm leading-6 text-amber-100" data-testid="admin-amux-missing-evidence">
+                {m.missingEvidence}: {recovery.missingEvidence
+                  .map((item) => m.missingEvidenceItem[item]).join(" · ")}
+              </p>
+            )}
+          </div>
+
+          <p className="mt-4 text-sm leading-6 text-amber-100">{m.duplicateCostRisk}</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-zinc-700 bg-zinc-950/60 p-4">
+              <p className="font-bold text-zinc-100">{m.amuxNextStep}</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-300">{m.amuxNextStepDetail}</p>
+            </div>
+            <div className="rounded-lg border border-zinc-700 bg-zinc-950/60 p-4">
+              <p className="font-bold text-zinc-100">{m.operatorNextStep}</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-300">{m.operatorNextStepDetail}</p>
+            </div>
+          </div>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <button type="button" onClick={onReread}
               className="min-h-11 rounded-lg border border-amber-300/40 px-4 py-2 font-semibold text-amber-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300"
@@ -648,6 +738,63 @@ export function AmuxOwnerReviewView({
               </Link>
             )}
           </div>
+        </section>
+      )}
+
+      {recovery.retryPreviewReady && retryScope && (
+        <section className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5"
+          data-testid="admin-amux-retry-preview">
+          <h5 className="text-lg font-black text-white">{m.retryPreviewTitle}</h5>
+          <p className="mt-2 text-sm leading-6 text-zinc-300">{m.retryPreviewIntro}</p>
+          <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/70 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryScope}</p>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-sans text-sm leading-6 text-zinc-200 [overflow-wrap:anywhere]">
+              {retryScope}
+            </pre>
+          </div>
+          <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryAttemptLimit}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">
+                {m.retryAttemptLimitValue(review.retry.used, review.retry.limit, review.retry.remaining)}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryCorrectionEvidence}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">{m.retryCorrectionUnavailable}</dd>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryPreviousReservation}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">{previousReservation}</dd>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryPreviousSettlement}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">{previousSettlement}</dd>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryNewCost}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">{m.retryNewCostUnavailable}</dd>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <dt className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryDuplicateControl}</dt>
+              <dd className="mt-2 text-sm leading-6 text-zinc-200">{m.retryDuplicateControlDetail}</dd>
+            </div>
+          </dl>
+          <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/70 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{m.retryEffect}</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-200">
+              {m.retryEffectDetail(review.task.status,
+                review.proposed_transitions.retry ?? "todo")}
+            </p>
+          </div>
+          <label className="mt-4 flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm font-semibold leading-6 text-blue-100">
+            <input type="checkbox" checked={retryReadConfirmed}
+              onChange={(event) => onRetryReadConfirmed(event.target.checked)}
+              disabled={reviewBusy || decisionStatusUnknown}
+              className="mt-1 h-4 w-4 shrink-0 accent-blue-500"
+              data-testid="admin-amux-retry-read-confirmation" />
+            <span>{m.retryReadConfirmation}</span>
+          </label>
         </section>
       )}
 
@@ -706,6 +853,13 @@ export function AmuxOwnerReviewView({
         <section className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5" data-testid="admin-amux-owner-decision">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-300">{m.ownerDecision}</p>
           <h5 className="mt-2 text-lg font-black text-white">{decisionQuestion}</h5>
+          {outcomes.includes("block") && recovery.outputState === "missing" && (
+            <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100"
+              data-testid="admin-amux-block-without-result">
+              {m.blockWithoutResultNotice(review.task.status,
+                review.proposed_transitions.block ?? "blocked")}
+            </p>
+          )}
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             {outcomes.map((outcome) => (
               <button key={outcome} type="button"
@@ -883,6 +1037,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
   const [reviewUnavailable, setReviewUnavailable] = useState(false);
   const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
   const [selectedOutcome, setSelectedOutcome] = useState<ReviewOutcome | null>(null);
+  const [retryReadConfirmed, setRetryReadConfirmed] = useState(false);
   const [resolution, setResolution] = useState("");
   const [proposal, setProposal] = useState<ReviewProposal | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -906,6 +1061,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
     setReviewUnavailable(false);
     setReauthenticationRequired(false);
     setSelectedOutcome(null);
+    setRetryReadConfirmed(false);
     setResolution("");
     setProposal(null);
     setIdempotencyKey(null);
@@ -977,6 +1133,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
     setReviewUnavailable(false);
     setReauthenticationRequired(false);
     setSelectedOutcome(null);
+    setRetryReadConfirmed(false);
     setResolution("");
     setProposal(null);
     setIdempotencyKey(null);
@@ -1047,6 +1204,10 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
   const prepareProposal = async () => {
     if (!review || !selectedOutcome || reviewBusy || pendingDecision || !review.allowed_outcomes.includes(selectedOutcome)) return;
     if (!hasReviewSubject(review)) return;
+    if (selectedOutcome === "retry" && !retryReadConfirmed) {
+      setReviewError(m.retryConfirmationRequired);
+      return;
+    }
     if (resolution.trim().length < 3 || resolution.trim().length > 1_000) {
       setReviewError(m.resolutionLength);
       return;
@@ -1102,6 +1263,10 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
   const confirmDecision = async () => {
     if (!review || !proposal || !idempotencyKey || reviewBusy || decisionStatusUnknown || pendingDecision ||
       !selectedOutcome || selectedOutcome !== proposal.outcome) return;
+    if (selectedOutcome === "retry" && !retryReadConfirmed) {
+      setReviewError(m.retryConfirmationRequired);
+      return;
+    }
     if (!Number.isFinite(Date.parse(proposal.expires_at)) ||
       Date.parse(proposal.expires_at) <= Date.now()) {
       setReviewError(m.proposalExpired);
@@ -1472,14 +1637,22 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                           ownerExecution={ownerExecution}
                           canInspectCards={canInspectCards}
                           selectedOutcome={selectedOutcome}
+                          retryReadConfirmed={retryReadConfirmed}
                           reviewBusy={reviewBusy}
                           reauthenticationRequired={reauthenticationRequired}
                           decisionStatusUnknown={decisionStatusUnknown}
                           date={date}
                           number={number}
                           onReread={() => void openReview(review.escalation.id)}
+                          onRetryReadConfirmed={(confirmed) => {
+                            setRetryReadConfirmed(confirmed);
+                            setProposal(null);
+                            setIdempotencyKey(null);
+                            setReviewError(null);
+                          }}
                           onSelectOutcome={(outcome) => {
                             setSelectedOutcome(outcome);
+                            if (outcome !== "retry") setRetryReadConfirmed(false);
                             setProposal(null);
                             setIdempotencyKey(null);
                             setDecisionStatusUnknown(false);
@@ -1509,7 +1682,8 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                               <button
                                 type="button"
                                 onClick={() => void prepareProposal()}
-                                disabled={reviewBusy || resolution.trim().length < 3}
+                                disabled={reviewBusy || resolution.trim().length < 3 ||
+                                  (selectedOutcome === "retry" && !retryReadConfirmed)}
                                 className="mt-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 font-bold text-blue-100 disabled:opacity-50"
                                 data-testid="admin-amux-prepare-proposal"
                               >

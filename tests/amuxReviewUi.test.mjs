@@ -103,3 +103,17 @@ test("failed detail reads offer an explicit read-only retry without clearing an 
   assert.doesNotMatch(retry, /resolve|clearPendingDecision|POST/);
   assert.match(messages, /Task 승인·재실행·차단 해제·실행은 하지 않습니다/);
 });
+
+test("recovery preparation is read-only and retry keeps the existing bound proposal flow", () => {
+  assert.match(panel, /amuxOwnerRecoveryPreparation/);
+  assert.match(panel, /recovery\.decisionContextReady/);
+  assert.match(panel, /recovery\.retryPreviewReady/);
+  assert.match(panel, /data-testid="admin-amux-recovery-checklist"/);
+  assert.match(panel, /data-testid="admin-amux-retry-preview"/);
+  assert.match(panel, /data-testid="admin-amux-retry-read-confirmation"/);
+  assert.match(panel, /selectedOutcome === "retry" && !retryReadConfirmed/);
+  assert.match(panel, /expected_subject_digest:\s*review\.review_content\.digest/);
+  assert.match(messages, /does not start an evidence-retrieval job/);
+  assert.match(messages, /근거 조회 작업을 시작하거나/);
+  assert.doesNotMatch(panel, /force.?requeue|runtime.?cancel|automatic.?recovery/i);
+});
