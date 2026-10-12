@@ -57,6 +57,12 @@ used for its Task process. The native roster's account reading is not a
 substitute. API-key helpers, alternate-backend/auth settings, unsafe or
 expired credentials, unsupported/malformed windows and failed provider
 reads produce no observation. No model call, login or token refresh occurs.
+Both the fixed CLI profile's global settings and its fixed HOME global
+settings are checked; project and managed settings cannot select another
+authentication path either. Settings reads are bounded at 256 KiB and the
+credential file at 64 KiB. An explicitly reported zero/no-reset optional
+model window is inactive, not a fabricated availability measurement; the
+required account/session windows still need valid future resets.
 The OAuth token is used only for one bounded HTTPS GET to Anthropic's usage
 endpoint; it never enters the bridge, app, audit, error output or journal.
 
@@ -68,6 +74,10 @@ and strict schema, serializes that UUID, and commits the observation and
 existing canonical system audit together. A duplicate with identical facts
 returns the original row; a different payload cannot replace it. Late
 transaction commits remain subject to the existing DB deadline fence.
+The canonical audit-chain lock precedes observation locks/inserts. The
+bridge uses the existing fifteen-second lifecycle transport limit, covering
+the normal app connection/transaction budget without an artificial five-
+second cutoff; this is not a guarantee of the durable COMMIT phase.
 
 A lost POST reply permits exact authenticated GET lookup only, never another
 POST. A matching row resolves the outcome; absent/conflicting/unreadable

@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { getConfiguredAmuxV22WorkerCatalog } from "@/lib/amux/routing";
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 
@@ -60,6 +60,7 @@ export async function POST(request: Request) {
     const lockKey = `amux-quota:${id}`;
     const result = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.quotaObservationWrite,
       async (tx, context) => {
+        await takeAuditChainLock(tx);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
         const existing = await tx.amuxQuotaObservation.findUnique({ where: { id } });
         if (existing) {

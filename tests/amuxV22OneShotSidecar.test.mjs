@@ -36,6 +36,10 @@ test("profile quota uses the tightest reported window and never invents availabi
     limits: [{ kind: "session", percent: 99, resets_at: reset }] };
   assert.equal(normalizeAmuxV22ClaudeQuota(body, at).remaining_basis_points, 7400);
   assert.equal(normalizeAmuxV22ClaudeQuota({ ...body,
+    seven_day_opus: { utilization: 0, resets_at: null } }, at).remaining_basis_points, 7400);
+  for (const utilization of [undefined, "0", 1]) assert.equal(normalizeAmuxV22ClaudeQuota({ ...body,
+    seven_day_opus: { utilization, resets_at: null } }, at), null);
+  assert.equal(normalizeAmuxV22ClaudeQuota({ ...body,
     seven_day_opus: { utilization: 100, resets_at: reset } }, at).exhausted, true);
   for (const bad of [{}, { five_hour: body.five_hour },
     { ...body, seven_day: { utilization: "16", resets_at: reset } },
@@ -46,6 +50,8 @@ test("profile quota uses the tightest reported window and never invents availabi
   const limits = [{ kind: "session", percent: 12.345, resets_at: reset },
     { kind: "weekly_all", percent: 15, resets_at: reset }];
   assert.equal(normalizeAmuxV22ClaudeQuota({ limits }, at).remaining_basis_points, 8500);
+  assert.equal(normalizeAmuxV22ClaudeQuota({ limits: [...limits,
+    { kind: "weekly_scoped", percent: 0, resets_at: null }] }, at).remaining_basis_points, 8500);
   assert.equal(normalizeAmuxV22ClaudeQuota({ limits: [...limits, { kind: "unknown", percent: 0 }] }, at), null);
 });
 
@@ -82,6 +88,9 @@ test("quota reads only the assigned CLI profile, bounds and erases credentials, 
       return path === join(config.claudeConfigDir, ".claude.json")
         ? { primaryApiKey: "synthetic-not-real" } : null; } }), null);
   assert.ok(visited.includes(join(config.claudeConfigDir, ".claude.json")));
+  assert.equal(await probeAmuxV22ClaudeQuota(config, { ...options,
+    readSettings: async path => path === join(config.homePath, ".claude.json")
+      ? { apiKeyHelper: "must-not-execute" } : null }), null);
   assert.equal(network, 1, "API-key/alternate backend settings cannot borrow subscription quota");
 });
 
