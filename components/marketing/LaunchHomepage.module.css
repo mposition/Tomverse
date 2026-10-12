@@ -48,7 +48,7 @@
 .modelArt { position: relative; min-height: 550px; }
 .rails { position: absolute; left: 10px; top: 10px; width: 660px; height: 340px; pointer-events: none; }
 .rails img { display: block; }
-.oneSculpture { position: absolute; left: 0; top: 300px; font-weight: 800; font-size: min(14.8vw, 13.375rem); line-height: .95; letter-spacing: -.06em; color: #52525b; opacity: .32; user-select: none; }
+.oneSculpture { position: absolute; left: 0; top: 300px; font-weight: 800; font-size: min(14.8vw, 13.375rem); line-height: .95; letter-spacing: -.06em; color: #71717a; user-select: none; }
 .modelStamps { position: relative; display: flex; align-items: start; justify-content: space-between; gap: 24px; padding: 18px 20px 0 12px; }
 .modelStamp { flex: 1 1 0; min-width: 0; background: var(--launch-panel); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 1; }
 .modelStamp strong { font-size: 1.625rem; line-height: 1.15; }
@@ -171,8 +171,8 @@
 .guestGrid p { font-size: 1.0625rem; }
 .guestGrid .actions { justify-content: end; }
 
-@keyframes riseIn { from { opacity: 0; translate: 0 16px; } to { opacity: 1; translate: 0 0; } }
-@keyframes revealResult { from { opacity: .4; translate: 0 6px; } to { opacity: 1; translate: 0 0; } }
+@keyframes riseIn { from { translate: 0 16px; } to { translate: 0 0; } }
+@keyframes revealResult { from { translate: 0 6px; } to { translate: 0 0; } }
 
 @media (min-width: 1600px) {
   .ribbon { justify-content: center; }
@@ -323,19 +323,19 @@
   .exampleResult { padding: 16px; }
   .rails { transform: scale(.43); }
 }
-/* Figma entrance tracks play once for readability; only the ribbon repeats. */
-.heroTitle span:first-child { animation: kf_13_255_opacity_0 4.5s linear, kf_13_255_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
-@keyframes kf_13_255_opacity_0 { 0% { opacity: 0; } 3.333% { animation-timing-function: ease-out; opacity: 0; } 18.889% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_255_translate_0 { 0% { translate: 0px 70px; } 3.333% { animation-timing-function: ease-out; translate: 0px 70px; } 18.889% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
-.heroTitle span:last-child { animation: kf_13_256_opacity_0 4.5s linear, kf_13_256_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
-@keyframes kf_13_256_opacity_0 { 0% { opacity: 0; } 7.111% { animation-timing-function: ease-out; opacity: 0; } 22.667% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_256_translate_0 { 0% { translate: 0px 70px; } 7.111% { animation-timing-function: ease-out; translate: 0px 70px; } 22.667% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
-.stamp0 { animation: kf_13_269_opacity_0 4.5s linear, kf_13_269_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
-@keyframes kf_13_269_opacity_0 { 0% { opacity: 0; } 6.667% { animation-timing-function: ease-out; opacity: 0; } 21.111% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_269_translate_0 { 0% { translate: -130px -40px; } 6.667% { animation-timing-function: ease-out; translate: -130px -40px; } 25.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
-.stamp1 { animation: kf_13_270_opacity_0 4.5s linear, kf_13_270_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
-@keyframes kf_13_270_opacity_0 { 0% { opacity: 0; } 10.667% { animation-timing-function: ease-out; opacity: 0; } 25.111% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_270_translate_0 { 0% { translate: 0px -40px; } 10.667% { animation-timing-function: ease-out; translate: 0px -40px; } 29.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
-.stamp2 { animation: kf_13_271_opacity_0 4.5s linear, kf_13_271_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
-@keyframes kf_13_271_opacity_0 { 0% { opacity: 0; } 14.667% { animation-timing-function: ease-out; opacity: 0; } 29.111% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_271_translate_0 { 0% { translate: 130px -40px; } 14.667% { animation-timing-function: ease-out; translate: 130px -40px; } 33.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
-.chatPreview { animation: kf_13_272_opacity_0 4.5s linear, kf_13_272_translate_0 4.5s linear, kf_13_272_scale_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
-@keyframes kf_13_272_opacity_0 { 0% { opacity: 0; } 21.111% { animation-timing-function: ease-out; opacity: 0; } 35.556% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_272_translate_0 { 0% { translate: 0px 70px; } 21.111% { animation-timing-function: ease-out; translate: 0px 70px; } 38.889% { translate: 0px 0px; } 100% { translate: 0px 0px; } } @keyframes kf_13_272_scale_0 { 0% { scale: 0.9 0.9; } 21.111% { animation-timing-function: ease-out; scale: 0.9 0.9; } 38.889% { scale: 1 1; } 100% { scale: 1 1; } }
+/* Keep text opaque throughout entrance motion so it stays readable on every frame. */
+.heroTitle span:first-child { animation: kf_13_255_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
+@keyframes kf_13_255_translate_0 { 0% { translate: 0px 70px; } 3.333% { animation-timing-function: ease-out; translate: 0px 70px; } 18.889% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
+.heroTitle span:last-child { animation: kf_13_256_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
+@keyframes kf_13_256_translate_0 { 0% { translate: 0px 70px; } 7.111% { animation-timing-function: ease-out; translate: 0px 70px; } 22.667% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
+.stamp0 { animation: kf_13_269_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
+@keyframes kf_13_269_translate_0 { 0% { translate: -130px -40px; } 6.667% { animation-timing-function: ease-out; translate: -130px -40px; } 25.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
+.stamp1 { animation: kf_13_270_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
+@keyframes kf_13_270_translate_0 { 0% { translate: 0px -40px; } 10.667% { animation-timing-function: ease-out; translate: 0px -40px; } 29.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
+.stamp2 { animation: kf_13_271_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
+@keyframes kf_13_271_translate_0 { 0% { translate: 130px -40px; } 14.667% { animation-timing-function: ease-out; translate: 130px -40px; } 33.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
+.chatPreview { animation: kf_13_272_translate_0 4.5s linear, kf_13_272_scale_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
+@keyframes kf_13_272_translate_0 { 0% { translate: 0px 70px; } 21.111% { animation-timing-function: ease-out; translate: 0px 70px; } 38.889% { translate: 0px 0px; } 100% { translate: 0px 0px; } } @keyframes kf_13_272_scale_0 { 0% { scale: 0.9 0.9; } 21.111% { animation-timing-function: ease-out; scale: 0.9 0.9; } 38.889% { scale: 1 1; } 100% { scale: 1 1; } }
 .ribbon { animation: kf_13_283_translate_0 4.5s linear; animation-iteration-count: infinite; }
 @keyframes kf_13_283_translate_0 { 0% { animation-timing-function: ease-out; translate: 90px 0px; } 93.333% { translate: -80px 0px; } 100% { translate: -80px 0px; } }
 .homepage[data-motion-disabled="true"] .hero * { animation: none !important; }
