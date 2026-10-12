@@ -28,7 +28,7 @@ const REQUEST_BOUNDARY_FILES = Object.freeze([
   "lib/mobileAccessToken.ts",
   "lib/nativeAppCors.ts",
   "lib/apiCacheControlPolicy.ts",
-  "lib/proxyMarketingBoundary.ts",
+  "lib/marketingRoutes.ts",
 ]);
 // Hash the complete proxy, including imports, matcher and forwarded headers.
 // Its other import branches are not traversed into unrelated product code.
