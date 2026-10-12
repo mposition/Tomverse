@@ -44,15 +44,13 @@ const localizedSearchIntentPaths = new Set([
 
 export const REVIEW_PRODUCT_PATH = "/products/review";
 
-/** Product choices are explicit; a Review CTA never switches to Chat. */
+/** Product choices are explicit; marketing never changes workspace preferences. */
 export const marketingProductEntryHref = (
   product: "chat" | "review",
   lang: string,
-  isAuthenticated = false,
 ) => {
   const path = product === "chat" ? CHAT_WORKSPACE_PATH : PRODUCT_SURFACE_PATH.review;
-  const guestEntry = product === "review" && !isAuthenticated ? "&entry=guest-preview" : "";
-  return `${path}?lang=${encodeURIComponent(lang)}${guestEntry}`;
+  return `${path}?lang=${encodeURIComponent(lang)}`;
 };
 
 const normalizePathname = (pathname: string) => {

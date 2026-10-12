@@ -23,11 +23,11 @@ test("only a strict authenticated offer opens Chat, using a private no-store rea
   startLandingChatCapabilityRead({
     accountUserId: "account-a",
     fetcher: async (url, options) => {
-      assert.equal(url, "/api/products/chat/capabilities");
+      assert.equal(url, "/api/marketing/chat-entry");
       assert.equal(options.method, "GET");
       assert.equal(options.cache, "no-store");
       assert.ok(options.signal instanceof AbortSignal);
-      return Response.json({ autoSelection: { offered: true }, guestAutoAuthority: "ignored" });
+      return Response.json({ offered: true });
     },
     onResolved: value => values.push(value),
   });
@@ -35,12 +35,13 @@ test("only a strict authenticated offer opens Chat, using a private no-store rea
   assert.deepEqual(values, [true]);
 });
 
-test("missing product endpoint, malformed offers and network errors keep Chat unavailable", async () => {
+test("missing marketing endpoint, malformed offers and network errors keep Chat unavailable", async () => {
   for (const fetcher of [
     async () => new Response("Not found", { status: 404 }),
-    async () => Response.json({ autoSelection: { offered: "true" } }),
-    async () => Response.json({ autoSelection: { offered: 1 } }),
-    async () => Response.json([{ autoSelection: { offered: true } }]),
+    async () => Response.json({ offered: "true" }),
+    async () => Response.json({ offered: 1 }),
+    async () => Response.json([{ offered: true }]),
+    async () => Response.json({ autoSelection: { offered: true } }),
     async () => Response.json({}),
     async () => { throw new Error("network failed"); },
   ]) {
@@ -68,9 +69,9 @@ test("cancelled account reads cannot enable a later account or the same account 
   const cancelB = begin("account-b", "B");
   cancelB();
   begin("account-a", "current A");
-  responses[0](Response.json({ autoSelection: { offered: true } }));
-  responses[1](Response.json({ autoSelection: { offered: true } }));
-  responses[2](Response.json({ autoSelection: { offered: false } }));
+  responses[0](Response.json({ offered: true }));
+  responses[1](Response.json({ offered: true }));
+  responses[2](Response.json({ offered: false }));
   await nextTask();
   assert.equal(signals[0].aborted, true);
   assert.equal(signals[1].aborted, true);

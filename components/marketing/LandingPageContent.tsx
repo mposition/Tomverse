@@ -49,8 +49,7 @@ export function LandingPageContent() {
   const { lang } = useLanguage();
   const { status } = useSession();
   const content = getLandingCopy(lang);
-  const isAuthenticated = status === "authenticated";
-  const primaryChatHref = marketingProductEntryHref("review", lang, isAuthenticated);
+  const primaryChatHref = marketingProductEntryHref("review", lang);
   const primaryCtaLabel =
     status === "authenticated" ? content.signedInCta : content.primaryCta;
   const landingTrackedRef = useRef(false);

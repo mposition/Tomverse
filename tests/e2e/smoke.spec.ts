@@ -21,7 +21,7 @@ test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
   await expect(page.getByTestId("landing-hero-title")).toContainText("AI");
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "unauthenticated");
   const guestChatAvailable = await page.getByTestId("launch-homepage").getAttribute("data-guest-chat-trial-available") === "true";
-  const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/review?lang=en&entry=guest-preview";
+  const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/review?lang=en";
   if ((page.viewportSize()?.width ?? 1024) >= 1024) {
     await expect(
       page.getByTestId("marketing-header-app-cta")
@@ -64,10 +64,10 @@ test("signed-in homepage keeps the page visible and offers one continue action",
       }),
     })
   );
-  await page.route("**/api/products/chat/capabilities", route => route.fulfill({
+  await page.route("**/api/marketing/chat-entry", route => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify({ autoSelection: { offered: false } }),
+    body: JSON.stringify({ offered: false }),
   }));
 
   await page.goto("/");
