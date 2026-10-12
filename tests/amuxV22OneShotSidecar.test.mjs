@@ -11,7 +11,7 @@ import { amuxV22ClaudeArgs, amuxV22SidecarEnabled,
   checkAmuxV22SidecarSocketDir, createAmuxV22SidecarHandler,
   createAmuxV22SidecarServer,
   parseAmuxV22OneShotRequest,
-  runAmuxV22OneShot } from
+  runAmuxV22OneShot, normalizeAmuxV22ClaudeQuota, probeAmuxV22ClaudeQuota } from
   "../lib/amux/v22OneShotSidecar.mjs";
 
 const attemptId = "00000000-0000-4000-8000-000000000001";
@@ -27,6 +27,69 @@ const usage = { type: "result", subtype: "success", is_error: false,
     inputTokens: 10, outputTokens: 5,
     cacheReadInputTokens: 2, cacheCreationInputTokens: 1,
   } } };
+
+test("profile quota uses the tightest reported window and never invents availability", () => {
+  const at = "2026-10-12T00:00:00.000Z";
+  const reset = "2026-10-12T07:00:00.000Z";
+  const body = { five_hour: { utilization: 26, resets_at: reset },
+    seven_day: { utilization: 16, resets_at: reset }, seven_day_opus: null,
+    limits: [{ kind: "session", percent: 99, resets_at: reset }] };
+  assert.equal(normalizeAmuxV22ClaudeQuota(body, at).remaining_basis_points, 7400);
+  assert.equal(normalizeAmuxV22ClaudeQuota({ ...body,
+    seven_day_opus: { utilization: 100, resets_at: reset } }, at).exhausted, true);
+  for (const bad of [{}, { five_hour: body.five_hour },
+    { ...body, seven_day: { utilization: "16", resets_at: reset } },
+    { ...body, seven_day: { utilization: -1, resets_at: reset } },
+    { ...body, five_hour: { utilization: 0, resets_at: at } }]) {
+    assert.equal(normalizeAmuxV22ClaudeQuota(bad, at), null);
+  }
+  const limits = [{ kind: "session", percent: 12.345, resets_at: reset },
+    { kind: "weekly_all", percent: 15, resets_at: reset }];
+  assert.equal(normalizeAmuxV22ClaudeQuota({ limits }, at).remaining_basis_points, 8500);
+  assert.equal(normalizeAmuxV22ClaudeQuota({ limits: [...limits, { kind: "unknown", percent: 0 }] }, at), null);
+});
+
+test("quota reads only the assigned CLI profile, bounds and erases credentials, and never launches CLI", async () => {
+  let network = 0, closed = 0, suppliedBuffer;
+  const credential = { claudeAiOauth: { accessToken: "synthetic-oauth-token-not-real", expiresAt: Date.now() + 60000 } };
+  const options = { uid: 1000,
+    readSettings: async () => null,
+    open: async path => { assert.equal(path, join(config.claudeConfigDir, ".credentials.json")); return {
+      stat: async () => ({ isFile: () => true, mode: 0o100600, uid: 1000, size: 100 }),
+      read: async buffer => { suppliedBuffer = buffer; const data = Buffer.from(JSON.stringify(credential));
+        data.copy(buffer); return { bytesRead: data.length }; }, close: async () => { closed += 1; },
+    }; },
+    request: async token => { network += 1; assert.equal(token, credential.claudeAiOauth.accessToken);
+      const reset = new Date(Date.now() + 3600000).toISOString();
+      return { five_hour: { utilization: 10, resets_at: reset }, seven_day: { utilization: 20, resets_at: reset } }; },
+  };
+  const result = await probeAmuxV22ClaudeQuota(config, options);
+  assert.equal(result.remaining_basis_points, 8000);
+  assert.equal(network, 1); assert.equal(closed, 1);
+  assert.equal(suppliedBuffer.every(byte => byte === 0), true);
+  assert.equal(JSON.stringify(result).includes(credential.claudeAiOauth.accessToken), false);
+  credential.claudeAiOauth.expiresAt = Date.now() - 1;
+  assert.equal(await probeAmuxV22ClaudeQuota(config, options), null);
+  assert.equal(network, 1, "expired authentication must not refresh or call provider");
+  credential.claudeAiOauth.expiresAt = Date.now() + 60000;
+  assert.equal(await probeAmuxV22ClaudeQuota(config, { ...options,
+    readSettings: async () => ({ apiKeyHelper: "must-not-execute" }) }), null);
+  assert.equal(await probeAmuxV22ClaudeQuota(config, { ...options,
+    readSettings: async () => ({ env: { ANTHROPIC_API_KEY: "not-real" } }) }), null);
+  assert.equal(network, 1, "API-key/alternate backend settings cannot borrow subscription quota");
+});
+
+test("quota RPC is bound to the fixed worker and creates no execution journal", async () => {
+  let runs = 0, reads = 0;
+  const handler = createAmuxV22SidecarHandler({ worker: request.worker, stateDir: config.worktreePath,
+    run: async () => { runs += 1; }, quota: async () => { reads += 1; return null; } });
+  const message = { op: "quota", requestId: attemptId, worker: request.worker };
+  assert.deepEqual(await handler(message), { kind: "quota_unavailable", requestId: attemptId, worker: request.worker });
+  await assert.rejects(handler({ ...message, worker: "another-worker" }));
+  await assert.rejects(handler({ ...message, claudeConfigDir: "/another-profile" }));
+  await assert.rejects(handler({ ...message, requestId: "not-an-id" }));
+  assert.equal(reads, 1); assert.equal(runs, 0);
+});
 
 async function readFinished(handler) {
   for (let i = 0; i < 100; i += 1) {

@@ -188,6 +188,17 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 3,
     isolation: "mutation",
   },
+  quotaObservationRead: {
+    operation: "quota_observation_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  quotaObservationWrite: {
+    operation: "quota_observation_write",
+    // setup + identity lock + lookup + create + canonical audit (4) + fence
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
   ownershipRecoveryRead: {
     operation: "ownership_recovery_read",
     prismaCallCeiling: 4,
