@@ -506,12 +506,20 @@ const compilerOptions = parsedConfig.options;
 // in `lib/models.ts` move its two `MODEL_ACCESS_RANK[...]` accesses by 16
 // lines. No access is added; count 228 and the position-free inventory are
 // unchanged, so this repins positions only.
+// 2026-10-12, AMUX worker registry R1 (orchestration policy version 31): the
+// marketing webhook fingerprint's history comment in
+// lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
+// below it. Count 228 and the position-free inventory remain unchanged; only
+// their source positions are repinned.
+// 2026-10-12, Guest Smart Adaptive plus AMUX worker registry merge: both
+// fingerprint provenance notes coexist. Access count 228 and position-free
+// digest are unchanged; the positions below the combined note are repinned.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "2ef8e03ecd2d5a67e3ab1dd41c1bfb89",
-  "8fcaff00b7f3bbc9aec39ad384b87291",
+  "3894a21bda0bf65ffa6322540c35a65f",
+  "b036fbcdf396611b5ab4de40387821e0",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

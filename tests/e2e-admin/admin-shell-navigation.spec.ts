@@ -622,15 +622,19 @@ test.describe("admin console shell", () => {
   }) => {
     await page.goto("/admin/amux-execution");
     const strip = page.getByRole("navigation", { name: "Execution sections" });
-    // Cards, Assignment, Halts (orchestration policy version 20) and Decision
-    // Maker (docs/policy/amux-decision-maker.md §8).
-    await expect(strip.getByRole("link")).toHaveCount(4);
+    // Cards, Assignment, Halts (orchestration policy version 20), Decision
+    // Maker (docs/policy/amux-decision-maker.md §8) and Workers (orchestration
+    // policy version 31).
+    await expect(strip.getByRole("link")).toHaveCount(5);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(1);
     await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(1);
+    await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(1);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
       /tab=cards$/
     );
+    await expect(page.getByTestId("amux-execution-workspace")).toBeVisible();
+    await page.getByText("Additional card and usage records", { exact: true }).click();
     await expect(page.getByTestId("amux-card-list-panel")).toBeVisible();
     // One heading per page: the panel's title no longer competes with it.
     await expect(consoleHeading(page)).toHaveCount(1);
@@ -690,9 +694,10 @@ test.describe("the AMUX group by role", () => {
     await page.goto("/admin/amux-execution");
     await expect(consoleHeading(page)).toHaveText("Execution");
     const strip = page.getByRole("navigation", { name: "Execution sections" });
-    // Assignment, Halts and Decision Maker: every admin role may read the
-    // halts and the switches; only an owner may clear a halt.
-    await expect(strip.getByRole("link")).toHaveCount(3);
+    // Assignment, Halts, Decision Maker and Workers: every admin role may read
+    // the halts, the switches and the worker registry; only an owner may clear
+    // a halt or change the registry.
+    await expect(strip.getByRole("link")).toHaveCount(4);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(1);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
@@ -700,6 +705,31 @@ test.describe("the AMUX group by role", () => {
     );
     await expect(page.getByTestId("admin-amux-routing-panel")).toBeVisible();
     await expect(page.getByTestId("amux-card-list-panel")).toHaveCount(0);
+  });
+
+  test("Workers shows the registry to every role, and offers the owner nothing while the code latch is off", async ({
+    page,
+    signInAs,
+  }) => {
+    // Orchestration policy version 31, sections 3 and 8: any administrator
+    // reads the registry and its comparison with the assignment catalog; only
+    // the owner may register, and R1 ships with registry writes latched off.
+    await signInAs("readonly");
+    await page.goto("/admin/amux-execution?tab=workers");
+    const panel = page.getByTestId("amux-worker-registry-panel");
+    await expect(panel).toBeVisible();
+    await expect(page.getByTestId("amux-worker-registry-read-only")).toBeVisible();
+    await expect(page.getByTestId("amux-worker-registry-comparison-status")).toBeVisible();
+    await expect(page.getByTestId("amux-worker-registry-seed")).toHaveCount(0);
+    await expect(panel.getByRole("button")).toHaveCount(0);
+
+    await signInAs("owner");
+    await page.goto("/admin/amux-execution?tab=workers");
+    await expect(page.getByTestId("amux-worker-registry-read-only")).toHaveCount(0);
+    await expect(page.getByTestId("amux-worker-registry-latch")).toBeVisible();
+    await expect(page.getByTestId("amux-worker-registry-seed")).toBeVisible();
+    await expect(page.getByTestId("amux-worker-registry-seed-register")).toBeDisabled();
+    expect(await adminFixtureDatabase().amuxWorkerRegistryEvent.count()).toBe(0);
   });
 
   test("Decision Maker shows the switches to every role, and a stale sign-in is refused a change with the way back", async ({

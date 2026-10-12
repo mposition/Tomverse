@@ -580,9 +580,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * the shared audit helper. The receiver's decisions and watched schema slice
  * are unchanged, but its import closure bytes moved, so prior signed staging
  * evidence is stale.
+ * 2026-10-12: the AMUX worker registry (orchestration policy version 31, stage
+ * R1) adds the registry event, trial evidence and latch event back relations
+ * to `AdminAuditLog` in the watched schema. No actor, descriptor, webhook
+ * writer or admission decision changes; the bytes moved, so evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "77d1e9adb5ab1709dddec3ada16b5d689ab719f6e78bd4ccdc9cc4e77945520a";
+  "09c6d9559cd26319ed1e7c57d19c2049e05b780e3544bade9a124b3cf5848e92";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

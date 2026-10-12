@@ -2634,6 +2634,7 @@ const checks = [
         read("lib/productSurfaceRoutes.ts").includes(
           "export const REVIEW_WORKSPACE_PATH = PRODUCT_SURFACE_PATH.review;"
         ) &&
+        !continuity.includes('href="/auth/signin?callbackUrl=%2Fchat"') &&
         source.includes("const primaryChatHref =") &&
         source.includes('cta_location: "landing_hero_chat"')
       );

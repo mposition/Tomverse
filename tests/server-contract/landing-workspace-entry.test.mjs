@@ -23,8 +23,11 @@ mock.module(mod("lib/autoAvailability.ts"), { namedExports: { autoAvailabilityFo
   availabilityReads += 1;
   throw new Error("ACCOUNT_AVAILABILITY_MUST_NOT_BE_READ");
 } } });
-mock.module(mod("components/marketing/LandingPageContent.tsx"), {
-  namedExports: { LandingPageContent: () => null },
+mock.module(mod("components/marketing/LaunchHomepage.tsx"), {
+  defaultExport: () => null,
+});
+mock.module(mod("components/marketing/MarketingChatAvailability.tsx"), {
+  namedExports: { MarketingChatAvailabilityProvider: () => null },
 });
 mock.module(mod("components/LanguageProvider.tsx"), {
   namedExports: { LanguageProvider: () => null },

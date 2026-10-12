@@ -772,7 +772,7 @@ export function AnalyticsProvider({
           </p>
           <div className="hidden @md/notice:block">
             <p className="text-xs font-bold text-zinc-900 dark:text-zinc-50">{promptCopy.title}</p>
-            <p className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">{promptCopy.body}</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-zinc-600 dark:text-zinc-400">{promptCopy.body}</p>
             <Link
               href="/privacy"
               className="mt-0.5 inline-flex text-[11px] font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"

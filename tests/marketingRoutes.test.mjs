@@ -4,6 +4,7 @@ import {
   isStaticMarketingPathname,
   localizedMarketingRedirect,
 } from "../lib/marketingRoutes.ts";
+import { marketingProductEntryHref } from "../lib/marketingProductEntry.ts";
 
 /**
  * R-05-LANG. The redirect that stops `/` being served in English to a visitor
@@ -128,4 +129,23 @@ test("the dynamic Assistant and Knowledge guide uses the nonce CSP path", () => 
     false,
     "the poster is an image response, not an HTML file with inline hashes"
   );
+});
+
+test("Review information is localized static marketing while the workspace remains dynamic", () => {
+  assert.equal(isStaticMarketingPathname("/products/review"), true);
+  for (const locale of ["en", "ko", "zh", "fr", "de", "es", "pt", "kr", "cn"]) {
+    assert.equal(isStaticMarketingPathname(`/${locale}/products/review`), true);
+  }
+  for (const path of ["/review", "/ko/review", "/ko/products/review/settings", "/ko/products/chat"]) {
+    assert.equal(isStaticMarketingPathname(path), false, `${path} must not inherit static marketing policy`);
+  }
+  assert.equal(localizedMarketingRedirect({ pathname: "/products/review", language: "ko", source: "accept" }), "/ko/products/review");
+  assert.equal(localizedMarketingRedirect({ pathname: "/ko/products/review", language: "fr", source: "search" }), null);
+});
+
+test("explicit product entry keeps Review separate without changing a visitor's workspace preferences", () => {
+  assert.equal(marketingProductEntryHref("review", "ko"), "/review?lang=ko");
+  assert.equal(marketingProductEntryHref("chat", "ko"), "/chat/workspace?lang=ko");
+  assert.equal(marketingProductEntryHref("review", "a&b"), "/review?lang=a%26b");
+  assert.equal(new URL(marketingProductEntryHref("review", "ko"), "https://tomverse.test").searchParams.has("entry"), false);
 });

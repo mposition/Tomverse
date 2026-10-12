@@ -56,7 +56,7 @@ const SECTION_IDS = [
 
 const openLanding = async (page: Page, path: "/" | "/ko") => {
   await prepareGuestPage(page, path === "/ko" ? "ko" : "en");
-  await page.goto(path);
+  await page.goto(path === "/" ? "/products/review" : "/ko/products/review");
   await expect(page.getByTestId("landing-hero-title")).toBeVisible();
 };
 
@@ -358,7 +358,7 @@ test("the How it works steps stay unqualified", async ({ page }) => {
   expect(steps).not.toMatch(/sign in to/i);
 });
 
-test("/ko keeps the locale on the brand link and the Features anchor", async ({
+test("/ko keeps the locale on the brand link and Review information link", async ({
   page,
 }) => {
   await openLanding(page, "/ko");
@@ -371,31 +371,23 @@ test("/ko keeps the locale on the brand link and the Features anchor", async ({
   // Below `lg` the top menu lives behind the hamburger, so the assertion has
   // to follow whichever nav this shell actually renders -- both must keep the
   // locale.
-  const desktopFeatures = page.getByTestId("header-features-link");
-  if (!(await desktopFeatures.isVisible())) {
+  const desktopReview = page.getByTestId("header-review-link");
+  if (!(await desktopReview.isVisible())) {
     await page.getByTestId("marketing-menu-button").click();
-    await expect(page.getByTestId("mobile-features-link")).toHaveAttribute(
+    await expect(page.getByTestId("mobile-review-link")).toHaveAttribute(
       "href",
-      "/ko#how-it-works"
-    );
-    await expect(page.getByTestId("mobile-trust-link")).toHaveAttribute(
-      "href",
-      "/ko#trust"
+      "/ko/products/review"
     );
   } else {
-    await expect(desktopFeatures).toHaveAttribute("href", "/ko#how-it-works");
-    await expect(page.getByTestId("header-trust-link")).toHaveAttribute(
-      "href",
-      "/ko#trust"
-    );
+    await expect(desktopReview).toHaveAttribute("href", "/ko/products/review");
   }
 
   // Destinations without a `/[locale]` route must NOT be prefixed -- doing so
   // would 404. Only the paths in LOCALIZED_SEO_PATHS have one.
   const header = page.locator("header");
   for (const [name, href] of [
-    ["모델", "/models"],
-    ["요금", "/pricing"],
+    ["모델 살펴보기", "/models"],
+    ["요금제", "/pricing"],
   ] as const) {
     await expect(
       header.getByRole("link", { name, exact: true }).first()
@@ -405,7 +397,7 @@ test("/ko keeps the locale on the brand link and the Features anchor", async ({
   // FAQ moved out of the top menu to keep it to four items, so the route has
   // to keep an entry point somewhere. It is in the footer.
   await expect(
-    page.locator("footer").getByRole("link", { name: "FAQ", exact: true })
+    page.locator("footer").locator("a[href='/faq']")
   ).toHaveAttribute("href", "/faq");
 });
 
@@ -457,7 +449,7 @@ test("plan credits follow the public billing response", async ({ page }) => {
       }),
     })
   );
-  await page.goto("/");
+  await page.goto("/products/review");
 
   await expect(page.getByTestId("landing-plan-free-credits")).toContainText("777");
   await expect(page.getByTestId("landing-plan-pro-credits")).toContainText("8,888");
@@ -520,7 +512,7 @@ for (const path of ["/", "/ko", "/fr"] as const) {
       apply();
       document.addEventListener("DOMContentLoaded", apply);
     });
-    await page.goto(path);
+    await page.goto(path === "/" ? "/products/review" : `${path}/products/review`);
     await expect(page.getByTestId("landing-hero-title")).toBeVisible();
 
     const clipped = await page.evaluate(() => {
@@ -546,7 +538,7 @@ test("primary copy and CTAs survive a 200% text scale at 320px", async ({ page }
   await page.addInitScript(() => {
     document.documentElement.style.fontSize = "32px";
   });
-  await page.goto("/ko");
+  await page.goto("/ko/products/review");
   await expect(page.getByTestId("landing-hero-title")).toBeVisible();
 
   const dimensions = await page.evaluate(() => ({

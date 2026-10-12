@@ -319,6 +319,11 @@ run(
     // each event bound to its own transaction's audit by the right actor and
     // action, the newest event wins, and nothing is changed or removed.
     "tests/integration/amux-decision-maker-switch.db.test.ts",
+    // AMUX worker registry (orchestration policy version 31, sections 3, 5
+    // and 7): the name grammar, class ceilings and change rule, each event
+    // bound to the owner's audit of its own transaction, READ COMMITTED only,
+    // nothing changed or removed, and the system tables closed until R4/R5.
+    "tests/integration/amux-worker-registry.db.test.ts",
     // AMUX Decision Maker request ledger (docs/policy/amux-decision-maker.md
     // §2, §6, §9, §10): one request per card revision, the transition graph
     // against the core's own, the deadlines by the database clock at the

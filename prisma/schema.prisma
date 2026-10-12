@@ -2457,6 +2457,9 @@ model AdminAuditLog {
   amuxDecisionMakerResultDetail AmuxDecisionMakerResultDetail?
   amuxDecisionMakerJudgment AmuxDecisionMakerJudgment?
   amuxDecisionMakerDeliveryEvent AmuxDecisionMakerDeliveryEvent?
+  amuxWorkerRegistryEvent AmuxWorkerRegistryEvent?
+  amuxWorkerTrialEvidence AmuxWorkerTrialEvidence?
+  amuxWorkerLatchEvent AmuxWorkerLatchEvent?
   promptRefinerAutoBudgetReservations PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetReservationAudit")
   promptRefinerAutoBudgetDispatches PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetDispatchAudit")
   promptRefinerAutoBudgetUnknowns PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetUnknownAudit")
@@ -10417,4 +10420,86 @@ model SupportTriageDecisionRecordLink {
 
   @@unique([recordId, feedbackId])
   @@index([feedbackId])
+}
+
+/// AMUX worker registry events (orchestration policy version 31, section 3):
+/// append-only, and a worker's desired state is its newest event. Only a
+/// person writes it, the owner with a recent step-up. Single writer:
+/// lib/amux/workerRegistryStore.ts. Migration 20261012100000_amux_worker_registry
+/// holds the CHECKs (name grammar, class prefix, version 16's roles with
+/// Cursor and Copilot below contract, the four desired states) and the trigger
+/// that holds the change rule, the per-worker revision, the audit row of the
+/// same transaction (amux.worker.register or amux.worker.change), the database
+/// clock, and refuses every update and delete. `actorUserId` is the owner's id
+/// and intentionally has no User foreign key, like the other AMUX operator
+/// evidence.
+model AmuxWorkerRegistryEvent {
+  id            String   @id
+  sequence      BigInt   @unique @default(autoincrement())
+  workerName    String
+  providerClass String
+  roleCeiling   String
+  desiredState  String
+  revision      Int
+  actorUserId   String
+  auditLogId    String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([workerName, revision])
+  @@index([workerName, sequence])
+}
+
+/// What the AMUX reconciler and invariant monitor observed of a worker
+/// (orchestration policy version 31, section 4). Append-only. Closed to every
+/// write until R4 replaces its guard; empty means "no observation", which is
+/// never assignable.
+model AmuxWorkerObservation {
+  id         String   @id
+  sequence   BigInt   @unique @default(autoincrement())
+  workerName String
+  status     String
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([workerName, sequence])
+}
+
+/// A trial card's result (orchestration policy version 31, section 5(1)).
+/// Append-only. Closed to every write until R5 replaces its guard; R5 also
+/// adds the uniqueness its re-trial rule needs.
+/// `costMicroUsd` is NULL when unknown, never zero.
+model AmuxWorkerTrialEvidence {
+  id           String   @id
+  sequence     BigInt   @unique @default(autoincrement())
+  workerName   String
+  trialNumber  Int
+  outcome      String
+  costMicroUsd BigInt?
+  auditLogId   String   @unique
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([workerName, sequence])
+}
+
+/// The automatic stop latch (orchestration policy version 31, section 7): the
+/// system opens it, only the owner releases it. Append-only; the latch is open
+/// when a worker's newest event is an opening. Closed to every write until R4
+/// replaces its guard.
+model AmuxWorkerLatchEvent {
+  id          String   @id
+  sequence    BigInt   @unique @default(autoincrement())
+  workerName  String
+  eventKind   String
+  actorKind   String
+  actorUserId String?
+  auditLogId  String   @unique
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([workerName, sequence])
 }

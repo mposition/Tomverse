@@ -5,11 +5,13 @@ import { getServerSession } from "next-auth/next";
 
 import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AmuxExecutionSupportingRecords } from "@/components/admin/AmuxExecutionSupportingRecords";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
 import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
+import { AmuxWorkerRegistryPanel } from "@/components/admin/AmuxWorkerRegistryPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
@@ -29,6 +31,8 @@ import {
   countOpenAmuxOrchestratorHalts,
   readAmuxOrchestratorHaltsForAdmin,
 } from "@/lib/amux/orchestratorHaltStore";
+import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
+import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("amux-execution");
@@ -65,10 +69,9 @@ export default async function AdminAmuxExecutionPage({
   const isOwner = Boolean(session?.user?.id) && role === "owner";
   const canChangeDmSwitches = hasAdminPermission(session, "ops:write");
   const statuses: Record<string, AmuxTabStatus | undefined> = {
-    // The card list issues no request and writes nothing
-    // (tests/amuxAdminCardList.test.mjs pins both), so there is no switch for
-    // this to read: it is read-only by construction, for the owner too.
-    cards: "read_only",
+    // The owner can request guarded admission; the supplementary card list
+    // remains read-only. Every command checks owner authorization again.
+    cards: isOwner ? undefined : "read_only",
     // The same permission every escalation, proposal and review route checks.
     assignment: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
     // Clearing an orchestrator halt takes the owner role, and a recent
@@ -78,6 +81,9 @@ export default async function AdminAmuxExecutionPage({
     // A Decision Maker switch change takes the permission and the step-up its
     // route checks (docs/policy/amux-decision-maker.md §8).
     "decision-maker": canChangeDmSwitches ? undefined : "read_only",
+    // A registry change takes the owner role, the stage's code latch and a
+    // recent step-up (orchestration policy version 31, sections 3 and 8).
+    workers: !isOwner ? "read_only" : amuxWorkerRegistryWritesOpen() ? undefined : "behind_server_switch",
   };
 
   const tabs = (
@@ -104,10 +110,12 @@ export default async function AdminAmuxExecutionPage({
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AmuxExecutionWorkspace initialTaskId={typeof query.taskId === "string" &&
+        <AmuxExecutionWorkspace canMoveCards={isOwner} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
-        <AmuxCardListPanel rows={rows} total={total} limit={limit} />
-        <AmuxCliUsagePanel view={usage} />
+        <AmuxExecutionSupportingRecords>
+          <AmuxCardListPanel rows={rows} total={total} limit={limit} />
+          <AmuxCliUsagePanel view={usage} />
+        </AmuxExecutionSupportingRecords>
       </div>
     );
   }
@@ -145,6 +153,20 @@ export default async function AdminAmuxExecutionPage({
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
         <AmuxDecisionMakerSwitchPanel state={state} canChange={canChangeDmSwitches} />
+      </div>
+    );
+  }
+
+  if (tab.id === "workers") {
+    // Every admin role reads the registry and its comparison with the
+    // catalog; only the owner is offered registration, and the route decides
+    // that again. A read that fails is shown as such, never as an empty
+    // registry.
+    const view = await readAmuxWorkerRegistryForAdmin().catch(() => null);
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        <AmuxWorkerRegistryPanel view={view} isOwner={isOwner} />
       </div>
     );
   }

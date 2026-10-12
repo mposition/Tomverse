@@ -572,6 +572,9 @@ async function assertClientSurfaceRouting(client) {
                 mountedSurface: scenario.mounted ?? "workspace",
                 pathname: scenario.pathname ?? "/continuations/other",
                 isGuestMode: scenario.guest ?? false,
+                // This harness exercises the initial/continuation routing
+                // prefix. Ready Guest re-selection is tested in the browser.
+                isInitialConversationResolved: false,
                 conversationSelectionTicketRef: ticket,
                 conversationNavigationAttemptRef: navigationAttempt,
                 allocateConversationNavigationAttempt: () => {
