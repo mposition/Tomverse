@@ -1157,7 +1157,7 @@ export function ChatInput({
     const autoCopy = autoRoutingCopy[lang];
     const isAutoMode = selectionMode === "auto";
     const isAutoCapabilityPending =
-      isAutoMode && selectionModePending && !autoSelectionOffered;
+      isAutoMode && draftLocked && !autoSelectionOffered;
     const modelsSelectedLabel = (count: number) =>
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
     const signInCallbackUrl = withChatLanguage(
