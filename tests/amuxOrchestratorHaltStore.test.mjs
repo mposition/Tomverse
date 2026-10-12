@@ -13,7 +13,10 @@ import test from "node:test";
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
 const STORE = "lib/amux/orchestratorHaltStore.ts";
+const AUDIT_PROOF_STORE = "lib/amux/orchestratorHaltAuditProofStore.ts";
 const MIGRATION = "prisma/migrations/20260930120000_amux_orchestrator_halt/migration.sql";
+const AUTO_CLEAR_MIGRATION =
+  "prisma/migrations/20261012170000_amux_verified_no_commit_halt_auto_clear/migration.sql";
 
 const walk = (directory) =>
   readdirSync(directory).flatMap((name) => {
@@ -64,6 +67,37 @@ test("every AMUX admission path consults the central halt store", () => {
   }
 });
 
+test("human audit writes and reserved system proof reads stay in separate modules", () => {
+  const store = withoutComments(read(STORE));
+  const proofStore = withoutComments(read(AUDIT_PROOF_STORE));
+  assert.match(store, /writeAdminAuditLog\(/);
+  assert.doesNotMatch(store, /systemActor|FROM "AdminAuditLog"/);
+  assert.doesNotMatch(proofStore, /writeAdminAuditLog|writeSystemAuditLog/);
+  assert.match(proofStore, /FROM "AdminAuditLog"/);
+  assert.match(proofStore, /AMUX_ORCHESTRATOR_HALT_AUDIT_JOINS_SQL = Prisma\.sql/);
+  assert.match(proofStore, /"metadata"->>'systemActor' = \$\{AMUX_SYSTEM_AUDIT_ACTOR\}/);
+  for (const field of [
+    "request_id",
+    "halt_id",
+    "halt_key",
+    "reason_code",
+    "call_kind",
+    "resolution",
+    "clear_kind",
+    "evidence_audit_id",
+  ]) {
+    assert.match(proofStore, new RegExp(`"metadata"->>'${field}'`), field);
+  }
+  const select = store.slice(
+    store.indexOf("const selectHaltsByKeys ="),
+    store.indexOf("export async function openAmuxOrchestratorHaltLocked"),
+  );
+  assert.equal((select.match(/\$queryRaw/g) ?? []).length, 1);
+  assert.match(select, /AMUX_ORCHESTRATOR_HALT_AUDIT_JOINS_SQL/);
+  assert.match(select, /AMUX_ORCHESTRATOR_HUMAN_CLEAR_AUDIT_PROOF_SQL/);
+  assert.match(select, /AMUX_ORCHESTRATOR_SYSTEM_CLEAR_AUDIT_PROOF_SQL/);
+});
+
 test("the clear never runs the original claim, recovery or promotion", () => {
   // Section 7: "해제는 원래 작업을 다시 하지 않는다."
   const store = withoutComments(read(STORE));
@@ -94,16 +128,21 @@ test("the clear never runs the original claim, recovery or promotion", () => {
   assert.match(clear, /prisma\.\$transaction\(/);
 });
 
-test("the internal halt route opens halts and has no way to clear one", () => {
+test("the internal halt POST has no caller-controlled way to clear one", () => {
   const route = withoutComments(read("app/api/internal/amux/orchestrator/halt/route.ts"));
   const service = withoutComments(read("lib/amux/orchestratorHaltService.ts"));
-  for (const source of [route, service]) {
+  for (const source of [service]) {
     assert.doesNotMatch(source, /clearAmuxOrchestratorHalt|clearedAt|clearedByUserId|clearAuditLogId/);
     assert.doesNotMatch(source, /export async function (PUT|PATCH|DELETE)\b/);
   }
+  assert.doesNotMatch(route, /export async function (PUT|PATCH|DELETE)\b/);
+  const post = route.slice(route.indexOf("export async function POST("), route.indexOf("export async function GET("));
+  assert.doesNotMatch(post, /clear_kind|clear_audit_log_id|clear_evidence_audit_log_id|clearAmuxOrchestratorHalt/);
   assert.match(route, /export async function POST\(/);
   assert.match(route, /export async function GET\(/);
   assert.match(route, /isAmuxSyncAuthorized\(request\)/);
+  assert.match(route, /clear_kind: row\.clearKind/);
+  assert.match(route, /clear_evidence_audit_log_id: row\.clearEvidenceAuditLogId/);
 });
 
 test("the migration makes the database refuse what the policy forbids", () => {
@@ -162,6 +201,28 @@ test("the migration makes the database refuse what the policy forbids", () => {
   }
 });
 
+test("the append migration admits only audited same-request no-commit auto clears", () => {
+  const sql = read(AUTO_CLEAR_MIGRATION);
+  const statements = sql
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("--"))
+    .join("\n");
+  assert.match(statements, /^BEGIN;$/m);
+  assert.match(statements, /^COMMIT;$/m);
+  assert.doesNotMatch(statements, /^\s*DELETE\s+FROM\b|^\s*TRUNCATE\b/im);
+  assert.match(statements, /ADD COLUMN "clearKind" TEXT/);
+  assert.match(statements, /ADD COLUMN "clearEvidenceAuditLogId" TEXT/);
+  assert.match(statements, /SET "clearKind" = 'human'/);
+  assert.match(statements, /"clearKind" IN \('human', 'system_no_commit'\)/);
+  assert.match(statements, /OLD\."haltKey" IS DISTINCT FROM OLD\."requestId"/);
+  assert.match(statements, /'claim_outcome_unknown',[\s\S]*'recovery_outcome_unknown',[\s\S]*'promotion_outcome_unknown'/);
+  assert.match(statements, /write_acked_at IS NOT NULL/);
+  assert.match(statements, /AMUX_ORCHESTRATOR_HALT_AUTO_CLEAR_HAS_RECEIPTS/);
+  assert.match(statements, /'amux\.orchestrator\.write_resolved'/);
+  assert.match(statements, /'amux\.orchestrator\.halt_auto_cleared'/);
+  assert.match(statements, /"metadata"->>''evidence_audit_id'' = \$6/);
+});
+
 test("the three tables have no column for user content or free text", () => {
   const schema = read("prisma/schema.prisma");
   const columns = (model) => {
@@ -201,14 +262,16 @@ test("the three tables have no column for user content or free text", () => {
     "requestId",
     "openedAt",
     "clearedAt",
+    "clearKind",
     "clearedByUserId",
     "clearAuditLogId",
+    "clearEvidenceAuditLogId",
   ]);
   // Every audit entry of this version goes through the allowlist.
   const store = withoutComments(read(STORE));
   const auditCalls = store.match(/(writeAmuxOrchestratorSystemAudit|writeAdminAuditLog)\(/g) ?? [];
-  assert.equal(auditCalls.length, 3);
-  assert.equal((store.match(/metadata: amuxOrchestratorAuditMetadata\(/g) ?? []).length, 3);
+  assert.equal(auditCalls.length, 4);
+  assert.equal((store.match(/metadata: amuxOrchestratorAuditMetadata\(/g) ?? []).length, 4);
 });
 
 test("a mutation of an admitted write locks the admission before its work and writes its receipts in its fence", () => {

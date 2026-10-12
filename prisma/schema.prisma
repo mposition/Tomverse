@@ -8594,23 +8594,27 @@ model AmuxOrchestratorWriteReceipt {
   @@index([requestId])
 }
 
-/// One orchestrator halt (orchestration policy version 20, section 5). The
-/// orchestrator opens it through `POST /api/internal/amux/orchestrator/halt`;
-/// only a person clears it, from the Admin console, with the owner role and a
-/// recent step-up. `haltKey` is the request id for a reason that has one and
-/// an orchestrator-made UUID otherwise. The trigger writes the three clear
-/// columns once, together, and refuses every other update and every delete.
-/// `clearedByUserId` is the administrator's id and intentionally has no User
-/// foreign key, like the other AMUX operator evidence.
+/// One orchestrator halt (orchestration policy versions 20 and 32). The
+/// orchestrator opens it through `POST /api/internal/amux/orchestrator/halt`.
+/// A person may clear it from the Admin console; version 33 also permits the
+/// server to clear one of the three result-unknown reasons after the same
+/// request is locked and proven `no_commit` with zero receipts. `clearKind`
+/// distinguishes those paths and `clearEvidenceAuditLogId` binds an automatic
+/// clear to the `amux.orchestrator.write_resolved` audit. The database trigger
+/// verifies the path-specific audit and evidence before writing `clearedAt`.
+/// `clearedByUserId` is the administrator's id only for a human clear and has
+/// no User foreign key, like the other AMUX operator evidence.
 model AmuxOrchestratorHalt {
-  id              String    @id
-  haltKey         String    @unique
-  reasonCode      String
-  requestId       String?
-  openedAt        DateTime  @db.Timestamptz(3)
-  clearedAt       DateTime? @db.Timestamptz(3)
-  clearedByUserId String?
-  clearAuditLogId String?   @unique
+  id                      String    @id
+  haltKey                 String    @unique
+  reasonCode              String
+  requestId               String?
+  openedAt                DateTime  @db.Timestamptz(3)
+  clearedAt               DateTime? @db.Timestamptz(3)
+  clearKind               String?
+  clearedByUserId         String?
+  clearAuditLogId         String?   @unique
+  clearEvidenceAuditLogId String?   @unique
 
   @@index([clearedAt, openedAt])
   @@index([requestId])

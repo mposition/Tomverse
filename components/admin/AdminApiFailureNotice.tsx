@@ -25,19 +25,21 @@ import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
  *   times and reads as a broken screen rather than a gated one.
  * - **Everything else.** An error, with whatever the server said.
  *
- * The callback path comes from `usePathname()` rather than a prop: it is the
- * screen the operator is actually on, and a prop is a second place for it to
- * be wrong.
+ * The callback defaults to the current pathname. A section control may pass
+ * its known returnTo path so the operator returns to the exact tab.
  */
 export function AdminApiFailureNotice({
   failure,
   onRetry,
   testId,
+  returnTo,
 }: {
   failure: AdminApiFailure;
   /** Rendered as a retry control when the caller can repeat the request. */
   onRetry?: () => void;
   testId?: string;
+  /** A known section of the current screen, when reauthentication must retain its tab. */
+  returnTo?: string;
 }) {
   const m = useAdminMessages(adminCommonMessages).apiFailure;
   const pathname = usePathname();
@@ -57,7 +59,7 @@ export function AdminApiFailureNotice({
           {failure.message}
         </p>
         <Link
-          href={adminRecentAuthenticationHref(pathname)}
+          href={adminRecentAuthenticationHref(returnTo ?? pathname)}
           data-testid="admin-api-reauthenticate-link"
           className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-2 text-xs font-bold text-amber-100 hover:bg-amber-500/20"
         >

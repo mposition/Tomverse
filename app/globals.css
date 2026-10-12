@@ -292,7 +292,9 @@
   /* status-switch-on: a switch that is on (email preferences). Separate from
      status-success on purpose: same value today, a control's state is not a
      verification. */
+  --color-status-switch-on-300: var(--color-emerald-300);
   --color-status-switch-on-500: var(--color-emerald-500);
+  --color-status-switch-on-700: var(--color-emerald-700);
 }
 
 body {
