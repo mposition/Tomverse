@@ -98,6 +98,7 @@ const seededMessages = (models: string[]): QaConversationMessage[] => [
 
 type EnterOptions = {
   lang?: "en" | "ko" | "de" | "fr" | "es" | "pt" | "zh";
+  productKey?: "chat" | "review";
   models?: string[];
   viewport: { width: number; height: number };
   webSearchMode?: "off" | "auto" | "always";
@@ -110,6 +111,7 @@ type EnterOptions = {
 async function enterMobileComposer(page: Page, options: EnterOptions) {
   const {
     lang = "ko",
+    productKey = "review",
     models = THREE_MODELS,
     viewport,
     webSearchMode = "always",
@@ -119,6 +121,7 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
 
   await prepareGuestPage(page, "en");
   await mockAuthenticatedApi(page, {
+    productKey,
     selectedModels: models,
     messages: emptyConversation ? [] : seededMessages(models),
     webSearchMode,
@@ -148,7 +151,7 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
   }
 
   await page.setViewportSize(viewport);
-  await page.goto(`/review?lang=${lang}`);
+  await page.goto(`/${productKey}?lang=${lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
@@ -826,29 +829,32 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
     await expect(page.getByTestId("mobile-sidebar-drawer").getByTestId("chat-product-review")).toHaveAttribute("href", "/review?lang=ko");
   });
 
-  test("137px zoom keeps visible model and credit numbers in 44px controls", async ({ page }) => {
-    await enterMobileComposer(page, {
-      models: ALL_SEARCH_MODELS,
-      viewport: { width: 137, height: 247 },
-      webSearchMode: "off",
+  for (const modelCount of [1, 3]) {
+    test(`137px zoom keeps ${modelCount} model and credit numbers in 44px controls`, async ({ page }) => {
+      await enterMobileComposer(page, {
+        productKey: modelCount === 1 ? "chat" : "review",
+        models: ALL_SEARCH_MODELS.slice(0, modelCount),
+        viewport: { width: 137, height: 247 },
+        webSearchMode: "off",
+      });
+      const composer = page.getByTestId("chat-input");
+      const model = composer.getByTestId("composer-model-select");
+      await expect(model.getByText(String(modelCount), { exact: true })).toBeVisible();
+      await expect(model).toHaveAccessibleName(new RegExp(String(modelCount)));
+      const credit = composer.getByTestId("request-credit-estimate");
+      const accessibleLabel = (await credit.getAttribute("aria-label"))!;
+      const value = accessibleLabel.match(/\d+/)?.[0];
+      expect(value).toBeTruthy();
+      await expect(credit.getByText(value!, { exact: true })).toBeVisible();
+      for (const control of [composer.getByTestId("composer-tools-button"), model, credit, composer.getByTestId("chat-send-button")]) {
+        const box = (await control.boundingBox())!;
+        expect(box.width).toBeGreaterThanOrEqual(44);
+        expect(box.height).toBeGreaterThanOrEqual(44);
+      }
+      await expectComposerControlsContained(page);
+      await expectComposerContract(page, "137px with visible actual count and credits");
     });
-    const composer = page.getByTestId("chat-input");
-    const model = composer.getByTestId("composer-model-select");
-    await expect(model.getByText("3", { exact: true })).toBeVisible();
-    await expect(model).toHaveAccessibleName(/3/);
-    const credit = composer.getByTestId("request-credit-estimate");
-    const accessibleLabel = (await credit.getAttribute("aria-label"))!;
-    const value = accessibleLabel.match(/\d+/)?.[0];
-    expect(value).toBeTruthy();
-    await expect(credit.getByText(value!, { exact: true })).toBeVisible();
-    for (const control of [composer.getByTestId("composer-tools-button"), model, credit, composer.getByTestId("chat-send-button")]) {
-      const box = (await control.boundingBox())!;
-      expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.height).toBeGreaterThanOrEqual(44);
-    }
-    await expectComposerControlsContained(page);
-    await expectComposerContract(page, "137px with visible actual count and credits");
-  });
+  }
 
   for (const lang of ["en", "de", "fr", "es", "pt", "ko", "zh"] as const) {
     for (const mode of ["text", "page"] as const) {

@@ -1166,6 +1166,8 @@ export function ChatInput({
     const autoCopy = autoRoutingCopy[lang];
     const isAutoMode = selectionMode === "auto";
     const isReviewProduct = currentProduct === "review";
+    const useCompactMobileReviewSpacing =
+      isMobileShell && isReviewProduct && !showReviewModelRow;
     const currentProductCopy = currentProduct
       ? chatProductUiCopy[lang][currentProduct]
       : null;
@@ -3771,7 +3773,9 @@ export function ChatInput({
               </button>
             </div>
           )}
-          <div className={`flex flex-col ${showReviewModelRow ? "gap-2" : "gap-0.5"}`}>
+          <div
+            className={`flex flex-col ${useCompactMobileReviewSpacing ? "gap-0" : "gap-2"}`}
+          >
         {isReviewProduct && showReviewModelRow && (
           <div
             data-testid="composer-review-models"
@@ -3939,7 +3943,12 @@ export function ChatInput({
           195px layout viewport) a fixed-width rail used to overflow, and the
           composer's own `overflow-hidden` then clipped Send out of sight.
         */}
-        <div className="relative flex flex-wrap items-center justify-between gap-1.5" ref={menuRef}>
+        <div
+          className={`relative flex flex-wrap items-center justify-between ${
+            useCompactMobileReviewSpacing ? "gap-x-1.5 gap-y-1" : "gap-1.5"
+          }`}
+          ref={menuRef}
+        >
         <div
           data-testid="composer-primary-tools"
           className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 max-[240px]:contents"
