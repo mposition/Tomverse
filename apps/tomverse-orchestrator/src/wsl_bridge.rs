@@ -1414,6 +1414,96 @@ struct HttpLocal {
     v22_socket: Option<String>,
 }
 
+pub fn parse_v22_quota_response(value: serde_json::Value, request_id: &str,
+    worker: &str, now: i64) -> Result<Option<crate::tomverse_api::AmuxWorkerQuota>> {
+    let object = value.as_object().context("invalid quota envelope")?;
+    if value.get("requestId").and_then(|v| v.as_str()) != Some(request_id) ||
+        value.get("worker").and_then(|v| v.as_str()) != Some(worker) {
+        bail!("quota source mismatch");
+    }
+    if value.get("kind").and_then(|v| v.as_str()) == Some("quota_unavailable") && object.len() == 3 {
+        return Ok(None);
+    }
+    if value.get("kind").and_then(|v| v.as_str()) != Some("quota") || object.len() != 4 {
+        bail!("invalid quota envelope");
+    }
+    let mut observation = value.get("observation").cloned().context("missing quota")?;
+    let fields = observation.as_object_mut().context("invalid quota")?;
+    if fields.len() != 7 || fields.contains_key("worker") || fields.contains_key("observation_id") {
+        bail!("invalid quota fields");
+    }
+    fields.insert("observation_id".into(), request_id.into());
+    fields.insert("worker".into(), worker.into());
+    let quota: crate::tomverse_api::AmuxWorkerQuota = serde_json::from_value(observation)?;
+    let observed = chrono::DateTime::parse_from_rfc3339(&quota.observed_at)?.timestamp();
+    let reset = chrono::DateTime::parse_from_rfc3339(quota.reset_at.as_deref().context("missing quota reset")?)?.timestamp();
+    if quota.provider != "anthropic" || quota.source != "provider_api" ||
+        quota.remaining_basis_points > 10_000 || quota.confidence_basis_points != 10_000 ||
+        quota.exhausted != (quota.remaining_basis_points == 0) ||
+        now - observed > 30 || observed - now > 300 || reset <= observed {
+        bail!("unverified quota observation");
+    }
+    Ok(Some(quota))
+}
+
+#[cfg(test)]
+mod quota_tests {
+    use super::*;
+    fn evidence() -> serde_json::Value {
+        serde_json::json!({"kind":"quota","requestId":"00000000-0000-4000-8000-000000000001",
+            "worker":"claude-chore","observation":{"provider":"anthropic","remaining_basis_points":7400,
+            "confidence_basis_points":10000,"exhausted":false,"source":"provider_api",
+            "observed_at":"2026-10-12T00:00:00.000Z","reset_at":"2026-10-12T07:00:00.000Z"}})
+    }
+    #[test]
+    fn quota_binds_worker_request_source_and_freshness() {
+        let id = "00000000-0000-4000-8000-000000000001";
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-12T00:00:01Z").unwrap().timestamp();
+        let quota = parse_v22_quota_response(evidence(), id, "claude-chore", now).unwrap().unwrap();
+        assert_eq!(quota.observation_id, id); assert_eq!(quota.remaining_basis_points, 7400);
+        assert!(parse_v22_quota_response(evidence(), id, "claude-impl", now).is_err());
+        assert!(parse_v22_quota_response(evidence(), "another-id", "claude-chore", now).is_err());
+        assert!(parse_v22_quota_response(evidence(), id, "claude-chore", now + 900).is_err());
+        for (key, value) in [("provider", serde_json::json!("openai")),
+            ("source", serde_json::json!("model")), ("exhausted", serde_json::json!(true)),
+            ("remaining_basis_points", serde_json::json!(10001)), ("secret", serde_json::json!("not-real"))] {
+            let mut body = evidence(); body["observation"][key] = value;
+            assert!(parse_v22_quota_response(body, id, "claude-chore", now).is_err(), "{key}");
+        }
+    }
+    #[test]
+    fn unavailable_quota_is_none_not_an_available_worker() {
+        let body = serde_json::json!({"kind":"quota_unavailable","requestId":"id","worker":"claude-chore"});
+        assert!(parse_v22_quota_response(body, "id", "claude-chore", 0).unwrap().is_none());
+    }
+}
+
+#[cfg(unix)]
+async fn v22_sidecar_quota(socket_path: &str, worker: &str) -> Result<Option<crate::tomverse_api::AmuxWorkerQuota>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+    if !std::path::Path::new(socket_path).is_absolute() || !valid_session_name(worker) {
+        bail!("invalid quota endpoint");
+    }
+    let request_id = Uuid::new_v4().to_string();
+    let payload = serde_json::json!({"op":"quota","requestId":request_id,"worker":worker});
+    let operation = async {
+        let mut request = serde_json::to_vec(&payload)?; request.push(b'\n');
+        let mut stream = UnixStream::connect(socket_path).await?;
+        stream.write_all(&request).await?; stream.shutdown().await?;
+        let mut response = Vec::new();
+        stream.take(4097).read_to_end(&mut response).await?;
+        if response.len() > 4096 { bail!("quota response exceeds limit"); }
+        parse_v22_quota_response(serde_json::from_slice(&response)?, &request_id, worker, unix_now())
+    };
+    tokio::time::timeout(Duration::from_secs(4), operation).await.context("quota probe timeout")?
+}
+
+#[cfg(not(unix))]
+async fn v22_sidecar_quota(_socket_path: &str, _worker: &str) -> Result<Option<crate::tomverse_api::AmuxWorkerQuota>> {
+    Ok(None)
+}
+
 #[cfg(unix)]
 async fn v22_sidecar_call(
     socket_path: &str,
@@ -1788,6 +1878,7 @@ pub async fn run_from_env() -> i32 {
     let mut halt_cause: Option<String> = None;
     let empty_prompts = BTreeMap::new();
     let mut awaiting_delivery: Vec<AwaitingDelivery> = Vec::new();
+    let mut quota_checked: BTreeMap<String, std::time::Instant> = BTreeMap::new();
 
     loop {
         if !halted && !awaiting_registration.is_empty() {
@@ -1890,6 +1981,29 @@ pub async fn run_from_env() -> i32 {
             }
         }
         pending = still_pending;
+
+        // Renew active attempts first. Each fixed-scope sidecar probes its own
+        // CLI profile at most once per five minutes; unknown reads remain
+        // unknown and never become a fabricated available/exhausted quota.
+        if !halted && !any_pending_busy_this_tick && roster_ok {
+            if let Some(socket) = &local.v22_socket {
+                for name in sessions.names() {
+                    if !sessions.presence(&name).is_some_and(|session| session.running) ||
+                        quota_checked.get(&name).is_some_and(|at| at.elapsed() < Duration::from_secs(300)) {
+                        continue;
+                    }
+                    quota_checked.insert(name.clone(), std::time::Instant::now());
+                    match v22_sidecar_quota(socket, &name).await {
+                        Ok(Some(observation)) => match api.worker_quota_record_once(&observation).await {
+                            Ok(true) => println!("amux v22 quota observation recorded for {name}"),
+                            Ok(false) => eprintln!("amux v22 quota observation refused for {name}"),
+                            Err(_) => { halted = true; note_halt(&mut halt_cause, "quota_write_unknown"); break; }
+                        },
+                        _ => eprintln!("amux v22 quota source unavailable for {name}"),
+                    }
+                }
+            }
+        }
 
         if !halted && !any_pending_busy_this_tick {
             let carried = std::mem::take(&mut awaiting_delivery);
