@@ -149,7 +149,7 @@ export function ModelsPageContent() {
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader maxWidth="max-w-6xl" />
 
-      <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20">
+      <section className="mx-auto max-w-6xl px-4 py-14 [overflow-wrap:anywhere] sm:px-6 lg:py-20">
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{content.title}</h1>
@@ -194,7 +194,7 @@ export function ModelsPageContent() {
               key={model.id}
               className="min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/40 [overflow-wrap:anywhere]"
             >
-              <div className="flex flex-wrap items-start gap-3">
+              <div className="flex items-start gap-3 max-[240px]:flex-wrap">
                 <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${brand.className} text-base font-bold text-white shadow-sm ring-1 ring-zinc-200/70 dark:ring-zinc-800`}>
                   {brand.image ? (
                     // eslint-disable-next-line @next/next/no-img-element
