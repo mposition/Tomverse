@@ -13,7 +13,7 @@ import type { AmuxIdeaUnitConfirmationSnapshot } from
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
-import { getConfiguredAmuxWorkerCatalog } from "./routing.ts";
+import { getConfiguredAmuxV22WorkerCatalog } from "./routing.ts";
 import { evaluateAmuxV4TaskReady, type AmuxV4TaskReadyFacts } from
   "./v4TaskReadyCore.ts";
 
@@ -286,7 +286,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           snapshot.card.task.costReceipt, { ok: true,
             receipt: current.receipt }).decision;
         if (cost === "allow") {
-          const configured = getConfiguredAmuxWorkerCatalog();
+          const configured = getConfiguredAmuxV22WorkerCatalog();
           workerNames = current.receipt.routes.filter((route) =>
             configured?.some((worker) =>
               worker.worker_name === route.workerName &&
