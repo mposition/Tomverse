@@ -340,6 +340,7 @@ export async function reserveGuestAutoCreditPrehold(input: Readonly<{
   traceId?: string;
   now?: Date;
 }>): Promise<Readonly<{
+  claim: "new" | "replay_preheld";
   state: GuestAutoCreditLedgerState;
   prehold: GuestAutoCreditPrehold;
 }>> {
@@ -403,6 +404,7 @@ export async function reserveGuestAutoCreditPrehold(input: Readonly<{
         throw new GuestAutoCreditLedgerError("duplicate_binding");
       }
       return Object.freeze({
+        claim: "replay_preheld" as const,
         state: stateFromRow(existing),
         prehold: existingPrehold,
       });
@@ -547,6 +549,7 @@ export async function reserveGuestAutoCreditPrehold(input: Readonly<{
       },
     });
     return Object.freeze({
+      claim: "new" as const,
       state: stateFromRow(created),
       prehold,
     });

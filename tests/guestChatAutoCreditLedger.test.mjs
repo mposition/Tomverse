@@ -182,6 +182,8 @@ test("Guest Auto reserve reads both subject and IP windows inside the locked tra
     transaction.indexOf("holdChatUsageBucket"));
   assert.match(transaction, /minuteEntries\.length|minuteEntries/);
   assert.match(transaction, /creditEntries/);
+  assert.match(transaction, /claim: "replay_preheld"/);
+  assert.match(transaction, /claim: "new"/);
 });
 
 test("Guest Auto conversion reuses the hold and ordinary exact settlement", () => {

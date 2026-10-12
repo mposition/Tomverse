@@ -163,6 +163,12 @@ and release identity before any paid work. Repeating the HTTP body, losing a
 response, opening another tab or changing the local conversation id cannot
 claim another attempt.
 
+While the first request still owns a `guest_auto_prehold`, the same exact
+subject, authority and client turn is an in-progress replay. The server refuses
+it before the Refiner, Router or provider and does not release, convert, mark
+unknown or otherwise mutate the first request's row. Only that original owner
+may continue the one-turn execution.
+
 A known refusal before the Refiner service is entered releases the deterministic
 Guest hold. A known undispatched failure after that boundary follows the
 separately defined settlement for the work that actually ran: it returns the
