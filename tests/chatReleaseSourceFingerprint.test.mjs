@@ -21,8 +21,11 @@ test("unrelated deployment source is stable; execution drift and missing source 
   try {
     const paths = chatReleaseSourcePaths(repository);
     for (const path of [
-      "proxy.ts",
-      "app/api/internal/maintenance/credit-reservations/route.ts",
+      "lib/nativeBearerGate.ts",
+      "lib/mobileAuthContract.ts",
+      "lib/originProtection.ts",
+      "lib/requestOrigin.ts",
+      "lib/deepResearchSettlement.ts",
       "lib/anthropicPromptCaching.ts",
       "lib/servedProcessingTier.ts",
       "lib/webSearchNativeCostReservation.ts",
@@ -31,8 +34,13 @@ test("unrelated deployment source is stable; execution drift and missing source 
       "lib/pinnedDeploymentExecution.ts",
       "lib/conversationKindGuard.ts",
     ]) assert.ok(paths.includes(path), `execution closure omits ${path}`);
+    assert.ok(!paths.includes("proxy.ts"));
+    assert.ok(!paths.includes(
+      "app/api/internal/maintenance/credit-reservations/route.ts"));
     assert.ok(!paths.includes("lib/amux/bridgeLivenessCore.ts"));
     for (const path of paths) copy(path);
+    copy("proxy.ts");
+    copy("app/api/internal/maintenance/credit-reservations/route.ts");
     copy("lib/amux/workerRegistryCore.ts");
     copy("prisma/schema.prisma");
     copy("package-lock.json");
@@ -54,13 +62,19 @@ test("unrelated deployment source is stable; execution drift and missing source 
     appendFileSync(join(root, "lib", "amux", "workerRegistryCore.ts"),
       "\n// Unrelated AMUX change.\n");
     assert.equal(chatReleaseSourceFingerprint(root), original);
-    appendFileSync(join(root, "proxy.ts"), "\n// Request boundary drift.\n");
+    appendFileSync(join(root, "proxy.ts"), "\n// Unrelated marketing change.\n");
+    appendFileSync(join(root, "app", "api", "internal", "maintenance",
+      "credit-reservations", "route.ts"), "\n// Unrelated sweep.\n");
+    assert.equal(chatReleaseSourceFingerprint(root), original);
+    const proxyPath = join(root, "proxy.ts");
+    writeFileSync(proxyPath, readFileSync(proxyPath, "utf8").replace(
+      "  // R-05-LANG.", "  // Request-boundary drift.\n  // R-05-LANG."));
     const changedProxy = chatReleaseSourceFingerprint(root);
     assert.notEqual(changedProxy, original);
-    appendFileSync(join(root, "app", "api", "internal", "maintenance",
-      "credit-reservations", "route.ts"), "\n// Settlement drift.\n");
-    const changedSettlement = chatReleaseSourceFingerprint(root);
-    assert.notEqual(changedSettlement, changedProxy);
+    appendFileSync(join(root, "lib", "nativeBearerGate.ts"),
+      "\n// Mobile request-boundary drift.\n");
+    const changedBearer = chatReleaseSourceFingerprint(root);
+    assert.notEqual(changedBearer, changedProxy);
     appendFileSync(join(root, "lib", "chatRefinerInitialAutoRelease.ts"),
       "\n// Execution boundary changed.\n");
     const changedExecution = chatReleaseSourceFingerprint(root);
@@ -72,9 +86,16 @@ test("unrelated deployment source is stable; execution drift and missing source 
     appendFileSync(join(root, "packages", "chat-core", "src",
       "completionStatus.ts"), "\n// Shared execution drift.\n");
     assert.notEqual(chatReleaseSourceFingerprint(root), changedProvider);
+    const noSpaceProbe = join(root, "lib", "fingerprintNoSpaceProbe.ts");
+    writeFileSync(noSpaceProbe, "export const marker = 1;\n");
     appendFileSync(join(root, "app", "api", "chat", "route.ts"),
-      "\nimport \"crypto\";\nimport\"@/lib/chatRefinerInitialAutoRelease\";\n");
-    assert.match(chatReleaseSourceFingerprint(root), /^[0-9a-f]{64}$/);
+      "\nimport \"crypto\";\nimport\"@/lib/fingerprintNoSpaceProbe\";\n" +
+      "export const datafrom = \"./not-an-import\";\n");
+    assert.ok(chatReleaseSourcePaths(root).includes(
+      "lib/fingerprintNoSpaceProbe.ts"));
+    const withProbe = chatReleaseSourceFingerprint(root);
+    appendFileSync(noSpaceProbe, "// No-space import target drift.\n");
+    assert.notEqual(chatReleaseSourceFingerprint(root), withProbe);
     rmSync(join(root, "app", "api", "chat", "route.ts"));
     assert.throws(() => chatReleaseSourceFingerprint(root),
       /chat_release_source_unavailable/);

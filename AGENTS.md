@@ -1658,7 +1658,7 @@ Non-negotiable requirements:
 - The owner-approved initial release in
   `docs/policy/chat-refiner-initial-auto-release-v1.md` may supply a separate,
   server-verified exact-deployment authority under its v1 contract while the
-  three measurement attestations remain pending. The separately approved
+  three measurement attestations remain pending. The versioned v2 contract in
   `docs/policy/chat-refiner-stable-release-authority-v2.md` uses a new Owner
   audit target bound to the execution-source fingerprint and effective
   controls; the original commit and deployment remain audit provenance.
