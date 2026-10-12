@@ -112,6 +112,21 @@ const pageHandler = (name, context) => {
   assert.ok(matches[0].initializer && ts.isArrowFunction(matches[0].initializer));
   return executable(matches[0].initializer, pageSource, context);
 };
+const pageValue = (name, context) => {
+  const matches = findNodes(pageSource, (node) => ts.isVariableDeclaration(node) &&
+    ts.isIdentifier(node.name) && node.name.text === name);
+  assert.equal(matches.length, 1, `${name} must identify the actual page value`);
+  assert.ok(matches[0].initializer);
+  return executable(matches[0].initializer, pageSource, context);
+};
+
+test("Guest Review save and compare sign-in returns to canonical Review", () => {
+  assert.equal(pageValue("guestCompareSignInHref", {
+    REVIEW_WORKSPACE_PATH: "/review",
+    lang: "ko",
+    encodeURIComponent,
+  }), "/auth/signin?callbackUrl=%2Freview%3Flang%3Dko");
+});
 
 test("actual Chat remove handlers refuse before confirmation, selection mutation or history deletion", async () => {
   const events = [];

@@ -51,8 +51,16 @@ test.after(() => {
 });
 const open = (searchParams = {}) => ChatWorkspaceShell({ searchParams });
 
-test("public deployment ignores forged fixture cookies and refuses unoffered new Chat", async () => {
-  await assert.rejects(open({ offered: "true", productKey: "chat" }), /NOT_FOUND/);
+test("public deployment ignores forged fixture cookies and shows Review when new Chat is unavailable", async () => {
+  const element = await open({ offered: "true", productKey: "chat", lang: "ko" });
+  assert.equal(element.type.name, "ChatUnavailableNotice");
+  assert.equal(element.props.language, "ko");
+  const notice = element.type(element.props);
+  assert.equal(notice.props["data-testid"], "chat-unavailable");
+  const reviewLink = notice.props.children.props.children.find(
+    (child) => child?.props?.["data-testid"] === "chat-unavailable-review"
+  );
+  assert.equal(reviewLink.props.href, "/review?lang=ko");
   assert.equal(cookieReads, 0);
   assert.deepEqual(availabilityReads, ["owner-a"]);
 });
