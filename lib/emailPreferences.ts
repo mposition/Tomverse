@@ -29,6 +29,7 @@ import {
   normalizeCountry,
   type ResolvedJurisdiction,
 } from "@/lib/emailJurisdictionCore";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isEmailConsentConfirmationEnabled } from "@/lib/appSettings";
 import { CONSENT_CONFIRMATION_TTL_MS, consentAddressDigest } from "@/lib/emailConsentToken";
 import {
@@ -711,6 +712,10 @@ export async function applyPreferenceChange(
       where: { userId: input.userId },
       create: {
         userId: input.userId,
+        // Written, not left to a column default: the account default is
+        // code (APP_DEFAULTS.defaultModelId), and a row an email path creates
+        // first must carry the same value the settings route would have.
+        defaultModel: APP_DEFAULTS.defaultModelId,
         country: confirmedCountry,
         countrySource: "self_declared",
         countryUpdatedAt: now,

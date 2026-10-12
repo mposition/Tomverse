@@ -42,6 +42,7 @@ import {
   ensureBootstrapPolicyVersion,
   ensureTemplateVersion,
 } from "@/lib/emailTemplateRegistry";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isLanguage } from "@/lib/language";
 import { MARKETING_CONSENT_CONFIRMATION_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import type {
@@ -252,6 +253,10 @@ export async function requestConsentConfirmation(input: {
           where: { userId: input.userId },
           create: {
             userId: input.userId,
+            // Written, not left to a column default: the account default is
+            // code (APP_DEFAULTS.defaultModelId), and a row an email path creates
+            // first must carry the same value the settings route would have.
+            defaultModel: APP_DEFAULTS.defaultModelId,
             country,
             countrySource: "self_declared",
             countryUpdatedAt: now,
