@@ -24,6 +24,7 @@ import {
   POLICY_CHANGE_NOTICE_TEMPLATE,
 } from "@/lib/emailTemplateDefinitions";
 import { SUPPORTED_LANGUAGES } from "@/lib/language";
+import { CHANGE_NOTICE_OWED_BEFORE } from "@/lib/emailPolicyPublicationCore";
 import { isPolicyChangeNoticeWordingApproved } from "@/lib/policyChangeNoticeEmail";
 
 const TABS = adminNavItemTabs("email-campaigns");
@@ -78,6 +79,7 @@ export default async function AdminEmailCampaignsPage({
             templateKey={POLICY_CHANGE_NOTICE_TEMPLATE}
             locales={SUPPORTED_LANGUAGES}
             effectiveDate={POLICY_CHANGE_NOTICE_EFFECTIVE_DATE}
+            owedBefore={`${CHANGE_NOTICE_OWED_BEFORE.slice(0, 16).replace("T", " ")} UTC`}
             wordingApproved={SUPPORTED_LANGUAGES.every((language) =>
               isPolicyChangeNoticeWordingApproved(language, appUrl())
             )}
