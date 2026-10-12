@@ -25,7 +25,7 @@ import type { AmuxOrchestratorHaltRow } from "@/lib/amux/orchestratorHaltStore";
 
 /**
  * The orchestrator's halt record and halt state
- * (docs/policy/development-agent-orchestration.md, versions 20 and 32).
+ * (docs/policy/development-agent-orchestration.md, versions 20 and 33).
  *
  * `POST` opens one halt with the system audit `amux.orchestrator.halted` in
  * the same transaction; sending the same `halt_key` again returns the halt

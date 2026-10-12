@@ -11,7 +11,7 @@ ALTER TABLE "AmuxOrchestratorHalt"
 
 -- The version 20 trigger rejects every update of a cleared row. Replace it in
 -- this transaction so the one-time label backfill can run before the stricter
--- version 32 trigger is installed.
+-- version 33 trigger is installed.
 DROP TRIGGER "amux_orchestrator_halt_guard" ON "AmuxOrchestratorHalt";
 
 UPDATE "AmuxOrchestratorHalt"

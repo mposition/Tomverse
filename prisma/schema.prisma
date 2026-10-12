@@ -8582,7 +8582,7 @@ model AmuxOrchestratorWriteReceipt {
 
 /// One orchestrator halt (orchestration policy versions 20 and 33). The
 /// orchestrator opens it through `POST /api/internal/amux/orchestrator/halt`.
-/// A person may clear it from the Admin console; version 32 also permits the
+/// A person may clear it from the Admin console; version 33 also permits the
 /// server to clear one of the three result-unknown reasons after the same
 /// request is locked and proven `no_commit` with zero receipts. `clearKind`
 /// distinguishes those paths and `clearEvidenceAuditLogId` binds an automatic
