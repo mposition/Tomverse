@@ -238,7 +238,7 @@ type MarketingHeaderProps = {
 };
 
 export function MarketingHeader(props: MarketingHeaderProps = {}) {
-  return props.variant === "launch" ? <LaunchMarketingHeader {...props} /> : <LegacyMarketingHeader {...props} />;
+  return props.variant === "default" ? <LegacyMarketingHeader {...props} /> : <LaunchMarketingHeader {...props} />;
 }
 
 function LegacyMarketingHeader({
@@ -497,7 +497,7 @@ function LegacyMarketingHeader({
 type MarketingFooterProps = { maxWidth?: string; variant?: "default" | "launch" };
 
 export function MarketingFooter(props: MarketingFooterProps = {}) {
-  return props.variant === "launch" ? <LaunchMarketingFooter {...props} /> : <LegacyMarketingFooter {...props} />;
+  return props.variant === "default" ? <LegacyMarketingFooter {...props} /> : <LaunchMarketingFooter {...props} />;
 }
 
 function LegacyMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps) {
