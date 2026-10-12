@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
-import { withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import {
   dmBodyDigest,
   dmKeyPeriodEndMs,
@@ -979,8 +979,27 @@ test("section 4's report counts each instance's judgments over their own denomin
   const anthropic = report.instances.find((entry) => entry.instance === "decision-maker-anthropic")!;
   assert.equal(anthropic.decidedProposals.status, "insufficient_evidence");
   // The report changed no switch.
-  const switches = await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS "n" FROM "AmuxDecisionMakerSwitchEvent"`;
-  assert.equal(Number(switches[0]!.n), 2);
+  const switchEvents = async () =>
+    Number((await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS "n" FROM "AmuxDecisionMakerSwitchEvent"`)[0]!.n);
+  assert.equal(await switchEvents(), 2);
+  // Admin reads the same report inside the AMUX boundary: two statements,
+  // setup and fence, and reading records stays open under the kill switch
+  // (§6's table: "DM 기록 열람 … 허용"). One call fewer refuses it.
+  await setSwitch("kill_switch", "on");
+  const bounded = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerReportRead, (tx) =>
+    readDecisionMakerDeclarationAccuracyReport(tx),
+  );
+  assert.deepEqual(
+    bounded.instances.map((entry) => [entry.instance, entry.decidedProposals, entry.confirmedWithoutEdit, entry.matchedOverJudged, entry.notJudged]),
+    report.instances.map((entry) => [entry.instance, entry.decidedProposals, entry.confirmedWithoutEdit, entry.matchedOverJudged, entry.notJudged]),
+  );
+  const short = { ...AMUX_DB_BOUNDARIES.decisionMakerReportRead, prismaCallCeiling: 3 };
+  await assert.rejects(
+    withAmuxDbBoundary(short, (tx) => readDecisionMakerDeclarationAccuracyReport(tx)),
+    (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+  );
+  // Neither read changed a switch: the one event added is the kill switch above.
+  assert.equal(await switchEvents(), 3);
 });
 
 // ---------------------------------------------------------------------------

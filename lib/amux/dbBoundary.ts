@@ -277,6 +277,14 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
+  // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment
+  // tallies + the proposal timeline with the database clock + fence, pinned
+  // by tests/amuxDecisionMakerJudgment.test.mjs.
+  decisionMakerReportRead: {
+    operation: "decision_maker_report_read",
+    prismaCallCeiling: 4,
+    isolation: "read",
+  },
 } as const satisfies Record<string, AmuxDbBoundary>;
 
 /**
