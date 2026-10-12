@@ -26,6 +26,8 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       saved: "Platform settings saved and are live.",
       leadSaved: "Leading model saved and is live.",
       leadNotSaved: "The leading model was not saved. Nothing else changed.",
+      lineupSaved: "Default lineup saved and is live for new conversations.",
+      lineupNotSaved: "The default lineup was not saved. Nothing else changed.",
       copyDoesNotApply: "This copy does not change anything.",
       copyFailed: "Could not copy. Select the text and copy it yourself.",
       sendFailed:
@@ -92,14 +94,20 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       eyebrow: "Guest default model",
       title: "Guest first conversation — leading model",
       description:
-        "Guests who are not signed in always get three models together. The model chosen here only decides which of those three goes first. It does not change which three they see, and it does not change the default for a signed-in account.",
-      leadingEngine: "Leading model (first of the guest trio)",
+        "Guests who are not signed in, and a new account's first chat, always get three models together. The lineup below decides which three; the leading model decides which of them goes first. Neither changes the default model of a signed-in account.",
+      leadingEngine: "Leading model (first of the default lineup)",
       saveLead: "Save leading model",
-      trioFixed: (ids: string) => `Guest trio (fixed in code): ${ids}`,
+      lineupTitle: "Default lineup",
+      lineupDescription:
+        "Each model must be enabled, available to guests and Standard-priced, with a verified price. Existing conversations keep their models; a retired model's replacement takes its place automatically.",
+      lineupSlot: (slot: number) => `Model ${slot}`,
+      lineupLeadMoves: (lead: string) =>
+        `Saving also makes ${lead} the leading model, because the current lead is not in this lineup.`,
+      saveLineup: "Save lineup",
       visibleOrder: (ids: string) => `Order guests see now: ${ids}`,
       noEligible: "No model can be chosen as the lead.",
       outsideTrio: (name: string, id: string) =>
-        `${name} (${id}) is not in the guest trio, so it cannot lead. Changing the trio is a code change.`,
+        `${name} (${id}) is not in the default lineup, so it cannot lead. Add it to the lineup first.`,
       storedNotApplied: (stored: string, effective: string) =>
         `Stored lead ${stored} is not applied, so ${effective} leads.`,
       substituted: (missing: string, substitute: string) =>
@@ -186,6 +194,8 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       saved: "플랫폼 설정을 저장했으며 바로 적용됩니다.",
       leadSaved: "선두 모델을 저장했으며 바로 적용됩니다.",
       leadNotSaved: "선두 모델을 저장하지 않았습니다. 그 밖의 설정은 바뀌지 않았습니다.",
+      lineupSaved: "기본 3모델 구성을 저장했으며 새 대화부터 바로 적용됩니다.",
+      lineupNotSaved: "기본 3모델 구성을 저장하지 않았습니다. 그 밖의 설정은 바뀌지 않았습니다.",
       copyDoesNotApply: "이 복사만으로 바뀌는 것은 없습니다.",
       copyFailed: "복사하지 못했습니다. 직접 선택해 복사하세요.",
       sendFailed:
@@ -252,14 +262,20 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       eyebrow: "게스트 기본 모델",
       title: "게스트 첫 대화 — 선두 모델",
       description:
-        "로그인하지 않은 게스트에게는 항상 세 모델이 함께 제공됩니다. 여기서 고르는 모델은 그 셋 중 어느 것을 맨 앞에 둘지만 정합니다. 세 모델의 구성도, 로그인 계정의 기본 모델도 바꾸지 않습니다.",
-      leadingEngine: "선두 모델 (게스트 3종 중 맨 앞)",
+        "로그인하지 않은 게스트와 신규 계정의 첫 대화에는 항상 세 모델이 함께 제공됩니다. 아래 구성이 어떤 세 모델인지를, 선두 모델이 그중 무엇을 맨 앞에 둘지를 정합니다. 둘 다 로그인 계정의 기본 모델은 바꾸지 않습니다.",
+      leadingEngine: "선두 모델 (기본 3모델 중 맨 앞)",
       saveLead: "선두 모델 저장",
-      trioFixed: (ids: string) => `게스트 3종 (코드 고정): ${ids}`,
+      lineupTitle: "기본 3모델 구성",
+      lineupDescription:
+        "각 모델은 활성화돼 있고 게스트가 쓸 수 있는 Standard 등급이며 가격이 확인돼 있어야 합니다. 기존 대화의 모델은 그대로이며, 은퇴한 모델의 자리는 대체 모델이 자동으로 이어받습니다.",
+      lineupSlot: (slot: number) => `모델 ${slot}`,
+      lineupLeadMoves: (lead: string) =>
+        `현재 선두가 이 구성에 없으므로, 저장하면 ${lead}가 선두 모델이 됩니다.`,
+      saveLineup: "구성 저장",
       visibleOrder: (ids: string) => `지금 게스트에게 보이는 순서: ${ids}`,
       noEligible: "선두로 고를 수 있는 모델이 없습니다.",
       outsideTrio: (name: string, id: string) =>
-        `${name} (${id})는 게스트 3종이 아니라 선두로 고를 수 없습니다. 3종 변경은 코드 변경입니다.`,
+        `${name} (${id})는 기본 3모델 구성에 없어 선두로 고를 수 없습니다. 먼저 구성에 넣으세요.`,
       storedNotApplied: (stored: string, effective: string) =>
         `저장된 선두 ${stored}가 적용되지 않아 ${effective}가 선두입니다.`,
       substituted: (missing: string, substitute: string) =>
