@@ -5,6 +5,7 @@ import { MarketingChatAvailabilityProvider } from "@/components/marketing/Market
 import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { StructuredData } from "@/components/seo/StructuredData";
 import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
+import type { Language } from "@/lib/language";
 
 const configuredMeasurementId = process.env.GA4_MEASUREMENT_ID?.trim();
 const measurementId =
@@ -26,15 +27,22 @@ const measurementId =
  */
 export function MarketingShell({
   children,
+  initialLang,
+  forceInitialLang,
+  nonce,
 }: Readonly<{
   children: React.ReactNode;
+  initialLang?: Language;
+  forceInitialLang?: boolean;
+  nonce?: string | null;
 }>) {
   return (
     <>
       {/* First thing in the marketing subtree, so it runs before the header --
           and therefore the consent slot -- is parsed. */}
-      <MarketingConsentReservation />
+      <MarketingConsentReservation nonce={nonce} />
       <StructuredData
+        nonce={nonce}
         data={{
           "@context": "https://schema.org",
           "@graph": [
@@ -66,7 +74,7 @@ export function MarketingShell({
           ],
         }}
       />
-      <MarketingProviders measurementId={measurementId}>
+      <MarketingProviders measurementId={measurementId} initialLang={initialLang} forceInitialLang={forceInitialLang} nonce={nonce}>
         <MarketingChatAvailabilityProvider guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
         {children}
         {/*
