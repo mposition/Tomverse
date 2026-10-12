@@ -6,12 +6,34 @@ import test from "node:test";
 
 import {
   canStartAnotherIdea,
+  canOpenSavedIdea,
   classifyIdeaSubmissionPost,
   classifyIdeaSubmissionReadBack,
 } from "../lib/amux/ideaSubmissionUiCore.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const requestId = "e7def5f0-2c78-4bd3-9558-ab8a8e3617d0";
+
+test("saved idea lookup cannot reset pending or unknown writes", () => {
+  for (const state of ["idle", "submitted", "refused"]) {
+    assert.equal(canOpenSavedIdea(state, false, requestId), true);
+    assert.equal(canOpenSavedIdea(state, true, requestId), false);
+  }
+  for (const state of ["pending", "outcome_unknown", "recovery_unavailable"]) {
+    assert.equal(canOpenSavedIdea(state, false, requestId), false);
+  }
+  assert.equal(canOpenSavedIdea("submitted", false, "not-a-request"), false);
+});
+
+test("manual reopen uses only the existing audited receipt readback", () => {
+  const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
+  const reopen = panel.split("const openSavedIdea = async")[1]?.split("useEffect(")[0] ?? "";
+  assert.match(reopen, /adminFetch\(`\/api\/admin\/amux\/ideas\/submissions\?/);
+  assert.match(reopen, /classifyIdeaSubmissionReadBack/);
+  assert.doesNotMatch(reopen, /method:\s*["']POST/);
+  assert.match(panel, /htmlFor="amux-saved-request-id"/);
+  assert.match(panel, /const frozen = readBackPending \|\|/);
+});
 
 test("another idea starts only after a definitive save and no pending check", () => {
   assert.equal(canStartAnotherIdea("submitted", false), true);
