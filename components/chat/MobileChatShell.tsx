@@ -18,6 +18,7 @@ import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
 import { AiDisclaimerNotice } from "@/components/chat/AiDisclaimerNotice";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { ChatProductSwitcher } from "@/components/chat/ChatProductSwitcher";
 import type { AttachmentsChangeHandler } from "@/components/chat/useConversationDrafts";
 import type { AiModel } from "@/lib/models";
 import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
@@ -40,6 +41,7 @@ import {
   useVisibleViewportHeight,
 } from "@/components/chat/useVisualViewport";
 import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
+import { autoRoutingCopy } from "@/lib/autoRoutingCopy";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
 import {
   deriveDeepResearchSuggestion,
@@ -103,6 +105,7 @@ import {
 import { lockBodyScroll } from "@/components/useBodyScrollLock";
 import type { PromptRefinerProductChatDecision } from
   "@/lib/promptRefinerProductApiContract";
+import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 
 type PromptPayload = {
   id: string;
@@ -147,6 +150,10 @@ const PROVIDER_BANNER_MIN_REM = 5;
 const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
+  /** Current product chrome; switching routes never rewrites this conversation. */
+  currentProduct?: ChatWorkspaceProduct;
+  productSwitchDisabled?: boolean;
+  onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
   transcriptScope?: "model" | "conversation";
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   conversations: Conversation[];
@@ -305,7 +312,7 @@ type MobileChatShellProps = {
   autoSelectionOffered?: boolean;
   selectionMode?: "manual" | "auto";
   selectionModePending?: boolean;
-  onSelectionModeChange?: (next: boolean) => void;
+  onSelectionModeChange?: (next: boolean) => Promise<boolean>;
   /** §14. Passed straight through to the composer's tools menu. */
   assistantProfile?: ChatAssistantProfile | null;
   /** ISO time this conversation's assistant was deleted, if it was. */
@@ -440,6 +447,9 @@ const mobileModelTabPanelId = (modelId: string) =>
   `mobile-model-tabpanel-${modelId}`;
 
 export function MobileChatShell({
+  currentProduct,
+  productSwitchDisabled = false,
+  onProductSwitch,
   transcriptScope = "model",
   onRestorePrompt,
   conversations,
@@ -882,12 +892,16 @@ export function MobileChatShell({
     [AVAILABLE_MODELS, disabledPanels, resolvedActiveModelId, selectedModels]
   );
   const summaryCopy = chatModelSummaryCopy[lang];
-  const modelSummaryLabel = summaryCopy.accessibleName({
-    primaryModelName: modelSummary.primary?.name ?? null,
-    extraActiveCount: modelSummary.extraActiveCount,
-    activeCount: modelSummary.activeCount,
-    pausedCount: modelSummary.pausedCount,
-  });
+  const isAutoMode = selectionMode === "auto";
+  const autoCopy = autoRoutingCopy[lang];
+  const modelSummaryLabel = isAutoMode
+    ? `${autoCopy.activeSummary}. ${summaryCopy.openPicker}.`
+    : summaryCopy.accessibleName({
+        primaryModelName: modelSummary.primary?.name ?? null,
+        extraActiveCount: modelSummary.extraActiveCount,
+        activeCount: modelSummary.activeCount,
+        pausedCount: modelSummary.pausedCount,
+      });
   const handleOpenModelPicker = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>) => {
       trackProductEvent("chat_tool_menu_opened", modelSummary.activeCount, {
@@ -1286,7 +1300,22 @@ export function MobileChatShell({
             aria-label={modelSummaryLabel}
             className="flex h-11 min-w-11 max-w-[52%] shrink items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 active:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:active:bg-zinc-800"
           >
-            {isMultiModelConversation ? (
+            {isAutoMode ? (
+              <>
+                <span
+                  aria-hidden="true"
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-status-switch-on-500 text-white"
+                >
+                  <Sparkles className="h-3 w-3" />
+                </span>
+                <span
+                  data-testid="mobile-header-auto-mode"
+                  className="min-w-0 truncate"
+                >
+                  {autoCopy.label}
+                </span>
+              </>
+            ) : isMultiModelConversation ? (
               <>
                 {/*
                   Glyph-sized count drawn inside a 16px badge, already
@@ -1800,6 +1829,10 @@ export function MobileChatShell({
       {composerPortalHost &&
         createPortal(
           <ChatInput
+            currentProduct={currentProduct}
+            showProductSwitcher={false}
+            productSwitchDisabled={productSwitchDisabled}
+            onProductSwitch={onProductSwitch}
             singleModelSelection={singleTranscript}
             value={inputValue}
             onChange={setInputValue}
@@ -1891,12 +1924,13 @@ export function MobileChatShell({
             // on the footer inside it, so the sidebar's own scroll region ends
             // above the home indicator instead of scrolling its last control
             // underneath it.
-            className="absolute inset-y-0 left-0 z-10 flex w-[min(24rem,92vw)] max-w-full bg-zinc-50 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl dark:bg-zinc-950"
+            className="absolute inset-y-0 left-0 z-10 flex w-[min(24rem,92vw)] max-w-full flex-col bg-zinc-50 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl dark:bg-zinc-950"
             style={
               drawerKeyboardInset ? { bottom: drawerKeyboardInset } : undefined
             }
           >
             <div className="absolute right-[-0.45rem] top-1/2 h-12 w-1.5 -translate-y-1/2 rounded-full bg-white/70 shadow dark:bg-zinc-700/80" aria-hidden="true" />
+            <div className="min-h-0 flex-1">
             <ChatSidebar
               conversations={conversations}
               currentChatId={currentChatId}
@@ -1950,6 +1984,15 @@ export function MobileChatShell({
               attachmentCount={attachments.length}
               isMobileDrawer
             />
+            </div>
+            {currentProduct && <div className="shrink-0 border-t border-zinc-200 p-2 dark:border-zinc-800">
+              <ChatProductSwitcher
+                currentProduct={currentProduct}
+                chatRequiresSignIn={isGuestMode}
+                disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
+                onProductSwitch={onProductSwitch}
+              />
+            </div>}
             <button
               ref={drawerCloseButtonRef}
               type="button"

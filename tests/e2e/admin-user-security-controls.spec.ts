@@ -537,7 +537,7 @@ test("consecutive toasts stack, dismiss by hand, and clear themselves", async ({
 
 test("the chat shell still renders exactly one toast per event", async ({ page }) => {
   await prepareGuestPage(page, "en");
-  await page.goto("/chat");
+  await page.goto("/review");
   await waitForHydration(page, '[data-testid="chat-input"]');
 
   await page.evaluate(() => {

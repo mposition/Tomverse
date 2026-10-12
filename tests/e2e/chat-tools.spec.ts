@@ -72,7 +72,7 @@ test("the + menu opens a tools sheet with web search, Deep Research, and an unch
   page,
 }) => {
   await mockAuthenticatedApi(page);
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
 
   await toolsMenuTrigger(page).click();
   await expect(page.getByTestId("tools-web-search-row")).toBeVisible();
@@ -96,7 +96,7 @@ test("selecting a web search mode shows a removable status chip", { tag: "@ui-ri
     webSearchMode: "off",
   });
   await asProPlan(page);
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   // /chat opens on the welcome screen with no active conversation, where the
   // selection is DEFAULT_MODEL_ID rather than anything this fixture seeded.
   // The seeded conversation has to actually be opened for its selectedModels
@@ -161,7 +161,7 @@ test("turning web search off does not repeat across a new chat", { tag: "@ui-ris
       },
     ],
   });
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
 
   // Seeding history is not enough on its own: /chat opens on the welcome
   // screen with no active conversation, so the panel still reports itself
@@ -188,7 +188,7 @@ test("turning web search off does not repeat across a new chat", { tag: "@ui-ris
 test("Deep Research is gated behind login for guests", { tag: "@ui-risk" }, async ({ page }) => {
   const { prepareGuestPage } = await import("./support/app-fixtures");
   await prepareGuestPage(page, "en");
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await toolsMenuTrigger(page).click();
   await page.getByTestId("tools-deep-research-row").click();
@@ -202,7 +202,7 @@ test("Deep Research setup sheet opens for an eligible Pro user and requires expl
 }) => {
   await mockAuthenticatedApi(page);
   await asProPlan(page);
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
 
   await page.getByPlaceholder("Ask anything...").fill("Compare inflation trends across regions");
 
@@ -224,7 +224,7 @@ for (const width of [320, 360, 375, 390, 430]) {
     await mockAuthenticatedApi(page);
     await asProPlan(page);
     await page.setViewportSize({ width, height: 700 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     const sendButton = page.getByTestId("chat-send-button");
     await expect(sendButton).toBeVisible();

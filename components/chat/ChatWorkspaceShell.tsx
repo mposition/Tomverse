@@ -7,7 +7,10 @@ import { chatSurfaceAvailable } from "@/lib/autoProductBoundary";
 import { decideChatWorkspaceEntry } from "@/lib/chatWorkspaceEntry";
 import { CONVERSATION_HANDOFF_PARAM, conversationHandoffHref } from "@/lib/continuationRoutes";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
-import { LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
+import {
+  CHAT_WORKSPACE_PATH,
+  REVIEW_WORKSPACE_PATH,
+} from "@/lib/productSurfaceRoutes";
 import { prisma } from "@/lib/prisma";
 import { ReviewWorkspaceShell } from "@/components/chat/ReviewWorkspaceShell";
 
@@ -30,7 +33,20 @@ export async function ChatWorkspaceShell({ searchParams }: {
 
   const session = await getServerSession(authOptions);
   const userId = session?.user?.id;
-  if (!userId) notFound();
+  if (!userId) {
+    const callback = new URL(CHAT_WORKSPACE_PATH, "https://local.invalid");
+    for (const [key, values] of Object.entries(searchParams)) {
+      if (values === undefined) continue;
+      for (const value of Array.isArray(values) ? values : [values]) {
+        callback.searchParams.append(key, value);
+      }
+    }
+    redirect(
+      `/auth/signin?callbackUrl=${encodeURIComponent(
+        `${callback.pathname}${callback.search}`
+      )}`
+    );
+  }
   const owned = conversationId
     ? await prisma.conversation.findFirst({
         where: { id: conversationId, userId },
@@ -50,7 +66,7 @@ export async function ChatWorkspaceShell({ searchParams }: {
   });
   if (decision.action === "not_found") notFound();
   if (decision.action === "redirect" && conversationId) {
-    const destination = new URL(conversationHandoffHref(decision.surface, conversationId, LEGACY_REVIEW_PATH), "https://local.invalid");
+    const destination = new URL(conversationHandoffHref(decision.surface, conversationId, REVIEW_WORKSPACE_PATH), "https://local.invalid");
     for (const [key, values] of Object.entries(searchParams)) {
       if (key === CONVERSATION_HANDOFF_PARAM || values === undefined) continue;
       for (const value of Array.isArray(values) ? values : [values]) destination.searchParams.append(key, value);

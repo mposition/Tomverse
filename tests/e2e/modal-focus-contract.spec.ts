@@ -62,7 +62,7 @@ test.describe("destructive confirmation dialog", () => {
     async ({ page }) => {
       await mockAuthenticatedApi(page);
       await page.setViewportSize({ width: 1366, height: 768 });
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
 
       await page.getByTestId("conversation-menu").first().click();
       await expect(page.getByTestId("conversation-menu-panel")).toBeVisible();
@@ -98,7 +98,7 @@ test.describe("first-run onboarding dialog", () => {
     { tag: "@ui-risk" },
     async ({ page }) => {
       await mockAuthenticatedApi(page);
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
 
       // Same entry point the model-finder suite uses.
       await page.locator('button[aria-controls="chat-input-popover"]').nth(1).click();
@@ -167,7 +167,7 @@ test.describe("focus survives the page behind the dialog re-rendering", () => {
       // implementation can satisfy the shape.
       await mockAuthenticatedApi(page);
       await page.setViewportSize({ width: 1366, height: 768 });
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
 
       await page.getByTestId("conversation-menu").first().click();
       await expect(page.getByTestId("conversation-menu-panel")).toBeVisible();
@@ -207,7 +207,7 @@ test(
   { tag: "@ui-risk" },
   async ({ page }) => {
     await prepareGuestPage(page, "en");
-    await page.goto("/chat");
+    await page.goto("/review");
     // A surface that sets aria-modal without role="dialog" is invisible to the
     // shared hook's ownership check and would silently opt out of the contract.
     const mismatched = await page.evaluate(
@@ -226,7 +226,7 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
     { tag: "@ui-risk" },
     async ({ page }) => {
       await mockAuthenticatedApi(page);
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
 
       const accountTrigger = page.getByTestId("account-menu-trigger");
       if ((page.viewportSize()?.width ?? 0) < 768) {
@@ -291,7 +291,7 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
             setTimeout(() => callback(performance.now()), 250);
           });
       });
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
 
       const accountTrigger = page.getByTestId("account-menu-trigger");
       if ((page.viewportSize()?.width ?? 0) < 768) {
@@ -348,7 +348,7 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
             setTimeout(() => callback(performance.now()), 2500);
           });
       });
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
 
       const accountTrigger = page.getByTestId("account-menu-trigger");
       if ((page.viewportSize()?.width ?? 0) < 768) {
@@ -397,7 +397,7 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
     async ({ page }) => {
       await mockAuthenticatedApi(page);
       await page.setViewportSize({ width: 1366, height: 768 });
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
 
       // A dialog whose Escape handler listens in the capture phase would beat
       // the popover's own handler on registration order and close the whole
@@ -540,7 +540,7 @@ test.describe("credit pack purchase opened from account settings", () => {
       // passed `toBeVisible()` -- painted underneath the settings overlay, so
       // nothing was on screen and no click reached it. Only a hit test at the
       // control's own centre can tell the two apart.
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       const { settings, viaMobileDrawer } = await openUserSettings(page);
 
       await settings.getByTestId("settings-tab-plan").click();
@@ -610,7 +610,7 @@ test.describe("credit pack purchase opened from account settings", () => {
     "Escape closes only the purchase modal and leaves User Settings open",
     { tag: "@ui-risk" },
     async ({ page }) => {
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       const { settings, viaMobileDrawer } = await openUserSettings(page);
 
       await settings.getByTestId("settings-tab-plan").click();

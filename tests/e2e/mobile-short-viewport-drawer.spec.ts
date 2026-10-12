@@ -411,7 +411,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
           window.localStorage.setItem("tomverse_theme_preference", theme);
         }, state.theme);
         await page.setViewportSize({ width: viewport.width, height: viewport.height });
-        await page.goto(`/chat?lang=${state.lang}`);
+        await page.goto(`/review?lang=${state.lang}`);
         await openDrawer(page);
 
         const initial = await expectPanelInsideVisibleViewport(page, name);
@@ -472,7 +472,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await prepareGuestPage(page, "en");
     await seedGuestConversations(page, 1);
     await page.setViewportSize({ width: 382, height: 560 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openDrawer(page);
 
     const sidebar = page.getByTestId("chat-sidebar");
@@ -503,7 +503,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await prepareGuestPage(page, "en");
     await seedGuestConversations(page, 24);
     await page.setViewportSize({ width: 382, height: 560 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openDrawer(page);
 
     await expectSingleScrollOwner(page, "long list");
@@ -519,7 +519,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await seedGuestConversations(page, 2);
     await setOrganizerPreference(page, "expanded");
     await page.setViewportSize({ width: 320, height: 480 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openDrawer(page);
 
     await expect(page.getByTestId("sidebar-organizer-content")).toBeVisible();
@@ -536,7 +536,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await prepareGuestPage(page, "en");
     await seedGuestConversations(page, 2);
     await page.setViewportSize({ width: 382, height: 560 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await setRootFontSize(page, 32);
     await openDrawer(page);
 
@@ -553,7 +553,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await prepareGuestPage(page, "en");
     await seedGuestConversations(page, 2);
     await page.setViewportSize({ width: 382, height: 560 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openDrawer(page);
 
     // The drawer traps Tab, so a full cycle visits every focusable control in
@@ -605,7 +605,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await prepareGuestPage(page, "en");
     await seedGuestConversations(page, 2);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openDrawer(page);
 
     for (const height of [844, 560, 480]) {
@@ -632,7 +632,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await prepareGuestPage(page, "en");
     await seedGuestConversations(page, 2);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openDrawer(page);
 
     // 667x375, not 844x390: past 767px wide the app swaps the whole mobile
@@ -658,7 +658,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await prepareGuestPage(page, "en");
     await seedGuestConversations(page, 2);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openDrawer(page);
 
     // The layout viewport keeps its full height on iOS Safari and Android
@@ -677,7 +677,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await prepareGuestPage(page, "en");
     await seedGuestConversations(page, 2);
     await page.setViewportSize({ width: 382, height: 560 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     const opener = page.getByTestId("mobile-sidebar-open");
     await openDrawer(page);
@@ -713,7 +713,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await prepareGuestPage(page, "en");
     await seedGuestConversations(page, 24);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openDrawer(page);
 
     const geometry = await readDrawerGeometry(page, []);

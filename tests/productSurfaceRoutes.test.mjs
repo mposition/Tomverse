@@ -4,17 +4,18 @@ import test from "node:test";
 import { CONVERSATION_PRODUCT_KEYS } from "../lib/conversationProduct.ts";
 import {
     conversationProductLabel,
+    CHAT_WORKSPACE_COMPATIBILITY_PATH,
+    CHAT_WORKSPACE_PATH,
     LEGACY_REVIEW_PATH,
     PRODUCT_LABEL,
     PRODUCT_SURFACE_PATH,
     resolveLegacyChatDeepLink,
+    REVIEW_WORKSPACE_PATH,
 } from "../lib/productSurfaceRoutes.ts";
 
 /**
- * Decision record v1.2 §8 — prepared, not wired. Nothing calls these in
- * production yet; the rule is written now because it needs productKey settled
- * before it can be applied, and writing it later means writing it under
- * deadline.
+ * Stored-product routing: docs/ui-contracts/chat-product-switcher.md. The stored product, never a URL guess, decides
+ * which canonical workspace opens the conversation.
  */
 
 test("every product has a surface path and a label", () => {
@@ -25,7 +26,7 @@ test("every product has a surface path and a label", () => {
 });
 
 test("a Review conversation moves off the legacy /chat path", () => {
-    // The bookmark case: every Review deep link points at /chat today.
+    // Historical bookmarks may still point at /chat after the cutover.
     assert.deepEqual(resolveLegacyChatDeepLink("review"), {
         action: "move",
         path: "/review",
@@ -67,6 +68,12 @@ test("the legacy path and Review's canonical path are separate constants", () =>
     assert.equal(LEGACY_REVIEW_PATH, "/chat");
     assert.equal(PRODUCT_SURFACE_PATH.review, "/review");
     assert.notEqual(LEGACY_REVIEW_PATH, PRODUCT_SURFACE_PATH.review);
+});
+
+test("Chat and Review expose canonical entries while the prior Chat URL remains inbound-only", () => {
+    assert.equal(CHAT_WORKSPACE_PATH, "/chat");
+    assert.equal(CHAT_WORKSPACE_COMPATIBILITY_PATH, "/chat/workspace");
+    assert.equal(REVIEW_WORKSPACE_PATH, "/review");
 });
 
 /* ------------------------------------------------------------ labelling */

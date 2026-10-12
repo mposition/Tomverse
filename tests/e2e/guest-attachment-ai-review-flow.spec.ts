@@ -288,7 +288,7 @@ async function startGuestJourney(page: Page, options: JourneyOptions) {
   const watch = watchConsole(page);
 
   await page.setViewportSize(viewport);
-  await page.goto(`/chat?lang=${lang}`);
+  await page.goto(`/review?lang=${lang}`);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   if (options.textScalePercent) {
     const size = (16 * options.textScalePercent) / 100;

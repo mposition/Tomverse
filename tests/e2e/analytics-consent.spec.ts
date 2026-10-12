@@ -85,7 +85,7 @@ test("mobile guest chat never shows the floating analytics settings shortcut", a
   ]);
   await prepareGuestPage(page, "en");
   await initMobileGuestAnalyticsState(page);
-  await page.goto("/chat");
+  await page.goto("/review");
 
   const settings = page.getByTestId("analytics-settings-button");
   // REAUDIT-P1-01: the floating pill is not rendered on /chat at all any
@@ -124,7 +124,7 @@ test("mobile guest chat keeps the composer usable and overflow-free while the ke
   ]);
   await prepareGuestPage(page, "en");
   await initMobileGuestAnalyticsState(page);
-  await page.goto("/chat");
+  await page.goto("/review");
 
   const settings = page.getByTestId("analytics-settings-button");
   await expect(settings).toBeHidden();
@@ -168,7 +168,7 @@ test("mobile guest chat opens analytics preferences from the sidebar drawer", as
   ]);
   await prepareGuestPage(page, "en");
   await initMobileGuestAnalyticsState(page);
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await expect(page.getByTestId("analytics-settings-button")).toBeHidden();
 
@@ -259,7 +259,7 @@ test("authenticated chat moves analytics settings into the account menu", async 
   await page.addInitScript(() => {
     window.localStorage.setItem("tomverse_analytics_consent_v1", "accepted");
   });
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
 
   // The floating shortcut's JSX is skipped entirely on /chat, for guests and
   // signed-in users alike (REAUDIT-P1-01).
@@ -306,7 +306,7 @@ test("a fresh guest sees the quick-start guide before the analytics consent noti
   await prepareGuestPage(page, "en");
   // No quick-start-seen flag and no guest-preview mode: this is a genuinely
   // fresh guest, the only state the quick-start guide actually renders for.
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
 
   const quickStart = page.getByTestId("guest-quick-start");
   const notice = page.getByTestId("chat-consent-notice");
@@ -338,7 +338,7 @@ test("both consent controls are reachable and operable by keyboard alone", async
   await page.addInitScript(() => {
     window.localStorage.setItem("tomverse_guest_quick_start_seen_v2", "1");
   });
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
 
   const notice = page.getByTestId("chat-consent-notice");
   await expect(notice).toBeVisible();
@@ -495,7 +495,7 @@ for (const viewport of REGRESSION_VIEWPORTS) {
     ]);
     await prepareGuestPage(page, "en");
     await page.setViewportSize(viewport);
-    await page.goto("/chat?lang=en&entry=guest-preview");
+    await page.goto("/review?lang=en&entry=guest-preview");
 
     const dimensions = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
@@ -563,7 +563,7 @@ test("STG-F001: Choose AI models opens the model dialog with the consent notice 
   ]);
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 320, height: 568 });
-  await page.goto("/chat?lang=en&entry=guest-preview");
+  await page.goto("/review?lang=en&entry=guest-preview");
 
   await expect(page.getByTestId("chat-consent-notice")).toBeVisible();
   await chatComposerLocators(page).modelSelect.click();
@@ -587,7 +587,7 @@ test("STG-F001: declining analytics from the chat notice hides it and persists t
   ]);
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 320, height: 568 });
-  await page.goto("/chat?lang=en&entry=guest-preview");
+  await page.goto("/review?lang=en&entry=guest-preview");
 
   const notice = page.getByTestId("chat-consent-notice");
   await expect(notice).toBeVisible();
@@ -617,7 +617,7 @@ test("STG-F001: accepting analytics from the chat notice hides it and persists t
   ]);
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 320, height: 568 });
-  await page.goto("/chat?lang=en&entry=guest-preview");
+  await page.goto("/review?lang=en&entry=guest-preview");
 
   const notice = page.getByTestId("chat-consent-notice");
   await expect(notice).toBeVisible();

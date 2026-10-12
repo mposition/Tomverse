@@ -35,7 +35,7 @@ async function openEmptyChat(
       window.localStorage.setItem("tomverse_sidebar_collapsed_v1", preference as string);
     }, options.sidebar);
   }
-  await page.goto(`/chat?lang=${options.lang}`);
+  await page.goto(`/review?lang=${options.lang}`);
   await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
   // The empty state is the condition under test, not an incidental starting
   // point: the defect only existed while it was showing.

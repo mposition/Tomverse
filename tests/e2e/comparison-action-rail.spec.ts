@@ -78,7 +78,7 @@ const seedGuestComparison = async (
 };
 
 const openSeeded = async (page: Page) => {
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openRecentConversation(page, { title: TITLE });
   await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 };
@@ -296,7 +296,7 @@ test.describe("comparison readiness states", { tag: "@ui-risk" }, () => {
       "claude-haiku-4-5": "missing",
       "gemini-2-5-flash": "missing",
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(rail(page)).toHaveCount(0);
   });
 
@@ -455,7 +455,7 @@ async function enterAuthenticatedComparison(
   if (modelStub) await installChatModelStub(page, modelStub);
 
   await page.setViewportSize(viewport);
-  await page.goto(`/chat?lang=${lang}`);
+  await page.goto(`/review?lang=${lang}`);
   // Which shell mounts is a function of the viewport (and pointer), so the
   // same helper drives both -- the policy under test must not depend on it.
   await expect(
@@ -491,7 +491,7 @@ async function openGuestComparison(
   });
   await seedGuestComparison(page);
   await page.setViewportSize(options.viewport);
-  await page.goto(`/chat?lang=${options.lang ?? "en"}`);
+  await page.goto(`/review?lang=${options.lang ?? "en"}`);
   await openRecentConversation(page, { title: TITLE });
   await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
   await expect(rail(page)).toBeVisible();

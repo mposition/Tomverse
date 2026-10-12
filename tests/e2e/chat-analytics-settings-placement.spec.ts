@@ -140,7 +140,7 @@ test.describe("desktop chat analytics settings placement", () => {
             await prepareGuestPage(page, lang);
             await seedGuestWorkspace(page, theme);
             await page.setViewportSize(viewport);
-            await page.goto(`/chat?lang=${lang}&entry=guest-preview`);
+            await page.goto(`/review?lang=${lang}&entry=guest-preview`);
             await openRecentConversation(page, { title: TITLE });
 
             // Real drafts, so every panel send is the enabled control a user
@@ -184,7 +184,7 @@ test.describe("desktop chat analytics settings placement", () => {
       await prepareGuestPage(page, "en");
       await seedGuestWorkspace(page, "light");
       await page.setViewportSize({ width: 1440, height: 900 });
-      await page.goto("/chat?lang=en&entry=guest-preview");
+      await page.goto("/review?lang=en&entry=guest-preview");
 
       // The floating overlay is gone from this route entirely -- not merely
       // hidden by a media query.
@@ -220,7 +220,7 @@ test.describe("desktop chat analytics settings placement", () => {
         window.localStorage.setItem("tomverse_sidebar_collapsed_v1", "collapsed");
       });
       await page.setViewportSize({ width: 1440, height: 900 });
-      await page.goto("/chat?lang=en&entry=guest-preview");
+      await page.goto("/review?lang=en&entry=guest-preview");
 
       const trigger = page.getByTestId("sidebar-rail-account-trigger");
       await expect(trigger).toBeVisible();

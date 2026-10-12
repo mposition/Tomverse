@@ -56,9 +56,12 @@ test("public deployment ignores forged fixture cookies and refuses unoffered new
   assert.equal(cookieReads, 0);
   assert.deepEqual(availabilityReads, ["owner-a"]);
 });
-test("public deployment ignores forged cookies without an authenticated owner", async () => {
+test("public deployment ignores forged cookies and sends an unauthenticated visitor through Chat sign-in", async () => {
   session = null;
-  await assert.rejects(open({ conversation: "another-owner-chat" }), /NOT_FOUND/);
+  await assert.rejects(
+    open({ conversation: "another-owner-chat" }),
+    /REDIRECT:\/auth\/signin\?callbackUrl=%2Fchat%3Fconversation%3Danother-owner-chat/
+  );
   assert.equal(cookieReads, 0);
   assert.equal(ownershipReads.length, 0);
 });
@@ -83,7 +86,7 @@ test("offered new entry opens the Chat shell", async () => {
 });
 test("owned legacy Review and continuation hand off without cutover or query loss", async () => {
   owned = { productKey: null, continuationBridge: null };
-  await assert.rejects(open({ conversation: "owned-review", lang: "ko" }), /REDIRECT:\/chat\?conversation=owned-review&lang=ko/);
+  await assert.rejects(open({ conversation: "owned-review", lang: "ko" }), /REDIRECT:\/review\?conversation=owned-review&lang=ko/);
   owned = { productKey: "review", continuationBridge: { id: "bridge" } };
   await assert.rejects(open({ conversation: "continued", lang: "ko" }), /REDIRECT:\/continuations\/continued\?lang=ko/);
 });
@@ -95,5 +98,11 @@ test("only full loopback fixture mode can use the opted-in cookies", async () =>
   assert.equal(cookieReads, 1);
   assert.equal(ownershipReads.length, 0);
   process.env.E2E_DISABLE_DATABASE = "false";
-  await assert.rejects(open(), /NOT_FOUND/);
+  await assert.rejects(
+    open(),
+    /REDIRECT:\/auth\/signin\?callbackUrl=%2Fchat/
+  );
+  assert.equal(cookieReads, 1);
+  assert.equal(ownershipReads.length, 0);
+  assert.equal(availabilityReads.length, 0);
 });

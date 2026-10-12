@@ -173,7 +173,7 @@ const gotoAuthenticatedChat = async (page: Page, language: QaLanguage = "en") =>
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
   // `?lang=` is what pins the language for a chat page; the stored preference
   // alone is restored asynchronously and would race these assertions.
-  await page.goto(`/chat?lang=${language}`);
+  await page.goto(`/review?lang=${language}`);
 };
 
 // ---------------------------------------------------------------------------
@@ -631,7 +631,7 @@ test.describe("email status updates consent", () => {
   }) => {
     await prepareGuestPage(page, "en");
     await installTurnstileScript(page, "silent");
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     const feedback = await mockFeedbackApi(page);
     await openFeedbackFromSidebar(page);
 
@@ -665,7 +665,7 @@ test.describe("email status updates consent", () => {
   }) => {
     await prepareGuestPage(page, "en");
     await installTurnstileScript(page, "silent");
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     const feedback = await mockFeedbackApi(page);
     await openFeedbackFromSidebar(page);
 
@@ -717,7 +717,7 @@ test.describe("guest verification", () => {
   test("a guest's submission carries a verified token", async ({ page }) => {
     await prepareGuestPage(page, "en");
     await installTurnstileScript(page, "silent");
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     const feedback = await mockFeedbackApi(page);
     await openFeedbackFromSidebar(page);
 
@@ -739,7 +739,7 @@ test.describe("guest verification", () => {
   }) => {
     await prepareGuestPage(page, "en");
     await installTurnstileScript(page, "interactive");
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     const feedback = await mockFeedbackApi(page);
     const dialog = await openFeedbackFromSidebar(page);
 
@@ -759,7 +759,7 @@ test.describe("guest verification", () => {
   test("cancelling verification keeps the draft and says so", async ({ page }) => {
     await prepareGuestPage(page, "en");
     await installTurnstileScript(page, "interactive");
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     const feedback = await mockFeedbackApi(page);
     await openFeedbackFromSidebar(page);
 
@@ -783,7 +783,7 @@ test.describe("guest verification", () => {
   }) => {
     await prepareGuestPage(page, "en");
     await installTurnstileScript(page, "error");
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     const feedback = await mockFeedbackApi(page);
     await openFeedbackFromSidebar(page);
 
@@ -800,7 +800,7 @@ test.describe("guest verification", () => {
   test("an expired check is distinguished from a failed one", async ({ page }) => {
     await prepareGuestPage(page, "en");
     await installTurnstileScript(page, "expired");
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await mockFeedbackApi(page);
     await openFeedbackFromSidebar(page);
 
@@ -813,7 +813,7 @@ test.describe("guest verification", () => {
   test("no Turnstile token is ever rendered into the dialog", async ({ page }) => {
     await prepareGuestPage(page, "en");
     await installTurnstileScript(page, "interactive");
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await mockFeedbackApi(page, () => ({ kind: "status", status: 500 }));
     await openFeedbackFromSidebar(page);
 
@@ -860,7 +860,7 @@ test.describe("error report mode", () => {
     // Without an active conversation the shell opens on its welcome view, and
     // the seeded transcript -- including the failed turn -- is never loaded.
     await restoreActiveConversation(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
   };
 
   test("it submits with no typing at all, using a compliant default", async ({
@@ -1092,7 +1092,7 @@ test.describe("mobile", () => {
   test("a guest challenge is reachable on a phone", async ({ page }) => {
     await prepareGuestPage(page, "en");
     await installTurnstileScript(page, "interactive");
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     const feedback = await mockFeedbackApi(page);
     await openMobileFeedback(page);
 
@@ -1278,7 +1278,7 @@ test.describe("diagnostics disclosure", () => {
       ],
     });
     await restoreActiveConversation(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await page.getByTestId("report-error-button").first().click();
     await expect(page.getByTestId("feedback-dialog")).toBeVisible();
   };
@@ -1456,7 +1456,7 @@ test.describe("per-message trace ownership", () => {
       ],
     });
     const feedback = await mockFeedbackApi(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page, { title: "Trace ownership" });
     await sendChatMessage(page, testInfo, "please fail once");
     await expect(reportButtons(page)).toHaveCount(1);
@@ -1504,7 +1504,7 @@ test.describe("per-message trace ownership", () => {
         errorReportToken: TOKEN_A,
       },
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page, { title: "Trace ownership" });
     await sendChatMessage(page, testInfo, "fail and persist");
     await expect(reportButtons(page)).toHaveCount(1);
@@ -1546,7 +1546,7 @@ test.describe("per-message trace ownership", () => {
       },
     });
     const feedback = await mockFeedbackApi(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page, { title: "Trace ownership" });
     await sendChatMessage(page, testInfo, "fail before the reload");
     await expect(reportButtons(page)).toHaveCount(1);
@@ -1593,7 +1593,7 @@ test.describe("per-message trace ownership", () => {
       [MODEL_A]: { kind: "empty", traceId: TRACE_EMPTY },
     });
     const feedback = await mockFeedbackApi(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page, { title: "Trace ownership" });
     await sendChatMessage(page, testInfo, "answer with nothing");
     await expect(reportButtons(page)).toHaveCount(1);

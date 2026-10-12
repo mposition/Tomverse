@@ -4,7 +4,10 @@ import test from "node:test";
 import type { ReactNode } from "react";
 
 import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
-import { AutoRoutingToggle } from "@/components/chat/AutoRoutingToggle";
+import {
+  AutoRoutingComposerToggle,
+  AutoRoutingToggle,
+} from "@/components/chat/AutoRoutingToggle";
 
 /**
  * UI contract auto-model-selection.md §1, and the evidence the wiring change
@@ -140,6 +143,42 @@ test("the switch carries an accessible name at every width", () => {
   assert.ok((label as string).length > 0);
 });
 
+test("the composer Auto switch obeys the same offered boundary", () => {
+  assert.equal(
+    AutoRoutingComposerToggle({
+      offered: false,
+      enabled: false,
+      language: "en",
+      onChange: () => {},
+    }),
+    null
+  );
+
+  const rendered = AutoRoutingComposerToggle({
+    offered: true,
+    enabled: true,
+    language: "ko",
+    onChange: () => {},
+  });
+
+  assert.equal(findProp(rendered, "data-testid"), "composer-auto-routing-toggle");
+  assert.equal(findProp(rendered, "role"), "switch");
+  assert.equal(findProp(rendered, "aria-checked"), true);
+  assert.match(textOf(rendered), /자동/);
+});
+
+test("the pending composer switch cannot issue a second mode change", () => {
+  const rendered = AutoRoutingComposerToggle({
+    offered: true,
+    enabled: false,
+    pending: true,
+    language: "en",
+    onChange: () => {},
+  });
+
+  assert.equal(findProp(rendered, "disabled"), true);
+});
+
 /* -------------------------------------------------------------- the badge */
 
 test("the badge renders nothing on a turn Auto did not route", () => {
@@ -219,7 +258,15 @@ test("no rendered Auto copy promises a better or optimal model", () => {
   for (const language of LANGUAGES) {
     for (const enabled of [true, false]) {
       const text = textOf(
-        AutoRoutingToggle({ offered: true, enabled, language, onChange: () => {} })
+        <>
+          {AutoRoutingToggle({ offered: true, enabled, language, onChange: () => {} })}
+          {AutoRoutingComposerToggle({
+            offered: true,
+            enabled,
+            language,
+            onChange: () => {},
+          })}
+        </>
       ).toLowerCase();
 
       for (const word of FORBIDDEN_SUPERIORITY) {
@@ -250,6 +297,14 @@ test("no rendered Auto copy names a bucket, share, salt, flag or gate", () => {
     const surfaces = [
       textOf(
         AutoRoutingToggle({
+          offered: true,
+          enabled: true,
+          language,
+          onChange: () => {},
+        })
+      ),
+      textOf(
+        AutoRoutingComposerToggle({
           offered: true,
           enabled: true,
           language,

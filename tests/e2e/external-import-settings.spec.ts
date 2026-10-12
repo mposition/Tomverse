@@ -883,7 +883,7 @@ test.describe("external import settings", () => {
     await mockAuthenticatedApi(page);
     await mockImportApi(page);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await openAccountSettingsDataTab(page);
 
@@ -907,7 +907,7 @@ test.describe("external import settings", () => {
     await mockAuthenticatedApi(page);
     await mockImportApi(page, { disabled: true });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await openAccountSettingsDataTab(page);
 

@@ -24,7 +24,7 @@ const openMemoryMenu = async (page: Page) => {
 
 test("a saved conversation offers the memory control", async ({ page }) => {
   await mockAuthenticatedApi(page);
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openRecentConversation(page);
 
   await toolsMenuTrigger(page).click();
@@ -35,7 +35,7 @@ test("a guest is not offered it at all", async ({ page }) => {
   // §8.1 invariant 2: a guest has no account memory for the control to act
   // on. Absent rather than disabled — a disabled control implies there is
   // something there to enable.
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
 
   await toolsMenuTrigger(page).click();
   await expect(page.getByTestId("tools-memory-row")).toHaveCount(0);
@@ -45,7 +45,7 @@ test("turning memory off for this conversation stores it as off", async ({
   page,
 }) => {
   await mockAuthenticatedApi(page);
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openRecentConversation(page);
 
   await openMemoryMenu(page);
@@ -65,7 +65,7 @@ test("inherit says which way the account default currently points", async ({
   // "Follows your default" alone leaves a privacy control ambiguous: the user
   // cannot tell whether memory is on for this conversation.
   await mockAuthenticatedApi(page, { accountMemoryDefault: "off" });
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openRecentConversation(page);
 
   await toolsMenuTrigger(page).click();
@@ -80,7 +80,7 @@ test("an explicit choice survives a return to the conversation", async ({
   // The stored value is what the menu reads on the way back in; a mode that
   // only lived in component state would silently revert.
   await mockAuthenticatedApi(page, { memoryMode: "off" });
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openRecentConversation(page);
 
   await toolsMenuTrigger(page).click();

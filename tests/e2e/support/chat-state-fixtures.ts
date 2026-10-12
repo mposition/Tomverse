@@ -869,7 +869,7 @@ export async function enterConversation(
   }
 
   await page.setViewportSize(viewport);
-  await page.goto(`/chat?lang=${lang}`);
+  await page.goto(`/review?lang=${lang}`);
   await freezeAnimations(page);
 
   const shellTestId = viewport.width < 768 ? "mobile-chat-shell" : "desktop-chat-shell";

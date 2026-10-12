@@ -108,7 +108,7 @@ async function enterChat(page: Page, options: {
     await restoreActiveConversation(page, PRIMARY_CONVERSATION);
   }
   await page.setViewportSize(options.viewport ?? { width: 390, height: 680 });
-  await page.goto(options.durableChat ? "/chat/workspace?lang=ko" : "/chat?lang=ko");
+  await page.goto(options.durableChat ? "/chat/workspace?lang=ko" : "/review?lang=ko");
   await expect(page.getByTestId(`${options.expectedShell ?? "mobile"}-chat-shell`))
     .toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("chat-textarea")).toBeVisible();

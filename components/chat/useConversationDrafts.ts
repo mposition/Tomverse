@@ -29,6 +29,13 @@ import {
   type PublicChatDraft,
 } from "@/components/chat/chatDurableRecoveryClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import {
+  consumeConversationDraftSession,
+  openConversationDraftSession,
+  publishConversationDraftSession,
+  type DraftSessionFence,
+  type DraftSessionProduct,
+} from "@/lib/conversationDraftSessionCache";
 
 export {
   draftKeyFor,
@@ -80,6 +87,11 @@ export type ConversationDraftsApi = {
   draftSyncFailed: boolean;
   /** Retries hydration or persistence without discarding local input. */
   retryDraftSync: () => void;
+  /**
+   * Stages this idle product's in-memory drafts for one product-switch return.
+   * Callers must refuse the switch while submit/preparation is unsettled.
+   */
+  preserveDraftsForProductSwitch: () => boolean;
   /** Captures the exact local intent synchronously, before preflight awaits. */
   captureDraftSend: (
     draft: ConversationDraft,
@@ -227,7 +239,8 @@ const releasePreviews = (items: ChatAttachment[], keep: ChatAttachment[]) => {
 export function useConversationDrafts(
   currentConversationId: string | null,
   identityKey: string | null,
-  durableSyncEnabled = false
+  durableSyncEnabled = false,
+  sessionProduct: DraftSessionProduct | null = null
 ): ConversationDraftsApi {
   const [drafts, setDrafts] = useState<ConversationDraftStore>({});
   const [, setSyncRevision] = useState(0);
@@ -246,10 +259,8 @@ export function useConversationDrafts(
   // submit all finish after an await, by which point the user may be looking
   // at a different conversation.
   const draftsRef = useRef(drafts);
+  const draftSessionFenceRef = useRef<DraftSessionFence | null>(null);
   const activeDraftKeyRef = useRef(activeDraftKey);
-  useEffect(() => {
-    draftsRef.current = drafts;
-  }, [drafts]);
   const syncMetaRef = useRef(new Map<string, DraftSyncMeta>());
   // Ordinary edit debounce may finish after navigation so the text just left
   // on screen is not lost. Failure retries are different: policy binds them
@@ -384,6 +395,62 @@ export function useConversationDrafts(
   const replaceDrafts = useCallback((next: ConversationDraftStore) => {
     draftsRef.current = next;
     setDrafts(next);
+  }, []);
+
+  const releaseDraftStores = useCallback(
+    (stores: readonly ConversationDraftStore[]) => {
+      const urls = new Set<string>();
+      for (const store of stores) {
+        for (const draft of Object.values(store)) {
+          for (const url of collectReleasablePreviewUrls(draft.attachments)) {
+            urls.add(url);
+          }
+        }
+      }
+      for (const url of urls) URL.revokeObjectURL(url);
+    },
+    []
+  );
+
+  // Product navigation unmounts this hook. A product switch explicitly stages
+  // an idle snapshot through preserveDraftsForProductSwitch; arbitrary
+  // unmounts and pending/unknown sends never publish raw draft bytes. Opening
+  // a product consumes its last staged snapshot for this resolved identity.
+  // Identity changes retire both product scopes and release their previews.
+  useLayoutEffect(() => {
+    const opened = openConversationDraftSession(identityKey, sessionProduct);
+    draftSessionFenceRef.current = opened.fence;
+    releaseDraftStores(opened.retired);
+    // Give a staged product-switch snapshot local authority before passive
+    // durable hydration can observe this mount. The committed mount still
+    // performs the state restore and cache consume in the microtask below so
+    // a discarded StrictMode layout-effect pass cannot take the only copy.
+    // Every state writer in this hook updates draftsRef synchronously through
+    // replaceDrafts, so no passive state-to-ref mirror may overwrite it with
+    // the render's initial empty store in between these two steps.
+    draftsRef.current = opened.store;
+    queueMicrotask(() => {
+      if (
+        opened.fence &&
+        draftSessionFenceRef.current === opened.fence &&
+        consumeConversationDraftSession(opened.fence, opened.store)
+      ) {
+        replaceDrafts(opened.store);
+      }
+    });
+    return () => {
+      const fence = opened.fence;
+      if (draftSessionFenceRef.current === fence) {
+        draftSessionFenceRef.current = null;
+      }
+    };
+  }, [identityKey, releaseDraftStores, replaceDrafts, sessionProduct]);
+
+  const preserveDraftsForProductSwitch = useCallback(() => {
+    const fence = draftSessionFenceRef.current;
+    return fence
+      ? publishConversationDraftSession(fence, draftsRef.current)
+      : false;
   }, []);
 
   const setConflict = useCallback((key: string, conflicted: boolean) => {
@@ -1362,6 +1429,7 @@ export function useConversationDrafts(
     resolveDraftConflict,
     draftSyncFailed: syncFailureKeys.has(activeDraftKey),
     retryDraftSync,
+    preserveDraftsForProductSwitch,
     captureDraftSend,
     prepareDraftSend,
     commitDraftSend,

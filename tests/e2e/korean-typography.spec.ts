@@ -410,7 +410,7 @@ test.describe("Korean typography: chat welcome screen", () => {
   test("keeps 도와드릴까요 intact and wraps within 2 lines at 320x568", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
 
     const greeting = page.getByTestId("chat-welcome-greeting");
     await expect(greeting).toBeVisible();
@@ -428,7 +428,7 @@ test.describe("Korean typography: chat welcome screen", () => {
   test("welcome text never overlaps the chat input box at 320x568", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
 
     const greeting = page.getByTestId("chat-welcome-greeting");
     const input = page.getByTestId("chat-textarea");
@@ -446,7 +446,7 @@ test.describe("Korean typography: chat welcome screen", () => {
   test("keeps welcome layout correct at 390x844", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
 
     const greeting = page.getByTestId("chat-welcome-greeting");
     await expect(greeting).toContainText("도와드릴까요");
@@ -463,7 +463,7 @@ test.describe("Korean typography: chat welcome screen", () => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const greeting = page.getByTestId("chat-welcome-greeting");
     await expect(greeting).toBeVisible();
@@ -494,7 +494,7 @@ test.describe("Korean typography: chat welcome screen", () => {
     ]);
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
 
     const greeting = page.getByTestId("chat-welcome-greeting");
     await expect(greeting).toBeVisible();
@@ -523,7 +523,7 @@ test.describe("Korean typography: chat welcome screen", () => {
   test("does not break the English welcome greeting mid-word at 320x568", async ({ page }) => {
     await prepareGuestPage(page, "en");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
 
     const greeting = page.getByTestId("chat-welcome-greeting");
     await expect(greeting).toContainText("How can I help you today?");
@@ -536,7 +536,7 @@ test.describe("Korean typography: chat welcome screen", () => {
   test("keeps the Chinese welcome greeting wrapping naturally at 320x568", async ({ page }) => {
     await prepareGuestPage(page, "zh");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
 
     const greeting = page.getByTestId("chat-welcome-greeting");
     await expect(greeting).toContainText("你好");
@@ -547,7 +547,7 @@ test.describe("Korean typography: chat welcome screen", () => {
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 320, height: 568 });
     await page.emulateMedia({ colorScheme: "dark" });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
     await expect(page.getByTestId("chat-welcome-greeting")).toBeVisible();
 
     const wordLines = await countLinesForWord(page, "[data-testid='chat-welcome-greeting']", "도와드릴까요");

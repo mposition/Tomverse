@@ -220,7 +220,7 @@ test.describe("font system: monospace scope", () => {
     page,
   }) => {
     await prepareGuestPage(page, "en");
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
     await waitForFonts(page);
 
     const textarea = page.getByTestId("chat-textarea");
@@ -299,7 +299,7 @@ test.describe("font system: accessibility and reflow", () => {
   test("customer chat surfaces keep text at 11px or larger", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
     await waitForFonts(page);
 
     const tooSmall = await page.evaluate(() => {
@@ -324,7 +324,7 @@ test.describe("font system: accessibility and reflow", () => {
   test("the mobile composer input stays at 16px so iOS does not zoom", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/chat?entry=guest-preview");
+    await page.goto("/review?entry=guest-preview");
     await waitForFonts(page);
 
     const textarea = page.getByTestId("chat-textarea");

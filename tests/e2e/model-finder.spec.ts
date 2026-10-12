@@ -127,7 +127,7 @@ test("saving the combination persists it for the next new chat and across a relo
     });
   });
 
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
 
   const finder = page.getByTestId("model-finder");
   await expect(finder).toBeHidden();
@@ -195,7 +195,7 @@ test("saving the combination persists it for the next new chat and across a relo
 
 test("the finder can be closed mid-flow without completing it", { tag: "@ui-risk" }, async ({ page }) => {
   await mockAuthenticatedApi(page);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
 
   const finder = page.getByTestId("model-finder");
   await modelMenuTrigger(page).click();
@@ -219,7 +219,7 @@ test("using the combination for this conversation only does not save it as the a
     await route.fallback();
   });
 
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   const finder = page.getByTestId("model-finder");
   await modelMenuTrigger(page).click();
   await page.getByTestId("model-combo-finder-cta").click();
@@ -239,7 +239,7 @@ test("selecting two models suggests one complementary model instead of the full 
   page,
 }) => {
   await mockAuthenticatedApi(page);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   // A new conversation starts with web search on, and three models' search
   // reservations on top of their base cost exceed the Free account's 30
   // daily credits -- the limit banner would cover the picker. This test is
@@ -287,7 +287,7 @@ test("the picker shows a compact re-recommend link once the model cap is reached
   page,
 }) => {
   await mockAuthenticatedApi(page);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
 
   await modelMenuTrigger(page).click();
   await openModelCatalogue(page);

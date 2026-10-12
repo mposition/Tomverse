@@ -27,7 +27,7 @@ const GUEST_CREDITS = GUEST_MODEL_COUNT * SEARCHING_MODEL_CREDITS;
 // The same trio in a restored conversation whose switch is off.
 const GUEST_CREDITS_SEARCH_OFF = GUEST_MODEL_COUNT;
 const GUEST_SEND_LABEL = `Send · ${GUEST_CREDITS} credits`;
-const GUEST_ENTRY = "/chat?lang=en&entry=guest-preview";
+const GUEST_ENTRY = "/review?lang=en&entry=guest-preview";
 
 type FirstPaintSample = {
   modelCount: number | null;
@@ -279,7 +279,7 @@ test.describe("guest initial cost hydration", () => {
   test("plain /chat applies the same guest default as the preview entry", async ({
     page,
   }) => {
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await settleComposer(page);
 
     expectStableGuestDefault(await readHistory(page));
@@ -422,7 +422,7 @@ test.describe("guest initial cost hydration", () => {
   test("an explicit ?models= link is priced from its own selection only", async ({
     page,
   }) => {
-    await page.goto("/chat?lang=en&models=gpt-5-4-mini,claude-haiku-4-5");
+    await page.goto("/review?lang=en&models=gpt-5-4-mini,claude-haiku-4-5");
     await settleComposer(page);
 
     const history = await readHistory(page);

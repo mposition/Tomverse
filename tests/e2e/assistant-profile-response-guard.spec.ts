@@ -194,7 +194,7 @@ async function openTwoConversations(page: Page) {
     ],
   });
   await mockChatStream(page, "QA answer");
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await expect(page.getByTestId("chat-input")).toBeVisible();
   await page
     .getByTestId("sidebar-conversation-item")

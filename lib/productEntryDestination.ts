@@ -1,25 +1,25 @@
 /**
  * Where the landing CTA sends this particular visitor.
  *
- * Product boundary decision record v1.2 §3, closing paragraph: the CTA goes
- * straight to `/chat` today, and the moment `/chat` is bound to the Chat
- * cohort that link starts bouncing everybody outside it. **A visitor must not
- * be sent somewhere they will be redirected away from.** Landing on a product
- * and being thrown out of it is worse than never being offered it, because the
- * bounce is the only part the user sees.
+ * Entry and availability: docs/ui-contracts/chat-product-switcher.md. After the canonical cutover,
+ * `/chat` is Chat and `/review` is Review. A visitor must not be sent to Chat
+ * when the server has not offered it; landing on a product and being thrown
+ * out is worse than being shown the available Review entry directly.
  *
  * So the destination is decided on the server, per visitor, before the link is
  * rendered -- not by the client reading a flag it is not allowed to have.
  *
- * Eligible visitors use the additive `/chat/workspace` entry. Everyone else
- * keeps the incumbent Review entry at `/chat`. The separate `chatPathIsChat`
- * input describes a future cutover; this helper does not activate it or any
- * availability flag.
+ * `chatPathIsChat` is retained only for an explicitly requested compatibility
+ * calculation. Its default is the shipped canonical mapping.
  *
  * Pure.
  */
 
-import { CHAT_WORKSPACE_PATH, LEGACY_REVIEW_PATH, PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
+import {
+  CHAT_WORKSPACE_COMPATIBILITY_PATH,
+  LEGACY_REVIEW_PATH,
+  PRODUCT_SURFACE_PATH,
+} from "@/lib/productSurfaceRoutes";
 
 export type WorkspaceDestinationInput = {
   /**
@@ -37,9 +37,8 @@ export type WorkspaceDestinationInput = {
   /**
    * Whether `/chat` has been repointed at Tomverse Chat yet.
    *
-   * False today, and deliberately an input rather than a constant read here:
-   * flipping it is a release decision with its own deep-link evidence, and a
-   * function that decided it for itself would make that decision invisible.
+   * Defaults to the canonical cutover. `false` is a compatibility calculation
+   * for callers testing the former route map, not the landing default.
    */
   chatPathIsChat?: boolean;
 };
@@ -50,11 +49,13 @@ export const workspaceDestination = ({
   chatSurfaceAvailable,
   lang,
   isAuthenticated,
-  chatPathIsChat = false,
+  chatPathIsChat = true,
 }: WorkspaceDestinationInput): string => {
   const reviewPath = chatPathIsChat ? PRODUCT_SURFACE_PATH.review : LEGACY_REVIEW_PATH;
   const path = chatSurfaceAvailable
-    ? (chatPathIsChat ? PRODUCT_SURFACE_PATH.chat : CHAT_WORKSPACE_PATH)
+    ? (chatPathIsChat
+        ? PRODUCT_SURFACE_PATH.chat
+        : CHAT_WORKSPACE_COMPATIBILITY_PATH)
     : reviewPath;
 
   const query = `lang=${encodeURIComponent(lang)}`;

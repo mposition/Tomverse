@@ -62,7 +62,7 @@ test.describe("guided help", { tag: "@ui-risk" }, () => {
     page.on("request", (request) => {
       if (request.method() === "POST" && request.url().includes("/api/feedback")) feedbackPosts.push(request.url());
     });
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
     await typeDraft(page);
 
@@ -132,7 +132,7 @@ test.describe("guided help", { tag: "@ui-risk" }, () => {
     // element actually hit at each control's centre.
     test.skip(!isMobile(testInfo), "The drawer only exists on the mobile shell.");
     await prepareGuestPage(page, "ko");
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
     const dialog = await openGuide(page, testInfo);
 
@@ -160,7 +160,7 @@ test.describe("guided help", { tag: "@ui-risk" }, () => {
 
   test("Escape closes the guide and returns focus", async ({ page }, testInfo) => {
     await prepareGuestPage(page, "en");
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
     await openGuide(page, testInfo);
     await page.keyboard.press("Escape");
@@ -175,7 +175,7 @@ test.describe("guided help", { tag: "@ui-risk" }, () => {
   }, testInfo) => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
     await typeDraft(page);
     const urlBefore = page.url();
