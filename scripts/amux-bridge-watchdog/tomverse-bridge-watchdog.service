@@ -1,0 +1,35 @@
+[Unit]
+Description=Tomverse AMUX bridge watchdog (dead-man signal)
+Documentation=https://github.com/mposition/Tomverse/blob/develop/docs/ops/amux/bridge-monitoring.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# No account to create and none the worker account shares. The ping URL is a
+# credential only this service's dynamic user can read.
+DynamicUser=yes
+LoadCredential=ping-url:/etc/tomverse-bridge-watchdog/ping-url
+ExecStart=/usr/local/libexec/tomverse-bridge-watchdog
+TimeoutStartSec=90
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+UMask=0077
