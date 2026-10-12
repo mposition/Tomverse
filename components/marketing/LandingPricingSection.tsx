@@ -7,6 +7,7 @@ import { displayHeadingClass } from "@/lib/displayHeading";
 import { formatLocalizedInteger } from "@/lib/pricingFormat";
 import { getLandingCopy, interpolate } from "./landingContent";
 import { usePublicBilling } from "./usePublicBilling";
+import { localizedPath } from "@/lib/seo";
 
 /**
  * The plans, three short answers, and the closing call to action.
@@ -128,7 +129,7 @@ export function LandingPricingSection({
             {copy.dailyLimitNote}
           </p>
           <Link
-            href="/pricing"
+            href={localizedPath(lang, "/pricing")}
             className="group inline-flex min-h-11 shrink-0 items-center gap-2 text-sm font-bold text-zinc-950 underline underline-offset-4 transition hover:text-blue-600 dark:text-zinc-100 dark:hover:text-blue-400"
           >
             {copy.detailsCta}

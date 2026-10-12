@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import type { Language } from "@/components/LanguageProvider";
+import type { Language } from "@/lib/language";
+import { LOCALIZED_MARKETING_BASE_PATHS } from "@/lib/marketingRoutes";
 
 export const SITE_ORIGIN = "https://tomverse.app";
 export const SITE_NAME = "Tomverse";
@@ -14,14 +15,7 @@ export const SEO_LOCALES: readonly Language[] = [
   "pt",
 ] as const;
 
-export const LOCALIZED_SEO_PATHS = [
-  "/",
-  "/compare-ai-models",
-  "/ai-answer-review",
-  "/chatgpt-vs-claude",
-  "/ai-for-file-analysis",
-  "/products/review",
-] as const;
+export const LOCALIZED_SEO_PATHS = LOCALIZED_MARKETING_BASE_PATHS;
 
 // SEO-I18N-01 (2026-09-17). `zh` is Simplified Chinese for readers
 // anywhere, so its hreflang names the script, not a region: `zh-Hans`.
@@ -62,6 +56,16 @@ const openGraphLocaleByLanguage: Record<Language, string> = {
   pt: "pt_BR",
 };
 
+const socialImageAlt: Record<Language, string> = {
+  en: "Tomverse — Chat and Review with GPT, Claude, and Gemini in one place",
+  ko: "Tomverse — GPT, Claude, Gemini를 한곳에서 사용하는 Chat과 Review",
+  zh: "Tomverse — 在一个地方使用 GPT、Claude 和 Gemini 的 Chat 与 Review",
+  fr: "Tomverse — Chat et Review avec GPT, Claude et Gemini au même endroit",
+  de: "Tomverse — Chat und Review mit GPT, Claude und Gemini an einem Ort",
+  es: "Tomverse — Chat y Review con GPT, Claude y Gemini en un solo lugar",
+  pt: "Tomverse — Chat e Review com GPT, Claude e Gemini em um só lugar",
+};
+
 export const isSeoLocale = (value: string): value is Language =>
   SEO_LOCALES.includes(value.toLowerCase() as Language);
 
@@ -90,6 +94,7 @@ type PageMetadataOptions = {
   noIndex?: boolean;
   ogTitle?: string;
   ogDescription?: string;
+  absoluteTitle?: boolean;
 };
 
 export const createPageMetadata = ({
@@ -101,8 +106,9 @@ export const createPageMetadata = ({
   noIndex = false,
   ogTitle,
   ogDescription,
+  absoluteTitle = false,
 }: PageMetadataOptions): Metadata => ({
-  title,
+  title: absoluteTitle ? { absolute: title } : title,
   description,
   alternates: {
     canonical: `${SITE_ORIGIN}${path}`,
@@ -125,7 +131,7 @@ export const createPageMetadata = ({
         url: `${SITE_ORIGIN}/opengraph-image`,
         width: 1200,
         height: 630,
-        alt: "Tomverse — Chat and Review with GPT, Claude, and Gemini in one place",
+        alt: socialImageAlt[locale],
       },
     ],
   },
@@ -136,7 +142,7 @@ export const createPageMetadata = ({
     images: [
       {
         url: `${SITE_ORIGIN}/twitter-image`,
-        alt: "Tomverse — Chat and Review with GPT, Claude, and Gemini in one place",
+        alt: socialImageAlt[locale],
       },
     ],
   },
@@ -202,70 +208,70 @@ export const reviewOgCopy: Record<
   { title: string; description: string }
 > = {
   en: {
-    title: "Tomverse | Multi-AI Comparison & Review",
+    title: "Tomverse Review | Multi-AI Comparison & Review",
     description:
-      "Compare GPT, Claude, and Gemini side by side, use AI Review to identify differences and omissions, then check the points that need verification.",
+      "The same question can produce different answers. In Tomverse Review, read up to three model answers side by side and use AI Review to examine agreements, differences and missing conditions with quotes. Decide which answer to explore and what to ask next.",
   },
   ko: {
-    title: "Tomverse | 멀티 AI 비교 및 검토",
+    title: "Tomverse Review | 멀티 AI 비교 및 검토",
     description:
-      "GPT, Claude, Gemini의 답변을 나란히 비교하고 AI Review로 차이점과 누락을 확인한 뒤, 검증이 필요한 부분은 웹 검색으로 확인하세요.",
+      "같은 질문에도 답변은 달라집니다. Tomverse Review에서 최대 3개 모델의 답변을 나란히 읽고, AI Review로 공통점·차이·빠진 조건을 인용과 함께 살펴보세요. 검토 결과를 바탕으로 더 읽을 답변과 다음 질문을 직접 고를 수 있습니다.",
   },
   zh: {
-    title: "Tomverse | 多 AI 比较与审查",
+    title: "Tomverse Review | 多 AI 比较与审查",
     description:
-      "并排比较 GPT、Claude 和 Gemini 的回答，用 AI Review 找出差异与遗漏，再核实需要查证的要点。",
+      "同一个问题，可能得到不同回答。在 Tomverse Review 中并排阅读最多三个模型的回答，再用 AI Review 结合引文查看共识、差异与遗漏条件。由你决定重点阅读哪个回答、接下来问什么。",
   },
   fr: {
-    title: "Tomverse | Comparaison et revue multi-IA",
+    title: "Tomverse Review | Comparaison et revue multi-IA",
     description:
-      "Comparez GPT, Claude et Gemini côte à côte, repérez différences et omissions avec AI Review, puis vérifiez les points qui le demandent.",
+      "Une même question peut produire des réponses différentes. Dans Tomverse Review, lisez jusqu’à trois réponses côte à côte et examinez avec AI Review leurs accords, différences et conditions oubliées, citations à l’appui. Choisissez ensuite quoi approfondir et quelle question poser.",
   },
   de: {
-    title: "Tomverse | Multi-KI-Vergleich und -Prüfung",
+    title: "Tomverse Review | Multi-KI-Vergleich und -Prüfung",
     description:
-      "Vergleichen Sie GPT, Claude und Gemini nebeneinander, erkennen Sie mit AI Review Unterschiede und Lücken und prüfen Sie danach, was geprüft werden muss.",
+      "Dieselbe Frage kann unterschiedliche Antworten liefern. Lesen Sie in Tomverse Review bis zu drei Modellantworten nebeneinander und prüfen Sie mit AI Review Gemeinsamkeiten, Unterschiede und fehlende Bedingungen samt Zitaten. Entscheiden Sie selbst, was Sie vertiefen und als Nächstes fragen.",
   },
   es: {
-    title: "Tomverse | Comparación y revisión multi-IA",
+    title: "Tomverse Review | Comparación y revisión multi-IA",
     description:
-      "Compara GPT, Claude y Gemini en paralelo, identifica diferencias y omisiones con AI Review y después comprueba los puntos que lo requieran.",
+      "La misma pregunta puede dar respuestas diferentes. En Tomverse Review, lee hasta tres respuestas en paralelo y usa AI Review para examinar coincidencias, diferencias y condiciones omitidas, con citas. Decide qué respuesta explorar y qué preguntar después.",
   },
   pt: {
-    title: "Tomverse | Comparação e revisão multi-IA",
+    title: "Tomverse Review | Comparação e revisão multi-IA",
     description:
-      "Compare GPT, Claude e Gemini lado a lado, identifique diferenças e omissões com o AI Review e depois confira os pontos que precisam de verificação.",
+      "A mesma pergunta pode gerar respostas diferentes. No Tomverse Review, leia até três respostas lado a lado e use o AI Review para examinar consensos, diferenças e condições omitidas, com citações. Decida qual resposta explorar e o que perguntar depois.",
   },
 };
 
 export const homeSeoCopy: Record<Language, { title: string; description: string }> = {
   en: {
-    title: "Several AIs. One Place. | Tomverse Chat & Review",
-    description: "Use GPT, Claude and Gemini in Tomverse. Chat with Smart Adaptive to consider model cost and quality, then compare different perspectives with Review. Start both as a guest.",
+    title: "Which AI should you use? | Tomverse Chat & Review",
+    description: "Use GPT, Claude and Gemini in one place. Smart Adaptive helps with model selection by capabilities, cost and quality; you decide on question suggestions. Compare answer differences and omissions with quotes in Review. Try Chat and Review as a guest.",
   },
   ko: {
-    title: "여러 AI를 한곳에서 | Tomverse Chat & Review",
-    description: "GPT, Claude, Gemini를 Tomverse 한곳에서 사용하세요. Chat의 Smart Adaptive로 모델 비용과 품질을 함께 고려하고, Review로 서로 다른 답변의 관점을 비교하세요. 두 제품 모두 비회원으로 시작할 수 있습니다.",
+    title: "어떤 AI를 쓸지, 고민은 Tomverse에. | Chat & Review",
+    description: "GPT, Claude, Gemini를 한곳에서. Chat의 Smart Adaptive로 기능·비용·품질을 고려한 모델 선택을 돕고 질문 제안은 직접 채택하세요. Review에서 답변의 차이·누락을 인용으로 비교하세요. Chat과 Review 모두 비회원으로 시작할 수 있습니다.",
   },
   zh: {
-    title: "多个 AI，同一个地方 | Tomverse Chat & Review",
-    description: "在 Tomverse 使用 GPT、Claude 和 Gemini。Chat 的 Smart Adaptive 兼顾模型成本与质量，Review 帮助比较回答中的不同观点。两款产品均可访客体验。",
+    title: "该用哪个 AI，让 Tomverse 帮你选。| Chat & Review",
+    description: "在一个地方使用GPT、Claude和Gemini。Smart Adaptive结合功能、费用与质量帮助选模型，提问建议由你决定是否采用。Review结合引文比较差异与遗漏。Chat和Review均可访客体验。",
   },
   fr: {
-    title: "Plusieurs IA au même endroit | Tomverse Chat & Review",
-    description: "Utilisez GPT, Claude et Gemini dans Tomverse. Smart Adaptive tient compte du coût et de la qualité des modèles dans Chat ; Review compare les différents points de vue. Essayez les deux sans compte.",
+    title: "Quelle IA choisir ? | Tomverse Chat & Review",
+    description: "Retrouvez GPT, Claude et Gemini au même endroit. Smart Adaptive aide à choisir selon les fonctions, le coût et la qualité ; vous décidez des reformulations. Comparez différences et omissions avec citations dans Review. Essayez Chat et Review sans compte.",
   },
   de: {
-    title: "Mehrere KIs an einem Ort | Tomverse Chat & Review",
-    description: "Nutzen Sie GPT, Claude und Gemini in Tomverse. Smart Adaptive berücksichtigt Modellkosten und Qualität in Chat. Review vergleicht verschiedene Perspektiven. Beide Produkte lassen sich als Gast starten.",
+    title: "Welche KI passt zu Ihrer Frage? | Tomverse Chat & Review",
+    description: "Nutzen Sie GPT, Claude und Gemini an einem Ort. Smart Adaptive unterstützt die Wahl nach Funktionen, Kosten und Qualität; Fragenvorschläge übernehmen Sie selbst. Vergleichen Sie Unterschiede und Lücken mit Zitaten in Review. Testen Sie Chat und Review als Gast.",
   },
   es: {
-    title: "Varias IA en un mismo lugar | Tomverse Chat & Review",
-    description: "Usa GPT, Claude y Gemini en Tomverse. Smart Adaptive considera el coste y la calidad del modelo en Chat, y Review compara distintas perspectivas. Prueba ambos sin crear una cuenta.",
+    title: "¿Qué IA elegir? | Tomverse Chat & Review",
+    description: "Usa GPT, Claude y Gemini en un lugar. Smart Adaptive ayuda a elegir según funciones, coste y calidad; tú decides si aplicar las sugerencias. Compara diferencias y omisiones con citas en Review. Prueba Chat y Review como invitado.",
   },
   pt: {
-    title: "Várias IAs em um só lugar | Tomverse Chat & Review",
-    description: "Use GPT, Claude e Gemini no Tomverse. O Smart Adaptive considera custo e qualidade do modelo no Chat, e o Review compara diferentes perspectivas. Experimente ambos sem criar uma conta.",
+    title: "Qual IA escolher? | Tomverse Chat & Review",
+    description: "Use GPT, Claude e Gemini em um só lugar. O Smart Adaptive ajuda na escolha por recursos, custo e qualidade; você decide sobre as sugestões. Compare diferenças e lacunas com citações no Review. Experimente Chat e Review como visitante.",
   },
 };
 
@@ -277,13 +283,13 @@ export const homeOgCopy: Record<Language, { title: string; description: string }
 ) as Record<Language, { title: string; description: string }>;
 
 const homeReviewEntryDescription: Record<Language, string> = {
-  en: "Use multiple AI models in Tomverse. Explore Smart Adaptive's cost and quality-aware selection in Chat and compare different perspectives in Review. Try Review without an account; Chat access depends on availability.",
-  ko: "여러 AI를 Tomverse 한곳에서 사용하세요. Chat의 Smart Adaptive는 모델 비용과 품질을 고려하고, Review는 서로 다른 답변의 관점을 비교합니다. Review는 비회원으로 체험할 수 있으며 Chat은 제공되는 환경에서 이용할 수 있습니다.",
-  zh: "在 Tomverse 一个地方使用多个 AI。了解 Chat 中兼顾费用与质量的 Smart Adaptive，在 Review 中比较不同视角。Review 可访客体验，Chat 需视提供情况使用。",
-  fr: "Utilisez plusieurs IA dans Tomverse. Découvrez Smart Adaptive dans Chat et comparez les points de vue dans Review. Essayez Review sans compte ; l’accès à Chat dépend de sa disponibilité.",
-  de: "Nutzen Sie mehrere KIs in Tomverse. Entdecken Sie Smart Adaptive in Chat und vergleichen Sie Perspektiven in Review. Testen Sie Review ohne Konto; Chat-Zugang hängt von der Verfügbarkeit ab.",
-  es: "Usa varias IA en Tomverse. Explora Smart Adaptive en Chat y compara perspectivas en Review. Prueba Review sin cuenta; el acceso a Chat depende de su disponibilidad.",
-  pt: "Use várias IAs no Tomverse. Conheça o Smart Adaptive no Chat e compare perspectivas no Review. Experimente o Review sem conta; o acesso ao Chat depende da disponibilidade.",
+  en: "Use GPT, Claude and Gemini in one place. Explore Smart Adaptive model selection and question suggestions you control in Chat; compare answer differences and omissions with quotes in Review. Try Review as a guest; Chat access depends on availability.",
+  ko: "GPT, Claude, Gemini를 한곳에서. Chat의 Smart Adaptive 모델 선택과 직접 확인하는 질문 제안을 알아보고, Review에서 답변의 차이·누락을 인용으로 비교하세요. Review는 비회원으로 체험할 수 있고 Chat은 현재 제공 범위에 따라 이용합니다.",
+  zh: "在一个地方使用GPT、Claude和Gemini。了解Chat的Smart Adaptive模型选择与由你决定的提问建议，在Review中结合引文比较差异与遗漏。Review可访客体验，Chat使用取决于当前提供范围。",
+  fr: "Retrouvez GPT, Claude et Gemini au même endroit. Découvrez le choix Smart Adaptive et les reformulations que vous contrôlez dans Chat ; comparez différences et omissions avec citations dans Review. Review est accessible sans compte ; l’accès à Chat dépend de sa disponibilité.",
+  de: "Nutzen Sie GPT, Claude und Gemini an einem Ort. Entdecken Sie Smart Adaptive und Fragenvorschläge unter Ihrer Kontrolle in Chat; vergleichen Sie Unterschiede und Lücken mit Zitaten in Review. Review ist ohne Konto testbar; Chat hängt von der Verfügbarkeit ab.",
+  es: "Usa GPT, Claude y Gemini en un lugar. Conoce Smart Adaptive y las sugerencias que tú controlas en Chat; compara diferencias y omisiones con citas en Review. Prueba Review como invitado; el acceso a Chat depende de su disponibilidad.",
+  pt: "Use GPT, Claude e Gemini em um só lugar. Conheça o Smart Adaptive e sugestões que você controla no Chat; compare diferenças e lacunas com citações no Review. Experimente o Review como visitante; o acesso ao Chat depende da disponibilidade.",
 };
 
 /** Static metadata uses only the public guest offer, never account capability. */

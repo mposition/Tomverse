@@ -80,6 +80,7 @@ export function MarketingLanguageSwitcher() {
         onChange={(event) => {
           const nextLanguage = event.target.value as Language;
           const basePath = localizedBasePath();
+          const queryLocalePage = pathname === "/guides/assistant-knowledge" || pathname === "/status";
           // RECON-I18N-001. Emitted before anything else in this handler,
           // because `router.push` below leaves the localized routes' own root
           // layout and therefore reloads the document -- an event queued after
@@ -94,10 +95,15 @@ export function MarketingLanguageSwitcher() {
           trackProductEvent("marketing_language_switched", 0, {
             language_from: lang,
             language_to: nextLanguage,
-            navigation: basePath ? "document" : "client",
+            navigation: basePath || queryLocalePage ? "document" : "client",
           });
           setLang(nextLanguage);
           if (basePath) router.push(localizedPath(nextLanguage, basePath));
+          else if (queryLocalePage) {
+            const url = new URL(window.location.href);
+            url.searchParams.set("lang", nextLanguage);
+            router.push(`${url.pathname}${url.search}${url.hash}`);
+          }
         }}
         className="min-w-0 flex-1 cursor-pointer truncate bg-transparent text-sm font-bold text-zinc-800 outline-none [color-scheme:light] dark:text-zinc-100 dark:[color-scheme:dark]"
       >

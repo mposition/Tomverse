@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { headers } from "next/headers";
+import { LanguageProvider } from "@/components/LanguageProvider";
 import { AssistantKnowledgeGuide } from "@/components/marketing/AssistantKnowledgeGuide";
 import {
   isAssistantPackageImportEnabled,
@@ -5,16 +8,30 @@ import {
 import {
   configuredAssistantKnowledgeSupademoEmbeds,
 } from "@/lib/assistantKnowledgeSupademo";
-import { createPageMetadata } from "@/lib/seo";
+import { DOCUMENT_LANGUAGE_HEADER, isSupportedDocumentLanguage } from "@/lib/documentLanguage";
+import { assistantKnowledgeMetadata } from "@/lib/publicMarketingMetadata";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = createPageMetadata({
-  title: "Create an AI Assistant with Your Knowledge",
-  description:
-    "Follow three practical steps to create a private Tomverse AI assistant, add Knowledge files, and use it in a conversation.",
-  path: "/guides/assistant-knowledge",
-});
+type KnowledgeGuidePageProps = {
+  searchParams: Promise<{ lang?: string | string[] }>;
+};
+
+async function guideLanguage({ searchParams }: KnowledgeGuidePageProps) {
+  const query = await searchParams;
+  const requested = Array.isArray(query.lang) ? query.lang[0] : query.lang;
+  if (isSupportedDocumentLanguage(requested)) return { lang: requested, explicit: true };
+  const documentLanguage = (await headers()).get(DOCUMENT_LANGUAGE_HEADER);
+  return {
+    lang: isSupportedDocumentLanguage(documentLanguage) ? documentLanguage : "en" as const,
+    explicit: false,
+  };
+}
+
+export async function generateMetadata(props: KnowledgeGuidePageProps): Promise<Metadata> {
+  const { lang } = await guideLanguage(props);
+  return assistantKnowledgeMetadata(lang);
+}
 
 async function packageImportAvailableForGuide() {
   try {
@@ -27,13 +44,16 @@ async function packageImportAvailableForGuide() {
   }
 }
 
-export default async function AssistantKnowledgeGuidePage() {
+export default async function AssistantKnowledgeGuidePage(props: KnowledgeGuidePageProps) {
+  const { lang, explicit } = await guideLanguage(props);
   const packageImportAvailable = await packageImportAvailableForGuide();
 
   return (
-    <AssistantKnowledgeGuide
-      packageImportAvailable={packageImportAvailable}
-      supademoEmbeds={configuredAssistantKnowledgeSupademoEmbeds()}
-    />
+    <LanguageProvider initialLang={lang} forceInitialLang={explicit}>
+      <AssistantKnowledgeGuide
+        packageImportAvailable={packageImportAvailable}
+        supademoEmbeds={configuredAssistantKnowledgeSupademoEmbeds()}
+      />
+    </LanguageProvider>
   );
 }
