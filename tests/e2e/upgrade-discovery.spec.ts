@@ -49,7 +49,7 @@ async function prepareAuthenticatedChat(
   await prepareGuestPage(page, "ko");
   await mockAuthenticatedApi(page, { selectedModels });
   await page.goto(
-    "/chat?lang=ko&utm_source=qa&utm_medium=e2e&utm_campaign=upgrade-discovery"
+    "/review?lang=ko&utm_source=qa&utm_medium=e2e&utm_campaign=upgrade-discovery"
   );
   await expect(page.getByTestId("chat-input")).toBeVisible();
 }
@@ -171,7 +171,7 @@ test.describe("value-moment upgrade prompt", () => {
       selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5"],
     });
     await mockChatStream(page, "Comparison response");
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     // A fresh chat starts with a single default model -- these tests need
     // the persisted qa-conversation's 2-model comparison selection active
     // (and a real currentChatId) for the comparison preflight/upgrade-prompt

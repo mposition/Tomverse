@@ -53,7 +53,7 @@ const seedGuestComparison = async (
 // under "Continue a recent chat" on the fresh empty-state welcome screen,
 // same as any other saved guest conversation, and needs a click to open.
 const openSeededConversation = async (page: Page) => {
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openRecentConversation(page, { title: "Layout test" });
   await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 };
@@ -329,7 +329,7 @@ test("AUD-R003: an authenticated account's ?models= preset dedupes, drops unknow
   await resizeAndSettle(page, 1440, 900);
   await mockAuthenticatedApi(page);
   await page.goto(
-    "/chat?lang=en&models=gpt-5-4-mini,not-a-real-model,claude-haiku-4-5,gpt-5-4-mini"
+    "/review?lang=en&models=gpt-5-4-mini,not-a-real-model,claude-haiku-4-5,gpt-5-4-mini"
   );
 
   const panels = page.locator('[data-testid="desktop-model-panel"]');

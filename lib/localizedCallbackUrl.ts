@@ -1,4 +1,5 @@
 import type { Language } from "@/components/LanguageProvider";
+import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
 
 const APP_LANGUAGES = new Set(["ko", "en", "zh", "fr", "de", "es", "pt"]);
 
@@ -7,8 +8,8 @@ export function isAppLanguage(value: unknown): value is Language {
 }
 
 export function withChatLanguage(callbackUrl: string | null | undefined, lang: Language) {
-    const fallback = `/chat?lang=${encodeURIComponent(lang)}`;
-    const source = callbackUrl || "/chat";
+    const fallback = `${PRODUCT_SURFACE_PATH.review}?lang=${encodeURIComponent(lang)}`;
+    const source = callbackUrl || PRODUCT_SURFACE_PATH.review;
 
     try {
         const parsed = new URL(source, "https://tomverse.app");
@@ -18,7 +19,11 @@ export function withChatLanguage(callbackUrl: string | null | undefined, lang: L
             parsed.origin === "https://tomverse.app";
         if (!isInternalPath) return fallback;
 
-        if (parsed.pathname === "/chat" && !isAppLanguage(parsed.searchParams.get("lang"))) {
+        if (
+            (parsed.pathname === PRODUCT_SURFACE_PATH.chat ||
+                parsed.pathname === PRODUCT_SURFACE_PATH.review) &&
+            !isAppLanguage(parsed.searchParams.get("lang"))
+        ) {
             parsed.searchParams.set("lang", lang);
         }
 

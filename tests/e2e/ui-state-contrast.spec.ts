@@ -229,7 +229,7 @@ test("full-error recovery copy carries no sub-11px text", { tag: "@ui-risk" }, a
  */
 const REQUIRED_ROUTES = [
   "/",
-  "/chat",
+  "/review",
   "/auth/signin",
   "/pricing",
   "/support",

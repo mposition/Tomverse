@@ -2627,10 +2627,12 @@ const checks = [
         // hero: signup is still offered only after the page has shown what an
         // account is for.
         !source.includes('data-testid="landing-signup-cta"') &&
-        // Review has its own canonical workspace now; signing in must return
-        // to the same product that the comparison page demonstrated.
         continuity.includes(
-          'href="/auth/signin?callbackUrl=%2Freview"'
+          'href={`/auth/signin?callbackUrl=${encodeURIComponent(REVIEW_WORKSPACE_PATH)}`}'
+        ) &&
+        read("lib/productSurfaceRoutes.ts").includes('review: "/review"') &&
+        read("lib/productSurfaceRoutes.ts").includes(
+          "export const REVIEW_WORKSPACE_PATH = PRODUCT_SURFACE_PATH.review;"
         ) &&
         !continuity.includes('href="/auth/signin?callbackUrl=%2Fchat"') &&
         source.includes("const primaryChatHref =") &&

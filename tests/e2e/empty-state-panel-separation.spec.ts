@@ -227,7 +227,7 @@ test.describe("conversation with an answer: the panels are operable", () => {
       ],
     });
     await page.setViewportSize(DESKTOP_VIEWPORT);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await expect(
       page.locator(PANEL).first().getByText("seeded answer")
@@ -327,7 +327,7 @@ test.describe("model selection stays available before the first question", () =>
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
-    await page.goto("/chat?lang=ko&utm_source=qa&utm_medium=e2e");
+    await page.goto("/review?lang=ko&utm_source=qa&utm_medium=e2e");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(1);
 

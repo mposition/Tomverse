@@ -102,7 +102,7 @@ test.describe("RECON-A11Y-001: desktop panel model selects", () => {
         selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5", "claude-sonnet-5"],
       });
       await page.addInitScript({ path: AXE_PATH });
-      await page.goto(`/chat?lang=${lang}`);
+      await page.goto(`/review?lang=${lang}`);
       await openRecentConversation(page);
 
       const selects = page.locator('[data-testid="desktop-model-panel"] select');

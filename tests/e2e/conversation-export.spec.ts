@@ -83,7 +83,7 @@ test("an entitled account can export a conversation to a file", async ({
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Pro", limits: { allowDownloads: true } });
   const exportRequests = await mockExportRoute(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect(page.getByTestId("chat-input")).toBeVisible();
 
   await openConversationMenu(page);
@@ -103,7 +103,7 @@ test("an entitled account can export a conversation to a file", async ({
   expect(exportRequests[0]).toContain("/api/conversations/qa-conversation/export");
   expect(download.suggestedFilename()).toBe("qa-conversation.txt");
   // Saved rather than navigated to: the chat is still the page on screen.
-  expect(new URL(page.url()).pathname).toBe("/chat");
+  expect(new URL(page.url()).pathname).toBe("/review");
   await expect(page.getByTestId("chat-input")).toBeVisible();
   // The menu closes once the export starts, so the sidebar is usable again.
   await expect(page.getByTestId("conversation-menu-panel")).toBeHidden();
@@ -122,7 +122,7 @@ test("an export the server refuses says so and keeps the workspace", async ({ pa
       body: JSON.stringify({ error: "Failed to export conversation." }),
     })
   );
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect(page.getByTestId("chat-input")).toBeVisible();
 
   await openConversationMenu(page);
@@ -133,7 +133,7 @@ test("an export the server refuses says so and keeps the workspace", async ({ pa
   const toast = page.getByTestId("app-toast");
   await expect(toast).toBeVisible();
   await expect(toast).toHaveAttribute("data-tone", "error");
-  expect(new URL(page.url()).pathname).toBe("/chat");
+  expect(new URL(page.url()).pathname).toBe("/review");
   await expect(page.getByTestId("chat-input")).toBeVisible();
 });
 
@@ -143,7 +143,7 @@ test("a plan without the download entitlement disables the control and sends not
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Free", limits: { allowDownloads: false } });
   const exportRequests = await mockExportRoute(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect(page.getByTestId("chat-input")).toBeVisible();
 
   await openConversationMenu(page);
@@ -260,7 +260,7 @@ test.describe("downloading a continuation with its original @ui-risk", () => {
           }, textScale);
         }
 
-        await page.goto("/chat");
+        await page.goto("/review");
         await expect(page.getByTestId("chat-input")).toBeVisible();
         await openMenuForContinuation(page);
 
@@ -333,7 +333,7 @@ test.describe("downloading a continuation with its original @ui-risk", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await openMenuForContinuation(page);
 
@@ -377,7 +377,7 @@ test.describe("downloading a continuation with its original @ui-risk", () => {
       })
     );
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await openMenuForContinuation(page);
     let saved = false;
@@ -410,7 +410,7 @@ test.describe("downloading a continuation with its original @ui-risk", () => {
       })
     );
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await openMenuForContinuation(page);
     await page

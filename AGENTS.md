@@ -1748,6 +1748,8 @@ Non-negotiable requirements:
 Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`, `lib/autoRoutingUi.ts`, `lib/autoProductBoundary.ts`, `lib/autoRoutingCopy.ts`, or the `selectionMode` handling in `app/api/conversations/[conversationId]/route.ts`, read:
 
 - `docs/ui-contracts/auto-model-selection.md`
+- `docs/ui-contracts/chat-product-switcher.md` for Chat/Review entry routes,
+  product navigation, draft isolation and Smart Adaptive presentation.
 
 Non-negotiable requirements:
 

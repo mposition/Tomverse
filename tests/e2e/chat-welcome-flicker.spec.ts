@@ -275,7 +275,7 @@ test.describe("restoring an existing conversation", () => {
       await seedGuestConversation(page, { withTranscript: true });
       await installDomHistoryProbe(page);
 
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       await expect(page.getByTestId(shellTestId(testInfo))).toBeVisible();
       await expect(page.getByText("restored guest question").first()).toBeVisible();
 
@@ -304,7 +304,7 @@ test.describe("restoring an existing conversation", () => {
       await delayConversationDetail(page, 2000);
       await installDomHistoryProbe(page);
 
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       await expect(page.getByTestId(shellTestId(testInfo))).toBeVisible();
 
       // While the transcript is still on the wire the shell shows the panel's
@@ -338,7 +338,7 @@ test.describe("sending a follow-up in an existing conversation", () => {
       await installDomHistoryProbe(page);
       await mockChatStream(page, "follow-up answer");
 
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       await expect(page.getByText("seeded account answer").first()).toBeVisible();
 
       await page.evaluate(() => {
@@ -375,7 +375,7 @@ test.describe("sending a follow-up in an existing conversation", () => {
       await installDomHistoryProbe(page);
       await mockChatStream(page, "guest follow-up answer");
 
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       await expect(page.getByText("restored guest question").first()).toBeVisible();
 
       await page.evaluate(() => {
@@ -417,7 +417,7 @@ test.describe("a new, empty conversation", () => {
       await installDomHistoryProbe(page);
       await mockChatStream(page, "first guest answer");
 
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       const welcome = page.getByTestId("chat-empty-state");
       await expect(welcome).toBeVisible();
       await expect(page.getByTestId(shellTestId(testInfo))).toHaveAttribute(
@@ -458,7 +458,7 @@ test.describe("a new, empty conversation", () => {
       await installDomHistoryProbe(page);
       await mockChatStream(page, "first account answer");
 
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       const welcome = page.getByTestId("chat-empty-state");
       await expect(welcome).toBeVisible();
 

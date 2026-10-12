@@ -688,7 +688,7 @@ test.describe("memory review settings", () => {
     await mockAuthenticatedApi(page);
     await mockMemoryApi(page);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     if ((page.viewportSize()?.width ?? 1920) < 768) {
       await page

@@ -333,7 +333,7 @@ const openComposerWithVoice = async (page: Page) => {
       url: "http://127.0.0.1:3100",
     },
   ]);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
 };
@@ -399,7 +399,7 @@ const openTwoGuestConversations = async (page: Page) => {
       url: "http://127.0.0.1:3100",
     },
   ]);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
 };
@@ -628,7 +628,7 @@ test.describe("voice input in the composer", () => {
     await prepareGuestPage(page, "ko");
     await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
     await suppressTransientUi(page);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
     // Not a disabled control: a visible microphone that refuses would be
@@ -1099,7 +1099,7 @@ const openComposerSignedIn = async (page: Page) => {
       url: "http://127.0.0.1:3100",
     },
   ]);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
   return session;

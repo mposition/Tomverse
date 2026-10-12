@@ -53,7 +53,7 @@ test.describe("mobile recent-chat disclosure", () => {
   });
 
   test("no recent chats means no disclosure at all", async ({ page }) => {
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-empty-state")).toBeVisible();
     await expect(page.getByTestId("recent-conversations-disclosure")).toHaveCount(0);
     await expect(page.getByTestId("recent-conversation-card")).toHaveCount(0);
@@ -68,7 +68,7 @@ test.describe("mobile recent-chat disclosure", () => {
         count
       );
       await seedGuestConversations(page, titles);
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
 
       const disclosure = page.getByTestId("recent-conversations-disclosure");
       await expect(disclosure).toBeVisible();
@@ -95,7 +95,7 @@ test.describe("mobile recent-chat disclosure", () => {
     page,
   }) => {
     await seedGuestConversations(page, [SENSITIVE_TITLE, "Tax return questions"]);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     const disclosure = page.getByTestId("recent-conversations-disclosure");
     await disclosure.click();
@@ -118,7 +118,7 @@ test.describe("mobile recent-chat disclosure", () => {
 
   test("picking a chat from the drawer opens it", async ({ page }) => {
     await seedGuestConversations(page, [SENSITIVE_TITLE]);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await page.getByTestId("recent-conversations-disclosure").click();
     await page
@@ -135,7 +135,7 @@ test.describe("mobile recent-chat disclosure", () => {
   }) => {
     await seedGuestConversations(page, ["A", "B", "C"]);
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     const disclosureBox = await page
       .getByTestId("recent-conversations-disclosure")
@@ -162,7 +162,7 @@ test.describe("desktop welcome screen lists no recent chats", () => {
     page,
   }) => {
     await seedGuestConversations(page, ["First chat", "Second chat"]);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     // The sidebar beside the welcome screen is the one list; a second copy in
     // the middle of the screen was the same information twice.

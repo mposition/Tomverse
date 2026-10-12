@@ -70,7 +70,7 @@ async function world(page: Page) {
     requests.push(body);
     await respond(route, body);
   });
-  await page.goto("/chat");
+  await page.goto("/review");
   const input = page.getByTestId("chat-textarea");
   await expect(input).toBeVisible();
   await input.fill(firstQuestion);

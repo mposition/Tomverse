@@ -181,7 +181,7 @@ async function openSeededConversation(
     ],
   });
   await mockChatStream(page, "QA answer");
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(page.getByTestId("chat-input")).toBeVisible();
   await openRecentConversation(page);
   // The seeded answer is positive evidence that the conversation has loaded.
@@ -531,7 +531,7 @@ test.describe("model change send barrier (desktop)", () => {
       ],
     });
     await mockChatStream(page, "QA answer");
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     // Not openRecentConversation: both seeded titles contain "QA
     // conversation", so a substring filter is ambiguous here.

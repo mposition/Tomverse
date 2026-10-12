@@ -112,6 +112,7 @@ test("the system actor list is closed and changes only by review", () => {
     "prompt-refiner-auto-budget",
     "prompt-refiner-chat-execution",
     "prompt-refiner-product-execution",
+    "guest-chat-auto-credit",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
     "amux-v22-auto-admit",

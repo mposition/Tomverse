@@ -114,7 +114,7 @@ test.describe("an attachment whose bytes storage no longer holds", () => {
   }) => {
     await prepareGuestPage(page, "ko");
     await seedConversation(page);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openRecentConversation(page);
 
     const card = page.getByTestId("chat-attachment-card-unavailable");
@@ -132,7 +132,7 @@ test.describe("an attachment whose bytes storage no longer holds", () => {
   }) => {
     await prepareGuestPage(page, "ko");
     await seedConversation(page);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openRecentConversation(page);
     await expect(page.getByTestId("chat-attachment-card-unavailable")).toBeVisible();
 
@@ -147,7 +147,7 @@ test.describe("an attachment whose bytes storage no longer holds", () => {
   }) => {
     await prepareGuestPage(page, "ko");
     await seedConversation(page);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openRecentConversation(page);
     await expect(page.getByTestId("chat-attachment-card-unavailable")).toBeVisible();
 
@@ -164,7 +164,7 @@ test.describe("an attachment whose bytes storage no longer holds", () => {
     await prepareGuestPage(page, "ko");
     await seedConversation(page);
     await mockUnavailableRefusal(page, record);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openRecentConversation(page);
 
     await send(page, "해지 조항이 뭐라고 돼 있었죠?");
@@ -209,7 +209,7 @@ test.describe("an attachment whose bytes storage no longer holds", () => {
     await prepareGuestPage(page, "ko");
     await seedConversation(page);
     await mockUnavailableRefusal(page, record);
-    await page.goto("/chat");
+    await page.goto("/review");
     await openRecentConversation(page);
 
     await send(page, "해지 조항이 뭐라고 돼 있었죠?");

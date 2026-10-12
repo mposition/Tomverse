@@ -120,7 +120,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
   }) => {
     for (const viewport of MOBILE_VIEWPORTS) {
       await page.setViewportSize(viewport);
-      await page.goto("/chat");
+      await page.goto("/review");
       await expect(page.getByTestId("chat-input")).toBeVisible();
 
       await assertMinTouchTarget(
@@ -149,7 +149,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
 
   test("composer controls hit-test to themselves, not a neighboring control", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-input")).toBeVisible();
 
     await assertHitTestReturnsSelf(
@@ -165,7 +165,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await modelSelectorTrigger(page).click();
     await expect(page.locator("#chat-input-popover")).toBeVisible();
@@ -179,7 +179,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat");
+    await page.goto("/review");
     await modelSelectorTrigger(page).click();
     const dialog = page.locator("#chat-input-popover");
     await expect(dialog).toBeVisible();
@@ -207,7 +207,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
   }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
-    await page.goto("/chat");
+    await page.goto("/review");
     // STG-F008: the capability chips moved into the All-models filter sheet,
     // so the picker has to be stepped through to reach them.
     const dialog = await openModelPickerCatalogue(page);
@@ -248,7 +248,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
 
   test("mobile header controls (sidebar open, new chat) meet the minimum", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await assertMinTouchTarget(page.getByTestId("mobile-sidebar-open"), "mobile sidebar open");
     await assertHitTestReturnsSelf(page.getByTestId("mobile-sidebar-open"), "mobile sidebar open");
@@ -256,7 +256,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
 
   test("mobile sidebar drawer close button meets the minimum", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat");
+    await page.goto("/review");
     await page.getByTestId("mobile-sidebar-open").click();
     const dialog = page.getByRole("dialog").first();
     await expect(dialog).toBeVisible();
@@ -281,7 +281,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
       if (viewport) {
         await page.setViewportSize(viewport);
       }
-      await page.goto("/chat");
+      await page.goto("/review");
       await page.getByTestId("mobile-sidebar-open").click();
       const dialog = page.getByRole("dialog").first();
       await expect(dialog).toBeVisible();
@@ -300,7 +300,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?lang=en&entry=guest-preview");
+    await page.goto("/review?lang=en&entry=guest-preview");
     // Guests default to a 3-model comparison, so the mobile tab strip (and
     // its per-tab remove buttons) is present without any setup. On a
     // touch-emulating mobile project, plain Enter inserts a newline instead
@@ -323,7 +323,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
   }) => {
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat");
+    await page.goto("/review");
     await page.getByTestId("mobile-sidebar-open").click();
     const dialog = page.getByRole("dialog").first();
     await expect(dialog).toBeVisible();
@@ -345,7 +345,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
   }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
-    await page.goto("/chat");
+    await page.goto("/review");
     const dialog = await openModelPickerCatalogue(page);
 
     const favoriteStar = dialog.getByTestId("model-favorite-star").first();
@@ -373,7 +373,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
   }) => {
     await prepareGuestPage(page, "ko");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-input")).toBeVisible();
 
     await assertMinTouchTarget(
@@ -418,35 +418,38 @@ test.describe("marketing header touch targets (UI-TOUCH-001)", () => {
         await page.goto(`/?lang=${lang}`);
         const label = `[${lang} ${viewport.width}x${viewport.height}]`;
 
-        // The switcher's hit area is the label, not the select: the label is
-        // `overflow-hidden`, so anything the select could paint outside it
-        // would be clipped and would not be tappable.
-        const switcher = page.locator('label:has([data-testid="marketing-language-switcher"])');
-        await assertMinTouchTarget(switcher, `${label} language switcher`);
-        await assertHitTestReturnsSelf(switcher, `${label} language switcher`);
+        // Session hydration replaces the landing subtree; measure live controls with every size and hit-area assertion intact.
+        await expect(async () => {
+          // The switcher's hit area is the label, not the select: the label is
+          // `overflow-hidden`, so anything the select could paint outside it
+          // would be clipped and would not be tappable.
+          const switcher = page.locator('label:has([data-testid="marketing-language-switcher"])');
+          await assertMinTouchTarget(switcher, `${label} language switcher`);
+          await assertHitTestReturnsSelf(switcher, `${label} language switcher`);
 
-        const menuButton = page.locator("header button[aria-expanded]").first();
-        await assertMinTouchTarget(menuButton, `${label} mobile menu`);
-        await assertHitTestReturnsSelf(menuButton, `${label} mobile menu`);
-        await assertMinHitArea(menuButton, `${label} mobile menu`);
+          const menuButton = page.locator("header button[aria-expanded]").first();
+          await assertMinTouchTarget(menuButton, `${label} mobile menu`);
+          await assertHitTestReturnsSelf(menuButton, `${label} mobile menu`);
+          await assertMinHitArea(menuButton, `${label} mobile menu`);
 
-        // Neither may have grown into the other, and neither may have pushed
-        // the header wider than the document.
-        const switcherBox = (await switcher.boundingBox())!;
-        const menuBox = (await menuButton.boundingBox())!;
-        const overlaps =
-          switcherBox.x < menuBox.x + menuBox.width &&
-          switcherBox.x + switcherBox.width > menuBox.x &&
-          switcherBox.y < menuBox.y + menuBox.height &&
-          switcherBox.y + switcherBox.height > menuBox.y;
-        expect(overlaps, `${label} switcher and menu must not overlap`).toBe(false);
+          // Neither may have grown into the other, and neither may have pushed
+          // the header wider than the document.
+          const switcherBox = (await switcher.boundingBox())!;
+          const menuBox = (await menuButton.boundingBox())!;
+          const overlaps =
+            switcherBox.x < menuBox.x + menuBox.width &&
+            switcherBox.x + switcherBox.width > menuBox.x &&
+            switcherBox.y < menuBox.y + menuBox.height &&
+            switcherBox.y + switcherBox.height > menuBox.y;
+          expect(overlaps, `${label} switcher and menu must not overlap`).toBe(false);
 
-        const overflow = await page.evaluate(
-          () =>
-            document.documentElement.scrollWidth -
-            document.documentElement.clientWidth
-        );
-        expect(overflow, `${label} horizontal overflow`).toBeLessThanOrEqual(1);
+          const overflow = await page.evaluate(
+            () =>
+              document.documentElement.scrollWidth -
+              document.documentElement.clientWidth
+          );
+          expect(overflow, `${label} horizontal overflow`).toBeLessThanOrEqual(1);
+        }).toPass({ timeout: 5_000 });
       }
     });
   }
@@ -490,7 +493,7 @@ test.describe("mobile touch targets (STG-F005) -- desktop comparison", () => {
 
   test("desktop keeps the original compact sizing for shared controls", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
-    await page.goto("/chat");
+    await page.goto("/review");
     await modelSelectorTrigger(page).click();
     const dialog = page.locator("#chat-input-popover");
     await expect(dialog).toBeVisible();
@@ -519,7 +522,7 @@ test.describe("mobile touch targets (STG-F005) -- desktop comparison", () => {
       localStorage.setItem("tomverse_sidebar_collapsed_v1", "expanded");
     });
     await page.setViewportSize({ width: 1024, height: 768 });
-    await page.goto("/chat");
+    await page.goto("/review");
     await assertBelowMinTouchTarget(
       page.getByTestId("sidebar-new-chat"),
       "sidebar new chat (desktop)"

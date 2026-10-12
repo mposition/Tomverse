@@ -51,16 +51,34 @@ test.after(() => {
 });
 const open = (searchParams = {}) => ChatWorkspaceShell({ searchParams });
 
-test("public deployment ignores forged fixture cookies and refuses unoffered new Chat", async () => {
-  await assert.rejects(open({ offered: "true", productKey: "chat" }), /NOT_FOUND/);
+test("public deployment ignores forged fixture cookies and shows Review when new Chat is unavailable", async () => {
+  const element = await open({ offered: "true", productKey: "chat", lang: "ko" });
+  assert.equal(element.type.name, "ChatUnavailableNotice");
+  assert.equal(element.props.language, "ko");
+  const notice = element.type(element.props);
+  assert.equal(notice.props["data-testid"], "chat-unavailable");
+  const reviewLink = notice.props.children.props.children.find(
+    (child) => child?.props?.["data-testid"] === "chat-unavailable-review"
+  );
+  assert.equal(reviewLink.props.href, "/review?lang=ko");
   assert.equal(cookieReads, 0);
   assert.deepEqual(availabilityReads, ["owner-a"]);
 });
-test("public deployment ignores forged cookies without an authenticated owner", async () => {
+test("public deployment opens a blank guest Chat without reading account ownership or Auto availability", async () => {
+  session = null;
+  const element = await open();
+  assert.equal(element.props.mountedSurface, "chat");
+  assert.equal(element.props.initialConversationId, null);
+  assert.equal(cookieReads, 0);
+  assert.equal(ownershipReads.length, 0);
+  assert.equal(availabilityReads.length, 0);
+});
+test("guest Chat refuses a conversation URL without probing the database", async () => {
   session = null;
   await assert.rejects(open({ conversation: "another-owner-chat" }), /NOT_FOUND/);
   assert.equal(cookieReads, 0);
   assert.equal(ownershipReads.length, 0);
+  assert.equal(availabilityReads.length, 0);
 });
 test("owned read binds both user and conversation; a missing/wrong-owner row never opens", async () => {
   offered = true;
@@ -83,7 +101,7 @@ test("offered new entry opens the Chat shell", async () => {
 });
 test("owned legacy Review and continuation hand off without cutover or query loss", async () => {
   owned = { productKey: null, continuationBridge: null };
-  await assert.rejects(open({ conversation: "owned-review", lang: "ko" }), /REDIRECT:\/chat\?conversation=owned-review&lang=ko/);
+  await assert.rejects(open({ conversation: "owned-review", lang: "ko" }), /REDIRECT:\/review\?conversation=owned-review&lang=ko/);
   owned = { productKey: "review", continuationBridge: { id: "bridge" } };
   await assert.rejects(open({ conversation: "continued", lang: "ko" }), /REDIRECT:\/continuations\/continued\?lang=ko/);
 });
@@ -95,5 +113,10 @@ test("only full loopback fixture mode can use the opted-in cookies", async () =>
   assert.equal(cookieReads, 1);
   assert.equal(ownershipReads.length, 0);
   process.env.E2E_DISABLE_DATABASE = "false";
-  await assert.rejects(open(), /NOT_FOUND/);
+  const publicGuest = await open();
+  assert.equal(publicGuest.props.mountedSurface, "chat");
+  assert.equal(publicGuest.props.initialConversationId, null);
+  assert.equal(cookieReads, 1);
+  assert.equal(ownershipReads.length, 0);
+  assert.equal(availabilityReads.length, 0);
 });

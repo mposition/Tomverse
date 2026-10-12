@@ -384,6 +384,10 @@ test("a promotion checkout sends discounts and never sends allow_promotion_codes
   assert.match((await response.json()).url, /^https:\/\/stripe\.test\//);
 
   const params = lastSessionParams();
+  assert.match(
+    String(params.success_url),
+    /^http:\/\/127\.0\.0\.1:3100\/review\?billing=success&/
+  );
   assert.deepEqual(params.discounts, [{ promotion_code: "promo_live" }]);
   assert.equal(
     Object.hasOwn(params, "allow_promotion_codes"),

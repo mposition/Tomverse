@@ -288,7 +288,7 @@ test.describe("native web search (webSearchMode: always)", () => {
       await route.fallback();
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     // The per-panel model <select> starts disabled with a transient default
     // until the initial conversation state resolves (see
     // chat-model-selection-readiness spec) -- wait for it before touching
@@ -388,7 +388,7 @@ test.describe("native web search (webSearchMode: always)", () => {
 
     // A new conversation starts with web search on, so it is switched off
     // here -- the state under test is the one a user chose.
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.locator('[data-testid="desktop-model-panel"] select').first()).toBeEnabled();
     await selectModelsViaPicker(page, models);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
@@ -477,7 +477,7 @@ test.describe("native web search (webSearchMode: always)", () => {
       });
     });
 
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page, { title: "Native search test" });
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 
@@ -572,7 +572,7 @@ test.describe("native web search (webSearchMode: always)", () => {
       });
     });
 
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page, { title: "App-managed refund" });
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 
@@ -655,7 +655,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     await mockAuthenticatedApi(page);
     await asProPlan(page);
     await seedFreshAccount(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(
       page.locator('[data-testid="desktop-model-panel"] select').first()
     ).toBeEnabled();
@@ -867,7 +867,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     await asProPlan(page);
     await seedFreshAccount(page);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.locator('[data-testid="desktop-model-panel"] select').first()).toBeEnabled();
     await selectModelsViaPicker(page, models);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
@@ -1009,7 +1009,7 @@ test.describe("Perplexity citations and incomplete answers", () => {
       });
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(
       page.locator('[data-testid="desktop-model-panel"] select').first()
     ).toBeEnabled();
@@ -1048,7 +1048,7 @@ test.describe("Perplexity citations and incomplete answers", () => {
       ],
     });
 
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page, { title: "QA conversation" });
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 

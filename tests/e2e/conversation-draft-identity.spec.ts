@@ -96,7 +96,7 @@ const openComposer = async (page: Page) => {
   await setDeterministicTheme(page, "light");
   await suppressTransientUi(page);
   const session = await installSwitchableSession(page);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
   return session;

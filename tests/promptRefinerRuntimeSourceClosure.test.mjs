@@ -495,6 +495,11 @@ const compilerOptions = parsedConfig.options;
 // this repins only their final source positions on the main release base.
 // 2026-10-12, back-merge of main 9cd033fa5 into develop: both histories above
 // are kept. Every closure file equals develop's, so develop's pins hold.
+// 2026-10-12, Guest Smart Adaptive CI repair: the reviewed Guest audit actor
+// joins the marketing schema fingerprint provenance. That moves existing
+// accesses in `lib/marketingAutomationAccess.ts`; capability naming changes no
+// access expression. The 228-entry count and position-free digest remain
+// unchanged, so this repins source positions only.
 // 2026-10-12, default model GPT 6 Luna and the guest trio's Haiku 5.5: two
 // pricing profiles inserted in `lib/modelPricing.ts` move the twelve accesses
 // below them by 73 lines, and two catalogue rows plus the DEFAULT_MODEL_ID note
@@ -506,6 +511,9 @@ const compilerOptions = parsedConfig.options;
 // lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
 // below it. Count 228 and the position-free inventory remain unchanged; only
 // their source positions are repinned.
+// 2026-10-12, Guest Smart Adaptive plus AMUX worker registry merge: both
+// fingerprint provenance notes coexist. Access count 228 and position-free
+// digest are unchanged; the positions below the combined note are repinned.
 // 2026-10-12, the default lineup as an Admin setting: the lineup reader, its
 // save-time checks and its writer in `lib/appSettings.ts` sit above that file's
 // one access, `flags[feature]`, and move it by 184 lines. The replacement walk,
@@ -516,8 +524,8 @@ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "8172515bb4b6206b6ce423a17e3b427d",
-  "dcb5928470f83b05dd213de581a93d0d",
+  "a038e5fce33a369b089a4777202eef2b",
+  "0c7f30535222ec440f1a8a05816560ec",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

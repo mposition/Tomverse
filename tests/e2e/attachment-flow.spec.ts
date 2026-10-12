@@ -195,7 +195,7 @@ test.describe("attachment UX", () => {
     await mockAuthenticatedApi(page);
     uploadState = await mockAttachmentUpload(page);
     await mockChatStream(page, "Attachment QA response");
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 

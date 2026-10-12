@@ -53,7 +53,7 @@ const rootActionTestIds = async (page: Page) =>
 test.describe("chat context menu shape", () => {
   test("the root offers at most six actions @ui-risk", async ({ page }) => {
     await mockAuthenticatedApi(page, { assistantProfiles: [] });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openMenu(page);
 
     const ids = await rootActionTestIds(page);
@@ -70,7 +70,7 @@ test.describe("chat context menu shape", () => {
 
   test("the four removals stay removed @ui-risk", async ({ page }) => {
     await mockAuthenticatedApi(page, { assistantProfiles: [] });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openMenu(page);
 
     // A card of prose, not an action.
@@ -89,7 +89,7 @@ test.describe("chat context menu shape", () => {
     // Removing the menu row must not remove the capability. The dedicated
     // button is the one that has to stay reachable and named.
     await mockAuthenticatedApi(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-input")).toBeVisible();
 
     const button = page.getByTestId("composer-model-select");
@@ -105,7 +105,7 @@ test.describe("chat context menu shape", () => {
     page,
   }) => {
     await mockAuthenticatedApi(page);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openMenu(page);
 
     await page.getByTestId("tools-attach-row").click();
@@ -139,7 +139,7 @@ test.describe("chat context menu shape", () => {
         currentRevision: 1,
       })),
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openMenu(page);
     await page.getByTestId("tools-assistant-row").click();
 
@@ -174,7 +174,7 @@ for (const viewport of NO_SCROLL_VIEWPORTS) {
   }) => {
     await page.setViewportSize(viewport);
     await mockAuthenticatedApi(page, { assistantProfiles: [] });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openMenu(page);
 
     const popover = page.locator("#chat-input-popover");
@@ -211,7 +211,7 @@ test("a very short viewport still reaches the last action @ui-risk", async ({
   // absence of a scrollbar.
   await page.setViewportSize({ width: 568, height: 320 });
   await mockAuthenticatedApi(page, { assistantProfiles: [] });
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openMenu(page);
 
   // The last row this session actually renders, whichever it is: the point is

@@ -9,6 +9,11 @@ export type ChatRecoveryPrompt = {
 /** UI-only greeting; never part of a provider transcript. */
 export const CHAT_WELCOME_MESSAGE_ID = "welcome";
 
+/** Unknown paid Guest Auto work requires reconciliation, never prompt replay. */
+export const CHAT_NON_RECOVERABLE_ERROR_CODES = new Set([
+  "GUEST_AUTO_OUTCOME_UNKNOWN",
+]);
+
 /** Keep UI failures in memory, but do not send their empty placeholders. */
 export function requestTranscriptForScope(
   messages: readonly Message[],
@@ -50,6 +55,8 @@ export function recoveryPromptsForMessages(
     const failedReply = message.role === "assistant" &&
       (message.status === "error" || message.status === "cancelled");
     if (!unansweredQuestion && !failedReply) continue;
+    if (failedReply && message.errorCode &&
+        CHAT_NON_RECOVERABLE_ERROR_CODES.has(message.errorCode)) continue;
     prompts.set(message.id, {
       text: question.content,
       attachments: question.attachments?.map((attachment) => ({ ...attachment })) ?? [],

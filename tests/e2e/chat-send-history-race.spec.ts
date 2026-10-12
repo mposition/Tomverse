@@ -64,7 +64,7 @@ async function delayConversationHistory(page: Page, delayMs: number) {
 async function prepareSingleModelChat(page: Page) {
   await prepareGuestPage(page, "ko");
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
 }
 

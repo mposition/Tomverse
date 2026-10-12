@@ -29,6 +29,13 @@ import {
   type PublicChatDraft,
 } from "@/components/chat/chatDurableRecoveryClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import {
+  consumeConversationDraftSession,
+  openConversationDraftSession,
+  publishConversationDraftSession,
+  type DraftSessionFence,
+  type DraftSessionProduct,
+} from "@/lib/conversationDraftSessionCache";
 
 export {
   draftKeyFor,
@@ -80,6 +87,11 @@ export type ConversationDraftsApi = {
   draftSyncFailed: boolean;
   /** Retries hydration or persistence without discarding local input. */
   retryDraftSync: () => void;
+  /**
+   * Stages this idle product's in-memory drafts for one product-switch return.
+   * Callers must refuse the switch while submit/preparation is unsettled.
+   */
+  preserveDraftsForProductSwitch: () => boolean;
   /** Captures the exact local intent synchronously, before preflight awaits. */
   captureDraftSend: (
     draft: ConversationDraft,
@@ -227,7 +239,8 @@ const releasePreviews = (items: ChatAttachment[], keep: ChatAttachment[]) => {
 export function useConversationDrafts(
   currentConversationId: string | null,
   identityKey: string | null,
-  durableSyncEnabled = false
+  durableSyncEnabled = false,
+  sessionProduct: DraftSessionProduct | null = null
 ): ConversationDraftsApi {
   const [drafts, setDrafts] = useState<ConversationDraftStore>({});
   const [, setSyncRevision] = useState(0);
@@ -246,10 +259,12 @@ export function useConversationDrafts(
   // submit all finish after an await, by which point the user may be looking
   // at a different conversation.
   const draftsRef = useRef(drafts);
+  const draftSessionFenceRef = useRef<DraftSessionFence | null>(null);
+  const draftSessionScopeRef = useRef<{
+    identityKey: string | null;
+    product: DraftSessionProduct | null;
+  } | null>(null);
   const activeDraftKeyRef = useRef(activeDraftKey);
-  useEffect(() => {
-    draftsRef.current = drafts;
-  }, [drafts]);
   const syncMetaRef = useRef(new Map<string, DraftSyncMeta>());
   // Ordinary edit debounce may finish after navigation so the text just left
   // on screen is not lost. Failure retries are different: policy binds them
@@ -384,6 +399,101 @@ export function useConversationDrafts(
   const replaceDrafts = useCallback((next: ConversationDraftStore) => {
     draftsRef.current = next;
     setDrafts(next);
+  }, []);
+
+  const releaseDraftStores = useCallback(
+    (
+      stores: readonly ConversationDraftStore[],
+      retainedStores: readonly ConversationDraftStore[] = []
+    ) => {
+      const urls = new Set<string>();
+      const retainedUrls = new Set<string>();
+      for (const store of stores) {
+        for (const draft of Object.values(store)) {
+          for (const url of collectReleasablePreviewUrls(draft.attachments)) {
+            urls.add(url);
+          }
+        }
+      }
+      for (const store of retainedStores) {
+        for (const draft of Object.values(store)) {
+          for (const url of collectReleasablePreviewUrls(draft.attachments)) {
+            retainedUrls.add(url);
+          }
+        }
+      }
+      for (const url of urls) {
+        if (!retainedUrls.has(url)) URL.revokeObjectURL(url);
+      }
+    },
+    []
+  );
+
+  // Product navigation unmounts this hook. A product switch explicitly stages
+  // an idle snapshot through preserveDraftsForProductSwitch; arbitrary
+  // unmounts and pending/unknown sends never publish raw draft bytes. Opening
+  // a product consumes its last staged snapshot for this resolved identity.
+  // Identity changes retire both staged product scopes. A preview which is
+  // still referenced by this mounted hook's separately keyed store remains
+  // live until that draft itself is discarded or the tab unmounts.
+  useLayoutEffect(() => {
+    const previousScope = draftSessionScopeRef.current;
+    draftSessionScopeRef.current = {
+      identityKey,
+      product: sessionProduct,
+    };
+    const identityChangedInsideMountedProduct =
+      previousScope !== null &&
+      previousScope.product === sessionProduct &&
+      previousScope.identityKey !== identityKey;
+    const opened = openConversationDraftSession(identityKey, sessionProduct);
+    draftSessionFenceRef.current = opened.fence;
+    releaseDraftStores(
+      opened.retired,
+      identityChangedInsideMountedProduct ? [draftsRef.current] : []
+    );
+    // Give a staged product-switch snapshot local authority before passive
+    // durable hydration can observe this mount. The committed mount still
+    // performs the state restore and cache consume in the microtask below so
+    // a discarded StrictMode layout-effect pass cannot take the only copy.
+    // Every state writer in this hook updates draftsRef synchronously through
+    // replaceDrafts, so no passive state-to-ref mirror may overwrite it with
+    // the render's initial empty store in between these two steps.
+    // An identity transition is not a product-navigation remount. The live
+    // hook already holds separately keyed drafts for A and B, and the approved
+    // identity contract requires A's bytes to become unreachable to B without
+    // deleting them. Replacing that store with the product-switch cache here
+    // made A -> B -> A lose A's draft. The cache owner is still retired by
+    // openConversationDraftSession; only this mounted, identity-keyed store is
+    // retained. Initial/StrictMode/product mounts continue to adopt the staged
+    // product snapshot below.
+    if (!identityChangedInsideMountedProduct) {
+      draftsRef.current = opened.store;
+    }
+    queueMicrotask(() => {
+      if (
+        opened.fence &&
+        draftSessionFenceRef.current === opened.fence &&
+        consumeConversationDraftSession(opened.fence, opened.store)
+      ) {
+        if (!identityChangedInsideMountedProduct) {
+          replaceDrafts(opened.store);
+        }
+      }
+    });
+    return () => {
+      const fence = opened.fence;
+      if (draftSessionFenceRef.current === fence) {
+        draftSessionFenceRef.current = null;
+      }
+    };
+  }, [identityKey, releaseDraftStores, replaceDrafts, sessionProduct]);
+
+  const preserveDraftsForProductSwitch = useCallback(() => {
+    const fence = draftSessionFenceRef.current;
+    return fence
+      ? publishConversationDraftSession(fence, draftsRef.current)
+      : false;
   }, []);
 
   const setConflict = useCallback((key: string, conflicted: boolean) => {
@@ -1362,6 +1472,7 @@ export function useConversationDrafts(
     resolveDraftConflict,
     draftSyncFailed: syncFailureKeys.has(activeDraftKey),
     retryDraftSync,
+    preserveDraftsForProductSwitch,
     captureDraftSend,
     prepareDraftSend,
     commitDraftSend,
