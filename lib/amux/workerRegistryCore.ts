@@ -57,6 +57,15 @@ export const AMUX_WORKER_PROVIDER_CLASS_TABLE: Readonly<
 /** Section 3: the class is the name's prefix; the rest is 1-24 of [a-z0-9]. */
 export const AMUX_WORKER_NAME_PATTERN = /^(claude|codex|cursor|copilot)-[a-z0-9]{1,24}$/;
 
+/**
+ * How the assignment catalog names a worker: `AMUX_MACHINE_ID_PATTERN` in
+ * lib/amux/claimContract.ts, copied so this module stays free of imports
+ * (tests/amuxWorkerRegistryCore.test.mjs pins the two equal). A catalog name
+ * outside the registry's grammar is legal there and appears in the comparison
+ * as `unregistered`.
+ */
+export const AMUX_CATALOG_WORKER_NAME_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,118}[A-Za-z0-9])?$/;
+
 /** Section 3's desired states, set by a person only. */
 export const AMUX_WORKER_DESIRED_STATES = ["requested", "active", "paused", "retired"] as const;
 export type AmuxWorkerDesiredState = (typeof AMUX_WORKER_DESIRED_STATES)[number];
@@ -591,8 +600,17 @@ const parseComparison = (value: unknown): AmuxWorkerCatalogComparison | null => 
   }
   if (value.status !== "match" && value.status !== "mismatch") return null;
   for (const row of value.rows) {
-    if (!isRecord(row) || !isAmuxWorkerName(row.workerName)) return null;
-    if (row.registryState !== null && !isAmuxWorkerDesiredState(row.registryState)) return null;
+    // A comparison row names a registry worker or a catalog entry. The catalog
+    // names its workers by the AMUX machine-id rule, which is wider than the
+    // registry's grammar, so only a registry name may carry a registry state.
+    if (!isRecord(row) || typeof row.workerName !== "string" ||
+        !AMUX_CATALOG_WORKER_NAME_PATTERN.test(row.workerName)) {
+      return null;
+    }
+    if (row.registryState !== null &&
+        (!isAmuxWorkerName(row.workerName) || !isAmuxWorkerDesiredState(row.registryState))) {
+      return null;
+    }
     if (typeof row.catalog !== "string" || !CATALOG_STATES.includes(row.catalog)) return null;
     if (!isOneOf(AMUX_WORKER_CATALOG_VERDICTS, row.verdict)) return null;
   }
