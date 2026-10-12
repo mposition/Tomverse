@@ -82,6 +82,11 @@ const CACHE_RESTORE_MARKERS = [
   "Looking up task storage for TaskId",
   "Unable to open static sorted file referenced from",
   "Unable to read next free task id from database",
+  // 2026-10-12 (production, Railway deployment 40fda894, main f08502b3e): the
+  // restore failed in one worker thread and every other thread panicked with
+  // only this line, at the backend's restore operation. None of the lines
+  // above reached the log, so the build aborted without the cold retry.
+  "failed in another thread: restoring failed",
 ];
 
 /**
