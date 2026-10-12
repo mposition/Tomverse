@@ -153,7 +153,7 @@ export const AMUX_ORCHESTRATOR_HALT_KEY_PREFIX_LENGTH = 8;
 export const AMUX_ORCHESTRATOR_REQUEST_ID_HEADER = "x-amux-request-id";
 export const AMUX_ORCHESTRATOR_INSTANCE_ID_HEADER = "x-amux-instance-id";
 
-/** The halt and resolution audit actions of versions 20 and 32. */
+/** The halt and resolution audit actions of versions 20 and 33. */
 export const AMUX_ORCHESTRATOR_AUDIT_ACTIONS = {
   halted: "amux.orchestrator.halted",
   writeResolved: "amux.orchestrator.write_resolved",
