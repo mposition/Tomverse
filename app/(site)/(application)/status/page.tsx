@@ -21,7 +21,7 @@ import {
   type PublicProviderStatus,
 } from "@/lib/providerPublicStatusCore";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
-import { createPageMetadata, SEO_LOCALES, SITE_ORIGIN } from "@/lib/seo";
+import { createPageMetadata, localizedQueryPath, queryLanguageAlternates } from "@/lib/seo";
 import { DOCUMENT_LANGUAGE_HEADER } from "@/lib/documentLanguage";
 import { describeProbeSchedulerDelay } from "@/lib/statusPageEvidence";
 import {
@@ -50,22 +50,17 @@ const statusPageLanguage = async (searchParams: StatusPageProps["searchParams"])
 export async function generateMetadata({ searchParams }: StatusPageProps): Promise<Metadata> {
   const language = await statusPageLanguage(searchParams);
   const copy = getPublicStatusCopy(language);
-  const localePath = (locale: string) => locale === "en" ? "/status" : `/status?lang=${locale}`;
   const metadata = createPageMetadata({
     title: copy.metadataTitle,
     description: copy.metadataDescription,
     locale: language,
-    path: localePath(language),
+    path: localizedQueryPath(language, "/status"),
   });
   return {
     ...metadata,
     alternates: {
       ...metadata.alternates,
-      languages: {
-        "x-default": `${SITE_ORIGIN}/status`,
-        ...Object.fromEntries(SEO_LOCALES.map(locale => [locale === "zh" ? "zh-Hans" : locale,
-          `${SITE_ORIGIN}${localePath(locale)}`])),
-      },
+      languages: queryLanguageAlternates("/status"),
     },
   };
 }

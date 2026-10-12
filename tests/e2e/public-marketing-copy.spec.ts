@@ -167,7 +167,7 @@ for (const language of SEO_LOCALES) {
       expect(document.language).toBe(language);
       expect(document.title).toBe((metadata.title as { absolute: string }).absolute);
       expect(document.description).toBe(metadata.description);
-      expect(document.canonical).toBe(`${SITE_ORIGIN}/guides/assistant-knowledge${language === "en" ? "" : `?lang=${language}`}`);
+      expect(document.canonical).toBe(`${SITE_ORIGIN}/guides/assistant-knowledge?lang=${language}`);
       expect(document.alternates).toEqual(metadata.alternates?.languages);
       expect(document.h1).toEqual([normalize(assistantKnowledgeGuideContent[language].title)]);
       expect(response.headers()["content-security-policy"] ?? response.headers()["content-security-policy-report-only"]).toBeTruthy();
