@@ -576,9 +576,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * system-audit action and its `AdminAuditLog` back relation. The webhook
  * receiver's calls, descriptor and admission decisions are unchanged; the
  * watched closure bytes moved, so existing signed staging evidence is stale.
+ * 2026-10-12: Guest Smart Adaptive adds a closed credit-lifecycle actor to
+ * the shared audit helper. The receiver's decisions and watched schema slice
+ * are unchanged, but its import closure bytes moved, so prior signed staging
+ * evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f88ad0827c25f3f4b432d18c014e029dbfe247226e234e1664743d775b4e5ce8";
+  "77d1e9adb5ab1709dddec3ada16b5d689ab719f6e78bd4ccdc9cc4e77945520a";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

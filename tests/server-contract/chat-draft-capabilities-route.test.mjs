@@ -37,7 +37,7 @@ mock.module(mod("lib/chatSecurity.ts"), {
 });
 mock.module(mod("lib/guestChatAutoAuthority.ts"), {
   namedExports: {
-    mintGuestChatAutoAuthority: (input) => {
+    mintGuestChatAutoCapability: (input) => {
       mintedAuthorities.push(input);
       return "gca1.signed-authority";
     },
@@ -104,7 +104,7 @@ test("guest blank Chat receives a subject and exact-release bound text-only auth
   assert.match(response.headers.get("set-cookie") ?? "", /tomverse_guest=test/);
   assert.deepEqual(await response.json(), {
     autoSelection: { offered: true },
-    guestAutoAuthority: "gca1.signed-authority",
+    guestAutoCapability: "gca1.signed-authority",
     guestAuto: { attachmentSupport: "manual_only" },
   });
   assert.equal(mintedAuthorities.length, 1);

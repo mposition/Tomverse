@@ -15,9 +15,9 @@ export type GuestAutoCreditClaimRow = Readonly<{
 
 export const guestAutoCreditRequestKeyCore = (
   subjectKey: string,
-  authorityId: string,
+  capabilityId: string,
 ) => `guest-auto-credit:v1:${createHash("sha256")
-  .update(`${subjectKey}\0${authorityId}`, "utf8").digest("hex")}`;
+  .update(`${subjectKey}\0${capabilityId}`, "utf8").digest("hex")}`;
 
 export type GuestAutoCreditClaimDecision =
   | "new"

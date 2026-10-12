@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   memo,
@@ -240,7 +240,7 @@ type ChatAppProps = {
      */
     admissionToken?: string | null;
     /** Short-lived server authority for one Guest Chat Smart Adaptive turn. */
-    guestAutoAuthority?: string;
+    guestAutoCapability?: string;
     /**
      * The §10 context bundle this send was priced against. Opaque and
      * single-use per (bundle, model); absent means the request was priced
@@ -1439,7 +1439,7 @@ function ChatAppComponent({
     onDispatchStarted?: () => void,
     /** One server-held Refiner decision. Never reused by a recovery send. */
     promptRefinerDecision?: PromptRefinerProductChatDecision,
-    guestAutoAuthority?: string
+    guestAutoCapability?: string
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1691,7 +1691,7 @@ function ChatAppComponent({
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
         onDispatchStarted?.();
-        if (isGuestMode && guestAutoAuthority) {
+        if (isGuestMode && guestAutoCapability) {
           guestAutoRequestStarted = true;
         }
         const res = await fetch("/api/chat", {
@@ -1744,8 +1744,8 @@ function ChatAppComponent({
               ? { acknowledgedUnavailableAttachmentIds }
               : {}),
             ...(promptRefinerDecision ? { promptRefinerDecision } : {}),
-            ...(isGuestMode && guestAutoAuthority
-              ? { guestAutoAuthority, guestClientTurnId: sourceUserMessageId }
+            ...(isGuestMode && guestAutoCapability
+              ? { guestAutoCapability, guestClientTurnId: sourceUserMessageId }
               : {}),
           }),
           signal: controller.signal,
@@ -2198,7 +2198,7 @@ function ChatAppComponent({
         typeof requestError.code === "string" ? requestError.code : "";
       const guestAutoTransportOutcomeUnknown =
         isGuestMode &&
-        Boolean(guestAutoAuthority) &&
+        Boolean(guestAutoCapability) &&
         guestAutoRequestStarted &&
         !isGuestVerificationError(error) &&
         (requestError.name === "AbortError" || reportedErrorCode.length === 0);
@@ -2761,7 +2761,7 @@ function ChatAppComponent({
             );
           },
           promptPayload.promptRefinerDecision,
-          promptPayload.guestAutoAuthority
+          promptPayload.guestAutoCapability
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

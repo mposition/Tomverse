@@ -470,7 +470,7 @@ test.describe("guest initial cost hydration", () => {
         contentType: "application/json",
         body: JSON.stringify({
           autoSelection: { offered: true },
-          guestAutoAuthority: authority,
+          guestAutoCapability: authority,
           guestAuto: { attachmentSupport: "manual_only" },
         }),
       });
@@ -519,7 +519,7 @@ test.describe("guest initial cost hydration", () => {
     expect(capabilityReads).toBeGreaterThanOrEqual(2);
     expect(accountWrites).toEqual([]);
     expect(requests[0]).toMatchObject({
-      guestAutoAuthority: authority,
+      guestAutoCapability: authority,
       guestClientTurnId: expect.stringMatching(/^[0-9a-f-]{36}$/),
     });
     expect(requests[0].conversationId).toBeUndefined();
@@ -541,7 +541,7 @@ test.describe("guest initial cost hydration", () => {
         contentType: "application/json",
         body: JSON.stringify({
           autoSelection: { offered: true },
-          guestAutoAuthority: "qa-guest-auto-mode-transport-only",
+          guestAutoCapability: "qa-guest-auto-mode-transport-only",
           guestAuto: { attachmentSupport: "manual_only" },
         }),
       })
@@ -574,7 +574,7 @@ test.describe("guest initial cost hydration", () => {
           contentType: "application/json",
           body: JSON.stringify({
             autoSelection: { offered: true },
-            guestAutoAuthority: "qa-guest-auto-unknown-transport-only",
+            guestAutoCapability: "qa-guest-auto-unknown-transport-only",
             guestAuto: { attachmentSupport: "manual_only" },
           }),
         })
@@ -624,7 +624,7 @@ test.describe("guest initial cost hydration", () => {
         contentType: "application/json",
         body: JSON.stringify({
           autoSelection: { offered: true },
-          guestAutoAuthority: "qa-guest-auto-interrupted-transport-only",
+          guestAutoCapability: "qa-guest-auto-interrupted-transport-only",
           guestAuto: { attachmentSupport: "manual_only" },
         }),
       })

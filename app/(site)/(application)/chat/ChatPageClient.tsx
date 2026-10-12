@@ -1665,7 +1665,7 @@ export function ChatPageClient({
     webSearchMode?: WebSearchToggleMode;
     admissionToken?: string | null;
     /** Short-lived server authority for one Guest Chat Smart Adaptive turn. */
-    guestAutoAuthority?: string;
+    guestAutoCapability?: string;
     contextBundle?: string | null;
     contextLayout?: "single" | "comparison";
     promptRefinerDecision?: PromptRefinerProductChatDecision;
@@ -1849,7 +1849,7 @@ export function ChatPageClient({
   // Request-memory only. A Guest authority is never persisted in localStorage,
   // a draft, or a conversation summary, and is refreshed immediately before
   // the one Send that presents it to the server.
-  const guestAutoAuthorityRef = useRef<string | null>(null);
+  const guestAutoCapabilityRef = useRef<string | null>(null);
   const [blankChatCapabilityRevision, setBlankChatCapabilityRevision] = useState(0);
   const [selectionModePending, setSelectionModePending] = useState(false);
   const promptRefinerProductExplicitFlowVisible =
@@ -2442,7 +2442,7 @@ export function ChatPageClient({
     newChatAutoPreparationRef.current = null;
     newChatAutoDraftSendRef.current = null;
     newChatAutoUnknownRef.current = null;
-    guestAutoAuthorityRef.current = null;
+    guestAutoCapabilityRef.current = null;
     blankChatDefaultModeOverrideRef.current = null;
     storedSelectionModeUnknownRef.current = null;
     selectionModeRequestSeqRef.current += 1;
@@ -2453,7 +2453,7 @@ export function ChatPageClient({
       newChatAutoPreparationRef.current = null;
       newChatAutoDraftSendRef.current = null;
       newChatAutoUnknownRef.current = null;
-      guestAutoAuthorityRef.current = null;
+      guestAutoCapabilityRef.current = null;
       blankChatDefaultModeOverrideRef.current = null;
       storedSelectionModeUnknownRef.current = null;
       selectionModeRequestSeqRef.current += 1;
@@ -2494,15 +2494,15 @@ export function ChatPageClient({
           isImageDraftActiveRef.current
         ) return;
         const guestAuthority = isGuestMode &&
-          typeof data?.guestAutoAuthority === "string"
-          ? data.guestAutoAuthority
+          typeof data?.guestAutoCapability === "string"
+          ? data.guestAutoCapability
           : null;
         const guestAutoContract = !isGuestMode ||
           data?.guestAuto?.attachmentSupport === "manual_only";
         const offered = data?.autoSelection?.offered === true &&
           guestAutoContract &&
           (!isGuestMode || Boolean(guestAuthority));
-        guestAutoAuthorityRef.current = guestAuthority;
+        guestAutoCapabilityRef.current = guestAuthority;
         setAutoSelectionOffered(offered);
         // A blank Tomverse Chat defaults to Smart Adaptive when the server
         // confirms the current account is eligible. This is display intent,
@@ -2547,7 +2547,7 @@ export function ChatPageClient({
           setAutoSelectionOffered(false);
           selectionModeRef.current = "manual";
           setSelectionMode("manual");
-          guestAutoAuthorityRef.current = null;
+          guestAutoCapabilityRef.current = null;
         }
       });
   }, [
@@ -4281,7 +4281,7 @@ export function ChatPageClient({
         setSelectionModeUnknown(null);
         selectionModeRequestSeqRef.current += 1;
         selectionModeRef.current = "manual";
-        guestAutoAuthorityRef.current = null;
+        guestAutoCapabilityRef.current = null;
         setSelectionMode("manual");
         setAutoSelectionOffered(false);
         setBlankChatCapabilityRevision((revision) => revision + 1);
@@ -4758,7 +4758,7 @@ export function ChatPageClient({
                   mode: restoredSelectionMode,
                 }
               : null;
-          guestAutoAuthorityRef.current = null;
+          guestAutoCapabilityRef.current = null;
           selectionModeRef.current = restoredSelectionMode ?? "manual";
           setSelectionMode(restoredSelectionMode ?? "manual");
           setAutoSelectionOffered(false);
@@ -5931,7 +5931,7 @@ export function ChatPageClient({
     const isOverrideSend = typeof options?.overrideText === "string";
     if (!trimmed && isOverrideSend) return;
     if ((!trimmed && sendInputAttachments.length === 0) || selectedModels.length === 0) return;
-    let guestAutoAuthorityForSend: string | null = null;
+    let guestAutoCapabilityForSend: string | null = null;
     if (
       isGuestMode &&
       mountedSurface === "chat" &&
@@ -5953,24 +5953,24 @@ export function ChatPageClient({
           authorityTicket !== conversationSelectionTicketRef.current ||
           selectionModeRef.current !== "auto"
         ) return;
-        const authority = typeof data?.guestAutoAuthority === "string"
-          ? data.guestAutoAuthority
+        const authority = typeof data?.guestAutoCapability === "string"
+          ? data.guestAutoCapability
           : null;
         if (
           data?.autoSelection?.offered !== true ||
           data?.guestAuto?.attachmentSupport !== "manual_only" ||
           !authority
         ) {
-          guestAutoAuthorityRef.current = null;
+          guestAutoCapabilityRef.current = null;
           setAutoSelectionOffered(false);
           showToast(t("chat.autoSelectionFailed"), "error");
           return;
         }
-        guestAutoAuthorityRef.current = authority;
-        guestAutoAuthorityForSend = authority;
+        guestAutoCapabilityRef.current = authority;
+        guestAutoCapabilityForSend = authority;
       } catch {
         if (submitOwnerIsCurrent()) {
-          guestAutoAuthorityRef.current = null;
+          guestAutoCapabilityRef.current = null;
           showToast(t("chat.autoSelectionFailed"), "error");
         }
         return;
@@ -6074,7 +6074,7 @@ export function ChatPageClient({
 	// Manual Guest sends have one known model and retain the client-side hint.
 	// Smart Adaptive has no selected model yet: its server-side reachable-pool
 	// prehold must decide whether a cheaper eligible candidate still fits.
-	if (isGuestMode && !guestAutoAuthorityForSend) {
+	if (isGuestMode && !guestAutoCapabilityForSend) {
       const requestCredits = estimateWeightedRequestCredits(trimmed, promptAttachments);
       if (guestMessageCount + requestCredits > MAX_GUEST_MESSAGES) {
           showToast(t("sidebar.exceedDailyLimit"), "error");
@@ -6930,8 +6930,8 @@ export function ChatPageClient({
         ...(preflight.admissionToken
           ? { admissionToken: preflight.admissionToken }
           : {}),
-        ...(guestAutoAuthorityForSend
-          ? { guestAutoAuthority: guestAutoAuthorityForSend }
+        ...(guestAutoCapabilityForSend
+          ? { guestAutoCapability: guestAutoCapabilityForSend }
           : {}),
         // The layout always travels, the bundle only when there is one: the
         // layout describes the *send*, and it is what decides whether a stale
@@ -7667,7 +7667,7 @@ export function ChatPageClient({
         selectionTicket: conversationSelectionTicketRef.current,
         mode,
       };
-      if (!next) guestAutoAuthorityRef.current = null;
+      if (!next) guestAutoCapabilityRef.current = null;
       selectionModeRef.current = mode;
       setSelectionMode(mode);
       const guestConversationId = currentChatIdRef.current;

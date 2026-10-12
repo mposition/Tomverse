@@ -5724,14 +5724,14 @@ export const validateChatPayload = (body: unknown) => {
         contextBundle?: unknown;
         acknowledgedUnavailableAttachmentIds?: unknown;
         promptRefinerDecision?: unknown;
-        guestAutoAuthority?: unknown;
+        guestAutoCapability?: unknown;
         guestClientTurnId?: unknown;
     };
     if (
-        payload.guestAutoAuthority !== undefined &&
-        (typeof payload.guestAutoAuthority !== "string" ||
-            payload.guestAutoAuthority.length < 1 ||
-            payload.guestAutoAuthority.length > 4_096)
+        payload.guestAutoCapability !== undefined &&
+        (typeof payload.guestAutoCapability !== "string" ||
+            payload.guestAutoCapability.length < 1 ||
+            payload.guestAutoCapability.length > 4_096)
     ) {
         throw new ChatAccessError(
             400,
@@ -5753,7 +5753,7 @@ export const validateChatPayload = (body: unknown) => {
         );
     }
     if (
-        Boolean(payload.guestAutoAuthority) !==
+        Boolean(payload.guestAutoCapability) !==
         Boolean(payload.guestClientTurnId)
     ) {
         throw new ChatAccessError(
@@ -6017,7 +6017,7 @@ export const validateChatPayload = (body: unknown) => {
         contextBundle?: string;
         acknowledgedUnavailableAttachmentIds?: string[];
         promptRefinerDecision?: PromptRefinerChatDecision;
-        guestAutoAuthority?: string;
+        guestAutoCapability?: string;
         guestClientTurnId?: string;
     };
 };

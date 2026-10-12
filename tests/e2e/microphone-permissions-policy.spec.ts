@@ -180,7 +180,7 @@ test.describe("microphone Permissions-Policy", () => {
       // ignores Permissions-Policy altogether, and proves nothing about the
       // header.
       await context.grantPermissions(["microphone"], { origin: baseURL! });
-      await page.route("**/chat", async (route) => {
+      await page.route("**/review", async (route) => {
         if (route.request().resourceType() !== "document") {
           await route.continue();
           return;

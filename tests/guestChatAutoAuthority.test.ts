@@ -5,14 +5,14 @@ import test from "node:test";
 import {
   GUEST_CHAT_AUTO_AUTHORITY_MAX_TTL_SECONDS,
   GUEST_CHAT_AUTO_AUTHORITY_MIN_TTL_SECONDS,
-  mintGuestChatAutoAuthority,
-  verifyGuestChatAutoAuthority,
+  mintGuestChatAutoCapability,
+  verifyGuestChatAutoCapability,
   type GuestChatAutoAuthorityBinding,
 } from "../lib/guestChatAutoAuthority.ts";
 
 const SECRET = "test-only-guest-chat-auto-secret";
 const NOW_MS = Date.parse("2026-10-12T04:00:00.000Z");
-const AUTHORITY_ID = "11111111-1111-4111-8111-111111111111";
+const CAPABILITY_ID = "11111111-1111-4111-8111-111111111111";
 const NONCE = "22222222-2222-4222-8222-222222222222";
 
 const binding = (
@@ -27,10 +27,10 @@ const binding = (
 });
 
 const mint = (overrides: Record<string, unknown> = {}) =>
-  mintGuestChatAutoAuthority({
+  mintGuestChatAutoCapability({
     secret: SECRET,
     binding: binding(),
-    authorityId: AUTHORITY_ID,
+    authorityId: CAPABILITY_ID,
     nonce: NONCE,
     nowMs: NOW_MS,
     ttlSeconds: 60,
@@ -41,7 +41,7 @@ const verify = (
   token: string,
   overrides: Record<string, unknown> = {}
 ) =>
-  verifyGuestChatAutoAuthority(token, {
+  verifyGuestChatAutoCapability(token, {
     secret: SECRET,
     binding: binding(),
     nowMs: NOW_MS,
@@ -68,7 +68,7 @@ test("mints and verifies an exact Guest Chat Smart Adaptive authority", () => {
   const verdict = verify(mint());
   assert.equal(verdict.ok, true);
   if (!verdict.ok) return;
-  assert.equal(verdict.payload.authorityId, AUTHORITY_ID);
+  assert.equal(verdict.payload.authorityId, CAPABILITY_ID);
   assert.equal(verdict.payload.nonce, NONCE);
   assert.equal(verdict.payload.subjectKey, binding().subjectKey);
   assert.equal(verdict.payload.issuedAtMs, NOW_MS);
@@ -86,8 +86,8 @@ test("keeps authorityId stable while a nonce makes independently minted tokens u
   assert.equal(firstVerdict.ok, true);
   assert.equal(secondVerdict.ok, true);
   if (!firstVerdict.ok || !secondVerdict.ok) return;
-  assert.equal(firstVerdict.payload.authorityId, AUTHORITY_ID);
-  assert.equal(secondVerdict.payload.authorityId, AUTHORITY_ID);
+  assert.equal(firstVerdict.payload.authorityId, CAPABILITY_ID);
+  assert.equal(secondVerdict.payload.authorityId, CAPABILITY_ID);
   assert.equal(firstVerdict.payload.subjectKey, secondVerdict.payload.subjectKey);
 });
 

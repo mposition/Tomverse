@@ -495,12 +495,17 @@ const compilerOptions = parsedConfig.options;
 // this repins only their final source positions on the main release base.
 // 2026-10-12, back-merge of main 9cd033fa5 into develop: both histories above
 // are kept. Every closure file equals develop's, so develop's pins hold.
+// 2026-10-12, Guest Smart Adaptive CI repair: the reviewed Guest audit actor
+// joins the marketing schema fingerprint provenance. That moves existing
+// accesses in `lib/marketingAutomationAccess.ts`; capability naming changes no
+// access expression. The 228-entry count and position-free digest remain
+// unchanged, so this repins source positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "8e5a039576f4fc975a32056ebb70c4ea",
-  "bf85c1b5848955e74b2a4b99e279b0b2",
+  "858f9175a0b2f872b080dea4a6ab022f",
+  "0dc7b8e909a8357f63a77a89ecdfd40c",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

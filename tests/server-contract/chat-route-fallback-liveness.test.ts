@@ -246,7 +246,7 @@ const guestAuthorityPayload = (
 
 mock.module(mod("lib/guestChatAutoAuthority.ts"), {
   namedExports: {
-    verifyGuestChatAutoAuthority: (token: string) => {
+    verifyGuestChatAutoCapability: (token: string) => {
       guestAuthorityVerificationCalls += 1;
       guestLifecycle.push("authority");
       if (token === "guest-authority-a") {
@@ -2761,7 +2761,7 @@ const askGuestAuto = async (options: {
         ],
         modelId: REQUESTED_MODEL_ID,
         turnstileToken: "synthetic-turnstile",
-        ...(authority !== undefined ? { guestAutoAuthority: authority } : {}),
+        ...(authority !== undefined ? { guestAutoCapability: authority } : {}),
         ...(clientTurnId !== undefined ? { guestClientTurnId: clientTurnId } : {}),
       }),
     })
