@@ -1641,6 +1641,96 @@ append migration `20261012170000_amux_verified_no_commit_halt_auto_clear`에 남
 
 **관측 기간.** 버전 32의 R1 관측 기간(3일, 72시간)은 다시 센다. 두 정리가 모두 production에 반영된 시각부터다. 하나는 이 버전의 제외가 들어간 배포이고, 다른 하나는 `devin-worker`를 지운 카탈로그 변수가 반영된 배포다.
 
+## 버전 35 — R2: 등록부가 배정 카탈로그와 bridge 세션 목록이 된다
+
+상태: **초안, 미승인.** 2026-10-13 작성, 작성자 Claude. 아래 세 가지는 운영자가 2026-10-13에 정한 방향이다. 이 절의 나머지는 그 방향을 구현하는 방법의 제안이며, 승인 기록이 붙기 전에는 효력이 없다.
+
+1. 능력 정보(모델, 역할 태그, 도구)를 등록부로 옮기고 환경 변수 카탈로그를 없앤다. 이는 버전 31 8항 R2의 "환경 변수 목록 삭제" 그대로다.
+2. R2의 배정 조건은 원하는 상태와 자동 정지 래치이고, 최신 관측 조건은 R4부터 적용한다.
+3. bridge가 등록부를 읽도록 R2에서 바꾼다.
+
+### 1. 버전 31과 다른 점
+
+- **배정 조건의 시점.** 버전 31 3항의 실제 배정 조건 셋 가운데 "최신 관측이 정상"은 R4의 운영자 활성화 기록이 관측 writer를 여는 때부터 적용한다. 관측 기록은 R4에서야 생기기 때문이다. R2와 R3 동안 조건은 두 가지다.
+  - 원하는 상태가 `active`다.
+  - 열린 자동 정지 래치가 없다.
+- 그 밖의 R2 내용은 버전 31 8항 그대로다. 배정 카탈로그, bridge 세션 목록, office 좌석이 등록부와 래치를 읽고, 환경 변수 목록을 지운다. 이 버전은 그 방법을 정한다.
+
+### 2. 능력의 저장
+
+- **새 표.** 새 append-only 표 `AmuxWorkerCapabilityEvent`를 둔다. worker의 능력은 그 worker의 가장 새 사건이다. 한 사건이 담는 것:
+  - worker 이름. 등록부에 있고 `retired`가 아닌 이름만 받는다.
+  - worker별 revision(compare-and-set).
+  - 모델(1~160자).
+  - 역할 태그(지금 카탈로그의 태그 문법, 1~64개).
+  - 도구(0~16개).
+  - 선택 항목인 v22 one-shot 프로필(모델, 역할, 도구). v22 프로필 규칙은 지금 `parseAmuxV22WorkerCatalog()`의 규칙 그대로다. 공급사 anthropic, 지원 역할, 역할마다 필요한 도구가 그 규칙이다.
+- **누가 쓰는가.** owner만 Admin에서 최근 step-up을 거쳐 쓴다. 같은 트랜잭션에 사람 감사 `amux.worker.capability`가 있어야 하며, 트리거가 강제한다. 시스템은 쓰지 않는다.
+- **등록부 사건과 표를 나누는 이유.** 원하는 상태의 변경 규칙과 능력 변경의 규칙이 다르기 때문이다. 원하는 상태는 활성화에 시험 증거가 필요하다. 능력은 owner의 운영 행위다. 대신 역할 상한을 넘는 태그는 받지 않는다.
+  - `contract`, `architecture`, `security` 태그는 역할 상한이 `contract`인 worker만 가진다.
+  - `review` 태그와 v22의 `review` 역할은 검증된 종류(버전 31 2항)만 가진다.
+- **`requested` worker.** `requested`인 worker도 능력을 가질 수 있지만, 배정되지 않는다.
+- **가져오기(한 번, owner).** Admin의 "환경 변수에서 능력 가져오기"는 지금 이 서버가 가진 두 카탈로그 환경 변수(`TOMVERSE_AMUX_WORKER_CATALOG_JSON`, `TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON`)를 읽는다. 등록부에 있는 worker마다 능력 사건 하나를 쓴다. 미리 보기에서 차이를 보인 뒤 owner가 확정한다. 환경 변수의 `archived`·`paused`·`isolated`·`blocked` 표시는 능력이 아니므로 가져오지 않는다. 그 의미는 원하는 상태와 래치가 이미 갖고 있다.
+
+### 3. 배정 카탈로그의 유도
+
+- **유도 규칙.** 앱은 배정 카탈로그를 등록부에서 만든다. 다음을 모두 만족하는 worker의 능력이 카탈로그 항목이 된다.
+  - 원하는 상태가 `active`다.
+  - 열린 래치가 없다.
+  - 능력 사건이 있다.
+- **`engineering-runner`.** 이 이름은 버전 34대로 등록부에 들 수 없다. 그 카탈로그 항목은 engineering agent 정책이 소유하는 코드 상수가 되며, 값은 지금 환경 변수의 항목과 같다. 그 항목이 실제로 쓰이는지는 engineering adapter의 래치와 운영 mode가 정한다(버전 25). 이 상수를 바꾸는 것은 engineering agent 정책의 변경이다.
+- **사용처.** 다음 일곱 곳이 모두 이 유도 카탈로그를 쓴다.
+  - 선택 snapshot
+  - worker 등록·heartbeat route
+  - quota route
+  - v22 claim, 자동 승격, Task 준비
+  - engineering adapter
+  - office 좌석. 좌석은 `retired`가 아닌 등록부 worker 전체를 보이고, 배정 여부는 따로 표시한다.
+- **읽기.** 각 경로의 기존 AMUX DB 경계 안에서 한 번 읽는다. 그 때문에 경계의 문장 상한이 하나씩 늘며, 테스트로 고정한다. 읽지 못하거나 사건이 정책 밖이면 카탈로그는 없는 것이다. 이는 지금의 `worker_catalog_unavailable`과 같으며, 아무도 배정하지 않는다(fail-closed).
+- **등록 route.** 등록 route는 유도 카탈로그에 없는 이름의 새 runtime 등록을 지금처럼 거부한다.
+- **heartbeat route.** 이미 등록된 runtime의 heartbeat는 그 worker가 카탈로그에서 빠져도 거부하지 않는다. 거부하면 bridge가 버전 20 11항대로 정지하기 때문이다. 대신 그 runtime은 `dispatch_ready`가 거짓으로 기록되어 배정되지 않는다.
+
+### 4. bridge 세션 목록
+
+- **route.** 새 내부 route를 둔다. bridge bearer로 호출하고, 읽기 전용이다. 이 route는 유도 카탈로그의 이름을 돌려준다. `engineering-runner`는 빠진다.
+- **세션 bridge(`tomverse-bridge.service`).** 시작할 때와 heartbeat 주기마다 목록을 읽는다.
+  - 목록 밖이 된 세션은 heartbeat를 `dispatch_ready: false`로 보내 새 배정을 받지 않는다. 진행 중인 attempt는 그대로 끝낸다. 이것은 버전 20 11항의 정지(종료 코드 3)가 아니다.
+  - 목록을 읽지 못하면 새 세션을 등록하지 않고, 모든 세션을 `dispatch_ready: false`로 둔다. 읽기에는 결과 불명이 없으므로 정지 사유가 아니다. 시작할 때 읽지 못하면 등록 없이 다시 시도한다.
+- **worker별 v22 bridge(`tomverse-amux-v22-bridge@`).** 같은 route로 자기 이름이 목록에 있는지 확인하고, 위와 같이 동작한다.
+- **`TOMVERSE_AMUX_WSL_SESSIONS`.** 전환 기간에는 목록을 좁히기만 하는 이중 장치로 남는다(교집합). R2를 끝낼 때 지운다.
+- **누가 하는가.** Rust 변경은 다른 공급사의 독립 검토를 거친다. 호스트 바이너리 교체는 운영자가 승인하고 수행한다(버전 23의 root 소유 경계).
+
+### 5. R2 안의 순서
+
+각 조각은 코드 래치를 끈 채 출고하고, 작성자와 다른 공급사의 독립 검토를 거치며, 운영자 활성화 기록 뒤에만 켠다.
+
+| 조각 | 내용 | 끝나는 조건 |
+|---|---|---|
+| R2a | 능력 표·store·Admin 편집, 환경 변수에서 가져오기 | production에서 등록부의 일곱 `active` worker와 여섯 `requested` worker의 능력이 기록됨 |
+| R2b | 유도 카탈로그를 shadow로 계산하고, Admin에 환경 변수 카탈로그와의 동등성 표시 | 동등이 정해진 기간 동안 관측됨 |
+| R2c | 일곱 사용처를 유도 카탈로그로 전환 | 운영자 활성화 기록 뒤 배정이 유도 카탈로그로 이뤄짐 |
+| R2d | bridge 목록 route, Rust 변경, 호스트 바이너리 교체 | 세션 목록이 유도 카탈로그와 같음을 관측 |
+| R2e | 두 카탈로그 환경 변수와 `TOMVERSE_AMUX_WSL_SESSIONS` 삭제 | 버전 31 8항 R2의 종료 조건 |
+
+- R2a와 R2b는 배정을 바꾸지 않으므로 R1의 관측 기간(버전 32·34)과 함께 진행할 수 있다.
+- R2c는 R1 관측이 끝난 뒤에만 켠다.
+
+### 6. 이 버전이 하지 않는 것
+
+이 버전은 다음 어느 것도 바꾸지 않는다.
+
+- 역할 상한과 검증 여부
+- 동시 실행 상한, 용량 행, 비용 상한
+- 버전 20의 bridge 정지 계약
+- Decision Maker, engineering agent의 권한·mode
+- R3~R6의 내용
+
+### 활성화 게이트
+
+1. 이 버전의 승인 기록과, 작성자와 다른 공급사의 독립 검토.
+2. R2b의 동등 관측 기간과 R2d의 세션 목록 관측 기간은 운영자가 승인할 때 정한다.
+3. 각 조각(R2a~R2e)은 독립 검토와 그 조각의 운영자 활성화 기록 뒤에만 켠다.
+
 ## CLI 사용량 보존·집계 부속 계약 — 2026-10-02 승인
 
 approvedBy: mposition · approvedAt: 2026-10-02 · 부속 계약 식별자: `cli-usage-retention-2026-10-02`
