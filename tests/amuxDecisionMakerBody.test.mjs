@@ -896,6 +896,13 @@ const withIntegrityKey = async (key, work) => {
 // The route transaction around each operation adds the boundary's setup and
 // commit fence (lib/amux/dbBoundary.ts): two more statements.
 const BOUNDARY_STATEMENTS = 2;
+
+/** The writes the retention sweep makes, and the boundary each runs in. */
+const SWEEP_BOUNDARIES = {
+  "expiry purge": "decisionMakerBodyPurge",
+  "key rotation": "decisionMakerDigestKeyRotate",
+  "key destruction": "decisionMakerDigestKeyDestroy",
+};
 const LOCK = /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/;
 const kindsOf = (sent) => sent.map((statement) => statement.kind);
 const auditOf = (sent) => sent.find((statement) => statement.kind === "create").data;
@@ -1076,6 +1083,14 @@ for (const [label, integrityKey] of [
         assert.ok(result.recorded === true || result.deleted === true, `${entry.name}: ${JSON.stringify(result)}`);
         assert.deepEqual(kindsOf(sent), entry.kinds, entry.name);
         assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12, entry.name);
+        // The retention sweep's boundary for this write is the write at its
+        // largest -- with an integrity key -- plus setup and fence
+        // (lib/amux/decisionMakerRetentionSweep.ts).
+        const sweepBoundary = SWEEP_BOUNDARIES[entry.name];
+        if (sweepBoundary) {
+          assert.ok(sent.length + BOUNDARY_STATEMENTS <= AMUX_DB_BOUNDARIES[sweepBoundary].prismaCallCeiling, entry.name);
+          if (integrityKey !== null) assert.equal(sent.length + BOUNDARY_STATEMENTS, AMUX_DB_BOUNDARIES[sweepBoundary].prismaCallCeiling, entry.name);
+        }
         assert.match(sent[0].sql, LOCK, entry.name);
         const audit = auditOf(sent);
         assert.equal(audit.action, entry.action, entry.name);

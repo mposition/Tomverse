@@ -37,6 +37,7 @@ import { runImageAssetMaintenanceQuietly } from "@/lib/imageAssetLifecycle";
 import { runKnowledgeMaintenanceQuietly } from "@/lib/assistantKnowledgeLifecycle";
 import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactStorage";
 import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
+import { runDecisionMakerRetentionMaintenanceQuietly } from "@/lib/amux/decisionMakerRetentionSweep";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -144,6 +145,14 @@ export async function POST(request: Request) {
     // stayed dead for the same, against a ten-minute staleness threshold.
     // The bucket-listing arm is deliberately not here; it stays daily.
     const knowledge = await runKnowledgeMaintenanceQuietly();
+    // The AMUX Decision Maker's retention (docs/policy/amux-decision-maker.md
+    // §10): put the current and next period's digest key into use, close
+    // requests left open for 720 hours, delete bodies whose 90-day retention
+    // has passed and record a spent key's destruction -- each in its own AMUX
+    // DB boundary transaction. A DB-only sweep, allowed under the kill switch,
+    // and never throws, so it cannot turn a successful reconciliation into a
+    // failed one.
+    const decisionMakerRetention = await runDecisionMakerRetentionMaintenanceQuietly();
     // Staged external-import payloads carry user conversation content and a
     // 24h-idle / 72h-absolute lifetime (policy §5.5). The lazy checks in
     // batch/finalize are the primary guard; this sweep clears content whose
@@ -227,6 +236,7 @@ export async function POST(request: Request) {
         generatedArtifacts,
         messageAttachments,
         knowledge,
+        decisionMakerRetention,
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,
@@ -247,6 +257,7 @@ export async function POST(request: Request) {
         generatedArtifacts,
         messageAttachments,
         knowledge,
+        decisionMakerRetention,
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,
