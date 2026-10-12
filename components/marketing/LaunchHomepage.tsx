@@ -234,7 +234,7 @@ export default function LaunchHomepage({ reviewInfoHref }: LaunchHomepageProps) 
 
         <section className={styles.guestSection} aria-labelledby="launch-guest-title">
           <div className={`${styles.container} ${styles.guestGrid}`}>
-            <div><h2 id="launch-guest-title">{accountCopy?.guestTitle ?? copy.guest.title}</h2><p>{accountCopy?.guestBody ?? (isGuestChatTrial ? copy.guest.body : reviewEntryCopy.guestBody)}</p></div>
+            <div><h2 id="launch-guest-title">{isAuthenticated ? launchAccountEntryCopy[lang].guestTitle : copy.guest.title}</h2><p>{accountCopy?.guestBody ?? (isGuestChatTrial ? copy.guest.body : reviewEntryCopy.guestBody)}</p></div>
             <div className={styles.actions}><ActionLink href={chatHref} inverse location="landing_final_chat">{chatAvailable ? copy.actions.chat : reviewEntryCopy.chatInfo}</ActionLink><ActionLink href={reviewEntryHref} inverse>{copy.actions.review}</ActionLink></div>
           </div>
         </section>

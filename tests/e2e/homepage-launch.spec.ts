@@ -158,6 +158,7 @@ test("the real marketing offer read is private and closed without an authenticat
   await expect(page.getByTestId("header-chat-link")).toHaveAttribute("href", "/en#chat");
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(launchReviewEntryCopy.en.heroAccess);
   await expect(page.locator("#launch-plans-title").locator("..").locator("p").nth(1)).toHaveText(launchReviewEntryCopy.en.plansBody);
+  await expect(page.locator("#launch-guest-title")).toHaveText(launchAccountEntryCopy.en.guestTitle);
   await expect(page.locator("#launch-guest-title").locator("..").locator("p")).toHaveText(launchReviewEntryCopy.en.guestBody);
 });
 
