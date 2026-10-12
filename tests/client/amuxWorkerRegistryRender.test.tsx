@@ -349,3 +349,37 @@ test("the GET body is accepted only in its exact shape", () => {
     assert.equal(parseAmuxWorkerRegistryAdminView(broken), null, JSON.stringify(broken)?.slice(0, 80));
   }
 });
+
+test("a catalog entry outside the registry's name grammar still reads back, as unregistered", () => {
+  // Production 2026-10-12: the catalog variable names workers by the AMUX
+  // machine-id rule, not the registry's grammar, and the re-read after the
+  // thirteen were registered was refused whole because one such name sat in
+  // the comparison. The server built that row correctly; only the reader was
+  // too strict.
+  const view = buildAmuxWorkerRegistryAdminView({
+    registrations: AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => registration(entry.workerName, entry.desiredState, entry.roleCeiling)),
+    latches: new Map(),
+    observations: new Map(),
+    catalog: [
+      catalogEntry("claude-impl", "claude"),
+      { ...catalogEntry("devin-worker", "devin"), archived: true },
+      catalogEntry("Codex.Impl:2", "openai"),
+    ],
+    writesLatch: true,
+  });
+  const verdicts = Object.fromEntries(view.comparison.rows.map((row) => [row.workerName, row.verdict]));
+  assert.equal(verdicts["devin-worker"], "unregistered");
+  assert.equal(verdicts["Codex.Impl:2"], "unregistered");
+  assert.deepEqual(parseAmuxWorkerRegistryAdminView(JSON.parse(JSON.stringify(view))), view);
+
+  // Still refused: a name that is not a machine id at all, and a registry
+  // state on a name the registry could never hold.
+  const body = JSON.parse(JSON.stringify(view));
+  const at = body.comparison.rows.findIndex((row: { workerName: string }) => row.workerName === "devin-worker");
+  for (const workerName of ["", "devin worker", "-devin", "x".repeat(121), 7]) {
+    const rows = body.comparison.rows.map((row: object, index: number) => (index === at ? { ...row, workerName } : row));
+    assert.equal(parseAmuxWorkerRegistryAdminView({ ...body, comparison: { ...body.comparison, rows } }), null, String(workerName));
+  }
+  const rows = body.comparison.rows.map((row: object, index: number) => (index === at ? { ...row, registryState: "active" } : row));
+  assert.equal(parseAmuxWorkerRegistryAdminView({ ...body, comparison: { ...body.comparison, rows } }), null);
+});
