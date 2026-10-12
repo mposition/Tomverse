@@ -399,6 +399,13 @@ test("the catalog name rule is the AMUX machine-id rule, and wider than the regi
 test("version 34: the engineering adapter's runner is exempt by name and counts as agreement; devin-worker is not", () => {
   assert.deepEqual([...AMUX_WORKER_CATALOG_EXEMPT], ["engineering-runner"]);
   assert.ok(Object.isFrozen(AMUX_WORKER_CATALOG_EXEMPT));
+  // An exempt name can never also be a registry entry: the grammar (and the
+  // migration's CHECK) refuse it, so "exempt only when unregistered" is the
+  // whole rule, not a gap.
+  for (const name of AMUX_WORKER_CATALOG_EXEMPT) {
+    assert.equal(isAmuxWorkerName(name), false, name);
+    assert.equal(parseAmuxWorkerRegistryChange({ workerName: name, roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 }), null, name);
+  }
   // The production catalog read on 2026-10-13: the seven, devin-worker and engineering-runner.
   const registry = AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => registration(entry.workerName, entry.desiredState, entry.roleCeiling));
   const seven = AMUX_WORKER_REGISTRY_V31_SEED.filter((entry) => entry.desiredState === "active")
