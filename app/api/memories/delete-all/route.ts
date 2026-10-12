@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import {
-    assertRecentAdminAuthentication,
-    isAdminReauthenticationError,
+    assertRecentAccountAuthentication,
+    isAccountReauthenticationError,
 } from "@/lib/adminReauthentication";
 import {
     apiSecurityResponse,
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
             minute: 2,
             day: 10,
         });
-        await assertRecentAdminAuthentication(session);
+        await assertRecentAccountAuthentication(session);
         await readLimitedJson(req, 1024, deleteAllSchema);
 
         const result = await deleteAllMemories(session.user.id);
@@ -60,7 +60,7 @@ export async function POST(req: Request) {
             headers: { "Cache-Control": "no-store" },
         });
     } catch (error) {
-        if (isAdminReauthenticationError(error)) {
+        if (isAccountReauthenticationError(error)) {
             return NextResponse.json(
                 {
                     error: "Sign in again before deleting all memories.",
