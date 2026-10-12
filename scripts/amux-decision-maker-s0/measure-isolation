@@ -297,7 +297,11 @@ exists_control() { # <id> <path> <label>
 
 cleanup() {
   local pid dir
+  # Killed, then reaped: until its parent waits for it a killed sleeper is a
+  # zombie, which still answers `kill -0`, so the run would end with a process
+  # it started still in the table.
   for pid in ${SLEEPER_PIDS[@]+"${SLEEPER_PIDS[@]}"}; do kill "$pid" 2>/dev/null; done
+  for pid in ${SLEEPER_PIDS[@]+"${SLEEPER_PIDS[@]}"}; do wait "$pid" 2>/dev/null; done
   for dir in ${PROBE_DIRS[@]+"${PROBE_DIRS[@]}"}; do
     case $dir in "${CFG[REQUEST_ROOT]}"/amux-dm-s0-[0-9]*) rm -rf -- "$dir" ;; esac
   done
