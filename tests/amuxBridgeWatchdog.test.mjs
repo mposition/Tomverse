@@ -195,7 +195,9 @@ test("a v22 unit in transition with nothing down sends nothing", { skip: noBash 
 });
 
 test("a main unit that is not loaded at all is down", { skip: noBash }, () => {
-  const { [MAIN]: _main, ...withoutMain } = allActive;
+  const withoutMain = Object.fromEntries(
+    Object.entries(allActive).filter(([unit]) => unit !== MAIN)
+  );
   const result = run({ states: withoutMain });
   assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
 });
