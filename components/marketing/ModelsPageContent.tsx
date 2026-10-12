@@ -165,12 +165,12 @@ export function ModelsPageContent() {
             aria-label={statusLinkLabel(content.liveStatus, lang)}
             title={statusNewTabCopy[lang]}
             data-testid="models-status-link"
-            className="mt-7 inline-flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left transition hover:bg-emerald-500/15"
+            className="mt-7 inline-flex max-w-full items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left transition hover:bg-emerald-500/15 [overflow-wrap:anywhere] max-[240px]:flex-col max-[240px]:items-start"
           >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
               <Activity className="h-5 w-5" />
             </span>
-            <span>
+            <span className="min-w-0 max-w-full">
               <span className="block text-sm font-bold text-emerald-700 dark:text-emerald-300">
                 {content.liveStatus}
               </span>
@@ -182,7 +182,7 @@ export function ModelsPageContent() {
           </Link>
         </div>
 
-        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {ENABLED_MODELS.map((model) => {
             const brand = getModelBrand(model.provider);
             const tags = getModelExperienceTags(model);
@@ -192,9 +192,9 @@ export function ModelsPageContent() {
             return (
             <article
               key={model.id}
-              className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/40"
+              className="min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/40 [overflow-wrap:anywhere]"
             >
-              <div className="flex items-start gap-3">
+              <div className="flex flex-wrap items-start gap-3">
                 <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${brand.className} text-base font-bold text-white shadow-sm ring-1 ring-zinc-200/70 dark:ring-zinc-800`}>
                   {brand.image ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -203,7 +203,7 @@ export function ModelsPageContent() {
                     brand.mark
                   )}
                 </span>
-                <div>
+                <div className="min-w-0">
                   <h2 className="font-bold">{model.name}</h2>
                   <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">{model.id}</p>
                 </div>
@@ -218,7 +218,7 @@ export function ModelsPageContent() {
                   </span>
                 ))}
               </div>
-              <div className="mt-5 grid grid-cols-2 gap-3">
+              <div className="mt-5 grid grid-cols-2 gap-3 max-[240px]:grid-cols-1">
                 <div>
                   <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-400">{content.minimumPlan}</p>
                   <p className="mt-1 text-sm font-bold">{t(`modelTiers.${model.minimumPlan.toLowerCase()}`)}</p>
