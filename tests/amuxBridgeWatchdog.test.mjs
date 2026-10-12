@@ -10,7 +10,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,6 +50,7 @@ const V22 = [
 const SYSTEMCTL_STUB = [
   "systemctl() {",
   '  if [ "$1" = list-units ]; then',
+  '    if [ "$FAKE_LIST_FAIL" = 1 ]; then printf "Failed to list units: Access denied\\n" >&2; return 1; fi',
   '    for pair in $FAKE_STATES; do unit=${pair%%=*}; [ "$unit" = tomverse-bridge.service ] || printf "%s loaded active running fake\\n" "$unit"; done',
   "    return 0",
   "  fi",
@@ -67,6 +68,7 @@ const run = ({
   url = URL_VALUE,
   credential = true,
   curlStatus = 0,
+  listFails = false,
 }) => {
   const dir = mkdtempSync(join(tmpdir(), "bridge-watchdog-"));
   try {
@@ -90,6 +92,7 @@ const run = ({
           .map(([unit, unitState]) => `${unit}=${unitState}`)
           .join(" "),
         FAKE_CURL_STATUS: String(curlStatus),
+        FAKE_LIST_FAIL: listFails ? "1" : "0",
       },
     });
     const lines = (name) =>
@@ -144,7 +147,28 @@ test("every bridge and sidecar active sends the success signal", { skip: noBash 
   const result = run({ states: allActive });
   assert.equal(result.status, 0, result.output);
   assert.deepEqual(result.requests, [URL_VALUE]);
-  assert.match(result.output, /4 unit\(s\), 0 down, 0 in transition; sent up/);
+  assert.match(
+    result.output,
+    /4 unit\(s\), 0 down, 0 in transition or unreadable; sent up/
+  );
+});
+
+// Review round 1 of the follow-up: a listing that failed used to read as "no
+// v22 units", so an active main unit alone sent up while four bridges went
+// unchecked.
+test("an unreadable unit list never sends up", { skip: noBash }, () => {
+  const result = run({ states: allActive, listFails: true });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(result.requests, []);
+  assert.match(
+    result.output,
+    /the v22 unit list is unreadable \(systemctl: Failed to list units: Access denied\)/
+  );
+});
+
+test("an unreadable unit list still reports a confirmed stop", { skip: noBash }, () => {
+  const result = run({ states: { [MAIN]: "failed" }, listFails: true });
+  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
 });
 
 for (const unit of V22) {
@@ -283,3 +307,86 @@ test("the install fails unless its own run sent a signal", () => {
   assert.ok(check > 0 && install.lastIndexOf("systemctl enable --now") > check);
   assert.match(install, /systemctl disable --now tomverse-bridge-watchdog\.timer/);
 });
+
+/**
+ * install.sh, run for real against stubbed host commands: which paths enable
+ * the timer and which leave it off. Sourced rather than executed so the stubs,
+ * some of whose names (systemd-analyze) cannot be exported, are in scope.
+ * `test` is wrapped only to say the credential is already installed, the
+ * re-install case; every other test runs as written.
+ */
+const runInstall = ({ start = 0, verify = 0, runLog }) => {
+  const dir = mkdtempSync(join(tmpdir(), "bridge-watchdog-install-"));
+  try {
+    const bundle = join(dir, "bundle");
+    mkdirSync(bundle);
+    for (const name of [
+      "tomverse-bridge-watchdog",
+      "tomverse-bridge-watchdog.service",
+      "tomverse-bridge-watchdog.timer",
+    ]) {
+      writeFileSync(join(bundle, name), read(name));
+    }
+    writeFileSync(join(dir, "install.sh"), install.replace(/\r\n/g, "\n"));
+    writeFileSync(join(dir, "run.log"), `${runLog}\n`);
+    const prelude = [
+      "id() { echo 0; }",
+      'realpath() { printf "%s\n" "${@: -1}"; }',
+      "stat() { echo tomverse-admin; }",
+      "find() { :; }",
+      'install() { printf "install %s\n" "${@: -1}" >> actions.log; }',
+      'systemd-analyze() { printf "verify\n" >> actions.log; return "$FAKE_VERIFY"; }',
+      'journalctl() { case "$1" in --sync) return 0 ;; *) cat run.log ;; esac; }',
+      "systemctl() {",
+      '  printf "systemctl %s\n" "$*" >> actions.log',
+      '  case "$1" in start) return "$FAKE_START" ;; show) echo invocation-1 ;; esac',
+      "}",
+      'test() { [ "$*" = "! -s /etc/tomverse-bridge-watchdog/ping-url" ] && return 1; builtin test "$@"; }',
+      "source ./install.sh bundle",
+    ].join("\n");
+    const result = spawnSync(bash, ["-c", prelude], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, FAKE_START: String(start), FAKE_VERIFY: String(verify) },
+    });
+    const actions = existsSync(join(dir, "actions.log"))
+      ? readFileSync(join(dir, "actions.log"), "utf8").split("\n").filter(Boolean)
+      : [];
+    return { status: result.status, output: `${result.stdout}${result.stderr}`, actions };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+const TIMER_ON = "systemctl enable --now tomverse-bridge-watchdog.timer";
+const TIMER_OFF = "systemctl disable --now tomverse-bridge-watchdog.timer";
+
+test("an install whose run sent a signal turns the timer on", { skip: noBash }, () => {
+  const result = runInstall({ runLog: "tomverse-bridge-watchdog: 9 unit(s), 0 down, 0 in transition or unreadable; sent up" });
+  assert.equal(result.status, 0, result.output);
+  assert.match(result.output, /TOMVERSE_BRIDGE_WATCHDOG_INSTALLED/);
+  assert.ok(result.actions.includes(TIMER_ON), result.actions.join("\n"));
+  assert.ok(!result.actions.includes(TIMER_OFF), result.actions.join("\n"));
+});
+
+for (const [name, options] of [
+  [
+    "a run that sent nothing",
+    { runLog: "tomverse-bridge-watchdog: tomverse-bridge.service is unreadable (systemctl: x); no signal this run" },
+  ],
+  // Review round 1 of the follow-up: a failed start ended the script under
+  // set -e before the timer was switched off.
+  [
+    "a run that failed to deliver",
+    { start: 1, runLog: "tomverse-bridge-watchdog: 9 unit(s), 1 down, 0 in transition or unreadable; the down signal was not delivered" },
+  ],
+  ["a unit that does not verify", { verify: 1, runLog: "" }],
+]) {
+  test(`${name} fails the install and leaves the timer off`, { skip: noBash }, () => {
+    const result = runInstall(options);
+    assert.notEqual(result.status, 0, result.output);
+    assert.doesNotMatch(result.output, /TOMVERSE_BRIDGE_WATCHDOG_INSTALLED/);
+    assert.ok(result.actions.includes(TIMER_OFF), result.actions.join("\n"));
+    assert.ok(!result.actions.includes(TIMER_ON), result.actions.join("\n"));
+  });
+}

@@ -46,16 +46,25 @@ if [[ ! "$url" =~ $url_pattern ]]; then
   exit 2
 fi
 
-# The main unit is always checked, listed or not: a unit that is not loaded
-# reads as inactive, which is a stop. The v22 instances are whatever is loaded.
-units=("$main_unit")
-while read -r name _; do
-  [[ "$name" =~ $unit_name ]] && units+=("$name")
-done < <(systemctl list-units --all --plain --no-legend --type=service \
-  "${unit_patterns[@]}" 2>/dev/null || true)
-
 down=0
 pending=0
+
+# The main unit is always checked, listed or not: a unit that is not loaded
+# reads as inactive, which is a stop. The v22 instances are whatever is loaded.
+# A listing that fails is not an empty listing: it leaves the v22 units
+# unknown, so it counts as unreadable and the run cannot send up.
+units=("$main_unit")
+if listing=$(systemctl list-units --all --plain --no-legend --type=service \
+  "${unit_patterns[@]}" 2>&1); then
+  while read -r name _; do
+    [[ "$name" =~ $unit_name ]] && units+=("$name")
+  done <<<"$listing"
+else
+  pending=$((pending + 1))
+  reason=${listing%%$'\n'*}
+  echo "tomverse-bridge-watchdog: the v22 unit list is unreadable (systemctl: ${reason:0:200})"
+fi
+
 for unit in "${units[@]}"; do
   # `is-active` exits non-zero for every state but active; the state it
   # prints is the answer either way. Anything else it prints is an error, and
@@ -80,7 +89,7 @@ for unit in "${units[@]}"; do
   esac
 done
 
-summary="${#units[@]} unit(s), $down down, $pending in transition"
+summary="${#units[@]} unit(s), $down down, $pending in transition or unreadable"
 if ((down > 0)); then
   target="$url/fail" signal=down
 elif ((pending > 0)); then
