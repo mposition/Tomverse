@@ -1253,7 +1253,7 @@ export function PricingPageContent() {
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader />
 
-      <section className="mx-auto max-w-7xl px-4 py-14 [overflow-wrap:anywhere] sm:px-6 lg:px-8 lg:py-20">
+      <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
         <div className="mx-auto max-w-4xl text-center">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
@@ -1365,7 +1365,7 @@ export function PricingPageContent() {
               data-cta-state={ctaState}
               data-requested-target={isRequestedTarget ? "true" : undefined}
               aria-labelledby={`pricing-plan-name-${planId}`}
-              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm ${
+              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm [overflow-wrap:anywhere] ${
                 plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               } ${
