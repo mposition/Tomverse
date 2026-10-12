@@ -47,21 +47,26 @@ test("English aliases and legal pages use the same site chrome", async ({ reques
   }
 });
 
-test("status chrome follows its served language and language changes reload the body", async ({ page }) => {
-  await prepareGuestPage(page, "en");
-  await page.context().addCookies([{ name: "tomverse_lang", value: "en", url: "http://127.0.0.1:3100" }]);
-  await page.addInitScript(() => localStorage.setItem("tomverse_language", "ko"));
+test("status chrome preserves saved language and language changes reload the body", async ({ page }) => {
+  await prepareGuestPage(page, "ko");
   await page.goto("/status");
-  await expect(page.locator("main")).toHaveAttribute("lang", "en");
-  const select = page.getByTestId("marketing-language-switcher");
-  await expect(select).toHaveValue("en");
-  await expect(page.locator("html")).toHaveAttribute("lang", "en");
-  await expect(page.getByTestId("launch-marketing-footer").getByTestId("footer-status-link")).toHaveAttribute("href", "/status?lang=en");
-  await select.selectOption("ko");
   await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "ko");
   await expect(page.locator("main")).toHaveAttribute("lang", "ko");
-  await expect(page.getByTestId("marketing-language-switcher")).toHaveValue("ko");
-  await expect(page.locator("html")).toHaveAttribute("lang", "ko");
+  const select = page.getByTestId("marketing-language-switcher");
+  await expect(select).toHaveValue("ko");
+  expect(await page.evaluate(() => localStorage.getItem("tomverse_language"))).toBe("ko");
+  expect((await page.context().cookies()).find(cookie => cookie.name === "tomverse_lang")?.value).toBe("ko");
+  await select.selectOption("en");
+  await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "en");
+  await expect(page.locator("main")).toHaveAttribute("lang", "en");
+  await page.setExtraHTTPHeaders({ "Accept-Language": "ko-KR,ko;q=0.9" });
+  await page.goto("/status");
+  await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "en");
+  await expect(page.locator("main")).toHaveAttribute("lang", "en");
+  await expect(page.getByTestId("marketing-language-switcher")).toHaveValue("en");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  expect(await page.evaluate(() => localStorage.getItem("tomverse_language"))).toBe("en");
+  expect((await page.context().cookies()).find(cookie => cookie.name === "tomverse_lang")?.value).toBe("en");
 });
 
 for (const width of [390, 1024, 1440]) {
