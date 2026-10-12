@@ -50,17 +50,21 @@ export function* fencedLines(text) {
   let open = null;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
+    // Four or more columns of indentation make an indented code block, never
+    // a fence (a tab counts as four): an indented example stays an example.
+    const indent = raw.match(/^[ \t]*/)[0].replace(/\t/g, "    ").length;
+    const fenceable = indent <= 3;
     if (open === null) {
-      const match = line.match(OPENING_FENCE);
+      const match = fenceable ? line.match(OPENING_FENCE) : null;
       if (match && !(match[1][0] === "`" && match[2].includes("`"))) {
         open = { char: match[1][0], length: match[1].length };
         yield { line, role: "open", info: match[2].trim() };
       } else {
-        yield { line, role: "text" };
+        yield { line, role: fenceable ? "text" : "indented" };
       }
       continue;
     }
-    if (line.length >= open.length && [...line].every((c) => c === open.char)) {
+    if (fenceable && line.length >= open.length && [...line].every((c) => c === open.char)) {
       open = null;
       yield { line, role: "close" };
     } else {
@@ -233,8 +237,10 @@ export function normalisePullRequests(list) {
   if (!Array.isArray(list)) return [];
   // A time that does not parse is no time: an unmerged pull request rather
   // than a merge at an instant nothing can compare against.
-  const instant = (value) =>
-    typeof value === "string" && Number.isFinite(Date.parse(value)) ? new Date(Date.parse(value)).toISOString() : null;
+  const instant = (value) => {
+    const parsed = typeof value === "string" ? Date.parse(value) : NaN;
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+  };
   return list.flatMap((pr) => {
     if (!pr || !Number.isInteger(pr.number)) return [];
     return [{

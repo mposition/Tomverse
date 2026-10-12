@@ -301,3 +301,18 @@ test("the command refuses the same goal in two checklists", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("an indented code block is an example: four columns of indentation make no fence and no declaration", () => {
+  const json = JSON.stringify({ goal: "CHAT-01", title: "t", since: iso(0), steps: [{ id: "A", title: "a", evidence: "operator_confirmed" }] });
+  const indented = (text) => text.split("\n").map((line) => `    ${line}`).join("\n");
+  assert.match(goalSpecsFromText(`Example:\n\n${indented("```goal-steps\n" + json + "\n```")}\n`, { markdown: true }).problems.join(),
+    /no ```goal-steps block/);
+  assert.match(goalSpecsFromText(`Example:\n\n\t\`\`\`goal-steps\n\t${json}\n\t\`\`\`\n`, { markdown: true }).problems.join(),
+    /no ```goal-steps block/, "a tab counts as four columns");
+  // Up to three columns is still a fence and still a declaration.
+  assert.deepEqual(goalSpecsFromText("   ```goal-steps\n" + json + "\n   ```", { markdown: true }).goals.map((g) => g.goal), ["CHAT-01"]);
+  assert.deepEqual(parseGoalStepDeclaration("Example:\n\n    Goal-Step: CHAT-01/B07 completes\n"), { kind: "missing" });
+  assert.deepEqual(parseGoalStepDeclaration("  Goal-Step: CHAT-01/B07"), { kind: "step", goal: "CHAT-01", step: "B07" });
+  // An indented fence-looking line inside a block does not close it.
+  assert.deepEqual(parseGoalStepDeclaration("```\n    ```\nGoal-Step: CHAT-01/B07\n```"), { kind: "missing" });
+});
