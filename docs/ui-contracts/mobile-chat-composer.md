@@ -6,7 +6,8 @@
 - Applies to: Mobile chat shell and responsive compact layouts
 - Severity when violated: Release blocker
 - Owners: Product Design, Frontend, Accessibility, QA
-- Last reviewed: 2026-10-13
+- Last reviewed: 2026-10-13 Australia/Brisbane (the owner's actual approval
+  date and timezone)
 
 ## Purpose
 
@@ -29,6 +30,12 @@ The message canvas may be optimized for additional vertical space, but the prima
 | New-chat welcome surface above the dock (holds no composer) | `components/chat/ChatWelcomeScreen.tsx` |
 
 The contract binds the mobile shell (`useIsMobileShell()`) and every compact/responsive layout that renders the same composer, including landscape phones, keyboard-open states and browser zoom levels that produce a phone-width layout viewport.
+
+The approved Figma Composer also defines the wider layout: its input uses the
+product's 16px body size and a deliberate `7rem` minimum height at `md` and
+above. Those desktop dimensions are part of the approved visual match; the
+compact input remains rem-scaled so browser text scaling preserves a complete
+visible line.
 
 ## Required anatomy
 
@@ -167,8 +174,8 @@ ChatMessageList height may never be bought with any of these:
 - A partial-support exception expands under the chip that opened it, never over the input.
 - A fully blocked state keeps its full-width notice and its way out (`web-search-unavailable-notice`).
 - A fully supported web-search chip sits with tools and model selection in the
-  footer. Partial support and blocked search stay in the independent status row
-  with their detail or recovery path.
+  footer on desktop and mobile. Partial support and blocked search stay in the
+  independent status row with their detail or recovery path.
 - Several warning/status chips wrap onto another chip row; they never scroll
   sideways and never enter the input row.
 

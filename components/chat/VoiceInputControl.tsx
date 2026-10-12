@@ -50,7 +50,6 @@ const formatElapsed = (seconds: number) => {
 export type VoiceInputButtonProps = {
   state: VoiceRecorderState;
   copy: VoiceInputCopy;
-  isMobileShell: boolean;
   /** The composer's own disabled state — a sending turn, a locked chat. */
   disabled: boolean;
   onStart: () => void;

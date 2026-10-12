@@ -28,7 +28,6 @@ import {
   Loader2,
   Lock,
   ImagePlus,
-  Info,
   MessageSquare,
   Microscope,
   Paperclip,
@@ -3248,7 +3247,7 @@ export function ChatInput({
   // only below md inside MobileChatShell, whose dock always ends with
   // AiDisclaimerNotice, and that last row already pads for the inset -- adding
   // it here too reserved the home-indicator space twice, once above the notice.
-  // (Above md the bar's md:pb-3 applies and no inset was ever added.) The
+  // (Above md the bar's md:py-4/md:pb-4 applies and no inset was ever added.) The
   // dock's bottom edge is the only place the inset belongs.
   return (
       <div className={variant === "floating"
@@ -3312,16 +3311,14 @@ export function ChatInput({
               {currentProductCopy && (
                 <span
                   data-testid="composer-product-context"
-                  aria-label={currentProductCopy.feature}
-                  className="hidden min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 min-[280px]:flex md:px-0"
+                  className="hidden min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl text-xs font-medium text-zinc-500 dark:text-zinc-400 md:flex"
                 >
                   {isReviewProduct ? (
-                    <PanelsTopLeft className="hidden h-4 w-4 md:block" aria-hidden="true" />
+                    <PanelsTopLeft className="h-4 w-4" aria-hidden="true" />
                   ) : (
-                    <Sparkles className="hidden h-4 w-4 md:block" aria-hidden="true" />
+                    <Sparkles className="h-4 w-4" aria-hidden="true" />
                   )}
-                  <Info className="h-[17px] w-[17px] md:hidden" aria-hidden="true" />
-                  <span className="hidden md:inline">{currentProductCopy.feature}</span>
+                  <span>{currentProductCopy.feature}</span>
                 </span>
               )}
             </div>
@@ -3787,7 +3784,7 @@ export function ChatInput({
               onClick={(event) => toggleModelPicker(event.currentTarget)}
               data-testid="composer-model-select"
               title={activeModelNames.join(", ")}
-              aria-label={t("chat.modelSelect")}
+              aria-label={`${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}`}
               aria-expanded={isMenuOpen && menuView === "models"}
               aria-controls="chat-input-popover"
               aria-haspopup="dialog"
@@ -3795,7 +3792,11 @@ export function ChatInput({
             >
               <span className="hidden md:inline">{t("chat.modelSelect")}</span>
               <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span data-testid="composer-active-model-count" className="sr-only">
+              <span
+                data-testid="composer-active-model-count"
+                className="sr-only"
+                aria-hidden="true"
+              >
                 {modelsSelectedLabel(activeSelectedModels.length)}
               </span>
             </button>
@@ -4029,7 +4030,7 @@ export function ChatInput({
         */}
         <div
           data-testid="composer-submit-actions"
-          className="flex flex-wrap items-center justify-end gap-1.5"
+          className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5"
         >
 
           {!isAutoMode && activeSelectedModels.length > 0 && (
@@ -4037,7 +4038,7 @@ export function ChatInput({
               type="button"
               data-testid="request-credit-estimate"
               onClick={() => setIsCreditBreakdownOpen(true)}
-              className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl px-2 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="flex min-h-11 min-w-0 max-w-full flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-xl px-2 py-1 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
               title={t("chat.creditEstimateAria").replace(
                 "{credits}",
                 String(estimatedRequestCredits)
@@ -4049,15 +4050,15 @@ export function ChatInput({
                 )
               }
             >
-              <CreditCoinIcon className="h-4 w-4" />
-              <span className="whitespace-nowrap">
+              <CreditCoinIcon className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 whitespace-normal break-words text-center leading-4">
                 {t("chat.creditEstimateLabel").replace(
                   "{credits}",
                   String(estimatedRequestCredits)
                 )}
               </span>
               {inputCreditMultiplier > 1 && (
-                <span className="text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
+                <span className="shrink-0 text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
               )}
               <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             </button>
@@ -4100,7 +4101,6 @@ export function ChatInput({
             <VoiceInputButton
               state={voice.state}
               copy={voiceCopy}
-              isMobileShell={isMobileShell}
               // The composer's mutation boundary, not the voice machine's:
               // a transaction-preparation lock has not yet established a
               // durable home for a successor transcript.

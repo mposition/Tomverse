@@ -98,12 +98,16 @@ action sends a message, creates a paid turn, or silently creates a conversation.
   instances use the same canonical links and `onProductSwitch` admission; the
   composer instance never writes `productKey`, copies a draft, or changes the
   selected models. This narrow placement exception was owner-approved with the
-  Composer design on 2026-10-13
+  Composer design on 2026-10-13 Australia/Brisbane time (the owner's actual
+  approval date and timezone)
   ([Figma](https://www.figma.com/design/SKTapwjDJz4DUwjlZMKsCI?node-id=2-71)).
-  The top navigation row is independent of the textarea and may wrap or hide
-  its supplementary context icon before it can narrow the input. The
-  composer's Smart Adaptive switch stays directly accessible without opening
-  the drawer.
+  The top navigation row is independent of the textarea. Its supplementary
+  product context is desktop text, and is absent on mobile before it can
+  narrow the input. The composer's Smart Adaptive switch stays directly
+  accessible without opening the drawer.
+- On both desktop and mobile, a fully supported web-search chip sits in the
+  footer tools group beside model selection. Partial or blocked search remains
+  in the independent status row with its detail or recovery action.
 - The current state is expressed by `aria-current`, border and surface
   treatment, not colour alone.
 

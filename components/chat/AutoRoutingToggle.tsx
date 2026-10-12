@@ -85,7 +85,7 @@ export function AutoRoutingToggle({
         onClick={() => onChange(!enabled)}
         // The state is on aria-checked and in the knob's position, never in
         // the colour alone -- the same rule the selection badge follows.
-        className="mt-0.5 flex h-11 w-11 shrink-0 touch-manipulation items-center disabled:opacity-50"
+        className="mt-0.5 flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center disabled:opacity-50"
       >
         <span
           aria-hidden="true"

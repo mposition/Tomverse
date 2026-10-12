@@ -97,7 +97,7 @@ const seededMessages = (models: string[]): QaConversationMessage[] => [
 ];
 
 type EnterOptions = {
-  lang?: "en" | "ko";
+  lang?: "en" | "ko" | "de" | "fr" | "es" | "pt" | "zh";
   models?: string[];
   viewport: { width: number; height: number };
   webSearchMode?: "off" | "auto" | "always";
@@ -327,6 +327,48 @@ async function expectComposerContract(page: Page, label: string) {
   await expectNoHorizontalOverflow(page);
 
   return geometry;
+}
+
+/** Checks controls and rendered label lines, so overflow-hidden cannot hide a failure. */
+async function expectComposerControlsContained(page: Page) {
+  await expect.poll(() => page.getByTestId("chat-input").evaluate((composer) => {
+    const boundary = composer.getBoundingClientRect();
+    const controls = Array.from(composer.querySelectorAll<HTMLElement>("button, nav a"))
+      .map((node) => ({ node, rect: node.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.width > 0 && rect.height > 0);
+    const failures: string[] = [];
+    for (const [index, control] of controls.entries()) {
+      const name = control.node.dataset.testid ?? control.node.getAttribute("aria-label");
+      if (control.rect.left < boundary.left - 1 || control.rect.right > boundary.right + 1) {
+        failures.push(`${name} leaves composer`);
+      }
+      for (const other of controls.slice(index + 1)) {
+        if (control.node.contains(other.node) || other.node.contains(control.node)) continue;
+        const width = Math.min(control.rect.right, other.rect.right) - Math.max(control.rect.left, other.rect.left);
+        const height = Math.min(control.rect.bottom, other.rect.bottom) - Math.max(control.rect.top, other.rect.top);
+        if (width > 1 && height > 1) failures.push(`${name} overlaps ${other.node.dataset.testid}`);
+      }
+    }
+    const credit = composer.querySelector<HTMLElement>('[data-testid="request-credit-estimate"]');
+    if (!credit) return [...failures, "credit estimate missing"];
+    const creditBox = credit.getBoundingClientRect();
+    if (credit.scrollWidth > credit.clientWidth + 1 || credit.scrollHeight > credit.clientHeight + 1) {
+      failures.push("credit estimate content clipped");
+    }
+    const walker = document.createTreeWalker(credit, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      if (!walker.currentNode.textContent?.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(walker.currentNode);
+      for (const line of Array.from(range.getClientRects())) {
+        if (line.left < creditBox.left - 1 || line.right > creditBox.right + 1 ||
+            line.top < creditBox.top - 1 || line.bottom > creditBox.bottom + 1) {
+          failures.push("credit estimate label line leaves button");
+        }
+      }
+    }
+    return failures;
+  })).toEqual([]);
 }
 
 test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" }, () => {
@@ -747,6 +789,85 @@ test.describe("Mobile composer: focus indicator", { tag: "@ui-risk" }, () => {
 });
 
 test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-risk" }, () => {
+  for (const lang of ["en", "de", "fr", "es", "pt", "ko", "zh"] as const) {
+    for (const mode of ["text", "page"] as const) {
+      test(`${lang} credit estimate and three Review models reflow at 200% ${mode} scaling`, async ({ page }) => {
+        await enterMobileComposer(page, {
+          lang,
+          models: ALL_SEARCH_MODELS,
+          viewport: { width: mode === "text" ? 320 : 195, height: 680 },
+          webSearchMode: "off",
+        });
+        if (mode === "text") await setRootFontSize(page, 32);
+        const composer = page.getByTestId("chat-input");
+        await expect(composer.getByTestId("composer-review-selected-model")).toHaveCount(3);
+        await expect(composer.getByTestId("composer-model-select")).toHaveAccessibleName(/3/);
+        await expect(composer.getByTestId("request-credit-estimate")).toBeVisible();
+        await expectComposerControlsContained(page);
+        await expectComposerContract(page, `${lang} 200% ${mode} scaling`);
+        const modelsBox = (await composer.getByTestId("composer-review-models").boundingBox())!;
+        const textareaBox = (await composer.getByTestId("chat-textarea").boundingBox())!;
+        expect(modelsBox.y + modelsBox.height).toBeLessThanOrEqual(textareaBox.y + 0.5);
+        // Normal-height docks retain the canonical product navigation even at narrow zoom.
+        await expect(composer.getByTestId("chat-product-switcher")).toBeVisible();
+      });
+    }
+  }
+
+  test("keyboard and rotation keep the composing textarea while the duplicate switcher changes", async ({ page }) => {
+    await enterMobileComposer(page, {
+      models: ALL_SEARCH_MODELS,
+      viewport: { width: 390, height: 680 },
+      webSearchMode: "off",
+    });
+    const composer = page.getByTestId("chat-input");
+    const textarea = page.getByTestId("chat-textarea");
+    await expect(composer.getByTestId("chat-product-switcher")).toBeVisible();
+    await textarea.focus();
+    await textarea.evaluate((node) => {
+      node.dataset.qaCompositionInstance = "original";
+      node.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      node.dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true, data: "하" }));
+    });
+    await page.keyboard.insertText("한국어 입력 하");
+    await page.evaluate(() => {
+      const viewport = window.visualViewport!;
+      Object.defineProperty(viewport, "height", { configurable: true, get: () => window.innerHeight * 0.5 });
+      viewport.dispatchEvent(new Event("resize"));
+    });
+    await expect(composer.getByTestId("chat-product-switcher")).toHaveCount(0);
+    await expect(textarea).toBeFocused();
+    await expect(textarea).toHaveValue("한국어 입력 하");
+    await expectComposerContract(page, "keyboard open with composing draft");
+    await page.evaluate(() => {
+      const viewport = window.visualViewport!;
+      Object.defineProperty(viewport, "height", { configurable: true, get: () => window.innerHeight });
+      viewport.dispatchEvent(new Event("resize"));
+    });
+    await expect(composer.getByTestId("chat-product-switcher")).toBeVisible();
+    await page.setViewportSize({ width: 568, height: 320 });
+    await expect(composer.getByTestId("chat-product-switcher")).toHaveCount(0);
+    await expect(textarea).toBeFocused();
+    await expectComposerContract(page, "landscape with composing draft");
+    await page.setViewportSize({ width: 390, height: 680 });
+    await expect(composer.getByTestId("chat-product-switcher")).toBeVisible();
+    await expect(textarea).toHaveAttribute("data-qa-composition-instance", "original");
+    await expect(textarea).toBeFocused();
+    await page.keyboard.insertText("나");
+    await expect(textarea).toHaveValue("한국어 입력 하나");
+    await textarea.evaluate((node) => node.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", isComposing: true, bubbles: true,
+    })));
+    await expect(textarea).toHaveValue("한국어 입력 하나");
+    await textarea.evaluate((node) => node.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "하나" })));
+    await expectComposerContract(page, "portrait restored with committed draft");
+    await page.getByTestId("mobile-sidebar-open").click();
+    const drawer = page.getByTestId("mobile-sidebar-drawer");
+    await expect(drawer.getByTestId("chat-product-chat")).toHaveAttribute("href", "/chat?lang=ko");
+    await expect(drawer.getByTestId("chat-product-review")).toHaveAttribute("href", "/review?lang=ko");
+    await expect(textarea).toHaveValue("한국어 입력 하나");
+  });
+
   test("an on-screen keyboard does not collapse the input row", async ({ page }) => {
     await enterMobileComposer(page, { viewport: { width: 390, height: 680 } });
     await page.getByTestId("chat-textarea").click();
