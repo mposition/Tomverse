@@ -135,18 +135,6 @@ const waveForEvent = (eventId: string) =>
   });
 
 /**
- * The accounts an amendment notice wave writes to.
- *
- * The publication gate's own owed set and evidence window
- * (lib/emailPolicyPublication.ts `noticeFactsFor`): an account owed the notice
- * (`policyChangeNoticeOwedWhere`) that holds no approved notice
- * that arrived (a told state with a recorded arrival, as the gate reads it) or
- * is still on its way (`NOTICE_SENT_IN_FLIGHT_DAYS`). Every wave asks afresh, so a second wave
- * reaches accounts created since the first and the ones whose notice did not
- * arrive, and nobody is written to twice. The audience estimate counts the same
- * condition, so the number an approver reads is the one the wave expands.
- */
-/**
  * The accounts the amendment notice is owed to: created before it was published
  * (`CHANGE_NOTICE_OWED_BEFORE`), never later than the effective day, or with no
  * creation time. The gate counts the same set (`noticeFactsFor`).
@@ -158,6 +146,18 @@ export const policyChangeNoticeOwedWhere = (effectiveDate: string): Prisma.UserW
   return { OR: [{ createdAt: null }, { createdAt: { lt: cutoff } }] };
 };
 
+/**
+ * The accounts an amendment notice wave writes to.
+ *
+ * The publication gate's own owed set and evidence window
+ * (lib/emailPolicyPublication.ts `noticeFactsFor`): an account owed the notice
+ * (`policyChangeNoticeOwedWhere`) that holds no approved notice
+ * that arrived (a told state with a recorded arrival, as the gate reads it) or
+ * is still on its way (`NOTICE_SENT_IN_FLIGHT_DAYS`). Every wave asks afresh, so a later wave
+ * reaches owed accounts the earlier one missed and the ones whose notice did not
+ * arrive, and nobody is written to twice. The audience estimate counts the same
+ * condition, so the number an approver reads is the one the wave expands.
+ */
 export const policyChangeNoticeAudienceWhere = (
   effectiveDate: string,
   now: Date
