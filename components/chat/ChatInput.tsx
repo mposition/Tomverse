@@ -3951,7 +3951,9 @@ export function ChatInput({
         >
         <div
           data-testid="composer-primary-tools"
-          className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 max-[240px]:contents"
+          className={`flex min-w-0 flex-1 flex-wrap items-center ${
+            useCompactMobileReviewSpacing ? "gap-x-1.5 gap-y-1" : "gap-1.5"
+          } max-[240px]:contents`}
         >
           <button
             ref={actionMenuButtonRef}
