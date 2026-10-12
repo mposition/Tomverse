@@ -24,7 +24,10 @@ import {
   type AmuxOrchestratorReceiptTargetKind,
 } from "@/lib/amux/orchestratorHaltCore";
 import { writeAmuxOrchestratorSystemAudit } from "@/lib/amux/orchestratorHaltSystemAudit";
-import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
+import {
+  findAmuxNoCommitResolutionAuditId,
+  readAmuxOrchestratorHaltAuditProofs,
+} from "@/lib/amux/orchestratorHaltAuditProofStore";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -248,25 +251,6 @@ export async function listAmuxOrchestratorResolveCandidates(
   return rows.map((row) => row.requestId);
 }
 
-async function findNoCommitResolutionAuditId(
-  tx: Prisma.TransactionClient,
-  requestId: string,
-): Promise<string | null> {
-  const rows = await tx.$queryRaw<Array<{ id: string }>>`
-    SELECT "id"
-    FROM "AdminAuditLog"
-    WHERE "action" = ${AMUX_ORCHESTRATOR_AUDIT_ACTIONS.writeResolved}
-      AND "targetId" = ${requestId}
-      AND "actorUserId" IS NULL
-      AND "metadata"->>'systemActor' = ${AMUX_SYSTEM_AUDIT_ACTOR}
-      AND "metadata"->>'request_id' = ${requestId}
-      AND "metadata"->>'resolution' = 'no_commit'
-    ORDER BY "createdAt" ASC, "id" ASC
-    LIMIT 1
-  `;
-  return rows[0]?.id ?? null;
-}
-
 /**
  * Version 33: with the admission row already locked and resolved no_commit,
  * closes its one eligible open halt. The receipt count is checked again under
@@ -363,7 +347,7 @@ export async function resolveAmuxOrchestratorWriteLocked(
   if (!row) return "closed";
   if (row.open !== true) {
     if (row.acked || row.resolution !== "no_commit") return "closed";
-    const resolutionAuditId = await findNoCommitResolutionAuditId(tx, requestId);
+    const resolutionAuditId = await findAmuxNoCommitResolutionAuditId(tx, requestId);
     if (!resolutionAuditId) {
       throw new Error("AMUX orchestrator no-commit resolution audit is missing");
     }
@@ -443,6 +427,14 @@ type RawHaltRow = {
   resolution: string | null;
 };
 
+type UnverifiedRawHaltRow = Omit<RawHaltRow, "cleared"> & {
+  storedCleared: boolean;
+  clearedByUserId: string | null;
+  callKind: string | null;
+  acked: boolean;
+  receiptCount: bigint;
+};
+
 const haltRow = (row: RawHaltRow): AmuxOrchestratorHaltRow => ({
   haltId: row.id,
   haltKey: row.haltKey,
@@ -461,65 +453,90 @@ const haltRow = (row: RawHaltRow): AmuxOrchestratorHaltRow => ({
  * the existing human audit and actor, or version 33's no-commit resolution
  * audit plus automatic-clear system audit and zero receipts.
  */
-const selectHaltsByKeys = (tx: Prisma.TransactionClient, haltKeys: readonly string[]) =>
-  tx.$queryRaw<RawHaltRow[]>`
+const selectHaltsByKeys = async (
+  tx: Prisma.TransactionClient,
+  haltKeys: readonly string[],
+): Promise<RawHaltRow[]> => {
+  const rows = await tx.$queryRaw<UnverifiedRawHaltRow[]>`
     SELECT
       h."id",
       h."haltKey",
       h."reasonCode",
       h."requestId",
       h."clearKind",
+      h."clearedByUserId",
       h."clearAuditLogId",
       h."clearEvidenceAuditLogId",
+      w."callKind",
       w."resolution",
-      floor(extract(epoch FROM h."openedAt") * 1000)::bigint AS "openedAtEpochMs",
+      (h."clearedAt" IS NOT NULL) AS "storedCleared",
+      (w."ackedAt" IS NOT NULL) AS "acked",
       (
-        h."clearedAt" IS NOT NULL
-        AND (
-          (
-            h."clearKind" = 'human'
-            AND h."clearedByUserId" IS NOT NULL
-            AND clear_audit."id" IS NOT NULL
-            AND clear_audit."action" = ${AMUX_ORCHESTRATOR_AUDIT_ACTIONS.haltCleared}
-            AND clear_audit."targetId" = h."id"
-            AND clear_audit."actorUserId" = h."clearedByUserId"
-            AND h."clearEvidenceAuditLogId" IS NULL
-          ) OR (
-            h."clearKind" = 'system_no_commit'
-            AND h."clearedByUserId" IS NULL
-            AND h."reasonCode" IN (${Prisma.join([...AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES])})
-            AND h."requestId" = h."haltKey"
-            AND w."ackedAt" IS NULL
-            AND w."resolution" = 'no_commit'
-            AND clear_audit."id" IS NOT NULL
-            AND clear_audit."action" = ${AMUX_ORCHESTRATOR_AUDIT_ACTIONS.haltAutoCleared}
-            AND clear_audit."targetId" = h."id"
-            AND clear_audit."actorUserId" IS NULL
-            AND clear_audit."metadata"->>'systemActor' = ${AMUX_SYSTEM_AUDIT_ACTOR}
-            AND clear_audit."metadata"->>'request_id' = h."requestId"
-            AND clear_audit."metadata"->>'resolution' = 'no_commit'
-            AND clear_audit."metadata"->>'clear_kind' = 'system_no_commit'
-            AND clear_audit."metadata"->>'evidence_audit_id' = h."clearEvidenceAuditLogId"
-            AND evidence_audit."id" IS NOT NULL
-            AND evidence_audit."action" = ${AMUX_ORCHESTRATOR_AUDIT_ACTIONS.writeResolved}
-            AND evidence_audit."targetId" = h."requestId"
-            AND evidence_audit."actorUserId" IS NULL
-            AND evidence_audit."metadata"->>'systemActor' = ${AMUX_SYSTEM_AUDIT_ACTOR}
-            AND evidence_audit."metadata"->>'request_id' = h."requestId"
-            AND evidence_audit."metadata"->>'resolution' = 'no_commit'
-            AND NOT EXISTS (
-              SELECT 1 FROM "AmuxOrchestratorWriteReceipt" receipt
-              WHERE receipt."requestId" = h."requestId"
-            )
-          )
-        )
-      ) AS "cleared"
+        SELECT count(*) FROM "AmuxOrchestratorWriteReceipt" receipt
+        WHERE receipt."requestId" = h."requestId"
+      )::bigint AS "receiptCount",
+      floor(extract(epoch FROM h."openedAt") * 1000)::bigint AS "openedAtEpochMs"
     FROM "AmuxOrchestratorHalt" h
     LEFT JOIN "AmuxOrchestratorWrite" w ON w."requestId" = h."requestId"
-    LEFT JOIN "AdminAuditLog" clear_audit ON clear_audit."id" = h."clearAuditLogId"
-    LEFT JOIN "AdminAuditLog" evidence_audit ON evidence_audit."id" = h."clearEvidenceAuditLogId"
     WHERE h."haltKey" IN (${Prisma.join([...haltKeys])})
   `;
+  const proofs = await readAmuxOrchestratorHaltAuditProofs(
+    tx,
+    rows.flatMap((row) =>
+      [row.clearAuditLogId, row.clearEvidenceAuditLogId].filter(
+        (id): id is string => id !== null,
+      ),
+    ),
+  );
+  const proofById = new Map(proofs.map((proof) => [proof.id, proof]));
+  return rows.map((row) => {
+    const clearProof = row.clearAuditLogId ? proofById.get(row.clearAuditLogId) : undefined;
+    const evidenceProof = row.clearEvidenceAuditLogId
+      ? proofById.get(row.clearEvidenceAuditLogId)
+      : undefined;
+    const humanClear =
+      row.clearKind === "human" &&
+      row.clearedByUserId !== null &&
+      row.clearEvidenceAuditLogId === null &&
+      clearProof?.action === AMUX_ORCHESTRATOR_AUDIT_ACTIONS.haltCleared &&
+      clearProof.targetId === row.id &&
+      clearProof.actorUserId === row.clearedByUserId;
+    const systemNoCommitClear =
+      row.clearKind === "system_no_commit" &&
+      row.clearedByUserId === null &&
+      row.requestId !== null &&
+      row.requestId === row.haltKey &&
+      AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES.includes(
+        row.reasonCode as (typeof AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES)[number],
+      ) &&
+      row.acked === false &&
+      row.resolution === "no_commit" &&
+      row.receiptCount === 0n &&
+      clearProof?.actorMatches === true &&
+      clearProof.action === AMUX_ORCHESTRATOR_AUDIT_ACTIONS.haltAutoCleared &&
+      clearProof.targetId === row.id &&
+      clearProof.actorUserId === null &&
+      clearProof.requestId === row.requestId &&
+      clearProof.haltId === row.id &&
+      clearProof.haltKey === row.haltKey &&
+      clearProof.reasonCode === row.reasonCode &&
+      clearProof.callKind === row.callKind &&
+      clearProof.resolution === "no_commit" &&
+      clearProof.clearKind === "system_no_commit" &&
+      clearProof.evidenceAuditId === row.clearEvidenceAuditLogId &&
+      evidenceProof?.actorMatches === true &&
+      evidenceProof.action === AMUX_ORCHESTRATOR_AUDIT_ACTIONS.writeResolved &&
+      evidenceProof.targetId === row.requestId &&
+      evidenceProof.actorUserId === null &&
+      evidenceProof.requestId === row.requestId &&
+      evidenceProof.callKind === row.callKind &&
+      evidenceProof.resolution === "no_commit";
+    return {
+      ...row,
+      cleared: row.storedCleared && (humanClear || systemNoCommitClear),
+    };
+  });
+};
 
 /**
  * Section 5: opens one halt, or returns the halt already recorded under the

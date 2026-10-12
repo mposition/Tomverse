@@ -13,6 +13,7 @@ import test from "node:test";
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
 const STORE = "lib/amux/orchestratorHaltStore.ts";
+const AUDIT_PROOF_STORE = "lib/amux/orchestratorHaltAuditProofStore.ts";
 const MIGRATION = "prisma/migrations/20260930120000_amux_orchestrator_halt/migration.sql";
 const AUTO_CLEAR_MIGRATION =
   "prisma/migrations/20261012170000_amux_verified_no_commit_halt_auto_clear/migration.sql";
@@ -63,6 +64,28 @@ test("every AMUX admission path consults the central halt store", () => {
   ]) {
     const source = withoutComments(read(path));
     assert.match(source, /findOpenAmuxOrchestratorHalt\(tx\)/, path);
+  }
+});
+
+test("human audit writes and reserved system proof reads stay in separate modules", () => {
+  const store = withoutComments(read(STORE));
+  const proofStore = withoutComments(read(AUDIT_PROOF_STORE));
+  assert.match(store, /writeAdminAuditLog\(/);
+  assert.doesNotMatch(store, /systemActor|FROM "AdminAuditLog"/);
+  assert.doesNotMatch(proofStore, /writeAdminAuditLog|writeSystemAuditLog/);
+  assert.match(proofStore, /FROM "AdminAuditLog"/);
+  assert.match(proofStore, /"metadata"->>'systemActor' = \$\{AMUX_SYSTEM_AUDIT_ACTOR\}/);
+  for (const field of [
+    "request_id",
+    "halt_id",
+    "halt_key",
+    "reason_code",
+    "call_kind",
+    "resolution",
+    "clear_kind",
+    "evidence_audit_id",
+  ]) {
+    assert.match(proofStore, new RegExp(`"metadata"->>'${field}'`), field);
   }
 });
 

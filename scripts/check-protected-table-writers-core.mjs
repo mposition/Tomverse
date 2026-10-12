@@ -687,14 +687,6 @@ export const RAW_SQL_ALLOWLIST = [
       "The local-intake read-back selects the audit row that writeAdminAuditLog already wrote. The two INSERT statements write AmuxLocalIntakeNormalized and AmuxLocalIntakeApproval only. This file never writes AdminAuditLog.",
   },
   {
-    path: "lib/amux/orchestratorHaltStore.ts",
-    table: "AdminAuditLog",
-    tableMentions: 3,
-    writeVerbs: 14,
-    reason:
-      "The orchestrator halt store (orchestration policy versions 20 and 33). One constant SELECT reads the existing no-commit resolution audit id, and the halt read joins the clear audit and resolution-evidence audit so it accepts only verified human or system clears. Human clear writes its audit through writeAdminAuditLog and system actions go through writeSystemAuditLog in orchestratorHaltSystemAudit.ts; every INSERT, UPDATE and FOR UPDATE statement mutates or locks only AmuxOrchestratorWrite, AmuxOrchestratorWriteReceipt and AmuxOrchestratorHalt. This file never writes AdminAuditLog.",
-  },
-  {
     path: "prisma/migrations/20261012170000_amux_verified_no_commit_halt_auto_clear/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 4,
