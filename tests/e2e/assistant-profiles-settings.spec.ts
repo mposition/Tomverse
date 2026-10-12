@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { ko } from "../../locales/ko";
+import { APP_DEFAULTS } from "../../lib/appDefaults";
 
 /**
  * /settings/assistants (Release C, slice C3b).
@@ -641,7 +642,12 @@ test.describe("assistant profile settings", () => {
         await page.getByTestId("assistant-advanced-toggle").click();
         await page.getByTestId("assistant-model-mode-explicit").check();
 
-        const seeded = page.getByTestId("assistant-model-gpt-5-6-luna");
+        // The editor seeds the application default (APP_DEFAULTS.defaultModelId),
+        // so this follows it rather than naming a model: it was gpt-5-6-luna
+        // until the default moved to gpt-6-luna on 2026-10-12.
+        const seeded = page.getByTestId(
+            `assistant-model-${APP_DEFAULTS.defaultModelId}`
+        );
         await expect(seeded).toBeChecked();
         await expect(seeded).toBeDisabled();
         await expect(page.getByTestId("assistant-models-keep-one")).toBeVisible();
@@ -663,7 +669,7 @@ test.describe("assistant profile settings", () => {
         await page.getByTestId("assistant-instructions").fill("Be brief.");
         await create.click();
 
-        await expect(page).toHaveURL(/\/chat$/);
+        await expect(page).toHaveURL(/\/review$/);
     });
 
     test("the edit screen says save, not publish a revision", async ({
@@ -784,7 +790,7 @@ test.describe("assistant profile settings", () => {
         await page.goto("/settings/assistants/new?from=chat");
 
         const back = page.getByTestId("assistant-create-back");
-        await expect(back).toHaveAttribute("href", "/chat");
+        await expect(back).toHaveAttribute("href", "/review");
         await expect(back).toContainText(/채팅으로 돌아가기|Back to the chat/);
         await expect(page.getByTestId("settings-breadcrumb")).toHaveCount(0);
     });

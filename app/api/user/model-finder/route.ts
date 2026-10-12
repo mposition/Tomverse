@@ -141,7 +141,7 @@ export async function POST(req: Request) {
       // without the isModelFinderDefaultId check.
       const defaultModelId = isModelFinderDefaultId(APP_DEFAULTS.defaultModelId)
         ? APP_DEFAULTS.defaultModelId
-        : "gpt-5-6-luna";
+        : "gpt-6-luna";
       // Accepting the default is an explicit choice, so the combination is
       // stored as [defaultModelId] rather than left to the null fallback.
       const settings = await prisma.userSettings.upsert({

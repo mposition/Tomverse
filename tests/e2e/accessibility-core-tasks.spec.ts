@@ -147,7 +147,7 @@ test.describe("core-task accessibility (automatable slice)", () => {
     page,
   }) => {
     await prepareGuestPage(page, "en");
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const textarea = page.getByTestId("chat-textarea");
     await expect(textarea).toBeVisible();

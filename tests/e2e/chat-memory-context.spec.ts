@@ -206,7 +206,7 @@ test.describe("chat memory context", () => {
         },
       ],
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await expect(panel(page, 0)).toContainText(ANSWER);
@@ -230,7 +230,7 @@ test.describe("chat memory context", () => {
         },
       ],
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await expect(panel(page, 0)).toContainText(ANSWER);

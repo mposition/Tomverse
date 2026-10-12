@@ -58,7 +58,10 @@ import { resolveWebSearchSuggestionCopy } from "@/components/chat/webSearchSugge
 import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
 import { WEB_SEARCH_COST_UNBOUNDED } from "@/lib/webSearchCostRefusalCode";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
-import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
+import {
+  useConversationDrafts,
+  type PreparedDraftSend,
+} from "@/components/chat/useConversationDrafts";
 import {
   parseChatDraftMessageReceipt,
   parseChatMessageSaveResponse,
@@ -123,7 +126,8 @@ import {
   subscribeContinuationFocus,
 } from "@/lib/continuationFocusHandoff";
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
-import { CHAT_WORKSPACE_PATH, LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
+import { CHAT_WORKSPACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import { guestAutoClientExecutionState } from "@/lib/guestAutoClientExecution";
 import { chatRuntimeKey, getChatRuntimeSnapshot, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
 import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
@@ -153,9 +157,10 @@ import type {
 } from "@/lib/conversationProfileBinding";
 import {
   APP_DEFAULTS,
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
+  createReplacementResolver,
   GUEST_BRAND_TRIO_MODEL_IDS,
-  GUEST_FALLBACK_MODEL_IDS,
   isWebSearchEnabled,
   normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
@@ -171,7 +176,8 @@ import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import {
   createGuestSelectionClamp,
   GUEST_ACTIVE_CHAT_STORAGE_KEY,
-  GUEST_CONVERSATIONS_STORAGE_KEY,
+  guestWorkspaceStorageKeys,
+  newGuestConversationId,
   readGuestInitialModelEnvironment,
   resolveGuestInitialWebSearchMode,
   resolveGuestInitialSelectedModels,
@@ -195,9 +201,6 @@ import {
   type AppToastEventDetail,
   type AppToastTone,
 } from "@/lib/appToast";
-import {
-  removeAllGuestConversationMessages,
-} from "@/lib/guestConversationStorage";
 import {
   notifyUserUsageChanged,
   useUserUsage,
@@ -288,7 +291,6 @@ import {
 // browser and coming back should still default to welcome.
 // Defined in lib/guestChatInitialModels so the first-render guest model
 // decision reads the same key this file writes.
-const ACTIVE_CHAT_STORAGE_KEY = GUEST_ACTIVE_CHAT_STORAGE_KEY;
 let conversationSelectionTicketSequence = 0;
 const allocateConversationSelectionTicket = (): number => {
   conversationSelectionTicketSequence += 1;
@@ -676,6 +678,26 @@ type GlobalSubmitOptions = {
    */
   webSearchOverride?: WebSearchToggleMode;
   /**
+   * Authority carried only by the recursive first-send handoff after a blank
+   * Chat has been created and its Auto mode has been read back and committed.
+   *
+   * That row has no transcript to hydrate yet. Treating it as an ordinary
+   * stored conversation would start the runtime GET and then drop the user's
+   * one send while the empty snapshot is still loading. The id and selection
+   * ticket keep this exemption bound to that exact preparation; normal stored
+   * conversations still wait for their runtime before sending.
+   */
+  preparedBlankChat?: {
+    conversationId: string;
+    selectionTicket: number;
+    draft: {
+      text: string;
+      attachments: ChatAttachment[];
+    };
+    preparedDraftSend?: PreparedDraftSend;
+    draftSettlement?: { settled: boolean };
+  };
+  /**
    * The models this one send is for, when that is not the whole selection.
    *
    * The expansion offered under a finished answer is the case this exists for:
@@ -691,10 +713,23 @@ type GlobalSubmitOptions = {
   overrideModelIds?: readonly string[];
 };
 
+type BlankChatAutoSendAuthority = {
+  identityKey: string;
+  identityEpoch: number;
+  selectionTicket: number;
+  modelIds: string[];
+  disabledIds: string[];
+  webSearchMode: WebSearchMode;
+  profileId: string | null;
+  preparedDraftSend: PreparedDraftSend;
+  draftSettlement: { settled: boolean };
+};
+
 export function ChatPageClient({
   // Resolved on the server (see page.tsx) rather than fetched after mount, so
   // this component's very first render already knows the guest default.
   guestDefaultModelId,
+  guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
   voiceInputEnabled = false,
   promptRefinerMode = "off",
@@ -709,6 +744,11 @@ export function ChatPageClient({
   mountedSurface = "workspace",
 }: {
   guestDefaultModelId: string;
+  /**
+   * The effective default lineup (lib/appSettings PublicAppSettings), resolved
+   * on the server like the lead so the first render and the server agree.
+   */
+  guestBrandTrioModelIds?: readonly string[];
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
   /**
@@ -953,8 +993,28 @@ export function ChatPageClient({
   // SessionProviderWrapper, so this is already final on the first render --
   // guest mode is never "unknown and then guest".
   const isGuestMode = status !== "loading" && !sessionUserId;
+  const guestWorkspaceProduct = mountedSurface === "chat" ? "chat" : "review";
+  const {
+    activeChatKey: guestActiveChatStorageKey,
+    conversationsKey: guestConversationsStorageKey,
+  } = guestWorkspaceStorageKeys(guestWorkspaceProduct);
+  const activeConversationStorageKey = isGuestMode
+    ? guestActiveChatStorageKey
+    : GUEST_ACTIVE_CHAT_STORAGE_KEY;
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isViewportReady, setIsViewportReady] = useState(false);
+
+  const pendingCreatedChatRef = useRef<{
+    id: string;
+    title: string;
+    identityKey: string;
+    modelIds: string[];
+    disabledIds: string[];
+  } | null>(null);
+  const [pendingCreatedDraftScope, setPendingCreatedDraftScope] = useState<{
+    id: string;
+    identityKey: string;
+  } | null>(null);
 
   const [focusToken, setFocusToken] = useState(0);
 
@@ -977,6 +1037,19 @@ export function ChatPageClient({
   // user into whatever conversation they opened next. Both shells read this
   // one store, so switching between desktop and mobile is not a draft
   // boundary either. In-memory for this tab only -- see the hook's docstring.
+  // Creating a blank Chat for Smart Adaptive binds its server-owned mode
+  // before the first Message exists. Until that Message atomically consumes
+  // the `new` server draft, the composer must keep reading and writing that
+  // original scope even though the URL/current conversation already names the
+  // created row. Otherwise a deterministic Message refusal switches the
+  // textarea to an empty conversation-scoped draft and the retry loses the
+  // exact revision it is required to consume.
+  const composerDraftConversationId =
+    currentChatId &&
+    pendingCreatedDraftScope?.id === currentChatId &&
+    pendingCreatedDraftScope.identityKey === identityKey
+      ? null
+      : currentChatId;
   const {
     activeDraftKey,
     draftText: inputValue,
@@ -991,15 +1064,17 @@ export function ChatPageClient({
     resolveDraftConflict,
     draftSyncFailed,
     retryDraftSync,
+    preserveDraftsForProductSwitch,
     captureDraftSend,
     prepareDraftSend,
     commitDraftSend,
     abortDraftSend,
     reconcileDraftSend,
   } = useConversationDrafts(
-    currentChatId,
+    composerDraftConversationId,
     identityKey,
-    mountedSurface === "chat" && identityKey?.startsWith("account:") === true
+    mountedSurface === "chat" && identityKey?.startsWith("account:") === true,
+    mountedSurface === "chat" ? "chat" : "review"
   );
   /*
     The first real ChatInput caller is deliberately fixture-only. It proves
@@ -1595,6 +1670,8 @@ export function ChatPageClient({
      */
     webSearchMode?: WebSearchToggleMode;
     admissionToken?: string | null;
+    /** Short-lived server authority for one Guest Chat Smart Adaptive turn. */
+    guestAutoCapability?: string;
     contextBundle?: string | null;
     contextLayout?: "single" | "comparison";
     promptRefinerDecision?: PromptRefinerProductChatDecision;
@@ -1704,13 +1781,15 @@ export function ChatPageClient({
   // lifecycle. The catalogue itself arrives as an initial prop from the
   // server (components/ModelCatalogProvider), so this is already populated on
   // the first render rather than after a client fetch.
-  const guestCatalogue = useMemo(
-    () => ({
+  const guestCatalogue = useMemo(() => {
+    const isGuestEligible = createGuestEligibilityCheck(getModel);
+    return {
       isEnabledModelId,
-      isGuestEligible: createGuestEligibilityCheck(getModel),
-    }),
-    [getModel, isEnabledModelId]
-  );
+      isGuestEligible,
+      isDefaultEligible: createDefaultLineupEligibilityCheck(getModel, isGuestEligible),
+      resolveReplacement: createReplacementResolver(getModel),
+    };
+  }, [getModel, isEnabledModelId]);
 
   // Lazy initializer, not a post-mount effect: the model count is what the
   // estimated credits, panel count, Send label and conversation summary are
@@ -1726,7 +1805,9 @@ export function ChatPageClient({
       ? resolveGuestInitialSelectedModels({
           catalogue: guestCatalogue,
           leadModelId: guestDefaultModelId,
+          trio: guestBrandTrioModelIds,
           environment: readGuestInitialModelEnvironment(),
+          product: guestWorkspaceProduct,
         })
       : null
   );
@@ -1745,7 +1826,10 @@ export function ChatPageClient({
   // priced as a new one (search on) for a frame before the restore effect.
   const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(() =>
     isGuestMode
-      ? resolveGuestInitialWebSearchMode(readGuestInitialModelEnvironment())
+      ? resolveGuestInitialWebSearchMode(
+          readGuestInitialModelEnvironment(),
+          guestWorkspaceProduct
+        )
       : APP_DEFAULTS.defaultWebSearchMode
   );
   // §8.1 invariant 1, per conversation exactly like webSearchMode above. The
@@ -1759,18 +1843,45 @@ export function ChatPageClient({
    * Auto at all (UI contract auto-model-selection.md §1).
    *
    * `autoSelectionOffered` starts false and is only ever set from a confirmed
-   * conversation read. Two reasons, and the second is the one that matters:
+   * server decision: a conversation detail for a stored Chat, or the read-only
+   * blank-Chat capability endpoint before the first turn.
    *
    *  - the conversation list's optimistic seeding does not carry it, so a
    *    default of anything but false would show a control on a guess;
-   *  - a conversation that has not been created yet has no product to read,
-   *    and the server refuses `auto` for one, so offering the switch there
-   *    would be a control that saves and changes nothing -- the exact failure
-   *    §1 exists to prevent.
+   * A blank screen never derives this from a flag or a client-side product.
+   * Turning Auto on first creates an owned Chat and stores the mode before the
+   * UI adopts it, so the first Send cannot outrun the authority it displays.
    */
   const [selectionMode, setSelectionMode] = useState<"manual" | "auto">("manual");
+  const selectionModeRef = useRef<"manual" | "auto">("manual");
   const [autoSelectionOffered, setAutoSelectionOffered] = useState(false);
+  // Request-memory only. A Guest authority is never persisted in localStorage,
+  // a draft, or a conversation summary, and is refreshed immediately before
+  // the one Send that presents it to the server.
+  const guestAutoCapabilityRef = useRef<string | null>(null);
+  const [guestAutoCapabilityReady, setGuestAutoCapabilityReady] = useState(false);
+  const [blankChatCapabilityRevision, setBlankChatCapabilityRevision] = useState(0);
   const [selectionModePending, setSelectionModePending] = useState(false);
+  const storeGuestAutoCapability = useCallback((authority: string | null) => {
+    guestAutoCapabilityRef.current = authority;
+    setGuestAutoCapabilityReady(Boolean(authority));
+  }, []);
+  const invalidateGuestAutoCapability = useCallback((refresh = false) => {
+    storeGuestAutoCapability(null);
+    setAutoSelectionOffered(false);
+    if (refresh) {
+      setBlankChatCapabilityRevision((revision) => revision + 1);
+    }
+  }, [storeGuestAutoCapability]);
+  const guestAutoExecutionState = guestAutoClientExecutionState({
+    isGuestMode,
+    surface: mountedSurface === "chat" ? "chat" : "review",
+    selectionMode,
+    offered: autoSelectionOffered,
+    hasCapability: guestAutoCapabilityReady,
+  });
+  const guestAutoCapabilityPending =
+    guestAutoExecutionState === "awaiting_capability";
   const promptRefinerProductExplicitFlowVisible =
     promptRefinerProductSelection !== "kept_original" &&
     (promptRefinerProductSelection === "accepted" ||
@@ -2014,6 +2125,9 @@ export function ChatPageClient({
     models: [],
     disabled: [],
   });
+  const webSearchModeRef = useRef(webSearchMode);
+  const pendingProfileIdRef = useRef(pendingProfileId);
+  const isImageDraftActiveRef = useRef(isImageDraftActive);
   // One serialized, coalescing PATCH queue per conversation. Never aborts an
   // in-flight write (an aborted fetch still commits server-side, which is
   // exactly the out-of-order overwrite this replaces) -- a newer change is
@@ -2029,6 +2143,15 @@ export function ChatPageClient({
       disabled: disabledPanels,
     };
   }, [selectedModels, disabledPanels]);
+  useEffect(() => {
+    webSearchModeRef.current = webSearchMode;
+  }, [webSearchMode]);
+  useEffect(() => {
+    pendingProfileIdRef.current = pendingProfileId;
+  }, [pendingProfileId]);
+  useEffect(() => {
+    isImageDraftActiveRef.current = isImageDraftActive;
+  }, [isImageDraftActive]);
   const comparisonCompletionsRef = useRef<Map<string, Set<string>>>(new Map());
   const comparisonTrackedRef = useRef<Set<string>>(new Set());
   const localComparisonResponsesRef = useRef<
@@ -2272,36 +2395,201 @@ export function ChatPageClient({
   // A new blank/image intent also invalidates reads when the id stays null.
   const conversationSelectionTicketRef = useRef(0);
   const conversationNavigationAttemptRef = useRef(0);
-  const pendingCreatedChatRef = useRef<{
-    id: string;
-    title: string;
+  const blankChatCapabilityRequestRef = useRef(0);
+  const blankChatDefaultModeOverrideRef = useRef<{
     identityKey: string;
-    modelIds: string[];
-    disabledIds: string[];
+    selectionTicket: number;
+    mode: "manual" | "auto";
   } | null>(null);
+  const newChatAutoPreparationRef = useRef<{
+    identityKey: string;
+    selectionTicket: number;
+    requestSeq: number;
+    draft: {
+      text: string;
+      attachments: ChatAttachment[];
+    };
+    sendAuthority?: BlankChatAutoSendAuthority;
+    promise: Promise<boolean>;
+  } | null>(null);
+  const newChatAutoDraftSendRef = useRef<{
+    identityKey: string;
+    selectionTicket: number;
+    promise: Promise<BlankChatAutoSendAuthority | null>;
+  } | null>(null);
+  const newChatAutoUnknownRef = useRef<{
+    identityKey: string;
+    selectionTicket: number;
+  } | null>(null);
+  const storedSelectionModeUnknownRef = useRef<{
+    identityKey: string;
+    selectionTicket: number;
+    conversationId: string;
+  } | null>(null);
+  const [selectionModeUnknown, setSelectionModeUnknown] = useState<{
+    identityKey: string;
+    conversationId: string | null;
+  } | null>(null);
+  const selectionModeRequestSeqRef = useRef(0);
+  const selectionModeChangeRef = useRef<
+    (next: boolean, sendAuthority?: BlankChatAutoSendAuthority) => Promise<boolean>
+  >(async () => false);
+  const committedAutoSendScopeRef = useRef<{
+    identityKey: string | null;
+    conversationId: string | null;
+    selectionMode: "manual" | "auto";
+    selectionTicket: number;
+    mountedSurface: "workspace" | "continuation" | "chat";
+  } | null>(null);
+  useLayoutEffect(() => {
+    committedAutoSendScopeRef.current = {
+      identityKey,
+      conversationId: currentChatId,
+      selectionMode,
+      selectionTicket: conversationSelectionTicketRef.current,
+      mountedSurface,
+    };
+  });
   const clearPendingCreatedChatIfOwned = useCallback(
     (conversationId: string, ownerIdentityKey: string | null) => {
       const pending = pendingCreatedChatRef.current;
       if (pending?.id === conversationId &&
           pending.identityKey === ownerIdentityKey) {
         pendingCreatedChatRef.current = null;
+        setPendingCreatedDraftScope((current) =>
+          current?.id === conversationId && current.identityKey === ownerIdentityKey
+            ? null
+            : current
+        );
       }
     },
-    []
+    [setPendingCreatedDraftScope]
   );
 
   useLayoutEffect(() => {
     conversationNavigationAttemptRef.current = allocateConversationNavigationAttempt();
     pendingCreatedChatRef.current = null;
+    newChatAutoPreparationRef.current = null;
+    newChatAutoDraftSendRef.current = null;
+    newChatAutoUnknownRef.current = null;
+    guestAutoCapabilityRef.current = null;
+    blankChatDefaultModeOverrideRef.current = null;
+    storedSelectionModeUnknownRef.current = null;
+    selectionModeRequestSeqRef.current += 1;
+    blankChatCapabilityRequestRef.current += 1;
     return () => {
       conversationNavigationAttemptRef.current = allocateConversationNavigationAttempt();
       pendingCreatedChatRef.current = null;
+      newChatAutoPreparationRef.current = null;
+      newChatAutoDraftSendRef.current = null;
+      newChatAutoUnknownRef.current = null;
+      guestAutoCapabilityRef.current = null;
+      blankChatDefaultModeOverrideRef.current = null;
+      storedSelectionModeUnknownRef.current = null;
+      selectionModeRequestSeqRef.current += 1;
+      blankChatCapabilityRequestRef.current += 1;
     };
   }, [identityKey]);
 
   useEffect(() => {
     currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
+
+  useEffect(() => {
+    const request = (blankChatCapabilityRequestRef.current += 1);
+    const selectionTicket = conversationSelectionTicketRef.current;
+    if (
+      mountedSurface !== "chat" ||
+      !identityKey ||
+      (!isGuestMode && currentChatId !== null) ||
+      (isGuestMode && currentChatId !== null &&
+        !isGuestConversationId(currentChatId)) ||
+      !isInitialConversationResolved ||
+      isImageDraftActive
+    ) {
+      return;
+    }
+
+    void fetch("/api/products/chat/capabilities", { cache: "no-store" })
+      .then(async (response) => {
+        const data = response.ok
+          ? await response.json().catch(() => null)
+          : await discardResponseBody(response).then(() => null);
+        if (
+          request !== blankChatCapabilityRequestRef.current ||
+          selectionTicket !== conversationSelectionTicketRef.current ||
+          (!isGuestMode && currentChatIdRef.current !== null) ||
+          (isGuestMode && currentChatIdRef.current !== null &&
+            !isGuestConversationId(currentChatIdRef.current)) ||
+          isImageDraftActiveRef.current
+        ) return;
+        const guestAuthority = isGuestMode &&
+          typeof data?.guestAutoCapability === "string"
+          ? data.guestAutoCapability
+          : null;
+        const guestAutoContract = !isGuestMode ||
+          data?.guestAuto?.attachmentSupport === "manual_only";
+        const offered = data?.autoSelection?.offered === true &&
+          guestAutoContract &&
+          (!isGuestMode || Boolean(guestAuthority));
+        storeGuestAutoCapability(isGuestMode && offered ? guestAuthority : null);
+        setAutoSelectionOffered(offered);
+        // A blank Tomverse Chat defaults to Smart Adaptive when the server
+        // confirms the current account is eligible. This is display intent,
+        // not routing authority: first Send still has to create the owned Chat
+        // and read/PATCH its canonical selectionMode before any paid path.
+        const explicitOverride = blankChatDefaultModeOverrideRef.current;
+        const preferredMode = explicitOverride?.identityKey === identityKey &&
+          explicitOverride.selectionTicket === selectionTicket
+            ? explicitOverride.mode
+            : offered
+              ? "auto"
+              : "manual";
+        const nextMode = preferredMode === "auto" && !offered
+          ? "manual"
+          : preferredMode;
+        selectionModeRef.current = nextMode;
+        setSelectionMode(nextMode);
+        const targetGuestConversationId = currentChatIdRef.current;
+        if (
+          isGuestMode &&
+          targetGuestConversationId &&
+          isGuestConversationId(targetGuestConversationId) &&
+          // A temporarily unavailable capability must not erase a stored Auto
+          // preference. It remains inactive until a later exact read offers it.
+          (offered || preferredMode === "manual")
+        ) {
+          setConversations((current) => current.map((conversation) =>
+            conversation.id === targetGuestConversationId
+              ? { ...conversation, selectionMode: nextMode }
+              : conversation
+          ));
+        }
+      })
+      .catch(() => {
+        if (
+          request === blankChatCapabilityRequestRef.current &&
+          selectionTicket === conversationSelectionTicketRef.current &&
+          ((!isGuestMode && currentChatIdRef.current === null) ||
+            (isGuestMode && (currentChatIdRef.current === null ||
+              isGuestConversationId(currentChatIdRef.current))))
+        ) {
+          invalidateGuestAutoCapability();
+          selectionModeRef.current = "manual";
+          setSelectionMode("manual");
+        }
+      });
+  }, [
+    currentChatId,
+    blankChatCapabilityRevision,
+    identityKey,
+    isImageDraftActive,
+    isInitialConversationResolved,
+    mountedSurface,
+    isGuestMode,
+    invalidateGuestAutoCapability,
+    storeGuestAutoCapability,
+  ]);
 
   /* --------------------------------------------------------------------- */
   /* Identity namespace                                                     */
@@ -2390,6 +2678,15 @@ export function ChatPageClient({
     // validates the saved id against this account's own conversation list.
     if (transition.initial) return;
 
+    // Auto authority belongs to the authenticated account and conversation.
+    // Never display the previous identity's stored mode or blank capability
+    // while the new identity is still resolving its own server decision.
+    selectionModeRef.current = "manual";
+    setSelectionMode("manual");
+    setAutoSelectionOffered(false);
+    setGuestAutoCapabilityReady(false);
+    setSelectionModePending(false);
+
     // Anything the previous identity had in flight or queued belongs to that
     // identity. A queued model-settings PATCH fired after this point would
     // aim the old conversation at the new account's API, so the whole sync
@@ -2421,8 +2718,14 @@ export function ChatPageClient({
 
     const carriedId = currentChatIdRef.current;
     if (transition.guestToAccount && typeof window !== "undefined") {
+      // The account import endpoint creates Review conversations. Guest Chat
+      // has its own local namespace and must never be silently converted into
+      // Review merely because the user signed in from `/chat`.
       guestSelectionAtSignInRef.current =
-        carriedId ?? window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+        guestWorkspaceProduct === "review"
+          ? carriedId ??
+            window.sessionStorage.getItem(GUEST_ACTIVE_CHAT_STORAGE_KEY)
+          : window.sessionStorage.getItem(GUEST_ACTIVE_CHAT_STORAGE_KEY);
     }
 
     const retainedId = selectionAfterIdentityTransition(carriedId, transition);
@@ -2435,10 +2738,10 @@ export function ChatPageClient({
       // identity that wrote it, so it must not survive into the next one --
       // the guest transcript it points at is untouched in localStorage.
       if (!retainedId && typeof window !== "undefined") {
-        window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
+        window.sessionStorage.removeItem(guestActiveChatStorageKey);
       }
     }
-  }, [identityNamespace]);
+  }, [guestActiveChatStorageKey, guestWorkspaceProduct, identityNamespace]);
 
   /**
    * Releases a selection the current identity turned out not to be able to
@@ -2552,7 +2855,7 @@ export function ChatPageClient({
       // to it. The transcript itself was never touched.
       setGuestImportDefaultId(
         guestSelectionAtSignInRef.current ??
-          window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY)
+          window.sessionStorage.getItem(GUEST_ACTIVE_CHAT_STORAGE_KEY)
       );
       setIsGuestImportModalOpen(true);
     });
@@ -2564,7 +2867,7 @@ export function ChatPageClient({
     setGuestImportDefaultId(
       guestSelectionAtSignInRef.current ??
         (typeof window !== "undefined"
-          ? window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY)
+          ? window.sessionStorage.getItem(GUEST_ACTIVE_CHAT_STORAGE_KEY)
           : null)
     );
     setIsGuestImportModalOpen(true);
@@ -2590,11 +2893,11 @@ export function ChatPageClient({
   useEffect(() => {
     if (typeof window === "undefined" || !isInitialConversationResolved) return;
     if (!currentChatId) {
-      window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
+      window.sessionStorage.removeItem(activeConversationStorageKey);
       return;
     }
-    window.sessionStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, currentChatId);
-  }, [currentChatId, isInitialConversationResolved]);
+    window.sessionStorage.setItem(activeConversationStorageKey, currentChatId);
+  }, [activeConversationStorageKey, currentChatId, isInitialConversationResolved]);
 
   useEffect(() => {
     if (!isGuestPreviewEntry) return;
@@ -2623,19 +2926,34 @@ export function ChatPageClient({
     () => createGuestSelectionClamp(guestCatalogue),
     [guestCatalogue]
   );
+  const clampGuestWorkspaceSelectedModels = useCallback(
+    (models: string[]) => {
+      const clamped = clampGuestSelectedModels(models);
+      return guestWorkspaceProduct === "chat" ? clamped.slice(0, 1) : clamped;
+    },
+    [clampGuestSelectedModels, guestWorkspaceProduct]
+  );
 
   // Same resolver, same lead model and same catalogue the first render used,
   // so re-deriving this here can only ever reproduce the value already on
   // screen -- never replace it with a different model count.
   const guestDefaultSelectedModels = useMemo(
-    () =>
-      clampGuestSelectedModels(
+    () => {
+      return clampGuestWorkspaceSelectedModels(
         resolveGuestDefaultSelectedModels({
-          isEligible: guestCatalogue.isGuestEligible,
+          isEligible: guestCatalogue.isDefaultEligible,
           leadModelId: guestDefaultModelId,
+          resolveReplacement: guestCatalogue.resolveReplacement,
+          trio: guestBrandTrioModelIds,
         })
-      ),
-    [clampGuestSelectedModels, guestCatalogue, guestDefaultModelId]
+      );
+    },
+    [
+      clampGuestWorkspaceSelectedModels,
+      guestBrandTrioModelIds,
+      guestCatalogue,
+      guestDefaultModelId,
+    ]
   );
 
   const isNewAccountEligibleModel = useCallback(
@@ -2652,19 +2970,23 @@ export function ChatPageClient({
 
   // Shown the first time a freshly created account loads chat, so a new
   // signed-in user starts with the same 3-model side-by-side comparison a
-  // guest already sees instead of a single panel. Same brand-trio-plus-
-  // fallback selection as guestDefaultSelectedModels above, just checked
-  // against "Free" (every guest-eligible model is Free-eligible too).
-  const newAccountDefaultSelectedModels = useMemo(() => {
-    const candidates = [...GUEST_BRAND_TRIO_MODEL_IDS, ...GUEST_FALLBACK_MODEL_IDS];
-    const trio: string[] = [];
-    for (const modelId of candidates) {
-      if (trio.includes(modelId) || !isNewAccountEligibleModel(modelId)) continue;
-      trio.push(modelId);
-      if (trio.length >= APP_DEFAULTS.maxSelectedModels) break;
-    }
-    return clampSelectedModels(trio);
-  }, [clampSelectedModels, isNewAccountEligibleModel]);
+  // guest already sees instead of a single panel. The same resolver, lineup
+  // and lead as guestDefaultSelectedModels above -- including a retired
+  // member's successor -- just checked against "Free" (every guest-eligible
+  // model is Free-eligible too).
+  const newAccountDefaultSelectedModels = useMemo(
+    () =>
+      clampSelectedModels(
+        resolveGuestDefaultSelectedModels({
+          isEligible: createDefaultLineupEligibilityCheck(getModel, isNewAccountEligibleModel),
+          leadModelId: guestDefaultModelId,
+          maxModels: APP_DEFAULTS.maxSelectedModels,
+          resolveReplacement: guestCatalogue.resolveReplacement,
+          trio: guestBrandTrioModelIds,
+        })
+      ),
+    [clampSelectedModels, getModel, guestBrandTrioModelIds, guestCatalogue, guestDefaultModelId, isNewAccountEligibleModel]
+  );
 
   // The guest default lead model used to be fetched here after mount, which
   // is why the guest bootstrap effect below had to wait on a network response
@@ -2989,13 +3311,18 @@ export function ChatPageClient({
   }, [identityKey, mountedSurface, readDraft, setDraftAttachments, setFocusToken, setInputValue, showToast, t]);
 
   useEffect(() => {
-    if (mountedSurface !== "chat" || !isInitialConversationResolved || !currentChatId) return;
+    if (mountedSurface !== "chat" || isGuestMode ||
+        !isInitialConversationResolved || !currentChatId) return;
     const url = new URL(window.location.href);
     // A not-yet-resolved owned read must not erase the id needed for reload.
     // New-chat navigation removes it explicitly by navigating to the bare route.
+    // Guest Chat ids are browser-local and deliberately fail closed at the
+    // server entry. Keep their selection in the product-specific session key;
+    // putting one in the URL would turn a later reload into an account-row
+    // probe and the server would correctly answer 404.
     url.searchParams.set(CONVERSATION_HANDOFF_PARAM, currentChatId);
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-  }, [currentChatId, isInitialConversationResolved, mountedSurface]);
+  }, [currentChatId, isGuestMode, isInitialConversationResolved, mountedSurface]);
 
   const runComparisonPreflight = useCallback(
     async ({
@@ -3404,6 +3731,18 @@ export function ChatPageClient({
         // the optimistic seeding from the conversation list is this client's
         // own guess and must not invalidate a request made against it.
         if (targetChatId) conversationSettingsRevisionRef.current += 1;
+        const storedModeUnknown = storedSelectionModeUnknownRef.current;
+        if (
+          targetChatId &&
+          storedModeUnknown?.conversationId === targetChatId &&
+          storedModeUnknown.identityKey ===
+            identityNamespaceKey(identityNamespaceRef.current) &&
+          storedModeUnknown.selectionTicket ===
+            conversationSelectionTicketRef.current
+        ) {
+          storedSelectionModeUnknownRef.current = null;
+          setSelectionModeUnknown(null);
+        }
         const savedModels = normalizeStringArray(data.selectedModels, userDefaultModelIds);
         const nextModels = clampSelectedModels(uniqueStrings(savedModels));
         const nextDisabled = normalizeStringArray(data.disabledPanels, []).filter(
@@ -3426,7 +3765,9 @@ export function ChatPageClient({
         // Reading it as off is what keeps the switch from claiming a consent
         // the account never gave; nothing is written back, so the row keeps
         // its value until the switch is touched.
-        setWebSearchMode(normalizeWebSearchMode(data.webSearchMode));
+        const nextWebSearchMode = normalizeWebSearchMode(data.webSearchMode);
+        setWebSearchMode(nextWebSearchMode);
+        webSearchModeRef.current = nextWebSearchMode;
         setMemoryMode(
             isConversationMemoryMode(data.memoryMode)
                 ? data.memoryMode
@@ -3459,6 +3800,7 @@ export function ChatPageClient({
         // going to be created with; leaving it set would apply that choice to
         // the *next* new chat without the user asking again.
         setPendingProfileId(null);
+        pendingProfileIdRef.current = null;
         if (targetChatId) {
           // A server read seeds the queue's confirmed state; markConfirmed
           // refuses while local changes are unconfirmed, so a stale read can
@@ -3504,11 +3846,11 @@ export function ChatPageClient({
           : guestDefaultSelectedModels;
       refreshGuestUsage();
 
-      const savedConversations = localStorage.getItem(GUEST_CONVERSATIONS_STORAGE_KEY);
+      const savedConversations = localStorage.getItem(guestConversationsStorageKey);
       if (savedConversations) {
         try {
           const parsed = JSON.parse(savedConversations);
-          const savedChatId = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+          const savedChatId = window.sessionStorage.getItem(guestActiveChatStorageKey);
 
           // Repeatedly clicking "New Chat" used to pile up empty guest
           // conversations forever (each one written straight to
@@ -3533,7 +3875,7 @@ export function ChatPageClient({
             : parsed;
           if (Array.isArray(parsed) && cleaned.length !== parsed.length) {
             localStorage.setItem(
-              GUEST_CONVERSATIONS_STORAGE_KEY,
+              guestConversationsStorageKey,
               JSON.stringify(cleaned)
             );
           }
@@ -3548,7 +3890,22 @@ export function ChatPageClient({
             : null;
           if (restoredConversation) {
             setCurrentChatId(restoredConversation.id);
-            const restoredModels = clampGuestSelectedModels(
+            const restoredSelectionMode =
+              restoredConversation.selectionMode === "manual" ||
+              restoredConversation.selectionMode === "auto"
+                ? restoredConversation.selectionMode
+                : null;
+            blankChatDefaultModeOverrideRef.current =
+              restoredSelectionMode && identityKey
+                ? {
+                    identityKey,
+                    selectionTicket: conversationSelectionTicketRef.current,
+                    mode: restoredSelectionMode,
+                  }
+                : null;
+            selectionModeRef.current = restoredSelectionMode ?? "manual";
+            setSelectionMode(restoredSelectionMode ?? "manual");
+            const restoredModels = clampGuestWorkspaceSelectedModels(
               normalizeStringArray(
                 restoredConversation.selectedModels,
                 guestDefaultSelectedModels
@@ -3572,7 +3929,7 @@ export function ChatPageClient({
           console.error("Failed to parse guest conversations:", e);
         }
       } else {
-        const initialChatId = `guest_${Date.now()}`;
+        const initialChatId = newGuestConversationId(guestWorkspaceProduct);
         const initialChat = {
           id: initialChatId,
           title: t("sidebar.newChat"),
@@ -3587,7 +3944,7 @@ export function ChatPageClient({
         setConversations([initialChat]);
         setCurrentChatId(initialChatId);
         localStorage.setItem(
-          GUEST_CONVERSATIONS_STORAGE_KEY,
+          guestConversationsStorageKey,
           JSON.stringify([initialChat])
         );
       }
@@ -3601,9 +3958,13 @@ export function ChatPageClient({
       };
     }
   }, [
-    clampGuestSelectedModels,
+    clampGuestWorkspaceSelectedModels,
+    guestActiveChatStorageKey,
+    guestConversationsStorageKey,
     guestDefaultModelId,
     guestDefaultSelectedModels,
+    guestWorkspaceProduct,
+    identityKey,
     initialGuestModels,
     isGuestMode,
     refreshGuestUsage,
@@ -3612,9 +3973,14 @@ export function ChatPageClient({
 
   useEffect(() => {
     if (isGuestMode && isConversationsLoaded && conversations.length > 0) {
-      localStorage.setItem(GUEST_CONVERSATIONS_STORAGE_KEY, JSON.stringify(conversations));
+      localStorage.setItem(guestConversationsStorageKey, JSON.stringify(conversations));
     }
-  }, [conversations, isGuestMode, isConversationsLoaded]);
+  }, [
+    conversations,
+    guestConversationsStorageKey,
+    isGuestMode,
+    isConversationsLoaded,
+  ]);
 
     useEffect(() => {
         if (
@@ -3634,7 +4000,7 @@ export function ChatPageClient({
         if (!guestCarryoverAppliedRef.current) {
             guestCarryoverAppliedRef.current = true;
             try {
-                const savedGuestConversations = localStorage.getItem(GUEST_CONVERSATIONS_STORAGE_KEY);
+                const savedGuestConversations = localStorage.getItem(guestConversationsStorageKey);
                 const parsedGuestConversations = savedGuestConversations
                     ? JSON.parse(savedGuestConversations)
                     : null;
@@ -3666,6 +4032,7 @@ export function ChatPageClient({
         isGuestMode,
         isUserSettingsLoaded,
         mountedSurface,
+        guestConversationsStorageKey,
     ]);
 
     useEffect(() => {
@@ -3944,6 +4311,19 @@ export function ChatPageClient({
         }
         conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         pendingCreatedChatRef.current = null;
+        setPendingCreatedDraftScope(null);
+        newChatAutoPreparationRef.current = null;
+        newChatAutoDraftSendRef.current = null;
+        newChatAutoUnknownRef.current = null;
+        blankChatDefaultModeOverrideRef.current = null;
+        storedSelectionModeUnknownRef.current = null;
+        setSelectionModeUnknown(null);
+        selectionModeRequestSeqRef.current += 1;
+        selectionModeRef.current = "manual";
+        invalidateGuestAutoCapability();
+        setSelectionMode("manual");
+        setBlankChatCapabilityRevision((revision) => revision + 1);
+        setSelectionModePending(false);
         /*
           A new chat on a continuation's URL has to leave that URL.
 
@@ -3958,7 +4338,7 @@ export function ChatPageClient({
         if (mountedSurface === "continuation") {
             // A fresh Chat entry re-runs the server's current offered gate.
             // Existing owned Chat remains readable independently of that gate.
-            router.push(LEGACY_REVIEW_PATH);
+            router.push(REVIEW_WORKSPACE_PATH);
             return;
         }
         if (mountedSurface === "chat") {
@@ -3989,11 +4369,12 @@ export function ChatPageClient({
           selectedModels: guestDefaultSelectedModels,
           disabledPanels: [],
           webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
+          selectionMode: undefined,
         };
         setConversations((prev) => prev.map((c) => (c.id === resetChat.id ? resetChat : c)));
       } else {
         const newGuestChat = {
-          id: `guest_${Date.now()}`,
+          id: newGuestConversationId(guestWorkspaceProduct),
             title: t("sidebar.autoGeneratedNewRoom"),
             selectedModels: guestDefaultSelectedModels,
           disabledPanels: [],
@@ -4309,7 +4690,7 @@ export function ChatPageClient({
 
               Asking only the second one got both directions wrong. Leaving a
               continuation for an ordinary conversation dropped the id --
-              `null` fell back to a bare `LEGACY_REVIEW_PATH` -- so `/chat`
+              `null` fell back to a bare Review workspace path
               opened naming nothing, its session restore found the
               continuation the user had just left still recorded as active,
               selected it, and this branch sent them back: a click that
@@ -4339,15 +4720,27 @@ export function ChatPageClient({
             } else if (targetSurface !== mountedSurface) {
                 // The workspace has no per-conversation URL, so the id travels
                 // as a parameter the workspace spends on arrival.
-                // `LEGACY_REVIEW_PATH`, not `PRODUCT_SURFACE_PATH.review`:
-                // this is where the workspace lives *today*, and the two stop
-                // being equal on the day of the cutover.
+                // Review has its own canonical workspace after the product
+                // cutover. The stored row, never this URL, supplies authority.
                 commitConversationSelection(true);
                 router.push(
-                    conversationHandoffHref(targetSurface, id, LEGACY_REVIEW_PATH)
+                    conversationHandoffHref(targetSurface, id, REVIEW_WORKSPACE_PATH)
                 );
                 return;
             }
+        }
+
+        // Re-selecting the row that is already open is a semantic no-op. In
+        // particular, it must not discard the request-memory Guest Auto
+        // authority without advancing the selection ticket that triggers a
+        // replacement capability read.
+        if (
+          isGuestMode &&
+          isInitialConversationResolved &&
+          id === currentChatIdRef.current
+        ) {
+          settleInitialConversationHandoff();
+          return;
         }
 
         // Keep the continuation routing prefix closure-independent: its
@@ -4356,6 +4749,7 @@ export function ChatPageClient({
         // cleanup clears the pending create; in-place selection clears it here.
         localComparisonResponsesRef.current.clear();
         pendingCreatedChatRef.current = null;
+        setPendingCreatedDraftScope(null);
         latestLocalComparisonPromptRef.current = null;
 
         // An image conversation swaps the whole surface for the image
@@ -4402,7 +4796,23 @@ export function ChatPageClient({
     if (isGuestMode) {
       const targetConv = conversations.find((c) => c.id === id);
       if (targetConv) {
-          const restoredModels = clampGuestSelectedModels(
+          const restoredSelectionMode =
+            targetConv.selectionMode === "manual" ||
+            targetConv.selectionMode === "auto"
+              ? targetConv.selectionMode
+              : null;
+          blankChatDefaultModeOverrideRef.current =
+            restoredSelectionMode && identityKey
+              ? {
+                  identityKey,
+                  selectionTicket: conversationSelectionTicketRef.current,
+                  mode: restoredSelectionMode,
+                }
+              : null;
+          invalidateGuestAutoCapability();
+          selectionModeRef.current = restoredSelectionMode ?? "manual";
+          setSelectionMode(restoredSelectionMode ?? "manual");
+          const restoredModels = clampGuestWorkspaceSelectedModels(
             normalizeStringArray(
               targetConv.selectedModels,
               guestDefaultSelectedModels
@@ -4480,7 +4890,7 @@ export function ChatPageClient({
           // Re-run the departure barrier so durable-but-undispatched turns are
           // promoted and late receipts cannot disappear with the unmount.
           commitConversationSelection(true);
-          router.push(conversationHandoffHref(data.surface, id, LEGACY_REVIEW_PATH));
+          router.push(conversationHandoffHref(data.surface, id, REVIEW_WORKSPACE_PATH));
           return;
         }
         // A detail response that lands late must not clobber newer local
@@ -4694,7 +5104,7 @@ export function ChatPageClient({
         // after a sign-out/sign-in in the same tab, etc. -- and
         // handleSelectConversation itself still re-prompts for a locked
         // conversation's password rather than silently opening it.
-        const savedChatId = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+        const savedChatId = window.sessionStorage.getItem(activeConversationStorageKey);
         /*
           A restore reopens what was on screen; it never navigates.
 
@@ -4867,10 +5277,7 @@ export function ChatPageClient({
         currentChatIdRef.current = nextId;
       }
       if (updated.length === 0) {
-        localStorage.removeItem(GUEST_CONVERSATIONS_STORAGE_KEY);
-        // Nothing is left to reference the remaining transcripts, so drop them
-        // rather than leaving deleted prompts recoverable on a shared browser.
-        removeAllGuestConversationMessages();
+        localStorage.removeItem(guestConversationsStorageKey);
       }
     } else {    
       try {
@@ -4933,6 +5340,22 @@ export function ChatPageClient({
       // send barrier that runs before React commits still captures this
       // change.
       latestModelSettingsRef.current = { models, disabled };
+      if (isGuestMode && targetChatId) {
+        // Guest rows exist only in this product's local namespace. Persist the
+        // exact one-model Chat replacement (or Review comparison edit) there
+        // so a reload cannot resurrect the model selection the user replaced.
+        setConversations((current) =>
+          current.map((conversation) =>
+            conversation.id === targetChatId
+              ? {
+                  ...conversation,
+                  selectedModels: models,
+                  disabledPanels: disabled,
+                }
+              : conversation
+          )
+        );
+      }
       const syncTargetId = accountConversationId(targetChatId);
       if (!syncTargetId || !sessionUserId) return;
       const syncModels = clampSelectedModels(models);
@@ -4941,7 +5364,7 @@ export function ChatPageClient({
         disabled: disabled.filter((modelId) => syncModels.includes(modelId)),
       });
     },
-    [accountConversationId, clampSelectedModels, mountedSurface, sessionUserId, showToast, t]
+    [accountConversationId, clampSelectedModels, isGuestMode, mountedSurface, sessionUserId, showToast, t]
   );
 
   // Deliberate user action (picked from the tools sheet), not the frequent
@@ -4951,6 +5374,7 @@ export function ChatPageClient({
   // by the effect below) is updated directly instead.
   const updateWebSearchMode = (mode: WebSearchMode) => {
     setWebSearchMode(mode);
+    webSearchModeRef.current = mode;
     if (isGuestMode) {
       if (currentChatId) {
         setConversations((prev) =>
@@ -5108,8 +5532,16 @@ export function ChatPageClient({
 
     comparisonPresetRequestedRef.current = true;
     let cancelled = false;
-    const presetModels = isGuestMode
+    // Preserve the common Guest allowlist clamp as the first boundary. Chat
+    // may narrow that already-authorized selection to one model, while Review
+    // keeps the existing comparison width.
+    const guestPresetModels = isGuestMode
       ? clampGuestSelectedModels(requestedModels)
+      : [];
+    const presetModels = isGuestMode
+      ? guestWorkspaceProduct === "chat"
+        ? guestPresetModels.slice(0, 1)
+        : guestPresetModels
       : clampSelectedModels(requestedModels).slice(0, maxSelectableModels);
 
     queueMicrotask(() => {
@@ -5160,6 +5592,7 @@ export function ChatPageClient({
   }, [
     currentChatId,
     clampGuestSelectedModels,
+    guestWorkspaceProduct,
     clampSelectedModels,
     isGuestMode,
     mutateModelSettings,
@@ -5177,7 +5610,9 @@ export function ChatPageClient({
   // two preflights, two saved user messages, two charges for one intent. One
   // submit at a time, and the flag is released in `finally` so a rejected or
   // aborted attempt can never wedge the composer shut.
-  const handleGlobalSubmit = async (options?: GlobalSubmitOptions) => {
+  const handleGlobalSubmit = async (
+    options?: GlobalSubmitOptions
+  ): Promise<void> => {
     if (promptRefinerMode === "e2e_fixture") {
       // This mode only exercises a no-cost pre-send proposal. It cannot
       // authorize any Chat dispatch, including after conversation switches,
@@ -5185,10 +5620,237 @@ export function ChatPageClient({
       // marker would not survive every restore/remount path safely.
       return;
     }
+    // A restored Guest `auto` value is an intent, not routing authority. The
+    // background capability read will either confirm it or return the UI to
+    // manual; until then every submit entry point stays closed instead of
+    // silently spending the turn on the fallback model.
+    if (
+      guestAutoClientExecutionState({
+        isGuestMode,
+        surface: mountedSurface === "chat" ? "chat" : "review",
+        selectionMode: selectionModeRef.current,
+        offered: autoSelectionOffered,
+        hasCapability: Boolean(guestAutoCapabilityRef.current),
+      }) === "awaiting_capability"
+    ) {
+      return;
+    }
+    const waitForCommittedAutoScope = async (
+      expectedConversationId: string,
+      expectedSelectionTicket: number
+    ) => {
+      const matches = () => {
+        const committed = committedAutoSendScopeRef.current;
+        return committed?.identityKey === identityKey &&
+          committed.conversationId === expectedConversationId &&
+          committed.selectionMode === "auto" &&
+          committed.selectionTicket === expectedSelectionTicket &&
+          committed.mountedSurface === "chat";
+      };
+      for (let attempt = 0; attempt < 3 && !matches(); attempt += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      return matches();
+    };
+    const abortBlankAutoSend = (authority: BlankChatAutoSendAuthority) => {
+      if (authority.draftSettlement.settled) return;
+      abortDraftSend(authority.preparedDraftSend);
+      authority.draftSettlement.settled = true;
+    };
+    if (
+      currentChatIdRef.current === null &&
+      selectionMode === "auto" &&
+      autoSelectionOffered &&
+      mountedSurface === "chat" &&
+      !isGuestMode &&
+      !isImageDraftActiveRef.current &&
+      !newChatAutoPreparationRef.current
+    ) {
+      if (!identityKey) return;
+      const expectedSelectionTicket = conversationSelectionTicketRef.current;
+      let draftPreparation = newChatAutoDraftSendRef.current;
+      if (
+        draftPreparation?.identityKey !== identityKey ||
+        draftPreparation.selectionTicket !== expectedSelectionTicket
+      ) {
+        const capturedIdentityEpoch = submitIdentityFenceRef.current.epoch;
+        const capturedModels = [...latestModelSettingsRef.current.models];
+        const capturedDisabled = [...latestModelSettingsRef.current.disabled];
+        const capturedWebSearchMode = webSearchModeRef.current;
+        const capturedProfileId = pendingProfileIdRef.current;
+        const capturedDraft = readDraft(null);
+        const capturedAttachmentIds = capturedDraft.attachments.map(
+          (attachment) => attachment.id
+        );
+        const draftSendCapture = captureDraftSend(capturedDraft, null);
+        const promise = (async (): Promise<BlankChatAutoSendAuthority | null> => {
+          const preparedDraftSend = await prepareDraftSend(draftSendCapture);
+          if (!preparedDraftSend) {
+            if (
+              identityKey === identityNamespaceKey(identityNamespaceRef.current) &&
+              expectedSelectionTicket === conversationSelectionTicketRef.current &&
+              currentChatIdRef.current === null
+            ) {
+              showToast(t("chat.questionSaveFailed"), "info");
+            }
+            return null;
+          }
+          const currentDraft = readDraft(null);
+          const stillCurrent =
+            identityKey === identityNamespaceKey(identityNamespaceRef.current) &&
+            capturedIdentityEpoch === submitIdentityFenceRef.current.epoch &&
+            expectedSelectionTicket === conversationSelectionTicketRef.current &&
+            currentChatIdRef.current === null &&
+            mountedSurface === "chat" &&
+            !isImageDraftActiveRef.current &&
+            sameStringList(capturedModels, latestModelSettingsRef.current.models) &&
+            sameStringList(capturedDisabled, latestModelSettingsRef.current.disabled) &&
+            capturedWebSearchMode === webSearchModeRef.current &&
+            capturedProfileId === pendingProfileIdRef.current &&
+            sameStringList(
+              capturedAttachmentIds,
+              currentDraft.attachments.map((attachment) => attachment.id)
+            );
+          if (!stillCurrent) {
+            abortDraftSend(preparedDraftSend);
+            return null;
+          }
+          return {
+            identityKey,
+            identityEpoch: capturedIdentityEpoch,
+            selectionTicket: expectedSelectionTicket,
+            modelIds: capturedModels,
+            disabledIds: capturedDisabled,
+            webSearchMode: capturedWebSearchMode,
+            profileId: capturedProfileId,
+            preparedDraftSend,
+            draftSettlement: { settled: false },
+          };
+        })();
+        draftPreparation = {
+          identityKey,
+          selectionTicket: expectedSelectionTicket,
+          promise,
+        };
+        newChatAutoDraftSendRef.current = draftPreparation;
+      }
+      const sendAuthority = await draftPreparation.promise;
+      if (!sendAuthority) {
+        if (newChatAutoDraftSendRef.current === draftPreparation) {
+          newChatAutoDraftSendRef.current = null;
+        }
+        return;
+      }
+      const prepared = await selectionModeChangeRef.current(true, sendAuthority);
+      if (!prepared) {
+        abortBlankAutoSend(sendAuthority);
+        if (newChatAutoDraftSendRef.current === draftPreparation) {
+          newChatAutoDraftSendRef.current = null;
+        }
+        return;
+      }
+      const preparedConversationId = currentChatIdRef.current;
+      if (!preparedConversationId ||
+          !(await waitForCommittedAutoScope(
+            preparedConversationId,
+            expectedSelectionTicket
+          ))) {
+        abortBlankAutoSend(sendAuthority);
+        if (newChatAutoDraftSendRef.current === draftPreparation) {
+          newChatAutoDraftSendRef.current = null;
+        }
+        return;
+      }
+      if (newChatAutoDraftSendRef.current === draftPreparation) {
+        newChatAutoDraftSendRef.current = null;
+      }
+      return handleGlobalSubmitRef.current({
+        ...options,
+        preparedBlankChat: {
+          conversationId: preparedConversationId,
+          selectionTicket: expectedSelectionTicket,
+          draft: sendAuthority.preparedDraftSend.draft,
+          preparedDraftSend: sendAuthority.preparedDraftSend,
+          draftSettlement: sendAuthority.draftSettlement,
+        },
+      });
+    }
+    const blankAutoPreparation = newChatAutoPreparationRef.current;
+    if (
+      blankAutoPreparation &&
+      blankAutoPreparation.identityKey === identityKey &&
+      blankAutoPreparation.selectionTicket ===
+        conversationSelectionTicketRef.current
+    ) {
+      const prepared = await blankAutoPreparation.promise;
+      if (!prepared) {
+        if (blankAutoPreparation.sendAuthority) {
+          abortBlankAutoSend(blankAutoPreparation.sendAuthority);
+        }
+        return;
+      }
+      const preparedConversationId = currentChatIdRef.current;
+      if (!preparedConversationId ||
+          !(await waitForCommittedAutoScope(
+            preparedConversationId,
+            blankAutoPreparation.selectionTicket
+          ))) {
+        if (blankAutoPreparation.sendAuthority) {
+          abortBlankAutoSend(blankAutoPreparation.sendAuthority);
+        }
+        return;
+      }
+      const sendAuthority = blankAutoPreparation.sendAuthority;
+      return handleGlobalSubmitRef.current({
+        ...options,
+        preparedBlankChat: {
+          conversationId: preparedConversationId,
+          selectionTicket: blankAutoPreparation.selectionTicket,
+          draft: blankAutoPreparation.draft,
+          ...(sendAuthority
+            ? {
+                preparedDraftSend: sendAuthority.preparedDraftSend,
+                draftSettlement: sendAuthority.draftSettlement,
+              }
+            : {}),
+        },
+      });
+    }
+    if (
+      currentChatIdRef.current === null &&
+      newChatAutoUnknownRef.current?.identityKey === identityKey &&
+      newChatAutoUnknownRef.current.selectionTicket ===
+        conversationSelectionTicketRef.current
+    ) {
+      showToast(t("chat.autoSelectionFailed"), "error");
+      return;
+    }
+    const storedSelectionModeUnknown = storedSelectionModeUnknownRef.current;
+    if (
+      storedSelectionModeUnknown?.identityKey === identityKey &&
+      storedSelectionModeUnknown.selectionTicket ===
+        conversationSelectionTicketRef.current &&
+      storedSelectionModeUnknown.conversationId ===
+        accountConversationId(currentChatIdRef.current)
+    ) {
+      showToast(t("chat.autoSelectionFailed"), "error");
+      return;
+    }
     const submitFence = submitIdentityFenceRef.current;
     const ownerKey = identityKey ?? "unresolved";
     if (pendingSubmissionOwnersRef.current.has(ownerKey)) return;
-    const existingChatRuntimeKey = mountedSurface === "chat" && currentChatIdRef.current
+    const preparedBlankChat = options?.preparedBlankChat;
+    const pendingCreatedChat = pendingCreatedChatRef.current;
+    const maySendPreparedBlankChat = Boolean(
+      preparedBlankChat &&
+      preparedBlankChat.conversationId === currentChatIdRef.current &&
+      preparedBlankChat.selectionTicket === conversationSelectionTicketRef.current &&
+      pendingCreatedChat?.id === preparedBlankChat.conversationId &&
+      pendingCreatedChat.identityKey === identityKey
+    );
+    const existingChatRuntimeKey = mountedSurface === "chat" &&
+      currentChatIdRef.current &&
+      !maySendPreparedBlankChat
       ? chatRuntimeKey({
       identityKey: identityKey ?? "account",
       conversationId: currentChatIdRef.current,
@@ -5206,7 +5868,17 @@ export function ChatPageClient({
       token: crypto.randomUUID(),
       identityKey,
       identityEpoch: submitFence.epoch,
-      originConversationId: currentChatIdRef.current,
+      // Preparing Smart Adaptive creates and selects the owned Chat before
+      // this recursive submit starts, but the user's send still originated
+      // from the blank workspace. Treating that just-created id as an
+      // existing transcript makes the runtime-read guard reject the send
+      // while its first empty-history GET is still loading. The exact
+      // prepared id/ticket/pending-created-row checks above are the authority
+      // for this one first turn; every ordinary stored conversation keeps the
+      // runtime-read barrier.
+      originConversationId: maySendPreparedBlankChat
+        ? null
+        : currentChatIdRef.current,
     };
     pendingSubmissionOwnersRef.current.set(ownerKey, owner);
     // Which conversation this send started from, published for the shells.
@@ -5234,6 +5906,15 @@ export function ChatPageClient({
       }
       await runGlobalSubmit(options, owner);
     } finally {
+      const preparedBlank = options?.preparedBlankChat;
+      if (
+        preparedBlank?.preparedDraftSend &&
+        preparedBlank.draftSettlement &&
+        !preparedBlank.draftSettlement.settled
+      ) {
+        abortDraftSend(preparedBlank.preparedDraftSend);
+        preparedBlank.draftSettlement.settled = true;
+      }
       // Compare-and-delete, never plain clear: A may finish after B has
       // acquired its own submit token, and A has no authority to unlock B.
       const finalOwner = pendingSubmissionOwnersRef.current.get(ownerKey);
@@ -5290,10 +5971,75 @@ export function ChatPageClient({
       is the ordinary send path, which is the point -- the expansion runs the
       workflow that already exists rather than a second one beside it.
     */
-    const trimmed = (options?.overrideText ?? inputValue).trim();
+    const preparedBlankDraft = options?.preparedBlankChat?.draft;
+    const suppliedPreparedDraft = options?.preparedBlankChat?.preparedDraftSend ?? null;
+    const suppliedDraftSettlement = options?.preparedBlankChat?.draftSettlement ?? null;
+    const markSuppliedDraftSettled = (prepared: PreparedDraftSend) => {
+      if (prepared.token === suppliedPreparedDraft?.token && suppliedDraftSettlement) {
+        suppliedDraftSettlement.settled = true;
+      }
+    };
+    const abortPreparedDraft = (prepared: PreparedDraftSend) => {
+      abortDraftSend(prepared);
+      markSuppliedDraftSettled(prepared);
+    };
+    const reconcilePreparedDraft = (
+      prepared: PreparedDraftSend,
+      outcome: "unchanged" | "ambiguous"
+    ) => {
+      reconcileDraftSend(prepared, outcome);
+      markSuppliedDraftSettled(prepared);
+    };
+    const sendInputValue = preparedBlankDraft?.text ?? inputValue;
+    const sendInputAttachments = preparedBlankDraft?.attachments ?? attachments;
+    const trimmed = (options?.overrideText ?? sendInputValue).trim();
     const isOverrideSend = typeof options?.overrideText === "string";
     if (!trimmed && isOverrideSend) return;
-    if ((!trimmed && attachments.length === 0) || selectedModels.length === 0) return;
+    if ((!trimmed && sendInputAttachments.length === 0) || selectedModels.length === 0) return;
+    let guestAutoCapabilityForSend: string | null = null;
+    if (
+      isGuestMode &&
+      mountedSurface === "chat" &&
+      selectionMode === "auto" &&
+      autoSelectionOffered
+    ) {
+      const authorityIdentity = submitOwner.identityKey;
+      const authorityTicket = conversationSelectionTicketRef.current;
+      try {
+        const response = await fetch("/api/products/chat/capabilities", {
+          cache: "no-store",
+        });
+        const data = response.ok
+          ? await response.json().catch(() => null)
+          : await discardResponseBody(response).then(() => null);
+        if (
+          !submitOwnerIsCurrent() ||
+          authorityIdentity !== identityNamespaceKey(identityNamespaceRef.current) ||
+          authorityTicket !== conversationSelectionTicketRef.current ||
+          selectionModeRef.current !== "auto"
+        ) return;
+        const authority = typeof data?.guestAutoCapability === "string"
+          ? data.guestAutoCapability
+          : null;
+        if (
+          data?.autoSelection?.offered !== true ||
+          data?.guestAuto?.attachmentSupport !== "manual_only" ||
+          !authority
+        ) {
+          invalidateGuestAutoCapability(true);
+          showToast(t("chat.autoSelectionFailed"), "error");
+          return;
+        }
+        storeGuestAutoCapability(authority);
+        guestAutoCapabilityForSend = authority;
+      } catch {
+        if (submitOwnerIsCurrent()) {
+          invalidateGuestAutoCapability(true);
+          showToast(t("chat.autoSelectionFailed"), "error");
+        }
+        return;
+      }
+    }
     const productResolution = !isOverrideSend
       ? promptRefinerResolutionRef.current
       : null;
@@ -5309,7 +6055,7 @@ export function ChatPageClient({
           resolution: productResolution,
           decision: productDecision,
           currentScope: promptRefinerProductScope,
-          currentPrompt: inputValue,
+          currentPrompt: sendInputValue,
           boundAttachmentKey: promptRefinerBoundAttachmentKeyRef.current,
           currentAttachmentKey: promptRefinerAttachmentKey,
         })
@@ -5342,7 +6088,7 @@ export function ChatPageClient({
     const authoredPrompt = explicitPromptRefinerDecision
       ? explicitProductSend!.authoredPrompt
       : promptRefinerAuthoredPromptForSend({
-          rawPrompt: inputValue,
+          rawPrompt: sendInputValue,
           ordinaryPrompt: trimmed,
           productTurn: requestAutoPrepare || skipAutoForThisTurn,
         });
@@ -5357,9 +6103,20 @@ export function ChatPageClient({
     // Captured before the first await: everything below may run while the
     // user is looking somewhere else, and this draft must only ever be
     // cleared once this send has actually been accepted.
-    const originScopeId = currentChatId;
+    const originConversationId = currentChatId;
+    const pendingCreatedDraft = pendingCreatedChatRef.current;
+    const continuesPendingCreatedDraft = Boolean(
+      currentChatId &&
+      pendingCreatedDraft?.id === currentChatId &&
+      pendingCreatedDraft.identityKey === identityKey
+    );
+    const originDraftScopeId =
+      preparedBlankDraft || continuesPendingCreatedDraft ? null : currentChatId;
     const draftSendCapture = !isGuestMode && !isOverrideSend && mountedSurface === "chat"
-      ? captureDraftSend({ text: authoredPrompt, attachments }, originScopeId)
+      ? suppliedPreparedDraft ? null : captureDraftSend(
+          { text: authoredPrompt, attachments: sendInputAttachments },
+          originDraftScopeId
+        )
       : null;
     // A new blank draft is a new intent even when its id and model stay equal.
     const preparedSelectionTicket = conversationSelectionTicketRef.current;
@@ -5369,16 +6126,19 @@ export function ChatPageClient({
       (mountedSurface !== "chat" || (
       Boolean(identityKey) && identityKey === identityNamespaceKey(identityNamespaceRef.current) &&
       preparedSelectionTicket === conversationSelectionTicketRef.current &&
-      currentChatIdRef.current === originScopeId &&
+      currentChatIdRef.current === originConversationId &&
       sameStringList(preparedModels, latestModelSettingsRef.current.models) &&
       sameStringList(preparedDisabled, latestModelSettingsRef.current.disabled)
     ));
     const promptAttachments = isOverrideSend
       ? []
-      : await cloneAttachmentPreviews(attachments);
+      : await cloneAttachmentPreviews(sendInputAttachments);
 	if (!chatOriginStillCurrent()) return;
 	
-    if (isGuestMode) {
+	// Manual Guest sends have one known model and retain the client-side hint.
+	// Smart Adaptive has no selected model yet: its server-side reachable-pool
+	// prehold must decide whether a cheaper eligible candidate still fits.
+	if (isGuestMode && !guestAutoCapabilityForSend) {
       const requestCredits = estimateWeightedRequestCredits(trimmed, promptAttachments);
       if (guestMessageCount + requestCredits > MAX_GUEST_MESSAGES) {
           showToast(t("sidebar.exceedDailyLimit"), "error");
@@ -5387,7 +6147,9 @@ export function ChatPageClient({
     }
 
 	let activeChatId = currentChatId;
-    let pendingCreatedConversationAdoption = false;
+    let pendingCreatedConversationAdoption = Boolean(
+      suppliedPreparedDraft || continuesPendingCreatedDraft
+    );
     // Captured only when a brand-new conversation is created below, so the
     // first-turn title tracking further down knows the exact interim title
     // string without re-deriving it from state that may not have committed
@@ -5434,7 +6196,7 @@ export function ChatPageClient({
         // finds the placeholder welcome message.
         activeChatId = conversations[0]?.id;
         if (!activeChatId) {
-          activeChatId = `guest_${Date.now()}`;
+          activeChatId = newGuestConversationId(guestWorkspaceProduct);
           const initialChat = {
             id: activeChatId,
             title: t("sidebar.newChat"),
@@ -5448,7 +6210,7 @@ export function ChatPageClient({
           };
           justCreatedTitle = initialChat.title;
           setConversations([initialChat]);
-          localStorage.setItem(GUEST_CONVERSATIONS_STORAGE_KEY, JSON.stringify([initialChat]));
+          localStorage.setItem(guestConversationsStorageKey, JSON.stringify([initialChat]));
         }
         setCurrentChatId(activeChatId);
         currentChatIdRef.current = activeChatId;
@@ -5456,11 +6218,11 @@ export function ChatPageClient({
         // draft; hand it to the real id so an abort further down (preflight,
         // credits, network) leaves the text under the conversation that is
         // now on screen instead of stranding it behind a key nothing reads.
-        migrateDraft(originScopeId, activeChatId);
+        migrateDraft(originDraftScopeId, activeChatId);
       } else {
       try {
         const newConversationTitle = (
-          trimmed || attachments[0]?.name || t("sidebar.newChat")
+          trimmed || sendInputAttachments[0]?.name || t("sidebar.newChat")
         ).slice(0, 30);
         const res = await fetch(mountedSurface === "chat" ? "/api/products/chat/conversations" : "/api/conversations", {
           method: "POST",
@@ -5569,11 +6331,12 @@ export function ChatPageClient({
                 modelIds: [...createdModels],
                 disabledIds: [...createdDisabled],
               };
+              setPendingCreatedDraftScope({ id: data.id, identityKey });
             }
           } else {
             setCurrentChatId(activeChatId);
             currentChatIdRef.current = activeChatId;
-            migrateDraft(originScopeId, activeChatId);
+            migrateDraft(originDraftScopeId, activeChatId);
           }
           fetchConversations();
         } else {
@@ -5630,7 +6393,7 @@ export function ChatPageClient({
         if (!submitOwnerIsCurrent()) return false;
         const currentIdentityKey = identityNamespaceKey(identityNamespaceRef.current);
         const preparedConversationId = pendingCreatedConversationAdoption
-          ? originScopeId
+          ? originConversationId
           : activeChatId!;
         const preparedSelectionIsCurrent = Boolean(identityKey) &&
           identityKey === currentIdentityKey &&
@@ -5707,7 +6470,7 @@ export function ChatPageClient({
                prompt: authoredPrompt,
             });
 	  if (!chatSendIsCurrent()) return;
-      let preparedDraft: Awaited<ReturnType<typeof prepareDraftSend>> = null;
+      let preparedDraft: Awaited<ReturnType<typeof prepareDraftSend>> = suppliedPreparedDraft;
       if (draftSendCapture) {
         preparedDraft = await prepareDraftSend(draftSendCapture);
         if (!preparedDraft) {
@@ -5717,7 +6480,7 @@ export function ChatPageClient({
           return;
         }
         if (!chatSendIsCurrent()) {
-          abortDraftSend(preparedDraft);
+          abortPreparedDraft(preparedDraft);
           return;
         }
       }
@@ -5755,7 +6518,7 @@ export function ChatPageClient({
           // request from this send path.
         }
         if (!chatSendIsCurrent()) {
-          abortDraftSend(preparedDraft);
+          abortPreparedDraft(preparedDraft);
           return;
         }
       }
@@ -5782,7 +6545,7 @@ export function ChatPageClient({
           : attachment.uploadId ? [{ uploadId: attachment.uploadId }] : []
       );
       if (carriesStoredAttachments && promptAttachmentReferences.length !== promptAttachments.length) {
-        if (preparedDraft) abortDraftSend(preparedDraft);
+        if (preparedDraft) abortPreparedDraft(preparedDraft);
         showToast(t("chat.questionSaveFailed"), "info");
         return;
       }
@@ -5823,7 +6586,7 @@ export function ChatPageClient({
           | null = null;
         let indeterminateFailureCode: string | undefined;
         if (!chatSendIsCurrent()) {
-          if (preparedDraft) abortDraftSend(preparedDraft);
+          if (preparedDraft) abortPreparedDraft(preparedDraft);
           return;
         }
         try {
@@ -5939,7 +6702,7 @@ export function ChatPageClient({
             receipt?.outcome === "unchanged" &&
             indeterminate === "completed-refusal"
           ) {
-            reconcileDraftSend(preparedDraft, "unchanged");
+            reconcilePreparedDraft(preparedDraft, "unchanged");
             if (chatSendIsCurrent()) {
               showToast(
                 t(
@@ -5954,7 +6717,7 @@ export function ChatPageClient({
             // There is no safe guess. Keep the exact server-backed draft
             // frozen and retain this identity's submit owner, while allowing
             // another signed-in identity in the same tab to keep working.
-            reconcileDraftSend(preparedDraft, "ambiguous");
+            reconcilePreparedDraft(preparedDraft, "ambiguous");
             holdSubmitForReceiptRecovery();
             return;
           }
@@ -5962,7 +6725,7 @@ export function ChatPageClient({
 
         if (deterministicFailure) {
           if (preparedDraft || carriesStoredAttachments) {
-            if (preparedDraft) abortDraftSend(preparedDraft);
+            if (preparedDraft) abortPreparedDraft(preparedDraft);
             if (chatSendIsCurrent()) {
               showToast(
                 t(
@@ -6029,7 +6792,7 @@ export function ChatPageClient({
               bound.some((item) => !Number.isInteger(item.ordinal) || item.ordinal < 0 ||
                 item.ordinal >= promptAttachments.length || typeof item.id !== "string" || !item.id))) {
             if (preparedDraft) {
-              reconcileDraftSend(preparedDraft, "ambiguous");
+              reconcilePreparedDraft(preparedDraft, "ambiguous");
               holdSubmitForReceiptRecovery();
             }
             if (chatSendIsCurrent()) showToast(t("chat.questionSaveFailed"), "info");
@@ -6054,10 +6817,11 @@ export function ChatPageClient({
             sendCurrentAfterMessageSave = chatSendIsCurrent(false, false);
             const submittedDraftStillCurrent = commitDraftSend(
               preparedDraft,
-              originScopeId,
+              originDraftScopeId,
               promptAttachments
             );
-            if (!submittedDraftStillCurrent) {
+            markSuppliedDraftSettled(preparedDraft);
+            if (!submittedDraftStillCurrent && !suppliedPreparedDraft) {
               // The user edited the composer while Message persistence was
               // pending. The saved turn remains durable, but dispatching its
               // provider request now would make the newer draft look sent.
@@ -6071,7 +6835,7 @@ export function ChatPageClient({
               // The source server draft is gone atomically with the Message.
               // Only now may unsent edits made during preflight follow the URL
               // to the created conversation as a fresh revision-0 draft.
-              migrateDraft(originScopeId, activeChatId, preparedDraft);
+              migrateDraft(originDraftScopeId, activeChatId, preparedDraft);
               setCurrentChatId(activeChatId);
               currentChatIdRef.current = activeChatId;
               pendingCreatedConversationAdoption = false;
@@ -6097,11 +6861,20 @@ export function ChatPageClient({
         activeModelIds.length, { conversation_mode: isGuestMode ? "guest" : "account" });
       promptCountsRef.current.set(activeChatId, previousCount + 1);
       if (previousCount === 0 && authoredPrompt.trim()) {
+        const preparedCreatedChat = pendingCreatedChatRef.current;
         firstTurnTitleTrackingRef.current.set(comparisonId, {
           chatId: activeChatId,
-          interimTitle: justCreatedTitle ?? conversation?.title ?? t("sidebar.newChat"),
+          interimTitle:
+            justCreatedTitle ??
+            (preparedCreatedChat?.id === activeChatId &&
+            preparedCreatedChat.identityKey === identityKey
+              ? preparedCreatedChat.title
+              : null) ??
+            conversation?.title ??
+            t("sidebar.newChat"),
           firstPromptText: authoredPrompt,
         });
+        clearPendingCreatedChatIfOwned(activeChatId, identityKey);
       }
 
       // What re-preparing this run would need, kept because the panels that
@@ -6220,6 +6993,9 @@ export function ChatPageClient({
           : {}),
         ...(preflight.admissionToken
           ? { admissionToken: preflight.admissionToken }
+          : {}),
+        ...(guestAutoCapabilityForSend
+          ? { guestAutoCapability: guestAutoCapabilityForSend }
           : {}),
         // The layout always travels, the bundle only when there is one: the
         // layout describes the *send*, and it is what decides whether a stale
@@ -6650,6 +7426,20 @@ export function ChatPageClient({
     [activeModelCount]
   );
 
+  const rememberBlankChatManualModelIntent = () => {
+    if (
+      mountedSurface !== "chat" ||
+      currentChatIdRef.current !== null ||
+      !identityKey
+    ) return;
+    blankChatDefaultModeOverrideRef.current = {
+      identityKey,
+      selectionTicket: conversationSelectionTicketRef.current,
+      mode: "manual",
+    };
+    setSelectionMode("manual");
+  };
+
   const toggleModel = (modelId: string) => {
     const model = getModel(modelId);
     // The latest committed selection, not this render's copy of it: the
@@ -6681,6 +7471,7 @@ export function ChatPageClient({
 	if (mountedSurface === "chat") {
       if (committedModels.length === 1 && isSelected && committedDisabled.length === 0) return false;
       mutateModelSettings(currentChatId, [modelId], []);
+      rememberBlankChatManualModelIntent();
       return true;
     }
 	let nextModels = [...committedModels];
@@ -6745,6 +7536,7 @@ export function ChatPageClient({
     }
     if (mountedSurface === "chat") {
       mutateModelSettings(currentChatId, [addModelId], []);
+      rememberBlankChatManualModelIntent();
       return true;
     }
     // Same reason as toggleModel above: derived from the latest committed
@@ -6917,51 +7709,463 @@ export function ChatPageClient({
   };
 
   /**
-   * Turning Auto on or off for this conversation.
+   * Store Auto before displaying it as active.
    *
-   * Optimistic and then corrected, like the memory mode above, but with one
-   * extra rule that is not cosmetic: a **failed** attempt to turn Auto on must
-   * put the switch back to manual. UI contract §1 -- a control that flips,
-   * saves and changes nothing cannot be told apart from Auto agreeing with the
-   * user every time, and the server refuses `auto` for an account it would not
-   * route (`mayStoreSelectionMode`). Leaving the switch on after that refusal
-   * would be exactly the lie the contract forbids.
-   *
-   * Going back to manual is accepted unconditionally by the server, including
-   * for an account that has left the cohort, so that direction only fails on a
-   * transport error.
+   * A blank Chat has a read-only capability but deliberately has no row. An
+   * an explicit Auto click or the first Send with the server-offered default
+   * creates that owned Chat, reads its canonical product and capability, then
+   * stores `auto` before adopting the id. Merely viewing the page therefore
+   * creates nothing, while the first Send can never run on a client-only Auto
+   * choice.
    */
-  const handleSelectionModeChange = (next: boolean) => {
-    const targetId = accountConversationId(currentChatId);
-    if (!targetId || !sessionUserId) return;
+  const handleSelectionModeChange = async (
+    next: boolean,
+    sendAuthority?: BlankChatAutoSendAuthority
+  ): Promise<boolean> => {
+    if (!identityKey || mountedSurface !== "chat") return false;
     const mode = next ? "auto" : "manual";
-    const previous = selectionMode;
-    if (mode === previous) return;
+    if (isGuestMode) {
+      if (next && !autoSelectionOffered) return false;
+      blankChatDefaultModeOverrideRef.current = {
+        identityKey,
+        selectionTicket: conversationSelectionTicketRef.current,
+        mode,
+      };
+      selectionModeRef.current = mode;
+      setSelectionMode(mode);
+      const guestConversationId = currentChatIdRef.current;
+      if (guestConversationId && isGuestConversationId(guestConversationId)) {
+        setConversations((current) => current.map((conversation) =>
+          conversation.id === guestConversationId
+            ? { ...conversation, selectionMode: mode }
+            : conversation
+        ));
+      }
+      return true;
+    }
+    if (!sessionUserId) return false;
+    const targetId = accountConversationId(currentChatId);
 
-    setSelectionMode(mode);
-    setSelectionModePending(true);
-    void fetch(`/api/conversations/${targetId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selectionMode: mode }),
-    })
-      .then(async (response) => {
+    if (targetId) {
+      const previous = selectionMode;
+      if (mode === previous) return true;
+      const requestIdentity = identityKey;
+      const requestTicket = conversationSelectionTicketRef.current;
+      const existingUnknown = storedSelectionModeUnknownRef.current;
+      if (
+        existingUnknown?.identityKey === requestIdentity &&
+        existingUnknown.selectionTicket === requestTicket &&
+        existingUnknown.conversationId === targetId
+      ) {
+        showToast(t("chat.autoSelectionFailed"), "error");
+        return false;
+      }
+      const requestSeq = (selectionModeRequestSeqRef.current += 1);
+      const requestStillCurrent = () =>
+        requestSeq === selectionModeRequestSeqRef.current &&
+        requestIdentity === identityNamespaceKey(identityNamespaceRef.current) &&
+        requestTicket === conversationSelectionTicketRef.current &&
+        accountConversationId(currentChatIdRef.current) === targetId;
+      const readStoredMode = async (): Promise<"requested" | "previous" | "unknown"> => {
+        try {
+          const response = await fetch(`/api/conversations/${targetId}`, {
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            await discardResponseBody(response);
+            return "unknown";
+          }
+          const data = await response.json().catch(() => null);
+          if (data?.surface !== "chat") return "unknown";
+          if (
+            data?.selectionMode === mode &&
+            (mode !== "auto" || data?.autoSelection?.offered === true)
+          ) return "requested";
+          if (data?.selectionMode === previous) return "previous";
+          return "unknown";
+        } catch {
+          return "unknown";
+        }
+      };
+      const applyReadback = (
+        readback: "requested" | "previous" | "unknown"
+      ): boolean => {
+        if (!requestStillCurrent()) return false;
+        if (readback === "requested") {
+          storedSelectionModeUnknownRef.current = null;
+          setSelectionModeUnknown(null);
+          setSelectionMode(mode);
+          return true;
+        }
+        if (readback === "previous") {
+          storedSelectionModeUnknownRef.current = null;
+          setSelectionModeUnknown(null);
+          setSelectionMode(previous);
+        } else {
+          storedSelectionModeUnknownRef.current = {
+            identityKey: requestIdentity,
+            selectionTicket: requestTicket,
+            conversationId: targetId,
+          };
+          setSelectionModeUnknown({
+            identityKey: requestIdentity,
+            conversationId: targetId,
+          });
+        }
+        showToast(t("chat.autoSelectionFailed"), "error");
+        return false;
+      };
+      setSelectionModePending(true);
+      try {
+        const response = await fetch(`/api/conversations/${targetId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ selectionMode: mode }),
+        });
         await discardResponseBody(response);
-        if (response.ok) return;
-        setSelectionMode(previous);
-        // A refusal means the server would not route this account after all.
-        // Hiding the control is the honest correction: it is the same state
-        // `offered: false` describes, and leaving it visible invites the user
-        // to try again at something that cannot succeed.
+        if (!requestStillCurrent()) return false;
+        if (response.ok) {
+          storedSelectionModeUnknownRef.current = null;
+          setSelectionModeUnknown(null);
+          setSelectionMode(mode);
+          return true;
+        }
+        // The route may fail after its transaction committed. A server error
+        // therefore has the same unknown-outcome boundary as a lost response:
+        // read once, never repeat the PATCH automatically.
+        if (response.status >= 500) {
+          return applyReadback(await readStoredMode());
+        }
         if (response.status === 403) setAutoSelectionOffered(false);
-        showToast(t("chat.autoSelectionFailed"), "error");
-      })
-      .catch(() => {
         setSelectionMode(previous);
         showToast(t("chat.autoSelectionFailed"), "error");
-      })
-      .finally(() => setSelectionModePending(false));
+        return false;
+      } catch {
+        return applyReadback(await readStoredMode());
+      } finally {
+        if (requestSeq === selectionModeRequestSeqRef.current) {
+          setSelectionModePending(false);
+        }
+      }
+    }
+
+    if (!next) {
+      blankChatDefaultModeOverrideRef.current = {
+        identityKey,
+        selectionTicket: conversationSelectionTicketRef.current,
+        mode: "manual",
+      };
+      setSelectionMode("manual");
+      return true;
+    }
+    if (!autoSelectionOffered || isImageDraftActive) return false;
+
+    const selectionTicket = conversationSelectionTicketRef.current;
+    const existingPreparation = newChatAutoPreparationRef.current;
+    if (
+      existingPreparation?.identityKey === identityKey &&
+      existingPreparation.selectionTicket === selectionTicket
+    ) {
+      if (
+        sendAuthority &&
+        existingPreparation.sendAuthority?.preparedDraftSend.token !==
+          sendAuthority.preparedDraftSend.token
+      ) {
+        return false;
+      }
+      return existingPreparation.promise;
+    }
+    if (
+      newChatAutoUnknownRef.current?.identityKey === identityKey &&
+      newChatAutoUnknownRef.current.selectionTicket === selectionTicket
+    ) {
+      showToast(t("chat.autoSelectionFailed"), "error");
+      return false;
+    }
+
+    const requestSeq = (selectionModeRequestSeqRef.current += 1);
+    const currentIdentityEpoch = submitIdentityFenceRef.current.epoch;
+    const sendAuthorityIsCurrent = !sendAuthority || (
+      sendAuthority.identityKey === identityKey &&
+      sendAuthority.identityEpoch === currentIdentityEpoch &&
+      sendAuthority.selectionTicket === selectionTicket
+    );
+    if (!sendAuthorityIsCurrent) return false;
+    const capturedModels = sendAuthority
+      ? [...sendAuthority.modelIds]
+      : [...latestModelSettingsRef.current.models];
+    const capturedDisabled = sendAuthority
+      ? [...sendAuthority.disabledIds]
+      : [...latestModelSettingsRef.current.disabled];
+    const capturedWebSearchMode = sendAuthority?.webSearchMode ?? webSearchModeRef.current;
+    const capturedProfileId = sendAuthority
+      ? sendAuthority.profileId
+      : pendingProfileIdRef.current;
+    const capturedDraft = sendAuthority?.preparedDraftSend.draft ?? readDraft(null);
+    const capturedAttachmentIds = capturedDraft.attachments.map(
+      (attachment) => attachment.id
+    );
+    const originStillCurrent = () =>
+      requestSeq === selectionModeRequestSeqRef.current &&
+      identityKey === identityNamespaceKey(identityNamespaceRef.current) &&
+      (!sendAuthority || sendAuthority.identityEpoch === submitIdentityFenceRef.current.epoch) &&
+      selectionTicket === conversationSelectionTicketRef.current &&
+      currentChatIdRef.current === null &&
+      mountedSurface === "chat" &&
+      !isImageDraftActiveRef.current;
+    const scopeStillCurrent = () => {
+      const currentDraft = readDraft(null);
+      return (
+        originStillCurrent() &&
+        sameStringList(capturedModels, latestModelSettingsRef.current.models) &&
+        sameStringList(capturedDisabled, latestModelSettingsRef.current.disabled) &&
+        capturedWebSearchMode === webSearchModeRef.current &&
+        capturedProfileId === pendingProfileIdRef.current &&
+        (sendAuthority
+          ? sameStringList(
+              capturedAttachmentIds,
+              currentDraft.attachments.map((attachment) => attachment.id)
+            )
+          : chatDraftMatchesSubmission({
+              submittedText: capturedDraft.text,
+              submittedAttachmentIds: capturedAttachmentIds,
+              currentText: currentDraft.text,
+              currentAttachmentIds: currentDraft.attachments.map(
+                (attachment) => attachment.id
+              ),
+            }))
+      );
+    };
+    const rememberKnownConversation = (
+      id: string,
+      title: string,
+      models: string[],
+      disabled: string[]
+    ) => {
+      if (!originStillCurrent()) return false;
+      pendingCreatedChatRef.current = {
+        id,
+        title,
+        identityKey,
+        modelIds: [...models],
+        disabledIds: [...disabled],
+      };
+      setPendingCreatedDraftScope({ id, identityKey });
+      return true;
+    };
+
+    const promise = (async () => {
+      setSelectionModePending(true);
+      let createdId: string | null = null;
+      let createdTitle = (
+        capturedDraft.text.trim() ||
+        capturedDraft.attachments[0]?.name ||
+        t("sidebar.newChat")
+      ).slice(0, 30);
+      let createdModels = [...capturedModels];
+      let createdDisabled = [...capturedDisabled];
+      try {
+        const reusable = pendingCreatedChatRef.current;
+        if (
+          reusable?.identityKey === identityKey &&
+          sameStringList(reusable.modelIds, capturedModels) &&
+          sameStringList(reusable.disabledIds, capturedDisabled)
+        ) {
+          createdId = reusable.id;
+          createdTitle = reusable.title;
+          createdModels = [...reusable.modelIds];
+          createdDisabled = [...reusable.disabledIds];
+        } else {
+          let response: Response;
+          try {
+            response = await fetch("/api/products/chat/conversations", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                title: createdTitle,
+                selectedModels: capturedModels,
+                disabledPanels: capturedDisabled,
+                webSearchMode: capturedWebSearchMode,
+                ...(capturedProfileId
+                  ? { assistantProfileId: capturedProfileId }
+                  : {}),
+              }),
+            });
+          } catch {
+            if (originStillCurrent()) {
+              newChatAutoUnknownRef.current = { identityKey, selectionTicket };
+              setSelectionModeUnknown({ identityKey, conversationId: null });
+              showToast(t("chat.autoSelectionFailed"), "error");
+            }
+            return false;
+          }
+          if (!response.ok) {
+            await discardResponseBody(response);
+            if (originStillCurrent()) {
+              // Creating a Chat can fail after the row committed while the
+              // response is being formatted. A 5xx is therefore unknown and
+              // blocks another create for this exact blank scope.
+              if (response.status >= 500) {
+                newChatAutoUnknownRef.current = { identityKey, selectionTicket };
+                setSelectionModeUnknown({ identityKey, conversationId: null });
+              } else if (response.status === 403 || response.status === 404) {
+                setAutoSelectionOffered(false);
+              }
+              showToast(t("chat.autoSelectionFailed"), "error");
+            }
+            return false;
+          }
+          const created = await response.json().catch(() => null);
+          if (typeof created?.id !== "string") {
+            if (originStillCurrent()) {
+              newChatAutoUnknownRef.current = { identityKey, selectionTicket };
+              setSelectionModeUnknown({ identityKey, conversationId: null });
+              showToast(t("chat.autoSelectionFailed"), "error");
+            }
+            return false;
+          }
+          const knownCreatedId = created.id as string;
+          createdId = knownCreatedId;
+          createdModels = clampSelectedModels(
+            Array.isArray(created.selectedModels)
+              ? created.selectedModels
+              : capturedModels
+          );
+          createdDisabled = uniqueStrings(
+            Array.isArray(created.disabledPanels)
+              ? created.disabledPanels
+              : capturedDisabled
+          ).filter((modelId) => createdModels.includes(modelId));
+          rememberKnownConversation(
+            knownCreatedId,
+            createdTitle,
+            createdModels,
+            createdDisabled
+          );
+        }
+
+        if (!scopeStillCurrent() || !createdId) {
+          if (originStillCurrent()) void fetchConversations();
+          return false;
+        }
+        const readCanonical = async () => {
+          const response = await fetch(`/api/conversations/${createdId}`, {
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            await discardResponseBody(response);
+            return null;
+          }
+          return response.json().catch(() => null);
+        };
+        const canonical = await readCanonical().catch(() => null);
+        if (!canonical) {
+          if (originStillCurrent()) {
+            showToast(t("chat.autoSelectionFailed"), "error");
+          }
+          return false;
+        }
+        if (
+          canonical.surface !== "chat" ||
+          canonical.autoSelection?.offered !== true
+        ) {
+          if (originStillCurrent()) {
+            setAutoSelectionOffered(false);
+            showToast(t("chat.autoSelectionFailed"), "error");
+          }
+          return false;
+        }
+        if (!scopeStillCurrent()) {
+          if (originStillCurrent()) void fetchConversations();
+          return false;
+        }
+
+        let stored = false;
+        const verifyUnknownPatch = async () => {
+          const verified = await readCanonical().catch(() => null);
+          if (verified?.selectionMode === "auto" &&
+              verified?.autoSelection?.offered === true) {
+            return true;
+          }
+          if (
+            (!verified || verified?.selectionMode !== "manual") &&
+            originStillCurrent()
+          ) {
+            newChatAutoUnknownRef.current = { identityKey, selectionTicket };
+            setSelectionModeUnknown({ identityKey, conversationId: null });
+          }
+          return false;
+        };
+        try {
+          const response = await fetch(`/api/conversations/${createdId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ selectionMode: "auto" }),
+          });
+          await discardResponseBody(response);
+          stored = response.ok;
+          if (!stored && response.status >= 500) {
+            stored = await verifyUnknownPatch();
+          } else if (response.status === 403 && originStillCurrent()) {
+            setAutoSelectionOffered(false);
+          }
+        } catch {
+          // A lost response can still have committed. One read-only check is
+          // the only safe way to distinguish success from an unknown write;
+          // never issue a second PATCH.
+          stored = await verifyUnknownPatch();
+        }
+        if (!stored) {
+          if (originStillCurrent()) {
+            showToast(t("chat.autoSelectionFailed"), "error");
+          }
+          return false;
+        }
+        if (!scopeStillCurrent()) {
+          if (originStillCurrent()) void fetchConversations();
+          return false;
+        }
+        const confirmed = { ...canonical, selectionMode: "auto" };
+        currentChatIdRef.current = createdId;
+        setCurrentChatId(createdId);
+        applyConversationSettings(confirmed, createdId);
+        newChatAutoUnknownRef.current = null;
+        setSelectionModeUnknown(null);
+        setSelectionMode("auto");
+        void fetchConversations();
+        return true;
+      } finally {
+        const active = newChatAutoPreparationRef.current;
+        if (
+          active?.identityKey === identityKey &&
+          active.selectionTicket === selectionTicket &&
+          active.requestSeq === requestSeq
+        ) {
+          newChatAutoPreparationRef.current = null;
+          if (requestSeq === selectionModeRequestSeqRef.current) {
+            setSelectionModePending(false);
+          }
+        }
+      }
+    })();
+
+    newChatAutoPreparationRef.current = {
+      identityKey,
+      selectionTicket,
+      requestSeq,
+      draft: {
+        text: capturedDraft.text,
+        attachments: [...capturedDraft.attachments],
+      },
+      ...(sendAuthority ? { sendAuthority } : {}),
+      promise,
+    };
+    return promise;
   };
+
+  useLayoutEffect(() => {
+    selectionModeChangeRef.current = handleSelectionModeChange;
+  });
 
   /**
    * §14. Attaching, detaching, and the explicit move to a newer revision are
@@ -6980,6 +8184,7 @@ export function ChatPageClient({
     const targetId = accountConversationId(currentChatId);
     if (!targetId) {
       setPendingProfileId(profileId);
+      pendingProfileIdRef.current = profileId;
       return;
     }
     const previous = assistantProfile;
@@ -7294,6 +8499,14 @@ export function ChatPageClient({
       latestLocalComparisonPromptRef.current = null;
       currentChatIdRef.current = null;
       setCurrentChatId(null);
+      if (mountedSurface === "chat" && identityKey) {
+        blankChatDefaultModeOverrideRef.current = {
+          identityKey,
+          selectionTicket: conversationSelectionTicketRef.current,
+          mode: "manual",
+        };
+        setSelectionMode("manual");
+      }
       setSelectedModels(applied);
       setDisabledPanels([]);
       setPersonalizedPrompt(promptExample || null);
@@ -7363,6 +8576,7 @@ export function ChatPageClient({
     }
     if (mountedSurface === "chat") {
       mutateModelSettings(currentChatId, [newModelId], []);
+      rememberBlankChatManualModelIntent();
       return;
     }
     const nextModels = clampSelectedModels(
@@ -7724,7 +8938,7 @@ export function ChatPageClient({
         : Info;
   const trialCopy = guestTrialCopy[lang];
   const guestCompareSignInHref = `/auth/signin?callbackUrl=${encodeURIComponent(
-    `/chat?lang=${encodeURIComponent(lang)}`
+    `${REVIEW_WORKSPACE_PATH}?lang=${encodeURIComponent(lang)}`
   )}`;
   const quickModelNames = new Map(
     (compareSummary?.responseMap || []).map((response) => [
@@ -8477,6 +9691,18 @@ export function ChatPageClient({
     ]
   );
 
+  const productSwitchHasUnknownWrite =
+    selectionModeUnknown?.identityKey === identityKey &&
+    selectionModeUnknown.conversationId === currentChatId;
+  const productSwitchDisabled =
+    Boolean(pendingSubmission) ||
+    selectionModePending ||
+    Boolean(productSwitchHasUnknownWrite) ||
+    draftConflict ||
+    draftSyncFailed;
+  const handleProductSwitch = () =>
+    !productSwitchDisabled && preserveDraftsForProductSwitch();
+
   return (
     // Every surface that decides whether a model searches reads this: the
     // composer's chip and credit estimate, the picker's badge and "Web search"
@@ -8513,6 +9739,9 @@ export function ChatPageClient({
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport ? (
         <MobileChatShell
+          currentProduct={mountedSurface === "chat" ? "chat" : "review"}
+          productSwitchDisabled={productSwitchDisabled}
+          onProductSwitch={handleProductSwitch}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
@@ -8534,6 +9763,7 @@ export function ChatPageClient({
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
           durableDraftLocked={
+            guestAutoCapabilityPending ||
             mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
@@ -8578,14 +9808,15 @@ export function ChatPageClient({
           // One boolean, and it is already false unless a confirmed read said
           // otherwise. The control renders when it is true and does not exist
           // when it is false -- no disabled state, no greyed row (UI contract
-          // auto-model-selection.md §1). Also false before a conversation
-          // exists: the server refuses `auto` for one, so a switch there could
-          // only ever save nothing.
+          // auto-model-selection.md §1). A blank Chat is the one exception to
+          // needing a stored id here: its read-only capability is confirmed
+          // first. Auto may then be shown as the default intent, while the
+          // handler creates and stores the owned Chat before first Send.
           autoSelectionOffered={
             autoSelectionOffered &&
-            !isGuestMode &&
-            Boolean(currentChatId) &&
-            !isGuestConversationId(currentChatId ?? "")
+            (isGuestMode
+              ? (currentChatId === null || isGuestConversationId(currentChatId))
+              : (currentChatId === null || !isGuestConversationId(currentChatId)))
           }
           selectionMode={selectionMode}
           selectionModePending={selectionModePending}
@@ -8657,6 +9888,9 @@ export function ChatPageClient({
         />
       ) : (
         <DesktopChatShell
+          currentProduct={mountedSurface === "chat" ? "chat" : "review"}
+          productSwitchDisabled={productSwitchDisabled}
+          onProductSwitch={handleProductSwitch}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
@@ -8678,6 +9912,7 @@ export function ChatPageClient({
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
           durableDraftLocked={
+            guestAutoCapabilityPending ||
             mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
@@ -8722,14 +9957,15 @@ export function ChatPageClient({
           // One boolean, and it is already false unless a confirmed read said
           // otherwise. The control renders when it is true and does not exist
           // when it is false -- no disabled state, no greyed row (UI contract
-          // auto-model-selection.md §1). Also false before a conversation
-          // exists: the server refuses `auto` for one, so a switch there could
-          // only ever save nothing.
+          // auto-model-selection.md §1). A blank Chat is the one exception to
+          // needing a stored id here: its read-only capability is confirmed
+          // first. Auto may then be shown as the default intent, while the
+          // handler creates and stores the owned Chat before first Send.
           autoSelectionOffered={
             autoSelectionOffered &&
-            !isGuestMode &&
-            Boolean(currentChatId) &&
-            !isGuestConversationId(currentChatId ?? "")
+            (isGuestMode
+              ? (currentChatId === null || isGuestConversationId(currentChatId))
+              : (currentChatId === null || !isGuestConversationId(currentChatId)))
           }
           selectionMode={selectionMode}
           selectionModePending={selectionModePending}
@@ -8906,7 +10142,12 @@ export function ChatPageClient({
                   trigger: "proactive",
                   cta_location: "guest_multi_model",
                 });
-                if (currentChatId) writePendingGuestImportIntent(currentChatId);
+                // The import endpoint creates Review rows. Guest Chat stays
+                // local until a separate, server-owned Chat import contract
+                // exists; never relabel it as Review during sign-in.
+                if (mountedSurface !== "chat" && currentChatId) {
+                  writePendingGuestImportIntent(currentChatId);
+                }
               }}
               className="flex min-h-11 flex-col items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-500"
             >
@@ -9092,7 +10333,9 @@ export function ChatPageClient({
                 trigger: "proactive",
                 cta_location: "guest_save_compare",
               });
-              if (currentChatId) writePendingGuestImportIntent(currentChatId);
+              if (mountedSurface !== "chat" && currentChatId) {
+                writePendingGuestImportIntent(currentChatId);
+              }
               setShowGuestSaveCompareCard(false);
             }}
             className="flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-center text-xs font-bold text-white hover:bg-blue-500"
@@ -9458,7 +10701,9 @@ export function ChatPageClient({
                       trigger: "proactive",
                       cta_location: "guest_save_review",
                     });
-                    if (currentChatId) writePendingGuestImportIntent(currentChatId);
+                    if (mountedSurface !== "chat" && currentChatId) {
+                      writePendingGuestImportIntent(currentChatId);
+                    }
                   }}
                   className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500"
                 >

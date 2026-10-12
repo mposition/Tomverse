@@ -8,6 +8,11 @@ import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import type { UserPlan } from "@/components/chat/useUserUsage";
 import { writePendingGuestImportIntent } from "@/lib/guestImport";
 import { lockBodyScroll } from "@/components/useBodyScrollLock";
+import {
+  chatProductUiCopy,
+  localizedProductHref,
+  type ChatWorkspaceProduct,
+} from "@/lib/chatProductUiCopy";
 
 const interpolateCopy = (
   template: string,
@@ -33,6 +38,10 @@ type UsageLimitModalProps = {
   creditShortfall: number;
   signInCallbackUrl: string;
   currentChatId?: string | null;
+  /** Only the legacy Review trial has an account import route. */
+  guestImportAvailable?: boolean;
+  /** Keeps billing round trips on the product that opened this modal. */
+  currentProduct?: ChatWorkspaceProduct;
 };
 
 export function UsageLimitModal({
@@ -50,6 +59,8 @@ export function UsageLimitModal({
   creditShortfall,
   signInCallbackUrl,
   currentChatId,
+  guestImportAvailable = true,
+  currentProduct = "review",
 }: UsageLimitModalProps) {
   const { t, lang } = useLanguage();
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -190,7 +201,9 @@ export function UsageLimitModal({
 
         <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
           {isGuestMode
-            ? t("chat.guestLimitReachedBody")
+            ? (guestImportAvailable
+                ? t("chat.guestLimitReachedBody")
+                : chatProductUiCopy[lang].guestChatSignInDescription)
             : isAccountMonthlyLimitReached
               ? t("chat.monthlyLimitReachedBody")
               : interpolateCopy(t("chat.dailyPlanLimitReachedBody"), {
@@ -211,14 +224,23 @@ export function UsageLimitModal({
         <div className="mt-4 flex flex-col gap-2">
           {isGuestMode ? (
             <a
+              data-testid="usage-limit-guest-signin"
               href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
-              onClick={() => currentChatId && writePendingGuestImportIntent(currentChatId)}
+              onClick={() => {
+                if (guestImportAvailable && currentChatId) {
+                  writePendingGuestImportIntent(currentChatId);
+                }
+              }}
               className="flex flex-col items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-center text-white transition hover:bg-blue-500"
             >
-              <span className="text-sm font-bold">{t("chat.continueConversationCta")}</span>
-              <span className="mt-0.5 text-xs font-medium text-blue-100">
-                {t("chat.continueConversationCtaSubtext")}
+              <span className="text-sm font-bold">
+                {guestImportAvailable ? t("chat.continueConversationCta") : t("auth.login")}
               </span>
+              {guestImportAvailable && (
+                <span className="mt-0.5 text-xs font-medium text-blue-100">
+                  {t("chat.continueConversationCtaSubtext")}
+                </span>
+              )}
             </a>
           ) : (
             <>
@@ -228,7 +250,7 @@ export function UsageLimitModal({
               <CreditPackPurchaseButton
                 trigger="limit_hit"
                 ctaLocation="credit_limit_modal"
-                returnTo={`/chat?lang=${encodeURIComponent(lang)}`}
+                returnTo={localizedProductHref(currentProduct, lang)}
                 // Height deliberately unchanged: this button is inside the
                 // usage-limit modal's visual golden, and re-recording that
                 // baseline is out of scope here (and cannot be done on a

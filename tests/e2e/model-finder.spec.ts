@@ -72,7 +72,7 @@ test("saving the combination persists it for the next new chat and across a relo
       });
       return;
     }
-    const lead = savedCombination?.[0] ?? "gpt-5-6-luna";
+    const lead = savedCombination?.[0] ?? "gpt-6-luna";
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -127,7 +127,7 @@ test("saving the combination persists it for the next new chat and across a relo
     });
   });
 
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
 
   const finder = page.getByTestId("model-finder");
   await expect(finder).toBeHidden();
@@ -161,7 +161,7 @@ test("saving the combination persists it for the next new chat and across a relo
       tasks: ["documents"],
       priority: "fast",
     },
-    modelIds: ["gpt-5-6-luna", "gemini-2-5-flash"],
+    modelIds: ["gpt-6-luna", "gemini-2-5-flash"],
   });
 
   // Completing the combo should land on a fresh chat rather than swap the
@@ -176,7 +176,7 @@ test("saving the combination persists it for the next new chat and across a relo
 
   // The fresh chat carries exactly the two saved models -- the canonical
   // combination the server persisted, not just its lead.
-  await expectSelectedModels(page, ["gpt-5-6-luna", "gemini-2-5-flash"]);
+  await expectSelectedModels(page, ["gpt-6-luna", "gemini-2-5-flash"]);
 
   // A reload restores the previously active conversation, whose own
   // selectedModels rightly win -- so the persistence claim is asserted where
@@ -185,17 +185,17 @@ test("saving the combination persists it for the next new chat and across a relo
   await page.reload();
   await expect(modelMenuTrigger(page)).toBeVisible();
   await startNewChat(page);
-  await expectSelectedModels(page, ["gpt-5-6-luna", "gemini-2-5-flash"]);
+  await expectSelectedModels(page, ["gpt-6-luna", "gemini-2-5-flash"]);
 
   // And once more from the blank chat: pressing "New Chat" again must not
   // collapse the combination back to a single model.
   await startNewChat(page);
-  await expectSelectedModels(page, ["gpt-5-6-luna", "gemini-2-5-flash"]);
+  await expectSelectedModels(page, ["gpt-6-luna", "gemini-2-5-flash"]);
 });
 
 test("the finder can be closed mid-flow without completing it", { tag: "@ui-risk" }, async ({ page }) => {
   await mockAuthenticatedApi(page);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
 
   const finder = page.getByTestId("model-finder");
   await modelMenuTrigger(page).click();
@@ -219,7 +219,7 @@ test("using the combination for this conversation only does not save it as the a
     await route.fallback();
   });
 
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   const finder = page.getByTestId("model-finder");
   await modelMenuTrigger(page).click();
   await page.getByTestId("model-combo-finder-cta").click();
@@ -239,7 +239,7 @@ test("selecting two models suggests one complementary model instead of the full 
   page,
 }) => {
   await mockAuthenticatedApi(page);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   // A new conversation starts with web search on, and three models' search
   // reservations on top of their base cost exceed the Free account's 30
   // daily credits -- the limit banner would cover the picker. This test is
@@ -287,7 +287,7 @@ test("the picker shows a compact re-recommend link once the model cap is reached
   page,
 }) => {
   await mockAuthenticatedApi(page);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
 
   await modelMenuTrigger(page).click();
   await openModelCatalogue(page);

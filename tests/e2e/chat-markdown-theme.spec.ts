@@ -42,7 +42,7 @@ test("assistant code blocks keep readable contrast in the light theme", async ({
     });
   });
 
-  await page.goto("/chat");
+  await page.goto("/review");
   // A fresh chat starts blank -- open the mocked qa-conversation from the
   // welcome screen's recent-conversations card to load its messages.
   await openRecentConversation(page);

@@ -86,6 +86,9 @@ export async function ReviewWorkspaceShell({
   mountedSurface?: ConversationSurface;
 } = {}) {
   let guestDefaultModelId: string = APP_DEFAULTS.guestDefaultModelId;
+  // The lineup that lead orders (lib/appSettings). A read failure keeps the
+  // compiled trio, which is what the client defaults to as well.
+  let guestBrandTrioModelIds: string[] | undefined;
   // Default-off opt-in (lib/imageGenerationAccess.ts): a read failure keeps
   // the entry points hidden, exactly like a missing flag row.
   let imageGenerationEnabled = false;
@@ -143,7 +146,9 @@ export async function ReviewWorkspaceShell({
     });
   }
   try {
-    guestDefaultModelId = (await getPublicAppSettings()).guestDefaultModelId;
+    const publicSettings = await getPublicAppSettings();
+    guestDefaultModelId = publicSettings.guestDefaultModelId;
+    guestBrandTrioModelIds = publicSettings.guestBrandTrioModelIds;
     imageGenerationEnabled = await isImageGenerationEnabled();
     // Guests included since 2026-09-10 (docs/policy/voice-input.md §4), so the
     // flag and the kill switch are the whole answer and the session is not
@@ -319,6 +324,7 @@ export async function ReviewWorkspaceShell({
       ) : null}
       <ChatPageClient
         guestDefaultModelId={guestDefaultModelId}
+        guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
         voiceInputEnabled={voiceInputEnabled}
         promptRefinerMode={promptRefinerMode}

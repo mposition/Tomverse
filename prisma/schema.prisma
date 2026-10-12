@@ -138,7 +138,7 @@ model UserSettings {
 
   theme                   String    @default("dark") // "dark", "light", "system"
   language                String    @default("en") // "ko", "en"
-  defaultModel            String    @default("gpt-5-6-luna")
+  defaultModel            String    @default("gpt-6-luna")
   // 1-3 model IDs a signed-in account starts a new conversation with.
   // NULL (never a schema default, never backfilled) means [defaultModel];
   // lib/newConversationModels.ts is the only interpreter. See
@@ -310,7 +310,7 @@ model Conversation {
   // For kind = "image" this is stored as "[]" and never read: the image
   // model comes from the image generation server layer's fixed allowlist,
   // not from conversation state.
-  selectedModels String @default("[\"gpt-5-6-luna\"]")
+  selectedModels String @default("[\"gpt-6-luna\"]")
   disabledPanels String @default("[]")
   webSearchMode  String @default("off") // off | auto | always
 
@@ -1621,7 +1621,13 @@ model ChatCreditReservation {
   user                         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   subjectKey                   String
   traceId                      String
+  /// Client-created logical turn id. NULL for historical/ordinary rows;
+  /// Guest Smart Adaptive binds it once with the signed Guest subject.
+  clientTurnId                 String?
   source                       String
+  /// `exact` for every historical/ordinary reservation. Guest Smart Adaptive
+  /// temporarily uses `guest_auto_prehold` before one exact model is selected.
+  phase                        String    @default("exact")
   provider                     String
   modelId                      String
   status                       String    @default("reserved")
@@ -1675,6 +1681,7 @@ model ChatCreditReservation {
   @@index([status, expiresAt])
   @@index([userId, createdAt])
   @@index([traceId])
+  @@unique([subjectKey, clientTurnId])
   @@index([providerRequestId])
   @@index([providerResponseId])
 }

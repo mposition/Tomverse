@@ -51,6 +51,34 @@ export const adminPromptRefinerProductStatusMessages = defineAdminMessages({
     mutationSucceeded: "The owner action was recorded. Status was refreshed.",
     mutationFailed: "The owner action was refused or its outcome is unknown. Refresh status and review it before confirming another action; it was not retried.",
     reauthenticate: "Renew administrator sign-in",
+    guestActivationTitle: "Guest Chat Smart Adaptive activation",
+    guestActivationDescription:
+      "Record one Owner activation for the exact serving commit and deployment. The server revalidates the existing Router and Prompt Refiner activation pair, operational guard and current runtime before it writes the audit record.",
+    guestActivationScope:
+      "Scope: Guest Chat text only, one answer within the existing Guest quota, and the existing Prompt Refiner limits of 100 per day and 3,000 per month. This does not release unknown holds, change paid-user rollout or call a model.",
+    guestActivationRefresh: "Read Guest activation",
+    guestActivationLoading: "Reading the exact Guest activation...",
+    guestActivationActive: "Exact Guest activation is active.",
+    guestActivationAbsent: "No exact Guest activation is recorded for this serving deployment.",
+    guestActivationMismatch: "The recorded Guest activation does not match the serving runtime shown above.",
+    guestActivationUnreadable: "Guest activation could not be read. No activation is available from this state.",
+    guestActivationAudit: "Guest activation audit log",
+    guestActivationPair: "Guest activation pair digest",
+    guestActivationApprovedAt: "Guest activation approved at",
+    guestActivationConfirm:
+      "I reviewed the exact serving commit and deployment above and authorize the single Guest Chat Smart Adaptive activation record.",
+    guestActivationAction: "Activate exact Guest Chat deployment",
+    guestActivationSaving: "Recording Guest activation...",
+    guestActivationConfirmed:
+      "Guest activation was recorded and confirmed by an exact readback.",
+    guestActivationConfirmedByReadback:
+      "The read-only result confirms that exact Guest activation is active. No second activation was sent.",
+    guestActivationRuntimeChanged:
+      "The serving runtime changed or no longer has an exact identity. Status was refreshed and no activation was sent.",
+    guestActivationFailed:
+      "Guest activation was refused, or its exact readback was not confirmed. Review the read-only state before any further action; this page did not retry the write.",
+    guestActivationUnknown:
+      "The activation outcome is unknown and its exact readback was not confirmed. This page will not send another activation. Use the read-only control and hand the result to an operator.",
     resumeTitle: "Resume paused Refiner Auto",
     resumeDescription: "Review the recorded pause and its cause before resuming. This action does not retry a request, release unknown cost holds, change rollout or disable kill switches.",
     resumeRefresh: "Read current Auto pause",
@@ -120,6 +148,34 @@ export const adminPromptRefinerProductStatusMessages = defineAdminMessages({
     mutationSucceeded: "운영자 동작을 기록했고 상태를 새로고침했습니다.",
     mutationFailed: "운영자 동작이 거절됐거나 결과를 확인할 수 없습니다. 상태를 새로고침해 검토한 뒤 다음 동작을 다시 확인하세요. 자동 재시도하지 않았습니다.",
     reauthenticate: "관리자 재인증",
+    guestActivationTitle: "Guest Chat 스마트 자동 활성화",
+    guestActivationDescription:
+      "현재 서버 커밋과 배포에 Owner 활성화를 한 번 기록합니다. 감사 기록을 쓰기 전에 서버가 기존 Router·Prompt Refiner 활성화 쌍, 운영 guard와 현재 runtime을 다시 검증합니다.",
+    guestActivationScope:
+      "범위: 기존 Guest 사용량 안의 텍스트 Chat 답변 1개와 기존 Prompt Refiner 한도(하루 100회·월 3,000회)입니다. 불명 hold를 해제하거나 유료 사용자 출시 설정을 바꾸거나 모델을 호출하지 않습니다.",
+    guestActivationRefresh: "Guest 활성화 조회",
+    guestActivationLoading: "정확한 Guest 활성화를 조회하는 중...",
+    guestActivationActive: "정확한 Guest 활성화가 활성 상태입니다.",
+    guestActivationAbsent: "현재 서버 배포에 정확한 Guest 활성화 기록이 없습니다.",
+    guestActivationMismatch: "기록된 Guest 활성화가 위에 표시된 서버 runtime과 일치하지 않습니다.",
+    guestActivationUnreadable: "Guest 활성화를 읽지 못했습니다. 이 상태에서는 활성화할 수 없습니다.",
+    guestActivationAudit: "Guest 활성화 감사 기록",
+    guestActivationPair: "Guest 활성화 쌍 digest",
+    guestActivationApprovedAt: "Guest 활성화 승인 시각",
+    guestActivationConfirm:
+      "위의 정확한 서버 커밋과 배포를 검토했으며 Guest Chat 스마트 자동 활성화 기록 1건을 승인합니다.",
+    guestActivationAction: "정확한 Guest Chat 배포 활성화",
+    guestActivationSaving: "Guest 활성화를 기록하는 중...",
+    guestActivationConfirmed:
+      "Guest 활성화를 기록했고 정확한 readback으로 확인했습니다.",
+    guestActivationConfirmedByReadback:
+      "읽기 전용 결과에서 정확한 Guest 활성화를 확인했습니다. 두 번째 활성화는 보내지 않았습니다.",
+    guestActivationRuntimeChanged:
+      "서버 runtime이 바뀌었거나 정확한 식별자를 더 이상 확인할 수 없습니다. 상태를 새로고침했고 활성화는 보내지 않았습니다.",
+    guestActivationFailed:
+      "Guest 활성화가 거절됐거나 정확한 readback을 확인하지 못했습니다. 추가 동작 전에 읽기 전용 상태를 검토하세요. 이 화면은 쓰기를 재시도하지 않았습니다.",
+    guestActivationUnknown:
+      "활성화 결과가 불명이며 정확한 readback을 확인하지 못했습니다. 이 화면은 활성화를 다시 보내지 않습니다. 읽기 전용 조회 결과를 운영자에게 전달하세요.",
     resumeTitle: "중단된 Refiner Auto 재개",
     resumeDescription: "기록된 중단과 원인을 검토한 뒤 재개합니다. 이전 요청을 재시도하거나 불명 비용 예약을 풀지 않으며 출시 설정·긴급 중지 스위치를 바꾸지 않습니다.",
     resumeRefresh: "현재 Auto 중단 조회",

@@ -1,5 +1,5 @@
 /**
- * The chat → create-a-profile → chat round trip (Release C).
+ * The Review → create-a-profile → Review round trip (Release C).
  *
  * docs/policy/external-conversation-import-and-memory.md §14.
  *
@@ -10,7 +10,7 @@
  * forgets to validate it. Nothing here needs one: the chat surface is a single
  * route that already restores its own conversation from
  * `GUEST_ACTIVE_CHAT_STORAGE_KEY` on mount, so returning is a fixed push to
- * `/chat` and the conversation comes back by itself.
+ * `/review` and the conversation comes back by itself.
  *
  * So the only thing this module carries is a flag saying the visitor arrived
  * from the chat — a literal, compared to a literal — and, separately, the id
@@ -31,11 +31,16 @@
  * reaching a request at all.
  */
 
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+
 export const ASSISTANT_PROFILE_RETURN_PARAM = "from";
 export const ASSISTANT_PROFILE_RETURN_CHAT = "chat";
 
 /** Where the round trip ends. A constant, never a value from the query. */
-export const ASSISTANT_PROFILE_CHAT_PATH = "/chat";
+export const ASSISTANT_PROFILE_REVIEW_PATH = REVIEW_WORKSPACE_PATH;
+
+/** @deprecated Use the product-correct Review destination. */
+export const ASSISTANT_PROFILE_CHAT_PATH = ASSISTANT_PROFILE_REVIEW_PATH;
 
 /**
  * Set by the create screen, read once by the chat surface.

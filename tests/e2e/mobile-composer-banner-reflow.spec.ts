@@ -559,7 +559,7 @@ async function enterGuestChat(
   await mockStatus(page, options.scenario);
   await seedGuestPreferences(page);
   await page.setViewportSize(options.viewport);
-  await page.goto(`/chat?lang=${options.lang}`);
+  await page.goto(`/review?lang=${options.lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
 }
@@ -594,7 +594,7 @@ async function enterSignedInConversation(
   await mockStatus(page, options.scenario);
   await seedGuestPreferences(page);
   await page.setViewportSize(options.viewport);
-  await page.goto(`/chat?lang=${options.lang}`);
+  await page.goto(`/review?lang=${options.lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
@@ -897,7 +897,7 @@ test.describe("no-fallback provider banner with the keyboard open", () => {
     async ({ page }) => {
       test.setTimeout(120_000);
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.goto("/chat?lang=ko");
+      await page.goto("/review?lang=ko");
       await expect(page.getByTestId("chat-textarea")).toBeVisible();
       // env() cannot be forced from a test, so the fixture reproduces what the
       // inset buys: 34px of reserved space below the composer's own padding.
@@ -944,11 +944,15 @@ test.describe("no-fallback provider banner with the keyboard open", () => {
         "the picker owns focus, not the textarea"
       ).not.toBe("chat-textarea");
 
-      // Add a healthy model, then drop the one that is out. Both halves go
-      // through the same catalogue the banner opened.
+      // Drop the one that is out, then add a healthy model. Both halves go
+      // through the same catalogue the banner opened. Dropping first keeps the
+      // guest under the three-model cap: the guest default is already three
+      // models, and adding a fourth opens the swap dialog instead. (This added
+      // claude-haiku-4-5 first while that model was itself in the guest trio,
+      // so the click quietly removed it.)
       await openModelCatalogue(page);
-      await picker.locator('[data-testid="model-option"][data-model-id="claude-haiku-4-5"]').click();
       await picker.locator(`[data-testid="model-option"][data-model-id="${IMPACTED_MODEL}"]`).click();
+      await picker.locator('[data-testid="model-option"][data-model-id="claude-haiku-4-5"]').click();
       // Escape steps back to the recommendations first, then closes.
       await page.keyboard.press("Escape");
       await page.keyboard.press("Escape");

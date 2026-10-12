@@ -23,6 +23,7 @@ import {
 } from "@/components/chat/guestVerificationFailure";
 import { dispatchAppToast } from "@/lib/appToast";
 import { submitFeedback } from "@/lib/feedbackClient";
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import {
   feedbackFailureCopyKey,
   feedbackMessageState,
@@ -555,7 +556,7 @@ export function SupportPageContent() {
               {page.helpCta}
               <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link href="/chat" className="inline-flex h-12 items-center gap-2 rounded-xl border border-zinc-300 px-5 text-sm font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">
+            <Link href={REVIEW_WORKSPACE_PATH} className="inline-flex h-12 items-center gap-2 rounded-xl border border-zinc-300 px-5 text-sm font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">
               {page.appCta}
             </Link>
           </div>

@@ -30,7 +30,7 @@ const VIEWPORTS = [
   { name: "390", width: 390, height: 844 },
 ] as const;
 
-const ROUTES = ["/", "/pricing", "/privacy", "/chat?entry=guest-preview"] as const;
+const ROUTES = ["/", "/pricing", "/privacy", "/review?entry=guest-preview"] as const;
 
 /**
  * Document-level horizontal overflow, with the own-scroller exception the

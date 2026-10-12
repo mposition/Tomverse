@@ -31,6 +31,10 @@ import {
 } from "@/lib/generatedArtifactCore";
 import { saveResponseAsFile } from "@/lib/browserDownload";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import {
+  localizedProductHref,
+  type ChatWorkspaceProduct,
+} from "@/lib/chatProductUiCopy";
 
 /**
  * The download card for a file an answer produced.
@@ -115,6 +119,8 @@ type GeneratedArtifactCardProps = {
   onRetry?: () => void;
   /** Guests get the sign-in call to action instead of a download. */
   isGuestMode?: boolean;
+  /** Product that owns the sign-in return. Unknown callers default to Review. */
+  currentProduct?: ChatWorkspaceProduct;
 };
 
 export function GeneratedArtifactCard({
@@ -123,8 +129,9 @@ export function GeneratedArtifactCard({
   fallbackModelId,
   onRetry,
   isGuestMode,
+  currentProduct = "review",
 }: GeneratedArtifactCardProps) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -384,7 +391,7 @@ export function GeneratedArtifactCard({
         )}
         {isBlocked && (
           <Link
-            href={`/auth/signin?callbackUrl=${encodeURIComponent("/chat")}`}
+            href={`/auth/signin?callbackUrl=${encodeURIComponent(localizedProductHref(currentProduct, lang))}`}
             data-testid="generated-artifact-signin"
             className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 @md/artifacts:w-auto dark:focus-visible:ring-offset-zinc-900"
           >
@@ -443,6 +450,7 @@ type GeneratedArtifactListProps = {
   fallbackModelId?: string | null;
   onRetry?: () => void;
   isGuestMode?: boolean;
+  currentProduct?: ChatWorkspaceProduct;
 };
 
 /** The whole section, or nothing when the answer produced no file. */
@@ -452,6 +460,7 @@ export function GeneratedArtifactList({
   fallbackModelId,
   onRetry,
   isGuestMode,
+  currentProduct = "review",
 }: GeneratedArtifactListProps) {
   const { t } = useLanguage();
   /*
@@ -489,6 +498,7 @@ export function GeneratedArtifactList({
             fallbackModelId={fallbackModelId}
             onRetry={onRetry}
             isGuestMode={isGuestMode}
+            currentProduct={currentProduct}
           />
         ))}
       </ul>

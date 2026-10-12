@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { SignOutAndSwitchAccountButton } from "@/components/auth/SignOutAndSwitchAccountButton";
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import {
   accountSwitchSignInHref,
   isAdminPathname,
@@ -76,7 +77,7 @@ export default async function NotFound() {
         >
           Go to the homepage
         </Link>
-        <Link href="/chat" className={secondaryLinkClass}>
+        <Link href={REVIEW_WORKSPACE_PATH} className={secondaryLinkClass}>
           Open the chat workspace
         </Link>
         <Link href="/support" className={secondaryLinkClass}>

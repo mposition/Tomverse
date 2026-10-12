@@ -354,7 +354,7 @@ for (const theme of THEMES) {
           width: crop.viewport.width,
           height: crop.name === "mobile" ? 1_400 : 1_500,
         });
-        await page.goto(`/chat?lang=${lang}`);
+        await page.goto(`/review?lang=${lang}`);
         await expectThemeApplied(page, theme);
         await openReviewConversation(page);
 

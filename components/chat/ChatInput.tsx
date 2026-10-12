@@ -100,6 +100,10 @@ import {
   ModelPickerPanel,
   type ModelPickerAnalyticsEvent,
 } from "@/components/chat/ModelPickerPanel";
+import { AutoRoutingComposerToggle } from "@/components/chat/AutoRoutingToggle";
+import { ChatProductSwitcher } from "@/components/chat/ChatProductSwitcher";
+import { autoRoutingCopy } from "@/lib/autoRoutingCopy";
+import { chatProductUiCopy, type ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import {
@@ -128,7 +132,10 @@ import {
 } from "@/lib/imageIntentSignals";
 import { normalizeComposerImageIntentInput } from "@/lib/imageIntentInput";
 import { ImageIntentHandoffChip } from "@/components/chat/ImageIntentHandoffChip";
-import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
+import {
+  deriveWebSearchComposerState,
+  type WebSearchComposerState,
+} from "@/lib/webSearchComposerState";
 import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
@@ -215,6 +222,141 @@ const interpolateCopy = (
     (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
     template
   );
+
+type ChatInputWebSearchChipViewProps = {
+  state: WebSearchComposerState;
+  isAutoMode: boolean;
+  isMobileShell: boolean;
+  fullLabel: string;
+  compactLabel: string;
+  description: string;
+  removeLabel: string;
+  isExceptionOpen: boolean;
+  onToggleException: () => void;
+  onRemove: () => void;
+};
+
+/**
+ * The selected-model capability detail is meaningful only in manual mode.
+ * Smart Adaptive has not chosen the answering model yet, so painting the
+ * stored manual fallback's count, warning tone, or exception disclosure would
+ * present that return choice as the active answer model.
+ */
+export function ChatInputWebSearchChipView({
+  state,
+  isAutoMode,
+  isMobileShell,
+  fullLabel,
+  compactLabel,
+  description,
+  removeLabel,
+  isExceptionOpen,
+  onToggleException,
+  onRemove,
+}: ChatInputWebSearchChipViewProps) {
+  const hasManualException = !isAutoMode && state.hasException;
+  const isManualBlocked = !isAutoMode && state.allUnsupported;
+  const tone = isAutoMode ? "neutral" : state.tone;
+
+  return (
+    <>
+      <div
+        data-testid="web-search-mode-chip"
+        data-selection-mode={isAutoMode ? "auto" : "manual"}
+        data-tone={tone}
+        data-supported-count={isAutoMode ? undefined : state.supportedCount}
+        data-unsupported-count={isAutoMode ? undefined : state.unsupportedCount}
+        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold ${isMobileShell ? "h-8" : "h-9"} ${
+          tone === "blocked"
+            ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+            : tone === "warning"
+              ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+              : "border-accent-web-search-200 bg-accent-web-search-50 text-accent-web-search-800 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/30 dark:text-accent-web-search-200"
+        }`}
+      >
+        <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        {hasManualException && !isManualBlocked ? (
+          <button
+            type="button"
+            data-testid="web-search-exception-toggle"
+            aria-expanded={isExceptionOpen}
+            aria-controls="web-search-exception-detail"
+            aria-describedby="web-search-state-description"
+            onClick={onToggleException}
+            className={`relative truncate rounded-full text-left underline decoration-dotted underline-offset-2 before:absolute before:content-[''] before:-inset-x-1 ${
+              isMobileShell ? "before:-inset-y-3.5" : "before:-inset-y-1"
+            }`}
+          >
+            {isMobileShell ? compactLabel : fullLabel}
+          </button>
+        ) : (
+          <span
+            className="truncate"
+            aria-describedby="web-search-state-description"
+          >
+            {isMobileShell ? compactLabel : fullLabel}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={removeLabel}
+          title={removeLabel}
+          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full before:absolute before:content-[''] hover:bg-black/5 dark:hover:bg-white/10 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <p
+        id="web-search-state-description"
+        data-testid="web-search-state-description"
+        className="sr-only"
+      >
+        {description}
+      </p>
+    </>
+  );
+}
+
+export function ChatInputWebSearchSwitchDescription({
+  isAutoMode,
+  isWebSearchOn,
+  description,
+  costNote,
+}: {
+  isAutoMode: boolean;
+  isWebSearchOn: boolean;
+  description: string;
+  costNote: string;
+}) {
+  return (
+    <span id="tools-web-search-description" className="text-xs text-zinc-500">
+      {description}
+      {isWebSearchOn && !isAutoMode ? ` ${costNote}` : ""}
+    </span>
+  );
+}
+
+export function ChatInputAutoCapabilityPendingNotice({
+  visible,
+  label,
+}: {
+  visible: boolean;
+  label: string;
+}) {
+  if (!visible) return null;
+
+  return (
+    <span
+      data-testid="guest-auto-capability-pending"
+      role="status"
+      aria-live="polite"
+      className="max-w-[132px] text-pretty text-[11px] font-medium leading-4 text-zinc-600 dark:text-zinc-300"
+    >
+      {label}
+    </span>
+  );
+}
 /**
  * Everything about which files may be picked now comes from the shared
  * registry (`lib/chatAttachmentFormats.ts`). What used to live here was four
@@ -559,6 +701,14 @@ const loadExternalScript = (src: string) =>
   });
 
 type ChatInputProps = {
+  /** The product this composer belongs to; switches navigate without rewriting it. */
+  currentProduct?: ChatWorkspaceProduct;
+  /** Mobile product navigation lives in the drawer to preserve the input dock. */
+  showProductSwitcher?: boolean;
+  /** Locks product navigation while the page owns an unknown or pre-send action. */
+  productSwitchDisabled?: boolean;
+  /** Stages an idle draft snapshot; false cancels navigation. */
+  onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
   singleModelSelection?: boolean;
   value: string;
   onChange: (value: string) => void;
@@ -653,7 +803,8 @@ type ChatInputProps = {
   autoSelectionOffered?: boolean;
   selectionMode?: "manual" | "auto";
   selectionModePending?: boolean;
-  onSelectionModeChange?: (next: boolean) => void;
+  /** Resolves true only after the server confirms the stored mode. */
+  onSelectionModeChange?: (next: boolean) => Promise<boolean>;
   /**
    * Pre-send Prompt Refiner suggestion UI. `offered` is one server-owned
    * decision; false leaves no disabled teaser. The caller owns the request and
@@ -852,6 +1003,10 @@ const isGooglePickerConfig = (value: unknown): value is GooglePickerConfig => {
 };
 
 export function ChatInput({
+  currentProduct,
+  showProductSwitcher = true,
+  productSwitchDisabled = false,
+  onProductSwitch,
   singleModelSelection = false,
   value,
   onChange,
@@ -999,9 +1154,16 @@ export function ChatInput({
   const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
+    const autoCopy = autoRoutingCopy[lang];
+    const isAutoMode = selectionMode === "auto";
+    const isAutoCapabilityPending =
+      isAutoMode && draftLocked && !autoSelectionOffered;
     const modelsSelectedLabel = (count: number) =>
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
-    const signInCallbackUrl = withChatLanguage("/chat", lang);
+    const signInCallbackUrl = withChatLanguage(
+      currentProduct === "review" ? "/review" : "/chat",
+      lang
+    );
     const accountUsage = useUserUsage(!isGuestMode);
     // Local files and Google Drive are two separate permissions: a guest gets
     // the first (one ephemeral file, validated and parsed server-side) and not
@@ -1189,38 +1351,37 @@ export function ChatInput({
     // exists only in the runtime registry is unknown to the compiled catalogue.
     resolveModel: getCatalogModel,
   });
-  const webSearchChipLabel = webSearchState.allUnsupported
-    ? t("chat.webSearchChipUnavailable")
-    : webSearchState.hasException
-      ? interpolateCopy(t("chat.webSearchChipPartial"), {
-          supported: webSearchState.supportedCount,
-          total: webSearchState.selectedCount,
-        })
-      : t("chat.webSearchChipOn");
-  // The mobile chip no longer owns a row of its own -- it shares the
-  // composer's first input line -- so it drops the separator and the word
-  // "supported" while keeping every state distinguishable: "Web search",
-  // "Web search auto", "Web search 2/3", "No web search". The full sentence is
-  // still what assistive tech gets (web-search-state-description below), and a
-  // blocking state additionally keeps its own full-width notice, so no state is
-  // ever reduced to a bare icon.
-  const webSearchChipCompactLabel = webSearchState.allUnsupported
-    ? t("chat.webSearchChipUnavailableCompact")
-    : webSearchState.hasException
-      ? interpolateCopy(t("chat.webSearchChipPartialCompact"), {
-          supported: webSearchState.supportedCount,
-          total: webSearchState.selectedCount,
-        })
-      : t("chat.webSearchChipOnCompact");
-  const webSearchStateDescription = interpolateCopy(
-    t("chat.webSearchChipDescriptionOn"),
-    {
-      supported: webSearchState.supportedCount,
-      total: webSearchState.selectedCount,
-      unsupported: webSearchState.unsupportedCount,
-      credits: webSearchState.estimatedSurchargeCredits,
-    }
-  );
+  const webSearchChipLabel = isAutoMode
+    ? t("chat.webSearchChipOn")
+    : webSearchState.allUnsupported
+      ? t("chat.webSearchChipUnavailable")
+      : webSearchState.hasException
+        ? interpolateCopy(t("chat.webSearchChipPartial"), {
+            supported: webSearchState.supportedCount,
+            total: webSearchState.selectedCount,
+          })
+        : t("chat.webSearchChipOn");
+  // The mobile chip keeps the tool-status row compact, so it drops the
+  // separator and the word "supported" while keeping every manual state
+  // distinguishable. The full sentence remains available to assistive tech.
+  const webSearchChipCompactLabel = isAutoMode
+    ? t("chat.webSearchChipOnCompact")
+    : webSearchState.allUnsupported
+      ? t("chat.webSearchChipUnavailableCompact")
+      : webSearchState.hasException
+        ? interpolateCopy(t("chat.webSearchChipPartialCompact"), {
+            supported: webSearchState.supportedCount,
+            total: webSearchState.selectedCount,
+          })
+        : t("chat.webSearchChipOnCompact");
+  const webSearchStateDescription = isAutoMode
+    ? t("chat.toolsWebSearchOnDescription")
+    : interpolateCopy(t("chat.webSearchChipDescriptionOn"), {
+        supported: webSearchState.supportedCount,
+        total: webSearchState.selectedCount,
+        unsupported: webSearchState.unsupportedCount,
+        credits: webSearchState.estimatedSurchargeCredits,
+      });
   // The switch is the whole control, so both of its states are said in words:
   // "on" carries the conditional-search sentence so it never reads as "every
   // question is searched", and the cost note quotes the surcharge from the
@@ -1238,6 +1399,10 @@ export function ChatInput({
         AVAILABLE_MODELS.find((model) => model.id === modelId)?.name || modelId
     )
     .join(", ");
+  const hasManualWebSearchException =
+    !isAutoMode && webSearchState.hasException;
+  const isManualWebSearchBlocked =
+    !isAutoMode && webSearchState.allUnsupported;
   const creditBreakdown = requestCreditEstimate.models
     .map((entry) => {
       const model = activeSelectedModelObjects.find((item) => item.id === entry.modelId);
@@ -2974,64 +3139,18 @@ export function ChatInput({
   const toolStatusChips = hasToolStatusChips ? (
     <>
     {webSearchState.isVisible && (
-      <div
-        data-testid="web-search-mode-chip"
-        data-tone={webSearchState.tone}
-        data-supported-count={webSearchState.supportedCount}
-        data-unsupported-count={webSearchState.unsupportedCount}
-        // 32px tall on mobile so the row the chip got back costs the answer
-        // canvas as little as possible; the controls inside keep their 44px
-        // touch area through ::before insets rather than through box height.
-        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold ${isMobileShell ? "h-8" : "h-9"} ${
-          webSearchState.tone === "blocked"
-            ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
-            : webSearchState.tone === "warning"
-              ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
-              : "border-accent-web-search-200 bg-accent-web-search-50 text-accent-web-search-800 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/30 dark:text-accent-web-search-200"
-        }`}
-      >
-        <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        {/*
-          When nothing can search there is no "which ones" worth
-          expanding -- the blocking notice below already names the
-          two ways out, so the chip stays a plain label.
-        */}
-        {webSearchState.hasException && !webSearchState.allUnsupported ? (
-          <button
-            type="button"
-            data-testid="web-search-exception-toggle"
-            aria-expanded={isWebSearchExceptionOpen}
-            aria-controls="web-search-exception-detail"
-            aria-describedby="web-search-state-description"
-            onClick={() => setIsWebSearchExceptionOpen((open) => !open)}
-            // The chip itself is 36px tall, so the toggle borrows
-            // vertical hit area from a pseudo-element rather than
-            // growing the chip. Horizontal inset stays small so it
-            // never overlaps the adjacent remove control.
-            className={`relative truncate rounded-full text-left underline decoration-dotted underline-offset-2 before:absolute before:content-[''] before:-inset-x-1 ${
-              isMobileShell ? "before:-inset-y-3.5" : "before:-inset-y-1"
-            }`}
-          >
-            {isMobileShell ? webSearchChipCompactLabel : webSearchChipLabel}
-          </button>
-        ) : (
-          <span
-            className="truncate"
-            aria-describedby="web-search-state-description"
-          >
-            {isMobileShell ? webSearchChipCompactLabel : webSearchChipLabel}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={() => onWebSearchModeChange?.("off")}
-          aria-label={t("chat.removeWebSearchMode")}
-          title={t("chat.removeWebSearchMode")}
-          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full before:absolute before:content-[''] hover:bg-black/5 dark:hover:bg-white/10 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
+      <ChatInputWebSearchChipView
+        state={webSearchState}
+        isAutoMode={isAutoMode}
+        isMobileShell={isMobileShell}
+        fullLabel={webSearchChipLabel}
+        compactLabel={webSearchChipCompactLabel}
+        description={webSearchStateDescription}
+        removeLabel={t("chat.removeWebSearchMode")}
+        isExceptionOpen={isWebSearchExceptionOpen}
+        onToggleException={() => setIsWebSearchExceptionOpen((open) => !open)}
+        onRemove={() => onWebSearchModeChange?.("off")}
+      />
     )}
     {isDeepResearchPending && (
       <div
@@ -3055,8 +3174,8 @@ export function ChatInput({
     </>
   ) : null;
   const webSearchExceptionDetail =
-    webSearchState.hasException &&
-    !webSearchState.allUnsupported &&
+    hasManualWebSearchException &&
+    !isManualWebSearchBlocked &&
     isWebSearchExceptionOpen ? (
       <p
         id="web-search-exception-detail"
@@ -3149,6 +3268,15 @@ export function ChatInput({
                 : "border-zinc-200 dark:border-zinc-800"
             }`}
           >
+          {currentProduct && showProductSwitcher && (
+            <div className="mb-2 md:mb-3">
+              <ChatProductSwitcher
+                currentProduct={currentProduct}
+                disabled={productSwitchDisabled || isSending || draftLocked}
+                onProductSwitch={onProductSwitch}
+              />
+            </div>
+          )}
           {isDragActive && (
             <div
               data-testid="chat-composer-drop-overlay"
@@ -3199,11 +3327,15 @@ export function ChatInput({
               className="mb-2 flex items-center gap-1.5 px-1"
             >
               <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
-                {t("chat.guestQuickLine")}
+                {currentProduct === "chat"
+                  ? chatProductUiCopy[lang].tryGuestChat
+                  : t("chat.guestQuickLine")}
               </span>
               <FeatureHelpPopover
                 title={t("chat.guestQuickLineHelp")}
-                description={t("chat.guestQuickLineHelpBody")}
+                description={currentProduct === "chat"
+                  ? chatProductUiCopy[lang].guestChatDescription
+                  : t("chat.guestQuickLineHelpBody")}
                 buttonLabel={t("chat.guestQuickLineHelp")}
                 learnMoreLabel={helpCopy.learnMore}
                 topic="guest_trial"
@@ -3326,22 +3458,10 @@ export function ChatInput({
               {toolStatusChips}
             </div>
           )}
-          {/*
-            The full request state -- mode, how many models can honour it, how
-            many cannot, the credit ceiling and what the unsupported models
-            actually do -- always exists for assistive tech, but only costs a
-            visible row when there is a real exception to resolve. "Unsupported
-            0" is the normal case and no longer earns a line of its own.
-          */}
-          {webSearchState.isVisible && (
-            <p id="web-search-state-description" className="sr-only">
-              {webSearchStateDescription}
-            </p>
-          )}
           {/* The detail belongs directly under the chip row it expands from,
               in both shells. */}
           {webSearchExceptionDetail}
-          {webSearchState.allUnsupported && (
+          {isManualWebSearchBlocked && (
             <div
               role="status"
               data-testid="web-search-unavailable-notice"
@@ -3753,6 +3873,17 @@ export function ChatInput({
           line of its own.
         */}
         <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5">
+          {autoSelectionOffered && onSelectionModeChange && (
+            <AutoRoutingComposerToggle
+              offered={autoSelectionOffered}
+              enabled={isAutoMode}
+              pending={selectionModePending}
+              language={lang}
+              onChange={(next) => {
+                void onSelectionModeChange(next);
+              }}
+            />
+          )}
           <button
             ref={modelMenuButtonRef}
             type="button"
@@ -3772,8 +3903,12 @@ export function ChatInput({
             // selector when a swap or a recovered provider unmounts the
             // control the user was standing on (ProviderStatusBanner).
             data-testid="composer-model-select"
-            title={activeModelNames.join(", ")}
-            aria-label={t("chat.modelSelect")}
+            title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
+            aria-label={
+              isAutoMode
+                ? `${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
+                : t("chat.modelSelect")
+            }
             aria-expanded={isMenuOpen && menuView === "models"}
             aria-controls="chat-input-popover"
             aria-haspopup="dialog"
@@ -3781,7 +3916,14 @@ export function ChatInput({
             {/* Counts what will actually be sent and billed -- the same basis
                 as the credit estimate beside it and as the mobile header's
                 "+N", so a paused panel cannot make the two disagree. */}
-            {activeSelectedModels.length === 1 ? (
+            {isAutoMode ? (
+              <span
+                aria-hidden="true"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-status-switch-on-500 text-white"
+              >
+                <Sparkles className="h-3 w-3" />
+              </span>
+            ) : activeSelectedModels.length === 1 ? (
               <ModelLogo
                 model={AVAILABLE_MODELS.find((item) => item.id === activeSelectedModels[0])}
                 size="xs"
@@ -3809,12 +3951,14 @@ export function ChatInput({
               data-testid="composer-active-model-count"
               className="min-w-0 line-clamp-2 break-keep"
             >
-              {modelsSelectedLabel(activeSelectedModels.length)}
+              {isAutoMode
+                ? autoCopy.label
+                : modelsSelectedLabel(activeSelectedModels.length)}
             </span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
           </button>
 
-          {activeSelectedModels.length > 0 && (
+          {!isAutoMode && activeSelectedModels.length > 0 && (
             <button
               type="button"
               data-testid="request-credit-estimate"
@@ -3844,6 +3988,18 @@ export function ChatInput({
                 <span className="text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
               )}
             </button>
+          )}
+          <ChatInputAutoCapabilityPendingNotice
+            visible={isAutoCapabilityPending}
+            label={`${autoCopy.label} · ${t("auth.loading")}`}
+          />
+          {isAutoMode && !isAutoCapabilityPending && (
+            <span
+              data-testid="auto-variable-credit-notice"
+              className="max-w-[132px] text-pretty text-[11px] font-medium leading-4 text-zinc-500 dark:text-zinc-400"
+            >
+              {autoCopy.variableCreditNotice}
+            </span>
           )}
           {/*
             The microphone is the control immediately left of Send.
@@ -3909,8 +4065,16 @@ export function ChatInput({
                 (!value.trim() && attachments.length === 0)
               }
               className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
-              title={`${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`}
-              aria-label={`${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`}
+              title={
+                isAutoMode
+                  ? `${t("chat.send")} · ${autoCopy.variableCreditNotice}`
+                  : `${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`
+              }
+              aria-label={
+                isAutoMode
+                  ? `${t("chat.send")} · ${autoCopy.variableCreditNotice}`
+                  : `${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`
+              }
               aria-describedby={
                 sendDisabledReason ? "chat-send-disabled-reason" : undefined
               }
@@ -4093,10 +4257,12 @@ export function ChatInput({
                       >
                         {t("chat.toolsWebSearch")}
                       </span>
-                      <span id="tools-web-search-description" className="text-xs text-zinc-500">
-                        {webSearchSwitchDescription}
-                        {isWebSearchOn ? ` ${webSearchSwitchCostNote}` : ""}
-                      </span>
+                      <ChatInputWebSearchSwitchDescription
+                        isAutoMode={isAutoMode}
+                        isWebSearchOn={isWebSearchOn}
+                        description={webSearchSwitchDescription}
+                        costNote={webSearchSwitchCostNote}
+                      />
                     </span>
                     {/* The track is decorative: the button already carries the
                         state as `aria-checked`, so repeating it here would
@@ -4975,6 +5141,8 @@ export function ChatInput({
         creditShortfall={creditShortfall}
         signInCallbackUrl={signInCallbackUrl}
         currentChatId={currentChatId}
+        guestImportAvailable={currentProduct !== "chat"}
+        currentProduct={currentProduct}
       />
     </div>
   );

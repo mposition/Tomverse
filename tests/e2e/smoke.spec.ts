@@ -26,17 +26,16 @@ test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
       page.getByRole("link", { name: /^Open Review$/i }).first()
     ).toHaveAttribute(
       "href",
-      "/chat?lang=en"
+      "/review?lang=en"
     );
   }
-  // "Start chatting free" named Tomverse Chat, which is not released. The
-  // CTA says what pressing it starts instead.
+  // The primary guest CTA starts Review; Chat has its own sign-in entry.
   await expect(page.getByTestId("landing-primary-cta")).toHaveText(
     "Start comparing free"
   );
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
-    "/chat?lang=en&entry=guest-preview"
+    "/review?lang=en&entry=guest-preview"
   );
   // The hero states the no-sign-up promise once. It used to carry it twice,
   // in the signup note and again in a guest note, in near-identical words;
@@ -76,7 +75,7 @@ test("signed-in homepage keeps the page visible and offers one continue action",
   );
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
-    "/chat?lang=en"
+    "/review?lang=en"
   );
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveCount(0);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
@@ -85,7 +84,7 @@ test("signed-in homepage keeps the page visible and offers one continue action",
 test("guest preview opens a 3-model comparison chat by default", { tag: "@smoke" }, async ({ page }, testInfo) => {
   await prepareGuestPage(page, "en");
   await mockChatStream(page, "Guest preview answer");
-  await page.goto("/chat?lang=en&entry=guest-preview");
+  await page.goto("/review?lang=en&entry=guest-preview");
 
   await expect(page.getByTestId("guest-quick-start")).toHaveCount(0);
   if ((page.viewportSize()?.width ?? 1024) < 768) {

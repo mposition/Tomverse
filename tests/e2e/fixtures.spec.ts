@@ -11,7 +11,7 @@ test("mock chat returns deterministic text", async ({ page }, testInfo) => {
   await prepareGuestPage(page, "ko");
   await mockChatStream(page, "QA mock response");
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "QA message");
 
   // The guest default is 3 comparison panels, and the mock responds

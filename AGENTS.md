@@ -55,6 +55,40 @@ Report implemented and tested behavior separately from documentation, review, me
 
 다음 작업의 추천은 그 작업의 자동 착수, 신규 과금, 병합 또는 배포 승인이 아닙니다.
 
+# 긴 목표는 단계에 묶어 둡니다
+
+여러 사이클에 걸친 큰 목표(기능 활성화, 여러 PR로 나뉜 기능 개발)는 진행 중에
+발견한 일에 끌려 원래 목표를 잃기 쉽습니다. 2026-10-10~11 AMUX v22 활성화는
+활성화 중 찾은 버그를 차례로 고치느라 활성화 단계가 멈췄고, Chat-01은 규모가
+커서 운영자가 틈틈이 지금 어디까지 왔는지를 따로 확인해야 했습니다.
+
+- **진행 중 발견한 버그는 지금 목표의 다음 단계를 막을 때만 고칩니다.** 막지
+  않으면 고치지 않고, 그 사이클 완료 보고의 다음 권장 작업에 적은 뒤 원래
+  단계로 돌아옵니다. 막는지 판단이 서지 않으면 운영자에게 묻습니다. 되돌릴 수
+  없는 피해(유출, 사용자 데이터 손실)가 진행 중이거나 그렇게 될 수 있는 문제(악용
+  가능한 보안 취약점 등)는 다음 단계를 막지 않아도 목록으로 미루지 않고 바로
+  운영자에게 알립니다.
+- **긴 목표의 완료 보고에는 목표 대비 현재 위치를 넣습니다.** 목표 문장, 단계
+  체크리스트의 완료 단계/전체, 마지막으로 단계가 진전한 때, 그 이후 어느 단계에도
+  속하지 않은 작업의 수입니다. 지금 하는 일이 어느 단계에 속하는지 적고, 어느
+  단계에도 속하지 않으면 그렇다고 적습니다. 체크리스트가 없으면 다음 사이클에
+  만들어 운영자 확인을 받습니다. 이미 진행 중인 목표도 같습니다.
+- **긴 목표에 속한 PR은 본문에 `Goal-Step:` 줄을 정확히 하나 넣습니다**(운영자
+  결정 2026-10-12). 목표 ID는 현황판 ID가 있으면 그것을 쓰고, 없으면 운영자가
+  정한 ID(영문 대문자·숫자·하이픈, 예: `AMUX-V22-ACT`)를 씁니다. 단계 ID는 영문·
+  숫자·`.`·`_`·`-`만 쓰며 공백이 없습니다. 긴 목표에 속하지 않는 PR에는 넣지
+  않습니다.
+
+  ```
+  Goal-Step: <목표 ID>/<단계 ID>             그 단계의 작업
+  Goal-Step: <목표 ID>/<단계 ID> completes   이 PR이 병합되면 그 단계가 끝남
+  Goal-Step: <목표 ID>/-                     어느 단계에도 속하지 않는 작업
+  Goal-Step: <목표 ID>/op                    운영자의 별도 요청으로 하는 작업
+  ```
+
+  곁길을 단계로 적지 않습니다. 이 줄이 목표 대비 위치를 기계가 셀 수 있는 유일한
+  근거입니다.
+
 # 실행할 명령을 줄 때는 실행 위치를 먼저 적습니다
 
 **사용자 환경은 Windows + PowerShell입니다.** 명령 블록을 주기 전에, 그 블록
@@ -234,6 +268,41 @@ staging에 "Wait for CI" 배포를 겹겹이 쌓았습니다.
 `tests/autoPrAutoMergeArming.test.mjs`와 `security-regression-check`가 workflow에
 `gh pr merge`·`--auto`가 없음을 고정합니다. 개별 PR에 auto-merge가 필요하면
 **사람이 켭니다.**
+
+## PR은 draft로 시작하고, 끝나면 ready로 바꿉니다
+
+**draft PR에서는 PR CI가 아무것도 돌지 않습니다**(2026-10-03). `Auto PR to Develop`은
+PR을 `--draft`로 열고, 브랜치 작업을 마친 세션이 직접 ready로 바꿉니다. ready로
+바꾸는 순간 전체 검사가 한 번 돌고, 녹색이 되면 merge train이 가져갑니다(merge
+train은 draft를 건너뜁니다).
+
+```
+gh pr ready <번호>        작업 완료 — CI 시작
+gh pr ready <번호> --undo 다시 손볼 때 — 이후 push는 CI를 돌리지 않음
+```
+
+- **작업 중에는 draft로 둡니다.** push할 때마다 약 20개 job이 돌던 것이 이 규칙의
+  이유입니다. 동시 실행 한도를 40으로 올린 뒤에도 2026-10-03에 실행 40·대기 68이었고,
+  Railway가 기다리는 develop·main push 검사가 그 뒤에 줄을 섰습니다.
+- **CI 결과가 필요하면 ready로 바꿉니다.** draft 상태로는 검사 결과를 얻을 수 없으니,
+  로컬에서 먼저 확인할 수 있는 것(`npm run test:unit`, 관련 check script)은 로컬에서
+  돌립니다.
+- 판정은 PR workflow들의 job 조건 하나이고, `tests/draftPrCiSkip.test.mjs`가 모든
+  job과 `ready_for_review` trigger, Auto PR의 `--draft`를 함께 고정합니다.
+
+## develop은 dev에, Test는 `test` 브랜치에 배포됩니다
+
+2026-10-07부터 환경이 셋입니다. **develop 병합이 닿는 곳은 dev**(`dev.tomverse.app`)이고,
+staging(사람에게는 Test, `staging.tomverse.app`)은 `test` 브랜치를 배포합니다. `test`는
+사람이 고른 release candidate로 `npm run promote:test -- --sha=<commit>`만 옮깁니다.
+
+- "develop에 병합했으니 staging에서 확인"은 이제 틀린 문장입니다. 병합 직후의 동작은 dev에서
+  보고, 고정된 SHA로 하는 검증(체크리스트·기록)은 그 SHA로 `test`를 옮긴 뒤 Test에서 합니다.
+- merge train은 dev 배포가 끝나기를 기다립니다. `test`로 병합하는 레인은 없습니다.
+- Railway 환경 이름은 `staging` 그대로이고, 환경 판정(`lib/deploymentEnvironment.ts`)도 `staging`
+  입니다. Test 전용 게이트는 계속 staging에서만 동작합니다.
+- release 경로는 `.github/RELEASE_CHECKLIST.md` 7.9, 승격 절차와 한 번만 하는 전환은
+  `docs/ops/dev-test-lanes.md`.
 
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
@@ -694,7 +763,7 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   초기화하지도, 추가 지급하지도, 이미 쓴 크레딧을 회수하지도 않습니다.
   업그레이드와 다운그레이드가 같은 함수를 씁니다.
 
-# Default model (GPT-5.6 Luna)
+# Default model (GPT 6 Luna)
 
 `DEFAULT_MODEL_ID`, 게스트 기본값, `gpt-5-4-mini`의 lifecycle을 건드리기 전에
 읽습니다.
@@ -710,9 +779,34 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **trio 밖의 모델은 `guestDefaultModelId`로 저장할 수 없습니다.** resolver가
   무시하므로 저장은 되고 효과는 없는 설정이 됩니다. `guestDefaultLeadRejection()`
   이 거부합니다.
-- **기본 모델은 `gpt-5-6-luna`입니다.** `lib/models.ts`의 `DEFAULT_MODEL_ID`,
-  `lib/appDefaults.ts`의 `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`,
-  Prisma 컬럼 기본값이 함께 움직입니다. 한쪽만 바꾸지 않습니다.
+- **기본 모델은 `gpt-6-luna`입니다**(2026-10-12, 이전 `gpt-5-6-luna`).
+  `lib/models.ts`의 `DEFAULT_MODEL_ID`, `lib/appDefaults.ts`의
+  `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`, Prisma 컬럼 기본값이
+  함께 움직입니다. 한쪽만 바꾸지 않습니다. 같은 날 trio의 Anthropic 자리는
+  `claude-haiku-5-5`로 옮겼습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
+- **게스트 기본 3모델은 OpenAI 1개 · Anthropic 1개 · Gemini 1개입니다**(플랫폼
+  전략, 2026-10-12 운영자 결정). 그래서 Anthropic 자리의 **Claude Haiku 계열만**
+  가격이 게스트 개방 조건(최악 턴 ≤ standard 1크레딧의 3배 커버)에 맞지 않아도
+  허용합니다. Haiku 5.5의 100,000토큰 장문 tier가 입력 상한 안에서 원가를 낮게
+  기록할 수 있다는 위험까지 수용한 결정이며, 다른 모델의 같은 경계는 이 예외가
+  아닙니다: docs/policy/credit-and-cost-limits.md "Haiku 계열을 게스트 Anthropic
+  자리로 여는 예외".
+- **기본 3모델 구성은 Admin 설정입니다**(2026-10-12 운영자 결정, 정책 문서
+  "기본 3모델 구성은 Admin 설정입니다"). `AppSetting["guestBrandTrioModelIds"]`가
+  정하고, 코드 trio는 행이 없거나 읽을 수 없을 때의 비상값입니다. 저장 검증은
+  `guestBrandTrioRejection()`(활성 · 공개 · Guest · Standard · 검증된 가격 · 서로
+  다른 3개 · OpenAI · Anthropic · Gemini 각 1개) 한 곳이고, 선두는 그 구성 안에서만 고르며 구성과 한 트랜잭션으로 저장합니다.
+  구성을 쓰는 모든 곳(첫 렌더, 신규 계정, Admin 설명, 서버 선두 판정,
+  `check:default-models`)은 `getPublicAppSettings()` 또는 `readGuestLeadFacts()`가
+  해석한 같은 구성을 받습니다 — 컴파일된 trio를 직접 읽지 않습니다.
+- **은퇴한 구성원의 자리는 대체 모델이 이어받습니다.** resolver에
+  `resolveReplacement`를 넘기면 비활성 구성원의 `replacementModelId` 체인을 따라가
+  같은 자리·같은 순서에 넣고, 자격이 없을 때만 fallback 목록으로 채웁니다. 서버와
+  브라우저가 같은 catalogue에 묶어야 첫 렌더가 어긋나지 않습니다.
+- **기본 선택을 계산할 때는 `createDefaultLineupEligibilityCheck()`를 씁니다.**
+  호출자의 자격 검사(새 계정 첫 비교는 Free, 나머지는 게스트)에
+  `isDefaultLineupServable`을 더한 것이라 `limited`·비공개가 된 구성 모델은
+  승계됩니다. 사람이 고른 선택의 clamp는 게스트 자격 그대로입니다.
 - **`gpt-5-4-mini`는 은퇴하지 않았습니다.** enabled·publiclyListed 상태를
   유지하는 것은 의도된 관찰 기간입니다.
 - **수치 eval 통과는 은퇴의 필요조건이지 충분조건이 아닙니다.** 정책 문서
@@ -1182,6 +1276,16 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   표식이 맞는 전달만 셉니다. pipeline 파일 목록은 수신 route의 import closure 전체이며 테스트가
   강제합니다. schema는 파일 전체가 아니라 수신 경로가 쓰는 모델·그 enum·datasource·generator만 감시합니다(운영자 결정
   2026-10-03) — 무관한 모델 추가가 서명된 기록을 무효로 만들지 않게 하기 위해서입니다.
+- **서명 가능 여부 보고**: `npm run report:marketing-webhook-record-signability`
+  (`scripts/report-marketing-webhook-record-signability.mjs`,
+  `scripts/report-marketing-webhook-record-signability-core.mjs`). 트리의 기록마다
+  서명 route의 `checkMarketingWebhookRecordForSigning()`을 **그대로 불러** 그 답을
+  출력합니다. **판정을 복제하지 않습니다** — 보고가 fingerprint를 자기 손으로
+  비교하면 콘솔이 거절하는 기록을 signable이라고 말할 수 있고,
+  `tests/marketingWebhookRecordSignability.test.mjs`가 그 회귀를 거부합니다.
+  읽기 전용이며 gate가 아니고, signable이라는 출력은 서명 승인이 아닙니다 —
+  서명은 production 콘솔에서 사람이 하는 행위이고, 콘솔은 production이 실제로
+  돌리는 트리를 읽습니다.
 
 # 엔지니어링 Agent
 
@@ -1319,8 +1423,14 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   docs/policy/amux-decision-maker.md §6의 표대로 이 단계의 쓰기는 kill switch 중에도 모두 허용되므로
   스위치를 읽지 않습니다. 같은 변경에서 S1c의 스위치 읽기 실패는 트랜잭션을 이미 중단시키므로 writer가
   그 자리에서 `settings_unreadable`을 던지고 아무것도 쓰지 않습니다(SAVEPOINT는
-  docs/policy/amux-decision-maker.md §9의 12문장을 넘깁니다). 결과 제출과 배정은 이 store의 두 조합을
-  거쳐서만 부릅니다. cron·route·Admin 화면은 없습니다.
+  docs/policy/amux-decision-maker.md §9의 12문장을 넘깁니다). 라우팅·결과 제출·배정은 이 store의 세
+  조합을 거쳐서만 부릅니다. **카드 본문은 라우팅이 같은 트랜잭션에서 씁니다**(2026-10-09) —
+  `recordDecisionMakerRequestWithCardText()`가 DM으로 라우팅된 새 요청에만 `dmCardText()`(S1a의 JSON
+  직렬화, `format` 표시 포함)를 그 route 감사에 묶어 저장하고, 운영자 라우팅은 본문이 없습니다. 본문
+  guard가 카드를 그 요청의 route 트랜잭션에만 받으므로 나중에 채울 수 없습니다.
+  docs/policy/amux-decision-maker.md §5의 16 KiB와 카드 secret 검사는 이 직렬화 바이트로 판정하므로 DM으로
+  가는 카드는 언제나 본문 store가 받습니다. Admin은
+  `readDecisionMakerCardText()`로 읽습니다. cron·route·Admin 화면은 없습니다.
 - **S1e(운영자 판정·전달)**: `lib/amux/decisionMakerJudgmentCore.ts`,
   `lib/amux/decisionMakerJudgmentStore.ts`, `lib/amux/decisionMakerJudgmentSystemAudit.ts`,
   `prisma/migrations/20261008130000_amux_decision_maker_stale_close_hours/migration.sql`,
@@ -1366,6 +1476,30 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   전에는 어떤 버튼도 풀지 않습니다. 다시 읽기에 실패하면 상태를 표시하지 않고 "다시 읽기"만
   남깁니다 — 확인되지 않은 상태 위에서 같은 변경을 다시 보내 latch를 풀 수 없게 하기 위해서입니다. 탭에
   badge는 없습니다.
+- **S1f3(라우팅 route)**: `app/api/internal/amux/decision-maker/requests/route.ts`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerRouting`(상한 12),
+  `tests/server-contract/amux-decision-maker-routing-route.test.ts`,
+  `tests/server-contract/amux-decision-maker-routing-route-budget.test.ts`. bridge가 부를 판정 route이며
+  **`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409 `dm_routing_disabled`입니다** — 이
+  route를 부르는 bridge 경로가 S2(docs/policy/amux-decision-maker.md §12)이므로, 그 승인 전에는 스위치와
+  상관없이 요청 원장에 아무것도 쓰지 않습니다. 판정은 body store의
+  `recordDecisionMakerRequestWithCardText()` 하나이고(route는 인증·body·key ring·예산·경계만), 같은 (카드,
+  질문 revision)은 기존 요청을 돌려주므로 결과 불명 뒤 같은 질문을 다시 보내는 것은 조회입니다. key ring
+  오류는 DB에 닿기 전에 503이며 로그에는 코드만 남깁니다. 응답과 로그에 카드 문구·digest·감사 id는
+  없습니다. **경계 상한 12는 라우팅의 가장 긴 경우(무결성 키, DM으로 가는 새 질문과 그 카드 본문) +
+  setup + fence와 같고**, `tests/amuxDecisionMakerBody.test.mjs`가 그 셈을, body DB 테스트가 하나 줄인
+  상한의 거부를 고정합니다. bridge·DM 호출은 없습니다.
+- **S1f4(선언 정확도 보고 화면)**: `components/admin/AmuxDecisionMakerReportPanel.tsx`,
+  `lib/adminMessages/amuxDecisionMaker.ts`의 `adminAmuxDecisionMakerReportMessages`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerReportRead`(상한 4), Decision Maker 탭
+  (`app/(site)/(application)/admin/amux-settings/page.tsx`),
+  `tests/client/amuxDecisionMakerReportRender.test.tsx`. 화면은 S1e의
+  `readDecisionMakerDeclarationAccuracyReport()`를 페이지가 AMUX DB 경계 안에서 읽어 넘긴 값만 그립니다 —
+  요청도 버튼도 없습니다. 수치는 각자의 분자/분모로 보이고, 분모가 비면 `insufficient_evidence`를 말로
+  보이며 0%로 쓰지 않습니다. 읽기에 실패하면 수치 없이 그 사실만 보이고, 스위치 읽기와 따로 실패합니다.
+  docs/policy/amux-decision-maker.md §0-2의 졸업 기준과 비교하지 않습니다. **경계 상한 4는 보고의 두 문장 +
+  setup + fence이고**, `tests/amuxDecisionMakerJudgment.test.mjs`가 그 셈을, judgment DB 테스트가 kill
+  switch 중의 읽기와 하나 줄인 상한의 거부를 고정합니다. 제안 열람·판정 화면은 S2입니다.
 
 # AI Review (교차검토) 품질과 M5
 
@@ -1629,6 +1763,7 @@ Before changing the Prompt Refiner surface or request boundary in
 `tests/promptRefinerShadowAdmissionCore.test.mjs`, or their tests, read:
 
 - `docs/ui-contracts/prompt-refiner-suggestion.md`
+- `docs/ui-contracts/chat-e04-staging-fixture.md`
 - `docs/policy/prompt-refiner-observability.md`
 - `docs/ops/prompt-refiner-shadow-harness.md`
 

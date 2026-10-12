@@ -60,8 +60,8 @@ export default async function AdminAmuxExecutionPage({
   ]);
   const isOwner = Boolean(session?.user?.id) && role === "owner";
   const statuses: Record<string, AmuxTabStatus | undefined> = {
-    // The owner can request guarded admission; the supplementary card list
-    // remains read-only. Every command checks owner authorization again.
+    // The owner may move cards in the Kanban workspace. Every command checks
+    // owner authorization again; other administrators only inspect it.
     cards: isOwner ? undefined : "read_only",
     // The same permission every escalation, proposal and review route checks.
     assignment: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
@@ -117,6 +117,7 @@ export default async function AdminAmuxExecutionPage({
       </div>
     );
   }
+
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}

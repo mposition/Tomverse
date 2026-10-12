@@ -194,7 +194,7 @@ async function openChat(page: Page, options: { lockedIds?: string[] } = {}) {
   await mockChatStream(page, "Draft isolation QA response");
   await restoreActiveConversation(page, CONVERSATION_A);
 
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(textarea(page)).toBeVisible();
   await expectConversationOpen(page, CONVERSATION_A);
   return world;
@@ -491,7 +491,7 @@ test.describe("conversation-scoped composer drafts: attachments", () => {
     await mockConversationPair(page);
     const uploadState = await mockAttachmentUpload(page);
     await restoreActiveConversation(page, CONVERSATION_A);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(textarea(page)).toBeVisible();
     await expectConversationOpen(page, CONVERSATION_A);
 

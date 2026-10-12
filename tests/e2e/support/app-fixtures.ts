@@ -1,4 +1,4 @@
-import { expect, type Page, type TestInfo } from "@playwright/test";
+import { expect, type Page, type Route, type TestInfo } from "@playwright/test";
 import { createHash } from "node:crypto";
 
 export const qaPersistedMessageId = (conversationId: string, requestId: string) => {
@@ -616,6 +616,8 @@ export async function mockAuthenticatedApi(
      */
     selectionMode?: "manual" | "auto";
     autoSelectionOffered?: boolean;
+    /** Stored product returned by the list and detail routes. */
+    productKey?: "chat" | "review" | null;
     /**
      * §14. The account's published profiles, served at
      * `/api/assistant-profiles`. Absent leaves that route unmocked, which is
@@ -688,10 +690,12 @@ export async function mockAuthenticatedApi(
     locked: false,
     shared: false,
     title: "QA conversation",
-    // Stands in for the compiled-in default selection, so it tracks
-    // DEFAULT_MODEL_ID rather than naming a model in its own right. Moved to
-    // gpt-5-6-luna with the app default on 2026-08-01; a spec that needs a
-    // specific model still passes `selectedModels` explicitly.
+    // Stood in for the compiled-in default selection, and moved to
+    // gpt-5-6-luna with the app default on 2026-08-01. It stayed there when
+    // DEFAULT_MODEL_ID moved to gpt-6-luna on 2026-10-12: a seeded account's
+    // conversation keeps the model it was created with, and the specs built on
+    // this fixture exercise gpt-5-6-luna's verified native search. A spec that
+    // needs a specific model still passes `selectedModels` explicitly.
     selectedModels: options.selectedModels || ["gpt-5-6-luna"],
     disabledPanels: [],
     memoryMode: options.memoryMode || "inherit",
@@ -720,6 +724,8 @@ export async function mockAuthenticatedApi(
     // the server -- so neither does this.
     selectionMode: state.selectionMode,
     autoSelection: { offered: state.autoSelectionOffered },
+    productKey: options.productKey ?? null,
+    surface: options.productKey === "chat" ? "chat" : "workspace",
     // §14. Server-computed, including whether the profile has published past
     // this conversation -- the screen never works the revision out itself.
     assistantProfile: state.assistantProfile,
@@ -824,9 +830,10 @@ export async function mockAuthenticatedApi(
       json({
         theme: state.theme,
         language: "ko",
-        // Tracks DEFAULT_MODEL_ID, not a model chosen for its own sake: this
-        // is "the account default a seeded QA user still has". Moved to
-        // gpt-5-6-luna on 2026-08-01.
+        // "The account default a seeded QA user still has". Moved to
+        // gpt-5-6-luna on 2026-08-01 and deliberately not to gpt-6-luna on
+        // 2026-10-12: an existing account keeps its stored default when the
+        // compiled one moves, and the welcome screen settles on this value.
         defaultModel: "gpt-5-6-luna",
         timeZone: state.timeZone,
         timeZoneInitializedAt: state.timeZoneInitializedAt,
@@ -965,9 +972,11 @@ export async function mockAuthenticatedApi(
     isLocked: false,
     shareEnabled: false,
     shareExpiresAt: null,
+    productKey: options.productKey ?? null,
+    surface: options.productKey === "chat" ? "chat" : "workspace",
   });
 
-  await page.route("**/api/conversations", async (route) => {
+  const handleConversationCollection = async (route: Route) => {
     if (route.request().method() === "GET") {
       state.conversationListReads += 1;
       // `state.deleted` is about the primary conversation only, so deleting it
@@ -1020,7 +1029,50 @@ export async function mockAuthenticatedApi(
       );
     }
     await route.fulfill(json(conversation(), 201));
-  });
+  };
+  await page.route("**/api/conversations", handleConversationCollection);
+  if (options.productKey === "chat") {
+    const drafts = new Map<string, {
+      text: string;
+      revision: number;
+      attachmentReferences: JsonValue[];
+    }>();
+    await page.route("**/api/products/chat/drafts/**", async (route) => {
+      const scopeKey = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop() ?? "");
+      const current = drafts.get(scopeKey);
+      const canonical = (draft: NonNullable<typeof current>) => ({
+        ...draft, scopeKey, attachments: [],
+        createdAt: "2026-09-21T00:00:00.000Z",
+        updatedAt: "2026-09-21T00:00:00.000Z",
+      });
+      if (route.request().method() === "GET") {
+        await route.fulfill(json({ scopeKey, draft: current ? canonical(current) : null }));
+        return;
+      }
+      const body = route.request().postDataJSON() as {
+        text?: string; expectedRevision?: number; attachmentReferences?: JsonValue[];
+      };
+      if (body.expectedRevision !== (current?.revision ?? 0)) {
+        await route.fulfill(json({ code: "CHAT_DRAFT_REVISION_CONFLICT",
+          currentRevision: current?.revision ?? null,
+          currentDraft: current ? canonical(current) : null }, 409));
+        return;
+      }
+      if (route.request().method() === "DELETE") {
+        drafts.delete(scopeKey);
+        await route.fulfill({ status: 204, body: "" });
+        return;
+      }
+      const next = { text: body.text ?? "", revision: (current?.revision ?? 0) + 1,
+        attachmentReferences: body.attachmentReferences ?? [] };
+      drafts.set(scopeKey, next);
+      await route.fulfill(json({ draft: canonical(next) }));
+    });
+    await page.route(
+      "**/api/products/chat/conversations",
+      handleConversationCollection
+    );
+  }
 
   // The transcript this conversation reports, which grows as the app saves to
   // it -- exactly like the real endpoint pair.

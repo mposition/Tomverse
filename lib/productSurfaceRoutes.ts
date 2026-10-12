@@ -1,15 +1,14 @@
 /**
  * Which URL a conversation belongs at, once `/chat` changes meaning.
  *
- * Product boundary decision record v1.2 §8. Written now and wired later, on
- * purpose: the rule needs `Conversation.productKey` to be settled before it
- * can be applied, and applying it early would move users on a value that is
- * still NULL for every row.
+ * Stored-product routing: docs/ui-contracts/chat-product-switcher.md. The product cutover is now wired:
+ * `/chat` is Tomverse Chat and `/review` is Tomverse Review. A stored row still
+ * decides where a conversation belongs; the URL never rewrites productKey.
  *
  * ## The problem it is for
  *
- * `/chat` is the Review workspace today, and every Review deep link and
- * bookmark points at it. The day `/chat` becomes Tomverse Chat, those links
+ * `/chat` used to be the Review workspace, and every Review deep link and
+ * bookmark pointed at it. Now that `/chat` is Tomverse Chat, those links
  * land on the wrong product. The fix is not a blanket redirect -- some `/chat`
  * links will genuinely be Chat by then -- it is to read the stored product and
  * send each conversation where it belongs.
@@ -20,16 +19,17 @@
  *
  * ## What it deliberately does not do
  *
- * It does not decide *when* `/chat` changes meaning, and it does not carry a
- * surface fallback. A conversation with no stored product is not routed on a
+ * It does not carry a surface fallback. A conversation with no stored product is not routed on a
  * guess; the caller reports it, which is what `strict` read mode is for.
  *
- * `resolveLegacyChatDeepLink` remains pure and unwired until that cutover.
- * The additive CHAT_WORKSPACE_PATH below is used by today's gated entry;
- * using it does not change `/chat`'s legacy meaning.
+ * `resolveLegacyChatDeepLink` remains the pure stored-product decision used by
+ * compatibility links. `/chat/workspace` remains an inbound alias only.
  */
 
-import type { ConversationProductKey } from "@/lib/conversationProduct";
+import {
+  isConversationProductKey,
+  type ConversationProductKey,
+} from "@/lib/conversationProduct";
 
 /** The path each product's workspace lives at once the cutover happens. */
 export const PRODUCT_SURFACE_PATH: Readonly<
@@ -41,17 +41,34 @@ export const PRODUCT_SURFACE_PATH: Readonly<
 };
 
 /**
- * `/chat` before the cutover: the Review workspace, unchanged.
+ * The historical Review path before the cutover.
  *
  * Held as its own constant rather than reusing `PRODUCT_SURFACE_PATH.review`,
- * because they mean different things -- this one is a fact about today, that
- * one is a decision about afterwards -- and they stop being equal on the day
- * of the cutover.
+ * Kept for compatibility-resolution tests and old bookmarks. Runtime Review
+ * navigation uses {@link REVIEW_WORKSPACE_PATH}.
  */
 export const LEGACY_REVIEW_PATH = "/chat";
 
-/** Additive, gated Chat entry. This does not activate the `/chat` cutover. */
-export const CHAT_WORKSPACE_PATH = "/chat/workspace";
+/** Canonical Tomverse Chat entry. Availability is still enforced server-side. */
+export const CHAT_WORKSPACE_PATH = PRODUCT_SURFACE_PATH.chat;
+
+/** Inbound compatibility alias for links issued before `/chat` became Chat. */
+export const CHAT_WORKSPACE_COMPATIBILITY_PATH = "/chat/workspace";
+
+/** Canonical Tomverse Review entry. */
+export const REVIEW_WORKSPACE_PATH = PRODUCT_SURFACE_PATH.review;
+
+/**
+ * Canonical workspace for a server-supplied product value.
+ *
+ * Public snapshots written before product identity was exposed have no value,
+ * and an unrecognised value must not become Chat by guess. Review is the
+ * historical, least-surprising fallback for those content-free links.
+ */
+export const productSurfacePathOrReview = (productKey: unknown): string =>
+  isConversationProductKey(productKey)
+    ? PRODUCT_SURFACE_PATH[productKey]
+    : REVIEW_WORKSPACE_PATH;
 
 export type DeepLinkResolution =
   | { action: "stay"; path: string }

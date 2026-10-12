@@ -32,14 +32,27 @@ const openPicker = async (page: Page) => {
 };
 
 const openSeededConversation = async (page: Page) => {
+  // Auto is a Chat product capability. `/chat` is the canonical Chat surface;
+  // Review at `/review` must refuse it even if a fixture accidentally says
+  // `offered: true`.
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_chat_workspace",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
   await page.goto("/chat?lang=en");
   await openRecentConversation(page, { title: CONVERSATION_TITLE });
+  await expect(page).toHaveURL(/conversation=qa-conversation/);
+  await expect(page.getByText("안녕하세요", { exact: true })).toBeVisible();
 };
 
 test.describe("Auto is not offered", () => {
   test.beforeEach(async ({ page }) => {
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page, {
+      productKey: "chat",
       messages: [
         { id: "qa-m1", role: "user", content: "안녕하세요" },
         {
@@ -60,7 +73,8 @@ test.describe("Auto is not offered", () => {
     const dialog = await openPicker(page);
 
     await expect(dialog.getByTestId("auto-routing-toggle")).toHaveCount(0);
-    await expect(dialog.getByRole("switch", { name: /auto/i })).toHaveCount(0);
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveCount(0);
+    await expect(dialog.getByRole("switch", { name: /smart adaptive/i })).toHaveCount(0);
   });
 
   test("it leaves no row height behind", async ({ page }) => {
@@ -102,6 +116,7 @@ test.describe("Auto is offered", () => {
   test.beforeEach(async ({ page }) => {
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page, {
+      productKey: "chat",
       autoSelectionOffered: true,
       messages: [
         { id: "qa-m1", role: "user", content: "안녕하세요" },
@@ -123,6 +138,7 @@ test.describe("Auto is offered", () => {
 
     const toggle = dialog.getByTestId("auto-routing-toggle");
     await expect(toggle).toBeVisible();
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toBeVisible();
 
     const control = toggle.getByRole("switch");
     await expect(control).toHaveAttribute("aria-checked", "false");
@@ -139,7 +155,7 @@ test.describe("Auto is offered", () => {
 
   test("turning it on stores auto and turning it off stores manual", async ({
     page,
-  }) => {
+  }, testInfo) => {
     await openSeededConversation(page);
     const dialog = await openPicker(page);
     const control = dialog.getByTestId("auto-routing-toggle").getByRole("switch");
@@ -147,6 +163,27 @@ test.describe("Auto is offered", () => {
     await control.click();
     await expect(control).toHaveAttribute("aria-checked", "true");
 
+    const composerToggle = page.getByTestId("composer-auto-routing-toggle");
+    await expect(composerToggle).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByTestId("composer-active-model-count")).toHaveText("Smart Adaptive");
+    await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
+    await expect(page.getByTestId("auto-variable-credit-notice")).toBeVisible();
+    await testInfo.attach("auto-on-composer-picker", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+
+    // The stored manual return model stays available, but Auto must not paint
+    // any model as the one currently answering. Choosing one first saves
+    // manual mode and only then restores that model's selected treatment.
+    const manualChoice = dialog.getByTestId("recommended-model-option").first();
+    await expect(manualChoice).toHaveAttribute("aria-pressed", "false");
+    await manualChoice.click();
+    await expect(control).toHaveAttribute("aria-checked", "false");
+    await expect(manualChoice).toHaveAttribute("aria-pressed", "true");
+
+    await control.click();
+    await expect(control).toHaveAttribute("aria-checked", "true");
     await control.click();
     await expect(control).toHaveAttribute("aria-checked", "false");
   });
@@ -165,37 +202,52 @@ test.describe("Auto is offered", () => {
   });
 
   test(
-    "the switch stays reachable and legible at 320px and 200% text scaling",
+    "the composer switch stays reachable without narrowing the textarea at 320px and 200% text scaling",
     { tag: "@ui-risk" },
     async ({ page }) => {
       // The composer contract's viewport floor, at the browser-level
-      // equivalent of 200% text scaling. Auto sits in the picker sheet rather
-      // than in the composer, so it may not push the composer around -- but it
-      // still has to survive the same viewport.
+      // equivalent of 200% text scaling. Auto is now a first-class composer
+      // action, so it must wrap below the textarea without narrowing or
+      // covering that dedicated input row.
       await page.setViewportSize({ width: 320, height: 568 });
       await page.addInitScript(() => {
         document.documentElement.style.fontSize = "32px";
       });
 
       await openSeededConversation(page);
-      const dialog = await openPicker(page);
-      const toggle = dialog.getByTestId("auto-routing-toggle");
-      await expect(toggle).toBeVisible();
+      const textarea = page.getByTestId("chat-textarea");
+      await textarea.fill("한글 조합 중인 문장");
+      const textareaBefore = await textarea.boundingBox();
+      expect(textareaBefore).not.toBeNull();
+
+      const composerToggle = page.getByTestId("composer-auto-routing-toggle");
+      await expect(composerToggle).toBeVisible();
+      await composerToggle.click();
+      await expect(composerToggle).toHaveAttribute("aria-checked", "true");
+      await expect(page.getByTestId("composer-active-model-count")).toHaveText("Smart Adaptive");
+      await expect(page.getByTestId("auto-variable-credit-notice")).toBeVisible();
 
       await expectNoHorizontalOverflow(page);
 
-      const box = await toggle.boundingBox();
+      const box = await composerToggle.boundingBox();
       expect(box).not.toBeNull();
       expect(box!.x).toBeGreaterThanOrEqual(-1);
       expect(box!.x + box!.width).toBeLessThanOrEqual(320 + 1);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
 
-      // The switch keeps a real touch target rather than being squeezed to
-      // make room for the label.
-      const control = toggle.getByRole("switch");
-      const controlBox = await control.boundingBox();
-      expect(controlBox).not.toBeNull();
-      expect(controlBox!.height).toBeGreaterThanOrEqual(20);
-      expect(controlBox!.width).toBeGreaterThanOrEqual(36);
+      const textareaAfter = await textarea.boundingBox();
+      expect(textareaAfter).not.toBeNull();
+      expect(Math.abs(textareaAfter!.width - textareaBefore!.width)).toBeLessThanOrEqual(1);
+      await expect(textarea).toHaveValue("한글 조합 중인 문장");
+
+      const dialog = await openPicker(page);
+      const pickerToggle = dialog.getByTestId("auto-routing-toggle");
+      await expect(pickerToggle).toBeVisible();
+      await expect(pickerToggle.getByRole("switch")).toHaveAttribute(
+        "aria-checked",
+        "true"
+      );
+      await expectNoHorizontalOverflow(page);
     }
   );
 
@@ -238,6 +290,7 @@ test.describe("Auto was offered and no longer is", () => {
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page, {
       selectionMode: "auto",
+      productKey: "chat",
       autoSelectionOffered: false,
       messages: [
         { id: "qa-m1", role: "user", content: "안녕하세요" },

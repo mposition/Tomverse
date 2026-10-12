@@ -626,8 +626,8 @@ test.describe("admin console shell", () => {
     // Cards, Assignment and Workers; recovery and Decision Maker are settings sections.
     await expect(strip.getByRole("link")).toHaveCount(3);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
-    await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(1);
     await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
+    await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(1);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
       /tab=cards$/
@@ -697,8 +697,8 @@ test.describe("the AMUX group by role", () => {
     // Assignment and Workers remain here; safety and switches belong to Operations settings.
     await expect(strip.getByRole("link")).toHaveCount(2);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
-    await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(1);
     await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
+    await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(1);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
       /tab=assignment$/
@@ -742,7 +742,7 @@ test.describe("the AMUX group by role", () => {
     // docs/policy/amux-decision-maker.md §8: any administrator reads the
     // switches; a change takes ops:write and a recent step-up.
     await signInAs("readonly");
-    await page.goto("/admin/amux-execution?tab=decision-maker");
+    await page.goto("/admin/amux-settings?tab=decision-maker");
     const panel = page.getByTestId("amux-decision-maker-switch-panel").filter({ visible: true });
     await expect(panel).toHaveCount(1);
     await expect(panel).toBeVisible();
@@ -755,7 +755,7 @@ test.describe("the AMUX group by role", () => {
     // with the way back on screen (docs/ui-contracts/admin-console-ia.md rule 7),
     // and nothing is written.
     await signInAs("ops", { authenticatedMinutesAgo: 45 });
-    await page.goto("/admin/amux-execution?tab=decision-maker");
+    await page.goto("/admin/amux-settings?tab=decision-maker");
     await expect(panel.getByTestId("amux-dm-switch-read-only")).toHaveCount(0);
     await panel.getByTestId("amux-dm-switch-set-kill_switch-on").click();
     await expect(panel.getByTestId("admin-api-reauthenticate-link")).toHaveAttribute(

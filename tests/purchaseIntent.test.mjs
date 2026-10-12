@@ -100,6 +100,7 @@ test("a hand-edited intent query cannot smuggle unknown values through", () => {
 test("returnTo accepts only the same-origin routes that can show a billing outcome", () => {
   assert.equal(sanitizeReturnTo("/pricing"), "/pricing");
   assert.equal(sanitizeReturnTo("/chat"), "/chat");
+  assert.equal(sanitizeReturnTo("/review"), "/review");
   assert.equal(
     sanitizeReturnTo("/pricing?lang=ko#credit-packs"),
     "/pricing?lang=ko#credit-packs"
@@ -180,7 +181,7 @@ test("checkout returns land back where the purchase started, with the pack named
   );
 });
 
-test("a rejected returnTo falls back to /chat instead of being passed to Stripe", () => {
+test("a rejected returnTo falls back to Review instead of being passed to Stripe", () => {
   const urls = buildCreditPackReturnUrls({
     origin: "https://tomverse.app",
     returnTo: "https://evil.com/steal",
@@ -188,10 +189,24 @@ test("a rejected returnTo falls back to /chat instead of being passed to Stripe"
     language: "en",
   });
 
-  assert.equal(urls.returnPath, "/chat");
+  assert.equal(urls.returnPath, "/review");
   assert.equal(new URL(urls.successUrl).origin, "https://tomverse.app");
   assert.equal(new URL(urls.cancelUrl).origin, "https://tomverse.app");
-  assert.match(urls.successUrl, /^https:\/\/tomverse\.app\/chat\?/);
+  assert.match(urls.successUrl, /^https:\/\/tomverse\.app\/review\?/);
+});
+
+test("explicit Chat and Review return destinations survive the checkout round trip", () => {
+  for (const pathname of ["/chat", "/review"]) {
+    const urls = buildCreditPackReturnUrls({
+      origin: "https://tomverse.app",
+      returnTo: `${pathname}?lang=ko`,
+      packId: "starter_500",
+      language: "ko",
+    });
+    assert.equal(urls.returnPath, `${pathname}?lang=ko`);
+    assert.equal(new URL(urls.successUrl).pathname, pathname);
+    assert.equal(new URL(urls.cancelUrl).pathname, pathname);
+  }
 });
 
 test("a fulfilled purchase does not return with its intent still armed", () => {

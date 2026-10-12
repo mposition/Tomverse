@@ -18,6 +18,7 @@ import {
 import { useEffect } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import {
   trackProductEvent,
   trackProductEventOnce,
@@ -198,7 +199,7 @@ export function ChatWorkspaceGuide() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
                 </span>
-                <span className="font-black">Tomverse Review</span>
+                <span className="font-bold">Tomverse Review</span>
                 <HelpCircle className="ml-auto h-5 w-5 text-blue-300" aria-hidden="true" />
               </div>
               <div className="mt-5 grid gap-3">
@@ -316,7 +317,7 @@ export function ChatWorkspaceGuide() {
               {copy.allHelp}
             </Link>
             <Link
-              href={`/chat?lang=${encodeURIComponent(lang)}`}
+              href={`${REVIEW_WORKSPACE_PATH}?lang=${encodeURIComponent(lang)}`}
               onClick={() =>
                 trackProductEvent("cta_start_click", 0, {
                   cta_location: "chat_workspace_guide",

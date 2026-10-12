@@ -136,6 +136,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "prompt-refiner-auto-budget",
   "prompt-refiner-chat-execution",
   "prompt-refiner-product-execution",
+  "guest-chat-auto-credit",
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
   AMUX_V22_AUTO_ADMIT_AUDIT_ACTOR,
@@ -243,6 +244,12 @@ export const systemAuditActionAllowed = (
     (action === "prompt_refiner.chat_scope_advanced" && targetType === "PromptRefinerChatScope") ||
     ((action === "prompt_refiner.chat_suggestion_held" || action === "prompt_refiner.chat_decision_consumed" || action === "prompt_refiner.chat_suggestion_expired") &&
       targetType === "PromptRefinerChatSuggestion")) &&
+  (actor !== "guest-chat-auto-credit" ||
+    ((action === "guest_chat.auto_credit_preheld" ||
+      action === "guest_chat.auto_credit_converted" ||
+      action === "guest_chat.auto_credit_released" ||
+      action === "guest_chat.auto_credit_unknown") &&
+      targetType === "ChatCreditReservation")) &&
   (actor !== AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR ||
     (action === "amux.v22.worker.assigned" &&
       targetType === "AmuxV22WorkerAssignment")) &&

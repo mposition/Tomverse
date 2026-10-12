@@ -177,7 +177,7 @@ async function enterGuestChat(page: Page, options: EnterOptions) {
 
   await page.setViewportSize(viewport);
   await page.goto(
-    `/chat?lang=${lang}&models=${encodeURIComponent(models.join(","))}`
+    `/review?lang=${lang}&models=${encodeURIComponent(models.join(","))}`
   );
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
@@ -1019,7 +1019,7 @@ test.describe("Guest verification: verified retry meets a later gate", { tag: "@
 
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await page.goto(
-      `/chat?lang=ko&models=${encodeURIComponent(THREE_MODELS.join(","))}`
+      `/review?lang=ko&models=${encodeURIComponent(THREE_MODELS.join(","))}`
     );
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
     await freezeAnimations(page);
@@ -1079,7 +1079,7 @@ test.describe("Guest verification: background vs user-initiated", { tag: "@ui-ri
     });
 
     await page.setViewportSize(DESKTOP_VIEWPORT);
-    await page.goto("/chat?lang=en&models=gemini-2-5-flash");
+    await page.goto("/review?lang=en&models=gemini-2-5-flash");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
     await send(page, "Plan my weekend", DESKTOP_VIEWPORT.width);
@@ -1144,7 +1144,7 @@ test.describe("Guest verification: background vs user-initiated", { tag: "@ui-ri
 
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await page.goto(
-      `/chat?lang=en&models=${encodeURIComponent(THREE_MODELS.join(","))}`
+      `/review?lang=en&models=${encodeURIComponent(THREE_MODELS.join(","))}`
     );
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
     await send(page, "Compare these", DESKTOP_VIEWPORT.width);

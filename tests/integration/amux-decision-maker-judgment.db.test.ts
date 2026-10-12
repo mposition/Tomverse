@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
-import { withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import {
   dmBodyDigest,
   dmKeyPeriodEndMs,
@@ -17,11 +17,14 @@ import {
   assignDecisionMakerRequestWithDigestKey,
   eraseDecisionMakerBodies,
   readDecisionMakerBodies,
+  readDecisionMakerCardText,
   readDecisionMakerResultDetail,
+  recordDecisionMakerRequestWithCardText,
   rotateDecisionMakerDigestKey,
   storeDecisionMakerOperatorAnswer,
   submitDecisionMakerOutput,
 } from "@/lib/amux/decisionMakerBodyStore";
+import { dmCardText } from "@/lib/amux/decisionMakerCore";
 import type { DmShownProposal } from "@/lib/amux/decisionMakerJudgmentCore";
 import {
   readDecisionMakerDeclarationAccuracyReport,
@@ -186,8 +189,29 @@ type Output =
 
 const FREE_TEXT: Output = { kind: "free_text", answer: "Use the model id only.", rationale: "The locale is already in the path.", irreversible: false };
 
-/** Routed, assigned with its key, transmitted with a worker_head snapshot, and answered with `output`. */
-const proposed = async (output: Output | "timeout" = FREE_TEXT, askingProvider = "claude") => {
+const CARD = {
+  askType: "decision",
+  resolution: null,
+  type: "task",
+  tags: [] as string[],
+  title: "Pick a cache key layout",
+  question: "Should the cache key include the locale or only the model id?",
+  options: OPTIONS,
+  unblocks: "The cache module can be finished.",
+  context: "Both layouts pass the current tests.",
+  contextPaths: ["lib/cache.ts"],
+};
+
+/**
+ * Routed, assigned with its key, transmitted with a worker_head snapshot, and answered with `output`.
+ * `withCardText` routes through the body store's composition, which keeps the card text as the
+ * application does (2026-10-09); the rest of this file routes through the ledger's own routing.
+ */
+const proposed = async (
+  output: Output | "timeout" = FREE_TEXT,
+  askingProvider = "claude",
+  { card = CARD, withCardText = false }: { card?: typeof CARD; withCardText?: boolean } = {},
+) => {
   const binding = {
     cardId: `card-judgment-${randomUUID()}`,
     questionRevision: 1,
@@ -199,19 +223,11 @@ const proposed = async (output: Output | "timeout" = FREE_TEXT, askingProvider =
     classificationVersion: "authority-manifest-1",
     scannerVersion: "v1",
   };
-  const card = {
-    askType: "decision",
-    resolution: null,
-    type: "task",
-    tags: [],
-    title: "Pick a cache key layout",
-    question: "Should the cache key include the locale or only the model id?",
-    options: OPTIONS,
-    unblocks: "The cache module can be finished.",
-    context: "Both layouts pass the current tests.",
-    contextPaths: ["lib/cache.ts"],
-  };
-  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { binding, card, keyRing: RING }));
+  const routed = await prisma.$transaction((tx) =>
+    withCardText
+      ? recordDecisionMakerRequestWithCardText(tx, { binding, card, keyRing: RING })
+      : recordDecisionMakerRequest(tx, { binding, card, keyRing: RING }),
+  );
   assert.equal(routed.route, "dm_proposal");
   const instance = routed.instance!;
   const assigned = await prisma.$transaction((tx) =>
@@ -902,6 +918,36 @@ test("an edited confirmation and a delivery decision commit through the AMUX bou
   assert.equal(decided.recorded, true);
 });
 
+// 2026-10-09: the card text a routing stores sits beside every later body of its request. At
+// every cap -- a 16 KiB card, an 8 KiB answer, a 4 KiB rationale and an 8 KiB edited answer --
+// the request holds 36 KiB, under section 10's 40 KiB, and Admin still reads the card after the
+// judgment closed the request.
+test("a proposal routed with its card text at the cap takes the longest answers and an edited answer", async () => {
+  const card = { ...CARD, context: "" };
+  card.context = "x".repeat(16 * 1024 - Buffer.byteLength(dmCardText(card), "utf8"));
+  const output: Output = { kind: "free_text", answer: "a".repeat(8 * 1024), rationale: "r".repeat(4 * 1024), irreversible: false };
+  const basis = await proposed(output, "claude", { card, withCardText: true });
+  const shown = await shownOf(basis.requestId);
+  const boundary = { operation: "dm_judgment_card_text_test", prismaCallCeiling: 12, isolation: "mutation" as const };
+  const written = await withAmuxDbBoundary(boundary, (tx) =>
+    recordDecisionMakerJudgment(tx, { session: operator(), requestId: basis.requestId, kind: "edit_confirm", shown, operatorAnswer: "o".repeat(8 * 1024), keyRing: RING }),
+  );
+  assert.equal(written.recorded, true);
+  const sizes = await prisma.$queryRaw<Array<{ field: string; octets: number }>>`
+    SELECT "field", octet_length("text") AS "octets" FROM "AmuxDecisionMakerBody" WHERE "requestId" = ${basis.requestId} ORDER BY "field"
+  `;
+  assert.deepEqual(sizes, [
+    { field: "card_text", octets: 16 * 1024 },
+    { field: "dm_answer", octets: 8 * 1024 },
+    { field: "dm_rationale", octets: 4 * 1024 },
+    { field: "operator_answer", octets: 8 * 1024 },
+  ]);
+  assert.equal((await eventsOf(basis.requestId)).at(-1)!.kind, "edit_confirm");
+  const read = await readDecisionMakerCardText(prisma, basis.requestId);
+  assert.deepEqual(read?.card, card);
+  assert.equal(read?.digest, dmBodyDigest(basis.requestKey, "card_text", dmCardText(card)));
+});
+
 // ---------------------------------------------------------------------------
 // Section 4's report
 // ---------------------------------------------------------------------------
@@ -933,8 +979,27 @@ test("section 4's report counts each instance's judgments over their own denomin
   const anthropic = report.instances.find((entry) => entry.instance === "decision-maker-anthropic")!;
   assert.equal(anthropic.decidedProposals.status, "insufficient_evidence");
   // The report changed no switch.
-  const switches = await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS "n" FROM "AmuxDecisionMakerSwitchEvent"`;
-  assert.equal(Number(switches[0]!.n), 2);
+  const switchEvents = async () =>
+    Number((await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS "n" FROM "AmuxDecisionMakerSwitchEvent"`)[0]!.n);
+  assert.equal(await switchEvents(), 2);
+  // Admin reads the same report inside the AMUX boundary: two statements,
+  // setup and fence, and reading records stays open under the kill switch
+  // (§6's table: "DM 기록 열람 … 허용"). One call fewer refuses it.
+  await setSwitch("kill_switch", "on");
+  const bounded = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerReportRead, (tx) =>
+    readDecisionMakerDeclarationAccuracyReport(tx),
+  );
+  assert.deepEqual(
+    bounded.instances.map((entry) => [entry.instance, entry.decidedProposals, entry.confirmedWithoutEdit, entry.matchedOverJudged, entry.notJudged]),
+    report.instances.map((entry) => [entry.instance, entry.decidedProposals, entry.confirmedWithoutEdit, entry.matchedOverJudged, entry.notJudged]),
+  );
+  const short = { ...AMUX_DB_BOUNDARIES.decisionMakerReportRead, prismaCallCeiling: 3 };
+  await assert.rejects(
+    withAmuxDbBoundary(short, (tx) => readDecisionMakerDeclarationAccuracyReport(tx)),
+    (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+  );
+  // Neither read changed a switch: the one event added is the kill switch above.
+  assert.equal(await switchEvents(), 3);
 });
 
 // ---------------------------------------------------------------------------

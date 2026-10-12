@@ -32,7 +32,6 @@ import {
   adoptionPreflightRefusal,
   adoptionReplacementRefusal,
   creditFloorExceptionVerdict,
-  GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION,
 } from "@/lib/modelAdoptionDraft";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { getModel, type AiModel } from "@/lib/models";
@@ -397,7 +396,9 @@ export async function POST(req: Request) {
             body.maxOutputTokens ?? adoptionContext.profilePrice?.maxOutputTokens ?? null,
           acknowledgement: creditFloorExceptionAck,
         }) === "accepted"
-          ? { creditFloorException: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id }
+          ? // Accepted means the acknowledgement is exactly the matched
+            // exception's id -- Gemini Flash-Lite or the Haiku line.
+            { creditFloorException: creditFloorExceptionAck }
           : {}),
       },
     });

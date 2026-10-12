@@ -81,7 +81,7 @@ for (const viewport of VIEWPORTS) {
 
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await prepareGuestPage(page, "en");
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await modelMenuTrigger(page).click();
     const dialog = page.locator("#chat-input-popover");
@@ -167,7 +167,7 @@ test.describe("coarse-pointer tablets keep 44px hit areas at >=768px", () => {
     test(`touch controls stay >=44px at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1024 });
       await prepareGuestPage(page, "en");
-      await page.goto("/chat");
+      await page.goto("/review");
 
       const isCoarse = await page.evaluate(
         () => window.matchMedia("(any-pointer: coarse)").matches
@@ -205,7 +205,7 @@ test.describe("coarse-pointer tablets keep 44px hit areas at >=768px", () => {
 test("mouse-only desktop keeps the compact favourite control", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   await prepareGuestPage(page, "en");
-  await page.goto("/chat");
+  await page.goto("/review");
 
   const isCoarse = await page.evaluate(
     () => window.matchMedia("(any-pointer: coarse)").matches
@@ -252,7 +252,7 @@ test.describe("the picker stays completable while the keyboard is up", () => {
 
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await prepareGuestPage(page, "en");
-      await page.goto("/chat");
+      await page.goto("/review");
 
       await modelMenuTrigger(page).click();
       const dialog = page.locator("#chat-input-popover");
@@ -338,7 +338,7 @@ test("the picker footer clears the safe area with no keyboard", { tag: "@ui-risk
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await prepareGuestPage(page, "en");
-  await page.goto("/chat");
+  await page.goto("/review");
   await modelMenuTrigger(page).click();
 
   const dialog = page.locator("#chat-input-popover");
@@ -385,7 +385,7 @@ for (const viewport of FIRST_SCREEN_VIEWPORTS) {
 
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await prepareGuestPage(page, lang);
-      await page.goto(`/chat?lang=${lang}`);
+      await page.goto(`/review?lang=${lang}`);
 
       await modelMenuTrigger(page).click();
       const dialog = page.locator("#chat-input-popover");

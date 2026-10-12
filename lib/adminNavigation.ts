@@ -788,7 +788,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     description: "AMUX cards, their execution state, and why AMUX assigned the work",
     group: "AMUX",
     // Assignment decisions take `ops:write` (every /api/admin/amux/escalations
-    // route checks it); the card list writes nothing. A worker
+    // route checks it); the owner-only card list writes nothing. A worker
     // registry change takes the owner role and a recent step-up in its route
     // (orchestration policy version 31, section 3).
     writeRoles: ["owner", "ops"],

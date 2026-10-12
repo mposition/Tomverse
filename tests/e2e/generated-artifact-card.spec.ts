@@ -119,7 +119,7 @@ for (const { format, filename, label } of CARDS_BY_FORMAT) {
       page,
       answerWith([{ ...ARTIFACT, format, filename, mediaType: "application/octet-stream" }])
     );
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await sendChatMessage(page, testInfo, `${filename} 파일로 만들어줘`);
 
@@ -139,7 +139,7 @@ test("a file request answers with a download card, not a table @ui-risk", async 
 }, testInfo) => {
   await prepareGuestPage(page, "ko");
   await mockChat(page, answerWith([ARTIFACT]));
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await sendChatMessage(
     page,
@@ -175,7 +175,7 @@ test("the answer body carries no generation code and no base64 @ui-risk", async 
 }, testInfo) => {
   await prepareGuestPage(page, "ko");
   await mockChat(page, answerWith([ARTIFACT]));
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
   await expect(card(page)).toBeVisible();
 
@@ -200,7 +200,7 @@ test("the answer body carries no generation code and no base64 @ui-risk", async 
 test("the storage key never reaches the page @ui-risk", async ({ page }, testInfo) => {
   await prepareGuestPage(page, "ko");
   await mockChat(page, answerWith([ARTIFACT]));
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
   await expect(card(page)).toBeVisible();
 
@@ -245,7 +245,7 @@ test("the download goes to the app's own route and saves the server's name", asy
     });
   });
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
   await expect(card(page)).toBeVisible();
 
@@ -281,7 +281,7 @@ test("a locked conversation says so instead of failing silently", async ({
     })
   );
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
   await expect(card(page)).toBeVisible();
   await inCard(page, "generated-artifact-download").click();
@@ -314,7 +314,7 @@ test("a failed file fails inside its own card, not the whole answer @ui-risk", a
       "파일을 만들지 못했습니다. 다시 시도할 수 있습니다."
     )
   );
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
 
   await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
@@ -367,7 +367,7 @@ test("an answer cut off mid file says so on its own card @ui-risk", async ({
 }, testInfo) => {
   await prepareGuestPage(page, "ko");
   await mockChat(page, truncatedBody([INCOMPLETE_ARTIFACT]));
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "이 PPT를 웹페이지로 만들어줘");
 
   await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
@@ -395,7 +395,7 @@ test("the same truncation with no file begun draws no card at all", async ({
   // nothing is owed: the generic notice on its own is the whole of it.
   await prepareGuestPage(page, "ko");
   await mockChat(page, truncatedBody([]));
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "아주 긴 설명을 써줘");
 
   await expect(
@@ -439,7 +439,7 @@ test("a signed-in account can retry the file the answer never finished @ui-risk"
     });
   });
 
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await sendChatMessage(page, testInfo, "이 PPT를 웹페이지로 만들어줘");
 
   await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
@@ -473,7 +473,7 @@ test("the turn_incomplete card comes back after a reload @ui-risk", async ({
       },
     ],
   });
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await openRecentConversation(page);
 
   await expect(card(page)).toHaveAttribute("data-artifact-status", "failed");
@@ -507,13 +507,16 @@ test("a guest is shown a sign-in card, never a table pretending to be a file @ui
       "파일을 만들려면 로그인이 필요합니다."
     )
   );
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
 
   await expect(card(page)).toHaveAttribute("data-artifact-status", "blocked");
   const cta = inCard(page, "generated-artifact-signin");
   await expect(cta).toBeVisible();
-  await expect(cta).toHaveAttribute("href", /\/auth\/signin/);
+  await expect(cta).toHaveAttribute(
+    "href",
+    "/auth/signin?callbackUrl=%2Freview%3Flang%3Dko"
+  );
   await expect(page.getByTestId("generated-artifact-download")).toHaveCount(0);
 });
 
@@ -522,7 +525,7 @@ test("a turn that produced nothing shows no card at all", async ({
 }, testInfo) => {
   await prepareGuestPage(page, "ko");
   await mockChat(page, answerWith([], "안녕하세요.", { announceProgress: false }));
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "안녕");
 
   await expect(page.getByTestId("chat-message").last()).toContainText("안녕하세요.");
@@ -550,7 +553,7 @@ test("a signed-in account's card comes back after a reload @ui-risk", async ({
       },
     ],
   });
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await openRecentConversation(page);
 
   await expect(card(page)).toBeVisible();
@@ -588,7 +591,7 @@ test("at 320px the name and the download button never overlap @ui-risk", async (
       },
     ])
   );
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
   await expect(card(page)).toBeVisible();
 
@@ -656,7 +659,7 @@ test("a narrow panel in a wide window stacks the card @ui-risk", async ({
       },
     ])
   );
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
   await expect(card(page)).toBeVisible();
   await page.addStyleTag({ url: NARROW_PANEL_STYLESHEET });
@@ -710,7 +713,7 @@ test("a failure in a narrow panel keeps a readable sentence and its own row @ui-
       },
     ],
   });
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await openRecentConversation(page);
   await expect(card(page)).toBeVisible();
   await page.addStyleTag({ url: NARROW_PANEL_STYLESHEET });
@@ -768,7 +771,7 @@ test("a failure the model fixed in the same turn leaves one card @ui-risk", asyn
       { ...recoveryArtifact(1, "ready"), modelId: "gemini-2-5-flash" },
     ])
   );
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "분기별 매출을 엑셀로 만들어줘");
 
   const cards = firstSection(page).getByTestId("generated-artifact-card");
@@ -798,7 +801,7 @@ test("the same turn shows the same one card after a reload @ui-risk", async ({
       },
     ],
   });
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await openRecentConversation(page);
 
   const cards = firstSection(page).getByTestId("generated-artifact-card");
@@ -828,7 +831,7 @@ test("a failure nothing fixed keeps its card and its retry @ui-risk", async ({
       },
     ],
   });
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await openRecentConversation(page);
 
   const cards = firstSection(page).getByTestId("generated-artifact-card");
@@ -889,7 +892,7 @@ test("only the same file, format and model resolves a failure @ui-risk", async (
       },
     ]),
   });
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await openRecentConversation(page);
 
   const sections = page.getByTestId("generated-artifact-section");
@@ -909,7 +912,7 @@ test("the download button meets the touch target and shows a focus ring @ui-risk
 }, testInfo) => {
   await prepareGuestPage(page, "ko");
   await mockChat(page, answerWith([ARTIFACT]));
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
 
   const button = inCard(page, "generated-artifact-download");
@@ -938,7 +941,7 @@ test("a screen reader is told the format, the name, the size and the state", asy
 }, testInfo) => {
   await prepareGuestPage(page, "ko");
   await mockChat(page, answerWith([ARTIFACT]));
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
 
   await expect(card(page)).toBeVisible();
@@ -970,7 +973,7 @@ test("the card can be reached and operated from the keyboard alone", async ({
       body: Buffer.from("PK\u0003\u0004fake"),
     })
   );
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
 
   const button = inCard(page, "generated-artifact-download");
@@ -1026,7 +1029,7 @@ test("an SVG is shown in the card, not only offered as a download @ui-risk", asy
   const requested: string[] = [];
   await serveSvg(page, requested);
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "인포그래픽으로 그려줘");
   await expect(card(page)).toBeVisible();
 
@@ -1051,7 +1054,7 @@ test("the preview is an img element, so the SVG cannot run in this origin", asyn
   await mockChat(page, answerWith([SVG_ARTIFACT], "인포그래픽을 만들었습니다."));
   await serveSvg(page, []);
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "인포그래픽으로 그려줘");
   const preview = inCard(page, "generated-artifact-preview");
   await expect(preview).toBeVisible();
@@ -1079,7 +1082,7 @@ test("a preview that fails to load leaves the card working", async ({
     });
   });
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "인포그래픽으로 그려줘");
   await expect(card(page)).toBeVisible();
 
@@ -1102,7 +1105,7 @@ test("a non-image format gets no preview", async ({ page }, testInfo) => {
     });
   });
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "엑셀로 만들어줘");
   await expect(card(page)).toBeVisible();
 
@@ -1158,7 +1161,7 @@ test("a Google turn can search and produce a file in the same answer @ui-risk", 
         artifacts: [ARTIFACT],
       })
   );
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await sendChatMessage(page, testInfo, "최신 모델 정보를 검색해서 xlsx로 만들어줘");
 

@@ -71,7 +71,7 @@ const openAssistantMenu = async (page: Page) => {
 
 test("a guest is never offered an assistant", async ({ page }) => {
     // A guest has no profile of their own for the control to act on (§14).
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
 
     await toolsMenuTrigger(page).click();
     await expect(page.getByTestId("tools-assistant-row")).toHaveCount(0);
@@ -90,7 +90,7 @@ test("an account with the feature off is not offered one either", async ({
             body: JSON.stringify({ code: "ASSISTANT_PROFILES_DISABLED" }),
         });
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await toolsMenuTrigger(page).click();
@@ -99,7 +99,7 @@ test("an account with the feature off is not offered one either", async ({
 
 test("a conversation with no assistant says so", async ({ page }) => {
     await mockAuthenticatedApi(page, { assistantProfiles: PROFILES });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await toolsMenuTrigger(page).click();
@@ -112,7 +112,7 @@ test("only published profiles are selectable", async ({ page }) => {
     // A draft cannot start a conversation, so offering it would be offering a
     // choice the server refuses on click.
     await mockAuthenticatedApi(page, { assistantProfiles: PROFILES });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await openAssistantMenu(page);
@@ -133,7 +133,7 @@ test("choosing one sends a profile id and shows the revision the server pinned",
         }
         await route.fallback();
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await openAssistantMenu(page);
@@ -168,7 +168,7 @@ test("a superseded conversation states its revision and offers the move", async 
         assistantProfiles: PROFILES,
         assistantProfile: boundProfile({ revision: 1, status: "superseded" }),
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await toolsMenuTrigger(page).click();
@@ -207,7 +207,7 @@ test("the picker row says which revision is running, not the profile's newest", 
             status: "superseded",
         }),
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await openAssistantMenu(page);
@@ -233,7 +233,7 @@ test("a chosen profile on its newest revision says only that revision", async ({
         assistantProfiles: PROFILES,
         assistantProfile: boundProfile(),
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await openAssistantMenu(page);
@@ -249,7 +249,7 @@ test("a profile the conversation does not run keeps its description", async ({
     // where the question is what is running. Everywhere else the description
     // is what helps the visitor choose.
     await mockAuthenticatedApi(page, { assistantProfiles: PROFILES });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await openAssistantMenu(page);
@@ -267,7 +267,7 @@ test("detaching is always available, including with nothing published", async ({
         assistantProfiles: [],
         assistantProfile: boundProfile(),
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openRecentConversation(page);
 
     await openAssistantMenu(page);
@@ -289,7 +289,7 @@ test("the empty picker offers creating one instead of describing it", async ({
     page,
 }) => {
     await mockAuthenticatedApi(page, { assistantProfiles: [] });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await openAssistantMenu(page);
 
@@ -306,7 +306,7 @@ test("the empty picker offers creating one instead of describing it", async ({
 
 test("the CTAs stay available once profiles exist", async ({ page }) => {
     await mockAuthenticatedApi(page, { assistantProfiles: PROFILES });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await openAssistantMenu(page);
 
@@ -316,14 +316,14 @@ test("the CTAs stay available once profiles exist", async ({ page }) => {
     // inside the surface they were already in.
     await expect(page.getByTestId("assistant-manage-cta")).toHaveAttribute(
         "href",
-        "/chat?settings=assistants&settingsSection=assistants"
+        "/review?settings=assistants&settingsSection=assistants"
     );
 });
 
 test("a guest is offered neither CTA, because the picker never opens", async ({
     page,
 }) => {
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await toolsMenuTrigger(page).click();
     await expect(page.getByTestId("tools-assistant-row")).toHaveCount(0);
     await expect(page.getByTestId("assistant-create-cta")).toHaveCount(0);
@@ -344,7 +344,7 @@ test("the feature being off hides the CTAs with the picker", async ({
             }),
         });
     });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await toolsMenuTrigger(page).click();
     await expect(page.getByTestId("assistant-create-cta")).toHaveCount(0);
@@ -355,7 +355,7 @@ test("the create CTA is reachable and activatable from the keyboard", async ({
     page,
 }) => {
     await mockAuthenticatedApi(page, { assistantProfiles: [] });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await openAssistantMenu(page);
 
@@ -386,7 +386,7 @@ test("the create CTA is reachable and activatable from the keyboard", async ({
 
 test("following a CTA closes the tools menu behind it", async ({ page }) => {
     await mockAuthenticatedApi(page, { assistantProfiles: PROFILES });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await openAssistantMenu(page);
 

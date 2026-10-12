@@ -9,7 +9,7 @@ import {
 
 test.beforeEach(async ({ page }) => {
   await prepareGuestPage(page, "en");
-  await page.goto("/chat");
+  await page.goto("/review");
 });
 
 test("opening the picker shows recommendations only, not the full catalogue", { tag: "@ui-risk" }, async ({ page }) => {

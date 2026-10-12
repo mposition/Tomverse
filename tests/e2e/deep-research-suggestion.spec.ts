@@ -184,7 +184,7 @@ const openChat = async (
   // Routes have to be in place before the first load: the settings the client
   // seeds a new conversation from are read once, on mount.
   await options.beforeNavigate?.(page);
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   return chat;
 };
 
@@ -513,7 +513,7 @@ test("the composer's own deep research still asks every selected model", async (
 }) => {
   test.setTimeout(120_000);
   const chat = await openChat(page, { selectedModels: [CHAT_MODEL_ID] });
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
   // Straight to the setup sheet, with a question of its own -- no expansion

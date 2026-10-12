@@ -127,7 +127,7 @@ test("the combination editor designates a lead, gates high-cost and plan-locked 
     );
   });
 
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   const settings = await openSettingsAiTab(page);
   const editor = settings.getByTestId("settings-new-conversation-models");
   await expect(editor).toBeVisible();

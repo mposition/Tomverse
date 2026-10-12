@@ -227,7 +227,7 @@ test.describe("conversation with an answer: the panels are operable", () => {
       ],
     });
     await page.setViewportSize(DESKTOP_VIEWPORT);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await expect(
       page.locator(PANEL).first().getByText("seeded answer")
@@ -294,8 +294,14 @@ test.describe("model selection stays available before the first question", () =>
     expect(composerPlacement!.reachable, "the composer is on top at its own centre").toBe(true);
 
     const dialog = await openModelPickerCatalogue(page);
+    // A model already in the conversation's three: clicking it deselects, so
+    // the selection changes in one step. An unselected model at the three-model
+    // cap opens the swap dialog instead, and the catalogue leads with the
+    // recently used model -- the compiled default, which is not one of the
+    // three -- so "the first enabled option" stopped being a model that changes
+    // anything when the default moved to gpt-6-luna on 2026-10-12.
     const option = dialog
-      .locator('[data-testid="model-option"]:not([disabled])')
+      .locator('[data-testid="model-option"][aria-pressed="true"]:not([disabled])')
       .first();
     await expect(option).toBeVisible();
     const before = await page
@@ -321,7 +327,7 @@ test.describe("model selection stays available before the first question", () =>
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
-    await page.goto("/chat?lang=ko&utm_source=qa&utm_medium=e2e");
+    await page.goto("/review?lang=ko&utm_source=qa&utm_medium=e2e");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(1);
 

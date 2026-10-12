@@ -36,6 +36,7 @@ import { FOUNDING_TESTER_PASS_STARTED_TEMPLATE } from "@/lib/emailTemplateDefini
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { prisma } from "@/lib/prisma";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
+import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
 import { getStripe } from "@/lib/stripe";
 import {
   analyticsAttributionSchema,
@@ -142,7 +143,7 @@ const billingSuccessUrl = (
   language?: "ko" | "en" | "zh" | "fr" | "de" | "es" | "pt",
   accessType?: "founding-tester-pass"
 ) =>
-  `${origin}/chat?billing=success&plan=${encodeURIComponent(
+  `${origin}${PRODUCT_SURFACE_PATH.review}?billing=success&plan=${encodeURIComponent(
     planId
   )}&interval=${encodeURIComponent(billingInterval)}${
     language ? `&lang=${encodeURIComponent(language)}` : ""

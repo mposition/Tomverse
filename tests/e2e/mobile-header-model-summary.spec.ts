@@ -89,7 +89,7 @@ async function seedGuestConversation(
 // A saved guest conversation is offered on the welcome screen rather than
 // auto-restored, so it takes a tap to become the current chat.
 async function openSeededConversation(page: Page) {
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openRecentConversation(page, { title: TITLE });
   await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 }

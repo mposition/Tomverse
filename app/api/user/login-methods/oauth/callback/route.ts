@@ -10,10 +10,12 @@ import {
   OAuthLinkError,
 } from "@/lib/oauthLink";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
+import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
 
 export async function GET(req: Request) {
   const origin = getPublicAppOrigin(req);
-  const settingsUrl = (query: string) => `${origin}/chat?${query}`;
+  const settingsUrl = (query: string) =>
+    `${origin}${PRODUCT_SURFACE_PATH.review}?${query}`;
 
   const respond = (query: string) => {
     const response = NextResponse.redirect(settingsUrl(query), { status: 302 });

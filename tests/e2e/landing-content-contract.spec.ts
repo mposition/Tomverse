@@ -169,7 +169,7 @@ for (const path of ["/", "/ko"] as const) {
     );
     await expect(page.getByTestId("landing-signup-cta")).toHaveAttribute(
       "href",
-      "/auth/signin?callbackUrl=%2Fchat"
+      "/auth/signin?callbackUrl=%2Freview"
     );
 
     // The provider count is derived from the catalogue, not written by hand.
@@ -275,7 +275,7 @@ for (const path of ["/", "/ko"] as const) {
       ["landing-models-cta", "/models"],
       ["landing-status-cta", "/status"],
       ["landing-safety-cta", "/safety"],
-      ["landing-signup-cta", "/auth/signin?callbackUrl=%2Fchat"],
+      ["landing-signup-cta", "/auth/signin?callbackUrl=%2Freview"],
       ["landing-secondary-cta", "#how-it-works"],
     ];
     for (const [testId, href] of expectedHrefs) {
@@ -287,24 +287,23 @@ for (const path of ["/", "/ko"] as const) {
       expect(name.length).toBeGreaterThan(0);
     }
 
-    // Both product CTAs go to the same resolved workspace entry. The
+    // Both primary CTAs go to the same resolved workspace entry. The
     // destination is decided on the server; this only checks the link the
     // page actually rendered has not been swapped for a different surface.
     for (const testId of ["landing-primary-cta", "landing-final-cta"]) {
       await expect(page.getByTestId(testId)).toHaveAttribute(
         "href",
-        /\/chat\?lang=/
+        /\/review\?lang=/
       );
     }
   });
 }
 
-test("the hero names Tomverse Review and sends its CTA to a comparison", async ({
+test("the hero names both products and keeps the primary guest CTA on Review", async ({
   page,
 }) => {
-  // The first screen has to answer four questions: Tomverse is the brand,
-  // Tomverse Review is this product, it compares several AI answers, and the
-  // button opens that comparison rather than the unreleased Tomverse Chat.
+  // The first screen names both product jobs. The guest primary action remains
+  // Review, while Chat has its own Guest Smart Adaptive entry.
   await openLanding(page, "/");
 
   const brand = await page.getByTestId("landing-brand-note").innerText();
@@ -312,10 +311,21 @@ test("the hero names Tomverse Review and sends its CTA to a comparison", async (
   expect(brand).toContain("Tomverse");
 
   const cta = await page.getByTestId("landing-primary-cta").innerText();
-  // "Chat" in a CTA names an unreleased product in the brand tree. Whatever
-  // the label says, it must not be that.
+  // The primary guest action is Review; Chat has the adjacent trial entry.
   expect(cta.toLowerCase()).not.toContain("chat");
   expect(cta.toLowerCase()).toContain("compar");
+  await expect(page.getByTestId("landing-chat-product-cta")).toHaveAttribute(
+    "href",
+    "/chat?lang=en"
+  );
+  await expect(page.getByTestId("landing-chat-product-cta")).toHaveText("Try Chat free");
+  await expect(page.getByTestId("landing-chat-product-description")).toHaveText(
+    /When Smart Adaptive is available.*text questions.*existing guest limit.*browser.*Attachments use manual model selection/
+  );
+  await expect(page.getByTestId("landing-review-product-cta")).toHaveAttribute(
+    "href",
+    "/review?lang=en&entry=guest-preview"
+  );
 });
 
 test("the hero keeps its guest-start and AI Review messages", async ({ page }) => {

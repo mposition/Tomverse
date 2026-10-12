@@ -12,12 +12,35 @@ test("stored Chat routes additively while bridge, legacy and Review remain on th
   assert.equal(conversationSurface({ productKey: null, hasContinuationBridge: false }), "workspace");
   assert.equal(conversationSurface({ productKey: "review", hasContinuationBridge: false }), "workspace");
   assert.equal(conversationSurface({ productKey: "studio", hasContinuationBridge: false }), "workspace");
-  assert.equal(conversationHandoffHref("chat", "a/b", "/chat"), "/chat/workspace?conversation=a%2Fb");
+  assert.equal(conversationHandoffHref("chat", "a/b", "/review"), "/chat?conversation=a%2Fb");
   assert.equal(surfaceHasContinuationBridge("chat"), false);
 });
 test("an offered gate is not ownership and legacy product is not Chat authority", () => {
   assert.deepEqual(decideChatWorkspaceEntry({ authenticated: true, requestedConversation: true, ownedConversation: null, offered: true }), { action: "not_found" });
   assert.deepEqual(decideChatWorkspaceEntry({ authenticated: true, requestedConversation: true, ownedConversation: { productKey: null, hasContinuationBridge: false }, offered: true }), { action: "redirect", surface: "workspace" });
+});
+test("guest trial opens only a blank local Chat and never treats a URL id as ownership", () => {
+  assert.deepEqual(decideChatWorkspaceEntry({
+    authenticated: false,
+    requestedConversation: false,
+    ownedConversation: null,
+    offered: false,
+    guestTrialAvailable: true,
+  }), { action: "open" });
+  assert.deepEqual(decideChatWorkspaceEntry({
+    authenticated: false,
+    requestedConversation: true,
+    ownedConversation: null,
+    offered: false,
+    guestTrialAvailable: true,
+  }), { action: "not_found" });
+  assert.deepEqual(decideChatWorkspaceEntry({
+    authenticated: false,
+    requestedConversation: false,
+    ownedConversation: null,
+    offered: true,
+    guestTrialAvailable: false,
+  }), { action: "not_found" });
 });
 test("single-model admission refuses original multi-choice without mutating it", () => {
   const selectedModels = Object.freeze(["a", "b"]);
@@ -89,6 +112,21 @@ const pageHandler = (name, context) => {
   assert.ok(matches[0].initializer && ts.isArrowFunction(matches[0].initializer));
   return executable(matches[0].initializer, pageSource, context);
 };
+const pageValue = (name, context) => {
+  const matches = findNodes(pageSource, (node) => ts.isVariableDeclaration(node) &&
+    ts.isIdentifier(node.name) && node.name.text === name);
+  assert.equal(matches.length, 1, `${name} must identify the actual page value`);
+  assert.ok(matches[0].initializer);
+  return executable(matches[0].initializer, pageSource, context);
+};
+
+test("Guest Review save and compare sign-in returns to canonical Review", () => {
+  assert.equal(pageValue("guestCompareSignInHref", {
+    REVIEW_WORKSPACE_PATH: "/review",
+    lang: "ko",
+    encodeURIComponent,
+  }), "/auth/signin?callbackUrl=%2Freview%3Flang%3Dko");
+});
 
 test("actual Chat remove handlers refuse before confirmation, selection mutation or history deletion", async () => {
   const events = [];

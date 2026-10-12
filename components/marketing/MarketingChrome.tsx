@@ -239,7 +239,7 @@ export function MarketingHeader({
   const { status: sessionStatus } = useSession();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isHeroCtaVisible, setIsHeroCtaVisible] = useState(false);
-  const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
+  const chatHref = `/review?lang=${encodeURIComponent(lang)}`;
   // "Try it" is wrong for someone who already has an account open in another
   // tab -- on /pricing it read as an invitation to sign up again. Both labels
   // lead to the same place, so the loading state keeps the signed-out wording

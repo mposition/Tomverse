@@ -1,7 +1,7 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
- * Copy for AMUX › Execution › Decision Maker
+ * Copy for AMUX › Operations settings › Decision Maker
  * (docs/policy/amux-decision-maker.md §6, §8). Scope ids and switch values
  * are identifiers and render as stored beside their sentence.
  */
@@ -78,5 +78,50 @@ export const adminAmuxDecisionMakerMessages = defineAdminMessages({
       "변경이 기록됐는지 알 수 없고, 상태도 다시 읽지 못했습니다. 다른 것을 바꾸기 전에 다시 읽으세요.",
     invalidChange: "이 스위치에 허용되지 않는 값입니다.",
     changeFailed: "스위치를 바꾸지 못했습니다.",
+  },
+});
+
+/**
+ * Copy for the §4 declaration accuracy report on the same tab
+ * (docs/policy/amux-decision-maker.md §4). Instance ids render as stored.
+ * Nothing here names a graduation threshold: the report is a reading.
+ */
+export const adminAmuxDecisionMakerReportMessages = defineAdminMessages({
+  en: {
+    title: "Declaration accuracy report",
+    description:
+      "For each instance: the proposals a person decided, the days since its first proposal, the share confirmed without an edit, the share of judged declarations that matched, and how many were left not judged. Each figure is shown over its own denominator.",
+    noEffect:
+      "This report is only a reading. It changes no switch or mode, records no graduation and permits no answer without a person.",
+    computedAt: (at: string) => `Computed at ${at} by the database clock.`,
+    measure: "Measure",
+    decidedProposals: "Proposals a person decided, of all proposals",
+    daysSinceFirstProposal: "Days since the first proposal",
+    confirmedWithoutEdit: "Confirmed without an edit, of the proposals a person decided",
+    matchedOverJudged: "Declarations judged matched, of those judged matched or mismatched",
+    notJudged: "Declarations left not judged, of the proposals a person decided",
+    insufficientEvidence: "Insufficient evidence: the denominator is empty.",
+    days: (days: number, firstAt: string) => `${days} days (first proposal ${firstAt})`,
+    noProposal: "Insufficient evidence: no proposal yet.",
+    unavailable:
+      "The report could not be read. No figure is shown, because an unread figure is not a zero.",
+  },
+  ko: {
+    title: "선언 정확도 보고",
+    description:
+      "인스턴스마다 사람이 결정한 제안 수, 첫 제안 뒤 일수, 수정 없이 확정한 비율, 판정된 선언 중 일치한 비율, 판정하지 않은 수를 보입니다. 각 수치는 자기 분모와 함께 보입니다.",
+    noEffect:
+      "이 보고는 읽기일 뿐입니다. 스위치나 모드를 바꾸지 않고, 졸업을 기록하지 않으며, 사람 없이 가는 답을 허락하지 않습니다.",
+    computedAt: (at: string) => `DB 시계 기준 ${at}에 계산했습니다.`,
+    measure: "항목",
+    decidedProposals: "전체 제안 중 사람이 결정한 제안",
+    daysSinceFirstProposal: "첫 제안 뒤 일수",
+    confirmedWithoutEdit: "사람이 결정한 제안 중 수정 없이 확정",
+    matchedOverJudged: "일치·불일치로 판정한 선언 중 일치",
+    notJudged: "사람이 결정한 제안 중 선언을 판정하지 않음",
+    insufficientEvidence: "근거 부족: 분모가 비어 있습니다.",
+    days: (days: number, firstAt: string) => `${days}일 (첫 제안 ${firstAt})`,
+    noProposal: "근거 부족: 아직 제안이 없습니다.",
+    unavailable: "보고를 읽지 못했습니다. 읽지 못한 수치는 0이 아니므로 어떤 수치도 표시하지 않습니다.",
   },
 });

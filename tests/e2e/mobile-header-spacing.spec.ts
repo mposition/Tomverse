@@ -217,7 +217,7 @@ async function enterMobileChat(
   }
 
   await page.setViewportSize(viewport);
-  await page.goto(`/chat?lang=${lang}`);
+  await page.goto(`/review?lang=${lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await settleModelSummary(page);
   await freezeAnimations(page);
@@ -296,7 +296,7 @@ async function enterGuestChat(
   const { lang = "en", viewport = DEFAULT_VIEWPORT } = options;
   await prepareGuestPage(page, "en");
   await page.setViewportSize(viewport);
-  await page.goto(`/chat?lang=${lang}`);
+  await page.goto(`/review?lang=${lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await settleModelSummary(page);
   await freezeAnimations(page);
@@ -1030,7 +1030,7 @@ test.describe("Hydration", { tag: "@ui-risk" }, () => {
     });
 
     await page.setViewportSize(DEFAULT_VIEWPORT);
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await settleModelSummary(page);
     await expect(modelCount(page)).toHaveText("3 models");
@@ -1065,7 +1065,7 @@ test.describe("Neighbouring surfaces", { tag: "@ui-risk" }, () => {
       "Open chat menu"
     );
 
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await expect(page.getByTestId("mobile-sidebar-open")).toHaveAccessibleName(
       "대화 메뉴 열기"
@@ -1107,7 +1107,7 @@ test.describe("Neighbouring surfaces", { tag: "@ui-risk" }, () => {
     await page.setViewportSize(DEFAULT_VIEWPORT);
     // Same entry point analytics-consent.spec.ts uses to land on the chat
     // with the notice still undecided.
-    await page.goto("/chat?lang=en&entry=guest-preview");
+    await page.goto("/review?lang=en&entry=guest-preview");
     await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await settleModelSummary(page);
 

@@ -400,7 +400,9 @@ test("the owner sees every AMUX section while other roles cannot see owner opera
     const visible = adminNavigationFor(role);
     const amux = visible.filter((item) => item.group === "AMUX");
     assert.deepEqual(amux.map((item) => item.id), ["amux-execution", "amux-settings"], `${role}: AMUX entries`);
-    // Workers is read by every role; a registry change takes the owner role.
+    // Workers is read by every role; a registry change takes the owner role
+    // (orchestration policy version 31, section 3). Safety and Decision Maker
+    // remain in Operations settings and are also readable by every role.
     assert.deepEqual(
       amux[0].tabs.map((tab) => tab.id),
       ["assignment", "workers"],
@@ -495,6 +497,7 @@ test("Execution and Operations settings open on the first section each role may 
   const tabs = adminNavItemTabs("amux-execution");
   assert.equal(resolveAdminTabFor(tabs, "owner", undefined).tab.id, "cards");
   assert.equal(resolveAdminTabFor(tabs, "owner", "assignment").tab.id, "assignment");
+  assert.equal(resolveAdminTabFor(tabs, "owner", "workers").tab.id, "workers");
   assert.equal(resolveAdminTabFor(tabs, "owner", "not-a-tab").tab.id, "cards");
   for (const role of [...NON_OWNER_ROLES, null]) {
     const opened = resolveAdminTabFor(tabs, role, undefined);

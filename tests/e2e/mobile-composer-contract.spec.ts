@@ -145,7 +145,7 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
   }
 
   await page.setViewportSize(viewport);
-  await page.goto(`/chat?lang=${lang}`);
+  await page.goto(`/review?lang=${lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
@@ -480,7 +480,7 @@ test.describe("Mobile composer: disabled actions state their reason", { tag: "@u
     await prepareGuestPage(page, "ko");
     await mockGuestUsage(page, 20, 20); // used === limit -> guest limit reached
     await page.setViewportSize({ width: 390, height: 680 });
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-textarea")).toBeDisabled();
 
     const send = page.getByTestId("chat-send-button");
@@ -905,7 +905,7 @@ async function enterZoomedWelcome(page: Page, viewport: { width: number; height:
   await setDeterministicTheme(page, "light");
   await suppressTransientUi(page);
   await page.setViewportSize(viewport);
-  await page.goto("/chat?lang=ko");
+  await page.goto("/review?lang=ko");
   await expect(page.getByTestId("chat-empty-state")).toBeAttached();
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
@@ -1205,7 +1205,7 @@ async function enterGuestMobileComposer(
   await suppressTransientUi(page);
 
   await page.setViewportSize(viewport);
-  await page.goto(`/chat?lang=${lang}`);
+  await page.goto(`/review?lang=${lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);

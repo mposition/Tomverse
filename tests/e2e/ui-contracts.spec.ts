@@ -4,7 +4,7 @@ import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 test("desktop exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 1366, height: 768 });
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-input")).toBeVisible();
@@ -118,7 +118,7 @@ test("chat workspace guide honors the language passed from the app", async ({ pa
 test("mobile exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 412, height: 915 });
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-input")).toBeVisible();
@@ -144,7 +144,7 @@ test("authenticated users can complete and replay the sidebar tour", async ({ pa
   await prepareGuestPage(page, "en");
   await mockAuthenticatedApi(page, { showSidebarTour: true });
   await page.setViewportSize({ width: 1366, height: 768 });
-  await page.goto("/chat");
+  await page.goto("/review");
 
   const tour = page.getByTestId("sidebar-tour");
   await expect(tour).toHaveCount(0);
