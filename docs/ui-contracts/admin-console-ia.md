@@ -35,8 +35,8 @@
 
 ## The navigation
 
-Seven groups, twenty-eight entries. One page, one job. The owner sees all
-twenty-eight; every other role sees twenty-six, because two AMUX entries are
+Seven groups, twenty-nine entries. One page, one job. The owner sees all
+twenty-nine; every other role sees twenty-seven, because two AMUX entries are
 owner-only (rule 14).
 
 | Group | Entry | Route | Sections (`?tab=`) |
