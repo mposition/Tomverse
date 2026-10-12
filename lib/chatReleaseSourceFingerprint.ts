@@ -19,12 +19,12 @@ const OWNER_RELEASE_ROUTES = Object.freeze([
   "app/api/admin/prompt-refiner/product-auto-resume/route.ts",
   "app/api/admin/prompt-refiner/guest-chat-auto-activation/route.ts",
 ]);
-// Whole-file boundaries shared with unrelated jobs. Their Chat helpers are
-// already reached from the Chat/Owner closure; traversing the maintenance
-// route would also bind AMUX, Memory and marketing workers to Chat approval.
-const SHARED_BOUNDARY_FILES = Object.freeze([
-  "proxy.ts",
-  "app/api/internal/maintenance/credit-reservations/route.ts",
+// The proxy request boundary is fingerprinted separately below. These helpers
+// decide whether a Chat request may pass it, without binding marketing or
+// maintenance work that happens to share the same entry point.
+const REQUEST_BOUNDARY_FILES = Object.freeze([
+  "lib/nativeBearerGate.ts",
+  "lib/mobileAuthContract.ts",
 ]);
 const SCHEMA_MODEL = /^(?:AdminAuditLog|AppSetting|BillingPlan|ModelRegistryEntry|User|Account|Conversation[A-Za-z0-9_]*|Message[A-Za-z0-9_]*|Chat[A-Za-z0-9_]*|Credit[A-Za-z0-9_]*|Provider[A-Za-z0-9_]*|Routing[A-Za-z0-9_]*|PromptRefiner[A-Za-z0-9_]*|Guest[A-Za-z0-9_]*|AutoRouter[A-Za-z0-9_]*|ContextManifest|TokenEstimate[A-Za-z0-9_]*)$/;
 const SOURCE_EXTENSIONS = Object.freeze(["", ".ts", ".tsx", ".mjs", ".js",
@@ -36,7 +36,7 @@ const REQUIRED_SOURCE = Object.freeze([
   "lib/chatRefinerInitialAutoRelease.ts",
   "lib/guestChatSmartAdaptiveRelease.ts",
   "packages/chat-core/src/index.ts",
-  ...SHARED_BOUNDARY_FILES,
+  ...REQUEST_BOUNDARY_FILES,
 ]);
 
 const digest = (value: string | Buffer) => createHash("sha256")
@@ -79,7 +79,7 @@ function localImport(root: string, importer: string, specifier: string):
 function importSpecifiers(root: string, path: string): string[] {
   const source = readFileSync(join(root, ...path.split("/")), "utf8");
   return [
-    ...source.matchAll(/^\s*(?:import|export)\b\s*(?:type\s+)?(?:[^"';]*?\s*from\s*)?["']([^"']+)["']/gm),
+    ...source.matchAll(/^\s*(?:import|export)\b\s*(?:type\s+)?(?:[^"';]*?\bfrom\s*)?["']([^"']+)["']/gm),
     ...source.matchAll(/\b(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)/g),
   ].map((match) => match[1]);
 }
@@ -159,6 +159,7 @@ export function chatReleaseSourcePaths(root: string): string[] {
   const entries = new Set<string>([
     ...ENTRY_DIRECTORIES.flatMap((directory) => sourcePaths(root, directory)),
     ...OWNER_RELEASE_ROUTES,
+    ...REQUEST_BOUNDARY_FILES,
     ...sourcePaths(root, "packages/chat-core/src"),
   ]);
   const queue = [...entries];
@@ -170,7 +171,6 @@ export function chatReleaseSourcePaths(root: string): string[] {
       }
     }
   }
-  for (const path of SHARED_BOUNDARY_FILES) entries.add(path);
   const paths = [...entries].sort();
   if (paths.length < MINIMUM_SOURCE_FILES ||
       REQUIRED_SOURCE.some((path) => !entries.has(path))) {
@@ -203,6 +203,18 @@ function prismaExecutionSchema(source: string): string {
   return blocks.join("\n\n");
 }
 
+function proxyChatRequestBoundary(source: string): string {
+  const normalized = source.replaceAll("\r\n", "\n");
+  const start = normalized.indexOf("const blockedOriginResponse =");
+  const end = normalized.indexOf("  // R-05-LANG.", start);
+  if (start < 0 || end <= start ||
+      normalized.indexOf("export function proxy(", start) < 0 ||
+      normalized.indexOf("export function proxy(", start) >= end) {
+    throw new Error("chat_release_proxy_boundary_unavailable");
+  }
+  return normalized.slice(start, end);
+}
+
 /** Fail closed if the serving image cannot prove its reviewed source. */
 export function chatReleaseSourceFingerprint(root: string): string {
   try {
@@ -212,6 +224,8 @@ export function chatReleaseSourceFingerprint(root: string): string {
     const schema = readFileSync(join(root, "prisma", "schema.prisma"), "utf8");
     entries.push(["prisma/schema.prisma#execution-models",
       digest(prismaExecutionSchema(schema))]);
+    entries.push(["proxy.ts#chat-request-boundary", digest(
+      proxyChatRequestBoundary(readFileSync(join(root, "proxy.ts"), "utf8")))]);
     entries.push(["package-lock.json#execution-dependencies",
       digest(executionDependencyLock(root, paths))]);
     return digest(JSON.stringify({ version: "chat-release-source-v2", entries }));

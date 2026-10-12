@@ -306,9 +306,9 @@ async function resolvePromptRefinerProductRelease(
     releaseAuthorityDigest = binding.releaseAuthorityDigest;
     releaseFingerprint = binding.releaseFingerprint;
   } catch {
-    // V1 keeps its original deployment-bound path. For an activated v2
-    // source, invalid controls still latch on dispatch instead of becoming a
-    // temporary absence that silently resumes when an env value is restored.
+    // V1 keeps its original deployment-bound path only while source proof is
+    // readable. For an activated v2 source, invalid controls still latch on
+    // dispatch instead of silently resuming when an env value is restored.
     try { releaseFingerprint = currentChatReleaseSourceFingerprint(); }
     catch { return closed(); }
   }

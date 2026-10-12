@@ -39,7 +39,11 @@ source fingerprint covers the checked-in Chat, Auto, Router, Refiner, Guest,
 model/pricing, provider, manifest, credit and audit execution modules, their
 local import closure, the Chat and release routes, the relevant Prisma model
 definitions, and the lockfile entries for dependencies reached by that
-execution graph. File paths and bytes are both
+execution graph. The shared proxy contributes its host/origin/bearer/request
+admission region and the selected request-boundary helpers. The shared
+maintenance route is excluded; its Chat credit settlement implementation is
+already in the Chat execution closure. This avoids binding marketing and
+unrelated maintenance edits to Chat activation. File paths and bytes are both
 hashed. Missing or unreadable source closes authority. The exact path-selection
 code is in the fingerprint, so changing its coverage also changes the key.
 The versioned policy body is bound by its own digest; frontmatter status changes

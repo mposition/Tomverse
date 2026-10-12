@@ -171,7 +171,7 @@ their real status and requires the actual enforced, immutable finalized
 manifest boundary, ordinary authorization/billing and every rollout/kill
 control. This is an initial product connection, not quality certification.
 
-The separately approved
+The versioned contract in
 [release continuity v2](./chat-refiner-stable-release-authority-v2.md)
 requires a new owner audit bound to stable execution source and effective
 controls. The original v1 pair remains exact-deployment-bound; a later
