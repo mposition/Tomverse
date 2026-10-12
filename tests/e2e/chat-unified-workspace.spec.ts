@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
+import { GUEST_BRAND_TRIO_MODEL_IDS } from "../../lib/appDefaults";
 import { buildRoutingRetryChunk } from "../../lib/routingRetrySignal";
 import {
   expectNoHorizontalOverflow,
@@ -3631,7 +3632,12 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       await drive(page, 0, "push", "A single default answer.");
       await drive(page, 0, "finish");
       expect(await requests(page)).toHaveLength(1);
-      expect(state.writes.filter((write) => write.path === "/api/products/chat/conversations").map((write) => write.body.selectedModels)).toEqual([[MODEL_A]]);
+      // A fresh new account opens on the new-account default lineup, not on
+      // the account defaults, so its one Chat-local model is that lineup's
+      // lead. This expected MODEL_A for every entry and held only while the
+      // default lead was gpt-5-6-luna, which MODEL_A happens to be.
+      const localModel = entry === "fresh new-account" ? GUEST_BRAND_TRIO_MODEL_IDS[0] : MODEL_A;
+      expect(state.writes.filter((write) => write.path === "/api/products/chat/conversations").map((write) => write.body.selectedModels)).toEqual([[localModel]]);
       expect(state.userSettingsWrites).toEqual([]);
       expect(accountDefaults).toEqual([MODEL_A, MODEL_B]);
     });

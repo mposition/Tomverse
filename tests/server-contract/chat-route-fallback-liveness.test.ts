@@ -1404,10 +1404,14 @@ for (const abortAt of [
     assert.ok(attempts[1].providerAbortedWith);
     assert.ok(attempts[1].cancelledWith);
     assert.equal(attempts[1].providerAbortedBeforeReaderCancel, true);
-    assert.deepEqual(attempts.map(({ modelId }) => modelId), [
-      "deepseek-v4-flash",
-      "deepseek-v4-pro",
-    ]);
+    // Which two models the Router picks is a fact about the catalogue, not
+    // about the fallback (see HELD_PROVIDERS above): this read deepseek-v4-pro
+    // until claude-haiku-5-5 joined the catalogue and outranked it on the
+    // model-id tie-break. What is asserted is two different models, each
+    // closed once with its own outcome.
+    const [primary, fallback] = attempts.map(({ modelId }) => modelId);
+    assert.ok(primary && fallback);
+    assert.notEqual(fallback, primary);
     assert.deepEqual(
       dispatchCloses.map(({ attemptId, modelId, outcome }) => ({
         attemptId,
@@ -1416,28 +1420,28 @@ for (const abortAt of [
       })),
       [
         {
-          attemptId: "routing-attempt-0-deepseek-v4-flash",
-          modelId: "deepseek-v4-flash",
+          attemptId: `routing-attempt-0-${primary}`,
+          modelId: primary,
           outcome: "failed_pre_token",
         },
         {
-          attemptId: "routing-attempt-1-deepseek-v4-pro",
-          modelId: "deepseek-v4-pro",
+          attemptId: `routing-attempt-1-${fallback}`,
+          modelId: fallback,
           outcome: "cancelled",
         },
       ]
     );
     assert.deepEqual(closedInstrumentationAttempts, [
       {
-        id: "routing-attempt-0-deepseek-v4-flash",
+        id: `routing-attempt-0-${primary}`,
         attemptIndex: 0,
-        modelId: "deepseek-v4-flash",
+        modelId: primary,
         outcome: "failed_pre_token",
       },
       {
-        id: "routing-attempt-1-deepseek-v4-pro",
+        id: `routing-attempt-1-${fallback}`,
         attemptIndex: 1,
-        modelId: "deepseek-v4-pro",
+        modelId: fallback,
         outcome: "cancelled",
       },
     ]);
@@ -1775,6 +1779,14 @@ test("a fallback constructor failure releases its unspent hold without a third d
     await ask("answers");
 
     assert.equal(attempts.length, 1, "a constructor failure reached the fallback provider");
+    // The fallback never reached a provider, so its model is read from the
+    // attempt record rather than named: which model the Router falls back to
+    // is a catalogue fact (it read deepseek-v4-pro before claude-haiku-5-5).
+    const fallbackModelId = closedInstrumentationAttempts.find(
+      ({ attemptIndex }) => attemptIndex === 1
+    )?.modelId;
+    assert.ok(fallbackModelId);
+    assert.notEqual(fallbackModelId, attempts[0].modelId);
     assert.equal(recordDispatchedCalls, 1);
     assert.equal(ledger.attemptBudgetReservations, 1);
     assert.equal(ledger.attemptBudgetReleases, 1);
@@ -1793,7 +1805,7 @@ test("a fallback constructor failure releases its unspent hold without a third d
         .sort((left, right) => left.attemptIndex - right.attemptIndex),
       [
         { attemptIndex: 0, modelId: attempts[0].modelId, outcome: "failed_pre_token" },
-        { attemptIndex: 1, modelId: "deepseek-v4-pro", outcome: "not_dispatched" },
+        { attemptIndex: 1, modelId: fallbackModelId, outcome: "not_dispatched" },
       ]
     );
   } finally {

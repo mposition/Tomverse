@@ -230,7 +230,9 @@ test("the chat route reserves Luna's search at its enforced ceiling", async () =
     POST(
       jsonRequest("/api/chat", {
         messages: [{ role: "user", content: "what happened today?" }],
-        model: MODEL_ID,
+        // `modelId` is the field the route reads. This sent `model`, which the
+        // route ignores, and passed only while DEFAULT_MODEL_ID was MODEL_ID.
+        modelId: MODEL_ID,
         webSearchMode: "always",
       })
     )
