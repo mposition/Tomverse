@@ -375,9 +375,9 @@ test("the request event table's kinds, instance rule and one closing take a judg
     ),
   );
   assert.doesNotMatch(sql, /FUNCTION "amux_decision_maker_request_closing_retention"\(\)\nRETURNS/);
-  // The closing kinds the state read, the open count and the guards use are the core's.
+  // The closing kinds the state read, the open count, the stale candidates and the guards use are the core's.
   const requestStore = read("lib/amux/decisionMakerRequestStore.ts");
-  assert.equal((requestStore.match(new RegExp(`"kind" IN \\(${sqlList(DM_CLOSING_EVENT_KINDS)}\\)`, "g")) ?? []).length, 2);
+  assert.equal((requestStore.match(new RegExp(`"kind" IN \\(${sqlList(DM_CLOSING_EVENT_KINDS)}\\)`, "g")) ?? []).length, 3);
   for (const name of ["amux_decision_maker_request_event_guard", "amux_decision_maker_body_guard", "amux_decision_maker_judgment_guard", "amux_decision_maker_digest_key_event_guard"]) {
     assert.ok(functionOf(sql, name).includes(`"kind" IN (${doubledList(DM_CLOSING_EVENT_KINDS)})`), name);
   }

@@ -34,6 +34,10 @@ import {
 } from "@/lib/amux/decisionMakerBodyStore";
 import { dmCardText } from "@/lib/amux/decisionMakerCore";
 import {
+  decisionMakerRetentionSweepDeps,
+  runDecisionMakerRetentionSweep,
+} from "@/lib/amux/decisionMakerRetentionSweep";
+import {
   DecisionMakerRequestWriteError,
   discardDecisionMakerAssignment,
   readDecisionMakerRequestState,
@@ -59,7 +63,9 @@ import { prisma } from "@/lib/prisma";
 // hold or an open request of its period remains, no update, READ COMMITTED
 // only, and every operation section 6's table allows under the kill switch.
 // The S1c review minor (a switch read that fails aborts the transaction) is
-// exercised here too. The writer's own statements are counted in
+// exercised here too, and so is §10's system sweep
+// (lib/amux/decisionMakerRetentionSweep.ts) end to end, through the AMUX DB
+// boundary. The writer's own statements are counted in
 // tests/amuxDecisionMakerBody.test.mjs.
 
 const requireDedicatedAmuxTestDatabase = () => {
@@ -1347,4 +1353,84 @@ test("the key period is the request's own, from its database clock", async () =>
   assert.equal(created.keyPeriod, dmKeyPeriodOf(created.createdAtMs));
   assert.ok(Math.abs(created.createdAtMs - now) < 60_000);
   assert.equal(DM_KEY_PERIOD_MS, 30 * DAY);
+});
+
+// ---------------------------------------------------------------------------
+// §10's system sweep, end to end
+// ---------------------------------------------------------------------------
+
+test("the retention sweep rotates the next key in, closes a stale request, purges an expired body and destroys a spent key, under the kill switch, and then rests", async () => {
+  const current = await rotateRecentPeriods(5);
+  // §6's table: the stale close, the purge and the key registry all stay
+  // allowed under the kill switch.
+  await setSwitch("kill_switch", "on");
+  const card = "Pick a cache key layout.";
+  // Open for 721 hours: stale.
+  const stale = await backdatedRequest(721 * 60 * 60 * 1000, { card });
+  // In the period four back, closed 91 days ago: its retention has passed.
+  const { period: expiredPeriod, ageMs } = await ageIntoPeriod(4);
+  const expired = await backdatedRequest(ageMs, { card });
+  await backdatedClose(expired.id, 91 * DAY);
+  // Opened now: neither stale nor closed.
+  const fresh = await backdatedRequest(0, { card });
+
+  const withBodies = new Set(
+    (await prisma.$queryRaw<Array<{ keyPeriod: number }>>`SELECT DISTINCT "keyPeriod" FROM "AmuxDecisionMakerBody"`).map((row) => Number(row.keyPeriod)),
+  );
+  const ended = [1, 2, 3, 4, 5].map((back) => current - back);
+  const ring = new Map([...ended, current, current + 1].map((period) => [period, KEY]));
+  const sweep = () => runDecisionMakerRetentionSweep(decisionMakerRetentionSweepDeps({ loadKeyRing: () => ring }));
+  const events = async (requestId: string) =>
+    (await prisma.$queryRaw<Array<{ kind: string }>>`SELECT "kind" FROM "AmuxDecisionMakerRequestEvent" WHERE "requestId" = ${requestId} ORDER BY "sequence"`).map((row) => row.kind);
+  const keyEvents = async () =>
+    prisma.$queryRaw<Array<{ keyPeriod: number; kind: string }>>`SELECT "keyPeriod", "kind" FROM "AmuxDecisionMakerDigestKeyEvent" ORDER BY "sequence"`;
+
+  const first = await sweep();
+  assert.deepEqual(first, {
+    keyRing: "loaded",
+    keysRotated: 1,
+    staleClosed: 1,
+    purged: 1,
+    // The ended periods with no body when the sweep read the registry; the
+    // expired request's period still had its card then.
+    keysDestroyed: ended.filter((period) => !withBodies.has(period)).length,
+    refused: 0,
+    stopped: null,
+  });
+  assert.deepEqual((await keyEvents()).filter((row) => row.kind === "rotate").map((row) => Number(row.keyPeriod)).at(-1), current + 1);
+  assert.equal((await events(stale.id)).at(-1), "stale_close");
+  assert.deepEqual((await retentionRows(stale.id)).map((row) => row.kind), ["retention_set"]);
+  assert.deepEqual(await bodyFields(stale.id), ["card_text"]);
+  assert.deepEqual(await bodyFields(expired.id), []);
+  assert.deepEqual(await events(fresh.id), []);
+  assert.deepEqual(await bodyFields(fresh.id), ["card_text"]);
+  const destroyed = new Set((await keyEvents()).filter((row) => row.kind === "destroy").map((row) => Number(row.keyPeriod)));
+  assert.ok(!destroyed.has(expiredPeriod));
+  for (const period of withBodies) assert.ok(!destroyed.has(period), String(period));
+
+  // The next run finds the expired request's period empty and destroys its key; the one after finds nothing.
+  const second = await sweep();
+  assert.deepEqual(second, { keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 1, refused: 0, stopped: null });
+  assert.ok(new Set((await keyEvents()).filter((row) => row.kind === "destroy").map((row) => Number(row.keyPeriod))).has(expiredPeriod));
+  const third = await sweep();
+  assert.deepEqual(third, { keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 0, refused: 0, stopped: null });
+
+  // Each write is the router's own, under the audit its row names.
+  const audits = await prisma.$queryRaw<Array<{ action: string; systemActor: string | null }>>`
+    SELECT a."action", a."metadata"->>'systemActor' AS "systemActor"
+    FROM "AmuxDecisionMakerRequestEvent" ev JOIN "AdminAuditLog" a ON a."id" = ev."auditLogId"
+    WHERE ev."requestId" = ${stale.id} AND ev."kind" = 'stale_close'
+    UNION ALL
+    SELECT a."action", a."metadata"->>'systemActor'
+    FROM "AmuxDecisionMakerDigestKeyEvent" k JOIN "AdminAuditLog" a ON a."id" = k."auditLogId"
+    WHERE k."keyPeriod" = ${current + 1} OR k."kind" = 'destroy'
+    UNION ALL
+    SELECT a."action", a."metadata"->>'systemActor'
+    FROM "AdminAuditLog" a WHERE a."action" = 'amux.decision.body_purge' AND a."targetId" = ${expired.id}
+  `;
+  assert.deepEqual(
+    [...new Set(audits.map((row) => row.action))].sort(),
+    ["amux.decision.body_purge", "amux.decision.digest_key_destroy", "amux.decision.digest_key_rotate", "amux.decision.stale_close"],
+  );
+  assert.ok(audits.every((row) => row.systemActor === "amux-decision-router"));
 });

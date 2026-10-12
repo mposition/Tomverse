@@ -360,6 +360,40 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 9,
     isolation: "read",
   },
+  // §10's system sweep (lib/amux/decisionMakerRetentionSweep.ts). Its read:
+  // setup + the stale candidates + the purge candidates + the key registry
+  // with the database clock + fence, pinned by
+  // tests/amuxDecisionMakerRetentionSweep.test.mjs.
+  decisionMakerRetentionRead: {
+    operation: "decision_maker_retention_read",
+    prismaCallCeiling: 5,
+    isolation: "read",
+  },
+  // Each write of the sweep is the store operation at its largest (with an
+  // integrity key) + setup + fence: the stale close's 7, pinned by
+  // tests/amuxDecisionMakerRequest.test.mjs; the purge's 7, the key
+  // rotation's 7 and the key destruction's 8, pinned by
+  // tests/amuxDecisionMakerBody.test.mjs.
+  decisionMakerStaleClose: {
+    operation: "decision_maker_stale_close",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  decisionMakerBodyPurge: {
+    operation: "decision_maker_body_purge",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  decisionMakerDigestKeyRotate: {
+    operation: "decision_maker_digest_key_rotate",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  decisionMakerDigestKeyDestroy: {
+    operation: "decision_maker_digest_key_destroy",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
 } as const satisfies Record<string, AmuxDbBoundary>;
 
 /**
