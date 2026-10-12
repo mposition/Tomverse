@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
     REVIEW_ENTRY_MARKER,
+    chatProductDestination,
     workspaceDestination,
 } from "../lib/productEntryDestination.ts";
 
@@ -59,14 +60,48 @@ test("the canonical mapping is Review at /review and Chat at /chat", () => {
 });
 
 test("a Chat entry is never marked as a guest preview", () => {
-    // A guest cannot be Chat-eligible, and claiming a preview that does not
-    // exist is the same failure as a toggle that does nothing.
+    // Chat's single-model trial is separate from Review's comparison preview.
     assert.ok(
         !destination({
             chatSurfaceAvailable: true,
             isAuthenticated: false,
         }).includes(REVIEW_ENTRY_MARKER)
     );
+});
+
+test("the guest Chat card trial is independent of Auto availability", () => {
+    for (const chatSurfaceAvailable of [true, false]) {
+        assert.equal(chatProductDestination({
+            chatSurfaceAvailable,
+            guestTrialAvailable: true,
+            lang: "ko",
+            isAuthenticated: false,
+        }), "/chat?lang=ko");
+    }
+});
+
+test("a guest trial cannot bypass signed-in Chat availability", () => {
+    assert.equal(chatProductDestination({
+        chatSurfaceAvailable: false,
+        guestTrialAvailable: true,
+        lang: "en",
+        isAuthenticated: true,
+    }), null);
+    assert.equal(chatProductDestination({
+        chatSurfaceAvailable: true,
+        guestTrialAvailable: false,
+        lang: "en",
+        isAuthenticated: true,
+    }), "/chat?lang=en");
+});
+
+test("an unresolved guest trial keeps the normal sign-in callback", () => {
+    assert.equal(chatProductDestination({
+        chatSurfaceAvailable: false,
+        guestTrialAvailable: false,
+        lang: "a&b",
+        isAuthenticated: false,
+    }), "/auth/signin?callbackUrl=%2Fchat%3Flang%3Da%2526b");
 });
 
 test("the language is encoded, not interpolated raw", () => {

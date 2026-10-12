@@ -5,6 +5,7 @@ import {
   mockAuthenticatedApi,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage } from "./support/chat-state-fixtures";
 
 async function openProductSwitcher(page: Page) {
   const mobileMenu = page.getByTestId("mobile-sidebar-open");
@@ -107,4 +108,62 @@ test.describe("Tomverse Chat and Review product switcher", () => {
       await expectNoHorizontalOverflow(page);
     }
   );
+});
+
+test.describe("Guest Chat and Review product entry", () => {
+  test("a guest switches directly between products and retains each idle draft", async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname.startsWith("/api/")) {
+        writes.push(new URL(request.url()).pathname);
+      }
+    });
+    await page.goto("/review?lang=en&entry=guest-preview");
+    const textarea = page.getByTestId("chat-textarea");
+    const reviewDraft = "This draft belongs to the guest Review trial.";
+    const chatDraft = "This draft belongs to the guest Chat trial.";
+    await textarea.fill(reviewDraft);
+
+    let switcher = await openProductSwitcher(page);
+    await expect(switcher.getByTestId("chat-product-chat")).toHaveAttribute("href", "/chat?lang=en");
+    await switcher.getByTestId("chat-product-chat").click();
+    await expect(page).toHaveURL(/\/chat\?lang=en$/);
+    await expect(textarea).toHaveValue("");
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveCount(0);
+    await expect(page.getByTestId("prompt-refiner-request")).toHaveCount(0);
+    await textarea.fill(chatDraft);
+
+    switcher = await openProductSwitcher(page);
+    await switcher.getByTestId("chat-product-review").click();
+    await expect(page).toHaveURL(/\/review\?lang=en$/);
+    await expect(textarea).toHaveValue(reviewDraft);
+
+    switcher = await openProductSwitcher(page);
+    await switcher.getByTestId("chat-product-chat").click();
+    await expect(page).toHaveURL(/\/chat\?lang=en$/);
+    await expect(textarea).toHaveValue(chatDraft);
+    expect(writes).toEqual([]);
+  });
+
+  test("the guest Chat limit offers sign-in without a Review import intent", async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    await mockGuestUsage(page, GUEST_DAILY_CREDIT_LIMIT, GUEST_DAILY_CREDIT_LIMIT);
+    await page.goto("/chat?lang=en");
+    await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+    // The exhausted server snapshot opens the Guest limit dialog on entry.
+    const modal = page.getByTestId("usage-limit-modal");
+    await expect(modal).toBeVisible();
+    const signIn = modal.getByTestId("usage-limit-guest-signin");
+    await expect(signIn).toHaveText("Login / Sign Up");
+    await expect(signIn).toHaveAttribute("href", "/auth/signin?callbackUrl=%2Fchat%3Flang%3Den");
+    await expect(modal).toContainText("Your guest Chat stays in this browser.");
+    // Keep the document open while exercising the real click handler so the
+    // assertion can inspect its local import-intent side effect.
+    await signIn.evaluate((element) => {
+      element.addEventListener("click", (event) => event.preventDefault());
+    });
+    await signIn.click();
+    expect(await page.evaluate(() => localStorage.getItem("tomverse_pending_guest_import"))).toBeNull();
+  });
 });

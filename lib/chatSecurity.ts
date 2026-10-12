@@ -162,6 +162,7 @@ import {
     enforceUserOperationalSecurity,
     UserOperationalRestrictionError,
 } from "@/lib/userOperationalSecurity";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -294,6 +295,31 @@ type ReservationEntry = {
         | "search-cost";
 };
 
+export type GuestAutoHeldCreditEntry = Readonly<{
+    key: string;
+    period: "day" | "month" | "guest-ip-day" | "guest-ip-month";
+    periodStart: Date;
+    amount: number;
+}>;
+
+export type GuestAutoPreholdConversion = Readonly<{
+    reservationId: string;
+    requestKey: string;
+    authorityId: string;
+    clientTurnId: string;
+    candidateDigest: string;
+    reachableCandidateDigest: string;
+    sourceCommitSha: string;
+    runtimeDeploymentId: string;
+    activationPairDigest: string;
+    configDigest: string;
+    basisModelId: string;
+    basisProvider: string;
+    heldCredits: number;
+    preholdAuditLogId: string;
+    creditEntries: readonly GuestAutoHeldCreditEntry[];
+}>;
+
 export type ChatUsageReservation = {
     reservationId: string;
     userId?: string;
@@ -367,6 +393,26 @@ export type ChatUsageReservation = {
      * re-derived by anybody who was not there.
      */
     promptCacheTtl?: string | null;
+    /** Content-free provenance for an exact reservation converted from a Guest Auto prehold. */
+    guestAuto?: {
+        authorityId: string;
+        requestKey: string;
+        clientTurnId: string;
+        candidateDigest: string;
+        reachableCandidateDigest: string;
+        sourceCommitSha: string;
+        runtimeDeploymentId: string;
+        activationPairDigest: string;
+        configDigest: string;
+        basisModelId: string;
+        basisProvider: string;
+        finalModelId: string;
+        finalProvider: string;
+        heldCredits: number;
+        exactCredits: number;
+        preholdAuditLogId: string;
+        conversionAuditLogId: string;
+    };
 };
 
 const durableReservationPayloadSchema = z
@@ -486,6 +532,28 @@ const durableReservationPayloadSchema = z
             .nullable()
             .optional(),
         promptCacheTtl: z.string().min(1).max(16).nullable().optional(),
+        guestAuto: z
+            .object({
+                authorityId: z.uuid(),
+                requestKey: z.string().regex(/^guest-auto-credit:v1:[a-f0-9]{64}$/),
+                clientTurnId: z.uuid(),
+                candidateDigest: z.string().regex(/^[a-f0-9]{64}$/),
+                reachableCandidateDigest: z.string().regex(/^[a-f0-9]{64}$/),
+                sourceCommitSha: z.string().regex(/^[a-f0-9]{40}$/),
+                runtimeDeploymentId: z.uuid(),
+                activationPairDigest: z.string().regex(/^[a-f0-9]{64}$/),
+                configDigest: z.string().regex(/^[a-f0-9]{64}$/),
+                basisModelId: z.string().min(1).max(160),
+                basisProvider: z.string().min(1).max(80),
+                finalModelId: z.string().min(1).max(160),
+                finalProvider: z.string().min(1).max(80),
+                heldCredits: z.number().int().positive(),
+                exactCredits: z.number().int().positive(),
+                preholdAuditLogId: z.string().min(1).max(100),
+                conversionAuditLogId: z.string().min(1).max(100),
+            })
+            .strict()
+            .optional(),
         // Optional so a reservation written before the pricing registry landed
         // still deserializes and settles at the rates it was reserved with.
         pricingVersion: z.string().min(1).max(120).optional(),
@@ -661,6 +729,10 @@ const positiveInteger = (value: string | undefined, fallback: number) => {
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
+
+/** The same Guest input ceiling enforced by createChatBudget. */
+export const guestChatMaxInputTokens = () =>
+    positiveInteger(process.env.CHAT_GUEST_MAX_INPUT_TOKENS, 16_000);
 
 const planCreditEntitlement = (
     plan: ModelTier,
@@ -872,7 +944,7 @@ export const createChatBudget = (
 ): ChatBudget => {
     const maxInputTokens =
         kind === "guest"
-            ? positiveInteger(process.env.CHAT_GUEST_MAX_INPUT_TOKENS, 16_000)
+            ? guestChatMaxInputTokens()
             : chatUserMaxInputTokens();
 
     // The limit is checked against the raw estimate, deliberately: it bounds
@@ -1007,12 +1079,27 @@ const textDetail = (details: ChatErrorDetails | undefined, key: string) => {
 const shouldRecordAllowedDecisions = () =>
     process.env.CHAT_LIMIT_DECISION_LOG_ALLOWED === "1";
 
+export const resolveGuestCreditQuotaLimits = () => ({
+    subjectMinute: positiveInteger(process.env.CHAT_GUEST_PER_MINUTE, 5),
+    subjectDay: positiveInteger(
+        process.env.CHAT_GUEST_PER_DAY,
+        APP_DEFAULTS.maxGuestMessages
+    ),
+    subjectMonth: positiveInteger(
+        process.env.CHAT_GUEST_PER_MONTH,
+        APP_DEFAULTS.maxGuestMonthlyCredits
+    ),
+    ipMinute: positiveInteger(process.env.CHAT_IP_PER_MINUTE, 40),
+    ipCreditMultiplier: 3 as const,
+});
+
 const limitsFor = (access: Pick<ChatAccess, "kind" | "plan" | "planLimits">): LimitRule[] => {
     if (access.kind !== "user") {
+        const limits = resolveGuestCreditQuotaLimits();
         return [
-            { period: "minute", limit: positiveInteger(process.env.CHAT_GUEST_PER_MINUTE, 5) },
-            { period: "day", limit: positiveInteger(process.env.CHAT_GUEST_PER_DAY, APP_DEFAULTS.maxGuestMessages) },
-            { period: "month", limit: positiveInteger(process.env.CHAT_GUEST_PER_MONTH, APP_DEFAULTS.maxGuestMonthlyCredits) },
+            { period: "minute", limit: limits.subjectMinute },
+            { period: "day", limit: limits.subjectDay },
+            { period: "month", limit: limits.subjectMonth },
         ];
     }
 
@@ -1237,6 +1324,10 @@ const periodStart = (period: Period, now: Date) => {
     return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 };
 
+/** Shared UTC bucket boundary used by ordinary Guest exact and Auto prehold. */
+export const guestCreditPeriodStart = (period: Period, now: Date) =>
+    periodStart(period, now);
+
 const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
     let end: Date;
     if (period === "minute") {
@@ -1252,7 +1343,7 @@ const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
 const monthlyResetAt = (now: Date) =>
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
-const incrementUsage = async (
+export const holdChatUsageBucket = async (
     tx: Prisma.TransactionClient,
     key: string,
     period: string,
@@ -1275,6 +1366,8 @@ const incrementUsage = async (
     `;
     return rows.length > 0;
 };
+
+const incrementUsage = holdChatUsageBucket;
 
 /** Counts into a bucket that has no ceiling. */
 const recordUsage = async (
@@ -2362,6 +2455,12 @@ export const acquireChatAccess = async (
          * what stops a three-model comparison from being admitted in part.
          */
         admissionToken?: string | null;
+        /**
+         * Converts one already-held Guest Smart Adaptive credit reservation.
+         * The ordinary path never supplies this and remains byte-for-byte on
+         * its existing insert/idempotency contract.
+         */
+        guestAutoPrehold?: GuestAutoPreholdConversion;
     }
 ): Promise<{
     leaseId: string;
@@ -2385,9 +2484,38 @@ export const acquireChatAccess = async (
     }
     const now = new Date();
     let leaseId: string = randomUUID();
-    const reservationId = randomUUID();
+    const reservationId = options?.guestAutoPrehold?.reservationId ?? randomUUID();
     const traceId = options?.traceId || reservationId;
     const reservationSource = options?.source || "chat";
+    const guestAutoPrehold = options?.guestAutoPrehold ?? null;
+    if (guestAutoPrehold) {
+        if (
+            access.kind !== "guest" ||
+            access.userId ||
+            reservationSource !== "chat" ||
+            options?.admissionToken
+        ) {
+            throw new ChatAccessError(
+                400,
+                "INVALID_GUEST_AUTO_PREHOLD",
+                "Invalid Guest Smart Adaptive credit prehold."
+            );
+        }
+        if (
+            !Number.isSafeInteger(guestAutoPrehold.heldCredits) ||
+            guestAutoPrehold.heldCredits <= 0 ||
+            budget.usageCredits > guestAutoPrehold.heldCredits ||
+            !guestAutoPrehold.preholdAuditLogId ||
+            guestAutoPrehold.preholdAuditLogId.length > 100 ||
+            guestAutoPrehold.creditEntries.length !== 4
+        ) {
+            throw new ChatAccessError(
+                409,
+                "GUEST_AUTO_PREHOLD_MISMATCH",
+                "Guest Smart Adaptive credit authorization changed."
+            );
+        }
+    }
     const reservationTtlSeconds = Math.min(
         1_800,
         Math.max(
@@ -2404,6 +2532,7 @@ export const acquireChatAccess = async (
     let addOnReservedCost = 0;
     let addOnReservations: AddOnCreditReservationEntry[] = [];
     let durableReservation: ChatUsageReservation | null = null;
+    let guestAutoConversionAuditLogId: string | null = null;
     const concurrencyPlan = resolveChatConcurrencyPlan(access);
     const leaseTtlSeconds = resolveLeaseTtlSeconds();
     // Signature and subject binding are verified here; whether the slot is
@@ -2440,7 +2569,7 @@ export const acquireChatAccess = async (
               }
             : null;
     })();
-    const ipPerMinute = positiveInteger(process.env.CHAT_IP_PER_MINUTE, 40);
+    const ipPerMinute = resolveGuestCreditQuotaLimits().ipMinute;
     const reservedTokens = getChatBudgetReservedTokens(budget);
     const reservedCost = getChatBudgetReservedCostMicroUsd(budget);
     const plan = access.plan || "Free";
@@ -2490,6 +2619,9 @@ export const acquireChatAccess = async (
 
     try {
     await prisma.$transaction(async (tx) => {
+        if (guestAutoPrehold) {
+            await takeAuditChainLock(tx);
+        }
         if (access.kind === "user") {
             if (!access.userId) {
                 throw new Error("Authenticated chat access is missing a user ID.");
@@ -2521,6 +2653,129 @@ export const acquireChatAccess = async (
             subjectKey: concurrencyPlan.subject.key,
             ipKey: concurrencyPlan.ip?.key ?? null,
         });
+        if (guestAutoPrehold) {
+            const durablePrehold = await tx.chatCreditReservation.findUnique({
+                where: { id: guestAutoPrehold.reservationId },
+                select: {
+                    phase: true,
+                    status: true,
+                    userId: true,
+                    subjectKey: true,
+                    traceId: true,
+                    clientTurnId: true,
+                    source: true,
+                    provider: true,
+                    modelId: true,
+                    idempotencyKey: true,
+                    reservationPayload: true,
+                    reservedCredits: true,
+                    reservedCostMicroUsd: true,
+                    planReservedCredits: true,
+                    addOnReservedCredits: true,
+                },
+            });
+            const payload = durablePrehold?.reservationPayload as
+                | Record<string, unknown>
+                | undefined;
+            if (
+                !durablePrehold ||
+                durablePrehold.phase !== "guest_auto_prehold" ||
+                durablePrehold.status !== "guest_auto_preheld" ||
+                durablePrehold.userId !== null ||
+                durablePrehold.subjectKey !== access.subjectKey ||
+                durablePrehold.traceId !== traceId ||
+                durablePrehold.clientTurnId !== guestAutoPrehold.clientTurnId ||
+                durablePrehold.source !== "chat" ||
+                durablePrehold.provider !== guestAutoPrehold.basisProvider ||
+                durablePrehold.modelId !== guestAutoPrehold.basisModelId ||
+                durablePrehold.idempotencyKey !== guestAutoPrehold.requestKey ||
+                durablePrehold.reservedCredits !== guestAutoPrehold.heldCredits ||
+                durablePrehold.reservedCostMicroUsd !== BigInt(0) ||
+                durablePrehold.planReservedCredits !== 0 ||
+                durablePrehold.addOnReservedCredits !== 0 ||
+                payload?.authorityId !== guestAutoPrehold.authorityId ||
+                payload?.clientTurnId !== guestAutoPrehold.clientTurnId ||
+                payload?.candidateDigest !== guestAutoPrehold.candidateDigest ||
+                payload?.reachableCandidateDigest !==
+                    guestAutoPrehold.reachableCandidateDigest ||
+                payload?.sourceCommitSha !== guestAutoPrehold.sourceCommitSha ||
+                payload?.runtimeDeploymentId !==
+                    guestAutoPrehold.runtimeDeploymentId ||
+                payload?.activationPairDigest !==
+                    guestAutoPrehold.activationPairDigest ||
+                payload?.configDigest !== guestAutoPrehold.configDigest ||
+                payload?.preholdAuditLogId !==
+                    guestAutoPrehold.preholdAuditLogId
+            ) {
+                throw new ChatAccessError(
+                    409,
+                    "GUEST_AUTO_PREHOLD_MISMATCH",
+                    "Guest Smart Adaptive credit authorization changed."
+                );
+            }
+
+            const expectedPeriods = new Set([
+                "day",
+                "month",
+                "guest-ip-day",
+                "guest-ip-month",
+            ]);
+            for (const entry of guestAutoPrehold.creditEntries) {
+                const expectedKey = entry.period.startsWith("guest-ip-")
+                    ? access.ipKey
+                    : access.subjectKey;
+                if (
+                    !expectedPeriods.delete(entry.period) ||
+                    entry.key !== expectedKey ||
+                    entry.amount !== guestAutoPrehold.heldCredits ||
+                    !(entry.periodStart instanceof Date) ||
+                    !Number.isFinite(entry.periodStart.getTime())
+                ) {
+                    throw new ChatAccessError(
+                        409,
+                        "GUEST_AUTO_PREHOLD_MISMATCH",
+                        "Guest Smart Adaptive credit authorization changed."
+                    );
+                }
+            }
+            if (expectedPeriods.size !== 0) {
+                throw new ChatAccessError(
+                    409,
+                    "GUEST_AUTO_PREHOLD_MISMATCH",
+                    "Guest Smart Adaptive credit authorization changed."
+                );
+            }
+
+            const refundCredits =
+                guestAutoPrehold.heldCredits - budget.usageCredits;
+            for (const entry of guestAutoPrehold.creditEntries) {
+                if (refundCredits > 0) {
+                    const changed = await tx.$executeRaw`
+                        UPDATE "ChatUsageBucket"
+                        SET "count" = "count" - ${refundCredits},
+                            "updatedAt" = NOW()
+                        WHERE "key" = ${entry.key}
+                          AND "period" = ${entry.period}
+                          AND "periodStart" = ${entry.periodStart}
+                          AND "count" >= ${refundCredits}
+                    `;
+                    if (changed !== 1) {
+                        throw new ChatAccessError(
+                            409,
+                            "GUEST_AUTO_PREHOLD_MISMATCH",
+                            "Guest Smart Adaptive credit authorization changed."
+                        );
+                    }
+                }
+                reservationEntries.push({
+                    key: entry.key,
+                    period: entry.period,
+                    periodStart: entry.periodStart,
+                    amount: budget.usageCredits,
+                    metric: "credits",
+                });
+            }
+        }
         // Claimed first, because the answer decides what this request still has
         // to pay for. A comparison that was admitted as a whole already
         // reserved this model's concurrency slot *and* its unit of per-minute
@@ -2719,6 +2974,10 @@ export const acquireChatAccess = async (
             }
         }
         for (const rule of limitsFor(access)) {
+            // The Guest Auto prehold already owns this request's subject
+            // minute and day/month credits. Conversion adjusts the held
+            // day/month amount above and must not charge any of them twice.
+            if (guestAutoPrehold) continue;
             if (
                 access.kind === "user" &&
                 (rule.period === "day" || rule.period === "month")
@@ -3057,7 +3316,7 @@ export const acquireChatAccess = async (
         // Same reservation, aggregate scope: a claimed slot already holds one
         // unit of this IP's minute. An unclaimed request still charges it here,
         // which is what keeps the single-model path unchanged.
-        if (!claimedAdmissionSlot) {
+        if (!claimedAdmissionSlot && !guestAutoPrehold) {
             const ipMinuteStart = periodStart("minute", now);
             const ipScope = ipRateScope(access.ipKey, ipPerMinute);
             const ipAllowed = await incrementUsage(
@@ -3089,7 +3348,7 @@ export const acquireChatAccess = async (
                 );
             }
         }
-        if (access.kind === "guest") {
+        if (access.kind === "guest" && !guestAutoPrehold) {
             for (const rule of limitsFor(access).filter(
                 (rule) => rule.period !== "minute"
             )) {
@@ -3495,6 +3754,38 @@ export const acquireChatAccess = async (
             ]);
         }
 
+        if (guestAutoPrehold) {
+            guestAutoConversionAuditLogId = await writeSystemAuditLog({
+                tx,
+                systemActor: "guest-chat-auto-credit",
+                action: "guest_chat.auto_credit_converted",
+                targetType: "ChatCreditReservation",
+                targetId: reservationId,
+                summary:
+                    "Converted one Guest Smart Adaptive credit prehold to an exact model reservation.",
+                metadata: {
+                    authorityId: guestAutoPrehold.authorityId,
+                    clientTurnId: guestAutoPrehold.clientTurnId,
+                    requestKey: guestAutoPrehold.requestKey,
+                    candidateDigest: guestAutoPrehold.candidateDigest,
+                    reachableCandidateDigest:
+                        guestAutoPrehold.reachableCandidateDigest,
+                    sourceCommitSha: guestAutoPrehold.sourceCommitSha,
+                    runtimeDeploymentId:
+                        guestAutoPrehold.runtimeDeploymentId,
+                    activationPairDigest:
+                        guestAutoPrehold.activationPairDigest,
+                    configDigest: guestAutoPrehold.configDigest,
+                    basisModelId: guestAutoPrehold.basisModelId,
+                    basisProvider: guestAutoPrehold.basisProvider,
+                    finalModelId: budget.modelId,
+                    finalProvider: budget.provider,
+                    heldCredits: guestAutoPrehold.heldCredits,
+                    exactCredits: budget.usageCredits,
+                },
+            });
+        }
+
         durableReservation = {
             reservationId,
             userId: access.userId,
@@ -3599,6 +3890,34 @@ export const acquireChatAccess = async (
                 budget.promptCacheWriteReservedPremiumMicroUsd > 0
                     ? ANTHROPIC_PROMPT_CACHE_TTL
                     : null,
+            ...(guestAutoPrehold
+                ? {
+                      guestAuto: {
+                          authorityId: guestAutoPrehold.authorityId,
+                          requestKey: guestAutoPrehold.requestKey,
+                          clientTurnId: guestAutoPrehold.clientTurnId,
+                          candidateDigest: guestAutoPrehold.candidateDigest,
+                          reachableCandidateDigest:
+                              guestAutoPrehold.reachableCandidateDigest,
+                          sourceCommitSha: guestAutoPrehold.sourceCommitSha,
+                          runtimeDeploymentId:
+                              guestAutoPrehold.runtimeDeploymentId,
+                          activationPairDigest:
+                              guestAutoPrehold.activationPairDigest,
+                          configDigest: guestAutoPrehold.configDigest,
+                          basisModelId: guestAutoPrehold.basisModelId,
+                          basisProvider: guestAutoPrehold.basisProvider,
+                          finalModelId: budget.modelId,
+                          finalProvider: budget.provider,
+                          heldCredits: guestAutoPrehold.heldCredits,
+                          exactCredits: budget.usageCredits,
+                          preholdAuditLogId:
+                              guestAutoPrehold.preholdAuditLogId,
+                          conversionAuditLogId:
+                              guestAutoConversionAuditLogId!,
+                      },
+                  }
+                : {}),
             planReservedCredits,
             addOnReservedCredits,
             addOnReservations,
@@ -3608,25 +3927,58 @@ export const acquireChatAccess = async (
             costSource: budget.costSource,
             longContextThresholdTokens: budget.longContextThresholdTokens,
         };
-        await tx.chatCreditReservation.create({
-            data: {
-                id: reservationId,
-                userId: access.userId || null,
-                subjectKey: access.subjectKey,
-                traceId,
-                source: reservationSource,
-                provider: budget.provider,
-                modelId: budget.modelId,
-                status: "reserved",
-                idempotencyKey: `chat-credit-reservation:${reservationId}:v1`,
-                reservationPayload: serializeReservation(durableReservation),
-                reservedCredits: budget.usageCredits,
-                reservedCostMicroUsd: BigInt(reservedCost),
-                planReservedCredits,
-                addOnReservedCredits,
-                expiresAt: reservationExpiresAt,
-            },
-        });
+        if (guestAutoPrehold) {
+            const converted = await tx.chatCreditReservation.updateMany({
+                where: {
+                    id: reservationId,
+                    subjectKey: access.subjectKey,
+                    clientTurnId: guestAutoPrehold.clientTurnId,
+                    phase: "guest_auto_prehold",
+                    status: "guest_auto_preheld",
+                    idempotencyKey: guestAutoPrehold.requestKey,
+                },
+                data: {
+                    phase: "exact",
+                    clientTurnId: guestAutoPrehold.clientTurnId,
+                    provider: budget.provider,
+                    modelId: budget.modelId,
+                    status: "reserved",
+                    reservationPayload: serializeReservation(durableReservation),
+                    reservedCredits: budget.usageCredits,
+                    reservedCostMicroUsd: BigInt(reservedCost),
+                    planReservedCredits,
+                    addOnReservedCredits,
+                    expiresAt: reservationExpiresAt,
+                },
+            });
+            if (converted.count !== 1) {
+                throw new ChatAccessError(
+                    409,
+                    "GUEST_AUTO_PREHOLD_MISMATCH",
+                    "Guest Smart Adaptive credit authorization changed."
+                );
+            }
+        } else {
+            await tx.chatCreditReservation.create({
+                data: {
+                    id: reservationId,
+                    userId: access.userId || null,
+                    subjectKey: access.subjectKey,
+                    traceId,
+                    source: reservationSource,
+                    provider: budget.provider,
+                    modelId: budget.modelId,
+                    status: "reserved",
+                    idempotencyKey: `chat-credit-reservation:${reservationId}:v1`,
+                    reservationPayload: serializeReservation(durableReservation),
+                    reservedCredits: budget.usageCredits,
+                    reservedCostMicroUsd: BigInt(reservedCost),
+                    planReservedCredits,
+                    addOnReservedCredits,
+                    expiresAt: reservationExpiresAt,
+                },
+            });
+        }
     });
     } catch (error) {
         if (error instanceof ChatAccessError) {
@@ -3917,10 +4269,11 @@ export const settleChatUsage = async (
                 modelId: durable.modelId,
             };
         }
-        if (
-            durable.idempotencyKey !==
-            `chat-credit-reservation:${reservation.reservationId}:v1`
-        ) {
+        const canonical = deserializeReservation(durable.reservationPayload);
+        const expectedIdempotencyKey =
+            canonical.guestAuto?.requestKey ??
+            `chat-credit-reservation:${reservation.reservationId}:v1`;
+        if (durable.idempotencyKey !== expectedIdempotencyKey) {
             throw new Error("Chat credit reservation idempotency key mismatch.");
         }
 
@@ -3935,7 +4288,6 @@ export const settleChatUsage = async (
             ? (resolved.providerUsageSnapshot ?? null)
             : (options?.providerUsageSnapshot ?? null);
 
-        const canonical = deserializeReservation(durable.reservationPayload);
         // The user's half of §7's split. With one dispatched attempt this *is*
         // the caller's `usage`; with two it is the accepted attempt's, because
         // the user is charged for the answer that arrived and not for
@@ -5166,7 +5518,15 @@ export const reconcileExpiredChatCreditReservations = async (
 ) => {
     const limit = Math.min(1_000, Math.max(1, maximum));
     const rows = await prisma.chatCreditReservation.findMany({
-        where: { status: "reserved", expiresAt: { lte: now } },
+        // A converted Guest Auto row keeps its logical-turn binding. Expiry is
+        // not evidence that the Refiner or provider did no paid work, so this
+        // generic zero-usage refund path must never consume it. Its request
+        // path settles known usage or marks the same durable row unknown.
+        where: {
+            status: "reserved",
+            clientTurnId: null,
+            expiresAt: { lte: now },
+        },
         orderBy: [{ expiresAt: "asc" }, { createdAt: "asc" }],
         take: limit,
         select: {
@@ -5364,7 +5724,44 @@ export const validateChatPayload = (body: unknown) => {
         contextBundle?: unknown;
         acknowledgedUnavailableAttachmentIds?: unknown;
         promptRefinerDecision?: unknown;
+        guestAutoAuthority?: unknown;
+        guestClientTurnId?: unknown;
     };
+    if (
+        payload.guestAutoAuthority !== undefined &&
+        (typeof payload.guestAutoAuthority !== "string" ||
+            payload.guestAutoAuthority.length < 1 ||
+            payload.guestAutoAuthority.length > 4_096)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_GUEST_AUTO_AUTHORITY",
+            "Invalid Guest Smart Adaptive authority."
+        );
+    }
+    if (
+        payload.guestClientTurnId !== undefined &&
+        (typeof payload.guestClientTurnId !== "string" ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                payload.guestClientTurnId
+            ))
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_GUEST_AUTO_TURN_ID",
+            "Invalid Guest Smart Adaptive turn identity."
+        );
+    }
+    if (
+        Boolean(payload.guestAutoAuthority) !==
+        Boolean(payload.guestClientTurnId)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_GUEST_AUTO_AUTHORITY",
+            "Incomplete Guest Smart Adaptive authority."
+        );
+    }
     if (payload.promptRefinerDecision !== undefined &&
         (!promptRefinerChatDecisionSchema.safeParse(payload.promptRefinerDecision).success ||
           !payload.conversationId || !payload.sourceUserMessageId || !payload.assistantMessageId)) {
@@ -5620,6 +6017,8 @@ export const validateChatPayload = (body: unknown) => {
         contextBundle?: string;
         acknowledgedUnavailableAttachmentIds?: string[];
         promptRefinerDecision?: PromptRefinerChatDecision;
+        guestAutoAuthority?: string;
+        guestClientTurnId?: string;
     };
 };
 

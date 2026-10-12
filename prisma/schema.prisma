@@ -1621,7 +1621,13 @@ model ChatCreditReservation {
   user                         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   subjectKey                   String
   traceId                      String
+  /// Client-created logical turn id. NULL for historical/ordinary rows;
+  /// Guest Smart Adaptive binds it once with the signed Guest subject.
+  clientTurnId                 String?
   source                       String
+  /// `exact` for every historical/ordinary reservation. Guest Smart Adaptive
+  /// temporarily uses `guest_auto_prehold` before one exact model is selected.
+  phase                        String    @default("exact")
   provider                     String
   modelId                      String
   status                       String    @default("reserved")
@@ -1675,6 +1681,7 @@ model ChatCreditReservation {
   @@index([status, expiresAt])
   @@index([userId, createdAt])
   @@index([traceId])
+  @@unique([subjectKey, clientTurnId])
   @@index([providerRequestId])
   @@index([providerResponseId])
 }

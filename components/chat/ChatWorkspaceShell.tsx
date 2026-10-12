@@ -8,7 +8,6 @@ import { decideChatWorkspaceEntry } from "@/lib/chatWorkspaceEntry";
 import { CONVERSATION_HANDOFF_PARAM, conversationHandoffHref } from "@/lib/continuationRoutes";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import {
-  CHAT_WORKSPACE_PATH,
   REVIEW_WORKSPACE_PATH,
 } from "@/lib/productSurfaceRoutes";
 import { prisma } from "@/lib/prisma";
@@ -34,17 +33,19 @@ export async function ChatWorkspaceShell({ searchParams }: {
   const session = await getServerSession(authOptions);
   const userId = session?.user?.id;
   if (!userId) {
-    const callback = new URL(CHAT_WORKSPACE_PATH, "https://local.invalid");
-    for (const [key, values] of Object.entries(searchParams)) {
-      if (values === undefined) continue;
-      for (const value of Array.isArray(values) ? values : [values]) {
-        callback.searchParams.append(key, value);
-      }
-    }
-    redirect(
-      `/auth/signin?callbackUrl=${encodeURIComponent(
-        `${callback.pathname}${callback.search}`
-      )}`
+    const decision = decideChatWorkspaceEntry({
+      authenticated: false,
+      requestedConversation: Boolean(conversationId),
+      ownedConversation: null,
+      offered: false,
+      guestTrialAvailable: true,
+    });
+    if (decision.action === "not_found") notFound();
+    return (
+      <ReviewWorkspaceShell
+        mountedSurface="chat"
+        initialConversationId={null}
+      />
     );
   }
   const owned = conversationId
@@ -63,6 +64,7 @@ export async function ChatWorkspaceShell({ searchParams }: {
       hasContinuationBridge: owned.continuationBridge !== null,
     } : null,
     offered,
+    guestTrialAvailable: false,
   });
   if (decision.action === "not_found") notFound();
   if (decision.action === "redirect" && conversationId) {

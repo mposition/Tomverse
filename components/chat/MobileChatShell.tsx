@@ -1667,6 +1667,7 @@ export function MobileChatShell({
                 aria-hidden={!isPanelVisible}
               >
                 <ChatApp
+                  currentProduct={currentProduct}
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
                   onRestorePrompt={onRestorePrompt}
@@ -1927,8 +1928,8 @@ export function MobileChatShell({
             }
           >
             <div className="absolute right-[-0.45rem] top-1/2 h-12 w-1.5 -translate-y-1/2 rounded-full bg-white/70 shadow dark:bg-zinc-700/80" aria-hidden="true" />
-            <div className="min-h-0 flex-1">
             <ChatSidebar
+              currentProduct={currentProduct}
               conversations={conversations}
               currentChatId={currentChatId}
               onNewChat={() => {
@@ -1980,16 +1981,14 @@ export function MobileChatShell({
               currentModelId={resolvedActiveModelId}
               attachmentCount={attachments.length}
               isMobileDrawer
+              mobileProductSwitcher={currentProduct ? (
+                <ChatProductSwitcher
+                  currentProduct={currentProduct}
+                  disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
+                  onProductSwitch={onProductSwitch}
+                />
+              ) : undefined}
             />
-            </div>
-            {currentProduct && <div className="shrink-0 border-t border-zinc-200 p-2 dark:border-zinc-800">
-              <ChatProductSwitcher
-                currentProduct={currentProduct}
-                chatRequiresSignIn={isGuestMode}
-                disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
-                onProductSwitch={onProductSwitch}
-              />
-            </div>}
             <button
               ref={drawerCloseButtonRef}
               type="button"

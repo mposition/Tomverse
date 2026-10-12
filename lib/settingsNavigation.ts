@@ -2,37 +2,38 @@ import {
     isAccountSettingsTab,
     type AccountSettingsTab,
 } from "@/lib/accountSettingsEvents";
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 
 /**
  * Where a settings *detail page* goes when the user navigates back up.
  *
  * Settings is not a route: it is a closable panel (the modal inside
- * components/auth/AuthButton.tsx) that lives on the chat surface. Its detail
+ * components/auth/AuthButton.tsx) that lives on the Review surface. Its detail
  * screens — everything under /settings — are full pages, so their upward
  * navigation has to name a destination rather than lean on `router.back()`,
  * which points at whatever the visitor happened to see last and at nothing at
  * all when the URL was opened directly.
  *
- * The destination is therefore the chat route plus a deep link that says which
+ * The destination is therefore the Review route plus a deep link that says which
  * settings tab to open and which entry inside it to restore, so "Back to
  * settings" lands on the settings list with the row the user came from
  * scrolled into view and focused.
  *
  * Leaving the settings hierarchy altogether is a *second*, separate movement,
- * and it needs its own control: the panel's close button is on the chat
+ * and it needs its own control: the panel's close button is on the Review
  * surface, which is exactly the surface a visitor standing on
  * /settings/imports/conversations/<id> cannot reach without walking back up
  * one level at a time. `settingsExitHref()` is that one-click way out, and it
- * goes to the bare chat route — no deep link, so the panel stays closed and
- * the tab's own last conversation is restored by the chat page as usual.
+ * goes to the bare Review route — no deep link, so the panel stays closed and
+ * the tab's own last conversation is restored by the Review page as usual.
  * Both movements are rendered, and they are never merged into one control:
  * see docs/ui-contracts/settings-navigation.md §1.
  */
-export const SETTINGS_HOME_PATH = "/chat";
+export const SETTINGS_HOME_PATH = REVIEW_WORKSPACE_PATH;
 
 /**
- * The chat route with nothing appended. Written through the same constant the
- * deep links are built from so "/chat" has one spelling in this module, and
+ * The Review route with nothing appended. Written through the same constant the
+ * deep links are built from so the destination has one spelling in this module, and
  * kept parameter-free on purpose: any `settings=` value here would reopen the
  * panel the visitor just asked to leave.
  */

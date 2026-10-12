@@ -26,7 +26,10 @@
  * compatibility links. `/chat/workspace` remains an inbound alias only.
  */
 
-import type { ConversationProductKey } from "@/lib/conversationProduct";
+import {
+  isConversationProductKey,
+  type ConversationProductKey,
+} from "@/lib/conversationProduct";
 
 /** The path each product's workspace lives at once the cutover happens. */
 export const PRODUCT_SURFACE_PATH: Readonly<
@@ -54,6 +57,18 @@ export const CHAT_WORKSPACE_COMPATIBILITY_PATH = "/chat/workspace";
 
 /** Canonical Tomverse Review entry. */
 export const REVIEW_WORKSPACE_PATH = PRODUCT_SURFACE_PATH.review;
+
+/**
+ * Canonical workspace for a server-supplied product value.
+ *
+ * Public snapshots written before product identity was exposed have no value,
+ * and an unrecognised value must not become Chat by guess. Review is the
+ * historical, least-surprising fallback for those content-free links.
+ */
+export const productSurfacePathOrReview = (productKey: unknown): string =>
+  isConversationProductKey(productKey)
+    ? PRODUCT_SURFACE_PATH[productKey]
+    : REVIEW_WORKSPACE_PATH;
 
 export type DeepLinkResolution =
   | { action: "stay"; path: string }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { shareSnapshotSchema } from "@/lib/shareSnapshot";
 import { isStrongShareToken } from "@/lib/shareTokens";
+import { isConversationProductKey } from "@/lib/conversationProduct";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -47,6 +48,7 @@ export async function GET(
       select: {
         shareSnapshot: true,
         shareExpiresAt: true,
+        productKey: true,
       },
     });
     const snapshot = shareSnapshotSchema.safeParse(
@@ -66,6 +68,9 @@ export async function GET(
       {
         snapshot: snapshot.data,
         expiresAt: conversation.shareExpiresAt.toISOString(),
+        productKey: isConversationProductKey(conversation.productKey)
+          ? conversation.productKey
+          : null,
       },
       {
         headers: publicShareHeaders,

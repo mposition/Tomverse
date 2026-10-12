@@ -169,7 +169,7 @@ for (const path of ["/", "/ko"] as const) {
     );
     await expect(page.getByTestId("landing-signup-cta")).toHaveAttribute(
       "href",
-      "/auth/signin?callbackUrl=%2Fchat"
+      "/auth/signin?callbackUrl=%2Freview"
     );
 
     // The provider count is derived from the catalogue, not written by hand.
@@ -275,7 +275,7 @@ for (const path of ["/", "/ko"] as const) {
       ["landing-models-cta", "/models"],
       ["landing-status-cta", "/status"],
       ["landing-safety-cta", "/safety"],
-      ["landing-signup-cta", "/auth/signin?callbackUrl=%2Fchat"],
+      ["landing-signup-cta", "/auth/signin?callbackUrl=%2Freview"],
       ["landing-secondary-cta", "#how-it-works"],
     ];
     for (const [testId, href] of expectedHrefs) {
@@ -303,7 +303,7 @@ test("the hero names both products and keeps the primary guest CTA on Review", a
   page,
 }) => {
   // The first screen names both product jobs. The guest primary action remains
-  // Review, while Chat has its own sign-in action and callback.
+  // Review, while Chat has its own Guest Smart Adaptive entry.
   await openLanding(page, "/");
 
   const brand = await page.getByTestId("landing-brand-note").innerText();
@@ -311,12 +311,16 @@ test("the hero names both products and keeps the primary guest CTA on Review", a
   expect(brand).toContain("Tomverse");
 
   const cta = await page.getByTestId("landing-primary-cta").innerText();
-  // The primary guest action is Review; Chat has the adjacent sign-in entry.
+  // The primary guest action is Review; Chat has the adjacent trial entry.
   expect(cta.toLowerCase()).not.toContain("chat");
   expect(cta.toLowerCase()).toContain("compar");
   await expect(page.getByTestId("landing-chat-product-cta")).toHaveAttribute(
     "href",
-    "/auth/signin?callbackUrl=%2Fchat%3Flang%3Den"
+    "/chat?lang=en"
+  );
+  await expect(page.getByTestId("landing-chat-product-cta")).toHaveText("Try Chat free");
+  await expect(page.getByTestId("landing-chat-product-description")).toHaveText(
+    /When Smart Adaptive is available.*text questions.*existing guest limit.*browser.*Attachments use manual model selection/
   );
   await expect(page.getByTestId("landing-review-product-cta")).toHaveAttribute(
     "href",

@@ -49,13 +49,37 @@ conversation to its confirmed manual fallback as defined by
 ## 3. Entry and availability
 
 The landing page may link an eligible signed-in visitor directly to Chat. A
-guest Chat action goes through the normal sign-in flow with `/chat` as its
-callback. A signed-in account that the server has not offered Chat sees an
+guest Chat product card or product-switcher link enters a blank `/chat` trial
+directly, where the existing guest usage limits apply to a single-model reply.
+`guestTrialAvailable` admits this blank entry independently of Auto's `offered`;
+it never grants Smart Adaptive or Prompt Refiner capability. Guest Smart Adaptive
+may refine a text question and select a model only when the server offers it,
+within the same existing Guest quota. The first Guest version is text-only;
+attachment sends retain manual model selection. When the server does not offer
+Auto, its controls remain absent and the manual trial remains available.
+The landing card describes this conditional Guest access and browser-local
+storage. Sign-in does not automatically save or import a Guest Chat into an
+account. A signed-in account that the server has not offered Chat sees an
 availability notice and a working Review alternative; the client never derives
 eligibility from a flag or reveals a cohort reason.
 
-Review keeps its guest preview boundary. No entry action sends a message,
-creates a paid turn, or silently creates a conversation.
+The marketing document stays static. Its public Guest entry is a server-supplied
+constant and reads no session, account row, auth secret or Auto availability at
+build time. Once `useSession` resolves an authenticated user ID, the landing
+reads the existing private `/api/products/chat/capabilities` GET with `no-store`
+and accepts only its `autoSelection.offered` boolean for link availability.
+The landing makes no Guest capability request; Guest Smart Adaptive availability
+is resolved separately by the canonical Chat workspace's server capability.
+Each resolved signed-in identity mounts an unavailable
+view and aborts the preceding read; late responses, including A-to-B-to-A, cannot
+restore a previous account's link. Failed, malformed or unknown reads retain the
+availability notice and Review alternative. This read grants no authority and
+neither changes the static CSP/cache boundary nor enables a Guest Auto control.
+
+Review keeps its guest preview boundary, and the landing hero and final primary
+comparison CTA retain `/review?entry=guest-preview`. Guest URLs that name a saved
+Chat conversation fail closed rather than probing an account's rows. No entry
+action sends a message, creates a paid turn, or silently creates a conversation.
 
 ## 4. Responsive and accessible shape
 
@@ -78,4 +102,6 @@ Primary product names are `Tomverse Chat` and `Tomverse Review`. Secondary
 feature names are `Smart Adaptive` and `Model Compare` (Korean: `스마트 자동`,
 `모델 비교`). Smart Adaptive is a product label chosen by Tomverse, not a
 market-standard term or a quality certification. Copy must not promise a best,
-better, optimal or winning model.
+better, optimal or winning model. Guest copy must not require sign-in for Smart
+Adaptive, promise an always-visible Auto control, automatic attachment routing,
+or automatic account storage/import of browser-local Guest chats.

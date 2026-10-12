@@ -37,10 +37,10 @@ const LOCALES = { en, ko };
 // happens to assert on.
 const ALL_LOCALES = { de, en, es, fr, ko, pt, zh };
 
-test("every entry with a detail page addresses the settings list, not the chat", () => {
+test("every entry with a detail page addresses the settings list on Review", () => {
   for (const section of SETTINGS_SECTION_IDS) {
     const href = settingsSectionHref(section);
-    assert.match(href, /^\/chat\?/);
+    assert.match(href, /^\/review\?/);
     const link = parseSettingsDeepLink(href.slice(href.indexOf("?")));
     assert.deepEqual(link, { tab: SETTINGS_SECTION_TAB[section], section });
   }
@@ -212,10 +212,10 @@ test("no user-facing label promises a destination the link does not go to", () =
   }
 });
 
-test("the exit goes to the bare chat route, with nothing appended", () => {
+test("the generic exit goes to the bare Review route, with nothing appended", () => {
   // A settings deep link here would reopen the panel the visitor just asked
-  // to leave, so the exit href must not merely *start* with /chat.
-  assert.equal(settingsExitHref(), "/chat");
+  // to leave, so the exit href must not merely *start* with /review.
+  assert.equal(settingsExitHref(), "/review");
   assert.equal(settingsExitHref(), SETTINGS_HOME_PATH);
   assert.equal(parseSettingsDeepLink(""), null);
 
@@ -332,11 +332,11 @@ test("tab ids stay stable while the names on screen change", () => {
   );
   assert.equal(
     settingsSectionHref("assistants"),
-    "/chat?settings=assistants&settingsSection=assistants"
+    "/review?settings=assistants&settingsSection=assistants"
   );
   assert.equal(
     settingsSectionHref("memory"),
-    "/chat?settings=ai&settingsSection=memory"
+    "/review?settings=ai&settingsSection=memory"
   );
 });
 

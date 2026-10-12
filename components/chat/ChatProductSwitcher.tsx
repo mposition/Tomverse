@@ -21,12 +21,10 @@ import type { Language } from "@/lib/language";
  */
 export function ChatProductSwitcher({
   currentProduct,
-  chatRequiresSignIn = false,
   disabled = false,
   onProductSwitch,
 }: {
   currentProduct: ChatWorkspaceProduct;
-  chatRequiresSignIn?: boolean;
   disabled?: boolean;
   onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
 }) {
@@ -36,7 +34,6 @@ export function ChatProductSwitcher({
     <ChatProductSwitcherView
       currentProduct={currentProduct}
       language={lang}
-      chatRequiresSignIn={chatRequiresSignIn}
       disabled={disabled}
       onProductSwitch={onProductSwitch}
     />
@@ -47,13 +44,11 @@ export function ChatProductSwitcher({
 export function ChatProductSwitcherView({
   currentProduct,
   language,
-  chatRequiresSignIn = false,
   disabled = false,
   onProductSwitch,
 }: {
   currentProduct: ChatWorkspaceProduct;
   language: Language;
-  chatRequiresSignIn?: boolean;
   disabled?: boolean;
   onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
 }) {
@@ -71,10 +66,7 @@ export function ChatProductSwitcherView({
         {(["chat", "review"] as const).map((product) => {
           const item = copy[product];
           const current = currentProduct === product;
-          const productHref = localizedProductHref(product, language);
-          const href = product === "chat" && chatRequiresSignIn
-            ? `/auth/signin?callbackUrl=${encodeURIComponent(productHref)}`
-            : productHref;
+          const href = localizedProductHref(product, language);
           return (
             <Link
               key={product}

@@ -121,6 +121,12 @@ test("no login-method route sends after the response any more", () => {
   }
 });
 
+test("the OAuth link callback returns to the canonical Review settings surface", () => {
+  const route = read("app/api/user/login-methods/oauth/callback/route.ts");
+  assert.match(route, /PRODUCT_SURFACE_PATH\.review/);
+  assert.doesNotMatch(route, /\$\{origin\}\/chat\?/);
+});
+
 test("the OAuth callback no longer announces a link that did not happen", () => {
   // `completeOAuthLink` returns early when the account is already linked to
   // this same user. The route used to send regardless, so a replayed callback

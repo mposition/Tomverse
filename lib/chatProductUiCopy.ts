@@ -15,6 +15,9 @@ export type ChatProductUiCopy = {
   landingIntro: string;
   unavailable: string;
   signInToOpenChat: string;
+  tryGuestChat: string;
+  guestChatDescription: string;
+  guestChatSignInDescription: string;
   switchPendingDescription: string;
   chat: ProductCopy;
   review: ProductCopy;
@@ -32,6 +35,9 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
     landingIntro: "Use Chat for one adaptive conversation, or Review to compare selected models side by side.",
     unavailable: "Tomverse Chat is not available for this account yet.",
     signInToOpenChat: "Sign in for Chat",
+    tryGuestChat: "Try Chat free",
+    guestChatDescription: "Try Chat as a guest. When Smart Adaptive is available, it refines text questions and selects a model within your existing guest limit. Chats stay in this browser. Attachments use manual model selection.",
+    guestChatSignInDescription: "Your guest Chat stays in this browser. Sign in to see the features available to your account.",
     switchPendingDescription: "Wait for the current action to finish before switching products.",
     chat: {
       shortLabel: "Chat",
@@ -53,6 +59,9 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
     landingIntro: "Chat에서는 하나의 대화를 스마트하게 이어가고, Review에서는 선택한 모델의 답변을 나란히 비교하세요.",
     unavailable: "이 계정에는 아직 Tomverse Chat이 제공되지 않습니다.",
     signInToOpenChat: "로그인하고 Chat 열기",
+    tryGuestChat: "Chat 무료 체험",
+    guestChatDescription: "Guest로 Chat을 체험하세요. 스마트 자동이 제공되는 경우 텍스트 질문을 다듬고 모델을 선택하며 기존 Guest 한도가 적용됩니다. 대화는 이 브라우저에 저장되고, 첨부는 수동 모델 선택을 사용합니다.",
+    guestChatSignInDescription: "Guest Chat은 이 브라우저에 저장됩니다. 로그인 후 계정에 제공되는 기능을 확인하세요.",
     switchPendingDescription: "현재 작업이 끝난 뒤 제품을 전환할 수 있습니다.",
     chat: {
       shortLabel: "Chat",
@@ -74,6 +83,9 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
     landingIntro: "使用 Chat 进行自适应单一对话，或使用 Review 并排比较所选模型。",
     unavailable: "此账户暂时无法使用 Tomverse Chat。",
     signInToOpenChat: "登录后打开 Chat",
+    tryGuestChat: "免费体验 Chat",
+    guestChatDescription: "以访客身份体验 Chat。智能自动可用时，会优化文字问题并选择模型，仍适用现有访客限额。对话保留在此浏览器中。附件使用手动模型选择。",
+    guestChatSignInDescription: "访客 Chat 保留在此浏览器中。登录后可查看您的账户能使用哪些功能。",
     switchPendingDescription: "请等待当前操作完成后再切换产品。",
     chat: {
       shortLabel: "Chat",
@@ -95,6 +107,9 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
     landingIntro: "Utilisez Chat pour une conversation adaptative, ou Review pour comparer côte à côte les modèles choisis.",
     unavailable: "Tomverse Chat n’est pas encore disponible pour ce compte.",
     signInToOpenChat: "Se connecter pour Chat",
+    tryGuestChat: "Essayer Chat gratuitement",
+    guestChatDescription: "Essayez Chat en tant qu’invité. Lorsque l’adaptation intelligente est disponible, elle affine les questions textuelles et sélectionne un modèle dans votre limite d’invité actuelle. Les conversations restent dans ce navigateur. Les pièces jointes utilisent la sélection manuelle du modèle.",
+    guestChatSignInDescription: "Votre Chat invité reste dans ce navigateur. Connectez-vous pour voir les fonctionnalités disponibles pour votre compte.",
     switchPendingDescription: "Attendez la fin de l’action en cours avant de changer de produit.",
     chat: {
       shortLabel: "Chat",
@@ -116,6 +131,9 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
     landingIntro: "Nutzen Sie Chat für eine adaptive Unterhaltung oder Review, um ausgewählte Modelle nebeneinander zu vergleichen.",
     unavailable: "Tomverse Chat ist für dieses Konto noch nicht verfügbar.",
     signInToOpenChat: "Für Chat anmelden",
+    tryGuestChat: "Chat kostenlos testen",
+    guestChatDescription: "Testen Sie Chat als Gast. Wenn Intelligente Automatik verfügbar ist, verfeinert sie Textfragen und wählt ein Modell innerhalb Ihres bestehenden Gastlimits. Unterhaltungen bleiben in diesem Browser. Anhänge verwenden die manuelle Modellauswahl.",
+    guestChatSignInDescription: "Ihr Gast-Chat bleibt in diesem Browser. Melden Sie sich an, um die für Ihr Konto verfügbaren Funktionen zu sehen.",
     switchPendingDescription: "Warten Sie, bis die aktuelle Aktion abgeschlossen ist, bevor Sie das Produkt wechseln.",
     chat: {
       shortLabel: "Chat",
@@ -137,6 +155,9 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
     landingIntro: "Usa Chat para una conversación adaptativa o Review para comparar en paralelo los modelos elegidos.",
     unavailable: "Tomverse Chat aún no está disponible para esta cuenta.",
     signInToOpenChat: "Iniciar sesión para Chat",
+    tryGuestChat: "Probar Chat gratis",
+    guestChatDescription: "Prueba Chat como invitado. Cuando la adaptación inteligente está disponible, refina preguntas de texto y elige un modelo dentro de tu límite de invitado actual. Las conversaciones permanecen en este navegador. Los adjuntos usan la selección manual de modelos.",
+    guestChatSignInDescription: "Tu Chat de invitado permanece en este navegador. Inicia sesión para ver las funciones disponibles para tu cuenta.",
     switchPendingDescription: "Espera a que termine la acción actual antes de cambiar de producto.",
     chat: {
       shortLabel: "Chat",
@@ -158,6 +179,9 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
     landingIntro: "Use o Chat para uma conversa adaptável ou o Review para comparar lado a lado os modelos escolhidos.",
     unavailable: "O Tomverse Chat ainda não está disponível para esta conta.",
     signInToOpenChat: "Entrar para usar o Chat",
+    tryGuestChat: "Experimentar Chat grátis",
+    guestChatDescription: "Experimente o Chat como visitante. Quando a adaptação inteligente está disponível, ela refina perguntas de texto e escolhe um modelo dentro do seu limite de visitante atual. As conversas permanecem neste navegador. Os anexos usam a seleção manual de modelos.",
+    guestChatSignInDescription: "Seu Chat como visitante permanece neste navegador. Entre para ver os recursos disponíveis para sua conta.",
     switchPendingDescription: "Aguarde a ação atual terminar antes de trocar de produto.",
     chat: {
       shortLabel: "Chat",
