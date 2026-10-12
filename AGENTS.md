@@ -55,40 +55,6 @@ Report implemented and tested behavior separately from documentation, review, me
 
 다음 작업의 추천은 그 작업의 자동 착수, 신규 과금, 병합 또는 배포 승인이 아닙니다.
 
-# 긴 목표는 단계에 묶어 둡니다
-
-여러 사이클에 걸친 큰 목표(기능 활성화, 여러 PR로 나뉜 기능 개발)는 진행 중에
-발견한 일에 끌려 원래 목표를 잃기 쉽습니다. 2026-10-10~11 AMUX v22 활성화는
-활성화 중 찾은 버그를 차례로 고치느라 활성화 단계가 멈췄고, Chat-01은 규모가
-커서 운영자가 틈틈이 지금 어디까지 왔는지를 따로 확인해야 했습니다.
-
-- **진행 중 발견한 버그는 지금 목표의 다음 단계를 막을 때만 고칩니다.** 막지
-  않으면 고치지 않고, 그 사이클 완료 보고의 다음 권장 작업에 적은 뒤 원래
-  단계로 돌아옵니다. 막는지 판단이 서지 않으면 운영자에게 묻습니다. 되돌릴 수
-  없는 피해(유출, 사용자 데이터 손실)가 진행 중이거나 그렇게 될 수 있는 문제(악용
-  가능한 보안 취약점 등)는 다음 단계를 막지 않아도 목록으로 미루지 않고 바로
-  운영자에게 알립니다.
-- **긴 목표의 완료 보고에는 목표 대비 현재 위치를 넣습니다.** 목표 문장, 단계
-  체크리스트의 완료 단계/전체, 마지막으로 단계가 진전한 때, 그 이후 어느 단계에도
-  속하지 않은 작업의 수입니다. 지금 하는 일이 어느 단계에 속하는지 적고, 어느
-  단계에도 속하지 않으면 그렇다고 적습니다. 체크리스트가 없으면 다음 사이클에
-  만들어 운영자 확인을 받습니다. 이미 진행 중인 목표도 같습니다.
-- **긴 목표에 속한 PR은 본문에 `Goal-Step:` 줄을 정확히 하나 넣습니다**(운영자
-  결정 2026-10-12). 목표 ID는 현황판 ID가 있으면 그것을 쓰고, 없으면 운영자가
-  정한 ID(영문 대문자·숫자·하이픈, 예: `AMUX-V22-ACT`)를 씁니다. 단계 ID는 영문·
-  숫자·`.`·`_`·`-`만 쓰며 공백이 없습니다. 긴 목표에 속하지 않는 PR에는 넣지
-  않습니다.
-
-  ```
-  Goal-Step: <목표 ID>/<단계 ID>             그 단계의 작업
-  Goal-Step: <목표 ID>/<단계 ID> completes   이 PR이 병합되면 그 단계가 끝남
-  Goal-Step: <목표 ID>/-                     어느 단계에도 속하지 않는 작업
-  Goal-Step: <목표 ID>/op                    운영자의 별도 요청으로 하는 작업
-  ```
-
-  곁길을 단계로 적지 않습니다. 이 줄이 목표 대비 위치를 기계가 셀 수 있는 유일한
-  근거입니다.
-
 # 실행할 명령을 줄 때는 실행 위치를 먼저 적습니다
 
 **사용자 환경은 Windows + PowerShell입니다.** 명령 블록을 주기 전에, 그 블록
@@ -268,41 +234,6 @@ staging에 "Wait for CI" 배포를 겹겹이 쌓았습니다.
 `tests/autoPrAutoMergeArming.test.mjs`와 `security-regression-check`가 workflow에
 `gh pr merge`·`--auto`가 없음을 고정합니다. 개별 PR에 auto-merge가 필요하면
 **사람이 켭니다.**
-
-## PR은 draft로 시작하고, 끝나면 ready로 바꿉니다
-
-**draft PR에서는 PR CI가 아무것도 돌지 않습니다**(2026-10-03). `Auto PR to Develop`은
-PR을 `--draft`로 열고, 브랜치 작업을 마친 세션이 직접 ready로 바꿉니다. ready로
-바꾸는 순간 전체 검사가 한 번 돌고, 녹색이 되면 merge train이 가져갑니다(merge
-train은 draft를 건너뜁니다).
-
-```
-gh pr ready <번호>        작업 완료 — CI 시작
-gh pr ready <번호> --undo 다시 손볼 때 — 이후 push는 CI를 돌리지 않음
-```
-
-- **작업 중에는 draft로 둡니다.** push할 때마다 약 20개 job이 돌던 것이 이 규칙의
-  이유입니다. 동시 실행 한도를 40으로 올린 뒤에도 2026-10-03에 실행 40·대기 68이었고,
-  Railway가 기다리는 develop·main push 검사가 그 뒤에 줄을 섰습니다.
-- **CI 결과가 필요하면 ready로 바꿉니다.** draft 상태로는 검사 결과를 얻을 수 없으니,
-  로컬에서 먼저 확인할 수 있는 것(`npm run test:unit`, 관련 check script)은 로컬에서
-  돌립니다.
-- 판정은 PR workflow들의 job 조건 하나이고, `tests/draftPrCiSkip.test.mjs`가 모든
-  job과 `ready_for_review` trigger, Auto PR의 `--draft`를 함께 고정합니다.
-
-## develop은 dev에, Test는 `test` 브랜치에 배포됩니다
-
-2026-10-07부터 환경이 셋입니다. **develop 병합이 닿는 곳은 dev**(`dev.tomverse.app`)이고,
-staging(사람에게는 Test, `staging.tomverse.app`)은 `test` 브랜치를 배포합니다. `test`는
-사람이 고른 release candidate로 `npm run promote:test -- --sha=<commit>`만 옮깁니다.
-
-- "develop에 병합했으니 staging에서 확인"은 이제 틀린 문장입니다. 병합 직후의 동작은 dev에서
-  보고, 고정된 SHA로 하는 검증(체크리스트·기록)은 그 SHA로 `test`를 옮긴 뒤 Test에서 합니다.
-- merge train은 dev 배포가 끝나기를 기다립니다. `test`로 병합하는 레인은 없습니다.
-- Railway 환경 이름은 `staging` 그대로이고, 환경 판정(`lib/deploymentEnvironment.ts`)도 `staging`
-  입니다. Test 전용 게이트는 계속 staging에서만 동작합니다.
-- release 경로는 `.github/RELEASE_CHECKLIST.md` 7.9, 승격 절차와 한 번만 하는 전환은
-  `docs/ops/dev-test-lanes.md`.
 
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
@@ -1276,16 +1207,6 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   표식이 맞는 전달만 셉니다. pipeline 파일 목록은 수신 route의 import closure 전체이며 테스트가
   강제합니다. schema는 파일 전체가 아니라 수신 경로가 쓰는 모델·그 enum·datasource·generator만 감시합니다(운영자 결정
   2026-10-03) — 무관한 모델 추가가 서명된 기록을 무효로 만들지 않게 하기 위해서입니다.
-- **서명 가능 여부 보고**: `npm run report:marketing-webhook-record-signability`
-  (`scripts/report-marketing-webhook-record-signability.mjs`,
-  `scripts/report-marketing-webhook-record-signability-core.mjs`). 트리의 기록마다
-  서명 route의 `checkMarketingWebhookRecordForSigning()`을 **그대로 불러** 그 답을
-  출력합니다. **판정을 복제하지 않습니다** — 보고가 fingerprint를 자기 손으로
-  비교하면 콘솔이 거절하는 기록을 signable이라고 말할 수 있고,
-  `tests/marketingWebhookRecordSignability.test.mjs`가 그 회귀를 거부합니다.
-  읽기 전용이며 gate가 아니고, signable이라는 출력은 서명 승인이 아닙니다 —
-  서명은 production 콘솔에서 사람이 하는 행위이고, 콘솔은 production이 실제로
-  돌리는 트리를 읽습니다.
 
 # 엔지니어링 Agent
 
@@ -1728,6 +1649,8 @@ Non-negotiable requirements:
 Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`, `lib/autoRoutingUi.ts`, `lib/autoProductBoundary.ts`, `lib/autoRoutingCopy.ts`, or the `selectionMode` handling in `app/api/conversations/[conversationId]/route.ts`, read:
 
 - `docs/ui-contracts/auto-model-selection.md`
+- `docs/ui-contracts/chat-product-switcher.md` for Chat/Review entry routes,
+  product navigation, draft isolation and Smart Adaptive presentation.
 
 Non-negotiable requirements:
 
@@ -1763,7 +1686,6 @@ Before changing the Prompt Refiner surface or request boundary in
 `tests/promptRefinerShadowAdmissionCore.test.mjs`, or their tests, read:
 
 - `docs/ui-contracts/prompt-refiner-suggestion.md`
-- `docs/ui-contracts/chat-e04-staging-fixture.md`
 - `docs/policy/prompt-refiner-observability.md`
 - `docs/ops/prompt-refiner-shadow-harness.md`
 
