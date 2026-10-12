@@ -495,6 +495,12 @@ const compilerOptions = parsedConfig.options;
 // this repins only their final source positions on the main release base.
 // 2026-10-12, back-merge of main 9cd033fa5 into develop: both histories above
 // are kept. Every closure file equals develop's, so develop's pins hold.
+// 2026-10-12, default model GPT 6 Luna and the guest trio's Haiku 5.5: two
+// pricing profiles inserted in `lib/modelPricing.ts` move the twelve accesses
+// below them by 73 lines, and two catalogue rows plus the DEFAULT_MODEL_ID note
+// in `lib/models.ts` move its two `MODEL_ACCESS_RANK[...]` accesses by 16
+// lines. No access is added; count 228 and the position-free inventory are
+// unchanged, so this repins positions only.
 // 2026-10-12, AMUX worker registry R1 (orchestration policy version 31): the
 // marketing webhook fingerprint's history comment in
 // lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
@@ -504,8 +510,8 @@ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a24cb9fce9c9012a720cf691a9768e03",
-  "54512a5c51a01e79c6200e12f483136e",
+  "ef477daaa1e18310a4d5cd458aa2b9f2",
+  "dd0a87ce5b6cf018c4c99f7f41f84578",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

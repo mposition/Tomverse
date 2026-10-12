@@ -721,8 +721,12 @@ test("the amendment notice reaches every owed account once, and a later wave onl
       where: { userId: suspended },
       data: { status: "complained", sentAt: new Date(), deliveredAt: null },
     });
+    // One account the launch missed (created before publication), and one
+    // created after the amendment was published, which is not owed it.
     const late = await account({});
-    await createdAt(late, new Date("2026-10-20T00:00:00Z"));
+    await createdAt(late, new Date("2026-10-02T00:00:00Z"));
+    const afterPublication = await account({});
+    await createdAt(afterPublication, new Date("2026-10-20T00:00:00Z"));
     const followUp = await runCampaignWave({
       campaignId: first.id,
       kind: "final_reminder",
@@ -732,6 +736,7 @@ test("the amendment notice reaches every owed account once, and a later wave onl
       await noticeRecipients(),
       [owed, owed, suspended, suspended, undated, late].sort()
     );
+    assert.ok(!(await noticeRecipients()).includes(afterPublication));
 
     // A notice sent with no delivery report is on its way for a few days, then
     // asked about again.

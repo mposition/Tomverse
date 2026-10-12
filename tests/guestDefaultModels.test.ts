@@ -190,3 +190,11 @@ test("disabled, non-guest and non-Standard leads are each rejected on their own 
     /not Standard/
   );
 });
+
+// Platform strategy, operator decision 2026-10-12: a guest's default lineup
+// always holds one OpenAI, one Anthropic and one Gemini model
+// (docs/policy/credit-and-cost-limits.md).
+test("the compiled trio is one OpenAI, one Anthropic and one Gemini model", () => {
+  const providers = GUEST_BRAND_TRIO_MODEL_IDS.map((id) => getModel(id)?.provider);
+  assert.deepEqual([...providers].sort(), ["anthropic", "google", "openai"]);
+});

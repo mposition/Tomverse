@@ -138,11 +138,14 @@ const seedFreshAccount = async (page: Page) => {
   });
 };
 
-// A fresh account starts on the single compiled-in default model, which moved
-// from gpt-5-4-mini to gpt-5-6-luna on 2026-08-01. toggleModel() refuses to
-// drop the last remaining model, so the default can only be removed once at
-// least one target is already selected -- add the first target, drop the
-// default, then add the rest.
+// The signed-in fixture account starts on a single default model: the account
+// default its settings fixture returns. That tracked the compiled-in default
+// (gpt-5-4-mini, then gpt-5-6-luna from 2026-08-01) and stayed on gpt-5-6-luna
+// when DEFAULT_MODEL_ID moved to gpt-6-luna on 2026-10-12 -- an existing
+// account keeps its stored default. toggleModel() refuses to drop the last
+// remaining model, so the default can only be removed once at least one target
+// is already selected -- add the first target, drop the default, then add the
+// rest.
 const COMPILED_IN_DEFAULT_MODEL_ID = "gpt-5-6-luna";
 
 const selectModelsViaPicker = async (page: Page, models: string[]) => {

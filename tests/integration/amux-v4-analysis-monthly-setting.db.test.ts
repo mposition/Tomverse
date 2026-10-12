@@ -6,6 +6,7 @@ import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { commitAnalysisBudgetSetting, readAnalysisBudgetSnapshot } from "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { assessAmuxIdeaAnalysisBudget } from "@/lib/amux/ideaAnalysisBudgetCore";
+import { resolveRecentAuthMinutes } from "@/lib/adminReauthenticationCore";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const target = testUrl ? new URL(testUrl) : null;
@@ -83,7 +84,12 @@ test("a ceiling below committed costs, stale version, and malformed money produc
 test("non-owner and stale authentication cannot save the setting", async () => {
   const other = { ...session, user: { ...session.user, id: "synthetic-other", email: "other@example.test" } };
   await assert.rejects(prisma.$transaction((tx) => commitAnalysisBudgetSetting(tx, input({ session: other }))), /forbidden/);
-  const stale = { ...session, user: { ...session.user, authenticatedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString() } };
+  // One minute past the step-up window this run uses, as in the v4 analysis
+  // budget suite (01f96228a). Exactly two hours sat on the boundary once #2362
+  // made two hours the default, so whether it read as stale depended on the
+  // millisecond -- and a save it let through broke the four tests after it.
+  const staleAgeMs = (resolveRecentAuthMinutes(process.env.ADMIN_RECENT_AUTH_MINUTES) + 1) * 60_000;
+  const stale = { ...session, user: { ...session.user, authenticatedAt: new Date(Date.now() - staleAgeMs).toISOString() } };
   await assert.rejects(prisma.$transaction((tx) => commitAnalysisBudgetSetting(tx, input({ session: stale }))), /recent|authentication|reauth/i);
 });
 

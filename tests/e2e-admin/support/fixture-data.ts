@@ -316,7 +316,8 @@ export const FIXTURE_RETENTION_RUN = {
  */
 export const FIXTURE_APP_SETTINGS = {
   guestDefaultModelId: "gemini-flash-lite-latest",
-  alternateGuestDefaultModelId: "claude-haiku-4-5",
+  // Moved from claude-haiku-4-5 when the trio's Anthropic slot did (2026-10-12).
+  alternateGuestDefaultModelId: "claude-haiku-5-5",
 } as const;
 
 /**

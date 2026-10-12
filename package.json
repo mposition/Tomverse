@@ -217,6 +217,7 @@
     "report:email-template-metadata": "node --conditions=react-server --import tsx scripts/report-email-template-metadata.mjs",
     "report:existing-account-jurisdiction": "node --conditions=react-server --import tsx scripts/report-existing-account-jurisdiction.mjs",
     "report:model-token-limits": "node --conditions=react-server --import tsx scripts/report-model-token-limits.mjs",
+    "report:product-consistency": "node --conditions=react-server --import tsx scripts/report-product-consistency.mjs",
     "marketing:webhook-record": "node --conditions=react-server --import tsx scripts/marketing-webhook-verification-record.mjs",
     "report:engineering-agent-tiers": "node --conditions=react-server --import tsx scripts/report-engineering-agent-tiers.mjs",
     "report:engineering-agent-image-proof": "node scripts/report-engineering-agent-image-proof.mjs",
