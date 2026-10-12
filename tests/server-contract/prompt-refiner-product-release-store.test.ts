@@ -33,6 +33,7 @@ let guardReasonCode: string | null = null;
 let guardTransitionAuditLogId = "activation";
 let capturedAuditMetadata: unknown = null;
 let initialInspection: Readonly<Record<string, unknown>> = { state: "absent" };
+let priorSourceActivation = false;
 const stopReasons: string[] = [];
 
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
@@ -124,10 +125,16 @@ const tx = async () => {
   return {
     adminAuditLog: { findMany: async ({ where }: { where: {
       action: string | { in: string[] };
+      targetType?: string;
     } }) => {
       if (queryFails) throw new Error("synthetic_db_unavailable");
       if (where.action === "prompt_refiner.product_release_activated") {
         return activationRows;
+      }
+      if (where.action ===
+          "prompt_refiner.product_initial_auto_release_activated" &&
+          where.targetType === "ChatReleaseAuthority") {
+        return priorSourceActivation ? [{ id: "prior-v2-product" }] : [];
       }
       if (typeof where.action === "object") {
         return initialInspection.state === "absent" ? [] : [{ id: "initial" }];
@@ -144,6 +151,7 @@ beforeEach(async () => {
   guardActive = true; guardGeneration = 1; guardReasonCode = null;
   guardTransitionAuditLogId = "activation"; capturedAuditMetadata = null;
   initialInspection = { state: "absent" };
+  priorSourceActivation = false;
   const store = await storePromise;
   activationRows = [{ id: "activation", actorUserId: "owner",
     createdAt: new Date("2026-10-10T00:00:00.000Z"),
@@ -211,6 +219,34 @@ test("a malformed view closes without mutating the operational guard", async () 
     { sourceReadCount: 0, priceReadCount: 0, auditValidationCount: 0 });
 });
 
+test("invalid or changed v2 controls latch on dispatch and never inherit a prior pair", async () => {
+  const store = await storePromise;
+  activationRows = [];
+  priorSourceActivation = true;
+  assert.equal((await store.admitPromptRefinerProductRelease(
+    await tx() as never, { ...runtime, AUTO_ROUTER_KILL_SWITCH: "on" }))
+    .autoEnabled, false);
+  assert.deepEqual(stopReasons, ["critical_safety_failure"]);
+  stopReasons.length = 0;
+  assert.equal((await store.admitPromptRefinerProductRelease(
+    await tx() as never, { ...runtime, AUTO_ROUTER_ROLLOUT_PERCENT: "10" }))
+    .autoEnabled, false);
+  assert.deepEqual(stopReasons, ["audit_failure"]);
+  stopReasons.length = 0;
+  assert.equal((await store.readPromptRefinerProductRelease(
+    await tx() as never, runtime)).autoEnabled, false);
+  assert.deepEqual(stopReasons, []);
+});
+
+test("a legacy exact-deployment row cannot revive an earlier v2 source pair", async () => {
+  const store = await storePromise;
+  priorSourceActivation = true;
+  const result = await store.admitPromptRefinerProductRelease(
+    await tx() as never, { ...runtime, AUTO_ROUTER_ROLLOUT_PERCENT: "10" });
+  assert.equal(result.autoEnabled, false);
+  assert.deepEqual(stopReasons, ["audit_failure"]);
+});
+
 test("initial release resume records the current policy and exact authority pair", async () => {
   const store = await storePromise;
   activationRows = [];
@@ -247,7 +283,7 @@ test("initial release resume records the current policy and exact authority pair
       policySha256:
         "a9dbe509a056152015a59a45fd6438304fac36f36521a1319c11f8d1704970f9",
       continuityPolicySha256:
-        "6763aaf7be51144325f372656cdd10977f79fb30a4ee4519982b2aca0f348ff9",
+        "53d16cad2b420237569c830f66e1b6d0917018f3ff1536193932d09292330c69",
       operatorConfirmedReasonCode: "unknown_dispatch_or_cost",
       pauseAuditLogId: "pause-audit",
       priorGeneration: 7,

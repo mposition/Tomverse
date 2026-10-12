@@ -1,9 +1,11 @@
 ---
-status: implementation_authorized_activation_pending
+status: implementation_review_pending
 policyVersion: 2
 workId: CHAT-01
-approvedBy: mposition
-approvedAt: 2026-10-13
+approvedBy: null
+approvedAt: null
+scopeAuthorizedBy: mposition
+scopeAuthorizedAt: 2026-10-13
 approvalTimezone: Australia/Brisbane
 scope: CHAT_REFINER_AND_GUEST_RELEASE_CONTINUITY
 activationAuthority: owner_action_after_exact_release_readback
@@ -40,7 +42,7 @@ definitions, and the lockfile entries for dependencies reached by that
 execution graph. File paths and bytes are both
 hashed. Missing or unreadable source closes authority. The exact path-selection
 code is in the fingerprint, so changing its coverage also changes the key.
-The approved policy body is bound by its own digest; frontmatter status changes
+The versioned policy body is bound by its own digest; frontmatter status changes
 do not rotate an active release. An unrelated AMUX,
 marketing, homepage or Composer-only deployment may continue using the same
 owner activation when this fingerprint and all effective controls are unchanged.

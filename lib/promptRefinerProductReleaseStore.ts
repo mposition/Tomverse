@@ -8,6 +8,8 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { inspectChatRefinerInitialAutoRelease } from
   "@/lib/chatRefinerInitialAutoReleaseStore";
+import { currentChatReleaseSourceFingerprint } from
+  "@/lib/chatReleaseSourceFingerprint";
 import { CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
   CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
   chatRefinerInitialAutoResumeMetadata,
@@ -298,9 +300,18 @@ async function resolvePromptRefinerProductRelease(
     targetId: runtimeDeploymentId,
   } });
   let releaseAuthorityDigest: string | null = null;
-  try { releaseAuthorityDigest =
-    chatRefinerInitialAutoRuntimeBinding(runtime).releaseAuthorityDigest; }
-  catch { if (rows.length === 0) return closed(); }
+  let releaseFingerprint: string | null = null;
+  try {
+    const binding = chatRefinerInitialAutoRuntimeBinding(runtime);
+    releaseAuthorityDigest = binding.releaseAuthorityDigest;
+    releaseFingerprint = binding.releaseFingerprint;
+  } catch {
+    // V1 keeps its original deployment-bound path. For an activated v2
+    // source, invalid controls still latch on dispatch instead of becoming a
+    // temporary absence that silently resumes when an env value is restored.
+    try { releaseFingerprint = currentChatReleaseSourceFingerprint(); }
+    catch { return closed(); }
+  }
   const initialRows = releaseAuthorityDigest
     ? await tx.adminAuditLog.findMany({ where: {
       action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
@@ -326,6 +337,17 @@ async function resolvePromptRefinerProductRelease(
       ? "unknown_dispatch_or_cost" : initial.reason === "runtime_controls_invalid"
         ? "critical_safety_failure" : "audit_failure";
     return latchDrift(reason);
+  }
+  if (releaseFingerprint) {
+    const previousSourceActivation = await tx.adminAuditLog.findMany({ where: {
+      action: CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
+      targetType: "ChatReleaseAuthority",
+      metadata: { path: ["releaseFingerprint"], equals: releaseFingerprint },
+    }, select: { id: true }, take: 1 });
+    if (previousSourceActivation.length !== 0) {
+      return latchDrift(releaseAuthorityDigest
+        ? "audit_failure" : "critical_safety_failure");
+    }
   }
   const row = rows.length === 1 ? rows[0] : null;
   if (rows.length === 0) return closed();
