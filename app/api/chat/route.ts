@@ -1103,13 +1103,12 @@ async function handleChatPost(
               conversionKnownRolledBack: boolean;
               converted: boolean;
               unknownMarked: boolean;
+              unknownReceiptChecked: boolean;
           }
         | null = null;
-    const returnKnownUndispatchedGuestAutoRefusal = async (
-        response: Response
-    ): Promise<Response> => {
+    const releaseKnownUndispatchedGuestAutoPrehold = async (): Promise<boolean> => {
         const run = guestAutoRun;
-        if (!run || run.converted || run.unknownMarked) return response;
+        if (!run || run.converted || run.unknownMarked) return true;
         try {
             await releaseGuestAutoCreditPrehold({
                 access: run.access,
@@ -1118,6 +1117,7 @@ async function handleChatPost(
                 reason: "refiner_confirmed_undispatched",
             });
             guestAutoRun = null;
+            return true;
         } catch (releaseError) {
             logRequestError(
                 "guest_auto_credit_prehold_release_failed",
@@ -1128,6 +1128,7 @@ async function handleChatPost(
             // The release may have committed even though its response was
             // lost. Never retry it. One content-free receipt read distinguishes
             // a confirmed release from the hold that must remain unknown.
+            run.unknownReceiptChecked = true;
             try {
                 const receipt = await readGuestAutoCreditState({
                     subjectKey: run.access.subjectKey,
@@ -1135,7 +1136,7 @@ async function handleChatPost(
                 });
                 if (receipt?.status === "guest_auto_released") {
                     guestAutoRun = null;
-                    return response;
+                    return true;
                 }
                 logRequestError(
                     "guest_auto_credit_release_receipt_unconfirmed",
@@ -1152,6 +1153,13 @@ async function handleChatPost(
                 );
             }
             run.unknownMarked = true;
+            return false;
+        }
+    };
+    const returnKnownUndispatchedGuestAutoRefusal = async (
+        response: Response
+    ): Promise<Response> => {
+        if (!(await releaseKnownUndispatchedGuestAutoPrehold())) {
             return tracedJsonError(
                 "Guest Smart Adaptive could not verify this turn. No retry was attempted.",
                 "GUEST_AUTO_OUTCOME_UNKNOWN",
@@ -1764,6 +1772,7 @@ async function handleChatPost(
                 conversionKnownRolledBack: false,
                 converted: false,
                 unknownMarked: false,
+                unknownReceiptChecked: false,
             };
             const sourcePrompt = profileTextFor(executionMessages);
             let refined;
@@ -7070,22 +7079,11 @@ async function handleChatPost(
             } else if (!guestAutoRun.converted) {
                 // Every paid boundary is still known and undispatched here.
                 // The Refiner may have settled independently; only the Guest
-                // Chat credit hold is returned.
-                try {
-                    await releaseGuestAutoCreditPrehold({
-                        access: guestAutoRun.access,
-                        binding: guestAutoRun.binding,
-                        proofId: randomUUID(),
-                        reason: "refiner_confirmed_undispatched",
-                    });
-                } catch (releaseError) {
-                    logRequestError(
-                        "guest_auto_credit_prehold_release_failed",
-                        traceId,
-                        releaseError,
-                        dispatchModelIdForLog
-                    );
-                }
+                // Chat credit hold is returned. A release failure is not proof
+                // that the write did not commit, so the shared helper performs
+                // one content-free receipt read and converts an unconfirmed
+                // result into the terminal unknown response below.
+                await releaseKnownUndispatchedGuestAutoPrehold();
             }
         }
         if (durableAttempt) {
@@ -7238,27 +7236,29 @@ async function handleChatPost(
             // content-free durable receipt once before returning it; absence
             // or a read failure is still unknown and must never turn into a
             // retryable refusal. A later reconciliation owns that decision.
-            try {
-                const receipt = await readGuestAutoCreditState({
-                    subjectKey: guestAutoRun.access.subjectKey,
-                    authorityId:
-                        guestAutoRun.binding.authority.authorityId,
-                });
-                if (receipt?.status !== "guest_auto_unknown") {
+            if (!guestAutoRun.unknownReceiptChecked) {
+                try {
+                    const receipt = await readGuestAutoCreditState({
+                        subjectKey: guestAutoRun.access.subjectKey,
+                        authorityId:
+                            guestAutoRun.binding.authority.authorityId,
+                    });
+                    if (receipt?.status !== "guest_auto_unknown") {
+                        logRequestError(
+                            "guest_auto_unknown_receipt_unconfirmed",
+                            traceId,
+                            new Error("Guest Auto unknown receipt was not confirmed."),
+                            dispatchModelIdForLog
+                        );
+                    }
+                } catch (receiptError) {
                     logRequestError(
-                        "guest_auto_unknown_receipt_unconfirmed",
+                        "guest_auto_unknown_receipt_read_failed",
                         traceId,
-                        new Error("Guest Auto unknown receipt was not confirmed."),
+                        receiptError,
                         dispatchModelIdForLog
                     );
                 }
-            } catch (receiptError) {
-                logRequestError(
-                    "guest_auto_unknown_receipt_read_failed",
-                    traceId,
-                    receiptError,
-                    dispatchModelIdForLog
-                );
             }
             return tracedJsonError(
                 "Guest Smart Adaptive could not verify this turn. No retry was attempted.",

@@ -9,6 +9,7 @@ import {
   AutoRoutingToggle,
 } from "@/components/chat/AutoRoutingToggle";
 import {
+  ChatInputAutoCapabilityPendingNotice,
   ChatInputWebSearchChipView,
   ChatInputWebSearchSwitchDescription,
 } from "@/components/chat/ChatInput";
@@ -182,6 +183,28 @@ test("the pending composer switch cannot issue a second mode change", () => {
   });
 
   assert.equal(findProp(rendered, "disabled"), true);
+});
+
+test("Guest Auto capability preparation is announced without claiming a variable-cost send is ready", () => {
+  const rendered = ChatInputAutoCapabilityPendingNotice({
+    visible: true,
+    label: "Smart Adaptive · Loading",
+  });
+
+  assert.equal(findProp(rendered, "data-testid"), "guest-auto-capability-pending");
+  assert.equal(findProp(rendered, "role"), "status");
+  assert.equal(findProp(rendered, "aria-live"), "polite");
+  assert.match(textOf(rendered), /Smart Adaptive · Loading/);
+});
+
+test("Guest Auto capability preparation leaves no stale status after confirmation", () => {
+  assert.equal(
+    ChatInputAutoCapabilityPendingNotice({
+      visible: false,
+      label: "Smart Adaptive · Loading",
+    }),
+    null
+  );
 });
 
 /* --------------------------------------- Auto-aware web search presentation */
