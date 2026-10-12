@@ -99,10 +99,9 @@ const render = (
   item: AmuxReviewDetail,
   changes: string[] = [],
   rereads: string[] = [],
-) => AmuxOwnerReviewView({
-  m,
-  review: item,
-  ownerExecution: {
+  retryConfirmations: boolean[] = [],
+  retryReadConfirmed = false,
+  ownerExecution: Parameters<typeof AmuxOwnerReviewView>[0]["ownerExecution"] = {
     state: "ready",
     metadata: {
       worker: "worker-openai",
@@ -112,14 +111,20 @@ const render = (
       actualCostConfirmed: true,
     },
   },
+) => AmuxOwnerReviewView({
+  m,
+  review: item,
+  ownerExecution,
   canInspectCards: true,
   selectedOutcome: null,
+  retryReadConfirmed,
   reviewBusy: false,
   reauthenticationRequired: false,
   decisionStatusUnknown: false,
   date: (value) => value,
   number: (value) => String(value),
   onSelectOutcome: (outcome) => changes.push(outcome),
+  onRetryReadConfirmed: (confirmed) => retryConfirmations.push(confirmed),
   onReread: () => rereads.push("read"),
 }) as ReactNode;
 
@@ -256,6 +261,10 @@ test("a disconnected report is not described as never existing", () => {
   assert.match(notice, /may have existed elsewhere/);
   assert.doesNotMatch(notice, /never existed/i);
   assert.equal(byTestId(tree, "admin-amux-select-approve").length, 0);
+  assert.equal(byTestId(tree, "admin-amux-select-block").length, 1);
+  assert.equal(byTestId(tree, "admin-amux-technical-recovery").length, 0);
+  assert.match(textOf(byTestId(tree, "admin-amux-block-without-result")[0]?.children as ReactNode),
+    /No completion evidence is connected.*review → blocked.*does not prove that a host process stopped/i);
 });
 
 test("a contradictory payload cannot offer approve for an unverified worker report", () => {
@@ -300,10 +309,179 @@ test("unknown execution offers read-only recovery and no blind retry", () => {
   assert.equal(byTestId(tree, "admin-amux-select-retry").length, 0);
   assert.equal(byTestId(tree, "admin-amux-select-block").length, 0);
   assert.equal(byTestId(tree, "admin-amux-technical-recovery").length, 1);
+  assert.match(textOf(tree), /missing report is not proof that the work did not run/i);
+  assert.match(textOf(tree), /could duplicate work and Agent cost/);
   (byTestId(tree, "admin-amux-owner-reread")[0]?.onClick as () => void)();
   assert.deepEqual(rereads, ["read"]);
   assert.match(textOf(byTestId(tree, "admin-amux-developer-details")[0]?.children as ReactNode),
     /retry, block/);
+});
+
+test("legacy done and closed reasons explain the flag boundary without offering a decision", () => {
+  const cases = [
+    ["local_card_done", "done.*flag is not the worker report"],
+    ["local_card_closed", "does not show whether the work succeeded, failed or was cancelled"],
+  ] as const;
+  for (const [reason, expected] of cases) {
+    const item = review({
+      task: { ...review().task, status: reason === "local_card_done" ? "review" : "blocked" },
+      review_context: {
+        ...review().review_context,
+        result_sha256: null,
+        last_attempt_reason: reason,
+      },
+      review_report: null,
+      allowed_outcomes: ["retry", "block"],
+      proposed_transitions: { retry: "todo", block: "blocked" },
+    });
+    const tree = render(item);
+    assert.equal(byTestId(tree, "admin-amux-owner-decision").length, 0);
+    assert.equal(byTestId(tree, "admin-amux-select-retry").length, 0);
+    assert.match(textOf(byTestId(tree, "admin-amux-technical-recovery")[0]?.children as ReactNode),
+      new RegExp(expected, "i"));
+    assert.match(textOf(byTestId(tree, "admin-amux-missing-evidence")[0]?.children as ReactNode),
+      /verified previous-execution outcome.*connected worker output or report/);
+  }
+});
+
+test("ambiguous and nonterminal attempts stay read-only even with verified output or an artifact", () => {
+  const artifact = {
+    pr_number: 812,
+    base_sha: "c".repeat(40),
+    head_sha: "d".repeat(40),
+    diff_digest: "e".repeat(64),
+    diff_text: "diff --git a/a b/a",
+    html_url: "https://github.com/mposition/Tomverse/pull/812",
+  };
+  const cases = [
+    { reason: "reported_result", outcome: "running", toStatus: "blocked" },
+    { reason: "reported_result", outcome: "started", toStatus: "blocked" },
+    { reason: "reported_result", outcome: "arbitrary", toStatus: "blocked" },
+    { reason: "local_card_done", outcome: "succeeded", toStatus: "review" },
+    { reason: "local_card_closed", outcome: "blocked", toStatus: "blocked" },
+    { reason: "usage_outcome_unknown", outcome: "expired", toStatus: "blocked" },
+    { reason: "outcome_unknown", outcome: "blocked", toStatus: "blocked" },
+  ];
+  for (const item of cases) {
+    const detail = review({
+      task: { ...review().task, status: "blocked" },
+      last_attempt: {
+        ...review().last_attempt!,
+        outcome: item.outcome,
+        to_status: item.toStatus,
+      },
+      review_context: {
+        ...review().review_context,
+        last_attempt_reason: item.reason,
+      },
+      review_artifact: artifact,
+      allowed_outcomes: ["approve", "retry", "block"],
+      proposed_transitions: { approve: "done", retry: "todo", block: "blocked" },
+    });
+    assert.deepEqual(visibleAmuxOwnerReviewOutcomes(detail), []);
+    const tree = render(detail);
+    assert.equal(byTestId(tree, "admin-amux-owner-decision").length, 0);
+    assert.equal(byTestId(tree, "admin-amux-technical-recovery").length, 1);
+  }
+
+  const missingAssignment = review({
+    review_context: { ...review().review_context, description: null },
+    review_report: {
+      ...review().review_report!,
+      scope_and_completion_criteria: null,
+    },
+    review_artifact: artifact,
+    allowed_outcomes: ["approve", "retry", "block"],
+    proposed_transitions: { approve: "done", retry: "todo", block: "blocked" },
+  });
+  assert.deepEqual(visibleAmuxOwnerReviewOutcomes(missingAssignment), []);
+  const missingAssignmentTree = render(missingAssignment);
+  assert.equal(byTestId(missingAssignmentTree, "admin-amux-owner-decision").length, 0);
+  assert.equal(byTestId(missingAssignmentTree, "admin-amux-technical-recovery").length, 1);
+});
+
+test("terminal blocked context without output preserves only the server block choice", () => {
+  const item = review({
+    task: { ...review().task, status: "blocked" },
+    last_attempt: {
+      ...review().last_attempt!,
+      outcome: "blocked",
+      to_status: "blocked",
+    },
+    review_context: {
+      ...review().review_context,
+      result_sha256: null,
+      last_attempt_reason: "reported_result",
+    },
+    review_report: null,
+    allowed_outcomes: ["block"],
+    proposed_transitions: { block: "blocked" },
+  });
+  assert.deepEqual(visibleAmuxOwnerReviewOutcomes(item), ["block"]);
+  const tree = render(item);
+  assert.equal(byTestId(tree, "admin-amux-select-approve").length, 0);
+  assert.equal(byTestId(tree, "admin-amux-select-retry").length, 0);
+  assert.equal(byTestId(tree, "admin-amux-select-block").length, 1);
+  assert.equal(byTestId(tree, "admin-amux-technical-recovery").length, 0);
+  assert.match(textOf(byTestId(tree, "admin-amux-block-without-result")[0]?.children as ReactNode),
+    /blocked → blocked.*does not prove that a host process stopped.*delete or cancel.*force a requeue/i);
+});
+
+test("a legitimate existing retry shows exact scope, nonzero prior cost and explicit read confirmation", () => {
+  const changes: string[] = [];
+  const confirmations: boolean[] = [];
+  const item = review({
+    task: { ...review().task, status: "blocked" },
+    last_attempt: {
+      ...review().last_attempt!,
+      outcome: "blocked",
+      to_status: "blocked",
+    },
+    review_context: {
+      ...review().review_context,
+      last_attempt_reason: "reported_result",
+    },
+    allowed_outcomes: ["retry", "block"],
+    proposed_transitions: { retry: "todo", block: "blocked" },
+  });
+  assert.deepEqual(visibleAmuxOwnerReviewOutcomes(item), ["retry", "block"]);
+  const tree = render(item, changes, [], confirmations);
+  const preview = textOf(byTestId(tree, "admin-amux-retry-preview")[0]?.children as ReactNode);
+  assert.match(preview, /Show the evidence and decision effects/);
+  assert.match(preview, /1 of 5 attempts used.*4 remain/);
+  assert.match(preview, /US\$2\.5/);
+  assert.match(preview, /US\$1\.25/);
+  assert.match(preview, /No new amount is reserved or validated/);
+  assert.match(preview, /blocked → todo/);
+  assert.match(preview, /does not claim that a host process has stopped/);
+  (byTestId(tree, "admin-amux-select-retry")[0]?.onClick as () => void)();
+  (byTestId(tree, "admin-amux-retry-read-confirmation")[0]?.onChange as
+    (event: { target: { checked: boolean } }) => void)({ target: { checked: true } });
+  assert.deepEqual(changes, ["retry"]);
+  assert.deepEqual(confirmations, [true]);
+});
+
+test("an unconfirmed zero settlement remains unknown rather than becoming actual cost", () => {
+  const item = review({
+    task: { ...review().task, status: "blocked" },
+    last_attempt: { ...review().last_attempt!, outcome: "blocked", to_status: "blocked" },
+    allowed_outcomes: ["retry"],
+    proposed_transitions: { retry: "todo" },
+  });
+  const tree = render(item, [], [], [], false, {
+    state: "ready",
+    metadata: {
+      worker: "worker-openai",
+      attemptNumber: 1,
+      reservedCostMicrousd: "2500000",
+      actualCostMicrousd: null,
+      actualCostConfirmed: false,
+    },
+  });
+  const preview = textOf(byTestId(tree, "admin-amux-retry-preview")[0]?.children as ReactNode);
+  assert.match(preview, /Previous reservation maximum US\$2\.5/);
+  assert.match(preview, /Previous recorded settlement Unknown — not zero/);
+  assert.doesNotMatch(preview, /US\$0/);
 });
 
 test("legacy closed card with no purpose or result offers checks, not a made-up retry question", () => {
@@ -365,8 +543,30 @@ test("owner cost metadata binds task, revision, attempt and retained result exac
   }), null);
   assert.equal(bindAmuxOwnerExecutionMetadata(item, {
     ...detail,
+    id: "other-task",
+  }), null);
+  assert.equal(bindAmuxOwnerExecutionMetadata(item, {
+    ...detail,
+    attempts: [{ ...detail.attempts[0], taskRevision: item.last_attempt!.task_revision + 1 }],
+  }), null);
+  assert.equal(bindAmuxOwnerExecutionMetadata(item, {
+    ...detail,
     result: { ...detail.result, sha256: "c".repeat(64) },
   }), null);
+  assert.deepEqual(bindAmuxOwnerExecutionMetadata(item, {
+    ...detail,
+    attempts: [{
+      ...detail.attempts[0],
+      settledCostMicrousd: "0",
+      costConfirmed: false,
+    }],
+  }), {
+    worker: "worker-openai",
+    attemptNumber: 1,
+    reservedCostMicrousd: "2500000",
+    actualCostMicrousd: null,
+    actualCostConfirmed: false,
+  });
   assert.equal(formatAmuxMicrousd("2500000"), "US$2.5");
   assert.equal(formatAmuxMicrousd("0"), "US$0");
   assert.equal(formatAmuxMicrousd("not-known"), null);

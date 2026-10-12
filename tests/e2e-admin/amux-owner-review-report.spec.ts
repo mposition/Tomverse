@@ -185,6 +185,42 @@ test("owner review renders verified, legacy and unknown evidence honestly at 390
   await expect(page.getByTestId("admin-amux-worker-report")).toContainText(
     "succeeded terminal outcome",
   );
+  await expect(page.getByTestId("admin-amux-technical-recovery")).toContainText(
+    "flag is not the worker report",
+  );
+  await expect(page.getByTestId("admin-amux-missing-evidence")).toContainText(
+    "verified previous-execution outcome",
+  );
+  await expect(page.getByTestId("admin-amux-owner-decision")).toHaveCount(0);
+
+  currentReview = {
+    ...baseReview(),
+    task: { ...baseReview().task, status: "blocked", title: "Terminal block without output" },
+    last_attempt: {
+      ...baseReview().last_attempt!,
+      outcome: "blocked",
+      to_status: "blocked",
+    },
+    review_context: {
+      ...baseReview().review_context,
+      result_sha256: null,
+      last_attempt_reason: "reported_result",
+    },
+    review_report: null,
+    allowed_outcomes: ["block"],
+    proposed_transitions: { block: "blocked" },
+  };
+  currentOwnerExecution = { error: "not connected" };
+  await open(390);
+  await expect(page.getByTestId("admin-amux-owner-decision")).toBeVisible();
+  await expect(page.getByTestId("admin-amux-select-block")).toBeVisible();
+  await expect(page.getByTestId("admin-amux-select-retry")).toHaveCount(0);
+  await expect(page.getByTestId("admin-amux-block-without-result")).toContainText(
+    "blocked → blocked",
+  );
+  await expect(page.getByTestId("admin-amux-block-without-result")).toContainText(
+    "does not prove that a host process stopped",
+  );
 
   currentReview = {
     ...baseReview(),
@@ -206,12 +242,47 @@ test("owner review renders verified, legacy and unknown evidence honestly at 390
   };
   await open(320);
   await expect(page.getByTestId("admin-amux-technical-recovery")).toBeVisible();
+  await expect(page.getByTestId("admin-amux-technical-recovery")).toContainText(
+    "does not show whether the work succeeded, failed or was cancelled",
+  );
   await expect(page.getByTestId("admin-amux-owner-decision")).toHaveCount(0);
   await expect(page.getByTestId("admin-amux-select-retry")).toHaveCount(0);
   await page.screenshot({
     path: "test-results-admin/amux-owner-review-legacy-closed-320.png",
     fullPage: true,
   });
+
+  currentReview = {
+    ...baseReview(),
+    task: { ...baseReview().task, status: "blocked", title: "Evidence-bound retry" },
+    last_attempt: {
+      ...baseReview().last_attempt!,
+      outcome: "blocked",
+      to_status: "blocked",
+    },
+    review_context: {
+      ...baseReview().review_context,
+      last_attempt_reason: "reported_result",
+    },
+    allowed_outcomes: ["retry", "block"],
+    proposed_transitions: { retry: "todo", block: "blocked" },
+  };
+  currentOwnerExecution = ownerExecution(currentReview);
+  await open(390);
+  await expect(page.getByTestId("admin-amux-retry-preview")).toContainText(
+    "Show the original assignment",
+  );
+  await expect(page.getByTestId("admin-amux-retry-preview")).toContainText(
+    "US$2.5",
+  );
+  await expect(page.getByTestId("admin-amux-retry-preview")).toContainText(
+    "No new amount is reserved or validated",
+  );
+  await page.getByTestId("admin-amux-select-retry").click();
+  await page.getByTestId("admin-amux-resolution").fill("Retry only the exact bound scope.");
+  await expect(page.getByTestId("admin-amux-prepare-proposal")).toBeDisabled();
+  await page.getByTestId("admin-amux-retry-read-confirmation").check();
+  await expect(page.getByTestId("admin-amux-prepare-proposal")).toBeEnabled();
 
   currentReview = {
     ...baseReview(),
@@ -236,7 +307,7 @@ test("owner review renders verified, legacy and unknown evidence honestly at 390
   };
   await open(320);
   await expect(page.getByTestId("admin-amux-technical-recovery")).toContainText(
-    "Do not retry blindly",
+    "missing report is not proof that the work did not run",
   );
   await expect(page.getByTestId("admin-amux-select-retry")).toHaveCount(0);
   await expect(page.getByTestId("admin-amux-select-block")).toHaveCount(0);

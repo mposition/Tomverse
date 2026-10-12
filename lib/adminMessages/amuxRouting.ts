@@ -80,17 +80,94 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "Exact owner-only attempt metadata is unavailable or does not match this review. Cost is unknown, not zero.",
     costBoundary:
       "Reservation is a maximum, not actual usage. Recorded settlement is agent operational accounting, not a provider invoice or user credits.",
-    technicalRecovery: "Technical recovery",
+    technicalRecovery: "Recovery preparation",
     unknownExecutionGuidance:
       "The prior execution outcome is not verified. Do not retry blindly. Re-read the record or inspect the card before taking a separate recovery action.",
     noEvidenceGuidance:
       "There is not enough connected evidence for a meaningful task decision. Use read-only checks to recover the source first.",
+    recoveryPreparationIntro:
+      "This is a read-only preparation checklist. It does not start an evidence-retrieval job, rerun work, settle cost or clear a stop.",
+    recoveryWhyStopped: "Why this stopped",
+    recoveryReason: {
+      local_card_done:
+        "The local card was marked done. That flag is not the worker report and does not prove the completion criteria were met.",
+      local_card_closed:
+        "The local card was closed. The flag alone does not show whether the work succeeded, failed or was cancelled.",
+      execution_lease_expired:
+        "The expected heartbeat or completion did not reach the app before the lease expired. That does not prove the CLI never ran.",
+      outcome_unknown:
+        "The previous outcome is not verified. A missing report is not proof that the work did not run.",
+      evidence_missing:
+        "This protected review does not connect enough original-work and result evidence for a task decision.",
+      terminal_recorded:
+        "A terminal attempt is recorded. The connected assignment and result still determine which decision can be prepared.",
+    },
+    recoveryKnownUnknown: "Known and still unknown",
+    originalWorkEvidence: "Original work and criteria",
+    originalWorkConnected: "Connected to this protected review",
+    originalWorkMissing: "Not connected here; this does not prove it never existed",
+    previousExecutionEvidence: "Previous execution",
+    executionKnown: "A terminal result is recorded for the connected attempt",
+    executionUnknown: "Not verified; do not infer that no process ran",
+    workerOutputEvidence: "Worker output",
+    outputVerified: "Connected and bound to this review",
+    outputUnverified: "Connected, but not verified as completion evidence",
+    outputMissing: "No output is connected here; absence is not proof of no output",
+    recoveryChecklist: "What must be verified first",
+    recoveryChecklistBoundary:
+      "These are evidence statuses, not approval authority. Only the protected server outcome and bound proposal can change the Task.",
+    checklistAssignment: "Original purpose, scope and completion criteria are connected",
+    checklistExecution: "The previous execution outcome is verified",
+    checklistOutput: "The previous output or report is connected",
+    checklistReady: "Connected",
+    checklistMissing: "Needs evidence",
+    missingEvidence: "Missing evidence",
+    missingEvidenceItem: {
+      assignment: "original work and completion criteria",
+      execution_outcome: "verified previous-execution outcome",
+      worker_output: "connected worker output or report",
+    },
+    duplicateCostRisk:
+      "Until the earlier execution is verified, another run could duplicate work and Agent cost. This screen neither spends Agent budget nor uses user credits.",
+    amuxNextStep: "AMUX next",
+    amuxNextStepDetail:
+      "Compare the retained app records before any separate recovery. This screen does not claim that a lookup or recovery job is currently running.",
+    operatorNextStep: "Operator next",
+    operatorNextStepDetail:
+      "Read the same protected record again and inspect the original card and history. Do not choose a task outcome until the missing evidence is connected.",
+    retryPreviewTitle: "Before requeuing this exact Task",
+    retryPreviewIntro:
+      "The server currently permits a retry from this bound review. Read the exact scope, prior evidence, attempt limit, cost status and effect before preparing the existing proposal.",
+    retryScope: "Exact work scope",
+    retryAttemptLimit: "Attempt limit",
+    retryAttemptLimitValue: (used: number, limit: number, remaining: number) =>
+      `${used} of ${limit} attempts used · ${remaining} remain before any new attempt`,
+    retryCorrectionEvidence: "What changed",
+    retryCorrectionUnavailable:
+      "No separate structured correction record is connected. Verify the worker report and card history; this screen does not infer that dependencies are complete.",
+    retryPreviousReservation: "Previous reservation maximum",
+    retryPreviousSettlement: "Previous recorded settlement",
+    retryNewCost: "New execution cost",
+    retryNewCostUnavailable:
+      "No new amount is reserved or validated by this review. The next claim rechecks current Agent budget and may still refuse to run.",
+    retryDuplicateControl: "Duplicate-work boundary",
+    retryDuplicateControlDetail:
+      "Requeue preserves the previous attempt and receipts and advances the Task revision. It does not claim that a host process has stopped.",
+    retryEffect: "Effect of this decision",
+    retryEffectDetail: (source: string, target: string) =>
+      `${source} → ${target}. This only returns the same Task to the queue; assignment and execution still require the existing admission checks.`,
+    retryReadConfirmation:
+      "I read the exact scope, previous-execution evidence, attempt limit, cost status and requeue effect.",
+    retryConfirmationRequired:
+      "Read and confirm the retry preview before preparing a proposal.",
     developerDetails: "Developer details",
     serverAllowedOutcomes: "Server-permitted outcomes",
     ownerDecision: "Genuine owner decision",
     ownerQuestionApprove: "Does the submitted result satisfy the assigned scope and completion criteria?",
     ownerQuestionRetry: "Has the reported blocker been corrected enough to requeue this same task?",
     ownerQuestionBlock: "Should this task remain blocked with this recorded reason?",
+    blockWithoutResultNotice: (source: string, target: string) =>
+      `No completion evidence is connected, so approval and retry are unavailable. The protected terminal outcome and server permission allow only ${source} → ${target}. This does not prove that a host process stopped, delete or cancel the Task, or force a requeue.`,
     unknownNoRetry:
       "No decision is offered while the prior execution outcome is unknown. Verify it before any retry or replacement task.",
     closeReview: "Close",
@@ -250,13 +327,13 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       `이 분류와 개수는 현재 불러온 큐 ${shown}건만 다루며 전체 AMUX 작업 수가 아닙니다.`,
     queueClassification: {
       needs_read: "자료 확인 필요",
-      owner_decision: "소유자 판단 가능",
+      owner_decision: "운영자 판단 가능",
       technical_recovery: "AMUX 확인 필요",
     },
     queueClassificationDescription: {
-      needs_read: "소유자 결정으로 분류하기 전에 보호된 배정 내용과 근거를 읽어야 합니다.",
+      needs_read: "운영자 결정으로 분류하기 전에 보호된 배정 내용과 근거를 읽어야 합니다.",
       owner_decision: "현재 보호된 검토의 결속 근거에서 서버가 허용한 결정을 제공하고 있습니다.",
-      technical_recovery: "의미 있는 소유자 선택이 없습니다. 누락되거나 불명확한 실행 근거를 먼저 확인합니다.",
+      technical_recovery: "의미 있는 운영자 선택이 없습니다. 누락되거나 불명확한 실행 근거를 먼저 확인합니다.",
     },
     taskPurposeUnavailable: "이 큐 기록에서는 작업 목적을 확인할 수 없음",
     queueDeveloperIdentifiers: "개발자 식별자와 라우팅 상태",
@@ -273,7 +350,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     openReview: "보호된 검토 열기",
     openCardDetail: "카드 상세 보기",
     reviewDetail: "보호된 작업 검토",
-    ownerReviewEyebrow: "소유자 검토",
+    ownerReviewEyebrow: "운영자 검토",
     ownerReviewIntro:
       "서버가 허용한 결정을 선택하기 전에 배정된 작업과 제출된 근거를 대조하세요.",
     assignedWork: "원래 배정된 작업",
@@ -293,10 +370,10 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     resultSubmitted: "작업자 결과 또는 검토 산출물이 연결돼 있습니다.",
     noResultConnected: "여기에 연결된 결과 근거가 없습니다.",
     remainingWork: "남은 일",
-    ownerDecisionRemaining: "아래에 표시된 소유자 결정이 아직 필요합니다.",
-    noDecisionAvailable: "연결된 근거로 내릴 수 있는 의미 있는 소유자 결정이 없습니다.",
+    ownerDecisionRemaining: "아래에 표시된 운영자 결정이 아직 필요합니다.",
+    noDecisionAvailable: "연결된 근거로 내릴 수 있는 의미 있는 운영자 결정이 없습니다.",
     unverified: "미검증",
-    qualityStillUnverified: "완전성과 품질은 여전히 소유자의 판단이 필요합니다.",
+    qualityStillUnverified: "완전성과 품질은 여전히 운영자의 판단이 필요합니다.",
     attemptAndCost: "시도와 Agent 비용",
     costLoading: "정확한 시도 메타데이터를 읽는 중…",
     worker: "작업자",
@@ -304,20 +381,108 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     actualSettledCost: "기록된 정산 비용",
     unknownValue: "알 수 없음 — 0이 아님",
     costUnavailable:
-      "정확한 소유자 전용 시도 메타데이터를 읽을 수 없거나 이 검토와 일치하지 않습니다. 비용은 0이 아니라 알 수 없음입니다.",
+      "정확한 운영자 전용 시도 메타데이터를 읽을 수 없거나 이 검토와 일치하지 않습니다. 비용은 0이 아니라 알 수 없음입니다.",
     costBoundary:
       "예약은 상한이지 실제 사용량이 아닙니다. 기록된 정산은 Agent 운영 회계이며 provider 청구서나 사용자 크레딧이 아닙니다.",
-    technicalRecovery: "기술적 복구",
+    technicalRecovery: "복구 준비",
     unknownExecutionGuidance:
       "이전 실행 결과가 검증되지 않았습니다. 맹목적으로 재시도하지 마세요. 별도 복구 전에 기록을 다시 읽거나 카드를 확인하세요.",
     noEvidenceGuidance:
       "의미 있는 작업 결정을 내릴 만큼 연결된 근거가 없습니다. 먼저 읽기 전용 확인으로 원천을 복구하세요.",
+    recoveryPreparationIntro:
+      "이 목록은 읽기 전용 복구 준비입니다. 근거 조회 작업을 시작하거나, 일을 다시 실행하거나, 비용을 정산하거나, 정지를 해제하지 않습니다.",
+    recoveryWhyStopped: "왜 멈췄나요?",
+    recoveryReason: {
+      local_card_done:
+        "로컬 카드에 완료 표시가 있습니다. 이 표시는 작업자 보고서가 아니며 완료 기준을 충족했다는 증거도 아닙니다.",
+      local_card_closed:
+        "로컬 카드가 닫혀 있습니다. 이 표시만으로 성공·실패·취소 가운데 무엇이었는지 알 수 없습니다.",
+      execution_lease_expired:
+        "이전 실행이 계속되고 있다는 신호나 완료 기록을 앱이 정해진 시간 안에 받지 못했습니다. 그렇다고 실행 프로그램이 시작되지 않았다고 단정할 수는 없습니다.",
+      outcome_unknown:
+        "이전 실행 결과를 확인하지 못했습니다. 보고서가 보이지 않는다고 실행하지 않았다고 판단할 수 없습니다.",
+      evidence_missing:
+        "이 화면에는 운영자가 결정하는 데 필요한 원래 요청과 실행 결과 기록이 충분히 연결되어 있지 않습니다.",
+      terminal_recorded:
+        "종결된 시도 기록이 있습니다. 연결된 배정 내용과 결과 근거가 어떤 결정을 준비할 수 있는지 정합니다.",
+    },
+    recoveryKnownUnknown: "확인된 것과 아직 모르는 것",
+    originalWorkEvidence: "원래 요청",
+    originalWorkConnected: "이 작업에 연결된 원래 요청을 확인할 수 있습니다",
+    originalWorkMissing: "여기에 연결되지 않음 · 애초에 없었다는 뜻은 아님",
+    previousExecutionEvidence: "이전 실행",
+    executionKnown: "연결된 실행 기록에 종료 결과가 있음",
+    executionUnknown: "확인되지 않음 · 어떤 프로세스도 실행되지 않았다고 추정하지 않음",
+    workerOutputEvidence: "작업자 결과",
+    outputVerified: "이 화면에 연결되어 있으며 현재 작업 기록과 일치함",
+    outputUnverified: "연결되어 있지만 현재 작업의 완료 결과인지 확인되지 않음",
+    outputMissing: "여기에 연결된 결과가 없음 · 결과물이 없었다는 증거는 아님",
+    recoveryChecklist: "먼저 확인해야 할 것",
+    recoveryChecklistBoundary:
+      "아래 표는 기록이 연결되어 있는지만 보여줍니다. 표시만으로 작업이 완료되거나 다시 실행되지는 않습니다.",
+    checklistAssignment: "이 작업에 연결된 원래 요청을 확인할 수 있음",
+    checklistExecution: "이전 실행 결과가 확인됨",
+    checklistOutput: "이전 결과 또는 보고서가 연결돼 있음",
+    checklistReady: "연결됨",
+    checklistMissing: "근거 필요",
+    missingEvidence: "빠진 근거",
+    missingEvidenceItem: {
+      assignment: "이 작업에 연결된 원래 요청",
+      execution_outcome: "확인된 이전 실행 결과",
+      worker_output: "연결된 작업자 결과 또는 보고서",
+    },
+    duplicateCostRisk:
+      "이전 실행을 확인하기 전에 다시 실행하면 같은 일과 자동화 비용이 중복될 수 있습니다. 이 화면을 읽는 데 추가 모델 비용은 들지 않습니다.",
+    amuxNextStep: "AMUX가 다음에 확인할 것",
+    amuxNextStepDetail:
+      "별도 복구 전에 앱에 보존된 기록을 대조해야 합니다. 지금 조회나 복구 작업이 실행 중이라는 뜻은 아닙니다.",
+    operatorNextStep: "운영자가 다음에 할 일",
+    operatorNextStepDetail:
+      "같은 보호 기록을 다시 읽고 원래 카드와 이력을 확인하세요. 빠진 근거가 연결되기 전에는 작업 결과를 선택하지 않습니다.",
+    retryPreviewTitle: "이 작업을 다시 맡기기 전에 확인",
+    retryPreviewIntro:
+      "현재 기록에서는 이 작업을 다시 맡기는 선택이 허용되어 있습니다. 선택을 준비하기 전에 작업 내용·이전 실행 기록·시도 상한·비용 상태·효과를 읽으세요.",
+    retryScope: "다시 맡길 작업과 완료 조건",
+    retryAttemptLimit: "시도 상한",
+    retryAttemptLimitValue: (used: number, limit: number, remaining: number) =>
+      `${limit}회 중 ${used}회 사용 · 새 시도 전 잔여 ${remaining}회`,
+    retryCorrectionEvidence: "무엇이 달라졌나요?",
+    retryCorrectionUnavailable:
+      "무엇을 고쳤는지 보여 주는 별도 기록은 연결돼 있지 않습니다. 작업자 보고서와 카드 이력을 확인하세요. 이 화면은 선행 작업이 끝났다고 추정하지 않습니다.",
+    retryPreviousReservation: "이전 예약 상한",
+    retryPreviousSettlement: "이전 기록 정산액",
+    retryNewCost: "새 실행 비용",
+    retryNewCostUnavailable:
+      "다음 작업 배정 때 자동화 예산과 실행 조건을 다시 확인합니다. 통과하지 못하면 시작되지 않습니다.",
+    retryDuplicateControl: "중복 작업 경계",
+    retryDuplicateControlDetail:
+      "이전 실행 기록과 비용 기록을 지우지 않습니다. 실행 중인 프로그램을 강제로 종료하는 버튼은 아닙니다.",
+    retryEffect: "이 결정의 효과",
+    retryEffectDetail: (source: string, target: string) => {
+      const statusLabel: Record<string, string> = {
+        blocked: "차단 상태",
+        todo: "실행 대기",
+        review: "검토 대기",
+        done: "완료",
+      };
+      return `${statusLabel[source] ?? "현재 상태"}에서 ${statusLabel[target] ?? "다음 상태"}로 바뀝니다. 이전 실행 기록을 지우지 않고 같은 작업을 실행 대기로 옮깁니다.`;
+    },
+    retryReadConfirmation:
+      "다시 맡길 작업·이전 실행 기록·시도 상한·비용 상태·변경 효과를 읽었습니다.",
+    retryConfirmationRequired:
+      "제안을 준비하기 전에 재시도 확인 내용을 읽고 확인해 주세요.",
     developerDetails: "개발자 상세",
     serverAllowedOutcomes: "서버 허용 결과",
-    ownerDecision: "실제 소유자 결정",
+    ownerDecision: "실제 운영자 결정",
     ownerQuestionApprove: "제출된 결과가 배정 범위와 완료 기준을 충족합니까?",
     ownerQuestionRetry: "보고된 차단 원인이 이 작업을 다시 대기열에 넣을 만큼 해결됐습니까?",
     ownerQuestionBlock: "기록된 사유로 이 작업을 차단 상태에 유지해야 합니까?",
+    blockWithoutResultNotice: (source: string, target: string) => {
+      const effect = source === "blocked" && target === "blocked"
+        ? "현재 작업을 차단 상태로 남기는 선택만 할 수 있습니다."
+        : "현재 작업을 차단 상태로 옮기는 선택만 할 수 있습니다.";
+      return `완료를 판단할 결과 기록은 연결돼 있지 않아 승인하거나 다시 맡길 수는 없습니다. ${effect} 실행 중인 프로그램이 멈췄다는 뜻이 아니며 작업을 삭제·취소하거나 실행 대기로 옮기지 않습니다.`;
+    },
     unknownNoRetry:
       "이전 실행 결과가 불명확한 동안에는 결정을 제공하지 않습니다. 재시도나 대체 작업 전에 결과를 검증하세요.",
     closeReview: "닫기",
@@ -325,7 +490,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     taskId: "작업 ID",
     taskState: "작업 상태",
     taskLifecycleStatus: (status: string) => ({
-      review: "소유자 검토 대기",
+      review: "운영자 검토 대기",
       blocked: "차단됨 — 이력 보존",
       todo: "작업 대기",
       in_progress: "작업 진행 중",
