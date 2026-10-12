@@ -514,12 +514,18 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-12, Guest Smart Adaptive plus AMUX worker registry merge: both
 // fingerprint provenance notes coexist. Access count 228 and position-free
 // digest are unchanged; the positions below the combined note are repinned.
+// 2026-10-12, the default lineup as an Admin setting: the lineup reader, its
+// save-time checks and its writer in `lib/appSettings.ts` sit above that file's
+// one access, `flags[feature]`, and move it by 184 lines. The replacement walk,
+// lineup rules and lead helper in `lib/appDefaults.ts` add no access. Count 228 and the
+// position-free inventory are unchanged; positions only. Repinned after the AMUX
+// record above merged in from develop.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "3894a21bda0bf65ffa6322540c35a65f",
-  "b036fbcdf396611b5ab4de40387821e0",
+  "a038e5fce33a369b089a4777202eef2b",
+  "0c7f30535222ec440f1a8a05816560ec",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

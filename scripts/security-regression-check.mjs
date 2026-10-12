@@ -2267,7 +2267,7 @@ const checks = [
       source.includes('"/pricing"') &&
       source.includes('"/support/help-centre"') &&
       source.includes('"/ai-answer-review"') &&
-      source.includes('"chatgpt-vs-claude"') &&
+      source.includes('"/chatgpt-vs-claude"') &&
       !source.includes('"/chat"') &&
       !source.includes('"/admin"') &&
       !source.includes('"/status"') &&
@@ -2342,7 +2342,7 @@ const checks = [
     file: "components/marketing/AiReviewDemo.tsx",
     test: (source) =>
       source.includes("common ground") &&
-      source.includes("Contradiction") &&
+      source.includes("contradictions") &&
       source.includes("Missing point") &&
       source.includes("does not browse, externally verify facts, or decide the correct answer") &&
       source.includes("position bias") &&
@@ -2673,12 +2673,12 @@ const checks = [
       source.includes('id="methodology"') &&
       source.includes('id="prompt-examples"') &&
       source.includes('id="comparison-faq"') &&
-      source.includes('"Writing"') &&
-      source.includes('"Coding"') &&
-      source.includes('"Long documents"') &&
-      source.includes('"Summarization"') &&
-      source.includes('"Instruction following"') &&
-      source.includes('reviewedDate: "14 July 2026"') &&
+      source.includes('"Learning explanations"') &&
+      source.includes('"Rewriting a message"') &&
+      source.includes('"Document summaries"') &&
+      source.includes('"Fictional editorial example · not a model test"') &&
+      source.includes("not actual responses from either model") &&
+      source.includes("For real runs, record model names, run date and conditions") &&
       source.includes('models: comparisonModelIds.join(",")') &&
       source.includes('source: "chatgpt-vs-claude"') &&
       source.includes('/model-icons/chatgpt.png') &&
@@ -2836,7 +2836,8 @@ const checks = [
         source.includes("일반적인 짧은 요청 기준 예시") &&
         source.includes("Standard + Advanced + Premium") &&
         source.includes("INPUT_CREDIT_MULTIPLIERS.map") &&
-        source.includes("파일·긴 문맥 배율") &&
+        source.includes("현재 질문, 이전 대화와 추출된 파일 내용") &&
+        source.includes("최종 사용량은 달라질 수 있습니다") &&
         models.includes("MODEL_USAGE_CREDIT_WEIGHTS") &&
         models.includes("getTypicalShortRequestCapacities") &&
         models.includes("credits / MODEL_USAGE_CREDIT_WEIGHTS.advanced") &&

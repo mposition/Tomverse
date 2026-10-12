@@ -791,6 +791,22 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   기록할 수 있다는 위험까지 수용한 결정이며, 다른 모델의 같은 경계는 이 예외가
   아닙니다: docs/policy/credit-and-cost-limits.md "Haiku 계열을 게스트 Anthropic
   자리로 여는 예외".
+- **기본 3모델 구성은 Admin 설정입니다**(2026-10-12 운영자 결정, 정책 문서
+  "기본 3모델 구성은 Admin 설정입니다"). `AppSetting["guestBrandTrioModelIds"]`가
+  정하고, 코드 trio는 행이 없거나 읽을 수 없을 때의 비상값입니다. 저장 검증은
+  `guestBrandTrioRejection()`(활성 · 공개 · Guest · Standard · 검증된 가격 · 서로
+  다른 3개 · OpenAI · Anthropic · Gemini 각 1개) 한 곳이고, 선두는 그 구성 안에서만 고르며 구성과 한 트랜잭션으로 저장합니다.
+  구성을 쓰는 모든 곳(첫 렌더, 신규 계정, Admin 설명, 서버 선두 판정,
+  `check:default-models`)은 `getPublicAppSettings()` 또는 `readGuestLeadFacts()`가
+  해석한 같은 구성을 받습니다 — 컴파일된 trio를 직접 읽지 않습니다.
+- **은퇴한 구성원의 자리는 대체 모델이 이어받습니다.** resolver에
+  `resolveReplacement`를 넘기면 비활성 구성원의 `replacementModelId` 체인을 따라가
+  같은 자리·같은 순서에 넣고, 자격이 없을 때만 fallback 목록으로 채웁니다. 서버와
+  브라우저가 같은 catalogue에 묶어야 첫 렌더가 어긋나지 않습니다.
+- **기본 선택을 계산할 때는 `createDefaultLineupEligibilityCheck()`를 씁니다.**
+  호출자의 자격 검사(새 계정 첫 비교는 Free, 나머지는 게스트)에
+  `isDefaultLineupServable`을 더한 것이라 `limited`·비공개가 된 구성 모델은
+  승계됩니다. 사람이 고른 선택의 clamp는 게스트 자격 그대로입니다.
 - **`gpt-5-4-mini`는 은퇴하지 않았습니다.** enabled·publiclyListed 상태를
   유지하는 것은 의도된 관찰 기간입니다.
 - **수치 eval 통과는 은퇴의 필요조건이지 충분조건이 아닙니다.** 정책 문서

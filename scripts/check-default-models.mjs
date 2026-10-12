@@ -18,8 +18,14 @@ import { join } from "node:path";
 
 import {
   APP_DEFAULTS,
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
+  createReplacementResolver,
+  expectedLeadForStored,
   GUEST_BRAND_TRIO_MODEL_IDS,
+  GUEST_LINEUP_PROVIDERS,
+  guestLeadForLineup,
+  parseGuestBrandTrio,
   resolveGuestDefaultSelectedModels,
 } from "../lib/appDefaults.ts";
 import {
@@ -31,7 +37,6 @@ import { resolveNewConversationModels } from "../lib/newConversationModels.ts";
 import { resolveGuestInitialSelectedModels } from "../lib/guestChatInitialModels.ts";
 import {
   AVAILABLE_MODELS,
-  canUseModelWithPlan,
   DEFAULT_MODEL_ID,
   getModelUsageProfile,
   isPubliclySelectableModel,
@@ -48,19 +53,25 @@ const databaseUrl = process.env.DATABASE_URL?.trim();
 let catalogueSource = "compiled_default";
 let models = AVAILABLE_MODELS;
 let storedGuestDefaultModelId = null;
+let storedGuestBrandTrio = null;
 let databaseNote =
   "No DATABASE_URL: the compiled catalogue was audited and no AppSetting was read.";
 
 if (databaseUrl) {
   try {
     const { prisma } = await import("../lib/prisma.ts");
-    const [rows, setting] = await Promise.all([
+    const [rows, setting, trioSetting] = await Promise.all([
       prisma.modelRegistryEntry.findMany(),
       prisma.appSetting.findUnique({
         where: { key: "guestDefaultModelId" },
         select: { value: true },
       }),
+      prisma.appSetting.findUnique({
+        where: { key: "guestBrandTrioModelIds" },
+        select: { value: true },
+      }),
     ]);
+    storedGuestBrandTrio = parseGuestBrandTrio(trioSetting?.value);
     if (rows.length > 0) {
       const { registryRowToModel } = await import("../lib/modelRegistry.ts");
       models = rows.map((row) => registryRowToModel(row));
@@ -82,45 +93,50 @@ if (databaseUrl) {
 const byId = new Map(models.map((model) => [model.id, model]));
 const lookup = (modelId) => byId.get(modelId);
 const isGuestEligible = createGuestEligibilityCheck(lookup);
+// What a default may name: the rule every default resolver uses, so a lineup
+// member that is limited or unlisted is audited as succeeded, not as leading.
+const isDefaultEligible = createDefaultLineupEligibilityCheck(lookup, isGuestEligible);
+// The chat client binds the same resolver to the same catalogue, so a retired
+// trio member's successor is audited in its slot exactly as guests see it.
+const resolveReplacement = createReplacementResolver(lookup);
 const isEnabled = (modelId) => {
   const model = lookup(modelId);
   return model ? isPubliclySelectableModel(model) : false;
 };
 
-// getPublicAppSettings()'s own rule, reproduced against whichever catalogue
-// answered: a stored value that fails it is discarded in favour of the
-// compiled guest default.
-const storedIsUsable =
-  storedGuestDefaultModelId !== null &&
-  (() => {
-    const model = lookup(storedGuestDefaultModelId);
-    return Boolean(
-      model &&
-        isPubliclySelectableModel(model) &&
-        canUseModelWithPlan("Guest", model) &&
-        getModelUsageProfile(model).category === "Standard"
-    );
-  })();
-const normalizedGuestDefaultModelId = storedIsUsable
-  ? storedGuestDefaultModelId
-  : APP_DEFAULTS.guestDefaultModelId;
+// The lineup the lead orders: the stored AppSetting when it parses, else the
+// compiled trio -- getPublicAppSettings()'s rule.
+const effectiveGuestBrandTrio = storedGuestBrandTrio ?? [...GUEST_BRAND_TRIO_MODEL_IDS];
+
+// getPublicAppSettings()'s own rule, the same function: a stored lead that is
+// a member of the lineup is passed through -- retired or not, the resolver
+// succeeds it in its slot -- and anything else gives way to the compiled
+// guest default.
+const normalizedGuestDefaultModelId = guestLeadForLineup(
+  storedGuestDefaultModelId,
+  effectiveGuestBrandTrio
+);
 
 const effectiveGuestSelectedModelIds = resolveGuestDefaultSelectedModels({
-  isEligible: isGuestEligible,
+  isEligible: isDefaultEligible,
   leadModelId: normalizedGuestDefaultModelId,
+  resolveReplacement,
+  trio: effectiveGuestBrandTrio,
 });
 
 // Hydration: the same function the server calls with no browser, and the same
 // one the client's first render calls with an empty browser. They must agree,
 // because the composer's credit estimate is summed from whichever it gets.
-const catalogue = { isEnabledModelId: isEnabled, isGuestEligible };
+const catalogue = { isEnabledModelId: isEnabled, isGuestEligible, isDefaultEligible, resolveReplacement };
 const ssrGuestSelectedModelIds = resolveGuestInitialSelectedModels({
   catalogue,
   leadModelId: normalizedGuestDefaultModelId,
+  trio: effectiveGuestBrandTrio,
 }).models;
 const hydratedGuestSelectedModelIds = resolveGuestInitialSelectedModels({
   catalogue,
   leadModelId: normalizedGuestDefaultModelId,
+  trio: effectiveGuestBrandTrio,
   environment: { search: "", sessionStorage: null, localStorage: null },
 }).models;
 
@@ -241,7 +257,7 @@ const newConversation = {
 
 const interesting = Array.from(
   new Set([
-    ...GUEST_BRAND_TRIO_MODEL_IDS,
+    ...effectiveGuestBrandTrio,
     ...effectiveGuestSelectedModelIds,
     ...(storedGuestDefaultModelId ? [storedGuestDefaultModelId] : []),
     normalizedGuestDefaultModelId,
@@ -267,9 +283,22 @@ const modelStates = interesting.map((modelId) => {
 
 const report = auditDefaultModels({
   storedGuestDefaultModelId,
+  storedGuestLeadExpectedId:
+    storedGuestDefaultModelId === null
+      ? null
+      : expectedLeadForStored({
+          stored: storedGuestDefaultModelId,
+          lineup: effectiveGuestBrandTrio,
+          isEligible: isDefaultEligible,
+          resolveReplacement,
+        }),
+  guestLineupProviders: {
+    required: [...GUEST_LINEUP_PROVIDERS],
+    effective: effectiveGuestSelectedModelIds.map((modelId) => lookup(modelId)?.provider ?? null),
+  },
   normalizedGuestDefaultModelId,
   effectiveGuestSelectedModelIds,
-  guestBrandTrioModelIds: GUEST_BRAND_TRIO_MODEL_IDS,
+  guestBrandTrioModelIds: effectiveGuestBrandTrio,
   defaultModelId: DEFAULT_MODEL_ID,
   appDefaultsDefaultModelId: APP_DEFAULTS.defaultModelId,
   prismaUserSettingsDefaultModel,
@@ -325,7 +354,7 @@ if (json) {
         ? "   (no AppSetting row; the compiled default leads)"
         : "")
   );
-  console.log(`  ${"guestBrandTrio".padEnd(38)} ${JSON.stringify(GUEST_BRAND_TRIO_MODEL_IDS)}   [compiled_default]`);
+  console.log(`  ${"guestBrandTrio".padEnd(38)} ${JSON.stringify(effectiveGuestBrandTrio)}   [${storedGuestBrandTrio ? "app_setting" : "compiled_default"}]`);
 
   console.log("\nB. Newly signed-in account");
   for (const [label, entry] of Object.entries(report.authenticated)) {

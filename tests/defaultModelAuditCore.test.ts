@@ -8,6 +8,7 @@ import {
   createGuestEligibilityCheck,
   GUEST_BRAND_TRIO_MODEL_IDS,
   GUEST_FALLBACK_MODEL_IDS,
+  GUEST_LINEUP_PROVIDERS,
   resolveGuestDefaultSelectedModels,
 } from "@/lib/appDefaults";
 import {
@@ -115,6 +116,53 @@ test("an AppSetting inside the trio is reported as applied when it leads", () =>
   assert.equal(report.guest.leadModelId, lead);
   assert.equal(report.guest.storedSettingApplied, true);
   assert.deepEqual(report.findings, []);
+});
+
+test("a retired lead that was succeeded in its slot is applied, not ignored", () => {
+  // The stored lead was a lineup member; it was retired and its successor now
+  // leads. That is the setting doing its job, so the audit must not call it
+  // "saved and then silently ignored".
+  const stored = GUEST_BRAND_TRIO_MODEL_IDS[1];
+  const successor = "claude-haiku-4-5";
+  assert.equal(isGuestEligible(successor), true, "the fixture successor must be guest-usable");
+  const selection = [successor, GUEST_BRAND_TRIO_MODEL_IDS[0], GUEST_BRAND_TRIO_MODEL_IDS[2]];
+  const input = healthyInput({
+    storedGuestDefaultModelId: stored,
+    normalizedGuestDefaultModelId: stored,
+    effectiveGuestSelectedModelIds: selection,
+    ssrGuestSelectedModelIds: selection,
+    hydratedGuestSelectedModelIds: selection,
+    modelStates: [...selection, DEFAULT_MODEL_ID, stored].map(stateFor),
+  });
+
+  const succeeded = auditDefaultModels({ ...input, storedGuestLeadExpectedId: successor });
+  assert.equal(succeeded.guest.storedSettingApplied, true);
+  assert.ok(!succeeded.findings.some((finding) => finding.code === "guest_setting_not_applied"));
+
+  // Without the expected id the same selection reads as ignored -- the defect.
+  assert.ok(codes(input).includes("guest_setting_not_applied"));
+  // A different expected lead is still a finding, and names the successor.
+  const wrong = auditDefaultModels({ ...input, storedGuestLeadExpectedId: "gpt-5-6-luna" });
+  const finding = wrong.findings.find((entry) => entry.code === "guest_setting_not_applied");
+  assert.ok(finding);
+  assert.match(finding.message, /succeeded by "gpt-5-6-luna"/);
+});
+
+test("a guest selection without one model from each provider is reported", () => {
+  const required = [...GUEST_LINEUP_PROVIDERS];
+  assert.ok(
+    !codes(
+      healthyInput({ guestLineupProviders: { required, effective: ["openai", "anthropic", "google"] } })
+    ).includes("guest_lineup_provider_missing")
+  );
+  const report = auditDefaultModels(
+    healthyInput({ guestLineupProviders: { required, effective: ["openai", "google", "deepseek"] } })
+  );
+  const finding = report.findings.find((entry) => entry.code === "guest_lineup_provider_missing");
+  assert.ok(finding);
+  assert.match(finding.message, /missing or doubling anthropic/);
+  // Absent input skips the check rather than guessing providers.
+  assert.ok(!codes(healthyInput()).includes("guest_lineup_provider_missing"));
 });
 
 test("a stored value outside the trio is a silent no-op, and is reported as one", () => {

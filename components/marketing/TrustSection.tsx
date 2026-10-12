@@ -9,6 +9,7 @@ import { formatLocalizedInteger } from "@/lib/pricingFormat";
 import { getLandingCopy } from "./landingContent";
 import { ModelCatalogueBlock } from "./ModelCatalogueSection";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { localizedPath } from "@/lib/seo";
 
 type ProofMetrics = {
   periodDays: number;
@@ -156,7 +157,7 @@ export function TrustSection() {
             </p>
           </div>
           <Link
-            href="/safety"
+            href={localizedPath(lang, "/safety")}
             data-testid="landing-safety-cta"
             className="group inline-flex min-h-12 shrink-0 items-center gap-2 text-sm font-bold text-white underline underline-offset-4 transition hover:text-zinc-300"
           >

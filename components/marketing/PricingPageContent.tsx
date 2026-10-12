@@ -71,6 +71,16 @@ const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: st
 
 // The public catalogue always offers exactly these three packs, so the
 // loading state can reserve their space without waiting to learn the count.
+const promotionDiscountLabel: Record<Language, (percent: number) => string> = {
+  ko: (percent) => `${percent}% 할인`,
+  en: (percent) => `${percent}% off`,
+  zh: (percent) => `优惠 ${percent}%`,
+  fr: (percent) => `${percent} % de remise`,
+  de: (percent) => `${percent} % Rabatt`,
+  es: (percent) => `${percent} % de descuento`,
+  pt: (percent) => `${percent}% de desconto`,
+};
+
 const CREDIT_PACK_PLACEHOLDER_KEYS = [
   "starter_500",
   "project_1500",
@@ -153,8 +163,8 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     longContextBody: "Input context includes the current prompt, previous conversation, and extracted file content. As that context grows, the base model charge is multiplied by the bands below.",
     tokenUnit: "input tokens",
     preflightTitle: "Check the base estimate before sending",
-    preflightBody: "The model selector shows each model's usage class and base credits. Add the selected models together; file and long-context multipliers are applied after the request context is processed.",
-    preflightCta: "Open the model selector",
+    preflightBody: "In the app’s model selector, check each model’s credit category and base credits. Before sending, the estimate adds the selected models’ base costs. Final usage may change when file content and long conversation history are processed and input-size multipliers apply.",
+    preflightCta: "Check credits in the app",
     disclaimer: "Illustrative examples for typical short requests without files or long conversation history. They are not guaranteed response counts; actual usage varies by model, full input context, attachments, and reasoning mode.",
   },
   ko: {
@@ -175,8 +185,8 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     longContextBody: "입력 문맥에는 현재 질문, 이전 대화와 추출된 파일 내용이 포함됩니다. 문맥이 길어지면 아래 구간에 따라 모델 기본 차감량에 배율이 적용됩니다.",
     tokenUnit: "입력 토큰",
     preflightTitle: "전송 전에 기본 예상량을 확인하세요",
-    preflightBody: "모델 선택기에서 각 모델의 사용 등급과 기본 크레딧을 확인할 수 있습니다. 선택한 모델의 기본값을 합산하며, 파일·긴 문맥 배율은 요청 문맥 처리 후 적용됩니다.",
-    preflightCta: "모델 선택기에서 확인",
+    preflightBody: "앱의 모델 선택기에서 각 모델의 크레딧 사용 등급과 기본 크레딧을 확인하세요. 전송 전에는 선택한 모델의 기본값을 합산한 예상량이 표시됩니다. 파일 내용과 긴 대화 기록을 처리한 뒤 적용되는 배율에 따라 최종 사용량은 달라질 수 있습니다.",
+    preflightCta: "앱에서 크레딧 확인하기",
     disclaimer: "파일이나 긴 대화 기록이 없는 일반적인 짧은 요청 기준의 예시이며 보장 응답 횟수가 아닙니다. 실제 사용량은 모델, 전체 입력 문맥, 첨부파일과 추론 방식에 따라 달라집니다.",
   },
   zh: {
@@ -197,8 +207,8 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     longContextBody: "输入上下文包括当前问题、先前对话和提取的文件内容。上下文增长时，模型基础消耗会按以下区间乘以相应倍数。",
     tokenUnit: "输入 token",
     preflightTitle: "发送前查看基础预估",
-    preflightBody: "模型选择器会显示每个模型的使用等级和基础积分。所选模型的基础值相加；文件和长上下文倍数会在处理请求上下文后应用。",
-    preflightCta: "打开模型选择器",
+    preflightBody: "在应用的模型选择器中查看各模型的积分等级与基础积分。发送前的预估为所选模型基础消耗之和；处理文件内容和长对话记录并应用输入倍数后，最终用量可能变化。",
+    preflightCta: "在应用中查看积分",
     disclaimer: "这是无文件、无长对话历史的典型短请求示例，并非保证的响应次数。实际用量会因模型、完整输入上下文、附件和推理模式而异。",
   },
   fr: {
@@ -219,8 +229,8 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     longContextBody: "Le contexte comprend la demande actuelle, la conversation précédente et le contenu extrait des fichiers. Le coût de base est multiplié selon les paliers ci-dessous.",
     tokenUnit: "tokens d'entrée",
     preflightTitle: "Vérifiez l'estimation de base avant l'envoi",
-    preflightBody: "Le sélecteur affiche la classe d'usage et les crédits de base de chaque modèle. Additionnez les modèles sélectionnés ; les multiplicateurs de fichiers et de contexte long sont appliqués après traitement.",
-    preflightCta: "Ouvrir le sélecteur de modèles",
+    preflightBody: "Dans le sélecteur de l’application, consultez la catégorie de consommation et les crédits de base de chaque modèle. L’estimation avant l’envoi additionne ces coûts. Le total final peut varier après traitement des fichiers et d’un long historique, selon les multiplicateurs d’entrée.",
+    preflightCta: "Consulter les crédits dans l’application",
     disclaimer: "Exemples indicatifs pour des requêtes courtes sans fichier ni long historique. Le nombre de réponses n'est pas garanti et varie selon le modèle, le contexte, les pièces jointes et le mode de raisonnement.",
   },
   de: {
@@ -241,8 +251,8 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     longContextBody: "Der Eingabekontext umfasst die aktuelle Anfrage, den bisherigen Verlauf und extrahierte Dateiinhalte. Mit wachsendem Kontext wird der Basisverbrauch nach den folgenden Stufen multipliziert.",
     tokenUnit: "Eingabe-Token",
     preflightTitle: "Basisprognose vor dem Senden prüfen",
-    preflightBody: "Die Modellauswahl zeigt Nutzungsklasse und Basis-Credits jedes Modells. Die ausgewählten Modelle werden addiert; Datei- und Langkontextfaktoren werden nach der Verarbeitung angewendet.",
-    preflightCta: "Modellauswahl öffnen",
+    preflightBody: "In der Modellauswahl der App sehen Sie die Credit-Kategorie und die Basis-Credits je Modell. Die Schätzung vor dem Senden addiert diese Basiswerte. Nach Verarbeitung von Dateien und langem Verlauf können Eingabefaktoren den endgültigen Verbrauch verändern.",
+    preflightCta: "Credits in der App ansehen",
     disclaimer: "Unverbindliche Beispiele für typische kurze Anfragen ohne Dateien oder langen Verlauf. Die Antwortzahl ist nicht garantiert und hängt von Modell, Gesamtkontext, Anhängen und Reasoning-Modus ab.",
   },
   es: {
@@ -263,8 +273,8 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     longContextBody: "El contexto incluye la solicitud actual, la conversación previa y el contenido extraído de archivos. Al crecer, el coste base se multiplica según los tramos siguientes.",
     tokenUnit: "tokens de entrada",
     preflightTitle: "Comprueba la estimación base antes de enviar",
-    preflightBody: "El selector muestra la clase de uso y los créditos base de cada modelo. Suma los modelos seleccionados; los multiplicadores de archivos y contexto largo se aplican tras procesar la solicitud.",
-    preflightCta: "Abrir el selector de modelos",
+    preflightBody: "En el selector de la aplicación, consulta la categoría de consumo y los créditos base de cada modelo. La estimación previa suma esos costes. El uso final puede variar al procesar archivos e historiales largos y aplicar multiplicadores de entrada.",
+    preflightCta: "Consultar créditos en la aplicación",
     disclaimer: "Ejemplos orientativos para solicitudes cortas sin archivos ni historial largo. No garantizan una cantidad de respuestas; el uso real depende del modelo, contexto, adjuntos y modo de razonamiento.",
   },
   pt: {
@@ -285,8 +295,8 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     longContextBody: "O contexto inclui o pedido atual, a conversa anterior e o conteúdo extraído dos arquivos. À medida que cresce, o custo-base é multiplicado pelas faixas abaixo.",
     tokenUnit: "tokens de entrada",
     preflightTitle: "Confira a estimativa-base antes de enviar",
-    preflightBody: "O seletor mostra a classe de uso e os créditos-base de cada modelo. Some os modelos escolhidos; multiplicadores de arquivos e contexto longo são aplicados após o processamento.",
-    preflightCta: "Abrir o seletor de modelos",
+    preflightBody: "No seletor de modelos do aplicativo, confira a categoria de consumo e os créditos-base de cada modelo. A estimativa antes do envio soma esses valores. O uso final pode mudar após o processamento de arquivos e históricos longos e a aplicação dos multiplicadores de entrada.",
+    preflightCta: "Conferir créditos no aplicativo",
     disclaimer: "Exemplos ilustrativos para pedidos curtos sem arquivos ou histórico longo. Não garantem uma quantidade de respostas; o uso real varia conforme modelo, contexto, anexos e modo de raciocínio.",
   },
 };
@@ -527,43 +537,43 @@ type PricingCopy = {
 const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
   en: {
     eyebrow: "Pricing",
-    title: "Choose the right level of AI power.",
+    title: "Try it first. Choose the plan you need.",
     description:
-      "Start free, then upgrade when you need more models, higher limits, file workflows, and premium model access.",
+      "Start with everyday questions on Free. Compare model access, monthly credits and file limits to decide whether Pro or Max fits the way you use AI.",
     billingNote: "Launch special: 50% off Pro or Max for your first month. Cancel anytime.",
     creditNotice:
-      "Credit usage varies by each model's processing cost and reasoning method. You can review the estimated usage before sending a request.",
+      "The amount shown before sending is a base credit estimate. It adds the selected models’ base costs; the final usage may change when file content and long conversation history are processed.",
     compareTitle: "Compare what each plan unlocks",
     compareScrollLabel: "Plan comparison table, scrolls horizontally",
     compareDescription:
-      "Tomverse plans are designed around model access, usage allowance, file workflows, and sharing controls.",
+      "Compare model access, monthly credits and file limits for Chat and Review. Choose a plan around the features you use and the amount of AI work you need.",
     table: {
       feature: "Feature",
       free: "Free",
       pro: "Pro",
       max: "Max",
       rows: [
-        { label: "Model access", free: "Selected model catalogue", pro: "All models with Pro usage limits", max: "All models with the largest allowance" },
+        { label: "Model access", free: "Selected models", pro: "All available models · Pro usage limits", max: "All available models · largest monthly allowance" },
         { label: "Multi-model comparison", free: "Up to 3 models", pro: "Up to 3 models", max: "Up to 3 models" },
         { label: "File attachments", free: "Images, PDFs, Office, Drive", pro: "Images, PDFs, Office, Drive", max: "Higher file and context limits" },
-        { label: "Conversation sharing", free: "Share and download", pro: "Share and download", max: "Share, download, priority limits" },
+        { label: "Conversation sharing", free: "Share and download", pro: "Share and download", max: "Share and download" },
         { label: "AI credits", free: "300/month", pro: "3,000/month", max: "10,000/month" },
       ],
     },
     faqTitle: "Pricing questions",
     faqs: [
       {
-        question: "Can I keep using Tomverse for free",
-        answer: "Yes. The Free plan is intended for light daily use with access to a selected model catalogue within usage limits.",
+        question: "Can I keep using Tomverse for free?",
+        answer: "Yes. Free gives you access to selected models for everyday questions within the plan’s usage limits. Sign in to save conversations and use supported file, sharing and download features.",
       },
       {
-        question: "How does the launch discount work",
+        question: "How does the launch discount work?",
         answer: "The launch special gives 50% off Pro or Max for the first month. After that, the plan renews at the regular monthly price unless canceled.",
         promotionOnly: true,
       },
       {
-        question: "Does Pro restrict which models I can choose",
-        answer: "Pro is intended to unlock the available model catalogue. Higher-cost models are managed through usage and cost limits rather than a simple model picker block.",
+        question: "Does Pro restrict which models I can choose?",
+        answer: "See the catalogue and model selector for models available on Pro. Credits depend on the selected model and request length, within the plan’s usage and feature limits.",
       },
     ],
     note:
@@ -578,14 +588,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         cta: "Start free",
         href: REVIEW_SIGN_IN_HREF,
         usage: "300 monthly AI credits",
-        features: [
-          "Access to the selected model catalogue",
-          "Up to 30 selected higher-cost model responses per month",
-          "Compare up to 3 models",
-          "Basic chat history",
-          "File attachments, sharing, and downloads after login",
-          "Good for light personal use",
-        ],
+        features: ["Access to selected models","Up to 30 selected higher-cost model responses per month","Compare up to 3 models","Saved conversation history","File attachments, sharing and downloads after sign-in","Start with light everyday questions"],
       },
       {
         name: "Pro",
@@ -598,13 +601,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         highlighted: true,
         badge: "Recommended",
         usage: "3,000 monthly AI credits",
-        features: [
-          "Access to all available models",
-          "Compare up to 3 models side by side",
-          "File attachments and Google Drive files",
-          "Share and download conversations",
-          "Monthly credits apply to weighted model usage",
-        ],
+        features: ["Access to all available models","Monthly credits cover each model’s credit cost","Compare up to 3 models side by side","File attachments and Google Drive files","Share and download conversations"],
       },
       {
         name: "Max",
@@ -615,224 +612,218 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         cta: "Upgrade to Max",
         href: REVIEW_WORKSPACE_PATH,
         usage: "10,000 monthly AI credits",
-        features: [
-          "Access to all available models",
-          "No daily limit on Standard models",
-          "Premium usage follows monthly credits and Fair Use",
-          "Higher attachment and context limits",
-          "Priority access to advanced models",
-        ],
+        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Higher attachment and context limits","For frequent advanced-model and long-document work"],
       },
     ],
   },
   ko: {
     eyebrow: "요금",
-    title: "필요한 AI 파워에 맞는 플랜을 선택하세요.",
-    description: "무료로 시작하고, 더 많은 모델과 높은 한도, 파일 워크플로, 프리미엄 모델 접근이 필요할 때 업그레이드하세요.",
+    title: "먼저 써보고, 필요한 만큼 선택하세요.",
+    description: "Free로 일상 질문부터 시작하세요. 자주 쓰는 모델, 월 사용량, 파일 작업에 필요한 한도를 비교해 Pro와 Max 중 나에게 맞는 플랜을 선택할 수 있습니다.",
     billingNote: "출시 특가: Pro 또는 Max 첫 달 50% 할인. 언제든 취소할 수 있습니다.",
-    creditNotice: "모델별 처리 비용과 추론 방식에 따라 크레딧 사용량이 다릅니다. 요청을 보내기 전에 예상 사용량을 확인할 수 있습니다.",
+    creditNotice: "전송 전 표시되는 값은 기본 예상 크레딧입니다. 선택한 모델의 기본값을 합산하며, 파일 내용과 긴 대화 기록을 처리한 뒤 적용되는 배율에 따라 최종 사용량은 달라질 수 있습니다.",
     compareTitle: "플랜별 제공 기능 비교",
     compareScrollLabel: "플랜 비교표, 가로로 스크롤됩니다",
-    compareDescription: "Tomverse 플랜은 모델 접근, 사용량, 파일 워크플로, 공유 제어를 기준으로 설계되었습니다.",
+    compareDescription: "Chat과 Review에서 쓰는 모델, 매월 필요한 크레딧과 파일 작업 한도를 함께 비교하세요. 자주 사용하는 기능과 실제 사용량을 기준으로 플랜을 고를 수 있습니다.",
     table: {
       feature: "기능",
       free: "Free",
       pro: "Pro",
       max: "Max",
       rows: [
-        { label: "모델 접근", free: "선별된 모델 카탈로그", pro: "Pro 사용량 한도 내 모든 모델", max: "가장 큰 사용량으로 모든 모델" },
+        { label: "모델 접근", free: "선별된 모델", pro: "모든 사용 가능 모델 · Pro 사용량 적용", max: "모든 사용 가능 모델 · 가장 큰 월 제공량" },
         { label: "다중 모델 비교", free: "최대 3개 모델", pro: "최대 3개 모델", max: "최대 3개 모델" },
         { label: "파일 첨부", free: "이미지, PDF, Office, Drive", pro: "이미지, PDF, Office, Drive", max: "더 높은 파일 및 맥락 한도" },
-        { label: "대화 공유", free: "공유 및 다운로드", pro: "공유 및 다운로드", max: "공유, 다운로드, 우선 한도" },
+        { label: "대화 공유", free: "공유 및 다운로드", pro: "공유 및 다운로드", max: "공유 및 다운로드" },
         { label: "AI 크레딧", free: "월 300", pro: "월 3,000", max: "월 10,000" },
       ],
     },
     faqTitle: "요금 관련 질문",
     faqs: [
-      { question: "Tomverse를 무료로 계속 사용할 수 있나요", answer: "네. Free 플랜은 사용량 한도 안에서 선별된 모델 카탈로그를 이용하는 가벼운 일상 사용용 플랜입니다." },
-      { question: "출시 할인은 어떻게 적용되나요", answer: "출시 특가로 Pro 또는 Max 첫 달 동안 50% 할인을 받을 수 있습니다. 이후에는 취소하지 않는 한 정가 월 요금으로 갱신됩니다.", promotionOnly: true },
-      { question: "Pro는 선택 가능한 모델을 제한하나요", answer: "Pro는 사용 가능한 모델 카탈로그를 열어두는 방향입니다. 고비용 모델은 단순히 모델 선택을 막기보다 사용량과 비용 한도로 관리합니다." },
+      { question: "무료로 계속 사용할 수 있나요?", answer: "네. Free에서는 플랜 사용 한도 안에서 일상 질문에 선별된 모델을 이용할 수 있습니다. 로그인하면 대화를 저장하고 지원되는 파일 첨부, 공유와 다운로드 기능도 사용할 수 있습니다." },
+      { question: "출시 할인은 어떻게 적용되나요?", answer: "출시 특가로 Pro 또는 Max 첫 달 동안 50% 할인을 받을 수 있습니다. 이후에는 취소하지 않는 한 정가 월 요금으로 갱신됩니다.", promotionOnly: true },
+      { question: "Pro에서 선택할 수 있는 모델이 제한되나요?", answer: "Pro에서 사용할 수 있는 모델은 모델 목록과 선택창에서 확인할 수 있습니다. 선택한 모델과 요청 길이에 따라 크레딧이 차감되며, 플랜 사용량과 기능별 이용 조건이 적용됩니다." },
     ],
     note: "가격은 선택된 현지통화의 세금 전 고정 금액입니다. Max는 Standard 모델 일일 제한 없음, Premium 사용량은 월 크레딧 및 공정사용 정책이 적용됩니다.",
     plans: [
-      { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: REVIEW_SIGN_IN_HREF, usage: "월 300 AI 크레딧", features: ["선별된 모델 카탈로그 접근", "고급 모델 월 30응답까지", "최대 3개 모델 비교", "로그인 후 파일 첨부, 공유, 다운로드", "가벼운 개인 사용에 적합"] },
-      { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 접근", "모델별 가중치에 따라 월 크레딧 사용", "최대 3개 모델 나란히 비교", "파일 첨부 및 Google Drive 파일", "공유 및 다운로드"] },
-      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 접근", "Standard 모델 일일 제한 없음", "Premium 사용량은 월 크레딧 및 공정사용 정책 적용", "더 높은 첨부파일 및 맥락 한도", "고급 모델·긴 문서 작업에 적합"] },
+      { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: REVIEW_SIGN_IN_HREF, usage: "월 300 AI 크레딧", features: ["선별된 모델 이용","선별된 고비용 모델 월 최대 30응답","최대 3개 모델 비교","저장한 대화 기록","로그인 후 파일 첨부, 공유 및 다운로드","가벼운 일상 질문부터 시작하기"] },
+      { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","모델별 크레딧 차감량에 따라 월 제공량 사용","최대 3개 모델 나란히 비교","파일 첨부 및 Google Drive 파일","대화 공유 및 다운로드"] },
+      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","Standard 모델 일일 제한 없음","Premium 사용량은 월 크레딧 및 공정사용 정책 적용","더 높은 첨부파일 및 맥락 한도","고급 모델과 긴 문서를 자주 쓰는 경우에 적합"] },
     ],
   },
   zh: {
     eyebrow: "价格",
-    title: "选择适合你的 AI 能力等级。",
-    description: "免费开始，当你需要更多模型、更高额度、文件工作流和高级模型访问时再升级。",
+    title: "先体验，再选择适合的套餐。",
+    description: "从 Free 套餐的日常提问开始。比较模型范围、每月积分和文件限制，再判断 Pro 或 Max 是否适合你的使用方式。",
     billingNote: "发布特价：Pro 或 Max 首月享 50% 折扣。可随时取消。",
-    creditNotice: "积分用量会因模型处理成本和推理方式而异。发送请求前可查看预计用量。",
+    creditNotice: "发送前显示的是基础积分预估，由所选模型的基础消耗相加得出。处理文件内容和较长的对话记录后，最终用量可能发生变化。",
     compareTitle: "比较每个方案解锁的功能",
     compareScrollLabel: "方案比较表，可横向滚动",
-    compareDescription: "Tomverse 方案围绕模型访问、使用额度、文件工作流和分享控制而设计。",
+    compareDescription: "比较 Chat 和 Review 的模型范围、每月积分与文件限制，按常用功能和实际用量选择套餐。",
     table: {
       feature: "功能",
       free: "Free",
       pro: "Pro",
       max: "Max",
       rows: [
-        { label: "模型访问", free: "精选模型目录", pro: "在 Pro 使用限制内访问所有模型", max: "以最大额度访问所有模型" },
+        { label: "模型访问", free: "精选模型", pro: "所有可用模型 · 适用 Pro 用量限制", max: "所有可用模型 · 最高月额度" },
         { label: "多模型比较", free: "最多 3 个模型", pro: "最多 3 个模型", max: "最多 3 个模型" },
         { label: "文件附件", free: "图片、PDF、Office、Drive", pro: "图片、PDF、Office、Drive", max: "更高的文件和上下文限制" },
-        { label: "对话分享", free: "分享和下载", pro: "分享和下载", max: "分享、下载和优先额度" },
+        { label: "对话分享", free: "分享和下载", pro: "分享和下载", max: "分享和下载" },
         { label: "AI 积分", free: "每月 300", pro: "每月 3,000", max: "每月 10,000" },
       ],
     },
     faqTitle: "价格问题",
     faqs: [
-      { question: "可以继续免费使用 Tomverse 吗？", answer: "可以。Free 适合轻量日常使用，可在使用限制内访问精选模型目录。" },
+      { question: "可以继续免费使用 Tomverse 吗？", answer: "可以。Free 可在套餐用量限制内，使用精选模型回答日常问题。登录后可保存对话，并使用支持的文件附件、分享与下载功能。" },
       { question: "发布折扣如何使用？", answer: "发布特价可让 Pro 或 Max 首月享受 50% 折扣。之后除非取消，否则会按标准月费续订。", promotionOnly: true },
-      { question: "Pro 会限制我能选择的模型吗？", answer: "Pro 的目标是开放可用模型目录。成本更高的模型会通过使用量和成本限制来管理，而不是简单地在模型选择器中锁定。" },
+      { question: "Pro 会限制我能选择的模型吗？", answer: "Pro 可用的模型请查看模型目录和选择器。积分消耗取决于所选模型与请求长度，并受套餐用量和功能条件约束。" },
     ],
     note: "价格为所选结算货币的税前固定金额。Max 的 Standard 模型无每日限制；Premium 用量受月度积分和公平使用政策约束。",
     plans: [
-      { name: "Free", eyebrow: "适合开始使用", price: "$0", period: "每月", description: "每月 300 AI 积分，适合轻量日常使用和体验高级模型。", cta: "免费开始", href: REVIEW_SIGN_IN_HREF, usage: "每月 300 AI 积分", features: ["访问精选模型目录", "最多比较 3 个模型", "基础聊天记录", "登录后可使用文件附件、分享和下载", "适合轻量个人使用"] },
-      { name: "Pro", eyebrow: "日常生产力", price: "$15", period: "每月", description: "每月 3,000 AI 积分，适合日常多模型比较。", cta: "升级到 Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "推荐", usage: "每月 3,000 AI 积分", features: ["访问所有可用模型", "最多并排比较 3 个模型", "文件附件和 Google Drive 文件", "分享和下载对话", "按模型加权使用月度积分"] },
-      { name: "Max", eyebrow: "高强度 AI 工作流", price: "$25", period: "每月", description: "每月 10,000 AI 积分，适合高强度高级模型和长文档工作。", cta: "升级到 Max", href: REVIEW_WORKSPACE_PATH, usage: "每月 10,000 AI 积分", features: ["访问所有可用模型", "Standard 模型无每日限制", "Premium 用量适用月度积分和公平使用政策", "更高的附件和上下文限制", "适合高级模型和长文档工作"] },
+      { name: "Free", eyebrow: "适合开始使用", price: "$0", period: "每月", description: "每月 300 AI 积分，适合轻量日常使用和体验高级模型。", cta: "免费开始", href: REVIEW_SIGN_IN_HREF, usage: "每月 300 AI 积分", features: ["使用精选模型","精选高费用模型每月最多 30 次响应","比较最多 3 个模型","已保存的对话记录","登录后可附加文件、分享和下载","从轻量日常提问开始"] },
+      { name: "Pro", eyebrow: "日常生产力", price: "$15", period: "每月", description: "每月 3,000 AI 积分，适合日常多模型比较。", cta: "升级到 Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "推荐", usage: "每月 3,000 AI 积分", features: ["使用所有可用模型","每月积分按各模型的积分消耗扣除","并排比较最多 3 个模型","附加文件和 Google Drive 文件","分享和下载对话"] },
+      { name: "Max", eyebrow: "高强度 AI 工作流", price: "$25", period: "每月", description: "每月 10,000 AI 积分，适合高强度高级模型和长文档工作。", cta: "升级到 Max", href: REVIEW_WORKSPACE_PATH, usage: "每月 10,000 AI 积分", features: ["使用所有可用模型","Standard 模型无每日限制","Premium 用量受每月积分及公平使用政策约束","更高的附件和上下文限制","适合经常使用高级模型和处理长文档"] },
     ],
   },
   fr: {
     eyebrow: "Tarifs",
-    title: "Choisissez le niveau de puissance IA qui vous convient.",
-    description: "Commencez gratuitement, puis passez à un plan supérieur lorsque vous avez besoin de plus de volume, de workflows avec fichiers et d'accès aux modèles avancés.",
-    billingNote: "Offre de lancement : -50 % sur Pro ou Max le premier mois. Annulation possible a tout moment.",
-    creditNotice: "La consommation de crédits varie selon le coût de traitement et le mode de raisonnement du modèle. Vous pouvez consulter l'estimation avant d'envoyer une demande.",
+    title: "Essayez d’abord, choisissez selon vos besoins.",
+    description: "Commencez avec Free pour vos questions du quotidien. Comparez l’accès aux modèles, les crédits mensuels et les limites de fichiers pour choisir Pro ou Max selon votre usage.",
+    billingNote: "Offre de lancement : -50 % sur Pro ou Max le premier mois. Annulation possible à tout moment.",
+    creditNotice: "Le montant affiché avant l’envoi est une estimation des crédits de base, additionnés pour les modèles sélectionnés. L’usage final peut varier après traitement des fichiers et d’un long historique.",
     compareTitle: "Comparez ce que chaque plan débloque",
     compareScrollLabel: "Tableau comparatif des plans, défilement horizontal",
-    compareDescription: "Les plans Tomverse sont conçus autour de l'accès aux modèles, des quotas d'utilisation, des workflows avec fichiers et des options de partage.",
+    compareDescription: "Comparez l’accès aux modèles, les crédits mensuels et les limites de fichiers pour Chat et Review. Choisissez selon les fonctions que vous utilisez et vos besoins réels.",
     table: {
       feature: "Fonctionnalité",
       free: "Free",
       pro: "Pro",
       max: "Max",
       rows: [
-        { label: "Accès aux modèles", free: "Niveaux de modèles Free et Pro", pro: "Tous les modèles avec les limites Pro", max: "Tous les modèles avec l'enveloppe la plus élevée" },
+        { label: "Accès aux modèles", free: "Sélection de modèles", pro: "Tous les modèles disponibles · limites Pro", max: "Tous les modèles disponibles · enveloppe mensuelle la plus élevée" },
         { label: "Comparaison multi-modèles", free: "Jusqu'à 3 modèles", pro: "Jusqu'à 3 modèles", max: "Jusqu'à 3 modèles" },
         { label: "Pièces jointes", free: "Images, PDF, Office, Drive", pro: "Images, PDF, Office, Drive", max: "Limites de fichiers et de contexte plus élevées" },
-        { label: "Partage de conversations", free: "Partage et téléchargement", pro: "Partage et téléchargement", max: "Partage, téléchargement et limites prioritaires" },
+        { label: "Partage de conversations", free: "Partage et téléchargement", pro: "Partage et téléchargement", max: "Partage et téléchargement" },
         { label: "Crédits IA", free: "300/mois", pro: "3 000/mois", max: "10 000/mois" },
       ],
     },
     faqTitle: "Questions sur les tarifs",
     faqs: [
-      { question: "Puis-je continuer à utiliser Tomverse gratuitement ?", answer: "Oui. Le plan Free est prévu pour un usage quotidien léger, avec accès à un catalogue de modèles sélectionnés dans les limites d'utilisation." },
+      { question: "Puis-je continuer à utiliser Tomverse gratuitement ?", answer: "Oui. Free donne accès à une sélection de modèles pour les questions du quotidien, dans les limites de l’offre. Connectez-vous pour enregistrer vos conversations et utiliser les fonctions de fichiers, partage et téléchargement prises en charge." },
       { question: "Comment fonctionne la réduction de lancement ?", answer: "L'offre de lancement applique -50 % sur Pro ou Max le premier mois. Ensuite, le plan se renouvelle au prix mensuel standard, sauf annulation.", promotionOnly: true },
-      { question: "Pro limite-t-il les modèles que je peux choisir ?", answer: "Pro vise à ouvrir le catalogue de modèles disponible. Les modèles plus coûteux sont gérés par des limites d'usage et de coût plutôt que par un simple blocage dans le sélecteur." },
+      { question: "Pro limite-t-il les modèles que je peux choisir ?", answer: "Consultez le catalogue et le sélecteur pour les modèles accessibles avec Pro. Les crédits dépendent du modèle et de la longueur de la demande, dans les limites d’usage et de fonctions de l’offre." },
     ],
     note: "Les prix sont des montants fixes hors taxes dans la devise de facturation sélectionnée. Avec Max, les modèles Standard n'ont pas de limite quotidienne ; l'usage Premium reste soumis aux crédits mensuels et à la politique d'utilisation équitable.",
     plans: [
-      { name: "Free", eyebrow: "Pour commencer", price: "$0", period: "par mois", description: "300 crédits IA mensuels pour un usage quotidien léger et l'essai de modèles avancés.", cta: "Commencer gratuitement", href: REVIEW_SIGN_IN_HREF, usage: "300 crédits IA par mois", features: ["Accès au catalogue de modèles sélectionnés", "Comparer jusqu'à 3 modèles", "Historique de conversation de base", "Pièces jointes, partage et téléchargements après connexion", "Adapté à un usage personnel léger"] },
-      { name: "Pro", eyebrow: "Productivité quotidienne", price: "$15", period: "par mois", description: "3 000 crédits IA mensuels pour les comparaisons multi-modèles quotidiennes.", cta: "Passer à Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recommandé", usage: "3 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles", "Comparer jusqu'à 3 modèles côte à côte", "Pièces jointes et fichiers Google Drive", "Partager et télécharger les conversations", "Crédits mensuels pondérés selon le modèle"] },
-      { name: "Max", eyebrow: "Workflows IA intensifs", price: "$25", period: "par mois", description: "10 000 crédits IA mensuels pour les modèles avancés et les longs documents.", cta: "Passer à Max", href: REVIEW_WORKSPACE_PATH, usage: "10 000 crédits IA par mois", features: ["Accès aux niveaux Free, Pro et Max", "Aucune limite quotidienne sur les modèles Standard", "L'usage Premium suit les crédits mensuels et le fair-use", "Limites de pièces jointes et de contexte plus élevées", "Adapté aux modèles avancés et aux longs documents"] },
+      { name: "Free", eyebrow: "Pour commencer", price: "$0", period: "par mois", description: "300 crédits IA mensuels pour un usage quotidien léger et l'essai de modèles avancés.", cta: "Commencer gratuitement", href: REVIEW_SIGN_IN_HREF, usage: "300 crédits IA par mois", features: ["Accès à une sélection de modèles","Jusqu’à 30 réponses par mois avec certains modèles à coût élevé","Comparez jusqu’à 3 modèles","Historique des conversations enregistrées","Fichiers, partage et téléchargements après connexion","Pour commencer avec des questions du quotidien"] },
+      { name: "Pro", eyebrow: "Productivité quotidienne", price: "$15", period: "par mois", description: "3 000 crédits IA mensuels pour les comparaisons multi-modèles quotidiennes.", cta: "Passer à Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recommandé", usage: "3 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles","Crédits mensuels consommés selon le coût de chaque modèle","Comparez jusqu’à 3 modèles côte à côte","Pièces jointes et fichiers Google Drive","Partage et téléchargement des conversations"] },
+      { name: "Max", eyebrow: "Workflows IA intensifs", price: "$25", period: "par mois", description: "10 000 crédits IA mensuels pour les modèles avancés et les longs documents.", cta: "Passer à Max", href: REVIEW_WORKSPACE_PATH, usage: "10 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles","Pas de limite quotidienne pour les modèles Standard","Usage Premium soumis aux crédits mensuels et à la politique d’usage équitable","Limites de pièces jointes et de contexte plus élevées","Pour l’usage fréquent de modèles avancés et de longs documents"] },
     ],
   },
   de: {
     eyebrow: "Preise",
-    title: "Wählen Sie die passende KI-Leistung.",
-    description: "Starten Sie kostenlos und upgraden Sie, wenn Sie mehr Nutzung, Datei-Workflows und Zugriff auf Premium-Modelle benötigen.",
+    title: "Erst ausprobieren, dann den passenden Tarif wählen.",
+    description: "Starten Sie mit Alltagsfragen im Free-Tarif. Vergleichen Sie Modellzugriff, monatliche Credits und Dateilimits, um Pro oder Max passend zu Ihrer Nutzung zu wählen.",
     billingNote: "Launch-Angebot: 50 % Rabatt auf Pro oder Max im ersten Monat. Jederzeit kündbar.",
-    creditNotice: "Der Credit-Verbrauch variiert je nach Verarbeitungskosten und Schlussfolgerungsmethode des Modells. Die geschätzte Nutzung ist vor dem Absenden sichtbar.",
+    creditNotice: "Vor dem Senden sehen Sie eine Schätzung der Basis-Credits für die gewählten Modelle. Der endgültige Verbrauch kann nach Verarbeitung von Dateien und langem Gesprächsverlauf abweichen.",
     compareTitle: "Vergleichen Sie, was jeder Plan freischaltet",
     compareScrollLabel: "Plan-Vergleichstabelle, horizontal scrollbar",
-    compareDescription: "Tomverse-Pläne sind rund um Modellzugriff, Nutzungskontingente, Datei-Workflows und Freigabefunktionen aufgebaut.",
+    compareDescription: "Vergleichen Sie Modellzugriff, monatliche Credits und Dateilimits für Chat und Review. Wählen Sie nach den Funktionen und dem Umfang, die Sie tatsächlich benötigen.",
     table: {
       feature: "Funktion",
       free: "Free",
       pro: "Pro",
       max: "Max",
       rows: [
-        { label: "Modellzugriff", free: "Ausgewählter Modellkatalog", pro: "Alle Modelle mit Pro-Limits", max: "Alle Modelle mit dem größten Kontingent" },
+        { label: "Modellzugriff", free: "Ausgewählte Modelle", pro: "Alle verfügbaren Modelle · Pro-Nutzungslimits", max: "Alle verfügbaren Modelle · größtes Monatskontingent" },
         { label: "Multi-Modell-Vergleich", free: "Bis zu 3 Modelle", pro: "Bis zu 3 Modelle", max: "Bis zu 3 Modelle" },
         { label: "Dateianhänge", free: "Bilder, PDFs, Office, Drive", pro: "Bilder, PDFs, Office, Drive", max: "Höhere Datei- und Kontextlimits" },
-        { label: "Unterhaltungen teilen", free: "Teilen und herunterladen", pro: "Teilen und herunterladen", max: "Teilen, herunterladen und priorisierte Limits" },
+        { label: "Unterhaltungen teilen", free: "Teilen und herunterladen", pro: "Teilen und herunterladen", max: "Teilen und Herunterladen" },
         { label: "KI-Credits", free: "300/Monat", pro: "3.000/Monat", max: "10.000/Monat" },
       ],
     },
     faqTitle: "Fragen zu Preisen",
     faqs: [
-      { question: "Kann ich Tomverse weiterhin kostenlos nutzen?", answer: "Ja. Free ist für leichte tägliche Nutzung gedacht und bietet innerhalb der Nutzungslimits Zugriff auf einen ausgewählten Modellkatalog." },
+      { question: "Kann ich Tomverse weiterhin kostenlos nutzen?", answer: "Ja. Free bietet innerhalb der Tariflimits ausgewählte Modelle für Alltagsfragen. Melden Sie sich an, um Gespräche zu speichern und unterstützte Datei-, Freigabe- und Downloadfunktionen zu nutzen." },
       { question: "Wie funktioniert der Launch-Rabatt?", answer: "Das Launch-Angebot gewährt im ersten Monat 50 % Rabatt auf Pro oder Max. Danach verlängert sich der Plan zum regulären Monatspreis, sofern er nicht gekündigt wird.", promotionOnly: true },
-      { question: "Beschränkt Pro die auswählbaren Modelle?", answer: "Pro soll den verfügbaren Modellkatalog öffnen. Kostenintensivere Modelle werden über Nutzungs- und Kostenlimits gesteuert, nicht über eine einfache Sperre im Modellwähler." },
+      { question: "Beschränkt Pro die auswählbaren Modelle?", answer: "Verfügbare Pro-Modelle finden Sie im Katalog und in der Modellauswahl. Der Credit-Verbrauch hängt von Modell und Anfragelänge ab; die Nutzungs- und Funktionsgrenzen des Tarifs gelten." },
     ],
     note: "Preise sind feste Beträge vor Steuern in der ausgewählten Abrechnungswährung. Bei Max haben Standard-Modelle kein Tageslimit; Premium-Nutzung unterliegt den monatlichen Credits und der Fair-Use-Richtlinie.",
     plans: [
-      { name: "Free", eyebrow: "Für den Einstieg", price: "$0", period: "pro Monat", description: "300 monatliche KI-Credits für leichte Alltagsnutzung und zum Testen fortgeschrittener Modelle.", cta: "Kostenlos starten", href: REVIEW_SIGN_IN_HREF, usage: "300 KI-Credits pro Monat", features: ["Zugriff auf den ausgewählten Modellkatalog", "Bis zu 3 Modelle vergleichen", "Grundlegender Chatverlauf", "Dateianhänge, Teilen und Downloads nach Anmeldung", "Gut für leichte persönliche Nutzung"] },
-      { name: "Pro", eyebrow: "Tägliche Produktivität", price: "$15", period: "pro Monat", description: "3.000 monatliche KI-Credits für alltägliche Multi-Modell-Vergleiche.", cta: "Auf Pro upgraden", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Empfohlen", usage: "3.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle", "Bis zu 3 Modelle nebeneinander vergleichen", "Dateianhänge und Google-Drive-Dateien", "Unterhaltungen teilen und herunterladen", "Nach Modell gewichtete Monats-Credits"] },
-      { name: "Max", eyebrow: "Intensive KI-Workflows", price: "$25", period: "pro Monat", description: "10.000 monatliche KI-Credits für intensive Arbeit mit fortgeschrittenen Modellen und langen Dokumenten.", cta: "Auf Max upgraden", href: REVIEW_WORKSPACE_PATH, usage: "10.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle", "Kein Tageslimit für Standard-Modelle", "Premium-Nutzung folgt Monats-Credits und Fair-Use", "Höhere Anhang- und Kontextlimits", "Für fortgeschrittene Modelle und lange Dokumente"] },
+      { name: "Free", eyebrow: "Für den Einstieg", price: "$0", period: "pro Monat", description: "300 monatliche KI-Credits für leichte Alltagsnutzung und zum Testen fortgeschrittener Modelle.", cta: "Kostenlos starten", href: REVIEW_SIGN_IN_HREF, usage: "300 KI-Credits pro Monat", features: ["Zugriff auf ausgewählte Modelle","Bis zu 30 Antworten ausgewählter kostenintensiver Modelle pro Monat","Bis zu 3 Modelle vergleichen","Gespeicherter Gesprächsverlauf","Dateianhänge, Teilen und Downloads nach Anmeldung","Einstieg mit einfachen Alltagsfragen"] },
+      { name: "Pro", eyebrow: "Tägliche Produktivität", price: "$15", period: "pro Monat", description: "3.000 monatliche KI-Credits für alltägliche Multi-Modell-Vergleiche.", cta: "Auf Pro upgraden", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Empfohlen", usage: "3.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle","Monatliche Credits nach dem Verbrauch des jeweiligen Modells","Bis zu 3 Modelle nebeneinander vergleichen","Dateianhänge und Google-Drive-Dateien","Gespräche teilen und herunterladen"] },
+      { name: "Max", eyebrow: "Intensive KI-Workflows", price: "$25", period: "pro Monat", description: "10.000 monatliche KI-Credits für intensive Arbeit mit fortgeschrittenen Modellen und langen Dokumenten.", cta: "Auf Max upgraden", href: REVIEW_WORKSPACE_PATH, usage: "10.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle","Kein Tageslimit für Standard-Modelle","Premium-Nutzung unterliegt Monats-Credits und der Fair-Use-Richtlinie","Höhere Anhang- und Kontextlimits","Für häufige Arbeit mit fortgeschrittenen Modellen und langen Dokumenten"] },
     ],
   },
   es: {
     eyebrow: "Precios",
-    title: "Elige el nivel adecuado de potencia de IA.",
-    description: "Empieza gratis y actualiza cuando necesites más uso, flujos con archivos y acceso a modelos premium.",
+    title: "Pruébalo y elige el plan que necesitas.",
+    description: "Empieza con preguntas cotidianas en Free. Compara el acceso a modelos, los créditos mensuales y los límites de archivos para decidir si Pro o Max encaja con tu uso.",
     billingNote: "Oferta de lanzamiento: 50 % de descuento en Pro o Max durante el primer mes. Cancela cuando quieras.",
-    creditNotice: "El consumo de créditos varía según el coste de procesamiento y el método de razonamiento del modelo. Puedes revisar el uso estimado antes de enviar una solicitud.",
+    creditNotice: "La cantidad que ves antes de enviar es una estimación de créditos base para los modelos seleccionados. El uso final puede variar al procesar archivos e historiales largos.",
     compareTitle: "Compara lo que desbloquea cada plan",
     compareScrollLabel: "Tabla comparativa de planes, con desplazamiento horizontal",
-    compareDescription: "Los planes de Tomverse se diseñan alrededor del acceso a modelos, límites de uso, archivos y controles para compartir.",
+    compareDescription: "Compara el acceso a modelos, los créditos mensuales y los límites de archivos para Chat y Review. Elige según las funciones que usas y la cantidad de trabajo que necesitas.",
     table: {
       feature: "Función",
       free: "Free",
       pro: "Pro",
       max: "Max",
       rows: [
-        { label: "Acceso a modelos", free: "Niveles Free y Pro", pro: "Todos los modelos con límites Pro", max: "Todos los modelos con la mayor asignación" },
+        { label: "Acceso a modelos", free: "Modelos seleccionados", pro: "Todos los modelos disponibles · límites de Pro", max: "Todos los modelos disponibles · mayor asignación mensual" },
         { label: "Comparación multi-modelo", free: "Hasta 3 modelos", pro: "Hasta 3 modelos", max: "Hasta 3 modelos" },
         { label: "Archivos adjuntos", free: "Imágenes, PDF, Office, Drive", pro: "Imágenes, PDF, Office, Drive", max: "Límites superiores de archivos y contexto" },
-        { label: "Compartir conversaciones", free: "Compartir y descargar", pro: "Compartir y descargar", max: "Compartir, descargar y límites prioritarios" },
+        { label: "Compartir conversaciones", free: "Compartir y descargar", pro: "Compartir y descargar", max: "Compartir y descargar" },
         { label: "Créditos de IA", free: "300/mes", pro: "3.000/mes", max: "10.000/mes" },
       ],
     },
     faqTitle: "Preguntas sobre precios",
     faqs: [
-      { question: "¿Puedo seguir usando Tomverse gratis?", answer: "Sí. Free está pensado para uso diario ligero con acceso a un catálogo de modelos seleccionados dentro de los límites de uso." },
+      { question: "¿Puedo seguir usando Tomverse gratis?", answer: "Sí. Free permite usar modelos seleccionados para preguntas cotidianas dentro de los límites del plan. Inicia sesión para guardar conversaciones y usar las funciones compatibles de archivos, compartir y descargar." },
       { question: "¿Cómo funciona el descuento de lanzamiento?", answer: "La oferta de lanzamiento aplica un 50 % de descuento en Pro o Max durante el primer mes. Después, el plan se renueva al precio mensual regular salvo cancelación.", promotionOnly: true },
-      { question: "¿Pro limita los modelos que puedo elegir?", answer: "Pro está pensado para abrir el catálogo de modelos disponible. Los modelos de mayor coste se gestionan con límites de uso y coste, no con un bloqueo simple del selector." },
+      { question: "¿Pro limita los modelos que puedo elegir?", answer: "Consulta el catálogo y el selector para ver los modelos disponibles en Pro. Los créditos dependen del modelo y de la longitud de la solicitud, dentro de los límites de uso y funciones del plan." },
     ],
     note: "Los precios son importes fijos antes de impuestos en la moneda de facturación seleccionada. En Max, los modelos Standard no tienen límite diario; el uso Premium está sujeto a los créditos mensuales y a la política de uso justo.",
     plans: [
-      { name: "Free", eyebrow: "Para empezar", price: "$0", period: "al mes", description: "300 créditos de IA al mes para uso diario ligero y probar modelos avanzados.", cta: "Empezar gratis", href: REVIEW_SIGN_IN_HREF, usage: "300 créditos de IA al mes", features: ["Acceso al catálogo de modelos seleccionados", "Comparar hasta 3 modelos", "Historial básico de chat", "Archivos, compartir y descargas tras iniciar sesión", "Adecuado para uso personal ligero"] },
-      { name: "Pro", eyebrow: "Productividad diaria", price: "$15", period: "al mes", description: "3.000 créditos de IA al mes para comparaciones multimodelo cotidianas.", cta: "Actualizar a Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles", "Comparar hasta 3 modelos lado a lado", "Archivos adjuntos y Google Drive", "Compartir y descargar conversaciones", "Créditos mensuales ponderados por modelo"] },
-      { name: "Max", eyebrow: "Flujos intensivos de IA", price: "$25", period: "al mes", description: "10.000 créditos de IA al mes para trabajo intensivo con modelos avanzados y documentos largos.", cta: "Actualizar a Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA al mes", features: ["Acceso a niveles Free, Pro y Max", "Sin límite diario en modelos Standard", "El uso Premium sigue los créditos mensuales y el uso justo", "Límites superiores de adjuntos y contexto", "Para modelos avanzados y documentos largos"] },
+      { name: "Free", eyebrow: "Para empezar", price: "$0", period: "al mes", description: "300 créditos de IA al mes para uso diario ligero y probar modelos avanzados.", cta: "Empezar gratis", href: REVIEW_SIGN_IN_HREF, usage: "300 créditos de IA al mes", features: ["Acceso a modelos seleccionados","Hasta 30 respuestas mensuales de determinados modelos de mayor coste","Compara hasta 3 modelos","Historial de conversaciones guardadas","Archivos, compartir y descargas tras iniciar sesión","Empieza con preguntas cotidianas sencillas"] },
+      { name: "Pro", eyebrow: "Productividad diaria", price: "$15", period: "al mes", description: "3.000 créditos de IA al mes para comparaciones multimodelo cotidianas.", cta: "Actualizar a Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles","Créditos mensuales según el consumo de cada modelo","Compara hasta 3 modelos lado a lado","Archivos adjuntos y archivos de Google Drive","Comparte y descarga conversaciones"] },
+      { name: "Max", eyebrow: "Flujos intensivos de IA", price: "$25", period: "al mes", description: "10.000 créditos de IA al mes para trabajo intensivo con modelos avanzados y documentos largos.", cta: "Actualizar a Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles","Sin límite diario en modelos Standard","Uso Premium sujeto a créditos mensuales y a la política de uso justo","Límites superiores de adjuntos y contexto","Para el uso frecuente de modelos avanzados y documentos largos"] },
     ],
   },
   pt: {
     eyebrow: "Preços",
-    title: "Escolha o nível certo de potência de IA.",
-    description: "Comece grátis e faça upgrade quando precisar de mais uso, workflows com arquivos e acesso a modelos premium.",
+    title: "Experimente e escolha o plano de que precisa.",
+    description: "Comece com perguntas do dia a dia no Free. Compare o acesso a modelos, os créditos mensais e os limites de arquivos para decidir se Pro ou Max atende ao seu uso.",
     billingNote: "Oferta de lançamento: 50% de desconto no Pro ou Max no primeiro mês. Cancele quando quiser.",
-    creditNotice: "O uso de créditos varia conforme o custo de processamento e o método de raciocínio do modelo. Você pode conferir o uso estimado antes de enviar uma solicitação.",
+    creditNotice: "O valor exibido antes do envio é uma estimativa dos créditos-base dos modelos escolhidos. O uso final pode mudar após o processamento de arquivos e históricos longos.",
     compareTitle: "Compare o que cada plano libera",
     compareScrollLabel: "Tabela comparativa de planos, com rolagem horizontal",
-    compareDescription: "Os planos Tomverse são pensados em torno de acesso a modelos, limites de uso, arquivos e compartilhamento.",
+    compareDescription: "Compare o acesso a modelos, os créditos mensais e os limites de arquivos para Chat e Review. Escolha conforme os recursos que usa e a quantidade de trabalho de que precisa.",
     table: {
       feature: "Recurso",
       free: "Free",
       pro: "Pro",
       max: "Max",
       rows: [
-        { label: "Acesso a modelos", free: "Níveis Free e Pro", pro: "Todos os modelos com limites Pro", max: "Todos os modelos com a maior franquia" },
+        { label: "Acesso a modelos", free: "Modelos selecionados", pro: "Todos os modelos disponíveis · limites do Pro", max: "Todos os modelos disponíveis · maior franquia mensal" },
         { label: "Comparação multi-modelo", free: "Até 3 modelos", pro: "Até 3 modelos", max: "Até 3 modelos" },
         { label: "Anexos", free: "Imagens, PDFs, Office, Drive", pro: "Imagens, PDFs, Office, Drive", max: "Limites maiores de arquivos e contexto" },
-        { label: "Compartilhar conversas", free: "Compartilhar e baixar", pro: "Compartilhar e baixar", max: "Compartilhar, baixar e limites prioritários" },
+        { label: "Compartilhar conversas", free: "Compartilhar e baixar", pro: "Compartilhar e baixar", max: "Compartilhar e baixar" },
         { label: "Créditos de IA", free: "300/mês", pro: "3.000/mês", max: "10.000/mês" },
       ],
     },
     faqTitle: "Perguntas sobre preços",
     faqs: [
-      { question: "Posso continuar usando o Tomverse de graça?", answer: "Sim. O Free é pensado para uso diário leve, com acesso a um catálogo de modelos selecionados dentro dos limites de uso." },
+      { question: "Posso continuar usando o Tomverse de graça?", answer: "Sim. O Free permite usar modelos selecionados para perguntas do dia a dia dentro dos limites do plano. Entre para salvar conversas e usar os recursos compatíveis de arquivos, compartilhamento e download." },
       { question: "Como funciona o desconto de lançamento?", answer: "A oferta de lançamento aplica 50% de desconto no Pro ou Max no primeiro mês. Depois disso, o plano renova pelo preço mensal regular, salvo cancelamento.", promotionOnly: true },
-      { question: "O Pro limita quais modelos posso escolher?", answer: "O Pro foi pensado para liberar o catálogo de modelos disponível. Modelos de custo maior são gerenciados por limites de uso e custo, não por um bloqueio simples no seletor." },
+      { question: "O Pro limita quais modelos posso escolher?", answer: "Veja o catálogo e o seletor para os modelos disponíveis no Pro. Os créditos dependem do modelo e do tamanho da solicitação, dentro dos limites de uso e recursos do plano." },
     ],
     note: "Os preços são valores fixos antes de impostos na moeda de cobrança selecionada. No Max, modelos Standard não têm limite diário; o uso Premium está sujeito aos créditos mensais e à política de uso justo.",
     plans: [
-      { name: "Free", eyebrow: "Para começar", price: "$0", period: "por mês", description: "300 créditos de IA por mês para uso diário leve e para testar modelos avançados.", cta: "Começar grátis", href: REVIEW_SIGN_IN_HREF, usage: "300 créditos de IA por mês", features: ["Acesso ao catálogo de modelos selecionados", "Comparar até 3 modelos", "Histórico básico de chat", "Anexos, compartilhamento e downloads após login", "Bom para uso pessoal leve"] },
-      { name: "Pro", eyebrow: "Produtividade diária", price: "$15", period: "por mês", description: "3.000 créditos de IA por mês para comparações multimodelo cotidianas.", cta: "Atualizar para Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis", "Comparar até 3 modelos lado a lado", "Anexos e arquivos do Google Drive", "Compartilhar e baixar conversas", "Créditos mensais ponderados por modelo"] },
-      { name: "Max", eyebrow: "Fluxos intensivos de IA", price: "$25", period: "por mês", description: "10.000 créditos de IA por mês para trabalho intensivo com modelos avançados e documentos longos.", cta: "Atualizar para Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA por mês", features: ["Acesso aos níveis Free, Pro e Max", "Sem limite diário em modelos Standard", "O uso Premium segue os créditos mensais e o uso justo", "Limites maiores de anexos e contexto", "Para modelos avançados e documentos longos"] },
+      { name: "Free", eyebrow: "Para começar", price: "$0", period: "por mês", description: "300 créditos de IA por mês para uso diário leve e para testar modelos avançados.", cta: "Começar grátis", href: REVIEW_SIGN_IN_HREF, usage: "300 créditos de IA por mês", features: ["Acesso a modelos selecionados","Até 30 respostas mensais de modelos selecionados de maior custo","Compare até 3 modelos","Histórico de conversas salvas","Anexos, compartilhamento e downloads após o login","Comece com perguntas simples do dia a dia"] },
+      { name: "Pro", eyebrow: "Produtividade diária", price: "$15", period: "por mês", description: "3.000 créditos de IA por mês para comparações multimodelo cotidianas.", cta: "Atualizar para Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis","Créditos mensais conforme o consumo de cada modelo","Compare até 3 modelos lado a lado","Anexos e arquivos do Google Drive","Compartilhe e baixe conversas"] },
+      { name: "Max", eyebrow: "Fluxos intensivos de IA", price: "$25", period: "por mês", description: "10.000 créditos de IA por mês para trabalho intensivo com modelos avançados e documentos longos.", cta: "Atualizar para Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis","Sem limite diário em modelos Standard","Uso Premium sujeito aos créditos mensais e à Política de Uso Justo","Limites maiores de anexos e contexto","Para uso frequente de modelos avançados e documentos longos"] },
     ],
   },
 };
@@ -1276,7 +1267,7 @@ export function PricingPageContent() {
                     {saleCopy.badge}
                   </span>
                   <p className="mt-3 text-4xl font-black tracking-tight text-accent-promotion-700 dark:text-accent-promotion-200">
-                    {featuredPromotion.discountPercent}% OFF
+                    {promotionDiscountLabel[lang](featuredPromotion.discountPercent)}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-accent-promotion-500/20 bg-accent-promotion-500/10 px-4 py-3 text-sm font-bold text-accent-promotion-700 dark:text-accent-promotion-200">
@@ -1392,7 +1383,7 @@ export function PricingPageContent() {
                     ? "bg-white text-blue-700 shadow-blue-950/20"
                     : "bg-accent-promotion-700 text-white shadow-accent-promotion-950/20"
                 }`}>
-                  {featuredPromotion.discountPercent}% OFF
+                  {promotionDiscountLabel[lang](featuredPromotion.discountPercent)}
                 </div>
               ) : null}
               {/*
@@ -1500,7 +1491,7 @@ export function PricingPageContent() {
                       // One step darker in light only; dark already passed.
                       className={`min-w-0 text-xs font-bold [overflow-wrap:anywhere] ${plan.highlighted ? "text-blue-50" : "text-accent-promotion-700 dark:text-accent-promotion-400"}`}
                     >
-                      {featuredPromotion?.discountPercent}% OFF
+                      {featuredPromotion ? promotionDiscountLabel[lang](featuredPromotion.discountPercent) : null}
                     </span>
                   </div>
                   {/* Same split-span problem as the plain price above, plus a

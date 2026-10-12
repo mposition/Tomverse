@@ -211,19 +211,19 @@ test.describe("Korean typography: landing hero", () => {
     await mockPublicProofMetrics(page);
   });
 
-  test("keeps 구독은 intact and wraps within 4 lines at 320x568", async ({ page }) => {
+  test("keeps 고민은 intact and wraps within 4 lines at 320x568", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/");
     await selectLanguage(page, "ko");
 
     const title = page.getByTestId("landing-hero-title");
     await expect(title).toBeVisible();
-    await expect(title).toContainText("구독은");
+    await expect(title).toContainText("고민은");
 
     const lineCount = await countRenderedLines(page, "[data-testid='landing-hero-title']");
     expect(lineCount).toBeLessThanOrEqual(4);
 
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "구독은");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
     expect(wordLines).toBe(1);
 
     const box = await title.boundingBox();
@@ -240,8 +240,8 @@ test.describe("Korean typography: landing hero", () => {
     await selectLanguage(page, "ko");
 
     const title = page.getByTestId("landing-hero-title");
-    await expect(title).toContainText("구독은");
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "구독은");
+    await expect(title).toContainText("고민은");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
     expect(wordLines).toBe(1);
 
     await expect(page.getByTestId("landing-primary-cta")).toBeVisible();
@@ -269,8 +269,8 @@ test.describe("Korean typography: landing hero", () => {
     await page.goto("/");
 
     const title = page.getByTestId("landing-hero-title");
-    await expect(title).toContainText("One subscription.");
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "One");
+    await expect(title).toContainText("Let Tomverse help you choose.");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "Tomverse");
     expect(wordLines).toBe(1);
 
     await expectNoHorizontalOverflow(page);
@@ -282,7 +282,7 @@ test.describe("Korean typography: landing hero", () => {
     await selectLanguage(page, "zh");
 
     const title = page.getByTestId("landing-hero-title");
-    await expect(title).toContainText("一个订阅。");
+    await expect(title).toContainText("让 Tomverse 帮你选。");
     await expectNoHorizontalOverflow(page);
 
     const box = await title.boundingBox();
@@ -300,7 +300,7 @@ test.describe("Korean typography: landing hero", () => {
     await page.waitForTimeout(100);
 
     await expectNoHorizontalOverflow(page);
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "구독은");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
     expect(wordLines).toBe(1);
   });
 
@@ -310,7 +310,7 @@ test.describe("Korean typography: landing hero", () => {
     await page.goto("/");
     await selectLanguage(page, "ko");
 
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "구독은");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
     expect(wordLines).toBe(1);
     await expectNoHorizontalOverflow(page);
   });

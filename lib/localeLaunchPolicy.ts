@@ -84,9 +84,9 @@ export const localeLaunchPolicy = {
     selectorLabel: "Português · Prévia",
     badge: "Prévia de idioma",
     scopeNotice:
-      "O português está disponível como prévia para a interface e os guias principais. O conteúdo jurídico, de faturação e de suporte ainda não foi totalmente revisto; use English ou 한국어 para cobertura completa.",
+      "O português está disponível como prévia para a interface e os guias principais. O conteúdo jurídico, de cobrança e de suporte ainda não foi totalmente revisado; use English ou 한국어 para cobertura completa.",
     englishFallbackNotice:
-      "Esta página ainda não possui uma versão revista em português e, por isso, é apresentada em inglês. Use English ou 한국어 para cobertura completa.",
+      "Esta página ainda não possui uma versão revisada em português e, por isso, é apresentada em inglês. Use English ou 한국어 para cobertura completa.",
   },
 } satisfies Record<Language, LocaleLaunchPolicy>;
 

@@ -1,13 +1,8 @@
 import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
 import { infoPages } from "@/components/marketing/marketingInfoContent";
-import { createPageMetadata } from "@/lib/seo";
+import { publicMarketingPageMetadata } from "@/lib/publicMarketingMetadata";
 
-export const metadata = createPageMetadata({
-  title: "Frequently Asked Questions",
-  description:
-    "Answers about Tomverse Review models, accounts, file attachments, sharing, billing, and usage limits.",
-  path: "/faq",
-});
+export const metadata = publicMarketingPageMetadata("/faq");
 
 export default function FaqPage() {
   return <MarketingInfoPage content={infoPages.faq} />;

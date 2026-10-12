@@ -855,13 +855,15 @@ test("clicking the banner's suggestion swaps the failed model instead of silentl
     "The 3-panel cap assertion only applies to the desktop chat shell."
   );
   await mockAuthenticatedApi(page);
-  // Signed in, so the workspace settles on the account default the settings
-  // fixture returns -- gpt-5-6-luna, a stored default an existing account
-  // keeps -- and not on the guest trio SELECTED describes.
+  // Signed in at `/chat?lang=en`, so the settings read carries `?lang=en`,
+  // which mockAuthenticatedApi's `**/api/user/settings` route does not match:
+  // the E2E server answers it, and the workspace opens on the compiled default,
+  // APP_DEFAULTS.defaultModelId -- the trio's OpenAI slot, SELECTED.gpt. It
+  // named gpt-5-6-luna until the default moved to gpt-6-luna on 2026-10-12.
   await mockProviderStatus(page, [
     {
-      id: "gpt-5-6-luna",
-      provider: "openai",
+      id: SELECTED.gpt.id,
+      provider: SELECTED.gpt.provider,
       status: "unavailable",
       fallbackModelIds: ["mistral-small-4"],
       fallbackHealth: "operational",
@@ -885,14 +887,14 @@ test("clicking the banner's suggestion swaps the failed model instead of silentl
 
   await expect(banner(page)).toBeVisible();
   const swapButton = banner(page).getByRole("button", {
-    name: "Switch GPT-5.6 Luna for Mistral Small 4",
+    name: `Switch ${SELECTED.gpt.name} for Mistral Small 4`,
   });
   await expect(swapButton).toBeVisible();
 
   await swapButton.click();
 
   await expect(
-    page.locator('[data-testid="desktop-model-panel"][data-model-id="gpt-5-6-luna"]')
+    page.locator(`[data-testid="desktop-model-panel"][data-model-id="${SELECTED.gpt.id}"]`)
   ).toHaveCount(0);
   await expect(
     page.locator('[data-testid="desktop-model-panel"][data-model-id="mistral-small-4"]')

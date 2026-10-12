@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   isStaticMarketingPathname,
+  LOCALIZED_MARKETING_BASE_PATHS,
   localizedMarketingRedirect,
 } from "../lib/marketingRoutes.ts";
 import { marketingProductEntryHref } from "../lib/marketingProductEntry.ts";
@@ -62,25 +63,17 @@ test("an already-localized path never redirects, which is what makes a loop impo
 });
 
 test("only the routes that have a localized counterpart are redirected", () => {
-  // Generated per locale.
-  for (const intent of [
-    "ai-answer-review",
-    "ai-for-file-analysis",
-    "chatgpt-vs-claude",
-    "compare-ai-models",
-  ]) {
+  for (const path of LOCALIZED_MARKETING_BASE_PATHS) {
     assert.equal(
-      localizedMarketingRedirect({ pathname: `/${intent}`, language: "ko", source: "accept" }),
-      `/ko/${intent}`
+      localizedMarketingRedirect({ pathname: path, language: "ko", source: "accept" }),
+      path === "/" ? "/ko" : `/ko${path}`
     );
   }
-  // English-only marketing pages: there is no /ko/pricing to send anyone to,
-  // so redirecting would be a 404 dressed up as a fix.
-  for (const path of ["/pricing", "/faq", "/privacy", "/terms", "/safety/approach"]) {
+  for (const path of ["/privacy", "/terms", "/refund"]) {
     assert.equal(
       localizedMarketingRedirect({ pathname: path, language: "ko", source: "accept" }),
       null,
-      `${path} has no localized counterpart`
+      `${path} keeps its existing legal destination`
     );
   }
 });

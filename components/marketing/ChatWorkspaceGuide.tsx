@@ -163,6 +163,19 @@ export function ChatWorkspaceGuide() {
           </p>
         </header>
 
+        <section className="mt-8 rounded-3xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:p-7">
+          <h2 className="text-xl font-black">{copy.chatIntro.title}</h2>
+          <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{copy.chatIntro.description}</p>
+          <dl className="mt-5 grid gap-5 sm:grid-cols-2">
+            {copy.chatIntro.items.map((item) => (
+              <div key={item.term}>
+                <dt className="text-sm font-bold">{item.term}</dt>
+                <dd className="mt-2 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{item.detail}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
         <nav
           aria-label={copy.contents}
           className="mt-10 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/45"
