@@ -175,11 +175,12 @@ test("narrow Korean dialog keeps actions within viewport",async({page})=>{
 test("Korean board and detail render with the console theme",async({page})=>{
   await setup(page);
   await page.goto("/e2e/admin-console-fixture?view=amux&locale=ko");
-  await page.evaluate(()=>document.documentElement.classList.add("dark"));
   await expect(page.getByRole("region",{name:"AMUX 대기열"})).toBeVisible();
+  await expect(page.getByTestId("amux-execution-workspace")).toHaveCSS("background-color","rgb(11, 15, 22)");
   await page.screenshot({path:test.info().outputPath("ko-board-desktop.png")});
   await page.getByRole("button",{name:"AMUX-104",exact:true}).click();
   await expect(page.getByRole("dialog").getByRole("tab",{name:"개요",exact:true})).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCSS("background-color","rgb(23, 30, 42)");
   await page.getByRole("tab",{name:"개요",exact:true}).focus();
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("tab",{name:"실행 이력",exact:true})).toBeFocused();

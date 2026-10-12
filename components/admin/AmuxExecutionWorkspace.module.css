@@ -1,24 +1,11 @@
 
 .workspace, .overlay {
-  --amux-canvas: #f6f8fb; --amux-surface: #fff; --amux-raised: #edf1f7;
-  --amux-border: #d7dfeb; --amux-text: #182335; --amux-muted: #52627a;
-  --amux-subtle: #61718a; --amux-blue: #245ed7; --amux-primary: #346cfb;
-  --amux-selected: #e4edff; --amux-warning: #886014;
-  color: var(--amux-text);
-}
-:global(.dark) .workspace, :global(.dark) .overlay {
+  /* The Admin Console owns a fixed dark surface independently of site theme. */
   --amux-canvas: #0b0f16; --amux-surface: #171e2a; --amux-raised: #1c2533;
   --amux-border: #293446; --amux-text: #ebf0f7; --amux-muted: #a2aec0;
   --amux-subtle: #8c9bb1; --amux-blue: #7ba5ff; --amux-selected: #1c335b;
   --amux-warning: #eac17c;
-}
-@media (prefers-color-scheme: dark) {
-  :global(:root:not(.light):not(.dark)) .workspace, :global(:root:not(.light):not(.dark)) .overlay {
-    --amux-canvas: #0b0f16; --amux-surface: #171e2a; --amux-raised: #1c2533;
-    --amux-border: #293446; --amux-text: #ebf0f7; --amux-muted: #a2aec0;
-    --amux-subtle: #8c9bb1; --amux-blue: #7ba5ff; --amux-selected: #1c335b;
-    --amux-warning: #eac17c;
-  }
+  color: var(--amux-text);
 }
 .workspace { width:100%; min-width:0; padding:20px; background:var(--amux-canvas); border:1px solid var(--amux-border); border-radius:12px; }
 .header, .toolbar, .summary, .columnHeading, .identity, .dialogBar, .dialogFooter { display:flex; align-items:center; gap:12px; }
