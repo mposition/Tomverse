@@ -127,9 +127,10 @@ test("complementary suggestion fills the missing capability in priority order", 
     "perplexity/sonar",
   ]);
   // Tracks the head of STANDARD_CANDIDATE_ORDER, which gpt-5-6-luna took
-  // over from gpt-5-4-mini when it became the app default.
+  // over from gpt-5-4-mini when it became the app default, and gpt-6-luna
+  // from gpt-5-6-luna on 2026-10-12.
   assert.deepEqual(hasReasoningAndResearch, {
-    modelId: "gpt-5-6-luna",
+    modelId: "gpt-6-luna",
     reason: "different_provider",
   });
 });
@@ -194,9 +195,13 @@ test("the wizard's output is unchanged over every combination of answers", () =>
   // three file-usage answers. Pinned so a table gaining or losing a task shows
   // up here rather than silently shrinking the coverage this test claims.
   assert.equal(lines.length, 756);
+  // Repinned 2026-10-12 for an id rename only: gpt-5-6-luna -> gpt-6-luna and
+  // claude-haiku-4-5 -> claude-haiku-5-5. Mapping those two ids back in this
+  // output reproduces the previous digest, bf0a0651...a358ee, exactly, so no
+  // ranking, combination or reason moved.
   assert.equal(
     createHash("sha256").update(lines.join("\n")).digest("hex"),
-    "bf0a0651835eb5b228fd763c06c27cd1fba6a36f0f9f7f6f0d9dd58384a358ee",
+    "f8e8dd4176f4abd91cdd2e40a021479ad48f9eb12c101c51e5fc8e146fa514cf",
     "the model finder's recommendations changed"
   );
 });
