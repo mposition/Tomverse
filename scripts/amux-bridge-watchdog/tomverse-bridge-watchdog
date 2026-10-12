@@ -50,8 +50,12 @@ case "$state" in
     ;;
 esac
 
-if curl --fail --silent --show-error --max-time 10 --retry 3 --retry-delay 2 \
-  --proto '=https' --output /dev/null "$target"; then
+# The URL goes to curl as a config line on stdin, never as an argument: any
+# local user, the worker account included, can read a process's arguments
+# from /proc/<pid>/cmdline. printf is a builtin and starts no process. The
+# URL pattern above admits no quote or backslash, so the line is literal.
+if printf 'url = "%s"\n' "$target" | curl --config - --fail --silent --show-error \
+  --max-time 10 --retry 3 --retry-delay 2 --proto '=https' --output /dev/null; then
   echo "tomverse-bridge-watchdog: $unit is $state; sent $signal"
 else
   echo "tomverse-bridge-watchdog: $unit is $state; the $signal signal was not delivered" >&2

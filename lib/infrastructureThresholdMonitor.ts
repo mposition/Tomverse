@@ -74,6 +74,12 @@ async function reportSilentMarketingPublisherRuns(now: Date): Promise<number> {
  * `AMUX_BRIDGE_REMINDER_MS`, and the first run that finds it live again says
  * so. The message names when the leases ran out and where to look -- never a
  * worker, a card or the reason the bridge stopped, which only the host knows.
+ *
+ * Only `lost` and `live` are reported. `lapsing` and `unwatched` are not
+ * evidence the bridge is alive: reporting them healthy would announce a
+ * recovery when a halted bridge's last lease merely ages out of the horizon.
+ * Saying nothing keeps a lost bridge lost until a live lease is seen, and
+ * stops the reminders once it ages out.
  */
 async function reportAmuxBridgeLiveness(
   now: Date
@@ -83,6 +89,9 @@ async function reportAmuxBridgeLiveness(
     select: { leaseExpiresAt: true },
   });
   const verdict = judgeAmuxBridgeLiveness(leases, now);
+  if (verdict.state !== "lost" && verdict.state !== "live") {
+    return { state: verdict.state, notified: false };
+  }
   const lost = verdict.state === "lost";
   const report = await reportOperationalDependencyStatus({
     dependency: "amux-execution-bridge",
