@@ -35,6 +35,39 @@ const DECLARATION_KEY = "Goal-Step:";
 const DECLARATION = new RegExp(
   "^Goal-Step:\\s*([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)/(-|op|[A-Za-z0-9._-]{1,32})(\\s+completes)?$"
 );
+const OPENING_FENCE = /^(`{3,}|~{3,})(.*)$/;
+
+/**
+ * Each line of a Markdown text with its role in fenced code blocks, by the
+ * CommonMark rule: a block opens on three or more backticks or tildes (a
+ * backtick fence's info string has no backtick), closes only on a line of the
+ * same character at least as long as the opening with nothing after it, and
+ * an unclosed block runs to the end. A shorter or different fence line inside
+ * a block is content, so a four-backtick example that quotes a three-backtick
+ * one stays one block.
+ */
+export function* fencedLines(text) {
+  let open = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (open === null) {
+      const match = line.match(OPENING_FENCE);
+      if (match && !(match[1][0] === "`" && match[2].includes("`"))) {
+        open = { char: match[1][0], length: match[1].length };
+        yield { line, role: "open", info: match[2].trim() };
+      } else {
+        yield { line, role: "text" };
+      }
+      continue;
+    }
+    if (line.length >= open.length && [...line].every((c) => c === open.char)) {
+      open = null;
+      yield { line, role: "close" };
+    } else {
+      yield { line, role: "inside" };
+    }
+  }
+}
 
 /**
  * The one Goal-Step line in a pull request body, or why there is none.
@@ -44,16 +77,8 @@ const DECLARATION = new RegExp(
 export function parseGoalStepDeclaration(body) {
   if (typeof body !== "string" || body.length === 0) return { kind: "missing" };
   const found = [];
-  let fence = null;
-  for (const raw of body.split(/\r?\n/)) {
-    const line = raw.trim();
-    const marker = line.match(/^(`{3,}|~{3,})/);
-    if (marker) {
-      if (fence === null) fence = marker[1][0];
-      else if (marker[1][0] === fence) fence = null;
-      continue;
-    }
-    if (fence === null && line.startsWith(DECLARATION_KEY)) found.push(line);
+  for (const { line, role } of fencedLines(body)) {
+    if (role === "text" && line.startsWith(DECLARATION_KEY)) found.push(line);
   }
   if (found.length === 0) return { kind: "missing" };
   if (found.length > 1) return { kind: "invalid", reason: "more than one Goal-Step line" };
@@ -162,8 +187,18 @@ export function validateGoalSpec(spec) {
 export function goalSpecsFromText(text, { markdown }) {
   const raw = [];
   if (markdown) {
-    const block = /^(`{3,})goal-steps[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*$/gm;
-    for (const match of text.matchAll(block)) raw.push(match[2]);
+    let collecting = null;
+    for (const { line, role, info } of fencedLines(text)) {
+      if (role === "open" && info.split(/\s+/)[0] === "goal-steps") collecting = [];
+      else if (role === "inside" && collecting) collecting.push(line);
+      else if (role === "close" && collecting) {
+        raw.push(collecting.join("\n"));
+        collecting = null;
+      }
+    }
+    // An unclosed block runs to the end of the file, which is almost always a
+    // missing fence rather than an intended goal.
+    if (collecting) return { problems: ["a ```goal-steps block is not closed"] };
     if (raw.length === 0) return { problems: ["no ```goal-steps block in this file"] };
   } else {
     raw.push(text);
@@ -196,6 +231,10 @@ export function goalSpecsFromText(text, { markdown }) {
  */
 export function normalisePullRequests(list) {
   if (!Array.isArray(list)) return [];
+  // A time that does not parse is no time: an unmerged pull request rather
+  // than a merge at an instant nothing can compare against.
+  const instant = (value) =>
+    typeof value === "string" && Number.isFinite(Date.parse(value)) ? new Date(Date.parse(value)).toISOString() : null;
   return list.flatMap((pr) => {
     if (!pr || !Number.isInteger(pr.number)) return [];
     return [{
@@ -203,11 +242,26 @@ export function normalisePullRequests(list) {
       title: typeof pr.title === "string" ? pr.title.slice(0, 200) : "",
       base: pr.baseRefName ?? pr.base?.ref ?? null,
       head: pr.headRefName ?? pr.head?.ref ?? "",
-      createdAt: pr.createdAt ?? pr.created_at ?? null,
-      mergedAt: pr.mergedAt ?? pr.merged_at ?? null,
+      createdAt: instant(pr.createdAt ?? pr.created_at),
+      mergedAt: instant(pr.mergedAt ?? pr.merged_at),
       declaration: parseGoalStepDeclaration(pr.body ?? ""),
     }];
   });
+}
+
+/** The REST listing is read newest-first, a page at a time, up to this many pages. */
+export const PULL_REQUEST_PAGE_SIZE = 100;
+export const PULL_REQUEST_PAGE_CAP = 30;
+
+/**
+ * Whether a newest-first listing has reached back past `startMs`: a short
+ * page is the end of the list, and an entry updated before the start means
+ * everything older is outside the window. Anything else is an incomplete read.
+ */
+export function listingReachedStart(lastBatch, startMs) {
+  if (!Array.isArray(lastBatch) || lastBatch.length < PULL_REQUEST_PAGE_SIZE) return true;
+  const oldest = Date.parse(lastBatch.at(-1)?.updated_at ?? "");
+  return Number.isFinite(oldest) && oldest < startMs;
 }
 
 const at = (value) => (value ? Date.parse(value) : NaN);
@@ -215,14 +269,18 @@ const after = (value, baseline) => Number.isFinite(at(value)) && at(value) > bas
 
 /** One goal's position. `now` is a millisecond timestamp. */
 export function goalPosition(goal, pullRequests, now) {
-  const declared = pullRequests.filter((pr) => pr.declaration.goal === goal.goal);
+  // The goal's own period: a pull request that declared this goal id before
+  // the goal started, or a merge from then, is not this goal's work or evidence.
+  const start = at(goal.since);
+  const declared = pullRequests.filter((pr) => pr.declaration.goal === goal.goal &&
+    (after(pr.createdAt, start) || after(pr.mergedAt, start)));
   const steps = goal.steps.map((step) => {
     if (step.evidence === "operator_confirmed") {
       return { ...step, done: step.confirmedAt !== null, doneAt: step.confirmedAt, doneBy: step.confirmedAt ? "operator" : null };
     }
     const completing = declared
       .filter((pr) => pr.declaration.kind === "completes" && pr.declaration.step === step.id &&
-        pr.base === step.base && pr.mergedAt && !step.rejectedPrs.includes(pr.number))
+        pr.base === step.base && after(pr.mergedAt, start) && !step.rejectedPrs.includes(pr.number))
       .sort((a, b) => at(a.mergedAt) - at(b.mergedAt))[0];
     return completing
       ? { ...step, done: true, doneAt: completing.mergedAt, doneBy: `#${completing.number}` }
@@ -242,8 +300,14 @@ export function goalPosition(goal, pullRequests, now) {
   const op = mergedSince.filter((pr) => pr.declaration.kind === "op").length;
   const active = declared.some((pr) => after(pr.createdAt, baseline) || after(pr.mergedAt, baseline));
   const hours = (now - baseline) / 3_600_000;
-  const open = new Set(steps.filter((step) => !step.done).map((step) => step.id));
-  const churn = Object.entries(stepPrs).filter(([id, count]) => open.has(id) && count >= STEP_CHURN_M);
+  // Churn is per step and cumulative over the goal: another step finishing
+  // does not excuse an open step that keeps absorbing pull requests.
+  const openStepPrs = {};
+  for (const step of steps.filter((s) => !s.done)) {
+    openStepPrs[step.id] = declared.filter((pr) => after(pr.mergedAt, start) &&
+      (pr.declaration.kind === "step" || pr.declaration.kind === "completes") && pr.declaration.step === step.id).length;
+  }
+  const churn = Object.entries(openStepPrs).filter(([, count]) => count >= STEP_CHURN_M);
   const signals = {
     sideWorkChain: { value: side, threshold: SIDE_WORK_CHAIN_N, fired: side >= SIDE_WORK_CHAIN_N },
     stepStall: { value: Math.max(0, hours), threshold: STEP_STALL_HOURS, active, fired: active && hours >= STEP_STALL_HOURS },

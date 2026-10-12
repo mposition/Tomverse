@@ -7,6 +7,7 @@ import { join } from "node:path";
 import {
   goalPosition,
   goalSpecsFromText,
+  listingReachedStart,
   normalisePullRequests,
   parseGoalStepDeclaration,
   repositoryDeclarationStats,
@@ -224,6 +225,78 @@ test("the command reports from a checklist and a saved pull request list, and re
     const refused = run();
     assert.equal(refused.status, 1);
     assert.match(refused.stderr, /goal: an id like CHAT-01/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fences close only on the same character, at least as long, with nothing after it", () => {
+  const missing = (body) => assert.deepEqual(parseGoalStepDeclaration(body), { kind: "missing" }, body);
+  // A four-backtick example quoting a three-backtick one stays one block.
+  missing("````md\n```\nGoal-Step: CHAT-01/B07 completes\n```\n````\n");
+  missing("````\nx\n```\nGoal-Step: CHAT-01/B07\n````");
+  missing("~~~\n```\nGoal-Step: CHAT-01/B07\n~~~");
+  missing("```\n```js\nGoal-Step: CHAT-01/B07\n```");
+  // An unclosed block runs to the end.
+  missing("```\nGoal-Step: CHAT-01/B07");
+  // A longer closing fence closes; the declaration after it counts.
+  assert.deepEqual(parseGoalStepDeclaration("```\nx\n`````\nGoal-Step: CHAT-01/-"), { kind: "side", goal: "CHAT-01" });
+});
+
+test("a goal-steps block with a longer closing fence is read, and an unclosed one is refused", () => {
+  const json = JSON.stringify({ goal: "CHAT-01", title: "t", since: iso(0), steps: [{ id: "A", title: "a", evidence: "operator_confirmed" }] });
+  assert.deepEqual(goalSpecsFromText("```goal-steps\n" + json + "\n`````\n", { markdown: true }).goals.map((g) => g.goal), ["CHAT-01"]);
+  assert.deepEqual(goalSpecsFromText("````goal-steps\n" + json + "\n````", { markdown: true }).goals.map((g) => g.goal), ["CHAT-01"]);
+  assert.match(goalSpecsFromText("```goal-steps\n" + json + "\n", { markdown: true }).problems.join(), /not closed/);
+});
+
+test("an open step's churn is cumulative and survives another step finishing", () => {
+  const onEnv = Array.from({ length: STEP_CHURN_M }, (_, i) => pr("Goal-Step: AMUX-V22-ACT/ENV", { created: 1 + i * 0.1, merged: 1.05 + i * 0.1 }));
+  const latch = pr("Goal-Step: AMUX-V22-ACT/LATCH completes", { created: 1.9, merged: 2, base: "main" });
+  const position = goalPosition(goal(), normalisePullRequests([...onEnv, latch]), T0 + 3 * HOUR);
+  assert.equal(position.baselineFrom, "step LATCH");
+  assert.deepEqual(position.signals.stepChurn.steps, [{ id: "ENV", count: STEP_CHURN_M }]);
+  assert.equal(position.state, "attention");
+});
+
+test("work and evidence from before the goal started are not this goal's", () => {
+  const early = pr("Goal-Step: AMUX-V22-ACT/LATCH completes", { created: -6, merged: -5, base: "main" });
+  const position = goalPosition(goal(), normalisePullRequests([early]), T0 + 3 * HOUR);
+  assert.deepEqual([position.steps[0].done, position.declaredEver, position.state], [false, 0, "insufficient_evidence"]);
+  // Created before the start but merged after it: that merge is evidence.
+  const straddling = pr("Goal-Step: AMUX-V22-ACT/LATCH completes", { created: -6, merged: 1, base: "main" });
+  assert.equal(goalPosition(goal(), normalisePullRequests([straddling]), T0 + 3 * HOUR).steps[0].done, true);
+});
+
+test("a time that does not parse is no time, and does not break the report", () => {
+  const [broken] = normalisePullRequests([{ number: 7, body: "Goal-Step: AMUX-V22-ACT/LATCH completes", baseRefName: "main",
+    headRefName: "x", createdAt: "yesterday", mergedAt: "soon" }]);
+  assert.deepEqual([broken.createdAt, broken.mergedAt], [null, null]);
+  const position = goalPosition(goal(), [broken], T0 + 3 * HOUR);
+  assert.deepEqual([position.steps[0].done, position.state], [false, "insufficient_evidence"]);
+});
+
+test("a newest-first listing is complete only when it reaches back past the start", () => {
+  const start = T0;
+  const page = (n, updated) => Array.from({ length: n }, () => ({ updated_at: iso(updated) }));
+  assert.equal(listingReachedStart(page(40, 5), start), true, "a short page is the end of the list");
+  assert.equal(listingReachedStart(page(100, -1), start), true);
+  assert.equal(listingReachedStart(page(100, 1), start), false);
+  assert.equal(listingReachedStart(Array.from({ length: 100 }, () => ({ updated_at: "?" })), start), false);
+});
+
+test("the command refuses the same goal in two checklists", () => {
+  const dir = mkdtempSync(join(tmpdir(), "goal-position-dup-"));
+  try {
+    const one = JSON.stringify({ goal: "CHAT-01", title: "t", since: "2026-10-10T00:00:00Z",
+      steps: [{ id: "A", title: "a", evidence: "operator_confirmed" }] });
+    writeFileSync(join(dir, "a.json"), one);
+    writeFileSync(join(dir, "b.json"), one);
+    writeFileSync(join(dir, "prs.json"), "[]");
+    const run = spawnSync(process.execPath, ["scripts/report-goal-position.mjs", "--goal-file", join(dir, "a.json"),
+      "--goal-file", join(dir, "b.json"), "--prs-file", join(dir, "prs.json")], { encoding: "utf8" });
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /more than one checklist: CHAT-01/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

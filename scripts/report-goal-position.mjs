@@ -25,7 +25,10 @@ import { readFileSync } from "node:fs";
 import {
   goalPosition,
   goalSpecsFromText,
+  listingReachedStart,
   normalisePullRequests,
+  PULL_REQUEST_PAGE_CAP,
+  PULL_REQUEST_PAGE_SIZE,
   repositoryDeclarationStats,
   REPOSITORY_WINDOW_DAYS,
 } from "./report-goal-position-core.mjs";
@@ -69,6 +72,13 @@ for (const file of goalFiles) {
   }
   goals.push(...result.goals);
 }
+const ids = goals.map((goal) => goal.goal);
+const repeated = ids.filter((id, index) => ids.indexOf(id) !== index);
+if (repeated.length > 0) {
+  // Two checklists for one goal would report it twice, each with its own steps.
+  console.error(`The same goal appears in more than one checklist: ${[...new Set(repeated)].join(", ")}.`);
+  process.exit(1);
+}
 
 const token = () => {
   const fromEnv = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -84,18 +94,27 @@ const fetchPullRequests = async (oldest) => {
     throw new Error("No pull request source. Set GITHUB_TOKEN, log in with gh, or pass --prs-file.");
   }
   const found = [];
-  for (let page = 1; page <= 30; page += 1) {
+  for (let page = 1; page <= PULL_REQUEST_PAGE_CAP; page += 1) {
     const response = await fetch(
-      `https://api.github.com/repos/${repository}/pulls?state=all&sort=updated&direction=desc&per_page=100&page=${page}`,
+      `https://api.github.com/repos/${repository}/pulls?state=all&sort=updated&direction=desc` +
+        `&per_page=${PULL_REQUEST_PAGE_SIZE}&page=${page}`,
       { headers: { accept: "application/vnd.github+json", authorization: `Bearer ${secret}` } }
     );
-    if (!response.ok) throw new Error(`GitHub returned ${response.status} listing pull requests.`);
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`GitHub returned ${response.status} listing pull requests.`);
+    }
     const batch = await response.json();
-    if (!Array.isArray(batch) || batch.length === 0) break;
+    if (!Array.isArray(batch)) throw new Error("GitHub returned something other than a list of pull requests.");
     found.push(...batch);
-    if (batch.length < 100 || Date.parse(batch.at(-1).updated_at) < oldest) break;
+    if (listingReachedStart(batch, oldest)) return found;
   }
-  return found;
+  // Positions computed from part of the window would miss completions and
+  // work in the unread part, and would look like a complete report.
+  throw new Error(
+    `Read ${PULL_REQUEST_PAGE_CAP * PULL_REQUEST_PAGE_SIZE} pull requests without reaching the start of the ` +
+      "window; refusing to report on a partial list. Narrow the goals' since, or pass --prs-file."
+  );
 };
 
 const now = Date.now();
