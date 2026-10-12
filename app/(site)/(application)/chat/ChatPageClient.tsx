@@ -127,6 +127,7 @@ import {
 } from "@/lib/continuationFocusHandoff";
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
 import { CHAT_WORKSPACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import { guestAutoClientExecutionState } from "@/lib/guestAutoClientExecution";
 import { chatRuntimeKey, getChatRuntimeSnapshot, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
 import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
@@ -1852,6 +1853,19 @@ export function ChatPageClient({
   const guestAutoCapabilityRef = useRef<string | null>(null);
   const [blankChatCapabilityRevision, setBlankChatCapabilityRevision] = useState(0);
   const [selectionModePending, setSelectionModePending] = useState(false);
+  const guestAutoExecutionState = guestAutoClientExecutionState({
+    isGuestMode,
+    surface: mountedSurface === "chat" ? "chat" : "review",
+    selectionMode,
+    offered: autoSelectionOffered,
+    // The capability reader sets `offered` only when the Guest authority is
+    // present. Submit still checks the request-memory token itself below; the
+    // render path uses the reactive server-confirmed boolean rather than
+    // reading a ref during render.
+    hasCapability: autoSelectionOffered,
+  });
+  const guestAutoCapabilityPending =
+    guestAutoExecutionState === "awaiting_capability";
   const promptRefinerProductExplicitFlowVisible =
     promptRefinerProductSelection !== "kept_original" &&
     (promptRefinerProductSelection === "accepted" ||
@@ -5568,6 +5582,21 @@ export function ChatPageClient({
       // authorize any Chat dispatch, including after conversation switches,
       // draft restoration or an overrideText caller. A browser-local accepted
       // marker would not survive every restore/remount path safely.
+      return;
+    }
+    // A restored Guest `auto` value is an intent, not routing authority. The
+    // background capability read will either confirm it or return the UI to
+    // manual; until then every submit entry point stays closed instead of
+    // silently spending the turn on the fallback model.
+    if (
+      guestAutoClientExecutionState({
+        isGuestMode,
+        surface: mountedSurface === "chat" ? "chat" : "review",
+        selectionMode: selectionModeRef.current,
+        offered: autoSelectionOffered,
+        hasCapability: Boolean(guestAutoCapabilityRef.current),
+      }) === "awaiting_capability"
+    ) {
       return;
     }
     const waitForCommittedAutoScope = async (
@@ -9700,6 +9729,7 @@ export function ChatPageClient({
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
           durableDraftLocked={
+            guestAutoCapabilityPending ||
             mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
@@ -9755,7 +9785,7 @@ export function ChatPageClient({
               : (currentChatId === null || !isGuestConversationId(currentChatId)))
           }
           selectionMode={selectionMode}
-          selectionModePending={selectionModePending}
+          selectionModePending={selectionModePending || guestAutoCapabilityPending}
           onSelectionModeChange={handleSelectionModeChange}
           accountMemoryDefault={accountMemoryDefault}
           assistantProfile={
@@ -9848,6 +9878,7 @@ export function ChatPageClient({
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
           durableDraftLocked={
+            guestAutoCapabilityPending ||
             mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
@@ -9903,7 +9934,7 @@ export function ChatPageClient({
               : (currentChatId === null || !isGuestConversationId(currentChatId)))
           }
           selectionMode={selectionMode}
-          selectionModePending={selectionModePending}
+          selectionModePending={selectionModePending || guestAutoCapabilityPending}
           onSelectionModeChange={handleSelectionModeChange}
           accountMemoryDefault={accountMemoryDefault}
           assistantProfile={

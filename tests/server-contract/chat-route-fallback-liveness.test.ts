@@ -3040,6 +3040,84 @@ for (const [name, ledgerMode, code] of [
   });
 }
 
+for (const [name, releaseOutcome, status, code, claimStatus] of [
+  [
+    "an uncommitted release",
+    "ambiguous_before_commit",
+    503,
+    "GUEST_AUTO_OUTCOME_UNKNOWN",
+    "guest_auto_preheld",
+  ],
+  [
+    "a committed release with a lost response",
+    "ambiguous_after_commit",
+    500,
+    "CHAT_APPLICATION_ERROR",
+    "guest_auto_released",
+  ],
+] as const) {
+  test(`Guest Auto resolves ${name} from the common failure unwind without retrying the release`, async () => {
+    const { body } = await askGuestAuto({
+      ledgerMode: "known_ledger_refusal",
+      releaseOutcome,
+      expectedStatus: status,
+    });
+
+    assert.equal((JSON.parse(body) as { code?: string }).code, code);
+    assert.equal(guestRefinerInputs.length, 1);
+    assert.equal(guestConvertInputs.length, 1);
+    assert.equal(attempts.length, 0);
+    assert.equal(guestReleaseInputs.length, 1);
+    assert.equal(guestUnknownInputs.length, 0);
+    assert.deepEqual(guestReadInputs, [{
+      subjectKey: GUEST_SUBJECT_KEY,
+      authorityId: GUEST_AUTHORITY_A,
+    }]);
+    assert.equal(
+      guestClaimsByAuthority.get(
+        `${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`
+      )?.status,
+      claimStatus
+    );
+    assert.deepEqual(
+      guestLifecycle.filter((phase) => phase === "provider"),
+      []
+    );
+  });
+}
+
+test("Guest Auto terminal release-unknown prehold rejects a fresh authority before a second paid attempt", async () => {
+  await askGuestAuto({
+    ledgerMode: "known_ledger_refusal",
+    releaseOutcome: "ambiguous_before_commit",
+    expectedStatus: 503,
+  });
+  const heldClaim = guestClaimsByAuthority.get(
+    `${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`
+  );
+  assert.equal(heldClaim?.status, "guest_auto_preheld");
+
+  const { response } = await askGuestAuto({
+    authority: "guest-authority-b",
+    clientTurnId: GUEST_TURN_A,
+    preserveClaims: true,
+  });
+
+  assert.notEqual(response.status, 200);
+  assert.equal(guestClaimsByAuthority.size, 1);
+  assert.equal(
+    guestClaimsByAuthority.get(
+      `${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`
+    ),
+    heldClaim
+  );
+  assert.equal(guestReserveInputs.length, 1);
+  assert.equal(guestRefinerInputs.length, 0);
+  assert.equal(guestConvertInputs.length, 0);
+  assert.equal(guestReleaseInputs.length, 0);
+  assert.equal(attempts.length, 0);
+});
+
 for (const [name, knownUndispatchedRefusal, status, code] of [
   [
     "strict Gemini prefill refusal",

@@ -336,6 +336,27 @@ export function ChatInputWebSearchSwitchDescription({
     </span>
   );
 }
+
+export function ChatInputAutoCapabilityPendingNotice({
+  visible,
+  label,
+}: {
+  visible: boolean;
+  label: string;
+}) {
+  if (!visible) return null;
+
+  return (
+    <span
+      data-testid="guest-auto-capability-pending"
+      role="status"
+      aria-live="polite"
+      className="max-w-[132px] text-pretty text-[11px] font-medium leading-4 text-zinc-600 dark:text-zinc-300"
+    >
+      {label}
+    </span>
+  );
+}
 /**
  * Everything about which files may be picked now comes from the shared
  * registry (`lib/chatAttachmentFormats.ts`). What used to live here was four
@@ -1135,6 +1156,8 @@ export function ChatInput({
     const helpCopy = chatHelpCopy[lang];
     const autoCopy = autoRoutingCopy[lang];
     const isAutoMode = selectionMode === "auto";
+    const isAutoCapabilityPending =
+      isAutoMode && selectionModePending && !autoSelectionOffered;
     const modelsSelectedLabel = (count: number) =>
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
     const signInCallbackUrl = withChatLanguage(
@@ -3966,7 +3989,11 @@ export function ChatInput({
               )}
             </button>
           )}
-          {isAutoMode && (
+          <ChatInputAutoCapabilityPendingNotice
+            visible={isAutoCapabilityPending}
+            label={`${autoCopy.label} · ${t("auth.loading")}`}
+          />
+          {isAutoMode && !isAutoCapabilityPending && (
             <span
               data-testid="auto-variable-credit-notice"
               className="max-w-[132px] text-pretty text-[11px] font-medium leading-4 text-zinc-500 dark:text-zinc-400"
