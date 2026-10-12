@@ -6,10 +6,11 @@ import { mock, test } from "node:test";
 const root = resolve(import.meta.dirname, "../..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 let authorized = true, auditCalls = 0, writeCalls = 0;
+const lockOrder: string[] = [];
 const rows = new Map<string, Record<string, unknown>>();
 const now = new Date("2026-10-12T00:00:00.000Z");
 const tx = {
-  $executeRaw: async () => 1,
+  $executeRaw: async () => { lockOrder.push("observation"); return 1; },
   amuxQuotaObservation: {
     findUnique: async ({ where }: { where: { id: string } }) => rows.get(where.id) ?? null,
     create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -22,6 +23,7 @@ mock.module(mod("lib/amux/routing.ts"), { namedExports: {
   getConfiguredAmuxV22WorkerCatalog: () => [{ worker_name: "claude-chore", provider: "anthropic" }],
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+  takeAuditChainLock: async (client: unknown) => { assert.equal(client, tx); lockOrder.push("audit"); },
   writeSystemAuditLog: async (input: { tx: unknown; action: string }) => {
     assert.equal(input.tx, tx); assert.equal(input.action, "amux.quota.observed"); auditCalls += 1;
   },
@@ -51,6 +53,7 @@ test("quota report authenticates, stores and audits once, and supports exact los
   assert.equal(writeCalls, 0);
   authorized = true;
   assert.equal((await post()).status, 200);
+  assert.deepEqual(lockOrder.slice(0, 2), ["audit", "observation"]);
   assert.equal(writeCalls, 1); assert.equal(auditCalls, 1);
   assert.equal((await post()).status, 200, "same observation must be idempotent");
   assert.equal(writeCalls, 1); assert.equal(auditCalls, 1);
