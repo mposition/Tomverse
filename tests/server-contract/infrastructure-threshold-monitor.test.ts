@@ -34,6 +34,14 @@ type PublisherRun = {
   heartbeatAt: Date | null;
 };
 
+type DependencyReport = {
+  dependency: string;
+  healthy: boolean;
+  code: string;
+  error: unknown;
+  context?: Record<string, unknown>;
+};
+
 type World = {
   dashboard: Record<string, unknown> | null;
   dashboardError: Error | null;
@@ -41,6 +49,12 @@ type World = {
   /** What the query said the total was, when it differs from the rows given. */
   silentTotal: number | null;
   publisherQueryError: Error | null;
+  /** Lease expiries the bridge check reads from AmuxWorkerRuntime. */
+  bridgeLeases: Date[];
+  bridgeQueryError: Error | null;
+  /** What the dependency reporter answers; by default, whether it was unhealthy. */
+  bridgeNotified: boolean | null;
+  dependencyReports: DependencyReport[];
   incidents: Incident[];
   completedResults: unknown[];
   failedRuns: number;
@@ -52,6 +66,10 @@ const world: World = {
   runningPublisherRuns: [],
   silentTotal: null,
   publisherQueryError: null,
+  bridgeLeases: [],
+  bridgeQueryError: null,
+  bridgeNotified: null,
+  dependencyReports: [],
   incidents: [],
   completedResults: [],
   failedRuns: 0,
@@ -63,6 +81,10 @@ const resetWorld = () => {
   world.runningPublisherRuns = [];
   world.silentTotal = null;
   world.publisherQueryError = null;
+  world.bridgeLeases = [];
+  world.bridgeQueryError = null;
+  world.bridgeNotified = null;
+  world.dependencyReports = [];
   world.incidents = [];
   world.completedResults = [];
   world.failedRuns = 0;
@@ -100,6 +122,12 @@ const loadMonitor = () => {
             // the unit suite stayed green -- the gate that catches it is this
             // file, and only because this file loads the real monitor.
           },
+          amuxWorkerRuntime: {
+            findMany: async () => {
+              if (world.bridgeQueryError) throw world.bridgeQueryError;
+              return world.bridgeLeases.map((leaseExpiresAt) => ({ leaseExpiresAt }));
+            },
+          },
         },
       },
     });
@@ -132,6 +160,11 @@ const loadMonitor = () => {
         reportOperationalIncident: async (incident: Incident) => {
           world.incidents.push(incident);
           return { notified: true, suppressed: false };
+        },
+        reportOperationalDependencyStatus: async (report: DependencyReport) => {
+          world.dependencyReports.push(report);
+          const notified = world.bridgeNotified ?? !report.healthy;
+          return { notified, suppressed: !notified };
         },
       },
     });
@@ -182,6 +215,7 @@ test("PROJECTED_BALANCE_LOW alone reports no incident but stays observable", asy
         prisma: "healthy",
       },
       silentPublisherRuns: 0,
+      amuxBridge: "unwatched",
     },
   ]);
 });
@@ -388,5 +422,83 @@ test("the incident reports the count the query returned, not the rows it named",
   assert.equal(
     (world.completedResults.at(-1) as { silentPublisherRuns: number }).silentPublisherRuns,
     137,
+  );
+});
+
+// The AMUX execution bridge watch (docs/ops/amux/bridge-monitoring.md). Lease
+// times are the only thing read, and the alert says when they ran out and
+// where to look -- nothing about a worker or why the bridge stopped.
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+
+test("a bridge whose every lease ran out pages, and is counted as an alert", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  world.bridgeLeases = [minutesAgo(40), minutesAgo(41), minutesAgo(39)];
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  assert.equal(world.dependencyReports.length, 1);
+  const [report] = world.dependencyReports;
+  assert.equal(report.dependency, "amux-execution-bridge");
+  assert.equal(report.healthy, false);
+  assert.equal(report.code, "AMUX_EXECUTION_BRIDGE_LOST");
+  assert.equal(report.context?.lostSince, world.bridgeLeases[2].toISOString());
+  assert.equal(report.context?.adminPath, "/admin/office");
+  assert.match(String(report.error), /journalctl -u tomverse-bridge\.service/);
+  assert.equal(
+    (world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge,
+    "lost"
+  );
+});
+
+test("a reminder the cooldown held back is not counted as an alert", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  world.bridgeLeases = [minutesAgo(400)];
+  world.bridgeNotified = false;
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 0, advisories: 0 });
+  assert.equal(world.dependencyReports[0]?.healthy, false);
+});
+
+test("a live bridge is reported healthy and pages nothing", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  world.bridgeLeases = [minutesAgo(30), new Date(Date.now() + 60_000)];
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 0, advisories: 0 });
+  assert.equal(world.dependencyReports[0]?.healthy, true);
+  assert.deepEqual(world.incidents, []);
+  assert.equal(
+    (world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge,
+    "live"
+  );
+});
+
+test("a bridge check that cannot read records null and pages on its own behalf", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  world.bridgeQueryError = new Error("relation is busy");
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  assert.deepEqual(world.dependencyReports, []);
+  assert.deepEqual(
+    world.incidents.map((incident) => incident.code),
+    ["AMUX_EXECUTION_BRIDGE_CHECK_FAILED"]
+  );
+  assert.equal(
+    (world.completedResults.at(-1) as { amuxBridge: string | null }).amuxBridge,
+    null
   );
 });

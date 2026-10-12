@@ -1,10 +1,19 @@
 import "server-only";
 
+import {
+  AMUX_BRIDGE_REMINDER_MS,
+  amuxBridgeWatchHorizonStart,
+  judgeAmuxBridgeLiveness,
+  type AmuxBridgeLiveness,
+} from "@/lib/amux/bridgeLivenessCore";
 import { planInfrastructureAlerts } from "@/lib/infrastructureAlertPolicy";
 import { getInfrastructureDashboard } from "@/lib/infrastructureMonitoring";
 import { findSilentMarketingPublisherRuns } from "@/lib/marketingPublisherRun";
 import { marketingPublisherSilentRuns } from "@/lib/marketingPublisherRunCore";
-import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import {
+  reportOperationalDependencyStatus,
+  reportOperationalIncident,
+} from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 import {
   completeScheduledJob,
@@ -54,6 +63,52 @@ async function reportSilentMarketingPublisherRuns(now: Date): Promise<number> {
     },
   });
   return total;
+}
+
+/**
+ * The AMUX execution bridge on the Ubuntu host, judged by the worker leases it
+ * keeps alive (lib/amux/bridgeLivenessCore.ts, docs/ops/amux/bridge-monitoring.md).
+ *
+ * A dependency status rather than a plain incident: the first run that finds
+ * the bridge lost pages at once, the same condition pages again only every
+ * `AMUX_BRIDGE_REMINDER_MS`, and the first run that finds it live again says
+ * so. The message names when the leases ran out and where to look -- never a
+ * worker, a card or the reason the bridge stopped, which only the host knows.
+ */
+async function reportAmuxBridgeLiveness(
+  now: Date
+): Promise<{ state: AmuxBridgeLiveness["state"]; notified: boolean }> {
+  const leases = await prisma.amuxWorkerRuntime.findMany({
+    where: { leaseExpiresAt: { gt: amuxBridgeWatchHorizonStart(now) } },
+    select: { leaseExpiresAt: true },
+  });
+  const verdict = judgeAmuxBridgeLiveness(leases, now);
+  const lost = verdict.state === "lost";
+  const report = await reportOperationalDependencyStatus({
+    dependency: "amux-execution-bridge",
+    healthy: !lost,
+    code: "AMUX_EXECUTION_BRIDGE_LOST",
+    title: "AMUX execution bridge stopped heartbeating",
+    error: lost
+      ? `No AMUX worker runtime has held a live lease since ${verdict.lostSince.toISOString()}. ` +
+        "Read journalctl -u tomverse-bridge.service on the Ubuntu host before restarting it."
+      : "An AMUX worker runtime holds a live lease.",
+    severity: "error",
+    cooldownMs: AMUX_BRIDGE_REMINDER_MS,
+    context: {
+      component: "amux-execution-bridge",
+      adminPath: "/admin/office",
+      ...(lost
+        ? {
+            lostSince: verdict.lostSince.toISOString(),
+            minutesLost: String(
+              Math.floor((now.getTime() - verdict.lostSince.getTime()) / 60_000)
+            ),
+          }
+        : {}),
+    },
+  });
+  return { state: verdict.state, notified: report.notified };
 }
 
 export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
@@ -124,7 +179,28 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
     // A failed check now reports an alert of its own, so null counts as one too:
     // the number has to agree with what was actually sent.
     const publisherAlerts = silentPublisherRuns === 0 ? 0 : 1;
-    const alerts = plan.incidents.length + publisherAlerts;
+    // The same rule as the publisher watch: a bridge check that cannot read
+    // pages on its own behalf and is recorded as null, so a failing read cannot
+    // turn the watch off while the monitor reports success.
+    const amuxBridge = await reportAmuxBridgeLiveness(now).catch(
+      async (error: unknown) => {
+        console.error("AMUX execution bridge check failed:", error);
+        await reportOperationalIncident({
+          code: "AMUX_EXECUTION_BRIDGE_CHECK_FAILED",
+          title: "The AMUX execution bridge check could not run",
+          error,
+          severity: "error",
+          cooldownMs: 30 * 60 * 1_000,
+          context: { component: "amux-execution-bridge" },
+        }).catch((reportError: unknown) => {
+          console.error("Bridge-check incident could not be reported:", reportError);
+        });
+        return null;
+      },
+    );
+    // A reminder held back by its cooldown was not sent, so it is not counted.
+    const bridgeAlerts = amuxBridge === null || amuxBridge.notified ? 1 : 0;
+    const alerts = plan.incidents.length + publisherAlerts + bridgeAlerts;
     await completeScheduledJob({
       runId: run?.id,
       processedCount: plan.decisions.length,
@@ -134,6 +210,7 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
         suppressedAdvisories: plan.advisories,
         statuses: plan.statuses,
         silentPublisherRuns,
+        amuxBridge: amuxBridge?.state ?? null,
       },
     });
     return {
