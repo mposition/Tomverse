@@ -188,6 +188,17 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 3,
     isolation: "mutation",
   },
+  quotaObservationRead: {
+    operation: "quota_observation_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  quotaObservationWrite: {
+    operation: "quota_observation_write",
+    // setup + chain lock + identity lock + lookup + create + audit (4) + fence
+    prismaCallCeiling: 11,
+    isolation: "mutation",
+  },
   ownershipRecoveryRead: {
     operation: "ownership_recovery_read",
     prismaCallCeiling: 4,
@@ -256,6 +267,22 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 9,
     isolation: "mutation",
   },
+  // setup + the newest registry, latch and observation of each worker (3,
+  // pinned by tests/amuxWorkerRegistryStore.test.mjs) + fence
+  workerRegistryRead: {
+    operation: "worker_registry_read",
+    prismaCallCeiling: 5,
+    isolation: "read",
+  },
+  // setup + an owner's registry change at its largest (audit chain lock, the
+  // worker's newest event, the administrator audit's 4 with an integrity key,
+  // the event insert: 7, pinned by tests/amuxWorkerRegistryStore.test.mjs) +
+  // fence (orchestration policy version 31, section 3)
+  workerRegistryChange: {
+    operation: "worker_registry_change",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // setup + a question's routing at its largest (audit chain lock, the
   // request read, the switch read, the throughput read, the router's audit 4
   // with an integrity key, the request insert, the card text insert: 10,
@@ -265,6 +292,14 @@ export const AMUX_DB_BOUNDARIES = {
     operation: "decision_maker_routing",
     prismaCallCeiling: 12,
     isolation: "mutation",
+  },
+  // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment
+  // tallies + the proposal timeline with the database clock + fence, pinned
+  // by tests/amuxDecisionMakerJudgment.test.mjs.
+  decisionMakerReportRead: {
+    operation: "decision_maker_report_read",
+    prismaCallCeiling: 4,
+    isolation: "read",
   },
 } as const satisfies Record<string, AmuxDbBoundary>;
 

@@ -16,7 +16,7 @@ import { AnswerRails } from "./AnswerRails";
 import { ProductCapture } from "./ProductCapture";
 import { TrustSection } from "./TrustSection";
 import { WorkflowContinuitySection } from "./WorkflowContinuitySection";
-import { workspaceDestination } from "@/lib/productEntryDestination";
+import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
 
 /**
  * The landing page shell: the hero, and the order the sections run in.
@@ -45,39 +45,11 @@ import { workspaceDestination } from "@/lib/productEntryDestination";
  * `min-w-0`, so the hero reflows at a 200% root font size on a 320px viewport
  * instead of being cropped by this element's `overflow-x-hidden`.
  */
-export function LandingPageContent({
-  chatSurfaceAvailable = false,
-}: {
-  /**
-   * Resolved on the server (`lib/landingWorkspaceEntry.ts`), because the CTA's
-   * destination has to be decided per visitor before the link is rendered.
-   *
-   * Decision record v1.2 §3: once `/chat` is bound to the Chat cohort, a CTA
-   * that sends everybody there bounces everybody outside it, and the bounce is
-   * the only part the visitor sees. Defaults to false so a caller that has not
-   * resolved it yet gets the Review workspace, which is where everybody goes
-   * today.
-   *
-   * A boolean, not a reason. Which bucket, what share and which readiness gate
-   * stay on the server (UI contract §2).
-   */
-  chatSurfaceAvailable?: boolean;
-} = {}) {
+export function LandingPageContent() {
   const { lang } = useLanguage();
   const { status } = useSession();
   const content = getLandingCopy(lang);
-  const isAuthenticated = status === "authenticated";
-  const chatHref = workspaceDestination({
-    chatSurfaceAvailable,
-    lang,
-    isAuthenticated: true,
-  });
-  const guestChatHref = workspaceDestination({
-    chatSurfaceAvailable,
-    lang,
-    isAuthenticated: false,
-  });
-  const primaryChatHref = isAuthenticated ? chatHref : guestChatHref;
+  const primaryChatHref = marketingProductEntryHref("review", lang);
   const primaryCtaLabel =
     status === "authenticated" ? content.signedInCta : content.primaryCta;
   const landingTrackedRef = useRef(false);
@@ -90,7 +62,7 @@ export function LandingPageContent({
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <MarketingHeader />
+      <MarketingHeader variant="launch" />
 
       <section
         aria-labelledby="landing-hero-title"
@@ -256,7 +228,7 @@ export function LandingPageContent({
         }
       />
 
-      <MarketingFooter />
+      <MarketingFooter variant="launch" />
     </main>
   );
 }

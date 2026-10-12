@@ -83,6 +83,7 @@ import {
   dmRequestStateFromRow,
 } from "../lib/amux/decisionMakerRequestCore.ts";
 import { DM_INSTANCE_SCOPES } from "../lib/amux/decisionMakerSwitchCore.ts";
+import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
@@ -1492,6 +1493,19 @@ test("the report reads in two statements, judgments first, and writes nothing", 
   assert.deepEqual(openai.confirmedWithoutEdit, { status: "measured", numerator: 3, denominator: 4, value: 0.75 });
   assert.deepEqual(openai.matchedOverJudged, { status: "measured", numerator: 2, denominator: 2, value: 1 });
   assert.deepEqual(openai.notJudged, { status: "measured", numerator: 2, denominator: 4, value: 0.5 });
+});
+
+test("the Admin report's DB boundary is the report's two statements plus setup and fence", async () => {
+  // A ceiling below the count refuses every report; one above it lets a
+  // statement the tests here never counted run inside the budget.
+  const { tx, sent } = recordingTx();
+  await readDecisionMakerDeclarationAccuracyReport(tx);
+  assert.equal(sent.length, 2);
+  assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerReportRead, {
+    operation: "decision_maker_report_read",
+    prismaCallCeiling: sent.length + 2,
+    isolation: "read",
+  });
 });
 
 test("the reads are one statement each", async () => {

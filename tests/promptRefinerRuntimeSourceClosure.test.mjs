@@ -501,17 +501,23 @@ const compilerOptions = parsedConfig.options;
 // in `lib/models.ts` move its two `MODEL_ACCESS_RANK[...]` accesses by 16
 // lines. No access is added; count 228 and the position-free inventory are
 // unchanged, so this repins positions only.
+// 2026-10-12, AMUX worker registry R1 (orchestration policy version 31): the
+// marketing webhook fingerprint's history comment in
+// lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
+// below it. Count 228 and the position-free inventory remain unchanged; only
+// their source positions are repinned.
 // 2026-10-12, the default lineup as an Admin setting: the lineup reader, its
 // save-time checks and its writer in `lib/appSettings.ts` sit above that file's
 // one access, `flags[feature]`, and move it by 184 lines. The replacement walk,
 // lineup rules and lead helper in `lib/appDefaults.ts` add no access. Count 228 and the
-// position-free inventory are unchanged; positions only.
+// position-free inventory are unchanged; positions only. Repinned after the AMUX
+// record above merged in from develop.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a904f3785da04b7955ea1f1a280215b5",
-  "e9d296540ffd5facf61276f0cb8c114a",
+  "8172515bb4b6206b6ce423a17e3b427d",
+  "dcb5928470f83b05dd213de581a93d0d",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -576,9 +576,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * system-audit action and its `AdminAuditLog` back relation. The webhook
  * receiver's calls, descriptor and admission decisions are unchanged; the
  * watched closure bytes moved, so existing signed staging evidence is stale.
+ * 2026-10-12: the AMUX worker registry (orchestration policy version 31, stage
+ * R1) adds the registry event, trial evidence and latch event back relations
+ * to `AdminAuditLog` in the watched schema. No actor, descriptor, webhook
+ * writer or admission decision changes; the bytes moved, so evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f88ad0827c25f3f4b432d18c014e029dbfe247226e234e1664743d775b4e5ce8";
+  "9c5656b55469590778f340ca29ed8d6d4aaff668c73e925d124a91d9a46adb93";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

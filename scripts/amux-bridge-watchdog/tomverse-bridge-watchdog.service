@@ -6,9 +6,16 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-# No account to create and none the worker account shares. The ping URL is a
-# credential only this service's dynamic user can read.
-DynamicUser=yes
+# A system account of its own, created by install.sh: no login, no home, no
+# group but its own, and not the worker account. The ping URL is a credential
+# only this service can read.
+#
+# Not DynamicUser=: the host's system bus drops a dynamic user's connection, so
+# every systemctl call failed with "Transport endpoint is not connected" and
+# no state could be read (first install, 2026-10-12).
+User=tomverse-bridge-watchdog
+Group=tomverse-bridge-watchdog
+RemoveIPC=yes
 LoadCredential=ping-url:/etc/tomverse-bridge-watchdog/ping-url
 ExecStart=/usr/local/libexec/tomverse-bridge-watchdog
 TimeoutStartSec=90

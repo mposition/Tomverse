@@ -124,6 +124,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261008130000_amux_v4_claim_owner_resolution",
   // AMUX intake v16: owner-managed analysis ceiling; no deadline guard changes.
   "20261011070000_amux_v4_owner_monthly_budget",
+  // Orchestration policy v31, R1: the worker registry and the three system
+  // tables. A registry change runs in an ordinary mutation boundary, whose
+  // fence is the existing commit deadline; no deadline guard changes.
+  "20261012100000_amux_worker_registry",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

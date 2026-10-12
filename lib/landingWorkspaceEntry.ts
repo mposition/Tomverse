@@ -7,6 +7,13 @@ import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import { chatSurfaceAvailable } from "@/lib/autoProductBoundary";
 
 /**
+ * This source still requires an authenticated Chat workspace entry. The
+ * product release that admits blank Guest Chat changes this public constant.
+ * Marketing reads no session or account rollout while building static HTML.
+ */
+export const PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE = false;
+
+/**
  * Whether the visitor asking for this page may start a Tomverse Chat.
  *
  * Server-only, and the only place the landing pages ask. A guest is never

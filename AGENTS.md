@@ -73,6 +73,21 @@ Report implemented and tested behavior separately from documentation, review, me
   속하지 않은 작업의 수입니다. 지금 하는 일이 어느 단계에 속하는지 적고, 어느
   단계에도 속하지 않으면 그렇다고 적습니다. 체크리스트가 없으면 다음 사이클에
   만들어 운영자 확인을 받습니다. 이미 진행 중인 목표도 같습니다.
+- **긴 목표에 속한 PR은 본문에 `Goal-Step:` 줄을 정확히 하나 넣습니다**(운영자
+  결정 2026-10-12). 목표 ID는 현황판 ID가 있으면 그것을 쓰고, 없으면 운영자가
+  정한 ID(영문 대문자·숫자·하이픈, 예: `AMUX-V22-ACT`)를 씁니다. 단계 ID는 영문·
+  숫자·`.`·`_`·`-`만 쓰며 공백이 없습니다. 긴 목표에 속하지 않는 PR에는 넣지
+  않습니다.
+
+  ```
+  Goal-Step: <목표 ID>/<단계 ID>             그 단계의 작업
+  Goal-Step: <목표 ID>/<단계 ID> completes   이 PR이 병합되면 그 단계가 끝남
+  Goal-Step: <목표 ID>/-                     어느 단계에도 속하지 않는 작업
+  Goal-Step: <목표 ID>/op                    운영자의 별도 요청으로 하는 작업
+  ```
+
+  곁길을 단계로 적지 않습니다. 이 줄이 목표 대비 위치를 기계가 셀 수 있는 유일한
+  근거입니다.
 
 # 실행할 명령을 줄 때는 실행 위치를 먼저 적습니다
 
@@ -1474,6 +1489,17 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   없습니다. **경계 상한 12는 라우팅의 가장 긴 경우(무결성 키, DM으로 가는 새 질문과 그 카드 본문) +
   setup + fence와 같고**, `tests/amuxDecisionMakerBody.test.mjs`가 그 셈을, body DB 테스트가 하나 줄인
   상한의 거부를 고정합니다. bridge·DM 호출은 없습니다.
+- **S1f4(선언 정확도 보고 화면)**: `components/admin/AmuxDecisionMakerReportPanel.tsx`,
+  `lib/adminMessages/amuxDecisionMaker.ts`의 `adminAmuxDecisionMakerReportMessages`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerReportRead`(상한 4), Decision Maker 탭
+  (`app/(site)/(application)/admin/amux-execution/page.tsx`),
+  `tests/client/amuxDecisionMakerReportRender.test.tsx`. 화면은 S1e의
+  `readDecisionMakerDeclarationAccuracyReport()`를 페이지가 AMUX DB 경계 안에서 읽어 넘긴 값만 그립니다 —
+  요청도 버튼도 없습니다. 수치는 각자의 분자/분모로 보이고, 분모가 비면 `insufficient_evidence`를 말로
+  보이며 0%로 쓰지 않습니다. 읽기에 실패하면 수치 없이 그 사실만 보이고, 스위치 읽기와 따로 실패합니다.
+  docs/policy/amux-decision-maker.md §0-2의 졸업 기준과 비교하지 않습니다. **경계 상한 4는 보고의 두 문장 +
+  setup + fence이고**, `tests/amuxDecisionMakerJudgment.test.mjs`가 그 셈을, judgment DB 테스트가 kill
+  switch 중의 읽기와 하나 줄인 상한의 거부를 고정합니다. 제안 열람·판정 화면은 S2입니다.
 
 # AI Review (교차검토) 품질과 M5
 
