@@ -9,7 +9,7 @@ import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import { autoSelectionCapability } from "@/lib/autoRoutingUi";
 import { identifyChatCaller } from "@/lib/chatSecurity";
 import {
-  mintGuestChatAutoAuthority,
+  mintGuestChatAutoCapability,
 } from "@/lib/guestChatAutoAuthority";
 import {
   GUEST_CHAT_SMART_ADAPTIVE_AUTHORITY_SECRET_ENV,
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
         if (access.setCookie) response.headers.append("Set-Cookie", access.setCookie);
         return response;
       }
-      const token = mintGuestChatAutoAuthority({
+      const capability = mintGuestChatAutoCapability({
         secret: process.env[GUEST_CHAT_SMART_ADAPTIVE_AUTHORITY_SECRET_ENV] ?? "",
         binding: {
           subjectKey: access.subjectKey as `guest:${string}`,
@@ -70,7 +70,7 @@ export async function GET(request: Request) {
       });
       const response = NextResponse.json({
         autoSelection: { offered: true },
-        guestAutoAuthority: token,
+        guestAutoCapability: capability,
         guestAuto: { attachmentSupport: "manual_only" },
       }, { headers: NO_STORE_HEADERS });
       if (access.setCookie) response.headers.append("Set-Cookie", access.setCookie);

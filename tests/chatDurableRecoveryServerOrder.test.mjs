@@ -15,11 +15,13 @@ test("route source places durable claim before context consumption, credit reser
   const route = source("app/api/chat/route.ts");
   const claim = route.indexOf("const claim = await claimChatResponseAttempt");
   const consume = route.indexOf("const consumption = await consumeContextBundle", claim);
-  const reserve = route.indexOf("const accessGrant = await acquireChatAccess", claim);
+  const accessBranch = route.indexOf("const accessGrant = guestAutoRun", claim);
+  const reserve = route.indexOf(": await acquireChatAccess(access, budget", accessBranch);
   const dispatch = route.indexOf("const result = await beginProviderCall", claim);
   assert.ok(claim > 0);
   assert.ok(consume > claim);
-  assert.ok(reserve > consume);
+  assert.ok(accessBranch > consume);
+  assert.ok(reserve > accessBranch);
   assert.ok(dispatch > reserve);
 });
 
@@ -54,8 +56,12 @@ test("route source places the persisted-source verifier call before durable clai
   const admission = route.indexOf('"chat-durable-attempt"');
   const verify = route.indexOf("await verifyDurableChatSourceMessage({");
   const claim = route.indexOf("const claim = await claimChatResponseAttempt", verify);
-  const reserve = route.indexOf("const accessGrant = await acquireChatAccess", claim);
-  assert.ok(admission > 0 && verify > admission && claim > verify && reserve > claim);
+  const accessBranch = route.indexOf("const accessGrant = guestAutoRun", claim);
+  const reserve = route.indexOf(": await acquireChatAccess(access, budget", accessBranch);
+  assert.ok(
+    admission > 0 && verify > admission && claim > verify &&
+      accessBranch > claim && reserve > accessBranch
+  );
 });
 
 test("claim and model-history deletion statically call the same advisory lock helper", () => {

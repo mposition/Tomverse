@@ -546,9 +546,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * one-shot dark tables to the watched Prisma schema. The receiver's calls,
  * descriptor and admission decisions remain unchanged; the closure bytes
  * move and the fingerprint is repinned after the full reviewed closure lands.
+ * 2026-10-12: Guest Smart Adaptive adds a closed credit-lifecycle actor to
+ * the shared audit helper. The receiver's decisions and watched schema slice
+ * are unchanged, but its import closure bytes moved, so prior signed staging
+ * evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "be5d07c42a05c4c1dba304ad712f5ad2272152f6c36dd89ab48deba387ac21c6";
+  "dc184e79f92fe844e3370e5b93528158fdc3f2d771c806d480566584d7d1b011";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

@@ -221,7 +221,7 @@ import {
     validateChatPayload,
 } from "@/lib/chatSecurity";
 import {
-    verifyGuestChatAutoAuthority,
+    verifyGuestChatAutoCapability,
     type GuestChatAutoAuthorityPayload,
 } from "@/lib/guestChatAutoAuthority";
 import {
@@ -1244,7 +1244,7 @@ async function handleChatPost(
             contextBundle,
             acknowledgedUnavailableAttachmentIds,
             promptRefinerDecision,
-            guestAutoAuthority,
+            guestAutoCapability,
             guestClientTurnId,
         } = validateChatPayload(body);
         persistenceSourceUserMessageId = sourceUserMessageId;
@@ -1402,7 +1402,7 @@ async function handleChatPost(
             : null;
         let earlyAccess: ChatAccess | null = null;
         let guestVerificationComplete = false;
-        let guestAuthorityPayload: GuestChatAutoAuthorityPayload | null = null;
+        let guestCapabilityPayload: GuestChatAutoAuthorityPayload | null = null;
         let guestReachableModels: AiModel[] | null = null;
         // §8.1 invariant 1: the conversation's stored mode, read from the row
         // the ownership check loads below. Null for a request with no
@@ -1631,7 +1631,7 @@ async function handleChatPost(
                       },
                   })
                 : null;
-        if (guestAutoAuthority) {
+        if (guestAutoCapability) {
             if (
                 session?.user?.id ||
                 conversationId ||
@@ -1669,32 +1669,32 @@ async function handleChatPost(
                     "Guest Smart Adaptive is temporarily unavailable."
                 );
             }
-            const authorityBinding = {
+            const capabilityBinding = {
                 subjectKey: earlyAccess.subjectKey as `guest:${string}`,
                 sourceCommitSha: guestRelease.binding.runtimeCommitSha,
                 runtimeDeploymentId: guestRelease.binding.runtimeDeploymentId,
                 activationPairDigest: guestRelease.activationPairDigest,
                 configDigest: guestRelease.binding.configDigest,
             } as const;
-            const authority = verifyGuestChatAutoAuthority(
-                guestAutoAuthority,
+            const capability = verifyGuestChatAutoCapability(
+                guestAutoCapability,
                 {
                     secret:
                         process.env[
                             GUEST_CHAT_SMART_ADAPTIVE_AUTHORITY_SECRET_ENV
                         ] ?? "",
-                    binding: authorityBinding,
+                    binding: capabilityBinding,
                     nowMs: Date.now(),
                 }
             );
-            if (!authority.ok) {
+            if (!capability.ok) {
                 throw new ChatAccessError(
                     409,
                     "GUEST_AUTO_AUTHORITY_INVALID",
                     "Guest Smart Adaptive authority expired or changed. Try again."
                 );
             }
-            guestAuthorityPayload = authority.payload;
+            guestCapabilityPayload = capability.payload;
             const guestCandidateModels = runtimeModels.filter(
                 (model) =>
                     model.enabled &&
@@ -1735,7 +1735,7 @@ async function handleChatPost(
                 guestEligible: true as const,
             }));
             const binding: GuestAutoCreditBinding = {
-                authority: authority.payload,
+                authority: capability.payload,
                 clientTurnId: guestClientTurnId!,
                 candidateDigest: guestAutoCreditCandidateDigest(candidates),
             };
@@ -1769,7 +1769,7 @@ async function handleChatPost(
             let refined;
             try {
                 refined = await refineGuestChatPrompt({
-                    authorityId: authority.payload.authorityId,
+                    authorityId: capability.payload.authorityId,
                     sourcePrompt,
                 });
             } catch {
@@ -1894,7 +1894,7 @@ async function handleChatPost(
         };
         const guestAutoSelection = guestAutoRun
             ? selectGuestChatAutoModel({
-                  authorityVerified: guestAuthorityPayload !== null,
+                  authorityVerified: guestCapabilityPayload !== null,
                   text: profileTextFor(autoRoutingMessages),
                   attachments: [],
                   attachmentsUnmeasurable: false,

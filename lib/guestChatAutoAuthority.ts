@@ -216,7 +216,7 @@ const decodePayload = (body: string): GuestChatAutoAuthorityPayload | null => {
   return Object.freeze({ ...payload });
 };
 
-export const mintGuestChatAutoAuthority = (
+export const mintGuestChatAutoCapability = (
   input: MintGuestChatAutoAuthorityInput
 ): string => {
   if (typeof input.secret !== "string" || input.secret.length === 0) {
@@ -257,7 +257,7 @@ export const mintGuestChatAutoAuthority = (
   return token;
 };
 
-export const verifyGuestChatAutoAuthority = (
+export const verifyGuestChatAutoCapability = (
   token: string,
   options: VerifyGuestChatAutoAuthorityOptions
 ): GuestChatAutoAuthorityVerification => {

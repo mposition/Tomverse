@@ -439,12 +439,17 @@ const compilerOptions = parsedConfig.options;
 // readiness and audit scopes move existing accesses in the already-reviewed
 // closure. The 228-entry count and position-free inventory remain unchanged;
 // this repins only their final source positions on the main release base.
+// 2026-10-12, Guest Smart Adaptive main compatibility repair: the reviewed
+// Guest audit actor joins the marketing schema fingerprint provenance. That
+// moves existing accesses in `lib/marketingAutomationAccess.ts`; capability
+// naming changes no access expression. The 228-entry count and position-free
+// digest remain unchanged, so this repins source positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "54518b09e096d37dfe4fd70a69fddec2",
-  "8633c118fd3e3cda5c900aeea2838205",
+  "97409432eb7f75c3ff8b6827fe16002e",
+  "55ae1199a2dc80498cfba725bece479c",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
