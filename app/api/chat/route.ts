@@ -232,6 +232,7 @@ import {
     releaseGuestAutoCreditPrehold,
     reserveGuestAutoCreditPrehold,
     type GuestAutoCreditBinding,
+    type GuestAutoCreditReleaseReason,
 } from "@/lib/guestChatAutoCreditLedger";
 import {
     guestAutoCreditCandidateDigest,
@@ -1094,19 +1095,77 @@ async function handleChatPost(
     // renewing a lease no request owns any more.
     let stopLeaseHeartbeat: (() => void) | null = null;
     let usageReservation: ChatUsageReservation | null = null;
-    let guestAutoRun:
-        | {
-              access: ChatAccess;
-              binding: GuestAutoCreditBinding;
-              prehold: GuestAutoCreditPrehold;
-              conversionStarted: boolean;
-              conversionKnownRolledBack: boolean;
-              converted: boolean;
-              unknownMarked: boolean;
-              unknownReceiptChecked: boolean;
-          }
-        | null = null;
-    const releaseKnownUndispatchedGuestAutoPrehold = async (): Promise<boolean> => {
+    type GuestAutoRun = {
+        access: ChatAccess;
+        binding: GuestAutoCreditBinding;
+        prehold: GuestAutoCreditPrehold;
+        conversionStarted: boolean;
+        conversionKnownRolledBack: boolean;
+        converted: boolean;
+        unknownMarked: boolean;
+        unknownDispositionAttempted: boolean;
+        unknownReceiptChecked: boolean;
+    };
+    let guestAutoRun: GuestAutoRun | null = null;
+    const retainGuestAutoUnknownOnce = async (
+        run: GuestAutoRun,
+        boundary: Parameters<typeof markGuestAutoCreditUnknown>[0]["boundary"]
+    ): Promise<Awaited<ReturnType<typeof readGuestAutoCreditState>>> => {
+        if (run.unknownDispositionAttempted) return null;
+        // The local terminal flag closes browser retry immediately. It is not
+        // evidence that the durable write committed, so keep a separate
+        // single-attempt fence and always follow that one write with one
+        // content-free receipt read.
+        run.unknownMarked = true;
+        run.unknownDispositionAttempted = true;
+        try {
+            await markGuestAutoCreditUnknown({
+                access: run.access,
+                binding: run.binding,
+                observationId: randomUUID(),
+                boundary,
+            });
+        } catch (unknownError) {
+            logRequestError(
+                "guest_auto_credit_unknown_mark_failed",
+                traceId,
+                unknownError,
+                dispatchModelIdForLog
+            );
+        }
+        run.unknownReceiptChecked = true;
+        try {
+            return await readGuestAutoCreditState({
+                subjectKey: run.access.subjectKey,
+                authorityId: run.binding.authority.authorityId,
+            });
+        } catch (receiptError) {
+            logRequestError(
+                "guest_auto_unknown_receipt_read_failed",
+                traceId,
+                receiptError,
+                dispatchModelIdForLog
+            );
+            return null;
+        }
+    };
+    const retainGuestAutoUnknown = async (
+        run: GuestAutoRun,
+        boundary: Parameters<typeof markGuestAutoCreditUnknown>[0]["boundary"]
+    ): Promise<void> => {
+        const receipt = await retainGuestAutoUnknownOnce(run, boundary);
+        if (receipt?.status !== "guest_auto_unknown") {
+            logRequestError(
+                "guest_auto_unknown_receipt_unconfirmed",
+                traceId,
+                new Error("Guest Auto unknown receipt was not confirmed."),
+                dispatchModelIdForLog
+            );
+        }
+    };
+    const releaseKnownUndispatchedGuestAutoPrehold = async (
+        reason: GuestAutoCreditReleaseReason = "refiner_confirmed_undispatched"
+    ): Promise<boolean> => {
         const run = guestAutoRun;
         if (!run || run.converted || run.unknownMarked) return true;
         try {
@@ -1114,7 +1173,7 @@ async function handleChatPost(
                 access: run.access,
                 binding: run.binding,
                 proofId: randomUUID(),
-                reason: "refiner_confirmed_undispatched",
+                reason,
             });
             guestAutoRun = null;
             return true;
@@ -1126,40 +1185,31 @@ async function handleChatPost(
                 dispatchModelIdForLog
             );
             // The release may have committed even though its response was
-            // lost. Never retry it. One content-free receipt read distinguishes
-            // a confirmed release from the hold that must remain unknown.
-            run.unknownReceiptChecked = true;
-            try {
-                const receipt = await readGuestAutoCreditState({
-                    subjectKey: run.access.subjectKey,
-                    authorityId: run.binding.authority.authorityId,
-                });
-                if (receipt?.status === "guest_auto_released") {
-                    guestAutoRun = null;
-                    return true;
-                }
+            // lost. Never retry it. A distinct idempotent unknown disposition
+            // attempt followed by one content-free receipt read covers both
+            // outcomes: released stays known; every other outcome keeps the
+            // hold terminal and unavailable to a fresh paid turn.
+            const receipt = await retainGuestAutoUnknownOnce(run, "settlement");
+            if (receipt?.status === "guest_auto_released") {
+                guestAutoRun = null;
+                return true;
+            }
+            if (receipt?.status !== "guest_auto_unknown") {
                 logRequestError(
                     "guest_auto_credit_release_receipt_unconfirmed",
                     traceId,
                     new Error("Guest Auto release receipt was not confirmed."),
                     dispatchModelIdForLog
                 );
-            } catch (receiptError) {
-                logRequestError(
-                    "guest_auto_credit_release_receipt_read_failed",
-                    traceId,
-                    receiptError,
-                    dispatchModelIdForLog
-                );
             }
-            run.unknownMarked = true;
             return false;
         }
     };
     const returnKnownUndispatchedGuestAutoRefusal = async (
-        response: Response
+        response: Response,
+        reason: GuestAutoCreditReleaseReason = "refiner_confirmed_undispatched"
     ): Promise<Response> => {
-        if (!(await releaseKnownUndispatchedGuestAutoPrehold())) {
+        if (!(await releaseKnownUndispatchedGuestAutoPrehold(reason))) {
             return tracedJsonError(
                 "Guest Smart Adaptive could not verify this turn. No retry was attempted.",
                 "GUEST_AUTO_OUTCOME_UNKNOWN",
@@ -1772,6 +1822,7 @@ async function handleChatPost(
                 conversionKnownRolledBack: false,
                 converted: false,
                 unknownMarked: false,
+                unknownDispositionAttempted: false,
                 unknownReceiptChecked: false,
             };
             const sourcePrompt = profileTextFor(executionMessages);
@@ -1782,13 +1833,7 @@ async function handleChatPost(
                     sourcePrompt,
                 });
             } catch {
-                guestAutoRun.unknownMarked = true;
-                await markGuestAutoCreditUnknown({
-                    access: earlyAccess,
-                    binding,
-                    observationId: randomUUID(),
-                    boundary: "refiner",
-                });
+                await retainGuestAutoUnknown(guestAutoRun, "refiner");
                 throw new ChatAccessError(
                     503,
                     "GUEST_AUTO_OUTCOME_UNKNOWN",
@@ -1799,13 +1844,7 @@ async function handleChatPost(
                 refined.outcome === "original_fallback" &&
                 refined.billingUnknown
             ) {
-                guestAutoRun.unknownMarked = true;
-                await markGuestAutoCreditUnknown({
-                    access: earlyAccess,
-                    binding,
-                    observationId: randomUUID(),
-                    boundary: "refiner",
-                });
+                await retainGuestAutoUnknown(guestAutoRun, "refiner");
                 throw new ChatAccessError(
                     503,
                     "GUEST_AUTO_OUTCOME_UNKNOWN",
@@ -1930,18 +1969,14 @@ async function handleChatPost(
               })
             : null;
         if (guestAutoSelection && !guestAutoSelection.routed) {
-            const run = guestAutoRun!;
-            await releaseGuestAutoCreditPrehold({
-                access: run.access,
-                binding: run.binding,
-                proofId: randomUUID(),
-                reason: "router_refused_before_dispatch",
-            });
-            guestAutoRun = null;
-            throw new ChatAccessError(
-                409,
-                "GUEST_AUTO_NO_CANDIDATE",
-                "No Guest Smart Adaptive model is available for this turn."
+            return returnKnownUndispatchedGuestAutoRefusal(
+                tracedJsonError(
+                    "No Guest Smart Adaptive model is available for this turn.",
+                    "GUEST_AUTO_NO_CANDIDATE",
+                    409,
+                    traceId
+                ),
+                "router_refused_before_dispatch"
             );
         }
         const autoSelection = selectAutoModel({
@@ -5188,22 +5223,10 @@ async function handleChatPost(
                         !guestAutoRun.unknownMarked &&
                         usageReservation
                     ) {
-                        guestAutoRun.unknownMarked = true;
-                        try {
-                            await markGuestAutoCreditUnknown({
-                                access: guestAutoRun.access,
-                                binding: guestAutoRun.binding,
-                                observationId: randomUUID(),
-                                boundary: "settlement",
-                            });
-                        } catch (unknownError) {
-                            logRequestError(
-                                "guest_auto_credit_unknown_mark_failed",
-                                traceId,
-                                unknownError,
-                                dispatched.modelId
-                            );
-                        }
+                        await retainGuestAutoUnknown(
+                            guestAutoRun,
+                            "settlement"
+                        );
                         // The exact reservation remains held. A later unwind
                         // must not convert settlement uncertainty into a
                         // refund merely because no local usage snapshot won.
@@ -7053,44 +7076,20 @@ async function handleChatPost(
                 // prehold with an exact reservation. Expiry or this unwind is
                 // not proof that it did not, so retain the hold for read-only
                 // reconciliation and never retry the paid path.
-                guestAutoRun.unknownMarked = true;
-                try {
-                    await markGuestAutoCreditUnknown({
-                        access: guestAutoRun.access,
-                        binding: guestAutoRun.binding,
-                        observationId: randomUUID(),
-                        boundary: "conversion",
-                    });
-                } catch (unknownError) {
-                    logRequestError(
-                        "guest_auto_credit_unknown_mark_failed",
-                        traceId,
-                        unknownError,
-                        dispatchModelIdForLog
-                    );
-                }
+                await retainGuestAutoUnknown(
+                    guestAutoRun,
+                    "conversion"
+                );
                 usageReservation = null;
             } else if (guestAutoRun.converted && providerCall) {
                 // Once a provider call starts, a thrown request cannot prove
                 // whether the provider accepted it. Preserve the converted
                 // exact hold and stop; a second authority cannot reopen this
                 // logical Guest turn.
-                guestAutoRun.unknownMarked = true;
-                try {
-                    await markGuestAutoCreditUnknown({
-                        access: guestAutoRun.access,
-                        binding: guestAutoRun.binding,
-                        observationId: randomUUID(),
-                        boundary: "provider_dispatch",
-                    });
-                } catch (unknownError) {
-                    logRequestError(
-                        "guest_auto_credit_unknown_mark_failed",
-                        traceId,
-                        unknownError,
-                        dispatchModelIdForLog
-                    );
-                }
+                await retainGuestAutoUnknown(
+                    guestAutoRun,
+                    "provider_dispatch"
+                );
                 usageReservation = null;
             } else if (!guestAutoRun.converted) {
                 // Every paid boundary is still known and undispatched here.

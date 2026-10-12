@@ -123,6 +123,29 @@ const DURABLE_ATTEMPT_POLL_INTERVAL_MS = 1_000;
 const DURABLE_ATTEMPT_MAX_POLL_MS = 5 * 60 * 1_000;
 const DURABLE_ATTEMPT_MAX_BACKOFF_MS = 15_000;
 
+type ChatAppRetryPrompt = NonNullable<
+  ReturnType<typeof getChatRuntimeLastPrompt>
+> & {
+  /** A Guest Auto authority is single-turn and may never be replaced by a manual retry. */
+  guestAutoRetryBlocked?: true;
+};
+
+export const guestAutoRetryMetadata = (
+  isGuestMode: boolean,
+  guestAutoCapability?: string
+): Pick<ChatAppRetryPrompt, "guestAutoRetryBlocked"> =>
+  isGuestMode && Boolean(guestAutoCapability)
+    ? { guestAutoRetryBlocked: true }
+    : {};
+
+export const isGuestAutoRetryBlocked = (
+  isGuestMode: boolean,
+  prompt: Pick<ChatAppRetryPrompt, "guestAutoRetryBlocked"> | null
+) => isGuestMode && prompt?.guestAutoRetryBlocked === true;
+
+const getChatAppRetryPrompt = (runtimeKey: string) =>
+  getChatRuntimeLastPrompt(runtimeKey) as ChatAppRetryPrompt | null;
+
 // The greeting bubble an empty conversation renders. It is UI, not
 // transcript: it is never persisted, and it must never be sent to
 // /api/chat. Doing so put an assistant turn ahead of the first user turn,
@@ -1518,6 +1541,11 @@ function ChatAppComponent({
       // Only when this send carried one; a composer send records nothing here
       // and its retry reads the conversation's mode exactly as before.
       ...(webSearchModeOverride ? { webSearchMode: webSearchModeOverride } : {}),
+      // A Guest Auto authority and logical turn are one-shot. Keeping this
+      // content-free marker with the retry source lets a remounted panel hide
+      // and reject the generic manual retry rather than silently sending the
+      // same question through the fallback model without Auto authority.
+      ...guestAutoRetryMetadata(isGuestMode, guestAutoCapability),
     });
     // Marks this conversation's history as locally advanced. A history load
     // that was already in flight when this send started describes the
@@ -2486,8 +2514,8 @@ function ChatAppComponent({
   }, [initialConversationId, onRestorePrompt, transcriptScope]);
 
   const handleRetryLast = useCallback(() => {
-    const lastPrompt = getChatRuntimeLastPrompt(runtimeKeyRef.current);
-    if (!lastPrompt) return;
+    const lastPrompt = getChatAppRetryPrompt(runtimeKeyRef.current);
+    if (!lastPrompt || isGuestAutoRetryBlocked(isGuestMode, lastPrompt)) return;
     const preparationKey = runtimeKeyRef.current;
     const preparationToken = beginSendPreparation(preparationKey);
     if (!preparationToken) return;
@@ -2523,7 +2551,7 @@ function ChatAppComponent({
         endSendPreparation(preparationKey, preparationToken);
       }
     })();
-  }, [beginSendPreparation, endSendPreparation, handleSendPrompt, onBeforeSend]);
+  }, [beginSendPreparation, endSendPreparation, handleSendPrompt, isGuestMode, onBeforeSend]);
 
   /**
    * Re-sends the last prompt, acknowledging files the server said are gone.
@@ -2937,7 +2965,15 @@ function ChatAppComponent({
           ]
         }
         importedTranscript={importedTranscript}
-        onRetryLast={transcriptScope === "model" ? handleRetryLast : undefined}
+        onRetryLast={
+          transcriptScope === "model" &&
+          !isGuestAutoRetryBlocked(
+            isGuestMode,
+            getChatAppRetryPrompt(runtimeKey)
+          )
+            ? handleRetryLast
+            : undefined
+        }
         onRestoreQuestion={transcriptScope === "conversation" && onRestorePrompt
           ? handleRestoreQuestion : undefined}
         onRetryWithoutAttachments={transcriptScope === "model" ? handleRetryWithoutAttachments : undefined}
