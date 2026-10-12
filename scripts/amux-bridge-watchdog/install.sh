@@ -90,12 +90,17 @@ systemctl daemon-reload
 # delivered. A run that sent nothing exits 0, so this run's own journal lines
 # are read as well: the first install reported success while every run read
 # the bridge as unreadable and sent nothing.
+#
+# The run is found by time, with the timer off so no other run can land in
+# the window. Not by InvocationID: a oneshot unit clears it the moment the run
+# ends, so the third install read an empty ID, found no lines, and failed a
+# run that had sent its signal (2026-10-12).
+timer_off
+since=$(date +%s)
 started=yes
 systemctl start tomverse-bridge-watchdog.service || started=no
 journalctl --sync
-invocation=$(systemctl show -p InvocationID --value tomverse-bridge-watchdog.service)
-run_log=$(journalctl -u tomverse-bridge-watchdog.service "_SYSTEMD_INVOCATION_ID=$invocation" \
-  --no-pager -o cat)
+run_log=$(journalctl -u tomverse-bridge-watchdog.service --since "@$since" --no-pager -o cat)
 printf '%s\n' "$run_log"
 if test "$started" = no || ! grep -qE '; sent (up|down)$' <<<"$run_log"; then
   timer_off
