@@ -23,6 +23,8 @@ test("saved idea lookup cannot reset pending or unknown writes", () => {
     assert.equal(canOpenSavedIdea(state, false, requestId), false);
   }
   assert.equal(canOpenSavedIdea("submitted", false, "not-a-request"), false);
+  assert.equal(canOpenSavedIdea("submitted", false,
+    "e7def5f0-2c78-1bd3-9558-ab8a8e3617d0"), false);
 });
 
 test("manual reopen uses only the existing audited receipt readback", () => {
@@ -33,6 +35,7 @@ test("manual reopen uses only the existing audited receipt readback", () => {
   assert.doesNotMatch(reopen, /method:\s*["']POST/);
   assert.match(panel, /htmlFor="amux-saved-request-id"/);
   assert.match(panel, /const frozen = readBackPending \|\|/);
+  assert.match(panel, /hasUnsavedInput = !!\(idea\.trim\(\) \|\| repositories\.trim\(\) \|\| pullRequests\.trim\(\)\)/);
 });
 
 test("another idea starts only after a definitive save and no pending check", () => {
