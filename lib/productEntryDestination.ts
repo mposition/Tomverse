@@ -6,8 +6,9 @@
  * when the server has not offered it; landing on a product and being thrown
  * out is worse than being shown the available Review entry directly.
  *
- * So the destination is decided on the server, per visitor, before the link is
- * rendered -- not by the client reading a flag it is not allowed to have.
+ * The signed-in destination uses only the existing server-owned capability
+ * response, before its link is rendered. Static marketing documents carry the
+ * separate public Guest entry and never read account rollout state at build time.
  *
  * `chatPathIsChat` is retained only for an explicitly requested compatibility
  * calculation. Its default is the shipped canonical mapping.
@@ -59,9 +60,27 @@ export const workspaceDestination = ({
     : reviewPath;
 
   const query = `lang=${encodeURIComponent(lang)}`;
-  // The guest preview marker belongs to the Review entry. A guest cannot be
-  // Chat-eligible today, and marking a Chat entry as a guest preview would
-  // claim an experience that does not exist.
+  // This primary CTA describes Review's comparison preview. Chat's separate
+  // guest trial entry does not carry the Review marker.
   const suffix = !isAuthenticated && !chatSurfaceAvailable ? `&${REVIEW_ENTRY_MARKER}` : "";
   return `${path}?${query}${suffix}`;
+};
+
+/** The Chat product card offers the guest trial separately from Auto access. */
+export const chatProductDestination = ({
+  chatSurfaceAvailable,
+  guestTrialAvailable,
+  lang,
+  isAuthenticated,
+}: {
+  chatSurfaceAvailable: boolean;
+  guestTrialAvailable: boolean;
+  lang: string;
+  isAuthenticated: boolean;
+}): string | null => {
+  const chatHref = `${PRODUCT_SURFACE_PATH.chat}?lang=${encodeURIComponent(lang)}`;
+  if (isAuthenticated) return chatSurfaceAvailable ? chatHref : null;
+  return guestTrialAvailable
+    ? chatHref
+    : `/auth/signin?callbackUrl=${encodeURIComponent(chatHref)}`;
 };

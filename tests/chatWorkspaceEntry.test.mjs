@@ -19,6 +19,29 @@ test("an offered gate is not ownership and legacy product is not Chat authority"
   assert.deepEqual(decideChatWorkspaceEntry({ authenticated: true, requestedConversation: true, ownedConversation: null, offered: true }), { action: "not_found" });
   assert.deepEqual(decideChatWorkspaceEntry({ authenticated: true, requestedConversation: true, ownedConversation: { productKey: null, hasContinuationBridge: false }, offered: true }), { action: "redirect", surface: "workspace" });
 });
+test("guest trial opens only a blank local Chat and never treats a URL id as ownership", () => {
+  assert.deepEqual(decideChatWorkspaceEntry({
+    authenticated: false,
+    requestedConversation: false,
+    ownedConversation: null,
+    offered: false,
+    guestTrialAvailable: true,
+  }), { action: "open" });
+  assert.deepEqual(decideChatWorkspaceEntry({
+    authenticated: false,
+    requestedConversation: true,
+    ownedConversation: null,
+    offered: false,
+    guestTrialAvailable: true,
+  }), { action: "not_found" });
+  assert.deepEqual(decideChatWorkspaceEntry({
+    authenticated: false,
+    requestedConversation: false,
+    ownedConversation: null,
+    offered: true,
+    guestTrialAvailable: false,
+  }), { action: "not_found" });
+});
 test("single-model admission refuses original multi-choice without mutating it", () => {
   const selectedModels = Object.freeze(["a", "b"]);
   assert.equal(chatSingleModelRefusal({ productKey: "chat", selectedModels, fromProfile: true }), "CHAT_PROFILE_SINGLE_MODEL_REQUIRED");

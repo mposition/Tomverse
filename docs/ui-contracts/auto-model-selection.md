@@ -30,8 +30,13 @@ cohort eligibility (`lib/autoRoutingUi.ts`). A signed-in blank Chat draft may
 receive the same single `offered` boolean from the server's read-only Chat
 draft capability. That capability means the account may start a stored Chat in
 Auto; it does not pretend the blank draft already has a conversation row or a
-stored product. The control renders when its server-owned `offered` value is
-true and does not exist when it is false.
+stored product. An admitted Guest Chat uses the separate, one-turn authority
+in
+[`chat-refiner-guest-smart-adaptive-v1.md`](../policy/chat-refiner-guest-smart-adaptive-v1.md):
+its read-only capability may offer Smart Adaptive without creating an account,
+conversation row, financial claim or provider request. The control renders
+when its server-owned `offered` value is true and does not exist when it is
+false.
 
 ```
 offered =
@@ -82,13 +87,26 @@ call. Before the first Send, the client must create the owned Chat row, read
 its canonical detail, store `selectionMode: auto`, and adopt that confirmed
 row. Send waits for this sequence.
 
-If the user has chosen manual on the blank draft and explicitly switches Smart
+If a signed-in user has chosen manual on the blank draft and explicitly switches Smart
 Adaptive back on, the same server-confirmation sequence runs immediately. In
 that explicit transition only, the switch remains pending or returns to manual
 until every step succeeds. These network steps are deliberately not described
 as one database transaction. An unknown outcome stops for readback and is never
-retried blindly. Review, guest and other product surfaces do not gain this
-draft capability, and routing itself still requires the stored owned row.
+retried blindly. Review and other product surfaces do not gain this account
+draft capability, and account routing itself still requires the stored owned
+row.
+
+Guest Chat follows a narrower one-turn contract. Entry and the visible default
+remain rowless and free. Immediately before Send, the client obtains a fresh
+opaque authority bound to the signed Guest principal and exact activated
+release. The server claims that authority and the logical client turn once,
+runs the Refiner at most once, and routes one answer inside the existing Guest
+allowance. The authority stays in request memory and never enters a URL,
+browser storage or transcript. Guest attachments remain manual-only; when an
+attachment is present the server refuses Auto before any hold, Refiner or
+provider call. An unknown Guest Auto outcome is read back as a content-free
+financial receipt, exposes no retry or restore action for that turn, and never
+silently obtains a fresh authority or client-turn id.
 
 There is no disabled state, no "coming soon", no greyed row. A control that
 flips, saves and changes nothing is worse than an absent one: the user cannot
@@ -166,8 +184,9 @@ A refused, failed or identity-stale write leaves the confirmed Auto UI intact.
   no price and no provider, and the credit estimate under the picker would have
   nothing to show for it.
 - No surface may derive availability from the flag alone. `offered` is the only
-  input, and it is computed server-side for either the owned stored
-  conversation or the signed-in blank Chat capability described in §1.
+  input, and it is computed server-side for the owned stored conversation, the
+  signed-in blank Chat capability, or the separately signed Guest one-turn
+  capability described in §1.
 - No user-facing string may name a bucket, a percentage, a salt, a cohort or a
   readiness gate.
 - A change that violates this contract is a release blocker.

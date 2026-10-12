@@ -4,7 +4,7 @@ import Link from "next/link";
 import { displayHeadingClass } from "@/lib/displayHeading";
 import { ArrowRight } from "lucide-react";
 import { useSession } from "next-auth/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
@@ -16,28 +16,29 @@ import { AnswerRails } from "./AnswerRails";
 import { ProductCapture } from "./ProductCapture";
 import { TrustSection } from "./TrustSection";
 import { WorkflowContinuitySection } from "./WorkflowContinuitySection";
-import { workspaceDestination } from "@/lib/productEntryDestination";
 import {
-  chatProductUiCopy,
-  localizedProductHref,
-} from "@/lib/chatProductUiCopy";
+  chatProductDestination,
+  workspaceDestination,
+} from "@/lib/productEntryDestination";
+import { chatProductUiCopy } from "@/lib/chatProductUiCopy";
+import { startLandingChatCapabilityRead } from "@/lib/landingChatCapabilityClient";
 
 /**
  * The landing page shell: the hero, and the order the sections run in.
  *
  * ## What V2 changed, and why
  *
- * Tomverse is the brand; Tomverse Review is the one product a visitor can
- * actually open today. The V1 hero said so twice and then contradicted
+ * Tomverse is the brand; Tomverse Review was V1's guest entry. The V1 hero
+ * said so twice and then contradicted
  * itself: a badge and a brand note each introduced the product, a signup note
  * and a guest note each promised the same "no sign-up required", and the CTA
- * read "Start chatting free" -- which names Tomverse Chat, a product that is
- * not released. A visitor could not tell from the first screen which of the
+ * read "Start chatting free" -- which named the then-unreleased Tomverse Chat.
+ * A visitor could not tell from the first screen which of the
  * four brand-tree products the button was going to open.
  *
  * The hero now names both product jobs once. Its primary guest action still
- * starts Review, while Chat has a distinct sign-in entry and server-owned
- * availability boundary.
+ * starts Review, while Chat has a distinct single-model guest trial entry and
+ * server-owned authenticated availability boundary.
  *
  * Eight sections became five. Three of the eight were retellings of the hero
  * demonstration rather than new facts, and two more pairs were answering one
@@ -50,28 +51,52 @@ import {
  * instead of being cropped by this element's `overflow-x-hidden`.
  */
 export function LandingPageContent({
-  chatSurfaceAvailable = false,
+  guestTrialAvailable = false,
 }: {
-  /**
-   * Resolved on the server (`lib/landingWorkspaceEntry.ts`), because the CTA's
-   * destination has to be decided per visitor before the link is rendered.
-   *
-   * Entry and availability: docs/ui-contracts/chat-product-switcher.md. A Chat
-   * link that is shown outside the eligible
-   * account set bounces the visitor, and the bounce is the only part the user
-   * sees. Defaults to false so an unresolved caller gets the canonical Review
-   * entry instead.
-   *
-   * A boolean, not a reason. Which bucket, what share and which readiness gate
-   * stay on the server (UI contract §2).
-   */
-  chatSurfaceAvailable?: boolean;
+  /** Public static trial entry, not an account, Auto or Refiner capability. */
+  guestTrialAvailable?: boolean;
 } = {}) {
+  const { data: session, status } = useSession();
+  const isAuthenticated = status === "authenticated";
+  const accountUserId = isAuthenticated && typeof session?.user?.id === "string"
+    && session.user.id.length > 0 ? session.user.id : null;
+  const landingTrackedRef = useRef(false);
+
+  useEffect(() => {
+    if (landingTrackedRef.current) return;
+    landingTrackedRef.current = true;
+    trackProductEvent("landing_view");
+  }, []);
+
+  return (
+    <LandingPageContentForIdentity
+      // A new resolved identity starts unavailable in the same render. A late
+      // capability response cannot repaint another account, even A-to-B-to-A.
+      key={`${status}:${accountUserId ?? ""}`}
+      accountUserId={accountUserId}
+      isAuthenticated={isAuthenticated}
+      guestTrialAvailable={guestTrialAvailable}
+    />
+  );
+}
+
+function LandingPageContentForIdentity({
+  accountUserId,
+  isAuthenticated,
+  guestTrialAvailable,
+}: {
+  accountUserId: string | null;
+  isAuthenticated: boolean;
+  guestTrialAvailable: boolean;
+}) {
   const { lang } = useLanguage();
-  const { status } = useSession();
+  const [chatSurfaceAvailable, setChatSurfaceAvailable] = useState(false);
+  useEffect(() => startLandingChatCapabilityRead({
+    accountUserId,
+    onResolved: setChatSurfaceAvailable,
+  }), [accountUserId]);
   const content = getLandingCopy(lang);
   const productCopy = chatProductUiCopy[lang];
-  const isAuthenticated = status === "authenticated";
   const chatHref = workspaceDestination({
     chatSurfaceAvailable,
     lang,
@@ -86,7 +111,7 @@ export function LandingPageContent({
   const primaryCtaLabel =
     isAuthenticated && chatSurfaceAvailable
       ? productCopy.chat.open
-      : status === "authenticated"
+      : isAuthenticated
         ? content.signedInCta
         : content.primaryCta;
   const reviewHref = workspaceDestination({
@@ -94,17 +119,13 @@ export function LandingPageContent({
     lang,
     isAuthenticated,
   });
-  const canonicalChatHref = localizedProductHref("chat", lang);
-  const chatProductHref = isAuthenticated
-    ? (chatSurfaceAvailable ? canonicalChatHref : null)
-    : `/auth/signin?callbackUrl=${encodeURIComponent(canonicalChatHref)}`;
-  const landingTrackedRef = useRef(false);
-
-  useEffect(() => {
-    if (landingTrackedRef.current) return;
-    landingTrackedRef.current = true;
-    trackProductEvent("landing_view");
-  }, []);
+  const chatProductHref = chatProductDestination({
+    chatSurfaceAvailable,
+    guestTrialAvailable,
+    lang,
+    isAuthenticated,
+  });
+  const isGuestChatTrial = !isAuthenticated && guestTrialAvailable;
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -193,8 +214,13 @@ export function LandingPageContent({
                   {productCopy.chat.feature}
                 </p>
                 <h2 className="mt-1 text-lg font-black">{productCopy.chat.name}</h2>
-                <p className="mt-2 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  {productCopy.chat.description}
+                <p
+                  data-testid="landing-chat-product-description"
+                  className="mt-2 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300"
+                >
+                  {isGuestChatTrial
+                    ? productCopy.guestChatDescription
+                    : productCopy.chat.description}
                 </p>
                 {chatProductHref ? (
                   <Link
@@ -202,9 +228,11 @@ export function LandingPageContent({
                     data-testid="landing-chat-product-cta"
                     className="mt-4 inline-flex min-h-11 items-center justify-center rounded-xl border border-blue-600 px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
                   >
-                    {isAuthenticated
-                      ? productCopy.chat.open
-                      : productCopy.signInToOpenChat}
+                    {isGuestChatTrial
+                      ? productCopy.tryGuestChat
+                      : isAuthenticated
+                        ? productCopy.chat.open
+                        : productCopy.signInToOpenChat}
                   </Link>
                 ) : (
                   <p
@@ -273,7 +301,7 @@ export function LandingPageContent({
                 V1 rendered this promise twice, once above the CTA and once
                 below it, in near-identical words. One line, one place.
               */}
-              {status !== "authenticated" && (
+              {!isAuthenticated && (
                 <p
                   data-testid="landing-hero-signup-note"
                   className="max-w-2xl break-words text-sm font-semibold text-zinc-700 dark:text-zinc-200"

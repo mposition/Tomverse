@@ -2494,7 +2494,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect.poll(state.beforeModelSendStarted).toBe(true);
 
     await chooseNewChat(page);
-    await expect.poll(() => new URL(page.url()).pathname).toBe("/chat");
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/review");
     await state.releaseBeforeModelSend();
     expect(await persistentChatPostCount(page)).toBe(0);
     await page.goto(`/continuations/${CONVERSATION}?lang=en`);
@@ -2544,7 +2544,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
       if (surface === "continuation") {
         await chooseNewChat(page);
-        await expect.poll(() => new URL(page.url()).pathname).toBe("/chat");
+        await expect.poll(() => new URL(page.url()).pathname).toBe("/review");
       } else {
         await chooseConversation(page, SECOND_CONVERSATION);
         await expect(message(page, SECOND_ANSWER)).toBeVisible();
@@ -3038,7 +3038,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect.poll(async () => (await page.evaluate(() =>
       (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents
     )).filter((item) => savedNoticeCopy.test(item)).length).toBe(1);
-    await expect.poll(() => new URL(page.url()).pathname).toBe("/chat");
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/review");
     await expect.poll(() => page.evaluate(() =>
       sessionStorage.getItem("tomverse_active_chat_id"))).toBe(CONVERSATION);
     await expect(message(page, FIRST_ANSWER)).toBeVisible();
@@ -3535,13 +3535,13 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(await persistentChatPostCount(page)).toBe(0);
   });
 
-  test("new Chat is gated while legacy Review keeps its existing route", async ({ page }) => {
+  test("the Chat workspace alias and canonical Review keep their product routes", async ({ page }) => {
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page);
     const response = await page.goto("/chat/workspace?lang=en");
-    expect(response?.status()).toBe(404);
-    await expect(page.getByTestId("chat-textarea")).toHaveCount(0);
-    await page.goto("/chat?lang=en");
+    expect(response?.status()).toBe(200);
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
   });
 

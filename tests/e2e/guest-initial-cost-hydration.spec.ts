@@ -1,5 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
-import { openModelCatalogue, prepareGuestPage } from "./support/app-fixtures";
+import { GUEST_BRAND_TRIO_MODEL_IDS } from "@/lib/appDefaults";
+import {
+  openModelCatalogue,
+  prepareGuestPage,
+  sendChatMessage,
+} from "./support/app-fixtures";
 
 // Regression coverage for STG-F006: a new guest's composer briefly showed a
 // single-model "1 credit" estimate before an effect (which waited on
@@ -24,6 +29,8 @@ const GUEST_MODEL_COUNT = 3;
 const WEB_SEARCH_SURCHARGE = 8;
 const SEARCHING_MODEL_CREDITS = 1 + WEB_SEARCH_SURCHARGE;
 const GUEST_CREDITS = GUEST_MODEL_COUNT * SEARCHING_MODEL_CREDITS;
+const GUEST_CHAT_MODEL_COUNT = 1;
+const GUEST_CHAT_CREDITS = SEARCHING_MODEL_CREDITS;
 // The same trio in a restored conversation whose switch is off.
 const GUEST_CREDITS_SEARCH_OFF = GUEST_MODEL_COUNT;
 const GUEST_SEND_LABEL = `Send · ${GUEST_CREDITS} credits`;
@@ -202,10 +209,11 @@ function collectHydrationConsoleErrors(page: Page) {
 
 function expectStableGuestDefault(
   history: FirstPaintSample[],
-  credits: number = GUEST_CREDITS
+  credits: number = GUEST_CREDITS,
+  modelCount: number = GUEST_MODEL_COUNT
 ) {
   expect(history.length).toBeGreaterThan(0);
-  expect(modelCountHistory(history)).toEqual([GUEST_MODEL_COUNT]);
+  expect(modelCountHistory(history)).toEqual([modelCount]);
   expect(creditsHistory(history)).toEqual([credits]);
   expect(sendLabelHistory(history)).toEqual([`Send · ${credits} credits`]);
 }
@@ -276,13 +284,378 @@ test.describe("guest initial cost hydration", () => {
     expect(consoleMessages.hydrationMessages).toEqual([]);
   });
 
-  test("plain /chat applies the same guest default as the preview entry", async ({
+  test("plain /chat starts the guest Chat trial on exactly one model", async ({
     page,
   }) => {
-    await page.goto("/review?lang=en");
+    await page.goto("/chat?lang=en");
     await settleComposer(page);
 
-    expectStableGuestDefault(await readHistory(page));
+    expectStableGuestDefault(
+      await readHistory(page),
+      GUEST_CHAT_CREDITS,
+      GUEST_CHAT_MODEL_COUNT
+    );
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveCount(0);
+    await expect(page.getByTestId("prompt-refiner-request")).toHaveCount(0);
+  });
+
+  test("guest Chat sends once, restores locally, and never rewrites Review history", async ({
+    page,
+  }, testInfo) => {
+    const prompt = "guest Chat keeps its own local history";
+    const answer = "single guest Chat answer";
+    const chosenModel = "claude-haiku-4-5";
+    const requests: Array<Record<string, unknown>> = [];
+    const accountOnlyRequests: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.url().includes("/api/chat/prompt-refiner/") ||
+        request.url().includes("/api/conversations")
+      ) {
+        accountOnlyRequests.push(request.url());
+      }
+    });
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      requests.push(route.request().postDataJSON() as Record<string, unknown>);
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain; charset=utf-8",
+        headers: { "X-Request-ID": "qa-guest-chat-single" },
+        body: answer,
+      });
+    });
+
+    await page.goto("/chat?lang=en");
+    await settleComposer(page);
+    const modelCatalogue = await openModelCatalogue(page);
+    await modelCatalogue.locator(
+      `[data-testid="model-option"][data-model-id="${chosenModel}"]`
+    ).click();
+    await expect.poll(() => page.evaluate(() => {
+      const raw = localStorage.getItem("guest_chat_conversations");
+      const rows = raw ? JSON.parse(raw) : [];
+      return rows[0]?.selectedModels ?? [];
+    })).toEqual([chosenModel]);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await settleComposer(page);
+    const restoredCatalogue = await openModelCatalogue(page);
+    await expect(restoredCatalogue.locator(
+      `[data-testid="model-option"][data-model-id="${chosenModel}"]`
+    )).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await page.evaluate((reviewModels) => {
+      const review = {
+        id: "guest_review_preserved",
+        title: "Review history must survive",
+        selectedModels: reviewModels,
+        disabledPanels: [],
+        webSearchMode: "off",
+        createdAt: "2026-10-12T00:00:00.000Z",
+      };
+      localStorage.setItem("guest_conversations", JSON.stringify([review]));
+      sessionStorage.setItem("tomverse_active_chat_id", review.id);
+    }, GUEST_BRAND_TRIO_MODEL_IDS);
+    const reviewBefore = await page.evaluate(() => ({
+      conversations: localStorage.getItem("guest_conversations"),
+      activeId: sessionStorage.getItem("tomverse_active_chat_id"),
+    }));
+
+    await sendChatMessage(page, testInfo, prompt);
+    await expect(page.getByText(prompt).first()).toBeVisible();
+    await expect(page.getByText(answer).first()).toBeVisible();
+    await expect.poll(() => requests.length).toBe(1);
+    expect(accountOnlyRequests).toEqual([]);
+
+    expect(requests[0]?.modelId).toBe(chosenModel);
+    expect(requests[0]?.conversationId).toBeUndefined();
+    expect(requests[0]?.assistantMessageId).toBeUndefined();
+    expect(requests[0]?.sourceUserMessageId).toBeUndefined();
+    expect(requests[0]?.promptRefinerDecision).toBeUndefined();
+    expect(
+      (requests[0]?.messages as Array<{ role?: string; content?: string }> | undefined)
+        ?.filter((message) => message.role === "user" && message.content === prompt)
+    ).toHaveLength(1);
+
+    const readGuestChatState = () => page.evaluate(() => {
+      const activeId = sessionStorage.getItem("tomverse_chat_active_chat_id");
+      const raw = localStorage.getItem("guest_chat_conversations");
+      const conversations = raw ? JSON.parse(raw) : [];
+      const transcriptKeys = Array.from(
+        { length: localStorage.length },
+        (_, index) => localStorage.key(index)
+      ).filter((key): key is string =>
+        Boolean(key && activeId && key.startsWith(`guest_messages_${activeId}_`))
+      );
+      return {
+        activeId,
+        conversations,
+        transcriptKeys,
+        transcripts: transcriptKeys.map((key) => localStorage.getItem(key)),
+        reviewConversations: localStorage.getItem("guest_conversations"),
+        reviewActiveId: sessionStorage.getItem("tomverse_active_chat_id"),
+      };
+    });
+    await expect.poll(readGuestChatState).toMatchObject({
+      activeId: expect.stringMatching(/^guest_chat_/),
+      conversations: [
+        expect.objectContaining({
+          id: expect.stringMatching(/^guest_chat_/),
+          selectedModels: [chosenModel],
+        }),
+      ],
+      transcriptKeys: expect.arrayContaining([
+        expect.stringMatching(new RegExp(`^guest_messages_guest_chat_.*_${chosenModel}$`)),
+      ]),
+      reviewConversations: reviewBefore.conversations,
+      reviewActiveId: reviewBefore.activeId,
+    });
+    const guestChatState = await readGuestChatState();
+    // A model changed before Send may leave its welcome-only panel key behind.
+    // Verify one answered transcript, rather than deleting preserved history.
+    const nonemptyTranscripts = guestChatState.transcripts.map((raw) =>
+      (JSON.parse(raw ?? "[]") as Array<{ id: string; role: string; content: string }>)
+        .filter((message) => message.id !== "welcome")
+    ).filter((messages) => messages.length > 0);
+    expect(nonemptyTranscripts).toHaveLength(1);
+    expect(nonemptyTranscripts[0]).toHaveLength(2);
+    expect(nonemptyTranscripts[0].filter((message) =>
+      message.role === "user" && message.content === prompt
+    )).toHaveLength(1);
+    expect(nonemptyTranscripts[0].filter((message) =>
+      message.role === "assistant" && message.content === answer
+    )).toHaveLength(1);
+
+    await page.reload();
+    await expect(page.getByText(prompt).first()).toBeVisible();
+    await expect(page.getByText(answer).first()).toBeVisible();
+    expect(requests).toHaveLength(1);
+
+    await page.goto("/review?lang=en");
+    await settleComposer(page);
+    await expect(page.getByText("3 AIs", { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => ({
+      conversations: localStorage.getItem("guest_conversations"),
+      activeId: sessionStorage.getItem("tomverse_active_chat_id"),
+      chatConversations: localStorage.getItem("guest_chat_conversations"),
+      chatActiveId: sessionStorage.getItem("tomverse_chat_active_chat_id"),
+    }))).toMatchObject({
+      conversations: reviewBefore.conversations,
+      activeId: reviewBefore.activeId,
+      chatConversations: expect.any(String),
+      chatActiveId: expect.stringMatching(/^guest_chat_/),
+    });
+  });
+
+  test("Guest Smart Adaptive is offered before the first turn and sends one original question", async ({
+    page,
+  }, testInfo) => {
+    // An opaque browser transport fixture: signature verification and actual
+    // Refiner/Router/ledger execution are exercised by server contracts.
+    const authority = "qa-guest-auto-transport-only";
+    const prompt = "Guest Smart Adaptive keeps the authored question";
+    const answer = "one routed Guest answer";
+    const requests: Array<Record<string, unknown>> = [];
+    const accountWrites: string[] = [];
+    let capabilityReads = 0;
+    await page.route("**/api/products/chat/capabilities", async (route) => {
+      capabilityReads += 1;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          autoSelection: { offered: true },
+          guestAutoAuthority: authority,
+          guestAuto: { attachmentSupport: "manual_only" },
+        }),
+      });
+    });
+    page.on("request", (request) => {
+      if (request.method() !== "GET" &&
+          /\/api\/(conversations|chat\/prompt-refiner\/)/.test(request.url())) {
+        accountWrites.push(request.url());
+      }
+    });
+    await page.route("**/api/chat", async (route) => {
+      requests.push(route.request().postDataJSON() as Record<string, unknown>);
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain; charset=utf-8",
+        headers: {
+          "X-Request-ID": "qa-guest-auto-once",
+          "X-Chat-Routed-Model": "claude-haiku-4-5",
+        },
+        body: answer,
+      });
+    });
+
+    await page.goto("/chat?lang=en");
+    const toggle = page.getByTestId("composer-auto-routing-toggle");
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByTestId("composer-active-model-count"))
+      .toHaveText("Smart Adaptive");
+    await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
+    await page.getByRole("button", { name: "Choose AI models" }).click();
+    const dialog = page.locator("#chat-input-popover");
+    await expect(dialog.getByTestId("auto-routing-toggle").getByRole("switch"))
+      .toHaveAttribute("aria-checked", "true");
+    // The remembered manual return preference may remain visible, but it
+    // must not claim to be Auto's selected answer model.
+    await expect(dialog.getByText("Manual return model", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Used after Smart Adaptive is turned off.", { exact: true }))
+      .toBeVisible();
+    await expect(dialog.locator('[data-testid="recommended-model-option"][aria-pressed="true"]'))
+      .toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    await sendChatMessage(page, testInfo, prompt);
+    await expect(page.getByText(answer, { exact: true }).first()).toBeVisible();
+    expect(requests).toHaveLength(1);
+    expect(capabilityReads).toBeGreaterThanOrEqual(2);
+    expect(accountWrites).toEqual([]);
+    expect(requests[0]).toMatchObject({
+      guestAutoAuthority: authority,
+      guestClientTurnId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    });
+    expect(requests[0].conversationId).toBeUndefined();
+    expect(requests[0].promptRefinerDecision).toBeUndefined();
+    expect((requests[0].messages as Array<{ role: string; content: string }>)
+      .filter((message) => message.role === "user" && message.content === prompt))
+      .toHaveLength(1);
+    const persisted = await page.evaluate(() => Object.values(localStorage).join("\n"));
+    expect(persisted).not.toContain(authority);
+    await page.reload();
+    await expect(page.getByText(prompt, { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(answer, { exact: true }).first()).toBeVisible();
+    expect(requests).toHaveLength(1);
+  });
+
+  test("Guest Auto manual choice survives a local conversation reload", async ({ page }) => {
+    await page.route("**/api/products/chat/capabilities", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          autoSelection: { offered: true },
+          guestAutoAuthority: "qa-guest-auto-mode-transport-only",
+          guestAuto: { attachmentSupport: "manual_only" },
+        }),
+      })
+    );
+    await page.goto("/chat?lang=en");
+    const toggle = page.getByTestId("composer-auto-routing-toggle");
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    const activeId = await page.evaluate(() =>
+      sessionStorage.getItem("tomverse_chat_active_chat_id")
+    );
+    expect(activeId).toMatch(/^guest_chat_/);
+    await page.reload();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByTestId("request-credit-estimate")).toBeVisible();
+    expect(await page.evaluate(() =>
+      sessionStorage.getItem("tomverse_chat_active_chat_id")
+    )).toBe(activeId);
+  });
+
+  for (const failure of ["unknown_receipt", "lost_response"] as const) {
+    test(`Guest Auto ${failure} does not offer prompt replay after reload`, async ({
+      page,
+    }, testInfo) => {
+      const prompt = `Guest unknown turn ${failure}`;
+      let sends = 0;
+      await page.route("**/api/products/chat/capabilities", (route) =>
+        route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            autoSelection: { offered: true },
+            guestAutoAuthority: "qa-guest-auto-unknown-transport-only",
+            guestAuto: { attachmentSupport: "manual_only" },
+          }),
+        })
+      );
+      await page.route("**/api/chat", async (route) => {
+        sends += 1;
+        if (failure === "lost_response") {
+          await route.abort("connectionreset");
+          return;
+        }
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "Guest Auto outcome is unknown; do not retry this turn.",
+            code: "GUEST_AUTO_OUTCOME_UNKNOWN",
+            details: { retryAuthorized: false, humanReviewRequired: true },
+          }),
+        });
+      });
+      await page.goto("/chat?lang=en");
+      await expect(page.getByTestId("composer-auto-routing-toggle"))
+        .toHaveAttribute("aria-checked", "true");
+      await sendChatMessage(page, testInfo, prompt);
+      await expect.poll(() => page.evaluate(() =>
+        Object.values(localStorage).join("\n")
+          .includes('"errorCode":"GUEST_AUTO_OUTCOME_UNKNOWN"')
+      )).toBe(true);
+      await expect(page.getByTestId("restore-chat-question")).toHaveCount(0);
+      expect(sends).toBe(1);
+      await page.reload();
+      await expect(page.getByText(prompt, { exact: true }).first()).toBeVisible();
+      await expect(page.getByTestId("restore-chat-question")).toHaveCount(0);
+      expect(sends).toBe(1);
+    });
+  }
+
+  test("Guest Auto reload during an unanswered POST preserves unknown and offers no replay", async ({
+    page,
+  }, testInfo) => {
+    const prompt = "Guest Auto interrupted before its response arrived";
+    let sends = 0;
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    await page.route("**/api/products/chat/capabilities", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          autoSelection: { offered: true },
+          guestAutoAuthority: "qa-guest-auto-interrupted-transport-only",
+          guestAuto: { attachmentSupport: "manual_only" },
+        }),
+      })
+    );
+    await page.route("**/api/chat", async (route) => {
+      sends += 1;
+      await responseGate;
+      // Reload closes the original request. Its delayed response cannot
+      // authorize a new attempt or replay on the newly mounted workspace.
+      await route.fulfill({ status: 200, body: "late answer" }).catch(() => {});
+    });
+    try {
+      await page.goto("/chat?lang=en");
+      await expect(page.getByTestId("composer-auto-routing-toggle"))
+        .toHaveAttribute("aria-checked", "true");
+      await sendChatMessage(page, testInfo, prompt);
+      await expect.poll(() => sends).toBe(1);
+      await expect.poll(() => page.evaluate((question) =>
+        Object.values(localStorage).join("\n").includes(question), prompt
+      )).toBe(true);
+      await page.reload();
+      await expect(page.getByText(prompt, { exact: true }).first()).toBeVisible();
+      await expect.poll(() => page.evaluate(() =>
+        Object.values(localStorage).join("\n")
+          .includes('"errorCode":"GUEST_AUTO_OUTCOME_UNKNOWN"')
+      )).toBe(true);
+      await expect(page.getByTestId("restore-chat-question")).toHaveCount(0);
+      expect(sends).toBe(1);
+    } finally {
+      releaseResponse();
+    }
   });
 
   test("the model count and price never depend on the viewport", async ({

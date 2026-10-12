@@ -260,6 +260,10 @@ export function useConversationDrafts(
   // at a different conversation.
   const draftsRef = useRef(drafts);
   const draftSessionFenceRef = useRef<DraftSessionFence | null>(null);
+  const draftSessionScopeRef = useRef<{
+    identityKey: string | null;
+    product: DraftSessionProduct | null;
+  } | null>(null);
   const activeDraftKeyRef = useRef(activeDraftKey);
   const syncMetaRef = useRef(new Map<string, DraftSyncMeta>());
   // Ordinary edit debounce may finish after navigation so the text just left
@@ -398,8 +402,12 @@ export function useConversationDrafts(
   }, []);
 
   const releaseDraftStores = useCallback(
-    (stores: readonly ConversationDraftStore[]) => {
+    (
+      stores: readonly ConversationDraftStore[],
+      retainedStores: readonly ConversationDraftStore[] = []
+    ) => {
       const urls = new Set<string>();
+      const retainedUrls = new Set<string>();
       for (const store of stores) {
         for (const draft of Object.values(store)) {
           for (const url of collectReleasablePreviewUrls(draft.attachments)) {
@@ -407,7 +415,16 @@ export function useConversationDrafts(
           }
         }
       }
-      for (const url of urls) URL.revokeObjectURL(url);
+      for (const store of retainedStores) {
+        for (const draft of Object.values(store)) {
+          for (const url of collectReleasablePreviewUrls(draft.attachments)) {
+            retainedUrls.add(url);
+          }
+        }
+      }
+      for (const url of urls) {
+        if (!retainedUrls.has(url)) URL.revokeObjectURL(url);
+      }
     },
     []
   );
@@ -416,11 +433,25 @@ export function useConversationDrafts(
   // an idle snapshot through preserveDraftsForProductSwitch; arbitrary
   // unmounts and pending/unknown sends never publish raw draft bytes. Opening
   // a product consumes its last staged snapshot for this resolved identity.
-  // Identity changes retire both product scopes and release their previews.
+  // Identity changes retire both staged product scopes. A preview which is
+  // still referenced by this mounted hook's separately keyed store remains
+  // live until that draft itself is discarded or the tab unmounts.
   useLayoutEffect(() => {
+    const previousScope = draftSessionScopeRef.current;
+    draftSessionScopeRef.current = {
+      identityKey,
+      product: sessionProduct,
+    };
+    const identityChangedInsideMountedProduct =
+      previousScope !== null &&
+      previousScope.product === sessionProduct &&
+      previousScope.identityKey !== identityKey;
     const opened = openConversationDraftSession(identityKey, sessionProduct);
     draftSessionFenceRef.current = opened.fence;
-    releaseDraftStores(opened.retired);
+    releaseDraftStores(
+      opened.retired,
+      identityChangedInsideMountedProduct ? [draftsRef.current] : []
+    );
     // Give a staged product-switch snapshot local authority before passive
     // durable hydration can observe this mount. The committed mount still
     // performs the state restore and cache consume in the microtask below so
@@ -428,14 +459,26 @@ export function useConversationDrafts(
     // Every state writer in this hook updates draftsRef synchronously through
     // replaceDrafts, so no passive state-to-ref mirror may overwrite it with
     // the render's initial empty store in between these two steps.
-    draftsRef.current = opened.store;
+    // An identity transition is not a product-navigation remount. The live
+    // hook already holds separately keyed drafts for A and B, and the approved
+    // identity contract requires A's bytes to become unreachable to B without
+    // deleting them. Replacing that store with the product-switch cache here
+    // made A -> B -> A lose A's draft. The cache owner is still retired by
+    // openConversationDraftSession; only this mounted, identity-keyed store is
+    // retained. Initial/StrictMode/product mounts continue to adopt the staged
+    // product snapshot below.
+    if (!identityChangedInsideMountedProduct) {
+      draftsRef.current = opened.store;
+    }
     queueMicrotask(() => {
       if (
         opened.fence &&
         draftSessionFenceRef.current === opened.fence &&
         consumeConversationDraftSession(opened.fence, opened.store)
       ) {
-        replaceDrafts(opened.store);
+        if (!identityChangedInsideMountedProduct) {
+          replaceDrafts(opened.store);
+        }
       }
     });
     return () => {

@@ -44,6 +44,7 @@ import {
     readPinnedDeploymentConfig,
 } from "@/lib/pinnedDeploymentExecution";
 import {
+    canUseModelWithPlan,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     type AiModel,
@@ -128,7 +129,10 @@ import {
     recordWebSearchCostRefusal,
     webSearchCostRefusalError,
 } from "@/lib/webSearchCostRefusal";
-import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
+import {
+    estimateRequestCredits,
+    getWebSearchSurchargeCredits,
+} from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
 import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
@@ -200,6 +204,7 @@ import {
     chatErrorResponse,
     createChatBudget,
     getChatBudgetReservedCostMicroUsd,
+    guestChatMaxInputTokens,
     identifyChatCaller,
     linkChatReservationProviderRequest,
     readChatJsonBody,
@@ -211,8 +216,32 @@ import {
     releaseAttemptProviderBudget,
     reserveAttemptProviderBudget,
     type ChatUsageReservation,
+    type ChatAccess,
     validateChatPayload,
 } from "@/lib/chatSecurity";
+import {
+    verifyGuestChatAutoAuthority,
+    type GuestChatAutoAuthorityPayload,
+} from "@/lib/guestChatAutoAuthority";
+import {
+    convertGuestAutoCreditPrehold,
+    markGuestAutoCreditUnknown,
+    readGuestAutoCreditState,
+    releaseGuestAutoCreditPrehold,
+    reserveGuestAutoCreditPrehold,
+    type GuestAutoCreditBinding,
+} from "@/lib/guestChatAutoCreditLedger";
+import {
+    guestAutoCreditCandidateDigest,
+    type GuestAutoCreditPrehold,
+} from "@/lib/guestChatAutoQuotaCore";
+import { selectGuestChatAutoModel } from "@/lib/guestChatAutoSelection";
+import {
+    GUEST_CHAT_SMART_ADAPTIVE_AUTHORITY_SECRET_ENV,
+} from "@/lib/guestChatSmartAdaptiveRelease";
+import { readGuestChatSmartAdaptiveRelease } from
+    "@/lib/guestChatSmartAdaptiveReleaseStore";
+import { refineGuestChatPrompt } from "@/lib/promptRefinerGuestProductService";
 import {
     attemptDispatchOptions,
     planAttemptExecution,
@@ -1063,6 +1092,16 @@ async function handleChatPost(
     // renewing a lease no request owns any more.
     let stopLeaseHeartbeat: (() => void) | null = null;
     let usageReservation: ChatUsageReservation | null = null;
+    let guestAutoRun:
+        | {
+              access: ChatAccess;
+              binding: GuestAutoCreditBinding;
+              prehold: GuestAutoCreditPrehold;
+              conversionStarted: boolean;
+              converted: boolean;
+              unknownMarked: boolean;
+          }
+        | null = null;
     let durableAttempt:
         | {
               userId: string;
@@ -1146,6 +1185,8 @@ async function handleChatPost(
             contextBundle,
             acknowledgedUnavailableAttachmentIds,
             promptRefinerDecision,
+            guestAutoAuthority,
+            guestClientTurnId,
         } = validateChatPayload(body);
         persistenceSourceUserMessageId = sourceUserMessageId;
         {
@@ -1300,6 +1341,10 @@ async function handleChatPost(
         const accountPlan = session?.user?.id
             ? await getUserBillingPlan(session.user.id)
             : null;
+        let earlyAccess: ChatAccess | null = null;
+        let guestVerificationComplete = false;
+        let guestAuthorityPayload: GuestChatAutoAuthorityPayload | null = null;
+        let guestReachableModels: AiModel[] | null = null;
         // §8.1 invariant 1: the conversation's stored mode, read from the row
         // the ownership check loads below. Null for a request with no
         // conversation, which inherits the account default like `inherit`.
@@ -1527,6 +1572,187 @@ async function handleChatPost(
                       },
                   })
                 : null;
+        if (guestAutoAuthority) {
+            if (
+                session?.user?.id ||
+                conversationId ||
+                assistantMessageId ||
+                sourceUserMessageId ||
+                promptRefinerDecision ||
+                deepResearchDepth
+            ) {
+                throw new ChatAccessError(
+                    409,
+                    "GUEST_AUTO_SCOPE_INVALID",
+                    "Guest Smart Adaptive is available only for a new Guest Chat turn."
+                );
+            }
+            if (turnCarriesAttachments(executionMessages)) {
+                throw new ChatAccessError(
+                    409,
+                    "GUEST_AUTO_ATTACHMENTS_UNSUPPORTED",
+                    "Smart Adaptive does not yet support Guest attachments. Choose a model directly to send this attachment."
+                );
+            }
+            earlyAccess = identifyChatCaller(req, null);
+            verificationGrant.setCookie = await ensureGuestVerified(
+                req,
+                turnstileToken,
+                "guest_chat",
+                { traceId }
+            );
+            guestVerificationComplete = true;
+            const guestRelease = await readGuestChatSmartAdaptiveRelease();
+            if (!guestRelease) {
+                throw new ChatAccessError(
+                    409,
+                    "GUEST_AUTO_UNAVAILABLE",
+                    "Guest Smart Adaptive is temporarily unavailable."
+                );
+            }
+            const authorityBinding = {
+                subjectKey: earlyAccess.subjectKey as `guest:${string}`,
+                sourceCommitSha: guestRelease.binding.runtimeCommitSha,
+                runtimeDeploymentId: guestRelease.binding.runtimeDeploymentId,
+                activationPairDigest: guestRelease.activationPairDigest,
+                configDigest: guestRelease.binding.configDigest,
+            } as const;
+            const authority = verifyGuestChatAutoAuthority(
+                guestAutoAuthority,
+                {
+                    secret:
+                        process.env[
+                            GUEST_CHAT_SMART_ADAPTIVE_AUTHORITY_SECRET_ENV
+                        ] ?? "",
+                    binding: authorityBinding,
+                    nowMs: Date.now(),
+                }
+            );
+            if (!authority.ok) {
+                throw new ChatAccessError(
+                    409,
+                    "GUEST_AUTO_AUTHORITY_INVALID",
+                    "Guest Smart Adaptive authority expired or changed. Try again."
+                );
+            }
+            guestAuthorityPayload = authority.payload;
+            const guestCandidateModels = runtimeModels.filter(
+                (model) =>
+                    model.enabled &&
+                    !model.catalogDeleted &&
+                    model.publiclyListed !== false &&
+                    canUseModelWithPlan("Guest", model)
+            );
+            const preflight = preflightInputEstimate(executionMessages);
+            if (!preflight.exact || guestCandidateModels.length === 0) {
+                throw new ChatAccessError(
+                    409,
+                    "GUEST_AUTO_NO_CANDIDATE",
+                    "No Guest Smart Adaptive model is available for this turn."
+                );
+            }
+            // The Refiner may replace the last authored prompt with any valid
+            // proposal up to its parser bound. Reserve Guest entitlement at
+            // the same input ceiling createChatBudget will enforce, so a
+            // longer verified proposal or an input-credit multiplier can
+            // never make the exact conversion larger than the prehold. This
+            // does not change that ceiling or any model's credit weight.
+            const creditEstimate = estimateRequestCredits({
+                models: guestCandidateModels,
+                estimatedInputTokens: guestChatMaxInputTokens(),
+                webSearchMode: webSearchMode ?? "off",
+                backendReadiness: resolveWebSearchBackendReadiness(),
+            });
+            const creditByModelId = new Map(
+                creditEstimate.models.map((entry) => [
+                    entry.modelId,
+                    entry.totalCredits,
+                ])
+            );
+            const candidates = guestCandidateModels.map((model) => ({
+                modelId: model.id,
+                provider: model.provider,
+                usageCredits: creditByModelId.get(model.id) ?? 0,
+                guestEligible: true as const,
+            }));
+            const binding: GuestAutoCreditBinding = {
+                authority: authority.payload,
+                clientTurnId: guestClientTurnId!,
+                candidateDigest: guestAutoCreditCandidateDigest(candidates),
+            };
+            const reserved = await reserveGuestAutoCreditPrehold({
+                access: earlyAccess,
+                binding,
+                candidates,
+                traceId,
+            });
+            guestAutoRun = {
+                access: earlyAccess,
+                binding,
+                prehold: reserved.prehold,
+                conversionStarted: false,
+                converted: false,
+                unknownMarked: false,
+            };
+            const sourcePrompt = profileTextFor(executionMessages);
+            let refined;
+            try {
+                refined = await refineGuestChatPrompt({
+                    authorityId: authority.payload.authorityId,
+                    sourcePrompt,
+                });
+            } catch {
+                guestAutoRun.unknownMarked = true;
+                await markGuestAutoCreditUnknown({
+                    access: earlyAccess,
+                    binding,
+                    observationId: randomUUID(),
+                    boundary: "refiner",
+                });
+                throw new ChatAccessError(
+                    503,
+                    "GUEST_AUTO_OUTCOME_UNKNOWN",
+                    "Guest Smart Adaptive could not verify this turn. No retry was attempted."
+                );
+            }
+            if (
+                refined.outcome === "original_fallback" &&
+                refined.billingUnknown
+            ) {
+                guestAutoRun.unknownMarked = true;
+                await markGuestAutoCreditUnknown({
+                    access: earlyAccess,
+                    binding,
+                    observationId: randomUUID(),
+                    boundary: "refiner",
+                });
+                throw new ChatAccessError(
+                    503,
+                    "GUEST_AUTO_OUTCOME_UNKNOWN",
+                    "Guest Smart Adaptive could not verify this turn. No retry was attempted."
+                );
+            }
+            refinerExecution = {
+                mode: "auto",
+                applied: refined.outcome === "refined",
+            };
+            if (refined.outcome === "refined") {
+                let replaced = false;
+                executionMessages = executionMessages.map((message, index) => {
+                    if (replaced || message.role !== "user") return message;
+                    const laterUserMessage = executionMessages
+                        .slice(index + 1)
+                        .some((candidate) => candidate.role === "user");
+                    if (laterUserMessage) return message;
+                    replaced = true;
+                    return { ...message, content: refined.refinedPrompt };
+                });
+            }
+            guestReachableModels = reserved.prehold.reachableCandidates
+                .map((candidate) => runtimeModelMap.get(candidate.modelId))
+                .filter((model): model is AiModel => Boolean(model));
+            conversationProductKey = "chat";
+        }
         // Router profiling, estimates, shadow and provider formatting all read
         // this same view. Ownership/source verification and storage read messages.
         const autoRoutingMessages = executionMessages;
@@ -1557,7 +1783,7 @@ async function handleChatPost(
         // health and signal inputs the real one uses.
         const routerShadowEnabled = isRouterShadowEnabled();
         const routerSignals =
-            autoCohort.eligible || routerShadowEnabled
+            autoCohort.eligible || guestAutoRun !== null || routerShadowEnabled
                 ? await getRouterRuntimeSignals()
                 : null;
         /**
@@ -1595,6 +1821,49 @@ async function handleChatPost(
             // for that model's backend.
             searchBackendReadiness: resolveWebSearchBackendReadiness(),
         };
+        const guestAutoSelection = guestAutoRun
+            ? selectGuestChatAutoModel({
+                  authorityVerified: guestAuthorityPayload !== null,
+                  text: profileTextFor(autoRoutingMessages),
+                  attachments: [],
+                  attachmentsUnmeasurable: false,
+                  webSearchRequested: webSearchMode === "always",
+                  searchBackendReadiness:
+                      routerCandidateInputs.searchBackendReadiness,
+                  models: guestReachableModels ?? [],
+                  reservedInputTokens: preflightInputEstimate(
+                      autoRoutingMessages
+                  ).estimatedInputTokens,
+                  requestOutputCapTokens:
+                      resolveModelPricing(requestedModelConfig).maxOutputTokens,
+                  unhealthyModelIds: routerCandidateInputs.unhealthyModelIds,
+                  availableCredits: guestAutoRun.prehold.dayAmount,
+                  creditsByModelId: Object.fromEntries(
+                      guestAutoRun.prehold.reachableCandidates.map(
+                          (candidate) => [
+                              candidate.modelId,
+                              candidate.usageCredits,
+                          ]
+                      )
+                  ),
+                  signals: routerCandidateInputs.signals,
+              })
+            : null;
+        if (guestAutoSelection && !guestAutoSelection.routed) {
+            const run = guestAutoRun!;
+            await releaseGuestAutoCreditPrehold({
+                access: run.access,
+                binding: run.binding,
+                proofId: randomUUID(),
+                reason: "router_refused_before_dispatch",
+            });
+            guestAutoRun = null;
+            throw new ChatAccessError(
+                409,
+                "GUEST_AUTO_NO_CANDIDATE",
+                "No Guest Smart Adaptive model is available for this turn."
+            );
+        }
         const autoSelection = selectAutoModel({
             explorationEnabled: await isAutoExplorationEnabled(),
             conversationId: conversationId ?? null,
@@ -1637,12 +1906,26 @@ async function handleChatPost(
             requestOutputCapTokens: resolveModelPricing(requestedModelConfig)
                 .maxOutputTokens,
         });
-        const effectiveModelId = autoSelection.routed
-            ? autoSelection.modelId
+        const autoRouted = guestAutoSelection?.routed === true ||
+            autoSelection.routed;
+        const autoRecord = guestAutoSelection?.routed
+            ? guestAutoSelection.record
+            : autoSelection.routed
+              ? autoSelection.record
+              : null;
+        const autoVersions = guestAutoSelection?.routed
+            ? guestAutoSelection.versions
+            : autoSelection.routed
+              ? autoSelection.versions
+              : null;
+        const effectiveModelId = guestAutoSelection?.routed
+            ? guestAutoSelection.modelId
+            : autoSelection.routed
+              ? autoSelection.modelId
             : requestedModelId;
         let autoSelectionRecorded = false;
         const recordAutoSelection = () => {
-            if (autoSelectionRecorded || !autoSelection.routed) return;
+            if (autoSelectionRecorded || !autoRouted || !autoRecord) return;
             autoSelectionRecorded = true;
             console.info(JSON.stringify({
                 event: "chat_auto_routed",
@@ -1650,16 +1933,24 @@ async function handleChatPost(
                 conversationId,
                 requestedModelId,
                 selectedModelId: effectiveModelId,
-                selectionReason: autoSelection.record.selectionReason,
-                routerVersion: autoSelection.versions.decision,
+                selectionReason: autoRecord.selectionReason,
+                routerVersion: autoVersions?.decision ?? "unknown",
                 limitedReleaseException:
-                    autoSelection.cohort.limitedReleaseException ?? null,
+                    guestAutoSelection?.routed
+                        ? null
+                        : autoSelection.routed
+                          ? autoSelection.cohort.limitedReleaseException ?? null
+                          : null,
                 timestamp: new Date().toISOString(),
             }));
             // Loud, and every time -- but only about a turn that was actually
             // routed. A routed turn that only routed because a drill said so
             // must be legible as one in the record it produces.
-            if (autoSelection.cohort.drillOverride) {
+            if (
+                !guestAutoSelection?.routed &&
+                autoSelection.routed &&
+                autoSelection.cohort.drillOverride
+            ) {
                 console.warn(JSON.stringify({
                     event: "chat_auto_readiness_overridden",
                     traceId,
@@ -1670,7 +1961,11 @@ async function handleChatPost(
                     timestamp: new Date().toISOString(),
                 }));
             }
-            if (autoSelection.cohort.initialReleaseAuthority) {
+            if (
+                !guestAutoSelection?.routed &&
+                autoSelection.routed &&
+                autoSelection.cohort.initialReleaseAuthority
+            ) {
                 console.warn(JSON.stringify({
                     event: "chat_auto_readiness_exception_used",
                     traceId,
@@ -1685,7 +1980,7 @@ async function handleChatPost(
         // A Refiner preview is tentative until the same view is atomically
         // revalidated and consumed after deterministic preflight refusals.
         if (!refinerPreview) recordAutoSelection();
-        const routedCatalogModel = autoSelection.routed
+        const routedCatalogModel = autoRouted
             ? runtimeModelMap.get(effectiveModelId)
             : requestedModelConfig;
         // The Router only ever considers runtime models that are enabled and
@@ -1694,7 +1989,7 @@ async function handleChatPost(
         // requested model keeps the answer, and the log says it happened --
         // silently answering from a model nobody chose is the one outcome
         // worse than either.
-        if (autoSelection.routed && !routedCatalogModel) {
+        if (autoRouted && !routedCatalogModel) {
             console.error(JSON.stringify({
                 event: "chat_auto_routed_model_missing",
                 traceId,
@@ -1906,17 +2201,19 @@ async function handleChatPost(
         // fetched twice.
         const billingPlan = accountPlan;
         const userPlan = billingPlan?.tier;
-        const access = identifyChatCaller(
-            req,
-            session?.user?.id,
-            userPlan,
-            billingPlan
-                ? {
-                      dailyMessageLimit: billingPlan.dailyMessageLimit,
-                      monthlyMessageLimit: billingPlan.monthlyMessageLimit,
-                  }
-                : undefined
-        );
+        const access =
+            earlyAccess ??
+            identifyChatCaller(
+                req,
+                session?.user?.id,
+                userPlan,
+                billingPlan
+                    ? {
+                          dailyMessageLimit: billingPlan.dailyMessageLimit,
+                          monthlyMessageLimit: billingPlan.monthlyMessageLimit,
+                      }
+                    : undefined
+            );
         refusalSubjectForLog = {
             subjectKey: access.subjectKey,
             userId: access.userId ?? null,
@@ -1963,7 +2260,7 @@ async function handleChatPost(
             }
         }
         assertModelAccess(access, modelConfig);
-        if (access.kind === "guest") {
+        if (access.kind === "guest" && !guestVerificationComplete) {
             verificationGrant.setCookie = await ensureGuestVerified(
                 req,
                 turnstileToken,
@@ -2051,7 +2348,7 @@ async function handleChatPost(
             // server did, and `selectedModels` is the manual list it is not
             // choosing from.
             if (
-                !autoSelection.routed &&
+                !autoRouted &&
                 selectedConversationModels.length > 0 &&
                 !selectedConversationModels.includes(requestedModelId)
             ) {
@@ -2619,7 +2916,7 @@ async function handleChatPost(
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             modelId: modelConfig.id,
             provider: modelConfig.provider,
-            autoRouted: autoSelection.routed,
+            autoRouted,
             isDeepResearchTurn,
             isAuthenticated: Boolean(session?.user?.id),
             canPersist: Boolean(
@@ -3581,7 +3878,7 @@ async function handleChatPost(
         // left to record, and a row here would enter the same decision twice
         // -- once as a shadow prediction and once as the real run -- into
         // metrics that read the two as independent.
-        if (!autoSelection.routed) scheduleRoutingShadowRun(() => {
+        if (!autoRouted) scheduleRoutingShadowRun(() => {
             const lastUserTurn = [...formattedMessages]
                 .reverse()
                 .find((message) => message.role === "user");
@@ -3628,19 +3925,34 @@ async function handleChatPost(
                 signals: routerCandidateInputs.signals,
             };
         });
-        const accessGrant = await acquireChatAccess(access, budget, {
-            traceId,
-            source: "chat",
-            enabledTools:
-                nativeSearchEnabled || appManagedSearchEnabled
-                    ? ["web_search"]
-                    : [],
-            // Comparison runs arrive with a slot already reserved for this
-            // model by the aggregate preflight. Without it the three panels of
-            // one comparison would each race for a slot, and a run could be
-            // admitted in part.
-            admissionToken,
-        });
+        const enabledTools =
+            nativeSearchEnabled || appManagedSearchEnabled
+                ? ["web_search"]
+                : [];
+        const accessGrant = guestAutoRun
+            ? await (async () => {
+                  guestAutoRun.conversionStarted = true;
+                  const converted = await convertGuestAutoCreditPrehold({
+                      access: guestAutoRun.access,
+                      binding: guestAutoRun.binding,
+                      prehold: guestAutoRun.prehold,
+                      budget,
+                      traceId,
+                      enabledTools,
+                  });
+                  guestAutoRun.converted = true;
+                  return converted;
+              })()
+            : await acquireChatAccess(access, budget, {
+                  traceId,
+                  source: "chat",
+                  enabledTools,
+                  // Comparison runs arrive with a slot already reserved for this
+                  // model by the aggregate preflight. Without it the three panels of
+                  // one comparison would each race for a slot, and a run could be
+                  // admitted in part.
+                  admissionToken,
+              });
         leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;
         // Shadow only, and awaited so the settlement update cannot race the
@@ -3918,8 +4230,8 @@ async function handleChatPost(
         // Which of those to do is a product decision; making the case visible
         // is not. Content-free: fixed identifiers and model ids only.
         if (
-            autoSelection.routed &&
-            autoSelection.record.needsCurrentInformation &&
+            autoRouted &&
+            autoRecord?.needsCurrentInformation &&
             !hasSearchPath(primarySearchPath)
         ) {
             console.warn(JSON.stringify({
@@ -3927,7 +4239,7 @@ async function handleChatPost(
                 traceId,
                 modelId: modelConfig.id,
                 gap: primarySearchPath.kind === "none" ? primarySearchPath.gap : null,
-                selectionReason: autoSelection.record.selectionReason,
+                selectionReason: autoRecord.selectionReason,
                 timestamp: new Date().toISOString(),
             }));
         }
@@ -4190,10 +4502,10 @@ async function handleChatPost(
             traceId,
             // Present only on a routed turn, so a manual run cannot be
             // counted in the metrics that grade routing.
-            routerDecision: autoSelection.routed
+            routerDecision: autoRouted && autoRecord && autoVersions
                 ? {
-                      versions: autoSelection.versions,
-                      record: autoSelection.record,
+                      versions: autoVersions,
+                      record: autoRecord,
                       userSelectedModelId: requestedModelId,
                   }
                 : null,
@@ -4390,7 +4702,7 @@ async function handleChatPost(
          * Empty on a manual turn, which the scope gate refuses on its own
          * grounds before this is ever read.
          */
-        const fallbackCandidates = autoSelection.routed
+        const fallbackCandidates = !guestAutoRun && autoSelection.routed
             ? autoSelection.fallbackCandidateModelIds
             : [];
         /**
@@ -4733,7 +5045,12 @@ async function handleChatPost(
                             })
                         );
                     }
-                    if (autoSelection.routed && outcome === "completed" && conversationId) {
+                    if (
+                        !guestAutoRun &&
+                        autoSelection.routed &&
+                        outcome === "completed" &&
+                        conversationId
+                    ) {
                         try {
                             await prisma.conversation.updateMany({
                                 // `updateMany` with the mode in the filter, so
@@ -4773,6 +5090,32 @@ async function handleChatPost(
                         }
                     }
                 } catch (error) {
+                    if (
+                        guestAutoRun?.converted &&
+                        !guestAutoRun.unknownMarked &&
+                        usageReservation
+                    ) {
+                        guestAutoRun.unknownMarked = true;
+                        try {
+                            await markGuestAutoCreditUnknown({
+                                access: guestAutoRun.access,
+                                binding: guestAutoRun.binding,
+                                observationId: randomUUID(),
+                                boundary: "settlement",
+                            });
+                        } catch (unknownError) {
+                            logRequestError(
+                                "guest_auto_credit_unknown_mark_failed",
+                                traceId,
+                                unknownError,
+                                dispatched.modelId
+                            );
+                        }
+                        // The exact reservation remains held. A later unwind
+                        // must not convert settlement uncertainty into a
+                        // refund merely because no local usage snapshot won.
+                        usageReservation = null;
+                    }
                     logRequestError(
                         "chat_usage_settlement_failed",
                         traceId,
@@ -5159,7 +5502,7 @@ async function handleChatPost(
             });
             lastStreamFailure = classified;
             const scope = autoFallbackScope({
-                routed: autoSelection.routed,
+                routed: autoRouted,
                 isGuest: access.kind === "guest",
                 // Includes the artifact tool, and that is the point:
                 // docs/policy/tomverse-chat-routing.md §7's own rationale
@@ -6536,9 +6879,9 @@ async function handleChatPost(
         // a header there would claim a routing decision that did not happen.
         // The reason is the Router's own fixed identifier, so the client
         // localises it and nothing derived from the turn crosses the wire.
-        if (autoSelection.routed) {
-            headers.set("X-Chat-Routed-Model", autoSelection.modelId);
-            headers.set("X-Chat-Routed-Reason", autoSelection.record.selectionReason);
+        if (autoRouted && autoRecord) {
+            headers.set("X-Chat-Routed-Model", effectiveModelId);
+            headers.set("X-Chat-Routed-Reason", autoRecord.selectionReason);
         }
         // These content-free facts describe the server-consumed decision.
         // They carry no proposal text and grant no authority to a later send.
@@ -6606,6 +6949,72 @@ async function handleChatPost(
                 traceId,
                 reason: orphanedLease.reason,
             });
+        }
+        if (guestAutoRun && !guestAutoRun.unknownMarked) {
+            if (guestAutoRun.conversionStarted && !guestAutoRun.converted) {
+                // A lost conversion response may already have replaced the
+                // prehold with an exact reservation. Expiry or this unwind is
+                // not proof that it did not, so retain the hold for read-only
+                // reconciliation and never retry the paid path.
+                guestAutoRun.unknownMarked = true;
+                try {
+                    await markGuestAutoCreditUnknown({
+                        access: guestAutoRun.access,
+                        binding: guestAutoRun.binding,
+                        observationId: randomUUID(),
+                        boundary: "conversion",
+                    });
+                } catch (unknownError) {
+                    logRequestError(
+                        "guest_auto_credit_unknown_mark_failed",
+                        traceId,
+                        unknownError,
+                        dispatchModelIdForLog
+                    );
+                }
+                usageReservation = null;
+            } else if (guestAutoRun.converted && providerCall) {
+                // Once a provider call starts, a thrown request cannot prove
+                // whether the provider accepted it. Preserve the converted
+                // exact hold and stop; a second authority cannot reopen this
+                // logical Guest turn.
+                guestAutoRun.unknownMarked = true;
+                try {
+                    await markGuestAutoCreditUnknown({
+                        access: guestAutoRun.access,
+                        binding: guestAutoRun.binding,
+                        observationId: randomUUID(),
+                        boundary: "provider_dispatch",
+                    });
+                } catch (unknownError) {
+                    logRequestError(
+                        "guest_auto_credit_unknown_mark_failed",
+                        traceId,
+                        unknownError,
+                        dispatchModelIdForLog
+                    );
+                }
+                usageReservation = null;
+            } else if (!guestAutoRun.converted) {
+                // Every paid boundary is still known and undispatched here.
+                // The Refiner may have settled independently; only the Guest
+                // Chat credit hold is returned.
+                try {
+                    await releaseGuestAutoCreditPrehold({
+                        access: guestAutoRun.access,
+                        binding: guestAutoRun.binding,
+                        proofId: randomUUID(),
+                        reason: "refiner_confirmed_undispatched",
+                    });
+                } catch (releaseError) {
+                    logRequestError(
+                        "guest_auto_credit_prehold_release_failed",
+                        traceId,
+                        releaseError,
+                        dispatchModelIdForLog
+                    );
+                }
+            }
         }
         if (durableAttempt) {
             try {
@@ -6686,7 +7095,7 @@ async function handleChatPost(
             });
             dispatchRecord = null;
         }
-        if (usageReservation) {
+        if (usageReservation && !guestAutoRun?.unknownMarked) {
             try {
                 const providerUsageSnapshot =
                     dispatchProviderForLog === "perplexity"
@@ -6749,6 +7158,40 @@ async function handleChatPost(
                 "The response attempt changed before dispatch.",
                 error.code,
                 409,
+                traceId
+            );
+        }
+        if (guestAutoRun?.unknownMarked) {
+            // The error response is the browser's stop signal. Confirm the
+            // content-free durable receipt once before returning it; absence
+            // or a read failure is still unknown and must never turn into a
+            // retryable refusal. A later reconciliation owns that decision.
+            try {
+                const receipt = await readGuestAutoCreditState({
+                    subjectKey: guestAutoRun.access.subjectKey,
+                    authorityId:
+                        guestAutoRun.binding.authority.authorityId,
+                });
+                if (receipt?.status !== "guest_auto_unknown") {
+                    logRequestError(
+                        "guest_auto_unknown_receipt_unconfirmed",
+                        traceId,
+                        new Error("Guest Auto unknown receipt was not confirmed."),
+                        dispatchModelIdForLog
+                    );
+                }
+            } catch (receiptError) {
+                logRequestError(
+                    "guest_auto_unknown_receipt_read_failed",
+                    traceId,
+                    receiptError,
+                    dispatchModelIdForLog
+                );
+            }
+            return tracedJsonError(
+                "Guest Smart Adaptive could not verify this turn. No retry was attempted.",
+                "GUEST_AUTO_OUTCOME_UNKNOWN",
+                503,
                 traceId
             );
         }

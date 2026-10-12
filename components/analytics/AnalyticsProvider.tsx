@@ -21,6 +21,10 @@ import {
 } from "@/lib/analyticsConsentPolicy";
 import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { CHAT_WORKSPACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+
+const isChatWorkspacePath = (pathname: string | null) =>
+  pathname === CHAT_WORKSPACE_PATH || pathname === REVIEW_WORKSPACE_PATH;
 
 type ConsentState = "loading" | "unset" | "accepted" | "declined";
 
@@ -439,7 +443,7 @@ export function AnalyticsProvider({
         if (!cancelled) setChatConsentReady(ready);
       });
     };
-    const isChatPath = pathname === "/chat";
+    const isChatPath = isChatWorkspacePath(pathname);
     if (!isChatPath) {
       scheduleChatConsentReady(false);
       return () => {
@@ -474,7 +478,7 @@ export function AnalyticsProvider({
   }, [initialPlan, pathname]);
 
   useEffect(() => {
-    if (pathname !== "/chat") {
+    if (!isChatWorkspacePath(pathname)) {
       queueMicrotask(() => setIsMobileChatTextEntryActive(false));
       return;
     }
@@ -643,7 +647,7 @@ export function AnalyticsProvider({
     closePreferences();
   }, [closePreferences]);
 
-  const consentPromptReady = pathname !== "/chat" || chatConsentReady;
+  const consentPromptReady = !isChatWorkspacePath(pathname) || chatConsentReady;
   const defaultEnabledNotice =
     consent === "unset" &&
     resolvedPolicy?.mode === "notice_opt_out" &&
@@ -669,7 +673,7 @@ export function AnalyticsProvider({
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
   const inlineSlot =
-    pathname === "/chat"
+    isChatWorkspacePath(pathname)
       ? chatConsentSlot
       : pathname === "/auth/signin"
         ? authConsentSlot
@@ -707,7 +711,7 @@ export function AnalyticsProvider({
   const settingsUsesInlineSlot = pathname === "/auth/signin";
   const settingsInlineSlot = settingsUsesInlineSlot ? authConsentSlot : null;
 
-  // REAUDIT-P1-01. /chat is the one route where the bottom-right corner is
+  // REAUDIT-P1-01. Chat and Review share a workspace where the bottom-right corner is
   // never free: the last model panel's follow-up form ends there, and below it
   // the shared composer runs to the same edge. Measured on a 1440x900 desktop
   // guest preview the pill covered 1012px^2 of the third panel's send button,
@@ -720,10 +724,10 @@ export function AnalyticsProvider({
   // The workspace already carries this entry point in normal document flow --
   // the account card in the sidebar footer for guests (AuthButton's
   // `showAnalyticsCookieButton`) and the account menu for signed-in users --
-  // and the collapsed rail's account menu offers it too. So on /chat the pill
+  // and the collapsed rail's account menu offers it too. On both products the pill
   // is redundant rather than load-bearing, and dropping it is what makes the
   // intersection structurally zero instead of coincidentally small.
-  const settingsUsesFloatingPill = pathname !== "/chat" && !settingsUsesInlineSlot;
+  const settingsUsesFloatingPill = !isChatWorkspacePath(pathname) && !settingsUsesInlineSlot;
 
 
   // Why container queries (@container/notice on the card below) instead of the

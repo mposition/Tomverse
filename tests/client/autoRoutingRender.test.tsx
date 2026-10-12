@@ -8,6 +8,11 @@ import {
   AutoRoutingComposerToggle,
   AutoRoutingToggle,
 } from "@/components/chat/AutoRoutingToggle";
+import {
+  ChatInputWebSearchChipView,
+  ChatInputWebSearchSwitchDescription,
+} from "@/components/chat/ChatInput";
+import type { WebSearchComposerState } from "@/lib/webSearchComposerState";
 
 /**
  * UI contract auto-model-selection.md §1, and the evidence the wiring change
@@ -177,6 +182,115 @@ test("the pending composer switch cannot issue a second mode change", () => {
   });
 
   assert.equal(findProp(rendered, "disabled"), true);
+});
+
+/* --------------------------------------- Auto-aware web search presentation */
+
+const webSearchState = (
+  overrides: Partial<WebSearchComposerState> = {}
+): WebSearchComposerState => ({
+  mode: "always",
+  isVisible: true,
+  selectedCount: 1,
+  supportedCount: 0,
+  unsupportedCount: 1,
+  unsupportedModelIds: ["manual-fallback"],
+  allUnsupported: true,
+  tone: "blocked",
+  hasException: true,
+  estimatedSurchargeCredits: 8,
+  ...overrides,
+});
+
+const webSearchChip = (
+  isAutoMode: boolean,
+  state: WebSearchComposerState = webSearchState()
+) =>
+  ChatInputWebSearchChipView({
+    state,
+    isAutoMode,
+    isMobileShell: false,
+    fullLabel: isAutoMode ? "Web search on" : "Web search · 1/2 supported",
+    compactLabel: isAutoMode ? "Web search" : "Web search 1/2",
+    description: isAutoMode
+      ? "Searches the web automatically when current information or sources are needed."
+      : "1 of 2 selected models can search. Up to 8 extra credits are reserved.",
+    removeLabel: "Turn web search off",
+    isExceptionOpen: false,
+    onToggleException: () => {},
+    onRemove: () => {},
+  });
+
+test("Auto web search does not present the manual fallback as the answering model", () => {
+  const rendered = webSearchChip(true);
+  const chip = propsOf(rendered).find(
+    (props) => props["data-testid"] === "web-search-mode-chip"
+  );
+  assert.ok(chip);
+  assert.equal(chip["data-selection-mode"], "auto");
+  assert.equal(chip["data-tone"], "neutral");
+  assert.equal(chip["data-supported-count"], undefined);
+  assert.equal(chip["data-unsupported-count"], undefined);
+  assert.equal(
+    propsOf(rendered).some(
+      (props) => props["data-testid"] === "web-search-exception-toggle"
+    ),
+    false
+  );
+
+  const text = textOf(rendered);
+  assert.match(text, /current information or sources are needed/);
+  assert.doesNotMatch(text, /selected models|8 extra credits|manual-fallback/);
+});
+
+test("manual web search keeps exact support counts and its exception control", () => {
+  const rendered = webSearchChip(
+    false,
+    webSearchState({
+      selectedCount: 2,
+      supportedCount: 1,
+      unsupportedCount: 1,
+      allUnsupported: false,
+      tone: "warning",
+    })
+  );
+  const chip = propsOf(rendered).find(
+    (props) => props["data-testid"] === "web-search-mode-chip"
+  );
+  assert.ok(chip);
+  assert.equal(chip["data-selection-mode"], "manual");
+  assert.equal(chip["data-tone"], "warning");
+  assert.equal(chip["data-supported-count"], 1);
+  assert.equal(chip["data-unsupported-count"], 1);
+  assert.equal(
+    propsOf(rendered).some(
+      (props) => props["data-testid"] === "web-search-exception-toggle"
+    ),
+    true
+  );
+  assert.match(textOf(rendered), /1 of 2 selected models can search/);
+  assert.match(textOf(rendered), /8 extra credits/);
+});
+
+test("Auto web search switch renders only the general conditional-search explanation", () => {
+  const auto = ChatInputWebSearchSwitchDescription({
+    isAutoMode: true,
+    isWebSearchOn: true,
+    description:
+      "Searches the web automatically when current information or sources are needed.",
+    costNote: "An extra 8 credits apply per selected model.",
+  });
+  assert.match(textOf(auto), /when current information or sources are needed/);
+  assert.doesNotMatch(textOf(auto), /8 credits|selected model/);
+
+  const manual = ChatInputWebSearchSwitchDescription({
+    isAutoMode: false,
+    isWebSearchOn: true,
+    description:
+      "Searches the web automatically when current information or sources are needed.",
+    costNote: "An extra 8 credits apply per selected model.",
+  });
+  assert.match(textOf(manual), /8 credits apply per selected model/);
 });
 
 /* -------------------------------------------------------------- the badge */

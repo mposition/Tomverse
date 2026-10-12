@@ -70,6 +70,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `chat-welcome-flicker.spec.ts` |
 | `chat-memory-context.spec.ts` |
 | `chat-unified-workspace.spec.ts` |
+| `chat-product-switcher.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
 | `email-notification-settings.spec.ts` |

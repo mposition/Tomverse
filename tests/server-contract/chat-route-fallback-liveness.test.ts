@@ -182,11 +182,166 @@ process.env.AUTO_ROUTER_FALLBACK_ENABLED = "on";
 process.env.CHAT_STREAM_KEEPALIVE_INTERVAL_MS = String(KEEPALIVE_INTERVAL_MS);
 process.env.CHAT_FIRST_TOKEN_DEADLINE_MS = String(FIRST_TOKEN_DEADLINE_MS);
 
+let activeSession: { user: { id: string; email: string } } | null = {
+  user: { id: USER_ID, email: "fallback-qa@tomverse.app" },
+};
+
 mock.module("next-auth/next", {
   namedExports: {
-    getServerSession: async () => ({
-      user: { id: USER_ID, email: "fallback-qa@tomverse.app" },
-    }),
+    getServerSession: async () => activeSession,
+  },
+});
+
+const GUEST_SUBJECT_KEY = `guest:${"a".repeat(64)}` as const;
+const GUEST_IP_KEY = `ip:${"b".repeat(64)}`;
+const GUEST_AUTHORITY_A = "77777777-7777-4777-8777-777777777777";
+const GUEST_AUTHORITY_B = "88888888-8888-4888-8888-888888888888";
+const GUEST_NONCE_A = "99999999-9999-4999-8999-999999999999";
+const GUEST_NONCE_B = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const GUEST_TURN_A = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const GUEST_TURN_B = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const GUEST_RUNTIME_COMMIT = "d".repeat(40);
+const GUEST_RUNTIME_DEPLOYMENT = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const GUEST_ACTIVATION_DIGEST = "e".repeat(64);
+const GUEST_CONFIG_DIGEST = "f".repeat(64);
+const GUEST_REFINED_PROMPT =
+  "정제된 실행 관점으로 정확히 답하고 필요한 근거만 간결하게 설명해 줘.";
+const guestLifecycle: string[] = [];
+
+const guestRelease = Object.freeze({
+  state: "active" as const,
+  binding: Object.freeze({
+    runtimeCommitSha: GUEST_RUNTIME_COMMIT,
+    runtimeDeploymentId: GUEST_RUNTIME_DEPLOYMENT,
+    configDigest: GUEST_CONFIG_DIGEST,
+  }),
+  activationPairDigest: GUEST_ACTIVATION_DIGEST,
+  activationAuditLogId: "guest-auto-activation-audit",
+  baseRouterActivationAuditLogId: "router-activation-audit",
+  baseProductActivationAuditLogId: "product-activation-audit",
+  actorUserId: USER_ID,
+  approvedAt: "2026-10-12T00:00:00.000Z",
+});
+
+let guestAuthorityVerificationCalls = 0;
+const guestAuthorityPayload = (
+  authorityId: string,
+  nonce: string,
+  subjectKey: `guest:${string}` = GUEST_SUBJECT_KEY
+) => Object.freeze({
+  version: 1 as const,
+  purpose: "guest_chat_smart_adaptive" as const,
+  product: "chat" as const,
+  policyVersion: 1 as const,
+  authorityId,
+  nonce,
+  subjectKey,
+  sourceCommitSha: GUEST_RUNTIME_COMMIT,
+  runtimeDeploymentId: GUEST_RUNTIME_DEPLOYMENT,
+  activationPairDigest: GUEST_ACTIVATION_DIGEST,
+  configDigest: GUEST_CONFIG_DIGEST,
+  issuedAtMs: Date.now() - 1_000,
+  expiresAtMs: Date.now() + 60_000,
+});
+
+mock.module(mod("lib/guestChatAutoAuthority.ts"), {
+  namedExports: {
+    verifyGuestChatAutoAuthority: (token: string) => {
+      guestAuthorityVerificationCalls += 1;
+      guestLifecycle.push("authority");
+      if (token === "guest-authority-a") {
+        return { ok: true as const, payload: guestAuthorityPayload(
+          GUEST_AUTHORITY_A,
+          GUEST_NONCE_A
+        ) };
+      }
+      if (token === "guest-authority-b") {
+        return { ok: true as const, payload: guestAuthorityPayload(
+          GUEST_AUTHORITY_B,
+          GUEST_NONCE_B
+        ) };
+      }
+      if (token === "guest-authority-wrong-principal") {
+        return { ok: false as const, reason: "subject_mismatch" as const };
+      }
+      return { ok: false as const, reason: "expired" as const };
+    },
+  },
+});
+
+mock.module(mod("lib/guestChatSmartAdaptiveReleaseStore.ts"), {
+  namedExports: {
+    readGuestChatSmartAdaptiveRelease: async () => guestRelease,
+  },
+});
+
+let guestTurnstileCalls = 0;
+mock.module(mod("lib/turnstile.ts"), {
+  namedExports: {
+    ensureGuestVerified: async () => {
+      guestTurnstileCalls += 1;
+      return "guest-verification=test; Path=/; HttpOnly";
+    },
+  },
+});
+
+type GuestRefinerMode = "refined" | "unknown" | "budget_refusal";
+let guestRefinerMode: GuestRefinerMode = "refined";
+const guestRefinerInputs: Array<{ authorityId: string; sourcePrompt: string }> = [];
+mock.module(mod("lib/promptRefinerGuestProductService.ts"), {
+  namedExports: {
+    refineGuestChatPrompt: async (input: {
+      authorityId: string;
+      sourcePrompt: string;
+    }) => {
+      guestRefinerInputs.push(input);
+      guestLifecycle.push("refiner");
+      if (guestRefinerMode === "unknown") {
+        return {
+          outcome: "original_fallback" as const,
+          reason: "unavailable" as const,
+          billingUnknown: true,
+          executionReceiptId: "guest-refiner-unknown-receipt",
+        };
+      }
+      if (guestRefinerMode === "budget_refusal") {
+        return {
+          outcome: "original_fallback" as const,
+          reason: "budget_exhausted" as const,
+          billingUnknown: false,
+          executionReceiptId: "guest-refiner-budget-refusal-receipt",
+        };
+      }
+      return {
+        outcome: "refined" as const,
+        refinedPrompt: GUEST_REFINED_PROMPT,
+        executionReceiptId: "guest-refiner-success-receipt",
+      };
+    },
+  },
+});
+
+const realGuestAutoSelection = require(
+  resolve(ROOT, "lib/guestChatAutoSelection.ts")
+) as typeof import("../../lib/guestChatAutoSelection");
+const guestSelectionInputs: Array<
+  Parameters<typeof realGuestAutoSelection.selectGuestChatAutoModel>[0]
+> = [];
+const guestSelectionOutputs: Array<
+  ReturnType<typeof realGuestAutoSelection.selectGuestChatAutoModel>
+> = [];
+mock.module(mod("lib/guestChatAutoSelection.ts"), {
+  namedExports: {
+    ...realGuestAutoSelection,
+    selectGuestChatAutoModel: (
+      input: Parameters<typeof realGuestAutoSelection.selectGuestChatAutoModel>[0]
+    ) => {
+      guestSelectionInputs.push(input);
+      guestLifecycle.push("router");
+      const output = realGuestAutoSelection.selectGuestChatAutoModel(input);
+      guestSelectionOutputs.push(output);
+      return output;
+    },
   },
 });
 
@@ -321,6 +476,7 @@ let recordDispatchStartedCalls = 0;
 let failDispatchStart = false;
 let throwAfterFallbackDispatchRecord = false;
 let throwBeforeFallbackStreamReturn = false;
+let throwGuestProviderUnknown = false;
 
 mock.module("ai", {
   namedExports: {
@@ -340,6 +496,10 @@ mock.module("ai", {
       };
       attempts.push(attempt);
       attemptLifecycle.push(`${index}:provider_start`);
+      if (activeSession === null) guestLifecycle.push("provider");
+      if (throwGuestProviderUnknown) {
+        throw new Error("GUEST_PROVIDER_UNKNOWN_TEST_FAILURE");
+      }
       // Attempt 0 is failed by the injected fault, not by this stream: the
       // route wraps the reader in `faultedReader`, which is the drill's own
       // mechanism rather than a shape invented here.
@@ -721,6 +881,185 @@ const reservation = {
   entries: providerHoldEntries,
 };
 
+type GuestLedgerMode = "normal" | "insufficient";
+let guestLedgerMode: GuestLedgerMode = "normal";
+type GuestPrehold = import("../../lib/guestChatAutoQuotaCore").GuestAutoCreditPrehold;
+type GuestClaim = {
+  subjectKey: string;
+  authorityId: string;
+  clientTurnId: string;
+  prehold: GuestPrehold;
+  phase: "guest_auto_prehold" | "exact";
+  status: "guest_auto_preheld" | "reserved" | "guest_auto_released" |
+    "guest_auto_unknown";
+};
+const guestClaimsByAuthority = new Map<string, GuestClaim>();
+const guestClaimsByTurn = new Map<string, GuestClaim>();
+const guestReserveInputs: Array<Record<string, unknown>> = [];
+const guestConvertInputs: Array<Record<string, unknown>> = [];
+const guestReleaseInputs: Array<Record<string, unknown>> = [];
+const guestUnknownInputs: Array<Record<string, unknown>> = [];
+const guestReadInputs: Array<Record<string, unknown>> = [];
+
+class TestGuestAutoCreditLedgerError extends Error {
+  constructor(readonly code: "duplicate_binding" | "quota_exhausted") {
+    super(code);
+  }
+}
+
+mock.module(mod("lib/guestChatAutoCreditLedger.ts"), {
+  namedExports: {
+    reserveGuestAutoCreditPrehold: async (input: {
+      access: { subjectKey: string };
+      binding: {
+        authority: { authorityId: string };
+        clientTurnId: string;
+      };
+      candidates: Array<{
+        modelId: string;
+        provider: string;
+        usageCredits: number;
+        guestEligible: true;
+      }>;
+      traceId: string;
+    }) => {
+      guestReserveInputs.push(input as unknown as Record<string, unknown>);
+      guestLifecycle.push("prehold");
+      if (guestLedgerMode === "insufficient") {
+        throw new TestGuestAutoCreditLedgerError("quota_exhausted");
+      }
+      const authorityKey =
+        `${input.access.subjectKey}:${input.binding.authority.authorityId}`;
+      const turnKey = `${input.access.subjectKey}:${input.binding.clientTurnId}`;
+      const authorityClaim = guestClaimsByAuthority.get(authorityKey);
+      const turnClaim = guestClaimsByTurn.get(turnKey);
+      if (
+        (authorityClaim && authorityClaim.clientTurnId !== input.binding.clientTurnId) ||
+        (turnClaim && turnClaim.authorityId !== input.binding.authority.authorityId)
+      ) {
+        throw new TestGuestAutoCreditLedgerError("duplicate_binding");
+      }
+      if (authorityClaim) {
+        return {
+          state: {
+            reservationId: "guest-auto-reservation",
+            phase: authorityClaim.phase,
+            status: authorityClaim.status,
+          },
+          prehold: authorityClaim.prehold,
+        };
+      }
+      const reachableCandidates = input.candidates.filter(
+        (candidate) => candidate.usageCredits > 0
+      );
+      assert.ok(reachableCandidates.length > 0, "Guest Auto needs a reachable model");
+      const basis = reachableCandidates.reduce((current, candidate) =>
+        candidate.usageCredits > current.usageCredits ? candidate : current
+      );
+      const prehold = Object.freeze({
+        basisModelId: basis.modelId,
+        basisProvider: basis.provider,
+        minuteAmount: 1 as const,
+        dayAmount: basis.usageCredits,
+        monthAmount: basis.usageCredits,
+        reachableCandidates: Object.freeze([...reachableCandidates]),
+      });
+      const claim: GuestClaim = {
+        subjectKey: input.access.subjectKey,
+        authorityId: input.binding.authority.authorityId,
+        clientTurnId: input.binding.clientTurnId,
+        prehold,
+        phase: "guest_auto_prehold",
+        status: "guest_auto_preheld",
+      };
+      guestClaimsByAuthority.set(authorityKey, claim);
+      guestClaimsByTurn.set(turnKey, claim);
+      return {
+        state: {
+          reservationId: "guest-auto-reservation",
+          phase: claim.phase,
+          status: claim.status,
+        },
+        prehold,
+      };
+    },
+    convertGuestAutoCreditPrehold: async (input: {
+      access: { subjectKey: string };
+      binding: { authority: { authorityId: string } };
+      budget: { modelId: string; provider: string };
+      traceId: string;
+    }) => {
+      guestConvertInputs.push(input as unknown as Record<string, unknown>);
+      guestLifecycle.push("conversion");
+      const claim = guestClaimsByAuthority.get(
+        `${input.access.subjectKey}:${input.binding.authority.authorityId}`
+      );
+      assert.ok(claim, "conversion requires the preheld dual claim");
+      claim.phase = "exact";
+      claim.status = "reserved";
+      return {
+        leaseId: "lease-guest-auto-1",
+        setCookie: undefined,
+        usageReservation: {
+          reservationId: "reservation-guest-auto-1",
+          userId: null,
+          traceId: input.traceId,
+          source: "chat" as const,
+          modelId: input.budget.modelId,
+          provider: input.budget.provider,
+          entries: [],
+        },
+      };
+    },
+    releaseGuestAutoCreditPrehold: async (input: {
+      access: { subjectKey: string };
+      binding: { authority: { authorityId: string } };
+    }) => {
+      guestReleaseInputs.push(input as unknown as Record<string, unknown>);
+      const claim = guestClaimsByAuthority.get(
+        `${input.access.subjectKey}:${input.binding.authority.authorityId}`
+      );
+      assert.ok(claim, "release requires the preheld dual claim");
+      claim.status = "guest_auto_released";
+      return { phase: claim.phase, status: claim.status };
+    },
+    markGuestAutoCreditUnknown: async (input: {
+      access: { subjectKey: string };
+      binding: { authority: { authorityId: string } };
+      boundary: string;
+    }) => {
+      guestUnknownInputs.push(input as unknown as Record<string, unknown>);
+      const claim = guestClaimsByAuthority.get(
+        `${input.access.subjectKey}:${input.binding.authority.authorityId}`
+      );
+      assert.ok(claim, "unknown retention requires the claimed hold");
+      claim.status = "guest_auto_unknown";
+      return { phase: claim.phase, status: claim.status };
+    },
+    readGuestAutoCreditState: async (input: {
+      subjectKey: string;
+      authorityId: string;
+    }) => {
+      guestReadInputs.push(input as unknown as Record<string, unknown>);
+      const claim = guestClaimsByAuthority.get(
+        `${input.subjectKey}:${input.authorityId}`
+      );
+      return claim
+        ? {
+            reservationId: "guest-auto-reservation",
+            requestKey: "guest-auto-credit:v1:test",
+            clientTurnId: claim.clientTurnId,
+            phase: claim.phase,
+            status: claim.status,
+            basisModelId: claim.prehold.basisModelId,
+            basisProvider: claim.prehold.basisProvider,
+            heldCredits: claim.prehold.dayAmount,
+          }
+        : null;
+    },
+  },
+});
+
 const ledger = {
   accessAcquisitions: 0,
   settlements: [] as Array<{ outcome: string; attempts: number | null }>,
@@ -734,6 +1073,20 @@ const ledger = {
 mock.module(mod("lib/chatSecurity.ts"), {
   namedExports: {
     ...realChatSecurity,
+    identifyChatCaller: (_request: Request, userId?: string | null) =>
+      userId
+        ? {
+            kind: "user" as const,
+            subjectKey: `user:${"c".repeat(64)}`,
+            ipKey: GUEST_IP_KEY,
+            userId,
+            plan: "Pro" as const,
+          }
+        : {
+            kind: "guest" as const,
+            subjectKey: GUEST_SUBJECT_KEY,
+            ipKey: GUEST_IP_KEY,
+          },
     acquireChatAccess: async () => {
       ledger.accessAcquisitions += 1;
       return {
@@ -751,6 +1104,7 @@ mock.module(mod("lib/chatSecurity.ts"), {
       usage: { outcome?: string },
       extra?: { attempts?: Array<{ attemptIndex: number; price: { modelId: string } }> }
     ) => {
+      if (activeSession === null) guestLifecycle.push("settlement");
       ledger.settlements.push({
         outcome: usage?.outcome ?? "unknown",
         attempts: extra?.attempts ? extra.attempts.length : null,
@@ -877,6 +1231,8 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
       assert.equal(row.modelId, record.modelId);
       assert.equal(row.state, "draft");
       row.state = "finalized";
+      attemptLifecycle.push(`${row.attemptIndex}:manifest_finalized`);
+      if (activeSession === null) guestLifecycle.push("manifest");
       return record;
     },
     recordDispatchStarted: async (record: unknown) => {
@@ -951,7 +1307,11 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
       assert.equal(row.modelId, instrumentation.modelId);
       assert.equal(
         row.state,
-        failDispatchStart ? "finalized" : "dispatched"
+        failDispatchStart
+          ? "finalized"
+          : throwGuestProviderUnknown
+            ? "dispatch_started"
+            : "dispatched"
       );
       dispatchCloses.push({
         attemptId: instrumentation.attemptId,
@@ -1061,6 +1421,10 @@ const ask = async (
     | "during_record_dispatched"
     | "during_primary_reader_cancel" = "none"
 ) => {
+  activeSession = {
+    user: { id: USER_ID, email: "fallback-qa@tomverse.app" },
+  };
+  throwGuestProviderUnknown = false;
   fallbackBehaviour = behaviour;
   injectPrimaryFault = withInjectedPrimaryFault;
   durableClaimMode = claimMode;
@@ -2179,4 +2543,330 @@ test("an accepted Refiner decision stops safely when durable dispatch-start reco
     refinerMode = null;
     conversationSelectionMode = "auto";
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* Guest Chat Smart Adaptive: actual /api/chat orchestration, no paid provider */
+/* -------------------------------------------------------------------------- */
+
+const resetGuestHarness = (preserveClaims = false) => {
+  activeSession = null;
+  guestRefinerMode = "refined";
+  guestLedgerMode = "normal";
+  throwGuestProviderUnknown = false;
+  injectPrimaryFault = false;
+  fallbackBehaviour = "answers";
+  failDispatchStart = false;
+  throwAfterFallbackDispatchRecord = false;
+  throwBeforeFallbackStreamReturn = false;
+  attempts.length = 0;
+  attemptLifecycle.length = 0;
+  guestLifecycle.length = 0;
+  guestAuthorityVerificationCalls = 0;
+  guestTurnstileCalls = 0;
+  guestRefinerInputs.length = 0;
+  guestSelectionInputs.length = 0;
+  guestSelectionOutputs.length = 0;
+  guestReserveInputs.length = 0;
+  guestConvertInputs.length = 0;
+  guestReleaseInputs.length = 0;
+  guestUnknownInputs.length = 0;
+  guestReadInputs.length = 0;
+  if (!preserveClaims) {
+    guestClaimsByAuthority.clear();
+    guestClaimsByTurn.clear();
+  }
+  recordDispatchedCalls = 0;
+  recordDispatchStartedCalls = 0;
+  dispatchCloses.length = 0;
+  instrumentationAttemptRows.clear();
+  closedInstrumentationAttempts.length = 0;
+  timingLines.length = 0;
+  world.messages = [];
+  world.terminals = [];
+  ledger.settlements = [];
+  ledger.settledAttempts = [];
+  ledger.attemptBudgetReleasesAtSettlement = [];
+  ledger.releases = [];
+  ledger.attemptBudgetReservations = 0;
+  ledger.attemptBudgetReleases = 0;
+  ledger.accessAcquisitions = 0;
+  warnings.length = 0;
+  refinerMode = null;
+  conversationSelectionMode = "auto";
+};
+
+const askGuestAuto = async (options: {
+  authority?: string;
+  clientTurnId?: string;
+  authenticated?: boolean;
+  attachments?: unknown[];
+  expectedStatus?: number;
+  preserveClaims?: boolean;
+  refinerMode?: GuestRefinerMode;
+  ledgerMode?: GuestLedgerMode;
+  providerUnknown?: boolean;
+} = {}) => {
+  resetGuestHarness(options.preserveClaims ?? false);
+  if (options.authenticated) {
+    activeSession = {
+      user: { id: USER_ID, email: "fallback-qa@tomverse.app" },
+    };
+  }
+  guestRefinerMode = options.refinerMode ?? "refined";
+  guestLedgerMode = options.ledgerMode ?? "normal";
+  throwGuestProviderUnknown = options.providerUnknown ?? false;
+  const authority = Object.prototype.hasOwnProperty.call(options, "authority")
+    ? options.authority
+    : "guest-authority-a";
+  const clientTurnId = Object.prototype.hasOwnProperty.call(options, "clientTurnId")
+    ? options.clientTurnId
+    : GUEST_TURN_A;
+  const { POST } = await loadRoute();
+  const response = await POST(
+    new Request("http://127.0.0.1:3100/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{
+          id: clientTurnId ?? GUEST_TURN_A,
+          role: "user",
+          content: "새 Guest 대화에서 자동으로 가장 알맞은 모델을 골라 답해 줘.",
+          ...(options.attachments ? { attachments: options.attachments } : {}),
+        }],
+        modelId: REQUESTED_MODEL_ID,
+        turnstileToken: "synthetic-turnstile",
+        ...(authority !== undefined ? { guestAutoAuthority: authority } : {}),
+        ...(clientTurnId !== undefined ? { guestClientTurnId: clientTurnId } : {}),
+      }),
+    })
+  );
+  const body = await whileWaiting(() => response.text().catch(() => ""));
+  if (
+    options.expectedStatus !== undefined &&
+    response.status !== options.expectedStatus
+  ) {
+    throw new Error(`status ${response.status}: ${body}`);
+  }
+  return { response, body };
+};
+
+const providerText = (content: unknown) =>
+  typeof content === "string"
+    ? content
+    : (content as Array<{ type: string; text?: string }>)
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("");
+
+test("Guest Auto binds authority and both claims before one Refiner, one exact conversion, one finalized provider dispatch", async () => {
+  const { body } = await askGuestAuto({ expectedStatus: 200 });
+
+  assert.ok(body.includes(ANSWER));
+  assert.equal(guestAuthorityVerificationCalls, 1);
+  assert.equal(guestTurnstileCalls, 1);
+  assert.equal(guestReserveInputs.length, 1);
+  const reserve = guestReserveInputs[0] as {
+    access: { subjectKey: string; ipKey: string };
+    binding: { authority: { authorityId: string }; clientTurnId: string };
+  };
+  assert.equal(reserve.access.subjectKey, GUEST_SUBJECT_KEY);
+  assert.equal(reserve.access.ipKey, GUEST_IP_KEY);
+  assert.equal(reserve.binding.authority.authorityId, GUEST_AUTHORITY_A);
+  assert.equal(reserve.binding.clientTurnId, GUEST_TURN_A);
+  assert.equal(guestClaimsByAuthority.size, 1);
+  assert.equal(guestClaimsByTurn.size, 1);
+
+  assert.deepEqual(guestRefinerInputs, [{
+    authorityId: GUEST_AUTHORITY_A,
+    sourcePrompt: "새 Guest 대화에서 자동으로 가장 알맞은 모델을 골라 답해 줘.",
+  }]);
+  assert.equal(guestSelectionInputs.length, 1);
+  assert.equal(guestSelectionInputs[0].text, GUEST_REFINED_PROMPT);
+  assert.equal(guestSelectionOutputs[0].routed, true);
+  assert.equal(guestConvertInputs.length, 1);
+  assert.equal(attempts.length, 1);
+  const selectedModelId = guestSelectionOutputs[0].routed
+    ? guestSelectionOutputs[0].modelId
+    : null;
+  assert.equal(attempts[0].modelId, selectedModelId);
+  assert.equal(
+    (guestConvertInputs[0] as { budget: { modelId: string } }).budget.modelId,
+    selectedModelId
+  );
+  const providerMessages = attempts[0].messages.filter(
+    (message) => message.role !== "system"
+  );
+  assert.equal(providerText(providerMessages.at(-1)!.content), GUEST_REFINED_PROMPT);
+
+  assert.deepEqual(guestLifecycle.slice(0, 7), [
+    "authority",
+    "prehold",
+    "refiner",
+    "router",
+    "conversion",
+    "manifest",
+    "provider",
+  ]);
+  assert.equal(guestLifecycle.filter((phase) => phase === "refiner").length, 1);
+  assert.equal(guestLifecycle.filter((phase) => phase === "provider").length, 1);
+  assert.equal(
+    attemptLifecycle.filter((phase) => phase === "0:manifest_finalized").length,
+    1
+  );
+  assert.ok(
+    attemptLifecycle.indexOf("0:manifest_finalized") <
+      attemptLifecycle.indexOf("0:dispatch_start")
+  );
+  assert.ok(
+    attemptLifecycle.indexOf("0:dispatch_start") <
+      attemptLifecycle.indexOf("0:provider_start")
+  );
+  assert.equal(recordDispatchedCalls, 1);
+  assert.equal(ledger.settlements.length, 1);
+  assert.equal(guestUnknownInputs.length, 0);
+  assert.equal(guestReadInputs.length, 0);
+});
+
+for (const [name, options, status] of [
+  ["wrong principal", { authority: "guest-authority-wrong-principal" }, 409],
+  ["expired authority", { authority: "guest-authority-expired" }, 409],
+  ["Review principal", { authenticated: true }, 409],
+  ["missing authority token", { authority: undefined }, 400],
+] as const) {
+  test(`Guest Auto refuses ${name} before every paid boundary`, async () => {
+    await askGuestAuto({ ...options, expectedStatus: status });
+    assert.equal(guestReserveInputs.length, 0);
+    assert.equal(guestRefinerInputs.length, 0);
+    assert.equal(guestConvertInputs.length, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(ledger.settlements.length, 0);
+  });
+}
+
+test("Guest Auto refuses attachments before authority claim, Refiner, or provider work", async () => {
+  await askGuestAuto({
+    attachments: [{ id: "synthetic-attachment", mediaType: "text/plain" }],
+    expectedStatus: 409,
+  });
+  assert.equal(guestAuthorityVerificationCalls, 0);
+  assert.equal(guestReserveInputs.length, 0);
+  assert.equal(guestRefinerInputs.length, 0);
+  assert.equal(guestConvertInputs.length, 0);
+  assert.equal(attempts.length, 0);
+});
+
+test("Guest Auto refuses the same logical turn under a fresh authority before a second Refiner or provider call", async () => {
+  await askGuestAuto({ expectedStatus: 200 });
+  const { response } = await askGuestAuto({
+    authority: "guest-authority-b",
+    clientTurnId: GUEST_TURN_A,
+    preserveClaims: true,
+  });
+  assert.notEqual(response.status, 200);
+  assert.equal(guestReserveInputs.length, 1);
+  assert.equal(guestRefinerInputs.length, 0);
+  assert.equal(guestConvertInputs.length, 0);
+  assert.equal(attempts.length, 0);
+});
+
+test("Guest Auto refuses one authority rebound to a fresh logical turn before a second Refiner or provider call", async () => {
+  await askGuestAuto({ expectedStatus: 200 });
+  const { response } = await askGuestAuto({
+    authority: "guest-authority-a",
+    clientTurnId: GUEST_TURN_B,
+    preserveClaims: true,
+  });
+  assert.notEqual(response.status, 200);
+  assert.equal(guestReserveInputs.length, 1);
+  assert.equal(guestRefinerInputs.length, 0);
+  assert.equal(guestConvertInputs.length, 0);
+  assert.equal(attempts.length, 0);
+});
+
+test("Guest Auto retains a Refiner-unknown prehold and confirms its readonly receipt once", async () => {
+  await askGuestAuto({
+    refinerMode: "unknown",
+    expectedStatus: 503,
+  });
+  assert.equal(guestReserveInputs.length, 1);
+  assert.equal(guestRefinerInputs.length, 1);
+  assert.equal(guestConvertInputs.length, 0);
+  assert.equal(attempts.length, 0);
+  assert.equal(guestUnknownInputs.length, 1);
+  assert.equal(
+    (guestUnknownInputs[0] as { boundary: string }).boundary,
+    "refiner"
+  );
+  assert.equal(guestReleaseInputs.length, 0);
+  assert.deepEqual(guestReadInputs, [{
+    subjectKey: GUEST_SUBJECT_KEY,
+    authorityId: GUEST_AUTHORITY_A,
+  }]);
+  assert.equal(
+    guestClaimsByAuthority.get(`${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`)?.status,
+    "guest_auto_unknown"
+  );
+});
+
+test("Guest Auto insufficient credit stops before Refiner, exact conversion, and provider", async () => {
+  const { response } = await askGuestAuto({ ledgerMode: "insufficient" });
+  assert.notEqual(response.status, 200);
+  assert.equal(guestReserveInputs.length, 1);
+  assert.equal(guestRefinerInputs.length, 0);
+  assert.equal(guestConvertInputs.length, 0);
+  assert.equal(attempts.length, 0);
+  assert.equal(guestClaimsByAuthority.size, 0);
+  assert.equal(guestReadInputs.length, 0);
+});
+
+test("Guest Auto known Refiner budget refusal uses the original execution view exactly once", async () => {
+  await askGuestAuto({
+    refinerMode: "budget_refusal",
+    expectedStatus: 200,
+  });
+  assert.equal(guestRefinerInputs.length, 1);
+  assert.equal(guestSelectionInputs.length, 1);
+  assert.equal(
+    guestSelectionInputs[0].text,
+    "새 Guest 대화에서 자동으로 가장 알맞은 모델을 골라 답해 줘."
+  );
+  assert.equal(guestConvertInputs.length, 1);
+  assert.equal(attempts.length, 1);
+  const providerMessages = attempts[0].messages.filter(
+    (message) => message.role !== "system"
+  );
+  assert.equal(
+    providerText(providerMessages.at(-1)!.content),
+    guestSelectionInputs[0].text
+  );
+  assert.equal(guestUnknownInputs.length, 0);
+  assert.equal(ledger.settlements.length, 1);
+});
+
+test("Guest Auto provider unknown retains the converted hold and confirms its readonly receipt once", async () => {
+  await askGuestAuto({ providerUnknown: true, expectedStatus: 503 });
+  assert.equal(guestReserveInputs.length, 1);
+  assert.equal(guestRefinerInputs.length, 1);
+  assert.equal(guestConvertInputs.length, 1);
+  assert.equal(attempts.length, 1);
+  assert.equal(guestUnknownInputs.length, 1);
+  assert.equal(
+    (guestUnknownInputs[0] as { boundary: string }).boundary,
+    "provider_dispatch"
+  );
+  assert.equal(guestReleaseInputs.length, 0);
+  assert.equal(ledger.settlements.length, 0);
+  assert.deepEqual(guestReadInputs, [{
+    subjectKey: GUEST_SUBJECT_KEY,
+    authorityId: GUEST_AUTHORITY_A,
+  }]);
+  assert.equal(
+    guestClaimsByAuthority.get(`${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`)?.phase,
+    "exact"
+  );
+  assert.equal(
+    guestClaimsByAuthority.get(`${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`)?.status,
+    "guest_auto_unknown"
+  );
 });

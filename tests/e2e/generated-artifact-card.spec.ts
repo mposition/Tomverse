@@ -513,7 +513,10 @@ test("a guest is shown a sign-in card, never a table pretending to be a file @ui
   await expect(card(page)).toHaveAttribute("data-artifact-status", "blocked");
   const cta = inCard(page, "generated-artifact-signin");
   await expect(cta).toBeVisible();
-  await expect(cta).toHaveAttribute("href", /\/auth\/signin/);
+  await expect(cta).toHaveAttribute(
+    "href",
+    "/auth/signin?callbackUrl=%2Freview%3Flang%3Dko"
+  );
   await expect(page.getByTestId("generated-artifact-download")).toHaveCount(0);
 });
 

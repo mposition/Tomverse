@@ -116,6 +116,7 @@ import {
   promptRefinerAllowsAutomaticChatRecovery,
 } from
   "@/components/chat/promptRefinerProductClient";
+import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 
 const processedPromptKeys = new Set<string>();
 const DURABLE_ATTEMPT_POLL_INTERVAL_MS = 1_000;
@@ -191,6 +192,8 @@ function guestTranscriptWithCarriedAnswers(
 }
 
 type ChatAppProps = {
+  /** Product chrome that owns this panel's account and purchase returns. */
+  currentProduct?: ChatWorkspaceProduct;
   modelId: string;
   transcriptScope?: "model" | "conversation";
   /**
@@ -236,6 +239,8 @@ type ChatAppProps = {
      * per-request admission path.
      */
     admissionToken?: string | null;
+    /** Short-lived server authority for one Guest Chat Smart Adaptive turn. */
+    guestAutoAuthority?: string;
     /**
      * The §10 context bundle this send was priced against. Opaque and
      * single-use per (bundle, model); absent means the request was priced
@@ -418,6 +423,7 @@ const interpolateModelOnlyLabel = (template: string, modelName: string) =>
     template.replace("{model}", modelName);
 
 function ChatAppComponent({
+  currentProduct = "review",
   modelId,
   transcriptScope = "model",
   otherPanelModelIds,
@@ -1432,7 +1438,8 @@ function ChatAppComponent({
     /** Fires at the exact boundary where a provider-facing fetch is attempted. */
     onDispatchStarted?: () => void,
     /** One server-held Refiner decision. Never reused by a recovery send. */
-    promptRefinerDecision?: PromptRefinerProductChatDecision
+    promptRefinerDecision?: PromptRefinerProductChatDecision,
+    guestAutoAuthority?: string
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1675,10 +1682,18 @@ function ChatAppComponent({
     let routedModelId: string | null = null;
     let routedReason: string | null = null;
     let knowledgeChunkCount = 0;
+    // Once a Guest Auto POST is attempted, a transport failure cannot prove
+    // whether the server stopped before or after its durable financial claim.
+    // Keep that uncertainty scoped to this exact logical turn; ordinary Guest
+    // manual and pre-POST verification failures retain their existing retry.
+    let guestAutoRequestStarted = false;
 
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
         onDispatchStarted?.();
+        if (isGuestMode && guestAutoAuthority) {
+          guestAutoRequestStarted = true;
+        }
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: {
@@ -1729,6 +1744,9 @@ function ChatAppComponent({
               ? { acknowledgedUnavailableAttachmentIds }
               : {}),
             ...(promptRefinerDecision ? { promptRefinerDecision } : {}),
+            ...(isGuestMode && guestAutoAuthority
+              ? { guestAutoAuthority, guestClientTurnId: sourceUserMessageId }
+              : {}),
           }),
           signal: controller.signal,
         });
@@ -2176,7 +2194,35 @@ function ChatAppComponent({
               details?: unknown;
             })
           : {};
-      if (requestError.name === "AbortError") {
+      const reportedErrorCode =
+        typeof requestError.code === "string" ? requestError.code : "";
+      const guestAutoTransportOutcomeUnknown =
+        isGuestMode &&
+        Boolean(guestAutoAuthority) &&
+        guestAutoRequestStarted &&
+        !isGuestVerificationError(error) &&
+        (requestError.name === "AbortError" || reportedErrorCode.length === 0);
+      if (guestAutoTransportOutcomeUnknown) {
+        // The browser has no positive evidence that the durable Guest hold or
+        // provider dispatch did not happen. Persist a terminal error code in
+        // the local transcript and remove every in-memory retry source. On a
+        // reload the recovery index reads the same code and offers no replay.
+        setChatRuntimeLastPrompt(runKey, null);
+        setAssistantMessage(
+          assistantMessageId,
+          t("chat.responseError"),
+          "error",
+          {
+            errorCode: "GUEST_AUTO_OUTCOME_UNKNOWN",
+            errorHadAttachments: attachments.length > 0,
+            errorReport: buildErrorReport(
+              requestTraceId,
+              "GUEST_AUTO_OUTCOME_UNKNOWN",
+              ERROR_CLASSIFICATION_SOURCE.client
+            ),
+          }
+        );
+      } else if (requestError.name === "AbortError") {
         // Every abort raises the same `AbortError`, so the reason has to come
         // from the run rather than from the exception. A stop stays exactly
         // what it was; a liveness deadline is a different event and gets its
@@ -2245,8 +2291,14 @@ function ChatAppComponent({
         if (traceId && typeof window !== "undefined") {
           window.localStorage.setItem("tomverse_last_error_trace_id", traceId);
         }
-        const errorCode =
-          typeof requestError.code === "string" ? requestError.code : "";
+        const errorCode = reportedErrorCode;
+        if (errorCode === "GUEST_AUTO_OUTCOME_UNKNOWN") {
+          // The authority and its logical turn have an unknown durable
+          // receipt. Remove the in-memory retry source as well as withholding
+          // the Chat restore action below; a fresh capability or UUID must not
+          // silently buy the same failed turn again.
+          setChatRuntimeLastPrompt(runKey, null);
+        }
         const retryAfterSeconds =
           requestError.details &&
           typeof requestError.details === "object" &&
@@ -2708,7 +2760,8 @@ function ChatAppComponent({
               promptPayload.id
             );
           },
-          promptPayload.promptRefinerDecision
+          promptPayload.promptRefinerDecision,
+          promptPayload.guestAutoAuthority
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });
@@ -2896,6 +2949,8 @@ function ChatAppComponent({
         currentModelId={modelId}
         currentPlan={currentPlan}
         isGuestMode={isGuestMode}
+        currentProduct={currentProduct}
+        guestImportAvailable={transcriptScope === "model"}
         currentChatId={initialConversationId}
         isSending={isSending}
         isSendPreparing={isSendPreparing}

@@ -103,7 +103,7 @@ import {
 import { AutoRoutingComposerToggle } from "@/components/chat/AutoRoutingToggle";
 import { ChatProductSwitcher } from "@/components/chat/ChatProductSwitcher";
 import { autoRoutingCopy } from "@/lib/autoRoutingCopy";
-import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
+import { chatProductUiCopy, type ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import {
@@ -132,7 +132,10 @@ import {
 } from "@/lib/imageIntentSignals";
 import { normalizeComposerImageIntentInput } from "@/lib/imageIntentInput";
 import { ImageIntentHandoffChip } from "@/components/chat/ImageIntentHandoffChip";
-import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
+import {
+  deriveWebSearchComposerState,
+  type WebSearchComposerState,
+} from "@/lib/webSearchComposerState";
 import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
@@ -219,6 +222,120 @@ const interpolateCopy = (
     (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
     template
   );
+
+type ChatInputWebSearchChipViewProps = {
+  state: WebSearchComposerState;
+  isAutoMode: boolean;
+  isMobileShell: boolean;
+  fullLabel: string;
+  compactLabel: string;
+  description: string;
+  removeLabel: string;
+  isExceptionOpen: boolean;
+  onToggleException: () => void;
+  onRemove: () => void;
+};
+
+/**
+ * The selected-model capability detail is meaningful only in manual mode.
+ * Smart Adaptive has not chosen the answering model yet, so painting the
+ * stored manual fallback's count, warning tone, or exception disclosure would
+ * present that return choice as the active answer model.
+ */
+export function ChatInputWebSearchChipView({
+  state,
+  isAutoMode,
+  isMobileShell,
+  fullLabel,
+  compactLabel,
+  description,
+  removeLabel,
+  isExceptionOpen,
+  onToggleException,
+  onRemove,
+}: ChatInputWebSearchChipViewProps) {
+  const hasManualException = !isAutoMode && state.hasException;
+  const isManualBlocked = !isAutoMode && state.allUnsupported;
+  const tone = isAutoMode ? "neutral" : state.tone;
+
+  return (
+    <>
+      <div
+        data-testid="web-search-mode-chip"
+        data-selection-mode={isAutoMode ? "auto" : "manual"}
+        data-tone={tone}
+        data-supported-count={isAutoMode ? undefined : state.supportedCount}
+        data-unsupported-count={isAutoMode ? undefined : state.unsupportedCount}
+        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold ${isMobileShell ? "h-8" : "h-9"} ${
+          tone === "blocked"
+            ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+            : tone === "warning"
+              ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+              : "border-accent-web-search-200 bg-accent-web-search-50 text-accent-web-search-800 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/30 dark:text-accent-web-search-200"
+        }`}
+      >
+        <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        {hasManualException && !isManualBlocked ? (
+          <button
+            type="button"
+            data-testid="web-search-exception-toggle"
+            aria-expanded={isExceptionOpen}
+            aria-controls="web-search-exception-detail"
+            aria-describedby="web-search-state-description"
+            onClick={onToggleException}
+            className={`relative truncate rounded-full text-left underline decoration-dotted underline-offset-2 before:absolute before:content-[''] before:-inset-x-1 ${
+              isMobileShell ? "before:-inset-y-3.5" : "before:-inset-y-1"
+            }`}
+          >
+            {isMobileShell ? compactLabel : fullLabel}
+          </button>
+        ) : (
+          <span
+            className="truncate"
+            aria-describedby="web-search-state-description"
+          >
+            {isMobileShell ? compactLabel : fullLabel}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={removeLabel}
+          title={removeLabel}
+          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full before:absolute before:content-[''] hover:bg-black/5 dark:hover:bg-white/10 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <p
+        id="web-search-state-description"
+        data-testid="web-search-state-description"
+        className="sr-only"
+      >
+        {description}
+      </p>
+    </>
+  );
+}
+
+export function ChatInputWebSearchSwitchDescription({
+  isAutoMode,
+  isWebSearchOn,
+  description,
+  costNote,
+}: {
+  isAutoMode: boolean;
+  isWebSearchOn: boolean;
+  description: string;
+  costNote: string;
+}) {
+  return (
+    <span id="tools-web-search-description" className="text-xs text-zinc-500">
+      {description}
+      {isWebSearchOn && !isAutoMode ? ` ${costNote}` : ""}
+    </span>
+  );
+}
 /**
  * Everything about which files may be picked now comes from the shared
  * registry (`lib/chatAttachmentFormats.ts`). What used to live here was four
@@ -1211,38 +1328,37 @@ export function ChatInput({
     // exists only in the runtime registry is unknown to the compiled catalogue.
     resolveModel: getCatalogModel,
   });
-  const webSearchChipLabel = webSearchState.allUnsupported
-    ? t("chat.webSearchChipUnavailable")
-    : webSearchState.hasException
-      ? interpolateCopy(t("chat.webSearchChipPartial"), {
-          supported: webSearchState.supportedCount,
-          total: webSearchState.selectedCount,
-        })
-      : t("chat.webSearchChipOn");
-  // The mobile chip no longer owns a row of its own -- it shares the
-  // composer's first input line -- so it drops the separator and the word
-  // "supported" while keeping every state distinguishable: "Web search",
-  // "Web search auto", "Web search 2/3", "No web search". The full sentence is
-  // still what assistive tech gets (web-search-state-description below), and a
-  // blocking state additionally keeps its own full-width notice, so no state is
-  // ever reduced to a bare icon.
-  const webSearchChipCompactLabel = webSearchState.allUnsupported
-    ? t("chat.webSearchChipUnavailableCompact")
-    : webSearchState.hasException
-      ? interpolateCopy(t("chat.webSearchChipPartialCompact"), {
-          supported: webSearchState.supportedCount,
-          total: webSearchState.selectedCount,
-        })
-      : t("chat.webSearchChipOnCompact");
-  const webSearchStateDescription = interpolateCopy(
-    t("chat.webSearchChipDescriptionOn"),
-    {
-      supported: webSearchState.supportedCount,
-      total: webSearchState.selectedCount,
-      unsupported: webSearchState.unsupportedCount,
-      credits: webSearchState.estimatedSurchargeCredits,
-    }
-  );
+  const webSearchChipLabel = isAutoMode
+    ? t("chat.webSearchChipOn")
+    : webSearchState.allUnsupported
+      ? t("chat.webSearchChipUnavailable")
+      : webSearchState.hasException
+        ? interpolateCopy(t("chat.webSearchChipPartial"), {
+            supported: webSearchState.supportedCount,
+            total: webSearchState.selectedCount,
+          })
+        : t("chat.webSearchChipOn");
+  // The mobile chip keeps the tool-status row compact, so it drops the
+  // separator and the word "supported" while keeping every manual state
+  // distinguishable. The full sentence remains available to assistive tech.
+  const webSearchChipCompactLabel = isAutoMode
+    ? t("chat.webSearchChipOnCompact")
+    : webSearchState.allUnsupported
+      ? t("chat.webSearchChipUnavailableCompact")
+      : webSearchState.hasException
+        ? interpolateCopy(t("chat.webSearchChipPartialCompact"), {
+            supported: webSearchState.supportedCount,
+            total: webSearchState.selectedCount,
+          })
+        : t("chat.webSearchChipOnCompact");
+  const webSearchStateDescription = isAutoMode
+    ? t("chat.toolsWebSearchOnDescription")
+    : interpolateCopy(t("chat.webSearchChipDescriptionOn"), {
+        supported: webSearchState.supportedCount,
+        total: webSearchState.selectedCount,
+        unsupported: webSearchState.unsupportedCount,
+        credits: webSearchState.estimatedSurchargeCredits,
+      });
   // The switch is the whole control, so both of its states are said in words:
   // "on" carries the conditional-search sentence so it never reads as "every
   // question is searched", and the cost note quotes the surcharge from the
@@ -1260,6 +1376,10 @@ export function ChatInput({
         AVAILABLE_MODELS.find((model) => model.id === modelId)?.name || modelId
     )
     .join(", ");
+  const hasManualWebSearchException =
+    !isAutoMode && webSearchState.hasException;
+  const isManualWebSearchBlocked =
+    !isAutoMode && webSearchState.allUnsupported;
   const creditBreakdown = requestCreditEstimate.models
     .map((entry) => {
       const model = activeSelectedModelObjects.find((item) => item.id === entry.modelId);
@@ -2996,64 +3116,18 @@ export function ChatInput({
   const toolStatusChips = hasToolStatusChips ? (
     <>
     {webSearchState.isVisible && (
-      <div
-        data-testid="web-search-mode-chip"
-        data-tone={webSearchState.tone}
-        data-supported-count={webSearchState.supportedCount}
-        data-unsupported-count={webSearchState.unsupportedCount}
-        // 32px tall on mobile so the row the chip got back costs the answer
-        // canvas as little as possible; the controls inside keep their 44px
-        // touch area through ::before insets rather than through box height.
-        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold ${isMobileShell ? "h-8" : "h-9"} ${
-          webSearchState.tone === "blocked"
-            ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
-            : webSearchState.tone === "warning"
-              ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
-              : "border-accent-web-search-200 bg-accent-web-search-50 text-accent-web-search-800 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/30 dark:text-accent-web-search-200"
-        }`}
-      >
-        <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        {/*
-          When nothing can search there is no "which ones" worth
-          expanding -- the blocking notice below already names the
-          two ways out, so the chip stays a plain label.
-        */}
-        {webSearchState.hasException && !webSearchState.allUnsupported ? (
-          <button
-            type="button"
-            data-testid="web-search-exception-toggle"
-            aria-expanded={isWebSearchExceptionOpen}
-            aria-controls="web-search-exception-detail"
-            aria-describedby="web-search-state-description"
-            onClick={() => setIsWebSearchExceptionOpen((open) => !open)}
-            // The chip itself is 36px tall, so the toggle borrows
-            // vertical hit area from a pseudo-element rather than
-            // growing the chip. Horizontal inset stays small so it
-            // never overlaps the adjacent remove control.
-            className={`relative truncate rounded-full text-left underline decoration-dotted underline-offset-2 before:absolute before:content-[''] before:-inset-x-1 ${
-              isMobileShell ? "before:-inset-y-3.5" : "before:-inset-y-1"
-            }`}
-          >
-            {isMobileShell ? webSearchChipCompactLabel : webSearchChipLabel}
-          </button>
-        ) : (
-          <span
-            className="truncate"
-            aria-describedby="web-search-state-description"
-          >
-            {isMobileShell ? webSearchChipCompactLabel : webSearchChipLabel}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={() => onWebSearchModeChange?.("off")}
-          aria-label={t("chat.removeWebSearchMode")}
-          title={t("chat.removeWebSearchMode")}
-          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full before:absolute before:content-[''] hover:bg-black/5 dark:hover:bg-white/10 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
+      <ChatInputWebSearchChipView
+        state={webSearchState}
+        isAutoMode={isAutoMode}
+        isMobileShell={isMobileShell}
+        fullLabel={webSearchChipLabel}
+        compactLabel={webSearchChipCompactLabel}
+        description={webSearchStateDescription}
+        removeLabel={t("chat.removeWebSearchMode")}
+        isExceptionOpen={isWebSearchExceptionOpen}
+        onToggleException={() => setIsWebSearchExceptionOpen((open) => !open)}
+        onRemove={() => onWebSearchModeChange?.("off")}
+      />
     )}
     {isDeepResearchPending && (
       <div
@@ -3077,8 +3151,8 @@ export function ChatInput({
     </>
   ) : null;
   const webSearchExceptionDetail =
-    webSearchState.hasException &&
-    !webSearchState.allUnsupported &&
+    hasManualWebSearchException &&
+    !isManualWebSearchBlocked &&
     isWebSearchExceptionOpen ? (
       <p
         id="web-search-exception-detail"
@@ -3175,7 +3249,6 @@ export function ChatInput({
             <div className="mb-2 md:mb-3">
               <ChatProductSwitcher
                 currentProduct={currentProduct}
-                chatRequiresSignIn={isGuestMode}
                 disabled={productSwitchDisabled || isSending || draftLocked}
                 onProductSwitch={onProductSwitch}
               />
@@ -3231,11 +3304,15 @@ export function ChatInput({
               className="mb-2 flex items-center gap-1.5 px-1"
             >
               <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
-                {t("chat.guestQuickLine")}
+                {currentProduct === "chat"
+                  ? chatProductUiCopy[lang].tryGuestChat
+                  : t("chat.guestQuickLine")}
               </span>
               <FeatureHelpPopover
                 title={t("chat.guestQuickLineHelp")}
-                description={t("chat.guestQuickLineHelpBody")}
+                description={currentProduct === "chat"
+                  ? chatProductUiCopy[lang].guestChatDescription
+                  : t("chat.guestQuickLineHelpBody")}
                 buttonLabel={t("chat.guestQuickLineHelp")}
                 learnMoreLabel={helpCopy.learnMore}
                 topic="guest_trial"
@@ -3358,22 +3435,10 @@ export function ChatInput({
               {toolStatusChips}
             </div>
           )}
-          {/*
-            The full request state -- mode, how many models can honour it, how
-            many cannot, the credit ceiling and what the unsupported models
-            actually do -- always exists for assistive tech, but only costs a
-            visible row when there is a real exception to resolve. "Unsupported
-            0" is the normal case and no longer earns a line of its own.
-          */}
-          {webSearchState.isVisible && (
-            <p id="web-search-state-description" className="sr-only">
-              {webSearchStateDescription}
-            </p>
-          )}
           {/* The detail belongs directly under the chip row it expands from,
               in both shells. */}
           {webSearchExceptionDetail}
-          {webSearchState.allUnsupported && (
+          {isManualWebSearchBlocked && (
             <div
               role="status"
               data-testid="web-search-unavailable-notice"
@@ -4165,10 +4230,12 @@ export function ChatInput({
                       >
                         {t("chat.toolsWebSearch")}
                       </span>
-                      <span id="tools-web-search-description" className="text-xs text-zinc-500">
-                        {webSearchSwitchDescription}
-                        {isWebSearchOn ? ` ${webSearchSwitchCostNote}` : ""}
-                      </span>
+                      <ChatInputWebSearchSwitchDescription
+                        isAutoMode={isAutoMode}
+                        isWebSearchOn={isWebSearchOn}
+                        description={webSearchSwitchDescription}
+                        costNote={webSearchSwitchCostNote}
+                      />
                     </span>
                     {/* The track is decorative: the button already carries the
                         state as `aria-checked`, so repeating it here would
@@ -5047,6 +5114,8 @@ export function ChatInput({
         creditShortfall={creditShortfall}
         signInCallbackUrl={signInCallbackUrl}
         currentChatId={currentChatId}
+        guestImportAvailable={currentProduct !== "chat"}
+        currentProduct={currentProduct}
       />
     </div>
   );

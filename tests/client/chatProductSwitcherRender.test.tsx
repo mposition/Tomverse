@@ -53,6 +53,8 @@ test("every locale distinguishes the two products and names both features", () =
     assert.ok(copy.review.feature.length > 0);
     assert.ok(copy.chat.description.length > 0);
     assert.ok(copy.review.description.length > 0);
+    assert.ok(copy.guestChatDescription.toLowerCase().includes(copy.chat.feature.toLowerCase()));
+    assert.doesNotMatch(copy.guestChatDescription, /[–—]/);
   }
 });
 
@@ -66,17 +68,16 @@ test("the switcher has one named navigation region and 44px product targets", ()
   assert.equal((html.match(/min-h-11/g) ?? []).length, 2);
 });
 
-test("a guest Chat target uses the normal sign-in callback", () => {
-  const html = renderSwitcher({
-    currentProduct: "review",
-    language: "en",
-    chatRequiresSignIn: true,
-  });
+test("a Review visitor can enter the Chat trial directly in every locale", () => {
+  for (const language of SUPPORTED_LANGUAGES) {
+    const html = renderSwitcher({
+      currentProduct: "review",
+      language,
+    });
 
-  assert.match(
-    html,
-    /href="\/auth\/signin\?callbackUrl=%2Fchat%3Flang%3Den"/
-  );
+    assert.match(html, new RegExp(`href="/chat\\?lang=${language}"`));
+    assert.doesNotMatch(html, /\/auth\/signin/);
+  }
 });
 
 test("pending switchers have unique described-by targets and keep 44px links", () => {

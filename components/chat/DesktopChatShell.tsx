@@ -896,6 +896,7 @@ export function DesktopChatShell({
       className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
       <ChatSidebar
+        currentProduct={currentProduct}
         conversations={conversations}
         currentChatId={currentChatId}
         onNewChat={onNewChat}
@@ -1278,6 +1279,7 @@ export function DesktopChatShell({
                 </div>
 
                 <ChatApp
+                  currentProduct={currentProduct}
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
                   onRestorePrompt={onRestorePrompt}

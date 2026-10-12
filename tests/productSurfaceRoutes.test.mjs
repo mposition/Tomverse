@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { CONVERSATION_PRODUCT_KEYS } from "../lib/conversationProduct.ts";
@@ -9,6 +10,7 @@ import {
     LEGACY_REVIEW_PATH,
     PRODUCT_LABEL,
     PRODUCT_SURFACE_PATH,
+    productSurfacePathOrReview,
     resolveLegacyChatDeepLink,
     REVIEW_WORKSPACE_PATH,
 } from "../lib/productSurfaceRoutes.ts";
@@ -74,6 +76,67 @@ test("Chat and Review expose canonical entries while the prior Chat URL remains 
     assert.equal(CHAT_WORKSPACE_PATH, "/chat");
     assert.equal(CHAT_WORKSPACE_COMPATIBILITY_PATH, "/chat/workspace");
     assert.equal(REVIEW_WORKSPACE_PATH, "/review");
+});
+
+test("a public share follows its stored product and defaults unknown rows to Review", () => {
+    assert.equal(productSurfacePathOrReview("chat"), "/chat");
+    assert.equal(productSurfacePathOrReview("review"), "/review");
+    assert.equal(productSurfacePathOrReview("studio"), "/studio");
+    assert.equal(productSurfacePathOrReview(null), "/review");
+    assert.equal(productSurfacePathOrReview("future-product"), "/review");
+});
+
+test("the generic account menu defaults to Review and accepts an explicit Chat product", () => {
+    const authButton = readFileSync(
+        new URL("../components/auth/AuthButton.tsx", import.meta.url),
+        "utf8"
+    );
+    assert.match(
+        authButton,
+        /currentProduct = "review"/
+    );
+    assert.match(
+        authButton,
+        /PRODUCT_SURFACE_PATH\[currentProduct\]/
+    );
+    assert.match(authButton, /currentProduct\?: ChatWorkspaceProduct/);
+    assert.match(authButton, /returnTo=\{accountCallbackUrl\}/);
+});
+
+test("shared account, quota, artifact, and sidebar returns carry the actual workspace product", () => {
+    const expectedProductAwareFiles = [
+        "../components/chat/UserUsageSummary.tsx",
+        "../components/chat/UsageLimitModal.tsx",
+        "../components/chat/ChatMessageList.tsx",
+        "../components/chat/GeneratedArtifactCard.tsx",
+        "../components/chat/SidebarAccountRailButton.tsx",
+    ];
+    for (const relativePath of expectedProductAwareFiles) {
+        const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
+        assert.match(source, /currentProduct(?:\s*=\s*"review")?/,
+            `${relativePath} must accept the workspace product`);
+        assert.match(source, /localizedProductHref\(currentProduct, lang\)/,
+            `${relativePath} must derive its return from the workspace product`);
+    }
+
+    for (const relativePath of [
+        "../components/chat/DesktopChatShell.tsx",
+        "../components/chat/MobileChatShell.tsx",
+    ]) {
+        const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
+        assert.match(source, /<ChatSidebar[\s\S]*?currentProduct=\{currentProduct\}/,
+            `${relativePath} must carry product identity into shared account actions`);
+        assert.match(source, /<ChatApp[\s\S]*?currentProduct=\{currentProduct\}/,
+            `${relativePath} must carry product identity into quota and artifact actions`);
+    }
+
+    const sidebar = readFileSync(
+        new URL("../components/chat/ChatSidebar.tsx", import.meta.url),
+        "utf8"
+    );
+    assert.match(sidebar, /<AuthButton[\s\S]*?currentProduct=\{currentProduct\}/);
+    assert.match(sidebar, /<SidebarAccountRailButton[\s\S]*?currentProduct=\{currentProduct\}/);
+    assert.match(sidebar, /<UserUsageSummary[\s\S]*?currentProduct=\{currentProduct\}/);
 });
 
 /* ------------------------------------------------------------ labelling */

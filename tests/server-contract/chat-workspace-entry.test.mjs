@@ -56,14 +56,21 @@ test("public deployment ignores forged fixture cookies and refuses unoffered new
   assert.equal(cookieReads, 0);
   assert.deepEqual(availabilityReads, ["owner-a"]);
 });
-test("public deployment ignores forged cookies and sends an unauthenticated visitor through Chat sign-in", async () => {
+test("public deployment opens a blank guest Chat without reading account ownership or Auto availability", async () => {
   session = null;
-  await assert.rejects(
-    open({ conversation: "another-owner-chat" }),
-    /REDIRECT:\/auth\/signin\?callbackUrl=%2Fchat%3Fconversation%3Danother-owner-chat/
-  );
+  const element = await open();
+  assert.equal(element.props.mountedSurface, "chat");
+  assert.equal(element.props.initialConversationId, null);
   assert.equal(cookieReads, 0);
   assert.equal(ownershipReads.length, 0);
+  assert.equal(availabilityReads.length, 0);
+});
+test("guest Chat refuses a conversation URL without probing the database", async () => {
+  session = null;
+  await assert.rejects(open({ conversation: "another-owner-chat" }), /NOT_FOUND/);
+  assert.equal(cookieReads, 0);
+  assert.equal(ownershipReads.length, 0);
+  assert.equal(availabilityReads.length, 0);
 });
 test("owned read binds both user and conversation; a missing/wrong-owner row never opens", async () => {
   offered = true;
@@ -98,10 +105,9 @@ test("only full loopback fixture mode can use the opted-in cookies", async () =>
   assert.equal(cookieReads, 1);
   assert.equal(ownershipReads.length, 0);
   process.env.E2E_DISABLE_DATABASE = "false";
-  await assert.rejects(
-    open(),
-    /REDIRECT:\/auth\/signin\?callbackUrl=%2Fchat/
-  );
+  const publicGuest = await open();
+  assert.equal(publicGuest.props.mountedSurface, "chat");
+  assert.equal(publicGuest.props.initialConversationId, null);
   assert.equal(cookieReads, 1);
   assert.equal(ownershipReads.length, 0);
   assert.equal(availabilityReads.length, 0);

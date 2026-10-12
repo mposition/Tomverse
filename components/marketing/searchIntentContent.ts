@@ -1,5 +1,6 @@
 import type { Language } from "@/components/LanguageProvider";
 import type { MarketingInfoCopy } from "./MarketingInfoPage";
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 
 export const SEARCH_INTENT_SLUGS = [
   "compare-ai-models",
@@ -35,7 +36,7 @@ const withCta = (
   copy: Omit<SearchIntentCopy, "cta">
 ): SearchIntentCopy => ({
   ...copy,
-  cta: { label: ctaLabels[locale], href: `/chat?lang=${locale}` },
+  cta: { label: ctaLabels[locale], href: `${REVIEW_WORKSPACE_PATH}?lang=${locale}` },
 });
 
 export const searchIntentPages: Record<

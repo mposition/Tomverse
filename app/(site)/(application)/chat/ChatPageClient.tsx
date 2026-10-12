@@ -174,7 +174,8 @@ import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import {
   createGuestSelectionClamp,
   GUEST_ACTIVE_CHAT_STORAGE_KEY,
-  GUEST_CONVERSATIONS_STORAGE_KEY,
+  guestWorkspaceStorageKeys,
+  newGuestConversationId,
   readGuestInitialModelEnvironment,
   resolveGuestInitialWebSearchMode,
   resolveGuestInitialSelectedModels,
@@ -198,9 +199,6 @@ import {
   type AppToastEventDetail,
   type AppToastTone,
 } from "@/lib/appToast";
-import {
-  removeAllGuestConversationMessages,
-} from "@/lib/guestConversationStorage";
 import {
   notifyUserUsageChanged,
   useUserUsage,
@@ -291,7 +289,6 @@ import {
 // browser and coming back should still default to welcome.
 // Defined in lib/guestChatInitialModels so the first-render guest model
 // decision reads the same key this file writes.
-const ACTIVE_CHAT_STORAGE_KEY = GUEST_ACTIVE_CHAT_STORAGE_KEY;
 let conversationSelectionTicketSequence = 0;
 const allocateConversationSelectionTicket = (): number => {
   conversationSelectionTicketSequence += 1;
@@ -988,6 +985,14 @@ export function ChatPageClient({
   // SessionProviderWrapper, so this is already final on the first render --
   // guest mode is never "unknown and then guest".
   const isGuestMode = status !== "loading" && !sessionUserId;
+  const guestWorkspaceProduct = mountedSurface === "chat" ? "chat" : "review";
+  const {
+    activeChatKey: guestActiveChatStorageKey,
+    conversationsKey: guestConversationsStorageKey,
+  } = guestWorkspaceStorageKeys(guestWorkspaceProduct);
+  const activeConversationStorageKey = isGuestMode
+    ? guestActiveChatStorageKey
+    : GUEST_ACTIVE_CHAT_STORAGE_KEY;
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isViewportReady, setIsViewportReady] = useState(false);
 
@@ -1659,6 +1664,8 @@ export function ChatPageClient({
      */
     webSearchMode?: WebSearchToggleMode;
     admissionToken?: string | null;
+    /** Short-lived server authority for one Guest Chat Smart Adaptive turn. */
+    guestAutoAuthority?: string;
     contextBundle?: string | null;
     contextLayout?: "single" | "comparison";
     promptRefinerDecision?: PromptRefinerProductChatDecision;
@@ -1791,6 +1798,7 @@ export function ChatPageClient({
           catalogue: guestCatalogue,
           leadModelId: guestDefaultModelId,
           environment: readGuestInitialModelEnvironment(),
+          product: guestWorkspaceProduct,
         })
       : null
   );
@@ -1809,7 +1817,10 @@ export function ChatPageClient({
   // priced as a new one (search on) for a frame before the restore effect.
   const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(() =>
     isGuestMode
-      ? resolveGuestInitialWebSearchMode(readGuestInitialModelEnvironment())
+      ? resolveGuestInitialWebSearchMode(
+          readGuestInitialModelEnvironment(),
+          guestWorkspaceProduct
+        )
       : APP_DEFAULTS.defaultWebSearchMode
   );
   // §8.1 invariant 1, per conversation exactly like webSearchMode above. The
@@ -1833,7 +1844,12 @@ export function ChatPageClient({
    * UI adopts it, so the first Send cannot outrun the authority it displays.
    */
   const [selectionMode, setSelectionMode] = useState<"manual" | "auto">("manual");
+  const selectionModeRef = useRef<"manual" | "auto">("manual");
   const [autoSelectionOffered, setAutoSelectionOffered] = useState(false);
+  // Request-memory only. A Guest authority is never persisted in localStorage,
+  // a draft, or a conversation summary, and is refreshed immediately before
+  // the one Send that presents it to the server.
+  const guestAutoAuthorityRef = useRef<string | null>(null);
   const [blankChatCapabilityRevision, setBlankChatCapabilityRevision] = useState(0);
   const [selectionModePending, setSelectionModePending] = useState(false);
   const promptRefinerProductExplicitFlowVisible =
@@ -2353,7 +2369,7 @@ export function ChatPageClient({
   const blankChatDefaultModeOverrideRef = useRef<{
     identityKey: string;
     selectionTicket: number;
-    mode: "manual";
+    mode: "manual" | "auto";
   } | null>(null);
   const newChatAutoPreparationRef = useRef<{
     identityKey: string;
@@ -2426,6 +2442,7 @@ export function ChatPageClient({
     newChatAutoPreparationRef.current = null;
     newChatAutoDraftSendRef.current = null;
     newChatAutoUnknownRef.current = null;
+    guestAutoAuthorityRef.current = null;
     blankChatDefaultModeOverrideRef.current = null;
     storedSelectionModeUnknownRef.current = null;
     selectionModeRequestSeqRef.current += 1;
@@ -2436,6 +2453,7 @@ export function ChatPageClient({
       newChatAutoPreparationRef.current = null;
       newChatAutoDraftSendRef.current = null;
       newChatAutoUnknownRef.current = null;
+      guestAutoAuthorityRef.current = null;
       blankChatDefaultModeOverrideRef.current = null;
       storedSelectionModeUnknownRef.current = null;
       selectionModeRequestSeqRef.current += 1;
@@ -2452,9 +2470,10 @@ export function ChatPageClient({
     const selectionTicket = conversationSelectionTicketRef.current;
     if (
       mountedSurface !== "chat" ||
-      !sessionUserId ||
       !identityKey ||
-      currentChatId !== null ||
+      (!isGuestMode && currentChatId !== null) ||
+      (isGuestMode && currentChatId !== null &&
+        !isGuestConversationId(currentChatId)) ||
       !isInitialConversationResolved ||
       isImageDraftActive
     ) {
@@ -2469,33 +2488,66 @@ export function ChatPageClient({
         if (
           request !== blankChatCapabilityRequestRef.current ||
           selectionTicket !== conversationSelectionTicketRef.current ||
-          currentChatIdRef.current !== null ||
+          (!isGuestMode && currentChatIdRef.current !== null) ||
+          (isGuestMode && currentChatIdRef.current !== null &&
+            !isGuestConversationId(currentChatIdRef.current)) ||
           isImageDraftActiveRef.current
         ) return;
-        const offered = data?.autoSelection?.offered === true;
+        const guestAuthority = isGuestMode &&
+          typeof data?.guestAutoAuthority === "string"
+          ? data.guestAutoAuthority
+          : null;
+        const guestAutoContract = !isGuestMode ||
+          data?.guestAuto?.attachmentSupport === "manual_only";
+        const offered = data?.autoSelection?.offered === true &&
+          guestAutoContract &&
+          (!isGuestMode || Boolean(guestAuthority));
+        guestAutoAuthorityRef.current = guestAuthority;
         setAutoSelectionOffered(offered);
         // A blank Tomverse Chat defaults to Smart Adaptive when the server
         // confirms the current account is eligible. This is display intent,
         // not routing authority: first Send still has to create the owned Chat
         // and read/PATCH its canonical selectionMode before any paid path.
         const explicitOverride = blankChatDefaultModeOverrideRef.current;
-        setSelectionMode(
-          explicitOverride?.identityKey === identityKey &&
+        const preferredMode = explicitOverride?.identityKey === identityKey &&
           explicitOverride.selectionTicket === selectionTicket
             ? explicitOverride.mode
             : offered
               ? "auto"
-              : "manual"
-        );
+              : "manual";
+        const nextMode = preferredMode === "auto" && !offered
+          ? "manual"
+          : preferredMode;
+        selectionModeRef.current = nextMode;
+        setSelectionMode(nextMode);
+        const targetGuestConversationId = currentChatIdRef.current;
+        if (
+          isGuestMode &&
+          targetGuestConversationId &&
+          isGuestConversationId(targetGuestConversationId) &&
+          // A temporarily unavailable capability must not erase a stored Auto
+          // preference. It remains inactive until a later exact read offers it.
+          (offered || preferredMode === "manual")
+        ) {
+          setConversations((current) => current.map((conversation) =>
+            conversation.id === targetGuestConversationId
+              ? { ...conversation, selectionMode: nextMode }
+              : conversation
+          ));
+        }
       })
       .catch(() => {
         if (
           request === blankChatCapabilityRequestRef.current &&
           selectionTicket === conversationSelectionTicketRef.current &&
-          currentChatIdRef.current === null
+          ((!isGuestMode && currentChatIdRef.current === null) ||
+            (isGuestMode && (currentChatIdRef.current === null ||
+              isGuestConversationId(currentChatIdRef.current))))
         ) {
           setAutoSelectionOffered(false);
+          selectionModeRef.current = "manual";
           setSelectionMode("manual");
+          guestAutoAuthorityRef.current = null;
         }
       });
   }, [
@@ -2505,7 +2557,7 @@ export function ChatPageClient({
     isImageDraftActive,
     isInitialConversationResolved,
     mountedSurface,
-    sessionUserId,
+    isGuestMode,
   ]);
 
   /* --------------------------------------------------------------------- */
@@ -2598,6 +2650,7 @@ export function ChatPageClient({
     // Auto authority belongs to the authenticated account and conversation.
     // Never display the previous identity's stored mode or blank capability
     // while the new identity is still resolving its own server decision.
+    selectionModeRef.current = "manual";
     setSelectionMode("manual");
     setAutoSelectionOffered(false);
     setSelectionModePending(false);
@@ -2633,8 +2686,14 @@ export function ChatPageClient({
 
     const carriedId = currentChatIdRef.current;
     if (transition.guestToAccount && typeof window !== "undefined") {
+      // The account import endpoint creates Review conversations. Guest Chat
+      // has its own local namespace and must never be silently converted into
+      // Review merely because the user signed in from `/chat`.
       guestSelectionAtSignInRef.current =
-        carriedId ?? window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+        guestWorkspaceProduct === "review"
+          ? carriedId ??
+            window.sessionStorage.getItem(GUEST_ACTIVE_CHAT_STORAGE_KEY)
+          : window.sessionStorage.getItem(GUEST_ACTIVE_CHAT_STORAGE_KEY);
     }
 
     const retainedId = selectionAfterIdentityTransition(carriedId, transition);
@@ -2647,10 +2706,10 @@ export function ChatPageClient({
       // identity that wrote it, so it must not survive into the next one --
       // the guest transcript it points at is untouched in localStorage.
       if (!retainedId && typeof window !== "undefined") {
-        window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
+        window.sessionStorage.removeItem(guestActiveChatStorageKey);
       }
     }
-  }, [identityNamespace]);
+  }, [guestActiveChatStorageKey, guestWorkspaceProduct, identityNamespace]);
 
   /**
    * Releases a selection the current identity turned out not to be able to
@@ -2764,7 +2823,7 @@ export function ChatPageClient({
       // to it. The transcript itself was never touched.
       setGuestImportDefaultId(
         guestSelectionAtSignInRef.current ??
-          window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY)
+          window.sessionStorage.getItem(GUEST_ACTIVE_CHAT_STORAGE_KEY)
       );
       setIsGuestImportModalOpen(true);
     });
@@ -2776,7 +2835,7 @@ export function ChatPageClient({
     setGuestImportDefaultId(
       guestSelectionAtSignInRef.current ??
         (typeof window !== "undefined"
-          ? window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY)
+          ? window.sessionStorage.getItem(GUEST_ACTIVE_CHAT_STORAGE_KEY)
           : null)
     );
     setIsGuestImportModalOpen(true);
@@ -2802,11 +2861,11 @@ export function ChatPageClient({
   useEffect(() => {
     if (typeof window === "undefined" || !isInitialConversationResolved) return;
     if (!currentChatId) {
-      window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
+      window.sessionStorage.removeItem(activeConversationStorageKey);
       return;
     }
-    window.sessionStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, currentChatId);
-  }, [currentChatId, isInitialConversationResolved]);
+    window.sessionStorage.setItem(activeConversationStorageKey, currentChatId);
+  }, [activeConversationStorageKey, currentChatId, isInitialConversationResolved]);
 
   useEffect(() => {
     if (!isGuestPreviewEntry) return;
@@ -2835,19 +2894,31 @@ export function ChatPageClient({
     () => createGuestSelectionClamp(guestCatalogue),
     [guestCatalogue]
   );
+  const clampGuestWorkspaceSelectedModels = useCallback(
+    (models: string[]) => {
+      const clamped = clampGuestSelectedModels(models);
+      return guestWorkspaceProduct === "chat" ? clamped.slice(0, 1) : clamped;
+    },
+    [clampGuestSelectedModels, guestWorkspaceProduct]
+  );
 
   // Same resolver, same lead model and same catalogue the first render used,
   // so re-deriving this here can only ever reproduce the value already on
   // screen -- never replace it with a different model count.
   const guestDefaultSelectedModels = useMemo(
-    () =>
-      clampGuestSelectedModels(
+    () => {
+      return clampGuestWorkspaceSelectedModels(
         resolveGuestDefaultSelectedModels({
           isEligible: guestCatalogue.isGuestEligible,
           leadModelId: guestDefaultModelId,
         })
-      ),
-    [clampGuestSelectedModels, guestCatalogue, guestDefaultModelId]
+      );
+    },
+    [
+      clampGuestWorkspaceSelectedModels,
+      guestCatalogue,
+      guestDefaultModelId,
+    ]
   );
 
   const isNewAccountEligibleModel = useCallback(
@@ -3201,13 +3272,18 @@ export function ChatPageClient({
   }, [identityKey, mountedSurface, readDraft, setDraftAttachments, setFocusToken, setInputValue, showToast, t]);
 
   useEffect(() => {
-    if (mountedSurface !== "chat" || !isInitialConversationResolved || !currentChatId) return;
+    if (mountedSurface !== "chat" || isGuestMode ||
+        !isInitialConversationResolved || !currentChatId) return;
     const url = new URL(window.location.href);
     // A not-yet-resolved owned read must not erase the id needed for reload.
     // New-chat navigation removes it explicitly by navigating to the bare route.
+    // Guest Chat ids are browser-local and deliberately fail closed at the
+    // server entry. Keep their selection in the product-specific session key;
+    // putting one in the URL would turn a later reload into an account-row
+    // probe and the server would correctly answer 404.
     url.searchParams.set(CONVERSATION_HANDOFF_PARAM, currentChatId);
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-  }, [currentChatId, isInitialConversationResolved, mountedSurface]);
+  }, [currentChatId, isGuestMode, isInitialConversationResolved, mountedSurface]);
 
   const runComparisonPreflight = useCallback(
     async ({
@@ -3731,11 +3807,11 @@ export function ChatPageClient({
           : guestDefaultSelectedModels;
       refreshGuestUsage();
 
-      const savedConversations = localStorage.getItem(GUEST_CONVERSATIONS_STORAGE_KEY);
+      const savedConversations = localStorage.getItem(guestConversationsStorageKey);
       if (savedConversations) {
         try {
           const parsed = JSON.parse(savedConversations);
-          const savedChatId = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+          const savedChatId = window.sessionStorage.getItem(guestActiveChatStorageKey);
 
           // Repeatedly clicking "New Chat" used to pile up empty guest
           // conversations forever (each one written straight to
@@ -3760,7 +3836,7 @@ export function ChatPageClient({
             : parsed;
           if (Array.isArray(parsed) && cleaned.length !== parsed.length) {
             localStorage.setItem(
-              GUEST_CONVERSATIONS_STORAGE_KEY,
+              guestConversationsStorageKey,
               JSON.stringify(cleaned)
             );
           }
@@ -3775,7 +3851,22 @@ export function ChatPageClient({
             : null;
           if (restoredConversation) {
             setCurrentChatId(restoredConversation.id);
-            const restoredModels = clampGuestSelectedModels(
+            const restoredSelectionMode =
+              restoredConversation.selectionMode === "manual" ||
+              restoredConversation.selectionMode === "auto"
+                ? restoredConversation.selectionMode
+                : null;
+            blankChatDefaultModeOverrideRef.current =
+              restoredSelectionMode && identityKey
+                ? {
+                    identityKey,
+                    selectionTicket: conversationSelectionTicketRef.current,
+                    mode: restoredSelectionMode,
+                  }
+                : null;
+            selectionModeRef.current = restoredSelectionMode ?? "manual";
+            setSelectionMode(restoredSelectionMode ?? "manual");
+            const restoredModels = clampGuestWorkspaceSelectedModels(
               normalizeStringArray(
                 restoredConversation.selectedModels,
                 guestDefaultSelectedModels
@@ -3799,7 +3890,7 @@ export function ChatPageClient({
           console.error("Failed to parse guest conversations:", e);
         }
       } else {
-        const initialChatId = `guest_${Date.now()}`;
+        const initialChatId = newGuestConversationId(guestWorkspaceProduct);
         const initialChat = {
           id: initialChatId,
           title: t("sidebar.newChat"),
@@ -3814,7 +3905,7 @@ export function ChatPageClient({
         setConversations([initialChat]);
         setCurrentChatId(initialChatId);
         localStorage.setItem(
-          GUEST_CONVERSATIONS_STORAGE_KEY,
+          guestConversationsStorageKey,
           JSON.stringify([initialChat])
         );
       }
@@ -3828,9 +3919,13 @@ export function ChatPageClient({
       };
     }
   }, [
-    clampGuestSelectedModels,
+    clampGuestWorkspaceSelectedModels,
+    guestActiveChatStorageKey,
+    guestConversationsStorageKey,
     guestDefaultModelId,
     guestDefaultSelectedModels,
+    guestWorkspaceProduct,
+    identityKey,
     initialGuestModels,
     isGuestMode,
     refreshGuestUsage,
@@ -3839,9 +3934,14 @@ export function ChatPageClient({
 
   useEffect(() => {
     if (isGuestMode && isConversationsLoaded && conversations.length > 0) {
-      localStorage.setItem(GUEST_CONVERSATIONS_STORAGE_KEY, JSON.stringify(conversations));
+      localStorage.setItem(guestConversationsStorageKey, JSON.stringify(conversations));
     }
-  }, [conversations, isGuestMode, isConversationsLoaded]);
+  }, [
+    conversations,
+    guestConversationsStorageKey,
+    isGuestMode,
+    isConversationsLoaded,
+  ]);
 
     useEffect(() => {
         if (
@@ -3861,7 +3961,7 @@ export function ChatPageClient({
         if (!guestCarryoverAppliedRef.current) {
             guestCarryoverAppliedRef.current = true;
             try {
-                const savedGuestConversations = localStorage.getItem(GUEST_CONVERSATIONS_STORAGE_KEY);
+                const savedGuestConversations = localStorage.getItem(guestConversationsStorageKey);
                 const parsedGuestConversations = savedGuestConversations
                     ? JSON.parse(savedGuestConversations)
                     : null;
@@ -3893,6 +3993,7 @@ export function ChatPageClient({
         isGuestMode,
         isUserSettingsLoaded,
         mountedSurface,
+        guestConversationsStorageKey,
     ]);
 
     useEffect(() => {
@@ -4179,6 +4280,8 @@ export function ChatPageClient({
         storedSelectionModeUnknownRef.current = null;
         setSelectionModeUnknown(null);
         selectionModeRequestSeqRef.current += 1;
+        selectionModeRef.current = "manual";
+        guestAutoAuthorityRef.current = null;
         setSelectionMode("manual");
         setAutoSelectionOffered(false);
         setBlankChatCapabilityRevision((revision) => revision + 1);
@@ -4228,11 +4331,12 @@ export function ChatPageClient({
           selectedModels: guestDefaultSelectedModels,
           disabledPanels: [],
           webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
+          selectionMode: undefined,
         };
         setConversations((prev) => prev.map((c) => (c.id === resetChat.id ? resetChat : c)));
       } else {
         const newGuestChat = {
-          id: `guest_${Date.now()}`,
+          id: newGuestConversationId(guestWorkspaceProduct),
             title: t("sidebar.autoGeneratedNewRoom"),
             selectedModels: guestDefaultSelectedModels,
           disabledPanels: [],
@@ -4641,7 +4745,24 @@ export function ChatPageClient({
     if (isGuestMode) {
       const targetConv = conversations.find((c) => c.id === id);
       if (targetConv) {
-          const restoredModels = clampGuestSelectedModels(
+          const restoredSelectionMode =
+            targetConv.selectionMode === "manual" ||
+            targetConv.selectionMode === "auto"
+              ? targetConv.selectionMode
+              : null;
+          blankChatDefaultModeOverrideRef.current =
+            restoredSelectionMode && identityKey
+              ? {
+                  identityKey,
+                  selectionTicket: conversationSelectionTicketRef.current,
+                  mode: restoredSelectionMode,
+                }
+              : null;
+          guestAutoAuthorityRef.current = null;
+          selectionModeRef.current = restoredSelectionMode ?? "manual";
+          setSelectionMode(restoredSelectionMode ?? "manual");
+          setAutoSelectionOffered(false);
+          const restoredModels = clampGuestWorkspaceSelectedModels(
             normalizeStringArray(
               targetConv.selectedModels,
               guestDefaultSelectedModels
@@ -4933,7 +5054,7 @@ export function ChatPageClient({
         // after a sign-out/sign-in in the same tab, etc. -- and
         // handleSelectConversation itself still re-prompts for a locked
         // conversation's password rather than silently opening it.
-        const savedChatId = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+        const savedChatId = window.sessionStorage.getItem(activeConversationStorageKey);
         /*
           A restore reopens what was on screen; it never navigates.
 
@@ -5106,10 +5227,7 @@ export function ChatPageClient({
         currentChatIdRef.current = nextId;
       }
       if (updated.length === 0) {
-        localStorage.removeItem(GUEST_CONVERSATIONS_STORAGE_KEY);
-        // Nothing is left to reference the remaining transcripts, so drop them
-        // rather than leaving deleted prompts recoverable on a shared browser.
-        removeAllGuestConversationMessages();
+        localStorage.removeItem(guestConversationsStorageKey);
       }
     } else {    
       try {
@@ -5172,6 +5290,22 @@ export function ChatPageClient({
       // send barrier that runs before React commits still captures this
       // change.
       latestModelSettingsRef.current = { models, disabled };
+      if (isGuestMode && targetChatId) {
+        // Guest rows exist only in this product's local namespace. Persist the
+        // exact one-model Chat replacement (or Review comparison edit) there
+        // so a reload cannot resurrect the model selection the user replaced.
+        setConversations((current) =>
+          current.map((conversation) =>
+            conversation.id === targetChatId
+              ? {
+                  ...conversation,
+                  selectedModels: models,
+                  disabledPanels: disabled,
+                }
+              : conversation
+          )
+        );
+      }
       const syncTargetId = accountConversationId(targetChatId);
       if (!syncTargetId || !sessionUserId) return;
       const syncModels = clampSelectedModels(models);
@@ -5180,7 +5314,7 @@ export function ChatPageClient({
         disabled: disabled.filter((modelId) => syncModels.includes(modelId)),
       });
     },
-    [accountConversationId, clampSelectedModels, mountedSurface, sessionUserId, showToast, t]
+    [accountConversationId, clampSelectedModels, isGuestMode, mountedSurface, sessionUserId, showToast, t]
   );
 
   // Deliberate user action (picked from the tools sheet), not the frequent
@@ -5348,8 +5482,16 @@ export function ChatPageClient({
 
     comparisonPresetRequestedRef.current = true;
     let cancelled = false;
-    const presetModels = isGuestMode
+    // Preserve the common Guest allowlist clamp as the first boundary. Chat
+    // may narrow that already-authorized selection to one model, while Review
+    // keeps the existing comparison width.
+    const guestPresetModels = isGuestMode
       ? clampGuestSelectedModels(requestedModels)
+      : [];
+    const presetModels = isGuestMode
+      ? guestWorkspaceProduct === "chat"
+        ? guestPresetModels.slice(0, 1)
+        : guestPresetModels
       : clampSelectedModels(requestedModels).slice(0, maxSelectableModels);
 
     queueMicrotask(() => {
@@ -5400,6 +5542,7 @@ export function ChatPageClient({
   }, [
     currentChatId,
     clampGuestSelectedModels,
+    guestWorkspaceProduct,
     clampSelectedModels,
     isGuestMode,
     mutateModelSettings,
@@ -5454,6 +5597,7 @@ export function ChatPageClient({
       selectionMode === "auto" &&
       autoSelectionOffered &&
       mountedSurface === "chat" &&
+      !isGuestMode &&
       !isImageDraftActiveRef.current &&
       !newChatAutoPreparationRef.current
     ) {
@@ -5787,6 +5931,51 @@ export function ChatPageClient({
     const isOverrideSend = typeof options?.overrideText === "string";
     if (!trimmed && isOverrideSend) return;
     if ((!trimmed && sendInputAttachments.length === 0) || selectedModels.length === 0) return;
+    let guestAutoAuthorityForSend: string | null = null;
+    if (
+      isGuestMode &&
+      mountedSurface === "chat" &&
+      selectionMode === "auto" &&
+      autoSelectionOffered
+    ) {
+      const authorityIdentity = submitOwner.identityKey;
+      const authorityTicket = conversationSelectionTicketRef.current;
+      try {
+        const response = await fetch("/api/products/chat/capabilities", {
+          cache: "no-store",
+        });
+        const data = response.ok
+          ? await response.json().catch(() => null)
+          : await discardResponseBody(response).then(() => null);
+        if (
+          !submitOwnerIsCurrent() ||
+          authorityIdentity !== identityNamespaceKey(identityNamespaceRef.current) ||
+          authorityTicket !== conversationSelectionTicketRef.current ||
+          selectionModeRef.current !== "auto"
+        ) return;
+        const authority = typeof data?.guestAutoAuthority === "string"
+          ? data.guestAutoAuthority
+          : null;
+        if (
+          data?.autoSelection?.offered !== true ||
+          data?.guestAuto?.attachmentSupport !== "manual_only" ||
+          !authority
+        ) {
+          guestAutoAuthorityRef.current = null;
+          setAutoSelectionOffered(false);
+          showToast(t("chat.autoSelectionFailed"), "error");
+          return;
+        }
+        guestAutoAuthorityRef.current = authority;
+        guestAutoAuthorityForSend = authority;
+      } catch {
+        if (submitOwnerIsCurrent()) {
+          guestAutoAuthorityRef.current = null;
+          showToast(t("chat.autoSelectionFailed"), "error");
+        }
+        return;
+      }
+    }
     const productResolution = !isOverrideSend
       ? promptRefinerResolutionRef.current
       : null;
@@ -5882,7 +6071,10 @@ export function ChatPageClient({
       : await cloneAttachmentPreviews(sendInputAttachments);
 	if (!chatOriginStillCurrent()) return;
 	
-    if (isGuestMode) {
+	// Manual Guest sends have one known model and retain the client-side hint.
+	// Smart Adaptive has no selected model yet: its server-side reachable-pool
+	// prehold must decide whether a cheaper eligible candidate still fits.
+	if (isGuestMode && !guestAutoAuthorityForSend) {
       const requestCredits = estimateWeightedRequestCredits(trimmed, promptAttachments);
       if (guestMessageCount + requestCredits > MAX_GUEST_MESSAGES) {
           showToast(t("sidebar.exceedDailyLimit"), "error");
@@ -5940,7 +6132,7 @@ export function ChatPageClient({
         // finds the placeholder welcome message.
         activeChatId = conversations[0]?.id;
         if (!activeChatId) {
-          activeChatId = `guest_${Date.now()}`;
+          activeChatId = newGuestConversationId(guestWorkspaceProduct);
           const initialChat = {
             id: activeChatId,
             title: t("sidebar.newChat"),
@@ -5954,7 +6146,7 @@ export function ChatPageClient({
           };
           justCreatedTitle = initialChat.title;
           setConversations([initialChat]);
-          localStorage.setItem(GUEST_CONVERSATIONS_STORAGE_KEY, JSON.stringify([initialChat]));
+          localStorage.setItem(guestConversationsStorageKey, JSON.stringify([initialChat]));
         }
         setCurrentChatId(activeChatId);
         currentChatIdRef.current = activeChatId;
@@ -6738,6 +6930,9 @@ export function ChatPageClient({
         ...(preflight.admissionToken
           ? { admissionToken: preflight.admissionToken }
           : {}),
+        ...(guestAutoAuthorityForSend
+          ? { guestAutoAuthority: guestAutoAuthorityForSend }
+          : {}),
         // The layout always travels, the bundle only when there is one: the
         // layout describes the *send*, and it is what decides whether a stale
         // refusal may be retried by one panel. Carrying it only alongside a
@@ -7463,8 +7658,29 @@ export function ChatPageClient({
     next: boolean,
     sendAuthority?: BlankChatAutoSendAuthority
   ): Promise<boolean> => {
-    if (!sessionUserId || !identityKey || mountedSurface !== "chat") return false;
+    if (!identityKey || mountedSurface !== "chat") return false;
     const mode = next ? "auto" : "manual";
+    if (isGuestMode) {
+      if (next && !autoSelectionOffered) return false;
+      blankChatDefaultModeOverrideRef.current = {
+        identityKey,
+        selectionTicket: conversationSelectionTicketRef.current,
+        mode,
+      };
+      if (!next) guestAutoAuthorityRef.current = null;
+      selectionModeRef.current = mode;
+      setSelectionMode(mode);
+      const guestConversationId = currentChatIdRef.current;
+      if (guestConversationId && isGuestConversationId(guestConversationId)) {
+        setConversations((current) => current.map((conversation) =>
+          conversation.id === guestConversationId
+            ? { ...conversation, selectionMode: mode }
+            : conversation
+        ));
+      }
+      return true;
+    }
+    if (!sessionUserId) return false;
     const targetId = accountConversationId(currentChatId);
 
     if (targetId) {
@@ -9534,8 +9750,9 @@ export function ChatPageClient({
           // handler creates and stores the owned Chat before first Send.
           autoSelectionOffered={
             autoSelectionOffered &&
-            !isGuestMode &&
-            (currentChatId === null || !isGuestConversationId(currentChatId))
+            (isGuestMode
+              ? (currentChatId === null || isGuestConversationId(currentChatId))
+              : (currentChatId === null || !isGuestConversationId(currentChatId)))
           }
           selectionMode={selectionMode}
           selectionModePending={selectionModePending}
@@ -9681,8 +9898,9 @@ export function ChatPageClient({
           // handler creates and stores the owned Chat before first Send.
           autoSelectionOffered={
             autoSelectionOffered &&
-            !isGuestMode &&
-            (currentChatId === null || !isGuestConversationId(currentChatId))
+            (isGuestMode
+              ? (currentChatId === null || isGuestConversationId(currentChatId))
+              : (currentChatId === null || !isGuestConversationId(currentChatId)))
           }
           selectionMode={selectionMode}
           selectionModePending={selectionModePending}
@@ -9859,7 +10077,12 @@ export function ChatPageClient({
                   trigger: "proactive",
                   cta_location: "guest_multi_model",
                 });
-                if (currentChatId) writePendingGuestImportIntent(currentChatId);
+                // The import endpoint creates Review rows. Guest Chat stays
+                // local until a separate, server-owned Chat import contract
+                // exists; never relabel it as Review during sign-in.
+                if (mountedSurface !== "chat" && currentChatId) {
+                  writePendingGuestImportIntent(currentChatId);
+                }
               }}
               className="flex min-h-11 flex-col items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-500"
             >
@@ -10045,7 +10268,9 @@ export function ChatPageClient({
                 trigger: "proactive",
                 cta_location: "guest_save_compare",
               });
-              if (currentChatId) writePendingGuestImportIntent(currentChatId);
+              if (mountedSurface !== "chat" && currentChatId) {
+                writePendingGuestImportIntent(currentChatId);
+              }
               setShowGuestSaveCompareCard(false);
             }}
             className="flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-center text-xs font-bold text-white hover:bg-blue-500"
@@ -10411,7 +10636,9 @@ export function ChatPageClient({
                       trigger: "proactive",
                       cta_location: "guest_save_review",
                     });
-                    if (currentChatId) writePendingGuestImportIntent(currentChatId);
+                    if (mountedSurface !== "chat" && currentChatId) {
+                      writePendingGuestImportIntent(currentChatId);
+                    }
                   }}
                   className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500"
                 >

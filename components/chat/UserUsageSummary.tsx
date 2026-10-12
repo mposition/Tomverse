@@ -11,6 +11,10 @@ import {
 } from "@/components/chat/useUserUsage";
 import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
+import {
+  localizedProductHref,
+  type ChatWorkspaceProduct,
+} from "@/lib/chatProductUiCopy";
 
 const percent = (used: number, limit: number) =>
   limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
@@ -46,6 +50,7 @@ export function UserUsageSummary({
   usageOverride,
   compact = false,
   headerAction,
+  currentProduct = "review",
 }: {
   isGuestMode?: boolean;
   guestMessageCount?: number;
@@ -53,8 +58,10 @@ export function UserUsageSummary({
   usageOverride?: UserUsageResponse | null;
   compact?: boolean;
   headerAction?: ReactNode;
+  currentProduct?: ChatWorkspaceProduct;
 }) {
   const { t, lang } = useLanguage();
+  const workspaceReturnTo = localizedProductHref(currentProduct, lang);
   const fetchedUsage = useUserUsage(!isGuestMode && usageOverride === undefined);
   const usage = usageOverride === undefined ? fetchedUsage : usageOverride;
   // "No daily limit" only ever meant "no daily *credit* limit". Said plainly,
@@ -196,7 +203,7 @@ export function UserUsageSummary({
             <CreditPackPurchaseButton
               trigger="usage_widget"
               ctaLocation="usage_widget"
-              returnTo={`/chat?lang=${encodeURIComponent(lang)}`}
+              returnTo={workspaceReturnTo}
               className="flex min-h-10 w-full items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"
             >
               {t("upgrade.buyAdditionalCredits")}
@@ -321,11 +328,11 @@ export function UserUsageSummary({
                 >
                   {upgradeLabel}
                 </UpgradeCtaLink>
-                <CreditPackPurchaseButton trigger="usage_widget" ctaLocation="usage_summary_warning" returnTo={`/chat?lang=${encodeURIComponent(lang)}`} className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-bold">{addCreditLabel}</CreditPackPurchaseButton>
+                <CreditPackPurchaseButton trigger="usage_widget" ctaLocation="usage_summary_warning" returnTo={workspaceReturnTo} className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-bold">{addCreditLabel}</CreditPackPurchaseButton>
               </>
             ) : (
               <>
-                <CreditPackPurchaseButton trigger="usage_widget" ctaLocation="usage_summary_primary" returnTo={`/chat?lang=${encodeURIComponent(lang)}`} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 font-bold text-white">{addCreditLabel}</CreditPackPurchaseButton>
+                <CreditPackPurchaseButton trigger="usage_widget" ctaLocation="usage_summary_primary" returnTo={workspaceReturnTo} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 font-bold text-white">{addCreditLabel}</CreditPackPurchaseButton>
                 {usage.plan === "Pro" && (
                   <UpgradeCtaLink
                     targetPlan="Max"
