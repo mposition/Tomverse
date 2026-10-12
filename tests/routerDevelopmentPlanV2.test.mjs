@@ -48,6 +48,11 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
   // moved. The previous plan digest was 9f948dd5…6946e5. The substitution
   // below is recomputed on this catalogue and still has to match the pair
   // those two older version strings produce.
+  //
+  // Re-baselined again on 2026-10-12: `gpt-6-luna` and `claude-haiku-5-5`
+  // joined the catalogue (two models, so 96 more rows) and DEFAULT_MODEL_ID --
+  // the plan's requested model -- moved to `gpt-6-luna`. Every digest below
+  // moved for that reason alone; the previous plan digest was 4e6f769a…892784.
   assert.equal(legacy.versions.router.taskProfile, "task-profile-v4");
   assert.equal(legacy.versions.router.selection, "router-selection-v3");
   assert.equal(legacy.versions.diagnostic, "router-full-catalog-diagnostic-v4");
@@ -67,10 +72,10 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
     },
   };
   const beforePlanDigest = benchmarkDigest(canonicalBenchmarkJson(asBefore));
-  assert.equal(beforePlanDigest, "43c5605bb7fad864c3c7695ccd2df2c75ff3679fbc582f5ef3170e266f1d58b5");
+  assert.equal(beforePlanDigest, "979a4620bc457b15f97e82a48526ab8cbbb201b838b37957df87d2f291c0cc4a");
   assert.equal(
     benchmarkDigest(JSON.stringify({ ...asBefore, planDigest: beforePlanDigest })),
-    "aa88c7a9e8a300303d59672193a97fff79e8192998692ed3b42daebfee24b40e"
+    "4c74f29bdf473c237e1449f955a77fd3d9150ec4f5102bfb0144466aaeef34a7"
   );
   assert.deepEqual(validateDevelopmentPlan(legacy, { ...common, corpus: oldCorpus }), legacy);
   assert.throws(() => buildDevelopmentPlan({ ...common, ...options }), /corpus_version_or_purpose/);
