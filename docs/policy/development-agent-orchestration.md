@@ -1666,11 +1666,24 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
   - 도구(0~16개).
   - 선택 항목인 v22 one-shot 프로필(모델, 역할, 도구). v22 프로필 규칙은 지금 `parseAmuxV22WorkerCatalog()`의 규칙 그대로다. 공급사 anthropic, 지원 역할, 역할마다 필요한 도구가 그 규칙이다.
 - **누가 쓰는가.** owner만 Admin에서 최근 step-up을 거쳐 쓴다. 같은 트랜잭션에 사람 감사 `amux.worker.capability`가 있어야 하며, 트리거가 강제한다. 시스템은 쓰지 않는다.
-- **등록부 사건과 표를 나누는 이유.** 원하는 상태의 변경 규칙과 능력 변경의 규칙이 다르기 때문이다. 원하는 상태는 활성화에 시험 증거가 필요하다. 능력은 owner의 운영 행위다. 대신 역할 상한을 넘는 태그는 받지 않는다.
-  - `contract`, `architecture`, `security` 태그는 역할 상한이 `contract`인 worker만 가진다.
-  - `review` 태그와 v22의 `review` 역할은 검증된 종류(버전 31 2항)만 가진다.
+- **등록부 사건과 표를 나누는 이유.** 원하는 상태의 변경 규칙과 능력 변경의 규칙이 다르기 때문이다. 원하는 상태는 활성화에 시험 증거가 필요하다. 능력은 owner의 운영 행위다. 대신 능력은 역할 상한을 넘지 못한다.
+- **역할 상한과 태그의 대응.** 배정 경로는 카드의 `requiredRoutingRole`이 worker의 태그에 들어 있는지만 본다. 그러므로 태그가 곧 권한이며, 다음 표로 묶는다. 태그와 v22 역할은 닫힌 목록이고, 목록 밖의 값은 받지 않는다. 목록을 늘리는 것은 검토를 거치는 코드 변경이다.
+
+  | 태그 또는 v22 역할 | 필요한 것 |
+  |---|---|
+  | `chore` | 아무 상한 |
+  | `implementation`; v22 `implement`, `investigate` | 상한 `implementation` 이상 |
+  | `contract`, `architecture`, `security`; v22 `design` | 상한 `contract` |
+  | `review`; v22 `review` | 검증된 종류(버전 31 2항). 아래 선택 규칙도 함께 적용 |
+  | 그 밖의 작업 태그(`bugfix`, `tests`, `multi_file`, `reasoning`, `integration`, `long_running`, `fallback`) | 아무 상한 |
+
+- **강제하는 세 지점.**
+  - 능력을 쓸 때. 상한을 넘는 태그는 거부한다.
+  - 카탈로그를 유도할 때. 상한은 나중에 좁혀질 수 있으므로, 그때의 상한을 넘는 태그와 v22 역할은 항목에서 뺀다.
+  - 선택할 때. 카드의 v16 역할(`chore`, `implementation`, `contract`)이 worker의 상한보다 높으면 그 worker를 후보로 두지 않는다. review 단계도 같은 카드의 v16 역할로 검사한다. 그래서 상한이 `chore`인 검증된 worker는 `review` 태그가 있어도 contract 카드의 review를 맡지 않는다.
 - **`requested` worker.** `requested`인 worker도 능력을 가질 수 있지만, 배정되지 않는다.
-- **가져오기(한 번, owner).** Admin의 "환경 변수에서 능력 가져오기"는 지금 이 서버가 가진 두 카탈로그 환경 변수(`TOMVERSE_AMUX_WORKER_CATALOG_JSON`, `TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON`)를 읽는다. 등록부에 있는 worker마다 능력 사건 하나를 쓴다. 미리 보기에서 차이를 보인 뒤 owner가 확정한다. 환경 변수의 `archived`·`paused`·`isolated`·`blocked` 표시는 능력이 아니므로 가져오지 않는다. 그 의미는 원하는 상태와 래치가 이미 갖고 있다.
+- **가져오기(한 번, owner).** Admin의 "환경 변수에서 능력 가져오기"는 지금 이 서버가 가진 두 카탈로그 환경 변수(`TOMVERSE_AMUX_WORKER_CATALOG_JSON`, `TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON`)를 읽는다. 카탈로그에 있고 등록부에도 있는 worker마다 능력 사건 하나를 쓴다. 미리 보기에서 차이와, 위 표 때문에 거부될 태그를 보인 뒤 owner가 확정한다.
+  - 지금 카탈로그에는 `active`인 일곱만 있다. `requested`인 여섯(Cursor·Copilot)은 가져올 것이 없으므로 owner가 Admin 편집으로 넣는다. 그 능력은 R5의 활성화 전에만 있으면 된다. 환경 변수의 `archived`·`paused`·`isolated`·`blocked` 표시는 능력이 아니므로 가져오지 않는다. 그 의미는 원하는 상태와 래치가 이미 갖고 있다.
 
 ### 3. 배정 카탈로그의 유도
 
@@ -1706,11 +1719,11 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
 
 | 조각 | 내용 | 끝나는 조건 |
 |---|---|---|
-| R2a | 능력 표·store·Admin 편집, 환경 변수에서 가져오기 | production에서 등록부의 일곱 `active` worker와 여섯 `requested` worker의 능력이 기록됨 |
+| R2a | 능력 표·store·Admin 편집, 환경 변수에서 가져오기 | production에서 `active`인 일곱의 능력이 기록됨(여섯 `requested`는 R5 전까지) |
 | R2b | 유도 카탈로그를 shadow로 계산하고, Admin에 환경 변수 카탈로그와의 동등성 표시 | 동등이 정해진 기간 동안 관측됨 |
 | R2c | 일곱 사용처를 유도 카탈로그로 전환 | 운영자 활성화 기록 뒤 배정이 유도 카탈로그로 이뤄짐 |
 | R2d | bridge 목록 route, Rust 변경, 호스트 바이너리 교체 | 세션 목록이 유도 카탈로그와 같음을 관측 |
-| R2e | 두 카탈로그 환경 변수와 `TOMVERSE_AMUX_WSL_SESSIONS` 삭제 | 버전 31 8항 R2의 종료 조건 |
+| R2e | 두 카탈로그 환경 변수와 `TOMVERSE_AMUX_WSL_SESSIONS` 삭제. 앱 서비스의 변수, 버전 28 IaC(`.railway/agent-runners.ts`)의 AMUX Orchestrator 변수 목록, 호스트 환경을 함께 지운다. IaC 목록에 남기면 다음 apply가 변수를 되살린다. Orchestrator 바이너리는 이 변수를 읽지 않는다. | 버전 31 8항 R2의 종료 조건 |
 
 - R2a와 R2b는 배정을 바꾸지 않으므로 R1의 관측 기간(버전 32·34)과 함께 진행할 수 있다.
 - R2c는 R1 관측이 끝난 뒤에만 켠다.
