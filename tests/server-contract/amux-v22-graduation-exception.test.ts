@@ -51,7 +51,7 @@ mock.module(mod("lib/amux/orchestratorHaltStore.ts"), { namedExports: {
   findOpenAmuxOrchestratorHalt: async () => null,
 } });
 mock.module(mod("lib/amux/routing.ts"), { namedExports: {
-  getConfiguredAmuxWorkerCatalog: () => [1, 2, 3].map((n) => ({ worker_name: `worker-${n}` })),
+  getConfiguredAmuxV22WorkerCatalog: () => [1, 2, 3].map((n) => ({ worker_name: `worker-${n}` })),
 } });
 mock.module(mod("lib/amux/v4TaskReadyService.ts"), { namedExports: {
   loadAmuxV4TaskReadyContext: async () => ({}),
