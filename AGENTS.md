@@ -715,6 +715,13 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`, Prisma 컬럼 기본값이
   함께 움직입니다. 한쪽만 바꾸지 않습니다. 같은 날 trio의 Anthropic 자리는
   `claude-haiku-5-5`로 옮겼습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
+- **게스트 기본 3모델은 OpenAI 1개 · Anthropic 1개 · Gemini 1개입니다**(플랫폼
+  전략, 2026-10-12 운영자 결정). 그래서 Anthropic 자리의 **Claude Haiku 계열만**
+  가격이 게스트 개방 조건(최악 턴 ≤ standard 1크레딧의 3배 커버)에 맞지 않아도
+  허용합니다. Haiku 5.5의 100,000토큰 장문 tier가 입력 상한 안에서 원가를 낮게
+  기록할 수 있다는 위험까지 수용한 결정이며, 다른 모델의 같은 경계는 이 예외가
+  아닙니다: docs/policy/credit-and-cost-limits.md "Haiku 계열을 게스트 Anthropic
+  자리로 여는 예외".
 - **`gpt-5-4-mini`는 은퇴하지 않았습니다.** enabled·publiclyListed 상태를
   유지하는 것은 의도된 관찰 기간입니다.
 - **수치 eval 통과는 은퇴의 필요조건이지 충분조건이 아닙니다.** 정책 문서
