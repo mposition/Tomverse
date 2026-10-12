@@ -219,10 +219,10 @@ export const AVAILABLE_MODELS = [
     { id: "gpt-5-6-sol", name: "GPT-5.6 Sol", apiModel: "gpt-5.6-sol", provider: "openai", icon: "🤖", bestFor: "Frontier reasoning, coding, and complex professional work", minimumPlan: "Pro", usageClass: "premium", creditWeight: 16, enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-6-terra", name: "GPT-5.6 Terra", apiModel: "gpt-5.6-terra", provider: "openai", icon: "🤖", bestFor: "Strong analysis and coding with balanced cost", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-6-luna", name: "GPT-5.6 Luna", apiModel: "gpt-5.6-luna", provider: "openai", icon: "🤖", bestFor: "Efficient high-volume questions and document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
-    // Adopted in the production registry before it was compiled here, and the
-    // row mirrors that registry row: no `reasoning`, so OpenAI's own default
-    // effort (medium) applies. Seeding never overwrites an existing row.
-    { id: "gpt-6-luna", name: "GPT 6 Luna", apiModel: "gpt-6-luna", provider: "openai", icon: "🤖", bestFor: "Efficient high-volume questions and document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
+    // Adopted in the production registry before it was compiled here. Medium is
+    // OpenAI's default effort for it -- what the registry row, which names no
+    // `reasoning`, already runs at. Seeding never overwrites an existing row.
+    { id: "gpt-6-luna", name: "GPT 6 Luna", apiModel: "gpt-6-luna", provider: "openai", icon: "🤖", bestFor: "Efficient high-volume questions and document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-5", name: "GPT-5.5", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Complex analysis and important decisions", minimumPlan: "Pro", usageClass: "premium", creditWeight: 16, enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-5-thinking", name: "GPT-5.5 Thinking", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Difficult problems that benefit from step-by-step reasoning", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", inputCapabilities: FULL_BINARY_INPUT },
     // Still enabled and publicly listed on purpose: this is the baseline the
