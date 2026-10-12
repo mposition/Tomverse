@@ -177,6 +177,22 @@ export type PublicationProblem = {
 export const CHANGE_NOTICE_PERIOD_DAYS = 30;
 
 /**
+ * Accounts created before this instant are owed the amendment notice.
+ *
+ * The moment the amended /privacy and /terms were first served in production
+ * (the 2026-10-03 selective release; production served 3ee420f from 07:07:19Z,
+ * the earliest observation recorded). Owner decision 2026-10-12
+ * (docs/policy/email-policy-amendment-draft.md section 5.1): an account created
+ * after it signed up under the published amendment, which states what changes
+ * and from when, through the links on the sign-in screen, so it is not owed a
+ * separate notice and does not hold the gate. The earlier rule counted every
+ * account created before the effective date, which made a sign-up on the last
+ * day hold release notes for thirty more days. Later than the true moment is the
+ * safe direction: it widens the owed set by the minutes in between.
+ */
+export const CHANGE_NOTICE_OWED_BEFORE = "2026-10-03T07:07:19.000Z";
+
+/**
  * How far before the effective date a delivery can be and still be this notice.
  *
  * The notice is identified by its template, and a key pointed by mistake at a

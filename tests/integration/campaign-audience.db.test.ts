@@ -12,7 +12,10 @@ import { prisma } from "@/lib/prisma";
 import { POLICY_NOTICE_CAMPAIGN_WAVES } from "@/lib/emailAudienceExpansionCore";
 import { waveAudienceBreakdown } from "@/lib/adminEmailCampaigns";
 import { expandEmailEvent } from "@/lib/emailAudienceExpansion";
-import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
+import {
+  ensureBootstrapPolicyVersion,
+  ensureTemplateVersion,
+} from "@/lib/emailTemplateRegistry";
 import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import {
   approveCampaign,
@@ -590,6 +593,19 @@ const noticeDraft = () =>
     createdByEmail: "ops@example.test",
   });
 
+/** One profile in the active version, so a notice wave has a footer to print. */
+const activeProfile = async () =>
+  prisma.jurisdictionProfile.create({
+    data: {
+      profileKey: "ZZ",
+      policyVersionId: await ensureBootstrapPolicyVersion(),
+      marketingBasis: "opt_in",
+      footerBlocks: ["legal_name", "postal_address", "contact_email"],
+      unsubscribeSlaBusinessDays: 5,
+      notes: "test profile",
+    },
+  });
+
 const createdAt = (userId: string, value: Date | null) =>
   prisma.user.update({ where: { id: userId }, data: { createdAt: value } });
 
@@ -607,6 +623,16 @@ test("the amendment notice reaches every owed account once, and a later wave onl
   // The approved hashes are for the production origin.
   process.env.PUBLIC_APP_URL = "https://tomverse.app";
   try {
+    // With no profile in the active version the wave is refused before a row
+    // exists: the notice would go out without the sender footer.
+    const unprofiled = await noticeDraft();
+    await approveCampaign({ campaignId: unprofiled.id, approvalId: `appr-${randomUUID()}` });
+    const refused = await runCampaignWave({ campaignId: unprofiled.id, kind: "launch" });
+    assert.ok("refused" in refused && refused.refused.refusal === "policy_without_profiles");
+    assert.equal(await prisma.emailDelivery.count(), 0);
+    await prisma.emailCampaign.delete({ where: { id: unprofiled.id } });
+    await activeProfile();
+
     const owed = await account({});
     const suspended = await account({ accountStatus: "suspended" });
     const undated = await account({});
@@ -695,8 +721,12 @@ test("the amendment notice reaches every owed account once, and a later wave onl
       where: { userId: suspended },
       data: { status: "complained", sentAt: new Date(), deliveredAt: null },
     });
+    // One account the launch missed (created before publication), and one
+    // created after the amendment was published, which is not owed it.
     const late = await account({});
-    await createdAt(late, new Date("2026-10-20T00:00:00Z"));
+    await createdAt(late, new Date("2026-10-02T00:00:00Z"));
+    const afterPublication = await account({});
+    await createdAt(afterPublication, new Date("2026-10-20T00:00:00Z"));
     const followUp = await runCampaignWave({
       campaignId: first.id,
       kind: "final_reminder",
@@ -706,6 +736,7 @@ test("the amendment notice reaches every owed account once, and a later wave onl
       await noticeRecipients(),
       [owed, owed, suspended, suspended, undated, late].sort()
     );
+    assert.ok(!(await noticeRecipients()).includes(afterPublication));
 
     // A notice sent with no delivery report is on its way for a few days, then
     // asked about again.

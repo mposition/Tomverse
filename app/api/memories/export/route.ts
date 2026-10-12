@@ -3,8 +3,8 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import {
-    assertRecentAdminAuthentication,
-    isAdminReauthenticationError,
+    assertRecentAccountAuthentication,
+    isAccountReauthenticationError,
 } from "@/lib/adminReauthentication";
 import {
     apiSecurityResponse,
@@ -27,7 +27,7 @@ import { logSecurityAuditEvent } from "@/lib/securityAudit";
  * feature off must not trap a user's reviewed memories inside an account
  * they can no longer get them out of.
  *
- * `assertRecentAdminAuthentication` reads session freshness, not an admin
+ * `assertRecentAccountAuthentication` reads session freshness, not an admin
  * role; account deletion already uses it as the account-holder step-up for a
  * sensitive action, and reusing it keeps one step-up contract (and one 428
  * client path) rather than inventing a second.
@@ -42,7 +42,7 @@ export async function GET(req: Request) {
             minute: 3,
             day: 30,
         });
-        await assertRecentAdminAuthentication(session);
+        await assertRecentAccountAuthentication(session);
 
         const userId = session.user.id;
         logSecurityAuditEvent("memory.export.create", {
@@ -105,7 +105,7 @@ export async function GET(req: Request) {
             },
         });
     } catch (error) {
-        if (isAdminReauthenticationError(error)) {
+        if (isAccountReauthenticationError(error)) {
             return NextResponse.json(
                 {
                     error: "Sign in again before exporting your memories.",

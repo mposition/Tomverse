@@ -1534,6 +1534,70 @@ domains:
       are never changed or removed by the application; the database refuses
       both.
 
+  - domain: amuxWorkerRegistryEvent
+    prismaModel: AmuxWorkerRegistryEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one AMUX worker registry change (orchestration
+        policy version 31, section 3: the registry is written only by the
+        owner, under a human audit entry of the same transaction). The row
+        names the administrator who made the change and is retained for
+        security investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id of the owner who changed the registry and
+      intentionally has no User foreign key. The row stores a worker name, a
+      closed class, role ceiling and desired state, and identifiers, not free
+      text or any customer's prompt or file. Rows are never changed or removed
+      by the application; the database refuses both.
+
+  - domain: amuxWorkerLatchEvent
+    prismaModel: AmuxWorkerLatchEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one AMUX worker automatic stop latch event
+        (orchestration policy version 31, section 7): the system opens a latch
+        and only a person releases it, under a human audit entry of the same
+        transaction. A release names the administrator and is retained for
+        security investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id of the administrator who released a latch
+      and intentionally has no User foreign key; it is null on an opening. The
+      row stores a worker name, a closed event and actor kind, and identifiers.
+      The table refuses every write until stage R4 replaces its guard, and
+      rows are never changed or removed by the application.
+
   - domain: amuxDecisionMakerBody
     prismaModel: AmuxDecisionMakerBody
     userLinkageRole: actor

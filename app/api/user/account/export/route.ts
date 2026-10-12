@@ -4,8 +4,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 
 import {
-    assertRecentAdminAuthentication,
-    isAdminReauthenticationError,
+    assertRecentAccountAuthentication,
+    isAccountReauthenticationError,
 } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
@@ -75,7 +75,7 @@ export async function GET(req: Request) {
  *   - the step-up is required to *obtain* the link, so a stolen link cannot be
  *     re-obtained without signing in again.
  *
- * `assertRecentAdminAuthentication` reads session freshness, not an admin role.
+ * `assertRecentAccountAuthentication` reads session freshness, not an admin role.
  * Account deletion and the memory export already use it as the account-holder
  * step-up, and reusing it keeps one step-up contract and one 428 client path.
  */
@@ -97,7 +97,7 @@ export async function POST(req: Request) {
             minute: 2,
             day: 10,
         });
-        await assertRecentAdminAuthentication(session);
+        await assertRecentAccountAuthentication(session);
 
         const ticket = await issueAccountDataExportTicket({ userId, request: req });
 
@@ -118,7 +118,7 @@ export async function POST(req: Request) {
             { status: 201, headers: { "Cache-Control": "no-store" } }
         );
     } catch (error) {
-        if (isAdminReauthenticationError(error)) {
+        if (isAccountReauthenticationError(error)) {
             return NextResponse.json(
                 {
                     error: "Sign in again before downloading your account data.",

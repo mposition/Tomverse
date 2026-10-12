@@ -70,7 +70,8 @@ export type CampaignRunRefusal =
   | "already_completed"
   | "content_changed"
   | "locale_not_pinned"
-  | "transition_unproven";
+  | "transition_unproven"
+  | "policy_without_profiles";
 
 /** One language's pinned version and what that version's copy hashed to. */
 export type PinnedVersion = {
@@ -108,6 +109,21 @@ export const campaignRunRefusal = (input: {
    * was true once.
    */
   transitionClaim?: { claimed: boolean; unmet: readonly string[] };
+  /**
+   * How many jurisdiction profiles the active policy version holds, asked only
+   * for a campaign whose messages go out whatever the footer says.
+   *
+   * A wave pins every row to the version active when it expands, and the lane
+   * reads the footer from that version. A legal or transactional message whose
+   * version has no profiles is sent without the sender footer rather than held
+   * (lib/emailJurisdictionComposition.ts), which is right for one account
+   * notice and wrong for a planned send to everybody: on 2026-10-04 the
+   * amendment notice reached 79 accounts with no footer because the bootstrap
+   * version (no profiles) was still active. Marketing needs no such check; the
+   * lane already refuses a marketing row with no profile. Undefined means the
+   * caller did not ask.
+   */
+  activePolicyProfileCount?: number;
 }): CampaignRunRefusalDetail | null => {
   if (input.status === "cancelled") {
     return { refusal: "cancelled", message: "This campaign was cancelled." };
@@ -128,6 +144,14 @@ export const campaignRunRefusal = (input: {
     return {
       refusal: "not_approved",
       message: `A campaign sends only once approved; this one is ${input.status}.`,
+    };
+  }
+
+  if (input.activePolicyProfileCount === 0) {
+    return {
+      refusal: "policy_without_profiles",
+      message:
+        "The active email policy version has no jurisdiction profiles, so every message in this wave would go out without the sender footer. Activate the jurisdiction policy version in the email policy console first.",
     };
   }
 
