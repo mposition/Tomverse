@@ -18,6 +18,7 @@ import { auditRowActorKind,
   AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
   AMUX_V4_IDEA_SYSTEM_ACTOR } from "@/lib/adminAuditSystemActors";
 import { isAdminReauthenticationError } from "@/lib/adminReauthentication";
+import { resolveRecentAuthMinutes } from "@/lib/adminReauthenticationCore";
 import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
@@ -376,7 +377,9 @@ test("owner cancels only an unused hold, releasing the reservation with one audi
     else process.env.ADMIN_OPS_EMAILS = previousOpsEmails;
   }
   const staleOwner = { ...session, user: { ...session.user,
-    authenticatedAt: new Date(Date.now() - 60 * 60_000).toISOString() } } as Session;
+    authenticatedAt: new Date(Date.now() -
+      (resolveRecentAuthMinutes(process.env.ADMIN_RECENT_AUTH_MINUTES) + 1) * 60_000)
+      .toISOString() } } as Session;
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
       { session: staleOwner, request, holdId })), isAdminReauthenticationError);

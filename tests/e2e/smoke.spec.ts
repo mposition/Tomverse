@@ -48,7 +48,7 @@ test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 
   await page.getByTestId("marketing-language-switcher").selectOption("ko");
-  await expect(page.getByTestId("landing-hero-title")).toContainText("구독은");
+  await expect(page.getByTestId("landing-hero-title")).toContainText("고민은 Tomverse에.");
 });
 
 test("signed-in homepage keeps the page visible and offers one continue action", { tag: "@smoke" }, async ({
