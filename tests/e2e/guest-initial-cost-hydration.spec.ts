@@ -763,6 +763,31 @@ test.describe("guest initial cost hydration", () => {
       guestClientTurnId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
   });
 
+  test("Guest Auto errors cannot retry through a manual fallback @ui-risk", async ({ page }, testInfo) => {
+    const requests: Array<Record<string, unknown>> = [];
+    await page.route("**/api/products/chat/capabilities", (route) => route.fulfill({
+      json: { autoSelection: { offered: true }, guestAutoCapability: "qa-auto-retry-boundary",
+        guestAuto: { attachmentSupport: "manual_only" } },
+    }));
+    await page.route("**/api/chat", async (route) => {
+      requests.push(route.request().postDataJSON() as Record<string, unknown>);
+      await route.fulfill({ status: 500, json: {
+        error: "QA Guest Auto provider failure", errorCode: "AI_PROVIDER_ERROR",
+      } });
+    });
+    await page.goto("/chat?lang=en");
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await sendChatMessage(page, testInfo, "one Guest Auto failure without a manual retry");
+    await expect(page.getByText("QA Guest Auto provider failure", { exact: false }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ guestAutoCapability: "qa-auto-retry-boundary" });
+    await page.reload();
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    expect(requests).toHaveLength(1);
+  });
+
   test("Guest Auto recovers from a failed pre-send capability read without manual dispatch", async ({ page }, testInfo) => {
     const authority = "qa-guest-auto-capability-recovered";
     const prompt = "recover the authority before this Auto turn";

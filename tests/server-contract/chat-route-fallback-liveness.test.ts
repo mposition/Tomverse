@@ -291,7 +291,8 @@ type GuestKnownUndispatchedRefusalMode =
   | "none"
   | "gemini_prefill"
   | "runtime_unavailable"
-  | "catalogue_host";
+  | "catalogue_host"
+  | "router_no_candidate";
 let guestKnownUndispatchedRefusalMode: GuestKnownUndispatchedRefusalMode = "none";
 let guestRefinerGate: Readonly<{
   entered: () => void;
@@ -354,8 +355,9 @@ mock.module(mod("lib/guestChatAutoSelection.ts"), {
       guestSelectionInputs.push(input);
       guestLifecycle.push("router");
       const selected = realGuestAutoSelection.selectGuestChatAutoModel(input);
-      const output =
-        guestKnownUndispatchedRefusalMode === "gemini_prefill" && selected.routed
+      const output = guestKnownUndispatchedRefusalMode === "router_no_candidate"
+        ? ({ routed: false, reason: "no_candidate" } as const)
+        : guestKnownUndispatchedRefusalMode === "gemini_prefill" && selected.routed
           ? {
               ...selected,
               modelId: "gemini-flash-lite-latest",
@@ -931,6 +933,9 @@ const guestReadInputs: Array<Record<string, unknown>> = [];
 type GuestReleaseOutcome = "normal" | "ambiguous_before_commit" |
   "ambiguous_after_commit";
 let guestReleaseOutcome: GuestReleaseOutcome = "normal";
+type GuestUnknownOutcome = "normal" | "ambiguous_before_commit" |
+  "ambiguous_after_commit";
+let guestUnknownOutcome: GuestUnknownOutcome = "normal";
 
 class TestGuestAutoCreditLedgerError extends Error {
   constructor(readonly code:
@@ -1109,11 +1114,27 @@ mock.module(mod("lib/guestChatAutoCreditLedger.ts"), {
       boundary: string;
     }) => {
       guestUnknownInputs.push(input as unknown as Record<string, unknown>);
+      if (guestUnknownOutcome === "ambiguous_before_commit") {
+        throw new Error("SYNTHETIC_GUEST_AUTO_UNKNOWN_OUTCOME_UNKNOWN");
+      }
       const claim = guestClaimsByAuthority.get(
         `${input.access.subjectKey}:${input.binding.authority.authorityId}`
       );
       assert.ok(claim, "unknown retention requires the claimed hold");
+      if (claim.status === "guest_auto_unknown") {
+        return { phase: claim.phase, status: claim.status };
+      }
+      if (!(
+        (claim.phase === "guest_auto_prehold" &&
+          claim.status === "guest_auto_preheld") ||
+        (claim.phase === "exact" && claim.status === "reserved")
+      )) {
+        throw new TestGuestAutoCreditLedgerError("transition_invalid");
+      }
       claim.status = "guest_auto_unknown";
+      if (guestUnknownOutcome === "ambiguous_after_commit") {
+        throw new Error("SYNTHETIC_GUEST_AUTO_UNKNOWN_RESPONSE_LOST");
+      }
       return { phase: claim.phase, status: claim.status };
     },
     readGuestAutoCreditState: async (input: {
@@ -2609,6 +2630,7 @@ const resetGuestHarness = (preserveClaims = false) => {
   guestRefinerGate = null;
   guestLedgerMode = "normal";
   guestReleaseOutcome = "normal";
+  guestUnknownOutcome = "normal";
   throwGuestProviderUnknown = false;
   injectPrimaryFault = false;
   fallbackBehaviour = "answers";
@@ -2661,6 +2683,7 @@ const askGuestAuto = async (options: {
   providerUnknown?: boolean;
   knownUndispatchedRefusal?: GuestKnownUndispatchedRefusalMode;
   releaseOutcome?: GuestReleaseOutcome;
+  unknownOutcome?: GuestUnknownOutcome;
   resetHarness?: boolean;
 } = {}) => {
   if (options.resetHarness !== false) {
@@ -2677,6 +2700,7 @@ const askGuestAuto = async (options: {
   guestKnownUndispatchedRefusalMode =
     options.knownUndispatchedRefusal ?? "none";
   guestReleaseOutcome = options.releaseOutcome ?? "normal";
+  guestUnknownOutcome = options.unknownOutcome ?? "normal";
   const authority = Object.prototype.hasOwnProperty.call(options, "authority")
     ? options.authority
     : "guest-authority-a";
@@ -2933,6 +2957,50 @@ test("Guest Auto retains a Refiner-unknown prehold and confirms its readonly rec
   );
 });
 
+for (const [name, unknownOutcome, claimStatus] of [
+  [
+    "an unknown disposition that did not commit",
+    "ambiguous_before_commit",
+    "guest_auto_preheld",
+  ],
+  [
+    "a committed unknown disposition whose response was lost",
+    "ambiguous_after_commit",
+    "guest_auto_unknown",
+  ],
+] as const) {
+  test(`Guest Auto stops after ${name} without retrying the durable write`, async () => {
+    const { body } = await askGuestAuto({
+      refinerMode: "unknown",
+      unknownOutcome,
+      expectedStatus: 503,
+    });
+
+    assert.equal(
+      (JSON.parse(body) as { code?: string }).code,
+      "GUEST_AUTO_OUTCOME_UNKNOWN"
+    );
+    assert.equal(guestUnknownInputs.length, 1);
+    assert.equal(
+      (guestUnknownInputs[0] as { boundary?: string }).boundary,
+      "refiner"
+    );
+    assert.deepEqual(guestReadInputs, [{
+      subjectKey: GUEST_SUBJECT_KEY,
+      authorityId: GUEST_AUTHORITY_A,
+    }]);
+    assert.equal(guestReleaseInputs.length, 0);
+    assert.equal(guestConvertInputs.length, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(
+      guestClaimsByAuthority.get(
+        `${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`
+      )?.status,
+      claimStatus
+    );
+  });
+}
+
 test("Guest Auto insufficient credit stops before Refiner, exact conversion, and provider", async () => {
   const { response } = await askGuestAuto({ ledgerMode: "insufficient" });
   assert.notEqual(response.status, 200);
@@ -2979,7 +3047,7 @@ for (const [name, releaseOutcome, status, code, claimStatus] of [
     "ambiguous_before_commit",
     503,
     "GUEST_AUTO_OUTCOME_UNKNOWN",
-    "guest_auto_preheld",
+    "guest_auto_unknown",
   ],
   [
     "a committed release with a lost response",
@@ -3001,7 +3069,11 @@ for (const [name, releaseOutcome, status, code, claimStatus] of [
     assert.equal(guestConvertInputs.length, 1);
     assert.equal(attempts.length, 0);
     assert.equal(guestReleaseInputs.length, 1);
-    assert.equal(guestUnknownInputs.length, 0);
+    assert.equal(guestUnknownInputs.length, 1);
+    assert.equal(
+      (guestUnknownInputs[0] as { boundary?: string }).boundary,
+      "settlement"
+    );
     assert.deepEqual(guestReadInputs, [{
       subjectKey: GUEST_SUBJECT_KEY,
       authorityId: GUEST_AUTHORITY_A,
@@ -3019,6 +3091,85 @@ for (const [name, releaseOutcome, status, code, claimStatus] of [
   });
 }
 
+test("Guest Auto retains an unconfirmed prehold when both release and unknown disposition responses are unavailable", async () => {
+  const { body } = await askGuestAuto({
+    ledgerMode: "known_ledger_refusal",
+    releaseOutcome: "ambiguous_before_commit",
+    unknownOutcome: "ambiguous_before_commit",
+    expectedStatus: 503,
+  });
+
+  assert.equal(
+    (JSON.parse(body) as { code?: string }).code,
+    "GUEST_AUTO_OUTCOME_UNKNOWN"
+  );
+  assert.equal(guestReleaseInputs.length, 1);
+  assert.equal(guestUnknownInputs.length, 1);
+  assert.deepEqual(guestReadInputs, [{
+    subjectKey: GUEST_SUBJECT_KEY,
+    authorityId: GUEST_AUTHORITY_A,
+  }]);
+  assert.equal(
+    guestClaimsByAuthority.get(
+      `${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`
+    )?.status,
+    "guest_auto_preheld"
+  );
+  assert.equal(attempts.length, 0);
+});
+
+test("Guest Auto releases a Router refusal once with the Router-specific financial scope", async () => {
+  const { body } = await askGuestAuto({
+    knownUndispatchedRefusal: "router_no_candidate",
+    expectedStatus: 409,
+  });
+
+  assert.equal(
+    (JSON.parse(body) as { code?: string }).code,
+    "GUEST_AUTO_NO_CANDIDATE"
+  );
+  assert.equal(guestSelectionInputs.length, 1);
+  assert.equal(guestConvertInputs.length, 0);
+  assert.equal(attempts.length, 0);
+  assert.equal(guestReleaseInputs.length, 1);
+  assert.equal(
+    (guestReleaseInputs[0] as { reason?: string }).reason,
+    "router_refused_before_dispatch"
+  );
+  assert.equal(guestUnknownInputs.length, 0);
+  assert.equal(guestReadInputs.length, 0);
+});
+
+test("Guest Auto does not retry an ambiguous Router-refusal release with a new proof", async () => {
+  const { body } = await askGuestAuto({
+    knownUndispatchedRefusal: "router_no_candidate",
+    releaseOutcome: "ambiguous_before_commit",
+    expectedStatus: 503,
+  });
+
+  assert.equal(
+    (JSON.parse(body) as { code?: string }).code,
+    "GUEST_AUTO_OUTCOME_UNKNOWN"
+  );
+  assert.equal(guestReleaseInputs.length, 1);
+  assert.equal(
+    (guestReleaseInputs[0] as { reason?: string }).reason,
+    "router_refused_before_dispatch"
+  );
+  assert.equal(guestUnknownInputs.length, 1);
+  assert.deepEqual(guestReadInputs, [{
+    subjectKey: GUEST_SUBJECT_KEY,
+    authorityId: GUEST_AUTHORITY_A,
+  }]);
+  assert.equal(
+    guestClaimsByAuthority.get(
+      `${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`
+    )?.status,
+    "guest_auto_unknown"
+  );
+  assert.equal(attempts.length, 0);
+});
+
 test("Guest Auto terminal release-unknown prehold rejects a fresh authority before a second paid attempt", async () => {
   await askGuestAuto({
     ledgerMode: "known_ledger_refusal",
@@ -3028,7 +3179,7 @@ test("Guest Auto terminal release-unknown prehold rejects a fresh authority befo
   const heldClaim = guestClaimsByAuthority.get(
     `${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`
   );
-  assert.equal(heldClaim?.status, "guest_auto_preheld");
+  assert.equal(heldClaim?.status, "guest_auto_unknown");
 
   const { response } = await askGuestAuto({
     authority: "guest-authority-b",
@@ -3107,7 +3258,7 @@ for (const [name, releaseOutcome, status, code, claimStatus] of [
     "ambiguous_before_commit",
     503,
     "GUEST_AUTO_OUTCOME_UNKNOWN",
-    "guest_auto_preheld",
+    "guest_auto_unknown",
   ],
   [
     "a committed release whose response was lost",
@@ -3129,7 +3280,11 @@ for (const [name, releaseOutcome, status, code, claimStatus] of [
     assert.equal(guestConvertInputs.length, 0);
     assert.equal(attempts.length, 0);
     assert.equal(guestReleaseInputs.length, 1);
-    assert.equal(guestUnknownInputs.length, 0);
+    assert.equal(guestUnknownInputs.length, 1);
+    assert.equal(
+      (guestUnknownInputs[0] as { boundary?: string }).boundary,
+      "settlement"
+    );
     assert.deepEqual(guestReadInputs, [{
       subjectKey: GUEST_SUBJECT_KEY,
       authorityId: GUEST_AUTHORITY_A,
