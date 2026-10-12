@@ -6,7 +6,10 @@
   --amux-subtle: #8c9bb1; --amux-blue: #7ba5ff; --amux-selected: #1c335b;
   --amux-warning: #eac17c;
   color: var(--amux-text);
+  color-scheme: dark;
 }
+.workspace :global(.text-zinc-500), .workspace :global(.text-zinc-600),
+.overlay :global(.text-zinc-500), .overlay :global(.text-zinc-600) { color:var(--amux-muted); }
 .workspace { width:100%; min-width:0; padding:20px; background:var(--amux-canvas); border:1px solid var(--amux-border); border-radius:12px; }
 .header, .toolbar, .summary, .columnHeading, .identity, .dialogBar, .dialogFooter { display:flex; align-items:center; gap:12px; }
 .header { justify-content:space-between; flex-wrap:wrap; margin-bottom:20px; }
