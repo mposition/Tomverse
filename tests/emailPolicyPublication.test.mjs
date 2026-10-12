@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CHANGE_NOTICE_OWED_BEFORE,
   PUBLICATION_REFUSALS,
   effectiveDateOf,
   noticeDeadline,
@@ -286,4 +287,14 @@ test("the test seam cannot be used outside tests", async () => {
     if (previous === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previous;
   }
+});
+
+test("the notice is owed to accounts created before the amendment was published", () => {
+  // Owner decision 2026-10-12 (docs/policy/email-policy-amendment-draft.md section 5.1):
+  // the 2026-10-03 release first served the amended pages at this instant.
+  assert.equal(CHANGE_NOTICE_OWED_BEFORE, "2026-10-03T07:07:19.000Z");
+  const owedBefore = new Date(CHANGE_NOTICE_OWED_BEFORE);
+  // Before the notice deadline (2026-10-18) and the effective date (2026-11-16).
+  assert.ok(owedBefore.getTime() < Date.parse("2026-10-18T00:00:00Z"));
+  assert.ok(owedBefore.getTime() < Date.parse("2026-11-16T00:00:00Z"));
 });
