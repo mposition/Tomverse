@@ -47,6 +47,23 @@ test("English aliases and legal pages use the same site chrome", async ({ reques
   }
 });
 
+test("status chrome follows its served language and language changes reload the body", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await page.context().addCookies([{ name: "tomverse_lang", value: "en", url: "http://127.0.0.1:3100" }]);
+  await page.addInitScript(() => localStorage.setItem("tomverse_language", "ko"));
+  await page.goto("/status");
+  await expect(page.locator("main")).toHaveAttribute("lang", "en");
+  const select = page.getByTestId("marketing-language-switcher");
+  await expect(select).toHaveValue("en");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(page.getByTestId("launch-marketing-footer").getByTestId("footer-status-link")).toHaveAttribute("href", "/status?lang=en");
+  await select.selectOption("ko");
+  await expect(page).toHaveURL(url => url.pathname === "/status" && url.searchParams.get("lang") === "ko");
+  await expect(page.locator("main")).toHaveAttribute("lang", "ko");
+  await expect(page.getByTestId("marketing-language-switcher")).toHaveValue("ko");
+  await expect(page.locator("html")).toHaveAttribute("lang", "ko");
+});
+
 for (const width of [390, 1024, 1440]) {
   for (const language of SEO_LOCALES) {
     test(`${language}: pricing and models share readable chrome at ${width}px`, async ({ page }) => {
