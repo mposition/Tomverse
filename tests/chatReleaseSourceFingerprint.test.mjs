@@ -23,9 +23,13 @@ test("unrelated deployment source is stable; execution drift and missing source 
     for (const path of [
       "lib/nativeBearerGate.ts",
       "lib/mobileAuthContract.ts",
+      "lib/mobileAccessToken.ts",
+      "lib/nativeAppCors.ts",
+      "lib/apiCacheControlPolicy.ts",
       "lib/originProtection.ts",
       "lib/requestOrigin.ts",
       "lib/deepResearchSettlement.ts",
+      "proxy.ts",
       "lib/anthropicPromptCaching.ts",
       "lib/servedProcessingTier.ts",
       "lib/webSearchNativeCostReservation.ts",
@@ -34,12 +38,10 @@ test("unrelated deployment source is stable; execution drift and missing source 
       "lib/pinnedDeploymentExecution.ts",
       "lib/conversationKindGuard.ts",
     ]) assert.ok(paths.includes(path), `execution closure omits ${path}`);
-    assert.ok(!paths.includes("proxy.ts"));
     assert.ok(!paths.includes(
       "app/api/internal/maintenance/credit-reservations/route.ts"));
     assert.ok(!paths.includes("lib/amux/bridgeLivenessCore.ts"));
     for (const path of paths) copy(path);
-    copy("proxy.ts");
     copy("app/api/internal/maintenance/credit-reservations/route.ts");
     copy("lib/amux/workerRegistryCore.ts");
     copy("prisma/schema.prisma");
@@ -62,15 +64,20 @@ test("unrelated deployment source is stable; execution drift and missing source 
     appendFileSync(join(root, "lib", "amux", "workerRegistryCore.ts"),
       "\n// Unrelated AMUX change.\n");
     assert.equal(chatReleaseSourceFingerprint(root), original);
-    appendFileSync(join(root, "proxy.ts"), "\n// Unrelated marketing change.\n");
     appendFileSync(join(root, "app", "api", "internal", "maintenance",
       "credit-reservations", "route.ts"), "\n// Unrelated sweep.\n");
     assert.equal(chatReleaseSourceFingerprint(root), original);
     const proxyPath = join(root, "proxy.ts");
     writeFileSync(proxyPath, readFileSync(proxyPath, "utf8").replace(
-      "  // R-05-LANG.", "  // Request-boundary drift.\n  // R-05-LANG."));
+      '"/((?!_next/static|favicon.ico|robots.txt|sitemap.xml).*)"',
+      '"/((?!api/chat|_next/static|favicon.ico|robots.txt|sitemap.xml).*)"'));
+    const changedMatcher = chatReleaseSourceFingerprint(root);
+    assert.notEqual(changedMatcher, original);
+    writeFileSync(proxyPath, readFileSync(proxyPath, "utf8").replace(
+      'from "@/lib/originProtection";',
+      'from "@/lib/changedOriginProtection";'));
     const changedProxy = chatReleaseSourceFingerprint(root);
-    assert.notEqual(changedProxy, original);
+    assert.notEqual(changedProxy, changedMatcher);
     appendFileSync(join(root, "lib", "nativeBearerGate.ts"),
       "\n// Mobile request-boundary drift.\n");
     const changedBearer = chatReleaseSourceFingerprint(root);
