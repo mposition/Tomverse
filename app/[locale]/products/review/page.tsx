@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { LanguageProvider, type Language } from "@/components/LanguageProvider";
 import { LandingPageContent } from "@/components/marketing/LandingPageContent";
-import { MarketingChatAvailabilityProvider } from "@/components/marketing/MarketingChatAvailability";
-import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
 import { SEO_LOCALES, createPageMetadata, isSeoLocale, localizedPath, reviewOgCopy, reviewSeoCopy } from "@/lib/seo";
 
@@ -40,9 +38,7 @@ export default async function LocalizedReviewProductPage({ params }: LocalizedRe
   return (
     <div lang={normalizedLocale}>
       <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
-        <MarketingChatAvailabilityProvider guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
-          <LandingPageContent />
-        </MarketingChatAvailabilityProvider>
+        <LandingPageContent />
       </LanguageProvider>
     </div>
   );

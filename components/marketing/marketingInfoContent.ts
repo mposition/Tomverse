@@ -3,37 +3,364 @@ import type { MarketingInfoCopy } from "./MarketingInfoPage";
 
 export const infoPages = {
   faq: {
-    en: {
-      eyebrow: "FAQ",
-      title: "Frequently asked questions",
-      description: "Quick answers about Tomverse Review, accounts, models, files, and sharing.",
-      sections: [
-        { title: "What is Tomverse Review?", body: "Tomverse Review is a multi-model AI workspace that lets you compare answers from several AI models, attach files, and organize conversations in one place." },
-        { title: "Can I use more than one model at once?", body: "Yes. You can compare up to three models in a single conversation so the experience stays readable and cost-controlled." },
-        { title: "Can I share a conversation?", body: "Logged-in users can create read-only public share links or download conversations as text files. Locked conversations require unlock verification before sharing." },
-      ],
-    },
-    ko: {
-      eyebrow: "FAQ",
-      title: "자주 묻는 질문",
-      description: "Tomverse Review, 계정, 모델, 파일, 공유에 대한 빠른 답변입니다.",
-      sections: [
-        { title: "Tomverse Review는 무엇인가요?", body: "Tomverse Review는 여러 AI 모델의 답변을 비교하고, 파일을 첨부하며, 대화를 한곳에서 정리할 수 있는 멀티 모델 AI 워크스페이스입니다." },
-        { title: "여러 모델을 동시에 사용할 수 있나요?", body: "네. 한 대화에서 최대 3개 모델까지 비교할 수 있습니다. 가독성과 비용 통제를 위해 3개로 제한합니다." },
-        { title: "대화를 공유할 수 있나요?", body: "로그인 사용자는 읽기 전용 공개 링크를 만들거나 대화를 텍스트 파일로 다운로드할 수 있습니다. 잠긴 대화는 공유 전 잠금 해제가 필요합니다." },
-      ],
-    },
-    zh: {
-      eyebrow: "FAQ",
-      title: "常见问题",
-      description: "关于 Tomverse Review、账户、模型、文件和分享的快速说明。",
-      sections: [
-        { title: "Tomverse Review 是什么？", body: "Tomverse Review 是一个多模型 AI 工作区，可在一个地方比较多个 AI 模型的回答、附加文件并整理对话。" },
-        { title: "可以同时使用多个模型吗？", body: "可以。单个对话最多可比较三个模型，以保持界面清晰并控制成本。" },
-        { title: "可以分享对话吗？", body: "登录用户可以创建只读公开链接，或将对话下载为文本文件。锁定对话在分享前需要完成解锁验证。" },
-      ],
-    },
+  "ko": {
+    "eyebrow": "FAQ",
+    "title": "자주 묻는 질문",
+    "description": "Chat과 Review의 차이, 무료 시작, 모델 선택과 크레딧 등 사용 전 궁금한 점을 확인하세요.",
+    "sections": [
+      {
+        "title": "Chat과 Review는 언제 쓰면 좋나요?",
+        "body": "한 모델과 질문을 이어가거나 모델 선택의 도움을 받고 싶을 때는 Chat을 사용하세요. 같은 질문에 대한 여러 모델의 답변을 읽고 차이와 놓친 조건을 살펴보고 싶을 때는 Review가 맞습니다."
+      },
+      {
+        "title": "가입 없이 무엇을 해볼 수 있나요?",
+        "body": "Review는 가입 없이 먼저 체험할 수 있습니다. Chat의 비회원 체험은 제공되는 환경에서 이용할 수 있습니다. 비회원에게 제공되는 모델과 사용량에는 제한이 있으며 저장·공유·파일 기능의 조건은 화면의 안내를 확인하세요."
+      },
+      {
+        "title": "Smart Adaptive를 써도 모델을 직접 고를 수 있나요?",
+        "body": "직접 모델을 선택하는 방식도 사용할 수 있습니다. Smart Adaptive는 질문과 필요한 기능, 모델의 비용·품질을 고려한 선택을 돕는 방식입니다. 실제 이용 가능 모델은 계정과 플랜에 따라 달라집니다."
+      },
+      {
+        "title": "질문 다듬기 제안은 자동으로 적용되나요?",
+        "body": "제안이 제공되면 내용을 확인한 뒤 채택할 수 있습니다. 원하는 뜻이나 조건과 다른 제안은 적용하지 않아도 됩니다. 원래 질문에 없는 정보가 필요한 경우에는 직접 보완해 주세요."
+      },
+      {
+        "title": "AI Review가 정답을 골라주나요?",
+        "body": "AI Review는 제공된 답변의 공통점, 차이, 충돌과 누락을 비교합니다. 답변을 독립적으로 사실검증하거나 정답을 보장하지 않습니다. 추가 확인이 필요한 항목은 원문과 출처를 직접 확인하는 데 활용하세요."
+      },
+      {
+        "title": "모델을 여러 개 쓰면 크레딧도 늘어나나요?",
+        "body": "선택한 모델의 사용량이 각각 반영됩니다. 모델별 기본 크레딧과 긴 문맥·파일에 따른 적용 범위를 확인하고, 필요한 모델 수만 선택하세요. AI Review는 실행 전에 별도 예상 크레딧을 확인할 수 있습니다."
+      },
+      {
+        "title": "파일을 첨부하면 어디에서 처리하나요?",
+        "body": "선택한 AI 제공자는 답변에 필요한 파일 또는 발췌 내용을 처리합니다. 잠금과 비공개 저장은 접근 제어에 관한 기능이며 공급자 처리를 없애는 기능은 아닙니다. 최신 보관·삭제 범위는 안전 안내와 개인정보 처리방침에서 확인하세요."
+      },
+      {
+        "title": "무료 AI 하나를 쓰고 있는데, Tomverse가 필요한가요?",
+        "body": "간단한 질문만 한다면 지금 쓰는 도구로 충분할 수도 있습니다. 모델을 바꿔가며 쓰거나 같은 질문의 답변을 비교하고, 자료와 대화를 다시 활용하고 싶을 때 Tomverse의 가치가 커집니다. 먼저 체험한 뒤 필요한 사용량과 기능에 맞춰 선택하세요."
+      },
+      {
+        "title": "Review에서 몇 개 모델을 비교할 수 있나요?",
+        "body": "같은 질문에 최대 3개 모델의 답변을 나란히 읽을 수 있습니다. 비교할 모델은 이용 가능한 목록에서 직접 선택하며, 선택한 각 모델의 사용량이 반영됩니다."
+      },
+      {
+        "title": "대화를 저장하거나 다른 사람에게 공유할 수 있나요?",
+        "body": "로그인하면 대화를 저장하고 지원되는 공유·다운로드 기능을 사용할 수 있습니다. 공유 링크에는 공유 당시의 내용이 읽기 전용으로 표시되며 이후 메시지는 자동으로 추가되지 않습니다. 잠긴 대화는 공유 전에 잠금 해제 확인이 필요합니다."
+      }
+    ],
+    "cta": {
+      "label": "처음 시작하기",
+      "href": "/support/help-centre"
+    }
   },
+  "en": {
+    "eyebrow": "FAQ",
+    "title": "Frequently asked questions",
+    "description": "Find answers about Chat and Review, getting started free, model selection and credits.",
+    "sections": [
+      {
+        "title": "When should I use Chat or Review?",
+        "body": "Use Chat to continue a conversation with one model or get help choosing one. Use Review to compare answers to the same question and examine differences and missing conditions."
+      },
+      {
+        "title": "What can I try without an account?",
+        "body": "Try Review without an account. Guest Chat is available where the product is offered. Guest models and usage have limits; check the on-screen requirements for saving, sharing and files."
+      },
+      {
+        "title": "Can I choose a model myself with Smart Adaptive?",
+        "body": "You can also select a model yourself. Smart Adaptive helps with selection based on your question, required capabilities, cost and quality. Available models depend on your account and plan."
+      },
+      {
+        "title": "Are question-refinement suggestions applied automatically?",
+        "body": "When suggestions are offered, you can review them and choose whether to apply them. You can leave suggestions unused if they change your meaning or conditions, and add missing information yourself."
+      },
+      {
+        "title": "Does AI Review choose the correct answer?",
+        "body": "AI Review compares agreements, differences, conflicts and omissions in the supplied answers. It does not independently fact-check them or guarantee a correct answer. Use the flagged points to guide your own source checks."
+      },
+      {
+        "title": "Does using more models use more credits?",
+        "body": "Usage from each selected model is counted. Check base credits and how long context or files can affect usage, and select the models you need. AI Review shows a separate estimate before it runs."
+      },
+      {
+        "title": "Where are attached files processed?",
+        "body": "The selected AI provider processes the file or excerpts needed to answer. Locks and private storage control access; they do not remove provider processing. See the safety information and privacy policy for current retention and deletion details."
+      },
+      {
+        "title": "I already use a free AI. Why try Tomverse?",
+        "body": "Your current tool may be enough for simple questions. Tomverse is useful when you want to switch models, compare answers to the same question or reuse your material and conversations. Try it first and choose based on your needs."
+      },
+      {
+        "title": "How many models can I compare in Review?",
+        "body": "Read up to three model answers to the same question side by side. Choose from the models available to you; usage from each selected model is counted."
+      },
+      {
+        "title": "Can I save or share a conversation?",
+        "body": "Sign in to save conversations and use supported sharing and download features. A share link shows a read-only snapshot from the time of sharing; later messages are not added automatically. Locked conversations require verification before sharing."
+      }
+    ],
+    "cta": {
+      "label": "Getting started",
+      "href": "/support/help-centre"
+    }
+  },
+  "zh": {
+    "eyebrow": "FAQ",
+    "title": "常见问题",
+    "description": "了解 Chat 与 Review 的区别、免费体验、模型选择与积分。",
+    "sections": [
+      {
+        "title": "什么时候用 Chat，什么时候用 Review？",
+        "body": "想与一个模型持续对话或获得选择帮助时用 Chat。想比较同一问题的多个回答、查看差异与遗漏条件时用 Review。"
+      },
+      {
+        "title": "无需注册可以体验什么？",
+        "body": "Review 可无需注册先体验。Chat 在提供访客体验的环境中可使用。访客模型与用量有限制，保存、分享及文件条件请查看屏幕说明。"
+      },
+      {
+        "title": "使用 Smart Adaptive 时还能手动选模型吗？",
+        "body": "也可以手动选择模型。Smart Adaptive 根据问题、所需功能、费用与质量帮助选择。可用模型取决于账户与套餐。"
+      },
+      {
+        "title": "提问优化建议会自动应用吗？",
+        "body": "提供建议时，你可以查看后决定是否采用。与原意或条件不符的建议可以不应用；缺少的信息可自行补充。"
+      },
+      {
+        "title": "AI Review 会选出正确答案吗？",
+        "body": "AI Review 比较所提供回答的共识、差异、冲突与遗漏，不进行独立事实核验，也不保证正确答案。可根据待核实项自行查看原文与来源。"
+      },
+      {
+        "title": "使用多个模型会消耗更多积分吗？",
+        "body": "每个所选模型的用量都会计算。请查看基础积分及长上下文、文件的影响，只选择所需模型。AI Review 运行前会显示单独预估。"
+      },
+      {
+        "title": "附加文件会在哪里处理？",
+        "body": "所选 AI 提供商会处理回答所需的文件或摘录。锁定与私有存储用于访问控制，不代表没有供应商处理。当前保留与删除范围请查看安全说明及隐私政策。"
+      },
+      {
+        "title": "我已经在用免费 AI，为什么还要试 Tomverse？",
+        "body": "如果只问简单问题，现有工具可能已经够用。需要切换模型、比较同一问题的回答，或再次使用资料与对话时，Tomverse 更有帮助。先体验，再按需要选择。"
+      },
+      {
+        "title": "Review 可以比较多少个模型？",
+        "body": "可以并排阅读最多三个模型对同一问题的回答。请从可用列表选择模型，每个所选模型的用量都会计算。"
+      },
+      {
+        "title": "可以保存或分享对话吗？",
+        "body": "登录后可以保存对话并使用支持的分享和下载功能。链接显示分享时的只读快照，后续消息不会自动加入。锁定对话在分享前需要验证解锁。"
+      }
+    ],
+    "cta": {
+      "label": "开始使用",
+      "href": "/support/help-centre"
+    }
+  },
+  "fr": {
+    "eyebrow": "FAQ",
+    "title": "Questions fréquentes",
+    "description": "Découvrez les réponses sur Chat et Review, le démarrage gratuit, le choix des modèles et les crédits.",
+    "sections": [
+      {
+        "title": "Quand utiliser Chat ou Review ?",
+        "body": "Utilisez Chat pour dialoguer avec un modèle ou être aidé dans le choix. Utilisez Review pour comparer les réponses à une même question et examiner différences et conditions oubliées."
+      },
+      {
+        "title": "Que puis-je essayer sans compte ?",
+        "body": "Essayez Review sans compte. Chat en mode invité est accessible lorsqu’il est proposé. Les modèles et l’usage invité ont des limites ; consultez les conditions affichées pour les fichiers, l’enregistrement et le partage."
+      },
+      {
+        "title": "Puis-je choisir moi-même le modèle ?",
+        "body": "Vous pouvez aussi choisir un modèle vous-même. Smart Adaptive tient compte de la question, des fonctions, du coût et de la qualité. Les modèles accessibles dépendent du compte et de l’offre."
+      },
+      {
+        "title": "Les reformulations s’appliquent-elles automatiquement ?",
+        "body": "Lorsqu’une suggestion est proposée, vous décidez de l’appliquer après lecture. Vous pouvez l’ignorer si elle change votre intention ou vos conditions, et compléter vous-même les informations manquantes."
+      },
+      {
+        "title": "AI Review choisit-il la bonne réponse ?",
+        "body": "AI Review compare accords, différences, conflits et omissions dans les réponses fournies. Il ne vérifie pas indépendamment les faits et ne garantit pas la bonne réponse. Utilisez les points signalés pour consulter les sources."
+      },
+      {
+        "title": "Plusieurs modèles consomment-ils plus de crédits ?",
+        "body": "L’usage de chaque modèle sélectionné est compté. Consultez les crédits de base et l’effet des fichiers ou longs contextes, puis choisissez les modèles nécessaires. AI Review affiche une estimation distincte avant exécution."
+      },
+      {
+        "title": "Où sont traités les fichiers joints ?",
+        "body": "Le fournisseur choisi traite le fichier ou les extraits nécessaires. Verrouillage et stockage privé contrôlent l’accès, sans supprimer le traitement par le fournisseur. Consultez les informations de sécurité et de confidentialité pour la conservation et la suppression."
+      },
+      {
+        "title": "J’utilise déjà une IA gratuite. Pourquoi essayer Tomverse ?",
+        "body": "Votre outil actuel peut suffire pour les questions simples. Tomverse est utile pour changer de modèle, comparer les réponses ou réutiliser documents et conversations. Essayez avant de choisir selon vos besoins."
+      },
+      {
+        "title": "Combien de modèles puis-je comparer dans Review ?",
+        "body": "Lisez jusqu’à trois réponses à une même question côte à côte. Choisissez parmi les modèles accessibles ; l’usage de chaque modèle est compté."
+      },
+      {
+        "title": "Puis-je enregistrer ou partager une conversation ?",
+        "body": "Connectez-vous pour enregistrer et utiliser les fonctions de partage et de téléchargement disponibles. Le lien montre un instantané en lecture seule ; les messages ultérieurs ne s’y ajoutent pas. Une conversation verrouillée doit être déverrouillée avant partage."
+      }
+    ],
+    "cta": {
+      "label": "Bien commencer",
+      "href": "/support/help-centre"
+    }
+  },
+  "de": {
+    "eyebrow": "FAQ",
+    "title": "Häufige Fragen",
+    "description": "Antworten zu Chat und Review, kostenlosem Einstieg, Modellwahl und Credits.",
+    "sections": [
+      {
+        "title": "Wann nutze ich Chat oder Review?",
+        "body": "Nutzen Sie Chat für ein Gespräch mit einem Modell oder Auswahlhilfe. Review hilft beim Vergleich derselben Frage und beim Prüfen von Unterschieden und fehlenden Bedingungen."
+      },
+      {
+        "title": "Was kann ich ohne Konto ausprobieren?",
+        "body": "Testen Sie Review ohne Konto. Gast-Chat ist dort verfügbar, wo er angeboten wird. Modell- und Nutzungslimits gelten; beachten Sie die Hinweise zu Speichern, Teilen und Dateien."
+      },
+      {
+        "title": "Kann ich das Modell selbst wählen?",
+        "body": "Sie können ein Modell selbst wählen. Smart Adaptive berücksichtigt Frage, Funktionen, Kosten und Qualität. Verfügbare Modelle hängen von Konto und Tarif ab."
+      },
+      {
+        "title": "Werden Vorschläge zur Frage automatisch übernommen?",
+        "body": "Sie prüfen angebotene Vorschläge und entscheiden selbst. Vorschläge, die Ihre Absicht oder Bedingungen ändern, müssen Sie nicht übernehmen. Fehlende Informationen können Sie ergänzen."
+      },
+      {
+        "title": "Wählt AI Review die richtige Antwort?",
+        "body": "AI Review vergleicht Gemeinsamkeiten, Unterschiede, Konflikte und Lücken der Antworten. Es prüft Fakten nicht unabhängig und garantiert keine richtige Antwort. Nutzen Sie die Hinweise für eigene Quellenprüfungen."
+      },
+      {
+        "title": "Verbrauchen mehrere Modelle mehr Credits?",
+        "body": "Der Verbrauch jedes gewählten Modells wird berücksichtigt. Prüfen Sie Basis-Credits sowie Datei- und Langkontexteffekte und wählen Sie benötigte Modelle. AI Review zeigt vorab eine separate Schätzung."
+      },
+      {
+        "title": "Wo werden Anhänge verarbeitet?",
+        "body": "Der gewählte Anbieter verarbeitet nötige Dateien oder Auszüge. Sperren und private Speicherung steuern den Zugriff, verhindern aber nicht die Anbieter-Verarbeitung. Aktuelle Aufbewahrungs- und Löschdetails stehen in den Sicherheits- und Datenschutzinformationen."
+      },
+      {
+        "title": "Ich nutze schon eine kostenlose KI. Warum Tomverse testen?",
+        "body": "Für einfache Fragen kann Ihr bisheriges Werkzeug ausreichen. Tomverse hilft beim Modellwechsel, Antwortvergleich und Wiederverwenden von Material und Gesprächen. Testen Sie es und wählen Sie nach Bedarf."
+      },
+      {
+        "title": "Wie viele Modelle kann ich in Review vergleichen?",
+        "body": "Lesen Sie bis zu drei Antworten auf dieselbe Frage nebeneinander. Wählen Sie aus den verfügbaren Modellen; der Verbrauch jedes Modells wird berücksichtigt."
+      },
+      {
+        "title": "Kann ich Gespräche speichern oder teilen?",
+        "body": "Melden Sie sich an, um Gespräche zu speichern und unterstützte Freigabe- und Downloadfunktionen zu nutzen. Der Link zeigt den damaligen Inhalt schreibgeschützt; spätere Nachrichten werden nicht ergänzt. Gesperrte Gespräche erfordern vorherige Entsperrung."
+      }
+    ],
+    "cta": {
+      "label": "Erste Schritte",
+      "href": "/support/help-centre"
+    }
+  },
+  "es": {
+    "eyebrow": "FAQ",
+    "title": "Preguntas frecuentes",
+    "description": "Resuelve tus dudas sobre Chat y Review, cómo empezar gratis, elegir modelos y usar créditos.",
+    "sections": [
+      {
+        "title": "¿Cuándo uso Chat o Review?",
+        "body": "Usa Chat para conversar con un modelo o recibir ayuda para elegirlo. Usa Review para comparar respuestas a la misma pregunta y examinar diferencias y condiciones omitidas."
+      },
+      {
+        "title": "¿Qué puedo probar sin crear una cuenta?",
+        "body": "Prueba Review sin cuenta. Chat como invitado está disponible donde se ofrece. Hay límites de modelos y uso; consulta los requisitos en pantalla para guardar, compartir y adjuntar archivos."
+      },
+      {
+        "title": "¿Puedo elegir el modelo por mi cuenta?",
+        "body": "También puedes seleccionar un modelo. Smart Adaptive considera la pregunta, las funciones necesarias, el coste y la calidad. Los modelos disponibles dependen de tu cuenta y plan."
+      },
+      {
+        "title": "¿Las sugerencias se aplican automáticamente?",
+        "body": "Revisa las sugerencias y decide si las aplicas. Puedes ignorarlas si cambian tu intención o condiciones y añadir tú mismo la información que falta."
+      },
+      {
+        "title": "¿AI Review elige la respuesta correcta?",
+        "body": "AI Review compara coincidencias, diferencias, conflictos y omisiones de las respuestas. No verifica los hechos de forma independiente ni garantiza una respuesta correcta. Usa los puntos señalados para revisar las fuentes."
+      },
+      {
+        "title": "¿Usar más modelos consume más créditos?",
+        "body": "Se cuenta el uso de cada modelo. Consulta los créditos base y el efecto de archivos o contextos largos y elige los modelos que necesitas. AI Review muestra una estimación separada antes de ejecutarse."
+      },
+      {
+        "title": "¿Dónde se procesan los archivos adjuntos?",
+        "body": "El proveedor elegido procesa el archivo o los extractos necesarios. El bloqueo y almacenamiento privado controlan el acceso, pero no eliminan el procesamiento del proveedor. Consulta seguridad y privacidad para retención y borrado."
+      },
+      {
+        "title": "Ya uso una IA gratuita. ¿Por qué probar Tomverse?",
+        "body": "Tu herramienta puede bastar para preguntas sencillas. Tomverse resulta útil para cambiar modelos, comparar respuestas o reutilizar material y conversaciones. Pruébalo y elige según lo que necesites."
+      },
+      {
+        "title": "¿Cuántos modelos puedo comparar en Review?",
+        "body": "Lee hasta tres respuestas a la misma pregunta en paralelo. Elige los modelos disponibles para ti; se cuenta el uso de cada uno."
+      },
+      {
+        "title": "¿Puedo guardar o compartir una conversación?",
+        "body": "Inicia sesión para guardar y usar las funciones compatibles de compartir y descargar. El enlace muestra una instantánea de solo lectura; los mensajes posteriores no se añaden. Las conversaciones bloqueadas requieren verificación antes de compartir."
+      }
+    ],
+    "cta": {
+      "label": "Primeros pasos",
+      "href": "/support/help-centre"
+    }
+  },
+  "pt": {
+    "eyebrow": "FAQ",
+    "title": "Perguntas frequentes",
+    "description": "Tire dúvidas sobre Chat e Review, como começar grátis, escolher modelos e usar créditos.",
+    "sections": [
+      {
+        "title": "Quando usar Chat ou Review?",
+        "body": "Use Chat para conversar com um modelo ou receber ajuda na escolha. Use Review para comparar respostas à mesma pergunta e examinar diferenças e condições omitidas."
+      },
+      {
+        "title": "O que posso experimentar sem criar uma conta?",
+        "body": "Experimente o Review sem conta. O Chat como visitante está disponível onde é oferecido. Há limites de modelos e uso; veja na tela os requisitos para salvar, compartilhar e anexar arquivos."
+      },
+      {
+        "title": "Posso escolher o modelo por conta própria?",
+        "body": "Você também pode selecionar um modelo. O Smart Adaptive considera a pergunta, os recursos necessários, o custo e a qualidade. Os modelos disponíveis dependem da conta e do plano."
+      },
+      {
+        "title": "As sugestões são aplicadas automaticamente?",
+        "body": "Analise as sugestões e decida se as aplica. Você pode ignorá-las se mudarem sua intenção ou condições e acrescentar as informações que faltam."
+      },
+      {
+        "title": "O AI Review escolhe a resposta correta?",
+        "body": "O AI Review compara consensos, diferenças, conflitos e lacunas das respostas. Não verifica fatos de forma independente nem garante uma resposta correta. Use os pontos destacados para consultar as fontes."
+      },
+      {
+        "title": "Usar mais modelos consome mais créditos?",
+        "body": "O uso de cada modelo é contado. Confira créditos-base e efeitos de arquivos ou contextos longos e escolha os modelos necessários. O AI Review mostra uma estimativa separada antes da execução."
+      },
+      {
+        "title": "Onde os anexos são processados?",
+        "body": "O provedor escolhido processa o arquivo ou os trechos necessários. Bloqueio e armazenamento privado controlam o acesso, mas não eliminam o processamento do provedor. Veja segurança e privacidade para retenção e exclusão."
+      },
+      {
+        "title": "Já uso uma IA gratuita. Por que experimentar o Tomverse?",
+        "body": "Sua ferramenta pode bastar para perguntas simples. O Tomverse ajuda a trocar modelos, comparar respostas ou reutilizar materiais e conversas. Experimente e escolha conforme suas necessidades."
+      },
+      {
+        "title": "Quantos modelos posso comparar no Review?",
+        "body": "Leia até três respostas à mesma pergunta lado a lado. Escolha os modelos disponíveis para você; o uso de cada um é contado."
+      },
+      {
+        "title": "Posso salvar ou compartilhar uma conversa?",
+        "body": "Entre na conta para salvar e usar os recursos compatíveis de compartilhamento e download. O link mostra uma cópia somente leitura daquele momento; novas mensagens não entram automaticamente. Conversas bloqueadas exigem verificação antes de compartilhar."
+      }
+    ],
+    "cta": {
+      "label": "Primeiros passos",
+      "href": "/support/help-centre"
+    }
+  }
+},
   terms: {
     en: {
       eyebrow: "Legal",
@@ -319,72 +646,307 @@ export const infoPages = {
     },
   },
   safety: {
-    en: {
-      eyebrow: "Safety",
-      title: "Safety at Tomverse",
-      description: "Our safety work focuses on access control, usage limits, secure file handling, privacy-aware product design, and transparent AI limitations.",
-      sections: [
-        { title: "Safety Approach", body: "We design controls before scale: model access tiers, rate limits, file validation, security headers, and public sharing safeguards.", bullets: ["Model and quota controls", "Attachment validation", "Locked conversation modes"] },
-        { title: "Security & Privacy", body: "Tomverse separates account access, conversation storage, temporary attachments, and public sharing snapshots to reduce accidental exposure.", bullets: ["Locked conversations require unlock grants", "Public shares are read-only snapshots"] },
-        { title: "Trust & Transparency", body: "We communicate model limitations, provider involvement, and data handling clearly so users understand what the product does and does not do." },
-      ],
-    },
-    ko: {
-      eyebrow: "안전",
-      title: "Tomverse의 안전 원칙",
-      description: "Tomverse는 접근 제어, 사용량 제한, 안전한 파일 처리, 개인정보를 고려한 제품 설계, AI 한계의 투명한 안내에 집중합니다.",
-      sections: [
-        { title: "Safety Approach", body: "확장 전에 통제 장치를 먼저 설계합니다. 모델 권한, 사용량 제한, 파일 검증, 보안 헤더, 공개 공유 보호가 포함됩니다.", bullets: ["모델 및 할당량 통제", "첨부파일 검증", "잠금 대화 모드"] },
-        { title: "Security & Privacy", body: "계정 접근, 대화 저장, 임시 첨부파일, 공개 공유 스냅샷을 분리해 의도치 않은 노출을 줄입니다.", bullets: ["잠긴 대화는 잠금 해제 권한 필요", "공개 공유는 읽기 전용 스냅샷"] },
-        { title: "Trust & Transparency", body: "모델의 한계, AI 공급자 관여, 데이터 처리 방식을 명확히 안내해 사용자가 제품의 범위를 이해하도록 돕습니다." },
-      ],
-    },
-    zh: {
-      eyebrow: "安全",
-      title: "Tomverse 的安全原则",
-      description: "我们的安全工作聚焦于访问控制、用量限制、安全文件处理、注重隐私的产品设计和透明的 AI 限制说明。",
-      sections: [
-        { title: "Safety Approach", body: "在规模化之前先设计控制措施：模型访问等级、速率限制、文件验证、安全标头和公开分享保护。", bullets: ["模型与额度控制", "附件验证", "锁定对话模式"] },
-        { title: "Security & Privacy", body: "Tomverse 将账户访问、对话存储、临时附件和公开分享快照分离，以减少意外暴露。", bullets: ["锁定对话需要解锁授权", "公开分享是只读快照"] },
-        { title: "Trust & Transparency", body: "我们清楚说明模型限制、供应商参与和数据处理方式，帮助用户理解产品能做什么、不能做什么。" },
-      ],
-    },
+  "ko": {
+    "eyebrow": "안전과 데이터 처리",
+    "title": "안전과 데이터 처리",
+    "description": "대화 접근, 공유 범위와 AI 제공자의 처리를 이해하고, 필요한 보호 기능을 선택하세요. 중요한 답변은 원문과 출처를 함께 확인하는 것이 좋습니다.",
+    "sections": [
+      {
+        "title": "사용 중 나를 보호하는 기능",
+        "body": "모델 이용 범위와 사용량, 파일 형식·용량 검사를 통해 사용할 수 있는 기능과 제한을 안내합니다. 지원되지 않는 파일은 이유를 확인하고 읽을 수 있는 형식으로 다시 준비할 수 있습니다."
+      },
+      {
+        "title": "보안과 데이터 처리",
+        "body": "선택한 AI 제공자는 답변에 필요한 질문과 자료를 처리합니다. 잠금은 저장된 대화에 대한 접근을 제어하고, 공유는 당시 내용의 읽기 전용 링크를 만듭니다. 자세한 데이터 처리 범위는 안전 안내에서 확인하세요."
+      },
+      {
+        "title": "AI의 한계와 서비스 상태",
+        "body": "답변은 선택한 외부 AI 모델이 생성하며 틀리거나 빠진 내용이 있을 수 있습니다. AI Review는 답변끼리 비교하는 기능입니다. 추가 사실 확인과 웹 검색은 별도 작업이며, 현재 모델 제공 상태는 서비스 상태 페이지에서 확인할 수 있습니다."
+      }
+    ]
   },
+  "en": {
+    "eyebrow": "Safety and data handling",
+    "title": "Safety and data handling",
+    "description": "Understand access to conversations, sharing and AI-provider processing, then choose the controls you need. Check important answers against the original material and sources.",
+    "sections": [
+      {
+        "title": "Controls that help protect your use",
+        "body": "Model access, usage limits and file checks show what is supported. If a file is not supported, check the reason and prepare a readable version."
+      },
+      {
+        "title": "Security and data handling",
+        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details."
+      },
+      {
+        "title": "AI limitations and service status",
+        "body": "Answers come from the selected external AI models and can be wrong or incomplete. AI Review compares those answers. External checks and web search are separate actions; see the service-status page for current availability."
+      }
+    ]
+  },
+  "zh": {
+    "eyebrow": "安全与数据处理",
+    "title": "安全与数据处理",
+    "description": "了解对话访问、分享范围与 AI 提供商处理，再选择所需保护功能。重要回答应结合原始资料与来源确认。",
+    "sections": [
+      {
+        "title": "帮助保护使用过程的功能",
+        "body": "模型范围、用量限制及文件检查会说明支持条件。文件不支持时，可查看原因并准备可读取版本。"
+      },
+      {
+        "title": "安全与数据处理",
+        "body": "所选 AI 提供商会处理回答所需的问题与资料。锁定控制已保存对话的访问；分享会生成当时内容的只读链接。数据处理详情请查看安全说明。"
+      },
+      {
+        "title": "AI 局限与服务状态",
+        "body": "回答由所选外部 AI 模型生成，可能错误或遗漏。AI Review 比较这些回答，外部核实与网页搜索是独立操作。当前可用状态请查看服务状态页。"
+      }
+    ]
+  },
+  "fr": {
+    "eyebrow": "Sécurité et traitement des données",
+    "title": "Sécurité et traitement des données",
+    "description": "Comprenez l’accès aux conversations, le partage et le traitement par les fournisseurs IA pour choisir les contrôles utiles. Vérifiez les réponses importantes dans les documents et sources.",
+    "sections": [
+      {
+        "title": "Les contrôles qui protègent votre usage",
+        "body": "L’accès aux modèles, les limites d’usage et les contrôles de fichiers précisent ce qui est pris en charge. En cas de refus, consultez le motif et préparez un fichier lisible."
+      },
+      {
+        "title": "Sécurité et traitement des données",
+        "body": "Le fournisseur IA choisi traite la question et les documents nécessaires à la réponse. Le verrou contrôle l’accès aux conversations enregistrées ; le partage crée un lien en lecture seule vers leur contenu à cet instant. Consultez les informations de sécurité pour le traitement des données."
+      },
+      {
+        "title": "Limites de l’IA et état du service",
+        "body": "Les modèles externes choisis génèrent les réponses, qui peuvent être erronées ou incomplètes. AI Review compare ces réponses. Vérifications externes et recherche web sont distinctes ; consultez l’état du service."
+      }
+    ]
+  },
+  "de": {
+    "eyebrow": "Sicherheit und Datenverarbeitung",
+    "title": "Sicherheit und Datenverarbeitung",
+    "description": "Verstehen Sie Gesprächszugriff, Freigaben und KI-Anbieter-Verarbeitung und wählen Sie nötige Schutzfunktionen. Prüfen Sie wichtige Antworten am Original und an Quellen.",
+    "sections": [
+      {
+        "title": "Schutzfunktionen bei der Nutzung",
+        "body": "Modellzugriff, Nutzungslimits und Dateiprüfungen zeigen die unterstützten Möglichkeiten. Prüfen Sie bei abgelehnten Dateien den Grund und erstellen Sie eine lesbare Fassung."
+      },
+      {
+        "title": "Sicherheit und Datenverarbeitung",
+        "body": "Der gewählte KI-Anbieter verarbeitet die nötige Frage und das Material. Sperren regelt den Zugriff auf gespeicherte Gespräche; Teilen erstellt einen Nur-Lese-Link zum damaligen Inhalt. Details finden Sie in den Sicherheitsinformationen."
+      },
+      {
+        "title": "KI-Grenzen und Servicestatus",
+        "body": "Ausgewählte externe Modelle erzeugen Antworten, die falsch oder unvollständig sein können. AI Review vergleicht diese Antworten. Externe Prüfung und Websuche sind separate Schritte; die Verfügbarkeit steht auf der Statusseite."
+      }
+    ]
+  },
+  "es": {
+    "eyebrow": "Seguridad y tratamiento de datos",
+    "title": "Seguridad y tratamiento de datos",
+    "description": "Entiende el acceso a conversaciones, el alcance de compartir y el procesamiento de los proveedores. Elige los controles necesarios y revisa respuestas importantes con el original y las fuentes.",
+    "sections": [
+      {
+        "title": "Funciones que ayudan a proteger tu uso",
+        "body": "El acceso a modelos, los límites y las comprobaciones de archivos indican qué se admite. Si se rechaza un archivo, revisa el motivo y prepara una versión legible."
+      },
+      {
+        "title": "Seguridad y tratamiento de datos",
+        "body": "El proveedor de IA seleccionado procesa la pregunta y el material necesarios. El bloqueo controla el acceso a conversaciones guardadas; compartir crea un enlace de solo lectura al contenido de ese momento. Consulta los detalles en la información de seguridad."
+      },
+      {
+        "title": "Límites de la IA y estado del servicio",
+        "body": "Los modelos externos elegidos generan respuestas que pueden ser incorrectas o incompletas. AI Review compara esas respuestas. La verificación externa y búsqueda web son acciones separadas; consulta el estado del servicio."
+      }
+    ]
+  },
+  "pt": {
+    "eyebrow": "Segurança e tratamento de dados",
+    "title": "Segurança e tratamento de dados",
+    "description": "Entenda o acesso às conversas, o compartilhamento e o processamento dos provedores. Escolha os controles necessários e confira respostas importantes com o original e as fontes.",
+    "sections": [
+      {
+        "title": "Recursos que ajudam a proteger seu uso",
+        "body": "O acesso a modelos, os limites e as verificações de arquivos mostram o que é compatível. Se um arquivo for recusado, veja o motivo e prepare uma versão legível."
+      },
+      {
+        "title": "Segurança e tratamento de dados",
+        "body": "O provedor de IA escolhido processa a pergunta e o material necessários. O bloqueio controla o acesso a conversas salvas; compartilhar cria um link somente leitura do conteúdo daquele momento. Veja os detalhes nas informações de segurança."
+      },
+      {
+        "title": "Limites da IA e status do serviço",
+        "body": "Os modelos externos escolhidos geram respostas que podem estar erradas ou incompletas. O AI Review compara essas respostas. Verificação externa e busca na web são ações separadas; consulte o status do serviço."
+      }
+    ]
+  }
+},
   about: {
-    en: {
-      eyebrow: "Company",
-      title: "About Tomverse Review",
-      description: "Tomverse Review is built for people who want to compare the fast-moving AI model market without rebuilding their workflow every week.",
-      sections: [
-        { title: "Our mission", body: "Make AI model choice practical, transparent, and useful for everyday work." },
-        { title: "Product philosophy", body: "We prefer calm, focused tools over flashy demos: compare models, use real context, protect sensitive conversations, and keep useful outputs portable." },
-        { title: "Plans and operations", body: "Tomverse currently offers Free, Pro, and Max plans, with monthly and annual paid subscriptions processed through Stripe. We continue to improve account controls, provider coverage, reliability, and support workflows for individual and commercial users." },
-        { title: "Operator and contact", body: "Tomverse is the service and operating name for tomverse.app, which hosts Tomverse Review and other Tomverse products. The legal seller for a paid transaction is identified on the Stripe Checkout page, receipt, or invoice. Contact support@tomverse.app or use tomverse.app/support for account, billing, legal, or product enquiries." },
-      ],
-    },
-    ko: {
-      eyebrow: "회사",
-      title: "Tomverse Review 소개",
-      description: "Tomverse Review는 빠르게 변하는 AI 모델 시장을 매주 새로 익히지 않아도 비교하고 활용할 수 있게 만든 제품입니다.",
-      sections: [
-        { title: "미션", body: "AI 모델 선택을 실용적이고 투명하며 일상 업무에 도움이 되는 경험으로 만드는 것입니다." },
-        { title: "제품 철학", body: "화려한 데모보다 차분하고 집중된 도구를 지향합니다. 모델 비교, 실제 맥락 활용, 민감한 대화 보호, 결과물 이동성을 중요하게 봅니다." },
-        { title: "플랜과 운영", body: "Tomverse는 현재 Free, Pro, Max 플랜을 제공하며 월간·연간 유료 구독은 Stripe를 통해 처리됩니다. 개인 및 상업 사용자를 위해 계정 제어, 제공자 범위, 안정성과 지원 흐름을 계속 개선하고 있습니다." },
-        { title: "운영 주체와 연락처", body: "Tomverse는 tomverse.app의 서비스 및 운영 명칭이며, Tomverse Review를 비롯한 Tomverse의 제품들을 운영합니다. 유료 거래의 법적 판매자는 Stripe 결제 화면, 영수증 또는 인보이스에 표시됩니다. 계정, 결제, 법률 또는 제품 관련 문의는 support@tomverse.app 또는 tomverse.app/support로 접수할 수 있습니다." },
-      ],
-    },
-    zh: {
-      eyebrow: "公司",
-      title: "关于 Tomverse Review",
-      description: "Tomverse Review 面向希望比较快速变化的 AI 模型市场、但不想每周重建工作流程的用户。",
-      sections: [
-        { title: "我们的使命", body: "让 AI 模型选择更实用、更透明，并真正服务于日常工作。" },
-        { title: "产品理念", body: "我们更偏好冷静、专注的工具，而不是炫目的演示：比较模型、使用真实上下文、保护敏感对话，并保持输出可移植。" },
-        { title: "方案和运营", body: "Tomverse 目前提供 Free、Pro 和 Max 方案，月付和年付订阅由 Stripe 处理。我们会继续改进账户控制、提供商覆盖、可靠性以及面向个人和商业用户的支持流程。" },
-        { title: "运营方和联系方式", body: "Tomverse 是 tomverse.app 的服务和运营名称，旗下运营 Tomverse Review 等 Tomverse 产品。付费交易的法定销售方标示在 Stripe 结账页、收据或发票上。账户、账单、法律或产品问题可发送至 support@tomverse.app 或 tomverse.app/support。" },
-      ],
-    },
+  "ko": {
+    "eyebrow": "Tomverse",
+    "title": "Tomverse 소개",
+    "description": "모델을 고르느라 질문을 미루거나, 여러 답변을 복사해 비교하느라 시간을 쓰지 않도록 만들고 있습니다. Tomverse Chat은 질문에 맞는 모델 선택과 질문 다듬기를 돕고, Tomverse Review는 서로 다른 답변을 나란히 살펴보고 검토할 수 있게 합니다.",
+    "sections": [
+      {
+        "title": "질문을 시작하기 쉽게",
+        "body": "어떤 모델을 고를지 몰라도, 질문하고 비교하는 경험을 시작할 수 있게 만드는 것이 목표입니다. 공부할 때, 글을 다듬을 때, 자료를 이해할 때처럼 일상에서 필요한 결과에 집중합니다."
+      },
+      {
+        "title": "선택과 판단은 사용자의 손에",
+        "body": "질문 개선 제안은 확인하고 채택할 수 있고, 모델도 직접 선택할 수 있습니다. Review에서는 여러 답변을 같은 맥락에서 읽고 인용을 확인하며 더 살펴볼 내용을 판단합니다. 결과를 저장하고 다시 활용하는 일도 같은 경험 안에서 이어집니다."
+      },
+      {
+        "title": "먼저 써보고, 필요에 맞게",
+        "body": "Chat과 Review를 먼저 체험하고, 자주 쓰게 될 때 필요한 플랜을 선택하세요. 무료 계정으로 대화를 저장하고 지원되는 공유·파일 기능을 이용할 수 있습니다. 더 많은 사용량이나 모델이 필요하다면 Free·Pro·Max의 제공 범위와 크레딧을 비교해 보세요."
+      },
+      {
+        "title": "운영 주체와 연락처",
+        "body": "Tomverse는 tomverse.app의 서비스 및 운영 명칭이며, Tomverse Review를 비롯한 Tomverse의 제품들을 운영합니다. 유료 거래의 법적 판매자는 Stripe 결제 화면, 영수증 또는 인보이스에 표시됩니다. 계정, 결제, 법률 또는 제품 관련 문의는 support@tomverse.app 또는 tomverse.app/support로 접수할 수 있습니다."
+      }
+    ]
   },
+  "en": {
+    "eyebrow": "Tomverse",
+    "title": "About Tomverse",
+    "description": "We’re building Tomverse to reduce the effort of choosing models and comparing answers across separate tools. Tomverse Chat helps with model selection and clearer questions; Tomverse Review lets you read different answers together and examine their differences.",
+    "sections": [
+      {
+        "title": "Make it easier to start a question",
+        "body": "Our aim is to help you ask and compare even when you are unsure which model to choose. We focus on useful results for everyday learning, writing and understanding material."
+      },
+      {
+        "title": "Keep you in control",
+        "body": "You choose whether to apply question-refinement suggestions and can select a model yourself. Review keeps answers in the same context so you can inspect quotes and decide what deserves another look. Saving and reusing useful results are part of that experience."
+      },
+      {
+        "title": "Try first, choose as needed",
+        "body": "Try Chat and Review, then choose a plan as your needs grow. A free account lets you save conversations and use supported sharing and file features. Compare Free, Pro and Max when you need a larger allowance or broader model access."
+      },
+      {
+        "title": "Operator and contact",
+        "body": "Tomverse is the service and operating name for tomverse.app, which hosts Tomverse Review and other Tomverse products. The legal seller for a paid transaction is identified on the Stripe Checkout page, receipt, or invoice. Contact support@tomverse.app or use tomverse.app/support for account, billing, legal, or product enquiries."
+      }
+    ]
+  },
+  "zh": {
+    "eyebrow": "Tomverse",
+    "title": "关于 Tomverse",
+    "description": "我们希望减少选择模型和在不同工具间复制、比较回答的麻烦。Tomverse Chat 帮助选择模型、让问题更清楚；Tomverse Review 则把不同回答放在一起，便于阅读和比较。",
+    "sections": [
+      {
+        "title": "让提问更容易开始",
+        "body": "我们希望即使不知道该选哪个模型，也能开始提问和比较，专注于学习、文字表达和理解资料等日常需要的结果。"
+      },
+      {
+        "title": "由你掌握选择与判断",
+        "body": "提问优化建议由你查看并决定是否采用，也可以手动选模型。在 Review 中，用同一上下文阅读回答、查看引文，决定需要深入了解的内容。保存与再次使用结果也属于这套体验。"
+      },
+      {
+        "title": "先体验，再按需选择",
+        "body": "先体验 Chat 和 Review，再按需要选择套餐。免费账户可以保存对话，并使用支持的分享与文件功能。需要更多用量或更广的模型范围时，可比较 Free、Pro、Max 的功能与积分额度。"
+      },
+      {
+        "title": "运营方和联系方式",
+        "body": "Tomverse 是 tomverse.app 的服务和运营名称，旗下运营 Tomverse Review 等 Tomverse 产品。付费交易的法定销售方标示在 Stripe 结账页、收据或发票上。账户、账单、法律或产品问题可发送至 support@tomverse.app 或 tomverse.app/support。"
+      }
+    ]
+  },
+  "fr": {
+    "eyebrow": "Tomverse",
+    "title": "À propos de Tomverse",
+    "description": "Nous développons Tomverse pour simplifier le choix des modèles et la comparaison de réponses entre plusieurs outils. Tomverse Chat aide à choisir un modèle et à clarifier les questions ; Tomverse Review réunit les réponses pour en examiner les différences.",
+    "sections": [
+      {
+        "title": "Poser une question plus facilement",
+        "body": "Notre objectif est de vous aider à poser des questions et comparer sans devoir connaître chaque modèle. Nous privilégions des résultats utiles pour apprendre, écrire et comprendre des documents."
+      },
+      {
+        "title": "Vous gardez la main",
+        "body": "Vous décidez d’appliquer les suggestions et pouvez choisir un modèle vous-même. Review rassemble les réponses dans le même contexte pour examiner les citations et choisir quoi approfondir. Vous pouvez ensuite conserver et réutiliser les résultats utiles."
+      },
+      {
+        "title": "Essayez, puis choisissez selon vos besoins",
+        "body": "Essayez Chat et Review, puis choisissez une offre selon vos besoins. Un compte gratuit permet de conserver les conversations et d’utiliser les fonctions de partage et de fichiers prises en charge. Comparez Free, Pro et Max si vous avez besoin de plus de crédits ou d’un accès plus large aux modèles."
+      },
+      {
+        "title": "Operator and contact",
+        "body": "Tomverse is the service and operating name for tomverse.app, which hosts Tomverse Review and other Tomverse products. The legal seller for a paid transaction is identified on the Stripe Checkout page, receipt, or invoice. Contact support@tomverse.app or use tomverse.app/support for account, billing, legal, or product enquiries.",
+        "lang": "en"
+      }
+    ]
+  },
+  "de": {
+    "eyebrow": "Tomverse",
+    "title": "Über Tomverse",
+    "description": "Wir entwickeln Tomverse, um Modellwahl und Antwortvergleiche über mehrere Werkzeuge zu vereinfachen. Tomverse Chat hilft bei der Auswahl und bei klareren Fragen; Tomverse Review zeigt unterschiedliche Antworten zusammen und macht ihre Unterschiede sichtbar.",
+    "sections": [
+      {
+        "title": "Fragen leichter beginnen",
+        "body": "Wir möchten Fragen und Vergleiche auch ohne genaue Modellkenntnis erleichtern. Im Mittelpunkt stehen Ergebnisse für Lernen, Schreiben und das Verstehen von Material."
+      },
+      {
+        "title": "Sie behalten die Kontrolle",
+        "body": "Sie entscheiden über Vorschläge und können Modelle selbst wählen. Review hält Antworten im selben Kontext, damit Sie Zitate prüfen und weitere Fragen auswählen können. Nützliche Ergebnisse lassen sich speichern und wiederverwenden."
+      },
+      {
+        "title": "Erst testen, dann nach Bedarf wählen",
+        "body": "Testen Sie Chat und Review und wählen Sie einen Tarif passend zu Ihrem Bedarf. Mit einem kostenlosen Konto speichern Sie Gespräche und nutzen unterstützte Freigabe- und Dateifunktionen. Vergleichen Sie Free, Pro und Max für mehr Kontingent oder einen breiteren Modellzugriff."
+      },
+      {
+        "title": "Operator and contact",
+        "body": "Tomverse is the service and operating name for tomverse.app, which hosts Tomverse Review and other Tomverse products. The legal seller for a paid transaction is identified on the Stripe Checkout page, receipt, or invoice. Contact support@tomverse.app or use tomverse.app/support for account, billing, legal, or product enquiries.",
+        "lang": "en"
+      }
+    ]
+  },
+  "es": {
+    "eyebrow": "Tomverse",
+    "title": "Acerca de Tomverse",
+    "description": "Creamos Tomverse para reducir el esfuerzo de elegir modelos y comparar respuestas entre herramientas. Tomverse Chat ayuda a elegir un modelo y formular preguntas más claras; Tomverse Review reúne distintas respuestas para examinar sus diferencias.",
+    "sections": [
+      {
+        "title": "Que empezar sea más fácil",
+        "body": "Queremos ayudarte a preguntar y comparar aunque no sepas qué modelo elegir. Nos centramos en resultados útiles para aprender, escribir y entender materiales."
+      },
+      {
+        "title": "Tú mantienes el control",
+        "body": "Tú decides si aplicar sugerencias y puedes elegir el modelo. Review reúne respuestas en el mismo contexto para revisar citas y decidir qué profundizar. También puedes guardar y reutilizar resultados útiles."
+      },
+      {
+        "title": "Prueba y elige según tus necesidades",
+        "body": "Prueba Chat y Review y elige un plan según tus necesidades. Una cuenta gratuita permite guardar conversaciones y usar las funciones compatibles para compartir y trabajar con archivos. Compara Free, Pro y Max si necesitas más uso o acceso a más modelos."
+      },
+      {
+        "title": "Operator and contact",
+        "body": "Tomverse is the service and operating name for tomverse.app, which hosts Tomverse Review and other Tomverse products. The legal seller for a paid transaction is identified on the Stripe Checkout page, receipt, or invoice. Contact support@tomverse.app or use tomverse.app/support for account, billing, legal, or product enquiries.",
+        "lang": "en"
+      }
+    ]
+  },
+  "pt": {
+    "eyebrow": "Tomverse",
+    "title": "Sobre o Tomverse",
+    "description": "Criamos o Tomverse para reduzir o esforço de escolher modelos e comparar respostas entre ferramentas. O Tomverse Chat ajuda na escolha e na clareza das perguntas; o Tomverse Review reúne respostas diferentes para examinar suas diferenças.",
+    "sections": [
+      {
+        "title": "Facilitar o primeiro passo",
+        "body": "Queremos ajudar você a perguntar e comparar mesmo sem saber qual modelo escolher. Priorizamos resultados úteis para aprender, escrever e entender materiais."
+      },
+      {
+        "title": "Você mantém o controle",
+        "body": "Você decide se aplica sugestões e pode escolher o modelo. O Review reúne respostas no mesmo contexto para examinar citações e decidir o que aprofundar. Também é possível salvar e reutilizar resultados úteis."
+      },
+      {
+        "title": "Experimente e escolha conforme a necessidade",
+        "body": "Experimente Chat e Review e escolha um plano conforme suas necessidades. Uma conta gratuita permite salvar conversas e usar os recursos compatíveis de compartilhamento e arquivos. Compare Free, Pro e Max quando precisar de mais créditos ou acesso a mais modelos."
+      },
+      {
+        "title": "Operator and contact",
+        "body": "Tomverse is the service and operating name for tomverse.app, which hosts Tomverse Review and other Tomverse products. The legal seller for a paid transaction is identified on the Stripe Checkout page, receipt, or invoice. Contact support@tomverse.app or use tomverse.app/support for account, billing, legal, or product enquiries.",
+        "lang": "en"
+      }
+    ]
+  }
+},
   support: {
     en: {
       eyebrow: "Support",
@@ -419,157 +981,740 @@ export const infoPages = {
     },
   },
   helpCentre: {
-    en: {
-      eyebrow: "Help Centre",
-      title: "Help Centre",
-      description: "Find practical guidance for account access, plans, model selection, attachments, sharing, privacy, billing, and support requests.",
-      sections: [
-        {
-          title: "Getting started",
-          body: "Tomverse lets you ask once, compare answers from multiple AI models, attach useful context, and keep the result organized in one workspace. Start with one model for simple questions or compare up to three models when you want different perspectives.",
-          bullets: ["Use Start Chat to open the app.", "Choose models from the model picker before sending.", "Use projects, pins, and search to keep important conversations easy to find."],
-          link: { label: "Open the Chat Workspace Guide", href: "/support/help-centre/chat-workspace" },
-        },
-        {
-          title: "Login and account access",
-          body: "If login fails, retry from the same browser session, confirm that popups and third-party sign-in redirects are allowed, and check whether the provider account email matches an existing Tomverse account.",
-          bullets: ["Google, Microsoft, and other OAuth providers may require verified callback settings.", "If you see an account-linking error, contact support with the provider name and account email.", "Account deletion permanently removes conversations, settings, and saved account data."],
-        },
-        {
-          title: "Plans, limits, and upgrades",
-          body: "Guest mode is intended for quick trials. Free, Pro, and Max plans unlock more model access and higher usage limits. If a model or feature is unavailable, the app will show the reason in the model picker or plan area.",
-          bullets: ["Guest: 100 monthly and 20 daily credits, Standard usage-class models only, no attachments.", "Free: 300 monthly and 30 daily plan credits, with up to 30 selected higher-cost model responses.", "Pro: 3,000 monthly and 300 daily plan credits. Purchased credits remain usable beyond the daily plan guardrail. Max: 10,000 monthly credits; Standard models have no daily limit, while Premium usage follows monthly credits and fair-use."],
-        },
-        {
-          title: "Files and Google Drive",
-          body: "Attachments work best when files are not password-protected, corrupted, or unusually large. If a PDF or Office document fails, re-export it, reduce the file size, or paste the key text directly into the prompt.",
-          bullets: ["Supported after login: images, PDFs, Office files, text files, and Google Drive files.", "Guest mode does not support attachments.", "Attach up to 5 files, 10 MB each."],
-        },
-        {
-          title: "Model responses and provider status",
-          body: "Tomverse shows responses from external AI providers without editing the model output. Providers can temporarily limit a model, return an empty answer, or fail because of balance, rate limit, or service availability.",
-          bullets: ["Try a recommended fallback model when one provider is limited.", "Remove attachments and retry if a file-specific error appears.", "Include the trace ID when contacting support."],
-        },
-        {
-          title: "Sharing, downloads, and privacy",
-          body: "Shared conversations are read-only snapshots. Your prompt is always sent to the selected AI provider to generate an answer.",
-          bullets: ["Use sharing only for content you are comfortable making available through the link.", "Locked conversations require unlock authorization before protected actions.", "Downloads export conversation content for your own records."],
-        },
-        {
-          title: "Contact support",
-          body: "If you still need help, send a written request from the support page. Include your account email, approximate time, browser, model name, whether files were attached, and any trace ID shown in the app. Phone support is not offered.",
-        },
-      ],
-      cta: { label: "Contact support", href: "/support" },
-    },
-    ko: {
-      eyebrow: "Help Centre",
-      title: "Help Centre",
-      description: "계정 접속, 플랜, 모델 선택, 첨부파일, 공유, 개인정보, 결제, 지원 요청에 필요한 실질적인 안내를 확인하세요.",
-      sections: [
-        {
-          title: "처음 시작하기",
-          body: "Tomverse는 한 번 질문하고 여러 AI 모델의 답변을 비교하며, 필요한 파일 맥락을 첨부하고, 유용한 결과를 하나의 워크스페이스에 정리할 수 있도록 돕습니다. 간단한 질문은 한 모델로 시작하고, 다양한 관점이 필요할 때는 최대 세 개 모델을 비교하세요.",
-          bullets: ["앱 열기 또는 대화 시작으로 채팅 화면을 엽니다.", "질문을 보내기 전에 모델 선택창에서 원하는 모델을 고릅니다.", "프로젝트, 고정, 검색 기능으로 중요한 대화를 쉽게 다시 찾을 수 있습니다."],
-          link: { label: "Chat Workspace Guide 열기", href: "/support/help-centre/chat-workspace" },
-        },
-        {
-          title: "로그인과 계정 접근",
-          body: "로그인이 실패하면 같은 브라우저 세션에서 다시 시도하고, 팝업과 외부 로그인 리다이렉트가 허용되어 있는지 확인하세요. 로그인 제공자의 이메일이 기존 Tomverse 계정과 같은지도 확인하는 것이 좋습니다.",
-          bullets: ["Google, Microsoft 등 OAuth 제공자는 올바른 callback 설정이 필요할 수 있습니다.", "계정 연결 오류가 보이면 제공자 이름과 계정 이메일을 포함해 지원팀에 문의하세요.", "계정 삭제는 대화, 설정, 저장된 계정 데이터를 영구 삭제합니다."],
-        },
-        {
-          title: "플랜, 제한, 업그레이드",
-          body: "게스트 모드는 빠른 체험용입니다. Free, Pro, Max 플랜은 더 넓은 모델 접근과 더 높은 사용량을 제공합니다. 모델이나 기능이 제한되면 모델 선택창 또는 플랜 영역에서 이유를 확인할 수 있습니다.",
-          bullets: ["Guest: 월 100 · 일 20 크레딧, Standard 사용량 클래스 모델만 사용, 첨부파일 불가.", "Free: 월 300 · 일일 플랜 크레딧 30개, 선별된 고비용 모델 월 30응답.", "Pro: 월 3,000 · 일일 플랜 크레딧 300개. 구매 크레딧은 일일 플랜 가드레일을 넘어 사용할 수 있습니다. Max: 월 10,000 크레딧, Standard 모델 일일 제한 없음, Premium 사용량은 월 크레딧 및 공정사용 정책 적용."],
-        },
-        {
-          title: "파일과 Google Drive",
-          body: "첨부파일은 암호가 걸려 있지 않고, 손상되지 않았으며, 크기가 너무 크지 않을 때 가장 안정적으로 작동합니다. PDF나 Office 문서가 실패하면 다시 내보내기, 파일 크기 줄이기, 핵심 텍스트 직접 붙여넣기를 시도하세요.",
-          bullets: ["로그인 후 이미지, PDF, Office 파일, 텍스트 파일, Google Drive 파일을 사용할 수 있습니다.", "게스트 모드는 첨부파일을 지원하지 않습니다.", "파일은 최대 5개, 각 10MB까지 첨부할 수 있습니다."],
-        },
-        {
-          title: "모델 응답과 Provider 상태",
-          body: "Tomverse는 외부 AI 제공자의 답변을 중간 편집 없이 보여줍니다. 제공자는 일시적으로 모델을 제한하거나, 빈 답변을 반환하거나, 잔액·rate limit·서비스 상태 때문에 실패할 수 있습니다.",
-          bullets: ["특정 모델이 제한되면 추천 대체 모델로 다시 시도하세요.", "파일 관련 오류가 나오면 첨부파일 없이 다시 시도해 보세요.", "지원팀에 문의할 때는 화면에 표시된 추적 ID를 함께 보내주세요."],
-        },
-        {
-          title: "공유, 다운로드, 개인정보",
-          body: "공유된 대화는 읽기 전용 스냅샷입니다. 답변 생성을 위해 프롬프트는 항상 선택한 AI 제공자에게 전송됩니다.",
-          bullets: ["공유 링크는 외부에 보여도 괜찮은 내용에만 사용하세요.", "잠긴 대화는 보호된 작업 전에 잠금 해제 권한이 필요합니다.", "다운로드는 본인 보관용으로 대화 내용을 내보냅니다."],
-        },
-        {
-          title: "지원팀에 문의하기",
-          body: "도움이 더 필요하면 지원 페이지에서 문의를 보내주세요. 계정 이메일, 발생 시간, 브라우저, 모델명, 첨부파일 여부, 앱에 표시된 추적 ID를 포함하면 더 빠르게 확인할 수 있습니다. 전화 상담은 제공하지 않습니다.",
-        },
-      ],
-      cta: { label: "지원팀에 문의하기", href: "/support" },
-    },
-    zh: {
-      eyebrow: "Help Centre",
-      title: "Help Centre",
-      description: "查看账户访问、套餐、模型选择、附件、分享、隐私、账单和支持请求的实用指南。",
-      sections: [
-        {
-          title: "开始使用",
-          body: "Tomverse 可让你一次提问、比较多个 AI 模型的答案、附加必要上下文，并把有价值的结果整理在一个工作区中。简单问题可从一个模型开始；需要不同视角时，可比较最多三个模型。",
-          bullets: ["使用 Start Chat 打开应用。", "发送问题前先在模型选择器中选择模型。", "使用项目、置顶和搜索功能找回重要对话。"],
-          link: { label: "打开 Chat Workspace Guide", href: "/support/help-centre/chat-workspace" },
-        },
-        {
-          title: "登录和账户访问",
-          body: "如果登录失败，请在同一浏览器会话中重试，确认允许弹窗和第三方登录跳转，并检查提供商账户邮箱是否与 Tomverse 账户一致。",
-          bullets: ["Google、Microsoft 等 OAuth 提供商可能需要正确的 callback 设置。", "如果出现账户关联错误，请联系支持并提供提供商名称和账户邮箱。", "删除账户会永久删除对话、设置和已保存的账户数据。"],
-        },
-        {
-          title: "套餐、限制和升级",
-          body: "Guest 模式用于快速体验。Free、Pro 和 Max 套餐提供更广的模型访问和更高的使用量。如果某个模型或功能不可用，应用会在模型选择器或套餐区域显示原因。",
-          bullets: ["Guest：每月 100、每日 20 积分，仅限 Standard 用量类别模型，不可使用附件。", "Free：每月 300、每日 30 个套餐积分，每月 30 次精选高成本模型回复。", "Pro：每月 3,000、每日 300 个套餐积分。已购买积分可在超过每日套餐保护额度后继续使用。Max：每月 10,000 积分，Standard 模型无每日限制，Premium 用量适用月度积分和公平使用政策。"],
-        },
-        {
-          title: "文件和 Google Drive",
-          body: "文件未加密、未损坏且大小合理时最稳定。如果 PDF 或 Office 文档失败，请重新导出、减小文件大小，或直接粘贴关键文本。",
-          bullets: ["登录后支持图片、PDF、Office 文件、文本文件和 Google Drive 文件。", "Guest 模式不支持附件。", "最多可附加 5 个文件，每个 10 MB。"],
-        },
-        {
-          title: "模型响应和提供商状态",
-          body: "Tomverse 不编辑模型输出，而是展示外部 AI 提供商返回的答案。提供商可能因余额、rate limit、服务状态或模型限制而失败或返回空答案。",
-          bullets: ["某个模型受限时，可尝试推荐的替代模型。", "出现文件相关错误时，可先移除附件重试。", "联系支持时请附上 trace ID。"],
-        },
-        {
-          title: "分享、下载和隐私",
-          body: "分享的对话是只读快照。为了生成回答，提示始终会发送给所选 AI 提供商。",
-          bullets: ["仅分享你愿意通过链接公开查看的内容。", "锁定对话在执行受保护操作前需要解锁授权。", "下载功能用于导出对话内容供你自行保存。"],
-        },
-        {
-          title: "联系支持",
-          body: "如果仍需帮助，请通过支持页面提交书面请求。请包含账户邮箱、大致时间、浏览器、模型名称、是否附加文件，以及应用中显示的 trace ID。我们不提供电话支持。",
-        },
-      ],
-      cta: { label: "联系支持", href: "/support" },
-    },
+  "ko": {
+    "eyebrow": "도움말 센터",
+    "title": "도움말 센터",
+    "description": "Chat과 Review 시작부터 모델 선택, 파일, 저장과 공유까지. 하려는 작업을 고르고 화면에서 무엇을 확인해야 하는지 살펴보세요.",
+    "sections": [
+      {
+        "title": "처음 시작하기",
+        "body": "같은 질문에도 답변은 달라집니다. Tomverse Review에서 최대 3개 모델의 답변을 나란히 읽고, AI Review로 공통점·차이·빠진 조건을 인용과 함께 살펴보세요. 검토 결과를 바탕으로 더 읽을 답변과 다음 질문을 직접 고를 수 있습니다.",
+        "bullets": [
+          "한 모델과 질문을 이어갈 때는 Tomverse Chat을 살펴보세요.",
+          "여러 답변을 비교할 때는 Review에서 최대 세 모델을 선택하세요.",
+          "저장·공유와 프로젝트는 로그인 후 이용 조건을 확인하세요."
+        ],
+        "link": {
+          "label": "Review 워크스페이스 가이드",
+          "href": "/support/help-centre/chat-workspace"
+        }
+      },
+      {
+        "title": "로그인과 계정 접근",
+        "body": "로그인 화면으로 돌아오지 못하면 같은 브라우저에서 다시 시도하세요. 문제가 계속되면 로그인 방법과 화면의 오류 내용을 지원팀에 보내주세요.",
+        "bullets": [
+          "기존 계정과 같은 이메일·로그인 방법을 사용했는지 확인하세요.",
+          "인증 코드가 만료됐다면 화면에서 새 코드를 요청하세요."
+        ]
+      },
+      {
+        "title": "모델과 크레딧 확인",
+        "body": "전송 전 표시되는 값은 기본 예상 크레딧입니다. 선택한 모델의 기본값을 합산하며, 파일 내용과 긴 대화 기록을 처리한 뒤 적용되는 배율에 따라 최종 사용량은 달라질 수 있습니다.",
+        "bullets": [
+          "모델 선택창에서 이용 가능한 모델과 기본 크레딧을 확인하세요.",
+          "월 플랜 크레딧과 추가 구매 크레딧은 별도로 표시됩니다.",
+          "요금제 페이지에서 모델 이용 범위와 사용량을 비교하세요."
+        ],
+        "link": {
+          "label": "먼저 써보고, 필요에 맞게",
+          "href": "/pricing"
+        }
+      },
+      {
+        "title": "파일과 Google Drive",
+        "body": "파일을 첨부할 수 있는 화면에서는 지원 형식과 크기를 먼저 확인하세요. 암호가 걸리거나 손상된 문서, 읽을 텍스트가 없는 스캔 PDF는 처리되지 않을 수 있습니다. 한 파일로 다시 시도하거나 핵심 텍스트를 직접 붙여넣어 보세요.",
+        "bullets": [
+          "지원되는 비회원 첨부: 메시지당 1개, 파일당 5MB까지. Google Drive 연결은 로그인 필요.",
+          "첨부가 허용된 로그인 플랜: 최대 5개, 파일당 10MB, 한 요청 합계 25MB까지.",
+          "계정 파일은 대화와 연결되어 보관됩니다. 비회원 파일은 임시 처리되며 저장·공유·내보내기에 포함되지 않습니다."
+        ],
+        "link": {
+          "label": "파일과 Google Drive",
+          "href": "/ai-for-file-analysis"
+        }
+      },
+      {
+        "title": "답변이 오지 않을 때",
+        "body": "모델 제공이 일시적으로 제한되거나 답변 생성에 실패할 수 있습니다. 화면의 이유와 서비스 상태를 확인하고, 필요하면 추천된 대체 모델로 한 번 다시 시도하세요. 계속 실패하면 추적 ID와 모델명을 지원팀에 전달해 주세요."
+      },
+      {
+        "title": "저장·공유와 데이터 처리",
+        "body": "선택한 AI 제공자는 답변에 필요한 질문과 자료를 처리합니다. 잠금은 저장된 대화에 대한 접근을 제어하고, 공유는 당시 내용의 읽기 전용 링크를 만듭니다. 자세한 데이터 처리 범위는 안전 안내에서 확인하세요."
+      },
+      {
+        "title": "지원팀에 문의하기",
+        "body": "문제가 계속되면 계정 이메일, 대략적인 발생 시간, 사용한 제품과 모델, 첨부 여부, 화면의 추적 ID를 알려주세요. 문의는 폼과 이메일로 접수합니다. 비밀번호나 카드번호는 보내지 마세요."
+      }
+    ],
+    "cta": {
+      "label": "지원팀에 문의하기",
+      "href": "/support"
+    }
   },
+  "en": {
+    "eyebrow": "Help Centre",
+    "title": "Help Centre",
+    "description": "From starting Chat and Review to models, files, saving and sharing: choose your task and find what to check on screen.",
+    "sections": [
+      {
+        "title": "Getting started",
+        "body": "The same question can produce different answers. In Tomverse Review, read up to three model answers side by side and use AI Review to examine agreements, differences and missing conditions with quotes. Decide which answer to explore and what to ask next.",
+        "bullets": [
+          "Explore Tomverse Chat for a conversation with one model.",
+          "Select up to three models in Review to compare answers.",
+          "Check signed-in requirements for saving, sharing and projects."
+        ],
+        "link": {
+          "label": "Review workspace guide",
+          "href": "/support/help-centre/chat-workspace"
+        }
+      },
+      {
+        "title": "Sign-in and account access",
+        "body": "If sign-in does not return you to Tomverse, try again in the same browser. If the problem continues, send support the sign-in method and the error shown.",
+        "bullets": [
+          "Check that you used the email and sign-in method for your account.",
+          "Request a new code on screen if the previous one expired."
+        ]
+      },
+      {
+        "title": "Models and credits",
+        "body": "The amount shown before sending is a base credit estimate. It adds the selected models’ base costs; the final usage may change when file content and long conversation history are processed.",
+        "bullets": [
+          "See available models and base credits in the model selector.",
+          "Monthly plan credits and purchased credits are shown separately.",
+          "Compare model access and allowances on the pricing page."
+        ],
+        "link": {
+          "label": "Try first, choose as needed",
+          "href": "/pricing"
+        }
+      },
+      {
+        "title": "Files and Google Drive",
+        "body": "Where attachments are available, check supported formats and sizes. Password-protected, damaged or scanned documents without readable text may fail. Try one file or paste the key text.",
+        "bullets": [
+          "Supported guest attachments: one file per message, up to 5 MB. Google Drive connection requires sign-in.",
+          "Signed-in plans with attachments: up to five files, 10 MB each and 25 MB total per request.",
+          "Account files are kept with the conversation. Guest files are temporary and are not included in saving, sharing or exports."
+        ],
+        "link": {
+          "label": "Files and Google Drive",
+          "href": "/ai-for-file-analysis"
+        }
+      },
+      {
+        "title": "When an answer does not arrive",
+        "body": "Models can be temporarily limited or fail to answer. Check the reason and service status, then try a suggested alternative once if needed. If the problem continues, send support the trace ID and model name."
+      },
+      {
+        "title": "Saving, sharing and data",
+        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details."
+      },
+      {
+        "title": "Contact support",
+        "body": "If the problem continues, include your account email, approximate time, product and model, attachment details and the on-screen trace ID. Use the form or email; do not send passwords or card numbers."
+      }
+    ],
+    "cta": {
+      "label": "Contact support",
+      "href": "/support"
+    }
+  },
+  "zh": {
+    "eyebrow": "帮助中心",
+    "title": "帮助中心",
+    "description": "从开始使用 Chat 与 Review，到模型、文件、保存和分享：选择想完成的任务，查看屏幕上需要确认的内容。",
+    "sections": [
+      {
+        "title": "开始使用",
+        "body": "同一个问题，可能得到不同回答。在 Tomverse Review 中并排阅读最多三个模型的回答，再用 AI Review 结合引文查看共识、差异与遗漏条件。由你决定重点阅读哪个回答、接下来问什么。",
+        "bullets": [
+          "想与一个模型持续对话时，可了解 Tomverse Chat。",
+          "比较多个回答时，在 Review 中选择最多三个模型。",
+          "保存、分享与项目功能请查看登录后的使用条件。"
+        ],
+        "link": {
+          "label": "Review 工作区指南",
+          "href": "/support/help-centre/chat-workspace"
+        }
+      },
+      {
+        "title": "登录与账户访问",
+        "body": "如果登录后无法返回 Tomverse，请在同一浏览器重试。问题仍然存在时，请向支持提供登录方式与屏幕上的错误信息。",
+        "bullets": [
+          "请确认使用了账户原有邮箱与登录方式。",
+          "验证码过期时，请在屏幕上申请新码。"
+        ]
+      },
+      {
+        "title": "模型与积分",
+        "body": "发送前显示的是基础积分预估，由所选模型的基础消耗相加得出。处理文件内容和较长的对话记录后，最终用量可能发生变化。",
+        "bullets": [
+          "在选择器中查看可用模型与基础积分。",
+          "月度套餐积分与购买积分会分别显示。",
+          "在套餐页面比较模型范围与额度。"
+        ],
+        "link": {
+          "label": "先体验，再按需选择",
+          "href": "/pricing"
+        }
+      },
+      {
+        "title": "文件与 Google Drive",
+        "body": "附件可用时，请先确认支持格式与大小。加密、损坏或无可读文字的扫描 PDF 可能无法处理。可尝试一个文件或直接粘贴关键文字。",
+        "bullets": [
+          "支持的访客附件：每条消息一个文件，最多5MB。连接 Google Drive 需要登录。",
+          "允许附件的登录套餐：最多五个文件，每个10MB，每次请求合计25MB。",
+          "账户文件与对话一起保留。访客文件为临时处理，不包含在保存、分享或导出中。"
+        ],
+        "link": {
+          "label": "文件与 Google Drive",
+          "href": "/ai-for-file-analysis"
+        }
+      },
+      {
+        "title": "没有收到回答时",
+        "body": "模型可能临时受限或回答失败。请查看原因和服务状态，必要时用推荐替代模型重试一次。仍然失败时，向支持提供追踪ID和模型名。"
+      },
+      {
+        "title": "保存、分享与数据处理",
+        "body": "所选 AI 提供商会处理回答所需的问题与资料。锁定控制已保存对话的访问；分享会生成当时内容的只读链接。数据处理详情请查看安全说明。"
+      },
+      {
+        "title": "联系支持",
+        "body": "问题持续时，请提供账户邮箱、大致时间、产品与模型、附件情况及追踪ID。通过表单或邮件联系，不要发送密码或银行卡号。"
+      }
+    ],
+    "cta": {
+      "label": "联系支持",
+      "href": "/support"
+    }
+  },
+  "fr": {
+    "eyebrow": "Centre d’aide",
+    "title": "Centre d’aide",
+    "description": "De Chat et Review aux modèles, fichiers, enregistrement et partage : choisissez votre tâche et les éléments à vérifier à l’écran.",
+    "sections": [
+      {
+        "title": "Bien commencer",
+        "body": "Une même question peut produire des réponses différentes. Dans Tomverse Review, lisez jusqu’à trois réponses côte à côte et examinez avec AI Review leurs accords, différences et conditions oubliées, citations à l’appui. Choisissez ensuite quoi approfondir et quelle question poser.",
+        "bullets": [
+          "Découvrez Tomverse Chat pour dialoguer avec un modèle.",
+          "Choisissez jusqu’à trois modèles dans Review pour comparer.",
+          "Vérifiez les conditions de connexion pour enregistrer, partager et utiliser les projets."
+        ],
+        "link": {
+          "label": "Guide de l’espace Review",
+          "href": "/support/help-centre/chat-workspace"
+        }
+      },
+      {
+        "title": "Connexion et accès au compte",
+        "body": "Si la connexion ne vous ramène pas à Tomverse, réessayez dans le même navigateur. Si le problème persiste, envoyez à l’assistance la méthode utilisée et le message d’erreur.",
+        "bullets": [
+          "Vérifiez l’adresse et la méthode utilisées pour votre compte.",
+          "Demandez un nouveau code si le précédent a expiré."
+        ]
+      },
+      {
+        "title": "Modèles et crédits",
+        "body": "Le montant affiché avant l’envoi est une estimation des crédits de base, additionnés pour les modèles sélectionnés. L’usage final peut varier après traitement des fichiers et d’un long historique.",
+        "bullets": [
+          "Consultez modèles accessibles et crédits de base dans le sélecteur.",
+          "Les crédits mensuels et achetés sont affichés séparément.",
+          "Comparez modèles et quotas sur la page Tarifs."
+        ],
+        "link": {
+          "label": "Essayez, puis choisissez selon vos besoins",
+          "href": "/pricing"
+        }
+      },
+      {
+        "title": "Fichiers et Google Drive",
+        "body": "Lorsque les pièces jointes sont proposées, vérifiez formats et tailles. Un document protégé, endommagé ou scanné sans texte lisible peut échouer. Essayez un seul fichier ou collez le texte essentiel.",
+        "bullets": [
+          "Pièces jointes invité prises en charge : un fichier par message, jusqu’à 5 Mo. Connexion requise pour Google Drive.",
+          "Offres connectées avec pièces jointes : cinq fichiers maximum, 10 Mo chacun et 25 Mo par demande.",
+          "Les fichiers du compte sont conservés avec la conversation. Les fichiers invités sont temporaires et exclus de l’enregistrement, du partage et des exports."
+        ],
+        "link": {
+          "label": "Fichiers et Google Drive",
+          "href": "/ai-for-file-analysis"
+        }
+      },
+      {
+        "title": "Si une réponse n’arrive pas",
+        "body": "Un modèle peut être limité ou ne pas répondre. Consultez le motif et l’état du service puis essayez une alternative proposée. Si le problème persiste, transmettez l’identifiant de suivi et le modèle."
+      },
+      {
+        "title": "Enregistrement, partage et données",
+        "body": "Le fournisseur IA choisi traite la question et les documents nécessaires à la réponse. Le verrou contrôle l’accès aux conversations enregistrées ; le partage crée un lien en lecture seule vers leur contenu à cet instant. Consultez les informations de sécurité pour le traitement des données."
+      },
+      {
+        "title": "Contacter l’assistance",
+        "body": "Indiquez l’e-mail du compte, l’heure approximative, le produit, le modèle, les pièces jointes et l’identifiant affiché. Utilisez le formulaire ou l’e-mail ; n’envoyez ni mot de passe ni numéro de carte."
+      }
+    ],
+    "cta": {
+      "label": "Contacter l’assistance",
+      "href": "/support"
+    }
+  },
+  "de": {
+    "eyebrow": "Hilfecenter",
+    "title": "Hilfecenter",
+    "description": "Von Chat und Review bis zu Modellen, Dateien, Speichern und Teilen: Wählen Sie Ihre Aufgabe und prüfen Sie die passenden Hinweise.",
+    "sections": [
+      {
+        "title": "Erste Schritte",
+        "body": "Dieselbe Frage kann unterschiedliche Antworten liefern. Lesen Sie in Tomverse Review bis zu drei Modellantworten nebeneinander und prüfen Sie mit AI Review Gemeinsamkeiten, Unterschiede und fehlende Bedingungen samt Zitaten. Entscheiden Sie selbst, was Sie vertiefen und als Nächstes fragen.",
+        "bullets": [
+          "Entdecken Sie Tomverse Chat für ein Gespräch mit einem Modell.",
+          "Wählen Sie in Review bis zu drei Modelle für den Vergleich.",
+          "Prüfen Sie Kontoanforderungen für Speichern, Teilen und Projekte."
+        ],
+        "link": {
+          "label": "Review-Workspace-Leitfaden",
+          "href": "/support/help-centre/chat-workspace"
+        }
+      },
+      {
+        "title": "Anmeldung und Kontozugriff",
+        "body": "Falls Sie nach der Anmeldung nicht zu Tomverse zurückkehren, versuchen Sie es im selben Browser erneut. Bei weiteren Problemen senden Sie dem Support die Anmeldemethode und den angezeigten Fehler.",
+        "bullets": [
+          "Prüfen Sie E-Mail und Anmeldemethode Ihres Kontos.",
+          "Fordern Sie bei abgelaufenem Code einen neuen an."
+        ]
+      },
+      {
+        "title": "Modelle und Credits",
+        "body": "Vor dem Senden sehen Sie eine Schätzung der Basis-Credits für die gewählten Modelle. Der endgültige Verbrauch kann nach Verarbeitung von Dateien und langem Gesprächsverlauf abweichen.",
+        "bullets": [
+          "Prüfen Sie verfügbare Modelle und Basis-Credits in der Auswahl.",
+          "Monatliche Tarif-Credits und gekaufte Credits werden getrennt angezeigt.",
+          "Vergleichen Sie Modellzugriff und Kontingente auf der Tarifseite."
+        ],
+        "link": {
+          "label": "Erst testen, dann nach Bedarf wählen",
+          "href": "/pricing"
+        }
+      },
+      {
+        "title": "Dateien und Google Drive",
+        "body": "Prüfen Sie bei verfügbaren Anhängen Format und Größe. Geschützte, beschädigte oder gescannte Dateien ohne lesbaren Text können scheitern. Versuchen Sie eine Datei oder fügen Sie Kerntext ein.",
+        "bullets": [
+          "Unterstützte Gastanhänge: eine Datei pro Nachricht, bis 5 MB. Google Drive erfordert Anmeldung.",
+          "Berechtigte Kontotarife: bis fünf Dateien, je 10 MB und insgesamt 25 MB pro Anfrage.",
+          "Kontodateien werden mit dem Gespräch aufbewahrt. Gastdateien sind temporär und nicht Teil von Speicherung, Freigaben oder Exporten."
+        ],
+        "link": {
+          "label": "Dateien und Google Drive",
+          "href": "/ai-for-file-analysis"
+        }
+      },
+      {
+        "title": "Wenn eine Antwort ausbleibt",
+        "body": "Modelle können eingeschränkt sein oder ausfallen. Prüfen Sie Grund und Status und versuchen Sie nötigenfalls ein vorgeschlagenes Ersatzmodell. Senden Sie bei weiteren Fehlern Trace-ID und Modellname an den Support."
+      },
+      {
+        "title": "Speichern, Teilen und Daten",
+        "body": "Der gewählte KI-Anbieter verarbeitet die nötige Frage und das Material. Sperren regelt den Zugriff auf gespeicherte Gespräche; Teilen erstellt einen Nur-Lese-Link zum damaligen Inhalt. Details finden Sie in den Sicherheitsinformationen."
+      },
+      {
+        "title": "Support kontaktieren",
+        "body": "Nennen Sie Konto-E-Mail, ungefähre Zeit, Produkt, Modell, Anhänge und angezeigte Trace-ID. Nutzen Sie Formular oder E-Mail; senden Sie keine Passwörter oder Kartennummern."
+      }
+    ],
+    "cta": {
+      "label": "Support kontaktieren",
+      "href": "/support"
+    }
+  },
+  "es": {
+    "eyebrow": "Centro de ayuda",
+    "title": "Centro de ayuda",
+    "description": "Desde empezar con Chat y Review hasta modelos, archivos, guardar y compartir: elige tu tarea y qué revisar en pantalla.",
+    "sections": [
+      {
+        "title": "Primeros pasos",
+        "body": "La misma pregunta puede dar respuestas diferentes. En Tomverse Review, lee hasta tres respuestas en paralelo y usa AI Review para examinar coincidencias, diferencias y condiciones omitidas, con citas. Decide qué respuesta explorar y qué preguntar después.",
+        "bullets": [
+          "Explora Tomverse Chat para conversar con un modelo.",
+          "Elige hasta tres modelos en Review para comparar respuestas.",
+          "Consulta los requisitos de cuenta para guardar, compartir y usar proyectos."
+        ],
+        "link": {
+          "label": "Guía del espacio Review",
+          "href": "/support/help-centre/chat-workspace"
+        }
+      },
+      {
+        "title": "Acceso e inicio de sesión",
+        "body": "Si al iniciar sesión no vuelves a Tomverse, inténtalo en el mismo navegador. Si el problema continúa, envía al soporte el método de acceso y el error mostrado.",
+        "bullets": [
+          "Comprueba el correo y el método de acceso de tu cuenta.",
+          "Pide un código nuevo si el anterior caducó."
+        ]
+      },
+      {
+        "title": "Modelos y créditos",
+        "body": "La cantidad que ves antes de enviar es una estimación de créditos base para los modelos seleccionados. El uso final puede variar al procesar archivos e historiales largos.",
+        "bullets": [
+          "Consulta modelos disponibles y créditos base en el selector.",
+          "Los créditos mensuales y comprados aparecen por separado.",
+          "Compara acceso a modelos y uso en la página de planes."
+        ],
+        "link": {
+          "label": "Prueba y elige según tus necesidades",
+          "href": "/pricing"
+        }
+      },
+      {
+        "title": "Archivos y Google Drive",
+        "body": "Cuando se admitan adjuntos, comprueba formato y tamaño. Los documentos protegidos, dañados o escaneados sin texto legible pueden fallar. Prueba un archivo o pega el texto clave.",
+        "bullets": [
+          "Adjuntos de invitado compatibles: un archivo por mensaje, hasta 5 MB. Google Drive requiere iniciar sesión.",
+          "Planes con adjuntos: hasta cinco archivos, 10 MB cada uno y 25 MB en total por solicitud.",
+          "Los archivos de cuenta se conservan con la conversación. Los archivos de invitado son temporales y no se incluyen al guardar, compartir o exportar."
+        ],
+        "link": {
+          "label": "Archivos y Google Drive",
+          "href": "/ai-for-file-analysis"
+        }
+      },
+      {
+        "title": "Si no llega una respuesta",
+        "body": "Un modelo puede estar limitado o fallar. Revisa el motivo y el estado y prueba una alternativa recomendada si hace falta. Si persiste, envía al soporte el identificador de seguimiento y modelo."
+      },
+      {
+        "title": "Guardar, compartir y datos",
+        "body": "El proveedor de IA seleccionado procesa la pregunta y el material necesarios. El bloqueo controla el acceso a conversaciones guardadas; compartir crea un enlace de solo lectura al contenido de ese momento. Consulta los detalles en la información de seguridad."
+      },
+      {
+        "title": "Contactar soporte",
+        "body": "Incluye el correo de la cuenta, hora aproximada, producto, modelo, adjuntos y el identificador mostrado. Usa el formulario o correo; no envíes contraseñas ni números de tarjeta."
+      }
+    ],
+    "cta": {
+      "label": "Contactar soporte",
+      "href": "/support"
+    }
+  },
+  "pt": {
+    "eyebrow": "Central de ajuda",
+    "title": "Central de ajuda",
+    "description": "Do início no Chat e no Review até modelos, arquivos, salvar e compartilhar: escolha sua tarefa e veja o que conferir na tela.",
+    "sections": [
+      {
+        "title": "Primeiros passos",
+        "body": "A mesma pergunta pode gerar respostas diferentes. No Tomverse Review, leia até três respostas lado a lado e use o AI Review para examinar consensos, diferenças e condições omitidas, com citações. Decida qual resposta explorar e o que perguntar depois.",
+        "bullets": [
+          "Conheça o Tomverse Chat para conversar com um modelo.",
+          "Escolha até três modelos no Review para comparar respostas.",
+          "Confira os requisitos de conta para salvar, compartilhar e usar projetos."
+        ],
+        "link": {
+          "label": "Guia do espaço Review",
+          "href": "/support/help-centre/chat-workspace"
+        }
+      },
+      {
+        "title": "Login e acesso à conta",
+        "body": "Se o login não levar você de volta ao Tomverse, tente novamente no mesmo navegador. Se o problema continuar, informe ao suporte o método de login e o erro exibido.",
+        "bullets": [
+          "Confira o e-mail e o método de login da sua conta.",
+          "Peça um código novo se o anterior expirou."
+        ]
+      },
+      {
+        "title": "Modelos e créditos",
+        "body": "O valor exibido antes do envio é uma estimativa dos créditos-base dos modelos escolhidos. O uso final pode mudar após o processamento de arquivos e históricos longos.",
+        "bullets": [
+          "Veja os modelos disponíveis e créditos-base no seletor.",
+          "Os créditos mensais e comprados aparecem separadamente.",
+          "Compare acesso a modelos e limites na página de planos."
+        ],
+        "link": {
+          "label": "Experimente e escolha conforme a necessidade",
+          "href": "/pricing"
+        }
+      },
+      {
+        "title": "Arquivos e Google Drive",
+        "body": "Quando anexos estiverem disponíveis, confira formato e tamanho. Documentos protegidos, danificados ou digitalizados sem texto legível podem falhar. Tente um arquivo ou cole o texto principal.",
+        "bullets": [
+          "Anexos compatíveis para visitantes: um por mensagem, até 5 MB. Google Drive exige login.",
+          "Planos com anexos: até cinco arquivos, 10 MB por arquivo e 25 MB no total por solicitação.",
+          "Os arquivos da conta ficam com a conversa. Arquivos de visitantes são temporários e não entram ao salvar, compartilhar ou exportar."
+        ],
+        "link": {
+          "label": "Arquivos e Google Drive",
+          "href": "/ai-for-file-analysis"
+        }
+      },
+      {
+        "title": "Quando uma resposta não chega",
+        "body": "Um modelo pode estar limitado ou falhar. Confira o motivo e o status e tente uma alternativa sugerida se necessário. Se persistir, envie ao suporte o ID de rastreamento e o modelo."
+      },
+      {
+        "title": "Salvar, compartilhar e dados",
+        "body": "O provedor de IA escolhido processa a pergunta e o material necessários. O bloqueio controla o acesso a conversas salvas; compartilhar cria um link somente leitura do conteúdo daquele momento. Veja os detalhes nas informações de segurança."
+      },
+      {
+        "title": "Contatar suporte",
+        "body": "Inclua e-mail da conta, horário aproximado, produto, modelo, anexos e o ID exibido. Use formulário ou e-mail; não envie senhas ou números de cartão."
+      }
+    ],
+    "cta": {
+      "label": "Contatar suporte",
+      "href": "/support"
+    }
+  }
+},
 } satisfies Record<
   string,
   { en: MarketingInfoCopy } & Partial<Record<Language, MarketingInfoCopy>>
 >;
 
 export const focusedSafetyPages = {
-  approach: {
-    en: { ...infoPages.safety.en, eyebrow: "Safety", title: "Safety Approach", description: "How Tomverse designs product controls before scaling usage.", sections: [infoPages.safety.en.sections[0]] },
-    ko: { ...infoPages.safety.ko, eyebrow: "안전", title: "Safety Approach", description: "Tomverse가 사용량 확장 전에 제품 통제 장치를 설계하는 방식입니다.", sections: [infoPages.safety.ko.sections[0]] },
-    zh: { ...infoPages.safety.zh, eyebrow: "安全", title: "Safety Approach", description: "Tomverse 如何在扩大使用前设计产品控制。", sections: [infoPages.safety.zh.sections[0]] },
+  "approach": {
+    "ko": {
+      "eyebrow": "안전과 데이터 처리",
+      "title": "사용 중 나를 보호하는 기능",
+      "description": "모델 이용 범위와 사용량, 파일 형식·용량 검사를 통해 사용할 수 있는 기능과 제한을 안내합니다. 지원되지 않는 파일은 이유를 확인하고 읽을 수 있는 형식으로 다시 준비할 수 있습니다.",
+      "sections": [
+        {
+          "title": "사용 중 나를 보호하는 기능",
+          "body": "모델 이용 범위와 사용량, 파일 형식·용량 검사를 통해 사용할 수 있는 기능과 제한을 안내합니다. 지원되지 않는 파일은 이유를 확인하고 읽을 수 있는 형식으로 다시 준비할 수 있습니다."
+        }
+      ]
+    },
+    "en": {
+      "eyebrow": "Safety and data handling",
+      "title": "Controls that help protect your use",
+      "description": "Model access, usage limits and file checks show what is supported. If a file is not supported, check the reason and prepare a readable version.",
+      "sections": [
+        {
+          "title": "Controls that help protect your use",
+          "body": "Model access, usage limits and file checks show what is supported. If a file is not supported, check the reason and prepare a readable version."
+        }
+      ]
+    },
+    "zh": {
+      "eyebrow": "安全与数据处理",
+      "title": "帮助保护使用过程的功能",
+      "description": "模型范围、用量限制及文件检查会说明支持条件。文件不支持时，可查看原因并准备可读取版本。",
+      "sections": [
+        {
+          "title": "帮助保护使用过程的功能",
+          "body": "模型范围、用量限制及文件检查会说明支持条件。文件不支持时，可查看原因并准备可读取版本。"
+        }
+      ]
+    },
+    "fr": {
+      "eyebrow": "Sécurité et traitement des données",
+      "title": "Les contrôles qui protègent votre usage",
+      "description": "L’accès aux modèles, les limites d’usage et les contrôles de fichiers précisent ce qui est pris en charge. En cas de refus, consultez le motif et préparez un fichier lisible.",
+      "sections": [
+        {
+          "title": "Les contrôles qui protègent votre usage",
+          "body": "L’accès aux modèles, les limites d’usage et les contrôles de fichiers précisent ce qui est pris en charge. En cas de refus, consultez le motif et préparez un fichier lisible."
+        }
+      ]
+    },
+    "de": {
+      "eyebrow": "Sicherheit und Datenverarbeitung",
+      "title": "Schutzfunktionen bei der Nutzung",
+      "description": "Modellzugriff, Nutzungslimits und Dateiprüfungen zeigen die unterstützten Möglichkeiten. Prüfen Sie bei abgelehnten Dateien den Grund und erstellen Sie eine lesbare Fassung.",
+      "sections": [
+        {
+          "title": "Schutzfunktionen bei der Nutzung",
+          "body": "Modellzugriff, Nutzungslimits und Dateiprüfungen zeigen die unterstützten Möglichkeiten. Prüfen Sie bei abgelehnten Dateien den Grund und erstellen Sie eine lesbare Fassung."
+        }
+      ]
+    },
+    "es": {
+      "eyebrow": "Seguridad y tratamiento de datos",
+      "title": "Funciones que ayudan a proteger tu uso",
+      "description": "El acceso a modelos, los límites y las comprobaciones de archivos indican qué se admite. Si se rechaza un archivo, revisa el motivo y prepara una versión legible.",
+      "sections": [
+        {
+          "title": "Funciones que ayudan a proteger tu uso",
+          "body": "El acceso a modelos, los límites y las comprobaciones de archivos indican qué se admite. Si se rechaza un archivo, revisa el motivo y prepara una versión legible."
+        }
+      ]
+    },
+    "pt": {
+      "eyebrow": "Segurança e tratamento de dados",
+      "title": "Recursos que ajudam a proteger seu uso",
+      "description": "O acesso a modelos, os limites e as verificações de arquivos mostram o que é compatível. Se um arquivo for recusado, veja o motivo e prepare uma versão legível.",
+      "sections": [
+        {
+          "title": "Recursos que ajudam a proteger seu uso",
+          "body": "O acesso a modelos, os limites e as verificações de arquivos mostram o que é compatível. Se um arquivo for recusado, veja o motivo e prepare uma versão legível."
+        }
+      ]
+    }
   },
-  securityPrivacy: {
-    en: { ...infoPages.safety.en, eyebrow: "Safety", title: "Security & Privacy", description: "How Tomverse reduces accidental exposure and protects sensitive workflows.", sections: [infoPages.safety.en.sections[1]] },
-    ko: { ...infoPages.safety.ko, eyebrow: "안전", title: "Security & Privacy", description: "Tomverse가 의도치 않은 노출을 줄이고 민감한 흐름을 보호하는 방식입니다.", sections: [infoPages.safety.ko.sections[1]] },
-    zh: { ...infoPages.safety.zh, eyebrow: "安全", title: "Security & Privacy", description: "Tomverse 如何减少意外暴露并保护敏感工作流。", sections: [infoPages.safety.zh.sections[1]] },
+  "securityPrivacy": {
+    "ko": {
+      "eyebrow": "안전과 데이터 처리",
+      "title": "보안과 데이터 처리",
+      "description": "선택한 AI 제공자는 답변에 필요한 질문과 자료를 처리합니다. 잠금은 저장된 대화에 대한 접근을 제어하고, 공유는 당시 내용의 읽기 전용 링크를 만듭니다. 자세한 데이터 처리 범위는 안전 안내에서 확인하세요.",
+      "sections": [
+        {
+          "title": "보안과 데이터 처리",
+          "body": "선택한 AI 제공자는 답변에 필요한 질문과 자료를 처리합니다. 잠금은 저장된 대화에 대한 접근을 제어하고, 공유는 당시 내용의 읽기 전용 링크를 만듭니다. 자세한 데이터 처리 범위는 안전 안내에서 확인하세요."
+        }
+      ]
+    },
+    "en": {
+      "eyebrow": "Safety and data handling",
+      "title": "Security and data handling",
+      "description": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details.",
+      "sections": [
+        {
+          "title": "Security and data handling",
+          "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details."
+        }
+      ]
+    },
+    "zh": {
+      "eyebrow": "安全与数据处理",
+      "title": "安全与数据处理",
+      "description": "所选 AI 提供商会处理回答所需的问题与资料。锁定控制已保存对话的访问；分享会生成当时内容的只读链接。数据处理详情请查看安全说明。",
+      "sections": [
+        {
+          "title": "安全与数据处理",
+          "body": "所选 AI 提供商会处理回答所需的问题与资料。锁定控制已保存对话的访问；分享会生成当时内容的只读链接。数据处理详情请查看安全说明。"
+        }
+      ]
+    },
+    "fr": {
+      "eyebrow": "Sécurité et traitement des données",
+      "title": "Sécurité et traitement des données",
+      "description": "Le fournisseur IA choisi traite la question et les documents nécessaires à la réponse. Le verrou contrôle l’accès aux conversations enregistrées ; le partage crée un lien en lecture seule vers leur contenu à cet instant. Consultez les informations de sécurité pour le traitement des données.",
+      "sections": [
+        {
+          "title": "Sécurité et traitement des données",
+          "body": "Le fournisseur IA choisi traite la question et les documents nécessaires à la réponse. Le verrou contrôle l’accès aux conversations enregistrées ; le partage crée un lien en lecture seule vers leur contenu à cet instant. Consultez les informations de sécurité pour le traitement des données."
+        }
+      ]
+    },
+    "de": {
+      "eyebrow": "Sicherheit und Datenverarbeitung",
+      "title": "Sicherheit und Datenverarbeitung",
+      "description": "Der gewählte KI-Anbieter verarbeitet die nötige Frage und das Material. Sperren regelt den Zugriff auf gespeicherte Gespräche; Teilen erstellt einen Nur-Lese-Link zum damaligen Inhalt. Details finden Sie in den Sicherheitsinformationen.",
+      "sections": [
+        {
+          "title": "Sicherheit und Datenverarbeitung",
+          "body": "Der gewählte KI-Anbieter verarbeitet die nötige Frage und das Material. Sperren regelt den Zugriff auf gespeicherte Gespräche; Teilen erstellt einen Nur-Lese-Link zum damaligen Inhalt. Details finden Sie in den Sicherheitsinformationen."
+        }
+      ]
+    },
+    "es": {
+      "eyebrow": "Seguridad y tratamiento de datos",
+      "title": "Seguridad y tratamiento de datos",
+      "description": "El proveedor de IA seleccionado procesa la pregunta y el material necesarios. El bloqueo controla el acceso a conversaciones guardadas; compartir crea un enlace de solo lectura al contenido de ese momento. Consulta los detalles en la información de seguridad.",
+      "sections": [
+        {
+          "title": "Seguridad y tratamiento de datos",
+          "body": "El proveedor de IA seleccionado procesa la pregunta y el material necesarios. El bloqueo controla el acceso a conversaciones guardadas; compartir crea un enlace de solo lectura al contenido de ese momento. Consulta los detalles en la información de seguridad."
+        }
+      ]
+    },
+    "pt": {
+      "eyebrow": "Segurança e tratamento de dados",
+      "title": "Segurança e tratamento de dados",
+      "description": "O provedor de IA escolhido processa a pergunta e o material necessários. O bloqueio controla o acesso a conversas salvas; compartilhar cria um link somente leitura do conteúdo daquele momento. Veja os detalhes nas informações de segurança.",
+      "sections": [
+        {
+          "title": "Segurança e tratamento de dados",
+          "body": "O provedor de IA escolhido processa a pergunta e o material necessários. O bloqueio controla o acesso a conversas salvas; compartilhar cria um link somente leitura do conteúdo daquele momento. Veja os detalhes nas informações de segurança."
+        }
+      ]
+    }
   },
-  trustTransparency: {
-    en: { ...infoPages.safety.en, eyebrow: "Safety", title: "Trust & Transparency", description: "How Tomverse explains AI limitations, provider involvement, and product behavior.", sections: [infoPages.safety.en.sections[2]] },
-    ko: { ...infoPages.safety.ko, eyebrow: "안전", title: "Trust & Transparency", description: "Tomverse가 AI 한계, 공급자 관여, 제품 동작을 설명하는 방식입니다.", sections: [infoPages.safety.ko.sections[2]] },
-    zh: { ...infoPages.safety.zh, eyebrow: "安全", title: "Trust & Transparency", description: "Tomverse 如何说明 AI 限制、供应商参与和产品行为。", sections: [infoPages.safety.zh.sections[2]] },
-  },
+  "trustTransparency": {
+    "ko": {
+      "eyebrow": "안전과 데이터 처리",
+      "title": "AI의 한계와 서비스 상태",
+      "description": "답변은 선택한 외부 AI 모델이 생성하며 틀리거나 빠진 내용이 있을 수 있습니다. AI Review는 답변끼리 비교하는 기능입니다. 추가 사실 확인과 웹 검색은 별도 작업이며, 현재 모델 제공 상태는 서비스 상태 페이지에서 확인할 수 있습니다.",
+      "sections": [
+        {
+          "title": "AI의 한계와 서비스 상태",
+          "body": "답변은 선택한 외부 AI 모델이 생성하며 틀리거나 빠진 내용이 있을 수 있습니다. AI Review는 답변끼리 비교하는 기능입니다. 추가 사실 확인과 웹 검색은 별도 작업이며, 현재 모델 제공 상태는 서비스 상태 페이지에서 확인할 수 있습니다."
+        }
+      ]
+    },
+    "en": {
+      "eyebrow": "Safety and data handling",
+      "title": "AI limitations and service status",
+      "description": "Answers come from the selected external AI models and can be wrong or incomplete. AI Review compares those answers. External checks and web search are separate actions; see the service-status page for current availability.",
+      "sections": [
+        {
+          "title": "AI limitations and service status",
+          "body": "Answers come from the selected external AI models and can be wrong or incomplete. AI Review compares those answers. External checks and web search are separate actions; see the service-status page for current availability."
+        }
+      ]
+    },
+    "zh": {
+      "eyebrow": "安全与数据处理",
+      "title": "AI 局限与服务状态",
+      "description": "回答由所选外部 AI 模型生成，可能错误或遗漏。AI Review 比较这些回答，外部核实与网页搜索是独立操作。当前可用状态请查看服务状态页。",
+      "sections": [
+        {
+          "title": "AI 局限与服务状态",
+          "body": "回答由所选外部 AI 模型生成，可能错误或遗漏。AI Review 比较这些回答，外部核实与网页搜索是独立操作。当前可用状态请查看服务状态页。"
+        }
+      ]
+    },
+    "fr": {
+      "eyebrow": "Sécurité et traitement des données",
+      "title": "Limites de l’IA et état du service",
+      "description": "Les modèles externes choisis génèrent les réponses, qui peuvent être erronées ou incomplètes. AI Review compare ces réponses. Vérifications externes et recherche web sont distinctes ; consultez l’état du service.",
+      "sections": [
+        {
+          "title": "Limites de l’IA et état du service",
+          "body": "Les modèles externes choisis génèrent les réponses, qui peuvent être erronées ou incomplètes. AI Review compare ces réponses. Vérifications externes et recherche web sont distinctes ; consultez l’état du service."
+        }
+      ]
+    },
+    "de": {
+      "eyebrow": "Sicherheit und Datenverarbeitung",
+      "title": "KI-Grenzen und Servicestatus",
+      "description": "Ausgewählte externe Modelle erzeugen Antworten, die falsch oder unvollständig sein können. AI Review vergleicht diese Antworten. Externe Prüfung und Websuche sind separate Schritte; die Verfügbarkeit steht auf der Statusseite.",
+      "sections": [
+        {
+          "title": "KI-Grenzen und Servicestatus",
+          "body": "Ausgewählte externe Modelle erzeugen Antworten, die falsch oder unvollständig sein können. AI Review vergleicht diese Antworten. Externe Prüfung und Websuche sind separate Schritte; die Verfügbarkeit steht auf der Statusseite."
+        }
+      ]
+    },
+    "es": {
+      "eyebrow": "Seguridad y tratamiento de datos",
+      "title": "Límites de la IA y estado del servicio",
+      "description": "Los modelos externos elegidos generan respuestas que pueden ser incorrectas o incompletas. AI Review compara esas respuestas. La verificación externa y búsqueda web son acciones separadas; consulta el estado del servicio.",
+      "sections": [
+        {
+          "title": "Límites de la IA y estado del servicio",
+          "body": "Los modelos externos elegidos generan respuestas que pueden ser incorrectas o incompletas. AI Review compara esas respuestas. La verificación externa y búsqueda web son acciones separadas; consulta el estado del servicio."
+        }
+      ]
+    },
+    "pt": {
+      "eyebrow": "Segurança e tratamento de dados",
+      "title": "Limites da IA e status do serviço",
+      "description": "Os modelos externos escolhidos geram respostas que podem estar erradas ou incompletas. O AI Review compara essas respostas. Verificação externa e busca na web são ações separadas; consulte o status do serviço.",
+      "sections": [
+        {
+          "title": "Limites da IA e status do serviço",
+          "body": "Os modelos externos escolhidos geram respostas que podem estar erradas ou incompletas. O AI Review compara essas respostas. Verificação externa e busca na web são ações separadas; consulte o status do serviço."
+        }
+      ]
+    }
+  }
 } satisfies Record<
   string,
   { en: MarketingInfoCopy } & Partial<Record<Language, MarketingInfoCopy>>

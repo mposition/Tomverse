@@ -1,13 +1,8 @@
 import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
 import { infoPages } from "@/components/marketing/marketingInfoContent";
-import { createPageMetadata } from "@/lib/seo";
+import { publicMarketingPageMetadata } from "@/lib/publicMarketingMetadata";
 
-export const metadata = createPageMetadata({
-  title: "About",
-  description:
-    "Learn how Tomverse Review brings multi-model comparison, file analysis, conversation organization, and privacy controls into one workspace.",
-  path: "/about",
-});
+export const metadata = publicMarketingPageMetadata("/about");
 
 export default function AboutPage() {
   return <MarketingInfoPage content={infoPages.about} />;

@@ -48,7 +48,7 @@ test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 
   await page.getByTestId("marketing-language-switcher").selectOption("ko");
-  await expect(page.getByTestId("landing-hero-title")).toContainText("구독은");
+  await expect(page.getByTestId("landing-hero-title")).toContainText("고민은 Tomverse에.");
 });
 
 test("signed-in homepage keeps the page visible and offers one continue action", { tag: "@smoke" }, async ({
@@ -122,9 +122,9 @@ test("guest preview opens a 3-model comparison chat by default", { tag: "@smoke"
 test("pricing page supports Chinese copy", async ({ page }) => {
   await page.goto("/pricing");
   await page.getByTestId("marketing-language-switcher").selectOption("zh");
-  await expect(
-    page.getByRole("heading", { name: "选择适合你的 AI 能力等级。" })
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/zh\/pricing$/);
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("先体验，再选择适合的套餐。");
   await expect(page.getByTestId("pricing-credit-packs")).toBeVisible();
   await expect(page.locator('[data-pack-id="starter_500"]')).toContainText("500");
   await expect(page.locator('[data-pack-id="project_1500"]')).toContainText("1,500");

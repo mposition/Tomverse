@@ -1,3 +1,5 @@
+import { discardResponseBody } from "@/lib/discardResponseBody";
+
 /**
  * Read only the existing server-owned Chat offer for a resolved account.
  * Cancellation binds the result to one mounted account identity; it is never
@@ -27,9 +29,13 @@ export function startLandingChatCapabilityRead({
         cache: "no-store",
         signal: controller.signal,
       });
-      if (!active || controller.signal.aborted) return;
+      if (!active || controller.signal.aborted) {
+        await discardResponseBody(response);
+        return;
+      }
       if (!response.ok) {
         resolve(false);
+        await discardResponseBody(response);
         return;
       }
       const body: unknown = await response.json();

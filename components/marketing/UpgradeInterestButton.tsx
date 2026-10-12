@@ -226,7 +226,7 @@ const foundingTesterPassCopy: Record<
   pt: {
     title: "Passe Founding Tester",
     detail: (days) =>
-      `${days} dias de acesso Pro sem método de pagamento, cobrança ou renovação automática. Depois, a conta regressa ao Free.`,
+      `${days} dias de acesso Pro sem método de pagamento, cobrança ou renovação automática. Depois, a conta volta para o Free.`,
     billingLabel: "Passe sem renovação",
     activate: "Ativar passe de teste",
   },
@@ -237,7 +237,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     secureCheckout: "Secure checkout",
     upgradeTo: (plan) => `Upgrade to ${plan}`,
     description:
-      "Choose your billing cycle, apply a promotion code, then continue to Stripe checkout.",
+      "Choose a billing cycle and add a promotion code if you have one. Check your total and renewal terms, then continue to payment.",
     billingCycle: "Billing cycle",
     monthly: "Monthly",
     annual: "Annual",
@@ -247,7 +247,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "Save 20% with yearly billing.",
     paymentMethods: "Payment methods",
     paymentHint:
-      "Stripe accepts cards and shows supported wallets such as Google Pay and Apple Pay when available for your device, browser, region, and Stripe account settings.",
+      "The payment screen shows cards and supported options such as Google Pay and Apple Pay. The options shown depend on your device, browser and region.",
     promoLabel: "Promotion code",
     promoPlaceholder: "Optional promotion code",
     apply: "Apply",
@@ -277,7 +277,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     secureCheckout: "보안 결제",
     upgradeTo: (plan) => `${plan}로 업그레이드`,
     description:
-      "결제 주기를 선택하고 프로모션 코드를 적용한 뒤 Stripe 결제로 진행하세요.",
+      "결제 주기를 선택하고 필요한 경우 프로모션 코드를 입력하세요. 주문 금액과 갱신 조건을 확인한 뒤 결제로 진행할 수 있습니다.",
     billingCycle: "결제 주기",
     monthly: "월간",
     annual: "연간",
@@ -287,7 +287,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "연간 결제로 20%를 절약하세요.",
     paymentMethods: "결제 방법",
     paymentHint:
-      "Stripe는 카드 결제를 제공하며, 기기, 브라우저, 지역 및 Stripe 계정 설정에서 지원되는 경우 Google Pay와 Apple Pay 같은 지갑 결제를 표시합니다.",
+      "결제 화면에서 카드와 지원되는 Google Pay·Apple Pay 등의 결제 수단을 확인할 수 있습니다. 표시되는 수단은 기기, 브라우저와 지역에 따라 달라집니다.",
     promoLabel: "프로모션 코드",
     promoPlaceholder: "프로모션 코드 선택 입력",
     apply: "적용",
@@ -316,7 +316,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
   zh: {
     secureCheckout: "安全结账",
     upgradeTo: (plan) => `升级到 ${plan}`,
-    description: "选择计费周期，应用促销代码，然后继续前往 Stripe 结账。",
+    description: "选择计费周期，有促销代码时可输入。确认总金额和续费条件后，再继续付款。",
     billingCycle: "计费周期",
     monthly: "月付",
     annual: "年付",
@@ -326,7 +326,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "选择年付可节省 20%。",
     paymentMethods: "付款方式",
     paymentHint:
-      "Stripe 支持银行卡付款；当你的设备、浏览器、地区和 Stripe 账户设置允许时，还会显示 Google Pay 和 Apple Pay 等钱包付款方式。",
+      "付款页面会显示银行卡及支持的 Google Pay、Apple Pay 等方式。可用选项取决于设备、浏览器和地区。",
     promoLabel: "促销代码",
     promoPlaceholder: "可选促销代码",
     apply: "应用",
@@ -356,7 +356,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     secureCheckout: "Paiement sécurisé",
     upgradeTo: (plan) => `Passer à ${plan}`,
     description:
-      "Choisissez votre cycle de facturation, appliquez un code promotionnel, puis continuez vers le paiement Stripe.",
+      "Choisissez un cycle de facturation et saisissez un code promotionnel si vous en avez un. Vérifiez le total et les conditions de renouvellement, puis passez au paiement.",
     billingCycle: "Cycle de facturation",
     monthly: "Mensuel",
     annual: "Annuel",
@@ -366,7 +366,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "Économisez 20 % avec la facturation annuelle.",
     paymentMethods: "Moyens de paiement",
     paymentHint:
-      "Stripe accepte les cartes et affiche les portefeuilles compatibles comme Google Pay et Apple Pay selon l’appareil, le navigateur, la région et les réglages du compte Stripe.",
+      "L’écran de paiement affiche les cartes et les options prises en charge, comme Google Pay et Apple Pay. Elles varient selon l’appareil, le navigateur et la région.",
     promoLabel: "Code promotionnel",
     promoPlaceholder: "Code promotionnel facultatif",
     apply: "Appliquer",
@@ -396,17 +396,17 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     secureCheckout: "Sichere Zahlung",
     upgradeTo: (plan) => `Upgrade auf ${plan}`,
     description:
-      "Wähle deinen Abrechnungszeitraum, wende einen Aktionscode an und fahre dann mit Stripe fort.",
+      "Wählen Sie einen Abrechnungszeitraum und geben Sie bei Bedarf einen Aktionscode ein. Prüfen Sie Gesamtbetrag und Verlängerungsbedingungen und fahren Sie dann zur Zahlung fort.",
     billingCycle: "Abrechnungszeitraum",
     monthly: "Monatlich",
     annual: "Jährlich",
     yearly: "Jährlich",
     annualOff: "20 % Rabatt",
     monthlyDescription: "Monatlich zahlen.",
-    annualDescription: "Spare 20 % mit jährlicher Abrechnung.",
+    annualDescription: "Sparen Sie 20 % mit jährlicher Abrechnung.",
     paymentMethods: "Zahlungsmethoden",
     paymentHint:
-      "Stripe akzeptiert Karten und zeigt unterstützte Wallets wie Google Pay und Apple Pay an, wenn sie für Gerät, Browser, Region und Stripe-Kontoeinstellungen verfügbar sind.",
+      "Die Zahlungsseite zeigt Karten und unterstützte Optionen wie Google Pay und Apple Pay. Die angezeigten Möglichkeiten hängen von Gerät, Browser und Region ab.",
     promoLabel: "Aktionscode",
     promoPlaceholder: "Optionaler Aktionscode",
     apply: "Anwenden",
@@ -436,7 +436,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     secureCheckout: "Pago seguro",
     upgradeTo: (plan) => `Actualizar a ${plan}`,
     description:
-      "Elige tu ciclo de facturación, aplica un código promocional y continúa al pago con Stripe.",
+      "Elige un ciclo de facturación e introduce un código promocional si tienes uno. Revisa el total y las condiciones de renovación antes de continuar al pago.",
     billingCycle: "Ciclo de facturación",
     monthly: "Mensual",
     annual: "Anual",
@@ -446,7 +446,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "Ahorra un 20 % con la facturación anual.",
     paymentMethods: "Métodos de pago",
     paymentHint:
-      "Stripe acepta tarjetas y muestra billeteras compatibles como Google Pay y Apple Pay cuando están disponibles para tu dispositivo, navegador, región y cuenta de Stripe.",
+      "La pantalla de pago muestra tarjetas y opciones compatibles como Google Pay y Apple Pay. Las opciones dependen de tu dispositivo, navegador y región.",
     promoLabel: "Código promocional",
     promoPlaceholder: "Código promocional opcional",
     apply: "Aplicar",
@@ -476,17 +476,17 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     secureCheckout: "Checkout seguro",
     upgradeTo: (plan) => `Fazer upgrade para ${plan}`,
     description:
-      "Escolha o ciclo de cobrança, aplique um código promocional e continue para o checkout da Stripe.",
+      "Escolha um ciclo de cobrança e insira um código promocional, se tiver. Confira o total e as condições de renovação antes de continuar para o pagamento.",
     billingCycle: "Ciclo de cobrança",
     monthly: "Mensal",
     annual: "Anual",
     yearly: "Anual",
-    annualOff: "20% off",
+    annualOff: "20% de desconto",
     monthlyDescription: "Pague mês a mês.",
     annualDescription: "Economize 20% com a cobrança anual.",
     paymentMethods: "Métodos de pagamento",
     paymentHint:
-      "A Stripe aceita cartões e mostra carteiras digitais compatíveis, como Google Pay e Apple Pay, quando disponíveis para seu dispositivo, navegador, região e conta Stripe.",
+      "A tela de pagamento mostra cartões e opções compatíveis, como Google Pay e Apple Pay. As opções dependem do dispositivo, navegador e região.",
     promoLabel: "Código promocional",
     promoPlaceholder: "Código promocional opcional",
     apply: "Aplicar",
@@ -515,13 +515,13 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
 };
 
 const promotionPolicyCopy: Record<Language, string> = {
-  en: "Codes are verified by the server. Promotions do not stack with the annual-plan discount unless that specific code explicitly allows it.",
-  ko: "코드는 서버에서 검증됩니다. 해당 코드에 연간 중복 할인이 명시적으로 허용된 경우가 아니면 연간 플랜 할인과 중복 적용되지 않습니다.",
-  zh: "促销代码由服务器验证。除非该代码明确允许，否则不能与年付折扣叠加。",
-  fr: "Les codes sont vérifiés par le serveur. Ils ne se cumulent pas avec la remise annuelle, sauf autorisation explicite du code.",
-  de: "Codes werden auf dem Server geprüft. Sie sind nicht mit dem Jahresrabatt kombinierbar, außer der Code erlaubt dies ausdrücklich.",
-  es: "Los códigos se validan en el servidor. No se acumulan con el descuento anual salvo que el código lo permita expresamente.",
-  pt: "Os códigos são validados no servidor. Não acumulam com o desconto anual, salvo quando o código permitir explicitamente.",
+  en: "Promotions do not normally combine with the annual-plan discount. They can be combined only when the offer details for your code explicitly allow it.",
+  ko: "연간 플랜 할인과는 원칙적으로 중복 적용되지 않습니다. 입력한 코드의 혜택 안내에서 중복 적용이 명시적으로 허용된 경우만 함께 사용할 수 있습니다.",
+  zh: "促销优惠通常不可与年付折扣叠加。仅当该代码的优惠说明明确允许时，才可同时使用。",
+  fr: "Les promotions ne se cumulent normalement pas avec la remise annuelle. Le cumul est possible uniquement si les conditions du code l’autorisent explicitement.",
+  de: "Aktionen sind grundsätzlich nicht mit dem Jahresrabatt kombinierbar. Eine Kombination ist nur möglich, wenn die Angebotsdetails Ihres Codes sie ausdrücklich erlauben.",
+  es: "Las promociones no se combinan normalmente con el descuento anual. Solo se pueden combinar si los detalles del código lo permiten expresamente.",
+  pt: "As promoções normalmente não acumulam com o desconto anual. A combinação só é possível quando os detalhes do código permitem isso expressamente.",
 };
 
 type CheckoutLegalCopy = {
@@ -1312,7 +1312,7 @@ export function UpgradeInterestButton({
                     {copy.orderSummary}
                   </p>
                   <h3 className="mt-2 text-xl font-black text-zinc-950 dark:text-white">
-                    Tomverse Review {plan}
+                    Tomverse {plan}
                   </h3>
                 </div>
                 <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">

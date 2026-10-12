@@ -4,6 +4,24 @@ import { startLandingChatCapabilityRead } from "../lib/landingChatCapabilityClie
 
 const nextTask = () => new Promise(resolve => setImmediate(resolve));
 
+test("refused and cancelled reads consume the unused body without enabling Chat", async () => {
+  for (const cancelled of [false, true]) {
+    const response = new Response("Unavailable", { status: 503 });
+    let complete;
+    const values = [];
+    const cancel = startLandingChatCapabilityRead({
+      accountUserId: "account-a",
+      fetcher: () => new Promise(resolve => { complete = resolve; }),
+      onResolved: value => values.push(value),
+    });
+    if (cancelled) cancel();
+    complete(response);
+    await nextTask();
+    assert.equal(response.bodyUsed, true);
+    assert.deepEqual(values, cancelled ? [] : [false]);
+  }
+});
+
 test("marketing never asks for a Guest Auto authority", async () => {
   let calls = 0;
   const values = [];

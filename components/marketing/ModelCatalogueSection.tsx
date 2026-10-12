@@ -10,6 +10,7 @@ import {
 import { formatLocalizedInteger } from "@/lib/pricingFormat";
 import { getLandingCopy, interpolate } from "./landingContent";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
+import { localizedPath } from "@/lib/seo";
 
 /**
  * The provider catalogue, plus the two conditions that decide what a given
@@ -82,7 +83,7 @@ export function ModelCatalogueBlock() {
 
           <div className="mt-7 flex flex-wrap gap-3">
             <Link
-              href="/models"
+              href={localizedPath(lang, "/models")}
               data-testid="landing-models-cta"
               className="inline-flex min-h-12 items-center gap-2 rounded-lg bg-white px-5 text-sm font-bold text-zinc-950 transition hover:bg-zinc-200 active:translate-y-px"
             >
@@ -90,7 +91,7 @@ export function ModelCatalogueBlock() {
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
             <Link
-              href="/status"
+              href={`/status?lang=${encodeURIComponent(lang)}`}
               target="_blank"
               rel="noopener noreferrer"
               prefetch={false}

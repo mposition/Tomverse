@@ -23,13 +23,9 @@ import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
  *
  * ## What V2 changed, and why
  *
- * Tomverse is the brand; Tomverse Review is the one product a visitor can
- * actually open today. The V1 hero said so twice and then contradicted
- * itself: a badge and a brand note each introduced the product, a signup note
- * and a guest note each promised the same "no sign-up required", and the CTA
- * read "Start chatting free" -- which names Tomverse Chat, a product that is
- * not released. A visitor could not tell from the first screen which of the
- * four brand-tree products the button was going to open.
+ * This page introduces Tomverse Review. Tomverse is the brand, Tomverse Chat
+ * is the conversational product, and AI Review is a comparison feature inside
+ * Tomverse Review. The hero CTA names the comparison it actually opens.
  *
  * So the hero states the product once, promises guest access once, and its
  * CTA says what pressing it starts: a comparison. The destination and the

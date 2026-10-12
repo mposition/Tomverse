@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import { launchAccountEntryCopy } from "@/components/marketing/launchHomepageContent";
 
 const guides = [
   "compare-ai-models",
@@ -167,7 +168,7 @@ test("an offered account opens Chat and sees account-specific access copy", asyn
   await page.goto("/ko");
   await expect(page.getByTestId("landing-primary-cta")).toHaveAccessibleName("Chat 시작하기");
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", `${CHAT_WORKSPACE_PATH}?lang=ko`);
-  await expect(page.getByTestId("landing-hero-signup-note")).toContainText("현재 계정에서 Chat");
+  await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(launchAccountEntryCopy.ko.heroAccess);
   await expect(page.locator("#launch-guest-title")).toHaveText("나에게 맞는 AI, 한곳에서 시작하세요.");
   const loaded = page.waitForResponse(response => response.request().isNavigationRequest() && new URL(response.url()).pathname === CHAT_WORKSPACE_PATH);
   await page.getByTestId("landing-primary-cta").click();

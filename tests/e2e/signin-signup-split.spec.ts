@@ -26,7 +26,7 @@ test.describe("sign-in and sign-up are separate screens", () => {
   }) => {
     const card = await gotoAuth(page, "/auth/signin?callbackUrl=%2Fpricing");
     await expect(card.getByTestId("signup-consent-devices")).toHaveCount(0);
-    await expect(card.getByText("Log in to your personal AI chat hub")).toHaveCount(1);
+    await expect(card.getByText("Sign in to continue with your saved conversations and personal settings.")).toHaveCount(1);
     const toSignup = card.getByTestId("signin-to-signup-link");
     await expect(toSignup).toHaveText("Sign up");
     const href = await toSignup.getAttribute("href");
@@ -38,7 +38,7 @@ test.describe("sign-in and sign-up are separate screens", () => {
   test("sign-up links back to sign-in and says what it is for", async ({ page }) => {
     const card = await gotoAuth(page, "/auth/signup");
     await expect(
-      card.getByText("Create an account to start your personal AI chat hub")
+      card.getByText("Create a free account to save conversations and your personal settings.")
     ).toHaveCount(1);
     await expect(card.getByTestId("signup-to-signin-link")).toHaveText("Log in");
     await expect(card.getByTestId("signin-to-signup-link")).toHaveCount(0);
