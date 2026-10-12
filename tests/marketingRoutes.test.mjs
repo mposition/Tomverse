@@ -145,7 +145,7 @@ test("Review information is localized static marketing while the workspace remai
 
 test("explicit product entry keeps Review separate without changing a visitor's workspace preferences", () => {
   assert.equal(marketingProductEntryHref("review", "ko"), "/review?lang=ko");
-  assert.equal(marketingProductEntryHref("chat", "ko"), "/chat/workspace?lang=ko");
+  assert.equal(marketingProductEntryHref("chat", "ko"), "/chat?lang=ko");
   assert.equal(marketingProductEntryHref("review", "a&b"), "/review?lang=a%26b");
   assert.equal(new URL(marketingProductEntryHref("review", "ko"), "https://tomverse.test").searchParams.has("entry"), false);
 });

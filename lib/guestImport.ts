@@ -1,5 +1,6 @@
 import type { Conversation, Message } from "@/components/chat/types";
 import { discardResponseBody } from "./discardResponseBody";
+import { removeGuestConversationMessages } from "./guestConversationStorage";
 
 export const PENDING_GUEST_IMPORT_KEY = "tomverse_pending_guest_import";
 export const GUEST_IMPORT_SEEN_KEY = "tomverse_guest_import_prompted_v1";
@@ -68,20 +69,11 @@ export function isGuestConversationEmpty(
   return true;
 }
 
-// Removes every per-model guest_messages_{conversationId}_{modelId} entry
-// for a conversation, regardless of which models the conversation's
-// current selectedModels/disabledPanels list -- a conversation may have
-// used other models earlier before the panel selection changed, and this
-// must not leave those orphaned.
+// Removes the legacy suffix-less transcript and every per-model transcript
+// for exactly one conversation. The canonical helper keeps deletion aligned
+// with the storage key contract without widening it to other conversations.
 export function removeGuestConversationStorage(conversationId: string): void {
-  if (typeof window === "undefined") return;
-  const prefix = `guest_messages_${conversationId}_`;
-  const keysToRemove: string[] = [];
-  for (let i = 0; i < window.localStorage.length; i++) {
-    const key = window.localStorage.key(i);
-    if (key && key.startsWith(prefix)) keysToRemove.push(key);
-  }
-  keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+  removeGuestConversationMessages(conversationId);
 }
 
 const readGuestConversations = (): Conversation[] => {
