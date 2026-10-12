@@ -66,8 +66,19 @@ install -o root -g root -m 0644 "$src/tomverse-bridge-watchdog.timer" \
 systemd-analyze verify /etc/systemd/system/tomverse-bridge-watchdog.service \
   /etc/systemd/system/tomverse-bridge-watchdog.timer
 systemctl daemon-reload
-# A oneshot start waits for the run and fails if the signal did not go out.
+# A oneshot start waits for the run and fails if a signal could not be
+# delivered. A run that sent nothing exits 0, so this run's own journal lines
+# are read as well: the first install reported success while every run read
+# the bridge as unreadable and sent nothing.
 systemctl start tomverse-bridge-watchdog.service
+journalctl --sync
+invocation=$(systemctl show -p InvocationID --value tomverse-bridge-watchdog.service)
+run_log=$(journalctl -u tomverse-bridge-watchdog.service "_SYSTEMD_INVOCATION_ID=$invocation" \
+  --no-pager -o cat)
+printf '%s\n' "$run_log"
+if ! grep -qE '; sent (up|down)$' <<<"$run_log"; then
+  systemctl disable --now tomverse-bridge-watchdog.timer
+  fail "the watchdog sent no signal (lines above); the timer is off. Pause the Healthchecks check and report the lines above"
+fi
 systemctl enable --now tomverse-bridge-watchdog.timer
-journalctl -u tomverse-bridge-watchdog.service -n 1 --no-pager -o cat
 echo TOMVERSE_BRIDGE_WATCHDOG_INSTALLED
