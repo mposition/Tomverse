@@ -55,6 +55,26 @@ if test ! -s "$url_file"; then
   unset url
 fi
 
+# From here on the installed files change. Any failure below -- a unit that
+# does not verify, a run that cannot deliver, a run that sent nothing -- leaves
+# the timer off, so a broken watchdog never keeps running on its own (an
+# earlier install's timer included).
+timer_off() {
+  systemctl disable --now tomverse-bridge-watchdog.timer >/dev/null 2>&1 || true
+}
+trap 'timer_off; echo "install.sh: failed; the timer is off. Pause the Healthchecks check" >&2' ERR
+
+# The unit's own system account. Created once; an existing one is checked, not
+# changed: it must have no login shell and no group but its own, so it can
+# never be the worker account or one that holds sudo.
+watch_user=tomverse-bridge-watchdog
+if ! getent passwd "$watch_user" >/dev/null; then
+  useradd --system --user-group --no-create-home --home-dir /nonexistent \
+    --shell /usr/sbin/nologin "$watch_user"
+fi
+test "$(getent passwd "$watch_user" | cut -d: -f7)" = /usr/sbin/nologin
+test "$(id -nG "$watch_user")" = "$watch_user"
+
 install -d -o root -g root -m 0755 /usr/local/libexec
 install -o root -g root -m 0755 "$src/tomverse-bridge-watchdog" \
   /usr/local/libexec/tomverse-bridge-watchdog
@@ -66,8 +86,22 @@ install -o root -g root -m 0644 "$src/tomverse-bridge-watchdog.timer" \
 systemd-analyze verify /etc/systemd/system/tomverse-bridge-watchdog.service \
   /etc/systemd/system/tomverse-bridge-watchdog.timer
 systemctl daemon-reload
-# A oneshot start waits for the run and fails if the signal did not go out.
-systemctl start tomverse-bridge-watchdog.service
+# A oneshot start waits for the run and fails if a signal could not be
+# delivered. A run that sent nothing exits 0, so this run's own journal lines
+# are read as well: the first install reported success while every run read
+# the bridge as unreadable and sent nothing.
+started=yes
+systemctl start tomverse-bridge-watchdog.service || started=no
+journalctl --sync
+invocation=$(systemctl show -p InvocationID --value tomverse-bridge-watchdog.service)
+run_log=$(journalctl -u tomverse-bridge-watchdog.service "_SYSTEMD_INVOCATION_ID=$invocation" \
+  --no-pager -o cat)
+printf '%s\n' "$run_log"
+if test "$started" = no || ! grep -qE '; sent (up|down)$' <<<"$run_log"; then
+  timer_off
+  trap - ERR
+  fail "the watchdog run failed or sent no signal (lines above); the timer is off. Pause the Healthchecks check and report the lines above"
+fi
 systemctl enable --now tomverse-bridge-watchdog.timer
-journalctl -u tomverse-bridge-watchdog.service -n 1 --no-pager -o cat
+trap - ERR
 echo TOMVERSE_BRIDGE_WATCHDOG_INSTALLED
