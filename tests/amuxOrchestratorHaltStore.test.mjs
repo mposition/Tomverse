@@ -74,6 +74,7 @@ test("human audit writes and reserved system proof reads stay in separate module
   assert.doesNotMatch(store, /systemActor|FROM "AdminAuditLog"/);
   assert.doesNotMatch(proofStore, /writeAdminAuditLog|writeSystemAuditLog/);
   assert.match(proofStore, /FROM "AdminAuditLog"/);
+  assert.match(proofStore, /AMUX_ORCHESTRATOR_HALT_AUDIT_JOINS_SQL = Prisma\.sql/);
   assert.match(proofStore, /"metadata"->>'systemActor' = \$\{AMUX_SYSTEM_AUDIT_ACTOR\}/);
   for (const field of [
     "request_id",
@@ -87,6 +88,14 @@ test("human audit writes and reserved system proof reads stay in separate module
   ]) {
     assert.match(proofStore, new RegExp(`"metadata"->>'${field}'`), field);
   }
+  const select = store.slice(
+    store.indexOf("const selectHaltsByKeys ="),
+    store.indexOf("export async function openAmuxOrchestratorHaltLocked"),
+  );
+  assert.equal((select.match(/\$queryRaw/g) ?? []).length, 1);
+  assert.match(select, /AMUX_ORCHESTRATOR_HALT_AUDIT_JOINS_SQL/);
+  assert.match(select, /AMUX_ORCHESTRATOR_HUMAN_CLEAR_AUDIT_PROOF_SQL/);
+  assert.match(select, /AMUX_ORCHESTRATOR_SYSTEM_CLEAR_AUDIT_PROOF_SQL/);
 });
 
 test("the clear never runs the original claim, recovery or promotion", () => {
