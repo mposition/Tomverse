@@ -1,0 +1,38 @@
+# AMUX Decision Maker S0: the isolation measurement's config
+# (docs/ops/amux/decision-maker-s0.md). Copy it, edit it on the host, and pass
+# the copy to measure-isolation. KEY=VALUE, one per line; lists are separated
+# by spaces. The script parses this file and never sources it, so nothing in it
+# runs.
+
+# The five roles of docs/policy/amux-decision-maker.md §5, one account each.
+WORKER_USER=tommy
+# The account tomverse-bridge.service runs as:
+#   systemctl show tomverse-bridge.service -p User
+BRIDGE_USER=tomverse-bridge
+BROKER_USER=amux-dm-broker
+OPENAI_USER=amux-dm-openai
+ANTHROPIC_USER=amux-dm-anthropic
+
+# Where the broker makes request directories. The broker owns it.
+REQUEST_ROOT=/var/lib/amux-dm/requests
+
+# What no DM account and not the broker may read: the worker's home, its clone
+# and the AMUX state, and the bridge's environment file:
+#   systemctl show tomverse-bridge.service -p EnvironmentFiles
+WORKER_PATHS=/home/tommy /home/tommy/Tomverse /home/tommy/.amux
+BRIDGE_ENV_FILE=/etc/tomverse-bridge/bridge.env
+
+# Each vendor account's own CLI, as installed for that account.
+OPENAI_CLI=/home/amux-dm-openai/.local/bin/codex
+ANTHROPIC_CLI=/home/amux-dm-anthropic/.local/bin/claude
+
+# host:port each account must reach. A vendor account reaches its own vendor's
+# hosts and nothing else; the broker reaches GitHub's public hosts and nothing
+# else. S0 records the exact host list each CLI needs; start from these.
+OPENAI_HOSTS=api.openai.com:443 chatgpt.com:443
+ANTHROPIC_HOSTS=api.anthropic.com:443
+GITHUB_HOSTS=api.github.com:443 raw.githubusercontent.com:443
+
+# Hosts that no DM account and not the broker may reach. They are a sample:
+# any one reached is a leak.
+OUTSIDE_HOSTS=example.com:443
