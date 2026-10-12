@@ -2720,7 +2720,27 @@ impl TomverseApi {
         instance_id: &str,
         generation: i64,
     ) -> Result<ExecutionHeartbeatResponse> {
-        let route = if delivery.assignment_id.is_some() {
+        self.execution_heartbeat_started(
+            &delivery.attempt_id,
+            delivery.assignment_id.as_deref(),
+            &delivery.worker,
+            instance_id,
+            generation,
+            delivery.task_revision,
+        )
+        .await
+    }
+
+    pub async fn execution_heartbeat_started(
+        &self,
+        attempt_id: &str,
+        assignment_id: Option<&str>,
+        worker: &str,
+        instance_id: &str,
+        generation: i64,
+        task_revision: i64,
+    ) -> Result<ExecutionHeartbeatResponse> {
+        let route = if assignment_id.is_some() {
             "v22/execution/heartbeat"
         } else {
             "execution/heartbeat"
@@ -2731,11 +2751,11 @@ impl TomverseApi {
             .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
             .bearer_auth(&self.secret)
             .json(&ExecutionHeartbeatRequest {
-                attempt_id: &delivery.attempt_id,
-                worker: &delivery.worker,
+                attempt_id,
+                worker,
                 instance_id,
                 generation,
-                task_revision: delivery.task_revision,
+                task_revision,
             })
             .send()
             .await?;
@@ -2824,7 +2844,10 @@ impl TomverseApi {
                     && body
                         .task_revision
                         .is_some_and(|value| (0..=PRISMA_INT_MAX).contains(&value))
-                    && body.lease_expires_at.is_some()
+                    && body
+                        .lease_expires_at
+                        .as_deref()
+                        .is_some_and(|value| chrono::DateTime::parse_from_rfc3339(value).is_ok())
                     && body.reason.is_none()
             }
             StatusCode::CONFLICT => {
