@@ -66,8 +66,8 @@ release-notes gate has opened under the new rule.
 
 ### After the merge
 
-- [ ] Production serves the merge commit, and `/api/ready` answers 200.
-- [ ] Section 5: ancestry. `develop` already has #2096 and #2372, so the back-merge should change no file.
+- [x] Production serves the merge commit, and `/api/ready` answers 200. #2375 merged as `8e4c4eef1` at 07:12Z on 2026-10-12. Later selective releases followed on `main`; production serves `501e377` (deployed 10:17Z, deployment success), which contains `8e4c4eef1`. `/api/ready` 200.
+- [x] Section 5: ancestry. The automated back-merge (https://github.com/mposition/Tomverse/actions/runs/38216422330) reported "The merge changes no file: the tree is identical to origin/develop", and its own check found `main (8e4c4eef1) is an ancestor of develop`.
 
 
 ## 1. Automated gates
@@ -616,9 +616,9 @@ with `if: always()`. Your job here is to confirm it did, not to do it.
       `main` carries work `develop` never had, such as a hotfix landed directly)
 
 ```
-Release merge SHA:  ____________________
-Back-merge run URL: ____________________
-Ancestry verified:  ____________________
+Release merge SHA:  8e4c4eef1426efd6e5e8fb6cdf2c0541de393f55
+Back-merge run URL: https://github.com/mposition/Tomverse/actions/runs/38216422330 -- no file changed
+Ancestry verified:  8e4c4eef1 is an ancestor of develop (run above; rechecked 2026-10-12)
 ```
 
 ### When it does not land on its own
@@ -1122,7 +1122,7 @@ RC SHA:             d9ddaee59a8dd755ad1d5c83dc2e57b7c5fbdbc5
 Verified on:        ____________________
 Verified by / how:  ____________________
 Rollback SHA:       64c39e0e5
-Back-merge run:     ____________________   (post-merge)
+Back-merge run:     38216422330, no file changed
 ```
 
 Done this way, a selective release is a release. It gets a record under
