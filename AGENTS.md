@@ -1761,8 +1761,12 @@ Non-negotiable requirements:
 - **`offered` is the only input.** It already folds the feature flag, the conversation's product and cohort eligibility together, so no surface may derive availability from the flag alone.
 - The owner-approved initial release in
   `docs/policy/chat-refiner-initial-auto-release-v1.md` may supply a separate,
-  server-verified exact-deployment authority while the three measurement
-  attestations remain pending. Availability, mode storage and turn routing
+  server-verified exact-deployment authority under its v1 contract while the
+  three measurement attestations remain pending. The separately approved
+  `docs/policy/chat-refiner-stable-release-authority-v2.md` uses a new Owner
+  audit target bound to the execution-source fingerprint and effective
+  controls; the original commit and deployment remain audit provenance.
+  Availability, mode storage and turn routing
   must share that authority. It never marks a gate passed, extends a staging
   drill into production or relaxes manifest enforcement, plan, product,
   cohort, rollout or kill controls.
@@ -1799,8 +1803,9 @@ Non-negotiable requirements:
 - Manual mode shows a suggestion before send and requires an explicit
   use-or-keep decision. The approved Auto exception may create only a
   server-owned accepted decision during an ordinary human Send, and only for
-  a stored Chat conversation already in Auto mode with an exact-deployment
-  auto release. Neither mode sends a turn by itself.
+  a stored Chat conversation already in Auto mode with a currently valid
+  v1 exact-deployment or v2 stable-source Auto release. Neither mode sends a
+  turn by itself.
 - The durable user Message keeps the user's original bytes. Only an accepted
   suggestion may become the Router/provider execution prompt.
 - One request is bound to one exact draft snapshot and request id. Editing the
@@ -1862,8 +1867,10 @@ Non-negotiable requirements:
   authority consumed fact to `admitted: true`. The product v1 authority is a
   separate contract and must not consume these one-shot slots or tombstones.
 - The current server gate folds the default-off AppSetting, environment kill
-  switch, adapter readiness and exact-deployment release readback into one
-  answer. A stored flag or deployed adapter alone must never expose product
+  switch, adapter readiness and a valid versioned release readback into one
+  answer. V1 remains exact-deployment-bound; v2 requires a checked serving
+  runtime, stable execution-source and effective-control digest, and its own
+  Owner audit. A stored flag or deployed adapter alone must never expose product
   controls. Legacy activation still requires signed B03G latency-only evidence
   and its limited audit. The separate initial release in
   `docs/policy/chat-refiner-initial-auto-release-v1.md` preserves those failed

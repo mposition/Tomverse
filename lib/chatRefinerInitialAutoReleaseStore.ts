@@ -74,8 +74,8 @@ export async function inspectChatRefinerInitialAutoRelease(
         CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
         CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
       ] },
-      targetType: "ChatReleaseFingerprint",
-      targetId: binding.releaseFingerprint,
+      targetType: "ChatReleaseAuthority",
+      targetId: binding.releaseAuthorityDigest,
     },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: 3,
@@ -171,8 +171,8 @@ export async function activateChatRefinerInitialAutoRelease(input: {
     const prior = await tx.adminAuditLog.findMany({ where: {
       action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
         CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION] },
-      targetType: "ChatReleaseFingerprint",
-      targetId: binding.releaseFingerprint,
+      targetType: "ChatReleaseAuthority",
+      targetId: binding.releaseAuthorityDigest,
     }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1 });
     if (prior.length !== 0) {
       throw new Error("chat_refiner_initial_auto_activation_duplicate");
@@ -188,14 +188,14 @@ export async function activateChatRefinerInitialAutoRelease(input: {
     const routerActivationAuditLogId = await writeAdminAuditLog({ tx,
       session: input.session, request: input.request,
       action: CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
-      targetType: "ChatReleaseFingerprint", targetId: binding.releaseFingerprint,
+      targetType: "ChatReleaseAuthority", targetId: binding.releaseAuthorityDigest,
       summary: CHAT_REFINER_INITIAL_AUTO_ROUTER_SUMMARY,
       metadata: chatRefinerInitialAutoRouterMetadata(binding, evidenceRefs),
     });
     const productActivationAuditLogId = await writeAdminAuditLog({ tx,
       session: input.session, request: input.request,
       action: CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
-      targetType: "ChatReleaseFingerprint", targetId: binding.releaseFingerprint,
+      targetType: "ChatReleaseAuthority", targetId: binding.releaseAuthorityDigest,
       summary: CHAT_REFINER_INITIAL_AUTO_PRODUCT_SUMMARY,
       metadata: chatRefinerInitialAutoProductMetadata(
         binding, routerActivationAuditLogId, evidenceRefs),

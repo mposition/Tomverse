@@ -61,9 +61,9 @@ test("initial Auto owner activation and rollout use one real audit chain",
       select: { value: true },
     })).value, "false");
     const rows = await prisma.adminAuditLog.findMany({ where: {
-      targetType: "ChatReleaseFingerprint",
+      targetType: "ChatReleaseAuthority",
       targetId: (await import("@/lib/chatRefinerInitialAutoRelease"))
-        .chatRefinerInitialAutoRuntimeBinding(runtime).releaseFingerprint,
+        .chatRefinerInitialAutoRuntimeBinding(runtime).releaseAuthorityDigest,
       action: { in: ["chat_auto.initial_release_exception_activated",
         "prompt_refiner.product_initial_auto_release_activated"] },
     }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
@@ -80,9 +80,9 @@ test("initial Auto owner activation and rollout use one real audit chain",
       /activation_duplicate/,
     );
     assert.equal(await prisma.adminAuditLog.count({ where: {
-      targetType: "ChatReleaseFingerprint",
+      targetType: "ChatReleaseAuthority",
       targetId: (await import("@/lib/chatRefinerInitialAutoRelease"))
-        .chatRefinerInitialAutoRuntimeBinding(runtime).releaseFingerprint,
+        .chatRefinerInitialAutoRuntimeBinding(runtime).releaseAuthorityDigest,
       action: { in: ["chat_auto.initial_release_exception_activated",
         "prompt_refiner.product_initial_auto_release_activated"] },
     } }), 2);

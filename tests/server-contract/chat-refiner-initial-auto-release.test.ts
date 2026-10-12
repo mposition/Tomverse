@@ -152,8 +152,30 @@ test("activation writes one adjacent pair, leaves rollout untouched and does not
     evidenceRefs);
   assert.deepEqual((rows[1].metadata as Record<string, unknown>).evidenceRefs,
     evidenceRefs);
-  assert.equal(rows[0].targetType, "ChatReleaseFingerprint");
+  assert.equal(rows[0].targetType, "ChatReleaseAuthority");
   assert.equal(rows[0].targetId, rows[1].targetId);
+});
+
+test("a changed Router control closes the old pair but allows a new exact Owner pair", async () => {
+  const store = await storePromise;
+  const core = await corePromise;
+  const input = {
+    session: { user: { id: "owner-id", email: "owner@example.test" } } as never,
+    request: new Request("https://tomverse.test", { method: "POST" }),
+    runtimeCommitSha: runtime.RAILWAY_GIT_COMMIT_SHA,
+    runtimeDeploymentId: runtime.RAILWAY_DEPLOYMENT_ID,
+    evidenceRefs,
+  };
+  await store.activateChatRefinerInitialAutoRelease(input, runtime);
+  const changed = { ...runtime, AUTO_ROUTER_ROLLOUT_PERCENT: "10" };
+  assert.equal(await store.readChatRefinerInitialAutoRouterAuthority(changed), null);
+  await store.activateChatRefinerInitialAutoRelease(input, changed);
+  assert.equal(rows.length, 4);
+  assert.notEqual(rows[0].targetId, rows[2].targetId);
+  assert.equal(rows[2].targetId,
+    core.chatRefinerInitialAutoRuntimeBinding(changed).releaseAuthorityDigest);
+  assert.ok(await store.readChatRefinerInitialAutoRouterAuthority(changed));
+  assert.equal(rows[2].previousHash, rows[1].entryHash);
 });
 
 test("unchanged source remains authorized across commit and deployment changes", async () => {
@@ -306,7 +328,7 @@ test("missing, ambiguous, drifted and current-price-invalid pairs mint no author
   const binding = core.chatRefinerInitialAutoRuntimeBinding(runtime);
   const router = { id: "router", actorUserId: "owner", actorEmail: null,
     action: core.CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
-    targetType: "ChatReleaseFingerprint", targetId: binding.releaseFingerprint,
+    targetType: "ChatReleaseAuthority", targetId: binding.releaseAuthorityDigest,
     summary: core.CHAT_REFINER_INITIAL_AUTO_ROUTER_SUMMARY,
     metadata: core.chatRefinerInitialAutoRouterMetadata(binding, evidenceRefs),
     ipAddress: null, userAgent: null, previousHash: "prior",

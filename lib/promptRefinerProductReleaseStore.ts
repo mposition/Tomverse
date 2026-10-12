@@ -8,11 +8,10 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { inspectChatRefinerInitialAutoRelease } from
   "@/lib/chatRefinerInitialAutoReleaseStore";
-import { currentChatReleaseSourceFingerprint } from
-  "@/lib/chatReleaseSourceFingerprint";
 import { CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
   CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
-  chatRefinerInitialAutoResumeMetadata } from
+  chatRefinerInitialAutoResumeMetadata,
+  chatRefinerInitialAutoRuntimeBinding } from
   "@/lib/chatRefinerInitialAutoRelease";
 import { prisma } from "@/lib/prisma";
 import { initializePromptRefinerProductAutoGuard,
@@ -298,14 +297,17 @@ async function resolvePromptRefinerProductRelease(
     action: ACTIVATION_ACTION, targetType: "RailwayDeployment",
     targetId: runtimeDeploymentId,
   } });
-  let releaseFingerprint: string;
-  try { releaseFingerprint = currentChatReleaseSourceFingerprint(); }
-  catch { return closed(); }
-  const initialRows = await tx.adminAuditLog.findMany({ where: {
-    action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
-      CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION] },
-    targetType: "ChatReleaseFingerprint", targetId: releaseFingerprint,
-  }, select: { id: true }, take: 3 });
+  let releaseAuthorityDigest: string | null = null;
+  try { releaseAuthorityDigest =
+    chatRefinerInitialAutoRuntimeBinding(runtime).releaseAuthorityDigest; }
+  catch { if (rows.length === 0) return closed(); }
+  const initialRows = releaseAuthorityDigest
+    ? await tx.adminAuditLog.findMany({ where: {
+      action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
+        CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION] },
+      targetType: "ChatReleaseAuthority", targetId: releaseAuthorityDigest,
+    }, select: { id: true }, take: 3 })
+    : [];
   const initial = initialRows.length === 0
     ? ({ state: "absent" } as const)
     : await inspectChatRefinerInitialAutoRelease(tx, runtime);

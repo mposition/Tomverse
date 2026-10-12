@@ -30,17 +30,23 @@ activation. The owner action still requires recent administrator authentication,
 same-origin mutation, a checked exact serving deployment and source readback.
 The activation audit records its commit and deployment UUID as provenance.
 
-The continuing lookup key is a stable SHA-256 release fingerprint, not the
-deployment UUID or whole Git commit. It covers the checked-in Chat, Auto,
-Router, Refiner, Guest, model/pricing, provider, manifest, credit and audit
-execution modules, the Chat and release routes, and the relevant Prisma model
-definitions. File paths and bytes are both hashed. Missing or unreadable source
-closes authority. The exact path-selection code is part of the fingerprint, so
-changing its coverage also changes the fingerprint. An unrelated AMUX,
+The continuing lookup key binds a stable SHA-256 execution-source fingerprint
+to the effective Router configuration and pinned Refiner candidate, price,
+adapter and policy digests, not the deployment UUID or whole Git commit. The
+source fingerprint covers the checked-in Chat, Auto, Router, Refiner, Guest,
+model/pricing, provider, manifest, credit and audit execution modules, their
+local import closure, the Chat and release routes, the relevant Prisma model
+definitions, and the lockfile entries for dependencies reached by that
+execution graph. File paths and bytes are both
+hashed. Missing or unreadable source closes authority. The exact path-selection
+code is in the fingerprint, so changing its coverage also changes the key.
+The approved policy body is bound by its own digest; frontmatter status changes
+do not rotate an active release. An unrelated AMUX,
 marketing, homepage or Composer-only deployment may continue using the same
 owner activation when this fingerprint and all effective controls are unchanged.
-An executable boundary change requires a new reviewed release and owner
-activation. A changed or ambiguous fingerprint cannot inherit the old audit.
+An executable boundary or effective control change requires a new reviewed
+release and owner activation. A changed or ambiguous authority key cannot
+inherit the old audit, but the owner may record a new audit pair for the new key.
 
 The effective Router cohort, eligible plans, fallback, instrumentation, manifest
 key ID, checked-in Refiner candidate/price/adapter, Guest policy and Guest

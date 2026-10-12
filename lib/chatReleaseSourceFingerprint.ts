@@ -1,30 +1,165 @@
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 
 /**
- * Files capable of changing the Chat/Guest execution boundary. The path list is
- * computed from the serving source tree, so adding or deleting a matching
- * module changes the fingerprint without a manually bumped version.
+ * Serving routes are entry points. Their local import closure is included so
+ * a new cost, provider or dispatch helper cannot inherit an older Owner
+ * release merely because its filename has an unfamiliar prefix.
  */
-const LIB_SOURCE = /^(?:chat|guest|auto|router|routing|promptRefiner|provider|model|credit|billing|manifest|dispatch|activeAiModel|appSettings|adminAudit|adminAuth|adminReauthentication|auth|prisma|apiSecurity|requestOrigin|originProtection|clientIp|token|usage|cost)[A-Za-z0-9_-]*\.(?:ts|tsx|mjs)$/;
-const SCHEMA_MODEL = /^(?:AdminAuditLog|AppSetting|BillingPlan|ModelRegistryEntry|User|Account|Conversation[A-Za-z0-9_]*|Message[A-Za-z0-9_]*|Chat[A-Za-z0-9_]*|Credit[A-Za-z0-9_]*|Provider[A-Za-z0-9_]*|Routing[A-Za-z0-9_]*|PromptRefiner[A-Za-z0-9_]*|Guest[A-Za-z0-9_]*|AutoRouter[A-Za-z0-9_]*|ContextManifest|TokenEstimate[A-Za-z0-9_]*)$/;
-const REQUIRED_PATHS = Object.freeze([
-  "docs/policy/chat-refiner-stable-release-authority-v2.md",
-  "prisma/schema.prisma",
+const ENTRY_DIRECTORIES = Object.freeze([
+  "app/api/chat",
+  "app/api/products/chat",
 ]);
-
-function sourcePaths(root: string, directory: string,
-  nameMatches: (name: string) => boolean): string[] {
-  const base = join(root, ...directory.split("/"));
-  return readdirSync(base, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile() && nameMatches(entry.name))
-    .map((entry) => `${directory}/${relative(base,
-      join(entry.parentPath, entry.name)).replaceAll("\\", "/")}`);
-}
+const OWNER_RELEASE_ROUTES = Object.freeze([
+  "app/api/admin/prompt-refiner/product-activation/route.ts",
+  "app/api/admin/prompt-refiner/product-rollout/route.ts",
+  "app/api/admin/prompt-refiner/product-status/route.ts",
+  "app/api/admin/prompt-refiner/product-auto-resume/route.ts",
+  "app/api/admin/prompt-refiner/guest-chat-auto-activation/route.ts",
+]);
+const SCHEMA_MODEL = /^(?:AdminAuditLog|AppSetting|BillingPlan|ModelRegistryEntry|User|Account|Conversation[A-Za-z0-9_]*|Message[A-Za-z0-9_]*|Chat[A-Za-z0-9_]*|Credit[A-Za-z0-9_]*|Provider[A-Za-z0-9_]*|Routing[A-Za-z0-9_]*|PromptRefiner[A-Za-z0-9_]*|Guest[A-Za-z0-9_]*|AutoRouter[A-Za-z0-9_]*|ContextManifest|TokenEstimate[A-Za-z0-9_]*)$/;
+const SOURCE_EXTENSIONS = Object.freeze(["", ".ts", ".tsx", ".mjs", ".js",
+  ".json", "/index.ts", "/index.tsx", "/index.mjs", "/index.js"]);
+const MINIMUM_SOURCE_FILES = 100;
+const REQUIRED_SOURCE = Object.freeze([
+  "app/api/chat/route.ts",
+  "app/api/products/chat/capabilities/route.ts",
+  "lib/chatRefinerInitialAutoRelease.ts",
+  "lib/guestChatSmartAdaptiveRelease.ts",
+  "packages/chat-core/src/index.ts",
+]);
 
 const digest = (value: string | Buffer) => createHash("sha256")
   .update(value).digest("hex");
+const slash = (path: string) => path.replaceAll("\\", "/");
+
+function sourcePaths(root: string, directory: string): string[] {
+  const base = join(root, ...directory.split("/"));
+  return readdirSync(base, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.(?:ts|tsx|mjs|js)$/.test(entry.name))
+    .map((entry) => `${directory}/${slash(relative(base,
+      join(entry.parentPath, entry.name)))}`);
+}
+
+function localImport(root: string, importer: string, specifier: string):
+  string | null {
+  let base: string;
+  if (specifier.startsWith("@/")) {
+    base = resolve(root, specifier.slice(2));
+  } else if (specifier === "@tomverse/chat-core" ||
+      specifier.startsWith("@tomverse/chat-core/")) {
+    const subpath = specifier === "@tomverse/chat-core"
+      ? "index" : specifier.slice("@tomverse/chat-core/".length);
+    base = resolve(root, "packages", "chat-core", "src", subpath);
+  } else if (specifier.startsWith(".")) {
+    base = resolve(root, dirname(importer), specifier);
+  } else {
+    return null;
+  }
+  const path = SOURCE_EXTENSIONS.map((extension) => `${base}${extension}`)
+    .find((candidate) => existsSync(candidate) && statSync(candidate).isFile());
+  if (!path) throw new Error("chat_release_local_import_missing");
+  const relativePath = slash(relative(root, path));
+  if (relativePath.startsWith("../") || relativePath === "..") {
+    throw new Error("chat_release_local_import_outside_repository");
+  }
+  return relativePath;
+}
+
+function importSpecifiers(root: string, path: string): string[] {
+  const source = readFileSync(join(root, ...path.split("/")), "utf8");
+  return [
+    ...source.matchAll(/^\s*(?:import|export)\s+(?:type\s+)?(?:[^"';]*?\s+from\s*)?["']([^"']+)["']/gm),
+    ...source.matchAll(/\b(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)/g),
+  ].map((match) => match[1]);
+}
+
+function importedPaths(root: string, path: string): string[] {
+  return importSpecifiers(root, path)
+    .map((specifier) => localImport(root, path, specifier))
+    .filter((value): value is string => value !== null);
+}
+
+function externalPackage(specifier: string): string | null {
+  if (specifier.startsWith(".") || specifier.startsWith("@/") ||
+      specifier === "@tomverse/chat-core" ||
+      specifier.startsWith("@tomverse/chat-core/") ||
+      specifier.startsWith("node:")) return null;
+  if (!/^(?:@[a-z0-9._-]+\/[a-z0-9._-]+|[a-z0-9._-]+)(?:\/|$)/i.test(
+    specifier)) return null;
+  const segments = specifier.split("/");
+  return specifier.startsWith("@")
+    ? segments.slice(0, 2).join("/") : segments[0];
+}
+
+function executionDependencyLock(root: string, paths: readonly string[]): string {
+  const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
+  const packages = lock?.packages as Record<string, Record<string, unknown>> | undefined;
+  if (!packages || typeof packages !== "object") {
+    throw new Error("chat_release_dependency_lock_invalid");
+  }
+  const selected = new Set<string>();
+  const queue = [...new Set(paths.flatMap((path) =>
+    importSpecifiers(root, path).map(externalPackage)
+      .filter((name): name is string => Boolean(name))))]
+    .map((name) => `node_modules/${name}`);
+  for (let index = 0; index < queue.length; index += 1) {
+    const key = queue[index];
+    if (selected.has(key)) continue;
+    const entry = packages[key];
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`chat_release_dependency_lock_incomplete:${key}`);
+    }
+    selected.add(key);
+    const required = entry.dependencies as Record<string, string> | undefined;
+    const optional = entry.optionalDependencies as Record<string, string> | undefined;
+    for (const name of [...Object.keys(required ?? {}),
+      ...Object.keys(optional ?? {})]) {
+      let scope = key;
+      let resolvedKey = "";
+      while (scope) {
+        const candidate = `${scope}/node_modules/${name}`;
+        if (packages[candidate]) { resolvedKey = candidate; break; }
+        const parent = scope.lastIndexOf("/node_modules/");
+        scope = parent < 0 ? "" : scope.slice(0, parent);
+      }
+      resolvedKey ||= `node_modules/${name}`;
+      if (!packages[resolvedKey]) {
+        if (Object.hasOwn(optional ?? {}, name)) continue;
+        throw new Error(`chat_release_dependency_lock_incomplete:${key}:${name}`);
+      }
+      queue.push(resolvedKey);
+    }
+  }
+  if (selected.size < 10) {
+    throw new Error("chat_release_dependency_lock_scope_invalid");
+  }
+  return JSON.stringify([...selected].sort().map((key) => [key, packages[key]]));
+}
+
+export function chatReleaseSourcePaths(root: string): string[] {
+  const entries = new Set<string>([
+    ...ENTRY_DIRECTORIES.flatMap((directory) => sourcePaths(root, directory)),
+    ...OWNER_RELEASE_ROUTES,
+    ...sourcePaths(root, "packages/chat-core/src"),
+  ]);
+  const queue = [...entries];
+  for (let index = 0; index < queue.length; index += 1) {
+    for (const imported of importedPaths(root, queue[index])) {
+      if (!entries.has(imported)) {
+        entries.add(imported);
+        queue.push(imported);
+      }
+    }
+  }
+  const paths = [...entries].sort();
+  if (paths.length < MINIMUM_SOURCE_FILES ||
+      REQUIRED_SOURCE.some((path) => !entries.has(path))) {
+    throw new Error("chat_release_source_scope_invalid");
+  }
+  return paths;
+}
 
 function prismaExecutionSchema(source: string): string {
   const lines = source.replaceAll("\r\n", "\n").split("\n");
@@ -53,35 +188,17 @@ function prismaExecutionSchema(source: string): string {
 /** Fail closed if the serving image cannot prove its reviewed source. */
 export function chatReleaseSourceFingerprint(root: string): string {
   try {
-    const paths = [
-      ...readdirSync(join(root, "lib"))
-        .filter((name) => LIB_SOURCE.test(name))
-        .map((name) => `lib/${name}`),
-      ...sourcePaths(root, "app/api/chat",
-        (name) => /\.(?:ts|tsx|mjs)$/.test(name)),
-      ...sourcePaths(root, "app/api/products/chat",
-        (name) => /\.(?:ts|tsx|mjs)$/.test(name)),
-      ...sourcePaths(root, "app/api/admin/prompt-refiner",
-        (name) => /\.(?:ts|tsx|mjs)$/.test(name)),
-      ...sourcePaths(root, "packages/chat-core/src",
-        (name) => /\.(?:ts|tsx)$/.test(name)),
-      ...REQUIRED_PATHS,
-    ].filter((path) => path !== "prisma/schema.prisma").sort();
-    if (paths.length < 100 ||
-        !paths.includes("app/api/chat/route.ts") ||
-        !paths.includes("app/api/products/chat/capabilities/route.ts") ||
-        paths.some((path, index) =>
-        index > 0 && path === paths[index - 1])) {
-      throw new Error("chat_release_source_scope_invalid");
-    }
+    const paths = chatReleaseSourcePaths(root);
     const entries = paths.map((path) =>
       [path, digest(readFileSync(join(root, ...path.split("/"))))]);
     const schema = readFileSync(join(root, "prisma", "schema.prisma"), "utf8");
     entries.push(["prisma/schema.prisma#execution-models",
       digest(prismaExecutionSchema(schema))]);
+    entries.push(["package-lock.json#execution-dependencies",
+      digest(executionDependencyLock(root, paths))]);
     return digest(JSON.stringify({ version: "chat-release-source-v2", entries }));
-  } catch {
-    throw new Error("chat_release_source_unavailable");
+  } catch (error) {
+    throw new Error("chat_release_source_unavailable", { cause: error });
   }
 }
 
