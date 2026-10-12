@@ -10,6 +10,10 @@ import {
 } from "@/lib/conversationProduct";
 import { prisma } from "@/lib/prisma";
 
+// The panel selection is required by createConversation and is the
+// caller's decision; these tests are about the product, not the models.
+const SELECTED_MODELS = "[]";
+
 /**
  * Product boundary decision record v1.2, §6 — writer coverage.
  *
@@ -38,16 +42,19 @@ test("every product the service creates lands with its productKey set", async ()
 
   const rows = await prisma.$transaction(async (tx) => [
     await createConversation(tx, {
+      selectedModels: SELECTED_MODELS,
       userId: user.id,
       title: "review",
       productKey: REVIEW_PRODUCT_KEY,
     }),
     await createConversation(tx, {
+      selectedModels: SELECTED_MODELS,
       userId: user.id,
       title: "chat",
       productKey: CHAT_PRODUCT_KEY,
     }),
     await createConversation(tx, {
+      selectedModels: SELECTED_MODELS,
       userId: user.id,
       title: "studio",
       productKey: STUDIO_PRODUCT_KEY,
@@ -74,6 +81,7 @@ test("the modality comes from the product, so a caller cannot forget it", async 
   const user = await createUser();
   const row = await prisma.$transaction((tx) =>
     createConversation(tx, {
+      selectedModels: SELECTED_MODELS,
       userId: user.id,
       title: "studio default",
       productKey: STUDIO_PRODUCT_KEY,
@@ -91,6 +99,7 @@ test("a product and modality that disagree are refused before the database", asy
   await assert.rejects(
     prisma.$transaction((tx) =>
       createConversation(tx, {
+        selectedModels: SELECTED_MODELS,
         userId: user.id,
         title: "studio in chat",
         productKey: STUDIO_PRODUCT_KEY,
@@ -110,6 +119,7 @@ test("Auto outside Chat is refused before the database", async () => {
   await assert.rejects(
     prisma.$transaction((tx) =>
       createConversation(tx, {
+        selectedModels: SELECTED_MODELS,
         userId: user.id,
         title: "auto review",
         productKey: REVIEW_PRODUCT_KEY,
@@ -131,6 +141,7 @@ test("the service opens no transaction of its own, so a caller's rollback takes 
   await assert.rejects(
     prisma.$transaction(async (tx) => {
       await createConversation(tx, {
+        selectedModels: SELECTED_MODELS,
         userId: user.id,
         title: "rolled back",
         productKey: REVIEW_PRODUCT_KEY,
@@ -149,7 +160,7 @@ test("a selected narrower row still gets its product written", async () => {
   const created = await prisma.$transaction((tx) =>
     createConversation(
       tx,
-      { userId: user.id, title: "image", productKey: STUDIO_PRODUCT_KEY },
+      { selectedModels: SELECTED_MODELS, userId: user.id, title: "image", productKey: STUDIO_PRODUCT_KEY },
       { id: true }
     )
   );

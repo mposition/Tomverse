@@ -7,6 +7,10 @@ import { REVIEW_PRODUCT_KEY, STUDIO_PRODUCT_KEY } from "@/lib/conversationProduc
 import { prisma } from "@/lib/prisma";
 import { beginInstrumentedDispatch } from "@/lib/routingDispatchInstrumentation";
 
+// The panel selection is required by createConversation and is the
+// caller's decision; these tests are about the product, not the models.
+const SELECTED_MODELS = "[]";
+
 /**
  * Product boundary decision record v1.2, §5 — RoutingRun product attribution.
  *
@@ -65,6 +69,7 @@ test("a manual run stores the conversation it belongs to", async () => {
   const user = await createUser();
   const conversation = await prisma.$transaction((tx) =>
     createConversation(tx, {
+      selectedModels: SELECTED_MODELS,
       userId: user.id,
       title: "review",
       productKey: REVIEW_PRODUCT_KEY,
@@ -97,6 +102,7 @@ test("deleting the conversation breaks the join and keeps the snapshot", async (
   const user = await createUser();
   const conversation = await prisma.$transaction((tx) =>
     createConversation(tx, {
+      selectedModels: SELECTED_MODELS,
       userId: user.id,
       title: "studio",
       productKey: STUDIO_PRODUCT_KEY,
@@ -126,6 +132,7 @@ test("deleting the account still takes the run: userId stays Cascade", async () 
   const user = await createUser();
   const conversation = await prisma.$transaction((tx) =>
     createConversation(tx, {
+      selectedModels: SELECTED_MODELS,
       userId: user.id,
       title: "review",
       productKey: REVIEW_PRODUCT_KEY,
