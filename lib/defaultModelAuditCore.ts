@@ -116,11 +116,26 @@ export type DefaultModelAuditInput = {
   modelStates: readonly ModelStateSnapshot[];
   /** Section C: the signed-in new-conversation combination. */
   newConversation: NewConversationAuditInput;
+  /**
+   * What the stored lead should put first: the stored id, or the successor the
+   * resolver puts in its slot when it is a retired lineup member
+   * (lib/appDefaults `expectedLeadForStored`). Absent means the stored id.
+   */
+  storedGuestLeadExpectedId?: string | null;
+  /**
+   * The providers every guest selection must hold one each of, and the
+   * providers of the selection the resolver produced. Absent skips the check.
+   */
+  guestLineupProviders?: {
+    required: readonly string[];
+    effective: readonly (string | null)[];
+  };
 };
 
 export type DefaultModelFinding = {
   code:
     | "guest_setting_not_applied"
+    | "guest_lineup_provider_missing"
     | "guest_default_not_selectable"
     | "guest_default_not_standard"
     | "default_model_unusable"
@@ -193,18 +208,41 @@ export const auditDefaultModels = (
   //    the brand trio is dropped by the resolver, and the write that stored it
   //    reported success.
   const stored = input.storedGuestDefaultModelId;
-  const storedSettingApplied = stored === null ? true : lead === stored;
+  // A retired lineup member that the resolver succeeded in its slot is
+  // applied: its successor leading is exactly what the stored lead asks for.
+  const expectedLead = stored === null ? null : (input.storedGuestLeadExpectedId ?? stored);
+  const storedSettingApplied = stored === null ? true : lead === expectedLead;
   if (stored !== null && !storedSettingApplied) {
     findings.push({
       code: "guest_setting_not_applied",
       message:
-        `AppSetting["guestDefaultModelId"] is "${stored}" but the guest selection leads with ` +
-        `"${lead ?? "nothing"}". ` +
+        `AppSetting["guestDefaultModelId"] is "${stored}"` +
+        (expectedLead !== stored ? ` (succeeded by "${expectedLead}")` : "") +
+        ` but the guest selection leads with "${lead ?? "nothing"}". ` +
         (input.guestBrandTrioModelIds.includes(stored)
           ? "The stored model is in the brand trio, so the resolver should have led with it."
           : `The setting only reorders the brand trio (${input.guestBrandTrioModelIds.join(", ")}), ` +
             "so this value was saved and then silently ignored."),
     });
+  }
+
+  // Platform strategy: one model from each required provider. The resolver
+  // cannot always keep it -- a retired member with no eligible successor is
+  // backfilled from the fallback list -- so the audit says so out loud.
+  if (input.guestLineupProviders) {
+    const { required, effective } = input.guestLineupProviders;
+    const missing = required.filter(
+      (provider) => effective.filter((candidate) => candidate === provider).length !== 1
+    );
+    if (missing.length > 0) {
+      findings.push({
+        code: "guest_lineup_provider_missing",
+        message:
+          `The guest selection must hold one model each from ${required.join(", ")}; ` +
+          `it is missing or doubling ${missing.join(", ")} (providers: ${effective.map((provider) => provider ?? "unknown").join(", ")}). ` +
+          "Choose an eligible model for that slot in the default lineup.",
+      });
+    }
   }
 
   // The lead a guest actually gets has to be a model a guest can actually

@@ -153,9 +153,10 @@ import type {
 } from "@/lib/conversationProfileBinding";
 import {
   APP_DEFAULTS,
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
+  createReplacementResolver,
   GUEST_BRAND_TRIO_MODEL_IDS,
-  GUEST_FALLBACK_MODEL_IDS,
   isWebSearchEnabled,
   normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
@@ -695,6 +696,7 @@ export function ChatPageClient({
   // Resolved on the server (see page.tsx) rather than fetched after mount, so
   // this component's very first render already knows the guest default.
   guestDefaultModelId,
+  guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
   voiceInputEnabled = false,
   promptRefinerMode = "off",
@@ -709,6 +711,11 @@ export function ChatPageClient({
   mountedSurface = "workspace",
 }: {
   guestDefaultModelId: string;
+  /**
+   * The effective default lineup (lib/appSettings PublicAppSettings), resolved
+   * on the server like the lead so the first render and the server agree.
+   */
+  guestBrandTrioModelIds?: readonly string[];
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
   /**
@@ -1706,13 +1713,15 @@ export function ChatPageClient({
   // lifecycle. The catalogue itself arrives as an initial prop from the
   // server (components/ModelCatalogProvider), so this is already populated on
   // the first render rather than after a client fetch.
-  const guestCatalogue = useMemo(
-    () => ({
+  const guestCatalogue = useMemo(() => {
+    const isGuestEligible = createGuestEligibilityCheck(getModel);
+    return {
       isEnabledModelId,
-      isGuestEligible: createGuestEligibilityCheck(getModel),
-    }),
-    [getModel, isEnabledModelId]
-  );
+      isGuestEligible,
+      isDefaultEligible: createDefaultLineupEligibilityCheck(getModel, isGuestEligible),
+      resolveReplacement: createReplacementResolver(getModel),
+    };
+  }, [getModel, isEnabledModelId]);
 
   // Lazy initializer, not a post-mount effect: the model count is what the
   // estimated credits, panel count, Send label and conversation summary are
@@ -1728,6 +1737,7 @@ export function ChatPageClient({
       ? resolveGuestInitialSelectedModels({
           catalogue: guestCatalogue,
           leadModelId: guestDefaultModelId,
+          trio: guestBrandTrioModelIds,
           environment: readGuestInitialModelEnvironment(),
         })
       : null
@@ -2633,11 +2643,13 @@ export function ChatPageClient({
     () =>
       clampGuestSelectedModels(
         resolveGuestDefaultSelectedModels({
-          isEligible: guestCatalogue.isGuestEligible,
+          isEligible: guestCatalogue.isDefaultEligible,
           leadModelId: guestDefaultModelId,
+          resolveReplacement: guestCatalogue.resolveReplacement,
+          trio: guestBrandTrioModelIds,
         })
       ),
-    [clampGuestSelectedModels, guestCatalogue, guestDefaultModelId]
+    [clampGuestSelectedModels, guestBrandTrioModelIds, guestCatalogue, guestDefaultModelId]
   );
 
   const isNewAccountEligibleModel = useCallback(
@@ -2654,19 +2666,23 @@ export function ChatPageClient({
 
   // Shown the first time a freshly created account loads chat, so a new
   // signed-in user starts with the same 3-model side-by-side comparison a
-  // guest already sees instead of a single panel. Same brand-trio-plus-
-  // fallback selection as guestDefaultSelectedModels above, just checked
-  // against "Free" (every guest-eligible model is Free-eligible too).
-  const newAccountDefaultSelectedModels = useMemo(() => {
-    const candidates = [...GUEST_BRAND_TRIO_MODEL_IDS, ...GUEST_FALLBACK_MODEL_IDS];
-    const trio: string[] = [];
-    for (const modelId of candidates) {
-      if (trio.includes(modelId) || !isNewAccountEligibleModel(modelId)) continue;
-      trio.push(modelId);
-      if (trio.length >= APP_DEFAULTS.maxSelectedModels) break;
-    }
-    return clampSelectedModels(trio);
-  }, [clampSelectedModels, isNewAccountEligibleModel]);
+  // guest already sees instead of a single panel. The same resolver, lineup
+  // and lead as guestDefaultSelectedModels above -- including a retired
+  // member's successor -- just checked against "Free" (every guest-eligible
+  // model is Free-eligible too).
+  const newAccountDefaultSelectedModels = useMemo(
+    () =>
+      clampSelectedModels(
+        resolveGuestDefaultSelectedModels({
+          isEligible: createDefaultLineupEligibilityCheck(getModel, isNewAccountEligibleModel),
+          leadModelId: guestDefaultModelId,
+          maxModels: APP_DEFAULTS.maxSelectedModels,
+          resolveReplacement: guestCatalogue.resolveReplacement,
+          trio: guestBrandTrioModelIds,
+        })
+      ),
+    [clampSelectedModels, getModel, guestBrandTrioModelIds, guestCatalogue, guestDefaultModelId, isNewAccountEligibleModel]
+  );
 
   // The guest default lead model used to be fetched here after mount, which
   // is why the guest bootstrap effect below had to wait on a network response

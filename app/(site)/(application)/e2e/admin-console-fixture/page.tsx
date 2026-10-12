@@ -13,6 +13,7 @@ import {
 } from "@/components/admin/RefundRequestsPanel";
 import type { AdminSecurityUser } from "@/components/admin/AdminUserSecurityControls";
 import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationBadges";
+import { GUEST_BRAND_TRIO_MODEL_IDS } from "@/lib/appDefaults";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import { AdminUserSecurityHarness } from "./AdminUserSecurityHarness";
 
@@ -178,6 +179,7 @@ export default async function AdminConsoleFixturePage({
           <PlatformSettingsPanel
             settings={{
               guestDefaultModelId: "gpt-5-6-luna",
+              guestBrandTrioModelIds: [...GUEST_BRAND_TRIO_MODEL_IDS],
               aiChatEnabled: true,
               attachmentsEnabled: true,
               publicSharingEnabled: true,
