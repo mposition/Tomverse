@@ -18,7 +18,7 @@ import {
   type AmuxAutoAdmissionNotice,
   type AmuxAutoAdmissionPending,
   type AmuxAutoAdmissionUpdate,
-} from "@/lib/amuxAutoAdmissionControlCore";
+} from "@/lib/amux/autoAdmissionControlCore";
 
 type Messages = (typeof adminAmuxAutoAdmissionMessages)["en"];
 const CONTROL_PATH = "/api/admin/amux/v22-auto-promotion";

@@ -15,7 +15,7 @@ import {
   type AmuxAutoAdmissionIo,
   type AmuxAutoAdmissionNotice,
   type AmuxAutoAdmissionUpdate,
-} from "@/lib/amuxAutoAdmissionControlCore";
+} from "@/lib/amux/autoAdmissionControlCore";
 
 const CONTROL: AmuxAutoAdmissionControl = {
   codeLatch: true, environmentEnabled: true, active: false,
