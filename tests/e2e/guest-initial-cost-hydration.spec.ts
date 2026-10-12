@@ -36,6 +36,70 @@ const GUEST_CREDITS_SEARCH_OFF = GUEST_MODEL_COUNT;
 const GUEST_SEND_LABEL = `Send · ${GUEST_CREDITS} credits`;
 const GUEST_ENTRY = "/review?lang=en&entry=guest-preview";
 
+for (const product of ["chat", "review"] as const) {
+  test(`last Guest ${product} deletion removes every transcript and preserves the other product @ui-risk`, async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    await page.route("**/api/products/chat/capabilities", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ autoSelection: { offered: false } }),
+    }));
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() !== "GET" && /\/api\/(chat|conversations)(?:\/|\?|$)/.test(request.url())) {
+        mutations.push(request.url());
+      }
+    });
+    await page.addInitScript(({ surface, model }) => {
+      if (sessionStorage.getItem("qa-scoped-delete-seeded")) return;
+      sessionStorage.setItem("qa-scoped-delete-seeded", "1");
+      for (const workspace of ["chat", "review"] as const) {
+        const id = workspace === "chat" ? "guest_chat_delete_fixture" : "guest_delete_fixture";
+        const indexKey = workspace === "chat" ? "guest_chat_conversations" : "guest_conversations";
+        const activeKey = workspace === "chat" ? "tomverse_chat_active_chat_id" : "tomverse_active_chat_id";
+        localStorage.setItem(indexKey, JSON.stringify([{
+          id, title: `Last ${workspace} deletion fixture`, selectedModels: [model],
+          disabledPanels: [], selectionMode: "manual", webSearchMode: "off",
+          createdAt: "2026-10-12T00:00:00.000Z",
+        }]));
+        sessionStorage.setItem(activeKey, id);
+        const transcript = JSON.stringify([
+          { id: `${workspace}-question`, role: "user", content: "synthetic deletion question", status: "normal" },
+          { id: `${workspace}-answer`, role: "assistant", content: "synthetic deletion answer", status: "normal" },
+        ]);
+        localStorage.setItem(`guest_messages_${id}`, transcript);
+        localStorage.setItem(`guest_messages_${id}_${model}`, transcript);
+        localStorage.setItem(`guest_messages_${id}_hidden-old-model`, transcript);
+      }
+      localStorage.setItem("qa-unrelated-setting", "keep");
+      sessionStorage.setItem("qa-delete-surface", surface);
+    }, { surface: product, model: GUEST_BRAND_TRIO_MODEL_IDS[0] });
+    await page.goto(`/${product}?lang=en`);
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    const id = product === "chat" ? "guest_chat_delete_fixture" : "guest_delete_fixture";
+    const otherId = product === "chat" ? "guest_delete_fixture" : "guest_chat_delete_fixture";
+    const otherIndex = product === "chat" ? "guest_conversations" : "guest_chat_conversations";
+    const preserved = await page.evaluate(({ other, index }) => Object.fromEntries(
+      Object.entries(localStorage).filter(([key]) => key === index || key === "qa-unrelated-setting" || key.startsWith(`guest_messages_${other}`))
+    ), { other: otherId, index: otherIndex });
+    if ((page.viewportSize()?.width ?? 1280) < 1024) {
+      await page.getByTestId("mobile-sidebar-open").click();
+    }
+    await page.locator(`[data-testid="conversation-menu"][data-conversation-id="${id}"]:visible`).click();
+    await page.getByTestId("conversation-menu-panel").getByRole("button", { name: "Delete", exact: true }).click();
+    await page.getByRole("dialog", { name: "Delete", exact: true }).getByRole("button", { name: "Delete", exact: true }).click();
+    const readDeleted = () => page.evaluate((deletedId) => Object.keys(localStorage).filter(
+      (key) => key === `guest_messages_${deletedId}` || key.startsWith(`guest_messages_${deletedId}_`)
+    ), id);
+    await expect.poll(readDeleted).toEqual([]);
+    expect(await page.evaluate((keys) => Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)])), Object.keys(preserved))).toEqual(preserved);
+    await page.reload();
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await expect.poll(readDeleted).toEqual([]);
+    expect(await page.evaluate((keys) => Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)])), Object.keys(preserved))).toEqual(preserved);
+    expect(mutations).toEqual([]);
+  });
+}
+
 type FirstPaintSample = {
   modelCount: number | null;
   estimatedCredits: number | null;
