@@ -293,7 +293,11 @@ for (const [label, answer] of [
   ["a 200 that is not JSON", () => Promise.resolve(new Response("ok", { status: 200 }))],
   ["a 200 with an empty body object", () => Promise.resolve(json(200, {}))],
   ["a 200 naming another worker", () => Promise.resolve(json(200, { workerName: "claude-chore", revision: 1, action: "amux.worker.register", eventId: "e" }))],
-  ["a 200 at another revision", (entry: AmuxWorkerSeedEntry) => Promise.resolve(json(200, { workerName: entry.workerName, revision: 2, action: "amux.worker.change", eventId: "e" }))],
+  // Each receipt field on its own: everything else matches.
+  ["a 200 at another revision", (entry: AmuxWorkerSeedEntry) => Promise.resolve(json(200, { workerName: entry.workerName, revision: 2, action: "amux.worker.register", eventId: "e" }))],
+  ["a 200 under another action", (entry: AmuxWorkerSeedEntry) => Promise.resolve(json(200, { workerName: entry.workerName, revision: 1, action: "amux.worker.change", eventId: "e" }))],
+  ["a 200 without an event id", (entry: AmuxWorkerSeedEntry) => Promise.resolve(json(200, { workerName: entry.workerName, revision: 1, action: "amux.worker.register" }))],
+  ["a 200 with an empty event id", (entry: AmuxWorkerSeedEntry) => Promise.resolve(json(200, { workerName: entry.workerName, revision: 1, action: "amux.worker.register", eventId: "" }))],
 ] as const) {
   test(`${label}: the outcome is unknown, so nothing more is sent and the registry is read before release`, async () => {
     const { posted, reads, last, updates } = await runWith([(entry) => Promise.resolve(receipt(entry)), answer], PARTIAL);

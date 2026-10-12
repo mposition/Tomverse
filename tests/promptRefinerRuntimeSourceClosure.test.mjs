@@ -497,7 +497,7 @@ const compilerOptions = parsedConfig.options;
 // are kept. Every closure file equals develop's, so develop's pins hold.
 // 2026-10-12, AMUX worker registry R1 (orchestration policy version 31): the
 // marketing webhook fingerprint's history comment in
-// lib/marketingAutomationAccess.ts grows by five lines, moving the accesses
+// lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
 // below it. Count 228 and the position-free inventory remain unchanged; only
 // their source positions are repinned.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
