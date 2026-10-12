@@ -28,9 +28,11 @@ import {
   Loader2,
   Lock,
   ImagePlus,
+  Info,
   MessageSquare,
   Microscope,
   Paperclip,
+  PanelsTopLeft,
   Plus,
   Presentation,
   RefreshCw,
@@ -42,7 +44,7 @@ import {
 } from "lucide-react";
 import { assistantProfileCreateHref } from "@/lib/assistantProfileReturn";
 import { settingsSectionHref } from "@/lib/settingsNavigation";
-import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
+import { CreditCoinIcon } from "@/components/credits/CreditCostBadge";
 import {
   MAX_SELECTED_MODELS,
   getModelUsageProfile,
@@ -703,7 +705,7 @@ const loadExternalScript = (src: string) =>
 type ChatInputProps = {
   /** The product this composer belongs to; switches navigate without rewriting it. */
   currentProduct?: ChatWorkspaceProduct;
-  /** Mobile product navigation lives in the drawer to preserve the input dock. */
+  /** Product navigation may also remain in the mobile drawer as a second route. */
   showProductSwitcher?: boolean;
   /** Locks product navigation while the page owns an unknown or pre-send action. */
   productSwitchDisabled?: boolean;
@@ -1156,6 +1158,10 @@ export function ChatInput({
     const helpCopy = chatHelpCopy[lang];
     const autoCopy = autoRoutingCopy[lang];
     const isAutoMode = selectionMode === "auto";
+    const isReviewProduct = currentProduct === "review";
+    const currentProductCopy = currentProduct
+      ? chatProductUiCopy[lang][currentProduct]
+      : null;
     const isAutoCapabilityPending =
       isAutoMode && draftLocked && !autoSelectionOffered;
     const modelsSelectedLabel = (count: number) =>
@@ -2120,6 +2126,21 @@ export function ChatInput({
       }
     },
     [menuView, selectedModels.length]
+  );
+
+  const toggleModelPicker = useCallback(
+    (trigger: HTMLButtonElement) => {
+      lastMenuTriggerRef.current = trigger;
+      const shouldClose = isMenuOpen && menuView === "models";
+      if (shouldClose) {
+        closeMenu(true);
+        return;
+      }
+      setMenuView("models");
+      setIsMenuOpen(true);
+      trackProductEvent("model_picker_opened", selectedModels.length, {});
+    },
+    [closeMenu, isMenuOpen, menuView, selectedModels.length]
   );
 
   // The mobile header's model summary opens this picker rather than shipping a
@@ -3132,26 +3153,34 @@ export function ChatInput({
     }
   };
 
-  // Both composer tool chips. They always sit in a row of their own above the
-  // textarea -- see docs/ui-contracts/mobile-chat-composer.md -- and only the
-  // label length differs between the shells, so the two never drift apart.
-  const hasToolStatusChips = webSearchState.isVisible || isDeepResearchPending;
+  // A fully supported web-search state is a compact tool in the footer. A
+  // partial or blocked state keeps its own row because the exception detail
+  // and recovery path must never compete with the textarea or submit actions.
+  const webSearchNeedsStatusRow =
+    webSearchState.isVisible &&
+    !isAutoMode &&
+    (webSearchState.hasException || webSearchState.allUnsupported);
+  const showWebSearchInFooter =
+    webSearchState.isVisible && !webSearchNeedsStatusRow;
+  const hasToolStatusChips =
+    webSearchNeedsStatusRow || isDeepResearchPending;
+  const webSearchChip = webSearchState.isVisible ? (
+    <ChatInputWebSearchChipView
+      state={webSearchState}
+      isAutoMode={isAutoMode}
+      isMobileShell={isMobileShell}
+      fullLabel={webSearchChipLabel}
+      compactLabel={webSearchChipCompactLabel}
+      description={webSearchStateDescription}
+      removeLabel={t("chat.removeWebSearchMode")}
+      isExceptionOpen={isWebSearchExceptionOpen}
+      onToggleException={() => setIsWebSearchExceptionOpen((open) => !open)}
+      onRemove={() => onWebSearchModeChange?.("off")}
+    />
+  ) : null;
   const toolStatusChips = hasToolStatusChips ? (
     <>
-    {webSearchState.isVisible && (
-      <ChatInputWebSearchChipView
-        state={webSearchState}
-        isAutoMode={isAutoMode}
-        isMobileShell={isMobileShell}
-        fullLabel={webSearchChipLabel}
-        compactLabel={webSearchChipCompactLabel}
-        description={webSearchStateDescription}
-        removeLabel={t("chat.removeWebSearchMode")}
-        isExceptionOpen={isWebSearchExceptionOpen}
-        onToggleException={() => setIsWebSearchExceptionOpen((open) => !open)}
-        onRemove={() => onWebSearchModeChange?.("off")}
-      />
-    )}
+    {webSearchNeedsStatusRow && webSearchChip}
     {isDeepResearchPending && (
       <div
         data-testid="deep-research-chip"
@@ -3224,7 +3253,7 @@ export function ChatInput({
   return (
       <div className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
-        : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-2 py-1 pb-[0.3rem] transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3 ${
+        : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-[clamp(0.25rem,2vw,0.5rem)] py-2 pb-[0.3rem] transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-4 md:pb-4 ${
             hideTopBorder ? "" : "border-t border-zinc-200 dark:border-zinc-800"
           }`
       }>
@@ -3262,19 +3291,39 @@ export function ChatInput({
             onDragOver={handleDropZoneDragOver}
             onDragLeave={handleDropZoneDragLeave}
             onDrop={handleDropZoneDrop}
-            className={`relative mx-auto w-full max-w-4xl overflow-hidden rounded-[1.4rem] border bg-white p-1.5 shadow-lg shadow-zinc-200/50 transition-colors has-[textarea[data-focus-ring=container]:focus-visible]:outline-2 has-[textarea[data-focus-ring=container]:focus-visible]:-outline-offset-3 has-[textarea[data-focus-ring=container]:focus-visible]:outline-blue-500 dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:rounded-2xl md:p-3 ${
+            className={`relative mx-auto w-full max-w-5xl overflow-hidden rounded-[1.25rem] border bg-white p-[clamp(0.375rem,5vw,1rem)] shadow-[0_8px_24px_-6px_rgba(23,28,46,0.08)] transition-colors has-[textarea[data-focus-ring=container]:focus-visible]:outline-2 has-[textarea[data-focus-ring=container]:focus-visible]:-outline-offset-3 has-[textarea[data-focus-ring=container]:focus-visible]:outline-blue-500 dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:p-6 ${
               isDragActive
                 ? "border-blue-500 bg-blue-50/70 dark:border-blue-400 dark:bg-blue-950/30"
                 : "border-zinc-200 dark:border-zinc-800"
             }`}
           >
           {currentProduct && showProductSwitcher && (
-            <div className="mb-2 md:mb-3">
-              <ChatProductSwitcher
-                currentProduct={currentProduct}
-                disabled={productSwitchDisabled || isSending || draftLocked}
-                onProductSwitch={onProductSwitch}
-              />
+            <div
+              data-testid="composer-product-mode-row"
+              className="mb-4 flex min-w-0 items-center justify-between gap-2 md:mb-5"
+            >
+              <div className="min-w-0 flex-1">
+                <ChatProductSwitcher
+                  currentProduct={currentProduct}
+                  disabled={productSwitchDisabled || isSending || draftLocked}
+                  onProductSwitch={onProductSwitch}
+                />
+              </div>
+              {currentProductCopy && (
+                <span
+                  data-testid="composer-product-context"
+                  aria-label={currentProductCopy.feature}
+                  className="hidden min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 min-[280px]:flex md:px-0"
+                >
+                  {isReviewProduct ? (
+                    <PanelsTopLeft className="hidden h-4 w-4 md:block" aria-hidden="true" />
+                  ) : (
+                    <Sparkles className="hidden h-4 w-4 md:block" aria-hidden="true" />
+                  )}
+                  <Info className="h-[17px] w-[17px] md:hidden" aria-hidden="true" />
+                  <span className="hidden md:inline">{currentProductCopy.feature}</span>
+                </span>
+              )}
             </div>
           )}
           {isDragActive && (
@@ -3711,6 +3760,47 @@ export function ChatInput({
             </div>
           )}
           <div className="flex flex-col gap-2">
+        {isReviewProduct && (
+          <div
+            data-testid="composer-review-models"
+            className="flex min-w-0 flex-wrap items-center gap-2"
+          >
+            <span className="hidden shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400 md:inline">
+              {t("chat.modelComparison")}
+            </span>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              {activeSelectedModelObjects.map((model) => (
+                <span
+                  key={model.id}
+                  data-testid="composer-review-selected-model"
+                  data-model-id={model.id}
+                  className="inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-[0.625rem] bg-zinc-100 px-2.5 text-xs font-medium text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100"
+                >
+                  <span className="truncate">{model.name}</span>
+                  <Check className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden="true" />
+                </span>
+              ))}
+            </div>
+            <button
+              ref={modelMenuButtonRef}
+              type="button"
+              onClick={(event) => toggleModelPicker(event.currentTarget)}
+              data-testid="composer-model-select"
+              title={activeModelNames.join(", ")}
+              aria-label={t("chat.modelSelect")}
+              aria-expanded={isMenuOpen && menuView === "models"}
+              aria-controls="chat-input-popover"
+              aria-haspopup="dialog"
+              className="flex min-h-11 shrink-0 touch-manipulation items-center justify-center gap-1 rounded-xl px-2 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+            >
+              <span className="hidden md:inline">{t("chat.modelSelect")}</span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span data-testid="composer-active-model-count" className="sr-only">
+                {modelsSelectedLabel(activeSelectedModels.length)}
+              </span>
+            </button>
+          </div>
+        )}
         {preserveFormatting && (
           <div className="flex items-center justify-between gap-2 rounded-lg bg-zinc-100 px-2 py-1 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
             <span>{t("chat.formatPreserved")}</span>
@@ -3822,7 +3912,7 @@ export function ChatInput({
           // The min/max heights are in rem, not px, so a reader at 200% text
           // scaling still gets a complete first line instead of a box frozen
           // at one 16px-root line's worth of height.
-          className={`w-full min-w-0 max-h-[5.75rem] min-h-[2.25rem] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[12.5rem] md:min-h-[3.25rem] md:py-2 md:text-sm md:leading-6 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
+          className={`w-full min-w-0 max-h-[5.75rem] min-h-[clamp(2.25rem,18vw,4.5rem)] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-[1.625rem] text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[12.5rem] md:min-h-[7rem] md:py-2 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
         />
         </div>
         {/*
@@ -3832,7 +3922,10 @@ export function ChatInput({
           composer's own `overflow-hidden` then clipped Send out of sight.
         */}
         <div className="relative flex flex-wrap items-center justify-between gap-1.5" ref={menuRef}>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div
+          data-testid="composer-primary-tools"
+          className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5"
+        >
           <button
             ref={actionMenuButtonRef}
             type="button"
@@ -3847,7 +3940,7 @@ export function ChatInput({
               setIsMenuOpen(true);
               trackProductEvent("chat_tool_menu_opened", selectedModels.length, {});
             }}
-            className={`flex shrink-0 touch-manipulation items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-10 w-10"}`}
+            className="flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-xl border border-transparent bg-transparent text-zinc-700 transition hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-200 dark:hover:border-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-white"
             data-testid="composer-tools-button"
             title={t("chat.addAndTools")}
             aria-label={t("chat.addAndTools")}
@@ -3861,18 +3954,7 @@ export function ChatInput({
               <Plus className="h-5 w-5" />
             )}
           </button>
-        </div>
-
-        {/*
-          This group wraps too, and it may not shrink below its widest control.
-          At 200% text and 320-360px its 44px circles were wider than the
-          space beside "+": with `min-w-0` the group squeezed below one
-          control, and `justify-end` overflowed that control leftwards over
-          "+" (two overlaps at 320px, one at 360px, measured 2026-09-15). With
-          the default minimum the outer row breaks first and the group takes a
-          line of its own.
-        */}
-        <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5">
+          {showWebSearchInFooter && webSearchChip}
           {autoSelectionOffered && onSelectionModeChange && (
             <AutoRoutingComposerToggle
               offered={autoSelectionOffered}
@@ -3884,91 +3966,82 @@ export function ChatInput({
               }}
             />
           )}
-          <button
-            ref={modelMenuButtonRef}
-            type="button"
-            onClick={() => {
-              lastMenuTriggerRef.current = modelMenuButtonRef.current;
-              const shouldClose = isMenuOpen && menuView === "models";
-              if (shouldClose) {
-                closeMenu(true);
-                return;
+          {!isReviewProduct && (
+            <button
+              ref={modelMenuButtonRef}
+              type="button"
+              onClick={(event) => toggleModelPicker(event.currentTarget)}
+              className="flex h-11 min-w-0 max-w-[132px] touch-manipulation items-center gap-1.5 overflow-hidden rounded-xl bg-zinc-100 px-3 text-xs font-medium text-zinc-800 transition hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
+              data-testid="composer-model-select"
+              title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
+              aria-label={
+                isAutoMode
+                  ? `${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
+                  : t("chat.modelSelect")
               }
-              setMenuView("models");
-              setIsMenuOpen(true);
-              trackProductEvent("model_picker_opened", selectedModels.length, {});
-            }}
-            className={`flex min-w-0 max-w-[112px] touch-manipulation items-center gap-1 overflow-hidden rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-10"}`}
-            // Named so the outage banner can hand focus back to the model
-            // selector when a swap or a recovered provider unmounts the
-            // control the user was standing on (ProviderStatusBanner).
-            data-testid="composer-model-select"
-            title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
-            aria-label={
-              isAutoMode
-                ? `${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
-                : t("chat.modelSelect")
-            }
-            aria-expanded={isMenuOpen && menuView === "models"}
-            aria-controls="chat-input-popover"
-            aria-haspopup="dialog"
-          >
-            {/* Counts what will actually be sent and billed -- the same basis
-                as the credit estimate beside it and as the mobile header's
-                "+N", so a paused panel cannot make the two disagree. */}
-            {isAutoMode ? (
-              <span
-                aria-hidden="true"
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-status-switch-on-500 text-white"
-              >
-                <Sparkles className="h-3 w-3" />
-              </span>
-            ) : activeSelectedModels.length === 1 ? (
-              <ModelLogo
-                model={AVAILABLE_MODELS.find((item) => item.id === activeSelectedModels[0])}
-                size="xs"
-              />
-            ) : (
-              // The same number is the visible label beside it
-              // ("3 AIs") and part of the button's accessible name, so the
-              // badge is a decorative repeat and stays out of the
-              // accessibility tree.
-              <span
-                aria-hidden="true"
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white"
-              >
-                {activeSelectedModels.length}
-              </span>
-            )}
-            {/* COMPOSER-REFLOW-01. Allowed a second line rather than `nowrap`.
-                A label that could not wrap made this button's minimum width
-                the whole label, and the group beside "+" keeps its default
-                minimum on purpose (see above), so at a ~120px viewport the
-                group was 111px in a 90px row and the composer's
-                `overflow-hidden` cut the chevron off. Where the label fits,
-                which is every phone at default zoom, it is still one line. */}
-            <span
-              data-testid="composer-active-model-count"
-              className="min-w-0 line-clamp-2 break-keep"
+              aria-expanded={isMenuOpen && menuView === "models"}
+              aria-controls="chat-input-popover"
+              aria-haspopup="dialog"
             >
-              {isAutoMode
-                ? autoCopy.label
-                : modelsSelectedLabel(activeSelectedModels.length)}
-            </span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-          </button>
+              {isAutoMode ? (
+                <span
+                  aria-hidden="true"
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-status-switch-on-500 text-white"
+                >
+                  <Sparkles className="h-3 w-3" />
+                </span>
+              ) : activeSelectedModels.length === 1 ? (
+                <ModelLogo
+                  model={AVAILABLE_MODELS.find(
+                    (item) => item.id === activeSelectedModels[0]
+                  )}
+                  size="xs"
+                />
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white"
+                >
+                  {activeSelectedModels.length}
+                </span>
+              )}
+              <span
+                data-testid="composer-active-model-count"
+                className="min-w-0 line-clamp-2 break-keep"
+              >
+                {isAutoMode
+                  ? autoCopy.label
+                  : modelsSelectedLabel(activeSelectedModels.length)}
+              </span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+            </button>
+          )}
+        </div>
+
+        {/*
+          This group wraps too, and it may not shrink below its widest control.
+          At 200% text and 320-360px its 44px circles were wider than the
+          space beside "+": with `min-w-0` the group squeezed below one
+          control, and `justify-end` overflowed that control leftwards over
+          "+" (two overlaps at 320px, one at 360px, measured 2026-09-15). With
+          the default minimum the outer row breaks first and the group takes a
+          line of its own.
+        */}
+        <div
+          data-testid="composer-submit-actions"
+          className="flex flex-wrap items-center justify-end gap-1.5"
+        >
 
           {!isAutoMode && activeSelectedModels.length > 0 && (
             <button
               type="button"
               data-testid="request-credit-estimate"
               onClick={() => setIsCreditBreakdownOpen(true)}
-              className={`flex shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-9"}`}
-              title={
-                lang === "ko"
-                  ? `예상 ${estimatedRequestCredits}크레딧${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
-                  : `Estimated ${estimatedRequestCredits} credits${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
-              }
+              className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl px-2 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title={t("chat.creditEstimateAria").replace(
+                "{credits}",
+                String(estimatedRequestCredits)
+              )}
               aria-label={
                 t("chat.creditEstimateAria").replace(
                   "{credits}",
@@ -3976,17 +4049,17 @@ export function ChatInput({
                 )
               }
             >
-              <CreditCostBadge
-                credits={estimatedRequestCredits}
-                size="xs"
-                tone="plain"
-                label={String(estimatedRequestCredits)}
-                title=""
-                className="px-0"
-              />
+              <CreditCoinIcon className="h-4 w-4" />
+              <span className="whitespace-nowrap">
+                {t("chat.creditEstimateLabel").replace(
+                  "{credits}",
+                  String(estimatedRequestCredits)
+                )}
+              </span>
               {inputCreditMultiplier > 1 && (
                 <span className="text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
               )}
+              <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             </button>
           )}
           <ChatInputAutoCapabilityPendingNotice
@@ -4041,7 +4114,7 @@ export function ChatInput({
               type="button"
               data-testid="chat-stop-all-button"
               onClick={onCancel}
-              className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
+              className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl bg-red-600 text-white hover:bg-red-500"
               title={t("chat.stopAllResponses")}
               aria-label={t("chat.stopAllResponses")}
             >
@@ -4064,7 +4137,11 @@ export function ChatInput({
                 activeSelectedModels.length === 0 ||
                 (!value.trim() && attachments.length === 0)
               }
-              className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
+              className={`flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-white disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 ${
+                isReviewProduct
+                  ? "bg-blue-600 hover:bg-blue-500"
+                  : "bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-300"
+              }`}
               title={
                 isAutoMode
                   ? `${t("chat.send")} · ${autoCopy.variableCreditNotice}`

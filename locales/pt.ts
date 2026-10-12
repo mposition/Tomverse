@@ -310,6 +310,7 @@ export const pt = {
         send: "Enviar",
         creditUnit: "créditos",
         creditEstimateAria: "Estimativa: {credits} créditos, ver detalhes",
+        creditEstimateLabel: "Estimativa: {credits} créditos",
         cancel: "Cancelar",
         sendSingMessage: "Enviar mensagem para...",
         sendMultipleMessages: "Enviar mensagens simultaneamente para...",

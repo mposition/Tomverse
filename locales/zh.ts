@@ -319,6 +319,7 @@ export const zh = {
         send: "发送",
         creditUnit: "积分",
         creditEstimateAria: "预计 {credits} 积分，查看明细",
+        creditEstimateLabel: "预计 {credits} 积分",
         cancel: "取消",
         sendSingMessage: "发送消息...",
         sendMultipleMessages: "同时发送给多个模型...",
