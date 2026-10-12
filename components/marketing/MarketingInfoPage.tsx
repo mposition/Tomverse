@@ -106,7 +106,7 @@ export function MarketingInfoPage({
 
             {page.cta && (
               <Link
-                href={page.cta.href}
+                href={page.cta.href.replace(/^\/chat(?=\?|$)/, "/review")}
                 onClick={() =>
                   trackProductEvent("cta_start_click", 0, {
                     cta_location:

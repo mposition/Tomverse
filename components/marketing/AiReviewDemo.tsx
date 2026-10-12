@@ -194,7 +194,7 @@ export function AiReviewDemo({
   const { lang } = useLanguage();
   const text = copy[lang];
   const reviewPath = lang === "en" ? "/ai-answer-review" : localizedPath(lang, "/ai-answer-review");
-  const chatPath = `/chat?lang=${encodeURIComponent(lang)}`;
+  const chatPath = `/review?lang=${encodeURIComponent(lang)}`;
 
   return (
     <div className="overflow-hidden rounded-[2rem] border border-tomverse-review-border bg-white shadow-xl shadow-blue-950/5 dark:bg-zinc-950">
