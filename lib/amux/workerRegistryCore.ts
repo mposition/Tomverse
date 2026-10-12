@@ -408,11 +408,25 @@ export type AmuxCatalogWorker = {
 
 export const AMUX_WORKER_CATALOG_VERDICTS = [
   "match",
+  "exempt",
   "registry_only",
   "catalog_only",
   "unregistered",
   "provider_mismatch",
 ] as const;
+
+/**
+ * Version 34: catalog entries the comparison leaves out by name, because
+ * another policy governs them. `engineering-runner` is the engineering
+ * adapter's worker identity (versions 12 and 25, docs/policy/engineering-agent.md),
+ * not a resident AMUX runner worker, and its name is outside the registry's
+ * grammar. An exempt entry counts as agreement and is shown as such; it
+ * changes nothing about the entry's assignment. Adding a name is a policy
+ * version.
+ */
+export const AMUX_WORKER_CATALOG_EXEMPT: readonly string[] = Object.freeze(["engineering-runner"]);
+
+const isCatalogExempt = (workerName: string): boolean => AMUX_WORKER_CATALOG_EXEMPT.includes(workerName);
 export type AmuxWorkerCatalogVerdict = (typeof AMUX_WORKER_CATALOG_VERDICTS)[number];
 
 export type AmuxWorkerCatalogRow = {
@@ -432,7 +446,9 @@ export type AmuxWorkerCatalogComparison =
  * catalog lists it assignable (present, not archived, paused, isolated or
  * blocked), or when neither does. A catalog entry with no registry event, or
  * whose provider is not the name's class, never agrees: the registry is the
- * single source (section 3). Roles are not compared: the catalog's routing
+ * single source (section 3) -- except a name version 34 exempts
+ * (`AMUX_WORKER_CATALOG_EXEMPT`), which is `exempt` and counts as agreement.
+ * Roles are not compared: the catalog's routing
  * tags and version 16's three roles are different vocabularies.
  *
  * `null` for either side is unreadable, never empty.
@@ -453,7 +469,9 @@ export function compareAmuxWorkerRegistryWithCatalog(
       entry.archived || entry.paused || entry.isolated || entry.blocked ? "held" : "assignable";
     const registryState = registration?.desiredState ?? null;
     let verdict: AmuxWorkerCatalogVerdict;
-    if (entry !== null && registration === null) verdict = "unregistered";
+    if (entry !== null && registration === null) {
+      verdict = isCatalogExempt(workerName) ? "exempt" : "unregistered";
+    }
     else if (entry !== null && amuxCatalogProviderClass(entry.provider) !== amuxWorkerProviderClassOf(workerName)) {
       verdict = "provider_mismatch";
     } else if (registryState === "active") {
@@ -463,7 +481,8 @@ export function compareAmuxWorkerRegistryWithCatalog(
     }
     return { workerName, registryState, catalog: catalogState, verdict };
   });
-  return { status: rows.every((row) => row.verdict === "match") ? "match" : "mismatch", rows };
+  const agrees = (verdict: AmuxWorkerCatalogVerdict) => verdict === "match" || verdict === "exempt";
+  return { status: rows.every((row) => agrees(row.verdict)) ? "match" : "mismatch", rows };
 }
 
 // ---------------------------------------------------------------------------
@@ -613,6 +632,12 @@ const parseComparison = (value: unknown): AmuxWorkerCatalogComparison | null => 
     }
     if (typeof row.catalog !== "string" || !CATALOG_STATES.includes(row.catalog)) return null;
     if (!isOneOf(AMUX_WORKER_CATALOG_VERDICTS, row.verdict)) return null;
+    // The server marks a row exempt only for an exempt name the catalog lists
+    // and the registry cannot hold.
+    if (row.verdict === "exempt" &&
+        (!isCatalogExempt(row.workerName) || row.registryState !== null || row.catalog === "absent")) {
+      return null;
+    }
   }
   return value as AmuxWorkerCatalogComparison;
 };

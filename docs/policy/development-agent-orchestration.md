@@ -11,7 +11,8 @@
 상태(v30 이력): **v30 초기 v22 활성화의 졸업 근거 예외 승인.** 운영자 `mposition`이 2026-10-11에 아래 v30 절의 닫힌 bootstrap 예외를 승인했다. 이전 v29 상태 줄은 이력이다.
 상태(v31 이력): **v31 worker 등록부와 공급사 종류 승인.** 운영자 `mposition`이 2026-10-12에 아래 v31 절과 그 활성화 게이트 값을 승인했다. 이전 v30 상태 줄은 이력이다.
 상태(v32 이력): **v32 worker 등록부 R1 코드 래치 승인.** 2026-10-12 운영자 `mposition`이 아래 v32 절을 승인했다. `AMUX_WORKER_REGISTRY_WRITES_LATCH`는 true가 되어 owner가 Admin에서 등록부에 쓸 수 있다. 배정은 R2 전까지 카탈로그 환경 변수를 따른다.
-상태(최신): **v33 DB로 미반영이 확정된 Orchestrator halt의 자동 종결 승인.** 운영자 `mposition`이 2026-10-12에 아래 v33 절의 동일 요청 `no_commit` 범위와 운영 안내 화면을 승인했다. 자동 종결은 원래 쓰기의 재시도가 아니며, 증거 없는 정지와 사람 확인 대상은 계속 사람이 해제한다.
+상태(v33 이력): **v33 DB로 미반영이 확정된 Orchestrator halt의 자동 종결 승인.** 운영자 `mposition`이 2026-10-12에 아래 v33 절의 동일 요청 `no_commit` 범위와 운영 안내 화면을 승인했다. 자동 종결은 원래 쓰기의 재시도가 아니며, 증거 없는 정지와 사람 확인 대상은 계속 사람이 해제한다.
+상태(최신): **v34 engineering adapter runner의 등록부 비교 제외 승인.** 2026-10-13 운영자 `mposition`이 아래 v34 절을 승인했다. `engineering-runner`는 등록부 일치 비교에서 이름으로 제외되고 일치로 센다. 그 배정과 권한은 바꾸지 않는다. 이전 v33 상태 줄은 이력이다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -42,6 +43,7 @@ approvedBy: mposition · approvedAt: 2026-10-11 · 정책 버전: 30
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 31
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 32
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 33
+approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 34
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -79,6 +81,7 @@ approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 33
 | 31 | 2026-10-12 mposition | worker 등록부와 공급사 종류. 공급사 종류를 한 번 승인하고 그 종류의 worker는 owner의 운영 행위로 더한다. 등록부(사람만 씀)와 시스템의 관측·시험·자동 정지 래치 표, 서버 조정기, 시험 기간(카드 3회, worker당 US$5), 연속 3회 실패 래치, R1~R6 전환 순서. 이 승인 자체로 어떤 코드 래치나 환경 변수도 켜지 않는다. |
 | 32 | 2026-10-12 mposition | 버전 31 R1의 코드 래치 `AMUX_WORKER_REGISTRY_WRITES_LATCH`를 켠다. owner의 등록부 쓰기만 열리고, R1의 관측 기간은 열셋 등록 뒤 3일(72시간)이다. 배정, 환경 변수, worker catalog, bridge, 관측·시험·래치 표는 바꾸지 않는다. |
 | 33 | 2026-10-12 mposition | 같은 요청의 admission row lock, deadline+grace, 영수증 0, `no_commit` resolution과 결속된 시스템 감사를 DB가 검증한 결과 불명 halt만 자동 종결한다. 그 밖의 정지는 사람 해제 그대로이며 원래 쓰기를 재시도하지 않는다. 운영 화면은 자동 복구와 사람 판단을 구분해 증거와 확인 순서를 설명한다. |
+| 34 | 2026-10-13 mposition | engineering adapter의 worker identity `engineering-runner`를 등록부와 카탈로그의 일치 비교에서 이름으로 제외한다(`AMUX_WORKER_CATALOG_EXEMPT`). 비교에만 적용하고 배정·권한·카탈로그 항목은 바꾸지 않는다. R1 관측 기간은 제외 배포와 `devin-worker` 카탈로그 삭제가 모두 반영된 시각부터 다시 센다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1613,6 +1616,30 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
 `20261012170000_amux_verified_no_commit_halt_auto_clear` migration은 main의 worker 등록부 v32와 번호 충돌을 조정하기 전에 draft v32 표기로 처음 게시되었다. migration checksum을 보존하기 위해 원본 주석의 v32 표기는 그대로 두며, 이는 실행 중인 정책 버전을 뜻하지 않는다. 현재 승인과 runtime 계약은 이 절의 v33이다.
 
 작성자와 다른 provider의 독립 검토, append migration을 적용한 PostgreSQL 통합 테스트, Rust 계약 테스트가 배포 전 차단 조건이다. 구현·검토·병합·배포와 운영 read-back은 따로 보고한다.
+
+## 버전 34 — engineering adapter runner의 등록부 비교 제외
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 2026-10-13 작성, 작성자 Claude. 운영자는 2026-10-13에 production 일치 보고의 불일치 두 건을 보고 이 버전을 결정했다.
+
+**배경.** 2026-10-12 23:14 AEST에 production에서 열셋을 등록했고, 그 뒤 일치 보고는 불일치였다. 2026-10-13에 production 카탈로그를 확인했다. 확인한 것은 이름, 공급사, 보류 표시뿐이다. 카탈로그는 아홉 항목이었다.
+
+- 버전 31 R1 등록의 일곱
+- `devin-worker`(공급사 devin, 배정 가능)
+- `engineering-runner`(공급사 claude, 배정 가능)
+
+**`engineering-runner`의 처리.**
+- `engineering-runner`는 버전 12와 25의 engineering adapter가 쓰는 worker identity다. AMUX 실행실의 상주 worker가 아니다. 그 권한, 운영 mode, 정지는 `docs/policy/engineering-agent.md`가 정한다. 버전 31 3항의 이름 문법(공급사 종류 접두사)에도 맞지 않는다.
+- 그러므로 등록부와 카탈로그의 일치 비교에서 이 이름 하나를 명시적으로 제외한다(`AMUX_WORKER_CATALOG_EXEMPT`, `lib/amux/workerRegistryCore.ts`).
+- 화면에는 "제외"로 보이고 일치로 센다.
+- 제외는 이름으로만 정한다. 제외 목록에 이름을 더하는 것은 이 정책의 새 버전이다.
+- 이 제외는 비교에만 적용한다. `engineering-runner`의 배정, 권한, 카탈로그 항목은 바꾸지 않는다. R2에서 배정 카탈로그를 등록부로 전환할 때 이 identity를 어떻게 다룰지는 R2가 정한다.
+
+**`devin-worker`의 처리.**
+- `devin-worker`는 버전 27에서 runner에서 제거된 worker다. 운영자가 production 카탈로그 환경 변수에서 그 항목을 지운다.
+- 배정을 좁히는 운영 행위이므로 이 버전의 승인 사항이 아니며, 여기에는 기록만 한다.
+- 버전 27 게이트 2의 read-back(그 identity의 제품 DB 0건)은 이 삭제와 무관하게 그대로 남는다.
+
+**관측 기간.** 버전 32의 R1 관측 기간(3일, 72시간)은 다시 센다. 두 정리가 모두 production에 반영된 시각부터다. 하나는 이 버전의 제외가 들어간 배포이고, 다른 하나는 `devin-worker`를 지운 카탈로그 변수가 반영된 배포다.
 
 ## CLI 사용량 보존·집계 부속 계약 — 2026-10-02 승인
 
