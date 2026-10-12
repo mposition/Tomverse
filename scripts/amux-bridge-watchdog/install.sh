@@ -91,16 +91,21 @@ systemctl daemon-reload
 # are read as well: the first install reported success while every run read
 # the bridge as unreadable and sent nothing.
 #
-# The run is found by time, with the timer off so no other run can land in
-# the window. Not by InvocationID: a oneshot unit clears it the moment the run
-# ends, so the third install read an empty ID, found no lines, and failed a
-# run that had sent its signal (2026-10-12).
+# The run's lines are the ones after a journal cursor taken once the timer is
+# off and no run is in progress, so no earlier run's "sent up" can count for
+# this one. Not by InvocationID: a oneshot unit clears it the moment the run
+# ends, so the third install found no lines and failed a run that had sent
+# its signal (2026-10-12). Not by time either: a second-resolution bound can
+# include an earlier run that ended in the same second.
 timer_off
-since=$(date +%s)
+systemctl stop tomverse-bridge-watchdog.service
+journalctl --sync
+cursor=$(journalctl -n 1 --show-cursor --no-pager -q -o cat | sed -n 's/^-- cursor: //p')
+test -n "$cursor"
 started=yes
 systemctl start tomverse-bridge-watchdog.service || started=no
 journalctl --sync
-run_log=$(journalctl -u tomverse-bridge-watchdog.service --since "@$since" --no-pager -o cat)
+run_log=$(journalctl -u tomverse-bridge-watchdog.service --after-cursor="$cursor" --no-pager -o cat)
 printf '%s\n' "$run_log"
 if test "$started" = no || ! grep -qE '; sent (up|down)$' <<<"$run_log"; then
   timer_off
