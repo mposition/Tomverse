@@ -1,7 +1,7 @@
 import { createAmuxV22SidecarServer, createAmuxV22SidecarHandler,
   checkAmuxV22SidecarSocketDir, checkAmuxV22SidecarStateDir,
   amuxV22SidecarEnabled,
-  AMUX_V22_SIDECAR_ENV, runAmuxV22OneShot } from
+  AMUX_V22_SIDECAR_ENV, runAmuxV22OneShot, probeAmuxV22ClaudeQuota } from
   "../lib/amux/v22OneShotSidecar.mjs";
 
 if (!amuxV22SidecarEnabled(process.env[AMUX_V22_SIDECAR_ENV])) {
@@ -28,5 +28,6 @@ await checkAmuxV22SidecarStateDir(stateDir);
 await checkAmuxV22SidecarSocketDir(socketPath);
 const sidecar = createAmuxV22SidecarServer(socketPath,
   createAmuxV22SidecarHandler({ worker: config.worker, stateDir,
+    quota: () => probeAmuxV22ClaudeQuota(config),
     run: (request) => runAmuxV22OneShot(request, config) }));
 await sidecar.listen();

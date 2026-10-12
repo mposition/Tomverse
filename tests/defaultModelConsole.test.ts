@@ -28,12 +28,12 @@ test("a missing guest-lead row still resolves to the compiled lead", () => {
 
 test("an ineligible stored lead is not the lead guests see", () => {
   const described = describeGuestDefault({
-    storedLead: "claude-haiku-4-5",
-    isEligible: (id) => id !== "claude-haiku-4-5" && eligible(id),
+    storedLead: "claude-haiku-5-5",
+    isEligible: (id) => id !== "claude-haiku-5-5" && eligible(id),
   });
   assert.equal(described.storedNotApplied, true);
-  assert.notEqual(described.effectiveLeadId, "claude-haiku-4-5");
-  assert.ok(described.ineligibleTrioIds.includes("claude-haiku-4-5"));
+  assert.notEqual(described.effectiveLeadId, "claude-haiku-5-5");
+  assert.ok(described.ineligibleTrioIds.includes("claude-haiku-5-5"));
 });
 
 test("the application fallback cannot be selected as a replacement", () => {
@@ -41,7 +41,9 @@ test("the application fallback cannot be selected as a replacement", () => {
   assert.equal(role, "application_fallback");
   assert.equal(replacementOptionDisabled(role), true);
   const refusal = adoptionReplacementRefusal({
-    adoptedModelId: "gpt-6-luna",
+    // A hypothetical successor: gpt-6-luna is the application fallback itself
+    // since 2026-10-12, so it cannot stand in for the model replacing it.
+    adoptedModelId: "gpt-7-luna",
     adoptedProvider: "openai",
     replacesModelId: APP_DEFAULTS.defaultModelId,
     predecessor: {

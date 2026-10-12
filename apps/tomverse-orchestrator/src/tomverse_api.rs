@@ -67,6 +67,20 @@ pub struct TomverseApi {
     secret: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AmuxWorkerQuota {
+    pub observation_id: String,
+    pub worker: String,
+    pub provider: String,
+    pub remaining_basis_points: u16,
+    pub confidence_basis_points: u16,
+    pub exhausted: bool,
+    pub source: String,
+    pub observed_at: String,
+    pub reset_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V22UsageRecord {
     Recorded,
@@ -244,6 +258,8 @@ pub fn is_database_busy(error: &anyhow::Error) -> bool {
 /// for this marker, so attaching it here changes no other caller's control
 /// flow (claim, recovery, auto-promotion, lifecycle routes, and the WSL
 /// bridge's owned-queue read all still see a plain `Err` and stop as before).
+/// `parse_owned_queue_body` attaches it too, for the same 5xx and 429, so the
+/// WSL bridge's halt line can name the status; the bridge still halts on it.
 #[derive(Debug, Clone, Copy)]
 pub struct SelectionReadTransientStatus {
     pub status: StatusCode,
@@ -508,7 +524,13 @@ pub(crate) fn parse_owned_queue_body(
         return Ok(SelectionRead::DatabaseBusy);
     }
     if status != StatusCode::OK {
-        bail!("unsupported Tomverse internal response status");
+        // Still an error, and still the same text. The status marker is read
+        // by one thing: the bridge's halt line names `http_<status>` from it
+        // (`wsl_bridge::bridge_error_class`) instead of an unexplained halt.
+        return Err(transient_status_or(
+            status,
+            "unsupported Tomverse internal response status",
+        ));
     }
     let tasks: Vec<OwnedTodoTask> =
         serde_json::from_slice(body).context("invalid Tomverse internal JSON response")?;
@@ -917,6 +939,42 @@ async fn read_claim_response(mut response: reqwest::Response) -> Result<ClaimRes
 }
 
 impl TomverseApi {
+    /// One write, then exact lookup on a lost response. Never repost a quota
+    /// observation or treat an unknown outcome as a completed report.
+    pub async fn worker_quota_record_once(&self, observation: &AmuxWorkerQuota) -> Result<bool> {
+        let payload = serde_json::to_value(observation)?;
+        let response = self.client
+            .post(format!("{}/api/internal/amux/quota", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT).bearer_auth(&self.secret)
+            .json(&payload).send().await;
+        if let Ok(response) = response {
+            let status = response.status();
+            if [StatusCode::BAD_REQUEST, StatusCode::UNAUTHORIZED, StatusCode::CONFLICT].contains(&status) {
+                return Ok(false);
+            }
+            if let Ok(answer) = read_raw_answer(response, 4096).await {
+                if status == StatusCode::OK {
+                    if let Ok(body) = serde_json::from_slice::<Value>(&answer.body) {
+                        if body.get("accepted").and_then(Value::as_bool) == Some(true) &&
+                            body.get("observation_id").and_then(Value::as_str) == Some(&observation.observation_id) {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+        let response = self.client
+            .get(format!("{}/api/internal/amux/quota", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT).bearer_auth(&self.secret)
+            .query(&[("observation_id", observation.observation_id.as_str())])
+            .send().await.context("quota outcome unknown; lookup unavailable")?;
+        let answer = read_raw_answer(response, 4096).await?;
+        let body: Value = serde_json::from_slice(&answer.body)?;
+        if answer.status == StatusCode::OK && body.get("found").and_then(Value::as_bool) == Some(true) &&
+            body.get("observation") == Some(&payload) { return Ok(true); }
+        bail!("quota outcome unknown or conflicting lookup")
+    }
+
     pub async fn v22_task_result_readback(
         &self, attempt_id: &str, expected_digest: &str,
         expected_patch: Option<(&str, &str)>,
@@ -1356,6 +1414,77 @@ mod tests {
             serde_json::json!({"settled":true,"taskRevision":4})
         ).unwrap();
         assert!(response.settled);
+    }
+
+    #[tokio::test]
+    async fn quota_lost_write_reply_uses_exact_lookup_once_and_never_reposts() {
+        for found in [true, false] {
+            let observation = AmuxWorkerQuota {
+                observation_id: "00000000-0000-4000-8000-000000000001".into(), worker: "claude-chore".into(),
+                provider: "anthropic".into(), remaining_basis_points: 7400, confidence_basis_points: 10000,
+                exhausted: false, source: "provider_api".into(), observed_at: "2026-10-12T00:00:00.000Z".into(),
+                reset_at: Some("2026-10-12T07:00:00.000Z".into()),
+            };
+            let payload = serde_json::to_value(&observation).unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = thread::spawn(move || {
+                for (method, status, body) in [
+                    ("POST", "503 Service Unavailable", "{}".to_string()),
+                    ("GET", "200 OK", if found { serde_json::json!({"found":true,"observation":payload}).to_string() }
+                        else { "{\"found\":false}".into() }),
+                ] {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                    let mut request = Vec::new();
+                    loop {
+                        let mut chunk = [0_u8; 4096];
+                        let count = stream.read(&mut chunk).unwrap(); assert!(count > 0);
+                        request.extend_from_slice(&chunk[..count]);
+                        if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") { break; }
+                    }
+                    let request_line = String::from_utf8_lossy(&request);
+                    assert!(request_line.starts_with(method));
+                    if method == "GET" { assert!(request_line.contains("observation_id=00000000-0000-4000-8000-000000000001")); }
+                    write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                }
+            });
+            let api = TomverseApi::for_test_with_timeouts(format!("http://{address}"), Duration::from_secs(1), Duration::from_secs(3));
+            let result = api.worker_quota_record_once(&observation).await;
+            assert_eq!(result.is_ok(), found);
+            if found { assert!(result.unwrap()); }
+            server.join().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn quota_write_waits_beyond_the_app_transaction_budget_without_reposting() {
+        let observation = AmuxWorkerQuota {
+            observation_id: "00000000-0000-4000-8000-000000000001".into(), worker: "claude-chore".into(),
+            provider: "anthropic".into(), remaining_basis_points: 7400, confidence_basis_points: 10000,
+            exhausted: false, source: "provider_api".into(), observed_at: "2026-10-12T00:00:00.000Z".into(),
+            reset_at: Some("2026-10-12T07:00:00.000Z".into()),
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0_u8; 4096];
+                let count = stream.read(&mut chunk).unwrap(); assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+                if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") { break; }
+            }
+            assert!(String::from_utf8_lossy(&request).starts_with("POST"));
+            thread::sleep(Duration::from_millis(5_200));
+            let body = "{\"accepted\":true,\"observation_id\":\"00000000-0000-4000-8000-000000000001\"}";
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let api = TomverseApi::for_test_with_timeouts(format!("http://{address}"), Duration::from_secs(1), Duration::from_secs(3));
+        assert!(api.worker_quota_record_once(&observation).await.unwrap());
+        server.join().unwrap();
     }
 
     #[tokio::test]

@@ -29,7 +29,8 @@ use crate::local_card::{
     review_pr_number_from, valid_local_card_id, LinkDecision, LocalCardSummary,
 };
 use crate::tomverse_api::{
-    is_database_busy, ExecutionStartResponse, OwnedTodoTask, PulledDelivery, SelectionRead,
+    is_database_busy, DatabaseBusy, ExecutionStartResponse, NothingCommittedAnswer, OwnedTodoTask,
+    PulledDelivery, SelectionRead, SelectionReadTransientStatus, UnacceptedStatus,
     BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
 };
 
@@ -661,6 +662,57 @@ fn apply_settle_followup<T>(
 
 fn should_exit_halted_bridge(halted: bool, pending_count: usize) -> bool {
     halted && pending_count == 0
+}
+
+/// A short, secret-free class for an error the bridge stops on: which kind of
+/// answer it was -- a status, a timeout, a refused connection -- never the
+/// response body, the request URL or the error's own text, which can carry
+/// either. Before this every unknown-outcome halt read the same in the
+/// journal, and the operator deciding whether to restart had to reconstruct
+/// the cause from the app's request logs (docs/ops/amux/bridge-monitoring.md).
+pub fn bridge_error_class(error: &anyhow::Error) -> String {
+    for cause in error.chain() {
+        if cause.downcast_ref::<DatabaseBusy>().is_some() {
+            return DATABASE_BUSY.to_owned();
+        }
+        if let Some(answer) = cause.downcast_ref::<NothingCommittedAnswer>() {
+            return answer.reason.to_owned();
+        }
+        if let Some(marker) = cause.downcast_ref::<SelectionReadTransientStatus>() {
+            return format!("http_{}", marker.status.as_u16());
+        }
+        if let Some(marker) = cause.downcast_ref::<UnacceptedStatus>() {
+            return format!("http_{}", marker.status.as_u16());
+        }
+        if let Some(transport) = cause.downcast_ref::<reqwest::Error>() {
+            let class = if transport.is_timeout() {
+                "timeout"
+            } else if transport.is_connect() {
+                "connect"
+            } else {
+                "transport"
+            };
+            return class.to_owned();
+        }
+    }
+    "other".to_owned()
+}
+
+/// Records why the bridge halted. The first cause wins: whatever followed it
+/// happened in a bridge that had already stopped taking new work.
+fn note_halt(halt_cause: &mut Option<String>, cause: impl Into<String>) {
+    if halt_cause.is_none() {
+        *halt_cause = Some(cause.into());
+    }
+}
+
+/// The one line a halt leaves. It keeps its old prefix, so a search for it
+/// still finds every halt, and names the cause in the closed vocabulary above.
+fn halt_line(halt_cause: Option<&str>) -> String {
+    format!(
+        "amux wsl bridge halted: no new assignments; cause={}; restart only after checking Tomverse and the local AMUX",
+        halt_cause.unwrap_or("unrecorded")
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1362,6 +1414,96 @@ struct HttpLocal {
     v22_socket: Option<String>,
 }
 
+pub fn parse_v22_quota_response(value: serde_json::Value, request_id: &str,
+    worker: &str, now: i64) -> Result<Option<crate::tomverse_api::AmuxWorkerQuota>> {
+    let object = value.as_object().context("invalid quota envelope")?;
+    if value.get("requestId").and_then(|v| v.as_str()) != Some(request_id) ||
+        value.get("worker").and_then(|v| v.as_str()) != Some(worker) {
+        bail!("quota source mismatch");
+    }
+    if value.get("kind").and_then(|v| v.as_str()) == Some("quota_unavailable") && object.len() == 3 {
+        return Ok(None);
+    }
+    if value.get("kind").and_then(|v| v.as_str()) != Some("quota") || object.len() != 4 {
+        bail!("invalid quota envelope");
+    }
+    let mut observation = value.get("observation").cloned().context("missing quota")?;
+    let fields = observation.as_object_mut().context("invalid quota")?;
+    if fields.len() != 7 || fields.contains_key("worker") || fields.contains_key("observation_id") {
+        bail!("invalid quota fields");
+    }
+    fields.insert("observation_id".into(), request_id.into());
+    fields.insert("worker".into(), worker.into());
+    let quota: crate::tomverse_api::AmuxWorkerQuota = serde_json::from_value(observation)?;
+    let observed = chrono::DateTime::parse_from_rfc3339(&quota.observed_at)?.timestamp();
+    let reset = chrono::DateTime::parse_from_rfc3339(quota.reset_at.as_deref().context("missing quota reset")?)?.timestamp();
+    if quota.provider != "anthropic" || quota.source != "provider_api" ||
+        quota.remaining_basis_points > 10_000 || quota.confidence_basis_points != 10_000 ||
+        quota.exhausted != (quota.remaining_basis_points == 0) ||
+        now - observed > 30 || observed - now > 300 || reset <= observed {
+        bail!("unverified quota observation");
+    }
+    Ok(Some(quota))
+}
+
+#[cfg(test)]
+mod quota_tests {
+    use super::*;
+    fn evidence() -> serde_json::Value {
+        serde_json::json!({"kind":"quota","requestId":"00000000-0000-4000-8000-000000000001",
+            "worker":"claude-chore","observation":{"provider":"anthropic","remaining_basis_points":7400,
+            "confidence_basis_points":10000,"exhausted":false,"source":"provider_api",
+            "observed_at":"2026-10-12T00:00:00.000Z","reset_at":"2026-10-12T07:00:00.000Z"}})
+    }
+    #[test]
+    fn quota_binds_worker_request_source_and_freshness() {
+        let id = "00000000-0000-4000-8000-000000000001";
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-12T00:00:01Z").unwrap().timestamp();
+        let quota = parse_v22_quota_response(evidence(), id, "claude-chore", now).unwrap().unwrap();
+        assert_eq!(quota.observation_id, id); assert_eq!(quota.remaining_basis_points, 7400);
+        assert!(parse_v22_quota_response(evidence(), id, "claude-impl", now).is_err());
+        assert!(parse_v22_quota_response(evidence(), "another-id", "claude-chore", now).is_err());
+        assert!(parse_v22_quota_response(evidence(), id, "claude-chore", now + 900).is_err());
+        for (key, value) in [("provider", serde_json::json!("openai")),
+            ("source", serde_json::json!("model")), ("exhausted", serde_json::json!(true)),
+            ("remaining_basis_points", serde_json::json!(10001)), ("secret", serde_json::json!("not-real"))] {
+            let mut body = evidence(); body["observation"][key] = value;
+            assert!(parse_v22_quota_response(body, id, "claude-chore", now).is_err(), "{key}");
+        }
+    }
+    #[test]
+    fn unavailable_quota_is_none_not_an_available_worker() {
+        let body = serde_json::json!({"kind":"quota_unavailable","requestId":"id","worker":"claude-chore"});
+        assert!(parse_v22_quota_response(body, "id", "claude-chore", 0).unwrap().is_none());
+    }
+}
+
+#[cfg(unix)]
+async fn v22_sidecar_quota(socket_path: &str, worker: &str) -> Result<Option<crate::tomverse_api::AmuxWorkerQuota>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+    if !std::path::Path::new(socket_path).is_absolute() || !valid_session_name(worker) {
+        bail!("invalid quota endpoint");
+    }
+    let request_id = Uuid::new_v4().to_string();
+    let payload = serde_json::json!({"op":"quota","requestId":request_id,"worker":worker});
+    let operation = async {
+        let mut request = serde_json::to_vec(&payload)?; request.push(b'\n');
+        let mut stream = UnixStream::connect(socket_path).await?;
+        stream.write_all(&request).await?; stream.shutdown().await?;
+        let mut response = Vec::new();
+        stream.take(4097).read_to_end(&mut response).await?;
+        if response.len() > 4096 { bail!("quota response exceeds limit"); }
+        parse_v22_quota_response(serde_json::from_slice(&response)?, &request_id, worker, unix_now())
+    };
+    tokio::time::timeout(Duration::from_secs(4), operation).await.context("quota probe timeout")?
+}
+
+#[cfg(not(unix))]
+async fn v22_sidecar_quota(_socket_path: &str, _worker: &str) -> Result<Option<crate::tomverse_api::AmuxWorkerQuota>> {
+    Ok(None)
+}
+
 #[cfg(unix)]
 async fn v22_sidecar_call(
     socket_path: &str,
@@ -1733,8 +1875,10 @@ pub async fn run_from_env() -> i32 {
     let mut pending: Vec<PendingExecution> = Vec::new();
     let mut halted = false;
     let mut halt_reported = false;
+    let mut halt_cause: Option<String> = None;
     let empty_prompts = BTreeMap::new();
     let mut awaiting_delivery: Vec<AwaitingDelivery> = Vec::new();
+    let mut quota_checked: BTreeMap<String, std::time::Instant> = BTreeMap::new();
 
     loop {
         if !halted && !awaiting_registration.is_empty() {
@@ -1782,6 +1926,7 @@ pub async fn run_from_env() -> i32 {
                     // pending) is still open on the server. Stop instead.
                     sessions.observe(&name, false, false);
                     halted = true;
+                    note_halt(&mut halt_cause, "worker_runtime_lease_lost");
                 }
                 _ => {
                     sessions.observe(&name, session.running, false);
@@ -1803,6 +1948,7 @@ pub async fn run_from_env() -> i32 {
         for entry in pending.drain(..) {
             let Some(session) = sessions.presence(&entry.delivery.worker) else {
                 halted = true;
+                note_halt(&mut halt_cause, "pending_session_missing");
                 continue;
             };
             let answer = api
@@ -1822,11 +1968,42 @@ pub async fn run_from_env() -> i32 {
                 PendingHeartbeat::KeepAndHalt => {
                     still_pending.push(entry);
                     halted = true;
+                    let class = match &answer {
+                        Err(error) => bridge_error_class(error),
+                        Ok(_) => "other".to_owned(),
+                    };
+                    note_halt(&mut halt_cause, format!("execution_heartbeat_{class}"));
                 }
-                PendingHeartbeat::DropAndHalt => halted = true,
+                PendingHeartbeat::DropAndHalt => {
+                    halted = true;
+                    note_halt(&mut halt_cause, "execution_heartbeat_refused");
+                }
             }
         }
         pending = still_pending;
+
+        // Renew active attempts first. Each fixed-scope sidecar probes its own
+        // CLI profile at most once per five minutes; unknown reads remain
+        // unknown and never become a fabricated available/exhausted quota.
+        if !halted && !any_pending_busy_this_tick && roster_ok {
+            if let Some(socket) = &local.v22_socket {
+                for name in sessions.names() {
+                    if !sessions.presence(&name).is_some_and(|session| session.running) ||
+                        quota_checked.get(&name).is_some_and(|at| at.elapsed() < Duration::from_secs(300)) {
+                        continue;
+                    }
+                    quota_checked.insert(name.clone(), std::time::Instant::now());
+                    match v22_sidecar_quota(socket, &name).await {
+                        Ok(Some(observation)) => match api.worker_quota_record_once(&observation).await {
+                            Ok(true) => println!("amux v22 quota observation recorded for {name}"),
+                            Ok(false) => eprintln!("amux v22 quota observation refused for {name}"),
+                            Err(_) => { halted = true; note_halt(&mut halt_cause, "quota_write_unknown"); break; }
+                        },
+                        _ => eprintln!("amux v22 quota source unavailable for {name}"),
+                    }
+                }
+            }
+        }
 
         if !halted && !any_pending_busy_this_tick {
             let carried = std::mem::take(&mut awaiting_delivery);
@@ -1877,6 +2054,9 @@ pub async fn run_from_env() -> i32 {
                         &mut accepted,
                         &mut halted,
                     );
+                    if halted {
+                        note_halt(&mut halt_cause, "dispatch_outcome_unknown");
+                    }
                 }
                 Err(err) => {
                     // The tick failed with an unknown outcome, but it may
@@ -1886,8 +2066,9 @@ pub async fn run_from_env() -> i32 {
                     // keeps an already-dispatched attempt in `pending` (so it
                     // keeps getting heartbeats after this halt) instead of
                     // being forgotten.
+                    let class = bridge_error_class(&err.error);
                     eprintln!(
-                        "amux wsl bridge warn: tick failed after {} result(s) already committed this tick; recording them before halting",
+                        "amux wsl bridge warn: tick failed ({class}) after {} result(s) already committed this tick; recording them before halting",
                         err.partial.len()
                     );
                     record_bridge_tick_results(
@@ -1898,6 +2079,7 @@ pub async fn run_from_env() -> i32 {
                         &mut halted,
                     );
                     halted = true;
+                    note_halt(&mut halt_cause, format!("tick_failed_{class}"));
                 }
             }
             drop(input);
@@ -1958,6 +2140,7 @@ pub async fn run_from_env() -> i32 {
                     } => {
                         let Some(session) = sessions.presence(&entry.delivery.worker).cloned() else {
                             halted = true;
+                            note_halt(&mut halt_cause, "settle_session_missing");
                             still_running.push(entry);
                             continue;
                         };
@@ -2101,6 +2284,7 @@ pub async fn run_from_env() -> i32 {
                         }.map(|response| response.settled);
                         let result = plan_settle_answer(&settled);
                         if result == SettleResult::HaltForReadBack {
+                            note_halt(&mut halt_cause, "settle_outcome_unknown");
                             eprintln!(
                                 "amux wsl bridge halt: settle outcome unknown for attempt {}; read back before restart",
                                 entry.delivery.attempt_id
@@ -2121,7 +2305,7 @@ pub async fn run_from_env() -> i32 {
             pending = still_running;
         }
         if halted && !halt_reported {
-            eprintln!("amux wsl bridge halted: no new assignments; restart only after checking Tomverse and the local AMUX");
+            eprintln!("{}", halt_line(halt_cause.as_deref()));
             halt_reported = true;
         }
         if should_exit_halted_bridge(halted, pending.len()) {
@@ -2948,6 +3132,67 @@ mod tests {
         let lost = &run[run.find("Some(\"runtime_lease_lost\")").unwrap()..];
         let lost = &lost[..lost.find("_ => {").unwrap()];
         assert!(lost.contains("halted = true;"));
+    }
+
+    #[test]
+    fn a_halt_names_its_cause_and_never_the_error_text() {
+        // The 2026-10-08 halt: the owned queue answered 500.
+        let owned_500 = crate::tomverse_api::parse_owned_queue_body(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            br#"{"error":"Internal server error.","detail":"secret"}"#,
+        )
+        .unwrap_err();
+        assert_eq!(owned_500.to_string(), "unsupported Tomverse internal response status");
+        assert_eq!(bridge_error_class(&owned_500), "http_500");
+        let owned_401 = crate::tomverse_api::parse_owned_queue_body(
+            reqwest::StatusCode::UNAUTHORIZED,
+            b"{}",
+        )
+        .unwrap_err();
+        assert_eq!(bridge_error_class(&owned_401), "http_401");
+        assert_eq!(bridge_error_class(&anyhow::Error::new(DatabaseBusy)), DATABASE_BUSY);
+        let deadline = anyhow::Error::new(NothingCommittedAnswer {
+            reason: "amux_database_deadline_exceeded",
+        })
+        .context("execution heartbeat");
+        assert_eq!(bridge_error_class(&deadline), "amux_database_deadline_exceeded");
+        // An error whose own text carries a URL or a body is classed, never quoted.
+        let leaky = anyhow::anyhow!("https://internal.example/api?token=secret answered {{\"x\":1}}");
+        assert_eq!(bridge_error_class(&leaky), "other");
+
+        let line = halt_line(Some("tick_failed_http_500"));
+        assert!(line.starts_with("amux wsl bridge halted: no new assignments; "));
+        assert!(line.contains("; cause=tick_failed_http_500; "));
+        assert!(halt_line(None).contains("; cause=unrecorded; "));
+    }
+
+    #[test]
+    fn the_first_halt_cause_is_the_one_reported() {
+        let mut cause = None;
+        note_halt(&mut cause, "worker_runtime_lease_lost");
+        note_halt(&mut cause, "tick_failed_other");
+        assert_eq!(cause.as_deref(), Some("worker_runtime_lease_lost"));
+    }
+
+    #[test]
+    fn every_halt_in_the_run_loop_records_its_cause() {
+        let source = include_str!("wsl_bridge.rs");
+        let run = &source[source.find("pub async fn run_from_env").unwrap()..];
+        let run = &run[..run.find("fn local_client").unwrap()];
+        // `*halted = true;` is `record_bridge_tick_results`, defined in this
+        // span; its caller names that cause (`dispatch_outcome_unknown`).
+        let halts: Vec<usize> = run
+            .match_indices("halted = true;")
+            .map(|(at, _)| at)
+            .filter(|&at| at == 0 || run.as_bytes()[at - 1] != b'*')
+            .collect();
+        assert!(halts.len() >= 6, "found {} halt sites", halts.len());
+        assert!(run.contains("note_halt(&mut halt_cause, \"dispatch_outcome_unknown\");"));
+        for at in halts {
+            let next = &run[at..(at + 400).min(run.len())];
+            assert!(next.contains("note_halt(&mut halt_cause"), "a halt without a cause: {next}");
+        }
+        assert!(run.contains("eprintln!(\"{}\", halt_line(halt_cause.as_deref()));"));
     }
 
     #[test]

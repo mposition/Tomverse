@@ -500,12 +500,18 @@ const compilerOptions = parsedConfig.options;
 // accesses in `lib/marketingAutomationAccess.ts`; capability naming changes no
 // access expression. The 228-entry count and position-free digest remain
 // unchanged, so this repins source positions only.
+// 2026-10-12, default model GPT 6 Luna and the guest trio's Haiku 5.5: two
+// pricing profiles inserted in `lib/modelPricing.ts` move the twelve accesses
+// below them by 73 lines, and two catalogue rows plus the DEFAULT_MODEL_ID note
+// in `lib/models.ts` move its two `MODEL_ACCESS_RANK[...]` accesses by 16
+// lines. No access is added; count 228 and the position-free inventory are
+// unchanged, so this repins positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "858f9175a0b2f872b080dea4a6ab022f",
-  "0dc7b8e909a8357f63a77a89ecdfd40c",
+  "2ef8e03ecd2d5a67e3ab1dd41c1bfb89",
+  "8fcaff00b7f3bbc9aec39ad384b87291",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

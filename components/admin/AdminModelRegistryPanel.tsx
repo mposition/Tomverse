@@ -29,7 +29,7 @@ import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, creditFloorExceptionShapeKey, creditFloorExceptionVerdict, GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION, isCreditFloor, suggestCreditFloor, type AdoptionPriceView } from "@/lib/modelAdoptionDraft";
+import { ADOPTION_USAGE_CLASSES, adoptionSaleProposal, adoptionSaveBlock, blankTokenFieldValues, creditFloorExceptionId, creditFloorExceptionShapeKey, creditFloorExceptionVerdict, GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION, isCreditFloor, suggestCreditFloor, type AdoptionPriceView } from "@/lib/modelAdoptionDraft";
 import { partitionAdoptionGuidance, priceHintsForView } from "@/lib/adoptionDialogGuidance";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
@@ -979,13 +979,14 @@ export function AdminModelRegistryPanel() {
   const floorExceptionShapeKey = adoptWorkItemId
     ? creditFloorExceptionShapeKey(floorExceptionInput)
     : null;
+  // The acknowledgement a matched shape needs: the Gemini Flash-Lite exception
+  // or the Haiku line exception, whichever this body is.
+  const floorExceptionId = creditFloorExceptionId(floorExceptionInput);
   const floorException = floorExceptionShapeKey
     ? creditFloorExceptionVerdict({
         ...floorExceptionInput,
         acknowledgement:
-          acknowledgedFloorExceptionKey === floorExceptionShapeKey
-            ? GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id
-            : null,
+          acknowledgedFloorExceptionKey === floorExceptionShapeKey ? floorExceptionId : null,
       })
     : "not_applicable";
   const adoptBlock = adoptWorkItemId
@@ -1140,8 +1141,8 @@ export function AdminModelRegistryPanel() {
               workItemId: adoptWorkItemId,
               reason: adoptReason.trim(),
               ...(replacesId ? { replacesModelId: replacesId } : {}),
-              ...(floorException === "accepted"
-                ? { creditFloorExceptionAck: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id }
+              ...(floorException === "accepted" && floorExceptionId
+                ? { creditFloorExceptionAck: floorExceptionId }
                 : {}),
             })}`
           : "/api/admin/models";
@@ -1792,7 +1793,11 @@ export function AdminModelRegistryPanel() {
                       );
                     }}
                   />
-                  <span>{m.adopt.flashLiteStandardException}</span>
+                  <span>
+                    {floorExceptionId === GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id
+                      ? m.adopt.flashLiteStandardException
+                      : m.adopt.haikuLineGuestException}
+                  </span>
                 </label>
               ) : null}
               {adoptWorkItemId && (adoptBlockText || (saveRefusal === "replace" && replaceMissing)) ? (

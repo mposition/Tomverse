@@ -22,11 +22,12 @@ type StatusRecord = {
 const SELECTED = {
   gemini: { id: "gemini-flash-lite-latest", provider: "google", name: "Gemini Flash-Lite" },
   // The OpenAI slot of the guest default selection. Tracks
-  // GUEST_BRAND_TRIO_MODEL_IDS, which moved to gpt-5-6-luna with the app
-  // default: a model this fixture names but the trio no longer selects would
-  // never reach the banner these tests are about.
-  gpt: { id: "gpt-5-6-luna", provider: "openai", name: "GPT-5.6 Luna" },
-  claude: { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5" },
+  // GUEST_BRAND_TRIO_MODEL_IDS, which moved to gpt-6-luna with the app default
+  // on 2026-10-12 (the Anthropic slot moved to claude-haiku-5-5 the same day):
+  // a model this fixture names but the trio no longer selects would never
+  // reach the banner these tests are about.
+  gpt: { id: "gpt-6-luna", provider: "openai", name: "GPT 6 Luna" },
+  claude: { id: "claude-haiku-5-5", provider: "anthropic", name: "Claude Haiku 5.5" },
 } as const;
 
 /**
@@ -854,10 +855,13 @@ test("clicking the banner's suggestion swaps the failed model instead of silentl
     "The 3-panel cap assertion only applies to the desktop chat shell."
   );
   await mockAuthenticatedApi(page);
+  // Signed in, so the workspace settles on the account default the settings
+  // fixture returns -- gpt-5-6-luna, a stored default an existing account
+  // keeps -- and not on the guest trio SELECTED describes.
   await mockProviderStatus(page, [
     {
-      id: SELECTED.gpt.id,
-      provider: SELECTED.gpt.provider,
+      id: "gpt-5-6-luna",
+      provider: "openai",
       status: "unavailable",
       fallbackModelIds: ["mistral-small-4"],
       fallbackHealth: "operational",

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { readAmuxPortfolioClock } from "./portfolioClock.ts";
+
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
@@ -213,7 +215,7 @@ export async function commitAmuxPortfolioScore(input: { session: Session;
       activeStaleAt: new Date(plan.score.activeStaleAt),
       baselineStaleAt: new Date(plan.score.baselineStaleAt),
       approvedByUserId: actorUserId, approvalAuditLogId: auditId,
-      computedAt: new Date(),
+      computedAt: await readAmuxPortfolioClock(tx),
     } });
     return { state: "confirmed" as const, scoreId: input.payload.id,
       score: plan.score, auditId };
