@@ -22,10 +22,10 @@ test("release policy binds body but not mutable status frontmatter", () => {
   const constant = source.match(/CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256 =\s*\n\s*"([0-9a-f]{64})"/);
   assert.ok(constant);
   assert.equal(digest(policyBody(document)), constant[1]);
-  assert.ok(document.includes(
-    "status: approved"));
+  const statusLine = document.match(/^status: [^\n]+$/m)?.[0];
+  assert.ok(statusLine);
   assert.equal(digest(policyBody(document.replace(
-    "status: approved",
+    statusLine,
     "status: implementation_merged_activation_pending"))), constant[1]);
   assert.notEqual(digest(`${policyBody(document)}\nDifferent policy body.\n`),
     constant[1]);

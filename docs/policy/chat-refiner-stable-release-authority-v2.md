@@ -1,5 +1,5 @@
 ---
-status: approved
+status: approved_scope_not_activated
 policyVersion: 2
 workId: CHAT-01
 approvedBy: mposition
