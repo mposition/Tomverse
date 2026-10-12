@@ -16,6 +16,7 @@ import {
   localizedPath,
 } from "@/lib/seo";
 import type { Language } from "@/lib/language";
+import { servedRawTextElements } from "@/tests/support/servedRawTextElements";
 import {
   expectNoHorizontalOverflow,
   mockAuthenticatedApi,
@@ -63,6 +64,7 @@ function servedDocument(html: string) {
 }
 
 function expectInlineHashes(html: string, headers: Record<string, string>, path: string) {
+  const elements = servedRawTextElements(html);
   const policies = [headers["content-security-policy"], headers["content-security-policy-report-only"]].filter(Boolean);
   expect(policies.length, `${path} must serve a CSP`).toBeGreaterThan(0);
   for (const policy of policies) {
@@ -75,11 +77,11 @@ function expectInlineHashes(html: string, headers: Record<string, string>, path:
       expect(sources, `${path} ${tag} must use hashes, not blanket inline permission`).not.toContain("'unsafe-inline'");
       if (tag === "script") expect(sources).not.toContain("'unsafe-eval'");
       let inlineCount = 0;
-      for (const match of html.matchAll(new RegExp(`<${tag}\\b([^>]*)>([\\s\\S]*?)<\\/${tag}\\s*>`, "gi"))) {
-        if (tag === "script" && attributes(match[1]).src) continue;
-        if (!match[2]) continue;
+      for (const element of elements.filter(element => element.tag === tag)) {
+        if (tag === "script" && element.attributes.src) continue;
+        if (!element.body) continue;
         inlineCount++;
-        const hash = `'sha384-${createHash("sha384").update(match[2], "utf8").digest("base64")}'`;
+        const hash = `'sha384-${createHash("sha384").update(element.body, "utf8").digest("base64")}'`;
         expect(sources, `${path}: CSP omits the served inline ${tag} hash ${hash}`).toContain(hash);
       }
       if (tag === "script") expect(inlineCount, `${path} must exercise actual inline hydration scripts`).toBeGreaterThan(0);
@@ -109,11 +111,11 @@ function expectDynamicNonces(html: string, headers: Record<string, string>, path
   // own attribute: both Next's bootstrap and our inline scripts must match it.
   const roles = new Set<string>();
   let checkedScripts = 0;
-  for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
-    const attrs = attributes(match[1]);
+  for (const element of servedRawTextElements(html).filter(element => element.tag === "script")) {
+    const attrs = element.attributes;
     const hasSource = Object.prototype.hasOwnProperty.call(attrs, "src");
     if (hasSource) expect(attrs.src.trim().length, `${path}: an empty src is not an inline script`).toBeGreaterThan(0);
-    const content = match[2].trim();
+    const content = element.body.trim();
     // Empty inline placeholders execute nothing. External scripts still need
     // the nonce even though their script element has no inline body.
     if (!hasSource && !content) continue;
