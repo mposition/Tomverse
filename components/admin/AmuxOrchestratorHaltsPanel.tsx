@@ -9,7 +9,7 @@ import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocale
 import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxOrchestratorHaltsMessages } from "@/lib/adminMessages/amuxOrchestratorHalts";
-import { AMUX_ORCHESTRATOR_HALT_KEY_PREFIX_LENGTH, AMUX_ORCHESTRATOR_RECEIPT_TARGET_HREFS } from "@/lib/amux/orchestratorHaltCore";
+import { AMUX_ORCHESTRATOR_HALT_KEY_PREFIX_LENGTH, AMUX_ORCHESTRATOR_RECEIPT_TARGET_HREFS, amuxOrchestratorHaltReasonAllowsAutoClear } from "@/lib/amux/orchestratorHaltCore";
 import type { AmuxOrchestratorAdminHalt, AmuxOrchestratorAdminView, AmuxOrchestratorAdminWrite } from "@/lib/amux/orchestratorHaltStore";
 import type { AdminLocale, AdminMessageShape } from "@/lib/adminLocale";
 
@@ -24,9 +24,9 @@ export type HaltAttention = "automatic_pending" | "operator_required" | "cause_r
 /** Presentation only; the server and database decide whether a halt is cleared. */
 export function amuxHaltAttention(halt: AmuxOrchestratorAdminHalt): HaltAttention {
   if (halt.reasonCode === "contract_violation" || halt.reasonCode === "selection_read_failures") return "cause_required";
-  if (["claim_outcome_unknown", "recovery_outcome_unknown", "promotion_outcome_unknown"].includes(halt.reasonCode)
+  if (amuxOrchestratorHaltReasonAllowsAutoClear(halt.reasonCode)
     && halt.requestId !== null && halt.write?.requestId === halt.requestId
-    && halt.write.receiptCount === 0 && (halt.write.resolution === null || halt.write.resolution === "no_commit")
+    && halt.write.receiptCount === 0 && halt.write.resolution === null && halt.write.resolvedAt === null
     && halt.write.ackedAt === null) return "automatic_pending";
   return "operator_required";
 }
@@ -83,11 +83,14 @@ function DateValue({ value, locale }: { value: string; locale: AdminLocale }) {
 function HaltCard({ halt, canClear, showCleared, m, locale }: { halt: AmuxOrchestratorAdminHalt; canClear: boolean; showCleared: boolean; m: Messages; locale: AdminLocale }) {
   const attention = amuxHaltAttention(halt);
   const automatic = amuxHaltHasAutomaticEvidence(halt);
+  const incompleteClear = !showCleared && amuxOrchestratorHaltReasonAllowsAutoClear(halt.reasonCode)
+    && halt.requestId !== null && halt.write?.requestId === halt.requestId
+    && halt.write.resolution === "no_commit" && halt.write.receiptCount === 0 && halt.write.ackedAt === null;
   return <article key={halt.haltId} className="min-w-0 rounded-lg border border-zinc-800 p-4" data-testid="amux-halt-row" data-attention={showCleared ? "cleared" : attention}>
     <div className="flex flex-wrap items-start justify-between gap-2"><h4 className="font-semibold">{m.reasonLabels[halt.reasonCode]}</h4><span className={`inline-flex items-center gap-1 text-xs font-semibold ${automatic ? "text-status-success-300" : "text-amber-300"}`}>
       {automatic ? <CheckCircle2 className="size-4" aria-hidden /> : attention === "automatic_pending" ? <Clock3 className="size-4" aria-hidden /> : <AlertTriangle className="size-4" aria-hidden />}
       {showCleared ? automatic ? m.autoCleared : halt.clearKind === "human" ? m.humanCleared : m.clearKindUnknown : m.category[attention]}</span></div>
-    <p className={`mt-2 ${muted}`}>{showCleared ? m.clearConsequence : m.categoryDetail[attention]}</p>
+    <p className={`mt-2 ${muted}`}>{showCleared ? m.clearConsequence : incompleteClear ? m.autoClearIncomplete : m.categoryDetail[attention]}</p>
     <dl className="mt-4 grid min-w-0 gap-x-4 gap-y-2 rounded-md bg-zinc-900 p-3 sm:grid-cols-[auto_minmax(0,1fr)]"><dt className={muted}>{m.admission}</dt><dd>{halt.write ? m.admissionPresent : m.admissionMissing}</dd><dt className={muted}>{showCleared ? m.clearedAt : m.openedAt}</dt><dd><DateValue value={showCleared ? halt.clearedAt ?? halt.openedAt : halt.openedAt} locale={locale} /></dd>
       {showCleared ? <><dt className={muted}>{m.actor}</dt><dd className="break-all">{automatic ? m.autoCleared : halt.clearedByUserId ?? m.none}</dd></> : null}</dl>
     {halt.write ? WriteSummary({ write: halt.write, m, locale }) : null}
@@ -142,7 +145,7 @@ function ClearHaltForm({ haltId }: { haltId: string }) {
     <label className="flex flex-col gap-1 font-medium" htmlFor={inputId}>{m.clearLabel}<input id={inputId} className={`min-h-11 w-full max-w-xs rounded-md border border-zinc-600 bg-zinc-950 px-3 font-mono text-base ${focus}`} value={prefix} maxLength={AMUX_ORCHESTRATOR_HALT_KEY_PREFIX_LENGTH} autoComplete="off" spellCheck={false} disabled={pending || unknown} onChange={event => setPrefix(event.target.value)} data-testid="amux-halt-clear-prefix" aria-describedby={`${inputId}-help`} /></label>
     <p id={`${inputId}-help`} className={`text-xs ${muted}`}>{m.clearRequirements}</p>
     <button type="submit" className={`inline-flex min-h-11 items-center rounded-md bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 ${focus}`} disabled={pending || unknown || !amuxHaltClearReady(prefix, checks)} data-testid="amux-halt-clear">{pending ? m.clearing : m.clear}</button><p className={muted}>{m.clearConsequence}</p>
-    {unknown ? <><p role="alert" className="text-amber-300">{m.unknownClear}</p><button type="button" onClick={() => router.refresh()} className={`inline-flex min-h-11 items-center underline ${focus}`}>{m.refresh}</button></> : null}
+    {unknown ? <><p role="alert" className="text-amber-300">{m.unknownClear}</p><button type="button" onClick={() => window.location.reload()} className={`inline-flex min-h-11 items-center underline ${focus}`}>{m.refresh}</button></> : null}
     {refusal ? <p role="alert" className="text-red-300">{m.clearRefusals[refusal]}</p> : null}
     {failure ? <AdminApiFailureNotice failure={failure} returnTo={RETURN_TO} /> : null}
   </form>;

@@ -1,8 +1,9 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
- * Copy for AMUX › Execution › Halts (orchestration policy version 20,
- * section 7). Reason codes, call kinds, receipt kinds, resolutions and ids are
+ * Copy for AMUX › Operations settings › Safety & recovery (orchestration
+ * policy version 20 section 7, amended by version 32). Reason codes, call kinds,
+ * receipt kinds, resolutions and ids are
  * identifiers and render as stored.
  */
 export const adminAmuxOrchestratorHaltsMessages = defineAdminMessages({
@@ -20,6 +21,7 @@ export const adminAmuxOrchestratorHaltsMessages = defineAdminMessages({
     refresh: "Read state again",
     automaticTitle: "Confirmed non-commits recover automatically",
     automaticBody: "The server clears a result-unknown halt only after verifying the same request was resolved as no_commit, has no change receipts, and has the required audit evidence. A missing admission or an uncertain result does not qualify.",
+    autoClearIncomplete: "A no_commit resolution is recorded, but this halt is still open. Check the automatic-clear audit and evidence. If recovery remains blocked, the owner can inspect the actual state and decide on a manual clear.",
     guideTitle: "What should I check?",
     guide: [
       { title: "Confirmed no change", body: "A verified no_commit with zero receipts is cleared by the server. You do not need to clear it manually." },
@@ -116,6 +118,7 @@ export const adminAmuxOrchestratorHaltsMessages = defineAdminMessages({
     refresh: "상태 다시 읽기",
     automaticTitle: "미반영이 확정되면 자동으로 해제합니다",
     automaticBody: "같은 요청의 no_commit 종결, 변경 영수증 0건과 필요한 감사 증거를 서버가 검증한 경우에만 결과 불명 정지를 해제합니다. 접수 기록이 없거나 결과가 미확정이면 자동 해제하지 않습니다.",
+    autoClearIncomplete: "no_commit 종결이 기록됐지만 정지는 아직 열려 있습니다. 자동 해제 감사와 증거를 확인하세요. 해제가 계속되지 않으면 owner가 실제 상태를 검토한 뒤 수동 해제를 결정할 수 있습니다.",
     guideTitle: "무엇을 보고 판단하나요?",
     guide: [
       { title: "미반영이 확정됨", body: "검증된 no_commit과 영수증 0건이면 서버가 자동으로 해제합니다. 운영자 조작은 필요하지 않습니다." },

@@ -65,6 +65,15 @@ test("automatic history needs the matching request, outcome and both audit refer
     assert.match(textOf(row?.children as ReactNode), /Clear evidence unavailable/);
   }
 });
+
+test("an open no_commit halt with incomplete clear evidence retains the owner's manual decision", () => {
+  const item = halt({ write: { ...write, resolution: "no_commit", resolvedAt: "2026-10-12T00:00:18Z" } });
+  assert.equal(amuxHaltAttention(item), "operator_required");
+  const view = { ...empty, openCount: 1, open: [item] };
+  assert.match(textOf(render(view)), /Check the automatic-clear audit and evidence/);
+  assert.equal(propsOf(render(view)).filter(p => p.haltId === item.haltId).length, 1);
+  assert.equal(propsOf(render(view, false)).filter(p => p.haltId === item.haltId).length, 0);
+});
 test("contract and prolonged read failures explicitly require fixing the cause", () => {
   for (const reasonCode of ["contract_violation", "selection_read_failures"] as const)
     assert.equal(amuxHaltAttention(halt({ reasonCode, requestId: null })), "cause_required");

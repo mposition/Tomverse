@@ -7,7 +7,7 @@
   per-page section tabs
 - Severity when violated: release blocker for the redirect table; ordinary
   review for everything else
-- Last reviewed: 2026-09-29
+- Last reviewed: 2026-10-12
 
 ## Scope
 
@@ -65,7 +65,7 @@ owner-only (rule 14).
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
 | AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment` |
-| AMUX | Operations settings | `/admin/amux-settings` | `safety`, `decision-maker` |
+| AMUX | Operations settings | `/admin/amux-settings` | `automatic-admission` (owner only), `safety`, `decision-maker` |
 | Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
 | Governance | Audit log | `/admin/audit` | — |
 | Governance | Retention | `/admin/retention` | — |
@@ -212,13 +212,18 @@ theme; the AI Review gradient is not among them.
 (`docs/policy/development-agent-orchestration.md`). Its eight screens used to
 be eight unlisted owner-only routes, left out of the table because the table
 fed every role's palette and every other role gets a 404 from them. They are
-now sections of three pages, listed by role (rule 14): **Backlog** (what
+now sections of four pages, listed by role (rule 14): **Backlog** (what
 enters the backlog and what is recorded about a card) and **Promotion** (how a
 card reaches Todo) are owner-only; **Execution** opens to every admin role on
 **Assignment** -- why AMUX assigned the work, and the escalations waiting on a
 person, which used to sit on Routing -- while its **Cards** section stays
 owner-only. The owner opens Execution on Cards, everyone else on Assignment,
 and a non-owner who names `?tab=cards` gets a 404 rather than another section.
+**Operations settings** opens to every admin role, but its **Automatic
+admission** section is owner-only. It is the owner's first section; after
+role filtering, every other role opens on **Execution safety and recovery**.
+A non-owner who names `?tab=automatic-admission` gets a 404 before the page
+reads the v22 control.
 Each page loads only its open section. On 2026-10-10 the operator retired the
 legacy JSON registration and local-analysis import UI in favour of v4 Ideas.
 Backlog opens on Ideas; `/admin/amux-intake` and Backlog's old `?tab=intake`
@@ -229,8 +234,8 @@ neither deletes data nor grants execution.
 Its Assignment tab carries the count of AMUX escalations still `open` or
 `acknowledged`, from the same status list the section reads
 (`AMUX_ESCALATION_AWAITING_STATUSES`). The Execution entry carries that count
-(`amuxEscalations`). **Operations settings** opens to every admin role on its
-**Safety & recovery** section (orchestration policy version 32, section 7).
+(`amuxEscalations`). The **Safety & recovery** section in **Operations
+settings** opens to every admin role (orchestration policy v20 section 7, amended by v32).
 It explains stop reasons and evidence, shows receipt confirmation and the
 owner's clear, and carries the count of open halts (`amuxOrchestratorHalts`).
 The server automatically clears only a request-bound outcome-unknown halt
@@ -256,10 +261,17 @@ reads (rule 8). Cards reads "Read only" because the card list issues no
 request and writes nothing; Assignment reads "Read only" to a role without
 `ops:write`, the permission every decision route checks.
 
-The Promotion auto-promotion section also contains the separate owner-only v22
-admission control. It reads actual graduation counts separately from the approved
-bootstrap exception, requires explicit confirmation and recent authentication for
-writes, and preserves the read-only Cards surface. Unknown writes are not retried.
+Promotion's **Auto-promotion** section remains the legacy v8 grant, halt and
+resume surface. The separate owner-only v22 control lives in **Operations
+settings › Automatic admission**. Its chip reads only the v22 server switch;
+the legacy chip reads only the v8 switch, so enabling either path never labels
+the other as open. The v22 control reads actual graduation counts separately
+from the approved bootstrap exception, requires explicit confirmation and
+recent authentication for writes, and preserves the read-only Cards surface.
+Unknown writes are not retried. The first-tab placement means the canonical
+step-up callback `/admin/amux-settings` returns an owner to this control, while
+role filtering still makes Execution safety and recovery the default for every
+other role.
 
 **Routing** keeps Chat shadow routing only, and one line pointing at AMUX ›
 Execution, because runbooks written before the move send operators there.

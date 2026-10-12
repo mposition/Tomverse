@@ -710,11 +710,12 @@ test.describe("the AMUX group by role", () => {
     // switches; a change takes ops:write and a recent step-up.
     await signInAs("readonly");
     await page.goto("/admin/amux-execution?tab=decision-maker");
-    const panel = page.getByTestId("amux-decision-maker-switch-panel");
+    const panel = page.getByTestId("amux-decision-maker-switch-panel").filter({ visible: true });
+    await expect(panel).toHaveCount(1);
     await expect(panel).toBeVisible();
-    await expect(page.getByTestId("amux-dm-switch-value-kill_switch")).toHaveText("Off (off)");
-    await expect(page.getByTestId("amux-dm-switch-value-decision-maker-openai")).toHaveText("Off (off)");
-    await expect(page.getByTestId("amux-dm-switch-read-only")).toBeVisible();
+    await expect(panel.getByTestId("amux-dm-switch-value-kill_switch")).toHaveText("Off (off)");
+    await expect(panel.getByTestId("amux-dm-switch-value-decision-maker-openai")).toHaveText("Off (off)");
+    await expect(panel.getByTestId("amux-dm-switch-read-only")).toBeVisible();
     await expect(panel.getByRole("button")).toHaveCount(0);
 
     // Past the step-up window the controls are offered, the change is refused
@@ -722,14 +723,14 @@ test.describe("the AMUX group by role", () => {
     // and nothing is written.
     await signInAs("ops", { authenticatedMinutesAgo: 45 });
     await page.goto("/admin/amux-execution?tab=decision-maker");
-    await expect(page.getByTestId("amux-dm-switch-read-only")).toHaveCount(0);
-    await page.getByTestId("amux-dm-switch-set-kill_switch-on").click();
+    await expect(panel.getByTestId("amux-dm-switch-read-only")).toHaveCount(0);
+    await panel.getByTestId("amux-dm-switch-set-kill_switch-on").click();
     await expect(panel.getByTestId("admin-api-reauthenticate-link")).toHaveAttribute(
       "href",
       "/auth/admin-reauthenticate?callbackUrl=%2Fadmin%2Famux-settings%3Ftab%3Ddecision-maker&mode=recent"
     );
     expect(await adminFixtureDatabase().amuxDecisionMakerSwitchEvent.count()).toBe(0);
-    await expect(page.getByTestId("amux-dm-switch-value-kill_switch")).toHaveText("Off (off)");
+    await expect(panel.getByTestId("amux-dm-switch-value-kill_switch")).toHaveText("Off (off)");
   });
 
   test("the palette does not offer another role the owner's AMUX pages", async ({
@@ -742,8 +743,9 @@ test.describe("the AMUX group by role", () => {
     const amux = palette
       .locator("section")
       .filter({ has: page.getByRole("heading", { name: "AMUX", exact: true }) });
-    await expect(amux.getByRole("option")).toHaveCount(1);
+    await expect(amux.getByRole("option")).toHaveCount(2);
     await expect(amux.getByRole("option", { name: /^Execution/ })).toBeVisible();
+    await expect(amux.getByRole("option", { name: /^Operations settings/ })).toBeVisible();
   });
 
   for (const url of [
