@@ -323,18 +323,18 @@
   .exampleResult { padding: 16px; }
   .rails { transform: scale(.43); }
 }
-/* Native Figma 4.5s cohort; individual transforms preserve each stamp's rotation. */
-.heroTitle span:first-child { animation: kf_13_255_opacity_0 4.5s linear, kf_13_255_translate_0 4.5s linear; animation-iteration-count: infinite; }
+/* Figma entrance tracks play once for readability; only the ribbon repeats. */
+.heroTitle span:first-child { animation: kf_13_255_opacity_0 4.5s linear, kf_13_255_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
 @keyframes kf_13_255_opacity_0 { 0% { opacity: 0; } 3.333% { animation-timing-function: ease-out; opacity: 0; } 18.889% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_255_translate_0 { 0% { translate: 0px 70px; } 3.333% { animation-timing-function: ease-out; translate: 0px 70px; } 18.889% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
-.heroTitle span:last-child { animation: kf_13_256_opacity_0 4.5s linear, kf_13_256_translate_0 4.5s linear; animation-iteration-count: infinite; }
+.heroTitle span:last-child { animation: kf_13_256_opacity_0 4.5s linear, kf_13_256_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
 @keyframes kf_13_256_opacity_0 { 0% { opacity: 0; } 7.111% { animation-timing-function: ease-out; opacity: 0; } 22.667% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_256_translate_0 { 0% { translate: 0px 70px; } 7.111% { animation-timing-function: ease-out; translate: 0px 70px; } 22.667% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
-.stamp0 { animation: kf_13_269_opacity_0 4.5s linear, kf_13_269_translate_0 4.5s linear; animation-iteration-count: infinite; }
+.stamp0 { animation: kf_13_269_opacity_0 4.5s linear, kf_13_269_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
 @keyframes kf_13_269_opacity_0 { 0% { opacity: 0; } 6.667% { animation-timing-function: ease-out; opacity: 0; } 21.111% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_269_translate_0 { 0% { translate: -130px -40px; } 6.667% { animation-timing-function: ease-out; translate: -130px -40px; } 25.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
-.stamp1 { animation: kf_13_270_opacity_0 4.5s linear, kf_13_270_translate_0 4.5s linear; animation-iteration-count: infinite; }
+.stamp1 { animation: kf_13_270_opacity_0 4.5s linear, kf_13_270_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
 @keyframes kf_13_270_opacity_0 { 0% { opacity: 0; } 10.667% { animation-timing-function: ease-out; opacity: 0; } 25.111% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_270_translate_0 { 0% { translate: 0px -40px; } 10.667% { animation-timing-function: ease-out; translate: 0px -40px; } 29.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
-.stamp2 { animation: kf_13_271_opacity_0 4.5s linear, kf_13_271_translate_0 4.5s linear; animation-iteration-count: infinite; }
+.stamp2 { animation: kf_13_271_opacity_0 4.5s linear, kf_13_271_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
 @keyframes kf_13_271_opacity_0 { 0% { opacity: 0; } 14.667% { animation-timing-function: ease-out; opacity: 0; } 29.111% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_271_translate_0 { 0% { translate: 130px -40px; } 14.667% { animation-timing-function: ease-out; translate: 130px -40px; } 33.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
-.chatPreview { animation: kf_13_272_opacity_0 4.5s linear, kf_13_272_translate_0 4.5s linear, kf_13_272_scale_0 4.5s linear; animation-iteration-count: infinite; }
+.chatPreview { animation: kf_13_272_opacity_0 4.5s linear, kf_13_272_translate_0 4.5s linear, kf_13_272_scale_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
 @keyframes kf_13_272_opacity_0 { 0% { opacity: 0; } 21.111% { animation-timing-function: ease-out; opacity: 0; } 35.556% { opacity: 1; } 100% { opacity: 1; } } @keyframes kf_13_272_translate_0 { 0% { translate: 0px 70px; } 21.111% { animation-timing-function: ease-out; translate: 0px 70px; } 38.889% { translate: 0px 0px; } 100% { translate: 0px 0px; } } @keyframes kf_13_272_scale_0 { 0% { scale: 0.9 0.9; } 21.111% { animation-timing-function: ease-out; scale: 0.9 0.9; } 38.889% { scale: 1 1; } 100% { scale: 1 1; } }
 .ribbon { animation: kf_13_283_translate_0 4.5s linear; animation-iteration-count: infinite; }
 @keyframes kf_13_283_translate_0 { 0% { animation-timing-function: ease-out; translate: 90px 0px; } 93.333% { translate: -80px 0px; } 100% { translate: -80px 0px; } }

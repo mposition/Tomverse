@@ -3,11 +3,11 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
-import { launchHomepageContent, type EverydayExample, type LaunchHomepageCopy } from "./launchHomepageContent";
+import { useMarketingChatEntry } from "./MarketingChatAvailability";
+import { launchHomepageContent, launchReviewEntryCopy, type EverydayExample, type LaunchHomepageCopy } from "./launchHomepageContent";
 import styles from "./LaunchHomepage.module.css";
 
 type LaunchHomepageProps = { chatHref: string; reviewHref: string; reviewInfoHref: string };
@@ -122,21 +122,21 @@ function EverydayGallery({ copy }: { copy: LaunchHomepageCopy["gallery"] }) {
   </section>;
 }
 
-export default function LaunchHomepage({ chatHref, reviewHref, reviewInfoHref }: LaunchHomepageProps) {
+export default function LaunchHomepage({ reviewInfoHref }: LaunchHomepageProps) {
   const { lang } = useLanguage();
   const copy = launchHomepageContent[lang];
-  const { status } = useSession();
+  const { chatAvailable, guestTrialAvailable, chatHref, reviewHref: reviewEntryHref, primaryHref, primaryProduct } = useMarketingChatEntry();
+  const reviewEntryCopy = launchReviewEntryCopy[lang];
   const [motionDisabled, setMotionDisabled] = useState(false);
   const landingTracked = useRef(false);
-  const reviewEntryHref = status === "authenticated" || /(?:[?&])entry=/.test(reviewHref)
-    ? reviewHref : `${reviewHref}${reviewHref.includes("?") ? "&" : "?"}entry=guest-preview`;
   useEffect(() => {
     if (landingTracked.current) return;
     landingTracked.current = true;
     trackProductEvent("landing_view");
   }, []);
 
-  return <div className={styles.homepage} lang={lang} data-testid="launch-homepage" data-motion-disabled={motionDisabled}>
+  return <div className={styles.homepage} lang={lang} data-testid="launch-homepage" data-motion-disabled={motionDisabled}
+    data-guest-chat-trial-available={guestTrialAvailable ? "true" : "false"}>
     <div className={styles.heroStage}>
       <MarketingHeader variant="launch" maxWidth="max-w-[1440px]" chatHref={chatHref} reviewInfoHref={reviewInfoHref} />
       <main>
@@ -147,10 +147,10 @@ export default function LaunchHomepage({ chatHref, reviewHref, reviewInfoHref }:
               <div className={styles.heroStory}>
                 <p>{copy.hero.body}</p>
                 <div className={styles.actions}>
-                  <ActionLink href={chatHref} id="landing-hero-primary" testId="landing-primary-cta" location="landing_hero_chat">{copy.actions.chat}</ActionLink>
+                  <ActionLink href={primaryHref} id="landing-hero-primary" testId="landing-primary-cta" location={`landing_hero_${primaryProduct}`}>{copy.actions[primaryProduct]}</ActionLink>
                   <ActionLink href={reviewInfoHref} inverse testId="launch-review-info-cta">{copy.actions.reviewInfo}</ActionLink>
                 </div>
-                <p className={styles.heroAccess} data-testid="landing-hero-signup-note">{copy.hero.access}</p>
+                <p className={styles.heroAccess} data-testid="landing-hero-signup-note">{guestTrialAvailable ? copy.hero.access : reviewEntryCopy.heroAccess}</p>
               </div>
               <HeroPreview copy={copy.hero} motionDisabled={motionDisabled}
                 motionLabel={motionDisabled ? copy.actions.motionOn : copy.actions.motionOff}
@@ -195,7 +195,7 @@ export default function LaunchHomepage({ chatHref, reviewHref, reviewInfoHref }:
               <h3 className={styles.reviewQuestion}>{copy.review.question}</h3>
               <div className={styles.answerGrid}>{copy.review.answers.map((answer, i) => <article key={modelNames[i]}>
                 <div className={styles.answer}><p className={styles.answerModel}>{modelNames[i]}</p><h4>{answer.title}</h4><p>{answer.body}</p></div>
-                <p className={styles.answerQuote}>{answer.quote} — {modelNames[i]}</p>
+                <p className={styles.answerQuote}>{answer.quote} · {modelNames[i]}</p>
               </article>)}</div>
               <div className={styles.aiReview}>
                 <div><p className={styles.aiReviewLabel}>AI Review</p><h3>{copy.review.synthesisTitle}</h3></div>
@@ -222,7 +222,7 @@ export default function LaunchHomepage({ chatHref, reviewHref, reviewInfoHref }:
         <section id="trust" className={`${styles.section} ${styles.plansSection}`} aria-labelledby="launch-plans-title">
           <div className={styles.container}>
             <div className={styles.plansGrid}>
-              <div><p className={styles.eyebrow}>Free · Pro · Max</p><h2 id="launch-plans-title">{copy.plans.title}</h2><p>{copy.plans.body}</p><ActionLink href="/pricing" subtle>{copy.actions.pricing}</ActionLink></div>
+              <div><p className={styles.eyebrow}>Free · Pro · Max</p><h2 id="launch-plans-title">{copy.plans.title}</h2><p>{guestTrialAvailable ? copy.plans.body : reviewEntryCopy.plansBody}</p><ActionLink href="/pricing" subtle>{copy.actions.pricing}</ActionLink></div>
               <div className={styles.trustCopy}><h3>{copy.plans.trustTitle}</h3><p>{copy.plans.trustBody}</p><Link href="/safety" className={styles.textLink}>{copy.actions.safety} <span aria-hidden="true">↗</span></Link></div>
             </div>
           </div>
@@ -230,8 +230,8 @@ export default function LaunchHomepage({ chatHref, reviewHref, reviewInfoHref }:
 
         <section className={styles.guestSection} aria-labelledby="launch-guest-title">
           <div className={`${styles.container} ${styles.guestGrid}`}>
-            <div><h2 id="launch-guest-title">{copy.guest.title}</h2><p>{copy.guest.body}</p></div>
-            <div className={styles.actions}><ActionLink href={chatHref} inverse location="landing_final_chat">{copy.actions.chat}</ActionLink><ActionLink href={reviewEntryHref} inverse>{copy.actions.review}</ActionLink></div>
+            <div><h2 id="launch-guest-title">{copy.guest.title}</h2><p>{guestTrialAvailable ? copy.guest.body : reviewEntryCopy.guestBody}</p></div>
+            <div className={styles.actions}><ActionLink href={chatHref} inverse location="landing_final_chat">{chatAvailable ? copy.actions.chat : reviewEntryCopy.chatInfo}</ActionLink><ActionLink href={reviewEntryHref} inverse>{copy.actions.review}</ActionLink></div>
           </div>
         </section>
       </main>
