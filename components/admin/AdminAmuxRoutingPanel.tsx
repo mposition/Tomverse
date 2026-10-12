@@ -290,6 +290,14 @@ const pct = (numerator: number, denominator: number) =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
+export const isValidAmuxReviewArtifact = (value: unknown): value is NonNullable<
+  AmuxReviewDetail["review_artifact"]
+> => isRecord(value) && Number.isSafeInteger(value.pr_number) &&
+  (value.pr_number as number) > 0 &&
+  typeof value.base_sha === "string" && /^[0-9a-f]{40}$/i.test(value.base_sha) &&
+  typeof value.head_sha === "string" && /^[0-9a-f]{40}$/i.test(value.head_sha) &&
+  typeof value.diff_digest === "string" && /^[0-9a-f]{64}$/i.test(value.diff_digest);
+
 const isMicrousd = (value: unknown): value is string =>
   typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
 
@@ -389,8 +397,11 @@ const isOutcomeUnknown = (review: ReviewDetail) => {
 
 const recoveryPreparationForReview = (review: ReviewDetail) =>
   amuxOwnerRecoveryPreparation({
+    taskStatus: review.task.status,
+    taskRevision: review.task.revision,
     escalationReason: review.review_context.escalation_reason,
     lastAttemptReason: review.review_context.last_attempt_reason,
+    lastAttemptTaskRevision: review.last_attempt?.task_revision ?? null,
     lastAttemptOutcome: review.last_attempt?.outcome ?? null,
     lastAttemptToStatus: review.last_attempt?.to_status ?? null,
     lastAttemptEndedAt: review.last_attempt?.ended_at ?? null,
@@ -401,7 +412,7 @@ const recoveryPreparationForReview = (review: ReviewDetail) =>
     workerReportConnected: Boolean(review.review_report?.worker_report),
     workerReportVerified:
       review.review_report?.worker_report_verified === true,
-    artifactConnected: Boolean(review.review_artifact),
+    artifactConnected: isValidAmuxReviewArtifact(review.review_artifact),
     serverAllowsRetry: review.allowed_outcomes.includes("retry") &&
       review.proposed_transitions.retry === "todo",
   });
@@ -409,14 +420,16 @@ const recoveryPreparationForReview = (review: ReviewDetail) =>
 export const visibleAmuxOwnerReviewOutcomes = (review: ReviewDetail) => {
   if (!hasReviewSubject(review)) return [];
   const recovery = recoveryPreparationForReview(review);
+  const validArtifact = isValidAmuxReviewArtifact(review.review_artifact);
   const hasApprovalEvidence = Boolean(
     (review.review_report?.worker_report &&
-      review.review_report.worker_report_verified) || review.review_artifact,
+      review.review_report.worker_report_verified) || validArtifact,
   );
   const unknown = isOutcomeUnknown(review);
   if (!recovery.decisionContextReady) return [];
   return review.allowed_outcomes.filter(isReviewOutcome)
-    .filter((outcome) => outcome !== "approve" || hasApprovalEvidence)
+    .filter((outcome) => outcome !== "approve" ||
+      (recovery.approvalExecutionSourceReady && hasApprovalEvidence))
     .filter((outcome) => outcome !== "retry" ||
       (!unknown && recovery.retryPreviewReady));
 };
@@ -489,7 +502,10 @@ export function AmuxOwnerReviewView({
   const recovery = recoveryPreparationForReview(review);
   const unknown = isOutcomeUnknown(review);
   const succeeded = review.last_attempt?.outcome === "succeeded";
-  const hasWorkerEvidence = Boolean(report?.worker_report || review.review_artifact);
+  const validArtifact = isValidAmuxReviewArtifact(review.review_artifact)
+    ? review.review_artifact
+    : null;
+  const hasWorkerEvidence = Boolean(report?.worker_report || validArtifact);
   const technicalOnly = !recovery.decisionContextReady;
   const decisionQuestion = outcomes.includes("approve")
     ? m.ownerQuestionApprove
@@ -598,11 +614,11 @@ export function AmuxOwnerReviewView({
                 {report.worker_report}
               </pre>
             </>
-          ) : review.review_artifact ? (
+          ) : validArtifact ? (
             <div className="mt-4">
-              <a href={`https://github.com/mposition/Tomverse/pull/${review.review_artifact.pr_number}`} target="_blank" rel="noopener noreferrer"
+              <a href={`https://github.com/mposition/Tomverse/pull/${validArtifact.pr_number}`} target="_blank" rel="noopener noreferrer"
                 className="inline-flex min-h-11 items-center rounded-lg border border-blue-500/40 px-3 py-2 font-bold text-blue-200 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">
-                {m.reviewPr} #{review.review_artifact.pr_number}
+                {m.reviewPr} #{validArtifact.pr_number}
               </a>
               <p className="mt-2 text-sm text-zinc-400">{m.prIsWorkerEvidence}</p>
             </div>
@@ -827,14 +843,14 @@ export function AmuxOwnerReviewView({
             </pre>
           </div>
         )}
-        {review.review_artifact && (
+        {validArtifact && (
           <div className="mt-4 border-t border-zinc-800 pt-4" data-testid="admin-amux-review-artifact">
-            <p className="break-all font-mono text-xs text-zinc-300">{m.reviewBaseSha}: {review.review_artifact.base_sha}</p>
-            <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewHeadSha}: {review.review_artifact.head_sha}</p>
-            <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewDiffDigest}: {review.review_artifact.diff_digest}</p>
+            <p className="break-all font-mono text-xs text-zinc-300">{m.reviewBaseSha}: {validArtifact.base_sha}</p>
+            <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewHeadSha}: {validArtifact.head_sha}</p>
+            <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewDiffDigest}: {validArtifact.diff_digest}</p>
             <p className="mt-3 text-xs font-bold text-zinc-500">{m.reviewPrDiff}</p>
             <pre dir="ltr" className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
-              {review.review_artifact.diff_text}
+              {validArtifact.diff_text}
             </pre>
           </div>
         )}
@@ -1177,14 +1193,15 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
         const isCurrent = () => requestId === reviewRequestId.current &&
           ownerExecutionController.current === controller;
         setOwnerExecution({ state: "loading" });
-        const nextOwnerExecution = await readAmuxOwnerExecutionMetadata({
+        void readAmuxOwnerExecutionMetadata({
           review: detail,
           controller,
           isCurrent,
+        }).then((nextOwnerExecution) => {
+          if (!isCurrent()) return;
+          if (nextOwnerExecution) setOwnerExecution(nextOwnerExecution);
+          ownerExecutionController.current = null;
         });
-        if (!isCurrent()) return;
-        if (nextOwnerExecution) setOwnerExecution(nextOwnerExecution);
-        ownerExecutionController.current = null;
       }
     } catch {
       if (requestId === reviewRequestId.current) setReviewError(m.reviewLoadFailed);
@@ -1577,6 +1594,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                         onClick={closeReview}
                         disabled={reviewBusy || decisionStatusUnknown || decisionStatusChecking}
                         className="rounded-md border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+                        data-testid="admin-amux-close-review"
                       >
                         {m.closeReview}
                       </button>
@@ -1585,7 +1603,8 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                       {m.escalationId}: {selectedEscalationId}
                     </p>
                     {reviewLoading && (
-                      <p className="mt-3 inline-flex items-center gap-2">
+                      <p className="mt-3 inline-flex items-center gap-2"
+                        data-testid="admin-amux-review-loading">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" /> {m.reviewLoading}
                       </p>
                     )}

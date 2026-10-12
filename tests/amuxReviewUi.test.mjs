@@ -28,12 +28,15 @@ test("raw review content loads only from the protected endpoint and is not persi
 
 test("review UI identifies the exact GitHub PR, head, and diff digest", () => {
   assert.match(panel, /data-testid="admin-amux-review-artifact"/);
-  assert.match(panel, /github\.com\/mposition\/Tomverse\/pull\/\$\{review\.review_artifact\.pr_number\}/);
-  assert.match(panel, /review\.review_artifact\.head_sha/);
-  assert.match(panel, /review\.review_artifact\.base_sha/);
-  assert.match(panel, /review\.review_artifact\.diff_digest/);
+  assert.match(panel, /Number\.isSafeInteger\(value\.pr_number\)/);
+  assert.match(panel, /\^\[0-9a-f\]\{40\}\$/);
+  assert.match(panel, /\^\[0-9a-f\]\{64\}\$/);
+  assert.match(panel, /github\.com\/mposition\/Tomverse\/pull\/\$\{validArtifact\.pr_number\}/);
+  assert.match(panel, /validArtifact\.head_sha/);
+  assert.match(panel, /validArtifact\.base_sha/);
+  assert.match(panel, /validArtifact\.diff_digest/);
   assert.match(panel, /data-testid="admin-amux-assigned-work"/);
-  assert.match(panel, /review\.review_artifact\.diff_text/);
+  assert.match(panel, /validArtifact\.diff_text/);
   assert.match(panel, /review\.review_context\.previous_block_reason/);
   assert.match(panel, /review\.retry\.remaining === 0 && \(/);
   assert.match(panel, /review\.review_content\?\.truncated/);

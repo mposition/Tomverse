@@ -1,4 +1,5 @@
 import { expect, test } from "./support/console";
+import type { Route } from "@playwright/test";
 
 import type { AmuxReviewDetail } from
   "@/components/admin/AdminAmuxRoutingPanel";
@@ -318,4 +319,81 @@ test("owner review renders verified, legacy and unknown evidence honestly at 390
     path: "test-results-admin/amux-owner-review-unknown-320.png",
     fullPage: true,
   });
+});
+
+test("protected review does not wait for supplemental owner metadata and aborts stale reads", async ({
+  page,
+  signInAs,
+}) => {
+  const currentReview = baseReview();
+  let executionReads = 0;
+  const heldExecutionRoutes: Route[] = [];
+
+  await page.route("**/api/admin/amux/routing", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(routingReport),
+  }));
+  await page.route("**/api/admin/amux/escalations/review?**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(currentReview),
+  }));
+  await page.route("**/api/admin/amux/execution-view?**", (route) => {
+    executionReads += 1;
+    if (executionReads === 2) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ownerExecution(currentReview)),
+      });
+    }
+    heldExecutionRoutes.push(route);
+  });
+
+  const releaseHeld = async () => {
+    const route = heldExecutionRoutes.shift();
+    expect(route).toBeTruthy();
+    await route?.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...ownerExecution(currentReview),
+        attempts: [{
+          ...ownerExecution(currentReview).attempts[0],
+          worker: "stale-worker",
+        }],
+      }),
+    }).catch(() => undefined);
+  };
+
+  await signInAs("owner");
+  await page.goto("/admin/amux-execution?tab=assignment");
+  const open = page.getByRole("button", { name: "Open protected review" });
+
+  await open.click();
+  await expect.poll(() => executionReads).toBe(1);
+  await expect(page.getByTestId("admin-amux-owner-review")).toBeVisible();
+  await expect(page.getByTestId("admin-amux-review-loading")).toHaveCount(0);
+  await expect(page.getByTestId("admin-amux-cost-summary")).toContainText("Reading exact attempt metadata…");
+  await expect(page.getByTestId("admin-amux-cost-summary")).not.toContainText("US$0");
+
+  await open.click();
+  await expect.poll(() => executionReads).toBe(2);
+  await expect(page.getByTestId("admin-amux-cost-summary")).toContainText("worker-openai");
+  await releaseHeld();
+  await expect(page.getByTestId("admin-amux-cost-summary")).toContainText("worker-openai");
+  await expect(page.getByTestId("admin-amux-cost-summary")).not.toContainText("stale-worker");
+
+  await open.click();
+  await expect.poll(() => executionReads).toBe(3);
+  await page.getByTestId("admin-amux-close-review").click();
+  await releaseHeld();
+  await expect(page.getByTestId("admin-amux-review-detail")).toHaveCount(0);
+
+  await open.click();
+  await expect.poll(() => executionReads).toBe(4);
+  await page.goto("about:blank");
+  await releaseHeld();
+  await expect(page.getByTestId("admin-amux-owner-review")).toHaveCount(0);
 });
