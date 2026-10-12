@@ -100,6 +100,7 @@ const settleCountry = (userId: string, country: string) =>
       countryUpdatedAt: new Date(),
     },
     create: {
+      defaultModel: "gpt-6-luna",
       userId,
       country,
       countrySource: "self_declared",
@@ -1079,6 +1080,7 @@ test("a country settled in the same transaction is seen by the refusal", async (
           countryUpdatedAt: new Date(),
         },
         create: {
+          defaultModel: "gpt-6-luna",
           userId: user.id,
           country: "AU",
           countrySource: "self_declared",

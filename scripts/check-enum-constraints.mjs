@@ -71,6 +71,13 @@ const REGISTRY = {
     reason:
       "Manual or Auto, per conversation (routing policy \u00a75). The application reads an unrecognised stored value as manual, so a mode the constraint allows but the list does not know would silently route nobody rather than fail loudly \u2014 which is exactly the drift this check exists to catch.",
   },
+  ChatCreditReservation_phase_check: {
+    owner: "list",
+    module: "lib/guestChatAutoCreditClaim.ts",
+    list: "CHAT_CREDIT_RESERVATION_PHASES",
+    reason:
+      "Historical and ordinary reservations are exact. Guest Smart Adaptive alone may begin as a model-agnostic guest_auto_prehold and the database guard permits only its one-way conversion to exact; a third phase would otherwise evade both settlement and unknown-hold recovery.",
+  },
   MessageArtifact_format_check: {
     owner: "list",
     module: "lib/generatedArtifactCore.ts",

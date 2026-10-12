@@ -580,13 +580,17 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * one-shot dark tables to the watched Prisma schema. The receiver's calls,
  * descriptor and admission decisions remain unchanged; the closure bytes
  * move and the fingerprint is repinned after the full reviewed closure lands.
+ * 2026-10-12: Guest Smart Adaptive adds a closed credit-lifecycle actor to
+ * the shared audit helper. The receiver's decisions and watched schema slice
+ * are unchanged, but its import closure bytes moved, so prior signed staging
+ * evidence is stale.
  * 2026-10-12: the AMUX worker registry (orchestration policy version 31, stage
  * R1) adds the registry event, trial evidence and latch event back relations
  * to `AdminAuditLog` in the watched schema. No actor, descriptor, webhook
  * writer or admission decision changes; the bytes moved, so evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "9c5656b55469590778f340ca29ed8d6d4aaff668c73e925d124a91d9a46adb93";
+  "09c6d9559cd26319ed1e7c57d19c2049e05b780e3544bade9a124b3cf5848e92";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

@@ -81,7 +81,7 @@ test.describe("user attachment persistence", () => {
         saveRequests.push(...(body?.messages ?? []));
       }
     });
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 
@@ -205,7 +205,7 @@ test.describe("a conversation with a stored attachment", () => {
   });
 
   test("the card is restored, and the turn is not its file name", async ({ page }) => {
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await openRecentConversation(page);
 
     const turn = userTurn(page).filter({ hasText: "명단.xlsx" });
@@ -232,7 +232,7 @@ test.describe("a conversation with a stored attachment", () => {
       bodies.push(await response.text().catch(() => ""));
     });
 
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await openRecentConversation(page);
     await expect(userTurn(page).filter({ hasText: "명단.xlsx" })).toBeVisible();
 
@@ -258,7 +258,7 @@ test.describe("a conversation with a stored attachment", () => {
       }
     });
 
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await openRecentConversation(page);
     await expect(userTurn(page).filter({ hasText: "명단.xlsx" })).toBeVisible();
 
@@ -325,7 +325,7 @@ test.describe("a stored attachment across panels and retries", () => {
     await prepareGuestPage(page, "ko");
     await seedComparison(page);
     await mockChatStream(page, "비교했습니다.");
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await openRecentConversation(page);
 
     // Desktop shows both panels side by side; the mobile shell shows one at a
@@ -423,7 +423,7 @@ test.describe("a stored attachment across panels and retries", () => {
       });
     });
 
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(page.getByTestId("chat-input")).toBeVisible();
     await attachFromComputer(page, {
       name: "계약서.pdf",

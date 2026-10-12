@@ -63,12 +63,14 @@ const seedShare = async (overrides: {
     shareEnabled?: boolean;
     shareExpiresAt?: Date | null;
     shareSnapshot?: unknown;
+    productKey?: "chat" | "review" | null;
 }) => {
     owner = await prisma.user.create({
         data: { email: `sharer-${randomUUID()}@example.test` },
     });
     return prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId: owner.id,
             title: "A private conversation",
             shareToken: overrides.shareToken,
@@ -81,6 +83,7 @@ const seedShare = async (overrides: {
                 overrides.shareSnapshot === undefined
                     ? (validSnapshot() as object)
                     : (overrides.shareSnapshot as object),
+            productKey: overrides.productKey ?? null,
         },
     });
 };
@@ -111,6 +114,15 @@ test("a live share serves its snapshot and its expiry", async () => {
     assert.ok(body.expiresAt, "the viewer is told when the link dies");
     // A CDN that cached this would keep serving it after the link expired.
     assertNoStore(response);
+});
+
+test("a live share exposes only its content-free stored product for canonical navigation", async () => {
+    const token = strongToken();
+    await seedShare({ shareToken: token, productKey: "chat" });
+
+    const { response, body } = await read(token);
+    assert.equal(response.status, 200);
+    assert.equal(body.productKey, "chat");
 });
 
 test("a revoked share is not found, however valid the token", async () => {
@@ -181,7 +193,7 @@ test("only the parsed snapshot is served, never the stored column", async () => 
         `the stored column must not be served verbatim: ${serialized}`
     );
     assert.ok(!serialized.includes("sharer@example.test"));
-    assert.deepEqual(Object.keys(body).sort(), ["expiresAt", "snapshot"]);
+    assert.deepEqual(Object.keys(body).sort(), ["expiresAt", "productKey", "snapshot"]);
 });
 
 test("a weak token is refused before the database is asked anything", async () => {

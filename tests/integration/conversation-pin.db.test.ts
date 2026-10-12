@@ -36,7 +36,7 @@ const resetData = async () => {
     ],
   });
   const conversation = await prisma.conversation.create({
-    data: { userId: ownerId, title: "Pinned by its owner" },
+    data: { selectedModels: '["gpt-6-luna"]', userId: ownerId, title: "Pinned by its owner" },
     select: { id: true },
   });
   conversationId = conversation.id;

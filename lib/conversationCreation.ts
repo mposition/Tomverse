@@ -62,7 +62,13 @@ export type CreateConversationInput = {
    */
   kind?: "chat" | "image";
   selectionMode?: "manual" | "auto";
-  selectedModels?: string;
+  /**
+   * The panel models, as the JSON string the column holds. Required: the
+   * selection is the caller's decision (an account combination, a guest
+   * import, "[]" for an image conversation), never a column default, which
+   * would name whatever model was the default when the migration ran.
+   */
+  selectedModels: string;
   disabledPanels?: string;
   webSearchMode?: string;
   projectId?: string | null;
@@ -134,7 +140,7 @@ export async function createConversation(
     productKey: input.productKey,
     kind,
     selectionMode,
-    ...(input.selectedModels === undefined ? {} : { selectedModels: input.selectedModels }),
+    selectedModels: input.selectedModels,
     ...(input.disabledPanels === undefined ? {} : { disabledPanels: input.disabledPanels }),
     ...(input.webSearchMode === undefined ? {} : { webSearchMode: input.webSearchMode }),
     ...(input.projectId === undefined ? {} : { projectId: input.projectId }),

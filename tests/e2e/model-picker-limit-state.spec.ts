@@ -30,7 +30,7 @@ test.beforeEach(async ({ page }) => {
 test("a full selection is a neutral status, never an amber warning", async ({
   page,
 }) => {
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   const dialog = await openPicker(page);
 
   // The guest default is already the maximum comparison set.
@@ -52,7 +52,7 @@ test("a full selection is a neutral status, never an amber warning", async ({
 test("a model that would need a swap says so before it is activated", async ({
   page,
 }) => {
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openPicker(page);
   const dialog = await openModelCatalogue(page);
 
@@ -69,7 +69,7 @@ test("a model that would need a swap says so before it is activated", async ({
 test("a fourth pick offers a swap instead of silently doing nothing", async ({
   page,
 }) => {
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openPicker(page);
   const dialog = await openModelCatalogue(page);
 
@@ -101,7 +101,7 @@ test("a fourth pick offers a swap instead of silently doing nothing", async ({
 test("removing one model reopens a slot and the estimate follows", async ({
   page,
 }) => {
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   const dialog = await openPicker(page);
 
   const summary = dialog.getByTestId("model-selection-summary");
@@ -127,7 +127,7 @@ test.describe("catalogue space at the tightest viewports", () => {
       page,
     }) => {
       await page.setViewportSize({ width, height });
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       await openPicker(page);
       const dialog = await openModelCatalogue(page);
 
@@ -162,7 +162,7 @@ test.describe("catalogue space at the tightest viewports", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await openPicker(page);
     const dialog = await openModelCatalogue(page);
 
@@ -189,7 +189,7 @@ test.describe("catalogue space at the tightest viewports", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     const dialog = await openPicker(page);
 
     // "Choose AI models" named the sheet while the picker's own header named

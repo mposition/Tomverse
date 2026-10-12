@@ -8,10 +8,13 @@ import type { ShareSnapshot } from "@/lib/shareSnapshot";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { localeLaunchPolicy } from "@/lib/localeLaunchPolicy";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { productSurfacePathOrReview } from "@/lib/productSurfaceRoutes";
 
 type SharedConversationData = {
   snapshot: ShareSnapshot;
   expiresAt: string;
+  /** Content-free stored product; absent on responses from older deployments. */
+  productKey?: string | null;
 };
 
 function formatDate(value: string, locale: string) {
@@ -161,7 +164,7 @@ export function SharedConversationView({
             </div>
             <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
               <Link
-                href="/chat"
+                href={productSurfacePathOrReview(data.productKey)}
                 className="inline-flex h-8 items-center gap-1.5 rounded-full bg-blue-600 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-blue-500"
               >
                 {t("share.openApp")}

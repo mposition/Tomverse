@@ -109,12 +109,12 @@ const seedUser = async () => {
   });
 
   await prisma.userSettings.create({
-    data: { userId, language: "ko", theme: "dark" },
+    data: { defaultModel: "gpt-6-luna", userId, language: "ko", theme: "dark" },
   });
   await prisma.userMemorySettings.create({ data: { userId, masterEnabled: true } });
 
   const conversation = await prisma.conversation.create({
-    data: { userId, title: "Kept", kind: "chat" },
+    data: { selectedModels: '["gpt-6-luna"]', userId, title: "Kept", kind: "chat" },
   });
   await prisma.message.create({
     data: {

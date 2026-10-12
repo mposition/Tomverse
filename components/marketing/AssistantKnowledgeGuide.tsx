@@ -49,8 +49,9 @@ export function AssistantKnowledgeGuide({
 }) {
   const { lang } = useLanguage();
   const { status } = useSession();
-  const contentLanguage = assistantKnowledgeGuideContentLanguage(lang);
-  const copy = assistantKnowledgeGuideContent[contentLanguage];
+  const contentLanguage = lang;
+  const mediaLanguage = assistantKnowledgeGuideContentLanguage(lang);
+  const copy = assistantKnowledgeGuideContent[lang];
   const [demoSelection, setDemoSelection] = useState({
     contentLanguage,
     step: 0,
@@ -67,7 +68,7 @@ export function AssistantKnowledgeGuide({
     : assistantKnowledgeSignInHref(lang);
   const videoPath = assistantKnowledgeGuideVideoPath(lang);
   const captionPath = assistantKnowledgeGuideCaptionPath(lang);
-  const supademoUrl = supademoEmbeds[contentLanguage];
+  const supademoUrl = supademoEmbeds[mediaLanguage];
 
   useEffect(() => {
     trackProductEventOnce(
@@ -88,9 +89,7 @@ export function AssistantKnowledgeGuide({
     <main className="min-h-screen bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader
         maxWidth="max-w-6xl"
-        localizedContentAvailable={
-          lang === "ko" || lang === "en" || lang === "zh"
-        }
+        localizedContentAvailable
       />
 
       <article
@@ -143,7 +142,7 @@ export function AssistantKnowledgeGuide({
                 default
                 kind="captions"
                 src={captionPath}
-                srcLang={contentLanguage}
+                srcLang={mediaLanguage}
                 label={assistantKnowledgeGuideCaptionLabel(lang)}
               />
             </video>
@@ -154,6 +153,17 @@ export function AssistantKnowledgeGuide({
               {copy.videoHint}
             </p>
           </div>
+        </section>
+
+        <section className="mt-12 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:p-7">
+          <h2 className="text-xl font-black">{copy.exampleTitle}</h2>
+          <p className="mt-4 text-sm font-bold">{copy.exampleMaterialLabel}</p>
+          <blockquote className="mt-2 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{copy.exampleMaterial}</blockquote>
+          <p className="mt-5 text-sm font-bold">{copy.examplePromptLabel}</p>
+          <p className="mt-2 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{copy.examplePrompt}</p>
+          <p className="mt-5 text-sm font-bold">{copy.exampleOutputLabel}</p>
+          <p className="mt-2 whitespace-pre-line text-sm leading-7 text-zinc-600 dark:text-zinc-300">{copy.exampleOutput}</p>
+          <p className="mt-4 text-xs leading-6 text-zinc-500 dark:text-zinc-400">{copy.exampleNote}</p>
         </section>
 
         <section aria-labelledby="interactive-demo-heading" className="mt-16">
@@ -177,6 +187,7 @@ export function AssistantKnowledgeGuide({
                 {copy.supademoLabel}
               </div>
               <iframe
+                lang={mediaLanguage}
                 title={copy.supademoLabel}
                 src={supademoUrl}
                 loading="lazy"
@@ -186,6 +197,9 @@ export function AssistantKnowledgeGuide({
                 sandbox="allow-forms allow-popups allow-presentation allow-same-origin allow-scripts"
                 className="aspect-video w-full bg-zinc-100"
               />
+              {mediaLanguage !== lang && (
+                <p className="px-5 py-3 text-xs leading-6 text-zinc-600 dark:text-zinc-300">{copy.videoHint}</p>
+              )}
             </div>
           ) : null}
 

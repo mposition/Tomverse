@@ -39,11 +39,13 @@ and at nothing at all on a directly-opened URL.
 
 **Global exit — out of settings, in one click, from any depth.** Rendered at
 the end of the same top area by the route shell, for every `/settings/**`
-screen. Its destination is `settingsExitHref()`, which is exactly `/chat` with
+screen. Its destination is `settingsExitHref()`, which is exactly `/review` with
 no query string: a `settings=` parameter here would reopen the panel the
 visitor just asked to leave, and the bare route is what lets the chat page
 restore the tab's own last conversation from its existing `sessionStorage`
-state. It never creates a conversation and never clears a selection.
+state. Review is the generic settings and assistant round-trip destination;
+an explicit Chat product flow carries its own `currentProduct` return instead.
+It never creates a conversation and never clears a selection.
 
 This edge exists because the panel's close button is on the chat surface, and
 the chat surface is precisely what a visitor three levels into settings cannot
@@ -58,7 +60,8 @@ Consequences:
   renders its own copy is a violation, and so is a shell that renders none.
 - **The two controls stay visually and verbally distinct.** Hierarchical back
   reads "back to settings" / "back to imports" and sits on the left; the exit
-  reads `settingsNav.backToChat` and sits on the right. A hierarchical link
+  reads `settingsNav.backToChat` and sits on the right. The key retains its
+  generic conversation wording while the canonical product route is Review. A hierarchical link
   must never adopt chat-bound wording, and the exit must never be relabelled
   as a generic "back".
 - **The exit is not an `X`.** These are pages, not modals; a close glyph would

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import {
   mockChatStream,
   prepareGuestPage,
@@ -110,8 +111,13 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
   await page.goto(
     "/?utm_source=qa-search&utm_medium=cpc&utm_campaign=launch-validation"
   );
+  const guestChatAvailable = await page.getByTestId("launch-homepage")
+    .getAttribute("data-guest-chat-trial-available") === "true";
+  const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/review?lang=en";
+  const destination = new URL(startHref, page.url()).href;
+  await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", startHref);
   await page.getByTestId("landing-primary-cta").click();
-  await expect(page).toHaveURL(/\/chat/);
+  await expect(page).toHaveURL(destination);
 
   // A full reload proves queued events and the first-touch UTM do not depend on
   // module memory or on UTM parameters remaining in the current URL.

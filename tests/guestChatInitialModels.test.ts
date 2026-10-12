@@ -9,7 +9,11 @@ import {
 } from "@/lib/appDefaults";
 import {
   GUEST_ACTIVE_CHAT_STORAGE_KEY,
+  GUEST_CHAT_ACTIVE_CHAT_STORAGE_KEY,
+  GUEST_CHAT_CONVERSATIONS_STORAGE_KEY,
   GUEST_CONVERSATIONS_STORAGE_KEY,
+  guestWorkspaceStorageKeys,
+  newGuestConversationId,
   resolveGuestInitialSelectedModels,
   resolveGuestInitialWebSearchMode,
   type GuestInitialModelEnvironment,
@@ -36,13 +40,14 @@ const storage = (entries: Record<string, string>) => ({
 
 const guestConversationEnvironment = (
   conversationId: string,
-  conversation: Record<string, unknown>
+  conversation: Record<string, unknown>,
+  product: "chat" | "review" = "review"
 ): GuestInitialModelEnvironment => ({
   sessionStorage: storage({
-    [GUEST_ACTIVE_CHAT_STORAGE_KEY]: conversationId,
+    [guestWorkspaceStorageKeys(product).activeChatKey]: conversationId,
   }),
   localStorage: storage({
-    [GUEST_CONVERSATIONS_STORAGE_KEY]: JSON.stringify([
+    [guestWorkspaceStorageKeys(product).conversationsKey]: JSON.stringify([
       { id: conversationId, ...conversation },
     ]),
   }),
@@ -55,6 +60,73 @@ test("a brand-new guest starts on the full brand trio", () => {
 
   assert.equal(resolved.source, "guest_default");
   assert.deepEqual(resolved.models, guestDefault);
+});
+
+test("Guest Chat has its own storage namespace and starts on one eligible model", () => {
+  assert.deepEqual(guestWorkspaceStorageKeys("review"), {
+    activeChatKey: GUEST_ACTIVE_CHAT_STORAGE_KEY,
+    conversationsKey: GUEST_CONVERSATIONS_STORAGE_KEY,
+  });
+  assert.deepEqual(guestWorkspaceStorageKeys("chat"), {
+    activeChatKey: GUEST_CHAT_ACTIVE_CHAT_STORAGE_KEY,
+    conversationsKey: GUEST_CHAT_CONVERSATIONS_STORAGE_KEY,
+  });
+  assert.equal(newGuestConversationId("review", 42), "guest_42");
+  assert.equal(newGuestConversationId("chat", 42), "guest_chat_42");
+
+  const resolved = resolveGuestInitialSelectedModels({
+    catalogue,
+    product: "chat",
+  });
+  assert.equal(resolved.source, "guest_default");
+  assert.deepEqual(resolved.models, guestDefault.slice(0, 1));
+});
+
+test("Guest Chat clamps URL and restored selections to one without reading Review storage", () => {
+  const requested = resolveGuestInitialSelectedModels({
+    catalogue,
+    product: "chat",
+    environment: {
+      ...guestConversationEnvironment("guest_chat_1", {
+        selectedModels: GUEST_BRAND_TRIO_MODEL_IDS,
+      }, "chat"),
+      search: `?models=${GUEST_BRAND_TRIO_MODEL_IDS.join(",")}`,
+    },
+  });
+  assert.equal(requested.source, "url_models_param");
+  assert.deepEqual(requested.models, GUEST_BRAND_TRIO_MODEL_IDS.slice(0, 1));
+
+  const restored = resolveGuestInitialSelectedModels({
+    catalogue,
+    product: "chat",
+    environment: guestConversationEnvironment("guest_chat_2", {
+      selectedModels: GUEST_BRAND_TRIO_MODEL_IDS,
+    }, "chat"),
+  });
+  assert.equal(restored.source, "restored_conversation");
+  assert.deepEqual(restored.models, GUEST_BRAND_TRIO_MODEL_IDS.slice(0, 1));
+
+  const reviewOnlyEnvironment = guestConversationEnvironment("guest_review", {
+    selectedModels: [GUEST_BRAND_TRIO_MODEL_IDS[2]],
+  });
+  const isolated = resolveGuestInitialSelectedModels({
+    catalogue,
+    product: "chat",
+    environment: reviewOnlyEnvironment,
+  });
+  assert.equal(isolated.source, "guest_default");
+  assert.deepEqual(isolated.models, guestDefault.slice(0, 1));
+});
+
+test("Guest Chat restores web search only from its own product namespace", () => {
+  assert.equal(resolveGuestInitialWebSearchMode(
+    guestConversationEnvironment("guest_chat_3", { webSearchMode: "off" }, "chat"),
+    "chat"
+  ), "off");
+  assert.equal(resolveGuestInitialWebSearchMode(
+    guestConversationEnvironment("guest_review", { webSearchMode: "off" }),
+    "chat"
+  ), "always");
 });
 
 test("server rendering resolves the same selection as the browser", () => {

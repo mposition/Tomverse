@@ -70,12 +70,12 @@ test.beforeEach(async ({ page }) => {
   await prepareGuestPage(page, "ko");
   await installClipboardMock(page);
   await mockAuthenticatedApi(page);
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect(page.getByTestId("chat-input")).toBeVisible();
 });
 
 test("billing success modal respects the explicit return language", { tag: "@smoke" }, async ({ page }) => {
-  await page.goto("/chat?billing=success&plan=max&interval=monthly&lang=ko");
+  await page.goto("/review?billing=success&plan=max&interval=monthly&lang=ko");
 
   const successDialog = page.getByTestId("billing-success-dialog");
   await expect(successDialog).toBeVisible();
@@ -86,7 +86,7 @@ test("billing success modal respects the explicit return language", { tag: "@smo
 
 test("billing success remains operable at 320px and 200% text scaling", { tag: "@ui-risk" }, async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
-  await page.goto("/chat?billing=success&plan=max&interval=monthly&lang=en");
+  await page.goto("/review?billing=success&plan=max&interval=monthly&lang=en");
   await setRootFontSize(page, 32);
 
   const dialog = page.getByTestId("billing-success-dialog");

@@ -18,6 +18,7 @@ import {
 import { useEffect } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
+import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import {
   trackProductEvent,
   trackProductEventOnce,
@@ -162,6 +163,19 @@ export function ChatWorkspaceGuide() {
           </p>
         </header>
 
+        <section className="mt-8 rounded-3xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:p-7">
+          <h2 className="text-xl font-black">{copy.chatIntro.title}</h2>
+          <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{copy.chatIntro.description}</p>
+          <dl className="mt-5 grid gap-5 sm:grid-cols-2">
+            {copy.chatIntro.items.map((item) => (
+              <div key={item.term}>
+                <dt className="text-sm font-bold">{item.term}</dt>
+                <dd className="mt-2 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{item.detail}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
         <nav
           aria-label={copy.contents}
           className="mt-10 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/45"
@@ -198,7 +212,7 @@ export function ChatWorkspaceGuide() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
                 </span>
-                <span className="font-black">Tomverse Review</span>
+                <span className="font-bold">Tomverse Review</span>
                 <HelpCircle className="ml-auto h-5 w-5 text-blue-300" aria-hidden="true" />
               </div>
               <div className="mt-5 grid gap-3">
@@ -316,7 +330,7 @@ export function ChatWorkspaceGuide() {
               {copy.allHelp}
             </Link>
             <Link
-              href={`/chat?lang=${encodeURIComponent(lang)}`}
+              href={`${REVIEW_WORKSPACE_PATH}?lang=${encodeURIComponent(lang)}`}
               onClick={() =>
                 trackProductEvent("cta_start_click", 0, {
                   cta_location: "chat_workspace_guide",

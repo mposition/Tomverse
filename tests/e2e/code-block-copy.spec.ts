@@ -96,7 +96,7 @@ async function openAnswerWithCodeBlocks(page: Page) {
     });
   });
 
-  await page.goto("/chat");
+  await page.goto("/review");
   // A fresh chat starts blank -- open the mocked conversation from the welcome
   // screen the way a user would, which is what loads its messages.
   await openRecentConversation(page);
@@ -142,7 +142,10 @@ test("a code block's button copies that block's code and nothing else", async ({
   const copied = written[0];
 
   if (clipboardReadable) {
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(copied);
+    // Windows' OS clipboard returns CRLF; the exact string handed to
+    // writeText is still asserted above and against the block below.
+    const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboardText.replace(/\r\n/g, "\n")).toBe(copied);
   }
 
   // Indentation, the interior newlines and the deliberate blank line all
@@ -228,6 +231,9 @@ test("the copy button offers a full-size touch target inside its code block", as
   page,
 }) => {
   const answer = await openAnswerWithCodeBlocks(page);
+  // Restored history opens at the end. Expose this block before probing
+  // viewport coordinates, including the full target's pseudo-element edges.
+  await answer.locator("pre").first().scrollIntoViewIfNeeded();
   await expect(answer.getByTestId("chat-code-copy-button").first()).toBeVisible();
 
   // Measured from the points a finger would land on rather than from the

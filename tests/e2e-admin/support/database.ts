@@ -448,6 +448,7 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
   // --- Conversations and usage ------------------------------------------
   await prisma.conversation.create({
     data: {
+      selectedModels: '["gpt-6-luna"]',
       id: FIXTURE_CONVERSATION.id,
       userId: FIXTURE_CUSTOMERS.activePro.id,
       title: FIXTURE_CONVERSATION.title,

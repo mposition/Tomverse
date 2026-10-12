@@ -68,6 +68,7 @@ type ConversationFixture = {
   messages: QaConversationMessage[];
   productKey: "chat" | "review";
   surface: "chat" | "workspace" | "continuation";
+  selectionMode?: "manual" | "auto";
 };
 
 type DraftFixture = {
@@ -330,6 +331,14 @@ async function openChat(page: Page, options: {
   lockedSecondConversation?: boolean;
   lockedInitialConversation?: boolean;
   initialConversationId?: string;
+  initialSelectionMode?: "manual" | "auto";
+  autoSelectionOffered?: boolean;
+  holdBlankChatCapability?: boolean;
+  autoSelectionPatchResponseLostAfterCommit?: boolean;
+  autoSelectionPatchServerErrorAfterCommit?: boolean;
+  autoSelectionReadbackUnavailableAfterLostPatch?: boolean;
+  autoConversationCreateResponseLostAfterCommit?: boolean;
+  autoConversationCreateServerErrorAfterCommit?: boolean;
   draftFailurePlan?: Array<{ method: string; scopeKey: string }>;
 } = {}) {
   await prepareGuestPage(page, "en");
@@ -365,6 +374,7 @@ async function openChat(page: Page, options: {
       { id: "seed-u", role: "user", content: "A prior question." },
       { id: "seed-a", role: "assistant", content: FIRST_ANSWER, modelId: MODEL_A, status: "normal" },
     ],
+    selectionMode: options.initialSelectionMode ?? "manual",
   }, {
     id: SECOND_CONVERSATION, title: "Second unified Chat", selectedModels: [MODEL_B],
     productKey: "chat", surface: "chat",
@@ -382,6 +392,15 @@ async function openChat(page: Page, options: {
   });
   const writes: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
   const historyReads: string[] = [];
+  let blankChatCapabilityReads = 0;
+  let blankChatCapabilityStarted = false;
+  let releaseBlankChatCapability = () => {};
+  const blankChatCapabilityGate = new Promise<void>((resolve) => {
+    releaseBlankChatCapability = resolve;
+  });
+  let autoSelectionPatchResponseLost = false;
+  let autoSelectionRecoveryReadPending = false;
+  let autoSelectionRecoveryReadCount = 0;
   let responseAttempts: Array<Record<string, unknown>> = [];
   let attemptReadCount = 0;
   const attemptPollFailures: Array<{ status: number; retryAfter?: string }> = [];
@@ -439,7 +458,10 @@ async function openChat(page: Page, options: {
   });
   const payload = (row: ConversationFixture) => ({
     ...row, disabledPanels: options.disabledPanels ?? [], webSearchMode: "off", memoryMode: "inherit",
-    selectionMode: "manual", autoSelection: { offered: false },
+    selectionMode: row.selectionMode ?? "manual",
+    autoSelection: {
+      offered: row.productKey === "chat" && (options.autoSelectionOffered ?? false),
+    },
     assistantProfile: null,
     isLocked: (options.lockedSecondConversation && row.id === SECOND_CONVERSATION) ||
       (options.lockedInitialConversation && row.id === CONVERSATION),
@@ -453,6 +475,17 @@ async function openChat(page: Page, options: {
       messageSaveResponseSettledCount += 1;
     }
   };
+  await page.route("**/api/products/chat/capabilities", async (route) => {
+    blankChatCapabilityReads += 1;
+    blankChatCapabilityStarted = true;
+    if (options.holdBlankChatCapability) await blankChatCapabilityGate;
+    await route.fulfill({
+      headers: { "Cache-Control": "private, no-store" },
+      json: {
+        autoSelection: { offered: options.autoSelectionOffered ?? false },
+      },
+    });
+  });
   await page.route(/\/api\/products\/chat\/attempts\/[^?]+(?:\?.*)?$/, async (route) => {
     attemptReadCount += 1;
     const forcedFailure = attemptPollFailures.shift();
@@ -603,6 +636,20 @@ async function openChat(page: Page, options: {
         row.id === UNCLASSIFIED_CONVERSATION ? { ...payload(row), surface: undefined } : payload(row)
       )) });
     }
+    if (path === "/api/conversations" && method === "POST") {
+      const created: ConversationFixture = {
+        id: "qa-review-created",
+        title: "New Review",
+        productKey: "review",
+        surface: "workspace",
+        selectedModels: Array.isArray(body.selectedModels)
+          ? body.selectedModels as string[]
+          : [MODEL_A],
+        messages: [],
+      };
+      visibleConversations.push(created);
+      return route.fulfill({ status: 201, json: payload(created) });
+    }
     if (path === "/api/products/chat/conversations" && method === "POST") {
       const created: ConversationFixture = {
         id: exposePreviousAccountDrafts ? "qa-chat-created" : "qa-chat-created-b",
@@ -611,6 +658,12 @@ async function openChat(page: Page, options: {
         messages: [],
       };
       visibleConversations.push(created);
+      if (options.autoConversationCreateResponseLostAfterCommit) {
+        return route.abort("failed");
+      }
+      if (options.autoConversationCreateServerErrorAfterCommit) {
+        return route.fulfill({ status: 500, json: { code: "QA_CREATE_FORMAT_FAILED" } });
+      }
       return route.fulfill({ status: 201, json: payload(created) });
     }
     if (path.endsWith("/messages/receipt") && method === "POST") {
@@ -674,6 +727,22 @@ async function openChat(page: Page, options: {
     }
     const row = visibleConversations.find((candidate) => path === `/api/conversations/${candidate.id}` || path === `/api/conversations/${candidate.id}/messages`);
     if (!row) return route.fulfill({ status: 404, json: { code: "CONVERSATION_NOT_FOUND" } });
+    if (
+      method === "GET" &&
+      autoSelectionRecoveryReadPending &&
+      path === `/api/conversations/${row.id}`
+    ) {
+      autoSelectionRecoveryReadPending = false;
+      autoSelectionRecoveryReadCount += 1;
+    }
+    if (
+      method === "GET" &&
+      autoSelectionPatchResponseLost &&
+      options.autoSelectionReadbackUnavailableAfterLostPatch &&
+      path === `/api/conversations/${row.id}`
+    ) {
+      return route.fulfill({ status: 503, json: { code: "QA_DETAIL_UNAVAILABLE" } });
+    }
     if (path.endsWith("/messages") && method === "POST") {
       messageSaveStarted = true;
       messageSaveCount += 1;
@@ -766,6 +835,22 @@ async function openChat(page: Page, options: {
       }));
     }
     if (method === "PATCH" && Array.isArray(body.selectedModels)) row.selectedModels = body.selectedModels as string[];
+    if (method === "PATCH" && (body.selectionMode === "manual" || body.selectionMode === "auto")) {
+      if (body.selectionMode === "auto" && !options.autoSelectionOffered) {
+        return route.fulfill({ status: 403, json: { code: "AUTO_SELECTION_NOT_AVAILABLE" } });
+      }
+      row.selectionMode = body.selectionMode;
+      if (options.autoSelectionPatchResponseLostAfterCommit && !autoSelectionPatchResponseLost) {
+        autoSelectionPatchResponseLost = true;
+        autoSelectionRecoveryReadPending = true;
+        return route.abort("failed");
+      }
+      if (options.autoSelectionPatchServerErrorAfterCommit && !autoSelectionPatchResponseLost) {
+        autoSelectionPatchResponseLost = true;
+        autoSelectionRecoveryReadPending = true;
+        return route.fulfill({ status: 500, json: { code: "QA_PATCH_RESPONSE_FAILED" } });
+      }
+    }
     if (method === "GET") historyReads.push(url.pathname + url.search);
     if (method === "GET" && row.id === CONVERSATION && !url.searchParams.has("cursor") &&
         ++firstHistoryPageReadCount === options.malformedFirstHistoryPageOnRead) {
@@ -882,8 +967,8 @@ async function openChat(page: Page, options: {
   const workspacePath = options.continuation
     ? `/continuations/${CONVERSATION}`
     : options.legacyReview
-      ? "/chat"
-      : "/chat/workspace";
+      ? "/review"
+      : "/chat";
   const initialConversationId = options.initialConversationId ?? CONVERSATION;
   await page.goto(`${workspacePath}?lang=en${options.fresh ? "" : `&conversation=${initialConversationId}`}`);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
@@ -899,6 +984,10 @@ async function openChat(page: Page, options: {
   }
   return {
     conversations, writes, historyReads, userSettingsWrites, drafts,
+    get blankChatCapabilityReads() { return blankChatCapabilityReads; },
+    get autoSelectionRecoveryReadCount() { return autoSelectionRecoveryReadCount; },
+    blankChatCapabilityStarted: () => blankChatCapabilityStarted,
+    releaseBlankChatCapability,
     contextBundleStarted: () => contextBundleStarted,
     contextBundleResponseSettled: () => contextBundleResponseSettled,
     releaseContextBundle,
@@ -2406,7 +2495,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect.poll(state.beforeModelSendStarted).toBe(true);
 
     await chooseNewChat(page);
-    await expect.poll(() => new URL(page.url()).pathname).toBe("/chat");
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/review");
     await state.releaseBeforeModelSend();
     expect(await persistentChatPostCount(page)).toBe(0);
     await page.goto(`/continuations/${CONVERSATION}?lang=en`);
@@ -2456,7 +2545,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
       if (surface === "continuation") {
         await chooseNewChat(page);
-        await expect.poll(() => new URL(page.url()).pathname).toBe("/chat");
+        await expect.poll(() => new URL(page.url()).pathname).toBe("/review");
       } else {
         await chooseConversation(page, SECOND_CONVERSATION);
         await expect(message(page, SECOND_ANSWER)).toBeVisible();
@@ -2950,7 +3039,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect.poll(async () => (await page.evaluate(() =>
       (window as unknown as { __qaSavedNoticeEvents: string[] }).__qaSavedNoticeEvents
     )).filter((item) => savedNoticeCopy.test(item)).length).toBe(1);
-    await expect.poll(() => new URL(page.url()).pathname).toBe("/chat");
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/review");
     await expect.poll(() => page.evaluate(() =>
       sessionStorage.getItem("tomverse_active_chat_id"))).toBe(CONVERSATION);
     await expect(message(page, FIRST_ANSWER)).toBeVisible();
@@ -3447,13 +3536,13 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(await persistentChatPostCount(page)).toBe(0);
   });
 
-  test("new Chat is gated while legacy Review keeps its existing route", async ({ page }) => {
+  test("the Chat workspace alias and canonical Review keep their product routes", async ({ page }) => {
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page);
     const response = await page.goto("/chat/workspace?lang=en");
-    expect(response?.status()).toBe(404);
-    await expect(page.getByTestId("chat-textarea")).toHaveCount(0);
-    await page.goto("/chat?lang=en");
+    expect(response?.status()).toBe(200);
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
   });
 
@@ -3522,50 +3611,507 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(creates[0].body.selectedModels).toHaveLength(1);
   });
 
-  test("a failed first Message save retries the same created Chat and never copies or deletes the new-scope draft", async ({ page }) => {
+  test("a fresh Chat stores Auto before its first Send and dispatches from that owned Chat", async ({ page }) => {
     const state = await openChat(page, {
       fresh: true,
-      messageSaveFailureOnce: true,
-      messageSaveFailureStatus: 409,
+      autoSelectionOffered: true,
     });
-    const prompt = "Retry this exact new-scope draft after the network refusal.";
-    await page.getByTestId("chat-textarea").fill(prompt);
-    await expect.poll(() => state.drafts.get("new")?.revision ?? 0).toBeGreaterThan(0);
+    const prompt = "Route this first Chat turn only after Auto is stored.";
+    const textarea = page.getByTestId("chat-textarea");
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toBeVisible();
+    await expect.poll(() => state.blankChatCapabilityReads).toBe(1);
+    const composerAuto = page.getByTestId("composer-auto-routing-toggle");
+    await expect(composerAuto).toHaveAttribute("aria-checked", "true");
+    const autoPanelSummary = page.getByTestId("desktop-auto-panel-summary");
+    await expect(autoPanelSummary).toBeVisible();
+    await expect(autoPanelSummary).toContainText("Smart Adaptive");
+    await expect(
+      page.getByTestId("desktop-model-panel").getByRole("combobox")
+    ).toHaveCount(0);
+    expect(state.writes.filter((write) =>
+      write.path === "/api/products/chat/conversations" ||
+      write.path === "/api/conversations/qa-chat-created"
+    )).toHaveLength(0);
+    expect(await requests(page)).toHaveLength(0);
+    await textarea.fill(prompt);
+    await expect.poll(() => state.drafts.get("new")?.text).toBe(prompt);
     await page.getByTestId("chat-send-button").click();
-    await expect(page.getByText(
-      "The question could not be saved with its files. Your draft has been kept.",
-      { exact: true }
-    )).toBeVisible();
-    await expect(page.getByTestId("chat-textarea")).toHaveValue(prompt);
-    expect(await persistentChatPostCount(page)).toBe(0);
+    await expect.poll(() => state.conversations.find(
+      (conversation) => conversation.id === "qa-chat-created"
+    )?.selectionMode).toBe("auto");
 
-    const draftWritesAfterFailure = state.writes.filter((write) =>
-      write.path.includes("/api/products/chat/drafts/")
+    const authorityWrites = state.writes.filter((write) =>
+      write.path === "/api/products/chat/conversations" ||
+      (write.path === "/api/conversations/qa-chat-created" &&
+        write.body.selectionMode === "auto")
     );
-    expect(draftWritesAfterFailure.some((write) =>
-      write.path.endsWith("/drafts/qa-chat-created") || write.method === "DELETE"
-    )).toBe(false);
-    expect(state.drafts.has("new")).toBe(true);
-    expect(state.drafts.has("qa-chat-created")).toBe(false);
+    expect(authorityWrites.map((write) => `${write.method} ${write.path}`)).toEqual([
+      "POST /api/products/chat/conversations",
+      "PATCH /api/conversations/qa-chat-created",
+    ]);
 
-    await page.getByTestId("chat-send-button").click();
-    await drive(page, 0, "push", "One answer after the Message retry.");
+    await drive(page, 0, "push", "The first stored-Auto answer.");
     await drive(page, 0, "finish");
-    await expect(message(page, "One answer after the Message retry.")).toBeVisible();
-
-    const creates = state.writes.filter((write) =>
-      write.method === "POST" && write.path === "/api/products/chat/conversations"
-    );
-    expect(creates).toHaveLength(1);
-    const messageWrites = state.writes.filter((write) =>
-      write.method === "POST" && write.path === "/api/conversations/qa-chat-created/messages"
-    );
-    expect(messageWrites).toHaveLength(2);
-    expect((messageWrites[1]?.body.draftConsume as { scopeKey?: string })?.scopeKey).toBe("new");
+    await expect(message(page, "The first stored-Auto answer.")).toBeVisible();
+    const calls = await requests(page);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].conversationId).toBe("qa-chat-created");
+    expect(calls[0].messages?.at(-1)?.content).toBe(prompt);
+    expect(state.conversations.find(
+      (conversation) => conversation.id === "qa-chat-created"
+    )?.messages.filter(
+      (item) => item.role === "user" && item.content === prompt
+    )).toHaveLength(1);
     expect(state.drafts.has("new")).toBe(false);
     expect(state.drafts.has("qa-chat-created")).toBe(false);
-    expect(await persistentProviderStreamCount(page)).toBe(1);
+    expect(state.writes.filter((write) =>
+      write.method === "POST" &&
+      write.path === "/api/conversations/qa-chat-created/messages"
+    )).toHaveLength(1);
+    expect(state.writes.filter((write) =>
+      write.method === "POST" &&
+      write.path === "/api/products/chat/conversations"
+    )).toHaveLength(1);
   });
+
+  test("the first Send waits for the Auto write to commit before dispatching once", async ({ page }) => {
+    const state = await openChat(page, {
+      fresh: true,
+      autoSelectionOffered: true,
+    });
+    let releaseAutoPatch = () => {};
+    const autoPatchGate = new Promise<void>((resolve) => {
+      releaseAutoPatch = resolve;
+    });
+    let autoPatchStarted = false;
+    await page.route("**/api/conversations/qa-chat-created", async (route) => {
+      const body = route.request().method() === "PATCH"
+        ? route.request().postDataJSON() as Record<string, unknown> | null
+        : null;
+      if (
+        route.request().method() === "PATCH" &&
+        body?.selectionMode === "auto"
+      ) {
+        autoPatchStarted = true;
+        await autoPatchGate;
+      }
+      return route.fallback();
+    });
+
+    const prompt = "Wait for the exact stored Auto authority before sending.";
+    await page.getByTestId("chat-textarea").fill(prompt);
+    await page.getByTestId("chat-send-button").click();
+    await expect.poll(() => autoPatchStarted).toBe(true);
+    expect(await requests(page)).toHaveLength(0);
+
+    releaseAutoPatch();
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const calls = await requests(page);
+    expect(calls[0]?.conversationId).toBe("qa-chat-created");
+    expect(state.writes.filter((write) =>
+      write.method === "POST" &&
+      write.path === "/api/products/chat/conversations"
+    )).toHaveLength(1);
+    expect(state.writes.filter((write) =>
+      write.method === "PATCH" &&
+      write.path === "/api/conversations/qa-chat-created" &&
+      write.body.selectionMode === "auto"
+    )).toHaveLength(1);
+    await drive(page, 0, "finish");
+  });
+
+  test("typing during first Auto preparation preserves the successor draft after one original Send", async ({ page }) => {
+    const state = await openChat(page, {
+      fresh: true,
+      autoSelectionOffered: true,
+    });
+    let releaseAutoPatch = () => {};
+    const autoPatchGate = new Promise<void>((resolve) => {
+      releaseAutoPatch = resolve;
+    });
+    let autoPatchStarted = false;
+    await page.route("**/api/conversations/qa-chat-created", async (route) => {
+      const body = route.request().method() === "PATCH"
+        ? route.request().postDataJSON() as Record<string, unknown> | null
+        : null;
+      if (
+        route.request().method() === "PATCH" &&
+        body?.selectionMode === "auto"
+      ) {
+        autoPatchStarted = true;
+        await autoPatchGate;
+      }
+      return route.fallback();
+    });
+
+    const submitted = "Send this exact first question after Auto is stored.";
+    const successor = "Keep this newer text as the next unsent Chat draft.";
+    const textarea = page.getByTestId("chat-textarea");
+    const composerAuto = page.getByTestId("composer-auto-routing-toggle");
+    await expect(composerAuto).toBeVisible();
+    await expect.poll(() => state.blankChatCapabilityReads).toBe(1);
+    await expect(composerAuto).toHaveAttribute("aria-checked", "true");
+    await textarea.fill(submitted);
+    await page.getByTestId("chat-send-button").click();
+    await expect.poll(() => autoPatchStarted).toBe(true);
+    expect(await requests(page)).toHaveLength(0);
+
+    await textarea.fill(successor);
+    // The original revision remains frozen on the server until the Message
+    // transaction consumes it. The successor is local during that window and
+    // is persisted under the created Chat only after the consume is known.
+    await expect(textarea).toHaveValue(successor);
+    expect(state.drafts.get("new")?.text).toBe(submitted);
+    releaseAutoPatch();
+
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const calls = await requests(page);
+    expect(calls[0]?.conversationId).toBe("qa-chat-created");
+    expect(calls[0]?.messages?.at(-1)?.content).toBe(submitted);
+    expect(state.conversations.find(
+      (conversation) => conversation.id === "qa-chat-created"
+    )?.messages.filter(
+      (item) => item.role === "user" && item.content === submitted
+    )).toHaveLength(1);
+    await expect(textarea).toHaveValue(successor);
+    await expect.poll(() => state.drafts.get("qa-chat-created")?.text).toBe(successor);
+    expect(state.drafts.has("new")).toBe(false);
+    expect(state.writes.filter((write) =>
+      write.method === "POST" &&
+      write.path === "/api/conversations/qa-chat-created/messages"
+    )).toHaveLength(1);
+    expect(state.writes.filter((write) =>
+      write.method === "POST" &&
+      write.path === "/api/products/chat/conversations"
+    )).toHaveLength(1);
+    expect(state.writes.filter((write) =>
+      write.method === "PATCH" &&
+      write.path === "/api/conversations/qa-chat-created" &&
+      write.body.selectionMode === "auto"
+    )).toHaveLength(1);
+    await drive(page, 0, "finish");
+  });
+
+  test("a manual model choice made before capability hydration keeps the blank Chat manual", async ({ page }) => {
+    const state = await openChat(page, {
+      fresh: true,
+      autoSelectionOffered: true,
+      holdBlankChatCapability: true,
+    });
+    await expect.poll(state.blankChatCapabilityStarted).toBe(true);
+    await chooseModel(page, MODEL_B);
+    state.releaseBlankChatCapability();
+
+    const composerAuto = page.getByTestId("composer-auto-routing-toggle");
+    await expect(composerAuto).toBeVisible();
+    await expect(composerAuto).toHaveAttribute("aria-checked", "false");
+    await page.getByTestId("chat-textarea").fill(
+      "Keep my explicit model choice manual after capability hydration."
+    );
+    await page.getByTestId("chat-send-button").click();
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    expect(state.writes.filter((write) =>
+      write.method === "PATCH" && write.body.selectionMode === "auto"
+    )).toHaveLength(0);
+    expect((await requests(page))[0]?.modelId).toBe(MODEL_B);
+    await drive(page, 0, "finish");
+  });
+
+  test("product switching restores each product's idle draft without copying it", async ({ page }) => {
+    await openChat(page, { fresh: true, autoSelectionOffered: true });
+    const textarea = page.getByTestId("chat-textarea");
+    const chatDraft = "An unsent draft that belongs only to Tomverse Chat.";
+    const reviewDraft = "A separate unsent draft that belongs only to Tomverse Review.";
+
+    await textarea.fill(chatDraft);
+    await page.getByTestId("chat-product-review").click();
+    await expect(page).toHaveURL(/\/review\?lang=en$/);
+    await expect(textarea).toHaveValue("");
+    await textarea.fill(reviewDraft);
+
+    await page.getByTestId("chat-product-chat").click();
+    await expect(page).toHaveURL(/\/chat\?lang=en$/);
+    await expect(textarea).toHaveValue(chatDraft);
+    await page.getByTestId("chat-product-review").click();
+    await expect(page).toHaveURL(/\/review\?lang=en$/);
+    await expect(textarea).toHaveValue(reviewDraft);
+    expect(await requests(page)).toHaveLength(0);
+  });
+
+  test("product switching is blocked while an accepted question is pending", async ({ page }) => {
+    const state = await openChat(page, {
+      fresh: true,
+      legacyReview: true,
+      holdMessageSaveBeforeTransaction: true,
+    });
+    await page.getByTestId("chat-textarea").fill(
+      "Do not duplicate this pending Review question across products."
+    );
+    await page.getByTestId("chat-send-button").click();
+    await expect.poll(state.messageSaveStarted).toBe(true);
+
+    const chatSwitch = page.getByTestId("chat-product-chat");
+    await expect(chatSwitch).toHaveAttribute("aria-disabled", "true");
+    await chatSwitch.evaluate((element: HTMLElement) => element.click());
+    await expect(page).toHaveURL(/\/review\?lang=en$/);
+    expect(await requests(page)).toHaveLength(0);
+
+    state.releaseMessageSave();
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    await drive(page, 0, "finish");
+  });
+
+  test("a lost Auto PATCH response is verified by one read and never creates a second Chat", async ({ page }) => {
+    const state = await openChat(page, {
+      fresh: true,
+      autoSelectionOffered: true,
+      autoSelectionPatchResponseLostAfterCommit: true,
+    });
+    await page.getByTestId("chat-textarea").fill(
+      "Keep the single created Chat when the Auto response is lost."
+    );
+    const composerAuto = page.getByTestId("composer-auto-routing-toggle");
+    await expect(composerAuto).toHaveAttribute("aria-checked", "true");
+    await composerAuto.click();
+    await expect(composerAuto).toHaveAttribute("aria-checked", "false");
+    await composerAuto.click();
+    await expect(composerAuto).toHaveAttribute("aria-checked", "true");
+    expect(state.writes.filter((write) =>
+      write.method === "POST" &&
+      write.path === "/api/products/chat/conversations"
+    )).toHaveLength(1);
+    expect(state.writes.filter((write) =>
+      write.method === "PATCH" &&
+      write.path === "/api/conversations/qa-chat-created" &&
+      write.body.selectionMode === "auto"
+    )).toHaveLength(1);
+    expect(state.autoSelectionRecoveryReadCount).toBe(1);
+    const exactDetailReads = state.historyReads.filter((read) =>
+      read === "/api/conversations/qa-chat-created"
+    ).length;
+    expect(exactDetailReads).toBeGreaterThanOrEqual(2);
+    expect(exactDetailReads).toBeLessThanOrEqual(3);
+  });
+
+  test("a post-commit Auto PATCH 5xx is verified by one read instead of retried", async ({ page }) => {
+    const state = await openChat(page, {
+      fresh: true,
+      autoSelectionOffered: true,
+      autoSelectionPatchServerErrorAfterCommit: true,
+    });
+    const composerAuto = page.getByTestId("composer-auto-routing-toggle");
+    await expect(composerAuto).toHaveAttribute("aria-checked", "true");
+    await composerAuto.click();
+    await expect(composerAuto).toHaveAttribute("aria-checked", "false");
+    await composerAuto.click();
+    await expect(composerAuto).toHaveAttribute("aria-checked", "true");
+    expect(state.writes.filter((write) =>
+      write.method === "PATCH" &&
+      write.path === "/api/conversations/qa-chat-created" &&
+      write.body.selectionMode === "auto"
+    )).toHaveLength(1);
+    expect(state.autoSelectionRecoveryReadCount).toBe(1);
+    const exactDetailReads = state.historyReads.filter((read) =>
+      read === "/api/conversations/qa-chat-created"
+    ).length;
+    expect(exactDetailReads).toBeGreaterThanOrEqual(2);
+    expect(exactDetailReads).toBeLessThanOrEqual(3);
+  });
+
+  test("a lost stored-mode response adopts the server-confirmed mode without repeating the PATCH", async ({ page }) => {
+    const state = await openChat(page, {
+      autoSelectionOffered: true,
+      initialSelectionMode: "auto",
+      autoSelectionPatchResponseLostAfterCommit: true,
+    });
+    const composerAuto = page.getByTestId("composer-auto-routing-toggle");
+    await expect(composerAuto).toHaveAttribute("aria-checked", "true");
+
+    await composerAuto.click();
+    await expect(composerAuto).toHaveAttribute("aria-checked", "false");
+    expect(state.conversations[0]?.selectionMode).toBe("manual");
+    expect(state.writes.filter((write) =>
+      write.method === "PATCH" &&
+      write.path === `/api/conversations/${CONVERSATION}` &&
+      write.body.selectionMode === "manual"
+    )).toHaveLength(1);
+  });
+
+  test("an unverifiable stored-mode write blocks another change and Send", async ({ page }) => {
+    const state = await openChat(page, {
+      autoSelectionOffered: true,
+      initialSelectionMode: "auto",
+      autoSelectionPatchResponseLostAfterCommit: true,
+      autoSelectionReadbackUnavailableAfterLostPatch: true,
+    });
+    const prompt = "Do not send while the stored Auto mode is unknown.";
+    const composerAuto = page.getByTestId("composer-auto-routing-toggle");
+    await expect(composerAuto).toHaveAttribute("aria-checked", "true");
+    await page.getByTestId("chat-textarea").fill(prompt);
+
+    await composerAuto.click();
+    await expect(page.getByText(
+      "That Auto setting could not be saved.",
+      { exact: true }
+    )).toBeVisible();
+    await expect(composerAuto).toHaveAttribute("aria-checked", "true");
+    await composerAuto.click();
+    await page.getByTestId("chat-send-button").click();
+    await page.waitForTimeout(100);
+
+    expect(state.writes.filter((write) =>
+      write.method === "PATCH" &&
+      write.path === `/api/conversations/${CONVERSATION}` &&
+      write.body.selectionMode === "manual"
+    )).toHaveLength(1);
+    expect(await requests(page)).toHaveLength(0);
+  });
+
+  test("an unknown blank-Chat create blocks retries and any first Send in that draft scope", async ({ page }) => {
+    const state = await openChat(page, {
+      fresh: true,
+      autoSelectionOffered: true,
+      autoConversationCreateResponseLostAfterCommit: true,
+    });
+    await page.getByTestId("chat-textarea").fill(
+      "Do not retry an Auto create whose outcome is unknown."
+    );
+    await page.getByTestId("chat-send-button").click();
+    await expect(page.getByText(
+      "That Auto setting could not be saved.",
+      { exact: true }
+    )).toBeVisible();
+    await page.getByTestId("chat-send-button").click();
+    await page.waitForTimeout(100);
+    expect(state.writes.filter((write) =>
+      write.method === "POST" &&
+      write.path === "/api/products/chat/conversations"
+    )).toHaveLength(1);
+    expect(await requests(page)).toHaveLength(0);
+  });
+
+  test("a post-commit blank-Chat create 5xx blocks another create and first Send", async ({ page }) => {
+    const state = await openChat(page, {
+      fresh: true,
+      autoSelectionOffered: true,
+      autoConversationCreateServerErrorAfterCommit: true,
+    });
+    await page.getByTestId("chat-textarea").fill(
+      "Treat a create 5xx as an unknown committed row."
+    );
+    await page.getByTestId("chat-send-button").click();
+    await expect(page.getByText(
+      "That Auto setting could not be saved.",
+      { exact: true }
+    )).toBeVisible();
+    await page.getByTestId("chat-send-button").click();
+    await page.waitForTimeout(100);
+    expect(state.writes.filter((write) =>
+      write.method === "POST" &&
+      write.path === "/api/products/chat/conversations"
+    )).toHaveLength(1);
+    expect(await requests(page)).toHaveLength(0);
+  });
+
+  test("a late failed Auto preparation cannot overwrite the next blank Chat authority", async ({ page }) => {
+    const state = await openChat(page, {
+      fresh: true,
+      autoSelectionOffered: true,
+    });
+    let releaseOldCreate = () => {};
+    const oldCreateGate = new Promise<void>((resolve) => {
+      releaseOldCreate = resolve;
+    });
+    let createCalls = 0;
+    let oldCreateStarted = false;
+    await page.route("**/api/products/chat/conversations", async (route) => {
+      createCalls += 1;
+      if (createCalls === 1) {
+        oldCreateStarted = true;
+        await oldCreateGate;
+        return route.abort("failed");
+      }
+      return route.fallback();
+    });
+
+    await page.getByTestId("chat-textarea").fill("Abandon this first Auto draft.");
+    await page.getByTestId("composer-auto-routing-toggle").click();
+    await expect(page.getByTestId("composer-auto-routing-toggle"))
+      .toHaveAttribute("aria-checked", "false");
+    await page.getByTestId("composer-auto-routing-toggle").click();
+    await expect.poll(() => oldCreateStarted).toBe(true);
+    await chooseNewChat(page);
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toBeVisible();
+    const nextPrompt = "Keep the next blank Chat and its stored Auto authority.";
+    await page.getByTestId("chat-textarea").fill(nextPrompt);
+    await expect(page.getByTestId("composer-auto-routing-toggle"))
+      .toHaveAttribute("aria-checked", "true");
+    await page.getByTestId("chat-send-button").click();
+
+    releaseOldCreate();
+    await expect.poll(() => createCalls).toBe(2);
+    await page.waitForTimeout(50);
+    await expect(page.getByTestId("composer-auto-routing-toggle"))
+      .toHaveAttribute("aria-checked", "true");
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    expect((await requests(page))[0]?.conversationId).toBe("qa-chat-created");
+    expect(state.writes.filter((write) =>
+      write.method === "POST" &&
+      write.path === "/api/products/chat/conversations"
+    )).toHaveLength(1);
+  });
+
+  for (const autoSelectionOffered of [false, true]) {
+    test(`a failed first Message save retries the same created Chat and never copies or deletes the new-scope draft (${autoSelectionOffered ? "Auto" : "manual"})`, async ({ page }) => {
+      const state = await openChat(page, {
+        fresh: true,
+        autoSelectionOffered,
+        messageSaveFailureOnce: true,
+        messageSaveFailureStatus: 409,
+      });
+      if (autoSelectionOffered) {
+        await expect(page.getByTestId("composer-auto-routing-toggle"))
+          .toHaveAttribute("aria-checked", "true");
+      }
+      const prompt = "Retry this exact new-scope draft after the network refusal.";
+      await page.getByTestId("chat-textarea").fill(prompt);
+      await expect.poll(() => state.drafts.get("new")?.revision ?? 0).toBeGreaterThan(0);
+      await page.getByTestId("chat-send-button").click();
+      await expect(page.getByText(
+        "The question could not be saved with its files. Your draft has been kept.",
+        { exact: true }
+      )).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).toHaveValue(prompt);
+      expect(await persistentChatPostCount(page)).toBe(0);
+
+      const draftWritesAfterFailure = state.writes.filter((write) =>
+        write.path.includes("/api/products/chat/drafts/")
+      );
+      expect(draftWritesAfterFailure.some((write) =>
+        write.path.endsWith("/drafts/qa-chat-created") || write.method === "DELETE"
+      )).toBe(false);
+      expect(state.drafts.has("new")).toBe(true);
+      expect(state.drafts.has("qa-chat-created")).toBe(false);
+
+      await page.getByTestId("chat-send-button").click();
+      await drive(page, 0, "push", "One answer after the Message retry.");
+      await drive(page, 0, "finish");
+      await expect(message(page, "One answer after the Message retry.")).toBeVisible();
+
+      const creates = state.writes.filter((write) =>
+        write.method === "POST" && write.path === "/api/products/chat/conversations"
+      );
+      expect(creates).toHaveLength(1);
+      const messageWrites = state.writes.filter((write) =>
+        write.method === "POST" && write.path === "/api/conversations/qa-chat-created/messages"
+      );
+      expect(messageWrites).toHaveLength(2);
+      expect((messageWrites[1]?.body.draftConsume as { scopeKey?: string })?.scopeKey).toBe("new");
+      expect(state.drafts.has("new")).toBe(false);
+      expect(state.drafts.has("qa-chat-created")).toBe(false);
+      expect(await persistentProviderStreamCount(page)).toBe(1);
+    });
+  }
 
   test("a late Chat create response cannot adopt itself after navigation to another conversation", async ({ page }) => {
     await openChat(page, { fresh: true });

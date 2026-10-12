@@ -58,6 +58,11 @@ import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
 import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
 import { recoveryPromptsForMessages } from "@/lib/chatTranscriptRecovery";
+import {
+  chatProductUiCopy,
+  localizedProductHref,
+  type ChatWorkspaceProduct,
+} from "@/lib/chatProductUiCopy";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -80,7 +85,11 @@ type ChatMessageListProps = {
   currentModelId?: string | null;
   currentPlan?: string | null;
   isGuestMode?: boolean;
+  /** Product that owns sign-in and generated-artifact return actions. */
+  currentProduct?: ChatWorkspaceProduct;
   currentChatId?: string | null;
+  /** The legacy Review trial can be imported; Guest Chat stays browser-local. */
+  guestImportAvailable?: boolean;
   // This panel's own in-flight state (not the other panels'), used to show
   // "connecting" vs "generating" on the message currently streaming in --
   // distinct from msg.status, which doesn't tell "still streaming" apart
@@ -333,7 +342,9 @@ export function ChatMessageList({
   currentModelId,
   currentPlan,
   isGuestMode = false,
+  currentProduct = "review",
   currentChatId = null,
+  guestImportAvailable = true,
   isSending = false,
   isSendPreparing = false,
   onStopGenerating,
@@ -1353,6 +1364,7 @@ export function ChatMessageList({
                         fallbackModelId={msg.modelId ?? null}
                         onRetry={onRetryLast}
                         isGuestMode={isGuestMode}
+                        currentProduct={currentProduct}
                       />
                     )}
                     {!isUser &&
@@ -1460,11 +1472,15 @@ export function ChatMessageList({
                         <div className="flex flex-wrap items-center gap-2">
                           {errorCategory === "quota" && isGuestMode && (
                             <Link
-                              href={`/auth/signin?callbackUrl=${encodeURIComponent("/chat")}`}
-                              onClick={() => currentChatId && writePendingGuestImportIntent(currentChatId)}
+                              href={`/auth/signin?callbackUrl=${encodeURIComponent(localizedProductHref(currentProduct, lang))}`}
+                              onClick={() => {
+                                if (guestImportAvailable && currentChatId) {
+                                  writePendingGuestImportIntent(currentChatId);
+                                }
+                              }}
                               className={primaryButtonClass}
                             >
-                              {t("chat.continueConversationCta")}
+                              {guestImportAvailable ? t("chat.continueConversationCta") : t("auth.login")}
                             </Link>
                           )}
                           {(errorCategory === "model_retired" ||
@@ -1561,7 +1577,9 @@ export function ChatMessageList({
                         </div>
                         {errorCategory === "quota" && isGuestMode && (
                           <p className="mt-2 text-xs leading-5 text-zinc-600 dark:text-zinc-400">
-                            {t("chat.guestQuotaLoginBenefitHint")}
+                            {guestImportAvailable
+                              ? t("chat.guestQuotaLoginBenefitHint")
+                              : chatProductUiCopy[lang].guestChatSignInDescription}
                           </p>
                         )}
                         {errorAuxiliaryLines.length > 0 && (

@@ -136,7 +136,7 @@ const seedReporter = async () => {
     data: {
       id: "user_reporter_1",
       email: "reporter@tomverse.test",
-      settings: { create: { language: "ko" } },
+      settings: { create: { defaultModel: "gpt-6-luna", language: "ko" } },
     },
   });
   return user;

@@ -51,7 +51,7 @@ test("every settings destination resolves to the deep link settings itself parse
             if (destination.kind === "settings-section") {
                 assert.equal(resolved.type, "href", id);
                 const url = new URL(resolved.href, "https://tomverse.app");
-                assert.equal(url.pathname, "/chat", id);
+                assert.equal(url.pathname, "/review", id);
                 const parsed = parseSettingsDeepLink(url.search);
                 assert.equal(parsed?.section, destination.section, id);
                 assert.equal(parsed?.tab, SETTINGS_SECTION_TAB[destination.section], id);

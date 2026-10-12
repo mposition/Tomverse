@@ -64,7 +64,7 @@ test("a keepalive torn across chunks never reaches the screen or the transcript"
     )
   );
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await sendChatMessage(page, testInfo, "Summarise the attached deck.");
 
   const answer = page.getByTestId("chat-message-list").first();

@@ -38,7 +38,7 @@ const createUser = () =>
 
 const seed = (userId: string, data: Record<string, unknown> = {}) =>
   prisma.conversation.create({
-    data: { userId, title: "product key fixture", ...data },
+    data: { selectedModels: '["gpt-6-luna"]', userId, title: "product key fixture", ...data },
   });
 
 /** The constraint name Postgres reports, so a case cannot pass on the wrong refusal. */

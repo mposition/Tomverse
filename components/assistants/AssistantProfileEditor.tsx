@@ -27,7 +27,7 @@ import {
     assistantProfileHierarchy,
 } from "@/lib/settingsNavigation";
 import {
-    ASSISTANT_PROFILE_CHAT_PATH,
+    ASSISTANT_PROFILE_REVIEW_PATH,
     stashPendingChatProfile,
 } from "@/lib/assistantProfileReturn";
 import { assistantProfileErrorCopyKey } from "@/lib/assistantProfileErrorCopy";
@@ -594,7 +594,7 @@ export function AssistantProfileEditor({
                     data-testid="settings-detail-nav"
                 >
                     <Link
-                        href={ASSISTANT_PROFILE_CHAT_PATH}
+                        href={ASSISTANT_PROFILE_REVIEW_PATH}
                         data-testid="assistant-create-back"
                         className="inline-flex items-center gap-1.5 rounded-lg text-sm font-semibold text-zinc-500 transition-colors hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-50 dark:hover:text-zinc-100 dark:focus-visible:ring-offset-zinc-950"
                     >

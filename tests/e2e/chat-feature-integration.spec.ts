@@ -248,7 +248,7 @@ test("attachment input reaches Chat and its durable card survives reload", async
       saved.push(...((request.postDataJSON() as { messages?: SavedMessage[] }).messages || []));
     }
   });
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
   await toolsTrigger(page).click();
@@ -335,7 +335,7 @@ test("voice transcription fills the draft and explicit Send reaches Chat once", 
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ transcript }) });
   });
   const requests = await mockAnswer(page, "Synthetic voice Chat answer.");
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect(page.getByTestId("composer-voice-button")).toBeEnabled();
   await page.getByTestId("composer-voice-button").click();
   await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
@@ -377,7 +377,7 @@ test("web search switch reaches Chat and renders the returned source", async ({ 
       citations: [source],
     },
   }));
-  await page.goto("/chat");
+  await page.goto("/review");
   await openRecentConversation(page);
   await toolsTrigger(page).click();
   const toggle = page.getByTestId("tools-web-search-row");
@@ -436,7 +436,7 @@ test("generated file event renders a Chat card and downloads the synthetic bytes
       body: bytes,
     });
   });
-  await page.goto("/chat");
+  await page.goto("/review");
   await page.getByTestId("chat-textarea").fill("Make a synthetic Markdown file.");
   await sendDraft(page);
   const card = visibleTurn(page, "assistant").getByTestId("generated-artifact-card");

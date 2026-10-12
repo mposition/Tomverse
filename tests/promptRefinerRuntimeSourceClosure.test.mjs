@@ -495,6 +495,11 @@ const compilerOptions = parsedConfig.options;
 // this repins only their final source positions on the main release base.
 // 2026-10-12, back-merge of main 9cd033fa5 into develop: both histories above
 // are kept. Every closure file equals develop's, so develop's pins hold.
+// 2026-10-12, Guest Smart Adaptive CI repair: the reviewed Guest audit actor
+// joins the marketing schema fingerprint provenance. That moves existing
+// accesses in `lib/marketingAutomationAccess.ts`; capability naming changes no
+// access expression. The 228-entry count and position-free digest remain
+// unchanged, so this repins source positions only.
 // 2026-10-12, default model GPT 6 Luna and the guest trio's Haiku 5.5: two
 // pricing profiles inserted in `lib/modelPricing.ts` move the twelve accesses
 // below them by 73 lines, and two catalogue rows plus the DEFAULT_MODEL_ID note
@@ -510,6 +515,9 @@ const compilerOptions = parsedConfig.options;
 // histories above remain, while their combined comments and audit helpers
 // reposition only already-reviewed accesses. The count and position-free
 // inventory remain unchanged, so this repins source positions only.
+// 2026-10-12, Guest Smart Adaptive plus AMUX worker registry merge: both
+// fingerprint provenance notes coexist. Access count 228 and position-free
+// digest are unchanged; the positions below the combined note are repinned.
 // 2026-10-12, the default lineup as an Admin setting: the lineup reader, its
 // save-time checks and its writer in `lib/appSettings.ts` sit above that file's
 // one access, `flags[feature]`, and move it by 184 lines. The replacement walk,
@@ -519,12 +527,16 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-12, merge frozen develop c9c557f3 into the integrated AMUX source:
 // both reviewed histories remain and the combined app-setting offsets only
 // reposition existing accesses. Count and position-free inventory are unchanged.
+// 2026-10-13, merge frozen develop 709ccb7a into the verified halt source:
+// the Guest, default-model and worker histories above remain alongside the
+// no-commit halt changes. Count and position-free inventory remain unchanged;
+// only the actual merged source positions are repinned below.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "6fb2a6a019e9077ccf028a37eda70b9",
-  "33fc2d44ec6777d4dbf6d3a0af5bca81d",
+  "15bf37335c6eb15c4f162e2d96e6eaaf",
+  "36a41ab31c58c7fe85df4b02e3cdb34f",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

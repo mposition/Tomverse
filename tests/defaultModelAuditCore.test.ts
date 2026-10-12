@@ -25,7 +25,8 @@ import { DEFAULT_MODEL_ID, getModel, getModelUsageProfile } from "@/lib/models";
 //   A. AppSetting["guestDefaultModelId"] -- which brand-trio model leads a
 //      guest's first comparison. Touches no account.
 //   B. DEFAULT_MODEL_ID -- what a newly signed-in account gets, spelled out
-//      in four places that nothing else reads together.
+//      in three places in code that nothing else reads together, and in no
+//      column default (dropped 2026-10-12).
 //
 // These lock down the audit that keeps them apart, and then apply it to the
 // real catalogue so the repository itself has to stay consistent.
@@ -76,8 +77,8 @@ const healthyInput = (
     guestBrandTrioModelIds: GUEST_BRAND_TRIO_MODEL_IDS,
     defaultModelId: DEFAULT_MODEL_ID,
     appDefaultsDefaultModelId: APP_DEFAULTS.defaultModelId,
-    prismaUserSettingsDefaultModel: DEFAULT_MODEL_ID,
-    prismaConversationSelectedModels: [DEFAULT_MODEL_ID],
+    prismaUserSettingsDefaultModel: null,
+    prismaConversationSelectedModels: null,
     userSettingsCreateDefaultModel: APP_DEFAULTS.defaultModelId,
     ssrGuestSelectedModelIds: selection,
     hydratedGuestSelectedModelIds: selection,
@@ -241,18 +242,20 @@ test("a guest lead that is not Standard fails -- a guest cannot pay for it", () 
   );
 });
 
-test("the four spellings of the signed-in default must agree", () => {
+test("the code spellings of the signed-in default must agree, and no column default may name a model", () => {
   assert.deepEqual(
     codes(healthyInput({ appDefaultsDefaultModelId: "gpt-5-4-mini" })),
     ["compiled_defaults_disagree"]
   );
+  // Even a column default equal to DEFAULT_MODEL_ID is refused: it is a
+  // second copy that only a migration can move.
   assert.deepEqual(
-    codes(healthyInput({ prismaUserSettingsDefaultModel: "gpt-5-4-mini" })),
-    ["prisma_schema_default_disagrees"]
+    codes(healthyInput({ prismaUserSettingsDefaultModel: DEFAULT_MODEL_ID })),
+    ["prisma_column_default_names_model"]
   );
   assert.deepEqual(
-    codes(healthyInput({ prismaConversationSelectedModels: ["gpt-5-4-mini"] })),
-    ["prisma_schema_default_disagrees"]
+    codes(healthyInput({ prismaConversationSelectedModels: [DEFAULT_MODEL_ID] })),
+    ["prisma_column_default_names_model"]
   );
   assert.deepEqual(
     codes(healthyInput({ userSettingsCreateDefaultModel: "gpt-5-4-mini" })),
@@ -310,21 +313,40 @@ test("changing the guest AppSetting cannot change any account's default", () => 
   }
 });
 
-test("the schema default is read from schema.prisma, not assumed", () => {
+test("the schema is read from schema.prisma, not assumed, and names no default model", () => {
   const schema = readFileSync(
     join(process.cwd(), "prisma/schema.prisma"),
     "utf8"
   );
+  for (const [model, field] of [
+    ["UserSettings", "defaultModel"],
+    ["Conversation", "selectedModels"],
+  ]) {
+    assert.deepEqual(
+      parsePrismaFieldContract(schema, model, field),
+      { present: true, nullable: false, hasDefault: false },
+      `${model}.${field} must stay NOT NULL with no column default`
+    );
+    assert.equal(parsePrismaStringDefault(schema, model, field), null);
+  }
+  // A field with no default is not read together with the next field: the
+  // parser once took disabledPanels' @default("[]") for selectedModels'.
+  const noDefaultThenDefault = `model Conversation {
+  selectedModels String
+  disabledPanels String @default("[]")
+}`;
+  assert.equal(parsePrismaStringDefault(noDefaultThenDefault, "Conversation", "selectedModels"), null);
   assert.equal(
-    parsePrismaStringDefault(schema, "UserSettings", "defaultModel"),
-    DEFAULT_MODEL_ID
+    parsePrismaFieldContract(noDefaultThenDefault, "Conversation", "selectedModels").hasDefault,
+    false
   );
-  assert.deepEqual(
-    JSON.parse(
-      parsePrismaStringDefault(schema, "Conversation", "selectedModels") ?? "[]"
-    ),
-    [DEFAULT_MODEL_ID]
-  );
+  assert.equal(parsePrismaStringDefault(noDefaultThenDefault, "Conversation", "disabledPanels"), "[]");
+  // The parser still reads a default when there is one.
+  const withDefault = `model UserSettings {
+  defaultModel String @default("gpt-6-luna")
+}`;
+  assert.equal(parsePrismaStringDefault(withDefault, "UserSettings", "defaultModel"), "gpt-6-luna");
+  assert.equal(parsePrismaFieldContract(withDefault, "UserSettings", "defaultModel").hasDefault, true);
   assert.equal(
     parsePrismaStringDefault(schema, "UserSettings", "notAField"),
     null
@@ -469,9 +491,10 @@ test("parsePrismaFieldContract reads the real column's contract", () => {
     parsePrismaFieldContract(schema, "UserSettings", "newConversationModelIds"),
     { present: true, nullable: true, hasDefault: false }
   );
-  // A non-nullable defaulted column for contrast.
+  // A non-nullable defaulted column for contrast. (It was defaultModel until
+  // that column's default was dropped on 2026-10-12.)
   assert.deepEqual(
-    parsePrismaFieldContract(schema, "UserSettings", "defaultModel"),
+    parsePrismaFieldContract(schema, "UserSettings", "theme"),
     { present: true, nullable: false, hasDefault: true }
   );
   assert.deepEqual(

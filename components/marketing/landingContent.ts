@@ -209,16 +209,16 @@ const en: LandingCopy = {
       "Evidence: unsupported claims, conflicts and evidence gaps",
       "Action: practical next steps, trade-offs and risks",
     ],
-    dualReviewerLabel: "Two independent reviewers",
-    dualReviewer: "When a second reviewer from a different provider is available, the comparison runs twice independently and the review reports where the two reviewers agreed and where they did not.",
-    terminologyNote: "AI Review is the product name; in the app the action itself reads “AI answer cross-review”.",
+    dualReviewerLabel: "Two AI review models",
+    dualReviewer: "When a second AI review model is available, read both review results. The comparison shows whether their quote-match grades are the same and how many exact quotes they share. This does not mean they agree about which answer is correct.",
+    terminologyNote: "AI Review is the answer cross-review feature inside Tomverse Review, helping you examine agreements, differences and omissions.",
     reviewBoundary: "AI Review compares only the supplied answers. It does not browse the web, prove facts, or declare a correct winner. When an item needs checking, you can run a separate web check on it from the review. Important claims still need current primary sources, testing, or qualified professional review.",
     casesTitle: "Three jobs where a second perspective matters",
-    casesDescription: "Each example starts with a concrete artifact and ends with something reviewable. These are controlled product examples, not invented customer testimonials.",
+    casesDescription: "Illustrative product example.",
     cases: [
       {
         title: "Cross-review a decision",
-        description: "Compare launch, policy, or planning advice from several models.",
+        description: "Compare everyday choices, such as choosing a laptop or spotting missing conditions in a study plan, through several answers.",
         link: "See AI answer review",
       },
       {
@@ -244,11 +244,11 @@ const en: LandingCopy = {
     },
     deepResearch: {
       title: "Deep Research",
-      description: "Send one question to an extended research run across many web sources. It runs as its own long job rather than a normal chat reply, and asks you to confirm before it starts.",
+      description: "Gather information from multiple web sources into a research result. Deep Research runs separately from a regular conversation reply and asks for confirmation before starting.",
       condition: "Pro plan and above. Uses credits.",
     },
     sourceGrounding: {
-      title: "Source grounding",
+      title: "Quote match rate",
       description: "AI Review quotes the answers it is comparing. Each quote is matched back against the answer it came from, and the share that matched exactly is shown with the review.",
       condition: "It measures quote matching, not factual accuracy, and not a probability that a claim is true.",
     },
@@ -267,7 +267,7 @@ const en: LandingCopy = {
       {
         title: "Files and real context",
         description: "Add images, PDFs, Office documents, text files, or supported Google Drive files when the source material matters.",
-        condition: "Connecting Google Drive needs an account.",
+        condition: "Guests can attach supported files temporarily. Connecting Google Drive requires an account.",
       },
       {
         title: "Targeted follow-up",
@@ -335,7 +335,7 @@ const en: LandingCopy = {
   },
   pricing: {
     title: "Start free. Upgrade when the work grows.",
-    description: "The homepage shows only the essentials. Model weights, credit examples, annual billing, add-on credits, and Fair Use details are explained on the pricing page.",
+    description: "This page introduces the main plans. See pricing for model credits, usage examples, annual billing and add-on credit details.",
     plans: [
       {
         id: "free",
@@ -349,7 +349,7 @@ const en: LandingCopy = {
     creditsUnknown: "Monthly AI credits shown on the pricing page",
     monthly: "/ month",
     dailyLimitNote: "Free and Pro also pace monthly credits with a daily limit.",
-    noDailyLimitNote: "Max has no daily credit limit.",
+    noDailyLimitNote: "Max has no daily credit cap within its monthly allowance.",
     deepResearchNote: "Deep Research is available from Pro.",
     detailsCta: "Compare plans and credit usage",
   },
@@ -418,16 +418,16 @@ const ko: LandingCopy = {
       "근거: 근거 없는 주장, 충돌, 근거 공백 위주",
       "실행: 실질적인 다음 단계, 장단점, 위험 위주",
     ],
-    dualReviewerLabel: "독립적인 두 검토자",
-    dualReviewer: "다른 공급자의 두 번째 검토 모델을 쓸 수 있을 때는 비교가 독립적으로 두 번 실행되고, 두 검토자가 어디에서 일치했고 어디에서 갈렸는지 함께 표시합니다.",
-    terminologyNote: "AI Review는 제품 이름이며, 앱 안에서는 같은 동작이 “AI 답변 교차검토”로 표시됩니다.",
+    dualReviewerLabel: "두 AI 검토 모델",
+    dualReviewer: "두 번째 AI 검토 모델을 쓸 수 있을 때는 두 검토 결과를 함께 읽을 수 있습니다. 출처 일치도 등급이 같은지, 정확히 같은 문구를 인용한 수가 몇 개인지 확인하세요. 두 모델이 어느 답변이 정답인지 합의했다는 뜻은 아닙니다.",
+    terminologyNote: "AI Review는 Tomverse Review 안에서 답변의 공통점·차이·누락을 살펴보는 교차검토 기능입니다.",
     reviewBoundary: "AI Review는 제공된 답변끼리만 비교합니다. 스스로 웹 검색을 하거나 사실을 확정하거나 정답을 고르지 않습니다. 확인이 필요한 항목은 검토 결과에서 웹 확인을 따로 실행할 수 있습니다. 중요한 주장은 최신 1차 출처, 테스트 또는 자격 있는 전문가를 통해 확인해야 합니다.",
     casesTitle: "두 번째 관점이 유용한 세 가지 작업",
-    casesDescription: "각 예시는 구체적인 자료에서 시작해 검토 가능한 결과로 끝납니다. 꾸며낸 고객 후기가 아닌 통제된 제품 예시입니다.",
+    casesDescription: "기능을 설명하기 위한 예시입니다.",
     cases: [
       {
         title: "의사결정 교차검토",
-        description: "여러 모델의 출시, 정책 또는 기획 조언을 비교합니다.",
+        description: "어떤 노트북을 고를지, 공부 계획에서 빠진 조건은 무엇인지처럼 생활 속 선택지를 여러 답변으로 비교해 보세요.",
         link: "AI 답변 교차검토 보기",
       },
       {
@@ -453,11 +453,11 @@ const ko: LandingCopy = {
     },
     deepResearch: {
       title: "Deep Research",
-      description: "하나의 질문을 여러 웹 출처에 걸친 확장 리서치로 보냅니다. 일반 채팅 답변이 아니라 별도의 장시간 작업으로 실행되며, 시작 전에 확인을 요청합니다.",
+      description: "여러 웹 출처의 정보를 모아 조사 결과를 읽어보세요. Deep Research는 일반 대화 답변과 별도로 진행되며, 시작 전에 실행 여부를 확인합니다.",
       condition: "Pro 플랜 이상에서 사용할 수 있고 크레딧을 사용합니다.",
     },
     sourceGrounding: {
-      title: "근거 일치율",
+      title: "인용문 일치율",
       description: "AI Review는 비교 중인 답변을 인용합니다. 각 인용문을 원본 답변과 다시 대조해, 정확히 일치한 비율을 검토 결과와 함께 표시합니다.",
       condition: "인용이 원문과 맞는지를 측정하는 값이며, 사실 정확도나 주장이 참일 확률이 아닙니다.",
     },
@@ -476,7 +476,7 @@ const ko: LandingCopy = {
       {
         title: "파일과 실제 맥락",
         description: "원본 자료가 중요할 때 이미지, PDF, Office 문서, 텍스트 또는 지원되는 Google Drive 파일을 추가하세요.",
-        condition: "Google Drive 연결에는 계정이 필요합니다.",
+        condition: "비회원은 지원 형식의 파일을 임시로 첨부할 수 있습니다. Google Drive 연결에는 계정이 필요합니다.",
       },
       {
         title: "특정 모델 후속 질문",
@@ -541,7 +541,7 @@ const ko: LandingCopy = {
   },
   pricing: {
     title: "무료로 시작하고 작업이 커질 때 업그레이드하세요.",
-    description: "홈페이지에는 핵심만 표시합니다. 모델별 차감량, 크레딧 예시, 연간 결제, 추가 크레딧과 공정사용 정책은 요금 페이지에서 확인하세요.",
+    description: "이 페이지에서는 주요 플랜을 소개합니다. 모델별 크레딧, 사용량 예시, 연간 결제와 추가 크레딧의 제공 범위는 요금제 페이지에서 확인하세요.",
     plans: [
       { id: "free", title: "Free", blurb: "가벼운 일상 사용과 고급 모델 체험." },
       { id: "pro", title: "Pro", blurb: "일상적인 멀티모델 비교." },
@@ -551,7 +551,7 @@ const ko: LandingCopy = {
     creditsUnknown: "월 AI 크레딧은 요금 페이지에서 확인",
     monthly: "/ 월",
     dailyLimitNote: "Free와 Pro는 월 크레딧에 더해 일일 사용 한도가 적용됩니다.",
-    noDailyLimitNote: "Max는 일일 크레딧 한도가 없습니다.",
+    noDailyLimitNote: "Max는 일일 크레딧 한도 없이 월 제공량 안에서 이용합니다.",
     deepResearchNote: "Deep Research는 Pro부터 사용할 수 있습니다.",
     detailsCta: "플랜과 크레딧 사용량 비교",
   },
@@ -616,14 +616,14 @@ const zh: LandingCopy = {
     aiReviewBridge: "当差异值得深入处理时，AI Review 会把同样的回答按板块、带引文地推进一步。",
     reviewModesLabel: "选择审查的侧重点",
     reviewModes: ["均衡: 一致、差异、遗漏与实用性并重", "依据: 侧重缺乏依据的说法、冲突与依据缺口", "行动: 侧重可执行的下一步、取舍与风险"],
-    dualReviewerLabel: "两位独立审查者",
-    dualReviewer: "当可以使用来自不同供应商的第二个审查模型时，比较会独立运行两次，并显示两位审查者在哪里一致、在哪里分歧。",
-    terminologyNote: "AI Review 是产品名称；在应用中该操作显示为“AI 回答交叉审查”。",
+    dualReviewerLabel: "两个 AI 审查模型",
+    dualReviewer: "第二个 AI 审查模型可用时，可以并排阅读两份审查结果，查看引文匹配等级是否相同，以及完全相同的引文有多少。这并不表示它们就哪个回答正确达成一致。",
+    terminologyNote: "AI Review 是 Tomverse Review 内的回答交叉审查功能，用于查看共识、差异与遗漏。",
     reviewBoundary: "AI Review 只比较提供的回答。它不会自行浏览网页、判定事实，也不会选出唯一正确答案。需要核实的项目，可以在审查结果中单独执行网页核实。重要说法仍需通过最新一手来源、测试或专业人员核实。",
     casesTitle: "三个值得获得第二视角的任务",
-    casesDescription: "每个示例都从具体材料开始，以可审查结果结束；这是受控产品示例，不是虚构客户评价。",
+    casesDescription: "用于说明功能的示例。",
     cases: [
-      { title: "交叉审查决策", description: "比较多个模型对发布、政策或规划的建议。", link: "查看 AI 回答审查" },
+      { title: "交叉审查决策", description: "通过多个回答比较日常选择，例如挑选笔记本或发现学习计划中遗漏的条件。", link: "查看 AI 回答审查" },
       {
         title: "分析 PDF 或文档",
         description: "不必把摘录逐个粘贴给每个模型，直接就同一份 18 页文档向多个模型提问。",
@@ -643,11 +643,11 @@ const zh: LandingCopy = {
     },
     deepResearch: {
       title: "Deep Research",
-      description: "把一个问题交给跨越多个网页来源的扩展研究。它作为独立的长时间任务运行，而不是普通聊天回复，并在开始前请你确认。",
+      description: "汇集多个网页来源的信息，阅读研究结果。Deep Research 与常规对话回复分开进行，开始前会请你确认。",
       condition: "Pro 套餐及以上可用，会消耗积分。",
     },
     sourceGrounding: {
-      title: "依据匹配率",
+      title: "引文匹配率",
       description: "AI Review 会引用它正在比较的回答。每条引文都会与其来源回答重新比对，并随审查结果显示完全匹配的比例。",
       condition: "它衡量的是引文是否与原文一致，而不是事实准确度，也不是某个说法为真的概率。",
     },
@@ -666,7 +666,7 @@ const zh: LandingCopy = {
       {
         title: "文件与真实上下文",
         description: "需要原始材料时，可添加图片、PDF、Office 文档、文本或受支持的 Google Drive 文件。",
-        condition: "连接 Google Drive 需要账户。",
+        condition: "访客可临时附加支持的文件。连接Google Drive需要账户。",
       },
       { title: "定向追问", description: "暂停看完的面板，只向一个模型继续提问，其他回答和原始比较都会保留。" },
       { title: "项目与记录", description: "按项目整理对话并检索历史，避免在多个标签页重复建立上下文。", condition: "需要账户。" },
@@ -716,7 +716,7 @@ const zh: LandingCopy = {
   },
   pricing: {
     title: "免费开始，按需升级。",
-    description: "首页只展示核心信息。模型权重、积分示例、年付、附加积分和公平使用政策请查看价格页。",
+    description: "本页介绍主要套餐。模型积分、用量示例、年付及额外积分详情请查看套餐页。",
     plans: [
       { id: "free", title: "Free", blurb: "轻量日常使用与体验高级模型。" },
       { id: "pro", title: "Pro", blurb: "常规多模型比较。" },
@@ -726,7 +726,7 @@ const zh: LandingCopy = {
     creditsUnknown: "每月 AI 积分见价格页",
     monthly: "/ 月",
     dailyLimitNote: "Free 与 Pro 的月度积分还受每日限额约束。",
-    noDailyLimitNote: "Max 没有每日积分限额。",
+    noDailyLimitNote: "Max没有每日积分上限，仍受每月额度约束。",
     deepResearchNote: "Deep Research 从 Pro 起可用。",
     detailsCta: "比较套餐与积分用量",
   },
@@ -810,16 +810,16 @@ const fr: LandingCopy = {
       "Preuves: affirmations non étayées, conflits et lacunes de preuve",
       "Action: étapes concrètes, compromis et risques",
     ],
-    dualReviewerLabel: "Deux relecteurs indépendants",
-    dualReviewer: "Lorsqu’un second relecteur d’un autre fournisseur est disponible, la comparaison est exécutée deux fois de façon indépendante, et la revue indique où les deux relecteurs convergent ou divergent.",
-    terminologyNote: "AI Review est le nom produit ; dans l’application, l’action s’appelle « AI answer cross-review ».",
+    dualReviewerLabel: "Deux modèles IA de revue",
+    dualReviewer: "Lorsqu’un second modèle IA de revue est disponible, lisez les deux résultats. Comparez leurs niveaux de correspondance des citations et le nombre de citations strictement identiques. Cela ne signifie pas qu’ils s’accordent sur la réponse correcte.",
+    terminologyNote: "AI Review est la fonction de revue croisée des réponses dans Tomverse Review, pour examiner accords, différences et omissions.",
     reviewBoundary: "AI Review compare uniquement les réponses fournies. Il ne navigue pas de lui-même, ne prouve pas les faits et ne désigne pas de gagnant. Pour un élément à vérifier, vous pouvez lancer une vérification web distincte depuis la revue. Les enjeux importants exigent des sources primaires à jour, des tests ou un avis qualifié.",
     casesTitle: "Trois tâches où un second point de vue compte",
-    casesDescription: "Chaque exemple part d’un élément concret et produit un résultat vérifiable, sans faux témoignage client.",
+    casesDescription: "Exemple illustrant le produit.",
     cases: [
       {
         title: "Revoir une décision",
-        description: "Comparez les conseils de lancement, politique ou planification.",
+        description: "Comparez plusieurs réponses pour un choix quotidien, comme un ordinateur ou les conditions oubliées d’un programme d’étude.",
         link: "Voir la revue des réponses",
       },
       {
@@ -845,11 +845,11 @@ const fr: LandingCopy = {
     },
     deepResearch: {
       title: "Deep Research",
-      description: "Envoyez une question vers une recherche étendue sur de nombreuses sources web. Elle s’exécute comme une tâche longue distincte, pas comme une réponse de chat, et demande confirmation avant de démarrer.",
+      description: "Rassemblez des informations issues de plusieurs sources Web dans un résultat de recherche. Deep Research se déroule séparément d’une réponse classique et demande confirmation avant de commencer.",
       condition: "À partir du plan Pro. Consomme des crédits.",
     },
     sourceGrounding: {
-      title: "Ancrage des citations",
+      title: "Taux de correspondance des citations",
       description: "AI Review cite les réponses qu’il compare. Chaque citation est recomparée à la réponse dont elle provient, et la part qui correspond exactement est affichée avec la revue.",
       condition: "Cela mesure la correspondance des citations, pas l’exactitude factuelle ni une probabilité de vérité.",
     },
@@ -868,7 +868,7 @@ const fr: LandingCopy = {
       {
         title: "Fichiers et contexte réel",
         description: "Ajoutez images, PDF, documents Office, texte ou fichiers Google Drive pris en charge.",
-        condition: "Connecter Google Drive requiert un compte.",
+        condition: "Le mode invité permet de joindre temporairement des fichiers pris en charge. La connexion à Google Drive nécessite un compte.",
       },
       {
         title: "Relance ciblée",
@@ -936,7 +936,7 @@ const fr: LandingCopy = {
   },
   pricing: {
     title: "Commencez gratuitement, évoluez selon vos besoins.",
-    description: "Les poids des modèles, exemples de crédits, paiements annuels, crédits additionnels et Fair Use sont détaillés sur la page Tarifs.",
+    description: "Cette page présente les principales offres. Consultez les tarifs pour les crédits par modèle, les exemples d’usage, la facturation annuelle et les crédits supplémentaires.",
     plans: [
       {
         id: "free",
@@ -950,7 +950,7 @@ const fr: LandingCopy = {
     creditsUnknown: "Crédits IA mensuels indiqués sur la page Tarifs",
     monthly: "/ mois",
     dailyLimitNote: "Free et Pro encadrent aussi les crédits mensuels par une limite quotidienne.",
-    noDailyLimitNote: "Max n’a pas de limite quotidienne de crédits.",
+    noDailyLimitNote: "Max n’a pas de plafond quotidien de crédits, dans la limite de son quota mensuel.",
     deepResearchNote: "Deep Research est disponible à partir de Pro.",
     detailsCta: "Comparer les plans et crédits",
   },
@@ -1031,19 +1031,19 @@ const de: LandingCopy = {
     reviewModesLabel: "Wählen Sie den Schwerpunkt der Prüfung",
     reviewModes: [
       "Ausgewogen: Übereinstimmung, Unterschiede, Lücken und Nutzen gleichermaßen",
-      "Belege: unbelegte Aussagen, Konflikte und Belegkücken",
+      "Belege: unbelegte Aussagen, Konflikte und Beleglücken",
       "Handlung: konkrete nächste Schritte, Abwägungen und Risiken",
     ],
-    dualReviewerLabel: "Zwei unabhängige Prüfer",
-    dualReviewer: "Steht ein zweiter Prüfer eines anderen Anbieters zur Verfügung, läuft der Vergleich zweimal unabhängig, und die Prüfung zeigt, wo beide übereinstimmten und wo nicht.",
-    terminologyNote: "AI Review ist der Produktname; in der App heißt die Aktion „AI answer cross-review“.",
+    dualReviewerLabel: "Zwei KI-Prüfmodelle",
+    dualReviewer: "Ist ein zweites KI-Prüfmodell verfügbar, lesen Sie beide Prüfungen. Vergleichen Sie ihre Stufen der Zitatübereinstimmung und die Anzahl identischer Zitate. Das bedeutet keine Einigkeit darüber, welche Antwort richtig ist.",
+    terminologyNote: "AI Review ist die Funktion zum Antwortvergleich in Tomverse Review und zeigt Gemeinsamkeiten, Unterschiede und Lücken.",
     reviewBoundary: "AI Review vergleicht nur gelieferte Antworten. Es durchsucht von sich aus nicht das Web, beweist keine Fakten und bestimmt keinen Gewinner. Für einen prüfbedürftigen Punkt können Sie aus der Prüfung heraus einen separaten Web-Check starten. Wichtige Aussagen brauchen weiterhin aktuelle Primärquellen, Tests oder qualifizierte Prüfung.",
     casesTitle: "Drei Aufgaben, bei denen eine zweite Sicht hilft",
-    casesDescription: "Jedes Beispiel beginnt mit einem konkreten Artefakt und endet prüfbar, ohne erfundene Kundenstimmen.",
+    casesDescription: "Beispiel zur Veranschaulichung der Funktion.",
     cases: [
       {
         title: "Entscheidung gegenprüfen",
-        description: "Start-, Richtlinien- oder Planungsrat mehrerer Modelle vergleichen.",
+        description: "Vergleichen Sie Alltagsentscheidungen anhand mehrerer Antworten, etwa eine Laptopwahl oder fehlende Bedingungen in einem Lernplan.",
         link: "KI-Antwortprüfung ansehen",
       },
       {
@@ -1069,11 +1069,11 @@ const de: LandingCopy = {
     },
     deepResearch: {
       title: "Deep Research",
-      description: "Schicken Sie eine Frage in eine erweiterte Recherche über viele Webquellen. Sie läuft als eigener Langzeitauftrag statt als normale Chatantwort und fragt vor dem Start nach einer Bestätigung.",
+      description: "Lesen Sie ein Rechercheergebnis mit Informationen aus mehreren Webquellen. Deep Research läuft getrennt von einer normalen Gesprächsantwort und fragt vor dem Start nach Ihrer Bestätigung.",
       condition: "Ab dem Pro-Plan. Verbraucht Kredite.",
     },
     sourceGrounding: {
-      title: "Quellenabgleich",
+      title: "Zitatübereinstimmung",
       description: "AI Review zitiert die verglichenen Antworten. Jedes Zitat wird mit der Antwort abgeglichen, aus der es stammt, und der exakt übereinstimmende Anteil wird mit der Prüfung angezeigt.",
       condition: "Gemessen wird die Zitatübereinstimmung, nicht die inhaltliche Richtigkeit und keine Wahrscheinlichkeit, dass eine Aussage zutrifft.",
     },
@@ -1092,7 +1092,7 @@ const de: LandingCopy = {
       {
         title: "Dateien und echter Kontext",
         description: "Bilder, PDFs, Office-Dokumente, Text oder unterstützte Google-Drive-Dateien hinzufügen.",
-        condition: "Google Drive zu verbinden erfordert ein Konto.",
+        condition: "Gäste können unterstützte Dateien vorübergehend anhängen. Für Google Drive ist ein Konto nötig.",
       },
       {
         title: "Gezielte Nachfrage",
@@ -1160,7 +1160,7 @@ const de: LandingCopy = {
   },
   pricing: {
     title: "Kostenlos starten, bei Bedarf erweitern.",
-    description: "Modellgewichte, Kreditbeispiele, Jahreszahlung, Zusatzkredite und Fair Use stehen auf der Preisseite.",
+    description: "Diese Seite stellt die wichtigsten Tarife vor. Details zu Modell-Credits, Nutzungsbeispielen, jährlicher Abrechnung und Zusatzcredits finden Sie auf der Tarifseite.",
     plans: [
       {
         id: "free",
@@ -1174,7 +1174,7 @@ const de: LandingCopy = {
     creditsUnknown: "Monatliche KI-Kredite auf der Preisseite",
     monthly: "/ Monat",
     dailyLimitNote: "Free und Pro begrenzen die Monatskredite zusätzlich pro Tag.",
-    noDailyLimitNote: "Max hat kein tägliches Kreditlimit.",
+    noDailyLimitNote: "Max hat kein tägliches Credit-Limit innerhalb seines monatlichen Kontingents.",
     deepResearchNote: "Deep Research ist ab Pro verfügbar.",
     detailsCta: "Pläne und Kreditverbrauch vergleichen",
   },
@@ -1258,16 +1258,16 @@ const es: LandingCopy = {
       "Evidencia: afirmaciones sin respaldo, conflictos y vacíos de evidencia",
       "Acción: próximos pasos prácticos, alternativas y riesgos",
     ],
-    dualReviewerLabel: "Dos revisores independientes",
-    dualReviewer: "Cuando hay disponible un segundo revisor de otro proveedor, la comparación se ejecuta dos veces de forma independiente y la revisión indica dónde coincidieron y dónde no.",
-    terminologyNote: "AI Review es el nombre de producto; dentro de la aplicación la acción aparece como «AI answer cross-review».",
+    dualReviewerLabel: "Dos modelos de revisión de IA",
+    dualReviewer: "Cuando esté disponible un segundo modelo de revisión, lee ambos resultados. Compara los niveles de coincidencia de citas y cuántas citas son exactamente iguales. Esto no significa que coincidan sobre qué respuesta es correcta.",
+    terminologyNote: "AI Review es la función de revisión cruzada dentro de Tomverse Review para examinar coincidencias, diferencias y omisiones.",
     reviewBoundary: "AI Review solo compara las respuestas dadas. No navega por su cuenta, no demuestra hechos ni elige un ganador. Para un punto que requiera comprobación, puedes ejecutar una verificación web aparte desde la revisión. Las afirmaciones importantes siguen requiriendo fuentes primarias actuales, pruebas o revisión profesional.",
     casesTitle: "Tres tareas donde importa una segunda perspectiva",
-    casesDescription: "Cada ejemplo parte de un material concreto y termina en un resultado revisable, sin testimonios inventados.",
+    casesDescription: "Ejemplo para ilustrar la función.",
     cases: [
       {
         title: "Revisar una decisión",
-        description: "Compara consejos de lanzamiento, política o planificación.",
+        description: "Compara decisiones cotidianas con varias respuestas, como elegir un portátil o detectar condiciones que faltan en un plan de estudio.",
         link: "Ver revisión de respuestas",
       },
       {
@@ -1293,11 +1293,11 @@ const es: LandingCopy = {
     },
     deepResearch: {
       title: "Deep Research",
-      description: "Envía una pregunta a una investigación ampliada sobre muchas fuentes web. Se ejecuta como un trabajo largo aparte, no como una respuesta de chat, y pide confirmación antes de empezar.",
+      description: "Reúne información de varias fuentes web en un resultado de investigación. Deep Research funciona por separado de una respuesta habitual y pide confirmación antes de empezar.",
       condition: "Desde el plan Pro. Consume créditos.",
     },
     sourceGrounding: {
-      title: "Anclaje de citas",
+      title: "Coincidencia de citas",
       description: "AI Review cita las respuestas que compara. Cada cita se contrasta con la respuesta de la que procede y se muestra el porcentaje que coincidió exactamente.",
       condition: "Mide la coincidencia de las citas, no la exactitud factual ni la probabilidad de que algo sea cierto.",
     },
@@ -1316,7 +1316,7 @@ const es: LandingCopy = {
       {
         title: "Archivos y contexto real",
         description: "Añade imágenes, PDF, documentos Office, texto o archivos compatibles de Google Drive.",
-        condition: "Conectar Google Drive requiere cuenta.",
+        condition: "Como invitado puedes adjuntar archivos compatibles de forma temporal. Conectar Google Drive requiere una cuenta.",
       },
       {
         title: "Seguimiento dirigido",
@@ -1384,7 +1384,7 @@ const es: LandingCopy = {
   },
   pricing: {
     title: "Empieza gratis y mejora cuando crezca el trabajo.",
-    description: "Los pesos por modelo, ejemplos de créditos, pago anual, créditos extra y Fair Use están en la página de precios.",
+    description: "Esta página presenta los planes principales. Consulta precios para créditos por modelo, ejemplos de uso, facturación anual y créditos adicionales.",
     plans: [
       {
         id: "free",
@@ -1398,7 +1398,7 @@ const es: LandingCopy = {
     creditsUnknown: "Créditos IA mensuales en la página de precios",
     monthly: "/ mes",
     dailyLimitNote: "Free y Pro también reparten los créditos mensuales con un límite diario.",
-    noDailyLimitNote: "Max no tiene límite diario de créditos.",
+    noDailyLimitNote: "Max no tiene límite diario de créditos dentro de su asignación mensual.",
     deepResearchNote: "Deep Research está disponible desde Pro.",
     detailsCta: "Comparar planes y créditos",
   },
@@ -1482,16 +1482,16 @@ const pt: LandingCopy = {
       "Evidência: afirmações sem apoio, conflitos e lacunas de evidência",
       "Ação: próximos passos práticos, escolhas e riscos",
     ],
-    dualReviewerLabel: "Dois revisores independentes",
-    dualReviewer: "Quando há um segundo revisor de outro provedor disponível, a comparação roda duas vezes de forma independente e a revisão mostra onde os dois concordaram e onde não.",
-    terminologyNote: "AI Review é o nome do produto; dentro do aplicativo a ação aparece como “AI answer cross-review”.",
+    dualReviewerLabel: "Dois modelos de revisão de IA",
+    dualReviewer: "Quando um segundo modelo de revisão estiver disponível, leia os dois resultados. Compare os níveis de correspondência das citações e quantas citações são exatamente iguais. Isso não significa que concordem sobre qual resposta está correta.",
+    terminologyNote: "O AI Review é o recurso de revisão cruzada das respostas no Tomverse Review para examinar consensos, diferenças e lacunas.",
     reviewBoundary: "O AI Review compara apenas as respostas fornecidas. Ele não navega por conta própria, não prova fatos nem escolhe um vencedor. Para um item que precise de checagem, você pode executar uma verificação web separada a partir da revisão. Afirmações importantes continuam exigindo fontes primárias atuais, testes ou revisão profissional.",
     casesTitle: "Três tarefas em que uma segunda perspectiva importa",
-    casesDescription: "Cada exemplo começa com um material concreto e termina com um resultado revisável, sem depoimentos inventados.",
+    casesDescription: "Exemplo para ilustrar o recurso.",
     cases: [
       {
         title: "Revisar uma decisão",
-        description: "Compare orientações de lançamento, política ou planejamento.",
+        description: "Compare escolhas do dia a dia com várias respostas, como escolher um notebook ou encontrar condições ausentes em um plano de estudo.",
         link: "Ver revisão de respostas",
       },
       {
@@ -1517,11 +1517,11 @@ const pt: LandingCopy = {
     },
     deepResearch: {
       title: "Deep Research",
-      description: "Envie uma pergunta para uma pesquisa estendida por muitas fontes da web. Ela roda como um trabalho longo à parte, não como uma resposta de chat, e pede confirmação antes de começar.",
+      description: "Reúna informações de várias fontes da web em um resultado de pesquisa. O Deep Research funciona separadamente de uma resposta comum e pede confirmação antes de começar.",
       condition: "A partir do plano Pro. Usa créditos.",
     },
     sourceGrounding: {
-      title: "Ancoragem das citações",
+      title: "Correspondência das citações",
       description: "O AI Review cita as respostas que está comparando. Cada citação é confrontada com a resposta de origem, e a proporção que corresponde exatamente aparece junto da revisão.",
       condition: "Mede a correspondência das citações, não a exatidão factual nem a probabilidade de algo ser verdadeiro.",
     },
@@ -1540,7 +1540,7 @@ const pt: LandingCopy = {
       {
         title: "Arquivos e contexto real",
         description: "Adicione imagens, PDFs, documentos Office, texto ou arquivos compatíveis do Google Drive.",
-        condition: "Conectar o Google Drive requer conta.",
+        condition: "Visitantes podem anexar arquivos compatíveis temporariamente. Conectar o Google Drive exige uma conta.",
       },
       {
         title: "Acompanhamento direcionado",
@@ -1608,7 +1608,7 @@ const pt: LandingCopy = {
   },
   pricing: {
     title: "Comece grátis e evolua quando o trabalho crescer.",
-    description: "Pesos por modelo, exemplos de créditos, cobrança anual, créditos extras e Fair Use estão na página de preços.",
+    description: "Esta página apresenta os principais planos. Veja preços para créditos por modelo, exemplos de uso, cobrança anual e créditos adicionais.",
     plans: [
       {
         id: "free",
@@ -1622,7 +1622,7 @@ const pt: LandingCopy = {
     creditsUnknown: "Créditos de IA mensais na página de preços",
     monthly: "/ mês",
     dailyLimitNote: "Free e Pro também distribuem os créditos mensais com um limite diário.",
-    noDailyLimitNote: "O Max não tem limite diário de créditos.",
+    noDailyLimitNote: "O Max não tem limite diário de créditos dentro da franquia mensal.",
     deepResearchNote: "O Deep Research está disponível a partir do Pro.",
     detailsCta: "Comparar planos e créditos",
   },

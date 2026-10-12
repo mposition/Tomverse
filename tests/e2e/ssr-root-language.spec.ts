@@ -31,8 +31,8 @@ import { expect, test, type Page } from "@playwright/test";
  * localized page that already carries their language, so property 1 above holds
  * for `/` too rather than being excused there.
  *
- * A marketing route with no localized counterpart -- `/pricing` and most of the
- * rest -- still serves English to everyone and still declares `en`, because
+ * A legal route with no localized counterpart -- `/privacy`, for example --
+ * still serves English to everyone and still declares `en`, because
  * there is nowhere else to send that visitor. Those cases stay asserted as `en`
  * on purpose, and they are what is left of the old compromise.
  *
@@ -60,25 +60,25 @@ type Case = {
 const SERVED_LANGUAGE_CASES: Case[] = [
   // Dynamic application routes: resolved per request.
   {
-    path: "/chat?lang=ko",
+    path: "/review?lang=ko",
     acceptLanguage: ENGLISH_BROWSER,
     expected: "ko",
     why: "an explicit ?lang is what the server renders, whatever the browser prefers",
   },
   {
-    path: "/chat?lang=en",
+    path: "/review?lang=en",
     acceptLanguage: KOREAN_BROWSER,
     expected: "en",
     why: "an explicit ?lang overrides the browser preference in both directions",
   },
   {
-    path: "/chat",
+    path: "/review",
     acceptLanguage: KOREAN_BROWSER,
     expected: "ko",
     why: "with no ?lang the application layout renders the browser's language",
   },
   {
-    path: "/chat",
+    path: "/review",
     acceptLanguage: ENGLISH_BROWSER,
     expected: "en",
     why: "with no ?lang the application layout renders the browser's language",
@@ -120,8 +120,14 @@ const SERVED_LANGUAGE_CASES: Case[] = [
   {
     path: "/pricing",
     acceptLanguage: KOREAN_BROWSER,
+    expected: "ko",
+    why: "pricing now redirects to its localized counterpart and declares that language",
+  },
+  {
+    path: "/privacy",
+    acceptLanguage: KOREAN_BROWSER,
     expected: "en",
-    why: "no localized counterpart exists, so English copy and an `en` declaration still agree",
+    why: "unlocalized legal copy keeps an English declaration",
   },
 ];
 
@@ -228,11 +234,17 @@ const LANGUAGE_REDIRECTS: Array<{
   {
     path: "/pricing",
     headers: { "accept-language": KOREAN_BROWSER },
-    to: null,
-    why: "no /ko/pricing exists; redirecting there would be a 404 dressed as a fix",
+    to: "/ko/pricing",
+    why: "pricing now has a localized counterpart for the Korean browser",
   },
   {
-    path: "/chat",
+    path: "/privacy",
+    headers: { "accept-language": KOREAN_BROWSER },
+    to: null,
+    why: "unlocalized legal routes keep their English page without a redirect",
+  },
+  {
+    path: "/review",
     headers: { "accept-language": KOREAN_BROWSER },
     to: null,
     why: "application routes resolve their own language and are never redirected",
@@ -298,8 +310,8 @@ const readLangState = (page: Page) =>
   }));
 
 const HYDRATION_CASES = [
-  { path: "/chat?lang=ko", acceptLanguage: ENGLISH_BROWSER, expected: "ko", cjk: true },
-  { path: "/chat?lang=en", acceptLanguage: KOREAN_BROWSER, expected: "en", cjk: false },
+  { path: "/review?lang=ko", acceptLanguage: ENGLISH_BROWSER, expected: "ko", cjk: true },
+  { path: "/review?lang=en", acceptLanguage: KOREAN_BROWSER, expected: "en", cjk: false },
   { path: "/auth/signin?lang=ko", acceptLanguage: ENGLISH_BROWSER, expected: "ko", cjk: true },
 ] as const;
 

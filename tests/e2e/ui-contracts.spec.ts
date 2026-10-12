@@ -4,7 +4,7 @@ import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 test("desktop exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 1366, height: 768 });
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-input")).toBeVisible();
@@ -83,12 +83,11 @@ test("chat workspace guide exposes the full help structure", async ({ page }) =>
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "Use the Tomverse chat workspace with confidence",
+      name: "Tomverse Review workspace guide",
     })
   ).toBeVisible();
-  // Nine since the labels section went with the labels feature (2026-09-16):
-  // the eight numbered sections plus the tour heading above them.
-  await expect(page.getByRole("heading", { level: 2 })).toHaveCount(9);
+  // The Chat introduction, the tour heading and eight Review help sections.
+  await expect(page.getByRole("heading", { level: 2 })).toHaveCount(10);
   await expect(page.getByText("AI Review compares only the supplied answers.")).toBeVisible();
 });
 
@@ -96,7 +95,7 @@ test("chat workspace guide honors the language passed from the app", async ({ pa
   await prepareGuestPage(page, "en");
   await page.goto("/support/help-centre/chat-workspace?lang=ko");
 
-  await expect(page).toHaveURL(/\/support\/help-centre\/chat-workspace\?lang=ko$/);
+  await expect(page).toHaveURL(/\/ko\/support\/help-centre\/chat-workspace$/);
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("tomverse_language")))
     .toBe("ko");
@@ -104,7 +103,7 @@ test("chat workspace guide honors the language passed from the app", async ({ pa
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "Tomverse Chat 워크스페이스 사용 가이드",
+      name: "Tomverse Review 작업공간 가이드",
     })
   ).toBeVisible();
   const localizedHelpLinks = page.locator(
@@ -118,7 +117,7 @@ test("chat workspace guide honors the language passed from the app", async ({ pa
 test("mobile exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 412, height: 915 });
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-input")).toBeVisible();
@@ -144,7 +143,7 @@ test("authenticated users can complete and replay the sidebar tour", async ({ pa
   await prepareGuestPage(page, "en");
   await mockAuthenticatedApi(page, { showSidebarTour: true });
   await page.setViewportSize({ width: 1366, height: 768 });
-  await page.goto("/chat");
+  await page.goto("/review");
 
   const tour = page.getByTestId("sidebar-tour");
   await expect(tour).toHaveCount(0);

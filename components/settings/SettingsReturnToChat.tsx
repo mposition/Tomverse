@@ -16,8 +16,10 @@ import {
  * from, that import goes to the import list, the import list goes to the
  * settings panel. That hierarchy is right and stays, but it means the way out
  * of settings costs as many clicks as the depth the visitor reached — and the
- * panel's own close button lives on the chat surface, which is the one place
- * they cannot get to. This is the missing edge: /chat from anywhere, once.
+ * panel's own close button lives on the conversation surface, which is the one place
+ * they cannot get to. This is the missing edge: Review from anywhere, once.
+ * The canonical generic destination is `/review`; explicit Chat product
+ * flows carry their product identity through the shared controls instead.
  *
  * Not an X. Settings is a full page, not a modal, so a close glyph would read
  * as "discard" or "cancel" — it would be describing an action this control

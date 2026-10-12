@@ -70,6 +70,7 @@ const australian = async () => {
   });
   await prisma.userSettings.create({
     data: {
+      defaultModel: "gpt-6-luna",
       userId: user.id,
       country: "AU",
       countrySource: "self_declared",
@@ -197,7 +198,7 @@ test("an account whose country marketing may not reach is not asked", async () =
     select: { id: true },
   });
   await prisma.userSettings.create({
-    data: { userId: user.id, country: "NL", countrySource: "self_declared", countryUpdatedAt: new Date() },
+    data: { defaultModel: "gpt-6-luna", userId: user.id, country: "NL", countrySource: "self_declared", countryUpdatedAt: new Date() },
   });
   assert.deepEqual(await consentNoticeForViewer(user.id), { offered: false });
 });

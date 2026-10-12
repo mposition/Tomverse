@@ -11,20 +11,18 @@ import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 import { LocaleSupportNotice } from "./LocaleSupportNotice";
-import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
 import { REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
 import { useMarketingChatEntry } from "./MarketingChatAvailability";
 
-// Only these paths actually have a `/[locale]` route (app/[locale]), so only
-// these may be prefixed. `/models`, `/pricing`, `/faq`, `/terms` and the rest
-// are single-route pages that pick their language up from LanguageProvider --
-// prefixing them would 404.
+// Prefix only paths with an explicit `/[locale]` route. Legal pages keep their
+// existing unprefixed destinations; service status takes its locale as a query.
 //
 // Without this the brand link and the "Features" anchor sent a visitor on
 // /ko to `/`, which is the English canonical URL: the copy stayed Korean
 // (localStorage), but the URL, the canonical tag and og:locale all switched
 // to English mid-visit.
 const localizedHref = (lang: Language, href: string) => {
+  if (href === "/status") return `/status?lang=${encodeURIComponent(lang)}`;
   const resolvedHref = href.startsWith("/#") ? `${REVIEW_PRODUCT_PATH}${href.slice(1)}` : href;
   if (lang === "en") return resolvedHref;
   const [path, hash] = resolvedHref.split("#");
@@ -146,7 +144,7 @@ const chrome = {
     close: "Fermer le menu",
     topMenu: [
       { label: "Fonctionnement", href: "/#how-it-works" },
-      { label: "Modeles", href: "/models" },
+      { label: "Modèles", href: "/models" },
       { label: "Tarifs", href: "/pricing" },
       { label: "Confiance", href: "/#trust" },
     ],
@@ -154,7 +152,7 @@ const chrome = {
       { label: "FAQ", href: "/faq" },
       { label: "Conditions", href: "/terms" },
       { label: "Remboursement", href: "/refund" },
-      { label: "Confidentialite", href: "/privacy" },
+      { label: "Confidentialité", href: "/privacy" },
       { label: "Support", href: "/support" },
       { label: "Statut", href: "/status" },
     ],
@@ -162,8 +160,8 @@ const chrome = {
   de: {
     app: "Review öffnen",
     appSignedIn: "Zurück zu Review",
-    menu: "Menu",
-    close: "Menu schliessen",
+    menu: "Menü",
+    close: "Menü schließen",
     topMenu: [
       { label: "Funktionsweise", href: "/#how-it-works" },
       { label: "Modelle", href: "/models" },
@@ -173,7 +171,7 @@ const chrome = {
     footerMenu: [
       { label: "FAQ", href: "/faq" },
       { label: "Bedingungen", href: "/terms" },
-      { label: "Ruckerstattung", href: "/refund" },
+      { label: "Rückerstattung", href: "/refund" },
       { label: "Datenschutz", href: "/privacy" },
       { label: "Support", href: "/support" },
       { label: "Status", href: "/status" },
@@ -182,17 +180,17 @@ const chrome = {
   es: {
     app: "Abrir Review",
     appSignedIn: "Volver a Review",
-    menu: "Menu",
-    close: "Cerrar menu",
+    menu: "Menú",
+    close: "Cerrar menú",
     topMenu: [
-      { label: "Como funciona", href: "/#how-it-works" },
+      { label: "Cómo funciona", href: "/#how-it-works" },
       { label: "Modelos", href: "/models" },
       { label: "Precios", href: "/pricing" },
       { label: "Confianza", href: "/#trust" },
     ],
     footerMenu: [
       { label: "FAQ", href: "/faq" },
-      { label: "Terminos", href: "/terms" },
+      { label: "Términos", href: "/terms" },
       { label: "Reembolso", href: "/refund" },
       { label: "Privacidad", href: "/privacy" },
       { label: "Soporte", href: "/support" },
@@ -207,8 +205,8 @@ const chrome = {
     topMenu: [
       { label: "Como funciona", href: "/#how-it-works" },
       { label: "Modelos", href: "/models" },
-      { label: "Precos", href: "/pricing" },
-      { label: "Confianca", href: "/#trust" },
+      { label: "Preços", href: "/pricing" },
+      { label: "Confiança", href: "/#trust" },
     ],
     footerMenu: [
       { label: "FAQ", href: "/faq" },
@@ -253,14 +251,19 @@ function LegacyMarketingHeader({
   const { lang } = useLanguage();
   const labels = chrome[lang] ?? chrome.en;
   const { status: sessionStatus } = useSession();
+  const entry = useMarketingChatEntry();
+  const navigationItems = [
+    { label: "Chat", href: entry.chatHref },
+    { label: "Review", href: REVIEW_PRODUCT_PATH },
+    ...labels.topMenu.slice(1),
+  ];
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isHeroCtaVisible, setIsHeroCtaVisible] = useState(false);
-  // The generic marketing entry has no guest-preview marker. Review handles
-  // the visitor's session itself, so resolving a session changes the label
-  // without replacing the link under a visitor about to activate it.
-  const chatHref = marketingProductEntryHref("review", lang);
-  const appCtaLabel =
-    sessionStatus === "authenticated" ? labels.appSignedIn : labels.app;
+  // Availability determines the product entry; copy follows that destination.
+  const primaryHref = entry.primaryHref;
+  const appCtaLabel = entry.primaryProduct === "chat"
+    ? sessionStatus === "authenticated" ? launchChrome[lang].back : launchChrome[lang].start
+    : sessionStatus === "authenticated" ? labels.appSignedIn : labels.app;
 
   useEffect(() => {
     const heroCta = document.getElementById("landing-hero-primary");
@@ -347,7 +350,7 @@ function LegacyMarketingHeader({
           </span>
         </Link>
         <nav className="hidden items-center gap-5 text-sm font-semibold text-zinc-600 dark:text-zinc-300 lg:flex">
-          {labels.topMenu.map((item) => (
+          {navigationItems.map((item) => (
             <Link
               key={item.href}
               href={localizedHref(lang, item.href)}
@@ -383,7 +386,7 @@ function LegacyMarketingHeader({
         <div className="flex min-w-0 items-center gap-[8px]">
           <MarketingLanguageSwitcher />
           <Link
-            href={chatHref}
+            href={primaryHref}
             onClick={() =>
               trackProductEvent("cta_start_click", 0, {
                 cta_location: "marketing_header",
@@ -425,7 +428,7 @@ function LegacyMarketingHeader({
       {isMenuOpen && (
         <div className="border-t border-zinc-200 bg-white px-4 py-4 shadow-xl dark:border-zinc-800 dark:bg-zinc-950 lg:hidden">
           <nav className={`mx-auto grid ${maxWidth} gap-2`}>
-            {labels.topMenu.map((item) => (
+            {navigationItems.map((item) => (
               <Link
                 key={item.href}
                 href={localizedHref(lang, item.href)}
@@ -459,7 +462,7 @@ function LegacyMarketingHeader({
               </Link>
             ))}
             <Link
-              href={chatHref}
+              href={primaryHref}
               onClick={() => {
                 setIsMenuOpen(false);
                 trackProductEvent("cta_start_click", 0, {
@@ -500,6 +503,7 @@ export function MarketingFooter(props: MarketingFooterProps = {}) {
 function LegacyMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps) {
   const { lang } = useLanguage();
   const labels = chrome[lang] ?? chrome.en;
+  const entry = useMarketingChatEntry();
 
   return (
     <footer className="border-t border-zinc-200 bg-white py-10 dark:border-zinc-800 dark:bg-zinc-950">
@@ -513,10 +517,12 @@ function LegacyMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
           <span>© 2026</span>
         </div>
         <nav className="flex flex-wrap gap-4">
+          <Link href={entry.chatHref} className="hover:text-zinc-950 dark:hover:text-white">Tomverse Chat</Link>
+          <Link href={localizedHref(lang, REVIEW_PRODUCT_PATH)} className="hover:text-zinc-950 dark:hover:text-white">Tomverse Review</Link>
           {labels.footerMenu.map((item) => (
             <Link
               key={item.href}
-              href={item.href}
+              href={item.href === "/status" ? `/status?lang=${encodeURIComponent(lang)}` : localizedHref(lang, item.href)}
               target={item.href === "/status" ? "_blank" : undefined}
               rel={item.href === "/status" ? "noopener noreferrer" : undefined}
               prefetch={item.href === "/status" ? false : undefined}
@@ -674,7 +680,7 @@ function LaunchMarketingHeader({
             <span className="text-sm font-bold tracking-tight max-[240px]:sr-only sm:text-lg" data-testid="marketing-brand-name">Tomverse</span>
           </Link>
           <nav aria-label={copy.navigation} className="hidden items-center gap-6 text-sm font-semibold lg:flex">
-            {items.map((item) => <Link key={item.key} href={item.href} data-testid={`header-${item.key}-link`} className={`py-3 text-zinc-300 transition hover:text-white ${launchFocus}`}>{item.label}</Link>)}
+            {items.map((item) => <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`header-${item.key}-link`} className={`py-3 text-zinc-300 transition hover:text-white ${launchFocus}`}>{item.label}</Link>)}
           </nav>
           <div className="flex min-w-0 items-center gap-[8px]">
             <div className="min-w-0 [&>label]:h-[44px] [&>label]:max-w-[126px] [&>label]:border-zinc-700 [&>label]:bg-zinc-900 [&>label]:text-zinc-100 [&_select]:text-zinc-100 [&_select]:[color-scheme:dark]">
@@ -690,7 +696,7 @@ function LaunchMarketingHeader({
           </div>
         </div>
         {isMenuOpen && <nav id={menuId} ref={menuRef} aria-label={copy.navigation} className={`mx-auto grid ${maxWidth} gap-1 border-t border-white/10 px-[16px] py-4 lg:hidden`}>
-          {items.map((item) => <Link key={item.key} href={item.href} data-testid={`mobile-${item.key}-link`} onClick={() => setIsMenuOpen(false)} className={`rounded-lg px-3 py-3 font-semibold hover:bg-zinc-900 ${launchFocus}`}>{item.label}</Link>)}
+          {items.map((item) => <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`mobile-${item.key}-link`} onClick={() => setIsMenuOpen(false)} className={`rounded-lg px-3 py-3 font-semibold hover:bg-zinc-900 ${launchFocus}`}>{item.label}</Link>)}
           {status !== "authenticated" && <Link href={loginHref} onClick={() => setIsMenuOpen(false)} className={`rounded-lg px-3 py-3 font-semibold hover:bg-zinc-900 ${launchFocus}`}>{copy.login}</Link>}
           <Link href={primaryHref} data-testid="marketing-mobile-app-cta" data-session-state={status} onClick={() => { setIsMenuOpen(false); trackStart("marketing_mobile_menu"); }} className={`mt-3 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-sm font-bold hover:bg-blue-500 ${launchFocus}`}>
             {appLabel}<ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -741,7 +747,7 @@ function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
               <h2 className="mb-3 text-sm font-semibold text-zinc-100">{column.title}</h2>
               <ul className="space-y-1">
                 {column.items.map((item) => <li key={item.href}>
-                  <Link href={item.href} target={item.href === "/status" ? "_blank" : undefined} rel={item.href === "/status" ? "noopener noreferrer" : undefined} prefetch={item.href === "/status" ? false : undefined} aria-label={item.href === "/status" ? statusLinkLabel(item.label, lang) : undefined} title={item.href === "/status" ? statusNewTabCopy[lang] : undefined} data-testid={item.href === "/status" ? "footer-status-link" : undefined} className={`inline-flex min-h-[36px] max-w-full items-center gap-1.5 py-1 text-sm leading-5 transition hover:text-white ${launchFocus}`}>
+                  <Link href={localizedHref(lang, item.href)} target={item.href === "/status" ? "_blank" : undefined} rel={item.href === "/status" ? "noopener noreferrer" : undefined} prefetch={item.href === "/status" ? false : undefined} aria-label={item.href === "/status" ? statusLinkLabel(item.label, lang) : undefined} title={item.href === "/status" ? statusNewTabCopy[lang] : undefined} data-testid={item.href === "/status" ? "footer-status-link" : undefined} className={`inline-flex min-h-[36px] max-w-full items-center gap-1.5 py-1 text-sm leading-5 transition hover:text-white ${launchFocus}`}>
                     <span className="min-w-0 break-words">{item.label}</span>{item.href === "/status" && <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />}
                   </Link>
                 </li>)}

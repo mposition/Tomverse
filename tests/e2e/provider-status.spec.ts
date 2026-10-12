@@ -138,7 +138,7 @@ test("limited provider health stays hidden from users", async ({ page }) => {
     },
   ]);
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect.poll(requestCount).toBeGreaterThan(0);
   await page.waitForTimeout(150);
 
@@ -162,7 +162,7 @@ test("outage remains visible with a fallback suggestion", async ({ page }) => {
     },
   ]);
 
-  await page.goto("/chat");
+  await page.goto("/review");
 
   await expect(banner(page)).toBeVisible();
   await expect(banner(page)).toContainText(
@@ -186,7 +186,7 @@ test("retired models stay out of the user model catalogue", async ({ page }) => 
     },
   ]);
 
-  await page.goto("/chat");
+  await page.goto("/review");
   await expect(banner(page)).toHaveCount(0);
 
   const dialog = await openModelPickerCatalogue(page);
@@ -245,7 +245,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
     await prepareGuestPage(page, "en");
     const requestCount = await mockProviderStatus(page, unselectedOutage(1));
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect.poll(requestCount).toBeGreaterThan(0);
     await page.waitForTimeout(250);
 
@@ -279,14 +279,14 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
 
     // Baseline: nothing wrong anywhere.
     const healthy = await mockProviderStatus(page, []);
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect.poll(healthy).toBeGreaterThan(0);
     await page.waitForTimeout(250);
     const before = await measure();
 
     await page.unroute("**/api/models/status");
     const outage = await mockProviderStatus(page, unselectedOutage(6));
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect.poll(outage).toBeGreaterThan(0);
     await page.waitForTimeout(250);
     const after = await measure();
@@ -313,7 +313,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
     await expect(banner(page)).toContainText(
       `${SELECTED.gemini.name} is temporarily unavailable`
@@ -359,7 +359,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect.poll(requestCount).toBeGreaterThan(0);
     await page.waitForTimeout(250);
     await expect(banner(page)).toHaveCount(0);
@@ -386,7 +386,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
     await expect(banner(page)).toContainText(
       "2 selected models are temporarily unavailable"
@@ -437,7 +437,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
     await expect(banner(page).getByTestId("provider-status-swap")).toHaveCount(1);
     // The model left without a replacement still gets a real recovery path,
@@ -463,7 +463,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
     await expect(banner(page)).toContainText(
       "No eligible replacement model is available right now."
@@ -513,7 +513,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
     await expect(
       banner(page).getByRole("button", {
@@ -544,7 +544,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
     // Never a swap the guest cannot take, and never an upgrade pitch dressed
     // up as a recovery -- the picker is the honest way out.
@@ -585,7 +585,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
           fallbackHealth: health,
         },
       ]);
-      await page.goto("/chat");
+      await page.goto("/review");
       await expect(banner(page)).toBeVisible();
 
       if (expected) {
@@ -635,7 +635,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
     // It skips the downed candidate and takes the next eligible one rather
     // than giving up on recovery altogether.
@@ -668,7 +668,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
     await expect(banner(page).getByTestId("provider-status-swap")).toHaveCount(0);
     // fallbackHealth said "operational", but the snapshot says otherwise and
@@ -701,7 +701,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
     // Each impacted model owns its own replacement now, so a shaky offer next
     // to a healthy one must still be called out rather than averaged away.
@@ -724,7 +724,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
     await settleStatusPolls(page, status.requestCount);
 
@@ -766,7 +766,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       },
     ]);
 
-    await page.goto("/chat");
+    await page.goto("/review");
     const swap = banner(page).getByTestId("provider-status-swap");
     await expect(swap).toBeVisible();
     await swap.focus();
@@ -792,7 +792,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       ...unselectedOutage(6),
     ]);
 
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(banner(page)).toBeVisible();
     await expect(banner(page)).toContainText(
       `일시적으로 사용할 수 없는 모델: ${SELECTED.gemini.name}`
@@ -831,7 +831,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
       ...unselectedOutage(6),
     ]);
 
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(banner(page)).toBeVisible();
     await expect(banner(page)).toContainText(
       "선택한 모델 2개를 일시적으로 사용할 수 없습니다"
@@ -870,7 +870,7 @@ test("clicking the banner's suggestion swaps the failed model instead of silentl
     },
   ]);
 
-  await page.goto("/chat?lang=en");
+  await page.goto("/review?lang=en");
   await openModelPickerCatalogue(page);
   await page
     .locator('[data-testid="model-option"][data-model-id="gemini-2-5-flash"]')
@@ -944,7 +944,7 @@ test.describe("outage banner touch targets (UI-TOUCH-001)", () => {
       { width: 382, height: 560 },
     ]) {
       await page.setViewportSize(viewport);
-      await page.goto("/chat");
+      await page.goto("/review");
       await expect(banner(page)).toBeVisible();
       const label = `[${viewport.width}x${viewport.height}]`;
 
@@ -1023,7 +1023,7 @@ test.describe("outage banner touch targets (UI-TOUCH-001)", () => {
     await prepareGuestPage(page, "en");
     await unavailableSelectedModel(page);
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(banner(page)).toBeVisible();
 
     await setRootFontSize(page, 32);
@@ -1055,7 +1055,7 @@ test.describe("outage banner touch targets (UI-TOUCH-001)", () => {
     await prepareGuestPage(page, "en");
     await unavailableSelectedModel(page);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/chat");
+    await page.goto("/review");
 
     const refresh = banner(page).getByTestId("provider-status-refresh");
     await expect(refresh).toBeVisible();
@@ -1145,7 +1145,7 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
   }) => {
     await prepareGuestPage(page, "en");
     await mockWidespreadSelectedOutage(page);
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await expect(banner(page)).toBeVisible();
 
@@ -1207,7 +1207,7 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
   }) => {
     await prepareGuestPage(page, "ko");
     await mockWidespreadSelectedOutage(page);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
 
     await expect(banner(page)).toBeVisible();
     // Korean puts the counter after the noun -- a number glued in front of a
@@ -1262,7 +1262,7 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
 
     for (const viewport of viewports) {
       await page.setViewportSize(viewport);
-      await page.goto("/chat");
+      await page.goto("/review");
       const label = `[${testInfo.project.name} ${viewport.width}x${viewport.height}]`;
 
       await expect(banner(page)).toBeVisible();
@@ -1447,7 +1447,7 @@ test.describe("provider banner keeps model names readable at every text size", (
           },
         ]);
         await page.setViewportSize({ width: 320, height: 640 });
-        await page.goto(`/chat?lang=${lang}`);
+        await page.goto(`/review?lang=${lang}`);
         await expect(banner(page)).toBeVisible();
         await page.evaluate((size) => {
           document.documentElement.style.fontSize = `${size}px`;
@@ -1508,7 +1508,7 @@ test.describe("provider banner keeps model names readable at every text size", (
         fallbackHealth: "operational",
       },
     ]);
-    await page.goto("/chat?lang=ko");
+    await page.goto("/review?lang=ko");
     await expect(banner(page)).toBeVisible();
 
     const text = await banner(page).innerText();

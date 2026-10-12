@@ -88,7 +88,7 @@ test.describe("streaming auto-scroll", () => {
     await prepareGuestPage(page, "en");
     await seedGuestModels(page, ["gpt-5-4-mini"]);
     await mockLongStream(page);
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await sendChatMessage(page, testInfo, "Tell me something long");
     await waitForContentGrowth(page);
@@ -110,7 +110,7 @@ test.describe("streaming auto-scroll", () => {
     await prepareGuestPage(page, "en");
     await seedGuestModels(page, ["gpt-5-4-mini"]);
     await mockLongStream(page);
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await sendChatMessage(page, testInfo, "Tell me something long");
     await waitForContentGrowth(page);
@@ -131,7 +131,7 @@ test.describe("streaming auto-scroll", () => {
     await prepareGuestPage(page, "en");
     await seedGuestModels(page, ["gpt-5-4-mini"]);
     await mockLongStream(page);
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await sendChatMessage(page, testInfo, "Tell me something long");
     await waitForContentGrowth(page);
@@ -154,7 +154,7 @@ test.describe("streaming auto-scroll", () => {
     await prepareGuestPage(page, "en");
     await seedGuestModels(page, ["gpt-5-4-mini"]);
     await mockLongStream(page);
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await sendChatMessage(page, testInfo, "First long question");
     await waitForContentGrowth(page);
@@ -173,7 +173,7 @@ test.describe("streaming auto-scroll", () => {
     await prepareGuestPage(page, "en");
     await seedGuestModels(page, ["gpt-5-4-mini"]);
     await mockLongStream(page);
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await sendChatMessage(page, testInfo, "Tell me something long");
     await waitForContentGrowth(page);
@@ -198,7 +198,7 @@ test.describe("streaming auto-scroll", () => {
     await prepareGuestPage(page, "en");
     await seedGuestModels(page, ["gpt-5-4-mini", "claude-haiku-4-5"]);
     await mockLongStream(page);
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await sendChatMessage(page, testInfo, "Tell both of you something long");
     await waitForContentGrowth(page, 0);
@@ -238,7 +238,7 @@ test.describe("streaming auto-scroll (mobile)", () => {
     await prepareGuestPage(page, "en");
     await seedGuestModels(page, ["gpt-5-4-mini", "claude-haiku-4-5"]);
     await mockLongStream(page);
-    await page.goto("/chat");
+    await page.goto("/review");
 
     await sendChatMessage(page, testInfo, "Tell both of you something long");
     // Both panels stay mounted (CSS-hidden, never unmounted) the whole time,

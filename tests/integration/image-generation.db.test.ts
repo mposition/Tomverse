@@ -126,7 +126,7 @@ const createReservation = (
 test("existing conversations default to kind chat", async () => {
   const user = await createUser();
   const conversation = await prisma.conversation.create({
-    data: { userId: user.id, title: "plain chat" },
+    data: { selectedModels: '["gpt-6-luna"]', userId: user.id, title: "plain chat" },
   });
   assert.equal(conversation.kind, "chat");
 });

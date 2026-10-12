@@ -17,7 +17,7 @@ const qaSession = {
 };
 
 test("server response contains an immediate chat shell", async ({ request }) => {
-  const response = await request.get("/chat");
+  const response = await request.get("/review");
   expect(response.ok()).toBeTruthy();
   expect(await response.text()).toContain('data-testid="chat-shell-skeleton"');
 });
@@ -38,7 +38,7 @@ test("session revalidation preserves chat data without redundant reloads", async
     })
   );
 
-  await page.goto("/chat");
+  await page.goto("/review");
   const chatShell = page.getByTestId(
     testInfo.project.name.startsWith("mobile")
       ? "mobile-chat-shell"

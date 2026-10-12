@@ -53,6 +53,8 @@ import {
 } from "@/lib/productAnalyticsClient";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
+import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
+import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
@@ -90,12 +92,17 @@ type LoginMethod =
 
 export function AuthButton({
     showAnalyticsCookieButton = false,
+    currentProduct = "review",
 }: {
     // Guests have no account menu to reach analytics preferences from, so
     // the mobile shell (which drops the floating settings button to
     // declutter the screen) passes this to put an inline substitute right
     // next to the guest login button instead of removing the path entirely.
     showAnalyticsCookieButton?: boolean;
+    // Generic account entry belongs to Review. Product shells pass their
+    // current product explicitly so sign-in and account actions return to the
+    // surface the user was actually using.
+    currentProduct?: ChatWorkspaceProduct;
 } = {}) {
     const { enabledModels: ENABLED_MODELS } = useModelCatalog();
   const { data: session, status } = useSession();
@@ -131,7 +138,10 @@ export function AuthButton({
     const accountMenuButtonRef = useRef<HTMLButtonElement | null>(null);
 
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
-    const chatCallbackUrl = withChatLanguage("/chat", globalLang);
+    const accountCallbackUrl = withChatLanguage(
+        PRODUCT_SURFACE_PATH[currentProduct],
+        globalLang
+    );
     const formatCopy = (key: string, values: Record<string, string>) =>
         Object.entries(values).reduce(
             (text, [name, value]) => text.replaceAll(`{${name}}`, value),
@@ -577,7 +587,7 @@ export function AuthButton({
                 if (response.status === 428) {
                     dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
                     await signOut({
-                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(accountCallbackUrl)}`,
                     });
                     return;
                 }
@@ -592,7 +602,7 @@ export function AuthButton({
                     // no live session left to keep working with.
                     dispatchAppToast(t("auth.removeLoginMethodSignedOut"), "info");
                     await signOut({
-                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(accountCallbackUrl)}`,
                     });
                     return;
                 }
@@ -606,7 +616,7 @@ export function AuthButton({
             // removal itself failed.
             dispatchAppToast(t("auth.removeLoginMethodSuccess"), "success");
             await signOut({
-                callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(accountCallbackUrl)}`,
             });
         } catch {
             dispatchAppToast(t("auth.removeLoginMethodFailed"), "error");
@@ -1032,14 +1042,14 @@ export function AuthButton({
                 if (response.status === 428 && data?.code === "ACCOUNT_REAUTHENTICATION_REQUIRED") {
                     dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
                     await signOut({
-                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(accountCallbackUrl)}`,
                     });
                     return;
                 }
                 throw new Error(data?.error || `Delete failed: ${response.status}`);
             }
             dispatchAppToast(t("auth.deleteAllChatsSuccess"), "success");
-            window.location.href = chatCallbackUrl;
+            window.location.href = accountCallbackUrl;
         } catch {
             dispatchAppToast(t("auth.deleteAllChatsFailed"), "error");
         } finally {
@@ -1080,7 +1090,7 @@ export function AuthButton({
                 if (response.status === 428 && data?.code === "ACCOUNT_REAUTHENTICATION_REQUIRED") {
                     dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
                     await signOut({
-                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(accountCallbackUrl)}`,
                     });
                     return;
                 }
@@ -1088,7 +1098,7 @@ export function AuthButton({
             }
             localStorage.removeItem("tomverse_refund_requested_at");
             dispatchAppToast(t("auth.deleteAccountSuccess"), "success");
-            await signOut({ callbackUrl: chatCallbackUrl });
+            await signOut({ callbackUrl: accountCallbackUrl });
         } catch {
             dispatchAppToast(t("auth.deleteAccountFailed"), "error");
         } finally {
@@ -2287,7 +2297,7 @@ export function AuthButton({
                                             <CreditPackPurchaseButton
                                                 trigger="account"
                                                 ctaLocation="account_settings_billing"
-                                                returnTo={`/chat?lang=${encodeURIComponent(globalLang)}`}
+                                                returnTo={accountCallbackUrl}
                                                 className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent-plan-max-300 bg-accent-plan-max-50 px-3 py-3 text-sm font-bold text-accent-plan-max-700 transition-colors hover:bg-accent-plan-max-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-accent-plan-max-900/60 dark:bg-accent-plan-max-950/30 dark:text-accent-plan-max-200 dark:hover:bg-accent-plan-max-950/50"
                                             >
                                                 <CreditCard className="h-4 w-4" />
@@ -2564,7 +2574,7 @@ export function AuthButton({
             trackProductEvent("cta_start_click", 0, {
               cta_location: "account_login",
             });
-            void signIn(undefined, { callbackUrl: chatCallbackUrl });
+            void signIn(undefined, { callbackUrl: accountCallbackUrl });
           }}
           className="flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
         >

@@ -18,7 +18,10 @@ import type { UserUsageResponse } from "@/components/chat/useUserUsage";
 import { openAccountSettings } from "@/lib/accountSettingsEvents";
 import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
-import { withChatLanguage } from "@/lib/localizedCallbackUrl";
+import {
+    localizedProductHref,
+    type ChatWorkspaceProduct,
+} from "@/lib/chatProductUiCopy";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 
@@ -30,8 +33,10 @@ import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 // settings modal (via openAccountSettings) rather than duplicating it.
 export function SidebarAccountRailButton({
     accountUsage = null,
+    currentProduct = "review",
 }: {
     accountUsage?: UserUsageResponse | null;
+    currentProduct?: ChatWorkspaceProduct;
 }) {
     const { data: session } = useSession();
     const { t, lang } = useLanguage();
@@ -89,7 +94,7 @@ export function SidebarAccountRailButton({
         };
     }, [isOpen]);
 
-    const chatCallbackUrl = withChatLanguage("/chat", lang);
+    const chatCallbackUrl = localizedProductHref(currentProduct, lang);
     const user = session?.user;
     const plan = accountUsage?.plan || null;
     const upgradeTargetPlan = plan === "Free" ? "Pro" : plan === "Pro" ? "Max" : null;

@@ -114,7 +114,7 @@ async function enterMobileComparison(page: Page, options: EnterOptions) {
   await restoreActiveConversation(page);
 
   await page.setViewportSize(viewport);
-  await page.goto(`/chat?lang=${lang}`);
+  await page.goto(`/review?lang=${lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-message-list").first()).toBeVisible();
@@ -428,7 +428,7 @@ test.describe("Composer tool status", { tag: "@ui-risk" }, () => {
     });
     await restoreActiveConversation(page);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/chat?lang=en");
+    await page.goto("/review?lang=en");
     await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
 
     await expect(page.getByTestId("tool-status-chip-row")).toHaveAttribute(

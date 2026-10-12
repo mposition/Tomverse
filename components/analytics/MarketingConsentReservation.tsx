@@ -29,8 +29,8 @@ import { ANALYTICS_CONSENT_STORAGE_KEY } from "@/lib/productAnalyticsShared";
  * every inline `<script>` and `<style>` straight out of the prerendered HTML
  * (`lib/staticMarketingCsp.ts`). This script is hashed like the JSON-LD block
  * already rendered next to it; nothing is allowlisted, and no nonce is needed.
- * It is also confined to the two `force-static` marketing layouts through
- * `MarketingShell`, so it never reaches the nonce + `strict-dynamic` routes.
+ * On request-time public guides the same script receives the request nonce;
+ * static marketing still omits it and uses hashes collected from its HTML.
  *
  * The matching `min-height` rules live in `app/globals.css`, keyed on the
  * `data-consent-pending` attribute this script sets. `AnalyticsProvider`
@@ -41,9 +41,10 @@ const RESERVATION_SCRIPT = `(function(){try{var v=localStorage.getItem(${JSON.st
   ANALYTICS_CONSENT_STORAGE_KEY
 )});if(v!=="accepted"&&v!=="declined"){document.documentElement.setAttribute("data-consent-pending","")}}catch(e){}})()`;
 
-export function MarketingConsentReservation() {
+export function MarketingConsentReservation({ nonce }: { nonce?: string | null } = {}) {
   return (
     <script
+      nonce={nonce || undefined}
       // React warns in development when a component renders a <script>, and on
       // a client-side navigation the tag is inserted via the DOM, where it
       // would never execute anyway. Rendering it as data on the client keeps

@@ -81,7 +81,7 @@ for (const narrow of [false, true]) {
       await route.fallback();
     });
 
-    await page.goto("/chat");
+    await page.goto("/review");
     await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
     await expectNoHorizontalOverflow(page);

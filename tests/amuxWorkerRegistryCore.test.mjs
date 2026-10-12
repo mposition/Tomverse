@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  AMUX_CATALOG_WORKER_NAME_PATTERN,
   AMUX_WORKER_DESIRED_STATES,
   AMUX_WORKER_LATCH_CONSECUTIVE_FAILURES,
   AMUX_WORKER_PROVIDER_CLASSES,
@@ -36,6 +37,7 @@ import {
   parseAmuxWorkerRegistryChange,
 } from "../lib/amux/workerRegistryCore.ts";
 import { AGENT_OFFICE_AMUX_ROSTER } from "../lib/agentOffice/amuxRoster.ts";
+import { AMUX_MACHINE_ID_PATTERN } from "../lib/amux/claimContract.ts";
 
 const registration = (workerName, desiredState, roleCeiling, revision = 1) => ({
   workerName,
@@ -383,4 +385,12 @@ test("an unreadable registry offers nothing to register", () => {
     seed: null,
   });
   assert.deepEqual(amuxWorkerSeedEntriesToRegister(view), []);
+});
+
+test("the catalog name rule is the AMUX machine-id rule, and wider than the registry's", () => {
+  assert.equal(AMUX_CATALOG_WORKER_NAME_PATTERN.source, AMUX_MACHINE_ID_PATTERN.source);
+  assert.equal(AMUX_CATALOG_WORKER_NAME_PATTERN.flags, AMUX_MACHINE_ID_PATTERN.flags);
+  for (const name of ["claude-impl", "devin-worker", "Codex.Impl:2"]) {
+    assert.ok(AMUX_CATALOG_WORKER_NAME_PATTERN.test(name), name);
+  }
 });

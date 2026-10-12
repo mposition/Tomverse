@@ -61,6 +61,7 @@ const openLanding = async (page: Page, path: "/" | "/ko") => {
 };
 
 for (const path of ["/", "/ko"] as const) {
+  const lang = path === "/ko" ? "ko" : "en";
   test(`${path} renders every landing section in the intended order`, async ({
     page,
   }) => {
@@ -157,15 +158,15 @@ for (const path of ["/", "/ko"] as const) {
     // Recovered dead copy has to actually reach the page, CTAs included.
     await expect(page.getByTestId("landing-models-cta")).toHaveAttribute(
       "href",
-      "/models"
+      `/${lang}/models`
     );
     await expect(page.getByTestId("landing-status-cta")).toHaveAttribute(
       "href",
-      "/status"
+      `/status?lang=${lang}`
     );
     await expect(page.getByTestId("landing-safety-cta")).toHaveAttribute(
       "href",
-      "/safety"
+      `/${lang}/safety`
     );
     await expect(page.getByTestId("landing-signup-cta")).toHaveAttribute(
       "href",
@@ -272,9 +273,9 @@ for (const path of ["/", "/ko"] as const) {
     await openLanding(page, path);
 
     const expectedHrefs: Array<[string, string]> = [
-      ["landing-models-cta", "/models"],
-      ["landing-status-cta", "/status"],
-      ["landing-safety-cta", "/safety"],
+      ["landing-models-cta", `/${lang}/models`],
+      ["landing-status-cta", `/status?lang=${lang}`],
+      ["landing-safety-cta", `/${lang}/safety`],
       ["landing-signup-cta", "/auth/signin?callbackUrl=%2Freview"],
       ["landing-secondary-cta", "#how-it-works"],
     ];
@@ -287,7 +288,7 @@ for (const path of ["/", "/ko"] as const) {
       expect(name.length).toBeGreaterThan(0);
     }
 
-    // Both product CTAs go to the same resolved workspace entry. The
+    // Both primary CTAs go to the same resolved workspace entry. The
     // destination is decided on the server; this only checks the link the
     // page actually rendered has not been swapped for a different surface.
     for (const testId of ["landing-primary-cta", "landing-final-cta"]) {
@@ -299,12 +300,11 @@ for (const path of ["/", "/ko"] as const) {
   });
 }
 
-test("the hero names Tomverse Review and sends its CTA to a comparison", async ({
+test("the hero names both products and keeps the primary guest CTA on Review", async ({
   page,
 }) => {
-  // The first screen has to answer four questions: Tomverse is the brand,
-  // Tomverse Review is this product, it compares several AI answers, and the
-  // button opens that comparison rather than the unreleased Tomverse Chat.
+  // The first screen names both product jobs. The guest primary action remains
+  // Review, while Chat has its own Guest Smart Adaptive entry.
   await openLanding(page, "/");
 
   const brand = await page.getByTestId("landing-brand-note").innerText();
@@ -312,10 +312,21 @@ test("the hero names Tomverse Review and sends its CTA to a comparison", async (
   expect(brand).toContain("Tomverse");
 
   const cta = await page.getByTestId("landing-primary-cta").innerText();
-  // "Chat" in a CTA names an unreleased product in the brand tree. Whatever
-  // the label says, it must not be that.
+  // The primary guest action is Review; Chat has the adjacent trial entry.
   expect(cta.toLowerCase()).not.toContain("chat");
   expect(cta.toLowerCase()).toContain("compar");
+  await expect(page.getByTestId("landing-chat-product-cta")).toHaveAttribute(
+    "href",
+    "/chat?lang=en"
+  );
+  await expect(page.getByTestId("landing-chat-product-cta")).toHaveText("Try Chat free");
+  await expect(page.getByTestId("landing-chat-product-description")).toHaveText(
+    /When Smart Adaptive is available.*text questions.*existing guest limit.*browser.*Attachments use manual model selection/
+  );
+  await expect(page.getByTestId("landing-review-product-cta")).toHaveAttribute(
+    "href",
+    "/review?lang=en&entry=guest-preview"
+  );
 });
 
 test("the hero keeps its guest-start and AI Review messages", async ({ page }) => {
@@ -372,12 +383,11 @@ test("/ko keeps the locale on the brand link and Review information link", async
     await expect(desktopReview).toHaveAttribute("href", "/ko/products/review");
   }
 
-  // Destinations without a `/[locale]` route must NOT be prefixed -- doing so
-  // would 404. Only the paths in LOCALIZED_SEO_PATHS have one.
+  // The public model and pricing pages now have actual locale routes.
   const header = page.locator("header");
   for (const [name, href] of [
-    ["모델 살펴보기", "/models"],
-    ["요금제", "/pricing"],
+    ["모델 살펴보기", "/ko/models"],
+    ["요금제", "/ko/pricing"],
   ] as const) {
     await expect(
       header.getByRole("link", { name, exact: true }).first()
@@ -387,12 +397,13 @@ test("/ko keeps the locale on the brand link and Review information link", async
   // FAQ moved out of the top menu to keep it to four items, so the route has
   // to keep an entry point somewhere. It is in the footer.
   await expect(
-    page.locator("footer").locator("a[href='/faq']")
-  ).toHaveAttribute("href", "/faq");
+    page.locator("footer").locator("a[href='/ko/faq']")
+  ).toHaveAttribute("href", "/ko/faq");
 });
 
-test("plan credits follow the public billing response", async ({ page }) => {
-  await prepareGuestPage(page, "en");
+for (const lang of ["en", "ko"] as const) {
+test(`${lang} plan credits follow the public billing response`, async ({ page }) => {
+  await prepareGuestPage(page, lang);
   // Deliberately not the built-in defaults: if the card still says 300, the
   // number is coming from copy rather than from billing config.
   await page.route("**/api/billing/config**", (route) =>
@@ -439,7 +450,7 @@ test("plan credits follow the public billing response", async ({ page }) => {
       }),
     })
   );
-  await page.goto("/products/review");
+  await page.goto(lang === "en" ? "/products/review" : "/ko/products/review");
 
   await expect(page.getByTestId("landing-plan-free-credits")).toContainText("777");
   await expect(page.getByTestId("landing-plan-pro-credits")).toContainText("8,888");
@@ -447,13 +458,18 @@ test("plan credits follow the public billing response", async ({ page }) => {
 
   // A zero daily limit is Max's selling point, not a missing value.
   await expect(page.getByTestId("landing-plan-max")).toContainText(
-    /no daily credit limit/i
+    lang === "ko" ? /일일 크레딧 한도 없이/ : /no daily credit cap/i
+  );
+  // Daily pacing is absent on Max; the monthly entitlement still applies.
+  await expect(page.getByTestId("landing-plan-max")).toContainText(
+    lang === "ko" ? /월 제공량 안에서/ : /within its monthly allowance/i
   );
   await expect(page.getByTestId("landing-daily-limit-note")).toBeVisible();
   await expect(page.getByTestId("landing-plan-pro-deep-research")).toContainText(
     /Pro/
   );
 });
+}
 
 test("the landing page carries no motion to suppress under reduced motion", async ({
   browser,

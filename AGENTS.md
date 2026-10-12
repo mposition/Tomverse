@@ -773,17 +773,22 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **"기본 모델"은 두 개의 다른 결정입니다.** 게스트 첫 대화는 DB의
   `AppSetting["guestDefaultModelId"]`이고 brand trio 중 **선두만** 정합니다.
   신규 로그인 계정은 `DEFAULT_MODEL_ID` → `APP_DEFAULTS.defaultModelId` →
-  `UserSettings.defaultModel` 컬럼 기본값 → `app/api/user/settings/route.ts`가
-  만드는 행입니다. 둘을 섞지 않습니다. `npm run check:default-models`가 양쪽을
+  `app/api/user/settings/route.ts`가 만드는 행입니다. 둘을 섞지 않습니다. `npm run check:default-models`가 양쪽을
   함께 읽고 PR Fast Gate에서 검사합니다.
 - **trio 밖의 모델은 `guestDefaultModelId`로 저장할 수 없습니다.** resolver가
   무시하므로 저장은 되고 효과는 없는 설정이 됩니다. `guestDefaultLeadRejection()`
   이 거부합니다.
 - **기본 모델은 `gpt-6-luna`입니다**(2026-10-12, 이전 `gpt-5-6-luna`).
   `lib/models.ts`의 `DEFAULT_MODEL_ID`, `lib/appDefaults.ts`의
-  `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`, Prisma 컬럼 기본값이
-  함께 움직입니다. 한쪽만 바꾸지 않습니다. 같은 날 trio의 Anthropic 자리는
+  `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`가 함께 움직입니다.
+  한쪽만 바꾸지 않습니다. 같은 날 trio의 Anthropic 자리는
   `claude-haiku-5-5`로 옮겼습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
+- **기본 모델을 가리키는 DB 컬럼 기본값은 없습니다**(2026-10-12). `UserSettings.defaultModel`과
+  `Conversation.selectedModels`는 NOT NULL이지만 `@default`가 없어서, 기본 모델 변경에
+  migration이 필요하지 않습니다. 대신 모든 쓰기 경로가 값을 직접 넣습니다 —
+  `tests/userSettingsDefaultModelWriters.test.mjs`와 `createConversation`의 필수
+  `selectedModels`, 그리고 기본값이 없어져 필수가 된 Prisma create 타입이 이를 지킵니다.
+  `npm run check:default-models`는 두 컬럼에 `@default`가 다시 생기면 실패합니다.
 - **게스트 기본 3모델은 OpenAI 1개 · Anthropic 1개 · Gemini 1개입니다**(플랫폼
   전략, 2026-10-12 운영자 결정). 그래서 Anthropic 자리의 **Claude Haiku 계열만**
   가격이 게스트 개방 조건(최악 턴 ≤ standard 1크레딧의 3배 커버)에 맞지 않아도
@@ -1366,6 +1371,13 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
 - DM은 승인 게이트에서 사람으로 인정되지 않고, 운영자가 확정한 답도 승인 계약의 승인이 아닙니다.
 - 구현 단계와 각 단계의 대상 경로는 docs/policy/amux-decision-maker.md §12를 따르며, 새 경로는 그
   단계의 PR이 이 절에 추가합니다.
+- **S0(계정 격리 실측)**: `scripts/amux-decision-maker-s0/measure-isolation`,
+  `scripts/amux-decision-maker-s0/isolation.conf.example`, `docs/ops/amux/decision-maker-s0.md`,
+  `tests/amuxDecisionMakerS0Isolation.test.mjs`. 운영자가 Ubuntu runner에서 root로 실행하며 유료 turn이 없습니다
+  (CLI에는 `--version`만). **`isolated`는 모든 control이 성공하고 모든 격리 검사가 막혔을 때뿐입니다** — control이
+  하나라도 실패하면 거부가 아무것도 증명하지 않으므로 `incomplete`입니다. 거부를 보는 대상마다 그 대상이 실재한다는 control(경로 존재, root에서의
+  endpoint 응답, root로의 process 읽기)이 먼저입니다. 보호 디렉터리는 목록·진입·안쪽 파일 읽기를 따로 잽니다. 설정은 해석만 하고 실행하지 않으며, 출력에
+  파일 내용·환경·자격증명이 없습니다. sudo 권한은 root가 `sudo -l -U`로 묻고 계정이 직접 시도하지 않습니다.
 - **S1a(결정적 핵심)**: `lib/amux/decisionMakerCore.ts`, `tests/amuxDecisionMakerCore.test.mjs`.
   I/O가 없습니다. DB·route·DM 호출은 다음 단계입니다.
 - **S1b(스위치 저장소)**: `lib/amux/decisionMakerSwitchCore.ts`, `lib/amux/decisionMakerSwitchStore.ts`,
@@ -1441,7 +1453,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   닫습니다** — 판정 표의 trigger가 같은 문장에서 같은 종류의 닫힘 사건을 원장에 쓰고, 원장의 event
   guard는 그 판정 행 옆에서만 받으며, S1d 닫힘 trigger가 그때부터 보존(2160시간)을 시작합니다. 원장의
   닫힘 종류는 다섯이고(request core의 닫힘 목록과 같음), event guard·본문 guard·보존 guard·키 guard와
-  request store의 두 읽기가 같은 목록을 씁니다 — 한쪽만 바꾸지 않습니다. 확정(`confirm`·`edit_confirm`)은 kill switch 중 거부되고 거절은
+  request store의 세 읽기(상태, 열린 요청 수, stale 후보)가 같은 목록을 씁니다 — 한쪽만 바꾸지 않습니다. 확정(`confirm`·`edit_confirm`)은 kill switch 중 거부되고 거절은
   허용되며, Admin이 보여 준 값(답·근거 본문의 keyed digest, select의 선택지, `irreversible`, 스냅샷
   상태·SHA·manifest digest)이 저장값과 모두 같을 때만 됩니다. 고친 답은 S1d 본문 store가 판정 직전 같은
   트랜잭션에 쓰고 판정이 그 digest를 기록합니다. 선언 정확도는 기본 `not_judged`, `mismatched`면
@@ -1500,6 +1512,19 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   docs/policy/amux-decision-maker.md §0-2의 졸업 기준과 비교하지 않습니다. **경계 상한 4는 보고의 두 문장 +
   setup + fence이고**, `tests/amuxDecisionMakerJudgment.test.mjs`가 그 셈을, judgment DB 테스트가 kill
   switch 중의 읽기와 하나 줄인 상한의 거부를 고정합니다. 제안 열람·판정 화면은 S2입니다.
+- **S1g(보존 정리 sweep)**: `lib/amux/decisionMakerRetentionSweep.ts`, request store의
+  `listDecisionMakerStaleCloseCandidates()`, body store의 `readDecisionMakerDigestKeyRegistry()`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerRetentionRead`(상한 5)·`decisionMakerStaleClose`(9)·
+  `decisionMakerBodyPurge`(9)·`decisionMakerDigestKeyRotate`(9)·`decisionMakerDigestKeyDestroy`(10),
+  `app/api/internal/maintenance/credit-reservations/route.ts`의 연결, `tests/amuxDecisionMakerRetentionSweep.test.mjs`.
+  docs/policy/amux-decision-maker.md §10의 시스템 정리를 15분 maintenance 실행에 붙였습니다: 현재·다음 key period
+  키를 쓰기 시작하고(ring에 있고 registry에 없을 때), 720시간 열린 요청을 `stale_close`로 닫고, 보존이 지난 본문을
+  지우고, 본문이 남지 않은 끝난 period의 키 파기를 기록합니다. **후보는 한 읽기 트랜잭션에서 읽고 쓰기는 항목마다
+  자기 경계 트랜잭션에서 store가 lock 아래 다시 판정합니다** — sweep 파일에는 SQL이 없고 스위치를 읽지 않습니다
+  (docs/policy/amux-decision-maker.md §6 표상 kill switch 중에도 허용). 오류가 나면 그 자리에서 멈추고 같은 실행에서 다시 보내지 않으며, 결과를 모르는
+  쓰기는 다음 실행의 읽기가 정합니다. 경계 상한은 각 쓰기의 무결성 키 포함 최대 문장 수 + setup + fence이고,
+  request·body 테스트의 문장 수 loop가 고정합니다. 키 파기 기록 뒤 `AMUX_DM_DIGEST_KEYS`에서 그 period를 지우는 것은
+  운영자입니다.
 
 # AI Review (교차검토) 품질과 M5
 
@@ -1728,6 +1753,8 @@ Non-negotiable requirements:
 Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`, `lib/autoRoutingUi.ts`, `lib/autoProductBoundary.ts`, `lib/autoRoutingCopy.ts`, or the `selectionMode` handling in `app/api/conversations/[conversationId]/route.ts`, read:
 
 - `docs/ui-contracts/auto-model-selection.md`
+- `docs/ui-contracts/chat-product-switcher.md` for Chat/Review entry routes,
+  product navigation, draft isolation and Smart Adaptive presentation.
 
 Non-negotiable requirements:
 

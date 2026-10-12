@@ -559,7 +559,7 @@ async function enterGuestChat(
   await mockStatus(page, options.scenario);
   await seedGuestPreferences(page);
   await page.setViewportSize(options.viewport);
-  await page.goto(`/chat?lang=${options.lang}`);
+  await page.goto(`/review?lang=${options.lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
 }
@@ -594,7 +594,7 @@ async function enterSignedInConversation(
   await mockStatus(page, options.scenario);
   await seedGuestPreferences(page);
   await page.setViewportSize(options.viewport);
-  await page.goto(`/chat?lang=${options.lang}`);
+  await page.goto(`/review?lang=${options.lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
@@ -897,7 +897,7 @@ test.describe("no-fallback provider banner with the keyboard open", () => {
     async ({ page }) => {
       test.setTimeout(120_000);
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.goto("/chat?lang=ko");
+      await page.goto("/review?lang=ko");
       await expect(page.getByTestId("chat-textarea")).toBeVisible();
       // env() cannot be forced from a test, so the fixture reproduces what the
       // inset buys: 34px of reserved space below the composer's own padding.

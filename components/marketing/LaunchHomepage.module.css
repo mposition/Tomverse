@@ -154,6 +154,7 @@
 .toolsColumns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; margin-top: 28px; }
 .toolsColumns h3 { font-size: 1.5rem; font-weight: 700; line-height: 1.5; margin-bottom: 16px !important; }
 .toolsColumns p { font-size: 1.0625rem; line-height: 1.6; }
+.toolsColumns .toolExample { margin-top: 18px; border-top: 1px solid rgb(255 255 255 / .3); padding-top: 16px; font-size: .9375rem; font-weight: 650; }
 .toolsSection .smallNote { color: #fff; }
 .plansSection { padding-block: 64px 48px; }
 .plansGrid { display: grid; grid-template-columns: minmax(0, 736fr) minmax(0, 512fr); gap: 64px; border-bottom: 1px solid var(--launch-divider); padding-bottom: 32px; }

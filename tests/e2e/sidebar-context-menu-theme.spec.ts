@@ -29,7 +29,7 @@ test.describe("conversation context menu", () => {
         window.localStorage.setItem("tomverse_theme_preference", "light")
       );
       await page.setViewportSize({ width: 1366, height: 768 });
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       await expect(page.locator("html")).not.toHaveClass(/dark/);
 
       await openConversationMenu(page);
@@ -73,7 +73,7 @@ test.describe("conversation context menu", () => {
         window.localStorage.setItem("tomverse_theme_preference", "light")
       );
       await page.setViewportSize({ width: 1366, height: 768 });
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
 
       const trigger = page.getByTestId("conversation-menu").first();
       const row = page.locator('[data-testid="sidebar-conversation-item"]').first();
@@ -107,7 +107,7 @@ test.describe("conversation context menu", () => {
     async ({ page }) => {
       await mockAuthenticatedApi(page);
       await page.setViewportSize({ width: 1366, height: 768 });
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       await openConversationMenu(page);
 
       const animationName = await page
@@ -124,7 +124,7 @@ test.describe("conversation context menu", () => {
       await page.emulateMedia({ reducedMotion: "reduce" });
       await mockAuthenticatedApi(page);
       await page.setViewportSize({ width: 1366, height: 768 });
-      await page.goto("/chat?lang=en");
+      await page.goto("/review?lang=en");
       await openConversationMenu(page);
 
       const duration = await page
