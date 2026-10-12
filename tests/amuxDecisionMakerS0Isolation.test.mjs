@@ -143,7 +143,13 @@ timeout() {
 }
 setpriv() {
   printf '%s %s\n' "$BASHPID" "%{1#--reuid=}" >> "$FAKE_ROOT/sleepers"
-  exec sleep 30
+  # A sleeper that takes a moment to die after SIGTERM, as a real process can:
+  # a script that kills it and does not wait for it ends with it still running
+  # -- on Linux even an instant death leaves a zombie that answers kill -0.
+  trap 'kill "$child" 2>/dev/null; sleep 0.3; exit 0' TERM
+  sleep 30 &
+  child=$!
+  wait "$child"
 }
 stat() { awk -v p="%{3#/proc/}" '$1 == p { print $2 }' "$FAKE_ROOT/sleepers"; }
 python3() { return 0; }
