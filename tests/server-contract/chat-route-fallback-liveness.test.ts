@@ -881,7 +881,13 @@ const reservation = {
   entries: providerHoldEntries,
 };
 
-type GuestLedgerMode = "normal" | "insufficient";
+type GuestLedgerMode =
+  | "normal"
+  | "insufficient"
+  | "known_concurrency"
+  | "known_prehold_mismatch"
+  | "known_ledger_refusal"
+  | "ambiguous_conversion";
 let guestLedgerMode: GuestLedgerMode = "normal";
 type GuestPrehold = import("../../lib/guestChatAutoQuotaCore").GuestAutoCreditPrehold;
 type GuestClaim = {
@@ -902,7 +908,10 @@ const guestUnknownInputs: Array<Record<string, unknown>> = [];
 const guestReadInputs: Array<Record<string, unknown>> = [];
 
 class TestGuestAutoCreditLedgerError extends Error {
-  constructor(readonly code: "duplicate_binding" | "quota_exhausted") {
+  constructor(readonly code:
+    | "duplicate_binding"
+    | "quota_exhausted"
+    | "transition_invalid") {
     super(code);
   }
 }
@@ -991,6 +1000,36 @@ mock.module(mod("lib/guestChatAutoCreditLedger.ts"), {
     }) => {
       guestConvertInputs.push(input as unknown as Record<string, unknown>);
       guestLifecycle.push("conversion");
+      if (guestLedgerMode === "known_concurrency") {
+        const AccessError = realChatSecurity.ChatAccessError as new (
+          status: number,
+          code: string,
+          message: string
+        ) => Error;
+        throw new AccessError(
+          409,
+          "CHAT_CONCURRENCY_EXCEEDED",
+          "Synthetic known concurrency refusal."
+        );
+      }
+      if (guestLedgerMode === "known_prehold_mismatch") {
+        const AccessError = realChatSecurity.ChatAccessError as new (
+          status: number,
+          code: string,
+          message: string
+        ) => Error;
+        throw new AccessError(
+          409,
+          "GUEST_AUTO_PREHOLD_MISMATCH",
+          "Synthetic known prehold mismatch."
+        );
+      }
+      if (guestLedgerMode === "ambiguous_conversion") {
+        throw new Error("SYNTHETIC_CONVERSION_COMMIT_OUTCOME_UNKNOWN");
+      }
+      if (guestLedgerMode === "known_ledger_refusal") {
+        throw new TestGuestAutoCreditLedgerError("transition_invalid");
+      }
       const claim = guestClaimsByAuthority.get(
         `${input.access.subjectKey}:${input.binding.authority.authorityId}`
       );
@@ -1023,6 +1062,8 @@ mock.module(mod("lib/guestChatAutoCreditLedger.ts"), {
       claim.status = "guest_auto_released";
       return { phase: claim.phase, status: claim.status };
     },
+    isGuestAutoCreditLedgerError: (error: unknown) =>
+      error instanceof TestGuestAutoCreditLedgerError,
     markGuestAutoCreditUnknown: async (input: {
       access: { subjectKey: string };
       binding: { authority: { authorityId: string } };
@@ -2818,6 +2859,56 @@ test("Guest Auto insufficient credit stops before Refiner, exact conversion, and
   assert.equal(attempts.length, 0);
   assert.equal(guestClaimsByAuthority.size, 0);
   assert.equal(guestReadInputs.length, 0);
+});
+
+for (const [name, ledgerMode, code] of [
+  ["known concurrency refusal", "known_concurrency", "CHAT_CONCURRENCY_EXCEEDED"],
+  ["known prehold mismatch", "known_prehold_mismatch", "GUEST_AUTO_PREHOLD_MISMATCH"],
+  ["known ledger refusal", "known_ledger_refusal", null],
+] as const) {
+  test(`Guest Auto releases financial credit after ${name} without classifying the rolled-back conversion as unknown`, async () => {
+    const { response, body } = await askGuestAuto({
+      ledgerMode,
+      expectedStatus: code === null ? 500 : 409,
+    });
+
+    if (code === null) {
+      assert.equal(response.status, 500);
+    } else {
+      assert.equal((JSON.parse(body) as { code?: string }).code, code);
+    }
+    assert.equal(guestRefinerInputs.length, 1);
+    assert.equal(guestConvertInputs.length, 1);
+    assert.equal(attempts.length, 0);
+    assert.equal(guestUnknownInputs.length, 0);
+    assert.equal(guestReadInputs.length, 0);
+    assert.equal(guestReleaseInputs.length, 1);
+    assert.equal(
+      (guestReleaseInputs[0] as { reason?: string }).reason,
+      "refiner_confirmed_undispatched"
+    );
+  });
+}
+
+test("Guest Auto retains an ambiguous conversion hold and confirms its readonly unknown receipt", async () => {
+  await askGuestAuto({
+    ledgerMode: "ambiguous_conversion",
+    expectedStatus: 503,
+  });
+
+  assert.equal(guestRefinerInputs.length, 1);
+  assert.equal(guestConvertInputs.length, 1);
+  assert.equal(attempts.length, 0);
+  assert.equal(guestReleaseInputs.length, 0);
+  assert.equal(guestUnknownInputs.length, 1);
+  assert.equal(
+    (guestUnknownInputs[0] as { boundary?: string }).boundary,
+    "conversion"
+  );
+  assert.deepEqual(guestReadInputs, [{
+    subjectKey: GUEST_SUBJECT_KEY,
+    authorityId: GUEST_AUTHORITY_A,
+  }]);
 });
 
 test("Guest Auto known Refiner budget refusal uses the original execution view exactly once", async () => {

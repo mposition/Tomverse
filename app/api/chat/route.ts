@@ -206,6 +206,7 @@ import {
     getChatBudgetReservedCostMicroUsd,
     guestChatMaxInputTokens,
     identifyChatCaller,
+    isChatAccessError,
     linkChatReservationProviderRequest,
     readChatJsonBody,
     heartbeatChatAccess,
@@ -225,6 +226,7 @@ import {
 } from "@/lib/guestChatAutoAuthority";
 import {
     convertGuestAutoCreditPrehold,
+    isGuestAutoCreditLedgerError,
     markGuestAutoCreditUnknown,
     readGuestAutoCreditState,
     releaseGuestAutoCreditPrehold,
@@ -1098,6 +1100,7 @@ async function handleChatPost(
               binding: GuestAutoCreditBinding;
               prehold: GuestAutoCreditPrehold;
               conversionStarted: boolean;
+              conversionKnownRolledBack: boolean;
               converted: boolean;
               unknownMarked: boolean;
           }
@@ -1691,6 +1694,7 @@ async function handleChatPost(
                 binding,
                 prehold: reserved.prehold,
                 conversionStarted: false,
+                conversionKnownRolledBack: false,
                 converted: false,
                 unknownMarked: false,
             };
@@ -3932,16 +3936,29 @@ async function handleChatPost(
         const accessGrant = guestAutoRun
             ? await (async () => {
                   guestAutoRun.conversionStarted = true;
-                  const converted = await convertGuestAutoCreditPrehold({
-                      access: guestAutoRun.access,
-                      binding: guestAutoRun.binding,
-                      prehold: guestAutoRun.prehold,
-                      budget,
-                      traceId,
-                      enabledTools,
-                  });
-                  guestAutoRun.converted = true;
-                  return converted;
+                  try {
+                      const converted = await convertGuestAutoCreditPrehold({
+                          access: guestAutoRun.access,
+                          binding: guestAutoRun.binding,
+                          prehold: guestAutoRun.prehold,
+                          budget,
+                          traceId,
+                          enabledTools,
+                      });
+                      guestAutoRun.converted = true;
+                      return converted;
+                  } catch (error) {
+                      // Both error families are raised only for deterministic
+                      // refusals before the conversion transaction commits, or
+                      // from inside that transaction so PostgreSQL rolls every
+                      // conversion write back. A transport/database error has
+                      // no such proof and keeps this flag false, preserving the
+                      // hold as unknown in the outer unwind.
+                      guestAutoRun.conversionKnownRolledBack =
+                          isChatAccessError(error) ||
+                          isGuestAutoCreditLedgerError(error);
+                      throw error;
+                  }
               })()
             : await acquireChatAccess(access, budget, {
                   traceId,
@@ -6951,7 +6968,11 @@ async function handleChatPost(
             });
         }
         if (guestAutoRun && !guestAutoRun.unknownMarked) {
-            if (guestAutoRun.conversionStarted && !guestAutoRun.converted) {
+            if (
+                guestAutoRun.conversionStarted &&
+                !guestAutoRun.converted &&
+                !guestAutoRun.conversionKnownRolledBack
+            ) {
                 // A lost conversion response may already have replaced the
                 // prehold with an exact reservation. Expiry or this unwind is
                 // not proof that it did not, so retain the hold for read-only

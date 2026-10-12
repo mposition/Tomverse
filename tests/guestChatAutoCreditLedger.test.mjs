@@ -10,7 +10,11 @@ import {
   classifyGuestAutoCreditClaim,
   guestAutoCreditRequestKeyCore,
 } from "@/lib/guestChatAutoCreditClaim";
-import { guestAutoUsageBucketCount } from "@/lib/guestChatAutoCreditLedger";
+import {
+  GuestAutoCreditLedgerError,
+  guestAutoUsageBucketCount,
+  isGuestAutoCreditLedgerError,
+} from "@/lib/guestChatAutoCreditLedger";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const schema = read("prisma/schema.prisma");
@@ -119,6 +123,23 @@ test("Guest Auto narrows real BIGINT bucket counts and rejects coercion", () => 
   }
 });
 
+test("Guest Auto ledger predicate accepts only the module error class", () => {
+  assert.equal(
+    isGuestAutoCreditLedgerError(
+      new GuestAutoCreditLedgerError("transition_invalid"),
+    ),
+    true,
+  );
+  assert.equal(
+    isGuestAutoCreditLedgerError({
+      name: "GuestAutoCreditLedgerError",
+      code: "transition_invalid",
+    }),
+    false,
+  );
+  assert.equal(isGuestAutoCreditLedgerError(new Error("transition_invalid")), false);
+});
+
 test("Guest Auto prehold is content-free, undispatched and one-way", () => {
   for (const required of [
     "guest_auto_preheld",
@@ -179,6 +200,37 @@ test("Guest Auto conversion reuses the hold and ordinary exact settlement", () =
       security.indexOf("reconcileExpiredChatCreditReservations"),
     ),
     /guest_auto_preheld|guest_auto_unknown/,
+  );
+});
+
+test("Guest Auto known release refunds credit but retains paid Refiner request throttle", () => {
+  const release = ledger.slice(
+    ledger.indexOf("export type GuestAutoCreditReleaseReason"),
+    ledger.indexOf("export async function markGuestAutoCreditUnknown"),
+  );
+  assert.match(
+    release,
+    /authority_refused: "pre_paid_full"/,
+  );
+  assert.match(
+    release,
+    /refiner_confirmed_undispatched: "paid_refiner_financial_only"/,
+  );
+  assert.match(
+    release,
+    /router_refused_before_dispatch: "paid_refiner_financial_only"/,
+  );
+  assert.match(
+    release,
+    /releaseScope === "pre_paid_full"[\s\S]{0,100}?\.\.\.payload\.minuteEntries[\s\S]{0,100}?payload\.creditEntries/,
+  );
+  assert.match(
+    release,
+    /: payload\.creditEntries/,
+  );
+  assert.match(
+    release,
+    /requestThrottle:[\s\S]{0,100}?"released"[\s\S]{0,100}?"retained"/,
   );
 });
 
