@@ -99,10 +99,13 @@ Tomverse Review의 OpenAI 기본 모델을 `gpt-5-4-mini`에서 `gpt-5-6-luna`�
   따라 첫 번째로 게스트 자격을 갖춘 모델을 같은 자리·같은 순서에 넣습니다. 그런
   모델이 없거나 이미 선택돼 있을 때만 fallback 목록으로 채웁니다. 2026-10-12에
   `claude-haiku-4-5` 자리가 DeepSeek으로 채워졌던 것이 이 규칙이 고친 결함입니다.
-- **기본값이 될 수 있는 모델은 게스트 자격보다 좁습니다.** 기본 선택을 계산하는
-  모든 곳(게스트 기본값, 새 계정 첫 비교, 선두 판정, 콘솔, `check:default-models`)은
-  게스트 자격에 `isDefaultLineupServable`(enabled · status `enabled` · 공개 · 삭제
-  안 됨)을 더한 `createDefaultLineupEligibilityCheck()`를 씁니다. 그래서 구성 모델이
+- **기본값이 될 수 있는 모델은 자격 검사보다 좁습니다.** 기본 선택을 계산하는
+  모든 곳(게스트 기본값, 새 계정 첫 비교, 선두 판정, 콘솔, 채택 경고,
+  `check:default-models`)은 자기 자격 검사에 `isDefaultLineupServable`(enabled ·
+  status `enabled` · 공개 · 삭제 안 됨)을 더한 `createDefaultLineupEligibilityCheck()`를
+  씁니다. 자격 검사는 새 계정 첫 비교만 그 계정의 Free 자격이고 나머지는 게스트
+  자격입니다 — 새 계정은 Free 전용 Standard 대체 모델을 쓸 수 있기 때문이며, 이는
+  이번 변경 전부터의 동작입니다. 그래서 구성 모델이
   나중에 `limited`나 비공개가 되면 자리에서 승계됩니다 — 게스트에게만 남고 새 계정의
   clamp에서 빠지는 일이 없습니다. 사람이 직접 고른 선택(복원된 대화, `?models=`)은
   계속 게스트 자격만 봅니다. `limited`는 실행 가능한 상태이기 때문입니다.

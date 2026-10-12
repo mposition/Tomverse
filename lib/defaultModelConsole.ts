@@ -131,13 +131,21 @@ export const describeGuestDefault = ({
  * answers with the model being adopted, and an `isEligible` that knows it:
  * when the successor is guest-eligible it is the substitute, otherwise the
  * fallback list is -- the same order the guest screen resolves.
+ *
+ * `currentResolveReplacement` is the catalogue as it stands, for the
+ * selection guests see now. It matters when `modelId` already fails the
+ * default rule (limited or unlisted, say): its slot is then filled today by
+ * its current replacement chain or the fallback list, and judging "now" with
+ * the adoption's resolver would make both selections the same and hide the
+ * change. Omitted, "now" uses `resolveReplacement`.
  */
 export const substituteIfTrioMemberRemoved = (
   modelId: string,
   effectiveGuestLeadId: string | null,
   isEligible: (modelId: string) => boolean,
   resolveReplacement?: ReplacementResolver,
-  trio: readonly string[] = GUEST_BRAND_TRIO_MODEL_IDS
+  trio: readonly string[] = GUEST_BRAND_TRIO_MODEL_IDS,
+  currentResolveReplacement: ReplacementResolver | undefined = resolveReplacement
 ): string | null => {
   if (replacementRole(modelId, effectiveGuestLeadId, trio) !== "guest_trio") return null;
   const after = resolveGuestDefaultSelectedModels({
@@ -149,7 +157,7 @@ export const substituteIfTrioMemberRemoved = (
   const before = resolveGuestDefaultSelectedModels({
     isEligible,
     leadModelId: effectiveGuestLeadId || APP_DEFAULTS.guestDefaultModelId,
-    resolveReplacement,
+    resolveReplacement: currentResolveReplacement,
     trio,
   });
   return after.find((id) => !before.includes(id)) ?? null;
