@@ -126,7 +126,9 @@ runuser() {
   esac
   target=$(printf '%s' "$target" | sed -E 's/amux-dm-s0-[0-9]+-[0-9]+-/amux-dm-s0-RUN-/')
   printf '%s %s %s\n' "$user" "$kind" "$target" >> "$FAKE_ROOT/attempts"
-  # githelper's third answer: a conditional include it cannot evaluate.
+  # githelper's other answers: a config it cannot read (2) and a conditional
+  # include it cannot evaluate (3).
+  if [ "$kind" = githelper ] && grep -qxF -- "$user githelper-2 $target" "$FAKE_ROOT/allow"; then return 2; fi
   if [ "$kind" = githelper ] && grep -qxF -- "$user githelper-3 $target" "$FAKE_ROOT/allow"; then return 3; fi
   grep -qxF -- "$user $kind $target" "$FAKE_ROOT/allow" || return 1
   case $kind in
@@ -475,6 +477,19 @@ test("the git snippet: a helper set directly or by an include is present, a cond
   assert.equal(githelper({ ".gitconfig": '[includeIf "onbranch:main"]\n\tpath = branch.inc\n' }), 3);
   // A helper beside a conditional include is still reported as present.
   assert.equal(githelper({ ".gitconfig": '[credential]\n\thelper = store\n[includeIf "gitdir:/x/"]\n\tpath = x.inc\n' }), 0);
+  // A config git cannot parse is unreadable, never "none" -- in the file
+  // itself or in one it includes.
+  assert.equal(githelper({ ".gitconfig": "[credential\n\thelper = store\n" }), 2);
+  assert.equal(githelper({ ".gitconfig": "[include]\n\tpath = broken.inc\n", "broken.inc": "this is not = [config\n" }), 2);
+});
+
+test("an unreadable git config counts as a leak", { skip: noBash }, () => {
+  const run = measure({ allow: [...CONTROLS, "amux-dm-openai githelper-2 -"] });
+  assert.equal(run.status, 1);
+  assert.deepEqual(
+    run.report.checks.filter((check) => !check.pass).map((check) => [check.subject, check.target, check.observed]),
+    [["decision-maker-openai", "git credential.helper", "unreadable"]],
+  );
 });
 
 test("an unverifiable git config counts as a leak", { skip: noBash }, () => {

@@ -224,9 +224,16 @@ attempt() {
     # cannot stand in, so it can hide a helper here and switch it on in the
     # snapshot clone: exit 3, unverifiable, which counts as a leak. The helper
     # is never run.
+    # Only git's 1 (no such key) is an absence: any other failure -- a
+    # config git cannot parse, an include it cannot open -- is exit 2,
+    # unreadable, never "none".
     githelper) snippet='cd / || exit 2
-      git config --includes --get-regexp "^credential(\..+)?\.helper\$" >/dev/null && exit 0
-      git config --includes --get-regexp "^includeif\." >/dev/null && exit 3
+      git config --includes --get-regexp "^credential(\..+)?\.helper\$" >/dev/null; s=$?
+      [ "$s" = 0 ] && exit 0
+      [ "$s" = 1 ] || exit 2
+      git config --includes --get-regexp "^includeif\." >/dev/null; s=$?
+      [ "$s" = 0 ] && exit 3
+      [ "$s" = 1 ] || exit 2
       exit 1' ;;
     *) return 2 ;;
   esac
