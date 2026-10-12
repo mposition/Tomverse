@@ -11,6 +11,7 @@ import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
   canStartAnotherIdea,
+  canOpenSavedIdea,
   classifyIdeaSubmissionPost,
   classifyIdeaSubmissionReadBack,
 } from "@/lib/amux/ideaSubmissionUiCore";
@@ -81,6 +82,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [pullRequests, setPullRequests] = useState("");
   const [pending, setPending] = useState(false);
   const [readBackPending, setReadBackPending] = useState(false);
+  const [savedRequestId, setSavedRequestId] = useState("");
+  const [savedRequestError, setSavedRequestError] = useState(false);
+  const [savedRequestReauth, setSavedRequestReauth] = useState(false);
   const [recoveryChecked, setRecoveryChecked] = useState(false);
   const [result, setResult] = useState<InputPreviewResult | null>(null);
   const [submission, setSubmission] = useState<SubmissionState>({ kind: "idle" });
@@ -173,6 +177,32 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       setReadBackPending(false);
     }
   }, [operatorId]);
+
+  const openSavedIdea = async () => {
+    const requestId = savedRequestId.trim().toLowerCase();
+    if (!recoveryChecked || !canOpenSavedIdea(submission.kind,
+      pending || readBackPending || sourceScopePending ||
+        (submission.kind !== "submitted" && !!idea.trim()), requestId)) return;
+    setReadBackPending(true); setSavedRequestError(false); setSavedRequestReauth(false);
+    try {
+      const response = await adminFetch(`/api/admin/amux/ideas/submissions?${
+        new URLSearchParams({ requestId })}`, { cache: "no-store" });
+      const decision = classifyIdeaSubmissionReadBack({ status: response.status,
+        body: await response.json() }, requestId);
+      if (decision.kind !== "submitted") {
+        setSavedRequestError(true); setSavedRequestReauth(response.status === 428);
+        return;
+      }
+      rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
+      setIdea(""); setRepositories(""); setPullRequests(""); setResult(null);
+      setPlanReadyIdeaId(null); setContinuationChunkIndex(0);
+      setSourceRepository(""); setSourceCommitSha(""); setSourcePath("");
+      setSourceScopeResult({ kind: "idle" });
+      setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
+        hasExternalSources: decision.hasExternalSources });
+    } catch { setSavedRequestError(true); }
+    finally { setReadBackPending(false); }
+  };
 
   useEffect(() => {
     let active = true;
@@ -268,7 +298,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   };
 
   const ideaBytes = new TextEncoder().encode(idea.trim()).length;
-  const frozen = submission.kind === "pending" || submission.kind === "outcome_unknown" ||
+  const frozen = readBackPending || submission.kind === "pending" || submission.kind === "outcome_unknown" ||
     submission.kind === "submitted" || submission.kind === "recovery_unavailable";
   const refusedForStepUp = result?.error === "ADMIN_REAUTHENTICATION_REQUIRED" ||
     (submission.kind === "refused" && submission.code === "ADMIN_REAUTHENTICATION_REQUIRED") ||
@@ -284,6 +314,24 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         <h2 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">{messages.title}</h2>
         <p className="max-w-2xl text-sm leading-6 text-zinc-700 dark:text-zinc-300">{messages.description}</p>
       </div>
+
+      <details className="space-y-2 rounded-xl border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+        <summary className="cursor-pointer font-medium">{messages.openSavedTitle}</summary>
+        <p>{messages.openSavedHint}</p>
+        <label className="block" htmlFor="amux-saved-request-id">{messages.openSavedId}</label>
+        <input id="amux-saved-request-id" value={savedRequestId} maxLength={36}
+          onChange={(event) => setSavedRequestId(event.target.value)}
+          disabled={readBackPending}
+          className="min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2 font-mono" />
+        <button type="button" onClick={() => void openSavedIdea()}
+          disabled={!recoveryChecked || !canOpenSavedIdea(submission.kind,
+            pending || readBackPending || sourceScopePending ||
+              (submission.kind !== "submitted" && !!idea.trim()), savedRequestId.trim().toLowerCase())}
+          className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+          {messages.openSavedButton}</button>
+        {savedRequestError ? <p role="alert">{messages.openSavedFailed}</p> : null}
+        {savedRequestReauth ? <a className="underline" href={STEP_UP_HREF}>{messages.stepUp}</a> : null}
+      </details>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(17rem,0.85fr)]">
         <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-4 text-sm font-medium text-zinc-800 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
