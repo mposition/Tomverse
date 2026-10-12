@@ -9,6 +9,7 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
+import { readAmuxPortfolioClock } from "./portfolioClock.ts";
 import { amuxPortfolioAssessmentPayloadSchema,
   parseAmuxPortfolioMetrics, type AmuxPortfolioAssessmentPayload } from
   "./portfolioScoreSchemas.ts";
@@ -190,7 +191,7 @@ export async function commitAmuxPortfolioAssessment(input: {
         evidenceRefCount: input.payload.evidenceRefs.length,
         evidenceAsOf: plan.evidenceAsOf.toISOString() },
     });
-    const now = new Date();
+    const now = await readAmuxPortfolioClock(tx);
     await tx.amuxPortfolioAssessment.create({ data: {
       id: input.payload.id, requestId: input.payload.requestId,
       nodeId: target.kind === "story" || target.kind === "task" ? null : target.id,
