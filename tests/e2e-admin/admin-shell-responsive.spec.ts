@@ -235,11 +235,14 @@ test.describe("admin console on a narrow viewport", () => {
 
     for (const group of NAV_GROUPS) {
       await expect(
-        navigation.getByRole("button", { name: group })
+        navigation.getByRole("button", { name: group, exact: true })
       ).toHaveAttribute("aria-expanded", "true");
     }
 
-    const operations = navigation.getByRole("button", { name: "Operations" });
+    const operations = navigation.getByRole("button", {
+      name: "Operations",
+      exact: true,
+    });
     await operations.click();
     await expect(operations).toHaveAttribute("aria-expanded", "false");
     await expect(navigation.getByRole("link", { name: "Alerts" })).toBeHidden();
