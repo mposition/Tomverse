@@ -244,6 +244,22 @@ async function seedGuestConversation(page: Page, selectedModels: string[]) {
   );
 }
 
+async function seedSavedGuestAuto(page: Page) {
+  await page.addInitScript((models) => {
+    const id = "guest_chat_lifecycle_saved";
+    localStorage.setItem("guest_chat_conversations", JSON.stringify([{
+      id, title: "Saved Auto lifecycle", selectedModels: [models[0]],
+      disabledPanels: [], selectionMode: "auto", webSearchMode: "off",
+      createdAt: "2026-10-12T00:00:00.000Z",
+    }]));
+    localStorage.setItem("guest_messages_" + id + "_" + models[0], JSON.stringify([
+      { id: "lifecycle-question", role: "user", content: "saved lifecycle question", status: "normal" },
+      { id: "lifecycle-answer", role: "assistant", content: "saved lifecycle answer", status: "normal" },
+    ]));
+    sessionStorage.setItem("tomverse_chat_active_chat_id", id);
+  }, GUEST_BRAND_TRIO_MODEL_IDS);
+}
+
 test.describe("guest initial cost hydration", () => {
   test.beforeEach(async ({ page }) => {
     await prepareGuestPage(page, "en");
@@ -587,17 +603,11 @@ test.describe("guest initial cost hydration", () => {
       await expect(page.getByText("saved original question", { exact: true }).first()).toBeVisible();
       await expect.poll(() => capabilityReads).toBeGreaterThan(0);
       const textarea = page.getByTestId("chat-textarea");
-      if (await textarea.isEditable()) {
-        await textarea.fill(prompt);
-        await textarea.press("Enter");
-      } else {
-        // A restored Auto draft may be locked while exact authority loads.
-        // Native input and keyboard entry must remain unable to send.
-        await expect(page.getByTestId("guest-auto-capability-pending")).toBeVisible();
-        await expect(page.getByTestId("chat-send-button")).toBeDisabled();
-        await textarea.focus();
-        await page.keyboard.press("Enter");
-      }
+      await expect(textarea).not.toBeEditable();
+      await expect(page.getByTestId("guest-auto-capability-pending")).toBeVisible();
+      await expect(page.getByTestId("chat-send-button")).toBeDisabled();
+      await textarea.focus();
+      await page.keyboard.press("Enter");
       await page.waitForTimeout(500);
       expect(requests).toEqual([]);
       expect(await page.evaluate(() => JSON.parse(
@@ -607,11 +617,9 @@ test.describe("guest initial cost hydration", () => {
       releaseCapability();
       const toggle = page.getByTestId("composer-auto-routing-toggle");
       await expect(toggle).toHaveAttribute("aria-checked", "true");
-      // A UI may keep the first attempt waiting or leave the draft ready.
-      // Both must produce one Auto request, never a manual request or replay.
-      if (requests.length === 0) {
-        await sendChatMessage(page, testInfo, prompt);
-      }
+      // Pending input was locked, so only this explicit action may dispatch.
+      expect(requests).toEqual([]);
+      await sendChatMessage(page, testInfo, prompt);
       await expect(page.getByText("fresh Auto reply", { exact: true }).first()).toBeVisible();
       expect(requests).toHaveLength(1);
       expect(requests[0]).toMatchObject({
@@ -628,6 +636,138 @@ test.describe("guest initial cost hydration", () => {
       capabilityReleased = true;
       releaseCapability();
     }
+  });
+
+  test("Guest Auto OFF then ON renews authority and sends exactly once", async ({ page }, testInfo) => {
+    const authority = "qa-guest-auto-toggle-renewed";
+    const requests: Array<Record<string, unknown>> = [];
+    await page.route("**/api/products/chat/capabilities", (route) => route.fulfill({
+      json: { autoSelection: { offered: true }, guestAutoCapability: authority,
+        guestAuto: { attachmentSupport: "manual_only" } },
+    }));
+    await page.route("**/api/chat", async (route) => {
+      requests.push(route.request().postDataJSON() as Record<string, unknown>);
+      await route.fulfill({ status: 200, body: "renewed Auto answer" });
+    });
+    await page.goto("/chat?lang=en");
+    const toggle = page.getByTestId("composer-auto-routing-toggle");
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByTestId("chat-textarea")).toBeEditable();
+    await sendChatMessage(page, testInfo, "one Guest Auto turn after OFF and ON");
+    await expect(page.getByText("renewed Auto answer", { exact: true }).first()).toBeVisible();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      guestAutoCapability: authority,
+      guestClientTurnId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    });
+  });
+
+  test("reselecting the current Guest Auto conversation preserves its ready draft", async ({ page }, testInfo) => {
+    const authority = "qa-current-guest-auto-capability";
+    const prompt = "current Auto conversation still sends";
+    const requests: Array<Record<string, unknown>> = [];
+    await seedSavedGuestAuto(page);
+    await page.route("**/api/products/chat/capabilities", (route) => route.fulfill({
+      json: { autoSelection: { offered: true }, guestAutoCapability: authority,
+        guestAuto: { attachmentSupport: "manual_only" } },
+    }));
+    await page.route("**/api/chat", async (route) => {
+      requests.push(route.request().postDataJSON() as Record<string, unknown>);
+      await route.fulfill({ status: 200, body: "current Auto answer" });
+    });
+    await page.goto("/chat?lang=en");
+    const textarea = page.getByTestId("chat-textarea");
+    await expect(textarea).toBeEditable();
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await textarea.fill(prompt);
+    const mobileMenu = page.getByTestId("mobile-sidebar-open");
+    if (await mobileMenu.isVisible()) await mobileMenu.click();
+    await page.locator('[data-testid="sidebar-conversation-item"][data-conversation-id="guest_chat_lifecycle_saved"]').click();
+    await expect(textarea).toBeEditable();
+    await expect(textarea).toHaveValue(prompt);
+    await expect(page.getByTestId("guest-auto-capability-pending")).toHaveCount(0);
+    expect(await page.evaluate(() => sessionStorage.getItem("tomverse_chat_active_chat_id")))
+      .toBe("guest_chat_lifecycle_saved");
+    await sendChatMessage(page, testInfo, prompt);
+    await expect(page.getByText("current Auto answer", { exact: true }).first()).toBeVisible();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ guestAutoCapability: authority,
+      guestClientTurnId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+  });
+
+  test("Guest Auto recovers from a failed pre-send capability read without manual dispatch", async ({ page }, testInfo) => {
+    const authority = "qa-guest-auto-capability-recovered";
+    const prompt = "recover the authority before this Auto turn";
+    const requests: Array<Record<string, unknown>> = [];
+    let reads = 0;
+    await page.route("**/api/products/chat/capabilities", async (route) => {
+      reads += 1;
+      if (reads === 2) { await route.abort("connectionreset"); return; }
+      await route.fulfill({ json: { autoSelection: { offered: true }, guestAutoCapability: authority,
+        guestAuto: { attachmentSupport: "manual_only" } } });
+    });
+    await page.route("**/api/chat", async (route) => {
+      requests.push(route.request().postDataJSON() as Record<string, unknown>);
+      await route.fulfill({ status: 200, body: "recovered Auto answer" });
+    });
+    await page.goto("/chat?lang=en");
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await sendChatMessage(page, testInfo, prompt);
+    await expect(page.getByTestId("app-toast").filter({ hasText: "That Auto setting could not be saved." })).toBeVisible();
+    expect(requests).toEqual([]);
+    const textarea = page.getByTestId("chat-textarea");
+    await expect(textarea).toHaveValue(prompt);
+    await expect(textarea).toBeEditable();
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    // This is an explicit retry of a read-only authority check; the failed
+    // attempt dispatched no Chat request, reservation or provider call.
+    await sendChatMessage(page, testInfo, prompt);
+    await expect(page.getByText("recovered Auto answer", { exact: true }).first()).toBeVisible();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ guestAutoCapability: authority,
+      guestClientTurnId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+  });
+
+  test("a Guest can explicitly leave Auto while the capability read remains hung", async ({ page }, testInfo) => {
+    const requests: Array<Record<string, unknown>> = [];
+    let releaseCapability!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseCapability = resolve; });
+    await seedSavedGuestAuto(page);
+    await page.route("**/api/products/chat/capabilities", async (route) => {
+      await gate;
+      await route.fulfill({ json: { autoSelection: { offered: true },
+        guestAutoCapability: "qa-hung-late-authority", guestAuto: { attachmentSupport: "manual_only" } } }).catch(() => {});
+    });
+    await page.route("**/api/chat", async (route) => {
+      requests.push(route.request().postDataJSON() as Record<string, unknown>);
+      await route.fulfill({ status: 200, body: "explicit manual answer" });
+    });
+    try {
+      await page.goto("/chat?lang=en");
+      await expect(page.getByTestId("guest-auto-capability-pending")).toBeVisible();
+      await expect(page.getByTestId("chat-textarea")).not.toBeEditable();
+      await expect(page.getByTestId("chat-send-button")).toBeDisabled();
+      const dialog = await openModelCatalogue(page);
+      await dialog.locator('[data-testid="model-option"][data-model-id="' + GUEST_BRAND_TRIO_MODEL_IDS[0] + '"]').click();
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("chat-textarea")).toBeEditable();
+      await sendChatMessage(page, testInfo, "explicitly choose a manual Guest turn");
+      await expect(page.getByText("explicit manual answer", { exact: true }).first()).toBeVisible();
+      expect(requests).toHaveLength(1);
+      expect(requests[0].guestAutoCapability).toBeUndefined();
+      expect(requests[0].guestClientTurnId).toBeUndefined();
+      releaseCapability();
+      await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "false");
+      expect(await page.evaluate(() => JSON.parse(localStorage.getItem("guest_chat_conversations") ?? "[]")
+        .find((row: { id: string; selectionMode?: string }) => row.id === "guest_chat_lifecycle_saved")?.selectionMode))
+        .toBe("manual");
+      expect(requests).toHaveLength(1);
+    } finally { releaseCapability(); }
   });
 
   test("Guest Auto manual choice survives a local conversation reload", async ({ page }) => {

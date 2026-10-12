@@ -1849,18 +1849,26 @@ export function ChatPageClient({
   // a draft, or a conversation summary, and is refreshed immediately before
   // the one Send that presents it to the server.
   const guestAutoCapabilityRef = useRef<string | null>(null);
+  const [guestAutoCapabilityReady, setGuestAutoCapabilityReady] = useState(false);
   const [blankChatCapabilityRevision, setBlankChatCapabilityRevision] = useState(0);
   const [selectionModePending, setSelectionModePending] = useState(false);
+  const storeGuestAutoCapability = useCallback((authority: string | null) => {
+    guestAutoCapabilityRef.current = authority;
+    setGuestAutoCapabilityReady(Boolean(authority));
+  }, []);
+  const invalidateGuestAutoCapability = useCallback((refresh = false) => {
+    storeGuestAutoCapability(null);
+    setAutoSelectionOffered(false);
+    if (refresh) {
+      setBlankChatCapabilityRevision((revision) => revision + 1);
+    }
+  }, [storeGuestAutoCapability]);
   const guestAutoExecutionState = guestAutoClientExecutionState({
     isGuestMode,
     surface: mountedSurface === "chat" ? "chat" : "review",
     selectionMode,
     offered: autoSelectionOffered,
-    // The capability reader sets `offered` only when the Guest authority is
-    // present. Submit still checks the request-memory token itself below; the
-    // render path uses the reactive server-confirmed boolean rather than
-    // reading a ref during render.
-    hasCapability: autoSelectionOffered,
+    hasCapability: guestAutoCapabilityReady,
   });
   const guestAutoCapabilityPending =
     guestAutoExecutionState === "awaiting_capability";
@@ -2514,7 +2522,7 @@ export function ChatPageClient({
         const offered = data?.autoSelection?.offered === true &&
           guestAutoContract &&
           (!isGuestMode || Boolean(guestAuthority));
-        guestAutoCapabilityRef.current = guestAuthority;
+        storeGuestAutoCapability(isGuestMode && offered ? guestAuthority : null);
         setAutoSelectionOffered(offered);
         // A blank Tomverse Chat defaults to Smart Adaptive when the server
         // confirms the current account is eligible. This is display intent,
@@ -2556,10 +2564,9 @@ export function ChatPageClient({
             (isGuestMode && (currentChatIdRef.current === null ||
               isGuestConversationId(currentChatIdRef.current))))
         ) {
-          setAutoSelectionOffered(false);
+          invalidateGuestAutoCapability();
           selectionModeRef.current = "manual";
           setSelectionMode("manual");
-          guestAutoCapabilityRef.current = null;
         }
       });
   }, [
@@ -2570,6 +2577,8 @@ export function ChatPageClient({
     isInitialConversationResolved,
     mountedSurface,
     isGuestMode,
+    invalidateGuestAutoCapability,
+    storeGuestAutoCapability,
   ]);
 
   /* --------------------------------------------------------------------- */
@@ -2665,6 +2674,7 @@ export function ChatPageClient({
     selectionModeRef.current = "manual";
     setSelectionMode("manual");
     setAutoSelectionOffered(false);
+    setGuestAutoCapabilityReady(false);
     setSelectionModePending(false);
 
     // Anything the previous identity had in flight or queued belongs to that
@@ -4293,9 +4303,8 @@ export function ChatPageClient({
         setSelectionModeUnknown(null);
         selectionModeRequestSeqRef.current += 1;
         selectionModeRef.current = "manual";
-        guestAutoCapabilityRef.current = null;
+        invalidateGuestAutoCapability();
         setSelectionMode("manual");
-        setAutoSelectionOffered(false);
         setBlankChatCapabilityRevision((revision) => revision + 1);
         setSelectionModePending(false);
         /*
@@ -4704,6 +4713,19 @@ export function ChatPageClient({
             }
         }
 
+        // Re-selecting the row that is already open is a semantic no-op. In
+        // particular, it must not discard the request-memory Guest Auto
+        // authority without advancing the selection ticket that triggers a
+        // replacement capability read.
+        if (
+          isGuestMode &&
+          isInitialConversationResolved &&
+          id === currentChatIdRef.current
+        ) {
+          settleInitialConversationHandoff();
+          return;
+        }
+
         // Keep the continuation routing prefix closure-independent: its
         // contract is executed in isolation by the surface-boundary tests.
         // Cross-surface navigation unmounts this workspace and the identity
@@ -4770,10 +4792,9 @@ export function ChatPageClient({
                   mode: restoredSelectionMode,
                 }
               : null;
-          guestAutoCapabilityRef.current = null;
+          invalidateGuestAutoCapability();
           selectionModeRef.current = restoredSelectionMode ?? "manual";
           setSelectionMode(restoredSelectionMode ?? "manual");
-          setAutoSelectionOffered(false);
           const restoredModels = clampGuestWorkspaceSelectedModels(
             normalizeStringArray(
               targetConv.selectedModels,
@@ -5988,16 +6009,15 @@ export function ChatPageClient({
           data?.guestAuto?.attachmentSupport !== "manual_only" ||
           !authority
         ) {
-          guestAutoCapabilityRef.current = null;
-          setAutoSelectionOffered(false);
+          invalidateGuestAutoCapability(true);
           showToast(t("chat.autoSelectionFailed"), "error");
           return;
         }
-        guestAutoCapabilityRef.current = authority;
+        storeGuestAutoCapability(authority);
         guestAutoCapabilityForSend = authority;
       } catch {
         if (submitOwnerIsCurrent()) {
-          guestAutoCapabilityRef.current = null;
+          invalidateGuestAutoCapability(true);
           showToast(t("chat.autoSelectionFailed"), "error");
         }
         return;
@@ -7694,7 +7714,6 @@ export function ChatPageClient({
         selectionTicket: conversationSelectionTicketRef.current,
         mode,
       };
-      if (!next) guestAutoCapabilityRef.current = null;
       selectionModeRef.current = mode;
       setSelectionMode(mode);
       const guestConversationId = currentChatIdRef.current;
@@ -9783,7 +9802,7 @@ export function ChatPageClient({
               : (currentChatId === null || !isGuestConversationId(currentChatId)))
           }
           selectionMode={selectionMode}
-          selectionModePending={selectionModePending || guestAutoCapabilityPending}
+          selectionModePending={selectionModePending}
           onSelectionModeChange={handleSelectionModeChange}
           accountMemoryDefault={accountMemoryDefault}
           assistantProfile={
@@ -9932,7 +9951,7 @@ export function ChatPageClient({
               : (currentChatId === null || !isGuestConversationId(currentChatId)))
           }
           selectionMode={selectionMode}
-          selectionModePending={selectionModePending || guestAutoCapabilityPending}
+          selectionModePending={selectionModePending}
           onSelectionModeChange={handleSelectionModeChange}
           accountMemoryDefault={accountMemoryDefault}
           assistantProfile={
