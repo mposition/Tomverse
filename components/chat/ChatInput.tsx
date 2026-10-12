@@ -1352,6 +1352,10 @@ export function ChatInput({
   });
   const selectedBaseCredits = requestCreditEstimate.baseCredits;
   const estimatedRequestCredits = requestCreditEstimate.totalEstimatedCredits;
+  const creditEstimateAccessibleLabel = `${t("chat.creditEstimateAria").replace(
+    "{credits}",
+    String(estimatedRequestCredits)
+  )}${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`;
   const webSearchReservationCredits = requestCreditEstimate.webSearchReservationCredits;
   // Derived from the same active-model list the credit estimate uses, so the
   // chip, its support counts and the reservation can never describe different
@@ -3767,13 +3771,13 @@ export function ChatInput({
               </button>
             </div>
           )}
-          <div className="flex flex-col gap-2">
+          <div className={`flex flex-col ${showReviewModelRow ? "gap-2" : "gap-0.5"}`}>
         {isReviewProduct && showReviewModelRow && (
           <div
             data-testid="composer-review-models"
             className="flex min-w-0 flex-wrap items-center gap-2"
           >
-            <span className="hidden shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400 md:inline">
+            <span className="hidden min-w-0 max-w-full whitespace-normal break-words text-xs font-medium text-zinc-500 dark:text-zinc-400 md:inline">
               {t("chat.modelComparison")}
             </span>
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
@@ -3799,9 +3803,11 @@ export function ChatInput({
               aria-expanded={isMenuOpen && menuView === "models"}
               aria-controls="chat-input-popover"
               aria-haspopup="dialog"
-              className="flex min-h-11 shrink-0 touch-manipulation items-center justify-center gap-1 rounded-xl px-2 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+              className="flex min-h-11 min-w-0 max-w-full flex-wrap touch-manipulation items-center justify-center gap-1 rounded-xl px-2 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
             >
-              <span className="hidden md:inline">{t("chat.modelSelect")}</span>
+              <span className="hidden min-w-0 max-w-full whitespace-normal break-words text-center leading-4 md:inline">
+                {t("chat.modelSelect")}
+              </span>
               <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span
                 data-testid="composer-active-model-count"
@@ -3936,7 +3942,7 @@ export function ChatInput({
         <div className="relative flex flex-wrap items-center justify-between gap-1.5" ref={menuRef}>
         <div
           data-testid="composer-primary-tools"
-          className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5"
+          className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 max-[240px]:contents"
         >
           <button
             ref={actionMenuButtonRef}
@@ -3983,15 +3989,13 @@ export function ChatInput({
               ref={modelMenuButtonRef}
               type="button"
               onClick={(event) => toggleModelPicker(event.currentTarget)}
-              className="flex h-11 min-w-0 max-w-[132px] touch-manipulation items-center gap-1.5 overflow-hidden rounded-xl bg-zinc-100 px-3 text-xs font-medium text-zinc-800 transition hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
+              className="flex h-11 min-w-0 max-w-[132px] touch-manipulation items-center gap-1.5 overflow-hidden rounded-xl bg-zinc-100 px-3 text-xs font-medium text-zinc-800 transition hover:bg-zinc-200 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:gap-1 max-[240px]:px-0 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
               data-testid="composer-model-select"
               title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
               aria-label={
                 isAutoMode
                   ? `${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
-                  : isReviewProduct
-                    ? `${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}`
-                    : t("chat.modelSelect")
+                  : `${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}`
               }
               aria-expanded={isMenuOpen && menuView === "models"}
               aria-controls="chat-input-popover"
@@ -4005,12 +4009,14 @@ export function ChatInput({
                   <Sparkles className="h-3 w-3" />
                 </span>
               ) : activeSelectedModels.length === 1 ? (
-                <ModelLogo
-                  model={AVAILABLE_MODELS.find(
-                    (item) => item.id === activeSelectedModels[0]
-                  )}
-                  size="xs"
-                />
+                <span className="max-[240px]:hidden">
+                  <ModelLogo
+                    model={AVAILABLE_MODELS.find(
+                      (item) => item.id === activeSelectedModels[0]
+                    )}
+                    size="xs"
+                  />
+                </span>
               ) : (
                 <span
                   aria-hidden="true"
@@ -4019,9 +4025,17 @@ export function ChatInput({
                   {activeSelectedModels.length}
                 </span>
               )}
+              {!isAutoMode && activeSelectedModels.length === 1 && (
+                <span
+                  aria-hidden="true"
+                  className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white max-[240px]:flex"
+                >
+                  1
+                </span>
+              )}
               <span
                 data-testid="composer-active-model-count"
-                className="min-w-0 line-clamp-2 break-keep"
+                className="min-w-0 line-clamp-2 break-keep max-[240px]:sr-only"
               >
                 {isAutoMode
                   ? autoCopy.label
@@ -4043,7 +4057,7 @@ export function ChatInput({
         */}
         <div
           data-testid="composer-submit-actions"
-          className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5"
+          className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-[240px]:contents"
         >
 
           {!isAutoMode && activeSelectedModels.length > 0 && (
@@ -4051,29 +4065,32 @@ export function ChatInput({
               type="button"
               data-testid="request-credit-estimate"
               onClick={() => setIsCreditBreakdownOpen(true)}
-              className="flex min-h-11 min-w-0 max-w-full flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-xl px-2 py-1 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              title={t("chat.creditEstimateAria").replace(
-                "{credits}",
-                String(estimatedRequestCredits)
-              )}
-              aria-label={
-                t("chat.creditEstimateAria").replace(
-                  "{credits}",
-                  String(estimatedRequestCredits)
-                )
-              }
+              className="flex min-h-11 min-w-0 max-w-full flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-xl px-2 py-1 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 max-[240px]:h-11 max-[240px]:w-11 max-[240px]:shrink-0 max-[240px]:flex-nowrap max-[240px]:gap-x-0.5 max-[240px]:p-0 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title={creditEstimateAccessibleLabel}
+              aria-label={creditEstimateAccessibleLabel}
             >
               <CreditCoinIcon className="h-4 w-4 shrink-0" />
-              <span className="min-w-0 whitespace-normal break-words text-center leading-4">
+              <span className="min-w-0 whitespace-normal break-words text-center leading-4 max-[240px]:sr-only">
                 {t("chat.creditEstimateLabel").replace(
                   "{credits}",
                   String(estimatedRequestCredits)
                 )}
               </span>
+              <span
+                aria-hidden="true"
+                className="hidden min-w-0 max-w-full break-all leading-none tabular-nums max-[240px]:inline"
+              >
+                {estimatedRequestCredits}
+              </span>
               {inputCreditMultiplier > 1 && (
-                <span className="shrink-0 text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
+                <span className="shrink-0 text-amber-600 max-[240px]:sr-only dark:text-amber-400">
+                  {inputCreditMultiplier}×
+                </span>
               )}
-              <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <ChevronDown
+                className="h-3.5 w-3.5 shrink-0 max-[240px]:hidden"
+                aria-hidden="true"
+              />
             </button>
           )}
           <ChatInputAutoCapabilityPendingNotice

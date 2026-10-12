@@ -110,7 +110,8 @@ test.describe("Tomverse Chat and Review product switcher", () => {
     await composer.getByTestId("composer-model-select").click();
     await expect(page.locator("#chat-input-popover")).toBeVisible();
     expect(conversationWrites).toEqual([]);
-    await composer.getByTestId("composer-model-select").click();
+    // The existing full-screen picker closes through Escape/Done, then returns focus.
+    await page.keyboard.press("Escape");
     await expect(page.locator("#chat-input-popover")).toHaveCount(0);
     await composer.getByTestId("composer-model-select").click();
     await expect(page.locator("#chat-input-popover")).toBeVisible();
