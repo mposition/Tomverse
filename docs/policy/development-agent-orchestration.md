@@ -1723,7 +1723,7 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
 | R2b | 유도 카탈로그를 shadow로 계산하고, Admin에 환경 변수 카탈로그와의 동등성 표시 | 동등이 정해진 기간 동안 관측됨 |
 | R2c | 일곱 사용처를 유도 카탈로그로 전환 | 운영자 활성화 기록 뒤 배정이 유도 카탈로그로 이뤄짐 |
 | R2d | bridge 목록 route, Rust 변경, 호스트 바이너리 교체 | 세션 목록이 유도 카탈로그와 같음을 관측 |
-| R2e | 두 카탈로그 환경 변수와 `TOMVERSE_AMUX_WSL_SESSIONS` 삭제. 앱 서비스의 변수, 버전 28 IaC(`.railway/agent-runners.ts`)의 AMUX Orchestrator 변수 목록, 호스트 환경을 함께 지운다. IaC 목록에 남기면 다음 apply가 변수를 되살린다. Orchestrator 바이너리는 이 변수를 읽지 않는다. | 버전 31 8항 R2의 종료 조건 |
+| R2e | 두 카탈로그 환경 변수와 `TOMVERSE_AMUX_WSL_SESSIONS` 삭제. 두 카탈로그 변수는 앱 서비스에서 지운다. `TOMVERSE_AMUX_WORKER_CATALOG_JSON`은 버전 28 IaC(`.railway/agent-runners.ts`)의 AMUX Orchestrator 변수 목록에도 있으므로 거기서도 지운다. 목록에 남기면 다음 apply가 그 변수를 되살린다. Orchestrator 바이너리는 그 변수를 읽지 않는다. v22 카탈로그 변수는 앱 서비스에만 있다. `TOMVERSE_AMUX_WSL_SESSIONS`는 호스트 환경에만 있으며, IaC는 일부러 그 이름을 두지 않는다. | 버전 31 8항 R2의 종료 조건 |
 
 - R2a와 R2b는 배정을 바꾸지 않으므로 R1의 관측 기간(버전 32·34)과 함께 진행할 수 있다.
 - R2c는 R1 관측이 끝난 뒤에만 켠다.
