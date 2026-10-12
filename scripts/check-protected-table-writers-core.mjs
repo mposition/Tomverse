@@ -345,6 +345,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/amux-decision-maker.md §10",
   },
   {
+    table: "AmuxWorkerRegistryEvent",
+    delegate: "amuxWorkerRegistryEvent",
+    writers: ["lib/amux/workerRegistryStore.ts"],
+    contract: "docs/policy/development-agent-orchestration.md 버전 31",
+  },
+  {
     table: "AmuxDecisionMakerRequest",
     delegate: "amuxDecisionMakerRequest",
     writers: ["lib/amux/decisionMakerRequestStore.ts"],
@@ -551,6 +557,30 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261012090000_amux_worker_registry/migration.sql",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 9,
+    writeVerbs: 23,
+    reason:
+      "Creates the registry event table, its indexes, its foreign key to the audit log and the guard trigger that holds the change rule, binds an insert to its audit row and refuses every update and delete. It names those verbs to constrain or refuse them, reads the worker's newest event in the guard, and writes no row.",
+  },
+  {
+    path: "lib/amux/workerRegistryStore.ts",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "The registry event table's single writer (orchestration policy version 31, section 3). Its raw SQL is two constant SELECTs (the newest event of every worker, and of one worker) and one constant INSERT ... RETURNING; every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261012090000_amux_worker_registry/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 23,
+    reason:
+      "The worker registry migration (orchestration policy version 31, sections 3, 5 and 7). Its four AdminAuditLog mentions are the restrictive foreign keys from the registry event's, the trial evidence's and the latch event's auditLogId, and the one SELECT EXISTS read in the registry guard that refuses an event whose audit row of the same transaction, person and action is missing. It never writes AdminAuditLog; its write verbs are the ALTER TABLEs adding those keys with their ON DELETE / ON UPDATE RESTRICT, the four triggers' events, the guards' TG_OP comparison and words of comments.",
+  },
   {
     path: "lib/promptRefinerVnextOneShotTerminalReceipt.ts",
     table: "AdminAuditLog",
@@ -1920,6 +1950,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 3,
     reason:
       "Three reads in the Decision Maker switch event guard, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the newest event of the inserted event's scope, read after a transaction advisory lock on that scope, and one SELECT EXISTS on AdminAuditLog for a person's event or for a latch. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261012090000_amux_worker_registry/migration.sql",
+    count: 2,
+    reason:
+      "Two reads in the worker registry event guard, both with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the inserted worker's newest event, read after a transaction advisory lock on that worker, and one SELECT EXISTS on AdminAuditLog for the person's audit row of the same transaction. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",

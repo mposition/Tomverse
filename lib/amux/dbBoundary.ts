@@ -252,6 +252,22 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // setup + the newest registry, latch and observation of each worker (3,
+  // pinned by tests/amuxWorkerRegistryStore.test.mjs) + fence
+  workerRegistryRead: {
+    operation: "worker_registry_read",
+    prismaCallCeiling: 5,
+    isolation: "read",
+  },
+  // setup + an owner's registry change at its largest (audit chain lock, the
+  // worker's newest event, the administrator audit's 4 with an integrity key,
+  // the event insert: 7, pinned by tests/amuxWorkerRegistryStore.test.mjs) +
+  // fence (orchestration policy version 31, section 3)
+  workerRegistryChange: {
+    operation: "worker_registry_change",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
 } as const satisfies Record<string, AmuxDbBoundary>;
 
 /**

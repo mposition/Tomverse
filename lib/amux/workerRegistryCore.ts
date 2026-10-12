@@ -303,9 +303,19 @@ export type AmuxWorkerObservationStatus = (typeof AMUX_WORKER_OBSERVATION_STATUS
 export const AMUX_WORKER_LATCH_EVENT_KINDS = ["opened", "released"] as const;
 export type AmuxWorkerLatchEventKind = (typeof AMUX_WORKER_LATCH_EVENT_KINDS)[number];
 
+/** The system opens a latch; a person releases it. */
+export const AMUX_WORKER_LATCH_ACTOR_KINDS = ["system", "human"] as const;
+
 /** Section 5(1): only `passed` passes; `failed` and `unknown` do not. */
 export const AMUX_WORKER_TRIAL_OUTCOMES = ["passed", "failed", "unknown"] as const;
 export type AmuxWorkerTrialOutcome = (typeof AMUX_WORKER_TRIAL_OUTCOMES)[number];
+
+export const isAmuxWorkerObservationStatus = (value: unknown): value is AmuxWorkerObservationStatus =>
+  isOneOf(AMUX_WORKER_OBSERVATION_STATUSES, value);
+export const isAmuxWorkerLatchEventKind = (value: unknown): value is AmuxWorkerLatchEventKind =>
+  isOneOf(AMUX_WORKER_LATCH_EVENT_KINDS, value);
+export const isAmuxWorkerTrialOutcome = (value: unknown): value is AmuxWorkerTrialOutcome =>
+  isOneOf(AMUX_WORKER_TRIAL_OUTCOMES, value);
 
 /** Activation gate 2: three trial cards and US$5 per worker, three failures for a latch. */
 export const AMUX_WORKER_TRIAL_CARD_COUNT = 3;
