@@ -28,6 +28,7 @@ import {
 import {
   expandEmailEvent,
   policyChangeNoticeAudienceWhere,
+  policyChangeNoticeOwedWhere,
   type ExpansionOutcome,
 } from "@/lib/emailAudienceExpansion";
 import { prisma } from "@/lib/prisma";
@@ -1101,12 +1102,7 @@ export const estimateCampaignAudience = async (input: {
 
   if (spec.cohort.kind === "policy_change_notice") {
     const effectiveDate = spec.cohort.effectiveDate;
-    const owedWhere: Prisma.UserWhereInput = {
-      OR: [
-        { createdAt: null },
-        { createdAt: { lt: new Date(`${effectiveDate}T00:00:00.000Z`) } },
-      ],
-    };
+    const owedWhere = policyChangeNoticeOwedWhere(effectiveDate);
     const audience = policyChangeNoticeAudienceWhere(effectiveDate, input.now ?? new Date());
     // One snapshot, so the two differences below cannot go negative when an
     // account or a notice row lands between the counts.

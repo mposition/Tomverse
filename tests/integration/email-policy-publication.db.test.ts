@@ -487,3 +487,39 @@ test("the accounts holding the gate shut are named, with why", async () => {
   assert.equal(byId.get(accepted.id), "sent");
   assert.ok(!JSON.stringify(result.blockingAccounts).includes("@"));
 });
+
+test("an account created after the amendment was published is not owed the notice", async () => {
+  // Owner decision 2026-10-12 (docs/policy/email-policy-amendment-draft.md section 5.1):
+  // an account that signed up under the published amendment does not hold the gate.
+  const published = daysBefore(44);
+  const before = await account(daysBefore(60));
+  await account(daysBefore(20)); // after publication, before the effective date
+  await delivery(before.id, "delivered", daysBefore(40));
+
+  const cut = await noticeFactsFor(
+    ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
+    HASHES,
+    EFFECTIVE,
+    EFFECTIVE,
+    published
+  );
+  assert.equal(cut.owed, 1);
+  assert.equal(cut.told, 1);
+  assert.equal(cut.untold, 0);
+
+  // Without the cutoff the later account is owed and, never told, holds the gate.
+  const uncut = await facts();
+  assert.equal(uncut.owed, 2);
+  assert.equal(uncut.untold, 1);
+
+  // A cutoff after the effective date never widens the owed set past it.
+  await account(new Date(EFFECTIVE.getTime() + DAY));
+  const late = await noticeFactsFor(
+    ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
+    HASHES,
+    EFFECTIVE,
+    EFFECTIVE,
+    new Date(EFFECTIVE.getTime() + 10 * DAY)
+  );
+  assert.equal(late.owed, 2);
+});

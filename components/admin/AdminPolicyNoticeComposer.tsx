@@ -41,6 +41,7 @@ export function AdminPolicyNoticeComposer({
   templateKey,
   locales,
   effectiveDate,
+  owedBefore,
   wordingApproved,
 }: {
   mayWrite: boolean;
@@ -49,6 +50,8 @@ export function AdminPolicyNoticeComposer({
   locales: readonly string[];
   /** YYYY-MM-DD, or null while the notice has no date. */
   effectiveDate: string | null;
+  /** When the amendment was published, as shown to the operator (UTC). */
+  owedBefore: string;
   /** Every locale renders to an approved hash on this deployment. */
   wordingApproved: boolean;
 }) {
@@ -156,7 +159,7 @@ export function AdminPolicyNoticeComposer({
       <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">{m.intro}</p>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
-        {effectiveDate ? m.audience(effectiveDate) : m.noDate}
+        {effectiveDate ? m.audience(owedBefore) : m.noDate}
       </p>
       {!wordingApproved ? (
         <p className="mt-4 rounded-2xl border border-amber-800 bg-amber-950/40 p-4 text-sm leading-6 text-amber-100">
