@@ -717,19 +717,21 @@ test.describe("the AMUX group by role", () => {
     // is clicked here: a registration is a write.
     await signInAs("readonly");
     await page.goto("/admin/amux-execution?tab=workers");
-    const panel = page.getByTestId("amux-worker-registry-panel");
-    await expect(panel).toBeVisible();
-    await expect(page.getByTestId("amux-worker-registry-read-only")).toBeVisible();
-    await expect(page.getByTestId("amux-worker-registry-comparison-status")).toBeVisible();
-    await expect(page.getByTestId("amux-worker-registry-seed")).toHaveCount(0);
+    // Streaming may retain a hidden page copy during the role transition.
+    const panel = page.getByTestId("amux-worker-registry-panel").filter({ visible: true });
+    await expect(panel).toHaveCount(1);
+    await expect(panel.getByTestId("amux-worker-registry-read-only")).toBeVisible();
+    await expect(panel.getByTestId("amux-worker-registry-comparison-status")).toBeVisible();
+    await expect(panel.getByTestId("amux-worker-registry-seed")).toHaveCount(0);
     await expect(panel.getByRole("button")).toHaveCount(0);
 
     await signInAs("owner");
     await page.goto("/admin/amux-execution?tab=workers");
-    await expect(page.getByTestId("amux-worker-registry-read-only")).toHaveCount(0);
-    await expect(page.getByTestId("amux-worker-registry-latch")).toBeVisible();
-    await expect(page.getByTestId("amux-worker-registry-seed")).toBeVisible();
-    await expect(page.getByTestId("amux-worker-registry-seed-register")).toBeEnabled();
+    await expect(panel).toHaveCount(1);
+    await expect(panel.getByTestId("amux-worker-registry-read-only")).toHaveCount(0);
+    await expect(panel.getByTestId("amux-worker-registry-latch")).toBeVisible();
+    await expect(panel.getByTestId("amux-worker-registry-seed")).toBeVisible();
+    await expect(panel.getByTestId("amux-worker-registry-seed-register")).toBeEnabled();
     expect(await adminFixtureDatabase().amuxWorkerRegistryEvent.count()).toBe(0);
   });
 
