@@ -94,6 +94,35 @@ test("an adoption that retires a trio member names its guest-eligible successor 
   );
 });
 
+test("replacing a member that is already limited still names the adoption's successor", () => {
+  const member = GUEST_BRAND_TRIO_MODEL_IDS.find((id) => id !== APP_DEFAULTS.defaultModelId)!;
+  // The member fails the default rule today (limited or unlisted); its slot is
+  // filled now by its current replacement, "current-successor".
+  const isEligible = (id: string) =>
+    id !== member &&
+    (id === "current-successor" ||
+      id === "adopted-successor" ||
+      eligible(id) ||
+      (GUEST_FALLBACK_MODEL_IDS as readonly string[]).includes(id));
+  const current = (id: string) => (id === member ? "current-successor" : undefined);
+  const adoption = (id: string) => (id === member ? "adopted-successor" : undefined);
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, adoption, undefined, current),
+    "adopted-successor"
+  );
+  // Judged with the adoption's resolver for both, the change disappears --
+  // the defect this parameter fixes.
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, adoption),
+    null
+  );
+  // An adoption that keeps today's successor changes nothing.
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, current, undefined, current),
+    null
+  );
+});
+
 test("the effective lead follows a retired lead's successor", () => {
   const lead = APP_DEFAULTS.guestDefaultModelId;
   const isEligible = (id: string) => id !== lead && (id === "lead-successor" || eligible(id));

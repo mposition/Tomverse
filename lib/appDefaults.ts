@@ -86,6 +86,8 @@ export const isDefaultLineupServable = (
 
 /**
  * `isEligible` narrowed to what a default may name (isDefaultLineupServable).
+ * `isEligible` is the caller's own plan rule: the guest check everywhere,
+ * except a new account's first comparison, which checks "Free".
  * Every place that computes a default selection -- the guest default, a new
  * account's first comparison, the lead facts, the console and
  * check:default-models -- passes this as the resolver's `isEligible`, so a

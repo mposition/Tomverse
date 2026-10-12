@@ -1605,7 +1605,10 @@ export function AdminModelRegistryPanel() {
                         guestLead?.effective ?? null,
                         eligible,
                         (id, accept) => (successor && id === selected.id ? successor.id : catalogueReplacement(id, accept)),
-                        guestTrio
+                        guestTrio,
+                        // Today's slot: if the member already fails the
+                        // default rule, its current chain fills it now.
+                        catalogueReplacement
                       );
                       if (!substituteId) return null;
                       const substitute = models.find((model) => model.id === substituteId);
