@@ -564,6 +564,10 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
     min-height: 2.75rem;
   }
 
+  .composer-chip-exception-row > [data-testid="web-search-mode-chip"] {
+    column-gap: 0.75rem;
+  }
+
   .composer-chip-touch-target::before {
     inset: -0.875rem -0.25rem;
   }
