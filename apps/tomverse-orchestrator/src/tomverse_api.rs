@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -2348,6 +2349,40 @@ pub struct WorkerRegisterResponse {
     pub reason: Option<String>,
 }
 
+/// The session list route's body (orchestration policy version 35, section 4).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerSessionListResponse {
+    pub listed: bool,
+    pub workers: Option<Vec<String>>,
+    pub reason: Option<String>,
+}
+
+/// What the bridge acts on from the session list route (orchestration policy
+/// version 35, section 4). None of the three is a halt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkerSessionList {
+    /// R2d is off, or the app does not serve the route yet: the environment
+    /// allowlist stays the only list, exactly as before.
+    Off,
+    /// The names the derived catalog lists; the bridge narrows its
+    /// environment allowlist to them.
+    Listed(BTreeSet<String>),
+    /// Any other answer, including no answer: nothing new registers and no
+    /// session is offered for dispatch until a later read succeeds.
+    Unreadable,
+}
+
+/// The one reading of a 200 body: anything but the two exact shapes is
+/// unreadable, never a list.
+pub fn plan_worker_session_list(body: &WorkerSessionListResponse) -> WorkerSessionList {
+    match (body.listed, &body.workers, body.reason.as_deref()) {
+        (true, Some(workers), None) => WorkerSessionList::Listed(workers.iter().cloned().collect()),
+        (false, None, Some("session_list_off")) => WorkerSessionList::Off,
+        _ => WorkerSessionList::Unreadable,
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct WorkerHeartbeatRequest<'a> {
     worker_name: &'a str,
@@ -2596,6 +2631,40 @@ impl TomverseApi {
             bail!("invalid Tomverse AMUX worker-register response invariant");
         }
         Ok(body)
+    }
+
+    /// Orchestration policy version 35, section 4: the sessions the derived
+    /// worker catalog lists. Read-only. A 404 is an app that does not serve the
+    /// route yet, which is the list being off; every other failure is
+    /// unreadable.
+    pub async fn worker_session_list(&self) -> WorkerSessionList {
+        let response = match self
+            .client
+            .get(format!(
+                "{}/api/internal/amux/workers/session-list",
+                self.base_url
+            ))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(_) => return WorkerSessionList::Unreadable,
+        };
+        if response.status() == StatusCode::NOT_FOUND {
+            return WorkerSessionList::Off;
+        }
+        match read_bounded_json::<WorkerSessionListResponse>(
+            response,
+            &[StatusCode::OK],
+            MAX_LIFECYCLE_RESPONSE_BYTES,
+        )
+        .await
+        {
+            Ok((_, body)) => plan_worker_session_list(&body),
+            Err(_) => WorkerSessionList::Unreadable,
+        }
     }
 
     pub async fn worker_heartbeat(

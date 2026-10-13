@@ -31,7 +31,7 @@ use crate::local_card::{
 use crate::tomverse_api::{
     is_database_busy, DatabaseBusy, ExecutionStartResponse, NothingCommittedAnswer, OwnedTodoTask,
     PulledDelivery, SelectionRead, SelectionReadTransientStatus, UnacceptedStatus,
-    BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
+    WorkerSessionList, BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
 };
 
 /// The idle reason for an execution start that answered the exact
@@ -210,6 +210,18 @@ pub fn session_allowed(allowlist: &Option<Vec<String>>, name: &str) -> bool {
     allowlist
         .as_ref()
         .is_none_or(|names| names.iter().any(|allowed| allowed == name))
+}
+
+/// Orchestration policy version 35, section 4: whether the session list lets
+/// a session register or be offered for dispatch. Off leaves the environment
+/// allowlist alone; a list narrows it (the two are intersected during the
+/// transition); an unreadable list lets nothing through.
+pub fn session_listed(list: &WorkerSessionList, name: &str) -> bool {
+    match list {
+        WorkerSessionList::Off => true,
+        WorkerSessionList::Listed(names) => names.contains(name),
+        WorkerSessionList::Unreadable => false,
+    }
 }
 
 /// Exit status of a runner that stopped taking assignments.
@@ -1939,10 +1951,17 @@ async fn retry_registrations(
     api: &crate::tomverse_api::TomverseApi,
     awaiting: &mut Vec<(String, String)>,
     sessions: &mut ExistingSessionAdapter,
+    session_list: &WorkerSessionList,
 ) {
     let mut still_awaiting = Vec::new();
     for (name, instance_id) in awaiting.drain(..) {
         if sessions.presence(&name).is_some() {
+            continue;
+        }
+        // Version 35, section 4: a session the list does not let through is
+        // not registered this tick; it waits with its instance id.
+        if !session_listed(session_list, &name) {
+            still_awaiting.push((name, instance_id));
             continue;
         }
         match plan_registration_answer(&api.worker_register(&name, &instance_id).await) {
@@ -2000,6 +2019,22 @@ pub async fn run_from_env() -> i32 {
             return 1;
         }
     };
+    // Orchestration policy version 35, section 4: the derived catalog's
+    // session list narrows the environment allowlist. Unreadable at start is
+    // not a halt: register nothing and let the unit try again.
+    let session_list = api.worker_session_list().await;
+    if session_list == WorkerSessionList::Unreadable {
+        eprintln!("amux wsl bridge could not read the session list; registering nothing");
+        return 1;
+    }
+    let running: Vec<_> = running
+        .into_iter()
+        .filter(|row| session_listed(&session_list, &row.name))
+        .collect();
+    if running.is_empty() {
+        println!("amux wsl bridge found no listed running session");
+        return 0;
+    }
     let mut registered = BTreeMap::new();
     // Sessions whose registration answered busy: it did not happen, so they
     // register next tick with the same instance id.
@@ -2048,8 +2083,18 @@ pub async fn run_from_env() -> i32 {
     let mut quota_checked: BTreeMap<String, std::time::Instant> = BTreeMap::new();
 
     loop {
+        // Version 35, section 4: read the session list every round. A session
+        // it does not let through keeps its true status but is not offered
+        // for dispatch; an attempt already running finishes.
+        let session_list = api.worker_session_list().await;
         if !halted && !awaiting_registration.is_empty() {
-            retry_registrations(&api, &mut awaiting_registration, &mut sessions).await;
+            retry_registrations(
+                &api,
+                &mut awaiting_registration,
+                &mut sessions,
+                &session_list,
+            )
+            .await;
         }
         let roster_ok = refresh_registered_sessions(&client, &base, &mut sessions).await;
         // A worker whose started attempt waits for its delivery is busy too.
@@ -2077,7 +2122,7 @@ pub async fn run_from_env() -> i32 {
                     &session.instance_id,
                     session.generation,
                     plan.status,
-                    plan.dispatch_ready,
+                    plan.dispatch_ready && session_listed(&session_list, &name),
                 )
                 .await;
             match published {
@@ -2958,6 +3003,96 @@ mod tests {
                 status: "stopped",
                 dispatch_ready: false,
             }
+        );
+    }
+
+    #[test]
+    fn the_session_list_reads_three_ways_and_only_the_exact_shapes_count() {
+        // Orchestration policy version 35, section 4.
+        use crate::tomverse_api::{WorkerSessionListResponse, plan_worker_session_list};
+        let body = |listed: bool, workers: Option<Vec<&str>>, reason: Option<&str>| {
+            WorkerSessionListResponse {
+                listed,
+                workers: workers.map(|names| names.into_iter().map(str::to_owned).collect()),
+                reason: reason.map(str::to_owned),
+            }
+        };
+        assert_eq!(
+            plan_worker_session_list(&body(true, Some(vec!["claude-impl", "codex-chore"]), None)),
+            WorkerSessionList::Listed(
+                ["claude-impl".to_owned(), "codex-chore".to_owned()]
+                    .into_iter()
+                    .collect()
+            )
+        );
+        assert_eq!(
+            plan_worker_session_list(&body(true, Some(vec![]), None)),
+            WorkerSessionList::Listed(Default::default())
+        );
+        assert_eq!(
+            plan_worker_session_list(&body(false, None, Some("session_list_off"))),
+            WorkerSessionList::Off
+        );
+        // The catalog that cannot be derived, and every malformed shape, is
+        // unreadable -- never a list, never off.
+        for unreadable in [
+            body(false, None, Some("worker_catalog_unavailable")),
+            body(false, None, Some("execution_api_disabled")),
+            body(false, None, None),
+            body(true, None, None),
+            body(true, Some(vec!["claude-impl"]), Some("session_list_off")),
+            body(false, Some(vec![]), Some("session_list_off")),
+        ] {
+            assert_eq!(
+                plan_worker_session_list(&unreadable),
+                WorkerSessionList::Unreadable
+            );
+        }
+    }
+
+    #[test]
+    fn the_session_list_narrows_the_allowlist_and_an_unreadable_one_lets_nothing_through() {
+        let listed = WorkerSessionList::Listed(["claude-impl".to_owned()].into_iter().collect());
+        assert!(session_listed(&WorkerSessionList::Off, "claude-impl"));
+        assert!(session_listed(&WorkerSessionList::Off, "anything"));
+        assert!(session_listed(&listed, "claude-impl"));
+        assert!(!session_listed(&listed, "codex-chore"));
+        assert!(!session_listed(
+            &WorkerSessionList::Unreadable,
+            "claude-impl"
+        ));
+    }
+
+    #[test]
+    fn the_run_reads_the_session_list_at_start_and_every_round_and_never_halts_on_it() {
+        let source = include_str!("wsl_bridge.rs");
+        let run = &source[source.find("pub async fn run_from_env").unwrap()..];
+        let start = run
+            .find("let session_list = api.worker_session_list().await;")
+            .unwrap();
+        // At start: unreadable registers nothing and exits 1 for the unit to retry;
+        // the list narrows the running sessions before anything registers.
+        assert!(start < run.find("let mut registered = BTreeMap::new();").unwrap());
+        assert!(run.contains("if session_list == WorkerSessionList::Unreadable {"));
+        assert!(run.contains(".filter(|row| session_listed(&session_list, &row.name))"));
+        // Every round: read again, gate registration retries and dispatch readiness.
+        let round = &run[run.find("    loop {").unwrap()..];
+        assert!(
+            round
+                .find("let session_list = api.worker_session_list().await;")
+                .unwrap()
+                < round.find("retry_registrations(").unwrap()
+        );
+        assert!(round.contains("plan.dispatch_ready && session_listed(&session_list, &name)"));
+        // Nothing about the list sets the halt.
+        let list_lines: Vec<_> = run
+            .lines()
+            .filter(|line| line.contains("session_list"))
+            .collect();
+        assert!(
+            list_lines
+                .iter()
+                .all(|line| !line.contains("halted = true"))
         );
     }
 
@@ -3968,7 +4103,13 @@ mod tests {
             "codex-impl".to_owned(),
             "00000000-0000-4000-8000-000000000009".to_owned(),
         )];
-        retry_registrations(&api, &mut awaiting, &mut sessions).await;
+        retry_registrations(
+            &api,
+            &mut awaiting,
+            &mut sessions,
+            &WorkerSessionList::Off,
+        )
+        .await;
         assert!(awaiting.is_empty());
         assert_eq!(
             sessions.presence("codex-impl"),
@@ -3988,7 +4129,13 @@ mod tests {
             "claude-impl".to_owned(),
             "00000000-0000-4000-8000-000000000009".to_owned(),
         )];
-        retry_registrations(&api, &mut awaiting, &mut sessions).await;
+        retry_registrations(
+            &api,
+            &mut awaiting,
+            &mut sessions,
+            &WorkerSessionList::Off,
+        )
+        .await;
         assert!(awaiting.is_empty());
         assert_eq!(
             sessions.presence("claude-impl").map(|session| session.generation),
