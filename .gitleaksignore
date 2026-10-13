@@ -483,3 +483,28 @@ c627ce4ede7ab0618b16205d8109741facab5fd8:tests/amuxDecisionMakerBody.test.mjs:gi
 51f44b3b24adcdd306d23d2d47126b2d0db421a3:tests/amuxDecisionMakerBody.test.mjs:generic-api-key:371
 51f44b3b24adcdd306d23d2d47126b2d0db421a3:tests/amuxDecisionMakerBody.test.mjs:generic-api-key:372
 51f44b3b24adcdd306d23d2d47126b2d0db421a3:tests/amuxDecisionMakerBody.test.mjs:github-pat:494
+
+# The guarded v22 FIRST Task recovery (orchestration policy v40-v42) names the
+# dedicated non-root Linux account that holds the API key file, and pins the
+# public IDs of the one approved Task and its prior attempt. The scanner's
+# generic-api-key rule reads that account name (keyOwner, api_user,
+# API_EXECUTOR_USER) and those two UUID constants as keys. None of them grants
+# access to anything; the key itself is never in the repository. Values are
+# intentionally not repeated here.
+#
+# Scope: exactly these findings in these commits (develop dcb1e139/dc0d3135,
+# main release 2acb508a) — nothing wider.
+dcb1e1396719b44f797dc003b45bb2e6cc0a0bb6:scripts/systemd/amux-v22-read-only-api-credential-profile.example.json:generic-api-key:5
+dcb1e1396719b44f797dc003b45bb2e6cc0a0bb6:tests/amuxV22ReadOnlyApiHostInstall.test.mjs:generic-api-key:47
+dcb1e1396719b44f797dc003b45bb2e6cc0a0bb6:scripts/install-amux-v22-read-only-api-sidecar.sh:generic-api-key:115
+dcb1e1396719b44f797dc003b45bb2e6cc0a0bb6:tests/amuxV22ReadOnlyApiHost.test.mjs:generic-api-key:279
+dcb1e1396719b44f797dc003b45bb2e6cc0a0bb6:lib/amux/v22ReadOnlyApiHost.mjs:generic-api-key:26
+dc0d313558e0e27456854d2e8f5b165558b9be6f:lib/amux/v22ApiModelAccessProtocol.mjs:generic-api-key:5
+dc0d313558e0e27456854d2e8f5b165558b9be6f:lib/amux/v22ApiModelAccessProtocol.mjs:generic-api-key:7
+2acb508acee867a368e43556ddc49d36048a045c:lib/amux/v22ApiModelAccessProtocol.mjs:generic-api-key:5
+2acb508acee867a368e43556ddc49d36048a045c:lib/amux/v22ApiModelAccessProtocol.mjs:generic-api-key:7
+2acb508acee867a368e43556ddc49d36048a045c:scripts/systemd/amux-v22-read-only-api-credential-profile.example.json:generic-api-key:5
+2acb508acee867a368e43556ddc49d36048a045c:tests/amuxV22ReadOnlyApiHostInstall.test.mjs:generic-api-key:47
+2acb508acee867a368e43556ddc49d36048a045c:scripts/install-amux-v22-read-only-api-sidecar.sh:generic-api-key:115
+2acb508acee867a368e43556ddc49d36048a045c:tests/amuxV22ReadOnlyApiHost.test.mjs:generic-api-key:279
+2acb508acee867a368e43556ddc49d36048a045c:lib/amux/v22ReadOnlyApiHost.mjs:generic-api-key:34

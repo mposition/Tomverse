@@ -1,0 +1,32 @@
+[Unit]
+Description=Tomverse AMUX v22 recovery inspector (%i, disabled by default)
+After=network-online.target tomverse-amux-v22-sidecar@%i.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tomverse-amux-v22-inspector
+Group=amux-v22-ipc
+Environment=TOMVERSE_AMUX_V22_WORKER=%i
+Environment=TOMVERSE_AMUX_V22_SIDECAR_SOCKET=/run/tomverse-amux-v22-%i/task.sock
+EnvironmentFile=-/etc/tomverse-amux-v22/recovery-inspector@%i.env
+ExecStart=/usr/bin/node /opt/tomverse-amux-v22/recovery-checker.mjs
+Restart=no
+TimeoutStartSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+InaccessiblePaths=/etc/tomverse-amux-v22/recovery-controller.env
+InaccessiblePaths=/var/lib/tomverse-amux-v22/recovery-stop-intents
+
+# Intentionally no [Install]. Its paired instance timer remains disabled.

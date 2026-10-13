@@ -27,6 +27,26 @@ test("composite checks do not masquerade as a closed enum", () => {
   assert.deepEqual(constraints, []);
 });
 
+test("ALTER-added composite checks do not masquerade as a closed enum", () => {
+  const constraints = readEnumConstraints([migration("composite", `
+    ALTER TABLE "Example"
+      ADD CONSTRAINT "Example_shape_check" CHECK (
+        "operation" IN ('split', 'merge') AND "state" IN ('draft', 'done')
+      );
+  `)]);
+  assert.deepEqual(constraints, []);
+});
+
+test("a nullable NOT VALID ALTER enum remains registered", () => {
+  const constraints = readEnumConstraints([migration("nullable", `
+    ALTER TABLE "Example"
+      ADD CONSTRAINT "Example_state_check"
+      CHECK ("state" IS NULL OR "state" IN ('draft', 'done')) NOT VALID;
+  `)]);
+  assert.equal(constraints.length, 1);
+  assert.deepEqual(constraints[0].values, ["draft", "done"]);
+});
+
 test("the newest definition of a constraint wins", () => {
   const constraints = readEnumConstraints([
     migration(

@@ -118,6 +118,63 @@ test("delegate writes are findings, in every spelling", () => {
   }
 });
 
+test("the v22 Task recovery ledgers have one exact writer and foreign delegates stay closed", () => {
+  const expected = [
+    ["AmuxV22TaskRecoveryInspectionRequest", "amuxV22TaskRecoveryInspectionRequest"],
+    ["AmuxV22TaskRecoveryEvidence", "amuxV22TaskRecoveryEvidence"],
+    ["AmuxV22TaskRecoveryApproval", "amuxV22TaskRecoveryApproval"],
+    ["AmuxV22TaskRecoveryRiskAcceptance", "amuxV22TaskRecoveryRiskAcceptance"],
+    ["AmuxV22ReadOnlyLaunchCheck", "amuxV22ReadOnlyLaunchCheck"],
+    ["AmuxV22ReadOnlyLaunchProof", "amuxV22ReadOnlyLaunchProof"],
+  ];
+  const protectedRecoveryTables = PROTECTED_TABLES.filter(({ table }) =>
+    expected.some(([expectedTable]) => expectedTable === table)
+  );
+  assert.deepEqual(
+    protectedRecoveryTables.map(({ table, delegate, writers }) => ({ table, delegate, writers })),
+    expected.map(([table, delegate]) => ({
+      table,
+      delegate,
+      writers: ["lib/amux/v22TaskRecoveryService.ts"],
+    }))
+  );
+
+  for (const [, delegate] of expected) {
+    assertOneFinding(
+      `lib/foreign-${delegate}.ts`,
+      `await prisma.${delegate}.create({ data })`,
+      "delegate-write"
+    );
+    assertOneFinding(
+      `lib/escaped-${delegate}.ts`,
+      `const ledger = prisma.${delegate}; await ledger.create({ data })`,
+      "delegate-write"
+    );
+    assert.deepEqual(
+      one(
+        "lib/amux/v22TaskRecoveryService.ts",
+        `await tx.${delegate}.create({ data })`
+      ),
+      []
+    );
+  }
+});
+
+test("the content-free usage ledger has only its record and retention writers", () => {
+  const protectedUsage = PROTECTED_TABLES.find(({ table }) =>
+    table === "AmuxCliUsageEvent");
+  assert.deepEqual(protectedUsage, {
+    table: "AmuxCliUsageEvent",
+    delegate: "amuxCliUsageEvent",
+    writers: ["lib/amux/cliUsageLedgerStore.ts", "lib/amux/cliUsageRetention.ts"],
+    contract: "docs/policy/development-agent-orchestration.md 버전 40",
+  });
+  assertOneFinding("lib/foreign-usage.ts",
+    "await prisma.amuxCliUsageEvent.create({ data })", "delegate-write");
+  assert.deepEqual(one("lib/amux/cliUsageLedgerStore.ts",
+    "await tx.amuxCliUsageEvent.findUnique({ where })"), []);
+});
+
 test("a delegate reached by name at runtime is a finding", () => {
   assertOneFinding(
     "lib/named.ts",
@@ -279,6 +336,183 @@ test("the monthly budget migration rejects added writes for both protected table
     extended.map((finding) => finding.detail.split(":")[0]).sort(),
     ["AdminAuditLog", "AmuxIdeaAnalysisBudgetSetting"]
   );
+});
+
+test("the v22 Task recovery migration has exact read-only audit references and closed ledger counts", () => {
+  const path = "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const expected = [
+    { table: "AdminAuditLog", tableMentions: 8, writeVerbs: 39 },
+    { table: "AmuxV22TaskRecoveryInspectionRequest", tableMentions: 13, writeVerbs: 39 },
+    { table: "AmuxV22TaskRecoveryEvidence", tableMentions: 8, writeVerbs: 39 },
+    { table: "AmuxV22TaskRecoveryApproval", tableMentions: 10, writeVerbs: 39 },
+  ];
+  assert.deepEqual(
+    RAW_SQL_ALLOWLIST
+      .filter((entry) => entry.path === path)
+      .map(({ table, tableMentions, writeVerbs }) => ({ table, tableMentions, writeVerbs })),
+    expected
+  );
+  assert.doesNotMatch(
+    sqlWithoutComments(source),
+    /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"[^"]+"\.)?"?AdminAuditLog"?/i,
+    "the migration may read and bind AdminAuditLog but must never write it"
+  );
+  const findingsFor = (text) => checkProtectedTableWriters({
+    sources: [{ path, text }],
+  }).filter((finding) => finding.path === path && finding.rule === "raw-sql");
+  assert.deepEqual(findingsFor(source), []);
+  assert.ok(
+    findingsFor(`${source}\nDELETE FROM "AdminAuditLog";\n`)
+      .some((finding) => finding.detail.startsWith("AdminAuditLog:")),
+    "a later audit write must invalidate the exact exception"
+  );
+  for (const { table } of expected.slice(1)) {
+    assert.ok(
+      findingsFor(`${source}\nDELETE FROM "${table}";\n`)
+        .some((finding) => finding.detail.startsWith(`${table}:`)),
+      `a later ${table} write must invalidate the exact exception`
+    );
+  }
+});
+
+test("the v39 DB follow-up and resume reads have five exact reviewed counts", () => {
+  const migrationPath =
+    "prisma/migrations/20261013230000_amux_v22_read_only_retry_db_guards/migration.sql";
+  const servicePath = "lib/amux/v22TaskRecoveryService.ts";
+  const migrationSource = readFileSync(resolve(ROOT, migrationPath), "utf8");
+  const serviceSource = readFileSync(resolve(ROOT, servicePath), "utf8");
+  const reviewed = RAW_SQL_ALLOWLIST.filter((entry) =>
+    entry.path === migrationPath || (entry.path === servicePath &&
+      ["AmuxV22TaskRecoveryInspectionRequest", "AmuxV22TaskRecoveryEvidence"]
+        .includes(entry.table)));
+  assert.deepEqual(
+    reviewed.map(({ path, table, tableMentions, writeVerbs }) => ({
+      path, table, tableMentions, writeVerbs,
+    })),
+    [
+      { path: migrationPath, table: "AmuxV22TaskRecoveryApproval",
+        tableMentions: 5, writeVerbs: 4 },
+      { path: migrationPath, table: "AmuxV22ReadOnlyLaunchCheck",
+        tableMentions: 3, writeVerbs: 4 },
+      { path: migrationPath, table: "AmuxV22ReadOnlyLaunchProof",
+        tableMentions: 2, writeVerbs: 4 },
+      { path: servicePath, table: "AmuxV22TaskRecoveryInspectionRequest",
+        tableMentions: 7, writeVerbs: 3 },
+      { path: servicePath, table: "AmuxV22TaskRecoveryEvidence",
+        tableMentions: 5, writeVerbs: 3 },
+    ]
+  );
+  for (const [path, source] of [[migrationPath, migrationSource], [servicePath, serviceSource]]) {
+    assert.deepEqual(checkProtectedTableWriters({ sources: [{ path, text: source }] })
+      .filter((finding) => finding.path === path && finding.rule === "raw-sql"), []);
+  }
+  for (const entry of reviewed) {
+    const source = entry.path === migrationPath ? migrationSource : serviceSource;
+    const findings = checkProtectedTableWriters({ sources: [{ path: entry.path,
+      text: `${source}\nSELECT 1 FROM "${entry.table}";\n` }] })
+      .filter((finding) => finding.path === entry.path && finding.rule === "raw-sql");
+    assert.ok(findings.some((finding) => finding.detail.startsWith(`${entry.table}:`)),
+      `an unreviewed ${entry.table} occurrence must fail closed`);
+  }
+});
+
+test("the v40 API scope guard replaces one exact constraint and no ledger rows", () => {
+  const path =
+    "prisma/migrations/20261013260000_amux_v22_read_only_api_scope_guards/migration.sql";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const reviewed = RAW_SQL_ALLOWLIST.filter((entry) => entry.path === path);
+
+  assert.deepEqual(
+    reviewed.map(({ table, tableMentions, writeVerbs }) => ({
+      table, tableMentions, writeVerbs,
+    })),
+    [{
+      table: "AmuxV22ReadOnlyLaunchCheck",
+      tableMentions: 1,
+      writeVerbs: 4,
+    }]
+  );
+  assert.deepEqual(
+    checkProtectedTableWriters({ sources: [{ path, text: source }] })
+      .filter((finding) => finding.path === path && finding.rule === "raw-sql"),
+    []
+  );
+  const findings = checkProtectedTableWriters({
+    sources: [{ path, text: `${source}\nSELECT 1 FROM "AmuxV22ReadOnlyLaunchCheck";\n` }],
+  }).filter((finding) => finding.path === path && finding.rule === "raw-sql");
+  assert.ok(findings.some((finding) =>
+    finding.detail.startsWith("AmuxV22ReadOnlyLaunchCheck:")),
+  "an unreviewed launch-check occurrence must fail closed");
+});
+
+test("the v40 native API usage guard replaces one exact check and no rows", () => {
+  const path =
+    "prisma/migrations/20261013280000_amux_native_api_first_task_scope/migration.sql";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const reviewed = RAW_SQL_ALLOWLIST.filter((entry) => entry.path === path);
+  assert.deepEqual(
+    reviewed.map(({ table, tableMentions, writeVerbs }) => ({
+      table, tableMentions, writeVerbs,
+    })),
+    [{ table: "AmuxCliUsageEvent", tableMentions: 1, writeVerbs: 2 }]
+  );
+  assert.deepEqual(
+    checkProtectedTableWriters({ sources: [{ path, text: source }] })
+      .filter((finding) => finding.path === path && finding.rule === "raw-sql"),
+    []
+  );
+  const findings = checkProtectedTableWriters({
+    sources: [{ path, text: `${source}\nSELECT 1 FROM "AmuxCliUsageEvent";\n` }],
+  }).filter((finding) => finding.path === path && finding.rule === "raw-sql");
+  assert.ok(findings.some((finding) =>
+    finding.detail.startsWith("AmuxCliUsageEvent:")),
+  "an unreviewed usage-ledger occurrence must fail closed");
+});
+
+test("the v42 launch-proof deadline guard has exact read-only exceptions and no row DML", () => {
+  const path =
+    "prisma/migrations/20261013330000_amux_v22_api_launch_proof_deadline/migration.sql";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const reviewed = RAW_SQL_ALLOWLIST.filter((entry) => entry.path === path);
+  assert.deepEqual(
+    reviewed.map(({ table, tableMentions, writeVerbs }) => ({
+      table, tableMentions, writeVerbs,
+    })),
+    [{ table: "AmuxV22TaskRecoveryApproval", tableMentions: 2, writeVerbs: 2 },
+      { table: "AmuxV22ReadOnlyLaunchProof", tableMentions: 2, writeVerbs: 2 }]
+  );
+  assert.doesNotMatch(sqlWithoutComments(source),
+    /\b(?:INSERT\s+INTO|UPDATE\s+"|DELETE\s+FROM|TRUNCATE)\b/i);
+});
+
+test("the v41 FIRST Task attempt guard has one exact read-only approval exception", () => {
+  const path =
+    "prisma/migrations/20261013290000_amux_v22_first_task_attempt_limit/migration.sql";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const reviewed = RAW_SQL_ALLOWLIST.filter((entry) => entry.path === path);
+  assert.deepEqual(
+    reviewed.map(({ table, tableMentions, writeVerbs }) => ({
+      table, tableMentions, writeVerbs,
+    })),
+    [{ table: "AmuxV22TaskRecoveryApproval", tableMentions: 3, writeVerbs: 1 }]
+  );
+  assert.doesNotMatch(
+    sqlWithoutComments(source),
+    /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"[^"]+"\.)?"?AmuxV22TaskRecoveryApproval"?/i,
+    "the replacement function may read its approval but must never write it"
+  );
+  assert.deepEqual(
+    checkProtectedTableWriters({ sources: [{ path, text: source }] })
+      .filter((finding) => finding.path === path && finding.rule === "raw-sql"),
+    []
+  );
+  const findings = checkProtectedTableWriters({
+    sources: [{ path, text: `${source}\nDELETE FROM "AmuxV22TaskRecoveryApproval";\n` }],
+  }).filter((finding) => finding.path === path && finding.rule === "raw-sql");
+  assert.ok(findings.some((finding) =>
+    finding.detail.startsWith("AmuxV22TaskRecoveryApproval:")),
+  "a later recovery-approval write must invalidate the exact exception");
 });
 
 test("the Prompt Refiner preview adds exact reads without widening its write boundary", () => {
@@ -789,21 +1023,56 @@ test("the CSS class and the English word are not SQL", () => {
   assert.deepEqual(findings, []);
 });
 
-test("every append-only ledger table is one the migration protects", () => {
+test("every append-only ledger table is one an exact migration protects", () => {
   // The list here and the tables the migration makes append-only are the same
   // decision; a table added to one and not the other is a table whose claim
   // nothing keeps.
-  const sql = readFileSync(
+  const emailSql = readFileSync(
     new URL(
       "../prisma/migrations/20260921170000_email_permission_ledger/migration.sql",
       import.meta.url
     ),
     "utf8"
   );
+  const recoverySql = readFileSync(
+    new URL(
+      "../prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const riskRetrySql = readFileSync(
+    new URL(
+      "../prisma/migrations/20261013220000_amux_v22_read_only_retry_risk/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const apiAccessSql = readFileSync(
+    new URL(
+      "../prisma/migrations/20261013300000_amux_v22_api_model_access_evidence/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const recoveryTables = new Set([
+    "AmuxV22TaskRecoveryInspectionRequest",
+    "AmuxV22TaskRecoveryEvidence",
+    "AmuxV22TaskRecoveryApproval",
+  ]);
+  const riskRetryTables = new Set([
+    "AmuxV22TaskRecoveryRiskAcceptance",
+    "AmuxV22ReadOnlyLaunchCheck",
+    "AmuxV22ReadOnlyLaunchProof",
+  ]);
+  const apiAccessTables = new Set(["AmuxV22ApiModelAccessEvidence"]);
   for (const table of APPEND_ONLY_LEDGER_TABLES) {
+    const sql = recoveryTables.has(table) ? recoverySql :
+      riskRetryTables.has(table) ? riskRetrySql :
+        apiAccessTables.has(table) ? apiAccessSql : emailSql;
     assert.match(
       sql,
-      new RegExp(`BEFORE (INSERT OR )?UPDATE( OR DELETE)? ON "${table}"`),
+      new RegExp(`BEFORE (?:INSERT OR )?UPDATE OR DELETE(?: OR TRUNCATE)?\\s+ON "${table}"`),
       `${table} has no append-only trigger in the migration`
     );
   }

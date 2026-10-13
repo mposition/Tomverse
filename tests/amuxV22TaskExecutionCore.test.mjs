@@ -5,6 +5,7 @@ import { amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
   v22ExecutionCostWithinAssignment,
   v22ExecutionReceiptVerified,
+  v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from
   "../lib/amux/v22TaskExecutionCore.ts";
 
@@ -54,7 +55,8 @@ test("v22 settlement accepts only its one preallocated invocation receipt", () =
     outcome: "succeeded", resultStored: true, reservedCostMicrousd: 1_000n,
     events: [{ invocationId: "attempt-1", status: "succeeded",
       completeness: "reported_complete", projectedApiCostMicrousd: 700n,
-      source: "claude_result", actualModelId: "claude-opus-5-5",
+      cli: "claude", source: "claude_result",
+      actualModelId: "claude-opus-5-5",
       selectedModelId: "claude-opus-5-5" }],
   };
   assert.equal(v22ExecutionReceiptVerified(base), true);
@@ -81,4 +83,36 @@ test("v22 settlement accepts only its one preallocated invocation receipt", () =
     events: [{ ...base.events[0], actualModelId: "claude-sonnet-5" }] }), false);
   assert.equal(v22ExecutionReceiptVerified({ ...base,
     events: [{ ...base.events[0], projectedApiCostMicrousd: 1_001n }] }), false);
+});
+
+test("read-only API receipt must exactly match its content-free usage event", () => {
+  const receipt = { attemptId: "attempt-1", invocationId: "attempt-1",
+    selectedModelId: "claude-opus-5-5", actualModelId: "claude-opus-5-5",
+    providerTurnCount: 2, uncachedInputTokens: 100, cacheReadTokens: 20,
+    cacheWriteTokens: 10, outputTokens: 50, terminalStatus: "succeeded",
+    projectedCostMicroUsd: 365, digest: "a".repeat(64) };
+  const event = { invocationId: "attempt-1", receiptDigest: receipt.digest,
+    cli: "anthropic_api",
+    source: "anthropic_messages_api", provider: "anthropic",
+    authentication: "api_key", selectedModelId: "claude-opus-5-5",
+    actualModelId: "claude-opus-5-5", completedTurns: 2,
+    inputTokens: 100n, cacheReadInputTokens: 20n,
+    cacheCreationInputTokens: 10n, outputTokens: 50n,
+    inputTokensIncludeCacheRead: false, inputTokensIncludeCacheWrite: false,
+    pricingVersion: "price-v1", projectedApiCostMicrousd: 365n };
+  const base = { attemptId: "attempt-1", outcome: "succeeded",
+    pricingVersion: "price-v1", receipt, event };
+  assert.equal(v22ReadOnlyApiReceiptMatchesUsage(base), true);
+  for (const changed of [
+    { outcome: "blocked" },
+    { receipt: { ...receipt, invocationId: "other" } },
+    { receipt: { ...receipt, terminalStatus: "failed" } },
+    { event: { ...event, receiptDigest: "b".repeat(64) } },
+    { event: { ...event, authentication: "subscription" } },
+    { event: { ...event, completedTurns: 1 } },
+    { event: { ...event, cacheReadInputTokens: 19n } },
+    { event: { ...event, inputTokensIncludeCacheRead: true } },
+    { event: { ...event, pricingVersion: "other" } },
+    { event: { ...event, projectedApiCostMicrousd: 364n } },
+  ]) assert.equal(v22ReadOnlyApiReceiptMatchesUsage({ ...base, ...changed }), false);
 });

@@ -1598,6 +1598,102 @@ domains:
       or any customer's prompt or file. Rows are never changed or removed by
       the application; the database refuses both.
 
+  - domain: amuxTaskRecoveryInspectionRequest
+    prismaModel: AmuxV22TaskRecoveryInspectionRequest
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one owner request to inspect or safely stop a
+        prior AMUX attempt (orchestration policy versions 36-42), written under
+        a human audit entry of the same transaction. The row names the
+        administrator who asked and is retained for security investigation and
+        audit. The retention period is not a legal determination; it stays TBD
+        until security and legal approval, and a legal hold outranks any later
+        purge.
+      retentionStartsFrom: "requestedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      requestedByUserId is the operator id of the owner who asked and
+      intentionally has no User foreign key. The row stores Task, attempt and
+      worker identifiers, a closed request kind and digests, not free text or
+      any customer's prompt or file. Rows are never changed or removed by the
+      application; the database refuses both.
+
+  - domain: amuxTaskRecoveryApproval
+    prismaModel: AmuxV22TaskRecoveryApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one owner approval of a single capped AMUX
+        recovery attempt (orchestration policy versions 36-42), written under
+        a human audit entry of the same transaction. The row names the
+        administrator who approved and the cost ceiling approved, and is
+        retained for security investigation, cost reconciliation and audit.
+        The retention period is not a legal determination; it stays TBD until
+        security and legal approval, and a legal hold outranks any later purge.
+      retentionStartsFrom: "approvedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      approvedByUserId is the operator id of the owner who approved and
+      intentionally has no User foreign key. The row stores identifiers,
+      digests, a worker/model/route binding and a cost receipt of prices and
+      ceilings, not free text or any customer's prompt or file. Rows are never
+      changed or removed by the application; the database refuses both.
+
+  - domain: amuxTaskRecoveryRiskAcceptance
+    prismaModel: AmuxV22TaskRecoveryRiskAcceptance
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence that the owner accepted the unknown effects of the
+        approved FIRST Task's prior attempt (orchestration policy version 39),
+        written under a human audit entry of the same transaction. The row
+        names the administrator who accepted and is retained for security
+        investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "acceptedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      acceptedByUserId is the operator id of the owner who accepted and
+      intentionally has no User foreign key. The row stores Task, attempt and
+      evidence identifiers, fixed cost ceilings and digests, not free text or
+      any customer's prompt or file. Rows are never changed or removed by the
+      application; the database refuses both.
+
   - domain: amuxWorkerLatchEvent
     prismaModel: AmuxWorkerLatchEvent
     userLinkageRole: actor

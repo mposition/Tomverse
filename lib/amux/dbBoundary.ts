@@ -125,7 +125,8 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "mutation",
   },
   // 18: the one-open-card-per-worker count added a read to the success path.
-  claim: { operation: "claim", prismaCallCeiling: 18, isolation: "mutation" },
+  // 19: the permanent safe-stop fence read (orchestration policy version 37).
+  claim: { operation: "claim", prismaCallCeiling: 19, isolation: "mutation" },
   // A refusal audit changes no ownership or status, so an admitted claim's
   // refusal takes no admission lock and leaves no receipt (policy version 20).
   claimRefusal: {

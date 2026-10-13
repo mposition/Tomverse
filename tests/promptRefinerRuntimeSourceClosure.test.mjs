@@ -480,12 +480,20 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-13, operator-controlled Chat availability: the marketing webhook
 // fingerprint provenance comment grows by three lines. Count 228 and the
 // position-free inventory remain unchanged; this repins source positions only.
+// 2026-10-13, guarded v22 Task recovery, selective release to main: the two
+// approved recovery system actors and their action scopes add twelve lines
+// above the one existing computed access in lib/adminAuditSystemActors.ts. No
+// access is added, removed or altered: count 228, every path and expression,
+// and the position-free inventory remain unchanged; positions only.
+// 2026-10-13, guarded v22 Task recovery: the marketing webhook fingerprint's
+// history comment in lib/marketingAutomationAccess.ts grows by six lines. Count
+// 228 and the position-free inventory remain unchanged; positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "fecc27f9609e56cd917f7af9a47bdca4",
-  "4ba40e18c47cc74c80f8dba53a469ea2",
+  "f755b7cf3bdec264fbe728b873c123f6",
+  "2549d6a284442aedbc34e5e9e0a2eebe",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
