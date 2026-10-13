@@ -106,6 +106,7 @@ type EnterOptions = {
   deepResearch?: boolean;
   /** A saved selection whose answer canvas is still empty. */
   emptyConversation?: boolean;
+  shell?: "mobile" | "desktop";
 };
 
 async function enterMobileComposer(page: Page, options: EnterOptions) {
@@ -117,6 +118,7 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
     webSearchMode = "always",
     deepResearch = false,
     emptyConversation = false,
+    shell = "mobile",
   } = options;
 
   await prepareGuestPage(page, "en");
@@ -152,8 +154,8 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
 
   await page.setViewportSize(viewport);
   await page.goto(`/${productKey ?? "review"}?lang=${lang}`);
-  await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
-  await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
+  await expect(page.getByTestId(`${shell}-chat-shell`)).toBeVisible();
+  if (shell === "mobile") await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
 }
@@ -534,7 +536,7 @@ test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" },
         return {
           width: rect.width + inset(before.left) + inset(before.right),
           height: rect.height + inset(before.top) + inset(before.bottom),
-          lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + 10)),
+          lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + inset(before.bottom) / 2)),
         };
       });
       expect(hit.height).toBeGreaterThanOrEqual(43.5);
@@ -544,8 +546,7 @@ test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" },
   });
 
   test("a coarse tablet retains the exception's actual 44px hit area", async ({ page }) => {
-    await enterMobileComposer(page, { lang: "en", viewport: { width: 390, height: 680 } });
-    await page.setViewportSize({ width: 1024, height: 900 });
+    await enterMobileComposer(page, { lang: "en", viewport: { width: 1024, height: 900 }, shell: "desktop" });
     const exception = page.getByTestId("chat-input").getByTestId("web-search-exception-toggle");
     await expect(exception).toBeVisible();
     const hit = await exception.evaluate(node => {
@@ -556,7 +557,7 @@ test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" },
         coarse: matchMedia("(pointer: coarse)").matches,
         width: rect.width + inset(before.left) + inset(before.right),
         height: rect.height + inset(before.top) + inset(before.bottom),
-        lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + 10)),
+        lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + inset(before.bottom) / 2)),
       };
     });
     expect(hit.coarse).toBe(true);
@@ -590,6 +591,17 @@ test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" },
           });
           expect(hit, id).toBe(true);
         }
+        const edgeHits = await composer.evaluate(node => {
+          const controls = node.querySelectorAll<HTMLElement>('[data-testid="chat-textarea"], [data-testid="composer-tools-button"], [data-testid="composer-model-select"], [data-testid="request-credit-estimate"], [data-testid="chat-send-button"]');
+          return Array.from(controls).flatMap(control => {
+            const box = control.getBoundingClientRect();
+            const x = box.left + box.width / 2;
+            const y = box.top + box.height / 2;
+            const points = [[x, box.top + 1], [x, box.bottom - 1], [box.left + 1, y], [box.right - 1, y]];
+            return points.filter(([px, py]) => !control.contains(document.elementFromPoint(px, py))).map(([px, py]) => ({ id: control.dataset.testid, x: px, y: py }));
+          });
+        });
+        expect(edgeHits, "input and adjacent actions retain their own hit areas").toEqual([]);
         await expectComposerContract(page, `${lang} partial-search keyboard @${width}px`);
       });
     }
