@@ -290,9 +290,11 @@ export function ChatInputWebSearchChipView({
             aria-controls="web-search-exception-detail"
             aria-describedby="web-search-state-description"
             onClick={onToggleException}
-            className="composer-chip-touch-target truncate rounded-full text-left underline decoration-dotted underline-offset-2"
+            className="composer-chip-touch-target min-w-0 max-w-full overflow-visible rounded-full text-left underline decoration-dotted underline-offset-2"
           >
-            {isMobileShell ? compactLabel : fullLabel}
+            <span className="block max-w-full truncate">
+              {isMobileShell ? compactLabel : fullLabel}
+            </span>
           </button>
         ) : (
           <span
@@ -1181,7 +1183,7 @@ export function ChatInput({
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
     useEffect(() => {
       queueMicrotask(() => setIsAutoCreditDetailsOpen(false));
-    }, [draftScopeId, isAutoMode]);
+    }, [draftScopeId, isAutoCapabilityPending, isAutoMode]);
     const signInCallbackUrl = withChatLanguage(
       currentProduct === "review" ? "/review" : "/chat",
       lang
@@ -3373,6 +3375,7 @@ export function ChatInput({
                         key={model.id}
                         data-testid="composer-review-selected-model"
                         data-model-id={model.id}
+                        className="block"
                       >
                         {model.name}
                       </span>
@@ -3944,7 +3947,7 @@ export function ChatInput({
         >
         <div
           data-testid="composer-primary-tools"
-          className={`flex min-w-0 flex-none flex-wrap items-center md:flex-1 ${
+          className={`flex min-w-0 max-w-full flex-none flex-wrap items-center md:flex-1 ${
             useCompactMobileReviewSpacing ? "gap-x-1.5 gap-y-1" : "gap-1.5"
           } max-[360px]:gap-x-0.5 max-[240px]:contents`}
         >
@@ -3987,7 +3990,7 @@ export function ChatInput({
               title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
               aria-label={
                 isAutoMode
-                  ? `${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
+                  ? `${autoCopy.compactLabel}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
                   : `${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}`
               }
               aria-expanded={isMenuOpen && menuView === "models"}
@@ -4100,7 +4103,7 @@ export function ChatInput({
                 isAutoCreditDetailsOpen ? "auto-variable-credit-detail" : undefined
               }
               aria-describedby="auto-variable-credit-description"
-              aria-label={`${autoCopy.variableCreditLabel}. ${autoCopy.variableCreditNotice}`}
+              aria-label={autoCopy.variableCreditLabel}
               className="flex h-11 min-w-0 max-w-20 items-center justify-center gap-1 rounded-xl px-1.5 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 max-[360px]:w-[52px] max-[360px]:gap-0.5 max-[360px]:px-0 dark:text-zinc-300 dark:hover:bg-zinc-800 md:max-w-[9.125rem] md:px-2 md:[@media(pointer:fine)]:h-9"
             >
               <ComposerCoinsIcon

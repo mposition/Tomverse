@@ -554,8 +554,8 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
   inset: -0.25rem;
 }
 
-@media (max-width: 767px) and (pointer: coarse) {
+@media (pointer: coarse) {
   .composer-chip-touch-target::before {
-    inset: -0.75rem -0.25rem;
+    inset: -0.875rem -0.25rem;
   }
 }

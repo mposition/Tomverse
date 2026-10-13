@@ -70,7 +70,7 @@ test.describe("Approved compact Composer", () => {
       await enterCompactComposer(page, product, 1280, 900);
       const input = page.getByTestId("chat-textarea");
       const empty = await inputMetrics(page);
-      console.log(`[compact] PC ${product} ${JSON.stringify(empty)}`);
+      await testInfo.attach("compact-pc-metrics", { body: JSON.stringify(empty), contentType: "application/json" });
       expect(empty.fontSize).toBe(16);
       expect(empty.height).toBeGreaterThanOrEqual(empty.lineHeight * 2 + empty.padding - 1);
       expect(empty.height).toBeLessThanOrEqual(72);
@@ -127,7 +127,7 @@ test.describe("Approved compact Composer", () => {
         await enterCompactComposer(page, product, width, 680);
         await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
         const metrics = await inputMetrics(page);
-        if (width === 390) console.log(`[compact] mobile ${product} ${JSON.stringify(metrics)}`);
+        if (width === 390) await testInfo.attach("compact-mobile-metrics", { body: JSON.stringify(metrics), contentType: "application/json" });
         expect(metrics.fontSize).toBe(16);
         expect(metrics.height).toBeGreaterThanOrEqual(metrics.lineHeight + metrics.padding - 1);
         expect(metrics.widthRatio).toBeGreaterThanOrEqual(0.9);
@@ -160,7 +160,7 @@ test.describe("Approved compact Composer", () => {
           await expect(detail).toBeVisible();
           const visibleLabel = (await credit.innerText()).trim();
           expect(await credit.getAttribute("aria-label")).toContain(visibleLabel);
-          expect(await credit.getAttribute("aria-label")).toContain((await detail.innerText()).trim());
+          await expect(credit).toHaveAccessibleDescription((await detail.innerText()).trim());
           const detailBox = (await detail.boundingBox())!;
           expect(detailBox.y).toBeGreaterThanOrEqual(inputBox.y + inputBox.height - 1);
           await credit.click();
@@ -179,7 +179,7 @@ test.describe("Approved compact Composer", () => {
       });
     }
 
-    test(`keyboard ${product} folds context while retaining input, models and controls`, { tag: "@ui-risk" }, async ({ page }) => {
+    test(`keyboard ${product} folds context while retaining input, models and controls`, { tag: "@ui-risk" }, async ({ page }, testInfo) => {
       await enterCompactComposer(page, product, 390, 680);
       const input = page.getByTestId("chat-textarea");
       await input.focus();
@@ -196,7 +196,7 @@ test.describe("Approved compact Composer", () => {
       });
       await expect(page.getByTestId("composer-product-mode-row")).toHaveCount(0);
       const metrics = await inputMetrics(page);
-      console.log(`[compact] keyboard ${product} ${JSON.stringify(metrics)}`);
+      await testInfo.attach("compact-keyboard-metrics", { body: JSON.stringify(metrics), contentType: "application/json" });
       expect(metrics.cardHeight).toBeLessThanOrEqual(120);
       expect(metrics.clipped).toBeLessThanOrEqual(1);
       await expect(input).toHaveAttribute("data-compact-composition-instance", "original");
@@ -224,6 +224,9 @@ test.describe("Approved compact Composer", () => {
     test(`${language} Auto context keeps product targets and complete labels at 320px`, { tag: "@ui-risk" }, async ({ page }) => {
       await enterCompactComposer(page, "chat", 320, 680, language);
       const composer = page.getByTestId("chat-input");
+      const modelPicker = composer.getByTestId("composer-model-select");
+      const modelLabel = (await modelPicker.innerText()).trim();
+      expect(await modelPicker.getAttribute("aria-label")).toContain(modelLabel);
       for (const product of ["chat", "review"]) {
         const target = composer.getByTestId(`chat-product-${product}`);
         const box = (await target.boundingBox())!;
