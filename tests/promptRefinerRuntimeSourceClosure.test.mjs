@@ -566,12 +566,15 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-13, merge develop 09ad68fc into the guarded v22 Task recovery: both
 // histories above remain; count 228 and the position-free inventory are
 // unchanged and only the combined source positions are repinned.
+// 2026-10-13, guarded v22 Task recovery: the marketing webhook fingerprint's
+// history comment in lib/marketingAutomationAccess.ts grows by six lines. Count
+// 228 and the position-free inventory remain unchanged; positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "77915d69323b3626d819158c2230618b",
-  "5372ac2e98fbe18681a8c23f5597fcdb",
+  "a65345a8209cfdf2314ca13dc1a5df1c",
+  "aebef21e8941d5bf2bbb622b930ddeb7",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
