@@ -48,8 +48,20 @@ export async function listDecisionMakerRequestsForAdmin(client: LedgerReader): P
     dbNowMs: ledger.dbNowMs,
     rows: ledger.rows.map((row) => {
       const id = row.id as string;
-      const detail = details.get(id) ?? { outputKind: null, irreversible: null };
-      const value = dmAdminRequestRowFromRow({ ...row, ...detail, ...judgments.get(id) });
+      // Every terminal result has its detail, written in its own transaction
+      // and of its own kind (§6, stage S1d); a result without one, a detail
+      // without a result, or a detail of another kind is a ledger nobody can
+      // read, not a proposal with nothing to mark.
+      const detail = details.get(id);
+      if ((row.resultKind !== null) !== (detail !== undefined) || (detail && detail.resultKind !== row.resultKind)) {
+        throw new DecisionMakerAdminReadError("state_unreadable");
+      }
+      const value = dmAdminRequestRowFromRow({
+        ...row,
+        outputKind: detail?.outputKind ?? null,
+        irreversible: detail?.irreversible ?? null,
+        ...judgments.get(id),
+      });
       if (!value) throw new DecisionMakerAdminReadError("state_unreadable");
       return value;
     }),

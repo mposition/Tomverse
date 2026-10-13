@@ -1118,18 +1118,19 @@ export async function readDecisionMakerResultDetail(
  * the result detail half of Admin's request list (stage S2,
  * lib/amux/decisionMakerAdminRead.ts). Only the output kind and the
  * irreversible flag, which Admin shows before anything else about a proposal
- * (docs/policy/amux-decision-maker.md §6); no option id, key or body. A request
- * without a terminal result has no row. A row the result detail's CHECKs could
+ * (docs/policy/amux-decision-maker.md §6), with the result kind the detail was
+ * written for; no option id, key or body. A request without a terminal result
+ * has no row. A row the result detail's CHECKs could
  * not have produced refuses the read.
  */
 export async function readDecisionMakerResultDetailsForAdmin(
   client: BodyReader,
   requestIds: readonly string[],
-): Promise<Map<string, { outputKind: DmResultDetail["outputKind"]; irreversible: boolean | null }>> {
+): Promise<Map<string, { resultKind: DmResultKind; outputKind: DmResultDetail["outputKind"]; irreversible: boolean | null }>> {
   if (requestIds.length > 100 || !requestIds.every((id) => isDmRequestId(id))) {
     throw new DecisionMakerBodyWriteError("invalid_input");
   }
-  const details = new Map<string, { outputKind: DmResultDetail["outputKind"]; irreversible: boolean | null }>();
+  const details = new Map<string, { resultKind: DmResultKind; outputKind: DmResultDetail["outputKind"]; irreversible: boolean | null }>();
   if (requestIds.length === 0) return details;
   const rows = await client.$queryRaw<
     Array<{ requestId: string; resultKind: string; outputKind: string | null; optionId: string | null; irreversible: boolean | null }>
@@ -1153,7 +1154,11 @@ export async function readDecisionMakerResultDetailsForAdmin(
     ) {
       throw new DecisionMakerBodyWriteError("state_unreadable");
     }
-    details.set(row.requestId, { outputKind: detail.outputKind, irreversible: detail.irreversible });
+    details.set(row.requestId, {
+      resultKind: row.resultKind as DmResultKind,
+      outputKind: detail.outputKind,
+      irreversible: detail.irreversible,
+    });
   }
   return details;
 }

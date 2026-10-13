@@ -206,6 +206,33 @@ test("a row the ledger could not have produced refuses the whole list", async ()
   await assert.rejects(listDecisionMakerRequestsForAdmin(stray.tx), /state_unreadable/);
 });
 
+test("every terminal result has its detail of its own kind, and nothing else has one", async () => {
+  const proposal = listRow({ snapshotState: "none", resultKind: "proposal", outputKind: "select", irreversible: true });
+  const answering = (detailRows) => {
+    const recorded = recordingTx([proposal]);
+    const query = recorded.tx.$queryRaw;
+    recorded.tx.$queryRaw = (strings, ...values) =>
+      strings.join("$").includes('FROM "AmuxDecisionMakerResultDetail"') ? Promise.resolve(detailRows) : query(strings, ...values);
+    return recorded.tx;
+  };
+  const detail = (overrides) => ({ requestId: REQUEST_ID, resultKind: "proposal", outputKind: "select", optionId: "a", irreversible: true, ...overrides });
+  // The proposal's own detail reads.
+  assert.equal((await listDecisionMakerRequestsForAdmin(answering([detail({})]))).rows[0].irreversible, true);
+  // A result without its detail would lose the irreversible mark: refused.
+  await assert.rejects(listDecisionMakerRequestsForAdmin(answering([])), /state_unreadable/);
+  // A detail of another kind: refused.
+  await assert.rejects(
+    listDecisionMakerRequestsForAdmin(answering([detail({ resultKind: "timeout", outputKind: null, optionId: null, irreversible: null })])),
+    /state_unreadable/,
+  );
+  // A detail beside a request with no result: refused.
+  const open = recordingTx([listRow()]);
+  const query = open.tx.$queryRaw;
+  open.tx.$queryRaw = (strings, ...values) =>
+    strings.join("$").includes('FROM "AmuxDecisionMakerResultDetail"') ? Promise.resolve([detail({})]) : query(strings, ...values);
+  await assert.rejects(listDecisionMakerRequestsForAdmin(open.tx), /state_unreadable/);
+});
+
 test("an operator route has no DM path, and its refusals are kept for Admin", () => {
   const row = parsed({
     route: "operator",
