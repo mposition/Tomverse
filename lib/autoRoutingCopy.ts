@@ -26,7 +26,7 @@ export type AutoRoutingLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt"
 export type AutoRoutingCopy = {
   /** The control's own label. */
   label: string;
-  /** Compact model-picker label used only where the full mode switch remains visible. */
+  /** Compact picker label; its accessible name still announces the full mode and action. */
   compactLabel: string;
   /** One line under it. Says what happens, never how well. */
   description: string;

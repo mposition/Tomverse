@@ -1268,8 +1268,11 @@ test.describe("Mobile composer: page zoom and short screens", { tag: "@ui-risk" 
       const measured = await page.evaluate(() => {
         const composer = document.querySelector<HTMLElement>('[data-testid="chat-input"]')!;
         const button = document.querySelector<HTMLElement>('[data-testid="composer-model-select"]')!;
-        const icons = button.querySelectorAll("svg");
-        const chevron = icons[icons.length - 1].getBoundingClientRect();
+        const chevronNode = button.querySelector<HTMLElement | SVGSVGElement>(
+          'span[style*="icon-chevron-down-14.svg"], svg.lucide-chevron-down'
+        );
+        if (!chevronNode) throw new Error("The model picker chevron is not rendered");
+        const chevron = chevronNode.getBoundingClientRect();
         const outer = composer.getBoundingClientRect();
         const style = getComputedStyle(composer);
         // The padding box: what the composer's overflow-hidden clips to.

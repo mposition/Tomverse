@@ -4,7 +4,7 @@ import { freezeAnimations, restoreActiveConversation, setDeterministicTheme, sup
 
 const reviewModels = ["claude-haiku-4-5", "claude-sonnet-5", "gpt-5-6-luna"];
 
-async function enterCompactComposer(page: Page, product: "chat" | "review", width: number, height: number) {
+async function enterCompactComposer(page: Page, product: "chat" | "review", width: number, height: number, language: "en" | "ko" | "de" | "fr" | "es" | "pt" | "zh" = "ko") {
   const models = product === "chat" ? ["gpt-5-6-luna"] : reviewModels;
   await prepareGuestPage(page, "en");
   await mockAuthenticatedApi(page, {
@@ -34,7 +34,7 @@ async function enterCompactComposer(page: Page, product: "chat" | "review", widt
   await suppressTransientUi(page);
   await restoreActiveConversation(page);
   await page.setViewportSize({ width, height });
-  await page.goto(`/${product}?lang=ko`);
+  await page.goto(`/${product}?lang=${language}`);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
 }
@@ -64,10 +64,13 @@ test.describe("Approved compact Composer", () => {
   });
 
   for (const product of ["chat", "review"] as const) {
+    test.describe(`PC pointer ${product}`, () => {
+      test.use({ hasTouch: false });
     test(`PC ${product} keeps two input lines without the previous empty space`, { tag: "@ui-risk" }, async ({ page }, testInfo) => {
       await enterCompactComposer(page, product, 1280, 900);
       const input = page.getByTestId("chat-textarea");
       const empty = await inputMetrics(page);
+      console.log(`[compact] PC ${product} ${JSON.stringify(empty)}`);
       expect(empty.fontSize).toBe(16);
       expect(empty.height).toBeGreaterThanOrEqual(empty.lineHeight * 2 + empty.padding - 1);
       expect(empty.height).toBeLessThanOrEqual(72);
@@ -104,12 +107,27 @@ test.describe("Approved compact Composer", () => {
         }
       }
     });
+    });
+
+    test(`touch tablet ${product} keeps primary controls at 44px`, { tag: "@ui-risk" }, async ({ page }) => {
+      await enterCompactComposer(page, product, 1024, 900);
+      const composer = page.getByTestId("chat-input");
+      const creditId = product === "chat" ? "auto-variable-credit-notice" : "request-credit-estimate";
+      for (const id of ["composer-tools-button", "composer-model-select", creditId, "chat-send-button"]) {
+        const box = (await composer.getByTestId(id).boundingBox())!;
+        expect(box.width, id).toBeGreaterThanOrEqual(44);
+        expect(box.height, id).toBeGreaterThanOrEqual(44);
+      }
+      if (product === "chat") expect((await composer.getByTestId("composer-auto-routing-toggle").boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await expectNoHorizontalOverflow(page);
+    });
 
     for (const width of [320, 360, 390, 430]) {
       test(`mobile ${product} at ${width}px keeps conversation room and full-width input`, { tag: "@ui-risk" }, async ({ page }, testInfo) => {
         await enterCompactComposer(page, product, width, 680);
         await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
         const metrics = await inputMetrics(page);
+        if (width === 390) console.log(`[compact] mobile ${product} ${JSON.stringify(metrics)}`);
         expect(metrics.fontSize).toBe(16);
         expect(metrics.height).toBeGreaterThanOrEqual(metrics.lineHeight + metrics.padding - 1);
         expect(metrics.widthRatio).toBeGreaterThanOrEqual(0.9);
@@ -140,10 +158,22 @@ test.describe("Approved compact Composer", () => {
           await expect(credit).toHaveAttribute("aria-expanded", "true");
           const detail = page.locator("#auto-variable-credit-detail");
           await expect(detail).toBeVisible();
-          await expect(detail).toHaveText((await credit.getAttribute("aria-label"))!);
+          const visibleLabel = (await credit.innerText()).trim();
+          expect(await credit.getAttribute("aria-label")).toContain(visibleLabel);
+          expect(await credit.getAttribute("aria-label")).toContain((await detail.innerText()).trim());
           const detailBox = (await detail.boundingBox())!;
           expect(detailBox.y).toBeGreaterThanOrEqual(inputBox.y + inputBox.height - 1);
           await credit.click();
+          await expect(detail).toHaveCount(0);
+          await credit.click();
+          await expect(detail).toBeVisible();
+          const modeSwitch = composer.getByTestId("composer-auto-routing-toggle");
+          await modeSwitch.click();
+          await expect(modeSwitch).toHaveAttribute("aria-checked", "false");
+          await expect(credit).toHaveCount(0);
+          await modeSwitch.click();
+          await expect(modeSwitch).toHaveAttribute("aria-checked", "true");
+          await expect(credit).toHaveAttribute("aria-expanded", "false");
           await expect(detail).toHaveCount(0);
         }
       });
@@ -166,6 +196,7 @@ test.describe("Approved compact Composer", () => {
       });
       await expect(page.getByTestId("composer-product-mode-row")).toHaveCount(0);
       const metrics = await inputMetrics(page);
+      console.log(`[compact] keyboard ${product} ${JSON.stringify(metrics)}`);
       expect(metrics.cardHeight).toBeLessThanOrEqual(120);
       expect(metrics.clipped).toBeLessThanOrEqual(1);
       await expect(input).toHaveAttribute("data-compact-composition-instance", "original");
@@ -185,6 +216,33 @@ test.describe("Approved compact Composer", () => {
       await page.keyboard.press("Escape");
       await expect(input).toHaveValue("한글 조합");
       await input.evaluate(node => node.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "한글 조합" })));
+      await expectNoHorizontalOverflow(page);
+    });
+  }
+
+  for (const language of ["en", "ko", "de", "fr", "es", "pt", "zh"] as const) {
+    test(`${language} Auto context keeps product targets and complete labels at 320px`, { tag: "@ui-risk" }, async ({ page }) => {
+      await enterCompactComposer(page, "chat", 320, 680, language);
+      const composer = page.getByTestId("chat-input");
+      for (const product of ["chat", "review"]) {
+        const target = composer.getByTestId(`chat-product-${product}`);
+        const box = (await target.boundingBox())!;
+        expect(box.width).toBeGreaterThanOrEqual(44);
+        expect(box.height).toBeGreaterThanOrEqual(44);
+        const outside = await target.evaluate(node => {
+          const bounds = node.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(node.querySelector("span")!);
+          return Array.from(range.getClientRects()).some(rect => rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1);
+        });
+        expect(outside).toBe(false);
+      }
+      const mode = composer.getByTestId("composer-auto-routing-toggle");
+      await expect(mode).toHaveAttribute("aria-checked", "true");
+      expect(await mode.getAttribute("aria-label")).toContain((await mode.locator(":scope > span").first().innerText()).trim());
+      const modeBox = (await mode.boundingBox())!;
+      const inputBox = (await composer.getByTestId("chat-textarea").boundingBox())!;
+      expect(modeBox.y + modeBox.height).toBeLessThanOrEqual(inputBox.y + 1);
       await expectNoHorizontalOverflow(page);
     });
   }

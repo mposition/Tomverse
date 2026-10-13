@@ -93,7 +93,7 @@ export function VoiceInputButton({
         state.status === "recording" ? "voice-input-status" : undefined
       }
       aria-pressed={isRecording}
-      className={`flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-xl border transition disabled:cursor-not-allowed disabled:opacity-50 md:h-9 md:w-9 ${
+      className={`flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-xl border transition disabled:cursor-not-allowed disabled:opacity-50 md:[@media(pointer:fine)]:h-9 md:[@media(pointer:fine)]:w-9 ${
         isRecording
           ? "border-red-300 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-400"
           : "border-zinc-300 bg-zinc-50 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
