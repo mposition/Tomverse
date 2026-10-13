@@ -97,17 +97,23 @@ async function launch(args) {
  * only when decideScoutRequest allows it. Every document response also pauses,
  * at the response stage, before its body reaches the renderer: documentStop
  * reads its status and headers there, and a challenge or an error status is
- * failed in place, so nothing it carries runs (§11-6). The caller swaps `tally`
- * and `stops` per page.
+ * failed in place, so nothing it carries runs (§11-6). That holds for every
+ * document for as long as the page lives -- the top document, an iframe, a
+ * later navigation -- and `onStop` tells the page's visit the moment one is
+ * stopped. The caller swaps `tally`, `stops` and `onStop` per page.
  */
 async function installCdpRules(browser, allowedOrigins) {
   const session = await browser.newBrowserCDPSession();
-  const state = { tally: new AbortTally(), stops: [] };
+  const state = { tally: new AbortTally(), stops: [], onStop: null };
   session.on("Fetch.requestPaused", (event) => {
     let allow;
     if (event.responseStatusCode !== undefined || event.responseErrorReason !== undefined) {
       const stop = documentStop({ status: event.responseStatusCode ?? 0, headers: headersFromCdp(event.responseHeaders) });
-      if (stop !== null) state.stops.push({ stop, status: event.responseStatusCode ?? null });
+      if (stop !== null) {
+        const entry = { stop, status: event.responseStatusCode ?? null };
+        state.stops.push(entry);
+        state.onStop?.(entry);
+      }
       allow = stop === null;
     } else {
       const { method, url } = event.request;
@@ -260,6 +266,7 @@ async function runFixture() {
         });
         return response.end(`<!doctype html><img src="${path}-img"><script>fetch("${path}-script-ran")</script>`);
       }
+      if (path === "/page-with-challenge-frame") return html(`<!doctype html><html lang="en"><title>framed</title><iframe src="/challenge"></iframe></html>`);
       if (path === "/form") return html(`<!doctype html><form method="post" action="/form-post"></form><script>document.forms[0].submit();</script>`);
       // The one same-origin redirect, checked first: it has to arrive, or the
       // fixture cannot tell a blocked redirect from a broken one.
@@ -312,7 +319,8 @@ async function runFixtureConfiguration(configuration, { allowedOrigin, allowed, 
     return { configuration: configuration.name, sandboxLaunch: "failed", launchError: errorCode(error) };
   }
   try {
-    const tally = configuration.cdp ? (await installCdpRules(browser, [allowedOrigin])).tally : new AbortTally();
+    const rules = configuration.cdp ? await installCdpRules(browser, [allowedOrigin]) : null;
+    const tally = rules?.tally ?? new AbortTally();
     const { context, webSocketsRefused } = await ruledContext(browser, {
       allowedOrigins: [allowedOrigin],
       locale: SCOUT_LOCALES.en,
@@ -344,6 +352,18 @@ async function runFixtureConfiguration(configuration, { allowedOrigin, allowed, 
     } finally {
       await context.close();
     }
+    // The page visit the service runs, on a page whose only problem is a
+    // challenge in an iframe: it has to come back stopped, not observed.
+    let framedChallenge = null;
+    if (rules) {
+      rules.stops = [];
+      const visit = await visitPage(browser, { id: "fixture.challenge-frame", path: "/page-with-challenge-frame", lang: "en" }, {
+        origin: allowedOrigin,
+        allowedOrigins: [allowedOrigin],
+        rules,
+      });
+      framedChallenge = visit.stopped ?? "not stopped";
+    }
     const reachedOther = other.received.map(({ method, path, upgrade }) => ({ method, path, upgrade }));
     const forbiddenOnAllowed = allowed.received
       .filter(({ method, upgrade, path }) => upgrade || !["GET", "HEAD"].includes(method) || path === "/sw.js")
@@ -359,6 +379,7 @@ async function runFixtureConfiguration(configuration, { allowedOrigin, allowed, 
       elapsedMs: Date.now() - startedAt,
       allowedArrived,
       stoppedDocumentRan,
+      framedChallenge,
       serviceWorker: workerOutcome,
       webSocketsRefusedByRoute: webSocketsRefused(),
       aborted: tally.entries().map((entry) => ({ ...entry, origin: scrub(entry.origin) })),
@@ -372,6 +393,7 @@ async function runFixtureConfiguration(configuration, { allowedOrigin, allowed, 
               reachedOther.length === 0 &&
               forbiddenOnAllowed.length === 0 &&
               stoppedDocumentRan.length === 0 &&
+              (rules === null || framedChallenge === "challenge") &&
               Object.values(allowedArrived).every(Boolean),
           }),
     };
@@ -394,7 +416,7 @@ async function runPages() {
     for (const target of SCOUT_PAGES) {
       rules.tally = new AbortTally();
       rules.stops = [];
-      const record = await visitPage(browser, target, { allowedOrigins, rules });
+      const record = await visitPage(browser, target, { origin: SCOUT_PAGE_ORIGIN, allowedOrigins, rules });
       for (const entry of record.aborted ?? []) {
         if (entry.reason === "origin") otherOrigins.set(entry.origin, (otherOrigins.get(entry.origin) ?? 0) + entry.count);
       }
@@ -414,7 +436,7 @@ async function runPages() {
   }
 }
 
-async function visitPage(browser, target, { allowedOrigins, rules }) {
+async function visitPage(browser, target, { origin, allowedOrigins, rules }) {
   const { tally } = rules;
   const startedAt = Date.now();
   const { context, webSocketsRefused } = await ruledContext(browser, {
@@ -438,35 +460,50 @@ async function visitPage(browser, target, { allowedOrigins, rules }) {
       consoleErrors += 1;
     });
     page.on("response", (response) => {
-      if (originOf(response.url()) === SCOUT_PAGE_ORIGIN && response.status() >= 400) sameOriginErrors += 1;
+      if (originOf(response.url()) === origin && response.status() >= 400) sameOriginErrors += 1;
     });
     page.on("requestfailed", (request) => {
-      const origin = originOf(request.url()) ?? "opaque";
-      if (origin !== SCOUT_PAGE_ORIGIN) failedOrigins.set(origin, (failedOrigins.get(origin) ?? 0) + 1);
+      const failedOrigin = originOf(request.url()) ?? "opaque";
+      if (failedOrigin !== origin) failedOrigins.set(failedOrigin, (failedOrigins.get(failedOrigin) ?? 0) + 1);
     });
 
-    // A challenge or an error status is stopped by the CDP rules while the
-    // document response is held, so the navigation fails here and nothing the
-    // response carried has run (§11-6). The stop it recorded is the answer.
-    let response;
-    try {
-      response = await page.goto(`${SCOUT_PAGE_ORIGIN}${target.path}`, {
+    // A challenge or an error status is failed by the CDP rules while the
+    // document response is held, so nothing it carried has run (§11-6). Any
+    // document stopped while the page lives -- the top one, an iframe, a later
+    // navigation -- ends the visit at once, and the stop is the answer.
+    const stopped = new Promise((resolve) => {
+      rules.onStop = resolve;
+    });
+    let response = null;
+    const load = (async () => {
+      response = await page.goto(`${origin}${target.path}`, {
         waitUntil: "load",
         timeout: PAGE_DEADLINE_MS - SETTLE_MS - 5_000,
       });
+      await page.waitForTimeout(SETTLE_MS);
+      return "loaded";
+    })();
+    // The load keeps running when a stop wins the race; the context closes
+    // under it in finally, and its rejection is expected.
+    load.catch(() => {});
+    let outcome;
+    try {
+      outcome = await Promise.race([load, stopped.then(() => "stopped")]);
     } catch (error) {
+      if (rules.stops.length === 0) throw error;
+      outcome = "stopped";
+    }
+    if (outcome === "stopped" || rules.stops.length > 0) {
       const [first] = rules.stops;
-      if (first) return { id: target.id, status: first.status, stopped: first.stop, elapsedMs: Date.now() - startedAt };
-      throw error;
+      return { id: target.id, status: first.status, stopped: first.stop, stops: rules.stops.length, elapsedMs: Date.now() - startedAt };
     }
     const status = response?.status() ?? 0;
-    await page.waitForTimeout(SETTLE_MS);
     const documentLang = await page.evaluate(() => document.documentElement.lang).catch(() => null);
     return {
       id: target.id,
       status,
       stopped: null,
-      finalOriginAllowed: originOf(page.url()) === SCOUT_PAGE_ORIGIN,
+      finalOriginAllowed: originOf(page.url()) === origin,
       documentLang,
       langMatches: typeof documentLang === "string" && documentLang.toLowerCase().startsWith(target.lang),
       consoleErrors,
@@ -480,6 +517,7 @@ async function visitPage(browser, target, { allowedOrigins, rules }) {
   } catch (error) {
     return { id: target.id, error: errorCode(error), elapsedMs: Date.now() - startedAt };
   } finally {
+    rules.onStop = null;
     await context.close();
   }
 }
@@ -661,6 +699,7 @@ if (asJson || mode === "all") {
     console.log(`${entry.configuration}: sandbox ${entry.sandboxLaunch}${verdict}`);
     if (entry.launchError || entry.error) console.log(`  error: ${entry.launchError ?? entry.error}`);
     if (entry.stoppedDocumentRan?.length) console.log(`  stopped document ran: ${JSON.stringify(entry.stoppedDocumentRan)}`);
+    if (entry.framedChallenge !== undefined && entry.framedChallenge !== null) console.log(`  page visit with a challenge iframe: ${entry.framedChallenge}`);
     if (entry.allowedArrived) console.log(`  allowed requests arrived: ${JSON.stringify(entry.allowedArrived)}`);
     if (entry.reachedOtherOrigin?.length) console.log(`  reached other origin: ${JSON.stringify(entry.reachedOtherOrigin)}`);
     if (entry.forbiddenReachedAllowedOrigin?.length) console.log(`  forbidden on allowed origin: ${JSON.stringify(entry.forbiddenReachedAllowedOrigin)}`);
