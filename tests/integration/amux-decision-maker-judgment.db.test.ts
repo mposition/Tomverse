@@ -7,7 +7,7 @@ import type { Session } from "next-auth";
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { dmAdminDeliveryStatus, dmAdminRequestStatus } from "@/lib/amux/decisionMakerAdminCore";
-import { listDecisionMakerRequestsForAdmin } from "@/lib/amux/decisionMakerAdminRead";
+import { listDecisionMakerRequestsForAdmin, readDecisionMakerRequestDetailForAdmin } from "@/lib/amux/decisionMakerAdminRead";
 import {
   dmBodyDigest,
   dmKeyPeriodEndMs,
@@ -1092,6 +1092,48 @@ test("Admin's request list shows each request's route, status and delivery as th
   const short = { ...AMUX_DB_BOUNDARIES.decisionMakerRequestListRead, prismaCallCeiling: 2 };
   await assert.rejects(
     withAmuxDbBoundary(short, (tx) => listDecisionMakerRequestsForAdmin(tx)),
+    (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+  );
+});
+
+test("Admin's detail of one request shows its card and proposal, and the values it shows are the ones a judgment records", async () => {
+  const read = (requestId: string) =>
+    withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerRequestDetailRead, (tx) => readDecisionMakerRequestDetailForAdmin(tx, requestId));
+  const proposal = await proposed(FREE_TEXT, "claude", { withCardText: true });
+  const open = (await read(proposal.requestId))!;
+  assert.equal(dmAdminRequestStatus(open.row, open.dbNowMs), "proposal");
+  assert.deepEqual(open.card, CARD);
+  assert.equal(open.answer, (FREE_TEXT as { answer: string }).answer);
+  assert.equal(open.rationale, (FREE_TEXT as { rationale: string }).rationale);
+  assert.equal(open.snapshotTargetSha, SHA);
+  // What Admin shows is what the stores hold for a judgment, and the judgment
+  // store records a confirmation on exactly those values.
+  assert.deepEqual(open.shown, await shownOf(proposal.requestId));
+  assert.equal((await judge(proposal.requestId, { kind: "confirm", shown: open.shown })).recorded, true);
+  const judged = (await read(proposal.requestId))!;
+  assert.equal(dmAdminRequestStatus(judged.row, judged.dbNowMs), "confirm");
+  assert.equal(judged.shown, null);
+
+  // A select names its option; an escalation shows its reason and has nothing to judge.
+  const select = await proposed({ kind: "select", optionId: "b", rationale: "The locale matters.", irreversible: true }, "claude", { withCardText: true });
+  const selectDetail = (await read(select.requestId))!;
+  assert.equal(selectDetail.optionId, "b");
+  assert.equal(selectDetail.row.irreversible, true);
+  assert.equal(selectDetail.answer, null);
+  assert.equal(selectDetail.shown?.optionId, "b");
+  const escalated = await proposed({ kind: "escalate", reason: "The operator knows the budget." });
+  const escalatedDetail = (await read(escalated.requestId))!;
+  assert.equal(escalatedDetail.escalationReason, "The operator knows the budget.");
+  assert.equal(escalatedDetail.shown, null);
+
+  // No such request is null; reading stays open under the kill switch, and
+  // one call fewer than its boundary refuses it.
+  assert.equal(await read(randomUUID()), null);
+  await setSwitch("kill_switch", "on");
+  assert.deepEqual((await read(select.requestId))!.shown, selectDetail.shown);
+  const short = { ...AMUX_DB_BOUNDARIES.decisionMakerRequestDetailRead, prismaCallCeiling: 6 };
+  await assert.rejects(
+    withAmuxDbBoundary(short, (tx) => readDecisionMakerRequestDetailForAdmin(tx, select.requestId)),
     (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
   );
 });

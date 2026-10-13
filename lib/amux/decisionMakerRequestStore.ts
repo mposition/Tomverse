@@ -313,8 +313,9 @@ export async function listDecisionMakerStaleCloseCandidates(
 }
 
 /**
- * The newest requests, newest first, at most `limit` (1 to 100), with what
- * their events add up to and the database clock, in one statement: the
+ * The newest requests, newest first, at most `limit` (1 to 100) -- or the one
+ * request `requestId` names -- with what their events add up to and the
+ * database clock, in one statement: the
  * ledger's half of Admin's request list (stage S2,
  * lib/amux/decisionMakerAdminRead.ts, which joins the result detail and the
  * judgment and delivery halves read by their own stores in the same
@@ -326,17 +327,20 @@ export async function listDecisionMakerStaleCloseCandidates(
  */
 export async function readRecentDecisionMakerRequestLedger(
   client: LedgerReader,
-  input: { limit: number },
+  input: { limit: number; requestId?: undefined } | { requestId: string; limit?: undefined },
 ): Promise<{ dbNowMs: number; rows: Array<Record<string, unknown>> }> {
-  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+  const requestId = input.requestId ?? null;
+  const limit = requestId === null ? input.limit : 1;
+  if (requestId !== null ? !isDmRequestId(requestId) : !Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 100) {
     throw new DecisionMakerRequestWriteError("invalid_input");
   }
   const rows = await client.$queryRaw<Array<Record<string, unknown>>>`
     WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS "now"),
     recent AS MATERIALIZED (
       SELECT * FROM "AmuxDecisionMakerRequest"
+      WHERE ${requestId}::text IS NULL OR "id" = ${requestId}::text
       ORDER BY "createdAt" DESC, "id" DESC
-      LIMIT ${input.limit}
+      LIMIT ${limit}
     )
     SELECT
       r."id", r."cardId", r."questionRevision", r."askingWorkerId", r."askingProvider", r."route",

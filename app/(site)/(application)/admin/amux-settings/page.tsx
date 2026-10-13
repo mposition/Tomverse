@@ -4,6 +4,10 @@ import { notFound } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxDecisionMakerReportPanel } from "@/components/admin/AmuxDecisionMakerReportPanel";
+import {
+  AmuxDecisionMakerRequestDetailPanel,
+  type DmAdminRequestDetailView,
+} from "@/components/admin/AmuxDecisionMakerRequestDetailPanel";
 import { AmuxDecisionMakerRequestsPanel } from "@/components/admin/AmuxDecisionMakerRequestsPanel";
 import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
@@ -20,7 +24,11 @@ import { adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
 import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationCounts";
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerDeclarationAccuracyReport } from "@/lib/amux/decisionMakerJudgmentStore";
-import { listDecisionMakerRequestsForAdmin } from "@/lib/amux/decisionMakerAdminRead";
+import {
+  listDecisionMakerRequestsForAdmin,
+  readDecisionMakerRequestDetailForAdmin,
+} from "@/lib/amux/decisionMakerAdminRead";
+import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import {
   AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
@@ -75,7 +83,22 @@ export default async function AdminAmuxSettingsPage({
       }));
       return null;
     };
-    const [state, report, requests] = await Promise.all([
+    // One request's bodies are for the person who may judge it (ops:write):
+    // another administrator sees the list and is told why, and nothing of the
+    // bodies is read for them.
+    const requested = typeof query.request === "string" ? query.request : null;
+    const readDetail = async (): Promise<DmAdminRequestDetailView | null> => {
+      if (requested === null) return null;
+      if (!canChange) return { kind: "restricted" };
+      if (!isDmRequestId(requested)) return { kind: "not_found" };
+      // A failed read is null from failed(); a missing request is a read that found nothing.
+      const read = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerRequestDetailRead,
+        (tx) => readDecisionMakerRequestDetailForAdmin(tx, requested))
+        .then((detail) => ({ detail }), failed("decision_maker_request_detail_read_failed"));
+      if (read === null) return { kind: "unavailable" };
+      return read.detail === null ? { kind: "not_found" } : { kind: "detail", detail: read.detail };
+    };
+    const [state, report, requests, detailView] = await Promise.all([
       withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead,
         (tx) => readDecisionMakerSwitchesOrThrow(tx)).catch(failed("decision_maker_switch_read_failed")),
       withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerReportRead,
@@ -84,9 +107,11 @@ export default async function AdminAmuxSettingsPage({
       withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerRequestListRead,
         (tx) => listDecisionMakerRequestsForAdmin(tx))
         .catch(failed("decision_maker_request_list_read_failed")),
+      readDetail(),
     ]);
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
       <AmuxDecisionMakerSwitchPanel state={state} canChange={canChange} />
+      {detailView !== null ? <AmuxDecisionMakerRequestDetailPanel view={detailView} /> : null}
       <AmuxDecisionMakerRequestsPanel list={requests} />
       <AmuxDecisionMakerReportPanel report={report} /></div>;
   }

@@ -1538,6 +1538,15 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   묶으므로, 상한은 세 문장 + setup + fence입니다. 본문은 읽지 않고, 원장이 만들 수 없는 행(인스턴스와 공급사의 대응,
   `provider_unverified`와 빈 인스턴스, 사건 순서)이 하나라도 있으면 목록 전체를 읽지 못한 것으로 보입니다. 되돌릴 수
   없는 제안은 상태보다 먼저 표시합니다. 제안 열람·판정은 S2-4b입니다.
+- **S2-4b1(Admin 요청 상세)**: `lib/amux/decisionMakerAdminRead.ts`의 `readDecisionMakerRequestDetailForAdmin()`,
+  `components/admin/AmuxDecisionMakerRequestDetailPanel.tsx`, `adminAmuxDecisionMakerRequestDetailMessages`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerRequestDetailRead`(상한 7),
+  `/admin/amux-settings?tab=decision-maker&request=<id>`, `tests/client/amuxDecisionMakerRequestDetailRender.test.tsx`.
+  요청 하나의 카드·DM 답·근거·이관 사유·고친 답·스냅샷을 보이며, 목록과 같은 원장 읽기를 그 id로 좁혀 쓰고 같은 검사를
+  지납니다. **본문은 판정할 수 있는 관리자(`ops:write`)에게만 읽어 보입니다** — 그 밖의 관리자에게는 본문을 읽지 않고
+  이유만 보입니다. 판정에 넘길 값(`shown`: 답·근거 본문의 keyed digest, select의 선택지, `irreversible`, 스냅샷 상태·SHA·
+  manifest digest)은 열린 제안의 본문과 전송이 모두 있을 때만 계산하며, judgment DB 테스트가 그 값으로 판정 store가 확정을
+  기록함을 고정합니다. worker와 모델이 쓴 글은 markup이 아닌 글자로만 보입니다. 판정 route와 버튼은 S2-4b2입니다.
 
 # AI Review (교차검토) 품질과 M5
 

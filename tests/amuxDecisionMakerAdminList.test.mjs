@@ -26,7 +26,9 @@ import { DM_CLOSING_EVENT_KINDS } from "../lib/amux/decisionMakerRequestCore.ts"
 import {
   DecisionMakerAdminReadError,
   listDecisionMakerRequestsForAdmin,
+  readDecisionMakerRequestDetailForAdmin,
 } from "../lib/amux/decisionMakerAdminRead.ts";
+import { dmCardText } from "../lib/amux/decisionMakerCore.ts";
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
@@ -130,8 +132,9 @@ test("the list is three statements, each store reading its own tables, and its b
   });
   // The request store chooses the newest requests before aggregating, at the panel's limit,
   // and the other two read exactly those ids.
-  assert.match(sent[0].sql, /recent AS MATERIALIZED \(\s*SELECT \* FROM "AmuxDecisionMakerRequest"\s*ORDER BY "createdAt" DESC, "id" DESC\s*LIMIT \$/);
-  assert.deepEqual(sent[0].values, [DM_ADMIN_REQUEST_LIST_LIMIT]);
+  assert.match(sent[0].sql, /recent AS MATERIALIZED \(\s*SELECT \* FROM "AmuxDecisionMakerRequest"\s*WHERE \$::text IS NULL OR "id" = \$::text\s*ORDER BY "createdAt" DESC, "id" DESC\s*LIMIT \$/);
+  // No request id narrows it: the newest, at the panel's limit.
+  assert.deepEqual(sent[0].values, [null, null, DM_ADMIN_REQUEST_LIST_LIMIT]);
   assert.deepEqual(sent[1].values, [[REQUEST_ID]]);
   assert.deepEqual(sent[2].values, [[REQUEST_ID]]);
   // Each statement names only its own store's tables.
@@ -328,4 +331,191 @@ test("every status and delivery code has words in both locales, and no other key
       assert.ok(typeof text === "string" && text.length > 0, locale);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// One request for the person who judges it
+// ---------------------------------------------------------------------------
+
+const SHA = "0123456789abcdef0123456789abcdef01234567";
+const DIGEST = (c) => c.repeat(64);
+
+/** The request state read's row (lib/amux/decisionMakerRequestStore.ts): an open free_text proposal. */
+const stateRow = (overrides = {}) => ({
+  id: REQUEST_ID,
+  cardId: "card-41",
+  questionRevision: 2,
+  askingWorkerId: "worker.claude-1",
+  amuxSessionId: "session:9",
+  amuxSessionAttempt: 1,
+  askingProvider: "claude",
+  optionSetDigest: DIGEST("a"),
+  termListVersion: "v1",
+  classificationVersion: "authority-manifest-1",
+  scannerVersion: "v1",
+  policyVersion: 1,
+  route: "dm_proposal",
+  instance: "decision-maker-openai",
+  createdAtEpochMs: BigInt(NOW - 60_000),
+  assignmentDeadlineAtEpochMs: BigInt(NOW + 60_000),
+  dbNowEpochMs: BigInt(NOW),
+  assigned: true,
+  resultDeadlineAtEpochMs: BigInt(NOW + 20 * 60_000),
+  transmitted: true,
+  snapshotState: "worker_head",
+  snapshotTargetSha: SHA,
+  snapshotManifestDigest: DIGEST("b"),
+  inputPayloadDigest: DIGEST("c"),
+  transmitOutcome: "transmit_receipt",
+  terminalEventId: "2b6f2a3e-5d1c-4e8f-9a7b-2c3d4e5f6a7b",
+  terminalResultKind: "proposal",
+  terminalResultDigest: DIGEST("d"),
+  resultUnknown: false,
+  closingKind: null,
+  probedRejection: null,
+  ...overrides,
+});
+
+const CARD_TEXT = dmCardText(
+  {
+    askType: "decision",
+    resolution: null,
+    type: "task",
+    tags: [],
+    title: "Pick a cache key layout",
+    question: "Should the cache key include the locale?",
+    options: [
+      { id: "a", label: "Model id only" },
+      { id: "b", label: "Model id and locale" },
+    ],
+    unblocks: "The cache module can be finished.",
+    context: "Both layouts pass.",
+    contextPaths: ["lib/cache.ts"],
+  },
+);
+
+const bodyRow = (field, text, digest) => ({ field, text, digest, keyPeriod: 700, createdAtEpochMs: BigInt(NOW - 30_000) });
+
+const detailTx = ({ ledger = [listRow({ snapshotState: "worker_head", transmitOutcome: "transmit_receipt", resultKind: "proposal", outputKind: "free_text", irreversible: false })], state = stateRow(), bodies, detail } = {}) => {
+  const sent = [];
+  const row = ledger[0];
+  const resolvedBodies = bodies ?? [
+    bodyRow("card_text", CARD_TEXT, DIGEST("1")),
+    bodyRow("dm_answer", "Use the model id only.", DIGEST("2")),
+    bodyRow("dm_rationale", "The locale is already in the path.", DIGEST("3")),
+  ];
+  const resolvedDetail =
+    detail !== undefined
+      ? detail
+      : row && row.resultKind !== null
+        ? [{ requestId: REQUEST_ID, resultKind: row.resultKind, outputKind: row.outputKind, optionId: row.outputKind === "select" ? "a" : null, irreversible: row.irreversible, keyPeriod: 700, createdAtEpochMs: BigInt(NOW - 30_000) }]
+        : [];
+  return {
+    sent,
+    tx: {
+      $queryRaw: (strings, ...values) => {
+        const sql = strings.join("$");
+        sent.push({ sql, values });
+        if (sql.includes("recent AS MATERIALIZED")) {
+          if (!row) return Promise.resolve([{ ...Object.fromEntries(Object.keys(listRow()).map((key) => [key, null])), dbNowEpochMs: BigInt(NOW) }]);
+          return Promise.resolve(ledger.map((entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => !DETAIL_KEYS.includes(key) && !JUDGMENT_KEYS.includes(key)))));
+        }
+        if (sql.includes('FROM "AmuxDecisionMakerResultDetail"')) return Promise.resolve(resolvedDetail);
+        if (sql.includes("unnest(")) {
+          return Promise.resolve([{ requestId: REQUEST_ID, ...Object.fromEntries(JUDGMENT_KEYS.map((key) => [key, row[key]])) }]);
+        }
+        if (sql.includes('FROM "AmuxDecisionMakerBody"')) return Promise.resolve(resolvedBodies);
+        if (sql.includes('"probedRejection"')) return Promise.resolve([state]);
+        throw new Error(`unexpected statement: ${sql}`);
+      },
+    },
+  };
+};
+
+test("one request's detail is five statements, each store reading its own tables, and its boundary is those plus setup and fence", async () => {
+  const { tx, sent } = detailTx();
+  const detail = await readDecisionMakerRequestDetailForAdmin(tx, REQUEST_ID);
+  assert.equal(sent.length, 5);
+  assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerRequestDetailRead, {
+    operation: "decision_maker_request_detail_read",
+    prismaCallCeiling: sent.length + 2,
+    isolation: "read",
+  });
+  // The ledger read is the list's own, narrowed to the one id.
+  assert.deepEqual(sent[0].values, [REQUEST_ID, REQUEST_ID, 1]);
+  assert.equal(detail.card.question, "Should the cache key include the locale?");
+  assert.equal(detail.answer, "Use the model id only.");
+  assert.equal(detail.rationale, "The locale is already in the path.");
+  assert.equal(detail.snapshotTargetSha, SHA);
+  // An open proposal with its bodies and transmission: what a judgment must name.
+  assert.deepEqual(detail.shown, {
+    answerDigest: DIGEST("2"),
+    rationaleDigest: DIGEST("3"),
+    optionId: null,
+    irreversible: false,
+    snapshotState: "worker_head",
+    snapshotTargetSha: SHA,
+    snapshotManifestDigest: DIGEST("b"),
+  });
+});
+
+test("nothing to judge: a closed proposal, a missing rationale or answer, and a request with no result", async () => {
+  const confirmed = listRow({
+    snapshotState: "worker_head",
+    transmitOutcome: "transmit_receipt",
+    resultKind: "proposal",
+    outputKind: "free_text",
+    irreversible: false,
+    closingKind: "confirm",
+    declarationAccuracy: "not_judged",
+  });
+  assert.equal((await readDecisionMakerRequestDetailForAdmin(detailTx({ ledger: [confirmed], state: stateRow({ closingKind: "confirm" }) }).tx, REQUEST_ID)).shown, null);
+  const withoutRationale = detailTx({ bodies: [bodyRow("card_text", CARD_TEXT, DIGEST("1")), bodyRow("dm_answer", "Use it.", DIGEST("2"))] });
+  assert.equal((await readDecisionMakerRequestDetailForAdmin(withoutRationale.tx, REQUEST_ID)).shown, null);
+  const withoutAnswer = detailTx({ bodies: [bodyRow("card_text", CARD_TEXT, DIGEST("1")), bodyRow("dm_rationale", "Because.", DIGEST("3"))] });
+  assert.equal((await readDecisionMakerRequestDetailForAdmin(withoutAnswer.tx, REQUEST_ID)).shown, null);
+  const assigned = detailTx({
+    ledger: [listRow()],
+    state: stateRow({ transmitted: false, snapshotState: null, snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: null, transmitOutcome: null, terminalEventId: null, terminalResultKind: null, terminalResultDigest: null }),
+    bodies: [bodyRow("card_text", CARD_TEXT, DIGEST("1"))],
+  });
+  const open = await readDecisionMakerRequestDetailForAdmin(assigned.tx, REQUEST_ID);
+  assert.equal(open.shown, null);
+  assert.equal(open.answer, null);
+  assert.equal(open.card.options.length, 2);
+});
+
+test("a select proposal names its option; a card text the store could not have written refuses the detail", async () => {
+  const select = listRow({ snapshotState: "none", transmitOutcome: "transmit_receipt", resultKind: "proposal", outputKind: "select", irreversible: true });
+  const { tx } = detailTx({
+    ledger: [select],
+    state: stateRow({ snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null }),
+    bodies: [bodyRow("card_text", CARD_TEXT, DIGEST("1")), bodyRow("dm_rationale", "The id is enough.", DIGEST("3"))],
+  });
+  const detail = await readDecisionMakerRequestDetailForAdmin(tx, REQUEST_ID);
+  assert.equal(detail.optionId, "a");
+  assert.equal(detail.row.irreversible, true);
+  assert.deepEqual(detail.shown, {
+    answerDigest: null,
+    rationaleDigest: DIGEST("3"),
+    optionId: "a",
+    irreversible: true,
+    snapshotState: "none",
+    snapshotTargetSha: null,
+    snapshotManifestDigest: null,
+  });
+  const broken = detailTx({ bodies: [bodyRow("card_text", "not a card", DIGEST("1"))] });
+  await assert.rejects(readDecisionMakerRequestDetailForAdmin(broken.tx, REQUEST_ID), /state_unreadable/);
+});
+
+test("a request nobody recorded is null after one statement, and an id that is not one is refused before any", async () => {
+  const missing = detailTx({ ledger: [] });
+  assert.equal(await readDecisionMakerRequestDetailForAdmin(missing.tx, REQUEST_ID), null);
+  assert.equal(missing.sent.length, 1);
+  const none = detailTx();
+  await assert.rejects(
+    readDecisionMakerRequestDetailForAdmin(none.tx, "not-a-request"),
+    (error) => error instanceof DecisionMakerAdminReadError && error.code === "invalid_input",
+  );
+  assert.equal(none.sent.length, 0);
 });
