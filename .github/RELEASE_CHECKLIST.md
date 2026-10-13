@@ -1102,10 +1102,17 @@ shorter record.
 
 ### 7.9.4 Wait for CI
 
-Railway's **Wait for CI** (`checkSuites`) is on for production as of
-2026-08-15, and for dev from its creation on 2026-10-07. It holds a deployment
-until the pushed commit's check suite finishes, which removes the race where
-production deployed while its own checks were still running.
+Railway's **Wait for CI** (`checkSuites`) holds a deployment until the pushed
+commit's check suites finish, which removes the race where an environment
+deploys while its own checks are still running. As of 2026-10-13 it holds only
+on dev (on since dev was created on 2026-10-07).
+
+**Production does not have it right now.** It was turned on on 2026-08-15. On
+2026-10-13 it was found off, and turning it back on did not hold: Railway
+turned it off again at the next deploy, although several workflows run on push
+to `main`. The cause is not known yet. Until the switch holds, a merge to
+`main` deploys without waiting for `main`'s own push suites, and what gates
+production is the release pull request's CI.
 
 **Test cannot have it.** Railway offers the switch only when a workflow runs on
 push to the branch the service deploys, and no workflow runs on push to
