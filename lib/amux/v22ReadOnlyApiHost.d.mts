@@ -39,3 +39,9 @@ export declare function inspectAmuxV22ReadOnlyApiLauncher(
   frame: AmuxV22ReadOnlyApiExecutionFrame,
   options?: Record<string, unknown>,
 ): Promise<{ current: false } | { current: true; launcherConfigDigest: string }>;
+
+export declare function inspectAmuxV22ReadOnlyApiStateDirectory(
+  path: string,
+  uid: number,
+  options?: Record<string, unknown>,
+): Promise<string>;

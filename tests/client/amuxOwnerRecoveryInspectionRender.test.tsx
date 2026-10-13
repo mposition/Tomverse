@@ -648,6 +648,34 @@ test("actual Panel preserves lost POST nonce across close, remount and page relo
   assert.doesNotMatch(raw, /oldHeldMicroUsd|additionalCapMicroUsd|prompt|secret|resolution/);
 });
 
+test("actual Panel releases the marker of a POST the server refused outright, never an unknown one", async t => {
+  for (const [status, released] of [[409, true], [428, true], [429, true], [503, false]] as const) {
+    const browser = recoveryBrowser(t); let writes = 0, reads = 0;
+    const nonces: string[] = [];
+    const fetchMock = t.mock.method(globalThis, "fetch", async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        writes += 1; nonces.push(JSON.parse(String(init.body)).requestId);
+        assert.equal(readAmuxPendingRecovery(identity.taskId).state, "pending",
+          "the marker must exist before POST");
+        return Response.json({ error: status === 409 ? "recovery_evidence_stale" :
+          status === 428 ? "ADMIN_REAUTHENTICATION_REQUIRED" : "busy" }, { status });
+      }
+      // Only an unknown outcome reads the same nonce back; it stays unresolved.
+      reads += 1; return Response.json({ error: "recovery_evidence_stale" }, { status: 409 });
+    });
+    const panel = mountRecoveryPanel(); await panel.flush();
+    panel.props.onRequest(); await panel.flush();
+    assert.equal(writes, 1, `${status}`);
+    assert.equal(browser.values.size, released ? 0 : 1, `${status} marker`);
+    assert.equal(panel.props.writesBlocked, !released, `${status} writes`);
+    assert.equal(reads, released ? 0 : 1, `${status} reads`);
+    panel.props.onRequest(); await panel.flush();
+    assert.equal(writes, released ? 2 : 1, `${status} next write`);
+    if (released) assert.notEqual(nonces[1], nonces[0], "a new request gets a new nonce");
+    panel.unmount(); fetchMock.mock.restore();
+  }
+});
+
 test("actual Panel preserves a lost risk-acceptance nonce and only reads it after remount", async t => {
   const browser = recoveryBrowser(t); let inspectionWrites = 0, acceptanceWrites = 0, acceptanceNonce = "";
   const readIds: string[] = [];

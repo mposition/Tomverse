@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 
 import { createAmuxV22ReadOnlyApiHost,
   amuxV22ReadOnlyApiCredentialMetadataDigest,
-  inspectAmuxV22ReadOnlyApiLauncher,
+  inspectAmuxV22ReadOnlyApiLauncher, inspectAmuxV22ReadOnlyApiStateDirectory,
   readAmuxV22ReadOnlyApiLauncherState } from "../lib/amux/v22ReadOnlyApiHost.mjs";
 import { createAmuxV22SidecarHandler,
   runAmuxV22ReadOnlyApiOneShot } from "../lib/amux/v22OneShotSidecar.mjs";
@@ -435,4 +435,68 @@ test("default root reader measures fixed unit artifacts and returns metadata-onl
       shared: true }), /invalid dedicated credential metadata/);
     assert.equal(providerCalls, 0);
   } finally { await rm(base, { recursive: true, force: true }); }
+});
+
+test("a later launch proof accepts only completed model-access journals in the sidecar state", async () => {
+  const dir = "/var/lib/tomverse-amux-v22-claude-investigate";
+  const uid = 1234;
+  const request = "00000000-0000-4000-8000-0000000000b1";
+  const other = "00000000-0000-4000-8000-0000000000b2";
+  const fake = (names, overrides = {}) => ({
+    realpath: async (value) => value,
+    readdir: async () => names,
+    lstat: async (value) => {
+      if (value === dir) return { isDirectory: () => true, isSymbolicLink: () => false,
+        uid, mode: 0o40700, dev: 1, ino: 2, size: 4096, ctimeMs: 5 };
+      const name = value.split(/[\\/]/).pop();
+      return { isFile: () => true, isSymbolicLink: () => false, nlink: 1, uid,
+        mode: 0o100600, dev: 1, ino: name.length, size: 64, ctimeMs: 6,
+        ...(overrides[name] ?? {}) };
+    },
+  });
+  const empty = await inspectAmuxV22ReadOnlyApiStateDirectory(dir, uid, fake([]));
+  assert.match(empty, /^[a-f0-9]{64}$/);
+  const completed = [request + ".model-access-claimed", request + ".model-access-result"];
+  const withJournal = await inspectAmuxV22ReadOnlyApiStateDirectory(dir, uid, fake(completed));
+  assert.match(withJournal, /^[a-f0-9]{64}$/);
+  assert.notEqual(withJournal, empty, "the digest still names what is on disk");
+  for (const [label, names, overrides] of [
+    ["claim without result", [request + ".model-access-claimed"]],
+    ["result without claim", [request + ".model-access-result"]],
+    ["temporary result", [...completed, request + ".model-access-result.tmp"]],
+    ["attempt journal", [...completed, request + ".claimed"]],
+    ["second request in flight", [...completed, other + ".model-access-claimed"]],
+    ["foreign name", ["notes.txt"]],
+    ["group-readable result", completed, { [completed[1]]: { mode: 0o100640 } }],
+    ["linked result", completed, { [completed[1]]: { nlink: 2 } }],
+    ["foreign owner", completed, { [completed[0]]: { uid: 0 } }],
+    ["symbolic link", completed, { [completed[1]]: { isFile: () => false,
+      isSymbolicLink: () => true } }],
+  ])
+    await assert.rejects(inspectAmuxV22ReadOnlyApiStateDirectory(dir, uid,
+      fake(names, overrides)), /has other work/, label);
+});
+
+test("the real sidecar's model-access journal leaves a state a fresh launch proof accepts", {
+  skip: process.platform !== "linux" ? "requires Linux file modes" : undefined,
+}, async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-api-proof-state-"));
+  try {
+    await chmod(stateDir, 0o700);
+    const uid = process.getuid();
+    const request = { version: 1, requestId: "00000000-0000-4000-8000-0000000000b3",
+      taskId: "c48886b9-86f8-4631-8db8-c0b288a707af",
+      priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba9bd8", worker,
+      provider: "anthropic", selectedModelId: "claude-opus-5-5",
+      launchProofId: "00000000-0000-4000-8000-0000000000b3",
+      launchProofDigest: "1".repeat(64), apiExecutionFrameDigest: "2".repeat(64),
+      credentialMetadataDigest: "3".repeat(64), launcherConfigDigest: "4".repeat(64) };
+    const handler = createAmuxV22SidecarHandler({ worker, stateDir,
+      run: async () => { throw new Error("paid path must remain closed"); },
+      modelAccess: async () => { throw new Error("provider unavailable"); },
+      protocolCapabilities: () => ["read_only_api_retry_v1"] });
+    const result = await handler({ op: "api_model_access", ...request });
+    assert.equal(result.access, "unknown");
+    assert.match(await inspectAmuxV22ReadOnlyApiStateDirectory(stateDir, uid), /^[a-f0-9]{64}$/);
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
 });

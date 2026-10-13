@@ -778,7 +778,15 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
       expectedReceipt: pending?.expectedReceipt ?? undefined,
       controller, isCurrent, fallback: m.host.unavailable, locale });
     if (!isCurrent()) return;
-    if (pending && next) {
+    // A fresh POST (an existing marker returns before any request) that the
+    // server refused outright, or that a precondition stopped before sending,
+    // committed nothing: release its marker. An unknown outcome keeps it.
+    const refusedFreshWrite = Boolean(action) && pending !== null && next !== null &&
+      (next.state === "changed" || (next.state === "unavailable" && !next.unknownWrite));
+    if (pending && next && refusedFreshWrite && clearAmuxPendingRecovery(pending)) {
+      pendingRecovery.current = null; setPendingStorage({ state: "empty" });
+      setHost(next);
+    } else if (pending && next) {
       const pendingReceipt = pending.expectedReceipt ?? undefined;
       const safeStopConfirmedResult = next.state === "ready" && safeStopReceipt(pendingReceipt) &&
         next.data.requestKind === "safe_stop" &&
