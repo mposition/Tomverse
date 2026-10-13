@@ -144,27 +144,22 @@ export function AutoRoutingComposerToggle({
       aria-label={copy.label}
       disabled={pending}
       onClick={() => onChange(!enabled)}
-      className={`flex h-11 shrink-0 touch-manipulation items-center gap-1.5 rounded-full border px-2 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-50 ${
-        enabled
-          ? "border-status-switch-on-500 bg-status-switch-on-500 text-white"
-          : "border-zinc-300 bg-zinc-50 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
-      }`}
+      className="flex h-11 shrink-0 touch-manipulation items-center justify-end gap-2 rounded-lg px-1 text-[13px] font-medium text-zinc-600 transition-colors hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-50 max-[240px]:w-full dark:text-zinc-300 dark:hover:bg-zinc-800 md:h-8"
     >
-      <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>{copy.label}</span>
+      <span className="whitespace-nowrap">{copy.label}</span>
       <span
         aria-hidden="true"
         data-testid="composer-auto-routing-track"
-        className={`relative h-5 w-9 shrink-0 overflow-hidden rounded-full border transition-colors ${
+        className={`relative h-[1.125rem] w-[1.875rem] shrink-0 overflow-hidden rounded-full border transition-colors ${
           enabled
-            ? "border-white/50 bg-white/25"
+            ? "border-status-switch-on-700 bg-status-switch-on-700"
             : "border-zinc-300 bg-zinc-200 dark:border-zinc-600 dark:bg-zinc-700"
         }`}
       >
         <span
           data-testid="composer-auto-routing-thumb"
-          className={`absolute left-0 top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-            enabled ? "translate-x-[1.125rem]" : "translate-x-1"
+          className={`absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+            enabled ? "translate-x-3" : "translate-x-0"
           }`}
         />
       </span>

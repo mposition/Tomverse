@@ -31,38 +31,48 @@ The message canvas may be optimized for additional vertical space, but the prima
 
 The contract binds the mobile shell (`useIsMobileShell()`) and every compact/responsive layout that renders the same composer, including landscape phones, keyboard-open states and browser zoom levels that produce a phone-width layout viewport.
 
-The approved Figma Composer also defines the wider layout: its input uses the
-product's 16px body size and a deliberate `7rem` minimum height at `md` and
-above. Those desktop dimensions are part of the approved visual match; the
-compact input remains rem-scaled so browser text scaling preserves a complete
-visible line.
+The owner-approved compact Composer defines both density tiers. At `md` and
+above, the input reserves two complete 26px lines at the product's 16px body
+size: a `4rem` minimum input row inside a normal-state card no taller than
+`10.75rem`. Mobile reserves one complete 26px line in a `2.75rem` input row;
+its normal-state card is no taller than `10.25rem`. These minima remain
+rem-scaled so browser text scaling preserves the complete visible lines.
+
+The normal compact context row keeps canonical Chat/Review navigation and its
+mode control outside the input: Smart Adaptive ON/OFF for Chat when offered,
+or the real selected-model count and existing picker action for Review. When
+the measured visible viewport reports the on-screen keyboard or landscape
+compaction, that context row may fold; the footer model picker and the picker's
+Smart Adaptive switch remain the accessible return path. In that folded state,
+the base input card is no taller than `7.5rem` before exceptional status rows.
 
 ## Required anatomy
 
 The mobile composer must preserve this vertical structure:
 
-1. Optional product navigation row
-2. Optional exception/status or Review model-summary row
+1. Optional compact context row: product navigation plus Smart Adaptive or
+   Review's selected-model count
+2. Optional exception/status rows
 3. Dedicated full-width textarea row
 4. Tools/model and credit/submit groups
 5. Required safety or privacy disclosure
 
 Optional rows may be compacted or conditionally hidden. The textarea row may not be merged with another row.
 
-On an active multi-model conversation below 800px of measured visible height,
-the composer may omit its duplicate product row and expanded Review model row
-when the drawer still provides product navigation and the shell's visible model
-strip still identifies every selection. The footer keeps the canonical model
-picker trigger and actual selected count. Empty/new conversations and the
-approved 844px presentation keep both expanded rows.
+The normal mobile state keeps its compact context row at supported portrait
+heights, including a 680px viewport. Keyboard-open and landscape compaction may
+fold that row as described above; a merely shorter portrait viewport does not.
+Review discloses the actual selected count in the compact context action rather
+than repeating every model chip above the textarea. The shell's model strip
+continues to identify each selected model, and the same canonical picker owns
+selection changes.
 
 As implemented, that is:
 
 ```
-[composer-product-mode-row]  ← optional; canonical Chat / Review navigation
+[composer-product-mode-row]  ← optional; navigation + mode/model-count context
 [tool-status-chip-row]        ← optional; exception/blocked search and deep research
 [web-search-exception-detail] ← optional; expands under the chip that opened it
-[composer-review-models]      ← Review only; opens the existing model picker
 [composer-textarea-row]       ← always; the textarea alone, width: 100%
 [actions row]                 ← tools/model/search left; credit, voice and send right
 [chat-ai-disclaimer-mobile]   ← always; AI + sensitive-data notice with "details"
@@ -71,9 +81,10 @@ As implemented, that is:
 ## Non-negotiable invariants
 
 - The textarea owns a dedicated row.
-- Product navigation and Review's selected-model summary each own a row outside
-  the textarea. They may only open the existing canonical navigation or model
-  picker paths; neither may write a product or model selection directly.
+- Product navigation and the Chat mode or Review model-count action share one
+  compact context row outside the textarea. They may only open the existing
+  canonical navigation, mode or model-picker paths; none may write a product or
+  model selection directly.
 - The empty textarea provides at least one complete visible line.
 - The textarea uses the available inner width of the composer.
 - A status chip may not reduce the textarea to remaining horizontal space.
