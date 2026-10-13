@@ -9,6 +9,7 @@ import { getConfiguredAmuxV22WorkerCatalog } from "@/lib/amux/routing";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { amuxInternalErrorResponse } from "@/lib/amux/internalRoute";
 
 const schema = z
   .object({
@@ -100,10 +101,9 @@ export async function POST(request: Request) {
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
-    return Response.json(
-      { error: "AMUX quota telemetry is unavailable." },
-      { status: 500, headers: { "Cache-Control": "no-store" } },
-    );
+    // The shared answer logs the cause and says whether anything committed:
+    // a busy or deadline 503 wrote nothing, anything else opens an incident.
+    return amuxInternalErrorResponse("quota_observation_write", error);
   }
 }
 
