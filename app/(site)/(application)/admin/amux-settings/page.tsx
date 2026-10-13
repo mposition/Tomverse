@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxDecisionMakerReportPanel } from "@/components/admin/AmuxDecisionMakerReportPanel";
+import { AmuxDecisionMakerRequestsPanel } from "@/components/admin/AmuxDecisionMakerRequestsPanel";
 import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
 import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
@@ -19,6 +20,7 @@ import { adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
 import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationCounts";
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerDeclarationAccuracyReport } from "@/lib/amux/decisionMakerJudgmentStore";
+import { listDecisionMakerRequestsForAdmin } from "@/lib/amux/decisionMakerAdminRead";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import {
   AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
@@ -62,25 +64,30 @@ export default async function AdminAmuxSettingsPage({
       <AmuxV22PromotionControl /></div>;
   }
   if (tab.id === "decision-maker") {
-    // The switch and declaration-accuracy report are independent reads. A
-    // failure in either one stays visible instead of becoming a default
-    // switch state or a zero-valued report.
-    const [state, report] = await Promise.all([
+    // The switch, the declaration-accuracy report and the request list are
+    // independent reads. A failure in any one stays visible instead of
+    // becoming a default switch state, a zero-valued report or an empty list.
+    const failed = (event: string) => (error: unknown) => {
+      console.warn(JSON.stringify({
+        subsystem: "amux",
+        event,
+        code: error instanceof AmuxDbBoundaryError ? error.code : null,
+      }));
+      return null;
+    };
+    const [state, report, requests] = await Promise.all([
       withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead,
-        (tx) => readDecisionMakerSwitchesOrThrow(tx)).catch(() => null),
+        (tx) => readDecisionMakerSwitchesOrThrow(tx)).catch(failed("decision_maker_switch_read_failed")),
       withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerReportRead,
         (tx) => readDecisionMakerDeclarationAccuracyReport(tx))
-        .catch((error: unknown) => {
-          console.warn(JSON.stringify({
-            subsystem: "amux",
-            event: "decision_maker_report_read_failed",
-            code: error instanceof AmuxDbBoundaryError ? error.code : null,
-          }));
-          return null;
-        }),
+        .catch(failed("decision_maker_report_read_failed")),
+      withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerRequestListRead,
+        (tx) => listDecisionMakerRequestsForAdmin(tx))
+        .catch(failed("decision_maker_request_list_read_failed")),
     ]);
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
       <AmuxDecisionMakerSwitchPanel state={state} canChange={canChange} />
+      <AmuxDecisionMakerRequestsPanel list={requests} />
       <AmuxDecisionMakerReportPanel report={report} /></div>;
   }
   const view = await readAmuxOrchestratorHaltsForAdmin().catch(() => null);

@@ -319,6 +319,16 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 4,
     isolation: "read",
   },
+  // Stage S2's Admin request list (lib/amux/decisionMakerAdminRead.ts): setup
+  // + the newest requests with the database clock + their result details +
+  // their judgments and deliveries + fence, pinned by
+  // tests/amuxDecisionMakerAdminList.test.mjs. REPEATABLE READ makes the three
+  // reads one snapshot.
+  decisionMakerRequestListRead: {
+    operation: "decision_maker_request_list_read",
+    prismaCallCeiling: 5,
+    isolation: "read",
+  },
   // §10's system sweep (lib/amux/decisionMakerRetentionSweep.ts). Its read:
   // setup + the stale candidates + the purge candidates + the key registry
   // with the database clock + fence, pinned by

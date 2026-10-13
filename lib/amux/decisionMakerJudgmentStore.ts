@@ -387,6 +387,46 @@ export async function readDecisionMakerDeliveryState(
   return state;
 }
 
+/**
+ * The judgment and delivery records of the given requests (at most 100), in
+ * one statement: their half of Admin's request list (stage S2,
+ * lib/amux/decisionMakerAdminRead.ts). For each request, its judgment's
+ * declaration accuracy and what its delivery events add up to; no person's id
+ * and no digest. Every requested id has a row, so a request without a
+ * judgment reads as none. The joined row is checked against the ledger's
+ * order (lib/amux/decisionMakerAdminCore.ts).
+ */
+export async function readDecisionMakerJudgmentsForAdmin(
+  client: JudgmentReader,
+  requestIds: readonly string[],
+): Promise<Map<string, Record<string, unknown>>> {
+  if (requestIds.length > 100 || !requestIds.every((id) => isDmRequestId(id))) {
+    throw new DecisionMakerJudgmentWriteError("invalid_input");
+  }
+  const records = new Map<string, Record<string, unknown>>();
+  if (requestIds.length === 0) return records;
+  const rows = await client.$queryRaw<Array<Record<string, unknown>>>`
+    SELECT
+      ids."id" AS "requestId",
+      (SELECT j."declarationAccuracy" FROM "AmuxDecisionMakerJudgment" j WHERE j."requestId" = ids."id") AS "declarationAccuracy",
+      coalesce(bool_or(d."kind" = 'deliver'), false) AS "delivered",
+      max(d."kind") FILTER (WHERE d."kind" IN ('delivery_receipt', 'delivery_unknown')) AS "deliveryOutcomeKind",
+      max(d."outcome") FILTER (WHERE d."kind" = 'delivery_unknown_resolve') AS "deliveryResolution"
+    FROM unnest(${[...requestIds]}::text[]) AS ids("id")
+    LEFT JOIN "AmuxDecisionMakerDeliveryEvent" d ON d."requestId" = ids."id"
+    GROUP BY ids."id"
+  `;
+  for (const row of rows) {
+    if (typeof row.requestId !== "string" || !requestIds.includes(row.requestId) || records.has(row.requestId)) {
+      throw new DecisionMakerJudgmentWriteError("state_unreadable");
+    }
+    const { requestId, ...record } = row;
+    records.set(requestId, record);
+  }
+  if (records.size !== new Set(requestIds).size) throw new DecisionMakerJudgmentWriteError("state_unreadable");
+  return records;
+}
+
 export type DecisionMakerDeliveryEventRecord = {
   eventId: string;
   auditLogId: string;
