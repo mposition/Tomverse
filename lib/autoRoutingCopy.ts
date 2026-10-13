@@ -42,7 +42,7 @@ export type AutoRoutingCopy = {
   /** Announced when the mode changes, for a screen reader. */
   turnedOn: string;
   turnedOff: string;
-  /** Prefix on an assistant message that Auto routed. */
+  /** Neutral selection label on an assistant message that Auto routed. */
   answeredBy: string;
 };
 
@@ -59,7 +59,7 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     variableCreditNotice: "Credits depend on the model that answers.",
     turnedOn: "Smart Adaptive is on. A model will be chosen for each message.",
     turnedOff: "Smart Adaptive is off. Your selected model answers every message.",
-    answeredBy: "Answered by",
+    answeredBy: "Auto selected",
   },
   ko: {
     label: "스마트 자동",
@@ -73,7 +73,7 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     variableCreditNotice: "답변한 모델에 따라 크레딧이 달라집니다.",
     turnedOn: "스마트 자동이 켜졌습니다. 메시지마다 모델을 고릅니다.",
     turnedOff: "스마트 자동이 꺼졌습니다. 선택한 모델이 모든 메시지에 답변합니다.",
-    answeredBy: "답변한 모델",
+    answeredBy: "자동 선택",
   },
   zh: {
     label: "智能自动",
@@ -86,7 +86,7 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     variableCreditNotice: "额度取决于回答的模型。",
     turnedOn: "智能自动已开启。每条消息都会挑选一个模型。",
     turnedOff: "智能自动已关闭。你选择的模型将回答所有消息。",
-    answeredBy: "回答模型",
+    answeredBy: "自动选择",
   },
   fr: {
     label: "Adaptation intelligente",
@@ -100,7 +100,7 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     variableCreditNotice: "Les crédits dépendent du modèle qui répond.",
     turnedOn: "L’adaptation intelligente est activée. Un modèle sera choisi pour chaque message.",
     turnedOff: "L’adaptation intelligente est désactivée. Le modèle que vous avez choisi répond à tous les messages.",
-    answeredBy: "Répondu par",
+    answeredBy: "Sélection automatique",
   },
   de: {
     label: "Intelligente Automatik",
@@ -114,7 +114,7 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     variableCreditNotice: "Die Credits hängen vom antwortenden Modell ab.",
     turnedOn: "Die intelligente Automatik ist an. Für jede Nachricht wird ein Modell gewählt.",
     turnedOff: "Die intelligente Automatik ist aus. Das von dir gewählte Modell beantwortet jede Nachricht.",
-    answeredBy: "Beantwortet von",
+    answeredBy: "Automatisch ausgewählt",
   },
   es: {
     label: "Adaptación inteligente",
@@ -128,7 +128,7 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     variableCreditNotice: "Los créditos dependen del modelo que responda.",
     turnedOn: "La adaptación inteligente está activada. Se elegirá un modelo para cada mensaje.",
     turnedOff: "La adaptación inteligente está desactivada. El modelo que elegiste responde a todos los mensajes.",
-    answeredBy: "Respondió",
+    answeredBy: "Selección automática",
   },
   pt: {
     label: "Adaptação inteligente",
@@ -142,7 +142,7 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     variableCreditNotice: "Os créditos dependem do modelo que responder.",
     turnedOn: "A adaptação inteligente está ligada. Um modelo será escolhido para cada mensagem.",
     turnedOff: "A adaptação inteligente está desligada. O modelo que você escolheu responde a todas as mensagens.",
-    answeredBy: "Respondido por",
+    answeredBy: "Seleção automática",
   },
 };
 

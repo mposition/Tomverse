@@ -20,6 +20,7 @@
 상태(v39 이력): **v39 FIRST Task의 과거 결과 불명 위험 수락과 읽기 전용 1회 재시도 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v39 절의 exact Task·과거 attempt·최대 노출액·현재 읽기 전용 실행 결속을 승인했다. 실제 stop·재시도·유료 호출·활성화는 별도다.
 상태(v40 이력): **v40 FIRST Task 전용 읽기 전용 API executor 대안 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v40 절의 기본 OFF, 고정 `Read`·`Grep`·`Glob` broker, Anthropic 전용 API key, 서버 정본 가격·token·turn 프레임과 실제 usage·model receipt 계약을 승인했다. key 등록·설치·배포·실제 API 호출은 별도다.
 상태(최신): **v41 packed Git object의 고정 읽기 전용 provenance 조회 승인.** 2026-10-13 운영자 `mposition`이 아래 v41 절의 보호된 고정 Git binary·고정 읽기 인자·sanitized environment·deadline·bounded output 예외를 승인했다. 모델 tool은 `Read`·`Grep`·`Glob` 셋으로 유지하며 설치·환경 설정·key 등록·배포·실제 API 호출은 별도다.
+상태(R2a 부속 이력): **2026-10-13에 원래 orchestration v36으로 승인된 worker 능력 R2a 코드 래치를 부속 계약 `worker-capability-r2a-latch-2026-10-13`로 보존한다.** `AMUX_WORKER_CAPABILITY_WRITES_LATCH`는 true이고 owner의 Admin 능력 기록만 열며, 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이는 번호가 겹치는 승인 이력의 식별자 구분일 뿐 새 정책 버전·권한·활성화를 승인하지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -1766,6 +1767,52 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
 1. 이 버전의 승인 기록과, 작성자와 다른 공급사의 독립 검토.
 2. 운영자가 2026-10-13에 정한 관측 기간: R2b의 동등 관측 3일(72시간), R2d의 세션 목록 관측 3일(72시간). 각 기간은 그 조각이 production에서 켜진 시각부터 세고, 그 사이 불일치를 관측하면 원인을 고친 뒤 처음부터 다시 센다. 바꾸는 것은 이 정책의 새 버전이다.
 3. 각 조각(R2a~R2e)은 독립 검토와 그 조각의 운영자 활성화 기록 뒤에만 켠다.
+
+## Worker 능력 R2a 래치 부속 계약 — 2026-10-13 승인
+
+approvedBy: mposition · approvedAt: 2026-10-13 · 부속 계약 식별자: `worker-capability-r2a-latch-2026-10-13`
+
+이 절은 `origin/develop`의 구현 커밋 `daf9224169c9e03928d56918ed4908e82a436a0f`(2026-10-13T15:06:39+10:00)과 독립 검토 기록 커밋 `2bb54c8d232ff75694894cdff7100ff7272a0bc6`(2026-10-13T15:08:48+10:00)에서 **버전 36 — worker 능력 R2a 코드 래치**로 승인·기록된 결정을 보존한다. 같은 번호를 독립적으로 사용한 recovery v36~v41 이력과 구분하기 위한 historical source-qualified alias이며, 원 승인 본문·래치 동작·권한 범위를 바꾸거나 새 숫자 정책 버전·새 권한·새 활성화를 주장하지 않는다.
+
+아래 두 줄은 원 승인 식별 표기의 verbatim 이력 인용이다. 코드 블록 안의 문구는 현행 정책 heading이나 새 버전 주장이 아니다.
+
+```text
+## 버전 36 — worker 능력 R2a 코드 래치
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 2026-10-13 작성, 작성자 Claude. 운영자는 2026-10-13에 R2a 코드 래치를 켜는 이 버전을 승인했다. 이 승인과 같은 변경에서 래치 상수를 true로 바꾼다. 작성자와 다른 공급사의 독립 검토(codex·copilot)는 r-20261013-050649-b92f59에서 둘 다 지적 없이 accept였다.
+```
+
+원 승인 요약: 버전 35 R2a의 코드 래치 `AMUX_WORKER_CAPABILITY_WRITES_LATCH`를 켠다. owner의 능력 쓰기만 열리고, production에서 `active`인 일곱의 능력이 기록되면 R2a가 끝난다. 배정, 환경 변수, worker catalog, bridge, 등록부의 원하는 상태와 역할 상한은 바꾸지 않는다.
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 2026-10-13 작성, 작성자 Claude. 운영자는 2026-10-13에 R2a 코드 래치를 켜는 이 버전을 승인했다. 이 승인과 같은 변경에서 래치 상수를 true로 바꾼다. 작성자와 다른 공급사의 독립 검토(codex·copilot)는 r-20261013-050649-b92f59에서 둘 다 지적 없이 accept였다.
+
+이 버전은 버전 35 5항의 R2a를 켠다. R2a는 코드 래치 `AMUX_WORKER_CAPABILITY_WRITES_LATCH`(`lib/amux/workerCapabilityCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다. 이 기록이 버전 35 5항이 말하는 그 조각의 운영자 활성화 기록이다.
+
+- **열리는 것.**
+  - 래치가 여는 것은 하나다. owner가 Admin(AMUX › 실행 › Worker)에서 최근 step-up을 거쳐 능력 표 `AmuxWorkerCapabilityEvent`에 쓰는 것이다.
+  - 무엇이 들어갈 수 있는지는 버전 35 2항대로 DB가 강제한다.
+    - 등록부에 있고 `retired`가 아닌 worker만 받는다.
+    - 태그와 v22 역할은 닫힌 목록이고, 그 worker의 역할 상한과 공급사 종류의 검증 여부를 넘지 못한다.
+    - worker별 revision을 compare-and-set으로 올린다.
+    - 같은 트랜잭션에 사람 감사 `amux.worker.capability`가 있어야 한다.
+    - 쓴 사건은 고치거나 지울 수 없다.
+- **R2a 가져오기.** owner는 Admin의 가져오기로, production의 두 카탈로그 환경 변수가 설명하는 `active` 일곱의 능력을 기록한다.
+  - 가져오기는 worker마다 변경 하나를 보낸다. 확인된 영수증을 받았을 때만 다음으로 간다. 결과가 불분명하면 멈추고 다시 읽으며, 다시 보내지 않는다.
+  - 두 변수 가운데 하나라도 읽을 수 없으면 아무것도 제안하지 않는다. v22 변수가 설정되어 있는데 읽히지 않으면 가져오기를 막는다. 빈 값도 여기에 든다. 변수가 아예 없을 때만 "v22 프로필 없음"으로 읽는다.
+  - `engineering-runner`는 버전 34대로 등록부에 없으므로 가져오지 않는다.
+- **R2a의 끝.**
+  - 버전 35 5항의 끝나는 조건대로, production에서 `active`인 일곱의 능력이 기록되면 R2a가 끝난다. 운영자가 Admin에서 일곱 행이 모두 "이미 기록됨"으로 보이는 것을 확인하면 된다.
+  - Cursor·Copilot의 여섯(`requested`)은 R5 활성화 전에만 능력이 있으면 된다.
+  - R2a의 Admin 화면은 가져오기만 제공한다. 버전 35 2항의 Admin 편집은 그 여섯에게만 필요하므로, 그 화면은 R5 전에 별도 변경으로 만든다.
+- **바뀌지 않는 것.**
+  - 배정은 R2c의 활성화 기록 전까지 그대로 카탈로그 환경 변수를 따른다. 능력 표는 아무것도 배정하지 않는다.
+  - 환경 변수, worker catalog, bridge, 등록부의 원하는 상태와 역할 상한, 용량 행, 비용 상한, 동시 실행 상한은 바꾸지 않는다.
+  - 관측·시험·래치 표는 계속 모든 쓰기를 거부한다.
+  - 버전 35 5항대로 R2a는 R1의 관측 기간과 함께 진행한다. R2c는 여전히 R1 관측이 끝난 뒤에만 켠다.
+- **되돌리기.**
+  - 래치를 false로 되돌리는 변경은 쓰기만 다시 닫는다.
+  - 이미 쓴 사건은 append-only라 남는다. 능력 표를 비우는 경로는 없다.
+  - R2c 전에는 능력 표가 배정에 닿지 않으므로, 잘못 기록된 능력은 다음 revision으로 고친다.
 
 ## CLI 사용량 보존·집계 부속 계약 — 2026-10-02 승인
 

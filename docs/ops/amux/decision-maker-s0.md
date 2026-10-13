@@ -118,6 +118,8 @@ sudo bash scripts/amux-decision-maker-s0/measure-isolation /root/amux-dm-s0.conf
    - 호스트 이름.
    - 계정을 만든 방식과 네트워크를 막은 방식.
 2. `not_isolated`나 `incomplete`면 고친 뒤 다시 잰다. 지난 결과는 지우지 않고 함께 남긴다.
+3. 기록은 `decision-maker-s0-records/`에 `<측정일>__<commit SHA>.md`로 두고, 결과 JSON은 같은 이름의 `.result.json`으로
+   함께 둔다. 판정과 서명은 운영자가 그 기록 안에 적는다.
 
 이 실측은 정책 §12 S2 선행 조건 가운데 "S0의 양방향 계정 격리 실측 증거" 하나다. 다른 S0 항목과 S2 서버 반영은
 따로다:

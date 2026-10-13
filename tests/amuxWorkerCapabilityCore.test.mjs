@@ -68,9 +68,18 @@ test("the closed lists are version 35's table", () => {
   assert.ok(Object.isFrozen(AMUX_WORKER_ROUTING_TAG_REQUIREMENTS));
 });
 
-test("R2a ships with capability writes latched off", () => {
-  assert.equal(AMUX_WORKER_CAPABILITY_WRITES_LATCH, false);
-  assert.equal(amuxWorkerCapabilityWritesOpen(), false);
+test("version 36 turns R2a's capability writes on, and the policy records it", () => {
+  // Version 35 section 5: R2a shipped latched off; version 36 is the
+  // operator's activation record. The latch and its record move together.
+  assert.equal(AMUX_WORKER_CAPABILITY_WRITES_LATCH, true);
+  assert.equal(amuxWorkerCapabilityWritesOpen(), true);
+  const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8");
+  const normalized = policy.split(String.fromCharCode(13)).join("");
+  const heading = "## 버전 36 — worker 능력 R2a 코드 래치";
+  const record = "승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`";
+  assert.ok(normalized.includes([heading, "", record].join(String.fromCharCode(10))));
+  assert.ok(normalized.includes("`AMUX_WORKER_CAPABILITY_WRITES_LATCH`(`lib/amux/workerCapabilityCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다"));
+  assert.ok(normalized.includes("approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 36"));
 });
 
 test("a tag is an authority: it never exceeds the worker's ceiling or its class", () => {
@@ -194,7 +203,8 @@ test("the Admin view proposes the import per worker and says what is already rec
     legacy: PRODUCTION_LEGACY,
     v22: PRODUCTION_V22,
   });
-  assert.equal(view.writesLatch, false);
+  // Defaults to the code latch (true since version 36).
+  assert.equal(view.writesLatch, AMUX_WORKER_CAPABILITY_WRITES_LATCH);
   assert.equal(view.catalogReadable, true);
   assert.equal(view.rows.length, 13);
   const byName = Object.fromEntries(view.rows.map((row) => [row.workerName, row]));
