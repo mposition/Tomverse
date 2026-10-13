@@ -42,7 +42,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-현재 실측: 2026-09-17 기준 `CI=1 --grep=@ui-risk --list`가 desktop-chromium과 mobile-chromium 각 project에서 **63개 파일, 890 test**를 선택합니다(두 project 합계 1,780). +1 파일은 `help-guide.spec.ts`(HELP-NAV-01 선택형 안내, test 3건)이고, 나머지 +21 test는 2026-09-16 이후 develop에서 기존 태그 spec이 늘어난 몫입니다(develop `0fb27486` 기준으로 셈).
+이전 실측 기준선: 2026-09-17 기준 `CI=1 --grep=@ui-risk --list`가 desktop-chromium과 mobile-chromium 각 project에서 **63개 파일, 890 test**를 선택합니다(두 project 합계 1,780). +1 파일은 `help-guide.spec.ts`(HELP-NAV-01 선택형 안내, test 3건)이고, 나머지 +21 test는 2026-09-16 이후 develop에서 기존 태그 spec이 늘어난 몫입니다(develop `0fb27486` 기준으로 셈). 이 수치는 이후 추가된 spec과 test를 포함한 현재 실행 분모가 아닙니다.
 
 이전 값: 2026-09-16 기준 `CI=1 --grep=@ui-risk --list`가
 desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**를
