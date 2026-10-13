@@ -34,12 +34,24 @@ class AmuxDbBoundaryError extends Error {
   constructor(readonly code: string, operation: string) { super(`${code}:${operation}`); this.name = "AmuxDbBoundaryError"; }
 }
 let boundaryFailure: unknown = null;
+// Only inside a route budget does the real boundary call a transaction that
+// never started busy; outside one it stays an outcome-unknown P2028.
+const LIFECYCLE_BUDGET_MS = 12_000;
+let openRouteBudgets = 0;
+const routeBudgetsUsed: number[] = [];
+const quotaWriteBoundary = {};
 mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
-  AMUX_DB_BOUNDARIES: { quotaObservationWrite: {}, quotaObservationRead: {} },
+  AMUX_DB_BOUNDARIES: { quotaObservationWrite: quotaWriteBoundary, quotaObservationRead: {} },
+  AMUX_LIFECYCLE_ROUTE_BUDGET_MS: LIFECYCLE_BUDGET_MS,
   AmuxDbBoundaryError,
   admitAmuxOrchestratorWrite: async () => ({ admitted: true }),
   amuxRouteOrchestratorReceiptsMayHaveCommitted: () => false,
-  withAmuxDbBoundary: async (_boundary: unknown, work: (tx: unknown, context: unknown) => Promise<unknown>) => {
+  withAmuxRouteBudget: async (work: () => Promise<unknown>, maxMs: number) => {
+    routeBudgetsUsed.push(maxMs); openRouteBudgets += 1;
+    try { return await work(); } finally { openRouteBudgets -= 1; }
+  },
+  withAmuxDbBoundary: async (boundary: unknown, work: (tx: unknown, context: unknown) => Promise<unknown>) => {
+    if (boundary === quotaWriteBoundary) assert.ok(openRouteBudgets > 0, "quota write outside a route budget");
     if (boundaryFailure) throw boundaryFailure;
     return work(tx, { dbNow: now });
   },
@@ -63,8 +75,11 @@ test("quota report authenticates, stores and audits once, and supports exact los
   authorized = false;
   assert.equal((await post()).status, 401);
   assert.equal(writeCalls, 0);
+  assert.deepEqual(routeBudgetsUsed, [], "an unauthorized call starts no route budget");
   authorized = true;
   assert.equal((await post()).status, 200);
+  // The bridge allows 15 s for a quota POST: the lifecycle route budget.
+  assert.deepEqual(routeBudgetsUsed, [LIFECYCLE_BUDGET_MS]);
   assert.deepEqual(lockOrder.slice(0, 2), ["audit", "observation"]);
   assert.equal(writeCalls, 1); assert.equal(auditCalls, 1);
   assert.equal((await post()).status, 200, "same observation must be idempotent");
@@ -126,6 +141,11 @@ test("a failed quota write is logged and says whether anything committed", async
     const late = await post(fresh(2));
     assert.equal(late.status, 503);
     assert.equal((await late.json()).reason, "amux_database_deadline_exceeded");
+    // Usually a wait for the audit chain lock; the line is the only trace.
+    assert.deepEqual(JSON.parse(String(warn.mock.calls.at(-1)?.arguments[0])), {
+      subsystem: "amux", event: "internal_route_deadline_exceeded",
+      operation: "quota_observation_write", error_code: "57014",
+    });
 
     // Anything else is still a 500, but no longer a silent one.
     boundaryFailure = new Error("unexpected");

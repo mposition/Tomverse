@@ -261,6 +261,18 @@ export const amuxInternalErrorResponse = (
       : "";
 
   if (isKnownDeadlineFailure(error, databaseCode, databaseError)) {
+    // Nothing was written either, but a statement that ran out of time is
+    // usually one that waited for a lock, and without this line the 503 is the
+    // only trace of it (2026-10-12: the audit chain lock behind quota writes).
+    console.warn(
+      JSON.stringify({
+        subsystem: "amux",
+        event: "internal_route_deadline_exceeded",
+        operation,
+        error_code:
+          error instanceof AmuxDbBoundaryError ? error.code : "57014",
+      }),
+    );
     return amuxJsonNoStore(
       {
         error: "AMUX database deadline exceeded.",
