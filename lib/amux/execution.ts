@@ -383,7 +383,7 @@ export async function startAmuxV22TaskExecution(input: {
         reason: "recovery_approval_unbound" as const };
       const budget = recoveryAttemptBudget({
         historicalAttempts: prior._count._all,
-        greatestAttemptNumber: prior._max.attemptNumber, approval: recovery,
+        greatestAttemptNumber: prior._max.attemptNumber,
       });
       if (!budget.allowed) return { started: false as const,
         reason: "attempt_budget_exhausted" as const };

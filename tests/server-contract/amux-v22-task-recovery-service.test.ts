@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 import { amuxV22RecoveryDigest, amuxV22SafeStopJournalBinding,
   type AmuxV22RecoveryEvidenceInput,
   type AmuxV22SafeStopEvidenceInput } from "../../lib/amux/v22TaskRecoveryCore.ts";
+import { createAmuxV22SidecarHandler } from "../../lib/amux/v22OneShotSidecar.mjs";
+import { runAmuxV22RecoveryCheckerOnce } from "../../lib/amux/v22RecoveryHost.mjs";
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const owner = {
   user: { id: "owner-1" },
@@ -273,6 +277,53 @@ test("terminal success, unbound invocation and changed runtime are stored as exp
         journalBound: true, socketTerminal: true, externalEffectsKnown: true, workspaceClean: true } } : {};
     const read = await submitEvidence(reportChange); assert.equal(read.state, "unverified");
     assert.equal(world.evidence.length, 1); assert.equal(world.approvals.length, 0);
+  }
+});
+test("the actual no-memory legacy producer stays unknown through the checker and cannot request safe-stop", async () => {
+  reset(); world.task.taskRole = "investigate";
+  const service = await load(); await requestInspection();
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-recovery-no-memory-"));
+  const capture: { transmitted?: AmuxV22RecoveryEvidenceInput } = {};
+  try {
+    const handler = createAmuxV22SidecarHandler({ worker: "claude-test", stateDir,
+      quota: undefined, recoveryUnit: undefined, recoveryWorkspace: undefined,
+      run: async () => {
+        throw new Error("provider execution is not allowed in this regression");
+      } });
+    const checker = await runAmuxV22RecoveryCheckerOnce({ enabled: "1",
+      workerName: "claude-test", socketPath: "/run/tomverse-amux-v22-claude-test/task.sock",
+      syncSecret: "i".repeat(40), internalUrl: "https://tomverse.test/" }, {
+      fetcher: async (_url: URL, init: RequestInit) => {
+        if (init.method === "GET")
+          return Response.json(await service.pendingAmuxV22RecoveryInspections("claude-test"));
+        const transmitted = JSON.parse(String(init.body)) as AmuxV22RecoveryEvidenceInput;
+        capture.transmitted = transmitted;
+        const recorded = await service.reportAmuxV22RecoveryEvidence(transmitted);
+        return Response.json({ recorded: recorded.recorded, evidenceId: recorded.evidenceId });
+      },
+      inspectSocket: async (_path: string, body: unknown) => handler(body),
+    });
+    assert.equal(checker.state, "reported");
+    assert.equal(capture.transmitted?.reason, "legacy_invocation_unbound");
+    assert.equal(capture.transmitted?.proof.externalEffectsKnown, false);
+
+    const source = await service.readAmuxV22TaskRecovery(owner, "task-1234", requestId);
+    assert.equal(source.state, "unverified");
+    const before = { inspections: world.inspections.length, audits: world.audits.length,
+      evidence: world.evidence.length };
+    await assert.rejects(service.requestAmuxV22LegacySafeStop({ session: owner,
+      request: new Request("https://tomverse.test"), action: "request_safe_stop",
+      taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+      sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
+      requestId: safeStopRequestId }), (error: unknown) =>
+      error instanceof Error && error.message === "safe_stop_external_effects_unknown" &&
+      "httpStatus" in error && error.httpStatus === 409);
+    assert.deepEqual({ inspections: world.inspections.length, audits: world.audits.length,
+      evidence: world.evidence.length }, before);
+    assert.equal(world.inspections.some((item) => item.requestKind === "safe_stop"), false);
+    assert.equal(world.approvals.length + world.changedOld + world.ledgerWrites + world.attemptWrites, 0);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
   }
 });
 test("approval rechecks evidence freshness, ready, costs, incident, allowance, and compare-and-set", async () => {

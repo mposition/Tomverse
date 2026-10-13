@@ -681,8 +681,10 @@ export async function readAmuxV22RecoveryAuthority(tx: Prisma.TransactionClient,
   return row;
 }
 
-export function recoveryAttemptBudget(input: { historicalAttempts: number; greatestAttemptNumber: number | null;
-  approval: { historicalAttempts: number; nextAttemptNumber: number } | null }) {
+export function recoveryAttemptBudget(input: {
+  historicalAttempts: number;
+  greatestAttemptNumber: number | null;
+}) {
   return decideAmuxAttemptBudget({ historical_rows: input.historicalAttempts,
     greatest_attempt_number: input.greatestAttemptNumber });
 }

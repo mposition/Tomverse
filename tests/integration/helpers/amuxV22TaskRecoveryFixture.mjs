@@ -81,6 +81,9 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     "AmuxV22Recovery_prior_attempt_immutable_check");
   await reject(() => db.query(`DELETE FROM public."AmuxExecutionAttempt" WHERE "id"=$1`, [priorAttemptId]),
     "AmuxV22Recovery_prior_attempt_immutable_check");
+  // This is a synthetic trigger fixture for the SQL-allowed known-read-only branch.
+  // The real no-memory legacy sidecar reports externalEffectsKnown=false and is
+  // covered by the server-contract producer-to-owner refusal regression.
   const report = { ...binding, evidenceId, requestDigest, hostInvocationId: null,
     proof: { terminalOutcome: "unknown", sameLiveInvocation: false, noActiveExecution: false,
       processTreeStopped: false, rootOwnedUnit: true, controlGroupBound: true, journalBound: true,

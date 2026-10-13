@@ -25,7 +25,8 @@ mock.module(mod("lib/amux/ownerRecoveryInspectionRead.ts"), { namedExports: {
   readAmuxOwnerRecoveryInspection: async (identity: unknown) => { reads += 1; received = identity;
     return { state: returnedState, inspection: { safe: true } }; } } });
 const route = import(mod("app/api/admin/amux/execution-view/route.ts"));
-const url = "https://tomverse.test/api/admin/amux/execution-view?view=recovery_inspection&taskId=task-1&taskRevision=4&attemptId=attempt-1";
+const base = "https://tomverse.test/api/admin/amux/execution-view";
+const url = `${base}?view=recovery_inspection&taskId=task-1&taskRevision=4&attemptId=attempt-1`;
 test("recovery inspection is owner-only, recent-authenticated, identity-bound and no-store", async () => {
   const { GET } = await route;
   assert.equal((await GET(new Request(url))).status, 404);
@@ -33,11 +34,23 @@ test("recovery inspection is owner-only, recent-authenticated, identity-bound an
   role = "owner"; assert.equal((await GET(new Request(url))).status, 428); assert.equal(reads, 0);
   recent = true;
   for (const bad of [url + "&attemptId=another", url + "&force=true",
-    url.replace("taskRevision=4", "taskRevision=0"), url.replace("taskRevision=4", "taskRevision=04"),
-    url.replace("taskRevision=4", "taskRevision=9007199254740993"),
+    url.replace("taskRevision=4", "taskRevision=-1"), url.replace("taskRevision=4", "taskRevision=04"),
+    url.replace("taskRevision=4", "taskRevision=2147483645"),
     url.replace("attemptId=attempt-1", "attemptId=%2Fsecret")])
     assert.equal((await GET(new Request(bad))).status, 400);
   assert.equal(reads, 0);
+  const maxTaskId = `task:${"a".repeat(123)}`;
+  const maxAttemptId = `attempt:${"b".repeat(120)}`;
+  const boundary = `${base}?view=recovery_inspection&taskId=${maxTaskId}` +
+    `&taskRevision=2147483644&attemptId=${maxAttemptId}`;
+  assert.equal((await GET(new Request(boundary))).status, 200);
+  assert.deepEqual(received, { taskId: maxTaskId, taskRevision: 2_147_483_644,
+    attemptId: maxAttemptId });
+  assert.equal((await GET(new Request(boundary.replace(maxTaskId, `${maxTaskId}x`)))).status, 400);
+  assert.equal((await GET(new Request(boundary.replace(maxAttemptId, `${maxAttemptId}x`)))).status, 400);
+  const zeroRevision = url.replace("taskRevision=4", "taskRevision=0");
+  assert.equal((await GET(new Request(zeroRevision))).status, 200);
+  assert.deepEqual(received, { taskId: "task-1", taskRevision: 0, attemptId: "attempt-1" });
   const response = await GET(new Request(url)); assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
   assert.deepEqual(received, { taskId: "task-1", taskRevision: 4, attemptId: "attempt-1" });

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { constants } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { amuxV22RecoveryDigest, amuxV22SafeStopEvidenceSchema } from "../lib/amux/v22TaskRecoveryCore.ts";
 import { AMUX_V22_RECOVERY_INTENT_DIR, bindAmuxV22StopIntent,
@@ -25,6 +28,28 @@ const request = { inspectionId: "00000000-0000-4000-8000-000000000001", requestK
 const bootId = "11111111-2222-3333-4444-555555555555";
 const capturedControlGroup = `/system.slice/${request.targetUnit}`;
 const activeCapture = { bootId, controlGroup: capturedControlGroup, invocationId: "c".repeat(32) };
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const bashPath = process.platform === "win32" ?
+  join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe") : "/bin/bash";
+const systemdState = ({ load = "loaded", unitFile = "disabled", active = "inactive",
+  sub = "dead", job = "" } = {}) => [
+  `LoadState=${load}`, `UnitFileState=${unitFile}`, `ActiveState=${active}`,
+  `SubState=${sub}`, `Job=${job}`,
+].join("\n");
+const runInstallPreflight = ({ service = systemdState({ unitFile: "static" }),
+  timer = systemdState(), queryFailure = "" } = {}) => spawnSync(bashPath, ["-c", `
+source scripts/install-amux-v22-recovery-controller.sh
+controller_systemctl_show() {
+  [[ \${QUERY_FAILURE:-} != "$1" ]] || return 1
+  case "$1" in
+    amux-v22-recovery-controller.service) printf '%s\\n' "$SERVICE_STATE" ;;
+    amux-v22-recovery-controller.timer) printf '%s\\n' "$TIMER_STATE" ;;
+    *) return 1 ;;
+  esac
+}
+assert_controller_install_safe
+`], { cwd: repositoryRoot, encoding: "utf8", env: { ...process.env,
+  SERVICE_STATE: service, TIMER_STATE: timer, QUERY_FAILURE: queryFailure } });
 const bindingBasis = value => ({ taskId: value.taskId, priorAttemptId: value.priorAttemptId,
   workerProfileAlias: value.workerProfileAlias, targetUnit: value.targetUnit });
 const intentFor = (value, capture = activeCapture) => {
@@ -360,14 +385,55 @@ test("journal preparation captures boot and cgroup with O_EXCL, fsyncs, and refu
 });
 
 test("install preparation remains manual, disabled and without start/restart/enable", async () => {
-  const [service, installer, env] = await Promise.all([
+  const [service, installer, env, packageSource] = await Promise.all([
     readFile(new URL("../scripts/systemd/amux-v22-recovery-controller.service", import.meta.url), "utf8"),
     readFile(new URL("../scripts/install-amux-v22-recovery-controller.sh", import.meta.url), "utf8"),
     readFile(new URL("../scripts/systemd/amux-v22-recovery-controller.env.example", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(service, /^Restart=no$/m); assert.doesNotMatch(service, /^\[Install\]$/m);
-  assert.doesNotMatch(installer, /systemctl\s+(?:start|restart|enable)/);
+  for (const line of ["PrivateDevices=true", "ProtectControlGroups=true",
+    "ProtectKernelModules=true", "ProtectKernelTunables=true",
+    "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+    "ReadWritePaths=/var/lib/tomverse-amux-v22/recovery-stop-intents"])
+    assert.ok(service.split("\n").includes(line));
+  assert.doesNotMatch(service, /^PrivateNetwork=true$/m);
+  assert.doesNotMatch(installer,
+    /\/usr\/bin\/systemctl\s+(?:start|restart|enable|disable|stop|try-restart|reload)\b/);
   assert.match(installer, /systemctl daemon-reload/);
+  assert.match(installer,
+    /systemctl show "\$1" --all[\s\S]*LoadState,UnitFileState,ActiveState,SubState,Job/);
+  assert.equal(installer.match(/^assert_controller_install_safe$/gm)?.length, 2);
+  assert.match(installer, /assert_controller_install_safe\n\n\/usr\/bin\/install -d/);
+  assert.match(installer, /systemctl daemon-reload\nassert_controller_install_safe\n/);
+  assert.match(installer, /artifact_parent=.*dirname/);
+  assert.match(installer, /parent_uid != 0/);
+  assert.match(installer, /8#\$parent_mode & 0022/);
+  assert.match(installer, /exec \{artifact_fd\}<"\$artifact"/);
+  assert.match(installer, /artifact_identity != "\$path_identity"/);
+  assert.match(installer, /install -o root -g root -m 0555 "\$artifact_fd_path" "\$staged_controller"/);
+  assert.doesNotMatch(installer, /install -o root -g root -m 0555 "\$artifact"/);
+  assert.equal(JSON.parse(packageSource).scripts["build:amux-v22-recovery-controller"],
+    "esbuild scripts/amux-v22-recovery-controller.mjs --bundle --platform=node --format=esm " +
+    "--outfile=.next/recovery-controller.mjs");
   assert.match(env, /TASK_RECOVERY_ENABLED=false/); assert.match(env, /LEGACY_SAFE_STOP_ENABLED=false/);
   assert.doesNotMatch(env, /DATABASE_URL|GITHUB_TOKEN|AMUX_SYNC_SECRET|API_KEY/);
+});
+
+test("prepare preflight refuses live, queued and unknown controller state before writes", () => {
+  const absent = systemdState({ load: "not-found", unitFile: "" });
+  assert.equal(runInstallPreflight({ service: absent, timer: absent }).status, 0);
+  assert.equal(runInstallPreflight().status, 0);
+  for (const options of [
+    { timer: systemdState({ unitFile: "enabled" }) },
+    { timer: systemdState({ active: "active", sub: "waiting" }) },
+    { timer: systemdState({ active: "activating", sub: "start" }) },
+    { timer: systemdState({ job: "42" }) },
+    { service: systemdState({ load: "unknown", unitFile: "static" }) },
+    { queryFailure: "amux-v22-recovery-controller.service" },
+  ]) {
+    const result = runInstallPreflight(options);
+    assert.notEqual(result.status, 0, `unexpectedly allowed: ${JSON.stringify(options)}`);
+    assert.doesNotMatch(result.stderr, /LoadState|UnitFileState|ActiveState|SubState|Job=/);
+  }
 });

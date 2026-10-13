@@ -17,8 +17,10 @@ export const AMUX_V22_RECOVERY_PROFILES_ENV =
   "TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON";
 export const amuxV22TaskRecoveryEnabled = (value: string | undefined) => value === "true";
 export const amuxV22LegacySafeStopEnabled = (value: string | undefined) => value === "true";
-const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9:_-]+$/);
-const revision = z.number().int().nonnegative().max(2_147_483_644);
+export const AMUX_V22_RECOVERY_ID_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;
+export const AMUX_V22_RECOVERY_MAX_REVISION = 2_147_483_644;
+const id = z.string().regex(AMUX_V22_RECOVERY_ID_PATTERN);
+const revision = z.number().int().nonnegative().max(AMUX_V22_RECOVERY_MAX_REVISION);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const money = z.string().regex(/^(0|[1-9][0-9]{0,18})$/)
   .refine((value) => BigInt(value) <= BigInt("9223372036854775807"));
