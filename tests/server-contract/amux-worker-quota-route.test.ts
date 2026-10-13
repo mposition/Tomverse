@@ -28,12 +28,24 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
     assert.equal(input.tx, tx); assert.equal(input.action, "amux.quota.observed"); auditCalls += 1;
   },
 } });
+// The real shared error answer (lib/amux/internalRoute.ts) runs against these
+// stand-ins, so the classification under test is the production one.
+class AmuxDbBoundaryError extends Error {
+  constructor(readonly code: string, operation: string) { super(`${code}:${operation}`); this.name = "AmuxDbBoundaryError"; }
+}
+let boundaryFailure: unknown = null;
 mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
   AMUX_DB_BOUNDARIES: { quotaObservationWrite: {}, quotaObservationRead: {} },
-  withAmuxDbBoundary: async (_boundary: unknown, work: (tx: unknown, context: unknown) => Promise<unknown>) =>
-    work(tx, { dbNow: now }),
+  AmuxDbBoundaryError,
+  admitAmuxOrchestratorWrite: async () => ({ admitted: true }),
+  amuxRouteOrchestratorReceiptsMayHaveCommitted: () => false,
+  withAmuxDbBoundary: async (_boundary: unknown, work: (tx: unknown, context: unknown) => Promise<unknown>) => {
+    if (boundaryFailure) throw boundaryFailure;
+    return work(tx, { dbNow: now });
+  },
 } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
+  ApiSecurityError: class ApiSecurityError extends Error {},
   readLimitedJson: async (request: Request, _limit: number, schema: { parse: (v: unknown) => unknown }) =>
     schema.parse(JSON.parse(await request.text())),
   apiSecurityResponse: () => null,
@@ -91,4 +103,45 @@ test("quota lookup is exact and distinct observations keep separate identities",
   assert.equal(rows.size, 3);
   for (const observation_id of [missingId, secondId]) assert.deepEqual(await (await lookup(observation_id)).json(),
     { found: true, observation: { ...body, observation_id } });
+});
+
+test("a failed quota write is logged and says whether anything committed", async () => {
+  const warn = mock.method(console, "warn", () => {});
+  const error = mock.method(console, "error", () => {});
+  const before = { writes: writeCalls, audits: auditCalls };
+  const fresh = (n: number) => ({ ...body, observation_id: `00000000-0000-4000-8000-00000000001${n}` });
+  try {
+    // A transaction the pool never started wrote nothing: busy, not unknown.
+    boundaryFailure = new AmuxDbBoundaryError("AMUX_DB_NOT_STARTED", "quota_observation_write");
+    const busy = await post(fresh(1));
+    assert.equal(busy.status, 503);
+    assert.equal((await busy.json()).reason, "amux_database_busy");
+    assert.ok(busy.headers.get("retry-after"));
+    const busyLine = JSON.parse(String(warn.mock.calls.at(-1)?.arguments[0]));
+    assert.equal(busyLine.event, "internal_route_database_busy");
+    assert.equal(busyLine.operation, "quota_observation_write");
+
+    // A statement timeout rolled the transaction back: deadline, not unknown.
+    boundaryFailure = Object.assign(new Error("raw query failed"), { code: "P2010", meta: { code: "57014" } });
+    const late = await post(fresh(2));
+    assert.equal(late.status, 503);
+    assert.equal((await late.json()).reason, "amux_database_deadline_exceeded");
+
+    // Anything else is still a 500, but no longer a silent one.
+    boundaryFailure = new Error("unexpected");
+    const failed = await post(fresh(3));
+    assert.equal(failed.status, 500);
+    const incidentId = failed.headers.get("x-amux-incident-id");
+    assert.ok(incidentId);
+    assert.equal((await failed.json()).incident_id, incidentId);
+    const failureLine = JSON.parse(String(error.mock.calls.at(-1)?.arguments[0]));
+    assert.equal(failureLine.event, "internal_route_failure");
+    assert.equal(failureLine.operation, "quota_observation_write");
+    assert.equal(failureLine.incident_id, incidentId);
+    assert.deepEqual({ writes: writeCalls, audits: auditCalls }, before);
+  } finally {
+    boundaryFailure = null;
+    warn.mock.restore();
+    error.mock.restore();
+  }
 });
