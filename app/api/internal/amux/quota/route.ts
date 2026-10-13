@@ -10,7 +10,12 @@ import { readAmuxAssignmentCatalogs } from "@/lib/amux/workerAssignmentCatalog";
 import { amuxWorkerDerivedCatalogAssignmentOpen } from "@/lib/amux/workerDerivedCatalogCore";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
-import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import {
+  AMUX_DB_BOUNDARIES,
+  AMUX_LIFECYCLE_ROUTE_BUDGET_MS,
+  withAmuxDbBoundary,
+  withAmuxRouteBudget,
+} from "@/lib/amux/dbBoundary";
 import { amuxInternalErrorResponse } from "@/lib/amux/internalRoute";
 
 const schema = z
@@ -36,6 +41,17 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+  // Inside a route budget, like every other AMUX internal route. Only there is
+  // a transaction the pool never started known to have written nothing, and
+  // answered 503 amux_database_busy; outside one it was an outcome-unknown
+  // P2028, and a bridge that cannot prove the write halts on that.
+  return withAmuxRouteBudget(
+    () => recordQuotaObservation(request),
+    AMUX_LIFECYCLE_ROUTE_BUDGET_MS,
+  );
+}
+
+async function recordQuotaObservation(request: Request): Promise<Response> {
   try {
     const body = await readLimitedJson(request, 4 * 1_024, schema);
     const listedFor = (catalog: ReturnType<typeof getConfiguredAmuxV22WorkerCatalog>) => {
