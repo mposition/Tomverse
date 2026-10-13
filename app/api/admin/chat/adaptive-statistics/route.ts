@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
-import { getAdminRole } from "@/lib/adminAuth";
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { getAdaptiveStatisticsReport } from "@/lib/adaptiveStatisticsReport";
 
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.id || getAdminRole(session) !== "owner") {
+    if (!session?.user?.id || !isAdminSession(session) || getAdminRole(session) !== "owner") {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
     await consumeApiRateLimit(request, session.user.id, "admin-adaptive-statistics", {
