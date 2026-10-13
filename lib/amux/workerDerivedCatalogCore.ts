@@ -22,6 +22,15 @@ import {
 export const AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH = false;
 export const amuxWorkerDerivedCatalogShadowOpen = (): boolean => AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH;
 
+/**
+ * R2c ships with its own code latch off (version 35 section 5). While it is
+ * false the assignment catalog is the catalog variables, as before, and
+ * reading it sends no statement. The operator's activation record turns it
+ * on, and only after R1's observation has ended (version 35 section 5).
+ */
+export const AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH = false;
+export const amuxWorkerDerivedCatalogAssignmentOpen = (): boolean => AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH;
+
 /** One entry in the shape the legacy catalog's consumers read. */
 export type AmuxDerivedCatalogEntry = {
   worker_name: string;

@@ -1,0 +1,164 @@
+// Orchestration policy version 35, section 3 (stage R2c): the one reader the
+// assignment paths will ask for the worker catalog. With R2c's latch off it is
+// the catalog variables and sends nothing; with it on, one statement whose
+// result, for production's values, is exactly what the variables give today.
+
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { afterEach, test } from "node:test";
+
+import { getConfiguredAmuxV22WorkerCatalog, getConfiguredAmuxWorkerCatalog } from "../lib/amux/routing.ts";
+import { AMUX_V22_WORKER_CATALOG_ENV } from "../lib/amux/v22WorkerCatalogCore.ts";
+import {
+  amuxDerivedCatalogAsConfigured,
+  readAmuxAssignmentCatalogs,
+  readAmuxDerivedWorkerCatalog,
+} from "../lib/amux/workerAssignmentCatalog.ts";
+import {
+  AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH,
+  amuxWorkerDerivedCatalogAssignmentOpen,
+} from "../lib/amux/workerDerivedCatalogCore.ts";
+import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
+
+const LEGACY_ENV = "TOMVERSE_AMUX_WORKER_CATALOG_JSON";
+const saved = { legacy: process.env[LEGACY_ENV], v22: process.env[AMUX_V22_WORKER_CATALOG_ENV] };
+afterEach(() => {
+  for (const [name, value] of [[LEGACY_ENV, saved.legacy], [AMUX_V22_WORKER_CATALOG_ENV, saved.v22]]) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+});
+
+// The production catalog variables as read on 2026-10-13 (names, providers,
+// models, tags and tools only), spelled as the variables spell them.
+const PRODUCTION_LEGACY_JSON = JSON.stringify([
+  { worker_name: "codex-chore", provider: "codex", routing_roles: ["chore"] },
+  { worker_name: "codex-impl", provider: "codex", routing_roles: ["implementation"] },
+  { worker_name: "codex-contract", provider: "codex", routing_roles: ["contract"] },
+  { worker_name: "claude-chore", provider: "claude", routing_roles: ["chore"] },
+  { worker_name: "claude-impl", provider: "claude", routing_roles: ["implementation"] },
+  { worker_name: "claude-contract", provider: "claude", routing_roles: ["contract"] },
+  { worker_name: "claude-review", provider: "claude", routing_roles: ["review"] },
+  { worker_name: "engineering-runner", provider: "claude", model: "claude-opus-5", routing_roles: ["engineering"] },
+]);
+const PRODUCTION_V22_JSON = JSON.stringify([
+  { worker_name: "claude-chore", provider: "anthropic", model: "claude-opus-5-5", routing_roles: ["investigate"], tool_capabilities: ["repo_read"] },
+  { worker_name: "claude-contract", provider: "anthropic", model: "claude-opus-5-5", routing_roles: ["design"], tool_capabilities: ["repo_read"] },
+  { worker_name: "claude-impl", provider: "anthropic", model: "claude-opus-5-5", routing_roles: ["implement"], tool_capabilities: ["repo_write"] },
+  { worker_name: "claude-review", provider: "anthropic", model: "claude-opus-5-5", routing_roles: ["review"], tool_capabilities: ["repo_read"] },
+]);
+const useProductionVariables = () => {
+  process.env[LEGACY_ENV] = PRODUCTION_LEGACY_JSON;
+  process.env[AMUX_V22_WORKER_CATALOG_ENV] = PRODUCTION_V22_JSON;
+};
+
+// What the one statement returns once R2a's import has run in production.
+const REGISTRY_ROWS = AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => ({
+  workerName: entry.workerName,
+  providerClass: amuxWorkerProviderClassOf(entry.workerName),
+  roleCeiling: entry.roleCeiling,
+  desiredState: entry.desiredState,
+  revision: 1,
+}));
+const v22Profile = {
+  "claude-chore": ["investigate", "repo_read"],
+  "claude-contract": ["design", "repo_read"],
+  "claude-impl": ["implement", "repo_write"],
+  "claude-review": ["review", "repo_read"],
+};
+const CAPABILITY_ROWS = [
+  ["codex-chore", "chore"], ["codex-impl", "implementation"], ["codex-contract", "contract"],
+  ["claude-chore", "chore"], ["claude-impl", "implementation"], ["claude-contract", "contract"], ["claude-review", "review"],
+].map(([workerName, tag]) => ({
+  workerName,
+  revision: 1,
+  model: null,
+  routingTags: [tag],
+  toolCapabilities: [],
+  v22Model: v22Profile[workerName] ? "claude-opus-5-5" : null,
+  v22Roles: v22Profile[workerName] ? [v22Profile[workerName][0]] : null,
+  v22Tools: v22Profile[workerName] ? [v22Profile[workerName][1]] : null,
+  changedAtEpochMs: 1_791_850_000_000,
+}));
+
+const fakeClient = (row) => {
+  const sent = [];
+  return {
+    sent,
+    $queryRaw: async (sql) => {
+      sent.push(sql);
+      return row === undefined ? [] : [row];
+    },
+  };
+};
+const statement = (registry = REGISTRY_ROWS, latches = [], capabilities = CAPABILITY_ROWS) => ({ registry, latches, capabilities });
+
+test("R2c ships with the derived assignment catalog latched off", () => {
+  assert.equal(AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH, false);
+  assert.equal(amuxWorkerDerivedCatalogAssignmentOpen(), false);
+});
+
+test("latched off, the catalog is the variables and nothing is sent", async () => {
+  useProductionVariables();
+  const client = fakeClient(statement());
+  const catalogs = await readAmuxAssignmentCatalogs(client);
+  assert.equal(client.sent.length, 0);
+  assert.equal(catalogs.source, "variables");
+  assert.deepEqual(catalogs.workers, getConfiguredAmuxWorkerCatalog());
+  assert.deepEqual(catalogs.v22, getConfiguredAmuxV22WorkerCatalog());
+});
+
+test("latched on, one statement gives exactly what production's variables give today", async () => {
+  useProductionVariables();
+  const client = fakeClient(statement());
+  const catalogs = await readAmuxAssignmentCatalogs(client, true);
+  assert.equal(client.sent.length, 1);
+  assert.equal(catalogs.source, "derived");
+  assert.deepEqual(catalogs.workers, getConfiguredAmuxWorkerCatalog());
+  assert.deepEqual(catalogs.v22, getConfiguredAmuxV22WorkerCatalog());
+  // The one statement composes the stores' three subqueries.
+  const text = client.sent[0].sql;
+  for (const table of ["AmuxWorkerRegistryEvent", "AmuxWorkerLatchEvent", "AmuxWorkerCapabilityEvent"]) {
+    assert.equal(text.split(`FROM "${table}"`).length, 2, table);
+  }
+  assert.equal(client.sent[0].values.length, 0);
+});
+
+test("anything the stores would not accept makes the catalog absent, never shorter", async () => {
+  const absent = async (row) => {
+    const catalogs = await readAmuxAssignmentCatalogs(fakeClient(row), true);
+    assert.deepEqual([catalogs.source, catalogs.workers, catalogs.v22], ["derived", null, null]);
+  };
+  await absent(undefined);
+  await absent(statement(REGISTRY_ROWS.map((row, index) => (index === 0 ? { ...row, providerClass: "cursor" } : row))));
+  await absent(statement(REGISTRY_ROWS, [{ workerName: "claude-impl", eventKind: "unknown" }]));
+  await absent(statement(REGISTRY_ROWS, [], [{ ...CAPABILITY_ROWS[0], routingTags: [] }]));
+  await absent(statement(REGISTRY_ROWS, [], [{ ...CAPABILITY_ROWS[3], v22Roles: null }]));
+  await absent({ registry: null, latches: [], capabilities: [] });
+  await absent({ registry: [], latches: [], capabilities: "[]" });
+  assert.equal(await readAmuxDerivedWorkerCatalog(fakeClient(undefined)), null);
+});
+
+test("an open stop latch takes the worker and its v22 profile out of both lists", async () => {
+  const catalogs = await readAmuxAssignmentCatalogs(
+    fakeClient(statement(REGISTRY_ROWS, [{ workerName: "claude-impl", eventKind: "opened" }])),
+    true,
+  );
+  assert.equal(catalogs.workers.some((worker) => worker.worker_name === "claude-impl"), false);
+  assert.equal(catalogs.v22.some((worker) => worker.worker_name === "claude-impl"), false);
+  assert.equal(catalogs.workers.length, 7);
+});
+
+test("the configured shape keeps the variables' conservative runtime defaults", () => {
+  const { workers } = amuxDerivedCatalogAsConfigured({
+    legacy: [{ worker_name: "claude-impl", provider: "claude", model: null, routing_roles: ["implementation"], tool_capabilities: [], archived: false, paused: false, isolated: false, blocked: false }],
+    v22: [],
+  });
+  assert.deepEqual([workers[0].running, workers[0].status, workers[0].dispatch_ready], [false, "stopped", false]);
+});
+
+test("the reader names no table: the text stays in the stores", () => {
+  const source = readFileSync(new URL("../lib/amux/workerAssignmentCatalog.ts", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  assert.doesNotMatch(source, /Amux(WorkerRegistryEvent|WorkerLatchEvent|WorkerCapabilityEvent|WorkerObservation)/);
+});
