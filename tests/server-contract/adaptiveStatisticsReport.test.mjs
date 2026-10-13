@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
-const root = resolve(import.meta.dirname, "..");
+const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
 const calls = [];
 const prisma = {

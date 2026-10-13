@@ -13,7 +13,7 @@ mock.module(mod("node_modules/next-auth/next/index.js"), {
   namedExports: { getServerSession: async () => session },
 });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
-mock.module(mod("lib/adminAuth.ts"), { namedExports: { getAdminRole: () => role } });
+mock.module(mod("lib/adminAuth.ts"), { namedExports: { getAdminRole: () => role, isAdminSession: () => role !== null } });
 mock.module(mod("lib/apiSecurity.ts"), {
   namedExports: { consumeApiRateLimit: async () => {}, apiSecurityResponse: () => null },
 });
