@@ -187,3 +187,20 @@ test("the lifecycle routes keep the variable's check while R2c is off, and pass 
   has(heartbeat, "const catalog = derived ? [] : getConfiguredAmuxWorkerCatalog();");
   has(heartbeat, "listed: derived\n          ? async (tx) => (await amuxWorkerCatalogRefusal(tx, body.worker_name, true)) === null\n          : undefined,");
 });
+
+test("quota and the engineering adapter keep the variable while R2c is off, and read the derived catalog in their own transactions when it is on", () => {
+  const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+  const has = (source, text) => assert.ok(source.includes(text), text);
+  const quota = read("app/api/internal/amux/quota/route.ts");
+  has(quota, "const variableListed = derived ? null : listedFor(getConfiguredAmuxV22WorkerCatalog());");
+  has(quota, "const configured = variableListed ?? listedFor((await readAmuxAssignmentCatalogs(tx, true)).v22);");
+  // The check comes before the audit chain lock: a refusal locks and writes nothing.
+  assert.ok(quota.indexOf("listedFor((await readAmuxAssignmentCatalogs(tx, true)).v22)") < quota.indexOf("await takeAuditChainLock(tx);"));
+  const adapter = read("lib/engineeringAgentAmuxAdapter.ts");
+  assert.equal(adapter.split("const refusal = derived ? null : workerCatalogRefusal();").length, 3);
+  has(adapter, "derived ? (tx) => amuxWorkerCatalogRefusal(tx, ENGINEERING_AGENT_AMUX_WORKER, true) : undefined");
+  has(adapter, "error instanceof AmuxWorkerRegistrationRefusedError");
+  has(adapter, ["listed: derived",
+    "      ? async (tx) => (await amuxWorkerCatalogRefusal(tx, ENGINEERING_AGENT_AMUX_WORKER, true)) === null",
+    "      : undefined,"].join(String.fromCharCode(10)));
+});

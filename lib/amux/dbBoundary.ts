@@ -201,8 +201,10 @@ export const AMUX_DB_BOUNDARIES = {
   },
   quotaObservationWrite: {
     operation: "quota_observation_write",
-    // setup + chain lock + identity lock + lookup + create + audit (4) + fence
-    prismaCallCeiling: 11,
+    // setup + chain lock + identity lock + lookup + create + audit (4) + fence,
+    // + the derived assignment catalog's one statement when R2c is on
+    // (orchestration policy version 35, section 3)
+    prismaCallCeiling: 12,
     isolation: "mutation",
   },
   ownershipRecoveryRead: {
