@@ -1,12 +1,14 @@
 # AMUX 실행 bridge 감시
 
 전용 Ubuntu 호스트의 AMUX 실행 bridge가 멈추면 Slack과 이메일로 알리는 장치와, 알림을 받은 뒤의
-순서다. bridge 자체의 계약과 재시작 규칙은 `wsl-execution-bridge.md`가 정하고, 이 문서는 그것을 바꾸지 않는다.
+순서다. bridge 자체의 계약과 재시작 규칙은 `wsl-execution-bridge.md`가 정한다. 5절의 자동 재시작은 운영자가
+2026-10-14에 승인한 좁은 예외이고, 그 밖의 재시작은 여전히 사람이 판단한다.
 
 ## 왜 있는가
 
 bridge는 결과를 모르면 종료 코드 3으로 halt하고, systemd는 이를 다시 시작하지 않는다(`RestartPreventExitStatus=3`).
-재시작 여부는 사람이 판단한다는 설계이며 이 문서도 그대로 둔다. 문제는 아무도 halt를 몰랐다는 것이다.
+재시작 여부는 사람이 판단한다는 설계다. 문제는 아무도 halt를 몰랐다는 것이다. 알림이 생긴 뒤에도 재시작을 기다린
+시간이 길어서, 아무것도 남기지 않았음이 확인되는 두 원인만 5절이 자동으로 다시 시작한다.
 
 | halt (UTC) | 재시작 (UTC) | 멈춰 있던 시간 | journal에 남은 원인 |
 |---|---|---|---|
@@ -195,10 +197,89 @@ amux wsl bridge halted: no new assignments; cause=<원인>; restart only after c
 
 ## 4. 알림을 받으면
 
-자동 재시작은 없다. 순서는 `wsl-execution-bridge.md` "halt와 재시작"과 같다.
+5절이 설치돼 있으면 `worker_runtime_lease_lost`와 "0 result(s) already committed"가 남은 `tick_failed_*`는 2분 안에
+자동으로 다시 시작되고, 알림 뒤 복구 알림이 따라온다. 그 밖의 원인은 자동으로 다시 시작하지 않는다. 순서는
+`wsl-execution-bridge.md` "halt와 재시작"과 같다.
 
 1. 어느 unit인지 본다(읽기 전용, `tommy`로 된다): `journalctl -u tomverse-bridge-watchdog.service -n 12 --no-pager -o cat`.
    그 unit의 원인 줄을 읽는다: `journalctl -u <unit> -n 20 --no-pager -o short-iso`
 2. `/admin/office`의 AMUX 방과 Tomverse의 attempt 상태를 확인한다.
 3. 다시 시작해도 된다고 판단하면 관리자 계정에서 `sudo systemctl restart <unit>`.
 4. 5분 안에 Healthchecks가 up으로 돌아오고, 다음 인프라 감시에서 앱이 복구 알림을 보낸다.
+
+## 5. 자동 재시작 (승인된 원인만)
+
+코드: `scripts/amux-bridge-autorestart/`. 테스트: `tests/amuxBridgeAutorestart.test.mjs`.
+
+**승인:** 운영자, 2026-10-14. 2026-10-13 하루 동안 bridge가 열 번 넘게 halt했고, 대부분 아무것도 저장되지 않은
+원인이었는데도 사람이 재시작할 때까지 몇 시간씩 멈춰 있었다. 외부에 있으면 호스트에 들어갈 수 없어 그대로 장애가
+된다. 승인 범위는 아래 두 원인이고, **횟수 제한은 두지 않는다**(운영자 결정).
+
+| halt 원인 | 자동 재시작 | 근거 |
+|---|---|---|
+| `worker_runtime_lease_lost` | 한다 | 앱이 이미 그 runtime을 버렸다. 다시 시작하면 새 generation으로 등록한다 |
+| `tick_failed_<class>`, 같은 실행에 `after 0 result(s) already committed this tick` 줄이 있을 때 | 한다 | 실패한 tick이 아무것도 저장하지 않았다 |
+| `tick_failed_<class>`, 저장된 결과가 1개 이상 | 하지 않는다 | |
+| `dispatch_outcome_unknown`, `settle_outcome_unknown`, `pending_session_missing`, `settle_session_missing`, `execution_heartbeat_*` | 하지 않는다 | 결과를 모른다. 사람이 확인한다 |
+| halt 줄이 없거나 읽을 수 없음 | 하지 않는다 | |
+
+동작:
+
+- systemd timer가 2분마다 실행한다. 대상은 `tomverse-bridge.service`와 `tomverse-amux-v22-bridge@*` 중
+  `failed`이고 종료 코드가 3인 unit뿐이다. 종료 코드 1(시작 실패)은 unit의 `Restart=on-failure`가 이미 다시
+  시작하고, 손으로 멈춘 unit은 `inactive`라 건드리지 않는다. sidecar도 건드리지 않는다.
+- 원인은 그 실패한 실행(invocation)의 journal만 읽는다. 이전 실행의 줄이 섞이지 않는다.
+- 다시 시작하기 전에 로컬 AMUX 서버 `/health`와 Tomverse `/api/health`가 답해야 한다. 답하지 않으면 다음
+  실행에서 다시 본다.
+- bridge는 진행 중인 attempt가 하나도 남지 않았을 때만 종료 코드 3으로 끝난다. 그래서 다시 시작해도 넘겨받을
+  작업이 없다.
+- 판정은 매 실행 한 줄씩 이 unit의 journal에 남는다: `… halted with cause=…; restarted` 또는 `… left halted`.
+  1·2절의 알림은 그대로 나가고, 다시 붙으면 복구 알림이 따라온다.
+- 전용 시스템 계정 `tomverse-bridge-autorestart`로 돈다. polkit 규칙
+  (`/etc/polkit-1/rules.d/50-tomverse-bridge-autorestart.rules`)이 그 계정에 bridge unit의 **restart만** 허용한다.
+  stop·start·다른 unit·sidecar는 허용하지 않는다. journal은 unit이 주는 `systemd-journal` 보조 그룹으로 읽는다.
+
+### 5.1 설치 (운영자)
+
+실행 위치: Ubuntu 호스트(192.168.0.7)의 bash, **관리자 계정 `tomverse-admin`**. sudo가 필요하고, production
+자격증명은 필요 없다. `<SHA>`는 이 절이 들어 있는 병합 commit의 전체 40자리 SHA다.
+
+```bash
+sha=<SHA>
+d=$(mktemp -d)
+for f in install.sh tomverse-bridge-autorestart tomverse-bridge-autorestart.service tomverse-bridge-autorestart.timer 50-tomverse-bridge-autorestart.rules; do
+  curl -fsSL --proto '=https' -o "$d/$f" "https://raw.githubusercontent.com/mposition/Tomverse/$sha/scripts/amux-bridge-autorestart/$f"
+done
+sudo bash "$d/install.sh" "$d"
+```
+
+- 설치는 polkit에 직접 물어 규칙의 범위를 확인한다: bridge restart는 허용, bridge stop·ssh restart·sidecar
+  restart는 거절이어야 한다. 하나라도 어긋나면 실패하고 timer를 켜지 않는다.
+- 그 뒤 한 번 실행하고 timer를 켠다. 마지막 줄이 `TOMVERSE_BRIDGE_AUTORESTART_INSTALLED`이면 끝이다.
+- 바꾸는 것: 시스템 계정 하나, 실행 파일과 unit 둘, polkit 규칙 하나, timer 활성화. 되돌리기는 5.3절.
+
+확인(읽기 전용, `tommy`로도 된다):
+
+```bash
+systemctl list-timers tomverse-bridge-autorestart.timer --no-pager
+journalctl -u tomverse-bridge-autorestart.service -n 10 --no-pager -o short-iso
+```
+
+### 5.2 잠시 끌 때
+
+bridge를 손으로 확인하는 동안 자동 재시작을 막으려면 timer만 끈다.
+
+```bash
+sudo systemctl disable --now tomverse-bridge-autorestart.timer
+```
+
+다시 켤 때는 `sudo systemctl enable --now tomverse-bridge-autorestart.timer`.
+
+### 5.3 제거
+
+```bash
+sudo systemctl disable --now tomverse-bridge-autorestart.timer
+sudo rm -f /etc/systemd/system/tomverse-bridge-autorestart.service /etc/systemd/system/tomverse-bridge-autorestart.timer /usr/local/libexec/tomverse-bridge-autorestart /etc/polkit-1/rules.d/50-tomverse-bridge-autorestart.rules
+sudo systemctl daemon-reload
+sudo userdel tomverse-bridge-autorestart
+```

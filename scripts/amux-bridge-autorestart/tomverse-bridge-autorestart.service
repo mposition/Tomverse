@@ -1,0 +1,40 @@
+[Unit]
+Description=Tomverse AMUX bridge auto-restart (approved halt causes only)
+Documentation=https://github.com/mposition/Tomverse/blob/develop/docs/ops/amux/bridge-monitoring.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# A system account of its own, created by install.sh: no login, no home, no
+# group but its own. The polkit rule installed beside this unit lets it
+# restart the bridge units and nothing else. Not DynamicUser=: the host's
+# system bus drops a dynamic user's connection (bridge watchdog, 2026-10-12).
+User=tomverse-bridge-autorestart
+Group=tomverse-bridge-autorestart
+# Read access to the bridges' journal, for their halt lines.
+SupplementaryGroups=systemd-journal
+RemoveIPC=yes
+ExecStart=/usr/local/libexec/tomverse-bridge-autorestart
+TimeoutStartSec=60
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+UMask=0077
