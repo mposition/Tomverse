@@ -266,20 +266,20 @@ export function ChatInputWebSearchChipView({
 
   const chip = (
     <div
-        data-testid="web-search-mode-chip"
-        data-selection-mode={isAutoMode ? "auto" : "manual"}
-        data-label-variant={isMobileShell ? "compact" : "full"}
-        data-tone={tone}
-        data-supported-count={isAutoMode ? undefined : state.supportedCount}
-        data-unsupported-count={isAutoMode ? undefined : state.unsupportedCount}
-        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold max-[360px]:gap-1 max-[360px]:pl-2 max-[360px]:pr-0.5 ${hasManualException ? "max-[360px]:max-w-full" : "max-[360px]:max-w-[4.75rem]"} ${isMobileShell ? "h-8" : "h-9"} ${
-          tone === "blocked"
-            ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
-            : tone === "warning"
-              ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
-              : "border-accent-web-search-200 bg-accent-web-search-50 text-accent-web-search-800 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/30 dark:text-accent-web-search-200"
-        }`}
-      >
+      data-testid="web-search-mode-chip"
+      data-selection-mode={isAutoMode ? "auto" : "manual"}
+      data-label-variant={isMobileShell ? "compact" : "full"}
+      data-tone={tone}
+      data-supported-count={isAutoMode ? undefined : state.supportedCount}
+      data-unsupported-count={isAutoMode ? undefined : state.unsupportedCount}
+      className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold max-[360px]:gap-1 max-[360px]:pl-2 max-[360px]:pr-0.5 ${hasManualException ? "max-[360px]:max-w-full" : "max-[360px]:max-w-[4.75rem]"} ${isMobileShell ? "h-8" : "h-9"} ${
+        tone === "blocked"
+          ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+          : tone === "warning"
+            ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+            : "border-accent-web-search-200 bg-accent-web-search-50 text-accent-web-search-800 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/30 dark:text-accent-web-search-200"
+      }`}
+    >
         <ComposerGlobeIcon aria-hidden="true" />
         {hasManualException && !isManualBlocked ? (
           <button
@@ -308,7 +308,7 @@ export function ChatInputWebSearchChipView({
           onClick={onRemove}
           aria-label={removeLabel}
           title={removeLabel}
-          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full before:absolute before:content-[''] hover:bg-black/5 dark:hover:bg-white/10 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
+          className={`composer-chip-remove-target relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full before:absolute before:content-[''] hover:bg-black/5 dark:hover:bg-white/10 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
         >
           <X className="h-3.5 w-3.5" />
         </button>

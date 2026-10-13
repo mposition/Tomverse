@@ -533,37 +533,45 @@ test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" },
         const before = getComputedStyle(node, "::before");
         const rect = node.getBoundingClientRect();
         const inset = (value: string) => Math.abs(Number.parseFloat(value) || 0);
+        const row = node.closest(".composer-chip-exception-row")!.getBoundingClientRect();
         return {
           width: rect.width + inset(before.left) + inset(before.right),
           height: rect.height + inset(before.top) + inset(before.bottom),
+          rowOverhang: Math.max(0, row.top - (rect.top - inset(before.top)), rect.bottom + inset(before.bottom) - row.bottom),
           lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + inset(before.bottom) / 2)),
         };
       });
       expect(hit.height).toBeGreaterThanOrEqual(43.5);
       expect(hit.width).toBeGreaterThanOrEqual(43.5);
+      expect(hit.rowOverhang).toBeLessThanOrEqual(1);
       expect(hit.lowerHitOwned).toBe(true);
     }
   });
 
   test("a coarse tablet retains the exception's actual 44px hit area", async ({ page }) => {
     await enterMobileComposer(page, { lang: "en", viewport: { width: 1024, height: 900 }, shell: "desktop" });
-    const exception = page.getByTestId("chat-input").getByTestId("web-search-exception-toggle");
-    await expect(exception).toBeVisible();
-    const hit = await exception.evaluate(node => {
+    const chip = page.getByTestId("chat-input").getByTestId("web-search-mode-chip");
+    await expect(chip).toBeVisible();
+    for (const target of [chip.getByTestId("web-search-exception-toggle"), chip.getByRole("button", { name: "Turn off web search" })]) {
+    const hit = await target.evaluate(node => {
       const rect = node.getBoundingClientRect();
       const before = getComputedStyle(node, "::before");
       const inset = (value: string) => Math.abs(Number.parseFloat(value) || 0);
+      const row = node.closest(".composer-chip-exception-row")!.getBoundingClientRect();
       return {
         coarse: matchMedia("(pointer: coarse)").matches,
         width: rect.width + inset(before.left) + inset(before.right),
         height: rect.height + inset(before.top) + inset(before.bottom),
+        rowOverhang: Math.max(0, row.top - (rect.top - inset(before.top)), rect.bottom + inset(before.bottom) - row.bottom),
         lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + inset(before.bottom) / 2)),
       };
     });
     expect(hit.coarse).toBe(true);
     expect(hit.width).toBeGreaterThanOrEqual(43.5);
     expect(hit.height).toBeGreaterThanOrEqual(43.5);
+    expect(hit.rowOverhang).toBeLessThanOrEqual(1);
     expect(hit.lowerHitOwned).toBe(true);
+    }
     await expectNoHorizontalOverflow(page);
   });
 
