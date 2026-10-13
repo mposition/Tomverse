@@ -114,14 +114,18 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 3,
     isolation: "read",
   },
+  // 8: the derived assignment catalog's one statement (orchestration policy
+  // version 35, section 3) joins the registration when R2c is on.
   workerRegister: {
     operation: "worker_register",
-    prismaCallCeiling: 7,
+    prismaCallCeiling: 8,
     isolation: "mutation",
   },
+  // 10: the derived assignment catalog's one statement (orchestration policy
+  // version 35, section 3) joins the heartbeat when R2c is on.
   workerHeartbeat: {
     operation: "worker_heartbeat",
-    prismaCallCeiling: 9,
+    prismaCallCeiling: 10,
     isolation: "mutation",
   },
   // 18: the one-open-card-per-worker count added a read to the success path.

@@ -4,9 +4,18 @@ import { after, beforeEach, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
-import { readAmuxAssignmentCatalogs, readAmuxDerivedWorkerCatalog } from "@/lib/amux/workerAssignmentCatalog";
+import {
+  amuxWorkerCatalogRefusal,
+  readAmuxAssignmentCatalogs,
+  readAmuxDerivedWorkerCatalog,
+} from "@/lib/amux/workerAssignmentCatalog";
 import { recordAmuxWorkerCapabilityByOwner } from "@/lib/amux/workerCapabilityStore";
 import { recordAmuxWorkerRegistryChangeByOwner } from "@/lib/amux/workerRegistryStore";
+import {
+  AmuxWorkerRegistrationRefusedError,
+  heartbeatAmuxWorkerRuntime,
+  registerAmuxWorkerRuntime,
+} from "@/lib/amux/workerRuntime";
 import { prisma } from "@/lib/prisma";
 
 // Orchestration policy version 35, section 3 (stage R2c), against PostgreSQL
@@ -37,8 +46,11 @@ const requireDedicatedAmuxTestDatabase = () => {
 };
 requireDedicatedAmuxTestDatabase();
 
-const truncate = () =>
-  prisma.$executeRawUnsafe(`TRUNCATE TABLE "AmuxWorkerCapabilityEvent", "AmuxWorkerRegistryEvent" RESTART IDENTITY`);
+const RUNTIME_NAMES = ["claude-impl", "codex-impl"];
+const truncate = async () => {
+  await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: { in: RUNTIME_NAMES } } });
+  await prisma.$executeRawUnsafe(`TRUNCATE TABLE "AmuxWorkerCapabilityEvent", "AmuxWorkerRegistryEvent" RESTART IDENTITY`);
+};
 
 beforeEach(truncate);
 
@@ -102,4 +114,37 @@ test("one statement derives the catalog from what the owner recorded", async () 
     ["engineering-runner", false, false],
   ]);
   assert.deepEqual(catalogs.v22?.map((worker) => worker.worker_name), ["claude-impl"]);
+});
+
+test("latched on, registration and heartbeat ask the derived catalog inside their own transaction", async () => {
+  const session = owner();
+  await register(session, "claude-impl", "implementation", "active");
+  await record(session, "claude-impl", { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null });
+  const admit = (name: string) => (tx: Parameters<typeof amuxWorkerCatalogRefusal>[0]) => amuxWorkerCatalogRefusal(tx, name, true);
+  const listed = (name: string) => async (tx: Parameters<typeof amuxWorkerCatalogRefusal>[0]) =>
+    (await amuxWorkerCatalogRefusal(tx, name, true)) === null;
+
+  // A name the catalog does not list is refused and nothing is written.
+  await assert.rejects(
+    registerAmuxWorkerRuntime("codex-impl", randomUUID(), undefined, undefined, admit("codex-impl")),
+    (error) => error instanceof AmuxWorkerRegistrationRefusedError && error.reason === "worker_not_configured",
+  );
+  assert.equal(await prisma.amuxWorkerRuntime.count({ where: { workerName: "codex-impl" } }), 0);
+
+  // A listed name registers, and an idle ready heartbeat is dispatch-ready.
+  const instanceId = randomUUID();
+  const runtime = await registerAmuxWorkerRuntime("claude-impl", instanceId, undefined, undefined, admit("claude-impl"));
+  const beat = () => heartbeatAmuxWorkerRuntime({
+    workerName: "claude-impl", instanceId, generation: runtime.generation, status: "idle", dispatchReady: true, listed: listed("claude-impl"),
+  });
+  assert.equal((await beat()).accepted, true);
+  assert.equal((await prisma.amuxWorkerRuntime.findUniqueOrThrow({ where: { workerName: "claude-impl" } })).dispatchReady, true);
+
+  // Once it leaves the catalog its heartbeat is still accepted -- a refusal
+  // would halt the bridge -- but it is no longer dispatch-ready.
+  await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerRegistryChange, (tx) =>
+    recordAmuxWorkerRegistryChangeByOwner(tx, { session, workerName: "claude-impl", roleCeiling: "implementation", desiredState: "paused", expectedRevision: 1 }),
+  );
+  assert.equal((await beat()).accepted, true);
+  assert.equal((await prisma.amuxWorkerRuntime.findUniqueOrThrow({ where: { workerName: "claude-impl" } })).dispatchReady, false);
 });

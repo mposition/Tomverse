@@ -11,6 +11,7 @@ import { getConfiguredAmuxV22WorkerCatalog, getConfiguredAmuxWorkerCatalog } fro
 import { AMUX_V22_WORKER_CATALOG_ENV } from "../lib/amux/v22WorkerCatalogCore.ts";
 import {
   amuxDerivedCatalogAsConfigured,
+  amuxWorkerCatalogRefusal,
   readAmuxAssignmentCatalogs,
   readAmuxDerivedWorkerCatalog,
 } from "../lib/amux/workerAssignmentCatalog.ts";
@@ -161,4 +162,28 @@ test("the reader names no table: the text stays in the stores", () => {
   const source = readFileSync(new URL("../lib/amux/workerAssignmentCatalog.ts", import.meta.url), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
   assert.doesNotMatch(source, /Amux(WorkerRegistryEvent|WorkerLatchEvent|WorkerCapabilityEvent|WorkerObservation)/);
+});
+
+test("the register refusal names an absent catalog apart from an unlisted name", async () => {
+  useProductionVariables();
+  assert.equal(await amuxWorkerCatalogRefusal(fakeClient(statement()), "claude-impl", true), null);
+  assert.equal(await amuxWorkerCatalogRefusal(fakeClient(statement()), "cursor-impl", true), "worker_not_configured");
+  assert.equal(await amuxWorkerCatalogRefusal(fakeClient(undefined), "claude-impl", true), "worker_catalog_unavailable");
+  // Latched off it is the variable's answer, with nothing sent.
+  const client = fakeClient(statement());
+  assert.equal(await amuxWorkerCatalogRefusal(client, "engineering-runner", false), null);
+  assert.equal(await amuxWorkerCatalogRefusal(client, "cursor-impl", false), "worker_not_configured");
+  assert.equal(client.sent.length, 0);
+});
+
+test("the lifecycle routes keep the variable's check while R2c is off, and pass the derived one only when it is on", () => {
+  const route = (name) => readFileSync(new URL(`../app/api/internal/amux/workers/${name}/route.ts`, import.meta.url), "utf8");
+  const register = route("register");
+  const has = (source, text) => assert.ok(source.includes(text), text);
+  has(register, "const catalog = derived ? [] : getConfiguredAmuxWorkerCatalog();");
+  has(register, "derived ? (tx) => amuxWorkerCatalogRefusal(tx, body.worker_name, true) : undefined");
+  has(register, "error instanceof AmuxWorkerRegistrationRefusedError");
+  const heartbeat = route("heartbeat");
+  has(heartbeat, "const catalog = derived ? [] : getConfiguredAmuxWorkerCatalog();");
+  has(heartbeat, "listed: derived\n          ? async (tx) => (await amuxWorkerCatalogRefusal(tx, body.worker_name, true)) === null\n          : undefined,");
 });

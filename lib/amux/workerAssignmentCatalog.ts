@@ -103,6 +103,22 @@ export function amuxDerivedCatalogAsConfigured(derived: AmuxDerivedCatalog): {
   return { workers, v22 };
 }
 
+export type AmuxWorkerCatalogRefusal = "worker_catalog_unavailable" | "worker_not_configured";
+
+/**
+ * Why the assignment catalog does not list this worker, or null when it
+ * does: the answer the register route gives a name it may not register.
+ */
+export async function amuxWorkerCatalogRefusal(
+  client: CatalogReader,
+  workerName: string,
+  open: boolean = amuxWorkerDerivedCatalogAssignmentOpen(),
+): Promise<AmuxWorkerCatalogRefusal | null> {
+  const { workers } = await readAmuxAssignmentCatalogs(client, open);
+  if (workers === null) return "worker_catalog_unavailable";
+  return workers.some((worker) => worker.worker_name === workerName) ? null : "worker_not_configured";
+}
+
 /**
  * The assignment catalog for an assignment path. `open` is the code latch;
  * a test passes it to reach both branches.
