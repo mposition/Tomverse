@@ -72,7 +72,9 @@ npm run promote:test -- --sha=<develop 병합 commit>
    - 프로젝트 `Tomverse`, 환경 `staging`: `Tomverse`, `Credit Reconciliation`, `Maintenance Cron`,
      `Provider Model Catalog`, `Provider Probe`, `Provider Usage Sync`.
      `Tomverse AMUX Validation 2026-09-21`은 자기 release 브랜치에 둡니다(4단계 정리 대상).
-   - 프로젝트 `Tomverse Agents`, 환경 `staging`: `Product Research Observation`, `Product Research Probe`.
+   - 프로젝트 `Tomverse Agents`, 환경 `staging`: `Product Research Observation`, `Product Research Probe`,
+     `Billing Finance Ops Deadline`. 마지막 것은 10-07 이후에 staging에 생겨서 처음 목록에 없었고, 2026-10-13 전환 때
+     `develop`을 배포하던 것을 발견해 같은 날 06:37에 옮겼습니다.
 5. **IaC apply로 전환하지 않습니다.** 표는 이미 `test`라서 나중의 plan에는 브랜치 차이가 없어야 합니다. 2026-10-07의
    staging plan은 그 환경에 없는 서비스를 **새로 만듭니다** — `railway:iac`는 Marketing Publisher, `railway:agents`는
    QA Release Digest·QA Release Monitor·Billing Finance Ops Deadline. 그 생성은 별개 결정입니다.
@@ -89,7 +91,8 @@ npm run promote:test -- --sha=<develop 병합 commit>
    Wait for CI 동작: 관측하지 못함. staging Tomverse의 스위치가 꺼져 있었고 배포는 바로 BUILDING(운영자 관측).
                      켜자 Railway가 다시 끔 — test에 push로 도는 workflow가 없음(Railway 요건).
                      그 대신 promote:test가 suite 종료를 기다림(§2).
-   서비스 branch:    8개 모두 test(Railway 읽기, 2026-10-13). IaC apply 없음.
+   서비스 branch:    9개 모두 test(Railway 읽기, 2026-10-13). IaC apply 없음.
+                     Billing Finance Ops Deadline(Agents)은 목록 밖이라 develop에 남아 있다가 06:37에 옮김.
    확인한 사람:      ____________________
    ```
 
