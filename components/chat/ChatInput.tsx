@@ -4073,7 +4073,10 @@ export function ChatInput({
               title={creditEstimateAccessibleLabel}
               aria-label={creditEstimateAccessibleLabel}
             >
-              <ComposerCoinsIcon aria-hidden="true" />
+              <ComposerCoinsIcon
+                data-testid="credit-coin-icon"
+                aria-hidden="true"
+              />
               <span className="hidden min-w-0 whitespace-normal break-words text-center leading-4 md:inline">
                 {t("chat.creditEstimateLabel").replace(
                   "{credits}",
@@ -4115,6 +4118,7 @@ export function ChatInput({
               className="flex h-11 min-w-0 max-w-20 items-center justify-center gap-1 rounded-xl px-1.5 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 max-[360px]:w-[52px] max-[360px]:gap-0.5 max-[360px]:px-0 dark:text-zinc-300 dark:hover:bg-zinc-800 md:max-w-[9.125rem] md:px-2 md:[@media(pointer:fine)]:h-9"
             >
               <ComposerCoinsIcon
+                data-testid="credit-coin-icon"
                 className="max-[360px]:hidden"
                 aria-hidden="true"
               />
