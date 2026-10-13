@@ -134,18 +134,30 @@ engineering Agent가 30분마다 실행할 때 앱이 직접 90초짜리 runtime
 동안 이 lease가 세 번 "복구"로 읽혀 거짓 복구 알림과 재알림이 나갔다. 앱 코드에 runtime을 등록하는 곳이 새로
 생기면 `tests/amuxBridgeLivenessCore.test.mjs`가 실패하므로, 그 worker를 이 목록에 넣는다.
 
+**runtime마다 따로 판정한다.** 처음에는 lease가 **전부** 끝나야 `lost`였다. 2026-10-13에 `claude-impl`이
+02:45Z, `claude-review`가 04:22Z에 멈췄지만, 다른 bridge의 lease가 살아 있어서 마지막 bridge가 멈춘 05:32Z까지
+아무 알림도 나가지 않았다.
+
 | 상태 | 조건 | 알림 |
 |---|---|---|
 | `unwatched` | 48시간 안의 lease가 없음 — 이 환경에 bridge가 없거나 폐기됨 | 없음(복구 알림도 없음) |
-| `live` | 하나라도 아직 유효 | 직전이 `lost`였으면 복구 알림 |
-| `lapsing` | 전부 끝났고 5분 미만 | 없음(복구 알림도 없음) |
-| `lost` | 전부 끝난 지 5분 이상 | 처음 발견하면 즉시, 그 뒤 3시간마다 |
+| `live` | 모든 runtime의 lease가 유효 | 직전이 `lost`였으면 복구 알림 |
+| `lapsing` | 끝난 lease가 있지만 모두 5분 미만 | 없음(복구 알림도 없음) |
+| `lost` | 끝난 지 5분 이상인 runtime이 하나라도 있음 | 새 runtime이 이 목록에 들어오면 즉시, 같은 목록이면 3시간마다 |
 
 - 알림은 기존 운영 알림 경로(`reportOperationalDependencyStatus`)다. production에는 Slack
   (`OPS_ALERT_SLACK_WEBHOOK_URL`)과 운영자 이메일(`OPS_ALERT_EMAIL`)이 설정돼 있다(2026-10-12에 이름만 확인).
   새 환경변수는 없다.
-- 알림 내용: 코드 `AMUX_EXECUTION_BRIDGE_LOST`, lease가 끝난 시각과 분, `/admin/office`, journal을 먼저 보라는 문장.
-  worker 이름, 카드, 멈춘 이유는 싣지 않는다.
+- 이메일이 안 보이면 먼저 Resend의 발송 기록을 본다. 제목은 `[Tomverse Operations] AMUX execution bridge stopped
+  heartbeating`, 발신은 `alerts@mail.tomverse.app`이다. `delivered`는 받는 쪽 메일 서버가 받았다는 뜻일 뿐이고
+  받은편지함에 들어갔다는 뜻이 아니다. 2026-10-13에 세 통이 `delivered`였지만 운영자는 받은 메일이 없었다.
+  그러면 받는 메일함의 정크·필터를 확인한다.
+- 알림 내용: 코드 `AMUX_EXECUTION_BRIDGE_LOST`, 멈춘 worker 이름과 각 lease가 끝난 시각, 살아 있는 runtime 수,
+  `/admin/office`, 각 bridge unit의 halt 줄을 먼저 보라는 문장. 이름은 어느 unit을 볼지 알려 주므로 싣는다
+  (`claude-*`는 `tomverse-amux-v22-bridge@<이름>`, `codex-*`는 `tomverse-bridge.service`). 평범한 식별자가 아닌
+  이름은 `unnamed-runtime`으로 바꾼다. 카드와 멈춘 이유는 싣지 않는다.
+- 폐기한 worker의 lease는 48시간 동안 `lost`로 남아 3시간마다 다시 알리고, 그동안 복구 알림도 나가지 않는다.
+  worker를 폐기할 때는 이 점을 감안한다.
 - lease를 읽지 못하면 `AMUX_EXECUTION_BRIDGE_CHECK_FAILED`로 따로 알리고, 실행 기록에는 `amuxBridge: null`을 남긴다.
 - 탐지까지 최대 약 20분(cron 15분 + 5분). 이 cron이 늦게 돌면 그만큼 늦는다. 빠른 쪽은 1절이다.
 - 상태는 웹 프로세스 메모리에 있으므로 배포 직후 bridge가 여전히 멈춰 있으면 한 번 더 알린다.

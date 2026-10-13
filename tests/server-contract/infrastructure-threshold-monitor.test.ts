@@ -40,6 +40,7 @@ type DependencyReport = {
   code: string;
   error: unknown;
   context?: Record<string, unknown>;
+  forceNotification?: boolean;
 };
 
 type World = {
@@ -96,6 +97,10 @@ const resetWorld = () => {
   world.incidents = [];
   world.completedResults = [];
   world.failedRuns = 0;
+  // The monitor remembers which runtimes it last reported lost, in process
+  // memory; every test starts as a freshly deployed process.
+  delete (globalThis as { __tomverseAmuxBridgeLostWorkers?: unknown })
+    .__tomverseAmuxBridgeLostWorkers;
 };
 
 const snapshot = (status: string, message: string, warningReasons: Array<{ code: string; detail: string }> = []) => ({
@@ -440,8 +445,9 @@ test("the incident reports the count the query returned, not the rows it named",
 });
 
 // The AMUX execution bridge watch (docs/ops/amux/bridge-monitoring.md). Lease
-// times are the only thing read, and the alert says when they ran out and
-// where to look -- nothing about a worker or why the bridge stopped.
+// times and worker names are the only things read, and the alert says which
+// runtimes stopped, when their leases ran out and where to look -- nothing
+// about a card or why a bridge stopped.
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000);
 
 test("a bridge whose every lease ran out pages, and is counted as an alert", async () => {
@@ -458,9 +464,13 @@ test("a bridge whose every lease ran out pages, and is counted as an alert", asy
   assert.equal(report.dependency, "amux-execution-bridge");
   assert.equal(report.healthy, false);
   assert.equal(report.code, "AMUX_EXECUTION_BRIDGE_LOST");
-  assert.equal(report.context?.lostSince, world.bridgeLeases[2].toISOString());
+  // The longest-lost runtime's expiry.
+  assert.equal(report.context?.lostSince, world.bridgeLeases[1].toISOString());
   assert.equal(report.context?.adminPath, "/admin/office");
-  assert.match(String(report.error), /journalctl -u tomverse-bridge\.service/);
+  assert.equal(report.forceNotification, true);
+  assert.match(String(report.error), /^3 of 3 AMUX worker runtimes stopped renewing/);
+  assert.match(String(report.error), /codex-impl \(lease out since /);
+  assert.match(String(report.error), /halt line of each one's bridge unit/);
   assert.equal(
     (world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge,
     "lost"
@@ -484,12 +494,13 @@ test("a live bridge is reported healthy and pages nothing", async () => {
   resetWorld();
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
   world.dashboard = dashboard();
-  world.bridgeLeases = [minutesAgo(30), new Date(Date.now() + 60_000)];
+  world.bridgeLeases = [new Date(Date.now() + 30_000), new Date(Date.now() + 60_000)];
 
   const result = await monitorInfrastructureThresholdsIfDue();
 
   assert.deepEqual(result, { checked: true, alerts: 0, advisories: 0 });
   assert.equal(world.dependencyReports[0]?.healthy, true);
+  assert.equal(world.dependencyReports[0]?.forceNotification, false);
   assert.deepEqual(world.incidents, []);
   assert.equal(
     (world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge,
@@ -564,5 +575,108 @@ test("a runtime no bridge runs is neither a recovery nor a live bridge", async (
   assert.equal(
     (world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge,
     "lost"
+  );
+});
+
+// 2026-10-13: claude-impl halted at 02:45Z while four other runtimes kept
+// renewing, and the watch said nothing until the last one stopped at 05:32Z.
+test("one halted runtime beside live ones pages, and names it", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  world.otherLeases = [
+    { workerName: "claude-impl", leaseExpiresAt: minutesAgo(15) },
+    { workerName: "codex-impl", leaseExpiresAt: new Date(Date.now() + 60_000) },
+    { workerName: "claude-review", leaseExpiresAt: new Date(Date.now() + 45_000) },
+  ];
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  const [report] = world.dependencyReports;
+  assert.equal(report.healthy, false);
+  assert.equal(report.forceNotification, true);
+  assert.equal(report.context?.lostWorkers, "claude-impl");
+  assert.equal(report.context?.newlyLost, "claude-impl");
+  assert.equal(report.context?.liveRuntimes, "2");
+  assert.match(
+    String(report.error),
+    /^1 of 3 AMUX worker runtimes stopped renewing their lease: claude-impl /
+  );
+  assert.equal(
+    (world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge,
+    "lost"
+  );
+});
+
+test("a runtime that halts after another pages inside the reminder cooldown", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  const live = { workerName: "codex-impl", leaseExpiresAt: new Date(Date.now() + 60_000) };
+  const impl = { workerName: "claude-impl", leaseExpiresAt: minutesAgo(100) };
+
+  world.otherLeases = [impl, live];
+  await monitorInfrastructureThresholdsIfDue();
+  // The same lost set again is a reminder: the cooldown decides.
+  await monitorInfrastructureThresholdsIfDue();
+  world.otherLeases = [impl, { workerName: "claude-review", leaseExpiresAt: minutesAgo(10) }, live];
+  await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(
+    world.dependencyReports.map((report) => [report.forceNotification, report.context?.newlyLost]),
+    [
+      [true, "claude-impl"],
+      [false, undefined],
+      [true, "claude-review"],
+    ]
+  );
+  assert.equal(world.dependencyReports[2].context?.lostWorkers, "claude-impl, claude-review");
+});
+
+test("once every runtime is live again, a later halt is new again", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  const live = { workerName: "codex-impl", leaseExpiresAt: new Date(Date.now() + 60_000) };
+
+  world.otherLeases = [{ workerName: "claude-impl", leaseExpiresAt: minutesAgo(30) }, live];
+  await monitorInfrastructureThresholdsIfDue();
+  world.otherLeases = [
+    { workerName: "claude-impl", leaseExpiresAt: new Date(Date.now() + 80_000) },
+    live,
+  ];
+  await monitorInfrastructureThresholdsIfDue();
+  world.otherLeases = [{ workerName: "claude-impl", leaseExpiresAt: minutesAgo(6) }, live];
+  await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(
+    world.dependencyReports.map((report) => [report.healthy, report.forceNotification]),
+    [
+      [false, true],
+      [true, false],
+      [false, true],
+    ]
+  );
+});
+
+test("a restart while another lease is still lapsing is not yet a recovery", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  // claude-impl is live again, but claude-review is two minutes out: not every
+  // runtime is live and none is lost, so nothing is reported either way.
+  world.otherLeases = [
+    { workerName: "claude-impl", leaseExpiresAt: new Date(Date.now() + 60_000) },
+    { workerName: "claude-review", leaseExpiresAt: minutesAgo(2) },
+  ];
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 0, advisories: 0 });
+  assert.deepEqual(world.dependencyReports, []);
+  assert.equal(
+    (world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge,
+    "lapsing"
   );
 });

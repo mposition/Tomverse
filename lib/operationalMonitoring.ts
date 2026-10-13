@@ -316,6 +316,9 @@ export async function reportOperationalDependencyStatus({
   severity,
   context,
   cooldownMs,
+  // An unhealthy report the caller knows is new -- a second thing failing
+  // under the same dependency -- pages inside the cooldown, like the first.
+  forceNotification = false,
 }: DependencyStatus) {
   const previous = state.dependencies.get(dependency);
   state.dependencies.set(dependency, healthy ? "healthy" : "unhealthy");
@@ -328,7 +331,7 @@ export async function reportOperationalDependencyStatus({
       severity,
       context: { ...context, dependency },
       cooldownMs,
-      forceNotification: previous !== "unhealthy",
+      forceNotification: forceNotification || previous !== "unhealthy",
     });
   }
 
