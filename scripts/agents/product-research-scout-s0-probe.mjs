@@ -7,25 +7,31 @@
 //
 // `fixture` measures S0 (4) and (11): it serves a page on a local allowed origin
 // that tries every request the browser rules forbid -- other methods, another
-// origin, a redirect to another origin, a WebSocket, a service worker, a
-// download, a form POST -- and the two local servers count what actually
-// reached them. Interception that only looks right in the browser's own event
-// stream is not a measurement; a request that arrived is.
+// origin, a redirect to another origin (from a subresource, a navigation, an
+// iframe and a worker), the same host on another port, a popup, a WebSocket, a
+// service worker, a download and a form POST -- and the two local servers count
+// what actually reached them. Interception that only looks right in the
+// browser's own event stream is not a measurement; a request that arrived is.
 //
-// It runs the browser two ways. `route` is Playwright request interception
-// alone. `route+resolver` adds Chromium's host resolver rules, which make every
-// host outside the allowed list unresolvable inside the browser. Playwright
-// calls a route handler only for the first URL of a redirect chain, so the
-// first configuration is expected to leak the redirect and the second is the
-// one the browser service would run; the probe reports both so the reason for
-// the second is on the record.
+// It runs the browser three ways and reports each:
+//
+//   route          Playwright request interception alone. Its handler sees only
+//                  the first URL of a redirect chain, so redirects leak.
+//   route+resolver adds Chromium host resolver rules: hosts off the list do not
+//                  resolve. A redirect to the allowed host on another port or
+//                  scheme still leaves, because the rule is by hostname.
+//   cdp+resolver   a browser-level CDP Fetch session pauses every request in
+//                  every target -- each redirect hop, iframes, workers, popups --
+//                  and the same origin rule decides it before it is sent; the
+//                  resolver rules stay as a second layer. This is the
+//                  configuration the browser service runs.
 //
 // `pages` measures S0 (3): the twenty production public pages (§12), one at a
-// time, as a guest, GET and HEAD only, with the same rules. It records whether
-// a page answered with a bot challenge, the document language, and which other
+// time, as a guest, GET and HEAD only, with the cdp+resolver rules. The
+// document response is read at commit and a challenge or an error status stops
+// the page there (§11-6). It records the document language and which other
 // origins the page tried to reach -- the candidates for the first-party static
-// origin list S0 (4) has to settle. It never clicks, types, solves or waits out
-// a challenge.
+// origin list S0 (4) has to settle. It never clicks, types or solves anything.
 //
 // `renderers` measures S0 (2): every fixed renderer probe goes through the chat
 // tool's admission and renderer, then the checks the RND rules need -- zip
@@ -34,16 +40,20 @@
 // app's TypeScript modules, hence the npm script (tsx, react-server).
 //
 // `all` is what the Railway probe service runs (docs/ops/product-research-agent.md):
-// the three modes in one process, one JSON document, plus what S0 (1) and (10)
-// need -- Node version, process start to first measurement, each mode's time and
-// the peak resident memory -- and the *names* of the variables the container
-// was given, never a value. It does nothing unless PRODUCT_RESEARCH_SCOUT_ENABLED
-// is set, because a Railway service without a schedule runs on every deploy.
+// the three modes in one process and one JSON document, plus what S0 (1) and
+// (10) need -- Node version, process start to first measurement, each mode's
+// time, the Node process's sampled peak RSS and, where the container exposes
+// it, the cgroup's peak memory (which includes Chromium) -- and the *names* of
+// the variables the container was given, never a value. It does nothing unless
+// PRODUCT_RESEARCH_SCOUT_ENABLED is set, because a Railway service without a
+// schedule runs on every deploy.
 //
-// Read-only and credential-free: no variable is read, nothing is written
-// outside stdout, and the only network destinations are 127.0.0.1 (fixture)
-// and https://tomverse.app (pages).
+// Read-only and credential-free: the switch is the only variable read, nothing
+// is written outside stdout, the network destinations are 127.0.0.1 (fixture)
+// and https://tomverse.app (pages), and errors leave as codes -- never the URL
+// a browser message carries.
 
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { chromium } from "@playwright/test";
 import {
@@ -52,7 +62,8 @@ import {
   SCOUT_PAGE_ORIGIN,
   SCOUT_PAGES,
   decideScoutRequest,
-  isBotChallenge,
+  documentStop,
+  errorCode,
   isScoutCausedConsoleError,
   originOf,
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
@@ -71,39 +82,61 @@ const PAGE_DEADLINE_MS = 60_000;
 const SETTLE_MS = 2_500;
 
 /** Host resolver rules that keep real DNS for the allowed hosts and fail the rest. */
-const passThroughResolverRules = (allowedHosts) =>
+const resolverRules = (allowedHosts) =>
   `--host-resolver-rules=MAP * ~NOTFOUND, ${allowedHosts.map((host) => `EXCLUDE ${host}`).join(", ")}`;
 
-async function launch(extraArgs) {
-  return chromium.launch({ chromiumSandbox: true, args: extraArgs });
+async function launch(args) {
+  return chromium.launch({ chromiumSandbox: true, args });
 }
 
 /**
- * A browser context with every rule of §13 applied. Returns the tally the
- * route handler fills; the caller reads it after the page settles.
+ * The scout's request rule as a browser-level CDP Fetch session: every request
+ * in every target pauses, and is continued only when decideScoutRequest allows
+ * it. `tally` is swapped per page by the caller so aborts are counted per page.
  */
-async function ruledContext(browser, { allowedOrigins, locale, serviceWorkers = "block" }) {
+async function installCdpRules(browser, allowedOrigins) {
+  const session = await browser.newBrowserCDPSession();
+  const state = { tally: new AbortTally() };
+  session.on("Fetch.requestPaused", (event) => {
+    const { method, url } = event.request;
+    const decision = decideScoutRequest({ method, url, allowedOrigins });
+    if (!decision.allow) state.tally.add({ reason: decision.reason, method, url });
+    const command = decision.allow
+      ? session.send("Fetch.continueRequest", { requestId: event.requestId })
+      : session.send("Fetch.failRequest", { requestId: event.requestId, errorReason: "BlockedByClient" });
+    // A target that closed while its request was paused rejects the command;
+    // there is nothing left to continue or fail.
+    command.catch(() => {});
+  });
+  await session.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
+  return state;
+}
+
+/** A browser context with the §13 context options, and Playwright's route when asked. */
+async function ruledContext(browser, { allowedOrigins, locale, serviceWorkers = "block", playwrightRoute, tally }) {
   const context = await browser.newContext({
     locale,
     serviceWorkers,
     acceptDownloads: false,
     permissions: [],
-    javaScriptEnabled: true,
   });
-  const tally = new AbortTally();
-  await context.route("**/*", (route) => {
-    const request = route.request();
-    const decision = decideScoutRequest({ method: request.method(), url: request.url(), allowedOrigins });
-    if (decision.allow) return route.continue();
-    tally.add({ reason: decision.reason, method: request.method(), url: request.url() });
-    return route.abort("blockedbyclient");
-  });
+  if (playwrightRoute) {
+    await context.route("**/*", (route) => {
+      const request = route.request();
+      const decision = decideScoutRequest({ method: request.method(), url: request.url(), allowedOrigins });
+      if (decision.allow) return route.continue();
+      tally.add({ reason: decision.reason, method: request.method(), url: request.url() });
+      return route.abort("blockedbyclient");
+    });
+  }
   let webSocketsRefused = 0;
+  // CDP Fetch does not see a WebSocket handshake; Playwright's WebSocket route
+  // closes it before it connects.
   await context.routeWebSocket(/.*/, (ws) => {
     webSocketsRefused += 1;
     ws.close({ code: 1008, reason: "scout" });
   });
-  return { context, tally, webSocketsRefused: () => webSocketsRefused };
+  return { context, webSocketsRefused: () => webSocketsRefused };
 }
 
 // ---------------------------------------------------------------- fixture
@@ -121,16 +154,22 @@ function recordingServer(name, handler) {
   return {
     received,
     listen: () => new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port))),
-    close: () => new Promise((resolve) => server.close(() => resolve())),
+    close: () =>
+      new Promise((resolve) => {
+        server.closeAllConnections?.();
+        server.close(() => resolve());
+      }),
   };
 }
 
-function fixturePage(other) {
+function fixturePage({ otherHost, otherSameHost }) {
   return `<!doctype html><html lang="en"><head><title>fixture</title>
-<link rel="stylesheet" href="${other}/style.css">
-<script src="${other}/script.js"></script>
+<link rel="stylesheet" href="${otherHost}/style.css">
+<script src="${otherHost}/script.js"></script>
 </head><body>
-<img src="${other}/direct.png"><img src="/redirect-off"><img src="/redirect-on">
+<img src="${otherHost}/direct.png"><img src="${otherSameHost}/same-host-direct.png">
+<img src="/redirect-other-host"><img src="/redirect-same-host"><img src="/redirect-on">
+<iframe src="/redirect-frame"></iframe>
 <script>
 (async () => {
   const settle = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(resolve, 2000))]);
@@ -140,10 +179,13 @@ function fixturePage(other) {
     fetch("/post", { method: "POST", body: "x" }),
     fetch("/put", { method: "PUT", body: "x" }),
     fetch("/delete", { method: "DELETE" }),
-    fetch("${other}/cors"),
+    fetch("${otherHost}/cors"),
+    fetch("/redirect-fetch"),
   ].map((attempt) => settle(attempt.catch(() => null)));
   try { navigator.sendBeacon("/beacon", "x"); } catch {}
   try { new WebSocket(location.origin.replace("http", "ws") + "/ws"); } catch {}
+  try { new Worker("/worker.js"); } catch {}
+  try { window.open("${otherSameHost}/popup"); } catch {}
   let worker = "absent";
   try {
     if (navigator.serviceWorker) { await settle(navigator.serviceWorker.register("/sw.js")); worker = "attempted"; }
@@ -155,133 +197,198 @@ function fixturePage(other) {
 </script></body></html>`;
 }
 
+const FIXTURE_CONFIGURATIONS = [
+  { name: "route", playwrightRoute: true, cdp: false, resolver: false },
+  { name: "route+resolver", playwrightRoute: true, cdp: false, resolver: true },
+  { name: "cdp+resolver", playwrightRoute: false, cdp: true, resolver: true },
+  // A control, not a configuration the service would run: service workers
+  // allowed, so the fixture shows it can see one. Without it, a service worker
+  // that never registered could mean the rule worked or that the page never
+  // had the API.
+  { name: "control:service-workers-allowed", playwrightRoute: false, cdp: true, resolver: true, serviceWorkers: "allow", control: true },
+];
+
 async function runFixture() {
   const other = recordingServer("other", (request, response) => {
-    response.writeHead(200, { "content-type": "text/plain" });
+    response.writeHead(200, { "content-type": "text/html" });
     response.end("other");
   });
-  const otherPort = await other.listen();
-  const otherOrigin = `http://other.test:${otherPort}`;
+  let allowed = null;
+  try {
+    const otherPort = await other.listen();
+    // Another hostname, and the allowed hostname on another port: the second is
+    // the case a hostname rule cannot see.
+    const otherHost = `http://other.test:${otherPort}`;
+    const otherSameHost = `http://localhost:${otherPort}`;
+    allowed = recordingServer("allowed", (request, response) => {
+      const path = new URL(request.url, "http://x").pathname;
+      const html = (body) => {
+        response.writeHead(200, { "content-type": "text/html" });
+        response.end(body);
+      };
+      const redirect = (location) => {
+        response.writeHead(302, { location });
+        response.end();
+      };
+      if (path === "/page") return html(fixturePage({ otherHost, otherSameHost }));
+      if (path === "/form") return html(`<!doctype html><form method="post" action="/form-post"></form><script>document.forms[0].submit();</script>`);
+      // The one same-origin redirect, checked first: it has to arrive, or the
+      // fixture cannot tell a blocked redirect from a broken one.
+      if (path === "/redirect-on") return redirect("/same-origin-landing");
+      if (path === "/redirect-other-host" || path === "/nav-redirect-other-host") return redirect(`${otherHost}/landed${path}`);
+      if (path.startsWith("/redirect-") || path === "/nav-redirect-same-host") return redirect(`${otherSameHost}/landed${path}`);
+      if (path === "/worker.js") {
+        response.writeHead(200, { "content-type": "text/javascript" });
+        return response.end(`fetch("${otherSameHost}/from-worker").catch(() => {}); fetch("/redirect-worker").catch(() => {});`);
+      }
+      if (path === "/download") {
+        response.writeHead(200, { "content-type": "application/octet-stream", "content-disposition": "attachment; filename=x.bin" });
+        return response.end("binary");
+      }
+      if (path === "/sw.js") {
+        response.writeHead(200, { "content-type": "text/javascript" });
+        return response.end("self.addEventListener('fetch', () => {});");
+      }
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("ok");
+    });
+    const allowedPort = await allowed.listen();
+    // `localhost` is a secure context over plain http, so the page has
+    // `navigator.serviceWorker` and the service worker rule is exercised.
+    const allowedOrigin = `http://localhost:${allowedPort}`;
+    const scrub = (value) => String(value).replaceAll(String(otherPort), "<other>").replaceAll(String(allowedPort), "<allowed>");
 
-  const allowed = recordingServer("allowed", (request, response) => {
-    const path = new URL(request.url, "http://x").pathname;
-    if (path === "/" || path === "/page") {
-      response.writeHead(200, { "content-type": "text/html" });
-      return response.end(fixturePage(otherOrigin));
+    const results = [];
+    for (const configuration of FIXTURE_CONFIGURATIONS) {
+      allowed.received.length = 0;
+      other.received.length = 0;
+      results.push(await runFixtureConfiguration(configuration, { allowedOrigin, allowed, other, scrub }));
     }
-    if (path === "/form") {
-      response.writeHead(200, { "content-type": "text/html" });
-      return response.end(`<!doctype html><form method="post" action="/form-post"></form>
-<script>document.forms[0].submit();</script>`);
-    }
-    if (path === "/redirect-off" || path === "/nav-redirect-off") {
-      response.writeHead(302, { location: `${otherOrigin}/landing${path}` });
-      return response.end();
-    }
-    if (path === "/redirect-on") {
-      response.writeHead(302, { location: "/get" });
-      return response.end();
-    }
-    if (path === "/download") {
-      response.writeHead(200, { "content-type": "application/octet-stream", "content-disposition": "attachment; filename=x.bin" });
-      return response.end("binary");
-    }
-    if (path === "/sw.js") {
-      response.writeHead(200, { "content-type": "text/javascript" });
-      return response.end("self.addEventListener('fetch', () => {});");
-    }
-    response.writeHead(200, { "content-type": "text/plain" });
-    response.end("ok");
-  });
-  const allowedPort = await allowed.listen();
-  // `localhost` is a secure context over plain http, so the page has
-  // `navigator.serviceWorker` and the service worker rule is actually exercised.
-  const allowedOrigin = `http://localhost:${allowedPort}`;
+    return { mode: "fixture", platform: `${process.platform}-${process.arch}`, results };
+  } finally {
+    await allowed?.close();
+    await other.close();
+  }
+}
 
-  const configurations = [
-    { name: "route", args: ["--host-resolver-rules=MAP other.test 127.0.0.1"] },
-    { name: "route+resolver", args: [passThroughResolverRules(["localhost"])] },
-    // A control, not a configuration the service would run: service workers
-    // allowed, so the fixture shows it can see one. Without it, "absent" in the
-    // two rows above could mean the rule worked or that the page never had the
-    // API.
-    { name: "control:service-workers-allowed", args: [passThroughResolverRules(["localhost"])], serviceWorkers: "allow", control: true },
-  ];
-  const results = [];
-  for (const configuration of configurations) {
-    allowed.received.length = 0;
-    other.received.length = 0;
-    const startedAt = Date.now();
-    let browser;
-    let launchError = null;
-    try {
-      browser = await launch(configuration.args);
-    } catch (error) {
-      launchError = String(error?.message ?? error).split("\n")[0];
-    }
-    if (!browser) {
-      results.push({ configuration: configuration.name, sandboxLaunch: "failed", launchError });
-      continue;
-    }
-    const { context, tally, webSocketsRefused } = await ruledContext(browser, {
+async function runFixtureConfiguration(configuration, { allowedOrigin, allowed, other, scrub }) {
+  const startedAt = Date.now();
+  const args = configuration.resolver
+    ? [resolverRules(["localhost"])]
+    : ["--host-resolver-rules=MAP other.test 127.0.0.1"];
+  let browser;
+  try {
+    browser = await launch(args);
+  } catch (error) {
+    return { configuration: configuration.name, sandboxLaunch: "failed", launchError: errorCode(error) };
+  }
+  try {
+    const tally = configuration.cdp ? (await installCdpRules(browser, [allowedOrigin])).tally : new AbortTally();
+    const { context, webSocketsRefused } = await ruledContext(browser, {
       allowedOrigins: [allowedOrigin],
       locale: SCOUT_LOCALES.en,
       serviceWorkers: configuration.serviceWorkers,
+      playwrightRoute: configuration.playwrightRoute,
+      tally,
     });
-    const page = await context.newPage();
-    await page.goto(`${allowedOrigin}/page`, { waitUntil: "load", timeout: PAGE_DEADLINE_MS });
-    await page.waitForFunction(() => document.title.startsWith("done:"), null, { timeout: 15_000 }).catch(() => null);
-    const workerOutcome = await page.title();
+    let workerOutcome = "unknown";
     const navigation = {};
-    for (const path of ["/nav-redirect-off", "/download", "/form"]) {
-      const probe = await context.newPage();
-      const response = await probe
-        .goto(`${allowedOrigin}${path}`, { waitUntil: "load", timeout: 15_000 })
-        .then((value) => ({ status: value?.status() ?? null, finalOrigin: originOf(probe.url()) }))
-        .catch((error) => ({ error: String(error?.message ?? error).split("\n")[0].slice(0, 120), finalOrigin: originOf(probe.url()) }));
-      await probe.waitForTimeout(1_000);
-      navigation[path] = response;
-      await probe.close();
+    try {
+      const page = await context.newPage();
+      await page.goto(`${allowedOrigin}/page`, { waitUntil: "load", timeout: PAGE_DEADLINE_MS });
+      await page.waitForFunction(() => document.title.startsWith("done:"), null, { timeout: 15_000 }).catch(() => null);
+      workerOutcome = (await page.title()).replace(/^done:/, "");
+      for (const path of ["/nav-redirect-other-host", "/nav-redirect-same-host", "/download", "/form"]) {
+        const probe = await context.newPage();
+        try {
+          navigation[path] = await probe
+            .goto(`${allowedOrigin}${path}`, { waitUntil: "load", timeout: 15_000 })
+            .then((response) => ({ status: response?.status() ?? null, finalOrigin: scrub(originOf(probe.url())) }))
+            .catch((error) => ({ error: errorCode(error), finalOrigin: scrub(originOf(probe.url())) }));
+          await probe.waitForTimeout(1_000);
+        } finally {
+          await probe.close();
+        }
+      }
+      // Let a popup or a worker that is still loading finish trying.
+      await page.waitForTimeout(1_000);
+    } finally {
+      await context.close();
     }
-    await context.close();
-    await browser.close();
     const reachedOther = other.received.map(({ method, path, upgrade }) => ({ method, path, upgrade }));
     const forbiddenOnAllowed = allowed.received
       .filter(({ method, upgrade, path }) => upgrade || !["GET", "HEAD"].includes(method) || path === "/sw.js")
       .map(({ method, path, upgrade }) => ({ method, path, upgrade }));
-    results.push({
+    // What must arrive, so that refusing everything cannot read as a pass.
+    const arrived = (path) => allowed.received.some((entry) => entry.path === path && !entry.upgrade);
+    const allowedArrived = { get: arrived("/get"), head: arrived("/head-ok"), sameOriginRedirect: arrived("/same-origin-landing") };
+    return {
       configuration: configuration.name,
       sandboxLaunch: "ok",
       elapsedMs: Date.now() - startedAt,
-      serviceWorker: workerOutcome.replace(/^done:/, ""),
+      allowedArrived,
+      serviceWorker: workerOutcome,
       webSocketsRefusedByRoute: webSocketsRefused(),
-      aborted: tally.entries().map((entry) => ({ ...entry, origin: entry.origin.replace(String(otherPort), "<other>").replace(String(allowedPort), "<allowed>") })),
+      aborted: tally.entries().map((entry) => ({ ...entry, origin: scrub(entry.origin) })),
       navigation,
       reachedOtherOrigin: reachedOther,
       forbiddenReachedAllowedOrigin: forbiddenOnAllowed,
       ...(configuration.control
         ? { controlDetected: allowed.received.some(({ path }) => path === "/sw.js") }
-        : { pass: reachedOther.length === 0 && forbiddenOnAllowed.length === 0 }),
-    });
+        : {
+            pass:
+              reachedOther.length === 0 &&
+              forbiddenOnAllowed.length === 0 &&
+              Object.values(allowedArrived).every(Boolean),
+          }),
+    };
+  } catch (error) {
+    return { configuration: configuration.name, sandboxLaunch: "ok", error: errorCode(error), elapsedMs: Date.now() - startedAt };
+  } finally {
+    await browser.close();
   }
-  await allowed.close();
-  await other.close();
-  return { mode: "fixture", platform: `${process.platform}-${process.arch}`, chromium: chromium.name(), results };
 }
 
 // ---------------------------------------------------------------- pages
 
 async function runPages() {
   const allowedOrigins = [SCOUT_PAGE_ORIGIN];
-  const browser = await launch([passThroughResolverRules([new URL(SCOUT_PAGE_ORIGIN).hostname])]);
-  const pages = [];
-  const otherOrigins = new Map();
-  for (const target of SCOUT_PAGES) {
-    const startedAt = Date.now();
-    const { context, tally, webSocketsRefused } = await ruledContext(browser, {
-      allowedOrigins,
-      locale: SCOUT_LOCALES[target.lang],
-    });
+  const browser = await launch([resolverRules([new URL(SCOUT_PAGE_ORIGIN).hostname])]);
+  try {
+    const rules = await installCdpRules(browser, allowedOrigins);
+    const pages = [];
+    const otherOrigins = new Map();
+    for (const target of SCOUT_PAGES) {
+      rules.tally = new AbortTally();
+      const record = await visitPage(browser, target, { allowedOrigins, tally: rules.tally });
+      for (const entry of record.aborted ?? []) {
+        if (entry.reason === "origin") otherOrigins.set(entry.origin, (otherOrigins.get(entry.origin) ?? 0) + entry.count);
+      }
+      for (const { origin, count } of record.failedOtherOrigins ?? []) {
+        otherOrigins.set(origin, (otherOrigins.get(origin) ?? 0) + count);
+      }
+      pages.push(record);
+    }
+    return {
+      mode: "pages",
+      platform: `${process.platform}-${process.arch}`,
+      pages,
+      otherOriginsTried: [...otherOrigins.entries()].map(([origin, count]) => ({ origin, count })).sort((a, b) => b.count - a.count),
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+async function visitPage(browser, target, { allowedOrigins, tally }) {
+  const startedAt = Date.now();
+  const { context, webSocketsRefused } = await ruledContext(browser, {
+    allowedOrigins,
+    locale: SCOUT_LOCALES[target.lang],
+    playwrightRoute: false,
+    tally,
+  });
+  try {
     const page = await context.newPage();
     let consoleErrors = 0;
     let scoutCausedConsoleErrors = 0;
@@ -302,50 +409,41 @@ async function runPages() {
       const origin = originOf(request.url()) ?? "opaque";
       if (origin !== SCOUT_PAGE_ORIGIN) failedOrigins.set(origin, (failedOrigins.get(origin) ?? 0) + 1);
     });
-    let record;
-    try {
-      const response = await page.goto(`${SCOUT_PAGE_ORIGIN}${target.path}`, {
-        waitUntil: "load",
-        timeout: PAGE_DEADLINE_MS - SETTLE_MS - 5_000,
-      });
-      await page.waitForTimeout(SETTLE_MS);
-      const headers = response ? await response.allHeaders() : {};
-      const title = await page.title().catch(() => "");
-      const documentLang = await page.evaluate(() => document.documentElement.lang).catch(() => null);
-      const finalOrigin = originOf(page.url());
-      record = {
-        id: target.id,
-        status: response?.status() ?? null,
-        challenge: isBotChallenge({ status: response?.status() ?? 0, headers, title }),
-        cfMitigated: headers["cf-mitigated"] ?? null,
-        finalOriginAllowed: finalOrigin === SCOUT_PAGE_ORIGIN,
-        documentLang,
-        langMatches: typeof documentLang === "string" && documentLang.toLowerCase().startsWith(target.lang),
-        titlePresent: title.length > 0,
-        consoleErrors,
-        scoutCausedConsoleErrors,
-        sameOriginErrors,
-        webSocketsRefused: webSocketsRefused(),
-        aborted: tally.entries(),
-        elapsedMs: Date.now() - startedAt,
-      };
-    } catch (error) {
-      record = { id: target.id, error: String(error?.message ?? error).split("\n")[0].slice(0, 160), elapsedMs: Date.now() - startedAt };
+
+    // Read the document response at commit, before the page runs anything a
+    // challenge would bring with it, and stop there if it says to (§11-6).
+    const response = await page.goto(`${SCOUT_PAGE_ORIGIN}${target.path}`, {
+      waitUntil: "commit",
+      timeout: PAGE_DEADLINE_MS / 2,
+    });
+    const status = response?.status() ?? 0;
+    const stop = documentStop({ status, headers: response ? await response.allHeaders() : {} });
+    if (stop !== null) {
+      return { id: target.id, status, stopped: stop, elapsedMs: Date.now() - startedAt };
     }
-    for (const entry of record.aborted ?? []) {
-      if (entry.reason === "origin") otherOrigins.set(entry.origin, (otherOrigins.get(entry.origin) ?? 0) + entry.count);
-    }
-    for (const [origin, count] of failedOrigins) otherOrigins.set(origin, (otherOrigins.get(origin) ?? 0) + count);
-    pages.push(record);
+    await page.waitForLoadState("load", { timeout: PAGE_DEADLINE_MS - SETTLE_MS - 5_000 - (Date.now() - startedAt) });
+    await page.waitForTimeout(SETTLE_MS);
+    const documentLang = await page.evaluate(() => document.documentElement.lang).catch(() => null);
+    return {
+      id: target.id,
+      status,
+      stopped: null,
+      finalOriginAllowed: originOf(page.url()) === SCOUT_PAGE_ORIGIN,
+      documentLang,
+      langMatches: typeof documentLang === "string" && documentLang.toLowerCase().startsWith(target.lang),
+      consoleErrors,
+      scoutCausedConsoleErrors,
+      sameOriginErrors,
+      webSocketsRefused: webSocketsRefused(),
+      aborted: tally.entries(),
+      failedOtherOrigins: [...failedOrigins.entries()].map(([origin, count]) => ({ origin, count })),
+      elapsedMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    return { id: target.id, error: errorCode(error), elapsedMs: Date.now() - startedAt };
+  } finally {
     await context.close();
   }
-  await browser.close();
-  return {
-    mode: "pages",
-    platform: `${process.platform}-${process.arch}`,
-    pages,
-    otherOriginsTried: [...otherOrigins.entries()].map(([origin, count]) => ({ origin, count })).sort((a, b) => b.count - a.count),
-  };
 }
 
 // ---------------------------------------------------------------- renderers
@@ -405,46 +503,65 @@ async function inspectPdf(bytes, tools, { containsHangul, textItemsOutsidePage }
     isEvalSupported: false,
     useSystemFonts: false,
   });
-  const document = await loadingTask.promise;
-  tools.pdfParse = "ok";
-  let text = "";
-  let outsidePage = 0;
-  for (let number = 1; number <= document.numPages; number += 1) {
-    const page = await document.getPage(number);
-    const viewport = page.getViewport({ scale: 1 });
-    const content = await page.getTextContent();
-    const items = content.items
-      .filter((item) => typeof item.str === "string")
-      .map((item) => ({ x: item.transform[4], y: item.transform[5], width: item.width, str: item.str }));
-    text += items.map((item) => item.str).join(" ");
-    outsidePage += textItemsOutsidePage(items, { width: viewport.width, height: viewport.height });
-    page.cleanup();
-  }
-  let rasterInkPixels = null;
   try {
-    const { createCanvas } = await import("@napi-rs/canvas");
-    const page = await document.getPage(1);
-    const viewport = page.getViewport({ scale: 0.5 });
-    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-    const context = canvas.getContext("2d");
-    context.fillStyle = "#fff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: context, canvas, viewport }).promise;
-    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-    rasterInkPixels = 0;
-    for (let index = 0; index < pixels.length; index += 4) {
-      if (pixels[index] < 200 || pixels[index + 1] < 200 || pixels[index + 2] < 200) rasterInkPixels += 1;
+    const document = await loadingTask.promise;
+    tools.pdfParse = "ok";
+    let text = "";
+    let outsidePage = 0;
+    for (let number = 1; number <= document.numPages; number += 1) {
+      const page = await document.getPage(number);
+      const viewport = page.getViewport({ scale: 1 });
+      const content = await page.getTextContent();
+      const items = content.items
+        .filter((item) => typeof item.str === "string")
+        .map((item) => ({ x: item.transform[4], y: item.transform[5], width: item.width, str: item.str }));
+      text += items.map((item) => item.str).join(" ");
+      outsidePage += textItemsOutsidePage(items, { width: viewport.width, height: viewport.height });
+      page.cleanup();
     }
-    tools.raster = "ok";
-  } catch (error) {
-    tools.raster = `failed: ${String(error?.message ?? error).split("\n")[0].slice(0, 120)}`;
+    let rasterInkPixels = null;
+    try {
+      const { createCanvas } = await import("@napi-rs/canvas");
+      const page = await document.getPage(1);
+      const viewport = page.getViewport({ scale: 0.5 });
+      const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#fff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: context, canvas, viewport }).promise;
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      rasterInkPixels = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (pixels[index] < 200 || pixels[index + 1] < 200 || pixels[index + 2] < 200) rasterInkPixels += 1;
+      }
+      tools.raster = "ok";
+    } catch (error) {
+      tools.raster = `failed: ${errorCode(error)}`;
+    }
+    return { pages: document.numPages, hangulInText: containsHangul(text), outsidePage, rasterInkPixels };
+  } finally {
+    await loadingTask.destroy();
   }
-  const pages = document.numPages;
-  await loadingTask.destroy();
-  return { pages, hangulInText: containsHangul(text), outsidePage, rasterInkPixels };
 }
 
 // ---------------------------------------------------------------- all
+
+/**
+ * The container's peak memory from its cgroup, which counts Chromium's
+ * processes as well as Node's. Null where the file is not there (a workstation,
+ * or a runtime that does not expose it).
+ */
+function containerMemoryPeakBytes() {
+  for (const path of ["/sys/fs/cgroup/memory.peak", "/sys/fs/cgroup/memory/memory.max_usage_in_bytes"]) {
+    try {
+      const value = Number(readFileSync(path, "utf8").trim());
+      if (Number.isFinite(value)) return value;
+    } catch {
+      // try the next layout
+    }
+  }
+  return null;
+}
 
 async function runAll() {
   // Unset and empty are off, the same reading as every product-research switch
@@ -453,35 +570,42 @@ async function runAll() {
     return { mode: "all", skipped: "PRODUCT_RESEARCH_SCOUT_ENABLED is not set" };
   }
   const firstMeasurementAtMs = Math.round(process.uptime() * 1000);
-  let peakRss = process.memoryUsage().rss;
+  // A sample, not a peak: the interval does not run while a renderer holds the
+  // thread, and Chromium's processes are not Node's. The cgroup figure below is
+  // the container's.
+  let nodeRssSampledPeak = process.memoryUsage().rss;
   const sample = setInterval(() => {
-    peakRss = Math.max(peakRss, process.memoryUsage().rss);
+    nodeRssSampledPeak = Math.max(nodeRssSampledPeak, process.memoryUsage().rss);
   }, 250);
   const timed = async (run) => {
     const startedAt = Date.now();
     try {
       return { ...(await run()), elapsedMs: Date.now() - startedAt };
     } catch (error) {
-      return { error: String(error?.message ?? error).split("\n")[0].slice(0, 200), elapsedMs: Date.now() - startedAt };
+      return { error: errorCode(error), elapsedMs: Date.now() - startedAt };
     }
   };
-  const fixture = await timed(runFixture);
-  const pages = await timed(runPages);
-  const renderers = await timed(runRenderers);
-  clearInterval(sample);
-  return {
-    mode: "all",
-    node: process.version,
-    platform: `${process.platform}-${process.arch}`,
-    uid: typeof process.getuid === "function" ? process.getuid() : null,
-    firstMeasurementAtMs,
-    totalMs: Math.round(process.uptime() * 1000),
-    peakRssBytes: peakRss,
-    variableNames: Object.keys(process.env).sort(),
-    fixture,
-    pages,
-    renderers,
-  };
+  try {
+    const fixture = await timed(runFixture);
+    const pages = await timed(runPages);
+    const renderers = await timed(runRenderers);
+    return {
+      mode: "all",
+      node: process.version,
+      platform: `${process.platform}-${process.arch}`,
+      uid: typeof process.getuid === "function" ? process.getuid() : null,
+      firstMeasurementAtMs,
+      totalMs: Math.round(process.uptime() * 1000),
+      nodeRssSampledPeakBytes: nodeRssSampledPeak,
+      containerMemoryPeakBytes: containerMemoryPeakBytes(),
+      variableNames: Object.keys(process.env).sort(),
+      fixture,
+      pages,
+      renderers,
+    };
+  } finally {
+    clearInterval(sample);
+  }
 }
 
 const run = { fixture: runFixture, pages: runPages, renderers: runRenderers, all: runAll }[mode];
@@ -490,9 +614,15 @@ if (asJson || mode === "all") {
   console.log(JSON.stringify(result, null, 2));
 } else if (mode === "fixture") {
   for (const entry of result.results) {
-    const verdict = entry.pass === undefined ? (entry.controlDetected === undefined ? "" : `, control ${entry.controlDetected ? "detected sw.js" : "DID NOT detect sw.js"}`) : `, ${entry.pass ? "PASS" : "FAIL"}`;
+    const verdict =
+      entry.pass === undefined
+        ? entry.controlDetected === undefined
+          ? ""
+          : `, control ${entry.controlDetected ? "detected sw.js" : "DID NOT detect sw.js"}`
+        : `, ${entry.pass ? "PASS" : "FAIL"}`;
     console.log(`${entry.configuration}: sandbox ${entry.sandboxLaunch}${verdict}`);
-    if (entry.launchError) console.log(`  launch: ${entry.launchError}`);
+    if (entry.launchError || entry.error) console.log(`  error: ${entry.launchError ?? entry.error}`);
+    if (entry.allowedArrived) console.log(`  allowed requests arrived: ${JSON.stringify(entry.allowedArrived)}`);
     if (entry.reachedOtherOrigin?.length) console.log(`  reached other origin: ${JSON.stringify(entry.reachedOtherOrigin)}`);
     if (entry.forbiddenReachedAllowedOrigin?.length) console.log(`  forbidden on allowed origin: ${JSON.stringify(entry.forbiddenReachedAllowedOrigin)}`);
     if (entry.serviceWorker) console.log(`  service worker: ${entry.serviceWorker}; websockets refused: ${entry.webSocketsRefusedByRoute}`);
@@ -503,9 +633,13 @@ if (asJson || mode === "all") {
   for (const probe of result.probes) console.log(`${probe.id}: ${JSON.stringify(probe)}`);
 } else {
   for (const page of result.pages) {
-    console.log(page.error
-      ? `${page.id}: error ${page.error}`
-      : `${page.id}: ${page.status}${page.challenge ? " CHALLENGE" : ""} lang=${page.documentLang}${page.langMatches ? "" : " (mismatch)"} console=${page.consoleErrors}(+${page.scoutCausedConsoleErrors} scout-caused) sameOrigin4xx5xx=${page.sameOriginErrors} ${page.elapsedMs}ms`);
+    console.log(
+      page.error
+        ? `${page.id}: error ${page.error}`
+        : page.stopped
+          ? `${page.id}: ${page.status} STOPPED (${page.stopped})`
+          : `${page.id}: ${page.status} lang=${page.documentLang}${page.langMatches ? "" : " (mismatch)"} console=${page.consoleErrors}(+${page.scoutCausedConsoleErrors} scout-caused) sameOrigin4xx5xx=${page.sameOriginErrors} ${page.elapsedMs}ms`,
+    );
   }
   console.log(`other origins tried: ${JSON.stringify(result.otherOriginsTried)}`);
 }

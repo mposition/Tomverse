@@ -6,7 +6,8 @@ import {
   SCOUT_PAGE_ORIGIN,
   SCOUT_PAGES,
   decideScoutRequest,
-  isBotChallenge,
+  documentStop,
+  errorCode,
   isScoutCausedConsoleError,
   originOf,
 } from "../lib/productResearchScoutBrowserPolicy.mjs";
@@ -93,15 +94,26 @@ test("opaque and unparsable URLs are refused, never treated as same-origin", () 
   assert.equal(originOf("https://tomverse.app/a?b#c"), "https://tomverse.app");
 });
 
-test("a bot challenge is recognised by its header or by the Cloudflare interstitial", () => {
-  assert.equal(isBotChallenge({ status: 200, headers: { "cf-mitigated": "challenge" }, title: "" }), true);
-  assert.equal(isBotChallenge({ status: 403, headers: { server: "cloudflare" }, title: "Just a moment..." }), true);
-  assert.equal(isBotChallenge({ status: 503, headers: { server: "cloudflare" }, title: "Attention Required! | Cloudflare" }), true);
-  // An ordinary page, an ordinary error and a page that merely says the words.
-  assert.equal(isBotChallenge({ status: 200, headers: { server: "cloudflare" }, title: "Tomverse" }), false);
-  assert.equal(isBotChallenge({ status: 404, headers: { server: "cloudflare" }, title: "Not found" }), false);
-  assert.equal(isBotChallenge({ status: 200, headers: { server: "cloudflare" }, title: "Just a moment, please" }), false);
-  assert.equal(isBotChallenge({ status: 503, headers: { server: "railway-edge" }, title: "Just a moment" }), false);
+test("the document response stops the page on a challenge or an error status, before it loads", () => {
+  assert.equal(documentStop({ status: 200, headers: { "cf-mitigated": "challenge" } }), "challenge");
+  assert.equal(documentStop({ status: 403, headers: { "cf-mitigated": "Challenge", server: "cloudflare" } }), "challenge");
+  assert.equal(documentStop({ status: 403, headers: { server: "cloudflare" } }), "status");
+  assert.equal(documentStop({ status: 503, headers: {} }), "status");
+  assert.equal(documentStop({ status: 404, headers: {} }), "status");
+  assert.equal(documentStop({ status: Number.NaN, headers: {} }), "status");
+  assert.equal(documentStop({ status: 200, headers: { server: "cloudflare" } }), null);
+  assert.equal(documentStop({ status: 304, headers: {} }), null);
+});
+
+test("an error leaves the probe as a code, never as the URL the message carries", () => {
+  const navigation = new Error("page.goto: net::ERR_BLOCKED_BY_CLIENT at https://tomverse.app/chat?token=abc\nCall log:");
+  assert.equal(errorCode(navigation), "ERR_BLOCKED_BY_CLIENT");
+  const timeout = Object.assign(new Error("page.goto: Timeout 45000ms exceeded.\n navigating to \"https://tomverse.app/x?y\""), { name: "TimeoutError" });
+  assert.equal(errorCode(timeout), "timeout");
+  assert.equal(errorCode(new Error("page.goto: Timeout 100ms exceeded.")), "timeout");
+  assert.equal(errorCode(new Error("Target page, context or browser has been closed at https://tomverse.app/secret")), "error");
+  assert.equal(errorCode("boom"), "error");
+  for (const value of [navigation, timeout]) assert.ok(!errorCode(value).includes("tomverse"));
 });
 
 test("the abort tally keeps method and origin and drops the path", () => {
