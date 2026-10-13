@@ -2,6 +2,7 @@ import "server-only";
 
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { getConfiguredAmuxV22WorkerCatalog, getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
+import { AMUX_V22_WORKER_CATALOG_ENV } from "@/lib/amux/v22WorkerCatalogCore";
 import {
   buildAmuxWorkerCapabilityAdminView,
   type AmuxWorkerCapabilityAdminView,
@@ -29,10 +30,13 @@ export async function readAmuxWorkerCapabilitiesForAdmin(): Promise<AmuxWorkerCa
   const current = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerCapabilityRead, (tx) =>
     readAmuxWorkerCapabilitiesOrThrow(tx),
   );
+  // An unset v22 variable means no worker has a profile ([]); a set one that
+  // does not parse is unreadable (null), which blocks the import.
+  const v22Raw = process.env[AMUX_V22_WORKER_CATALOG_ENV]?.trim();
   return buildAmuxWorkerCapabilityAdminView({
     registrations: registry.registrations,
     current,
     legacy: getConfiguredAmuxWorkerCatalog(),
-    v22: getConfiguredAmuxV22WorkerCatalog(),
+    v22: v22Raw ? getConfiguredAmuxV22WorkerCatalog() : [],
   });
 }

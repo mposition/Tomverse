@@ -223,3 +223,19 @@ test("the GET body is accepted only in its exact shape", () => {
   assert.ok(unreadable.rows.every((row) => row.proposed === null));
   assert.deepEqual(parseAmuxWorkerCapabilityAdminView(JSON.parse(JSON.stringify(unreadable))), unreadable);
 });
+
+test("a v22 variable that is set but unreadable blocks the import; an unset one means no profiles", () => {
+  const recorded = new Map([[
+    "claude-chore",
+    { revision: 1, capability: { model: null, routingTags: ["chore"], toolCapabilities: [], v22: { model: "claude-opus-5-5", roles: ["investigate"], tools: ["repo_read"] } }, changedAt: "2026-10-13T00:00:00.000Z" },
+  ]]);
+  // Review r-20261013-020744-27285f: reading an invalid v22 variable as empty
+  // would propose v22: null and erase the recorded profile.
+  const unreadable = buildAmuxWorkerCapabilityAdminView({ registrations: PRODUCTION_REGISTRY, current: recorded, legacy: PRODUCTION_LEGACY, v22: null });
+  assert.equal(unreadable.catalogReadable, false);
+  assert.ok(unreadable.rows.every((row) => row.proposed === null));
+  assert.deepEqual(amuxWorkerCapabilityImportsToWrite(unreadable), []);
+  const unset = buildAmuxWorkerCapabilityAdminView({ registrations: PRODUCTION_REGISTRY, current: recorded, legacy: PRODUCTION_LEGACY, v22: [] });
+  assert.equal(unset.catalogReadable, true);
+  assert.equal(unset.rows.find((row) => row.workerName === "claude-chore").proposed.v22, null);
+});
