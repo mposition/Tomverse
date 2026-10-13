@@ -485,12 +485,15 @@ const compilerOptions = parsedConfig.options;
 // above the one existing computed access in lib/adminAuditSystemActors.ts. No
 // access is added, removed or altered: count 228, every path and expression,
 // and the position-free inventory remain unchanged; positions only.
+// 2026-10-13, guarded v22 Task recovery: the marketing webhook fingerprint's
+// history comment in lib/marketingAutomationAccess.ts grows by six lines. Count
+// 228 and the position-free inventory remain unchanged; positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "aa65a578dfff0f1013ef6a0f75f0036a",
-  "fa4318c3a7e254bc2ee91b3e41621de5",
+  "f755b7cf3bdec264fbe728b873c123f6",
+  "2549d6a284442aedbc34e5e9e0a2eebe",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
