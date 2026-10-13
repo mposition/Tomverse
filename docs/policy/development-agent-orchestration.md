@@ -16,7 +16,10 @@
 상태(v35 이력): **v35 R2 설계 승인: 등록부가 배정 카탈로그와 bridge 세션 목록이 된다.** 2026-10-13 운영자 `mposition`이 아래 v35 절을 승인했다. R2의 배정 조건은 원하는 상태와 래치이며 관측 조건은 R4부터다. 이 승인 자체로 코드 래치나 환경 변수를 켜지 않는다. 이전 v34 상태 줄은 이력이다.
 상태(v36 이력): **v36 owner Task 중단 증명과 1회 복구 한도 승인.** 2026-10-13 운영자 `mposition`이 아래 v36 절의 고정 Ubuntu 점검과 exact Task에 결속된 owner 추가 1회 승인 계약을 승인했다.
 상태(v37 이력): **v37 legacy 조사 Task의 고정 worker safe-stop 증명 승인.** 2026-10-13 운영자 `mposition`이 아래 v37 절의 별도 종료 증명, 물리 worker fence, root 전용 단회 stop과 읽기 전용 재확인을 승인했다.
-상태(최신): **v38 기본 OFF 60초 recovery carrier와 inspect 인증 격리의 코드 준비 승인.** 2026-10-13 운영자 `mposition`이 아래 v38 절의 설치·활성화되지 않은 carrier 준비와 기존 inspect 권한의 전용 secret 분리를 승인했다.
+상태(v38 이력): **v38 기본 OFF 60초 recovery carrier와 inspect 인증 격리의 코드 준비 승인.** 2026-10-13 운영자 `mposition`이 아래 v38 절의 설치·활성화되지 않은 carrier 준비와 기존 inspect 권한의 전용 secret 분리를 승인했다.
+상태(v39 이력): **v39 FIRST Task의 과거 결과 불명 위험 수락과 읽기 전용 1회 재시도 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v39 절의 exact Task·과거 attempt·최대 노출액·현재 읽기 전용 실행 결속을 승인했다. 실제 stop·재시도·유료 호출·활성화는 별도다.
+상태(v40 이력): **v40 FIRST Task 전용 읽기 전용 API executor 대안 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v40 절의 기본 OFF, 고정 `Read`·`Grep`·`Glob` broker, Anthropic 전용 API key, 서버 정본 가격·token·turn 프레임과 실제 usage·model receipt 계약을 승인했다. key 등록·설치·배포·실제 API 호출은 별도다.
+상태(최신): **v41 packed Git object의 고정 읽기 전용 provenance 조회 승인.** 2026-10-13 운영자 `mposition`이 아래 v41 절의 보호된 고정 Git binary·고정 읽기 인자·sanitized environment·deadline·bounded output 예외를 승인했다. 모델 tool은 `Read`·`Grep`·`Glob` 셋으로 유지하며 설치·환경 설정·key 등록·배포·실제 API 호출은 별도다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -52,6 +55,9 @@ approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 35
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 36
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 37
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 38
+approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 39
+approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 40
+approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 41
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -94,6 +100,9 @@ approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 38
 | 36 | 2026-10-13 mposition | owner가 exact Task·revision·직전 attempt의 Ubuntu 중단 증명을 요청하고, 고정된 비실행 점검기의 증거가 중단을 입증한 경우에만 Admin에서 추가 1회와 해당 1회의 승인된 catalog 최대 비용을 별도 승인한다. 첫 대상의 실제 값은 기존 US$3.40 예약을 불변으로 점유하고 새 1회 최대 US$3.40, 최악 노출 US$6.80이다. 일반 코드는 이 예시 숫자를 하드코딩하지 않고 각 Task의 불변 기존 예약과 exact 승인 catalog에서 서버가 계산한다. 이 승인은 설계·코드·합성 검증만 열고 production 활성화·실행·migration 적용·병합·배포를 열지 않는다. |
 | 37 | 2026-10-13 mposition | v36 점검이 `legacy_invocation_unbound`로 닫힌 deterministic `investigate` Task에 한해, owner 요청 뒤 물리 worker profile의 다른 작업이 없음을 잠그고 새 작업을 fence한 다음 root 전용 controller가 고정 unit을 최대 한 번 stop하고 fresh kernel process-gone을 별도로 증명한다. 모델 결과·기존 비용은 `unknown`으로 유지한다. stop 응답 유실과 중복 controller는 재발행하지 않고, 같은 Task의 후속 확인은 읽기 전용이다. 자동 재시작·자동 fence 해제·운영 활성화는 열지 않는다. |
 | 38 | 2026-10-13 mposition | v36 inspect와 v37 root controller의 고정 one-shot을 각각 60초 non-overlap timer로 깨울 수 있는 기본 OFF carrier와 합성 검증을 준비한다. inspector 인증은 기존 route·actor·DTO·writer 권한을 늘리지 않고 전용 `TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET`으로 broad sync와 root controller secret에서 분리한다. 이 승인은 코드와 설치 준비물만 열며 secret 등록·설치·daemon-reload·enable·start·stop·restart·스위치 변경·실제 Task 복구는 열지 않는다. |
+| 39 | 2026-10-13 mposition | FIRST Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 과거 attempt `97858395-3d66-42fa-9bfb-0e5a6cba9bd8` 하나에 한해, 과거 결과·외부 효과를 `unknown`으로 보존한 채 owner가 US$3.40의 기존 보류와 최대 US$3.40의 새 읽기 전용 시도, 최악 US$6.80 노출을 명시적으로 수락할 수 있다. 수락은 stop 의도만 열고 실행·예약·Task 상태를 바꾸지 않는다. root process-gone 증명 뒤 현재 모델·공급사·route·brief·가격·비용·강제 읽기 전용 launch proof에 다시 결속한 별도 최종 승인이 추가 시도 하나만 연다. 다른 legacy Task, 세 번째 시도, 과거 성공·0비용 추정은 열지 않는다. |
+| 40 | 2026-10-13 mposition | v39의 CLI 런처가 remote managed hooks를 host proof로 배제할 수 없어 `current=false`로 닫히는 경우에만, FIRST Task와 같은 최종 승인 결속을 쓰는 전용 읽기 전용 Anthropic API executor 대안을 준비한다. 고정 repo broker의 `Read`·`Grep`·`Glob`만 모델 tool로 노출하고 shell·쓰기·Git push·MCP·plugin·임의 HTTP를 열지 않는다. 가격과 누적 token·turn 한도는 승인된 catalog snapshot에서 서버가 만든 versioned frame에 결속하고, API가 반환한 실제 model·usage가 완전하지 않으면 결과 불명으로 멈춘다. API key 등록·설치·배포·실제 호출은 별도이고, 이 버전은 실행 스위치를 켜지 않는다. |
+| 41 | 2026-10-13 mposition | v40 broker가 packed Git object에 든 승인 revision의 파일 provenance를 확인할 수 있도록, 보호된 고정 Git binary의 로컬 읽기 전용 object 조회만 좁게 허용한다. 모델 tool은 `Read`·`Grep`·`Glob` 셋 그대로이고 모델이 Git 명령·인자·환경을 고르지 않는다. shell·hooks·network·write·push·credential 전달은 계속 금지하며, binary digest·고정 인자 문법·최소 환경·deadline·출력 상한을 proof에 결속한다. 이 승인은 CODE/LOCAL 합성 검증만 열고 설치·배포·key 등록·실제 provider 호출·실제 Task 실행을 열지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -2073,3 +2082,287 @@ request 하나만 처리하며, queue가 비었거나 gate가 꺼져 있으면 �
   검증은 별개 증거다. 실제 활성 전에는 전용 inspector secret의 broad/root secret과의
   분리, inspector 계정의 exact socket 접근, controller root ownership과 default-OFF
   read-back을 값이나 자격증명을 출력하지 않고 다시 확인한다.
+
+## 버전 39 — FIRST Task 과거 결과 불명 위험 수락과 읽기 전용 1회 재시도
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 이 절은 v36~v38의
+일반 복구 계약을 약하게 만들지 않고, 실제 producer가
+`legacy_invocation_unbound`와 `externalEffectsKnown=false`를 정직하게 반환한 첫
+`investigate` Task 하나에만 닫힌 예외를 둔다. 대상은 Task
+`c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
+`97858395-3d66-42fa-9bfb-0e5a6cba9bd8`다. 다른 legacy Task, 다른 prior attempt,
+`implement` 역할, 이 Task의 세 번째 시도에는 적용하지 않는다.
+
+### 1. 과거 사실과 첫 위험 수락
+
+- prior attempt의 결과, 외부 효과와 사용량은 계속 `unknown`이다. 기존 최대 예약
+  3,400,000 microUSD는 보류된 노출로 남고 성공·실패·0 비용·해제라고 추정하지 않는다.
+  이 예외는 과거 evidence를 `externalEffectsKnown=true`로 고쳐 쓰거나 합성 evidence를
+  만들지 않는다.
+- owner는 최근 step-up 뒤 `accept_unknown_prior_effects`를 명시적으로 실행하고,
+  기본 false인 `acceptRisk`를 true로 보내야 한다. 서버는 exact Task·blocked revision,
+  exact prior attempt와 revision, 현재 brief digest, source evidence id·digest와 그
+  `legacy_invocation_unbound`·false 사실, prior 보류 3,400,000, 추가 시도 상한
+  3,400,000, 최악 노출 6,800,000을 한 append-only 수락에 결속한다. 요청 nonce의
+  같은 payload 재전송만 같은 receipt를 반환하고, 다른 payload·Task·attempt·금액·
+  evidence는 거절한다.
+- 수락 transaction은 기존 global admission lock과 Task·attempt lock을 잡고 기존
+  hash-chain 사람 감사를 같은 transaction에 쓴다. 수락은 Task status, assignment,
+  reservation, attempt, delivery를 만들거나 바꾸지 않는다. 따라서 아직 존재하지 않는
+  다음 launch proof를 요구하지 않는다. 수락은 오직 v37 root safe-stop request의
+  source 예외를 여는 owner 의도다.
+
+### 2. unknown source로 허용되는 root safe-stop
+
+- v37의 보통 경로는 계속 `externalEffectsKnown=true`를 요구한다. false source를
+  허용하는 경우는 위 exact 대상의 활성 수락 id·digest, 같은 Task·prior attempt·
+  revision·brief·source evidence 결속이 모두 일치할 때뿐이다. source reason은
+  `legacy_invocation_unbound`, role은 `investigate`, terminal outcome은 success가 아니어야
+  한다.
+- 기존 v37의 no-other-work, 고정 profile member, root-owned config, fixed unit,
+  durable stop intent, DB physical fence, restart disabled와 fresh kernel process-gone
+  증명은 하나도 면제하지 않는다. worker 수는 현재 카탈로그·런타임에서 동적으로 읽고
+  특정 개수로 고정하지 않는다. stopped profile은 계속 fenced되고 새 시도는 다른 현재
+  eligible worker만 맡는다.
+- stop acknowledgement와 과거 모델 결과는 여전히 별개다. process-gone은 안전한 종료
+  사실만 증명하며 과거 효과를 known으로 만들지 않는다. 수락이 없거나 stale·mismatch면
+  false source로 stop을 발행하지 않는다.
+
+### 3. 현재 읽기 전용 launch proof와 최종 재시도 동의
+
+- process-gone 뒤, 최종 승인 전에 trusted root controller가 별도의 immutable
+  `read_only_launch_v1` proof를 기록한다. proof는 수락 id·digest, exact Task·revision,
+  prior attempt, 현재 brief digest, stopped profile과 다른 worker·instance·generation,
+  provider·model·route와 route-policy digest, catalog approval/version, pricing version,
+  cost receipt digest, 추가 시도 상한, role `investigate`, 고정 launcher contract version과
+  scope digest에 결속한다. 이 proof는 worker가 보낸 `readOnly=true` 같은 자기주장
+  boolean이 아니다.
+- launcher scope는 두 단계로 결속한다. app의 launch-check 요청은 exact Task·worker·model·
+  brief·가격·정책과 nominal 고정 sidecar 의도를 먼저 결속하고, 인증된 root controller만
+  읽을 수 있는 현재 child-launch 설정과 설치 artifact는 controller가 기존
+  `launcherConfigDigest`를 actual digest로 교체해 immutable proof에 기록한다. 다른 scope
+  필드는 exact echo여야 하며, 최종 사람 승인과 delivery에는 이 actual 전체 scope digest만
+  사용한다. 이 scope는 버전된 root-owned 설정과 고정 sidecar 계약이 enforcement 전에
+  계산한 사실이어야 한다. CLI 전에 exact Task input과 `Read`, `Grep`, `Glob`만 허용하고,
+  임의 tool·shell·쓰기·external action을 열지 않는다. app은 trusted proof의 exact
+  binding을 검증·저장하고, host와 sidecar는 delivery의 같은 immutable scope를 다시
+  검증한 뒤에만 CLI를 시작한다. proof row 하나가 실제 실행을 승인하거나 읽기 전용을
+  스스로 증명하지는 않는다.
+- owner의 최종 `approve_attempt`는 최근 step-up과 기본 false인 별도
+  `acceptRetry`를 요구한다. 그 transaction은 source 수락, 90초 안의 verified
+  process-gone evidence, current launch proof, 현재 ready/dependency·brief·incident·
+  global halt·catalog·pricing·cost 사실을 다시 읽고 동일함을 확인한다. owner receipt는
+  actual worker·provider·model·route·scope·가격·비용 결속을 담는다. 그중 하나가 바뀌면
+  기존 receipt로 실행하지 않고 fresh final consent를 받아야 한다.
+- 최종 승인은 복구 approval과 hash-chain 사람 감사를 같은 transaction에 append하고,
+  expected blocked revision의 Task를 CAS로 `todo`·unassigned로만 바꾼다. 그 transaction은
+  reservation, assignment, attempt, delivery를 만들지 않는다. 응답 유실 뒤 같은 nonce와
+  payload는 같은 receipt를 반환하고, nonce 재사용 payload mismatch와 중복 소비는
+  fail-closed다.
+
+### 4. 비용·시도·실행 시점 재검증
+
+- prior 보류는 정확히 3,400,000 microUSD로 유지한다. 새 시도의 reservation·정산 상한은
+  3,400,000 이하이고 `prior held + new maximum <= 6,800,000`을 approval, claim, start
+  시점마다 확인한다. prior cost를 0으로 바꾸거나 새 예산을 여러 route에 중복 예약하지
+  않는다.
+- 전역 attempt 상한 5는 그대로지만 이 exact Task의 총 attempt는 2가 상한이다. 현재
+  authorisation은 오직 추가 attempt 하나에 한 번 소비된다. delivery·start는 승인에
+  결속된 current worker·provider·model·route·pricing·brief·launch scope와 현재 read-only
+  enforcement proof를 다시 확인하고, 다르면 실행 전에 거절한다. lost response, CAS
+  실패, TTL 만료, 중복 claim/start가 세 번째 attempt나 두 번째 새 reservation을 만들 수
+  없다.
+- v36~v38의 feature gate와 safe-stop gate는 기본 OFF로 남는다. normal verified-proof
+  복구, global halt, incident와 dependency guard, 기존 profile fence, 일반 Task의 unknown
+  outcome 처리, worker 재개 절차는 바꾸지 않는다.
+- 이 승인은 정책·schema·additive migration·app/core/internal route·host/sidecar wire·
+  Admin UI와 합성·scratch DB 검증의 작성만 연다. 기존 applied migration 변경,
+  production DB 적용, 설치·배포·환경 값 설정, worker 시작·stop·restart, 실제 승인·
+  reservation·재시도·provider 호출, 병합·push·PR은 열지 않는다.
+
+## 버전 40 — FIRST Task 전용 읽기 전용 API executor 대안
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 이 절은 v39의
+exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
+`97858395-3d66-42fa-9bfb-0e5a6cba9bd8`, 기존 보류 3,400,000 microUSD, 새
+시도 최대 3,400,000 microUSD, 최악 노출 6,800,000 microUSD 한 건만
+계속 다룬다. v39의 CLI 경로는 remote managed hooks를 배제했다는 신뢰할
+수 있는 proof가 없으면 `current=false`로 남긴다. 이 사실을 `current=true`로
+바꾸지 않고, 새로운 `read_only_api_retry_v1` 실행 종류를 별도로 둔다.
+
+### 1. 실행 주체와 기본 OFF
+
+- 실행 주체는 기존 CLI 계정이 아닌 전용 non-root API executor다. 그 실행
+  프로세스는 제품 DB·배포·GitHub write·worker 제어·기존 v4 공유 provider key
+  자격증명을 갖지 않는다. `TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED`가
+  정확히 `true`일 때만 후보가 되며, 누락·다른 값은 off다. v36~v39 게이트와
+  실행 API·claim·incident·halt·dependency 게이트를 모두 추가로 통과해야 한다.
+- 자격증명은 FIRST Task recovery API executor 전용 Anthropic API key 하나다.
+  기존 v4/Chat/CLI key와 같은 비밀값이면 현재 proof가 될 수 없다. key 식별자,
+  소유자·mode·경로 metadata, 허용 provider host와 보존 분류의 digest만 proof에
+  들어가고 key 값·fingerprint·파일 경로는 app·감사·결과에 저장하지 않는다.
+- root controller는 여전히 v37의 과거 risk scope safe-stop과 launch preflight만
+  한다. 모델을 호출하거나 API key를 실행에 사용하지 않는다. key 등록,
+  환경·unit 설치, 배포, 스위치 변경은 각각 별도 운영 승인과 read-back이다.
+
+### 2. 서버 정본 API execution frame
+
+- app은 승인되고 현재 유효한 v4 Task catalog의 exact route에서 다음을 파생한
+  strict `apiExecutionFrame` version 1을 만든다: `executorKind`, `provider`, `modelId`,
+  `routeId`, `routePolicyDigest`, `catalogApprovalId`, `catalogVersion`, `catalogDigest`,
+  `pricingVersion`, `pricingSource`, `pricingVerifiedAt`, `pricingExpiresAt`, 네 가지 token
+  요율, `tokenLimits`, `maxProviderTurns`, `maxOutputTokensPerTurn`, `maxRetries`,
+  `maximumCostMicroUsd`, `credentialProfileId`, `credentialMetadataDigest`,
+  `executorArtifactDigest`, `settingsDigest`, `repositoryScopeDigest`, `brokerPolicyDigest`,
+  `toolSchemaDigest`. exact shape와 canonical digest를 launch proof·owner approval·assignment·
+  delivery·start·settlement에 같이 결속한다.
+- token 요율과 한도는 사용자 입력·client 추정·현재 모델의 하드코딩이
+  아니다. catalog row의 승인된 가격 snapshot과 기존 cost receipt의 누적 카테고리
+  caps에서 서버가 산출한다. frame은 cache 분류를 포함한 최악 비용이
+  3,400,000 microUSD 이하임을 증명해야 한다. 가격 만료, model/route 불일치,
+  요율·caps·만료 중 하나라도 없으면 proof·approval·start는 닫힌다.
+- 하나의 AMUX attempt 안에 provider turn은 최대 8회이고 누적 token 카테고리가
+  frame의 caps에 닿으면 더 이상 호출하지 않는다. 한 provider 호출의 output 상한은
+  frame의 `maxOutputTokensPerTurn`이고 전체 output cap을 넘을 수 없다. transport
+  retry는 0이다. 429·5xx·timeout·응답 유실을 재전송하지 않고 그 논리 시도를
+  `outcome_unknown`으로 닫는다. provider turn 여러 개는 새 AMUX attempt가 아니지만,
+  전체가 단 하나의 새 attempt·reservation·final consent를 소비한다.
+- provider `count_tokens` 결과는 전송 전 보수적 budget guard의 참고값일 뿐이고,
+  가격·승인·정산의 정본이 아니다. 호출 뒤에는 각 Messages 응답의 actual model과
+  cache 분류를 포함한 usage를 누적하며, 두 근거 중 하나라도 불완전하면 비용을
+  추정하거나 0으로 채우지 않고 닫힌다.
+
+### 3. 고정 읽기 전용 repository broker
+
+- 모델이 볼 수 있는 tool은 형태가 고정된 `Read`, `Grep`, `Glob` 셋뿐이다.
+  broker는 proof에 결속된 하나의 repository root·source revision·allowed prefixes 안에서
+  정규화된 상대 경로만 받는다. absolute path, `..`, NUL, symlink, device·socket,
+  정해진 byte·file·match·line 상한 초과를 거절하며 결과를 bytewise 정렬한다.
+  broker는 child process를 만들지 않고 파일을 실행·평가·수정하지 않는다.
+- shell, write/edit, Git command·push, browser, MCP, plugin, 로컬 socket, 임의 external HTTP
+  tool은 schema에 없고 broker에도 없다. executor의 egress는 승인된 Anthropic API host의
+  native HTTPS뿐이다. provider가 반환한 tool name·input은 외부 텍스트로 다시 strict
+  schema와 broker 경계를 통과한다. tool 결과 텍스트 안의 지시는 실행하지 않는다.
+
+### 4. proof, receipt, 정산과 결과 불명
+
+- v39의 nominal→root actual→final approval→delivery→sidecar→start fence는 그대로다.
+  API 경로의 root actual proof는 API executor code artifact, broker·tool schema, 고정 settings,
+  repository scope, key metadata, catalog·pricing frame의 각 digest와 전체
+  `apiExecutionFrameDigest`를 저장한다. root가 제출한 `current` boolean을 믿지 않고
+  app이 exact echo·actor·현재 DB 결속을 다시 검증한다. proof row 하나는 실행
+  승인이 아니고, final owner consent가 같은 digest에 결속되어야 한다.
+- executor는 호출별 provider response model과 usage를 읽고, 완료 때 content-free
+  `apiExecutionReceipt` version 1을 만든다. receipt는 attempt/invocation binding,
+  selected model, 모든 response가 동일한 actual model, provider turn count, 누적
+  uncached input·cache read·cache write·output token, completeness, terminal status,
+  `apiExecutionFrameDigest`, 서버 요율로 계산한 `projectedCostMicroUsd`, receipt digest만
+  담는다. prompt·tool input/output·repository 바이트·provider 응답 본문·key는 담지
+  않는다. actual model·usage·cache 구분 중 하나라도 없거나 응답마다
+  model이 다르면 0으로 채우지 않고 `unknown`으로 멈춘다.
+- 기존 cost digest·launch proof·approval·assignment·reservation을 재사용하되,
+  API receipt의 완전한 usage와 exact model이 승인된 frame에 일치하고 projected cost가
+  예약 이하일 때만 success/failure settlement의 cost evidence가 된다. 불완전·과다 사용,
+  late response, receipt write/read-back 불명은 시도를 `outcome_unknown`으로 둘 뿐
+  재시도·세 번째 attempt·두 번째 새 reservation을 만들지 않는다. 새 DB 형태가
+  없이 기존 불변 usage event에 정직하게 저장할 수 없다면 기존 migration을
+  고치지 않고, 별도 additive migration을 먼저 보고·검토받기 전에 실제 호출을
+  열지 않는다.
+
+### 5. 공통 Agent 기반 체크리스트 16개의 답
+
+1. 조합하는 기능은 승인된 AMUX Task delivery, 제한 repository read, Anthropic
+   Messages API다. Chat·Memory·결제·사용자 credit·promotion·Publisher 상태는 건드리지
+   않는다.
+2. `platformProductKey`는 기존 AMUX 내부 실행 경계를 재사용하며 새 제품
+   namespace를 만들지 않는다. system actor는 기존
+   `tomverse-amux-orchestrator`와 recovery controller만 쓰고 새 사람 권한을 더하지 않는다.
+3. provider 전송은 회수 불가능하다. v39의 risk acceptance·safe-stop proof·current API proof·
+   final consent가 전송 전 사람 승인 지점이며 자율 졸업은 없다.
+4. Guard는 exact identity·digest·현재 gate·예산·frame·broker 증명이 다 맞을 때만
+   allow하고, owner consent 전에는 approval-required, 불일치·불명은 reject/stop이다.
+   LLM이 authority·가격·tool 허용을 판정하는 곳은 없다.
+5. sealed Task brief와 broker가 반환한 파일 바이트는 모델에 닿는 외부 텍스트다.
+   system 지시와 합치지 않고 typed message/tool result data로만 전달하며 내부 명령은
+   실행하지 않는다.
+6. executor에는 전용 API key만 닿는다. 제품 DB, app internal secret, deployment,
+   GitHub write, CLI credential은 환경·파일·로그·child process에 닿지 않는다.
+7. 이 작은 우선 기존 launch JSON, approval, delivery, attempt, result, usage ledger의 strict
+   writer와 불변성을 재사용한다. 실제 정직한 API source 표현에 새 DB 형태가
+   필요하면 additive migration을 별도 보고한다. 암호화 result와 content-free usage의
+   기존 보존 계약을 늘리지 않는다.
+8. namespace는 기존 AMUX Agent cost다. 이 한 시도의 최대는 3,400,000
+   microUSD, 과거 보류를 포함한 노출은 6,800,000 microUSD다. 초과·불명은
+   hold/stop이고 사용자 credit로 fallback하지 않는다.
+9. v36~v39 gate에 전용 default-OFF API executor gate를 더한다. 사람의 stop/fence를
+   자동으로 풀지 않는다. 해제는 따로 승인된 owner 조작과 감사가 필요하다.
+10. idempotency는 v39의 request nonce, attempt, launch binding과 새 frame digest에 결속한다.
+    provider·receipt 결과를 모르면 retry하지 않고 read-back 후 `outcome_unknown`으로
+    멈춘다.
+11. 코드에는 신뢰할 수 있는 API 실호출 증거를 생성하지 않는다. 후속
+    활성 전 key 분리, provider host/TLS, timeout, 응답 유실, 429/5xx, 불일치 model,
+    usage 누락과 receipt read-back을 실측한다. provider 계약·처리 지역·보존은 key
+    등록 승인 전에 확인한다.
+12. 새 승인 action을 만들지 않는다. v39의 사람 risk/final consent 감사와 시스템
+    launch proof·execution·usage·settlement 감사에 executor kind과 frame/receipt digest만 더한다.
+13. 모델에 전송되는 범위를 exact Task와 approved repository scope로 최소화한다.
+    ACL상 preview·proof·승인을 실행 완료로 표시하지 않고, provider의 APP 8/11
+    처리 계약 확인 전 live를 막으며, 중국 본토 접속·region·subprocessor를 열지 않는다.
+14. 순서는 정책 v40 → pure contract/DTO → host broker/executor → 합성 검증 → key 등록
+    별도 승인 → 설치·배포 별도 승인 → 실제 호출 별도 승인이다. 쓰기·shell·임의
+    network 도달, key 공유, 미검증 가격/model/usage, 예산 초과, 두 번째 새 시도는
+    차단 사유다.
+15. 예외로 승인된 전용 Ubuntu runner의 non-root API executor에서 외부 텍스트와
+    LLM을 다루고, app은 결정적 결속·DB writer만 담당한다. executor hard timeout과
+    app DB deadline fence를 그대로 쓴다. executor의 유일 비밀은 전용 provider key며,
+    Publisher·외부 게시 권한은 없다.
+16. 대기열·approval·attempt·result·usage는 기존 app DB와 Admin recovery 화면에 남는다.
+    승인은 v39 digest 목록과 API frame digest에 함께 결속되며 후속 코드 PR 예외,
+    GitHub 승인·상태 저장소, Publisher는 적용하지 않는다.
+
+### 6. 닫힌 범위
+
+이 승인은 정책·app/host/sidecar contract·broker·API adapter·합성 검증의 작성만
+연다. 기존 applied migration 변경, 새 migration 적용, DB 적용, root SSH, systemd 설치,
+key 생성·등록, 환경 값 설정, 배포, owner action, stop/start/restart, reservation,
+provider 호출, Task 재시도, PR·push·병합은 열지 않는다. 검증은 실제 모델 호출을
+포함하지 않고, 실제 호출을 했다는 증거나 recovery 완료 주장을 만들지 않는다.
+
+## 버전 41 — packed Git object의 고정 읽기 전용 provenance 조회
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 이 절은 v40의
+FIRST Task 전용 API executor가 승인된 source revision의 파일을 packed Git
+object에서도 읽고 provenance를 확인할 수 있게 하는 좁은 예외다. 모델에 노출되는
+tool은 계속 strict `Read`·`Grep`·`Glob` 셋뿐이며, 새 Git·shell tool을 추가하지 않는다.
+
+- broker만 root actual proof에 결속된 절대 경로와 SHA-256 digest의 보호된 Git
+  binary를 child process로 실행할 수 있다. 호출은 proof에 결속된 repository와
+  approved commit에서 object type, tree entry, blob bytes를 읽는 고정 read-only
+  operation·인자 문법으로 한정한다. 모델·Task brief·tool input·repository text는
+  executable, subcommand, option, revision, environment 이름이나 값이 될 수 없다.
+- revision은 app이 승인하고 frame·repository scope에 결속한 full commit object ID만
+  쓴다. broker는 조회한 object type·tree path·blob identity가 그 revision과 allowed
+  prefixes에 속함을 다시 확인한 뒤에만 기존 `Read`·`Grep`·`Glob` 결과를 만든다.
+  working tree fallback, index·ref·config 변경, lock 생성, checkout, fetch, credential
+  lookup과 submodule 실행은 허용하지 않는다.
+- 환경은 고정된 최소 allowlist로 새로 만들고 inherited environment를 child에 넘기지
+  않는다. Git system/global/local config, credential helper, askpass, terminal prompt,
+  hooks, replace object, external diff·filter, pager와 network transport는 꺼진다. API key,
+  CLI 로그인, GitHub·SSH credential, 제품 DB·bridge·배포 secret과 원래 process 환경은
+  child에 닿지 않는다.
+- 각 child는 v40 broker 요청보다 짧은 고정 deadline, stdout/stderr byte 상한, object·file·
+  match·line 상한과 동시 실행 상한을 가진다. deadline·signal 종료, non-zero exit,
+  잘못된 object type, 출력 초과·truncation, digest·identity·scope 불일치는 결과를
+  사용하지 않고 fail-closed한다. stderr·환경·절대 경로·repository bytes는 app payload,
+  감사, provider receipt와 일반 로그에 넣지 않는다.
+- root actual proof는 binary path 자체나 repository path를 app에 공개하지 않고 binary
+  artifact digest, 고정 operation/argument grammar digest, sanitized environment digest,
+  deadline/output-limit settings digest와 갱신된 broker policy digest를 결속한다. app의
+  current frame·final consent·delivery·start는 그 digest들을 exact 비교한다.
+- shell wrapper, 임의 process spawn, 모델이 선택하는 Git 명령·option·revision,
+  `git push`와 모든 write, hooks/plugins/MCP/browser/임의 HTTP는 여전히 금지다. 이 예외는
+  v40의 비용·한 시도·결과 불명·usage receipt·default-OFF·사람 승인 계약을 바꾸지 않는다.
+
+이 승인은 정책과 CODE/LOCAL 합성 검증용 broker 보완만 연다. 보호 binary 설치·교체,
+환경 설정, key 등록, 배포, 실제 provider 호출, 실제 Task approval·claim·reservation·
+retry, root SSH·systemd 조작, PR·push·병합은 각각 별도 승인이다.

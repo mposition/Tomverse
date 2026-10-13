@@ -31,6 +31,7 @@ const safeResult = async () => {
 };
 mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
   requestAmuxV22RecoveryInspection: result, requestAmuxV22LegacySafeStop: safeResult,
+  acceptAmuxV22UnknownPriorEffects: result,
   approveAmuxV22TaskRecovery: result, readAmuxV22TaskRecovery: result,
 } });
 const url = "https://tomverse.test/api/admin/amux/execution-recovery";
@@ -39,6 +40,11 @@ const valid = { action: "request_inspection", taskId: "task-1234", expectedRevis
 const safeStop = { action: "request_safe_stop", taskId: "task-1234", expectedRevision: 8,
   priorAttemptId: requestId, sourceEvidenceId: requestId,
   sourceEvidenceDigest: "a".repeat(64), requestId };
+const acceptRisk = { action: "accept_unknown_prior_effects",
+  taskId: "c48886b9-86f8-4631-8db8-c0b288a707af", expectedRevision: 8,
+  priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba9bd8",
+  sourceEvidenceId: requestId, sourceEvidenceDigest: "a".repeat(64),
+  requestId, acceptRisk: true };
 const post = (value: unknown, origin = "https://tomverse.test") => new Request(url, {
   method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(value) });
 const read = () => new Request(`${url}?taskId=task-1234&requestId=${requestId}`);
@@ -68,6 +74,10 @@ test("strict same-origin requests cannot provide arbitrary commands, bodies, or 
   const response = await POST(post(valid)); assert.equal(response.status, 200);
   assert.match(response.headers.get("cache-control")!, /no-store/);
   assert.equal((await POST(post(safeStop))).status, 200);
+  assert.equal((await POST(post(acceptRisk))).status, 200);
+  for (const changed of [{ acceptRisk: false }, { acceptRisk: "true" },
+    { taskId: "task-outside-approved-scope" }, { priorAttemptId: requestId }])
+    assert.equal((await POST(post({ ...acceptRisk, ...changed }))).status, 400);
   for (const changed of [{ workerProfileAlias: "forged" }, { profileWorkerNames: ["forged"] },
     { targetUnit: "forged.service" }, { profileConfigDigest: "b".repeat(64) }])
     assert.equal((await POST(post({ ...safeStop, ...changed }))).status, 400);

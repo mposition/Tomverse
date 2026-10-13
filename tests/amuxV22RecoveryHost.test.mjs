@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { amuxCliUsageReceiptDigest } from "../lib/amux/cliUsageLedgerCore.ts";
 import { createAmuxV22SidecarHandler } from "../lib/amux/v22OneShotSidecar.mjs";
-import { parseAmuxV22RecoveryInspectionRequest, runAmuxV22RecoveryCheckerOnce,
+import { parseAmuxV22ReadOnlyRecoveryBinding, parseAmuxV22RecoveryInspectionRequest,
+  runAmuxV22RecoveryCheckerOnce,
   inspectAmuxV22RecoveryUnit, readAmuxV22RecoveryJournal } from "../lib/amux/v22RecoveryHost.mjs";
 
 const attemptId = "00000000-0000-4000-8000-000000000001";
@@ -36,6 +37,17 @@ test("fixed inspection refuses paths, commands and foreign worker bindings", () 
   for (const extra of [{ path: "/etc/passwd" }, { command: "systemctl restart" },
     { workerName: "another-worker" }, { targetHost: "other-host" }])
     assert.throws(() => parseAmuxV22RecoveryInspectionRequest({ ...request, ...extra }, execute.worker));
+});
+test("read-only recovery binding adds exact approval, attempt, worker and brief identity", () => {
+  const value = { ...binding, taskId: "c48886b9-86f8-4631-8db8-c0b288a707af",
+    attemptId, workerName: execute.worker,
+    recoveryApprovalId: "00000000-0000-4000-8000-000000000005",
+    briefDigest: "c".repeat(64) };
+  assert.deepEqual(parseAmuxV22ReadOnlyRecoveryBinding(value), value);
+  for (const mutation of [{ taskId: "task-1" }, { attemptId: "other" },
+    { workerName: "Other" }, { briefDigest: "x" },
+    { recoveryApprovalId: "not-a-uuid" }, { readOnly: true }])
+    assert.throws(() => parseAmuxV22ReadOnlyRecoveryBinding({ ...value, ...mutation }));
 });
 test("only current live invocation terminal and exact local binding prove stopped", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "amux-recovery-host-"));

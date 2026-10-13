@@ -19,7 +19,11 @@ import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
 import { readAmuxV22RecoveryAuthority } from "./v22TaskRecoveryService.ts";
-import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed } from "./v22TaskRecoveryCore.ts";
+import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
+  amuxV22ReadOnlyRetryRouteCost,
+  currentAmuxV22ReadOnlyApiExecutionFrame } from "./v22TaskRecoveryCore.ts";
+import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND } from
+  "./v22ReadOnlyApiProtocol.mjs";
 import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
@@ -134,7 +138,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
         workerName: { in: catalog.map((worker) => worker.worker_name) },
         leaseExpiresAt: { gt: now }, status: { in: ["idle", "busy"] },
       }, select: { workerName: true, instanceId: true, generation: true,
-        status: true, dispatchReady: true } });
+        status: true, dispatchReady: true, protocolCapabilities: true } });
       const liveByName = new Map(live.map((worker) => [worker.workerName, worker]));
       const operationalNames = new Set(catalog.filter((worker) =>
         !worker.archived && !worker.paused && !worker.isolated &&
@@ -167,7 +171,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
 
       const approved = await calculateCurrentApprovedAmuxV4TaskCost(tx,
         card.taskRole, card.executionGrade);
-      const recovery = await readAmuxV22RecoveryAuthority(tx, taskId, card.revision);
+      const recovery = await readAmuxV22RecoveryAuthority(tx, taskId, card.revision,
+        null, now);
       const source = ready.sourceApprovalId ?
         await tx.amuxIdeaUnitDecision.findUnique({
           where: { id: ready.sourceApprovalId },
@@ -188,6 +193,10 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const requiredTool = amuxV22RequiredTool(card.taskRole);
       if (!requiredTool) throw new BoardImportError("role_unavailable", 409);
       const busy = new Set(occupied.map((item) => item.owner));
+      const currentApiFrame = recovery?.readOnlyExecutorKind ===
+        AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
+        currentAmuxV22ReadOnlyApiExecutionFrame(
+          recovery.apiExecutionFrame, { now }) : null;
       const matchingRoutes = approved.receipt.routes.filter((route) => {
         const worker = catalog.find((item) => item.worker_name === route.workerName);
         const runtime = liveByName.get(route.workerName);
@@ -198,7 +207,27 @@ async function claimCandidate(taskId: string, assignmentId: string,
           worker.provider === route.provider.toLowerCase() &&
           worker.model === route.modelId &&
           worker.routing_roles.includes(card.taskRole!) &&
-          worker.tool_capabilities.includes(requiredTool);
+          worker.tool_capabilities.includes(requiredTool) &&
+          (!recovery?.riskAcceptanceId ||
+            (route.workerName === recovery.workerName &&
+             route.provider === recovery.provider && route.modelId === recovery.modelId &&
+             route.routeId === recovery.routeId &&
+             route.routePolicyDigest === recovery.routePolicyDigest &&
+             runtime.protocolCapabilities.length === 1 &&
+             runtime.protocolCapabilities[0] === recovery.readOnlyExecutorKind &&
+             (recovery.readOnlyExecutorKind !==
+                AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ||
+              (!!currentApiFrame &&
+               currentApiFrame.provider === route.provider &&
+               currentApiFrame.modelId === route.modelId &&
+               currentApiFrame.routeId === route.routeId &&
+               currentApiFrame.routePolicyDigest === route.routePolicyDigest &&
+               currentApiFrame.catalogApprovalId === approved.approvalId &&
+               currentApiFrame.catalogVersion === approved.receipt.catalogVersion &&
+               currentApiFrame.catalogDigest === approved.catalogDigest &&
+               currentApiFrame.pricingVersion === approved.receipt.pricingVersion &&
+               BigInt(currentApiFrame.maximumCostMicroUsd) ===
+                 BigInt(route.perAttemptMicroUsd)))));
       });
       const telemetry = await getAmuxWorkerTelemetry(catalog.filter((worker) =>
         matchingRoutes.some((route) => route.workerName === worker.worker_name)), now, tx);
@@ -223,8 +252,13 @@ async function claimCandidate(taskId: string, assignmentId: string,
         const prior = await tx.amuxExecutionAttempt.aggregate({ where: { taskId },
           _count: { _all: true }, _max: { attemptNumber: true },
           _sum: { reservedCostMicrousd: true } });
-        const quote = amuxV22RecoveryCost({ priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
-          catalogApprovalId: approved.approvalId, receipt: approved.receipt });
+        const quote = recovery.riskAcceptanceId ? amuxV22ReadOnlyRetryRouteCost({
+          priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          catalogApprovalId: approved.approvalId, receipt: approved.receipt,
+          routeId: route.routeId, workerName: route.workerName,
+          provider: route.provider, modelId: route.modelId }) :
+          amuxV22RecoveryCost({ priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+            catalogApprovalId: approved.approvalId, receipt: approved.receipt });
         if (!amuxV22RecoveryStartAllowed({ approval: recovery, taskId,
           assignmentRevision: card.revision, historicalAttempts: prior._count._all,
           nextAttemptNumber: Math.max(prior._count._all, prior._max.attemptNumber ?? 0) + 1,
@@ -254,14 +288,18 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const pinnedRuntime = await tx.$queryRaw<Array<{
         workerName: string; instanceId: string; generation: number;
         status: string; dispatchReady: boolean; leaseExpiresAt: Date;
+        protocolCapabilities: string[];
       }>>`SELECT "workerName", "instanceId", "generation", "status",
-        "dispatchReady", "leaseExpiresAt" FROM "AmuxWorkerRuntime"
+        "dispatchReady", "leaseExpiresAt", "protocolCapabilities" FROM "AmuxWorkerRuntime"
         WHERE "workerName" = ${route.workerName} FOR UPDATE`;
       const pinned = pinnedRuntime[0];
       if (!pinned || pinned.instanceId !== runtime.instanceId ||
           pinned.generation !== runtime.generation ||
           pinned.status !== "idle" || !pinned.dispatchReady ||
-          pinned.leaseExpiresAt.getTime() <= now.getTime()) {
+          pinned.leaseExpiresAt.getTime() <= now.getTime() ||
+          (recovery?.riskAcceptanceId &&
+            (pinned.protocolCapabilities.length !== 1 ||
+             pinned.protocolCapabilities[0] !== recovery.readOnlyExecutorKind))) {
         throw new BoardImportError("worker_unavailable", 409);
       }
       const auditId = await writeSystemAuditLog({ tx,

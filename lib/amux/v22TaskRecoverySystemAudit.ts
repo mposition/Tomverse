@@ -20,3 +20,21 @@ export function recordAmuxV22SafeStopEvidenceAudit(tx: Prisma.TransactionClient,
     summary: "Recorded content-free root-controller legacy safe-stop evidence.",
     metadata });
 }
+
+export function recordAmuxV22ReadOnlyLaunchCheckAudit(tx: Prisma.TransactionClient,
+  launchCheckId: string, metadata: Prisma.InputJsonObject) {
+  return writeSystemAuditLog({ tx, systemActor: AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
+    action: "amux.v22.recovery.read_only_launch_requested",
+    targetType: "AmuxV22ReadOnlyLaunchCheck", targetId: launchCheckId,
+    summary: "Recorded one content-free read-only retry launch preflight request.",
+    metadata });
+}
+
+export function recordAmuxV22ReadOnlyLaunchProofAudit(tx: Prisma.TransactionClient,
+  launchProofId: string, metadata: Prisma.InputJsonObject) {
+  return writeSystemAuditLog({ tx, systemActor: AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
+    action: "amux.v22.recovery.read_only_launch_observed",
+    targetType: "AmuxV22ReadOnlyLaunchProof", targetId: launchProofId,
+    summary: "Recorded one trusted root read-only retry launch preflight observation.",
+    metadata });
+}

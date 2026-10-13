@@ -47,6 +47,7 @@
     "build:amux-v4-cli-model-s0": "esbuild scripts/amux-v4-cli-model-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-cli-model-s0.mjs",
     "build:amux-v4-analysis-agent-once": "esbuild scripts/amux-v4-analysis-agent-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-analysis-agent-once.mjs",
     "build:amux-v22-task-sidecar": "esbuild scripts/amux-v22-task-sidecar.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v22-task-sidecar.mjs",
+    "build:amux-v22-read-only-api-sidecar": "esbuild scripts/amux-v22-read-only-api-sidecar.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v22-read-only-api-sidecar.mjs",
     "build:amux-v22-recovery-checker": "esbuild scripts/amux-v22-recovery-checker.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v22-recovery-checker.mjs",
     "build:amux-v22-recovery-controller": "esbuild scripts/amux-v22-recovery-controller.mjs --bundle --platform=node --format=esm --outfile=.next/recovery-controller.mjs",
     "build:amux-v4-content-retention-once": "esbuild scripts/amux-v4-content-retention-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-content-retention-once.mjs",

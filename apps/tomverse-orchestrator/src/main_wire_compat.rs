@@ -400,6 +400,7 @@ fn every_request_body_is_what_main_and_this_tree_serialize() {
                     generation: i64_at(&request, "generation"),
                     status: str_at(&request, "status"),
                     dispatch_ready: request["dispatch_ready"].as_bool().unwrap(),
+                    protocol_capabilities: None,
                 },
             ),
             "delivery/pull" => assert_request_parity(

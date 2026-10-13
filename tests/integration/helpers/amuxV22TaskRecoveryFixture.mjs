@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { amuxV22RecoveryDigest } from "../../../lib/amux/v22TaskRecoveryCore.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createAmuxV22SidecarHandler } from "../../../lib/amux/v22OneShotSidecar.mjs";
+import { amuxV22ReadOnlyLaunchScope, amuxV22ReadOnlyLaunchScopeDigest,
+  amuxV22RecoveryDigest } from
+  "../../../lib/amux/v22TaskRecoveryCore.ts";
+import { AMUX_V22_READ_ONLY_API_BROKER_POLICY_DIGEST,
+  AMUX_V22_READ_ONLY_API_SETTINGS_DIGEST,
+  AMUX_V22_READ_ONLY_API_TOOL_SCHEMA_DIGEST,
+  amuxV22ReadOnlyApiNominalLaunchScope } from
+  "../../../lib/amux/v22ReadOnlyApiProtocol.mjs";
 
 /** The recovery guards require the audit row's top-level transaction XID.
  * Assert rollback-only transaction ownership before inserting, and release
@@ -33,8 +44,12 @@ async function appendRecoveryFixtureAudit(db, input) {
  * cover separately. All original source/promotion/assignment guards stay on. */
 export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   const { taskId, priorAttemptId, priorAssignmentId, promotionId, instanceId,
-    recoveryInstanceId, laneSequence, digest, sourceApprovalId } = input;
-  const inspectionId = randomUUID(); const evidenceId = randomUUID(); const approvalId = randomUUID();
+    recoveryInstanceId, laneSequence, digest, sourceApprovalId,
+    readOnlyExecutorKind = "read_only_api_retry_v1" } = input;
+  assert.ok(["read_only_retry_v1", "read_only_api_retry_v1"]
+    .includes(readOnlyExecutorKind));
+  const apiExecutor = readOnlyExecutorKind === "read_only_api_retry_v1";
+  const inspectionId = randomUUID(); let evidenceId; const approvalId = randomUUID();
   async function insert(table, data) {
     const keys = Object.keys(data);
     return db.query(`INSERT INTO public."${table}" (${keys.map((key) => `"${key}"`).join(",")})
@@ -81,14 +96,22 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     "AmuxV22Recovery_prior_attempt_immutable_check");
   await reject(() => db.query(`DELETE FROM public."AmuxExecutionAttempt" WHERE "id"=$1`, [priorAttemptId]),
     "AmuxV22Recovery_prior_attempt_immutable_check");
-  // This is a synthetic trigger fixture for the SQL-allowed known-read-only branch.
-  // The real no-memory legacy sidecar reports externalEffectsKnown=false and is
-  // covered by the server-contract producer-to-owner refusal regression.
-  const report = { ...binding, evidenceId, requestDigest, hostInvocationId: null,
-    proof: { terminalOutcome: "unknown", sameLiveInvocation: false, noActiveExecution: false,
-      processTreeStopped: false, rootOwnedUnit: true, controlGroupBound: true, journalBound: true,
-      socketTerminal: false, externalEffectsKnown: true, workspaceClean: true },
-    usage: { status: "unknown", projectedCostMicroUsd: null }, reason: "legacy_invocation_unbound" };
+  // Actual no-memory host producer: this synthetic fixture invokes the real
+  // sidecar handler but does not attest a live Linux process or kernel state.
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-v39-db-no-memory-"));
+  let providerCalls = 0;
+  let report;
+  try {
+    const handler = createAmuxV22SidecarHandler({ worker: "worker-one", stateDir,
+      run: async () => { providerCalls += 1; throw new Error("provider must not run"); } });
+    report = await handler({ op: "inspect_recovery", ...binding, requestDigest,
+      requestedAt: requestedAt.toISOString() });
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
+  evidenceId = report.evidenceId;
+  assert.equal(report.reason, "legacy_invocation_unbound");
+  assert.equal(report.proof.externalEffectsKnown, false);
+  assert.equal(report.usage.status, "unknown");
+  assert.equal(providerCalls, 0);
   const evidenceDigest = amuxV22RecoveryDigest("evidence", report);
   const evidenceAuditId = await appendRecoveryFixtureAudit(db, { actorUserId: null,
     action: "amux.v22.recovery.inspected", targetType: "AmuxV22TaskRecoveryEvidence", targetId: evidenceId,
@@ -103,6 +126,64 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   const evidence = (await db.query(`SELECT * FROM public."AmuxV22TaskRecoveryEvidence" WHERE "id"=$1`, [evidenceId])).rows[0];
   assert.ok(evidence.recordedAt.getTime() >= requestedAt.getTime(), "DB must replace caller timestamp");
 
+  const taskBeforeRisk = (await db.query(`SELECT * FROM public."AmuxWorkItem" WHERE "id"=$1`,
+    [taskId])).rows[0];
+  const countsBeforeRisk = (await db.query(`SELECT
+    (SELECT count(*)::int FROM public."AmuxExecutionAttempt" WHERE "taskId"=$1) attempts,
+    (SELECT count(*)::int FROM public."AmuxV22WorkerAssignment" WHERE "workItemId"=$1) assignments,
+    (SELECT count(*)::int FROM public."AmuxWorkDelivery" WHERE "taskId"=$1) deliveries,
+    (SELECT count(*)::int FROM public."AmuxCostLedgerEntry" WHERE "taskId"=$1) ledger`,
+  [taskId])).rows[0];
+  const riskAcceptanceId = randomUUID(); const launchBindingId = randomUUID();
+  const riskOwnerRequestId = randomUUID();
+  const riskBinding = { acceptanceId: riskAcceptanceId, ownerRequestId: riskOwnerRequestId,
+    taskId, taskRevision: 4, priorAttemptId, priorAttemptTaskRevision: 3,
+    sourceEvidenceId: evidenceId, sourceEvidenceDigest: evidenceDigest,
+    briefDigest: digest, launchBindingId, oldHeldMicroUsd: "3400000",
+    additionalCapMicroUsd: "3400000", worstExposureMicroUsd: "6800000" };
+  const acceptanceDigest = amuxV22RecoveryDigest("unknown-prior-risk-acceptance", riskBinding);
+  const riskAuditId = await appendRecoveryFixtureAudit(db, { actorUserId: "synthetic-owner",
+    action: "amux.v22.recovery.unknown_prior_risk_accepted",
+    targetType: "AmuxV22TaskRecoveryRiskAcceptance", targetId: riskAcceptanceId,
+    summary: "synthetic exact UNKNOWN-risk acceptance", metadata: { ...riskBinding,
+      acceptanceDigest, policyVersion: 40, priorEffects: "unknown",
+      executionStarted: false, reservationCreated: false } });
+  const riskRow = { id: riskAcceptanceId, ownerRequestId: riskOwnerRequestId,
+    taskId, taskRevision: 4, priorAttemptId, priorAttemptTaskRevision: 3,
+    sourceEvidenceId: evidenceId, sourceEvidenceDigest: evidenceDigest,
+    briefDigest: digest, launchBindingId, oldHeldMicroUsd: "3400000",
+    additionalCapMicroUsd: "3400000", worstExposureMicroUsd: "6800000",
+    acceptanceDigest, acceptedByUserId: "synthetic-owner",
+    authorizationAuditLogId: riskAuditId, acceptedAt: requestedAt };
+  await insert("AmuxV22TaskRecoveryRiskAcceptance", riskRow);
+  await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+  assert.deepEqual((await db.query(`SELECT * FROM public."AmuxWorkItem" WHERE "id"=$1`,
+    [taskId])).rows[0], taskBeforeRisk, "risk acceptance must not mutate the Task");
+  assert.deepEqual((await db.query(`SELECT
+    (SELECT count(*)::int FROM public."AmuxExecutionAttempt" WHERE "taskId"=$1) attempts,
+    (SELECT count(*)::int FROM public."AmuxV22WorkerAssignment" WHERE "workItemId"=$1) assignments,
+    (SELECT count(*)::int FROM public."AmuxWorkDelivery" WHERE "taskId"=$1) deliveries,
+    (SELECT count(*)::int FROM public."AmuxCostLedgerEntry" WHERE "taskId"=$1) ledger`,
+  [taskId])).rows[0], countsBeforeRisk,
+  "risk acceptance must create no reservation, assignment, delivery or execution");
+  const duplicateRiskId = randomUUID();
+  const duplicateRiskAuditId = await appendRecoveryFixtureAudit(db, {
+    actorUserId: "synthetic-owner", action: "amux.v22.recovery.unknown_prior_risk_accepted",
+    targetType: "AmuxV22TaskRecoveryRiskAcceptance", targetId: duplicateRiskId,
+    summary: "synthetic duplicate UNKNOWN-risk acceptance", metadata: { ...riskBinding,
+      acceptanceId: duplicateRiskId, ownerRequestId: randomUUID(), acceptanceDigest,
+      policyVersion: 40, priorEffects: "unknown", executionStarted: false,
+      reservationCreated: false },
+  });
+  await reject(() => insert("AmuxV22TaskRecoveryRiskAcceptance", { ...riskRow,
+    id: duplicateRiskId, ownerRequestId: randomUUID(), authorizationAuditLogId: duplicateRiskAuditId }),
+  ["AmuxV22TaskRecoveryRiskAcceptance_launchBindingId_key",
+    "AmuxV22TaskRecoveryRiskAcceptance_acceptanceDigest_key",
+    "AmuxV22RiskAcceptance_task_attempt_key"], "23505");
+  await reject(() => insert("AmuxV22TaskRecoveryRiskAcceptance", { ...riskRow,
+    id: randomUUID(), ownerRequestId: randomUUID(), taskId: randomUUID(),
+    authorizationAuditLogId: randomUUID() }), "AmuxV22RiskAcceptance_exact_target_check");
+
   const safeStopInspectionId = randomUUID(); const safeStopEvidenceId = randomUUID();
   const safeStopOwnerRequestId = randomUUID(); const workerProfileAlias = "legacy-worker-one";
   const profileWorkerNames = ["worker-one"];
@@ -115,7 +196,7 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     workerName: "worker-one", workerInstanceId: instanceId, workerGeneration: 1,
     targetHost: "amux-ubuntu", sourceEvidenceId: evidenceId,
     sourceEvidenceDigest: evidenceDigest, workerProfileAlias, profileWorkerNames,
-    targetUnit, profileConfigDigest };
+    targetUnit, profileConfigDigest, riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest };
   const safeStopRequestDigest = amuxV22RecoveryDigest("inspection", safeStopBinding);
   const safeStopRequestAuditId = await appendRecoveryFixtureAudit(db, {
     actorUserId: "synthetic-owner", action: "amux.v22.recovery.safe_stop_requested",
@@ -133,6 +214,7 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     workerGeneration: 1, targetHost: "amux-ubuntu", requestDigest: safeStopRequestDigest,
     sourceEvidenceId: evidenceId, sourceEvidenceDigest: evidenceDigest,
     workerProfileAlias, profileWorkerNames, targetUnit, profileConfigDigest,
+    riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest,
     requestedByUserId: "synthetic-owner", authorizationAuditLogId: safeStopRequestAuditId,
     requestedAt: safeStopRequestedAt,
   });
@@ -142,7 +224,10 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   const journalEntryDigest = amuxV22RecoveryDigest("stop-journal-entry", {
     version: 1, journalBindingDigest, taskId, priorAttemptId, workerProfileAlias, targetUnit,
   });
-  const safeStopReport = { ...safeStopBinding, evidenceId: safeStopEvidenceId,
+  const safeStopReportBinding = { ...safeStopBinding };
+  delete safeStopReportBinding.riskAcceptanceId;
+  delete safeStopReportBinding.riskAcceptanceDigest;
+  const safeStopReport = { ...safeStopReportBinding, evidenceId: safeStopEvidenceId,
     requestDigest: safeStopRequestDigest, hostInvocationId: null, modelOutcome: "unknown",
     stopProof: { journalBindingDigest, journalEntryDigest,
       journalDisposition: "not_needed_already_gone", stopAcknowledgement: "not_issued",
@@ -169,25 +254,191 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     authorizationAuditLogId: safeStopEvidenceAuditId,
     recordedAt: new Date("2000-01-01T00:00:00.000Z"),
   });
+  await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+
+  const launchCheckId = randomUUID();
+  const routePolicyDigest = "b".repeat(64); const costDigest = "f".repeat(64);
+  const readOnlyProfileConfigDigest = amuxV22RecoveryDigest("worker-profile-config", {
+    version: 1, profiles: [{ alias: "read-only-worker-two", workerNames: ["worker-two"] }],
+  });
+  const apiExecutionFrame = {
+    version: 1, executorKind: "read_only_api_retry_v1", provider: "anthropic",
+    modelId: "claude-opus-5-5", routeId: "read-only-route", routePolicyDigest,
+    catalogApprovalId: "catalog-one", catalogVersion: "v1",
+    catalogDigest: "c".repeat(64), pricingVersion: "synthetic-price-v1",
+    pricingSource: "synthetic-approved-catalog",
+    pricingVerifiedAt: "2026-10-13T00:00:00.000Z",
+    pricingExpiresAt: "2027-01-11T00:00:00.000Z",
+    uncachedInputMicroUsdPerMillion: 15_000_000,
+    cacheReadMicroUsdPerMillion: 1_500_000,
+    cacheWriteMicroUsdPerMillion: 18_750_000,
+    outputMicroUsdPerMillion: 75_000_000,
+    tokenLimits: { uncachedInputTokens: 10_000, cacheReadTokens: 10_000,
+      cacheWriteTokens: 10_000, outputTokens: 20_000 },
+    maxProviderTurns: 8, maxOutputTokensPerTurn: 20_000, maxRetries: 0,
+    maximumCostMicroUsd: 3_400_000, credentialProfileId: "synthetic-dedicated-api",
+    credentialMetadataDigest: "1".repeat(64), executorArtifactDigest: "2".repeat(64),
+    settingsDigest: AMUX_V22_READ_ONLY_API_SETTINGS_DIGEST,
+    repositoryScopeDigest: "3".repeat(64),
+    brokerPolicyDigest: AMUX_V22_READ_ONLY_API_BROKER_POLICY_DIGEST,
+    toolSchemaDigest: AMUX_V22_READ_ONLY_API_TOOL_SCHEMA_DIGEST,
+  };
+  const nominalScope = apiExecutor ? amuxV22ReadOnlyApiNominalLaunchScope(
+    apiExecutionFrame, "6".repeat(64)) : amuxV22ReadOnlyLaunchScope({
+    profileConfigDigest: readOnlyProfileConfigDigest });
+  const nominalScopeDigest = amuxV22ReadOnlyLaunchScopeDigest(nominalScope);
+  const launchBinding = { requestKind: "read_only_launch_check", launchCheckId,
+    taskId, taskRevision: 4, priorAttemptId, workerName: "worker-two",
+    workerInstanceId: recoveryInstanceId, workerGeneration: 1,
+    targetHost: "amux-ubuntu", sourceEvidenceId: safeStopEvidenceId,
+    sourceEvidenceDigest: safeStopEvidenceDigest, riskAcceptanceId,
+    riskAcceptanceDigest: acceptanceDigest, launchBindingId, briefDigest: digest,
+    provider: "anthropic", modelId: "claude-opus-5-5", routeId: "read-only-route",
+    routePolicyDigest, catalogApprovalId: "catalog-one", catalogVersion: "v1",
+    pricingVersion: "synthetic-price-v1", costReceiptDigest: digest,
+    additionalCapMicroUsd: "3400000", worstExposureMicroUsd: "6800000",
+    launchScope: nominalScope, ...(apiExecutor ? { apiExecutionFrame } : {}) };
+  const launchRequestDigest = amuxV22RecoveryDigest("read-only-launch-check", launchBinding);
+  const launchAuditId = await appendRecoveryFixtureAudit(db, { actorUserId: null,
+    action: "amux.v22.recovery.read_only_launch_requested",
+    targetType: "AmuxV22ReadOnlyLaunchCheck", targetId: launchCheckId,
+    summary: "synthetic read-only launch preflight request", metadata: {
+      systemActor: "amux-v22-recovery-controller", taskId, priorAttemptId,
+      sourceEvidenceId: safeStopEvidenceId, riskAcceptanceId, requestDigest: launchRequestDigest,
+      launchBindingId, launchScopeDigest: nominalScopeDigest, workerName: "worker-two",
+      provider: "anthropic", modelId: "claude-opus-5-5", routeId: "read-only-route",
+      routePolicyDigest, catalogApprovalId: "catalog-one", catalogVersion: "v1",
+      pricingVersion: "synthetic-price-v1", costReceiptDigest: digest, costDigest,
+      additionalCapMicroUsd: "3400000", worstExposureMicroUsd: "6800000",
+      policyVersion: 40, executionStarted: false, reservationCreated: false,
+    } });
+  const launchRequestedAt = new Date((await db.query(`SELECT
+    ((clock_timestamp() AT TIME ZONE 'UTC') - interval '2 minutes')::timestamp(3) AS now`)).rows[0].now);
+  const launchRow = { id: launchCheckId, requestDigest: launchRequestDigest,
+    riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest,
+    sourceEvidenceId: safeStopEvidenceId, sourceEvidenceDigest: safeStopEvidenceDigest,
+    taskId, taskRevision: 4, priorAttemptId, workerName: "worker-two",
+    workerInstanceId: recoveryInstanceId, workerGeneration: 1, targetHost: "amux-ubuntu",
+    launchBindingId, briefDigest: digest, provider: "anthropic",
+    modelId: "claude-opus-5-5", routeId: "read-only-route", routePolicyDigest,
+    catalogApprovalId: "catalog-one", catalogVersion: "v1",
+    pricingVersion: "synthetic-price-v1", costReceiptDigest: digest, costDigest,
+    additionalCapMicroUsd: "3400000", worstExposureMicroUsd: "6800000",
+    launchScope: nominalScope, launchScopeDigest: nominalScopeDigest,
+    authorizationAuditLogId: launchAuditId, requestedAt: launchRequestedAt };
+  await reject(async () => {
+    await db.query(`UPDATE public."AmuxWorkerRuntime"
+      SET "protocolCapabilities"=ARRAY[]::text[] WHERE "workerName"='worker-two'`);
+    await insert("AmuxV22ReadOnlyLaunchCheck", launchRow);
+    await db.query("SET CONSTRAINTS amux_v22_v39_launch_capability_guard_trigger IMMEDIATE");
+  }, "AmuxV22ReadOnlyLaunchCheck_current_capability_check");
+  if (apiExecutor) {
+    const missingFrameDigest = { ...nominalScope };
+    delete missingFrameDigest.apiExecutionFrameDigest;
+    for (const malformedScope of [
+      missingFrameDigest,
+      { ...nominalScope, executorKind: "unknown_read_only_executor_v1" },
+      { ...nominalScope, unexpected: true },
+    ]) {
+      await reject(() => insert("AmuxV22ReadOnlyLaunchCheck", {
+        ...launchRow, launchScope: malformedScope,
+      }), "AmuxV22ReadOnlyLaunchCheck_shape_check");
+    }
+  }
+  await reject(() => insert("AmuxV22ReadOnlyLaunchCheck", { ...launchRow,
+    id: randomUUID(), requestDigest: "d".repeat(64), sourceEvidenceId: evidenceId,
+    additionalCapMicroUsd: "3400001", worstExposureMicroUsd: "6800001",
+    authorizationAuditLogId: randomUUID() }), "AmuxV22ReadOnlyLaunchCheck_shape_check");
+  await insert("AmuxV22ReadOnlyLaunchCheck", launchRow);
+  await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+  const storedLaunch = (await db.query(`SELECT "launchScope" FROM
+    public."AmuxV22ReadOnlyLaunchCheck" WHERE "id"=$1`, [launchCheckId])).rows[0];
+  assert.deepEqual(storedLaunch.launchScope, nominalScope);
+
+  const actualScope = { ...nominalScope, launcherConfigDigest: "7".repeat(64) };
+  const actualScopeDigest = amuxV22ReadOnlyLaunchScopeDigest(actualScope);
+  const proofReport = { ...launchBinding, requestDigest: launchRequestDigest,
+    launchProofId: randomUUID(), observation: "current", launchScope: actualScope };
+  async function appendProofAudit(proofId, proofDigestValue, verified) {
+    return appendRecoveryFixtureAudit(db, { actorUserId: null,
+      action: "amux.v22.recovery.read_only_launch_observed",
+      targetType: "AmuxV22ReadOnlyLaunchProof", targetId: proofId,
+      summary: "synthetic trusted read-only launch observation", metadata: {
+        systemActor: "amux-v22-recovery-controller", taskId, priorAttemptId,
+        launchCheckId, launchBindingId, riskAcceptanceId,
+        sourceEvidenceId: safeStopEvidenceId, launchProofDigest: proofDigestValue,
+        launchScopeDigest: actualScopeDigest,
+        launcherConfigDigest: actualScope.launcherConfigDigest,
+        observation: "current", verified, reason: null, policyVersion: 40,
+        executionStarted: false,
+      } });
+  }
+  async function appendApprovalAudit(id, ownerRequestId, proofId, proofDigestValue) {
+    return appendRecoveryFixtureAudit(db, { actorUserId: "synthetic-owner",
+      action: "amux.v22.recovery.approved", targetType: "AmuxV22TaskRecoveryApproval",
+      targetId: id, summary: "synthetic exact read-only retry consent", metadata: {
+        taskId, inspectionId: safeStopInspectionId, evidenceId: safeStopEvidenceId,
+        priorAttemptId, evidenceDigest: safeStopEvidenceDigest, costDigest,
+        oldHeldMicroUsd: "3400000", additionalCapMicroUsd: "3400000",
+        ownerRequestId, riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest,
+        launchProofId: proofId, launchProofDigest: proofDigestValue,
+        launchBindingId, launchScopeDigest: actualScopeDigest,
+        policyVersion: 40,
+      } });
+  }
   const approvalAt = (await db.query(`SELECT
     (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`)).rows[0].now;
-  const costDigest = "f".repeat(64); const ownerApprovalRequestId = randomUUID();
-  const approvalAuditId = await appendRecoveryFixtureAudit(db, { actorUserId: "synthetic-owner",
-    action: "amux.v22.recovery.approved", targetType: "AmuxV22TaskRecoveryApproval", targetId: approvalId,
-    summary: "synthetic exact additional attempt cap", metadata: { taskId,
-      inspectionId: safeStopInspectionId, evidenceId: safeStopEvidenceId,
-      priorAttemptId, evidenceDigest: safeStopEvidenceDigest, costDigest,
-      oldHeldMicroUsd: "3400000", additionalCapMicroUsd: "3400000",
-      ownerRequestId: ownerApprovalRequestId } });
-  const approvalRow = { id: approvalId, ownerRequestId: ownerApprovalRequestId,
-    inspectionId: safeStopInspectionId, evidenceId: safeStopEvidenceId, taskId,
-    beforeRevision: 4, afterRevision: 5, priorAttemptId,
-    evidenceDigest: safeStopEvidenceDigest, costDigest, catalogApprovalId: "catalog-one",
-    catalogVersion: "v1", pricingVersion: "synthetic-price-v1", costReceiptDigest: digest,
-    costReceipt: { synthetic: true }, historicalAttempts: 1, nextAttemptNumber: 2,
-    oldHeldMicroUsd: "3400000", additionalCapMicroUsd: "3400000",
-    worstExposureMicroUsd: "6800000", approvedByUserId: "synthetic-owner",
-    authorizationAuditLogId: approvalAuditId, approvedAt: approvalAt };
+  const approvalBase = { inspectionId: safeStopInspectionId,
+    evidenceId: safeStopEvidenceId, taskId, beforeRevision: 4, afterRevision: 5,
+    priorAttemptId, evidenceDigest: safeStopEvidenceDigest, costDigest,
+    catalogApprovalId: "catalog-one", catalogVersion: "v1",
+    pricingVersion: "synthetic-price-v1", costReceiptDigest: digest,
+    costReceipt: { synthetic: true, actualProducer: false }, historicalAttempts: 1,
+    nextAttemptNumber: 2, oldHeldMicroUsd: "3400000",
+    additionalCapMicroUsd: "3400000", worstExposureMicroUsd: "6800000",
+    riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest,
+    launchBindingId, launchScopeDigest: actualScopeDigest, workerName: "worker-two",
+    provider: "anthropic", modelId: "claude-opus-5-5", routeId: "read-only-route",
+    routePolicyDigest, briefDigest: digest,
+    profileConfigDigest: apiExecutor ? null : readOnlyProfileConfigDigest,
+    approvedByUserId: "synthetic-owner", approvedAt: approvalAt };
+  const staleProofId = proofReport.launchProofId;
+  const staleProofDigest = amuxV22RecoveryDigest("read-only-launch-proof", proofReport);
+  const staleProofAuditId = await appendProofAudit(staleProofId, staleProofDigest, true);
+  const staleApprovalId = randomUUID(); const staleApprovalRequestId = randomUUID();
+  const staleApprovalAuditId = await appendApprovalAudit(staleApprovalId,
+    staleApprovalRequestId, staleProofId, staleProofDigest);
+  await reject(async () => {
+    await db.query("SET CONSTRAINTS ALL DEFERRED");
+    await insert("AmuxV22ReadOnlyLaunchProof", { id: staleProofId, launchCheckId,
+      proofDigest: staleProofDigest, observation: "current", report: proofReport,
+      verified: true, reason: null, authorizationAuditLogId: staleProofAuditId,
+      recordedAt: new Date(launchRequestedAt.getTime() + 1_000) });
+    await insert("AmuxV22TaskRecoveryApproval", { ...approvalBase, id: staleApprovalId,
+      ownerRequestId: staleApprovalRequestId, launchProofId: staleProofId,
+      launchProofDigest: staleProofDigest, authorizationAuditLogId: staleApprovalAuditId });
+    await db.query(`UPDATE public."AmuxWorkItem" SET "status"='todo', "revision"=5
+      WHERE "id"=$1 AND "status"='blocked' AND "revision"=4`, [taskId]);
+    await db.query("SET CONSTRAINTS amux_v22_v39_approval_guard_trigger IMMEDIATE");
+  }, "AmuxV22RecoveryApproval_v39_binding_check");
+
+  const launchProofId = randomUUID();
+  const currentProofReport = { ...proofReport, launchProofId };
+  const launchProofDigest = amuxV22RecoveryDigest("read-only-launch-proof", currentProofReport);
+  const proofAuditId = await appendProofAudit(launchProofId, launchProofDigest, true);
+  const proofRecordedAt = (await db.query(`SELECT
+    (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`)).rows[0].now;
+  await insert("AmuxV22ReadOnlyLaunchProof", { id: launchProofId, launchCheckId,
+    proofDigest: launchProofDigest, observation: "current", report: currentProofReport,
+    verified: true, reason: null, authorizationAuditLogId: proofAuditId,
+    recordedAt: proofRecordedAt });
+
+  const ownerApprovalRequestId = randomUUID();
+  const approvalAuditId = await appendApprovalAudit(approvalId,
+    ownerApprovalRequestId, launchProofId, launchProofDigest);
+  const approvalRow = { ...approvalBase, id: approvalId,
+    ownerRequestId: ownerApprovalRequestId, launchProofId, launchProofDigest,
+    authorizationAuditLogId: approvalAuditId };
   await db.query("SET CONSTRAINTS ALL DEFERRED");
   await insert("AmuxV22TaskRecoveryApproval", approvalRow);
   const cas = await db.query(`UPDATE public."AmuxWorkItem" SET "status"='todo', "revision"=5
@@ -202,9 +453,20 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   assert.equal(BigInt(storedApproval.worstExposureMicroUsd), 6_800_000n);
   assert.equal((await db.query(`UPDATE public."AmuxWorkItem" SET "revision"=5
     WHERE "id"=$1 AND "status"='blocked' AND "revision"=4`, [taskId])).rowCount, 0);
-  for (const table of ["AmuxV22TaskRecoveryInspectionRequest", "AmuxV22TaskRecoveryEvidence", "AmuxV22TaskRecoveryApproval"]) {
+  for (const table of ["AmuxV22TaskRecoveryInspectionRequest", "AmuxV22TaskRecoveryEvidence",
+    "AmuxV22TaskRecoveryApproval"]) {
     await reject(() => db.query(`UPDATE public."${table}" SET "id"="id" WHERE false`), "AmuxV22Recovery_append_only_check");
     await reject(() => db.query(`DELETE FROM public."${table}" WHERE false`), "AmuxV22Recovery_append_only_check");
+  }
+  for (const [table, id] of [
+    ["AmuxV22TaskRecoveryRiskAcceptance", riskAcceptanceId],
+    ["AmuxV22ReadOnlyLaunchCheck", launchCheckId],
+    ["AmuxV22ReadOnlyLaunchProof", launchProofId],
+  ]) {
+    await reject(() => db.query(`UPDATE public."${table}" SET "id"="id" WHERE "id"=$1`, [id]),
+      "AmuxV22V39_append_only_check");
+    await reject(() => db.query(`DELETE FROM public."${table}" WHERE "id"=$1`, [id]),
+      "AmuxV22V39_append_only_check");
   }
   await reject(() => db.query(`DELETE FROM public."AdminAuditLog" WHERE "id"=$1`, [approvalAuditId]),
     null);
@@ -234,6 +496,9 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   const recoveryAssignment = { ...originalAssignment, id: assignmentId,
     promotionReceiptId: promotionId, laneDecisionSequence: laneSequence, taskRevision: 5,
     workerName: "worker-two", workerInstanceId: recoveryInstanceId, workerGeneration: 1,
+    provider: "anthropic", modelId: "claude-opus-5-5", routeId: "read-only-route",
+    routePolicyDigest, catalogApprovalId: "catalog-one", catalogVersion: "v1",
+    costReceiptDigest: digest, perAttemptMicroUsd: "3400000",
     recoveryApprovalId: approvalId, authorizationAuditLogId: assignmentAuditId, assignedAt: assignmentAt };
   await db.query("SET CONSTRAINTS ALL DEFERRED");
   await insert("AmuxV22WorkerAssignment", recoveryAssignment);
@@ -275,7 +540,7 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     "AmuxExecutionAttempt_v22AssignmentId_key", "23505");
   await reject(async () => {
     await insert("AmuxExecutionAttempt", { ...newAttempt, id: randomUUID(),
-      attemptNumber: 6, v22AssignmentId: null });
+      attemptNumber: 3, v22AssignmentId: null });
     await db.query("SET CONSTRAINTS amux_v22_execution_attempt_guard_trigger IMMEDIATE");
   }, "AmuxExecutionAttempt_v22_binding_check");
   return { safeStopFenceInput: { safeStopRequestId: safeStopInspectionId,

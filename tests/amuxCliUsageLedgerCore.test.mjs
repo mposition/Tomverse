@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { estimateAmuxCliApiCost, makeAmuxCliUsageReceipt,
-  amuxCliUsageReceiptSchema } from "../lib/amux/cliUsageLedgerCore.ts";
+  amuxCliUsageReceiptSchema, amuxUsageLedgerReceiptSchema } from
+  "../lib/amux/cliUsageLedgerCore.ts";
 
 const base = {
   invocationId: "run-1", binding: { kind: "task_attempt", attemptId: "attempt-1" },
@@ -70,4 +71,23 @@ test("receipt refuses prompt/body fields and inconsistent numeric evidence", () 
     observed: null }).success, false);
   assert.equal(amuxCliUsageReceiptSchema.safeParse({ ...receipt,
     endedAt: "2026-10-05T00:00:00.000Z" }).success, false);
+});
+
+test("native Messages API provenance is settlement-writer-only and exact", () => {
+  const cliReceipt = makeAmuxCliUsageReceipt({ ...base, observation,
+    authentication: "api_key", cliVersion: null });
+  const native = { ...cliReceipt, cli: "anthropic_api",
+    source: "anthropic_messages_api" };
+  assert.equal(amuxUsageLedgerReceiptSchema.safeParse(native).success, true);
+  assert.equal(amuxCliUsageReceiptSchema.safeParse(native).success, false);
+  for (const changed of [
+    { cli: "claude" },
+    { source: "claude_result" },
+    { authentication: "subscription" },
+    { completeness: "reported_partial" },
+    { cliVersion: "2.1.288" },
+    { observed: null },
+  ]) assert.equal(amuxUsageLedgerReceiptSchema.safeParse({
+    ...native, ...changed,
+  }).success, false);
 });

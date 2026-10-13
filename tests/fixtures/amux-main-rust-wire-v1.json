@@ -138,6 +138,7 @@
     { "status": 409, "response": { "claimed": false, "reason": "incident_admission_blocked" } },
     { "status": 409, "response": { "claimed": false, "reason": "wip_limit_reached" } },
     { "status": 409, "response": { "claimed": false, "reason": "execution_lifecycle_unavailable" } },
+    { "status": 409, "response": { "claimed": false, "reason": "worker_safe_stop_fenced" } },
     { "status": 409, "response": { "claimed": false, "reason": "invalid_routing_evidence" } }
   ]
 }

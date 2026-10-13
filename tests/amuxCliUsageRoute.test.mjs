@@ -58,6 +58,12 @@ test("usage writes stay env-closed and reject invalid receipts when enabled", as
           cacheCreationInputTokens: 4, reasoningOutputTokens: null } }],
       },
     });
+    const nativeApiReceipt = { ...receipt, cli: "anthropic_api",
+      source: "anthropic_messages_api", authentication: "api_key",
+      cliVersion: null };
+    const nativeViaCliRoute = await POST(request("POST", syncSecret,
+      undefined, nativeApiReceipt));
+    assert.equal(nativeViaCliRoute.status, 400);
     assert.equal((await POST(request("POST", agentSecret,
       "amux-intake", receipt))).status, 401);
     assert.equal((await POST(request("POST", syncSecret, undefined,

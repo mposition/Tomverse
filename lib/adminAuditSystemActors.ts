@@ -235,8 +235,12 @@ export const systemAuditActionAllowed = (
     (action === "amux.v22.recovery.inspected" &&
       targetType === "AmuxV22TaskRecoveryEvidence")) &&
   (actor !== AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR ||
-    (action === "amux.v22.recovery.safe_stop_reported" &&
-      targetType === "AmuxV22TaskRecoveryEvidence")) &&
+    ((action === "amux.v22.recovery.safe_stop_reported" &&
+      targetType === "AmuxV22TaskRecoveryEvidence") ||
+     (action === "amux.v22.recovery.read_only_launch_requested" &&
+      targetType === "AmuxV22ReadOnlyLaunchCheck") ||
+     (action === "amux.v22.recovery.read_only_launch_observed" &&
+      targetType === "AmuxV22ReadOnlyLaunchProof"))) &&
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||
     (action === "prompt_refiner.product_disposition_recorded" && targetType === "PromptRefinerProductDispositionReceipt") ||

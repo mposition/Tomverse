@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
-const state = { reads: 0, writes: 0 };
+const state = { reads: 0, writes: 0, launchWrites: 0 };
 class Invalid extends Error {}
 
 mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
@@ -38,6 +38,11 @@ mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
     return { recorded: true, evidenceId: uuid, verified: true,
       evidenceDigest: "f".repeat(64), reason: null, retryWrite: false };
   },
+  reportAmuxV22ReadOnlyLaunchProof: async () => {
+    state.launchWrites += 1;
+    return { recorded: true, launchProofId: uuid,
+      launchProofDigest: "f".repeat(64), observation: "current", retryWrite: false };
+  },
 } });
 
 const route = () => import(mod("app/api/internal/amux/v22/recovery-controller/route.ts"));
@@ -61,10 +66,30 @@ const report = {
     controlGroupEmpty: true, kernelProofFresh: true },
   usage: { status: "unknown", projectedCostMicroUsd: null }, reason: "safe_stop_process_gone",
 };
+const launchReport = {
+  requestKind: "read_only_launch_check", launchCheckId: uuid,
+  launchProofId: uuid, requestDigest: "a".repeat(64),
+  taskId: "c48886b9-86f8-4631-8db8-c0b288a707af", taskRevision: 8,
+  priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba9bd8",
+  workerName: "claude-test", workerInstanceId: uuid, workerGeneration: 2,
+  targetHost: "amux-ubuntu", sourceEvidenceId: uuid,
+  sourceEvidenceDigest: "b".repeat(64), riskAcceptanceId: uuid,
+  riskAcceptanceDigest: "c".repeat(64), launchBindingId: uuid,
+  briefDigest: "d".repeat(64), provider: "anthropic", modelId: "claude-opus",
+  routeId: "route-1", routePolicyDigest: "e".repeat(64),
+  catalogApprovalId: "approval-1", catalogVersion: "catalog-1",
+  pricingVersion: "price-1", costReceiptDigest: "f".repeat(64),
+  additionalCapMicroUsd: "3400000", worstExposureMicroUsd: "6800000",
+  launchScope: { version: 1, launcherPolicyVersion: "amux-v22-read-only-retry-v1",
+    launcherConfigDigest: "1".repeat(64), fixedArgvDigest: "2".repeat(64),
+    toolPolicyDigest: "3".repeat(64), profileConfigDigest: "4".repeat(64),
+    role: "investigate", allowedTools: ["Glob", "Grep", "Read"] },
+  observation: "current",
+};
 const post = (body: unknown, auth = headers.authorization) => new Request(url,
   { method: "POST", headers: { ...headers, authorization: auth }, body: JSON.stringify(body) });
 const reset = () => {
-  state.reads = 0; state.writes = 0;
+  state.reads = 0; state.writes = 0; state.launchWrites = 0;
   process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED = "true";
   process.env.TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED = "true";
   process.env.TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET = secret;
@@ -96,6 +121,12 @@ test("controller exposes only its pending safe-stop queue and exact 23/14 report
   const response = await POST(post(report));
   assert.equal(response.status, 200); assert.equal(state.writes, 1);
   assert.match(response.headers.get("cache-control")!, /no-store/);
+  const launchResponse = await POST(post(launchReport));
+  assert.equal(launchResponse.status, 200); assert.equal(state.launchWrites, 1);
+  for (const changed of [{ taskId: "task-outside-approved-scope" },
+    { priorAttemptId: uuid }, { additionalCapMicroUsd: "3400001" },
+    { launchScope: { ...launchReport.launchScope, allowedTools: ["Bash"] } }])
+    assert.equal((await POST(post({ ...launchReport, ...changed }))).status, 400);
 });
 
 test("both exact capability flags close the controller before queue or report work", async () => {

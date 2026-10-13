@@ -7,10 +7,11 @@ import { amuxJsonNoStore, amuxInternalErrorResponse, isAmuxInputError } from
   "@/lib/amux/internalRoute";
 import { AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV,
   AMUX_V22_TASK_RECOVERY_ENABLED_ENV, amuxV22LegacySafeStopEnabled,
-  amuxV22SafeStopEvidenceSchema, amuxV22TaskRecoveryEnabled,
+  amuxV22RecoveryControllerReportSchema, amuxV22TaskRecoveryEnabled,
   isAmuxV22RecoveryControllerAuthorized } from "@/lib/amux/v22TaskRecoveryCore";
 import { pendingAmuxV22LegacySafeStops,
-  reportAmuxV22LegacySafeStopEvidence } from "@/lib/amux/v22TaskRecoveryService";
+  reportAmuxV22LegacySafeStopEvidence, reportAmuxV22ReadOnlyLaunchProof } from
+  "@/lib/amux/v22TaskRecoveryService";
 
 function capabilityFailure() {
   if (!amuxV22TaskRecoveryEnabled(process.env[AMUX_V22_TASK_RECOVERY_ENABLED_ENV]))
@@ -59,8 +60,10 @@ export async function POST(request: Request) {
       await consumeApiRateLimit(request, "amux-v22-recovery-controller",
         "amux-recovery-safe-stop-report", { minute: 20, day: 1_000 });
       const body = await readLimitedJson(request, 8_192,
-        amuxV22SafeStopEvidenceSchema);
-      return amuxJsonNoStore(await reportAmuxV22LegacySafeStopEvidence(body), 200);
+        amuxV22RecoveryControllerReportSchema);
+      return amuxJsonNoStore(body.requestKind === "safe_stop" ?
+        await reportAmuxV22LegacySafeStopEvidence(body) :
+        await reportAmuxV22ReadOnlyLaunchProof(body), 200);
     } catch (error) { return failure(error); }
   }, AMUX_LIFECYCLE_ROUTE_BUDGET_MS);
 }

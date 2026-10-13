@@ -207,8 +207,10 @@ export async function calculateCurrentApprovedAmuxV4TaskCost(
   if (!row || row.status !== "approved" || row.revokedAt !== null) {
     throw new AmuxV4TaskCatalogApprovalError("evidence_unverified");
   }
-  const inspection = inspectV4TaskCostCatalog(row.catalog);
-  if (!inspection.ok || inspection.catalogDigest !== row.catalogDigest) {
+  let inspection: ReturnType<typeof inspectedCatalog>;
+  try { inspection = inspectedCatalog(row.catalog); }
+  catch { throw new AmuxV4TaskCatalogApprovalError("catalog_changed"); }
+  if (inspection.inspection.catalogDigest !== row.catalogDigest) {
     throw new AmuxV4TaskCatalogApprovalError("catalog_changed");
   }
   const audit = await tx.adminAuditLog.findUnique({
@@ -230,5 +232,6 @@ export async function calculateCurrentApprovedAmuxV4TaskCost(
     throw new AmuxV4TaskCatalogApprovalError("evidence_unverified");
   }
   return { approvalId: row.id, version: row.version,
-    catalogDigest: row.catalogDigest, receipt: result.receipt };
+    catalogDigest: row.catalogDigest, catalog: inspection.catalog,
+    receipt: result.receipt };
 }

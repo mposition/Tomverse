@@ -7,8 +7,14 @@ import { appendSyntheticAdminAudit } from
   "./helpers/appendSyntheticAdminAudit.mjs";
 import { exerciseAmuxV22LegacySafeStopFenceFixture,
   exerciseAmuxV22TaskRecoveryFixture } from "./helpers/amuxV22TaskRecoveryFixture.mjs";
+import { AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+  AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID } from "../../lib/amux/v22TaskRecoveryCore.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
+const recoveryExecutorKind = process.env.AMUX_RECOVERY_FIXTURE_EXECUTOR_KIND ??
+  "read_only_api_retry_v1";
+assert.ok(["read_only_retry_v1", "read_only_api_retry_v1"]
+  .includes(recoveryExecutorKind));
 const allowed = (() => {
   if (!databaseUrl) return false;
   const url = new URL(databaseUrl);
@@ -22,7 +28,8 @@ test("portfolio evidence and score history are audited, path-bound and append-on
 }, async () => {
   const client = new pg.Client({ connectionString: databaseUrl });
   const ids = { initiative: randomUUID(), epic: randomUUID(),
-    feature: randomUUID(), task: randomUUID(), sourceApproval: randomUUID() };
+    feature: randomUUID(), task: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID,
+    sourceApproval: randomUUID() };
   const ideaId = randomUUID();
   const unitId = randomUUID();
   const digest = "a".repeat(64);
@@ -358,7 +365,7 @@ test("portfolio evidence and score history are audited, path-bound and append-on
       SET "status" = 'doing', "revision" = 3 WHERE "id" = $1`,
     [ids.task], "AmuxWorkItem_v22_doing_check",
     "amux_v22_doing_guard_trigger");
-    const attemptId = randomUUID();
+    const attemptId = AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID;
     await client.query(`UPDATE public."AmuxWorkItem"
       SET "status" = 'doing', "revision" = 3 WHERE "id" = $1`,
     [ids.task]);
@@ -440,16 +447,18 @@ test("portfolio evidence and score history are audited, path-bound and append-on
       v22AssignmentId: null });
     await client.query(`INSERT INTO public."AmuxWorkerRuntime"
       ("workerName", "instanceId", "generation", "status", "dispatchReady",
-       "heartbeatAt", "leaseExpiresAt", "updatedAt") VALUES
+       "heartbeatAt", "leaseExpiresAt", "updatedAt", "protocolCapabilities") VALUES
       ('worker-one', $1, 1, 'idle', true, CURRENT_TIMESTAMP,
-       CURRENT_TIMESTAMP + interval '90 seconds', CURRENT_TIMESTAMP),
+       CURRENT_TIMESTAMP + interval '90 seconds', CURRENT_TIMESTAMP, ARRAY[]::text[]),
       ('worker-two', $2, 1, 'idle', true, CURRENT_TIMESTAMP,
-       CURRENT_TIMESTAMP + interval '90 seconds', CURRENT_TIMESTAMP)`,
-    [instanceId, recoveryInstanceId]);
+       CURRENT_TIMESTAMP + interval '90 seconds', CURRENT_TIMESTAMP,
+       $3::text[])`,
+    [instanceId, recoveryInstanceId, [recoveryExecutorKind]]);
     const recovery = await exerciseAmuxV22TaskRecoveryFixture(client, {
       taskId: ids.task, priorAttemptId: attemptId, priorAssignmentId: assignmentId,
       promotionId: receiptId, instanceId, recoveryInstanceId,
       laneSequence: laneSeq, digest, sourceApprovalId: ids.sourceApproval,
+      readOnlyExecutorKind: recoveryExecutorKind,
     });
     await exerciseAmuxV22LegacySafeStopFenceFixture(client, recovery.safeStopFenceInput);
   } finally {

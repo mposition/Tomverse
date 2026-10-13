@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "6bb3fa473f3048e30a2131a817de85b43d99817c4cba429a918b9696ec712709",
+  "replacedChecks": [
+    {
+      "table": "AmuxCliUsageEvent",
+      "constraint": "AmuxCliUsageEvent_shape_check",
+      "previousDefinitionSha256": "377a8f1fdf3f2522dddcc1e3441eae81da5bea739fef45fc1095c36f8394e886"
+    }
+  ]
+}

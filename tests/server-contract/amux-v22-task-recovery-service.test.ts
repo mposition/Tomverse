@@ -4,11 +4,18 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "@prisma/client";
 import { amuxV22RecoveryDigest, amuxV22SafeStopJournalBinding,
+  amuxV22ReadOnlyLaunchScope, amuxV22ReadOnlyLaunchScopeDigest,
+  amuxV22ReadOnlyLaunchProofSchema, amuxV22RecoveryAdminSchema,
+  configuredAmuxV22RecoveryProfile,
+  AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
   type AmuxV22RecoveryEvidenceInput,
   type AmuxV22SafeStopEvidenceInput } from "../../lib/amux/v22TaskRecoveryCore.ts";
 import { createAmuxV22SidecarHandler } from "../../lib/amux/v22OneShotSidecar.mjs";
 import { runAmuxV22RecoveryCheckerOnce } from "../../lib/amux/v22RecoveryHost.mjs";
+import { inspectV4TaskCostCatalog } from "../../lib/amux/v4TaskCostCatalogCore.ts";
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const owner = {
   user: { id: "owner-1" },
@@ -25,17 +32,47 @@ const receipt = { role: "design", grade: "small", catalogVersion: "catalog-1", c
   caps: { uncachedInputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, maxAttempts: 1 },
   routes: [{ routeId: "route-1", workerName: "claude-test", provider: "anthropic", modelId: "claude-opus",
     routePolicyDigest: "b".repeat(64), perAttemptMicroUsd: "3400000" }], ceilingMicroUsd: "3400000", receiptDigest: "c".repeat(64) };
+const approvedCatalog = (workerName: string) => ({ schemaVersion: 1,
+  catalogVersion: "catalog-1", pricingVersion: "price-1",
+  gradeRulesVersion: "grade-1", gradeRules: [{ role: "investigate", grade: "small",
+    caps: { uncachedInputTokens: 1, outputTokens: 1, cacheReadTokens: 0,
+      cacheWriteTokens: 0, maxAttempts: 1 } }],
+  routes: [{ routeId: "route-1", workerName, provider: "anthropic",
+    modelId: "claude-opus", routePolicyDigest: "b".repeat(64), enabled: true,
+    roles: ["investigate"], grades: ["small"], pricingSource: "approved-record",
+    pricingVerifiedAt: "2026-10-13T00:00:00.000Z",
+    pricingExpiresAt: "2026-10-20T00:00:00.000Z",
+    uncachedInputMicroUsdPerMillion: 1_000_000,
+    outputMicroUsdPerMillion: 1_000_000,
+    cacheReadMicroUsdPerMillion: 0, cacheWriteMicroUsdPerMillion: 0,
+    toolCostCapMicroUsdPerAttempt: 0 }],
+});
 type Row = Record<string, unknown>;
 const world = { task: {} as Row, attempt: {} as Row, runtime: {} as Row,
+  retryRuntime: {} as Row, routeWorkerName: "claude-test",
   inspections: [] as Row[], evidence: [] as Row[], approvals: [] as Row[], audits: [] as Row[],
+  risks: [] as Row[], launchChecks: [] as Row[], launchProofs: [] as Row[],
   ready: true, incident: false, cap: "3400000", costAdmission: true, cas: true,
   otherWork: false,
   changedOld: 0, ledgerWrites: 0, attemptWrites: 0 };
 function reset() {
   process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED = "true";
   process.env.TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED = "true";
+  delete process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED;
+  delete process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID;
+  delete process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST;
+  delete process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST;
+  delete process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST;
   process.env.TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON = JSON.stringify({ version: 1,
-    profiles: [{ alias: "profile-one", workerNames: ["claude-test"] }] });
+    profiles: [{ alias: "profile-one", workerNames: ["claude-test"] },
+      { alias: "profile-two", workerNames: ["codex-test"] }] });
+  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([{
+    worker_name: "claude-test", provider: "anthropic", model: "claude-opus",
+    routing_roles: ["investigate"], tool_capabilities: ["repo_read"],
+    archived: false, paused: false, isolated: false, blocked: false }]);
+  process.env.TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON = JSON.stringify([{
+    worker_name: "claude-test", provider: "anthropic", model: "claude-opus",
+    routing_roles: ["investigate"], tool_capabilities: ["repo_read"] }]);
   world.attempt = { id: attemptId, taskId: "task-1234", taskRevision: 7,
     worker: "claude-test", workerInstanceId: instanceId, workerGeneration: 2,
     endedAt: new Date("2026-10-13T00:59:00.000Z"), outcome: "expired", reason: "outcome_unknown",
@@ -46,8 +83,12 @@ function reset() {
     executionAttempts: [world.attempt] };
   world.runtime = { workerName: "claude-test", instanceId, generation: 2,
     heartbeatAt: new Date("2026-10-13T01:00:10.000Z"),
-    leaseExpiresAt: new Date("2026-10-13T01:01:30.000Z") };
+    leaseExpiresAt: new Date("2026-10-13T01:01:30.000Z"), status: "idle",
+    dispatchReady: true, protocolCapabilities: ["read_only_retry_v1"] };
+  world.retryRuntime = { ...world.runtime, workerName: "codex-test" };
+  world.routeWorkerName = "claude-test";
   world.inspections = []; world.evidence = []; world.approvals = []; world.audits = [];
+  world.risks = []; world.launchChecks = []; world.launchProofs = [];
   world.ready = true; world.incident = false; world.cap = "3400000"; world.costAdmission = true;
   world.cas = true; world.otherWork = false; world.changedOld = 0;
   world.ledgerWrites = 0; world.attemptWrites = 0;
@@ -58,15 +99,21 @@ function inspectionWithRelations(row: Row | undefined) {
     approval: world.approvals.find((item) => item.inspectionId === row.id) ?? null } : null;
 }
 const tx = {
-  $queryRaw: async (strings: TemplateStringsArray) => {
+  $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join("");
     if (sql.includes("AS present")) return [{ present: world.otherWork }];
-    if (sql.includes('FROM "AmuxWorkerRuntime"')) return [world.runtime];
+    if (sql.includes('FROM "AmuxWorkerRuntime"')) {
+      const workerNames = Array.isArray(values[0]) ? values[0] : [values[0]];
+      return [world.runtime, world.retryRuntime].filter((row) =>
+        workerNames.includes(row.workerName));
+    }
     if (sql.includes('FROM "AmuxExecutionAttempt"')) return [{ id: attemptId }];
-    if (sql.includes("unnest(request")) return [{ workerName: "claude-test" }];
+    if (sql.includes("unnest(request")) return Array.isArray(values[0]) &&
+      values[0].includes("claude-test") ? [{ workerName: "claude-test" }] : [];
     return [{ id: world.task.id }];
   },
-  amuxWorkItem: { findUnique: async () => world.task, updateMany: async ({ where }: { where: Row }) => {
+  amuxWorkItem: { findUnique: async () => world.task, findMany: async () => [],
+    updateMany: async ({ where }: { where: Row }) => {
     if (!world.cas || !matches(world.task, where)) return { count: 0 };
     world.task.status = "todo"; world.task.revision = Number(world.task.revision) + 1;
     return { count: 1 };
@@ -95,8 +142,39 @@ const tx = {
   },
     create: async ({ data }: { data: Row }) => { world.evidence.push(data); return data; } },
   amuxV22TaskRecoveryApproval: { findUnique: async ({ where }: { where: Row }) => world.approvals.find((row) => matches(row, where)) ?? null,
-    findFirst: async ({ where }: { where: Row }) => world.approvals.find((row) => matches(row, where)) ?? null,
+    findFirst: async ({ where, include }: { where: Row; include?: Row }) => {
+      const row = world.approvals.find((item) => matches(item, where));
+      return row && include ? { ...row,
+        inspection: world.inspections.find((item) => item.id === row.inspectionId),
+        evidence: world.evidence.find((item) => item.id === row.evidenceId) } : row ?? null;
+    },
     create: async ({ data }: { data: Row }) => { world.approvals.push(data); return data; } },
+  amuxV22TaskRecoveryRiskAcceptance: {
+    findUnique: async ({ where }: { where: Row }) => world.risks.find((row) => matches(row, where)) ?? null,
+    findFirst: async ({ where }: { where: Row }) => world.risks.find((row) => matches(row, where)) ?? null,
+    create: async ({ data }: { data: Row }) => { world.risks.push(data); return data; },
+  },
+  amuxV22ReadOnlyLaunchCheck: {
+    findUnique: async ({ where, include }: { where: Row; include?: Row }) => {
+      const row = world.launchChecks.find((item) => matches(item, where));
+      return row && include ? { ...row, task: { taskRole: world.task.taskRole,
+        executionGrade: world.task.executionGrade } } : row ?? null;
+    },
+    findFirst: async ({ where }: { where: Row }) => world.launchChecks.find((row) => matches(row, where)) ?? null,
+    findMany: async ({ include }: { include?: Row } = {}) => include ?
+      world.launchChecks.map((row) => ({ ...row, task: {
+        taskRole: world.task.taskRole,
+        executionGrade: world.task.executionGrade,
+      } })) : world.launchChecks,
+    create: async ({ data }: { data: Row }) => { world.launchChecks.push(data); return data; },
+  },
+  amuxV22ReadOnlyLaunchProof: {
+    findUnique: async ({ where }: { where: Row }) => world.launchProofs.find((row) => matches(row, where)) ?? null,
+    findMany: async () => world.launchProofs,
+    create: async ({ data }: { data: Row }) => { world.launchProofs.push(data); return data; },
+  },
+  amuxWorkerRuntime: { findMany: async () => [world.runtime, world.retryRuntime] },
+  amuxOrchestratorHalt: { findFirst: async () => null },
 };
 let loaded: Promise<typeof import("../../lib/amux/v22TaskRecoveryService.ts")> | null = null;
 function load() {
@@ -118,11 +196,14 @@ function load() {
     withAutoTransaction: async (_id: unknown, _limits: unknown,
       callback: (transaction: typeof tx, time: Date) => Promise<unknown>) => {
       const saved = { task: structuredClone(world.task), inspections: [...world.inspections],
-        approvals: [...world.approvals], evidence: [...world.evidence], audits: [...world.audits] };
+        approvals: [...world.approvals], evidence: [...world.evidence], audits: [...world.audits],
+        risks: [...world.risks], launchChecks: [...world.launchChecks], launchProofs: [...world.launchProofs] };
       try { return await callback(tx, now); }
       catch (error) { world.task = saved.task; world.inspections = saved.inspections;
         world.approvals = saved.approvals;
-        world.evidence = saved.evidence; world.audits = saved.audits; throw error; }
+        world.evidence = saved.evidence; world.audits = saved.audits;
+        world.risks = saved.risks; world.launchChecks = saved.launchChecks;
+        world.launchProofs = saved.launchProofs; throw error; }
     },
   } });
   mock.module(mod("lib/amux/incident.ts"), { namedExports: { lockAmuxAdmissionAndReadIncident: async () => ({ blocks_admission: world.incident }) } });
@@ -132,8 +213,16 @@ function load() {
       assert.equal(expected, "blocked"); return { ready: world.ready }; },
   } });
   mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports: {
-    calculateCurrentApprovedAmuxV4TaskCost: async () => ({ approvalId: "catalog-id", receipt: {
-      ...receipt, routes: [{ ...receipt.routes[0], perAttemptMicroUsd: world.cap }] } }),
+    calculateCurrentApprovedAmuxV4TaskCost: async () => {
+      const catalog = approvedCatalog(world.routeWorkerName);
+      const inspected = inspectV4TaskCostCatalog(catalog);
+      assert.equal(inspected.ok, true);
+      return { approvalId: "catalog-id", catalog,
+        catalogDigest: inspected.catalogDigest, receipt: {
+          ...receipt, catalogDigest: inspected.catalogDigest,
+          routes: [{ ...receipt.routes[0], workerName: world.routeWorkerName,
+            perAttemptMicroUsd: world.cap }] } };
+    },
   } });
   mock.module(mod("lib/amux/resourcePolicy.ts"), { namedExports: {
     lockAmuxResourcePolicies: async () => [], evaluateLockedAmuxCostAdmission: async () => ({
@@ -150,15 +239,19 @@ async function requestInspection() {
 async function submitEvidence(change: Partial<AmuxV22RecoveryEvidenceInput> = {}) {
   const service = await load(); const inspection = world.inspections[0]!;
   const report = { inspectionId: inspection.id as string, evidenceId: "8fe97a85-d5df-4432-b4b0-7406571eaf37",
-    requestDigest: inspection.requestDigest as string, taskId: "task-1234", taskRevision: 8,
-    priorAttemptId: attemptId, priorAttemptTaskRevision: 7, workerName: "claude-test", workerInstanceId: instanceId,
+    requestDigest: inspection.requestDigest as string, taskId: inspection.taskId as string,
+    taskRevision: inspection.taskRevision as number,
+    priorAttemptId: inspection.priorAttemptId as string,
+    priorAttemptTaskRevision: inspection.priorAttemptTaskRevision as number,
+    workerName: "claude-test", workerInstanceId: instanceId,
     workerGeneration: 2, targetHost: "amux-ubuntu", hostInvocationId: "f".repeat(32),
     proof: { terminalOutcome: "unknown", sameLiveInvocation: true, noActiveExecution: true,
       processTreeStopped: true, rootOwnedUnit: true, controlGroupBound: true, journalBound: true,
       socketTerminal: true, externalEffectsKnown: true, workspaceClean: true },
     usage: { status: "unknown", projectedCostMicroUsd: null }, reason: "stopped_proven", ...change } as AmuxV22RecoveryEvidenceInput;
   await service.reportAmuxV22RecoveryEvidence(report);
-  return service.readAmuxV22TaskRecovery(owner, "task-1234", requestId);
+  return service.readAmuxV22TaskRecovery(owner, inspection.taskId as string,
+    inspection.ownerRequestId as string);
 }
 async function approvalInput() {
   const read = await submitEvidence();
@@ -192,8 +285,10 @@ async function submitSafeStop() {
     inspectionId: inspection.id as string,
     evidenceId: "76737099-0932-4cb2-b075-6d2805b16303",
     requestKind: "safe_stop", requestDigest: inspection.requestDigest as string,
-    taskId: "task-1234", taskRevision: 8, priorAttemptId: attemptId,
-    priorAttemptTaskRevision: 7, workerName: "claude-test",
+    taskId: inspection.taskId as string, taskRevision: inspection.taskRevision as number,
+    priorAttemptId: inspection.priorAttemptId as string,
+    priorAttemptTaskRevision: inspection.priorAttemptTaskRevision as number,
+    workerName: "claude-test",
     workerInstanceId: instanceId, workerGeneration: 2, targetHost: "amux-ubuntu",
     sourceEvidenceId: inspection.sourceEvidenceId as string,
     sourceEvidenceDigest: inspection.sourceEvidenceDigest as string,
@@ -203,7 +298,8 @@ async function submitSafeStop() {
     profileConfigDigest: inspection.profileConfigDigest as string,
     hostInvocationId: null, modelOutcome: "unknown",
     stopProof: { journalBindingDigest: amuxV22SafeStopJournalBinding({
-      taskId: "task-1234", priorAttemptId: attemptId,
+      taskId: inspection.taskId as string,
+      priorAttemptId: inspection.priorAttemptId as string,
       workerProfileAlias: inspection.workerProfileAlias as string,
       targetUnit: inspection.targetUnit as string }),
     journalEntryDigest: "e".repeat(64), journalDisposition: "intent_recorded",
@@ -215,6 +311,82 @@ async function submitSafeStop() {
     reason: "safe_stop_process_gone",
   };
   return service.reportAmuxV22LegacySafeStopEvidence(report);
+}
+
+async function prepareUnknownRiskSafeStop(protocolCapabilities = ["read_only_retry_v1"]) {
+  reset();
+  world.retryRuntime.protocolCapabilities = protocolCapabilities;
+  if (protocolCapabilities.length === 1 &&
+      protocolCapabilities[0] === "read_only_api_retry_v1") {
+    process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED = "true";
+    process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID =
+      "first-task-anthropic";
+    process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST =
+      "a".repeat(64);
+    process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST =
+      "b".repeat(64);
+    process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST =
+      "c".repeat(64);
+  }
+  world.task.id = AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID;
+  world.task.taskRole = "investigate";
+  world.task.revision = 7;
+  world.task.v4BriefDigest = "9".repeat(64);
+  world.attempt.id = AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID;
+  world.attempt.taskId = AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID;
+  world.attempt.taskRevision = 7;
+  world.task.executionAttempts = [world.attempt];
+  const service = await load();
+  await service.requestAmuxV22RecoveryInspection({ session: owner,
+    request: new Request("https://tomverse.test"), action: "request_inspection",
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID, requestId });
+  const source = await submitEvidence({ hostInvocationId: null,
+    reason: "legacy_invocation_unbound",
+    proof: { terminalOutcome: "unknown", sameLiveInvocation: false,
+      noActiveExecution: false, processTreeStopped: false, rootOwnedUnit: false,
+      controlGroupBound: false, journalBound: false, socketTerminal: false,
+      externalEffectsKnown: false, workspaceClean: true } });
+  const riskRequestId = "35f8124e-e122-4d4f-bb42-ec75fc95ef5a";
+  await service.acceptAmuxV22UnknownPriorEffects({ session: owner,
+    request: new Request("https://tomverse.test"), action: "accept_unknown_prior_effects",
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+    sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
+    requestId: riskRequestId, acceptRisk: true });
+  await service.requestAmuxV22LegacySafeStop({ session: owner,
+    request: new Request("https://tomverse.test"), action: "request_safe_stop",
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+    sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
+    requestId: safeStopRequestId });
+  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([{
+    worker_name: "codex-test", provider: "anthropic", model: "claude-opus",
+    routing_roles: ["investigate"], tool_capabilities: ["repo_read"],
+    archived: false, paused: false, isolated: false, blocked: false }]);
+  process.env.TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON = JSON.stringify([{
+    worker_name: "codex-test", provider: "anthropic", model: "claude-opus",
+    routing_roles: ["investigate"], tool_capabilities: ["repo_read"] }]);
+  world.routeWorkerName = "codex-test";
+  await submitSafeStop();
+  return { service, source, riskRequestId };
+}
+
+async function submitReadOnlyLaunchProof() {
+  const service = await load();
+  const check = world.launchChecks[0]!;
+  const pending = await service.pendingAmuxV22LegacySafeStops();
+  const request = pending.requests.find((candidate) =>
+    "launchCheckId" in candidate && candidate.launchCheckId === check.id);
+  assert.ok(request && "launchScope" in request);
+  const nominalScope = request.launchScope;
+  const actualScope = { ...nominalScope, launcherConfigDigest: "7".repeat(64) };
+  const report = amuxV22ReadOnlyLaunchProofSchema.parse({
+    ...request, launchScope: actualScope,
+    launchProofId: "97037c9c-d382-43fb-9409-69ed89f76f10", observation: "current" });
+  await service.reportAmuxV22ReadOnlyLaunchProof(report);
+  return service.readAmuxV22TaskRecovery(owner,
+    AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, safeStopRequestId);
 }
 
 test("inspection and approval use real stored IDs, preserve old unknown spend, and create no attempt or ledger", async () => {
@@ -286,6 +458,7 @@ test("the actual no-memory legacy producer stays unknown through the checker and
   const capture: { transmitted?: AmuxV22RecoveryEvidenceInput } = {};
   try {
     const handler = createAmuxV22SidecarHandler({ worker: "claude-test", stateDir,
+      protocolCapabilities: () => ["read_only_retry_v1"],
       quota: undefined, recoveryUnit: undefined, recoveryWorkspace: undefined,
       run: async () => {
         throw new Error("provider execution is not allowed in this regression");
@@ -325,6 +498,274 @@ test("the actual no-memory legacy producer stays unknown through the checker and
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
+});
+test("the actual unknown producer authorizes only the approved FIRST Task risk intent without execution", async () => {
+  reset();
+  world.task.id = AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID;
+  world.task.taskRole = "investigate";
+  world.task.revision = 7;
+  world.task.v4BriefDigest = "9".repeat(64);
+  world.attempt.id = AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID;
+  world.attempt.taskId = AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID;
+  world.attempt.taskRevision = 7;
+  world.task.executionAttempts = [world.attempt];
+  const service = await load();
+  const inspectionRequestId = "6e07ad55-33ca-4c71-9a5b-30f052bbb5b8";
+  const riskRequestId = "35f8124e-e122-4d4f-bb42-ec75fc95ef5a";
+  await service.requestAmuxV22RecoveryInspection({ session: owner,
+    request: new Request("https://tomverse.test"), action: "request_inspection",
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+    requestId: inspectionRequestId });
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-recovery-risk-intent-"));
+  try {
+    const handler = createAmuxV22SidecarHandler({ worker: "claude-test", stateDir,
+      protocolCapabilities: () => ["read_only_retry_v1"],
+      quota: undefined, recoveryUnit: undefined, recoveryWorkspace: undefined,
+      run: async () => { throw new Error("risk acceptance must not run the provider"); } });
+    await runAmuxV22RecoveryCheckerOnce({ enabled: "1", workerName: "claude-test",
+      socketPath: "/run/tomverse-amux-v22-claude-test/task.sock",
+      syncSecret: "i".repeat(40), internalUrl: "https://tomverse.test/" }, {
+      fetcher: async (_url: URL, init: RequestInit) => init.method === "GET" ?
+        Response.json(await service.pendingAmuxV22RecoveryInspections("claude-test")) :
+        Response.json(await service.reportAmuxV22RecoveryEvidence(
+          JSON.parse(String(init.body)) as AmuxV22RecoveryEvidenceInput)),
+      inspectSocket: async (_path: string, body: unknown) => handler(body),
+    });
+    const source = await service.readAmuxV22TaskRecovery(owner,
+      AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, inspectionRequestId);
+    assert.equal(source.state, "unverified");
+    assert.equal(source.reason, "legacy_invocation_unbound");
+    const beforeTask = structuredClone(world.task);
+    const accepted = await service.acceptAmuxV22UnknownPriorEffects({ session: owner,
+      request: new Request("https://tomverse.test"), action: "accept_unknown_prior_effects",
+      taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+      priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+      sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
+      requestId: riskRequestId, acceptRisk: true });
+    assert.equal(accepted.state, "pending");
+    assert.equal(accepted.riskAcceptance?.oldHeldMicroUsd, "3400000");
+    assert.equal(accepted.riskAcceptance?.worstExposureMicroUsd, "6800000");
+    assert.equal(accepted.riskAcceptance?.executionStarted, false);
+    assert.equal(accepted.riskAcceptance?.reservationCreated, false);
+    assert.deepEqual(world.task, beforeTask);
+    assert.equal(world.risks.length, 1);
+    assert.equal(world.approvals.length + world.launchChecks.length + world.launchProofs.length +
+      world.attemptWrites + world.ledgerWrites, 0);
+    await service.acceptAmuxV22UnknownPriorEffects({ session: owner,
+      request: new Request("https://tomverse.test"), action: "accept_unknown_prior_effects",
+      taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+      priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+      sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
+      requestId: riskRequestId, acceptRisk: true });
+    assert.equal(world.risks.length, 1);
+    const outsideScope = amuxV22RecoveryAdminSchema.safeParse({ action: "accept_unknown_prior_effects",
+      taskId: "task-outside-approved-scope", expectedRevision: 7,
+      priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+      sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
+      requestId: "97037c9c-d382-43fb-9409-69ed89f76f10", acceptRisk: true });
+    assert.equal(outsideScope.success, false);
+    assert.equal(world.risks.length, 1);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+test("the trusted root proof replaces only the nominal launcher digest and stores the actual scope", async () => {
+  reset();
+  const service = await load();
+  const riskId = "35f8124e-e122-4d4f-bb42-ec75fc95ef5a";
+  const checkId = "6e07ad55-33ca-4c71-9a5b-30f052bbb5b8";
+  const proofId = "97037c9c-d382-43fb-9409-69ed89f76f10";
+  const evidenceId = "76737099-0932-4cb2-b075-6d2805b16303";
+  const riskDigest = "1".repeat(64);
+  const profile = configuredAmuxV22RecoveryProfile("claude-test")!;
+  const nominalScope = amuxV22ReadOnlyLaunchScope({
+    profileConfigDigest: profile.profileConfigDigest });
+  const actualScope = { ...nominalScope, launcherConfigDigest: "7".repeat(64) };
+  world.risks.push({ id: riskId, acceptanceDigest: riskDigest });
+  world.inspections.push({ id: safeStopRequestId, riskAcceptanceId: riskId,
+    riskAcceptanceDigest: riskDigest });
+  world.evidence.push({ id: evidenceId, inspectionId: safeStopRequestId,
+    requestKind: "safe_stop", verified: true, reason: null,
+    evidenceDigest: "2".repeat(64) });
+  const check = { id: checkId, requestDigest: "3".repeat(64),
+    riskAcceptanceId: riskId, riskAcceptanceDigest: riskDigest,
+    sourceEvidenceId: evidenceId, sourceEvidenceDigest: "2".repeat(64),
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, taskRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+    workerName: "claude-test", workerInstanceId: instanceId, workerGeneration: 2,
+    targetHost: "amux-ubuntu", launchBindingId: requestId,
+    briefDigest: "4".repeat(64), provider: "anthropic", modelId: "claude-opus",
+    routeId: "route-1", routePolicyDigest: "5".repeat(64),
+    catalogApprovalId: "catalog-id", catalogVersion: "catalog-1",
+    pricingVersion: "price-1", costReceiptDigest: "6".repeat(64),
+    costDigest: "8".repeat(64), additionalCapMicroUsd: BigInt(3_400_000),
+    worstExposureMicroUsd: BigInt(6_800_000), launchScope: nominalScope,
+    launchScopeDigest: amuxV22ReadOnlyLaunchScopeDigest(nominalScope),
+    authorizationAuditLogId: "audit-check", requestedAt: now };
+  world.launchChecks.push(check);
+  world.audits.push({ id: "audit-check", action: "amux.v22.recovery.read_only_launch_requested",
+    targetType: "AmuxV22ReadOnlyLaunchCheck", targetId: checkId,
+    actorUserId: null, actorEmail: null, ipAddress: null, userAgent: null,
+    metadata: { systemActor: "amux-v22-recovery-controller" }, entryHash: "9".repeat(64) });
+  const report = { requestKind: "read_only_launch_check" as const,
+    launchCheckId: checkId, requestDigest: check.requestDigest,
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, taskRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+    workerName: check.workerName, workerInstanceId: instanceId, workerGeneration: 2,
+    targetHost: "amux-ubuntu" as const, sourceEvidenceId: evidenceId,
+    sourceEvidenceDigest: check.sourceEvidenceDigest, riskAcceptanceId: riskId,
+    riskAcceptanceDigest: riskDigest, launchBindingId: requestId,
+    briefDigest: check.briefDigest, provider: "anthropic", modelId: "claude-opus",
+    routeId: "route-1", routePolicyDigest: check.routePolicyDigest,
+    catalogApprovalId: "catalog-id", catalogVersion: "catalog-1",
+    pricingVersion: "price-1", costReceiptDigest: check.costReceiptDigest,
+    additionalCapMicroUsd: "3400000", worstExposureMicroUsd: "6800000",
+    launchScope: actualScope, launchProofId: proofId, observation: "current" as const };
+  const parsedReport = amuxV22ReadOnlyLaunchProofSchema.parse(report);
+  const recorded = await service.reportAmuxV22ReadOnlyLaunchProof(parsedReport);
+  assert.equal(recorded.recorded, true);
+  assert.equal(world.launchProofs[0]!.verified, true);
+  assert.equal((world.launchProofs[0]!.report as typeof report).launchScope.launcherConfigDigest,
+    actualScope.launcherConfigDigest);
+  assert.equal((world.audits.at(-1)!.metadata as Row).launchScopeDigest,
+    amuxV22ReadOnlyLaunchScopeDigest(actualScope));
+  await assert.rejects(service.reportAmuxV22ReadOnlyLaunchProof(
+    amuxV22ReadOnlyLaunchProofSchema.parse({ ...report,
+    launchProofId: "8b465370-568a-4a78-b9dd-31dfd5413f95",
+    launchScope: { ...actualScope, toolPolicyDigest: "0".repeat(64) } })),
+  /read_only_launch_binding_mismatch/);
+  assert.equal(world.launchProofs.length, 1);
+});
+test("only an exact read-only protocol capability can create a launch check", async () => {
+  for (const capabilities of [[], ["legacy_v1"],
+    ["read_only_retry_v1", "unexpected_v2"]]) {
+    await prepareUnknownRiskSafeStop(capabilities);
+    assert.equal(world.launchChecks.length, 0, JSON.stringify(capabilities));
+    assert.equal(world.approvals.length, 0, JSON.stringify(capabilities));
+    assert.equal(world.task.status, "blocked", JSON.stringify(capabilities));
+  }
+});
+test("the exact API capability binds a server-priced v40 frame through final consent", async () => {
+  const { service } = await prepareUnknownRiskSafeStop(["read_only_api_retry_v1"]);
+  assert.equal(world.launchChecks.length, 1);
+  const check = world.launchChecks[0]!;
+  assert.deepEqual(Object.keys(check.launchScope as Row).sort(), [
+    "apiExecutionFrameDigest", "executorKind", "launcherConfigDigest", "version",
+  ]);
+  assert.equal((check.launchScope as Row).executorKind, "read_only_api_retry_v1");
+  const checkAudit = world.audits.find((row) =>
+    row.action === "amux.v22.recovery.read_only_launch_requested")!;
+  assert.equal((checkAudit.metadata as Row).policyVersion, 40);
+  const pending = await service.pendingAmuxV22LegacySafeStops();
+  const launch = pending.requests.find((candidate) => "launchCheckId" in candidate);
+  assert.ok(launch && "apiExecutionFrame" in launch);
+  const launchFrame = launch.apiExecutionFrame;
+  assert.ok(launchFrame);
+  assert.equal(launchFrame.executorKind, "read_only_api_retry_v1");
+  assert.equal(launchFrame.maximumCostMicroUsd, 3_400_000);
+  assert.equal(launchFrame.credentialProfileId, "first-task-anthropic");
+  assert.equal(JSON.stringify(launch).includes("apiKey"), false);
+  const ready = await submitReadOnlyLaunchProof();
+  assert.equal(world.launchProofs.length, 1);
+  assert.equal((world.launchProofs[0]!.report as Row).apiExecutionFrame !== undefined, true);
+  const approved = await service.approveAmuxV22TaskRecovery({ session: owner,
+    request: new Request("https://tomverse.test"), action: "approve_attempt",
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+    requestId: approvalRequestId, inspectionId: ready.inspectionId!,
+    evidenceId: ready.evidenceId!, evidenceDigest: ready.evidenceDigest!,
+    costDigest: ready.cost!.costDigest,
+    riskAcceptanceId: ready.riskAcceptance!.id,
+    riskAcceptanceDigest: ready.riskAcceptance!.digest,
+    launchProofId: ready.launchProof!.id,
+    launchProofDigest: ready.launchProof!.digest, acceptRetry: true });
+  assert.equal(approved.state, "approved");
+  assert.equal(world.approvals.length, 1);
+  assert.equal((world.audits.at(-1)!.metadata as Row).policyVersion, 40);
+});
+test("final consent rechecks the exact runtime capability before any approval or Task write", async () => {
+  for (const capabilities of [[], ["legacy_v1"],
+    ["read_only_retry_v1", "unexpected_v2"]]) {
+    const { service } = await prepareUnknownRiskSafeStop();
+    assert.equal(world.launchChecks.length, 1);
+    const ready = await submitReadOnlyLaunchProof();
+    assert.ok(ready.cost, "launch binding must remain current");
+    world.retryRuntime.protocolCapabilities = capabilities;
+    await assert.rejects(service.approveAmuxV22TaskRecovery({ session: owner,
+      request: new Request("https://tomverse.test"), action: "approve_attempt",
+      taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+      priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+      requestId: approvalRequestId, inspectionId: ready.inspectionId!,
+      evidenceId: ready.evidenceId!, evidenceDigest: ready.evidenceDigest!,
+      costDigest: ready.cost!.costDigest,
+      riskAcceptanceId: ready.riskAcceptance!.id,
+      riskAcceptanceDigest: ready.riskAcceptance!.digest,
+      launchProofId: ready.launchProof!.id,
+      launchProofDigest: ready.launchProof!.digest, acceptRetry: true }),
+    /read_only_launch_proof_unverified/);
+    assert.equal(world.approvals.length, 0, JSON.stringify(capabilities));
+    assert.equal(world.task.status, "blocked", JSON.stringify(capabilities));
+    assert.equal(world.task.revision, 7, JSON.stringify(capabilities));
+  }
+});
+test("a current owner can resume the exact unconsumed risk with a fresh GET nonce", async () => {
+  const { service, riskRequestId } = await prepareUnknownRiskSafeStop();
+  const freshRequestId = "6f9bd126-0cc4-4a41-9075-95eeb65048a8";
+  const resumed = await service.readAmuxV22TaskRecovery(owner,
+    AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, freshRequestId);
+  assert.equal(resumed.requestId, freshRequestId);
+  assert.equal(resumed.riskAcceptance?.ownerRequestId, riskRequestId);
+  assert.equal(resumed.requestKind, "safe_stop");
+  assert.equal(resumed.inspectionId,
+    world.inspections.find((item) => item.requestKind === "safe_stop")!.id);
+  const otherOwner = await service.readAmuxV22TaskRecovery({
+    user: { id: "owner-2" }, expires: owner.expires },
+  AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, freshRequestId);
+  assert.equal(otherOwner.state, "not_visible");
+  const otherTask = await service.readAmuxV22TaskRecovery(owner,
+    "task-outside-approved-scope", freshRequestId);
+  assert.equal(otherTask.state, "not_visible");
+  const riskAcceptanceId = world.risks[0]!.id;
+  world.approvals.push({ id: "consumed-approval", ownerRequestId: approvalRequestId,
+    riskAcceptanceId });
+  const consumed = await service.readAmuxV22TaskRecovery(owner,
+    AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, "eac90d46-9c96-4988-95f3-95b83db4982b");
+  assert.equal(consumed.state, "not_visible");
+  world.approvals.pop();
+  world.task.revision = 8;
+  const changedRevision = await service.readAmuxV22TaskRecovery(owner,
+    AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, "1ae14ea5-7ef0-4e77-bf25-02c28f1a402f");
+  assert.equal(changedRevision.state, "not_visible");
+  assert.equal(world.changedOld + world.ledgerWrites + world.attemptWrites, 0);
+});
+test("an approved read-only snapshot remains valid 91 seconds after proof freshness", async () => {
+  const { service } = await prepareUnknownRiskSafeStop();
+  const ready = await submitReadOnlyLaunchProof();
+  const approved = await service.approveAmuxV22TaskRecovery({ session: owner,
+    request: new Request("https://tomverse.test"), action: "approve_attempt",
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+    requestId: approvalRequestId, inspectionId: ready.inspectionId!,
+    evidenceId: ready.evidenceId!, evidenceDigest: ready.evidenceDigest!,
+    costDigest: ready.cost!.costDigest,
+    riskAcceptanceId: ready.riskAcceptance!.id,
+    riskAcceptanceDigest: ready.riskAcceptance!.digest,
+    launchProofId: ready.launchProof!.id,
+    launchProofDigest: ready.launchProof!.digest, acceptRetry: true });
+  const prisma = new PrismaClient({ adapter: new PrismaPg({
+    connectionString: "postgresql://local-test:local-test@127.0.0.1:1/local-test",
+  }) });
+  const transaction = new Proxy(prisma, { get(target, property) {
+    return Reflect.has(tx, property) ? Reflect.get(tx, property) :
+      Reflect.get(target, property, target);
+  } });
+  try {
+    const authority = await service.readAmuxV22RecoveryAuthority(transaction,
+      AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, 8, approved.approvalId,
+      new Date(now.getTime() + 91_000));
+    assert.equal(authority?.id, approved.approvalId);
+  } finally { await prisma.$disconnect(); }
 });
 test("approval rechecks evidence freshness, ready, costs, incident, allowance, and compare-and-set", async () => {
   const service = await load();

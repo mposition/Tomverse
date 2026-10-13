@@ -11,8 +11,10 @@ import { adminAmuxRecoveryInspectionMessages } from "@/lib/adminMessages/amuxRec
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { bindAmuxRecoveryInspection, type AmuxOwnerRecoveryInspection,
   type AmuxRecoveryInspectionIdentity } from "@/lib/amux/ownerRecoveryInspectionCore";
-import type { AmuxV22RecoveryRead } from "@/lib/amux/v22TaskRecoveryCore";
-import { clearAmuxPendingRecovery, readAmuxPendingRecovery, saveAmuxPendingRecovery,
+import type { AmuxV22RecoveryCost, AmuxV22RecoveryRead } from "@/lib/amux/v22TaskRecoveryCore";
+import { clearAmuxAcceptedRiskResume, clearAmuxPendingRecovery,
+  readAmuxAcceptedRiskResume, readAmuxPendingRecovery,
+  saveAmuxAcceptedRiskResume, saveAmuxPendingRecovery,
   type AmuxPendingRecovery, type AmuxPendingRecoveryLoad, type RecoveryAction,
   type RecoveryReceiptBinding } from "@/lib/amux/ownerRecoveryPending";
 export type AmuxHostRecoveryRead = AmuxV22RecoveryRead & { recoveryEnabled?: boolean;
@@ -33,18 +35,82 @@ export type AmuxHostRecoveryState =
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null &&
   typeof value === "object" && !Array.isArray(value);
+const keys = (value: Record<string, unknown>, expected: string) =>
+  Object.keys(value).sort().join(",") === expected;
 const uuid = (value: unknown): value is string => typeof value === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const digest = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const money = (value: unknown): value is string => typeof value === "string" && /^(0|[1-9][0-9]{0,18})$/.test(value);
+const id = (value: unknown): value is string => typeof value === "string" &&
+  /^[A-Za-z0-9:_-]{1,128}$/.test(value);
+const version = (value: unknown): value is string => typeof value === "string" &&
+  value.length >= 1 && value.length <= 160;
+const recoveryCost = (value: unknown): value is AmuxV22RecoveryCost => {
+  if (!record(value) || !keys(value,
+    "additionalCapMicroUsd,catalogApprovalId,catalogVersion,costDigest,costReceiptDigest,oldHeldMicroUsd,pricingVersion,worstExposureMicroUsd")) return false;
+  return money(value.oldHeldMicroUsd) && money(value.additionalCapMicroUsd) &&
+    money(value.worstExposureMicroUsd) && BigInt(value.additionalCapMicroUsd) > BigInt(0) &&
+    BigInt(value.oldHeldMicroUsd) + BigInt(value.additionalCapMicroUsd) === BigInt(value.worstExposureMicroUsd) &&
+    digest(value.costReceiptDigest) && digest(value.costDigest) && version(value.catalogApprovalId) &&
+    version(value.catalogVersion) && version(value.pricingVersion);
+};
+const sameRecoveryCost = (left: AmuxV22RecoveryCost, right: AmuxV22RecoveryCost) =>
+  (["oldHeldMicroUsd", "additionalCapMicroUsd", "worstExposureMicroUsd", "catalogApprovalId",
+    "catalogVersion", "pricingVersion", "costReceiptDigest", "costDigest"] as const)
+    .every((key) => left[key] === right[key]);
+const recoveryRiskAcceptance = (value: unknown): value is NonNullable<AmuxV22RecoveryRead["riskAcceptance"]> =>
+  record(value) && keys(value,
+    "acceptedAt,additionalCapMicroUsd,digest,executionStarted,id,oldHeldMicroUsd,ownerRequestId,reservationCreated,sourceEvidenceDigest,sourceEvidenceId,worstExposureMicroUsd") &&
+  uuid(value.id) && digest(value.digest) && uuid(value.ownerRequestId) && uuid(value.sourceEvidenceId) &&
+  digest(value.sourceEvidenceDigest) && typeof value.acceptedAt === "string" &&
+  Number.isFinite(Date.parse(value.acceptedAt)) && money(value.oldHeldMicroUsd) &&
+  money(value.additionalCapMicroUsd) && money(value.worstExposureMicroUsd) &&
+  BigInt(value.oldHeldMicroUsd) + BigInt(value.additionalCapMicroUsd) === BigInt(value.worstExposureMicroUsd) &&
+  value.oldHeldMicroUsd === "3400000" && value.additionalCapMicroUsd === "3400000" &&
+  value.worstExposureMicroUsd === "6800000" &&
+  value.executionStarted === false && value.reservationCreated === false;
+const recoveryLaunchProof = (value: unknown): value is NonNullable<AmuxV22RecoveryRead["launchProof"]> =>
+  record(value) && keys(value,
+    "briefDigest,costReceiptDigest,digest,id,launchBindingId,launchScopeVersion,modelId,pricingVersion,provider,role,routeId,state,workerName") &&
+  uuid(value.id) && digest(value.digest) && uuid(value.launchBindingId) &&
+  ["current", "stale", "mismatch"].includes(String(value.state)) && id(value.workerName) &&
+  id(value.provider) && typeof value.modelId === "string" && value.modelId.length >= 1 &&
+  value.modelId.length <= 160 && id(value.routeId) && value.role === "investigate" &&
+  digest(value.briefDigest) && version(value.pricingVersion) && digest(value.costReceiptDigest) &&
+  value.launchScopeVersion === 1;
+const recoveryEligibility = (value: unknown): value is AmuxV22RecoveryRead["eligibility"] =>
+  record(value) && keys(value, "acceptUnknownPriorEffects,approveAttempt,reason,requestSafeStop") &&
+  typeof value.acceptUnknownPriorEffects === "boolean" && typeof value.requestSafeStop === "boolean" &&
+  typeof value.approveAttempt === "boolean" && (value.reason === null || ["exact_target_only",
+    "risk_acceptance_required", "safe_stop_required", "safe_stop_stale", "launch_proof_required",
+    "launch_proof_stale", "binding_changed", "already_approved"].includes(String(value.reason)));
+const recoveryGuards = (value: unknown): value is AmuxV22RecoveryRead["guards"] =>
+  record(value) && keys(value, "oldCost,priorEffects,readOnlyLaunch,taskAttemptLimit") &&
+  value.priorEffects === "unknown" && value.oldCost === "held" &&
+  value.readOnlyLaunch === "required" && value.taskAttemptLimit === 2;
 const approvalReceipt = (value: RecoveryReceiptBinding | undefined): value is RecoveryReceiptBinding &
   { inspectionId: string | null; evidenceId: string | null; evidenceDigest: string | null; costDigest: string } =>
   Boolean(value && "costDigest" in value);
+const riskApprovalReceipt = (value: RecoveryReceiptBinding | undefined): value is RecoveryReceiptBinding &
+  { riskAcceptanceId: string; riskAcceptanceDigest: string; launchProofId: string;
+    launchProofDigest: string; launchBindingId: string; workerName: string; provider: string;
+    modelId: string; routeId: string; briefDigest: string; pricingVersion: string;
+    costReceiptDigest: string } => Boolean(value && "costDigest" in value && "launchProofId" in value);
 const safeStopReceipt = (value: RecoveryReceiptBinding | undefined): value is RecoveryReceiptBinding &
   { sourceEvidenceId: string; sourceEvidenceDigest: string } => Boolean(value && "sourceEvidenceId" in value);
-const safeStopSourceEligible = (value: AmuxV22RecoveryRead | undefined): value is AmuxV22RecoveryRead =>
+const riskSafeStopReceipt = (value: RecoveryReceiptBinding | undefined): value is RecoveryReceiptBinding &
+  { riskAcceptanceId: string; riskAcceptanceDigest: string } =>
+  Boolean(value && "sourceEvidenceId" in value && "riskAcceptanceId" in value);
+const unknownRiskSourceEligible = (value: AmuxV22RecoveryRead | undefined): value is AmuxV22RecoveryRead =>
   Boolean(value && value.state === "unverified" && uuid(value.evidenceId) && digest(value.evidenceDigest) &&
     (value.requestKind === "safe_stop" || value.reason === "legacy_invocation_unbound"));
+const recoverySource = (value: AmuxV22RecoveryRead | undefined) => value?.riskAcceptance ? {
+  id: value.riskAcceptance.sourceEvidenceId, digest: value.riskAcceptance.sourceEvidenceDigest,
+} : value && uuid(value.evidenceId) && digest(value.evidenceDigest) ? {
+  id: value.evidenceId, digest: value.evidenceDigest,
+} : null;
+const safeStopSourceEligible = (value: AmuxV22RecoveryRead | undefined): value is AmuxV22RecoveryRead =>
+  Boolean(recoverySource(value) && (value?.riskAcceptance || unknownRiskSourceEligible(value)));
 export function bindAmuxHostRecovery(value: unknown, identity: AmuxRecoveryInspectionIdentity,
   requestId: string): AmuxHostRecoveryRead | null {
   if (!record(value) || value.taskId !== identity.taskId || value.requestId !== requestId ||
@@ -65,9 +131,20 @@ export function bindAmuxHostRecovery(value: unknown, identity: AmuxRecoveryInspe
        !Number.isSafeInteger(value.currentTask.revision) || Number(value.currentTask.revision) < 0 ||
        Number(value.currentTask.revision) > 2_147_483_647 ||
        !["backlog", "todo", "doing", "review", "blocked", "done", "cancelled"].includes(String(value.currentTask.status)))) return null;
+  if (!recoveryEligibility(value.eligibility) || !recoveryGuards(value.guards) ||
+      (value.cost !== null && !recoveryCost(value.cost)) ||
+      (value.quote !== null && !recoveryCost(value.quote)) ||
+      ((value.cost === null) !== (value.quote === null)) ||
+      (recoveryCost(value.cost) && recoveryCost(value.quote) && !sameRecoveryCost(value.cost, value.quote)) ||
+      (value.riskAcceptance !== null && !recoveryRiskAcceptance(value.riskAcceptance)) ||
+      (value.launchProof !== null && !recoveryLaunchProof(value.launchProof))) return null;
   if (value.state === "not_visible") return value.inspectionId === null && value.evidenceId === null &&
-    value.evidenceDigest === null && value.cost === null ? value as AmuxHostRecoveryRead : null;
-  if (!uuid(value.inspectionId) || value.priorAttemptId !== identity.attemptId ||
+    value.evidenceDigest === null && value.cost === null && value.quote === null &&
+    value.riskAcceptance === null && value.launchProof === null ? value as AmuxHostRecoveryRead : null;
+  const acceptanceOnly = value.state === "pending" && value.inspectionId === null &&
+    value.evidenceId === null && value.evidenceDigest === null && value.riskAcceptance !== null &&
+    value.launchProof === null;
+  if ((!acceptanceOnly && !uuid(value.inspectionId)) || value.priorAttemptId !== identity.attemptId ||
       value.taskRevision !== identity.taskRevision + (value.state === "approved" ? 1 : 0) ||
       (value.evidenceId !== null && !uuid(value.evidenceId)) ||
       (value.evidenceDigest !== null && !digest(value.evidenceDigest))) return null;
@@ -81,16 +158,9 @@ export function bindAmuxHostRecovery(value: unknown, identity: AmuxRecoveryInspe
         typeof name !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) ||
       typeof value.targetUnit !== "string" || value.targetUnit !==
         `tomverse-amux-v22-sidecar@${value.workerProfileAlias}.service` || !digest(value.profileConfigDigest))) return null;
-  if (value.cost !== null) {
-    if (!record(value.cost)) return null;
-    const cost = value.cost;
-    if (!money(cost.oldHeldMicroUsd) || !money(cost.additionalCapMicroUsd) ||
-        !money(cost.worstExposureMicroUsd) || BigInt(cost.additionalCapMicroUsd) <= BigInt(0) ||
-        BigInt(cost.oldHeldMicroUsd) + BigInt(cost.additionalCapMicroUsd) !== BigInt(cost.worstExposureMicroUsd) ||
-        !digest(cost.costReceiptDigest) || !digest(cost.costDigest) ||
-        ["catalogApprovalId", "catalogVersion", "pricingVersion"].some(key =>
-          typeof cost[key] !== "string" || !cost[key] || String(cost[key]).length > 160)) return null;
-  }
+  if (value.launchProof && recoveryCost(value.quote) &&
+      (value.launchProof.pricingVersion !== value.quote.pricingVersion ||
+       value.launchProof.costReceiptDigest !== value.quote.costReceiptDigest)) return null;
   return value as AmuxHostRecoveryRead;
 }
 
@@ -108,11 +178,29 @@ export async function fetchAmuxHostRecovery({ identity, requestId, action, displ
 }): Promise<AmuxHostRecoveryState | null> {
   if (!isCurrent() || controller.signal.aborted) return null;
   const unresolvedAction = unknownAction ?? action;
-  const receiptBinding = expectedReceipt ?? (action === "approve_attempt" && displayed?.cost ? {
-    inspectionId: displayed.inspectionId, evidenceId: displayed.evidenceId,
-    evidenceDigest: displayed.evidenceDigest, costDigest: displayed.cost.costDigest } :
-    action === "request_safe_stop" && displayed?.evidenceId && displayed.evidenceDigest ? {
-      sourceEvidenceId: displayed.evidenceId, sourceEvidenceDigest: displayed.evidenceDigest } : undefined);
+  const displayedSource = recoverySource(displayed);
+  const receiptBinding = expectedReceipt ?? (action === "approve_attempt" && displayed?.cost ?
+    displayed.riskAcceptance && displayed.launchProof ? {
+      inspectionId: displayed.inspectionId, evidenceId: displayed.evidenceId,
+      evidenceDigest: displayed.evidenceDigest, costDigest: displayed.cost.costDigest,
+      riskAcceptanceId: displayed.riskAcceptance.id,
+      riskAcceptanceDigest: displayed.riskAcceptance.digest,
+      launchProofId: displayed.launchProof.id, launchProofDigest: displayed.launchProof.digest,
+      launchBindingId: displayed.launchProof.launchBindingId, workerName: displayed.launchProof.workerName,
+      provider: displayed.launchProof.provider, modelId: displayed.launchProof.modelId,
+      routeId: displayed.launchProof.routeId, briefDigest: displayed.launchProof.briefDigest,
+      pricingVersion: displayed.launchProof.pricingVersion,
+      costReceiptDigest: displayed.launchProof.costReceiptDigest,
+    } : { inspectionId: displayed.inspectionId, evidenceId: displayed.evidenceId,
+      evidenceDigest: displayed.evidenceDigest, costDigest: displayed.cost.costDigest } :
+    (action === "request_safe_stop" || action === "accept_unknown_prior_effects") &&
+      displayedSource ? {
+        sourceEvidenceId: displayedSource.id, sourceEvidenceDigest: displayedSource.digest,
+        ...(action === "request_safe_stop" && displayed?.riskAcceptance ? {
+          riskAcceptanceId: displayed.riskAcceptance.id,
+          riskAcceptanceDigest: displayed.riskAcceptance.digest,
+        } : {}),
+      } : undefined);
   let unresolvedWrite = unknownWrite;
   let rejectAborted!: (reason: unknown) => void;
   const aborted = new Promise<never>((_resolve, reject) => { rejectAborted = reject; });
@@ -143,15 +231,43 @@ export async function fetchAmuxHostRecovery({ identity, requestId, action, displ
     if (!data) return unresolvedWrite || action ? unavailable(null, true) : { state: "changed" };
     if ((unresolvedWrite || action) && (data.state === "not_visible" ||
         (unresolvedAction === "approve_attempt" && data.state !== "approved") ||
-        (unresolvedAction === "request_safe_stop" && data.requestKind !== "safe_stop")))
+        (unresolvedAction === "request_safe_stop" && data.requestKind !== "safe_stop") ||
+        (unresolvedAction === "accept_unknown_prior_effects" &&
+          data.riskAcceptance?.ownerRequestId !== requestId)))
       return unavailable(null, true);
     if (data.state === "approved" && approvalReceipt(receiptBinding) &&
         (data.inspectionId !== receiptBinding.inspectionId || data.evidenceId !== receiptBinding.evidenceId ||
          data.evidenceDigest !== receiptBinding.evidenceDigest || data.cost?.costDigest !== receiptBinding.costDigest))
       return unavailable(null, true);
+    if (data.state === "approved" && approvalReceipt(receiptBinding) &&
+        !riskApprovalReceipt(receiptBinding) && (data.riskAcceptance !== null || data.launchProof !== null))
+      return unavailable(null, true);
+    if (data.state === "approved" && riskApprovalReceipt(receiptBinding) &&
+        (data.riskAcceptance?.id !== receiptBinding.riskAcceptanceId ||
+         data.riskAcceptance?.digest !== receiptBinding.riskAcceptanceDigest ||
+         data.launchProof?.id !== receiptBinding.launchProofId ||
+         data.launchProof?.digest !== receiptBinding.launchProofDigest ||
+         data.launchProof?.launchBindingId !== receiptBinding.launchBindingId ||
+         data.launchProof?.workerName !== receiptBinding.workerName ||
+         data.launchProof?.provider !== receiptBinding.provider ||
+         data.launchProof?.modelId !== receiptBinding.modelId ||
+         data.launchProof?.routeId !== receiptBinding.routeId ||
+         data.launchProof?.briefDigest !== receiptBinding.briefDigest ||
+         data.launchProof?.pricingVersion !== receiptBinding.pricingVersion ||
+         data.launchProof?.costReceiptDigest !== receiptBinding.costReceiptDigest)) return unavailable(null, true);
+    if (unresolvedAction === "accept_unknown_prior_effects" && safeStopReceipt(receiptBinding) &&
+        (data.riskAcceptance?.ownerRequestId !== requestId ||
+         data.riskAcceptance?.sourceEvidenceId !== receiptBinding.sourceEvidenceId ||
+         data.riskAcceptance?.sourceEvidenceDigest !== receiptBinding.sourceEvidenceDigest))
+      return unavailable(null, true);
     if (data.requestKind === "safe_stop" && safeStopReceipt(receiptBinding) &&
         (data.sourceEvidenceId !== receiptBinding.sourceEvidenceId ||
          data.sourceEvidenceDigest !== receiptBinding.sourceEvidenceDigest)) return unavailable(null, true);
+    if (data.requestKind === "safe_stop" && safeStopReceipt(receiptBinding) &&
+        !riskSafeStopReceipt(receiptBinding) && data.riskAcceptance !== null) return unavailable(null, true);
+    if (data.requestKind === "safe_stop" && riskSafeStopReceipt(receiptBinding) &&
+        (data.riskAcceptance?.id !== receiptBinding.riskAcceptanceId ||
+         data.riskAcceptance?.digest !== receiptBinding.riskAcceptanceDigest)) return unavailable(null, true);
     return { state: "ready", data };
   };
   const read = () => bounded(fetcher(`/api/admin/amux/execution-recovery?${new URLSearchParams({
@@ -164,12 +280,30 @@ export async function fetchAmuxHostRecovery({ identity, requestId, action, displ
       priorAttemptId: identity.attemptId, requestId,
       ...(action === "approve_attempt" ? { inspectionId: displayed?.inspectionId,
         evidenceId: displayed?.evidenceId, evidenceDigest: displayed?.evidenceDigest,
-        costDigest: displayed?.cost?.costDigest } : {}),
-      ...(action === "request_safe_stop" ? { sourceEvidenceId: displayed?.evidenceId,
-        sourceEvidenceDigest: displayed?.evidenceDigest } : {}) };
+        costDigest: displayed?.cost?.costDigest,
+        ...(displayed?.riskAcceptance && displayed.launchProof ? {
+          riskAcceptanceId: displayed.riskAcceptance.id,
+          riskAcceptanceDigest: displayed.riskAcceptance.digest,
+          launchProofId: displayed.launchProof.id,
+          launchProofDigest: displayed.launchProof.digest, acceptRetry: true,
+        } : {}) } : {}),
+      ...(action === "accept_unknown_prior_effects" ? {
+        sourceEvidenceId: displayedSource?.id,
+        sourceEvidenceDigest: displayedSource?.digest, acceptRisk: true,
+      } : {}),
+      ...(action === "request_safe_stop" ? { sourceEvidenceId: displayedSource?.id,
+        sourceEvidenceDigest: displayedSource?.digest } : {}) };
     if (action === "approve_attempt" && (!displayed || displayed.state !== "verified" ||
+        !displayed.cost || !displayed.eligibility.approveAttempt ||
+        (Boolean(displayed.riskAcceptance) !== Boolean(displayed.launchProof)) ||
+        (displayed.launchProof !== null && displayed.launchProof.state !== "current") ||
         !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return { state: "changed" };
+    if (action === "accept_unknown_prior_effects" && (!unknownRiskSourceEligible(displayed) ||
+        !displayed.eligibility.acceptUnknownPriorEffects || displayed.riskAcceptance !== null ||
+        !bindAmuxHostRecovery(displayed, identity, displayed.requestId)))
+      return { state: "changed" };
     if (action === "request_safe_stop" && (!safeStopSourceEligible(displayed) ||
+        !displayed.eligibility.requestSafeStop ||
         !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return { state: "changed" };
     try {
       const response = await bounded(fetcher("/api/admin/amux/execution-recovery", {
@@ -288,19 +422,27 @@ export function AmuxRecoveryInspectionView({ m, state, onInspect, onReloadReview
 
 export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest,
   onRefresh, onApprove, onReloadReview, canRequest, safeStopConfirmed = false,
-  onSafeStopConfirm = () => {}, onSafeStop = () => {}, busy = false, writesBlocked = false,
+  onSafeStopConfirm = () => {}, onSafeStop = () => {}, riskConfirmed = false,
+  onRiskConfirm = () => {}, onAcceptRisk = () => {}, busy = false, writesBlocked = false,
   storageBlocked = false }: {
   m: Messages; state: AmuxHostRecoveryState; confirmed: boolean;
   onConfirm: (value: boolean) => void; onRequest: () => void; onRefresh: () => void;
   onApprove: () => void; onReloadReview: () => void; canRequest: boolean; busy?: boolean;
   safeStopConfirmed?: boolean; onSafeStopConfirm?: (value: boolean) => void; onSafeStop?: () => void;
+  riskConfirmed?: boolean; onRiskConfirm?: (value: boolean) => void; onAcceptRisk?: () => void;
   writesBlocked?: boolean; storageBlocked?: boolean;
 }) {
   const data = state.state === "ready" ? state.data : null;
-  const canApprove = data?.state === "verified" && data.cost !== null && data.recoveryEnabled !== false &&
-    (data.requestKind !== "safe_stop" || data.safeStopEnabled === true);
+  const quote = data?.quote ?? null;
+  const exceptionApproval = Boolean(data?.riskAcceptance && data.launchProof);
+  const canApprove = data?.state === "verified" && quote !== null && data.recoveryEnabled !== false &&
+    data.eligibility.approveAttempt && (data.requestKind !== "safe_stop" || data.safeStopEnabled === true) &&
+    (!exceptionApproval || data.launchProof?.state === "current");
   const safeStopSource = safeStopSourceEligible(data ?? undefined);
-  const canSafeStop = safeStopSource && data?.recoveryEnabled !== false && data?.safeStopEnabled === true;
+  const canAcceptRisk = Boolean(data && safeStopSource && data.recoveryEnabled !== false &&
+    data.eligibility.acceptUnknownPriorEffects && data.riskAcceptance === null);
+  const canSafeStop = safeStopSource && data?.recoveryEnabled !== false && data?.safeStopEnabled === true &&
+    data.eligibility.requestSafeStop;
   const safeStopResult = data?.requestKind === "safe_stop" ? data : null;
   const requestId = data?.requestId ?? (state.state === "unavailable" ? state.requestId : null);
   const disabled = data?.recoveryEnabled === false || data?.reason === "recovery_disabled" ||
@@ -313,7 +455,8 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
     <div className="mt-3 flex flex-wrap gap-2">
       <button type="button" className={button} onClick={onRequest} data-testid="admin-amux-request-host-inspection"
         disabled={writesBlocked || disabled || busy || !canRequest || state.state === "loading" || state.state === "changed" ||
-          (state.state === "unavailable" && state.unknownWrite) || data?.state === "approved"}>
+          (state.state === "unavailable" && state.unknownWrite) || data?.state === "approved" ||
+          data?.riskAcceptance !== null && data?.riskAcceptance !== undefined}>
         {requestId ? m.host.requestAgain : m.host.request}</button>
       {requestId && <button type="button" className={button} onClick={onRefresh}
         data-testid="admin-amux-refresh-host-inspection" disabled={busy || state.state === "loading" || state.state === "changed"}>
@@ -330,12 +473,64 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
       {state.state === "changed" && <><p>{m.host.changed}</p><button type="button" className={`${button} mt-2`}
         onClick={onReloadReview}>{m.reloadReview}</button>
         {state.reason && <p className="mt-2 break-words">{m.host.reason}: {state.reason}</p>}</>}
-      {data && <><p>{disabled ? m.host.disabled : m.host.statuses[data.state]}</p>
+      {data && <><p>{disabled ? m.host.disabled :
+        data.riskAcceptance && data.inspectionId === null ? m.host.exception.accepted : m.host.statuses[data.state]}</p>
         {data.reason === "evidence_stale" && <p className="mt-2 text-amber-200">{m.host.stale}</p>}
         {data.reason === "legacy_invocation_unbound" && <p className="mt-2 text-amber-200">{m.host.legacy}</p>}
         {data.reason === "terminal_success" && <p className="mt-2 text-amber-200">{m.host.success}</p>}
       </>}
     </div>
+    {data && data.state !== "not_visible" && <section
+      className="mt-4 rounded-lg border border-amber-300/40 bg-amber-950/20 p-3"
+      data-testid="admin-amux-unknown-risk-exception">
+      <h6 className="font-semibold text-amber-100">{m.host.exception.title}</h6>
+      <p className="mt-2 text-amber-100/90">{m.host.exception.scope}</p>
+      <p className="mt-2 text-zinc-300">{m.host.exception.unknown}</p>
+      <p className="mt-1 text-zinc-300">{m.host.exception.held}</p>
+      {data.eligibility.reason && <p className="mt-3 text-amber-200"
+        data-testid="admin-amux-recovery-disabled-reason">
+        {m.host.exception.blocked}: {m.host.exception.reason[data.eligibility.reason]}
+        <span className="sr-only"> ({data.eligibility.reason})</span>
+      </p>}
+      {data.riskAcceptance === null && data.eligibility.acceptUnknownPriorEffects && <>
+        <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-3 py-2 text-zinc-100">
+          <input type="checkbox" checked={riskConfirmed} disabled={busy || writesBlocked || !canAcceptRisk}
+            onChange={event => onRiskConfirm(event.target.checked)}
+            data-testid="admin-amux-risk-accept-confirm" className="mt-1 h-4 w-4 shrink-0 accent-blue-500" />
+          <span>{m.host.exception.confirm}</span>
+        </label>
+        <button type="button" className={`${button} mt-2`} onClick={onAcceptRisk}
+          disabled={busy || writesBlocked || !canAcceptRisk || !riskConfirmed}
+          data-testid="admin-amux-accept-unknown-risk">{m.host.exception.accept}</button>
+      </>}
+      {data.riskAcceptance && <div className="mt-3 border-t border-amber-300/20 pt-3"
+        data-testid="admin-amux-risk-acceptance-receipt">
+        <p className="font-semibold text-zinc-100">{m.host.exception.accepted}</p>
+        <p className="mt-1 text-zinc-300">{m.host.exception.acceptedBoundary}</p>
+        <dl className="mt-2 space-y-2 break-words text-zinc-300">
+          <div><dt className="font-semibold text-zinc-100">{m.host.exception.acceptanceId}</dt>
+            <dd>{data.riskAcceptance.id}</dd></div>
+          <div><dt className="font-semibold text-zinc-100">{m.host.exception.acceptedAt}</dt>
+            <dd>{data.riskAcceptance.acceptedAt}</dd></div>
+        </dl>
+        <div className="mt-3 border-t border-zinc-700 pt-3">
+          <p className="font-semibold text-zinc-100">{m.host.exception.launchTitle}</p>
+          {!data.launchProof && <p className="mt-1 text-amber-200">{m.host.exception.launchMissing}</p>}
+          {data.launchProof && <dl className="mt-2 grid gap-3 break-words sm:grid-cols-2"
+            data-testid="admin-amux-read-only-launch-proof">
+            <div><dt className="font-semibold text-zinc-100">{m.host.exception.launchStatus}</dt>
+              <dd>{m.host.exception.launchState[data.launchProof.state]}</dd></div>
+            <div><dt className="font-semibold text-zinc-100">{m.host.exception.role}</dt><dd>{data.launchProof.role}</dd></div>
+            <div><dt className="font-semibold text-zinc-100">{m.host.exception.worker}</dt><dd>{data.launchProof.workerName}</dd></div>
+            <div><dt className="font-semibold text-zinc-100">{m.host.exception.provider}</dt><dd>{data.launchProof.provider}</dd></div>
+            <div><dt className="font-semibold text-zinc-100">{m.host.exception.model}</dt><dd>{data.launchProof.modelId}</dd></div>
+            <div><dt className="font-semibold text-zinc-100">{m.host.exception.route}</dt><dd>{data.launchProof.routeId}</dd></div>
+            <div><dt className="font-semibold text-zinc-100">{m.host.exception.binding}</dt><dd>{data.launchProof.launchBindingId}</dd></div>
+            <div><dt className="font-semibold text-zinc-100">{m.host.exception.brief}</dt><dd>{data.launchProof.briefDigest}</dd></div>
+          </dl>}
+        </div>
+      </div>}
+    </section>}
     {safeStopSource && <div className="mt-4 rounded-lg border border-amber-300/40 bg-amber-950/20 p-3"
       data-testid="admin-amux-safe-stop-risk">
       <h6 className="font-semibold text-amber-100">{m.host.safeStop.title}</h6>
@@ -371,7 +566,8 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
       </dl>
       <div className="mt-3 border-t border-zinc-700 pt-3">
         <p className="font-semibold text-zinc-100">{m.host.safeStop.nextApproval}</p>
-        <p className="mt-1 text-zinc-300">{safeStopResult.state === "verified" ?
+        <p className="mt-1 text-zinc-300">{safeStopResult.state === "verified" &&
+          safeStopResult.eligibility.approveAttempt ?
           m.host.safeStop.nextApprovalReady : m.host.safeStop.nextApprovalBlocked}</p>
       </div>
     </section>}
@@ -393,28 +589,28 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
         </>}
       </dl>
     </details>}
-    {data?.cost && <>
+    {quote && <>
       <dl className="mt-4 grid gap-4 sm:grid-cols-3">
-        <div><dt className="font-semibold text-zinc-100">{m.host.oldHeld}</dt><dd className="mt-1">{amount(data.cost.oldHeldMicroUsd, m.unknown)}</dd></div>
-        <div><dt className="font-semibold text-zinc-100">{m.host.additional}</dt><dd className="mt-1">{amount(data.cost.additionalCapMicroUsd, m.unknown)}</dd></div>
-        <div><dt className="font-semibold text-zinc-100">{m.host.worst}</dt><dd className="mt-1">{amount(data.cost.worstExposureMicroUsd, m.unknown)}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{m.host.oldHeld}</dt><dd className="mt-1">{amount(quote.oldHeldMicroUsd, m.unknown)}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{m.host.additional}</dt><dd className="mt-1">{amount(quote.additionalCapMicroUsd, m.unknown)}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{m.host.worst}</dt><dd className="mt-1">{amount(quote.worstExposureMicroUsd, m.unknown)}</dd></div>
       </dl>
       <p className="mt-3 text-zinc-400">{m.host.costBoundary}</p>
       <dl className="mt-3 space-y-2 break-words text-zinc-300">
-        <div><dt className="font-semibold text-zinc-100">{m.host.catalog}</dt><dd>{data.cost.catalogApprovalId} · {data.cost.catalogVersion}</dd></div>
-        <div><dt className="font-semibold text-zinc-100">{m.host.pricing}</dt><dd>{data.cost.pricingVersion}</dd></div>
-        <div><dt className="font-semibold text-zinc-100">{m.host.costReceipt}</dt><dd>{data.cost.costReceiptDigest}</dd></div>
-        <div><dt className="font-semibold text-zinc-100">{m.host.costDigest}</dt><dd>{data.cost.costDigest}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{m.host.catalog}</dt><dd>{quote.catalogApprovalId} · {quote.catalogVersion}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{m.host.pricing}</dt><dd>{quote.pricingVersion}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{m.host.costReceipt}</dt><dd>{quote.costReceiptDigest}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{m.host.costDigest}</dt><dd>{quote.costDigest}</dd></div>
       </dl>
     </>}
     {canApprove && <div className="mt-4 border-t border-zinc-700 pt-3">
       <label className="flex min-h-11 cursor-pointer items-start gap-3 py-2 text-zinc-100">
         <input type="checkbox" checked={confirmed} disabled={busy || writesBlocked} onChange={event => onConfirm(event.target.checked)}
           data-testid="admin-amux-recovery-cost-confirm" className="mt-1 h-4 w-4 shrink-0 accent-blue-500" />
-        <span>{m.host.confirm}</span>
+        <span>{exceptionApproval ? m.host.exception.finalConfirm : m.host.confirm}</span>
       </label>
       <button type="button" className={`${button} mt-2`} onClick={onApprove} disabled={busy || writesBlocked || !confirmed}
-        data-testid="admin-amux-approve-recovery">{m.host.approve}</button>
+        data-testid="admin-amux-approve-recovery">{exceptionApproval ? m.host.exception.finalApprove : m.host.approve}</button>
     </div>}
     {data?.state === "approved" && <button type="button" className={`${button} mt-3`}
       onClick={onReloadReview} data-testid="admin-amux-recovery-history">{m.host.trace}</button>}
@@ -431,6 +627,7 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
   const [state, setState] = useState<AmuxRecoveryInspectionState>({ state: "idle" });
   const [host, setHost] = useState<AmuxHostRecoveryState>({ state: "idle" });
   const [confirmed, setConfirmed] = useState(false);
+  const [riskConfirmed, setRiskConfirmed] = useState(false);
   const [safeStopConfirmed, setSafeStopConfirmed] = useState(false);
   const [pendingStorage, setPendingStorage] = useState<AmuxPendingRecoveryLoad | { state: "loading" }>({ state: "loading" });
   const pendingRecovery = useRef<AmuxPendingRecovery | null>(null);
@@ -443,17 +640,36 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
   useEffect(() => {
     let disposed = false;
     const restored = readAmuxPendingRecovery(identity.taskId);
+    const resume = restored.state === "empty" ?
+      readAmuxAcceptedRiskResume(identity.taskId) : null;
+    const resumeRequestId = resume?.priorAttemptId === identity.attemptId ?
+      crypto.randomUUID() : null;
     queueMicrotask(() => {
       if (disposed) return;
-      setPendingStorage(restored); setConfirmed(false); setSafeStopConfirmed(false);
+      setPendingStorage(restored); setConfirmed(false); setRiskConfirmed(false); setSafeStopConfirmed(false);
       pendingRecovery.current = restored.state === "pending" ? restored.pending : null;
-      hostRequestId.current = restored.state === "pending" ? restored.pending.requestId : null;
+      hostRequestId.current = restored.state === "pending" ? restored.pending.requestId : resumeRequestId;
       setHost(restored.state === "pending" ? { state: "unavailable", failure: null,
         requestId: restored.pending.requestId, unknownWrite: true, unknownAction: restored.pending.action,
-        ...(restored.pending.expectedReceipt ? { expectedReceipt: restored.pending.expectedReceipt } : {}) } : { state: "idle" });
+        ...(restored.pending.expectedReceipt ? { expectedReceipt: restored.pending.expectedReceipt } : {}) } :
+        resumeRequestId ? { state: "loading" } : { state: "idle" });
+      if (resumeRequestId) {
+        const controller = new AbortController(); active.current = controller;
+        const current = ++requestId.current;
+        const isCurrent = () => !disposed && current === requestId.current &&
+          active.current === controller;
+        void fetchAmuxHostRecovery({ identity: { taskId: identity.taskId,
+          taskRevision: identity.taskRevision, attemptId: identity.attemptId },
+          requestId: resumeRequestId,
+          controller, isCurrent, fallback: m.host.unavailable, locale }).then(next => {
+          if (!isCurrent()) return;
+          if (next) setHost(next);
+          active.current = null;
+        });
+      }
     });
     return () => { disposed = true; requestId.current += 1; active.current?.abort(); active.current = null; };
-  }, [identity.taskId, identity.taskRevision, identity.attemptId]);
+  }, [identity.taskId, identity.taskRevision, identity.attemptId, locale, m.host.unavailable]);
   const inspect = async () => {
     if (active.current) return;
     const controller = new AbortController();
@@ -480,19 +696,43 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
       if (action) { setHost(unresolvedState(pending)); return; }
     } else if (stored.state !== "empty" || identity.attemptId === null) return;
     const displayed = host.state === "ready" ? host.data : undefined;
+    const source = recoverySource(displayed);
+    if (action === "request_inspection" && displayed?.riskAcceptance) return;
     if (action === "approve_attempt" && (!displayed || displayed.state !== "verified" ||
-        !displayed.cost || !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return;
+        !displayed.cost || !displayed.eligibility.approveAttempt ||
+        !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return;
+    if (action === "accept_unknown_prior_effects" && (!unknownRiskSourceEligible(displayed) ||
+        !displayed.eligibility.acceptUnknownPriorEffects || displayed.riskAcceptance !== null ||
+        !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return;
     if (action === "request_safe_stop" && (!safeStopSourceEligible(displayed) ||
+        !displayed.eligibility.requestSafeStop ||
         !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return;
     const id = pending?.requestId ?? (action ? crypto.randomUUID() : hostRequestId.current);
     if (!id) return;
     if (action) {
       const proposed: AmuxPendingRecovery = { version: 1,
         identity: { ...identity, attemptId: identity.attemptId! }, requestId: id, action,
-        expectedReceipt: action === "approve_attempt" ? { inspectionId: displayed!.inspectionId,
+        expectedReceipt: action === "approve_attempt" ? displayed!.riskAcceptance && displayed!.launchProof ? {
+          inspectionId: displayed!.inspectionId, evidenceId: displayed!.evidenceId,
+          evidenceDigest: displayed!.evidenceDigest, costDigest: displayed!.cost!.costDigest,
+          riskAcceptanceId: displayed!.riskAcceptance.id,
+          riskAcceptanceDigest: displayed!.riskAcceptance.digest,
+          launchProofId: displayed!.launchProof.id, launchProofDigest: displayed!.launchProof.digest,
+          launchBindingId: displayed!.launchProof.launchBindingId,
+          workerName: displayed!.launchProof.workerName, provider: displayed!.launchProof.provider,
+          modelId: displayed!.launchProof.modelId, routeId: displayed!.launchProof.routeId,
+          briefDigest: displayed!.launchProof.briefDigest,
+          pricingVersion: displayed!.launchProof.pricingVersion,
+          costReceiptDigest: displayed!.launchProof.costReceiptDigest,
+        } : { inspectionId: displayed!.inspectionId,
           evidenceId: displayed!.evidenceId, evidenceDigest: displayed!.evidenceDigest,
-          costDigest: displayed!.cost!.costDigest } : action === "request_safe_stop" ? {
-          sourceEvidenceId: displayed!.evidenceId!, sourceEvidenceDigest: displayed!.evidenceDigest!,
+          costDigest: displayed!.cost!.costDigest } :
+          action === "request_safe_stop" || action === "accept_unknown_prior_effects" ? {
+          sourceEvidenceId: source!.id, sourceEvidenceDigest: source!.digest,
+          ...(action === "request_safe_stop" && displayed!.riskAcceptance ? {
+            riskAcceptanceId: displayed!.riskAcceptance.id,
+            riskAcceptanceDigest: displayed!.riskAcceptance.digest,
+          } : {}),
         } : null };
       const saved = saveAmuxPendingRecovery(proposed);
       setPendingStorage(saved);
@@ -504,7 +744,7 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     const controller = new AbortController(); active.current = controller;
     const current = ++requestId.current;
     const isCurrent = () => current === requestId.current && active.current === controller;
-    setConfirmed(false); setSafeStopConfirmed(false); setHost({ state: "loading" });
+    setConfirmed(false); setRiskConfirmed(false); setSafeStopConfirmed(false); setHost({ state: "loading" });
     const next = await fetchAmuxHostRecovery({ identity: pending?.identity ?? identity, requestId: id, action, displayed,
       unknownWrite: Boolean(pending && !action), unknownAction: pending?.action,
       expectedReceipt: pending?.expectedReceipt ?? undefined,
@@ -515,13 +755,28 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
       const safeStopConfirmedResult = next.state === "ready" && safeStopReceipt(pendingReceipt) &&
         next.data.requestKind === "safe_stop" &&
         next.data.sourceEvidenceId === pendingReceipt.sourceEvidenceId &&
-        next.data.sourceEvidenceDigest === pendingReceipt.sourceEvidenceDigest;
+        next.data.sourceEvidenceDigest === pendingReceipt.sourceEvidenceDigest &&
+        (!riskSafeStopReceipt(pendingReceipt) ||
+          (next.data.riskAcceptance?.id === pendingReceipt.riskAcceptanceId &&
+           next.data.riskAcceptance?.digest === pendingReceipt.riskAcceptanceDigest));
+      const riskAcceptanceConfirmedResult = next.state === "ready" && safeStopReceipt(pendingReceipt) &&
+        next.data.riskAcceptance?.ownerRequestId === pending.requestId &&
+        next.data.riskAcceptance.sourceEvidenceId === pendingReceipt.sourceEvidenceId &&
+        next.data.riskAcceptance.sourceEvidenceDigest === pendingReceipt.sourceEvidenceDigest;
       const confirmedResult = next.state === "ready" && next.data.state !== "not_visible" &&
         (pending.action === "approve_attempt" ? next.data.state === "approved" :
+         pending.action === "accept_unknown_prior_effects" ? riskAcceptanceConfirmedResult :
          pending.action === "request_safe_stop" ? safeStopConfirmedResult :
            next.data.state !== "approved");
-      if (confirmedResult && clearAmuxPendingRecovery(pending)) {
+      const resume = pending.action === "accept_unknown_prior_effects" ? {
+        version: 1 as const, taskId: pending.identity.taskId,
+        priorAttemptId: pending.identity.attemptId } : null;
+      const resumeStored = !resume || !confirmedResult || saveAmuxAcceptedRiskResume(resume);
+      if (confirmedResult && resumeStored && clearAmuxPendingRecovery(pending)) {
         pendingRecovery.current = null; setPendingStorage({ state: "empty" });
+        if (pending.action === "approve_attempt") clearAmuxAcceptedRiskResume({
+          version: 1, taskId: pending.identity.taskId,
+          priorAttemptId: pending.identity.attemptId });
         const sameIdentity = pending.identity.taskId === identity.taskId &&
           pending.identity.taskRevision === identity.taskRevision && pending.identity.attemptId === identity.attemptId;
         setHost(sameIdentity ? next : { state: "changed" });
@@ -538,9 +793,11 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
   return <><AmuxRecoveryInspectionView m={m} state={state} busy={busy} onInspect={() => void inspect()}
     onReloadReview={onReloadReview} date={date} />
     <AmuxHostRecoveryView m={m} state={host} busy={busy} confirmed={confirmed} onConfirm={setConfirmed}
+      riskConfirmed={riskConfirmed} onRiskConfirm={setRiskConfirmed}
       safeStopConfirmed={safeStopConfirmed} onSafeStopConfirm={setSafeStopConfirmed}
       writesBlocked={pendingStorage.state !== "empty"} storageBlocked={pendingStorage.state === "blocked"}
       onRequest={() => void recover("request_inspection")} onRefresh={() => void recover()}
+      onAcceptRisk={() => { if (riskConfirmed) void recover("accept_unknown_prior_effects"); }}
       onSafeStop={() => { if (safeStopConfirmed) void recover("request_safe_stop"); }}
       onApprove={() => { if (confirmed) void recover("approve_attempt"); }}
       onReloadReview={onReloadReview} canRequest={identity.attemptId !== null} /></>;

@@ -19,12 +19,16 @@ export type AmuxWorkerRegisteredFact = { workerName: string; generation: number 
 export type AmuxWorkerRuntimeStatus =
   "starting" | "idle" | "busy" | "error" | "stopped";
 
+export type AmuxWorkerProtocolCapability =
+  "read_only_retry_v1" | "read_only_api_retry_v1";
+
 export type AmuxWorkerRuntimeSnapshot = {
   workerName: string;
   instanceId: string;
   generation: number;
   status: string;
   dispatchReady: boolean;
+  protocolCapabilities: string[];
   heartbeatAt: Date;
   leaseExpiresAt: Date;
 };
@@ -60,6 +64,7 @@ export async function registerAmuxWorkerRuntime(
       "generation",
       "status",
       "dispatchReady",
+      "protocolCapabilities",
       "heartbeatAt",
       "leaseExpiresAt",
       "createdAt",
@@ -71,6 +76,7 @@ export async function registerAmuxWorkerRuntime(
       1,
       'starting',
       false,
+      ARRAY[]::TEXT[],
       ${now},
       ${leaseExpiresAt},
       ${now},
@@ -83,6 +89,7 @@ export async function registerAmuxWorkerRuntime(
         "AmuxWorkerRuntime"."generation" + 1,
       "status" = 'starting',
       "dispatchReady" = false,
+      "protocolCapabilities" = ARRAY[]::TEXT[],
       "heartbeatAt" = EXCLUDED."heartbeatAt",
       "leaseExpiresAt" = EXCLUDED."leaseExpiresAt",
       "updatedAt" = EXCLUDED."updatedAt"
@@ -93,6 +100,7 @@ export async function registerAmuxWorkerRuntime(
       "generation",
       "status",
       "dispatchReady",
+      "protocolCapabilities",
       "heartbeatAt",
       "leaseExpiresAt"
   `;
@@ -146,6 +154,7 @@ export async function heartbeatAmuxWorkerRuntime(input: {
   generation: number;
   status: AmuxWorkerRuntimeStatus;
   dispatchReady: boolean;
+  protocolCapabilities?: readonly AmuxWorkerProtocolCapability[];
   now?: Date;
 }): Promise<{
   accepted: boolean;
@@ -168,6 +177,7 @@ export async function heartbeatAmuxWorkerRuntime(input: {
           "generation",
           "status",
           "dispatchReady",
+          "protocolCapabilities",
           "heartbeatAt",
           "leaseExpiresAt"
         FROM "AmuxWorkerRuntime"
@@ -215,6 +225,8 @@ export async function heartbeatAmuxWorkerRuntime(input: {
       }
 
       const dispatchReady = input.status === "idle" && input.dispatchReady;
+      const protocolCapabilities = input.protocolCapabilities?.length === 1 ?
+        [...input.protocolCapabilities] : [];
 
       const result = await tx.amuxWorkerRuntime.updateMany({
         where: {
@@ -228,6 +240,7 @@ export async function heartbeatAmuxWorkerRuntime(input: {
         data: {
           status: input.status,
           dispatchReady,
+          protocolCapabilities,
           heartbeatAt: now,
           leaseExpiresAt: nextLease,
         },
@@ -244,7 +257,8 @@ export async function heartbeatAmuxWorkerRuntime(input: {
       // Lease refresh alone is high-frequency telemetry. A status or dispatch
       // authority transition is a control-plane mutation and is audited in
       // this same transaction.
-      if (runtime.status !== input.status || runtime.dispatchReady !== dispatchReady) {
+      if (runtime.status !== input.status || runtime.dispatchReady !== dispatchReady ||
+          runtime.protocolCapabilities.join(",") !== protocolCapabilities.join(",")) {
         await writeSystemAuditLog({
           systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: "amux.worker.status_changed",
@@ -259,6 +273,8 @@ export async function heartbeatAmuxWorkerRuntime(input: {
             to_status: input.status,
             from_dispatch_ready: runtime.dispatchReady,
             to_dispatch_ready: dispatchReady,
+            from_protocol_capabilities: runtime.protocolCapabilities,
+            to_protocol_capabilities: protocolCapabilities,
           },
           tx,
         });
@@ -294,6 +310,7 @@ export async function amuxWorkerRuntimeByName(
         generation: true,
         status: true,
         dispatchReady: true,
+        protocolCapabilities: true,
         heartbeatAt: true,
         leaseExpiresAt: true,
       },

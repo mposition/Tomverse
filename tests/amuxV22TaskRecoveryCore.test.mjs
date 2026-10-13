@@ -3,10 +3,19 @@ import test from "node:test";
 import { amuxV22RecoveryAdminSchema, amuxV22RecoveryEvidenceSchema,
   amuxV22RecoveryProofReason, amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
   amuxV22TaskRecoveryEnabled, amuxV22LegacySafeStopEnabled,
+  amuxV22ReadOnlyApiExecutorEnabled, configuredAmuxV22ReadOnlyApiMetadata,
   configuredAmuxV22RecoveryProfiles, configuredAmuxV22RecoveryProfile,
   amuxV22SafeStopEvidenceSchema, amuxV22SafeStopJournalBinding,
-  amuxV22SafeStopProofReason, isAmuxV22RecoveryControllerAuthorized } from
+  amuxV22SafeStopProofReason, isAmuxV22RecoveryControllerAuthorized,
+  amuxV22ReadOnlyLaunchCheckSchema, amuxV22ReadOnlyLaunchProofSchema,
+  amuxV22ReadOnlyRetryRouteCost, amuxV22ReadOnlyLaunchScope,
+  amuxV22ReadOnlyLaunchProofScope, amuxV22ReadOnlyLaunchScopeMatchesIntent,
+  AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID } from
   "../lib/amux/v22TaskRecoveryCore.ts";
+import { AMUX_V22_READ_ONLY_API_BROKER_POLICY_DIGEST,
+  AMUX_V22_READ_ONLY_API_SETTINGS_DIGEST,
+  AMUX_V22_READ_ONLY_API_TOOL_SCHEMA_DIGEST } from
+  "../lib/amux/v22ReadOnlyApiProtocol.mjs";
 const uuid = "8b465370-568a-4a78-b9dd-31dfd5413f95";
 test("recovery capability defaults off and only the exact master value opens it", () => {
   assert.equal(amuxV22TaskRecoveryEnabled("true"), true);
@@ -37,6 +46,35 @@ test("legacy safe-stop defaults off and rejects reuse of the broad sync secret",
     TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET: own,
     TOMVERSE_AMUX_SYNC_SECRET: broad,
   }), false);
+});
+
+test("read-only API execution needs an exact enable value and complete non-secret metadata", () => {
+  assert.equal(amuxV22ReadOnlyApiExecutorEnabled("true"), true);
+  for (const value of [undefined, "", "enabled", "1", "TRUE", " true", "false"])
+    assert.equal(amuxV22ReadOnlyApiExecutorEnabled(value), false);
+  const env = {
+    TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID: "first-task-anthropic",
+    TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST: "1".repeat(64),
+    TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST: "2".repeat(64),
+    TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST: "4".repeat(64),
+  };
+  assert.deepEqual(configuredAmuxV22ReadOnlyApiMetadata(env), {
+    credentialProfileId: "first-task-anthropic",
+    credentialMetadataDigest: "1".repeat(64),
+    executorArtifactDigest: "2".repeat(64),
+    settingsDigest: AMUX_V22_READ_ONLY_API_SETTINGS_DIGEST,
+    repositoryScopeDigest: "4".repeat(64),
+    brokerPolicyDigest: AMUX_V22_READ_ONLY_API_BROKER_POLICY_DIGEST,
+    toolSchemaDigest: AMUX_V22_READ_ONLY_API_TOOL_SCHEMA_DIGEST,
+  });
+  for (const key of Object.keys(env)) {
+    const missing = { ...env }; delete missing[key];
+    assert.equal(configuredAmuxV22ReadOnlyApiMetadata(missing), null, key);
+  }
+  assert.equal(configuredAmuxV22ReadOnlyApiMetadata({ ...env,
+    TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID: "/secret/key/path" }), null);
+  assert.equal(configuredAmuxV22ReadOnlyApiMetadata({ ...env,
+    TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST: "not-a-digest" }), null);
 });
 
 const profileConfig = { version: 1, profiles: [
@@ -166,4 +204,50 @@ test("one approval cannot authorize another revision, route amount, catalog, or 
     { historicalAttempts: 2 }, { nextAttemptNumber: 3 }, { priorReservedMicroUsd: 0n },
     { assignedMicroUsd: 3_400_001n }, { catalogApprovalId: "other" }, { costDigest: "f".repeat(64) }])
     assert.equal(amuxV22RecoveryStartAllowed({ ...input, ...change }), false);
+});
+test("v39 launch authority is exact to the FIRST Task, one route, and the 6.80 USD exposure", () => {
+  const investigateReceipt = { ...receipt, role: "investigate",
+    routes: [{ ...receipt.routes[0], routeId: "route-1", workerName: "claude-test",
+      provider: "anthropic", modelId: "claude-opus", perAttemptMicroUsd: "3400000" }] };
+  const cost = amuxV22ReadOnlyRetryRouteCost({ priorReservedMicroUsd: 3_400_000n,
+    catalogApprovalId: "catalog-id", receipt: investigateReceipt,
+    routeId: "route-1", workerName: "claude-test", provider: "anthropic",
+    modelId: "claude-opus" });
+  assert.equal(cost.oldHeldMicroUsd, "3400000");
+  assert.equal(cost.additionalCapMicroUsd, "3400000");
+  assert.equal(cost.worstExposureMicroUsd, "6800000");
+  const check = { requestKind: "read_only_launch_check", launchCheckId: uuid,
+    requestDigest: "1".repeat(64), taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID,
+    taskRevision: 8, priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+    workerName: "claude-test", workerInstanceId: uuid, workerGeneration: 2,
+    targetHost: "amux-ubuntu", sourceEvidenceId: uuid,
+    sourceEvidenceDigest: "2".repeat(64), riskAcceptanceId: uuid,
+    riskAcceptanceDigest: "3".repeat(64), launchBindingId: uuid,
+    briefDigest: "4".repeat(64), provider: "anthropic", modelId: "claude-opus",
+    routeId: "route-1", routePolicyDigest: "5".repeat(64),
+    catalogApprovalId: "catalog-id", catalogVersion: investigateReceipt.catalogVersion,
+    pricingVersion: investigateReceipt.pricingVersion,
+    costReceiptDigest: investigateReceipt.receiptDigest,
+    additionalCapMicroUsd: cost.additionalCapMicroUsd,
+    worstExposureMicroUsd: cost.worstExposureMicroUsd,
+    launchScope: amuxV22ReadOnlyLaunchScope({ profileConfigDigest: "6".repeat(64) }) };
+  assert.equal(amuxV22ReadOnlyLaunchCheckSchema.safeParse(check).success, true);
+  const actualScope = { ...check.launchScope, launcherConfigDigest: "7".repeat(64) };
+  const proof = { ...check, launchScope: actualScope,
+    launchProofId: uuid, observation: "current" };
+  assert.equal(amuxV22ReadOnlyLaunchProofSchema.safeParse(proof).success, true);
+  assert.equal(amuxV22ReadOnlyLaunchScopeMatchesIntent(check.launchScope, actualScope), true);
+  assert.equal(amuxV22ReadOnlyLaunchProofScope(proof)?.launchScope.launcherConfigDigest,
+    "7".repeat(64));
+  assert.equal(amuxV22ReadOnlyLaunchScopeMatchesIntent(check.launchScope,
+    { ...actualScope, toolPolicyDigest: "8".repeat(64) }), false);
+  for (const changed of [{ taskId: "task-outside-approved-scope" },
+    { priorAttemptId: uuid }, { additionalCapMicroUsd: "3400001" },
+    { worstExposureMicroUsd: "6800001" }, { command: "claude --dangerously-skip-permissions" }])
+    assert.equal(amuxV22ReadOnlyLaunchCheckSchema.safeParse({ ...check, ...changed }).success, false);
+  assert.throws(() => amuxV22ReadOnlyRetryRouteCost({ priorReservedMicroUsd: 3_400_000n,
+    catalogApprovalId: "catalog-id", receipt: { ...investigateReceipt,
+      routes: [{ ...investigateReceipt.routes[0], perAttemptMicroUsd: "3400001" }] },
+    routeId: "route-1", workerName: "claude-test", provider: "anthropic",
+    modelId: "claude-opus" }));
 });

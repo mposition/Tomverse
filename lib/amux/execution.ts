@@ -57,6 +57,7 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   amuxV22TaskExecutionEnabled,
   v22ExecutionCostWithinAssignment,
   v22ExecutionReceiptVerified,
+  v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
 import { loadEngineeringAgentV22SettlementPatch } from
   "@/lib/engineeringAgentV22SettlementPatch";
@@ -71,7 +72,16 @@ import { currentEngineeringAgentV22ImageProofDigest } from
 import { readAmuxV22PublicPrConsent } from
   "@/lib/amux/v22PublicPrConsent";
 import { readAmuxV22RecoveryAuthority, recoveryAttemptBudget } from "@/lib/amux/v22TaskRecoveryService";
-import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed } from "@/lib/amux/v22TaskRecoveryCore";
+import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
+  amuxV22ReadOnlyRetryRouteCost,
+  currentAmuxV22ReadOnlyApiExecutionFrame } from "@/lib/amux/v22TaskRecoveryCore";
+import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
+  amuxV22ReadOnlyApiExecutionFrameDigest,
+  parseAmuxV22ReadOnlyApiExecutionReceipt,
+  type AmuxV22ReadOnlyApiExecutionReceipt } from
+  "@/lib/amux/v22ReadOnlyApiProtocol.mjs";
+import { amuxV22ReadOnlyApiUsageProjection,
+  recordAmuxV22ReadOnlyApiUsage } from "@/lib/amux/cliUsageLedgerStore";
 import { amuxV22WorkerSafeStopFenced } from "@/lib/amux/v22LegacySafeStopFence";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
@@ -131,6 +141,7 @@ type RuntimeLockRow = {
   generation: number;
   status: string;
   dispatchReady: boolean;
+  protocolCapabilities: string[];
   leaseExpiresAt: Date;
 };
 
@@ -144,6 +155,7 @@ type AttemptLockRow = {
   attemptNumber: number | null;
   reservedCostMicrousd: bigint;
   v22AssignmentId: string | null;
+  startedAt: Date;
   leaseExpiresAt: Date | null;
   endedAt: Date | null;
 };
@@ -180,6 +192,7 @@ const lockRuntime = async (
       "generation",
       "status",
       "dispatchReady",
+      "protocolCapabilities",
       "leaseExpiresAt"
     FROM "AmuxWorkerRuntime"
     WHERE "workerName" = ${worker}
@@ -204,6 +217,7 @@ const lockAttempt = async (
       "attemptNumber",
       "reservedCostMicrousd",
       "v22AssignmentId",
+      "startedAt",
       "leaseExpiresAt",
       "endedAt"
     FROM "AmuxExecutionAttempt"
@@ -378,7 +392,7 @@ export async function startAmuxV22TaskExecution(input: {
         _sum: { reservedCostMicrousd: true },
       });
       const recovery = assignment.recoveryApprovalId ? await readAmuxV22RecoveryAuthority(tx,
-        input.taskId, assignment.taskRevision, assignment.recoveryApprovalId) : null;
+        input.taskId, assignment.taskRevision, assignment.recoveryApprovalId, now) : null;
       if (assignment.recoveryApprovalId && !recovery) return { started: false as const,
         reason: "recovery_approval_unbound" as const };
       const budget = recoveryAttemptBudget({
@@ -387,17 +401,50 @@ export async function startAmuxV22TaskExecution(input: {
       });
       if (!budget.allowed) return { started: false as const,
         reason: "attempt_budget_exhausted" as const };
+      const recoveryCost = recovery?.riskAcceptanceId && route ?
+        amuxV22ReadOnlyRetryRouteCost({
+          priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          catalogApprovalId: cost.approvalId, receipt: cost.receipt,
+          routeId: route.routeId, workerName: route.workerName,
+          provider: route.provider, modelId: route.modelId }) :
+        recovery ? amuxV22RecoveryCost({
+          priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          catalogApprovalId: cost.approvalId, receipt: cost.receipt }) : null;
+      const apiFrame = recovery?.readOnlyExecutorKind ===
+        AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
+        currentAmuxV22ReadOnlyApiExecutionFrame(
+          recovery.apiExecutionFrame, { now }) : null;
+      const apiFrameCurrent = recovery?.readOnlyExecutorKind !==
+        AMUX_V22_READ_ONLY_API_EXECUTOR_KIND || (!!apiFrame && !!route &&
+          apiFrame.provider === assignment.provider &&
+          apiFrame.modelId === assignment.modelId &&
+          apiFrame.routeId === assignment.routeId &&
+          apiFrame.routePolicyDigest === assignment.routePolicyDigest &&
+          apiFrame.catalogApprovalId === cost.approvalId &&
+          apiFrame.catalogVersion === cost.receipt.catalogVersion &&
+          apiFrame.catalogDigest === cost.catalogDigest &&
+          apiFrame.pricingVersion === cost.receipt.pricingVersion &&
+          BigInt(apiFrame.maximumCostMicroUsd) === assignment.perAttemptMicroUsd);
       if (!route || !approved || typeof approved !== "object" ||
           !("ceilingMicroUsd" in approved) ||
           typeof approved.ceilingMicroUsd !== "string" ||
+          (recovery?.riskAcceptanceId &&
+            (runtime.protocolCapabilities.length !== 1 ||
+             runtime.protocolCapabilities[0] !== recovery.readOnlyExecutorKind ||
+             !apiFrameCurrent ||
+             recovery.workerName !== assignment.workerName ||
+             recovery.provider !== assignment.provider ||
+             recovery.modelId !== assignment.modelId ||
+             recovery.routeId !== assignment.routeId ||
+             recovery.routePolicyDigest !== assignment.routePolicyDigest ||
+             recovery.briefDigest !== card.v4BriefDigest)) ||
           !(recovery ? amuxV22RecoveryStartAllowed({ approval: recovery,
             taskId: input.taskId, assignmentRevision: assignment.taskRevision,
             historicalAttempts: prior._count._all, nextAttemptNumber: budget.next_attempt_number,
             priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
             assignedMicroUsd: assignment.perAttemptMicroUsd,
             catalogApprovalId: cost.approvalId,
-            costDigest: amuxV22RecoveryCost({ priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
-              catalogApprovalId: cost.approvalId, receipt: cost.receipt }).costDigest,
+            costDigest: recoveryCost!.costDigest,
           }) && BigInt(route.perAttemptMicroUsd) <= assignment.perAttemptMicroUsd :
           v22ExecutionCostWithinAssignment({
             assignedMicroUsd: assignment.perAttemptMicroUsd,
@@ -1119,6 +1166,12 @@ export async function settleAmuxV22TaskExecution(input: {
   generation: number; taskRevision: number;
   outcome: "succeeded" | "failed" | "blocked";
   invocationIds: string[];
+  readOnlyRetry?: { version: 1; launchBindingId: string;
+    launchProofDigest: string; launchScopeDigest: string;
+    executorKind?: "read_only_api_retry_v1";
+    launcherConfigDigest?: string;
+    apiExecutionFrameDigest?: string;
+    apiExecutionReceipt?: unknown };
 }) {
   const patch = input.outcome === "succeeded" ?
     await loadEngineeringAgentV22SettlementPatch(input.attemptId) : null;
@@ -1155,17 +1208,82 @@ export async function settleAmuxV22TaskExecution(input: {
           task.status !== "doing" || task.owner !== input.worker ||
           task.revision !== input.taskRevision)
         return { settled: false as const, reason: "fenced_out" as const };
+      const settlementAssignment = await tx.amuxV22WorkerAssignment.findUnique({
+        where: { id: attempt.v22AssignmentId },
+        select: { recoveryApprovalId: true, taskRevision: true } });
+      const settlementRecovery = settlementAssignment?.recoveryApprovalId ?
+        await readAmuxV22RecoveryAuthority(tx, attempt.taskId,
+          settlementAssignment.taskRevision,
+          settlementAssignment.recoveryApprovalId, now) : null;
+      const needsReadOnlyEcho = !!settlementRecovery?.riskAcceptanceId;
+      if (needsReadOnlyEcho !== !!input.readOnlyRetry ||
+          (needsReadOnlyEcho && (!settlementRecovery ||
+            input.readOnlyRetry!.version !== 1 ||
+            input.readOnlyRetry!.launchBindingId !== settlementRecovery.launchBindingId ||
+            input.readOnlyRetry!.launchProofDigest !== settlementRecovery.launchProofDigest ||
+            input.readOnlyRetry!.launchScopeDigest !== settlementRecovery.launchScopeDigest)))
+        return { settled: false as const,
+          reason: "read_only_retry_echo_unverified" as const };
+      let apiExecutionReceipt: AmuxV22ReadOnlyApiExecutionReceipt | null = null;
+      if (settlementRecovery?.readOnlyExecutorKind ===
+          AMUX_V22_READ_ONLY_API_EXECUTOR_KIND) {
+        const echo = input.readOnlyRetry;
+        if (!echo || echo.executorKind !== AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ||
+            echo.launcherConfigDigest !== settlementRecovery.launcherConfigDigest ||
+            !settlementRecovery.apiExecutionFrame ||
+            echo.apiExecutionFrameDigest !==
+              amuxV22ReadOnlyApiExecutionFrameDigest(
+                settlementRecovery.apiExecutionFrame)) {
+          return { settled: false as const,
+            reason: "read_only_retry_echo_unverified" as const };
+        }
+        try {
+          apiExecutionReceipt = parseAmuxV22ReadOnlyApiExecutionReceipt(
+            echo.apiExecutionReceipt, settlementRecovery.apiExecutionFrame);
+        } catch {
+          return { settled: false as const,
+            reason: "read_only_api_receipt_unverified" as const };
+        }
+        if (echo.apiExecutionFrameDigest !==
+              apiExecutionReceipt.apiExecutionFrameDigest ||
+            apiExecutionReceipt.attemptId !== attempt.id ||
+            apiExecutionReceipt.invocationId !== attempt.id ||
+            apiExecutionReceipt.terminalStatus !== input.outcome) {
+          return { settled: false as const,
+            reason: "read_only_api_receipt_unverified" as const };
+        }
+      } else if (input.readOnlyRetry &&
+          (input.readOnlyRetry.executorKind !== undefined ||
+           input.readOnlyRetry.launcherConfigDigest !== undefined ||
+           input.readOnlyRetry.apiExecutionFrameDigest !== undefined ||
+           input.readOnlyRetry.apiExecutionReceipt !== undefined)) {
+        return { settled: false as const,
+          reason: "read_only_retry_echo_unverified" as const };
+      }
       const delivery = await tx.amuxWorkDelivery.findUnique({
         where: { attemptId: input.attemptId }, select: { status: true },
       });
       if (delivery?.status !== "acknowledged")
         return { settled: false as const, reason: "delivery_unverified" as const };
-      const events = await tx.amuxCliUsageEvent.findMany({
+      const storedEvents = await tx.amuxCliUsageEvent.findMany({
         where: { attemptId: input.attemptId },
-        select: { invocationId: true, status: true, completeness: true,
-          projectedApiCostMicrousd: true, source: true, actualModelId: true,
-          selectedModelId: true },
+        select: { invocationId: true, receiptDigest: true,
+          status: true, completeness: true,
+          projectedApiCostMicrousd: true, cli: true, source: true,
+          actualModelId: true,
+          selectedModelId: true, provider: true, authentication: true,
+          inputTokens: true, outputTokens: true,
+          cacheReadInputTokens: true, cacheCreationInputTokens: true,
+          inputTokensIncludeCacheRead: true,
+          inputTokensIncludeCacheWrite: true, completedTurns: true,
+          pricingVersion: true },
       });
+      const events = apiExecutionReceipt && storedEvents.length === 0 &&
+          settlementRecovery?.apiExecutionFrame ?
+        [amuxV22ReadOnlyApiUsageProjection({
+          frame: settlementRecovery.apiExecutionFrame,
+          receipt: apiExecutionReceipt,
+        })] : storedEvents;
       const expectedIds = input.invocationIds;
       const storedResult = input.outcome === "succeeded" ?
         await tx.amuxV22TaskResult.findUnique({
@@ -1178,7 +1296,13 @@ export async function settleAmuxV22TaskExecution(input: {
         reservedCostMicrousd: attempt.reservedCostMicrousd,
         resultStored: storedResult?.taskId === task.id &&
           storedResult.bodyPurgedAt === null,
-      });
+        expectedExecutionSource: apiExecutionReceipt ?
+          "anthropic_messages_api" : "claude_result",
+      }) && (!apiExecutionReceipt || (events.length === 1 &&
+        v22ReadOnlyApiReceiptMatchesUsage({ attemptId: attempt.id,
+          outcome: input.outcome,
+          pricingVersion: settlementRecovery!.apiExecutionFrame!.pricingVersion,
+          receipt: apiExecutionReceipt, event: events[0]! })));
       if (input.outcome === "succeeded" &&
           (!storedResult || storedResult.taskId !== task.id ||
             storedResult.bodyPurgedAt !== null))
@@ -1239,6 +1363,18 @@ export async function settleAmuxV22TaskExecution(input: {
           });
         }
       }
+      if (apiExecutionReceipt && storedEvents.length === 0 &&
+          settlementRecovery?.apiExecutionFrame) {
+        await recordAmuxV22ReadOnlyApiUsage(tx, {
+          worker: input.worker,
+          attemptId: attempt.id,
+          attemptStartedAt: attempt.startedAt,
+          endedAt: now,
+          launchScopeDigest: settlementRecovery.launchScopeDigest!,
+          frame: settlementRecovery.apiExecutionFrame,
+          receipt: apiExecutionReceipt,
+        });
+      }
       const budget = settlementDestinationForBudget({
         requested_status: input.outcome === "succeeded" ? "review" :
           input.outcome === "failed" ? "todo" : "blocked",
@@ -1276,6 +1412,7 @@ export async function settleAmuxV22TaskExecution(input: {
           toStatus: next, invocationIds: expectedIds,
           receiptsComplete, reservedCostMicrousd:
             attempt.reservedCostMicrousd.toString(),
+          apiExecutionReceiptDigest: apiExecutionReceipt?.digest ?? null,
           imageProofDigest: product?.kind === "publish" &&
             publication?.ok ? publication.imageProofDigest : null },
       });

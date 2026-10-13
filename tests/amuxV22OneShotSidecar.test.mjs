@@ -13,14 +13,59 @@ import { amuxV22ClaudeArgs, amuxV22SidecarEnabled,
   parseAmuxV22OneShotRequest,
   runAmuxV22OneShot, normalizeAmuxV22ClaudeQuota, probeAmuxV22ClaudeQuota } from
   "../lib/amux/v22OneShotSidecar.mjs";
+import { amuxV22ReadOnlyActualLauncherConfigDigest, amuxV22ReadOnlyLaunchScope,
+  amuxV22ReadOnlyLaunchScopeDigest } from
+  "../lib/amux/v22ReadOnlyRetryProtocol.mjs";
 
 const attemptId = "00000000-0000-4000-8000-000000000001";
 const request = { version: 1, attemptId, worker: "worker-a",
   role: "implement", modelId: "claude-opus-5-5",
   budgetMicrousd: 1_250_000, prompt: "Change a small file." };
 const config = { worker: "worker-a", binaryPath: "/usr/bin/claude",
-  worktreePath: "/tmp/worktree", homePath: "/home/tommy",
+  worktreePath: "/srv/tomverse/worktrees/worker-a", homePath: "/home/tommy",
   claudeConfigDir: "/home/tommy/.amux-cli-profiles/claude" };
+const retryActualLauncherConfigDigest = amuxV22ReadOnlyActualLauncherConfigDigest({
+  ...config, profileConfigDigest: "1".repeat(64), nodeArtifactDigest: "a".repeat(64),
+  sidecarArtifactDigest: "b".repeat(64), cliArtifactDigest: "c".repeat(64),
+  localCustomizationDigest: "9".repeat(64),
+  worktreeIdentityDigest: "d".repeat(64), homeIdentityDigest: "e".repeat(64),
+  claudeConfigIdentityDigest: "f".repeat(64),
+});
+const retryScope = amuxV22ReadOnlyLaunchScope({ profileConfigDigest: "1".repeat(64),
+  launcherConfigDigest: retryActualLauncherConfigDigest });
+const retryBinding = { version: 1,
+  launchBindingId: "00000000-0000-4000-8000-000000000011",
+  riskAcceptanceDigest: "2".repeat(64), safeStopEvidenceDigest: "3".repeat(64),
+  launchProofDigest: "4".repeat(64),
+  launchScopeDigest: amuxV22ReadOnlyLaunchScopeDigest(retryScope),
+  launcherPolicyVersion: retryScope.launcherPolicyVersion,
+  launcherConfigDigest: retryScope.launcherConfigDigest,
+  fixedArgvDigest: retryScope.fixedArgvDigest, toolPolicyDigest: retryScope.toolPolicyDigest,
+  profileConfigDigest: retryScope.profileConfigDigest, briefDigest: "5".repeat(64),
+  provider: "anthropic", modelId: "claude-opus-5-5", routeId: "route:one",
+  routePolicyDigest: "6".repeat(64), catalogApprovalId: "catalog:one",
+  catalogVersion: "catalog-v1", pricingVersion: "pricing-v1",
+  costReceiptDigest: "7".repeat(64), additionalCapMicroUsd: "3400000",
+  worstExposureMicroUsd: "6800000", role: "investigate" };
+const recoveryBinding = { version: 1,
+  taskId: "c48886b9-86f8-4631-8db8-c0b288a707af", taskRevision: 5,
+  attemptId, workerName: "worker-a",
+  workerInstanceId: "00000000-0000-4000-8000-000000000012",
+  workerGeneration: 8, targetHost: "amux-ubuntu",
+  recoveryApprovalId: "00000000-0000-4000-8000-000000000013",
+  briefDigest: retryBinding.briefDigest };
+const readOnlyRequest = { ...request, role: "investigate", modelId: retryBinding.modelId,
+  budgetMicrousd: 3_400_000, prompt: "Inspect the approved files only.",
+  recoveryBinding, readOnlyRetry: retryBinding };
+const inspectReadOnlyLauncherConfig = async value => ({ current: true,
+  launcherConfigDigest: amuxV22ReadOnlyActualLauncherConfigDigest({
+    ...value, profileConfigDigest: retryBinding.profileConfigDigest,
+    nodeArtifactDigest: "a".repeat(64), sidecarArtifactDigest: "b".repeat(64),
+    cliArtifactDigest: "c".repeat(64),
+    localCustomizationDigest: "9".repeat(64),
+    worktreeIdentityDigest: "d".repeat(64), homeIdentityDigest: "e".repeat(64),
+    claudeConfigIdentityDigest: "f".repeat(64),
+  }) });
 const usage = { type: "result", subtype: "success", is_error: false,
   result: "Synthetic review result",
   num_turns: 1, modelUsage: { "claude-opus-5-5": {
@@ -140,6 +185,20 @@ test("quota RPC is bound to the fixed worker and creates no execution journal", 
   assert.equal(reads, 1); assert.equal(runs, 0);
 });
 
+test("protocol handshake is exact, worker-bound, and never invokes the CLI", async () => {
+  let runs = 0;
+  const handler = createAmuxV22SidecarHandler({ worker: request.worker,
+    stateDir: config.worktreePath, run: async () => { runs += 1; } });
+  assert.deepEqual(await handler({ op: "protocol", requestId: attemptId,
+    worker: request.worker }), { kind: "protocol", requestId: attemptId,
+    worker: request.worker, capabilities: ["read_only_retry_v1"] });
+  await assert.rejects(handler({ op: "protocol", requestId: attemptId,
+    worker: "worker-b" }));
+  await assert.rejects(handler({ op: "protocol", requestId: attemptId,
+    worker: request.worker, capability: true }));
+  assert.equal(runs, 0);
+});
+
 async function readFinished(handler) {
   for (let i = 0; i < 100; i += 1) {
     const result = await handler({ op: "readback", attemptId });
@@ -196,6 +255,83 @@ test("the one-shot request and CLI command have bounded capabilities", () => {
   assert.equal(args[args.indexOf("--tools") + 1],
     "Read,Grep,Glob,Edit,Write");
   assert.equal(args.some((arg) => arg.includes("Bash")), false);
+});
+
+test("read-only retry is validated and closed before the CLI child starts", async () => {
+  assert.deepEqual(parseAmuxV22OneShotRequest(readOnlyRequest, "worker-a"), readOnlyRequest);
+  const args = amuxV22ClaudeArgs(readOnlyRequest);
+  assert.equal(args[args.indexOf("--permission-mode") + 1], "dontAsk");
+  assert.equal(args[args.indexOf("--max-turns") + 1], "8");
+  assert.equal(args[args.indexOf("--tools") + 1], "Glob,Grep,Read");
+  assert.equal(args[args.indexOf("--allowedTools") + 1], "Glob,Grep,Read");
+  assert.equal(args.some(value => /Bash|Edit|Write|MCP|WebFetch|WebSearch/.test(value)), false);
+  let spawned = 0;
+  const mutations = [
+    { recoveryBinding: { ...recoveryBinding, taskId: "another-task" } },
+    { recoveryBinding: { ...recoveryBinding,
+      attemptId: "00000000-0000-4000-8000-000000000099" } },
+    { modelId: "claude-other" },
+    { recoveryBinding: { ...recoveryBinding, briefDigest: "8".repeat(64) } },
+    { readOnlyRetry: { ...retryBinding, launcherPolicyVersion: "another-version" } },
+    { readOnlyRetry: { ...retryBinding, launcherConfigDigest: "8".repeat(64) } },
+    { readOnlyRetry: { ...retryBinding, provider: "openai" } },
+    { readOnlyRetry: { ...retryBinding, allowedTools: ["Bash"] } },
+  ];
+  for (const mutation of mutations) await assert.rejects(() =>
+    runAmuxV22OneShot({ ...readOnlyRequest, ...mutation }, config, {
+      syntheticPlatform: true,
+      inspectReadOnlyLauncherConfig,
+      spawnChild: () => { spawned += 1; throw new Error("must not spawn"); },
+    }), /invalid read-only (?:retry|recovery) binding/);
+  for (const [key, value] of Object.entries({ binaryPath: "/usr/local/bin/claude",
+    worktreePath: "/srv/tomverse/worktrees/other", homePath: "/home/other",
+    claudeConfigDir: "/home/tommy/.amux-cli-profiles/other" }))
+    await assert.rejects(() => runAmuxV22OneShot(readOnlyRequest,
+      { ...config, [key]: value }, { syntheticPlatform: true,
+        inspectReadOnlyLauncherConfig,
+        spawnChild: () => { spawned += 1; throw new Error("must not spawn"); } }),
+    /invalid read-only retry launcher configuration/, key);
+  for (const current of [false, true]) await assert.rejects(() =>
+    runAmuxV22OneShot(readOnlyRequest, config, { syntheticPlatform: true,
+      inspectReadOnlyLauncherConfig: async () => current
+        ? { current: true, launcherConfigDigest: "f".repeat(64) } : { current: false },
+      spawnChild: () => { spawned += 1; throw new Error("must not spawn"); } }),
+  /invalid read-only retry launcher configuration/);
+  assert.equal(spawned, 0);
+  const fake = fakeSpawn(JSON.stringify(usage));
+  for (const [launchConfig, launchOptions] of [
+    [config, {}],
+    [{ ...config, remoteManagedSettingsVerified: true },
+      { remoteManagedSettingsVerified: true }],
+  ]) await assert.rejects(() => runAmuxV22OneShot(readOnlyRequest, launchConfig, {
+    syntheticPlatform: true, spawnChild: fake.spawnChild, ...launchOptions,
+  }), /invalid read-only retry launcher configuration/);
+  assert.equal(fake.calls.length, 0);
+});
+
+test("read-only result echo is durable and a missing echo can never settle as success", async () => {
+  for (const includeEcho of [true, false]) {
+    const stateDir = await mkdtemp(join(tmpdir(), `amux-v22-read-only-${includeEcho}-`));
+    try {
+      let calls = 0;
+      const echo = { version: 1, launchBindingId: retryBinding.launchBindingId,
+        launchProofDigest: retryBinding.launchProofDigest,
+        launchScopeDigest: retryBinding.launchScopeDigest };
+      const run = async input => { calls += 1; return { kind: "succeeded",
+        attemptId: input.attemptId, ...(includeEcho ? { readOnlyRetry: echo } : {}) }; };
+      const handler = createAmuxV22SidecarHandler({ worker: "worker-a", stateDir, run });
+      const execute = { op: "execute", ...readOnlyRequest };
+      assert.equal((await handler(execute)).kind, "in_progress");
+      const stored = await readFinished(handler);
+      assert.equal(stored.kind, includeEcho ? "succeeded" : "outcome_unknown");
+      if (includeEcho) assert.deepEqual(stored.readOnlyRetry, echo);
+      else assert.equal(stored.readOnlyRetry, undefined);
+      const restarted = createAmuxV22SidecarHandler({ worker: "worker-a", stateDir, run });
+      assert.equal((await restarted(execute)).kind,
+        includeEcho ? "succeeded" : "outcome_unknown");
+      assert.equal(calls, 1, "durable claim must not repeat the provider invocation");
+    } finally { await rm(stateDir, { recursive: true, force: true }); }
+  }
 });
 
 test("one child returns a reviewable result and a content-free receipt", async () => {

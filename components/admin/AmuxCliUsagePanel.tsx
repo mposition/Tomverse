@@ -27,12 +27,15 @@ export function AmuxCliUsagePanel({ view }: { view: {
       </p>
       {view.rows.length === 0 ? <p>{m.empty}</p> :
         <div className="mt-2 overflow-x-auto"><table className="w-full text-left text-sm">
-          <thead><tr>{[m.worker, m.model, m.round, m.recorded, m.unknown,
+          <thead><tr>{[m.worker, m.executor, m.source, m.model, m.round,
+            m.recorded, m.unknown,
             m.missing, m.rate, m.reportedInput, m.reportedOutput,
             m.cacheRead, m.cacheWrite, m.projected].map((label) =>
             <th key={label} scope="col" className="border-b p-2">{label}</th>)}</tr></thead>
-          <tbody>{view.rows.map((row) => <tr key={`${row.worker}:${row.model}:${row.round}`}>
+          <tbody>{view.rows.map((row) => <tr key={`${row.worker}:${row.executor}:${row.source}:${row.model}:${row.round}`}>
             <td className="border-b p-2">{row.worker}</td>
+            <td className="border-b p-2">{row.executor}</td>
+            <td className="border-b p-2">{row.source}</td>
             <td className="border-b p-2">{row.model}</td>
             <td className="border-b p-2">{row.round ?? m.none}</td>
             <td className="border-b p-2">{row.recorded}</td>

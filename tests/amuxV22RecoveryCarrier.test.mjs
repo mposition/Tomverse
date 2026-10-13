@@ -79,14 +79,26 @@ test("inspector timer stays non-root, instance-fixed, inspect-only and off by de
   assert.doesNotMatch(installer, /tomverse-bridge-watchdog/);
 });
 
-test("v38 records code-only carriers and dedicated inspector authentication", async () => {
+test("v41 keeps the v38-v40 recovery history", async () => {
   const policy = await source("docs/policy/development-agent-orchestration.md");
-  const v38 = policy.slice(policy.indexOf("## 버전 38"));
-  assert.match(policy, /상태\(최신\): \*\*v38 기본 OFF 60초 recovery carrier/);
+  const v38 = policy.slice(policy.indexOf("## 버전 38"), policy.indexOf("## 버전 39"));
+  const v39 = policy.slice(policy.indexOf("## 버전 39"), policy.indexOf("## 버전 40"));
+  const v40 = policy.slice(policy.indexOf("## 버전 40"), policy.indexOf("## 버전 41"));
+  assert.match(policy, /상태\(v40 이력\): \*\*v40 FIRST Task 전용 읽기 전용 API executor 대안 계약 승인/);
+  assert.match(policy, /상태\(최신\): \*\*v41 packed Git object의 고정 읽기 전용 provenance 조회 승인/);
   assert.match(policy, /정책 버전: 38/);
+  assert.match(policy, /정책 버전: 39/);
+  assert.match(policy, /정책 버전: 40/);
+  assert.match(policy, /정책 버전: 41/);
   assert.match(v38, /TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET/);
   assert.match(v38, /secret 값의 생성·등록·host 배포는 이 승인에 포함되지 않는다/);
   assert.match(v38, /실제 script 실행, unit 설치,[\s\S]*timer enable\/start/);
+  assert.match(v39, /accept_unknown_prior_effects/);
+  assert.match(v39, /prior attempt의 결과, 외부 효과와 사용량은 계속 `unknown`이다/);
+  assert.match(v39, /prior held \+ new maximum <= 6,800,000/);
+  assert.match(v40, /read_only_api_retry_v1/);
+  assert.match(v40, /모델이 볼 수 있는 tool은 형태가 고정된 `Read`, `Grep`, `Glob` 셋뿐이다/);
+  assert.match(v40, /key 생성·등록,[\s\S]*provider 호출,[\s\S]*열지 않는다/);
 });
 
 test("60 second pickup does not invent a request TTL or consume the 90 second evidence window", async () => {

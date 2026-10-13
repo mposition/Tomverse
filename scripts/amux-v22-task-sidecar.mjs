@@ -5,6 +5,8 @@ import { createAmuxV22SidecarServer, createAmuxV22SidecarHandler,
   "../lib/amux/v22OneShotSidecar.mjs";
 import { inspectAmuxV22RecoveryUnit } from "../lib/amux/v22RecoveryHost.mjs";
 import { captureAmuxV22PatchBaseline } from "../lib/amux/v22PatchCapture.mjs";
+import { amuxV22SidecarLaunchConfigFromEnvironment } from
+  "../lib/amux/v22ReadOnlyRetryProtocol.mjs";
 
 if (!amuxV22SidecarEnabled(process.env[AMUX_V22_SIDECAR_ENV])) {
   // The executable is deliberately inert until a reviewed code change opens
@@ -17,13 +19,7 @@ for (const name of ["DATABASE_URL", "DIRECT_URL", "TOMVERSE_AMUX_SYNC_SECRET",
   if (process.env[name]) throw new Error("sidecar credential boundary violated");
 }
 
-const config = Object.freeze({
-  worker: process.env.TOMVERSE_AMUX_V22_WORKER,
-  binaryPath: process.env.TOMVERSE_AMUX_V22_CLAUDE_BINARY,
-  worktreePath: process.env.TOMVERSE_AMUX_V22_WORKTREE,
-  homePath: process.env.TOMVERSE_AMUX_V22_HOME,
-  claudeConfigDir: process.env.TOMVERSE_AMUX_V22_CLAUDE_CONFIG_DIR,
-});
+const config = amuxV22SidecarLaunchConfigFromEnvironment(process.env);
 const socketPath = process.env.TOMVERSE_AMUX_V22_SIDECAR_SOCKET;
 const stateDir = process.env.TOMVERSE_AMUX_V22_SIDECAR_STATE_DIR;
 const invocationId = process.env.INVOCATION_ID ?? null;

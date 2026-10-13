@@ -137,6 +137,27 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration policy v37: permanent physical-worker safe-stop fences. It
   // changes no commit-deadline marker, trigger, guard or classifier.
   "20261013210000_amux_v22_legacy_safe_stop",
+  // Orchestration policy v39: additive read-only retry risk and capability
+  // state; it changes no commit-deadline marker, trigger or classifier.
+  "20261013220000_amux_v22_read_only_retry_risk",
+  // Orchestration policy v39: capability guards for launch, approval,
+  // assignment and attempt; it changes no commit-deadline mechanism.
+  "20261013230000_amux_v22_read_only_retry_db_guards",
+  // Orchestration policy v39: launch-proof guard repair only; it changes no
+  // commit-deadline marker, trigger, guard or classifier.
+  "20261013240000_amux_v22_read_only_launch_proof_guard_repair",
+  // Orchestration policy v40: native API capability branches in the existing
+  // recovery guards; it changes no commit-deadline mechanism.
+  "20261013250000_amux_v22_read_only_api_capability_guards",
+  // Orchestration policy v40: exact CLI/API runtime capability and launch
+  // scope constraints; it changes no commit-deadline mechanism.
+  "20261013260000_amux_v22_read_only_api_scope_guards",
+  // Orchestration policy v40: honest native API usage provenance constraints;
+  // it changes no commit-deadline marker, trigger, guard or classifier.
+  "20261013270000_amux_native_api_usage_provenance",
+  // Orchestration policy v40: native API usage is narrowed to the approved
+  // FIRST Task and budget; it changes no commit-deadline mechanism.
+  "20261013280000_amux_native_api_first_task_scope",
   // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
   // no commit deadline and continues to use the existing mutation fence.
   "20261012170000_amux_verified_no_commit_halt_auto_clear",

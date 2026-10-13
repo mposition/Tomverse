@@ -1413,6 +1413,7 @@ mod tests {
             task_revision: 3,
             outcome: "blocked",
             invocation_ids: &[],
+            read_only_retry: None,
         }).unwrap();
         assert_eq!(body["outcome"], "blocked");
         assert_eq!(body["invocation_ids"], serde_json::json!([]));
@@ -1421,6 +1422,73 @@ mod tests {
             serde_json::json!({"settled":true,"taskRevision":4})
         ).unwrap();
         assert!(response.settled);
+    }
+
+    #[test]
+    fn v22_read_only_settlement_echo_is_versioned_and_content_free() {
+        let echo = V22ReadOnlyRetryEcho { version: 1,
+            launch_binding_id: "00000000-0000-4000-8000-000000000041".into(),
+            launch_proof_digest: "a".repeat(64), launch_scope_digest: "b".repeat(64),
+            executor_kind: None, launcher_config_digest: None,
+            api_execution_frame_digest: None, api_execution_receipt: None };
+        let body = serde_json::to_value(V22ExecutionSettleRequest {
+            attempt_id: "attempt", worker: "worker", instance_id: "instance",
+            generation: 1, task_revision: 3, outcome: "succeeded",
+            invocation_ids: &["attempt"], read_only_retry: Some(&echo),
+        }).unwrap();
+        assert_eq!(body["read_only_retry"], serde_json::json!({
+            "version": 1,
+            "launch_binding_id": echo.launch_binding_id,
+            "launch_proof_digest": echo.launch_proof_digest,
+            "launch_scope_digest": echo.launch_scope_digest,
+        }));
+        assert!(body["read_only_retry"].get("prompt").is_none());
+    }
+
+    #[test]
+    fn v22_read_only_api_settlement_carries_the_full_content_free_receipt() {
+        let receipt = serde_json::json!({ "version": 1,
+            "executorKind": "read_only_api_retry_v1", "attemptId": "attempt",
+            "invocationId": "attempt", "selectedModelId": "claude-opus-5-5",
+            "actualModelId": "claude-opus-5-5", "actualModelUniform": true,
+            "providerTurnCount": 2, "uncachedInputTokens": 10,
+            "cacheReadTokens": 0, "cacheWriteTokens": 0, "outputTokens": 5,
+            "usageComplete": true, "terminalStatus": "succeeded",
+            "apiExecutionFrameDigest": "c".repeat(64),
+            "projectedCostMicroUsd": 35, "digest": "d".repeat(64) });
+        let echo = V22ReadOnlyRetryEcho { version: 1,
+            launch_binding_id: "00000000-0000-4000-8000-000000000041".into(),
+            launch_proof_digest: "a".repeat(64), launch_scope_digest: "b".repeat(64),
+            executor_kind: Some("read_only_api_retry_v1".into()),
+            launcher_config_digest: Some("e".repeat(64)),
+            api_execution_frame_digest: Some("c".repeat(64)),
+            api_execution_receipt: Some(receipt.clone()) };
+        let body = serde_json::to_value(V22ExecutionSettleRequest {
+            attempt_id: "attempt", worker: "worker", instance_id: "instance",
+            generation: 1, task_revision: 3, outcome: "succeeded",
+            invocation_ids: &["attempt"], read_only_retry: Some(&echo),
+        }).unwrap();
+        assert_eq!(body["read_only_retry"]["executor_kind"],
+            "read_only_api_retry_v1");
+        assert_eq!(body["read_only_retry"]["api_execution_receipt"], receipt);
+        assert!(body["read_only_retry"].get("usage_receipt").is_none());
+    }
+
+    #[test]
+    fn v22_heartbeat_carries_only_the_closed_protocol_capability() {
+        let capabilities = ["read_only_retry_v1"];
+        let current = serde_json::to_value(WorkerHeartbeatRequest {
+            worker_name: "claude-chore", instance_id: "instance", generation: 3,
+            status: "idle", dispatch_ready: true,
+            protocol_capabilities: Some(&capabilities),
+        }).unwrap();
+        assert_eq!(current["protocol_capabilities"],
+            serde_json::json!(["read_only_retry_v1"]));
+        let legacy = serde_json::to_value(WorkerHeartbeatRequest {
+            worker_name: "claude-chore", instance_id: "instance", generation: 3,
+            status: "idle", dispatch_ready: true, protocol_capabilities: None,
+        }).unwrap();
+        assert!(legacy.get("protocol_capabilities").is_none());
     }
 
     #[tokio::test]
@@ -1663,6 +1731,7 @@ mod tests {
         let delivery = PulledDelivery {
             attempt_id: "attempt-1".to_owned(),
             assignment_id: Some("assignment-1".to_owned()),
+            recovery_approval_id: None,
             v22_execution: None,
             task_id: "task-1".to_owned(),
             worker: "worker-1".to_owned(),
@@ -1676,8 +1745,8 @@ mod tests {
             Duration::from_secs(1),
             Duration::from_secs(3),
         );
-        assert!(api.v22_execution_settle_verified(&delivery, "instance-1", 1, "blocked").await.is_err());
-        let result = api.v22_execution_settle_verified(&delivery, "instance-1", 1, "succeeded").await.unwrap();
+        assert!(api.v22_execution_settle_verified(&delivery, "instance-1", 1, "blocked", None).await.is_err());
+        let result = api.v22_execution_settle_verified(&delivery, "instance-1", 1, "succeeded", None).await.unwrap();
         assert!(result.settled);
         let body = server.join().unwrap();
         assert_eq!(body["outcome"], "succeeded");
@@ -2353,6 +2422,8 @@ struct WorkerHeartbeatRequest<'a> {
     generation: i64,
     status: &'a str,
     dispatch_ready: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protocol_capabilities: Option<&'a [&'a str]>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2370,12 +2441,69 @@ struct DeliveryPullRequest<'a> {
     generation: i64,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V22ReadOnlyRetryProfile {
+    pub version: i64,
+    #[serde(default)]
+    pub executor_kind: Option<String>,
+    pub launch_binding_id: String,
+    pub risk_acceptance_digest: String,
+    pub safe_stop_evidence_digest: String,
+    pub launch_proof_digest: String,
+    pub launch_scope_digest: String,
+    #[serde(default)]
+    pub launcher_policy_version: Option<String>,
+    pub launcher_config_digest: String,
+    #[serde(default)]
+    pub fixed_argv_digest: Option<String>,
+    #[serde(default)]
+    pub tool_policy_digest: Option<String>,
+    #[serde(default)]
+    pub profile_config_digest: Option<String>,
+    #[serde(default)]
+    pub api_execution_frame: Option<serde_json::Value>,
+    #[serde(default)]
+    pub api_execution_frame_digest: Option<String>,
+    pub brief_digest: String,
+    pub provider: String,
+    pub model_id: String,
+    pub route_id: String,
+    pub route_policy_digest: String,
+    pub catalog_approval_id: String,
+    pub catalog_version: String,
+    pub pricing_version: String,
+    pub cost_receipt_digest: String,
+    pub additional_cap_microusd: String,
+    pub worst_exposure_microusd: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V22ReadOnlyRetryEcho {
+    pub version: i64,
+    pub launch_binding_id: String,
+    pub launch_proof_digest: String,
+    pub launch_scope_digest: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launcher_config_digest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_execution_frame_digest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_execution_receipt: Option<serde_json::Value>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct V22ExecutionProfile {
     pub model_id: String,
     pub role: String,
     pub budget_microusd: i64,
+    #[serde(default)]
+    pub read_only_retry: Option<V22ReadOnlyRetryProfile>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2384,6 +2512,8 @@ pub struct PulledDelivery {
     pub attempt_id: String,
     #[serde(default)]
     pub assignment_id: Option<String>,
+    #[serde(default)]
+    pub recovery_approval_id: Option<String>,
     #[serde(default)]
     pub v22_execution: Option<V22ExecutionProfile>,
     pub task_id: String,
@@ -2503,6 +2633,8 @@ struct V22ExecutionSettleRequest<'a> {
     task_revision: i64,
     outcome: &'a str,
     invocation_ids: &'a [&'a str],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    read_only_retry: Option<&'a V22ReadOnlyRetryEcho>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2596,13 +2728,14 @@ impl TomverseApi {
         Ok(body)
     }
 
-    pub async fn worker_heartbeat(
+    async fn worker_heartbeat_with_capabilities<'a>(
         &self,
-        worker_name: &str,
-        instance_id: &str,
+        worker_name: &'a str,
+        instance_id: &'a str,
         generation: i64,
-        status_name: &str,
+        status_name: &'a str,
         dispatch_ready: bool,
+        protocol_capabilities: Option<&'a [&'a str]>,
     ) -> Result<WorkerHeartbeatResponse> {
         let response = self
             .client
@@ -2618,6 +2751,7 @@ impl TomverseApi {
                 generation,
                 status: status_name,
                 dispatch_ready,
+                protocol_capabilities,
             })
             .send()
             .await?;
@@ -2646,6 +2780,36 @@ impl TomverseApi {
             bail!("invalid Tomverse AMUX worker-heartbeat response invariant");
         }
         Ok(body)
+    }
+
+    pub async fn worker_heartbeat(
+        &self,
+        worker_name: &str,
+        instance_id: &str,
+        generation: i64,
+        status_name: &str,
+        dispatch_ready: bool,
+    ) -> Result<WorkerHeartbeatResponse> {
+        self.worker_heartbeat_with_capabilities(worker_name, instance_id,
+            generation, status_name, dispatch_ready, None).await
+    }
+
+    pub async fn v22_worker_heartbeat<'a>(
+        &self,
+        worker_name: &'a str,
+        instance_id: &'a str,
+        generation: i64,
+        status_name: &'a str,
+        dispatch_ready: bool,
+        protocol_capabilities: &'a [&'a str],
+    ) -> Result<WorkerHeartbeatResponse> {
+        if protocol_capabilities.len() > 1 || protocol_capabilities.first()
+            .is_some_and(|value| !matches!(*value,
+                "read_only_retry_v1" | "read_only_api_retry_v1")) {
+            bail!("invalid v22 protocol capabilities");
+        }
+        self.worker_heartbeat_with_capabilities(worker_name, instance_id,
+            generation, status_name, dispatch_ready, Some(protocol_capabilities)).await
     }
 
     pub async fn delivery_pull(
@@ -3034,6 +3198,7 @@ impl TomverseApi {
         generation: i64,
         outcome: &str,
         invocation_ids: &[&str],
+        read_only_retry: Option<&V22ReadOnlyRetryEcho>,
     ) -> Result<ExecutionSettleResponse> {
         if delivery.assignment_id.is_none() {
             bail!("v22 settlement requires an assignment-bound delivery");
@@ -3050,6 +3215,7 @@ impl TomverseApi {
                 task_revision: delivery.task_revision,
                 outcome,
                 invocation_ids,
+                read_only_retry,
             })
             .send().await?;
         let (status, body): (_, ExecutionSettleResponse) = read_bounded_json(
@@ -3077,12 +3243,13 @@ impl TomverseApi {
         instance_id: &str,
         generation: i64,
         outcome: &str,
+        read_only_retry: Option<&V22ReadOnlyRetryEcho>,
     ) -> Result<ExecutionSettleResponse> {
         if !matches!(outcome, "succeeded" | "failed") {
             bail!("verified v22 settlement requires a terminal CLI result");
         }
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            outcome, &[&delivery.attempt_id]).await
+            outcome, &[&delivery.attempt_id], read_only_retry).await
     }
 
     /// A local AMUX card is not an A14 usage receipt. Without a verified
@@ -3093,9 +3260,10 @@ impl TomverseApi {
         delivery: &PulledDelivery,
         instance_id: &str,
         generation: i64,
+        read_only_retry: Option<&V22ReadOnlyRetryEcho>,
     ) -> Result<ExecutionSettleResponse> {
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            "blocked", &[]).await
+            "blocked", &[], read_only_retry).await
     }
 
     /// Policy version 15: the system consumer of pre-approved automatic

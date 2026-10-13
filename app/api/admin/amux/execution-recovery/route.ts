@@ -11,7 +11,8 @@ import { amuxV22RecoveryAdminSchema, amuxV22TaskRecoveryEnabled,
   amuxV22LegacySafeStopEnabled, AMUX_V22_TASK_RECOVERY_ENABLED_ENV,
   AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV } from "@/lib/amux/v22TaskRecoveryCore";
 import { requestAmuxV22RecoveryInspection, approveAmuxV22TaskRecovery,
-  readAmuxV22TaskRecovery, requestAmuxV22LegacySafeStop } from
+  acceptAmuxV22UnknownPriorEffects, readAmuxV22TaskRecovery,
+  requestAmuxV22LegacySafeStop } from
   "@/lib/amux/v22TaskRecoveryService";
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const readSchema = z.object({ taskId: z.string().min(1).max(128).regex(/^[A-Za-z0-9:_-]+$/),
@@ -63,6 +64,8 @@ export async function POST(request: Request) {
     const input = { session: auth.session, request, ...body };
     const result = body.action === "request_inspection" ?
       await requestAmuxV22RecoveryInspection({ ...input, ...body }) :
+      body.action === "accept_unknown_prior_effects" ?
+        await acceptAmuxV22UnknownPriorEffects({ ...input, ...body }) :
       body.action === "request_safe_stop" ?
         await requestAmuxV22LegacySafeStop({ ...input, ...body }) :
         await approveAmuxV22TaskRecovery({ ...input, ...body });

@@ -40,7 +40,8 @@ const LEASE = new Date("2026-09-29T00:01:30.000Z");
 const ATTEMPT = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
 const RECEIPT = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 let v22DeliveryProfile: { modelId: string; role: string;
-  budgetMicrousd: number } | null = null;
+  budgetMicrousd: number; readOnlyRetry?: Record<string, unknown> } | null = null;
+let recoveryApprovalId: string | null = null;
 const calls: { writer: string; input: unknown }[] = [];
 const record = (writer: string, input: unknown) => {
   calls.push({ writer, input });
@@ -104,6 +105,7 @@ mock.module(mod("lib/amux/delivery.ts"), {
           v22Execution: v22DeliveryProfile,
           ...(v22DeliveryProfile ? { assignmentId:
             "0a7e13db-0373-4b92-9e74-0b2a79e0e8c7" } : {}),
+          ...(recoveryApprovalId ? { recoveryApprovalId } : {}),
           receiptId: RECEIPT,
           leaseExpiresAt: LEASE,
         },
@@ -191,6 +193,76 @@ test("v22 delivery carries its approved one-shot model, role and ceiling", async
     assert.equal(body.delivery.assignment_id,
       "0a7e13db-0373-4b92-9e74-0b2a79e0e8c7");
   } finally { v22DeliveryProfile = null; }
+});
+
+test("the app emits the v39 marker and complete read-only retry profile together", async () => {
+  recoveryApprovalId = "00000000-0000-4000-8000-000000000039";
+  v22DeliveryProfile = { modelId: "claude-opus-5-5", role: "investigate",
+    budgetMicrousd: 3_400_000, readOnlyRetry: {
+      version: 1, launchBindingId: "00000000-0000-4000-8000-000000000040",
+      riskAcceptanceDigest: "1".repeat(64), safeStopEvidenceDigest: "2".repeat(64),
+      launchProofDigest: "3".repeat(64), launchScopeDigest: "4".repeat(64),
+      launcherPolicyVersion: "amux-v22-read-only-retry-v1",
+      launcherConfigDigest: "5".repeat(64), fixedArgvDigest: "6".repeat(64),
+      toolPolicyDigest: "7".repeat(64), profileConfigDigest: "8".repeat(64),
+      briefDigest: "9".repeat(64), provider: "anthropic", modelId: "claude-opus-5-5",
+      routeId: "route-1", routePolicyDigest: "a".repeat(64),
+      catalogApprovalId: "approval-1", catalogVersion: "catalog-1",
+      pricingVersion: "price-1", costReceiptDigest: "b".repeat(64),
+      additionalCapMicroUsd: "3400000", worstExposureMicroUsd: "6800000",
+      role: "investigate",
+    } };
+  try {
+    const exchange = wire.exchanges.find((entry) => entry.name === "delivery_pull");
+    assert.ok(exchange);
+    const response = await post(exchange.path, exchange.request);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.delivery.recovery_approval_id, recoveryApprovalId);
+    assert.deepEqual(Object.keys(body.delivery.v22_execution.read_only_retry).sort(), [
+      "additional_cap_microusd", "brief_digest", "catalog_approval_id", "catalog_version",
+      "cost_receipt_digest", "fixed_argv_digest", "launch_binding_id", "launch_proof_digest",
+      "launch_scope_digest", "launcher_config_digest", "launcher_policy_version", "model_id",
+      "pricing_version", "profile_config_digest", "provider", "risk_acceptance_digest", "role",
+      "route_id", "route_policy_digest", "safe_stop_evidence_digest", "tool_policy_digest",
+      "version", "worst_exposure_microusd",
+    ].sort());
+  } finally { v22DeliveryProfile = null; recoveryApprovalId = null; }
+});
+
+test("the app emits the v40 API frame without CLI-only launcher fields", async () => {
+  recoveryApprovalId = "00000000-0000-4000-8000-000000000049";
+  const apiExecutionFrame = { version: 1,
+    executorKind: "read_only_api_retry_v1", provider: "anthropic",
+    modelId: "claude-opus-5-5" };
+  v22DeliveryProfile = { modelId: "claude-opus-5-5", role: "investigate",
+    budgetMicrousd: 3_400_000, readOnlyRetry: {
+      version: 1, executorKind: "read_only_api_retry_v1",
+      launchBindingId: "00000000-0000-4000-8000-000000000050",
+      riskAcceptanceDigest: "1".repeat(64), safeStopEvidenceDigest: "2".repeat(64),
+      launchProofDigest: "3".repeat(64), launchScopeDigest: "4".repeat(64),
+      launcherConfigDigest: "5".repeat(64),
+      apiExecutionFrame, apiExecutionFrameDigest: "6".repeat(64),
+      briefDigest: "7".repeat(64), provider: "anthropic",
+      modelId: "claude-opus-5-5", routeId: "route-1",
+      routePolicyDigest: "8".repeat(64), catalogApprovalId: "approval-1",
+      catalogVersion: "catalog-1", pricingVersion: "price-1",
+      costReceiptDigest: "9".repeat(64), additionalCapMicroUsd: "3400000",
+      worstExposureMicroUsd: "6800000", role: "investigate",
+    } };
+  try {
+    const exchange = wire.exchanges.find((entry) => entry.name === "delivery_pull");
+    assert.ok(exchange);
+    const response = await post(exchange.path, exchange.request);
+    assert.equal(response.status, 200);
+    const retry = (await response.json()).delivery.v22_execution.read_only_retry;
+    assert.equal(retry.executor_kind, "read_only_api_retry_v1");
+    assert.deepEqual(retry.api_execution_frame, apiExecutionFrame);
+    assert.equal(retry.api_execution_frame_digest, "6".repeat(64));
+    for (const cliOnly of ["launcher_policy_version", "fixed_argv_digest",
+      "tool_policy_digest", "profile_config_digest"])
+      assert.equal(Object.hasOwn(retry, cliOnly), false, cliOnly);
+  } finally { v22DeliveryProfile = null; recoveryApprovalId = null; }
 });
 
 test("settle keeps the review PR distinction main's Rust sends: a number, null, or absent", async () => {

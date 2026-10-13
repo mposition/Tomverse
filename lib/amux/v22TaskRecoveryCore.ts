@@ -2,10 +2,38 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import type { V4TaskCostCeilingReceipt } from "./v4TaskCostCeilingCore.ts";
+import { AMUX_V22_READ_ONLY_RETRY_PROTOCOL_VERSION,
+  AMUX_V22_READ_ONLY_LAUNCHER_POLICY_VERSION,
+  amuxV22ReadOnlyLaunchScopeDigest as amuxV22CliReadOnlyLaunchScopeDigest } from
+  "./v22ReadOnlyRetryProtocol.mjs";
+import { AMUX_V22_READ_ONLY_API_BROKER_POLICY_DIGEST,
+  AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
+  AMUX_V22_READ_ONLY_API_SETTINGS_DIGEST,
+  AMUX_V22_READ_ONLY_API_TOOL_SCHEMA_DIGEST,
+  amuxV22ReadOnlyApiExecutionFrameDigest,
+  amuxV22ReadOnlyApiLaunchScopeDigest,
+  matchAmuxV22ReadOnlyApiLaunchScopes,
+  parseAmuxV22ReadOnlyApiExecutionFrame,
+  type AmuxV22ReadOnlyApiExecutionFrame } from
+  "./v22ReadOnlyApiProtocol.mjs";
+export { AMUX_V22_READ_ONLY_LAUNCHER_POLICY_VERSION,
+  AMUX_V22_READ_ONLY_ALLOWED_TOOLS, amuxV22ReadOnlyLauncherDigests,
+  amuxV22ReadOnlyLaunchScope } from
+  "./v22ReadOnlyRetryProtocol.mjs";
 
 /** A logical scope, never a hostname or authentication credential. */
 export const AMUX_V22_RECOVERY_HOST_SCOPE = "amux-ubuntu" as const;
-export const AMUX_V22_TASK_RECOVERY_POLICY_VERSION = 37;
+export const AMUX_V22_TASK_RECOVERY_POLICY_VERSION = 40;
+export const AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID =
+  "c48886b9-86f8-4631-8db8-c0b288a707af" as const;
+export const AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID =
+  "97858395-3d66-42fa-9bfb-0e5a6cba9bd8" as const;
+export const AMUX_V22_UNKNOWN_PRIOR_HELD_MICROUSD = BigInt("3400000");
+export const AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD = BigInt("3400000");
+export const AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD = BigInt("6800000");
+export const AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT = 2;
+export const AMUX_V22_READ_ONLY_LAUNCH_SCOPE_VERSION =
+  AMUX_V22_READ_ONLY_RETRY_PROTOCOL_VERSION;
 export const AMUX_V22_TASK_RECOVERY_ENABLED_ENV = "TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED";
 export const AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV =
   "TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED";
@@ -15,8 +43,20 @@ export const AMUX_V22_RECOVERY_INSPECTOR_SECRET_ENV =
   "TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET";
 export const AMUX_V22_RECOVERY_PROFILES_ENV =
   "TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON";
+export const AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED_ENV =
+  "TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED";
+export const AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID_ENV =
+  "TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID";
+export const AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST_ENV =
+  "TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST";
+export const AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST_ENV =
+  "TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST";
+export const AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST_ENV =
+  "TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST";
 export const amuxV22TaskRecoveryEnabled = (value: string | undefined) => value === "true";
 export const amuxV22LegacySafeStopEnabled = (value: string | undefined) => value === "true";
+export const amuxV22ReadOnlyApiExecutorEnabled = (value: string | undefined) =>
+  value === "true";
 export const AMUX_V22_RECOVERY_ID_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;
 export const AMUX_V22_RECOVERY_MAX_REVISION = 2_147_483_644;
 const id = z.string().regex(AMUX_V22_RECOVERY_ID_PATTERN);
@@ -26,13 +66,85 @@ const money = z.string().regex(/^(0|[1-9][0-9]{0,18})$/)
   .refine((value) => BigInt(value) <= BigInt("9223372036854775807"));
 const identity = { taskId: id, expectedRevision: revision, priorAttemptId: id,
   requestId: z.string().uuid() };
+
+export type AmuxV22ReadOnlyApiConfiguredMetadata = {
+  credentialProfileId: string;
+  credentialMetadataDigest: string;
+  executorArtifactDigest: string;
+  settingsDigest: string;
+  repositoryScopeDigest: string;
+  brokerPolicyDigest: string;
+  toolSchemaDigest: string;
+};
+
+/** Non-secret expected identities only. Key bytes, paths and source bytes are
+ * deliberately not accepted by this app-side contract. */
+export function configuredAmuxV22ReadOnlyApiMetadata(
+  env: NodeJS.ProcessEnv = process.env,
+): AmuxV22ReadOnlyApiConfiguredMetadata | null {
+  const credentialProfileId = env[AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID_ENV];
+  const values = {
+    credentialMetadataDigest:
+      env[AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST_ENV],
+    executorArtifactDigest:
+      env[AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST_ENV],
+    repositoryScopeDigest:
+      env[AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST_ENV],
+  };
+  if (!credentialProfileId || !AMUX_V22_RECOVERY_ID_PATTERN.test(credentialProfileId) ||
+      Object.values(values).some((value) => !value || !/^[a-f0-9]{64}$/.test(value))) {
+    return null;
+  }
+  return { credentialProfileId,
+    credentialMetadataDigest: values.credentialMetadataDigest!,
+    executorArtifactDigest: values.executorArtifactDigest!,
+    settingsDigest: AMUX_V22_READ_ONLY_API_SETTINGS_DIGEST,
+    repositoryScopeDigest: values.repositoryScopeDigest!,
+    brokerPolicyDigest: AMUX_V22_READ_ONLY_API_BROKER_POLICY_DIGEST,
+    toolSchemaDigest: AMUX_V22_READ_ONLY_API_TOOL_SCHEMA_DIGEST };
+}
+
+/** Re-check the separately activated, non-secret runtime identities before an
+ * approved frame can start or leave the app. Secret key material is never part
+ * of this comparison. */
+export function currentAmuxV22ReadOnlyApiExecutionFrame(
+  raw: unknown,
+  options: { now?: Date; env?: NodeJS.ProcessEnv } = {},
+): AmuxV22ReadOnlyApiExecutionFrame | null {
+  const env = options.env ?? process.env;
+  if (!amuxV22ReadOnlyApiExecutorEnabled(
+      env[AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED_ENV])) return null;
+  const metadata = configuredAmuxV22ReadOnlyApiMetadata(env);
+  if (!metadata) return null;
+  try {
+    const frame = parseAmuxV22ReadOnlyApiExecutionFrame(raw,
+      { now: options.now });
+    return Object.entries(metadata).every(([key, value]) =>
+      frame[key as keyof AmuxV22ReadOnlyApiExecutionFrame] === value) ?
+      frame : null;
+  } catch { return null; }
+}
 export const amuxV22RecoveryAdminSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("request_inspection"), ...identity }).strict(),
+  z.object({ action: z.literal("accept_unknown_prior_effects"), ...identity,
+    taskId: z.literal(AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID),
+    priorAttemptId: z.literal(AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID),
+    sourceEvidenceId: z.string().uuid(), sourceEvidenceDigest: digest,
+    acceptRisk: z.literal(true) }).strict(),
   z.object({ action: z.literal("request_safe_stop"), ...identity,
     sourceEvidenceId: z.string().uuid(), sourceEvidenceDigest: digest }).strict(),
   z.object({ action: z.literal("approve_attempt"), ...identity,
     inspectionId: z.string().uuid(), evidenceId: z.string().uuid(),
-    evidenceDigest: digest, costDigest: digest }).strict(),
+    evidenceDigest: digest, costDigest: digest,
+    riskAcceptanceId: z.string().uuid().optional(), riskAcceptanceDigest: digest.optional(),
+    launchProofId: z.string().uuid().optional(), launchProofDigest: digest.optional(),
+    acceptRetry: z.literal(true).optional() }).strict().superRefine((value, context) => {
+      const fields = [value.riskAcceptanceId, value.riskAcceptanceDigest,
+        value.launchProofId, value.launchProofDigest, value.acceptRetry];
+      if (fields.some((field) => field !== undefined) &&
+          fields.some((field) => field === undefined))
+        context.addIssue({ code: "custom", message: "retry acceptance binding must be complete" });
+    }),
 ]);
 export const amuxV22RecoveryWorkerSchema = z.object({ workerName: id }).strict();
 export const amuxV22RecoveryEvidenceSchema = z.object({
@@ -145,6 +257,97 @@ export const amuxV22SafeStopEvidenceSchema = z.object({
 export type AmuxV22RecoveryEvidenceInput = z.infer<typeof amuxV22RecoveryEvidenceSchema>;
 export type AmuxV22SafeStopEvidenceInput = z.infer<typeof amuxV22SafeStopEvidenceSchema>;
 export type AmuxV22RecoveryAdminInput = z.infer<typeof amuxV22RecoveryAdminSchema>;
+const amuxV22CliReadOnlyLaunchScopeSchema = z.object({
+  version: z.literal(AMUX_V22_READ_ONLY_LAUNCH_SCOPE_VERSION),
+  launcherPolicyVersion: z.literal(AMUX_V22_READ_ONLY_LAUNCHER_POLICY_VERSION),
+  launcherConfigDigest: digest, fixedArgvDigest: digest, toolPolicyDigest: digest,
+  profileConfigDigest: digest, role: z.literal("investigate"),
+  allowedTools: z.tuple([z.literal("Glob"), z.literal("Grep"), z.literal("Read")]),
+}).strict();
+const amuxV22ApiReadOnlyLaunchScopeSchema = z.object({
+  version: z.literal(1), executorKind: z.literal(AMUX_V22_READ_ONLY_API_EXECUTOR_KIND),
+  launcherConfigDigest: digest, apiExecutionFrameDigest: digest,
+}).strict();
+export const amuxV22ReadOnlyLaunchScopeSchema = z.union([
+  amuxV22CliReadOnlyLaunchScopeSchema, amuxV22ApiReadOnlyLaunchScopeSchema,
+]);
+const amuxV22ReadOnlyApiExecutionFrameSchema = z.custom<AmuxV22ReadOnlyApiExecutionFrame>(
+  (value) => {
+    try { parseAmuxV22ReadOnlyApiExecutionFrame(value); return true; }
+    catch { return false; }
+  }, "read_only_api_frame_invalid");
+const readOnlyLaunchBinding = {
+  requestKind: z.literal("read_only_launch_check"), launchCheckId: z.string().uuid(),
+  requestDigest: digest, taskId: z.literal(AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID),
+  taskRevision: revision, priorAttemptId: z.literal(AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID),
+  workerName: id, workerInstanceId: z.string().uuid(),
+  workerGeneration: z.number().int().min(1).max(2_147_483_647),
+  targetHost: z.literal(AMUX_V22_RECOVERY_HOST_SCOPE),
+  sourceEvidenceId: z.string().uuid(), sourceEvidenceDigest: digest,
+  riskAcceptanceId: z.string().uuid(), riskAcceptanceDigest: digest,
+  launchBindingId: z.string().uuid(), briefDigest: digest,
+  provider: id, modelId: z.string().min(1).max(160), routeId: id,
+  routePolicyDigest: digest, catalogApprovalId: id,
+  catalogVersion: z.string().min(1).max(128), pricingVersion: z.string().min(1).max(128),
+  costReceiptDigest: digest,
+  additionalCapMicroUsd: money.refine((value) =>
+    BigInt(value) <= AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD),
+  worstExposureMicroUsd: money.refine((value) =>
+    BigInt(value) <= AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD),
+  launchScope: amuxV22ReadOnlyLaunchScopeSchema,
+  apiExecutionFrame: amuxV22ReadOnlyApiExecutionFrameSchema.optional(),
+};
+function validateReadOnlyApiFrameBinding(value: {
+  launchScope: z.infer<typeof amuxV22ReadOnlyLaunchScopeSchema>;
+  apiExecutionFrame?: AmuxV22ReadOnlyApiExecutionFrame;
+}, context: z.RefinementCtx) {
+  if ("executorKind" in value.launchScope) {
+    if (!value.apiExecutionFrame ||
+        value.launchScope.apiExecutionFrameDigest !==
+          amuxV22ReadOnlyApiExecutionFrameDigest(value.apiExecutionFrame)) {
+      context.addIssue({ code: "custom", message: "read_only_api_frame_invalid" });
+    }
+  } else if (value.apiExecutionFrame !== undefined) {
+    context.addIssue({ code: "custom", message: "read_only_api_frame_invalid" });
+  }
+}
+export const amuxV22ReadOnlyLaunchCheckSchema = z.object(readOnlyLaunchBinding).strict()
+  .superRefine(validateReadOnlyApiFrameBinding);
+export const amuxV22ReadOnlyLaunchProofSchema = z.object({
+  ...readOnlyLaunchBinding, launchProofId: z.string().uuid(),
+  observation: z.enum(["current", "worker_identity_changed",
+    "launcher_config_mismatch", "profile_config_mismatch", "scope_mismatch"]),
+}).strict().superRefine(validateReadOnlyApiFrameBinding);
+export function amuxV22ReadOnlyLaunchProofScope(value: unknown) {
+  const parsed = amuxV22ReadOnlyLaunchProofSchema.safeParse(value);
+  if (!parsed.success) return null;
+  return { report: parsed.data, launchScope: parsed.data.launchScope,
+    launchScopeDigest: amuxV22ReadOnlyLaunchScopeDigest(parsed.data.launchScope) };
+}
+export function amuxV22ReadOnlyLaunchScopeMatchesIntent(nominal: unknown, actual: unknown) {
+  const expected = amuxV22ReadOnlyLaunchScopeSchema.safeParse(nominal);
+  const observed = amuxV22ReadOnlyLaunchScopeSchema.safeParse(actual);
+  if (!expected.success || !observed.success) return false;
+  if ("executorKind" in expected.data || "executorKind" in observed.data)
+    return matchAmuxV22ReadOnlyApiLaunchScopes(expected.data, observed.data);
+  return amuxCanonicalJson(expected.data) === amuxCanonicalJson({ ...observed.data,
+    launcherConfigDigest: expected.data.launcherConfigDigest });
+}
+export function amuxV22ReadOnlyLaunchScopeDigest(scope: unknown) {
+  const parsed = amuxV22ReadOnlyLaunchScopeSchema.parse(scope);
+  return "executorKind" in parsed ? amuxV22ReadOnlyApiLaunchScopeDigest(parsed) :
+    amuxV22CliReadOnlyLaunchScopeDigest(parsed);
+}
+export function amuxV22ReadOnlyLaunchExecutorKind(scope: unknown) {
+  const parsed = amuxV22ReadOnlyLaunchScopeSchema.safeParse(scope);
+  if (!parsed.success) return null;
+  return "executorKind" in parsed.data ? parsed.data.executorKind : "read_only_retry_v1";
+}
+export const amuxV22RecoveryControllerReportSchema = z.discriminatedUnion("requestKind", [
+  amuxV22SafeStopEvidenceSchema, amuxV22ReadOnlyLaunchProofSchema,
+]);
+export type AmuxV22ReadOnlyLaunchCheck = z.infer<typeof amuxV22ReadOnlyLaunchCheckSchema>;
+export type AmuxV22ReadOnlyLaunchProofInput = z.infer<typeof amuxV22ReadOnlyLaunchProofSchema>;
 export type AmuxV22RecoveryCost = { oldHeldMicroUsd: string;
   additionalCapMicroUsd: string; worstExposureMicroUsd: string;
   catalogApprovalId: string; catalogVersion: string; pricingVersion: string;
@@ -162,7 +365,24 @@ export type AmuxV22RecoveryRead = { taskId: string; requestId: string;
   targetUnit?: string | null; profileConfigDigest?: string | null;
   /** Current observation, separate from the immutable approval revision. */
   currentTask?: { revision: number; status: string } | null;
-  cost: AmuxV22RecoveryCost | null; approvalId?: string; retryWrite: false };
+  cost: AmuxV22RecoveryCost | null; quote: AmuxV22RecoveryCost | null;
+  riskAcceptance: null | { id: string; digest: string; ownerRequestId: string;
+    sourceEvidenceId: string; sourceEvidenceDigest: string; acceptedAt: string;
+    oldHeldMicroUsd: string; additionalCapMicroUsd: string;
+    worstExposureMicroUsd: string; executionStarted: false; reservationCreated: false };
+  launchProof: null | { id: string; digest: string; launchBindingId: string;
+    state: "current" | "stale" | "mismatch"; workerName: string;
+    provider: string; modelId: string; routeId: string; role: "investigate";
+    briefDigest: string; pricingVersion: string; costReceiptDigest: string;
+    launchScopeVersion: 1 };
+  eligibility: { acceptUnknownPriorEffects: boolean; requestSafeStop: boolean;
+    approveAttempt: boolean; reason: null | "exact_target_only" |
+      "risk_acceptance_required" | "safe_stop_required" | "safe_stop_stale" |
+      "launch_proof_required" | "launch_proof_stale" | "binding_changed" |
+      "already_approved" };
+  guards: { priorEffects: "unknown"; oldCost: "held";
+    readOnlyLaunch: "required"; taskAttemptLimit: 2 };
+  approvalId?: string; retryWrite: false };
 export const amuxV22RecoveryDigest = (kind: string, value: unknown) =>
   createHash("sha256").update(`amux-v22-task-recovery-${kind}-v1\n`)
     .update(amuxCanonicalJson(value)).digest("hex");
@@ -251,6 +471,33 @@ export function amuxV22RecoveryCost(input: { priorReservedMicroUsd: bigint;
   return { ...cost, costDigest: amuxV22RecoveryDigest("cost", {
     oldHeldMicroUsd: cost.oldHeldMicroUsd, additionalCapMicroUsd: cost.additionalCapMicroUsd,
     catalogApprovalId: cost.catalogApprovalId, basis }) };
+}
+
+export function amuxV22ReadOnlyRetryRouteCost(input: {
+  priorReservedMicroUsd: bigint; catalogApprovalId: string;
+  receipt: V4TaskCostCeilingReceipt; routeId: string; workerName: string;
+  provider: string; modelId: string;
+}): AmuxV22RecoveryCost {
+  const route = input.receipt.routes.find((candidate) =>
+    candidate.routeId === input.routeId && candidate.workerName === input.workerName &&
+    candidate.provider === input.provider && candidate.modelId === input.modelId);
+  if (!route || input.priorReservedMicroUsd !== AMUX_V22_UNKNOWN_PRIOR_HELD_MICROUSD)
+    throw new Error("cost_unverified");
+  const cap = BigInt(route.perAttemptMicroUsd);
+  const worst = input.priorReservedMicroUsd + cap;
+  if (cap <= BigInt(0) || cap > AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD ||
+      worst > AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD)
+    throw new Error("cost_unverified");
+  const cost = { oldHeldMicroUsd: input.priorReservedMicroUsd.toString(),
+    additionalCapMicroUsd: cap.toString(), worstExposureMicroUsd: worst.toString(),
+    catalogApprovalId: input.catalogApprovalId,
+    catalogVersion: input.receipt.catalogVersion,
+    pricingVersion: input.receipt.pricingVersion,
+    costReceiptDigest: input.receipt.receiptDigest };
+  return { ...cost, costDigest: amuxV22RecoveryDigest("read-only-route-cost", {
+    ...cost, routeId: route.routeId, workerName: route.workerName,
+    provider: route.provider, modelId: route.modelId,
+    routePolicyDigest: route.routePolicyDigest, perAttemptMicroUsd: route.perAttemptMicroUsd }) };
 }
 
 /** This authorization binds one exact next attempt; the generic ceiling still applies. */

@@ -144,6 +144,9 @@ export const APPEND_ONLY_LEDGER_TABLES = [
   "AmuxV22TaskRecoveryInspectionRequest",
   "AmuxV22TaskRecoveryEvidence",
   "AmuxV22TaskRecoveryApproval",
+  "AmuxV22TaskRecoveryRiskAcceptance",
+  "AmuxV22ReadOnlyLaunchCheck",
+  "AmuxV22ReadOnlyLaunchProof",
 ];
 
 /**
@@ -417,12 +420,21 @@ export const PROTECTED_TABLES = [
     "AmuxV22TaskRecoveryInspectionRequest",
     "AmuxV22TaskRecoveryEvidence",
     "AmuxV22TaskRecoveryApproval",
+    "AmuxV22TaskRecoveryRiskAcceptance",
+    "AmuxV22ReadOnlyLaunchCheck",
+    "AmuxV22ReadOnlyLaunchProof",
   ].map((table) => ({
     table,
     delegate: table[0].toLowerCase() + table.slice(1),
     writers: ["lib/amux/v22TaskRecoveryService.ts"],
-    contract: "docs/policy/development-agent-orchestration.md 버전 36-37",
+    contract: "docs/policy/development-agent-orchestration.md 버전 36-39",
   })),
+  {
+    table: "AmuxCliUsageEvent",
+    delegate: "amuxCliUsageEvent",
+    writers: ["lib/amux/cliUsageLedgerStore.ts", "lib/amux/cliUsageRetention.ts"],
+    contract: "docs/policy/development-agent-orchestration.md 버전 40",
+  },
 ];
 
 /** Prisma delegate operations that cannot change a row. */
@@ -723,9 +735,110 @@ export const RAW_SQL_ALLOWLIST = [
       "The additive v37 migration extends and reads the append-only evidence ledger to bind source evidence, durable stop journal and kernel process state. It seeds and mutates no evidence row; the existing append-only trigger remains in force.",
   },
   ...[
-    ["AmuxV22TaskRecoveryInspectionRequest", 6],
-    ["AmuxV22TaskRecoveryEvidence", 3],
+    ["AdminAuditLog", 9],
+    ["AmuxV22TaskRecoveryInspectionRequest", 8],
+    ["AmuxV22TaskRecoveryEvidence", 8],
+    ["AmuxV22TaskRecoveryApproval", 7],
+    ["AmuxV22TaskRecoveryRiskAcceptance", 14],
+    ["AmuxV22ReadOnlyLaunchCheck", 11],
+    ["AmuxV22ReadOnlyLaunchProof", 8],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261013220000_amux_v22_read_only_retry_risk/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 46,
+    reason:
+      "The additive v39 migration creates and guards the exact FIRST Task risk, launch-check and launch-proof ledgers, extends the existing request and approval bindings, and only reads linked recovery and audit rows. It seeds no authority or execution and never writes AdminAuditLog.",
+  })),
+  ...[
+    ["AmuxV22TaskRecoveryApproval", 5],
+    ["AmuxV22ReadOnlyLaunchCheck", 3],
+    ["AmuxV22ReadOnlyLaunchProof", 2],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261013230000_amux_v22_read_only_retry_db_guards/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 4,
+    reason:
+      "The additive v39 follow-up installs four constraint triggers that re-read the immutable final consent, launch check and launch proof at the launch, approval, claim and start boundaries. It performs no row DML; the scanner's write verbs are the triggers' INSERT event declarations.",
+  })),
+  {
+    path: "prisma/migrations/20261013260000_amux_v22_read_only_api_scope_guards/migration.sql",
+    table: "AmuxV22ReadOnlyLaunchCheck",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "The additive v40 migration replaces only the existing launch-check JSON scope constraint so it accepts the exact four-key API scope beside the unchanged CLI scope. It performs no row DML and the replacement remains fail-closed for null, malformed, extra-key, unknown-kind and cap-mismatch inputs.",
+  },
+  {
+    path: "prisma/migrations/20261006130000_amux_cli_usage_event/migration.sql",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 8,
+    writeVerbs: 22,
+    reason:
+      "The original usage-ledger migration creates the table, its indexes and immutable 13-month retention guard. It is immutable history and contains no runtime writer.",
+  },
+  {
+    path: "prisma/migrations/20261013270000_amux_native_api_usage_provenance/migration.sql",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The additive v40 migration replaces only the source and shape checks to add one honest complete native-API provenance branch. It changes no row and preserves both existing CLI branches.",
+  },
+  {
+    path: "prisma/migrations/20261013280000_amux_native_api_first_task_scope/migration.sql",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The additive v40 follow-up replaces only the existing usage shape CHECK to limit native API rows to the approved FIRST Task, complete terminal receipt, uniform model, eight-turn and 3.40 USD caps. It changes no row and leaves both CLI branches unchanged.",
+  },
+  {
+    path: "lib/amux/cliUsageLedgerStore.ts",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason:
+      "The sole guarded usage writer inserts one content-free row and appends its hash-chain system audit in the same transaction; duplicate invocation IDs are exact receipt-digest read-backs.",
+  },
+  {
+    path: "lib/amux/cliUsageRetention.ts",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 4,
+    writeVerbs: 7,
+    reason:
+      "The existing reviewed retention writer aggregates eligible expired rows before deleting them under the database-enforced 13-month retention contract.",
+  },
+  {
+    path: "lib/amux/v22WorkerClaimService.ts",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "Claim eligibility only reads whether prior attempts have usage evidence; unrelated assignment writes in the same module trigger the conservative raw-SQL text inventory.",
+  },
+  {
+    path: "lib/amux/v22TaskRecoveryService.ts",
+    table: "AmuxV22TaskRecoveryInspectionRequest",
+    tableMentions: 7,
+    writeVerbs: 3,
+    reason:
+      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable inspection request. It adds no writer; the raw-SQL verbs remain the three reviewed SELECT FOR UPDATE locks and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
+  },
+  {
+    path: "lib/amux/v22TaskRecoveryService.ts",
+    table: "AmuxV22TaskRecoveryEvidence",
+    tableMentions: 5,
+    writeVerbs: 3,
+    reason:
+      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable evidence receipt. It adds no writer; the raw-SQL verbs remain the three reviewed SELECT FOR UPDATE locks and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
+  },
+  ...[
     ["AmuxV22TaskRecoveryApproval", 3],
+    ["AmuxV22TaskRecoveryRiskAcceptance", 5],
+    ["AmuxV22ReadOnlyLaunchCheck", 2],
+    ["AmuxV22ReadOnlyLaunchProof", 1],
   ].map(([table, tableMentions]) => ({
     path: "lib/amux/v22TaskRecoveryService.ts",
     table,
@@ -742,6 +855,14 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The closed system-actor manifest names the recovery evidence target once for the unprivileged checker and once for the root controller beside prose about audit writes. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
   },
+  ...["AmuxV22ReadOnlyLaunchCheck", "AmuxV22ReadOnlyLaunchProof"].map((table) => ({
+    path: "lib/adminAuditSystemActors.ts",
+    table,
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed root-controller actor manifest names this v39 audit target once. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
+  })),
   {
     path: "lib/accountDataExportDomains.ts",
     table: "AmuxIdeaAnalysisBudgetSetting",

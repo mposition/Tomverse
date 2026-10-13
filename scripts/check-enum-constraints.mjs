@@ -799,6 +799,11 @@ const REGISTRY = {
     reason:
       "AmuxWorkerRuntimeStatus in lib/amux/workerRuntime.ts carries starting, idle, busy, error and stopped. The authenticated heartbeat route validates the same five values with zod, but neither copy is an exported runtime array the audit can compare mechanically.",
   },
+  AmuxWorkerRuntime_protocolCapabilities_check: {
+    owner: "type_only",
+    reason:
+      "AmuxWorkerRuntime.protocolCapabilities is a Prisma String[] version vector, not an ORM enum. AmuxWorkerProtocolCapability in lib/amux/workerRuntime.ts carries exactly the CLI read_only_retry_v1 and API read_only_api_retry_v1 literals, and the authenticated heartbeat route repeats both in zod while limiting the array to at most one. Neither representation is an exported runtime array the audit can compare mechanically; the database CHECK defines the persisted array shape, allowing only empty or exactly one of those literals.",
+  },
   AmuxIncidentTransition_from_state_check: {
     owner: "list",
     module: "lib/amux/incidentCore.ts",
