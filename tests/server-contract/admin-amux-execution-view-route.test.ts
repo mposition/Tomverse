@@ -28,6 +28,9 @@ mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
   consumeApiRateLimit: async () => undefined,
   apiSecurityResponse: () => null,
 } });
+mock.module(mod("lib/amux/ownerRecoveryInspectionRead.ts"), { namedExports: {
+  readAmuxOwnerRecoveryInspection: async () => { throw new Error("not_requested"); },
+} });
 mock.module(mod("lib/amux/adminExecutionRead.ts"), { namedExports: {
   readAmuxExecutionBoardSnapshot: async () => { reads += 1;
     return { counts: {}, lanes: [] }; },

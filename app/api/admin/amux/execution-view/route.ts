@@ -19,6 +19,8 @@ import {
 } from "@/lib/amux/adminExecutionViewCore";
 import { readAmuxV22ActivationStatus } from
   "@/lib/amux/v22ActivationReadiness";
+import { readAmuxOwnerRecoveryInspection } from
+  "@/lib/amux/ownerRecoveryInspectionRead";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const json = (body: object, status = 200) =>
@@ -42,6 +44,7 @@ export async function GET(request: Request) {
       view === "board" ? ["view", "lane", "page"] :
       view === "hierarchy" ? ["view", "parentKind", "parentId", "page"] :
       view === "feedback" ? ["view", "parentKind", "parentId"] :
+      view === "recovery_inspection" ? ["view", "taskId", "taskRevision", "attemptId"] :
       view === "detail" ? ["view", "taskId"] : null;
     if (!allowed || [...params.keys()].some((key) => !allowed.includes(key) ||
         params.getAll(key).length !== 1)) return json({ error: "invalid_request" }, 400);
@@ -77,6 +80,18 @@ export async function GET(request: Request) {
     }
     const taskId = params.get("taskId");
     if (!taskId || !ID.test(taskId)) return json({ error: "invalid_request" }, 400);
+    if (view === "recovery_inspection") {
+      const revision = params.get("taskRevision");
+      const taskRevision = revision && /^[1-9][0-9]*$/.test(revision) ? Number(revision) : null;
+      const attemptId = params.get("attemptId");
+      if (!Number.isSafeInteger(taskRevision) ||
+          (attemptId !== null && !ID.test(attemptId))) return json({ error: "invalid_request" }, 400);
+      const result = await readAmuxOwnerRecoveryInspection({ taskId,
+        taskRevision: taskRevision!, attemptId });
+      return result.state === "not_found" ? json({ error: "not_found" }, 404) :
+        result.state === "changed" ? json({ error: "recovery_inspection_changed" }, 409) :
+        json(result.inspection);
+    }
     const result = await readAmuxExecutionTaskDetail(taskId);
     return result ? json(result) : json({ error: "not_found" }, 404);
   } catch (error) {
