@@ -323,6 +323,25 @@ Tomverse Agents의 **dev 환경에만** 있고(dev는 `develop`에서 빌드합�
    plan이 서비스 생성을 보이면 apply하지 않는다고 적으므로, IaC apply로 만들지(plan에 **이 서비스 하나의
    생성만** 있고 지워지거나 바뀌는 것이 없을 때) 대시보드에서 만들지는 운영자가 정합니다. 어느 쪽이든
    region은 `asia-southeast1-eqsg3a`여야 합니다(6a).
+
+   대시보드에서 만들면 `.railway/agent-runners.ts`의 선언이 적용되지 않으므로 아래를 **모두** 손으로
+   맞춥니다. 하나라도 빠지면 Railpack이 앱 전체를 빌드하거나 다른 명령이 돌아 측정 JSON이 나오지 않습니다.
+
+   | 설정 | 값 |
+   |---|---|
+   | 환경 | Tomverse Agents → **dev** |
+   | 이름 | `Product Research Scout Probe` |
+   | Source | GitHub `mposition/Tomverse`, branch `develop` |
+   | Build → Builder | **Dockerfile**, 경로 `docker/product-research-scout-probe.Dockerfile` |
+   | Deploy → Start command | `npm run agent:product-research-scout-s0-probe -- all` |
+   | Deploy → Cron schedule | 비움(일정 없음) |
+   | Deploy → Restart policy | **Never** |
+   | Region | `asia-southeast1-eqsg3a`, replica 1 |
+   | Networking | 공개 domain을 만들지 않음 |
+   | Variables | `PRODUCT_RESEARCH_SCOUT_ENABLED` 하나뿐(2단계에서 넣음). 다른 변수 없음 |
+
+   만든 뒤 `npm run railway:agents:use-dev && npm run railway:agents:plan`(읽기 전용)이 이 서비스에 대해
+   차이를 보이지 않으면 선언과 같게 만들어진 것입니다.
 2. **켜기.** Railway 대시보드 → Tomverse Agents → dev → Product Research Scout
    Probe → Variables에 `PRODUCT_RESEARCH_SCOUT_ENABLED`를 아무 값으로 넣습니다.
    변수 변경이 재배포를 만들고, 그 배포가 측정입니다(일정이 없는 서비스는 배포마다
