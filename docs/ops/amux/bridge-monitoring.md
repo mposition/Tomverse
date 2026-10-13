@@ -175,7 +175,9 @@ halt하면 journal에 다음 한 줄이 남는다. 앞부분은 예전과 같아
 amux wsl bridge halted: no new assignments; cause=<원인>; restart only after checking Tomverse and the local AMUX
 ```
 
-원인은 처음 halt한 이유 하나이고, 닫힌 어휘다.
+원인은 처음 halt한 이유 하나이고, 닫힌 어휘다. 그와 별도로 bridge는 원인을 기록할 때마다
+`amux wsl bridge halt noted: cause=<원인>` 한 줄을 남긴다. 처음 것 뒤에 기록된 원인도 남으므로, 5절의 자동
+재시작은 이 줄로 그 실행에서 기록된 원인을 모두 본다.
 
 | 원인 | 뜻 |
 |---|---|
@@ -229,6 +231,13 @@ amux wsl bridge halted: no new assignments; cause=<원인>; restart only after c
   `failed`이고 종료 코드가 3인 unit뿐이다. 종료 코드 1(시작 실패)은 unit의 `Restart=on-failure`가 이미 다시
   시작하고, 손으로 멈춘 unit은 `inactive`라 건드리지 않는다. sidecar도 건드리지 않는다.
 - 원인은 그 실패한 실행(invocation)의 journal만 읽는다. 이전 실행의 줄이 섞이지 않는다.
+- halt 줄은 처음 원인만 적고, halt 뒤에 결과를 모르게 된 작업(예: 열린 채 남은 읽기 전용 API attempt)은 다른 줄을
+  남기지 않을 수 있다. 그래서 그 실행의 `halt noted: cause=` 줄이 **모두** 승인된 원인이고, halt 줄이 그중 첫
+  번째를 가리키고, 나머지 줄이 모두 알려진 무해한 줄일 때만 재시작한다. 그 밖의 줄이 하나라도 있으면 멈춘 채 둔다.
+- **이 줄을 남기는 bridge 바이너리가 있어야 동작한다.** 그 전의 바이너리가 남긴 halt는 기록된 원인을 알 수 없어
+  모두 멈춘 채 둔다. codex bridge(`/usr/local/libexec/tomverse-wsl-bridge`)와 v22 bridge
+  (`/opt/tomverse-amux-v22/tomverse-wsl-bridge`) 둘 다 이 절이 들어 있는 commit 이후로 빌드해 교체해야 한다
+  (운영자 승인, `wsl-execution-bridge.md`의 전용 Ubuntu 서버 절차).
 - 다시 시작하기 전에 로컬 AMUX 서버 `/health`와 Tomverse `/api/health`가 답해야 한다. 답하지 않으면 다음
   실행에서 다시 본다.
 - bridge는 진행 중인 attempt가 하나도 남지 않았을 때만 종료 코드 3으로 끝난다. 그래서 다시 시작해도 넘겨받을

@@ -851,10 +851,23 @@ fn api_model_access_read_deferrable(error: &anyhow::Error) -> bool {
 
 /// Records why the bridge halted. The first cause wins: whatever followed it
 /// happened in a bridge that had already stopped taking new work.
+///
+/// Every cause is also printed, the first and each one after it. The final
+/// halt line names only the first, and some later causes (a read-only API
+/// attempt left open, for one) print nothing else; the host's auto-restart
+/// (scripts/amux-bridge-autorestart) restarts a halted run only when every
+/// cause noted in it is one the operator approved, so it has to see them all.
 fn note_halt(halt_cause: &mut Option<String>, cause: impl Into<String>) {
+    let cause = cause.into();
+    eprintln!("{}", halt_noted_line(&cause));
     if halt_cause.is_none() {
-        *halt_cause = Some(cause.into());
+        *halt_cause = Some(cause);
     }
+}
+
+/// The line each noted halt cause leaves, in the closed vocabulary below.
+fn halt_noted_line(cause: &str) -> String {
+    format!("amux wsl bridge halt noted: cause={cause}")
 }
 
 /// The one line a halt leaves. It keeps its old prefix, so a search for it
@@ -3902,6 +3915,22 @@ mod tests {
         assert!(line.starts_with("amux wsl bridge halted: no new assignments; "));
         assert!(line.contains("; cause=tick_failed_http_500; "));
         assert!(halt_line(None).contains("; cause=unrecorded; "));
+        assert_eq!(
+            halt_noted_line("read_only_api_outcome_unknown"),
+            "amux wsl bridge halt noted: cause=read_only_api_outcome_unknown"
+        );
+    }
+
+    #[test]
+    fn every_noted_halt_cause_is_printed_not_only_the_first() {
+        // The auto-restart reads these lines; a cause noted after the first
+        // must leave one too, or it would restart over an unknown outcome.
+        let source = include_str!("wsl_bridge.rs");
+        let body = &source[source.find("fn note_halt(").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        let print = body.find("eprintln!(\"{}\", halt_noted_line(&cause));").unwrap();
+        let first_only = body.find("if halt_cause.is_none()").unwrap();
+        assert!(print < first_only, "the line is printed before the first-cause check");
     }
 
     #[test]

@@ -19,12 +19,17 @@
 # that cannot be read -- stays halted and is reported by the existing alerts.
 # There is no restart count limit (operator decision, 2026-10-14).
 #
-# The cause alone is not enough. The bridge keeps only the first cause
+# The final cause alone is not enough. The bridge keeps only the first cause
 # (note_halt), and it may go on settling earlier work after halting; an
-# outcome that becomes unknown then ("halt: settle outcome unknown ... read
-# back before restart") does not change the cause. So the whole halted run is
-# read, and it restarts only when every line is one this script knows to be
-# harmless. Any other line holds it.
+# outcome that becomes unknown then does not change it, and some such paths
+# print nothing else. So the bridge prints every cause it notes
+# ("amux wsl bridge halt noted: cause=<cause>"), and a run restarts only when
+#
+#   - every noted cause is an approved one, and the halt line names the first;
+#   - every other line is one this script knows to be harmless.
+#
+# A bridge binary built before it printed noted causes leaves none, and its
+# halts are held: there is no way to tell what else it noted.
 #
 # A bridge exits 3 only once nothing it dispatched is still pending
 # (apps/tomverse-orchestrator/src/wsl_bridge.rs, `halted && pending_count == 0`).
@@ -48,6 +53,7 @@ log() { echo "tomverse-bridge-autorestart: $*"; }
 # The lines a halted run may contain and still be restarted, as
 # wsl_bridge.rs prints them. Everything else holds the bridge.
 halt_line='^amux wsl bridge halted: no new assignments; cause=([a-z0-9_]+); restart only after checking Tomverse and the local AMUX$'
+noted_line='^amux wsl bridge halt noted: cause=([a-z0-9_]+)$'
 nothing_committed='^amux wsl bridge warn: tick failed \([a-z0-9_]+\) after 0 result\(s\) already committed this tick; recording them before halting$'
 harmless=(
   # A warning the bridge itself declares harmless ends with "not halted".
@@ -57,14 +63,28 @@ harmless=(
   '^amux v[0-9]+ quota observation recorded for [A-Za-z0-9_.-]+$'
 )
 
+approved() {
+  [[ "$1" == worker_runtime_lease_lost || "$1" == tick_failed_* ]]
+}
+
 # Prints "restart" or "hold <reason>" for one failed run's journal lines.
 decide() {
-  local lines=$1 cause="" halts=0 ticks=0 line pattern known
+  local lines=$1 cause="" first="" halts=0 noted=0 ticks=0 tick_causes=0 line pattern known
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     if [[ "$line" =~ $halt_line ]]; then
       cause=${BASH_REMATCH[1]}
       halts=$((halts + 1))
+      continue
+    fi
+    if [[ "$line" =~ $noted_line ]]; then
+      noted=$((noted + 1))
+      [[ -z "$first" ]] && first=${BASH_REMATCH[1]}
+      if ! approved "${BASH_REMATCH[1]}"; then
+        echo "hold cause=${BASH_REMATCH[1]} was noted and is not restarted automatically"
+        return
+      fi
+      [[ "${BASH_REMATCH[1]}" == tick_failed_* ]] && tick_causes=$((tick_causes + 1))
       continue
     fi
     if [[ "$line" =~ $nothing_committed ]]; then
@@ -82,14 +102,16 @@ decide() {
   done <<<"$lines"
   if ((halts != 1)); then
     echo "hold $halts halt lines in the halted run"
-  elif [[ "$cause" == worker_runtime_lease_lost ]]; then
-    echo restart
-  elif [[ "$cause" == tick_failed_* ]] && ((ticks > 0)); then
-    echo restart
-  elif [[ "$cause" == tick_failed_* ]]; then
-    echo "hold cause=$cause without a tick that committed nothing"
-  else
+  elif ! approved "$cause"; then
     echo "hold cause=$cause is not restarted automatically"
+  elif ((noted == 0)); then
+    echo "hold no noted causes (a bridge binary that predates them)"
+  elif [[ "$first" != "$cause" ]]; then
+    echo "hold the halt line names $cause but the first noted cause is $first"
+  elif ((tick_causes > ticks)); then
+    echo "hold cause=tick_failed_* without a tick that committed nothing"
+  else
+    echo restart
   fi
 }
 
