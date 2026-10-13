@@ -43,7 +43,8 @@ import {
   reviewRoomView,
   researchTone,
 } from "../lib/agentOffice/live.ts";
-import { agentOfficeAmuxState } from "../lib/agentOfficeAmuxState.ts";
+import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState } from "../lib/agentOfficeAmuxState.ts";
+import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
 import { AGENT_OFFICE_AMUX_ROSTER } from "../lib/agentOffice/amuxRoster.ts";
 import { agentOfficeDecisionState } from "../lib/agentOfficeDecisionState.ts";
 import { AGENT_OFFICE_DIGEST_WINDOW_MS, agentOfficeDigestState } from "../lib/agentOfficeDigestState.ts";
@@ -831,8 +832,14 @@ test("the display-only v27 roster shows thirteen residents without admitting new
   assert.match(view.note, /정책 v27/);
   assert.ok(view.workers.filter((worker) => worker.state === "not_admitted").every((worker) => worker.status === "waiting" && !worker.dim));
   const officeReader = readFunction("readAmuxWorkers");
-  assert.match(officeReader, /AGENT_OFFICE_AMUX_ROSTER\.filter\(\(worker\) => admitted\.has\(worker\.name\)\)/);
-  assert.match(officeReader, /roster: AGENT_OFFICE_AMUX_ROSTER/);
+  // While R2c is off the display roster is the seat list; once it is on,
+  // orchestration policy version 35 (section 3) seats every registered worker
+  // that is not retired. Either way the seats are display only: they choose
+  // which runtime rows are read, never who may be assigned.
+  assert.match(officeReader, /let roster: readonly \{ name: string; provider: string \}\[\] = AGENT_OFFICE_AMUX_ROSTER;/);
+  assert.match(officeReader, /roster\.filter\(\(worker\) => admitted\.has\(worker\.name\)\)/);
+  assert.match(officeReader, /agentOfficeAmuxState\(\{ catalog, roster, runtimes, now: new Date\(\) \}\)/);
+  assert.match(officeReader, /if \(amuxWorkerDerivedCatalogAssignmentOpen\(\)\) \{/);
   for (const path of ["lib/amux/routing.ts", "app/api/internal/amux/workers/register/route.ts"]) {
     assert.doesNotMatch(readFileSync(path, "utf8"), /agentOffice\/amuxRoster|AGENT_OFFICE_AMUX_ROSTER/);
   }
@@ -2139,4 +2146,35 @@ test("a room's name opens what its team does, written from its code and policy",
   assert.match(modal, /m\.teamInfo\.teams\[team\]/);
   // Read only: it links and names, and decides nothing.
   assert.doesNotMatch(modal, /fetch\(|method: "POST"|engine\.command|onApprove/);
+});
+
+test("with R2c on, every registered worker that is not retired has a seat, in the roster's order", () => {
+  // Orchestration policy version 35, section 3: the registry's thirteen give
+  // exactly the display roster, in its order and with its provider labels.
+  const seed = AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => ({
+    workerName: entry.workerName,
+    providerClass: amuxWorkerProviderClassOf(entry.workerName),
+    desiredState: entry.desiredState,
+  }));
+  const order = AGENT_OFFICE_AMUX_ROSTER.map((worker) => worker.name);
+  assert.deepEqual(
+    agentOfficeAmuxRosterFromRegistry(seed, order),
+    AGENT_OFFICE_AMUX_ROSTER.map((worker) => ({ name: worker.name, provider: worker.provider })),
+  );
+  // A retired worker loses its seat; one the roster does not name gets one,
+  // after the roster's, in name order.
+  const changed = [
+    ...seed.map((row) => (row.workerName === "copilot-worker" ? { ...row, desiredState: "retired" } : row)),
+    { workerName: "codex-review", providerClass: "codex", desiredState: "requested" },
+    { workerName: "claude-extra", providerClass: "claude", desiredState: "paused" },
+  ];
+  const seats = agentOfficeAmuxRosterFromRegistry(changed, order);
+  assert.equal(seats.some((seat) => seat.name === "copilot-worker"), false);
+  assert.deepEqual(seats.slice(-2), [
+    { name: "claude-extra", provider: "anthropic" },
+    { name: "codex-review", provider: "openai" },
+  ]);
+  // A seat the catalog does not assign is shown apart, never as assigned.
+  const state = agentOfficeAmuxState({ catalog: [catalogRow("claude-impl")], roster: seats, runtimes: [], now: amuxNow });
+  assert.equal(state.workers.find((worker) => worker.name === "codex-review").state, "not_admitted");
 });

@@ -45,6 +45,37 @@ function workerState(worker: CatalogWorker, runtime: Runtime | undefined, now: D
   return "error";
 }
 
+/** The display roster's provider labels, by provider class (version 31). */
+const OFFICE_PROVIDER_LABEL: Readonly<Record<string, string>> = Object.freeze({
+  claude: "anthropic",
+  codex: "openai",
+  cursor: "cursor",
+  copilot: "github-copilot",
+});
+
+/**
+ * Orchestration policy version 35, section 3: once R2c is on, a seat for
+ * every registered worker that is not retired -- assigned or not, which the
+ * state says apart. Seats keep the display roster's order; a registered
+ * worker the roster does not name follows, in name order.
+ */
+export function agentOfficeAmuxRosterFromRegistry(
+  registrations: readonly { workerName: string; providerClass: string; desiredState: string }[],
+  displayOrder: readonly string[],
+): { name: string; provider: string }[] {
+  const rank = (name: string) => {
+    const index = displayOrder.indexOf(name);
+    return index < 0 ? displayOrder.length : index;
+  };
+  return registrations
+    .filter((registration) => registration.desiredState !== "retired")
+    .map((registration) => ({
+      name: registration.workerName,
+      provider: OFFICE_PROVIDER_LABEL[registration.providerClass] ?? registration.providerClass,
+    }))
+    .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
+}
+
 export function agentOfficeAmuxState(input: {
   catalog: readonly CatalogWorker[] | null;
   roster: readonly { name: string; provider: string }[];
