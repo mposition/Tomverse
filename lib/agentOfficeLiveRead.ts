@@ -33,7 +33,7 @@ import {
   countAwaitingAmuxEscalations,
   countPendingMarketingApprovals,
 } from "@/lib/adminNavigationCounts";
-import { agentOfficeAmuxState } from "@/lib/agentOfficeAmuxState";
+import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState, agentOfficeProviderLabel } from "@/lib/agentOfficeAmuxState";
 import { AGENT_OFFICE_AMUX_ROSTER } from "@/lib/agentOffice/amuxRoster";
 import { agentOfficeDecisionState } from "@/lib/agentOfficeDecisionState";
 import { AGENT_OFFICE_DIGEST_WINDOW_MS, agentOfficeDigestState } from "@/lib/agentOfficeDigestState";
@@ -48,6 +48,8 @@ import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
 import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
+import { amuxDerivedCatalogAsConfigured, readAmuxRegistryAndDerivedCatalog } from "@/lib/amux/workerAssignmentCatalog";
+import { amuxWorkerDerivedCatalogAssignmentOpen } from "@/lib/amux/workerDerivedCatalogCore";
 import { readBillingFinanceOpsControl } from "@/lib/billingFinanceOpsControl";
 import {
   BILLING_FINANCE_OPS_AGENT_KEY,
@@ -241,9 +243,31 @@ async function readEngineering(): Promise<AgentOfficeEngineeringState> {
  */
 async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
   try {
-    const catalog = getConfiguredAmuxWorkerCatalog();
+    // Orchestration policy version 35, section 3: while R2c is off, the
+    // display roster against the catalog variable; once it is on, a seat for
+    // every registered worker that is not retired, against the derived
+    // catalog, both read in one statement. A registry that cannot be read
+    // falls back to the display roster with the catalog unknown.
+    let catalog: ReturnType<typeof getConfiguredAmuxWorkerCatalog>;
+    let roster: readonly { name: string; provider: string }[] = AGENT_OFFICE_AMUX_ROSTER;
+    if (amuxWorkerDerivedCatalogAssignmentOpen()) {
+      const read = await readAmuxRegistryAndDerivedCatalog(prisma);
+      // The derived catalog names provider classes; seats show the roster's
+      // labels, assigned or not.
+      catalog = read.derived === null
+        ? null
+        : amuxDerivedCatalogAsConfigured(read.derived).workers.map((worker) => ({
+            ...worker,
+            provider: agentOfficeProviderLabel(worker.provider),
+          }));
+      if (read.registrations !== null) {
+        roster = agentOfficeAmuxRosterFromRegistry(read.registrations, AGENT_OFFICE_AMUX_ROSTER.map((worker) => worker.name));
+      }
+    } else {
+      catalog = getConfiguredAmuxWorkerCatalog();
+    }
     const admitted = new Set((catalog ?? []).filter((worker) => !worker.archived).map((worker) => worker.worker_name));
-    const names = AGENT_OFFICE_AMUX_ROSTER.filter((worker) => admitted.has(worker.name)).map((worker) => worker.name);
+    const names = roster.filter((worker) => admitted.has(worker.name)).map((worker) => worker.name);
     const runtimes = names.length
       ? await prisma.amuxWorkerRuntime.findMany({
           where: { workerName: { in: names } },
@@ -252,7 +276,7 @@ async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
       : [];
     // Judged against a clock taken after the read: a lease that has run out
     // by then is lost, never live.
-    return agentOfficeAmuxState({ catalog, roster: AGENT_OFFICE_AMUX_ROSTER, runtimes, now: new Date() });
+    return agentOfficeAmuxState({ catalog, roster, runtimes, now: new Date() });
   } catch {
     console.warn({ event: "admin_agent_office_read_failed", read: "amux_workers" });
     return { kind: "unread" };

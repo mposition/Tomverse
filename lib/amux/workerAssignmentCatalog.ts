@@ -12,6 +12,7 @@ import {
   deriveAmuxWorkerCatalog,
   type AmuxDerivedCatalog,
 } from "@/lib/amux/workerDerivedCatalogCore";
+import type { AmuxWorkerRegistration } from "@/lib/amux/workerRegistryCore";
 import {
   amuxWorkerLatchNewestJsonSql,
   amuxWorkerRegistryFromNewestJsonOrThrow,
@@ -43,8 +44,16 @@ export type AmuxAssignmentCatalogs = {
   v22: AmuxConfiguredV22Worker[] | null;
 };
 
-/** The derived catalog in one statement; null when it cannot be derived. */
-export async function readAmuxDerivedWorkerCatalog(client: CatalogReader): Promise<AmuxDerivedCatalog | null> {
+/**
+ * The registry's newest events and the catalog derived from them, in one
+ * statement. Either is null when it cannot be read or derived; the office
+ * seats (version 35, section 3) show every registered worker beside whether
+ * the catalog assigns it.
+ */
+export async function readAmuxRegistryAndDerivedCatalog(client: CatalogReader): Promise<{
+  registrations: AmuxWorkerRegistration[] | null;
+  derived: AmuxDerivedCatalog | null;
+}> {
   const rows = await client.$queryRaw<Array<{ registry: unknown; latches: unknown; capabilities: unknown }>>(
     Prisma.sql`SELECT
       ${amuxWorkerRegistryNewestJsonSql()} AS "registry",
@@ -52,17 +61,34 @@ export async function readAmuxDerivedWorkerCatalog(client: CatalogReader): Promi
       ${amuxWorkerCapabilityNewestJsonSql()} AS "capabilities"`,
   );
   const row = rows[0];
-  if (row === undefined) return null;
+  if (row === undefined) return { registrations: null, derived: null };
+  let registry: ReturnType<typeof amuxWorkerRegistryFromNewestJsonOrThrow>;
   try {
-    const registry = amuxWorkerRegistryFromNewestJsonOrThrow(row.registry, row.latches);
-    return deriveAmuxWorkerCatalog({
-      registrations: registry.registrations,
-      capabilities: amuxWorkerCapabilitiesFromNewestJsonOrThrow(row.capabilities),
-      latches: registry.latches,
-    });
+    registry = amuxWorkerRegistryFromNewestJsonOrThrow(row.registry, row.latches);
   } catch {
-    return null;
+    return { registrations: null, derived: null };
   }
+  // A capability row the store would not accept leaves no catalog, but the
+  // registry it was read beside is still the registry.
+  let capabilities: ReturnType<typeof amuxWorkerCapabilitiesFromNewestJsonOrThrow>;
+  try {
+    capabilities = amuxWorkerCapabilitiesFromNewestJsonOrThrow(row.capabilities);
+  } catch {
+    return { registrations: registry.registrations, derived: null };
+  }
+  return {
+    registrations: registry.registrations,
+    derived: deriveAmuxWorkerCatalog({
+      registrations: registry.registrations,
+      capabilities,
+      latches: registry.latches,
+    }),
+  };
+}
+
+/** The derived catalog in one statement; null when it cannot be derived. */
+export async function readAmuxDerivedWorkerCatalog(client: CatalogReader): Promise<AmuxDerivedCatalog | null> {
+  return (await readAmuxRegistryAndDerivedCatalog(client)).derived;
 }
 
 /** The derived catalog in the shapes the catalog variables' readers return. */
