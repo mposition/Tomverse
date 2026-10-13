@@ -24,7 +24,7 @@ test("every authoritative routing, claim, and execution-start path consults the 
   const root = resolve(import.meta.dirname, "../..");
   const source = (path: string) => readFileSync(resolve(root, path), "utf8");
   const routing = source("lib/amux/routing.ts");
-  assert.match(routing, /amuxV22SafeStopFencedWorkers/);
+  assert.match(routing, /amuxV22OpenCardOwnersAndSafeStopFenced/);
   assert.match(routing, /!safeStopFenced\.has\(worker\.worker_name\)/);
   assert.match(routing, /blocked: worker\.blocked \|\| specialistMismatch \|\|\s*safeStopFenced\.has/);
 
