@@ -11,6 +11,8 @@ import {
 } from "@/lib/promptRefinerProductContract";
 import { promptRefinerKillSwitchEngaged } from "@/lib/promptRefinerAccess";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
+import { currentChatReleaseSourceFingerprint } from
+  "@/lib/chatReleaseSourceFingerprint";
 import { ROUTER_VERSIONS } from "@/lib/routerDecision";
 import { FALLBACK_POLICY_VERSION, plannerFailureMode } from
   "@/lib/routingFallbackPolicy";
@@ -19,19 +21,21 @@ import type { ChatRefinerInitialAutoEvidenceRefs } from
   "@/lib/chatRefinerInitialAutoReleaseApiContract";
 
 export const CHAT_REFINER_INITIAL_AUTO_RELEASE_KIND =
-  "initial_auto_v1" as const;
+  "initial_auto_v2" as const;
 export const CHAT_REFINER_INITIAL_AUTO_POLICY_COMMIT =
   "3aeb001a4abde2d93e945ed5e5de61b10c412c0b" as const;
 export const CHAT_REFINER_INITIAL_AUTO_POLICY_SHA256 =
   "a9dbe509a056152015a59a45fd6438304fac36f36521a1319c11f8d1704970f9" as const;
+export const CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256 =
+  "1624ea972b907448dbe13ae9739c96a7854e2dbd777bbfb8dece36ba5d1f7838" as const;
 export const CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION =
   "chat_auto.initial_release_exception_activated" as const;
 export const CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION =
   "prompt_refiner.product_initial_auto_release_activated" as const;
 export const CHAT_REFINER_INITIAL_AUTO_ROUTER_SUMMARY =
-  "Activated the exact-deployment Chat Auto initial-release exception." as const;
+  "Activated the stable-source Chat Auto initial-release exception." as const;
 export const CHAT_REFINER_INITIAL_AUTO_PRODUCT_SUMMARY =
-  "Activated the exact-deployment Prompt Refiner initial Auto release." as const;
+  "Activated the stable-source Prompt Refiner initial Auto release." as const;
 
 export const CHAT_REFINER_INITIAL_AUTO_DEFERRED_ROUTER_GATES = Object.freeze([
   "shadow_report",
@@ -53,6 +57,8 @@ const sha256 = (value: unknown) => createHash("sha256")
 export type ChatRefinerInitialAutoRuntimeBinding = Readonly<{
   runtimeCommitSha: string;
   runtimeDeploymentId: string;
+  releaseFingerprint: string;
+  releaseAuthorityDigest: string;
   routerConfigDigest: string;
   rolloutPercent: number;
   eligiblePlans: readonly string[];
@@ -98,8 +104,19 @@ export const chatRefinerInitialAutoRuntimeBinding = (
     dispatchInstrumentation: "enforce",
     manifestHashKeyId,
   });
+  const releaseFingerprint = currentChatReleaseSourceFingerprint();
+  const releaseAuthorityDigest = sha256({
+    version: "chat-release-authority-v2",
+    releaseFingerprint,
+    routerConfigDigest,
+    candidateDigest: PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
+    pricePinDigest: PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
+    adapterConfigDigest: PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST,
+    continuityPolicySha256: CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256,
+  });
   return Object.freeze({ runtimeCommitSha, runtimeDeploymentId,
-    routerConfigDigest, rolloutPercent: cohort.rolloutPercent,
+    releaseFingerprint, releaseAuthorityDigest, routerConfigDigest,
+    rolloutPercent: cohort.rolloutPercent,
     eligiblePlans, cohortSaltDigest, manifestHashKeyId });
 };
 
@@ -107,8 +124,11 @@ const sharedMetadata = (binding: ChatRefinerInitialAutoRuntimeBinding,
   evidenceRefs: ChatRefinerInitialAutoEvidenceRefs) => ({
   policyCommit: CHAT_REFINER_INITIAL_AUTO_POLICY_COMMIT,
   policySha256: CHAT_REFINER_INITIAL_AUTO_POLICY_SHA256,
+  continuityPolicySha256: CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256,
   runtimeCommitSha: binding.runtimeCommitSha,
   runtimeDeploymentId: binding.runtimeDeploymentId,
+  releaseFingerprint: binding.releaseFingerprint,
+  releaseAuthorityDigest: binding.releaseAuthorityDigest,
   candidateDigest: PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
   pricePinDigest: PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
   adapterConfigDigest: PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST,
@@ -130,7 +150,7 @@ export const chatRefinerInitialAutoRouterMetadata = (
   binding: ChatRefinerInitialAutoRuntimeBinding,
   evidenceRefs: ChatRefinerInitialAutoEvidenceRefs,
 ) => ({
-  version: "chat-refiner-initial-auto-router-release-v1",
+  version: "chat-refiner-initial-auto-router-release-v2",
   releaseKind: CHAT_REFINER_INITIAL_AUTO_RELEASE_KIND,
   ...sharedMetadata(binding, evidenceRefs),
 });
@@ -140,7 +160,7 @@ export const chatRefinerInitialAutoProductMetadata = (
   routerExceptionAuditLogId: string,
   evidenceRefs: ChatRefinerInitialAutoEvidenceRefs,
 ) => ({
-  version: "prompt-refiner-product-initial-auto-release-v1",
+  version: "prompt-refiner-product-initial-auto-release-v2",
   releaseKind: CHAT_REFINER_INITIAL_AUTO_RELEASE_KIND,
   ...sharedMetadata(binding, evidenceRefs),
   routerExceptionAuditLogId,
@@ -157,10 +177,11 @@ export const chatRefinerInitialAutoResumeMetadata = (input: Readonly<{
   routerExceptionAuditLogId: string;
   productActivationAuditLogId: string;
 }>) => ({
-  version: "prompt-refiner-product-auto-resume-v2",
+  version: "prompt-refiner-product-auto-resume-v3",
   releaseKind: CHAT_REFINER_INITIAL_AUTO_RELEASE_KIND,
   policyCommit: CHAT_REFINER_INITIAL_AUTO_POLICY_COMMIT,
   policySha256: CHAT_REFINER_INITIAL_AUTO_POLICY_SHA256,
+  continuityPolicySha256: CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256,
   ...input,
 });
 

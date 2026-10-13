@@ -22,6 +22,7 @@ import {
   DEFAULT_API_CACHE_CONTROL,
   isApiPathname,
 } from "@/lib/apiCacheControlPolicy";
+import { proxyMarketingBoundary } from "@/lib/marketingRoutes";
 import {
   hasValidMutationOrigin,
   requiresMutationOriginCheck,
@@ -347,14 +348,17 @@ export function proxy(request: NextRequest) {
           searchLanguage: null,
           acceptLanguage: request.headers.get("accept-language"),
         });
-  const localizedTarget =
-    request.method === "GET" || request.method === "HEAD"
-      ? localizedMarketingRedirect({
-          pathname: request.nextUrl.pathname,
-          language: preference.language,
-          source: preference.source,
-        })
-      : null;
+  const marketing = proxyMarketingBoundary({
+    pathname: request.nextUrl.pathname,
+    method: request.method,
+    isStatic: isStaticMarketingPathname,
+    redirect: () => localizedMarketingRedirect({
+      pathname: request.nextUrl.pathname,
+      language: preference.language,
+      source: preference.source,
+    }),
+  });
+  const localizedTarget = marketing.redirect;
   if (localizedTarget) {
     const target = request.nextUrl.clone();
     target.pathname = localizedTarget;
@@ -370,9 +374,7 @@ export function proxy(request: NextRequest) {
     return redirect;
   }
 
-  const isStaticMarketingRequest = isStaticMarketingPathname(
-    request.nextUrl.pathname
-  );
+  const isStaticMarketingRequest = marketing.staticMarketing;
   const staticMarketingHashes = isStaticMarketingRequest
     ? getStaticMarketingCspHashes(request.nextUrl.pathname)
     : null;

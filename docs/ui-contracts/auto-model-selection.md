@@ -4,7 +4,9 @@
   release authority still requires serving readback.** The three
   readiness attestations in `lib/autoRolloutReadiness.ts` remain `pending`.
   The owner-approved initial release may authorize Auto through
-  [its exact-deployment activation](../policy/chat-refiner-initial-auto-release-v1.md),
+  [its exact-deployment v1 activation](../policy/chat-refiner-initial-auto-release-v1.md)
+  or the separately activated
+  [stable-source v2 authority](../policy/chat-refiner-stable-release-authority-v2.md),
   while the separate limited-release path requires its exact reviewed artifact
   and runtime tuple. This document is not evidence that either path is active.
   The controls are mounted

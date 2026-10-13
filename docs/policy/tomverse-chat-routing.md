@@ -171,4 +171,10 @@ their real status and requires the actual enforced, immutable finalized
 manifest boundary, ordinary authorization/billing and every rollout/kill
 control. This is an initial product connection, not quality certification.
 
+The versioned contract in
+[release continuity v2](./chat-refiner-stable-release-authority-v2.md)
+requires a new owner audit bound to stable execution source and effective
+controls. The original v1 pair remains exact-deployment-bound; a later
+deployment does not silently broaden that historical approval.
+
 The generated release-gate view (`docs/release-gates/tomverse-chat-v1.generated.md`, rendered from the canonical YAML by `npm run generate:tomverse-chat-release-gate-view`) must link routing results to the IDs under `ROUTE-*`, `ESTIMATE-*`, `FALLBACK-*`, `PLANNER-*`, `BILLING-*`, `ABUSE-*`, `MODERATION-*`, `MEMORY-*`, and `MANIFEST-*` in the canonical YAML. This policy intentionally does not duplicate their numeric thresholds.

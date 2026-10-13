@@ -6,7 +6,14 @@ import { pathToFileURL } from "node:url";
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const runtime = { RAILWAY_GIT_COMMIT_SHA: "a".repeat(40),
-  RAILWAY_DEPLOYMENT_ID: "22222222-2222-4222-8222-222222222222" };
+  RAILWAY_DEPLOYMENT_ID: "22222222-2222-4222-8222-222222222222",
+  AUTO_ROUTER_ROLLOUT_PERCENT: "5",
+  AUTO_ROUTER_ELIGIBLE_PLANS: "Max,Plus",
+  AUTO_ROUTER_COHORT_SALT: "product-release-store-test-cohort",
+  TOMVERSE_AUTO_ROUTER_UI_ENABLED: "true",
+  ROUTING_DISPATCH_INSTRUMENTATION: "enforce",
+  MANIFEST_HASH_KEYS: `test-key:${"m".repeat(32)}`,
+  MANIFEST_HASH_ACTIVE_KEY_ID: "test-key" };
 const target = { stageId: "prompt-refiner-vnext-one-shot-v4",
   gateAuditLogId: "gate-audit", dispositionAuditLogId: "disposition-audit",
   limitedAuditReceiptId: "limited-audit",
@@ -26,6 +33,7 @@ let guardReasonCode: string | null = null;
 let guardTransitionAuditLogId = "activation";
 let capturedAuditMetadata: unknown = null;
 let initialInspection: Readonly<Record<string, unknown>> = { state: "absent" };
+let priorSourceActivation = false;
 const stopReasons: string[] = [];
 
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
@@ -117,10 +125,16 @@ const tx = async () => {
   return {
     adminAuditLog: { findMany: async ({ where }: { where: {
       action: string | { in: string[] };
+      targetType?: string;
     } }) => {
       if (queryFails) throw new Error("synthetic_db_unavailable");
       if (where.action === "prompt_refiner.product_release_activated") {
         return activationRows;
+      }
+      if (where.action ===
+          "prompt_refiner.product_initial_auto_release_activated" &&
+          where.targetType === "ChatReleaseAuthority") {
+        return priorSourceActivation ? [{ id: "prior-v2-product" }] : [];
       }
       if (typeof where.action === "object") {
         return initialInspection.state === "absent" ? [] : [{ id: "initial" }];
@@ -137,6 +151,7 @@ beforeEach(async () => {
   guardActive = true; guardGeneration = 1; guardReasonCode = null;
   guardTransitionAuditLogId = "activation"; capturedAuditMetadata = null;
   initialInspection = { state: "absent" };
+  priorSourceActivation = false;
   const store = await storePromise;
   activationRows = [{ id: "activation", actorUserId: "owner",
     createdAt: new Date("2026-10-10T00:00:00.000Z"),
@@ -204,6 +219,34 @@ test("a malformed view closes without mutating the operational guard", async () 
     { sourceReadCount: 0, priceReadCount: 0, auditValidationCount: 0 });
 });
 
+test("invalid or changed v2 controls latch on dispatch and never inherit a prior pair", async () => {
+  const store = await storePromise;
+  activationRows = [];
+  priorSourceActivation = true;
+  assert.equal((await store.admitPromptRefinerProductRelease(
+    await tx() as never, { ...runtime, AUTO_ROUTER_KILL_SWITCH: "on" }))
+    .autoEnabled, false);
+  assert.deepEqual(stopReasons, ["critical_safety_failure"]);
+  stopReasons.length = 0;
+  assert.equal((await store.admitPromptRefinerProductRelease(
+    await tx() as never, { ...runtime, AUTO_ROUTER_ROLLOUT_PERCENT: "10" }))
+    .autoEnabled, false);
+  assert.deepEqual(stopReasons, ["audit_failure"]);
+  stopReasons.length = 0;
+  assert.equal((await store.readPromptRefinerProductRelease(
+    await tx() as never, runtime)).autoEnabled, false);
+  assert.deepEqual(stopReasons, []);
+});
+
+test("a legacy exact-deployment row cannot revive an earlier v2 source pair", async () => {
+  const store = await storePromise;
+  priorSourceActivation = true;
+  const result = await store.admitPromptRefinerProductRelease(
+    await tx() as never, { ...runtime, AUTO_ROUTER_ROLLOUT_PERCENT: "10" });
+  assert.equal(result.autoEnabled, false);
+  assert.deepEqual(stopReasons, ["audit_failure"]);
+});
+
 test("initial release resume records the current policy and exact authority pair", async () => {
   const store = await storePromise;
   activationRows = [];
@@ -234,11 +277,13 @@ test("initial release resume records the current policy and exact authority pair
     });
     assert.equal(result.generation, 8);
     assert.deepEqual(capturedAuditMetadata, {
-      version: "prompt-refiner-product-auto-resume-v2",
-      releaseKind: "initial_auto_v1",
+      version: "prompt-refiner-product-auto-resume-v3",
+      releaseKind: "initial_auto_v2",
       policyCommit: "3aeb001a4abde2d93e945ed5e5de61b10c412c0b",
       policySha256:
         "a9dbe509a056152015a59a45fd6438304fac36f36521a1319c11f8d1704970f9",
+      continuityPolicySha256:
+        "1624ea972b907448dbe13ae9739c96a7854e2dbd777bbfb8dece36ba5d1f7838",
       operatorConfirmedReasonCode: "unknown_dispatch_or_cost",
       pauseAuditLogId: "pause-audit",
       priorGeneration: 7,

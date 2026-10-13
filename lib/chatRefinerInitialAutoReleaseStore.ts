@@ -74,8 +74,8 @@ export async function inspectChatRefinerInitialAutoRelease(
         CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
         CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
       ] },
-      targetType: "RailwayDeployment",
-      targetId: binding.runtimeDeploymentId,
+      targetType: "ChatReleaseAuthority",
+      targetId: binding.releaseAuthorityDigest,
     },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: 3,
@@ -96,6 +96,21 @@ export async function inspectChatRefinerInitialAutoRelease(
   if (!evidence.success) {
     return closed("invalid", "activation_pair_mismatch");
   }
+  // The original serving identity is immutable audit provenance. Continued
+  // authority compares the stable release fingerprint and effective controls,
+  // while the current deployment is still validated before each use.
+  const activationCommit = routerMetadata?.runtimeCommitSha;
+  const activationDeployment = routerMetadata?.runtimeDeploymentId;
+  if (typeof activationCommit !== "string" ||
+      !/^[0-9a-f]{40}$/.test(activationCommit) ||
+      typeof activationDeployment !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        activationDeployment)) {
+    return closed("invalid", "activation_pair_mismatch");
+  }
+  const activationBinding = { ...binding,
+    runtimeCommitSha: activationCommit,
+    runtimeDeploymentId: activationDeployment };
   if (!router.actorUserId || router.actorUserId !== product.actorUserId ||
       router.summary !== CHAT_REFINER_INITIAL_AUTO_ROUTER_SUMMARY ||
       product.summary !== CHAT_REFINER_INITIAL_AUTO_PRODUCT_SUMMARY ||
@@ -103,10 +118,10 @@ export async function inspectChatRefinerInitialAutoRelease(
       product.createdAt.getTime() <= router.createdAt.getTime() ||
       !exactChatRefinerInitialAutoMetadata(
         router.metadata, chatRefinerInitialAutoRouterMetadata(
-          binding, evidence.data)) ||
+          activationBinding, evidence.data)) ||
       !exactChatRefinerInitialAutoMetadata(product.metadata,
         chatRefinerInitialAutoProductMetadata(
-          binding, router.id, evidence.data))) {
+          activationBinding, router.id, evidence.data))) {
     return closed("invalid", "activation_pair_mismatch");
   }
   const keys = adminAuditIntegrityKeys(runtime);
@@ -156,8 +171,8 @@ export async function activateChatRefinerInitialAutoRelease(input: {
     const prior = await tx.adminAuditLog.findMany({ where: {
       action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
         CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION] },
-      targetType: "RailwayDeployment",
-      targetId: binding.runtimeDeploymentId,
+      targetType: "ChatReleaseAuthority",
+      targetId: binding.releaseAuthorityDigest,
     }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1 });
     if (prior.length !== 0) {
       throw new Error("chat_refiner_initial_auto_activation_duplicate");
@@ -173,14 +188,14 @@ export async function activateChatRefinerInitialAutoRelease(input: {
     const routerActivationAuditLogId = await writeAdminAuditLog({ tx,
       session: input.session, request: input.request,
       action: CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
-      targetType: "RailwayDeployment", targetId: binding.runtimeDeploymentId,
+      targetType: "ChatReleaseAuthority", targetId: binding.releaseAuthorityDigest,
       summary: CHAT_REFINER_INITIAL_AUTO_ROUTER_SUMMARY,
       metadata: chatRefinerInitialAutoRouterMetadata(binding, evidenceRefs),
     });
     const productActivationAuditLogId = await writeAdminAuditLog({ tx,
       session: input.session, request: input.request,
       action: CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
-      targetType: "RailwayDeployment", targetId: binding.runtimeDeploymentId,
+      targetType: "ChatReleaseAuthority", targetId: binding.releaseAuthorityDigest,
       summary: CHAT_REFINER_INITIAL_AUTO_PRODUCT_SUMMARY,
       metadata: chatRefinerInitialAutoProductMetadata(
         binding, routerActivationAuditLogId, evidenceRefs),
@@ -192,7 +207,7 @@ export async function activateChatRefinerInitialAutoRelease(input: {
         readback.productActivationAuditLogId !== productActivationAuditLogId) {
       throw new Error("chat_refiner_initial_auto_activation_readback_invalid");
     }
-    return Object.freeze({ releaseKind: "initial_auto_v1" as const,
+    return Object.freeze({ releaseKind: "initial_auto_v2" as const,
       routerActivationAuditLogId, productActivationAuditLogId,
       runtimeCommitSha: binding.runtimeCommitSha,
       runtimeDeploymentId: binding.runtimeDeploymentId,

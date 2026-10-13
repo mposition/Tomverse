@@ -44,16 +44,30 @@ const closed = (state: "absent" | "invalid", reason: string) =>
 const exactActivation = (row: AdminAuditLog,
   binding: GuestChatSmartAdaptiveRuntimeBinding,
   base: Extract<Awaited<ReturnType<typeof inspectChatRefinerInitialAutoRelease>>,
-    { state: "active" }>) =>
-  row.action === GUEST_CHAT_SMART_ADAPTIVE_ACTION &&
+    { state: "active" }>) => {
+  const metadata = row.metadata && typeof row.metadata === "object" &&
+    !Array.isArray(row.metadata)
+    ? row.metadata as Record<string, unknown> : null;
+  const activationCommit = metadata?.runtimeCommitSha;
+  const activationDeployment = metadata?.runtimeDeploymentId;
+  if (typeof activationCommit !== "string" ||
+      !/^[0-9a-f]{40}$/.test(activationCommit) ||
+      typeof activationDeployment !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        activationDeployment)) return false;
+  const activationBinding = { ...binding,
+    runtimeCommitSha: activationCommit,
+    runtimeDeploymentId: activationDeployment };
+  return row.action === GUEST_CHAT_SMART_ADAPTIVE_ACTION &&
   row.summary === GUEST_CHAT_SMART_ADAPTIVE_SUMMARY &&
-  row.targetType === "RailwayDeployment" &&
-  row.targetId === binding.runtimeDeploymentId &&
+  row.targetType === "GuestChatReleaseFingerprint" &&
+  row.targetId === binding.configDigest &&
   Boolean(row.actorUserId) && Boolean(row.entryHash) &&
   exactGuestChatSmartAdaptiveMetadata(row.metadata,
-    guestChatSmartAdaptiveActivationMetadata({ binding,
+    guestChatSmartAdaptiveActivationMetadata({ binding: activationBinding,
       baseRouterActivationAuditLogId: base.routerActivationAuditLogId,
       baseProductActivationAuditLogId: base.productActivationAuditLogId }));
+};
 
 /** Fresh readback. Unknown runtime or database state never becomes authority. */
 export async function inspectGuestChatSmartAdaptiveRelease(
@@ -74,8 +88,8 @@ export async function inspectGuestChatSmartAdaptiveRelease(
   if (!guard.active) return closed("invalid", "product_auto_guard_inactive");
   const rows = await tx.adminAuditLog.findMany({
     where: { action: GUEST_CHAT_SMART_ADAPTIVE_ACTION,
-      targetType: "RailwayDeployment",
-      targetId: binding.runtimeDeploymentId },
+      targetType: "GuestChatReleaseFingerprint",
+      targetId: binding.configDigest },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: 2,
   });
@@ -123,8 +137,8 @@ export async function activateGuestChatSmartAdaptiveRelease(input: {
     }
     const prior = await tx.adminAuditLog.findMany({ where: {
       action: GUEST_CHAT_SMART_ADAPTIVE_ACTION,
-      targetType: "RailwayDeployment",
-      targetId: binding.runtimeDeploymentId,
+      targetType: "GuestChatReleaseFingerprint",
+      targetId: binding.configDigest,
     }, select: { id: true }, take: 1 });
     if (prior.length !== 0) {
       throw new Error("guest_chat_smart_adaptive_activation_duplicate");
@@ -132,7 +146,8 @@ export async function activateGuestChatSmartAdaptiveRelease(input: {
     const activationAuditLogId = await writeAdminAuditLog({ tx,
       session: input.session, request: input.request,
       action: GUEST_CHAT_SMART_ADAPTIVE_ACTION,
-      targetType: "RailwayDeployment", targetId: binding.runtimeDeploymentId,
+      targetType: "GuestChatReleaseFingerprint",
+      targetId: binding.configDigest,
       summary: GUEST_CHAT_SMART_ADAPTIVE_SUMMARY,
       metadata: guestChatSmartAdaptiveActivationMetadata({ binding,
         baseRouterActivationAuditLogId: base.routerActivationAuditLogId,
@@ -143,7 +158,7 @@ export async function activateGuestChatSmartAdaptiveRelease(input: {
         readback.activationAuditLogId !== activationAuditLogId) {
       throw new Error("guest_chat_smart_adaptive_activation_readback_invalid");
     }
-    return Object.freeze({ releaseKind: "guest_chat_smart_adaptive_v1" as const,
+    return Object.freeze({ releaseKind: "guest_chat_smart_adaptive_v2" as const,
       activationAuditLogId,
       activationPairDigest: readback.activationPairDigest,
       runtimeCommitSha: binding.runtimeCommitSha,

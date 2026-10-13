@@ -43,6 +43,7 @@ const guestChatAutoReleaseSchema = z.object({
   binding: z.object({
     runtimeCommitSha: z.string().regex(/^[0-9a-f]{40}$/),
     runtimeDeploymentId: z.string().uuid(),
+    releaseFingerprint: sha256Schema,
     configDigest: sha256Schema,
     baseRouterConfigDigest: sha256Schema,
     promptRefinerCandidateDigest: sha256Schema,
@@ -60,7 +61,7 @@ const guestChatAutoReadbackSchema = z.object({
   release: guestChatAutoReleaseSchema.nullable(),
 }).strict();
 const guestChatAutoActivationResponseSchema = z.object({
-  releaseKind: z.literal("guest_chat_smart_adaptive_v1"),
+  releaseKind: z.literal("guest_chat_smart_adaptive_v2"),
   activationAuditLogId: z.string().min(1).max(240),
   activationPairDigest: sha256Schema,
   runtimeCommitSha: z.string().regex(/^[0-9a-f]{40}$/),
@@ -178,7 +179,7 @@ export function AdminChatRefinerInitialAutoReleaseControls({ snapshot, onRefresh
     setResult(null);
     const activation = kind === "activate";
     const body = activation
-      ? { releaseKind: "initial_auto_v1", ...runtime,
+      ? { releaseKind: "initial_auto_v2", ...runtime,
         evidenceRefs,
         confirmation: CHAT_REFINER_INITIAL_AUTO_ACTIVATION_CONFIRMATION }
       : { enabled: kind === "enable", ...runtime,
@@ -260,7 +261,7 @@ export function AdminChatRefinerInitialAutoReleaseControls({ snapshot, onRefresh
         </button>
         <button type="button" disabled={disabled ||
           snapshot.controls.rollout === "enabled" ||
-          snapshot.release.releaseKind !== "initial_auto_v1"}
+          snapshot.release.releaseKind !== "initial_auto_v2"}
           onClick={() => void mutate("enable")}
           className="min-h-11 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-100 disabled:opacity-50">
           {m.enableRollout}

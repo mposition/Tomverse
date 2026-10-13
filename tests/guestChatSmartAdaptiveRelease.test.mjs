@@ -22,7 +22,7 @@ const runtime = {
   MANIFEST_HASH_ACTIVE_KEY_ID: "2026-11",
 };
 
-test("Guest Smart Adaptive binding is exact-deployment and default-off", () => {
+test("Guest Smart Adaptive binding is stable across deployment identity and default-off", () => {
   assert.throws(() => guestChatSmartAdaptiveRuntimeBinding({ ...runtime,
     CHAT_GUEST_SMART_ADAPTIVE_ROLLOUT_ENABLED: "0" }),
   /rollout_disabled/);
@@ -30,6 +30,14 @@ test("Guest Smart Adaptive binding is exact-deployment and default-off", () => {
   assert.equal(binding.runtimeCommitSha, "a".repeat(40));
   assert.equal(binding.runtimeDeploymentId,
     "11111111-1111-4111-8111-111111111111");
+  const successor = guestChatSmartAdaptiveRuntimeBinding({ ...runtime,
+    RAILWAY_GIT_COMMIT_SHA: "b".repeat(40),
+    RAILWAY_DEPLOYMENT_ID: "22222222-2222-4222-8222-222222222222" });
+  assert.equal(successor.releaseFingerprint, binding.releaseFingerprint);
+  assert.equal(successor.configDigest, binding.configDigest);
+  assert.notEqual(successor.runtimeDeploymentId, binding.runtimeDeploymentId);
+  assert.notEqual(guestChatSmartAdaptiveRuntimeBinding({ ...runtime,
+    AUTO_ROUTER_ROLLOUT_PERCENT: "5" }).configDigest, binding.configDigest);
   assert.match(binding.configDigest, /^[0-9a-f]{64}$/);
 });
 
