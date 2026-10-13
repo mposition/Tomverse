@@ -542,8 +542,13 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
   }
 }
 
-/* The compact web-search chip stays visually 32px high. Its exception text
-   still owns a 44px coarse-pointer target without adding another layout row. */
+/* The web-search chip stays visually 32px on mobile and 36px on tablet. A
+   manual exception gets a transparent row that contains its 44px target. */
+.composer-chip-exception-row {
+  display: flex;
+  align-items: center;
+}
+
 .composer-chip-touch-target {
   position: relative;
 }
@@ -555,6 +560,10 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
 }
 
 @media (pointer: coarse) {
+  .composer-chip-exception-row {
+    min-height: 2.75rem;
+  }
+
   .composer-chip-touch-target::before {
     inset: -0.875rem -0.25rem;
   }
