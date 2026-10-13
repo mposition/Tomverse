@@ -81,8 +81,7 @@ npm run promote:test -- --sha=<develop 병합 commit>
 6. **확인:** `npm run report:deployed-commit-drift -- --fetch`에서 staging은 `test`, dev는 `develop`과 맞습니다.
    Railway에서 staging `Tomverse`의 새 배포가 `test`의 SHA로 `SUCCESS`인지 봅니다.
 
-   **기록 (초안 — Claude가 운영자의 관측과 Railway·GitHub 읽기로 채웠고, 확인한 사람 칸은 운영자가 각 줄을 확인한 뒤
-   채웁니다)**
+   **기록** — Claude가 운영자의 관측과 Railway·GitHub 읽기로 작성했고, 운영자가 각 줄을 확인했습니다(2026-10-13).
 
    ```
    전환 일시(UTC):   2026-10-13 05:56 (Branch 변경 → staging Tomverse 배포 생성 05:56:03, 서빙 06:02:51)
@@ -93,7 +92,7 @@ npm run promote:test -- --sha=<develop 병합 commit>
                      그 대신 promote:test가 suite 종료를 기다림(§2).
    서비스 branch:    9개 모두 test(Railway 읽기, 2026-10-13). IaC apply 없음.
                      Billing Finance Ops Deadline(Agents)은 목록 밖이라 develop에 남아 있다가 06:37에 옮김.
-   확인한 사람:      ____________________
+   확인한 사람:      mposition (2026-10-13)
    ```
 
 **되돌리기:** 4의 서비스들 Branch를 `develop`으로 되돌립니다. `test`는 남겨 둬도 아무것도 읽지 않습니다. merge
