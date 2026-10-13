@@ -13,11 +13,14 @@ import {
   amuxDerivedCatalogAsConfigured,
   amuxWorkerCatalogRefusal,
   readAmuxAssignmentCatalogs,
+  readAmuxRegistryAndDerivedCatalog,
   readAmuxDerivedWorkerCatalog,
 } from "../lib/amux/workerAssignmentCatalog.ts";
 import {
   AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH,
+  AMUX_WORKER_SESSION_LIST_LATCH,
   amuxWorkerDerivedCatalogAssignmentOpen,
+  amuxWorkerSessionListOpen,
 } from "../lib/amux/workerDerivedCatalogCore.ts";
 import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
 
@@ -203,4 +206,33 @@ test("quota and the engineering adapter keep the variable while R2c is off, and 
   has(adapter, ["listed: derived",
     "      ? async (tx) => (await amuxWorkerCatalogRefusal(tx, ENGINEERING_AGENT_AMUX_WORKER, true)) === null",
     "      : undefined,"].join(String.fromCharCode(10)));
+});
+
+test("a capability the store would not accept leaves no catalog but keeps the registry read beside it", async () => {
+  const badCapability = await readAmuxRegistryAndDerivedCatalog(
+    fakeClient(statement(REGISTRY_ROWS, [], [{ ...CAPABILITY_ROWS[0], routingTags: [] }])),
+  );
+  assert.equal(badCapability.derived, null);
+  assert.equal(badCapability.registrations?.length, REGISTRY_ROWS.length);
+  const badLatch = await readAmuxRegistryAndDerivedCatalog(
+    fakeClient(statement(REGISTRY_ROWS, [{ workerName: "claude-impl", eventKind: "unknown" }])),
+  );
+  assert.deepEqual(badLatch, { registrations: null, derived: null });
+  const whole = await readAmuxRegistryAndDerivedCatalog(fakeClient(statement()));
+  assert.equal(whole.registrations?.length, REGISTRY_ROWS.length);
+  assert.equal(whole.derived?.legacy.length, 8);
+});
+
+test("R2d ships with the bridge session list latched off, and the route only reads", () => {
+  // Orchestration policy version 35, section 4.
+  assert.equal(AMUX_WORKER_SESSION_LIST_LATCH, false);
+  assert.equal(amuxWorkerSessionListOpen(), false);
+  const route = readFileSync(new URL("../app/api/internal/amux/workers/session-list/route.ts", import.meta.url), "utf8");
+  assert.match(route, /export async function GET\(request: Request\)/);
+  assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)/);
+  assert.ok(route.indexOf("isAmuxSyncAuthorized(request)") < route.indexOf("readAmuxWorkerSessionList()"));
+  const list = readFileSync(new URL("../lib/amux/workerSessionList.ts", import.meta.url), "utf8");
+  assert.match(list, /if \(!open\) return \{ listed: false, reason: "session_list_off" \};/);
+  assert.match(list, /AMUX_DB_BOUNDARIES\.workerSessionListRead/);
+  assert.match(list, /filter\(\(name\) => !amuxDerivedCatalogEntryIsConstant\(name\)\)/);
 });

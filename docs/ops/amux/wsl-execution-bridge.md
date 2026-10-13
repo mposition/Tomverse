@@ -96,6 +96,22 @@ WantedBy=default.target
 
 halt 뒤에는 로그(`journalctl --user -u tomverse-wsl-bridge`)와 Tomverse의 attempt 상태를 확인한 다음 사람이 `systemctl --user restart tomverse-wsl-bridge`로 다시 시작한다.
 
+### 세션 목록 (정책 버전 35, R2d)
+
+bridge는 시작할 때와 heartbeat를 보내는 매 회차에 `GET /api/internal/amux/workers/session-list`를 읽는다. 이 route는 등록부에서 유도한 카탈로그의 이름 목록을 돌려준다. `engineering-runner`는 이 목록에 들어가지 않는다. 읽기 전용이며 등록·갱신·배정을 하지 않는다. worker별 v22 bridge(`tomverse-amux-v22-bridge@<worker>`)도 같은 바이너리라서 같은 규칙을 따른다.
+
+| 답 | bridge의 동작 |
+|---|---|
+| `session_list_off`(R2d 코드 래치가 꺼져 있음), 또는 그 route가 없는 앱의 404 | 지금과 같다. `TOMVERSE_AMUX_WSL_SESSIONS`만 따른다. |
+| 목록 | `TOMVERSE_AMUX_WSL_SESSIONS`와의 교집합만 등록하고 배정 대상으로 내놓는다. 목록 밖의 실행 중 세션은 아직 등록하지 않고 대기열에 두며, 이후 회차에 목록에 들어오면 등록한다. 이미 등록된 세션이 목록 밖이 되면 상태는 그대로 보고하되 `dispatch_ready: false`로 heartbeat하고, 진행 중인 attempt는 끝낸다. |
+| 그 밖의 모든 답(카탈로그를 유도할 수 없음, 응답 없음, 형식 오류) | 새로 등록하지 않는다. 시작할 때라면 실행 중 세션 모두가 대기열에 들어간다. 등록된 세션도 진행 중인 일도 없이 등록만 기다리는 동안에는 배정 조회를 하지 않으므로, 장애가 이어져도 halt하지 않는다. 등록된 세션은 배정 대상으로 내놓지 않는다. |
+
+어느 경우도 halt(종료 코드 3)가 아니다.
+
+전환 기간에는 `TOMVERSE_AMUX_WSL_SESSIONS`가 목록을 좁히기만 하는 이중 장치로 남는다. R2e에서 지운다.
+
+404를 "꺼짐"으로 읽으므로 앱 배포와 호스트 바이너리 교체의 순서는 상관없다. 바이너리 교체는 운영자가 한다(버전 23).
+
 ## 활성화
 
 버전 14가 코드 래치를 켰다. `tomverse-wsl-bridge`는 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이고 `TOMVERSE_AMUX_WSL_LOCAL_URL`이 loopback일 때만 `run_from_env`로 들어간다. 그 함수는 `bridge_tick_sourced`를 호출하고, 실행 attempt의 전달 본문은 Tomverse의 delivery pull로 받는다. `bridge_tick`은 고정 본문을 받는 테스트용 진입점이다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 환경 변수가 없으면 바이너리와 `scripts/amux-wsl-bridge.mjs`는 소켓을 열지 않고 끝난다.
