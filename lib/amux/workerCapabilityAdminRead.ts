@@ -1,9 +1,10 @@
 import "server-only";
 
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
-import { getConfiguredAmuxV22WorkerCatalog, getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
-import { AMUX_V22_WORKER_CATALOG_ENV } from "@/lib/amux/v22WorkerCatalogCore";
+import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
+import { AMUX_V22_WORKER_CATALOG_ENV, parseAmuxV22WorkerCatalog } from "@/lib/amux/v22WorkerCatalogCore";
 import {
+  amuxWorkerCapabilityV22Catalog,
   buildAmuxWorkerCapabilityAdminView,
   type AmuxWorkerCapabilityAdminView,
 } from "@/lib/amux/workerCapabilityCore";
@@ -30,13 +31,16 @@ export async function readAmuxWorkerCapabilitiesForAdmin(): Promise<AmuxWorkerCa
   const current = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerCapabilityRead, (tx) =>
     readAmuxWorkerCapabilitiesOrThrow(tx),
   );
-  // An unset v22 variable means no worker has a profile ([]); a set one that
-  // does not parse is unreadable (null), which blocks the import.
-  const v22Raw = process.env[AMUX_V22_WORKER_CATALOG_ENV]?.trim();
+  // Only an absent v22 variable means no worker has a profile ([]); any
+  // present value, blank included, is parsed, and one that does not parse is
+  // unreadable (null), which blocks the import.
+  const legacy = getConfiguredAmuxWorkerCatalog();
   return buildAmuxWorkerCapabilityAdminView({
     registrations: registry.registrations,
     current,
-    legacy: getConfiguredAmuxWorkerCatalog(),
-    v22: v22Raw ? getConfiguredAmuxV22WorkerCatalog() : [],
+    legacy,
+    v22: amuxWorkerCapabilityV22Catalog(process.env[AMUX_V22_WORKER_CATALOG_ENV], (raw) =>
+      parseAmuxV22WorkerCatalog(raw, legacy),
+    ),
   });
 }

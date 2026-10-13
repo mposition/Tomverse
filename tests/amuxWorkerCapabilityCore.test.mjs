@@ -3,8 +3,10 @@
 // rule at write and at derivation, and the import from the catalog variables.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { parseAmuxV22WorkerCatalog } from "../lib/amux/v22WorkerCatalogCore.ts";
 import {
   AMUX_WORKER_CAPABILITY_WRITES_LATCH,
   AMUX_WORKER_ROUTING_TAGS,
@@ -15,6 +17,7 @@ import {
   amuxWorkerCapabilityImportsToWrite,
   amuxWorkerCapabilityImport,
   amuxWorkerCapabilityRefusal,
+  amuxWorkerCapabilityV22Catalog,
   amuxWorkerCapabilityWithinCeiling,
   amuxWorkerCapabilityWritesOpen,
   buildAmuxWorkerCapabilityAdminView,
@@ -238,4 +241,19 @@ test("a v22 variable that is set but unreadable blocks the import; an unset one 
   const unset = buildAmuxWorkerCapabilityAdminView({ registrations: PRODUCTION_REGISTRY, current: recorded, legacy: PRODUCTION_LEGACY, v22: [] });
   assert.equal(unset.catalogReadable, true);
   assert.equal(unset.rows.find((row) => row.workerName === "claude-chore").proposed.v22, null);
+});
+
+test("only an absent v22 variable reads as no profiles; a blank or malformed one is unreadable", () => {
+  // Review r-20261013-021506-9adb4b: a trimmed truthiness check read a blank
+  // variable as unset and proposed v22: null over the recorded profiles.
+  const parse = (raw) => parseAmuxV22WorkerCatalog(raw, PRODUCTION_LEGACY);
+  assert.deepEqual(amuxWorkerCapabilityV22Catalog(undefined, parse), []);
+  for (const raw of ["", "   ", "\n", "[]", "{", "not json"]) {
+    assert.equal(amuxWorkerCapabilityV22Catalog(raw, parse), null, JSON.stringify(raw));
+  }
+  assert.equal(amuxWorkerCapabilityV22Catalog(JSON.stringify(PRODUCTION_V22), parse).length, PRODUCTION_V22.length);
+  // The server read hands the variable over untouched; it decides nothing itself.
+  const source = readFileSync(new URL("../lib/amux/workerCapabilityAdminRead.ts", import.meta.url), "utf8");
+  assert.match(source, /amuxWorkerCapabilityV22Catalog\(process\.env\[AMUX_V22_WORKER_CATALOG_ENV\],/);
+  assert.doesNotMatch(source, /\.trim\(\)|getConfiguredAmuxV22WorkerCatalog/);
 });

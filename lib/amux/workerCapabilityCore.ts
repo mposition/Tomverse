@@ -321,6 +321,19 @@ export type AmuxWorkerCapabilityAdminView = {
   rows: AmuxWorkerCapabilityAdminRow[];
 };
 
+/**
+ * The v22 profiles the import reads: [] only when the variable is absent.
+ * Any value that is present -- blank or whitespace included -- goes to the
+ * parser, so a value it cannot read is null and blocks the import instead of
+ * being proposed as "no profiles" over what is recorded.
+ */
+export function amuxWorkerCapabilityV22Catalog<T>(
+  raw: string | undefined,
+  parse: (raw: string) => readonly T[] | null,
+): readonly T[] | null {
+  return raw === undefined ? [] : parse(raw);
+}
+
 /** One row per registered, non-retired worker, in name order. */
 export function buildAmuxWorkerCapabilityAdminView(input: {
   registrations: readonly AmuxWorkerRegistration[];
