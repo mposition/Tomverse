@@ -99,9 +99,11 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "read",
   },
   // 7: the busy-owner read (one open card per worker) joined the snapshot.
+  // 8: the derived assignment catalog's one statement (orchestration policy
+  // version 35, section 3) joins it when R2c is on.
   routingSnapshot: {
     operation: "routing_snapshot",
-    prismaCallCeiling: 7,
+    prismaCallCeiling: 8,
     isolation: "read",
   },
   routingTaskRead: {

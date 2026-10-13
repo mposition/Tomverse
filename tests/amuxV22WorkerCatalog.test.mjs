@@ -96,7 +96,11 @@ test("Task readiness, promotion capacity and claim use the same separated catalo
     assert.match(source, /getConfiguredAmuxV22WorkerCatalog\(\)/);
     assert.doesNotMatch(source, /getConfiguredAmuxWorkerCatalog\(\)/);
   }
-  const routing = readFileSync("lib/amux/routing.ts", "utf8");
-  assert.match(routing, /parseAmuxV22WorkerCatalog\(process\.env\[AMUX_V22_WORKER_CATALOG_ENV\],[\s\S]*?getConfiguredAmuxWorkerCatalog\(\)\)/);
-  assert.match(routing, /const raw = process\.env\.TOMVERSE_AMUX_WORKER_CATALOG_JSON\?\.trim\(\)/);
+  // The variables' parser moved out of routing.ts (orchestration policy
+  // version 35, R2c), which re-exports it for these importers.
+  const variables = readFileSync("lib/amux/workerCatalogVariables.ts", "utf8");
+  assert.match(variables, /parseAmuxV22WorkerCatalog\(process\.env\[AMUX_V22_WORKER_CATALOG_ENV\],[\s\S]*?getConfiguredAmuxWorkerCatalog\(\)\)/);
+  assert.match(variables, /const raw = process\.env\.TOMVERSE_AMUX_WORKER_CATALOG_JSON\?\.trim\(\)/);
+  assert.match(readFileSync("lib/amux/routing.ts", "utf8"),
+    /export \{\s*getConfiguredAmuxV22WorkerCatalog,\s*getConfiguredAmuxWorkerCatalog,\s*\} from "@\/lib\/amux\/workerCatalogVariables";/);
 });

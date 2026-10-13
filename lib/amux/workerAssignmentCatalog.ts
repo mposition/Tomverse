@@ -2,7 +2,7 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 
-import { getConfiguredAmuxV22WorkerCatalog, getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
+import { getConfiguredAmuxV22WorkerCatalog, getConfiguredAmuxWorkerCatalog } from "@/lib/amux/workerCatalogVariables";
 import {
   amuxWorkerCapabilitiesFromNewestJsonOrThrow,
   amuxWorkerCapabilityNewestJsonSql,
