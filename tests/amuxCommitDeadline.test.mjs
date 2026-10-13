@@ -131,6 +131,12 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration policy v35, R2a: worker capabilities; an ordinary mutation
   // boundary, no deadline guard changes.
   "20261013100000_amux_worker_capability",
+  // Orchestration policy v36: additive v22 recovery metadata. It continues to
+  // use the existing mutation boundary and changes no commit-deadline guard.
+  "20261013200000_amux_v22_task_recovery",
+  // Orchestration policy v37: permanent physical-worker safe-stop fences. It
+  // changes no commit-deadline marker, trigger, guard or classifier.
+  "20261013210000_amux_v22_legacy_safe_stop",
   // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
   // no commit deadline and continues to use the existing mutation fence.
   "20261012170000_amux_verified_no_commit_halt_auto_clear",

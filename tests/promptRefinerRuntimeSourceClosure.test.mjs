@@ -536,12 +536,17 @@ const compilerOptions = parsedConfig.options;
 // lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
 // below it. Count 228 and the position-free inventory remain unchanged; only
 // their source positions are repinned.
+// 2026-10-13, guarded v22 Task recovery: the two approved recovery system
+// actors and their action scopes add twelve lines above the one existing
+// computed access in lib/adminAuditSystemActors.ts, moving it from 295:17 to
+// 307:17. No access is added, removed or altered: count 228, every path and
+// expression, and the position-free inventory remain unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "5b03707a16556eccd68c399d121786d2",
-  "9bb46b3e052cfd57c0e4dad653081e32",
+  "d45495854d74afd20898fe475ff45238",
+  "4b5aacc469a18029484d4f1a5f1be315",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
