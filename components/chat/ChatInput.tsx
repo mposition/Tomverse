@@ -264,9 +264,8 @@ export function ChatInputWebSearchChipView({
   const isManualBlocked = !isAutoMode && state.allUnsupported;
   const tone = isAutoMode ? "neutral" : state.tone;
 
-  return (
-    <>
-      <div
+  const chip = (
+    <div
         data-testid="web-search-mode-chip"
         data-selection-mode={isAutoMode ? "auto" : "manual"}
         data-label-variant={isMobileShell ? "compact" : "full"}
@@ -313,7 +312,16 @@ export function ChatInputWebSearchChipView({
         >
           <X className="h-3.5 w-3.5" />
         </button>
-      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {hasManualException ? (
+        <div className="composer-chip-exception-row min-w-0 max-w-full">
+          {chip}
+        </div>
+      ) : chip}
       <p
         id="web-search-state-description"
         data-testid="web-search-state-description"
@@ -3375,7 +3383,7 @@ export function ChatInput({
                         key={model.id}
                         data-testid="composer-review-selected-model"
                         data-model-id={model.id}
-                        className="block"
+                        className="sr-only"
                       >
                         {model.name}
                       </span>
