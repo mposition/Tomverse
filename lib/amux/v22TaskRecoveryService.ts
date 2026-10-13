@@ -1328,7 +1328,6 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
         where: { id: launchProof.launchCheckId } }) : null;
       const currentProfile = launchCheck ? configuredAmuxV22RecoveryProfile(
         launchCheck.workerName) : null;
-      launchProfileConfigDigest = currentProfile?.profileConfigDigest ?? null;
       launchScope = launchProof ? amuxV22ReadOnlyLaunchProofScope(
         launchProof.report) : null;
       const nominalLaunchScope = launchCheck ? amuxV22ReadOnlyLaunchScopeSchema.safeParse(
@@ -1349,6 +1348,8 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
       cost = riskCost;
       const executorKind = launchScope ?
         amuxV22ReadOnlyLaunchExecutorKind(launchScope.launchScope) : null;
+      launchProfileConfigDigest = executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
+        null : currentProfile?.profileConfigDigest ?? null;
       const currentApiBinding = executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND &&
         launchCheck && currentProfile ? apiExecutionBinding({ approved: current,
           role: task.taskRole!, grade: task.executionGrade!, routeId: launchCheck.routeId,
@@ -1521,7 +1522,7 @@ export async function readAmuxV22RecoveryAuthority(tx: Prisma.TransactionClient,
         !amuxV22ReadOnlyLaunchScopeMatchesIntent(
           nominalScope.data, scope.launchScope) ||
         (executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
-          row.profileConfigDigest === null : "executorKind" in scope.launchScope ||
+          row.profileConfigDigest !== null : "executorKind" in scope.launchScope ||
             scope.launchScope.profileConfigDigest !== row.profileConfigDigest) ||
         check.additionalCapMicroUsd !== row.additionalCapMicroUsd ||
         check.worstExposureMicroUsd !== row.worstExposureMicroUsd)

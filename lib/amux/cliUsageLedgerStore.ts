@@ -20,6 +20,8 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
   "@/lib/amux/v22ReadOnlyApiProtocol.mjs";
 import { AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID } from
   "@/lib/amux/v22TaskRecoveryCore";
+import { readAmuxV22RecoveryAuthority } from
+  "@/lib/amux/v22TaskRecoveryService";
 
 export class AmuxCliUsageLedgerError extends Error {
   constructor(readonly code: "binding_mismatch" | "receipt_conflict" |
@@ -30,8 +32,52 @@ type Receipt = AmuxUsageLedgerReceipt;
 type ApiAuditBinding = {
   launchScopeDigest: string;
   apiExecutionFrameDigest: string;
+  apiExecutionFrame: AmuxV22ReadOnlyApiExecutionFrame;
   apiExecutionReceipt: AmuxV22ReadOnlyApiExecutionReceipt;
 };
+
+function apiExecutionFramePrice(
+  frame: AmuxV22ReadOnlyApiExecutionFrame,
+): AmuxCliApiPrice {
+  return {
+    provider: frame.provider,
+    modelId: frame.modelId,
+    version: frame.pricingVersion,
+    uncachedInputMicroUsdPerMillion: frame.uncachedInputMicroUsdPerMillion,
+    cacheReadMicroUsdPerMillion: frame.cacheReadMicroUsdPerMillion,
+    cacheWriteMicroUsdPerMillion: frame.cacheWriteMicroUsdPerMillion,
+    outputMicroUsdPerMillion: frame.outputMicroUsdPerMillion,
+    reasoningOutputMicroUsdPerMillion: null,
+  };
+}
+
+async function authoritativeApiExecutionFrame(
+  tx: Prisma.TransactionClient,
+  attemptId: string,
+): Promise<{ frame: AmuxV22ReadOnlyApiExecutionFrame;
+  launchScopeDigest: string } | null> {
+  const attempt = await tx.amuxExecutionAttempt.findUnique({
+    where: { id: attemptId },
+    select: {
+      taskId: true,
+      v22Assignment: { select: {
+        recoveryApprovalId: true,
+        taskRevision: true,
+      } },
+    },
+  });
+  const assignment = attempt?.v22Assignment;
+  const approvalId = assignment?.recoveryApprovalId;
+  if (!attempt || !assignment || !approvalId) return null;
+  const authority = await readAmuxV22RecoveryAuthority(
+    tx, attempt.taskId, assignment.taskRevision, approvalId);
+  return authority?.readOnlyExecutorKind ===
+      AMUX_V22_READ_ONLY_API_EXECUTOR_KIND && authority.apiExecutionFrame &&
+      authority.launchScopeDigest ? {
+        frame: authority.apiExecutionFrame,
+        launchScopeDigest: authority.launchScopeDigest,
+      } : null;
+}
 
 async function approvedTaskPrice(tx: Prisma.TransactionClient,
   receipt: Receipt): Promise<AmuxCliApiPrice | null> {
@@ -134,7 +180,9 @@ async function recordUsage(tx: Prisma.TransactionClient,
       throw new AmuxCliUsageLedgerError("binding_mismatch");
     }
   }
-  const price = await approvedTaskPrice(tx, receipt);
+  const price = apiAuditBinding ?
+    apiExecutionFramePrice(apiAuditBinding.apiExecutionFrame) :
+    await approvedTaskPrice(tx, receipt);
   const projected = estimateAmuxCliApiCost(receipt, price);
   const usage = receipt.observed;
   const id = randomUUID();
@@ -234,8 +282,8 @@ export function amuxV22ReadOnlyApiUsageProjection(input: {
 }
 
 /** Convert one complete native Anthropic API receipt into the existing
- * immutable usage ledger. The current approved price is checked before the
- * insert; a mismatch therefore records neither usage nor settlement. */
+ * immutable usage ledger. Settlement re-reads the server-approved immutable
+ * launch frame; a later catalogue version never retroactively reprices it. */
 export async function recordAmuxV22ReadOnlyApiUsage(
   tx: Prisma.TransactionClient,
   input: {
@@ -248,9 +296,17 @@ export async function recordAmuxV22ReadOnlyApiUsage(
     receipt: AmuxV22ReadOnlyApiExecutionReceipt;
   },
 ) {
+  const echoedFrameDigest = amuxV22ReadOnlyApiExecutionFrameDigest(input.frame);
+  const authority = await authoritativeApiExecutionFrame(tx, input.attemptId);
+  if (!authority || input.launchScopeDigest !== authority.launchScopeDigest ||
+      amuxV22ReadOnlyApiExecutionFrameDigest(authority.frame) !==
+        echoedFrameDigest) {
+    throw new AmuxCliUsageLedgerError("binding_mismatch");
+  }
+  const approvedFrame = authority.frame;
   const parsed = parseAmuxV22ReadOnlyApiExecutionReceipt(
-    input.receipt, input.frame);
-  const frameDigest = amuxV22ReadOnlyApiExecutionFrameDigest(input.frame);
+    input.receipt, approvedFrame);
+  const frameDigest = amuxV22ReadOnlyApiExecutionFrameDigest(approvedFrame);
   if (parsed.attemptId !== input.attemptId ||
       parsed.invocationId !== input.attemptId ||
       !/^[a-f0-9]{64}$/.test(input.launchScopeDigest) ||
@@ -286,26 +342,15 @@ export async function recordAmuxV22ReadOnlyApiUsage(
     reasoningOutputIncludedInOutput: null,
     completedTurns: parsed.providerTurnCount,
   });
-  const price = await approvedTaskPrice(tx, usageReceipt);
+  const price = apiExecutionFramePrice(approvedFrame);
   const projected = estimateAmuxCliApiCost(usageReceipt, price);
-  if (!price || price.provider !== input.frame.provider ||
-      price.modelId !== input.frame.modelId ||
-      price.version !== input.frame.pricingVersion ||
-      price.uncachedInputMicroUsdPerMillion !==
-        input.frame.uncachedInputMicroUsdPerMillion ||
-      price.cacheReadMicroUsdPerMillion !==
-        input.frame.cacheReadMicroUsdPerMillion ||
-      price.cacheWriteMicroUsdPerMillion !==
-        input.frame.cacheWriteMicroUsdPerMillion ||
-      price.outputMicroUsdPerMillion !==
-        input.frame.outputMicroUsdPerMillion ||
-      price.reasoningOutputMicroUsdPerMillion !== null ||
-      projected !== BigInt(parsed.projectedCostMicroUsd)) {
+  if (projected !== BigInt(parsed.projectedCostMicroUsd)) {
     throw new AmuxCliUsageLedgerError("catalog_unavailable");
   }
   return recordUsage(tx, usageReceipt, {
     launchScopeDigest: input.launchScopeDigest,
     apiExecutionFrameDigest: frameDigest,
+    apiExecutionFrame: approvedFrame,
     apiExecutionReceipt: parsed,
   });
 }

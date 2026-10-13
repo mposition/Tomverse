@@ -32,6 +32,8 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
   amuxV22ReadOnlyApiExecutionFrameDigest,
   type AmuxV22ReadOnlyApiExecutionFrame } from
   "@/lib/amux/v22ReadOnlyApiProtocol.mjs";
+import { amuxWorkerRuntimeHasExactCapability,
+  amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -41,6 +43,7 @@ type RuntimeLockRow = {
   generation: number;
   status: string;
   dispatchReady: boolean;
+  protocolCapabilities: string[];
   leaseExpiresAt: Date;
 };
 
@@ -122,6 +125,7 @@ const lockRuntime = async (
       "generation",
       "status",
       "dispatchReady",
+      "protocolCapabilities",
       "leaseExpiresAt"
     FROM "AmuxWorkerRuntime"
     WHERE "workerName" = ${worker}
@@ -304,9 +308,13 @@ export async function pullAmuxWorkDelivery(input: {
     await loadAmuxContentKeyRing([{ ideaId, purpose: "card_brief",
       subjectId: sealedCandidate.taskId }]) : null;
   const deliveryContent = async (tx: Prisma.TransactionClient,
-    delivery: DeliveryLockRow, now: Date) => {
-    if (delivery.prompt !== AMUX_V22_SEALED_DELIVERY_MARKER)
+    delivery: DeliveryLockRow, now: Date,
+    protocolCapabilities: readonly string[]) => {
+    if (delivery.prompt !== AMUX_V22_SEALED_DELIVERY_MARKER) {
+      if (amuxWorkerRuntimeUsesReadOnlyApi(protocolCapabilities))
+        throw new Error("ordinary delivery cannot use a read-only API runtime");
       return { prompt: delivery.prompt, v22Execution: null };
+    }
     if (!v22Enabled) throw new Error("v22 sealed delivery is disabled");
     if (!briefKeys || sealedCandidate?.attemptId !== delivery.attemptId ||
         sealedCandidate.taskId !== delivery.taskId)
@@ -353,6 +361,13 @@ export async function pullAmuxWorkDelivery(input: {
         assignment.taskRevision, assignment.recoveryApprovalId, now) : null;
     if (assignment.recoveryApprovalId && !recovery)
       throw new Error("v22 recovery delivery authority is unavailable");
+    if (recovery?.riskAcceptanceId) {
+      if (!amuxWorkerRuntimeHasExactCapability(protocolCapabilities,
+        recovery.readOnlyExecutorKind))
+        throw new Error("v22 recovery delivery runtime capability is invalid");
+    } else if (amuxWorkerRuntimeUsesReadOnlyApi(protocolCapabilities)) {
+      throw new Error("v22 ordinary delivery cannot use a read-only API runtime");
+    }
     let readOnlyRetry: AmuxV22ReadOnlyDeliveryBinding | undefined;
     let recoveryApprovalId: string | undefined;
     if (recovery?.riskAcceptanceId) {
@@ -521,7 +536,8 @@ export async function pullAmuxWorkDelivery(input: {
           reason: "none" as const,
         };
       }
-      const content = await deliveryContent(tx, delivery, now);
+      const content = await deliveryContent(tx, delivery, now,
+        runtime?.protocolCapabilities ?? []);
 
       /*
        * A retry while the receipt lease is still live is idempotent: return

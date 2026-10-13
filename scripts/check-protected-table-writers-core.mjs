@@ -795,6 +795,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The additive v40 follow-up replaces only the existing usage shape CHECK to limit native API rows to the approved FIRST Task, complete terminal receipt, uniform model, eight-turn and 3.40 USD caps. It changes no row and leaves both CLI branches unchanged.",
   },
   {
+    path: "prisma/migrations/20261013290000_amux_v22_first_task_attempt_limit/migration.sql",
+    table: "AmuxV22TaskRecoveryApproval",
+    tableMentions: 3,
+    writeVerbs: 1,
+    reason:
+      "The additive v41 migration replaces only the existing attempt-guard function so the exact FIRST Task's second attempt re-reads its immutable recovery approval. It performs no row DML; the scanner's one write verb is the function's FOR UPDATE lock clause.",
+  },
+  {
     path: "lib/amux/cliUsageLedgerStore.ts",
     table: "AmuxCliUsageEvent",
     tableMentions: 2,

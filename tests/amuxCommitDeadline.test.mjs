@@ -158,6 +158,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration policy v40: native API usage is narrowed to the approved
   // FIRST Task and budget; it changes no commit-deadline mechanism.
   "20261013280000_amux_native_api_first_task_scope",
+  // Orchestration policy v41: the approved FIRST Task has a database-owned
+  // two-attempt ceiling; it changes no commit-deadline mechanism.
+  "20261013290000_amux_v22_first_task_attempt_limit",
   // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
   // no commit deadline and continues to use the existing mutation fence.
   "20261012170000_amux_verified_no_commit_halt_auto_clear",

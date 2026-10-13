@@ -25,6 +25,7 @@ import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
 import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND } from
   "./v22ReadOnlyApiProtocol.mjs";
 import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
+import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22RequiredTool,
@@ -200,6 +201,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const matchingRoutes = approved.receipt.routes.filter((route) => {
         const worker = catalog.find((item) => item.worker_name === route.workerName);
         const runtime = liveByName.get(route.workerName);
+        const nativeApiOnly = !!runtime &&
+          amuxWorkerRuntimeUsesReadOnlyApi(runtime.protocolCapabilities);
         return worker && runtime?.status === "idle" && runtime.dispatchReady &&
           !safeStopFenced.has(route.workerName) &&
           !busy.has(route.workerName) && verifiedNames.has(route.workerName) &&
@@ -208,6 +211,9 @@ async function claimCandidate(taskId: string, assignmentId: string,
           worker.model === route.modelId &&
           worker.routing_roles.includes(card.taskRole!) &&
           worker.tool_capabilities.includes(requiredTool) &&
+          (!nativeApiOnly || (!!recovery?.riskAcceptanceId &&
+            recovery.readOnlyExecutorKind ===
+              AMUX_V22_READ_ONLY_API_EXECUTOR_KIND)) &&
           (!recovery?.riskAcceptanceId ||
             (route.workerName === recovery.workerName &&
              route.provider === recovery.provider && route.modelId === recovery.modelId &&
@@ -297,6 +303,9 @@ async function claimCandidate(taskId: string, assignmentId: string,
           pinned.generation !== runtime.generation ||
           pinned.status !== "idle" || !pinned.dispatchReady ||
           pinned.leaseExpiresAt.getTime() <= now.getTime() ||
+          (amuxWorkerRuntimeUsesReadOnlyApi(pinned.protocolCapabilities) &&
+            (!recovery?.riskAcceptanceId || recovery.readOnlyExecutorKind !==
+              AMUX_V22_READ_ONLY_API_EXECUTOR_KIND)) ||
           (recovery?.riskAcceptanceId &&
             (pinned.protocolCapabilities.length !== 1 ||
              pinned.protocolCapabilities[0] !== recovery.readOnlyExecutorKind))) {

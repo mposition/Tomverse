@@ -205,6 +205,57 @@ test("one final consent can create only attempt two within the fixed exposure", 
   assert.match(sql, /p\."report"->'launchScope'->>'profileConfigDigest'/);
 });
 
+test("the exact FIRST Task rejects every unapproved second or third attempt", async () => {
+  const [before, sql] = await Promise.all([
+    source("prisma/migrations/20261013220000_amux_v22_read_only_retry_risk/migration.sql"),
+    source("prisma/migrations/20261013290000_amux_v22_first_task_attempt_limit/migration.sql"),
+  ]);
+  const previousBodyDigest = sha256(functionBody(before,
+    "amux_v22_v39_attempt_guard"));
+  assert.equal(previousBodyDigest,
+    "5fd506041790421b0bdc83a5ab87fc5b7c769988da8d944200e632326d8c1fd6");
+  assert.equal(sha256(sql),
+    "19ab206b5dfee0a11231ae65b8c9458d56aae2f617501f9db1e42a22aec378e0");
+  assert.match(sql, new RegExp(
+    `^-- baseline-check: replace-function-if-body-sha256 ` +
+    `"amux_v22_v39_attempt_guard" "${previousBodyDigest}"$`, "m"));
+  assert.equal((sql.match(/CREATE OR REPLACE FUNCTION/g) ?? []).length, 1);
+  const guard = functionBody(sql, "amux_v22_v39_attempt_guard");
+  assert.match(guard, /NEW\."taskId" = 'c48886b9-86f8-4631-8db8-c0b288a707af'/);
+  assert.match(guard,
+    /current_setting\('transaction_isolation'\) NOT IN\s+\('read committed', 'read uncommitted', 'serializable'\)/);
+  const isolationGuard = guard.indexOf("current_setting('transaction_isolation')");
+  const globalLock = guard.indexOf("pg_catalog.pg_advisory_xact_lock");
+  const taskLock = guard.indexOf('FROM "AmuxWorkItem"');
+  const attemptCount = guard.indexOf('FROM "AmuxExecutionAttempt"');
+  assert.ok(isolationGuard > 0 && globalLock > isolationGuard &&
+    taskLock > globalLock && attemptCount > taskLock,
+    "the exact Task guard must preserve global, Task, attempt lock order");
+  assert.match(guard,
+    /attempt_count > 2 OR\s+NEW\."attemptNumber" IS DISTINCT FROM attempt_count/);
+  assert.match(guard, /IF NEW\."attemptNumber" = 2 THEN/);
+  assert.match(guard, /assignment\."recoveryApprovalId"/);
+  assert.match(guard, /approval\."riskAcceptanceId" IS NULL/);
+  assert.match(guard, /approval\."priorAttemptId" IS DISTINCT FROM[\s\S]*'97858395-3d66-42fa-9bfb-0e5a6cba9bd8'/);
+  assert.match(guard, /approval\."historicalAttempts" IS DISTINCT FROM 1/);
+  assert.match(guard, /approval\."nextAttemptNumber" IS DISTINCT FROM 2/);
+  assert.match(guard,
+    /NEW\."reservedCostMicrousd" IS DISTINCT FROM[\s\S]*approval\."additionalCapMicroUsd"/);
+  const otherTasks = guard.slice(guard.indexOf(
+    'IF NEW."v22AssignmentId" IS NULL THEN RETURN NEW; END IF;'));
+  assert.ok(otherTasks.length < guard.length,
+    "the pre-existing recovery guard must remain after the exact Task branch");
+  assert.match(otherTasks,
+    /NEW\."taskId" IS DISTINCT FROM approval\."taskId"/);
+  assert.match(otherTasks, /NEW\."attemptNumber" IS DISTINCT FROM 2/);
+  assert.match(otherTasks,
+    /NEW\."reservedCostMicrousd" IS DISTINCT FROM[\s\S]*approval\."additionalCapMicroUsd"/);
+  assert.match(otherTasks,
+    /count\(\*\) FROM "AmuxExecutionAttempt"[\s\S]*> 2/);
+  assert.doesNotMatch(sql,
+    /^\s*(?:INSERT\s+INTO|UPDATE\s+"|DELETE\s+FROM|TRUNCATE\s+|DROP\s+)/im);
+});
+
 test("risk delivery, start, and settlement fail closed around the read-only bridge", async () => {
   const [delivery, execution, claim, pull, settle, recovery] = await Promise.all([
     source("lib/amux/delivery.ts"), source("lib/amux/execution.ts"),

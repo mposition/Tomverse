@@ -41,11 +41,14 @@ async function appendRecoveryFixtureAudit(db, input) {
 /** Real migrated tables and triggers, rollback-only synthetic metadata. The
  * host proof and audit hashes are synthetic; this does not attest a live host
  * or test source decryption/current-ready, which the service contract tests
- * cover separately. All original source/promotion/assignment guards stay on. */
+ * cover separately. All original source/promotion/assignment guards stay on.
+ * `positiveOnly` skips refusal probes but keeps the valid second attempt and
+ * awaits `afterReadOnlyAttemptStarted` inside the caller's transaction. */
 export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   const { taskId, priorAttemptId, priorAssignmentId, promotionId, instanceId,
     recoveryInstanceId, laneSequence, digest, sourceApprovalId,
     readOnlyExecutorKind = "read_only_api_retry_v1" } = input;
+  const positiveOnly = input.positiveOnly === true;
   assert.ok(["read_only_retry_v1", "read_only_api_retry_v1"]
     .includes(readOnlyExecutorKind));
   const apiExecutor = readOnlyExecutorKind === "read_only_api_retry_v1";
@@ -56,6 +59,7 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
       VALUES (${keys.map((_key, index) => `$${index + 1}`).join(",")})`, Object.values(data));
   }
   async function reject(callback, expectedConstraint, expectedCode = "23514") {
+    if (positiveOnly) return;
     await db.query("SAVEPOINT recovery_probe"); let error;
     try { await callback(); } catch (caught) { error = caught; }
     await db.query("ROLLBACK TO SAVEPOINT recovery_probe"); await db.query("RELEASE SAVEPOINT recovery_probe");
@@ -487,18 +491,44 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   ["AmuxV22TaskRecoveryApproval_inspectionId_key",
     "AmuxV22TaskRecoveryApproval_evidenceId_key"], "23505");
   const assignmentId = randomUUID();
-  const assignmentAuditId = await appendRecoveryFixtureAudit(db, { actorUserId: null,
-    action: "amux.v22.worker.assigned", targetType: "AmuxV22WorkerAssignment", targetId: assignmentId,
-    summary: "synthetic recovery assignment", metadata: { systemActor: "amux-v22-worker-claim", taskId,
-      workerName: "worker-two", lane: "sev1", recoveryApprovalId: approvalId, recoveryCostDigest: costDigest } });
   const originalAssignment = (await db.query(`SELECT * FROM public."AmuxV22WorkerAssignment" WHERE "id"=$1`, [priorAssignmentId])).rows[0];
   const assignmentAt = approvalAt;
-  const recoveryAssignment = { ...originalAssignment, id: assignmentId,
+  const assignmentBase = { ...originalAssignment,
     promotionReceiptId: promotionId, laneDecisionSequence: laneSequence, taskRevision: 5,
     workerName: "worker-two", workerInstanceId: recoveryInstanceId, workerGeneration: 1,
     provider: "anthropic", modelId: "claude-opus-5-5", routeId: "read-only-route",
     routePolicyDigest, catalogApprovalId: "catalog-one", catalogVersion: "v1",
-    costReceiptDigest: digest, perAttemptMicroUsd: "3400000",
+    costReceiptDigest: digest, perAttemptMicroUsd: "3400000", assignedAt: assignmentAt };
+  const unapprovedAssignmentId = randomUUID();
+  const unapprovedAuditId = positiveOnly ? null : await appendRecoveryFixtureAudit(db, { actorUserId: null,
+    action: "amux.v22.worker.assigned", targetType: "AmuxV22WorkerAssignment",
+    targetId: unapprovedAssignmentId, summary: "synthetic unapproved assignment probe",
+    metadata: { systemActor: "amux-v22-worker-claim", taskId,
+      workerName: "worker-two", lane: "sev1" } });
+  await reject(async () => {
+    await db.query(`SET CONSTRAINTS
+      amux_v22_assignment_row_guard_trigger,
+      amux_v22_recovery_assignment_guard_trigger,
+      amux_v22_v39_assignment_guard_trigger,
+      amux_v22_v39_assignment_capability_guard_trigger DEFERRED`);
+    await insert("AmuxV22WorkerAssignment", { ...assignmentBase,
+      id: unapprovedAssignmentId, recoveryApprovalId: null,
+      authorizationAuditLogId: unapprovedAuditId });
+    await db.query("SET CONSTRAINTS amux_v22_v39_attempt_guard_trigger DEFERRED");
+    await insert("AmuxExecutionAttempt", { ...oldAttempt, id: randomUUID(),
+      taskRevision: 7, attemptNumber: 2, worker: "worker-two",
+      workerInstanceId: recoveryInstanceId, workerGeneration: 1,
+      endedAt: assignmentAt, outcome: "failed", toStatus: "todo",
+      endedBy: "worker-two", reason: "reported_result",
+      heartbeatAt: assignmentAt, leaseExpiresAt: null, startedAt: assignmentAt,
+      v22AssignmentId: unapprovedAssignmentId });
+    await db.query("SET CONSTRAINTS amux_v22_v39_attempt_guard_trigger IMMEDIATE");
+  }, "AmuxV22RecoveryAttempt_v39_limit_check");
+  const assignmentAuditId = await appendRecoveryFixtureAudit(db, { actorUserId: null,
+    action: "amux.v22.worker.assigned", targetType: "AmuxV22WorkerAssignment", targetId: assignmentId,
+    summary: "synthetic recovery assignment", metadata: { systemActor: "amux-v22-worker-claim", taskId,
+      workerName: "worker-two", lane: "sev1", recoveryApprovalId: approvalId, recoveryCostDigest: costDigest } });
+  const recoveryAssignment = { ...assignmentBase, id: assignmentId,
     recoveryApprovalId: approvalId, authorizationAuditLogId: assignmentAuditId, assignedAt: assignmentAt };
   await db.query("SET CONSTRAINTS ALL DEFERRED");
   await insert("AmuxV22WorkerAssignment", recoveryAssignment);
@@ -523,6 +553,11 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     prompt: "synthetic", status: "queued", receiptId: null, leasedAt: null,
     leaseExpiresAt: null, acknowledgedAt: null, cancelledAt: null,
     createdAt: assignmentAt, updatedAt: assignmentAt });
+  await input.afterReadOnlyAttemptStarted?.({ attemptId: newAttemptId,
+    approvalId, taskId, taskRevision: 7, assignmentId, worker: "worker-two",
+    attemptStartedAt: new Date(newAttempt.startedAt),
+    launchScopeDigest: actualScopeDigest,
+    apiExecutionFrame: apiExecutor ? currentProofReport.apiExecutionFrame : null });
   const fenceState = await db.query(`SELECT
     amux_v22_legacy_safe_stop_worker_fenced('worker-one') AS physical_fenced,
     amux_v22_legacy_safe_stop_worker_fenced('worker-two') AS recovery_fenced`);
@@ -538,6 +573,28 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   assert.equal((await db.query(`SELECT sum("reservedCostMicrousd")::text AS held FROM public."AmuxExecutionAttempt" WHERE "taskId"=$1`, [taskId])).rows[0].held, "6800000");
   await reject(() => insert("AmuxExecutionAttempt", { ...newAttempt, id: randomUUID(), attemptNumber: 3 }),
     "AmuxExecutionAttempt_v22AssignmentId_key", "23505");
+  const thirdAssignmentId = randomUUID();
+  const thirdAuditId = positiveOnly ? null : await appendRecoveryFixtureAudit(db, { actorUserId: null,
+    action: "amux.v22.worker.assigned", targetType: "AmuxV22WorkerAssignment",
+    targetId: thirdAssignmentId, summary: "synthetic third assignment probe",
+    metadata: { systemActor: "amux-v22-worker-claim", taskId,
+      workerName: "worker-two", lane: "sev1" } });
+  await reject(async () => {
+    await db.query(`SET CONSTRAINTS
+      amux_v22_assignment_row_guard_trigger,
+      amux_v22_recovery_assignment_guard_trigger,
+      amux_v22_v39_assignment_guard_trigger,
+      amux_v22_v39_assignment_capability_guard_trigger DEFERRED`);
+    await insert("AmuxV22WorkerAssignment", { ...assignmentBase,
+      id: thirdAssignmentId, recoveryApprovalId: null,
+      authorizationAuditLogId: thirdAuditId });
+    await db.query("SET CONSTRAINTS amux_v22_v39_attempt_guard_trigger DEFERRED");
+    await insert("AmuxExecutionAttempt", { ...newAttempt, id: randomUUID(),
+      attemptNumber: 3, endedAt: assignmentAt, outcome: "failed",
+      toStatus: "todo", endedBy: "worker-two", reason: "reported_result",
+      leaseExpiresAt: null, v22AssignmentId: thirdAssignmentId });
+    await db.query("SET CONSTRAINTS amux_v22_v39_attempt_guard_trigger IMMEDIATE");
+  }, "AmuxV22RecoveryAttempt_v39_limit_check");
   await reject(async () => {
     await insert("AmuxExecutionAttempt", { ...newAttempt, id: randomUUID(),
       attemptNumber: 3, v22AssignmentId: null });

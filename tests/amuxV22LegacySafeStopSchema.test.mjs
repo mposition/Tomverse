@@ -20,6 +20,7 @@ const schema = new URL("../prisma/schema.prisma", import.meta.url);
 const actors = new URL("../lib/adminAuditSystemActors.ts", import.meta.url);
 const policy = new URL("../docs/policy/development-agent-orchestration.md", import.meta.url);
 const dbIntegration = new URL("./integration/amuxV4PortfolioScore.db.test.mjs", import.meta.url);
+const seedFixture = new URL("./integration/helpers/amuxV4PortfolioSeedFixture.mjs", import.meta.url);
 const recoveryFixture = new URL("./integration/helpers/amuxV22TaskRecoveryFixture.mjs", import.meta.url);
 
 const quotedValues = (source) =>
@@ -163,21 +164,26 @@ test("v37 migration never changes old attempts, approvals, settlements or cost l
 });
 
 test("v37 DB lane executes the permanent fence and another-worker recovery contract", async () => {
-  const [integration, fixture] = await Promise.all([
+  const [integration, seed, fixture] = await Promise.all([
     readFile(dbIntegration, "utf8"),
+    readFile(seedFixture, "utf8"),
     readFile(recoveryFixture, "utf8"),
   ]);
 
-  assert.match(integration, /exerciseAmuxV22LegacySafeStopFenceFixture\(client, recovery\.safeStopFenceInput\)/);
-  assert.match(integration, /'reservation', 3400000/);
-  assert.match(integration, /"AmuxCliUsageEvent"/);
-  assert.match(integration, /"status"='acknowledged'/);
+  assert.match(integration, /exerciseAmuxV22LegacySafeStopFenceFixture\(client,\s*recovery\.safeStopFenceInput\)/);
+  assert.match(integration, /import\s*\{\s*seedAmuxV4PortfolioRecoveryPrerequisites\s*\}\s*from\s*"\.\/helpers\/amuxV4PortfolioSeedFixture\.mjs"/);
+  assert.match(integration, /const seed = await seedAmuxV4PortfolioRecoveryPrerequisites\(client,\s*\{/);
+  assert.match(integration, /const recovery = await exerciseAmuxV22TaskRecoveryFixture\(client,\s*seed\)/);
+  assert.match(seed, /export async function seedAmuxV4PortfolioRecoveryPrerequisites\(db, input = \{\}\)/);
+  assert.match(seed, /'reservation', 3400000/);
+  assert.match(seed, /"AmuxCliUsageEvent"/);
+  assert.match(seed, /"status"='acknowledged'/);
   assert.match(fixture, /oldHeldMicroUsd: "3400000"/);
   assert.match(fixture, /additionalCapMicroUsd: "3400000"/);
   assert.match(fixture, /worstExposureMicroUsd: "6800000"/);
   assert.match(fixture, /workerName: "worker-two"/);
   assert.match(fixture, /physical_fenced: true, recovery_fenced: false/);
-  assert.match(fixture, /attemptNumber: 6, v22AssignmentId: null/);
+  assert.match(fixture, /attemptNumber: 3, v22AssignmentId: null/);
   assert.match(fixture, /AmuxV22TaskRecoveryApproval_inspectionId_key/);
   assert.match(fixture, /SELECT \* FROM public\."AmuxCliUsageEvent" WHERE "attemptId"=\$1/);
   assert.match(fixture, /workerGeneration',2147483647/);

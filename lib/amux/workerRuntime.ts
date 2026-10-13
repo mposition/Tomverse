@@ -22,6 +22,16 @@ export type AmuxWorkerRuntimeStatus =
 export type AmuxWorkerProtocolCapability =
   "read_only_retry_v1" | "read_only_api_retry_v1";
 
+export const amuxWorkerRuntimeUsesReadOnlyApi =
+  (capabilities: readonly string[]) => capabilities.length === 1 &&
+    capabilities[0] === "read_only_api_retry_v1";
+
+export const amuxWorkerRuntimeHasExactCapability = (
+  capabilities: readonly string[],
+  capability: string | null | undefined,
+) => typeof capability === "string" && capabilities.length === 1 &&
+  capabilities[0] === capability;
+
 export type AmuxWorkerRuntimeSnapshot = {
   workerName: string;
   instanceId: string;
@@ -200,12 +210,18 @@ export async function heartbeatAmuxWorkerRuntime(input: {
         };
       }
 
+      const protocolCapabilities = input.protocolCapabilities?.length === 1 ?
+        [...input.protocolCapabilities] : [];
+      const capabilityChanged = runtime.protocolCapabilities.join(",") !==
+        protocolCapabilities.join(",");
+
       /*
        * Only the worker knows its real turn boundary, so settlement itself does
        * not synthesize Idle. Conversely, the worker may not advertise Idle while
-       * this exact runtime generation still owns a live execution attempt.
+       * this exact runtime generation still owns a live execution attempt, or
+       * change that attempt's executor capability while it remains live.
        */
-      if (input.status === "idle") {
+      if (input.status === "idle" || capabilityChanged) {
         const liveAttempts = await tx.amuxExecutionAttempt.count({
           where: {
             worker: input.workerName,
@@ -225,8 +241,6 @@ export async function heartbeatAmuxWorkerRuntime(input: {
       }
 
       const dispatchReady = input.status === "idle" && input.dispatchReady;
-      const protocolCapabilities = input.protocolCapabilities?.length === 1 ?
-        [...input.protocolCapabilities] : [];
 
       const result = await tx.amuxWorkerRuntime.updateMany({
         where: {
@@ -258,7 +272,7 @@ export async function heartbeatAmuxWorkerRuntime(input: {
       // authority transition is a control-plane mutation and is audited in
       // this same transaction.
       if (runtime.status !== input.status || runtime.dispatchReady !== dispatchReady ||
-          runtime.protocolCapabilities.join(",") !== protocolCapabilities.join(",")) {
+          capabilityChanged) {
         await writeSystemAuditLog({
           systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: "amux.worker.status_changed",

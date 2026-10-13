@@ -1,5 +1,9 @@
 import type { AmuxV22ReadOnlyApiExecutionFrame } from "./v22ReadOnlyApiProtocol.mjs";
 
+export declare function amuxV22ReadOnlyApiCredentialMetadataDigest(
+  input: Record<string, unknown>,
+): string;
+
 export declare function amuxV22ReadOnlyApiLauncherConfigDigest(
   input: Record<string, unknown>,
 ): string;
@@ -16,6 +20,12 @@ export declare function createAmuxV22ReadOnlyApiHost(
   hostDeadlineAtMs: number;
   capabilities(): string[];
 }>>;
+
+export declare function readAmuxV22ReadOnlyApiLauncherState(
+  worker: string,
+  frame: AmuxV22ReadOnlyApiExecutionFrame,
+  options?: Record<string, unknown>,
+): Promise<Readonly<Record<string, unknown>>>;
 
 export declare function inspectAmuxV22ReadOnlyApiLauncher(
   worker: string,

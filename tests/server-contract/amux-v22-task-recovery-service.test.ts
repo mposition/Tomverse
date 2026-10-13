@@ -683,6 +683,24 @@ test("the exact API capability binds a server-priced v40 frame through final con
   assert.equal(approved.state, "approved");
   assert.equal(world.approvals.length, 1);
   assert.equal((world.audits.at(-1)!.metadata as Row).policyVersion, 40);
+  assert.equal(world.approvals[0]!.profileConfigDigest, null);
+  const prisma = new PrismaClient({ adapter: new PrismaPg({
+    connectionString: "postgresql://local-test:local-test@127.0.0.1:1/local-test",
+  }) });
+  const transaction = new Proxy(prisma, { get(target, property) {
+    return Reflect.has(tx, property) ? Reflect.get(tx, property) :
+      Reflect.get(target, property, target);
+  } });
+  try {
+    const authority = await service.readAmuxV22RecoveryAuthority(transaction,
+      AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, 8, approved.approvalId);
+    assert.equal(authority?.readOnlyExecutorKind, "read_only_api_retry_v1");
+    assert.deepEqual(authority?.apiExecutionFrame, launchFrame);
+    world.approvals[0]!.profileConfigDigest = "4".repeat(64);
+    await assert.rejects(service.readAmuxV22RecoveryAuthority(transaction,
+      AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, 8, approved.approvalId),
+    /recovery_approval_unbound/);
+  } finally { await prisma.$disconnect(); }
 });
 test("final consent rechecks the exact runtime capability before any approval or Task write", async () => {
   for (const capabilities of [[], ["legacy_v1"],
@@ -765,6 +783,11 @@ test("an approved read-only snapshot remains valid 91 seconds after proof freshn
       AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, 8, approved.approvalId,
       new Date(now.getTime() + 91_000));
     assert.equal(authority?.id, approved.approvalId);
+    assert.equal(typeof world.approvals[0]!.profileConfigDigest, "string");
+    world.approvals[0]!.profileConfigDigest = null;
+    await assert.rejects(service.readAmuxV22RecoveryAuthority(transaction,
+      AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, 8, approved.approvalId),
+    /recovery_approval_unbound/);
   } finally { await prisma.$disconnect(); }
 });
 test("approval rechecks evidence freshness, ready, costs, incident, allowance, and compare-and-set", async () => {

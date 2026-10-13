@@ -19,6 +19,10 @@ let world: World;
 function makeWorld(outcome: Outcome) {
   return {
     outcome,
+    taskId,
+    attemptId,
+    attemptNumber: 2,
+    recoveryApprovalId: "approval-one" as string | null,
     frame: null as unknown,
     recovery: null as unknown,
     storedEvents: [] as Array<Record<string, unknown>>,
@@ -29,6 +33,8 @@ function makeWorld(outcome: Outcome) {
     taskUpdates: 0,
     attemptUpdates: 0,
     runtimeUpdates: 0,
+    taskUpdateData: null as Record<string, unknown> | null,
+    attemptUpdateData: null as Record<string, unknown> | null,
   };
 }
 
@@ -100,14 +106,16 @@ const tx = {
       leaseExpiresAt: new Date("2026-10-13T12:01:00.000Z"),
     }];
     if (sql.includes('FROM "AmuxExecutionAttempt"')) return [{
-      id: attemptId, taskId, worker, workerInstanceId: instanceId,
-      workerGeneration: 1, taskRevision: 5, attemptNumber: 2,
+      id: world.attemptId, taskId: world.taskId, worker,
+      workerInstanceId: instanceId,
+      workerGeneration: 1, taskRevision: 5,
+      attemptNumber: world.attemptNumber,
       reservedCostMicrousd: BigInt("3400000"), v22AssignmentId: "assignment-one",
       startedAt: new Date("2026-10-13T11:59:00.000Z"),
       leaseExpiresAt: new Date("2026-10-13T12:01:00.000Z"), endedAt: null,
     }];
     if (sql.includes('FROM "AmuxWorkItem"')) return [{
-      id: taskId, sourceSystem: "admin-idea-v4",
+      id: world.taskId, sourceSystem: "admin-idea-v4",
       v22AssignmentId: "assignment-one", owner: worker, status: "doing",
       revision: 5, claimedAt: new Date("2026-10-13T11:59:00.000Z"),
       archivedAt: null, projectKey: null, teamKey: null,
@@ -123,7 +131,7 @@ const tx = {
     throw new Error(`unexpected SQL: ${sql}`);
   },
   amuxV22WorkerAssignment: { findUnique: async () => ({
-    recoveryApprovalId: "approval-one", taskRevision: 5,
+    recoveryApprovalId: world.recoveryApprovalId, taskRevision: 5,
   }) },
   amuxWorkDelivery: { findUnique: async () => ({ status: "acknowledged" }) },
   amuxCliUsageEvent: {
@@ -134,17 +142,26 @@ const tx = {
     { taskId, bodyPurgedAt: null } : null },
   amuxV22TaskPatch: { findUnique: async () => null },
   engineeringAgentWorkItem: { findFirst: async () => null },
-  amuxWorkItem: { update: async () => { world.taskUpdates += 1; } },
+  amuxWorkItem: { update: async (input: { data: Record<string, unknown> }) => {
+    world.taskUpdates += 1;
+    world.taskUpdateData = input.data;
+  } },
   amuxExecutionAttempt: {
     findUnique: async () => ({
-      taskId, worker, startedAt: new Date("2026-10-13T11:59:00.000Z"),
+      taskId: world.taskId, worker,
+      taskRevision: 5,
+      startedAt: new Date("2026-10-13T11:59:00.000Z"),
       endedAt: null, v22AssignmentId: "assignment-one",
+      v22Assignment: { recoveryApprovalId: world.recoveryApprovalId },
       task: { sourceSystem: "admin-idea-v4",
         v22AssignmentId: "assignment-one",
         v22AcceptedAssignment: { workerName: worker, provider: "anthropic",
           modelId: "claude-opus-5-5" } },
     }),
-    update: async () => { world.attemptUpdates += 1; },
+    update: async (input: { data: Record<string, unknown> }) => {
+      world.attemptUpdates += 1;
+      world.attemptUpdateData = input.data;
+    },
   },
   amuxWorkerRuntime: {
     updateMany: async () => { world.runtimeUpdates += 1; return { count: 1 }; },
@@ -243,8 +260,47 @@ for (const outcome of ["succeeded", "failed"] as const) {
       assert.equal(world.taskUpdates, 1);
       assert.equal(world.attemptUpdates, 1);
       assert.equal(world.runtimeUpdates, 1);
+      assert.equal(world.taskUpdateData?.status,
+        outcome === "failed" ? "blocked" : "review");
+      assert.equal(world.attemptUpdateData?.toStatus,
+        outcome === "failed" ? "blocked" : "review");
+      assert.equal(world.attemptUpdateData?.reason,
+        outcome === "failed" ? "attempts" : "reported_result");
     });
 }
+
+test("other Tasks keep the global five-attempt settlement budget", async () => {
+  const cases = [[4, "todo", null], [4, "todo", "approval-other"],
+    [5, "blocked", null]] as const;
+  for (const [attemptNumber, expectedStatus, approvalId] of cases) {
+    world = makeWorld("failed");
+    world.taskId = "00000000-0000-4000-8000-000000000099";
+    world.attemptId = `00000000-0000-4000-8000-00000000000${attemptNumber}`;
+    world.attemptNumber = attemptNumber;
+    world.recoveryApprovalId = approvalId;
+    world.recovery = approvalId ? { riskAcceptanceId: null } : null;
+    world.storedEvents = [{ invocationId: world.attemptId,
+      receiptDigest: "7".repeat(64), status: "failed",
+      completeness: "reported_complete",
+      projectedApiCostMicrousd: BigInt(1), cli: "claude",
+      source: "claude_result", actualModelId: "claude-opus-5-5",
+      selectedModelId: "claude-opus-5-5", provider: "anthropic",
+      authentication: "subscription", inputTokens: BigInt(1),
+      outputTokens: BigInt(1), cacheReadInputTokens: BigInt(0),
+      cacheCreationInputTokens: BigInt(0), inputTokensIncludeCacheRead: false,
+      inputTokensIncludeCacheWrite: false, completedTurns: 1,
+      pricingVersion: null }];
+    const result = await (await execution).settleAmuxV22TaskExecution({
+      attemptId: world.attemptId, worker, instanceId, generation: 1,
+      taskRevision: 5, outcome: "failed", invocationIds: [world.attemptId],
+    });
+    assert.equal(result.settled, true);
+    assert.equal(world.taskUpdateData?.status, expectedStatus);
+    assert.equal(world.attemptUpdateData?.toStatus, expectedStatus);
+    assert.equal(world.attemptUpdateData?.reason,
+      attemptNumber === 5 ? "attempts" : "reported_result");
+  }
+});
 
 test("unknown or incomplete native receipt writes no usage or settlement", async () => {
   for (const invalid of [

@@ -470,6 +470,35 @@ test("the v40 native API usage guard replaces one exact check and no rows", () =
   "an unreviewed usage-ledger occurrence must fail closed");
 });
 
+test("the v41 FIRST Task attempt guard has one exact read-only approval exception", () => {
+  const path =
+    "prisma/migrations/20261013290000_amux_v22_first_task_attempt_limit/migration.sql";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const reviewed = RAW_SQL_ALLOWLIST.filter((entry) => entry.path === path);
+  assert.deepEqual(
+    reviewed.map(({ table, tableMentions, writeVerbs }) => ({
+      table, tableMentions, writeVerbs,
+    })),
+    [{ table: "AmuxV22TaskRecoveryApproval", tableMentions: 3, writeVerbs: 1 }]
+  );
+  assert.doesNotMatch(
+    sqlWithoutComments(source),
+    /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"[^"]+"\.)?"?AmuxV22TaskRecoveryApproval"?/i,
+    "the replacement function may read its approval but must never write it"
+  );
+  assert.deepEqual(
+    checkProtectedTableWriters({ sources: [{ path, text: source }] })
+      .filter((finding) => finding.path === path && finding.rule === "raw-sql"),
+    []
+  );
+  const findings = checkProtectedTableWriters({
+    sources: [{ path, text: `${source}\nDELETE FROM "AmuxV22TaskRecoveryApproval";\n` }],
+  }).filter((finding) => finding.path === path && finding.rule === "raw-sql");
+  assert.ok(findings.some((finding) =>
+    finding.detail.startsWith("AmuxV22TaskRecoveryApproval:")),
+  "a later recovery-approval write must invalidate the exact exception");
+});
+
 test("the Prompt Refiner preview adds exact reads without widening its write boundary", () => {
   const path = "lib/promptRefinerChatExecutionStore.ts";
   const source = readFileSync(resolve(ROOT, path), "utf8");

@@ -1,0 +1,56 @@
+[Unit]
+Description=Tomverse AMUX v22 FIRST Task read-only API sidecar (%i, disabled by default)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tomverse-amux-v22-api
+Group=amux-v22-ipc
+Environment=TOMVERSE_AMUX_V22_WORKER=%i
+Environment=TOMVERSE_AMUX_V22_SIDECAR_SOCKET=/run/tomverse-amux-v22-read-only-api-%i/task.sock
+Environment=TOMVERSE_AMUX_V22_SIDECAR_STATE_DIR=/var/lib/tomverse-amux-v22-read-only-api/%i
+Environment=TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_ROOT=/srv/tomverse-amux-v22-read-only-api/repository
+Environment=TOMVERSE_AMUX_V22_READ_ONLY_API_HOST_ENV_FILE=/etc/tomverse-amux-v22/read-only-api@%i.env
+EnvironmentFile=/etc/tomverse-amux-v22/read-only-api@%i.env
+ExecStart=/usr/bin/node /opt/tomverse-amux-v22/read-only-api-sidecar.mjs
+Restart=no
+TimeoutStartSec=30
+RuntimeMaxSec=30min
+RuntimeDirectory=tomverse-amux-v22-read-only-api-%i
+RuntimeDirectoryMode=0750
+StateDirectory=tomverse-amux-v22-read-only-api/%i
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+PrivateMounts=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectHostname=true
+ProtectClock=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/srv/tomverse-amux-v22-read-only-api/repository
+ReadWritePaths=/run/tomverse-amux-v22-read-only-api-%i /var/lib/tomverse-amux-v22-read-only-api/%i
+InaccessiblePaths=-/etc/tomverse-amux-v4
+InaccessiblePaths=-/etc/tomverse-amux-v22/recovery-controller.env
+InaccessiblePaths=-/var/lib/tomverse-amux-v22/recovery-stop-intents
+InaccessiblePaths=-/home/tommy
+InaccessiblePaths=-/home/tomverse-bridge
+
+# Intentionally no [Install]. One operator-selected existing worker instance is
+# started only after the separate key/profile, launch proof and final consent.

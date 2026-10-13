@@ -72,7 +72,9 @@ import { currentEngineeringAgentV22ImageProofDigest } from
 import { readAmuxV22PublicPrConsent } from
   "@/lib/amux/v22PublicPrConsent";
 import { readAmuxV22RecoveryAuthority, recoveryAttemptBudget } from "@/lib/amux/v22TaskRecoveryService";
-import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
+import { AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT,
+  AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID,
+  amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
   amuxV22ReadOnlyRetryRouteCost,
   currentAmuxV22ReadOnlyApiExecutionFrame } from "@/lib/amux/v22TaskRecoveryCore";
 import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
@@ -83,6 +85,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
 import { amuxV22ReadOnlyApiUsageProjection,
   recordAmuxV22ReadOnlyApiUsage } from "@/lib/amux/cliUsageLedgerStore";
 import { amuxV22WorkerSafeStopFenced } from "@/lib/amux/v22LegacySafeStopFence";
+import { amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -395,6 +398,12 @@ export async function startAmuxV22TaskExecution(input: {
         input.taskId, assignment.taskRevision, assignment.recoveryApprovalId, now) : null;
       if (assignment.recoveryApprovalId && !recovery) return { started: false as const,
         reason: "recovery_approval_unbound" as const };
+      if (amuxWorkerRuntimeUsesReadOnlyApi(runtime.protocolCapabilities) &&
+          (!recovery?.riskAcceptanceId || recovery.readOnlyExecutorKind !==
+            AMUX_V22_READ_ONLY_API_EXECUTOR_KIND)) {
+        return { started: false as const,
+          reason: "recovery_approval_unbound" as const };
+      }
       const budget = recoveryAttemptBudget({
         historicalAttempts: prior._count._all,
         greatestAttemptNumber: prior._max.attemptNumber,
@@ -655,6 +664,14 @@ export async function startAmuxExecution(
       );
 
       const runtime = await lockRuntime(tx, input.worker);
+
+      if (runtime &&
+          amuxWorkerRuntimeUsesReadOnlyApi(runtime.protocolCapabilities)) {
+        return {
+          started: false as const,
+          reason: "runtime_not_ready" as const,
+        };
+      }
 
       if (
         !runtimeGenerationMatches(runtime, input, now) ||
@@ -1379,6 +1396,10 @@ export async function settleAmuxV22TaskExecution(input: {
         requested_status: input.outcome === "succeeded" ? "review" :
           input.outcome === "failed" ? "todo" : "blocked",
         attempt_number: attempt.attemptNumber,
+        ...(attempt.taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID &&
+          settlementAssignment?.recoveryApprovalId ? {
+          max_attempts: AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT,
+        } : {}),
       });
       const next = budget.to_status;
       await tx.amuxWorkItem.update({ where: { id: task.id }, data: {

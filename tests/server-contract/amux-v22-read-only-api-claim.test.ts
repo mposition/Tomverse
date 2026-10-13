@@ -19,9 +19,11 @@ const receipt = {
 };
 const approved = { approvalId: "catalog-one", catalogDigest: receipt.catalogDigest,
   catalog: {}, receipt };
-let recovery: Record<string, unknown>;
+let recovery: Record<string, unknown> | null = null;
 let assignmentWrites = 0;
 let taskWrites = 0;
+let listedCapabilities = ["read_only_api_retry_v1"];
+let pinnedCapabilities = ["read_only_api_retry_v1"];
 
 const workers = [workerName, "worker-two", "worker-three"].map((name) => ({
   worker_name: name,
@@ -31,10 +33,11 @@ const workers = [workerName, "worker-two", "worker-three"].map((name) => ({
   tool_capabilities: ["repo_read"],
   archived: false, paused: false, isolated: false, blocked: false,
 }));
-const runtime = (name: string) => ({ workerName: name,
+const runtime = (name: string, capabilities = name === workerName ?
+  listedCapabilities : []) => ({ workerName: name,
   instanceId: `${name}-instance`, generation: 1, status: "idle",
   dispatchReady: true,
-  protocolCapabilities: name === workerName ? ["read_only_api_retry_v1"] : [],
+  protocolCapabilities: capabilities,
   leaseExpiresAt: new Date("2026-10-13T12:01:00.000Z") });
 
 const tx = {
@@ -45,7 +48,7 @@ const tx = {
         sql.includes("FOR UPDATE")) return [{ id: taskId }];
     if (sql.includes("FROM \"AmuxExecutionAttempt\" a")) return [];
     if (sql.includes("FROM \"AmuxWorkerRuntime\"") && sql.includes("FOR UPDATE"))
-      return [runtime(workerName)];
+      return [runtime(workerName, pinnedCapabilities)];
     throw new Error(`unexpected SQL: ${sql}`);
   },
   amuxV22LaneDecision: { findFirst: async () => null },
@@ -195,12 +198,42 @@ test("API gate and current frame fence claim before assignment mutation", async 
     assert.equal(taskWrites, 0);
 
     process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED = "true";
+    const approvedRecovery = recovery;
+    recovery = null;
+    const noAuthority = await (await service).tickV22WorkerClaim();
+    assert.deepEqual(noAuthority, { claimed: false, reason: "no_ready_candidate" });
+    assert.equal(assignmentWrites, 0);
+    assert.equal(taskWrites, 0);
+
+    listedCapabilities = [];
+    const changedWhilePinned = await (await service).tickV22WorkerClaim();
+    assert.deepEqual(changedWhilePinned,
+      { claimed: false, reason: "no_ready_candidate" });
+    assert.equal(assignmentWrites, 0);
+    assert.equal(taskWrites, 0);
+
+    for (const capabilities of [[], ["read_only_retry_v1"]]) {
+      listedCapabilities = capabilities;
+      pinnedCapabilities = capabilities;
+      const ordinary = await (await service).tickV22WorkerClaim();
+      assert.equal(ordinary.claimed, true, JSON.stringify(capabilities));
+      assert.equal(assignmentWrites, 1);
+      assert.equal(taskWrites, 1);
+      assignmentWrites = 0;
+      taskWrites = 0;
+    }
+
+    recovery = approvedRecovery;
+    listedCapabilities = ["read_only_api_retry_v1"];
+    pinnedCapabilities = ["read_only_api_retry_v1"];
     const on = await (await service).tickV22WorkerClaim();
     assert.equal(on.claimed, true);
     assert.equal(on.workerName, workerName);
     assert.equal(assignmentWrites, 1);
     assert.equal(taskWrites, 1);
   } finally {
+    listedCapabilities = ["read_only_api_retry_v1"];
+    pinnedCapabilities = ["read_only_api_retry_v1"];
     for (const [key, value] of Object.entries(env)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;

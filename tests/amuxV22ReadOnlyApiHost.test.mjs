@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, lstat, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmod, lstat, mkdtemp, mkdir, open as openFile, rm,
+  writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
 import { createAmuxV22ReadOnlyApiHost,
-  inspectAmuxV22ReadOnlyApiLauncher } from "../lib/amux/v22ReadOnlyApiHost.mjs";
+  amuxV22ReadOnlyApiCredentialMetadataDigest,
+  inspectAmuxV22ReadOnlyApiLauncher,
+  readAmuxV22ReadOnlyApiLauncherState } from "../lib/amux/v22ReadOnlyApiHost.mjs";
 import { createAmuxV22SidecarHandler,
   runAmuxV22ReadOnlyApiOneShot } from "../lib/amux/v22OneShotSidecar.mjs";
 import {
@@ -100,9 +104,20 @@ test("dedicated API host advertises only a current frame and never enters the CL
       info.mode = (info.mode & ~0o777) | 0o600;
       return info;
     };
+    const syntheticOpen = async (path, flags) => {
+      const handle = await openFile(path, flags);
+      const stat = handle.stat.bind(handle);
+      handle.stat = async () => {
+        const info = await stat();
+        info.mode = (info.mode & ~0o777) | 0o600;
+        return info;
+      };
+      return handle;
+    };
     const host = await createAmuxV22ReadOnlyApiHost(environment, { uid, now,
       testOnly: true, hostDeadlineAtMs: now + 600_000,
-      lstat: syntheticLstat,
+      serviceConfigDigest: "d".repeat(64), rootProtectedPath: async () => true,
+      lstat: syntheticLstat, open: syntheticOpen,
       clock: () => now, fetcher: async url => {
         fetches += 1;
         if (url === AMUX_V22_READ_ONLY_API_COUNT_TOKENS_URL)
@@ -140,6 +155,12 @@ test("dedicated API host advertises only a current frame and never enters the CL
         workerGeneration: 1, targetHost: "amux-ubuntu",
         recoveryApprovalId: "00000000-0000-4000-8000-000000000064",
         briefDigest: binding.briefDigest } };
+    const mismatchedScope = { ...launchScope, launcherConfigDigest: "0".repeat(64) };
+    await assert.rejects(runAmuxV22ReadOnlyApiOneShot({ ...request,
+      readOnlyRetry: { ...binding, launcherConfigDigest: "0".repeat(64),
+        launchScopeDigest: amuxV22ReadOnlyApiLaunchScopeDigest(mismatchedScope) } }, host),
+    /invalid read-only API sidecar configuration/);
+    assert.equal(fetches, 0, "a mismatched root proof must not reach the provider");
     const result = await runAmuxV22ReadOnlyApiOneShot(request, host);
     assert.equal(result.kind, "succeeded");
     assert.equal(result.cliStarted, false);
@@ -218,7 +239,7 @@ test("root API preflight binds only verified non-secret metadata and frame diges
     brokerPolicyDigest: frame.brokerPolicyDigest,
     toolSchemaDigest: frame.toolSchemaDigest,
     gitProofDigest: "b".repeat(64),
-    snapshotDigest: "a".repeat(64) };
+    snapshotDigest: "a".repeat(64), serviceConfigDigest: "d".repeat(64) };
   const current = await inspectAmuxV22ReadOnlyApiLauncher(worker, frame,
     { now, readApiLauncherState: async () => state });
   assert.equal(current.current, true);
@@ -232,4 +253,186 @@ test("root API preflight binds only verified non-secret metadata and frame diges
   assert.deepEqual(await inspectAmuxV22ReadOnlyApiLauncher(worker, frame,
     { now, readApiLauncherState: async () => ({ ...state,
       apiExecutionFrameDigest: "0".repeat(64) }) }), { current: false });
+});
+
+test("default root reader measures fixed unit artifacts and returns metadata-only proof", async () => {
+  const base = await mkdtemp(join(tmpdir(), "amux-api-root-reader-"));
+  try {
+    const files = {
+      unit: join(process.cwd(), "scripts/systemd/amux-v22-read-only-api-sidecar@.service"),
+      node: join(base, "node"), artifact: join(base, "sidecar.mjs"),
+      environment: join(base, "profile.env"), profile: join(base, "profile.json"),
+      repository: join(base, "repository"), processStatus: join(base, "status"),
+      processCommand: join(base, "cmdline"), processEnvironment: join(base, "environ"),
+    };
+    await mkdir(files.repository);
+    await writeFile(files.node, "fixed node artifact\n");
+    await writeFile(files.artifact, "fixed sidecar artifact\n");
+    const executorArtifactDigest = createHash("sha256")
+      .update("fixed sidecar artifact\n").digest("hex");
+    const repositoryScopeDigest = amuxV22ReadOnlyApiRepositoryScopeDigest({
+      sourceRevision, allowedPrefixes: ["safe"],
+    });
+    const profile = { version: 1,
+      credentialProfileId: "first-task-recovery-anthropic",
+      provider: "anthropic", allowedProviderHost: "api.anthropic.com",
+      keyOwner: "tomverse-amux-v22-api", keyMode: "0600",
+      keyPath: "/etc/tomverse-amux-v22/read-only-api/first-task-recovery-anthropic.key",
+      retentionClass: "operator-managed-dedicated-recovery", shared: false };
+    const frame = { ...makeFrame(repositoryScopeDigest), executorArtifactDigest,
+      credentialMetadataDigest: amuxV22ReadOnlyApiCredentialMetadataDigest(profile) };
+    const environment = {
+      TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED: "true",
+      TOMVERSE_AMUX_V22_READ_ONLY_API_OPERATIONAL_GATES: "true",
+      TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_DEDICATED: "true",
+      TOMVERSE_AMUX_V22_READ_ONLY_API_SOURCE_REVISION: sourceRevision,
+      TOMVERSE_AMUX_V22_READ_ONLY_API_ALLOWED_PREFIXES_JSON: JSON.stringify(["safe"]),
+      TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTION_FRAME_JSON: JSON.stringify(frame),
+      TOMVERSE_AMUX_V22_READ_ONLY_API_KEY_FILE:
+        "/etc/tomverse-amux-v22/read-only-api/first-task-recovery-anthropic.key",
+      TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_FILE:
+        "/etc/tomverse-amux-v22/read-only-api/first-task-recovery-anthropic.profile.json",
+      TOMVERSE_AMUX_V22_WORKER: worker,
+      TOMVERSE_AMUX_V22_SIDECAR_SOCKET:
+        `/run/tomverse-amux-v22-read-only-api-${worker}/task.sock`,
+      TOMVERSE_AMUX_V22_SIDECAR_STATE_DIR:
+        `/var/lib/tomverse-amux-v22-read-only-api/${worker}`,
+      TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_ROOT:
+        "/srv/tomverse-amux-v22-read-only-api/repository",
+      TOMVERSE_AMUX_V22_READ_ONLY_API_HOST_ENV_FILE:
+        `/etc/tomverse-amux-v22/read-only-api@${worker}.env`,
+    };
+    await writeFile(files.environment, [
+      "TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED=true",
+      "TOMVERSE_AMUX_V22_READ_ONLY_API_OPERATIONAL_GATES=true",
+      "TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_DEDICATED=true",
+      `TOMVERSE_AMUX_V22_READ_ONLY_API_SOURCE_REVISION=${sourceRevision}`,
+      `TOMVERSE_AMUX_V22_READ_ONLY_API_ALLOWED_PREFIXES_JSON='${JSON.stringify(["safe"])}'`,
+      `TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTION_FRAME_JSON='${JSON.stringify(frame)}'`,
+      `TOMVERSE_AMUX_V22_READ_ONLY_API_KEY_FILE=${environment.TOMVERSE_AMUX_V22_READ_ONLY_API_KEY_FILE}`,
+      `TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_FILE=${environment.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_FILE}`,
+      "",
+    ].join("\n"));
+    await writeFile(files.profile, `${JSON.stringify(profile)}\n`);
+    const processStatus = groups => [
+      "Name:\tnode", "Uid:\t1701\t1701\t1701\t1701",
+      "Gid:\t1702\t1702\t1702\t1702",
+      ...(groups === null ? [] : [`Groups:\t${groups}`]),
+      "NoNewPrivs:\t1", "CapEff:\t0000000000000000", "",
+    ].join("\n");
+    await writeFile(files.processStatus, processStatus("1702"));
+    await writeFile(files.processCommand, Buffer.from(
+      "/usr/bin/node\0/opt/tomverse-amux-v22/read-only-api-sidecar.mjs\0"));
+    await writeFile(files.processEnvironment, Buffer.from(
+      `${Object.entries(environment).map(([name, value]) => `${name}=${value}`).join("\0")}\0`));
+    const fixed = {
+      "/etc/systemd/system/amux-v22-read-only-api-sidecar@.service": files.unit,
+      "/usr/bin/node": files.node,
+      "/opt/tomverse-amux-v22/read-only-api-sidecar.mjs": files.artifact,
+      [`/etc/tomverse-amux-v22/read-only-api@${worker}.env`]: files.environment,
+      [environment.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_FILE]: files.profile,
+      "/srv/tomverse-amux-v22-read-only-api/repository": files.repository,
+      "/proc/4242/status": files.processStatus,
+      "/proc/4242/cmdline": files.processCommand,
+      "/proc/4242/environ": files.processEnvironment,
+    };
+    const modes = new Map([
+      [files.unit, 0o644], [files.node, 0o555], [files.artifact, 0o555],
+      [files.environment, 0o644], [files.profile, 0o644],
+      [files.repository, 0o755],
+    ]);
+    const mappedLstat = async path => {
+      const target = fixed[path] ?? path;
+      const info = await lstat(target);
+      info.uid = 0;
+      info.mode = (info.mode & ~0o777) | (modes.get(target) ?? 0o755);
+      return info;
+    };
+    const mappedOpen = async (path, flags) => {
+      const target = fixed[path] ?? path;
+      const handle = await openFile(target, flags);
+      const stat = handle.stat.bind(handle);
+      handle.stat = async () => {
+        const info = await stat();
+        info.uid = 0;
+        info.mode = (info.mode & ~0o777) | (modes.get(target) ?? 0o755);
+        return info;
+      };
+      return handle;
+    };
+    const unit = { Id: `amux-v22-read-only-api-sidecar@${worker}.service`,
+      LoadState: "loaded", ActiveState: "active", SubState: "running",
+      MainPID: "4242", InvocationID: "a".repeat(32),
+      User: "tomverse-amux-v22-api", Group: "amux-v22-ipc",
+      ExecStart: "{ path=/usr/bin/node ; argv[]=/usr/bin/node /opt/tomverse-amux-v22/read-only-api-sidecar.mjs ; ignore_errors=no ; start_time=[n/a] ; }",
+      EnvironmentFiles: `/etc/tomverse-amux-v22/read-only-api@${worker}.env`,
+      FragmentPath: "/etc/systemd/system/amux-v22-read-only-api-sidecar@.service",
+      DropInPaths: "", Restart: "no", RuntimeMaxUSec: "30min" };
+    const inactiveCliUnit = {
+      Id: `tomverse-amux-v22-sidecar@${worker}.service`, LoadState: "loaded",
+      ActiveState: "inactive", SubState: "dead", MainPID: "0", Job: "",
+    };
+    let providerCalls = 0;
+    const options = { testOnly: true, syntheticPlatform: true, now,
+      showUnit: async () => ({ ...unit }),
+      showInactiveCliUnit: async () => ({ ...inactiveCliUnit }),
+      readlink: async () => "/usr/bin/node",
+      createSnapshotManifest: async () => ({ gitProofDigest: "b".repeat(64),
+        snapshotDigest: "a".repeat(64) }),
+      inspectDedicatedCredential: async () => ({ identityDigest: "c".repeat(64) }),
+      inspectApiStateDirectory: async () => "e".repeat(64),
+      rootProtectedPath: async () => true, lstat: mappedLstat, open: mappedOpen,
+      fetcher: async () => { providerCalls += 1; },
+    };
+    const state = await readAmuxV22ReadOnlyApiLauncherState(worker, frame, options);
+    assert.equal(state.worker, worker);
+    assert.match(state.serviceConfigDigest, /^[a-f0-9]{64}$/);
+    assert.equal(Object.values(state).some(value => typeof value === "string" &&
+      (value.includes("/etc/") || value.includes("4242"))), false);
+    assert.equal(providerCalls, 0);
+    const current = await inspectAmuxV22ReadOnlyApiLauncher(worker, frame, options);
+    assert.equal(current.current, true);
+    await writeFile(files.artifact, "drifted sidecar artifact\n");
+    await assert.rejects(readAmuxV22ReadOnlyApiLauncherState(worker, frame, options),
+      /executor artifact drift/);
+    await writeFile(files.artifact, "fixed sidecar artifact\n");
+    await writeFile(files.profile, `${JSON.stringify({ ...profile, shared: true })}\n`);
+    await assert.rejects(readAmuxV22ReadOnlyApiLauncherState(worker, frame, options),
+      /invalid dedicated credential metadata/);
+    await writeFile(files.profile, `${JSON.stringify(profile)}\n`);
+    await assert.rejects(readAmuxV22ReadOnlyApiLauncherState(worker, frame, {
+      ...options, showUnit: async () => ({ ...unit,
+        DropInPaths: "/etc/systemd/system/amux-v22-read-only-api-sidecar@.service.d/drift.conf" }),
+    }), /unit state drift/);
+    await assert.rejects(readAmuxV22ReadOnlyApiLauncherState(worker, frame, {
+      ...options, showInactiveCliUnit: async () => ({ ...inactiveCliUnit,
+        ActiveState: "active", SubState: "running", MainPID: "99" }),
+    }), /not safely stopped/);
+    await assert.rejects(readAmuxV22ReadOnlyApiLauncherState(worker, frame, {
+      ...options, inspectApiStateDirectory: async () => {
+        throw new TypeError("read-only API sidecar has other work");
+      },
+    }), /has other work/);
+    for (const groups of [
+      null, "1703", "1702 27", "1702 1702", "1702 invalid", "0", "01702",
+    ]) {
+      await writeFile(files.processStatus, processStatus(groups));
+      await assert.rejects(readAmuxV22ReadOnlyApiLauncherState(worker, frame, options),
+        /process group drift/, `unsafe process Groups state must fail closed: ${groups}`);
+    }
+    await writeFile(files.processStatus, processStatus("1702"));
+    let processReads = 0;
+    const processBasis = { uid: 1701, executable: "/usr/bin/node",
+      argv: ["/usr/bin/node", "/opt/tomverse-amux-v22/read-only-api-sidecar.mjs"],
+      environment: { ...environment } };
+    await assert.rejects(readAmuxV22ReadOnlyApiLauncherState(worker, frame, {
+      ...options, readProcessState: async () => processReads++ === 0
+        ? { ...processBasis, gid: 1702, groups: [1702] }
+        : { ...processBasis, gid: 1703, groups: [1703] },
+    }), /launcher changed during inspection/,
+    "the actual process group identity must remain stable across the proof");
+    assert.throws(() => amuxV22ReadOnlyApiCredentialMetadataDigest({ ...profile,
+      shared: true }), /invalid dedicated credential metadata/);
+    assert.equal(providerCalls, 0);
+  } finally { await rm(base, { recursive: true, force: true }); }
 });
