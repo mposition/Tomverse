@@ -2231,7 +2231,16 @@ pub async fn run_from_env() -> i32 {
             }
         }
 
-        if !halted && !any_pending_busy_this_tick {
+        // Version 35, section 4: with no session registered yet -- all of them
+        // waiting for the session list -- and nothing in flight, there is
+        // nothing to assign. Skip the assignment reads, so an outage that
+        // kept the list unreadable cannot halt the bridge through them; the
+        // next round reads the list and retries the registrations again.
+        let only_waiting_for_registration = sessions.names().is_empty()
+            && pending.is_empty()
+            && awaiting_delivery.is_empty()
+            && undelivered_started.is_empty();
+        if !halted && !any_pending_busy_this_tick && !only_waiting_for_registration {
             let carried = std::mem::take(&mut awaiting_delivery);
             // Independent of this tick's heartbeat timing: a worker whose
             // earlier attempt is still in `pending` right now must never be
@@ -3099,6 +3108,15 @@ mod tests {
                 < round.find("retry_registrations(").unwrap()
         );
         assert!(round.contains("plan.dispatch_ready && session_listed(&session_list, &name)"));
+        // Waiting only for registration, the round makes no assignment read
+        // that could halt the bridge.
+        assert!(round.contains(
+            "if !halted && !any_pending_busy_this_tick && !only_waiting_for_registration {"
+        ));
+        assert!(
+            round.find("let only_waiting_for_registration").unwrap()
+                < round.find("bridge_tick_sourced(").unwrap()
+        );
         // Nothing about the list sets the halt.
         let list_lines: Vec<_> = run
             .lines()
