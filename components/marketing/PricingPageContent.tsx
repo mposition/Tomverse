@@ -2121,7 +2121,7 @@ export function PricingPageContent() {
           </div>
         </section>
 
-        <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm font-semibold leading-7 text-blue-950 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-100">
+        <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm font-semibold leading-7 text-blue-950 [overflow-wrap:anywhere] dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-100">
           {content.creditNotice}
         </div>
 

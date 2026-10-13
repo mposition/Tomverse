@@ -82,6 +82,16 @@ test("status chrome preserves saved language and language changes reload the bod
   } finally { await englishPage.close(); }
 });
 
+test("German pricing remains readable at 160px with enlarged text", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await page.setViewportSize({ width: 160, height: 900 });
+  await page.goto("/de/pricing");
+  await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "unauthenticated");
+  await page.evaluate(() => document.fonts.ready);
+  await page.addStyleTag({ content: "html { font-size: 104% !important; }" });
+  await expectNoHorizontalOverflow(page);
+});
+
 for (const width of [160, 320, 390, 1024, 1440]) {
   for (const language of SEO_LOCALES) {
     test(`${language}: pricing and models share readable chrome at ${width}px`, async ({ page }) => {
