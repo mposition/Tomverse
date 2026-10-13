@@ -534,12 +534,66 @@ test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" },
         return {
           width: rect.width + inset(before.left) + inset(before.right),
           height: rect.height + inset(before.top) + inset(before.bottom),
+          lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + 10)),
         };
       });
       expect(hit.height).toBeGreaterThanOrEqual(43.5);
       expect(hit.width).toBeGreaterThanOrEqual(43.5);
+      expect(hit.lowerHitOwned).toBe(true);
     }
   });
+
+  test("a coarse tablet retains the exception's actual 44px hit area", async ({ page }) => {
+    await enterMobileComposer(page, { lang: "en", viewport: { width: 390, height: 680 } });
+    await page.setViewportSize({ width: 1024, height: 900 });
+    const exception = page.getByTestId("chat-input").getByTestId("web-search-exception-toggle");
+    await expect(exception).toBeVisible();
+    const hit = await exception.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      const before = getComputedStyle(node, "::before");
+      const inset = (value: string) => Math.abs(Number.parseFloat(value) || 0);
+      return {
+        coarse: matchMedia("(pointer: coarse)").matches,
+        width: rect.width + inset(before.left) + inset(before.right),
+        height: rect.height + inset(before.top) + inset(before.bottom),
+        lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + 10)),
+      };
+    });
+    expect(hit.coarse).toBe(true);
+    expect(hit.width).toBeGreaterThanOrEqual(43.5);
+    expect(hit.height).toBeGreaterThanOrEqual(43.5);
+    expect(hit.lowerHitOwned).toBe(true);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  for (const lang of ["en", "es"] as const) {
+    for (const width of [249, 275]) {
+      test(`${lang} partial-search actions remain reachable at ${width}px with the keyboard open`, async ({ page }) => {
+        await enterMobileComposer(page, { lang, viewport: { width, height: 680 } });
+        await page.getByTestId("chat-textarea").focus();
+        await page.evaluate(() => {
+          const viewport = window.visualViewport!;
+          Object.defineProperty(viewport, "height", { configurable: true, get: () => 360 });
+          viewport.dispatchEvent(new Event("resize"));
+        });
+        await expect(page.getByTestId("composer-product-mode-row")).toHaveCount(0);
+        const composer = page.getByTestId("chat-input");
+        const bounds = (await composer.boundingBox())!;
+        for (const id of ["composer-tools-button", "composer-model-select", "web-search-mode-chip", "request-credit-estimate", "chat-send-button"]) {
+          const control = composer.getByTestId(id);
+          const box = (await control.boundingBox())!;
+          expect(box.x, id).toBeGreaterThanOrEqual(bounds.x);
+          expect(box.x + box.width, id).toBeLessThanOrEqual(bounds.x + bounds.width);
+          const hit = await control.evaluate(node => {
+            const rect = node.getBoundingClientRect();
+            return node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+          });
+          expect(hit, id).toBe(true);
+        }
+        await expectComposerContract(page, `${lang} partial-search keyboard @${width}px`);
+      });
+    }
+  }
 });
 
 test.describe("Mobile composer: disabled actions state their reason", { tag: "@ui-risk" }, () => {

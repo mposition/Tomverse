@@ -184,6 +184,7 @@ type CellReport = {
   scrollOwners: string[];
   documentHorizontalOverflow: number;
   widestElementOverhang: number;
+  widestElementDescription: string;
 };
 
 /**
@@ -383,6 +384,7 @@ async function readCell(page: Page): Promise<CellReport> {
     // Per-element horizontal overhang inside the shell, so the shell's own
     // `overflow-x: hidden` cannot make a sideways overflow look like zero.
     let widestElementOverhang = 0;
+    let widestElementDescription = "none";
     shell.querySelectorAll<HTMLElement>("*").forEach((element) => {
       const rect = element.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
@@ -394,10 +396,11 @@ async function readCell(page: Page): Promise<CellReport> {
         if (overflowX === "auto" || overflowX === "scroll") return;
         ancestor = ancestor.parentElement;
       }
-      widestElementOverhang = Math.max(
-        widestElementOverhang,
-        Math.round(rect.right - window.innerWidth)
-      );
+      const overhang = Math.round(rect.right - window.innerWidth);
+      if (overhang > widestElementOverhang) {
+        widestElementOverhang = overhang;
+        widestElementDescription = `${element.tagName} ${element.dataset.testid ?? ""} ${element.className}`;
+      }
     });
 
     const lineHeight = textarea
@@ -422,6 +425,7 @@ async function readCell(page: Page): Promise<CellReport> {
       documentHorizontalOverflow:
         document.documentElement.scrollWidth - document.documentElement.clientWidth,
       widestElementOverhang,
+      widestElementDescription,
     };
   });
   return { ...report, textareaHit };
@@ -461,7 +465,7 @@ function assertCell(report: CellReport, label: string) {
   ).toBeLessThanOrEqual(1);
   expect(
     report.widestElementOverhang,
-    `${label}: element wider than the viewport inside the shell`
+    `${label}: element wider than the viewport inside the shell (${report.widestElementDescription})`
   ).toBeLessThanOrEqual(1);
 }
 
