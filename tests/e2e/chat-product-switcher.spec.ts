@@ -132,14 +132,22 @@ test.describe("Tomverse Chat and Review product switcher", () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/review?lang=en");
     const composer = page.getByTestId("chat-input");
-    await expect(composer.getByTestId("composer-product-context")).toContainText("Model Compare");
+    await expect(composer.getByTestId("chat-product-review")).toHaveAttribute("aria-current", "page");
+    await expect(composer.getByTestId("composer-model-select")).toHaveAccessibleName(/1/);
     const chip = composer.getByTestId("composer-primary-tools").getByTestId("web-search-mode-chip");
     await expect(chip).toBeVisible();
     await expect(composer.getByTestId("tool-status-chip-row")).toHaveCount(0);
     const textarea = composer.getByTestId("chat-textarea");
     const inputBox = (await textarea.boundingBox())!;
     const chipBox = (await chip.boundingBox())!;
-    expect(inputBox.height).toBeGreaterThanOrEqual(112);
+    const minimumTwoLines = await textarea.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return 2 * Number.parseFloat(style.lineHeight)
+        + Number.parseFloat(style.paddingTop)
+        + Number.parseFloat(style.paddingBottom);
+    });
+    expect(inputBox.height).toBeGreaterThanOrEqual(minimumTwoLines - 1);
+    expect(inputBox.height).toBeLessThanOrEqual(72);
     expect(inputBox.y + inputBox.height).toBeLessThanOrEqual(chipBox.y + 0.5);
     expect(await textarea.evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
     await expectNoHorizontalOverflow(page);

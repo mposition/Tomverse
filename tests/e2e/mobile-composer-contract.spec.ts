@@ -809,15 +809,15 @@ test.describe("Mobile composer: focus indicator", { tag: "@ui-risk" }, () => {
 });
 
 test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-risk" }, () => {
-  test("short active Review keeps models in the header and a usable footer picker", async ({ page }) => {
+  test("normal active Review keeps a compact context and the actual model picker", async ({ page }) => {
     await enterMobileComposer(page, {
       models: ALL_SEARCH_MODELS,
       viewport: { width: 390, height: 680 },
       webSearchMode: "off",
     });
     const composer = page.getByTestId("chat-input");
-    await expect(composer.getByTestId("composer-product-mode-row")).toHaveCount(0);
-    await expect(composer.getByTestId("composer-review-models")).toHaveCount(0);
+    await expect(composer.getByTestId("composer-product-mode-row")).toBeVisible();
+    await expect(composer.getByTestId("composer-review-models")).toBeVisible();
     await expect(page.getByTestId("mobile-header-model-count")).toContainText("3");
     await expect(page.getByTestId("mobile-model-tab")).toHaveCount(3);
     await expect(composer.getByTestId("composer-model-select")).toHaveAccessibleName(/3/);
