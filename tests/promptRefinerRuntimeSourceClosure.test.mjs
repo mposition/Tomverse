@@ -477,12 +477,15 @@ const compilerOptions = parsedConfig.options;
 // lib/marketingAutomationAccess.ts moves the accesses below it on the main
 // base. Count 228 and the position-free inventory remain unchanged; only the
 // positions main's closure files give are repinned.
+// 2026-10-13, operator-controlled Chat availability: the marketing webhook
+// fingerprint provenance comment grows by three lines. Count 228 and the
+// position-free inventory remain unchanged; this repins source positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "20d4971eb84ef6d68b156928fb44c0f7",
-  "55c17e8b81d576a6cddd917ebc7e36f3",
+  "fecc27f9609e56cd917f7af9a47bdca4",
+  "4ba40e18c47cc74c80f8dba53a469ea2",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
