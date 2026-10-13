@@ -15,7 +15,12 @@ import {
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
-import { registerAmuxWorkerRuntime } from "@/lib/amux/workerRuntime";
+import { amuxWorkerCatalogRefusal } from "@/lib/amux/workerAssignmentCatalog";
+import { amuxWorkerDerivedCatalogAssignmentOpen } from "@/lib/amux/workerDerivedCatalogCore";
+import {
+  AmuxWorkerRegistrationRefusedError,
+  registerAmuxWorkerRuntime,
+} from "@/lib/amux/workerRuntime";
 
 const requestSchema = z
   .object({
@@ -46,9 +51,13 @@ export async function POST(request: Request) {
     try {
       const body = await readLimitedJson(request, 2 * 1_024, requestSchema);
 
-      const catalog = getConfiguredAmuxWorkerCatalog();
+      // Orchestration policy version 35, section 3 (R2c): with the derived
+      // catalog's code latch on, the name is checked against it inside the
+      // registration's own transaction; until then, against the variable here.
+      const derived = amuxWorkerDerivedCatalogAssignmentOpen();
+      const catalog = derived ? [] : getConfiguredAmuxWorkerCatalog();
 
-      if (!catalog) {
+      if (!derived && !catalog) {
         return Response.json(
           {
             registered: false,
@@ -61,7 +70,7 @@ export async function POST(request: Request) {
         );
       }
 
-      if (!catalog.some((worker) => worker.worker_name === body.worker_name)) {
+      if (!derived && !catalog?.some((worker) => worker.worker_name === body.worker_name)) {
         return Response.json(
           {
             registered: false,
@@ -77,6 +86,9 @@ export async function POST(request: Request) {
       const runtime = await registerAmuxWorkerRuntime(
         body.worker_name,
         body.instance_id,
+        undefined,
+        undefined,
+        derived ? (tx) => amuxWorkerCatalogRefusal(tx, body.worker_name, true) : undefined,
       );
 
       return Response.json(
@@ -94,6 +106,9 @@ export async function POST(request: Request) {
     } catch (error) {
       if (isAmuxInputError(error)) {
         return amuxJsonNoStore({ error: "Invalid request." }, 400);
+      }
+      if (error instanceof AmuxWorkerRegistrationRefusedError) {
+        return amuxJsonNoStore({ registered: false, reason: error.reason }, 409);
       }
       return amuxInternalErrorResponse("worker_register", error);
     }

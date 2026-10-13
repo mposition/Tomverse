@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { getConfiguredAmuxV22WorkerCatalog } from "@/lib/amux/routing";
+import { readAmuxAssignmentCatalogs } from "@/lib/amux/workerAssignmentCatalog";
+import { amuxWorkerDerivedCatalogAssignmentOpen } from "@/lib/amux/workerDerivedCatalogCore";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
@@ -36,14 +38,17 @@ export async function POST(request: Request) {
   }
   try {
     const body = await readLimitedJson(request, 4 * 1_024, schema);
-    const catalog = getConfiguredAmuxV22WorkerCatalog();
-    const configured = catalog?.find(
-      (worker) => worker.worker_name === body.worker,
-    );
-    if (
-      !configured ||
-      configured.provider !== body.provider.trim().toLowerCase()
-    ) {
+    const listedFor = (catalog: ReturnType<typeof getConfiguredAmuxV22WorkerCatalog>) => {
+      const worker = catalog?.find((entry) => entry.worker_name === body.worker);
+      return worker && worker.provider === body.provider.trim().toLowerCase() ? worker : null;
+    };
+    // Orchestration policy version 35, section 3 (R2c): with the derived
+    // catalog's code latch on, the worker is checked against it inside the
+    // write's own transaction, before anything is locked or written; until
+    // then, against the v22 variable here, as before.
+    const derived = amuxWorkerDerivedCatalogAssignmentOpen();
+    const variableListed = derived ? null : listedFor(getConfiguredAmuxV22WorkerCatalog());
+    if (!derived && !variableListed) {
       return Response.json(
         { accepted: false, reason: "worker_provider_mismatch" },
         { status: 409, headers: { "Cache-Control": "no-store" } },
@@ -61,6 +66,8 @@ export async function POST(request: Request) {
     const lockKey = `amux-quota:${id}`;
     const result = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.quotaObservationWrite,
       async (tx, context) => {
+        const configured = variableListed ?? listedFor((await readAmuxAssignmentCatalogs(tx, true)).v22);
+        if (!configured) return { accepted: false as const, reason: "worker_provider_mismatch" };
         await takeAuditChainLock(tx);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
         const existing = await tx.amuxQuotaObservation.findUnique({ where: { id } });

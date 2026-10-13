@@ -328,6 +328,10 @@ run(
     // the closed tag and v22 lists, every tag and role within the worker's
     // current ceiling and class, the owner's audit, nothing changed.
     "tests/integration/amux-worker-capability.db.test.ts",
+    // AMUX assignment catalog (orchestration policy version 35, section 3):
+    // the registry, stop latches and capabilities read in one statement and
+    // the catalog derived from them.
+    "tests/integration/amux-worker-assignment-catalog.db.test.ts",
     // AMUX Decision Maker request ledger (docs/policy/amux-decision-maker.md
     // §2, §6, §9, §10): one request per card revision, the transition graph
     // against the core's own, the deadlines by the database clock at the

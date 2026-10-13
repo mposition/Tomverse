@@ -13,6 +13,21 @@ import { AMUX_PRISMA_INT_MAX } from "@/lib/amux/claimContract";
 
 export const AMUX_WORKER_RUNTIME_LEASE_MS = 90_000;
 
+/**
+ * A registration the assignment catalog refused inside the registration's own
+ * transaction (orchestration policy version 35, section 3). Thrown from the
+ * boundary, so the transaction rolls back and nothing is written.
+ */
+export class AmuxWorkerRegistrationRefusedError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string) {
+    super(reason);
+    this.name = "AmuxWorkerRegistrationRefusedError";
+    this.reason = reason;
+  }
+}
+
 /** What an attachment to a registration sees: the generation it created. */
 export type AmuxWorkerRegisteredFact = { workerName: string; generation: number };
 
@@ -55,16 +70,26 @@ const leaseExpiry = (now: Date) =>
  * INSERT .. ON CONFLICT, so two simultaneous registrations cannot receive the
  * same generation. A heartbeat from the old generation can no longer mutate
  * the replacement runtime.
+ *
+ * `admit`, when given, runs first in the same transaction and may refuse the
+ * name (version 35, section 3: the derived catalog is read inside the path's
+ * own boundary); a refusal throws `AmuxWorkerRegistrationRefusedError` and
+ * writes nothing.
  */
 export async function registerAmuxWorkerRuntime(
   workerName: string,
   instanceId: string,
   suppliedNow?: Date,
   attachment?: AmuxAttachment<AmuxWorkerRegisteredFact>,
+  admit?: (tx: Prisma.TransactionClient) => Promise<string | null>,
 ): Promise<RegisterRow> {
   const rows = await withAmuxDbBoundary(
     amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.workerRegister, attachment),
     async (tx, context) => {
+      if (admit) {
+        const refusal = await admit(tx);
+        if (refusal !== null) throw new AmuxWorkerRegistrationRefusedError(refusal);
+      }
       const now = suppliedNow ?? context.dbNow;
       const leaseExpiresAt = leaseExpiry(now);
       const registered = await tx.$queryRaw<RegisterRow[]>`
@@ -166,6 +191,13 @@ export async function heartbeatAmuxWorkerRuntime(input: {
   dispatchReady: boolean;
   protocolCapabilities?: readonly AmuxWorkerProtocolCapability[];
   now?: Date;
+  /**
+   * Version 35, section 3: whether the assignment catalog lists this worker,
+   * read in this transaction. A live runtime that is not listed is not
+   * refused -- the bridge would halt (version 20, section 11) -- but is
+   * recorded as not dispatch-ready, so it is not assigned.
+   */
+  listed?: (tx: Prisma.TransactionClient) => Promise<boolean>;
 }): Promise<{
   accepted: boolean;
   leaseExpiresAt: Date;
@@ -240,7 +272,8 @@ export async function heartbeatAmuxWorkerRuntime(input: {
         }
       }
 
-      const dispatchReady = input.status === "idle" && input.dispatchReady;
+      const listed = input.listed ? await input.listed(tx) : true;
+      const dispatchReady = input.status === "idle" && input.dispatchReady && listed;
 
       const result = await tx.amuxWorkerRuntime.updateMany({
         where: {

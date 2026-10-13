@@ -35,8 +35,11 @@ import {
 import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { recordAmuxReviewPullRequest, type AmuxReviewPullRequestFact } from "@/lib/amux/reviewPullRequest";
 import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
+import { amuxWorkerCatalogRefusal } from "@/lib/amux/workerAssignmentCatalog";
+import { amuxWorkerDerivedCatalogAssignmentOpen } from "@/lib/amux/workerDerivedCatalogCore";
 import { listOwnedTodos } from "@/lib/amux/store";
 import {
+  AmuxWorkerRegistrationRefusedError,
   heartbeatAmuxWorkerRuntime,
   registerAmuxWorkerRuntime,
   type AmuxWorkerRuntimeStatus,
@@ -287,7 +290,10 @@ const requireOpen = async () => {
 
 /**
  * The catalogue check the AMUX worker routes make before registering or
- * renewing a runtime, made here for the adapter's one worker.
+ * renewing a runtime, made here for the adapter's one worker. Once R2c's
+ * code latch is on (orchestration policy version 35, section 3) the routes
+ * check the derived catalog inside their own transactions instead, and so
+ * does the adapter (below); this is the variable's answer until then.
  */
 const workerCatalogRefusal = (): "worker_catalog_unavailable" | "worker_not_configured" | null => {
   const catalog = getConfiguredAmuxWorkerCatalog();
@@ -301,17 +307,25 @@ const workerCatalogRefusal = (): "worker_catalog_unavailable" | "worker_not_conf
  */
 export async function registerEngineeringAgentWorker(input: { instanceId: string; markCommitted?: MarkCommitted }) {
   await requireOpen();
-  const refusal = workerCatalogRefusal();
+  const derived = amuxWorkerDerivedCatalogAssignmentOpen();
+  const refusal = derived ? null : workerCatalogRefusal();
   if (refusal) return { registered: false as const, reason: refusal };
   // A registration creates a generation; a retry of one whose answer was lost
   // must not create another. The request records the generation it created.
-  const runtime = await registerAmuxWorkerRuntime(ENGINEERING_AGENT_AMUX_WORKER, input.instanceId, undefined, {
-    prismaCalls: WORKER_REGISTER_PRISMA_CALLS,
-    work: async (lent, fact) => {
-      await input.markCommitted?.(engineeringAgentTransactionInAmux(lent), String(fact.generation));
-    },
-  });
-  return { registered: true as const, generation: runtime.generation, leaseExpiresAt: runtime.leaseExpiresAt };
+  try {
+    const runtime = await registerAmuxWorkerRuntime(ENGINEERING_AGENT_AMUX_WORKER, input.instanceId, undefined, {
+      prismaCalls: WORKER_REGISTER_PRISMA_CALLS,
+      work: async (lent, fact) => {
+        await input.markCommitted?.(engineeringAgentTransactionInAmux(lent), String(fact.generation));
+      },
+    }, derived ? (tx) => amuxWorkerCatalogRefusal(tx, ENGINEERING_AGENT_AMUX_WORKER, true) : undefined);
+    return { registered: true as const, generation: runtime.generation, leaseExpiresAt: runtime.leaseExpiresAt };
+  } catch (error) {
+    if (error instanceof AmuxWorkerRegistrationRefusedError) {
+      return { registered: false as const, reason: error.reason as "worker_catalog_unavailable" | "worker_not_configured" };
+    }
+    throw error;
+  }
 }
 
 /**
@@ -327,7 +341,8 @@ export async function heartbeatEngineeringAgentWorker(input: {
   dispatchReady: boolean;
 }) {
   await requireOpen();
-  const refusal = workerCatalogRefusal();
+  const derived = amuxWorkerDerivedCatalogAssignmentOpen();
+  const refusal = derived ? null : workerCatalogRefusal();
   if (refusal) return { accepted: false as const, reason: refusal };
   // An attempt AMUX recovered under a live run is a mismatch for a person
   // (§11); the heartbeat is where the adapter looks for one.
@@ -345,6 +360,11 @@ export async function heartbeatEngineeringAgentWorker(input: {
     generation: input.lease.generation,
     status: input.status,
     dispatchReady,
+    // Version 35, section 3: not listed by the derived catalog is not a
+    // refusal, only not dispatch-ready (the AMUX heartbeat route does the same).
+    listed: derived
+      ? async (tx) => (await amuxWorkerCatalogRefusal(tx, ENGINEERING_AGENT_AMUX_WORKER, true)) === null
+      : undefined,
   });
   if (!heartbeat.accepted) return { accepted: false as const, reason: heartbeat.reason ?? "runtime_lease_lost" };
   // The halt, apart from dispatchReady: a service sends no success signal

@@ -648,10 +648,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/workerCapabilityStore.ts",
     table: "AmuxWorkerCapabilityEvent",
-    tableMentions: 3,
+    tableMentions: 4,
     writeVerbs: 2,
     reason:
-      "The capability event table's single writer (orchestration policy version 35, section 2). Its raw SQL is two constant SELECTs (the newest capability of every worker, and one worker's newest revision) and one constant INSERT ... RETURNING; every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
+      "The capability event table's single writer (orchestration policy version 35, section 2). Its raw SQL is two constant SELECTs (the newest capability of every worker, and one worker's newest revision), one constant INSERT ... RETURNING and one constant SELECT subquery (the newest capability of every worker as JSON) that the assignment catalog reader composes into its one statement (version 35, section 3); every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
@@ -672,10 +672,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/workerRegistryStore.ts",
     table: "AmuxWorkerRegistryEvent",
-    tableMentions: 4,
+    tableMentions: 5,
     writeVerbs: 2,
     reason:
-      "The registry event table's single writer (orchestration policy version 31, section 3). Its raw SQL is three constant SELECTs (the newest event of every worker, of one worker for its own writer, and of one worker for the capability store's writer, version 35) and one constant INSERT ... RETURNING; every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
+      "The registry event table's single writer (orchestration policy version 31, section 3). Its raw SQL is three constant SELECTs (the newest event of every worker, of one worker for its own writer, and of one worker for the capability store's writer, version 35), one constant INSERT ... RETURNING and one constant SELECT subquery (the newest event of every worker as JSON) that the assignment catalog reader composes into its one statement (version 35, section 3); every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
   },
   {
     path: "prisma/migrations/20261012100000_amux_worker_registry/migration.sql",
