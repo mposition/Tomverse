@@ -9,7 +9,8 @@
  *
  * A read that failed because the database could not take it just then -- the
  * pool had no connection, the transaction could not start within `maxWait`,
- * the statement timed out, the connection dropped -- is answered 503
+ * the statement timed out, the connection dropped, the session was ended for
+ * idling in its transaction -- is answered 503
  * `amux_database_busy`, and the caller may ask again on its next tick. Any
  * other read failure keeps its old answer.
  *
@@ -58,6 +59,13 @@ const TRANSIENT_DRIVER_KINDS = new Set([
 const TRANSIENT_SQLSTATES = new Set([
   // query_canceled: the statement timeout.
   "57014",
+  // idle_in_transaction_session_timeout: a boundary sets it to 100 ms
+  // (lib/amux/dbBoundary.ts), so a gap longer than that between two of its
+  // statements -- a slow round trip, a stalled event loop on a just-started
+  // instance -- ends the session, and the next statement or the COMMIT is
+  // refused with it. The session's transaction is rolled back with it. Only a
+  // read is ever answered busy for it; a mutation keeps its answer.
+  "25P03",
   // Class 08, connection exception.
   "08000",
   "08001",
