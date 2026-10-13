@@ -147,9 +147,10 @@ conversation that fell back to the user's own model gets no badge, because a
 badge there would claim a routing decision that did not happen — the same
 mistake `lib/autoModelSelection.ts` makes unrepresentable on the server.
 
-The reason line is optional and drops silently: `autoRoutingReason` returns
-`null` for an identifier the locale has no sentence for, rather than rendering
-`fallback_order` into somebody's chat.
+The badge uses a neutral automatic-selection label followed by the answering
+model name. The router's selection reason is not rendered in visible copy or
+the accessible name; internal reason metadata never becomes an explanation in
+somebody's chat.
 
 ## 5. Turning it off is always available
 

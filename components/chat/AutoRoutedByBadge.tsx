@@ -2,11 +2,7 @@
 
 import { Sparkles } from "lucide-react";
 
-import {
-  autoRoutingCopy,
-  autoRoutingReason,
-  type AutoRoutingLanguage,
-} from "@/lib/autoRoutingCopy";
+import { autoRoutingCopy, type AutoRoutingLanguage } from "@/lib/autoRoutingCopy";
 
 /**
  * Which model answered this message, on a turn Auto routed.
@@ -21,14 +17,13 @@ import {
  * would claim a routing decision that did not happen, which is the same
  * mistake `lib/autoModelSelection.ts` makes unrepresentable on the server.
  *
- * The reason is optional. `autoRoutingReason` returns null for an identifier
- * this locale has no sentence for, and the badge then shows the model name
- * alone rather than leaking `fallback_order` into somebody's chat.
+ * The router's selection reason stays out of both visible copy and the
+ * accessible name. The badge identifies only that Auto selected the model
+ * and which model answered.
  */
 export function AutoRoutedByBadge({
   routed,
   modelName,
-  reason,
   language,
 }: {
   routed: boolean;
@@ -40,7 +35,6 @@ export function AutoRoutedByBadge({
 }) {
   if (!routed || !modelName) return null;
   const copy = autoRoutingCopy[language] ?? autoRoutingCopy.en;
-  const explanation = autoRoutingReason(language, reason);
 
   return (
     <span
@@ -49,11 +43,8 @@ export function AutoRoutedByBadge({
     >
       <Sparkles aria-hidden="true" className="h-3 w-3" />
       <span>
-        {copy.answeredBy} {modelName}
+        {copy.answeredBy} · {modelName}
       </span>
-      {explanation ? (
-        <span className="text-zinc-400 dark:text-zinc-500">— {explanation}</span>
-      ) : null}
     </span>
   );
 }
