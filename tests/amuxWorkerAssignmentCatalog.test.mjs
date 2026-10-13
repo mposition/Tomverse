@@ -13,6 +13,7 @@ import {
   amuxDerivedCatalogAsConfigured,
   amuxWorkerCatalogRefusal,
   readAmuxAssignmentCatalogs,
+  readAmuxRegistryAndDerivedCatalog,
   readAmuxDerivedWorkerCatalog,
 } from "../lib/amux/workerAssignmentCatalog.ts";
 import {
@@ -203,4 +204,19 @@ test("quota and the engineering adapter keep the variable while R2c is off, and 
   has(adapter, ["listed: derived",
     "      ? async (tx) => (await amuxWorkerCatalogRefusal(tx, ENGINEERING_AGENT_AMUX_WORKER, true)) === null",
     "      : undefined,"].join(String.fromCharCode(10)));
+});
+
+test("a capability the store would not accept leaves no catalog but keeps the registry read beside it", async () => {
+  const badCapability = await readAmuxRegistryAndDerivedCatalog(
+    fakeClient(statement(REGISTRY_ROWS, [], [{ ...CAPABILITY_ROWS[0], routingTags: [] }])),
+  );
+  assert.equal(badCapability.derived, null);
+  assert.equal(badCapability.registrations?.length, REGISTRY_ROWS.length);
+  const badLatch = await readAmuxRegistryAndDerivedCatalog(
+    fakeClient(statement(REGISTRY_ROWS, [{ workerName: "claude-impl", eventKind: "unknown" }])),
+  );
+  assert.deepEqual(badLatch, { registrations: null, derived: null });
+  const whole = await readAmuxRegistryAndDerivedCatalog(fakeClient(statement()));
+  assert.equal(whole.registrations?.length, REGISTRY_ROWS.length);
+  assert.equal(whole.derived?.legacy.length, 8);
 });
