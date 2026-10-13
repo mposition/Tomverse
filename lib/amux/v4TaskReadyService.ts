@@ -187,7 +187,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
   tx: Prisma.TransactionClient, taskId: string,
   context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>,
   expectedActorUserId: string | null,
-  expectedStatus: "backlog" | "todo" = "backlog",
+  expectedStatus: "backlog" | "todo" | "blocked" = "backlog",
 ) {
     const { ideaId, keys } = context;
     const card = await tx.amuxWorkItem.findUnique({ where: { id: taskId },

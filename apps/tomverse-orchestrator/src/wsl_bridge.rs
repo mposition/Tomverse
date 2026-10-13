@@ -29,9 +29,12 @@ use crate::local_card::{
     review_pr_number_from, valid_local_card_id, LinkDecision, LocalCardSummary,
 };
 use crate::tomverse_api::{
-    is_database_busy, DatabaseBusy, ExecutionStartResponse, NothingCommittedAnswer, OwnedTodoTask,
+    is_database_busy, AmuxV22ApiModelAccessRequest, AmuxV22ApiModelAccessResult,
+    DatabaseBusy, ExecutionStartResponse,
+    NothingCommittedAnswer, OwnedTodoTask,
     PulledDelivery, SelectionRead, SelectionReadTransientStatus, UnacceptedStatus,
-    WorkerSessionList, BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
+    V22ReadOnlyRetryEcho, V22ReadOnlyRetryProfile, WorkerSessionList,
+    BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
 };
 
 /// The idle reason for an execution start that answered the exact
@@ -419,9 +422,22 @@ pub enum V22SidecarState {
     Confirmed,
 }
 
+fn read_only_api_result_must_remain_open(
+    api_retry: bool,
+    state: Option<V22SidecarState>,
+    elapsed_seconds: i64,
+) -> bool {
+    api_retry && (state == Some(V22SidecarState::OutcomeUnknown) ||
+        elapsed_seconds >= 15 * 60 &&
+            !matches!(state, Some(V22SidecarState::InProgress |
+                V22SidecarState::Succeeded | V22SidecarState::Failed)))
+}
+
 #[derive(Debug, Clone)]
 pub struct V22SidecarResult {
     pub state: V22SidecarState,
+    pub read_only_retry: Option<V22ReadOnlyRetryEcho>,
+    pub api_execution_receipt: Option<serde_json::Value>,
     pub usage_receipt: Option<serde_json::Value>,
     pub usage_receipt_digest: Option<String>,
     pub result_text: Option<String>,
@@ -464,7 +480,12 @@ pub trait LocalAmux {
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply>;
     async fn read_back(&mut self, session_name: &str, attempt_id: &str) -> Result<ReadBack>;
 
-    async fn send_v22(&mut self, _delivery: &PulledDelivery) -> Result<V22SidecarState> {
+    async fn read_only_retry_capability(&mut self, _worker: &str) -> Option<String> {
+        None
+    }
+
+    async fn send_v22(&mut self, _delivery: &PulledDelivery,
+        _instance_id: &str, _generation: i64) -> Result<V22SidecarState> {
         bail!("v22 one-shot sidecar is unavailable")
     }
 
@@ -474,6 +495,8 @@ pub trait LocalAmux {
 
     async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
         Ok(V22SidecarResult { state: self.readback_v22(attempt_id).await?,
+            read_only_retry: None,
+            api_execution_receipt: None,
             usage_receipt: None, usage_receipt_digest: None,
             result_text: None, result_sha256: None,
             patch_body: None, patch_base_sha: None, patch_digest: None,
@@ -829,6 +852,13 @@ pub fn bridge_error_class(error: &anyhow::Error) -> String {
         }
     }
     "other".to_owned()
+}
+
+/// Whether a failed API model-access authorization read may wait for a later
+/// tick. Only answers that carry no evidence the app decided anything qualify:
+/// the exact busy answer, a transport failure, or a 5xx/429 status.
+fn api_model_access_read_deferrable(error: &anyhow::Error) -> bool {
+    is_database_busy(error) || crate::tomverse_api::is_selection_read_recoverable(error)
 }
 
 /// Records why the bridge halted. The first cause wins: whatever followed it
@@ -1373,7 +1403,8 @@ where
                 attempt_id: started.attempt_id.clone(),
             });
         }
-        return Ok(dispatch_v22(delivery, local).await);
+        let session = presence.expect("running presence checked");
+        return Ok(dispatch_v22(delivery, &session.instance_id, session.generation, local).await);
     }
     Ok(dispatch_started(
         input,
@@ -1386,8 +1417,9 @@ where
     .await)
 }
 
-async fn dispatch_v22<L: LocalAmux>(delivery: &PulledDelivery, local: &mut L) -> BridgeTickResult {
-    let reply = match local.send_v22(delivery).await {
+async fn dispatch_v22<L: LocalAmux>(delivery: &PulledDelivery, instance_id: &str,
+    generation: i64, local: &mut L) -> BridgeTickResult {
+    let reply = match local.send_v22(delivery, instance_id, generation).await {
         Ok(reply) => reply,
         Err(_) => match local.readback_v22(&delivery.attempt_id).await {
             Ok(reply) => reply,
@@ -1683,6 +1715,91 @@ async fn v22_sidecar_quota(_socket_path: &str, _worker: &str) -> Result<Option<c
 }
 
 #[cfg(unix)]
+async fn v22_sidecar_api_model_access(socket_path: &str,
+    request: &AmuxV22ApiModelAccessRequest) -> Result<AmuxV22ApiModelAccessResult> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+    if !std::path::Path::new(socket_path).is_absolute() ||
+        !valid_session_name(&request.worker) {
+        bail!("invalid API model access endpoint");
+    }
+    let mut payload = serde_json::to_value(request)?;
+    payload.as_object_mut().context("invalid API model access payload")?
+        .insert("op".to_owned(), serde_json::json!("api_model_access"));
+    let operation = async {
+        let mut bytes = serde_json::to_vec(&payload)?; bytes.push(b'\n');
+        let mut stream = UnixStream::connect(socket_path).await?;
+        stream.write_all(&bytes).await?; stream.shutdown().await?;
+        let mut response = Vec::new();
+        stream.take(8193).read_to_end(&mut response).await?;
+        if response.len() > 8192 { bail!("API model access response exceeds limit"); }
+        let result: AmuxV22ApiModelAccessResult = serde_json::from_slice(&response)?;
+        crate::tomverse_api::validate_api_model_access_result(&result, request)?;
+        Ok(result)
+    };
+    tokio::time::timeout(Duration::from_secs(4), operation).await
+        .context("API model access sidecar timeout")?
+}
+
+#[cfg(not(unix))]
+async fn v22_sidecar_api_model_access(_socket_path: &str,
+    _request: &AmuxV22ApiModelAccessRequest) -> Result<AmuxV22ApiModelAccessResult> {
+    bail!("API model access sidecar unavailable")
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+fn parse_v22_protocol_response(value: &serde_json::Value,
+    request_id: &str, worker: &str) -> Result<Option<String>> {
+    let object = value.as_object().context("invalid protocol response")?;
+    let expected = ["capabilities", "kind", "requestId", "worker"];
+    if object.len() != expected.len() ||
+        expected.iter().any(|key| !object.contains_key(*key)) ||
+        value.get("kind").and_then(|v| v.as_str()) != Some("protocol") ||
+        value.get("requestId").and_then(|v| v.as_str()) != Some(request_id) ||
+        value.get("worker").and_then(|v| v.as_str()) != Some(worker) {
+        bail!("invalid protocol response");
+    }
+    let capabilities = value.get("capabilities").and_then(|item| item.as_array())
+        .context("invalid protocol capabilities")?;
+    if capabilities.len() > 1 { bail!("invalid protocol capabilities"); }
+    let capability = capabilities.first().map(|item| item.as_str()
+        .context("invalid protocol capability")).transpose()?;
+    if capability.is_some_and(|value|
+        !matches!(value, "read_only_retry_v1" | "read_only_api_retry_v1")) {
+        bail!("invalid protocol capability");
+    }
+    Ok(capability.map(str::to_owned))
+}
+
+#[cfg(unix)]
+async fn v22_sidecar_protocol(socket_path: &str, worker: &str) -> Result<Option<String>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+    if !std::path::Path::new(socket_path).is_absolute() || !valid_session_name(worker) {
+        bail!("invalid protocol endpoint");
+    }
+    let request_id = Uuid::new_v4().to_string();
+    let payload = serde_json::json!({"op":"protocol","requestId":request_id,"worker":worker});
+    let operation = async {
+        let mut request = serde_json::to_vec(&payload)?; request.push(b'\n');
+        let mut stream = UnixStream::connect(socket_path).await?;
+        stream.write_all(&request).await?; stream.shutdown().await?;
+        let mut response = Vec::new();
+        stream.take(4097).read_to_end(&mut response).await?;
+        if response.len() > 4096 { bail!("protocol response exceeds limit"); }
+        let value: serde_json::Value = serde_json::from_slice(&response)?;
+        parse_v22_protocol_response(&value, &request_id, worker)
+    };
+    tokio::time::timeout(Duration::from_secs(4), operation)
+        .await.context("protocol probe timeout")?
+}
+
+#[cfg(not(unix))]
+async fn v22_sidecar_protocol(_socket_path: &str, _worker: &str) -> Result<Option<String>> {
+    Ok(None)
+}
+
+#[cfg(unix)]
 async fn v22_sidecar_call(
     socket_path: &str,
     payload: serde_json::Value,
@@ -1724,6 +1841,8 @@ async fn v22_sidecar_call(
         };
         let receipt = value.get("usageReceipt").filter(|v| !v.is_null()).cloned();
         let digest = value.get("usageReceiptDigest").and_then(|v| v.as_str());
+        let api_execution_receipt = value.get("apiExecutionReceipt")
+            .filter(|v| !v.is_null()).cloned();
         let result_text = value.get("resultText").and_then(|v| v.as_str());
         let result_sha256 = value.get("resultSha256").and_then(|v| v.as_str());
         let patch_body = value.get("patchBody").and_then(|v| v.as_str());
@@ -1732,12 +1851,73 @@ async fn v22_sidecar_call(
         let publish_files = value.get("publishFiles").filter(|v| !v.is_null());
         let publish_files_digest = value.get("publishFilesDigest")
             .and_then(|v| v.as_str());
+        let read_only_retry = match value.get("readOnlyRetry") {
+            None => None,
+            Some(item) => {
+                let object = item.as_object().context("invalid read-only retry echo")?;
+                let api = object.get("executorKind").and_then(|v| v.as_str()) ==
+                    Some("read_only_api_retry_v1");
+                let expected: &[&str] = if api { &["apiExecutionFrameDigest",
+                    "executorKind", "launchBindingId", "launcherConfigDigest",
+                    "launchProofDigest", "launchScopeDigest", "version"] } else {
+                    &["launchBindingId", "launchProofDigest", "launchScopeDigest", "version"]
+                };
+                if object.len() != expected.len() ||
+                    expected.iter().any(|key| !object.contains_key(*key)) {
+                    bail!("invalid read-only retry echo");
+                }
+                let version = object.get("version").and_then(|v| v.as_i64());
+                let launch_binding_id = object.get("launchBindingId")
+                    .and_then(|v| v.as_str());
+                let launch_proof_digest = object.get("launchProofDigest")
+                    .and_then(|v| v.as_str());
+                let launch_scope_digest = object.get("launchScopeDigest")
+                    .and_then(|v| v.as_str());
+                let launcher_config_digest = object.get("launcherConfigDigest")
+                    .and_then(|v| v.as_str());
+                let api_execution_frame_digest = object.get("apiExecutionFrameDigest")
+                    .and_then(|v| v.as_str());
+                if version != Some(1) ||
+                    launch_binding_id.is_none_or(|id| Uuid::parse_str(id).is_err()) ||
+                    launch_proof_digest.is_none_or(|digest| !v22_digest(digest)) ||
+                    launch_scope_digest.is_none_or(|digest| !v22_digest(digest)) ||
+                    api && (launcher_config_digest.is_none_or(|digest| !v22_digest(digest)) ||
+                        api_execution_frame_digest.is_none_or(|digest| !v22_digest(digest))) {
+                    bail!("invalid read-only retry echo");
+                }
+                Some(V22ReadOnlyRetryEcho {
+                    version: 1,
+                    launch_binding_id: launch_binding_id.unwrap().to_owned(),
+                    launch_proof_digest: launch_proof_digest.unwrap().to_owned(),
+                    launch_scope_digest: launch_scope_digest.unwrap().to_owned(),
+                    executor_kind: api.then(|| "read_only_api_retry_v1".to_owned()),
+                    launcher_config_digest: launcher_config_digest.map(str::to_owned),
+                    api_execution_frame_digest: api_execution_frame_digest.map(str::to_owned),
+                    api_execution_receipt: api_execution_receipt.clone(),
+                })
+            },
+        };
+        let api_retry = read_only_retry.as_ref().and_then(|echo|
+            echo.executor_kind.as_deref()) == Some("read_only_api_retry_v1");
         if receipt.is_some() != digest.is_some() ||
             digest.is_some_and(|v| v.len() != 64 || !v.bytes().all(|b|
                 b.is_ascii_hexdigit())) ||
             receipt.is_some() && !matches!(state,
                 V22SidecarState::Succeeded | V22SidecarState::Failed) {
             bail!("invalid v22 sidecar usage receipt envelope");
+        }
+        if api_retry && (receipt.is_some() || digest.is_some() ||
+            api_execution_receipt.as_ref().is_none_or(|receipt|
+                !matches!(state, V22SidecarState::Succeeded | V22SidecarState::Failed) ||
+                receipt.get("version").and_then(|v| v.as_i64()) != Some(1) ||
+                receipt.get("executorKind").and_then(|v| v.as_str()) !=
+                    Some("read_only_api_retry_v1") ||
+                receipt.get("attemptId").and_then(|v| v.as_str()) != Some(attempt_id) ||
+                receipt.get("invocationId").and_then(|v| v.as_str()) != Some(attempt_id) ||
+                receipt.get("usageComplete").and_then(|v| v.as_bool()) != Some(true) ||
+                receipt.get("digest").and_then(|v| v.as_str()).is_none_or(|v| !v22_digest(v)))) ||
+            !api_retry && api_execution_receipt.is_some() {
+            bail!("invalid v22 sidecar API receipt envelope");
         }
         if result_text.is_some_and(|text| text.is_empty() ||
             text.len() > 65_536 || text.contains('\0')) ||
@@ -1766,7 +1946,8 @@ async fn v22_sidecar_call(
                 !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) {
             bail!("invalid v22 sidecar patch envelope");
         }
-        Ok(V22SidecarResult { state, usage_receipt: receipt,
+        Ok(V22SidecarResult { state, read_only_retry,
+            api_execution_receipt, usage_receipt: receipt,
             usage_receipt_digest: digest.map(str::to_owned),
             result_text: result_text.map(str::to_owned),
             result_sha256: result_sha256.map(str::to_owned),
@@ -1780,6 +1961,153 @@ async fn v22_sidecar_call(
         .await.context("v22 sidecar transport timed out")?
 }
 
+const V22_READ_ONLY_RETRY_TASK_ID: &str = "c48886b9-86f8-4631-8db8-c0b288a707af";
+const V22_READ_ONLY_LAUNCHER_POLICY: &str = "amux-v22-read-only-retry-v1";
+
+fn v22_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) &&
+        value.bytes().all(|byte| !byte.is_ascii_uppercase())
+}
+
+fn v22_read_only_retry_payload(delivery: &PulledDelivery,
+    profile: &V22ReadOnlyRetryProfile) -> Result<serde_json::Value> {
+    let execution = delivery.v22_execution.as_ref().context("v22 profile missing")?;
+    let additional = profile.additional_cap_microusd.parse::<i64>()
+        .context("invalid read-only retry additional cap")?;
+    let exposure = profile.worst_exposure_microusd.parse::<i64>()
+        .context("invalid read-only retry worst exposure")?;
+    let bounded = |value: &str| !value.is_empty() && value.len() <= 128 &&
+        !value.bytes().any(|byte| matches!(byte, 0 | b'\r' | b'\n'));
+    let common_digests = [&profile.risk_acceptance_digest,
+        &profile.safe_stop_evidence_digest, &profile.launch_proof_digest,
+        &profile.launch_scope_digest, &profile.launcher_config_digest,
+        &profile.brief_digest,
+        &profile.route_policy_digest, &profile.cost_receipt_digest];
+    if execution.read_only_retry.as_ref() != Some(profile) ||
+        delivery.task_id != V22_READ_ONLY_RETRY_TASK_ID ||
+        delivery.recovery_approval_id.as_deref()
+            .is_none_or(|id| Uuid::parse_str(id).is_err()) || profile.version != 1 ||
+        Uuid::parse_str(&profile.launch_binding_id).is_err() ||
+        profile.provider != "anthropic" || profile.role != "investigate" ||
+        execution.role != "investigate" || execution.model_id != profile.model_id ||
+        execution.budget_microusd != additional || additional < 1 || additional > 3_400_000 ||
+        exposure != 3_400_000 + additional || exposure > 6_800_000 ||
+        !profile.model_id.starts_with("claude-") || profile.model_id.len() > 127 ||
+        !bounded(&profile.route_id) || !bounded(&profile.catalog_approval_id) ||
+        !bounded(&profile.catalog_version) || !bounded(&profile.pricing_version) ||
+        common_digests.iter().any(|digest| !v22_digest(digest)) {
+        bail!("invalid read-only retry delivery binding");
+    }
+    let mut payload = serde_json::json!({
+        "version": profile.version,
+        "launchBindingId": profile.launch_binding_id,
+        "riskAcceptanceDigest": profile.risk_acceptance_digest,
+        "safeStopEvidenceDigest": profile.safe_stop_evidence_digest,
+        "launchProofDigest": profile.launch_proof_digest,
+        "launchScopeDigest": profile.launch_scope_digest,
+        "launcherConfigDigest": profile.launcher_config_digest,
+        "briefDigest": profile.brief_digest,
+        "provider": profile.provider,
+        "modelId": profile.model_id,
+        "routeId": profile.route_id,
+        "routePolicyDigest": profile.route_policy_digest,
+        "catalogApprovalId": profile.catalog_approval_id,
+        "catalogVersion": profile.catalog_version,
+        "pricingVersion": profile.pricing_version,
+        "costReceiptDigest": profile.cost_receipt_digest,
+        "additionalCapMicroUsd": profile.additional_cap_microusd,
+        "worstExposureMicroUsd": profile.worst_exposure_microusd,
+        "role": profile.role,
+    });
+    let object = payload.as_object_mut().context("read-only retry payload object")?;
+    match profile.executor_kind.as_deref() {
+        Some("read_only_api_retry_v1") => {
+            if profile.launcher_policy_version.is_some() ||
+                profile.fixed_argv_digest.is_some() || profile.tool_policy_digest.is_some() ||
+                profile.profile_config_digest.is_some() ||
+                profile.api_execution_frame_digest.as_deref().is_none_or(|v| !v22_digest(v)) ||
+                profile.api_execution_frame.as_ref().is_none_or(|frame|
+                    frame.get("version").and_then(|v| v.as_i64()) != Some(1) ||
+                    frame.get("executorKind").and_then(|v| v.as_str()) !=
+                        Some("read_only_api_retry_v1") ||
+                    frame.get("provider").and_then(|v| v.as_str()) != Some("anthropic") ||
+                    frame.get("modelId").and_then(|v| v.as_str()) != Some(&profile.model_id) ||
+                    frame.get("routeId").and_then(|v| v.as_str()) != Some(&profile.route_id) ||
+                    frame.get("routePolicyDigest").and_then(|v| v.as_str()) !=
+                        Some(&profile.route_policy_digest) ||
+                    frame.get("catalogApprovalId").and_then(|v| v.as_str()) !=
+                        Some(&profile.catalog_approval_id) ||
+                    frame.get("catalogVersion").and_then(|v| v.as_str()) !=
+                        Some(&profile.catalog_version) ||
+                    frame.get("pricingVersion").and_then(|v| v.as_str()) !=
+                        Some(&profile.pricing_version) ||
+                    frame.get("maximumCostMicroUsd").and_then(|v| v.as_i64()) != Some(additional)) {
+                bail!("invalid read-only API retry delivery binding");
+            }
+            object.insert("executorKind".into(),
+                serde_json::Value::String("read_only_api_retry_v1".into()));
+            object.insert("apiExecutionFrame".into(),
+                profile.api_execution_frame.clone().unwrap());
+            object.insert("apiExecutionFrameDigest".into(), serde_json::Value::String(
+                profile.api_execution_frame_digest.clone().unwrap()));
+        },
+        None => {
+            let cli_digests = [profile.fixed_argv_digest.as_deref(),
+                profile.tool_policy_digest.as_deref(),
+                profile.profile_config_digest.as_deref()];
+            if profile.launcher_policy_version.as_deref() != Some(V22_READ_ONLY_LAUNCHER_POLICY) ||
+                cli_digests.iter().any(|value| value.is_none_or(|v| !v22_digest(v))) ||
+                profile.api_execution_frame.is_some() || profile.api_execution_frame_digest.is_some() {
+                bail!("invalid read-only CLI retry delivery binding");
+            }
+            object.insert("launcherPolicyVersion".into(), serde_json::Value::String(
+                profile.launcher_policy_version.clone().unwrap()));
+            object.insert("fixedArgvDigest".into(), serde_json::Value::String(
+                profile.fixed_argv_digest.clone().unwrap()));
+            object.insert("toolPolicyDigest".into(), serde_json::Value::String(
+                profile.tool_policy_digest.clone().unwrap()));
+            object.insert("profileConfigDigest".into(), serde_json::Value::String(
+                profile.profile_config_digest.clone().unwrap()));
+        },
+        _ => bail!("invalid read-only retry executor kind"),
+    }
+    Ok(payload)
+}
+
+fn v22_read_only_retry_echo_matches(delivery: &PulledDelivery,
+    echo: Option<&V22ReadOnlyRetryEcho>) -> bool {
+    let expected = delivery.v22_execution.as_ref()
+        .and_then(|profile| profile.read_only_retry.as_ref());
+    match (expected, echo) {
+        (None, None) => true,
+        (Some(expected), Some(echo)) => echo.version == 1 &&
+            echo.launch_binding_id == expected.launch_binding_id &&
+            echo.launch_proof_digest == expected.launch_proof_digest &&
+            echo.launch_scope_digest == expected.launch_scope_digest &&
+            echo.executor_kind == expected.executor_kind &&
+            (expected.executor_kind.as_deref() != Some("read_only_api_retry_v1") ||
+                echo.launcher_config_digest.as_deref() == Some(&expected.launcher_config_digest) &&
+                echo.api_execution_frame_digest == expected.api_execution_frame_digest &&
+                echo.api_execution_receipt.as_ref().is_some_and(|receipt|
+                    receipt.get("version").and_then(|v| v.as_i64()) == Some(1) &&
+                    receipt.get("executorKind").and_then(|v| v.as_str()) ==
+                        Some("read_only_api_retry_v1") &&
+                    receipt.get("attemptId").and_then(|v| v.as_str()) ==
+                        Some(&delivery.attempt_id) &&
+                    receipt.get("invocationId").and_then(|v| v.as_str()) ==
+                        Some(&delivery.attempt_id) &&
+                    receipt.get("selectedModelId").and_then(|v| v.as_str()) ==
+                        Some(&expected.model_id) &&
+                    receipt.get("actualModelId").and_then(|v| v.as_str()) ==
+                        Some(&expected.model_id) &&
+                    receipt.get("usageComplete").and_then(|v| v.as_bool()) == Some(true) &&
+                    receipt.get("apiExecutionFrameDigest").and_then(|v| v.as_str()) ==
+                        expected.api_execution_frame_digest.as_deref() &&
+                    receipt.get("digest").and_then(|v| v.as_str()).is_some_and(v22_digest))),
+        _ => false,
+    }
+}
+
 #[cfg(not(unix))]
 async fn v22_sidecar_call(
     _socket_path: &str,
@@ -1789,7 +2117,45 @@ async fn v22_sidecar_call(
     bail!("v22 sidecar requires Ubuntu")
 }
 
+/// Content-free identity from the authenticated delivery and this registered
+/// bridge session. A recovery queue can never manufacture this local binding.
+fn v22_recovery_binding(delivery: &PulledDelivery, instance_id: &str,
+    generation: i64) -> Result<serde_json::Value> {
+    if delivery.task_id.is_empty() || delivery.task_id.len() > 128 ||
+        !delivery.task_id.bytes().all(|byte| byte.is_ascii_alphanumeric() ||
+            matches!(byte, b':' | b'_' | b'-')) ||
+        !(0..=2_147_483_644).contains(&delivery.task_revision) ||
+        Uuid::parse_str(instance_id).is_err() || !(1..=2_147_483_647).contains(&generation) {
+        bail!("invalid v22 recovery binding");
+    }
+    let retry = delivery.v22_execution.as_ref()
+        .and_then(|profile| profile.read_only_retry.as_ref());
+    match (delivery.recovery_approval_id.as_deref(), retry) {
+        (Some(approval), Some(retry)) => {
+            if Uuid::parse_str(approval).is_err() ||
+                delivery.task_id != V22_READ_ONLY_RETRY_TASK_ID {
+                bail!("invalid v22 read-only recovery binding");
+            }
+            return Ok(serde_json::json!({ "version": 1, "taskId": delivery.task_id,
+                "taskRevision": delivery.task_revision, "attemptId": delivery.attempt_id,
+                "workerName": delivery.worker, "workerInstanceId": instance_id,
+                "workerGeneration": generation, "targetHost": "amux-ubuntu",
+                "recoveryApprovalId": approval, "briefDigest": retry.brief_digest }));
+        },
+        (None, None) => {},
+        _ => bail!("incomplete v22 read-only recovery binding"),
+    }
+    Ok(serde_json::json!({ "version": 1, "taskId": delivery.task_id,
+        "taskRevision": delivery.task_revision, "workerInstanceId": instance_id,
+        "workerGeneration": generation, "targetHost": "amux-ubuntu" }))
+}
+
 impl LocalAmux for HttpLocal {
+    async fn read_only_retry_capability(&mut self, worker: &str) -> Option<String> {
+        let Some(socket) = self.v22_socket.as_deref() else { return None; };
+        v22_sidecar_protocol(socket, worker).await.unwrap_or(None)
+    }
+
     async fn confirm_v22_result(&mut self, attempt_id: &str, sha256: &str) -> Result<()> {
         let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
         if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -1820,7 +2186,8 @@ impl LocalAmux for HttpLocal {
         Ok(())
     }
 
-    async fn send_v22(&mut self, delivery: &PulledDelivery) -> Result<V22SidecarState> {
+    async fn send_v22(&mut self, delivery: &PulledDelivery,
+        instance_id: &str, generation: i64) -> Result<V22SidecarState> {
         let profile = delivery.v22_execution.as_ref().context("v22 profile missing")?;
         if delivery.assignment_id.is_none() ||
             !profile.model_id.starts_with("claude-") ||
@@ -1828,8 +2195,14 @@ impl LocalAmux for HttpLocal {
             delivery.prompt.len() > 32 * 1024 {
             bail!("invalid v22 one-shot delivery");
         }
+        if delivery.recovery_approval_id.is_some() != profile.read_only_retry.is_some() {
+            bail!("incomplete v22 read-only retry delivery");
+        }
+        let read_only_retry = profile.read_only_retry.as_ref()
+            .map(|retry| v22_read_only_retry_payload(delivery, retry))
+            .transpose()?;
         let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
-        Ok(v22_sidecar_call(socket, serde_json::json!({
+        let mut payload = serde_json::json!({
             "op": "execute", "version": 1,
             "attemptId": delivery.attempt_id,
             "worker": delivery.worker,
@@ -1837,7 +2210,13 @@ impl LocalAmux for HttpLocal {
             "role": profile.role,
             "budgetMicrousd": profile.budget_microusd,
             "prompt": delivery.prompt,
-        }), &delivery.attempt_id).await?.state)
+            "recoveryBinding": v22_recovery_binding(delivery, instance_id, generation)?,
+        });
+        if let Some(read_only_retry) = read_only_retry {
+            payload.as_object_mut().context("v22 payload object")?
+                .insert("readOnlyRetry".into(), read_only_retry);
+        }
+        Ok(v22_sidecar_call(socket, payload, &delivery.attempt_id).await?.state)
     }
 
     async fn readback_v22(&mut self, attempt_id: &str) -> Result<V22SidecarState> {
@@ -2082,6 +2461,7 @@ pub async fn run_from_env() -> i32 {
     let mut awaiting_delivery: Vec<AwaitingDelivery> = Vec::new();
     let mut undelivered_started: Vec<StartedExecution> = Vec::new();
     let mut quota_checked: BTreeMap<String, std::time::Instant> = BTreeMap::new();
+    let mut protocol_by_worker: BTreeMap<String, Option<String>> = BTreeMap::new();
 
     loop {
         // Version 35, section 4: read the session list every round. A session
@@ -2105,6 +2485,7 @@ pub async fn run_from_env() -> i32 {
             .chain(awaiting_delivery.iter().map(|entry| entry.started.worker.clone()))
             .chain(undelivered_started.iter().map(|entry| entry.worker.clone()))
             .collect();
+        protocol_by_worker.clear();
         for name in sessions.names() {
             let Some(session) = sessions.presence(&name).cloned() else {
                 continue;
@@ -2117,20 +2498,26 @@ pub async fn run_from_env() -> i32 {
                 session.at_boundary,
                 has_pending,
             );
+            let protocol_capability = local.read_only_retry_capability(&name).await;
+            protocol_by_worker.insert(name.clone(), protocol_capability.clone());
+            let protocol_capabilities: Vec<&str> =
+                protocol_capability.as_deref().into_iter().collect();
             let published = api
-                .worker_heartbeat(
+                .v22_worker_heartbeat(
                     &name,
                     &session.instance_id,
                     session.generation,
                     plan.status,
                     plan.dispatch_ready && session_listed(&session_list, &name),
+                    &protocol_capabilities,
                 )
                 .await;
             match published {
                 Ok(response) if response.accepted => {}
                 Ok(response) if response.reason.as_deref() == Some("active_execution") && plan.status == "idle" => {
                     let _ = api
-                        .worker_heartbeat(&name, &session.instance_id, session.generation, "busy", false)
+                        .v22_worker_heartbeat(&name, &session.instance_id, session.generation,
+                            "busy", false, &protocol_capabilities)
                         .await;
                     sessions.observe(&name, session.running, false);
                 }
@@ -2208,16 +2595,62 @@ pub async fn run_from_env() -> i32 {
         }
         pending = still_pending;
 
-        // Renew active attempts first. Each fixed-scope sidecar probes its own
-        // CLI profile at most once per five minutes; unknown reads remain
-        // unknown and never become a fabricated available/exhausted quota.
+        // Renew active attempts first. The dedicated API worker never enters
+        // the CLI quota path. It may make the fixed provider GET only after
+        // the app returns one exact launch-proof-bound request.
         if !halted && !any_pending_busy_this_tick && roster_ok {
             if let Some(socket) = &local.v22_socket {
                 for name in sessions.names() {
-                    if !sessions.presence(&name).is_some_and(|session| session.running) ||
-                        quota_checked.get(&name).is_some_and(|at| at.elapsed() < Duration::from_secs(300)) {
+                    if !sessions.presence(&name).is_some_and(|session| session.running) {
                         continue;
                     }
+                    if protocol_by_worker.get(&name).and_then(|value| value.as_deref()) ==
+                        Some("read_only_api_retry_v1") {
+                        match api.v22_api_model_access_pending(&name).await {
+                            Ok(Some(request)) => match v22_sidecar_api_model_access(socket, &request).await {
+                                Ok(result) => match api.v22_api_model_access_record_once(&result).await {
+                                    Ok(true) => println!("amux v22 API model access evidence recorded for {name}"),
+                                    Ok(false) => {
+                                        halted = true;
+                                        note_halt(&mut halt_cause, "api_model_access_report_refused");
+                                        break;
+                                    }
+                                    Err(_) => {
+                                        halted = true;
+                                        note_halt(&mut halt_cause, "api_model_access_write_unknown");
+                                        break;
+                                    }
+                                },
+                                Err(_) => {
+                                    halted = true;
+                                    note_halt(&mut halt_cause, "api_model_access_outcome_unknown");
+                                    break;
+                                }
+                            },
+                            Ok(None) => {}
+                            // Nothing has reached the sidecar or provider yet:
+                            // a busy, timed-out, 5xx or 429 read defers this
+                            // worker to a later tick. A 4xx or a malformed
+                            // answer is a contract break and still halts.
+                            Err(error) if api_model_access_read_deferrable(&error) => {
+                                eprintln!(
+                                    "amux wsl bridge warn: API model access authorization read for {name} failed ({}); nothing was sent to the provider, deferred",
+                                    bridge_error_class(&error)
+                                );
+                            }
+                            Err(_) => {
+                                halted = true;
+                                note_halt(&mut halt_cause, "api_model_access_authorization_unavailable");
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    // Each fixed-scope CLI sidecar probes its own profile at
+                    // most once per five minutes. Unknown never becomes a
+                    // fabricated available or exhausted observation.
+                    if quota_checked.get(&name).is_some_and(|at|
+                        at.elapsed() < Duration::from_secs(300)) { continue; }
                     quota_checked.insert(name.clone(), std::time::Instant::now());
                     match v22_sidecar_quota(socket, &name).await {
                         Ok(Some(observation)) => match api.worker_quota_record_once(&observation).await {
@@ -2345,6 +2778,21 @@ pub async fn run_from_env() -> i32 {
                 let v22_result = if entry.delivery.assignment_id.is_some() {
                     local.readback_v22_result(&entry.delivery.attempt_id).await.ok()
                 } else { None };
+                let api_retry_delivery = entry.delivery.v22_execution.as_ref()
+                    .and_then(|execution| execution.read_only_retry.as_ref())
+                    .and_then(|retry| retry.executor_kind.as_deref()) ==
+                    Some("read_only_api_retry_v1");
+                if read_only_api_result_must_remain_open(api_retry_delivery,
+                    v22_result.as_ref().map(|result| result.state),
+                    now.saturating_sub(entry.sent_at)) {
+                    // An API transport or receipt that is not provably terminal
+                    // cannot be converted into a blocked settlement. Drop the
+                    // local pending row, halt the bridge and leave the app
+                    // attempt open for operator read-back.
+                    halted = true;
+                    note_halt(&mut halt_cause, "read_only_api_outcome_unknown");
+                    continue;
+                }
                 let completion = if entry.delivery.assignment_id.is_some() {
                     match v22_result.as_ref().map(|result| result.state) {
                         Some(V22SidecarState::InProgress) => LocalCompletion::Running,
@@ -2382,16 +2830,32 @@ pub async fn run_from_env() -> i32 {
                             continue;
                         };
                         let settled = if entry.delivery.assignment_id.is_some() {
+                            let retry_echo = v22_result.as_ref()
+                                .and_then(|result| result.read_only_retry.as_ref());
+                            let retry_echo_matches = v22_read_only_retry_echo_matches(
+                                &entry.delivery, retry_echo);
+                            let settlement_retry_echo = retry_echo_matches
+                                .then_some(retry_echo).flatten();
+                            let api_retry = entry.delivery.v22_execution.as_ref()
+                                .and_then(|execution| execution.read_only_retry.as_ref())
+                                .and_then(|retry| retry.executor_kind.as_deref()) ==
+                                Some("read_only_api_retry_v1");
                             let verified = v22_result.as_ref().and_then(|result| {
+                                if !retry_echo_matches { return None; }
                                 let outcome = match result.state {
                                     V22SidecarState::Succeeded => "succeeded",
                                     V22SidecarState::Failed => "failed",
                                     _ => return None,
                                 };
-                                Some((result.usage_receipt.as_ref()?,
-                                    result.usage_receipt_digest.as_deref()?, outcome))
+                                if api_retry {
+                                    Some((None, None,
+                                        Some(result.api_execution_receipt.as_ref()?), outcome))
+                                } else {
+                                    Some((Some(result.usage_receipt.as_ref()?),
+                                        Some(result.usage_receipt_digest.as_deref()?), None, outcome))
+                                }
                             });
-                            if let Some((receipt, digest, outcome)) = verified {
+                            if let Some((receipt, digest, _api_receipt, outcome)) = verified {
                                 let result_record = if outcome == "succeeded" {
                                     match v22_result.as_ref() {
                                         Some(result) => {
@@ -2463,46 +2927,71 @@ pub async fn run_from_env() -> i32 {
                                                     &entry.delivery.attempt_id, digest).await;
                                             }
                                         }
-                                        match api.v22_cli_usage_record_once(
-                                            &entry.delivery.attempt_id, receipt, digest).await {
+                                        let usage_record = match (receipt, digest, api_retry) {
+                                            (Some(receipt), Some(digest), false) =>
+                                                api.v22_cli_usage_record_once(
+                                                    &entry.delivery.attempt_id,
+                                                    receipt, digest).await,
+                                            (None, None, true) =>
+                                                Ok(crate::tomverse_api::V22UsageRecord::Recorded),
+                                            _ => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
+                                        };
+                                        match usage_record {
                                             Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
                                                 let answer = api.v22_execution_settle_verified(
                                                     &entry.delivery, &session.instance_id,
-                                                    session.generation, outcome).await;
-                                                match answer {
+                                                    session.generation, outcome,
+                                                    settlement_retry_echo).await;
+                                                if api_retry { answer } else { match answer {
                                                     Ok(ref refused) if !refused.settled &&
                                                         matches!(refused.reason.as_deref(),
                                                             Some("usage_unverified" | "result_unverified")) =>
                                                         api.v22_execution_settle_unverified(
                                                             &entry.delivery, &session.instance_id,
-                                                            session.generation).await,
+                                                            session.generation,
+                                                            settlement_retry_echo).await,
                                                     other => other,
-                                                }
+                                                } }
                                             }
                                             Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
-                                                api.v22_execution_settle_unverified(
+                                                if api_retry { Err(anyhow::anyhow!(
+                                                    "read-only API usage receipt unverified")) }
+                                                else { api.v22_execution_settle_unverified(
                                                     &entry.delivery, &session.instance_id,
-                                                    session.generation).await,
+                                                    session.generation,
+                                                    settlement_retry_echo).await },
                                             Ok(crate::tomverse_api::V22UsageRecord::PrivateOnly) =>
-                                                api.v22_execution_settle_unverified(
+                                                if api_retry { Err(anyhow::anyhow!(
+                                                    "read-only API usage receipt private")) }
+                                                else { api.v22_execution_settle_unverified(
                                                     &entry.delivery, &session.instance_id,
-                                                    session.generation).await,
+                                                    session.generation,
+                                                    settlement_retry_echo).await },
                                             Err(error) => Err(error),
                                         }
                                     },
                                     Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
-                                        api.v22_execution_settle_unverified(
+                                        if api_retry { Err(anyhow::anyhow!(
+                                            "read-only API result unverified")) }
+                                        else { api.v22_execution_settle_unverified(
                                             &entry.delivery, &session.instance_id,
-                                            session.generation).await,
+                                            session.generation,
+                                            settlement_retry_echo).await },
                                     Ok(crate::tomverse_api::V22UsageRecord::PrivateOnly) =>
-                                        api.v22_execution_settle_unverified(
+                                        if api_retry { Err(anyhow::anyhow!(
+                                            "read-only API result private")) }
+                                        else { api.v22_execution_settle_unverified(
                                             &entry.delivery, &session.instance_id,
-                                            session.generation).await,
+                                            session.generation,
+                                            settlement_retry_echo).await },
                                     Err(error) => Err(error),
                                 }
+                            } else if api_retry {
+                                Err(anyhow::anyhow!("read-only API receipt unverified"))
                             } else {
                                 api.v22_execution_settle_unverified(&entry.delivery,
-                                    &session.instance_id, session.generation).await
+                                    &session.instance_id, session.generation,
+                                    settlement_retry_echo).await
                             }
                         } else {
                             api.execution_settle_with_review_pr(
@@ -2860,6 +3349,8 @@ mod tests {
     fn confirmed_patch_retries_by_exact_readback_without_volatile_bytes() {
         let mut result = V22SidecarResult {
             state: V22SidecarState::Succeeded,
+            read_only_retry: None,
+            api_execution_receipt: None,
             usage_receipt: None, usage_receipt_digest: None,
             result_text: Some("private result".into()), result_sha256: Some("a".repeat(64)),
             patch_body: Some("diff --git a/a b/a\n".into()),
@@ -3965,6 +4456,7 @@ mod tests {
         PulledDelivery {
             attempt_id: ATTEMPT_ID.into(),
             assignment_id: None,
+            recovery_approval_id: None,
             v22_execution: None,
             task_id: "TASK-1".into(),
             worker: "claude-impl".into(),
@@ -3973,6 +4465,48 @@ mod tests {
             receipt_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d".into(),
             lease_expires_at: "2026-09-30T00:01:30.000Z".into(),
         }
+    }
+
+    fn read_only_retry_profile() -> V22ReadOnlyRetryProfile {
+        V22ReadOnlyRetryProfile {
+            version: 1,
+            executor_kind: None,
+            launch_binding_id: "00000000-0000-4000-8000-000000000021".into(),
+            risk_acceptance_digest: "1".repeat(64),
+            safe_stop_evidence_digest: "2".repeat(64),
+            launch_proof_digest: "3".repeat(64),
+            launch_scope_digest: "4".repeat(64),
+            launcher_policy_version: Some(V22_READ_ONLY_LAUNCHER_POLICY.into()),
+            launcher_config_digest: "5".repeat(64), fixed_argv_digest: Some("6".repeat(64)),
+            tool_policy_digest: Some("7".repeat(64)), profile_config_digest: Some("8".repeat(64)),
+            api_execution_frame: None, api_execution_frame_digest: None,
+            brief_digest: "9".repeat(64), provider: "anthropic".into(),
+            model_id: "claude-opus-5-5".into(), route_id: "route:one".into(),
+            route_policy_digest: "a".repeat(64), catalog_approval_id: "catalog:one".into(),
+            catalog_version: "catalog-v1".into(), pricing_version: "pricing-v1".into(),
+            cost_receipt_digest: "b".repeat(64), additional_cap_microusd: "3400000".into(),
+            worst_exposure_microusd: "6800000".into(), role: "investigate".into(),
+        }
+    }
+
+    fn read_only_api_retry_profile() -> V22ReadOnlyRetryProfile {
+        let mut profile = read_only_retry_profile();
+        profile.executor_kind = Some("read_only_api_retry_v1".into());
+        profile.launcher_policy_version = None;
+        profile.fixed_argv_digest = None;
+        profile.tool_policy_digest = None;
+        profile.profile_config_digest = None;
+        profile.api_execution_frame_digest = Some("c".repeat(64));
+        profile.api_execution_frame = Some(serde_json::json!({
+            "version": 1, "executorKind": "read_only_api_retry_v1",
+            "provider": profile.provider, "modelId": profile.model_id,
+            "routeId": profile.route_id, "routePolicyDigest": profile.route_policy_digest,
+            "catalogApprovalId": profile.catalog_approval_id,
+            "catalogVersion": profile.catalog_version,
+            "pricingVersion": profile.pricing_version,
+            "maximumCostMicroUsd": 3_400_000,
+        }));
+        profile
     }
 
     struct SidecarOnlyLocal {
@@ -3988,7 +4522,8 @@ mod tests {
             bail!("v22 must never read an interactive card")
         }
 
-        async fn send_v22(&mut self, _delivery: &PulledDelivery) -> Result<V22SidecarState> {
+        async fn send_v22(&mut self, _delivery: &PulledDelivery,
+            _instance_id: &str, _generation: i64) -> Result<V22SidecarState> {
             self.sidecar_sends += 1;
             Ok(V22SidecarState::InProgress)
         }
@@ -4002,10 +4537,145 @@ mod tests {
         delivery.v22_execution = Some(crate::tomverse_api::V22ExecutionProfile {
             model_id: "claude-opus-5-5".into(), role: "design".into(),
             budget_microusd: 1_000_000,
+            read_only_retry: None,
         });
-        assert!(matches!(dispatch_v22(&delivery, &mut local).await,
+        assert!(matches!(dispatch_v22(&delivery, "00000000-0000-4000-8000-000000000001", 3, &mut local).await,
             BridgeTickResult::Pending { .. }));
         assert_eq!(local.sidecar_sends, 1);
+    }
+
+    #[test]
+    fn v22_recovery_binding_uses_exact_delivery_and_registered_instance() {
+        let delivery = pulled_delivery();
+        let instance = "00000000-0000-4000-8000-000000000001";
+        let binding = v22_recovery_binding(&delivery, instance, 3).unwrap();
+        assert_eq!(binding, serde_json::json!({ "version": 1, "taskId": "TASK-1",
+            "taskRevision": 3, "workerInstanceId": instance,
+            "workerGeneration": 3, "targetHost": "amux-ubuntu" }));
+        assert!(!binding.to_string().contains(&delivery.prompt));
+        assert!(v22_recovery_binding(&delivery, instance, 0).is_err());
+        assert!(v22_recovery_binding(&delivery, "foreign", 3).is_err());
+    }
+
+    #[test]
+    fn read_only_retry_delivery_is_exact_before_sidecar_or_provider_call() {
+        let mut delivery = pulled_delivery();
+        delivery.task_id = V22_READ_ONLY_RETRY_TASK_ID.into();
+        delivery.worker = "claude-chore".into();
+        delivery.assignment_id = Some("00000000-0000-4000-8000-000000000020".into());
+        delivery.recovery_approval_id = Some("00000000-0000-4000-8000-000000000022".into());
+        let retry = read_only_retry_profile();
+        delivery.v22_execution = Some(crate::tomverse_api::V22ExecutionProfile {
+            model_id: retry.model_id.clone(), role: "investigate".into(),
+            budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
+        });
+        let payload = v22_read_only_retry_payload(&delivery, &retry).unwrap();
+        assert_eq!(payload["launchBindingId"], retry.launch_binding_id);
+        assert_eq!(payload["briefDigest"], retry.brief_digest);
+        let binding = v22_recovery_binding(&delivery,
+            "00000000-0000-4000-8000-000000000023", 9).unwrap();
+        assert_eq!(binding["attemptId"], ATTEMPT_ID);
+        assert_eq!(binding["workerName"], "claude-chore");
+        assert_eq!(binding["recoveryApprovalId"],
+            delivery.recovery_approval_id.as_deref().unwrap());
+        assert_eq!(binding["briefDigest"], retry.brief_digest);
+        let echo = V22ReadOnlyRetryEcho { version: 1,
+            launch_binding_id: retry.launch_binding_id.clone(),
+            launch_proof_digest: retry.launch_proof_digest.clone(),
+            launch_scope_digest: retry.launch_scope_digest.clone(),
+            executor_kind: None, launcher_config_digest: None,
+            api_execution_frame_digest: None, api_execution_receipt: None };
+        assert!(v22_read_only_retry_echo_matches(&delivery, Some(&echo)));
+
+        let mut missing_marker = delivery.clone();
+        missing_marker.recovery_approval_id = None;
+        assert!(v22_read_only_retry_payload(&missing_marker, &retry).is_err());
+        assert!(v22_recovery_binding(&missing_marker,
+            "00000000-0000-4000-8000-000000000023", 9).is_err());
+        let mut wrong_task = delivery.clone(); wrong_task.task_id = "TASK-1".into();
+        assert!(v22_read_only_retry_payload(&wrong_task, &retry).is_err());
+        let mut wrong_model = delivery.clone();
+        wrong_model.v22_execution.as_mut().unwrap().model_id = "claude-other".into();
+        assert!(v22_read_only_retry_payload(&wrong_model, &retry).is_err());
+        let mut wrong_brief = retry.clone(); wrong_brief.brief_digest = "c".repeat(64);
+        assert!(!v22_read_only_retry_echo_matches(&delivery, None));
+        assert!(v22_read_only_retry_payload(&delivery, &wrong_brief).is_err(),
+            "profile and delivery model binding includes the canonical profile object");
+    }
+
+    #[test]
+    fn read_only_api_retry_wire_never_falls_through_to_cli_usage_shape() {
+        let mut delivery = pulled_delivery();
+        delivery.task_id = V22_READ_ONLY_RETRY_TASK_ID.into();
+        delivery.worker = "claude-chore".into();
+        delivery.assignment_id = Some("00000000-0000-4000-8000-000000000020".into());
+        delivery.recovery_approval_id = Some("00000000-0000-4000-8000-000000000022".into());
+        let retry = read_only_api_retry_profile();
+        delivery.v22_execution = Some(crate::tomverse_api::V22ExecutionProfile {
+            model_id: retry.model_id.clone(), role: "investigate".into(),
+            budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
+        });
+        let payload = v22_read_only_retry_payload(&delivery, &retry).unwrap();
+        assert_eq!(payload["executorKind"], "read_only_api_retry_v1");
+        assert_eq!(payload["apiExecutionFrameDigest"], "c".repeat(64));
+        assert!(payload.get("launcherPolicyVersion").is_none());
+        assert!(payload.get("fixedArgvDigest").is_none());
+        let receipt = serde_json::json!({ "version": 1,
+            "executorKind": "read_only_api_retry_v1", "attemptId": ATTEMPT_ID,
+            "invocationId": ATTEMPT_ID, "selectedModelId": retry.model_id,
+            "actualModelId": retry.model_id, "usageComplete": true,
+            "apiExecutionFrameDigest": "c".repeat(64), "digest": "d".repeat(64) });
+        let echo = V22ReadOnlyRetryEcho { version: 1,
+            launch_binding_id: retry.launch_binding_id.clone(),
+            launch_proof_digest: retry.launch_proof_digest.clone(),
+            launch_scope_digest: retry.launch_scope_digest.clone(),
+            executor_kind: retry.executor_kind.clone(),
+            launcher_config_digest: Some(retry.launcher_config_digest.clone()),
+            api_execution_frame_digest: retry.api_execution_frame_digest.clone(),
+            api_execution_receipt: Some(receipt) };
+        assert!(v22_read_only_retry_echo_matches(&delivery, Some(&echo)));
+        let mut missing = echo.clone(); missing.api_execution_receipt = None;
+        assert!(!v22_read_only_retry_echo_matches(&delivery, Some(&missing)));
+    }
+
+    #[test]
+    fn read_only_api_unknown_or_missing_receipt_never_becomes_a_settlement() {
+        assert!(read_only_api_result_must_remain_open(true,
+            Some(V22SidecarState::OutcomeUnknown), 0));
+        assert!(read_only_api_result_must_remain_open(true, None, 15 * 60));
+        assert!(read_only_api_result_must_remain_open(true,
+            Some(V22SidecarState::NotFound), 15 * 60));
+        for state in [V22SidecarState::InProgress, V22SidecarState::Succeeded,
+            V22SidecarState::Failed] {
+            assert!(!read_only_api_result_must_remain_open(true, Some(state), 15 * 60));
+        }
+        assert!(!read_only_api_result_must_remain_open(false,
+            Some(V22SidecarState::OutcomeUnknown), 15 * 60));
+    }
+
+    #[test]
+    fn protocol_capability_requires_the_exact_current_sidecar_handshake() {
+        let request_id = "00000000-0000-4000-8000-000000000031";
+        let worker = "claude-chore";
+        let answer = serde_json::json!({ "kind": "protocol", "requestId": request_id,
+            "worker": worker, "capabilities": ["read_only_retry_v1"] });
+        assert_eq!(parse_v22_protocol_response(&answer, request_id, worker).unwrap(),
+            Some("read_only_retry_v1".into()));
+        let api = serde_json::json!({ "kind": "protocol", "requestId": request_id,
+            "worker": worker, "capabilities": ["read_only_api_retry_v1"] });
+        assert_eq!(parse_v22_protocol_response(&api, request_id, worker).unwrap(),
+            Some("read_only_api_retry_v1".into()));
+        let none = serde_json::json!({ "kind": "protocol", "requestId": request_id,
+            "worker": worker, "capabilities": [] });
+        assert_eq!(parse_v22_protocol_response(&none, request_id, worker).unwrap(), None);
+        for changed in [
+            serde_json::json!({ "kind": "protocol", "requestId": request_id,
+                "worker": worker, "capabilities": ["read_only_retry_v1"], "verified": true }),
+            serde_json::json!({ "kind": "protocol", "requestId": request_id,
+                "worker": "other", "capabilities": ["read_only_retry_v1"] }),
+        ] {
+            assert!(parse_v22_protocol_response(&changed, request_id, worker).is_err());
+        }
     }
 
     #[cfg(unix)]
@@ -4904,4 +5574,45 @@ mod tests {
         assert!(!is_database_busy(&other), "the text alone is not the answer");
     }
 
+
+    #[test]
+    fn api_model_access_read_defers_only_answers_that_decided_nothing() {
+        use crate::tomverse_api::{DatabaseBusy, SelectionReadTransientStatus, UnacceptedStatus};
+        use reqwest::StatusCode;
+        let busy = anyhow::Error::new(DatabaseBusy).context("API model access authorization refused");
+        let transient = anyhow::Error::new(SelectionReadTransientStatus {
+            status: StatusCode::BAD_GATEWAY }).context("API model access authorization refused");
+        let limited = anyhow::Error::new(SelectionReadTransientStatus {
+            status: StatusCode::TOO_MANY_REQUESTS }).context("API model access authorization refused");
+        assert!(api_model_access_read_deferrable(&busy));
+        assert!(api_model_access_read_deferrable(&transient));
+        assert!(api_model_access_read_deferrable(&limited));
+        let unauthorized = anyhow::Error::new(UnacceptedStatus {
+            status: StatusCode::UNAUTHORIZED }).context("API model access authorization refused");
+        let malformed = anyhow::anyhow!("invalid API model access request");
+        assert!(!api_model_access_read_deferrable(&unauthorized));
+        assert!(!api_model_access_read_deferrable(&malformed));
+    }
+
+    #[test]
+    fn api_model_access_defers_only_before_the_sidecar_and_keeps_unknown_halts() {
+        let source = include_str!("wsl_bridge.rs");
+        let start = source.find("match api.v22_api_model_access_pending(&name).await").unwrap();
+        let block = &source[start..start + source[start..].find("// Each fixed-scope CLI sidecar").unwrap()];
+        let deferred = block.find("Err(error) if api_model_access_read_deferrable(&error)").unwrap();
+        let read_halt = block.find("\"api_model_access_authorization_unavailable\"").unwrap();
+        assert!(deferred < read_halt, "the deferral must be tried before the read halt");
+        // Once the sidecar may have called the provider, or the report write is
+        // unknown, the bridge still halts and never reposts or re-calls.
+        for cause in ["api_model_access_outcome_unknown", "api_model_access_write_unknown",
+            "api_model_access_report_refused"] {
+            assert!(block.contains(&format!("\"{cause}\"")), "{cause}");
+        }
+        let deferral_end = deferred + block[deferred..].find("Err(_) =>").unwrap();
+        assert!(deferral_end < read_halt);
+        let deferral = &block[deferred..deferral_end];
+        assert!(!deferral.contains("halted = true"));
+        assert!(!deferral.contains("v22_sidecar_api_model_access"));
+        assert!(!deferral.contains("record_once"));
+    }
 }

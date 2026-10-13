@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "ee2145362acafe6198fcc952186ae1aa835388e82b414d9b763265c213b3e6f1",
+  "replacedChecks": [
+    {
+      "table": "AmuxWorkerRuntime",
+      "constraint": "AmuxWorkerRuntime_protocolCapabilities_check",
+      "previousDefinitionSha256": "8e627eb7618477d93a370472aa635e8f05a89271f4c942aa29b618d4bc697f1a"
+    },
+    {
+      "table": "AmuxV22ReadOnlyLaunchCheck",
+      "constraint": "AmuxV22ReadOnlyLaunchCheck_shape_check",
+      "previousDefinitionSha256": "c3634e56060e5ad5bcf501f5f8b67076ae00da76a5efb5792c1b8f1396440b4c"
+    }
+  ]
+}

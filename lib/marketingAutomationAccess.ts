@@ -595,9 +595,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-10-13: operator-controlled Chat availability adds an observation-only
  * action to the shared audit actor helper. No marketing actor, descriptor,
  * webhook writer or admission decision changes; prior evidence is stale.
+ * 2026-10-13: the guarded v22 FIRST Task recovery (orchestration policy
+ * versions 36-42) adds its recovery and API model-access system actors to the
+ * shared audit helper and their back relations to `AdminAuditLog` in the
+ * watched schema. No marketing actor, descriptor, webhook writer or admission
+ * decision changes; the bytes moved, so prior evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "ccdf05dc514634ae117cad6bdc99a1eeb80622c1d932d9f43b61eeb3ec380f9a";
+  "0a61982476c2f660132d35bba8290c28f5afe134eed1f4062842a884b1175525";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

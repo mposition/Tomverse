@@ -19,11 +19,23 @@ import {
 } from "@/lib/amux/adminExecutionViewCore";
 import { readAmuxV22ActivationStatus } from
   "@/lib/amux/v22ActivationReadiness";
+import { readAmuxOwnerRecoveryInspection } from
+  "@/lib/amux/ownerRecoveryInspectionRead";
+import { AMUX_V22_RECOVERY_ID_PATTERN, AMUX_V22_RECOVERY_MAX_REVISION } from
+  "@/lib/amux/v22TaskRecoveryCore";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const json = (body: object, status = 200) =>
   NextResponse.json(body, { status, headers });
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
+const canonicalRecoveryRevision = /^(0|[1-9][0-9]*)$/;
+
+function parseRecoveryRevision(value: string | null) {
+  if (value === null || !canonicalRecoveryRevision.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed <= AMUX_V22_RECOVERY_MAX_REVISION ?
+    parsed : null;
+}
 
 /** Owner-only, read-only projection. No column or tree navigation grants a
  * status transition, worker claim, PR publication or completion decision. */
@@ -42,6 +54,7 @@ export async function GET(request: Request) {
       view === "board" ? ["view", "lane", "page"] :
       view === "hierarchy" ? ["view", "parentKind", "parentId", "page"] :
       view === "feedback" ? ["view", "parentKind", "parentId"] :
+      view === "recovery_inspection" ? ["view", "taskId", "taskRevision", "attemptId"] :
       view === "detail" ? ["view", "taskId"] : null;
     if (!allowed || [...params.keys()].some((key) => !allowed.includes(key) ||
         params.getAll(key).length !== 1)) return json({ error: "invalid_request" }, 400);
@@ -76,7 +89,21 @@ export async function GET(request: Request) {
       return result ? json(result) : json({ error: "not_found" }, 404);
     }
     const taskId = params.get("taskId");
-    if (!taskId || !ID.test(taskId)) return json({ error: "invalid_request" }, 400);
+    if (taskId === null || !(view === "recovery_inspection" ?
+        AMUX_V22_RECOVERY_ID_PATTERN.test(taskId) : ID.test(taskId)))
+      return json({ error: "invalid_request" }, 400);
+    if (view === "recovery_inspection") {
+      const taskRevision = parseRecoveryRevision(params.get("taskRevision"));
+      const attemptId = params.get("attemptId");
+      if (taskRevision === null ||
+          (attemptId !== null && !AMUX_V22_RECOVERY_ID_PATTERN.test(attemptId)))
+        return json({ error: "invalid_request" }, 400);
+      const result = await readAmuxOwnerRecoveryInspection({ taskId,
+        taskRevision, attemptId });
+      return result.state === "not_found" ? json({ error: "not_found" }, 404) :
+        result.state === "changed" ? json({ error: "recovery_inspection_changed" }, 409) :
+        json(result.inspection);
+    }
     const result = await readAmuxExecutionTaskDetail(taskId);
     return result ? json(result) : json({ error: "not_found" }, 404);
   } catch (error) {

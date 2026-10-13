@@ -34,12 +34,26 @@ export type AmuxWorkerRegisteredFact = { workerName: string; generation: number 
 export type AmuxWorkerRuntimeStatus =
   "starting" | "idle" | "busy" | "error" | "stopped";
 
+export type AmuxWorkerProtocolCapability =
+  "read_only_retry_v1" | "read_only_api_retry_v1";
+
+export const amuxWorkerRuntimeUsesReadOnlyApi =
+  (capabilities: readonly string[]) => capabilities.length === 1 &&
+    capabilities[0] === "read_only_api_retry_v1";
+
+export const amuxWorkerRuntimeHasExactCapability = (
+  capabilities: readonly string[],
+  capability: string | null | undefined,
+) => typeof capability === "string" && capabilities.length === 1 &&
+  capabilities[0] === capability;
+
 export type AmuxWorkerRuntimeSnapshot = {
   workerName: string;
   instanceId: string;
   generation: number;
   status: string;
   dispatchReady: boolean;
+  protocolCapabilities: string[];
   heartbeatAt: Date;
   leaseExpiresAt: Date;
 };
@@ -85,6 +99,7 @@ export async function registerAmuxWorkerRuntime(
       "generation",
       "status",
       "dispatchReady",
+      "protocolCapabilities",
       "heartbeatAt",
       "leaseExpiresAt",
       "createdAt",
@@ -96,6 +111,7 @@ export async function registerAmuxWorkerRuntime(
       1,
       'starting',
       false,
+      ARRAY[]::TEXT[],
       ${now},
       ${leaseExpiresAt},
       ${now},
@@ -108,6 +124,7 @@ export async function registerAmuxWorkerRuntime(
         "AmuxWorkerRuntime"."generation" + 1,
       "status" = 'starting',
       "dispatchReady" = false,
+      "protocolCapabilities" = ARRAY[]::TEXT[],
       "heartbeatAt" = EXCLUDED."heartbeatAt",
       "leaseExpiresAt" = EXCLUDED."leaseExpiresAt",
       "updatedAt" = EXCLUDED."updatedAt"
@@ -118,6 +135,7 @@ export async function registerAmuxWorkerRuntime(
       "generation",
       "status",
       "dispatchReady",
+      "protocolCapabilities",
       "heartbeatAt",
       "leaseExpiresAt"
   `;
@@ -171,6 +189,7 @@ export async function heartbeatAmuxWorkerRuntime(input: {
   generation: number;
   status: AmuxWorkerRuntimeStatus;
   dispatchReady: boolean;
+  protocolCapabilities?: readonly AmuxWorkerProtocolCapability[];
   now?: Date;
   /**
    * Version 35, section 3: whether the assignment catalog lists this worker,
@@ -200,6 +219,7 @@ export async function heartbeatAmuxWorkerRuntime(input: {
           "generation",
           "status",
           "dispatchReady",
+          "protocolCapabilities",
           "heartbeatAt",
           "leaseExpiresAt"
         FROM "AmuxWorkerRuntime"
@@ -222,12 +242,18 @@ export async function heartbeatAmuxWorkerRuntime(input: {
         };
       }
 
+      const protocolCapabilities = input.protocolCapabilities?.length === 1 ?
+        [...input.protocolCapabilities] : [];
+      const capabilityChanged = runtime.protocolCapabilities.join(",") !==
+        protocolCapabilities.join(",");
+
       /*
        * Only the worker knows its real turn boundary, so settlement itself does
        * not synthesize Idle. Conversely, the worker may not advertise Idle while
-       * this exact runtime generation still owns a live execution attempt.
+       * this exact runtime generation still owns a live execution attempt, or
+       * change that attempt's executor capability while it remains live.
        */
-      if (input.status === "idle") {
+      if (input.status === "idle" || capabilityChanged) {
         const liveAttempts = await tx.amuxExecutionAttempt.count({
           where: {
             worker: input.workerName,
@@ -261,6 +287,7 @@ export async function heartbeatAmuxWorkerRuntime(input: {
         data: {
           status: input.status,
           dispatchReady,
+          protocolCapabilities,
           heartbeatAt: now,
           leaseExpiresAt: nextLease,
         },
@@ -277,7 +304,8 @@ export async function heartbeatAmuxWorkerRuntime(input: {
       // Lease refresh alone is high-frequency telemetry. A status or dispatch
       // authority transition is a control-plane mutation and is audited in
       // this same transaction.
-      if (runtime.status !== input.status || runtime.dispatchReady !== dispatchReady) {
+      if (runtime.status !== input.status || runtime.dispatchReady !== dispatchReady ||
+          capabilityChanged) {
         await writeSystemAuditLog({
           systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: "amux.worker.status_changed",
@@ -292,6 +320,8 @@ export async function heartbeatAmuxWorkerRuntime(input: {
             to_status: input.status,
             from_dispatch_ready: runtime.dispatchReady,
             to_dispatch_ready: dispatchReady,
+            from_protocol_capabilities: runtime.protocolCapabilities,
+            to_protocol_capabilities: protocolCapabilities,
           },
           tx,
         });
@@ -327,6 +357,7 @@ export async function amuxWorkerRuntimeByName(
         generation: true,
         status: true,
         dispatchReady: true,
+        protocolCapabilities: true,
         heartbeatAt: true,
         leaseExpiresAt: true,
       },

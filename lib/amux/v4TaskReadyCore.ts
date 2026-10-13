@@ -26,7 +26,7 @@ export type AmuxV4TaskReadyFacts = {
 };
 
 export function evaluateAmuxV4TaskReady(facts: AmuxV4TaskReadyFacts,
-  expectedStatus: "backlog" | "todo" = "backlog") {
+  expectedStatus: "backlog" | "todo" | "blocked" = "backlog") {
   const reasons: AmuxV4TaskReadyReason[] = [];
   const { card } = facts;
   if (card.sourceSystem !== "admin-idea-v4" || card.cardType !== "task") {

@@ -69,6 +69,25 @@ const catalogSchema = z.object({
 
 export type V4TaskCostCatalog = z.infer<typeof catalogSchema>;
 
+export type V4TaskApiExecutionBasis = {
+  catalogVersion: string;
+  catalogDigest: string;
+  pricingVersion: string;
+  pricingSource: string;
+  pricingVerifiedAt: string;
+  pricingExpiresAt: string;
+  uncachedInputMicroUsdPerMillion: number;
+  outputMicroUsdPerMillion: number;
+  cacheReadMicroUsdPerMillion: number;
+  cacheWriteMicroUsdPerMillion: number;
+  tokenLimits: {
+    uncachedInputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  };
+};
+
 type ParsedCatalog = {
   catalog: V4TaskCostCatalog;
   catalogDigest: string;
@@ -169,6 +188,61 @@ export function calculateV4TaskCeilingFromCatalog(input: {
     routes: parsed.catalog.routes,
   });
   return cost.ok ? cost : { ok: false, code: cost.reason };
+}
+
+/**
+ * Select the price and token basis for one already-approved route. The caller
+ * remains responsible for loading `rawCatalog` from the immutable approval
+ * row; request or model supplied rates must never reach this function.
+ */
+export function resolveV4TaskApiExecutionBasis(input: {
+  rawCatalog: unknown;
+  role: unknown;
+  grade: unknown;
+  routeId: unknown;
+  asOfIso: unknown;
+}): { ok: true; basis: V4TaskApiExecutionBasis } |
+  { ok: false; code: string } {
+  const parsed = parseCatalog(input.rawCatalog);
+  if ("ok" in parsed) return parsed;
+  const parsedAsOf = utcIso.safeParse(input.asOfIso);
+  if (typeof input.role !== "string" || typeof input.grade !== "string" ||
+      typeof input.routeId !== "string" || !parsedAsOf.success) {
+    return { ok: false, code: "selection_invalid" };
+  }
+  const rule = parsed.catalog.gradeRules.find((entry) =>
+    entry.role === input.role && entry.grade === input.grade);
+  const route = parsed.catalog.routes.find((entry) => entry.routeId === input.routeId);
+  if (!rule || !route || !route.enabled || !route.roles.includes(input.role) ||
+      !route.grades.includes(input.grade)) {
+    return { ok: false, code: "route_unavailable" };
+  }
+  const asOfIso = parsedAsOf.data;
+  if (route.pricingVerifiedAt > asOfIso || route.pricingExpiresAt <= asOfIso ||
+      route.uncachedInputMicroUsdPerMillion <= 0 ||
+      route.outputMicroUsdPerMillion <= 0 ||
+      (rule.caps.cacheReadTokens > 0 && route.cacheReadMicroUsdPerMillion <= 0) ||
+      (rule.caps.cacheWriteTokens > 0 && route.cacheWriteMicroUsdPerMillion <= 0)) {
+    return { ok: false, code: "pricing_unverified" };
+  }
+  return { ok: true, basis: {
+    catalogVersion: parsed.catalog.catalogVersion,
+    catalogDigest: parsed.catalogDigest,
+    pricingVersion: parsed.catalog.pricingVersion,
+    pricingSource: route.pricingSource,
+    pricingVerifiedAt: route.pricingVerifiedAt,
+    pricingExpiresAt: route.pricingExpiresAt,
+    uncachedInputMicroUsdPerMillion: route.uncachedInputMicroUsdPerMillion,
+    outputMicroUsdPerMillion: route.outputMicroUsdPerMillion,
+    cacheReadMicroUsdPerMillion: route.cacheReadMicroUsdPerMillion,
+    cacheWriteMicroUsdPerMillion: route.cacheWriteMicroUsdPerMillion,
+    tokenLimits: {
+      uncachedInputTokens: rule.caps.uncachedInputTokens,
+      outputTokens: rule.caps.outputTokens,
+      cacheReadTokens: rule.caps.cacheReadTokens,
+      cacheWriteTokens: rule.caps.cacheWriteTokens,
+    },
+  } };
 }
 
 /** Preserve a concrete refusal reason when passing a catalog result to the approval guard. */

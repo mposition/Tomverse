@@ -82,6 +82,137 @@ pub struct AmuxWorkerQuota {
     pub reset_at: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AmuxV22ApiModelAccessRequest {
+    pub version: u8,
+    pub request_id: String,
+    pub task_id: String,
+    pub prior_attempt_id: String,
+    pub worker: String,
+    pub provider: String,
+    pub selected_model_id: String,
+    pub launch_proof_id: String,
+    pub launch_proof_digest: String,
+    pub api_execution_frame_digest: String,
+    pub credential_metadata_digest: String,
+    pub launcher_config_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AmuxV22ApiModelAccessResult {
+    pub version: u8,
+    pub kind: String,
+    pub request_id: String,
+    pub task_id: String,
+    pub prior_attempt_id: String,
+    pub worker: String,
+    pub provider: String,
+    pub provider_host: String,
+    pub selected_model_id: String,
+    pub canonical_model_id: Option<String>,
+    pub launch_proof_id: String,
+    pub launch_proof_digest: String,
+    pub api_execution_frame_digest: String,
+    pub credential_metadata_digest: String,
+    pub launcher_config_digest: String,
+    pub access: String,
+    pub reason: Option<String>,
+    pub balance_known: bool,
+    pub maximum_cost_micro_usd: u64,
+    pub worst_exposure_micro_usd: u64,
+}
+
+const AMUX_V22_API_MODEL_ACCESS_TASK_ID: &str =
+    "c48886b9-86f8-4631-8db8-c0b288a707af";
+const AMUX_V22_API_MODEL_ACCESS_PRIOR_ATTEMPT_ID: &str =
+    "97858395-3d66-42fa-9bfb-0e5a6cba9bd8";
+
+fn valid_hex_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn validate_api_model_access_request(value: &AmuxV22ApiModelAccessRequest) -> Result<()> {
+    if value.version != 1 || value.request_id != value.launch_proof_id ||
+        Uuid::parse_str(&value.request_id).is_err() ||
+        value.task_id != AMUX_V22_API_MODEL_ACCESS_TASK_ID ||
+        value.prior_attempt_id != AMUX_V22_API_MODEL_ACCESS_PRIOR_ATTEMPT_ID ||
+        value.provider != "anthropic" || !value.selected_model_id.starts_with("claude-") ||
+        ![&value.launch_proof_digest, &value.api_execution_frame_digest,
+          &value.credential_metadata_digest, &value.launcher_config_digest]
+            .iter().all(|digest| valid_hex_digest(digest)) {
+        bail!("invalid API model access request");
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_api_model_access_result(value: &AmuxV22ApiModelAccessResult,
+    request: &AmuxV22ApiModelAccessRequest) -> Result<()> {
+    validate_api_model_access_request(request)?;
+    let identity_matches = value.version == request.version && value.kind == "api_model_access" &&
+        value.request_id == request.request_id && value.task_id == request.task_id &&
+        value.prior_attempt_id == request.prior_attempt_id && value.worker == request.worker &&
+        value.provider == request.provider && value.provider_host == "api.anthropic.com" &&
+        value.selected_model_id == request.selected_model_id &&
+        value.launch_proof_id == request.launch_proof_id &&
+        value.launch_proof_digest == request.launch_proof_digest &&
+        value.api_execution_frame_digest == request.api_execution_frame_digest &&
+        value.credential_metadata_digest == request.credential_metadata_digest &&
+        value.launcher_config_digest == request.launcher_config_digest &&
+        !value.balance_known && value.maximum_cost_micro_usd == 3_400_000 &&
+        value.worst_exposure_micro_usd == 6_800_000;
+    let state_valid = match value.access.as_str() {
+        "verified" => value.reason.is_none() && value.canonical_model_id.as_deref()
+            .is_some_and(|model| model.starts_with("claude-")),
+        "unavailable" | "unknown" => value.canonical_model_id.is_none() &&
+            value.reason.as_deref().is_some_and(|reason| matches!(reason,
+                "auth_failed" | "model_unavailable" | "rate_limited" |
+                "provider_unavailable" | "request_timeout" | "transport_unknown" |
+                "invalid_response" | "outcome_unknown")),
+        _ => false,
+    };
+    if !identity_matches || !state_valid { bail!("invalid API model access result"); }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApiModelAccessPendingResponse {
+    requests: Vec<AmuxV22ApiModelAccessRequest>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ApiModelAccessRecordedResponse {
+    accepted: bool,
+    evidence_id: String,
+    evidence_digest: String,
+    access: String,
+    canonical_model_id: Option<String>,
+    recorded_at: String,
+    retry_write: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ApiModelAccessReadbackEvidence {
+    evidence_id: String,
+    evidence_digest: String,
+    launch_proof_id: String,
+    access: String,
+    canonical_model_id: Option<String>,
+    recorded_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApiModelAccessReadbackResponse {
+    found: bool,
+    #[serde(default)]
+    evidence: Option<ApiModelAccessReadbackEvidence>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V22UsageRecord {
     Recorded,
@@ -300,9 +431,10 @@ fn is_selection_transient_status_code(status: StatusCode) -> bool {
 /// Whether this error is, anywhere in its chain, a transport failure (never
 /// reached the app: connect, send, timeout, or a body read that failed after
 /// the response started) or the `SelectionReadTransientStatus` marker. Used
-/// only by the scheduler's two selection reads (`queue`, `routing_snapshot`);
-/// every other caller of this module still treats any `Err` as unknown and
-/// stops, so this classification changes nothing for them.
+/// by the scheduler's two selection reads (`queue`, `routing_snapshot`) and
+/// by the WSL bridge's API model-access authorization read, which happens
+/// before any sidecar or provider call; every other caller of this module
+/// still treats any `Err` as unknown and stops.
 pub fn is_selection_read_recoverable(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause.downcast_ref::<SelectionReadTransientStatus>().is_some()
@@ -942,6 +1074,93 @@ async fn read_claim_response(mut response: reqwest::Response) -> Result<ClaimRes
 }
 
 impl TomverseApi {
+    /// Read one app-authorized, exact-FIRST model-access request. This read is
+    /// required before the unprivileged sidecar may touch the provider.
+    pub async fn v22_api_model_access_pending(&self, worker: &str)
+        -> Result<Option<AmuxV22ApiModelAccessRequest>> {
+        let response = self.client
+            .get(format!("{}/api/internal/amux/v22/model-access", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT).bearer_auth(&self.secret)
+            .query(&[("worker", worker)]).send().await
+            .context("API model access authorization unavailable")?;
+        // A non-200 answer keeps the existing classification: the exact busy
+        // body is DatabaseBusy, any other 5xx or 429 carries the transient
+        // marker, everything else is UnacceptedStatus. Only the bridge's
+        // pre-provider read looks at those markers.
+        if response.status() != StatusCode::OK {
+            return Err(database_busy_or(response, "API model access authorization refused").await);
+        }
+        let answer = read_raw_answer(response, 8192).await?;
+        let mut body: ApiModelAccessPendingResponse = serde_json::from_slice(&answer.body)?;
+        if body.requests.len() > 1 { bail!("invalid API model access authorization count"); }
+        let request = body.requests.pop();
+        if let Some(request) = &request {
+            validate_api_model_access_request(request)?;
+            if request.worker != worker { bail!("API model access worker mismatch"); }
+        }
+        Ok(request)
+    }
+
+    /// Write the content-free provider result once. If the POST answer is
+    /// lost, perform only an exact evidence lookup; never repost here.
+    pub async fn v22_api_model_access_record_once(&self,
+        result: &AmuxV22ApiModelAccessResult) -> Result<bool> {
+        let request = AmuxV22ApiModelAccessRequest {
+            version: result.version, request_id: result.request_id.clone(),
+            task_id: result.task_id.clone(), prior_attempt_id: result.prior_attempt_id.clone(),
+            worker: result.worker.clone(), provider: result.provider.clone(),
+            selected_model_id: result.selected_model_id.clone(),
+            launch_proof_id: result.launch_proof_id.clone(),
+            launch_proof_digest: result.launch_proof_digest.clone(),
+            api_execution_frame_digest: result.api_execution_frame_digest.clone(),
+            credential_metadata_digest: result.credential_metadata_digest.clone(),
+            launcher_config_digest: result.launcher_config_digest.clone(),
+        };
+        validate_api_model_access_result(result, &request)?;
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/model-access", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT).bearer_auth(&self.secret)
+            .json(result).send().await;
+        if let Ok(response) = response {
+            let status = response.status();
+            if [StatusCode::BAD_REQUEST, StatusCode::UNAUTHORIZED, StatusCode::CONFLICT]
+                .contains(&status) { return Ok(false); }
+            if let Ok(answer) = read_raw_answer(response, 4096).await {
+                if status == StatusCode::OK {
+                    if let Ok(body) = serde_json::from_slice::<ApiModelAccessRecordedResponse>(
+                        &answer.body) {
+                        if body.accepted && !body.retry_write &&
+                            body.evidence_id == result.request_id &&
+                            valid_hex_digest(&body.evidence_digest) &&
+                            body.access == result.access &&
+                            body.canonical_model_id == result.canonical_model_id &&
+                            chrono::DateTime::parse_from_rfc3339(&body.recorded_at).is_ok() {
+                            return Ok(true);
+                        }
+                    }
+                }
+                if crate::orchestrator_halt::nothing_committed_reason(status, &answer.body)
+                    .is_some() { return Ok(false); }
+            }
+        }
+        let response = self.client
+            .get(format!("{}/api/internal/amux/v22/model-access", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT).bearer_auth(&self.secret)
+            .query(&[("evidence_id", result.request_id.as_str())]).send().await
+            .context("API model access outcome unknown; lookup unavailable")?;
+        let answer = read_raw_answer(response, 4096).await?;
+        let body: ApiModelAccessReadbackResponse = serde_json::from_slice(&answer.body)?;
+        let evidence = body.evidence;
+        if answer.status == StatusCode::OK && body.found && evidence.as_ref().is_some_and(|row|
+            row.evidence_id == result.request_id && row.launch_proof_id == result.launch_proof_id &&
+            valid_hex_digest(&row.evidence_digest) && row.access == result.access &&
+            row.canonical_model_id == result.canonical_model_id &&
+            chrono::DateTime::parse_from_rfc3339(&row.recorded_at).is_ok()) {
+            return Ok(true);
+        }
+        bail!("API model access outcome unknown or conflicting lookup")
+    }
+
     /// One write, then exact lookup on a lost response. Never repost a quota
     /// observation or treat an unknown outcome as a completed report.
     pub async fn worker_quota_record_once(&self, observation: &AmuxWorkerQuota) -> Result<bool> {
@@ -1416,6 +1635,7 @@ mod tests {
             task_revision: 3,
             outcome: "blocked",
             invocation_ids: &[],
+            read_only_retry: None,
         }).unwrap();
         assert_eq!(body["outcome"], "blocked");
         assert_eq!(body["invocation_ids"], serde_json::json!([]));
@@ -1424,6 +1644,73 @@ mod tests {
             serde_json::json!({"settled":true,"taskRevision":4})
         ).unwrap();
         assert!(response.settled);
+    }
+
+    #[test]
+    fn v22_read_only_settlement_echo_is_versioned_and_content_free() {
+        let echo = V22ReadOnlyRetryEcho { version: 1,
+            launch_binding_id: "00000000-0000-4000-8000-000000000041".into(),
+            launch_proof_digest: "a".repeat(64), launch_scope_digest: "b".repeat(64),
+            executor_kind: None, launcher_config_digest: None,
+            api_execution_frame_digest: None, api_execution_receipt: None };
+        let body = serde_json::to_value(V22ExecutionSettleRequest {
+            attempt_id: "attempt", worker: "worker", instance_id: "instance",
+            generation: 1, task_revision: 3, outcome: "succeeded",
+            invocation_ids: &["attempt"], read_only_retry: Some(&echo),
+        }).unwrap();
+        assert_eq!(body["read_only_retry"], serde_json::json!({
+            "version": 1,
+            "launch_binding_id": echo.launch_binding_id,
+            "launch_proof_digest": echo.launch_proof_digest,
+            "launch_scope_digest": echo.launch_scope_digest,
+        }));
+        assert!(body["read_only_retry"].get("prompt").is_none());
+    }
+
+    #[test]
+    fn v22_read_only_api_settlement_carries_the_full_content_free_receipt() {
+        let receipt = serde_json::json!({ "version": 1,
+            "executorKind": "read_only_api_retry_v1", "attemptId": "attempt",
+            "invocationId": "attempt", "selectedModelId": "claude-opus-5-5",
+            "actualModelId": "claude-opus-5-5", "actualModelUniform": true,
+            "providerTurnCount": 2, "uncachedInputTokens": 10,
+            "cacheReadTokens": 0, "cacheWriteTokens": 0, "outputTokens": 5,
+            "usageComplete": true, "terminalStatus": "succeeded",
+            "apiExecutionFrameDigest": "c".repeat(64),
+            "projectedCostMicroUsd": 35, "digest": "d".repeat(64) });
+        let echo = V22ReadOnlyRetryEcho { version: 1,
+            launch_binding_id: "00000000-0000-4000-8000-000000000041".into(),
+            launch_proof_digest: "a".repeat(64), launch_scope_digest: "b".repeat(64),
+            executor_kind: Some("read_only_api_retry_v1".into()),
+            launcher_config_digest: Some("e".repeat(64)),
+            api_execution_frame_digest: Some("c".repeat(64)),
+            api_execution_receipt: Some(receipt.clone()) };
+        let body = serde_json::to_value(V22ExecutionSettleRequest {
+            attempt_id: "attempt", worker: "worker", instance_id: "instance",
+            generation: 1, task_revision: 3, outcome: "succeeded",
+            invocation_ids: &["attempt"], read_only_retry: Some(&echo),
+        }).unwrap();
+        assert_eq!(body["read_only_retry"]["executor_kind"],
+            "read_only_api_retry_v1");
+        assert_eq!(body["read_only_retry"]["api_execution_receipt"], receipt);
+        assert!(body["read_only_retry"].get("usage_receipt").is_none());
+    }
+
+    #[test]
+    fn v22_heartbeat_carries_only_the_closed_protocol_capability() {
+        let capabilities = ["read_only_retry_v1"];
+        let current = serde_json::to_value(WorkerHeartbeatRequest {
+            worker_name: "claude-chore", instance_id: "instance", generation: 3,
+            status: "idle", dispatch_ready: true,
+            protocol_capabilities: Some(&capabilities),
+        }).unwrap();
+        assert_eq!(current["protocol_capabilities"],
+            serde_json::json!(["read_only_retry_v1"]));
+        let legacy = serde_json::to_value(WorkerHeartbeatRequest {
+            worker_name: "claude-chore", instance_id: "instance", generation: 3,
+            status: "idle", dispatch_ready: true, protocol_capabilities: None,
+        }).unwrap();
+        assert!(legacy.get("protocol_capabilities").is_none());
     }
 
     #[tokio::test]
@@ -1666,6 +1953,7 @@ mod tests {
         let delivery = PulledDelivery {
             attempt_id: "attempt-1".to_owned(),
             assignment_id: Some("assignment-1".to_owned()),
+            recovery_approval_id: None,
             v22_execution: None,
             task_id: "task-1".to_owned(),
             worker: "worker-1".to_owned(),
@@ -1679,8 +1967,8 @@ mod tests {
             Duration::from_secs(1),
             Duration::from_secs(3),
         );
-        assert!(api.v22_execution_settle_verified(&delivery, "instance-1", 1, "blocked").await.is_err());
-        let result = api.v22_execution_settle_verified(&delivery, "instance-1", 1, "succeeded").await.unwrap();
+        assert!(api.v22_execution_settle_verified(&delivery, "instance-1", 1, "blocked", None).await.is_err());
+        let result = api.v22_execution_settle_verified(&delivery, "instance-1", 1, "succeeded", None).await.unwrap();
         assert!(result.settled);
         let body = server.join().unwrap();
         assert_eq!(body["outcome"], "succeeded");
@@ -2302,6 +2590,186 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("exceeds byte limit"));
     }
+
+    // Policy v42 API model access: the shared fixture is generated from the
+    // TypeScript protocol (tests/amuxV22ApiModelAccess.test.mjs compares it),
+    // and the route's real answers are key-checked against it in the service
+    // contract test. These tests drive the Rust client over real HTTP.
+    fn api_model_access_wire() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../tests/fixtures/amux-v22-api-model-access-wire-v1.json"
+        ))
+        .unwrap()
+    }
+
+    /// Serves one scripted answer per connection and returns each request's
+    /// request line and body, in order.
+    fn api_model_access_script(answers: Vec<(&'static str, String)>)
+        -> (TomverseApi, thread::JoinHandle<Vec<(String, Vec<u8>)>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let mut seen = Vec::new();
+            for (status, body) in answers {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                let mut request = Vec::new();
+                let header_end = loop {
+                    let mut chunk = [0_u8; 4096];
+                    let count = stream.read(&mut chunk).unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&chunk[..count]);
+                    if let Some(at) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                        break at + 4;
+                    }
+                };
+                let head = String::from_utf8_lossy(&request[..header_end]).to_string();
+                let length = head.lines().find_map(|line| line.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .map(|value| value.trim().parse::<usize>().unwrap()))
+                    .unwrap_or(0);
+                while request.len() < header_end + length {
+                    let mut chunk = [0_u8; 4096];
+                    let count = stream.read(&mut chunk).unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&chunk[..count]);
+                }
+                let line = head.lines().next().unwrap().to_owned();
+                seen.push((line, request[header_end..header_end + length].to_vec()));
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()).unwrap();
+            }
+            seen
+        });
+        (TomverseApi::for_test_with_timeouts(format!("http://{address}"),
+            Duration::from_secs(1), Duration::from_secs(3)), server)
+    }
+
+    fn api_model_access_result_from_wire(wire: &Value) -> AmuxV22ApiModelAccessResult {
+        serde_json::from_value(wire["verified"].clone()).unwrap()
+    }
+
+    #[test]
+    fn api_model_access_wire_parses_with_the_strict_structs_and_validates() {
+        let wire = api_model_access_wire();
+        let request: AmuxV22ApiModelAccessRequest =
+            serde_json::from_value(wire["request"].clone()).unwrap();
+        validate_api_model_access_request(&request).unwrap();
+        for kind in ["verified", "unknown"] {
+            let result: AmuxV22ApiModelAccessResult =
+                serde_json::from_value(wire[kind].clone()).unwrap();
+            validate_api_model_access_result(&result, &request).unwrap();
+            // Serializing back gives exactly the TypeScript producer's value.
+            assert_eq!(serde_json::to_value(&result).unwrap(), wire[kind]);
+        }
+        let _: ApiModelAccessPendingResponse =
+            serde_json::from_value(wire["pending"].clone()).unwrap();
+        let _: ApiModelAccessRecordedResponse =
+            serde_json::from_value(wire["recorded"].clone()).unwrap();
+        let _: ApiModelAccessReadbackResponse =
+            serde_json::from_value(wire["readback"].clone()).unwrap();
+        let _: ApiModelAccessReadbackResponse =
+            serde_json::from_value(wire["readbackMissing"].clone()).unwrap();
+        let mut extra = wire["verified"].clone();
+        extra["balance"] = Value::from(1);
+        assert!(serde_json::from_value::<AmuxV22ApiModelAccessResult>(extra).is_err(),
+            "an unexpected balance or price field must not parse");
+    }
+
+    #[tokio::test]
+    async fn api_model_access_pending_reads_the_exact_request_for_one_worker() {
+        let wire = api_model_access_wire();
+        let (api, server) = api_model_access_script(vec![
+            ("200 OK", wire["pending"].to_string()),
+            ("200 OK", "{\"requests\":[]}".to_owned()),
+        ]);
+        let request = api.v22_api_model_access_pending("claude-investigate").await.unwrap();
+        assert_eq!(serde_json::to_value(request.unwrap()).unwrap(), wire["request"]);
+        assert!(api.v22_api_model_access_pending("claude-investigate").await.unwrap().is_none());
+        let seen = server.join().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert!(seen.iter().all(|(line, body)| line.starts_with("GET ") &&
+            line.contains("/api/internal/amux/v22/model-access?worker=claude-investigate") &&
+            body.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn api_model_access_pending_failures_keep_their_classification() {
+        let wire = api_model_access_wire();
+        for (status, body, recoverable, busy) in [
+            ("503 Service Unavailable", String::from_utf8(DATABASE_BUSY_BODY.to_vec()).unwrap(), true, true),
+            ("503 Service Unavailable", "{\"error\":\"other\"}".to_owned(), true, false),
+            ("502 Bad Gateway", "upstream".to_owned(), true, false),
+            ("429 Too Many Requests", "{}".to_owned(), true, false),
+            ("401 Unauthorized", "{\"error\":\"Unauthorized\"}".to_owned(), false, false),
+            ("400 Bad Request", "{\"error\":\"Invalid request.\"}".to_owned(), false, false),
+            ("200 OK", "{\"requests\":[],\"extra\":1}".to_owned(), false, false),
+        ] {
+            let (api, server) = api_model_access_script(vec![(status, body)]);
+            let error = api.v22_api_model_access_pending("claude-investigate").await.unwrap_err();
+            server.join().unwrap();
+            assert_eq!(is_selection_read_recoverable(&error) || is_database_busy(&error),
+                recoverable, "{status}");
+            assert_eq!(is_database_busy(&error), busy, "{status}");
+        }
+        // Another worker's request is a contract break, never accepted.
+        let (api, server) = api_model_access_script(vec![("200 OK", wire["pending"].to_string())]);
+        let error = api.v22_api_model_access_pending("claude-other").await.unwrap_err();
+        server.join().unwrap();
+        assert!(!is_selection_read_recoverable(&error) && !is_database_busy(&error));
+    }
+
+    #[tokio::test]
+    async fn api_model_access_record_posts_the_exact_result_once() {
+        let wire = api_model_access_wire();
+        let result = api_model_access_result_from_wire(&wire);
+        let (api, server) = api_model_access_script(vec![("200 OK", wire["recorded"].to_string())]);
+        assert!(api.v22_api_model_access_record_once(&result).await.unwrap());
+        let seen = server.join().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].0.starts_with("POST /api/internal/amux/v22/model-access "));
+        assert_eq!(serde_json::from_slice::<Value>(&seen[0].1).unwrap(), wire["verified"]);
+    }
+
+    #[tokio::test]
+    async fn api_model_access_record_refusal_is_false_without_lookup() {
+        let wire = api_model_access_wire();
+        let result = api_model_access_result_from_wire(&wire);
+        let (api, server) = api_model_access_script(vec![
+            ("409 Conflict", "{\"error\":\"api_model_access_binding_mismatch\"}".to_owned()),
+        ]);
+        assert!(!api.v22_api_model_access_record_once(&result).await.unwrap());
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn api_model_access_lost_reply_reads_back_by_exact_id_without_reposting() {
+        let wire = api_model_access_wire();
+        let result = api_model_access_result_from_wire(&wire);
+        let (api, server) = api_model_access_script(vec![
+            ("502 Bad Gateway", "lost".to_owned()),
+            ("200 OK", wire["readback"].to_string()),
+        ]);
+        assert!(api.v22_api_model_access_record_once(&result).await.unwrap());
+        let seen = server.join().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert!(seen[0].0.starts_with("POST "));
+        assert!(seen[1].0.starts_with("GET ") && seen[1].0.contains(
+            "/api/internal/amux/v22/model-access?evidence_id=00000000-0000-4000-8000-0000000000a1"));
+        assert!(seen[1].1.is_empty());
+
+        // A missing or different row stays unknown; it is never reposted.
+        let mut other = wire["readback"].clone();
+        other["evidence"]["canonicalModelId"] = Value::from("claude-other");
+        for readback in [wire["readbackMissing"].to_string(), other.to_string()] {
+            let (api, server) = api_model_access_script(vec![
+                ("502 Bad Gateway", "lost".to_owned()), ("200 OK", readback)]);
+            assert!(api.v22_api_model_access_record_once(&result).await.is_err());
+            let seen = server.join().unwrap();
+            assert_eq!(seen.len(), 2);
+            assert_eq!(seen.iter().filter(|(line, _)| line.starts_with("POST ")).count(), 1);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -2404,6 +2872,8 @@ struct WorkerHeartbeatRequest<'a> {
     generation: i64,
     status: &'a str,
     dispatch_ready: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protocol_capabilities: Option<&'a [&'a str]>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2421,12 +2891,69 @@ struct DeliveryPullRequest<'a> {
     generation: i64,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V22ReadOnlyRetryProfile {
+    pub version: i64,
+    #[serde(default)]
+    pub executor_kind: Option<String>,
+    pub launch_binding_id: String,
+    pub risk_acceptance_digest: String,
+    pub safe_stop_evidence_digest: String,
+    pub launch_proof_digest: String,
+    pub launch_scope_digest: String,
+    #[serde(default)]
+    pub launcher_policy_version: Option<String>,
+    pub launcher_config_digest: String,
+    #[serde(default)]
+    pub fixed_argv_digest: Option<String>,
+    #[serde(default)]
+    pub tool_policy_digest: Option<String>,
+    #[serde(default)]
+    pub profile_config_digest: Option<String>,
+    #[serde(default)]
+    pub api_execution_frame: Option<serde_json::Value>,
+    #[serde(default)]
+    pub api_execution_frame_digest: Option<String>,
+    pub brief_digest: String,
+    pub provider: String,
+    pub model_id: String,
+    pub route_id: String,
+    pub route_policy_digest: String,
+    pub catalog_approval_id: String,
+    pub catalog_version: String,
+    pub pricing_version: String,
+    pub cost_receipt_digest: String,
+    pub additional_cap_microusd: String,
+    pub worst_exposure_microusd: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V22ReadOnlyRetryEcho {
+    pub version: i64,
+    pub launch_binding_id: String,
+    pub launch_proof_digest: String,
+    pub launch_scope_digest: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launcher_config_digest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_execution_frame_digest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_execution_receipt: Option<serde_json::Value>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct V22ExecutionProfile {
     pub model_id: String,
     pub role: String,
     pub budget_microusd: i64,
+    #[serde(default)]
+    pub read_only_retry: Option<V22ReadOnlyRetryProfile>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2435,6 +2962,8 @@ pub struct PulledDelivery {
     pub attempt_id: String,
     #[serde(default)]
     pub assignment_id: Option<String>,
+    #[serde(default)]
+    pub recovery_approval_id: Option<String>,
     #[serde(default)]
     pub v22_execution: Option<V22ExecutionProfile>,
     pub task_id: String,
@@ -2554,6 +3083,8 @@ struct V22ExecutionSettleRequest<'a> {
     task_revision: i64,
     outcome: &'a str,
     invocation_ids: &'a [&'a str],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    read_only_retry: Option<&'a V22ReadOnlyRetryEcho>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2677,13 +3208,14 @@ impl TomverseApi {
         }
     }
 
-    pub async fn worker_heartbeat(
+    async fn worker_heartbeat_with_capabilities<'a>(
         &self,
-        worker_name: &str,
-        instance_id: &str,
+        worker_name: &'a str,
+        instance_id: &'a str,
         generation: i64,
-        status_name: &str,
+        status_name: &'a str,
         dispatch_ready: bool,
+        protocol_capabilities: Option<&'a [&'a str]>,
     ) -> Result<WorkerHeartbeatResponse> {
         let response = self
             .client
@@ -2699,6 +3231,7 @@ impl TomverseApi {
                 generation,
                 status: status_name,
                 dispatch_ready,
+                protocol_capabilities,
             })
             .send()
             .await?;
@@ -2727,6 +3260,36 @@ impl TomverseApi {
             bail!("invalid Tomverse AMUX worker-heartbeat response invariant");
         }
         Ok(body)
+    }
+
+    pub async fn worker_heartbeat(
+        &self,
+        worker_name: &str,
+        instance_id: &str,
+        generation: i64,
+        status_name: &str,
+        dispatch_ready: bool,
+    ) -> Result<WorkerHeartbeatResponse> {
+        self.worker_heartbeat_with_capabilities(worker_name, instance_id,
+            generation, status_name, dispatch_ready, None).await
+    }
+
+    pub async fn v22_worker_heartbeat<'a>(
+        &self,
+        worker_name: &'a str,
+        instance_id: &'a str,
+        generation: i64,
+        status_name: &'a str,
+        dispatch_ready: bool,
+        protocol_capabilities: &'a [&'a str],
+    ) -> Result<WorkerHeartbeatResponse> {
+        if protocol_capabilities.len() > 1 || protocol_capabilities.first()
+            .is_some_and(|value| !matches!(*value,
+                "read_only_retry_v1" | "read_only_api_retry_v1")) {
+            bail!("invalid v22 protocol capabilities");
+        }
+        self.worker_heartbeat_with_capabilities(worker_name, instance_id,
+            generation, status_name, dispatch_ready, Some(protocol_capabilities)).await
     }
 
     pub async fn delivery_pull(
@@ -3115,6 +3678,7 @@ impl TomverseApi {
         generation: i64,
         outcome: &str,
         invocation_ids: &[&str],
+        read_only_retry: Option<&V22ReadOnlyRetryEcho>,
     ) -> Result<ExecutionSettleResponse> {
         if delivery.assignment_id.is_none() {
             bail!("v22 settlement requires an assignment-bound delivery");
@@ -3131,6 +3695,7 @@ impl TomverseApi {
                 task_revision: delivery.task_revision,
                 outcome,
                 invocation_ids,
+                read_only_retry,
             })
             .send().await?;
         let (status, body): (_, ExecutionSettleResponse) = read_bounded_json(
@@ -3158,12 +3723,13 @@ impl TomverseApi {
         instance_id: &str,
         generation: i64,
         outcome: &str,
+        read_only_retry: Option<&V22ReadOnlyRetryEcho>,
     ) -> Result<ExecutionSettleResponse> {
         if !matches!(outcome, "succeeded" | "failed") {
             bail!("verified v22 settlement requires a terminal CLI result");
         }
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            outcome, &[&delivery.attempt_id]).await
+            outcome, &[&delivery.attempt_id], read_only_retry).await
     }
 
     /// A local AMUX card is not an A14 usage receipt. Without a verified
@@ -3174,9 +3740,10 @@ impl TomverseApi {
         delivery: &PulledDelivery,
         instance_id: &str,
         generation: i64,
+        read_only_retry: Option<&V22ReadOnlyRetryEcho>,
     ) -> Result<ExecutionSettleResponse> {
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            "blocked", &[]).await
+            "blocked", &[], read_only_retry).await
     }
 
     /// Policy version 15: the system consumer of pre-approved automatic

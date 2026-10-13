@@ -61,28 +61,81 @@ export function v22ExecutionReceiptVerified(input: {
   invocationIds: string[];
   events: Array<{ invocationId: string; status: string;
     completeness: string; projectedApiCostMicrousd: bigint | null;
-    source: string; actualModelId: string | null;
+    cli: string; source: string; actualModelId: string | null;
     selectedModelId: string }>;
   outcome: "succeeded" | "failed" | "blocked";
   reservedCostMicrousd: bigint;
   resultStored: boolean;
+  expectedExecutionSource?: "claude_result" | "anthropic_messages_api";
 }) {
   if (input.invocationIds.length !== 1 ||
       input.invocationIds[0] !== input.attemptId ||
       input.events.length !== 1 ||
       input.reservedCostMicrousd <= BigInt(0)) return false;
   const event = input.events[0];
+  const expectedSource = input.expectedExecutionSource ?? "claude_result";
+  const expectedExecutor = expectedSource === "anthropic_messages_api" ?
+    "anthropic_api" : "claude";
   return (input.outcome !== "succeeded" || input.resultStored) &&
     event.invocationId === input.attemptId &&
     event.completeness === "reported_complete" &&
     // Codex JSONL currently reports the configured model, not an attested
     // provider-served model. Keep its usage for telemetry but never settle a
     // v22 Task until independent served-model evidence exists.
-    event.source === "claude_result" &&
+    event.cli === expectedExecutor && event.source === expectedSource &&
     event.actualModelId !== null &&
     event.actualModelId === event.selectedModelId &&
     event.projectedApiCostMicrousd !== null &&
     event.projectedApiCostMicrousd <= input.reservedCostMicrousd &&
     (input.outcome === "succeeded" ? event.status === "succeeded" :
       event.status === "succeeded" || event.status === "failed");
+}
+
+/** The native API receipt and the immutable usage-ledger projection must say
+ * exactly the same thing before the ordinary v22 settlement may proceed. */
+export function v22ReadOnlyApiReceiptMatchesUsage(input: {
+  attemptId: string;
+  outcome: "succeeded" | "failed" | "blocked";
+  pricingVersion: string;
+  receipt: {
+    attemptId: string; invocationId: string; selectedModelId: string;
+    actualModelId: string; providerTurnCount: number;
+    uncachedInputTokens: number; cacheReadTokens: number;
+    cacheWriteTokens: number; outputTokens: number;
+    terminalStatus: "succeeded" | "failed"; projectedCostMicroUsd: number;
+    digest: string;
+  };
+  event: {
+    invocationId: string; receiptDigest: string; cli: string; source: string;
+    provider: string; authentication: string;
+    selectedModelId: string; actualModelId: string | null;
+    completedTurns: number; inputTokens: bigint | null;
+    cacheReadInputTokens: bigint | null;
+    cacheCreationInputTokens: bigint | null; outputTokens: bigint | null;
+    inputTokensIncludeCacheRead: boolean;
+    inputTokensIncludeCacheWrite: boolean | null;
+    pricingVersion: string | null; projectedApiCostMicrousd: bigint | null;
+  };
+}) {
+  const { receipt, event } = input;
+  return input.outcome !== "blocked" &&
+    receipt.attemptId === input.attemptId &&
+    receipt.invocationId === input.attemptId &&
+    receipt.terminalStatus === input.outcome &&
+    event.invocationId === input.attemptId &&
+    event.receiptDigest === receipt.digest &&
+    event.cli === "anthropic_api" &&
+    event.source === "anthropic_messages_api" &&
+    event.provider === "anthropic" && event.authentication === "api_key" &&
+    event.selectedModelId === receipt.selectedModelId &&
+    event.actualModelId === receipt.actualModelId &&
+    event.completedTurns === receipt.providerTurnCount &&
+    event.inputTokens === BigInt(receipt.uncachedInputTokens) &&
+    event.cacheReadInputTokens === BigInt(receipt.cacheReadTokens) &&
+    event.cacheCreationInputTokens === BigInt(receipt.cacheWriteTokens) &&
+    event.outputTokens === BigInt(receipt.outputTokens) &&
+    event.inputTokensIncludeCacheRead === false &&
+    event.inputTokensIncludeCacheWrite === false &&
+    event.pricingVersion === input.pricingVersion &&
+    event.projectedApiCostMicrousd === BigInt(receipt.projectedCostMicroUsd);
 }

@@ -1,0 +1,13 @@
+[Unit]
+Description=Poll approved Tomverse AMUX v22 recovery inspections (%i)
+
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=60s
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=false
+Unit=amux-v22-recovery-inspector@%i.service
+
+[Install]
+WantedBy=timers.target

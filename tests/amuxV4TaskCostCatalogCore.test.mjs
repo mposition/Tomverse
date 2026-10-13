@@ -5,6 +5,7 @@ import {
   calculateV4TaskCeilingFromCatalog,
   checkV4TaskApprovedCatalogCeiling,
   inspectV4TaskCostCatalog,
+  resolveV4TaskApiExecutionBasis,
 } from "../lib/amux/v4TaskCostCatalogCore.ts";
 
 const route = (overrides = {}) => ({
@@ -192,4 +193,57 @@ test("approval adapter keeps a concrete hold reason and delegates valid recalcul
     ok: false,
     code: "pricing_unverified",
   }), { decision: "hold", reason: "pricing_unverified" });
+});
+
+test("API execution basis comes from one current catalog route and preserves disjoint caps", () => {
+  const inspected = inspectV4TaskCostCatalog(catalog());
+  assert.equal(inspected.ok, true);
+  const result = resolveV4TaskApiExecutionBasis({
+    rawCatalog: catalog(),
+    role: "implementation",
+    grade: "standard",
+    routeId: "codex-standard",
+    asOfIso: "2026-10-01T01:00:00.000Z",
+  });
+  assert.deepEqual(result, { ok: true, basis: {
+    catalogVersion: "catalog-v1",
+    catalogDigest: inspected.catalogDigest,
+    pricingVersion: "pricing-v1",
+    pricingSource: "verified-price-record",
+    pricingVerifiedAt: "2026-10-01T00:00:00.000Z",
+    pricingExpiresAt: "2026-10-08T00:00:00.000Z",
+    uncachedInputMicroUsdPerMillion: 1_000_000,
+    outputMicroUsdPerMillion: 2_000_000,
+    cacheReadMicroUsdPerMillion: 100_000,
+    cacheWriteMicroUsdPerMillion: 150_000,
+    tokenLimits: {
+      uncachedInputTokens: 1_000,
+      outputTokens: 1_000,
+      cacheReadTokens: 500,
+      cacheWriteTokens: 500,
+    },
+  } });
+});
+
+test("API execution basis rejects a missing, disabled, future or expired route", () => {
+  const basis = (rawCatalog, overrides = {}) => resolveV4TaskApiExecutionBasis({
+    rawCatalog,
+    role: "implementation",
+    grade: "standard",
+    routeId: "codex-standard",
+    asOfIso: "2026-10-01T01:00:00.000Z",
+    ...overrides,
+  });
+  assert.deepEqual(basis(catalog(), { routeId: "missing" }), {
+    ok: false, code: "route_unavailable",
+  });
+  assert.deepEqual(basis(catalog({ routes: [route({ enabled: false })] })), {
+    ok: false, code: "route_unavailable",
+  });
+  assert.deepEqual(basis(catalog({ routes: [route({
+    pricingVerifiedAt: "2026-10-02T00:00:00.000Z",
+  })] })), { ok: false, code: "pricing_unverified" });
+  assert.deepEqual(basis(catalog(), { asOfIso: "2026-10-08T00:00:00.000Z" }), {
+    ok: false, code: "pricing_unverified",
+  });
 });

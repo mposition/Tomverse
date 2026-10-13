@@ -56,6 +56,10 @@ export const readEnumConstraints = (migrations) => {
       // 500 lands where a 400 belongs -- is the same one.
       /ALTER\s+TABLE\s+(?:ONLY\s+)?"([^"]+)"[^;]*?ADD\s+CONSTRAINT\s+"([^"]+)"\s+CHECK\s*\(\s*(?:"[^"]+"\s+IS\s+NULL\s+OR\s+)?"([^"]+)"\s+IN\s*\(([^;]*?)\)\s*\)/gi;
     for (const match of sql.matchAll(addPattern)) {
+      // As with the inline form below, an ALTER-added composite CHECK may
+      // begin with IN but continue into other predicates before its outer
+      // close. Flattening every quoted literal in that shape is not an enum.
+      if (/\)\s*(?:AND|OR)\b/i.test(match[4])) continue;
       const values = Array.from(match[4].matchAll(/'([^']*)'/g), (item) => item[1]);
       if (values.length === 0) continue;
       constraints.set(match[2], {

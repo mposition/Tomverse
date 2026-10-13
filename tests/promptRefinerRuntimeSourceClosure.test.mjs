@@ -558,12 +558,23 @@ const compilerOptions = parsedConfig.options;
 // position-free inventory remain unchanged; this repins source positions only.
 // 2026-10-13, back-merge the Chat availability hotfix into develop: preserve
 // both provenance histories and repin their combined source positions only.
+// 2026-10-13, guarded v22 Task recovery: the two approved recovery system
+// actors and their action scopes add twelve lines above the one existing
+// computed access in lib/adminAuditSystemActors.ts, moving it from 295:17 to
+// 307:17. No access is added, removed or altered: count 228, every path and
+// expression, and the position-free inventory remain unchanged.
+// 2026-10-13, merge develop 09ad68fc into the guarded v22 Task recovery: both
+// histories above remain; count 228 and the position-free inventory are
+// unchanged and only the combined source positions are repinned.
+// 2026-10-13, guarded v22 Task recovery: the marketing webhook fingerprint's
+// history comment in lib/marketingAutomationAccess.ts grows by six lines. Count
+// 228 and the position-free inventory remain unchanged; positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "942d7e2245760981cb63a90dcdf227df",
-  "e3e69c41405be4a9e4ff00f806cb1033",
+  "a65345a8209cfdf2314ca13dc1a5df1c",
+  "aebef21e8941d5bf2bbb622b930ddeb7",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

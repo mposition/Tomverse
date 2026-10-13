@@ -23,6 +23,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminFetch } from "@/lib/adminFetch";
 import { amuxOwnerRecoveryPreparation } from "@/lib/amux/ownerRecoveryCore";
 import { amuxReviewReadError } from "@/lib/amux/reviewReadErrorCore";
+import { AmuxOwnerRecoveryInspectionPanel } from "./AmuxOwnerRecoveryInspectionPanel";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
 // first; an unknown outcome freezes writes until decision ID/digest lookup.
@@ -682,6 +683,11 @@ export function AmuxOwnerReviewView({
             <h5 className="font-bold">{m.technicalRecovery}</h5>
           </div>
           <p className="mt-3 text-sm leading-6 text-amber-100/90">{m.recoveryPreparationIntro}</p>
+          {canInspectCards && <AmuxOwnerRecoveryInspectionPanel
+            key={`${review.task.id}:${review.task.revision}:${review.last_attempt?.id ?? "none"}`}
+            identity={{ taskId: review.task.id, taskRevision: review.task.revision,
+              attemptId: review.last_attempt?.id ?? null }}
+            taskStatus={review.task.status} onReloadReview={onReread} />}
           <div className="mt-4 rounded-lg border border-amber-300/20 bg-zinc-950/40 p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-amber-200">{m.recoveryWhyStopped}</p>
             <p className="mt-2 text-sm leading-6 text-zinc-200">

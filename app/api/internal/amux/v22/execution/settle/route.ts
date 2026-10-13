@@ -13,12 +13,28 @@ import { amuxInternalErrorResponse, amuxJsonNoStore,
 import { AMUX_V22_TASK_EXECUTION_CODE_LATCH } from
   "@/lib/amux/v22TaskExecutionCore";
 
+const digest = z.string().regex(/^[a-f0-9]{64}$/);
+const readOnlyRetryBase = {
+  version: z.literal(1), launch_binding_id: z.string().uuid(),
+  launch_proof_digest: digest, launch_scope_digest: digest,
+};
+const readOnlyRetrySchema = z.union([
+  z.object(readOnlyRetryBase).strict(),
+  z.object({ ...readOnlyRetryBase,
+    executor_kind: z.literal("read_only_api_retry_v1"),
+    launcher_config_digest: digest,
+    api_execution_frame_digest: digest,
+    api_execution_receipt: z.unknown(),
+  }).strict(),
+]);
+
 const requestSchema = z.object({ attempt_id: z.string().uuid(),
   worker: amuxMachineIdSchema, instance_id: z.string().uuid(),
   generation: z.number().int().min(1).max(AMUX_PRISMA_INT_MAX),
   task_revision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
   outcome: z.enum(["succeeded", "failed", "blocked"]),
   invocation_ids: z.array(z.string().uuid()).max(128),
+  read_only_retry: readOnlyRetrySchema.optional(),
 }).strict();
 
 export async function POST(request: Request) {
@@ -37,6 +53,18 @@ export async function POST(request: Request) {
         instanceId: body.instance_id, generation: body.generation,
         taskRevision: body.task_revision, outcome: body.outcome,
         invocationIds: body.invocation_ids,
+        readOnlyRetry: body.read_only_retry ? {
+          version: body.read_only_retry.version,
+          launchBindingId: body.read_only_retry.launch_binding_id,
+          launchProofDigest: body.read_only_retry.launch_proof_digest,
+          launchScopeDigest: body.read_only_retry.launch_scope_digest,
+          ...("executor_kind" in body.read_only_retry ? {
+            executorKind: body.read_only_retry.executor_kind,
+            launcherConfigDigest: body.read_only_retry.launcher_config_digest,
+            apiExecutionFrameDigest:
+              body.read_only_retry.api_execution_frame_digest,
+            apiExecutionReceipt: body.read_only_retry.api_execution_receipt,
+          } : {}) } : undefined,
       });
       return amuxJsonNoStore(result, result.settled ? 200 : 409);
     } catch (error) {
