@@ -15,7 +15,17 @@
 set -euo pipefail
 umask 077
 
+timer_off() {
+  systemctl disable --now tomverse-bridge-autorestart.timer >/dev/null 2>&1 || true
+}
+
+# Once the installed files start to change, every way out but success leaves
+# the timer off -- an explicit failure as much as an unexpected one -- so a
+# rule or script that did not pass its checks never runs on its own (an
+# earlier install's timer included).
+changing=no
 fail() {
+  [[ "$changing" == yes ]] && timer_off && echo "install.sh: the timer is off" >&2
   echo "install.sh: $*" >&2
   exit 2
 }
@@ -34,9 +44,8 @@ for file in "${files[@]}"; do
   test -f "$src/$file" && test ! -L "$src/$file" || fail "missing $file"
 done
 
-timer_off() {
-  systemctl disable --now tomverse-bridge-autorestart.timer >/dev/null 2>&1 || true
-}
+changing=yes
+timer_off
 trap 'timer_off; echo "install.sh: failed; the timer is off" >&2' ERR
 
 restart_user=tomverse-bridge-autorestart

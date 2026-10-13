@@ -69,6 +69,30 @@ const HALT = {
     "amux wsl bridge warn: tick failed (http_500) after 0 result(s) already committed this tick; recording them before halting",
     "amux wsl bridge halted: no new assignments; cause=dispatch_outcome_unknown; restart only after checking Tomverse and the local AMUX",
   ],
+  // Review r-20261013-231119-e051d6: the bridge keeps its first cause, and a
+  // settlement that turns unknown after the halt only adds this line.
+  leaseLostThenSettleUnknown: [
+    "amux wsl bridge halted: no new assignments; cause=worker_runtime_lease_lost; restart only after checking Tomverse and the local AMUX",
+    "amux wsl bridge halt: settle outcome unknown for attempt 7f9c2d10-1111-4222-8333-944455556666; read back before restart",
+  ],
+  quotaRefusedBeforeLeaseLost: [
+    "amux v22 quota observation refused for claude-impl",
+    "amux wsl bridge halted: no new assignments; cause=worker_runtime_lease_lost; restart only after checking Tomverse and the local AMUX",
+  ],
+  twoHalts: [
+    "amux wsl bridge halted: no new assignments; cause=worker_runtime_lease_lost; restart only after checking Tomverse and the local AMUX",
+    "amux wsl bridge halted: no new assignments; cause=worker_runtime_lease_lost; restart only after checking Tomverse and the local AMUX",
+  ],
+  // Every harmless line the bridges printed on 2026-10-10..13, then a halt.
+  harmlessNoise: [
+    "amux v22 quota source unavailable for claude-chore",
+    "amux v22 quota observation recorded for claude-chore",
+    "amux wsl bridge warn: owned queue answered 503 amux_database_busy; no new assignment this tick, not halted",
+    "amux wsl bridge warn: worker register answered 503 amux_database_busy; registering again next tick",
+    "amux wsl bridge warn: execution heartbeat for attempt 7f9c2d10-1111-4222-8333-944455556666 answered 503 amux_database_busy; kept, not halted",
+    "amux wsl bridge warn: tick failed (timeout) after 0 result(s) already committed this tick; recording them before halting",
+    "amux wsl bridge halted: no new assignments; cause=tick_failed_timeout; restart only after checking Tomverse and the local AMUX",
+  ],
 };
 
 /**
@@ -85,6 +109,9 @@ const SYSTEMCTL_STUB = [
   "  fi",
   '  if [ "$1" = show ]; then',
   '    prop=$3; unit=$5',
+  // FAKE_FLIP_UNIT turns active, as if a person restarted it, after
+  // FAKE_FLIP_AFTER reads of its properties.
+  '    if [ "$unit" = "$FAKE_FLIP_UNIT" ]; then n=$(cat flip.count 2>/dev/null || echo 0); n=$((n + 1)); echo $n > flip.count; if [ $n -gt "$FAKE_FLIP_AFTER" ]; then case "$prop" in ActiveState) echo active ;; ExecMainStatus) echo 0 ;; InvocationID) echo ffffffffffffffffffffffffffffffff ;; esac; return 0; fi; fi',
   '    for entry in $FAKE_UNITS; do',
   '      IFS="|" read -r u state status id <<<"$entry"',
   '      [ "$u" = "$unit" ] || continue',
@@ -105,6 +132,7 @@ const run = ({
   amuxUp = true,
   appUp = true,
   restartStatus = 0,
+  flip = null,
 }) => {
   const dir = mkdtempSync(join(tmpdir(), "bridge-autorestart-"));
   try {
@@ -128,6 +156,8 @@ const run = ({
         FAKE_AMUX_STATUS: amuxUp ? "0" : "22",
         FAKE_APP_STATUS: appUp ? "0" : "22",
         FAKE_RESTART_STATUS: String(restartStatus),
+        FAKE_FLIP_UNIT: flip?.unit ?? "",
+        FAKE_FLIP_AFTER: String(flip?.after ?? 0),
       },
     });
     const lines = (name) =>
@@ -179,13 +209,21 @@ test("a restart is asked for without waiting on the unit", { skip: noBash }, () 
   assert.match(script, /systemctl restart --no-block "\$unit"/);
 });
 
+test("every harmless line the bridges print still allows a restart", { skip: noBash }, () => {
+  const result = run({ units: [halted(IMPL, 2)], journals: { [invocation(2)]: HALT.harmlessNoise } });
+  assert.deepEqual(result.restarts, [IMPL], result.output);
+});
+
 for (const [name, lines, reason] of [
-  ["a tick that had committed results", HALT.tickCommitted, /without a tick that committed nothing/],
+  ["a tick that had committed results", HALT.tickCommitted, /unrecognised line in the halted run: amux wsl bridge warn: tick failed \(http_500\) after 2 result/],
   ["dispatch_outcome_unknown", HALT.dispatchUnknown, /cause=dispatch_outcome_unknown is not restarted automatically/],
   ["settle_outcome_unknown", HALT.settleUnknown, /cause=settle_outcome_unknown is not restarted automatically/],
-  ["a halt line without a cause", HALT.noCause, /no halt line/],
+  ["a halt line without a cause", HALT.noCause, /unrecognised line in the halted run: amux wsl bridge halted: no new assignments; restart only/],
   ["a nothing-committed tick followed by a different halt", HALT.tickThenDispatch, /cause=dispatch_outcome_unknown/],
-  ["an empty journal", [], /no halt line/],
+  ["a settlement that turned unknown after an approved halt", HALT.leaseLostThenSettleUnknown, /unrecognised line in the halted run: amux wsl bridge halt: settle outcome unknown/],
+  ["a line this script does not know", HALT.quotaRefusedBeforeLeaseLost, /unrecognised line in the halted run: amux v22 quota observation refused/],
+  ["two halt lines in one run", HALT.twoHalts, /2 halt lines in the halted run/],
+  ["an empty journal", [], /0 halt lines in the halted run/],
 ]) {
   test(`${name} stays halted`, { skip: noBash }, () => {
     const result = run({ units: [halted(REVIEW, 3)], journals: { [invocation(3)]: lines } });
@@ -248,6 +286,22 @@ test("each halted bridge is judged on its own", { skip: noBash }, () => {
   assert.match(result.output, /claude-impl\.service halted; cause=dispatch_outcome_unknown/);
 });
 
+// Review r-20261013-231119-e051d6: a person restarted the unit while this run
+// was checking it. The halted run it judged is gone; restarting now would
+// interrupt the new one.
+test("a unit that changed while it was being checked is left alone", { skip: noBash }, () => {
+  // Three reads judge it halted (ActiveState, ExecMainStatus, InvocationID);
+  // the fourth, right before the restart, sees it running again.
+  const result = run({
+    units: [halted(MAIN, 1)],
+    journals: { [invocation(1)]: HALT.leaseLost },
+    flip: { unit: MAIN, after: 3 },
+  });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(result.restarts, []);
+  assert.match(result.output, /tomverse-bridge\.service changed while it was being checked; left alone/);
+});
+
 test("a refused restart is reported and the run goes on", { skip: noBash }, () => {
   const result = run({
     units: [halted(MAIN, 1), halted(IMPL, 2)],
@@ -272,8 +326,15 @@ test("the approved causes are the only ones restarted", () => {
   const decide = script.slice(script.indexOf("decide() {"), script.indexOf("answers() {"));
   assert.equal(decide.match(/echo restart/g)?.length, 2);
   assert.match(decide, /"\$cause" == worker_runtime_lease_lost/);
-  assert.match(decide, /"\$cause" == tick_failed_\*/);
-  assert.match(script, /after 0 result\\\(s\\\) already committed this tick;/);
+  assert.match(decide, /"\$cause" == tick_failed_\* \]\] && \(\(ticks > 0\)\)/);
+  assert.match(script, /after 0 result\\\(s\\\) already committed this tick; recording them before halting\$'/);
+});
+
+test("the restart re-reads the unit right before it", () => {
+  const loop = script.slice(script.indexOf('for unit in "${halted[@]}"; do'));
+  const reread = loop.indexOf('"$(halted_run "$unit")" != "failed 3 $invocation"');
+  const restart = loop.indexOf('systemctl restart --no-block "$unit"');
+  assert.ok(reread > 0 && reread < restart);
 });
 
 // The polkit rule, run as polkitd would run it.
@@ -333,6 +394,12 @@ test("the installer proves the rule's reach before it enables the timer", () => 
     assert.ok(at > 0 && at < enable, check);
   }
   assert.match(install, /test "\$\(stat -c %U "\$src"\)" != tommy/);
+  // Review r-20261013-231119-e051d6: an explicit failure exits through fail(),
+  // which the ERR trap never sees. The timer goes off before the first change
+  // and fail() turns it off from then on.
+  const changing = install.indexOf("\nchanging=yes\ntimer_off\n");
+  assert.ok(changing > 0 && changing < install.indexOf("useradd"), "timer off before any change");
+  assert.match(install, /fail\(\) \{\n {2}\[\[ "\$changing" == yes \]\] && timer_off/);
   assert.match(install, /\/etc\/polkit-1\/rules\.d\/50-tomverse-bridge-autorestart\.rules/);
 });
 
