@@ -526,6 +526,8 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
   const endpoints = [
     ["workers/register", ["workerRegister"], "worker_register"],
     ["workers/heartbeat", ["workerHeartbeat"], "worker_heartbeat"],
+    // Orchestration policy version 35, section 4: the bridge session list.
+    ["workers/session-list", ["workerSessionListRead"], "worker_session_list"],
     ["delivery/pull", ["deliveryPull"], "delivery_pull"],
     ["delivery/ack", ["deliveryAck"], "delivery_ack"],
     ["execution/start", ["executionStart"], "execution_start"],
