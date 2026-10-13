@@ -298,7 +298,8 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
 
 `Product Research Scout Probe`는 개선 탐색의 S0 측정 전용 서비스입니다. walker도
 browser 서비스도 아니며, 아무 데도 제출하지 않고 자격증명을 읽지 않습니다.
-staging에만 있고, Playwright 이미지(`docker/product-research-scout-probe.Dockerfile`)로
+Tomverse Agents의 **dev 환경에만** 있고(dev는 `develop`에서 빌드합니다. staging은
+`test`에서 빌드하므로 release 후보가 올라가기 전에는 빌드할 것이 없습니다), Playwright 이미지(`docker/product-research-scout-probe.Dockerfile`)로
 빌드되며, 변수는 스위치 `PRODUCT_RESEARCH_SCOUT_ENABLED` 하나입니다.
 
 한 번 실행에서 세 가지를 잽니다(`npm run agent:product-research-scout-s0-probe -- all`).
@@ -318,11 +319,11 @@ staging에만 있고, Playwright 이미지(`docker/product-research-scout-probe.
 
 ### 실행 (운영자)
 
-1. **apply.** 위 "6. apply"의 staging 순서 그대로입니다(`railway:agents:use-staging` →
-   `railway:agents:plan` → `railway:agents:apply`). 계획에 새 서비스
-   `Product Research Scout Probe` 하나가 추가되고 **지워지는 것이 없는지** 확인합니다.
-   apply 뒤 region이 `asia-southeast1-eqsg3a`인지 확인합니다(6a).
-2. **켜기.** Railway 대시보드 → Tomverse Agents → staging → Product Research Scout
+1. **만들기.** dev 환경에 `Product Research Scout Probe`를 만듭니다. `docs/ops/dev-test-lanes.md`는
+   plan이 서비스 생성을 보이면 apply하지 않는다고 적으므로, IaC apply로 만들지(plan에 **이 서비스 하나의
+   생성만** 있고 지워지거나 바뀌는 것이 없을 때) 대시보드에서 만들지는 운영자가 정합니다. 어느 쪽이든
+   region은 `asia-southeast1-eqsg3a`여야 합니다(6a).
+2. **켜기.** Railway 대시보드 → Tomverse Agents → dev → Product Research Scout
    Probe → Variables에 `PRODUCT_RESEARCH_SCOUT_ENABLED`를 아무 값으로 넣습니다.
    변수 변경이 재배포를 만들고, 그 배포가 측정입니다(일정이 없는 서비스는 배포마다
    한 번 실행됩니다). 스위치가 없으면 probe는 아무것도 하지 않고 끝납니다.

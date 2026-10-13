@@ -479,11 +479,14 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   },
   {
     // The improvement scout's S0 probe (docs/policy/product-research-agent.md
-    // §20). Staging only: what it measures is whether Chromium keeps its
-    // sandbox in a Railway container and what production's public pages answer
-    // a Railway address, and the staging project runs in the same region. Built
-    // from its own Dockerfile because Chromium and its system libraries come
-    // with Playwright's image, not with Railpack's.
+    // §20). One environment is enough: what it measures is whether Chromium
+    // keeps its sandbox in a Railway container and what production's public
+    // pages answer a Railway address, and every environment of this project
+    // runs in the same region. dev, because dev builds from develop; staging
+    // builds from `test`, which a service can only reach once a release
+    // candidate is promoted there (docs/ops/dev-test-lanes.md). Built from its
+    // own Dockerfile because Chromium and its system libraries come with
+    // Playwright's image, not with Railpack's.
     key: "product_research_scout_probe",
     service: "Product Research Scout Probe",
     startCommand: "npm run agent:product-research-scout-s0-probe -- all",
@@ -498,7 +501,7 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
       ],
     },
     environments: {
-      staging: PRODUCT_RESEARCH_SCOUT_PROBE_VARIABLES,
+      dev: PRODUCT_RESEARCH_SCOUT_PROBE_VARIABLES,
     },
   },
   ...ENGINEERING_AGENT_SERVICES,

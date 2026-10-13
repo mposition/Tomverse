@@ -48,8 +48,8 @@ test("the probe reads one variable, its switch, and the service declares only th
 
   const { AGENT_RUNNER_SERVICES } = await import("../.railway/agent-runners.ts");
   const service = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_scout_probe");
-  assert.deepEqual(Object.keys(service.environments), ["staging"]);
-  assert.deepEqual([...service.environments.staging], ["PRODUCT_RESEARCH_SCOUT_ENABLED"]);
+  assert.deepEqual(Object.keys(service.environments), ["dev"]);
+  assert.deepEqual([...service.environments.dev], ["PRODUCT_RESEARCH_SCOUT_ENABLED"]);
   assert.equal(service.cronSchedule, null);
   assert.equal(service.dockerfile.path, "docker/product-research-scout-probe.Dockerfile");
 });
