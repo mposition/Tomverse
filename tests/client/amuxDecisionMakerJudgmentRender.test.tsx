@@ -8,6 +8,7 @@ import {
   DM_OPERATOR_ANSWER_MAX_BYTES,
   dmJudgmentBody,
   dmJudgmentDraftProblem,
+  dmJudgmentSendAllowed,
   runDmJudgment,
   type DmJudgmentDraft,
   type DmJudgmentIo,
@@ -152,6 +153,17 @@ for (const locale of ["en", "ko"] as const) {
   });
 }
 
+test("a send starts only while editing a sound draft, and only for the request the panel was mounted for", () => {
+  const editing: DmJudgmentState = { phase: "editing" };
+  const other = "00000000-0000-4000-8000-000000000012";
+  assert.equal(dmJudgmentSendAllowed({ state: editing, problem: null, mountedFor: REQUEST_ID, requestId: REQUEST_ID }), true);
+  assert.equal(dmJudgmentSendAllowed({ state: editing, problem: null, mountedFor: REQUEST_ID, requestId: other }), false);
+  assert.equal(dmJudgmentSendAllowed({ state: editing, problem: "why", mountedFor: REQUEST_ID, requestId: REQUEST_ID }), false);
+  for (const state of [{ phase: "sending", kind: "confirm" }, { phase: "recorded", kind: "confirm" }, { phase: "unknown" }] as DmJudgmentState[]) {
+    assert.equal(dmJudgmentSendAllowed({ state, problem: null, mountedFor: REQUEST_ID, requestId: REQUEST_ID }), false, state.phase);
+  }
+});
+
 test("a confirmation names exactly what Admin showed; a rejection names none; the items keep the policy's order", () => {
   assert.deepEqual(dmJudgmentBody(REQUEST_ID, "confirm", SHOWN, DRAFT), {
     requestId: REQUEST_ID,
@@ -177,7 +189,6 @@ test("a confirmation names exactly what Admin showed; a rejection names none; th
 });
 
 const FAILURE = { message: "failure" } as unknown as AdminApiFailure;
-const NETWORK = { message: "network" } as unknown as AdminApiFailure;
 const run = async (answer: (() => Promise<Response>) | Response) => {
   let posts = 0;
   const updates: Array<{ state?: DmJudgmentState; failure?: AdminApiFailure | null }> = [];
@@ -187,7 +198,6 @@ const run = async (answer: (() => Promise<Response>) | Response) => {
       return typeof answer === "function" ? answer() : answer;
     },
     failureOf: async () => FAILURE,
-    networkFailure: () => NETWORK,
   };
   await runDmJudgment(dmJudgmentBody(REQUEST_ID, "confirm", SHOWN, DRAFT), io, (changes) => updates.push(changes));
   const last = updates.filter((update) => update.state !== undefined).at(-1)!.state!;
@@ -235,11 +245,13 @@ test("an unknown outcome, an unreadable answer or no answer at all is never sent
     const outcome = await run(answer);
     assert.equal(outcome.posts, 1);
     assert.deepEqual(outcome.last, { phase: "unknown" });
+    assert.equal(outcome.failure, null);
   }
   const lost = await run(async () => {
     throw new TypeError("network");
   });
   assert.equal(lost.posts, 1);
   assert.deepEqual(lost.last, { phase: "unknown" });
-  assert.equal(lost.failure, NETWORK);
+  // No notice that would invite a resend beside the unknown outcome.
+  assert.equal(lost.failure, null);
 });

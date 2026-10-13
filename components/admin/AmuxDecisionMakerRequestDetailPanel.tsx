@@ -194,8 +194,12 @@ export function AmuxDecisionMakerRequestDetailView({
       <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-dm-detail-judgeable" data-judgeable={detail.shown !== null}>
         {detail.shown !== null ? m.judgeable : m.notJudgeable}
       </p>
+      {/* Keyed by the request: a soft navigation to another request (the
+          list's links) would otherwise keep this panel's draft, phase and
+          failure, and send one request's judgment with another's id. */}
       {detail.shown !== null ? (
         <AmuxDecisionMakerJudgmentPanel
+          key={row.requestId}
           requestId={row.requestId}
           shown={detail.shown}
           reloadHref={dmAdminRequestDetailHref(row.requestId)}

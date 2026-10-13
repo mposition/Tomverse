@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
+import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxDecisionMakerJudgmentMessages } from "@/lib/adminMessages/amuxDecisionMaker";
 import {
@@ -44,6 +44,20 @@ export type DmJudgmentState =
 
 const utf8Bytes = (value: string) => new TextEncoder().encode(value).length;
 
+/**
+ * Whether a send may start: the page is editing, the draft has no problem,
+ * and the panel still serves the request it was mounted for. The detail
+ * keys the panel by its request, so a different request mounts a new panel;
+ * this refuses a send even if that key were ever lost, rather than record one
+ * request's judgment under another's id.
+ */
+export const dmJudgmentSendAllowed = (input: {
+  state: DmJudgmentState;
+  problem: string | null;
+  mountedFor: string;
+  requestId: string;
+}) => input.state.phase === "editing" && input.problem === null && input.mountedFor === input.requestId;
+
 /** Why a judgment cannot be sent from this draft; null when it can. */
 export const dmJudgmentDraftProblem = (
   m: Messages,
@@ -82,7 +96,6 @@ export const dmJudgmentBody = (
 export type DmJudgmentIo = {
   post: (body: ReturnType<typeof dmJudgmentBody>) => Promise<Response>;
   failureOf: (response: Response) => Promise<AdminApiFailure>;
-  networkFailure: () => AdminApiFailure;
 };
 
 /**
@@ -123,7 +136,9 @@ export async function runDmJudgment(
   try {
     response = await io.post(body);
   } catch {
-    update({ state: { phase: "unknown" }, failure: io.networkFailure() });
+    // No answer may still mean it was recorded. The unknown outcome's own words
+    // say to read it again; a network notice would say to send it again.
+    update({ state: { phase: "unknown" }, failure: null });
     return;
   }
   const answer = await bodyOf(response);
@@ -145,7 +160,7 @@ export async function runDmJudgment(
     update({ state: { phase: "editing" }, failure: await io.failureOf(response) });
     return;
   }
-  update({ state: { phase: "unknown" } });
+  update({ state: { phase: "unknown" }, failure: null });
 }
 
 const buttonClass =
@@ -327,6 +342,7 @@ export function AmuxDecisionMakerJudgmentPanel({
   const [draft, setDraft] = useState<DmJudgmentDraft>({ accuracy: "not_judged", mismatchedItems: [], operatorAnswer: "" });
   const [state, setState] = useState<DmJudgmentState>({ phase: "editing" });
   const [failure, setFailure] = useState<AdminApiFailure | null>(null);
+  const [mountedFor] = useState(requestId);
   const io: DmJudgmentIo = {
     post: (body) =>
       adminFetch(JUDGMENT_PATH, {
@@ -335,7 +351,6 @@ export function AmuxDecisionMakerJudgmentPanel({
         body: JSON.stringify(body),
       }),
     failureOf: (response) => readAdminApiFailure(response, { fallback: m.failed, locale }),
-    networkFailure: () => adminNetworkFailure(locale),
   };
   const apply = (changes: { state?: DmJudgmentState; failure?: AdminApiFailure | null }) => {
     if (changes.state) setState(changes.state);
@@ -352,7 +367,7 @@ export function AmuxDecisionMakerJudgmentPanel({
       reloadHref={reloadHref}
       onDraft={setDraft}
       onSend={(kind) => {
-        if (state.phase !== "editing" || dmJudgmentDraftProblem(m, kind, draft) !== null) return;
+        if (!dmJudgmentSendAllowed({ state, problem: dmJudgmentDraftProblem(m, kind, draft), mountedFor, requestId })) return;
         void runDmJudgment(dmJudgmentBody(requestId, kind, shown, draft), io, apply);
       }}
     />

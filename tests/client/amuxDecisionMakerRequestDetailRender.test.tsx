@@ -279,3 +279,36 @@ test("the judgment controls are mounted only for a request with something to jud
   });
   assert.equal(propsOf(closed).filter((props) => "shown" in props && "reloadHref" in props).length, 0);
 });
+
+/** Every element in the tree, with its key, so the remount a key causes can be checked. */
+const elementsOf = (node: ReactNode, found: Array<{ key: unknown; props: Props }> = []) => {
+  if (node === null || node === undefined || typeof node === "boolean") return found;
+  if (typeof node === "string" || typeof node === "number") return found;
+  if (Array.isArray(node)) {
+    for (const child of node) elementsOf(child, found);
+    return found;
+  }
+  const element = node as { key?: unknown; props?: Props };
+  if (element.props) {
+    found.push({ key: element.key, props: element.props });
+    elementsOf(element.props.children as ReactNode, found);
+  }
+  return found;
+};
+
+test("moving from one request to another mounts a new judgment panel: its key is the request", () => {
+  const m = adminAmuxDecisionMakerRequestDetailMessages.en;
+  const list = adminAmuxDecisionMakerRequestsMessages.en;
+  const other = "00000000-0000-4000-8000-000000000012";
+  const panelOf = (view: DmAdminRequestDetailView) =>
+    elementsOf(AmuxDecisionMakerRequestDetailView({ m, list, view })).filter((element) => "reloadHref" in element.props);
+  const first = panelOf(detail());
+  const second = panelOf(detail({ row: row({ id: other, cardId: "card-42" }) }));
+  assert.equal(first.length, 1);
+  assert.equal(second.length, 1);
+  // React mounts a new component, with new state, when the key changes; the
+  // panel for request B never holds request A's draft, phase or failure.
+  assert.equal(first[0]!.key, REQUEST_ID);
+  assert.equal(second[0]!.key, other);
+  assert.equal(second[0]!.props.requestId, other);
+});
