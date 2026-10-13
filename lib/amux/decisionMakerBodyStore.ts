@@ -1113,6 +1113,51 @@ export async function readDecisionMakerResultDetail(
   };
 }
 
+/**
+ * The result details of the given requests (at most 100), in one statement:
+ * the result detail half of Admin's request list (stage S2,
+ * lib/amux/decisionMakerAdminRead.ts). Only the output kind and the
+ * irreversible flag, which Admin shows before anything else about a proposal
+ * (docs/policy/amux-decision-maker.md §6); no option id, key or body. A request
+ * without a terminal result has no row. A row the result detail's CHECKs could
+ * not have produced refuses the read.
+ */
+export async function readDecisionMakerResultDetailsForAdmin(
+  client: BodyReader,
+  requestIds: readonly string[],
+): Promise<Map<string, { outputKind: DmResultDetail["outputKind"]; irreversible: boolean | null }>> {
+  if (requestIds.length > 100 || !requestIds.every((id) => isDmRequestId(id))) {
+    throw new DecisionMakerBodyWriteError("invalid_input");
+  }
+  const details = new Map<string, { outputKind: DmResultDetail["outputKind"]; irreversible: boolean | null }>();
+  if (requestIds.length === 0) return details;
+  const rows = await client.$queryRaw<
+    Array<{ requestId: string; resultKind: string; outputKind: string | null; optionId: string | null; irreversible: boolean | null }>
+  >`
+    SELECT "requestId", "resultKind", "outputKind", "optionId", "irreversible"
+    FROM "AmuxDecisionMakerResultDetail"
+    WHERE "requestId" = ANY(${[...requestIds]}::text[])
+  `;
+  for (const row of rows) {
+    const detail: DmResultDetail = {
+      outputKind: (row.outputKind ?? null) as DmResultDetail["outputKind"],
+      optionId: row.optionId ?? null,
+      irreversible: row.irreversible ?? null,
+    };
+    if (
+      !requestIds.includes(row.requestId) ||
+      details.has(row.requestId) ||
+      !(DM_RESULT_KINDS as readonly string[]).includes(row.resultKind) ||
+      !(row.outputKind === null || (DM_OUTPUT_KINDS as readonly string[]).includes(row.outputKind)) ||
+      !dmResultDetailShapeValid(row.resultKind, detail)
+    ) {
+      throw new DecisionMakerBodyWriteError("state_unreadable");
+    }
+    details.set(row.requestId, { outputKind: detail.outputKind, irreversible: detail.irreversible });
+  }
+  return details;
+}
+
 // ---------------------------------------------------------------------------
 // A person's judgment (stage S1e)
 // ---------------------------------------------------------------------------
