@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
@@ -125,6 +125,73 @@ export async function readAmuxWorkerRegistryOrThrow(
     observations.set(row.workerName, row.status);
   }
   return { registrations, latches, observations };
+}
+
+/**
+ * Version 35 section 3: the newest registry event and the newest latch event
+ * of every worker, as JSON-array subqueries that the assignment catalog
+ * reader composes into its one statement. The text stays in this store, the
+ * one module that reads these tables; the composing module names no table.
+ */
+export const amuxWorkerRegistryNewestJsonSql = (): Prisma.Sql => Prisma.sql`(
+  SELECT coalesce(json_agg(newest), '[]'::json) FROM (
+    SELECT DISTINCT ON ("workerName")
+      "workerName", "providerClass", "roleCeiling", "desiredState", "revision"
+    FROM "AmuxWorkerRegistryEvent"
+    ORDER BY "workerName", "sequence" DESC
+  ) AS newest
+)`;
+
+export const amuxWorkerLatchNewestJsonSql = (): Prisma.Sql => Prisma.sql`(
+  SELECT coalesce(json_agg(newest), '[]'::json) FROM (
+    SELECT DISTINCT ON ("workerName") "workerName", "eventKind"
+    FROM "AmuxWorkerLatchEvent"
+    ORDER BY "workerName", "sequence" DESC
+  ) AS newest
+)`;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * What those two subqueries return, under this store's own rules: a registry
+ * row the guard would not have accepted makes the registrations null, as
+ * `readAmuxWorkerRegistryOrThrow()` does; a latch row outside its vocabulary,
+ * or a value that is not a list of rows, throws -- a latch that cannot be read
+ * is never "closed".
+ */
+export function amuxWorkerRegistryFromNewestJsonOrThrow(
+  registry: unknown,
+  latches: unknown,
+): { registrations: AmuxWorkerRegistration[] | null; latches: Map<string, AmuxWorkerLatchEventKind> } {
+  if (!Array.isArray(registry) || !Array.isArray(latches)) {
+    throw new Error("AMUX worker registry read outside its shape");
+  }
+  let registrations: AmuxWorkerRegistration[] | null = [];
+  for (const row of registry) {
+    const registration = isRecord(row)
+      ? amuxWorkerRegistrationFromRow({
+          workerName: row.workerName,
+          providerClass: row.providerClass,
+          roleCeiling: row.roleCeiling,
+          desiredState: row.desiredState,
+          revision: row.revision,
+        })
+      : null;
+    if (registration === null) {
+      registrations = null;
+      break;
+    }
+    registrations.push(registration);
+  }
+  const latchKinds = new Map<string, AmuxWorkerLatchEventKind>();
+  for (const row of latches) {
+    if (!isRecord(row) || !isAmuxWorkerName(row.workerName) || !isAmuxWorkerLatchEventKind(row.eventKind)) {
+      throw new Error("AMUX worker latch row outside its vocabulary");
+    }
+    latchKinds.set(row.workerName, row.eventKind);
+  }
+  return { registrations, latches: latchKinds };
 }
 
 /**

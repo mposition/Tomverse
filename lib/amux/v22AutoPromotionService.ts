@@ -12,7 +12,7 @@ import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
 import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from
   "./incidentCore.ts";
-import { getConfiguredAmuxV22WorkerCatalog } from "./routing.ts";
+import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
 import { AUTO_PROMOTION_APPLY_ENV, AUTO_PROMOTION_CODE_LATCH,
   AUTO_UNKNOWN_BURST_COUNT, AUTO_UNKNOWN_BURST_MS,
   autoCostAccepted, autoGraduationAccepted, autoUnknownEvents,
@@ -299,7 +299,10 @@ async function latestCandidates(tx: Prisma.TransactionClient, now: Date):
 }
 
 async function verifiedWorkerCount(tx: Prisma.TransactionClient, now: Date) {
-  const catalog = getConfiguredAmuxV22WorkerCatalog();
+  // Orchestration policy version 35, section 3: the variables while R2c is
+  // off; the catalog derived from the registry, read in this transaction,
+  // once it is on.
+  const { v22: catalog } = await readAmuxAssignmentCatalogs(tx);
   if (!catalog) return 0;
   const names = [...new Set(catalog.filter((worker) => !worker.archived &&
     !worker.paused && !worker.isolated && !worker.blocked).map(

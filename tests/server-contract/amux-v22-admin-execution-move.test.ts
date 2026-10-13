@@ -192,11 +192,13 @@ mock.module(mod("lib/amux/autoPromotionService.ts"), { namedExports: {
 mock.module(mod("lib/amux/orchestratorHaltStore.ts"), { namedExports: {
   findOpenAmuxOrchestratorHalt: async () => null,
 } });
-mock.module(mod("lib/amux/routing.ts"), { namedExports: {
-  getConfiguredAmuxV22WorkerCatalog: () => [1, 2, 3].map((index) => ({
+// The services read the assignment catalog (orchestration policy version 35,
+// section 3); while R2c is off it is the v22 variable, stood in for here.
+mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
+  readAmuxAssignmentCatalogs: async () => ({ source: "variables", workers: [], v22: [1, 2, 3].map((index) => ({
     worker_name: `worker-${index}`, archived: false, paused: false,
     isolated: false, blocked: false,
-  })),
+  })) }),
 } });
 mock.module(mod("lib/amux/v4TaskReadyService.ts"), { namedExports: {
   loadAmuxV4TaskReadyContext: async () => ({}),
