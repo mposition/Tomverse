@@ -533,44 +533,52 @@ test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" },
         const before = getComputedStyle(node, "::before");
         const rect = node.getBoundingClientRect();
         const inset = (value: string) => Math.abs(Number.parseFloat(value) || 0);
-        const row = node.closest(".composer-chip-exception-row")!.getBoundingClientRect();
+        const rowElement = node.closest(".composer-chip-exception-row");
+        if (!rowElement) throw new Error("The manual exception must provide a dedicated touch-target row.");
+        const row = rowElement.getBoundingClientRect();
         return {
           width: rect.width + inset(before.left) + inset(before.right),
           height: rect.height + inset(before.top) + inset(before.bottom),
           rowOverhang: Math.max(0, row.top - (rect.top - inset(before.top)), rect.bottom + inset(before.bottom) - row.bottom),
           lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + inset(before.bottom) / 2)),
+          realEdgesOwned: [rect.left + 1, rect.right - 1].every(x => node.contains(document.elementFromPoint(x, rect.top + rect.height / 2))),
         };
       });
       expect(hit.height).toBeGreaterThanOrEqual(43.5);
       expect(hit.width).toBeGreaterThanOrEqual(43.5);
       expect(hit.rowOverhang).toBeLessThanOrEqual(1);
       expect(hit.lowerHitOwned).toBe(true);
+      expect(hit.realEdgesOwned).toBe(true);
     }
   });
 
-  test("a coarse tablet retains the exception's actual 44px hit area", async ({ page }) => {
+  test("a coarse tablet keeps both search controls within their 44px row", async ({ page }) => {
     await enterMobileComposer(page, { lang: "en", viewport: { width: 1024, height: 900 }, shell: "desktop" });
     const chip = page.getByTestId("chat-input").getByTestId("web-search-mode-chip");
     await expect(chip).toBeVisible();
     for (const target of [chip.getByTestId("web-search-exception-toggle"), chip.getByRole("button", { name: "Turn off web search" })]) {
-    const hit = await target.evaluate(node => {
-      const rect = node.getBoundingClientRect();
-      const before = getComputedStyle(node, "::before");
-      const inset = (value: string) => Math.abs(Number.parseFloat(value) || 0);
-      const row = node.closest(".composer-chip-exception-row")!.getBoundingClientRect();
-      return {
-        coarse: matchMedia("(pointer: coarse)").matches,
-        width: rect.width + inset(before.left) + inset(before.right),
-        height: rect.height + inset(before.top) + inset(before.bottom),
-        rowOverhang: Math.max(0, row.top - (rect.top - inset(before.top)), rect.bottom + inset(before.bottom) - row.bottom),
-        lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + inset(before.bottom) / 2)),
-      };
-    });
-    expect(hit.coarse).toBe(true);
-    expect(hit.width).toBeGreaterThanOrEqual(43.5);
-    expect(hit.height).toBeGreaterThanOrEqual(43.5);
-    expect(hit.rowOverhang).toBeLessThanOrEqual(1);
-    expect(hit.lowerHitOwned).toBe(true);
+      const hit = await target.evaluate(node => {
+        const rect = node.getBoundingClientRect();
+        const before = getComputedStyle(node, "::before");
+        const inset = (value: string) => Math.abs(Number.parseFloat(value) || 0);
+        const rowElement = node.closest(".composer-chip-exception-row");
+        if (!rowElement) throw new Error("The manual exception must provide a dedicated touch-target row.");
+        const row = rowElement.getBoundingClientRect();
+        return {
+          coarse: matchMedia("(pointer: coarse)").matches,
+          width: rect.width + inset(before.left) + inset(before.right),
+          height: rect.height + inset(before.top) + inset(before.bottom),
+          rowOverhang: Math.max(0, row.top - (rect.top - inset(before.top)), rect.bottom + inset(before.bottom) - row.bottom),
+          lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + inset(before.bottom) / 2)),
+          realEdgesOwned: [rect.left + 1, rect.right - 1].every(x => node.contains(document.elementFromPoint(x, rect.top + rect.height / 2))),
+        };
+      });
+      expect(hit.coarse).toBe(true);
+      expect(hit.width).toBeGreaterThanOrEqual(43.5);
+      expect(hit.height).toBeGreaterThanOrEqual(43.5);
+      expect(hit.rowOverhang).toBeLessThanOrEqual(1);
+      expect(hit.lowerHitOwned).toBe(true);
+      expect(hit.realEdgesOwned).toBe(true);
     }
     await expectNoHorizontalOverflow(page);
   });
