@@ -42,7 +42,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-현재 실측: 2026-09-17 기준 `CI=1 --grep=@ui-risk --list`가 desktop-chromium과 mobile-chromium 각 project에서 **63개 파일, 890 test**를 선택합니다(두 project 합계 1,780). +1 파일은 `help-guide.spec.ts`(HELP-NAV-01 선택형 안내, test 3건)이고, 나머지 +21 test는 2026-09-16 이후 develop에서 기존 태그 spec이 늘어난 몫입니다(develop `0fb27486` 기준으로 셈).
+이전 실측 기준선: 2026-09-17 기준 `CI=1 --grep=@ui-risk --list`가 desktop-chromium과 mobile-chromium 각 project에서 **63개 파일, 890 test**를 선택합니다(두 project 합계 1,780). +1 파일은 `help-guide.spec.ts`(HELP-NAV-01 선택형 안내, test 3건)이고, 나머지 +21 test는 2026-09-16 이후 develop에서 기존 태그 spec이 늘어난 몫입니다(develop `0fb27486` 기준으로 셈). 이 수치는 이후 추가된 spec과 test를 포함한 현재 실행 분모가 아닙니다.
 
 이전 값: 2026-09-16 기준 `CI=1 --grep=@ui-risk --list`가
 desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**를
@@ -71,6 +71,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `chat-memory-context.spec.ts` |
 | `chat-unified-workspace.spec.ts` |
 | `chat-product-switcher.spec.ts` |
+| `compact-composer.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
 | `email-notification-settings.spec.ts` |
@@ -123,6 +124,13 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `external-conversation-continuation.spec.ts` |
 | `conversation-export.spec.ts` |
 | `help-guide.spec.ts` |
+
+`compact-composer.spec.ts`가 2026-10-13에 합류했습니다. 승인된 축소 Composer의
+PC 두 줄 입력 공간, 모바일·키보드 상태의 높이와 입력 폭, coarse pointer의
+44px target, 다국어 모델 선택·크레딧 설명과 스마트 자동 복귀를 실제 화면에서
+확인하는 21개 test입니다. desktop-chromium에서 모바일·태블릿 viewport와
+touch 입력도 함께 측정하며, 다른 project에서는 명시적으로 건너뜁니다.
+기존 모바일 Composer·배너·음성 입력 spec의 계약 검사는 그대로 유지합니다.
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준

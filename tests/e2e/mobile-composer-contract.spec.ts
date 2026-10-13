@@ -106,6 +106,7 @@ type EnterOptions = {
   deepResearch?: boolean;
   /** A saved selection whose answer canvas is still empty. */
   emptyConversation?: boolean;
+  shell?: "mobile" | "desktop";
 };
 
 async function enterMobileComposer(page: Page, options: EnterOptions) {
@@ -117,6 +118,7 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
     webSearchMode = "always",
     deepResearch = false,
     emptyConversation = false,
+    shell = "mobile",
   } = options;
 
   await prepareGuestPage(page, "en");
@@ -152,8 +154,8 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
 
   await page.setViewportSize(viewport);
   await page.goto(`/${productKey ?? "review"}?lang=${lang}`);
-  await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
-  await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
+  await expect(page.getByTestId(`${shell}-chat-shell`)).toBeVisible();
+  if (shell === "mobile") await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
 }
@@ -531,15 +533,95 @@ test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" },
         const before = getComputedStyle(node, "::before");
         const rect = node.getBoundingClientRect();
         const inset = (value: string) => Math.abs(Number.parseFloat(value) || 0);
+        const rowElement = node.closest(".composer-chip-exception-row");
+        if (!rowElement) throw new Error("The manual exception must provide a dedicated touch-target row.");
+        const row = rowElement.getBoundingClientRect();
         return {
           width: rect.width + inset(before.left) + inset(before.right),
           height: rect.height + inset(before.top) + inset(before.bottom),
+          rowOverhang: Math.max(0, row.top - (rect.top - inset(before.top)), rect.bottom + inset(before.bottom) - row.bottom),
+          lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + inset(before.bottom) / 2)),
+          realEdgesOwned: [rect.left + 1, rect.right - 1].every(x => node.contains(document.elementFromPoint(x, rect.top + rect.height / 2))),
         };
       });
       expect(hit.height).toBeGreaterThanOrEqual(43.5);
       expect(hit.width).toBeGreaterThanOrEqual(43.5);
+      expect(hit.rowOverhang).toBeLessThanOrEqual(1);
+      expect(hit.lowerHitOwned).toBe(true);
+      expect(hit.realEdgesOwned).toBe(true);
     }
   });
+
+  test("a coarse tablet keeps both search controls within their 44px row", async ({ page }) => {
+    await enterMobileComposer(page, { lang: "en", viewport: { width: 1024, height: 900 }, shell: "desktop" });
+    const chip = page.getByTestId("chat-input").getByTestId("web-search-mode-chip");
+    await expect(chip).toBeVisible();
+    for (const target of [chip.getByTestId("web-search-exception-toggle"), chip.getByRole("button", { name: "Turn off web search" })]) {
+      const hit = await target.evaluate(node => {
+        const rect = node.getBoundingClientRect();
+        const before = getComputedStyle(node, "::before");
+        const inset = (value: string) => Math.abs(Number.parseFloat(value) || 0);
+        const rowElement = node.closest(".composer-chip-exception-row");
+        if (!rowElement) throw new Error("The manual exception must provide a dedicated touch-target row.");
+        const row = rowElement.getBoundingClientRect();
+        return {
+          coarse: matchMedia("(pointer: coarse)").matches,
+          width: rect.width + inset(before.left) + inset(before.right),
+          height: rect.height + inset(before.top) + inset(before.bottom),
+          rowOverhang: Math.max(0, row.top - (rect.top - inset(before.top)), rect.bottom + inset(before.bottom) - row.bottom),
+          lowerHitOwned: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.bottom + inset(before.bottom) / 2)),
+          realEdgesOwned: [rect.left + 1, rect.right - 1].every(x => node.contains(document.elementFromPoint(x, rect.top + rect.height / 2))),
+        };
+      });
+      expect(hit.coarse).toBe(true);
+      expect(hit.width).toBeGreaterThanOrEqual(43.5);
+      expect(hit.height).toBeGreaterThanOrEqual(43.5);
+      expect(hit.rowOverhang).toBeLessThanOrEqual(1);
+      expect(hit.lowerHitOwned).toBe(true);
+      expect(hit.realEdgesOwned).toBe(true);
+    }
+    await expectNoHorizontalOverflow(page);
+  });
+
+  for (const lang of ["en", "es"] as const) {
+    for (const width of [249, 275]) {
+      test(`${lang} partial-search actions remain reachable at ${width}px with the keyboard open`, async ({ page }) => {
+        await enterMobileComposer(page, { lang, viewport: { width, height: 680 } });
+        await page.getByTestId("chat-textarea").focus();
+        await page.evaluate(() => {
+          const viewport = window.visualViewport!;
+          Object.defineProperty(viewport, "height", { configurable: true, get: () => 360 });
+          viewport.dispatchEvent(new Event("resize"));
+        });
+        await expect(page.getByTestId("composer-product-mode-row")).toHaveCount(0);
+        const composer = page.getByTestId("chat-input");
+        const bounds = (await composer.boundingBox())!;
+        for (const id of ["composer-tools-button", "composer-model-select", "web-search-mode-chip", "request-credit-estimate", "chat-send-button"]) {
+          const control = composer.getByTestId(id);
+          const box = (await control.boundingBox())!;
+          expect(box.x, id).toBeGreaterThanOrEqual(bounds.x);
+          expect(box.x + box.width, id).toBeLessThanOrEqual(bounds.x + bounds.width);
+          const hit = await control.evaluate(node => {
+            const rect = node.getBoundingClientRect();
+            return node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+          });
+          expect(hit, id).toBe(true);
+        }
+        const edgeHits = await composer.evaluate(node => {
+          const controls = node.querySelectorAll<HTMLElement>('[data-testid="chat-textarea"], [data-testid="composer-tools-button"], [data-testid="composer-model-select"], [data-testid="request-credit-estimate"], [data-testid="chat-send-button"]');
+          return Array.from(controls).flatMap(control => {
+            const box = control.getBoundingClientRect();
+            const x = box.left + box.width / 2;
+            const y = box.top + box.height / 2;
+            const points = [[x, box.top + 1], [x, box.bottom - 1], [box.left + 1, y], [box.right - 1, y]];
+            return points.filter(([px, py]) => !control.contains(document.elementFromPoint(px, py))).map(([px, py]) => ({ id: control.dataset.testid, x: px, y: py }));
+          });
+        });
+        expect(edgeHits, "input and adjacent actions retain their own hit areas").toEqual([]);
+        await expectComposerContract(page, `${lang} partial-search keyboard @${width}px`);
+      });
+    }
+  }
 });
 
 test.describe("Mobile composer: disabled actions state their reason", { tag: "@ui-risk" }, () => {
@@ -809,15 +891,15 @@ test.describe("Mobile composer: focus indicator", { tag: "@ui-risk" }, () => {
 });
 
 test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-risk" }, () => {
-  test("short active Review keeps models in the header and a usable footer picker", async ({ page }) => {
+  test("normal active Review keeps a compact context and the actual model picker", async ({ page }) => {
     await enterMobileComposer(page, {
       models: ALL_SEARCH_MODELS,
       viewport: { width: 390, height: 680 },
       webSearchMode: "off",
     });
     const composer = page.getByTestId("chat-input");
-    await expect(composer.getByTestId("composer-product-mode-row")).toHaveCount(0);
-    await expect(composer.getByTestId("composer-review-models")).toHaveCount(0);
+    await expect(composer.getByTestId("composer-product-mode-row")).toBeVisible();
+    await expect(composer.getByTestId("composer-review-models")).toBeVisible();
     await expect(page.getByTestId("mobile-header-model-count")).toContainText("3");
     await expect(page.getByTestId("mobile-model-tab")).toHaveCount(3);
     await expect(composer.getByTestId("composer-model-select")).toHaveAccessibleName(/3/);
@@ -1268,8 +1350,11 @@ test.describe("Mobile composer: page zoom and short screens", { tag: "@ui-risk" 
       const measured = await page.evaluate(() => {
         const composer = document.querySelector<HTMLElement>('[data-testid="chat-input"]')!;
         const button = document.querySelector<HTMLElement>('[data-testid="composer-model-select"]')!;
-        const icons = button.querySelectorAll("svg");
-        const chevron = icons[icons.length - 1].getBoundingClientRect();
+        const chevronNode = button.querySelector<HTMLElement | SVGSVGElement>(
+          'span[style*="icon-chevron-down-14.svg"], svg.lucide-chevron-down'
+        );
+        if (!chevronNode) throw new Error("The model picker chevron is not rendered");
+        const chevron = chevronNode.getBoundingClientRect();
         const outer = composer.getBoundingClientRect();
         const style = getComputedStyle(composer);
         // The padding box: what the composer's overflow-hidden clips to.

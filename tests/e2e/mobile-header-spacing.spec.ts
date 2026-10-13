@@ -729,7 +729,7 @@ test.describe("Model configuration", { tag: "@ui-risk" }, () => {
 
       // The header's count and the composer's must agree.
       await expect(page.getByTestId("composer-active-model-count")).toHaveText(
-        models.length === 1 ? "1 AI" : `${models.length} AIs`
+        models.length === 1 ? "1 model" : `${models.length} models`
       );
       await expectNoHorizontalOverflow(page);
     });
