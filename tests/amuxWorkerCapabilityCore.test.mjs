@@ -12,10 +12,13 @@ import {
   AMUX_WORKER_V22_ROLES,
   AMUX_WORKER_V22_ROLE_REQUIREMENTS,
   amuxWorkerCapabilitiesEqual,
+  amuxWorkerCapabilityImportsToWrite,
   amuxWorkerCapabilityImport,
   amuxWorkerCapabilityRefusal,
   amuxWorkerCapabilityWithinCeiling,
   amuxWorkerCapabilityWritesOpen,
+  buildAmuxWorkerCapabilityAdminView,
+  parseAmuxWorkerCapabilityAdminView,
 } from "../lib/amux/workerCapabilityCore.ts";
 import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
 
@@ -174,4 +177,49 @@ test("an import shows the refusal a write would meet, and skips unregistered or 
     null,
   );
   assert.deepEqual(rows.map((row) => [row.workerName, row.refusal]), [["claude-chore", "tag_above_ceiling"]]);
+});
+
+
+test("the Admin view proposes the import per worker and says what is already recorded", () => {
+  const recorded = new Map([[
+    "codex-impl",
+    { revision: 1, capability: { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null }, changedAt: "2026-10-13T00:00:00.000Z" },
+  ]]);
+  const view = buildAmuxWorkerCapabilityAdminView({
+    registrations: PRODUCTION_REGISTRY,
+    current: recorded,
+    legacy: PRODUCTION_LEGACY,
+    v22: PRODUCTION_V22,
+  });
+  assert.equal(view.writesLatch, false);
+  assert.equal(view.catalogReadable, true);
+  assert.equal(view.rows.length, 13);
+  const byName = Object.fromEntries(view.rows.map((row) => [row.workerName, row]));
+  assert.equal(byName["codex-impl"].same, true);
+  assert.equal(byName["cursor-impl"].proposed, null);
+  const imports = amuxWorkerCapabilityImportsToWrite(view);
+  assert.equal(imports.length, 6);
+  assert.equal(imports.some((entry) => entry.workerName === "codex-impl"), false);
+  assert.deepEqual(imports.find((entry) => entry.workerName === "claude-chore").expectedRevision, 0);
+  assert.deepEqual(parseAmuxWorkerCapabilityAdminView(JSON.parse(JSON.stringify(view))), view);
+});
+
+test("the GET body is accepted only in its exact shape", () => {
+  const view = buildAmuxWorkerCapabilityAdminView({ registrations: PRODUCTION_REGISTRY, current: new Map(), legacy: PRODUCTION_LEGACY, v22: PRODUCTION_V22 });
+  const body = JSON.parse(JSON.stringify(view));
+  for (const broken of [
+    null,
+    { ...body, writesLatch: "no" },
+    { ...body, rows: [{ ...body.rows[0], workerName: "devin-worker" }] },
+    { ...body, rows: [{ ...body.rows[0], roleCeiling: "review" }] },
+    { ...body, rows: [{ ...body.rows[0], refusal: "because" }] },
+    { ...body, rows: [{ ...body.rows[0], proposed: { routingTags: "chore" } }] },
+    { ...body, catalogReadable: false },
+  ]) {
+    assert.equal(parseAmuxWorkerCapabilityAdminView(broken), null, JSON.stringify(broken)?.slice(0, 60));
+  }
+  const unreadable = buildAmuxWorkerCapabilityAdminView({ registrations: PRODUCTION_REGISTRY, current: new Map(), legacy: null, v22: null });
+  assert.equal(unreadable.catalogReadable, false);
+  assert.ok(unreadable.rows.every((row) => row.proposed === null));
+  assert.deepEqual(parseAmuxWorkerCapabilityAdminView(JSON.parse(JSON.stringify(unreadable))), unreadable);
 });
