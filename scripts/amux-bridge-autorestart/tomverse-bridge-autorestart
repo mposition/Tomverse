@@ -1,0 +1,120 @@
+#!/bin/bash
+# Restarts an AMUX execution bridge that halted for a reason known to have
+# left nothing behind.
+#
+# docs/ops/amux/bridge-monitoring.md §5 is the runbook. A systemd timer runs
+# this every two minutes. A bridge halts with exit 3 and systemd deliberately
+# does not restart it (RestartPreventExitStatus=3): an unknown outcome stops
+# and waits for a person. The operator approved a narrow exception on
+# 2026-10-14, after a day of halts that waited hours for a restart nobody
+# needed to judge:
+#
+#   cause=worker_runtime_lease_lost      the app had already dropped the
+#                                        runtime; a restart registers a new one
+#   cause=tick_failed_<class>            only when the same run logged that the
+#                                        failed tick had committed 0 results
+#
+# Every other cause -- dispatch_outcome_unknown, settle_outcome_unknown,
+# pending_session_missing, a tick that had committed results, a halt line
+# that cannot be read -- stays halted and is reported by the existing alerts.
+# There is no restart count limit (operator decision, 2026-10-14).
+#
+# A bridge exits 3 only once nothing it dispatched is still pending
+# (apps/tomverse-orchestrator/src/wsl_bridge.rs, `halted && pending_count == 0`),
+# so a restart never takes over work in flight.
+#
+# A restart also needs the local AMUX server and the Tomverse app to answer;
+# otherwise this run leaves the bridge for the next one.
+#
+# Runs as its own system account. A polkit rule installed with it lets that
+# account restart the bridge units and nothing else; it reads their journal
+# through the systemd-journal group the unit grants it.
+set -euo pipefail
+
+main_unit=tomverse-bridge.service
+unit_pattern='tomverse-amux-v22-bridge@*.service'
+unit_name='^tomverse-amux-v22-bridge@[A-Za-z0-9_.-]+\.service$'
+amux_health=https://127.0.0.1:8824/health
+app_health=https://tomverse.app/api/health
+
+log() { echo "tomverse-bridge-autorestart: $*"; }
+
+# The halt line and the tick line, as wsl_bridge.rs prints them.
+halt_line='^amux wsl bridge halted: no new assignments; cause=([a-z0-9_]+);'
+nothing_committed='^amux wsl bridge warn: tick failed \([a-z0-9_]+\) after 0 result\(s\) already committed this tick;'
+
+# Prints "restart" or "hold <reason>" for one failed run's journal lines.
+decide() {
+  local lines=$1 cause=""
+  while IFS= read -r line; do
+    [[ "$line" =~ $halt_line ]] && cause=${BASH_REMATCH[1]}
+  done <<<"$lines"
+  if [[ -z "$cause" ]]; then
+    echo "hold no halt line"
+  elif [[ "$cause" == worker_runtime_lease_lost ]]; then
+    echo restart
+  elif [[ "$cause" == tick_failed_* ]]; then
+    if grep -qE "$nothing_committed" <<<"$lines"; then
+      echo restart
+    else
+      echo "hold cause=$cause without a tick that committed nothing"
+    fi
+  else
+    echo "hold cause=$cause is not restarted automatically"
+  fi
+}
+
+answers() {
+  curl --silent --show-error --fail --max-time 5 --output /dev/null "$@" 2>/dev/null
+}
+
+units=("$main_unit")
+if listing=$(systemctl list-units --all --plain --no-legend --type=service "$unit_pattern" 2>&1); then
+  while read -r name _; do
+    [[ "$name" =~ $unit_name ]] && units+=("$name")
+  done <<<"$listing"
+else
+  log "the v22 unit list is unreadable (systemctl: ${listing%%$'\n'*}); checking $main_unit only"
+fi
+
+halted=()
+for unit in "${units[@]}"; do
+  state=$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)
+  status=$(systemctl show -p ExecMainStatus --value "$unit" 2>/dev/null || true)
+  [[ "$state" == failed && "$status" == 3 ]] && halted+=("$unit")
+done
+
+if ((${#halted[@]} == 0)); then
+  exit 0
+fi
+
+# The local AMUX server's own certificate is self-signed; the unit's start
+# check reads it the same way.
+if ! answers --insecure "$amux_health"; then
+  log "${#halted[@]} halted; the local AMUX server does not answer, no restart this run"
+  exit 0
+fi
+if ! answers --proto '=https' "$app_health"; then
+  log "${#halted[@]} halted; the Tomverse app does not answer, no restart this run"
+  exit 0
+fi
+
+for unit in "${halted[@]}"; do
+  invocation=$(systemctl show -p InvocationID --value "$unit" 2>/dev/null || true)
+  if [[ ! "$invocation" =~ ^[0-9a-f]{32}$ ]]; then
+    log "$unit halted; its run is unreadable (no invocation id), left halted"
+    continue
+  fi
+  lines=$(journalctl "_SYSTEMD_INVOCATION_ID=$invocation" --no-pager -q -o cat 2>/dev/null || true)
+  read -r verdict reason <<<"$(decide "$lines")"
+  if [[ "$verdict" != restart ]]; then
+    log "$unit halted; $reason, left halted"
+    continue
+  fi
+  cause=$(grep -oE 'cause=[a-z0-9_]+' <<<"$lines" | tail -n 1)
+  if systemctl restart --no-block "$unit"; then
+    log "$unit halted with $cause; restarted"
+  else
+    log "$unit halted with $cause; the restart was refused" >&2
+  fi
+done
