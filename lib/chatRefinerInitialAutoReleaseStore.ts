@@ -13,6 +13,7 @@ import {
   CHAT_REFINER_INITIAL_AUTO_PRODUCT_SUMMARY,
   CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
   CHAT_REFINER_INITIAL_AUTO_ROUTER_SUMMARY,
+  chatRefinerInitialAutoAuthorityDigest,
   chatRefinerInitialAutoProductMetadata,
   chatRefinerInitialAutoRouterMetadata,
   chatRefinerInitialAutoRuntimeBinding,
@@ -68,6 +69,18 @@ export async function inspectChatRefinerInitialAutoRelease(
   } catch {
     return closed("invalid", "runtime_controls_invalid");
   }
+  // An unrelated deployment must not turn off an Owner-enabled product.
+  // Read only the latest activation; never fall back past a bad newer record.
+  // docs/policy/chat-operator-controlled-availability-v3.md
+  const latest = await tx.adminAuditLog.findMany({
+    where: {
+      action: CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
+      targetType: "ChatReleaseAuthority",
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 1,
+  });
+  if (latest.length === 0) return closed("absent", "activation_pair_absent");
   const rows = await tx.adminAuditLog.findMany({
     where: {
       action: { in: [
@@ -75,7 +88,7 @@ export async function inspectChatRefinerInitialAutoRelease(
         CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
       ] },
       targetType: "ChatReleaseAuthority",
-      targetId: binding.releaseAuthorityDigest,
+      targetId: latest[0].targetId,
     },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: 3,
@@ -96,22 +109,29 @@ export async function inspectChatRefinerInitialAutoRelease(
   if (!evidence.success) {
     return closed("invalid", "activation_pair_mismatch");
   }
-  // The original serving identity is immutable audit provenance. Continued
-  // authority compares the stable release fingerprint and effective controls,
-  // while the current deployment is still validated before each use.
+  // Verify the original source and serving identity as immutable provenance,
+  // with the current effective controls and price/candidate/adapter pins.
   const activationCommit = routerMetadata?.runtimeCommitSha;
   const activationDeployment = routerMetadata?.runtimeDeploymentId;
+  const activationFingerprint = routerMetadata?.releaseFingerprint;
   if (typeof activationCommit !== "string" ||
       !/^[0-9a-f]{40}$/.test(activationCommit) ||
       typeof activationDeployment !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
-        activationDeployment)) {
+        activationDeployment) ||
+      typeof activationFingerprint !== "string" ||
+      !/^[0-9a-f]{64}$/.test(activationFingerprint)) {
     return closed("invalid", "activation_pair_mismatch");
   }
   const activationBinding = { ...binding,
     runtimeCommitSha: activationCommit,
-    runtimeDeploymentId: activationDeployment };
+    runtimeDeploymentId: activationDeployment,
+    releaseFingerprint: activationFingerprint,
+    releaseAuthorityDigest: chatRefinerInitialAutoAuthorityDigest(
+      activationFingerprint, binding.routerConfigDigest) };
   if (!router.actorUserId || router.actorUserId !== product.actorUserId ||
+      router.targetId !== activationBinding.releaseAuthorityDigest ||
+      product.id !== latest[0].id ||
       router.summary !== CHAT_REFINER_INITIAL_AUTO_ROUTER_SUMMARY ||
       product.summary !== CHAT_REFINER_INITIAL_AUTO_PRODUCT_SUMMARY ||
       !router.entryHash || product.previousHash !== router.entryHash ||

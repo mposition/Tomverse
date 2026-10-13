@@ -240,7 +240,7 @@ export const PROTECTED_TABLES = [
   {
     table: "PromptRefinerProductOperationalGuard", delegate: "promptRefinerProductOperationalGuard",
     writers: ["lib/promptRefinerProductOperationalGuard.ts"],
-    contract: "docs/policy/prompt-refiner-vnext-full-auto-release-exception-v1.md §3",
+    contract: "docs/policy/chat-operator-controlled-availability-v3.md",
   },
   {
     table: "PromptRefinerChatSuggestion",
@@ -1929,8 +1929,8 @@ export const RAW_SQL_ALLOWLIST = [
   })),
   ...["AdminAuditLog", "PromptRefinerProductExecutionReceipt", "PromptRefinerProductExecutionContext", "PromptRefinerProductDispositionReceipt", "PromptRefinerProductAttempt", "PromptRefinerProductOperationalGuard", "PromptRefinerAutoBudgetHold"].map((table, index) => ({
     path: "lib/promptRefinerProductOperationalGuard.ts", table,
-    tableMentions: [4, 5, 2, 4, 4, 6, 2][index], writeVerbs: 4,
-    reason: "The sole operational guard writer reads the current writer-supplied receipt, bounded latest-100 execution/disposition facts, an indexed generation-wide unknown-attempt probe, and one indexed expired-attempt receipt-gap probe. It inserts the initial latch and updates only the latch for policy stop or a generation-bound human resume; all audits use the canonical writer in the same transaction. It never changes provider accounting or receipt history.",
+    tableMentions: [5, 5, 2, 4, 4, 6, 2][index], writeVerbs: 3,
+    reason: "The sole operational guard writer reads the current writer-supplied receipt, bounded latest-100 execution/disposition facts, generation-wide unknown/expired-attempt probes, and the audit to deduplicate each operational reason per Owner generation. The v3 operator decision removes the automatic pause UPDATE: only initialization and generation-bound human resume write the guard. All audit writes use the canonical writer in the same transaction. It never changes provider accounting or receipt history.",
   })),
   ...["AdminAuditLog", "PromptRefinerProductOperationalGuard"].map((table, index) => ({
     path: "prisma/migrations/20261010120000_prompt_refiner_product_operational_guard/migration.sql", table,

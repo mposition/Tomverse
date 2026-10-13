@@ -11,6 +11,7 @@ export const PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID = "auto";
 export const PROMPT_REFINER_PRODUCT_OPERATIONAL_SAMPLE_SIZE = 100;
 export const PROMPT_REFINER_PRODUCT_P90_LIMIT_MS = 6_000;
 export const PROMPT_REFINER_PRODUCT_FALLBACK_LIMIT = 5;
+export const PROMPT_REFINER_PRODUCT_OBSERVATION_WINDOW_MS = 60 * 60 * 1_000;
 
 export const PROMPT_REFINER_PRODUCT_AUTO_GUARD_STATES =
   ["active", "paused"] as const;
@@ -309,34 +310,37 @@ async function observe(
   return null;
 }
 
-async function pause(tx: Tx, guard: GuardRow, observation: Observation) {
-  const auditLogId = await writeSystemAuditLog({ tx,
+async function recordObservation(tx: Tx, guard: GuardRow, observation: Observation) {
+  // The operator controls product availability. A failed request retains its
+  // own fallback/refusal and unknown holds, without switching off every user.
+  // docs/policy/chat-operator-controlled-availability-v3.md
+  // The audit-chain lock held by the caller serializes this read and write.
+  // Record each reason at most once per hour and Owner generation. Persistent
+  // unknown reservations do not flood the audit; later recurrences remain visible.
+  const [prior] = await tx.$queryRaw<Array<{ present: boolean }>>`
+    SELECT EXISTS (
+      SELECT 1 FROM "AdminAuditLog"
+      WHERE "action" = 'prompt_refiner.product_auto_guard_observed'
+        AND "targetType" = 'PromptRefinerProductOperationalGuard'
+        AND "targetId" = ${PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID}
+        AND "metadata"->>'generation' = ${String(guard.generation)}
+        AND "metadata"->>'reasonCode' = ${observation.reasonCode}
+        AND "createdAt" >= (clock_timestamp() AT TIME ZONE 'UTC') -
+          (${PROMPT_REFINER_PRODUCT_OBSERVATION_WINDOW_MS}::bigint * INTERVAL '1 millisecond')
+    ) AS "present"
+  `;
+  if (!prior?.present) await writeSystemAuditLog({ tx,
     systemActor: "prompt-refiner-product-execution",
-    action: "prompt_refiner.product_auto_paused",
+    action: "prompt_refiner.product_auto_guard_observed",
     targetType: "PromptRefinerProductOperationalGuard",
     targetId: PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID,
-    summary: "Paused Prompt Refiner Auto on a content-free operational guard.",
+    summary: "Observed a Prompt Refiner operational issue without changing availability.",
     metadata: { generation: guard.generation,
       reasonCode: observation.reasonCode, sampleSize: observation.sampleSize,
       p90LatencyMs: observation.p90LatencyMs,
       fallbackCount: observation.fallbackCount },
   });
-  const changed = await tx.$executeRaw`
-    UPDATE "PromptRefinerProductOperationalGuard"
-    SET "state" = 'paused', "pausedAt" = clock_timestamp(),
-      "reasonCode" = ${observation.reasonCode},
-      "sampleSize" = ${observation.sampleSize},
-      "p90LatencyMs" = ${observation.p90LatencyMs},
-      "fallbackCount" = ${observation.fallbackCount},
-      "lastTransitionAuditLogId" = ${auditLogId},
-      "transitionedAt" = clock_timestamp()
-    WHERE "id" = ${PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID}
-      AND "state" = 'active' AND "generation" = ${guard.generation}
-  `;
-  if (changed !== 1) {
-    throw new Error("prompt_refiner_product_auto_guard_pause_conflict");
-  }
-  return Object.freeze({ active: false, generation: guard.generation,
+  return Object.freeze({ active: true, generation: guard.generation,
     reasonCode: observation.reasonCode });
 }
 
@@ -351,7 +355,7 @@ export async function evaluatePromptRefinerProductAutoGuardInTransaction(
   if (!guard || guard.state !== "active") return Object.freeze({ active: false,
     generation: guard?.generation ?? null, reasonCode: guard?.reasonCode ?? null });
   const observation = await observe(tx, guard, currentReceipts);
-  return observation ? pause(tx, guard, observation) : Object.freeze({
+  return observation ? recordObservation(tx, guard, observation) : Object.freeze({
     active: true, generation: guard.generation, reasonCode: null });
 }
 
@@ -381,7 +385,7 @@ export async function latchPromptRefinerProductAutoStopInTransaction(
   if (!guard || guard.state !== "active") return Object.freeze({
     active: false, generation: guard?.generation ?? null,
     reasonCode: guard?.reasonCode ?? null });
-  return pause(tx, guard, Object.freeze({ reasonCode,
+  return recordObservation(tx, guard, Object.freeze({ reasonCode,
     sampleSize: 0, p90LatencyMs: null, fallbackCount: null }));
 }
 

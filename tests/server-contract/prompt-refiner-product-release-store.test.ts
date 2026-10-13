@@ -134,7 +134,8 @@ const tx = async () => {
       if (where.action ===
           "prompt_refiner.product_initial_auto_release_activated" &&
           where.targetType === "ChatReleaseAuthority") {
-        return priorSourceActivation ? [{ id: "prior-v2-product" }] : [];
+        return priorSourceActivation || initialInspection.state !== "absent"
+          ? [{ id: "prior-v2-product" }] : [];
       }
       if (typeof where.action === "object") {
         return initialInspection.state === "absent" ? [] : [{ id: "initial" }];

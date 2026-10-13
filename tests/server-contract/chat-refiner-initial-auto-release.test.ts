@@ -30,19 +30,25 @@ let guardInitializations = 0;
 let nextAudit = 0;
 let transactionCount = 0;
 let storedRollout: string | null = null;
+let sourceFingerprint = "d".repeat(64);
 
 const tx = {
   adminAuditLog: {
-    findMany: async ({ where, take }: { where: {
+    findMany: async ({ where, take, orderBy }: { where: {
       action: string | { in: string[] }; targetType?: string;
       targetId?: string;
-    }; take?: number }) => {
+    }; take?: number; orderBy?: Array<Record<string, string>> }) => {
       const actions = typeof where.action === "string"
         ? [where.action] : where.action.in;
       return rows.filter((row) => actions.includes(String(row.action)) &&
         (where.targetType === undefined || row.targetType === where.targetType) &&
         (where.targetId === undefined || row.targetId === where.targetId))
-        .slice(0, take);
+        .sort((left, right) => {
+          const order = (left.createdAt as Date).getTime() -
+            (right.createdAt as Date).getTime() ||
+            String(left.id).localeCompare(String(right.id));
+          return orderBy?.[0]?.createdAt === "desc" ? -order : order;
+        }).slice(0, take);
     },
   },
   appSetting: {
@@ -72,6 +78,9 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
     return row.id;
   },
 } });
+mock.module(mod("lib/chatReleaseSourceFingerprint.ts"), { namedExports: {
+  currentChatReleaseSourceFingerprint: () => sourceFingerprint,
+} });
 mock.module(mod("lib/adminAuditIntegrityCore.ts"), { namedExports: {
   adminAuditIntegrityKeys: () => ["synthetic-audit-key"],
 } });
@@ -82,6 +91,13 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   },
 } } });
 mock.module(mod("lib/promptRefinerProductOperationalGuard.ts"), { namedExports: {
+  PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID: "auto",
+  latchPromptRefinerProductAutoStopInTransaction: async () => {
+    throw new Error("valid_continuing_release_must_not_record_drift");
+  },
+  resumePromptRefinerProductAutoGuardInTransaction: async () => {
+    throw new Error("continuing_release_must_not_resume_a_guard");
+  },
   initializePromptRefinerProductAutoGuard: async () => {
     guardInitializations += 1;
     return { active: false, generation: 7, reasonCode: "unknown_dispatch_or_cost" };
@@ -102,12 +118,14 @@ const corePromise = import(mod("lib/chatRefinerInitialAutoRelease.ts"));
 const storePromise = import(mod("lib/chatRefinerInitialAutoReleaseStore.ts"));
 const rolloutStorePromise = import(mod("lib/chatRefinerInitialAutoRolloutStore.ts"));
 const guestStorePromise = import(mod("lib/guestChatSmartAdaptiveReleaseStore.ts"));
+const productStorePromise = import(mod("lib/promptRefinerProductReleaseStore.ts"));
 
 beforeEach(() => {
   rows = []; priceMatches = true; guardActive = true;
   guardInitializations = 0; nextAudit = 0;
   transactionCount = 0;
   storedRollout = null;
+  sourceFingerprint = "d".repeat(64);
 });
 
 test("runtime binding is content-free, deterministic and closes on critical controls", async () => {
@@ -178,7 +196,7 @@ test("a changed Router control closes the old pair but allows a new exact Owner 
   assert.equal(rows[2].previousHash, rows[1].entryHash);
 });
 
-test("unchanged source remains authorized across commit and deployment changes", async () => {
+test("Owner activation survives changed source, commit and deployment without rewriting audit", async () => {
   const store = await storePromise;
   await store.activateChatRefinerInitialAutoRelease({
     session: { user: { id: "owner-id", email: "owner@example.test" } } as never,
@@ -187,6 +205,8 @@ test("unchanged source remains authorized across commit and deployment changes",
     runtimeDeploymentId: runtime.RAILWAY_DEPLOYMENT_ID,
     evidenceRefs,
   }, runtime);
+  const originalAudits = structuredClone(rows);
+  sourceFingerprint = "e".repeat(64);
   const successor = { ...runtime,
     RAILWAY_GIT_COMMIT_SHA: "c".repeat(40),
     RAILWAY_DEPLOYMENT_ID: "22222222-2222-4222-8222-222222222222" };
@@ -195,6 +215,16 @@ test("unchanged source remains authorized across commit and deployment changes",
   assert.equal(authority?.runtimeCommitSha, successor.RAILWAY_GIT_COMMIT_SHA);
   assert.equal(authority?.runtimeDeploymentId, successor.RAILWAY_DEPLOYMENT_ID);
   assert.equal(rows.length, 2);
+  assert.deepEqual(rows, originalAudits);
+  // Exercise the actual execution admission as well as capability minting:
+  // neither may retain a current-fingerprint prefilter after source changes.
+  const productStore = await productStorePromise;
+  const admitted = await productStore.admitPromptRefinerProductRelease(
+    tx as never, successor);
+  assert.equal(admitted.autoEnabled, true);
+  assert.equal(admitted.approvalAuditLogId, rows[1].id);
+  assert.equal(admitted.runtimeDeploymentId, successor.RAILWAY_DEPLOYMENT_ID);
+  assert.deepEqual(rows, originalAudits);
   assert.equal((rows[0].metadata as Record<string, unknown>).runtimeCommitSha,
     runtime.RAILWAY_GIT_COMMIT_SHA);
   assert.equal(await store.readChatRefinerInitialAutoRouterAuthority({
@@ -240,13 +270,38 @@ test("Guest release remains active on a new deployment but closes on guard drift
   const successor = { ...guestRuntime,
     RAILWAY_GIT_COMMIT_SHA: "c".repeat(40),
     RAILWAY_DEPLOYMENT_ID: "22222222-2222-4222-8222-222222222222" };
+  sourceFingerprint = "e".repeat(64);
   const current = await guest.readGuestChatSmartAdaptiveRelease(successor);
   assert.equal(current?.binding.runtimeDeploymentId,
     successor.RAILWAY_DEPLOYMENT_ID);
   assert.equal(current?.activationAuditLogId, rows[2].id);
   assert.equal(rows.length, 3);
+  assert.equal(current?.binding.releaseFingerprint, sourceFingerprint);
+  rows.push({ ...rows[2], id: "duplicate-guest", createdAt: new Date(2_000) });
+  assert.equal(await guest.readGuestChatSmartAdaptiveRelease(successor), null,
+    "duplicate activation records are ambiguous, even if the newest is valid");
+  rows.pop();
+  rows.push({ ...rows[2], id: "invalid-new-guest", targetId: "f".repeat(64),
+    metadata: { tampered: true }, createdAt: new Date(2_001) });
+  assert.equal(await guest.readGuestChatSmartAdaptiveRelease(successor), null,
+    "a newer invalid Guest activation cannot inherit the older valid one");
+  rows.pop();
   guardActive = false;
   assert.equal(await guest.readGuestChatSmartAdaptiveRelease(successor), null);
+});
+
+test("a newer invalid activation never falls back to a valid older Owner pair", async () => {
+  const store = await storePromise;
+  await store.activateChatRefinerInitialAutoRelease({
+    session: { user: { id: "owner-id" } } as never,
+    request: new Request("https://tomverse.test", { method: "POST" }),
+    runtimeCommitSha: runtime.RAILWAY_GIT_COMMIT_SHA,
+    runtimeDeploymentId: runtime.RAILWAY_DEPLOYMENT_ID,
+    evidenceRefs,
+  }, runtime);
+  rows.push({ ...rows[1], id: "invalid-newer", targetId: "f".repeat(64),
+    createdAt: new Date(2_000), metadata: { tampered: true } });
+  assert.equal(await store.readChatRefinerInitialAutoRouterAuthority(runtime), null);
 });
 
 test("activation rejects malformed evidence before opening a transaction", async () => {

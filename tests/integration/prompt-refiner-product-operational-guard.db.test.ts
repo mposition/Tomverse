@@ -5,12 +5,38 @@ import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
+import { computeAdminAuditEntryHash } from "../../lib/adminAuditIntegrityCore";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const rawUrl = process.env.TEST_DATABASE_URL?.trim();
 
-test("Prompt Refiner product Auto operational latch on PostgreSQL",
+test("the real Prisma PostgreSQL driver binds the observation window and generation", {
+  skip: !rawUrl,
+}, async () => {
+  if (!rawUrl) return;
+  const url = new URL(rawUrl);
+  assert.match(decodeURIComponent(url.pathname), /(?:^|[_-])test(?:[_-]|$)/);
+  assert.ok(["127.0.0.1", "localhost"].includes(url.hostname));
+  const [{ PrismaClient }, { PrismaPg }] = await Promise.all([
+    import("@prisma/client"), import("@prisma/adapter-pg"),
+  ]);
+  const nativeClient = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: rawUrl }),
+  });
+  try {
+    const rows = await nativeClient.$queryRaw<Array<{ compatible: boolean }>>`
+      SELECT (${String(1)}::text = '1' AND
+        ${60 * 60 * 1_000}::bigint * INTERVAL '1 millisecond' = INTERVAL '1 hour')
+        AS "compatible"
+    `;
+    assert.equal(rows[0].compatible, true);
+  } finally {
+    await nativeClient.$disconnect();
+  }
+});
+
+test("Prompt Refiner operational observations preserve Owner availability on PostgreSQL",
   { skip: !rawUrl }, async t => {
     if (!rawUrl) return;
     const url = new URL(rawUrl);
@@ -19,6 +45,10 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
     const schema = `refiner_operational_${randomUUID().replaceAll("-", "")}`;
     const client = new pg.Client({ connectionString: rawUrl });
     const pool = new pg.Pool({ connectionString: rawUrl, max: 2 });
+    const auditSecret = "synthetic-chat-availability-audit-integrity-key";
+    const priorAuditSecret = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+    process.env.ADMIN_AUDIT_INTEGRITY_KEY = auditSecret;
+    let auditLockCount = 0;
     await client.connect();
     const query = (db: pg.PoolClient, strings: TemplateStringsArray,
       values: unknown[]) => db.query(strings.reduce((sql, part, index) =>
@@ -30,6 +60,10 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         ...values: unknown[]) => Promise<unknown[]>;
       $executeRaw: (strings: TemplateStringsArray,
         ...values: unknown[]) => Promise<number>;
+      adminAuditLog: {
+        findFirst: (input: unknown) => Promise<unknown>;
+        create: (input: { data: Record<string, unknown> }) => Promise<{ id: string }>;
+      };
     };
     const transactionAtTimeZone = async <T>(timeZone: TestTimeZone,
       work: (tx: TestTx) => Promise<T>, rollback = false) => {
@@ -41,8 +75,28 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         const result = await work({
           $queryRaw: async (strings, ...values) =>
             (await query(db, strings, values)).rows,
-          $executeRaw: async (strings, ...values) =>
-            (await query(db, strings, values)).rowCount ?? 0,
+          $executeRaw: async (strings, ...values) => {
+            if (strings.join("").includes("pg_advisory_xact_lock")) auditLockCount += 1;
+            return (await query(db, strings, values)).rowCount ?? 0;
+          },
+          adminAuditLog: {
+            findFirst: async () => (await db.query(`SELECT "entryHash", "createdAt"
+              FROM "AdminAuditLog" WHERE "entryHash" IS NOT NULL
+              ORDER BY "createdAt" DESC, "id" DESC LIMIT 1`)).rows[0] ?? null,
+            create: async ({ data }) => {
+              const id = randomUUID();
+              await db.query(`INSERT INTO "AdminAuditLog" (
+                "id", "actorUserId", "actorEmail", "action", "targetType",
+                "targetId", "summary", "metadata", "ipAddress", "userAgent",
+                "previousHash", "entryHash", "createdAt"
+              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13)`,
+              [id, data.actorUserId, data.actorEmail, data.action, data.targetType,
+                data.targetId, data.summary, JSON.stringify(data.metadata ?? {}),
+                data.ipAddress, data.userAgent, data.previousHash,
+                data.entryHash, data.createdAt]);
+              return { id };
+            },
+          },
         });
         await db.query(rollback ? "ROLLBACK" : "COMMIT"); return result;
       } catch (error) {
@@ -57,7 +111,12 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
       await client.query(`
         CREATE TABLE "AdminAuditLog" (
           "id" TEXT PRIMARY KEY, "action" TEXT NOT NULL,
-          "targetType" TEXT NOT NULL, "targetId" TEXT
+          "targetType" TEXT NOT NULL, "targetId" TEXT,
+          "metadata" JSONB NOT NULL DEFAULT '{}',
+          "actorUserId" TEXT, "actorEmail" TEXT, "summary" TEXT,
+          "ipAddress" TEXT, "userAgent" TEXT, "previousHash" TEXT,
+          "entryHash" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT
+            (clock_timestamp() AT TIME ZONE 'UTC')
         );
         CREATE TABLE "PromptRefinerProductAttempt" (
           "id" TEXT PRIMARY KEY, "mode" TEXT NOT NULL, "state" TEXT NOT NULL,
@@ -100,27 +159,9 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
       await client.query(await readFile(resolve(root,
         "prisma/migrations/20261010120000_prompt_refiner_product_operational_guard/migration.sql"),
       "utf8"));
-      let auditLockCount = 0;
-      mock.module(mod("lib/adminAudit.ts"), { namedExports: {
-        takeAuditChainLock: async (tx: {
-          $executeRaw: (strings: TemplateStringsArray,
-            ...values: unknown[]) => Promise<number>;
-        }) => {
-          auditLockCount += 1;
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(
-            hashtext('tomverse-admin-audit-chain'))`;
-        },
-        writeSystemAuditLog: async (input: { tx: {
-          $executeRaw: (strings: TemplateStringsArray,
-            ...values: unknown[]) => Promise<number>;
-        }; action: string; targetType: string; targetId: string }) => {
-          const id = randomUUID();
-          await input.tx.$executeRaw`INSERT INTO "AdminAuditLog"
-            ("id", "action", "targetType", "targetId") VALUES
-            (${id}, ${input.action}, ${input.targetType}, ${input.targetId})`;
-          return id;
-        },
-      } });
+      // Only the ORM transport is adapted to this isolated PostgreSQL schema.
+      // The production adminAudit module, permission gate, clock and HMAC
+      // writer are deliberately real, so an unregistered action rolls back.
       mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
         $transaction: transaction,
       } } });
@@ -131,6 +172,24 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
           ("id","action","targetType","targetId") VALUES ($1,$2,$3,'auto')`,
         [id, action, "PromptRefinerProductOperationalGuard"]);
         return id;
+      };
+      // Fixture for a pause written by the pre-v3 runtime. New product code
+      // cannot create this transition, but the existing Owner resume must work.
+      const installLegacyPause = async () => {
+        const state = (await client.query(`SELECT "state" FROM
+          "PromptRefinerProductOperationalGuard" WHERE "id"='auto'`)).rows[0];
+        if (state?.state !== "active") return;
+        const id = await transitionAudit("prompt_refiner.product_auto_paused");
+        await client.query(`UPDATE "PromptRefinerProductOperationalGuard"
+          SET "state"='paused', "pausedAt"=clock_timestamp(),
+            "reasonCode"='audit_failure', "sampleSize"=0,
+            "p90LatencyMs"=NULL, "fallbackCount"=NULL,
+            "lastTransitionAuditLogId"=$1, "transitionedAt"=clock_timestamp()
+          WHERE "id"='auto'`, [id]);
+      };
+      const legacyResumeAudit = async () => {
+        await installLegacyPause();
+        return transitionAudit("owner-resume");
       };
       const insertReceipt = async (input: { outcome?: string;
         latency?: number; failureCode?: string | null; audited?: boolean;
@@ -193,7 +252,7 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         }
       };
 
-      await t.test("the 100-request p90 latch survives rolling success and activation", async () => {
+      await t.test("100-request p90 records an observation without disabling Auto", async () => {
         const activationAuditId = await transitionAudit("activation");
         await transaction(tx => guard.initializePromptRefinerProductAutoGuard(
           tx as never, activationAuditId));
@@ -232,7 +291,7 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         }
         const paused = await evaluate();
         assert.deepEqual({ active: paused.active, reasonCode: paused.reasonCode },
-          { active: false, reasonCode: "latency_p90_exceeded" });
+          { active: true, reasonCode: "latency_p90_exceeded" });
         const pauseReadback = (await client.query(`SELECT "reasonCode",
           "sampleSize", "p90LatencyMs", "fallbackCount",
           "lastTransitionAuditLogId" FROM
@@ -241,16 +300,44 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
           sampleSize: pauseReadback.sampleSize,
           p90LatencyMs: pauseReadback.p90LatencyMs,
           fallbackCount: pauseReadback.fallbackCount }, {
-          reasonCode: "latency_p90_exceeded", sampleSize: 100,
-          p90LatencyMs: 6_001, fallbackCount: 0 });
+          reasonCode: null, sampleSize: 0,
+          p90LatencyMs: null, fallbackCount: null });
         assert.equal((await client.query(`SELECT count(*)::int AS n FROM
-          "AdminAuditLog" WHERE "id"=$1
-            AND "action"='prompt_refiner.product_auto_paused'`,
-        [pauseReadback.lastTransitionAuditLogId])).rows[0].n, 1);
+          "AdminAuditLog" WHERE
+            "action"='prompt_refiner.product_auto_guard_observed'`)).rows[0].n, 1);
+        const observationRow = (await client.query(`SELECT * FROM "AdminAuditLog"
+          WHERE "action"='prompt_refiner.product_auto_guard_observed'`)).rows[0];
+        const { id: observationId, entryHash: actualHash,
+          ...storedObservation } = observationRow;
+        assert.equal(observationRow.metadata.systemActor,
+          "prompt-refiner-product-execution");
+        assert.match(actualHash, /^[0-9a-f]{64}$/);
+        assert.equal(actualHash, computeAdminAuditEntryHash({
+          ...storedObservation, createdAt: observationRow.createdAt.toISOString(),
+        }, auditSecret), "the real canonical writer must persist a verifiable HMAC");
+        await evaluate();
+        assert.equal((await client.query(`SELECT count(*)::int AS n FROM
+          "AdminAuditLog" WHERE "action"='prompt_refiner.product_auto_guard_observed'`))
+          .rows[0].n, 1, "same-hour repeated failures must be deduplicated");
+        // Seed an older signed observation in the isolated fixture to verify
+        // later recurrence, without changing any product row or generation.
+        const olderAt = new Date(observationRow.createdAt.getTime() - 2 * 60 * 60 * 1_000);
+        const olderHash = computeAdminAuditEntryHash({ ...storedObservation,
+          createdAt: olderAt.toISOString() }, auditSecret);
+        await client.query(`UPDATE "AdminAuditLog" SET "createdAt"=$1,
+          "entryHash"=$2 WHERE "id"=$3`, [olderAt, olderHash, observationId]);
+        await evaluate();
+        const observedAgain = (await client.query(`SELECT "entryHash", "previousHash"
+          FROM "AdminAuditLog" WHERE "action"='prompt_refiner.product_auto_guard_observed'
+          ORDER BY "createdAt" DESC`)).rows;
+        assert.equal(observedAgain.length, 2, "later failures must remain observable");
+        assert.equal(observedAgain[0].previousHash, olderHash);
+        assert.equal((await read()).active, true);
         for (let index = 0; index < 100; index += 1) {
           await insertReceipt({ latency: 10 });
         }
-        assert.equal((await evaluate()).active, false);
+        assert.equal((await evaluate()).active, true);
+        await installLegacyPause();
         auditLockCount = 0;
         assert.equal((await evaluate()).active, false);
         await transaction(tx => guard.latchPromptRefinerProductAutoStopInTransaction(
@@ -267,7 +354,7 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
 
       await t.test("only an exact owner-audit generation transition resumes", async () => {
         const current = await read();
-        const resumeAuditId = await transitionAudit("owner-resume");
+        const resumeAuditId = await legacyResumeAudit();
         await assert.rejects(transaction(tx =>
           guard.resumePromptRefinerProductAutoGuardInTransaction(tx as never, {
             expectedGeneration: (current.generation ?? 0) + 1,
@@ -287,7 +374,7 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         assert.equal((await evaluate()).active, true);
       });
 
-      await t.test("system fallbacks pause while manual kept-original choices do not", async () => {
+      await t.test("system fallbacks are observed while manual kept-original choices are distinct", async () => {
         for (let index = 0; index < 100; index += 1) {
           const receiptId = await insertReceipt({ outcome: "suggested" });
           if (index < 6) await insertDisposition(receiptId, "kept_original");
@@ -299,14 +386,15 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         }
         const paused = await evaluate();
         assert.equal(paused.reasonCode, "original_fallback_rate_exceeded");
+        assert.equal(paused.active, true);
         const row = (await client.query(`SELECT "sampleSize", "fallbackCount"
           FROM "PromptRefinerProductOperationalGuard"`)).rows[0];
-        assert.deepEqual(row, { sampleSize: 100, fallbackCount: 6 });
+        assert.deepEqual(row, { sampleSize: 0, fallbackCount: null });
       });
 
-      await t.test("unknown and missing audit facts pause immediately after owner resume", async () => {
+      await t.test("unknown and missing audit facts remain observed without changing availability", async () => {
         let current = await read();
-        let resumeAuditId = await transitionAudit("owner-resume");
+        let resumeAuditId = await legacyResumeAudit();
         await transaction(tx => guard.resumePromptRefinerProductAutoGuardInTransaction(
           tx as never, { expectedGeneration: current.generation!,
             resumeAuditLogId: resumeAuditId }));
@@ -323,7 +411,11 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
           "an unknown attempt remains fail-closed outside latest-100 receipts");
 
         current = await read();
-        resumeAuditId = await transitionAudit("owner-resume");
+        assert.equal((await read()).active, true);
+        assert.equal((await client.query(`SELECT "state" FROM
+          "PromptRefinerProductAttempt" WHERE "id"=$1`, [attemptId])).rows[0].state,
+          "unknown", "observation must not clear or replay an unknown attempt");
+        resumeAuditId = await legacyResumeAudit();
         await transaction(tx => guard.resumePromptRefinerProductAutoGuardInTransaction(
           tx as never, { expectedGeneration: current.generation!,
             resumeAuditLogId: resumeAuditId }));
@@ -336,7 +428,7 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
           .reasonCode, "critical_safety_failure");
 
         current = await read();
-        resumeAuditId = await transitionAudit("owner-resume");
+        resumeAuditId = await legacyResumeAudit();
         await transaction(tx => guard.resumePromptRefinerProductAutoGuardInTransaction(
           tx as never, { expectedGeneration: current.generation!,
             resumeAuditLogId: resumeAuditId }));
@@ -368,7 +460,7 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         "a dispatch still unconfirmed after the execution deadline is unknown");
 
         current = await read();
-        resumeAuditId = await transitionAudit("owner-resume");
+        resumeAuditId = await legacyResumeAudit();
         await transaction(tx => guard.resumePromptRefinerProductAutoGuardInTransaction(
           tx as never, { expectedGeneration: current.generation!,
             resumeAuditLogId: resumeAuditId }));
@@ -382,10 +474,10 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         })).reasonCode, "audit_failure");
       });
 
-      await t.test("only expired preparing receipt gaps pause across time zones", async () => {
+      await t.test("only expired preparing receipt gaps produce observations across time zones", async () => {
         const resume = async () => {
           const current = await read();
-          const resumeAuditLogId = await transitionAudit("owner-resume");
+          const resumeAuditLogId = await legacyResumeAudit();
           await transaction(tx =>
             guard.resumePromptRefinerProductAutoGuardInTransaction(tx as never, {
               expectedGeneration: current.generation!,
@@ -448,9 +540,9 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
             tx as never, "audit_failure"));
       });
 
-      await t.test("concurrent receipt completion and pause keep audit then guard lock order", async () => {
+      await t.test("concurrent receipt completion and observation retain lock order and active state", async () => {
         const current = await read();
-        const resumeAuditId = await transitionAudit("owner-resume");
+        const resumeAuditId = await legacyResumeAudit();
         await transaction(tx => guard.resumePromptRefinerProductAutoGuardInTransaction(
           tx as never, { expectedGeneration: current.generation!,
             resumeAuditLogId: resumeAuditId }));
@@ -482,11 +574,14 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
           Promise.all([completeReceipt(), evaluate()]), timeout,
         ]);
         assert.equal(results.length, 2);
-        assert.equal((await read()).reasonCode, "latency_p90_exceeded");
-        assert.ok(results.some(result => result.active === false));
+        assert.equal((await read()).reasonCode, null);
+        assert.equal((await read()).active, true);
+        assert.ok(results.some(result => result.reasonCode === "latency_p90_exceeded"));
+        assert.ok(results.every(result => result.active));
       });
 
       await t.test("guard rows reject direct reset, delete and truncate", async () => {
+        await installLegacyPause();
         await assert.rejects(client.query(`UPDATE "PromptRefinerProductOperationalGuard"
           SET "state"='active'`), /transition_invalid|resume_invalid/);
         await assert.rejects(client.query(`DELETE FROM "PromptRefinerProductOperationalGuard"`),
@@ -495,6 +590,8 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
           /truncate_forbidden/);
       });
     } finally {
+      if (priorAuditSecret === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+      else process.env.ADMIN_AUDIT_INTEGRITY_KEY = priorAuditSecret;
       await pool.end();
       await client.query(`DROP SCHEMA "${schema}" CASCADE`);
       await client.end();
