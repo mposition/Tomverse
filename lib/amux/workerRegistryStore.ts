@@ -127,6 +127,31 @@ export async function readAmuxWorkerRegistryOrThrow(
   return { registrations, latches, observations };
 }
 
+/**
+ * One worker's newest registry event, in one statement, for another store's
+ * writer in the same transaction (the capability store checks the ceiling
+ * with it). Null when the worker has none; a row the guard would not have
+ * accepted throws, so the caller never acts on it.
+ */
+export async function readAmuxWorkerRegistrationOrThrow(
+  client: RegistryReader,
+  workerName: string,
+): Promise<AmuxWorkerRegistration | null> {
+  const rows = await client.$queryRaw<
+    Array<{ workerName: string; providerClass: string; roleCeiling: string; desiredState: string; revision: number }>
+  >`
+    SELECT "workerName", "providerClass", "roleCeiling", "desiredState", "revision"
+    FROM "AmuxWorkerRegistryEvent"
+    WHERE "workerName" = ${workerName}
+    ORDER BY "sequence" DESC
+    LIMIT 1
+  `;
+  if (!rows[0]) return null;
+  const registration = amuxWorkerRegistrationFromRow(rows[0]);
+  if (registration === null) throw new Error("AMUX worker registry row outside its shape");
+  return registration;
+}
+
 export class AmuxWorkerRegistryWriteError extends Error {
   readonly code: "invalid_change" | "no_operator" | "unreadable_previous" | AmuxWorkerRegistryRefusal;
 

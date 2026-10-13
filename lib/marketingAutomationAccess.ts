@@ -588,9 +588,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * R1) adds the registry event, trial evidence and latch event back relations
  * to `AdminAuditLog` in the watched schema. No actor, descriptor, webhook
  * writer or admission decision changes; the bytes moved, so evidence is stale.
+ * 2026-10-13: the AMUX worker capability table (orchestration policy version
+ * 35, R2a) adds its back relation to `AdminAuditLog` in the watched schema.
+ * No actor, descriptor, webhook writer or admission decision changes; the
+ * bytes moved, so evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "09c6d9559cd26319ed1e7c57d19c2049e05b780e3544bade9a124b3cf5848e92";
+  "06ca1e6e2f233ad276cc65b15ef8706fb37153f89ca51ef64b8d2ab8cf828286";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

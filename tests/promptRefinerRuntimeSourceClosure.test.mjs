@@ -531,12 +531,17 @@ const compilerOptions = parsedConfig.options;
 // the Guest, default-model and worker histories above remain alongside the
 // no-commit halt changes. Count and position-free inventory remain unchanged;
 // only the actual merged source positions are repinned below.
+// 2026-10-13, AMUX worker capabilities (orchestration policy version 35, R2a):
+// the marketing webhook fingerprint's history comment in
+// lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
+// below it. Count 228 and the position-free inventory remain unchanged; only
+// their source positions are repinned.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "15bf37335c6eb15c4f162e2d96e6eaaf",
-  "36a41ab31c58c7fe85df4b02e3cdb34f",
+  "5b03707a16556eccd68c399d121786d2",
+  "9bb46b3e052cfd57c0e4dad653081e32",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

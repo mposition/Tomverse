@@ -324,6 +324,10 @@ run(
     // bound to the owner's audit of its own transaction, READ COMMITTED only,
     // nothing changed or removed, and the system tables closed until R4/R5.
     "tests/integration/amux-worker-registry.db.test.ts",
+    // AMUX worker capabilities (orchestration policy version 35, section 2):
+    // the closed tag and v22 lists, every tag and role within the worker's
+    // current ceiling and class, the owner's audit, nothing changed.
+    "tests/integration/amux-worker-capability.db.test.ts",
     // AMUX Decision Maker request ledger (docs/policy/amux-decision-maker.md
     // §2, §6, §9, §10): one request per card revision, the transition graph
     // against the core's own, the deadlines by the database clock at the

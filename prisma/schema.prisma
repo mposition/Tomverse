@@ -2464,6 +2464,7 @@ model AdminAuditLog {
   amuxWorkerRegistryEvent AmuxWorkerRegistryEvent?
   amuxWorkerTrialEvidence AmuxWorkerTrialEvidence?
   amuxWorkerLatchEvent AmuxWorkerLatchEvent?
+  amuxWorkerCapabilityEvent AmuxWorkerCapabilityEvent?
   promptRefinerAutoBudgetReservations PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetReservationAudit")
   promptRefinerAutoBudgetDispatches PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetDispatchAudit")
   promptRefinerAutoBudgetUnknowns PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetUnknownAudit")
@@ -10509,5 +10510,36 @@ model AmuxWorkerLatchEvent {
 
   auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
+  @@index([workerName, sequence])
+}
+
+/// AMUX worker capability events (orchestration policy version 35, section
+/// 2): append-only, and a worker's capability is its newest event. Only the
+/// owner writes it. Single writer: lib/amux/workerCapabilityStore.ts. Migration
+/// 20261013100000_amux_worker_capability holds the closed tag and v22 lists,
+/// and the trigger that binds every tag and v22 role to the worker's current
+/// role ceiling and class, the per-worker revision, the owner's audit of the
+/// same transaction (amux.worker.capability), the database clock, and refuses
+/// every update and delete. `actorUserId` has no User foreign key, like the
+/// other AMUX operator evidence.
+model AmuxWorkerCapabilityEvent {
+  id               String   @id
+  sequence         BigInt   @unique @default(autoincrement())
+  workerName       String
+  revision         Int
+  model            String?
+  routingTags      String[]
+  toolCapabilities String[]
+  v22Model         String?
+  v22Roles         String[]
+  v22Tools         String[]
+  actorUserId      String
+  auditLogId       String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([workerName, revision])
   @@index([workerName, sequence])
 }
