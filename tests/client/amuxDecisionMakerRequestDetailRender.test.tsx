@@ -261,3 +261,21 @@ for (const locale of ["en", "ko"] as const) {
     assert.deepEqual(hrefs, [DM_ADMIN_REQUEST_LIST_HREF]);
   });
 }
+
+test("the judgment controls are mounted only for a request with something to judge, with exactly the values shown", () => {
+  const m = adminAmuxDecisionMakerRequestDetailMessages.en;
+  const list = adminAmuxDecisionMakerRequestsMessages.en;
+  const judgeable = detail();
+  const tree = AmuxDecisionMakerRequestDetailView({ m, list, view: judgeable });
+  const panels = propsOf(tree).filter((props) => "shown" in props && "reloadHref" in props);
+  assert.equal(panels.length, 1);
+  assert.equal(panels[0]!.requestId, REQUEST_ID);
+  assert.deepEqual(panels[0]!.shown, judgeable.kind === "detail" ? judgeable.detail.shown : null);
+  assert.equal(panels[0]!.reloadHref, `${DM_ADMIN_REQUEST_LIST_HREF}&request=${REQUEST_ID}`);
+  const closed = AmuxDecisionMakerRequestDetailView({
+    m,
+    list,
+    view: detail({ row: row({ closingKind: "confirm", declarationAccuracy: "not_judged" }), shown: null }),
+  });
+  assert.equal(propsOf(closed).filter((props) => "shown" in props && "reloadHref" in props).length, 0);
+});

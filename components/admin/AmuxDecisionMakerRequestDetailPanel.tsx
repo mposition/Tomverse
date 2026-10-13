@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxDecisionMakerJudgmentPanel } from "@/components/admin/AmuxDecisionMakerJudgmentPanel";
 import {
   adminAmuxDecisionMakerRequestDetailMessages,
   adminAmuxDecisionMakerRequestsMessages,
@@ -82,8 +83,9 @@ const snapshotText = (m: Messages, detail: DmAdminRequestDetail) => {
  *
  * An irreversible proposal says so before anything else (§6). The card and the
  * Decision Maker's texts are the worker's and the model's words: shown as
- * plain text, never as markup, and never followed as instructions. The panel
- * offers no control in this stage; judging a proposal is the next slice.
+ * plain text, never as markup, and never followed as instructions. An open
+ * proposal with its bodies and transmission all there carries the judgment
+ * controls (AmuxDecisionMakerJudgmentPanel); nothing else on the panel acts.
  */
 export function AmuxDecisionMakerRequestDetailView({
   m,
@@ -192,6 +194,13 @@ export function AmuxDecisionMakerRequestDetailView({
       <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-dm-detail-judgeable" data-judgeable={detail.shown !== null}>
         {detail.shown !== null ? m.judgeable : m.notJudgeable}
       </p>
+      {detail.shown !== null ? (
+        <AmuxDecisionMakerJudgmentPanel
+          requestId={row.requestId}
+          shown={detail.shown}
+          reloadHref={dmAdminRequestDetailHref(row.requestId)}
+        />
+      ) : null}
     </section>
   );
 }

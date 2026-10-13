@@ -912,7 +912,17 @@ test("an edited confirmation and a delivery decision commit through the AMUX bou
   const basis = await proposed();
   const shown = await shownOf(basis.requestId);
   const boundary = { operation: "dm_judgment_test", prismaCallCeiling: 12, isolation: "mutation" as const };
-  const written = await withAmuxDbBoundary(boundary, (tx) =>
+  // Stage S2's judgment route uses its own boundary of that size: one call
+  // fewer refuses the largest judgment, and the route's boundary commits it.
+  assert.equal(AMUX_DB_BOUNDARIES.decisionMakerJudgment.prismaCallCeiling, 12);
+  const short = { ...AMUX_DB_BOUNDARIES.decisionMakerJudgment, prismaCallCeiling: 11 };
+  await assert.rejects(
+    withAmuxDbBoundary(short, (tx) =>
+      recordDecisionMakerJudgment(tx, { session: operator(), requestId: basis.requestId, kind: "edit_confirm", shown, operatorAnswer: "Use both.", keyRing: RING }),
+    ),
+    (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+  );
+  const written = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerJudgment, (tx) =>
     recordDecisionMakerJudgment(tx, { session: operator(), requestId: basis.requestId, kind: "edit_confirm", shown, operatorAnswer: "Use both.", keyRing: RING }),
   );
   assert.equal(written.recorded, true);

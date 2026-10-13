@@ -1522,3 +1522,30 @@ test("the reads are one statement each", async () => {
     assert.equal(sent.length, 1);
   }
 });
+
+test("the judgment route's DB boundary is the largest judgment's statements plus setup and fence", async () => {
+  // An edited confirmation with an integrity key is the largest (the cases above).
+  // A ceiling below it refuses every edit; one above it lets a statement the tests
+  // here never counted run inside the budget.
+  let largest = 0;
+  for (const keyValue of [null, integrityKey]) {
+    await withIntegrityKey(keyValue, async () => {
+      for (const input of [
+        { kind: "confirm", shown: shownFor() },
+        { kind: "edit_confirm", shown: shownFor(), operatorAnswer: "Use the model id." },
+        { kind: "reject" },
+      ]) {
+        const { tx, sent } = recordingTx();
+        const result = await recordDecisionMakerJudgment(tx, { session, requestId: REQUEST_ID, keyRing: RING, ...input });
+        assert.equal(result.recorded, true, input.kind);
+        largest = Math.max(largest, sent.length);
+      }
+    });
+  }
+  assert.equal(largest, 10);
+  assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerJudgment, {
+    operation: "decision_maker_judgment",
+    prismaCallCeiling: largest + BOUNDARY_STATEMENTS,
+    isolation: "mutation",
+  });
+});

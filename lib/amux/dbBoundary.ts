@@ -311,6 +311,17 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
+  // Stage S2's judgment route: setup + a person's judgment at its largest
+  // (an edited confirmation with an integrity key: the audit chain lock, the
+  // request state, the switches, the proposal, the administrator audit's 4,
+  // the operator answer body and the judgment insert: 10, pinned by
+  // tests/amuxDecisionMakerJudgment.test.mjs) + fence. 12 is also
+  // docs/policy/amux-decision-maker.md §9's ceiling for one DM operation.
+  decisionMakerJudgment: {
+    operation: "decision_maker_judgment",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
   // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment
   // tallies + the proposal timeline with the database clock + fence, pinned
   // by tests/amuxDecisionMakerJudgment.test.mjs.
