@@ -351,21 +351,33 @@ test("the badge names the model that answered", () => {
   });
 
   assert.equal(findProp(rendered, "data-testid"), "auto-routed-by");
-  assert.match(textOf(rendered), /DeepSeek V4 Flash/);
+  assert.equal(
+    textOf(rendered).replace(/\s+/g, " ").trim(),
+    "Auto selected · DeepSeek V4 Flash"
+  );
 });
 
-test("an unknown reason identifier is dropped, never shown raw", () => {
-  // `fallback_order` in somebody's chat is a leak of internal vocabulary.
-  const rendered = AutoRoutedByBadge({
-    routed: true,
-    modelName: "DeepSeek V4 Flash",
-    reason: "some_new_reason",
-    language: "en",
-  });
+test("selection reasons do not change the neutral answering-model badge", () => {
+  for (const reason of [
+    "only_candidate",
+    "task_preference",
+    "fallback_order",
+    "sticky",
+    "some_new_reason",
+    null,
+  ]) {
+    const rendered = AutoRoutedByBadge({
+      routed: true,
+      modelName: "Qwen 3.8 Flash",
+      reason,
+      language: "ko",
+    });
 
-  const text = textOf(rendered);
-  assert.match(text, /DeepSeek V4 Flash/);
-  assert.ok(!text.includes("some_new_reason"));
+    assert.equal(
+      textOf(rendered).replace(/\s+/g, " ").trim(),
+      "자동 선택 · Qwen 3.8 Flash"
+    );
+  }
 });
 
 /* ------------------------------------------------- what the copy may say */
