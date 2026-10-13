@@ -78,6 +78,12 @@ Marketing 판정·권한은 그대로이며 기존 검증 증거는 stale로 남
 `test:prompt-refiner-product-db` 39개(0 skip), Marketing 단위 19개,
 TypeScript·scoped eslint·protected writer·문서 참조 검사를 통과했다.
 이 후속 diff도 Claude Code 독립 검토 ACCEPT를 받았다.
+Marketing 주석의 3줄 이동에 대한 runtime closure 위치 snapshot도 갱신했다.
+접근 개수 228과 위치를 제외한 기존 digest는 바뀌지 않았고, closure 검증
+7개가 통과했으며 위치 전용 diff도 별도 독립 검토 ACCEPT를 받았다.
+이 기록 시점의 로컬 Windows 전체 단위 실행은 중단됐고 PASS로 보고하지 않는다.
+동일 실행에서 authority 인접 검증 5개가 실패했으나, GitHub Linux CI에서는
+해당 검증을 통과했다. 로컬 실패의 원인을 이 작업에서 확정하지 않는다.
 
 운영 복구와 새 코드의 운영 배포는 다르다. 이번 변경은 아직 병합·배포하지
 않았다. 운영자 mposition이 2026-10-13 이 작업의 PR #2449에 대해
