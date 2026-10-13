@@ -5,6 +5,7 @@ import pg from "pg";
 
 import { appendSyntheticAdminAudit } from
   "./helpers/appendSyntheticAdminAudit.mjs";
+import { exerciseAmuxV22TaskRecoveryFixture } from "./helpers/amuxV22TaskRecoveryFixture.mjs";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
@@ -21,6 +22,8 @@ test("portfolio evidence and score history are audited, path-bound and append-on
   const client = new pg.Client({ connectionString: databaseUrl });
   const ids = { initiative: randomUUID(), epic: randomUUID(),
     feature: randomUUID(), task: randomUUID(), sourceApproval: randomUUID() };
+  const ideaId = randomUUID();
+  const unitId = randomUUID();
   const digest = "a".repeat(64);
   const titleDigest = "b".repeat(64);
   const inputDigest = "c".repeat(64);
@@ -28,6 +31,7 @@ test("portfolio evidence and score history are audited, path-bound and append-on
     story: 0, task: 24, urgency: 6, dependency: 2, worker: 2,
     effortPenalty: 4, riskPenalty: 1, uncertaintyPenalty: 0 };
   const synthetic = Buffer.from("synthetic-only", "utf8");
+  const instanceId = randomUUID();
   await client.connect();
   try {
     await client.query("BEGIN");
@@ -61,8 +65,8 @@ test("portfolio evidence and score history are audited, path-bound and append-on
                $7, 'synthetic', $6, 'synthetic', 1, $3, 'synthetic',
                $6, 'synthetic', 1, $3, 'synthetic', $8,
                'implement', 'medium', CURRENT_TIMESTAMP)`,
-      [ids.task, randomUUID().replaceAll("-", "").toUpperCase(), digest,
-        JSON.stringify({ schemaVersion: "amux-v4", ideaId: randomUUID(),
+      [ids.task, unitId.toUpperCase(), digest,
+        JSON.stringify({ schemaVersion: "amux-v4", ideaId,
           approvalId: ids.sourceApproval }), ids.feature, synthetic,
         titleDigest, ids.sourceApproval]);
 
@@ -199,8 +203,6 @@ test("portfolio evidence and score history are audited, path-bound and append-on
 
     // A12: a score is not promotion authority by itself. A separate v22
     // system receipt may use the exact owner approval, score and brief only.
-    const ideaId = randomUUID();
-    const unitId = randomUUID();
     const previewId = randomUUID();
     await client.query(`INSERT INTO public."AmuxIdeaSubmission"
       ("id", "requestId", "actorUserId", "state", "submittedAt",
@@ -267,6 +269,10 @@ test("portfolio evidence and score history are audited, path-bound and append-on
     [ids.sourceApproval, randomUUID(), ids.task, consumeAudit]);
     await client.query(`UPDATE public."AmuxIdeaDraftUnit"
       SET "state" = 'approved' WHERE "id" = $1`, [unitId]);
+    // Registration finishes while the exact approved card is still backlog.
+    // Later lifecycle steps must not defer this initial approval check.
+    await client.query(`SET CONSTRAINTS amux_v4_consumed_decision_complete,
+      amux_v4_registered_card_complete, amux_v4_task_dag_decision IMMEDIATE`);
     const receiptId = randomUUID();
     const receiptAudit = await appendSyntheticAdminAudit(client, {
       actorUserId: null, action: "amux.v22.auto_promotion.consumed",
@@ -328,7 +334,7 @@ test("portfolio evidence and score history are audited, path-bound and append-on
        "routeId", "routePolicyDigest", "catalogApprovalId",
        "catalogVersion", "costReceiptDigest", "perAttemptMicroUsd",
        "authorizationAuditLogId", "assignedAt") VALUES
-      ($1, $2, $3, $4, 'sev1', 1, 'worker-one', 'instance-one',
+      ($1, $2, $3, $4, 'sev1', 1, 'worker-one', '${instanceId}',
        1, 'openai', 'model-one', 'implement', 'medium', 'route-one', $5,
        'catalog-one', 'v1', $5, 1000, $6, CURRENT_TIMESTAMP)`,
     [assignmentId, ids.task, receiptId, laneSeq, digest, assignmentAudit]);
@@ -358,7 +364,7 @@ test("portfolio evidence and score history are audited, path-bound and append-on
       ("id", "taskId", "worker", "workerInstanceId", "workerGeneration",
        "taskRevision", "attemptNumber", "reservedCostMicrousd",
        "heartbeatAt", "leaseExpiresAt", "startedAt", "v22AssignmentId",
-       "updatedAt") VALUES ($1, $2, 'worker-one', 'instance-one', 1,
+       "updatedAt") VALUES ($1, $2, 'worker-one', '${instanceId}', 1,
        3, 1, 1000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '90 seconds',
        CURRENT_TIMESTAMP, $3, CURRENT_TIMESTAMP)`,
     [attemptId, ids.task, assignmentId]);
@@ -373,7 +379,7 @@ test("portfolio evidence and score history are audited, path-bound and append-on
        "taskRevision", "attemptNumber", "reservedCostMicrousd",
        "heartbeatAt", "leaseExpiresAt", "startedAt",
        "v22AssignmentId", "updatedAt")
-      VALUES ($1, $2, 'worker-one', 'instance-one', 1, 3, 2, 1000,
+      VALUES ($1, $2, 'worker-one', '${instanceId}', 1, 3, 2, 1000,
        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '90 seconds',
        CURRENT_TIMESTAMP, $3, CURRENT_TIMESTAMP)`,
     [randomUUID(), ids.task, assignmentId],
@@ -400,6 +406,8 @@ test("portfolio evidence and score history are audited, path-bound and append-on
     [ids.task]);
     assert.deepEqual(ended.rows[0], { status: "review", owner: null,
       v22AssignmentId: null });
+    await exerciseAmuxV22TaskRecoveryFixture(client, { taskId: ids.task, priorAttemptId: attemptId,
+      priorAssignmentId: assignmentId, promotionId: receiptId, instanceId, laneSequence: laneSeq, digest });
   } finally {
     await client.query("ROLLBACK").catch(() => undefined);
     await client.end();

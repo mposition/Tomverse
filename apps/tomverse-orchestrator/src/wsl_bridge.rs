@@ -452,7 +452,8 @@ pub trait LocalAmux {
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply>;
     async fn read_back(&mut self, session_name: &str, attempt_id: &str) -> Result<ReadBack>;
 
-    async fn send_v22(&mut self, _delivery: &PulledDelivery) -> Result<V22SidecarState> {
+    async fn send_v22(&mut self, _delivery: &PulledDelivery,
+        _instance_id: &str, _generation: i64) -> Result<V22SidecarState> {
         bail!("v22 one-shot sidecar is unavailable")
     }
 
@@ -1361,7 +1362,8 @@ where
                 attempt_id: started.attempt_id.clone(),
             });
         }
-        return Ok(dispatch_v22(delivery, local).await);
+        let session = presence.expect("running presence checked");
+        return Ok(dispatch_v22(delivery, &session.instance_id, session.generation, local).await);
     }
     Ok(dispatch_started(
         input,
@@ -1374,8 +1376,9 @@ where
     .await)
 }
 
-async fn dispatch_v22<L: LocalAmux>(delivery: &PulledDelivery, local: &mut L) -> BridgeTickResult {
-    let reply = match local.send_v22(delivery).await {
+async fn dispatch_v22<L: LocalAmux>(delivery: &PulledDelivery, instance_id: &str,
+    generation: i64, local: &mut L) -> BridgeTickResult {
+    let reply = match local.send_v22(delivery, instance_id, generation).await {
         Ok(reply) => reply,
         Err(_) => match local.readback_v22(&delivery.attempt_id).await {
             Ok(reply) => reply,
@@ -1777,6 +1780,22 @@ async fn v22_sidecar_call(
     bail!("v22 sidecar requires Ubuntu")
 }
 
+/// Content-free identity from the authenticated delivery and this registered
+/// bridge session. A recovery queue can never manufacture this local binding.
+fn v22_recovery_binding(delivery: &PulledDelivery, instance_id: &str,
+    generation: i64) -> Result<serde_json::Value> {
+    if delivery.task_id.is_empty() || delivery.task_id.len() > 128 ||
+        !delivery.task_id.bytes().all(|byte| byte.is_ascii_alphanumeric() ||
+            matches!(byte, b':' | b'_' | b'-')) ||
+        !(0..=2_147_483_644).contains(&delivery.task_revision) ||
+        Uuid::parse_str(instance_id).is_err() || !(1..=2_147_483_647).contains(&generation) {
+        bail!("invalid v22 recovery binding");
+    }
+    Ok(serde_json::json!({ "version": 1, "taskId": delivery.task_id,
+        "taskRevision": delivery.task_revision, "workerInstanceId": instance_id,
+        "workerGeneration": generation, "targetHost": "amux-ubuntu" }))
+}
+
 impl LocalAmux for HttpLocal {
     async fn confirm_v22_result(&mut self, attempt_id: &str, sha256: &str) -> Result<()> {
         let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
@@ -1808,7 +1827,8 @@ impl LocalAmux for HttpLocal {
         Ok(())
     }
 
-    async fn send_v22(&mut self, delivery: &PulledDelivery) -> Result<V22SidecarState> {
+    async fn send_v22(&mut self, delivery: &PulledDelivery,
+        instance_id: &str, generation: i64) -> Result<V22SidecarState> {
         let profile = delivery.v22_execution.as_ref().context("v22 profile missing")?;
         if delivery.assignment_id.is_none() ||
             !profile.model_id.starts_with("claude-") ||
@@ -1825,6 +1845,7 @@ impl LocalAmux for HttpLocal {
             "role": profile.role,
             "budgetMicrousd": profile.budget_microusd,
             "prompt": delivery.prompt,
+            "recoveryBinding": v22_recovery_binding(delivery, instance_id, generation)?,
         }), &delivery.attempt_id).await?.state)
     }
 
@@ -3820,7 +3841,8 @@ mod tests {
             bail!("v22 must never read an interactive card")
         }
 
-        async fn send_v22(&mut self, _delivery: &PulledDelivery) -> Result<V22SidecarState> {
+        async fn send_v22(&mut self, _delivery: &PulledDelivery,
+            _instance_id: &str, _generation: i64) -> Result<V22SidecarState> {
             self.sidecar_sends += 1;
             Ok(V22SidecarState::InProgress)
         }
@@ -3835,9 +3857,22 @@ mod tests {
             model_id: "claude-opus-5-5".into(), role: "design".into(),
             budget_microusd: 1_000_000,
         });
-        assert!(matches!(dispatch_v22(&delivery, &mut local).await,
+        assert!(matches!(dispatch_v22(&delivery, "00000000-0000-4000-8000-000000000001", 3, &mut local).await,
             BridgeTickResult::Pending { .. }));
         assert_eq!(local.sidecar_sends, 1);
+    }
+
+    #[test]
+    fn v22_recovery_binding_uses_exact_delivery_and_registered_instance() {
+        let delivery = pulled_delivery();
+        let instance = "00000000-0000-4000-8000-000000000001";
+        let binding = v22_recovery_binding(&delivery, instance, 3).unwrap();
+        assert_eq!(binding, serde_json::json!({ "version": 1, "taskId": "TASK-1",
+            "taskRevision": 3, "workerInstanceId": instance,
+            "workerGeneration": 3, "targetHost": "amux-ubuntu" }));
+        assert!(!binding.to_string().contains(&delivery.prompt));
+        assert!(v22_recovery_binding(&delivery, instance, 0).is_err());
+        assert!(v22_recovery_binding(&delivery, "foreign", 3).is_err());
     }
 
     #[cfg(unix)]

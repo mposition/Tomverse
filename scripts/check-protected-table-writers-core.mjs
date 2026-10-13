@@ -141,6 +141,9 @@ export const APPEND_ONLY_LEDGER_TABLES = [
   "EmailPermissionDecision",
   "EmailPermissionDecisionEvidence",
   "ConsentRecord",
+  "AmuxV22TaskRecoveryInspectionRequest",
+  "AmuxV22TaskRecoveryEvidence",
+  "AmuxV22TaskRecoveryApproval",
 ];
 
 /**
@@ -404,6 +407,16 @@ export const PROTECTED_TABLES = [
     writers: ["lib/amux/decisionMakerJudgmentStore.ts"],
     contract: "docs/policy/amux-decision-maker.md §10",
   },
+  ...[
+    "AmuxV22TaskRecoveryInspectionRequest",
+    "AmuxV22TaskRecoveryEvidence",
+    "AmuxV22TaskRecoveryApproval",
+  ].map((table) => ({
+    table,
+    delegate: table[0].toLowerCase() + table.slice(1),
+    writers: ["lib/amux/v22TaskRecoveryService.ts"],
+    contract: "docs/policy/development-agent-orchestration.md 버전 36",
+  })),
 ];
 
 /** Prisma delegate operations that cannot change a row. */
@@ -600,6 +613,58 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 23,
     reason:
       "The worker registry migration (orchestration policy version 31, sections 3, 5 and 7). Its four AdminAuditLog mentions are the restrictive foreign keys from the registry event's, the trial evidence's and the latch event's auditLogId, and the one SELECT EXISTS read in the registry guard that refuses an event whose audit row of the same transaction, person and action is missing. It never writes AdminAuditLog; its write verbs are the ALTER TABLEs adding those keys with their ON DELETE / ON UPDATE RESTRICT, the four triggers' events, the guards' TG_OP comparison and words of comments.",
+  },
+  {
+    path: "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 8,
+    writeVerbs: 39,
+    reason:
+      "The v22 Task recovery migration has three restrictive audit foreign keys and five guard reads that bind the inspection, evidence, approval and assignment to their canonical audit rows. Its DDL and trigger verbs create or constrain recovery metadata only; it never inserts, updates or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
+    table: "AmuxV22TaskRecoveryInspectionRequest",
+    tableMentions: 13,
+    writeVerbs: 39,
+    reason:
+      "The v22 Task recovery migration creates and guards this append-only request ledger. The migration seeds no request; application inserts are confined to the protected writer and updates, deletes and truncates are refused by its trigger.",
+  },
+  {
+    path: "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
+    table: "AmuxV22TaskRecoveryEvidence",
+    tableMentions: 8,
+    writeVerbs: 39,
+    reason:
+      "The v22 Task recovery migration creates and guards this append-only evidence ledger, including its database-clock trigger. The migration seeds no evidence; application inserts are confined to the protected writer and updates, deletes and truncates are refused by its trigger.",
+  },
+  {
+    path: "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
+    table: "AmuxV22TaskRecoveryApproval",
+    tableMentions: 10,
+    writeVerbs: 39,
+    reason:
+      "The v22 Task recovery migration creates and guards this append-only one-attempt approval ledger and its assignment and attempt bindings. The migration seeds no approval; application inserts are confined to the protected writer and updates, deletes and truncates are refused by its trigger.",
+  },
+  ...[
+    ["AmuxV22TaskRecoveryInspectionRequest", 4],
+    ["AmuxV22TaskRecoveryEvidence", 2],
+    ["AmuxV22TaskRecoveryApproval", 3],
+  ].map(([table, tableMentions]) => ({
+    path: "lib/amux/v22TaskRecoveryService.ts",
+    table,
+    tableMentions,
+    writeVerbs: 1,
+    reason:
+      "The sole recovery-ledger writer names this model in fixed canonical audit targets and read-back checks. Its only raw-SQL write verb is a constant SELECT FOR UPDATE lock on the Task; all recovery ledger mutations use the protected Prisma delegates in this file.",
+  })),
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxV22TaskRecoveryEvidence",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed system-actor manifest names the recovery evidence audit target beside prose about audit writes. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
   },
   {
     path: "lib/accountDataExportDomains.ts",

@@ -12,7 +12,8 @@
 상태(v31 이력): **v31 worker 등록부와 공급사 종류 승인.** 운영자 `mposition`이 2026-10-12에 아래 v31 절과 그 활성화 게이트 값을 승인했다. 이전 v30 상태 줄은 이력이다.
 상태(v32 이력): **v32 worker 등록부 R1 코드 래치 승인.** 2026-10-12 운영자 `mposition`이 아래 v32 절을 승인했다. `AMUX_WORKER_REGISTRY_WRITES_LATCH`는 true가 되어 owner가 Admin에서 등록부에 쓸 수 있다. 배정은 R2 전까지 카탈로그 환경 변수를 따른다. 이전 v31 상태 줄은 이력이다.
 상태(v33 이력): **v33 DB로 미반영이 확정된 Orchestrator halt의 자동 종결 승인.** 운영자 `mposition`이 2026-10-12에 아래 v33 절의 동일 요청 `no_commit` 범위와 운영 안내 화면을 승인했다. 자동 종결은 원래 쓰기의 재시도가 아니며, 증거 없는 정지와 사람 확인 대상은 계속 사람이 해제한다.
-상태(최신): **v34 engineering adapter runner의 등록부 비교 제외 승인.** 2026-10-13 운영자 `mposition`이 아래 v34 절을 승인했다. `engineering-runner`는 등록부 일치 비교에서 이름으로 제외되고 일치로 센다. 그 배정과 권한은 바꾸지 않는다. 이전 v33 상태 줄은 이력이다.
+상태(v34 이력): **v34 engineering adapter runner의 등록부 비교 제외 승인.** 2026-10-13 운영자 `mposition`이 아래 v34 절을 승인했다. `engineering-runner`는 등록부 일치 비교에서 이름으로 제외되고 일치로 센다. 그 배정과 권한은 바꾸지 않는다. 이전 v33 상태 줄은 이력이다.
+상태(최신): **v36 owner Task 중단 증명과 1회 복구 한도 승인.** 2026-10-13 운영자 `mposition`이 아래 v36 절의 고정 Ubuntu 점검과 exact Task에 결속된 owner 추가 1회 승인 계약을 승인했다. v35 R2는 계속 미승인 초안이다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -44,6 +45,7 @@ approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 31
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 32
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 33
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 34
+approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 36
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -82,6 +84,7 @@ approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 34
 | 32 | 2026-10-12 mposition | 버전 31 R1의 코드 래치 `AMUX_WORKER_REGISTRY_WRITES_LATCH`를 켠다. owner의 등록부 쓰기만 열리고, R1의 관측 기간은 열셋 등록 뒤 3일(72시간)이다. 배정, 환경 변수, worker catalog, bridge, 관측·시험·래치 표는 바꾸지 않는다. |
 | 33 | 2026-10-12 mposition | 같은 요청의 admission row lock, deadline+grace, 영수증 0, `no_commit` resolution과 결속된 시스템 감사를 DB가 검증한 결과 불명 halt만 자동 종결한다. 그 밖의 정지는 사람 해제 그대로이며 원래 쓰기를 재시도하지 않는다. 운영 화면은 자동 복구와 사람 판단을 구분해 증거와 확인 순서를 설명한다. |
 | 34 | 2026-10-13 mposition | engineering adapter의 worker identity `engineering-runner`를 등록부와 카탈로그의 일치 비교에서 이름으로 제외한다(`AMUX_WORKER_CATALOG_EXEMPT`). 비교에만 적용하고 배정·권한·카탈로그 항목은 바꾸지 않는다. R1 관측 기간은 제외 배포와 `devin-worker` 카탈로그 삭제가 모두 반영된 시각부터 다시 센다. |
+| 36 | 2026-10-13 mposition | owner가 exact Task·revision·직전 attempt의 Ubuntu 중단 증명을 요청하고, 고정된 비실행 점검기의 증거가 중단을 입증한 경우에만 Admin에서 추가 1회와 해당 1회의 승인된 catalog 최대 비용을 별도 승인한다. 첫 대상의 실제 값은 기존 US$3.40 예약을 불변으로 점유하고 새 1회 최대 US$3.40, 최악 노출 US$6.80이다. 일반 코드는 이 예시 숫자를 하드코딩하지 않고 각 Task의 불변 기존 예약과 exact 승인 catalog에서 서버가 계산한다. 이 승인은 설계·코드·합성 검증만 열고 production 활성화·실행·migration 적용·병합·배포를 열지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1777,3 +1780,117 @@ CLI-C는 CLI-B의 "기간 granularity·분류 차원·합치기 순서는 구현
 한 CLI 호출 안에서 **서로 다른 실제 모델이 둘 이상 독립적으로 확인되면**, CLI-C의 실제 모델 차원에는 해당 호출을 `multi_model`로 분류한다. 한 호출을 모델별 칸으로 나누거나 호출 건수·토큰을 둘 이상에 중복 합산하지 않는다. 모델별 사용량이 따로 보고되어도 장기 집계의 호출 단위는 하나이며, 호출 전체에서 확인된 토큰 사용량만 한 번 반영한다. `multi_model`은 실제 모델 확인 증거가 둘 이상일 때만 쓰고, 실제 모델을 증명하지 못한 `actualModelUnknown` 및 단순 선택·요청 모델과 구분한다. 실제 공급자를 증명할 수 없는 호출에는 CLI-C의 `actualProviderUnknown` 규칙을 그대로 적용한다. 서로 다른 실제 공급자가 둘 이상 확인된 호출의 공급자 차원은 아직 정하지 않았다. 그런 호출이 발견되면 장기 집계 확정을 보류하고 별도 운영자 결정을 요청하며, 호출을 조용히 제외하거나 공급자를 임의로 합치지 않는다. 토큰의 완전성이 불명확한 필드는 v22~CLI-C처럼 `unknown`으로 유지한다.
 
 이 분류는 CLI-C의 역할→모델→분기→연도 병합 순서와 5건 하한, CLI-A·CLI-B의 보존 기간, 비용·감사 분리 경계를 바꾸지 않는다. 실제 모델 확인 증거와 단일 호출 멱등 결속을 검증하기 전에는 비합성 집계 writer·Admin 장기 조회를 열지 않는다. CLI-D은 분류 결정이지 migration 적용, 운영 수집·삭제·조회 활성화 승인이 아니다.
+
+## 버전 36 — owner Task 중단 증명과 1회 복구 한도
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 운영자는
+아래의 두 가지만 승인했다.
+
+1. owner가 Admin에서 지목한 exact Task·revision·직전 attempt에 대해,
+   전용 Ubuntu host의 고정된 비실행 점검기가 중단·결과·사용량의
+   본문 없는 증거를 앱에 보고하는 경로를 설계·구현한다.
+2. 그 증거가 이 절의 중단 증명과 현재 실행 guard를 모두 만족할 때,
+   owner가 최근 step-up을 거쳐 exact 증거·Task revision·직전 attempt·비용
+   receipt에 결속된 **추가 attempt 1회**와 그 1회의 최대 비용을 Admin에서
+   승인하는 경로를 설계·구현한다. 기존 예약은 원래의 불변 승인과
+   직전 attempt에서, 새 1회 한도는 exact 현재 승인 catalog과 비용 receipt에서
+   서버가 계산한다. 첫 대상 Task의 실제 값은 기존 US$3.40을 예약된 채로
+   유지하고, 새 1회 최대 US$3.40, 최악 노출 US$6.80이다. 일반 코드는
+   이 예시 숫자를 하드코딩하지 않는다. 새 예약이나 실행은 이 owner 승인 전에
+   일어나지 않는다.
+
+### 1. 중단 증명
+
+- 앱은 host에 SSH하지 않고, host는 제품 DB 자격증명을 갖지 않는다. 앱에서
+  발행한 점검 request는 Task id·revision·직전 attempt id·worker instance·generation·
+  대상 host·request digest에 결속된다. 점검기는 이 결속에서 고정된 읽기만
+  하고 모델을 호출하거나 서비스를 재시작하거나 임의 명령을 실행하지 않는다.
+- 중단은 **같은 live sidecar invocation**의 terminal `.result`와, 그 invocation의
+  active execution 집합에 exact execution이 없음과, request의 host·instance·generation·
+  attempt 결속이 모두 일치할 때만 증명된다. 고정 점검기는 root 소유
+  systemd unit의 `InvocationID`·`ControlGroup`·`MainPID`·`KillMode`·`Delegate`를 읽고,
+  root 소유·일반 계정 쓰기 불가 unit이며 `KillMode=control-group`·`Delegate=no`·
+  `MainPID` cgroup 일치가 확인될 때만 쓴다. 지정된 cgroup의 process tree에 CLI 자식이
+  없음과 현재 sidecar socket의 exact-attempt
+  read-back이 terminal을 보고함을 같이 검사한다. `.claimed`·`.result`의 소유자·일반
+  파일·심볼릭 아님·상한·`ctime`과 그 현재 invocation 시작 결속이 입증되지 않으면
+  중단 증거가 아니다. `.claimed`만 있음, idle, 앱 lease 만료는 증명이 아니다.
+  sidecar가 crash·재시작해 이전 invocation의 active 집합을 입증할 수 없으면 멈춰 있다고
+  추정하지 않고 `legacy_invocation_unbound`로 보고해 복구 승인을 계속 차단한다.
+  현재 sidecar journal의 `.claimed`·`.result`는 attempt id는 담지만 systemd `InvocationID`·PID·
+  cgroup을 담지 않으므로, 첫 대상의 파일이 현재 invocation 시작 전이면 이 버전만으로
+  자동 복구를 열 수 없다. UI는 이 사실과 실제 request·evidence id를 보여 준다.
+- 보고는 식별자·고정 enum·digest·서버 시각·사용량 관측치만 담는다.
+  결과·patch·stdout·프롬프트 본문, host path, 자유형 오류를 저장하지 않는다.
+  사용량을 관측하지 못한 필드는 0이 아닌 `unknown`이다. terminal success가 관측돼도
+  이 경로는 늦은 success settlement를 쓰거나 Task를 `review`·`done`으로 옮기지
+  않으며, 중복 실행을 피하기 위해 새 attempt 승인도 거절한다.
+- 기존 사용량이 `unknown`인 것만으로 영구 거절하지는 않는다. 중단이 증명되고,
+  기존 최악 예약을 그대로 점유하며, 새 1회의 exact 최대액을 owner가 별도로
+  승인하고, 다른 비용 guard가 통과하면 그 불명성은 새 한도를 0으로 바꾸거나
+  이전 reservation을 풀지 않는 조건으로 다룬다. 실행 중 외부 효과가 불명하거나,
+  `implement` 역할의 고정 worktree에 이전 실행의 변경이 남았음을 비실행 점검으로
+  배제하지 못하면 비용과 관계없이 새 attempt는 계속 차단한다.
+
+### 2. owner 승인과 단일 소비
+
+- Admin은 저장된 실제 inspection id·evidence id·상태·거절 코드, 기존
+  예약액, 새 1회 최대액, 최악 노출액, catalog·가격·비용 receipt 버전과
+  digest를 보여 준다. 승인 request의 숫자를 믿지 않고 서버가 다시 산출해
+  하나라도 다르거나 상한 근거가 읽히지 않으면 0으로 대체하지 않고 거절한다.
+- 승인은 owner·최근 step-up·same-origin·CSRF, exact Task revision·직전 attempt·
+  evidence digest, 현재 의존성·ready·worker·catalog·route·비용·allowance guard를 모두
+  다시 검사한다. 증거는 request 이후 같은 live invocation의 최신 보고여야 하고,
+  승인 transaction 시점에 task·attempt·host generation·worker 관측 가드가 그대로여야
+  한다. 정지한 bridge의 옛 heartbeat나 만료 전 lease는 이 증명의 조건이 아니다.
+  `AmuxWorkerRuntime`은 현재 행의 instance·generation이 request와 같은지를 확인하는
+  identity fence로만 읽고 쓰거나 heartbeat를 합성하지 않는다. 인증된 고정 점검 보고를
+  받은 DB 시각 `evidence.recordedAt`이 미래가 아니고 기존
+  `AMUX_WORKER_RUNTIME_LEASE_MS` 90초 freshness 범위 안일 때만 승인한다. evidence는
+  불변이므로 같은 행의 시각을 갱신해 범위를 늘릴 수 없고, 범위를 벗어나면 새 exact
+  inspection부터 다시 해야 한다. 이 freshness로 입증할 수 없으면 새 시간 수치를
+  임의로 만들지 않고 거절한다. 이후 claim·start의 fresh live worker guard는 그대로다.
+- 승인·canonical human audit·Task compare-and-set·새 1회 한도는 한 DB
+  transaction이다. Task는 owner·claim·이전 assignment이 없는 새 `todo`와 증가한
+  revision을 갖지만, 직전 expired·`outcome_unknown` attempt와 그 reservation·result·usage·
+  ledger를 수정·정산·해제·삭제하지 않는다. 기존 일반 review `retry`는 그 두
+  상태를 계속 거절하며, 이 절의 별도로 소비된 승인으로만 예외가 성립한다.
+- 승인은 Task revision과 새 assignment 하나에만 결속되고 두 번 소비될 수
+  없다. 이후의 assignment·claim·start는 기존 v22 경로만 사용하고, 실행
+  직전에 모든 guard와 한도를 다시 검사한다. worker 수·모델·가격·route·
+  의존성을 하드코딩하거나 승인 시점의 판정으로 나중 guard를 생략하지 않는다.
+- 복구 승인 transaction은 기존 `evaluateAmuxV4TaskReadyInTransaction()`과 동일한
+  source approval·본문/brief digest·현재 hierarchy·의존성·승인 cost/catalog·오케스트레이터
+  정지 검사를 새 `todo`를 쓰기 전에 재사용한다. 그 뒤 `v22WorkerClaimService`의
+  `claimCandidate()`가 ready·live worker·capacity·quota·route·catalog·cost를 다시 검사하고,
+  `startAmuxV22TaskExecution()`이 runtime generation·assignment·현재 cost·route·attempt 한도를
+  다시 검사한다. 최초 promotion의 `scoreTotal`과 score receipt는 불변 우선순위 근거로
+  유지하고 복구를 새 promotion으로 꾸미거나 점수를 재산출하지 않는다. score는
+  실행 중단 안전 가드가 아니고, current-ready 재검사가 실행 안전성을 담당한다.
+- request, evidence, approval은 append-only이고 exact id·revision·attempt·digest와 결속된다.
+  approval의 request id와 evidence는 각각 유일하며, 새 assignment은 approval 하나에 유일하다.
+  응답이 유실되면 같은 request id로 승인·Task revision·감사를 한 번 읽고,
+  커밋을 확정할 수 없으면 `outcome_unknown`으로 멈추고 자동 재시도하지 않는다.
+
+### 3. 저장·감사·활성화 경계
+
+- 앱 DB는 불변 inspection request, content-free evidence, owner approval을 각각 담고,
+  approval과 새 assignment의 1:1 결속으로 추가 1회를 강제한다. 새 attempt가 시작할
+  때까지 approval의 금액은 새 reservation이 아니라 최대 한도다. 여기서 기존
+  미확정액의 점유는 해당 Task attempt들의 불변 `reservedCostMicrousd` 합계를 뜻하며
+  project·team 기간 예산 원장에 소급 reservation이 생겼다는 뜻이 아니다. 새 attempt는
+  기존 v22 start transaction의 Task 비용 합계·assignment 비용 fence를 우회하지 않는다.
+- request·evidence·approval의 ID, digest, 고정 판정, 비용 숫자, actor, 시각은
+  기존 canonical 감사 metadata와 같이 7년 보존 범위를 재사용한다. 결과·brief
+  본문은 기존 90일 계약을 바꾸지 않는다. raw host artifact·path·process output은
+  승인된 보존 수치가 없으므로 이 경로에 저장하지 않는다.
+- 이 승인은 정책·schema·additive migration 파일·앱 route·고정 checker·Admin UI·
+  합성 테스트의 작성만 연다. migration 적용, 실제 Task 점검·승인·예약·
+  실행, provider·모델 호출, 서비스 재시작, worker 수·카탈로그 변경, 새
+  환경 값, 병합·배포·production 활성화는 열지 않는다. 작성자와 다른 provider의
+  독립 검토와 합성 DB·checker·UI 검증을 배포 전 차단 조건으로 둔다.
+- 작성된 복구 mutation 능력은 별도 false 하드코드 latch 없이
+  `TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED`가 정확히 `true`일 때만 owner POST와
+  internal pending/report를 연다. 누락·그 밖의 값은 기본 off이고, owner GET은
+  disabled metadata와 기존 Phase 1 read만 제공하며, 일반 claim·start 경로에는
+  영향을 주지 않는다. 이 환경 값을 실제로 설정하는 일은 별도 활성화 승인이다.

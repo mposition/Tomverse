@@ -70,6 +70,8 @@ import { currentEngineeringAgentV22ImageProofDigest } from
   "@/lib/engineeringAgentV22ImageEvidence";
 import { readAmuxV22PublicPrConsent } from
   "@/lib/amux/v22PublicPrConsent";
+import { readAmuxV22RecoveryAuthority, recoveryAttemptBudget } from "@/lib/amux/v22TaskRecoveryService";
+import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed } from "@/lib/amux/v22TaskRecoveryCore";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -285,7 +287,7 @@ export async function startAmuxV22TaskExecution(input: {
     ? input.publicationBaseSha : null;
   return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionStart,
     prismaCallCeiling: AMUX_DB_BOUNDARIES.executionStart.prismaCallCeiling +
-      (publicationBaseSha ? 24 : 0) },
+      (publicationBaseSha ? 24 : 0) + 2 },
     async (tx, context) => {
       const now = context.dbNow;
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
@@ -371,21 +373,34 @@ export async function startAmuxV22TaskExecution(input: {
         _count: { _all: true }, _max: { attemptNumber: true },
         _sum: { reservedCostMicrousd: true },
       });
-      const budget = decideAmuxAttemptBudget({
-        historical_rows: prior._count._all,
-        greatest_attempt_number: prior._max.attemptNumber,
+      const recovery = assignment.recoveryApprovalId ? await readAmuxV22RecoveryAuthority(tx,
+        input.taskId, assignment.taskRevision, assignment.recoveryApprovalId) : null;
+      if (assignment.recoveryApprovalId && !recovery) return { started: false as const,
+        reason: "recovery_approval_unbound" as const };
+      const budget = recoveryAttemptBudget({
+        historicalAttempts: prior._count._all,
+        greatestAttemptNumber: prior._max.attemptNumber, approval: recovery,
       });
       if (!budget.allowed) return { started: false as const,
         reason: "attempt_budget_exhausted" as const };
       if (!route || !approved || typeof approved !== "object" ||
           !("ceilingMicroUsd" in approved) ||
           typeof approved.ceilingMicroUsd !== "string" ||
-          !v22ExecutionCostWithinAssignment({
+          !(recovery ? amuxV22RecoveryStartAllowed({ approval: recovery,
+            taskId: input.taskId, assignmentRevision: assignment.taskRevision,
+            historicalAttempts: prior._count._all, nextAttemptNumber: budget.next_attempt_number,
+            priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+            assignedMicroUsd: assignment.perAttemptMicroUsd,
+            catalogApprovalId: cost.approvalId,
+            costDigest: amuxV22RecoveryCost({ priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+              catalogApprovalId: cost.approvalId, receipt: cost.receipt }).costDigest,
+          }) && BigInt(route.perAttemptMicroUsd) <= assignment.perAttemptMicroUsd :
+          v22ExecutionCostWithinAssignment({
             assignedMicroUsd: assignment.perAttemptMicroUsd,
             currentMicroUsd: BigInt(route.perAttemptMicroUsd),
             approvedCeilingMicroUsd: BigInt(approved.ceilingMicroUsd),
             priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
-          })) {
+          }))) {
         return { started: false as const, reason: "cost_unverified" as const };
       }
       let publicationRunId: string | null = null;

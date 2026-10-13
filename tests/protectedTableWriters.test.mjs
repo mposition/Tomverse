@@ -118,6 +118,45 @@ test("delegate writes are findings, in every spelling", () => {
   }
 });
 
+test("the v22 Task recovery ledgers have one exact writer and foreign delegates stay closed", () => {
+  const expected = [
+    ["AmuxV22TaskRecoveryInspectionRequest", "amuxV22TaskRecoveryInspectionRequest"],
+    ["AmuxV22TaskRecoveryEvidence", "amuxV22TaskRecoveryEvidence"],
+    ["AmuxV22TaskRecoveryApproval", "amuxV22TaskRecoveryApproval"],
+  ];
+  const protectedRecoveryTables = PROTECTED_TABLES.filter(({ table }) =>
+    table.startsWith("AmuxV22TaskRecovery")
+  );
+  assert.deepEqual(
+    protectedRecoveryTables.map(({ table, delegate, writers }) => ({ table, delegate, writers })),
+    expected.map(([table, delegate]) => ({
+      table,
+      delegate,
+      writers: ["lib/amux/v22TaskRecoveryService.ts"],
+    }))
+  );
+
+  for (const [, delegate] of expected) {
+    assertOneFinding(
+      `lib/foreign-${delegate}.ts`,
+      `await prisma.${delegate}.create({ data })`,
+      "delegate-write"
+    );
+    assertOneFinding(
+      `lib/escaped-${delegate}.ts`,
+      `const ledger = prisma.${delegate}; await ledger.create({ data })`,
+      "delegate-write"
+    );
+    assert.deepEqual(
+      one(
+        "lib/amux/v22TaskRecoveryService.ts",
+        `await tx.${delegate}.create({ data })`
+      ),
+      []
+    );
+  }
+});
+
 test("a delegate reached by name at runtime is a finding", () => {
   assertOneFinding(
     "lib/named.ts",
@@ -279,6 +318,44 @@ test("the monthly budget migration rejects added writes for both protected table
     extended.map((finding) => finding.detail.split(":")[0]).sort(),
     ["AdminAuditLog", "AmuxIdeaAnalysisBudgetSetting"]
   );
+});
+
+test("the v22 Task recovery migration has exact read-only audit references and closed ledger counts", () => {
+  const path = "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const expected = [
+    { table: "AdminAuditLog", tableMentions: 8, writeVerbs: 39 },
+    { table: "AmuxV22TaskRecoveryInspectionRequest", tableMentions: 13, writeVerbs: 39 },
+    { table: "AmuxV22TaskRecoveryEvidence", tableMentions: 8, writeVerbs: 39 },
+    { table: "AmuxV22TaskRecoveryApproval", tableMentions: 10, writeVerbs: 39 },
+  ];
+  assert.deepEqual(
+    RAW_SQL_ALLOWLIST
+      .filter((entry) => entry.path === path)
+      .map(({ table, tableMentions, writeVerbs }) => ({ table, tableMentions, writeVerbs })),
+    expected
+  );
+  assert.doesNotMatch(
+    sqlWithoutComments(source),
+    /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"[^"]+"\.)?"?AdminAuditLog"?/i,
+    "the migration may read and bind AdminAuditLog but must never write it"
+  );
+  const findingsFor = (text) => checkProtectedTableWriters({
+    sources: [{ path, text }],
+  }).filter((finding) => finding.path === path && finding.rule === "raw-sql");
+  assert.deepEqual(findingsFor(source), []);
+  assert.ok(
+    findingsFor(`${source}\nDELETE FROM "AdminAuditLog";\n`)
+      .some((finding) => finding.detail.startsWith("AdminAuditLog:")),
+    "a later audit write must invalidate the exact exception"
+  );
+  for (const { table } of expected.slice(1)) {
+    assert.ok(
+      findingsFor(`${source}\nDELETE FROM "${table}";\n`)
+        .some((finding) => finding.detail.startsWith(`${table}:`)),
+      `a later ${table} write must invalidate the exact exception`
+    );
+  }
 });
 
 test("the Prompt Refiner preview adds exact reads without widening its write boundary", () => {
@@ -789,21 +866,34 @@ test("the CSS class and the English word are not SQL", () => {
   assert.deepEqual(findings, []);
 });
 
-test("every append-only ledger table is one the migration protects", () => {
+test("every append-only ledger table is one an exact migration protects", () => {
   // The list here and the tables the migration makes append-only are the same
   // decision; a table added to one and not the other is a table whose claim
   // nothing keeps.
-  const sql = readFileSync(
+  const emailSql = readFileSync(
     new URL(
       "../prisma/migrations/20260921170000_email_permission_ledger/migration.sql",
       import.meta.url
     ),
     "utf8"
   );
+  const recoverySql = readFileSync(
+    new URL(
+      "../prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const recoveryTables = new Set([
+    "AmuxV22TaskRecoveryInspectionRequest",
+    "AmuxV22TaskRecoveryEvidence",
+    "AmuxV22TaskRecoveryApproval",
+  ]);
   for (const table of APPEND_ONLY_LEDGER_TABLES) {
+    const sql = recoveryTables.has(table) ? recoverySql : emailSql;
     assert.match(
       sql,
-      new RegExp(`BEFORE (INSERT OR )?UPDATE( OR DELETE)? ON "${table}"`),
+      new RegExp(`BEFORE (?:INSERT OR )?UPDATE OR DELETE(?: OR TRUNCATE)?\\s+ON "${table}"`),
       `${table} has no append-only trigger in the migration`
     );
   }

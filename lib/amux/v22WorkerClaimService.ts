@@ -18,6 +18,8 @@ import { TICK_TRANSACTION_LIMITS, withAutoTransaction } from
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
+import { readAmuxV22RecoveryAuthority } from "./v22TaskRecoveryService.ts";
+import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed } from "./v22TaskRecoveryCore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22RequiredTool,
@@ -158,6 +160,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
 
       const approved = await calculateCurrentApprovedAmuxV4TaskCost(tx,
         card.taskRole, card.executionGrade);
+      const recovery = await readAmuxV22RecoveryAuthority(tx, taskId, card.revision);
       const source = ready.sourceApprovalId ?
         await tx.amuxIdeaUnitDecision.findUnique({
           where: { id: ready.sourceApprovalId },
@@ -208,6 +211,20 @@ async function claimCandidate(taskId: string, assignmentId: string,
         priorAuthorWorkers: authorWorkers, priorAuthorProviders: authorProviders,
         isReview: card.taskRole === "review" });
       if (!route) throw new BoardImportError("worker_unavailable", 409);
+      if (recovery) {
+        const prior = await tx.amuxExecutionAttempt.aggregate({ where: { taskId },
+          _count: { _all: true }, _max: { attemptNumber: true },
+          _sum: { reservedCostMicrousd: true } });
+        const quote = amuxV22RecoveryCost({ priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          catalogApprovalId: approved.approvalId, receipt: approved.receipt });
+        if (!amuxV22RecoveryStartAllowed({ approval: recovery, taskId,
+          assignmentRevision: card.revision, historicalAttempts: prior._count._all,
+          nextAttemptNumber: Math.max(prior._count._all, prior._max.attemptNumber ?? 0) + 1,
+          priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          assignedMicroUsd: BigInt(route.perAttemptMicroUsd),
+          catalogApprovalId: approved.approvalId, costDigest: quote.costDigest }))
+          throw new BoardImportError("recovery_approval_changed", 409);
+      }
       // Never treat a prior v4 worker's absent/partial CLI observation as a
       // zero-cost run when admitting another cost-bound assignment. A15 owns
       // the audited owner-release and reservation-occupancy recovery path.
@@ -215,6 +232,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
         SELECT a."id" FROM "AmuxExecutionAttempt" a
         JOIN "AmuxWorkItem" w ON w."id" = a."taskId"
         WHERE a."worker" = ${route.workerName}
+          AND a."id" IS DISTINCT FROM ${recovery?.priorAttemptId ?? null}
           AND a."endedAt" IS NOT NULL
           AND w."sourceSystem" = 'admin-idea-v4'
           AND (NOT EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" u
@@ -248,6 +266,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
           laneDecisionSequence: lane.sequence?.toString() ?? null,
           routeId: route.routeId, catalogApprovalId: approved.approvalId,
           costReceiptDigest: approved.receipt.receiptDigest,
+          ...(recovery ? { recoveryApprovalId: recovery.id,
+            recoveryCostDigest: recovery.costDigest } : {}),
           capacityAssigned: occupied.length,
           verifiedWorkerCount: verifiedNames.size },
       });
@@ -265,6 +285,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
         catalogVersion: approved.receipt.catalogVersion,
         costReceiptDigest: approved.receipt.receiptDigest,
         perAttemptMicroUsd: BigInt(route.perAttemptMicroUsd),
+        recoveryApprovalId: recovery?.id ?? null,
         authorizationAuditLogId: auditId, assignedAt: now,
       } });
       const changed = await tx.amuxWorkItem.updateMany({ where: {
