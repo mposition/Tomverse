@@ -284,6 +284,23 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 9,
     isolation: "mutation",
   },
+  // setup + the newest capability of each worker (1, pinned by
+  // tests/amuxWorkerCapabilityStore.test.mjs) + fence (orchestration policy
+  // version 35, section 2)
+  workerCapabilityRead: {
+    operation: "worker_capability_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // setup + an owner's capability write at its largest (audit chain lock, the
+  // worker's newest registry event, its newest capability revision, the
+  // administrator audit's 4 with an integrity key, the event insert: 8, pinned
+  // by tests/amuxWorkerCapabilityStore.test.mjs) + fence
+  workerCapabilityChange: {
+    operation: "worker_capability_change",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
   // setup + a question's routing at its largest (audit chain lock, the
   // request read, the switch read, the throughput read, the router's audit 4
   // with an integrity key, the request insert, the card text insert: 10,

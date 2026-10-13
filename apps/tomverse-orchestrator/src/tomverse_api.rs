@@ -961,6 +961,13 @@ impl TomverseApi {
                         }
                     }
                 }
+                // Orchestration policy version 20, section 1: an exact 503
+                // busy, deadline or call-ceiling answer committed nothing. It
+                // is a known "not recorded", not an unknown outcome; the
+                // sidecar's next probe reports afresh.
+                if crate::orchestrator_halt::nothing_committed_reason(status, &answer.body).is_some() {
+                    return Ok(false);
+                }
             }
         }
         let response = self.client
@@ -1453,6 +1460,42 @@ mod tests {
             let result = api.worker_quota_record_once(&observation).await;
             assert_eq!(result.is_ok(), found);
             if found { assert!(result.unwrap()); }
+            server.join().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn quota_nothing_committed_answer_is_not_recorded_without_a_lookup() {
+        for body in [
+            r#"{"error":"AMUX database is busy.","reason":"amux_database_busy"}"#,
+            r#"{"error":"AMUX database deadline exceeded.","reason":"amux_database_deadline_exceeded"}"#,
+            r#"{"error":"AMUX database call ceiling exceeded.","reason":"amux_database_call_ceiling_exceeded"}"#,
+        ] {
+            let observation = AmuxWorkerQuota {
+                observation_id: "00000000-0000-4000-8000-000000000001".into(), worker: "claude-chore".into(),
+                provider: "anthropic".into(), remaining_basis_points: 7400, confidence_basis_points: 10000,
+                exhausted: false, source: "provider_api".into(), observed_at: "2026-10-12T00:00:00.000Z".into(),
+                reset_at: Some("2026-10-12T07:00:00.000Z".into()),
+            };
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            // One connection only: a lookup after this answer would find no
+            // listener and come back as an error.
+            let server = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let mut chunk = [0_u8; 4096];
+                    let count = stream.read(&mut chunk).unwrap(); assert!(count > 0);
+                    request.extend_from_slice(&chunk[..count]);
+                    if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") { break; }
+                }
+                assert!(String::from_utf8_lossy(&request).starts_with("POST"));
+                write!(stream, "HTTP/1.1 503 Service Unavailable\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            let api = TomverseApi::for_test_with_timeouts(format!("http://{address}"), Duration::from_secs(1), Duration::from_secs(3));
+            assert!(!api.worker_quota_record_once(&observation).await.unwrap(), "{body}");
             server.join().unwrap();
         }
     }
