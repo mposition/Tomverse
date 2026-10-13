@@ -242,6 +242,10 @@ run(
     // that only a person clears -- each refused by the database, not only by
     // the application, when it is broken.
     "tests/integration/amux-orchestration-halt.db.test.ts",
+    // The quota route under real contention: a write that waited too long for
+    // the audit chain lock, or never got a pool connection, wrote nothing and
+    // says so with a 503 the bridge can act on, and its replay is accepted.
+    "tests/integration/amux-quota-observation-route.db.test.ts",
     // AMUX v4/v22 receipts, retention and patch boundaries must execute in CI.
     "tests/integration/amuxCliUsageLedger.db.test.mjs",
     "tests/integration/amuxCliUsageRetention.db.test.mjs",
