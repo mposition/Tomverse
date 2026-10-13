@@ -1,6 +1,9 @@
 "use client";
 
+import Link from "next/link";
+
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { dmAdminRequestDetailHref } from "@/components/admin/AmuxDecisionMakerRequestDetailPanel";
 import { dmReportInstant } from "@/components/admin/AmuxDecisionMakerReportPanel";
 import { adminAmuxDecisionMakerRequestsMessages } from "@/lib/adminMessages/amuxDecisionMaker";
 import {
@@ -47,8 +50,8 @@ const statusCell = (m: Messages, row: DmAdminRequestRow, dbNowMs: number) => {
  * test can call it and read the tree it returns.
  *
  * `list` is what the page read, or `null` when the read failed: then the
- * panel says so and shows no request. It offers no control -- a proposal is
- * opened, confirmed or rejected elsewhere -- and it states how many rows it
+ * panel says so and shows no request. Its only links open one request on the
+ * same tab; it changes nothing, and it states how many rows it
  * shows and that they are not totals (docs/ui-contracts/admin-console-ia.md).
  */
 export function AmuxDecisionMakerRequestsView({ m, list }: { m: Messages; list: DmAdminRequestList | null }) {
@@ -90,7 +93,13 @@ export function AmuxDecisionMakerRequestsView({ m, list }: { m: Messages; list: 
                     <tr key={row.requestId} data-testid={`amux-dm-request-${row.requestId}`}>
                       <td className={cellClass}>{dmReportInstant(row.createdAtMs)}</td>
                       <td className={cellClass}>
-                        <span className="font-mono text-xs">{row.cardId}</span>
+                        <Link
+                          href={dmAdminRequestDetailHref(row.requestId)}
+                          className="font-mono text-xs text-blue-700 underline dark:text-blue-300"
+                          data-testid={`amux-dm-request-open-${row.requestId}`}
+                        >
+                          {row.cardId}
+                        </Link>
                         <span className="block text-xs text-zinc-600 dark:text-zinc-400">
                           {m.revision(row.questionRevision)}
                         </span>
