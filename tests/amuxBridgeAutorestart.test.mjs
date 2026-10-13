@@ -39,49 +39,72 @@ const SIDECAR = "tomverse-amux-v22-sidecar@claude-impl.service";
 
 const invocation = (n) => n.toString(16).padStart(32, "0");
 
-/** A halted run's journal, as the bridge printed it on 2026-10-13. */
+/**
+ * A halted run's journal, as the bridge prints it: the 2026-10-13 lines, with
+ * the per-cause line every noted cause now leaves (note_halt in
+ * apps/tomverse-orchestrator/src/wsl_bridge.rs).
+ */
+const noted = (cause) => `amux wsl bridge halt noted: cause=${cause}`;
+const halt = (cause) =>
+  `amux wsl bridge halted: no new assignments; cause=${cause}; restart only after checking Tomverse and the local AMUX`;
+const tick = (committed, cls = "http_500") =>
+  `amux wsl bridge warn: tick failed (${cls}) after ${committed} result(s) already committed this tick; recording them before halting`;
 const HALT = {
   leaseLost: [
     "amux wsl bridge warn: owned queue answered 503 amux_database_busy; no new assignment this tick, not halted",
-    "amux wsl bridge halted: no new assignments; cause=worker_runtime_lease_lost; restart only after checking Tomverse and the local AMUX",
+    noted("worker_runtime_lease_lost"),
+    halt("worker_runtime_lease_lost"),
   ],
   tickNothingCommitted: [
     "amux v22 quota source unavailable for claude-impl",
-    "amux wsl bridge warn: tick failed (http_500) after 0 result(s) already committed this tick; recording them before halting",
-    "amux wsl bridge halted: no new assignments; cause=tick_failed_http_500; restart only after checking Tomverse and the local AMUX",
+    tick(0),
+    noted("tick_failed_http_500"),
+    halt("tick_failed_http_500"),
   ],
-  tickCommitted: [
-    "amux wsl bridge warn: tick failed (http_500) after 2 result(s) already committed this tick; recording them before halting",
-    "amux wsl bridge halted: no new assignments; cause=tick_failed_http_500; restart only after checking Tomverse and the local AMUX",
-  ],
-  dispatchUnknown: [
-    "amux wsl bridge halted: no new assignments; cause=dispatch_outcome_unknown; restart only after checking Tomverse and the local AMUX",
-  ],
-  settleUnknown: [
-    "amux wsl bridge halted: no new assignments; cause=settle_outcome_unknown; restart only after checking Tomverse and the local AMUX",
-  ],
+  tickCommitted: [tick(2), noted("tick_failed_http_500"), halt("tick_failed_http_500")],
+  dispatchUnknown: [noted("dispatch_outcome_unknown"), halt("dispatch_outcome_unknown")],
+  settleUnknown: [noted("settle_outcome_unknown"), halt("settle_outcome_unknown")],
   noCause: [
     "amux wsl bridge halted: no new assignments; restart only after checking Tomverse and the local AMUX",
   ],
   // A tick line that committed nothing, but the halt that followed was for
   // something else: the cause decides, not the presence of the tick line.
-  tickThenDispatch: [
-    "amux wsl bridge warn: tick failed (http_500) after 0 result(s) already committed this tick; recording them before halting",
-    "amux wsl bridge halted: no new assignments; cause=dispatch_outcome_unknown; restart only after checking Tomverse and the local AMUX",
-  ],
+  tickThenDispatch: [tick(0), noted("dispatch_outcome_unknown"), halt("dispatch_outcome_unknown")],
   // Review r-20261013-231119-e051d6: the bridge keeps its first cause, and a
-  // settlement that turns unknown after the halt only adds this line.
+  // settlement that turns unknown after the halt adds lines of its own.
   leaseLostThenSettleUnknown: [
-    "amux wsl bridge halted: no new assignments; cause=worker_runtime_lease_lost; restart only after checking Tomverse and the local AMUX",
+    noted("worker_runtime_lease_lost"),
     "amux wsl bridge halt: settle outcome unknown for attempt 7f9c2d10-1111-4222-8333-944455556666; read back before restart",
+    noted("settle_outcome_unknown"),
+    halt("worker_runtime_lease_lost"),
+  ],
+  // Review r-20261013-231443-7cfb6c: a read-only API attempt left open after
+  // the halt prints nothing but its noted cause.
+  leaseLostThenReadOnlyApiUnknown: [
+    noted("worker_runtime_lease_lost"),
+    noted("read_only_api_outcome_unknown"),
+    halt("worker_runtime_lease_lost"),
   ],
   quotaRefusedBeforeLeaseLost: [
     "amux v22 quota observation refused for claude-impl",
-    "amux wsl bridge halted: no new assignments; cause=worker_runtime_lease_lost; restart only after checking Tomverse and the local AMUX",
+    noted("worker_runtime_lease_lost"),
+    halt("worker_runtime_lease_lost"),
   ],
-  twoHalts: [
-    "amux wsl bridge halted: no new assignments; cause=worker_runtime_lease_lost; restart only after checking Tomverse and the local AMUX",
-    "amux wsl bridge halted: no new assignments; cause=worker_runtime_lease_lost; restart only after checking Tomverse and the local AMUX",
+  twoHalts: [noted("worker_runtime_lease_lost"), halt("worker_runtime_lease_lost"), halt("worker_runtime_lease_lost")],
+  // A binary built before noted causes: its halt cannot say what else it noted.
+  oldBinaryLeaseLost: [halt("worker_runtime_lease_lost")],
+  // The halt line must name the first noted cause.
+  haltDisagreesWithFirst: [
+    tick(0),
+    noted("tick_failed_http_500"),
+    noted("worker_runtime_lease_lost"),
+    halt("worker_runtime_lease_lost"),
+  ],
+  // Two approved causes, the second a tick that committed results.
+  leaseLostThenCommittedTick: [
+    noted("worker_runtime_lease_lost"),
+    noted("tick_failed_http_500"),
+    halt("worker_runtime_lease_lost"),
   ],
   // Every harmless line the bridges printed on 2026-10-10..13, then a halt.
   harmlessNoise: [
@@ -90,8 +113,9 @@ const HALT = {
     "amux wsl bridge warn: owned queue answered 503 amux_database_busy; no new assignment this tick, not halted",
     "amux wsl bridge warn: worker register answered 503 amux_database_busy; registering again next tick",
     "amux wsl bridge warn: execution heartbeat for attempt 7f9c2d10-1111-4222-8333-944455556666 answered 503 amux_database_busy; kept, not halted",
-    "amux wsl bridge warn: tick failed (timeout) after 0 result(s) already committed this tick; recording them before halting",
-    "amux wsl bridge halted: no new assignments; cause=tick_failed_timeout; restart only after checking Tomverse and the local AMUX",
+    tick(0, "timeout"),
+    noted("tick_failed_timeout"),
+    halt("tick_failed_timeout"),
   ],
 };
 
@@ -216,8 +240,12 @@ test("every harmless line the bridges print still allows a restart", { skip: noB
 
 for (const [name, lines, reason] of [
   ["a tick that had committed results", HALT.tickCommitted, /unrecognised line in the halted run: amux wsl bridge warn: tick failed \(http_500\) after 2 result/],
-  ["dispatch_outcome_unknown", HALT.dispatchUnknown, /cause=dispatch_outcome_unknown is not restarted automatically/],
-  ["settle_outcome_unknown", HALT.settleUnknown, /cause=settle_outcome_unknown is not restarted automatically/],
+  ["dispatch_outcome_unknown", HALT.dispatchUnknown, /cause=dispatch_outcome_unknown was noted and is not restarted automatically/],
+  ["settle_outcome_unknown", HALT.settleUnknown, /cause=settle_outcome_unknown was noted and is not restarted automatically/],
+  ["an unknown read-only API outcome noted after an approved halt", HALT.leaseLostThenReadOnlyApiUnknown, /cause=read_only_api_outcome_unknown was noted and is not restarted automatically/],
+  ["a halt from a binary that predates noted causes", HALT.oldBinaryLeaseLost, /no noted causes/],
+  ["a halt line that does not name the first noted cause", HALT.haltDisagreesWithFirst, /names worker_runtime_lease_lost but the first noted cause is tick_failed_http_500/],
+  ["a later tick_failed cause without a tick that committed nothing", HALT.leaseLostThenCommittedTick, /without a tick that committed nothing/],
   ["a halt line without a cause", HALT.noCause, /unrecognised line in the halted run: amux wsl bridge halted: no new assignments; restart only/],
   ["a nothing-committed tick followed by a different halt", HALT.tickThenDispatch, /cause=dispatch_outcome_unknown/],
   ["a settlement that turned unknown after an approved halt", HALT.leaseLostThenSettleUnknown, /unrecognised line in the halted run: amux wsl bridge halt: settle outcome unknown/],
@@ -324,9 +352,9 @@ test("the approved causes are the only ones restarted", () => {
   // The decision is one function; its restart branches are exactly the two
   // causes the operator approved on 2026-10-14.
   const decide = script.slice(script.indexOf("decide() {"), script.indexOf("answers() {"));
-  assert.equal(decide.match(/echo restart/g)?.length, 2);
-  assert.match(decide, /"\$cause" == worker_runtime_lease_lost/);
-  assert.match(decide, /"\$cause" == tick_failed_\* \]\] && \(\(ticks > 0\)\)/);
+  const approvedFn = script.slice(script.indexOf("approved() {"), script.indexOf("decide() {"));
+  assert.match(approvedFn, /\[\[ "\$1" == worker_runtime_lease_lost \|\| "\$1" == tick_failed_\* \]\]/);
+  assert.equal(decide.match(/echo restart/g)?.length, 1);
   assert.match(script, /after 0 result\\\(s\\\) already committed this tick; recording them before halting\$'/);
 });
 
