@@ -238,7 +238,8 @@ test.describe("Auto is offered", () => {
 
     const composerToggle = page.getByTestId("composer-auto-routing-toggle");
     await expect(composerToggle).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByTestId("composer-active-model-count")).toHaveText("Smart Adaptive");
+    await expect(page.getByTestId("composer-active-model-count")).toHaveText("Auto");
+    await expect(composerToggle).toHaveAccessibleName("Smart Adaptive");
     await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
     await expect(page.getByTestId("auto-variable-credit-notice")).toBeVisible();
     await testInfo.attach("auto-on-composer-picker", {
@@ -341,8 +342,9 @@ test.describe("Auto is offered", () => {
       await expectNoIntersection(composerLabel, composerTrack);
       await expectNoIntersection(composerToggle, modelTrigger);
       await expect(page.getByTestId("composer-active-model-count")).toHaveText(
-        "스마트 자동"
+        "자동"
       );
+      await expect(composerToggle).toHaveAccessibleName("스마트 자동");
       await expect(page.getByTestId("auto-variable-credit-notice")).toBeVisible();
 
       await expectNoHorizontalOverflow(page);

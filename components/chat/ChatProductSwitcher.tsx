@@ -68,11 +68,11 @@ export function ChatProductSwitcherView({
       aria-label={copy.selectorLabel}
       data-density={density}
       className={density === "compact"
-        ? "w-[138px] max-w-full min-w-0"
+        ? "w-fit max-w-full min-w-0 max-[240px]:w-full"
         : "w-full min-w-0 max-w-[236px]"}
     >
       <div className={density === "compact"
-        ? "grid h-11 min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1.2258fr)] rounded-lg bg-zinc-100 dark:bg-zinc-950 md:h-8"
+        ? "grid h-11 min-w-0 grid-cols-[minmax(62px,max-content)_minmax(76px,max-content)] rounded-lg max-[240px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:[@media(pointer:fine)]:h-8"
         : "grid min-w-0 grid-cols-2 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-950"}>
         {(["chat", "review"] as const).map((product) => {
           const item = copy[product];
@@ -99,12 +99,16 @@ export function ChatProductSwitcherView({
                 }
               }}
               className={`${density === "compact"
-                ? "flex h-11 min-w-0 touch-manipulation items-center justify-center rounded-lg border px-2 text-center text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 md:h-8"
+                ? "flex h-11 min-w-0 touch-manipulation items-center justify-center rounded-lg border px-2 text-center text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 md:[@media(pointer:fine)]:h-8"
                 : "flex min-h-11 min-w-0 flex-wrap touch-manipulation content-center items-center justify-center gap-x-2 gap-y-0.5 rounded-lg border px-2 text-center text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"} ${
                 current
                   ? product === "review"
-                    ? "border-blue-100 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-900/70 dark:bg-blue-950/40 dark:text-blue-200"
-                    : "border-zinc-300 bg-white text-zinc-950 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+                    ? density === "compact"
+                      ? "border-transparent bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+                      : "border-blue-100 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-900/70 dark:bg-blue-950/40 dark:text-blue-200"
+                    : density === "compact"
+                      ? "border-transparent bg-zinc-100 text-zinc-950 dark:bg-zinc-800 dark:text-white"
+                      : "border-zinc-300 bg-white text-zinc-950 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
                   : disabled
                     ? "cursor-wait border-transparent text-zinc-400 dark:text-zinc-600"
                     : "border-transparent text-zinc-600 hover:bg-white/70 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900/70 dark:hover:text-white"

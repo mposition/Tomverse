@@ -144,7 +144,7 @@ export function AutoRoutingComposerToggle({
       aria-label={copy.label}
       disabled={pending}
       onClick={() => onChange(!enabled)}
-      className="flex h-11 shrink-0 touch-manipulation items-center justify-end gap-2 rounded-lg px-1 text-[13px] font-medium text-zinc-600 transition-colors hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-50 max-[240px]:w-full dark:text-zinc-300 dark:hover:bg-zinc-800 md:h-8"
+      className="flex h-11 shrink-0 touch-manipulation items-center justify-end gap-2 rounded-lg px-1 text-[13px] font-medium text-zinc-600 transition-colors hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-50 max-[240px]:w-full dark:text-zinc-300 dark:hover:bg-zinc-800 md:[@media(pointer:fine)]:h-8"
     >
       <span className="whitespace-nowrap">{copy.label}</span>
       <span
