@@ -69,13 +69,25 @@ target의 action을 등록하고 실제 canonical writer를 쓰는 DB 검증을 
 - active guard 컬럼은 가용성 상태다. 품질 문제는 영수증·새 관측 감사로
   기록하며, 과거 실패한 품질 게이트와 Router 측정 대기는 PASS로 바꾸지 않는다.
 
-## 배포 전 남은 조건
+## 병합 전 hotfix 승인과 남은 조건
+
+PR CI의 후속 수정은 budget DB 시료의 `metadata`·UTC `createdAt` 보완과
+공용 감사 actor closure 변경에 따른 Marketing fingerprint 갱신이다.
+Marketing 판정·권한은 그대로이며 기존 검증 증거는 stale로 남는다.
+격리된 loopback PostgreSQL 17에 현재 전체 migration을 적용한 뒤
+`test:prompt-refiner-product-db` 39개(0 skip), Marketing 단위 19개,
+TypeScript·scoped eslint·protected writer·문서 참조 검사를 통과했다.
+이 후속 diff도 Claude Code 독립 검토 ACCEPT를 받았다.
 
 운영 복구와 새 코드의 운영 배포는 다르다. 이번 변경은 아직 병합·배포하지
-않았다. hotfix로 staging을 생략하려면
-[릴리스 체크리스트 §7.9.2](../RELEASE_CHECKLIST.md)의 병합 전 운영자 승인이
-필요하다. 대안은 §7.9.1의 정확한 RC staging 검증이다. 운영 반영 뒤 정확한
-release SHA, 활성화 지속·운영 제어 readback과 develop back-merge를 확인한다.
+않았다. 운영자 mposition이 2026-10-13 이 작업의 PR #2449에 대해
+"staging 생략 hotfix 승인"이라고 명시적으로 승인했다. 승인은 실제 병합 전이며,
+CI 통과 뒤 이 production 가용성 사고 수정의 병합·배포에 적용한다.
+[릴리스 체크리스트 §7.9.2](../RELEASE_CHECKLIST.md)의 staging 생략 승인을
+기록하며, CI에서 드러난 테스트 시료 보완과 감사 closure fingerprint 갱신은
+같은 수정 범위다. Marketing 권한·외부 호출·활성화 증거를 승인하지 않는다.
+운영 반영 뒤 정확한 release SHA, 활성화 지속·운영 제어 readback과
+develop back-merge를 확인한다.
 
 전체 Chat 진행률은 현재 승인 계획의 기능별 분모를 확인하지 않았으므로
 산정하지 않는다. 이번 완료는 운영 가용성 복구와 위 두 자동 비활성화 경로의

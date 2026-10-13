@@ -558,9 +558,12 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 35, R2a) adds its back relation to `AdminAuditLog` in the watched schema.
  * No actor, descriptor, webhook writer or admission decision changes; the
  * bytes moved, so evidence is stale.
+ * 2026-10-13: operator-controlled Chat availability adds an observation-only
+ * action to the shared audit actor helper. No marketing actor, descriptor,
+ * webhook writer or admission decision changes; prior evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "1bcd4e5b4f23e4455516ebfa62b1af7d4a76347ec9ac6fcb7c45fc9dbc9b5647";
+  "2886d0b776caef2023e675ccba23555776ae6e0da5dde320f84e5f96ae3c4ff4";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
