@@ -93,8 +93,10 @@ test("Task readiness, promotion capacity and claim use the same separated catalo
   for (const path of ["lib/amux/v4TaskReadyService.ts", "lib/amux/v22AutoPromotionService.ts",
     "lib/amux/v22WorkerClaimService.ts"]) {
     const source = readFileSync(path, "utf8");
-    assert.match(source, /getConfiguredAmuxV22WorkerCatalog\(\)/);
-    assert.doesNotMatch(source, /getConfiguredAmuxWorkerCatalog\(\)/);
+    // Version 35, section 3 (R2c): each reads the assignment catalog in its
+    // own transaction, which is the v22 variable while R2c is off.
+    assert.match(source, /const \{ v22: \w+ \} = await readAmuxAssignmentCatalogs\(tx\);/);
+    assert.doesNotMatch(source, /getConfiguredAmuxWorkerCatalog\(\)|getConfiguredAmuxV22WorkerCatalog\(\)/);
   }
   // The variables' parser moved out of routing.ts (orchestration policy
   // version 35, R2c), which re-exports it for these importers.
