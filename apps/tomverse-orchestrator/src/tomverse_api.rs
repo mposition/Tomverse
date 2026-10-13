@@ -2349,15 +2349,6 @@ pub struct WorkerRegisterResponse {
     pub reason: Option<String>,
 }
 
-/// The session list route's body (orchestration policy version 35, section 4).
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkerSessionListResponse {
-    pub listed: bool,
-    pub workers: Option<Vec<String>>,
-    pub reason: Option<String>,
-}
-
 /// What the bridge acts on from the session list route (orchestration policy
 /// version 35, section 4). None of the three is a halt.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2373,12 +2364,35 @@ pub enum WorkerSessionList {
     Unreadable,
 }
 
-/// The one reading of a 200 body: anything but the two exact shapes is
-/// unreadable, never a list.
-pub fn plan_worker_session_list(body: &WorkerSessionListResponse) -> WorkerSessionList {
-    match (body.listed, &body.workers, body.reason.as_deref()) {
-        (true, Some(workers), None) => WorkerSessionList::Listed(workers.iter().cloned().collect()),
-        (false, None, Some("session_list_off")) => WorkerSessionList::Off,
+/// The one reading of a 200 body: exactly `{ "listed": true, "workers": [names] }`
+/// or exactly `{ "listed": false, "reason": "session_list_off" }`. A field
+/// set to null is not an absent field, and anything else -- another key, a
+/// non-string name, another reason -- is unreadable, never a list or off.
+pub fn plan_worker_session_list(body: &Value) -> WorkerSessionList {
+    let Some(object) = body.as_object() else {
+        return WorkerSessionList::Unreadable;
+    };
+    let keys: BTreeSet<&str> = object.keys().map(String::as_str).collect();
+    match object.get("listed") {
+        Some(Value::Bool(true)) if keys == BTreeSet::from(["listed", "workers"]) => {
+            let Some(names) = object.get("workers").and_then(Value::as_array) else {
+                return WorkerSessionList::Unreadable;
+            };
+            let mut listed = BTreeSet::new();
+            for name in names {
+                let Some(name) = name.as_str() else {
+                    return WorkerSessionList::Unreadable;
+                };
+                listed.insert(name.to_owned());
+            }
+            WorkerSessionList::Listed(listed)
+        }
+        Some(Value::Bool(false))
+            if keys == BTreeSet::from(["listed", "reason"])
+                && object.get("reason").and_then(Value::as_str) == Some("session_list_off") =>
+        {
+            WorkerSessionList::Off
+        }
         _ => WorkerSessionList::Unreadable,
     }
 }
@@ -2655,12 +2669,8 @@ impl TomverseApi {
         if response.status() == StatusCode::NOT_FOUND {
             return WorkerSessionList::Off;
         }
-        match read_bounded_json::<WorkerSessionListResponse>(
-            response,
-            &[StatusCode::OK],
-            MAX_LIFECYCLE_RESPONSE_BYTES,
-        )
-        .await
+        match read_bounded_json::<Value>(response, &[StatusCode::OK], MAX_LIFECYCLE_RESPONSE_BYTES)
+            .await
         {
             Ok((_, body)) => plan_worker_session_list(&body),
             Err(_) => WorkerSessionList::Unreadable,

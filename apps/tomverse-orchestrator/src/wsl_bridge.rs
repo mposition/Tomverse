@@ -2019,26 +2019,27 @@ pub async fn run_from_env() -> i32 {
             return 1;
         }
     };
-    // Orchestration policy version 35, section 4: the derived catalog's
-    // session list narrows the environment allowlist. Unreadable at start is
-    // not a halt: register nothing and let the unit try again.
-    let session_list = api.worker_session_list().await;
-    if session_list == WorkerSessionList::Unreadable {
-        eprintln!("amux wsl bridge could not read the session list; registering nothing");
-        return 1;
-    }
-    let running: Vec<_> = running
-        .into_iter()
-        .filter(|row| session_listed(&session_list, &row.name))
-        .collect();
-    if running.is_empty() {
-        println!("amux wsl bridge found no listed running session");
-        return 0;
-    }
-    let mut registered = BTreeMap::new();
     // Sessions whose registration answered busy: it did not happen, so they
     // register next tick with the same instance id.
     let mut awaiting_registration: Vec<(String, String)> = Vec::new();
+    // Orchestration policy version 35, section 4: the derived catalog's
+    // session list narrows the environment allowlist. A running session the
+    // list does not let through now -- or every one, when the list cannot be
+    // read -- is not registered yet: it waits with its own instance id, and
+    // every round reads the list again before retrying it. Never a halt.
+    let session_list = api.worker_session_list().await;
+    let (running, deferred): (Vec<_>, Vec<_>) = running
+        .into_iter()
+        .partition(|row| session_listed(&session_list, &row.name));
+    for row in deferred {
+        awaiting_registration.push((row.name, Uuid::new_v4().to_string()));
+    }
+    if !awaiting_registration.is_empty() {
+        eprintln!(
+            "amux wsl bridge warn: the session list does not let every running session through yet; waiting"
+        );
+    }
+    let mut registered = BTreeMap::new();
     for row in &running {
         let instance_id = Uuid::new_v4().to_string();
         let generation =
@@ -3009,13 +3010,18 @@ mod tests {
     #[test]
     fn the_session_list_reads_three_ways_and_only_the_exact_shapes_count() {
         // Orchestration policy version 35, section 4.
-        use crate::tomverse_api::{WorkerSessionListResponse, plan_worker_session_list};
+        use crate::tomverse_api::plan_worker_session_list;
+        // Only a field that is present counts: a null is not an absent field.
         let body = |listed: bool, workers: Option<Vec<&str>>, reason: Option<&str>| {
-            WorkerSessionListResponse {
-                listed,
-                workers: workers.map(|names| names.into_iter().map(str::to_owned).collect()),
-                reason: reason.map(str::to_owned),
+            let mut object = serde_json::Map::new();
+            object.insert("listed".into(), serde_json::Value::Bool(listed));
+            if let Some(names) = workers {
+                object.insert("workers".into(), serde_json::json!(names));
             }
+            if let Some(reason) = reason {
+                object.insert("reason".into(), serde_json::json!(reason));
+            }
+            serde_json::Value::Object(object)
         };
         assert_eq!(
             plan_worker_session_list(&body(true, Some(vec!["claude-impl", "codex-chore"]), None)),
@@ -3042,6 +3048,11 @@ mod tests {
             body(true, None, None),
             body(true, Some(vec!["claude-impl"]), Some("session_list_off")),
             body(false, Some(vec![]), Some("session_list_off")),
+            serde_json::json!({ "listed": false, "workers": null, "reason": "session_list_off" }),
+            serde_json::json!({ "listed": true, "workers": ["claude-impl"], "reason": null }),
+            serde_json::json!({ "listed": true, "workers": [1] }),
+            serde_json::json!({ "listed": false, "reason": "session_list_off", "extra": 1 }),
+            serde_json::json!(["claude-impl"]),
         ] {
             assert_eq!(
                 plan_worker_session_list(&unreadable),
@@ -3070,11 +3081,15 @@ mod tests {
         let start = run
             .find("let session_list = api.worker_session_list().await;")
             .unwrap();
-        // At start: unreadable registers nothing and exits 1 for the unit to retry;
-        // the list narrows the running sessions before anything registers.
+        // At start the list is read before anything registers; a session it
+        // holds back (all of them when it is unreadable) waits instead.
         assert!(start < run.find("let mut registered = BTreeMap::new();").unwrap());
-        assert!(run.contains("if session_list == WorkerSessionList::Unreadable {"));
-        assert!(run.contains(".filter(|row| session_listed(&session_list, &row.name))"));
+        // A session the list holds back is kept, never dropped: it waits for
+        // a later round, so it registers once the list lets it through.
+        assert!(run.contains(".partition(|row| session_listed(&session_list, &row.name));"));
+        assert!(
+            run.contains("awaiting_registration.push((row.name, Uuid::new_v4().to_string()));")
+        );
         // Every round: read again, gate registration retries and dispatch readiness.
         let round = &run[run.find("    loop {").unwrap()..];
         assert!(
