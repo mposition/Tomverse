@@ -3,6 +3,10 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 
 import { AdminRoutingShadowPanel } from "@/components/admin/AdminRoutingShadowPanel";
+import { AdminAdaptiveStatisticsPanel } from "@/components/admin/AdminAdaptiveStatisticsPanel";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 
@@ -20,6 +24,7 @@ import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
  */
 export default async function AdminRoutingPage() {
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
+  const session = await getServerSession(authOptions);
   return (
     <div className="space-y-6">
       <p className="rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-sm text-zinc-300">
@@ -32,6 +37,7 @@ export default async function AdminRoutingPage() {
         </Link>
         {m.routingMoved.after}
       </p>
+      {getAdminRole(session) === "owner" && <AdminAdaptiveStatisticsPanel />}
       <AdminRoutingShadowPanel />
     </div>
   );
