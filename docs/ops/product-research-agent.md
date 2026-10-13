@@ -288,3 +288,63 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
   이미 답이 있는 회차의 재제출은 409입니다.
 - **GitHub에 아무것도 쓰지 않습니다.** 이슈·label·comment·PR·check 전부. 토큰은
   읽기 전용이고, 쓰기 권한이 붙은 토큰을 넣으면 그 자체가 정책 위반입니다.
+
+## 개선 탐색 S0 probe (정책 v2 §20)
+
+`Product Research Scout Probe`는 개선 탐색의 S0 측정 전용 서비스입니다. walker도
+browser 서비스도 아니며, 아무 데도 제출하지 않고 자격증명을 읽지 않습니다.
+Tomverse Agents의 **dev 환경에만** 있고(dev는 `develop`에서 빌드합니다. staging은
+`test`에서 빌드하므로 release 후보가 올라가기 전에는 빌드할 것이 없습니다), Playwright 이미지(`docker/product-research-scout-probe.Dockerfile`)로
+빌드되며, 변수는 스위치 `PRODUCT_RESEARCH_SCOUT_ENABLED` 하나입니다.
+
+한 번 실행에서 세 가지를 잽니다(`npm run agent:product-research-scout-s0-probe -- all`).
+
+| mode | S0 항목 | 무엇을 보는가 |
+|---|---|---|
+| fixture | (4)·(11) | 로컬 서버 두 개를 띄워, 금지된 요청(다른 method·다른 host·같은 host의 다른 port·그곳으로의 redirect를 하위 자원·페이지 이동·iframe·worker에서·popup·WebSocket·service worker·form POST)이 실제로 서버에 도달했는지, 허용된 요청(GET·HEAD·같은 origin redirect)은 도달했는지 셉니다. 세 구성을 함께 봅니다 — Playwright 가로채기만, 거기에 host resolver 규칙, 그리고 browser 수준 CDP Fetch + resolver(서비스가 쓸 구성). sandbox를 켠 Chromium이 뜨는지도 봅니다 |
+| pages | (3) | production 공개 page 20개를 게스트로 GET·HEAD만 써서 열고, 문서 응답을 CDP가 붙잡아 둔 채(본문이 renderer에 닿기 전) 읽어 챌린지·오류 상태면 그 자리에서 실패시키며, 문서 언어·다른 origin 시도를 기록합니다 |
+| renderers | (2) | 고정 명세 PDF·DOCX·XLSX·PPTX를 채팅 도구의 admission과 렌더러로 만들고, zip part·PDF parse·내장 글꼴·한글·텍스트 위치·첫 쪽 래스터를 확인합니다 |
+
+출력은 JSON 한 덩어리이며 Node 버전, 시작부터 첫 측정까지의 시간, 모드별 시간,
+메모리 두 가지, 그리고 컨테이너가 받은 **변수 이름**(값은 없음)을 함께 싣습니다.
+메모리는 Node 프로세스 RSS의 표본(렌더러가 thread를 잡은 동안과 Chromium은 빠짐)과,
+컨테이너가 노출하면 cgroup의 최대값(Chromium 포함)입니다 — 서비스의 메모리 크기는
+뒤의 값으로 정합니다. production page의 원문·콘솔 문장·경로는 싣지 않고 오류는 코드로만
+남기므로(fixture의 경로는 probe 자신의 로컬 서버 것) 그대로 붙여도 안전합니다.
+
+### 실행 (운영자)
+
+1. **만들기.** dev 환경에 `Product Research Scout Probe`를 만듭니다. `docs/ops/dev-test-lanes.md`는
+   plan이 서비스 생성을 보이면 apply하지 않는다고 적으므로, IaC apply로 만들지(plan에 **이 서비스 하나의
+   생성만** 있고 지워지거나 바뀌는 것이 없을 때) 대시보드에서 만들지는 운영자가 정합니다. 어느 쪽이든
+   region은 `asia-southeast1-eqsg3a`여야 합니다(6a).
+
+   대시보드에서 만들면 `.railway/agent-runners.ts`의 선언이 적용되지 않으므로 아래를 **모두** 손으로
+   맞춥니다. 하나라도 빠지면 Railpack이 앱 전체를 빌드하거나 다른 명령이 돌아 측정 JSON이 나오지 않습니다.
+
+   | 설정 | 값 |
+   |---|---|
+   | 환경 | Tomverse Agents → **dev** |
+   | 이름 | `Product Research Scout Probe` |
+   | Source | GitHub `mposition/Tomverse`, branch `develop` |
+   | Build → Builder | **Dockerfile**, 경로 `docker/product-research-scout-probe.Dockerfile` |
+   | Build → Watch paths | `docker/product-research-scout-probe.Dockerfile`, `scripts/agents/product-research-scout-s0-probe.mjs`, `lib/productResearchScout*`, `package-lock.json` (이 넷만 — 비워 두면 무관한 develop 병합마다 재배포되고, 스위치가 켜져 있으면 그때마다 production page를 다시 엽니다) |
+   | Deploy → Start command | `npm run agent:product-research-scout-s0-probe -- all` |
+   | Deploy → Cron schedule | 비움(일정 없음) |
+   | Deploy → Restart policy | **Never** |
+   | Region | `asia-southeast1-eqsg3a`, replica 1 |
+   | Networking | 공개 domain을 만들지 않음 |
+   | Variables | `PRODUCT_RESEARCH_SCOUT_ENABLED` 하나뿐(2단계에서 넣음). 다른 변수 없음 |
+
+   만든 뒤 `npm run railway:agents:use-dev && npm run railway:agents:plan`(읽기 전용)이 이 서비스에 대해
+   차이를 보이지 않으면 선언과 같게 만들어진 것입니다.
+2. **켜기.** Railway 대시보드 → Tomverse Agents → dev → Product Research Scout
+   Probe → Variables에 `PRODUCT_RESEARCH_SCOUT_ENABLED`를 아무 값으로 넣습니다.
+   변수 변경이 재배포를 만들고, 그 배포가 측정입니다(일정이 없는 서비스는 배포마다
+   한 번 실행됩니다). 스위치가 없으면 probe는 아무것도 하지 않고 끝납니다.
+3. **결과.** 그 배포의 로그에 JSON이 남습니다. 에이전트 세션이 Railway에서 읽거나,
+   로그를 그대로 붙여 주시면 됩니다.
+4. **끄기.** 측정이 끝나면 변수를 지웁니다. 배포마다 production 공개 page 20개를
+   다시 열기 때문입니다.
+
+빌드 로그의 이미지 크기와 이 JSON의 시간·메모리가 S0 (1)과 (10)의 입력입니다.
