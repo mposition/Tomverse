@@ -1538,6 +1538,26 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   묶으므로, 상한은 세 문장 + setup + fence입니다. 본문은 읽지 않고, 원장이 만들 수 없는 행(인스턴스와 공급사의 대응,
   `provider_unverified`와 빈 인스턴스, 사건 순서)이 하나라도 있으면 목록 전체를 읽지 못한 것으로 보입니다. 되돌릴 수
   없는 제안은 상태보다 먼저 표시합니다. 제안 열람·판정은 S2-4b입니다.
+- **S2-4b1(Admin 요청 상세)**: `lib/amux/decisionMakerAdminRead.ts`의 `readDecisionMakerRequestDetailForAdmin()`,
+  `components/admin/AmuxDecisionMakerRequestDetailPanel.tsx`, `adminAmuxDecisionMakerRequestDetailMessages`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerRequestDetailRead`(상한 7),
+  `/admin/amux-settings?tab=decision-maker&request=<id>`, `tests/client/amuxDecisionMakerRequestDetailRender.test.tsx`.
+  요청 하나의 카드·DM 답·근거·이관 사유·고친 답·스냅샷을 보이며, 목록과 같은 원장 읽기를 그 id로 좁혀 쓰고 같은 검사를
+  지납니다. **본문은 판정할 수 있는 관리자(`ops:write`)에게만 읽어 보입니다** — 그 밖의 관리자에게는 본문을 읽지 않고
+  이유만 보입니다. 판정에 넘길 값(`shown`: 답·근거 본문의 keyed digest, select의 선택지, `irreversible`, 스냅샷 상태·SHA·
+  manifest digest)은 열린 제안의 본문과 전송이 모두 있을 때만 계산하며, judgment DB 테스트가 그 값으로 판정 store가 확정을
+  기록함을 고정합니다. worker와 모델이 쓴 글은 markup이 아닌 글자로만 보입니다. 판정 route와 버튼은 S2-4b2입니다.
+- **S2-4b2(Admin 판정)**: `app/api/admin/amux/decision-maker/judgments/route.ts`,
+  `components/admin/AmuxDecisionMakerJudgmentPanel.tsx`, `adminAmuxDecisionMakerJudgmentMessages`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerJudgment`(상한 12), `tests/server-contract/admin-amux-decision-maker-judgments-route.test.ts`,
+  `tests/client/amuxDecisionMakerJudgmentRender.test.tsx`. 상세 화면의 열린 제안에서 그대로 확정·고쳐서 확정·거절과 선언 정확도를
+  기록합니다. route는 `ops:write`와 최근 step-up을 body보다 먼저 검사하고(낡은 step-up은 428과 재인증 링크), 고친 답일 때만
+  DB 전에 digest key ring을 읽으며, 판정은 S1e store가 한 트랜잭션에서 씁니다. **확정은 상세 화면이 보인 `shown` 값을 그대로
+  보내고**, store가 저장값과 다르면 거절합니다. store의 거절은 409와 그 이유입니다. **판정은 한 번만 보냅니다** — 기록·거절·결과
+  불명 뒤에는 모든 버튼을 잠그고 다시 읽기 링크만 두며, 트랜잭션 전 거절(400·403·404·413·428·429)과 rollback을 말한 503만 버튼을
+  돌려줍니다(`runDmJudgment()`). 화면은 확정한 답이 승인 계약의 승인이 아님을 적습니다. 이 route는 전달 경로를 부르지 않으므로
+  여기서 worker에게 가는 것은 없습니다. 상한 12는 무결성 키가 있는 고친 답 확정의 10문장 + setup + fence이고, judgment unit
+  테스트가 그 셈을, judgment DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
 
 # AI Review (교차검토) 품질과 M5
 

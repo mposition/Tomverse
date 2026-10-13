@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ReactNode } from "react";
 
 import { dmReportInstant } from "@/components/admin/AmuxDecisionMakerReportPanel";
+import { dmAdminRequestDetailHref } from "@/components/admin/AmuxDecisionMakerRequestDetailPanel";
 import { AmuxDecisionMakerRequestsView } from "@/components/admin/AmuxDecisionMakerRequestsPanel";
 import { adminAmuxDecisionMakerRequestsMessages } from "@/lib/adminMessages/amuxDecisionMaker";
 import {
@@ -182,13 +183,16 @@ for (const locale of ["en", "ko"] as const) {
     );
   });
 
-  test(`${locale}: nothing on the panel acts`, () => {
+  test(`${locale}: nothing on the panel acts; its only links open one request on the same tab`, () => {
     const tree = AmuxDecisionMakerRequestsView({ m, list: list() });
+    const hrefs: unknown[] = [];
     for (const props of propsOf(tree)) {
       assert.equal(props.onClick, undefined);
-      assert.equal(props.href, undefined);
       assert.equal(props.type, undefined);
       assert.equal(props.action, undefined);
+      if (props.href !== undefined) hrefs.push(props.href);
     }
+    assert.deepEqual(hrefs.sort(), [ID_PROPOSAL, ID_OPERATOR, ID_CONFIRMED].map(dmAdminRequestDetailHref).sort());
+    assert.equal(dmAdminRequestDetailHref(ID_PROPOSAL), `/admin/amux-settings?tab=decision-maker&request=${ID_PROPOSAL}`);
   });
 }
