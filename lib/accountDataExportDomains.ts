@@ -663,6 +663,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence for one AMUX worker registry change, not customer data. The actor id is the owner who changed the registry and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a worker name, a closed class, role ceiling and desired state, and identifiers, not free text. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxWorkerCapabilityEvent",
+    publicName: "amux_worker_capability_events",
+    prismaModel: "AmuxWorkerCapabilityEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX worker capability change, not customer data. The actor id is the owner who recorded it and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a worker name, a model id, closed routing tags, tools and a v22 profile, not free text. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxWorkerLatchEvent",
     publicName: "amux_worker_latch_events",
     prismaModel: "AmuxWorkerLatchEvent",

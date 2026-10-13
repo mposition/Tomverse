@@ -471,12 +471,18 @@ const compilerOptions = parsedConfig.options;
 // clamp while adopting the server-managed guest trio and retirement replacement
 // resolver. Those additions move downstream accesses only. Count 228 and the
 // position-free inventory remain unchanged; positions are repinned here.
+// 2026-10-13, selective release of AMUX worker capabilities (orchestration
+// policy version 35, R2a) to main: the same four-line growth of the
+// marketing webhook fingerprint's history comment in
+// lib/marketingAutomationAccess.ts moves the accesses below it on the main
+// base. Count 228 and the position-free inventory remain unchanged; only the
+// positions main's closure files give are repinned.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "4729bcc022aefee670e5dd4cc10d1010",
-  "73bd77dd2a44364bb323c6b61bb6088e",
+  "20d4971eb84ef6d68b156928fb44c0f7",
+  "55c17e8b81d576a6cddd917ebc7e36f3",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

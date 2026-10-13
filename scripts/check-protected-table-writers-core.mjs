@@ -351,6 +351,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/development-agent-orchestration.md 버전 31",
   },
   {
+    table: "AmuxWorkerCapabilityEvent",
+    delegate: "amuxWorkerCapabilityEvent",
+    writers: ["lib/amux/workerCapabilityStore.ts"],
+    contract: "docs/policy/development-agent-orchestration.md 버전 35",
+  },
+  {
     table: "AmuxDecisionMakerRequest",
     delegate: "amuxDecisionMakerRequest",
     writers: ["lib/amux/decisionMakerRequestStore.ts"],
@@ -534,6 +540,12 @@ export const DELEGATE_NAME_ALLOWLIST = [
   },
   {
     path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxWorkerCapabilityEvent",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     delegate: "amuxDecisionMakerBody",
     count: 1,
     reason: "The data-domain registry's domain key. No client is indexed with it.",
@@ -565,6 +577,46 @@ export const DELEGATE_NAME_ALLOWLIST = [
 export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/accountDataExportDomains.ts",
+    table: "AmuxWorkerCapabilityEvent",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the worker capability model as its domain key and as prismaModel, and other domains' prose uses delete and update. It builds no SQL and opens no database connection.",
+  },
+  {
+    path: "prisma/migrations/20261013100000_amux_worker_capability/migration.sql",
+    table: "AmuxWorkerCapabilityEvent",
+    tableMentions: 9,
+    writeVerbs: 7,
+    reason:
+      "Creates the capability event table, its indexes, its foreign key to the audit log and the guard trigger that binds every tag and v22 role to the worker's current ceiling, binds an insert to its audit row and refuses every update and delete. It reads the worker's newest capability revision in the guard and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261013100000_amux_worker_capability/migration.sql",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 1,
+    writeVerbs: 7,
+    reason:
+      "The capability guard reads the worker's newest registry event (class, ceiling, desired state) after the registry's own advisory lock, to refuse a capability the ceiling or class does not allow. A SELECT in EXECUTE; nothing here writes a registry event.",
+  },
+  {
+    path: "prisma/migrations/20261013100000_amux_worker_capability/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 7,
+    reason:
+      "The capability migration (orchestration policy version 35, section 2). Its two AdminAuditLog mentions are the restrictive foreign key from auditLogId and the one SELECT EXISTS read in the guard that refuses an event whose audit row of the same transaction, person and action is missing. It never writes AdminAuditLog; its write verbs are the ALTER TABLE adding the key with ON DELETE / ON UPDATE RESTRICT, the trigger events, the guard's TG_OP comparison and words of comments.",
+  },
+  {
+    path: "lib/amux/workerCapabilityStore.ts",
+    table: "AmuxWorkerCapabilityEvent",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "The capability event table's single writer (orchestration policy version 35, section 2). Its raw SQL is two constant SELECTs (the newest capability of every worker, and one worker's newest revision) and one constant INSERT ... RETURNING; every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     table: "AmuxWorkerRegistryEvent",
     tableMentions: 2,
     writeVerbs: 3,
@@ -582,10 +634,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/workerRegistryStore.ts",
     table: "AmuxWorkerRegistryEvent",
-    tableMentions: 3,
+    tableMentions: 4,
     writeVerbs: 2,
     reason:
-      "The registry event table's single writer (orchestration policy version 31, section 3). Its raw SQL is two constant SELECTs (the newest event of every worker, and of one worker) and one constant INSERT ... RETURNING; every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
+      "The registry event table's single writer (orchestration policy version 31, section 3). Its raw SQL is three constant SELECTs (the newest event of every worker, of one worker for its own writer, and of one worker for the capability store's writer, version 35) and one constant INSERT ... RETURNING; every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
   },
   {
     path: "prisma/migrations/20261012100000_amux_worker_registry/migration.sql",
@@ -1863,6 +1915,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261013100000_amux_worker_capability/migration.sql",
+    count: 3,
+    reason:
+      "Three reads in the capability event guard, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the worker's newest registry event, its newest capability revision, and one SELECT EXISTS on AdminAuditLog for the person's audit row of the same transaction. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
   {
     path: "prisma/migrations/20261012170000_amux_verified_no_commit_halt_auto_clear/migration.sql",
     count: 6,
