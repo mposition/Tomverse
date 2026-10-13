@@ -399,7 +399,7 @@ async function readCell(page: Page): Promise<CellReport> {
       const overhang = Math.round(rect.right - window.innerWidth);
       if (overhang > widestElementOverhang) {
         widestElementOverhang = overhang;
-        widestElementDescription = `${element.tagName} ${element.dataset.testid ?? ""} ${element.className}`;
+        widestElementDescription = `${element.tagName} ${element.dataset.testid ?? ""}`;
       }
     });
 
