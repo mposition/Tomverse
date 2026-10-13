@@ -375,9 +375,9 @@ test("the request event table's kinds, instance rule and one closing take a judg
     ),
   );
   assert.doesNotMatch(sql, /FUNCTION "amux_decision_maker_request_closing_retention"\(\)\nRETURNS/);
-  // The closing kinds the state read, the open count, the stale candidates and the guards use are the core's.
+  // The closing kinds the state read, the open count, the stale candidates, Admin's recent requests and the guards use are the core's.
   const requestStore = read("lib/amux/decisionMakerRequestStore.ts");
-  assert.equal((requestStore.match(new RegExp(`"kind" IN \\(${sqlList(DM_CLOSING_EVENT_KINDS)}\\)`, "g")) ?? []).length, 3);
+  assert.equal((requestStore.match(new RegExp(`"kind" IN \\(${sqlList(DM_CLOSING_EVENT_KINDS)}\\)`, "g")) ?? []).length, 4);
   for (const name of ["amux_decision_maker_request_event_guard", "amux_decision_maker_body_guard", "amux_decision_maker_judgment_guard", "amux_decision_maker_digest_key_event_guard"]) {
     assert.ok(functionOf(sql, name).includes(`"kind" IN (${doubledList(DM_CLOSING_EVENT_KINDS)})`), name);
   }
@@ -1521,4 +1521,31 @@ test("the reads are one statement each", async () => {
     assert.equal(await readDecisionMakerJudgment(tx, REQUEST_ID), null);
     assert.equal(sent.length, 1);
   }
+});
+
+test("the judgment route's DB boundary is the largest judgment's statements plus setup and fence", async () => {
+  // An edited confirmation with an integrity key is the largest (the cases above).
+  // A ceiling below it refuses every edit; one above it lets a statement the tests
+  // here never counted run inside the budget.
+  let largest = 0;
+  for (const keyValue of [null, integrityKey]) {
+    await withIntegrityKey(keyValue, async () => {
+      for (const input of [
+        { kind: "confirm", shown: shownFor() },
+        { kind: "edit_confirm", shown: shownFor(), operatorAnswer: "Use the model id." },
+        { kind: "reject" },
+      ]) {
+        const { tx, sent } = recordingTx();
+        const result = await recordDecisionMakerJudgment(tx, { session, requestId: REQUEST_ID, keyRing: RING, ...input });
+        assert.equal(result.recorded, true, input.kind);
+        largest = Math.max(largest, sent.length);
+      }
+    });
+  }
+  assert.equal(largest, 10);
+  assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerJudgment, {
+    operation: "decision_maker_judgment",
+    prismaCallCeiling: largest + BOUNDARY_STATEMENTS,
+    isolation: "mutation",
+  });
 });

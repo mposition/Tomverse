@@ -15,6 +15,7 @@ export const FULL_SHA = /^[0-9a-f]{40}$/;
 const SHA_PREFIX = /^[0-9a-f]{7,40}$/;
 
 export const DEFAULT_WAIT_MINUTES = 45;
+export const DEFAULT_CI_WAIT_MINUTES = 60;
 export const DEFAULT_POLL_SECONDS = 30;
 
 /** The candidate, as typed. A full SHA or an unambiguous prefix; git resolves it. */
@@ -57,14 +58,17 @@ export function parseSourceBranch(value) {
 }
 
 /**
- * The GitHub Actions check suites on the candidate, as Railway's Wait for CI
- * reads them: it looks at Actions suites only, holds a deployment while any
- * is unfinished, and skips it when any concluded otherwise
- * (.github/RELEASE_CHECKLIST.md 7.9.4).
+ * The GitHub Actions check suites on the candidate. Suites from other apps are
+ * ignored, as Railway ignores them.
+ *
+ * Test has no Railway Wait for CI: Railway offers it only when a workflow runs
+ * on push to the deployed branch, and none runs on push to `test`
+ * (.github/RELEASE_CHECKLIST.md 7.9.4). This verdict is therefore the only CI
+ * gate in front of Test, and it is stricter than Railway's would be.
  *
  * "failed" includes `cancelled`: a develop push cancels the previous push's
  * runs, so a commit merged a minute before another often carries cancelled
- * suites, and Test would never deploy it.
+ * suites, and the checks those suites hold never ran on that commit.
  */
 const PASSING_SUITE_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 export function checkSuitesVerdict(suites) {
@@ -83,11 +87,17 @@ export function checkSuitesVerdict(suites) {
  * history -- a merge commit develop actually pointed at, which dev deployed.
  * Mere ancestry would also admit a pull request's head or a commit inside a
  * merged branch: a tree develop never had.
+ *
+ * `checks_pending` comes last and is the one reason that can clear: the CLI
+ * waits for the suites to finish and asks again, since nothing on Railway's
+ * side would hold Test's deployment until they do. A no-op pushes nothing, so
+ * it has nothing to wait for.
  */
 export function refusalReason({ move, onSource, allowRewind, suites }) {
   if (!onSource) return "not_on_source";
   if (suites === "failed") return "checks_failed";
   if (move === "rewind" && !allowRewind) return "rewind_needs_allow_rewind";
+  if (suites === "pending" && move !== "noop") return "checks_pending";
   return null;
 }
 

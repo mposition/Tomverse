@@ -312,6 +312,67 @@ export async function listDecisionMakerStaleCloseCandidates(
   return rows.map((row) => requireRequestId(row.id));
 }
 
+/**
+ * The newest requests, newest first, at most `limit` (1 to 100) -- or the one
+ * request `requestId` names -- with what their events add up to and the
+ * database clock, in one statement: the
+ * ledger's half of Admin's request list (stage S2,
+ * lib/amux/decisionMakerAdminRead.ts, which joins the result detail and the
+ * judgment and delivery halves read by their own stores in the same
+ * REPEATABLE READ boundary and checks the joined row). The newest requests
+ * are chosen first and only those are aggregated, so the cost does not grow
+ * with the ledger. The clock row is joined to the requests, so an empty
+ * ledger still returns the database clock. The closing kinds are the same
+ * list the state read, the open count and the stale candidates use.
+ */
+export async function readRecentDecisionMakerRequestLedger(
+  client: LedgerReader,
+  input: { limit: number; requestId?: undefined } | { requestId: string; limit?: undefined },
+): Promise<{ dbNowMs: number; rows: Array<Record<string, unknown>> }> {
+  const requestId = input.requestId ?? null;
+  const limit = requestId === null ? input.limit : 1;
+  if (requestId !== null ? !isDmRequestId(requestId) : !Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 100) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  const rows = await client.$queryRaw<Array<Record<string, unknown>>>`
+    WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS "now"),
+    recent AS MATERIALIZED (
+      SELECT * FROM "AmuxDecisionMakerRequest"
+      WHERE ${requestId}::text IS NULL OR "id" = ${requestId}::text
+      ORDER BY "createdAt" DESC, "id" DESC
+      LIMIT ${limit}
+    )
+    SELECT
+      r."id", r."cardId", r."questionRevision", r."askingWorkerId", r."askingProvider", r."route",
+      r."instance", r."refusalCodes",
+      floor(extract(epoch FROM r."createdAt") * 1000)::bigint AS "createdAtEpochMs",
+      floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs",
+      floor(extract(epoch FROM db_clock."now") * 1000)::bigint AS "dbNowEpochMs",
+      e."assigned", e."snapshotState", e."transmitOutcome", e."resultKind", e."resultUnknown", e."closingKind"
+    FROM db_clock
+    LEFT JOIN recent r ON true
+    CROSS JOIN LATERAL (
+      SELECT
+        coalesce(bool_or(ev."kind" = 'assign'), false) AS "assigned",
+        max(ev."snapshotState") FILTER (WHERE ev."kind" = 'transmit_intent') AS "snapshotState",
+        max(ev."kind") FILTER (WHERE ev."kind" IN ('transmit_receipt', 'transmit_unknown')) AS "transmitOutcome",
+        max(ev."resultKind") FILTER (WHERE ev."kind" = 'result') AS "resultKind",
+        coalesce(bool_or(ev."kind" = 'result_unknown'), false) AS "resultUnknown",
+        max(ev."kind") FILTER (
+          WHERE ev."kind" IN ('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject')
+        ) AS "closingKind"
+      FROM "AmuxDecisionMakerRequestEvent" ev
+      WHERE ev."requestId" = r."id"
+    ) e
+    ORDER BY r."createdAt" DESC NULLS LAST, r."id" DESC
+  `;
+  const first = rows[0];
+  if (!first) throw new Error("AMUX Decision Maker recent request read returned no row");
+  const dbNowMs = safeInteger(first.dbNowEpochMs, "clock");
+  // An empty ledger is the clock's row alone, with no request on it.
+  return { dbNowMs, rows: rows.length === 1 && first.id === null ? [] : rows };
+}
+
 export type DecisionMakerProposalTimeline = {
   /** The database clock when the timeline was read. */
   dbNowMs: number;

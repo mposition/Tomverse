@@ -311,12 +311,43 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
+  // Stage S2's judgment route: setup + a person's judgment at its largest
+  // (an edited confirmation with an integrity key: the audit chain lock, the
+  // request state, the switches, the proposal, the administrator audit's 4,
+  // the operator answer body and the judgment insert: 10, pinned by
+  // tests/amuxDecisionMakerJudgment.test.mjs) + fence. 12 is also
+  // docs/policy/amux-decision-maker.md §9's ceiling for one DM operation.
+  decisionMakerJudgment: {
+    operation: "decision_maker_judgment",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
   // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment
   // tallies + the proposal timeline with the database clock + fence, pinned
   // by tests/amuxDecisionMakerJudgment.test.mjs.
   decisionMakerReportRead: {
     operation: "decision_maker_report_read",
     prismaCallCeiling: 4,
+    isolation: "read",
+  },
+  // Stage S2's Admin request list (lib/amux/decisionMakerAdminRead.ts): setup
+  // + the newest requests with the database clock + their result details +
+  // their judgments and deliveries + fence, pinned by
+  // tests/amuxDecisionMakerAdminList.test.mjs. REPEATABLE READ makes the three
+  // reads one snapshot.
+  decisionMakerRequestListRead: {
+    operation: "decision_maker_request_list_read",
+    prismaCallCeiling: 5,
+    isolation: "read",
+  },
+  // Stage S2's one request for the person who judges it
+  // (readDecisionMakerRequestDetailForAdmin): setup + its ledger row with the
+  // database clock + its result detail + its judgment and deliveries + its
+  // bodies + its state + fence, pinned by
+  // tests/amuxDecisionMakerAdminList.test.mjs.
+  decisionMakerRequestDetailRead: {
+    operation: "decision_maker_request_detail_read",
+    prismaCallCeiling: 7,
     isolation: "read",
   },
   // §10's system sweep (lib/amux/decisionMakerRetentionSweep.ts). Its read:

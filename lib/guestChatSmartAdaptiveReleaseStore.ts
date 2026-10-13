@@ -13,6 +13,7 @@ import {
   exactGuestChatSmartAdaptiveMetadata,
   guestChatSmartAdaptiveActivationMetadata,
   guestChatSmartAdaptiveActivationPairDigest,
+  guestChatSmartAdaptiveConfigDigest,
   guestChatSmartAdaptiveRuntimeBinding,
   type GuestChatSmartAdaptiveRuntimeBinding,
 } from "@/lib/guestChatSmartAdaptiveRelease";
@@ -50,18 +51,26 @@ const exactActivation = (row: AdminAuditLog,
     ? row.metadata as Record<string, unknown> : null;
   const activationCommit = metadata?.runtimeCommitSha;
   const activationDeployment = metadata?.runtimeDeploymentId;
+  const activationFingerprint = metadata?.releaseFingerprint;
   if (typeof activationCommit !== "string" ||
       !/^[0-9a-f]{40}$/.test(activationCommit) ||
       typeof activationDeployment !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
-        activationDeployment)) return false;
+        activationDeployment) ||
+      typeof activationFingerprint !== "string" ||
+      !/^[0-9a-f]{64}$/.test(activationFingerprint)) return false;
   const activationBinding = { ...binding,
     runtimeCommitSha: activationCommit,
-    runtimeDeploymentId: activationDeployment };
+    runtimeDeploymentId: activationDeployment,
+    releaseFingerprint: activationFingerprint,
+    configDigest: guestChatSmartAdaptiveConfigDigest({
+      releaseFingerprint: activationFingerprint,
+      baseRouterConfigDigest: binding.baseRouterConfigDigest,
+    }) };
   return row.action === GUEST_CHAT_SMART_ADAPTIVE_ACTION &&
   row.summary === GUEST_CHAT_SMART_ADAPTIVE_SUMMARY &&
   row.targetType === "GuestChatReleaseFingerprint" &&
-  row.targetId === binding.configDigest &&
+  row.targetId === activationBinding.configDigest &&
   Boolean(row.actorUserId) && Boolean(row.entryHash) &&
   exactGuestChatSmartAdaptiveMetadata(row.metadata,
     guestChatSmartAdaptiveActivationMetadata({ binding: activationBinding,
@@ -86,15 +95,21 @@ export async function inspectGuestChatSmartAdaptiveRelease(
   }
   const guard = await readPromptRefinerProductAutoGuard(tx);
   if (!guard.active) return closed("invalid", "product_auto_guard_inactive");
-  const rows = await tx.adminAuditLog.findMany({
+  const latest = await tx.adminAuditLog.findMany({
     where: { action: GUEST_CHAT_SMART_ADAPTIVE_ACTION,
       targetType: "GuestChatReleaseFingerprint",
-      targetId: binding.configDigest },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    take: 2,
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 1,
   });
-  if (rows.length === 0) return closed("absent", "activation_absent");
-  if (rows.length !== 1 || !exactActivation(rows[0], binding, base)) {
+  if (latest.length === 0) return closed("absent", "activation_absent");
+  const rows = await tx.adminAuditLog.findMany({
+    where: { action: GUEST_CHAT_SMART_ADAPTIVE_ACTION,
+      targetType: "GuestChatReleaseFingerprint", targetId: latest[0].targetId },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 2,
+  });
+  if (rows.length !== 1 || rows[0].id !== latest[0].id ||
+      !exactActivation(rows[0], binding, base)) {
     return closed("invalid", "activation_mismatch");
   }
   const row = rows[0];

@@ -33,6 +33,27 @@ const sha256 = (value: unknown) => createHash("sha256")
   .update(typeof value === "string" ? value : canonicalBenchmarkJson(value), "utf8")
   .digest("hex");
 
+export function guestChatSmartAdaptiveConfigDigest(input: {
+  releaseFingerprint: string;
+  baseRouterConfigDigest: string;
+}) {
+  return sha256({
+    version: "guest-chat-smart-adaptive-config-v2",
+    policyVersion: GUEST_CHAT_SMART_ADAPTIVE_POLICY_VERSION,
+    policySha256: GUEST_CHAT_SMART_ADAPTIVE_POLICY_SHA256,
+    continuityPolicySha256: CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256,
+    releaseFingerprint: input.releaseFingerprint,
+    baseRouterConfigDigest: input.baseRouterConfigDigest,
+    routerVersions: ROUTER_VERSIONS,
+    promptRefinerCandidateDigest: PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
+    promptRefinerPricePinDigest: PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
+    promptRefinerAdapterConfigDigest: PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST,
+    guestQuotaContract: "shared-guest-subject-and-ip-v1",
+    guestCreditPhaseContract: "prehold-convert-exact-v1",
+    retryCount: 0,
+  });
+}
+
 export type GuestChatSmartAdaptiveRuntimeBinding = Readonly<{
   runtimeCommitSha: string;
   runtimeDeploymentId: string;
@@ -72,21 +93,9 @@ export function guestChatSmartAdaptiveRuntimeBinding(
   }
   guestChatSmartAdaptiveAuthorityTtlSeconds(runtime);
   const base = chatRefinerInitialAutoRuntimeBinding(runtime);
-  const configDigest = sha256({
-    version: "guest-chat-smart-adaptive-config-v2",
-    policyVersion: GUEST_CHAT_SMART_ADAPTIVE_POLICY_VERSION,
-    policySha256: GUEST_CHAT_SMART_ADAPTIVE_POLICY_SHA256,
-    continuityPolicySha256: CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256,
+  const configDigest = guestChatSmartAdaptiveConfigDigest({
     releaseFingerprint: base.releaseFingerprint,
     baseRouterConfigDigest: base.routerConfigDigest,
-    routerVersions: ROUTER_VERSIONS,
-    promptRefinerCandidateDigest: PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
-    promptRefinerPricePinDigest: PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
-    promptRefinerAdapterConfigDigest:
-      PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST,
-    guestQuotaContract: "shared-guest-subject-and-ip-v1",
-    guestCreditPhaseContract: "prehold-convert-exact-v1",
-    retryCount: 0,
   });
   if (!SHA256.test(configDigest)) {
     throw new Error("guest_chat_smart_adaptive_config_invalid");

@@ -306,19 +306,16 @@ async function resolvePromptRefinerProductRelease(
     releaseAuthorityDigest = binding.releaseAuthorityDigest;
     releaseFingerprint = binding.releaseFingerprint;
   } catch {
-    // V1 keeps its original deployment-bound path only while source proof is
-    // readable. For an activated v2 source, invalid controls still latch on
-    // dispatch instead of silently resuming when an env value is restored.
+    // V1 retains its historical path. Operational errors are observations,
+    // rather than a persistent product off switch under the v3 decision.
     try { releaseFingerprint = currentChatReleaseSourceFingerprint(); }
     catch { return closed(); }
   }
-  const initialRows = releaseAuthorityDigest
-    ? await tx.adminAuditLog.findMany({ where: {
-      action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
-        CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION] },
-      targetType: "ChatReleaseAuthority", targetId: releaseAuthorityDigest,
-    }, select: { id: true }, take: 3 })
-    : [];
+  const initialRows = await tx.adminAuditLog.findMany({ where: {
+    action: CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
+    targetType: "ChatReleaseAuthority",
+  }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true }, take: 1 });
   const initial = initialRows.length === 0
     ? ({ state: "absent" } as const)
     : await inspectChatRefinerInitialAutoRelease(tx, runtime);

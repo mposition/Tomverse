@@ -7,6 +7,7 @@
 //   npm run promote:test -- --sha=<commit> --no-wait   # move only
 //   npm run promote:test -- --sha=<commit> --allow-rewind
 //   npm run promote:test -- --sha=<commit> --source=release/<date>-<subject>
+//   npm run promote:test -- --sha=<commit> --ci-wait-minutes=90
 //
 // Run it from a local PowerShell in the repository clone. It pushes with the
 // operator's own git credentials and reads check suites with the operator's
@@ -17,9 +18,13 @@
 //   develop that is a merge commit develop actually pointed at, which dev
 //   deployed; a pull request's head or a commit inside a merged branch is not.
 // - a candidate whose GitHub Actions suites concluded otherwise than success,
-//   cancelled included: Railway's Wait for CI would skip it on Test.
+//   cancelled included: the checks a cancelled suite holds never ran.
 // - a move that is not a fast-forward, without --allow-rewind: it takes
 //   commits off the environment somebody may be verifying.
+// A candidate whose suites are still running is not pushed until they finish
+// (--ci-wait-minutes, default 60): Railway cannot hold Test's deployment for
+// them, because Wait for CI needs a workflow that runs on push to `test` and
+// none does (.github/RELEASE_CHECKLIST.md 7.9.4). --dry-run does not wait.
 // The push is pinned with --force-with-lease to the `test` that was read, so a
 // concurrent move is refused rather than overwritten
 // (.github/RELEASE_CHECKLIST.md 7.9, docs/ops/dev-test-lanes.md).
@@ -28,6 +33,7 @@ import { execFileSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import {
+  DEFAULT_CI_WAIT_MINUTES,
   DEFAULT_POLL_SECONDS,
   DEFAULT_WAIT_MINUTES,
   buildInfoServes,
@@ -50,12 +56,14 @@ const dryRun = args.includes("--dry-run");
 const noWait = args.includes("--no-wait");
 const allowRewind = args.includes("--allow-rewind");
 const waitMinutes = Number(flag("wait-minutes") ?? DEFAULT_WAIT_MINUTES);
+const ciWaitMinutes = Number(flag("ci-wait-minutes") ?? DEFAULT_CI_WAIT_MINUTES);
 const pollSeconds = Number(flag("poll-seconds") ?? DEFAULT_POLL_SECONDS);
 
 function usage(message) {
   console.error(message);
   console.error(
-    "usage: npm run promote:test -- --sha=<commit> [--source=release/<name>] [--dry-run] [--no-wait] [--allow-rewind]",
+    "usage: npm run promote:test -- --sha=<commit> [--source=release/<name>] [--dry-run] [--no-wait] " +
+      "[--allow-rewind] [--ci-wait-minutes=<n>]",
   );
   process.exit(2);
 }
@@ -69,7 +77,11 @@ const candidate = parseCandidate(flag("sha"));
 if (!candidate) usage("--sha must be a commit SHA (7 to 40 hex characters)");
 const source = parseSourceBranch(flag("source"));
 if (!source) usage("--source must be develop (the default) or a release/** branch");
-for (const [name, value] of [["wait-minutes", waitMinutes], ["poll-seconds", pollSeconds]]) {
+for (const [name, value] of [
+  ["wait-minutes", waitMinutes],
+  ["ci-wait-minutes", ciWaitMinutes],
+  ["poll-seconds", pollSeconds],
+]) {
   if (!Number.isFinite(value) || value <= 0) usage(`--${name} must be a positive number`);
 }
 if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(REPOSITORY)) usage("PROMOTE_TEST_REPOSITORY must look like owner/name");
@@ -121,18 +133,19 @@ try {
 
 const firstParentHistory = new Set(git("rev-list", "--first-parent", `refs/remotes/origin/${source}`).split("\n"));
 
-let suites;
-try {
-  const lines = run("gh", [
-    "api",
-    "--paginate",
-    `repos/${REPOSITORY}/commits/${targetSha}/check-suites`,
-    "--jq",
-    ".check_suites[] | {app: .app.slug, status: .status, conclusion: .conclusion}",
-  ]);
-  suites = checkSuitesVerdict(lines ? lines.split("\n").map((line) => JSON.parse(line)) : []);
-} catch (error) {
-  stop(`could not read the candidate's check suites with gh (is it installed and logged in?): ${stderrOf(error)}`);
+function readSuites() {
+  try {
+    const lines = run("gh", [
+      "api",
+      "--paginate",
+      `repos/${REPOSITORY}/commits/${targetSha}/check-suites`,
+      "--jq",
+      ".check_suites[] | {app: .app.slug, status: .status, conclusion: .conclusion}",
+    ]);
+    return checkSuitesVerdict(lines ? lines.split("\n").map((line) => JSON.parse(line)) : []);
+  } catch (error) {
+    stop(`could not read the candidate's check suites with gh (is it installed and logged in?): ${stderrOf(error)}`);
+  }
 }
 
 const move = classifyMove({
@@ -140,11 +153,27 @@ const move = classifyMove({
   targetSha,
   currentIsAncestorOfTarget: currentSha !== null && gitSucceeds("merge-base", "--is-ancestor", currentSha, targetSha),
 });
-const refusal = refusalReason({ move, onSource: firstParentHistory.has(targetSha), allowRewind, suites });
+const onSource = firstParentHistory.has(targetSha);
+let suites = readSuites();
+let refusal = refusalReason({ move, onSource, allowRewind, suites });
 
 console.log(`test: ${currentSha ? currentSha.slice(0, 9) : "(does not exist)"} -> ${targetSha.slice(0, 9)} (${move})`);
 console.log(`  ${git("log", "-1", "--format=%h %s", targetSha)}`);
 console.log(`  GitHub Actions suites: ${suites}`);
+
+// Test has no Railway Wait for CI (none of the workflows runs on push to
+// `test`), so a candidate whose suites are still running would deploy before
+// they finish. Wait here instead, then ask again: they may still fail.
+if (refusal === "checks_pending" && !dryRun) {
+  console.log(`  waiting up to ${ciWaitMinutes} minutes for them to finish before pushing...`);
+  const ciDeadline = Date.now() + ciWaitMinutes * 60_000;
+  while (refusal === "checks_pending" && Date.now() < ciDeadline) {
+    await sleep(pollSeconds * 1000);
+    suites = readSuites();
+    refusal = refusalReason({ move, onSource, allowRewind, suites });
+  }
+  console.log(`  ${new Date().toISOString()} GitHub Actions suites: ${suites}`);
+}
 
 if (refusal === "not_on_source") {
   stop(
@@ -154,8 +183,8 @@ if (refusal === "not_on_source") {
 }
 if (refusal === "checks_failed") {
   stop(
-    `refused: a GitHub Actions suite on ${targetSha.slice(0, 9)} did not succeed (a cancelled one counts), so ` +
-      "Railway's Wait for CI would skip it on Test. Choose a commit whose suites all finished green.",
+    `refused: a GitHub Actions suite on ${targetSha.slice(0, 9)} did not succeed (a cancelled one counts: its ` +
+      "checks never ran on this commit). Choose a commit whose suites all finished green.",
   );
 }
 if (refusal === "rewind_needs_allow_rewind") {
@@ -164,8 +193,16 @@ if (refusal === "rewind_needs_allow_rewind") {
       "off Test. If nobody is verifying the current candidate, run again with --allow-rewind.",
   );
 }
-if (suites === "pending") console.log("  some suites are still running; Railway holds Test's deployment until they finish.");
-if (suites === "none") console.log("  no GitHub Actions suite on this commit; Railway's Wait for CI has nothing to wait for.");
+if (refusal === "checks_pending") {
+  if (!dryRun) {
+    stop(
+      `refused: the GitHub Actions suites on ${targetSha.slice(0, 9)} were still running after ${ciWaitMinutes} ` +
+        "minutes. Nothing was pushed; run again once they finish, or with a larger --ci-wait-minutes.",
+    );
+  }
+  console.log("  some suites are still running; a real run waits for them to finish before it pushes.");
+}
+if (suites === "none") console.log("  no GitHub Actions suite on this commit, so there is nothing to wait for.");
 
 if (dryRun) {
   console.log("dry run: nothing pushed.");
@@ -243,6 +280,6 @@ while (Date.now() < deadline) {
 
 stop(
   `Test did not serve ${targetSha.slice(0, 9)} within ${waitMinutes} minutes. Open staging's Tomverse service in ` +
-    "Railway: WAITING is Wait for CI, SKIPPED is a suite that did not pass, and a branch other than test means " +
-    "the service was never switched (docs/ops/dev-test-lanes.md).",
+    "Railway: a deployment still BUILDING needs longer, a FAILED one needs its logs, and a branch other than test " +
+    "means the service was never switched (docs/ops/dev-test-lanes.md).",
 );

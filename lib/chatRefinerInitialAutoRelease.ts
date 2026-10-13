@@ -54,6 +54,20 @@ const sha256 = (value: unknown) => createHash("sha256")
   .update(typeof value === "string" ? value : canonicalBenchmarkJson(value), "utf8")
   .digest("hex");
 
+/** Source is activation provenance; current execution controls remain bound. */
+export const chatRefinerInitialAutoAuthorityDigest = (
+  releaseFingerprint: string,
+  routerConfigDigest: string,
+) => sha256({
+  version: "chat-release-authority-v2",
+  releaseFingerprint,
+  routerConfigDigest,
+  candidateDigest: PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
+  pricePinDigest: PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
+  adapterConfigDigest: PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST,
+  continuityPolicySha256: CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256,
+});
+
 export type ChatRefinerInitialAutoRuntimeBinding = Readonly<{
   runtimeCommitSha: string;
   runtimeDeploymentId: string;
@@ -105,15 +119,8 @@ export const chatRefinerInitialAutoRuntimeBinding = (
     manifestHashKeyId,
   });
   const releaseFingerprint = currentChatReleaseSourceFingerprint();
-  const releaseAuthorityDigest = sha256({
-    version: "chat-release-authority-v2",
-    releaseFingerprint,
-    routerConfigDigest,
-    candidateDigest: PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
-    pricePinDigest: PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
-    adapterConfigDigest: PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST,
-    continuityPolicySha256: CHAT_REFINER_STABLE_RELEASE_POLICY_SHA256,
-  });
+  const releaseAuthorityDigest = chatRefinerInitialAutoAuthorityDigest(
+    releaseFingerprint, routerConfigDigest);
   return Object.freeze({ runtimeCommitSha, runtimeDeploymentId,
     releaseFingerprint, releaseAuthorityDigest, routerConfigDigest,
     rolloutPercent: cohort.rolloutPercent,
