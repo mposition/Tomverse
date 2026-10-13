@@ -78,10 +78,13 @@ export const AMUX_WORKER_CAPABILITY_AUDIT_ACTION = "amux.worker.capability" as c
 export const AMUX_WORKER_CAPABILITY_AUDIT_TARGET_TYPE = "AmuxWorkerCapabilityEvent" as const;
 
 /**
- * R2a ships with its code latch off (version 31 section 8, version 35 section
- * 5); the operator's activation record turns it on.
+ * R2a shipped with its code latch off (version 31 section 8, version 35 section
+ * 5); version 36 (approved 2026-10-13) is the operator's activation record and
+ * sets it true, so the owner may record capabilities -- and nothing else opens:
+ * assignment still follows the catalog variables until R2c. While it is false
+ * the route refuses every write. Reading is never latched.
  */
-export const AMUX_WORKER_CAPABILITY_WRITES_LATCH = false;
+export const AMUX_WORKER_CAPABILITY_WRITES_LATCH = true;
 export const amuxWorkerCapabilityWritesOpen = (): boolean => AMUX_WORKER_CAPABILITY_WRITES_LATCH;
 
 export type AmuxWorkerV22Profile = {

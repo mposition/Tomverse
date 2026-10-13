@@ -31,7 +31,7 @@ import {
  *
  * POST is the owner recording one worker's capability, and nothing else. In
  * order, before the body is read: the owner role, R2a's code latch
- * (`AMUX_WORKER_CAPABILITY_WRITES_LATCH`, off until the operator's activation
+ * (`AMUX_WORKER_CAPABILITY_WRITES_LATCH`, on since version 36's activation
  * record), and a recent step-up (a stale one answers 428). The store writes
  * the human audit `amux.worker.capability` and the event in one transaction.
  * A refusal by the ceiling rule answers 409 with its code and writes nothing;
