@@ -8,6 +8,7 @@ import {
   decideScoutRequest,
   documentStop,
   errorCode,
+  headersFromCdp,
   isScoutCausedConsoleError,
   originOf,
 } from "../lib/productResearchScoutBrowserPolicy.mjs";
@@ -140,4 +141,14 @@ test("console errors the scout's own blocking caused are told apart by their err
   assert.equal(isScoutCausedConsoleError("Failed to load resource: net::ERR_CONNECTION_REFUSED"), false);
   assert.equal(isScoutCausedConsoleError("TypeError: Cannot read properties of undefined"), false);
   assert.equal(isScoutCausedConsoleError("net::ERR_BLOCKED_BY_CLIENTX"), false);
+});
+
+test("CDP response headers are read case-insensitively, so a challenge header in any case still stops the page", () => {
+  const headers = headersFromCdp([
+    { name: "CF-Mitigated", value: "challenge" },
+    { name: "Server", value: "cloudflare" },
+  ]);
+  assert.deepEqual(headers, { "cf-mitigated": "challenge", server: "cloudflare" });
+  assert.equal(documentStop({ status: 200, headers }), "challenge");
+  assert.deepEqual(headersFromCdp(undefined), {});
 });

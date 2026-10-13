@@ -306,7 +306,7 @@ staging에만 있고, Playwright 이미지(`docker/product-research-scout-probe.
 | mode | S0 항목 | 무엇을 보는가 |
 |---|---|---|
 | fixture | (4)·(11) | 로컬 서버 두 개를 띄워, 금지된 요청(다른 method·다른 host·같은 host의 다른 port·그곳으로의 redirect를 하위 자원·페이지 이동·iframe·worker에서·popup·WebSocket·service worker·form POST)이 실제로 서버에 도달했는지, 허용된 요청(GET·HEAD·같은 origin redirect)은 도달했는지 셉니다. 세 구성을 함께 봅니다 — Playwright 가로채기만, 거기에 host resolver 규칙, 그리고 browser 수준 CDP Fetch + resolver(서비스가 쓸 구성). sandbox를 켠 Chromium이 뜨는지도 봅니다 |
-| pages | (3) | production 공개 page 20개를 게스트로 GET·HEAD만 써서 열고, 문서 응답을 commit 시점에 읽어 챌린지·오류 상태면 그 자리에서 멈추며, 문서 언어·다른 origin 시도를 기록합니다 |
+| pages | (3) | production 공개 page 20개를 게스트로 GET·HEAD만 써서 열고, 문서 응답을 CDP가 붙잡아 둔 채(본문이 renderer에 닿기 전) 읽어 챌린지·오류 상태면 그 자리에서 실패시키며, 문서 언어·다른 origin 시도를 기록합니다 |
 | renderers | (2) | 고정 명세 PDF·DOCX·XLSX·PPTX를 채팅 도구의 admission과 렌더러로 만들고, zip part·PDF parse·내장 글꼴·한글·텍스트 위치·첫 쪽 래스터를 확인합니다 |
 
 출력은 JSON 한 덩어리이며 Node 버전, 시작부터 첫 측정까지의 시간, 모드별 시간,
