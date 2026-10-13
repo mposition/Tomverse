@@ -1558,7 +1558,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   닫습니다** — 판정 표의 trigger가 같은 문장에서 같은 종류의 닫힘 사건을 원장에 쓰고, 원장의 event
   guard는 그 판정 행 옆에서만 받으며, S1d 닫힘 trigger가 그때부터 보존(2160시간)을 시작합니다. 원장의
   닫힘 종류는 다섯이고(request core의 닫힘 목록과 같음), event guard·본문 guard·보존 guard·키 guard와
-  request store의 세 읽기(상태, 열린 요청 수, stale 후보)가 같은 목록을 씁니다 — 한쪽만 바꾸지 않습니다. 확정(`confirm`·`edit_confirm`)은 kill switch 중 거부되고 거절은
+  request store의 네 읽기(상태, 열린 요청 수, stale 후보, Admin의 최근 요청)가 같은 목록을 씁니다 — 한쪽만 바꾸지 않습니다. 확정(`confirm`·`edit_confirm`)은 kill switch 중 거부되고 거절은
   허용되며, Admin이 보여 준 값(답·근거 본문의 keyed digest, select의 선택지, `irreversible`, 스냅샷
   상태·SHA·manifest digest)이 저장값과 모두 같을 때만 됩니다. 고친 답은 S1d 본문 store가 판정 직전 같은
   트랜잭션에 쓰고 판정이 그 digest를 기록합니다. 선언 정확도는 기본 `not_judged`, `mismatched`면
@@ -1630,6 +1630,18 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   쓰기는 다음 실행의 읽기가 정합니다. 경계 상한은 각 쓰기의 무결성 키 포함 최대 문장 수 + setup + fence이고,
   request·body 테스트의 문장 수 loop가 고정합니다. 키 파기 기록 뒤 `AMUX_DM_DIGEST_KEYS`에서 그 period를 지우는 것은
   운영자입니다.
+- **S2-4a(Admin 요청 목록)**: `lib/amux/decisionMakerAdminCore.ts`, `lib/amux/decisionMakerAdminRead.ts`,
+  request store의 `readRecentDecisionMakerRequestLedger()`, body store의 `readDecisionMakerResultDetailsForAdmin()`,
+  judgment store의 `readDecisionMakerJudgmentsForAdmin()`, `components/admin/AmuxDecisionMakerRequestsPanel.tsx`,
+  `lib/adminMessages/amuxDecisionMaker.ts`의 `adminAmuxDecisionMakerRequestsMessages`, `lib/amux/dbBoundary.ts`의
+  `decisionMakerRequestListRead`(상한 5), `/admin/amux-settings?tab=decision-maker`,
+  `tests/amuxDecisionMakerAdminList.test.mjs`, `tests/client/amuxDecisionMakerRequestsRender.test.tsx`. 최근 요청 50건의
+  라우팅·상태·전달을 보이며, 보이는 건수와 그것이 전체 수가 아님을 화면에 적습니다. **각 표는 그것을 쓰는 store만
+  읽습니다** — 요청과 사건은 request store, 결과 상세는 body store, 판정과 전달은 judgment store가 한 문장씩 읽고,
+  `decisionMakerAdminRead.ts`는 SQL 없이 셋을 합칩니다. read 경계의 REPEATABLE READ가 세 문장을 한 snapshot으로
+  묶으므로, 상한은 세 문장 + setup + fence입니다. 본문은 읽지 않고, 원장이 만들 수 없는 행(인스턴스와 공급사의 대응,
+  `provider_unverified`와 빈 인스턴스, 사건 순서)이 하나라도 있으면 목록 전체를 읽지 못한 것으로 보입니다. 되돌릴 수
+  없는 제안은 상태보다 먼저 표시합니다. 제안 열람·판정은 S2-4b입니다.
 
 # AI Review (교차검토) 품질과 M5
 
