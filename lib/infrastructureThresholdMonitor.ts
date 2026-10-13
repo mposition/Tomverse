@@ -4,6 +4,7 @@ import {
   AMUX_BRIDGE_REMINDER_MS,
   amuxBridgeWatchHorizonStart,
   judgeAmuxBridgeLiveness,
+  newlyLostAmuxWorkers,
   type AmuxBridgeLiveness,
 } from "@/lib/amux/bridgeLivenessCore";
 import { planInfrastructureAlerts } from "@/lib/infrastructureAlertPolicy";
@@ -66,19 +67,46 @@ async function reportSilentMarketingPublisherRuns(now: Date): Promise<number> {
 }
 
 /**
- * The AMUX execution bridge on the Ubuntu host, judged by the worker leases it
- * keeps alive (lib/amux/bridgeLivenessCore.ts, docs/ops/amux/bridge-monitoring.md).
+ * The runtimes reported lost by the previous check in this process, so the
+ * next one can tell a newly halted bridge from a reminder. In memory, like the
+ * dependency state it sits beside (lib/operationalMonitoring.ts): after a
+ * deploy the first check pages again, which is the existing behaviour.
+ */
+const bridgeAlertMemory = globalThis as typeof globalThis & {
+  __tomverseAmuxBridgeLostWorkers?: ReadonlySet<string>;
+};
+
+/** At most this many names in one alert; the rest are counted. */
+const MAX_NAMED_LOST_RUNTIMES = 10;
+
+const describeLostRuntimes = (
+  verdict: Extract<AmuxBridgeLiveness, { state: "lost" }>
+) => {
+  const named = verdict.lostRuntimes
+    .slice(0, MAX_NAMED_LOST_RUNTIMES)
+    .map(
+      (runtime) =>
+        `${runtime.workerName} (lease out since ${runtime.leaseExpiresAt.toISOString()})`
+    );
+  const unnamed = verdict.lostRuntimes.length - named.length;
+  return unnamed > 0 ? [...named, `and ${unnamed} more`].join(", ") : named.join(", ");
+};
+
+/**
+ * The AMUX execution bridges on the Ubuntu host, judged by the worker leases
+ * they keep alive (lib/amux/bridgeLivenessCore.ts, docs/ops/amux/bridge-monitoring.md).
  *
- * A dependency status rather than a plain incident: the first run that finds
- * the bridge lost pages at once, the same condition pages again only every
- * `AMUX_BRIDGE_REMINDER_MS`, and the first run that finds it live again says
- * so. The message names when the leases ran out and where to look -- never a
- * worker, a card or the reason the bridge stopped, which only the host knows.
+ * A dependency status rather than a plain incident: the first run that finds a
+ * runtime lost pages at once, a runtime that joins the lost set later pages at
+ * once too, the same set pages again only every `AMUX_BRIDGE_REMINDER_MS`, and
+ * the first run that finds every runtime live again says so. The message names
+ * the lost workers, when their leases ran out and where to look -- never a
+ * card or the reason a bridge stopped, which only the host knows.
  *
  * Only `lost` and `live` are reported. `lapsing` and `unwatched` are not
- * evidence the bridge is alive: reporting them healthy would announce a
+ * evidence the bridges are alive: reporting them healthy would announce a
  * recovery when a halted bridge's last lease merely ages out of the horizon.
- * Saying nothing keeps a lost bridge lost until a live lease is seen, and
+ * Saying nothing keeps a lost runtime lost until its lease is live again, and
  * stops the reminders once it ages out.
  */
 async function reportAmuxBridgeLiveness(
@@ -93,23 +121,32 @@ async function reportAmuxBridgeLiveness(
   if (verdict.state !== "lost" && verdict.state !== "live") {
     return { state: verdict.state, notified: false };
   }
-  const lost = verdict.state === "lost";
+  const previouslyLost = bridgeAlertMemory.__tomverseAmuxBridgeLostWorkers ?? new Set();
+  const newlyLost = newlyLostAmuxWorkers(previouslyLost, verdict);
   const report = await reportOperationalDependencyStatus({
     dependency: "amux-execution-bridge",
-    healthy: !lost,
+    healthy: verdict.state === "live",
     code: "AMUX_EXECUTION_BRIDGE_LOST",
     title: "AMUX execution bridge stopped heartbeating",
-    error: lost
-      ? `No AMUX worker runtime has held a live lease since ${verdict.lostSince.toISOString()}. ` +
-        "Read journalctl -u tomverse-bridge.service on the Ubuntu host before restarting it."
-      : "An AMUX worker runtime holds a live lease.",
+    error:
+      verdict.state === "lost"
+        ? `${verdict.lostRuntimes.length} of ${verdict.watchedRuntimes} AMUX worker runtimes ` +
+          `stopped renewing their lease: ${describeLostRuntimes(verdict)}. ` +
+          "Read the halt line of each one's bridge unit on the Ubuntu host before restarting it."
+        : "Every AMUX worker runtime holds a live lease.",
     severity: "error",
     cooldownMs: AMUX_BRIDGE_REMINDER_MS,
+    forceNotification: newlyLost.length > 0,
     context: {
       component: "amux-execution-bridge",
       adminPath: "/admin/office",
-      ...(lost
+      ...(verdict.state === "lost"
         ? {
+            lostWorkers: verdict.lostRuntimes
+              .map((runtime) => runtime.workerName)
+              .join(", "),
+            ...(newlyLost.length > 0 ? { newlyLost: newlyLost.join(", ") } : {}),
+            liveRuntimes: String(verdict.liveRuntimes),
             lostSince: verdict.lostSince.toISOString(),
             minutesLost: String(
               Math.floor((now.getTime() - verdict.lostSince.getTime()) / 60_000)
@@ -118,6 +155,11 @@ async function reportAmuxBridgeLiveness(
         : {}),
     },
   });
+  bridgeAlertMemory.__tomverseAmuxBridgeLostWorkers = new Set(
+    verdict.state === "lost"
+      ? verdict.lostRuntimes.map((runtime) => runtime.workerName)
+      : []
+  );
   return { state: verdict.state, notified: report.notified };
 }
 
