@@ -1482,6 +1482,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   하나라도 실패하면 거부가 아무것도 증명하지 않으므로 `incomplete`입니다. 거부를 보는 대상마다 그 대상이 실재한다는 control(경로 존재, root에서의
   endpoint 응답, root로의 process 읽기)이 먼저입니다. 보호 디렉터리는 목록·진입·안쪽 파일 읽기를 따로 잽니다. 설정은 해석만 하고 실행하지 않으며, 출력에
   파일 내용·환경·자격증명이 없습니다. sudo 권한은 root가 `sudo -l -U`로 묻고 계정이 직접 시도하지 않습니다.
+  실측 기록은 `docs/ops/amux/decision-maker-s0-records/`에 두며, 서명 전의 기록은 S2 선행 조건의 증거가 아닙니다.
 - **S1a(결정적 핵심)**: `lib/amux/decisionMakerCore.ts`, `tests/amuxDecisionMakerCore.test.mjs`.
   I/O가 없습니다. DB·route·DM 호출은 다음 단계입니다.
 - **S1b(스위치 저장소)**: `lib/amux/decisionMakerSwitchCore.ts`, `lib/amux/decisionMakerSwitchStore.ts`,
