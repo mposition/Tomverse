@@ -27,13 +27,19 @@ npm run promote:test -- --sha=<develop 병합 commit>
 
 - 받는 것: `develop`이 실제로 가리켰던 commit(first-parent 이력 — 병합 commit). PR head나 병합된 브랜치 안의 commit은
   dev가 돌린 적 없는 tree라서 거절합니다. 선택 release는 `--source=release/<date>-<subject>`.
-- 거절하는 것: GitHub Actions suite가 하나라도 성공하지 않은 commit(취소 포함 — Railway Wait for CI가 그 배포를
-  SKIPPED로 만듭니다), 지금 후보를 버리는 이동(`--allow-rewind`가 없으면).
+- 거절하는 것: GitHub Actions suite가 하나라도 성공하지 않은 commit(취소 포함 — 취소된 suite의 검사는 그 commit에서
+  돌지 않았습니다), 지금 후보를 버리는 이동(`--allow-rewind`가 없으면).
+- suite가 아직 도는 commit은 끝날 때까지 기다렸다가(기본 60분, `--ci-wait-minutes`) 통과하면 push하고 실패하면
+  거절합니다. **Test에는 Railway Wait for CI가 없습니다** — Railway는 배포하는 브랜치에 push로 도는 workflow가 있어야
+  그 스위치를 주는데, `test`에 push로 도는 workflow는 없습니다(2026-10-13에 켜자 Railway가 다시 껐습니다). 그래서
+  push 전에 이 script가 기다립니다. `--dry-run`은 기다리지 않습니다.
 - push는 읽은 `test`에 lease를 걸므로, 그 사이 누가 옮겼으면 덮어쓰지 않고 거절합니다.
 - push 뒤 Test의 `/api/build-info`가 그 SHA를 말할 때까지 기다립니다(기본 45분, `--no-wait`로 생략).
 - **되돌리기:** 이전 SHA로 같은 명령에 `--allow-rewind`.
 
 ## 3. 한 번만: staging을 `test`로 전환
+
+**2026-10-13에 끝났습니다.** 기록은 6에 있습니다. 아래 순서는 그때 쓴 것이며, 실제와 달랐던 곳을 그 자리에 적었습니다.
 
 **선행 조건**
 
@@ -53,6 +59,10 @@ npm run promote:test -- --sha=<develop 병합 commit>
    `check:edge-robots`가 실패합니다. 확인: 로컬 PowerShell에서
    `npm run report:deployed-commit-drift -- --environment=dev --fetch`가 dev의 commit을 읽는지.
 2. **[브라우저 — 읽기]** `https://staging.tomverse.app/api/build-info`의 `commitSha`를 읽습니다.
+   staging이 develop이 아니라 release 브랜치를 배포하고 있었다면 그 SHA는 develop의 commit이 아니어서 3이 거절합니다.
+   그때는 suite가 모두 끝난 develop 병합 commit을 고릅니다(`--dry-run`이 `suites: passed`를 말하는 것). 2026-10-13이
+   그랬습니다 — staging은 이미 지워진 `release/2026-10-12-chat-guest-adaptive`(`3eb75ec`)에 멈춰 있었고, 그 commit은
+   main에 들어간 뒤였습니다.
 3. **[로컬 PowerShell — 쓰기]** 그 SHA로 `test`를 만듭니다. 첫 실행은 `create`이고, lease는 `test`가 아직 없어야
    통과합니다.
    ```
@@ -62,20 +72,27 @@ npm run promote:test -- --sha=<develop 병합 commit>
    - 프로젝트 `Tomverse`, 환경 `staging`: `Tomverse`, `Credit Reconciliation`, `Maintenance Cron`,
      `Provider Model Catalog`, `Provider Probe`, `Provider Usage Sync`.
      `Tomverse AMUX Validation 2026-09-21`은 자기 release 브랜치에 둡니다(4단계 정리 대상).
-   - 프로젝트 `Tomverse Agents`, 환경 `staging`: `Product Research Observation`, `Product Research Probe`.
+   - 프로젝트 `Tomverse Agents`, 환경 `staging`: `Product Research Observation`, `Product Research Probe`,
+     `Billing Finance Ops Deadline`. 마지막 것은 10-07 이후에 staging에 생겨서 처음 목록에 없었고, 2026-10-13 전환 때
+     `develop`을 배포하던 것을 발견해 같은 날 06:37에 옮겼습니다.
 5. **IaC apply로 전환하지 않습니다.** 표는 이미 `test`라서 나중의 plan에는 브랜치 차이가 없어야 합니다. 2026-10-07의
    staging plan은 그 환경에 없는 서비스를 **새로 만듭니다** — `railway:iac`는 Marketing Publisher, `railway:agents`는
    QA Release Digest·QA Release Monitor·Billing Finance Ops Deadline. 그 생성은 별개 결정입니다.
 6. **확인:** `npm run report:deployed-commit-drift -- --fetch`에서 staging은 `test`, dev는 `develop`과 맞습니다.
    Railway에서 staging `Tomverse`의 새 배포가 `test`의 SHA로 `SUCCESS`인지 봅니다.
-   **첫 관측을 아래에 적습니다** — 이미 끝난 suite만 가진 commit을 Railway Wait for CI가 바로 배포하는지는 이 전환 전에
-   확인된 적이 없습니다.
+
+   **기록** — Claude가 운영자의 관측과 Railway·GitHub 읽기로 작성했고, 운영자가 각 줄을 확인했습니다(2026-10-13).
 
    ```
-   전환 일시(UTC):          ____________________
-   test 첫 SHA:             ____________________
-   Wait for CI 동작:        ____________________  (WAITING이 몇 분, 또는 즉시)
-   확인한 사람:             ____________________
+   전환 일시(UTC):   2026-10-13 05:56 (Branch 변경 → staging Tomverse 배포 생성 05:56:03, 서빙 06:02:51)
+   test 첫 SHA:      41eec33f1ddb9ebd1520b49ab829980bcc13322c
+                     (develop 병합 commit, main→develop back-merge. GitHub Actions 4개 모두 success)
+   Wait for CI 동작: 관측하지 못함. staging Tomverse의 스위치가 꺼져 있었고 배포는 바로 BUILDING(운영자 관측).
+                     켜자 Railway가 다시 끔 — test에 push로 도는 workflow가 없음(Railway 요건).
+                     그 대신 promote:test가 suite 종료를 기다림(§2).
+   서비스 branch:    9개 모두 test(Railway 읽기, 2026-10-13). IaC apply 없음.
+                     Billing Finance Ops Deadline(Agents)은 목록 밖이라 develop에 남아 있다가 06:37에 옮김.
+   확인한 사람:      mposition (2026-10-13)
    ```
 
 **되돌리기:** 4의 서비스들 Branch를 `develop`으로 되돌립니다. `test`는 남겨 둬도 아무것도 읽지 않습니다. merge
@@ -85,9 +102,11 @@ train은 이 변경 이전의 script로 돌리면 staging을 기다립니다.
 
 - **매시 drift workflow는 `main`의 script를 돌립니다.** 이 변경이 `main`에 닿기 전까지 staging을 `develop`과
   비교해 빨간불이 날 수 있고 dev는 보지 않습니다. 다음 release로 해소됩니다.
-- **IaC apply의 checkout.** staging cron은 `test`의 코드를 돌리므로 staging apply는 `origin/test` checkout에서 합니다
-  — 단 `test`가 이 변경을 담은 뒤부터입니다(그 전의 표는 staging을 `develop`이라고 말합니다). 어느 환경이든 plan이
-  서비스 생성이나 삭제를 보이면 apply하지 않습니다.
+- **IaC apply의 checkout.** staging cron은 `test`의 코드를 돌리므로 staging apply는 `origin/test` checkout에서 합니다.
+  `test`의 첫 SHA(`41eec33`)부터 이미 표가 staging을 `test`라고 말합니다. 어느 환경이든 plan이 서비스 생성이나 삭제를
+  보이면 apply하지 않습니다.
+- **Test에는 Railway Wait for CI가 없습니다**(§2). `test`로 옮기는 길은 `promote:test`뿐이라는 관례가 CI 게이트까지
+  겸합니다 — `git push`로 `test`를 직접 옮기면 suite가 실패했거나 아직 도는 commit도 그대로 배포됩니다.
 - **정책 개정을 기다리는 둘:** QA Release Merge Lane의 대상(docs/policy/qa-release-agent.md §8)과 feedback
   auto-fix의 승격 관측(docs/policy/trace-feedback-automation.md §9.3)은 아직 staging을 봅니다. 둘 다 2026-10-07
   현재 운영되지 않습니다.

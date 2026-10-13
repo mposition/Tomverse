@@ -971,10 +971,12 @@ deploy or had its build replaced mid-run.
 `promote:test` takes a commit `develop` actually pointed at -- a merge
 commit, never a pull request's head -- or, for 7.9.1, one on the `release/**`
 branch named by `--source`. It refuses a candidate whose GitHub Actions suites
-did not all pass (a cancelled one included: Wait for CI would skip it), and a
-move that drops the current candidate unless `--allow-rewind` says nobody is
-verifying it. It pushes with a lease on the `test` it read and waits until
-Test's `/api/build-info` names the candidate. `--dry-run` reads only. A
+did not all pass (a cancelled one included: its checks never ran on that
+commit), and a move that drops the current candidate unless `--allow-rewind`
+says nobody is verifying it. A candidate whose suites are still running is not
+pushed until they finish (7.9.4: Test has no Wait for CI to hold it). It pushes
+with a lease on the `test` it read and waits until Test's `/api/build-info`
+names the candidate. `--dry-run` reads only and does not wait. A
 selective release's candidate is not on `develop`, so moving `test` to it, and
 back to `develop` afterwards, are both rewinds. The one-time switch and the
 order it needs are in `docs/ops/dev-test-lanes.md`.
@@ -1100,10 +1102,25 @@ shorter record.
 
 ### 7.9.4 Wait for CI
 
-Railway's **Wait for CI** (`checkSuites`) is on for production and staging as
-of 2026-08-15, and for dev from its creation on 2026-10-07. It holds a deployment until the pushed commit's check suite
-finishes, which removes the race where production deployed while its own checks
-were still running.
+Railway's **Wait for CI** (`checkSuites`) holds a deployment until the pushed
+commit's check suites finish, which removes the race where an environment
+deploys while its own checks are still running. As of 2026-10-13 it holds only
+on dev (on since dev was created on 2026-10-07).
+
+**Production does not have it right now.** It was turned on on 2026-08-15. On
+2026-10-13 it was found off, and turning it back on did not hold: Railway
+turned it off again at the next deploy, although several workflows run on push
+to `main`. The cause is not known yet. Until the switch holds, a merge to
+`main` deploys without waiting for `main`'s own push suites, and what gates
+production is the release pull request's CI.
+
+**Test cannot have it.** Railway offers the switch only when a workflow runs on
+push to the branch the service deploys, and no workflow runs on push to
+`test`: the commits `test` moves to already ran their checks where they were
+merged. On 2026-10-13, after staging moved to `test`, the switch was turned on
+and Railway turned it back off. In its place `promote:test` waits for the
+candidate's suites to finish before it pushes, and refuses one that did not
+succeed, so the gap Wait for CI closes is closed before the push instead.
 
 It is a floor under every lane above and a substitute for none of them: it
 answers "did the checks finish", never "was this exercised anywhere real".

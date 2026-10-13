@@ -45,20 +45,34 @@ test("a candidate off its source, or with a failed suite, is refused; a rewind n
   assert.equal(refusalReason({ ...ok, move: "rewind" }), "rewind_needs_allow_rewind");
   assert.equal(refusalReason({ ...ok, move: "rewind", allowRewind: true }), null);
   for (const move of ["create", "noop", "forward"]) {
-    for (const suites of ["passed", "pending", "none"]) {
+    for (const suites of ["passed", "none"]) {
       assert.equal(refusalReason({ ...ok, move, suites }), null, `${move} ${suites}`);
     }
   }
 });
 
-test("check suites are read the way Railway's Wait for CI reads them", () => {
+test("running suites hold the push, after every reason that cannot clear by waiting", () => {
+  const pending = { onSource: true, allowRewind: false, suites: "pending" };
+  // Test has no Wait for CI, so nothing else would hold the deployment.
+  for (const move of ["create", "forward"]) {
+    assert.equal(refusalReason({ ...pending, move }), "checks_pending", move);
+  }
+  assert.equal(refusalReason({ ...pending, move: "rewind", allowRewind: true }), "checks_pending");
+  // A no-op pushes nothing, so there is nothing to hold.
+  assert.equal(refusalReason({ ...pending, move: "noop" }), null);
+  // Waiting would not change these answers, so they come first.
+  assert.equal(refusalReason({ ...pending, move: "forward", onSource: false }), "not_on_source");
+  assert.equal(refusalReason({ ...pending, move: "rewind" }), "rewind_needs_allow_rewind");
+});
+
+test("a suite that did not succeed fails the candidate, cancelled included; other apps are ignored", () => {
   const actions = (status, conclusion) => ({ app: "github-actions", status, conclusion });
   assert.equal(checkSuitesVerdict([]), "none");
   // Other apps' suites are ignored, as Railway ignores them.
   assert.equal(checkSuitesVerdict([{ app: "claude", status: "completed", conclusion: "failure" }]), "none");
   assert.equal(checkSuitesVerdict([actions("completed", "success"), actions("completed", "skipped")]), "passed");
   assert.equal(checkSuitesVerdict([actions("completed", "success"), actions("in_progress", null)]), "pending");
-  // A later develop push cancels the earlier one's runs; Test would skip that commit.
+  // A later develop push cancels the earlier one's runs; their checks never ran on that commit.
   assert.equal(checkSuitesVerdict([actions("completed", "success"), actions("completed", "cancelled")]), "failed");
   assert.equal(checkSuitesVerdict([actions("in_progress", null), actions("completed", "failure")]), "failed");
 });
