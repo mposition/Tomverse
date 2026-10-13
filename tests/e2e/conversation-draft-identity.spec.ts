@@ -76,7 +76,7 @@ const refetchSession = async (page: Page) => {
 };
 
 const actionMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').first();
+  page.getByTestId("composer-tools-button");
 
 /** The repository's own attach flow: menu, source, file chooser. */
 const attachFromComputer = async (

@@ -24,7 +24,7 @@ const withSearchMetadata = (
 ) => `${text}${SEARCH_METADATA_MARKER}${JSON.stringify(execution)}`;
 
 const toolsMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(0);
+  page.getByTestId("composer-tools-button");
 
 // Web search is one switch, flipped in place. The menu deliberately stays
 // open afterwards (the row's own description and cost note are what change),

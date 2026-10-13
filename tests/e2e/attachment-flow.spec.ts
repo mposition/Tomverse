@@ -18,7 +18,7 @@ import {
 } from "./support/app-fixtures";
 
 const actionMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').first();
+  page.getByTestId("composer-tools-button");
 
 async function attachFromComputer(
   page: Page,

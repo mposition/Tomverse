@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useId } from "react";
+import { MessageSquare, PanelsTopLeft } from "lucide-react";
 
 import { useLanguage } from "@/components/LanguageProvider";
 import {
@@ -60,13 +61,14 @@ export function ChatProductSwitcherView({
     <nav
       data-testid="chat-product-switcher"
       aria-label={copy.selectorLabel}
-      className="w-full min-w-0"
+      className="w-full min-w-0 max-w-[236px]"
     >
-      <div className="grid min-w-0 grid-cols-2 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-950">
+      <div className="grid min-w-0 grid-cols-2 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-950">
         {(["chat", "review"] as const).map((product) => {
           const item = copy[product];
           const current = currentProduct === product;
           const href = localizedProductHref(product, language);
+          const ProductIcon = product === "chat" ? MessageSquare : PanelsTopLeft;
           return (
             <Link
               key={product}
@@ -86,17 +88,19 @@ export function ChatProductSwitcherView({
                   event.preventDefault();
                 }
               }}
-              className={`flex min-h-11 min-w-0 touch-manipulation items-center justify-center rounded-lg border px-2 text-center text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
+              className={`flex min-h-11 min-w-0 flex-wrap touch-manipulation content-center items-center justify-center gap-x-2 gap-y-0.5 rounded-lg border px-2 text-center text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
                 current
-                  ? "border-zinc-300 bg-white text-zinc-950 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+                  ? product === "review"
+                    ? "border-blue-100 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-900/70 dark:bg-blue-950/40 dark:text-blue-200"
+                    : "border-zinc-300 bg-white text-zinc-950 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
                   : disabled
                     ? "cursor-wait border-transparent text-zinc-400 dark:text-zinc-600"
                     : "border-transparent text-zinc-600 hover:bg-white/70 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900/70 dark:hover:text-white"
               }`}
             >
-              <span className="truncate">{item.shortLabel}</span>
-              <span className="ml-1 hidden truncate md:inline" aria-hidden="true">
-                · {item.feature}
+              <ProductIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 max-w-full whitespace-normal break-words leading-tight">
+                {item.shortLabel}
               </span>
             </Link>
           );

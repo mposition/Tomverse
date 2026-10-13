@@ -70,7 +70,7 @@ test.describe("keyboard reach", () => {
     async ({ page }) => {
       await openConversation(page, { width: 1366, height: 768 });
 
-      await page.locator('button[aria-controls="chat-input-popover"]').nth(1).click();
+      await page.getByTestId("composer-model-select").click();
       const dialog = page.locator("#chat-input-popover");
       await expect(dialog).toBeVisible();
 

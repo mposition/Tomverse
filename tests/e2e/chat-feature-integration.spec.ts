@@ -35,7 +35,7 @@ type NetworkBoundary = { external: string[]; unmockedApi: string[] };
 
 const MODEL_ID = "gpt-5-6-luna";
 const toolsTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').first();
+  page.getByTestId("composer-tools-button");
 const visibleTurn = (page: Page, role: string) =>
   page.locator(`[data-message-role="${role}"]`).filter({ visible: true });
 const newestUser = (request: ChatRequest) =>

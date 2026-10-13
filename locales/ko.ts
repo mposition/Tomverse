@@ -304,6 +304,7 @@ export const ko = {
         send: "전송",
         creditUnit: "크레딧",
         creditEstimateAria: "예상 {credits}크레딧, 상세 보기",
+        creditEstimateLabel: "예상 {credits}크레딧",
         cancel: "취소",
         sendSingMessage: "메시지 보내기...",
         sendMultipleMessages: "여러 모델에 동시에 보내기...",

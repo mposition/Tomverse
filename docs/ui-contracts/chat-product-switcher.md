@@ -90,9 +90,28 @@ action sends a message, creates a paid turn, or silently creates a conversation.
   `Model Compare` (localized).
 - The switcher occupies a row outside the textarea. It may not reduce the
   textarea's dedicated full-width row or introduce horizontal page overflow.
-- On mobile it lives in the conversation drawer so the closed input dock keeps
-  its height at page zoom and on short screens. The composer's Smart Adaptive
-  switch stays directly accessible without opening the drawer.
+- On mobile the compact switcher appears in the composer's own top navigation
+  row while the bottom dock has normal room, and remains available in the
+  conversation drawer as a second route. A keyboard-covered, landscape or
+  otherwise compact bottom dock may omit its duplicate and leave the drawer as
+  the navigation route. Both
+  instances use the same canonical links and `onProductSwitch` admission; the
+  composer instance never writes `productKey`, copies a draft, or changes the
+  selected models. This narrow placement exception was owner-approved with the
+  Composer design on 2026-10-13 Australia/Brisbane time (the owner's actual
+  approval date and timezone)
+  ([Figma](https://www.figma.com/design/SKTapwjDJz4DUwjlZMKsCI?node-id=2-71)).
+  The top navigation row is independent of the textarea. Its supplementary
+  product context is desktop text, and is absent on mobile before it can
+  narrow the input. The composer's Smart Adaptive switch stays directly
+  accessible without opening the drawer.
+  In an active multi-model conversation with less than 800px of visible
+  height, the shell may omit this duplicate composer instance while the drawer
+  route remains available. Empty/new conversations and taller layouts retain
+  the approved Composer row.
+- On both desktop and mobile, a fully supported web-search chip sits in the
+  footer tools group beside model selection. Partial or blocked search remains
+  in the independent status row with its detail or recovery action.
 - The current state is expressed by `aria-current`, border and surface
   treatment, not colour alone.
 

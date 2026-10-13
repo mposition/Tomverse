@@ -64,7 +64,7 @@ const open = async (page: Page) => {
 };
 
 const toolsMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(0);
+  page.getByTestId("composer-tools-button");
 const toggle = (page: Page) => page.getByTestId("tools-web-search-row");
 const chip = (page: Page) => page.getByTestId("web-search-mode-chip");
 

@@ -132,7 +132,7 @@ test.describe("a conversation started with an assistant", () => {
         await page.goto("/review");
         await expect(page.getByTestId("chat-input")).toBeVisible();
 
-        await page.locator('button[aria-controls="chat-input-popover"]').first().click();
+        await page.getByTestId("composer-tools-button").click();
         await page.getByTestId("tools-assistant-row").click();
         await page.getByTestId("assistant-option-p-scheduler").click();
         await page.keyboard.press("Escape");
@@ -172,7 +172,7 @@ test.describe("a conversation started with an assistant", () => {
         await page.goto("/review");
         await expect(page.getByTestId("chat-input")).toBeVisible();
 
-        await page.locator('button[aria-controls="chat-input-popover"]').first().click();
+        await page.getByTestId("composer-tools-button").click();
         await page.getByTestId("tools-assistant-row").click();
         await page.getByTestId("assistant-option-p-scheduler").click();
         await page.keyboard.press("Escape");
@@ -293,7 +293,7 @@ test.describe("a comparison started with an assistant", () => {
         await page.goto("/review");
         await expect(page.getByTestId("chat-input")).toBeVisible();
 
-        await page.locator('button[aria-controls="chat-input-popover"]').first().click();
+        await page.getByTestId("composer-tools-button").click();
         await page.getByTestId("tools-assistant-row").click();
         await page.getByTestId("assistant-option-p-scheduler").click();
         await page.keyboard.press("Escape");

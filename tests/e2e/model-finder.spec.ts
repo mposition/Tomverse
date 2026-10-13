@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, openModelCatalogue } from "./support/app-fixtures";
 
 const modelMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+  page.getByTestId("composer-model-select");
 
 /**
  * STG-F008: the combo-finder CTA and the complementary nudge live on the
@@ -244,7 +244,7 @@ test("selecting two models suggests one complementary model instead of the full 
   // reservations on top of their base cost exceed the Free account's 30
   // daily credits -- the limit banner would cover the picker. This test is
   // about the combination suggestion, so it runs with search off.
-  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  await page.getByTestId("composer-tools-button").click();
   await page.getByTestId("tools-web-search-row").click();
   await expect(page.getByTestId("tools-web-search-row")).toHaveAttribute(
     "aria-checked",
