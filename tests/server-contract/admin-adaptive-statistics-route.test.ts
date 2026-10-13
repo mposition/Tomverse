@@ -7,13 +7,14 @@ const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 let session: { user: { id: string } } | null = null;
 let role: string | null = null;
+let adminSession = false;
 const windows: number[] = [];
 
 mock.module(mod("node_modules/next-auth/next/index.js"), {
   namedExports: { getServerSession: async () => session },
 });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
-mock.module(mod("lib/adminAuth.ts"), { namedExports: { getAdminRole: () => role, isAdminSession: () => role !== null } });
+mock.module(mod("lib/adminAuth.ts"), { namedExports: { getAdminRole: () => role, isAdminSession: () => adminSession } });
 mock.module(mod("lib/apiSecurity.ts"), {
   namedExports: { consumeApiRateLimit: async () => {}, apiSecurityResponse: () => null },
 });
@@ -36,6 +37,8 @@ test("only the owner may read actual execution statistics", async () => {
   session = { user: { id: "admin" } };
   role = "readonly";
   assert.equal((await GET(request())).status, 404);
+  role = "owner";
+  assert.equal((await GET(request())).status, 404);
   assert.equal(windows.length, 0);
 });
 
@@ -43,6 +46,7 @@ test("window is exact, invalid windows are rejected, and response is uncached", 
   const { GET } = await loadRoute();
   session = { user: { id: "owner" } };
   role = "owner";
+  adminSession = true;
   assert.equal((await GET(request("?days=1"))).status, 400);
   assert.equal(windows.length, 0);
   const response = await GET(request("?days=30"));
