@@ -41,12 +41,25 @@ Tomverse Review의 OpenAI 기본 모델을 `gpt-5-4-mini`에서 `gpt-5-6-luna`�
 
 - `lib/models.ts`의 `DEFAULT_MODEL_ID`
 - `lib/appDefaults.ts`의 `APP_DEFAULTS.defaultModelId`
-- `prisma/schema.prisma`의 `UserSettings.defaultModel` 컬럼 기본값
 - `app/api/user/settings/route.ts`가 행이 없을 때 만드는 값
 - 새 conversation의 fallback
 
-한 값의 네 가지 표기이고, **넷을 함께 읽는 코드는 없습니다.** 그래서 조용히
-어긋납니다.
+한 값의 여러 표기이고, **이들을 함께 읽는 코드는 `npm run check:default-models`뿐입니다.**
+
+`prisma/schema.prisma`의 `UserSettings.defaultModel` 컬럼 기본값은 2026-10-12에
+없앴습니다(`Conversation.selectedModels`도 같은 날). 기본값은 이 문서가 다루는
+결정을 DB에 한 번 더 적은 사본이었고, migration으로만 옮길 수 있었습니다. 그래서
+코드가 `gpt-6-luna`로 옮겨 간 뒤에도 schema가 `gpt-5-6-luna`를 말하는 일이
+생겼습니다. 지금은 두 컬럼 모두 NOT NULL이고 `@default`가 없습니다. 모든 쓰기 경로가
+값을 직접 넣습니다(`tests/userSettingsDefaultModelWriters.test.mjs`, `createConversation`의
+필수 `selectedModels`). `check:default-models`는 `@default`가 다시 생기면
+`prisma_column_default_names_model`로 실패합니다.
+
+배포 순서도 계약입니다. 쓰기 경로를 명시적으로 바꾼 release(step 3a)가 먼저
+production에 나가고, 기본값을 지우는 migration
+(`20261012140000_drop_default_model_column_defaults`)은 그 다음 release로
+나갑니다. `prisma migrate deploy`는 이전 배포가 아직 트래픽을 받는 동안
+실행되기 때문입니다. 순서가 바뀌면 옛 인스턴스의 insert가 NOT NULL로 실패합니다.
 
 ### 유효하지만 아무 효과가 없는 설정은 저장하지 않습니다
 

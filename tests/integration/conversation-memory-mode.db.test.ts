@@ -42,6 +42,7 @@ const createUser = () =>
 const seedConversation = (userId: string, memoryMode?: string) =>
     prisma.conversation.create({
         data: {
+            selectedModels: '["gpt-6-luna"]',
             userId,
             title: "mode fixture",
             ...(memoryMode ? { memoryMode } : {}),

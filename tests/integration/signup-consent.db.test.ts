@@ -501,7 +501,7 @@ test("a wrong nonce, and a switched-off gate, consume nothing", async () => {
 test("an estimate never replaces a declaration, and replaces an earlier estimate", async () => {
   const declared = await prisma.user.create({ data: { email: `${randomUUID()}@example.test` } });
   await prisma.userSettings.create({
-    data: { userId: declared.id, country: "KR", countrySource: "self_declared", countryUpdatedAt: new Date() },
+    data: { defaultModel: "gpt-6-luna", userId: declared.id, country: "KR", countrySource: "self_declared", countryUpdatedAt: new Date() },
   });
   assert.deepEqual(await recordSignInEstimatedCountry({ userId: declared.id, ipCountry: "AU" }), {
     recorded: false,
