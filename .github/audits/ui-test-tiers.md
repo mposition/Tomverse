@@ -71,6 +71,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `chat-memory-context.spec.ts` |
 | `chat-unified-workspace.spec.ts` |
 | `chat-product-switcher.spec.ts` |
+| `compact-composer.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
 | `email-notification-settings.spec.ts` |
@@ -123,6 +124,13 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `external-conversation-continuation.spec.ts` |
 | `conversation-export.spec.ts` |
 | `help-guide.spec.ts` |
+
+`compact-composer.spec.ts`가 2026-10-13에 합류했습니다. 승인된 축소 Composer의
+PC 두 줄 입력 공간, 모바일·키보드 상태의 높이와 입력 폭, coarse pointer의
+44px target, 다국어 모델 선택·크레딧 설명과 스마트 자동 복귀를 실제 화면에서
+확인하는 21개 test입니다. desktop-chromium에서 모바일·태블릿 viewport와
+touch 입력도 함께 측정하며, 다른 project에서는 명시적으로 건너뜁니다.
+기존 모바일 Composer·배너·음성 입력 spec의 계약 검사는 그대로 유지합니다.
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
