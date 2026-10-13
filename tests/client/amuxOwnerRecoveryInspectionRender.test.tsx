@@ -99,10 +99,21 @@ const hostFixture = (): AmuxV22RecoveryRead => ({ taskId: identity.taskId, reque
   cost: { oldHeldMicroUsd: "3400000", additionalCapMicroUsd: "3400000", worstExposureMicroUsd: "6800000",
     catalogApprovalId: "catalog-approval", catalogVersion: "catalog-v1", pricingVersion: "pricing-v1",
     costReceiptDigest: "b".repeat(64), costDigest: "c".repeat(64) }, retryWrite: false });
-const hostView = (data: AmuxHostRecoveryRead, confirmed = false) => AmuxHostRecoveryView({
+const hostView = (data: AmuxHostRecoveryRead, confirmed = false, safeStopConfirmed = false) => AmuxHostRecoveryView({
   m: adminAmuxRecoveryInspectionMessages.ko, state: { state: "ready", data },
   confirmed, onConfirm: () => {}, onRequest: () => {}, onRefresh: () => {}, onApprove: () => {},
+  safeStopConfirmed, onSafeStopConfirm: () => {}, onSafeStop: () => {},
   onReloadReview: () => {}, canRequest: true });
+const legacyFixture = (): AmuxHostRecoveryRead => ({ ...hostFixture(), state: "unverified",
+  requestKind: "inspect", reason: "legacy_invocation_unbound", recoveryEnabled: true,
+  safeStopEnabled: true });
+const safeStopFixture = (requestId = inspectionRequestId): AmuxHostRecoveryRead => ({
+  ...hostFixture(), requestId, requestKind: "safe_stop", state: "verified",
+  sourceEvidenceId: legacyFixture().evidenceId, sourceEvidenceDigest: legacyFixture().evidenceDigest,
+  workerProfileAlias: "claude-maintenance", profileWorkerNames: ["claude-chore", "claude-security"],
+  targetUnit: "tomverse-amux-v22-sidecar@claude-maintenance.service",
+  profileConfigDigest: "d".repeat(64), stopAcknowledgement: "outcome_unknown", processState: "gone",
+  reason: "safe_stop_process_gone", recoveryEnabled: true, safeStopEnabled: true });
 test("host recovery renders real evidence and derives the held/new/worst exposure confirmation", () => {
   const tree = hostView(hostFixture()); const text = textOf(tree);
   assert.match(text, /US\$3\.40/); assert.match(text, /US\$6\.80/);
@@ -126,6 +137,66 @@ test("host request POST binds the displayed identity and never runs work", async
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), { action: "request_inspection",
     taskId: identity.taskId, expectedRevision: identity.taskRevision,
     priorAttemptId: identity.attemptId, requestId: inspectionRequestId });
+});
+test("safe stop is risk-confirmed, uses only source evidence fields, and keeps stop proof separate", async () => {
+  const initial = hostView(legacyFixture()); const text = textOf(initial);
+  assert.match(text, /정지한 worker에는 이후 작업도 배정되지 않습니다/);
+  assert.match(text, /worker 재개는 별도 운영 절차가 필요합니다/);
+  const initialButton = propsOf(initial).find(props => props["data-testid"] === "admin-amux-request-safe-stop");
+  assert.equal(initialButton?.disabled, true);
+  assert.equal(propsOf(hostView(legacyFixture(), false, true))
+    .find(props => props["data-testid"] === "admin-amux-request-safe-stop")?.disabled, false);
+
+  const nonce = "00000000-0000-4000-8000-000000000008"; let body: Record<string, unknown> = {};
+  const result = await fetchAmuxHostRecovery({ identity, requestId: nonce, action: "request_safe_stop",
+    displayed: legacyFixture(), controller: new AbortController(), isCurrent: () => true,
+    fallback: "unavailable", fetcher: async (_url, init) => {
+      body = JSON.parse(String(init?.body)); return Response.json(safeStopFixture(nonce));
+    } });
+  assert.equal(result?.state, "ready");
+  assert.deepEqual(body, { action: "request_safe_stop", taskId: identity.taskId,
+    expectedRevision: identity.taskRevision, priorAttemptId: identity.attemptId, requestId: nonce,
+    sourceEvidenceId: legacyFixture().evidenceId, sourceEvidenceDigest: legacyFixture().evidenceDigest });
+  assert.equal(Object.hasOwn(body, "targetUnit"), false); assert.equal(Object.hasOwn(body, "workerProfileAlias"), false);
+  const resultText = textOf(hostView(safeStopFixture(nonce)));
+  assert.match(resultText, /정지 명령 접수 여부는 미확인/);
+  assert.match(resultText, /모두 종료된 것을 확인/);
+  assert.match(resultText, /이번 종료 요청은 모델을 호출하지 않습니다/);
+  assert.match(resultText, /미확인 비용을 0으로 바꾸지 않습니다/);
+  assert.doesNotMatch(resultText, /claude-maintenance|profile|fence|PID|v37/);
+});
+
+test("safe-stop result refresh is read-only and a mismatched source receipt stays fenced", async () => {
+  const nonce = "00000000-0000-4000-8000-000000000008"; let reads = 0, writes = 0;
+  const refreshed = await fetchAmuxHostRecovery({ identity, requestId: nonce,
+    controller: new AbortController(), isCurrent: () => true, fallback: "unavailable",
+    fetcher: async (_url, init) => { if (init?.method) writes += 1; else reads += 1;
+      return Response.json(safeStopFixture(nonce)); } });
+  assert.equal(refreshed?.state, "ready"); assert.equal(reads, 1); assert.equal(writes, 0);
+  const fenced = await fetchAmuxHostRecovery({ identity, requestId: nonce, unknownWrite: true,
+    unknownAction: "request_safe_stop", expectedReceipt: {
+      sourceEvidenceId: legacyFixture().evidenceId!, sourceEvidenceDigest: legacyFixture().evidenceDigest! },
+    controller: new AbortController(), isCurrent: () => true, fallback: "unavailable",
+    fetcher: async () => Response.json({ ...safeStopFixture(nonce), sourceEvidenceDigest: "e".repeat(64) }) });
+  assert.equal(fenced?.state, "unavailable");
+  if (fenced?.state === "unavailable") assert.equal(fenced.unknownWrite, true);
+});
+
+test("an explicit safe-stop recheck binds the prior evidence while ordinary refresh remains read-only", async () => {
+  const previous = { ...safeStopFixture(), state: "unverified" as const,
+    reason: "safe_stop_process_present", processState: "present" as const };
+  const tree = hostView(previous, false, true);
+  assert.match(textOf(tree), /종료 상태 새로 확인/);
+  assert.equal(propsOf(tree).find(props => props["data-testid"] === "admin-amux-request-safe-stop")?.disabled, false);
+  const nonce = "00000000-0000-4000-8000-000000000009"; let body: Record<string, unknown> = {};
+  const rechecked = await fetchAmuxHostRecovery({ identity, requestId: nonce, action: "request_safe_stop",
+    displayed: previous, controller: new AbortController(), isCurrent: () => true, fallback: "unavailable",
+    fetcher: async (_url, init) => { body = JSON.parse(String(init?.body));
+      return Response.json(safeStopFixture(nonce)); } });
+  assert.equal(rechecked?.state, "ready");
+  assert.equal(body.sourceEvidenceId, previous.evidenceId);
+  assert.equal(body.sourceEvidenceDigest, previous.evidenceDigest);
+  assert.equal(Object.hasOwn(body, "targetUnit"), false);
 });
 test("lost approval reads the same id once and never repeats the write", async () => {
   const approvalRequestId = "00000000-0000-4000-8000-000000000004";
@@ -347,7 +418,9 @@ const pendingFixture = (action: AmuxPendingRecovery["action"] = "approve_attempt
   version: 1, identity, requestId: "00000000-0000-4000-8000-000000000005", action,
   expectedReceipt: action === "approve_attempt" ? { inspectionId: hostFixture().inspectionId,
     evidenceId: hostFixture().evidenceId, evidenceDigest: hostFixture().evidenceDigest,
-    costDigest: hostFixture().cost!.costDigest } : null });
+    costDigest: hostFixture().cost!.costDigest } : action === "request_safe_stop" ? {
+    sourceEvidenceId: legacyFixture().evidenceId!, sourceEvidenceDigest: legacyFixture().evidenceDigest!,
+  } : null });
 const missingRecovery = (taskId: string, requestId: string) => ({ taskId, requestId, state: "not_visible",
   inspectionId: null, evidenceId: null, evidenceDigest: null, reason: null,
   taskRevision: null, priorAttemptId: null, cost: null, retryWrite: false });
@@ -388,6 +461,42 @@ test("actual Panel preserves lost POST nonce across close, remount and page relo
   assert.deepEqual(readIds, [nonce, nonce, nonce]); assert.equal(browser.values.size, 1);
   const raw = [...browser.values.values()][0];
   assert.doesNotMatch(raw, /oldHeldMicroUsd|additionalCapMicroUsd|prompt|secret|resolution/);
+});
+
+test("actual Panel preserves a lost safe-stop receipt across remount and refresh without another stop write", async t => {
+  const browser = recoveryBrowser(t); let inspectionWrites = 0, stopWrites = 0, safeNonce = "";
+  const readIds: string[] = [];
+  t.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      const body = JSON.parse(String(init.body));
+      if (body.action === "request_inspection") {
+        inspectionWrites += 1; return Response.json({ ...legacyFixture(), requestId: body.requestId });
+      }
+      assert.equal(body.action, "request_safe_stop"); stopWrites += 1; safeNonce = body.requestId;
+      const marker = readAmuxPendingRecovery(identity.taskId);
+      assert.equal(marker.state, "pending");
+      if (marker.state === "pending") {
+        assert.equal(marker.pending.action, "request_safe_stop");
+        assert.deepEqual(marker.pending.expectedReceipt, pendingFixture("request_safe_stop").expectedReceipt);
+      }
+      throw new Error("lost safe-stop answer");
+    }
+    const query = new URL(String(url), "https://tomverse.test").searchParams;
+    readIds.push(query.get("requestId")!); return Response.json(missingRecovery(identity.taskId, safeNonce));
+  });
+  let panel = mountRecoveryPanel(); await panel.flush(); panel.props.onRequest(); await panel.flush();
+  assert.equal(inspectionWrites, 1); assert.equal(browser.values.size, 0);
+  panel.props.onSafeStopConfirm?.(true); await panel.flush(); panel.props.onSafeStop?.(); await panel.flush();
+  assert.equal(stopWrites, 1); assert.equal(browser.values.size, 1); panel.unmount();
+
+  panel = mountRecoveryPanel(); await panel.flush();
+  assert.equal(panel.props.writesBlocked, true); assert.equal(panel.props.safeStopConfirmed, false);
+  panel.props.onSafeStop?.(); await panel.flush(); assert.equal(stopWrites, 1);
+  panel.props.onRefresh(); await panel.flush(); assert.equal(stopWrites, 1); panel.unmount();
+  assert.deepEqual(readIds, [safeNonce, safeNonce]);
+  const raw = [...browser.values.values()][0];
+  assert.match(raw, /request_safe_stop/);
+  assert.doesNotMatch(raw, /workerProfileAlias|targetUnit|profileConfigDigest|oldHeldMicroUsd|additionalCapMicroUsd/);
 });
 
 test("actual Panel persists exact approval receipt binding before POST and keeps it after unmount", async t => {

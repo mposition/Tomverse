@@ -72,6 +72,7 @@ import { readAmuxV22PublicPrConsent } from
   "@/lib/amux/v22PublicPrConsent";
 import { readAmuxV22RecoveryAuthority, recoveryAttemptBudget } from "@/lib/amux/v22TaskRecoveryService";
 import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed } from "@/lib/amux/v22TaskRecoveryCore";
+import { amuxV22WorkerSafeStopFenced } from "@/lib/amux/v22LegacySafeStopFence";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -293,6 +294,9 @@ export async function startAmuxV22TaskExecution(input: {
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
       if (incident.blocks_admission) return { started: false as const,
         reason: "incident_frozen" as const };
+      if (await amuxV22WorkerSafeStopFenced(tx, input.worker))
+        return { started: false as const,
+          reason: "worker_safe_stop_fenced" as const };
       const halt = await findOpenAmuxOrchestratorHalt(tx);
       if (halt) return { started: false as const,
         reason: "orchestrator_halted" as const };
@@ -537,7 +541,8 @@ export async function startAmuxExecution(
         | "cost_estimate_missing"
         | "cost_budget_exhausted"
         | "cost_budget_window_inactive"
-        | "execution_brief_unverified";
+        | "execution_brief_unverified"
+        | "worker_safe_stop_fenced";
     }
 > {
   if (input.expectedRevision > AMUX_MAX_EXPECTED_REVISION) {
@@ -574,6 +579,10 @@ export async function startAmuxExecution(
           started: false as const,
           reason: "incident_frozen" as const,
         };
+      }
+      if (await amuxV22WorkerSafeStopFenced(tx, input.worker)) {
+        return { started: false as const,
+          reason: "worker_safe_stop_fenced" as const };
       }
 
       const planning = await tx.amuxWorkItem.findUnique({

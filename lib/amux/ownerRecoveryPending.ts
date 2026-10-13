@@ -1,10 +1,14 @@
 import type { AmuxRecoveryInspectionIdentity } from "./ownerRecoveryInspectionCore";
 
-export type RecoveryAction = "request_inspection" | "approve_attempt";
-export type RecoveryReceiptBinding = {
+export type RecoveryAction = "request_inspection" | "request_safe_stop" | "approve_attempt";
+export type RecoveryApprovalReceiptBinding = {
   inspectionId: string | null; evidenceId: string | null;
   evidenceDigest: string | null; costDigest: string;
 };
+export type RecoverySafeStopReceiptBinding = {
+  sourceEvidenceId: string; sourceEvidenceDigest: string;
+};
+export type RecoveryReceiptBinding = RecoveryApprovalReceiptBinding | RecoverySafeStopReceiptBinding;
 export type AmuxPendingRecovery = {
   version: 1; identity: AmuxRecoveryInspectionIdentity & { attemptId: string };
   requestId: string; action: RecoveryAction; expectedReceipt: RecoveryReceiptBinding | null;
@@ -38,6 +42,10 @@ export function bindAmuxPendingRecovery(value: unknown, taskId: string): AmuxPen
       Number(value.identity.taskRevision) > 2_147_483_647) return null;
   if (value.action === "request_inspection") {
     if (value.expectedReceipt !== null) return null;
+  } else if (value.action === "request_safe_stop") {
+    const receipt = value.expectedReceipt;
+    if (!record(receipt) || !keys(receipt, "sourceEvidenceDigest,sourceEvidenceId") ||
+        !uuid(receipt.sourceEvidenceId) || !digest(receipt.sourceEvidenceDigest)) return null;
   } else if (value.action === "approve_attempt") {
     const receipt = value.expectedReceipt;
     if (!record(receipt) || !keys(receipt, "costDigest,evidenceDigest,evidenceId,inspectionId") ||

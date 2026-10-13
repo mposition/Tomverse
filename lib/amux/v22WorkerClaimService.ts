@@ -20,6 +20,7 @@ import { calculateCurrentApprovedAmuxV4TaskCost } from
 import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
 import { readAmuxV22RecoveryAuthority } from "./v22TaskRecoveryService.ts";
 import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed } from "./v22TaskRecoveryCore.ts";
+import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22RequiredTool,
@@ -127,16 +128,22 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const lane = await currentLane(tx, taskId);
       const catalog = getConfiguredAmuxV22WorkerCatalog();
       if (!catalog) throw new BoardImportError("worker_catalog_unavailable", 409);
+      const safeStopFenced = await amuxV22SafeStopFencedWorkers(tx,
+        catalog.map((worker) => worker.worker_name));
       const live = await tx.amuxWorkerRuntime.findMany({ where: {
         workerName: { in: catalog.map((worker) => worker.worker_name) },
         leaseExpiresAt: { gt: now }, status: { in: ["idle", "busy"] },
       }, select: { workerName: true, instanceId: true, generation: true,
         status: true, dispatchReady: true } });
       const liveByName = new Map(live.map((worker) => [worker.workerName, worker]));
-      const verifiedNames = new Set(catalog.filter((worker) =>
+      const operationalNames = new Set(catalog.filter((worker) =>
         !worker.archived && !worker.paused && !worker.isolated &&
         !worker.blocked && liveByName.has(worker.worker_name)).map(
         (worker) => worker.worker_name));
+      const verifiedNames = new Set([...operationalNames].filter((worker) =>
+        !safeStopFenced.has(worker)));
+      if (operationalNames.size > 0 && verifiedNames.size === 0)
+        throw new BoardImportError("worker_safe_stop_fenced", 409);
       const occupied = await tx.amuxWorkItem.findMany({ where: {
         owner: { not: null }, archivedAt: null,
         status: { in: ["todo", "doing", "review"] },
@@ -185,6 +192,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
         const worker = catalog.find((item) => item.worker_name === route.workerName);
         const runtime = liveByName.get(route.workerName);
         return worker && runtime?.status === "idle" && runtime.dispatchReady &&
+          !safeStopFenced.has(route.workerName) &&
           !busy.has(route.workerName) && verifiedNames.has(route.workerName) &&
           amuxV22OneShotRouteSupported(route.provider, route.modelId) &&
           worker.provider === route.provider.toLowerCase() &&

@@ -134,7 +134,8 @@ test("complete local receipt remains complete while unobserved price is null and
   } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 test("checker is off by default, pulls once, uses a fixed socket and never retries unknown POST", async () => {
-  const config = { workerName: execute.worker, socketPath: "/run/amux-v22/claude-chore/worker.sock",
+  const config = { workerName: execute.worker,
+    socketPath: "/run/tomverse-amux-v22-claude-chore/task.sock",
     internalUrl: "https://tomverse.example", syncSecret: "x".repeat(32) };
   let calls = 0, sockets = 0;
   const dependencies = { fetcher: async (_url, init) => {
@@ -155,6 +156,59 @@ test("checker is off by default, pulls once, uses a fixed socket and never retri
   assert.deepEqual(await runAmuxV22RecoveryCheckerOnce({ ...config, enabled: "1" }, dependencies),
     { state: "outcome_unknown" });
   assert.equal(calls, 2); assert.equal(sockets, 1);
+});
+test("checker gives POST a fresh deadline after GET and inspection spend the first one", async () => {
+  const config = { enabled: "1", workerName: execute.worker,
+    socketPath: "/run/tomverse-amux-v22-claude-chore/task.sock",
+    internalUrl: "https://tomverse.example", syncSecret: "x".repeat(32) };
+  const controllers = [];
+  let getSignal;
+  const evidenceId = "00000000-0000-4000-8000-000000000004";
+  const result = await runAmuxV22RecoveryCheckerOnce(config, {
+    timeoutSignal: milliseconds => {
+      assert.equal(milliseconds, 10_000);
+      const controller = new AbortController(); controllers.push(controller);
+      return controller.signal;
+    },
+    fetcher: async (_url, init) => {
+      if (init.method === "GET") {
+        getSignal = init.signal;
+        return Response.json({ requests: [request] });
+      }
+      assert.equal(getSignal.aborted, true);
+      assert.notEqual(init.signal, getSignal);
+      assert.equal(init.signal.aborted, false);
+      return Response.json({ recorded: true, evidenceId });
+    },
+    inspectSocket: async () => {
+      controllers[0].abort();
+      const identity = { ...request }; delete identity.requestedAt;
+      return { ...identity, evidenceId, hostInvocationId: null,
+        proof: { terminalOutcome: "unknown", sameLiveInvocation: false,
+          noActiveExecution: false, ...unitProof, journalBound: false,
+          socketTerminal: false, externalEffectsKnown: false, workspaceClean: false },
+        usage: { status: "unknown", projectedCostMicroUsd: null },
+        reason: "legacy_invocation_unbound" };
+    },
+  });
+  assert.deepEqual(result, { state: "reported", inspectionId: request.inspectionId, evidenceId });
+  assert.equal(controllers.length, 2);
+});
+test("checker refuses a foreign socket path or invalid worker before GET, socket, or POST", async () => {
+  let fetches = 0, sockets = 0;
+  const dependencies = {
+    fetcher: async () => { fetches += 1; return Response.json({ requests: [] }); },
+    inspectSocket: async () => { sockets += 1; return {}; },
+  };
+  const base = { enabled: "1", workerName: "claude-chore",
+    socketPath: "/run/tomverse-amux-v22-claude-chore/task.sock",
+    internalUrl: "https://tomverse.example", syncSecret: "x".repeat(32) };
+  for (const config of [
+    { ...base, socketPath: "/tmp/unrelated.sock" },
+    { ...base, workerName: "Claude-Chore" },
+  ]) assert.deepEqual(await runAmuxV22RecoveryCheckerOnce(config, dependencies),
+    { state: "unavailable" });
+  assert.equal(fetches, 0); assert.equal(sockets, 0);
 });
 test("unit proof fails closed on missing protected scope without executing a service mutation", async () => {
   const result = await inspectAmuxV22RecoveryUnit({ worker: execute.worker, invocationId },

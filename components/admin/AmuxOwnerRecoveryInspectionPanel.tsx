@@ -15,7 +15,8 @@ import type { AmuxV22RecoveryRead } from "@/lib/amux/v22TaskRecoveryCore";
 import { clearAmuxPendingRecovery, readAmuxPendingRecovery, saveAmuxPendingRecovery,
   type AmuxPendingRecovery, type AmuxPendingRecoveryLoad, type RecoveryAction,
   type RecoveryReceiptBinding } from "@/lib/amux/ownerRecoveryPending";
-export type AmuxHostRecoveryRead = AmuxV22RecoveryRead & { recoveryEnabled?: boolean };
+export type AmuxHostRecoveryRead = AmuxV22RecoveryRead & { recoveryEnabled?: boolean;
+  safeStopEnabled?: boolean; sourceEvidenceDigest?: string | null };
 
 export const AMUX_RECOVERY_INSPECTION_TIMEOUT_MS = 10_000;
 type Messages = AdminMessageShape<(typeof adminAmuxRecoveryInspectionMessages)["en"]>;
@@ -36,12 +37,28 @@ const uuid = (value: unknown): value is string => typeof value === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const digest = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const money = (value: unknown): value is string => typeof value === "string" && /^(0|[1-9][0-9]{0,18})$/.test(value);
+const approvalReceipt = (value: RecoveryReceiptBinding | undefined): value is RecoveryReceiptBinding &
+  { inspectionId: string | null; evidenceId: string | null; evidenceDigest: string | null; costDigest: string } =>
+  Boolean(value && "costDigest" in value);
+const safeStopReceipt = (value: RecoveryReceiptBinding | undefined): value is RecoveryReceiptBinding &
+  { sourceEvidenceId: string; sourceEvidenceDigest: string } => Boolean(value && "sourceEvidenceId" in value);
+const safeStopSourceEligible = (value: AmuxV22RecoveryRead | undefined): value is AmuxV22RecoveryRead =>
+  Boolean(value && value.state === "unverified" && uuid(value.evidenceId) && digest(value.evidenceDigest) &&
+    (value.requestKind === "safe_stop" || value.reason === "legacy_invocation_unbound"));
 export function bindAmuxHostRecovery(value: unknown, identity: AmuxRecoveryInspectionIdentity,
   requestId: string): AmuxHostRecoveryRead | null {
   if (!record(value) || value.taskId !== identity.taskId || value.requestId !== requestId ||
       value.retryWrite !== false || (value.reason !== null &&
         (typeof value.reason !== "string" || !/^[A-Za-z0-9_]{1,128}$/.test(value.reason))) ||
       (value.recoveryEnabled !== undefined && typeof value.recoveryEnabled !== "boolean") ||
+      (value.safeStopEnabled !== undefined && typeof value.safeStopEnabled !== "boolean") ||
+      (value.requestKind !== undefined && !["inspect", "safe_stop"].includes(String(value.requestKind))) ||
+      (value.sourceEvidenceId !== undefined && value.sourceEvidenceId !== null && !uuid(value.sourceEvidenceId)) ||
+      (value.sourceEvidenceDigest !== undefined && value.sourceEvidenceDigest !== null && !digest(value.sourceEvidenceDigest)) ||
+      (value.stopAcknowledgement !== undefined && value.stopAcknowledgement !== null &&
+        !["acknowledged", "outcome_unknown", "not_issued"].includes(String(value.stopAcknowledgement))) ||
+      (value.processState !== undefined && value.processState !== null &&
+        !["gone", "present", "unknown"].includes(String(value.processState))) ||
       !["pending", "unverified", "verified", "approved", "not_visible"].includes(String(value.state))) return null;
   if (value.currentTask !== undefined && value.currentTask !== null &&
       (!record(value.currentTask) || Object.keys(value.currentTask).sort().join(",") !== "revision,status" ||
@@ -57,6 +74,13 @@ export function bindAmuxHostRecovery(value: unknown, identity: AmuxRecoveryInspe
   if (["verified", "approved"].includes(String(value.state)) &&
       (!uuid(value.evidenceId) || !digest(value.evidenceDigest) || !record(value.cost))) return null;
   if (value.state === "approved" && (typeof value.approvalId !== "string" || !value.approvalId)) return null;
+  if (value.requestKind === "safe_stop" && (!uuid(value.sourceEvidenceId) || !digest(value.sourceEvidenceDigest) ||
+      typeof value.workerProfileAlias !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value.workerProfileAlias) ||
+      !Array.isArray(value.profileWorkerNames) || value.profileWorkerNames.length < 1 ||
+      value.profileWorkerNames.length > 16 || value.profileWorkerNames.some(name =>
+        typeof name !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) ||
+      typeof value.targetUnit !== "string" || value.targetUnit !==
+        `tomverse-amux-v22-sidecar@${value.workerProfileAlias}.service` || !digest(value.profileConfigDigest))) return null;
   if (value.cost !== null) {
     if (!record(value.cost)) return null;
     const cost = value.cost;
@@ -86,7 +110,9 @@ export async function fetchAmuxHostRecovery({ identity, requestId, action, displ
   const unresolvedAction = unknownAction ?? action;
   const receiptBinding = expectedReceipt ?? (action === "approve_attempt" && displayed?.cost ? {
     inspectionId: displayed.inspectionId, evidenceId: displayed.evidenceId,
-    evidenceDigest: displayed.evidenceDigest, costDigest: displayed.cost.costDigest } : undefined);
+    evidenceDigest: displayed.evidenceDigest, costDigest: displayed.cost.costDigest } :
+    action === "request_safe_stop" && displayed?.evidenceId && displayed.evidenceDigest ? {
+      sourceEvidenceId: displayed.evidenceId, sourceEvidenceDigest: displayed.evidenceDigest } : undefined);
   let unresolvedWrite = unknownWrite;
   let rejectAborted!: (reason: unknown) => void;
   const aborted = new Promise<never>((_resolve, reject) => { rejectAborted = reject; });
@@ -116,11 +142,16 @@ export async function fetchAmuxHostRecovery({ identity, requestId, action, displ
     if (!isCurrent()) return null;
     if (!data) return unresolvedWrite || action ? unavailable(null, true) : { state: "changed" };
     if ((unresolvedWrite || action) && (data.state === "not_visible" ||
-        (unresolvedAction === "approve_attempt" && data.state !== "approved"))) return unavailable(null, true);
-    if (data.state === "approved" && receiptBinding &&
+        (unresolvedAction === "approve_attempt" && data.state !== "approved") ||
+        (unresolvedAction === "request_safe_stop" && data.requestKind !== "safe_stop")))
+      return unavailable(null, true);
+    if (data.state === "approved" && approvalReceipt(receiptBinding) &&
         (data.inspectionId !== receiptBinding.inspectionId || data.evidenceId !== receiptBinding.evidenceId ||
          data.evidenceDigest !== receiptBinding.evidenceDigest || data.cost?.costDigest !== receiptBinding.costDigest))
       return unavailable(null, true);
+    if (data.requestKind === "safe_stop" && safeStopReceipt(receiptBinding) &&
+        (data.sourceEvidenceId !== receiptBinding.sourceEvidenceId ||
+         data.sourceEvidenceDigest !== receiptBinding.sourceEvidenceDigest)) return unavailable(null, true);
     return { state: "ready", data };
   };
   const read = () => bounded(fetcher(`/api/admin/amux/execution-recovery?${new URLSearchParams({
@@ -133,8 +164,12 @@ export async function fetchAmuxHostRecovery({ identity, requestId, action, displ
       priorAttemptId: identity.attemptId, requestId,
       ...(action === "approve_attempt" ? { inspectionId: displayed?.inspectionId,
         evidenceId: displayed?.evidenceId, evidenceDigest: displayed?.evidenceDigest,
-        costDigest: displayed?.cost?.costDigest } : {}) };
+        costDigest: displayed?.cost?.costDigest } : {}),
+      ...(action === "request_safe_stop" ? { sourceEvidenceId: displayed?.evidenceId,
+        sourceEvidenceDigest: displayed?.evidenceDigest } : {}) };
     if (action === "approve_attempt" && (!displayed || displayed.state !== "verified" ||
+        !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return { state: "changed" };
+    if (action === "request_safe_stop" && (!safeStopSourceEligible(displayed) ||
         !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return { state: "changed" };
     try {
       const response = await bounded(fetcher("/api/admin/amux/execution-recovery", {
@@ -252,15 +287,21 @@ export function AmuxRecoveryInspectionView({ m, state, onInspect, onReloadReview
 }
 
 export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest,
-  onRefresh, onApprove, onReloadReview, canRequest, busy = false, writesBlocked = false,
+  onRefresh, onApprove, onReloadReview, canRequest, safeStopConfirmed = false,
+  onSafeStopConfirm = () => {}, onSafeStop = () => {}, busy = false, writesBlocked = false,
   storageBlocked = false }: {
   m: Messages; state: AmuxHostRecoveryState; confirmed: boolean;
   onConfirm: (value: boolean) => void; onRequest: () => void; onRefresh: () => void;
   onApprove: () => void; onReloadReview: () => void; canRequest: boolean; busy?: boolean;
+  safeStopConfirmed?: boolean; onSafeStopConfirm?: (value: boolean) => void; onSafeStop?: () => void;
   writesBlocked?: boolean; storageBlocked?: boolean;
 }) {
   const data = state.state === "ready" ? state.data : null;
-  const canApprove = data?.state === "verified" && data.cost !== null && data.recoveryEnabled !== false;
+  const canApprove = data?.state === "verified" && data.cost !== null && data.recoveryEnabled !== false &&
+    (data.requestKind !== "safe_stop" || data.safeStopEnabled === true);
+  const safeStopSource = safeStopSourceEligible(data ?? undefined);
+  const canSafeStop = safeStopSource && data?.recoveryEnabled !== false && data?.safeStopEnabled === true;
+  const safeStopResult = data?.requestKind === "safe_stop" ? data : null;
   const requestId = data?.requestId ?? (state.state === "unavailable" ? state.requestId : null);
   const disabled = data?.recoveryEnabled === false || data?.reason === "recovery_disabled" ||
     (state.state === "unavailable" && state.failure?.message === "recovery_disabled");
@@ -295,21 +336,63 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
         {data.reason === "terminal_success" && <p className="mt-2 text-amber-200">{m.host.success}</p>}
       </>}
     </div>
-    {requestId && <dl className="mt-3 space-y-2 break-words text-zinc-300">
-      <div><dt className="font-semibold text-zinc-100">{m.host.requestId}</dt><dd>{requestId}</dd></div>
-      {data?.inspectionId && <div><dt className="font-semibold text-zinc-100">{m.host.inspectionId}</dt><dd>{data.inspectionId}</dd></div>}
-      {data?.evidenceId && <div><dt className="font-semibold text-zinc-100">{m.host.evidenceId}</dt><dd>{data.evidenceId}</dd></div>}
-      {data?.evidenceDigest && <div><dt className="font-semibold text-zinc-100">{m.host.evidenceDigest}</dt><dd>{data.evidenceDigest}</dd></div>}
-      {data?.reason && <div><dt className="font-semibold text-zinc-100">{m.host.reason}</dt><dd>{data.reason}</dd></div>}
-      {data?.approvalId && <div><dt className="font-semibold text-zinc-100">{m.host.approvedId}</dt><dd>{data.approvalId}</dd></div>}
-      {data?.taskRevision !== null && data?.taskRevision !== undefined &&
-        <div><dt className="font-semibold text-zinc-100">{data.state === "approved" ? m.host.approvedRevision : m.host.revision}</dt><dd>{data.taskRevision}</dd></div>}
-      {data?.state === "approved" && <>
-        <div><dt className="font-semibold text-zinc-100">{m.host.currentTask}</dt><dd>{data.currentTask?.status ?? m.unknown}</dd></div>
-        <div><dt className="font-semibold text-zinc-100">{m.host.currentRevision}</dt><dd>{data.currentTask?.revision ?? m.unknown}</dd></div>
-        <p className="text-zinc-400">{m.host.currentBoundary}</p>
-      </>}
-    </dl>}
+    {safeStopSource && <div className="mt-4 rounded-lg border border-amber-300/40 bg-amber-950/20 p-3"
+      data-testid="admin-amux-safe-stop-risk">
+      <h6 className="font-semibold text-amber-100">{m.host.safeStop.title}</h6>
+      <p className="mt-2 text-amber-100/90">{m.host.safeStop.risk}</p>
+      {data?.safeStopEnabled === false && <p className="mt-2 text-amber-200">{m.host.safeStop.disabled}</p>}
+      <label className="mt-2 flex min-h-11 cursor-pointer items-start gap-3 py-2 text-zinc-100">
+        <input type="checkbox" checked={safeStopConfirmed}
+          disabled={busy || writesBlocked || !canSafeStop}
+          onChange={event => onSafeStopConfirm(event.target.checked)}
+          data-testid="admin-amux-safe-stop-confirm" className="mt-1 h-4 w-4 shrink-0 accent-blue-500" />
+        <span>{m.host.safeStop.confirm}</span>
+      </label>
+      <button type="button" className={`${button} mt-2`} onClick={onSafeStop}
+        disabled={busy || writesBlocked || !canSafeStop || !safeStopConfirmed}
+        data-testid="admin-amux-request-safe-stop">{data?.requestKind === "safe_stop" ?
+          m.host.safeStop.recheck : m.host.safeStop.action}</button>
+    </div>}
+    {safeStopResult && <section className="mt-4 rounded-lg border border-zinc-700 p-3"
+      data-testid="admin-amux-safe-stop-result">
+      <h6 className="font-semibold text-zinc-100">{m.host.safeStop.title}</h6>
+      <p className="mt-2 text-zinc-300">{m.host.safeStop.requested}</p>
+      <p className="mt-2 text-amber-100/90">{m.host.safeStop.risk}</p>
+      <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div><dt className="font-semibold text-zinc-100">{m.host.safeStop.stopResult}</dt>
+          <dd>{safeStopResult.stopAcknowledgement ?
+            m.host.safeStop.acknowledgement[safeStopResult.stopAcknowledgement] : m.unknown}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{m.host.safeStop.processResult}</dt>
+          <dd>{safeStopResult.processState ? m.host.safeStop.process[safeStopResult.processState] : m.unknown}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{m.host.safeStop.modelResult}</dt>
+          <dd>{m.host.safeStop.modelUnknown}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{m.host.safeStop.actualCost}</dt>
+          <dd>{m.host.safeStop.actualCostUnknown}</dd></div>
+      </dl>
+      <div className="mt-3 border-t border-zinc-700 pt-3">
+        <p className="font-semibold text-zinc-100">{m.host.safeStop.nextApproval}</p>
+        <p className="mt-1 text-zinc-300">{safeStopResult.state === "verified" ?
+          m.host.safeStop.nextApprovalReady : m.host.safeStop.nextApprovalBlocked}</p>
+      </div>
+    </section>}
+    {requestId && <details className="mt-3 text-zinc-300">
+      <summary className="min-h-11 cursor-pointer py-2 font-semibold text-zinc-100">{m.host.safeStop.technical}</summary>
+      <dl className="space-y-2 break-words">
+        <div><dt className="font-semibold text-zinc-100">{m.host.requestId}</dt><dd>{requestId}</dd></div>
+        {data?.inspectionId && <div><dt className="font-semibold text-zinc-100">{m.host.inspectionId}</dt><dd>{data.inspectionId}</dd></div>}
+        {data?.evidenceId && <div><dt className="font-semibold text-zinc-100">{m.host.evidenceId}</dt><dd>{data.evidenceId}</dd></div>}
+        {data?.evidenceDigest && <div><dt className="font-semibold text-zinc-100">{m.host.evidenceDigest}</dt><dd>{data.evidenceDigest}</dd></div>}
+        {data?.reason && <div><dt className="font-semibold text-zinc-100">{m.host.reason}</dt><dd>{data.reason}</dd></div>}
+        {data?.approvalId && <div><dt className="font-semibold text-zinc-100">{m.host.approvedId}</dt><dd>{data.approvalId}</dd></div>}
+        {data?.taskRevision !== null && data?.taskRevision !== undefined &&
+          <div><dt className="font-semibold text-zinc-100">{data.state === "approved" ? m.host.approvedRevision : m.host.revision}</dt><dd>{data.taskRevision}</dd></div>}
+        {data?.state === "approved" && <>
+          <div><dt className="font-semibold text-zinc-100">{m.host.currentTask}</dt><dd>{data.currentTask?.status ?? m.unknown}</dd></div>
+          <div><dt className="font-semibold text-zinc-100">{m.host.currentRevision}</dt><dd>{data.currentTask?.revision ?? m.unknown}</dd></div>
+          <p className="text-zinc-400">{m.host.currentBoundary}</p>
+        </>}
+      </dl>
+    </details>}
     {data?.cost && <>
       <dl className="mt-4 grid gap-4 sm:grid-cols-3">
         <div><dt className="font-semibold text-zinc-100">{m.host.oldHeld}</dt><dd className="mt-1">{amount(data.cost.oldHeldMicroUsd, m.unknown)}</dd></div>
@@ -348,6 +431,7 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
   const [state, setState] = useState<AmuxRecoveryInspectionState>({ state: "idle" });
   const [host, setHost] = useState<AmuxHostRecoveryState>({ state: "idle" });
   const [confirmed, setConfirmed] = useState(false);
+  const [safeStopConfirmed, setSafeStopConfirmed] = useState(false);
   const [pendingStorage, setPendingStorage] = useState<AmuxPendingRecoveryLoad | { state: "loading" }>({ state: "loading" });
   const pendingRecovery = useRef<AmuxPendingRecovery | null>(null);
   const requestId = useRef(0);
@@ -361,7 +445,7 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     const restored = readAmuxPendingRecovery(identity.taskId);
     queueMicrotask(() => {
       if (disposed) return;
-      setPendingStorage(restored); setConfirmed(false);
+      setPendingStorage(restored); setConfirmed(false); setSafeStopConfirmed(false);
       pendingRecovery.current = restored.state === "pending" ? restored.pending : null;
       hostRequestId.current = restored.state === "pending" ? restored.pending.requestId : null;
       setHost(restored.state === "pending" ? { state: "unavailable", failure: null,
@@ -398,6 +482,8 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     const displayed = host.state === "ready" ? host.data : undefined;
     if (action === "approve_attempt" && (!displayed || displayed.state !== "verified" ||
         !displayed.cost || !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return;
+    if (action === "request_safe_stop" && (!safeStopSourceEligible(displayed) ||
+        !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return;
     const id = pending?.requestId ?? (action ? crypto.randomUUID() : hostRequestId.current);
     if (!id) return;
     if (action) {
@@ -405,7 +491,9 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
         identity: { ...identity, attemptId: identity.attemptId! }, requestId: id, action,
         expectedReceipt: action === "approve_attempt" ? { inspectionId: displayed!.inspectionId,
           evidenceId: displayed!.evidenceId, evidenceDigest: displayed!.evidenceDigest,
-          costDigest: displayed!.cost!.costDigest } : null };
+          costDigest: displayed!.cost!.costDigest } : action === "request_safe_stop" ? {
+          sourceEvidenceId: displayed!.evidenceId!, sourceEvidenceDigest: displayed!.evidenceDigest!,
+        } : null };
       const saved = saveAmuxPendingRecovery(proposed);
       setPendingStorage(saved);
       if (saved.state !== "pending") return;
@@ -416,15 +504,22 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     const controller = new AbortController(); active.current = controller;
     const current = ++requestId.current;
     const isCurrent = () => current === requestId.current && active.current === controller;
-    setConfirmed(false); setHost({ state: "loading" });
+    setConfirmed(false); setSafeStopConfirmed(false); setHost({ state: "loading" });
     const next = await fetchAmuxHostRecovery({ identity: pending?.identity ?? identity, requestId: id, action, displayed,
       unknownWrite: Boolean(pending && !action), unknownAction: pending?.action,
       expectedReceipt: pending?.expectedReceipt ?? undefined,
       controller, isCurrent, fallback: m.host.unavailable, locale });
     if (!isCurrent()) return;
     if (pending && next) {
+      const pendingReceipt = pending.expectedReceipt ?? undefined;
+      const safeStopConfirmedResult = next.state === "ready" && safeStopReceipt(pendingReceipt) &&
+        next.data.requestKind === "safe_stop" &&
+        next.data.sourceEvidenceId === pendingReceipt.sourceEvidenceId &&
+        next.data.sourceEvidenceDigest === pendingReceipt.sourceEvidenceDigest;
       const confirmedResult = next.state === "ready" && next.data.state !== "not_visible" &&
-        (pending.action === "approve_attempt" ? next.data.state === "approved" : next.data.state !== "approved");
+        (pending.action === "approve_attempt" ? next.data.state === "approved" :
+         pending.action === "request_safe_stop" ? safeStopConfirmedResult :
+           next.data.state !== "approved");
       if (confirmedResult && clearAmuxPendingRecovery(pending)) {
         pendingRecovery.current = null; setPendingStorage({ state: "empty" });
         const sameIdentity = pending.identity.taskId === identity.taskId &&
@@ -443,8 +538,10 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
   return <><AmuxRecoveryInspectionView m={m} state={state} busy={busy} onInspect={() => void inspect()}
     onReloadReview={onReloadReview} date={date} />
     <AmuxHostRecoveryView m={m} state={host} busy={busy} confirmed={confirmed} onConfirm={setConfirmed}
+      safeStopConfirmed={safeStopConfirmed} onSafeStopConfirm={setSafeStopConfirmed}
       writesBlocked={pendingStorage.state !== "empty"} storageBlocked={pendingStorage.state === "blocked"}
       onRequest={() => void recover("request_inspection")} onRefresh={() => void recover()}
+      onSafeStop={() => { if (safeStopConfirmed) void recover("request_safe_stop"); }}
       onApprove={() => { if (confirmed) void recover("approve_attempt"); }}
       onReloadReview={onReloadReview} canRequest={identity.attemptId !== null} /></>;
 }

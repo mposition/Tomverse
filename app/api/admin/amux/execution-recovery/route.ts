@@ -8,9 +8,11 @@ import { authOptions } from "@/lib/auth";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { amuxV22RecoveryAdminSchema, amuxV22TaskRecoveryEnabled,
-  AMUX_V22_TASK_RECOVERY_ENABLED_ENV } from "@/lib/amux/v22TaskRecoveryCore";
+  amuxV22LegacySafeStopEnabled, AMUX_V22_TASK_RECOVERY_ENABLED_ENV,
+  AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV } from "@/lib/amux/v22TaskRecoveryCore";
 import { requestAmuxV22RecoveryInspection, approveAmuxV22TaskRecovery,
-  readAmuxV22TaskRecovery } from "@/lib/amux/v22TaskRecoveryService";
+  readAmuxV22TaskRecovery, requestAmuxV22LegacySafeStop } from
+  "@/lib/amux/v22TaskRecoveryService";
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const readSchema = z.object({ taskId: z.string().min(1).max(128).regex(/^[A-Za-z0-9:_-]+$/),
   requestId: z.string().uuid() }).strict();
@@ -45,7 +47,9 @@ export async function GET(request: Request) {
     const parsed = readSchema.safeParse(Object.fromEntries(params));
     if (!parsed.success) return Response.json({ error: "INVALID_REQUEST" }, { status: 400, headers: noStore });
     return Response.json({ ...await readAmuxV22TaskRecovery(auth.session, parsed.data.taskId, parsed.data.requestId),
-      recoveryEnabled: amuxV22TaskRecoveryEnabled(process.env[AMUX_V22_TASK_RECOVERY_ENABLED_ENV]) }, { headers: noStore });
+      recoveryEnabled: amuxV22TaskRecoveryEnabled(process.env[AMUX_V22_TASK_RECOVERY_ENABLED_ENV]),
+      safeStopEnabled: amuxV22LegacySafeStopEnabled(
+        process.env[AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV]) }, { headers: noStore });
   } catch (error) { return failure(error); }
 }
 export async function POST(request: Request) {
@@ -59,7 +63,9 @@ export async function POST(request: Request) {
     const input = { session: auth.session, request, ...body };
     const result = body.action === "request_inspection" ?
       await requestAmuxV22RecoveryInspection({ ...input, ...body }) :
-      await approveAmuxV22TaskRecovery({ ...input, ...body });
+      body.action === "request_safe_stop" ?
+        await requestAmuxV22LegacySafeStop({ ...input, ...body }) :
+        await approveAmuxV22TaskRecovery({ ...input, ...body });
     return Response.json(result, { headers: noStore });
   } catch (error) { return failure(error); }
 }

@@ -1,0 +1,25 @@
+[Unit]
+Description=Tomverse AMUX v22 recovery controller (scheduled one-shot, disabled by default)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/tomverse-amux-v22/recovery-controller.env
+ExecStart=/usr/bin/node /opt/tomverse-amux-v22/recovery-controller.mjs
+Restart=no
+TimeoutStartSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/tomverse-amux-v22/recovery-stop-intents
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+
+# Intentionally no [Install]. Its paired timer is installed inactive and disabled.

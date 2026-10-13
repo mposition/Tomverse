@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "@/lib/amux/ideaCrypto";
@@ -15,6 +16,8 @@ import { AMUX_V22_TASK_EXECUTION_ENV,
   "@/lib/amux/v22TaskExecutionCore";
 import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from
   "@/lib/amux/v22ExternalAuthorityCore";
+import { amuxV22WorkerSafeStopFenced } from
+  "@/lib/amux/v22LegacySafeStopFence";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -219,7 +222,7 @@ export type AmuxPulledDelivery =
     }
   | {
       available: false;
-      reason: "none" | "runtime_not_ready";
+      reason: "none" | "runtime_not_ready" | "worker_safe_stop_fenced";
     };
 
 export async function pullAmuxWorkDelivery(input: {
@@ -319,9 +322,18 @@ export async function pullAmuxWorkDelivery(input: {
     } finally { plain?.fill(0); }
   };
   return withAmuxDbBoundary(
-    AMUX_DB_BOUNDARIES.deliveryPull,
+    { ...AMUX_DB_BOUNDARIES.deliveryPull,
+      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 2 },
     async (tx, context) => {
       const now = input.now ?? context.dbNow;
+      // Safe-stop request and all ownership/start/delivery writers share this
+      // global-first order. An existing row cannot be re-leased after its
+      // physical profile has been permanently fenced.
+      await lockAmuxAdmissionAndReadIncident(tx, now);
+      if (await amuxV22WorkerSafeStopFenced(tx, input.worker)) {
+        return { available: false as const,
+          reason: "worker_safe_stop_fenced" as const };
+      }
       const runtime = await lockRuntime(tx, input.worker);
       if (!runtimeMatches(runtime, input, now)) {
         return {

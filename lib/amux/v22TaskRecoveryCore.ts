@@ -1,13 +1,22 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import type { V4TaskCostCeilingReceipt } from "./v4TaskCostCeilingCore.ts";
 
 /** A logical scope, never a hostname or authentication credential. */
 export const AMUX_V22_RECOVERY_HOST_SCOPE = "amux-ubuntu" as const;
-export const AMUX_V22_TASK_RECOVERY_POLICY_VERSION = 36;
+export const AMUX_V22_TASK_RECOVERY_POLICY_VERSION = 37;
 export const AMUX_V22_TASK_RECOVERY_ENABLED_ENV = "TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED";
+export const AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV =
+  "TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED";
+export const AMUX_V22_RECOVERY_CONTROLLER_SECRET_ENV =
+  "TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET";
+export const AMUX_V22_RECOVERY_INSPECTOR_SECRET_ENV =
+  "TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET";
+export const AMUX_V22_RECOVERY_PROFILES_ENV =
+  "TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON";
 export const amuxV22TaskRecoveryEnabled = (value: string | undefined) => value === "true";
+export const amuxV22LegacySafeStopEnabled = (value: string | undefined) => value === "true";
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9:_-]+$/);
 const revision = z.number().int().nonnegative().max(2_147_483_644);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -17,6 +26,8 @@ const identity = { taskId: id, expectedRevision: revision, priorAttemptId: id,
   requestId: z.string().uuid() };
 export const amuxV22RecoveryAdminSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("request_inspection"), ...identity }).strict(),
+  z.object({ action: z.literal("request_safe_stop"), ...identity,
+    sourceEvidenceId: z.string().uuid(), sourceEvidenceDigest: digest }).strict(),
   z.object({ action: z.literal("approve_attempt"), ...identity,
     inspectionId: z.string().uuid(), evidenceId: z.string().uuid(),
     evidenceDigest: digest, costDigest: digest }).strict(),
@@ -41,7 +52,96 @@ export const amuxV22RecoveryEvidenceSchema = z.object({
   reason: z.enum(["stopped_proven", "legacy_invocation_unbound",
     "inspection_unverified", "terminal_success"]),
 }).strict();
+const profileAlias = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
+const recoveryProfileConfigSchema = z.object({
+  version: z.literal(1),
+  profiles: z.array(z.object({ alias: profileAlias,
+    workerNames: z.array(profileAlias).min(1).max(16) }).strict()).min(1).max(128),
+}).strict().superRefine((value, context) => {
+  const aliases = new Set<string>();
+  const workers = new Set<string>();
+  if (value.profiles.some((profile, index) => index > 0 &&
+      value.profiles[index - 1]!.alias >= profile.alias)) {
+    context.addIssue({ code: "custom", message: "profiles must be sorted and unique" });
+  }
+  for (const profile of value.profiles) {
+    if (aliases.has(profile.alias)) context.addIssue({ code: "custom",
+      message: "profile aliases must be unique" });
+    aliases.add(profile.alias);
+    if (profile.workerNames.some((worker, index) => index > 0 &&
+        profile.workerNames[index - 1]! >= worker)) {
+      context.addIssue({ code: "custom", message: "worker names must be sorted and unique" });
+    }
+    for (const worker of profile.workerNames) {
+      if (workers.has(worker)) context.addIssue({ code: "custom",
+        message: "each worker must belong to exactly one profile" });
+      workers.add(worker);
+    }
+  }
+});
+export type AmuxV22RecoveryProfileConfig = z.infer<typeof recoveryProfileConfigSchema>;
+export type AmuxV22RecoveryProfile = AmuxV22RecoveryProfileConfig["profiles"][number] & {
+  targetUnit: string; profileConfigDigest: string;
+};
+export function configuredAmuxV22RecoveryProfiles(raw =
+  process.env[AMUX_V22_RECOVERY_PROFILES_ENV]): {
+    config: AmuxV22RecoveryProfileConfig; profileConfigDigest: string;
+  } | null {
+  if (!raw?.trim()) return null;
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); } catch { return null; }
+  const parsed = recoveryProfileConfigSchema.safeParse(decoded);
+  if (!parsed.success) return null;
+  return { config: parsed.data,
+    profileConfigDigest: amuxV22RecoveryDigest("worker-profile-config", parsed.data) };
+}
+export function configuredAmuxV22RecoveryProfile(workerName: string,
+  raw = process.env[AMUX_V22_RECOVERY_PROFILES_ENV]): AmuxV22RecoveryProfile | null {
+  const configured = configuredAmuxV22RecoveryProfiles(raw);
+  const profile = configured?.config.profiles.find((item) =>
+    item.workerNames.includes(workerName));
+  if (!configured || !profile) return null;
+  return { ...profile,
+    targetUnit: `tomverse-amux-v22-sidecar@${profile.alias}.service`,
+    profileConfigDigest: configured.profileConfigDigest };
+}
+const stopProofSchema = z.object({
+  journalBindingDigest: digest, journalEntryDigest: digest,
+  journalDisposition: z.enum(["intent_recorded", "intent_reused", "not_needed_already_gone"]),
+  stopAcknowledgement: z.enum(["acknowledged", "outcome_unknown", "not_issued"]),
+  processState: z.enum(["gone", "present", "unknown"]),
+  fixedUnit: z.boolean(), rootOwnedConfig: z.boolean(), profileUnique: z.boolean(),
+  noOtherWork: z.boolean(), restartDisabled: z.boolean(), journalBound: z.boolean(),
+  mainPidAbsent: z.boolean(), controlGroupEmpty: z.boolean(), kernelProofFresh: z.boolean(),
+}).strict().superRefine((value, context) => {
+  const valid = value.journalDisposition === "not_needed_already_gone" ?
+    value.stopAcknowledgement === "not_issued" :
+    value.stopAcknowledgement === "acknowledged" || value.stopAcknowledgement === "outcome_unknown";
+  if (!valid) context.addIssue({ code: "custom", message: "stop acknowledgement is not journal-bound" });
+});
+export const amuxV22SafeStopEvidenceSchema = z.object({
+  inspectionId: z.string().uuid(), evidenceId: z.string().uuid(),
+  requestKind: z.literal("safe_stop"), requestDigest: digest,
+  taskId: id, taskRevision: revision, priorAttemptId: id,
+  priorAttemptTaskRevision: revision, workerName: id,
+  workerInstanceId: z.string().uuid(),
+  workerGeneration: z.number().int().min(1).max(2_147_483_647),
+  targetHost: z.literal(AMUX_V22_RECOVERY_HOST_SCOPE),
+  sourceEvidenceId: z.string().uuid(), sourceEvidenceDigest: digest,
+  workerProfileAlias: profileAlias,
+  profileWorkerNames: z.array(profileAlias).min(1).max(16),
+  targetUnit: z.string().min(1).max(128), profileConfigDigest: digest,
+  hostInvocationId: z.null(), modelOutcome: z.literal("unknown"),
+  stopProof: stopProofSchema,
+  usage: z.object({ status: z.literal("unknown"), projectedCostMicroUsd: z.null() }).strict(),
+  reason: z.enum(["safe_stop_process_gone", "safe_stop_identity_changed",
+    "safe_stop_config_unverified", "safe_stop_profile_not_unique",
+    "safe_stop_other_work_present", "safe_stop_journal_unverified",
+    "safe_stop_process_present", "safe_stop_process_unknown",
+    "safe_stop_kernel_proof_stale"]),
+}).strict();
 export type AmuxV22RecoveryEvidenceInput = z.infer<typeof amuxV22RecoveryEvidenceSchema>;
+export type AmuxV22SafeStopEvidenceInput = z.infer<typeof amuxV22SafeStopEvidenceSchema>;
 export type AmuxV22RecoveryAdminInput = z.infer<typeof amuxV22RecoveryAdminSchema>;
 export type AmuxV22RecoveryCost = { oldHeldMicroUsd: string;
   additionalCapMicroUsd: string; worstExposureMicroUsd: string;
@@ -52,12 +152,67 @@ export type AmuxV22RecoveryRead = { taskId: string; requestId: string;
   inspectionId: string | null; evidenceId: string | null;
   evidenceDigest: string | null; reason: string | null;
   taskRevision: number | null; priorAttemptId: string | null;
+  requestKind?: "inspect" | "safe_stop"; sourceEvidenceId?: string | null;
+  sourceEvidenceDigest?: string | null;
+  stopAcknowledgement?: "acknowledged" | "outcome_unknown" | "not_issued" | null;
+  processState?: "gone" | "present" | "unknown" | null;
+  workerProfileAlias?: string | null; profileWorkerNames?: string[];
+  targetUnit?: string | null; profileConfigDigest?: string | null;
   /** Current observation, separate from the immutable approval revision. */
   currentTask?: { revision: number; status: string } | null;
   cost: AmuxV22RecoveryCost | null; approvalId?: string; retryWrite: false };
 export const amuxV22RecoveryDigest = (kind: string, value: unknown) =>
   createHash("sha256").update(`amux-v22-task-recovery-${kind}-v1\n`)
     .update(amuxCanonicalJson(value)).digest("hex");
+
+export function isAmuxV22RecoveryControllerAuthorized(request: Request,
+  env: NodeJS.ProcessEnv = process.env) {
+  const configured = env[AMUX_V22_RECOVERY_CONTROLLER_SECRET_ENV] ?? "";
+  const broad = env.TOMVERSE_AMUX_SYNC_SECRET ?? "";
+  const inspector = env[AMUX_V22_RECOVERY_INSPECTOR_SECRET_ENV] ?? "";
+  if (configured.length < 32 || configured === broad || configured === inspector) return false;
+  const authorization = request.headers.get("authorization") ?? "";
+  const provided = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!provided) return false;
+  const hash = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(hash(configured), hash(provided));
+}
+
+export function isAmuxV22RecoveryInspectorAuthorized(request: Request,
+  env: NodeJS.ProcessEnv = process.env) {
+  const configured = env[AMUX_V22_RECOVERY_INSPECTOR_SECRET_ENV] ?? "";
+  const broad = env.TOMVERSE_AMUX_SYNC_SECRET ?? "";
+  const controller = env[AMUX_V22_RECOVERY_CONTROLLER_SECRET_ENV] ?? "";
+  if (configured.length < 32 || configured === broad || configured === controller) return false;
+  const authorization = request.headers.get("authorization") ?? "";
+  const provided = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!provided) return false;
+  const hash = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(hash(configured), hash(provided));
+}
+
+export function amuxV22SafeStopJournalBinding(input: {
+  taskId: string; priorAttemptId: string; workerProfileAlias: string; targetUnit: string;
+}) {
+  return amuxV22RecoveryDigest("stop-journal-binding", {
+    taskId: input.taskId, priorAttemptId: input.priorAttemptId,
+    workerProfileAlias: input.workerProfileAlias, targetUnit: input.targetUnit,
+  });
+}
+
+export function amuxV22SafeStopProofReason(input: AmuxV22SafeStopEvidenceInput) {
+  const proof = input.stopProof;
+  if (!proof.fixedUnit || !proof.rootOwnedConfig || !proof.restartDisabled)
+    return "safe_stop_config_unverified" as const;
+  if (!proof.profileUnique) return "safe_stop_profile_not_unique" as const;
+  if (!proof.noOtherWork) return "safe_stop_other_work_present" as const;
+  if (!proof.journalBound) return "safe_stop_journal_unverified" as const;
+  if (proof.processState === "present") return "safe_stop_process_present" as const;
+  if (proof.processState === "unknown") return "safe_stop_process_unknown" as const;
+  if (!proof.mainPidAbsent || !proof.controlGroupEmpty || !proof.kernelProofFresh)
+    return "safe_stop_kernel_proof_stale" as const;
+  return null;
+}
 
 /** Unknown spend remains held; process or external-effect uncertainty does not. */
 export function amuxV22RecoveryProofReason(input: AmuxV22RecoveryEvidenceInput,

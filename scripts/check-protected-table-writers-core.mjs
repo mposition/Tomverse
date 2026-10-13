@@ -415,7 +415,7 @@ export const PROTECTED_TABLES = [
     table,
     delegate: table[0].toLowerCase() + table.slice(1),
     writers: ["lib/amux/v22TaskRecoveryService.ts"],
-    contract: "docs/policy/development-agent-orchestration.md 버전 36",
+    contract: "docs/policy/development-agent-orchestration.md 버전 36-37",
   })),
 ];
 
@@ -646,25 +646,49 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The v22 Task recovery migration creates and guards this append-only one-attempt approval ledger and its assignment and attempt bindings. The migration seeds no approval; application inserts are confined to the protected writer and updates, deletes and truncates are refused by its trigger.",
   },
+  {
+    path: "prisma/migrations/20261013210000_amux_v22_legacy_safe_stop/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 19,
+    reason:
+      "The additive v37 safe-stop migration reads same-transaction human and controller audit rows in the request and evidence guards. Its DDL and trigger verbs extend recovery metadata and fence execution tables; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261013210000_amux_v22_legacy_safe_stop/migration.sql",
+    table: "AmuxV22TaskRecoveryInspectionRequest",
+    tableMentions: 9,
+    writeVerbs: 19,
+    reason:
+      "The additive v37 migration extends and reads the append-only request ledger to install a physical-worker safe-stop fence. It seeds and mutates no request row; the existing append-only trigger remains in force.",
+  },
+  {
+    path: "prisma/migrations/20261013210000_amux_v22_legacy_safe_stop/migration.sql",
+    table: "AmuxV22TaskRecoveryEvidence",
+    tableMentions: 9,
+    writeVerbs: 19,
+    reason:
+      "The additive v37 migration extends and reads the append-only evidence ledger to bind source evidence, durable stop journal and kernel process state. It seeds and mutates no evidence row; the existing append-only trigger remains in force.",
+  },
   ...[
-    ["AmuxV22TaskRecoveryInspectionRequest", 4],
-    ["AmuxV22TaskRecoveryEvidence", 2],
+    ["AmuxV22TaskRecoveryInspectionRequest", 6],
+    ["AmuxV22TaskRecoveryEvidence", 3],
     ["AmuxV22TaskRecoveryApproval", 3],
   ].map(([table, tableMentions]) => ({
     path: "lib/amux/v22TaskRecoveryService.ts",
     table,
     tableMentions,
-    writeVerbs: 1,
+    writeVerbs: 3,
     reason:
-      "The sole recovery-ledger writer names this model in fixed canonical audit targets and read-back checks. Its only raw-SQL write verb is a constant SELECT FOR UPDATE lock on the Task; all recovery ledger mutations use the protected Prisma delegates in this file.",
+      "The sole recovery-ledger writer names this model in fixed canonical audit targets and read-back checks. Its raw-SQL write verbs are constant SELECT FOR UPDATE locks in the global-first Task, prior-attempt and physical-profile order; all recovery ledger mutations and their same-transaction audits use the protected Prisma delegates in this file.",
   })),
   {
     path: "lib/adminAuditSystemActors.ts",
     table: "AmuxV22TaskRecoveryEvidence",
-    tableMentions: 1,
+    tableMentions: 2,
     writeVerbs: 2,
     reason:
-      "The closed system-actor manifest names the recovery evidence audit target beside prose about audit writes. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
+      "The closed system-actor manifest names the recovery evidence target once for the unprivileged checker and once for the root controller beside prose about audit writes. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
@@ -1006,7 +1030,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "scripts/check-enum-constraints.mjs",
     table: "AgentDigestItem",
     tableMentions: 1,
-    writeVerbs: 20,
+    writeVerbs: 19,
     reason:
       "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
   },
@@ -1967,7 +1991,7 @@ export const RAW_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/check-enum-constraints.mjs", table: "PromptRefinerProductOperationalGuard",
-    tableMentions: 2, writeVerbs: 20,
+    tableMentions: 2, writeVerbs: 19,
     reason: "Two closed constraint-registry identifiers link the latch state and reason checks to their runtime lists. This checker reads source and migration SQL, holds no database client and executes no SQL.",
   },
 ];

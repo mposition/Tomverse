@@ -24,18 +24,28 @@ mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
 } });
 const result = async () => { state.calls++; if (state.failure) throw new BoardImportError("outcome_unknown", 409);
   return { state: "pending", retryWrite: false }; };
+const safeResult = async () => {
+  if (process.env.TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED !== "true")
+    throw new BoardImportError("safe_stop_disabled", 409);
+  return result();
+};
 mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
-  requestAmuxV22RecoveryInspection: result, approveAmuxV22TaskRecovery: result, readAmuxV22TaskRecovery: result,
+  requestAmuxV22RecoveryInspection: result, requestAmuxV22LegacySafeStop: safeResult,
+  approveAmuxV22TaskRecovery: result, readAmuxV22TaskRecovery: result,
 } });
 const url = "https://tomverse.test/api/admin/amux/execution-recovery";
 const requestId = "530abfe8-b2e0-4b58-bef9-ea5a63a2e90d";
 const valid = { action: "request_inspection", taskId: "task-1234", expectedRevision: 8, priorAttemptId: requestId, requestId };
+const safeStop = { action: "request_safe_stop", taskId: "task-1234", expectedRevision: 8,
+  priorAttemptId: requestId, sourceEvidenceId: requestId,
+  sourceEvidenceDigest: "a".repeat(64), requestId };
 const post = (value: unknown, origin = "https://tomverse.test") => new Request(url, {
   method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(value) });
 const read = () => new Request(`${url}?taskId=task-1234&requestId=${requestId}`);
 const route = () => import(mod("app/api/admin/amux/execution-recovery/route.ts"));
 const reset = () => { state.session = { user: { id: "owner" } }; state.role = "owner";
   process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED = "true";
+  process.env.TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED = "true";
   state.recent = true; state.calls = 0; state.failure = false; };
 test("read and mutation require exact owner authentication before touching the service", async () => {
   const { GET, POST } = await route();
@@ -57,12 +67,17 @@ test("strict same-origin requests cannot provide arbitrary commands, bodies, or 
   assert.equal(state.calls, 0);
   const response = await POST(post(valid)); assert.equal(response.status, 200);
   assert.match(response.headers.get("cache-control")!, /no-store/);
+  assert.equal((await POST(post(safeStop))).status, 200);
+  for (const changed of [{ workerProfileAlias: "forged" }, { profileWorkerNames: ["forged"] },
+    { targetUnit: "forged.service" }, { profileConfigDigest: "b".repeat(64) }])
+    assert.equal((await POST(post({ ...safeStop, ...changed }))).status, 400);
 });
 test("uncertain writes return a closed outcome and read-back never exposes a retry grant", async () => {
   reset(); const { POST, GET } = await route(); state.failure = true;
   const response = await POST(post(valid)); assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: "outcome_unknown", retry: false });
-  state.failure = false; assert.deepEqual(await (await GET(read())).json(), { state: "pending", retryWrite: false, recoveryEnabled: true });
+  state.failure = false; assert.deepEqual(await (await GET(read())).json(), { state: "pending", retryWrite: false,
+    recoveryEnabled: true, safeStopEnabled: true });
 });
 test("the independent recovery master flag defaults off while owner metadata read remains available", async () => {
   reset(); delete process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED;
@@ -70,5 +85,14 @@ test("the independent recovery master flag defaults off while owner metadata rea
   const response = await POST(post(valid)); assert.equal(response.status, 409);
   assert.deepEqual(await response.json(), { error: "recovery_disabled" });
   assert.equal(state.calls, 0);
-  assert.deepEqual(await (await GET(read())).json(), { state: "pending", retryWrite: false, recoveryEnabled: false });
+  assert.deepEqual(await (await GET(read())).json(), { state: "pending", retryWrite: false,
+    recoveryEnabled: false, safeStopEnabled: true });
+});
+test("safe-stop has its own exact flag and accepts only source evidence authority", async () => {
+  reset(); delete process.env.TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED;
+  const { POST, GET } = await route();
+  assert.equal((await POST(post(safeStop))).status, 409);
+  assert.equal(state.calls, 0);
+  assert.deepEqual(await (await GET(read())).json(), { state: "pending", retryWrite: false,
+    recoveryEnabled: true, safeStopEnabled: false });
 });

@@ -10385,10 +10385,11 @@ model AmuxV22WorkerAssignment {
   @@index([workItemId, assignedAt])
 }
 
-/// Policy v36: append-only metadata; no host paths, prompt, output or result body.
+/// Policy v36-v37: append-only metadata; no host paths, prompt, output or result body.
 model AmuxV22TaskRecoveryInspectionRequest {
   id                      String @id @db.Uuid
   ownerRequestId          String @unique @db.Uuid
+  requestKind             String @default("inspect")
   taskId                  String
   taskRevision            Int
   priorAttemptId          String
@@ -10398,22 +10399,38 @@ model AmuxV22TaskRecoveryInspectionRequest {
   workerGeneration        Int
   targetHost              String
   requestDigest           String
+  sourceEvidenceId        String? @db.Uuid
+  sourceEvidenceDigest    String?
+  workerProfileAlias      String?
+  profileWorkerNames      String[] @default([])
+  targetUnit              String?
+  profileConfigDigest     String?
   requestedByUserId       String
   authorizationAuditLogId String @unique(map: "AmuxV22TaskRecoveryInspectionReques_authorizationAuditLogId_key")
   requestedAt             DateTime
   task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   priorAttempt AmuxExecutionAttempt @relation(fields: [priorAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sourceEvidence AmuxV22TaskRecoveryEvidence? @relation("AmuxV22RecoveryRequestSourceEvidence", fields: [sourceEvidenceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22RecoveryRequest_sourceEvidenceId_fkey")
   authorizationAuditLog AdminAuditLog @relation("AmuxV22RecoveryInspectionAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22TaskRecoveryInspectionReque_authorizationAuditLogId_fkey")
   evidence AmuxV22TaskRecoveryEvidence?
   approval AmuxV22TaskRecoveryApproval?
   @@index([workerName, requestedAt])
   @@index([taskId, requestedAt])
+  @@index([requestKind, requestedAt], map: "AmuxV22RecoveryRequest_requestKind_requestedAt_idx")
+  @@index([profileWorkerNames], type: Gin, map: "AmuxV22RecoveryRequest_profileWorkerNames_idx")
 }
 
 model AmuxV22TaskRecoveryEvidence {
   id                      String @id @db.Uuid
   inspectionId            String @unique @db.Uuid
+  requestKind             String @default("inspect")
+  sourceEvidenceId        String? @db.Uuid
+  sourceEvidenceDigest    String?
   hostInvocationId        String?
+  stopJournalBindingDigest String?
+  stopJournalEntryDigest  String?
+  stopAcknowledgement     String?
+  processState            String?
   report                  Json
   evidenceDigest          String
   verified                Boolean
@@ -10421,6 +10438,9 @@ model AmuxV22TaskRecoveryEvidence {
   authorizationAuditLogId String @unique
   recordedAt              DateTime
   inspection AmuxV22TaskRecoveryInspectionRequest @relation(fields: [inspectionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sourceEvidence AmuxV22TaskRecoveryEvidence? @relation("AmuxV22RecoveryEvidenceSource", fields: [sourceEvidenceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22RecoveryEvidence_sourceEvidenceId_fkey")
+  sourceForRequests AmuxV22TaskRecoveryInspectionRequest[] @relation("AmuxV22RecoveryRequestSourceEvidence")
+  sourceForEvidence AmuxV22TaskRecoveryEvidence[] @relation("AmuxV22RecoveryEvidenceSource")
   authorizationAuditLog AdminAuditLog @relation("AmuxV22RecoveryEvidenceAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   approval AmuxV22TaskRecoveryApproval?
 }

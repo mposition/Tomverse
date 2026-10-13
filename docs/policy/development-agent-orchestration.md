@@ -13,7 +13,10 @@
 상태(v32 이력): **v32 worker 등록부 R1 코드 래치 승인.** 2026-10-12 운영자 `mposition`이 아래 v32 절을 승인했다. `AMUX_WORKER_REGISTRY_WRITES_LATCH`는 true가 되어 owner가 Admin에서 등록부에 쓸 수 있다. 배정은 R2 전까지 카탈로그 환경 변수를 따른다. 이전 v31 상태 줄은 이력이다.
 상태(v33 이력): **v33 DB로 미반영이 확정된 Orchestrator halt의 자동 종결 승인.** 운영자 `mposition`이 2026-10-12에 아래 v33 절의 동일 요청 `no_commit` 범위와 운영 안내 화면을 승인했다. 자동 종결은 원래 쓰기의 재시도가 아니며, 증거 없는 정지와 사람 확인 대상은 계속 사람이 해제한다.
 상태(v34 이력): **v34 engineering adapter runner의 등록부 비교 제외 승인.** 2026-10-13 운영자 `mposition`이 아래 v34 절을 승인했다. `engineering-runner`는 등록부 일치 비교에서 이름으로 제외되고 일치로 센다. 그 배정과 권한은 바꾸지 않는다. 이전 v33 상태 줄은 이력이다.
-상태(최신): **v36 owner Task 중단 증명과 1회 복구 한도 승인.** 2026-10-13 운영자 `mposition`이 아래 v36 절의 고정 Ubuntu 점검과 exact Task에 결속된 owner 추가 1회 승인 계약을 승인했다. v35 R2는 계속 미승인 초안이다.
+상태(v35 이력): **v35 R2 설계 승인: 등록부가 배정 카탈로그와 bridge 세션 목록이 된다.** 2026-10-13 운영자 `mposition`이 아래 v35 절을 승인했다. R2의 배정 조건은 원하는 상태와 래치이며 관측 조건은 R4부터다. 이 승인 자체로 코드 래치나 환경 변수를 켜지 않는다. 이전 v34 상태 줄은 이력이다.
+상태(v36 이력): **v36 owner Task 중단 증명과 1회 복구 한도 승인.** 2026-10-13 운영자 `mposition`이 아래 v36 절의 고정 Ubuntu 점검과 exact Task에 결속된 owner 추가 1회 승인 계약을 승인했다.
+상태(v37 이력): **v37 legacy 조사 Task의 고정 worker safe-stop 증명 승인.** 2026-10-13 운영자 `mposition`이 아래 v37 절의 별도 종료 증명, 물리 worker fence, root 전용 단회 stop과 읽기 전용 재확인을 승인했다.
+상태(최신): **v38 기본 OFF 60초 recovery carrier와 inspect 인증 격리의 코드 준비 승인.** 2026-10-13 운영자 `mposition`이 아래 v38 절의 설치·활성화되지 않은 carrier 준비와 기존 inspect 권한의 전용 secret 분리를 승인했다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -45,7 +48,10 @@ approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 31
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 32
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 33
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 34
+approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 35
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 36
+approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 37
+approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 38
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -84,7 +90,10 @@ approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 36
 | 32 | 2026-10-12 mposition | 버전 31 R1의 코드 래치 `AMUX_WORKER_REGISTRY_WRITES_LATCH`를 켠다. owner의 등록부 쓰기만 열리고, R1의 관측 기간은 열셋 등록 뒤 3일(72시간)이다. 배정, 환경 변수, worker catalog, bridge, 관측·시험·래치 표는 바꾸지 않는다. |
 | 33 | 2026-10-12 mposition | 같은 요청의 admission row lock, deadline+grace, 영수증 0, `no_commit` resolution과 결속된 시스템 감사를 DB가 검증한 결과 불명 halt만 자동 종결한다. 그 밖의 정지는 사람 해제 그대로이며 원래 쓰기를 재시도하지 않는다. 운영 화면은 자동 복구와 사람 판단을 구분해 증거와 확인 순서를 설명한다. |
 | 34 | 2026-10-13 mposition | engineering adapter의 worker identity `engineering-runner`를 등록부와 카탈로그의 일치 비교에서 이름으로 제외한다(`AMUX_WORKER_CATALOG_EXEMPT`). 비교에만 적용하고 배정·권한·카탈로그 항목은 바꾸지 않는다. R1 관측 기간은 제외 배포와 `devin-worker` 카탈로그 삭제가 모두 반영된 시각부터 다시 센다. |
+| 35 | 2026-10-13 mposition | R2 설계. 능력(모델·역할 태그·도구·v22 프로필)을 owner만 쓰는 등록부 능력 표로 옮기고, 태그와 역할 상한의 대응을 쓰기·유도·선택에서 강제한다. 배정 카탈로그는 등록부에서 유도하며(fail-closed), bridge는 읽기 전용 route로 세션 목록을 읽는다. R2의 배정 조건은 원하는 상태와 래치, 관측 조건은 R4부터. R2a~R2e 순서, R2b·R2d 관측 각 3일. 이 승인 자체로 코드 래치나 환경 변수를 켜지 않는다. |
 | 36 | 2026-10-13 mposition | owner가 exact Task·revision·직전 attempt의 Ubuntu 중단 증명을 요청하고, 고정된 비실행 점검기의 증거가 중단을 입증한 경우에만 Admin에서 추가 1회와 해당 1회의 승인된 catalog 최대 비용을 별도 승인한다. 첫 대상의 실제 값은 기존 US$3.40 예약을 불변으로 점유하고 새 1회 최대 US$3.40, 최악 노출 US$6.80이다. 일반 코드는 이 예시 숫자를 하드코딩하지 않고 각 Task의 불변 기존 예약과 exact 승인 catalog에서 서버가 계산한다. 이 승인은 설계·코드·합성 검증만 열고 production 활성화·실행·migration 적용·병합·배포를 열지 않는다. |
+| 37 | 2026-10-13 mposition | v36 점검이 `legacy_invocation_unbound`로 닫힌 deterministic `investigate` Task에 한해, owner 요청 뒤 물리 worker profile의 다른 작업이 없음을 잠그고 새 작업을 fence한 다음 root 전용 controller가 고정 unit을 최대 한 번 stop하고 fresh kernel process-gone을 별도로 증명한다. 모델 결과·기존 비용은 `unknown`으로 유지한다. stop 응답 유실과 중복 controller는 재발행하지 않고, 같은 Task의 후속 확인은 읽기 전용이다. 자동 재시작·자동 fence 해제·운영 활성화는 열지 않는다. |
+| 38 | 2026-10-13 mposition | v36 inspect와 v37 root controller의 고정 one-shot을 각각 60초 non-overlap timer로 깨울 수 있는 기본 OFF carrier와 합성 검증을 준비한다. inspector 인증은 기존 route·actor·DTO·writer 권한을 늘리지 않고 전용 `TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET`으로 broad sync와 root controller secret에서 분리한다. 이 승인은 코드와 설치 준비물만 열며 secret 등록·설치·daemon-reload·enable·start·stop·restart·스위치 변경·실제 Task 복구는 열지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1646,7 +1655,9 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
 
 ## 버전 35 — R2: 등록부가 배정 카탈로그와 bridge 세션 목록이 된다
 
-상태: **초안, 미승인.** 2026-10-13 작성, 작성자 Claude. 아래 세 가지는 운영자가 2026-10-13에 정한 방향이다. 이 절의 나머지는 그 방향을 구현하는 방법의 제안이며, 승인 기록이 붙기 전에는 효력이 없다.
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 2026-10-13 작성, 작성자 Claude. 작성자와 다른 공급사의 독립 검토는 두 회차였다. r-20261012-231011-ced295에서 codex가 reject했고(태그로 역할 상한 우회), 고친 뒤 r-20261012-231539-b7aa49에서 codex와 copilot이 둘 다 accept했다. 운영자는 이 버전과 함께 R2b와 R2d의 관측 기간을 각각 3일로 정했다. 승인 뒤 병합 전에 production 카탈로그를 대조해, v22 `investigate`를 읽기 전용 역할로 보고 아무 상한에서나 허용하도록 표를 바로잡았다. 지금 `claude-chore`(상한 `chore`)가 그 역할을 맡고 있기 때문이다. 그 수정은 r-20261013-012853-acea6f에서 codex와 copilot이 accept했고, 운영자는 2026-10-13에 수정을 포함해 승인을 유지했다. 이 승인 자체로 어떤 코드 래치나 환경 변수도 켜지 않는다.
+
+아래 세 가지는 운영자가 2026-10-13에 정한 방향이다.
 
 1. 능력 정보(모델, 역할 태그, 도구)를 등록부로 옮기고 환경 변수 카탈로그를 없앤다. 이는 버전 31 8항 R2의 "환경 변수 목록 삭제" 그대로다.
 2. R2의 배정 조건은 원하는 상태와 자동 정지 래치이고, 최신 관측 조건은 R4부터 적용한다.
@@ -1674,8 +1685,8 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
 
   | 태그 또는 v22 역할 | 필요한 것 |
   |---|---|
-  | `chore` | 아무 상한 |
-  | `implementation`; v22 `implement`, `investigate` | 상한 `implementation` 이상 |
+  | `chore`; v22 `investigate`(읽기 전용, `repo_read`만) | 아무 상한 |
+  | `implementation`; v22 `implement` | 상한 `implementation` 이상 |
   | `contract`, `architecture`, `security`; v22 `design` | 상한 `contract` |
   | `review`; v22 `review` | 검증된 종류(버전 31 2항). 아래 선택 규칙도 함께 적용 |
   | 그 밖의 작업 태그(`bugfix`, `tests`, `multi_file`, `reasoning`, `integration`, `long_running`, `fallback`) | 아무 상한 |
@@ -1744,7 +1755,7 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
 ### 활성화 게이트
 
 1. 이 버전의 승인 기록과, 작성자와 다른 공급사의 독립 검토.
-2. R2b의 동등 관측 기간과 R2d의 세션 목록 관측 기간은 운영자가 승인할 때 정한다.
+2. 운영자가 2026-10-13에 정한 관측 기간: R2b의 동등 관측 3일(72시간), R2d의 세션 목록 관측 3일(72시간). 각 기간은 그 조각이 production에서 켜진 시각부터 세고, 그 사이 불일치를 관측하면 원인을 고친 뒤 처음부터 다시 센다. 바꾸는 것은 이 정책의 새 버전이다.
 3. 각 조각(R2a~R2e)은 독립 검토와 그 조각의 운영자 활성화 기록 뒤에만 켠다.
 
 ## CLI 사용량 보존·집계 부속 계약 — 2026-10-02 승인
@@ -1894,3 +1905,171 @@ CLI-C는 CLI-B의 "기간 granularity·분류 차원·합치기 순서는 구현
   internal pending/report를 연다. 누락·그 밖의 값은 기본 off이고, owner GET은
   disabled metadata와 기존 Phase 1 read만 제공하며, 일반 claim·start 경로에는
   영향을 주지 않는다. 이 환경 값을 실제로 설정하는 일은 별도 활성화 승인이다.
+
+## 버전 37 — legacy 조사 Task의 고정 worker safe-stop 증명
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 이 절은 v36의
+같은 live invocation 증명을 약하게 해석하지 않는다. 그 증명을 만들 수 없어
+`legacy_invocation_unbound`로 닫힌 **동일한 deterministic `investigate` Task**에만,
+worker 작업 서비스 전체를 멈추고 process-gone을 확인하는 별도 증명을 추가한다.
+`implement`와 외부 효과가 불명인 실행에는 적용하지 않는다. v36의 전역 attempt 5,
+owner 추가 1회, 90초 DB-clock freshness, 비용 계산과 불변 source approval·attempt·
+ledger는 그대로다. 기존 결과와 사용량은 추정하지 않고 `unknown`으로 유지한다.
+
+### 1. 불변 request와 물리 worker fence
+
+- 기존 request와 evidence에 `requestKind`(`inspect | safe_stop`)를 둔다. `safe_stop`
+  request는 exact `sourceEvidenceId`·`sourceEvidenceDigest`, Task id·현재 blocked
+  revision·prior attempt id와 그 revision, worker name·instance id·generation,
+  `workerProfileAlias`, 정렬되고 중복 없는 `profileWorkerNames`, 고정 `targetUnit`,
+  `profileConfigDigest`에 결속한다. profile의 모든 이름은 request 시점에 같은
+  instance·generation이어야 한다. unit은 profile alias에서 서버가 정한
+  `tomverse-amux-v22-sidecar@<alias>.service`만 허용한다. 브라우저나 controller가
+  이 profile 필드를 선택하지 않는다.
+- 첫 `safe_stop`의 source는 같은 결속의 v36 `inspect` evidence이고, 판정은
+  `legacy_invocation_unbound`, Task role은 `investigate`, 읽기 전용 점검이 기록한
+  `externalEffectsKnown=true`, terminal outcome은 success 아님이어야 한다. 이후 같은
+  Task의 재확인은 같은 profile/config 결속의 앞선 `safe_stop` evidence를 source로
+  삼는다. 이 후속 실행은 fresh kernel 상태만 다시 읽고 stop을 발행하지 않는다.
+- owner request transaction은 기존 `tomverse-amux-admission` advisory lock을 **먼저**,
+  profile의 `AmuxWorkerRuntime` 행을 worker name 순서로 **다음에**, Task·prior attempt를
+  그 뒤에 잠근다. 같은 profile의 다른 비종료·결과 불명 attempt, 다른 active/unknown
+  Task·현재 accepted assignment, `queued | leased` delivery가 하나라도 있으면
+  `safe_stop_other_work_present`로 거절한다. target의 delivery라도 queued/leased면
+  아직 시작 가능하므로 거절한다.
+- request 자체가 DB fence다. additive migration의 immediate `BEFORE INSERT` guard는
+  `AmuxV22WorkerAssignment`, `AmuxExecutionAttempt`, `AmuxWorkDelivery`에서 같은 global
+  admission lock을 잡고 profile member의 새 assignment·attempt·delivery를 거절한다.
+  그러므로 rolling 배포의 옛 app 경로나 legacy writer도 fence를 우회하지 못하고,
+  owner request와 claim/start 중 한 transaction만 이긴다. app의 claim은 candidate를
+  고르기 전, start는 runtime/Task를 읽기 전, delivery 생성은 attempt와 같은
+  transaction에서 이 기존 lock 순서를 유지한다.
+- pending·unverified·process unknown fence는 instance id나 generation 변경으로 우회할
+  수 없다. verified process-gone 뒤에도 해당 물리 profile의 **모든 현재·미래 epoch**를
+  계속 막는다. generation 증가는 사람 재개의 증거가 아니다. 이번 버전에는 fence 해제나
+  worker 재개 writer가 없으며, app이나 controller가 서비스를 자동 시작·재시작하지 않는다.
+  복구된 Task는 다른 eligible worker가 기존 claim guard를 모두 통과해 맡을 수 있다.
+  멈춘 profile의 별도 운영자 재개·fence 해제는 후속 승인과 구현 없이는 할 수 없다.
+
+### 2. root controller와 단회 stop proof
+
+- `TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED`가 정확히 `true`일 때만 owner POST와
+  root pending/report가 열린다. 누락·그 밖의 값은 기본 off다. root route는 전용
+  `TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET`만 받고 기존 sync secret을 재사용하지
+  않는다. v36 unprivileged checker actor는 `inspect`만 읽고
+  `amux.v22.recovery.inspected`만 쓸 수 있으며 stop proof를 제출할 수 없다.
+  root 전용 `amux-v22-recovery-controller` actor는
+  `amux.v22.recovery.safe_stop_reported`와 recovery evidence target 한 쌍만 허용한다.
+- 고정 helper의 허용 명령은 절대 경로의 `systemctl show <fixed-unit>`와
+  `systemctl stop <fixed-unit>`뿐이다. 임의 unit·명령·shell, 모델 호출, Task 실행,
+  자동 start/restart는 없다. root 소유·일반 계정 쓰기 불가 fragment/drop-in,
+  exact profile-to-unit 유일성, `KillMode=control-group`, `Delegate=no`, `Restart=no`와
+  cgroup 결속을 검증하지 못하면 stop하지 않는다.
+  현재 설치된 sidecar unit이 이미 `Restart=no`라고 가정하지 않는다. 신규 root helper는
+  실제 fragment와 drop-in의 effective `Restart` 값을 `systemctl show`로 확인하며,
+  다르면 `safe_stop_config_unverified`로 닫는다. unit 설정 변경은 v37 구현이나 활성화에
+  포함되지 않고 별도 운영 변경·검증을 요구한다.
+- helper는 기존 `amuxV22RecoveryDigest('stop-journal-binding', value)` domain으로
+  `{taskId,priorAttemptId,workerProfileAlias,targetUnit}`(이 키 순서)의 canonical JSON을
+  해시한 binding에 결속된 root 소유 durable journal을 사용한다. 처음 stop하기 전에 intent를 durable하게
+  기록한다. 그 뒤 응답 유실, 다른 request nonce, 중복 controller가 와도 같은 binding의
+  intent를 읽을 뿐 `systemctl stop`을 다시 발행하지 않는다. 이미 process가 없으면
+  `not_needed_already_gone`, intent가 새로 기록됐으면 `intent_recorded`, 기존 intent면
+  `intent_reused`다. stop acknowledgement는 `acknowledged | outcome_unknown | not_issued`,
+  실제 kernel 상태는 별도의 `gone | present | unknown`이며 서로를 성공으로 추정하지 않는다.
+- strict `stopProof`는 `journalBindingDigest`, `journalEntryDigest`,
+  `journalDisposition`, `stopAcknowledgement`, `processState`, `fixedUnit`,
+  `rootOwnedConfig`, `profileUnique`, `noOtherWork`, `restartDisabled`, `journalBound`,
+  `mainPidAbsent`, `controlGroupEmpty`, `kernelProofFresh`만 가진다. evidence 열에도 source
+  id/digest, journal 두 digest, acknowledgement, process state를 따로 저장한다.
+  `modelOutcome`과 usage는 각각 `unknown`과 `{status:'unknown',
+  projectedCostMicroUsd:null}`이다. 경로·PID·argv·환경·stdout·결과·프롬프트·자유형
+  오류는 report나 감사에 저장하지 않는다.
+- `safe_stop_process_gone`은 process state가 `gone`이고 아홉 boolean proof가 모두
+  true일 때만 verified다. stop acknowledgement가 `outcome_unknown`이어도 독립적인
+  fresh kernel proof는 process-gone을 증명할 수 있지만, acknowledgement 자체를
+  success로 바꾸지는 않는다. unverified evidence reason은
+  `safe_stop_identity_changed | safe_stop_config_unverified |
+  safe_stop_profile_not_unique | safe_stop_other_work_present |
+  safe_stop_journal_unverified | safe_stop_process_present |
+  safe_stop_process_unknown | safe_stop_kernel_proof_stale` 중 하나다.
+
+### 3. app wire와 닫힌 범위
+
+- owner Admin action `request_safe_stop`은 `taskId`, `expectedRevision`,
+  `priorAttemptId`, `sourceEvidenceId`, `sourceEvidenceDigest`, idempotent `requestId`만
+  받는다. 서버가 profile member·unit·config digest를 고정 설정에서 산출하고 같은
+  transaction에 사람 감사 `amux.v22.recovery.safe_stop_requested`를 쓴다. 요청 거절
+  코드는 `safe_stop_disabled | safe_stop_source_unavailable | safe_stop_source_mismatch |
+  safe_stop_legacy_not_read_only | safe_stop_external_effects_unknown |
+  safe_stop_profile_unavailable | safe_stop_other_work_present`다. DB fence 위반은
+  `worker_safe_stop_fenced`로 매핑한다.
+- root 전용 internal wire는 `GET` pending `safe_stop`과 `POST` strict report뿐이다.
+  v36 checker pending은 `inspect`만 반환한다. controller는 새 secret, actor와 exact
+  request digest를 다시 확인하고 evidence와 canonical system audit를 한 transaction에
+  append한다. recheck는 새 request/evidence 행을 만들지만 journal binding은 같고
+  `systemctl show`만 수행한다.
+- Admin UI는 stop acknowledgement와 process-gone을 별도 표시하고, verified 뒤에도
+  기본 안내를 “정지한 worker에는 이후 작업도 배정되지 않습니다. worker 재개는 별도
+  운영 절차가 필요합니다. 이 작업은 다른 사용 가능한 worker가 이어서 맡을 수 있습니다.”로
+  표시한다. profile·fence·정책 버전 같은 기술 정보는 상세 정보에만 둔다.
+  성공 결과, 0 비용, reservation 해제, late settlement를 암시하지 않는다.
+- 이 승인은 정책·schema·additive migration·app/host/UI 코드와 합성 검증만 연다.
+  기존 migration 수정, DB 적용, 실제 stop·restart·Task 복구, 환경 값 설정, provider·
+  모델 호출, 병합·배포·production 활성화는 열지 않는다.
+
+## 버전 38 — 기본 OFF recovery carrier와 inspect 인증 격리
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 이 절은 v36의
+읽기 전용 inspector와 v37의 root safe-stop controller를 주기적으로 새로 호출할 수
+있는 systemd carrier의 **코드와 설치 준비물만** 승인한다. timer가 깨어나는 사실은
+점검·stop·Task 복구의 승인이 아니다. 각 one-shot은 기존 queue에서 서버가 반환한
+request 하나만 처리하며, queue가 비었거나 gate가 꺼져 있으면 실행할 일이 없다.
+
+### 1. 분리된 두 carrier
+
+- inspector는 전용 비-root 계정으로 실행한다. template instance의 검증된 worker 이름에서
+  worker 이름과 `/run/tomverse-amux-v22-<worker>/task.sock`만 고정 유도하고, 기존
+  `amux-v22-recovery-checker.mjs`의 `inspect_recovery` socket 동작만 호출한다. 모델·Task
+  실행, worker 서비스 제어, 임의 명령은 없다. root controller의 환경 파일·intent
+  journal과 controller secret을 읽을 수 없어야 한다.
+- inspector의 기존 recovery-inspection GET/POST는 전용
+  `TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET`만 받는다. broad
+  `TOMVERSE_AMUX_SYNC_SECRET`과 root
+  `TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET`은 거절한다. route, DTO, actor,
+  `amux.v22.recovery.inspected` writer와 rate limit은 v36 그대로이며 새 권한·route·writer를
+  만들지 않는다. 전용 secret 값의 생성·등록·host 배포는 이 승인에 포함되지 않는다.
+- controller는 기존 root 전용 service·전용 secret·두 exact-true gate와 v37의 단회
+  durable intent를 그대로 쓴다. timer는 새 stop 권한을 만들지 않고 owner가 exact Task에
+  만든 pending `safe_stop` 또는 그 읽기 전용 재확인만 전달한다. worker start/restart,
+  별도 resume writer, 임의 unit·명령은 없다.
+
+### 2. timer와 설치 경계
+
+- 두 timer는 `OnBootSec=60s`, `OnUnitInactiveSec=60s`, `AccuracySec=1s`,
+  `Persistent=false`, `RandomizedDelaySec=0`인 oneshot carrier다. systemd의
+  `AccuracySec` 기본 1분 coalescing을 그대로 두지 않고 1초로 좁혀 승인된 60초 cadence가
+  불필요하게 한 주기 더 밀리지 않게 한다. 이전 one-shot이 inactive가 된 뒤에만 다음 60초가
+  시작되므로 서로 겹치지 않는다. missed tick catch-up이나 병렬 consumer를 만들지 않으며
+  service의 전체 실행 상한은 30초다.
+- 기존 pending inspection request에는 expiry나 `requestedAt` TTL filter가 없다. 60초는
+  queue pickup 주기이지 request TTL이 아니며, 이 버전은 새 만료 시간을 만들지 않는다.
+  기존 90초는 report가 DB에 기록된 `evidence.recordedAt`부터 owner 승인까지의 immutable
+  evidence freshness이고 request 생성 시각부터 세지 않는다. service의 30초도 한 번의
+  host process 실행 상한이지 request나 evidence의 만료가 아니다. 따라서 timer 대기 시간이
+  evidence freshness를 미리 소비했다고 계산하지 않으며, report 뒤 90초를 갱신하거나
+  늘리지도 않는다.
+- unit과 예제 환경은 기본 OFF로 출고한다. 설치 준비 script는 root 소유 artifact·unit·
+  예제 파일을 쓰고 정적 검증과 제한된 `daemon-reload`까지만 담을 수 있다. `enable`,
+  `start`, `restart`, `stop`은 호출하지 않는다. 실제 script 실행, unit 설치,
+  `daemon-reload`, timer enable/start, secret·URL·gate 값 설정은 각각 후속 운영 승인과
+  host 검증 전에는 수행하지 않는다.
+- 2026-10-13 읽기 전용 inventory에서 확인한 기존 5분
+  `tomverse-bridge-watchdog.timer`는 bridge dead-man 전용이다. recovery carrier로
+  재사용하거나 파일·상태·주기를 바꾸지 않는다. analysis·worker timer도 recovery
+  carrier로 간주하지 않는다.
+- 이 승인은 실제 Linux timer 동작, 현재 sidecar의 restart 정책, 첫 Task의 종료·복구를
+  통과했다고 주장하지 않는다. 코드의 합성 unit 검증과 실제 설치·권한·socket·kernel
+  검증은 별개 증거다. 실제 활성 전에는 전용 inspector secret의 broad/root secret과의
+  분리, inspector 계정의 exact socket 접근, controller root ownership과 default-OFF
+  read-back을 값이나 자격증명을 출력하지 않고 다시 확인한다.

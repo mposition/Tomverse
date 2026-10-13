@@ -5,7 +5,8 @@ import pg from "pg";
 
 import { appendSyntheticAdminAudit } from
   "./helpers/appendSyntheticAdminAudit.mjs";
-import { exerciseAmuxV22TaskRecoveryFixture } from "./helpers/amuxV22TaskRecoveryFixture.mjs";
+import { exerciseAmuxV22LegacySafeStopFenceFixture,
+  exerciseAmuxV22TaskRecoveryFixture } from "./helpers/amuxV22TaskRecoveryFixture.mjs";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
@@ -32,6 +33,7 @@ test("portfolio evidence and score history are audited, path-bound and append-on
     effortPenalty: 4, riskPenalty: 1, uncertaintyPenalty: 0 };
   const synthetic = Buffer.from("synthetic-only", "utf8");
   const instanceId = randomUUID();
+  const recoveryInstanceId = randomUUID();
   await client.connect();
   try {
     await client.query("BEGIN");
@@ -64,7 +66,7 @@ test("portfolio evidence and score history are audited, path-bound and append-on
                $4::jsonb, 'task', $5, $6, 'synthetic', 1,
                $7, 'synthetic', $6, 'synthetic', 1, $3, 'synthetic',
                $6, 'synthetic', 1, $3, 'synthetic', $8,
-               'implement', 'medium', CURRENT_TIMESTAMP)`,
+               'investigate', 'medium', CURRENT_TIMESTAMP)`,
       [ids.task, unitId.toUpperCase(), digest,
         JSON.stringify({ schemaVersion: "amux-v4", ideaId,
           approvalId: ids.sourceApproval }), ids.feature, synthetic,
@@ -335,8 +337,8 @@ test("portfolio evidence and score history are audited, path-bound and append-on
        "catalogVersion", "costReceiptDigest", "perAttemptMicroUsd",
        "authorizationAuditLogId", "assignedAt") VALUES
       ($1, $2, $3, $4, 'sev1', 1, 'worker-one', '${instanceId}',
-       1, 'openai', 'model-one', 'implement', 'medium', 'route-one', $5,
-       'catalog-one', 'v1', $5, 1000, $6, CURRENT_TIMESTAMP)`,
+       1, 'openai', 'model-one', 'investigate', 'medium', 'route-one', $5,
+       'catalog-one', 'v1', $5, 3400000, $6, CURRENT_TIMESTAMP)`,
     [assignmentId, ids.task, receiptId, laneSeq, digest, assignmentAudit]);
     await client.query(`UPDATE public."AmuxWorkItem"
       SET "owner" = 'worker-one', "claimedAt" = CURRENT_TIMESTAMP,
@@ -365,7 +367,7 @@ test("portfolio evidence and score history are audited, path-bound and append-on
        "taskRevision", "attemptNumber", "reservedCostMicrousd",
        "heartbeatAt", "leaseExpiresAt", "startedAt", "v22AssignmentId",
        "updatedAt") VALUES ($1, $2, 'worker-one', '${instanceId}', 1,
-       3, 1, 1000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '90 seconds',
+       3, 1, 3400000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '90 seconds',
        CURRENT_TIMESTAMP, $3, CURRENT_TIMESTAMP)`,
     [attemptId, ids.task, assignmentId]);
     await client.query(`SET CONSTRAINTS amux_v22_execution_attempt_guard_trigger,
@@ -379,11 +381,41 @@ test("portfolio evidence and score history are audited, path-bound and append-on
        "taskRevision", "attemptNumber", "reservedCostMicrousd",
        "heartbeatAt", "leaseExpiresAt", "startedAt",
        "v22AssignmentId", "updatedAt")
-      VALUES ($1, $2, 'worker-one', '${instanceId}', 1, 3, 2, 1000,
+      VALUES ($1, $2, 'worker-one', '${instanceId}', 1, 3, 2, 3400000,
        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '90 seconds',
        CURRENT_TIMESTAMP, $3, CURRENT_TIMESTAMP)`,
     [randomUUID(), ids.task, assignmentId],
     "AmuxExecutionAttempt_v22AssignmentId_key");
+    await client.query(`INSERT INTO public."AmuxCostLedgerEntry"
+      ("id", "scope", "resourceKey", "budgetWindowStartsAt",
+       "budgetWindowEndsAt", "taskId", "attemptId", "kind", "amountMicrousd")
+      VALUES ($1, 'project', 'synthetic-recovery', date_trunc('month', CURRENT_TIMESTAMP),
+        date_trunc('month', CURRENT_TIMESTAMP) + interval '1 month', $2, $3,
+        'reservation', 3400000)`, [randomUUID(), ids.task, attemptId]);
+    await client.query(`INSERT INTO public."AmuxCliUsageEvent"
+      ("id", "invocationId", "receiptDigest", "bindingKind", "attemptId", "taskId",
+       "worker", "cli", "provider", "selectedModelId", "authentication",
+       "startedAt", "endedAt", "status", "completeness", "source",
+       "inputTokensIncludeCacheRead", "inputTokensIncludeCacheWrite",
+       "reasoningOutputIncludedInOutput", "completedTurns", "createdAt", "retentionUntil")
+      VALUES ($1, $2, $3, 'task_attempt', $4, $5, 'worker-one', 'codex', 'openai',
+        'model-one', 'subscription', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+        'outcome_unknown', 'unknown', 'unreported', true, NULL, true, 0,
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '13 months')`,
+    [randomUUID(), `recovery-${randomUUID()}`, digest, attemptId, ids.task]);
+    await client.query(`INSERT INTO public."AmuxWorkDelivery"
+      ("attemptId", "taskId", "worker", "workerInstanceId", "workerGeneration",
+       "taskRevision", "prompt", "status", "updatedAt")
+      VALUES ($1, $2, 'worker-one', $3, 1, 3, 'synthetic', 'queued', CURRENT_TIMESTAMP)`,
+    [attemptId, ids.task, instanceId]);
+    const deliveryReceiptId = randomUUID();
+    await client.query(`UPDATE public."AmuxWorkDelivery" SET "status"='leased',
+      "receiptId"=$2, "leasedAt"=CURRENT_TIMESTAMP,
+      "leaseExpiresAt"=CURRENT_TIMESTAMP + interval '30 seconds', "updatedAt"=CURRENT_TIMESTAMP
+      WHERE "attemptId"=$1`, [attemptId, deliveryReceiptId]);
+    await client.query(`UPDATE public."AmuxWorkDelivery" SET "status"='acknowledged',
+      "leaseExpiresAt"=NULL, "acknowledgedAt"=CURRENT_TIMESTAMP, "updatedAt"=CURRENT_TIMESTAMP
+      WHERE "attemptId"=$1`, [attemptId]);
     await rejects(`UPDATE public."AmuxWorkItem"
       SET "status" = 'review', "owner" = NULL, "claimedAt" = NULL,
           "v22AssignmentId" = NULL, "revision" = 4
@@ -406,8 +438,20 @@ test("portfolio evidence and score history are audited, path-bound and append-on
     [ids.task]);
     assert.deepEqual(ended.rows[0], { status: "review", owner: null,
       v22AssignmentId: null });
-    await exerciseAmuxV22TaskRecoveryFixture(client, { taskId: ids.task, priorAttemptId: attemptId,
-      priorAssignmentId: assignmentId, promotionId: receiptId, instanceId, laneSequence: laneSeq, digest });
+    await client.query(`INSERT INTO public."AmuxWorkerRuntime"
+      ("workerName", "instanceId", "generation", "status", "dispatchReady",
+       "heartbeatAt", "leaseExpiresAt", "updatedAt") VALUES
+      ('worker-one', $1, 1, 'idle', true, CURRENT_TIMESTAMP,
+       CURRENT_TIMESTAMP + interval '90 seconds', CURRENT_TIMESTAMP),
+      ('worker-two', $2, 1, 'idle', true, CURRENT_TIMESTAMP,
+       CURRENT_TIMESTAMP + interval '90 seconds', CURRENT_TIMESTAMP)`,
+    [instanceId, recoveryInstanceId]);
+    const recovery = await exerciseAmuxV22TaskRecoveryFixture(client, {
+      taskId: ids.task, priorAttemptId: attemptId, priorAssignmentId: assignmentId,
+      promotionId: receiptId, instanceId, recoveryInstanceId,
+      laneSequence: laneSeq, digest, sourceApprovalId: ids.sourceApproval,
+    });
+    await exerciseAmuxV22LegacySafeStopFenceFixture(client, recovery.safeStopFenceInput);
   } finally {
     await client.query("ROLLBACK").catch(() => undefined);
     await client.end();

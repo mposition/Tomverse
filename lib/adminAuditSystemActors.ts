@@ -31,6 +31,9 @@ export const AMUX_AUTO_PROMOTER_AUDIT_ACTOR = "amux-auto-promoter" as const;
 export const AMUX_V22_AUTO_ADMIT_AUDIT_ACTOR = "amux-v22-auto-admit" as const;
 export const AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR = "amux-v22-worker-claim" as const;
 export const AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR = "amux-v22-recovery-checker" as const;
+/** Policy v37: the root-only legacy safe-stop reporter is distinct from the
+ * unprivileged read-only recovery checker. */
+export const AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR = "amux-v22-recovery-controller" as const;
 
 /**
  * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
@@ -143,6 +146,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V22_AUTO_ADMIT_AUDIT_ACTOR,
   AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR,
   AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR,
+  AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
@@ -229,6 +233,9 @@ export const systemAuditActionAllowed = (
   isSystemAuditActor(actor) &&
   (actor !== AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.inspected" &&
+      targetType === "AmuxV22TaskRecoveryEvidence")) &&
+  (actor !== AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR ||
+    (action === "amux.v22.recovery.safe_stop_reported" &&
       targetType === "AmuxV22TaskRecoveryEvidence")) &&
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||

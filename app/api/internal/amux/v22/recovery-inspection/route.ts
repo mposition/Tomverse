@@ -1,11 +1,11 @@
 export const dynamic = "force-dynamic";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
-import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxJsonNoStore, amuxInternalErrorResponse, isAmuxInputError } from "@/lib/amux/internalRoute";
 import { AMUX_LIFECYCLE_ROUTE_BUDGET_MS, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { amuxV22RecoveryWorkerSchema, amuxV22RecoveryEvidenceSchema, amuxV22TaskRecoveryEnabled,
-  AMUX_V22_TASK_RECOVERY_ENABLED_ENV } from "@/lib/amux/v22TaskRecoveryCore";
+  AMUX_V22_TASK_RECOVERY_ENABLED_ENV, isAmuxV22RecoveryInspectorAuthorized } from
+  "@/lib/amux/v22TaskRecoveryCore";
 import { pendingAmuxV22RecoveryInspections, reportAmuxV22RecoveryEvidence } from "@/lib/amux/v22TaskRecoveryService";
 function failure(error: unknown) {
   if (isAmuxInputError(error)) return amuxJsonNoStore({ error: "INVALID_REQUEST" }, 400);
@@ -16,7 +16,8 @@ function failure(error: unknown) {
   return amuxInternalErrorResponse("v22_recovery_inspection", error);
 }
 export async function GET(request: Request) {
-  if (!isAmuxSyncAuthorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
+  if (!isAmuxV22RecoveryInspectorAuthorized(request))
+    return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   if (!amuxV22TaskRecoveryEnabled(process.env[AMUX_V22_TASK_RECOVERY_ENABLED_ENV]))
     return amuxJsonNoStore({ error: "recovery_disabled", requests: [] }, 409);
   return withAmuxRouteBudget(async () => {
@@ -29,7 +30,8 @@ export async function GET(request: Request) {
   }, AMUX_LIFECYCLE_ROUTE_BUDGET_MS);
 }
 export async function POST(request: Request) {
-  if (!isAmuxSyncAuthorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
+  if (!isAmuxV22RecoveryInspectorAuthorized(request))
+    return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   if (!amuxV22TaskRecoveryEnabled(process.env[AMUX_V22_TASK_RECOVERY_ENABLED_ENV]))
     return amuxJsonNoStore({ error: "recovery_disabled" }, 409);
   return withAmuxRouteBudget(async () => {

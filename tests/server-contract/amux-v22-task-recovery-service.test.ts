@@ -2,12 +2,18 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
-import { amuxV22RecoveryDigest, type AmuxV22RecoveryEvidenceInput } from "../../lib/amux/v22TaskRecoveryCore.ts";
+import { amuxV22RecoveryDigest, amuxV22SafeStopJournalBinding,
+  type AmuxV22RecoveryEvidenceInput,
+  type AmuxV22SafeStopEvidenceInput } from "../../lib/amux/v22TaskRecoveryCore.ts";
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
-const owner = { user: { id: "owner-1" } };
+const owner = {
+  user: { id: "owner-1" },
+  expires: "2099-01-01T00:00:00.000Z",
+};
 const now = new Date("2026-10-13T01:00:20.000Z");
 const requestId = "530abfe8-b2e0-4b58-bef9-ea5a63a2e90d";
 const approvalRequestId = "6ddc04b1-e28f-4b56-9613-f3059b890cd9";
+const safeStopRequestId = "2d76084f-150d-4050-a4ce-74d7ccc58a7f";
 const attemptId = "d3e88810-998d-40ca-8fa7-7655411d99e0";
 const instanceId = "b5eb2898-7c55-48ac-91b6-0af241c40344";
 const receipt = { role: "design", grade: "small", catalogVersion: "catalog-1", catalogDigest: "a".repeat(64),
@@ -19,9 +25,13 @@ type Row = Record<string, unknown>;
 const world = { task: {} as Row, attempt: {} as Row, runtime: {} as Row,
   inspections: [] as Row[], evidence: [] as Row[], approvals: [] as Row[], audits: [] as Row[],
   ready: true, incident: false, cap: "3400000", costAdmission: true, cas: true,
+  otherWork: false,
   changedOld: 0, ledgerWrites: 0, attemptWrites: 0 };
 function reset() {
   process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED = "true";
+  process.env.TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED = "true";
+  process.env.TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON = JSON.stringify({ version: 1,
+    profiles: [{ alias: "profile-one", workerNames: ["claude-test"] }] });
   world.attempt = { id: attemptId, taskId: "task-1234", taskRevision: 7,
     worker: "claude-test", workerInstanceId: instanceId, workerGeneration: 2,
     endedAt: new Date("2026-10-13T00:59:00.000Z"), outcome: "expired", reason: "outcome_unknown",
@@ -30,11 +40,13 @@ function reset() {
     v22ReceiptId: requestId, taskRole: "design", executionGrade: "small", status: "blocked", owner: null,
     claimedAt: null, v22AssignmentId: null, revision: 8, projectKey: null, teamKey: null,
     executionAttempts: [world.attempt] };
-  world.runtime = { instanceId, generation: 2, heartbeatAt: new Date("2026-10-13T01:00:10.000Z"),
+  world.runtime = { workerName: "claude-test", instanceId, generation: 2,
+    heartbeatAt: new Date("2026-10-13T01:00:10.000Z"),
     leaseExpiresAt: new Date("2026-10-13T01:01:30.000Z") };
   world.inspections = []; world.evidence = []; world.approvals = []; world.audits = [];
   world.ready = true; world.incident = false; world.cap = "3400000"; world.costAdmission = true;
-  world.cas = true; world.changedOld = 0; world.ledgerWrites = 0; world.attemptWrites = 0;
+  world.cas = true; world.otherWork = false; world.changedOld = 0;
+  world.ledgerWrites = 0; world.attemptWrites = 0;
 }
 const matches = (row: Row, where: Row) => Object.entries(where).every(([key, value]) => key === "assignment" ? true : row[key] === value);
 function inspectionWithRelations(row: Row | undefined) {
@@ -42,8 +54,14 @@ function inspectionWithRelations(row: Row | undefined) {
     approval: world.approvals.find((item) => item.inspectionId === row.id) ?? null } : null;
 }
 const tx = {
-  $queryRaw: async (strings: TemplateStringsArray) => strings.join("").includes('FROM "AmuxWorkerRuntime"') ?
-    [world.runtime] : [{ id: world.task.id }],
+  $queryRaw: async (strings: TemplateStringsArray) => {
+    const sql = strings.join("");
+    if (sql.includes("AS present")) return [{ present: world.otherWork }];
+    if (sql.includes('FROM "AmuxWorkerRuntime"')) return [world.runtime];
+    if (sql.includes('FROM "AmuxExecutionAttempt"')) return [{ id: attemptId }];
+    if (sql.includes("unnest(request")) return [{ workerName: "claude-test" }];
+    return [{ id: world.task.id }];
+  },
   amuxWorkItem: { findUnique: async () => world.task, updateMany: async ({ where }: { where: Row }) => {
     if (!world.cas || !matches(world.task, where)) return { count: 0 };
     world.task.status = "todo"; world.task.revision = Number(world.task.revision) + 1;
@@ -59,10 +77,18 @@ const tx = {
       const row = world.inspections.find((item) => matches(item, where));
       return include ? inspectionWithRelations(row) : row ?? null;
     }, findFirst: async ({ where }: { where: Row }) => inspectionWithRelations(world.inspections.find((item) => matches(item, where))),
-    findMany: async () => world.inspections.filter((item) => !world.evidence.some((e) => e.inspectionId === item.id)),
+    findMany: async ({ where }: { where: Row }) => world.inspections.filter((item) =>
+      matches(item, Object.fromEntries(Object.entries(where).filter(([key]) =>
+        key !== "evidence" && key !== "approval"))) &&
+      !world.evidence.some((e) => e.inspectionId === item.id) &&
+      !world.approvals.some((a) => a.inspectionId === item.id)),
     create: async ({ data }: { data: Row }) => { world.inspections.push(data); return data; },
   },
-  amuxV22TaskRecoveryEvidence: { findUnique: async ({ where }: { where: Row }) => world.evidence.find((row) => matches(row, where)) ?? null,
+  amuxV22TaskRecoveryEvidence: { findUnique: async ({ where, include }: { where: Row; include?: Row }) => {
+    const row = world.evidence.find((item) => matches(item, where));
+    return row && include ? { ...row,
+      inspection: world.inspections.find((item) => item.id === row.inspectionId)! } : row ?? null;
+  },
     create: async ({ data }: { data: Row }) => { world.evidence.push(data); return data; } },
   amuxV22TaskRecoveryApproval: { findUnique: async ({ where }: { where: Row }) => world.approvals.find((row) => matches(row, where)) ?? null,
     findFirst: async ({ where }: { where: Row }) => world.approvals.find((row) => matches(row, where)) ?? null,
@@ -87,9 +113,11 @@ function load() {
     OWNER_TRANSACTION_LIMITS: {}, TICK_TRANSACTION_LIMITS: {},
     withAutoTransaction: async (_id: unknown, _limits: unknown,
       callback: (transaction: typeof tx, time: Date) => Promise<unknown>) => {
-      const saved = { task: structuredClone(world.task), approvals: [...world.approvals], evidence: [...world.evidence], audits: [...world.audits] };
+      const saved = { task: structuredClone(world.task), inspections: [...world.inspections],
+        approvals: [...world.approvals], evidence: [...world.evidence], audits: [...world.audits] };
       try { return await callback(tx, now); }
-      catch (error) { world.task = saved.task; world.approvals = saved.approvals;
+      catch (error) { world.task = saved.task; world.inspections = saved.inspections;
+        world.approvals = saved.approvals;
         world.evidence = saved.evidence; world.audits = saved.audits; throw error; }
     },
   } });
@@ -133,6 +161,56 @@ async function approvalInput() {
   return { session: owner, request: new Request("https://tomverse.test"), action: "approve_attempt" as const,
     taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId, requestId: approvalRequestId,
     inspectionId: read.inspectionId!, evidenceId: read.evidenceId!, evidenceDigest: read.evidenceDigest!, costDigest: read.cost!.costDigest };
+}
+async function requestLegacySafeStopSource() {
+  world.task.taskRole = "investigate";
+  await requestInspection();
+  return submitEvidence({ hostInvocationId: null, reason: "legacy_invocation_unbound",
+    proof: { terminalOutcome: "unknown", sameLiveInvocation: false,
+      noActiveExecution: false, processTreeStopped: false, rootOwnedUnit: false,
+      controlGroupBound: false, journalBound: false, socketTerminal: false,
+      externalEffectsKnown: true, workspaceClean: true } });
+}
+async function requestSafeStop() {
+  const source = await requestLegacySafeStopSource();
+  const service = await load();
+  const read = await service.requestAmuxV22LegacySafeStop({ session: owner,
+    request: new Request("https://tomverse.test"), action: "request_safe_stop",
+    taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+    sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
+    requestId: safeStopRequestId });
+  return { source, read };
+}
+async function submitSafeStop() {
+  const service = await load();
+  const inspection = world.inspections.find((item) => item.requestKind === "safe_stop")!;
+  const report: AmuxV22SafeStopEvidenceInput = {
+    inspectionId: inspection.id as string,
+    evidenceId: "76737099-0932-4cb2-b075-6d2805b16303",
+    requestKind: "safe_stop", requestDigest: inspection.requestDigest as string,
+    taskId: "task-1234", taskRevision: 8, priorAttemptId: attemptId,
+    priorAttemptTaskRevision: 7, workerName: "claude-test",
+    workerInstanceId: instanceId, workerGeneration: 2, targetHost: "amux-ubuntu",
+    sourceEvidenceId: inspection.sourceEvidenceId as string,
+    sourceEvidenceDigest: inspection.sourceEvidenceDigest as string,
+    workerProfileAlias: inspection.workerProfileAlias as string,
+    profileWorkerNames: inspection.profileWorkerNames as string[],
+    targetUnit: inspection.targetUnit as string,
+    profileConfigDigest: inspection.profileConfigDigest as string,
+    hostInvocationId: null, modelOutcome: "unknown",
+    stopProof: { journalBindingDigest: amuxV22SafeStopJournalBinding({
+      taskId: "task-1234", priorAttemptId: attemptId,
+      workerProfileAlias: inspection.workerProfileAlias as string,
+      targetUnit: inspection.targetUnit as string }),
+    journalEntryDigest: "e".repeat(64), journalDisposition: "intent_recorded",
+    stopAcknowledgement: "acknowledged", processState: "gone",
+    fixedUnit: true, rootOwnedConfig: true, profileUnique: true,
+    noOtherWork: true, restartDisabled: true, journalBound: true,
+    mainPidAbsent: true, controlGroupEmpty: true, kernelProofFresh: true },
+    usage: { status: "unknown", projectedCostMicroUsd: null },
+    reason: "safe_stop_process_gone",
+  };
+  return service.reportAmuxV22LegacySafeStopEvidence(report);
 }
 
 test("inspection and approval use real stored IDs, preserve old unknown spend, and create no attempt or ledger", async () => {
@@ -238,4 +316,66 @@ test("a complete receipt with unknown actual cost retains the prior cap and neve
   assert.equal(read.state, "verified"); assert.equal(read.cost!.oldHeldMicroUsd, "3400000");
   assert.equal(read.cost!.worstExposureMicroUsd, "6800000");
   assert.equal(world.changedOld + world.ledgerWrites + world.attemptWrites, 0);
+});
+test("legacy safe-stop derives its immutable physical profile and preserves exact source read-back", async () => {
+  reset(); const service = await load();
+  const { source, read } = await requestSafeStop();
+  assert.equal(read.state, "pending"); assert.equal(read.requestKind, "safe_stop");
+  assert.equal(read.sourceEvidenceId, source.evidenceId);
+  assert.equal(read.sourceEvidenceDigest, source.evidenceDigest);
+  assert.equal(read.workerProfileAlias, "profile-one");
+  assert.deepEqual(read.profileWorkerNames, ["claude-test"]);
+  assert.equal(read.targetUnit, "tomverse-amux-v22-sidecar@profile-one.service");
+  assert.equal(typeof read.profileConfigDigest, "string");
+  assert.deepEqual(await service.pendingAmuxV22RecoveryInspections("claude-test"), { requests: [] });
+  const pending = await service.pendingAmuxV22LegacySafeStops();
+  assert.equal(pending.requests.length, 1);
+  assert.deepEqual(Object.keys(pending.requests[0]!).sort(), ["inspectionId", "priorAttemptId",
+    "priorAttemptTaskRevision", "profileConfigDigest", "profileWorkerNames", "requestDigest",
+    "requestKind", "requestedAt", "sourceEvidenceDigest", "sourceEvidenceId", "targetHost",
+    "targetUnit", "taskId", "taskRevision", "workerGeneration", "workerInstanceId",
+    "workerName", "workerProfileAlias"].sort());
+});
+test("verified safe-stop is audited once, remains permanently fenced, and authorizes only a new worker claim", async () => {
+  reset(); const service = await load(); await requestSafeStop();
+  const reported = await submitSafeStop();
+  assert.equal(reported.verified, true); assert.equal(reported.reason, null);
+  const safeRead = await service.readAmuxV22TaskRecovery(owner, "task-1234", safeStopRequestId);
+  assert.equal(safeRead.state, "verified");
+  assert.equal(safeRead.stopAcknowledgement, "acknowledged");
+  assert.equal(safeRead.processState, "gone");
+  const approval = await service.approveAmuxV22TaskRecovery({ session: owner,
+    request: new Request("https://tomverse.test"), action: "approve_attempt",
+    taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+    requestId: approvalRequestId, inspectionId: safeRead.inspectionId!,
+    evidenceId: safeRead.evidenceId!, evidenceDigest: safeRead.evidenceDigest!,
+    costDigest: safeRead.cost!.costDigest });
+  assert.equal(approval.state, "approved"); assert.equal(world.task.status, "todo");
+  assert.equal(world.task.owner, null); assert.equal(world.attemptWrites + world.ledgerWrites, 0);
+});
+test("safe-stop closes request and report races when profile work appears", async () => {
+  reset(); await requestLegacySafeStopSource(); world.otherWork = true;
+  const service = await load();
+  const source = world.evidence[0]!;
+  await assert.rejects(service.requestAmuxV22LegacySafeStop({ session: owner,
+    request: new Request("https://tomverse.test"), action: "request_safe_stop",
+    taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+    sourceEvidenceId: source.id as string, sourceEvidenceDigest: source.evidenceDigest as string,
+    requestId: safeStopRequestId }), /safe_stop_other_work_present/);
+  assert.equal(world.inspections.filter((item) => item.requestKind === "safe_stop").length, 0);
+
+  reset(); await requestSafeStop(); world.otherWork = true;
+  const reported = await submitSafeStop();
+  assert.equal(reported.verified, false);
+  assert.equal(reported.reason, "safe_stop_other_work_present");
+  const safeInspection = world.inspections.find((item) => item.requestKind === "safe_stop")!;
+  const safeEvidence = world.evidence.find((item) => item.inspectionId === safeInspection.id)!;
+  const read = await service.readAmuxV22TaskRecovery(owner, "task-1234", safeStopRequestId);
+  await assert.rejects(service.approveAmuxV22TaskRecovery({ session: owner,
+    request: new Request("https://tomverse.test"), action: "approve_attempt",
+    taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+    requestId: approvalRequestId, inspectionId: safeInspection.id as string,
+    evidenceId: safeEvidence.id as string, evidenceDigest: safeEvidence.evidenceDigest as string,
+    costDigest: read.cost!.costDigest }), /recovery_evidence_unverified/);
+  assert.equal(world.task.status, "blocked");
 });

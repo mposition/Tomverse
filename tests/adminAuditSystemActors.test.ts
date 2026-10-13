@@ -117,6 +117,8 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-auto-promoter",
     "amux-v22-auto-admit",
     "amux-v22-worker-claim",
+    "amux-v22-recovery-checker",
+    "amux-v22-recovery-controller",
     "amux-v4-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",
@@ -170,6 +172,14 @@ test("the system actor list is closed and changes only by review", () => {
     "amux.auto_promotion.halted", "AmuxRecommendationAutoHalt"), true);
   assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
     "amux.claim.assigned", "AmuxWorkItem"), false);
+  assert.equal(systemAuditActionAllowed("amux-v22-recovery-checker",
+    "amux.v22.recovery.inspected", "AmuxV22TaskRecoveryEvidence"), true);
+  assert.equal(systemAuditActionAllowed("amux-v22-recovery-checker",
+    "amux.v22.recovery.safe_stop_reported", "AmuxV22TaskRecoveryEvidence"), false);
+  assert.equal(systemAuditActionAllowed("amux-v22-recovery-controller",
+    "amux.v22.recovery.safe_stop_reported", "AmuxV22TaskRecoveryEvidence"), true);
+  assert.equal(systemAuditActionAllowed("amux-v22-recovery-controller",
+    "amux.v22.recovery.inspected", "AmuxV22TaskRecoveryEvidence"), false);
   assert.equal(AMUX_V4_IDEA_SOURCE_SYSTEM, "admin-idea-v4");
   assert.equal(AMUX_V4_IDEA_AGENT_ID, "amux-intake");
   assert.equal(isSystemAuditActor(AMUX_V4_IDEA_SYSTEM_ACTOR), true);
