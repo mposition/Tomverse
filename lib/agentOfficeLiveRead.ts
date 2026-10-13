@@ -33,7 +33,7 @@ import {
   countAwaitingAmuxEscalations,
   countPendingMarketingApprovals,
 } from "@/lib/adminNavigationCounts";
-import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState } from "@/lib/agentOfficeAmuxState";
+import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState, agentOfficeProviderLabel } from "@/lib/agentOfficeAmuxState";
 import { AGENT_OFFICE_AMUX_ROSTER } from "@/lib/agentOffice/amuxRoster";
 import { agentOfficeDecisionState } from "@/lib/agentOfficeDecisionState";
 import { AGENT_OFFICE_DIGEST_WINDOW_MS, agentOfficeDigestState } from "@/lib/agentOfficeDigestState";
@@ -252,7 +252,14 @@ async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
     let roster: readonly { name: string; provider: string }[] = AGENT_OFFICE_AMUX_ROSTER;
     if (amuxWorkerDerivedCatalogAssignmentOpen()) {
       const read = await readAmuxRegistryAndDerivedCatalog(prisma);
-      catalog = read.derived === null ? null : amuxDerivedCatalogAsConfigured(read.derived).workers;
+      // The derived catalog names provider classes; seats show the roster's
+      // labels, assigned or not.
+      catalog = read.derived === null
+        ? null
+        : amuxDerivedCatalogAsConfigured(read.derived).workers.map((worker) => ({
+            ...worker,
+            provider: agentOfficeProviderLabel(worker.provider),
+          }));
       if (read.registrations !== null) {
         roster = agentOfficeAmuxRosterFromRegistry(read.registrations, AGENT_OFFICE_AMUX_ROSTER.map((worker) => worker.name));
       }

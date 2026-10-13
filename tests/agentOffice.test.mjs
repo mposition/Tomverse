@@ -43,7 +43,7 @@ import {
   reviewRoomView,
   researchTone,
 } from "../lib/agentOffice/live.ts";
-import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState } from "../lib/agentOfficeAmuxState.ts";
+import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState, agentOfficeProviderLabel } from "../lib/agentOfficeAmuxState.ts";
 import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
 import { AGENT_OFFICE_AMUX_ROSTER } from "../lib/agentOffice/amuxRoster.ts";
 import { agentOfficeDecisionState } from "../lib/agentOfficeDecisionState.ts";
@@ -2177,4 +2177,13 @@ test("with R2c on, every registered worker that is not retired has a seat, in th
   // A seat the catalog does not assign is shown apart, never as assigned.
   const state = agentOfficeAmuxState({ catalog: [catalogRow("claude-impl")], roster: seats, runtimes: [], now: amuxNow });
   assert.equal(state.workers.find((worker) => worker.name === "codex-review").state, "not_admitted");
+});
+
+test("with R2c on, an assigned seat shows the roster's provider label, not the class", () => {
+  assert.deepEqual(
+    ["claude", "codex", "cursor", "copilot"].map(agentOfficeProviderLabel),
+    ["anthropic", "openai", "cursor", "github-copilot"],
+  );
+  const reader = readFunction("readAmuxWorkers");
+  assert.match(reader, /provider: agentOfficeProviderLabel\(worker\.provider\)/);
 });

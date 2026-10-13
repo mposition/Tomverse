@@ -53,6 +53,10 @@ const OFFICE_PROVIDER_LABEL: Readonly<Record<string, string>> = Object.freeze({
   copilot: "github-copilot",
 });
 
+/** A provider class as the display roster labels it. */
+export const agentOfficeProviderLabel = (providerClass: string): string =>
+  OFFICE_PROVIDER_LABEL[providerClass] ?? providerClass;
+
 /**
  * Orchestration policy version 35, section 3: once R2c is on, a seat for
  * every registered worker that is not retired -- assigned or not, which the
@@ -71,7 +75,7 @@ export function agentOfficeAmuxRosterFromRegistry(
     .filter((registration) => registration.desiredState !== "retired")
     .map((registration) => ({
       name: registration.workerName,
-      provider: OFFICE_PROVIDER_LABEL[registration.providerClass] ?? registration.providerClass,
+      provider: agentOfficeProviderLabel(registration.providerClass),
     }))
     .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
 }

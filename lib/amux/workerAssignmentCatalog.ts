@@ -62,19 +62,28 @@ export async function readAmuxRegistryAndDerivedCatalog(client: CatalogReader): 
   );
   const row = rows[0];
   if (row === undefined) return { registrations: null, derived: null };
+  let registry: ReturnType<typeof amuxWorkerRegistryFromNewestJsonOrThrow>;
   try {
-    const registry = amuxWorkerRegistryFromNewestJsonOrThrow(row.registry, row.latches);
-    return {
-      registrations: registry.registrations,
-      derived: deriveAmuxWorkerCatalog({
-        registrations: registry.registrations,
-        capabilities: amuxWorkerCapabilitiesFromNewestJsonOrThrow(row.capabilities),
-        latches: registry.latches,
-      }),
-    };
+    registry = amuxWorkerRegistryFromNewestJsonOrThrow(row.registry, row.latches);
   } catch {
     return { registrations: null, derived: null };
   }
+  // A capability row the store would not accept leaves no catalog, but the
+  // registry it was read beside is still the registry.
+  let capabilities: ReturnType<typeof amuxWorkerCapabilitiesFromNewestJsonOrThrow>;
+  try {
+    capabilities = amuxWorkerCapabilitiesFromNewestJsonOrThrow(row.capabilities);
+  } catch {
+    return { registrations: registry.registrations, derived: null };
+  }
+  return {
+    registrations: registry.registrations,
+    derived: deriveAmuxWorkerCatalog({
+      registrations: registry.registrations,
+      capabilities,
+      latches: registry.latches,
+    }),
+  };
 }
 
 /** The derived catalog in one statement; null when it cannot be derived. */
