@@ -122,6 +122,16 @@ const PRODUCT_RESEARCH_PROBE_VARIABLES = [
 ] as const;
 
 /**
+ * The improvement scout's S0 probe has one variable, its switch.
+ *
+ * A service without a schedule runs on every deploy, so the probe does nothing
+ * until the operator sets PRODUCT_RESEARCH_SCOUT_ENABLED; setting it redeploys
+ * the service, and that deploy is the measurement. It reads no credential and
+ * submits nowhere (docs/policy/product-research-agent.md §20).
+ */
+const PRODUCT_RESEARCH_SCOUT_PROBE_VARIABLES = ["PRODUCT_RESEARCH_SCOUT_ENABLED"] as const;
+
+/**
  * The QA-release services' variables (docs/policy/qa-release-agent.md
  * section 3), the same lists lib/qaReleaseServiceEnvCore.ts accepts at start;
  * tests/agentRunnerIac.test.mjs holds the two equal. Nothing else -- the
@@ -465,6 +475,30 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
       production: PRODUCT_RESEARCH_PROBE_VARIABLES,
       staging: PRODUCT_RESEARCH_PROBE_VARIABLES,
       dev: PRODUCT_RESEARCH_PROBE_VARIABLES,
+    },
+  },
+  {
+    // The improvement scout's S0 probe (docs/policy/product-research-agent.md
+    // §20). Staging only: what it measures is whether Chromium keeps its
+    // sandbox in a Railway container and what production's public pages answer
+    // a Railway address, and the staging project runs in the same region. Built
+    // from its own Dockerfile because Chromium and its system libraries come
+    // with Playwright's image, not with Railpack's.
+    key: "product_research_scout_probe",
+    service: "Product Research Scout Probe",
+    startCommand: "npm run agent:product-research-scout-s0-probe -- all",
+    cronSchedule: null,
+    dockerfile: {
+      path: "docker/product-research-scout-probe.Dockerfile",
+      watchPatterns: [
+        "docker/product-research-scout-probe.Dockerfile",
+        "scripts/agents/product-research-scout-s0-probe.mjs",
+        "lib/productResearchScout*",
+        "package-lock.json",
+      ],
+    },
+    environments: {
+      staging: PRODUCT_RESEARCH_SCOUT_PROBE_VARIABLES,
     },
   },
   ...ENGINEERING_AGENT_SERVICES,

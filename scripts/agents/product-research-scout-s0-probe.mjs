@@ -3,6 +3,7 @@
 //   node scripts/agents/product-research-scout-s0-probe.mjs fixture [--json]
 //   node scripts/agents/product-research-scout-s0-probe.mjs pages [--json]
 //   npm run agent:product-research-scout-s0-probe -- renderers [--json]
+//   npm run agent:product-research-scout-s0-probe -- all
 //
 // `fixture` measures S0 (4) and (11): it serves a page on a local allowed origin
 // that tries every request the browser rules forbid -- other methods, another
@@ -32,6 +33,13 @@
 // positions against the page, and a raster of the first page. It needs the
 // app's TypeScript modules, hence the npm script (tsx, react-server).
 //
+// `all` is what the Railway probe service runs (docs/ops/product-research-agent.md):
+// the three modes in one process, one JSON document, plus what S0 (1) and (10)
+// need -- Node version, process start to first measurement, each mode's time and
+// the peak resident memory -- and the *names* of the variables the container
+// was given, never a value. It does nothing unless PRODUCT_RESEARCH_SCOUT_ENABLED
+// is set, because a Railway service without a schedule runs on every deploy.
+//
 // Read-only and credential-free: no variable is read, nothing is written
 // outside stdout, and the only network destinations are 127.0.0.1 (fixture)
 // and https://tomverse.app (pages).
@@ -51,8 +59,9 @@ import {
 
 const mode = process.argv[2];
 const asJson = process.argv.includes("--json");
-if (mode !== "fixture" && mode !== "pages" && mode !== "renderers") {
-  console.error("Usage: product-research-scout-s0-probe.mjs fixture|pages|renderers [--json]");
+const MODES = ["fixture", "pages", "renderers", "all"];
+if (!MODES.includes(mode)) {
+  console.error("Usage: product-research-scout-s0-probe.mjs fixture|pages|renderers|all [--json]");
   process.exit(64);
 }
 
@@ -435,8 +444,49 @@ async function inspectPdf(bytes, tools, { containsHangul, textItemsOutsidePage }
   return { pages, hangulInText: containsHangul(text), outsidePage, rasterInkPixels };
 }
 
-const result = mode === "fixture" ? await runFixture() : mode === "pages" ? await runPages() : await runRenderers();
-if (asJson) {
+// ---------------------------------------------------------------- all
+
+async function runAll() {
+  // Unset and empty are off, the same reading as every product-research switch
+  // (docs/policy/product-research-agent.md §6).
+  if (!process.env.PRODUCT_RESEARCH_SCOUT_ENABLED) {
+    return { mode: "all", skipped: "PRODUCT_RESEARCH_SCOUT_ENABLED is not set" };
+  }
+  const firstMeasurementAtMs = Math.round(process.uptime() * 1000);
+  let peakRss = process.memoryUsage().rss;
+  const sample = setInterval(() => {
+    peakRss = Math.max(peakRss, process.memoryUsage().rss);
+  }, 250);
+  const timed = async (run) => {
+    const startedAt = Date.now();
+    try {
+      return { ...(await run()), elapsedMs: Date.now() - startedAt };
+    } catch (error) {
+      return { error: String(error?.message ?? error).split("\n")[0].slice(0, 200), elapsedMs: Date.now() - startedAt };
+    }
+  };
+  const fixture = await timed(runFixture);
+  const pages = await timed(runPages);
+  const renderers = await timed(runRenderers);
+  clearInterval(sample);
+  return {
+    mode: "all",
+    node: process.version,
+    platform: `${process.platform}-${process.arch}`,
+    uid: typeof process.getuid === "function" ? process.getuid() : null,
+    firstMeasurementAtMs,
+    totalMs: Math.round(process.uptime() * 1000),
+    peakRssBytes: peakRss,
+    variableNames: Object.keys(process.env).sort(),
+    fixture,
+    pages,
+    renderers,
+  };
+}
+
+const run = { fixture: runFixture, pages: runPages, renderers: runRenderers, all: runAll }[mode];
+const result = await run();
+if (asJson || mode === "all") {
   console.log(JSON.stringify(result, null, 2));
 } else if (mode === "fixture") {
   for (const entry of result.results) {

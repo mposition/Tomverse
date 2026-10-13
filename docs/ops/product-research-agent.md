@@ -293,3 +293,39 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
   이미 답이 있는 회차의 재제출은 409입니다.
 - **GitHub에 아무것도 쓰지 않습니다.** 이슈·label·comment·PR·check 전부. 토큰은
   읽기 전용이고, 쓰기 권한이 붙은 토큰을 넣으면 그 자체가 정책 위반입니다.
+
+## 개선 탐색 S0 probe (정책 v2 §20)
+
+`Product Research Scout Probe`는 개선 탐색의 S0 측정 전용 서비스입니다. walker도
+browser 서비스도 아니며, 아무 데도 제출하지 않고 자격증명을 읽지 않습니다.
+staging에만 있고, Playwright 이미지(`docker/product-research-scout-probe.Dockerfile`)로
+빌드되며, 변수는 스위치 `PRODUCT_RESEARCH_SCOUT_ENABLED` 하나입니다.
+
+한 번 실행에서 세 가지를 잽니다(`npm run agent:product-research-scout-s0-probe -- all`).
+
+| mode | S0 항목 | 무엇을 보는가 |
+|---|---|---|
+| fixture | (4)·(11) | 로컬 서버 두 개를 띄워, 금지된 요청(다른 method·다른 origin·다른 origin으로의 redirect·WebSocket·service worker·form POST)이 실제로 서버에 도달했는지 셉니다. Playwright 가로채기만 쓴 실행과 host resolver 규칙을 더한 실행을 함께 보고, sandbox를 켠 Chromium이 뜨는지 봅니다 |
+| pages | (3) | production 공개 page 20개를 게스트로 GET·HEAD만 써서 열고, 봇 챌린지·문서 언어·다른 origin 시도를 기록합니다 |
+| renderers | (2) | 고정 명세 PDF·DOCX·XLSX·PPTX를 채팅 도구의 admission과 렌더러로 만들고, zip part·PDF parse·내장 글꼴·한글·텍스트 위치·첫 쪽 래스터를 확인합니다 |
+
+출력은 JSON 한 덩어리이며 Node 버전, 시작부터 첫 측정까지의 시간, 모드별 시간,
+최대 메모리, 그리고 컨테이너가 받은 **변수 이름**(값은 없음)을 함께 싣습니다.
+page 원문·콘솔 문장·경로는 싣지 않으므로 그대로 붙여도 안전합니다.
+
+### 실행 (운영자)
+
+1. **apply.** 위 "6. apply"의 staging 순서 그대로입니다(`railway:agents:use-staging` →
+   `railway:agents:plan` → `railway:agents:apply`). 계획에 새 서비스
+   `Product Research Scout Probe` 하나가 추가되고 **지워지는 것이 없는지** 확인합니다.
+   apply 뒤 region이 `asia-southeast1-eqsg3a`인지 확인합니다(6a).
+2. **켜기.** Railway 대시보드 → Tomverse Agents → staging → Product Research Scout
+   Probe → Variables에 `PRODUCT_RESEARCH_SCOUT_ENABLED`를 아무 값으로 넣습니다.
+   변수 변경이 재배포를 만들고, 그 배포가 측정입니다(일정이 없는 서비스는 배포마다
+   한 번 실행됩니다). 스위치가 없으면 probe는 아무것도 하지 않고 끝납니다.
+3. **결과.** 그 배포의 로그에 JSON이 남습니다. 에이전트 세션이 Railway에서 읽거나,
+   로그를 그대로 붙여 주시면 됩니다.
+4. **끄기.** 측정이 끝나면 변수를 지웁니다. 배포마다 production 공개 page 20개를
+   다시 열기 때문입니다.
+
+빌드 로그의 이미지 크기와 이 JSON의 시간·메모리가 S0 (1)과 (10)의 입력입니다.
