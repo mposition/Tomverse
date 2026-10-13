@@ -28,7 +28,7 @@ const XLSX_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 const actionMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').first();
+  page.getByTestId("composer-tools-button");
 
 async function attachFromComputer(
   page: Page,

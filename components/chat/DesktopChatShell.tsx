@@ -1322,7 +1322,7 @@ export function DesktopChatShell({
           The bottom workflow dock. The comparison rail and the composer are
           separate sections semantically -- one acts on finished answers, the
           other configures the next request -- but they share one alignment
-          axis (`max-w-4xl mx-auto`, same horizontal padding) and one boundary
+          axis (`max-w-5xl mx-auto`, same horizontal padding) and one boundary
           against the answer canvas, so a wide screen no longer strands the
           actions on the far left of a centred composer.
         */}
@@ -1419,7 +1419,7 @@ export function DesktopChatShell({
         )}
 
         <div className="w-full shrink-0 px-4 md:px-6">
-          <div ref={setBottomConsentSlot} className="mx-auto w-full max-w-4xl" />
+          <div ref={setBottomConsentSlot} className="mx-auto w-full max-w-5xl" />
         </div>
         <div ref={setBottomInputSlot} />
         {composerPortalHost &&

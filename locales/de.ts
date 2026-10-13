@@ -310,6 +310,7 @@ export const de = {
         send: "Senden",
         creditUnit: "Credits",
         creditEstimateAria: "Geschätzt {credits} Credits, Details anzeigen",
+        creditEstimateLabel: "Geschätzt {credits} Credits",
         cancel: "Abbrechen",
         sendSingMessage: "Nachricht senden an...",
         sendMultipleMessages: "Nachrichten gleichzeitig senden an...",

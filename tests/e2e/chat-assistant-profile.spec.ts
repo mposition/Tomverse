@@ -62,7 +62,7 @@ const boundProfile = (
 });
 
 const toolsMenuTrigger = (page: Page) =>
-    page.locator('button[aria-controls="chat-input-popover"]').nth(0);
+    page.getByTestId("composer-tools-button");
 
 const openAssistantMenu = async (page: Page) => {
     await toolsMenuTrigger(page).click();

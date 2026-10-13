@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
   mockAuthenticatedApi,
@@ -24,6 +24,76 @@ import {
 // conversation it actually has rather than one it hoped for.
 const CONVERSATION_TITLE = "QA conversation";
 
+type Box = NonNullable<Awaited<ReturnType<Locator["boundingBox"]>>>;
+
+const intersectionArea = (a: Box, b: Box) =>
+  Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) *
+  Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+
+const expectThumbContained = async ({
+  control,
+  track,
+  thumb,
+  enabled,
+}: {
+  control: Locator;
+  track: Locator;
+  thumb: Locator;
+  enabled: boolean;
+}) => {
+  await expect(control).toHaveAttribute("aria-checked", String(enabled));
+  await expect(control).toBeVisible();
+  await expect(track).toBeVisible();
+  await expect(thumb).toBeVisible();
+
+  await expect
+    .poll(async () => {
+      const [controlBox, trackBox, thumbBox] = await Promise.all([
+        control.boundingBox(),
+        track.boundingBox(),
+        thumb.boundingBox(),
+      ]);
+      if (!controlBox || !trackBox || !thumbBox) return null;
+
+      const epsilon = 1;
+      return {
+        controlHasTouchFloor: controlBox.height >= 44,
+        trackInsideControl:
+          trackBox.x >= controlBox.x - epsilon &&
+          trackBox.x + trackBox.width <= controlBox.x + controlBox.width + epsilon &&
+          trackBox.y >= controlBox.y - epsilon &&
+          trackBox.y + trackBox.height <= controlBox.y + controlBox.height + epsilon,
+        thumbInsideTrack:
+          thumbBox.x >= trackBox.x - epsilon &&
+          thumbBox.x + thumbBox.width <= trackBox.x + trackBox.width + epsilon &&
+          thumbBox.y >= trackBox.y - epsilon &&
+          thumbBox.y + thumbBox.height <= trackBox.y + trackBox.height + epsilon,
+        thumbOnExpectedSide: enabled
+          ? thumbBox.x + thumbBox.width / 2 > trackBox.x + trackBox.width / 2
+          : thumbBox.x + thumbBox.width / 2 < trackBox.x + trackBox.width / 2,
+      };
+    })
+    .toEqual({
+      controlHasTouchFloor: true,
+      trackInsideControl: true,
+      thumbInsideTrack: true,
+      thumbOnExpectedSide: true,
+    });
+};
+
+const expectNoIntersection = async (
+  first: Locator,
+  second: Locator
+) => {
+  const [firstBox, secondBox] = await Promise.all([
+    first.boundingBox(),
+    second.boundingBox(),
+  ]);
+  expect(firstBox).not.toBeNull();
+  expect(secondBox).not.toBeNull();
+  expect(intersectionArea(firstBox!, secondBox!)).toBe(0);
+};
+
 const openPicker = async (page: Page) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
@@ -31,7 +101,10 @@ const openPicker = async (page: Page) => {
   return dialog;
 };
 
-const openSeededConversation = async (page: Page) => {
+const openSeededConversation = async (
+  page: Page,
+  language: "en" | "ko" = "en"
+) => {
   // Auto is a Chat product capability. `/chat` is the canonical Chat surface;
   // Review at `/review` must refuse it even if a fixture accidentally says
   // `offered: true`.
@@ -42,7 +115,7 @@ const openSeededConversation = async (page: Page) => {
       url: "http://127.0.0.1:3100",
     },
   ]);
-  await page.goto("/chat?lang=en");
+  await page.goto(`/chat?lang=${language}`);
   await openRecentConversation(page, { title: CONVERSATION_TITLE });
   await expect(page).toHaveURL(/conversation=qa-conversation/);
   await expect(page.getByText("안녕하세요", { exact: true })).toBeVisible();
@@ -202,7 +275,7 @@ test.describe("Auto is offered", () => {
   });
 
   test(
-    "the composer switch stays reachable without narrowing the textarea at 320px and 200% text scaling",
+    "both switch thumbs stay contained in Korean at 320px and 200% text scaling",
     { tag: "@ui-risk" },
     async ({ page }) => {
       // The composer contract's viewport floor, at the browser-level
@@ -214,17 +287,62 @@ test.describe("Auto is offered", () => {
         document.documentElement.style.fontSize = "32px";
       });
 
-      await openSeededConversation(page);
+      await openSeededConversation(page, "ko");
       const textarea = page.getByTestId("chat-textarea");
       await textarea.fill("한글 조합 중인 문장");
       const textareaBefore = await textarea.boundingBox();
       expect(textareaBefore).not.toBeNull();
 
       const composerToggle = page.getByTestId("composer-auto-routing-toggle");
-      await expect(composerToggle).toBeVisible();
+      const composerTrack = composerToggle.getByTestId(
+        "composer-auto-routing-track"
+      );
+      const composerThumb = composerToggle.getByTestId(
+        "composer-auto-routing-thumb"
+      );
+      const composerLabel = composerToggle
+        .locator(":scope > span:not([aria-hidden='true'])")
+        .first();
+      const modelTrigger = modelMenuTrigger(page);
+
+      await expectThumbContained({
+        control: composerToggle,
+        track: composerTrack,
+        thumb: composerThumb,
+        enabled: false,
+      });
+      await expectNoIntersection(composerLabel, composerTrack);
+      await expectNoIntersection(composerToggle, modelTrigger);
+
+      let dialog = await openPicker(page);
+      let pickerToggle = dialog.getByTestId("auto-routing-toggle");
+      let pickerControl = pickerToggle.getByRole("switch");
+      const pickerCopy = pickerToggle.locator(".min-w-0");
+      await expectThumbContained({
+        control: pickerControl,
+        track: pickerControl.getByTestId("auto-routing-track"),
+        thumb: pickerControl.getByTestId("auto-routing-thumb"),
+        enabled: false,
+      });
+      await expectNoIntersection(pickerCopy, pickerControl);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+
+      // Clicking the visible composer target changes only the mode. The thumb
+      // must remain inside its own track instead of spilling into the adjacent
+      // model picker as it moves to ON.
       await composerToggle.click();
-      await expect(composerToggle).toHaveAttribute("aria-checked", "true");
-      await expect(page.getByTestId("composer-active-model-count")).toHaveText("Smart Adaptive");
+      await expectThumbContained({
+        control: composerToggle,
+        track: composerTrack,
+        thumb: composerThumb,
+        enabled: true,
+      });
+      await expectNoIntersection(composerLabel, composerTrack);
+      await expectNoIntersection(composerToggle, modelTrigger);
+      await expect(page.getByTestId("composer-active-model-count")).toHaveText(
+        "스마트 자동"
+      );
       await expect(page.getByTestId("auto-variable-credit-notice")).toBeVisible();
 
       await expectNoHorizontalOverflow(page);
@@ -240,13 +358,33 @@ test.describe("Auto is offered", () => {
       expect(Math.abs(textareaAfter!.width - textareaBefore!.width)).toBeLessThanOrEqual(1);
       await expect(textarea).toHaveValue("한글 조합 중인 문장");
 
-      const dialog = await openPicker(page);
-      const pickerToggle = dialog.getByTestId("auto-routing-toggle");
-      await expect(pickerToggle).toBeVisible();
-      await expect(pickerToggle.getByRole("switch")).toHaveAttribute(
-        "aria-checked",
-        "true"
-      );
+      dialog = await openPicker(page);
+      pickerToggle = dialog.getByTestId("auto-routing-toggle");
+      pickerControl = pickerToggle.getByRole("switch");
+      await expectThumbContained({
+        control: pickerControl,
+        track: pickerControl.getByTestId("auto-routing-track"),
+        thumb: pickerControl.getByTestId("auto-routing-thumb"),
+        enabled: true,
+      });
+      await expectNoIntersection(pickerToggle.locator(".min-w-0"), pickerControl);
+
+      // The picker target still maps to the same mode control after reflow.
+      // A geometry fix must not turn the neighbouring model choice into the
+      // clickable target or leave the other switch with a stale state.
+      await pickerControl.click();
+      await expectThumbContained({
+        control: pickerControl,
+        track: pickerControl.getByTestId("auto-routing-track"),
+        thumb: pickerControl.getByTestId("auto-routing-thumb"),
+        enabled: false,
+      });
+      await expectThumbContained({
+        control: composerToggle,
+        track: composerTrack,
+        thumb: composerThumb,
+        enabled: false,
+      });
       await expectNoHorizontalOverflow(page);
     }
   );

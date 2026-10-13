@@ -32,7 +32,7 @@ const CANONICAL_ORDER = [
 ];
 
 const toolsMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(0);
+  page.getByTestId("composer-tools-button");
 
 const openMenu = async (page: Page) => {
   await expect(page.getByTestId("chat-input")).toBeVisible();

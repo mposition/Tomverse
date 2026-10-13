@@ -6,7 +6,8 @@
 - Applies to: Mobile chat shell and responsive compact layouts
 - Severity when violated: Release blocker
 - Owners: Product Design, Frontend, Accessibility, QA
-- Last reviewed: 2026-09-17
+- Last reviewed: 2026-10-13 Australia/Brisbane (the owner's actual approval
+  date and timezone)
 
 ## Purpose
 
@@ -30,30 +31,49 @@ The message canvas may be optimized for additional vertical space, but the prima
 
 The contract binds the mobile shell (`useIsMobileShell()`) and every compact/responsive layout that renders the same composer, including landscape phones, keyboard-open states and browser zoom levels that produce a phone-width layout viewport.
 
+The approved Figma Composer also defines the wider layout: its input uses the
+product's 16px body size and a deliberate `7rem` minimum height at `md` and
+above. Those desktop dimensions are part of the approved visual match; the
+compact input remains rem-scaled so browser text scaling preserves a complete
+visible line.
+
 ## Required anatomy
 
 The mobile composer must preserve this vertical structure:
 
-1. Optional tool/status row
-2. Dedicated full-width textarea row
-3. Actions, model selection, credit estimate, and send row
-4. Required safety or privacy disclosure
+1. Optional product navigation row
+2. Optional exception/status or Review model-summary row
+3. Dedicated full-width textarea row
+4. Tools/model and credit/submit groups
+5. Required safety or privacy disclosure
 
 Optional rows may be compacted or conditionally hidden. The textarea row may not be merged with another row.
+
+On an active multi-model conversation below 800px of measured visible height,
+the composer may omit its duplicate product row and expanded Review model row
+when the drawer still provides product navigation and the shell's visible model
+strip still identifies every selection. The footer keeps the canonical model
+picker trigger and actual selected count. Empty/new conversations and the
+approved 844px presentation keep both expanded rows.
 
 As implemented, that is:
 
 ```
-[tool-status-chip-row]        ← optional; web search / deep research chips, flex-wrap
+[composer-product-mode-row]  ← optional; canonical Chat / Review navigation
+[tool-status-chip-row]        ← optional; exception/blocked search and deep research
 [web-search-exception-detail] ← optional; expands under the chip that opened it
+[composer-review-models]      ← Review only; opens the existing model picker
 [composer-textarea-row]       ← always; the textarea alone, width: 100%
-[actions row]                 ← attach, model picker, credit estimate, send
+[actions row]                 ← tools/model/search left; credit, voice and send right
 [chat-ai-disclaimer-mobile]   ← always; AI + sensitive-data notice with "details"
 ```
 
 ## Non-negotiable invariants
 
 - The textarea owns a dedicated row.
+- Product navigation and Review's selected-model summary each own a row outside
+  the textarea. They may only open the existing canonical navigation or model
+  picker paths; neither may write a product or model selection directly.
 - The empty textarea provides at least one complete visible line.
 - The textarea uses the available inner width of the composer.
 - A status chip may not reduce the textarea to remaining horizontal space.
@@ -113,7 +133,9 @@ this contract, not a separate concern.
 
 ## Allowed patterns
 
-- A separate, compact status row above the textarea, wrapping with `flex-wrap` when several chips are present.
+- A fully supported web-search chip in the footer's tools group.
+- A separate, compact status row above the textarea for partial support,
+  blocked states, expanded details, or other warnings.
 - Shorter chip labels on mobile (`웹 검색 2/3`, `웹 검색 불가`, `심층 조사`), as long as the accessible name and description keep the full meaning.
 - Chips whose visual height is compacted (32px on mobile) while their controls keep a ≥44×44px hit area through `::before` insets.
 - Rows below the textarea that wrap when they no longer fit, so no control is pushed outside the composer.
@@ -158,7 +180,11 @@ ChatMessageList height may never be bought with any of these:
 - The full sentence — how many models can search, how many cannot, the credit ceiling, the refund rule for a search that never ran, and the action the user can take — stays available through `#web-search-state-description` and `aria-describedby`.
 - A partial-support exception expands under the chip that opened it, never over the input.
 - A fully blocked state keeps its full-width notice and its way out (`web-search-unavailable-notice`).
-- Several chips wrap onto another chip row; they never scroll sideways and never enter the input row.
+- A fully supported web-search chip sits with tools and model selection in the
+  footer on desktop and mobile. Partial support and blocked search stay in the
+  independent status row with their detail or recovery path.
+- Several warning/status chips wrap onto another chip row; they never scroll
+  sideways and never enter the input row.
 
 ## Attachment capabilities
 

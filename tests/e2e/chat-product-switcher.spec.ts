@@ -5,11 +5,16 @@ import {
   mockAuthenticatedApi,
   prepareGuestPage,
 } from "./support/app-fixtures";
-import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage } from "./support/chat-state-fixtures";
+import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage, restoreActiveConversation } from "./support/chat-state-fixtures";
 
 async function openProductSwitcher(page: Page) {
   const mobileMenu = page.getByTestId("mobile-sidebar-open");
-  if (await mobileMenu.isVisible()) await mobileMenu.click();
+  if (await mobileMenu.isVisible()) {
+    await mobileMenu.click();
+    return page
+      .getByTestId("mobile-sidebar-drawer")
+      .getByTestId("chat-product-switcher");
+  }
   return page.getByTestId("chat-product-switcher");
 }
 
@@ -38,6 +43,14 @@ test.describe("Tomverse Chat and Review product switcher", () => {
     const composer = page.locator('[data-testid="chat-input"]:visible');
     await expect(composer).toHaveCount(1);
     await expect(page.getByTestId("composer-auto-routing-toggle")).toBeVisible();
+    await expect(
+      composer
+        .getByTestId("composer-primary-tools")
+        .getByTestId("composer-model-select")
+    ).toBeVisible();
+    await expect(composer.getByTestId("chat-send-button")).toHaveClass(
+      /bg-zinc-900/
+    );
     const switcher = await openProductSwitcher(page);
     await expect(switcher).toHaveCount(1);
     await expect(switcher).toBeVisible();
@@ -58,6 +71,8 @@ test.describe("Tomverse Chat and Review product switcher", () => {
   test("Review is current and does not present Smart Adaptive as a product", async ({
     page,
   }) => {
+    // Open the fixture's saved selection instead of relying on the new-chat catalogue default.
+    await restoreActiveConversation(page);
     await page.goto("/review?lang=en");
 
     const composer = page.locator('[data-testid="chat-input"]:visible');
@@ -72,11 +87,66 @@ test.describe("Tomverse Chat and Review product switcher", () => {
       "aria-current",
       "page"
     );
+    const drawer = page.getByTestId("mobile-sidebar-drawer");
+    if (await drawer.isVisible()) {
+      await page.keyboard.press("Escape");
+      await expect(drawer).not.toBeVisible();
+    }
     await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveCount(0);
+    await expect(composer.getByTestId("chat-send-button")).toHaveClass(
+      /bg-blue-600/
+    );
+
+    const selectedModel = composer.getByTestId("composer-review-selected-model");
+    await expect(selectedModel).toHaveCount(1);
+    await expect(selectedModel).toHaveAttribute("data-model-id", "gpt-5-6-luna");
+    await expect(selectedModel).toContainText(/GPT-5\.6 Luna/i);
+
+    const conversationWrites: string[] = [];
+    page.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (
+        request.method() !== "GET" &&
+        pathname.startsWith("/api/conversations")
+      ) {
+        conversationWrites.push(`${request.method()} ${pathname}`);
+      }
+    });
+    await composer.getByTestId("composer-model-select").click();
+    await expect(page.locator("#chat-input-popover")).toBeVisible();
+    expect(conversationWrites).toEqual([]);
+    // The existing full-screen picker closes through Escape/Done, then returns focus.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#chat-input-popover")).toHaveCount(0);
+    await composer.getByTestId("composer-model-select").click();
+    await expect(page.locator("#chat-input-popover")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#chat-input-popover")).toHaveCount(0);
+    await expect(composer.getByTestId("composer-model-select")).toBeFocused();
+    expect(conversationWrites).toEqual([]);
+  });
+
+  test("desktop full-support search sits in the footer beside a dedicated input row", async ({ page }) => {
+    await mockAuthenticatedApi(page, { webSearchMode: "always" });
+    await restoreActiveConversation(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/review?lang=en");
+    const composer = page.getByTestId("chat-input");
+    await expect(composer.getByTestId("composer-product-context")).toContainText("Model Compare");
+    const chip = composer.getByTestId("composer-primary-tools").getByTestId("web-search-mode-chip");
+    await expect(chip).toBeVisible();
+    await expect(composer.getByTestId("tool-status-chip-row")).toHaveCount(0);
+    const textarea = composer.getByTestId("chat-textarea");
+    const inputBox = (await textarea.boundingBox())!;
+    const chipBox = (await chip.boundingBox())!;
+    expect(inputBox.height).toBeGreaterThanOrEqual(112);
+    expect(inputBox.y + inputBox.height).toBeLessThanOrEqual(chipBox.y + 0.5);
+    expect(await textarea.evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
+    await expectNoHorizontalOverflow(page);
   });
 
   test(
-    "the mobile drawer switch keeps 44px targets without taking a composer row",
+    "mobile keeps the canonical switch in the composer and drawer without narrowing input",
     { tag: "@ui-risk" },
     async ({ page }) => {
       await page.setViewportSize({ width: 320, height: 568 });
@@ -87,7 +157,24 @@ test.describe("Tomverse Chat and Review product switcher", () => {
 
       const composer = page.locator('[data-testid="chat-input"]:visible');
       await expect(composer).toHaveCount(1);
-      await expect(composer.getByTestId("chat-product-switcher")).toHaveCount(0);
+      const composerSwitcher = composer.getByTestId("chat-product-switcher");
+      await expect(composerSwitcher).toHaveCount(1);
+      await expect(composerSwitcher.getByTestId("chat-product-chat")).toHaveAttribute(
+        "href",
+        "/chat?lang=en"
+      );
+      await expect(composerSwitcher.getByTestId("chat-product-review")).toHaveAttribute(
+        "href",
+        "/review?lang=en"
+      );
+      for (const target of [
+        composerSwitcher.getByTestId("chat-product-chat"),
+        composerSwitcher.getByTestId("chat-product-review"),
+      ]) {
+        const box = await target.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.height).toBeGreaterThanOrEqual(44);
+      }
       const textareaRow = composer.getByTestId("composer-textarea-row");
       const textareaBox = await textareaRow.boundingBox();
       expect(textareaBox).not.toBeNull();

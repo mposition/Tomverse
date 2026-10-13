@@ -101,7 +101,7 @@ test.describe("first-run onboarding dialog", () => {
       await page.goto("/review?lang=en");
 
       // Same entry point the model-finder suite uses.
-      await page.locator('button[aria-controls="chat-input-popover"]').nth(1).click();
+      await page.getByTestId("composer-model-select").click();
       await page.getByTestId("model-combo-finder-cta").click();
 
       const finder = page.getByTestId("model-finder");

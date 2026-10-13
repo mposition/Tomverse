@@ -14,7 +14,7 @@ import { mockAuthenticatedApi, openModelCatalogue } from "./support/app-fixtures
  */
 
 const modelMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+  page.getByTestId("composer-model-select");
 
 const json = (body: unknown) => ({
   status: 200,

@@ -7,7 +7,7 @@ import {
 } from "./support/app-fixtures";
 
 const actionMenuTrigger = (page: import("@playwright/test").Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').first();
+  page.getByTestId("composer-tools-button");
 
 test.beforeEach(async ({ page }) => {
   await prepareGuestPage(page, "ko");

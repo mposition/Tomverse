@@ -85,18 +85,24 @@ export function AutoRoutingToggle({
         onClick={() => onChange(!enabled)}
         // The state is on aria-checked and in the knob's position, never in
         // the colour alone -- the same rule the selection badge follows.
-        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full border transition-colors disabled:opacity-50 ${
-          enabled
-            ? "border-transparent bg-status-switch-on-500"
-            : "border-zinc-300 bg-zinc-200 dark:border-zinc-600 dark:bg-zinc-700"
-        }`}
+        className="mt-0.5 flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center disabled:opacity-50"
       >
         <span
           aria-hidden="true"
-          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-            enabled ? "translate-x-6" : "translate-x-1"
+          data-testid="auto-routing-track"
+          className={`relative h-6 w-11 overflow-hidden rounded-full border transition-colors ${
+            enabled
+              ? "border-transparent bg-status-switch-on-500"
+              : "border-zinc-300 bg-zinc-200 dark:border-zinc-600 dark:bg-zinc-700"
           }`}
-        />
+        >
+          <span
+            data-testid="auto-routing-thumb"
+            className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+              enabled ? "translate-x-6" : "translate-x-1"
+            }`}
+          />
+        </span>
       </button>
 
       {/* Announced on change rather than on render, so a screen reader is told
@@ -148,15 +154,17 @@ export function AutoRoutingComposerToggle({
       <span>{copy.label}</span>
       <span
         aria-hidden="true"
-        className={`relative h-5 w-9 shrink-0 rounded-full border transition-colors ${
+        data-testid="composer-auto-routing-track"
+        className={`relative h-5 w-9 shrink-0 overflow-hidden rounded-full border transition-colors ${
           enabled
             ? "border-white/50 bg-white/25"
             : "border-zinc-300 bg-zinc-200 dark:border-zinc-600 dark:bg-zinc-700"
         }`}
       >
         <span
-          className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-            enabled ? "translate-x-[17px]" : "translate-x-1"
+          data-testid="composer-auto-routing-thumb"
+          className={`absolute left-0 top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+            enabled ? "translate-x-[1.125rem]" : "translate-x-1"
           }`}
         />
       </span>

@@ -161,7 +161,7 @@ Requirements:
 Desktop:
 
 - No empty row and no leftover bottom padding once the sentence is hidden.
-- The rail keeps the composer's alignment axis (`max-w-4xl`, same left/right
+- The rail keeps the composer's alignment axis (`max-w-5xl`, same left/right
   edges) at 768/1024/1280/1440/1920px.
 - One seam only: the rail owns the top border; the composer must not draw a
   second one.
