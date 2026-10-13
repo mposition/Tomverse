@@ -7,8 +7,11 @@ import {
   AMUX_BRIDGE_LOST_AFTER_MS,
   AMUX_NON_BRIDGE_WORKERS,
   AMUX_BRIDGE_WATCH_HORIZON_MS,
+  alertableAmuxWorkerName,
   amuxBridgeWatchHorizonStart,
   judgeAmuxBridgeLiveness,
+  lostAmuxWorkers,
+  newlyLostAmuxWorkers,
 } from "../lib/amux/bridgeLivenessCore.ts";
 
 const NOW = new Date("2026-10-12T03:00:00.000Z");
@@ -22,10 +25,29 @@ test("no runtime row means there is no bridge to watch", () => {
   assert.deepEqual(judgeAmuxBridgeLiveness([], NOW), { state: "unwatched" });
 });
 
-test("one live lease among lapsed ones is a live bridge", () => {
+test("every runtime holding a live lease is live", () => {
   assert.deepEqual(
-    judgeAmuxBridgeLiveness([at(-10 * MINUTE), at(45_000), at(-MINUTE)], NOW),
-    { state: "live", liveRuntimes: 1 }
+    judgeAmuxBridgeLiveness([at(45_000, "codex-impl"), at(80_000, "claude-impl")], NOW),
+    { state: "live", liveRuntimes: 2 }
+  );
+});
+
+// 2026-10-13: claude-impl halted at 02:45Z and claude-review at 04:22Z, and
+// nothing was reported until the last bridge stopped at 05:32Z, because one
+// live lease anywhere made the whole fleet read live.
+test("one halted runtime beside live ones is lost", () => {
+  assert.deepEqual(
+    judgeAmuxBridgeLiveness(
+      [at(-10 * MINUTE, "claude-impl"), at(45_000, "codex-impl"), at(-MINUTE, "claude-chore")],
+      NOW
+    ),
+    {
+      state: "lost",
+      lostSince: at(-10 * MINUTE).leaseExpiresAt,
+      lostRuntimes: [{ workerName: "claude-impl", leaseExpiresAt: at(-10 * MINUTE).leaseExpiresAt }],
+      liveRuntimes: 1,
+      watchedRuntimes: 3,
+    }
   );
 });
 
@@ -42,21 +64,99 @@ test("every lease out for less than the grace period is lapsing, not lost", () =
     NOW
   );
   assert.equal(verdict.state, "lapsing");
-  // The newest expiry is when the last heartbeat stopped counting.
-  assert.deepEqual(verdict.lostSince, at(-2 * MINUTE).leaseExpiresAt);
+  // The oldest expiry: the runtime that will be lost first.
+  assert.deepEqual(verdict.lostSince, at(-(AMUX_BRIDGE_LOST_AFTER_MS - 1)).leaseExpiresAt);
 });
 
-test("every lease out for the grace period or longer is lost", () => {
+test("every lease out for the grace period or longer is lost, longest-lost first", () => {
   assert.deepEqual(
     judgeAmuxBridgeLiveness(
-      [at(-AMUX_BRIDGE_LOST_AFTER_MS), at(-30 * MINUTE), at(-31 * MINUTE)],
+      [
+        at(-AMUX_BRIDGE_LOST_AFTER_MS, "claude-chore"),
+        at(-30 * MINUTE, "claude-impl"),
+        at(-31 * MINUTE, "codex-impl"),
+      ],
       NOW
     ),
     {
       state: "lost",
-      lostSince: at(-AMUX_BRIDGE_LOST_AFTER_MS).leaseExpiresAt,
+      lostSince: at(-31 * MINUTE).leaseExpiresAt,
+      lostRuntimes: [
+        { workerName: "codex-impl", leaseExpiresAt: at(-31 * MINUTE).leaseExpiresAt },
+        { workerName: "claude-impl", leaseExpiresAt: at(-30 * MINUTE).leaseExpiresAt },
+        { workerName: "claude-chore", leaseExpiresAt: at(-AMUX_BRIDGE_LOST_AFTER_MS).leaseExpiresAt },
+      ],
+      liveRuntimes: 0,
       watchedRuntimes: 3,
     }
+  );
+});
+
+test("a runtime still inside the grace period is not named as lost", () => {
+  const verdict = judgeAmuxBridgeLiveness(
+    [at(-20 * MINUTE, "claude-impl"), at(-2 * MINUTE, "claude-review")],
+    NOW
+  );
+  assert.equal(verdict.state, "lost");
+  assert.deepEqual(
+    verdict.lostRuntimes.map((runtime) => runtime.workerName),
+    ["claude-impl"]
+  );
+  assert.equal(verdict.liveRuntimes, 0);
+  assert.equal(verdict.watchedRuntimes, 2);
+});
+
+test("a name outside the catalog's worker-name grammar never reaches the alert", () => {
+  assert.equal(alertableAmuxWorkerName("claude-impl"), "claude-impl");
+  assert.equal(alertableAmuxWorkerName("codex:review.v2"), "codex:review.v2");
+  // The catalog allows 120 characters, so a registrable name prints in full.
+  assert.equal(alertableAmuxWorkerName("x".repeat(120)), "x".repeat(120));
+  for (const name of [
+    "",
+    "<@channel>",
+    "a b",
+    "-leading",
+    "trailing-",
+    "x".repeat(121),
+    `line${String.fromCharCode(10)}break`,
+  ]) {
+    assert.equal(alertableAmuxWorkerName(name), "unnamed-runtime", JSON.stringify(name));
+  }
+});
+
+// Review r-20261013-082232-b289dd: replacing the name inside the judgement made
+// two different runtimes one "unnamed-runtime", so the second one's halt read
+// as a reminder of the first.
+test("two runtimes that print the same are still two runtimes", () => {
+  const first = "<one> runtime";
+  const second = "<two> runtime";
+  const verdict = judgeAmuxBridgeLiveness(
+    [at(-40 * MINUTE, first), at(-10 * MINUTE, second)],
+    NOW
+  );
+  assert.deepEqual(
+    verdict.lostRuntimes.map((runtime) => runtime.workerName),
+    [first, second]
+  );
+  assert.deepEqual(newlyLostAmuxWorkers(new Set([first]), verdict), [second]);
+  assert.deepEqual(lostAmuxWorkers(verdict), [first, second]);
+  assert.deepEqual(lostAmuxWorkers(judgeAmuxBridgeLiveness([at(-2 * MINUTE)], NOW)), []);
+});
+
+test("only a runtime that was not lost before is newly lost", () => {
+  const verdict = judgeAmuxBridgeLiveness(
+    [at(-40 * MINUTE, "claude-impl"), at(-10 * MINUTE, "claude-review"), at(45_000, "codex-impl")],
+    NOW
+  );
+  assert.deepEqual(newlyLostAmuxWorkers(new Set(), verdict), ["claude-impl", "claude-review"]);
+  assert.deepEqual(newlyLostAmuxWorkers(new Set(["claude-impl"]), verdict), ["claude-review"]);
+  assert.deepEqual(
+    newlyLostAmuxWorkers(new Set(["claude-impl", "claude-review"]), verdict),
+    []
+  );
+  assert.deepEqual(
+    newlyLostAmuxWorkers(new Set(["claude-impl"]), judgeAmuxBridgeLiveness([at(45_000)], NOW)),
+    []
   );
 });
 
@@ -69,6 +169,7 @@ test("a bridge halted for a day is still reported", () => {
   );
   assert.equal(verdict.state, "lost");
   assert.equal(verdict.watchedRuntimes, 3);
+  assert.equal(verdict.lostRuntimes.length, 3);
 });
 
 test("a lease past the horizon is retired, and is not counted", () => {
@@ -99,6 +200,12 @@ test("a runtime no bridge runs never makes the bridges live", () => {
   assert.deepEqual(judgeAmuxBridgeLiveness([at(45_000, "engineering-runner")], NOW), {
     state: "unwatched",
   });
+  // Between its runs the engineering agent's lease is out for twenty-eight
+  // minutes; that is not a halted bridge.
+  assert.deepEqual(
+    judgeAmuxBridgeLiveness([at(45_000), at(-20 * MINUTE, "engineering-runner")], NOW),
+    { state: "live", liveRuntimes: 1 }
+  );
 });
 
 const ROOT = new URL("..", import.meta.url);
