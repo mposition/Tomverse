@@ -459,7 +459,11 @@ export async function pullAmuxWorkDelivery(input: {
   };
   return withAmuxDbBoundary(
     { ...AMUX_DB_BOUNDARIES.deliveryPull,
-      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 2 },
+      // + 3: the admission lock and incident read, and the safe-stop fence.
+      // + 7: an approved recovery delivery re-reads its authority (approval,
+      // approval audit, risk acceptance, launch proof and launch check) and
+      // the proof and check it binds into the delivery.
+      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 3 + 7 },
     async (tx, context) => {
       const now = input.now ?? context.dbNow;
       // Safe-stop request and all ownership/start/delivery writers share this

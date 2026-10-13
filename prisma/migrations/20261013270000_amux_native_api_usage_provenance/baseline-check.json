@@ -5,12 +5,12 @@
     {
       "table": "AmuxCliUsageEvent",
       "constraint": "AmuxCliUsageEvent_source_check",
-      "previousDefinitionSha256": "7f4fdc83b93f8b22fd6b79eb0f3db9b87522a2cf85ae84aa78da31541fb04f13"
+      "previousDefinitionSha256": "5ca3304bf539aed2d3add88337fb613bc44ff2a391116535518290a0ec245b47"
     },
     {
       "table": "AmuxCliUsageEvent",
       "constraint": "AmuxCliUsageEvent_shape_check",
-      "previousDefinitionSha256": "a170f4443efcaa5a3f6f4bb20d66f06a1eb9e9ad550bee4818872d990fba1ea1"
+      "previousDefinitionSha256": "d80ec1c306e8fab0a69f0610767e5700e2902ac7953e954838449acb13ebf882"
     }
   ]
 }

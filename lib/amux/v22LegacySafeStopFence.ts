@@ -27,6 +27,35 @@ export async function amuxV22SafeStopFencedWorkers(
   return new Set(rows.map((row) => row.workerName));
 }
 
+/**
+ * The routing snapshot's two worker facts in one statement: which named
+ * workers own an open card (todo or doing, not archived; the same rule as
+ * amuxWorkersOwningOpenCards) and which are permanently safe-stop fenced (the
+ * same rule as amuxV22SafeStopFencedWorkers). One read keeps the snapshot
+ * inside its Prisma-call ceiling and selection-route budget.
+ */
+export async function amuxV22OpenCardOwnersAndSafeStopFenced(
+  tx: Prisma.TransactionClient,
+  workerNames: readonly string[],
+) {
+  if (!workerNames.length) return { busy: new Set<string>(), fenced: new Set<string>() };
+  const rows = await tx.$queryRaw<Array<{ workerName: string; busy: boolean; fenced: boolean }>>`
+    SELECT name AS "workerName",
+      EXISTS (SELECT 1 FROM "AmuxWorkItem" item
+        WHERE item."owner" = name AND item."archivedAt" IS NULL
+          AND item."status" IN ('todo', 'doing')) AS "busy",
+      EXISTS (SELECT 1 FROM "AmuxV22TaskRecoveryInspectionRequest" request
+        WHERE request."requestKind" = 'safe_stop'
+          AND name = ANY(request."profileWorkerNames")) AS "fenced"
+    FROM unnest(${[...workerNames]}::text[]) AS name
+    ORDER BY name
+  `;
+  return {
+    busy: new Set(rows.filter((row) => row.busy).map((row) => row.workerName)),
+    fenced: new Set(rows.filter((row) => row.fenced).map((row) => row.workerName)),
+  };
+}
+
 export async function amuxV22WorkerSafeStopFenced(
   tx: Prisma.TransactionClient,
   workerName: string,

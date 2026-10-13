@@ -671,6 +671,30 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence for one AMUX worker capability change, not customer data. The actor id is the owner who recorded it and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a worker name, a model id, closed routing tags, tools and a v22 profile, not free text. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxTaskRecoveryInspectionRequest",
+    publicName: "amux_v22_task_recovery_inspection_requests",
+    prismaModel: "AmuxV22TaskRecoveryInspectionRequest",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one owner request to inspect or safely stop a prior AMUX attempt, not customer data. The requester id is the owner who asked and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores Task, attempt and worker identifiers, a closed request kind and digests, not free text. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxTaskRecoveryApproval",
+    publicName: "amux_v22_task_recovery_approvals",
+    prismaModel: "AmuxV22TaskRecoveryApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one owner approval of a single capped AMUX recovery attempt, not customer data. The approver id is the owner who approved and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores identifiers, digests, a worker/model/route binding and a cost receipt of prices and ceilings, not free text. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxTaskRecoveryRiskAcceptance",
+    publicName: "amux_v22_task_recovery_risk_acceptances",
+    prismaModel: "AmuxV22TaskRecoveryRiskAcceptance",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence that the owner accepted the unknown effects of the approved FIRST Task's prior attempt, not customer data. The accepter id is the owner and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores Task, attempt and evidence identifiers, fixed cost ceilings and digests, not free text. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxWorkerLatchEvent",
     publicName: "amux_worker_latch_events",
     prismaModel: "AmuxWorkerLatchEvent",

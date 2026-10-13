@@ -3,13 +3,10 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
-import {
-  amuxWorkersOwningOpenCards,
-  getRoutingSnapshotTask,
-} from "@/lib/amux/store";
+import { getRoutingSnapshotTask } from "@/lib/amux/store";
 import { amuxWorkerRuntimeByName } from "@/lib/amux/workerRuntime";
 import { getAmuxWorkerTelemetry } from "@/lib/amux/telemetry";
-import { amuxV22SafeStopFencedWorkers } from
+import { amuxV22OpenCardOwnersAndSafeStopFenced } from
   "@/lib/amux/v22LegacySafeStopFence";
 import { readAmuxAssignmentCatalogs } from "@/lib/amux/workerAssignmentCatalog";
 
@@ -136,12 +133,10 @@ export async function buildAmuxRoutingSnapshot(
 
       // A worker holds one open card at a time (the claim refuses a second), so
       // one that already owns todo or doing work is not a dispatch candidate.
-      const busyOwners = await amuxWorkersOwningOpenCards(
-        workers.map((worker) => worker.worker_name),
-        tx,
-      );
-      const safeStopFenced = await amuxV22SafeStopFencedWorkers(tx,
-        workers.map((worker) => worker.worker_name));
+      // The permanent safe-stop fence is read in the same statement.
+      const { busy: busyOwners, fenced: safeStopFenced } =
+        await amuxV22OpenCardOwnersAndSafeStopFenced(tx,
+          workers.map((worker) => worker.worker_name));
 
       const filesExpected = classification.data.files_expected;
 
