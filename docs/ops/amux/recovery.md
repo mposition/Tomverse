@@ -69,7 +69,7 @@ COMMIT이 됐든 안 됐든 DB 상태는 같다. 결과 불명 규칙(정책 Pha
 
 **지금의 동작.**
 
-- 읽기 경계가 `P2024`, `P2028`, `57014`, 연결 오류(목록은
+- 읽기 경계가 `P2024`, `P2028`, `57014`, `25P03`(2026-10-13 추가), 연결 오류(목록은
   `lib/amux/readFailureCore.ts`)로 실패하고, 그 route가 그때까지 쓰기 트랜잭션을 시작하지
   않았으면 503 `amux_database_busy`와 `Retry-After: 5`로 답한다. incident를 열지 않고
   WARN `internal_route_database_busy` 한 줄을 남긴다.

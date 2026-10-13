@@ -73,6 +73,36 @@ test("the pool, the transaction API, the statement timeout and a lost connection
   }
 });
 
+test("a session the database ended for idling in its transaction (25P03) is transient, in every shape", () => {
+  // 2026-10-13, production: right after the web service's deploy cutovers the
+  // owned-queue read failed with P2010, P2039 and a bare DriverAdapterError
+  // and was answered 500, and four WSL bridges halted on it. The recovery
+  // sweep logged the nested code of the same failures: 25P03. A boundary sets
+  // idle_in_transaction_session_timeout to 100 ms (lib/amux/dbBoundary.ts), so
+  // a gap longer than that between two statements ends the session, and the
+  // next statement or the COMMIT is refused with this code.
+  const fatal = new DriverAdapterError({
+    kind: "postgres",
+    code: "25P03",
+    originalCode: "25P03",
+    originalMessage: "m",
+    severity: "FATAL",
+    message: "m",
+  });
+  const cases = [
+    // At COMMIT the transaction manager rethrows the adapter's error bare.
+    fatal,
+    // From a raw statement (setup, fence) and from a model query.
+    { name: "PrismaClientKnownRequestError", code: "P2010", meta: { driverAdapterError: fatal } },
+    { name: "PrismaClientKnownRequestError", code: "P2039", meta: { driverAdapterError: postgres("25P03") } },
+    // The pg driver's own error.
+    { code: "25P03", severity: "FATAL" },
+  ];
+  for (const error of cases) {
+    assert.equal(amuxTransientDatabaseCode(error), "25P03", JSON.stringify(error));
+  }
+});
+
 test("everything else keeps its old answer", () => {
   for (const error of [
     undefined,

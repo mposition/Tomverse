@@ -683,6 +683,58 @@ test("a statement timeout or a lost connection in a read of a route that wrote n
   }
 });
 
+// 2026-10-13: after the web service's deploy cutovers, the owned-queue read
+// failed with 25P03 (the 100 ms idle-in-transaction timeout a boundary sets
+// ended its session) and was answered 500, which halts a WSL bridge. A read
+// writes nothing, so it is busy. A mutation keeps its answer: unknown at
+// COMMIT, and passed on (not busy) while its callback runs.
+test("an idle-in-transaction termination (25P03) is a busy read and leaves a mutation's answer alone", async () => {
+  const { AmuxDbBoundaryError, amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
+  const idleTimeout = () =>
+    Object.assign(
+      databaseError("25P03", "terminating connection due to idle-in-transaction timeout"),
+      { severity: "FATAL" },
+    );
+
+  for (const overrides of [{ callbackError: idleTimeout() }, { commitError: idleTimeout() }]) {
+    reset(overrides);
+    await quietly(async ({ warnings, errors }) => {
+      const error = await caught(withAmuxRouteBudget(() => run(READ)));
+      const where = Object.keys(overrides)[0];
+      assert.ok(error instanceof AmuxDbBoundaryError, where);
+      assert.equal(error.code, "AMUX_DB_READ_BUSY", where);
+      const response = amuxInternalErrorResponse("owned_queue", error);
+      assert.equal(response.status, 503, where);
+      assert.equal(response.headers.get("X-AMUX-Incident-ID"), null, where);
+      assert.equal(await response.text(), busyBody, where);
+      assert.equal(errors.mock.callCount(), 0, `${where}: a busy answer opens no incident`);
+      const warning = lastWarning(warnings);
+      assert.equal(warning.path, "read", where);
+      assert.equal(warning.error_code, "25P03", where);
+    });
+  }
+
+  await quietly(async () => {
+    // At COMMIT a mutation stays an unknown outcome, whatever the code.
+    reset({ commitError: idleTimeout() });
+    const atCommit = await caught(withAmuxRouteBudget(() => run(MUTATION)));
+    assert.ok(atCommit instanceof AmuxDbBoundaryError);
+    assert.equal(atCommit.code, "AMUX_DB_OUTCOME_UNKNOWN");
+    assert.equal(
+      await reasonOf(amuxInternalErrorResponse("worker_heartbeat", atCommit)),
+      "amux_outcome_unknown",
+    );
+
+    // While its callback runs, a mutation's failure is passed on, never busy.
+    reset({ callbackError: idleTimeout() });
+    const running = await caught(withAmuxRouteBudget(() => run(MUTATION)));
+    assert.equal(running instanceof AmuxDbBoundaryError, false);
+    assert.equal(running.code, "P2010");
+    const response = amuxInternalErrorResponse("worker_heartbeat", running);
+    assert.notEqual(await response.text(), busyBody);
+  });
+});
+
 test("once its route has started a mutation, a transaction that cannot start keeps the unknown outcome", async () => {
   const { AmuxDbBoundaryError, amuxInternalErrorResponse, anchorAmuxRouteDeadline, withAmuxRouteBudget } =
     await modules();
