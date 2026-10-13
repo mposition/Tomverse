@@ -667,10 +667,12 @@ pub const TOMVERSE_INTERNAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 /// also bounds a peer that sends a valid claim body one byte at a time.
 pub const TOMVERSE_INTERNAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Queue and routing snapshot routes each allow 2.8 seconds inside the app.
-/// Five seconds leaves one second for connect and at least one second for
-/// response transport; the shorter default remains for other requests.
-pub const TOMVERSE_INTERNAL_SELECTION_READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// The queue route allows 2.8 seconds and the routing snapshot route 3.1
+/// seconds inside the app (orchestration policy version 35: the derived worker
+/// catalog adds one statement to the snapshot). Six seconds leaves one second
+/// for connect and at least one second for response transport; the shorter
+/// default remains for other requests.
+pub const TOMVERSE_INTERNAL_SELECTION_READ_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// Claim can perform a clock-anchor, snapshot and bounded mutation. The
 /// advanced admission transaction includes incident, resource, WIP and audit

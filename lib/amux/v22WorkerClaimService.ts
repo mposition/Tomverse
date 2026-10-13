@@ -11,7 +11,7 @@ import { BoardImportError } from "./boardImportCore.ts";
 import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
 import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { lockAmuxAdmissionAndReadIncident } from "./incident.ts";
-import { getConfiguredAmuxV22WorkerCatalog } from "./routing.ts";
+import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
 import { getAmuxWorkerTelemetry } from "./telemetry.ts";
 import { TICK_TRANSACTION_LIMITS, withAutoTransaction } from
   "./autoPromotionService.ts";
@@ -123,7 +123,10 @@ async function claimCandidate(taskId: string, assignmentId: string,
         throw new BoardImportError("one_shot_role_unavailable", 409);
       }
       const lane = await currentLane(tx, taskId);
-      const catalog = getConfiguredAmuxV22WorkerCatalog();
+      // Orchestration policy version 35, section 3: the variables while R2c is
+      // off; the catalog derived from the registry, read in this transaction,
+      // once it is on.
+      const { v22: catalog } = await readAmuxAssignmentCatalogs(tx);
       if (!catalog) throw new BoardImportError("worker_catalog_unavailable", 409);
       const live = await tx.amuxWorkerRuntime.findMany({ where: {
         workerName: { in: catalog.map((worker) => worker.worker_name) },

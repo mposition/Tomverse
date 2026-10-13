@@ -186,6 +186,11 @@ test("the adapter reaches only the AMUX writers version 12 allows it", () => {
     "reviewPullRequest",
     "routing",
     "store",
+    // Orchestration policy version 35, section 3 names the adapter among the
+    // seven consumers of the derived assignment catalog: a reader and its
+    // code latch, neither of which writes.
+    "workerAssignmentCatalog",
+    "workerDerivedCatalogCore",
     "workerRuntime",
   ]);
   assert.doesNotMatch(text, /\breclaimExpiredAmux/, "recovery is the AMUX recover route's alone");

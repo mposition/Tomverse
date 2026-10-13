@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
@@ -76,6 +76,35 @@ export async function readAmuxWorkerCapabilitiesOrThrow(
     FROM "AmuxWorkerCapabilityEvent"
     ORDER BY "workerName", "sequence" DESC
   `;
+  return capabilityEntriesFromRowsOrThrow(rows);
+}
+
+/**
+ * Version 35 section 3: the newest capability of every worker as a JSON-array
+ * subquery that the assignment catalog reader composes into its one
+ * statement. The text stays in this store, the one module that reads the
+ * table; the composing module names no table.
+ */
+export const amuxWorkerCapabilityNewestJsonSql = (): Prisma.Sql => Prisma.sql`(
+  SELECT coalesce(json_agg(newest), '[]'::json) FROM (
+    SELECT DISTINCT ON ("workerName")
+      "workerName", "revision", "model", "routingTags", "toolCapabilities",
+      "v22Model", "v22Roles", "v22Tools",
+      floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "changedAtEpochMs"
+    FROM "AmuxWorkerCapabilityEvent"
+    ORDER BY "workerName", "sequence" DESC
+  ) AS newest
+)`;
+
+/** What that subquery returns, under the same rules as the read above. */
+export function amuxWorkerCapabilitiesFromNewestJsonOrThrow(rows: unknown): Map<string, AmuxWorkerCapabilityEntry> {
+  if (!Array.isArray(rows) || rows.some((row) => row === null || typeof row !== "object" || Array.isArray(row))) {
+    throw new Error("AMUX worker capability read outside its shape");
+  }
+  return capabilityEntriesFromRowsOrThrow(rows as CapabilityRow[]);
+}
+
+function capabilityEntriesFromRowsOrThrow(rows: readonly CapabilityRow[]): Map<string, AmuxWorkerCapabilityEntry> {
   const entries = new Map<string, AmuxWorkerCapabilityEntry>();
   for (const row of rows) {
     const changedAtMs = Number(row.changedAtEpochMs);

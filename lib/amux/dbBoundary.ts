@@ -99,9 +99,11 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "read",
   },
   // 7: the busy-owner read (one open card per worker) joined the snapshot.
+  // 8: the derived assignment catalog's one statement (orchestration policy
+  // version 35, section 3) joins it when R2c is on.
   routingSnapshot: {
     operation: "routing_snapshot",
-    prismaCallCeiling: 7,
+    prismaCallCeiling: 8,
     isolation: "read",
   },
   routingTaskRead: {
@@ -114,14 +116,18 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 3,
     isolation: "read",
   },
+  // 8: the derived assignment catalog's one statement (orchestration policy
+  // version 35, section 3) joins the registration when R2c is on.
   workerRegister: {
     operation: "worker_register",
-    prismaCallCeiling: 7,
+    prismaCallCeiling: 8,
     isolation: "mutation",
   },
+  // 10: the derived assignment catalog's one statement (orchestration policy
+  // version 35, section 3) joins the heartbeat when R2c is on.
   workerHeartbeat: {
     operation: "worker_heartbeat",
-    prismaCallCeiling: 9,
+    prismaCallCeiling: 10,
     isolation: "mutation",
   },
   // 18: the one-open-card-per-worker count added a read to the success path.
@@ -195,8 +201,10 @@ export const AMUX_DB_BOUNDARIES = {
   },
   quotaObservationWrite: {
     operation: "quota_observation_write",
-    // setup + chain lock + identity lock + lookup + create + audit (4) + fence
-    prismaCallCeiling: 11,
+    // setup + chain lock + identity lock + lookup + create + audit (4) + fence,
+    // + the derived assignment catalog's one statement when R2c is on
+    // (orchestration policy version 35, section 3)
+    prismaCallCeiling: 12,
     isolation: "mutation",
   },
   ownershipRecoveryRead: {
