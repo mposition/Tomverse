@@ -36,6 +36,7 @@ const buttonClass =
 const describe = (m: Messages, capability: AmuxWorkerCapability | null) => {
   if (capability === null) return m.none;
   const parts = [`${m.tags}: ${capability.routingTags.join(", ")}`];
+  if (capability.toolCapabilities.length > 0) parts.push(`${m.tools}: ${capability.toolCapabilities.join(", ")}`);
   if (capability.model) parts.push(`${m.model}: ${capability.model}`);
   if (capability.v22) parts.push(`${m.v22}: ${capability.v22.roles.join(", ")} (${capability.v22.tools.join(", ")}, ${capability.v22.model})`);
   return parts.join(" · ");

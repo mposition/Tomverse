@@ -157,6 +157,16 @@ test("the read is one statement; a row outside its shape throws", async () => {
   assert.deepEqual(entries.get("claude-chore").capability, { model: null, routingTags: ["chore"], toolCapabilities: [], v22: null });
   const bad = recordingTx({ all: [{ workerName: "devin-worker", revision: 1, routingTags: [], toolCapabilities: [], changedAtEpochMs: 1n }] });
   await assert.rejects(readAmuxWorkerCapabilitiesOrThrow(bad.tx), /outside its shape/);
+  // A row the guard would not have accepted fails the read too.
+  const base = { workerName: "claude-chore", revision: 1, model: null, routingTags: ["chore"], toolCapabilities: [], v22Model: null, v22Roles: null, v22Tools: null, changedAtEpochMs: 1n };
+  for (const row of [
+    { ...base, routingTags: [] },
+    { ...base, revision: 0 },
+    { ...base, v22Model: "claude-opus-5-5" },
+    { ...base, v22Model: "claude-opus-5-5", v22Roles: [], v22Tools: ["repo_read"] },
+  ]) {
+    await assert.rejects(readAmuxWorkerCapabilitiesOrThrow(recordingTx({ all: [row] }).tx), /outside its shape/);
+  }
 });
 
 for (const [label, key, auditStatements] of [["without", null, 3], ["with", "unit-test-integrity-key", 4]]) {

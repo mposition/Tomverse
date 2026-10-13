@@ -312,7 +312,11 @@ export type AmuxWorkerCapabilityAdminRow = {
 
 export type AmuxWorkerCapabilityAdminView = {
   writesLatch: boolean;
-  /** False when the catalog variables could not be read: nothing is proposed. */
+  /**
+   * False when either catalog variable could not be read: nothing is
+   * proposed. A v22 variable that is set but does not parse is unreadable,
+   * never an empty list -- importing over it would erase recorded profiles.
+   */
   catalogReadable: boolean;
   rows: AmuxWorkerCapabilityAdminRow[];
 };
@@ -322,10 +326,12 @@ export function buildAmuxWorkerCapabilityAdminView(input: {
   registrations: readonly AmuxWorkerRegistration[];
   current: ReadonlyMap<string, { revision: number; capability: AmuxWorkerCapability; changedAt: string }>;
   legacy: readonly AmuxCatalogCapabilityEntry[] | null;
+  /** The v22 profiles; [] when the variable is unset, null when it is set and unreadable. */
   v22: readonly AmuxV22CatalogCapabilityEntry[] | null;
   writesLatch?: boolean;
 }): AmuxWorkerCapabilityAdminView {
-  const imports = input.legacy === null ? [] : amuxWorkerCapabilityImport(input.registrations, input.legacy, input.v22);
+  const catalogReadable = input.legacy !== null && input.v22 !== null;
+  const imports = catalogReadable ? amuxWorkerCapabilityImport(input.registrations, input.legacy!, input.v22) : [];
   const proposals = new Map(imports.map((row) => [row.workerName, row]));
   const rows = [...input.registrations]
     .filter((registration) => registration.desiredState !== "retired")
@@ -343,7 +349,7 @@ export function buildAmuxWorkerCapabilityAdminView(input: {
         same: proposal !== null && current !== null && amuxWorkerCapabilitiesEqual(current.capability, proposal.proposed),
       };
     });
-  return { writesLatch: input.writesLatch ?? amuxWorkerCapabilityWritesOpen(), catalogReadable: input.legacy !== null, rows };
+  return { writesLatch: input.writesLatch ?? amuxWorkerCapabilityWritesOpen(), catalogReadable, rows };
 }
 
 /** The proposals an owner may import now: readable, not refused, not already recorded. */

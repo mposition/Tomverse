@@ -79,12 +79,19 @@ export async function readAmuxWorkerCapabilitiesOrThrow(
   const entries = new Map<string, AmuxWorkerCapabilityEntry>();
   for (const row of rows) {
     const changedAtMs = Number(row.changedAtEpochMs);
-    if (!isAmuxWorkerName(row.workerName) || !Number.isSafeInteger(changedAtMs)) {
+    const revision = Number(row.revision);
+    const v22Parts = [row.v22Model, row.v22Roles, row.v22Tools].filter((part) => part !== null).length;
+    if (!isAmuxWorkerName(row.workerName) || !Number.isSafeInteger(changedAtMs) ||
+        !Number.isSafeInteger(revision) || revision < 1 ||
+        !Array.isArray(row.routingTags) || row.routingTags.length === 0 || !Array.isArray(row.toolCapabilities) ||
+        (v22Parts !== 0 && v22Parts !== 3) ||
+        (row.v22Roles !== null && (!Array.isArray(row.v22Roles) || row.v22Roles.length === 0)) ||
+        (row.v22Tools !== null && (!Array.isArray(row.v22Tools) || row.v22Tools.length === 0))) {
       throw new Error("AMUX worker capability row outside its shape");
     }
     entries.set(row.workerName, {
       workerName: row.workerName,
-      revision: Number(row.revision),
+      revision,
       capability: capabilityFromRow(row),
       changedAt: new Date(changedAtMs).toISOString(),
     });

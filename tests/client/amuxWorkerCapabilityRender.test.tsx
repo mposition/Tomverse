@@ -163,3 +163,17 @@ test("a refusal by the ceiling rule, the latch or a stale revision stops on that
   const unread = await runWith([], null);
   assert.equal(unread.last("notice"), "unread");
 });
+
+test("the preview shows the tools, so a tools-only change is visible", () => {
+  const view = buildAmuxWorkerCapabilityAdminView({
+    registrations: REGISTRY,
+    current: new Map([["codex-impl", { revision: 1, capability: { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null }, changedAt: "2026-10-13T00:00:00.000Z" }]]),
+    legacy: [{ worker_name: "codex-impl", provider: "codex", routing_roles: ["implementation"], tool_capabilities: ["shell"] }],
+    v22: [],
+    writesLatch: true,
+  });
+  const tree = render({ view });
+  const row = byTestId(tree, "amux-worker-capability-row-codex-impl")[0]!;
+  assert.match(textOf(row.children as ReactNode), /tools: shell/);
+  assert.match(textOf(byTestId(tree, "amux-worker-capability-status-codex-impl")[0]!.children as ReactNode), /will be recorded/);
+});
