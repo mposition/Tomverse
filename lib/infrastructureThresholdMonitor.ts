@@ -3,7 +3,9 @@ import "server-only";
 import {
   AMUX_BRIDGE_REMINDER_MS,
   amuxBridgeWatchHorizonStart,
+  alertableAmuxWorkerName,
   judgeAmuxBridgeLiveness,
+  lostAmuxWorkers,
   newlyLostAmuxWorkers,
   type AmuxBridgeLiveness,
 } from "@/lib/amux/bridgeLivenessCore";
@@ -67,10 +69,11 @@ async function reportSilentMarketingPublisherRuns(now: Date): Promise<number> {
 }
 
 /**
- * The runtimes reported lost by the previous check in this process, so the
- * next one can tell a newly halted bridge from a reminder. In memory, like the
- * dependency state it sits beside (lib/operationalMonitoring.ts): after a
- * deploy the first check pages again, which is the existing behaviour.
+ * The runtimes the previous check in this process found lost, by registered
+ * name, so the next one can tell a newly halted bridge from a reminder. Set
+ * after every check, whatever its state. In memory, like the dependency state
+ * it sits beside (lib/operationalMonitoring.ts): after a deploy the first
+ * check pages again, which is the existing behaviour.
  */
 const bridgeAlertMemory = globalThis as typeof globalThis & {
   __tomverseAmuxBridgeLostWorkers?: ReadonlySet<string>;
@@ -86,7 +89,8 @@ const describeLostRuntimes = (
     .slice(0, MAX_NAMED_LOST_RUNTIMES)
     .map(
       (runtime) =>
-        `${runtime.workerName} (lease out since ${runtime.leaseExpiresAt.toISOString()})`
+        `${alertableAmuxWorkerName(runtime.workerName)} ` +
+        `(lease out since ${runtime.leaseExpiresAt.toISOString()})`
     );
   const unnamed = verdict.lostRuntimes.length - named.length;
   return unnamed > 0 ? [...named, `and ${unnamed} more`].join(", ") : named.join(", ");
@@ -118,11 +122,15 @@ async function reportAmuxBridgeLiveness(
   });
   // The judgement drops runtimes no bridge runs (AMUX_NON_BRIDGE_WORKERS).
   const verdict = judgeAmuxBridgeLiveness(leases, now);
-  if (verdict.state !== "lost" && verdict.state !== "live") {
-    return { state: verdict.state, notified: false };
-  }
   const previouslyLost = bridgeAlertMemory.__tomverseAmuxBridgeLostWorkers ?? new Set();
   const newlyLost = newlyLostAmuxWorkers(previouslyLost, verdict);
+  if (verdict.state !== "lost" && verdict.state !== "live") {
+    // Nothing is reported, but nothing is lost either: a runtime that was
+    // lost and has restarted must not stay in the set, or its next halt would
+    // read as a reminder.
+    bridgeAlertMemory.__tomverseAmuxBridgeLostWorkers = new Set();
+    return { state: verdict.state, notified: false };
+  }
   const report = await reportOperationalDependencyStatus({
     dependency: "amux-execution-bridge",
     healthy: verdict.state === "live",
@@ -143,9 +151,11 @@ async function reportAmuxBridgeLiveness(
       ...(verdict.state === "lost"
         ? {
             lostWorkers: verdict.lostRuntimes
-              .map((runtime) => runtime.workerName)
+              .map((runtime) => alertableAmuxWorkerName(runtime.workerName))
               .join(", "),
-            ...(newlyLost.length > 0 ? { newlyLost: newlyLost.join(", ") } : {}),
+            ...(newlyLost.length > 0
+              ? { newlyLost: newlyLost.map(alertableAmuxWorkerName).join(", ") }
+              : {}),
             liveRuntimes: String(verdict.liveRuntimes),
             lostSince: verdict.lostSince.toISOString(),
             minutesLost: String(
@@ -155,11 +165,7 @@ async function reportAmuxBridgeLiveness(
         : {}),
     },
   });
-  bridgeAlertMemory.__tomverseAmuxBridgeLostWorkers = new Set(
-    verdict.state === "lost"
-      ? verdict.lostRuntimes.map((runtime) => runtime.workerName)
-      : []
-  );
+  bridgeAlertMemory.__tomverseAmuxBridgeLostWorkers = new Set(lostAmuxWorkers(verdict));
   return { state: verdict.state, notified: report.notified };
 }
 

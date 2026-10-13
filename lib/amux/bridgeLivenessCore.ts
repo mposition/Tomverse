@@ -23,6 +23,8 @@
  * Pure: the infrastructure threshold monitor reads the rows and reports.
  */
 
+import { AMUX_CATALOG_WORKER_NAME_PATTERN } from "./workerRegistryCore.ts";
+
 /**
  * How long a lease may have been out before its runtime is reported lost.
  * A restart registers again within seconds, so this only absorbs a run that
@@ -62,7 +64,10 @@ export type AmuxBridgeLease = {
 };
 
 export type AmuxLostRuntime = {
-  /** The worker name, or `unnamed-runtime` when it is not a plain identifier. */
+  /**
+   * The worker name exactly as registered. It identifies the runtime and is
+   * never put in an alert as it stands: `alertableAmuxWorkerName` does that.
+   */
   readonly workerName: string;
   readonly leaseExpiresAt: Date;
 };
@@ -91,11 +96,13 @@ export const amuxBridgeWatchHorizonStart = (now: Date) =>
 /**
  * The name as it may appear in an alert. Worker names are registered through
  * an authenticated internal route, but the alert goes to Slack and email, so
- * anything that is not a plain identifier is replaced rather than quoted.
+ * anything outside the catalog's own worker-name grammar is replaced rather
+ * than quoted. Only the output is replaced: the judgement and the lost-set
+ * comparison keep the registered name, so two runtimes that both print as
+ * `unnamed-runtime` are still two runtimes.
  */
-const ALERTABLE_WORKER_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 export const alertableAmuxWorkerName = (workerName: string) =>
-  ALERTABLE_WORKER_NAME.test(workerName) ? workerName : "unnamed-runtime";
+  AMUX_CATALOG_WORKER_NAME_PATTERN.test(workerName) ? workerName : "unnamed-runtime";
 
 export function judgeAmuxBridgeLiveness(
   leases: readonly AmuxBridgeLease[],
@@ -129,7 +136,7 @@ export function judgeAmuxBridgeLiveness(
     state: "lost",
     lostSince: new Date(lost[0].expiresAt),
     lostRuntimes: lost.map(({ workerName, expiresAt }) => ({
-      workerName: alertableAmuxWorkerName(workerName),
+      workerName,
       leaseExpiresAt: new Date(expiresAt),
     })),
     liveRuntimes,
@@ -138,17 +145,30 @@ export function judgeAmuxBridgeLiveness(
 }
 
 /**
+ * The registered names of the runtimes this verdict finds lost; empty for
+ * every other state. The monitor keeps this from one check to the next.
+ */
+export function lostAmuxWorkers(verdict: AmuxBridgeLiveness): string[] {
+  return verdict.state === "lost"
+    ? verdict.lostRuntimes.map((runtime) => runtime.workerName)
+    : [];
+}
+
+/**
  * The lost runtimes that were not lost at the previous check. A runtime that
  * joins the lost set pages at once, even inside the reminder cooldown that a
  * runtime lost earlier started: otherwise the second bridge to halt waits up
  * to three hours behind the first.
+ *
+ * `previouslyLost` must be the lost set of the previous check whatever its
+ * state was -- a `lapsing` or `unwatched` check included, which reports
+ * nothing but has no lost runtime. Keeping an older set across such a check
+ * would leave a runtime that restarted in it, and its next halt would wait
+ * behind the cooldown as a reminder.
  */
 export function newlyLostAmuxWorkers(
   previouslyLost: ReadonlySet<string>,
   verdict: AmuxBridgeLiveness
 ): string[] {
-  if (verdict.state !== "lost") return [];
-  return verdict.lostRuntimes
-    .map((runtime) => runtime.workerName)
-    .filter((workerName) => !previouslyLost.has(workerName));
+  return lostAmuxWorkers(verdict).filter((workerName) => !previouslyLost.has(workerName));
 }

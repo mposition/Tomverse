@@ -680,3 +680,60 @@ test("a restart while another lease is still lapsing is not yet a recovery", asy
     "lapsing"
   );
 });
+
+// Review r-20261013-082232-b289dd: a check that reports nothing still has to
+// forget a runtime that is no longer lost, or that runtime's next halt is a
+// reminder held back by the cooldown.
+test("a restart seen during a lapsing check makes the next halt new again", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+
+  world.otherLeases = [{ workerName: "claude-impl", leaseExpiresAt: minutesAgo(30) }];
+  await monitorInfrastructureThresholdsIfDue();
+  // claude-impl restarted; claude-review is two minutes out, so nothing is
+  // reported this time.
+  world.otherLeases = [
+    { workerName: "claude-impl", leaseExpiresAt: new Date(Date.now() + 60_000) },
+    { workerName: "claude-review", leaseExpiresAt: minutesAgo(2) },
+  ];
+  await monitorInfrastructureThresholdsIfDue();
+  world.otherLeases = [
+    { workerName: "claude-impl", leaseExpiresAt: minutesAgo(6) },
+    { workerName: "claude-review", leaseExpiresAt: new Date(Date.now() + 60_000) },
+  ];
+  await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(
+    world.dependencyReports.map((report) => [report.forceNotification, report.context?.newlyLost]),
+    [
+      [true, "claude-impl"],
+      [true, "claude-impl"],
+    ]
+  );
+});
+
+test("names that cannot be printed are replaced in the alert, not in the comparison", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  const first = { workerName: "<!here> one", leaseExpiresAt: minutesAgo(40) };
+  const second = { workerName: "<!here> two", leaseExpiresAt: minutesAgo(10) };
+
+  world.otherLeases = [first];
+  await monitorInfrastructureThresholdsIfDue();
+  world.otherLeases = [first, second];
+  await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(
+    world.dependencyReports.map((report) => [report.forceNotification, report.context?.newlyLost]),
+    [
+      [true, "unnamed-runtime"],
+      [true, "unnamed-runtime"],
+    ]
+  );
+  const last = world.dependencyReports[1];
+  assert.equal(last.context?.lostWorkers, "unnamed-runtime, unnamed-runtime");
+  assert.doesNotMatch(String(last.error), /<!here>/);
+  assert.doesNotMatch(JSON.stringify(last.context), /<!here>/);
+});
