@@ -17,5 +17,6 @@ await checkAmuxV22SidecarSocketDir(socketPath);
 const sidecar = createAmuxV22SidecarServer(socketPath,
   createAmuxV22SidecarHandler({ worker: host.worker, stateDir,
     protocolCapabilities: host.capabilities,
+    modelAccess: request => host.modelAccess(request),
     run: request => runAmuxV22ReadOnlyApiOneShot(request, host) }));
 await sidecar.listen();

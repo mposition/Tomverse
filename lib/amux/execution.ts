@@ -71,7 +71,8 @@ import { currentEngineeringAgentV22ImageProofDigest } from
   "@/lib/engineeringAgentV22ImageEvidence";
 import { readAmuxV22PublicPrConsent } from
   "@/lib/amux/v22PublicPrConsent";
-import { readAmuxV22RecoveryAuthority, recoveryAttemptBudget } from "@/lib/amux/v22TaskRecoveryService";
+import { amuxV22ApiModelAccessCurrent, readAmuxV22RecoveryAuthority,
+  recoveryAttemptBudget } from "@/lib/amux/v22TaskRecoveryService";
 import { AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT,
   AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID,
   amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
@@ -398,6 +399,10 @@ export async function startAmuxV22TaskExecution(input: {
         input.taskId, assignment.taskRevision, assignment.recoveryApprovalId, now) : null;
       if (assignment.recoveryApprovalId && !recovery) return { started: false as const,
         reason: "recovery_approval_unbound" as const };
+      if (!amuxV22ApiModelAccessCurrent(recovery, now)) {
+        return { started: false as const,
+          reason: "read_only_api_model_access_stale" as const };
+      }
       if (amuxWorkerRuntimeUsesReadOnlyApi(runtime.protocolCapabilities) &&
           (!recovery?.riskAcceptanceId || recovery.readOnlyExecutorKind !==
             AMUX_V22_READ_ONLY_API_EXECUTOR_KIND)) {

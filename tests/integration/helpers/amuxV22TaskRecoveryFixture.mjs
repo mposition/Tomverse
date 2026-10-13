@@ -7,6 +7,10 @@ import { createAmuxV22SidecarHandler } from "../../../lib/amux/v22OneShotSidecar
 import { amuxV22ReadOnlyLaunchScope, amuxV22ReadOnlyLaunchScopeDigest,
   amuxV22RecoveryDigest } from
   "../../../lib/amux/v22TaskRecoveryCore.ts";
+import { probeAmuxV22ReadOnlyApiModelAccess } from
+  "../../../lib/amux/v22ReadOnlyApiHost.mjs";
+import { amuxV22ApiModelAccessEvidenceDigest } from
+  "../../../lib/amux/v22ApiModelAccessProtocol.mjs";
 import { AMUX_V22_READ_ONLY_API_BROKER_POLICY_DIGEST,
   AMUX_V22_READ_ONLY_API_SETTINGS_DIGEST,
   AMUX_V22_READ_ONLY_API_TOOL_SCHEMA_DIGEST,
@@ -390,6 +394,72 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
         policyVersion: 40,
       } });
   }
+  async function dbNow(offsetMs = 0) {
+    return (await db.query(`SELECT ((clock_timestamp() AT TIME ZONE 'UTC') +
+      make_interval(secs => $1::double precision / 1000))::timestamp(3) AS now`,
+    [offsetMs])).rows[0].now;
+  }
+  /** The real non-root producer (fixed metadata GET answered by a synthetic
+   * active ModelInfo), its canonical digest, and the same-transaction audit the
+   * service writes. The audit is appended outside any probe savepoint because
+   * the guard requires the top-level transaction XID. */
+  async function produceModelAccess(proofId, proofDigestValue) {
+    const request = { version: 1, requestId: proofId, taskId, priorAttemptId,
+      worker: "worker-two", provider: "anthropic", selectedModelId: "claude-opus-5-5",
+      launchProofId: proofId, launchProofDigest: proofDigestValue,
+      apiExecutionFrameDigest: actualScope.apiExecutionFrameDigest,
+      credentialMetadataDigest: apiExecutionFrame.credentialMetadataDigest,
+      launcherConfigDigest: actualScope.launcherConfigDigest };
+    let calls = 0;
+    const result = await probeAmuxV22ReadOnlyApiModelAccess(request, {
+      worker: "worker-two", frame: { provider: "anthropic", modelId: "claude-opus-5-5",
+        credentialMetadataDigest: apiExecutionFrame.credentialMetadataDigest },
+      apiExecutionFrameDigest: actualScope.apiExecutionFrameDigest,
+      launcherConfigDigest: actualScope.launcherConfigDigest,
+      apiKey: "synthetic-dedicated-key-not-a-secret" }, { testOnly: true,
+      fetcher: async () => { calls += 1; return new Response(JSON.stringify({
+        id: "claude-opus-5-5", type: "model", display_name: "Synthetic",
+        created_at: "2026-10-01T00:00:00Z", lifecycle: "active" }), { status: 200 }); } });
+    assert.equal(calls, 1);
+    assert.equal(result.access, "verified");
+    const evidenceDigest = amuxV22ApiModelAccessEvidenceDigest(result);
+    const auditId = await appendRecoveryFixtureAudit(db, { actorUserId: null,
+      action: "amux.v22.recovery.api_model_access_observed",
+      targetType: "AmuxV22ApiModelAccessEvidence", targetId: proofId,
+      summary: "synthetic content-free API model-access observation", metadata: {
+        systemActor: "amux-v22-api-model-access", taskId, priorAttemptId,
+        workerName: "worker-two", launchProofId: proofId,
+        launchProofDigest: proofDigestValue,
+        apiExecutionFrameDigest: result.apiExecutionFrameDigest,
+        credentialMetadataDigest: result.credentialMetadataDigest,
+        launcherConfigDigest: result.launcherConfigDigest,
+        selectedModelId: result.selectedModelId,
+        canonicalModelId: result.canonicalModelId, access: result.access,
+        reason: result.reason, balanceKnown: false,
+        maximumCostMicroUsd: result.maximumCostMicroUsd,
+        worstExposureMicroUsd: result.worstExposureMicroUsd, evidenceDigest } });
+    return { result, evidenceDigest, auditId };
+  }
+  async function insertModelAccess(produced) {
+    const { result, evidenceDigest, auditId } = produced;
+    await insert("AmuxV22ApiModelAccessEvidence", { id: result.requestId,
+      launchProofId: result.launchProofId, taskId: result.taskId,
+      priorAttemptId: result.priorAttemptId, workerName: result.worker,
+      workerInstanceId: recoveryInstanceId, workerGeneration: 1,
+      provider: result.provider, providerHost: result.providerHost,
+      selectedModelId: result.selectedModelId,
+      canonicalModelId: result.canonicalModelId,
+      apiExecutionFrameDigest: result.apiExecutionFrameDigest,
+      credentialMetadataDigest: result.credentialMetadataDigest,
+      launcherConfigDigest: result.launcherConfigDigest,
+      accessState: result.access, reason: result.reason, balanceKnown: false,
+      maximumCostMicroUsd: String(result.maximumCostMicroUsd),
+      worstExposureMicroUsd: String(result.worstExposureMicroUsd), evidenceDigest,
+      authorizationAuditLogId: auditId, recordedAt: await dbNow() });
+    return { apiModelAccessEvidenceId: result.requestId,
+      apiModelAccessEvidenceDigest: evidenceDigest,
+      canonicalModelId: result.canonicalModelId };
+  }
   const approvalAt = (await db.query(`SELECT
     (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`)).rows[0].now;
   const approvalBase = { inspectionId: safeStopInspectionId,
@@ -424,7 +494,86 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     await db.query(`UPDATE public."AmuxWorkItem" SET "status"='todo', "revision"=5
       WHERE "id"=$1 AND "status"='blocked' AND "revision"=4`, [taskId]);
     await db.query("SET CONSTRAINTS amux_v22_v39_approval_guard_trigger IMMEDIATE");
-  }, "AmuxV22RecoveryApproval_v39_binding_check");
+  // An API approval of a stale proof cannot carry model-access evidence at all:
+  // the evidence insert guard refuses a proof older than 90 seconds, so the
+  // BEFORE INSERT access guard refuses first. The deferred v39 freshness check
+  // is reached by the CLI executor run (AMUX_RECOVERY_FIXTURE_EXECUTOR_KIND).
+  }, apiExecutor ? "AmuxV22RecoveryApproval_api_access_binding_check" :
+    "AmuxV22RecoveryApproval_v39_binding_check");
+
+  if (apiExecutor && !positiveOnly) {
+    // Policy v42 late report: proof at T0, cached model-access result reported
+    // near T0+85 s. The evidence is fresh, but claim and start must still close
+    // 90 seconds after the proof, never 90 seconds after the report.
+    const originalForProbe = (await db.query(`SELECT * FROM public."AmuxV22WorkerAssignment"
+      WHERE "id"=$1`, [priorAssignmentId])).rows[0];
+    for (const stage of ["claim", "start"]) {
+      const lateProofId = randomUUID();
+      const lateReport = { ...proofReport, launchProofId: lateProofId };
+      const lateDigest = amuxV22RecoveryDigest("read-only-launch-proof", lateReport);
+      const lateProofAuditId = await appendProofAudit(lateProofId, lateDigest, true);
+      const lateAccess = await produceModelAccess(lateProofId, lateDigest);
+      const lateApprovalId = randomUUID(); const lateRequestId = randomUUID();
+      const lateApprovalAuditId = await appendApprovalAudit(lateApprovalId,
+        lateRequestId, lateProofId, lateDigest);
+      const lateAssignmentId = randomUUID();
+      const lateAssignmentAuditId = await appendRecoveryFixtureAudit(db, { actorUserId: null,
+        action: "amux.v22.worker.assigned", targetType: "AmuxV22WorkerAssignment",
+        targetId: lateAssignmentId, summary: "synthetic late-report assignment probe",
+        metadata: { systemActor: "amux-v22-worker-claim", taskId,
+          workerName: "worker-two", lane: "sev1", recoveryApprovalId: lateApprovalId,
+          recoveryCostDigest: costDigest } });
+      await reject(async () => {
+        await db.query("SET CONSTRAINTS ALL DEFERRED");
+        await insert("AmuxV22ReadOnlyLaunchProof", { id: lateProofId, launchCheckId,
+          proofDigest: lateDigest, observation: "current", report: lateReport,
+          verified: true, reason: null, authorizationAuditLogId: lateProofAuditId,
+          recordedAt: await dbNow(-85_000) });
+        const binding = await insertModelAccess(lateAccess);
+        await insert("AmuxV22TaskRecoveryApproval", { ...approvalBase, ...binding,
+          id: lateApprovalId, ownerRequestId: lateRequestId, launchProofId: lateProofId,
+          launchProofDigest: lateDigest, authorizationAuditLogId: lateApprovalAuditId,
+          approvedAt: await dbNow() });
+        assert.equal((await db.query(`UPDATE public."AmuxWorkItem" SET "status"='todo',
+          "revision"=5 WHERE "id"=$1 AND "status"='blocked' AND "revision"=4`,
+        [taskId])).rowCount, 1);
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        const lateAssignment = { ...originalForProbe, id: lateAssignmentId,
+          promotionReceiptId: promotionId, laneDecisionSequence: laneSequence,
+          taskRevision: 5, workerName: "worker-two", workerInstanceId: recoveryInstanceId,
+          workerGeneration: 1, provider: "anthropic", modelId: "claude-opus-5-5",
+          routeId: "read-only-route", routePolicyDigest, catalogApprovalId: "catalog-one",
+          catalogVersion: "v1", costReceiptDigest: digest, perAttemptMicroUsd: "3400000",
+          recoveryApprovalId: lateApprovalId, authorizationAuditLogId: lateAssignmentAuditId };
+        if (stage === "claim") {
+          await db.query("SELECT pg_sleep(6)");
+          await db.query("SET CONSTRAINTS ALL DEFERRED");
+          await insert("AmuxV22WorkerAssignment", { ...lateAssignment,
+            assignedAt: await dbNow() });
+          return;
+        }
+        await db.query("SET CONSTRAINTS ALL DEFERRED");
+        const assignedAt = await dbNow();
+        await insert("AmuxV22WorkerAssignment", { ...lateAssignment, assignedAt });
+        await db.query(`UPDATE public."AmuxWorkItem" SET "owner"='worker-two', "claimedAt"=$3,
+          "v22AssignmentId"=$2, "revision"=6 WHERE "id"=$1`, [taskId, lateAssignmentId, assignedAt]);
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        await db.query("SELECT pg_sleep(6)");
+        await db.query("SET CONSTRAINTS ALL DEFERRED");
+        await db.query(`UPDATE public."AmuxWorkItem" SET "status"='doing', "revision"=7
+          WHERE "id"=$1`, [taskId]);
+        const startedAt = await dbNow();
+        await insert("AmuxExecutionAttempt", { ...oldAttempt, id: randomUUID(),
+          taskRevision: 7, attemptNumber: 2, worker: "worker-two",
+          workerInstanceId: recoveryInstanceId, workerGeneration: 1, endedAt: null,
+          outcome: null, toStatus: null, endedBy: null, reason: null,
+          heartbeatAt: startedAt, startedAt,
+          leaseExpiresAt: new Date(startedAt.getTime() + 90_000),
+          v22AssignmentId: lateAssignmentId });
+        await db.query("SET CONSTRAINTS amux_v22_v42_attempt_launch_proof_deadline IMMEDIATE");
+      }, "AmuxV22Recovery_api_launch_proof_deadline_check");
+    }
+  }
 
   const launchProofId = randomUUID();
   const currentProofReport = { ...proofReport, launchProofId };
@@ -436,13 +585,17 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     proofDigest: launchProofDigest, observation: "current", report: currentProofReport,
     verified: true, reason: null, authorizationAuditLogId: proofAuditId,
     recordedAt: proofRecordedAt });
+  const accessBinding = apiExecutor ? await insertModelAccess(
+    await produceModelAccess(launchProofId, launchProofDigest)) : {};
+  // The API approval must follow its model-access evidence (approvedAt >= recordedAt).
+  const mainApprovalAt = apiExecutor ? await dbNow() : approvalAt;
 
   const ownerApprovalRequestId = randomUUID();
   const approvalAuditId = await appendApprovalAudit(approvalId,
     ownerApprovalRequestId, launchProofId, launchProofDigest);
-  const approvalRow = { ...approvalBase, id: approvalId,
+  const approvalRow = { ...approvalBase, ...accessBinding, id: approvalId,
     ownerRequestId: ownerApprovalRequestId, launchProofId, launchProofDigest,
-    authorizationAuditLogId: approvalAuditId };
+    authorizationAuditLogId: approvalAuditId, approvedAt: mainApprovalAt };
   await db.query("SET CONSTRAINTS ALL DEFERRED");
   await insert("AmuxV22TaskRecoveryApproval", approvalRow);
   const cas = await db.query(`UPDATE public."AmuxWorkItem" SET "status"='todo', "revision"=5
@@ -492,7 +645,7 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     "AmuxV22TaskRecoveryApproval_evidenceId_key"], "23505");
   const assignmentId = randomUUID();
   const originalAssignment = (await db.query(`SELECT * FROM public."AmuxV22WorkerAssignment" WHERE "id"=$1`, [priorAssignmentId])).rows[0];
-  const assignmentAt = approvalAt;
+  const assignmentAt = mainApprovalAt;
   const assignmentBase = { ...originalAssignment,
     promotionReceiptId: promotionId, laneDecisionSequence: laneSequence, taskRevision: 5,
     workerName: "worker-two", workerInstanceId: recoveryInstanceId, workerGeneration: 1,

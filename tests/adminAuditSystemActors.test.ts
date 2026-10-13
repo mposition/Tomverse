@@ -119,6 +119,7 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-v22-worker-claim",
     "amux-v22-recovery-checker",
     "amux-v22-recovery-controller",
+    "amux-v22-api-model-access",
     "amux-v4-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",
@@ -301,6 +302,16 @@ test("the system actor list is closed and changes only by review", () => {
   // The column marker is not an audit actor name.
   assert.equal(isSystemAuditActor("system:amux-auto-promoter"), false);
   assert.equal(isSystemAuditActor(undefined), false);
+});
+
+test("the v42 model-access actor can write only its content-free evidence", () => {
+  assert.equal(systemAuditActionAllowed("amux-v22-api-model-access",
+    "amux.v22.recovery.api_model_access_observed",
+    "AmuxV22ApiModelAccessEvidence"), true);
+  assert.equal(systemAuditActionAllowed("amux-v22-api-model-access",
+    "amux.v22.recovery.approved", "AmuxV22TaskRecoveryApproval"), false);
+  assert.equal(systemAuditActionAllowed("amux-v22-api-model-access",
+    "amux.v22.recovery.api_model_access_observed", "AdminAuditLog"), false);
 });
 
 test("only a top-level key of an object claims the marker", () => {

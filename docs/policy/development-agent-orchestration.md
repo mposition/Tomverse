@@ -19,7 +19,8 @@
 상태(v38 이력): **v38 기본 OFF 60초 recovery carrier와 inspect 인증 격리의 코드 준비 승인.** 2026-10-13 운영자 `mposition`이 아래 v38 절의 설치·활성화되지 않은 carrier 준비와 기존 inspect 권한의 전용 secret 분리를 승인했다.
 상태(v39 이력): **v39 FIRST Task의 과거 결과 불명 위험 수락과 읽기 전용 1회 재시도 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v39 절의 exact Task·과거 attempt·최대 노출액·현재 읽기 전용 실행 결속을 승인했다. 실제 stop·재시도·유료 호출·활성화는 별도다.
 상태(v40 이력): **v40 FIRST Task 전용 읽기 전용 API executor 대안 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v40 절의 기본 OFF, 고정 `Read`·`Grep`·`Glob` broker, Anthropic 전용 API key, 서버 정본 가격·token·turn 프레임과 실제 usage·model receipt 계약을 승인했다. key 등록·설치·배포·실제 API 호출은 별도다.
-상태(최신): **v41 packed Git object의 고정 읽기 전용 provenance 조회 승인.** 2026-10-13 운영자 `mposition`이 아래 v41 절의 보호된 고정 Git binary·고정 읽기 인자·sanitized environment·deadline·bounded output 예외를 승인했다. 모델 tool은 `Read`·`Grep`·`Glob` 셋으로 유지하며 설치·환경 설정·key 등록·배포·실제 API 호출은 별도다.
+상태(v41 이력): **v41 packed Git object의 고정 읽기 전용 provenance 조회 승인.** 2026-10-13 운영자 `mposition`이 아래 v41 절의 보호된 고정 Git binary·고정 읽기 인자·sanitized environment·deadline·bounded output 예외를 승인했다. 모델 tool은 `Read`·`Grep`·`Glob` 셋으로 유지하며 설치·환경 설정·key 등록·배포·실제 API 호출은 별도다.
+상태(최신): **v42 FIRST Task 전용 API 인증·모델 접근 증거 승인.** 2026-10-13 운영자 `mposition`이 아래 v42 절의 전용 API key 인증과 선택 model 조회, alias→canonical 결속, 공급사 잔액 불명 표시, exact 비용 상한 예외를 승인했다. 실제 provider 호출·배포·DB 적용은 별도다.
 상태(R2a 부속 이력): **2026-10-13에 원래 orchestration v36으로 승인된 worker 능력 R2a 코드 래치를 부속 계약 `worker-capability-r2a-latch-2026-10-13`로 보존한다.** `AMUX_WORKER_CAPABILITY_WRITES_LATCH`는 true이고 owner의 Admin 능력 기록만 열며, 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이는 번호가 겹치는 승인 이력의 식별자 구분일 뿐 새 정책 버전·권한·활성화를 승인하지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
@@ -59,6 +60,7 @@ approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 38
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 39
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 40
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 41
+approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 42
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -2413,3 +2415,78 @@ tool은 계속 strict `Read`·`Grep`·`Glob` 셋뿐이며, 새 Git·shell tool�
 이 승인은 정책과 CODE/LOCAL 합성 검증용 broker 보완만 연다. 보호 binary 설치·교체,
 환경 설정, key 등록, 배포, 실제 provider 호출, 실제 Task approval·claim·reservation·
 retry, root SSH·systemd 조작, PR·push·병합은 각각 별도 승인이다.
+
+## 버전 42 — FIRST Task 전용 API 인증·모델 접근 증거
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 이 절은 v39~v41의
+exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
+`97858395-3d66-42fa-9bfb-0e5a6cba9bd8`에만 적용한다. 운영자는 이 첫 Task에
+한해 전용 Anthropic API key로 인증하고, 승인된 frame의 선택 model에 접근 가능한지
+과금 없는 model metadata 조회 한 번으로 확인한 뒤, 과거 보류 3,400,000 microUSD와
+새 시도 최대 3,400,000 microUSD, 합계 6,800,000 microUSD의 결정적 상한 안에서
+배정·시작하는 경로를 승인했다. 기존 CLI subscription quota, 다른 Task, 월 provider
+예산과 일반 worker 정책은 바꾸지 않는다.
+
+### 1. 전용 non-root probe와 실패 경계
+
+- probe는 v40의 전용 non-root API executor만 수행한다. root controller와 app은 key
+  byte를 읽거나 provider를 호출하지 않는다. 요청은 승인된 Anthropic API host의
+  `GET /v1/models/{model_id}` 하나로 고정하며 `X-Api-Key`, 고정
+  `anthropic-version`, redirect 거절, 짧은 deadline과 bounded body를 사용한다. prompt,
+  Messages API, token 사용, 임의 URL·header·method는 없다.
+- transport retry와 자동 probe retry는 0이다. 인증 실패, 404, 429, 5xx, timeout,
+  redirect, 잘못된 body·model id·type은 실행 가능 증거가 아니며 assignment, reservation,
+  attempt, delivery, 유료 호출을 만들지 않는다. 응답 유실이나 상태 불명도 새 GET을
+  자동으로 보내지 않고 사람에게 actionable 상태로 돌려준다.
+- key는 기존 v4·Chat·CLI 자격증명과 구분된 v40 credential profile이어야 한다.
+  증거는 key 값·fingerprint·경로를 담지 않고 현재 credential metadata digest와
+  launcher/API frame digest에만 결속한다. metadata나 frame이 바뀌면 fresh probe와
+  fresh owner consent 없이는 실행할 수 없다.
+
+### 2. alias, canonical model과 정본의 경계
+
+- 요청한 model id는 승인된 `apiExecutionFrame.modelId` 그대로이며 임의 추정·fallback을
+  금지한다. 성공 응답은 `type: model`과 non-empty canonical `id`를 strict하게 검증한다.
+  선택 alias와 응답 canonical id는 둘 다 append-only 증거에 저장하고, 증거 digest와
+  final owner approval·assignment·delivery·start에 함께 결속한다.
+- model metadata는 인증과 접근 가능성만 증명한다. 가격·quota·공급사 잔액의 출처로
+  쓰지 않는다. 가격과 token cap은 계속 v40의 승인된 app frame이 정본이다. paid
+  response의 actual model은 결속된 canonical id와 일치해야 하며, 다르면 usage나 비용을
+  추정하지 않고 `outcome_unknown`으로 멈추고 재시도하지 않는다.
+- alias→canonical을 현재 frame, credential metadata, root launch proof와 사람 승인에
+  안전하게 결속할 수 없으면 claim 전에 멈추고 canonical catalog approval을 요구한다.
+  model 문자열을 caller가 고치거나 새 가격을 추정해서 통과시키지 않는다.
+
+### 3. quota와 비용 표시
+
+- 이 증거는 CLI subscription quota가 아니다. 같은 logical worker의 예전 CLI quota
+  row를 재사용하거나 API key에 남은 비율·100%를 합성하지 않는다. exact FIRST API
+  경로의 claim은 fresh·verified·미소비 model access evidence와 exact final approval을
+  별도로 요구하고, 다른 route의 기존 quota 판정은 그대로 유지한다.
+- 공급사 wallet·balance는 확인하지 않았으므로 `balanceKnown=false`다. UI와 운영
+  보고는 “API 인증/모델 접근 확인 · 공급사 잔액 미확인 · 이번 시도 최대
+  US$3.40/합계 US$6.80”으로 표시하며 `quotaFresh` 또는 잔여 퍼센트로 표현하지 않는다.
+- prior attempt의 outcome·external effects·cost는 계속 `unknown`이고 기존
+  3,400,000 microUSD hold는 0, success, failure 또는 해제로 바꾸지 않는다. 새 시도는
+  3,400,000 microUSD 이하, 두 노출 합계는 6,800,000 microUSD 이하를 approval, claim,
+  start에서 각각 확인한다. 이 exact grant를 월 US$1,000 분석 예산이나 사용자 credit,
+  provider budget의 대체물로 일반화하지 않는다.
+
+### 4. 증거·소비·닫힌 범위
+
+- verified evidence는 exact Task·prior attempt·worker·instance·generation, current launch
+  proof, API frame와 credential metadata digest, selected·canonical model, provider host,
+  `balanceKnown=false`, DB clock `recordedAt`에 결속된 append-only row다. v39의 90초
+  freshness를 재사용하고 final approval과 claim/start에서 다시 검사한다. 한 final
+  approval이 한 evidence를 한 번만 소비하며 세 번째 attempt나 다른 Task를 열 수 없다.
+- 기존 operation audit, risk acceptance, process-gone, launch proof, one-shot final
+  approval, current gate·incident·dependency·halt·catalog·pricing·read-only proof는 하나도
+  면제하지 않는다. system과 사람 행동은 기존 hash-chain audit와 같은 transaction에
+  기록하고, 결과 불명 provider 호출은 v40대로 hold/stop한다.
+- 이 승인은 정책·additive schema/migration·app/core/internal route·non-root
+  host/sidecar·bridge·Admin UI와 합성·scratch DB 검증의 작성, 그리고 별도 독립 검토 뒤
+  이번 feature의 develop/main Ready PR 예외 절차만 연다. 기존 applied migration 변경,
+  production DB 적용, key byte 조회·출력, 실제 probe·provider/model 호출, SSH,
+  Ubuntu 설치·unit 변경, Task approval·claim·start, 배포·병합·push는 이 코드 작성
+  단계에서 열지 않는다. 후속 명시 운영 승인 없이 다른 Task나 일반 API worker로
+  졸업시키지 않는다.

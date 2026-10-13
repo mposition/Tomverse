@@ -24,6 +24,7 @@ let assignmentWrites = 0;
 let taskWrites = 0;
 let listedCapabilities = ["read_only_api_retry_v1"];
 let pinnedCapabilities = ["read_only_api_retry_v1"];
+let telemetryWorkers: string[][] = [];
 
 const workers = [workerName, "worker-two", "worker-three"].map((name) => ({
   worker_name: name,
@@ -94,11 +95,14 @@ mock.module(mod("lib/amux/routing.ts"), { namedExports: {
   getConfiguredAmuxV22WorkerCatalog: () => workers,
 } });
 mock.module(mod("lib/amux/telemetry.ts"), { namedExports: {
-  getAmuxWorkerTelemetry: async () => new Map([[workerName, {
+  getAmuxWorkerTelemetry: async (selected: Array<{ worker_name: string }>) => {
+    telemetryWorkers.push(selected.map((worker) => worker.worker_name));
+    return new Map([[workerName, {
     evidence: { quota: { state: "fresh" } },
     scoring: { provider_exhausted: false,
       quota_remaining: { value: 1 } },
-  }]]),
+    }]]);
+  },
 } });
 mock.module(mod("lib/amux/autoPromotionService.ts"), { namedExports: {
   TICK_TRANSACTION_LIMITS: {},
@@ -114,6 +118,16 @@ mock.module(mod("lib/amux/v4TaskCostCeilingCore.ts"), { namedExports: {
 } });
 mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
   readAmuxV22RecoveryAuthority: async () => recovery,
+  amuxV22ApiModelAccessCurrent: (authority: Record<string, unknown> | null,
+    at: Date) => authority?.readOnlyExecutorKind !== "read_only_api_retry_v1" ||
+      Boolean(authority.apiModelAccessEvidence &&
+        (authority.apiModelAccessEvidence as { accessState: string }).accessState === "verified" &&
+        (authority.apiModelAccessEvidence as { selectedModelId: string }).selectedModelId ===
+          authority.modelId &&
+        (authority.apiModelAccessEvidence as { canonicalModelId: string }).canonicalModelId ===
+          authority.modelId &&
+        at.getTime() - (authority.apiModelAccessEvidence as { recordedAt: Date })
+          .recordedAt.getTime() <= 90_000),
 } });
 mock.module(mod("lib/amux/v22LegacySafeStopFence.ts"), { namedExports: {
   amuxV22SafeStopFencedWorkers: async () => new Set(),
@@ -226,6 +240,20 @@ test("API gate and current frame fence claim before assignment mutation", async 
     recovery = approvedRecovery;
     listedCapabilities = ["read_only_api_retry_v1"];
     pinnedCapabilities = ["read_only_api_retry_v1"];
+    telemetryWorkers = [];
+    const noAccessEvidence = await (await service).tickV22WorkerClaim();
+    assert.deepEqual(noAccessEvidence,
+      { claimed: false, reason: "no_ready_candidate" });
+    assert.equal(assignmentWrites, 0);
+    assert.equal(taskWrites, 0);
+    assert.deepEqual(telemetryWorkers.at(-1), [],
+      "an API-key worker must never consume CLI quota telemetry");
+
+    recovery = { ...approvedRecovery, apiModelAccessEvidence: {
+      accessState: "verified", balanceKnown: false,
+      selectedModelId: "claude-opus-5-5", canonicalModelId: "claude-opus-5-5",
+      recordedAt: new Date("2026-10-13T11:59:30.000Z"),
+    } };
     const on = await (await service).tickV22WorkerClaim();
     assert.equal(on.claimed, true);
     assert.equal(on.workerName, workerName);

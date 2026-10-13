@@ -1048,6 +1048,46 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
     where: { launchCheckId: launchCheck.id } }) : null;
   const launchProofScope = launchProof ?
     amuxV22ReadOnlyLaunchProofScope(launchProof.report) : null;
+  const apiExecutor = launchProofScope ?
+    amuxV22ReadOnlyLaunchExecutorKind(launchProofScope.launchScope) ===
+      AMUX_V22_READ_ONLY_API_EXECUTOR_KIND : false;
+  const apiAccessEvidence = apiExecutor && launchProof ?
+    await tx.amuxV22ApiModelAccessEvidence.findUnique({ where: {
+      launchProofId: launchProof.id } }) : null;
+  const apiAccessFresh = !!apiAccessEvidence &&
+    evidenceFresh(apiAccessEvidence.recordedAt, now);
+  const apiAccessBindingMatches = !!apiAccessEvidence && !!launchCheck &&
+    !!launchProofScope && apiAccessEvidence.launchProofId === launchProof?.id &&
+    apiAccessEvidence.taskId === launchCheck.taskId &&
+    apiAccessEvidence.priorAttemptId === launchCheck.priorAttemptId &&
+    apiAccessEvidence.workerName === launchCheck.workerName &&
+    apiAccessEvidence.provider === launchCheck.provider &&
+    apiAccessEvidence.selectedModelId === launchCheck.modelId &&
+    apiAccessEvidence.apiExecutionFrameDigest ===
+      ("apiExecutionFrameDigest" in launchProofScope.launchScope ?
+        launchProofScope.launchScope.apiExecutionFrameDigest : null) &&
+    apiAccessEvidence.credentialMetadataDigest ===
+      launchProofScope.report.apiExecutionFrame?.credentialMetadataDigest &&
+    apiAccessEvidence.launcherConfigDigest ===
+      launchProofScope.launchScope.launcherConfigDigest &&
+    !apiAccessEvidence.balanceKnown;
+  const apiAccessCurrent = apiAccessBindingMatches && apiAccessFresh &&
+    apiAccessEvidence?.accessState === "verified" &&
+    apiAccessEvidence.canonicalModelId === launchCheck?.modelId;
+  const apiModelAccess: AmuxV22RecoveryRead["apiModelAccess"] = !apiExecutor ||
+    !launchCheck ? undefined : {
+      state: !apiAccessEvidence ? "required" :
+        !apiAccessBindingMatches ? "unknown" : !apiAccessFresh ? "stale" :
+          apiAccessEvidence.accessState === "verified" ?
+            apiAccessEvidence.canonicalModelId === launchCheck.modelId ?
+              "verified" : "catalog_mismatch" :
+            apiAccessEvidence.accessState === "unavailable" ? "unavailable" : "unknown",
+      selectedModelId: launchCheck.modelId,
+      canonicalModelId: apiAccessEvidence?.canonicalModelId ?? null,
+      balanceKnown: false, maximumCostMicroUsd: "3400000",
+      worstExposureMicroUsd: "6800000",
+      recordedAt: apiAccessEvidence?.recordedAt.toISOString() ?? null,
+    };
   const riskRead = risk ? { id: risk.id, digest: risk.acceptanceDigest,
     ownerRequestId: risk.ownerRequestId, sourceEvidenceId: risk.sourceEvidenceId,
     sourceEvidenceDigest: risk.sourceEvidenceDigest,
@@ -1069,7 +1109,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
   const empty: AmuxV22RecoveryRead = { taskId, requestId, state: "not_visible", inspectionId: null,
     evidenceId: null, evidenceDigest: null, reason: null, taskRevision: null,
     priorAttemptId: null, cost: null, quote: null, riskAcceptance: riskRead,
-    launchProof: launchRead,
+    launchProof: launchRead, ...(apiModelAccess ? { apiModelAccess } : {}),
     eligibility: { acceptUnknownPriorEffects: taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID && !risk,
       requestSafeStop: false, approveAttempt: false,
       reason: taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID ?
@@ -1195,11 +1235,18 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
     state: launchBindingChanged ? "mismatch" : "stale" };
   const exception = !!risk;
   const approveEligible = !approved && !!evidence?.verified &&
-    (!exception || launchCurrent);
+    (!exception || (launchCurrent && (!apiExecutor || apiAccessCurrent)));
   const eligibilityReason: AmuxV22RecoveryRead["eligibility"]["reason"] = approved ?
     "already_approved" : !exception ? null : !evidence?.verified ? "safe_stop_required" :
       !launchProof ? "launch_proof_required" : !launchProof.verified || launchBindingChanged ?
-        "binding_changed" : !launchCurrent ? "launch_proof_stale" : null;
+        "binding_changed" : !launchCurrent ? "launch_proof_stale" :
+          !apiExecutor ? null : !apiAccessEvidence ? "api_model_access_required" :
+            !apiAccessBindingMatches ? "api_model_access_unverified" :
+              !apiAccessFresh ? "api_model_access_stale" :
+                apiAccessEvidence.accessState !== "verified" ?
+                  "api_model_access_unverified" :
+                  apiAccessEvidence.canonicalModelId !== launchCheck?.modelId ?
+                    "canonical_catalog_approval_required" : null;
   return { ...empty, state, inspectionId: inspection.id, evidenceId: evidence?.id ?? null,
     evidenceDigest: evidence?.evidenceDigest ?? null, reason,
     taskRevision: approved?.afterRevision ?? inspection.taskRevision,
@@ -1309,6 +1356,8 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
     let risk: Awaited<ReturnType<typeof tx.amuxV22TaskRecoveryRiskAcceptance.findUnique>> = null;
     let launchCheck: Awaited<ReturnType<typeof tx.amuxV22ReadOnlyLaunchCheck.findUnique>> = null;
     let launchProof: Awaited<ReturnType<typeof tx.amuxV22ReadOnlyLaunchProof.findUnique>> = null;
+    let apiModelAccessEvidence: Awaited<ReturnType<
+      typeof tx.amuxV22ApiModelAccessEvidence.findUnique>> = null;
     let launchScope: ReturnType<typeof amuxV22ReadOnlyLaunchProofScope> = null;
     let launchProfileConfigDigest: string | null = null;
     let current: Awaited<ReturnType<typeof calculateCurrentApprovedAmuxV4TaskCost>>;
@@ -1348,6 +1397,9 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
       cost = riskCost;
       const executorKind = launchScope ?
         amuxV22ReadOnlyLaunchExecutorKind(launchScope.launchScope) : null;
+      apiModelAccessEvidence = executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND &&
+        launchProof ? await tx.amuxV22ApiModelAccessEvidence.findUnique({
+          where: { launchProofId: launchProof.id } }) : null;
       launchProfileConfigDigest = executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
         null : currentProfile?.profileConfigDigest ?? null;
       const currentApiBinding = executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND &&
@@ -1379,7 +1431,26 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
           !launchScope || !nominalLaunchScope?.success || !currentProfile ||
           (executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
             !currentApiBinding || !amuxV22ReadOnlyLaunchScopeMatchesIntent(
-              currentApiBinding.launchScope, nominalLaunchScope.data) :
+              currentApiBinding.launchScope, nominalLaunchScope.data) ||
+              !apiModelAccessEvidence ||
+              apiModelAccessEvidence.accessState !== "verified" ||
+              !evidenceFresh(apiModelAccessEvidence.recordedAt, now) ||
+              apiModelAccessEvidence.taskId !== task.id ||
+              apiModelAccessEvidence.priorAttemptId !== input.priorAttemptId ||
+              apiModelAccessEvidence.workerName !== launchCheck.workerName ||
+              apiModelAccessEvidence.workerInstanceId !== launchCheck.workerInstanceId ||
+              apiModelAccessEvidence.workerGeneration !== launchCheck.workerGeneration ||
+              apiModelAccessEvidence.provider !== launchCheck.provider ||
+              apiModelAccessEvidence.selectedModelId !== launchCheck.modelId ||
+              apiModelAccessEvidence.canonicalModelId !== launchCheck.modelId ||
+              apiModelAccessEvidence.apiExecutionFrameDigest !==
+                ("apiExecutionFrameDigest" in launchScope.launchScope ?
+                  launchScope.launchScope.apiExecutionFrameDigest : null) ||
+              apiModelAccessEvidence.credentialMetadataDigest !==
+                currentApiBinding.frame.credentialMetadataDigest ||
+              apiModelAccessEvidence.launcherConfigDigest !==
+                launchScope.launchScope.launcherConfigDigest ||
+              apiModelAccessEvidence.balanceKnown :
             "executorKind" in launchScope.launchScope ||
               currentProfile.profileConfigDigest !==
                 launchScope.launchScope.profileConfigDigest) ||
@@ -1438,7 +1509,12 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
           modelId: launchCheck.modelId, routeId: launchCheck.routeId,
           routePolicyDigest: launchCheck.routePolicyDigest,
           briefDigest: launchCheck.briefDigest,
-          profileConfigDigest: launchProfileConfigDigest } : {}),
+          profileConfigDigest: launchProfileConfigDigest,
+          ...(apiModelAccessEvidence ? {
+            apiModelAccessEvidenceId: apiModelAccessEvidence.id,
+            apiModelAccessEvidenceDigest: apiModelAccessEvidence.evidenceDigest,
+            canonicalModelId: apiModelAccessEvidence.canonicalModelId,
+          } : {}) } : {}),
         policyVersion: AMUX_V22_TASK_RECOVERY_POLICY_VERSION, executionStarted: false, reservationCreated: false } });
     await tx.amuxV22TaskRecoveryApproval.create({ data: { id: approvalId, ownerRequestId: input.requestId,
       inspectionId: inspection.id, evidenceId: evidence.id, taskId: task.id,
@@ -1463,6 +1539,9 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
       routePolicyDigest: launchCheck?.routePolicyDigest ?? null,
       briefDigest: launchCheck?.briefDigest ?? null,
       profileConfigDigest: launchProfileConfigDigest,
+      apiModelAccessEvidenceId: apiModelAccessEvidence?.id ?? null,
+      apiModelAccessEvidenceDigest: apiModelAccessEvidence?.evidenceDigest ?? null,
+      canonicalModelId: apiModelAccessEvidence?.canonicalModelId ?? null,
       approvedByUserId: ownerId,
       authorizationAuditLogId: auditId, approvedAt: now } });
     const changed = await tx.amuxWorkItem.updateMany({ where: { id: task.id, revision: task.revision,
@@ -1476,10 +1555,11 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
 /** Only the approval at this exact Todo revision can exempt its own held prior attempt. */
 export async function readAmuxV22RecoveryAuthority(tx: Prisma.TransactionClient,
   taskId: string, taskRevision: number, approvalId?: string | null, now?: Date) {
-  void now; // Approved snapshots do not expire; callers still bind their transaction clock.
+  void now; // Callers separately apply the 90-second access freshness at claim/start.
   const row = await tx.amuxV22TaskRecoveryApproval.findFirst({ where: {
     taskId, afterRevision: taskRevision, ...(approvalId ? { id: approvalId } : {}),
-    ...(approvalId ? {} : { assignment: null }) }, include: { inspection: true, evidence: true } });
+    ...(approvalId ? {} : { assignment: null }) }, include: { inspection: true,
+      evidence: true, apiModelAccessEvidence: true } });
   if (!row) return null;
   if (!row.evidence.verified || row.evidenceDigest !== row.evidence.evidenceDigest ||
       !await auditBound(tx, row.authorizationAuditLogId, "amux.v22.recovery.approved",
@@ -1488,6 +1568,7 @@ export async function readAmuxV22RecoveryAuthority(tx: Prisma.TransactionClient,
   let readOnlyExecutorKind: "read_only_retry_v1" | "read_only_api_retry_v1" | null = null;
   let apiExecutionFrame: AmuxV22ReadOnlyApiExecutionFrame | null = null;
   let launcherConfigDigest: string | null = null;
+  let launchProofRecordedAt: Date | null = null;
   if (row.riskAcceptanceId) {
     const risk = await tx.amuxV22TaskRecoveryRiskAcceptance.findUnique({
       where: { id: row.riskAcceptanceId } });
@@ -1500,6 +1581,7 @@ export async function readAmuxV22RecoveryAuthority(tx: Prisma.TransactionClient,
       amuxV22ReadOnlyLaunchScopeSchema.safeParse(check.launchScope) : null;
     const executorKind = scope ?
       amuxV22ReadOnlyLaunchExecutorKind(scope.launchScope) : null;
+    const access = row.apiModelAccessEvidence;
     if (row.taskId !== AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID ||
         row.priorAttemptId !== AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID ||
         row.historicalAttempts !== 1 || row.nextAttemptNumber !== 2 ||
@@ -1522,20 +1604,62 @@ export async function readAmuxV22RecoveryAuthority(tx: Prisma.TransactionClient,
         !amuxV22ReadOnlyLaunchScopeMatchesIntent(
           nominalScope.data, scope.launchScope) ||
         (executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
-          row.profileConfigDigest !== null : "executorKind" in scope.launchScope ||
+          row.profileConfigDigest !== null || !access ||
+            row.apiModelAccessEvidenceId !== access.id ||
+            row.apiModelAccessEvidenceDigest !== access.evidenceDigest ||
+            access.launchProofId !== proof.id || access.accessState !== "verified" ||
+            access.taskId !== row.taskId || access.priorAttemptId !== row.priorAttemptId ||
+            access.workerName !== row.workerName || access.provider !== row.provider ||
+            access.selectedModelId !== row.modelId ||
+            access.canonicalModelId !== row.canonicalModelId ||
+            access.canonicalModelId !== row.modelId || access.balanceKnown ||
+            access.apiExecutionFrameDigest !==
+              ("apiExecutionFrameDigest" in scope.launchScope ?
+                scope.launchScope.apiExecutionFrameDigest : null) ||
+            access.credentialMetadataDigest !==
+              scope.report.apiExecutionFrame?.credentialMetadataDigest ||
+            access.launcherConfigDigest !== scope.launchScope.launcherConfigDigest :
+          row.apiModelAccessEvidenceId !== null ||
+            row.apiModelAccessEvidenceDigest !== null || row.canonicalModelId !== null ||
+            "executorKind" in scope.launchScope ||
             scope.launchScope.profileConfigDigest !== row.profileConfigDigest) ||
         check.additionalCapMicroUsd !== row.additionalCapMicroUsd ||
         check.worstExposureMicroUsd !== row.worstExposureMicroUsd)
       throw new BoardImportError("recovery_approval_unbound", 409);
     readOnlyExecutorKind = executorKind;
     launcherConfigDigest = scope.launchScope.launcherConfigDigest;
+    launchProofRecordedAt = proof.recordedAt;
     apiExecutionFrame = executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
       scope.report.apiExecutionFrame ?? null : null;
   } else if (row.launchProofId || row.launchBindingId || row.workerName || row.provider ||
-      row.modelId || row.routeId || row.briefDigest || row.launchScopeDigest) {
+      row.modelId || row.routeId || row.briefDigest || row.launchScopeDigest ||
+      row.apiModelAccessEvidenceId || row.apiModelAccessEvidenceDigest ||
+      row.canonicalModelId) {
     throw new BoardImportError("recovery_approval_unbound", 409);
   }
-  return { ...row, readOnlyExecutorKind, apiExecutionFrame, launcherConfigDigest };
+  return { ...row, readOnlyExecutorKind, apiExecutionFrame, launcherConfigDigest,
+    launchProofRecordedAt };
+}
+
+export function amuxV22ApiModelAccessCurrent(authority: null | {
+  readOnlyExecutorKind: string | null; modelId: string | null;
+  launchProofRecordedAt: Date | null;
+  apiModelAccessEvidence: null | { accessState: string; balanceKnown: boolean;
+    canonicalModelId: string | null; selectedModelId: string; recordedAt: Date };
+}, now: Date) {
+  const evidence = authority?.apiModelAccessEvidence;
+  if (authority?.readOnlyExecutorKind !== AMUX_V22_READ_ONLY_API_EXECUTOR_KIND)
+    return true;
+  return !!evidence && evidence.accessState === "verified" &&
+    evidence.balanceKnown === false && evidence.canonicalModelId === authority.modelId &&
+    evidence.selectedModelId === authority.modelId &&
+    evidence.recordedAt.getTime() <= now.getTime() &&
+    now.getTime() - evidence.recordedAt.getTime() <= 90_000 &&
+    // A late report records its own DB time; the window still closes 90
+    // seconds after the launch proof it answered, never after the report.
+    !!authority.launchProofRecordedAt &&
+    authority.launchProofRecordedAt.getTime() <= evidence.recordedAt.getTime() &&
+    now.getTime() - authority.launchProofRecordedAt.getTime() <= 90_000;
 }
 
 export function recoveryAttemptBudget(input: {

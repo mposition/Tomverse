@@ -470,6 +470,22 @@ test("the v40 native API usage guard replaces one exact check and no rows", () =
   "an unreviewed usage-ledger occurrence must fail closed");
 });
 
+test("the v42 launch-proof deadline guard has exact read-only exceptions and no row DML", () => {
+  const path =
+    "prisma/migrations/20261013330000_amux_v22_api_launch_proof_deadline/migration.sql";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const reviewed = RAW_SQL_ALLOWLIST.filter((entry) => entry.path === path);
+  assert.deepEqual(
+    reviewed.map(({ table, tableMentions, writeVerbs }) => ({
+      table, tableMentions, writeVerbs,
+    })),
+    [{ table: "AmuxV22TaskRecoveryApproval", tableMentions: 2, writeVerbs: 2 },
+      { table: "AmuxV22ReadOnlyLaunchProof", tableMentions: 2, writeVerbs: 2 }]
+  );
+  assert.doesNotMatch(sqlWithoutComments(source),
+    /\b(?:INSERT\s+INTO|UPDATE\s+"|DELETE\s+FROM|TRUNCATE)\b/i);
+});
+
 test("the v41 FIRST Task attempt guard has one exact read-only approval exception", () => {
   const path =
     "prisma/migrations/20261013290000_amux_v22_first_task_attempt_limit/migration.sql";
@@ -1032,6 +1048,13 @@ test("every append-only ledger table is one an exact migration protects", () => 
     ),
     "utf8"
   );
+  const apiAccessSql = readFileSync(
+    new URL(
+      "../prisma/migrations/20261013300000_amux_v22_api_model_access_evidence/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
   const recoveryTables = new Set([
     "AmuxV22TaskRecoveryInspectionRequest",
     "AmuxV22TaskRecoveryEvidence",
@@ -1042,9 +1065,11 @@ test("every append-only ledger table is one an exact migration protects", () => 
     "AmuxV22ReadOnlyLaunchCheck",
     "AmuxV22ReadOnlyLaunchProof",
   ]);
+  const apiAccessTables = new Set(["AmuxV22ApiModelAccessEvidence"]);
   for (const table of APPEND_ONLY_LEDGER_TABLES) {
     const sql = recoveryTables.has(table) ? recoverySql :
-      riskRetryTables.has(table) ? riskRetrySql : emailSql;
+      riskRetryTables.has(table) ? riskRetrySql :
+        apiAccessTables.has(table) ? apiAccessSql : emailSql;
     assert.match(
       sql,
       new RegExp(`BEFORE (?:INSERT OR )?UPDATE OR DELETE(?: OR TRUNCATE)?\\s+ON "${table}"`),

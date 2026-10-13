@@ -78,12 +78,27 @@ const recoveryLaunchProof = (value: unknown): value is NonNullable<AmuxV22Recove
   value.modelId.length <= 160 && id(value.routeId) && value.role === "investigate" &&
   digest(value.briefDigest) && version(value.pricingVersion) && digest(value.costReceiptDigest) &&
   value.launchScopeVersion === 1;
+const recoveryApiModelAccess = (value: unknown): value is NonNullable<
+  AmuxV22RecoveryRead["apiModelAccess"]> =>
+  record(value) && keys(value,
+    "balanceKnown,canonicalModelId,maximumCostMicroUsd,recordedAt,selectedModelId,state,worstExposureMicroUsd") &&
+  ["required", "verified", "stale", "unavailable", "unknown", "catalog_mismatch"]
+    .includes(String(value.state)) && typeof value.selectedModelId === "string" &&
+  value.selectedModelId.length >= 1 && value.selectedModelId.length <= 160 &&
+  (value.canonicalModelId === null || (typeof value.canonicalModelId === "string" &&
+    value.canonicalModelId.length >= 1 && value.canonicalModelId.length <= 160)) &&
+  value.balanceKnown === false && value.maximumCostMicroUsd === "3400000" &&
+  value.worstExposureMicroUsd === "6800000" &&
+  (value.recordedAt === null || (typeof value.recordedAt === "string" &&
+    Number.isFinite(Date.parse(value.recordedAt))));
 const recoveryEligibility = (value: unknown): value is AmuxV22RecoveryRead["eligibility"] =>
   record(value) && keys(value, "acceptUnknownPriorEffects,approveAttempt,reason,requestSafeStop") &&
   typeof value.acceptUnknownPriorEffects === "boolean" && typeof value.requestSafeStop === "boolean" &&
   typeof value.approveAttempt === "boolean" && (value.reason === null || ["exact_target_only",
     "risk_acceptance_required", "safe_stop_required", "safe_stop_stale", "launch_proof_required",
-    "launch_proof_stale", "binding_changed", "already_approved"].includes(String(value.reason)));
+    "launch_proof_stale", "binding_changed", "api_model_access_required",
+    "api_model_access_stale", "api_model_access_unverified",
+    "canonical_catalog_approval_required", "already_approved"].includes(String(value.reason)));
 const recoveryGuards = (value: unknown): value is AmuxV22RecoveryRead["guards"] =>
   record(value) && keys(value, "oldCost,priorEffects,readOnlyLaunch,taskAttemptLimit") &&
   value.priorEffects === "unknown" && value.oldCost === "held" &&
@@ -137,7 +152,9 @@ export function bindAmuxHostRecovery(value: unknown, identity: AmuxRecoveryInspe
       ((value.cost === null) !== (value.quote === null)) ||
       (recoveryCost(value.cost) && recoveryCost(value.quote) && !sameRecoveryCost(value.cost, value.quote)) ||
       (value.riskAcceptance !== null && !recoveryRiskAcceptance(value.riskAcceptance)) ||
-      (value.launchProof !== null && !recoveryLaunchProof(value.launchProof))) return null;
+      (value.launchProof !== null && !recoveryLaunchProof(value.launchProof)) ||
+      (value.apiModelAccess !== undefined &&
+        !recoveryApiModelAccess(value.apiModelAccess))) return null;
   if (value.state === "not_visible") return value.inspectionId === null && value.evidenceId === null &&
     value.evidenceDigest === null && value.cost === null && value.quote === null &&
     value.riskAcceptance === null && value.launchProof === null ? value as AmuxHostRecoveryRead : null;
@@ -528,6 +545,17 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
             <div><dt className="font-semibold text-zinc-100">{m.host.exception.binding}</dt><dd>{data.launchProof.launchBindingId}</dd></div>
             <div><dt className="font-semibold text-zinc-100">{m.host.exception.brief}</dt><dd>{data.launchProof.briefDigest}</dd></div>
           </dl>}
+          {data.apiModelAccess && <div className="mt-3 rounded-md border border-zinc-700 p-3"
+            data-testid="admin-amux-api-model-access">
+            <p className={data.apiModelAccess.state === "verified" ?
+              "text-emerald-200" : "text-amber-200"}>
+              {data.apiModelAccess.state === "verified" ?
+                m.host.exception.apiAccess : m.host.exception.apiAccessPending}
+            </p>
+            {data.apiModelAccess.canonicalModelId && <p className="mt-1 break-words text-zinc-300">
+              {m.host.exception.canonicalModel}: {data.apiModelAccess.canonicalModelId}
+            </p>}
+          </div>}
         </div>
       </div>}
     </section>}

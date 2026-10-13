@@ -29,7 +29,9 @@ use crate::local_card::{
     review_pr_number_from, valid_local_card_id, LinkDecision, LocalCardSummary,
 };
 use crate::tomverse_api::{
-    is_database_busy, DatabaseBusy, ExecutionStartResponse, NothingCommittedAnswer, OwnedTodoTask,
+    is_database_busy, AmuxV22ApiModelAccessRequest, AmuxV22ApiModelAccessResult,
+    DatabaseBusy, ExecutionStartResponse,
+    NothingCommittedAnswer, OwnedTodoTask,
     PulledDelivery, SelectionRead, SelectionReadTransientStatus, UnacceptedStatus,
     V22ReadOnlyRetryEcho, V22ReadOnlyRetryProfile,
     BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
@@ -838,6 +840,13 @@ pub fn bridge_error_class(error: &anyhow::Error) -> String {
         }
     }
     "other".to_owned()
+}
+
+/// Whether a failed API model-access authorization read may wait for a later
+/// tick. Only answers that carry no evidence the app decided anything qualify:
+/// the exact busy answer, a transport failure, or a 5xx/429 status.
+fn api_model_access_read_deferrable(error: &anyhow::Error) -> bool {
+    is_database_busy(error) || crate::tomverse_api::is_selection_read_recoverable(error)
 }
 
 /// Records why the bridge halted. The first cause wins: whatever followed it
@@ -1693,6 +1702,39 @@ async fn v22_sidecar_quota(_socket_path: &str, _worker: &str) -> Result<Option<c
     Ok(None)
 }
 
+#[cfg(unix)]
+async fn v22_sidecar_api_model_access(socket_path: &str,
+    request: &AmuxV22ApiModelAccessRequest) -> Result<AmuxV22ApiModelAccessResult> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+    if !std::path::Path::new(socket_path).is_absolute() ||
+        !valid_session_name(&request.worker) {
+        bail!("invalid API model access endpoint");
+    }
+    let mut payload = serde_json::to_value(request)?;
+    payload.as_object_mut().context("invalid API model access payload")?
+        .insert("op".to_owned(), serde_json::json!("api_model_access"));
+    let operation = async {
+        let mut bytes = serde_json::to_vec(&payload)?; bytes.push(b'\n');
+        let mut stream = UnixStream::connect(socket_path).await?;
+        stream.write_all(&bytes).await?; stream.shutdown().await?;
+        let mut response = Vec::new();
+        stream.take(8193).read_to_end(&mut response).await?;
+        if response.len() > 8192 { bail!("API model access response exceeds limit"); }
+        let result: AmuxV22ApiModelAccessResult = serde_json::from_slice(&response)?;
+        crate::tomverse_api::validate_api_model_access_result(&result, request)?;
+        Ok(result)
+    };
+    tokio::time::timeout(Duration::from_secs(4), operation).await
+        .context("API model access sidecar timeout")?
+}
+
+#[cfg(not(unix))]
+async fn v22_sidecar_api_model_access(_socket_path: &str,
+    _request: &AmuxV22ApiModelAccessRequest) -> Result<AmuxV22ApiModelAccessResult> {
+    bail!("API model access sidecar unavailable")
+}
+
 #[cfg_attr(not(unix), allow(dead_code))]
 fn parse_v22_protocol_response(value: &serde_json::Value,
     request_id: &str, worker: &str) -> Result<Option<String>> {
@@ -2383,6 +2425,7 @@ pub async fn run_from_env() -> i32 {
     let mut awaiting_delivery: Vec<AwaitingDelivery> = Vec::new();
     let mut undelivered_started: Vec<StartedExecution> = Vec::new();
     let mut quota_checked: BTreeMap<String, std::time::Instant> = BTreeMap::new();
+    let mut protocol_by_worker: BTreeMap<String, Option<String>> = BTreeMap::new();
 
     loop {
         if !halted && !awaiting_registration.is_empty() {
@@ -2396,6 +2439,7 @@ pub async fn run_from_env() -> i32 {
             .chain(awaiting_delivery.iter().map(|entry| entry.started.worker.clone()))
             .chain(undelivered_started.iter().map(|entry| entry.worker.clone()))
             .collect();
+        protocol_by_worker.clear();
         for name in sessions.names() {
             let Some(session) = sessions.presence(&name).cloned() else {
                 continue;
@@ -2409,6 +2453,7 @@ pub async fn run_from_env() -> i32 {
                 has_pending,
             );
             let protocol_capability = local.read_only_retry_capability(&name).await;
+            protocol_by_worker.insert(name.clone(), protocol_capability.clone());
             let protocol_capabilities: Vec<&str> =
                 protocol_capability.as_deref().into_iter().collect();
             let published = api
@@ -2504,16 +2549,62 @@ pub async fn run_from_env() -> i32 {
         }
         pending = still_pending;
 
-        // Renew active attempts first. Each fixed-scope sidecar probes its own
-        // CLI profile at most once per five minutes; unknown reads remain
-        // unknown and never become a fabricated available/exhausted quota.
+        // Renew active attempts first. The dedicated API worker never enters
+        // the CLI quota path. It may make the fixed provider GET only after
+        // the app returns one exact launch-proof-bound request.
         if !halted && !any_pending_busy_this_tick && roster_ok {
             if let Some(socket) = &local.v22_socket {
                 for name in sessions.names() {
-                    if !sessions.presence(&name).is_some_and(|session| session.running) ||
-                        quota_checked.get(&name).is_some_and(|at| at.elapsed() < Duration::from_secs(300)) {
+                    if !sessions.presence(&name).is_some_and(|session| session.running) {
                         continue;
                     }
+                    if protocol_by_worker.get(&name).and_then(|value| value.as_deref()) ==
+                        Some("read_only_api_retry_v1") {
+                        match api.v22_api_model_access_pending(&name).await {
+                            Ok(Some(request)) => match v22_sidecar_api_model_access(socket, &request).await {
+                                Ok(result) => match api.v22_api_model_access_record_once(&result).await {
+                                    Ok(true) => println!("amux v22 API model access evidence recorded for {name}"),
+                                    Ok(false) => {
+                                        halted = true;
+                                        note_halt(&mut halt_cause, "api_model_access_report_refused");
+                                        break;
+                                    }
+                                    Err(_) => {
+                                        halted = true;
+                                        note_halt(&mut halt_cause, "api_model_access_write_unknown");
+                                        break;
+                                    }
+                                },
+                                Err(_) => {
+                                    halted = true;
+                                    note_halt(&mut halt_cause, "api_model_access_outcome_unknown");
+                                    break;
+                                }
+                            },
+                            Ok(None) => {}
+                            // Nothing has reached the sidecar or provider yet:
+                            // a busy, timed-out, 5xx or 429 read defers this
+                            // worker to a later tick. A 4xx or a malformed
+                            // answer is a contract break and still halts.
+                            Err(error) if api_model_access_read_deferrable(&error) => {
+                                eprintln!(
+                                    "amux wsl bridge warn: API model access authorization read for {name} failed ({}); nothing was sent to the provider, deferred",
+                                    bridge_error_class(&error)
+                                );
+                            }
+                            Err(_) => {
+                                halted = true;
+                                note_halt(&mut halt_cause, "api_model_access_authorization_unavailable");
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    // Each fixed-scope CLI sidecar probes its own profile at
+                    // most once per five minutes. Unknown never becomes a
+                    // fabricated available or exhausted observation.
+                    if quota_checked.get(&name).is_some_and(|at|
+                        at.elapsed() < Duration::from_secs(300)) { continue; }
                     quota_checked.insert(name.clone(), std::time::Instant::now());
                     match v22_sidecar_quota(socket, &name).await {
                         Ok(Some(observation)) => match api.worker_quota_record_once(&observation).await {
@@ -5303,4 +5394,45 @@ mod tests {
         assert!(!is_database_busy(&other), "the text alone is not the answer");
     }
 
+
+    #[test]
+    fn api_model_access_read_defers_only_answers_that_decided_nothing() {
+        use crate::tomverse_api::{DatabaseBusy, SelectionReadTransientStatus, UnacceptedStatus};
+        use reqwest::StatusCode;
+        let busy = anyhow::Error::new(DatabaseBusy).context("API model access authorization refused");
+        let transient = anyhow::Error::new(SelectionReadTransientStatus {
+            status: StatusCode::BAD_GATEWAY }).context("API model access authorization refused");
+        let limited = anyhow::Error::new(SelectionReadTransientStatus {
+            status: StatusCode::TOO_MANY_REQUESTS }).context("API model access authorization refused");
+        assert!(api_model_access_read_deferrable(&busy));
+        assert!(api_model_access_read_deferrable(&transient));
+        assert!(api_model_access_read_deferrable(&limited));
+        let unauthorized = anyhow::Error::new(UnacceptedStatus {
+            status: StatusCode::UNAUTHORIZED }).context("API model access authorization refused");
+        let malformed = anyhow::anyhow!("invalid API model access request");
+        assert!(!api_model_access_read_deferrable(&unauthorized));
+        assert!(!api_model_access_read_deferrable(&malformed));
+    }
+
+    #[test]
+    fn api_model_access_defers_only_before_the_sidecar_and_keeps_unknown_halts() {
+        let source = include_str!("wsl_bridge.rs");
+        let start = source.find("match api.v22_api_model_access_pending(&name).await").unwrap();
+        let block = &source[start..start + source[start..].find("// Each fixed-scope CLI sidecar").unwrap()];
+        let deferred = block.find("Err(error) if api_model_access_read_deferrable(&error)").unwrap();
+        let read_halt = block.find("\"api_model_access_authorization_unavailable\"").unwrap();
+        assert!(deferred < read_halt, "the deferral must be tried before the read halt");
+        // Once the sidecar may have called the provider, or the report write is
+        // unknown, the bridge still halts and never reposts or re-calls.
+        for cause in ["api_model_access_outcome_unknown", "api_model_access_write_unknown",
+            "api_model_access_report_refused"] {
+            assert!(block.contains(&format!("\"{cause}\"")), "{cause}");
+        }
+        let deferral_end = deferred + block[deferred..].find("Err(_) =>").unwrap();
+        assert!(deferral_end < read_halt);
+        let deferral = &block[deferred..deferral_end];
+        assert!(!deferral.contains("halted = true"));
+        assert!(!deferral.contains("v22_sidecar_api_model_access"));
+        assert!(!deferral.contains("record_once"));
+    }
 }

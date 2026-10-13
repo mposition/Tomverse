@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,6 +15,8 @@ import { amuxV22RecoveryDigest, amuxV22SafeStopJournalBinding,
   type AmuxV22RecoveryEvidenceInput,
   type AmuxV22SafeStopEvidenceInput } from "../../lib/amux/v22TaskRecoveryCore.ts";
 import { createAmuxV22SidecarHandler } from "../../lib/amux/v22OneShotSidecar.mjs";
+import { amuxV22ApiModelAccessResult } from
+  "../../lib/amux/v22ApiModelAccessProtocol.mjs";
 import { runAmuxV22RecoveryCheckerOnce } from "../../lib/amux/v22RecoveryHost.mjs";
 import { inspectV4TaskCostCatalog } from "../../lib/amux/v4TaskCostCatalogCore.ts";
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
@@ -52,6 +55,7 @@ const world = { task: {} as Row, attempt: {} as Row, runtime: {} as Row,
   retryRuntime: {} as Row, routeWorkerName: "claude-test",
   inspections: [] as Row[], evidence: [] as Row[], approvals: [] as Row[], audits: [] as Row[],
   risks: [] as Row[], launchChecks: [] as Row[], launchProofs: [] as Row[],
+  apiModelAccessEvidence: [] as Row[],
   ready: true, incident: false, cap: "3400000", costAdmission: true, cas: true,
   otherWork: false,
   changedOld: 0, ledgerWrites: 0, attemptWrites: 0 };
@@ -89,6 +93,7 @@ function reset() {
   world.routeWorkerName = "claude-test";
   world.inspections = []; world.evidence = []; world.approvals = []; world.audits = [];
   world.risks = []; world.launchChecks = []; world.launchProofs = [];
+  world.apiModelAccessEvidence = [];
   world.ready = true; world.incident = false; world.cap = "3400000"; world.costAdmission = true;
   world.cas = true; world.otherWork = false; world.changedOld = 0;
   world.ledgerWrites = 0; world.attemptWrites = 0;
@@ -146,7 +151,9 @@ const tx = {
       const row = world.approvals.find((item) => matches(item, where));
       return row && include ? { ...row,
         inspection: world.inspections.find((item) => item.id === row.inspectionId),
-        evidence: world.evidence.find((item) => item.id === row.evidenceId) } : row ?? null;
+        evidence: world.evidence.find((item) => item.id === row.evidenceId),
+        apiModelAccessEvidence: world.apiModelAccessEvidence.find((item) =>
+          item.id === row.apiModelAccessEvidenceId) ?? null } : row ?? null;
     },
     create: async ({ data }: { data: Row }) => { world.approvals.push(data); return data; } },
   amuxV22TaskRecoveryRiskAcceptance: {
@@ -157,7 +164,8 @@ const tx = {
   amuxV22ReadOnlyLaunchCheck: {
     findUnique: async ({ where, include }: { where: Row; include?: Row }) => {
       const row = world.launchChecks.find((item) => matches(item, where));
-      return row && include ? { ...row, task: { taskRole: world.task.taskRole,
+      return row && include ? { ...row, task: { ...world.task,
+        taskRole: world.task.taskRole,
         executionGrade: world.task.executionGrade } } : row ?? null;
     },
     findFirst: async ({ where }: { where: Row }) => world.launchChecks.find((row) => matches(row, where)) ?? null,
@@ -169,14 +177,46 @@ const tx = {
     create: async ({ data }: { data: Row }) => { world.launchChecks.push(data); return data; },
   },
   amuxV22ReadOnlyLaunchProof: {
-    findUnique: async ({ where }: { where: Row }) => world.launchProofs.find((row) => matches(row, where)) ?? null,
-    findMany: async () => world.launchProofs,
+    findUnique: async ({ where, include }: { where: Row; include?: Row }) => {
+      const row = world.launchProofs.find((item) => matches(item, where));
+      return row && include ? { ...row, launchCheck: world.launchChecks.find((item) =>
+        item.id === row.launchCheckId) } : row ?? null;
+    },
+    findMany: async ({ where, include }: { where?: Row; include?: Row } = {}) =>
+      world.launchProofs.filter((row) => {
+        if (!where) return true;
+        const check = world.launchChecks.find((item) => item.id === row.launchCheckId);
+        const recordedAt = row.recordedAt as Date;
+        const range = where.recordedAt as { gte: Date; lte: Date } | undefined;
+        return row.verified === where.verified &&
+          !world.apiModelAccessEvidence.some((item) => item.launchProofId === row.id) &&
+          (!range || (recordedAt >= range.gte && recordedAt <= range.lte)) &&
+          Boolean(check && (where.launchCheck as Row).workerName === check.workerName);
+      }).sort((left, right) => (right.recordedAt as Date).getTime() -
+        (left.recordedAt as Date).getTime()).slice(0, 1).map((row) => include ? {
+          ...row, launchCheck: { ...world.launchChecks.find((item) =>
+            item.id === row.launchCheckId)!, task: world.task },
+        } : row),
     create: async ({ data }: { data: Row }) => { world.launchProofs.push(data); return data; },
   },
-  amuxWorkerRuntime: { findMany: async () => [world.runtime, world.retryRuntime] },
+  amuxV22ApiModelAccessEvidence: {
+    findUnique: async ({ where }: { where: Row }) => world.apiModelAccessEvidence.find((row) =>
+      matches(row, where)) ?? null,
+    create: async ({ data, select }: { data: Row; select?: Row }) => {
+      world.apiModelAccessEvidence.push(data);
+      return select ? Object.fromEntries(Object.keys(select).map((key) =>
+        [key, data[key]])) : data;
+    },
+  },
+  amuxWorkerRuntime: {
+    findMany: async () => [world.runtime, world.retryRuntime],
+    findUnique: async ({ where }: { where: Row }) =>
+      [world.runtime, world.retryRuntime].find((row) => matches(row, where)) ?? null,
+  },
   amuxOrchestratorHalt: { findFirst: async () => null },
 };
 let loaded: Promise<typeof import("../../lib/amux/v22TaskRecoveryService.ts")> | null = null;
+let apiAccessLoaded: Promise<typeof import("../../lib/amux/v22ApiModelAccessService.ts")> | null = null;
 function load() {
   if (loaded) return loaded;
   mock.module(mod("lib/adminAuth.ts"), { namedExports: { isAdminSession: () => true, getAdminRole: () => "owner" } });
@@ -197,13 +237,15 @@ function load() {
       callback: (transaction: typeof tx, time: Date) => Promise<unknown>) => {
       const saved = { task: structuredClone(world.task), inspections: [...world.inspections],
         approvals: [...world.approvals], evidence: [...world.evidence], audits: [...world.audits],
-        risks: [...world.risks], launchChecks: [...world.launchChecks], launchProofs: [...world.launchProofs] };
+        risks: [...world.risks], launchChecks: [...world.launchChecks], launchProofs: [...world.launchProofs],
+        apiModelAccessEvidence: [...world.apiModelAccessEvidence] };
       try { return await callback(tx, now); }
       catch (error) { world.task = saved.task; world.inspections = saved.inspections;
         world.approvals = saved.approvals;
         world.evidence = saved.evidence; world.audits = saved.audits;
         world.risks = saved.risks; world.launchChecks = saved.launchChecks;
-        world.launchProofs = saved.launchProofs; throw error; }
+        world.launchProofs = saved.launchProofs;
+        world.apiModelAccessEvidence = saved.apiModelAccessEvidence; throw error; }
     },
   } });
   mock.module(mod("lib/amux/incident.ts"), { namedExports: { lockAmuxAdmissionAndReadIncident: async () => ({ blocks_admission: world.incident }) } });
@@ -230,6 +272,11 @@ function load() {
   } });
   mock.module(mod("lib/amux/workerRuntime.ts"), { namedExports: { AMUX_WORKER_RUNTIME_LEASE_MS: 90_000 } });
   loaded = import(mod("lib/amux/v22TaskRecoveryService.ts")); return loaded;
+}
+async function loadApiAccess() {
+  await load();
+  apiAccessLoaded ??= import(mod("lib/amux/v22ApiModelAccessService.ts"));
+  return apiAccessLoaded;
 }
 async function requestInspection() {
   const service = await load();
@@ -460,6 +507,7 @@ test("the actual no-memory legacy producer stays unknown through the checker and
     const handler = createAmuxV22SidecarHandler({ worker: "claude-test", stateDir,
       protocolCapabilities: () => ["read_only_retry_v1"],
       quota: undefined, recoveryUnit: undefined, recoveryWorkspace: undefined,
+      modelAccess: undefined,
       run: async () => {
         throw new Error("provider execution is not allowed in this regression");
       } });
@@ -522,6 +570,7 @@ test("the actual unknown producer authorizes only the approved FIRST Task risk i
     const handler = createAmuxV22SidecarHandler({ worker: "claude-test", stateDir,
       protocolCapabilities: () => ["read_only_retry_v1"],
       quota: undefined, recoveryUnit: undefined, recoveryWorkspace: undefined,
+      modelAccess: undefined,
       run: async () => { throw new Error("risk acceptance must not run the provider"); } });
     await runAmuxV22RecoveryCheckerOnce({ enabled: "1", workerName: "claude-test",
       socketPath: "/run/tomverse-amux-v22-claude-test/task.sock",
@@ -656,7 +705,7 @@ test("the exact API capability binds a server-priced v40 frame through final con
   assert.equal((check.launchScope as Row).executorKind, "read_only_api_retry_v1");
   const checkAudit = world.audits.find((row) =>
     row.action === "amux.v22.recovery.read_only_launch_requested")!;
-  assert.equal((checkAudit.metadata as Row).policyVersion, 40);
+  assert.equal((checkAudit.metadata as Row).policyVersion, 42);
   const pending = await service.pendingAmuxV22LegacySafeStops();
   const launch = pending.requests.find((candidate) => "launchCheckId" in candidate);
   assert.ok(launch && "apiExecutionFrame" in launch);
@@ -669,20 +718,37 @@ test("the exact API capability binds a server-priced v40 frame through final con
   const ready = await submitReadOnlyLaunchProof();
   assert.equal(world.launchProofs.length, 1);
   assert.equal((world.launchProofs[0]!.report as Row).apiExecutionFrame !== undefined, true);
+  assert.equal(ready.eligibility.approveAttempt, false);
+  assert.equal(ready.eligibility.reason, "api_model_access_required");
+  const accessService = await loadApiAccess();
+  const pendingAccess = await accessService.pendingAmuxV22ApiModelAccess("codex-test");
+  assert.equal(pendingAccess.requests.length, 1);
+  const accessRequest = pendingAccess.requests[0]!;
+  const accessResult = amuxV22ApiModelAccessResult(accessRequest, {
+    access: "verified", canonicalModelId: accessRequest.selectedModelId, reason: null,
+  });
+  const accessReceipt = await accessService.reportAmuxV22ApiModelAccess(accessResult);
+  assert.equal(accessReceipt.accepted, true);
+  assert.equal(accessReceipt.access, "verified");
+  assert.equal(world.apiModelAccessEvidence.length, 1);
+  const readyWithAccess = await service.readAmuxV22TaskRecovery(owner,
+    AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, safeStopRequestId);
+  assert.equal(readyWithAccess.eligibility.approveAttempt, true);
+  assert.equal(readyWithAccess.apiModelAccess?.state, "verified");
   const approved = await service.approveAmuxV22TaskRecovery({ session: owner,
     request: new Request("https://tomverse.test"), action: "approve_attempt",
     taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
     priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
-    requestId: approvalRequestId, inspectionId: ready.inspectionId!,
-    evidenceId: ready.evidenceId!, evidenceDigest: ready.evidenceDigest!,
-    costDigest: ready.cost!.costDigest,
-    riskAcceptanceId: ready.riskAcceptance!.id,
-    riskAcceptanceDigest: ready.riskAcceptance!.digest,
-    launchProofId: ready.launchProof!.id,
-    launchProofDigest: ready.launchProof!.digest, acceptRetry: true });
+    requestId: approvalRequestId, inspectionId: readyWithAccess.inspectionId!,
+    evidenceId: readyWithAccess.evidenceId!, evidenceDigest: readyWithAccess.evidenceDigest!,
+    costDigest: readyWithAccess.cost!.costDigest,
+    riskAcceptanceId: readyWithAccess.riskAcceptance!.id,
+    riskAcceptanceDigest: readyWithAccess.riskAcceptance!.digest,
+    launchProofId: readyWithAccess.launchProof!.id,
+    launchProofDigest: readyWithAccess.launchProof!.digest, acceptRetry: true });
   assert.equal(approved.state, "approved");
   assert.equal(world.approvals.length, 1);
-  assert.equal((world.audits.at(-1)!.metadata as Row).policyVersion, 40);
+  assert.equal((world.audits.at(-1)!.metadata as Row).policyVersion, 42);
   assert.equal(world.approvals[0]!.profileConfigDigest, null);
   const prisma = new PrismaClient({ adapter: new PrismaPg({
     connectionString: "postgresql://local-test:local-test@127.0.0.1:1/local-test",
@@ -701,6 +767,85 @@ test("the exact API capability binds a server-priced v40 frame through final con
       AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, 8, approved.approvalId),
     /recovery_approval_unbound/);
   } finally { await prisma.$disconnect(); }
+});
+test("API access selects the fresh proof and refuses stale, drifted and alias-mismatched authority", async () => {
+  const { service } = await prepareUnknownRiskSafeStop(["read_only_api_retry_v1"]);
+  await submitReadOnlyLaunchProof();
+  const freshProof = world.launchProofs[0]!;
+  const freshCheck = world.launchChecks[0]!;
+  const staleProofId = "8b465370-568a-4a78-b9dd-31dfd5413f95";
+  const staleCheckId = "cd3bbc7f-ed3f-438d-8ae9-77906ca4a8a2";
+  world.launchChecks.unshift({ ...freshCheck, id: staleCheckId });
+  world.launchProofs.unshift({ ...freshProof, id: staleProofId,
+    launchCheckId: staleCheckId,
+    recordedAt: new Date(now.getTime() - 91_000) });
+  const accessService = await loadApiAccess();
+  const pending = await accessService.pendingAmuxV22ApiModelAccess("codex-test");
+  assert.equal(pending.requests.length, 1);
+  assert.equal(pending.requests[0]!.requestId, freshProof.id,
+    "a stale earlier proof must not hide the fresh authorization");
+  const request = pending.requests[0]!;
+  world.launchChecks = world.launchChecks.filter((row) => row.id !== staleCheckId);
+  world.launchProofs = world.launchProofs.filter((row) => row.id !== staleProofId);
+
+  freshProof.recordedAt = new Date(now.getTime() - 91_000);
+  await assert.rejects(accessService.reportAmuxV22ApiModelAccess(
+    amuxV22ApiModelAccessResult(request, { access: "verified",
+      canonicalModelId: request.selectedModelId, reason: null })),
+  /api_model_access_binding_mismatch/);
+  assert.equal(world.apiModelAccessEvidence.length, 0);
+  freshProof.recordedAt = now;
+
+  world.retryRuntime.instanceId = "drifted-instance";
+  await assert.rejects(accessService.reportAmuxV22ApiModelAccess(
+    amuxV22ApiModelAccessResult(request, { access: "verified",
+      canonicalModelId: request.selectedModelId, reason: null })),
+  /api_model_access_binding_mismatch/);
+  assert.equal(world.apiModelAccessEvidence.length, 0);
+  world.retryRuntime.instanceId = freshCheck.workerInstanceId;
+
+  const alias = await accessService.reportAmuxV22ApiModelAccess(
+    amuxV22ApiModelAccessResult(request, { access: "verified",
+      canonicalModelId: "claude-canonical-not-approved", reason: null }));
+  assert.equal(alias.accepted, true);
+  // The Rust client parses these bodies with deny_unknown_fields; keep the
+  // service's real answers key-identical to the shared wire fixture.
+  const wire = JSON.parse(readFileSync(resolve(import.meta.dirname, "../..",
+    "tests/fixtures/amux-v22-api-model-access-wire-v1.json"), "utf8"));
+  assert.deepEqual(Object.keys(alias).sort(), Object.keys(wire.recorded).sort());
+  const readback = await accessService.readAmuxV22ApiModelAccess(alias.evidenceId);
+  assert.deepEqual(Object.keys(readback).sort(), Object.keys(wire.readback).sort());
+  assert.deepEqual(Object.keys(readback.evidence ?? {}).sort(),
+    Object.keys(wire.readback.evidence).sort());
+  assert.deepEqual(await accessService.readAmuxV22ApiModelAccess(
+    "00000000-0000-4000-8000-0000000000ff"), wire.readbackMissing);
+  const blocked = await service.readAmuxV22TaskRecovery(owner,
+    AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, safeStopRequestId);
+  assert.equal(blocked.apiModelAccess?.state, "catalog_mismatch");
+  assert.equal(blocked.eligibility.approveAttempt, false);
+  assert.equal(blocked.eligibility.reason,
+    "canonical_catalog_approval_required");
+  assert.equal(world.approvals.length, 0);
+});
+test("a late model-access report cannot extend the launch proof deadline at claim or start", async () => {
+  const service = await load();
+  const proofAt = new Date("2026-10-13T00:00:00.000Z");
+  const at = (ms: number) => new Date(proofAt.getTime() + ms);
+  const authority = (evidenceAt: Date, launchProofRecordedAt: Date | null = proofAt) => ({
+    readOnlyExecutorKind: "read_only_api_retry_v1", modelId: "claude-opus-5-5",
+    launchProofRecordedAt, apiModelAccessEvidence: { accessState: "verified",
+      balanceKnown: false, canonicalModelId: "claude-opus-5-5",
+      selectedModelId: "claude-opus-5-5", recordedAt: evidenceAt } });
+  // proof/GET at T0, cached result reported at T0+89 s: still bounded by T0+90 s.
+  assert.equal(service.amuxV22ApiModelAccessCurrent(authority(at(89_000)), at(90_000)), true);
+  assert.equal(service.amuxV22ApiModelAccessCurrent(authority(at(89_000)), at(90_001)), false);
+  assert.equal(service.amuxV22ApiModelAccessCurrent(authority(at(89_000)), at(179_000)), false);
+  assert.equal(service.amuxV22ApiModelAccessCurrent(authority(at(1_000), null), at(2_000)), false);
+  assert.equal(service.amuxV22ApiModelAccessCurrent(authority(at(-1), proofAt), at(2_000)), false,
+    "evidence older than its launch proof is not bound to it");
+  assert.equal(service.amuxV22ApiModelAccessCurrent({ ...authority(at(1_000)),
+    readOnlyExecutorKind: "read_only_retry_v1" }, at(500_000)), true,
+    "the CLI recovery path does not use API model access");
 });
 test("final consent rechecks the exact runtime capability before any approval or Task write", async () => {
   for (const capabilities of [[], ["legacy_v1"],

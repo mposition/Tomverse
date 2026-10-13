@@ -161,6 +161,16 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration policy v41: the approved FIRST Task has a database-owned
   // two-attempt ceiling; it changes no commit-deadline mechanism.
   "20261013290000_amux_v22_first_task_attempt_limit",
+  // Orchestration policy v42: content-free API model-access evidence and its
+  // recovery bindings; it changes no commit-deadline mechanism.
+  "20261013300000_amux_v22_api_model_access_evidence",
+  // Orchestration policy v42 repairs of the 300 evidence and assignment
+  // guards (cast, same-transaction audit read, CLI pass-through) and the
+  // launch-proof deadline guard; none changes a commit-deadline mechanism.
+  "20261013310000_amux_v22_api_model_access_insert_guard_repair",
+  "20261013320000_amux_v22_api_model_access_audit_xid_repair",
+  "20261013330000_amux_v22_api_launch_proof_deadline",
+  "20261013340000_amux_v22_api_assignment_cli_passthrough_repair",
   // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
   // no commit deadline and continues to use the existing mutation fence.
   "20261012170000_amux_verified_no_commit_halt_auto_clear",

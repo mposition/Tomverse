@@ -6,7 +6,7 @@ import { mock, test } from "node:test";
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const now = new Date("2026-10-13T12:00:00.000Z");
-const taskId = "task-one";
+const taskId = "c48886b9-86f8-4631-8db8-c0b288a707af";
 const assignmentId = "assignment-one";
 const attemptId = "attempt-one";
 const worker = "worker-one";
@@ -15,6 +15,7 @@ const apiCapability = ["read_only_api_retry_v1"];
 let runtimeCapabilities = apiCapability;
 let recoveryAuthority: Record<string, unknown> | null = null;
 let assignmentRecoveryApprovalId: string | null = null;
+let apiModelAccessCurrent = true;
 let scenario: "start" | "delivery" | "generic-start" | "generic-delivery" |
   "heartbeat" = "start";
 let decryptCalls = 0;
@@ -105,8 +106,11 @@ const tx = {
     confirmationSnapshot: { card: { task: { costReceipt: receipt } } },
   }) },
   amuxExecutionAttempt: {
-    aggregate: async () => ({ _count: { _all: 0 },
-      _max: { attemptNumber: null }, _sum: { reservedCostMicrousd: null } }),
+    aggregate: async () => recoveryAuthority ? ({ _count: { _all: 1 },
+      _max: { attemptNumber: 1 },
+      _sum: { reservedCostMicrousd: BigInt("3400000") } }) :
+      ({ _count: { _all: 0 }, _max: { attemptNumber: null },
+        _sum: { reservedCostMicrousd: null } }),
     findUnique: async () => ({ v22AssignmentId: assignmentId }),
     count: async () => { liveAttemptReads += 1; return 1; },
     create: async () => { attemptWrites += 1; },
@@ -154,7 +158,9 @@ mock.module(mod("lib/amux/v22LegacySafeStopFence.ts"), { namedExports: {
 } });
 mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
   readAmuxV22RecoveryAuthority: async () => recoveryAuthority,
-  recoveryAttemptBudget: () => ({ allowed: true, next_attempt_number: 1 }),
+  amuxV22ApiModelAccessCurrent: () => apiModelAccessCurrent,
+  recoveryAttemptBudget: () => ({ allowed: true,
+    next_attempt_number: recoveryAuthority ? 2 : 1 }),
 } });
 mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports: {
   calculateCurrentApprovedAmuxV4TaskCost: async () => ({
@@ -215,6 +221,103 @@ test("an API-only runtime cannot start an ordinary assignment", async () => {
   } finally {
     if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
     else process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = previous;
+  }
+});
+
+test("the exact API recovery starts only while model-access evidence is current", async () => {
+  scenario = "start"; runtimeCapabilities = apiCapability;
+  assignmentRecoveryApprovalId = "approval-one"; resetWrites();
+  const p = await import(mod("lib/amux/v22ReadOnlyApiProtocol.mjs"));
+  const c = await import(mod("lib/amux/v22TaskRecoveryCore.ts"));
+  const frame = p.parseAmuxV22ReadOnlyApiExecutionFrame({
+    version: 1, executorKind: "read_only_api_retry_v1", provider: "anthropic",
+    modelId: "claude-opus-5-5", routeId: "read-only-route",
+    routePolicyDigest: "d".repeat(64), catalogApprovalId: "catalog-one",
+    catalogVersion: "v1", catalogDigest: receipt.catalogDigest,
+    pricingVersion: "price-v1", pricingSource: "approved-catalog",
+    pricingVerifiedAt: "2026-10-13T00:00:00.000Z",
+    pricingExpiresAt: "2026-10-14T00:00:00.000Z",
+    uncachedInputMicroUsdPerMillion: 1, cacheReadMicroUsdPerMillion: 1,
+    cacheWriteMicroUsdPerMillion: 1, outputMicroUsdPerMillion: 1,
+    tokenLimits: { uncachedInputTokens: 10, cacheReadTokens: 10,
+      cacheWriteTokens: 10, outputTokens: 10 }, maxProviderTurns: 8,
+    maxOutputTokensPerTurn: 10, maxRetries: 0,
+    maximumCostMicroUsd: 3_400_000, credentialProfileId: "first-task-anthropic",
+    credentialMetadataDigest: "1".repeat(64),
+    executorArtifactDigest: "2".repeat(64),
+    settingsDigest: p.AMUX_V22_READ_ONLY_API_SETTINGS_DIGEST,
+    repositoryScopeDigest: "3".repeat(64),
+    brokerPolicyDigest: p.AMUX_V22_READ_ONLY_API_BROKER_POLICY_DIGEST,
+    toolSchemaDigest: p.AMUX_V22_READ_ONLY_API_TOOL_SCHEMA_DIGEST,
+  }, { now });
+  const quote = c.amuxV22ReadOnlyRetryRouteCost({
+    priorReservedMicroUsd: BigInt("3400000"), catalogApprovalId: "catalog-one",
+    receipt: receipt as never, routeId: "read-only-route", workerName: worker,
+    provider: "anthropic", modelId: "claude-opus-5-5",
+  });
+  recoveryAuthority = { id: "approval-one", taskId, afterRevision: 5,
+    historicalAttempts: 1, nextAttemptNumber: 2,
+    oldHeldMicroUsd: BigInt("3400000"),
+    additionalCapMicroUsd: BigInt("3400000"), catalogApprovalId: "catalog-one",
+    costDigest: quote.costDigest, riskAcceptanceId: "risk-one",
+    readOnlyExecutorKind: "read_only_api_retry_v1", apiExecutionFrame: frame,
+    workerName: worker, provider: "anthropic", modelId: "claude-opus-5-5",
+    routeId: "read-only-route", routePolicyDigest: "d".repeat(64),
+    briefDigest: "b".repeat(64) };
+  assert.equal(c.amuxV22RecoveryStartAllowed({ approval: recoveryAuthority as never,
+    taskId, assignmentRevision: 5, historicalAttempts: 1, nextAttemptNumber: 2,
+    priorReservedMicroUsd: BigInt("3400000"), assignedMicroUsd: BigInt("3400000"),
+    catalogApprovalId: "catalog-one", costDigest: quote.costDigest }), true);
+  const previous = process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
+  const apiEnv = {
+    enabled: process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED,
+    profile: process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID,
+    metadata: process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST,
+    artifact: process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST,
+    scope: process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST,
+  };
+  process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = "enabled";
+  process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED = "true";
+  process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID =
+    frame.credentialProfileId;
+  process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST =
+    frame.credentialMetadataDigest;
+  process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST =
+    frame.executorArtifactDigest;
+  process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST =
+    frame.repositoryScopeDigest;
+  try {
+    apiModelAccessCurrent = false;
+    const stale = await (await execution).startAmuxV22TaskExecution({
+      taskId, assignmentId, worker, instanceId, generation: 1,
+      expectedRevision: 6,
+    });
+    assert.deepEqual(stale,
+      { started: false, reason: "read_only_api_model_access_stale" });
+    assert.deepEqual([taskWrites, runtimeWrites, attemptWrites,
+      deliveryWrites, auditWrites], [0, 0, 0, 0, 0]);
+    apiModelAccessCurrent = true;
+    const started = await (await execution).startAmuxV22TaskExecution({
+      taskId, assignmentId, worker, instanceId, generation: 1,
+      expectedRevision: 6,
+    });
+    assert.equal(started.started, true, JSON.stringify(started));
+    assert.deepEqual([taskWrites, runtimeWrites, attemptWrites,
+      deliveryWrites, auditWrites], [1, 1, 1, 1, 1]);
+  } finally {
+    recoveryAuthority = null; assignmentRecoveryApprovalId = null;
+    apiModelAccessCurrent = true;
+    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
+    else process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = previous;
+    for (const [key, value] of [
+      ["TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED", apiEnv.enabled],
+      ["TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID", apiEnv.profile],
+      ["TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST", apiEnv.metadata],
+      ["TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST", apiEnv.artifact],
+      ["TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST", apiEnv.scope],
+    ] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
   }
 });
 

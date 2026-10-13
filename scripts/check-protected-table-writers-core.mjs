@@ -147,6 +147,7 @@ export const APPEND_ONLY_LEDGER_TABLES = [
   "AmuxV22TaskRecoveryRiskAcceptance",
   "AmuxV22ReadOnlyLaunchCheck",
   "AmuxV22ReadOnlyLaunchProof",
+  "AmuxV22ApiModelAccessEvidence",
 ];
 
 /**
@@ -429,6 +430,12 @@ export const PROTECTED_TABLES = [
     writers: ["lib/amux/v22TaskRecoveryService.ts"],
     contract: "docs/policy/development-agent-orchestration.md 버전 36-39",
   })),
+  {
+    table: "AmuxV22ApiModelAccessEvidence",
+    delegate: "amuxV22ApiModelAccessEvidence",
+    writers: ["lib/amux/v22ApiModelAccessService.ts"],
+    contract: "docs/policy/development-agent-orchestration.md 버전 42",
+  },
   {
     table: "AmuxCliUsageEvent",
     delegate: "amuxCliUsageEvent",
@@ -802,6 +809,31 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The additive v41 migration replaces only the existing attempt-guard function so the exact FIRST Task's second attempt re-reads its immutable recovery approval. It performs no row DML; the scanner's one write verb is the function's FOR UPDATE lock clause.",
   },
+  ...[
+    ["AdminAuditLog", 3],
+    ["AmuxV22TaskRecoveryApproval", 8],
+    ["AmuxV22ReadOnlyLaunchCheck", 2],
+    ["AmuxV22ReadOnlyLaunchProof", 7],
+    ["AmuxV22ApiModelAccessEvidence", 17],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261013300000_amux_v22_api_model_access_evidence/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 19,
+    reason:
+      "The additive v42 migration creates and guards one content-free API authentication/model-access evidence row, extends the exact recovery approval binding and re-reads immutable launch, audit, claim and start evidence. It seeds no authority or provider result and never writes AdminAuditLog.",
+  })),
+  ...[
+    ["AmuxV22TaskRecoveryApproval", 2],
+    ["AmuxV22ReadOnlyLaunchProof", 2],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261013330000_amux_v22_api_launch_proof_deadline/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 2,
+    reason:
+      "The additive v42 follow-up adds one read-only trigger function that closes an API recovery's claim and start 90 seconds after its launch proof. It performs no row DML; the scanner's two write verbs are the BEFORE/AFTER INSERT trigger clauses.",
+  })),
   {
     path: "lib/amux/cliUsageLedgerStore.ts",
     table: "AmuxCliUsageEvent",
@@ -862,6 +894,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 2,
     reason:
       "The closed system-actor manifest names the recovery evidence target once for the unprivileged checker and once for the root controller beside prose about audit writes. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxV22ApiModelAccessEvidence",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed system-actor manifest names the v42 content-free access-evidence target. It executes no SQL; canonical audit mutation remains in lib/adminAudit.ts.",
   },
   ...["AmuxV22ReadOnlyLaunchCheck", "AmuxV22ReadOnlyLaunchProof"].map((table) => ({
     path: "lib/adminAuditSystemActors.ts",

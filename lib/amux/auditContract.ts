@@ -16,7 +16,6 @@ export const AMUX_CLAIM_CLOSED_REFUSAL_REASONS = [
   "incident_admission_blocked",
   "wip_limit_reached",
   "execution_lifecycle_unavailable",
-  "worker_safe_stop_fenced",
   "invalid_routing_evidence",
 ] as const;
 
@@ -29,6 +28,9 @@ export type AmuxClaimClosedRefusalReason =
  */
 export const AMUX_CLAIM_AUDIT_REFUSAL_REASONS = [
   ...AMUX_CLAIM_CLOSED_REFUSAL_REASONS,
+  // Audit-only: the claim answer reuses "no_authoritative_worker" because the
+  // running Rust claim clients parse a closed reason set without this value.
+  "worker_safe_stop_fenced",
   "invalid_request",
   "dependent_weight_mismatch",
   "scheduler_score_mismatch",

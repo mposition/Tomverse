@@ -236,7 +236,7 @@ export type AmuxClaimOutcome =
         | "incident_admission_blocked"
         | "wip_limit_reached"
         | "execution_lifecycle_unavailable"
-        | "worker_safe_stop_fenced";
+        | "no_authoritative_worker";
     };
 
 type AmuxClaimRefusalContext = {
@@ -525,8 +525,10 @@ export async function claimUnownedTodo(
     if (await amuxV22WorkerSafeStopFenced(tx, worker)) {
       await writeAmuxClaimRefusalAudit(tx, "worker_safe_stop_fenced",
         refusalContext, { permanent_physical_profile_fence: true });
+      // The audit keeps the exact cause; the answer reuses the closed
+      // vocabulary that main's and the current Rust claim clients parse.
       return { claimed: false as const,
-        reason: "worker_safe_stop_fenced" as const };
+        reason: "no_authoritative_worker" as const };
     }
 
     const planning = await tx.amuxWorkItem.findFirst({

@@ -18,8 +18,15 @@ export declare function createAmuxV22ReadOnlyApiHost(
   apiExecutionFrameDigest: string;
   launcherConfigDigest: string;
   hostDeadlineAtMs: number;
+  modelAccess(request: unknown): Promise<import("./v22ApiModelAccessProtocol.mjs").AmuxV22ApiModelAccessResult>;
   capabilities(): string[];
 }>>;
+
+export declare function probeAmuxV22ReadOnlyApiModelAccess(
+  request: unknown,
+  host: Record<string, unknown>,
+  dependencies?: Record<string, unknown>,
+): Promise<import("./v22ApiModelAccessProtocol.mjs").AmuxV22ApiModelAccessResult>;
 
 export declare function readAmuxV22ReadOnlyApiLauncherState(
   worker: string,

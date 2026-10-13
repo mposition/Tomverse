@@ -23,7 +23,7 @@ export { AMUX_V22_READ_ONLY_LAUNCHER_POLICY_VERSION,
 
 /** A logical scope, never a hostname or authentication credential. */
 export const AMUX_V22_RECOVERY_HOST_SCOPE = "amux-ubuntu" as const;
-export const AMUX_V22_TASK_RECOVERY_POLICY_VERSION = 40;
+export const AMUX_V22_TASK_RECOVERY_POLICY_VERSION = 42;
 export const AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID =
   "c48886b9-86f8-4631-8db8-c0b288a707af" as const;
 export const AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID =
@@ -375,10 +375,17 @@ export type AmuxV22RecoveryRead = { taskId: string; requestId: string;
     provider: string; modelId: string; routeId: string; role: "investigate";
     briefDigest: string; pricingVersion: string; costReceiptDigest: string;
     launchScopeVersion: 1 };
+  apiModelAccess?: { state: "required" | "verified" | "stale" |
+      "unavailable" | "unknown" | "catalog_mismatch";
+    selectedModelId: string; canonicalModelId: string | null;
+    balanceKnown: false; maximumCostMicroUsd: "3400000";
+    worstExposureMicroUsd: "6800000"; recordedAt: string | null };
   eligibility: { acceptUnknownPriorEffects: boolean; requestSafeStop: boolean;
     approveAttempt: boolean; reason: null | "exact_target_only" |
       "risk_acceptance_required" | "safe_stop_required" | "safe_stop_stale" |
       "launch_proof_required" | "launch_proof_stale" | "binding_changed" |
+      "api_model_access_required" | "api_model_access_stale" |
+      "api_model_access_unverified" | "canonical_catalog_approval_required" |
       "already_approved" };
   guards: { priorEffects: "unknown"; oldCost: "held";
     readOnlyLaunch: "required"; taskAttemptLimit: 2 };

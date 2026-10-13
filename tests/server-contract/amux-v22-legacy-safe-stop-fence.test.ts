@@ -31,7 +31,10 @@ test("every authoritative routing, claim, and execution-start path consults the 
   const store = source("lib/amux/store.ts");
   assert.ok(store.indexOf("lockAmuxAdmissionAndReadIncident") <
     store.indexOf("amuxV22WorkerSafeStopFenced(tx, worker)"));
-  assert.match(store, /reason: "worker_safe_stop_fenced"/);
+  // The claim audit names the fence; the wire answer stays in the closed
+  // vocabulary main's Rust claim client parses.
+  assert.match(store,
+    /writeAmuxClaimRefusalAudit\(tx, "worker_safe_stop_fenced",[\s\S]{0,400}reason: "no_authoritative_worker" as const/);
 
   const claim = source("lib/amux/v22WorkerClaimService.ts");
   assert.match(claim, /amuxV22SafeStopFencedWorkers/);

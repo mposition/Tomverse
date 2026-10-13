@@ -18,7 +18,8 @@ import { TICK_TRANSACTION_LIMITS, withAutoTransaction } from
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
-import { readAmuxV22RecoveryAuthority } from "./v22TaskRecoveryService.ts";
+import { amuxV22ApiModelAccessCurrent, readAmuxV22RecoveryAuthority } from
+  "./v22TaskRecoveryService.ts";
 import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
   amuxV22ReadOnlyRetryRouteCost,
   currentAmuxV22ReadOnlyApiExecutionFrame } from "./v22TaskRecoveryCore.ts";
@@ -235,9 +236,17 @@ async function claimCandidate(taskId: string, assignmentId: string,
                BigInt(currentApiFrame.maximumCostMicroUsd) ===
                  BigInt(route.perAttemptMicroUsd)))));
       });
+      const apiModelAccessCurrent = amuxV22ApiModelAccessCurrent(recovery, now);
       const telemetry = await getAmuxWorkerTelemetry(catalog.filter((worker) =>
-        matchingRoutes.some((route) => route.workerName === worker.worker_name)), now, tx);
+        matchingRoutes.some((route) => route.workerName === worker.worker_name) &&
+        !(recovery?.readOnlyExecutorKind ===
+            AMUX_V22_READ_ONLY_API_EXECUTOR_KIND &&
+          recovery.workerName === worker.worker_name)), now, tx);
       const quotaRoutes = matchingRoutes.filter((route) => {
+        if (recovery?.readOnlyExecutorKind ===
+              AMUX_V22_READ_ONLY_API_EXECUTOR_KIND &&
+            route.workerName === recovery.workerName)
+          return apiModelAccessCurrent;
         const quota = telemetry.get(route.workerName);
         return quota?.evidence.quota.state === "fresh" &&
           !quota.scoring.provider_exhausted &&

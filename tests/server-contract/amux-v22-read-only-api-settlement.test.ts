@@ -86,6 +86,7 @@ mock.module(mod("lib/engineeringAgentStore.ts"), { namedExports: {
 } });
 mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
   readAmuxV22RecoveryAuthority: async () => world.recovery,
+  amuxV22ApiModelAccessCurrent: () => true,
   recoveryAttemptBudget: async () => ({ allowed: false }),
 } });
 mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), {

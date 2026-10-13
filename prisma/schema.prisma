@@ -2457,6 +2457,7 @@ model AdminAuditLog {
   amuxV22RiskAcceptances AmuxV22TaskRecoveryRiskAcceptance[] @relation("AmuxV22RiskAcceptanceAudit")
   amuxV22ReadOnlyLaunchChecks AmuxV22ReadOnlyLaunchCheck[] @relation("AmuxV22ReadOnlyLaunchCheckAudit")
   amuxV22ReadOnlyLaunchProofs AmuxV22ReadOnlyLaunchProof[] @relation("AmuxV22ReadOnlyLaunchProofAudit")
+  amuxV22ApiModelAccessEvidence AmuxV22ApiModelAccessEvidence[] @relation("AmuxV22ApiModelAccessEvidenceAudit")
   amuxV22LaneDecisions AmuxV22LaneDecision[] @relation("AmuxV22LaneAudit")
   amuxDecisionMakerSwitchEvent AmuxDecisionMakerSwitchEvent?
   amuxDecisionMakerRequest AmuxDecisionMakerRequest?
@@ -7436,6 +7437,7 @@ model AmuxWorkItem {
   v22RecoveryInspections AmuxV22TaskRecoveryInspectionRequest[]
   v22RecoveryRiskAcceptances AmuxV22TaskRecoveryRiskAcceptance[] @relation("AmuxV22RiskAcceptanceTask")
   v22ReadOnlyLaunchChecks AmuxV22ReadOnlyLaunchCheck[] @relation("AmuxV22ReadOnlyLaunchCheckTask")
+  v22ApiModelAccessEvidence AmuxV22ApiModelAccessEvidence[] @relation("AmuxV22ApiModelAccessEvidenceTask")
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
@@ -7513,6 +7515,7 @@ model AmuxExecutionAttempt {
   v22RecoveryInspections AmuxV22TaskRecoveryInspectionRequest[]
   v22RecoveryRiskAcceptances AmuxV22TaskRecoveryRiskAcceptance[] @relation("AmuxV22RiskAcceptanceAttempt")
   v22ReadOnlyLaunchChecks AmuxV22ReadOnlyLaunchCheck[] @relation("AmuxV22ReadOnlyLaunchCheckAttempt")
+  v22ApiModelAccessEvidence AmuxV22ApiModelAccessEvidence[] @relation("AmuxV22ApiModelAccessEvidenceAttempt")
 }
 
 /// One encrypted, reviewable text result per v22 attempt. The sidecar keeps
@@ -10494,6 +10497,9 @@ model AmuxV22TaskRecoveryApproval {
   routePolicyDigest        String?
   briefDigest              String?
   profileConfigDigest      String?
+  apiModelAccessEvidenceId String? @unique @db.Uuid
+  apiModelAccessEvidenceDigest String?
+  canonicalModelId         String?
   approvedByUserId         String
   authorizationAuditLogId  String @unique
   approvedAt              DateTime
@@ -10502,6 +10508,7 @@ model AmuxV22TaskRecoveryApproval {
   authorizationAuditLog AdminAuditLog @relation("AmuxV22RecoveryApprovalAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   riskAcceptance AmuxV22TaskRecoveryRiskAcceptance? @relation("AmuxV22RecoveryApprovalRiskAcceptance", fields: [riskAcceptanceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22RecoveryApproval_riskAcceptanceId_fkey")
   launchProof AmuxV22ReadOnlyLaunchProof? @relation("AmuxV22RecoveryApprovalLaunchProof", fields: [launchProofId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22RecoveryApproval_launchProofId_fkey")
+  apiModelAccessEvidence AmuxV22ApiModelAccessEvidence? @relation("AmuxV22RecoveryApprovalApiModelAccess", fields: [apiModelAccessEvidenceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22RecoveryApproval_apiModelAccessEvidenceId_fkey")
   assignment AmuxV22WorkerAssignment?
   @@index([taskId, afterRevision])
 }
@@ -10600,8 +10607,45 @@ model AmuxV22ReadOnlyLaunchProof {
   launchCheck AmuxV22ReadOnlyLaunchCheck @relation(fields: [launchCheckId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22ReadOnlyLaunchProof_check_fkey")
   authorizationAuditLog AdminAuditLog @relation("AmuxV22ReadOnlyLaunchProofAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22ReadOnlyLaunchProof_audit_fkey")
   approvals AmuxV22TaskRecoveryApproval[] @relation("AmuxV22RecoveryApprovalLaunchProof")
+  apiModelAccessEvidence AmuxV22ApiModelAccessEvidence?
 
   @@index([recordedAt])
+}
+
+/// Policy v42: one content-free, non-model API authentication and model-access
+/// observation for the exact FIRST recovery launch proof. It is append-only.
+model AmuxV22ApiModelAccessEvidence {
+  id                       String   @id @db.Uuid
+  launchProofId            String   @unique @db.Uuid
+  taskId                   String
+  priorAttemptId           String
+  workerName               String
+  workerInstanceId         String
+  workerGeneration         Int
+  provider                 String
+  providerHost             String
+  selectedModelId          String
+  canonicalModelId         String?
+  apiExecutionFrameDigest  String
+  credentialMetadataDigest String
+  launcherConfigDigest     String
+  accessState              String
+  reason                   String?
+  balanceKnown             Boolean
+  maximumCostMicroUsd      BigInt
+  worstExposureMicroUsd    BigInt
+  evidenceDigest           String   @unique
+  authorizationAuditLogId  String   @unique
+  recordedAt               DateTime
+
+  launchProof AmuxV22ReadOnlyLaunchProof @relation(fields: [launchProofId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22ApiModelAccessEvidence_launchProofId_fkey")
+  task AmuxWorkItem @relation("AmuxV22ApiModelAccessEvidenceTask", fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22ApiModelAccessEvidence_taskId_fkey")
+  priorAttempt AmuxExecutionAttempt @relation("AmuxV22ApiModelAccessEvidenceAttempt", fields: [priorAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22ApiModelAccessEvidence_priorAttemptId_fkey")
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22ApiModelAccessEvidenceAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22ApiModelAccessEvidence_audit_fkey")
+  approval AmuxV22TaskRecoveryApproval? @relation("AmuxV22RecoveryApprovalApiModelAccess")
+
+  @@index([taskId, recordedAt], map: "AmuxV22ApiModelAccessEvidence_task_recordedAt_idx")
+  @@index([workerName, recordedAt], map: "AmuxV22ApiModelAccessEvidence_worker_recordedAt_idx")
 }
 
 /// Owner-approved, versioned Agent worker/model ceiling inputs. These are

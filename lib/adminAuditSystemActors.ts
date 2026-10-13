@@ -34,6 +34,8 @@ export const AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR = "amux-v22-recovery-checker"
 /** Policy v37: the root-only legacy safe-stop reporter is distinct from the
  * unprivileged read-only recovery checker. */
 export const AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR = "amux-v22-recovery-controller" as const;
+/** Policy v42: records only content-free, exact FIRST model-access evidence. */
+export const AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR = "amux-v22-api-model-access" as const;
 
 /**
  * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
@@ -147,6 +149,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR,
   AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR,
   AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
+  AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
@@ -241,6 +244,9 @@ export const systemAuditActionAllowed = (
       targetType === "AmuxV22ReadOnlyLaunchCheck") ||
      (action === "amux.v22.recovery.read_only_launch_observed" &&
       targetType === "AmuxV22ReadOnlyLaunchProof"))) &&
+  (actor !== AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR ||
+    (action === "amux.v22.recovery.api_model_access_observed" &&
+      targetType === "AmuxV22ApiModelAccessEvidence")) &&
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||
     (action === "prompt_refiner.product_disposition_recorded" && targetType === "PromptRefinerProductDispositionReceipt") ||
