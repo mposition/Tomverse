@@ -607,6 +607,18 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  ...[
+    "AmuxV22TaskRecoveryInspectionRequest",
+    "AmuxV22TaskRecoveryApproval",
+    "AmuxV22TaskRecoveryRiskAcceptance",
+  ].map((table) => ({
+    path: "lib/accountDataExportDomains.ts",
+    table,
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names this operator recovery model as prismaModel only, and other domains' prose uses delete and update. It builds no SQL and opens no database connection.",
+  })),
   {
     path: "lib/accountDataExportDomains.ts",
     table: "AmuxWorkerCapabilityEvent",
