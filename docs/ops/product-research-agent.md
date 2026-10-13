@@ -333,6 +333,7 @@ Tomverse Agents의 **dev 환경에만** 있고(dev는 `develop`에서 빌드합�
    | 이름 | `Product Research Scout Probe` |
    | Source | GitHub `mposition/Tomverse`, branch `develop` |
    | Build → Builder | **Dockerfile**, 경로 `docker/product-research-scout-probe.Dockerfile` |
+   | Build → Watch paths | `docker/product-research-scout-probe.Dockerfile`, `scripts/agents/product-research-scout-s0-probe.mjs`, `lib/productResearchScout*`, `package-lock.json` (이 넷만 — 비워 두면 무관한 develop 병합마다 재배포되고, 스위치가 켜져 있으면 그때마다 production page를 다시 엽니다) |
    | Deploy → Start command | `npm run agent:product-research-scout-s0-probe -- all` |
    | Deploy → Cron schedule | 비움(일정 없음) |
    | Deploy → Restart policy | **Never** |
