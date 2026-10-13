@@ -62,7 +62,9 @@ Railway orchestrator의 claim 전용 루프는 서버가 답한 claim 결과를 
 
 halt는 runner가 스스로 풀지 않는다. 원인은 사라진 전송, 거절된 heartbeat, 응답 없는 Tomverse 호출 같은 결과 불명이고, 다시 시작해도 되는지는 사람이 판단한다. halt한 runner는 진행 중인 attempt가 남지 않으면 종료 코드 3으로 끝나고 stderr에 한 줄을 남긴다. 그 줄은 처음 halt한 원인을 `cause=`로 적는다(어휘와 뜻은 `bridge-monitoring.md` 3절). 종료 코드 0은 정상 종료, 1은 시작 실패다.
 
-halt를 사람이 알아채는 경로는 `bridge-monitoring.md`다. 그 감시는 알리기만 하고 다시 시작하지 않는다.
+halt를 사람이 알아채는 경로는 `bridge-monitoring.md`다. 예외는 하나다. 운영자가 2026-10-14에 승인한 두 원인
+(`worker_runtime_lease_lost`, 아무것도 저장하지 않은 `tick_failed_*`)은 같은 문서 5절의 timer가 자동으로 다시
+시작한다. 그 밖의 halt는 여전히 사람이 판단한다.
 
 ## 상시 실행
 
