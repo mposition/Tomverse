@@ -19,9 +19,15 @@
 # that cannot be read -- stays halted and is reported by the existing alerts.
 # There is no restart count limit (operator decision, 2026-10-14).
 #
+# The cause alone is not enough. The bridge keeps only the first cause
+# (note_halt), and it may go on settling earlier work after halting; an
+# outcome that becomes unknown then ("halt: settle outcome unknown ... read
+# back before restart") does not change the cause. So the whole halted run is
+# read, and it restarts only when every line is one this script knows to be
+# harmless. Any other line holds it.
+#
 # A bridge exits 3 only once nothing it dispatched is still pending
-# (apps/tomverse-orchestrator/src/wsl_bridge.rs, `halted && pending_count == 0`),
-# so a restart never takes over work in flight.
+# (apps/tomverse-orchestrator/src/wsl_bridge.rs, `halted && pending_count == 0`).
 #
 # A restart also needs the local AMUX server and the Tomverse app to answer;
 # otherwise this run leaves the bridge for the next one.
@@ -39,26 +45,49 @@ app_health=https://tomverse.app/api/health
 
 log() { echo "tomverse-bridge-autorestart: $*"; }
 
-# The halt line and the tick line, as wsl_bridge.rs prints them.
-halt_line='^amux wsl bridge halted: no new assignments; cause=([a-z0-9_]+);'
-nothing_committed='^amux wsl bridge warn: tick failed \([a-z0-9_]+\) after 0 result\(s\) already committed this tick;'
+# The lines a halted run may contain and still be restarted, as
+# wsl_bridge.rs prints them. Everything else holds the bridge.
+halt_line='^amux wsl bridge halted: no new assignments; cause=([a-z0-9_]+); restart only after checking Tomverse and the local AMUX$'
+nothing_committed='^amux wsl bridge warn: tick failed \([a-z0-9_]+\) after 0 result\(s\) already committed this tick; recording them before halting$'
+harmless=(
+  # A warning the bridge itself declares harmless ends with "not halted".
+  '^amux wsl bridge warn: .*[;,] not halted$'
+  '^amux wsl bridge warn: worker register answered 503 amux_database_busy; registering again next tick$'
+  '^amux v[0-9]+ quota source unavailable for [A-Za-z0-9_.-]+$'
+  '^amux v[0-9]+ quota observation recorded for [A-Za-z0-9_.-]+$'
+)
 
 # Prints "restart" or "hold <reason>" for one failed run's journal lines.
 decide() {
-  local lines=$1 cause=""
+  local lines=$1 cause="" halts=0 ticks=0 line pattern known
   while IFS= read -r line; do
-    [[ "$line" =~ $halt_line ]] && cause=${BASH_REMATCH[1]}
+    [[ -z "$line" ]] && continue
+    if [[ "$line" =~ $halt_line ]]; then
+      cause=${BASH_REMATCH[1]}
+      halts=$((halts + 1))
+      continue
+    fi
+    if [[ "$line" =~ $nothing_committed ]]; then
+      ticks=$((ticks + 1))
+      continue
+    fi
+    known=no
+    for pattern in "${harmless[@]}"; do
+      [[ "$line" =~ $pattern ]] && known=yes && break
+    done
+    if [[ "$known" != yes ]]; then
+      echo "hold an unrecognised line in the halted run: ${line:0:160}"
+      return
+    fi
   done <<<"$lines"
-  if [[ -z "$cause" ]]; then
-    echo "hold no halt line"
+  if ((halts != 1)); then
+    echo "hold $halts halt lines in the halted run"
   elif [[ "$cause" == worker_runtime_lease_lost ]]; then
     echo restart
+  elif [[ "$cause" == tick_failed_* ]] && ((ticks > 0)); then
+    echo restart
   elif [[ "$cause" == tick_failed_* ]]; then
-    if grep -qE "$nothing_committed" <<<"$lines"; then
-      echo restart
-    else
-      echo "hold cause=$cause without a tick that committed nothing"
-    fi
+    echo "hold cause=$cause without a tick that committed nothing"
   else
     echo "hold cause=$cause is not restarted automatically"
   fi
@@ -99,6 +128,14 @@ if ! answers --proto '=https' "$app_health"; then
   exit 0
 fi
 
+# The unit's halted run, as one line: "<ActiveState> <ExecMainStatus> <id>".
+halted_run() {
+  printf '%s %s %s' \
+    "$(systemctl show -p ActiveState --value "$1" 2>/dev/null || true)" \
+    "$(systemctl show -p ExecMainStatus --value "$1" 2>/dev/null || true)" \
+    "$(systemctl show -p InvocationID --value "$1" 2>/dev/null || true)"
+}
+
 for unit in "${halted[@]}"; do
   invocation=$(systemctl show -p InvocationID --value "$unit" 2>/dev/null || true)
   if [[ ! "$invocation" =~ ^[0-9a-f]{32}$ ]]; then
@@ -112,6 +149,13 @@ for unit in "${halted[@]}"; do
     continue
   fi
   cause=$(grep -oE 'cause=[a-z0-9_]+' <<<"$lines" | tail -n 1)
+  # Read again right before the restart: if a person restarted or stopped the
+  # unit while this run was checking, the run judged above is no longer the
+  # unit's, and restarting would interrupt the new one.
+  if [[ "$(halted_run "$unit")" != "failed 3 $invocation" ]]; then
+    log "$unit changed while it was being checked; left alone"
+    continue
+  fi
   if systemctl restart --no-block "$unit"; then
     log "$unit halted with $cause; restarted"
   else
