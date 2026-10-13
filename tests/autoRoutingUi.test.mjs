@@ -157,11 +157,13 @@ test("every supported language carries the whole control vocabulary", () => {
     assert.ok(copy, `${language} has no copy`);
     for (const key of [
       "label",
+      "compactLabel",
       "description",
       "activeSummary",
       "turnedOn",
       "turnedOff",
       "answeredBy",
+      "variableCreditLabel",
     ]) {
       assert.equal(typeof copy[key], "string", `${language}.${key} missing`);
       assert.ok(copy[key].trim().length > 0, `${language}.${key} is empty`);
@@ -189,12 +191,27 @@ test("no locale claims Auto picks a better model", () => {
   }
 });
 
+// These short native terms share their spelling with English. Keep the
+// vocabulary closed and exact; sentences and every other field still have
+// to be translated.
+const NATIVE_SHARED_SHORT_LABELS = {
+  fr: { compactLabel: "Auto", variableCreditLabel: "Variable" },
+  de: { compactLabel: "Auto" },
+  es: { compactLabel: "Auto", variableCreditLabel: "Variable" },
+  pt: { compactLabel: "Auto" },
+};
+
 // A non-English locale left in English is the failure the repository already
 // has a check for; this is the same rule applied to a record that check does
 // not read.
 test("no non-English locale is left showing the English sentence", () => {
   for (const language of LANGUAGES.filter((name) => name !== "en")) {
     for (const [key, value] of Object.entries(autoRoutingCopy[language])) {
+      const nativeShortLabel = NATIVE_SHARED_SHORT_LABELS[language]?.[key];
+      if (nativeShortLabel !== undefined) {
+        assert.equal(value, nativeShortLabel, `${language}.${key} changed its native short term`);
+        continue;
+      }
       if (key === "label" && value === "Auto") continue; // a brand word, not a sentence
       assert.notEqual(
         value,

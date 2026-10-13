@@ -139,7 +139,7 @@ async function installFirstPaintRecorder(page: Page) {
       // Read it directly so accessible names can also name the selected count.
 
       const entry: FirstPaintSample = {
-        modelCount: numberFrom(modelCountLabel?.textContent?.trim(), /^(\d+)\s+AIs?$/),
+        modelCount: numberFrom(modelCountLabel?.textContent?.trim(), /^(\d+)\s+(?:AIs?|models?)$/),
         estimatedCredits: numberFrom(
           estimate?.getAttribute("aria-label"),
           /Estimated\s+(\d+)\s+credits/
@@ -516,7 +516,7 @@ test.describe("guest initial cost hydration", () => {
 
     await page.goto("/review?lang=en");
     await settleComposer(page);
-    await expect(page.getByText("3 AIs", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("composer-active-model-count")).toHaveText("3 models");
     expect(await page.evaluate(() => ({
       conversations: localStorage.getItem("guest_conversations"),
       activeId: sessionStorage.getItem("tomverse_active_chat_id"),
@@ -575,7 +575,8 @@ test.describe("guest initial cost hydration", () => {
     const toggle = page.getByTestId("composer-auto-routing-toggle");
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     await expect(page.getByTestId("composer-active-model-count"))
-      .toHaveText("Smart Adaptive");
+      .toHaveText("Auto");
+    await expect(page.getByTestId("composer-model-select")).toHaveAccessibleName(/Auto.*Smart Adaptive/);
     await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
     await page.getByRole("button", { name: "Choose AI models" }).click();
     const dialog = page.locator("#chat-input-popover");
@@ -1133,7 +1134,7 @@ test.describe("guest initial cost hydration", () => {
 
     const estimate = page.getByTestId("request-credit-estimate");
     const sendButton = page.getByTestId("chat-send-button");
-    const modelMenu = page.getByRole("button", { name: "Choose AI models" });
+    const modelMenu = page.getByTestId("composer-model-select");
 
     await modelMenu.click();
     const dialog = page.locator("#chat-input-popover");
@@ -1182,7 +1183,7 @@ test.describe("guest initial cost hydration", () => {
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
-    await expect(modelMenu).toContainText(`${GUEST_MODEL_COUNT} AIs`);
+    await expect(modelMenu.getByTestId("composer-active-model-count")).toHaveText(`${GUEST_MODEL_COUNT} models`);
 
     // The breakdown sheet is derived from the same selection, so its rows
     // have to sum to exactly what the composer and the Send button quote.
