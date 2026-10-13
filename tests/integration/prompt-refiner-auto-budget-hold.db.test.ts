@@ -42,7 +42,9 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
       await client.query(`SET search_path TO "${schema}"`);
       await client.query(`CREATE TABLE "AdminAuditLog" (
         "id" TEXT PRIMARY KEY, "action" TEXT, "targetType" TEXT,
-        "targetId" TEXT
+        "targetId" TEXT, "metadata" JSONB,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT
+          (clock_timestamp() AT TIME ZONE 'UTC')
       )`);
       await client.query(await readFile(baseMigration, "utf8"));
       await client.query(await readFile(transitionMigration, "utf8"));
@@ -139,15 +141,16 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
         takeAuditChainLock: async (input: unknown) => assert.equal(input, tx),
         writeSystemAuditLog: async (input: {
           tx: typeof tx; systemActor: string; action: string;
-          targetType: string; targetId: string;
+          targetType: string; targetId: string; metadata?: Record<string, unknown>;
         }) => {
           assert.equal(input.tx, tx);
           assert.ok(["prompt-refiner-auto-budget",
             "prompt-refiner-product-execution"].includes(input.systemActor));
           const id = `audit-${++auditSequence}-${input.action}`;
           await client.query(`INSERT INTO "AdminAuditLog"
-            ("id","action","targetType","targetId") VALUES ($1,$2,$3,$4)`,
-          [id, input.action, input.targetType, input.targetId]);
+            ("id","action","targetType","targetId","metadata")
+            VALUES ($1,$2,$3,$4,$5)`,
+          [id, input.action, input.targetType, input.targetId, input.metadata ?? null]);
           return id;
         },
       } });
@@ -233,10 +236,15 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
       await new Promise(resolveTimeout => setTimeout(resolveTimeout,
         contract.PROMPT_REFINER_PRODUCT_TIMEOUT_MS + 50));
       const overdue = await inTransaction<{
+        readonly active: boolean;
         readonly reasonCode: string | null;
       }>(async transaction => await
         guard.evaluatePromptRefinerProductAutoGuardInTransaction(
-          transaction as never) as { readonly reasonCode: string | null });
+          transaction as never) as {
+            readonly active: boolean; readonly reasonCode: string | null;
+          });
+      assert.equal(overdue.active, true,
+        "an overdue dispatch is observed without changing Owner availability");
       assert.equal(overdue.reasonCode, "unknown_dispatch_or_cost",
         "the guard observes the DB-stamped actual writer after its deadline");
       await authority.settleVerifiedBilled(raw({ kind: "verified_billed" as const,

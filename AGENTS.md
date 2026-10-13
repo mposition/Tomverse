@@ -1799,6 +1799,13 @@ Non-negotiable requirements:
   `docs/policy/chat-refiner-stable-release-authority-v2.md` uses a new Owner
   audit target bound to the execution-source fingerprint and effective
   controls; the original commit and deployment remain audit provenance.
+  The operator's 2026-10-13 decision in
+  `docs/policy/chat-operator-controlled-availability-v3.md` supersedes v2's
+  source-change reactivation rule and automatic global operational pauses.
+  The latest Owner activation persists across source/deployment changes;
+  operational observations never change the enabled state. Current execution
+  controls, price/audit proof, per-request refusal/fallback and unknown cost
+  holds remain enforced.
   Availability, mode storage and turn routing
   must share that authority. It never marks a gate passed, extends a staging
   drill into production or relaxes manifest enforcement, plan, product,

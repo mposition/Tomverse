@@ -527,6 +527,17 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-12, merge frozen develop c9c557f3 into the integrated AMUX source:
 // both reviewed histories remain and the combined app-setting offsets only
 // reposition existing accesses. Count and position-free inventory are unchanged.
+// 2026-10-12, selective release of both to main: the same commits on the main
+// base. The four files they move (`lib/modelPricing.ts`, `lib/models.ts`,
+// `lib/appSettings.ts`, `lib/appDefaults.ts`) are identical on main and on the
+// develop they were reviewed on, so the moves above hold; this repins only the
+// final positions main's other closure files give, after main's own
+// AMUX worker registry record above.
+// 2026-10-12, merge the reviewed Guest Chat release with the current main
+// default-model tree: `ChatPageClient.tsx` keeps the Guest Chat single-answer
+// clamp while adopting the server-managed guest trio and retirement replacement
+// resolver. Those additions move downstream accesses only. Count 228 and the
+// position-free inventory remain unchanged; positions are repinned here.
 // 2026-10-13, merge frozen develop 709ccb7a into the verified halt source:
 // the Guest, default-model and worker histories above remain alongside the
 // no-commit halt changes. Count and position-free inventory remain unchanged;
@@ -536,12 +547,23 @@ const compilerOptions = parsedConfig.options;
 // lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
 // below it. Count 228 and the position-free inventory remain unchanged; only
 // their source positions are repinned.
+// 2026-10-13, selective release of AMUX worker capabilities (orchestration
+// policy version 35, R2a) to main: the same four-line growth of the
+// marketing webhook fingerprint's history comment in
+// lib/marketingAutomationAccess.ts moves the accesses below it on the main
+// base. Count 228 and the position-free inventory remain unchanged; only the
+// positions main's closure files give are repinned.
+// 2026-10-13, operator-controlled Chat availability: the marketing webhook
+// fingerprint provenance comment grows by three lines. Count 228 and the
+// position-free inventory remain unchanged; this repins source positions only.
+// 2026-10-13, back-merge the Chat availability hotfix into develop: preserve
+// both provenance histories and repin their combined source positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "5b03707a16556eccd68c399d121786d2",
-  "9bb46b3e052cfd57c0e4dad653081e32",
+  "942d7e2245760981cb63a90dcdf227df",
+  "e3e69c41405be4a9e4ff00f806cb1033",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
