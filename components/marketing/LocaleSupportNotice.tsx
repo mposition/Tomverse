@@ -35,7 +35,7 @@ export function LocaleSupportNotice({
         className={`mx-auto flex ${maxWidth} items-start gap-3 px-4 py-3 text-xs leading-5 sm:px-6 lg:px-8`}
       >
         <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-        <div className="min-w-0">
+        <div className="min-w-0 [overflow-wrap:anywhere]">
           <span className="font-bold">{policy.badge}</span>
           <span className="ml-2 font-medium">{message}</span>
         </div>

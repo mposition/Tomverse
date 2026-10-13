@@ -238,7 +238,7 @@ type MarketingHeaderProps = {
 };
 
 export function MarketingHeader(props: MarketingHeaderProps = {}) {
-  return props.variant === "launch" ? <LaunchMarketingHeader {...props} /> : <LegacyMarketingHeader {...props} />;
+  return props.variant === "default" ? <LegacyMarketingHeader {...props} /> : <LaunchMarketingHeader {...props} />;
 }
 
 function LegacyMarketingHeader({
@@ -497,7 +497,7 @@ function LegacyMarketingHeader({
 type MarketingFooterProps = { maxWidth?: string; variant?: "default" | "launch" };
 
 export function MarketingFooter(props: MarketingFooterProps = {}) {
-  return props.variant === "launch" ? <LaunchMarketingFooter {...props} /> : <LegacyMarketingFooter {...props} />;
+  return props.variant === "default" ? <LegacyMarketingFooter {...props} /> : <LaunchMarketingFooter {...props} />;
 }
 
 function LegacyMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps) {
@@ -732,18 +732,18 @@ function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
   return (
     <footer className="bg-zinc-950 text-zinc-400" data-testid="launch-marketing-footer">
       <div className={`mx-auto ${maxWidth} px-[16px] pb-8 pt-12 sm:px-6 lg:px-[64px]`}>
-        <div className="grid gap-x-8 gap-y-10 lg:grid-cols-[1.8fr_3fr]">
-          <div>
-            <Link href={localizedHref(lang, "/")} className={`inline-flex items-center gap-3 text-2xl font-bold tracking-tight text-white ${launchFocus}`}>
-              <span className="h-[36px] w-[36px] overflow-hidden rounded-[10px] bg-white">
+        <div className="grid grid-cols-1 gap-x-8 gap-y-10 lg:grid-cols-[1.8fr_3fr]">
+          <div className="min-w-0">
+            <Link href={localizedHref(lang, "/")} className={`inline-flex max-w-full flex-wrap items-center gap-3 text-2xl font-bold tracking-tight text-white ${launchFocus}`}>
+              <span className="h-[36px] w-[36px] shrink-0 overflow-hidden rounded-[10px] bg-white">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
-              </span>Tomverse
+              </span><span className="min-w-0 [overflow-wrap:anywhere]">Tomverse</span>
             </Link>
             <p className="mt-4 max-w-md text-sm leading-6">{copy.description}</p>
           </div>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-8 sm:grid-cols-4">
-            {columns.map((column) => <nav key={column.title} aria-label={column.title}>
+          <div className="grid min-w-0 grid-cols-2 gap-x-6 gap-y-8 max-[240px]:grid-cols-1 sm:grid-cols-4">
+            {columns.map((column) => <nav key={column.title} aria-label={column.title} className="min-w-0 [overflow-wrap:anywhere]">
               <h2 className="mb-3 text-sm font-semibold text-zinc-100">{column.title}</h2>
               <ul className="space-y-1">
                 {column.items.map((item) => <li key={item.href}>

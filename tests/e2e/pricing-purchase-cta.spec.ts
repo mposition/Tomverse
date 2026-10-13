@@ -688,7 +688,7 @@ test.describe("expired sessions and failed checkouts", { tag: "@ui-risk" }, () =
     await expect(page.getByTestId("credit-pack-buy-starter_500")).toBeVisible();
     await expect(page.getByTestId("credit-pack-retry")).toHaveCount(0);
     await expect(
-      page.getByRole("link", { name: "Contact support" })
+      error.getByRole("link", { name: "Contact support" })
     ).toHaveCount(0);
   });
 
@@ -712,8 +712,9 @@ test.describe("expired sessions and failed checkouts", { tag: "@ui-risk" }, () =
     );
     await expect(error).toContainText("Nothing was charged");
     await expect(
-      page.getByRole("link", { name: "Contact support" })
+      error.getByRole("link", { name: "Contact support" })
     ).toBeVisible();
+    await expect(error.getByRole("link", { name: "Contact support" })).toHaveAttribute("href", "/support");
     await expect(page.getByTestId("credit-pack-retry")).toHaveCount(0);
   });
 });
