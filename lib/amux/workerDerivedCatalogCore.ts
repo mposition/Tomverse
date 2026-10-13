@@ -31,6 +31,14 @@ export const amuxWorkerDerivedCatalogShadowOpen = (): boolean => AMUX_WORKER_DER
 export const AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH = false;
 export const amuxWorkerDerivedCatalogAssignmentOpen = (): boolean => AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH;
 
+/**
+ * R2d ships with its own code latch off (version 35 section 5). While it is
+ * false the bridge session list route answers that the list is off, and the
+ * bridge keeps its environment allowlist as before.
+ */
+export const AMUX_WORKER_SESSION_LIST_LATCH = false;
+export const amuxWorkerSessionListOpen = (): boolean => AMUX_WORKER_SESSION_LIST_LATCH;
+
 /** One entry in the shape the legacy catalog's consumers read. */
 export type AmuxDerivedCatalogEntry = {
   worker_name: string;
