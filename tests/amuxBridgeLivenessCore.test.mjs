@@ -10,6 +10,7 @@ import {
   alertableAmuxWorkerName,
   amuxBridgeWatchHorizonStart,
   judgeAmuxBridgeLiveness,
+  lostAmuxWorkers,
   newlyLostAmuxWorkers,
 } from "../lib/amux/bridgeLivenessCore.ts";
 
@@ -105,14 +106,41 @@ test("a runtime still inside the grace period is not named as lost", () => {
   assert.equal(verdict.watchedRuntimes, 2);
 });
 
-test("a name that is not a plain identifier never reaches the alert", () => {
+test("a name outside the catalog's worker-name grammar never reaches the alert", () => {
   assert.equal(alertableAmuxWorkerName("claude-impl"), "claude-impl");
   assert.equal(alertableAmuxWorkerName("codex:review.v2"), "codex:review.v2");
-  for (const name of ["", "<@channel>", "a b", "-leading", "x".repeat(65), `line${String.fromCharCode(10)}break`]) {
+  // The catalog allows 120 characters, so a registrable name prints in full.
+  assert.equal(alertableAmuxWorkerName("x".repeat(120)), "x".repeat(120));
+  for (const name of [
+    "",
+    "<@channel>",
+    "a b",
+    "-leading",
+    "trailing-",
+    "x".repeat(121),
+    `line${String.fromCharCode(10)}break`,
+  ]) {
     assert.equal(alertableAmuxWorkerName(name), "unnamed-runtime", JSON.stringify(name));
   }
-  const verdict = judgeAmuxBridgeLiveness([at(-10 * MINUTE, "<!here> restart")], NOW);
-  assert.equal(verdict.lostRuntimes[0].workerName, "unnamed-runtime");
+});
+
+// Review r-20261013-082232-b289dd: replacing the name inside the judgement made
+// two different runtimes one "unnamed-runtime", so the second one's halt read
+// as a reminder of the first.
+test("two runtimes that print the same are still two runtimes", () => {
+  const first = "<one> runtime";
+  const second = "<two> runtime";
+  const verdict = judgeAmuxBridgeLiveness(
+    [at(-40 * MINUTE, first), at(-10 * MINUTE, second)],
+    NOW
+  );
+  assert.deepEqual(
+    verdict.lostRuntimes.map((runtime) => runtime.workerName),
+    [first, second]
+  );
+  assert.deepEqual(newlyLostAmuxWorkers(new Set([first]), verdict), [second]);
+  assert.deepEqual(lostAmuxWorkers(verdict), [first, second]);
+  assert.deepEqual(lostAmuxWorkers(judgeAmuxBridgeLiveness([at(-2 * MINUTE)], NOW)), []);
 });
 
 test("only a runtime that was not lost before is newly lost", () => {
