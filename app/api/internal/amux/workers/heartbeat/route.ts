@@ -27,6 +27,10 @@ const requestSchema = z
     generation: z.number().int().min(1).max(AMUX_PRISMA_INT_MAX),
     status: z.enum(["starting", "idle", "busy", "error", "stopped"]),
     dispatch_ready: z.boolean(),
+    protocol_capabilities: z.array(z.enum([
+      "read_only_retry_v1",
+      "read_only_api_retry_v1",
+    ])).max(1).optional(),
   })
   .strict();
 
@@ -86,6 +90,7 @@ export async function POST(request: Request) {
         generation: body.generation,
         status: body.status,
         dispatchReady: body.dispatch_ready,
+        protocolCapabilities: body.protocol_capabilities ?? [],
       });
 
       if (!heartbeat.accepted) {

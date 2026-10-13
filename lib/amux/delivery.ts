@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "@/lib/amux/ideaCrypto";
@@ -15,6 +16,24 @@ import { AMUX_V22_TASK_EXECUTION_ENV,
   "@/lib/amux/v22TaskExecutionCore";
 import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from
   "@/lib/amux/v22ExternalAuthorityCore";
+import { amuxV22WorkerSafeStopFenced } from
+  "@/lib/amux/v22LegacySafeStopFence";
+import { readAmuxV22RecoveryAuthority } from
+  "@/lib/amux/v22TaskRecoveryService";
+import { amuxV22ReadOnlyLaunchProofScope,
+  amuxV22ReadOnlyLaunchScopeMatchesIntent,
+  amuxV22ReadOnlyLaunchScopeSchema,
+  currentAmuxV22ReadOnlyApiExecutionFrame } from
+  "@/lib/amux/v22TaskRecoveryCore";
+import { validateAmuxV22ReadOnlyRetryBinding,
+  type AmuxV22ReadOnlyRetryBinding } from
+  "@/lib/amux/v22ReadOnlyRetryProtocol.mjs";
+import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
+  amuxV22ReadOnlyApiExecutionFrameDigest,
+  type AmuxV22ReadOnlyApiExecutionFrame } from
+  "@/lib/amux/v22ReadOnlyApiProtocol.mjs";
+import { amuxWorkerRuntimeHasExactCapability,
+  amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -24,6 +43,7 @@ type RuntimeLockRow = {
   generation: number;
   status: string;
   dispatchReady: boolean;
+  protocolCapabilities: string[];
   leaseExpiresAt: Date;
 };
 
@@ -65,6 +85,35 @@ type DeliveryLockRow = {
   cancelledAt: Date | null;
 };
 
+export type AmuxV22ReadOnlyApiRetryBinding = {
+  version: 1;
+  executorKind: "read_only_api_retry_v1";
+  launchBindingId: string;
+  riskAcceptanceDigest: string;
+  safeStopEvidenceDigest: string;
+  launchProofDigest: string;
+  launchScopeDigest: string;
+  launcherConfigDigest: string;
+  apiExecutionFrame: AmuxV22ReadOnlyApiExecutionFrame;
+  apiExecutionFrameDigest: string;
+  briefDigest: string;
+  provider: string;
+  modelId: string;
+  routeId: string;
+  routePolicyDigest: string;
+  catalogApprovalId: string;
+  catalogVersion: string;
+  pricingVersion: string;
+  costReceiptDigest: string;
+  additionalCapMicroUsd: string;
+  worstExposureMicroUsd: string;
+  role: "investigate";
+};
+
+export type AmuxV22ReadOnlyDeliveryBinding =
+  | AmuxV22ReadOnlyRetryBinding
+  | AmuxV22ReadOnlyApiRetryBinding;
+
 const lockRuntime = async (
   tx: Prisma.TransactionClient,
   worker: string,
@@ -76,6 +125,7 @@ const lockRuntime = async (
       "generation",
       "status",
       "dispatchReady",
+      "protocolCapabilities",
       "leaseExpiresAt"
     FROM "AmuxWorkerRuntime"
     WHERE "workerName" = ${worker}
@@ -204,6 +254,7 @@ export type AmuxPulledDelivery =
       delivery: {
         attemptId: string;
         assignmentId: string | null;
+        recoveryApprovalId?: string;
         taskId: string;
         worker: string;
         taskRevision: number;
@@ -212,6 +263,7 @@ export type AmuxPulledDelivery =
           modelId: string;
           role: string;
           budgetMicrousd: number;
+          readOnlyRetry?: AmuxV22ReadOnlyDeliveryBinding;
         } | null;
         receiptId: string;
         leaseExpiresAt: Date;
@@ -219,7 +271,7 @@ export type AmuxPulledDelivery =
     }
   | {
       available: false;
-      reason: "none" | "runtime_not_ready";
+      reason: "none" | "runtime_not_ready" | "worker_safe_stop_fenced";
     };
 
 export async function pullAmuxWorkDelivery(input: {
@@ -256,9 +308,13 @@ export async function pullAmuxWorkDelivery(input: {
     await loadAmuxContentKeyRing([{ ideaId, purpose: "card_brief",
       subjectId: sealedCandidate.taskId }]) : null;
   const deliveryContent = async (tx: Prisma.TransactionClient,
-    delivery: DeliveryLockRow) => {
-    if (delivery.prompt !== AMUX_V22_SEALED_DELIVERY_MARKER)
+    delivery: DeliveryLockRow, now: Date,
+    protocolCapabilities: readonly string[]) => {
+    if (delivery.prompt !== AMUX_V22_SEALED_DELIVERY_MARKER) {
+      if (amuxWorkerRuntimeUsesReadOnlyApi(protocolCapabilities))
+        throw new Error("ordinary delivery cannot use a read-only API runtime");
       return { prompt: delivery.prompt, v22Execution: null };
+    }
     if (!v22Enabled) throw new Error("v22 sealed delivery is disabled");
     if (!briefKeys || sealedCandidate?.attemptId !== delivery.attemptId ||
         sealedCandidate.taskId !== delivery.taskId)
@@ -287,7 +343,9 @@ export async function pullAmuxWorkDelivery(input: {
       where: { id: card.v22AssignmentId },
       select: { workItemId: true, workerName: true,
         workerInstanceId: true, workerGeneration: true,
-        modelId: true, role: true,
+        modelId: true, role: true, provider: true, routeId: true,
+        routePolicyDigest: true, catalogApprovalId: true, catalogVersion: true,
+        costReceiptDigest: true, recoveryApprovalId: true, taskRevision: true,
         perAttemptMicroUsd: true },
     });
     const budgetMicrousd = Number(assignment?.perAttemptMicroUsd);
@@ -298,6 +356,86 @@ export async function pullAmuxWorkDelivery(input: {
         !Number.isSafeInteger(budgetMicrousd) ||
         budgetMicrousd < 1 || budgetMicrousd > 5_000_000)
       throw new Error("v22 delivery assignment profile is invalid");
+    const recovery = assignment.recoveryApprovalId ?
+      await readAmuxV22RecoveryAuthority(tx, delivery.taskId,
+        assignment.taskRevision, assignment.recoveryApprovalId, now) : null;
+    if (assignment.recoveryApprovalId && !recovery)
+      throw new Error("v22 recovery delivery authority is unavailable");
+    if (recovery?.riskAcceptanceId) {
+      if (!amuxWorkerRuntimeHasExactCapability(protocolCapabilities,
+        recovery.readOnlyExecutorKind))
+        throw new Error("v22 recovery delivery runtime capability is invalid");
+    } else if (amuxWorkerRuntimeUsesReadOnlyApi(protocolCapabilities)) {
+      throw new Error("v22 ordinary delivery cannot use a read-only API runtime");
+    }
+    let readOnlyRetry: AmuxV22ReadOnlyDeliveryBinding | undefined;
+    let recoveryApprovalId: string | undefined;
+    if (recovery?.riskAcceptanceId) {
+      const proof = recovery.launchProofId ? await tx.amuxV22ReadOnlyLaunchProof.findUnique({
+        where: { id: recovery.launchProofId } }) : null;
+      const check = proof ? await tx.amuxV22ReadOnlyLaunchCheck.findUnique({
+        where: { id: proof.launchCheckId } }) : null;
+      const scope = proof ? amuxV22ReadOnlyLaunchProofScope(proof.report) : null;
+      const nominalScope = check ?
+        amuxV22ReadOnlyLaunchScopeSchema.safeParse(check.launchScope) : null;
+      if (!check || !scope || !nominalScope?.success ||
+          !amuxV22ReadOnlyLaunchScopeMatchesIntent(
+            nominalScope.data, scope.launchScope) ||
+          scope.launchScopeDigest !== recovery.launchScopeDigest ||
+          recovery.id !== assignment.recoveryApprovalId ||
+          recovery.workerName !== assignment.workerName ||
+          recovery.provider !== assignment.provider || recovery.modelId !== assignment.modelId ||
+          recovery.routeId !== assignment.routeId ||
+          recovery.routePolicyDigest !== assignment.routePolicyDigest ||
+          recovery.catalogApprovalId !== assignment.catalogApprovalId ||
+          recovery.catalogVersion !== assignment.catalogVersion ||
+          recovery.costReceiptDigest !== assignment.costReceiptDigest ||
+          recovery.briefDigest !== card.v4BriefDigest ||
+          recovery.additionalCapMicroUsd !== assignment.perAttemptMicroUsd)
+        throw new Error("v22 read-only retry delivery binding is invalid");
+      const common = {
+        version: 1 as const, launchBindingId: recovery.launchBindingId!,
+        riskAcceptanceDigest: recovery.riskAcceptanceDigest!,
+        safeStopEvidenceDigest: recovery.evidenceDigest,
+        launchProofDigest: recovery.launchProofDigest!,
+        launchScopeDigest: recovery.launchScopeDigest!,
+        launcherConfigDigest: scope.launchScope.launcherConfigDigest,
+        briefDigest: recovery.briefDigest!, provider: recovery.provider!,
+        modelId: recovery.modelId!, routeId: recovery.routeId!,
+        routePolicyDigest: recovery.routePolicyDigest!,
+        catalogApprovalId: recovery.catalogApprovalId,
+        catalogVersion: recovery.catalogVersion,
+        pricingVersion: recovery.pricingVersion,
+        costReceiptDigest: recovery.costReceiptDigest,
+        additionalCapMicroUsd: recovery.additionalCapMicroUsd.toString(),
+        worstExposureMicroUsd: recovery.worstExposureMicroUsd.toString(),
+        role: "investigate" as const,
+      };
+      if (recovery.readOnlyExecutorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND) {
+        const frame = currentAmuxV22ReadOnlyApiExecutionFrame(
+          recovery.apiExecutionFrame, { now });
+        const frameDigest = frame ?
+          amuxV22ReadOnlyApiExecutionFrameDigest(frame) : null;
+        if (!("executorKind" in scope.launchScope) || !frame ||
+            frameDigest !== scope.launchScope.apiExecutionFrameDigest ||
+            recovery.launcherConfigDigest !== scope.launchScope.launcherConfigDigest)
+          throw new Error("v22 read-only API delivery binding is invalid");
+        readOnlyRetry = { ...common,
+          executorKind: AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
+          apiExecutionFrame: frame, apiExecutionFrameDigest: frameDigest };
+      } else {
+        if ("executorKind" in scope.launchScope)
+          throw new Error("v22 read-only retry protocol binding is invalid");
+        readOnlyRetry = { ...common,
+          launcherPolicyVersion: scope.launchScope.launcherPolicyVersion,
+          fixedArgvDigest: scope.launchScope.fixedArgvDigest,
+          toolPolicyDigest: scope.launchScope.toolPolicyDigest,
+          profileConfigDigest: scope.launchScope.profileConfigDigest };
+        if (!validateAmuxV22ReadOnlyRetryBinding(readOnlyRetry).ok)
+          throw new Error("v22 read-only retry protocol binding is invalid");
+      }
+      recoveryApprovalId = recovery.id;
+    }
     let plain: Buffer | null = null;
     try {
       plain = openAmuxContent({
@@ -314,14 +452,24 @@ export async function pullAmuxWorkDelivery(input: {
           `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
           AMUX_V22_WORKER_AUTHORITY_NOTICE,
         v22Execution: { modelId: assignment.modelId, role: assignment.role,
-          budgetMicrousd },
+          budgetMicrousd, ...(readOnlyRetry ? { readOnlyRetry } : {}) },
+        recoveryApprovalId,
       };
     } finally { plain?.fill(0); }
   };
   return withAmuxDbBoundary(
-    AMUX_DB_BOUNDARIES.deliveryPull,
+    { ...AMUX_DB_BOUNDARIES.deliveryPull,
+      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 2 },
     async (tx, context) => {
       const now = input.now ?? context.dbNow;
+      // Safe-stop request and all ownership/start/delivery writers share this
+      // global-first order. An existing row cannot be re-leased after its
+      // physical profile has been permanently fenced.
+      await lockAmuxAdmissionAndReadIncident(tx, now);
+      if (await amuxV22WorkerSafeStopFenced(tx, input.worker)) {
+        return { available: false as const,
+          reason: "worker_safe_stop_fenced" as const };
+      }
       const runtime = await lockRuntime(tx, input.worker);
       if (!runtimeMatches(runtime, input, now)) {
         return {
@@ -388,7 +536,8 @@ export async function pullAmuxWorkDelivery(input: {
           reason: "none" as const,
         };
       }
-      const content = await deliveryContent(tx, delivery);
+      const content = await deliveryContent(tx, delivery, now,
+        runtime?.protocolCapabilities ?? []);
 
       /*
        * A retry while the receipt lease is still live is idempotent: return
@@ -414,6 +563,8 @@ export async function pullAmuxWorkDelivery(input: {
           delivery: {
             attemptId: delivery.attemptId,
             assignmentId: delivery.v22AssignmentId,
+            ...(content.recoveryApprovalId ?
+              { recoveryApprovalId: content.recoveryApprovalId } : {}),
             taskId: delivery.taskId,
             worker: delivery.worker,
             taskRevision: delivery.taskRevision,
@@ -480,6 +631,8 @@ export async function pullAmuxWorkDelivery(input: {
         delivery: {
           attemptId: delivery.attemptId,
           assignmentId: delivery.v22AssignmentId,
+          ...(content.recoveryApprovalId ?
+            { recoveryApprovalId: content.recoveryApprovalId } : {}),
           taskId: delivery.taskId,
           worker: delivery.worker,
           taskRevision: delivery.taskRevision,

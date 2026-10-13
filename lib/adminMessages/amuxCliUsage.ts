@@ -2,11 +2,12 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 
 export const adminAmuxCliUsageMessages = defineAdminMessages({
   en: {
-    title: "Worker CLI usage coverage",
-    description: "Last 30 days. Tokens and API estimates sum reported calls only; missing calls are never zero-cost. Estimates are not subscription charges or user credits.",
+    title: "Worker execution usage coverage",
+    description: "Last 30 days. Executor and source distinguish CLI observations from native API receipts. Tokens and API estimates sum reported calls only; missing calls are never zero-cost. Estimates are not subscription charges or user credits.",
     unavailable: "Usage coverage is unavailable; do not interpret this as zero usage.",
     empty: "No completed attempts or usage receipts in this window.",
-    worker: "Worker", model: "Served model", round: "Round",
+    worker: "Worker", executor: "Executor", source: "Usage source",
+    model: "Served model", round: "Round",
     recorded: "Recorded calls", unknown: "Unknown usage",
     missing: "Attempts without a receipt", rate: "Unmeasured ≥", none: "unknown",
     reportedInput: "Reported input", reportedOutput: "Reported output",
@@ -17,11 +18,12 @@ export const adminAmuxCliUsageMessages = defineAdminMessages({
       `${recorded} recorded calls · at least ${missing} unmeasured`,
   },
   ko: {
-    title: "worker CLI 사용량 수집 상태",
-    description: "최근 30일입니다. 토큰·API 예상액은 보고된 호출만 합산하며 누락 호출은 0원으로 취급하지 않습니다. 예상액은 구독료나 사용자 크레딧이 아닙니다.",
+    title: "worker 실행 사용량 수집 상태",
+    description: "최근 30일입니다. 실행기와 출처로 CLI 관측과 native API receipt를 구분합니다. 토큰·API 예상액은 보고된 호출만 합산하며 누락 호출은 0원으로 취급하지 않습니다. 예상액은 구독료나 사용자 크레딧이 아닙니다.",
     unavailable: "사용량 수집 상태를 읽을 수 없습니다. 사용량 0으로 해석하지 마세요.",
     empty: "이 기간에 종료된 시도나 사용량 접수 기록이 없습니다.",
-    worker: "worker", model: "실제 모델", round: "회차",
+    worker: "worker", executor: "실행기", source: "사용량 출처",
+    model: "실제 모델", round: "회차",
     recorded: "기록된 호출", unknown: "사용량 불명",
     missing: "접수 기록 없는 시도", rate: "미측정률 ≥", none: "미확인",
     reportedInput: "보고된 입력", reportedOutput: "보고된 출력",

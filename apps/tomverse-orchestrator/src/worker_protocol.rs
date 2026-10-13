@@ -156,6 +156,7 @@ impl WorkerControlPlane for TomverseApi {
         if delivery.assignment_id.is_some() {
             return TomverseApi::v22_execution_settle_unverified(
                 self, delivery, instance_id, generation,
+                None,
             ).await;
         }
         let (outcome, to_status, reason) = settlement_fields(result);
@@ -500,6 +501,7 @@ mod tests {
         fn delivery() -> PulledDelivery {
             PulledDelivery {
                 assignment_id: None,
+                recovery_approval_id: None,
                 v22_execution: None,
                 attempt_id: "00000000-0000-4000-8000-000000000011".into(),
                 task_id: "TASK-1".into(),

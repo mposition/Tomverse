@@ -141,6 +141,13 @@ export const APPEND_ONLY_LEDGER_TABLES = [
   "EmailPermissionDecision",
   "EmailPermissionDecisionEvidence",
   "ConsentRecord",
+  "AmuxV22TaskRecoveryInspectionRequest",
+  "AmuxV22TaskRecoveryEvidence",
+  "AmuxV22TaskRecoveryApproval",
+  "AmuxV22TaskRecoveryRiskAcceptance",
+  "AmuxV22ReadOnlyLaunchCheck",
+  "AmuxV22ReadOnlyLaunchProof",
+  "AmuxV22ApiModelAccessEvidence",
 ];
 
 /**
@@ -404,6 +411,31 @@ export const PROTECTED_TABLES = [
     writers: ["lib/amux/decisionMakerJudgmentStore.ts"],
     contract: "docs/policy/amux-decision-maker.md §10",
   },
+  ...[
+    "AmuxV22TaskRecoveryInspectionRequest",
+    "AmuxV22TaskRecoveryEvidence",
+    "AmuxV22TaskRecoveryApproval",
+    "AmuxV22TaskRecoveryRiskAcceptance",
+    "AmuxV22ReadOnlyLaunchCheck",
+    "AmuxV22ReadOnlyLaunchProof",
+  ].map((table) => ({
+    table,
+    delegate: table[0].toLowerCase() + table.slice(1),
+    writers: ["lib/amux/v22TaskRecoveryService.ts"],
+    contract: "docs/policy/development-agent-orchestration.md 버전 36-39",
+  })),
+  {
+    table: "AmuxV22ApiModelAccessEvidence",
+    delegate: "amuxV22ApiModelAccessEvidence",
+    writers: ["lib/amux/v22ApiModelAccessService.ts"],
+    contract: "docs/policy/development-agent-orchestration.md 버전 42",
+  },
+  {
+    table: "AmuxCliUsageEvent",
+    delegate: "amuxCliUsageEvent",
+    writers: ["lib/amux/cliUsageLedgerStore.ts", "lib/amux/cliUsageRetention.ts"],
+    contract: "docs/policy/development-agent-orchestration.md 버전 40",
+  },
 ];
 
 /** Prisma delegate operations that cannot change a row. */
@@ -655,6 +687,232 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The AdminAuditLog delegate only reads terminal and stop receipts. The one SQL write verb is FOR NO KEY UPDATE NOWAIT on PromptRefinerVnextOneShotStage, a row lock before writeSystemAuditLog appends the receipt through the sole audit writer. No statement here inserts, updates or deletes AdminAuditLog.",
   },
+  {
+    path: "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 8,
+    writeVerbs: 39,
+    reason:
+      "The v22 Task recovery migration has three restrictive audit foreign keys and five guard reads that bind the inspection, evidence, approval and assignment to their canonical audit rows. Its DDL and trigger verbs create or constrain recovery metadata only; it never inserts, updates or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
+    table: "AmuxV22TaskRecoveryInspectionRequest",
+    tableMentions: 13,
+    writeVerbs: 39,
+    reason:
+      "The v22 Task recovery migration creates and guards this append-only request ledger. The migration seeds no request; application inserts are confined to the protected writer and updates, deletes and truncates are refused by its trigger.",
+  },
+  {
+    path: "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
+    table: "AmuxV22TaskRecoveryEvidence",
+    tableMentions: 8,
+    writeVerbs: 39,
+    reason:
+      "The v22 Task recovery migration creates and guards this append-only evidence ledger, including its database-clock trigger. The migration seeds no evidence; application inserts are confined to the protected writer and updates, deletes and truncates are refused by its trigger.",
+  },
+  {
+    path: "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
+    table: "AmuxV22TaskRecoveryApproval",
+    tableMentions: 10,
+    writeVerbs: 39,
+    reason:
+      "The v22 Task recovery migration creates and guards this append-only one-attempt approval ledger and its assignment and attempt bindings. The migration seeds no approval; application inserts are confined to the protected writer and updates, deletes and truncates are refused by its trigger.",
+  },
+  {
+    path: "prisma/migrations/20261013210000_amux_v22_legacy_safe_stop/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 19,
+    reason:
+      "The additive v37 safe-stop migration reads same-transaction human and controller audit rows in the request and evidence guards. Its DDL and trigger verbs extend recovery metadata and fence execution tables; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261013210000_amux_v22_legacy_safe_stop/migration.sql",
+    table: "AmuxV22TaskRecoveryInspectionRequest",
+    tableMentions: 9,
+    writeVerbs: 19,
+    reason:
+      "The additive v37 migration extends and reads the append-only request ledger to install a physical-worker safe-stop fence. It seeds and mutates no request row; the existing append-only trigger remains in force.",
+  },
+  {
+    path: "prisma/migrations/20261013210000_amux_v22_legacy_safe_stop/migration.sql",
+    table: "AmuxV22TaskRecoveryEvidence",
+    tableMentions: 9,
+    writeVerbs: 19,
+    reason:
+      "The additive v37 migration extends and reads the append-only evidence ledger to bind source evidence, durable stop journal and kernel process state. It seeds and mutates no evidence row; the existing append-only trigger remains in force.",
+  },
+  ...[
+    ["AdminAuditLog", 9],
+    ["AmuxV22TaskRecoveryInspectionRequest", 8],
+    ["AmuxV22TaskRecoveryEvidence", 8],
+    ["AmuxV22TaskRecoveryApproval", 7],
+    ["AmuxV22TaskRecoveryRiskAcceptance", 14],
+    ["AmuxV22ReadOnlyLaunchCheck", 11],
+    ["AmuxV22ReadOnlyLaunchProof", 8],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261013220000_amux_v22_read_only_retry_risk/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 46,
+    reason:
+      "The additive v39 migration creates and guards the exact FIRST Task risk, launch-check and launch-proof ledgers, extends the existing request and approval bindings, and only reads linked recovery and audit rows. It seeds no authority or execution and never writes AdminAuditLog.",
+  })),
+  ...[
+    ["AmuxV22TaskRecoveryApproval", 5],
+    ["AmuxV22ReadOnlyLaunchCheck", 3],
+    ["AmuxV22ReadOnlyLaunchProof", 2],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261013230000_amux_v22_read_only_retry_db_guards/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 4,
+    reason:
+      "The additive v39 follow-up installs four constraint triggers that re-read the immutable final consent, launch check and launch proof at the launch, approval, claim and start boundaries. It performs no row DML; the scanner's write verbs are the triggers' INSERT event declarations.",
+  })),
+  {
+    path: "prisma/migrations/20261013260000_amux_v22_read_only_api_scope_guards/migration.sql",
+    table: "AmuxV22ReadOnlyLaunchCheck",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "The additive v40 migration replaces only the existing launch-check JSON scope constraint so it accepts the exact four-key API scope beside the unchanged CLI scope. It performs no row DML and the replacement remains fail-closed for null, malformed, extra-key, unknown-kind and cap-mismatch inputs.",
+  },
+  {
+    path: "prisma/migrations/20261006130000_amux_cli_usage_event/migration.sql",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 8,
+    writeVerbs: 22,
+    reason:
+      "The original usage-ledger migration creates the table, its indexes and immutable 13-month retention guard. It is immutable history and contains no runtime writer.",
+  },
+  {
+    path: "prisma/migrations/20261013270000_amux_native_api_usage_provenance/migration.sql",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The additive v40 migration replaces only the source and shape checks to add one honest complete native-API provenance branch. It changes no row and preserves both existing CLI branches.",
+  },
+  {
+    path: "prisma/migrations/20261013280000_amux_native_api_first_task_scope/migration.sql",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The additive v40 follow-up replaces only the existing usage shape CHECK to limit native API rows to the approved FIRST Task, complete terminal receipt, uniform model, eight-turn and 3.40 USD caps. It changes no row and leaves both CLI branches unchanged.",
+  },
+  {
+    path: "prisma/migrations/20261013290000_amux_v22_first_task_attempt_limit/migration.sql",
+    table: "AmuxV22TaskRecoveryApproval",
+    tableMentions: 3,
+    writeVerbs: 1,
+    reason:
+      "The additive v41 migration replaces only the existing attempt-guard function so the exact FIRST Task's second attempt re-reads its immutable recovery approval. It performs no row DML; the scanner's one write verb is the function's FOR UPDATE lock clause.",
+  },
+  ...[
+    ["AdminAuditLog", 3],
+    ["AmuxV22TaskRecoveryApproval", 8],
+    ["AmuxV22ReadOnlyLaunchCheck", 2],
+    ["AmuxV22ReadOnlyLaunchProof", 7],
+    ["AmuxV22ApiModelAccessEvidence", 17],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261013300000_amux_v22_api_model_access_evidence/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 19,
+    reason:
+      "The additive v42 migration creates and guards one content-free API authentication/model-access evidence row, extends the exact recovery approval binding and re-reads immutable launch, audit, claim and start evidence. It seeds no authority or provider result and never writes AdminAuditLog.",
+  })),
+  ...[
+    ["AmuxV22TaskRecoveryApproval", 2],
+    ["AmuxV22ReadOnlyLaunchProof", 2],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261013330000_amux_v22_api_launch_proof_deadline/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 2,
+    reason:
+      "The additive v42 follow-up adds one read-only trigger function that closes an API recovery's claim and start 90 seconds after its launch proof. It performs no row DML; the scanner's two write verbs are the BEFORE/AFTER INSERT trigger clauses.",
+  })),
+  {
+    path: "lib/amux/cliUsageLedgerStore.ts",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason:
+      "The sole guarded usage writer inserts one content-free row and appends its hash-chain system audit in the same transaction; duplicate invocation IDs are exact receipt-digest read-backs.",
+  },
+  {
+    path: "lib/amux/cliUsageRetention.ts",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 4,
+    writeVerbs: 7,
+    reason:
+      "The existing reviewed retention writer aggregates eligible expired rows before deleting them under the database-enforced 13-month retention contract.",
+  },
+  {
+    path: "lib/amux/v22WorkerClaimService.ts",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "Claim eligibility only reads whether prior attempts have usage evidence; unrelated assignment writes in the same module trigger the conservative raw-SQL text inventory.",
+  },
+  {
+    path: "lib/amux/v22TaskRecoveryService.ts",
+    table: "AmuxV22TaskRecoveryInspectionRequest",
+    tableMentions: 7,
+    writeVerbs: 3,
+    reason:
+      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable inspection request. It adds no writer; the raw-SQL verbs remain the three reviewed SELECT FOR UPDATE locks and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
+  },
+  {
+    path: "lib/amux/v22TaskRecoveryService.ts",
+    table: "AmuxV22TaskRecoveryEvidence",
+    tableMentions: 5,
+    writeVerbs: 3,
+    reason:
+      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable evidence receipt. It adds no writer; the raw-SQL verbs remain the three reviewed SELECT FOR UPDATE locks and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
+  },
+  ...[
+    ["AmuxV22TaskRecoveryApproval", 3],
+    ["AmuxV22TaskRecoveryRiskAcceptance", 5],
+    ["AmuxV22ReadOnlyLaunchCheck", 2],
+    ["AmuxV22ReadOnlyLaunchProof", 1],
+  ].map(([table, tableMentions]) => ({
+    path: "lib/amux/v22TaskRecoveryService.ts",
+    table,
+    tableMentions,
+    writeVerbs: 3,
+    reason:
+      "The sole recovery-ledger writer names this model in fixed canonical audit targets and read-back checks. Its raw-SQL write verbs are constant SELECT FOR UPDATE locks in the global-first Task, prior-attempt and physical-profile order; all recovery ledger mutations and their same-transaction audits use the protected Prisma delegates in this file.",
+  })),
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxV22TaskRecoveryEvidence",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The closed system-actor manifest names the recovery evidence target once for the unprivileged checker and once for the root controller beside prose about audit writes. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxV22ApiModelAccessEvidence",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed system-actor manifest names the v42 content-free access-evidence target. It executes no SQL; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  ...["AmuxV22ReadOnlyLaunchCheck", "AmuxV22ReadOnlyLaunchProof"].map((table) => ({
+    path: "lib/adminAuditSystemActors.ts",
+    table,
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed root-controller actor manifest names this v39 audit target once. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
+  })),
   {
     path: "lib/accountDataExportDomains.ts",
     table: "AmuxIdeaAnalysisBudgetSetting",
@@ -987,7 +1245,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "scripts/check-enum-constraints.mjs",
     table: "AgentDigestItem",
     tableMentions: 1,
-    writeVerbs: 20,
+    writeVerbs: 19,
     reason:
       "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
   },
@@ -1908,7 +2166,7 @@ export const RAW_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/check-enum-constraints.mjs", table: "PromptRefinerProductOperationalGuard",
-    tableMentions: 2, writeVerbs: 20,
+    tableMentions: 2, writeVerbs: 19,
     reason: "Two closed constraint-registry identifiers link the latch state and reason checks to their runtime lists. This checker reads source and migration SQL, holds no database client and executes no SQL.",
   },
 ];

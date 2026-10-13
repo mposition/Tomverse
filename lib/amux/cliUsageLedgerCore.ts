@@ -16,7 +16,7 @@ const counts = z.object({
   reasoningOutputTokens: count.nullable(),
 }).strict();
 
-export const amuxCliUsageReceiptSchema = z.object({
+export const amuxUsageLedgerReceiptSchema = z.object({
   version: z.literal(1),
   invocationId: id,
   binding: z.discriminatedUnion("kind", [
@@ -24,7 +24,7 @@ export const amuxCliUsageReceiptSchema = z.object({
     z.object({ kind: z.literal("idea_analysis"), holdId: id }).strict(),
   ]),
   worker: id,
-  cli: z.enum(["codex", "claude"]),
+  cli: z.enum(["codex", "claude", "anthropic_api"]),
   provider: z.enum(["openai", "anthropic"]),
   selectedModelId: model,
   actualModelId: model.nullable(),
@@ -34,7 +34,8 @@ export const amuxCliUsageReceiptSchema = z.object({
   endedAt: z.string().datetime({ offset: false }),
   status: z.enum(["succeeded", "failed", "interrupted", "outcome_unknown"]),
   completeness: z.enum(["reported_complete", "reported_partial", "unknown"]),
-  source: z.enum(["codex_jsonl", "claude_result", "unreported"]),
+  source: z.enum(["codex_jsonl", "claude_result",
+    "anthropic_messages_api", "unreported"]),
   observed: counts.nullable(),
   inputTokensIncludeCacheRead: z.boolean(),
   inputTokensIncludeCacheWrite: z.boolean().nullable(),
@@ -43,17 +44,27 @@ export const amuxCliUsageReceiptSchema = z.object({
 }).strict().superRefine((value, context) => {
   if (value.cli === "codex" && value.provider !== "openai" ||
       value.cli === "claude" && value.provider !== "anthropic" ||
+      value.cli === "anthropic_api" && value.provider !== "anthropic" ||
       Date.parse(value.endedAt) < Date.parse(value.startedAt) ||
       (value.completeness === "unknown") !== (value.observed === null) ||
       (value.source === "unreported") !== (value.observed === null) ||
       (value.source === "codex_jsonl" && value.cli !== "codex") ||
       (value.source === "claude_result" && value.cli !== "claude") ||
+      (value.source === "anthropic_messages_api" &&
+        value.cli !== "anthropic_api") ||
       (value.cli === "codex" &&
         (!value.inputTokensIncludeCacheRead ||
           value.reasoningOutputIncludedInOutput !== true)) ||
       (value.cli === "claude" &&
         (value.inputTokensIncludeCacheRead ||
           value.inputTokensIncludeCacheWrite !== false)) ||
+      (value.cli === "anthropic_api" &&
+        (value.authentication !== "api_key" || value.cliVersion !== null ||
+          value.completeness !== "reported_complete" ||
+          value.source !== "anthropic_messages_api" ||
+          value.observed === null || value.inputTokensIncludeCacheRead ||
+          value.inputTokensIncludeCacheWrite !== false ||
+          value.reasoningOutputIncludedInOutput !== null)) ||
       (value.completeness === "reported_complete" && value.completedTurns === 0) ||
       (value.actualModelId !== null && value.actualModelId.split("/").some(
         (part) => part === "" || part === "." || part === ".."))) {
@@ -74,17 +85,38 @@ export const amuxCliUsageReceiptSchema = z.object({
   }
 });
 
-export type AmuxCliUsageReceipt = z.infer<typeof amuxCliUsageReceiptSchema>;
+/** The public worker ingestion contract remains CLI-only. Native API rows are
+ * accepted exclusively by the guarded settlement writer. */
+export const amuxCliUsageReceiptSchema = amuxUsageLedgerReceiptSchema
+  .superRefine((value, context) => {
+    if (value.cli === "anthropic_api" ||
+        value.source === "anthropic_messages_api") {
+      context.addIssue({ code: "custom", message: "native_api_writer_only" });
+    }
+  });
+
+export type AmuxUsageLedgerReceipt =
+  z.infer<typeof amuxUsageLedgerReceiptSchema>;
+export type AmuxCliUsageReceipt = AmuxUsageLedgerReceipt & {
+  cli: "codex" | "claude";
+  source: "codex_jsonl" | "claude_result" | "unreported";
+};
 
 /** v22 accepts no silent CLI model fallback. A different served model has a
  * different approved route and price and therefore cannot settle this Task. */
-export function v22ReceiptModelMatchesAssignment(receipt: AmuxCliUsageReceipt): boolean {
+export function v22ReceiptModelMatchesAssignment(
+  receipt: AmuxUsageLedgerReceipt,
+): boolean {
   return receipt.binding.kind !== "task_attempt" ||
     receipt.actualModelId === null ||
     receipt.actualModelId === receipt.selectedModelId;
 }
 
-export function amuxCliUsageReceiptDigest(receipt: AmuxCliUsageReceipt): string {
+export function amuxCliUsageReceiptDigest(
+  receipt: AmuxUsageLedgerReceipt,
+): string {
+  if (receipt.cli === "anthropic_api")
+    throw new Error("native_api_receipt_digest_required");
   return createHash("sha256").update("amux-cli-usage-v1\n", "utf8")
     .update(JSON.stringify(receipt), "utf8").digest("hex");
 }
@@ -113,7 +145,7 @@ export function makeAmuxCliUsageReceipt(input: Omit<AmuxCliUsageReceipt,
     completedTurns: observation.completedTurns,
     source: observation.observed === null ? "unreported" :
       observation.cli === "codex" ? "codex_jsonl" : "claude_result",
-  });
+  }) as AmuxCliUsageReceipt;
 }
 
 export type AmuxCliApiPrice = {
@@ -128,7 +160,7 @@ export type AmuxCliApiPrice = {
 };
 
 /** This is a future API-key conversion estimate, never subscription billing. */
-export function estimateAmuxCliApiCost(receipt: AmuxCliUsageReceipt,
+export function estimateAmuxCliApiCost(receipt: AmuxUsageLedgerReceipt,
   price: AmuxCliApiPrice | null): bigint | null {
   const usage = receipt.observed;
   if (!usage || !price || receipt.completeness !== "reported_complete" ||

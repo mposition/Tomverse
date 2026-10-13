@@ -90,3 +90,52 @@ test("CLI usage is append-only, scoped and retained for 13 months", {
     await db.end();
   }
 });
+
+test("repeatable-read native API usage cannot bypass FIRST Task attempt authority", {
+  skip: allowed ? undefined : "requires a dedicated loopback test database",
+}, async () => {
+  const db = new pg.Client({ connectionString: url });
+  await db.connect();
+  let rolledBack = false;
+  try {
+    const before = Number((await db.query(
+      `SELECT count(*)::int AS count FROM "AmuxCliUsageEvent"`)).rows[0].count);
+    await db.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    await db.query("SET LOCAL statement_timeout = '10s'");
+    await db.query("SET LOCAL TIME ZONE 'UTC'");
+    const taskId = "c48886b9-86f8-4631-8db8-c0b288a707af";
+    const attemptId = randomUUID();
+    await db.query(`INSERT INTO "AmuxWorkItem" ("id", "title", "status",
+      "kind", "priority", "updatedAt") VALUES
+      ($1, 'native API usage fixture', 'doing', 'code', 'p3', CURRENT_TIMESTAMP)`,
+    [taskId]);
+    await db.query("SAVEPOINT native_api_refusal");
+    let error;
+    try {
+      await db.query(`INSERT INTO "AmuxExecutionAttempt" ("id", "taskId",
+        "worker", "workerInstanceId", "workerGeneration", "taskRevision",
+        "attemptNumber", "heartbeatAt", "startedAt", "leaseExpiresAt", "updatedAt") VALUES ($1, $2,
+        'worker-api', 'fixture', 1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP + interval '1 hour', CURRENT_TIMESTAMP)`, [attemptId, taskId]);
+      await db.query("SET CONSTRAINTS amux_v22_v39_attempt_guard_trigger IMMEDIATE");
+    } catch (caught) {
+      error = caught;
+    }
+    await db.query("ROLLBACK TO SAVEPOINT native_api_refusal");
+    await db.query("RELEASE SAVEPOINT native_api_refusal");
+    assert.equal(error?.code, "23514", error?.message);
+    assert.equal(error?.constraint, "AmuxV22RecoveryAttempt_v39_limit_check",
+      error?.message);
+    assert.equal(Number((await db.query(`SELECT count(*)::int AS count
+      FROM "AmuxExecutionAttempt" WHERE "taskId" = $1`, [taskId])).rows[0].count), 0);
+    assert.equal(Number((await db.query(`SELECT count(*)::int AS count
+      FROM "AmuxCliUsageEvent" WHERE "taskId" = $1`, [taskId])).rows[0].count), 0);
+    await db.query("ROLLBACK");
+    rolledBack = true;
+    assert.equal(Number((await db.query(
+      `SELECT count(*)::int AS count FROM "AmuxCliUsageEvent"`)).rows[0].count), before);
+  } finally {
+    if (!rolledBack) await db.query("ROLLBACK").catch(() => undefined);
+    await db.end();
+  }
+});

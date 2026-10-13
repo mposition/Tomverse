@@ -12,6 +12,8 @@ import { amuxWorkerRuntimeByName } from "@/lib/amux/workerRuntime";
 import { getAmuxWorkerTelemetry } from "@/lib/amux/telemetry";
 import { AMUX_V22_WORKER_CATALOG_ENV, parseAmuxV22WorkerCatalog } from
   "@/lib/amux/v22WorkerCatalogCore";
+import { amuxV22SafeStopFencedWorkers } from
+  "@/lib/amux/v22LegacySafeStopFence";
 
 const classificationSchema = z
   .object({
@@ -225,6 +227,8 @@ export async function buildAmuxRoutingSnapshot(
         workers.map((worker) => worker.worker_name),
         tx,
       );
+      const safeStopFenced = await amuxV22SafeStopFencedWorkers(tx,
+        workers.map((worker) => worker.worker_name));
 
       const filesExpected = classification.data.files_expected;
 
@@ -253,6 +257,7 @@ export async function buildAmuxRoutingSnapshot(
             !worker.paused &&
             !worker.isolated &&
             !worker.blocked &&
+            !safeStopFenced.has(worker.worker_name) &&
             !specialistMismatch
           );
         }),
@@ -296,13 +301,15 @@ export async function buildAmuxRoutingSnapshot(
             !worker.paused &&
             !worker.isolated &&
             !worker.blocked &&
+            !safeStopFenced.has(worker.worker_name) &&
             !specialistMismatch;
           const telemetry = telemetryByWorker.get(worker.worker_name)?.scoring;
 
           return {
             worker: {
               ...worker,
-              blocked: worker.blocked || specialistMismatch,
+              blocked: worker.blocked || specialistMismatch ||
+                safeStopFenced.has(worker.worker_name),
               running,
               status: running ? runtime.status : "stopped",
               dispatch_ready: dispatchReady,

@@ -130,7 +130,7 @@ const rustPublicAsyncMethodSource = (source, method) => {
   const executable = maskRustCommentsAndStrings(source);
   const escapedMethod = method.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const signature = new RegExp(
-    `\\bpub\\s+async\\s+fn\\s+${escapedMethod}\\s*\\(`,
+    `\\b(?:pub\\s+)?async\\s+fn\\s+${escapedMethod}\\s*(?:<[^>{]*>)?\\(`,
   ).exec(executable);
   if (!signature) return undefined;
   const bodyStart = executable.indexOf("{", signature.index + signature[0].length);
@@ -525,7 +525,8 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
 
   const endpoints = [
     ["workers/register", ["workerRegister"], "worker_register"],
-    ["workers/heartbeat", ["workerHeartbeat"], "worker_heartbeat"],
+    // worker_heartbeat and v22_worker_heartbeat both delegate to this request.
+    ["workers/heartbeat", ["workerHeartbeat"], "worker_heartbeat_with_capabilities"],
     ["delivery/pull", ["deliveryPull"], "delivery_pull"],
     ["delivery/ack", ["deliveryAck"], "delivery_ack"],
     ["execution/start", ["executionStart"], "execution_start"],

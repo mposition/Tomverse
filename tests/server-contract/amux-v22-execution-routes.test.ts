@@ -11,6 +11,7 @@ let permitStart = false;
 let readbackCalls = 0;
 let heartbeatCalls = 0;
 let settleCalls = 0;
+let settleInput: unknown = null;
 const noStore = (body: unknown, status = 200) => new Response(
   JSON.stringify(body), { status, headers: { "Cache-Control": "no-store" } });
 const unexpected = () => { startReachedService = true;
@@ -36,7 +37,8 @@ mock.module(mod("lib/amux/execution.ts"), { namedExports: {
     return { found: true, state: "not_started" }; },
   heartbeatAmuxV22TaskExecution: async () => { heartbeatCalls += 1;
     return false; },
-  settleAmuxV22TaskExecution: async () => { settleCalls += 1;
+  settleAmuxV22TaskExecution: async (input: unknown) => { settleCalls += 1;
+    settleInput = input;
     return { settled: false, reason: "fenced_out" }; },
 } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
@@ -139,4 +141,44 @@ test("v22 exact enabled admission reaches start only after authentication", asyn
     if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
     else process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = previous;
   }
+});
+
+test("v22 settlement maps the strict read-only API receipt echo", async () => {
+  const { call } = (await routes).find(({ name }) => name === "settle")!;
+  authorized = true;
+  settleInput = null;
+  const digest = "a".repeat(64);
+  const apiExecutionReceipt = { version: 1,
+    executorKind: "read_only_api_retry_v1", digest: "b".repeat(64) };
+  const response = await call(new Request(
+    "https://tomverse.test/api/internal/amux/v22/execution/settle", {
+      method: "POST", body: JSON.stringify({
+        attempt_id: "00000000-0000-4000-8000-000000000003",
+        worker: "worker-one",
+        instance_id: "00000000-0000-4000-8000-000000000002",
+        generation: 1, task_revision: 2, outcome: "succeeded",
+        invocation_ids: ["00000000-0000-4000-8000-000000000003"],
+        read_only_retry: { version: 1,
+          launch_binding_id: "00000000-0000-4000-8000-000000000004",
+          launch_proof_digest: digest, launch_scope_digest: digest,
+          executor_kind: "read_only_api_retry_v1",
+          launcher_config_digest: digest,
+          api_execution_frame_digest: digest,
+          api_execution_receipt: apiExecutionReceipt },
+      }),
+    }));
+  assert.equal(response.status, 409);
+  assert.deepEqual(settleInput, {
+    attemptId: "00000000-0000-4000-8000-000000000003",
+    worker: "worker-one",
+    instanceId: "00000000-0000-4000-8000-000000000002",
+    generation: 1, taskRevision: 2, outcome: "succeeded",
+    invocationIds: ["00000000-0000-4000-8000-000000000003"],
+    readOnlyRetry: { version: 1,
+      launchBindingId: "00000000-0000-4000-8000-000000000004",
+      launchProofDigest: digest, launchScopeDigest: digest,
+      executorKind: "read_only_api_retry_v1",
+      launcherConfigDigest: digest, apiExecutionFrameDigest: digest,
+      apiExecutionReceipt },
+  });
 });

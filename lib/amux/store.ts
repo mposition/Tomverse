@@ -16,6 +16,7 @@ import {
   type AmuxSchedulerScore,
 } from "@/lib/amux/schedulerScoreCore";
 import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
+import { amuxV22WorkerSafeStopFenced } from "@/lib/amux/v22LegacySafeStopFence";
 import {
   AMUX_INCIDENT_SETTING_KEY,
   parseAmuxIncidentSetting,
@@ -234,7 +235,8 @@ export type AmuxClaimOutcome =
         | "cas_lost"
         | "incident_admission_blocked"
         | "wip_limit_reached"
-        | "execution_lifecycle_unavailable";
+        | "execution_lifecycle_unavailable"
+        | "no_authoritative_worker";
     };
 
 type AmuxClaimRefusalContext = {
@@ -519,6 +521,14 @@ export async function claimUnownedTodo(
         claimed: false as const,
         reason: "incident_admission_blocked" as const,
       };
+    }
+    if (await amuxV22WorkerSafeStopFenced(tx, worker)) {
+      await writeAmuxClaimRefusalAudit(tx, "worker_safe_stop_fenced",
+        refusalContext, { permanent_physical_profile_fence: true });
+      // The audit keeps the exact cause; the answer reuses the closed
+      // vocabulary that main's and the current Rust claim clients parse.
+      return { claimed: false as const,
+        reason: "no_authoritative_worker" as const };
     }
 
     const planning = await tx.amuxWorkItem.findFirst({

@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 
 export type AmuxCliUsageSummaryRow = {
   worker: string;
+  executor: string;
+  source: string;
   model: string;
   round: number | null;
   recorded: number;
@@ -43,7 +45,8 @@ export async function readAmuxCliUsageSummaryForAdmin(
   const facts = await db.$queryRaw<Array<Omit<AmuxCliUsageSummaryRow,
     "unmeasuredRateLowerBound">>>`
     WITH facts AS (
-      SELECT e."worker", COALESCE(e."actualModelId", 'unknown') AS model,
+      SELECT e."worker", e."cli" AS executor, e."source",
+        COALESCE(e."actualModelId", 'unknown') AS model,
         a."attemptNumber" AS round, 1 AS recorded,
         CASE WHEN e."completeness" <> 'reported_complete' THEN 1 ELSE 0 END AS unknown,
         0 AS missing, e."inputTokens" AS input_tokens,
@@ -55,7 +58,8 @@ export async function readAmuxCliUsageSummaryForAdmin(
       LEFT JOIN "AmuxExecutionAttempt" a ON a."id" = e."attemptId"
       WHERE e."createdAt" >= ${since}
       UNION ALL
-      SELECT a."worker", 'unknown' AS model, a."attemptNumber" AS round,
+      SELECT a."worker", 'unknown' AS executor, 'unreported' AS source,
+        'unknown' AS model, a."attemptNumber" AS round,
         0 AS recorded, 0 AS unknown, 1 AS missing,
         NULL::BIGINT AS input_tokens, NULL::BIGINT AS output_tokens,
         NULL::BIGINT AS cache_read_tokens,
@@ -67,7 +71,8 @@ export async function readAmuxCliUsageSummaryForAdmin(
         AND NOT EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" e
           WHERE e."attemptId" = a."id")
       UNION ALL
-      SELECT 'amux-intake' AS worker, h."modelId" AS model,
+      SELECT 'amux-intake' AS worker, 'unknown' AS executor,
+        'unreported' AS source, h."modelId" AS model,
         NULL::INTEGER AS round, 0 AS recorded, 0 AS unknown, 1 AS missing,
         NULL::BIGINT AS input_tokens, NULL::BIGINT AS output_tokens,
         NULL::BIGINT AS cache_read_tokens,
@@ -79,7 +84,8 @@ export async function readAmuxCliUsageSummaryForAdmin(
         AND NOT EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" e
           WHERE e."analysisHoldId" = h."id")
     )
-    SELECT worker, model, round, SUM(recorded)::INTEGER AS recorded,
+    SELECT worker, executor, source, model, round,
+      SUM(recorded)::INTEGER AS recorded,
       SUM(unknown)::INTEGER AS "usageUnknown",
       SUM(missing)::INTEGER AS "noReceiptAttempts",
       COALESCE(SUM(input_tokens), 0)::TEXT AS "reportedInputTokens",
@@ -89,8 +95,8 @@ export async function readAmuxCliUsageSummaryForAdmin(
       COUNT(cache_write_tokens)::INTEGER AS "cacheWriteReports",
       COALESCE(SUM(projected_cost), 0)::TEXT AS "knownProjectedApiCostMicrousd",
       COUNT(projected_cost)::INTEGER AS "pricedCalls"
-    FROM facts GROUP BY worker, model, round
-    ORDER BY SUM(unknown + missing) DESC, worker, model, round
+    FROM facts GROUP BY worker, executor, source, model, round
+    ORDER BY SUM(unknown + missing) DESC, worker, executor, source, model, round
   `;
   const rows = facts.map((row) => ({ ...row,
     unmeasuredRateLowerBound: amuxCliUnmeasuredRateLowerBound(
