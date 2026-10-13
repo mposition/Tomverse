@@ -23,6 +23,8 @@ import {
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
 import { createPageMetadata, localizedQueryPath, queryLanguageAlternates } from "@/lib/seo";
 import { DOCUMENT_LANGUAGE_HEADER } from "@/lib/documentLanguage";
+import { StatusPageChrome } from "@/components/marketing/StatusPageChrome";
+import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { describeProbeSchedulerDelay } from "@/lib/statusPageEvidence";
 import {
   describePublicStatusAffectedModels,
@@ -157,6 +159,7 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
   };
 
   return (
+    <StatusPageChrome language={language} guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
     <main lang={language} className="min-h-screen bg-zinc-950 px-5 py-8 text-zinc-100">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
         <header className="rounded-3xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-6">
@@ -310,5 +313,6 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
         </section>
       </div>
     </main>
+    </StatusPageChrome>
   );
 }
