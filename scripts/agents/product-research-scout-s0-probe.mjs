@@ -266,6 +266,18 @@ async function runFixture() {
         });
         return response.end(`<!doctype html><img src="${path}-img"><script>fetch("${path}-script-ran")</script>`);
       }
+      // The same problem arriving after the page has loaded: an iframe added,
+      // and the page navigating itself, inside the settle window.
+      if (path === "/page-with-late-challenge-frame") {
+        return html(`<!doctype html><html lang="en"><title>late</title><script>
+addEventListener("load", () => setTimeout(() => {
+  const frame = document.createElement("iframe"); frame.src = "/challenge"; document.body.appendChild(frame);
+}, 300));</script><body></body></html>`);
+      }
+      if (path === "/page-with-late-navigation") {
+        return html(`<!doctype html><html lang="en"><title>late</title><script>
+addEventListener("load", () => setTimeout(() => { location.href = "/challenge"; }, 300));</script></html>`);
+      }
       if (path === "/page-with-challenge-frame") return html(`<!doctype html><html lang="en"><title>framed</title><iframe src="/challenge"></iframe></html>`);
       if (path === "/form") return html(`<!doctype html><form method="post" action="/form-post"></form><script>document.forms[0].submit();</script>`);
       // The one same-origin redirect, checked first: it has to arrive, or the
@@ -356,13 +368,16 @@ async function runFixtureConfiguration(configuration, { allowedOrigin, allowed, 
     // challenge in an iframe: it has to come back stopped, not observed.
     let framedChallenge = null;
     if (rules) {
-      rules.stops = [];
-      const visit = await visitPage(browser, { id: "fixture.challenge-frame", path: "/page-with-challenge-frame", lang: "en" }, {
-        origin: allowedOrigin,
-        allowedOrigins: [allowedOrigin],
-        rules,
-      });
-      framedChallenge = visit.stopped ?? "not stopped";
+      framedChallenge = {};
+      for (const path of ["/page-with-challenge-frame", "/page-with-late-challenge-frame", "/page-with-late-navigation"]) {
+        rules.stops = [];
+        const visit = await visitPage(browser, { id: `fixture${path}`, path, lang: "en" }, {
+          origin: allowedOrigin,
+          allowedOrigins: [allowedOrigin],
+          rules,
+        });
+        framedChallenge[path] = visit.stopped ?? (visit.error ? `error ${visit.error}` : "not stopped");
+      }
     }
     const reachedOther = other.received.map(({ method, path, upgrade }) => ({ method, path, upgrade }));
     const forbiddenOnAllowed = allowed.received
@@ -393,7 +408,7 @@ async function runFixtureConfiguration(configuration, { allowedOrigin, allowed, 
               reachedOther.length === 0 &&
               forbiddenOnAllowed.length === 0 &&
               stoppedDocumentRan.length === 0 &&
-              (rules === null || framedChallenge === "challenge") &&
+              (rules === null || Object.values(framedChallenge).every((outcome) => outcome === "challenge")) &&
               Object.values(allowedArrived).every(Boolean),
           }),
     };
@@ -474,46 +489,47 @@ async function visitPage(browser, target, { origin, allowedOrigins, rules }) {
     const stopped = new Promise((resolve) => {
       rules.onStop = resolve;
     });
-    let response = null;
-    const load = (async () => {
-      response = await page.goto(`${origin}${target.path}`, {
+    // The whole observation -- load, settle and the reads -- runs against the
+    // stop signal, and the stop list is checked again after it, so a document
+    // stopped at any point before the record is returned wins. A read that
+    // fails because a stopped navigation tore the page down is a stop too.
+    const observe = (async () => {
+      const response = await page.goto(`${origin}${target.path}`, {
         waitUntil: "load",
         timeout: PAGE_DEADLINE_MS - SETTLE_MS - 5_000,
       });
       await page.waitForTimeout(SETTLE_MS);
-      return "loaded";
+      const documentLang = await page.evaluate(() => document.documentElement.lang);
+      return {
+        id: target.id,
+        status: response?.status() ?? 0,
+        stopped: null,
+        finalOriginAllowed: originOf(page.url()) === origin,
+        documentLang,
+        langMatches: typeof documentLang === "string" && documentLang.toLowerCase().startsWith(target.lang),
+        consoleErrors,
+        scoutCausedConsoleErrors,
+        sameOriginErrors,
+        webSocketsRefused: webSocketsRefused(),
+        aborted: tally.entries(),
+        failedOtherOrigins: [...failedOrigins.entries()].map(([failed, count]) => ({ origin: failed, count })),
+      };
     })();
-    // The load keeps running when a stop wins the race; the context closes
-    // under it in finally, and its rejection is expected.
-    load.catch(() => {});
-    let outcome;
+    // The observation keeps running when a stop wins the race; the context
+    // closes under it in finally, and its rejection is expected.
+    observe.catch(() => {});
+    let record;
     try {
-      outcome = await Promise.race([load, stopped.then(() => "stopped")]);
+      record = await Promise.race([observe, stopped.then(() => null)]);
     } catch (error) {
       if (rules.stops.length === 0) throw error;
-      outcome = "stopped";
+      record = null;
     }
-    if (outcome === "stopped" || rules.stops.length > 0) {
+    if (record === null || rules.stops.length > 0) {
       const [first] = rules.stops;
       return { id: target.id, status: first.status, stopped: first.stop, stops: rules.stops.length, elapsedMs: Date.now() - startedAt };
     }
-    const status = response?.status() ?? 0;
-    const documentLang = await page.evaluate(() => document.documentElement.lang).catch(() => null);
-    return {
-      id: target.id,
-      status,
-      stopped: null,
-      finalOriginAllowed: originOf(page.url()) === origin,
-      documentLang,
-      langMatches: typeof documentLang === "string" && documentLang.toLowerCase().startsWith(target.lang),
-      consoleErrors,
-      scoutCausedConsoleErrors,
-      sameOriginErrors,
-      webSocketsRefused: webSocketsRefused(),
-      aborted: tally.entries(),
-      failedOtherOrigins: [...failedOrigins.entries()].map(([origin, count]) => ({ origin, count })),
-      elapsedMs: Date.now() - startedAt,
-    };
+    return { ...record, elapsedMs: Date.now() - startedAt };
   } catch (error) {
     return { id: target.id, error: errorCode(error), elapsedMs: Date.now() - startedAt };
   } finally {
@@ -699,7 +715,7 @@ if (asJson || mode === "all") {
     console.log(`${entry.configuration}: sandbox ${entry.sandboxLaunch}${verdict}`);
     if (entry.launchError || entry.error) console.log(`  error: ${entry.launchError ?? entry.error}`);
     if (entry.stoppedDocumentRan?.length) console.log(`  stopped document ran: ${JSON.stringify(entry.stoppedDocumentRan)}`);
-    if (entry.framedChallenge !== undefined && entry.framedChallenge !== null) console.log(`  page visit with a challenge iframe: ${entry.framedChallenge}`);
+    if (entry.framedChallenge !== undefined && entry.framedChallenge !== null) console.log(`  page visits that must stop: ${JSON.stringify(entry.framedChallenge)}`);
     if (entry.allowedArrived) console.log(`  allowed requests arrived: ${JSON.stringify(entry.allowedArrived)}`);
     if (entry.reachedOtherOrigin?.length) console.log(`  reached other origin: ${JSON.stringify(entry.reachedOtherOrigin)}`);
     if (entry.forbiddenReachedAllowedOrigin?.length) console.log(`  forbidden on allowed origin: ${JSON.stringify(entry.forbiddenReachedAllowedOrigin)}`);
