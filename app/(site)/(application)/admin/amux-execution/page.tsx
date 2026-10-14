@@ -96,7 +96,7 @@ export default async function AdminAmuxExecutionPage({
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AmuxExecutionWorkspace canMoveCards={isOwner} initialTaskId={typeof query.taskId === "string" &&
+        <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxExecutionSupportingRecords>
           <AmuxCardListPanel rows={rows} total={total} limit={limit} />

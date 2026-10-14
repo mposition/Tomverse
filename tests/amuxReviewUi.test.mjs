@@ -63,8 +63,11 @@ test("disabled approval and stale step-up have explicit bilingual operator guida
   // Assignment section, which it left /admin/routing for, with the review
   // that was open reopened rather than the bare section.
   assert.match(panel, /const AMUX_ASSIGNMENT_PATH = "\/admin\/amux-execution\?tab=assignment"/);
-  assert.match(panel, /adminRecentAuthenticationHref\(\s*amuxAssignmentReviewReturnPath\(selectedEscalationId\)\)/);
-  assert.match(panel, /adminRecentAuthenticationHref\(\s*amuxAssignmentReviewReturnPath\(pendingDecision\.escalation_id\)\)/);
+  // A host may name its own screen (the card dialog does); Assignment falls
+  // back to the escalation it opened.
+  assert.match(panel, /const returnPath = reviewReturnPath \?\? amuxAssignmentReviewReturnPath\(selectedEscalationId\)/);
+  assert.match(panel, /adminRecentAuthenticationHref\(returnPath\)/);
+  assert.match(panel, /adminRecentAuthenticationHref\(\s*returnPath \?\? amuxAssignmentReviewReturnPath\(pendingDecision\.escalation_id\)\)/);
   assert.doesNotMatch(panel, /adminRecentAuthenticationHref\("\/admin\/amux-execution\?tab=assignment"\)/);
   assert.doesNotMatch(panel, /adminRecentAuthenticationHref\("\/admin\/routing"\)/);
   assert.match(panel, /reviewOutcomes = review \? visibleAmuxOwnerReviewOutcomes\(review\) : \[\]/);
