@@ -44,6 +44,10 @@ test("v48: a changed existing route, raised bounds or ceiling, or a wrong select
   assert.equal(amuxV22RecoveryAddedRouteConsented(registered, current, chore.routeId), false);
   assert.equal(amuxV22RecoveryAddedRouteConsented(registered, current, "not-listed"), false);
   assert.equal(amuxV22RecoveryAddedRouteConsented(null, current, contract.routeId), false);
+  // A registered route removed while another is added still refuses.
+  const third = route("v22-third-investigate", "claude-third");
+  assert.equal(amuxV22RecoveryAddedRouteConsented(receipt([chore, third]),
+    receipt([chore, contract]), contract.routeId), false);
   // Every registered route gone: nothing the owner approved is left to compare.
   assert.equal(amuxV22RecoveryAddedRouteConsented(registered, receipt([contract]),
     contract.routeId), false);
