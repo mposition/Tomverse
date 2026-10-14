@@ -175,6 +175,7 @@ test("v40 admits the API capability and gives its four-key launch scope a strict
 test("initial risk intent is exact, append-only, and cannot reserve or execute work", async () => {
   const sql = await source("prisma/migrations/20261013220000_amux_v22_read_only_retry_risk/migration.sql");
   assert.match(sql, /"taskId" = 'c48886b9-86f8-4631-8db8-c0b288a707af'/);
+  // Applied bytes keep the v39 transcription typo; migration 20261014100100 corrects it.
   assert.match(sql, /"priorAttemptId" = '97858395-3d66-42fa-9bfb-0e5a6cba9bd8'/);
   assert.match(sql, /"oldHeldMicroUsd" = 3400000[\s\S]*"additionalCapMicroUsd" = 3400000[\s\S]*"worstExposureMicroUsd" = 6800000/);
   assert.match(sql, /amux_v22_risk_acceptance_immutable BEFORE UPDATE OR DELETE/);
@@ -236,6 +237,7 @@ test("the exact FIRST Task rejects every unapproved second or third attempt", as
   assert.match(guard, /IF NEW\."attemptNumber" = 2 THEN/);
   assert.match(guard, /assignment\."recoveryApprovalId"/);
   assert.match(guard, /approval\."riskAcceptanceId" IS NULL/);
+  // Applied bytes keep the v39 transcription typo; migration 20261014100000 corrects it.
   assert.match(guard, /approval\."priorAttemptId" IS DISTINCT FROM[\s\S]*'97858395-3d66-42fa-9bfb-0e5a6cba9bd8'/);
   assert.match(guard, /approval\."historicalAttempts" IS DISTINCT FROM 1/);
   assert.match(guard, /approval\."nextAttemptNumber" IS DISTINCT FROM 2/);
@@ -291,4 +293,36 @@ test("proof freshness is a final-consent gate, not an expiry on an approved snap
   assert.doesNotMatch(authority, /evidenceFresh\(/);
   assert.match(recovery,
     /action: "approve_attempt"[\s\S]*!evidenceFresh\(launchProof\.recordedAt, now\)/);
+});
+
+test("v43 corrects only the prior attempt ID in the guard function and its four CHECKs", async () => {
+  const wrong = "97858395-3d66-42fa-9bfb-0e5a6cba9bd8";
+  const actual = "97858395-3d66-42fa-9bfb-0e5a6cba39d8";
+  const [previous, guardSql, checkSql, sidecarText, core, controller] = await Promise.all([
+    source("prisma/migrations/20261013290000_amux_v22_first_task_attempt_limit/migration.sql"),
+    source("prisma/migrations/20261014100000_amux_v22_prior_attempt_id_guard_correction/migration.sql"),
+    source("prisma/migrations/20261014100100_amux_v22_prior_attempt_id_check_correction/migration.sql"),
+    source("prisma/migrations/20261014100100_amux_v22_prior_attempt_id_check_correction/baseline-check.json"),
+    source("lib/amux/v22TaskRecoveryCore.ts"),
+    source("lib/amux/v22RecoveryController.mjs"),
+  ]);
+  assert.ok(core.includes(`"${actual}" as const`) && !core.includes(wrong));
+  assert.ok(controller.includes(`"${actual}"`));
+  // The function body is migration 290's with exactly the one literal swapped.
+  assert.match(guardSql, /^-- baseline-check: replace-function-if-body-sha256 "amux_v22_v39_attempt_guard" "4b506a4e8af5cd88fd1cf3df423f7b4ef3612c8d13c19e0e32146f2f864d643f"$/m);
+  assert.equal(functionBody(guardSql, "amux_v22_v39_attempt_guard"),
+    functionBody(previous, "amux_v22_v39_attempt_guard").replace(wrong, actual));
+  assert.ok(!guardSql.includes(wrong) && guardSql.split(actual).length - 1 === 2);
+  // Four CHECKs, each dropped and re-added with the corrected literal only.
+  const sidecar = JSON.parse(sidecarText);
+  assert.equal(sidecar.migrationSqlSha256, sha256(checkSql.replaceAll("\r\n", "\n")));
+  assert.deepEqual(sidecar.replacedChecks.map((check) => check.constraint).sort(), [
+    "AmuxV22ApiModelAccessEvidence_exact_first_check",
+    "AmuxV22ReadOnlyLaunchCheck_shape_check",
+    "AmuxV22RecoveryApproval_v39_shape_check",
+    "AmuxV22RiskAcceptance_exact_target_check",
+  ]);
+  assert.ok(!checkSql.replace(/^--.*$/gm, "").includes(wrong));
+  assert.equal(checkSql.replace(/^--.*$/gm, "").split(actual).length - 1, 4);
+  assert.doesNotMatch(checkSql, /\b(?:INSERT|UPDATE|DELETE)\b/);
 });

@@ -126,7 +126,7 @@ pub struct AmuxV22ApiModelAccessResult {
 const AMUX_V22_API_MODEL_ACCESS_TASK_ID: &str =
     "c48886b9-86f8-4631-8db8-c0b288a707af";
 const AMUX_V22_API_MODEL_ACCESS_PRIOR_ATTEMPT_ID: &str =
-    "97858395-3d66-42fa-9bfb-0e5a6cba9bd8";
+    "97858395-3d66-42fa-9bfb-0e5a6cba39d8";
 
 fn valid_hex_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())

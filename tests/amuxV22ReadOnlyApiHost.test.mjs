@@ -486,7 +486,7 @@ test("the real sidecar's model-access journal leaves a state a fresh launch proo
     const uid = process.getuid();
     const request = { version: 1, requestId: "00000000-0000-4000-8000-0000000000b3",
       taskId: "c48886b9-86f8-4631-8db8-c0b288a707af",
-      priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba9bd8", worker,
+      priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba39d8", worker,
       provider: "anthropic", selectedModelId: "claude-opus-5-5",
       launchProofId: "00000000-0000-4000-8000-0000000000b3",
       launchProofDigest: "1".repeat(64), apiExecutionFrameDigest: "2".repeat(64),

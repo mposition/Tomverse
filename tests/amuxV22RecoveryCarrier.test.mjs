@@ -79,20 +79,27 @@ test("inspector timer stays non-root, instance-fixed, inspect-only and off by de
   assert.doesNotMatch(installer, /tomverse-bridge-watchdog/);
 });
 
-test("v42 keeps the v38-v41 recovery history", async () => {
+test("v43 keeps the v38-v42 recovery history", async () => {
   const policy = await source("docs/policy/development-agent-orchestration.md");
   const v38 = policy.slice(policy.indexOf("## 버전 38"), policy.indexOf("## 버전 39"));
   const v39 = policy.slice(policy.indexOf("## 버전 39"), policy.indexOf("## 버전 40"));
   const v40 = policy.slice(policy.indexOf("## 버전 40"), policy.indexOf("## 버전 41"));
   assert.match(policy, /상태\(v40 이력\): \*\*v40 FIRST Task 전용 읽기 전용 API executor 대안 계약 승인/);
   assert.match(policy, /상태\(v41 이력\): \*\*v41 packed Git object의 고정 읽기 전용 provenance 조회 승인/);
-  assert.match(policy, /상태\(최신\): \*\*v42 FIRST Task 전용 API 인증·모델 접근 증거 승인/);
+  assert.match(policy, /상태\(v42 이력\): \*\*v42 FIRST Task 전용 API 인증·모델 접근 증거 승인/);
+  assert.match(policy, /상태\(최신\): \*\*v43 FIRST Task prior attempt ID 전사 오류 정정 승인/);
   assert.equal(policy.match(/^상태\(최신\):/gm)?.length, 1);
   assert.match(policy, /정책 버전: 38/);
   assert.match(policy, /정책 버전: 39/);
   assert.match(policy, /정책 버전: 40/);
   assert.match(policy, /정책 버전: 41/);
   assert.match(policy, /정책 버전: 42/);
+  assert.match(policy, /정책 버전: 43/);
+  // The corrected prior attempt is the real DB attempt; the typo survives only
+  // as history inside the v43 correction.
+  const v43 = policy.slice(policy.indexOf("## 버전 43"));
+  assert.equal(policy.split("97858395-3d66-42fa-9bfb-0e5a6cba9bd8").length - 1, 1);
+  assert.match(v43, /97858395-3d66-42fa-9bfb-0e5a6cba9bd8/);
   assert.match(v38, /TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET/);
   assert.match(v38, /secret 값의 생성·등록·host 배포는 이 승인에 포함되지 않는다/);
   assert.match(v38, /실제 script 실행, unit 설치,[\s\S]*timer enable\/start/);

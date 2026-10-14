@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "378f1cf2de75d5c75c1cbdbd02b99c6bb93c1e2ddb2d321e75be39c2d74acfaf",
+  "replacedChecks": [
+    {
+      "table": "AmuxV22ApiModelAccessEvidence",
+      "constraint": "AmuxV22ApiModelAccessEvidence_exact_first_check",
+      "previousDefinitionSha256": "be4576737da7a2d23cad48b6ecb596dc68746b1df8c41a1d10c5534f732aff8b"
+    },
+    {
+      "table": "AmuxV22ReadOnlyLaunchCheck",
+      "constraint": "AmuxV22ReadOnlyLaunchCheck_shape_check",
+      "previousDefinitionSha256": "c13062be930490873b88b6fab889b807a12438df107637f7d0c47fd4d930f339"
+    },
+    {
+      "table": "AmuxV22TaskRecoveryApproval",
+      "constraint": "AmuxV22RecoveryApproval_v39_shape_check",
+      "previousDefinitionSha256": "d4d957e9047466517c98e0b72cf459b79acbdc03cf7cfb503dac08343e823494"
+    },
+    {
+      "table": "AmuxV22TaskRecoveryRiskAcceptance",
+      "constraint": "AmuxV22RiskAcceptance_exact_target_check",
+      "previousDefinitionSha256": "006d39e6168b93718f72e7e6de9c4280e9e8c2f273f65478d3ddfc71def2a69e"
+    }
+  ]
+}

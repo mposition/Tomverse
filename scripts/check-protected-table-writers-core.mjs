@@ -849,6 +849,27 @@ export const RAW_SQL_ALLOWLIST = [
       "The additive v42 follow-up adds one read-only trigger function that closes an API recovery's claim and start 90 seconds after its launch proof. It performs no row DML; the scanner's two write verbs are the BEFORE/AFTER INSERT trigger clauses.",
   })),
   {
+    path: "prisma/migrations/20261014100000_amux_v22_prior_attempt_id_guard_correction/migration.sql",
+    table: "AmuxV22TaskRecoveryApproval",
+    tableMentions: 3,
+    writeVerbs: 1,
+    reason:
+      "The v43 correction re-creates the attempt-guard function from migration 290 with only the FIRST Task's prior attempt ID corrected. It performs no row DML; the scanner's one write verb is the function's FOR UPDATE lock clause.",
+  },
+  ...[
+    "AmuxV22ApiModelAccessEvidence",
+    "AmuxV22ReadOnlyLaunchCheck",
+    "AmuxV22TaskRecoveryApproval",
+    "AmuxV22TaskRecoveryRiskAcceptance",
+  ].map((table) => ({
+    path: "prisma/migrations/20261014100100_amux_v22_prior_attempt_id_check_correction/migration.sql",
+    table,
+    tableMentions: 1,
+    writeVerbs: 8,
+    reason:
+      "The v43 correction drops and re-adds four existing CHECKs with only the FIRST Task's prior attempt ID corrected. It performs no row DML; the scanner's write verbs are the ALTER TABLE DROP/ADD CONSTRAINT clauses.",
+  })),
+  {
     path: "lib/amux/cliUsageLedgerStore.ts",
     table: "AmuxCliUsageEvent",
     tableMentions: 2,
