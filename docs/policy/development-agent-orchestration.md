@@ -2496,7 +2496,7 @@ exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
 
 ## 버전 43 — 유도 카탈로그 shadow R2b 코드 래치
 
-승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-14`. 2026-10-14 작성, 작성자 Claude. 운영자는 2026-10-14에 R2b 코드 래치를 켜는 이 버전을 승인했다. 이 승인과 같은 변경에서 래치 상수를 true로 바꾼다.
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-14`. 2026-10-14 작성, 작성자 Claude. 운영자는 2026-10-14에 R2b 코드 래치를 켜는 이 버전을 승인했다. 이 승인과 같은 변경에서 래치 상수를 true로 바꾼다. 작성자와 다른 공급사의 독립 검토(codex·copilot)는 r-20261014-014447-2eb26f에서 둘 다 accept였다.
 
 이 버전은 버전 35 5항의 R2b를 켠다. R2b는 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`(`lib/amux/workerDerivedCatalogCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다. 이 기록이 버전 35 5항이 말하는 그 조각의 운영자 활성화 기록이다.
 
