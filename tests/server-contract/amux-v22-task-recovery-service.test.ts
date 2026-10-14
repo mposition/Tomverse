@@ -58,8 +58,12 @@ const world = { task: {} as Row, attempt: {} as Row, runtime: {} as Row,
   apiModelAccessEvidence: [] as Row[],
   ready: true, incident: false, cap: "3400000", costAdmission: true, cas: true,
   otherWork: false,
+  // null keeps the fixed test receipt. A Date makes the receipt digest depend on
+  // its calculation time, as production does (calculatedAtIso is digested).
+  costClock: null as Date | null,
   changedOld: 0, ledgerWrites: 0, attemptWrites: 0 };
 function reset() {
+  world.costClock = null;
   process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED = "true";
   process.env.TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED = "true";
   delete process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED;
@@ -255,13 +259,18 @@ function load() {
       assert.equal(expected, "blocked"); return { ready: world.ready }; },
   } });
   mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports: {
-    calculateCurrentApprovedAmuxV4TaskCost: async () => {
+    calculateCurrentApprovedAmuxV4TaskCost: async (_tx: unknown, _role: string,
+      _grade: string, options: { asOf?: Date } = {}) => {
       const catalog = approvedCatalog(world.routeWorkerName);
       const inspected = inspectV4TaskCostCatalog(catalog);
       assert.equal(inspected.ok, true);
+      // Each unpinned calculation happens a second later than the last one.
+      const at = world.costClock ? (options.asOf ?? (world.costClock =
+        new Date(world.costClock.getTime() + 1_000))).toISOString() : null;
       return { approvalId: "catalog-id", catalog,
         catalogDigest: inspected.catalogDigest, receipt: {
           ...receipt, catalogDigest: inspected.catalogDigest,
+          ...(at ? { calculatedAtIso: at, receiptDigest: amuxV22RecoveryDigest("test-receipt", { at }) } : {}),
           routes: [{ ...receipt.routes[0], workerName: world.routeWorkerName,
             perAttemptMicroUsd: world.cap }] } };
     },
@@ -360,8 +369,10 @@ async function submitSafeStop() {
   return service.reportAmuxV22LegacySafeStopEvidence(report);
 }
 
-async function prepareUnknownRiskSafeStop(protocolCapabilities = ["read_only_retry_v1"]) {
+async function prepareUnknownRiskSafeStop(protocolCapabilities = ["read_only_retry_v1"],
+  costClock: Date | null = null) {
   reset();
+  world.costClock = costClock;
   world.retryRuntime.protocolCapabilities = protocolCapabilities;
   if (protocolCapabilities.length === 1 &&
       protocolCapabilities[0] === "read_only_api_retry_v1") {
@@ -775,6 +786,34 @@ test("the exact API capability binds a server-priced v40 frame through final con
       AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, 8, approved.approvalId),
     /recovery_approval_unbound/);
   } finally { await prisma.$disconnect(); }
+});
+test("v47: a time-stamped receipt still binds the launch check through read and final consent", async () => {
+  const { service } = await prepareUnknownRiskSafeStop(["read_only_api_retry_v1"], new Date(now));
+  const check = world.launchChecks[0]!;
+  await submitReadOnlyLaunchProof();
+  const accessService = await loadApiAccess();
+  const accessRequest = (await accessService.pendingAmuxV22ApiModelAccess("codex-test")).requests[0]!;
+  await accessService.reportAmuxV22ApiModelAccess(amuxV22ApiModelAccessResult(accessRequest, {
+    access: "verified", canonicalModelId: accessRequest.selectedModelId, reason: null }));
+  const ready = await service.readAmuxV22TaskRecovery(owner,
+    AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, safeStopRequestId);
+  // Before v47 every later calculation produced another digest, so the read
+  // dropped the cost (the panel showed "changed") and approval refused.
+  assert.equal(ready.launchProof?.state, "current");
+  assert.equal(ready.cost?.costReceiptDigest, check.costReceiptDigest);
+  assert.equal(ready.eligibility.approveAttempt, true);
+  const approved = await service.approveAmuxV22TaskRecovery({ session: owner,
+    request: new Request("https://tomverse.test"), action: "approve_attempt",
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
+    requestId: approvalRequestId, inspectionId: ready.inspectionId!,
+    evidenceId: ready.evidenceId!, evidenceDigest: ready.evidenceDigest!,
+    costDigest: ready.cost!.costDigest,
+    riskAcceptanceId: ready.riskAcceptance!.id, riskAcceptanceDigest: ready.riskAcceptance!.digest,
+    launchProofId: ready.launchProof!.id, launchProofDigest: ready.launchProof!.digest,
+    acceptRetry: true });
+  assert.equal(approved.state, "approved");
+  assert.equal(world.approvals[0]!.costReceiptDigest, check.costReceiptDigest);
 });
 test("API access selects the fresh proof and refuses stale, drifted and alias-mismatched authority", async () => {
   const { service } = await prepareUnknownRiskSafeStop(["read_only_api_retry_v1"]);

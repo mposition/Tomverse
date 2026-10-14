@@ -11,7 +11,7 @@ import { AMUX_V22_RECOVERY_INTENT_DIR, bindAmuxV22StopIntent,
   executeAmuxV22ReadOnlyLaunchCheck, executeAmuxV22SafeStop,
   inspectAmuxV22ReadOnlyLauncher, inspectAmuxV22SafeStopCgroupEmpty, inspectAmuxV22SafeStopUnit,
   parseAmuxV22ReadOnlyLaunchCheckRequest, parseAmuxV22RecoveryProfiles, parseAmuxV22SafeStopRequest,
-  runAmuxV22RecoveryControllerOnce } from "../lib/amux/v22RecoveryController.mjs";
+  runAmuxV22RecoveryControllerOnce, runAmuxV22RecoveryControllerTick } from "../lib/amux/v22RecoveryController.mjs";
 import { amuxV22ReadOnlyLaunchScope } from "../lib/amux/v22ReadOnlyRetryProtocol.mjs";
 import { AMUX_V22_READ_ONLY_API_BROKER_POLICY_DIGEST,
   AMUX_V22_READ_ONLY_API_SETTINGS_DIGEST,
@@ -572,6 +572,97 @@ test("root controller uses only its dedicated route secret and accepts one stric
   assert.equal(result.state, "reported"); assert.equal(result.verified, true); assert.equal(calls, 2);
 });
 
+// Policy v47: the launch check created by this run's verified process-gone
+// proof is handled in the same run, so the 90 s approval window is not spent
+// waiting for the next timer tick.
+const tickConfig = { recoveryEnabled: "true", safeStopEnabled: "true",
+  internalUrl: "https://internal.test/", controllerSecret: "s".repeat(32) };
+const safeStopAnswer = (report, verified = true) => Response.json({ recorded: true,
+  evidenceId: report.evidenceId, verified, evidenceDigest: "f".repeat(64),
+  reason: verified ? null : "safe_stop_config_unverified", retryWrite: false });
+test("a verified safe stop processes the launch check it created in the same run", async () => {
+  const states = [unitState(true), unitState(false), unitState(false)];
+  let stopEvidence; const posted = [];
+  const queue = [() => [request], () => [{ ...launchRequest, sourceEvidenceId: stopEvidence,
+    sourceEvidenceDigest: "f".repeat(64) }]];
+  const result = await runAmuxV22RecoveryControllerTick(tickConfig, baseOptions({ uid: 0,
+    inspectUnit: async () => inspected(states.shift()), stopUnit: async () => {},
+    bindLaunchProof: async report => report,
+    inspectLauncher: async () => ({ current: true, profileConfigDigest,
+      launcherConfigDigest: actualLauncherConfigDigest }),
+    fetcher: async (_url, init) => {
+      if (init.method === "GET") return Response.json({ requests: queue.shift()?.() ?? [] });
+      const report = JSON.parse(String(init.body)); posted.push(report.requestKind ?? "safe_stop");
+      stopEvidence ??= report.evidenceId;
+      return report.requestKind === "read_only_launch_check" ? Response.json({ recorded: true,
+        launchProofId: report.launchProofId, observation: report.observation, retryWrite: false,
+        launchProofDigest: amuxV22RecoveryDigest("read-only-launch-proof", report) }) :
+        safeStopAnswer(report);
+    },
+  }));
+  assert.equal(result.state, "reported"); assert.equal(result.verified, true);
+  assert.equal(result.followUp.state, "reported");
+  assert.equal(result.followUp.launchCheckId, launchRequest.launchCheckId);
+  assert.deepEqual(posted, ["safe_stop", "read_only_launch_check"]);
+});
+test("the follow-up skips a launch check from other evidence and a run already past its budget", async () => {
+  for (const variant of ["other_evidence", "late"]) {
+    const states = [unitState(true), unitState(false), unitState(false)];
+    let gets = 0, posts = 0, tick = 0;
+    const result = await runAmuxV22RecoveryControllerTick(tickConfig, baseOptions({ uid: 0,
+      monotonic: () => (tick += 1) === 1 ? 0 : variant === "late" ? 14_001 : 1_000,
+      inspectUnit: async () => inspected(states.shift()), stopUnit: async () => {},
+      fetcher: async (_url, init) => {
+        if (init.method === "GET") { gets += 1;
+          return Response.json({ requests: gets === 1 ? [request] : [launchRequest] }); }
+        posts += 1; return safeStopAnswer(JSON.parse(String(init.body)));
+      },
+    }));
+    assert.equal(posts, 1);
+    assert.equal(gets, variant === "late" ? 1 : 2);
+    assert.deepEqual(result.followUp, variant === "late" ? undefined : { state: "idle" });
+  }
+});
+test("the follow-up read never processes a second safe stop or chains after an unverified proof", async () => {
+  for (const [verified, second] of [[true, [{ ...request,
+    inspectionId: "00000000-0000-4000-8000-000000000009" }]], [false, [launchRequest]]]) {
+    const states = [unitState(true), unitState(false), unitState(false)];
+    const queue = [[request], second]; let stops = 0, gets = 0, posts = 0;
+    const result = await runAmuxV22RecoveryControllerTick(tickConfig, baseOptions({ uid: 0,
+      inspectUnit: async () => inspected(states.shift()), stopUnit: async () => { stops += 1; },
+      fetcher: async (_url, init) => {
+        if (init.method === "GET") { gets += 1; return Response.json({ requests: queue.shift() ?? [] }); }
+        posts += 1; return safeStopAnswer(JSON.parse(String(init.body)), verified);
+      },
+    }));
+    assert.equal(stops, 1); assert.equal(posts, 1);
+    assert.equal(gets, verified ? 2 : 1);
+    assert.deepEqual(result.followUp, verified ? { state: "idle" } : undefined);
+  }
+});
+test("a unit SIGKILLed past its stop limit is process-gone when the kernel proof is empty", async () => {
+  const failed = { ...unitState(false), ActiveState: "failed", SubState: "failed",
+    InvocationID: activeCapture.invocationId };
+  const states = [unitState(true), failed, failed];
+  const report = await executeAmuxV22SafeStop(request, baseOptions({ uid: 0,
+    inspectUnit: async () => inspected(states.shift()), stopUnit: async () => {} }));
+  assert.equal(report.reason, "safe_stop_process_gone");
+  assert.equal(report.stopProof.processState, "gone");
+  const present = { ...failed, MainPID: "4321" };
+  const states2 = [unitState(true), present, present];
+  const refused = await executeAmuxV22SafeStop(request, baseOptions({ uid: 0,
+    inspectUnit: async () => inspected(states2.shift()), stopUnit: async () => {} }));
+  assert.notEqual(refused.reason, "safe_stop_process_gone");
+});
+test("the root stop waits past the fixed unit's 10 s stop limit", async () => {
+  let timeout;
+  const states = [unitState(true), unitState(false), unitState(false)];
+  await executeAmuxV22SafeStop(request, baseOptions({ uid: 0,
+    inspectUnit: async () => inspected(states.shift()),
+    run: async (_binary, _args, options) => { timeout = options.timeout; return { stdout: "" }; } }));
+  assert.ok(timeout > 10_000 && timeout <= 15_000);
+});
+
 test("root controller gives POST a fresh timeout signal after GET and kernel proof", async () => {
   const states = [unitState(true), unitState(false), unitState(false)];
   const controllers = []; const signals = [];
@@ -579,7 +670,7 @@ test("root controller gives POST a fresh timeout signal after GET and kernel pro
     internalUrl: "https://internal.test/", controllerSecret: "s".repeat(32) }, baseOptions({
     platform: "linux", uid: 0, inspectUnit: async () => inspected(states.shift()),
     timeoutSignal: milliseconds => {
-      assert.equal(milliseconds, 10_000);
+      assert.equal(milliseconds, 8_000);
       const controller = new AbortController(); controllers.push(controller); return controller.signal;
     },
     stopUnit: async () => { controllers[0].abort(); },

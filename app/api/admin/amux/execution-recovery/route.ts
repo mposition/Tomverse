@@ -69,6 +69,11 @@ export async function POST(request: Request) {
       body.action === "request_safe_stop" ?
         await requestAmuxV22LegacySafeStop({ ...input, ...body }) :
         await approveAmuxV22TaskRecovery({ ...input, ...body });
-    return Response.json(result, { headers: noStore });
+    // The panel renders the next step from this answer, so it carries the same
+    // gates the GET read does; without them the safe-stop control stayed off.
+    return Response.json({ ...result,
+      recoveryEnabled: amuxV22TaskRecoveryEnabled(process.env[AMUX_V22_TASK_RECOVERY_ENABLED_ENV]),
+      safeStopEnabled: amuxV22LegacySafeStopEnabled(
+        process.env[AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV]) }, { headers: noStore });
   } catch (error) { return failure(error); }
 }
