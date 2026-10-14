@@ -20,7 +20,7 @@
 상태(v39 이력): **v39 FIRST Task의 과거 결과 불명 위험 수락과 읽기 전용 1회 재시도 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v39 절의 exact Task·과거 attempt·최대 노출액·현재 읽기 전용 실행 결속을 승인했다. 실제 stop·재시도·유료 호출·활성화는 별도다.
 상태(v40 이력): **v40 FIRST Task 전용 읽기 전용 API executor 대안 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v40 절의 기본 OFF, 고정 `Read`·`Grep`·`Glob` broker, Anthropic 전용 API key, 서버 정본 가격·token·turn 프레임과 실제 usage·model receipt 계약을 승인했다. key 등록·설치·배포·실제 API 호출은 별도다.
 상태(v41 이력): **v41 packed Git object의 고정 읽기 전용 provenance 조회 승인.** 2026-10-13 운영자 `mposition`이 아래 v41 절의 보호된 고정 Git binary·고정 읽기 인자·sanitized environment·deadline·bounded output 예외를 승인했다. 모델 tool은 `Read`·`Grep`·`Glob` 셋으로 유지하며 설치·환경 설정·key 등록·배포·실제 API 호출은 별도다.
-상태(최신): **v43 FIRST Task prior attempt ID 전사 오류 정정 승인.** 2026-10-14 운영자 `mposition`이 아래 v43 절의 정정을 승인했다. v39~v42가 가리키는 과거 attempt는 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`이며, 기록에 잘못 옮겨 적은 값은 실재하지 않는 ID였다. 대상 Task, 한 번의 재시도, 비용 상한과 다른 계약은 바꾸지 않는다. 이전 v42 상태 줄은 이력이다.
+상태(최신): **v44 FIRST Task prior attempt ID 전사 오류 정정 승인.** 2026-10-14 운영자 `mposition`이 아래 v44 절의 정정을 승인했다. v39~v42가 가리키는 과거 attempt는 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`이며, 기록에 잘못 옮겨 적은 값은 실재하지 않는 ID였다. 대상 Task, 한 번의 재시도, 비용 상한과 다른 계약은 바꾸지 않는다. 이전 v42 상태 줄은 이력이다.
 상태(v42 이력): **v42 FIRST Task 전용 API 인증·모델 접근 증거 승인.** 2026-10-13 운영자 `mposition`이 아래 v42 절의 전용 API key 인증과 선택 model 조회, alias→canonical 결속, 공급사 잔액 불명 표시, exact 비용 상한 예외를 승인했다. 실제 provider 호출·배포·DB 적용은 별도다.
 상태(R2a 부속 이력): **2026-10-13에 원래 orchestration v36으로 승인된 worker 능력 R2a 코드 래치를 부속 계약 `worker-capability-r2a-latch-2026-10-13`로 보존한다.** `AMUX_WORKER_CAPABILITY_WRITES_LATCH`는 true이고 owner의 Admin 능력 기록만 열며, 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이는 번호가 겹치는 승인 이력의 식별자 구분일 뿐 새 정책 버전·권한·활성화를 승인하지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
@@ -62,7 +62,7 @@ approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 39
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 40
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 41
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 42
-approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 43
+approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 44
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -108,7 +108,7 @@ approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 43
 | 39 | 2026-10-13 mposition | FIRST Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 과거 attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8` 하나에 한해, 과거 결과·외부 효과를 `unknown`으로 보존한 채 owner가 US$3.40의 기존 보류와 최대 US$3.40의 새 읽기 전용 시도, 최악 US$6.80 노출을 명시적으로 수락할 수 있다. 수락은 stop 의도만 열고 실행·예약·Task 상태를 바꾸지 않는다. root process-gone 증명 뒤 현재 모델·공급사·route·brief·가격·비용·강제 읽기 전용 launch proof에 다시 결속한 별도 최종 승인이 추가 시도 하나만 연다. 다른 legacy Task, 세 번째 시도, 과거 성공·0비용 추정은 열지 않는다. |
 | 40 | 2026-10-13 mposition | v39의 CLI 런처가 remote managed hooks를 host proof로 배제할 수 없어 `current=false`로 닫히는 경우에만, FIRST Task와 같은 최종 승인 결속을 쓰는 전용 읽기 전용 Anthropic API executor 대안을 준비한다. 고정 repo broker의 `Read`·`Grep`·`Glob`만 모델 tool로 노출하고 shell·쓰기·Git push·MCP·plugin·임의 HTTP를 열지 않는다. 가격과 누적 token·turn 한도는 승인된 catalog snapshot에서 서버가 만든 versioned frame에 결속하고, API가 반환한 실제 model·usage가 완전하지 않으면 결과 불명으로 멈춘다. API key 등록·설치·배포·실제 호출은 별도이고, 이 버전은 실행 스위치를 켜지 않는다. |
 | 41 | 2026-10-13 mposition | v40 broker가 packed Git object에 든 승인 revision의 파일 provenance를 확인할 수 있도록, 보호된 고정 Git binary의 로컬 읽기 전용 object 조회만 좁게 허용한다. 모델 tool은 `Read`·`Grep`·`Glob` 셋 그대로이고 모델이 Git 명령·인자·환경을 고르지 않는다. shell·hooks·network·write·push·credential 전달은 계속 금지하며, binary digest·고정 인자 문법·최소 환경·deadline·출력 상한을 proof에 결속한다. 이 승인은 CODE/LOCAL 합성 검증만 열고 설치·배포·key 등록·실제 provider 호출·실제 Task 실행을 열지 않는다. |
-| 43 | 2026-10-14 mposition | v39~v42의 FIRST Task 과거 attempt ID를 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`로 정정한다. 기록에 옮겨 적은 `…0e5a6cba9bd8`은 실재하지 않는 ID여서 모든 guard가 거절했다. 적용된 migration은 그대로 두고 새 migration이 같은 정의의 ID만 바꾼다. 대상 Task, 재시도 1회, 비용 상한, 결과 불명 보존은 그대로다. |
+| 44 | 2026-10-14 mposition | v39~v42의 FIRST Task 과거 attempt ID를 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`로 정정한다. 기록에 옮겨 적은 `…0e5a6cba9bd8`은 실재하지 않는 ID여서 모든 guard가 거절했다. 적용된 migration은 그대로 두고 새 migration이 같은 정의의 ID만 바꾼다. 대상 Task, 재시도 1회, 비용 상한, 결과 불명 보존은 그대로다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -2526,11 +2526,12 @@ exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
   단계에서 열지 않는다. 후속 명시 운영 승인 없이 다른 Task나 일반 API worker로
   졸업시키지 않는다.
 
-## 버전 43 — FIRST Task prior attempt ID 정정
+## 버전 44 — FIRST Task prior attempt ID 정정
 
 승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-14`. 2026-10-14 작성, 작성자 Claude.
 운영자는 production 복구 진행 중 Admin에 표시된 실제 과거 attempt와 v39~v42 기록의 ID가
-다르다는 보고를 보고 이 정정을 승인했다.
+다르다는 보고를 보고 이 정정을 승인했다. 버전 번호 43은 같은 날 `develop`에 기록된 별도 결정(유도 카탈로그
+shadow R2b 코드 래치)이 쓴다.
 
 - v39~v42가 가리키는 FIRST Task `c48886b9-86f8-4631-8db8-c0b288a707af`의 과거 attempt는
   실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`다. 이전 기록은 이를
