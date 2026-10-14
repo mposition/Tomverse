@@ -68,6 +68,29 @@ test("each writer allocates once from its own prefix and writes the key it got",
   }
 });
 
+test("the v4 node commit writes the chosen Feature prefix and audits both values", () => {
+  // docs/policy/amux-intake.md v17 item 3. The DB test covers the choice
+  // itself; this pins the wiring between it, the audit and the node row.
+  const source = read("lib/amux/ideaUnitDecisionStore.ts");
+  const commit = source.slice(source.indexOf("export async function commitAmuxV4NodeCreation"),
+    source.indexOf("export async function commitAmuxV4UnitRejection"));
+  const chooseAt = commit.indexOf("await chooseAmuxFeatureDisplayPrefix(tx, plan.displayPrefix)");
+  const auditAt = commit.indexOf("await writeAdminAuditLog(");
+  const createAt = commit.indexOf("await tx.amuxPortfolioNode.create(");
+  assert.ok(chooseAt > 0 && chooseAt < auditAt && auditAt < createAt, "choose, then audit, then create");
+  assert.match(commit.slice(auditAt, createAt),
+    /proposedDisplayPrefix: plan\.displayPrefix,\s*displayPrefix \}/, "the audit records proposed and assigned");
+  assert.match(commit.slice(createAt, commit.indexOf("} });", createAt)), /\bdisplayPrefix,/,
+    "the node row gets the chosen prefix");
+
+  // docs/policy/amux-intake.md v17 item 4: the card's prefix is the one read
+  // from the Feature row the registration locks.
+  const register = source.slice(source.indexOf("export async function commitAmuxV4CardRegistration"),
+    source.indexOf("export async function commitAmuxV4NodeCreation"));
+  assert.match(register, /"contentDigest", "contentDigestKeyId", "displayPrefix"\n\s+FROM "AmuxPortfolioNode" WHERE "id" = \$\{target\.id\} FOR SHARE/);
+  assert.match(register, /if \(target\.level === "feature"\) featureDisplayPrefix = current\?\.displayPrefix \?\? null;/);
+});
+
 test("no writer spends a number on a skipped upsert", () => {
   // The issue trigger records a number before the row is written
   // (prisma/migrations/20261014100000_amux_card_display_key), so an

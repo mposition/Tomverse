@@ -91,8 +91,10 @@ test("a taken Feature prefix falls back to the first free numbered variant withi
   for (const proposal of [undefined, null, "github", "ENG", "A"]) {
     assert.deepEqual(amuxFeatureDisplayPrefixCandidates(proposal), [], String(proposal));
   }
-  // A reserved prefix never appears as a variant either (ENG2 is not ENG).
+  // A short proposal gets plain numbered variants; none of them can be a
+  // reserved prefix, which never ends in a digit.
   assert.deepEqual(amuxFeatureDisplayPrefixCandidates("EN").slice(0, 2), ["EN", "EN2"]);
+  assert.ok(AMUX_CARD_DISPLAY_RESERVED_PREFIXES.every((prefix) => !/[0-9]$/.test(prefix)));
 });
 
 test("the migration's CHECKs use the core's own patterns and reserved list", () => {
