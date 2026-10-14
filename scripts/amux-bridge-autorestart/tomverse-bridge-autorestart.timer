@@ -1,0 +1,10 @@
+[Unit]
+Description=Tomverse AMUX bridge auto-restart, every two minutes
+Documentation=https://github.com/mposition/Tomverse/blob/develop/docs/ops/amux/bridge-monitoring.md
+
+[Timer]
+OnCalendar=*:0/2
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+// Lets the bridge auto-restart account restart the AMUX bridge units, and
+// nothing else: no start, stop, enable or edit, no other unit, no other
+// account. docs/ops/amux/bridge-monitoring.md §5.
+polkit.addRule(function (action, subject) {
+  if (action.id !== "org.freedesktop.systemd1.manage-units") return;
+  if (subject.user !== "tomverse-bridge-autorestart") return;
+  var unit = action.lookup("unit");
+  var verb = action.lookup("verb");
+  if (verb !== "restart" || typeof unit !== "string") return;
+  if (
+    unit === "tomverse-bridge.service" ||
+    /^tomverse-amux-v22-bridge@[A-Za-z0-9_.-]+\.service$/.test(unit)
+  ) {
+    return polkit.Result.YES;
+  }
+});
