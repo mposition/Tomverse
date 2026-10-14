@@ -22,6 +22,8 @@ export type AmuxHostRecoveryRead = AmuxV22RecoveryRead & { recoveryEnabled?: boo
 
 export const AMUX_RECOVERY_INSPECTION_TIMEOUT_MS = 10_000;
 type Messages = AdminMessageShape<(typeof adminAmuxRecoveryInspectionMessages)["en"]>;
+// The Assignment section, for a caller that names no review to return to.
+const AMUX_RECOVERY_DEFAULT_RETURN_TO = "/admin/amux-execution?tab=assignment";
 export type AmuxRecoveryInspectionState =
   | { state: "idle" | "loading" | "changed" }
   | { state: "unavailable"; failure: AdminApiFailure | null }
@@ -385,8 +387,9 @@ const amount = (value: string | null, fallback: string) => {
 };
 
 export function AmuxRecoveryInspectionView({ m, state, onInspect, onReloadReview, busy = false,
-  date }: { m: Messages; state: AmuxRecoveryInspectionState; onInspect: () => void;
-  onReloadReview: () => void; date: (value: string) => string; busy?: boolean }) {
+  date, returnTo = AMUX_RECOVERY_DEFAULT_RETURN_TO }: { m: Messages; state: AmuxRecoveryInspectionState;
+  onInspect: () => void; onReloadReview: () => void; date: (value: string) => string; busy?: boolean;
+  returnTo?: string }) {
   const data = state.state === "ready" ? state.inspection : null;
   return <section className="mt-4 rounded-xl border border-zinc-700 bg-zinc-950/60 p-4"
     data-testid="admin-amux-recovery-inspection">
@@ -433,7 +436,7 @@ export function AmuxRecoveryInspectionView({ m, state, onInspect, onReloadReview
       </>}
     </div>
     {state.state === "unavailable" && state.failure && <AdminApiFailureNotice failure={state.failure}
-      returnTo="/admin/amux-execution?tab=assignment" />}
+      returnTo={returnTo} />}
   </section>;
 }
 
@@ -441,13 +444,13 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
   onRefresh, onApprove, onReloadReview, canRequest, safeStopConfirmed = false,
   onSafeStopConfirm = () => {}, onSafeStop = () => {}, riskConfirmed = false,
   onRiskConfirm = () => {}, onAcceptRisk = () => {}, busy = false, writesBlocked = false,
-  storageBlocked = false }: {
+  storageBlocked = false, returnTo = AMUX_RECOVERY_DEFAULT_RETURN_TO }: {
   m: Messages; state: AmuxHostRecoveryState; confirmed: boolean;
   onConfirm: (value: boolean) => void; onRequest: () => void; onRefresh: () => void;
   onApprove: () => void; onReloadReview: () => void; canRequest: boolean; busy?: boolean;
   safeStopConfirmed?: boolean; onSafeStopConfirm?: (value: boolean) => void; onSafeStop?: () => void;
   riskConfirmed?: boolean; onRiskConfirm?: (value: boolean) => void; onAcceptRisk?: () => void;
-  writesBlocked?: boolean; storageBlocked?: boolean;
+  writesBlocked?: boolean; storageBlocked?: boolean; returnTo?: string;
 }) {
   const data = state.state === "ready" ? state.data : null;
   const quote = data?.quote ?? null;
@@ -643,12 +646,15 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
     {data?.state === "approved" && <button type="button" className={`${button} mt-3`}
       onClick={onReloadReview} data-testid="admin-amux-recovery-history">{m.host.trace}</button>}
     {state.state === "unavailable" && state.failure && <AdminApiFailureNotice failure={state.failure}
-      returnTo="/admin/amux-execution?tab=assignment" />}
+      returnTo={returnTo} />}
   </section>;
 }
 
-export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloadReview }: {
+export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloadReview,
+  returnTo = AMUX_RECOVERY_DEFAULT_RETURN_TO }: {
   identity: AmuxRecoveryInspectionIdentity; taskStatus: string; onReloadReview: () => void;
+  /** The screen a refused step-up returns to: the review this panel sits in. */
+  returnTo?: string;
 }) {
   const m = useAdminMessages(adminAmuxRecoveryInspectionMessages);
   const { locale } = useAdminLocale();
@@ -827,7 +833,7 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     dateStyle: "medium", timeStyle: "medium" }).format(new Date(value));
   const busy = state.state === "loading" || host.state === "loading";
   return <><AmuxRecoveryInspectionView m={m} state={state} busy={busy} onInspect={() => void inspect()}
-    onReloadReview={onReloadReview} date={date} />
+    onReloadReview={onReloadReview} date={date} returnTo={returnTo} />
     <AmuxHostRecoveryView m={m} state={host} busy={busy} confirmed={confirmed} onConfirm={setConfirmed}
       riskConfirmed={riskConfirmed} onRiskConfirm={setRiskConfirmed}
       safeStopConfirmed={safeStopConfirmed} onSafeStopConfirm={setSafeStopConfirmed}
@@ -836,5 +842,5 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
       onAcceptRisk={() => { if (riskConfirmed) void recover("accept_unknown_prior_effects"); }}
       onSafeStop={() => { if (safeStopConfirmed) void recover("request_safe_stop"); }}
       onApprove={() => { if (confirmed) void recover("approve_attempt"); }}
-      onReloadReview={onReloadReview} canRequest={identity.attemptId !== null} /></>;
+      onReloadReview={onReloadReview} canRequest={identity.attemptId !== null} returnTo={returnTo} /></>;
 }

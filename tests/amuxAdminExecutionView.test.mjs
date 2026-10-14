@@ -65,3 +65,46 @@ test("execution UI reads the same DB through bounded owner-only read routes", as
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)/);
   assert.doesNotMatch(ui, /method: "(POST|PUT|PATCH|DELETE)"/);
 });
+
+test("a card waiting on the owner opens on the same owner review Assignment hosts", async () => {
+  const ui = await readFile(new URL("../components/admin/AmuxExecutionWorkspace.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/(site)/(application)/admin/amux-execution/page.tsx", import.meta.url), "utf8");
+  // The review is the Assignment component, not a second implementation.
+  assert.match(ui, /import \{ AmuxCardOwnerReview \} from "\.\/AdminAmuxRoutingPanel"/);
+  assert.match(ui, /const ownerEscalation = canReviewCards \? selected\?\.escalations\[0\] \?\? null : null/);
+  assert.match(ui, /if \(canReviewCards && result\.escalations\.length > 0\) setDetailTab\("ownerReview"\)/);
+  // Kept mounted behind `hidden`, so a tab switch cannot drop a decision.
+  assert.match(ui, /hidden=\{detailTab !== "ownerReview"\}/);
+  // A decision that lands after the owner left the card reloads the board,
+  // never the card it left.
+  assert.match(ui, /searchParams\.get\("taskId"\) === selected\.id\)\s*void openCard\(selected\.id, false\)/);
+  // Only the owner opens Cards, and only the owner is offered the review.
+  assert.match(page, /<AmuxExecutionWorkspace canMoveCards=\{isOwner\} canReviewCards=\{isOwner\}/);
+});
+
+test("a board card says why it waits on the owner, from its newest open escalation", async () => {
+  const service = await readFile(new URL("../lib/amux/adminExecutionRead.ts", import.meta.url), "utf8");
+  const ui = await readFile(new URL("../components/admin/AmuxExecutionWorkspace.tsx", import.meta.url), "utf8");
+  // One bounded read per page of cards, one row per card, the same reason
+  // normaliser the card detail uses.
+  assert.match(service, /prisma\.amuxHumanEscalation\.findMany\(\{\s*where: \{ taskId: \{ in: ids \}, status: \{ in: \["open", "acknowledged"\] \} \}/);
+  assert.match(service, /distinct: \["taskId"\]/);
+  assert.match(service, /storedAmuxEscalationReasonCode\(row\.reason, row\.specialty\)/);
+  assert.match(service, /attentionReason: attentionReason\.get\(row\.id\) \?\? null/);
+  // The call to act is offered only where the review can be opened.
+  assert.match(ui, /\{canReviewCards && card\.attentionReason && <button type="button" className=\{styles\.reviewButton\}/);
+  assert.match(ui, /m\.attentionReason\[card\.attentionReason\] \?\? m\.attentionReasonFallback/);
+});
+
+test("every stored escalation reason has a short board label in both locales", async () => {
+  const source = await readFile(new URL("../lib/amux/escalation.ts", import.meta.url), "utf8");
+  const block = source.match(/const ESCALATION_REASON_CODES = new Set\(\[([\s\S]*?)\]\)/)?.[1] ?? "";
+  const codes = [...block.matchAll(/"([a-z_]+)"/g)].map((match) => match[1]);
+  assert.ok(codes.length >= 10, "the reason code list was not found");
+  const { adminAmuxExecutionMessages } = await import("../lib/adminMessages/amuxExecution.ts");
+  for (const locale of ["en", "ko"]) {
+    const labels = adminAmuxExecutionMessages[locale].attentionReason;
+    assert.deepEqual(Object.keys(labels).sort(), [...codes].sort(), locale);
+    for (const code of codes) assert.ok(labels[code].length <= 24, `${locale} ${code} is too long for a chip`);
+  }
+});

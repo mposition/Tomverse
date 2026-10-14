@@ -73,7 +73,7 @@ export async function readAmuxCardTitle(row: Pick<CardRow, "id" | "title" |
 async function cardSummaries(rows: CardRow[]) {
   const ids = rows.map((row) => row.id);
   const storyIds = rows.filter((row) => row.cardType === "story").map((row) => row.id);
-  const [titles, scores, dependencies, lanes, progress] = await Promise.all([
+  const [titles, scores, dependencies, lanes, progress, openEscalations] = await Promise.all([
     Promise.all(rows.map(readAmuxCardTitle)),
     ids.length ? prisma.$queryRaw<Array<{ taskId: string;
       taskRevision: number; scoreTotal: number; activeStaleAt: Date }>>`
@@ -98,7 +98,15 @@ async function cardSummaries(rows: CardRow[]) {
         archivedAt: null },
       _count: { _all: true },
     }) : [],
+    // Why each card waits on a person: its newest open escalation, one per card.
+    ids.length ? prisma.amuxHumanEscalation.findMany({
+      where: { taskId: { in: ids }, status: { in: ["open", "acknowledged"] } },
+      orderBy: [{ taskId: "asc" }, { createdAt: "desc" }], distinct: ["taskId"],
+      select: { taskId: true, reason: true, specialty: true },
+    }) : [],
   ]);
+  const attentionReason = new Map(openEscalations.map((row) =>
+    [row.taskId, storedAmuxEscalationReasonCode(row.reason, row.specialty)]));
   const latestScore = new Map(scores.map((score) => [score.taskId, score]));
   const dependencyCount = new Map(dependencies.map((row) =>
     [row.taskId, row._count._all]));
@@ -135,6 +143,7 @@ async function cardSummaries(rows: CardRow[]) {
     dependencyCount: dependencyCount.get(row.id) ?? 0,
     progress: storyProgress.get(row.id) ?? null,
     briefPresent: Boolean(row.executionBriefDigest || row.v4BriefDigest),
+    attentionReason: attentionReason.get(row.id) ?? null,
     updatedAt: row.updatedAt.toISOString(),
   }));
 }
