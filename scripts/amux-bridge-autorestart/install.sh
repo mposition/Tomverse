@@ -86,6 +86,10 @@ setpriv --reuid="$restart_user" --regid="$restart_user" --clear-groups sleep 120
 subject=$!
 stop_subject() { kill "$subject" 2>/dev/null || true; }
 trap 'stop_subject; timer_off; echo "install.sh: failed; the timer is off" >&2' ERR
+# An interrupted install (Ctrl+C, SIGTERM) also stops it, and leaves the
+# timer off like any other failure.
+trap 'stop_subject' EXIT
+trap 'timer_off; exit 130' INT TERM
 sleep 1
 test "$(stat -c %U "/proc/$subject")" = "$restart_user" ||
   fail "could not start a process as $restart_user to ask polkit about"

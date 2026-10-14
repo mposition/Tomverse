@@ -435,6 +435,7 @@ test("the installer proves the rule's reach before it enables the timer", () => 
   assert.doesNotMatch(install, /runuser -u "\$restart_user" -- sh -c/);
   assert.match(install, /setpriv --reuid="\$restart_user" --regid="\$restart_user" --clear-groups sleep/);
   assert.match(install, /--process "\$subject"/);
+  assert.match(install, /trap 'stop_subject' EXIT\ntrap 'timer_off; exit 130' INT TERM/);
   assert.match(install, /1 \| 2\) ;;/);
   assert.match(install, /\*\) fail "polkit gave no answer/);
   assert.match(install, /fail\(\) \{\n {2}declare -F stop_subject >\/dev\/null && stop_subject/);
