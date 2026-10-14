@@ -880,7 +880,7 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions,
     writeVerbs: 1,
     reason:
-      "The v45 migration re-creates the recovery request guard so a legacy safe stop binds the profile's live runtime. It performs no row DML and never writes AdminAuditLog; the scanner's one write verb is the guard's existing FOR UPDATE lock.",
+      "The v46 migration re-creates the recovery request guard so a legacy safe stop binds the profile's live runtime. It performs no row DML and never writes AdminAuditLog; the scanner's one write verb is the guard's existing FOR UPDATE lock.",
   })),
   {
     path: "lib/amux/cliUsageLedgerStore.ts",
@@ -912,7 +912,7 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 7,
     writeVerbs: 4,
     reason:
-      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable inspection request. It adds no writer; the raw-SQL verbs remain the four reviewed SELECT FOR UPDATE locks (v45 adds the live-profile runtime lock) and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
+      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable inspection request. It adds no writer; the raw-SQL verbs remain the four reviewed SELECT FOR UPDATE locks (v46 adds the live-profile runtime lock) and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
   },
   {
     path: "lib/amux/v22TaskRecoveryService.ts",
@@ -920,7 +920,7 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 5,
     writeVerbs: 4,
     reason:
-      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable evidence receipt. It adds no writer; the raw-SQL verbs remain the four reviewed SELECT FOR UPDATE locks (v45 adds the live-profile runtime lock) and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
+      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable evidence receipt. It adds no writer; the raw-SQL verbs remain the four reviewed SELECT FOR UPDATE locks (v46 adds the live-profile runtime lock) and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
   },
   ...[
     ["AmuxV22TaskRecoveryApproval", 3],

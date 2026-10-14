@@ -244,7 +244,7 @@ run(
     "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
     "tests/integration/amuxV4DerivationService.db.test.mjs",
     "tests/integration/amuxV4PortfolioScore.db.test.mjs",
-    // Policy v45: a legacy safe stop binds the live runtime after re-registration.
+    // Policy v46: a legacy safe stop binds the live runtime after re-registration.
     "tests/integration/amuxV22LegacySafeStopLiveRuntime.db.test.mjs",
     "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
     "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
