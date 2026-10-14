@@ -11,7 +11,9 @@ import { amuxWorkerCapabilityImport } from "../lib/amux/workerCapabilityCore.ts"
 import {
   AMUX_ENGINEERING_RUNNER_CATALOG_ENTRY,
   AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH,
+  amuxCardRoleLevel,
   amuxDerivedCatalogEntryIsConstant,
+  amuxWorkerCeilingAllowsCard,
   amuxWorkerDerivedCatalogShadowOpen,
   compareAmuxDerivedCatalogWithEnv,
   deriveAmuxWorkerCatalog,
@@ -208,4 +210,48 @@ test("the Admin read reads nothing while the latch is off, and hands the v22 var
   assert.ok(off < source.indexOf("getConfiguredAmuxWorkerCatalog()"));
   assert.match(source, /amuxWorkerCapabilityV22Catalog\(process\.env\[AMUX_V22_WORKER_CATALOG_ENV\],/);
   assert.doesNotMatch(source, /\.trim\(\)/);
+});
+
+test("version 45: a card's level comes from its tag, and review asks the highest", () => {
+  // Version 16's role judgement is not built, so requiredRoutingRole stands in.
+  assert.equal(amuxCardRoleLevel(null), null);
+  assert.equal(amuxCardRoleLevel("chore"), "chore");
+  assert.equal(amuxCardRoleLevel(" Implementation "), "implementation");
+  assert.equal(amuxCardRoleLevel("contract"), "contract");
+  assert.equal(amuxCardRoleLevel("review"), "contract");
+  for (const other of ["tests", "bugfix", "reasoning", "engineering", "anything"]) {
+    assert.equal(amuxCardRoleLevel(other), "chore", other);
+  }
+});
+
+test("version 45: at selection a ceiling below the card's level is not a candidate, whatever the tags", () => {
+  // The review finding (r-20261014-044758-95b679): a verified worker with a
+  // chore ceiling keeps its review tag, and must not review a contract card.
+  assert.equal(amuxWorkerCeilingAllowsCard("claude-chore", "chore", "review"), false);
+  assert.equal(amuxWorkerCeilingAllowsCard("claude-review", "contract", "review"), true);
+  assert.equal(amuxWorkerCeilingAllowsCard("codex-impl", "implementation", "contract"), false);
+  assert.equal(amuxWorkerCeilingAllowsCard("codex-impl", "implementation", "implementation"), true);
+  assert.equal(amuxWorkerCeilingAllowsCard("codex-chore", "chore", "tests"), true);
+  // No tag asks nothing; an unknown ceiling is not a candidate for a card that asks.
+  assert.equal(amuxWorkerCeilingAllowsCard("codex-chore", "chore", null), true);
+  assert.equal(amuxWorkerCeilingAllowsCard("claude-impl", undefined, "chore"), false);
+  // The code constant is governed by its own policy.
+  assert.equal(amuxWorkerCeilingAllowsCard("engineering-runner", undefined, "engineering"), true);
+});
+
+test("version 45: the selection snapshot applies the ceiling to both readiness and every candidate", () => {
+  const routing = readFileSync(new URL("../lib/amux/routing.ts", import.meta.url), "utf8");
+  assert.match(routing, /const \{ workers, ceilings \} = await readAmuxAssignmentCatalogs\(tx\);/);
+  assert.match(routing, /ceilings !== null &&\s+!amuxWorkerCeilingAllowsCard\(workerName, ceilings\.get\(workerName\), row\.requiredRoutingRole\)/);
+  assert.equal(routing.split("!aboveCeiling(worker.worker_name)").length - 1, 2);
+});
+
+test("version 45 records the selection rule the code applies", () => {
+  const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8")
+    .split(String.fromCharCode(13)).join("");
+  const heading = "## 버전 45 — R2c 선택 단계의 역할 상한 검사";
+  const record = "승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-14`";
+  assert.ok(policy.includes([heading, "", record].join(String.fromCharCode(10))));
+  assert.ok(policy.includes("approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 45"));
+  assert.ok(policy.includes("| `review` | `contract` (검토 대상 카드의 수준을 모르므로 가장 높게) |"));
 });

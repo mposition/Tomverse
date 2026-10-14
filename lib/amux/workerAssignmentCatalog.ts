@@ -12,7 +12,7 @@ import {
   deriveAmuxWorkerCatalog,
   type AmuxDerivedCatalog,
 } from "@/lib/amux/workerDerivedCatalogCore";
-import type { AmuxWorkerRegistration } from "@/lib/amux/workerRegistryCore";
+import type { AmuxWorkerRegistration, AmuxWorkerRoleCeiling } from "@/lib/amux/workerRegistryCore";
 import {
   amuxWorkerLatchNewestJsonSql,
   amuxWorkerRegistryFromNewestJsonOrThrow,
@@ -42,6 +42,12 @@ export type AmuxAssignmentCatalogs = {
   source: "variables" | "derived";
   workers: AmuxConfiguredWorker[] | null;
   v22: AmuxConfiguredV22Worker[] | null;
+  /**
+   * Each registered worker's role ceiling, for the selection-time check
+   * (orchestration policy version 45). Null while the catalog is the
+   * variables, which carry no ceiling, and when the catalog is absent.
+   */
+  ceilings: ReadonlyMap<string, AmuxWorkerRoleCeiling> | null;
 };
 
 /**
@@ -158,9 +164,16 @@ export async function readAmuxAssignmentCatalogs(
       source: "variables",
       workers: getConfiguredAmuxWorkerCatalog(),
       v22: getConfiguredAmuxV22WorkerCatalog(),
+      ceilings: null,
     };
   }
-  const derived = await readAmuxDerivedWorkerCatalog(client);
-  if (derived === null) return { source: "derived", workers: null, v22: null };
-  return { source: "derived", ...amuxDerivedCatalogAsConfigured(derived) };
+  const { registrations, derived } = await readAmuxRegistryAndDerivedCatalog(client);
+  if (derived === null || registrations === null) {
+    return { source: "derived", workers: null, v22: null, ceilings: null };
+  }
+  return {
+    source: "derived",
+    ...amuxDerivedCatalogAsConfigured(derived),
+    ceilings: new Map(registrations.map((registration) => [registration.workerName, registration.roleCeiling])),
+  };
 }
