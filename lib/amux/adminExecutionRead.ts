@@ -615,3 +615,6 @@ export async function readAmuxExecutionFeedback(parent: {
   return { parent, complete: true, reason: null,
     rollup: rollupAmuxTaskFeedback(feedback) };
 }
+
+/** The digest-verified title reader the card number backfill shares (docs/policy/amux-card-display-key.md §5). */
+export { nodeSelect as amuxNodeTitleSelect, nodeTitles as readAmuxNodeTitles };
