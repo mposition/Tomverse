@@ -412,11 +412,11 @@ test("the service runs as its own account with journal read access and no creden
 test("the installer proves the rule's reach before it enables the timer", () => {
   const enable = install.indexOf("systemctl enable --now tomverse-bridge-autorestart.timer");
   for (const check of [
-    "allowed tomverse-bridge.service restart ||",
-    "allowed tomverse-amux-v22-bridge@claude-impl.service restart ||",
-    "if allowed tomverse-bridge.service stop; then",
-    "if allowed ssh.service restart; then",
-    "if allowed tomverse-amux-v22-sidecar@claude-impl.service restart; then",
+    "granted tomverse-bridge.service restart",
+    "granted tomverse-amux-v22-bridge@claude-impl.service restart",
+    "refused tomverse-bridge.service stop",
+    "refused ssh.service restart",
+    "refused tomverse-amux-v22-sidecar@claude-impl.service restart",
   ]) {
     const at = install.indexOf(check);
     assert.ok(at > 0 && at < enable, check);
@@ -427,8 +427,18 @@ test("the installer proves the rule's reach before it enables the timer", () => 
   // and fail() turns it off from then on.
   const changing = install.indexOf("\nchanging=yes\ntimer_off\n");
   assert.ok(changing > 0 && changing < install.indexOf("useradd"), "timer off before any change");
-  assert.match(install, /fail\(\) \{\n {2}\[\[ "\$changing" == yes \]\] && timer_off/);
+  assert.match(install, /stop_subject\n {2}\[\[ "\$changing" == yes \]\] && timer_off/);
   assert.match(install, /\/etc\/polkit-1\/rules\.d\/50-tomverse-bridge-autorestart\.rules/);
+  // 2026-10-14 first install: polkitd refuses details from an unprivileged
+  // caller, so the question is put by root about a process running as the
+  // account, and only pkcheck's "not authorized" answers count as a refusal.
+  assert.doesNotMatch(install, /runuser -u "\$restart_user" -- sh -c/);
+  assert.match(install, /setpriv --reuid="\$restart_user" --regid="\$restart_user" --clear-groups sleep/);
+  assert.match(install, /--process "\$subject"/);
+  assert.match(install, /trap 'stop_subject' EXIT\ntrap 'timer_off; exit 130' INT TERM/);
+  assert.match(install, /1 \| 2\) ;;/);
+  assert.match(install, /\*\) fail "polkit gave no answer/);
+  assert.match(install, /fail\(\) \{\n {2}declare -F stop_subject >\/dev\/null && stop_subject/);
 });
 
 test("the installer is valid bash", { skip: noBash }, () => {
