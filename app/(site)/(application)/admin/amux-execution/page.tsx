@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth/next";
 import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxExecutionSupportingRecords } from "@/components/admin/AmuxExecutionSupportingRecords";
+import { AmuxCardDisplayKeyBackfillPanel } from "@/components/admin/AmuxCardDisplayKeyBackfillPanel";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
@@ -102,6 +103,7 @@ export default async function AdminAmuxExecutionPage({
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxExecutionSupportingRecords>
           <AmuxCardListPanel rows={rows} total={total} limit={limit} />
+          <AmuxCardDisplayKeyBackfillPanel />
           <AmuxCliUsagePanel view={usage} />
         </AmuxExecutionSupportingRecords>
       </div>

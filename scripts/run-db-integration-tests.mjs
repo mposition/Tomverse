@@ -337,6 +337,10 @@ run(
     // Feature's prefix, and a per-prefix counter that only advances by one
     // and gives back its increment when the caller rolls back.
     "tests/integration/amux-card-display-key.db.test.ts",
+    // The card number backfill (docs/policy/amux-card-display-key.md §5):
+    // the previewed plan is written exactly, under the owner's audit, with
+    // updatedAt untouched; a stale digest writes nothing.
+    "tests/integration/amux-card-display-key-backfill.db.test.ts",
     // AMUX assignment catalog (orchestration policy version 35, section 3):
     // the registry, stop latches and capabilities read in one statement and
     // the catalog derived from them.
