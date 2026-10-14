@@ -94,6 +94,13 @@ test("v42 keeps the v38-v41 recovery history", async () => {
   assert.match(policy, /정책 버전: 40/);
   assert.match(policy, /정책 버전: 41/);
   assert.match(policy, /정책 버전: 42/);
+  assert.match(policy, /정책 버전: 44/);
+  assert.match(policy, /상태\((최신|v44 이력)\): \*\*v44 FIRST Task prior attempt ID 전사 오류 정정 승인/);
+  // The corrected prior attempt is the real DB attempt; the typo survives only
+  // as history inside the v44 correction.
+  const v44 = policy.slice(policy.indexOf("## 버전 44"));
+  assert.equal(policy.split("97858395-3d66-42fa-9bfb-0e5a6cba9bd8").length - 1, 1);
+  assert.match(v44, /97858395-3d66-42fa-9bfb-0e5a6cba9bd8/);
   assert.match(v38, /TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET/);
   assert.match(v38, /secret 값의 생성·등록·host 배포는 이 승인에 포함되지 않는다/);
   assert.match(v38, /실제 script 실행, unit 설치,[\s\S]*timer enable\/start/);

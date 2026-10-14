@@ -39,7 +39,7 @@ const actualLauncherConfigDigest = "9".repeat(64);
 const launchRequest = { requestKind: "read_only_launch_check",
   launchCheckId: "00000000-0000-4000-8000-000000000011", requestDigest: "1".repeat(64),
   taskId: "c48886b9-86f8-4631-8db8-c0b288a707af", taskRevision: 5,
-  priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba9bd8",
+  priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba39d8",
   workerName: "claude-chore", workerInstanceId: "00000000-0000-4000-8000-000000000012",
   workerGeneration: 8, targetHost: "amux-ubuntu",
   sourceEvidenceId: "00000000-0000-4000-8000-000000000013",

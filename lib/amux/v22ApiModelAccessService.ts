@@ -25,7 +25,7 @@ export const amuxV22ApiModelAccessResultSchema = z.object({
   version: z.literal(1), kind: z.literal("api_model_access"),
   requestId: z.string().uuid(),
   taskId: z.literal("c48886b9-86f8-4631-8db8-c0b288a707af"),
-  priorAttemptId: z.literal("97858395-3d66-42fa-9bfb-0e5a6cba9bd8"),
+  priorAttemptId: z.literal("97858395-3d66-42fa-9bfb-0e5a6cba39d8"),
   worker: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
   provider: z.literal("anthropic"), providerHost: z.literal("api.anthropic.com"),
   selectedModelId: z.string().regex(/^claude-[A-Za-z0-9._-]{1,120}$/),
@@ -78,7 +78,7 @@ export function pendingAmuxV22ApiModelAccess(workerName: string) {
       recordedAt: { gte: new Date(now.getTime() - 90_000), lte: now },
       launchCheck: { workerName,
         taskId: "c48886b9-86f8-4631-8db8-c0b288a707af",
-        priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba9bd8" },
+        priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba39d8" },
     }, include: { launchCheck: { include: { task: { select: { status: true,
       revision: true, owner: true, v22AssignmentId: true } } } } },
     orderBy: [{ recordedAt: "desc" }, { id: "desc" }], take: 1 });

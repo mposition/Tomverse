@@ -21,7 +21,8 @@
 상태(v40 이력): **v40 FIRST Task 전용 읽기 전용 API executor 대안 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v40 절의 기본 OFF, 고정 `Read`·`Grep`·`Glob` broker, Anthropic 전용 API key, 서버 정본 가격·token·turn 프레임과 실제 usage·model receipt 계약을 승인했다. key 등록·설치·배포·실제 API 호출은 별도다.
 상태(v41 이력): **v41 packed Git object의 고정 읽기 전용 provenance 조회 승인.** 2026-10-13 운영자 `mposition`이 아래 v41 절의 보호된 고정 Git binary·고정 읽기 인자·sanitized environment·deadline·bounded output 예외를 승인했다. 모델 tool은 `Read`·`Grep`·`Glob` 셋으로 유지하며 설치·환경 설정·key 등록·배포·실제 API 호출은 별도다.
 상태(v42 이력): **v42 FIRST Task 전용 API 인증·모델 접근 증거 승인.** 2026-10-13 운영자 `mposition`이 아래 v42 절의 전용 API key 인증과 선택 model 조회, alias→canonical 결속, 공급사 잔액 불명 표시, exact 비용 상한 예외를 승인했다. 실제 provider 호출·배포·DB 적용은 별도다.
-상태(최신): **v43 유도 카탈로그 shadow R2b 코드 래치 승인.** 2026-10-14 운영자 `mposition`이 아래 v43 절을 승인했다. `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`는 true가 되어 Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 보인다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이전 v42 상태 줄은 이력이다.
+상태(최신): **v44 FIRST Task prior attempt ID 전사 오류 정정 승인.** 2026-10-14 운영자 `mposition`이 아래 v44 절의 정정을 승인했다. v39~v42가 가리키는 과거 attempt는 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`이며, 기록에 잘못 옮겨 적은 값은 실재하지 않는 ID였다. 대상 Task, 한 번의 재시도, 비용 상한과 다른 계약은 바꾸지 않는다. 이전 v43 상태 줄은 이력이다.
+상태(v43 이력): **v43 유도 카탈로그 shadow R2b 코드 래치 승인.** 2026-10-14 운영자 `mposition`이 아래 v43 절을 승인했다. `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`는 true가 되어 Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 보인다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이전 v42 상태 줄은 이력이다.
 상태(R2a 부속 이력): **2026-10-13에 원래 orchestration v36으로 승인된 worker 능력 R2a 코드 래치를 부속 계약 `worker-capability-r2a-latch-2026-10-13`로 보존한다.** `AMUX_WORKER_CAPABILITY_WRITES_LATCH`는 true이고 owner의 Admin 능력 기록만 열며, 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이는 번호가 겹치는 승인 이력의 식별자 구분일 뿐 새 정책 버전·권한·활성화를 승인하지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
@@ -63,6 +64,7 @@ approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 40
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 41
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 42
 approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 43
+approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 44
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -105,10 +107,11 @@ approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 43
 | 36 | 2026-10-13 mposition | owner가 exact Task·revision·직전 attempt의 Ubuntu 중단 증명을 요청하고, 고정된 비실행 점검기의 증거가 중단을 입증한 경우에만 Admin에서 추가 1회와 해당 1회의 승인된 catalog 최대 비용을 별도 승인한다. 첫 대상의 실제 값은 기존 US$3.40 예약을 불변으로 점유하고 새 1회 최대 US$3.40, 최악 노출 US$6.80이다. 일반 코드는 이 예시 숫자를 하드코딩하지 않고 각 Task의 불변 기존 예약과 exact 승인 catalog에서 서버가 계산한다. 이 승인은 설계·코드·합성 검증만 열고 production 활성화·실행·migration 적용·병합·배포를 열지 않는다. |
 | 37 | 2026-10-13 mposition | v36 점검이 `legacy_invocation_unbound`로 닫힌 deterministic `investigate` Task에 한해, owner 요청 뒤 물리 worker profile의 다른 작업이 없음을 잠그고 새 작업을 fence한 다음 root 전용 controller가 고정 unit을 최대 한 번 stop하고 fresh kernel process-gone을 별도로 증명한다. 모델 결과·기존 비용은 `unknown`으로 유지한다. stop 응답 유실과 중복 controller는 재발행하지 않고, 같은 Task의 후속 확인은 읽기 전용이다. 자동 재시작·자동 fence 해제·운영 활성화는 열지 않는다. |
 | 38 | 2026-10-13 mposition | v36 inspect와 v37 root controller의 고정 one-shot을 각각 60초 non-overlap timer로 깨울 수 있는 기본 OFF carrier와 합성 검증을 준비한다. inspector 인증은 기존 route·actor·DTO·writer 권한을 늘리지 않고 전용 `TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET`으로 broad sync와 root controller secret에서 분리한다. 이 승인은 코드와 설치 준비물만 열며 secret 등록·설치·daemon-reload·enable·start·stop·restart·스위치 변경·실제 Task 복구는 열지 않는다. |
-| 39 | 2026-10-13 mposition | FIRST Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 과거 attempt `97858395-3d66-42fa-9bfb-0e5a6cba9bd8` 하나에 한해, 과거 결과·외부 효과를 `unknown`으로 보존한 채 owner가 US$3.40의 기존 보류와 최대 US$3.40의 새 읽기 전용 시도, 최악 US$6.80 노출을 명시적으로 수락할 수 있다. 수락은 stop 의도만 열고 실행·예약·Task 상태를 바꾸지 않는다. root process-gone 증명 뒤 현재 모델·공급사·route·brief·가격·비용·강제 읽기 전용 launch proof에 다시 결속한 별도 최종 승인이 추가 시도 하나만 연다. 다른 legacy Task, 세 번째 시도, 과거 성공·0비용 추정은 열지 않는다. |
+| 39 | 2026-10-13 mposition | FIRST Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 과거 attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8` 하나에 한해, 과거 결과·외부 효과를 `unknown`으로 보존한 채 owner가 US$3.40의 기존 보류와 최대 US$3.40의 새 읽기 전용 시도, 최악 US$6.80 노출을 명시적으로 수락할 수 있다. 수락은 stop 의도만 열고 실행·예약·Task 상태를 바꾸지 않는다. root process-gone 증명 뒤 현재 모델·공급사·route·brief·가격·비용·강제 읽기 전용 launch proof에 다시 결속한 별도 최종 승인이 추가 시도 하나만 연다. 다른 legacy Task, 세 번째 시도, 과거 성공·0비용 추정은 열지 않는다. |
 | 40 | 2026-10-13 mposition | v39의 CLI 런처가 remote managed hooks를 host proof로 배제할 수 없어 `current=false`로 닫히는 경우에만, FIRST Task와 같은 최종 승인 결속을 쓰는 전용 읽기 전용 Anthropic API executor 대안을 준비한다. 고정 repo broker의 `Read`·`Grep`·`Glob`만 모델 tool로 노출하고 shell·쓰기·Git push·MCP·plugin·임의 HTTP를 열지 않는다. 가격과 누적 token·turn 한도는 승인된 catalog snapshot에서 서버가 만든 versioned frame에 결속하고, API가 반환한 실제 model·usage가 완전하지 않으면 결과 불명으로 멈춘다. API key 등록·설치·배포·실제 호출은 별도이고, 이 버전은 실행 스위치를 켜지 않는다. |
 | 41 | 2026-10-13 mposition | v40 broker가 packed Git object에 든 승인 revision의 파일 provenance를 확인할 수 있도록, 보호된 고정 Git binary의 로컬 읽기 전용 object 조회만 좁게 허용한다. 모델 tool은 `Read`·`Grep`·`Glob` 셋 그대로이고 모델이 Git 명령·인자·환경을 고르지 않는다. shell·hooks·network·write·push·credential 전달은 계속 금지하며, binary digest·고정 인자 문법·최소 환경·deadline·출력 상한을 proof에 결속한다. 이 승인은 CODE/LOCAL 합성 검증만 열고 설치·배포·key 등록·실제 provider 호출·실제 Task 실행을 열지 않는다. |
 | 43 | 2026-10-14 mposition | 버전 35 R2b의 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`를 켠다. Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 읽기 전용으로 보이고, production에서 켜진 뒤 3일(72시간) 동안 모두 같으면 R2b가 끝난다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정과 환경 변수는 바꾸지 않는다. |
+| 44 | 2026-10-14 mposition | v39~v42의 FIRST Task 과거 attempt ID를 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`로 정정한다. 기록에 옮겨 적은 `…0e5a6cba9bd8`은 실재하지 않는 ID여서 모든 guard가 거절했다. 적용된 migration은 그대로 두고 새 migration이 같은 정의의 ID만 바꾼다. 대상 Task, 재시도 1회, 비용 상한, 결과 불명 보존은 그대로다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -2142,7 +2145,7 @@ request 하나만 처리하며, queue가 비었거나 gate가 꺼져 있으면 �
 `legacy_invocation_unbound`와 `externalEffectsKnown=false`를 정직하게 반환한 첫
 `investigate` Task 하나에만 닫힌 예외를 둔다. 대상은 Task
 `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
-`97858395-3d66-42fa-9bfb-0e5a6cba9bd8`다. 다른 legacy Task, 다른 prior attempt,
+`97858395-3d66-42fa-9bfb-0e5a6cba39d8`다. 다른 legacy Task, 다른 prior attempt,
 `implement` 역할, 이 Task의 세 번째 시도에는 적용하지 않는다.
 
 ### 1. 과거 사실과 첫 위험 수락
@@ -2236,7 +2239,7 @@ request 하나만 처리하며, queue가 비었거나 gate가 꺼져 있으면 �
 
 승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 이 절은 v39의
 exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
-`97858395-3d66-42fa-9bfb-0e5a6cba9bd8`, 기존 보류 3,400,000 microUSD, 새
+`97858395-3d66-42fa-9bfb-0e5a6cba39d8`, 기존 보류 3,400,000 microUSD, 새
 시도 최대 3,400,000 microUSD, 최악 노출 6,800,000 microUSD 한 건만
 계속 다룬다. v39의 CLI 경로는 remote managed hooks를 배제했다는 신뢰할
 수 있는 proof가 없으면 `current=false`로 남긴다. 이 사실을 `current=true`로
@@ -2423,7 +2426,7 @@ retry, root SSH·systemd 조작, PR·push·병합은 각각 별도 승인이다.
 
 승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-13`. 이 절은 v39~v41의
 exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
-`97858395-3d66-42fa-9bfb-0e5a6cba9bd8`에만 적용한다. 운영자는 이 첫 Task에
+`97858395-3d66-42fa-9bfb-0e5a6cba39d8`에만 적용한다. 운영자는 이 첫 Task에
 한해 전용 Anthropic API key로 인증하고, 승인된 frame의 선택 model에 접근 가능한지
 과금 없는 model metadata 조회 한 번으로 확인한 뒤, 과거 보류 3,400,000 microUSD와
 새 시도 최대 3,400,000 microUSD, 합계 6,800,000 microUSD의 결정적 상한 안에서
@@ -2519,3 +2522,22 @@ exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
   - 기간을 채우면 운영자가 R2b 종료를 기록한다.
 - **R2c와의 관계.** R2c는 R1 관측 종료와 이 관측 기간을 모두 채운 뒤에만 켠다(버전 35 5항).
 - **되돌리기.** 래치를 false로 되돌리면 패널이 읽기를 멈출 뿐이다. 쓰는 것이 없으므로 남는 것도 없다.
+
+## 버전 44 — FIRST Task prior attempt ID 정정
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-14`. 2026-10-14 작성, 작성자 Claude.
+운영자는 production 복구 진행 중 Admin에 표시된 실제 과거 attempt와 v39~v42 기록의 ID가
+다르다는 보고를 보고 이 정정을 승인했다.
+
+- v39~v42가 가리키는 FIRST Task `c48886b9-86f8-4631-8db8-c0b288a707af`의 과거 attempt는
+  실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`다. 이전 기록은 이를
+  `97858395-3d66-42fa-9bfb-0e5a6cba9bd8`로 옮겨 적었다. 그 값은 어떤 attempt도
+  가리키지 않으므로 위험 수락, 안전 종료, launch proof, 모델 접근 확인, 두 번째 attempt가
+  모두 거절됐고, 다른 attempt가 열린 적은 없다.
+- 이 절은 위 절들의 ID만 바로잡는다. 대상 Task, 재시도 1회, 기존 보류 3,400,000 microUSD,
+  새 시도 최대 3,400,000 microUSD, 합계 6,800,000 microUSD, 과거 결과·외부 효과·비용의
+  `unknown` 보존, 사람 승인과 결정적 guard는 그대로다.
+- 적용된 migration은 바꾸지 않는다. 새 migration 두 개가 같은 함수 본문과 CHECK 정의에서
+  ID 문자열만 바꾸며, 각각 직전 함수 본문 digest와 직전 CHECK 정의 digest를 고정한다.
+- 이 정정은 배포·설치·실제 실행을 따로 열지 않는다. v39~v42와 2026-10-13 운영 승인 범위를
+  그대로 따른다.
