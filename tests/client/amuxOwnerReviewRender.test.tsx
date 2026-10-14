@@ -7,6 +7,7 @@ import {
   AmuxOwnerReviewQueueView,
   AmuxOwnerReviewView,
   AMUX_OWNER_EXECUTION_READ_TIMEOUT_MS,
+  amuxAssignmentReviewReturnPath,
   bindAmuxOwnerExecutionMetadata,
   formatAmuxMicrousd,
   isValidAmuxReviewArtifact,
@@ -338,6 +339,30 @@ test("unknown execution offers read-only recovery and no blind retry", () => {
   assert.deepEqual(rereads, ["read"]);
   assert.match(textOf(byTestId(tree, "admin-amux-developer-details")[0]?.children as ReactNode),
     /retry, block/);
+});
+
+test("a step-up from a review returns to that escalation, and only a well-formed one", () => {
+  assert.equal(amuxAssignmentReviewReturnPath("clreview1234567890123456"),
+    "/admin/amux-execution?tab=assignment&focusEscalation=clreview1234567890123456");
+  for (const bad of [null, undefined, "", "not-an-escalation", "c12&tab=cards0000000000000"]) {
+    assert.equal(amuxAssignmentReviewReturnPath(bad), "/admin/amux-execution?tab=assignment");
+  }
+  const item = review({
+    last_attempt: { ...review().last_attempt!, outcome: "expired", to_status: "blocked" },
+    review_context: { ...review().review_context, result_sha256: null, last_attempt_reason: "usage_outcome_unknown" },
+    review_report: { ...review().review_report!, worker_report: null, worker_report_verified: false },
+  });
+  const panelProps = (tree: ReactNode) => propsOf(tree).find((props) => "identity" in props && "returnTo" in props);
+  assert.equal(panelProps(render(item))?.returnTo,
+    "/admin/amux-execution?tab=assignment&focusEscalation=clreview1234567890123456");
+  const fromCard = AmuxOwnerReviewView({
+    m, review: item, ownerExecution: { state: "idle" }, canInspectCards: true, selectedOutcome: null,
+    retryReadConfirmed: false, reviewBusy: false, reauthenticationRequired: false,
+    decisionStatusUnknown: false, date: (value) => value, number: (value) => String(value),
+    onSelectOutcome: () => {}, onRetryReadConfirmed: () => {}, onReread: () => {},
+    reviewReturnPath: "/admin/amux-execution?tab=cards&taskId=task-owner-review",
+  }) as ReactNode;
+  assert.equal(panelProps(fromCard)?.returnTo, "/admin/amux-execution?tab=cards&taskId=task-owner-review");
 });
 
 test("legacy done and closed reasons explain the flag boundary without offering a decision", () => {
