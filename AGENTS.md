@@ -1300,6 +1300,15 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   출처로 기록할 뿐 비교하지 않습니다 — fingerprint를 바꾸지 않는 release가 production
   적용을 조용히 멈추게 해서는 안 됩니다. 세대는 `OLD+1`이고, 저장값을 읽지 못했거나
   거절하는 값이면 그 위에 서명하지 않습니다.
+- **S2f 서명**: `lib/marketingWebhookProductionConfigStore.ts`,
+  `app/api/admin/marketing/webhook/production-config/route.ts`(POST, 서명),
+  `app/api/admin/marketing/webhook/production-config/live/route.ts`(GET, 서명 전 화면이 볼 값),
+  `tests/marketingWebhookProductionConfigStore.test.ts`. **production에서만** 서명하며, 화면이 본
+  값(다음 세대·기록·기록 서명 audit·배포 commit·fingerprint·실제 설정 digest)을 감사 행에 그대로
+  묶고 store가 같은 트랜잭션에서 하나씩 다시 계산해 움직인 값을 거절합니다. 방금 쓴 감사 행은
+  apply가 쓸 검증기로 다시 읽고, 검증되지 않으면 쓰기와 함께 되돌립니다. 거절 class는 store에
+  닿지 않는 `lib/marketingWebhookProductionConfig.ts`에 둡니다 — route sweep이 트랜잭션 밖에서
+  store 경로의 이름을 쓰는 것을 실패로 만듭니다.
 
 # 엔지니어링 Agent
 

@@ -34,6 +34,21 @@ export const MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY =
 export const MARKETING_WEBHOOK_PRODUCTION_CONFIG_SIGNED_ACTION =
   "marketing_webhook.production_config_signed";
 
+/**
+ * A production configuration signature refused, with a closed code. Here rather
+ * than beside the store so a route can recognise it without importing anything
+ * that reaches the store.
+ */
+export class MarketingWebhookProductionConfigRefusedError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "MarketingWebhookProductionConfigRefusedError";
+    this.code = code;
+  }
+}
+
 // The same field rules as the verification record and signature in
 // lib/marketingAutomationAccess.ts. Repeated rather than exported from there:
 // that file is sealed into another contract's reviewed closure, and a new
