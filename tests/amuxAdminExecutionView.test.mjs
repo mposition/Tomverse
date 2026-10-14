@@ -65,3 +65,19 @@ test("execution UI reads the same DB through bounded owner-only read routes", as
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)/);
   assert.doesNotMatch(ui, /method: "(POST|PUT|PATCH|DELETE)"/);
 });
+
+test("a card waiting on the owner opens on the same owner review Assignment hosts", async () => {
+  const ui = await readFile(new URL("../components/admin/AmuxExecutionWorkspace.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/(site)/(application)/admin/amux-execution/page.tsx", import.meta.url), "utf8");
+  // The review is the Assignment component, not a second implementation.
+  assert.match(ui, /import \{ AmuxCardOwnerReview \} from "\.\/AdminAmuxRoutingPanel"/);
+  assert.match(ui, /const ownerEscalation = canReviewCards \? selected\?\.escalations\[0\] \?\? null : null/);
+  assert.match(ui, /if \(canReviewCards && result\.escalations\.length > 0\) setDetailTab\("ownerReview"\)/);
+  // Kept mounted behind `hidden`, so a tab switch cannot drop a decision.
+  assert.match(ui, /hidden=\{detailTab !== "ownerReview"\}/);
+  // A decision that lands after the owner left the card reloads the board,
+  // never the card it left.
+  assert.match(ui, /searchParams\.get\("taskId"\) === selected\.id\)\s*void openCard\(selected\.id, false\)/);
+  // Only the owner opens Cards, and only the owner is offered the review.
+  assert.match(page, /<AmuxExecutionWorkspace canMoveCards=\{isOwner\} canReviewCards=\{isOwner\}/);
+});

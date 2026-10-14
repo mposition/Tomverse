@@ -1046,11 +1046,8 @@ export function AmuxOwnerReviewQueueView({
   );
 }
 
-export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCards = false }: {
-  focusEscalationId?: string | null;
-  canInspectCards?: boolean;
-} = {}) {
-  const m = useAdminMessages(adminAmuxRoutingMessages);
+/** Locale-aware number and date formatting shared by the review hosts. */
+const useAmuxRoutingFormatters = () => {
   const { locale } = useAdminLocale();
   const number = useCallback(
     (value: number) => value.toLocaleString(adminIntlLocale(locale)),
@@ -1065,9 +1062,25 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
       : "—",
     [locale],
   );
-  const [report, setReport] = useState<AmuxReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  return { number, date };
+};
+
+/**
+ * The owner review of one escalation: its read, proposal, decision and the
+ * decision-status lookup that settles an ambiguous write.
+ *
+ * Assignment and the Kanban card dialog both host it, so a decision follows
+ * the same rules -- one pending decision in session storage freezes writes in
+ * either place until the server ledger answers.
+ */
+export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: committed }: {
+  canInspectCards: boolean;
+  /** Called after the server confirms a decision, to reload what the host shows. */
+  onDecisionCommitted: () => void;
+}) {
+  const m = useAdminMessages(adminAmuxRoutingMessages);
+  const onDecisionCommitted = useRef(committed);
+  useEffect(() => { onDecisionCommitted.current = committed; }, [committed]);
   const [selectedEscalationId, setSelectedEscalationId] = useState<string | null>(null);
   const [review, setReview] = useState<ReviewDetail | null>(null);
   const [ownerExecution, setOwnerExecution] = useState<OwnerExecutionState>({ state: "idle" });
@@ -1084,9 +1097,12 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
   const [decisionStatusUnknown, setDecisionStatusUnknown] = useState(false);
   const [decisionStatusChecking, setDecisionStatusChecking] = useState(false);
   const [pendingDecision, setPendingDecision] = useState<PendingDecision | null>(null);
+  // Whether session storage has been read for a pending decision yet. A host
+  // that opens a review on mount waits for it, so a reload that left a
+  // decision unresolved never opens a review the stored decision should freeze.
+  const [pendingDecisionChecked, setPendingDecisionChecked] = useState(false);
   const reviewRequestId = useRef(0);
   const ownerExecutionController = useRef<AbortController | null>(null);
-  const openedFocus = useRef<string | null>(null);
 
   const closeReview = useCallback(() => {
     reviewRequestId.current += 1;
@@ -1109,43 +1125,23 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
     setDecisionStatusChecking(false);
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await adminFetch("/api/admin/amux/routing", {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        await discardResponseBody(response);
-        throw new Error(String(response.status));
-      }
-      setReport((await response.json()) as AmuxReport);
-    } catch {
-      setError(m.loadFailed);
-    } finally {
-      setLoading(false);
-    }
-  }, [m]);
-
   useEffect(() => {
-    queueMicrotask(() => void load());
-  }, [load]);
-
-  useEffect(() => {
+    let restored: PendingDecision | null = null;
     try {
       const stored = window.sessionStorage.getItem(PENDING_DECISION_KEY);
-      if (!stored) return;
-      const parsed: unknown = JSON.parse(stored);
-      if (!isPendingDecision(parsed)) return;
-      queueMicrotask(() => {
-        setPendingDecision(parsed);
-        setDecisionStatusUnknown(true);
-      });
+      const parsed: unknown = stored ? JSON.parse(stored) : null;
+      if (isPendingDecision(parsed)) restored = parsed;
     } catch {
       // Storage is not an authority. An invalid or unavailable entry can
       // never cause a write; the server decision ledger remains authoritative.
     }
+    queueMicrotask(() => {
+      if (restored) {
+        setPendingDecision(restored);
+        setDecisionStatusUnknown(true);
+      }
+      setPendingDecisionChecked(true);
+    });
   }, []);
 
   useEffect(() => () => {
@@ -1234,13 +1230,6 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
     }
   }, [pendingDecision, canInspectCards, m.reviewLoadFailed, m.reviewProxyConfigurationFailed,
     m.reviewAccessRefused, m.reviewNotFound, m.reviewTemporarilyUnavailable]);
-
-  useEffect(() => {
-    if (!report || !focusEscalationId || pendingDecision ||
-        openedFocus.current === focusEscalationId) return;
-    openedFocus.current = focusEscalationId;
-    queueMicrotask(() => void openReview(focusEscalationId));
-  }, [report, focusEscalationId, pendingDecision, openReview]);
 
   const prepareProposal = async () => {
     if (!review || !selectedOutcome || reviewBusy || pendingDecision || !review.allowed_outcomes.includes(selectedOutcome)) return;
@@ -1381,7 +1370,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
       }
       clearPendingDecision();
       closeReview();
-      void load();
+      onDecisionCommitted.current();
     } catch {
       setDecisionStatusUnknown(true);
       setReviewError(m.decisionUncertain);
@@ -1432,7 +1421,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
           result.outcome === identity.outcome) {
         clearPendingDecision();
         closeReview();
-        void load();
+        onDecisionCommitted.current();
       } else {
         setReviewError(m.decisionUncertain);
       }
@@ -1443,12 +1432,354 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
     }
   };
 
+  return {
+    canInspectCards, selectedEscalationId, review, ownerExecution, reviewLoading, reviewBusy,
+    reviewError, setReviewError, reviewUnavailable, reauthenticationRequired, selectedOutcome,
+    setSelectedOutcome, retryReadConfirmed, setRetryReadConfirmed, resolution, setResolution,
+    proposal, setProposal, setIdempotencyKey, decisionStatusUnknown, setDecisionStatusUnknown,
+    decisionStatusChecking, pendingDecision, pendingDecisionChecked, closeReview, openReview,
+    prepareProposal, confirmDecision, checkDecisionStatus,
+  };
+}
+
+export type AmuxOwnerReviewController = ReturnType<typeof useAmuxOwnerReview>;
+
+// The Execution page's own `taskId` shape; anything else is not written back.
+const AMUX_TASK_ID = /^[A-Za-z0-9-]{1,128}$/;
+
+/** Where a step-up refused inside a card's review returns: that card, reopened. */
+export const amuxCardReviewReturnPath = (taskId: string) =>
+  AMUX_TASK_ID.test(taskId)
+    ? `/admin/amux-execution?tab=cards&taskId=${encodeURIComponent(taskId)}`
+    : "/admin/amux-execution?tab=cards";
+
+/**
+ * A card's newest open escalation, reviewed inside the card dialog. It is the
+ * same review Assignment opens, so the owner no longer leaves the board to
+ * act on a card waiting for them.
+ */
+export function AmuxCardOwnerReview({ taskId, escalationId, canInspectCards, onDecisionCommitted }: {
+  taskId: string;
+  escalationId: string;
+  /** Whether attempt costs and recovery inspection are offered (the owner). */
+  canInspectCards: boolean;
+  onDecisionCommitted: () => void;
+}) {
+  const reviewer = useAmuxOwnerReview({ canInspectCards, onDecisionCommitted });
+  const { openReview, pendingDecision, pendingDecisionChecked } = reviewer;
+  const opened = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pendingDecisionChecked || pendingDecision || opened.current === escalationId) return;
+    opened.current = escalationId;
+    queueMicrotask(() => void openReview(escalationId));
+  }, [escalationId, pendingDecision, pendingDecisionChecked, openReview]);
+  const returnPath = amuxCardReviewReturnPath(taskId);
+  return (
+    <div className="space-y-3" data-testid="amux-card-owner-review">
+      <AmuxPendingDecisionNotice controller={reviewer} returnPath={returnPath} />
+      <AmuxOwnerReviewDetail controller={reviewer} reviewReturnPath={returnPath} showClose={false} />
+    </div>
+  );
+}
+
+/** The banner for a decision whose commit is still unknown after a reload. */
+export function AmuxPendingDecisionNotice({ controller, returnPath }: {
+  controller: AmuxOwnerReviewController;
+  /** Where a step-up returns; defaults to the escalation in Assignment. */
+  returnPath?: string;
+}) {
+  const m = useAdminMessages(adminAmuxRoutingMessages);
+  const { pendingDecision, decisionStatusUnknown, reauthenticationRequired,
+    decisionStatusChecking, checkDecisionStatus } = controller;
+  return (
+    <>
+      {pendingDecision && decisionStatusUnknown && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-100" data-testid="admin-amux-pending-decision">
+          <p className="font-bold">{m.decisionUncertain}</p>
+          <p className="mt-2 break-all font-mono text-xs">{m.decisionId}: {pendingDecision.decision_id}</p>
+          <p className="mt-1 break-all font-mono text-xs">{m.subjectDigest}: {pendingDecision.subject_digest}</p>
+          {reauthenticationRequired && (
+            <Link
+              href={adminRecentAuthenticationHref(
+                returnPath ?? amuxAssignmentReviewReturnPath(pendingDecision.escalation_id))}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-block font-bold underline"
+            >
+              {m.reauthenticate}
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={() => void checkDecisionStatus()}
+            disabled={decisionStatusChecking}
+            className="mt-3 block rounded-lg border border-amber-400 px-3 py-2 font-bold disabled:opacity-50"
+            data-testid="admin-amux-check-pending-decision-status"
+          >
+            {decisionStatusChecking ? m.working : m.checkDecisionStatus}
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** One escalation's review: read state, the owner view and the decision form. */
+export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose = true }: {
+  controller: AmuxOwnerReviewController;
+  /** Where a step-up refused inside this review returns. */
+  reviewReturnPath?: string;
+  /** Assignment closes a review in place; a card dialog closes the card instead. */
+  showClose?: boolean;
+}) {
+  const m = useAdminMessages(adminAmuxRoutingMessages);
+  const { number, date } = useAmuxRoutingFormatters();
+  const { canInspectCards, selectedEscalationId, review, ownerExecution, reviewLoading,
+    reviewBusy, reviewError, setReviewError, reviewUnavailable, reauthenticationRequired,
+    selectedOutcome, setSelectedOutcome, retryReadConfirmed, setRetryReadConfirmed,
+    resolution, setResolution, proposal, setProposal, setIdempotencyKey,
+    decisionStatusUnknown, setDecisionStatusUnknown, decisionStatusChecking,
+    pendingDecision, closeReview, openReview, prepareProposal, confirmDecision,
+    checkDecisionStatus } = controller;
+  const reviewOutcomes = review ? visibleAmuxOwnerReviewOutcomes(review) : [];
+  const returnPath = reviewReturnPath ?? amuxAssignmentReviewReturnPath(selectedEscalationId);
+  return (
+    <>
+      {selectedEscalationId && (
+        <div
+          className="mt-4 rounded-xl border border-zinc-700 bg-zinc-900 p-4 text-xs text-zinc-300"
+          data-testid="admin-amux-review-detail"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-sm font-bold text-white">{m.reviewDetail}</h4>
+            {showClose && (
+              <button
+                type="button"
+                onClick={closeReview}
+                disabled={reviewBusy || decisionStatusUnknown || decisionStatusChecking}
+                className="rounded-md border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+                data-testid="admin-amux-close-review"
+              >
+                {m.closeReview}
+              </button>
+            )}
+          </div>
+          <p className="mt-2 break-all font-mono text-zinc-500">
+            {m.escalationId}: {selectedEscalationId}
+          </p>
+          {reviewLoading && (
+            <p className="mt-3 inline-flex items-center gap-2"
+              data-testid="admin-amux-review-loading">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {m.reviewLoading}
+            </p>
+          )}
+          {reviewUnavailable && (
+            <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100" data-testid="admin-amux-review-unavailable">
+              {m.reviewUnavailable}
+            </p>
+          )}
+          {reauthenticationRequired && (
+            <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100">
+              {m.reauthenticationRequired}{" "}
+              <Link
+                href={adminRecentAuthenticationHref(returnPath)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-bold underline underline-offset-2"
+              >
+                {m.reauthenticate}
+              </Link>
+            </p>
+          )}
+          {reviewError && (
+            <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-200">
+              {reviewError}
+            </p>
+          )}
+          {!review && !reviewLoading && (reviewError || reauthenticationRequired) && (
+            <div className="mt-3">
+              <button type="button"
+                data-testid="admin-amux-retry-review-read"
+                disabled={reviewBusy || decisionStatusUnknown || pendingDecision !== null}
+                onClick={() => void openReview(selectedEscalationId)}
+                className="rounded-md border border-zinc-700 px-3 py-2 text-zinc-200 hover:bg-zinc-800 disabled:opacity-60">
+                {m.retryReviewRead}
+              </button>
+              <p className="mt-2 text-zinc-400">{m.retryReviewReadDescription}</p>
+            </div>
+          )}
+          {review && !reviewUnavailable && (
+            <>
+              {review.retry.remaining === 0 && (
+                <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100" data-testid="admin-amux-exhausted-task-notice">
+                  {m.exhaustedRequiresNewTask} {m.taskId}: <span className="font-mono">{review.task.id}</span>
+                </p>
+              )}
+              <AmuxOwnerReviewView
+                m={m}
+                review={review}
+                ownerExecution={ownerExecution}
+                canInspectCards={canInspectCards}
+                selectedOutcome={selectedOutcome}
+                retryReadConfirmed={retryReadConfirmed}
+                reviewBusy={reviewBusy}
+                reauthenticationRequired={reauthenticationRequired}
+                decisionStatusUnknown={decisionStatusUnknown}
+                date={date}
+                number={number}
+                onReread={() => void openReview(review.escalation.id)}
+                reviewReturnPath={returnPath}
+                onRetryReadConfirmed={(confirmed) => {
+                  setRetryReadConfirmed(confirmed);
+                  setProposal(null);
+                  setIdempotencyKey(null);
+                  setReviewError(null);
+                }}
+                onSelectOutcome={(outcome) => {
+                  setSelectedOutcome(outcome);
+                  if (outcome !== "retry") setRetryReadConfirmed(false);
+                  setProposal(null);
+                  setIdempotencyKey(null);
+                  setDecisionStatusUnknown(false);
+                  setReviewError(null);
+                }}
+              />
+              {selectedOutcome && reviewOutcomes.includes(selectedOutcome) && (
+                <div className="mt-3 border-t border-zinc-700 pt-3">
+                  <p className="font-bold text-zinc-100">
+                    {m.outcome[selectedOutcome]} · {review.task.status} → {review.proposed_transitions[selectedOutcome] ?? "—"}
+                  </p>
+                  <p className="mt-1 text-amber-200">{m.decisionWarning[selectedOutcome]}</p>
+                  <label htmlFor="admin-amux-resolution" className="mt-3 block font-semibold text-zinc-200">
+                    {m.resolutionLabel}
+                  </label>
+                  <textarea
+                    id="admin-amux-resolution"
+                    value={resolution}
+                    onChange={(event) => setResolution(event.target.value)}
+                    disabled={reviewBusy || Boolean(proposal)}
+                    maxLength={1_000}
+                    rows={3}
+                    className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 p-2 text-sm text-white disabled:opacity-60"
+                    data-testid="admin-amux-resolution"
+                  />
+                  {!proposal ? (
+                    <button
+                      type="button"
+                      onClick={() => void prepareProposal()}
+                      disabled={reviewBusy || resolution.trim().length < 3 ||
+                        (selectedOutcome === "retry" && !retryReadConfirmed)}
+                      className="mt-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 font-bold text-blue-100 disabled:opacity-50"
+                      data-testid="admin-amux-prepare-proposal"
+                    >
+                      {reviewBusy ? m.working : m.prepareProposal}
+                    </button>
+                  ) : (
+                    <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3" data-testid="admin-amux-proposal-confirmation">
+                      <p className="font-bold text-amber-100">{m.confirmHeading[selectedOutcome]}</p>
+                      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-amber-100/90">
+                        <dt>{m.proposalId}</dt><dd className="break-all font-mono">{proposal.id}</dd>
+                        <dt>{m.decisionId}</dt><dd className="break-all font-mono">{proposal.decision_id}</dd>
+                        <dt>{m.revision}</dt><dd>r{proposal.task_revision}</dd>
+                        <dt>{m.transition}</dt><dd>{proposal.source_status} → {proposal.target_status}</dd>
+                        <dt>{m.expiry}</dt><dd>{date(proposal.expires_at)}</dd>
+                        <dt>{m.subjectDigest}</dt><dd className="break-all font-mono">{proposal.subject_digest}</dd>
+                        <dt>{m.attemptBudget}</dt><dd>{number(review.retry.remaining)} {m.remaining}</dd>
+                      </dl>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void confirmDecision()}
+                          disabled={reviewBusy || reauthenticationRequired || decisionStatusUnknown}
+                          className="rounded-lg border border-amber-400 bg-amber-400/20 px-3 py-2 font-bold text-amber-100 disabled:opacity-50"
+                          data-testid={`admin-amux-confirm-${selectedOutcome}`}
+                        >
+                          {reviewBusy ? m.working : m.confirmDecision[selectedOutcome]}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setProposal(null); setIdempotencyKey(null); }}
+                          disabled={reviewBusy || decisionStatusUnknown}
+                          className="rounded-lg border border-zinc-600 px-3 py-2 disabled:opacity-50"
+                        >
+                          {m.changeDecision}
+                        </button>
+                        {decisionStatusUnknown && (
+                          <button
+                            type="button"
+                            onClick={() => void checkDecisionStatus()}
+                            disabled={decisionStatusChecking}
+                            className="rounded-lg border border-blue-400 px-3 py-2 font-bold text-blue-100 disabled:opacity-50"
+                            data-testid="admin-amux-check-decision-status"
+                          >
+                            {decisionStatusChecking ? m.working : m.checkDecisionStatus}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCards = false }: {
+  focusEscalationId?: string | null;
+  canInspectCards?: boolean;
+} = {}) {
+  const m = useAdminMessages(adminAmuxRoutingMessages);
+  const { number, date } = useAmuxRoutingFormatters();
+  const [report, setReport] = useState<AmuxReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const loadRef = useRef<() => Promise<void>>(async () => {});
+  // A committed decision reloads the report, which no longer lists it.
+  const reviewer = useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: () => void loadRef.current() });
+  const { review, reviewBusy, pendingDecision, closeReview, openReview } = reviewer;
+  const openedFocus = useRef<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await adminFetch("/api/admin/amux/routing", {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        await discardResponseBody(response);
+        throw new Error(String(response.status));
+      }
+      setReport((await response.json()) as AmuxReport);
+    } catch {
+      setError(m.loadFailed);
+    } finally {
+      setLoading(false);
+    }
+  }, [m]);
+  useEffect(() => { loadRef.current = load; }, [load]);
+
+  useEffect(() => {
+    queueMicrotask(() => void load());
+  }, [load]);
+
+  useEffect(() => {
+    if (!report || !focusEscalationId || pendingDecision ||
+        openedFocus.current === focusEscalationId) return;
+    openedFocus.current = focusEscalationId;
+    queueMicrotask(() => void openReview(focusEscalationId));
+  }, [report, focusEscalationId, pendingDecision, openReview]);
+
   const incidentLabel = !report?.incident.valid
     ? m.incidentInvalid
     : report.incident.blocks_admission
       ? m.incidentFrozen
       : m.incidentNormal;
-  const reviewOutcomes = review ? visibleAmuxOwnerReviewOutcomes(review) : [];
+
 
   return (
     <section
@@ -1489,33 +1820,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
           </p>
         )}
 
-        {pendingDecision && decisionStatusUnknown && (
-          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-100" data-testid="admin-amux-pending-decision">
-            <p className="font-bold">{m.decisionUncertain}</p>
-            <p className="mt-2 break-all font-mono text-xs">{m.decisionId}: {pendingDecision.decision_id}</p>
-            <p className="mt-1 break-all font-mono text-xs">{m.subjectDigest}: {pendingDecision.subject_digest}</p>
-            {reauthenticationRequired && (
-              <Link
-                href={adminRecentAuthenticationHref(
-                  amuxAssignmentReviewReturnPath(pendingDecision.escalation_id))}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-2 inline-block font-bold underline"
-              >
-                {m.reauthenticate}
-              </Link>
-            )}
-            <button
-              type="button"
-              onClick={() => void checkDecisionStatus()}
-              disabled={decisionStatusChecking}
-              className="mt-3 block rounded-lg border border-amber-400 px-3 py-2 font-bold disabled:opacity-50"
-              data-testid="admin-amux-check-pending-decision-status"
-            >
-              {decisionStatusChecking ? m.working : m.checkDecisionStatus}
-            </button>
-          </div>
-        )}
+        <AmuxPendingDecisionNotice controller={reviewer} />
 
         {report && (
           <>
@@ -1607,183 +1912,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                   writesFrozen={Boolean(pendingDecision)}
                   onOpenReview={(escalationId) => void openReview(escalationId)}
                 />
-                {selectedEscalationId && (
-                  <div
-                    className="mt-4 rounded-xl border border-zinc-700 bg-zinc-900 p-4 text-xs text-zinc-300"
-                    data-testid="admin-amux-review-detail"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <h4 className="text-sm font-bold text-white">{m.reviewDetail}</h4>
-                      <button
-                        type="button"
-                        onClick={closeReview}
-                        disabled={reviewBusy || decisionStatusUnknown || decisionStatusChecking}
-                        className="rounded-md border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
-                        data-testid="admin-amux-close-review"
-                      >
-                        {m.closeReview}
-                      </button>
-                    </div>
-                    <p className="mt-2 break-all font-mono text-zinc-500">
-                      {m.escalationId}: {selectedEscalationId}
-                    </p>
-                    {reviewLoading && (
-                      <p className="mt-3 inline-flex items-center gap-2"
-                        data-testid="admin-amux-review-loading">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> {m.reviewLoading}
-                      </p>
-                    )}
-                    {reviewUnavailable && (
-                      <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100" data-testid="admin-amux-review-unavailable">
-                        {m.reviewUnavailable}
-                      </p>
-                    )}
-                    {reauthenticationRequired && (
-                      <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100">
-                        {m.reauthenticationRequired}{" "}
-                        <Link
-                          href={adminRecentAuthenticationHref(
-                            amuxAssignmentReviewReturnPath(selectedEscalationId))}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-bold underline underline-offset-2"
-                        >
-                          {m.reauthenticate}
-                        </Link>
-                      </p>
-                    )}
-                    {reviewError && (
-                      <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-200">
-                        {reviewError}
-                      </p>
-                    )}
-                    {!review && !reviewLoading && (reviewError || reauthenticationRequired) && (
-                      <div className="mt-3">
-                        <button type="button"
-                          data-testid="admin-amux-retry-review-read"
-                          disabled={reviewBusy || decisionStatusUnknown || pendingDecision !== null}
-                          onClick={() => void openReview(selectedEscalationId)}
-                          className="rounded-md border border-zinc-700 px-3 py-2 text-zinc-200 hover:bg-zinc-800 disabled:opacity-60">
-                          {m.retryReviewRead}
-                        </button>
-                        <p className="mt-2 text-zinc-400">{m.retryReviewReadDescription}</p>
-                      </div>
-                    )}
-                    {review && !reviewUnavailable && (
-                      <>
-                        {review.retry.remaining === 0 && (
-                          <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100" data-testid="admin-amux-exhausted-task-notice">
-                            {m.exhaustedRequiresNewTask} {m.taskId}: <span className="font-mono">{review.task.id}</span>
-                          </p>
-                        )}
-                        <AmuxOwnerReviewView
-                          m={m}
-                          review={review}
-                          ownerExecution={ownerExecution}
-                          canInspectCards={canInspectCards}
-                          selectedOutcome={selectedOutcome}
-                          retryReadConfirmed={retryReadConfirmed}
-                          reviewBusy={reviewBusy}
-                          reauthenticationRequired={reauthenticationRequired}
-                          decisionStatusUnknown={decisionStatusUnknown}
-                          date={date}
-                          number={number}
-                          onReread={() => void openReview(review.escalation.id)}
-                          onRetryReadConfirmed={(confirmed) => {
-                            setRetryReadConfirmed(confirmed);
-                            setProposal(null);
-                            setIdempotencyKey(null);
-                            setReviewError(null);
-                          }}
-                          onSelectOutcome={(outcome) => {
-                            setSelectedOutcome(outcome);
-                            if (outcome !== "retry") setRetryReadConfirmed(false);
-                            setProposal(null);
-                            setIdempotencyKey(null);
-                            setDecisionStatusUnknown(false);
-                            setReviewError(null);
-                          }}
-                        />
-                        {selectedOutcome && reviewOutcomes.includes(selectedOutcome) && (
-                          <div className="mt-3 border-t border-zinc-700 pt-3">
-                            <p className="font-bold text-zinc-100">
-                              {m.outcome[selectedOutcome]} · {review.task.status} → {review.proposed_transitions[selectedOutcome] ?? "—"}
-                            </p>
-                            <p className="mt-1 text-amber-200">{m.decisionWarning[selectedOutcome]}</p>
-                            <label htmlFor="admin-amux-resolution" className="mt-3 block font-semibold text-zinc-200">
-                              {m.resolutionLabel}
-                            </label>
-                            <textarea
-                              id="admin-amux-resolution"
-                              value={resolution}
-                              onChange={(event) => setResolution(event.target.value)}
-                              disabled={reviewBusy || Boolean(proposal)}
-                              maxLength={1_000}
-                              rows={3}
-                              className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 p-2 text-sm text-white disabled:opacity-60"
-                              data-testid="admin-amux-resolution"
-                            />
-                            {!proposal ? (
-                              <button
-                                type="button"
-                                onClick={() => void prepareProposal()}
-                                disabled={reviewBusy || resolution.trim().length < 3 ||
-                                  (selectedOutcome === "retry" && !retryReadConfirmed)}
-                                className="mt-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 font-bold text-blue-100 disabled:opacity-50"
-                                data-testid="admin-amux-prepare-proposal"
-                              >
-                                {reviewBusy ? m.working : m.prepareProposal}
-                              </button>
-                            ) : (
-                              <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3" data-testid="admin-amux-proposal-confirmation">
-                                <p className="font-bold text-amber-100">{m.confirmHeading[selectedOutcome]}</p>
-                                <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-amber-100/90">
-                                  <dt>{m.proposalId}</dt><dd className="break-all font-mono">{proposal.id}</dd>
-                                  <dt>{m.decisionId}</dt><dd className="break-all font-mono">{proposal.decision_id}</dd>
-                                  <dt>{m.revision}</dt><dd>r{proposal.task_revision}</dd>
-                                  <dt>{m.transition}</dt><dd>{proposal.source_status} → {proposal.target_status}</dd>
-                                  <dt>{m.expiry}</dt><dd>{date(proposal.expires_at)}</dd>
-                                  <dt>{m.subjectDigest}</dt><dd className="break-all font-mono">{proposal.subject_digest}</dd>
-                                  <dt>{m.attemptBudget}</dt><dd>{number(review.retry.remaining)} {m.remaining}</dd>
-                                </dl>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => void confirmDecision()}
-                                    disabled={reviewBusy || reauthenticationRequired || decisionStatusUnknown}
-                                    className="rounded-lg border border-amber-400 bg-amber-400/20 px-3 py-2 font-bold text-amber-100 disabled:opacity-50"
-                                    data-testid={`admin-amux-confirm-${selectedOutcome}`}
-                                  >
-                                    {reviewBusy ? m.working : m.confirmDecision[selectedOutcome]}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => { setProposal(null); setIdempotencyKey(null); }}
-                                    disabled={reviewBusy || decisionStatusUnknown}
-                                    className="rounded-lg border border-zinc-600 px-3 py-2 disabled:opacity-50"
-                                  >
-                                    {m.changeDecision}
-                                  </button>
-                                  {decisionStatusUnknown && (
-                                    <button
-                                      type="button"
-                                      onClick={() => void checkDecisionStatus()}
-                                      disabled={decisionStatusChecking}
-                                      className="rounded-lg border border-blue-400 px-3 py-2 font-bold text-blue-100 disabled:opacity-50"
-                                      data-testid="admin-amux-check-decision-status"
-                                    >
-                                      {decisionStatusChecking ? m.working : m.checkDecisionStatus}
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
+                <AmuxOwnerReviewDetail controller={reviewer} />
               </div>
             </div>
 
