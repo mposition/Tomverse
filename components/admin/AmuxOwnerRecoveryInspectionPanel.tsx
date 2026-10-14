@@ -721,6 +721,9 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     if (next) setState(next);
     active.current = null;
   };
+  // Re-created every render on purpose; the auto-read timer reaches the latest
+  // one through recoverRef, synced by an effect keyed on it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const recover = async (action?: RecoveryAction) => {
     if (active.current) return;
     // Recheck synchronously as well: a click can precede hydration, or another
