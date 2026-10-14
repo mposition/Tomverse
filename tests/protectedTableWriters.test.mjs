@@ -398,9 +398,9 @@ test("the v39 DB follow-up and resume reads have five exact reviewed counts", ()
       { path: migrationPath, table: "AmuxV22ReadOnlyLaunchProof",
         tableMentions: 2, writeVerbs: 4 },
       { path: servicePath, table: "AmuxV22TaskRecoveryInspectionRequest",
-        tableMentions: 7, writeVerbs: 3 },
+        tableMentions: 7, writeVerbs: 4 },
       { path: servicePath, table: "AmuxV22TaskRecoveryEvidence",
-        tableMentions: 5, writeVerbs: 3 },
+        tableMentions: 5, writeVerbs: 4 },
     ]
   );
   for (const [path, source] of [[migrationPath, migrationSource], [servicePath, serviceSource]]) {

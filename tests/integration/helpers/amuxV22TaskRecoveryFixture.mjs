@@ -199,12 +199,51 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   const profileConfigDigest = amuxV22RecoveryDigest("worker-profile-config", {
     version: 1, profiles: [{ alias: workerProfileAlias, workerNames: profileWorkerNames }],
   });
-  const safeStopBinding = { inspectionId: safeStopInspectionId, requestKind: "safe_stop",
+  // Policy v46: when the worker re-registered after the prior attempt, the
+  // safe stop binds its live runtime; the attempt-time runtime is refused.
+  const liveRuntime = input.liveRuntime ?? null;
+  const stopInstanceId = liveRuntime?.instanceId ?? instanceId;
+  const stopGeneration = liveRuntime?.generation ?? 1;
+  const safeStopBindingFor = (id, workerInstanceId, workerGeneration,
+    source = { id: evidenceId, digest: evidenceDigest }) => ({
+    inspectionId: id, requestKind: "safe_stop",
     taskId, taskRevision: 4, priorAttemptId, priorAttemptTaskRevision: 3,
-    workerName: "worker-one", workerInstanceId: instanceId, workerGeneration: 1,
-    targetHost: "amux-ubuntu", sourceEvidenceId: evidenceId,
-    sourceEvidenceDigest: evidenceDigest, workerProfileAlias, profileWorkerNames,
-    targetUnit, profileConfigDigest, riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest };
+    workerName: "worker-one", workerInstanceId, workerGeneration,
+    targetHost: "amux-ubuntu", sourceEvidenceId: source.id,
+    sourceEvidenceDigest: source.digest, workerProfileAlias, profileWorkerNames,
+    targetUnit, profileConfigDigest, riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest });
+  // The audit row needs the top-level transaction XID, so it is written before
+  // any probe savepoint; only the request insert runs inside the probe.
+  async function prepareSafeStopRequest(id, ownerRequestId, workerInstanceId, workerGeneration,
+    source = { id: evidenceId, digest: evidenceDigest }) {
+    const binding = safeStopBindingFor(id, workerInstanceId, workerGeneration, source);
+    const requestDigest = amuxV22RecoveryDigest("inspection", binding);
+    const auditId = await appendRecoveryFixtureAudit(db, {
+      actorUserId: "synthetic-owner", action: "amux.v22.recovery.safe_stop_requested",
+      targetType: "AmuxV22TaskRecoveryInspectionRequest", targetId: id,
+      summary: "synthetic fixed-profile safe-stop request",
+      metadata: { ...binding, ownerRequestId, requestDigest },
+    });
+    const requestedAt = (await db.query(`SELECT
+      (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`)).rows[0].now;
+    return {
+      id, ownerRequestId, requestKind: "safe_stop", taskId, taskRevision: 4, priorAttemptId,
+      priorAttemptTaskRevision: 3, workerName: "worker-one", workerInstanceId,
+      workerGeneration, targetHost: "amux-ubuntu", requestDigest,
+      sourceEvidenceId: source.id, sourceEvidenceDigest: source.digest,
+      workerProfileAlias, profileWorkerNames, targetUnit, profileConfigDigest,
+      riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest,
+      requestedByUserId: "synthetic-owner", authorizationAuditLogId: auditId, requestedAt,
+    };
+  }
+  if (liveRuntime) {
+    await db.query(`UPDATE public."AmuxWorkerRuntime" SET "instanceId"=$1, "generation"=$2
+      WHERE "workerName"='worker-one'`, [liveRuntime.instanceId, liveRuntime.generation]);
+    const attemptBound = await prepareSafeStopRequest(randomUUID(), randomUUID(), instanceId, 1);
+    await reject(() => insert("AmuxV22TaskRecoveryInspectionRequest", attemptBound),
+      "AmuxV22LegacySafeStop_request_guard_check");
+  }
+  const safeStopBinding = safeStopBindingFor(safeStopInspectionId, stopInstanceId, stopGeneration);
   const safeStopRequestDigest = amuxV22RecoveryDigest("inspection", safeStopBinding);
   const safeStopRequestAuditId = await appendRecoveryFixtureAudit(db, {
     actorUserId: "synthetic-owner", action: "amux.v22.recovery.safe_stop_requested",
@@ -218,8 +257,8 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   await insert("AmuxV22TaskRecoveryInspectionRequest", {
     id: safeStopInspectionId, ownerRequestId: safeStopOwnerRequestId,
     requestKind: "safe_stop", taskId, taskRevision: 4, priorAttemptId,
-    priorAttemptTaskRevision: 3, workerName: "worker-one", workerInstanceId: instanceId,
-    workerGeneration: 1, targetHost: "amux-ubuntu", requestDigest: safeStopRequestDigest,
+    priorAttemptTaskRevision: 3, workerName: "worker-one", workerInstanceId: stopInstanceId,
+    workerGeneration: stopGeneration, targetHost: "amux-ubuntu", requestDigest: safeStopRequestDigest,
     sourceEvidenceId: evidenceId, sourceEvidenceDigest: evidenceDigest,
     workerProfileAlias, profileWorkerNames, targetUnit, profileConfigDigest,
     riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest,
@@ -263,6 +302,14 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     recordedAt: new Date("2000-01-01T00:00:00.000Z"),
   });
   await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+  if (liveRuntime) {
+    // A stop bound to the newer live runtime cannot seed a chained request.
+    const chained = await prepareSafeStopRequest(randomUUID(), randomUUID(),
+      liveRuntime.instanceId, liveRuntime.generation,
+      { id: safeStopEvidenceId, digest: safeStopEvidenceDigest });
+    await reject(() => insert("AmuxV22TaskRecoveryInspectionRequest", chained),
+      "AmuxV22LegacySafeStop_request_guard_check");
+  }
 
   const launchCheckId = randomUUID();
   const routePolicyDigest = "b".repeat(64); const costDigest = "f".repeat(64);

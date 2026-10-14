@@ -236,3 +236,16 @@ test("R2d ships with the bridge session list latched off, and the route only rea
   assert.match(list, /AMUX_DB_BOUNDARIES\.workerSessionListRead/);
   assert.match(list, /filter\(\(name\) => !amuxDerivedCatalogEntryIsConstant\(name\)\)/);
 });
+
+test("the derived catalog carries each registered worker's ceiling; the variables carry none", async () => {
+  useProductionVariables();
+  const variables = await readAmuxAssignmentCatalogs(fakeClient(statement()));
+  assert.equal(variables.ceilings, null);
+  const derived = await readAmuxAssignmentCatalogs(fakeClient(statement()), true);
+  assert.equal(derived.ceilings?.get("claude-chore"), "chore");
+  assert.equal(derived.ceilings?.get("claude-review"), "contract");
+  assert.equal(derived.ceilings?.get("cursor-impl"), "implementation");
+  assert.equal(derived.ceilings?.has("engineering-runner"), false);
+  const absent = await readAmuxAssignmentCatalogs(fakeClient(undefined), true);
+  assert.equal(absent.ceilings, null);
+});
