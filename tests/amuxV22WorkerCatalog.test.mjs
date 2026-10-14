@@ -106,3 +106,11 @@ test("Task readiness, promotion capacity and claim use the same separated catalo
   assert.match(readFileSync("lib/amux/routing.ts", "utf8"),
     /export \{\s*getConfiguredAmuxV22WorkerCatalog,\s*getConfiguredAmuxWorkerCatalog,\s*\} from "@\/lib\/amux\/workerCatalogVariables";/);
 });
+
+test("v48: readiness counts compatible workers whenever the cost is known, not only when it is allowed", () => {
+  const source = readFileSync("lib/amux/v4TaskReadyService.ts", "utf8");
+  // A cost that needs reconfirmation must not also read as "no worker": the
+  // FIRST Task final consent stands in for exactly that one reconfirmation.
+  assert.match(source, /if \(cost !== "hold"\) \{[\s\S]{0,400}?readAmuxAssignmentCatalogs\(tx\)/);
+  assert.doesNotMatch(source, /if \(cost === "allow"\) \{/);
+});
