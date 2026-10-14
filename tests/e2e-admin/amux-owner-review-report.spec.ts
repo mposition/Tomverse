@@ -409,7 +409,7 @@ test("a Kanban card waiting on the owner opens on the same owner review", async 
     parentFeatureNodeId: null, parentStoryCardId: null, taskRole: "investigate",
     executionGrade: null, worker: "worker-openai", lane: "attention", sev1: false,
     score: null, scoreFresh: false, dependencyCount: 0, progress: null, briefPresent: true,
-    updatedAt: "2026-10-12T00:00:00.000Z",
+    attentionReason: "usage_outcome_unknown", updatedAt: "2026-10-12T00:00:00.000Z",
   };
   const detail = {
     ...card, revision: review.task.revision, body: null, brief: null, feedback: null,
@@ -444,8 +444,13 @@ test("a Kanban card waiting on the owner opens on the same owner review", async 
     await page.setViewportSize({ width, height: 900 });
     reviewReads.length = 0;
     await page.goto("/admin/amux-execution?tab=cards");
-    await page.getByTestId(`amux-board-card-${card.id}`)
-      .getByRole("button", { name: card.title }).click();
+    const boardCard = page.getByTestId(`amux-board-card-${card.id}`);
+    // The card says why it waits before it is opened.
+    await expect(boardCard.getByTestId(`amux-card-attention-reason-${card.id}`))
+      .toHaveText("Outcome unknown");
+    // Either the title or the call to act opens the same review.
+    if (width === 1280) await boardCard.getByRole("button", { name: card.title }).click();
+    else await boardCard.getByRole("button", { name: "Open owner review" }).click();
 
     const dialog = page.getByTestId("amux-card-dialog");
     await expect(dialog.getByRole("tab", { name: "Owner review" }))
