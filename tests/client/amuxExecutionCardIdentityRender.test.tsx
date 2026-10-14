@@ -6,23 +6,23 @@ import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxDistinctSourceKey } from
 import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
 
 const TASK_ID = "c48886b9-1111-4222-8333-444455556666";
-const SOURCE_KEY = "16B56903-aaaa-4bbb-8ccc-ddddeeeeffff";
+const ORIGIN_REF = "16B56903-aaaa-4bbb-8ccc-ddddeeeeffff";
 
 for (const locale of ["en", "ko"] as const) {
   const m = adminAmuxExecutionMessages[locale];
 
   test(`${locale}: detail header leads with the Task ID and shows a differing source key as a labelled secondary line`, () => {
-    const html = renderToStaticMarkup(<AmuxCardIdentity id={TASK_ID} sourceKey={SOURCE_KEY} revision={7}
+    const html = renderToStaticMarkup(<AmuxCardIdentity id={TASK_ID} sourceKey={ORIGIN_REF} revision={7}
       m={m} />);
     const taskLine = html.match(/<p data-testid="amux-detail-task-id">.*?<\/p>/)?.[0] ?? "";
     assert.ok(taskLine.includes(TASK_ID), "primary line carries the Task ID");
     assert.ok(taskLine.includes("· r7"), "revision stays next to the Task ID");
     assert.ok(taskLine.includes(m.taskId));
-    assert.ok(!taskLine.includes(SOURCE_KEY), "primary line never carries the source key");
+    assert.ok(!taskLine.includes(ORIGIN_REF), "primary line never carries the source key");
     const sourceLine = html.match(/<p class="text-xs opacity-70" data-testid="amux-detail-source-key">.*?<\/p>/)?.[0] ?? "";
-    assert.ok(sourceLine.includes(SOURCE_KEY), "source key is kept on a secondary line");
+    assert.ok(sourceLine.includes(ORIGIN_REF), "source key is kept on a secondary line");
     assert.ok(sourceLine.includes(m.sourceKey));
-    assert.ok(html.indexOf(TASK_ID) < html.indexOf(SOURCE_KEY));
+    assert.ok(html.indexOf(TASK_ID) < html.indexOf(ORIGIN_REF));
   });
 
   test(`${locale}: no secondary line when the source key is absent or equals the Task ID`, () => {
@@ -50,10 +50,10 @@ test("source key text goes through the same visibility escaping as the Task ID",
 });
 
 test("dependency list suffix shows the source key only when it differs", () => {
-  assert.equal(amuxDistinctSourceKey(TASK_ID, SOURCE_KEY), SOURCE_KEY);
+  assert.equal(amuxDistinctSourceKey(TASK_ID, ORIGIN_REF), ORIGIN_REF);
   assert.equal(amuxDistinctSourceKey(TASK_ID, TASK_ID), null);
   assert.equal(amuxDistinctSourceKey(TASK_ID, null), null);
-  const shown = renderToStaticMarkup(<AmuxSourceKeySuffix id={TASK_ID} sourceKey={SOURCE_KEY} m={adminAmuxExecutionMessages.en} />);
-  assert.ok(shown.includes(SOURCE_KEY) && shown.includes("Source key"));
+  const shown = renderToStaticMarkup(<AmuxSourceKeySuffix id={TASK_ID} sourceKey={ORIGIN_REF} m={adminAmuxExecutionMessages.en} />);
+  assert.ok(shown.includes(ORIGIN_REF) && shown.includes("Source key"));
   assert.equal(renderToStaticMarkup(<AmuxSourceKeySuffix id={TASK_ID} sourceKey={TASK_ID} m={adminAmuxExecutionMessages.en} />), "");
 });
