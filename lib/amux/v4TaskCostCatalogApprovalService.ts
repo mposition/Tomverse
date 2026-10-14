@@ -200,7 +200,8 @@ export async function readAmuxV4TaskCatalogApproval(session: Session,
 /** Called from the same registration transaction as the prepared receipt.
  * A revoked/latest missing catalog or stale price is a hold, never zero cost. */
 export async function calculateCurrentApprovedAmuxV4TaskCost(
-  tx: Prisma.TransactionClient, role: string, grade: string) {
+  tx: Prisma.TransactionClient, role: string, grade: string,
+  options: { asOf?: Date } = {}) {
   const row = await tx.amuxV4TaskCostCatalogApproval.findFirst({
     orderBy: { version: "desc" },
   });
@@ -225,10 +226,16 @@ export async function calculateCurrentApprovedAmuxV4TaskCost(
     throw new AmuxV4TaskCatalogApprovalError("evidence_unverified");
   }
   const now = await databaseNow(tx);
-  const result = calculateV4TaskCeilingFromCatalog({
+  // The receipt digest includes its calculation time. A caller that must match
+  // a receipt stored earlier (the v39 read-only retry chain) pins that time;
+  // the price must still be valid now, so the live calculation always runs.
+  const live = calculateV4TaskCeilingFromCatalog({
     rawCatalog: row.catalog, role, grade, asOfIso: now.toISOString(),
   });
-  if (!result.ok) {
+  const result = options.asOf && live.ok ? calculateV4TaskCeilingFromCatalog({
+    rawCatalog: row.catalog, role, grade, asOfIso: options.asOf.toISOString(),
+  }) : live;
+  if (!live.ok || !result.ok) {
     throw new AmuxV4TaskCatalogApprovalError("evidence_unverified");
   }
   return { approvalId: row.id, version: row.version,

@@ -106,3 +106,9 @@ test("safe-stop has its own exact flag and accepts only source evidence authorit
   assert.deepEqual(await (await GET(read())).json(), { state: "pending", retryWrite: false,
     recoveryEnabled: true, safeStopEnabled: false });
 });
+test("a write answer carries the same gates as the read, so the next control is not left off", async () => {
+  reset(); const { POST } = await route();
+  for (const body of [valid, acceptRisk, safeStop])
+    assert.deepEqual(await (await POST(post(body))).json(), { state: "pending", retryWrite: false,
+      recoveryEnabled: true, safeStopEnabled: true });
+});

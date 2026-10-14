@@ -21,6 +21,10 @@ export type AmuxHostRecoveryRead = AmuxV22RecoveryRead & { recoveryEnabled?: boo
   safeStopEnabled?: boolean; sourceEvidenceDigest?: string | null };
 
 export const AMUX_RECOVERY_INSPECTION_TIMEOUT_MS = 10_000;
+/** Automatic read-back while host evidence is pending: every 5 s for 3 minutes
+ * (12 reads a minute, under the route's 20-a-minute owner read limit). */
+export const AMUX_HOST_EVIDENCE_AUTO_READ_MS = 5_000;
+export const AMUX_HOST_EVIDENCE_AUTO_READS = 36;
 type Messages = AdminMessageShape<(typeof adminAmuxRecoveryInspectionMessages)["en"]>;
 // The Assignment section, for a caller that names no review to return to.
 const AMUX_RECOVERY_DEFAULT_RETURN_TO = "/admin/amux-execution?tab=assignment";
@@ -717,6 +721,9 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     if (next) setState(next);
     active.current = null;
   };
+  // Re-created every render on purpose; the auto-read timer reaches the latest
+  // one through recoverRef, synced by an effect keyed on it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const recover = async (action?: RecoveryAction) => {
     if (active.current) return;
     // Recheck synchronously as well: a click can precede hydration, or another
@@ -829,6 +836,34 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     } else if (next) setHost(next);
     active.current = null;
   };
+  // While the exception chain is producing its host evidence (process-gone,
+  // launch proof, model access), read it back on its own: the final consent
+  // window is 90 seconds and must not depend on someone pressing refresh.
+  // Reads only; it never writes, and it stops once nothing is pending.
+  const waitingData = host.state === "ready" ? host.data : null;
+  const waitingForHostEvidence = !!waitingData?.riskAcceptance &&
+    waitingData.requestKind === "safe_stop" && pendingStorage.state === "empty" &&
+    (waitingData.state === "pending" || (waitingData.state === "verified" &&
+      (!waitingData.launchProof || waitingData.apiModelAccess?.state === "required")));
+  // Keyed by request only: each read passes through "loading", which tears the
+  // timer down, so the read budget lives in a ref that survives it.
+  const waitingKey = waitingForHostEvidence ? waitingData!.requestId : null;
+  const autoReads = useRef<{ requestId: string; reads: number } | null>(null);
+  const recoverRef = useRef(recover);
+  useEffect(() => { recoverRef.current = recover; }, [recover]);
+  useEffect(() => {
+    if (!waitingKey) return;
+    if (autoReads.current?.requestId !== waitingKey)
+      autoReads.current = { requestId: waitingKey, reads: 0 };
+    const budget = autoReads.current;
+    const timer = setInterval(() => {
+      if (budget.reads >= AMUX_HOST_EVIDENCE_AUTO_READS) { clearInterval(timer); return; }
+      if (active.current) return;
+      budget.reads += 1;
+      void recoverRef.current();
+    }, AMUX_HOST_EVIDENCE_AUTO_READ_MS);
+    return () => clearInterval(timer);
+  }, [waitingKey]);
   const date = (value: string) => new Intl.DateTimeFormat(adminIntlLocale(locale), {
     dateStyle: "medium", timeStyle: "medium" }).format(new Date(value));
   const busy = state.state === "loading" || host.state === "loading";

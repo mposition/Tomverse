@@ -275,8 +275,10 @@ async function createAmuxV22ReadOnlyLaunchCheck(tx: Prisma.TransactionClient, no
     throw new BoardImportError("read_only_launch_binding_changed", 409);
   const catalog = getConfiguredAmuxV22WorkerCatalog();
   if (!catalog) return null;
+  // The check stores requestedAt = now; every later step recomputes the receipt
+  // as of that instant so its time-stamped digest still matches (v47).
   const approved = await calculateCurrentApprovedAmuxV4TaskCost(tx,
-    task.taskRole, task.executionGrade!);
+    task.taskRole, task.executionGrade!, { asOf: now });
   const workerNames = catalog.map((worker) => worker.worker_name);
   const fenced = await amuxV22SafeStopFencedWorkers(tx, workerNames);
   const live = await tx.amuxWorkerRuntime.findMany({ where: {
@@ -702,7 +704,7 @@ export function pendingAmuxV22LegacySafeStops() {
           AMUX_V22_READ_ONLY_API_EXECUTOR_KIND) {
         if (!row.task.taskRole || !row.task.executionGrade) continue;
         const approved = await calculateCurrentApprovedAmuxV4TaskCost(tx,
-          row.task.taskRole, row.task.executionGrade);
+          row.task.taskRole, row.task.executionGrade, { asOf: row.requestedAt });
         const profile = configuredAmuxV22RecoveryProfile(row.workerName);
         const binding = profile ? apiExecutionBinding({ approved,
           role: row.task.taskRole, grade: row.task.executionGrade,
@@ -751,7 +753,7 @@ export function reportAmuxV22ReadOnlyLaunchProof(input: AmuxV22ReadOnlyLaunchPro
     if (executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND &&
         check.task.taskRole && check.task.executionGrade) {
       const approved = await calculateCurrentApprovedAmuxV4TaskCost(tx,
-        check.task.taskRole, check.task.executionGrade);
+        check.task.taskRole, check.task.executionGrade, { asOf: check.requestedAt });
       const profile = configuredAmuxV22RecoveryProfile(check.workerName);
       if (profile) expectedApiBinding = apiExecutionBinding({ approved,
         role: check.task.taskRole, grade: check.task.executionGrade,
@@ -1199,7 +1201,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
         costDigest: launchCheck.costDigest } : (await currentCost(tx, task)).cost;
       if (risk && launchCheck && launchProof) {
         const current = await calculateCurrentApprovedAmuxV4TaskCost(tx,
-          task.taskRole!, task.executionGrade!);
+          task.taskRole!, task.executionGrade!, { asOf: launchCheck.requestedAt });
         const currentRouteCost = amuxV22ReadOnlyRetryRouteCost({
           priorReservedMicroUsd: risk.oldHeldMicroUsd,
           catalogApprovalId: current.approvalId, receipt: current.receipt,
@@ -1421,7 +1423,8 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
       const selectedFenced = launchCheck ? await amuxV22SafeStopFencedWorkers(tx,
         [launchCheck.workerName]) : new Set<string>();
       current = await calculateCurrentApprovedAmuxV4TaskCost(tx,
-        task.taskRole!, task.executionGrade!);
+        task.taskRole!, task.executionGrade!,
+        launchCheck ? { asOf: launchCheck.requestedAt } : {});
       budget = await priorBudget(tx, task.id);
       const riskCost = launchCheck ? amuxV22ReadOnlyRetryRouteCost({
         priorReservedMicroUsd: budget.reserved,
@@ -1603,6 +1606,9 @@ export async function readAmuxV22RecoveryAuthority(tx: Prisma.TransactionClient,
   let apiExecutionFrame: AmuxV22ReadOnlyApiExecutionFrame | null = null;
   let launcherConfigDigest: string | null = null;
   let launchProofRecordedAt: Date | null = null;
+  // The v39 receipt is time-stamped; claim and start recompute it as of the
+  // launch check that bound it (v47).
+  let costAsOf: Date | null = null;
   if (row.riskAcceptanceId) {
     const risk = await tx.amuxV22TaskRecoveryRiskAcceptance.findUnique({
       where: { id: row.riskAcceptanceId } });
@@ -1663,6 +1669,7 @@ export async function readAmuxV22RecoveryAuthority(tx: Prisma.TransactionClient,
     readOnlyExecutorKind = executorKind;
     launcherConfigDigest = scope.launchScope.launcherConfigDigest;
     launchProofRecordedAt = proof.recordedAt;
+    costAsOf = check.requestedAt;
     apiExecutionFrame = executorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
       scope.report.apiExecutionFrame ?? null : null;
   } else if (row.launchProofId || row.launchBindingId || row.workerName || row.provider ||
@@ -1672,7 +1679,7 @@ export async function readAmuxV22RecoveryAuthority(tx: Prisma.TransactionClient,
     throw new BoardImportError("recovery_approval_unbound", 409);
   }
   return { ...row, readOnlyExecutorKind, apiExecutionFrame, launcherConfigDigest,
-    launchProofRecordedAt };
+    launchProofRecordedAt, costAsOf };
 }
 
 export function amuxV22ApiModelAccessCurrent(authority: null | {

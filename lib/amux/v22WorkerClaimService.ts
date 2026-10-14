@@ -178,6 +178,11 @@ async function claimCandidate(taskId: string, assignmentId: string,
         card.taskRole, card.executionGrade);
       const recovery = await readAmuxV22RecoveryAuthority(tx, taskId, card.revision,
         null, now);
+      // A v39 retry is bound to the receipt its launch check recorded; recompute
+      // that receipt as of the check so its time-stamped digest matches (v47).
+      const recoveryApproved = recovery?.costAsOf ?
+        await calculateCurrentApprovedAmuxV4TaskCost(tx, card.taskRole, card.executionGrade,
+          { asOf: recovery.costAsOf }) : approved;
       const source = ready.sourceApprovalId ?
         await tx.amuxIdeaUnitDecision.findUnique({
           where: { id: ready.sourceApprovalId },
@@ -272,7 +277,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
           _sum: { reservedCostMicrousd: true } });
         const quote = recovery.riskAcceptanceId ? amuxV22ReadOnlyRetryRouteCost({
           priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
-          catalogApprovalId: approved.approvalId, receipt: approved.receipt,
+          catalogApprovalId: recoveryApproved.approvalId, receipt: recoveryApproved.receipt,
           routeId: route.routeId, workerName: route.workerName,
           provider: route.provider, modelId: route.modelId }) :
           amuxV22RecoveryCost({ priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
@@ -332,7 +337,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
           promotionReceiptId: promotion.id, lane: lane.lane,
           laneDecisionSequence: lane.sequence?.toString() ?? null,
           routeId: route.routeId, catalogApprovalId: approved.approvalId,
-          costReceiptDigest: approved.receipt.receiptDigest,
+          costReceiptDigest: recoveryApproved.receipt.receiptDigest,
           ...(recovery ? { recoveryApprovalId: recovery.id,
             recoveryCostDigest: recovery.costDigest } : {}),
           capacityAssigned: occupied.length,
@@ -350,7 +355,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
         routePolicyDigest: route.routePolicyDigest,
         catalogApprovalId: approved.approvalId,
         catalogVersion: approved.receipt.catalogVersion,
-        costReceiptDigest: approved.receipt.receiptDigest,
+        costReceiptDigest: recoveryApproved.receipt.receiptDigest,
         perAttemptMicroUsd: BigInt(route.perAttemptMicroUsd),
         recoveryApprovalId: recovery?.id ?? null,
         authorizationAuditLogId: auditId, assignedAt: now,
