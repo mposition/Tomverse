@@ -527,8 +527,12 @@ export function amuxV22RecoveryAddedRouteConsented(approved: unknown,
   const approvedIds = new Set(((approved as { routes: { routeId?: unknown }[] }).routes)
     .map((route) => route.routeId));
   if (approvedIds.has(selectedRouteId)) return false;
+  // The generic check only walks current routes, so a registered route that
+  // disappeared would pass unseen: every registered route must still be listed.
+  const currentIds = new Set(current.routes.map((route) => route.routeId));
+  if (!approvedIds.size || [...approvedIds].some((id) => !currentIds.has(id as string)))
+    return false;
   const existing = current.routes.filter((route) => approvedIds.has(route.routeId));
-  if (!existing.length) return false;
   return checkV4TaskApprovedCeiling(approved, { ok: true,
     receipt: { ...current, routes: existing } }).decision === "allow";
 }
