@@ -219,6 +219,11 @@ card reaches Todo) are owner-only; **Execution** opens to every admin role on
 person, which used to sit on Routing -- while its **Cards** section stays
 owner-only. The owner opens Execution on Cards, everyone else on Assignment,
 and a non-owner who names `?tab=cards` gets a 404 rather than another section.
+A card with an open escalation opens its dialog on **Owner review**, the same
+review component Assignment hosts (one pending decision freezes writes in
+both), and a refused step-up there returns to that card. Assignment stays: it
+is where `ops` reviews, and it carries the queue and assignment evidence that
+belongs to no single card (operator decision, 2026-10-14).
 **Operations settings** opens to every admin role, but its **Automatic
 admission** section is owner-only. It is the owner's first section; after
 role filtering, every other role opens on **Execution safety and recovery**.

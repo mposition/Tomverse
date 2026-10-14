@@ -1236,8 +1236,16 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
   const exception = !!risk;
   const approveEligible = !approved && !!evidence?.verified &&
     (!exception || (launchCurrent && (!apiExecutor || apiAccessCurrent)));
+  // The unknown-risk intent is offered on exactly the source the write path
+  // accepts: an unverified legacy inspect report for the approved FIRST Task.
+  // The write rechecks identity, cost, audit binding and uniqueness itself.
+  const riskIntentEligible = !approved && !exception &&
+    taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID &&
+    inspection.requestKind === "inspect" && !!evidence && !evidence.verified &&
+    evidence.reason === "legacy_invocation_unbound" && reason === "legacy_invocation_unbound";
   const eligibilityReason: AmuxV22RecoveryRead["eligibility"]["reason"] = approved ?
-    "already_approved" : !exception ? null : !evidence?.verified ? "safe_stop_required" :
+    "already_approved" : riskIntentEligible ? "risk_acceptance_required" :
+    !exception ? null : !evidence?.verified ? "safe_stop_required" :
       !launchProof ? "launch_proof_required" : !launchProof.verified || launchBindingChanged ?
         "binding_changed" : !launchCurrent ? "launch_proof_stale" :
           !apiExecutor ? null : !apiAccessEvidence ? "api_model_access_required" :
@@ -1261,7 +1269,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
     profileWorkerNames: inspection.profileWorkerNames,
     targetUnit: inspection.targetUnit,
     profileConfigDigest: inspection.profileConfigDigest,
-    eligibility: { acceptUnknownPriorEffects: false,
+    eligibility: { acceptUnknownPriorEffects: riskIntentEligible,
       requestSafeStop: exception && (!evidence?.verified || !launchCurrent),
       approveAttempt: approveEligible, reason: eligibilityReason },
     ...(approved ? { approvalId: approved.id, currentTask } : {}) };
