@@ -89,17 +89,36 @@ const fakeTx = (rows: Record<string, string> = {}) => {
   return { tx: tx as unknown as MarketingTransaction, settings };
 };
 
-/** Every requirement verifies unless a test says which action does not. */
+/**
+ * The audit rows each fake transaction holds: id -> the metadata the route
+ * bound. A requirement verifies as the real verifier would -- every metadata
+ * key it names must be on the row with exactly that value -- unless a test
+ * says which action does not verify at all. A row nothing recorded verifies
+ * (the record-signature row, which this suite does not write).
+ */
+const ledgers = new WeakMap<object, Map<string, Record<string, unknown>>>();
+const ledgerOf = (tx: MarketingTransaction) => {
+  let ledger = ledgers.get(tx);
+  if (!ledger) ledgers.set(tx, (ledger = new Map()));
+  return ledger;
+};
+
 const verifier = (refuseAction?: string) => {
   const seen: MarketingAuditRequirement[] = [];
   const verify = async (
-    _tx: MarketingTransaction,
+    tx: MarketingTransaction,
     requirement: MarketingAuditRequirement,
   ): Promise<MarketingAuditVerdict> => {
     seen.push(requirement);
-    return requirement.action === refuseAction
-      ? { ok: false, problem: "entry_unhashed" }
-      : { ok: true, createdAt: new Date() };
+    if (requirement.action === refuseAction) return { ok: false, problem: "entry_unhashed" };
+    const row = ledgerOf(tx).get(requirement.auditLogId);
+    if (
+      row &&
+      Object.entries(requirement.metadata ?? {}).some(([key, value]) => row[key] !== value)
+    ) {
+      return { ok: false, problem: "metadata_mismatch" };
+    }
+    return { ok: true, createdAt: new Date() };
   };
   return { verify, seen };
 };
@@ -123,6 +142,8 @@ const sign = (
   options: { env?: Record<string, string | undefined>; file?: string | null; refuseAction?: string } = {},
 ) => {
   const { verify, seen } = verifier(options.refuseAction);
+  // What the route's audit row binds, written before the store runs.
+  ledgerOf(tx).set("audit-this-signature", { ...body });
   const promise = signMarketingWebhookProductionConfig(tx, body, "audit-this-signature", {
     env: options.env ?? ENV,
     readRecordFile: async () => (options.file === undefined ? RECORD : options.file),
@@ -193,6 +214,7 @@ test("a first signature writes generation 1 bound to this request's audit row", 
     metadata: {
       generation: 1,
       recordId: RECORD_ID,
+      recordDigest: RECORD_DIGEST,
       deployCommitSha: COMMIT,
       pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
       productionConfigSnapshotDigest: LIVE_DIGEST,
@@ -421,4 +443,22 @@ test("the same set of pairs is the same stored bytes, in any order", () => {
     serializeMarketingWebhookProductionApplyScope({ ...base, scope: [a, b] }),
     serializeMarketingWebhookProductionApplyScope({ ...base, scope: [b, a] }),
   );
+});
+
+test("a record rewritten under the same id cannot stretch the old signature to new pairs", async () => {
+  const { tx, settings } = await signedStore();
+  // Same id, one more observed pair, redeployed with fingerprint and live
+  // configuration unchanged.
+  const rewritten = recordText({
+    observedScope: [
+      { eventType: "post.platform.published", channelId: "chn-youtube" },
+      { eventType: "post.failed", channelId: "chn-youtube" },
+    ],
+  });
+  for (const scope of [SCOPE, [{ eventType: "post.failed", channelId: "chn-youtube" }]]) {
+    await refusedWith(setScope(tx, { scope }, { file: rewritten }), "production_config_not_binding");
+  }
+  assert.equal(settings.has(MARKETING_WEBHOOK_APPLY_SCOPE_KEY), false);
+  // The bytes it was signed over still work.
+  await setScope(tx);
 });

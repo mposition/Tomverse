@@ -87,14 +87,21 @@ export const marketingWebhookLiveDeployCommitSha = (
 /**
  * The audit claim a production configuration signature has to prove.
  *
- * The record signature it rested on is bound when the caller knows it -- the
- * signing transaction does -- and left out later, when only the stored
- * generation is at hand: the generation does not carry it, and the signing
- * transaction already proved it before the row could commit.
+ * `recordDigest` is the digest of the verification record file **as the
+ * caller reads it now**. The signing row bound the digest of the bytes signed
+ * over, so a record rewritten under the same id since -- more observed pairs,
+ * say -- no longer matches the row, and nothing signed over the old bytes can
+ * be stretched to cover the new ones. Every reader of a signed generation
+ * passes it.
+ *
+ * The record signature the generation rested on is bound when the caller
+ * knows it -- the signing transaction does -- and left out later: the
+ * generation does not carry it, and the signing transaction already proved it
+ * before the row could commit.
  */
 export const marketingWebhookProductionConfigAuditRequirement = (
   value: MarketingWebhookProductionConfigGeneration,
-  verificationSignatureAuditLogId?: string,
+  binding: { readonly recordDigest: string; readonly verificationSignatureAuditLogId?: string },
 ): MarketingAuditRequirement => ({
   auditLogId: value.signatureAuditLogId,
   action: MARKETING_WEBHOOK_PRODUCTION_CONFIG_SIGNED_ACTION,
@@ -102,10 +109,13 @@ export const marketingWebhookProductionConfigAuditRequirement = (
   metadata: {
     generation: value.generation,
     recordId: value.recordId,
+    recordDigest: binding.recordDigest,
     deployCommitSha: value.deployCommitSha,
     pipelineFingerprint: value.pipelineFingerprint,
     productionConfigSnapshotDigest: value.productionConfigSnapshotDigest,
-    ...(verificationSignatureAuditLogId === undefined ? {} : { verificationSignatureAuditLogId }),
+    ...(binding.verificationSignatureAuditLogId === undefined
+      ? {}
+      : { verificationSignatureAuditLogId: binding.verificationSignatureAuditLogId }),
   },
 });
 
@@ -311,7 +321,10 @@ export async function signMarketingWebhookProductionConfig(
   // nothing. Refusing rolls the write and the row back together.
   const own = await verifyAudit(
     tx,
-    marketingWebhookProductionConfigAuditRequirement(value, request.verificationSignatureAuditLogId),
+    marketingWebhookProductionConfigAuditRequirement(value, {
+      recordDigest: request.recordDigest,
+      verificationSignatureAuditLogId: request.verificationSignatureAuditLogId,
+    }),
   );
   if (!own.ok) {
     refuse("signature_audit_unverifiable", `The signing audit entry does not verify (${own.problem}).`);
@@ -369,7 +382,27 @@ export async function setMarketingWebhookProductionApplyScope(
       refuse("production_config_mismatch", "The scope names a production generation that is not the signed one.");
     }
     const signed = live.stored.value;
-    const audit = await verifyAudit(tx, marketingWebhookProductionConfigAuditRequirement(signed));
+
+    // The record as the tree carries it now: strict, the named id, and -- through
+    // the audit requirement below -- the same bytes the generation was signed over.
+    const fileText = await readRecordFile(value.recordId);
+    let recordJson: unknown = null;
+    try {
+      recordJson = fileText === null ? null : JSON.parse(canonicalMarketingWebhookFileText(fileText));
+    } catch {
+      recordJson = null;
+    }
+    const record = marketingWebhookVerificationRecordSchema.safeParse(recordJson);
+    if (fileText === null || !record.success || record.data.recordId !== value.recordId) {
+      refuse("record_invalid", "The verification record is not in the deployed tree, or is not a strict record.");
+    }
+
+    const audit = await verifyAudit(
+      tx,
+      marketingWebhookProductionConfigAuditRequirement(signed, {
+        recordDigest: digestMarketingWebhookVerificationRecord(fileText),
+      }),
+    );
     const reasons = marketingWebhookProductionConfigRefusals({
       stored: { ok: true, value: live.stored },
       audit: {
@@ -393,18 +426,6 @@ export async function setMarketingWebhookProductionApplyScope(
         "production_config_not_binding",
         `The signed production configuration does not bind (${reasons.join(", ")}).`,
       );
-    }
-
-    const fileText = await readRecordFile(value.recordId);
-    let recordJson: unknown = null;
-    try {
-      recordJson = fileText === null ? null : JSON.parse(canonicalMarketingWebhookFileText(fileText));
-    } catch {
-      recordJson = null;
-    }
-    const record = marketingWebhookVerificationRecordSchema.safeParse(recordJson);
-    if (!record.success || record.data.recordId !== value.recordId) {
-      refuse("record_invalid", "The verification record is not in the deployed tree, or is not a strict record.");
     }
     if (marketingWebhookScopeOutsideObserved(value.scope, record.data.observedScope).length > 0) {
       refuse("scope_not_observed", "The scope lists a pair the verification record never observed.");
