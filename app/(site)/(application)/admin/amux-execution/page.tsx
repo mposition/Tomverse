@@ -10,6 +10,7 @@ import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
 import { AmuxWorkerCapabilityPanel } from "@/components/admin/AmuxWorkerCapabilityPanel";
+import { AmuxWorkerDerivedCatalogPanel } from "@/components/admin/AmuxWorkerDerivedCatalogPanel";
 import { AmuxWorkerRegistryPanel } from "@/components/admin/AmuxWorkerRegistryPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
@@ -23,6 +24,7 @@ import {
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
 import { readAmuxCliUsageSummaryForAdmin } from "@/lib/amux/adminCliUsageSummary";
 import { readAmuxWorkerCapabilitiesForAdmin } from "@/lib/amux/workerCapabilityAdminRead";
+import { readAmuxDerivedCatalogShadowForAdmin } from "@/lib/amux/workerDerivedCatalogAdminRead";
 import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
 import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
@@ -111,16 +113,19 @@ export default async function AdminAmuxExecutionPage({
     // catalog; only the owner is offered registration, and the route decides
     // that again. A read that fails is shown as such, never as an empty
     // registry.
-    // Capabilities (version 35, R2a) sit under the registry they extend.
-    const [view, capabilities] = await Promise.all([
+    // Capabilities (version 35, R2a) sit under the registry they extend,
+    // and the derived catalog (R2b, a read-only shadow) under them.
+    const [view, capabilities, derivedCatalog] = await Promise.all([
       readAmuxWorkerRegistryForAdmin().catch(() => null),
       readAmuxWorkerCapabilitiesForAdmin().catch(() => null),
+      readAmuxDerivedCatalogShadowForAdmin().catch(() => null),
     ]);
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
         <AmuxWorkerRegistryPanel view={view} isOwner={isOwner} />
         <AmuxWorkerCapabilityPanel view={capabilities} isOwner={isOwner} />
+        <AmuxWorkerDerivedCatalogPanel view={derivedCatalog} />
       </div>
     );
   }

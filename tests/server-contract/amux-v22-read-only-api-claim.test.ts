@@ -94,6 +94,11 @@ mock.module(mod("lib/amux/orchestratorHaltStore.ts"), { namedExports: {
 mock.module(mod("lib/amux/routing.ts"), { namedExports: {
   getConfiguredAmuxV22WorkerCatalog: () => workers,
 } });
+// Orchestration v35 R2c: the v22 claim reads its catalog through the
+// assignment catalog reader; with R2c off that is the configured catalog.
+mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
+  readAmuxAssignmentCatalogs: async () => ({ source: "variables", workers: [], v22: workers }),
+} });
 mock.module(mod("lib/amux/telemetry.ts"), { namedExports: {
   getAmuxWorkerTelemetry: async (selected: Array<{ worker_name: string }>) => {
     telemetryWorkers.push(selected.map((worker) => worker.worker_name));

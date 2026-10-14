@@ -93,10 +93,16 @@ test("Task readiness, promotion capacity and claim use the same separated catalo
   for (const path of ["lib/amux/v4TaskReadyService.ts", "lib/amux/v22AutoPromotionService.ts",
     "lib/amux/v22WorkerClaimService.ts"]) {
     const source = readFileSync(path, "utf8");
-    assert.match(source, /getConfiguredAmuxV22WorkerCatalog\(\)/);
-    assert.doesNotMatch(source, /getConfiguredAmuxWorkerCatalog\(\)/);
+    // Version 35, section 3 (R2c): each reads the assignment catalog in its
+    // own transaction, which is the v22 variable while R2c is off.
+    assert.match(source, /const \{ v22: \w+ \} = await readAmuxAssignmentCatalogs\(tx\);/);
+    assert.doesNotMatch(source, /getConfiguredAmuxWorkerCatalog\(\)|getConfiguredAmuxV22WorkerCatalog\(\)/);
   }
-  const routing = readFileSync("lib/amux/routing.ts", "utf8");
-  assert.match(routing, /parseAmuxV22WorkerCatalog\(process\.env\[AMUX_V22_WORKER_CATALOG_ENV\],[\s\S]*?getConfiguredAmuxWorkerCatalog\(\)\)/);
-  assert.match(routing, /const raw = process\.env\.TOMVERSE_AMUX_WORKER_CATALOG_JSON\?\.trim\(\)/);
+  // The variables' parser moved out of routing.ts (orchestration policy
+  // version 35, R2c), which re-exports it for these importers.
+  const variables = readFileSync("lib/amux/workerCatalogVariables.ts", "utf8");
+  assert.match(variables, /parseAmuxV22WorkerCatalog\(process\.env\[AMUX_V22_WORKER_CATALOG_ENV\],[\s\S]*?getConfiguredAmuxWorkerCatalog\(\)\)/);
+  assert.match(variables, /const raw = process\.env\.TOMVERSE_AMUX_WORKER_CATALOG_JSON\?\.trim\(\)/);
+  assert.match(readFileSync("lib/amux/routing.ts", "utf8"),
+    /export \{\s*getConfiguredAmuxV22WorkerCatalog,\s*getConfiguredAmuxWorkerCatalog,\s*\} from "@\/lib\/amux\/workerCatalogVariables";/);
 });

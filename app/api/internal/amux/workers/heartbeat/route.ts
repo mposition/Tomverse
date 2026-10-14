@@ -18,6 +18,8 @@ import {
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
+import { amuxWorkerCatalogRefusal } from "@/lib/amux/workerAssignmentCatalog";
+import { amuxWorkerDerivedCatalogAssignmentOpen } from "@/lib/amux/workerDerivedCatalogCore";
 import { heartbeatAmuxWorkerRuntime } from "@/lib/amux/workerRuntime";
 
 const requestSchema = z
@@ -56,9 +58,15 @@ export async function POST(request: Request) {
     try {
       const body = await readLimitedJson(request, 2 * 1_024, requestSchema);
 
-      const catalog = getConfiguredAmuxWorkerCatalog();
+      // Orchestration policy version 35, section 3 (R2c): with the derived
+      // catalog's code latch on, a live runtime the catalog does not list (or
+      // a catalog that cannot be read) is not refused -- the bridge would
+      // halt -- but recorded as not dispatch-ready, inside the heartbeat's own
+      // transaction. Until then, the variable is checked here as before.
+      const derived = amuxWorkerDerivedCatalogAssignmentOpen();
+      const catalog = derived ? [] : getConfiguredAmuxWorkerCatalog();
 
-      if (!catalog) {
+      if (!derived && !catalog) {
         return Response.json(
           {
             accepted: false,
@@ -71,7 +79,7 @@ export async function POST(request: Request) {
         );
       }
 
-      if (!catalog.some((worker) => worker.worker_name === body.worker_name)) {
+      if (!derived && !catalog?.some((worker) => worker.worker_name === body.worker_name)) {
         return Response.json(
           {
             accepted: false,
@@ -91,6 +99,9 @@ export async function POST(request: Request) {
         status: body.status,
         dispatchReady: body.dispatch_ready,
         protocolCapabilities: body.protocol_capabilities ?? [],
+        listed: derived
+          ? async (tx) => (await amuxWorkerCatalogRefusal(tx, body.worker_name, true)) === null
+          : undefined,
       });
 
       if (!heartbeat.accepted) {
