@@ -242,6 +242,20 @@ type PendingDecision = {
   escalation_id: string;
 };
 const PENDING_DECISION_KEY = "amux-review-pending-decision-v1";
+const AMUX_ASSIGNMENT_PATH = "/admin/amux-execution?tab=assignment";
+// The same shape the Execution page accepts for `focusEscalation`; anything
+// else would be dropped there, so it is not written into the URL either.
+const AMUX_ESCALATION_ID = /^c[a-z0-9]{20,}$/i;
+
+/**
+ * Where a step-up started from a review returns: the Assignment section with
+ * that escalation reopened. Returning to the bare section made the operator
+ * find the review again after every reauthentication.
+ */
+export const amuxAssignmentReviewReturnPath = (escalationId: string | null | undefined) =>
+  escalationId && AMUX_ESCALATION_ID.test(escalationId)
+    ? `${AMUX_ASSIGNMENT_PATH}&focusEscalation=${encodeURIComponent(escalationId)}`
+    : AMUX_ASSIGNMENT_PATH;
 // These codes are emitted by the server only after a definite pre-decision
 // refusal or a rolled-back transaction. Transport errors and unknown codes
 // remain frozen until the decision ledger confirms their outcome.
@@ -482,6 +496,7 @@ export function AmuxOwnerReviewView({
   onSelectOutcome,
   onRetryReadConfirmed,
   onReread,
+  reviewReturnPath = amuxAssignmentReviewReturnPath(review.escalation.id),
 }: {
   m: RoutingMessages;
   review: ReviewDetail;
@@ -497,6 +512,8 @@ export function AmuxOwnerReviewView({
   onSelectOutcome: (outcome: ReviewOutcome) => void;
   onRetryReadConfirmed: (confirmed: boolean) => void;
   onReread: () => void;
+  /** Where a step-up refused inside this review returns the operator. */
+  reviewReturnPath?: string;
 }) {
   const outcomes = visibleAmuxOwnerReviewOutcomes(review);
   const report = review.review_report;
@@ -687,7 +704,8 @@ export function AmuxOwnerReviewView({
             key={`${review.task.id}:${review.task.revision}:${review.last_attempt?.id ?? "none"}`}
             identity={{ taskId: review.task.id, taskRevision: review.task.revision,
               attemptId: review.last_attempt?.id ?? null }}
-            taskStatus={review.task.status} onReloadReview={onReread} />}
+            taskStatus={review.task.status} onReloadReview={onReread}
+            returnTo={reviewReturnPath} />}
           <div className="mt-4 rounded-lg border border-amber-300/20 bg-zinc-950/40 p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-amber-200">{m.recoveryWhyStopped}</p>
             <p className="mt-2 text-sm leading-6 text-zinc-200">
@@ -1478,7 +1496,8 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
             <p className="mt-1 break-all font-mono text-xs">{m.subjectDigest}: {pendingDecision.subject_digest}</p>
             {reauthenticationRequired && (
               <Link
-                href={adminRecentAuthenticationHref("/admin/amux-execution?tab=assignment")}
+                href={adminRecentAuthenticationHref(
+                  amuxAssignmentReviewReturnPath(pendingDecision.escalation_id))}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-2 inline-block font-bold underline"
@@ -1623,7 +1642,8 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                       <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100">
                         {m.reauthenticationRequired}{" "}
                         <Link
-                          href={adminRecentAuthenticationHref("/admin/amux-execution?tab=assignment")}
+                          href={adminRecentAuthenticationHref(
+                            amuxAssignmentReviewReturnPath(selectedEscalationId))}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-bold underline underline-offset-2"
