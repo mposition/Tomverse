@@ -301,10 +301,12 @@ test("an own audit row that does not verify refuses the signature it would have 
 
 test("a racing first signature loses on the key, not silently", async () => {
   const { tx, settings } = fakeTx();
-  const original = tx.appSetting.create;
-  (tx.appSetting as { create: typeof original }).create = (async (args: Parameters<typeof original>[0]) => {
+  // The fake create, wrapped so the other request writes the key first.
+  const appSetting = tx.appSetting as unknown as { create: (args: unknown) => Promise<unknown> };
+  const original = appSetting.create;
+  appSetting.create = async (args) => {
     settings.set(MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY, "written by the other request");
     return original(args);
-  }) as typeof original;
+  };
   await refusedWith(sign(tx, request()).promise, "production_config_conflict");
 });
