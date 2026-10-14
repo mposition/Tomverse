@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, ShieldCheck, X } fr
 import { GripVertical, MoveRight } from "lucide-react";
 import { AmuxExecutionMovePanel, type AmuxBoardMove } from "./AmuxExecutionMovePanel";
 import { AmuxExecutionDialog } from "./AmuxExecutionDialog";
+import { AmuxCardOwnerReview } from "./AdminAmuxRoutingPanel";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
@@ -124,8 +125,11 @@ async function getJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false }: {
+export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false,
+  canReviewCards = false }: {
   initialTaskId?: string | null; canMoveCards?: boolean;
+  /** Whether a card waiting on the owner opens on its owner review. */
+  canReviewCards?: boolean;
 }) {
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const [view, setView] = useState<"board" | "hierarchy">("board");
@@ -153,7 +157,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
   const activeMoveTarget = useRef<AmuxBoardMove | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [detailTab, setDetailTab] = useState<"overview" | "execution" | "review" | "activity">("overview");
+  const [detailTab, setDetailTab] = useState<"ownerReview" | "overview" | "execution" | "review" | "activity">("overview");
   const [query, setQuery] = useState("");
   const [workerFilter, setWorkerFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -272,11 +276,15 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     try {
       const result = await getJson<Detail>(
         `/api/admin/amux/execution-view?view=detail&taskId=${encodeURIComponent(id)}`);
-      if (request === detailRequest.current) setSelected(result);
+      if (request === detailRequest.current) {
+        setSelected(result);
+        // A card waiting on the owner opens where the owner acts on it.
+        if (canReviewCards && result.escalations.length > 0) setDetailTab("ownerReview");
+      }
     } catch (reason) { if (request === detailRequest.current)
       setDetailError(reason instanceof Error && reason.message === "reauth" ? "reauth" : "unavailable"); }
     finally { if (request === detailRequest.current) setDetailBusy(false); }
-  }, []);
+  }, [canReviewCards]);
 
   useEffect(() => {
     if (!initialTaskId) return;
@@ -311,7 +319,10 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     (!workerFilter || (workerFilter === "__unassigned" ? !card.worker : card.worker === workerFilter)) &&
     (!priorityFilter || card.priority === priorityFilter));
   const adjacent = selected ? uniqueCards.findIndex((card) => card.id === selected.id) : -1;
-  const tabs = ["overview", "execution", "review", "activity"] as const;
+  const ownerEscalation = canReviewCards ? selected?.escalations[0] ?? null : null;
+  const tabs = ownerEscalation ?
+    ["ownerReview", "overview", "execution", "review", "activity"] as const :
+    ["overview", "execution", "review", "activity"] as const;
   const copyLink = async () => {
     try { const url = new URL(window.location.href); url.searchParams.delete("moveRequest");
       await navigator.clipboard.writeText(url.href); setCopyNotice(m.copied); }
@@ -702,6 +713,14 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                   document.getElementById("amux-tab-" + tabs[next])?.focus();
                 }}>{m.detailTabs[tab]}</button>)}
             </div>
+            {ownerEscalation && <div id="amux-panel-ownerReview" role="tabpanel"
+              aria-labelledby="amux-tab-ownerReview" hidden={detailTab !== "ownerReview"} className={styles.panel}>
+              {/* Mounted while the card is open, so switching tabs never drops
+                  a proposal or a decision whose outcome is still being read. */}
+              <AmuxCardOwnerReview key={ownerEscalation.id} taskId={selected.id}
+                escalationId={ownerEscalation.id}
+                onDecisionCommitted={() => { void openCard(selected.id, false); void refreshBoard(); }} />
+            </div>}
             <div id="amux-panel-overview" role="tabpanel" aria-labelledby="amux-tab-overview" hidden={detailTab !== "overview"} className={styles.panel}>
       {selected.body ? <div><h4 className="font-semibold">{m.criteria}</h4>
         {selectedBody ? <div className="space-y-2 text-sm">
