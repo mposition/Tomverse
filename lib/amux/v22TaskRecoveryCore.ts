@@ -1,7 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
-import type { V4TaskCostCeilingReceipt } from "./v4TaskCostCeilingCore.ts";
+import { checkV4TaskApprovedCeiling,
+  type V4TaskCostCeilingReceipt } from "./v4TaskCostCeilingCore.ts";
 import { AMUX_V22_READ_ONLY_RETRY_PROTOCOL_VERSION,
   AMUX_V22_READ_ONLY_LAUNCHER_POLICY_VERSION,
   amuxV22ReadOnlyLaunchScopeDigest as amuxV22CliReadOnlyLaunchScopeDigest } from
@@ -505,6 +506,35 @@ export function amuxV22ReadOnlyRetryRouteCost(input: {
     ...cost, routeId: route.routeId, workerName: route.workerName,
     provider: route.provider, modelId: route.modelId,
     routePolicyDigest: route.routePolicyDigest, perAttemptMicroUsd: route.perAttemptMicroUsd }) };
+}
+
+/** Policy v48. The FIRST Task read-only retry can only run on a route its v4
+ * catalog added after the Task was registered, and an added route alone makes
+ * the generic check ask for a cost reconfirmation. The owner's final consent
+ * binds that exact route, model and cap, so it stands in for that
+ * reconfirmation. Only the added route is excused: with the added routes left
+ * out the Task must still pass the generic check unchanged, so a changed or
+ * removed existing route, raised token bounds or a raised ceiling still refuse,
+ * and the selected route must be one the current catalog actually lists. */
+export function amuxV22RecoveryAddedRouteConsented(approved: unknown,
+  current: V4TaskCostCeilingReceipt, selectedRouteId: string) {
+  const whole = checkV4TaskApprovedCeiling(approved, { ok: true, receipt: current });
+  if (whole.decision === "allow") return true;
+  if (whole.decision !== "reconfirm" || whole.reason !== "task_route_changed" ||
+      !approved || typeof approved !== "object" ||
+      !Array.isArray((approved as { routes?: unknown }).routes) ||
+      !current.routes.some((route) => route.routeId === selectedRouteId)) return false;
+  const approvedIds = new Set(((approved as { routes: { routeId?: unknown }[] }).routes)
+    .map((route) => route.routeId));
+  if (approvedIds.has(selectedRouteId)) return false;
+  // The generic check only walks current routes, so a registered route that
+  // disappeared would pass unseen: every registered route must still be listed.
+  const currentIds = new Set(current.routes.map((route) => route.routeId));
+  if (!approvedIds.size || [...approvedIds].some((id) => !currentIds.has(id as string)))
+    return false;
+  const existing = current.routes.filter((route) => approvedIds.has(route.routeId));
+  return checkV4TaskApprovedCeiling(approved, { ok: true,
+    receipt: { ...current, routes: existing } }).decision === "allow";
 }
 
 /** This authorization binds one exact next attempt; the generic ceiling still applies. */
