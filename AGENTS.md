@@ -1212,6 +1212,15 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   표식이 맞는 전달만 셉니다. pipeline 파일 목록은 수신 route의 import closure 전체이며 테스트가
   강제합니다. schema는 파일 전체가 아니라 수신 경로가 쓰는 모델·그 enum·datasource·generator만 감시합니다(운영자 결정
   2026-10-03) — 무관한 모델 추가가 서명된 기록을 무효로 만들지 않게 하기 위해서입니다.
+- **S2f(production 설정 세대와 적용)**: `lib/marketingWebhookProductionConfig.ts`,
+  `tests/marketingWebhookProductionConfig.test.ts`. staging 기록은 수신 경로만 증명하고
+  production은 **따로 서명한 설정 세대**로 묶습니다(S1 r7 amendment 1). 환경을 건너는
+  것은 pipeline fingerprint 하나이고, production digest는 이름부터 `production`이라 staging
+  digest를 대신 내밀 수 없습니다. apply scope는 digest에 넣지 않습니다 — 범위를 좁혀도
+  서명이 무효가 되지 않게 하고, 범위는 서명된 세대와 따로 대조합니다. 배포 commit은
+  출처로 기록할 뿐 비교하지 않습니다 — fingerprint를 바꾸지 않는 release가 production
+  적용을 조용히 멈추게 해서는 안 됩니다. 세대는 `OLD+1`이고, 저장값을 읽지 못했거나
+  거절하는 값이면 그 위에 서명하지 않습니다.
 
 # 엔지니어링 Agent
 
