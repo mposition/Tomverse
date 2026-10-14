@@ -122,6 +122,22 @@ test("strict API frame binds authoritative v4 price, caps, fixed settings and cu
     /read_only_api_frame_invalid/);
 });
 
+test("a production caller without an injected clock checks the pricing window on the real clock", () => {
+  // The host, launcher and preflight pass `{ now: dependencies.now }`, which is
+  // undefined in production; that must not read as an invalid date.
+  const day = 86_400_000;
+  const current = frame({
+    pricingVerifiedAt: new Date(Date.now() - day).toISOString(),
+    pricingExpiresAt: new Date(Date.now() + day).toISOString() });
+  assert.equal(parseAmuxV22ReadOnlyApiExecutionFrame(current, { now: undefined }), current);
+  assert.throws(() => parseAmuxV22ReadOnlyApiExecutionFrame(frame({
+    pricingVerifiedAt: new Date(Date.now() - 2 * day).toISOString(),
+    pricingExpiresAt: new Date(Date.now() - day).toISOString(),
+  }), { now: undefined }), /read_only_api_frame_invalid/);
+  assert.throws(() => parseAmuxV22ReadOnlyApiExecutionFrame(current, { now: "not a date" }),
+    /read_only_api_frame_invalid/);
+});
+
 test("nominal to actual scope may replace only opaque launcherConfigDigest", () => {
   const nominal = amuxV22ReadOnlyApiNominalLaunchScope(frame(), "5".repeat(64));
   const actual = amuxV22ReadOnlyApiActualLaunchScope(nominal, "6".repeat(64));
