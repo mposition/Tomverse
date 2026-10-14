@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import pg from "pg";
 
-import { allocateAmuxCardDisplayKey } from "@/lib/amux/cardDisplayKeyAllocator";
+import { allocateAmuxCardDisplayKey, chooseAmuxFeatureDisplayPrefix } from "@/lib/amux/cardDisplayKeyAllocator";
 import { prisma } from "@/lib/prisma";
 
 // docs/policy/amux-card-display-key.md §3, against PostgreSQL through the
@@ -286,6 +286,42 @@ test("the AMUX snapshot sync numbers a new card SYNC and an update keeps its num
 // reads public."AmuxPortfolioNode", so Feature nodes can be built only in the
 // public schema; the v4 schema tests run there for the same reason.
 const testSchema = new URL(process.env.TEST_DATABASE_URL!).searchParams.get("schema") || "public";
+
+test("a new Feature takes its proposal or the first free numbered variant, and its cards number under it", {
+  skip: testSchema === "public" ? undefined : "the v4 portfolio parent guard reads the public schema",
+}, async () => {
+  // docs/policy/amux-intake.md v17 items 3 and 4, inside one rolled-back transaction.
+  const proposed = freshPrefix().slice(0, 12);
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const addNode = async (level: string, parentId: string | null, displayPrefix: string | null) => {
+      const id = randomUUID();
+      await tx.$executeRaw`
+        INSERT INTO "AmuxPortfolioNode"
+          ("id", "level", "parentId", "state", "revision", "titleCiphertext",
+           "contentKeyId", "contentKeyVersion", "contentDigest", "contentDigestKeyId",
+           "approvedByUserId", "authorizationAuditLogId", "displayPrefix", "updatedAt")
+        VALUES (${id}, ${level}, ${parentId}, 'active', 0, ${Buffer.from("synthetic-only")},
+                'synthetic', 1, ${"a".repeat(64)}, 'synthetic', 'synthetic', ${randomUUID()},
+                ${displayPrefix}, CURRENT_TIMESTAMP)`;
+      return id;
+    };
+    const initiative = await addNode("initiative", null, null);
+    const epic = await addNode("epic", initiative, null);
+
+    assert.equal(await chooseAmuxFeatureDisplayPrefix(tx, proposed), proposed);
+    await addNode("feature", epic, proposed);
+    assert.equal(await chooseAmuxFeatureDisplayPrefix(tx, proposed), `${proposed}2`);
+    await addNode("feature", epic, `${proposed}2`);
+    assert.equal(await chooseAmuxFeatureDisplayPrefix(tx, proposed), `${proposed}3`);
+    for (const invalid of [undefined, "lower", "ENG"]) {
+      assert.equal(await chooseAmuxFeatureDisplayPrefix(tx, invalid), null);
+    }
+
+    assert.equal(await allocateAmuxCardDisplayKey(tx, proposed), `AMUX-${proposed}-001`);
+    assert.equal(await allocateAmuxCardDisplayKey(tx, proposed), `AMUX-${proposed}-002`);
+    throw new Rollback("synthetic nodes are not kept");
+  }), Rollback);
+});
 
 test("a Feature's prefix is Feature-only, not reserved, unique and immutable once set", {
   skip: testSchema === "public" ? undefined : "the v4 portfolio parent guard reads the public schema",

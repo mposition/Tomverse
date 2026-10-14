@@ -89,5 +89,6 @@ v4 카드가 Feature 아래에 있으면(`parentFeatureNodeId`, 또는 부모 St
   함수.
 - **S3 생성 경로 연결**: 카드를 만드는 모든 경로가 새 카드에 번호를 준다. Feature PREFIX를 v4
   intake 제안에 넣는 요청 schema 변경은 `amux-intake.md` 개정안을 운영자에게 먼저 제시한다.
+  그 개정은 `amux-intake.md`의 v17 절로 2026-10-14 mposition이 승인했다.
 - **S4 backfill**: §5.
 - **S5 표시와 검색**: 목록·상세에서 번호를 주 식별자로, Task ID를 그 옆에 보이고, 번호로 검색한다.

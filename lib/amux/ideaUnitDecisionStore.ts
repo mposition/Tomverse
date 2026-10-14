@@ -27,6 +27,8 @@ import { checkAmuxIdeaUnitConsume,
   type AmuxIdeaUnitConsumeContext } from "./ideaUnitConsumeGuard.ts";
 import type { V4TaskCostCeilingResult } from "./v4TaskCostCeilingCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { allocateAmuxCardDisplayKey,
+  chooseAmuxFeatureDisplayPrefix } from "./cardDisplayKeyAllocator.ts";
 
 /** A09's protected writer still requires the dedicated environment gate and
  * the route's owner approval before its transaction body is reachable. */
@@ -329,16 +331,21 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
   // insert. A changed or archived parent invalidates the old receipt.
   const hierarchy = input.snapshot.hierarchy;
   if (hierarchy.length !== 3) throw new AmuxV4UnitDecisionError("reconfirm");
+  // The card's Feature (hierarchy[2]) prefix, read with the row this loop
+  // already locks (docs/policy/amux-intake.md v17 item 4).
+  let featureDisplayPrefix: string | null = null;
   for (const target of hierarchy) {
     const nodes = await tx.$queryRaw<Array<{
       id: string; level: string; parentId: string | null; state: string;
       revision: number; contentDigest: string; contentDigestKeyId: string;
+      displayPrefix: string | null;
     }>>`
       SELECT "id", "level", "parentId", "state", "revision",
-             "contentDigest", "contentDigestKeyId"
+             "contentDigest", "contentDigestKeyId", "displayPrefix"
       FROM "AmuxPortfolioNode" WHERE "id" = ${target.id} FOR SHARE
     `;
     const current = nodes[0];
+    if (target.level === "feature") featureDisplayPrefix = current?.displayPrefix ?? null;
     const revision = await tx.amuxPortfolioNodeRevision.findUnique({
       where: { nodeId_revision: { nodeId: target.id,
         revision: target.revision } },
@@ -419,8 +426,13 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     "card_body", input.cardId, input.keys);
   const brief = plan.executionBrief === null ? null : sealAmuxContent(
     Buffer.from(plan.executionBrief, "utf8"), "card_brief", input.cardId, input.keys);
+  // A Feature without a prefix (made before amux-intake v17, or whose
+  // proposal had none) leaves the card unnumbered for the backfill.
+  const displayKey = featureDisplayPrefix === null ? null :
+    await allocateAmuxCardDisplayKey(tx, featureDisplayPrefix);
   await tx.amuxWorkItem.create({ data: {
     id: input.cardId, title: plan.cardType === "story" ? "AMUX Story" : "AMUX Task",
+    displayKey,
     description: null, status: "backlog", kind: "unknown", priority: "p3",
     owner: null, claimedAt: null, revision: 0,
     sourceSystem: plan.sourceSystem, sourceKey: plan.sourceKey,
@@ -575,6 +587,11 @@ export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient, inp
   const content = amuxContentDigest(Buffer.from(amuxCanonicalJson({
     title: plan.title, description: plan.description }), "utf8"),
   "node_content", plan.id, input.keys);
+  // docs/policy/amux-intake.md v17 item 3: the proposed Feature prefix, or the first of its
+  // numbered alternatives no Feature holds yet. The unique index still
+  // refuses a concurrent creation that took the same one.
+  const displayPrefix = plan.level === "feature" ?
+    await chooseAmuxFeatureDisplayPrefix(tx, plan.displayPrefix) : null;
   const auditId = await writeAdminAuditLog({ tx, session: input.session,
     request: input.request, action: "amux.v4.unit.consume",
     targetType: "AmuxIdeaUnitDecision", targetId: plan.decisionId,
@@ -582,10 +599,13 @@ export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient, inp
     metadata: { ideaId: plan.ideaId, draftUnitId: plan.draftUnitId,
       nodeId: plan.id, action: "create_node",
       confirmationDigest: prepared.confirmationDigest,
+      ...(plan.displayPrefix ? { proposedDisplayPrefix: plan.displayPrefix,
+        displayPrefix } : {}),
       executionAttempted: false },
   });
   await tx.amuxPortfolioNode.create({ data: {
     id: plan.id, level: plan.level, parentId: plan.parentId,
+    displayPrefix,
     state: "active", revision: 0,
     titleCiphertext: new Uint8Array(title.ciphertext),
     descriptionCiphertext: new Uint8Array(description.ciphertext),

@@ -33,6 +33,32 @@ approvedBy: mposition · approvedAt: 2026-10-15 · policy version: 18
 이 버전은 위 두 화면과 timer를 만드는 코드와 운영 설치를 승인한다. 화면이 생기기 전까지는
 기존 단계별 화면이 그대로 동작한다.
 
+## v17 — Feature 카드 번호 PREFIX 제안 [decision, mposition 2026-10-14]
+
+approvedBy: mposition · approvedAt: 2026-10-14 · policy version: 17
+
+`docs/policy/amux-card-display-key.md`의 결정 2·6·8(PREFIX는 Feature마다 하나, agent·등록 주체가 고르고
+운영자는 입력하지 않음, Feature 사이에 고유)을 v4 분석·등록 경로에 적용한다. 이 절은 그 PREFIX가 어디서
+제안되고 언제 Feature에 쓰이는지만 정한다. 결정·승인·승격·실행·비용·점수 계약은 바꾸지 않는다.
+
+1. **제안.** 분석 chunk schema를 4로 올린다. `level: feature` 노드 제안은 선택 필드 `displayPrefix`를 가질 수
+   있다 — A-Z·0-9 2~16자, 예약 PREFIX(`WORKBOARD`·`INTAKE`·`LOCAL`·`ENG`·`IDEA`·`SYNC`·`LEGACY`)가 아님.
+   initiative·epic 제안에는 이 필드가 없다. 분석 prompt 버전을 올려 모델에게 Feature마다 그 Feature를
+   나타내는 짧은 코드를 제안하게 한다. 모델 값은 제안이며, 형식이나 예약어를 어기면 기존 strict parse처럼
+   그 chunk를 거절한다.
+2. **결속.** PREFIX는 노드 제안 객체의 일부이므로 기존 unit digest와 확인 snapshot이 그대로 결속한다.
+   `create_node` 확인 화면은 제안된 PREFIX를 읽기 전용으로 보여 준다. 운영자는 입력하거나 고치지 않는다.
+3. **기록.** `create_node`가 Feature를 만드는 같은 트랜잭션에서 PREFIX를 Feature 행에 쓴다. 다른 Feature가
+   이미 그 PREFIX를 쓰고 있으면, 등록 주체(서버)가 결정적으로 `<PREFIX>2`부터 `<PREFIX>99`까지 중 처음 비어
+   있는 값을 고른다(16자를 넘으면 앞부분을 잘라 맞춘다). 실제로 쓴 PREFIX는 같은 트랜잭션의 감사 기록에 남긴다.
+   다 차 있으면 PREFIX 없이 Feature를 만든다.
+4. **카드 번호.** v4 Story·Task 카드는 등록 트랜잭션에서 이미 잠근 Feature 행의 PREFIX로 같은 트랜잭션에서
+   번호를 받는다. v4 카드는 항상 Feature 아래에 있으므로(계층 3단 필수) `IDEA` PREFIX는 backfill 예비로만 남는다.
+5. **PREFIX 없는 Feature.** schema 3 이하로 이미 봉인된 draft의 Feature, 이 개정 전에 만든 Feature,
+   `select_existing_node`로 연결한 PREFIX 없는 Feature는 PREFIX를 비워 둔다. 그 아래 카드는 번호 없이
+   등록되고, `docs/policy/amux-card-display-key.md §5`의 backfill이 운영자 승인 뒤 채운다. 이 절은 기존
+   Feature의 PREFIX를 쓰는 별도 경로를 만들지 않는다.
+
 ## v16 — Owner-managed analysis monthly budget [decision, mposition 2026-10-11]
 
 approvedBy: mposition · approvedAt: 2026-10-11 · policy version: 16
@@ -112,6 +138,7 @@ v1 승인은 설계 권고 16개를 승인했고 그때 법적 보존 기간과 
 | 13 | 2026-10-04 mposition | 분석 CLI 호출 1회 hard deadline 10분, Agent 전체 DB UTC 하루 최대 12회, 상한 초과 보류, 자동 재시도 금지를 승인한다. live runner·S0·운영 래치는 열지 않는다. |
 | 14 | 2026-10-08 mposition | v4 전용 코드 래치를 준비하는 단일 PR 작성을 승인한다. 분석 queue/result read/claim/result write·라이브 CLI·보존 삭제/hold write 래치는 그대로 닫고, 모든 v4 운영 환경 스위치와 라이브 호출·쓰기·자동 실행은 별도 검증·승인 전까지 열지 않는다. v22와 v1~v3 경로는 바꾸지 않는다. |
 | 15 | 2026-10-09 mposition | 남은 v4 live 활성화를 코드 래치 PR → production 합성 key 삭제 증거 → 승인 모델·가격 등록 → 전용 Ubuntu 서비스 연결·검증 순서로 승인한다. 각 단계는 앞 단계의 증거와 별도 환경 스위치를 요구하며 main 병합은 운영자만 한다. v22 자동 승격과 worker 실행은 열지 않는다. |
+| 17 | 2026-10-14 mposition | v4 분석이 Feature마다 카드 번호 PREFIX를 제안하고(chunk schema 4), `create_node`가 같은 트랜잭션에서 Feature에 쓰며, v4 카드는 그 PREFIX로 번호를 받는다. 위 v17 절. |
 | 18 | 2026-10-15 mposition | 아이디어당 실행 승인 한 번(입력·전송 preview·모델·비용 상한)과 계획 승인 한 번(노드·Story·Task·의존·역할·점수·공개 PR 동의를 한 트랜잭션, 단위별 결정 행 유지, 실패 시 전체 롤백). 분석은 고정 주기 timer로 자동 시작한다. `development-agent-orchestration.md` v49와 같은 결정 |
 
 아래 v3 절은 2026-09-29에 운영자 mposition이 승인했다. 더 세밀한 시각은 없다. 그 설계 승인은 코드 래치를 켜지 않고 환경 값을 설정하지 않는다. 2026-09-30 활성화 승인이 코드 래치를 켜고, 환경 값이 `enabled`일 때만 writer를 연다. v1과 v2의 writer는 바뀌지 않는다.

@@ -181,6 +181,11 @@ export function AmuxIdeaNodeRegistrationPanel({ ideaId, unit }: {
   return <section className="space-y-2 rounded-lg border p-3 border-zinc-700">
     <h5 className="font-medium">{m.nodeRegistrationTitle} · {proposal.title}</h5>
     <p className="text-sm">{m.nodeRegistrationHint}</p>
+    {/* docs/policy/amux-intake.md v17 item 2: shown, never typed; the server assigns it. */}
+    {proposal.level === "feature" ? <p className="text-sm" data-testid="amux-node-display-prefix">
+      {m.nodeRegistrationDisplayPrefix}: <span className="font-mono">
+        {proposal.displayPrefix ?? m.nodeRegistrationNoDisplayPrefix}</span>
+      <span className="block text-xs opacity-70">{m.nodeRegistrationDisplayPrefixHint}</span></p> : null}
     {expectedParentLevel ? <><button type="button" onClick={() => void load()}
       disabled={busy || unknown}
       className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">

@@ -2,7 +2,12 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { formatAmuxCardDisplayKey, isAmuxCardDisplayPrefix } from "@/lib/amux/cardDisplayKeyCore";
+import {
+  amuxFeatureDisplayPrefixCandidates,
+  formatAmuxCardDisplayKey,
+  isAmuxCardDisplayPrefix,
+  pickAmuxFeatureDisplayPrefix,
+} from "@/lib/amux/cardDisplayKeyCore";
 
 type AllocatorClient = Pick<Prisma.TransactionClient, "$queryRaw">;
 
@@ -38,4 +43,24 @@ export async function allocateAmuxCardDisplayKey(tx: AllocatorClient, prefix: st
     throw new Error("AMUX card display counter returned no number");
   }
   return formatAmuxCardDisplayKey(prefix, Number(rows[0].lastNumber));
+}
+
+/**
+ * The prefix a new Feature takes (docs/policy/amux-intake.md v17 item 3): the
+ * proposal, or the first `<PREFIX>2` .. `<PREFIX>99` variant no Feature holds
+ * yet; null when there is no valid proposal or every variant is taken. One
+ * read, inside the caller's transaction; the unique index on
+ * `AmuxPortfolioNode.displayPrefix` still refuses a concurrent creation that
+ * chose the same one.
+ */
+export async function chooseAmuxFeatureDisplayPrefix(
+  tx: AllocatorClient, proposed: unknown,
+): Promise<string | null> {
+  const candidates = amuxFeatureDisplayPrefixCandidates(proposed);
+  if (candidates.length === 0) return null;
+  const taken = await tx.$queryRaw<Array<{ displayPrefix: string }>>`
+    SELECT "displayPrefix" FROM "AmuxPortfolioNode"
+    WHERE "displayPrefix" = ANY(${candidates}::TEXT[])
+  `;
+  return pickAmuxFeatureDisplayPrefix(candidates, new Set(taken.map((row) => row.displayPrefix)));
 }
