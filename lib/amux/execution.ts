@@ -415,10 +415,14 @@ export async function startAmuxV22TaskExecution(input: {
       });
       if (!budget.allowed) return { started: false as const,
         reason: "attempt_budget_exhausted" as const };
+      // v47: the retry receipt is recomputed as of its launch check.
+      const recoveryReceipt = recovery?.riskAcceptanceId && route && recovery.costAsOf ?
+        await calculateCurrentApprovedAmuxV4TaskCost(tx, card.taskRole, card.executionGrade,
+          { asOf: recovery.costAsOf }) : cost;
       const recoveryCost = recovery?.riskAcceptanceId && route ?
         amuxV22ReadOnlyRetryRouteCost({
           priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
-          catalogApprovalId: cost.approvalId, receipt: cost.receipt,
+          catalogApprovalId: recoveryReceipt.approvalId, receipt: recoveryReceipt.receipt,
           routeId: route.routeId, workerName: route.workerName,
           provider: route.provider, modelId: route.modelId }) :
         recovery ? amuxV22RecoveryCost({

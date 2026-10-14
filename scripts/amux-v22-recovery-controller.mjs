@@ -1,5 +1,5 @@
 import { AMUX_V22_LEGACY_SAFE_STOP_ENV, AMUX_V22_RECOVERY_CONTROLLER_SECRET_ENV,
-  runAmuxV22RecoveryControllerOnce } from "../lib/amux/v22RecoveryController.mjs";
+  runAmuxV22RecoveryControllerTick } from "../lib/amux/v22RecoveryController.mjs";
 
 // A built artifact remains inert until both independent exact-true gates are
 // set by an operator. This process never starts or restarts a worker.
@@ -15,7 +15,7 @@ for (const name of ["DATABASE_URL", "DIRECT_URL", "GITHUB_TOKEN", "GH_TOKEN",
 if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0")
   throw new Error("recovery controller transport boundary violated");
 
-const result = await runAmuxV22RecoveryControllerOnce({
+const result = await runAmuxV22RecoveryControllerTick({
   recoveryEnabled: process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED,
   safeStopEnabled: process.env[AMUX_V22_LEGACY_SAFE_STOP_ENV],
   internalUrl: process.env.TOMVERSE_INTERNAL_URL,
@@ -23,4 +23,5 @@ const result = await runAmuxV22RecoveryControllerOnce({
 });
 // Never print a PID, path, systemd output, credential, or worker/model output.
 console.log(JSON.stringify(result));
-if (["outcome_unknown", "unavailable"].includes(result.state)) process.exitCode = 3;
+if (["outcome_unknown", "unavailable"].includes(result.state) ||
+    ["outcome_unknown", "unavailable"].includes(result.followUp?.state)) process.exitCode = 3;
