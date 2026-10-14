@@ -70,7 +70,7 @@ const launchReport = {
   requestKind: "read_only_launch_check", launchCheckId: uuid,
   launchProofId: uuid, requestDigest: "a".repeat(64),
   taskId: "c48886b9-86f8-4631-8db8-c0b288a707af", taskRevision: 8,
-  priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba9bd8",
+  priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba39d8",
   workerName: "claude-test", workerInstanceId: uuid, workerGeneration: 2,
   targetHost: "amux-ubuntu", sourceEvidenceId: uuid,
   sourceEvidenceDigest: "b".repeat(64), riskAcceptanceId: uuid,

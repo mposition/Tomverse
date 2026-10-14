@@ -171,6 +171,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261013320000_amux_v22_api_model_access_audit_xid_repair",
   "20261013330000_amux_v22_api_launch_proof_deadline",
   "20261013340000_amux_v22_api_assignment_cli_passthrough_repair",
+  // Orchestration policy v44: the FIRST Task prior attempt ID correction of
+  // the 290 attempt guard and four recovery CHECKs; it changes no
+  // commit-deadline mechanism.
+  "20261014120000_amux_v22_prior_attempt_id_guard_correction",
+  "20261014120100_amux_v22_prior_attempt_id_check_correction",
   // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
   // no commit deadline and continues to use the existing mutation fence.
   "20261012170000_amux_verified_no_commit_halt_auto_clear",

@@ -17,7 +17,7 @@ const worker = "claude-investigate";
 const request = Object.freeze({ version: 1,
   requestId: "00000000-0000-4000-8000-000000000071",
   taskId: "c48886b9-86f8-4631-8db8-c0b288a707af",
-  priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba9bd8",
+  priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba39d8",
   worker, provider: "anthropic", selectedModelId: "claude-opus-5-5",
   launchProofId: "00000000-0000-4000-8000-000000000071",
   launchProofDigest: "1".repeat(64), apiExecutionFrameDigest: "2".repeat(64),
