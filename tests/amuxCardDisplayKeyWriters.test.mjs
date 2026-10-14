@@ -50,6 +50,10 @@ test("each numbered writer allocates from its own path's prefix and writes the k
   for (const [path, entry] of Object.entries(NUMBERED)) {
     const source = read(path);
     assert.ok(entry in AMUX_CARD_DISPLAY_PATH_PREFIX, `${path}: ${entry} is not a policy §4 path`);
+    // Exactly one card-creating call per file, so a second create, createMany,
+    // upsert or raw INSERT added beside the numbered one fails here.
+    const creations = source.match(new RegExp(CREATES_CARD.source, "g")) ?? [];
+    assert.equal(creations.length, 1, `${path} creates cards in exactly one place`);
     const allocations = [...source.matchAll(/allocateAmuxCardDisplayKey\(tx, AMUX_CARD_DISPLAY_PATH_PREFIX\.(\w+)\)/g)];
     assert.deepEqual(allocations.map((match) => match[1]), [entry], `${path} allocates once, under ${entry}`);
     // The allocation sits just before the one create it numbers, which then
