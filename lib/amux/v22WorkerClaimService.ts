@@ -20,7 +20,7 @@ import { calculateCurrentApprovedAmuxV4TaskCost } from
 import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
 import { amuxV22ApiModelAccessCurrent, readAmuxV22RecoveryAuthority } from
   "./v22TaskRecoveryService.ts";
-import { amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
+import { amuxV22RecoveryAddedRouteConsented, amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
   amuxV22ReadOnlyRetryRouteCost,
   currentAmuxV22ReadOnlyApiExecutionFrame } from "./v22TaskRecoveryCore.ts";
 import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND } from
@@ -123,7 +123,12 @@ async function claimCandidate(taskId: string, assignmentId: string,
       });
       const ready = await evaluateAmuxV4TaskReadyInTransaction(tx,
         taskId, context, null, "todo");
-      if (!ready.ready || !promotion || promotion.workItemId !== taskId ||
+      // Policy v48: only the FIRST Task retry may carry a cost reconfirmation,
+      // and only for a route added after registration (checked below once the
+      // owner-approved recovery is read).
+      const reconfirmOnly = !ready.ready && ready.reasons.length === 1 &&
+        ready.reasons[0] === "cost_reconfirmation_required";
+      if ((!ready.ready && !reconfirmOnly) || !promotion || promotion.workItemId !== taskId ||
           promotion.sourceApprovalId !== ready.sourceApprovalId ||
           promotion.briefDigest !== ready.briefDigest) {
         throw new BoardImportError("task_not_ready", 409);
@@ -196,8 +201,12 @@ async function claimCandidate(taskId: string, assignmentId: string,
         snapshot.card.task && typeof snapshot.card.task === "object" &&
         !Array.isArray(snapshot.card.task) && "costReceipt" in snapshot.card.task ?
           snapshot.card.task.costReceipt : null;
+      const addedRouteConsented = !!recovery?.riskAcceptanceId && !!recovery.routeId &&
+        amuxV22RecoveryAddedRouteConsented(approvedCost, approved.receipt, recovery.routeId);
+      if (reconfirmOnly && !addedRouteConsented)
+        throw new BoardImportError("task_not_ready", 409);
       if (checkV4TaskApprovedCeiling(approvedCost,
-        { ok: true, receipt: approved.receipt }).decision !== "allow") {
+        { ok: true, receipt: approved.receipt }).decision !== "allow" && !addedRouteConsented) {
         throw new BoardImportError("cost_reconfirmation_required", 409);
       }
       const requiredTool = amuxV22RequiredTool(card.taskRole);

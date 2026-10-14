@@ -61,9 +61,11 @@ const world = { task: {} as Row, attempt: {} as Row, runtime: {} as Row,
   // null keeps the fixed test receipt. A Date makes the receipt digest depend on
   // its calculation time, as production does (calculatedAtIso is digested).
   costClock: null as Date | null,
+  readyReasons: ["dependency_incomplete"] as string[], sourceReceipt: null as unknown,
   changedOld: 0, ledgerWrites: 0, attemptWrites: 0 };
 function reset() {
   world.costClock = null;
+  world.readyReasons = ["dependency_incomplete"]; world.sourceReceipt = null;
   process.env.TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED = "true";
   process.env.TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED = "true";
   delete process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED;
@@ -121,6 +123,8 @@ const tx = {
       values[0].includes("claude-test") ? [{ workerName: "claude-test" }] : [];
     return [{ id: world.task.id }];
   },
+  amuxIdeaUnitDecision: { findUnique: async () => world.sourceReceipt === null ? null :
+    { confirmationSnapshot: { card: { task: { costReceipt: world.sourceReceipt } } } } },
   amuxWorkItem: { findUnique: async () => world.task, findMany: async () => [],
     updateMany: async ({ where }: { where: Row }) => {
     if (!world.cas || !matches(world.task, where)) return { count: 0 };
@@ -256,7 +260,9 @@ function load() {
   mock.module(mod("lib/amux/v4TaskReadyService.ts"), { namedExports: {
     loadAmuxV4TaskReadyContext: async () => ({}), evaluateAmuxV4TaskReadyInTransaction: async (_tx: unknown,
       _task: string, _context: unknown, _owner: unknown, expected: string) => {
-      assert.equal(expected, "blocked"); return { ready: world.ready }; },
+      assert.equal(expected, "blocked");
+      return { ready: world.ready, reasons: world.ready ? [] : world.readyReasons,
+        sourceApprovalId: "source-approval" }; },
   } });
   mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports: {
     calculateCurrentApprovedAmuxV4TaskCost: async (_tx: unknown, _role: string,
@@ -814,6 +820,36 @@ test("v47: a time-stamped receipt still binds the launch check through read and 
     acceptRetry: true });
   assert.equal(approved.state, "approved");
   assert.equal(world.approvals[0]!.costReceiptDigest, check.costReceiptDigest);
+});
+test("v48: final consent excuses only a cost reconfirmation it actually covers", async () => {
+  const { service } = await prepareUnknownRiskSafeStop(["read_only_api_retry_v1"]);
+  await submitReadOnlyLaunchProof();
+  const accessService = await loadApiAccess();
+  const accessRequest = (await accessService.pendingAmuxV22ApiModelAccess("codex-test")).requests[0]!;
+  await accessService.reportAmuxV22ApiModelAccess(amuxV22ApiModelAccessResult(accessRequest, {
+    access: "verified", canonicalModelId: accessRequest.selectedModelId, reason: null }));
+  const ready = await service.readAmuxV22TaskRecovery(owner,
+    AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, safeStopRequestId);
+  const approve = (requestId: string) => service.approveAmuxV22TaskRecovery({ session: owner,
+    request: new Request("https://tomverse.test"), action: "approve_attempt",
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID, requestId,
+    inspectionId: ready.inspectionId!, evidenceId: ready.evidenceId!,
+    evidenceDigest: ready.evidenceDigest!, costDigest: ready.cost!.costDigest,
+    riskAcceptanceId: ready.riskAcceptance!.id, riskAcceptanceDigest: ready.riskAcceptance!.digest,
+    launchProofId: ready.launchProof!.id, launchProofDigest: ready.launchProof!.digest,
+    acceptRetry: true });
+  world.ready = false;
+  // Another readiness reason is never excused.
+  world.readyReasons = ["cost_reconfirmation_required", "dependency_incomplete"];
+  await assert.rejects(approve("8b0e7c1d-5f2a-4c39-9e6d-1a2b3c4d5e60"), /task_not_ready/);
+  // A reconfirmation the consent does not cover (no registered receipt) refuses.
+  world.readyReasons = ["cost_reconfirmation_required"];
+  await assert.rejects(approve("8b0e7c1d-5f2a-4c39-9e6d-1a2b3c4d5e61"), /task_not_ready/);
+  // An unreadable registered receipt cannot show the route was added: refuse.
+  world.sourceReceipt = "unparseable";
+  await assert.rejects(approve("8b0e7c1d-5f2a-4c39-9e6d-1a2b3c4d5e62"), /task_not_ready/);
+  assert.equal(world.approvals.length, 0);
 });
 test("API access selects the fresh proof and refuses stale, drifted and alias-mismatched authority", async () => {
   const { service } = await prepareUnknownRiskSafeStop(["read_only_api_retry_v1"]);
