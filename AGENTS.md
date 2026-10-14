@@ -1291,6 +1291,15 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   읽기 전용이며 gate가 아니고, signable이라는 출력은 서명 승인이 아닙니다 —
   서명은 production 콘솔에서 사람이 하는 행위이고, 콘솔은 production이 실제로
   돌리는 트리를 읽습니다.
+- **S2f(production 설정 세대와 적용)**: `lib/marketingWebhookProductionConfig.ts`,
+  `tests/marketingWebhookProductionConfig.test.ts`. staging 기록은 수신 경로만 증명하고
+  production은 **따로 서명한 설정 세대**로 묶습니다(S1 r7 amendment 1). 환경을 건너는
+  것은 pipeline fingerprint 하나이고, production digest는 이름부터 `production`이라 staging
+  digest를 대신 내밀 수 없습니다. apply scope는 digest에 넣지 않습니다 — 범위를 좁혀도
+  서명이 무효가 되지 않게 하고, 범위는 서명된 세대와 따로 대조합니다. 배포 commit은
+  출처로 기록할 뿐 비교하지 않습니다 — fingerprint를 바꾸지 않는 release가 production
+  적용을 조용히 멈추게 해서는 안 됩니다. 세대는 `OLD+1`이고, 저장값을 읽지 못했거나
+  거절하는 값이면 그 위에 서명하지 않습니다.
 
 # 엔지니어링 Agent
 
