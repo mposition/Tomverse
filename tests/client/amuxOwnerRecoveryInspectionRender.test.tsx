@@ -46,7 +46,7 @@ test("Korean inspection shows reservation and unknown cost plainly, never offers
   assert.equal(propsOf(tree).some((props) => props["data-testid"] === "admin-amux-review-outcome-retry"), false);
 });
 test("a refused step-up returns to the review the caller names, else the Assignment section", () => {
-  const failure = { message: "sign in again", tone: "warning" as const, requiresReauthentication: true, approvalId: null };
+  const failure = { message: "sign in again", tone: "error" as const, requiresReauthentication: true, approvalId: null };
   const notice = (returnTo?: string) => propsOf(AmuxRecoveryInspectionView({ m: adminAmuxRecoveryInspectionMessages.en,
     state: { state: "unavailable", failure }, onInspect: () => {}, onReloadReview: () => {},
     date: (value) => value, ...(returnTo ? { returnTo } : {}) })).find((props) => props.failure === failure);
@@ -54,7 +54,7 @@ test("a refused step-up returns to the review the caller names, else the Assignm
   assert.equal(notice("/admin/amux-execution?tab=cards&taskId=task-1")?.returnTo,
     "/admin/amux-execution?tab=cards&taskId=task-1");
   const host = propsOf(AmuxHostRecoveryView({ m: adminAmuxRecoveryInspectionMessages.en,
-    state: { state: "unavailable", failure, requestId: null, unknownWrite: false }, confirmed: false,
+    state: { state: "unavailable", failure, requestId: "11111111-1111-4111-8111-111111111111", unknownWrite: false }, confirmed: false,
     onConfirm: () => {}, onRequest: () => {}, onRefresh: () => {}, onApprove: () => {},
     onReloadReview: () => {}, canRequest: true, returnTo: "/admin/amux-execution?tab=cards&taskId=task-1" }))
     .find((props) => props.failure === failure);
