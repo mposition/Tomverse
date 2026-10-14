@@ -70,9 +70,18 @@ const compare = (derived, legacy = PRODUCTION_LEGACY, v22 = PRODUCTION_V22) =>
   compareAmuxDerivedCatalogWithEnv({ derived, legacy, v22 });
 const verdicts = (comparison) => Object.fromEntries(comparison.rows.map((row) => [row.workerName, row.verdict]));
 
-test("R2b ships with the derived catalog shadow latched off", () => {
-  assert.equal(AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH, false);
-  assert.equal(amuxWorkerDerivedCatalogShadowOpen(), false);
+test("version 43 turns R2b's shadow on, and the policy records it", () => {
+  // Version 35 section 5: R2b shipped latched off; version 43 is the
+  // operator's activation record. The latch and its record move together.
+  assert.equal(AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH, true);
+  assert.equal(amuxWorkerDerivedCatalogShadowOpen(), true);
+  const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8");
+  const normalized = policy.split(String.fromCharCode(13)).join("");
+  const heading = "## 버전 43 — 유도 카탈로그 shadow R2b 코드 래치";
+  const record = "승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-14`";
+  assert.ok(normalized.includes([heading, "", record].join(String.fromCharCode(10))));
+  assert.ok(normalized.includes("`AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`(`lib/amux/workerDerivedCatalogCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다"));
+  assert.ok(normalized.includes("approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 43"));
 });
 
 test("the engineering runner is a code constant equal to the production catalog entry", () => {
