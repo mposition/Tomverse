@@ -3,7 +3,8 @@ import test, { type TestContext } from "node:test";
 import React, { type ReactNode } from "react";
 import { AmuxRecoveryInspectionView, fetchAmuxRecoveryInspection,
   AMUX_RECOVERY_INSPECTION_TIMEOUT_MS, AmuxHostRecoveryView, fetchAmuxHostRecovery,
-  AmuxOwnerRecoveryInspectionPanel, bindAmuxHostRecovery } from
+  AmuxOwnerRecoveryInspectionPanel, bindAmuxHostRecovery,
+  AMUX_HOST_EVIDENCE_AUTO_READ_MS, AMUX_HOST_EVIDENCE_AUTO_READS } from
   "@/components/admin/AmuxOwnerRecoveryInspectionPanel";
 import type { AmuxHostRecoveryRead } from "@/components/admin/AmuxOwnerRecoveryInspectionPanel";
 import type { AmuxV22RecoveryRead } from "@/lib/amux/v22TaskRecoveryCore";
@@ -934,9 +935,29 @@ test("pending metadata accepts no arbitrary fields and cannot clear another nonc
   assert.equal(clearAmuxPendingRecovery(pending, access), true);
 });
 
+test("actual Panel reads pending host evidence back by itself and stops after its budget", async t => {
+  recoveryBrowser(t);
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let reads = 0;
+  const waiting = (requestId: string) => ({ ...safeStopFixture(requestId), launchProof: null });
+  t.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") return Response.json(waiting(JSON.parse(String(init.body)).requestId));
+    reads += 1;
+    return Response.json(waiting(new URL(String(url), "https://tomverse.test").searchParams.get("requestId")!));
+  });
+  const panel = mountRecoveryPanel(); await panel.flush(); panel.props.onRequest(); await panel.flush();
+  assert.equal(reads, 0);
+  for (let tick = 0; tick < 3; tick += 1) {
+    t.mock.timers.tick(AMUX_HOST_EVIDENCE_AUTO_READ_MS); await panel.flush(); }
+  assert.equal(reads, 3, "pending evidence is read without a click");
+  // Every read passes through "loading"; the budget still ends the polling.
+  for (let tick = 0; tick < 100; tick += 1) {
+    t.mock.timers.tick(AMUX_HOST_EVIDENCE_AUTO_READ_MS); await panel.flush(); }
+  assert.equal(reads, AMUX_HOST_EVIDENCE_AUTO_READS);
+  panel.unmount();
+});
+
 test("pending host evidence is read back automatically within the owner read limit", async () => {
-  const { AMUX_HOST_EVIDENCE_AUTO_READ_MS, AMUX_HOST_EVIDENCE_AUTO_READS } = await import(
-    "@/components/admin/AmuxOwnerRecoveryInspectionPanel");
   // The route allows an owner 20 reads a minute; leave room for manual reads.
   assert.ok(60_000 / AMUX_HOST_EVIDENCE_AUTO_READ_MS <= 12);
   // Long enough to cover a controller tick (60 s) plus a bridge tick (30 s).
