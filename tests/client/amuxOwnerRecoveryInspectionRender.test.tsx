@@ -933,3 +933,12 @@ test("pending metadata accepts no arbitrary fields and cannot clear another nonc
   assert.equal(readAmuxPendingRecovery(identity.taskId, access).state, "pending");
   assert.equal(clearAmuxPendingRecovery(pending, access), true);
 });
+
+test("pending host evidence is read back automatically within the owner read limit", async () => {
+  const { AMUX_HOST_EVIDENCE_AUTO_READ_MS, AMUX_HOST_EVIDENCE_AUTO_READS } = await import(
+    "@/components/admin/AmuxOwnerRecoveryInspectionPanel");
+  // The route allows an owner 20 reads a minute; leave room for manual reads.
+  assert.ok(60_000 / AMUX_HOST_EVIDENCE_AUTO_READ_MS <= 12);
+  // Long enough to cover a controller tick (60 s) plus a bridge tick (30 s).
+  assert.ok(AMUX_HOST_EVIDENCE_AUTO_READ_MS * AMUX_HOST_EVIDENCE_AUTO_READS >= 120_000);
+});

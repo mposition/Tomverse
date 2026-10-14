@@ -21,6 +21,10 @@ export type AmuxHostRecoveryRead = AmuxV22RecoveryRead & { recoveryEnabled?: boo
   safeStopEnabled?: boolean; sourceEvidenceDigest?: string | null };
 
 export const AMUX_RECOVERY_INSPECTION_TIMEOUT_MS = 10_000;
+/** Automatic read-back while host evidence is pending: every 5 s for 3 minutes
+ * (12 reads a minute, under the route's 20-a-minute owner read limit). */
+export const AMUX_HOST_EVIDENCE_AUTO_READ_MS = 5_000;
+export const AMUX_HOST_EVIDENCE_AUTO_READS = 36;
 type Messages = AdminMessageShape<(typeof adminAmuxRecoveryInspectionMessages)["en"]>;
 // The Assignment section, for a caller that names no review to return to.
 const AMUX_RECOVERY_DEFAULT_RETURN_TO = "/admin/amux-execution?tab=assignment";
@@ -829,6 +833,29 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     } else if (next) setHost(next);
     active.current = null;
   };
+  // While the exception chain is producing its host evidence (process-gone,
+  // launch proof, model access), read it back on its own: the final consent
+  // window is 90 seconds and must not depend on someone pressing refresh.
+  // Reads only; it never writes, and it stops once nothing is pending.
+  const waitingData = host.state === "ready" ? host.data : null;
+  const waitingForHostEvidence = !!waitingData?.riskAcceptance &&
+    waitingData.requestKind === "safe_stop" && pendingStorage.state === "empty" &&
+    (waitingData.state === "pending" || (waitingData.state === "verified" &&
+      (!waitingData.launchProof || waitingData.apiModelAccess?.state === "required")));
+  const waitingKey = waitingForHostEvidence ? `${waitingData!.requestId}:${waitingData!.state}:` +
+    `${waitingData!.launchProof?.id ?? ""}:${waitingData!.apiModelAccess?.state ?? ""}` : null;
+  const recoverRef = useRef(recover);
+  useEffect(() => { recoverRef.current = recover; }, [recover]);
+  useEffect(() => {
+    if (!waitingKey) return;
+    let reads = 0;
+    const timer = setInterval(() => {
+      reads += 1;
+      if (reads > AMUX_HOST_EVIDENCE_AUTO_READS) { clearInterval(timer); return; }
+      if (!active.current) void recoverRef.current();
+    }, AMUX_HOST_EVIDENCE_AUTO_READ_MS);
+    return () => clearInterval(timer);
+  }, [waitingKey]);
   const date = (value: string) => new Intl.DateTimeFormat(adminIntlLocale(locale), {
     dateStyle: "medium", timeStyle: "medium" }).format(new Date(value));
   const busy = state.state === "loading" || host.state === "loading";
