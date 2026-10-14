@@ -21,7 +21,8 @@
 상태(v40 이력): **v40 FIRST Task 전용 읽기 전용 API executor 대안 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v40 절의 기본 OFF, 고정 `Read`·`Grep`·`Glob` broker, Anthropic 전용 API key, 서버 정본 가격·token·turn 프레임과 실제 usage·model receipt 계약을 승인했다. key 등록·설치·배포·실제 API 호출은 별도다.
 상태(v41 이력): **v41 packed Git object의 고정 읽기 전용 provenance 조회 승인.** 2026-10-13 운영자 `mposition`이 아래 v41 절의 보호된 고정 Git binary·고정 읽기 인자·sanitized environment·deadline·bounded output 예외를 승인했다. 모델 tool은 `Read`·`Grep`·`Glob` 셋으로 유지하며 설치·환경 설정·key 등록·배포·실제 API 호출은 별도다.
 상태(v42 이력): **v42 FIRST Task 전용 API 인증·모델 접근 증거 승인.** 2026-10-13 운영자 `mposition`이 아래 v42 절의 전용 API key 인증과 선택 model 조회, alias→canonical 결속, 공급사 잔액 불명 표시, exact 비용 상한 예외를 승인했다. 실제 provider 호출·배포·DB 적용은 별도다.
-상태(최신): **v43 유도 카탈로그 shadow R2b 코드 래치 승인.** 2026-10-14 운영자 `mposition`이 아래 v43 절을 승인했다. `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`는 true가 되어 Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 보인다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이전 v42 상태 줄은 이력이다.
+상태(v43 이력): **v43 유도 카탈로그 shadow R2b 코드 래치 승인.** 2026-10-14 운영자 `mposition`이 아래 v43 절을 승인했다. `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`는 true가 되어 Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 보인다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이전 v42 상태 줄은 이력이다.
+상태(최신): **v45 R2c 선택 단계의 역할 상한 검사 승인.** 2026-10-14 운영자 `mposition`이 아래 v45 절을 승인했다. v16 역할이 없는 레거시 카드는 `requiredRoutingRole`에서 수준을 유도하고(`review`는 `contract`), R2c가 켜지면 상한이 그보다 낮은 worker는 후보가 되지 않는다. 코드 래치는 바꾸지 않는다. 이전 v43 상태 줄은 이력이다.
 상태(R2a 부속 이력): **2026-10-13에 원래 orchestration v36으로 승인된 worker 능력 R2a 코드 래치를 부속 계약 `worker-capability-r2a-latch-2026-10-13`로 보존한다.** `AMUX_WORKER_CAPABILITY_WRITES_LATCH`는 true이고 owner의 Admin 능력 기록만 열며, 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이는 번호가 겹치는 승인 이력의 식별자 구분일 뿐 새 정책 버전·권한·활성화를 승인하지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
@@ -63,6 +64,7 @@ approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 40
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 41
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 42
 approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 43
+approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 45
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -109,6 +111,7 @@ approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 43
 | 40 | 2026-10-13 mposition | v39의 CLI 런처가 remote managed hooks를 host proof로 배제할 수 없어 `current=false`로 닫히는 경우에만, FIRST Task와 같은 최종 승인 결속을 쓰는 전용 읽기 전용 Anthropic API executor 대안을 준비한다. 고정 repo broker의 `Read`·`Grep`·`Glob`만 모델 tool로 노출하고 shell·쓰기·Git push·MCP·plugin·임의 HTTP를 열지 않는다. 가격과 누적 token·turn 한도는 승인된 catalog snapshot에서 서버가 만든 versioned frame에 결속하고, API가 반환한 실제 model·usage가 완전하지 않으면 결과 불명으로 멈춘다. API key 등록·설치·배포·실제 호출은 별도이고, 이 버전은 실행 스위치를 켜지 않는다. |
 | 41 | 2026-10-13 mposition | v40 broker가 packed Git object에 든 승인 revision의 파일 provenance를 확인할 수 있도록, 보호된 고정 Git binary의 로컬 읽기 전용 object 조회만 좁게 허용한다. 모델 tool은 `Read`·`Grep`·`Glob` 셋 그대로이고 모델이 Git 명령·인자·환경을 고르지 않는다. shell·hooks·network·write·push·credential 전달은 계속 금지하며, binary digest·고정 인자 문법·최소 환경·deadline·출력 상한을 proof에 결속한다. 이 승인은 CODE/LOCAL 합성 검증만 열고 설치·배포·key 등록·실제 provider 호출·실제 Task 실행을 열지 않는다. |
 | 43 | 2026-10-14 mposition | 버전 35 R2b의 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`를 켠다. Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 읽기 전용으로 보이고, production에서 켜진 뒤 3일(72시간) 동안 모두 같으면 R2b가 끝난다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정과 환경 변수는 바꾸지 않는다. |
+| 45 | 2026-10-14 mposition | 버전 35 2항의 "선택할 때" 검사를 정한다. v16 역할이 없는 레거시 카드의 수준을 `requiredRoutingRole`에서 유도하고(`review`는 `contract`, 그 밖의 태그는 `chore`, 없으면 요구 없음), R2c가 켜지면 상한이 그보다 낮은 worker를 후보에서 뺀다. 코드 상수는 제외. 코드 래치는 바꾸지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -2519,3 +2522,53 @@ exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
   - 기간을 채우면 운영자가 R2b 종료를 기록한다.
 - **R2c와의 관계.** R2c는 R1 관측 종료와 이 관측 기간을 모두 채운 뒤에만 켠다(버전 35 5항).
 - **되돌리기.** 래치를 false로 되돌리면 패널이 읽기를 멈출 뿐이다. 쓰는 것이 없으므로 남는 것도 없다.
+
+## 버전 45 — R2c 선택 단계의 역할 상한 검사
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-14`. 2026-10-14 작성, 작성자 Claude. release #2480의 사후 독립 검토(r-20261014-044758-95b679)에서 codex가 지적했다. 버전 35 2항의 세 강제 지점 가운데 "선택할 때"가 구현되지 않았다는 것이다. 운영자는 2026-10-14에 아래 규칙("태그로 수준 유도")을 골라 승인했다. 이 버전은 코드 래치를 켜지 않는다. 검사는 R2c 래치가 켜져 배정이 유도 카탈로그를 읽을 때만 작동한다.
+
+### 1. 무엇이 문제였나
+
+버전 35 2항은 선택할 때 "카드의 v16 역할(`chore`, `implementation`, `contract`)이 worker의 상한보다 높으면 그 worker를 후보로 두지 않는다"고 정했다. 그러나 버전 16의 역할 판정(`routingRole`, 단계 사이클)은 아직 구현되지 않아 레거시 카드에는 v16 역할이 없다. 그 결과는 다음과 같았다.
+
+- 선택은 카드의 `requiredRoutingRole`이 worker의 태그에 있는지만 보았다.
+- 그래서 상한이 `chore`인 검증된 worker가 `review` 태그를 가지면 contract 수준 카드의 review 후보가 될 수 있었다.
+- 버전 35가 명시적으로 금지한 경우다.
+- v22 경로(`taskRole`)는 유도할 때 역할 요구가 이미 걸러내므로 해당하지 않는다.
+
+### 2. 카드의 수준
+
+v16 역할이 생길 때까지 카드의 수준은 `requiredRoutingRole`에서 유도한다.
+
+| `requiredRoutingRole` | 카드의 수준 |
+|---|---|
+| `chore`, `implementation`, `contract` | 그 값 |
+| `review` | `contract` (검토 대상 카드의 수준을 모르므로 가장 높게) |
+| 그 밖의 태그 | `chore` |
+| 없음(null) | 요구 없음. 지금처럼 아무 worker나 후보가 될 수 있다. |
+
+### 3. 선택 단계의 검사
+
+- 배정이 유도 카탈로그를 읽을 때(R2c), 선택 snapshot은 worker의 등록부 상한이 카드의 수준보다 낮으면 그 worker를 후보에서 뺀다. 태그는 따지지 않는다.
+- 이 검사는 배정 가능 여부(`execution_ready`)와 후보마다의 `dispatch_ready` 양쪽에 걸린다.
+- 상한을 알 수 없는 등록 worker는 수준을 요구하는 카드의 후보가 아니다.
+- 코드 상수(`engineering-runner`, 버전 34)는 engineering agent 정책이 다스리므로 이 검사를 받지 않는다.
+- 카탈로그 환경 변수에는 상한이 없으므로 R2c가 꺼져 있는 동안에는 아무것도 바뀌지 않는다.
+
+### 4. 영향
+
+2026-10-14 production 카탈로그와 등록부에서는 이 검사로 배정이 바뀌지 않는다.
+
+- `review` 태그를 가진 worker는 `claude-review`뿐이고, 그 상한은 `contract`다.
+- `contract`·`implementation` 태그는 유도할 때 이미 상한으로 걸러진다.
+
+### 5. 이 버전이 하지 않는 것
+
+이 버전은 다음 어느 것도 바꾸지 않는다.
+
+- R2c·R2d 코드 래치
+- 버전 16의 역할 판정
+- 태그 표
+- DB guard
+
+v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 새 정책 버전이다.
