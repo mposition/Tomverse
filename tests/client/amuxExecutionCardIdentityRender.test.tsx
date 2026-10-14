@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxDistinctSourceKey } from
+import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from
   "@/components/admin/AmuxCardIdentity";
 import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
 
@@ -56,4 +56,39 @@ test("dependency list suffix shows the source key only when it differs", () => {
   const shown = renderToStaticMarkup(<AmuxSourceKeySuffix id={TASK_ID} sourceKey={ORIGIN_REF} m={adminAmuxExecutionMessages.en} />);
   assert.ok(shown.includes(ORIGIN_REF) && shown.includes("Source key"));
   assert.equal(renderToStaticMarkup(<AmuxSourceKeySuffix id={TASK_ID} sourceKey={TASK_ID} m={adminAmuxExecutionMessages.en} />), "");
+});
+
+// docs/policy/amux-card-display-key.md §2-5: the number leads, the Task ID is next to it.
+const CARD_NUMBER = "AMUX-GITHUB-001";
+
+for (const locale of ["en", "ko"] as const) {
+  const m = adminAmuxExecutionMessages[locale];
+
+  test(`${locale}: a numbered card's header leads with the number, then the Task ID and revision`, () => {
+    const html = renderToStaticMarkup(<AmuxCardIdentity id={TASK_ID} displayKey={CARD_NUMBER}
+      sourceKey={ORIGIN_REF} revision={3} m={m} />);
+    const numberLine = html.match(/<p class="font-semibold" data-testid="amux-detail-card-number">.*?<\/p>/)?.[0] ?? "";
+    assert.ok(numberLine.includes(CARD_NUMBER));
+    assert.ok(!numberLine.includes(TASK_ID), "the number line carries only the number");
+    const taskLine = html.match(/<p data-testid="amux-detail-task-id">.*?<\/p>/)?.[0] ?? "";
+    assert.ok(taskLine.includes(`${m.taskId}: ${TASK_ID}`) && taskLine.includes("· r3"));
+    assert.ok(html.indexOf(CARD_NUMBER) < html.indexOf(TASK_ID) && html.indexOf(TASK_ID) < html.indexOf(ORIGIN_REF));
+  });
+}
+
+test("an unnumbered card keeps the Task ID header and draws no number line", () => {
+  const html = renderToStaticMarkup(<AmuxCardIdentity id={TASK_ID} displayKey={null} sourceKey={null}
+    revision={1} m={adminAmuxExecutionMessages.en} />);
+  assert.ok(!html.includes("amux-detail-card-number"));
+  assert.ok(html.includes(`Task ID: ${TASK_ID}`));
+});
+
+test("lists name a card by its number, else its Task ID, and a numbered entry shows the Task ID beside it", () => {
+  assert.equal(amuxCardLabel({ id: TASK_ID, displayKey: CARD_NUMBER }), CARD_NUMBER);
+  assert.equal(amuxCardLabel({ id: TASK_ID, displayKey: null }), TASK_ID);
+  assert.equal(amuxCardLabel({ id: TASK_ID }), TASK_ID);
+  const numbered = renderToStaticMarkup(<AmuxSourceKeySuffix id={TASK_ID} displayKey={CARD_NUMBER}
+    sourceKey={ORIGIN_REF} m={adminAmuxExecutionMessages.en} />);
+  assert.ok(numbered.includes(`Task ID: ${TASK_ID}`));
+  assert.ok(!numbered.includes(ORIGIN_REF), "the number replaces the source key as the extra identity");
 });

@@ -77,8 +77,13 @@ export function AmuxCardListPanel({
               {rows.map((row) => (
                 <tr key={row.id} data-testid="amux-card-row">
                   <td className={cellClass}>
-                    <span className="block font-medium">{row.sourceKey ?? messages.none}</span>
+                    <span className="block font-medium" data-testid="amux-card-row-number">
+                      {row.displayKey ?? messages.none}</span>
                     <span className="block font-mono text-xs text-zinc-500 dark:text-zinc-400">{row.id}</span>
+                    {row.sourceKey && row.sourceKey !== row.id ? (
+                      <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                        {messages.sourceKey}: {row.sourceKey}</span>
+                    ) : null}
                   </td>
                   <td className={cellClass}>{row.status}</td>
                   <td className={`${cellClass} font-mono text-xs`}>{row.owner ?? messages.none}</td>
