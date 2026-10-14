@@ -936,6 +936,9 @@ test("an agent registration writes its card and its record in one transaction, o
     assert.equal(stored.kind, "unknown");
     assert.equal(stored.owner, null);
     assert.equal(stored.description, null, "the card holds no proposal text beyond its title");
+    // docs/policy/amux-card-display-key.md §4: an engineering agent card is ENG,
+    // allocated inside the same bounded transaction.
+    assert.match(stored.displayKey ?? "", /^AMUX-ENG-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,8})$/);
     const row = await prisma.engineeringAgentRegistration.findUniqueOrThrow({ where: { id: firstId } });
     assert.equal(row.result, "registered");
     assert.equal(row.amuxCardId, cardId);

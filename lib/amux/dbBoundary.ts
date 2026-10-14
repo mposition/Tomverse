@@ -229,8 +229,9 @@ export const AMUX_DB_BOUNDARIES = {
   },
   agentIntake: {
     operation: "agent_intake",
-    // setup + source lock + existing card + card insert + canonical audit + fence
-    prismaCallCeiling: 10,
+    // setup + source lock + existing card + card number + card insert +
+    // canonical audit + fence
+    prismaCallCeiling: 11,
     isolation: "mutation",
   },
   reviewPullRequest: {

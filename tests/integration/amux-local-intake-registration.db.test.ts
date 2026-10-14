@@ -145,6 +145,8 @@ test("local registration writes one backlog card, one normalized row, and no dep
   assert.equal(stored?.kind, "unknown");
   assert.equal(stored?.status, "backlog");
   assert.equal(stored?.owner, null);
+  // docs/policy/amux-card-display-key.md §4: a local intake card is LOCAL.
+  assert.match(stored?.displayKey ?? "", /^AMUX-LOCAL-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,8})$/);
   const normalized = await prisma.$queryRaw<Array<{ sourceSystem: string }>>`
     SELECT "sourceSystem" FROM "AmuxLocalIntakeNormalized" WHERE "workItemId" = ${result.cardId}
   `;

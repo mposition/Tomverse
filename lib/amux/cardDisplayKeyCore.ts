@@ -39,6 +39,28 @@ export const AMUX_CARD_DISPLAY_RESERVED_PREFIXES = [
 
 export type AmuxCardDisplayReservedPrefix = (typeof AMUX_CARD_DISPLAY_RESERVED_PREFIXES)[number];
 
+/**
+ * Policy §4, by registration path. Each card-creating path names its own
+ * entry here rather than spelling the prefix, so the table in the policy and
+ * the writers cannot drift apart unnoticed.
+ */
+export const AMUX_CARD_DISPLAY_PATH_PREFIX = {
+  /** tomverse_private_workboard import */
+  workboardImport: "WORKBOARD",
+  /** codex-conversation intake */
+  conversationIntake: "INTAKE",
+  /** local-agent-intake */
+  localIntake: "LOCAL",
+  /** engineering agent registration sources */
+  engineeringAgent: "ENG",
+  /** admin-idea-v4 card with no Feature */
+  ideaWithoutFeature: "IDEA",
+  /** AMUX snapshot sync, no source */
+  snapshotSync: "SYNC",
+  /** backfill of a card with neither source nor Feature */
+  legacy: "LEGACY",
+} as const satisfies Record<string, AmuxCardDisplayReservedPrefix>;
+
 const PREFIX = new RegExp(AMUX_CARD_DISPLAY_PREFIX_PATTERN);
 const DISPLAY_KEY = new RegExp(AMUX_CARD_DISPLAY_KEY_PATTERN);
 

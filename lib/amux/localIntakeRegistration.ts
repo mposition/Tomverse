@@ -10,6 +10,8 @@ import {
   BoardImportError,
   boardImportFailureIsAmbiguous,
 } from "@/lib/amux/boardImportCore";
+import { allocateAmuxCardDisplayKey } from "@/lib/amux/cardDisplayKeyAllocator";
+import { AMUX_CARD_DISPLAY_PATH_PREFIX } from "@/lib/amux/cardDisplayKeyCore";
 import {
   LOCAL_INTAKE_APPLY_ENV,
   buildLocalIntakeSnapshot,
@@ -108,8 +110,10 @@ export async function commitLocalIntakeRegistration(
     throw new BoardImportError("conflict", 409, input.approvalId);
   }
   const now = await databaseNow(tx);
+  const displayKey = await allocateAmuxCardDisplayKey(tx, AMUX_CARD_DISPLAY_PATH_PREFIX.localIntake);
   const created = await tx.amuxWorkItem.create({
     data: {
+      displayKey,
       title: card.title,
       description: card.description,
       status: card.status,

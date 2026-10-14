@@ -4,6 +4,8 @@ import { createHmac } from "node:crypto";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import type { SystemAuditActor } from "@/lib/adminAuditSystemActors";
+import { allocateAmuxCardDisplayKey } from "@/lib/amux/cardDisplayKeyAllocator";
+import { AMUX_CARD_DISPLAY_PATH_PREFIX } from "@/lib/amux/cardDisplayKeyCore";
 import {
   AMUX_DB_BOUNDARIES,
   amuxBoundaryWithAttachment,
@@ -124,8 +126,10 @@ export async function registerAmuxAgentIntakeCard(
         cardId = existing.id;
         created = false;
       } else {
+        const displayKey = await allocateAmuxCardDisplayKey(tx, AMUX_CARD_DISPLAY_PATH_PREFIX.engineeringAgent);
         const row = await tx.amuxWorkItem.create({
           data: {
+            displayKey,
             title: card.title,
             description: null,
             status: "backlog",
