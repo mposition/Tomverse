@@ -75,6 +75,9 @@ test("a card waiting on the owner opens on the same owner review Assignment host
   assert.match(ui, /if \(canReviewCards && result\.escalations\.length > 0\) setDetailTab\("ownerReview"\)/);
   // Kept mounted behind `hidden`, so a tab switch cannot drop a decision.
   assert.match(ui, /hidden=\{detailTab !== "ownerReview"\}/);
+  // A decision that lands after the owner left the card reloads the board,
+  // never the card it left.
+  assert.match(ui, /searchParams\.get\("taskId"\) === selected\.id\)\s*void openCard\(selected\.id, false\)/);
   // Only the owner opens Cards, and only the owner is offered the review.
   assert.match(page, /<AmuxExecutionWorkspace canMoveCards=\{isOwner\} canReviewCards=\{isOwner\}/);
 });
