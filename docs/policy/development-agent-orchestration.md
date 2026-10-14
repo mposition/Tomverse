@@ -2527,8 +2527,7 @@ exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
 
 승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-14`. 2026-10-14 작성, 작성자 Claude.
 운영자는 production 복구 진행 중 Admin에 표시된 실제 과거 attempt와 v39~v42 기록의 ID가
-다르다는 보고를 보고 이 정정을 승인했다. 버전 번호 43은 같은 날 `develop`에 기록된 별도 결정(유도 카탈로그
-shadow R2b 코드 래치)이 쓴다.
+다르다는 보고를 보고 이 정정을 승인했다.
 
 - v39~v42가 가리키는 FIRST Task `c48886b9-86f8-4631-8db8-c0b288a707af`의 과거 attempt는
   실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`다. 이전 기록은 이를
