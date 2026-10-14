@@ -1303,7 +1303,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **S2f 서명**: `lib/marketingWebhookProductionConfigStore.ts`,
   `app/api/admin/marketing/webhook/production-config/route.ts`(POST, 서명),
   `app/api/admin/marketing/webhook/production-config/live/route.ts`(GET, 서명 전 화면이 볼 값),
-  `tests/marketingWebhookProductionConfigStore.test.ts`. **배포가 스스로 production이라고 밝힐 때만**(`APP_ENV` 또는 `RAILWAY_ENVIRONMENT_NAME`) 서명합니다 — `resolveDeploymentEnvironment()`는 라벨 없는 production 빌드도 production이라 답하므로 쓰지 않습니다. 서명할 때 화면이 본
+  `tests/marketingWebhookProductionConfigStore.test.ts`. **배포가 스스로 production이라고 밝힐 때만**(APP_ENV 또는 RAILWAY_ENVIRONMENT_NAME) 서명합니다 — `resolveDeploymentEnvironment()`는 라벨 없는 production 빌드도 production이라 답하므로 쓰지 않습니다. 서명할 때 화면이 본
   값(다음 세대·기록·기록 서명 audit·배포 commit·fingerprint·실제 설정 digest)을 감사 행에 그대로
   묶고 store가 같은 트랜잭션에서 하나씩 다시 계산해 움직인 값을 거절합니다. 방금 쓴 감사 행은
   apply가 쓸 검증기로 다시 읽고, 검증되지 않으면 쓰기와 함께 되돌립니다. 거절 class는 store에
