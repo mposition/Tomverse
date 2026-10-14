@@ -1047,3 +1047,42 @@ test("safe-stop closes request and report races when profile work appears", asyn
     costDigest: read.cost!.costDigest }), /recovery_evidence_unverified/);
   assert.equal(world.task.status, "blocked");
 });
+
+test("v45: a re-registered worker keeps a legacy reason and its safe stop binds the live runtime", async () => {
+  reset(); const service = await load();
+  world.task.taskRole = "investigate";
+  await requestInspection();
+  // The bridge re-registers after the prior attempt: a new instance and generation.
+  const liveInstance = "0f5a2c9e-6d1b-4e3a-9c7f-2b8d4e6a1c03";
+  world.runtime.instanceId = liveInstance; world.runtime.generation = 7;
+  const source = await submitEvidence({ hostInvocationId: null, reason: "legacy_invocation_unbound",
+    proof: { terminalOutcome: "unknown", sameLiveInvocation: false,
+      noActiveExecution: false, processTreeStopped: false, rootOwnedUnit: false,
+      controlGroupBound: false, journalBound: false, socketTerminal: false,
+      externalEffectsKnown: true, workspaceClean: true } });
+  assert.equal(source.state, "unverified");
+  assert.equal(source.reason, "legacy_invocation_unbound");
+  const inspect = world.inspections.find((item) => item.requestKind === "inspect")!;
+  assert.equal(inspect.workerInstanceId, instanceId);
+  assert.equal(inspect.workerGeneration, 2);
+  const read = await service.requestAmuxV22LegacySafeStop({ session: owner,
+    request: new Request("https://tomverse.test"), action: "request_safe_stop",
+    taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+    sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
+    requestId: safeStopRequestId });
+  assert.equal(read.state, "pending");
+  const stop = world.inspections.find((item) => item.requestKind === "safe_stop")!;
+  assert.equal(stop.workerInstanceId, liveInstance);
+  assert.equal(stop.workerGeneration, 7);
+  const pending = await service.pendingAmuxV22LegacySafeStops();
+  assert.equal(pending.requests[0]!.workerInstanceId, liveInstance);
+  assert.equal(pending.requests[0]!.workerGeneration, 7);
+});
+
+test("v45: a proof that would verify still refuses a changed runtime", async () => {
+  reset(); await requestInspection();
+  world.runtime.instanceId = "0f5a2c9e-6d1b-4e3a-9c7f-2b8d4e6a1c03"; world.runtime.generation = 7;
+  const read = await submitEvidence();
+  assert.equal(read.state, "unverified");
+  assert.equal(read.reason, "runtime_observation_unverified");
+});
