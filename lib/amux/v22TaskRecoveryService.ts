@@ -457,8 +457,10 @@ export async function acceptAmuxV22UnknownPriorEffects(input: {
     await lockAmuxAdmissionAndReadIncident(tx, now);
     const task = await lockRecoveryTask(tx, input.taskId);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
-    if (task.taskRole !== "investigate" || !task.v4BriefDigest ||
-        attempt.taskRevision !== task.revision)
+    // The blocked revision and the prior attempt's revision are bound separately
+    // (requireBlockedIdentity, the record and its trigger). They never match:
+    // the expiry that ends the attempt and blocks the task also bumps the revision.
+    if (task.taskRole !== "investigate" || !task.v4BriefDigest)
       throw new BoardImportError("risk_acceptance_identity_changed", 409);
     const budget = await priorBudget(tx, task.id);
     if (budget.historicalAttempts !== 1 || budget.nextAttemptNumber !== 2 ||

@@ -381,7 +381,7 @@ async function prepareUnknownRiskSafeStop(protocolCapabilities = ["read_only_ret
   world.task.v4BriefDigest = "9".repeat(64);
   world.attempt.id = AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID;
   world.attempt.taskId = AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID;
-  world.attempt.taskRevision = 7;
+  world.attempt.taskRevision = 6;
   world.task.executionAttempts = [world.attempt];
   const service = await load();
   await service.requestAmuxV22RecoveryInspection({ session: owner,
@@ -557,7 +557,7 @@ test("the actual unknown producer authorizes only the approved FIRST Task risk i
   world.task.v4BriefDigest = "9".repeat(64);
   world.attempt.id = AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID;
   world.attempt.taskId = AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID;
-  world.attempt.taskRevision = 7;
+  world.attempt.taskRevision = 6;
   world.task.executionAttempts = [world.attempt];
   const service = await load();
   const inspectionRequestId = "6e07ad55-33ca-4c71-9a5b-30f052bbb5b8";
