@@ -7,6 +7,8 @@ import type { Prisma } from "@prisma/client";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
+import { allocateAmuxCardDisplayKey } from "@/lib/amux/cardDisplayKeyAllocator";
+import { AMUX_CARD_DISPLAY_PATH_PREFIX } from "@/lib/amux/cardDisplayKeyCore";
 import {
   BOARD_IMPORT_APPLY_CODE_LATCH,
   BOARD_IMPORT_APPLY_ENV,
@@ -781,8 +783,10 @@ export async function applyBoardImport(input: {
     // A unique conflict aborts the transaction. The outer catch reports
     // `conflict` and does not retry. The approval stays approved, so the next
     // apply reclassifies the live card instead of inserting again.
+    // Numbers follow the import's own card order (policy amux-card-display-key §4).
     for (const card of writes) {
-      await tx.amuxWorkItem.create({ data: card });
+      const displayKey = await allocateAmuxCardDisplayKey(tx, AMUX_CARD_DISPLAY_PATH_PREFIX.workboardImport);
+      await tx.amuxWorkItem.create({ data: { ...card, displayKey } });
     }
     const auditId = await writeHumanAudit(
       tx,
