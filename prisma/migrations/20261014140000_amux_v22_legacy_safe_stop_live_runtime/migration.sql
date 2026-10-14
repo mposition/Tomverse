@@ -1,5 +1,5 @@
 -- baseline-check: replace-function-if-body-sha256 "amux_v22_recovery_inspection_guard" "1cf7cc10f5a47b2b74b4d6b733fc4efaf63e55d1b419fd9fe8473aa559df829c"
--- Policy v45 (owner-approved 2026-10-14): a legacy safe stop binds the worker
+-- Policy v46 (owner-approved 2026-10-14): a legacy safe stop binds the worker
 -- profile's live runtime instead of the prior attempt's, which any restart since
 -- that attempt has already replaced. The live-runtime match, idle-profile,
 -- source, risk and audit checks are unchanged; an inspect request and every

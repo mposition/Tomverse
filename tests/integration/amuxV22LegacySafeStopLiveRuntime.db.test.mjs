@@ -17,7 +17,7 @@ const allowed = (() => {
     /(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(name);
 })();
 
-// Policy v45: the physical worker re-registered after the prior attempt. The
+// Policy v46: the physical worker re-registered after the prior attempt. The
 // database refuses a safe stop bound to the attempt-time runtime and accepts
 // one bound to the live runtime; the rest of the recovery chain is unchanged.
 test("a legacy safe stop binds the worker's live runtime after re-registration", {

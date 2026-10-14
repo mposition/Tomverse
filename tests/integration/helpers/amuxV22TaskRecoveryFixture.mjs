@@ -199,7 +199,7 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   const profileConfigDigest = amuxV22RecoveryDigest("worker-profile-config", {
     version: 1, profiles: [{ alias: workerProfileAlias, workerNames: profileWorkerNames }],
   });
-  // Policy v45: when the worker re-registered after the prior attempt, the
+  // Policy v46: when the worker re-registered after the prior attempt, the
   // safe stop binds its live runtime; the attempt-time runtime is refused.
   const liveRuntime = input.liveRuntime ?? null;
   const stopInstanceId = liveRuntime?.instanceId ?? instanceId;

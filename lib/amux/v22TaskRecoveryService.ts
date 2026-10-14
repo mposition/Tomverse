@@ -211,7 +211,7 @@ async function lockSafeStopProfileRuntime(tx: Prisma.TransactionClient,
     row.instanceId === profile.workerInstanceId &&
     row.generation === profile.workerGeneration);
 }
-/** Policy v45: a legacy safe stop binds the profile's current runtime, not the
+/** Policy v46: a legacy safe stop binds the profile's current runtime, not the
  * prior attempt's. A restart since that attempt already ended its control
  * group; the stop proves the live one gone and fences the profile. Every
  * profile row must share one live instance and generation. */
@@ -562,7 +562,7 @@ export async function requestAmuxV22LegacySafeStop(input: {
       throw new BoardImportError("safe_stop_legacy_not_read_only", 409);
     // The source request stays bound to the prior attempt's runtime. A safe
     // stop recorded against a newer live runtime therefore cannot seed another
-    // request; policy v45 does not open chained re-requests.
+    // request; policy v46 does not open chained re-requests.
     if (sourceRequest.priorAttemptTaskRevision !== attempt.taskRevision ||
         sourceRequest.workerName !== attempt.worker ||
         sourceRequest.workerInstanceId !== attempt.workerInstanceId ||
@@ -872,7 +872,7 @@ export function reportAmuxV22RecoveryEvidence(input: AmuxV22RecoveryEvidenceInpu
     catch { reason = "recovery_identity_changed"; }
     // A runtime change only matters to a proof that would otherwise verify. A
     // legacy report already proves nothing about the prior invocation, and a
-    // restart since that attempt must not hide that reason (policy v45).
+    // restart since that attempt must not hide that reason (policy v46).
     if (reason === null && !await currentRuntime(tx, inspection))
       reason = "runtime_observation_unverified";
     const auditId = await recordAmuxV22RecoveryEvidenceAudit(tx, input.evidenceId, {

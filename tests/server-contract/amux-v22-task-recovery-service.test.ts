@@ -1048,7 +1048,7 @@ test("safe-stop closes request and report races when profile work appears", asyn
   assert.equal(world.task.status, "blocked");
 });
 
-test("v45: a re-registered worker keeps a legacy reason and its safe stop binds the live runtime", async () => {
+test("v46: a re-registered worker keeps a legacy reason and its safe stop binds the live runtime", async () => {
   reset(); const service = await load();
   world.task.taskRole = "investigate";
   await requestInspection();
@@ -1079,7 +1079,7 @@ test("v45: a re-registered worker keeps a legacy reason and its safe stop binds 
   assert.equal(pending.requests[0]!.workerGeneration, 7);
 });
 
-test("v45: a proof that would verify still refuses a changed runtime", async () => {
+test("v46: a proof that would verify still refuses a changed runtime", async () => {
   reset(); await requestInspection();
   world.runtime.instanceId = "0f5a2c9e-6d1b-4e3a-9c7f-2b8d4e6a1c03"; world.runtime.generation = 7;
   const read = await submitEvidence();
@@ -1087,7 +1087,7 @@ test("v45: a proof that would verify still refuses a changed runtime", async () 
   assert.equal(read.reason, "runtime_observation_unverified");
 });
 
-test("v45: a safe stop bound to the live runtime cannot seed a chained re-request", async () => {
+test("v46: a safe stop bound to the live runtime cannot seed a chained re-request", async () => {
   reset(); const service = await load();
   world.task.taskRole = "investigate";
   await requestInspection();
