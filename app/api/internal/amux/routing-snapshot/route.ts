@@ -50,5 +50,5 @@ export async function POST(request: Request) {
       }
       return amuxInternalErrorResponse("routing_snapshot", error);
     }
-  }, 2_800);
+  }, 3_100);
 }

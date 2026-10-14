@@ -397,3 +397,87 @@ test("protected review does not wait for supplemental owner metadata and aborts 
   await releaseHeld();
   await expect(page.getByTestId("admin-amux-owner-review")).toHaveCount(0);
 });
+
+test("a Kanban card waiting on the owner opens on the same owner review", async ({
+  page,
+  signInAs,
+}) => {
+  const review = baseReview();
+  const card = {
+    id: review.task.id, title: review.task.title, sourceKey: "AMUX-OWNER-REVIEW-E2E",
+    status: "review", priority: "p1", kind: "task", cardType: "task", storyKind: null,
+    parentFeatureNodeId: null, parentStoryCardId: null, taskRole: "investigate",
+    executionGrade: null, worker: "worker-openai", lane: "attention", sev1: false,
+    score: null, scoreFresh: false, dependencyCount: 0, progress: null, briefPresent: true,
+    attentionReason: "usage_outcome_unknown", updatedAt: "2026-10-12T00:00:00.000Z",
+  };
+  const detail = {
+    ...card, revision: review.task.revision, body: null, brief: null, feedback: null,
+    outcomeWriteEnabled: false, result: null, dependencies: [], dependents: [],
+    attempts: [], score: null, usage: [], reviews: [], publications: [],
+    escalations: [{ id: ESCALATION_ID, reason: "operator_review_required", status: "open",
+      createdAt: "2026-10-12T00:00:00.000Z" }],
+  };
+  const counts = { tomverse_backlog: 0, amux_backlog: 0, todo: 0, in_progress: 0,
+    in_review: 0, attention: 1, archive: 0 };
+  const reviewReads: string[] = [];
+
+  await page.route("**/api/admin/amux/execution-view?**", (route) => {
+    const view = new URL(route.request().url()).searchParams.get("view");
+    const body = view === "board_snapshot" ? { pageSize: 8, counts,
+      lanes: [{ lane: "attention", cards: [card] }] }
+      : view === "activation" ? { asOf: "2026-10-12T00:00:00.000Z",
+        activationAuthorized: false, stages: [] }
+      : detail;
+    return route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify(body) });
+  });
+  await page.route("**/api/admin/amux/escalations/review?**", (route) => {
+    reviewReads.push(new URL(route.request().url()).searchParams.get("escalation_id") ?? "");
+    return route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify(review) });
+  });
+
+  await signInAs("owner");
+
+  for (const width of [1280, 390] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    reviewReads.length = 0;
+    await page.goto("/admin/amux-execution?tab=cards");
+    const boardCard = page.getByTestId(`amux-board-card-${card.id}`);
+    // The card says why it waits before it is opened.
+    await expect(boardCard.getByTestId(`amux-card-attention-reason-${card.id}`))
+      .toHaveText("Outcome unknown");
+    // Either the title or the call to act opens the same review.
+    if (width === 1280) await boardCard.getByRole("button", { name: card.title }).click();
+    else await boardCard.getByRole("button", { name: "Open owner review" }).click();
+
+    const dialog = page.getByTestId("amux-card-dialog");
+    await expect(dialog.getByRole("tab", { name: "Owner review" }))
+      .toHaveAttribute("aria-selected", "true");
+    const ownerReview = dialog.getByTestId("amux-card-owner-review");
+    await expect(ownerReview.getByTestId("admin-amux-owner-review")).toBeVisible();
+    await expect(ownerReview.getByTestId("admin-amux-owner-decision")).toContainText(
+      "Does the submitted result satisfy the assigned scope and completion criteria?",
+    );
+    // The dialog closes the card; the review offers no second close.
+    await expect(ownerReview.getByTestId("admin-amux-close-review")).toHaveCount(0);
+    expect(reviewReads).toEqual([ESCALATION_ID]);
+
+    // Other tabs stay one click away, and coming back keeps the review.
+    await dialog.getByRole("tab", { name: "Overview" }).click();
+    await expect(ownerReview).toBeHidden();
+    await dialog.getByRole("tab", { name: "Owner review" }).click();
+    await expect(ownerReview.getByTestId("admin-amux-owner-review")).toBeVisible();
+    expect(reviewReads).toEqual([ESCALATION_ID]);
+  }
+
+  // A direct link to the card -- where a step-up returns -- opens the review too.
+  reviewReads.length = 0;
+  await page.goto(`/admin/amux-execution?tab=cards&taskId=${card.id}`);
+  await expect(page.getByTestId("amux-card-dialog").getByRole("tab", { name: "Owner review" }))
+    .toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("amux-card-owner-review")
+    .getByTestId("admin-amux-owner-review")).toBeVisible();
+  expect(reviewReads).toEqual([ESCALATION_ID]);
+});
