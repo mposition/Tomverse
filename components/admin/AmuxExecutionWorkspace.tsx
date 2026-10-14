@@ -718,8 +718,15 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
               {/* Mounted while the card is open, so switching tabs never drops
                   a proposal or a decision whose outcome is still being read. */}
               <AmuxCardOwnerReview key={ownerEscalation.id} taskId={selected.id}
-                escalationId={ownerEscalation.id}
-                onDecisionCommitted={() => { void openCard(selected.id, false); void refreshBoard(); }} />
+                escalationId={ownerEscalation.id} canInspectCards={canReviewCards}
+                onDecisionCommitted={() => {
+                  void refreshBoard();
+                  // A decision can land after the owner closed this card or
+                  // moved to another; reopening it then would show one card
+                  // under another's URL. The URL names the card on screen.
+                  if (new URL(window.location.href).searchParams.get("taskId") === selected.id)
+                    void openCard(selected.id, false);
+                }} />
             </div>}
             <div id="amux-panel-overview" role="tabpanel" aria-labelledby="amux-tab-overview" hidden={detailTab !== "overview"} className={styles.panel}>
       {selected.body ? <div><h4 className="font-semibold">{m.criteria}</h4>

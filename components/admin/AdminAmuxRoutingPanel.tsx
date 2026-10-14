@@ -1458,13 +1458,14 @@ export const amuxCardReviewReturnPath = (taskId: string) =>
  * same review Assignment opens, so the owner no longer leaves the board to
  * act on a card waiting for them.
  */
-export function AmuxCardOwnerReview({ taskId, escalationId, onDecisionCommitted }: {
+export function AmuxCardOwnerReview({ taskId, escalationId, canInspectCards, onDecisionCommitted }: {
   taskId: string;
   escalationId: string;
+  /** Whether attempt costs and recovery inspection are offered (the owner). */
+  canInspectCards: boolean;
   onDecisionCommitted: () => void;
 }) {
-  // Cards is the owner's section, and the owner may read the attempt costs.
-  const reviewer = useAmuxOwnerReview({ canInspectCards: true, onDecisionCommitted });
+  const reviewer = useAmuxOwnerReview({ canInspectCards, onDecisionCommitted });
   const { openReview, pendingDecision, pendingDecisionChecked } = reviewer;
   const opened = useRef<string | null>(null);
   useEffect(() => {

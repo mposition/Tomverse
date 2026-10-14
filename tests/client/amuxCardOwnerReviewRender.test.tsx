@@ -78,7 +78,7 @@ function mount() {
     const previous = internals.H; internals.H = dispatcher;
     try {
       tree = AmuxCardOwnerReview({ taskId: TASK_ID, escalationId: ESCALATION_ID,
-        onDecisionCommitted: () => {} }) as typeof tree;
+        canInspectCards: true, onDecisionCommitted: () => {} }) as typeof tree;
     } finally { internals.H = previous; }
     queued.splice(0).forEach((create) => create());
   };
