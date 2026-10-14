@@ -68,7 +68,8 @@ export function AmuxCardDisplayKeyBackfillPanel() {
       if (response.status === 409) {
         const body = await response.json().catch(() => null) as { error?: string } | null;
         setPlan(null);
-        setNotice(body?.error === "nothing_to_apply" ? m.nothingToApply : m.planChanged);
+        setNotice(body?.error === "nothing_to_apply" ? m.nothingToApply :
+          body?.error === "write_conflict" ? m.writeConflict : m.planChanged);
         return;
       }
       setFailure(await readAdminApiFailure(response, { fallback: m.writeFailed, locale }));
@@ -79,7 +80,10 @@ export function AmuxCardDisplayKeyBackfillPanel() {
     } finally { setBusy(null); }
   }
 
+  // Nothing to write is not the same as nothing to report: cards the plan
+  // cannot number stay listed with their reason (policy §5).
   const nothing = plan !== null && plan.features.length === 0 && plan.cards.length === 0;
+  const allDone = nothing && plan.unresolved.length === 0;
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-4" data-testid="amux-card-display-key-backfill">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{m.title}</h2>
@@ -91,8 +95,8 @@ export function AmuxCardDisplayKeyBackfillPanel() {
       </div>
       {failure ? <AdminApiFailureNotice failure={failure} /> : null}
       {notice ? <p role="status" className="text-sm" data-testid="amux-card-display-key-backfill-notice">{notice}</p> : null}
-      {plan && nothing ? <p role="status" className="text-sm">{m.empty}</p> : null}
-      {plan && !nothing ? <>
+      {plan && allDone ? <p role="status" className="text-sm">{m.empty}</p> : null}
+      {plan && !allDone ? <>
         <p className="text-sm" data-testid="amux-card-display-key-backfill-summary">
           {m.summary(plan.features.length, plan.cards.length, plan.unresolved.length)}</p>
         {plan.features.length > 0 ? <div>
@@ -115,13 +119,13 @@ export function AmuxCardDisplayKeyBackfillPanel() {
             {plan.unresolved.map((item) => <li key={item.id}>
               <span className="font-mono text-xs">{item.id}</span> · {m.unresolvedReason(item.reason)}</li>)}
           </ul></div> : null}
-        <p className="font-mono text-xs opacity-70">{m.digest}: {plan.planDigest}</p>
+        {!nothing ? <><p className="font-mono text-xs opacity-70">{m.digest}: {plan.planDigest}</p>
         <div>
           <button type="button" onClick={() => void apply()} disabled={busy !== null}
             className="min-h-11 rounded border border-zinc-400 px-3 font-medium disabled:opacity-50"
             data-testid="amux-card-display-key-backfill-apply">
             {busy === "apply" ? m.applying : m.apply}</button>
-        </div>
+        </div></> : null}
       </> : null}
     </section>
   );

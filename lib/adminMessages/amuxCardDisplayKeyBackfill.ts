@@ -31,6 +31,7 @@ export const adminAmuxCardDisplayKeyBackfillMessages = defineAdminMessages({
       `Applied: ${features} Feature prefix(es) and ${cards} card number(s).`,
     planChanged: "The data changed since this plan was loaded. Load the plan again and check it before applying.",
     nothingToApply: "There was nothing left to apply.",
+    writeConflict: "A card or Feature changed while the plan was being written, so nothing was written. Load the plan again and check it before applying.",
     outcomeUnknown: "The answer was lost. Load the plan again to see whether the backfill was applied before retrying.",
   },
   ko: {
@@ -63,6 +64,7 @@ export const adminAmuxCardDisplayKeyBackfillMessages = defineAdminMessages({
       `적용했습니다. Feature PREFIX ${features}개, 카드 번호 ${cards}개.`,
     planChanged: "계획을 불러온 뒤 데이터가 바뀌었습니다. 계획을 다시 불러와 확인한 뒤 적용하세요.",
     nothingToApply: "적용할 것이 남아 있지 않았습니다.",
+    writeConflict: "계획을 쓰는 동안 카드나 Feature가 바뀌어 아무것도 쓰지 않았습니다. 계획을 다시 불러와 확인한 뒤 적용하세요.",
     outcomeUnknown: "응답을 받지 못했습니다. 다시 시도하기 전에 계획을 다시 불러와 적용 여부를 확인하세요.",
   },
 });

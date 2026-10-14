@@ -99,6 +99,8 @@ export function planAmuxCardDisplayKeyBackfill(input: {
     const candidates = derived === null ? FALLBACK_PREFIXES : amuxFeatureDisplayPrefixCandidates(derived);
     const prefix = candidates.find((candidate) => !taken.has(candidate)) ??
       FALLBACK_PREFIXES.find((candidate) => !taken.has(candidate));
+    // Deliberate: with every variant and FEAT1..FEAT999 taken the Feature gets
+    // no prefix here, and its cards are reported as feature_without_prefix.
     if (prefix === undefined) continue;
     taken.add(prefix);
     featurePrefix.set(feature.id, prefix);

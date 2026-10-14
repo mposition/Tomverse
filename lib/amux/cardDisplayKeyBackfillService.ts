@@ -30,7 +30,8 @@ export class AmuxCardDisplayKeyBackfillError extends Error {
   }
 }
 
-type Reader = Pick<Prisma.TransactionClient, "amuxPortfolioNode" | "amuxWorkItem" | "amuxCardDisplayKeyCounter">;
+type Reader = Pick<Prisma.TransactionClient, "amuxPortfolioNode" | "amuxWorkItem" | "amuxCardDisplayKeyCounter"
+  | "amuxPortfolioNodeRevision" | "amuxIdeaUnitDecision">;
 
 async function readPlan(db: Reader): Promise<{ plan: AmuxBackfillPlan; digest: string }> {
   const [features, cards, counters, held] = await Promise.all([
@@ -45,7 +46,8 @@ async function readPlan(db: Reader): Promise<{ plan: AmuxBackfillPlan; digest: s
   ]);
   // Only Features still without a prefix need their title.
   const untitled = features.filter((feature) => feature.displayPrefix === null);
-  const titles = await readAmuxNodeTitles(untitled);
+  // Through the same reader, so an apply reads titles inside its own transaction.
+  const titles = await readAmuxNodeTitles(untitled, db);
   const titleById = new Map(untitled.map((feature, index) => [feature.id, titles[index] ?? null]));
   const plan = planAmuxCardDisplayKeyBackfill({
     features: features.map((feature) => ({ id: feature.id,
