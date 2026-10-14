@@ -34,7 +34,7 @@ async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUn
         lane==="amux_backlog"&&promoted?[{...a,status:"todo"}]:[]})),
     }});
     if(p.get("view")==="hierarchy") return route.fulfill({json:{
-      page:0,pageSize:8,total:1,items:[{type:"card",...a}],
+      page:0,pageSize:8,total:1,items:[{type:"card",...b}],
     }});
     return route.fulfill({json:{cards:[],counts:{}}});
   });
@@ -302,5 +302,7 @@ test("hierarchy metadata stays readable in the console's own dark theme",async({
   await setup(page);
   await page.getByRole("button",{name:"Hierarchy",exact:true}).click();
   await expect(page.getByText(/backlog · impl · standard/)).toHaveCSS("color","rgb(162, 174, 192)");
+  // docs/policy/amux-card-display-key.md decision 5: tree entries name the number, Task ID beside it.
+  await expect(page.getByTestId("amux-tree-card-label")).toHaveText("AMUX-GITHUB-007 (Task ID: qa-task-105)");
 });
 

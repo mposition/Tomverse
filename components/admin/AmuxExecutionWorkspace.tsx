@@ -416,6 +416,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
             </button> : <span className="w-7" aria-hidden="true" />}
             <span className="text-xs uppercase text-zinc-500">{item.type === "node" ?
               item.level : item.storyKind === "bug" ? "Bug" : item.cardType ?? "Task"}</span>
+            {item.type === "card" && <span className="font-mono text-xs" data-testid="amux-tree-card-label">
+              {amuxVisibleInspectionText(amuxCardLabel(item))}
+              <AmuxSourceKeySuffix id={item.id} displayKey={item.displayKey} sourceKey={item.sourceKey} m={m} /></span>}
             {item.type === "card" ? <button type="button" className="text-left underline"
               onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(item.id); }}>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</button> :
               <span>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</span>}
@@ -611,6 +614,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         <summary className="cursor-pointer text-sm font-semibold">{m.archive}
           {board ? ` (${board.counts.archive})` : ""}</summary>
         <ul className="mt-3 space-y-2 text-sm">{archive.map((card) => <li key={card.id}>
+          <span className="font-mono text-xs" data-testid="amux-archive-card-label">
+            {amuxVisibleInspectionText(amuxCardLabel(card))}
+            <AmuxSourceKeySuffix id={card.id} displayKey={card.displayKey} sourceKey={card.sourceKey} m={m} /></span>{" "}
           <button type="button" className="underline" onClick={(event) => {
             returnFocusRef.current = event.currentTarget; void openCard(card.id);
           }}>
