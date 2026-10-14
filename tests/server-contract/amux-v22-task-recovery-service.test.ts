@@ -1086,3 +1086,39 @@ test("v45: a proof that would verify still refuses a changed runtime", async () 
   assert.equal(read.state, "unverified");
   assert.equal(read.reason, "runtime_observation_unverified");
 });
+
+test("v45: a safe stop bound to the live runtime cannot seed a chained re-request", async () => {
+  reset(); const service = await load();
+  world.task.taskRole = "investigate";
+  await requestInspection();
+  world.runtime.instanceId = "0f5a2c9e-6d1b-4e3a-9c7f-2b8d4e6a1c03"; world.runtime.generation = 7;
+  const source = await submitEvidence({ hostInvocationId: null, reason: "legacy_invocation_unbound",
+    proof: { terminalOutcome: "unknown", sameLiveInvocation: false,
+      noActiveExecution: false, processTreeStopped: false, rootOwnedUnit: false,
+      controlGroupBound: false, journalBound: false, socketTerminal: false,
+      externalEffectsKnown: true, workspaceClean: true } });
+  await service.requestAmuxV22LegacySafeStop({ session: owner,
+    request: new Request("https://tomverse.test"), action: "request_safe_stop",
+    taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+    sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
+    requestId: safeStopRequestId });
+  const stop = world.inspections.find((item) => item.requestKind === "safe_stop")!;
+  // A stored safe-stop evidence row stands in for the controller's report.
+  const stopEvidenceId = "1d4e6f80-2a3b-4c5d-8e9f-0a1b2c3d4e5f";
+  world.evidence.push({ id: stopEvidenceId, inspectionId: stop.id, requestKind: "safe_stop",
+    sourceEvidenceId: stop.sourceEvidenceId, sourceEvidenceDigest: stop.sourceEvidenceDigest,
+    evidenceDigest: "e".repeat(64), verified: true, reason: null,
+    authorizationAuditLogId: "audit-chained-stop", report: {}, recordedAt: new Date() });
+  world.audits.push({ id: "audit-chained-stop", action: "amux.v22.recovery.safe_stop_reported",
+    targetType: "AmuxV22TaskRecoveryEvidence", targetId: stopEvidenceId, entryHash: "d".repeat(64),
+    actorUserId: null, actorEmail: null, ipAddress: null, userAgent: null,
+    metadata: { systemActor: "amux-v22-recovery-controller" } });
+  stop.evidence = world.evidence.at(-1);
+  const before = world.inspections.length;
+  await assert.rejects(service.requestAmuxV22LegacySafeStop({ session: owner,
+    request: new Request("https://tomverse.test"), action: "request_safe_stop",
+    taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+    sourceEvidenceId: stopEvidenceId, sourceEvidenceDigest: "e".repeat(64),
+    requestId: "8a1f3c5e-7b9d-4e2f-a6c8-0d2e4f6a8b1c" }), /safe_stop_source_mismatch/);
+  assert.equal(world.inspections.length, before);
+});

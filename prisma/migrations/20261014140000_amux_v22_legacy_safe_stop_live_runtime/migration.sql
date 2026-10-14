@@ -2,8 +2,9 @@
 -- Policy v45 (owner-approved 2026-10-14): a legacy safe stop binds the worker
 -- profile's live runtime instead of the prior attempt's, which any restart since
 -- that attempt has already replaced. The live-runtime match, idle-profile,
--- source, risk and audit checks are unchanged; an inspect request and an
--- inspect source stay bound to the prior attempt's runtime.
+-- source, risk and audit checks are unchanged; an inspect request and every
+-- source request stay bound to the prior attempt's runtime, so a stop bound to
+-- a newer live runtime cannot seed a chained request.
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public.amux_v22_recovery_inspection_guard()
@@ -100,9 +101,8 @@ BEGIN
        source_r."priorAttemptId" IS DISTINCT FROM NEW."priorAttemptId" OR
        source_r."priorAttemptTaskRevision" IS DISTINCT FROM NEW."priorAttemptTaskRevision" OR
        source_r."workerName" IS DISTINCT FROM NEW."workerName" OR
-       (source_r."requestKind" = 'inspect' AND
-         (source_r."workerInstanceId" IS DISTINCT FROM p."workerInstanceId" OR
-          source_r."workerGeneration" IS DISTINCT FROM p."workerGeneration")) OR
+       source_r."workerInstanceId" IS DISTINCT FROM p."workerInstanceId" OR
+       source_r."workerGeneration" IS DISTINCT FROM p."workerGeneration" OR
        source_r."targetHost" IS DISTINCT FROM NEW."targetHost" OR
        NEW."workerName" <> ALL(NEW."profileWorkerNames") OR
        NEW."profileWorkerNames" IS DISTINCT FROM

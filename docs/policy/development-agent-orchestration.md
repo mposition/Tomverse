@@ -114,7 +114,7 @@ approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 45
 | 41 | 2026-10-13 mposition | v40 broker가 packed Git object에 든 승인 revision의 파일 provenance를 확인할 수 있도록, 보호된 고정 Git binary의 로컬 읽기 전용 object 조회만 좁게 허용한다. 모델 tool은 `Read`·`Grep`·`Glob` 셋 그대로이고 모델이 Git 명령·인자·환경을 고르지 않는다. shell·hooks·network·write·push·credential 전달은 계속 금지하며, binary digest·고정 인자 문법·최소 환경·deadline·출력 상한을 proof에 결속한다. 이 승인은 CODE/LOCAL 합성 검증만 열고 설치·배포·key 등록·실제 provider 호출·실제 Task 실행을 열지 않는다. |
 | 43 | 2026-10-14 mposition | 버전 35 R2b의 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`를 켠다. Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 읽기 전용으로 보이고, production에서 켜진 뒤 3일(72시간) 동안 모두 같으면 R2b가 끝난다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정과 환경 변수는 바꾸지 않는다. |
 | 44 | 2026-10-14 mposition | v39~v42의 FIRST Task 과거 attempt ID를 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`로 정정한다. 기록에 옮겨 적은 `…0e5a6cba9bd8`은 실재하지 않는 ID여서 모든 guard가 거절했다. 적용된 migration은 그대로 두고 새 migration이 같은 정의의 ID만 바꾼다. 대상 Task, 재시도 1회, 비용 상한, 결과 불명 보존은 그대로다. |
-| 45 | 2026-10-14 mposition | v37 legacy safe stop이 이전 attempt 당시의 실행 인스턴스와 현재 인스턴스가 같기를 요구해, 그 뒤 bridge가 한 번이라도 다시 등록되면 점검 증거와 안전 종료가 모두 거절됐다. legacy 점검 증거는 인스턴스 비교로 사유를 덮어쓰지 않고, 안전 종료는 현재 profile 인스턴스를 잠가 결속한다. 점검 요청과 점검 원본은 계속 이전 attempt 인스턴스에 결속한다. |
+| 45 | 2026-10-14 mposition | v37 legacy safe stop이 이전 attempt 당시의 실행 인스턴스와 현재 인스턴스가 같기를 요구해, 그 뒤 bridge가 한 번이라도 다시 등록되면 점검 증거와 안전 종료가 모두 거절됐다. legacy 점검 증거는 인스턴스 비교로 사유를 덮어쓰지 않고, 안전 종료는 현재 profile 인스턴스를 잠가 결속한다. 점검 요청과 모든 원본 요청은 계속 이전 attempt 인스턴스에 결속하므로, 새 인스턴스에 결속된 안전 종료를 원본으로 한 재요청은 열리지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -2594,9 +2594,9 @@ exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
   sidecar unit은 재시작 때 자기 control group 전체를 종료하므로 이전 attempt의 하위 프로세스는
   그 재시작과 함께 끝났다. 종료 제어기는 현재 프로세스가 사라졌음을 증명하고 profile을 영구
   fence한다.
-- 바뀌지 않는 것: 점검 요청과 점검 원본은 계속 이전 attempt 인스턴스에 결속한다. 현재 인스턴스
+- 바뀌지 않는 것: 점검 요청과 모든 원본 요청은 계속 이전 attempt 인스턴스에 결속한다. 현재 인스턴스
   일치, 다른 작업 없음, 원본·위험 수락·감사 결속, 대상 Task, 재시도 1회, 비용 상한, 결과 불명
-  보존과 사람 승인은 그대로다. 이전 안전 종료를 원본으로 하는 재요청은 앱이 계속 이전 attempt
-  인스턴스를 요구하므로 이 버전에서 열리지 않는다.
+  보존과 사람 승인은 그대로다. 앱과 DB guard가 원본 요청의 이전 attempt 인스턴스 결속을 계속
+  요구하므로, 새 인스턴스에 결속된 안전 종료를 원본으로 한 재요청은 이 버전에서 열리지 않는다.
 - 새 migration 하나가 요청 guard 함수를 직전 본문 digest에 고정해 교체한다. 이 정정은
   배포·설치·실제 실행을 따로 열지 않으며 v39~v44와 2026-10-13 운영 승인 범위를 따른다.

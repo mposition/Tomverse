@@ -560,13 +560,13 @@ export async function requestAmuxV22LegacySafeStop(input: {
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
     if (task.taskRole !== "investigate")
       throw new BoardImportError("safe_stop_legacy_not_read_only", 409);
-    // An inspect source stays bound to the prior attempt's runtime; a safe-stop
-    // source already carries the live runtime of its own stop (policy v45).
+    // The source request stays bound to the prior attempt's runtime. A safe
+    // stop recorded against a newer live runtime therefore cannot seed another
+    // request; policy v45 does not open chained re-requests.
     if (sourceRequest.priorAttemptTaskRevision !== attempt.taskRevision ||
         sourceRequest.workerName !== attempt.worker ||
-        (source.requestKind === "inspect" &&
-          (sourceRequest.workerInstanceId !== attempt.workerInstanceId ||
-           sourceRequest.workerGeneration !== attempt.workerGeneration)) ||
+        sourceRequest.workerInstanceId !== attempt.workerInstanceId ||
+        sourceRequest.workerGeneration !== attempt.workerGeneration ||
         sourceRequest.targetHost !== AMUX_V22_RECOVERY_HOST_SCOPE)
       throw new BoardImportError("safe_stop_source_mismatch", 409);
     let riskAcceptance: Awaited<ReturnType<typeof tx.amuxV22TaskRecoveryRiskAcceptance.findFirst>> = null;
