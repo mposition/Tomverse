@@ -530,6 +530,8 @@ test("the actual no-memory legacy producer stays unknown through the checker and
 
     const source = await service.readAmuxV22TaskRecovery(owner, "task-1234", requestId);
     assert.equal(source.state, "unverified");
+    // Outside the approved FIRST Task the same legacy evidence offers no risk intent.
+    assert.equal(source.eligibility.acceptUnknownPriorEffects, false);
     const before = { inspections: world.inspections.length, audits: world.audits.length,
       evidence: world.evidence.length };
     await assert.rejects(service.requestAmuxV22LegacySafeStop({ session: owner,
@@ -585,6 +587,9 @@ test("the actual unknown producer authorizes only the approved FIRST Task risk i
       AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, inspectionRequestId);
     assert.equal(source.state, "unverified");
     assert.equal(source.reason, "legacy_invocation_unbound");
+    // The Admin panel renders the acceptance control only from this flag.
+    assert.equal(source.eligibility.acceptUnknownPriorEffects, true);
+    assert.equal(source.eligibility.reason, "risk_acceptance_required");
     const beforeTask = structuredClone(world.task);
     const accepted = await service.acceptAmuxV22UnknownPriorEffects({ session: owner,
       request: new Request("https://tomverse.test"), action: "accept_unknown_prior_effects",
@@ -608,6 +613,9 @@ test("the actual unknown producer authorizes only the approved FIRST Task risk i
       sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
       requestId: riskRequestId, acceptRisk: true });
     assert.equal(world.risks.length, 1);
+    const sourceAfter = await service.readAmuxV22TaskRecovery(owner,
+      AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, inspectionRequestId);
+    assert.equal(sourceAfter.eligibility.acceptUnknownPriorEffects, false);
     const outsideScope = amuxV22RecoveryAdminSchema.safeParse({ action: "accept_unknown_prior_effects",
       taskId: "task-outside-approved-scope", expectedRevision: 7,
       priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
