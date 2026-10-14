@@ -32,6 +32,8 @@ type Card = {
   worker: string | null; lane: string | null; sev1: boolean;
   score: number | null; scoreFresh: boolean; dependencyCount: number;
   progress: { done: number; total: number } | null; briefPresent: boolean;
+  /** The newest open escalation's reason code; null when none is open. */
+  attentionReason: string | null;
   updatedAt: string;
 };
 type BoardSnapshot = { pageSize: number;
@@ -590,6 +592,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                         onClick={(event) => { returnFocusRef.current = event.currentTarget; openMove(card.id); }}>
                         <MoveRight size={14} aria-hidden="true" /></button>}
                   </div>
+                  {card.attentionReason && <span className={styles.reasonChip}
+                    data-testid={"amux-card-attention-reason-" + card.id}>
+                    {m.attentionReason[card.attentionReason] ?? m.attentionReasonFallback}</span>}
                   <button type="button" className={styles.cardTitle}
                     onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
                     {amuxVisibleInspectionText(card.title ?? m.protectedTitle)}
@@ -600,6 +605,10 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                     {card.taskRole ? " · " + card.taskRole : ""}</p>
                   <p className={styles.cardWorker}><ShieldCheck size={14} aria-hidden="true" />
                     {card.worker ?? m.noWorker}</p>
+                  {canReviewCards && card.attentionReason && <button type="button" className={styles.reviewButton}
+                    data-testid={"amux-card-open-review-" + card.id}
+                    onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
+                    {m.openOwnerReview}<MoveRight size={14} aria-hidden="true" /></button>}
                   <p className={styles.cardState + (!card.briefPresent || !card.scoreFresh ? " " + styles.cardWarning : "")}>
                     {card.dependencyCount > 0 ? m.dependencyCount(card.dependencyCount) :
                       card.score !== null ? m.score + " " + card.score + (card.scoreFresh ? "" : " · " + m.stale) :

@@ -81,3 +81,30 @@ test("a card waiting on the owner opens on the same owner review Assignment host
   // Only the owner opens Cards, and only the owner is offered the review.
   assert.match(page, /<AmuxExecutionWorkspace canMoveCards=\{isOwner\} canReviewCards=\{isOwner\}/);
 });
+
+test("a board card says why it waits on the owner, from its newest open escalation", async () => {
+  const service = await readFile(new URL("../lib/amux/adminExecutionRead.ts", import.meta.url), "utf8");
+  const ui = await readFile(new URL("../components/admin/AmuxExecutionWorkspace.tsx", import.meta.url), "utf8");
+  // One bounded read per page of cards, one row per card, the same reason
+  // normaliser the card detail uses.
+  assert.match(service, /prisma\.amuxHumanEscalation\.findMany\(\{\s*where: \{ taskId: \{ in: ids \}, status: \{ in: \["open", "acknowledged"\] \} \}/);
+  assert.match(service, /distinct: \["taskId"\]/);
+  assert.match(service, /storedAmuxEscalationReasonCode\(row\.reason, row\.specialty\)/);
+  assert.match(service, /attentionReason: attentionReason\.get\(row\.id\) \?\? null/);
+  // The call to act is offered only where the review can be opened.
+  assert.match(ui, /\{canReviewCards && card\.attentionReason && <button type="button" className=\{styles\.reviewButton\}/);
+  assert.match(ui, /m\.attentionReason\[card\.attentionReason\] \?\? m\.attentionReasonFallback/);
+});
+
+test("every stored escalation reason has a short board label in both locales", async () => {
+  const source = await readFile(new URL("../lib/amux/escalation.ts", import.meta.url), "utf8");
+  const block = source.match(/const ESCALATION_REASON_CODES = new Set\(\[([\s\S]*?)\]\)/)?.[1] ?? "";
+  const codes = [...block.matchAll(/"([a-z_]+)"/g)].map((match) => match[1]);
+  assert.ok(codes.length >= 10, "the reason code list was not found");
+  const { adminAmuxExecutionMessages } = await import("../lib/adminMessages/amuxExecution.ts");
+  for (const locale of ["en", "ko"]) {
+    const labels = adminAmuxExecutionMessages[locale].attentionReason;
+    assert.deepEqual(Object.keys(labels).sort(), [...codes].sort(), locale);
+    for (const code of codes) assert.ok(labels[code].length <= 24, `${locale} ${code} is too long for a chip`);
+  }
+});
