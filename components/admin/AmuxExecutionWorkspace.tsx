@@ -6,7 +6,7 @@ import { GripVertical, MoveRight } from "lucide-react";
 import { AmuxExecutionMovePanel, type AmuxBoardMove } from "./AmuxExecutionMovePanel";
 import { AmuxExecutionDialog } from "./AmuxExecutionDialog";
 import { AmuxCardOwnerReview } from "./AdminAmuxRoutingPanel";
-import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxDistinctSourceKey } from "./AmuxCardIdentity";
+import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 
@@ -24,7 +24,7 @@ import {
 import type { AmuxTaskFeedbackProjection } from "@/lib/amux/v22TaskFeedbackCore";
 
 type Card = {
-  id: string; title: string | null; sourceKey: string | null;
+  id: string; title: string | null; displayKey: string | null; sourceKey: string | null;
   status: string; priority: string; kind: string;
   cardType: string | null; storyKind: string | null;
   parentFeatureNodeId: string | null; parentStoryCardId: string | null;
@@ -65,8 +65,8 @@ type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
     createdAt: string; text: string | null; sha256: string | null;
     patch: { state: "available"; baseSha: string; sha256: string } |
       { state: "purged" } | null } | null;
-  dependencies: Array<{ id: string; sourceKey: string | null; status: string }>;
-  dependents: Array<{ id: string; sourceKey: string | null; status: string }>;
+  dependencies: Array<{ id: string; displayKey: string | null; sourceKey: string | null; status: string }>;
+  dependents: Array<{ id: string; displayKey: string | null; sourceKey: string | null; status: string }>;
   attempts: Array<{ id: string; worker: string; attemptNumber: number | null;
     startedAt: string; endedAt: string | null; outcome: string | null;
     toStatus: string | null; reason: string | null;
@@ -316,7 +316,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
   const uniqueCards = [...new Map(loadedCards.map((card) => [card.id, card])).values()];
   const workers = [...new Set(uniqueCards.flatMap((card) => card.worker ? [card.worker] : []))].sort();
   const filtered = (cards: Card[]) => cards.filter((card) =>
-    (!query.trim() || [card.title, card.id, card.sourceKey, card.worker].some((value) =>
+    (!query.trim() || [card.title, card.displayKey, card.id, card.sourceKey, card.worker].some((value) =>
       value?.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))) &&
     (!workerFilter || (workerFilter === "__unassigned" ? !card.worker : card.worker === workerFilter)) &&
     (!priorityFilter || card.priority === priorityFilter));
@@ -429,6 +429,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
             </button> : <span className="w-7" aria-hidden="true" />}
             <span className="text-xs uppercase text-zinc-500">{item.type === "node" ?
               item.level : item.storyKind === "bug" ? "Bug" : item.cardType ?? "Task"}</span>
+            {item.type === "card" && <span className="font-mono text-xs" data-testid="amux-tree-card-label">
+              {amuxVisibleInspectionText(amuxCardLabel(item))}
+              <AmuxSourceKeySuffix id={item.id} displayKey={item.displayKey} sourceKey={item.sourceKey} m={m} /></span>}
             {item.type === "card" ? <button type="button" className="text-left underline"
               onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(item.id); }}>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</button> :
               <span>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</span>}
@@ -479,7 +482,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
   return <section className={styles.workspace}
     data-testid="amux-execution-workspace">
     {pointerTask && <div ref={dragGhostRef} className={styles.dragGhost} aria-hidden="true" data-testid="amux-pointer-drag">
-      {amuxVisibleInspectionText(pointerTask)} · {m.moveToQueue}
+      {amuxVisibleInspectionText(amuxCardLabel(uniqueCards.find((card) => card.id === pointerTask) ?? { id: pointerTask }))} · {m.moveToQueue}
     </div>}
     <div className={styles.header}>
       <div><h2>{m.boardTitle}</h2><p>{m.boardSubtitle}</p></div>
@@ -569,7 +572,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                   <div className={styles.identity}>
                     <button type="button" className={styles.cardId}
                       onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
-                      {amuxVisibleInspectionText(card.id)}</button>
+                      {amuxVisibleInspectionText(amuxCardLabel(card))}</button>
                     {card.sev1 && <span className={styles.cardWarning}>SEV1</span>}
                     {canMoveCards && lane === "tomverse_backlog" && card.cardType === "task" &&
                       <button type="button" className={styles.iconButton + " " + styles.dragHandle} aria-label={m.dragToQueue}
@@ -599,6 +602,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                     onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
                     {amuxVisibleInspectionText(card.title ?? m.protectedTitle)}
                   </button>
+                  {card.displayKey && <p className={styles.cardMeta}>
+                    {m.taskId}: {amuxVisibleInspectionText(card.id)}</p>}
                   {amuxDistinctSourceKey(card.id, card.sourceKey) && <p className={styles.cardMeta}>
                     {m.sourceKey}: {amuxVisibleInspectionText(card.sourceKey ?? "")}</p>}
                   <p className={styles.cardMeta}>{card.cardType ?? card.kind} · {card.priority.toUpperCase()}
@@ -629,6 +634,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         <summary className="cursor-pointer text-sm font-semibold">{m.archive}
           {board ? ` (${board.counts.archive})` : ""}</summary>
         <ul className="mt-3 space-y-2 text-sm">{archive.map((card) => <li key={card.id}>
+          <span className="font-mono text-xs" data-testid="amux-archive-card-label">
+            {amuxVisibleInspectionText(amuxCardLabel(card))}
+            <AmuxSourceKeySuffix id={card.id} displayKey={card.displayKey} sourceKey={card.sourceKey} m={m} /></span>{" "}
           <button type="button" className="underline" onClick={(event) => {
             returnFocusRef.current = event.currentTarget; void openCard(card.id);
           }}>
@@ -700,7 +708,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       </div>}
       {selected && <section id="amux-execution-detail" className={styles.detail} data-testid="amux-execution-detail">
         <header className={styles.detailHeader}>
-          <AmuxCardIdentity id={selected.id} sourceKey={selected.sourceKey} revision={selected.revision}
+          <AmuxCardIdentity id={selected.id} displayKey={selected.displayKey} sourceKey={selected.sourceKey} revision={selected.revision}
             m={m} />
           <h3>{amuxVisibleInspectionText(selected.title ?? m.protectedTitle)}</h3>
           <button type="button" className={styles.button} onClick={() => void copyLink()}>
@@ -759,13 +767,13 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         <div><h4 className="font-semibold">{m.dependencies}</h4>
           <ul className="text-sm">{selected.dependencies.map((item) => <li key={item.id}>
             <button type="button" className="underline" onClick={() => void openCard(item.id)}>
-              {amuxVisibleInspectionText(item.id)}</button>
-            <AmuxSourceKeySuffix id={item.id} sourceKey={item.sourceKey} m={m} /> · {item.status}</li>)}</ul></div>
+              {amuxVisibleInspectionText(amuxCardLabel(item))}</button>
+            <AmuxSourceKeySuffix id={item.id} displayKey={item.displayKey} sourceKey={item.sourceKey} m={m} /> · {item.status}</li>)}</ul></div>
         <div><h4 className="font-semibold">{m.dependents}</h4>
           <ul className="text-sm">{selected.dependents.map((item) => <li key={item.id}>
             <button type="button" className="underline" onClick={() => void openCard(item.id)}>
-              {amuxVisibleInspectionText(item.id)}</button>
-            <AmuxSourceKeySuffix id={item.id} sourceKey={item.sourceKey} m={m} /> · {item.status}</li>)}</ul></div>
+              {amuxVisibleInspectionText(amuxCardLabel(item))}</button>
+            <AmuxSourceKeySuffix id={item.id} displayKey={item.displayKey} sourceKey={item.sourceKey} m={m} /> · {item.status}</li>)}</ul></div>
       </div>
       {selected.score && <div className="text-sm">
         <p>{m.score}: {selected.score.scoreTotal} ·
