@@ -65,10 +65,17 @@ v4 카드가 Feature 아래에 있으면(`parentFeatureNodeId`, 또는 부모 St
 
 ## 5. Backfill
 
-- 기존 카드 번호는 report-first script로 정한다. 기본은 dry-run이며 Feature별 제안 PREFIX와 카드별로
-  줄 번호를 표로 출력한다. 운영자가 그 표를 확인하고 명시적으로 승인한 뒤에만 적용한다.
-- 같은 PREFIX 안의 기존 카드는 `createdAt`, 같으면 `id` 순으로 번호를 받는다.
-- 적용은 저장소의 감사 규칙이 요구하는 감사 기록과 같은 트랜잭션에서 쓴다.
+- 기존 카드 번호는 report-first로 정한다. 먼저 dry-run 계획이 Feature별 PREFIX와 카드별로 줄 번호를
+  보여 주고, 운영자가 그 계획을 확인하고 명시적으로 승인한 뒤에만 적용한다.
+- **적용 경로와 PREFIX 유도(운영자 mposition 결정, 2026-10-14).** 계획과 적용은 Admin의 owner 전용 화면에서
+  한다(최근 재인증, same-origin). 적용 요청은 운영자가 본 계획의 digest를 이름 대고, 서버는 같은 트랜잭션에서
+  계획을 다시 계산해 digest가 다르면 아무것도 쓰지 않는다. PREFIX가 없는 Feature의 PREFIX는 제목에서 자동
+  유도한다 — 제목의 첫 영문·숫자 단어(2~16자, 예약어 제외), 이미 쓰인 값이면 v4 등록과 같은 번호 붙은 값,
+  쓸 수 있는 단어가 없으면 `FEAT1`, `FEAT2` … 순서다.
+- 같은 PREFIX 안의 기존 카드는 `createdAt`, 같으면 `id` 순으로 번호를 받는다. Feature 아래 카드는 그 Feature의
+  PREFIX, 원천이 있는 카드는 §4의 경로 PREFIX, 원천도 Feature도 없는 카드는 `LEGACY`다. 알 수 없는 원천의
+  카드는 번호를 주지 않고 계획에 이유를 보인다.
+- 적용은 사람 감사 기록과 같은 트랜잭션에서 쓴다.
 - backfill은 카드의 다른 컬럼, 상태, revision, 승인·실행 기록을 바꾸지 않는다.
 
 ## 6. 닫힌 범위
