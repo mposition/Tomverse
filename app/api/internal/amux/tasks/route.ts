@@ -5,6 +5,8 @@ import type { Prisma } from "@prisma/client";
 
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { allocateAmuxCardDisplayKey } from "@/lib/amux/cardDisplayKeyAllocator";
+import { AMUX_CARD_DISPLAY_PATH_PREFIX } from "@/lib/amux/cardDisplayKeyCore";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { parseAmuxDeadline } from "@/lib/amux/planningCore";
@@ -256,7 +258,9 @@ export async function PUT(request: Request) {
           }
           updated += 1;
         } else {
-          await tx.amuxWorkItem.create({ data: { id: task.id, ...data } });
+          // A new card's number; an update above keeps the one it has.
+          const displayKey = await allocateAmuxCardDisplayKey(tx, AMUX_CARD_DISPLAY_PATH_PREFIX.snapshotSync);
+          await tx.amuxWorkItem.create({ data: { id: task.id, ...data, displayKey } });
           created += 1;
         }
         if (blocksDispatchForDeadline) {

@@ -1578,7 +1578,10 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
 - **S2(schema와 할당기)**: `lib/amux/cardDisplayKeyCore.ts`, `lib/amux/cardDisplayKeyAllocator.ts`,
   `prisma/migrations/20261014100000_amux_card_display_key/migration.sql`,
   `tests/amuxCardDisplayKeyCore.test.mjs`, `tests/integration/amux-card-display-key.db.test.ts`.
-  아직 어떤 경로도 번호를 쓰지 않습니다(S3).
+- **S3a(고정 PREFIX 경로)**: 대화 intake(INTAKE), 로컬 intake(LOCAL), engineering agent(ENG),
+  workboard import(WORKBOARD), AMUX snapshot 동기화(SYNC)가 새 카드에 번호를 줍니다.
+  `tests/amuxCardDisplayKeyWriters.test.mjs`가 카드를 만드는 모든 파일을 찾아, 번호를 주지 않는
+  새 경로를 실패로 만듭니다. v4 아이디어 경로는 S3b까지 그 테스트의 pending 목록에 있습니다.
 
 # AI Review (교차검토) 품질과 M5
 
