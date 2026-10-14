@@ -23,7 +23,8 @@
 상태(v42 이력): **v42 FIRST Task 전용 API 인증·모델 접근 증거 승인.** 2026-10-13 운영자 `mposition`이 아래 v42 절의 전용 API key 인증과 선택 model 조회, alias→canonical 결속, 공급사 잔액 불명 표시, exact 비용 상한 예외를 승인했다. 실제 provider 호출·배포·DB 적용은 별도다.
 상태(v43 이력): **v43 유도 카탈로그 shadow R2b 코드 래치 승인.** 2026-10-14 운영자 `mposition`이 아래 v43 절을 승인했다. `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`는 true가 되어 Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 보인다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이전 v42 상태 줄은 이력이다.
 상태(v44 이력): **v44 FIRST Task prior attempt ID 전사 오류 정정 승인.** 2026-10-14 운영자 `mposition`이 아래 v44 절의 정정을 승인했다. v39~v42가 가리키는 과거 attempt는 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`이며, 기록에 잘못 옮겨 적은 값은 실재하지 않는 ID였다. 대상 Task, 한 번의 재시도, 비용 상한과 다른 계약은 바꾸지 않는다. 이전 v43 상태 줄은 이력이다.
-상태(최신): **v47 안전 종료 확인 뒤 같은 실행의 읽기 전용 launch check 처리 승인.** 2026-10-14 운영자 `mposition`이 아래 v47 절을 승인했다. recovery controller는 자기 실행이 기록한 verified process-gone evidence가 만든 launch check 하나를 같은 30초 실행 안에서 바로 처리한다. 90초 freshness와 다른 guard는 그대로다. 이전 v46 상태 줄은 이력이다.
+상태(최신): **v48 FIRST Task 재시도의 추가 경로를 최종 승인으로 비용 재확인 승인.** 2026-10-14 운영자 `mposition`이 아래 v48 절을 승인했다. FIRST Task 예외에서만, 등록 뒤 catalog에 추가된 경로가 일으킨 비용 재확인을 owner의 최종 승인이 대신한다. 기존 경로 변경·토큰 상한·비용 상한 인상과 다른 준비 사유는 그대로 거절한다. 이전 v47 상태 줄은 이력이다.
+상태(v47 이력): **v47 안전 종료 확인 뒤 같은 실행의 읽기 전용 launch check 처리 승인.** 2026-10-14 운영자 `mposition`이 아래 v47 절을 승인했다. recovery controller는 자기 실행이 기록한 verified process-gone evidence가 만든 launch check 하나를 같은 30초 실행 안에서 바로 처리한다. 90초 freshness와 다른 guard는 그대로다. 이전 v46 상태 줄은 이력이다.
 상태(v46 이력): **v46 legacy safe stop의 현재 실행 인스턴스 결속 승인.** 2026-10-14 운영자 `mposition`이 아래 v46 절을 승인했다. legacy 점검 증거는 실행 인스턴스가 바뀌어도 `legacy_invocation_unbound`로 남고, 안전 종료는 이전 attempt 당시가 아니라 지금 실행 중인 worker profile 인스턴스를 잠가 끄고 증명한다. 대상 Task, 재시도 1회, 비용 상한, 위험 수락, 영구 fence는 바꾸지 않는다. 이전 v45 상태 줄은 이력이다.
 상태(v45 이력): **v45 R2c 선택 단계의 역할 상한 검사 승인.** 2026-10-14 운영자 `mposition`이 아래 v45 절을 승인했다. v16 역할이 없는 레거시 카드는 `requiredRoutingRole`에서 수준을 유도하고(`review`는 `contract`), R2c가 켜지면 상한이 그보다 낮은 worker는 후보가 되지 않는다. 코드 래치는 바꾸지 않는다. 이전 v44 상태 줄은 이력이다.
 상태(R2a 부속 이력): **2026-10-13에 원래 orchestration v36으로 승인된 worker 능력 R2a 코드 래치를 부속 계약 `worker-capability-r2a-latch-2026-10-13`로 보존한다.** `AMUX_WORKER_CAPABILITY_WRITES_LATCH`는 true이고 owner의 Admin 능력 기록만 열며, 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이는 번호가 겹치는 승인 이력의 식별자 구분일 뿐 새 정책 버전·권한·활성화를 승인하지 않는다.
@@ -71,6 +72,7 @@ approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 44
 approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 45
 approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 46
 approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 47
+approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 48
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -121,6 +123,7 @@ approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 47
 | 45 | 2026-10-14 mposition | 버전 35 2항의 "선택할 때" 검사를 정한다. v16 역할이 없는 레거시 카드의 수준을 `requiredRoutingRole`에서 유도하고(`review`는 `contract`, 그 밖의 태그는 `chore`, 없으면 요구 없음), R2c가 켜지면 상한이 그보다 낮은 worker를 후보에서 뺀다. 코드 상수는 제외. 코드 래치는 바꾸지 않는다. |
 | 46 | 2026-10-14 mposition | v37 legacy safe stop이 이전 attempt 당시의 실행 인스턴스와 현재 인스턴스가 같기를 요구해, 그 뒤 bridge가 한 번이라도 다시 등록되면 점검 증거와 안전 종료가 모두 거절됐다. legacy 점검 증거는 인스턴스 비교로 사유를 덮어쓰지 않고, 안전 종료는 현재 profile 인스턴스를 잠가 결속한다. 점검 요청과 모든 원본 요청은 계속 이전 attempt 인스턴스에 결속하므로, 새 인스턴스에 결속된 안전 종료를 원본으로 한 재요청은 열리지 않는다. |
 | 47 | 2026-10-14 mposition | v39 최종 승인은 process-gone evidence 기록 뒤 90초 안이어야 하는데, 그 evidence가 만든 launch check는 controller의 다음 60초 주기에야 처리되고 API 모델 접근 증거가 그 뒤에 와서 사람이 승인할 시간이 남지 않았다. controller가 자기 실행에서 verified process-gone을 보고했으면 같은 실행 안에서 queue를 한 번 더 읽고, 그 항목이 read-only launch check일 때만 처리한다. 30초 실행 상한, 병렬 consumer·밀린 주기 처리 금지, 90초 freshness와 모든 결속은 그대로다. |
+| 48 | 2026-10-14 mposition | FIRST Task는 catalog v2로 등록됐고 재시도는 v3가 추가한 claude-contract 경로로만 할 수 있는데, 일반 준비 판정이 추가 경로를 이유로 비용 재확인을 요구하고 그 재확인 수단이 없어 승인·claim·start가 막혔다. FIRST Task 예외에서만 owner의 최종 승인(정확한 경로·모델·상한 결속)을 그 재확인으로 인정한다. 추가 경로를 뺀 나머지는 일반 판정을 그대로 통과해야 하고, 선택 경로는 추가된 경로여야 한다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -2687,3 +2690,23 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
   읽기와 같은 활성 스위치 값을 싣는다.
 - 이 변경은 배포·설치·실제 실행을 따로 열지 않으며 v39~v46과 2026-10-13 운영 승인 범위를
   따른다.
+
+## 버전 48 — FIRST Task 재시도의 추가 경로와 비용 재확인
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-14`. 2026-10-14 작성, 작성자 Claude.
+운영자는 최종 승인이 `task_not_ready`로 거절되는 원인을 보고 이 변경을 승인했다.
+
+- 문제: FIRST Task는 catalog v2로 등록됐고, 그 등록 비용 승인에는 claude-chore 경로 하나만
+  있다. 그 worker는 v37 안전 종료로 영구 fence됐으므로 재시도는 catalog v3가 추가한
+  claude-contract 경로로만 가능하다. 일반 준비 판정은 등록 승인에 없는 현재 경로를 보면 비용
+  재확인을 요구하는데, v4 Task의 비용 재확인 수단은 없다. 그래서 최종 승인, claim, start가
+  모두 막혔다.
+- 변경: FIRST Task 예외(위험 수락이 결속된 최종 승인)에서만, 남은 준비 사유가 비용 재확인
+  하나이고 그 원인이 등록 뒤 추가된 경로일 때 owner의 최종 승인을 그 재확인으로 인정한다.
+  최종 승인은 이미 정확한 경로·모델·추가 상한·가격 버전에 결속된다.
+- 조건: 추가 경로를 뺀 현재 영수증이 일반 판정을 그대로 통과해야 하고(기존 경로 변경·삭제,
+  토큰 상한 인상, 비용 상한 인상은 계속 거절), 선택 경로는 현재 catalog에 있는 추가 경로여야
+  한다. claim과 start는 같은 판정을 승인된 복구의 경로로 다시 한다.
+- 바뀌지 않는 것: 다른 Task와 일반 경로의 비용 재확인, 다른 준비 사유, 1회 재시도, 기존
+  US$3.40 보존과 US$6.80 상한, 90초 freshness와 모든 결속은 그대로다. 이 변경은 배포·설치·
+  실제 실행을 따로 열지 않으며 v39~v47과 2026-10-13 운영 승인 범위를 따른다.
