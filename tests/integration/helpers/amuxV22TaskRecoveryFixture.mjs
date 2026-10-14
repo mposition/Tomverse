@@ -204,17 +204,19 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   const liveRuntime = input.liveRuntime ?? null;
   const stopInstanceId = liveRuntime?.instanceId ?? instanceId;
   const stopGeneration = liveRuntime?.generation ?? 1;
-  const safeStopBindingFor = (id, workerInstanceId, workerGeneration) => ({
+  const safeStopBindingFor = (id, workerInstanceId, workerGeneration,
+    source = { id: evidenceId, digest: evidenceDigest }) => ({
     inspectionId: id, requestKind: "safe_stop",
     taskId, taskRevision: 4, priorAttemptId, priorAttemptTaskRevision: 3,
     workerName: "worker-one", workerInstanceId, workerGeneration,
-    targetHost: "amux-ubuntu", sourceEvidenceId: evidenceId,
-    sourceEvidenceDigest: evidenceDigest, workerProfileAlias, profileWorkerNames,
+    targetHost: "amux-ubuntu", sourceEvidenceId: source.id,
+    sourceEvidenceDigest: source.digest, workerProfileAlias, profileWorkerNames,
     targetUnit, profileConfigDigest, riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest });
   // The audit row needs the top-level transaction XID, so it is written before
   // any probe savepoint; only the request insert runs inside the probe.
-  async function prepareSafeStopRequest(id, ownerRequestId, workerInstanceId, workerGeneration) {
-    const binding = safeStopBindingFor(id, workerInstanceId, workerGeneration);
+  async function prepareSafeStopRequest(id, ownerRequestId, workerInstanceId, workerGeneration,
+    source = { id: evidenceId, digest: evidenceDigest }) {
+    const binding = safeStopBindingFor(id, workerInstanceId, workerGeneration, source);
     const requestDigest = amuxV22RecoveryDigest("inspection", binding);
     const auditId = await appendRecoveryFixtureAudit(db, {
       actorUserId: "synthetic-owner", action: "amux.v22.recovery.safe_stop_requested",
@@ -228,7 +230,7 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
       id, ownerRequestId, requestKind: "safe_stop", taskId, taskRevision: 4, priorAttemptId,
       priorAttemptTaskRevision: 3, workerName: "worker-one", workerInstanceId,
       workerGeneration, targetHost: "amux-ubuntu", requestDigest,
-      sourceEvidenceId: evidenceId, sourceEvidenceDigest: evidenceDigest,
+      sourceEvidenceId: source.id, sourceEvidenceDigest: source.digest,
       workerProfileAlias, profileWorkerNames, targetUnit, profileConfigDigest,
       riskAcceptanceId, riskAcceptanceDigest: acceptanceDigest,
       requestedByUserId: "synthetic-owner", authorizationAuditLogId: auditId, requestedAt,
@@ -300,6 +302,14 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
     recordedAt: new Date("2000-01-01T00:00:00.000Z"),
   });
   await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+  if (liveRuntime) {
+    // A stop bound to the newer live runtime cannot seed a chained request.
+    const chained = await prepareSafeStopRequest(randomUUID(), randomUUID(),
+      liveRuntime.instanceId, liveRuntime.generation,
+      { id: safeStopEvidenceId, digest: safeStopEvidenceDigest });
+    await reject(() => insert("AmuxV22TaskRecoveryInspectionRequest", chained),
+      "AmuxV22LegacySafeStop_request_guard_check");
+  }
 
   const launchCheckId = randomUUID();
   const routePolicyDigest = "b".repeat(64); const costDigest = "f".repeat(64);
