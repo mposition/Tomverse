@@ -43,7 +43,7 @@ import {
   type MarketingWebhookProductionConfigGeneration,
   type MarketingWebhookProductionConfigRead,
 } from "@/lib/marketingWebhookProductionConfig";
-import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
+import { validateEnvironment } from "@/lib/deploymentEnvironment";
 import { readMarketingWebhookVerificationRecordFile } from "@/lib/marketingWebhookVerification";
 
 export { MarketingWebhookProductionConfigRefusedError };
@@ -53,6 +53,20 @@ function refuse(code: string, message: string): never {
 }
 
 const COMMIT_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+/**
+ * The environment this deployment is explicitly labelled as, or `unlabelled`.
+ *
+ * Deliberately not `resolveDeploymentEnvironment()`: that answers
+ * `production` for any production build with no label at all (its
+ * `NODE_ENV` fallback), which is the right default for deciding how strict to
+ * be and the wrong one for deciding where a production signature may be made.
+ * A signature needs the deployment to say it is production.
+ */
+export const marketingWebhookExplicitEnvironment = (
+  env: Readonly<Record<string, string | undefined>>,
+): string =>
+  validateEnvironment(env.APP_ENV) ?? validateEnvironment(env.RAILWAY_ENVIRONMENT_NAME) ?? "unlabelled";
 
 /** The deploy commit Railway gives the running build, or null when it gives none. */
 export const marketingWebhookLiveDeployCommitSha = (
@@ -115,7 +129,7 @@ export async function readMarketingWebhookProductionConfigLive(
   );
   const stored = readMarketingWebhookProductionConfig(configRow?.value);
   return {
-    environment: resolveDeploymentEnvironment(env as NodeJS.ProcessEnv),
+    environment: marketingWebhookExplicitEnvironment(env),
     deployCommitSha: marketingWebhookLiveDeployCommitSha(env),
     pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
     productionConfigSnapshotDigest: marketingWebhookProductionConfigSnapshotDigest(
@@ -164,7 +178,7 @@ export async function signMarketingWebhookProductionConfig(
   const readRecordFile = deps.readRecordFile ?? readMarketingWebhookVerificationRecordFile;
   const verifyAudit = deps.verifyAudit ?? verifyMarketingAuditEvidence;
 
-  if (resolveDeploymentEnvironment(env as NodeJS.ProcessEnv) !== "production") {
+  if (marketingWebhookExplicitEnvironment(env) !== "production") {
     refuse("environment_not_production", "A production configuration is signed in production only.");
   }
 

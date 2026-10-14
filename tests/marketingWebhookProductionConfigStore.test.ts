@@ -134,6 +134,20 @@ const refusedWith = async (promise: Promise<unknown>, code: string) => {
   );
 };
 
+test("an unlabelled deployment reads as unlabelled, not as production", async () => {
+  const { tx } = fakeTx();
+  const live = await readMarketingWebhookProductionConfigLive(tx, {
+    ...ENV,
+    APP_ENV: undefined,
+    RAILWAY_ENVIRONMENT_NAME: undefined,
+    NODE_ENV: "production",
+  });
+  assert.equal(live.environment, "unlabelled");
+  // Railway names the environment even when APP_ENV is unset.
+  const railwayOnly = await readMarketingWebhookProductionConfigLive(tx, { ...ENV, APP_ENV: undefined });
+  assert.equal(railwayOnly.environment, "production");
+});
+
 test("the live read shows what a signature would bind", async () => {
   const { tx } = fakeTx();
   const live = await readMarketingWebhookProductionConfigLive(tx, ENV);
@@ -210,6 +224,11 @@ test("anywhere but production refuses before reading anything", async () => {
   for (const env of [
     { ...ENV, APP_ENV: "staging", RAILWAY_ENVIRONMENT_NAME: "staging" },
     { ...ENV, APP_ENV: "dev", RAILWAY_ENVIRONMENT_NAME: "dev" },
+    // A production build with no label: resolveDeploymentEnvironment() would
+    // call it production through NODE_ENV, and a signature must not.
+    { ...ENV, APP_ENV: undefined, RAILWAY_ENVIRONMENT_NAME: undefined, NODE_ENV: "production" },
+    { ...ENV, APP_ENV: "prod", RAILWAY_ENVIRONMENT_NAME: "live", NODE_ENV: "production" },
+    { ...ENV, APP_ENV: "", RAILWAY_ENVIRONMENT_NAME: " ", NODE_ENV: "production" },
   ]) {
     const { tx, settings } = fakeTx();
     const { promise } = sign(tx, request(), { env, file: null });
