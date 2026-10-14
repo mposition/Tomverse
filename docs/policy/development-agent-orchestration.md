@@ -21,7 +21,8 @@
 상태(v40 이력): **v40 FIRST Task 전용 읽기 전용 API executor 대안 계약 승인.** 2026-10-13 운영자 `mposition`이 아래 v40 절의 기본 OFF, 고정 `Read`·`Grep`·`Glob` broker, Anthropic 전용 API key, 서버 정본 가격·token·turn 프레임과 실제 usage·model receipt 계약을 승인했다. key 등록·설치·배포·실제 API 호출은 별도다.
 상태(v41 이력): **v41 packed Git object의 고정 읽기 전용 provenance 조회 승인.** 2026-10-13 운영자 `mposition`이 아래 v41 절의 보호된 고정 Git binary·고정 읽기 인자·sanitized environment·deadline·bounded output 예외를 승인했다. 모델 tool은 `Read`·`Grep`·`Glob` 셋으로 유지하며 설치·환경 설정·key 등록·배포·실제 API 호출은 별도다.
 상태(v42 이력): **v42 FIRST Task 전용 API 인증·모델 접근 증거 승인.** 2026-10-13 운영자 `mposition`이 아래 v42 절의 전용 API key 인증과 선택 model 조회, alias→canonical 결속, 공급사 잔액 불명 표시, exact 비용 상한 예외를 승인했다. 실제 provider 호출·배포·DB 적용은 별도다.
-상태(최신): **v44 FIRST Task prior attempt ID 전사 오류 정정 승인.** 2026-10-14 운영자 `mposition`이 아래 v44 절의 정정을 승인했다. v39~v42가 가리키는 과거 attempt는 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`이며, 기록에 잘못 옮겨 적은 값은 실재하지 않는 ID였다. 대상 Task, 한 번의 재시도, 비용 상한과 다른 계약은 바꾸지 않는다. 이전 v43 상태 줄은 이력이다.
+상태(최신): **v46 legacy safe stop의 현재 실행 인스턴스 결속 승인.** 2026-10-14 운영자 `mposition`이 아래 v46 절을 승인했다. legacy 점검 증거는 실행 인스턴스가 바뀌어도 `legacy_invocation_unbound`로 남고, 안전 종료는 이전 attempt 당시가 아니라 지금 실행 중인 worker profile 인스턴스를 잠가 끄고 증명한다. 대상 Task, 재시도 1회, 비용 상한, 위험 수락, 영구 fence는 바꾸지 않는다. 이전 v44 상태 줄은 이력이다.
+상태(v44 이력): **v44 FIRST Task prior attempt ID 전사 오류 정정 승인.** 2026-10-14 운영자 `mposition`이 아래 v44 절의 정정을 승인했다. v39~v42가 가리키는 과거 attempt는 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`이며, 기록에 잘못 옮겨 적은 값은 실재하지 않는 ID였다. 대상 Task, 한 번의 재시도, 비용 상한과 다른 계약은 바꾸지 않는다. 이전 v43 상태 줄은 이력이다.
 상태(v43 이력): **v43 유도 카탈로그 shadow R2b 코드 래치 승인.** 2026-10-14 운영자 `mposition`이 아래 v43 절을 승인했다. `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`는 true가 되어 Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 보인다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이전 v42 상태 줄은 이력이다.
 상태(R2a 부속 이력): **2026-10-13에 원래 orchestration v36으로 승인된 worker 능력 R2a 코드 래치를 부속 계약 `worker-capability-r2a-latch-2026-10-13`로 보존한다.** `AMUX_WORKER_CAPABILITY_WRITES_LATCH`는 true이고 owner의 Admin 능력 기록만 열며, 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이는 번호가 겹치는 승인 이력의 식별자 구분일 뿐 새 정책 버전·권한·활성화를 승인하지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
@@ -65,6 +66,7 @@ approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 41
 approvedBy: mposition · approvedAt: 2026-10-13 · 정책 버전: 42
 approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 43
 approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 44
+approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 46
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -112,6 +114,7 @@ approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 44
 | 41 | 2026-10-13 mposition | v40 broker가 packed Git object에 든 승인 revision의 파일 provenance를 확인할 수 있도록, 보호된 고정 Git binary의 로컬 읽기 전용 object 조회만 좁게 허용한다. 모델 tool은 `Read`·`Grep`·`Glob` 셋 그대로이고 모델이 Git 명령·인자·환경을 고르지 않는다. shell·hooks·network·write·push·credential 전달은 계속 금지하며, binary digest·고정 인자 문법·최소 환경·deadline·출력 상한을 proof에 결속한다. 이 승인은 CODE/LOCAL 합성 검증만 열고 설치·배포·key 등록·실제 provider 호출·실제 Task 실행을 열지 않는다. |
 | 43 | 2026-10-14 mposition | 버전 35 R2b의 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`를 켠다. Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 읽기 전용으로 보이고, production에서 켜진 뒤 3일(72시간) 동안 모두 같으면 R2b가 끝난다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정과 환경 변수는 바꾸지 않는다. |
 | 44 | 2026-10-14 mposition | v39~v42의 FIRST Task 과거 attempt ID를 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`로 정정한다. 기록에 옮겨 적은 `…0e5a6cba9bd8`은 실재하지 않는 ID여서 모든 guard가 거절했다. 적용된 migration은 그대로 두고 새 migration이 같은 정의의 ID만 바꾼다. 대상 Task, 재시도 1회, 비용 상한, 결과 불명 보존은 그대로다. |
+| 46 | 2026-10-14 mposition | v37 legacy safe stop이 이전 attempt 당시의 실행 인스턴스와 현재 인스턴스가 같기를 요구해, 그 뒤 bridge가 한 번이라도 다시 등록되면 점검 증거와 안전 종료가 모두 거절됐다. legacy 점검 증거는 인스턴스 비교로 사유를 덮어쓰지 않고, 안전 종료는 현재 profile 인스턴스를 잠가 결속한다. 점검 요청과 모든 원본 요청은 계속 이전 attempt 인스턴스에 결속하므로, 새 인스턴스에 결속된 안전 종료를 원본으로 한 재요청은 열리지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -2573,3 +2576,28 @@ exact Task `c48886b9-86f8-4631-8db8-c0b288a707af`와 prior attempt
   ID 문자열만 바꾸며, 각각 직전 함수 본문 digest와 직전 CHECK 정의 digest를 고정한다.
 - 이 정정은 배포·설치·실제 실행을 따로 열지 않는다. v39~v42와 2026-10-13 운영 승인 범위를
   그대로 따른다.
+
+## 버전 46 — legacy safe stop의 현재 실행 인스턴스 결속
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-14`. 2026-10-14 작성, 작성자 Claude.
+운영자는 production 복구에서 점검 증거가 `runtime_observation_unverified`로만 저장되는 원인을
+보고 이 정정을 승인했다. 승인 당시 v45로 불렀으나, 같은 날 `develop`에 기록된 별도 결정(R2c 선택
+단계의 역할 상한 검사)이 버전 45를 쓰므로 이 절은 버전 46이다.
+
+- 문제: v36·v37은 점검 요청과 안전 종료 요청을 이전 attempt 당시의 worker 실행 인스턴스와
+  generation에 묶고, 증거 기록과 안전 종료 DB guard가 그 인스턴스가 지금도 현재이기를 요구했다.
+  bridge는 재시작될 때마다 새 generation으로 등록하므로, 이전 attempt 뒤 한 번이라도 다시
+  등록된 worker에서는 legacy 경로 전체가 도달할 수 없었다.
+- 점검 증거: 사유가 이미 `legacy_invocation_unbound`처럼 검증되지 않는 판정이면 인스턴스
+  불일치로 덮어쓰지 않는다. 검증될 수 있는 증거(`stopped_proven`)에는 지금처럼 현재 인스턴스
+  일치를 요구한다.
+- 안전 종료: 요청은 profile worker의 현재 실행 인스턴스를 잠그고 그 값에 결속한다. 고정
+  sidecar unit은 재시작 때 자기 control group 전체를 종료하므로 이전 attempt의 하위 프로세스는
+  그 재시작과 함께 끝났다. 종료 제어기는 현재 프로세스가 사라졌음을 증명하고 profile을 영구
+  fence한다.
+- 바뀌지 않는 것: 점검 요청과 모든 원본 요청은 계속 이전 attempt 인스턴스에 결속한다. 현재 인스턴스
+  일치, 다른 작업 없음, 원본·위험 수락·감사 결속, 대상 Task, 재시도 1회, 비용 상한, 결과 불명
+  보존과 사람 승인은 그대로다. 앱과 DB guard가 원본 요청의 이전 attempt 인스턴스 결속을 계속
+  요구하므로, 새 인스턴스에 결속된 안전 종료를 원본으로 한 재요청은 이 버전에서 열리지 않는다.
+- 새 migration 하나가 요청 guard 함수를 직전 본문 digest에 고정해 교체한다. 이 정정은
+  배포·설치·실제 실행을 따로 열지 않으며 v39~v44와 2026-10-13 운영 승인 범위를 따른다.
