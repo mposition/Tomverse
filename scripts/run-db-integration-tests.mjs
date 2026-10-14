@@ -329,6 +329,11 @@ run(
     // boundary (the seven-read version failed the 100 ms idle-in-transaction
     // timeout), newest first, bounded and owner scoped.
     "tests/integration/amux-idea-progress.db.test.ts",
+    // AMUX card display numbers (docs/policy/amux-card-display-key.md §3):
+    // the format, uniqueness and immutability of a card's number and a
+    // Feature's prefix, and a per-prefix counter that only advances by one
+    // and gives back its increment when the caller rolls back.
+    "tests/integration/amux-card-display-key.db.test.ts",
     // AMUX assignment catalog (orchestration policy version 35, section 3):
     // the registry, stop latches and capabilities read in one statement and
     // the catalog derived from them.

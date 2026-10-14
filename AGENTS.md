@@ -1984,6 +1984,27 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   멈추며, 확인 단계가 그 창을 결정 직전 한 번의 왕복으로 줄입니다. bridge가 결정과 영수증 사이에 죽은 결정은 자동으로 정리하지 않으며,
   운영자의 직접 답이 먼저일 때 앱 요청을 닫는 것(docs/policy/amux-decision-maker.md §2-7 마지막 문장)도 아직 없습니다.
 
+# AMUX 카드 표시 번호
+
+`AmuxWorkItem.displayKey`, Feature의 `displayPrefix`, `AmuxCardDisplayKeyCounter`, 그리고 카드를
+만드는 경로의 번호 할당을 건드리기 전에 읽습니다.
+
+- `docs/policy/amux-card-display-key.md`
+
+- **번호는 표시용 이름이고 Task ID를 대체하지 않습니다.** API·링크·로그·복구 기록·승인 결속은
+  계속 Task ID를 씁니다.
+- **한 번 쓴 번호와 Feature PREFIX는 바뀌지 않습니다.** DB trigger가 변경과 비우기를 거부하고,
+  카드에 쓰인 번호는 `AmuxCardDisplayKeyIssued`에 남아 카드가 삭제돼도 다시 쓰이지 않습니다.
+  카운터는 1씩만 증가하며 지워지지 않습니다.
+- **할당은 `allocateAmuxCardDisplayKey(tx, prefix)` 하나이고 카드를 쓰는 트랜잭션 안에서 합니다.**
+  카운터에 직접 쓰지 않습니다(`npm run check:protected-table-writers`).
+- **Feature 없는 카드의 PREFIX는 등록 경로별 고정 목록입니다**
+  (`lib/amux/cardDisplayKeyCore.ts`의 예약 목록). 새 등록 경로는 `docs/policy/amux-card-display-key.md §4`를 먼저 개정합니다.
+- **S2(schema와 할당기)**: `lib/amux/cardDisplayKeyCore.ts`, `lib/amux/cardDisplayKeyAllocator.ts`,
+  `prisma/migrations/20261014100000_amux_card_display_key/migration.sql`,
+  `tests/amuxCardDisplayKeyCore.test.mjs`, `tests/integration/amux-card-display-key.db.test.ts`.
+  아직 어떤 경로도 번호를 쓰지 않습니다(S3).
+
 # AI Review (교차검토) 품질과 M5
 
 AI Review의 프롬프트·reviewer 패널·인용 검증·평가·운영 계측·항목 피드백,
