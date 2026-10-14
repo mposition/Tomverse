@@ -7395,6 +7395,10 @@ model AmuxWorkItem {
   v22AssignmentId       String?   @unique @db.Uuid
   taskRole              String?
   executionGrade        String?
+  /// Readable card number `AMUX-<PREFIX>-<NNN>` (docs/policy/amux-card-display-key.md).
+  /// Null until a writer or the backfill assigns it; once set the database
+  /// refuses any change. The Task ID (`id`) stays the canonical identifier.
+  displayKey            String?   @unique
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -7450,6 +7454,25 @@ model AmuxWorkItem {
   @@index([parentStoryCardId, status])
   engineeringAgentRuns          EngineeringAgentRun[]          @relation("EngineeringAgentRunCard")
   engineeringAgentRegistrations EngineeringAgentRegistration[] @relation("EngineeringAgentRegistrationCard")
+}
+
+/// The last card number handed out per prefix (docs/policy/amux-card-display-key.md §3).
+/// It starts at 1 and only ever grows by one; the database refuses any other
+/// update and every delete. The single writer is
+/// lib/amux/cardDisplayKeyAllocator.ts.
+model AmuxCardDisplayKeyCounter {
+  prefix     String @id
+  lastNumber Int
+}
+
+/// Every card number ever issued (docs/policy/amux-card-display-key.md §3).
+/// Written only by a database trigger when a card first receives its number,
+/// never changed or removed, and deliberately without a foreign key so the
+/// number outlives a deleted card and can never be issued again.
+model AmuxCardDisplayKeyIssued {
+  displayKey String   @id
+  workItemId String
+  issuedAt   DateTime @default(now()) @db.Timestamptz(3)
 }
 
 model AmuxWorkDependency {
@@ -10165,6 +10188,10 @@ model AmuxPortfolioNode {
   contentDigestKeyId      String
   approvedByUserId        String
   authorizationAuditLogId String   @unique
+  /// A Feature's card number prefix (docs/policy/amux-card-display-key.md §2-6,
+  /// §2-8). Feature nodes only, unique, never a reserved path prefix, and
+  /// immutable once set.
+  displayPrefix           String?  @unique
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
