@@ -1581,7 +1581,11 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
 - **S3a(고정 PREFIX 경로)**: 대화 intake(INTAKE), 로컬 intake(LOCAL), engineering agent(ENG),
   workboard import(WORKBOARD), AMUX snapshot 동기화(SYNC)가 새 카드에 번호를 줍니다.
   `tests/amuxCardDisplayKeyWriters.test.mjs`가 카드를 만드는 모든 파일을 찾아, 번호를 주지 않는
-  새 경로를 실패로 만듭니다. v4 아이디어 경로는 S3b까지 그 테스트의 pending 목록에 있습니다.
+  새 경로를 실패로 만듭니다.
+- **S3b(v4 Feature PREFIX)**: `docs/policy/amux-intake.md` v17 절. 분석 chunk schema 4에서 Feature 제안이
+  `displayPrefix`를 가질 수 있고, `create_node`가 같은 트랜잭션에서 Feature에 쓰며(이미 쓰인 값이면
+  `chooseAmuxFeatureDisplayPrefix()`가 고르는 번호 붙은 값), v4 카드는 그 Feature의 PREFIX로 번호를 받습니다.
+  PREFIX 없는 Feature 아래 카드는 번호 없이 등록되고 S4 backfill이 채웁니다.
 
 # AI Review (교차검토) 품질과 M5
 

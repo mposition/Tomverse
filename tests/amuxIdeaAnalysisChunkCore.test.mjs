@@ -483,3 +483,40 @@ test("model text is parsed as data, never an instruction or approval", () => {
   assert.equal(result.chunk.units[0].problem, value.problem);
   assert.equal("approved" in result.chunk, false);
 });
+
+test("v4 Feature proposals may carry a card number prefix; nothing else may", () => {
+  // docs/policy/amux-intake.md v17 item 1.
+  const signal = { metrics: { value: 3 }, uncertainty: "low",
+    rationale: "A bounded portfolio container.", evidenceRefIds: [sourceRef] };
+  const hierarchy = (featureExtra = {}, epicExtra = {}) => [
+    { ...node("c0:node-1"), portfolioSignal: signal },
+    { ...node("c0:node-2"), level: "epic", parentRef: "c0:node-1", portfolioSignal: signal, ...epicExtra },
+    { ...node("c0:node-3"), level: "feature", parentRef: "c0:node-2", portfolioSignal: signal, ...featureExtra },
+  ];
+  const v4 = (units) => ({ ...chunk(units), schemaVersion: 4 });
+
+  const accepted = inspect(v4(hierarchy({ displayPrefix: "GITHUB" })));
+  assert.equal(accepted.ok, true, JSON.stringify(accepted));
+  if (accepted.ok) {
+    assert.equal(accepted.chunk.units[2].displayPrefix, "GITHUB");
+    assert.equal(Object.hasOwn(accepted.chunk.units[0], "displayPrefix"), false);
+  }
+  // Optional: a Feature without one is still a valid proposal.
+  assert.equal(inspect(v4(hierarchy())).ok, true);
+
+  const rejected = { ok: false, code: "schema_rejected" };
+  for (const prefix of ["github", "G", "GIT-HUB", "ABCDEFGHIJKLMNOPQ", "ENG", "LEGACY", 7, null]) {
+    assert.deepEqual(inspect(v4(hierarchy({ displayPrefix: prefix }))), rejected, String(prefix));
+  }
+  assert.deepEqual(inspect(v4(hierarchy({}, { displayPrefix: "EPICCODE" }))), rejected);
+  // Before schema 4 there is no such key.
+  assert.deepEqual(inspect({ ...v4(hierarchy({ displayPrefix: "GITHUB" })), schemaVersion: 3 }), rejected);
+
+  // A stored, digest-verified unit keeps its prefix when re-read alone.
+  const stored = inspectAmuxStoredAnalysisUnit({
+    raw: JSON.stringify(hierarchy({ displayPrefix: "GITHUB" })[2]),
+    chunkIndex: 0, permittedSourceRefIds: [sourceRef],
+  });
+  assert.equal(stored.ok, true);
+  if (stored.ok) assert.equal(stored.unit.displayPrefix, "GITHUB");
+});
