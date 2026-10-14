@@ -86,7 +86,8 @@ test("v42 keeps the v38-v41 recovery history", async () => {
   const v40 = policy.slice(policy.indexOf("## 버전 40"), policy.indexOf("## 버전 41"));
   assert.match(policy, /상태\(v40 이력\): \*\*v40 FIRST Task 전용 읽기 전용 API executor 대안 계약 승인/);
   assert.match(policy, /상태\(v41 이력\): \*\*v41 packed Git object의 고정 읽기 전용 provenance 조회 승인/);
-  assert.match(policy, /상태\(최신\): \*\*v42 FIRST Task 전용 API 인증·모델 접근 증거 승인/);
+  // v42 stays recorded, as the latest status or, once a later version is, as history.
+  assert.match(policy, /상태\((최신|v42 이력)\): \*\*v42 FIRST Task 전용 API 인증·모델 접근 증거 승인/);
   assert.equal(policy.match(/^상태\(최신\):/gm)?.length, 1);
   assert.match(policy, /정책 버전: 38/);
   assert.match(policy, /정책 버전: 39/);
