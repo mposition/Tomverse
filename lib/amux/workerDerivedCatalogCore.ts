@@ -3,6 +3,8 @@ import {
   AMUX_WORKER_CATALOG_EXEMPT,
   amuxCatalogProviderClass,
   amuxWorkerLatchOpen,
+  amuxWorkerRoleRank,
+  type AmuxWorkerRoleCeiling,
   type AmuxWorkerLatchEventKind,
   type AmuxWorkerRegistration,
 } from "./workerRegistryCore.ts";
@@ -250,6 +252,40 @@ export function compareAmuxDerivedCatalogWithEnv(input: {
 export type AmuxDerivedCatalogShadowView =
   | { shadow: "off" }
   | { shadow: "on"; comparison: AmuxDerivedCatalogComparison };
+
+/**
+ * Orchestration policy version 45 (version 35 section 2, at selection): the
+ * level a legacy card asks of a worker. Version 16's role judgement is not
+ * built, so a card has no v16 role; its `requiredRoutingRole` stands in:
+ * a v16 role name is that level, `review` is `contract` (the reviewed
+ * card's level is unknown, so the highest), any other tag is `chore`, and
+ * no tag asks nothing.
+ */
+export function amuxCardRoleLevel(requiredRoutingRole: string | null): AmuxWorkerRoleCeiling | null {
+  if (requiredRoutingRole === null) return null;
+  const tag = requiredRoutingRole.trim().toLowerCase();
+  if (tag === "chore" || tag === "implementation" || tag === "contract") return tag;
+  if (tag === "review") return "contract";
+  return "chore";
+}
+
+/**
+ * Whether a worker's ceiling lets it be a candidate for a card. A code
+ * constant (`engineering-runner`) is governed by its own policy and is not
+ * held to a registry ceiling; a registered worker with no known ceiling is
+ * not a candidate for a card that asks a level.
+ */
+export function amuxWorkerCeilingAllowsCard(
+  workerName: string,
+  ceiling: AmuxWorkerRoleCeiling | undefined,
+  requiredRoutingRole: string | null,
+): boolean {
+  if (amuxDerivedCatalogEntryIsConstant(workerName)) return true;
+  const level = amuxCardRoleLevel(requiredRoutingRole);
+  if (level === null) return true;
+  if (ceiling === undefined) return false;
+  return amuxWorkerRoleRank(ceiling) >= amuxWorkerRoleRank(level);
+}
 
 /** Whether a name comes from a code constant rather than the registry (version 34). */
 export const amuxDerivedCatalogEntryIsConstant = (workerName: string): boolean =>

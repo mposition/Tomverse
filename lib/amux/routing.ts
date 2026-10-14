@@ -9,6 +9,7 @@ import { getAmuxWorkerTelemetry } from "@/lib/amux/telemetry";
 import { amuxV22OpenCardOwnersAndSafeStopFenced } from
   "@/lib/amux/v22LegacySafeStopFence";
 import { readAmuxAssignmentCatalogs } from "@/lib/amux/workerAssignmentCatalog";
+import { amuxWorkerCeilingAllowsCard } from "@/lib/amux/workerDerivedCatalogCore";
 
 // The catalog variables' parser lives in workerCatalogVariables.ts so the
 // assignment catalog reader (version 35, section 3) can use it without a
@@ -115,7 +116,13 @@ export async function buildAmuxRoutingSnapshot(
       // Orchestration policy version 35, section 3: the variables while
       // R2c is off; the catalog derived from the registry, read in this
       // boundary, once it is on.
-      const { workers } = await readAmuxAssignmentCatalogs(tx);
+      const { workers, ceilings } = await readAmuxAssignmentCatalogs(tx);
+      // Version 45 (version 35 section 2, at selection): with the derived
+      // catalog, a worker whose ceiling is below the card's level is not a
+      // candidate, whatever its tags. The variables carry no ceiling.
+      const aboveCeiling = (workerName: string) =>
+        ceilings !== null &&
+        !amuxWorkerCeilingAllowsCard(workerName, ceilings.get(workerName), row.requiredRoutingRole);
 
       if (!workers) {
         return unavailable("worker_catalog_unavailable");
@@ -166,7 +173,8 @@ export async function buildAmuxRoutingSnapshot(
             !worker.isolated &&
             !worker.blocked &&
             !safeStopFenced.has(worker.worker_name) &&
-            !specialistMismatch
+            !specialistMismatch &&
+            !aboveCeiling(worker.worker_name)
           );
         }),
         reason: null,
@@ -210,7 +218,8 @@ export async function buildAmuxRoutingSnapshot(
             !worker.isolated &&
             !worker.blocked &&
             !safeStopFenced.has(worker.worker_name) &&
-            !specialistMismatch;
+            !specialistMismatch &&
+            !aboveCeiling(worker.worker_name);
           const telemetry = telemetryByWorker.get(worker.worker_name)?.scoring;
 
           return {
