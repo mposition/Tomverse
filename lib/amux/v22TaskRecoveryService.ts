@@ -211,6 +211,23 @@ async function lockSafeStopProfileRuntime(tx: Prisma.TransactionClient,
     row.instanceId === profile.workerInstanceId &&
     row.generation === profile.workerGeneration);
 }
+/** Policy v46: a legacy safe stop binds the profile's current runtime, not the
+ * prior attempt's. A restart since that attempt already ended its control
+ * group; the stop proves the live one gone and fences the profile. Every
+ * profile row must share one live instance and generation. */
+async function lockCurrentSafeStopProfileRuntime(tx: Prisma.TransactionClient,
+  workerNames: string[]): Promise<{ instanceId: string; generation: number } | null> {
+  const rows = await tx.$queryRaw<Array<{
+    workerName: string; instanceId: string; generation: number;
+  }>>`SELECT "workerName", "instanceId", "generation" FROM "AmuxWorkerRuntime"
+    WHERE "workerName" = ANY(${workerNames}::text[])
+    ORDER BY "workerName" FOR UPDATE`;
+  const first = rows[0];
+  return first && rows.length === workerNames.length && rows.every((row, index) =>
+    row.workerName === workerNames[index] && row.instanceId === first.instanceId &&
+    row.generation === first.generation) ?
+    { instanceId: first.instanceId, generation: first.generation } : null;
+}
 async function lockPriorAttempt(tx: Prisma.TransactionClient, attemptId: string) {
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${attemptId} FOR UPDATE`;
@@ -530,19 +547,22 @@ export async function requestAmuxV22LegacySafeStop(input: {
       throw new BoardImportError("safe_stop_source_mismatch", 409);
     const configured = configuredAmuxV22RecoveryProfile(sourceRequest.workerName);
     if (!configured) throw new BoardImportError("safe_stop_profile_unavailable", 409);
+    const liveRuntime = await lockCurrentSafeStopProfileRuntime(tx, configured.workerNames);
+    if (!liveRuntime) throw new BoardImportError("safe_stop_profile_unavailable", 409);
     const profile: SafeStopProfileBinding = { alias: configured.alias,
       workerNames: configured.workerNames, targetUnit: configured.targetUnit,
       profileConfigDigest: configured.profileConfigDigest,
-      workerInstanceId: sourceRequest.workerInstanceId,
-      workerGeneration: sourceRequest.workerGeneration };
-    if (!await lockSafeStopProfileRuntime(tx, profile))
-      throw new BoardImportError("safe_stop_profile_unavailable", 409);
+      workerInstanceId: liveRuntime.instanceId,
+      workerGeneration: liveRuntime.generation };
     const task = await lockRecoveryTask(tx, input.taskId);
     if (!await lockPriorAttempt(tx, input.priorAttemptId))
       throw new BoardImportError("safe_stop_source_mismatch", 409);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
     if (task.taskRole !== "investigate")
       throw new BoardImportError("safe_stop_legacy_not_read_only", 409);
+    // The source request stays bound to the prior attempt's runtime. A safe
+    // stop recorded against a newer live runtime therefore cannot seed another
+    // request; policy v46 does not open chained re-requests.
     if (sourceRequest.priorAttemptTaskRevision !== attempt.taskRevision ||
         sourceRequest.workerName !== attempt.worker ||
         sourceRequest.workerInstanceId !== attempt.workerInstanceId ||
@@ -598,8 +618,8 @@ export async function requestAmuxV22LegacySafeStop(input: {
     const binding = { inspectionId, requestKind: "safe_stop" as const,
       taskId: task.id, taskRevision: task.revision,
       priorAttemptId: attempt.id, priorAttemptTaskRevision: attempt.taskRevision,
-      workerName: attempt.worker, workerInstanceId: attempt.workerInstanceId,
-      workerGeneration: attempt.workerGeneration, targetHost: AMUX_V22_RECOVERY_HOST_SCOPE,
+      workerName: attempt.worker, workerInstanceId: profile.workerInstanceId,
+      workerGeneration: profile.workerGeneration, targetHost: AMUX_V22_RECOVERY_HOST_SCOPE,
       sourceEvidenceId: source.id, sourceEvidenceDigest: source.evidenceDigest,
       workerProfileAlias: profile.alias, profileWorkerNames: profile.workerNames,
       targetUnit: profile.targetUnit, profileConfigDigest: profile.profileConfigDigest,
@@ -850,7 +870,11 @@ export function reportAmuxV22RecoveryEvidence(input: AmuxV22RecoveryEvidenceInpu
     let reason = amuxV22RecoveryProofReason(input, task.taskRole!);
     try { requireBlockedIdentity(task, inspection.taskRevision, inspection.priorAttemptId); }
     catch { reason = "recovery_identity_changed"; }
-    if (!await currentRuntime(tx, inspection)) reason = "runtime_observation_unverified";
+    // A runtime change only matters to a proof that would otherwise verify. A
+    // legacy report already proves nothing about the prior invocation, and a
+    // restart since that attempt must not hide that reason (policy v46).
+    if (reason === null && !await currentRuntime(tx, inspection))
+      reason = "runtime_observation_unverified";
     const auditId = await recordAmuxV22RecoveryEvidenceAudit(tx, input.evidenceId, {
       taskId: task.id, inspectionId: inspection.id, priorAttemptId: inspection.priorAttemptId,
       evidenceDigest, verified: reason === null, reason,
