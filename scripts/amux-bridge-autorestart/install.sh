@@ -25,6 +25,7 @@ timer_off() {
 # earlier install's timer included).
 changing=no
 fail() {
+  declare -F stop_subject >/dev/null && stop_subject
   [[ "$changing" == yes ]] && timer_off && echo "install.sh: the timer is off" >&2
   echo "install.sh: $*" >&2
   exit 2
@@ -73,25 +74,51 @@ systemctl daemon-reload
 # polkitd reads rules.d on change; give it a moment, then ask it directly.
 sleep 2
 
-# Asks polkit, as the account, whether <verb> on <unit> is allowed. The shell
-# execs into pkcheck, so the process it names is the account's own.
-allowed() {
-  runuser -u "$restart_user" -- sh -c \
-    'exec pkcheck --action-id org.freedesktop.systemd1.manage-units --process $$ --detail unit "$1" --detail verb "$2"' \
-    sh "$1" "$2" >/dev/null 2>&1
+# Asks polkit whether the account may <verb> <unit>, the way systemd asks it.
+#
+# The subject is a process running as the account, and the question is put
+# by root: polkitd refuses details (unit, verb) from an unprivileged caller
+# ("Only trusted callers (e.g. uid 0 or an action owner) can use
+# CheckAuthorization() and pass details"), so asking as the account itself
+# failed every check on the first install (2026-10-14). setpriv execs
+# straight into sleep, so the process it leaves is the account's own.
+setpriv --reuid="$restart_user" --regid="$restart_user" --clear-groups sleep 120 &
+subject=$!
+stop_subject() { kill "$subject" 2>/dev/null || true; }
+trap 'stop_subject; timer_off; echo "install.sh: failed; the timer is off" >&2' ERR
+sleep 1
+test "$(stat -c %U "/proc/$subject")" = "$restart_user" ||
+  fail "could not start a process as $restart_user to ask polkit about"
+
+# Prints pkcheck's exit status: 0 authorized, 1 or 2 not authorized (2 would
+# need a password), anything else an error that answers nothing.
+answer() {
+  local status=0
+  pkcheck --action-id org.freedesktop.systemd1.manage-units --process "$subject" \
+    --detail unit "$1" --detail verb "$2" >/dev/null 2>&1 || status=$?
+  echo "$status"
 }
-allowed tomverse-bridge.service restart || fail "polkit does not let the account restart tomverse-bridge.service"
-allowed tomverse-amux-v22-bridge@claude-impl.service restart ||
-  fail "polkit does not let the account restart a v22 bridge"
-if allowed tomverse-bridge.service stop; then
-  fail "polkit lets the account stop a bridge; the rule is wider than approved"
-fi
-if allowed ssh.service restart; then
-  fail "polkit lets the account restart ssh.service; the rule is wider than approved"
-fi
-if allowed tomverse-amux-v22-sidecar@claude-impl.service restart; then
-  fail "polkit lets the account restart a sidecar; the rule is wider than approved"
-fi
+granted() {
+  local status
+  status=$(answer "$1" "$2")
+  test "$status" = 0 || fail "polkit does not let the account $2 $1 (pkcheck exit $status)"
+}
+refused() {
+  local status
+  status=$(answer "$1" "$2")
+  case "$status" in
+    1 | 2) ;;
+    0) fail "polkit lets the account $2 $1; the rule is wider than approved" ;;
+    *) fail "polkit gave no answer for $2 $1 (pkcheck exit $status)" ;;
+  esac
+}
+granted tomverse-bridge.service restart
+granted tomverse-amux-v22-bridge@claude-impl.service restart
+refused tomverse-bridge.service stop
+refused ssh.service restart
+refused tomverse-amux-v22-sidecar@claude-impl.service restart
+stop_subject
+trap 'timer_off; echo "install.sh: failed; the timer is off" >&2' ERR
 
 timer_off
 systemctl start tomverse-bridge-autorestart.service
