@@ -75,6 +75,28 @@ export const isAmuxCardDisplayReservedPrefix = (value: unknown): value is AmuxCa
 export const isAmuxFeatureDisplayPrefix = (value: unknown): value is string =>
   isAmuxCardDisplayPrefix(value) && !isAmuxCardDisplayReservedPrefix(value);
 
+/**
+ * docs/policy/amux-intake.md v17 item 3: the prefixes a new Feature may take, in order. The
+ * proposal first, then `<PREFIX>2` .. `<PREFIX>99`, each cut from the front
+ * to fit 16 characters. Empty when the proposal is not a Feature prefix.
+ */
+export function amuxFeatureDisplayPrefixCandidates(proposed: unknown): string[] {
+  if (!isAmuxFeatureDisplayPrefix(proposed)) return [];
+  const candidates = [proposed];
+  for (let suffix = 2; suffix <= 99; suffix += 1) {
+    const tail = String(suffix);
+    candidates.push(proposed.slice(0, 16 - tail.length) + tail);
+  }
+  return [...new Set(candidates.filter(isAmuxFeatureDisplayPrefix))];
+}
+
+/** The first candidate no Feature holds yet, or null when every one is taken. */
+export function pickAmuxFeatureDisplayPrefix(
+  candidates: readonly string[], taken: ReadonlySet<string>,
+): string | null {
+  return candidates.find((candidate) => !taken.has(candidate)) ?? null;
+}
+
 export const isAmuxCardDisplayKey = (value: unknown): value is string =>
   typeof value === "string" && DISPLAY_KEY.test(value);
 

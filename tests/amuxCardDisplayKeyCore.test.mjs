@@ -7,7 +7,9 @@ import {
   AMUX_CARD_DISPLAY_MAX_NUMBER,
   AMUX_CARD_DISPLAY_PREFIX_PATTERN,
   AMUX_CARD_DISPLAY_RESERVED_PREFIXES,
+  amuxFeatureDisplayPrefixCandidates,
   formatAmuxCardDisplayKey,
+  pickAmuxFeatureDisplayPrefix,
   isAmuxCardDisplayKey,
   isAmuxCardDisplayPrefix,
   isAmuxFeatureDisplayPrefix,
@@ -71,6 +73,28 @@ test("reserved path prefixes are valid card prefixes but never Feature prefixes"
   assert.ok(!isAmuxFeatureDisplayPrefix("github"));
 });
 
+test("a taken Feature prefix falls back to the first free numbered variant within 16 characters", () => {
+  // docs/policy/amux-intake.md v17 item 3.
+  const candidates = amuxFeatureDisplayPrefixCandidates("GITHUB");
+  assert.equal(candidates.length, 99);
+  assert.deepEqual(candidates.slice(0, 3), ["GITHUB", "GITHUB2", "GITHUB3"]);
+  assert.equal(candidates.at(-1), "GITHUB99");
+  assert.equal(pickAmuxFeatureDisplayPrefix(candidates, new Set()), "GITHUB");
+  assert.equal(pickAmuxFeatureDisplayPrefix(candidates, new Set(["GITHUB", "GITHUB2"])), "GITHUB3");
+  assert.equal(pickAmuxFeatureDisplayPrefix(candidates, new Set(candidates)), null);
+
+  const long = amuxFeatureDisplayPrefixCandidates("ABCDEFGHIJKLMNOP");
+  assert.deepEqual(long.slice(0, 2), ["ABCDEFGHIJKLMNOP", "ABCDEFGHIJKLMNO2"]);
+  assert.equal(long.at(-1), "ABCDEFGHIJKLMN99");
+  assert.ok(long.every((prefix) => prefix.length <= 16 && isAmuxFeatureDisplayPrefix(prefix)));
+
+  for (const proposal of [undefined, null, "github", "ENG", "A"]) {
+    assert.deepEqual(amuxFeatureDisplayPrefixCandidates(proposal), [], String(proposal));
+  }
+  // A reserved prefix never appears as a variant either (ENG2 is not ENG).
+  assert.deepEqual(amuxFeatureDisplayPrefixCandidates("EN").slice(0, 2), ["EN", "EN2"]);
+});
+
 test("the migration's CHECKs use the core's own patterns and reserved list", () => {
   assert.ok(statements.includes(`"displayKey" ~ '${AMUX_CARD_DISPLAY_KEY_PATTERN}'`));
   // The issued-number ledger and the issue trigger use the same pattern.
@@ -117,7 +141,10 @@ test("the migration is additive and writes no row", () => {
 
 test("the allocator is one bound INSERT ... ON CONFLICT that advances by one", () => {
   const allocator = readFileSync("lib/amux/cardDisplayKeyAllocator.ts", "utf8").replace(/\r\n/g, "\n");
-  assert.equal((allocator.match(/\.\$queryRaw\b/g) ?? []).length, 1);
+  // Two statements: the counter's one INSERT, and the read-only Feature prefix lookup.
+  assert.equal((allocator.match(/\.\$queryRaw\b/g) ?? []).length, 2);
+  assert.equal((allocator.match(/\bINSERT INTO\b/g) ?? []).length, 1);
+  assert.match(allocator, /SELECT "displayPrefix" FROM "AmuxPortfolioNode"\n\s+WHERE "displayPrefix" = ANY\(\$\{candidates\}::TEXT\[\]\)/);
   assert.doesNotMatch(allocator, /\$queryRawUnsafe|\$executeRawUnsafe|Prisma\.raw/);
   assert.match(allocator, /VALUES \(\$\{prefix\}, 1\)/);
   assert.match(allocator,

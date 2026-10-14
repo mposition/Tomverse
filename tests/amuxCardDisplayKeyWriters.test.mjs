@@ -19,43 +19,44 @@ const read = (path) => readFileSync(join(root, path), "utf8").replace(/\r\n/g, "
 
 const CREATES_CARD = /\.amuxWorkItem\.(?:create|createMany|upsert)\s*\(|INSERT\s+INTO\s+(?:public\.)?"AmuxWorkItem"/;
 
-/** Each creating file and the policy §4 path it numbers under. */
+/**
+ * Each creating file and the prefix it numbers under: a policy §4 path, or
+ * `feature` for the v4 idea path, whose card takes its Feature's prefix
+ * (docs/policy/amux-intake.md v17 item 4).
+ */
 const NUMBERED = {
   "lib/amux/intakeRegistration.ts": "conversationIntake",
   "lib/amux/localIntakeRegistration.ts": "localIntake",
   "lib/amux/agentIntake.ts": "engineeringAgent",
   "lib/amux/boardImportService.ts": "workboardImport",
   "app/api/internal/amux/tasks/route.ts": "snapshotSync",
+  "lib/amux/ideaUnitDecisionStore.ts": "feature",
 };
 
-/**
- * Not numbered yet, each with the stage that numbers it. Shrinks only.
- * The v4 idea path takes its Feature's prefix, which needs the intake
- * proposal change of stage S3b; its cards are numbered by the backfill until
- * then.
- */
-const PENDING = {
-  "lib/amux/ideaUnitDecisionStore.ts": "S3b",
-};
+/** What each prefix kind is passed to the allocator as. */
+const allocationArgument = (entry) =>
+  entry === "feature" ? "featureDisplayPrefix" : `AMUX_CARD_DISPLAY_PATH_PREFIX.${entry}`;
 
 const creators = [...sourceFiles("lib"), ...sourceFiles("app")]
   .filter((path) => CREATES_CARD.test(read(path)))
   .sort();
 
-test("every file that creates a card is numbered or named as pending", () => {
-  assert.deepEqual(creators, [...Object.keys(NUMBERED), ...Object.keys(PENDING)].sort());
+test("every file that creates a card is numbered", () => {
+  assert.deepEqual(creators, Object.keys(NUMBERED).sort());
 });
 
-test("each numbered writer allocates from its own path's prefix and writes the key it got", () => {
+test("each writer allocates once from its own prefix and writes the key it got", () => {
   for (const [path, entry] of Object.entries(NUMBERED)) {
     const source = read(path);
-    assert.ok(entry in AMUX_CARD_DISPLAY_PATH_PREFIX, `${path}: ${entry} is not a policy §4 path`);
+    assert.ok(entry === "feature" || entry in AMUX_CARD_DISPLAY_PATH_PREFIX,
+      `${path}: ${entry} is not a policy §4 path`);
     // Exactly one card-creating call per file, so a second create, createMany,
     // upsert or raw INSERT added beside the numbered one fails here.
     const creations = source.match(new RegExp(CREATES_CARD.source, "g")) ?? [];
     assert.equal(creations.length, 1, `${path} creates cards in exactly one place`);
-    const allocations = [...source.matchAll(/allocateAmuxCardDisplayKey\(tx, AMUX_CARD_DISPLAY_PATH_PREFIX\.(\w+)\)/g)];
-    assert.deepEqual(allocations.map((match) => match[1]), [entry], `${path} allocates once, under ${entry}`);
+    const allocations = [...source.matchAll(/allocateAmuxCardDisplayKey\(tx, ([\w.]+)\)/g)];
+    assert.deepEqual(allocations.map((match) => match[1]), [allocationArgument(entry)],
+      `${path} allocates once, from ${allocationArgument(entry)}`);
     // The allocation sits just before the one create it numbers, which then
     // carries the allocated key.
     const allocationAt = allocations[0].index;
