@@ -15,11 +15,13 @@ import {
  */
 
 /**
- * R2b ships with its code latch off (version 35 section 5); the operator's
- * activation record turns it on. While it is false the Admin page reads
- * nothing for the shadow and says so.
+ * R2b shipped with its code latch off (version 35 section 5); version 43
+ * (approved 2026-10-14) is the operator's activation record and sets it true,
+ * so the Admin page reads the shadow and compares -- and nothing else opens:
+ * assignment still follows the catalog variables until R2c. While it is false
+ * the Admin page reads nothing for the shadow and says so.
  */
-export const AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH = false;
+export const AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH = true;
 export const amuxWorkerDerivedCatalogShadowOpen = (): boolean => AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH;
 
 /**
