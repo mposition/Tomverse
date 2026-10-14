@@ -175,6 +175,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // columns, a counter table and immutability guards; it changes no
   // commit-deadline mechanism.
   "20261014100000_amux_card_display_key",
+  // Orchestration policy v44: the FIRST Task prior attempt ID correction of
+  // the 290 attempt guard and four recovery CHECKs; it changes no
+  // commit-deadline mechanism.
+  "20261014120000_amux_v22_prior_attempt_id_guard_correction",
+  "20261014120100_amux_v22_prior_attempt_id_check_correction",
   // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
   // no commit deadline and continues to use the existing mutation fence.
   "20261012170000_amux_verified_no_commit_halt_auto_clear",
