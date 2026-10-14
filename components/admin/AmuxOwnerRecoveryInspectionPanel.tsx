@@ -842,17 +842,22 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     waitingData.requestKind === "safe_stop" && pendingStorage.state === "empty" &&
     (waitingData.state === "pending" || (waitingData.state === "verified" &&
       (!waitingData.launchProof || waitingData.apiModelAccess?.state === "required")));
-  const waitingKey = waitingForHostEvidence ? `${waitingData!.requestId}:${waitingData!.state}:` +
-    `${waitingData!.launchProof?.id ?? ""}:${waitingData!.apiModelAccess?.state ?? ""}` : null;
+  // Keyed by request only: each read passes through "loading", which tears the
+  // timer down, so the read budget lives in a ref that survives it.
+  const waitingKey = waitingForHostEvidence ? waitingData!.requestId : null;
+  const autoReads = useRef<{ requestId: string; reads: number } | null>(null);
   const recoverRef = useRef(recover);
   useEffect(() => { recoverRef.current = recover; }, [recover]);
   useEffect(() => {
     if (!waitingKey) return;
-    let reads = 0;
+    if (autoReads.current?.requestId !== waitingKey)
+      autoReads.current = { requestId: waitingKey, reads: 0 };
+    const budget = autoReads.current;
     const timer = setInterval(() => {
-      reads += 1;
-      if (reads > AMUX_HOST_EVIDENCE_AUTO_READS) { clearInterval(timer); return; }
-      if (!active.current) void recoverRef.current();
+      if (budget.reads >= AMUX_HOST_EVIDENCE_AUTO_READS) { clearInterval(timer); return; }
+      if (active.current) return;
+      budget.reads += 1;
+      void recoverRef.current();
     }, AMUX_HOST_EVIDENCE_AUTO_READ_MS);
     return () => clearInterval(timer);
   }, [waitingKey]);
