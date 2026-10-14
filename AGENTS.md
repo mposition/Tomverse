@@ -1586,6 +1586,10 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `displayPrefix`를 가질 수 있고, `create_node`가 같은 트랜잭션에서 Feature에 쓰며(이미 쓰인 값이면
   `chooseAmuxFeatureDisplayPrefix()`가 고르는 번호 붙은 값), v4 카드는 그 Feature의 PREFIX로 번호를 받습니다.
   PREFIX 없는 Feature 아래 카드는 번호 없이 등록되고 S4 backfill이 채웁니다.
+- **S4(backfill)**: `/admin/amux-execution?tab=cards`의 owner 전용 패널과
+  `app/api/admin/amux/card-display-key-backfill/route.ts`. 계획은 `lib/amux/cardDisplayKeyBackfillCore.ts`
+  (순수)가 정하고, 적용은 같은 트랜잭션에서 계획을 다시 계산해 운영자가 본 digest와 같을 때만 쓰며 사람
+  감사를 남깁니다. raw UPDATE로 `updatedAt`과 다른 컬럼을 건드리지 않습니다.
 
 # AI Review (교차검토) 품질과 M5
 

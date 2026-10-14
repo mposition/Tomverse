@@ -207,13 +207,14 @@ const nodeSelect = {
   contentDigest: true, contentDigestKeyId: true,
 } as const;
 
-async function nodeTitles(rows: NodeRow[]) {
+async function nodeTitles(rows: NodeRow[],
+  db: Pick<typeof prisma, "amuxPortfolioNodeRevision" | "amuxIdeaUnitDecision"> = prisma) {
   if (rows.length === 0) return [];
-  const revisions = await prisma.amuxPortfolioNodeRevision.findMany({
+  const revisions = await db.amuxPortfolioNodeRevision.findMany({
     where: { OR: rows.map((row) => ({ nodeId: row.id, revision: row.revision })) },
     select: { nodeId: true, revision: true, decisionId: true },
   });
-  const decisions = await prisma.amuxIdeaUnitDecision.findMany({
+  const decisions = await db.amuxIdeaUnitDecision.findMany({
     where: { id: { in: revisions.map((row) => row.decisionId) } },
     select: { id: true, ideaId: true },
   });
@@ -625,3 +626,6 @@ export async function readAmuxExecutionFeedback(parent: {
   return { parent, complete: true, reason: null,
     rollup: rollupAmuxTaskFeedback(feedback) };
 }
+
+/** The digest-verified title reader the card number backfill shares (docs/policy/amux-card-display-key.md §5). */
+export { nodeSelect as amuxNodeTitleSelect, nodeTitles as readAmuxNodeTitles };
