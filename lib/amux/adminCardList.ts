@@ -18,6 +18,7 @@ const STATUS_ORDER = ["doing", "review", "blocked", "todo", "backlog", "done", "
 
 export type AmuxAdminCardRow = {
   id: string;
+  displayKey: string | null;
   sourceKey: string | null;
   status: string;
   owner: string | null;
@@ -46,6 +47,7 @@ export async function listAmuxCardsForAdmin(): Promise<{
       take: AMUX_ADMIN_CARD_LIST_LIMIT,
       select: {
         id: true,
+        displayKey: true,
         sourceKey: true,
         status: true,
         owner: true,
@@ -87,6 +89,7 @@ export async function listAmuxCardsForAdmin(): Promise<{
   const rows = cards
     .map((card) => ({
       id: card.id,
+      displayKey: card.displayKey,
       sourceKey: card.sourceKey,
       status: card.status,
       owner: card.owner,
@@ -104,7 +107,8 @@ export async function listAmuxCardsForAdmin(): Promise<{
     .sort(
       (left, right) =>
         rank(left.status) - rank(right.status) ||
-        (left.sourceKey ?? left.id).localeCompare(right.sourceKey ?? right.id),
+        (left.displayKey ?? left.sourceKey ?? left.id).localeCompare(
+          right.displayKey ?? right.sourceKey ?? right.id, undefined, { numeric: true }),
     );
   return { rows, total, limit: AMUX_ADMIN_CARD_LIST_LIMIT };
 }

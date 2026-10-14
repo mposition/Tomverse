@@ -6,7 +6,8 @@ const a = { id:"qa-task-104", title:"Open details without losing the board", sou
   parentFeatureNodeId:null, parentStoryCardId:null, taskRole:"impl", executionGrade:"standard",
   worker:null, lane:null, sev1:false, score:74, scoreFresh:true, dependencyCount:0,
   progress:null, briefPresent:true, updatedAt:"2026-10-12T05:00:00Z" };
-const b = { ...a, id:"qa-task-105", sourceKey:"AMUX-105", title:"Preserve the second card", priority:"p1" };
+const b = { ...a, id:"qa-task-105", sourceKey:"AMUX-105", title:"Preserve the second card", priority:"p1",
+  displayKey:"AMUX-GITHUB-007" };
 const lanes = ["tomverse_backlog","amux_backlog","todo","in_progress","in_review","attention"];
 const detail = (card=a) => ({ ...card, revision:3, body:JSON.stringify({
   problem:"Keep the board context",scopeIn:["Same-page dialog"],scopeOut:[],completionCriteria:["Keyboard focus returns"] }),
@@ -74,6 +75,21 @@ test("number opens modal; tabs, Escape, focus and loaded filter survive",async({
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);await expect(search).toHaveValue("AMUX-104");await expect(number).toBeFocused();
   await expect(page).not.toHaveURL(/taskId=/);
+});
+
+test("a numbered card is listed and found by its number, with its Task ID beside it",async({page})=>{
+  await setup(page);
+  const card=page.getByTestId("amux-board-card-"+b.id);
+  await expect(card.getByRole("button",{name:"AMUX-GITHUB-007",exact:true})).toBeVisible();
+  await expect(card.getByText("Task ID: qa-task-105")).toBeVisible();
+  const search=page.getByRole("textbox",{name:"Search loaded cards"});
+  await search.fill("github-007");
+  await expect(card).toBeVisible();
+  await expect(page.getByTestId("amux-board-card-"+a.id)).toHaveCount(0);
+  await card.getByRole("button",{name:"AMUX-GITHUB-007",exact:true}).click();
+  const dialog=page.getByRole("dialog");
+  await expect(dialog.getByTestId("amux-detail-card-number")).toHaveText("AMUX-GITHUB-007");
+  await expect(dialog.getByTestId("amux-detail-task-id")).toHaveText("Task ID: qa-task-105 · r3");
 });
 
 test("closing loading detail prevents a late response reopening it",async({page})=>{
@@ -243,7 +259,7 @@ test("unknown move uses readback and reopening never replays the write",async({p
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText("unconfirmed");
   expect(state.posts()).toBe(1);expect(state.reads()).toBeGreaterThan(1);
   await page.keyboard.press("Escape");
-  await page.getByRole("button",{name:"qa-task-105",exact:true}).click();
+  await page.getByRole("button",{name:"AMUX-GITHUB-007",exact:true}).click();
   await page.keyboard.press("Escape");
   await page.getByTestId("amux-board-card-"+a.id).getByRole("button",{name:"Move to AMUX queue"}).click();
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText("unconfirmed");

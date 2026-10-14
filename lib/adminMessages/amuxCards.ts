@@ -8,6 +8,7 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     shown: (shown: number, total: number, limit: number) =>
       `Showing ${shown} of ${total} cards, the ${limit} most recently updated, ordered by status.`,
     columnCard: "Card",
+    sourceKey: "Source key",
     columnStatus: "Status",
     columnOwner: "Owner",
     columnPriority: "Priority",
@@ -36,6 +37,7 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     shown: (shown: number, total: number, limit: number) =>
       `카드 ${total}장 가운데 최근 갱신된 ${limit}장 한도에서 ${shown}장을 상태 순으로 보여 줍니다.`,
     columnCard: "카드",
+    sourceKey: "원본 키",
     columnStatus: "상태",
     columnOwner: "owner",
     columnPriority: "우선순위",

@@ -23,7 +23,7 @@ import {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const cardSelect = {
-  id: true, title: true, sourceKey: true, sourceSystem: true,
+  id: true, title: true, displayKey: true, sourceKey: true, sourceSystem: true,
   sourceSnapshot: true, status: true, priority: true, kind: true,
   cardType: true, storyKind: true, parentFeatureNodeId: true,
   parentStoryCardId: true, taskRole: true, executionGrade: true,
@@ -114,6 +114,7 @@ async function cardSummaries(rows: CardRow[]) {
   return rows.map((row, index) => ({
     id: row.id,
     title: titles[index],
+    displayKey: row.displayKey,
     sourceKey: row.sourceKey,
     status: row.status,
     priority: row.priority,
@@ -362,9 +363,9 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       v4BodyDigest: true, v4BodyDigestKeyId: true,
       v4BriefCiphertext: true, v4BriefKeyId: true, v4BriefKeyVersion: true,
       v4BriefDigestKeyId: true, revision: true,
-      dependencies: { select: { dependency: { select: { id: true,
+      dependencies: { select: { dependency: { select: { id: true, displayKey: true,
         sourceKey: true, status: true } } } },
-      dependents: { select: { task: { select: { id: true,
+      dependents: { select: { task: { select: { id: true, displayKey: true,
         sourceKey: true, status: true } } } },
       executionAttempts: { orderBy: { startedAt: "desc" as const }, take: 20,
         select: { id: true, worker: true, attemptNumber: true,
