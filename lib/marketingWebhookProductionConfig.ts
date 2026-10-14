@@ -254,3 +254,107 @@ export const marketingWebhookProductionConfigRefusals = (
 
   return reasons;
 };
+
+// ---------------------------------------------------------------------------
+// The apply scope (`marketing_webhook.apply_scope_changed`)
+// ---------------------------------------------------------------------------
+
+export const MARKETING_WEBHOOK_APPLY_SCOPE_CHANGED_ACTION =
+  "marketing_webhook.apply_scope_changed";
+
+const scopeEntry = z
+  .object({
+    eventType: boundedToken,
+    channelId: boundedToken,
+  })
+  .strict();
+
+/**
+ * The stored apply scope: which exact (event type, channel) pairs production may
+ * apply, under which verification record and which signed production
+ * generation. An empty scope is storable and applies nothing -- it is how an
+ * operator stops production applying without touching the signature.
+ */
+export const marketingWebhookProductionApplyScopeSchema = z
+  .object({
+    recordId: verificationRecordId,
+    productionConfigGeneration: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    scope: z
+      .array(scopeEntry)
+      .max(200)
+      .superRefine((entries, context) => {
+        const seen = new Set<string>();
+        for (const entry of entries) {
+          const key = JSON.stringify([entry.eventType, entry.channelId]);
+          if (seen.has(key)) {
+            context.addIssue({ code: "custom", message: "duplicate scope entry" });
+            return;
+          }
+          seen.add(key);
+        }
+      }),
+  })
+  .strict();
+
+export type MarketingWebhookProductionApplyScope = z.infer<
+  typeof marketingWebhookProductionApplyScopeSchema
+>;
+
+export type MarketingWebhookProductionApplyScopeRead =
+  | { readonly status: "absent" }
+  | { readonly status: "invalid" }
+  | { readonly status: "valid"; readonly value: MarketingWebhookProductionApplyScope };
+
+export const readMarketingWebhookProductionApplyScope = (
+  value: string | null | undefined,
+): MarketingWebhookProductionApplyScopeRead => {
+  if (value === null || value === undefined) return { status: "absent" };
+  try {
+    const parsed = marketingWebhookProductionApplyScopeSchema.safeParse(
+      JSON.parse(canonicalMarketingWebhookFileText(value)),
+    );
+    return parsed.success ? { status: "valid", value: parsed.data } : { status: "invalid" };
+  } catch {
+    return { status: "invalid" };
+  }
+};
+
+/** Entries sorted, so the same set of pairs is always the same bytes. */
+export const serializeMarketingWebhookProductionApplyScope = (
+  value: MarketingWebhookProductionApplyScope,
+): string => {
+  const parsed = marketingWebhookProductionApplyScopeSchema.parse(value);
+  return canonicalMarketingWebhookJson({
+    ...parsed,
+    scope: [...parsed.scope].sort((left, right) =>
+      JSON.stringify([left.eventType, left.channelId]) < JSON.stringify([right.eventType, right.channelId])
+        ? -1
+        : 1,
+    ),
+  });
+};
+
+/**
+ * The digest a screen reads the stored scope as, and sends back as the value it
+ * expects to replace: `absent` for no row, otherwise the sha-256 of the stored
+ * bytes exactly -- not of their parse, so a row something else wrote is still a
+ * value the caller has to have seen.
+ */
+export const marketingWebhookStoredValueDigest = (value: string | null | undefined): string =>
+  value === null || value === undefined
+    ? "absent"
+    : createHash("sha256").update(value, "utf8").digest("hex");
+
+/** The pairs of `requested` that the record never observed. */
+export const marketingWebhookScopeOutsideObserved = (
+  requested: readonly { readonly eventType: string; readonly channelId: string }[],
+  observed: readonly { readonly eventType: string; readonly channelId: string }[],
+): Array<{ eventType: string; channelId: string }> =>
+  requested
+    .filter(
+      (entry) =>
+        !observed.some(
+          (seen) => seen.eventType === entry.eventType && seen.channelId === entry.channelId,
+        ),
+    )
+    .map((entry) => ({ eventType: entry.eventType, channelId: entry.channelId }));

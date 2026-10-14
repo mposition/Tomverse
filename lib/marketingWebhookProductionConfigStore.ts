@@ -19,6 +19,7 @@
 import "server-only";
 
 import {
+  MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
   MARKETING_WEBHOOK_SHADOW_KEY,
   canonicalMarketingWebhookFileText,
@@ -36,10 +37,17 @@ import {
   MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY,
   MARKETING_WEBHOOK_PRODUCTION_CONFIG_SIGNED_ACTION,
   MarketingWebhookProductionConfigRefusedError,
+  marketingWebhookProductionConfigRefusals,
   marketingWebhookProductionConfigSnapshotDigest,
+  marketingWebhookScopeOutsideObserved,
+  marketingWebhookStoredValueDigest,
   nextMarketingWebhookProductionConfigGeneration,
+  readMarketingWebhookProductionApplyScope,
   readMarketingWebhookProductionConfig,
+  serializeMarketingWebhookProductionApplyScope,
   serializeMarketingWebhookProductionConfig,
+  type MarketingWebhookProductionApplyScope,
+  type MarketingWebhookProductionApplyScopeRead,
   type MarketingWebhookProductionConfigGeneration,
   type MarketingWebhookProductionConfigRead,
 } from "@/lib/marketingWebhookProductionConfig";
@@ -76,10 +84,17 @@ export const marketingWebhookLiveDeployCommitSha = (
   return value && COMMIT_SHA.test(value) ? value : null;
 };
 
-/** The audit claim a production configuration signature has to prove. */
+/**
+ * The audit claim a production configuration signature has to prove.
+ *
+ * The record signature it rested on is bound when the caller knows it -- the
+ * signing transaction does -- and left out later, when only the stored
+ * generation is at hand: the generation does not carry it, and the signing
+ * transaction already proved it before the row could commit.
+ */
 export const marketingWebhookProductionConfigAuditRequirement = (
   value: MarketingWebhookProductionConfigGeneration,
-  verificationSignatureAuditLogId: string,
+  verificationSignatureAuditLogId?: string,
 ): MarketingAuditRequirement => ({
   auditLogId: value.signatureAuditLogId,
   action: MARKETING_WEBHOOK_PRODUCTION_CONFIG_SIGNED_ACTION,
@@ -90,7 +105,7 @@ export const marketingWebhookProductionConfigAuditRequirement = (
     deployCommitSha: value.deployCommitSha,
     pipelineFingerprint: value.pipelineFingerprint,
     productionConfigSnapshotDigest: value.productionConfigSnapshotDigest,
-    verificationSignatureAuditLogId,
+    ...(verificationSignatureAuditLogId === undefined ? {} : { verificationSignatureAuditLogId }),
   },
 });
 
@@ -102,6 +117,8 @@ export type MarketingWebhookProductionConfigLive = {
   readonly stored: MarketingWebhookProductionConfigRead;
   /** Null when the stored value refuses a signature over it. */
   readonly nextGeneration: number | null;
+  /** The stored apply scope, and the digest a change has to name to replace it. */
+  readonly applyScope: MarketingWebhookProductionApplyScopeRead & { readonly storedDigest: string };
 };
 
 /**
@@ -113,12 +130,13 @@ export async function readMarketingWebhookProductionConfigLive(
   db: Pick<MarketingTransaction, "appSetting" | "marketingChannel">,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<MarketingWebhookProductionConfigLive> {
-  const [shadowRow, configRow, channels] = await Promise.all([
+  const [shadowRow, configRow, scopeRow, channels] = await Promise.all([
     db.appSetting.findUnique({ where: { key: MARKETING_WEBHOOK_SHADOW_KEY }, select: { value: true } }),
     db.appSetting.findUnique({
       where: { key: MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY },
       select: { value: true },
     }),
+    db.appSetting.findUnique({ where: { key: MARKETING_WEBHOOK_APPLY_SCOPE_KEY }, select: { value: true } }),
     db.marketingChannel.findMany({
       where: { provider: "zernio", externalAccountRef: { not: null } },
       select: { id: true, externalAccountRef: true },
@@ -139,6 +157,10 @@ export async function readMarketingWebhookProductionConfigLive(
     ),
     stored,
     nextGeneration: nextMarketingWebhookProductionConfigGeneration({ ok: true, value: stored }),
+    applyScope: {
+      ...readMarketingWebhookProductionApplyScope(scopeRow?.value),
+      storedDigest: marketingWebhookStoredValueDigest(scopeRow?.value),
+    },
   };
 }
 
@@ -293,6 +315,129 @@ export async function signMarketingWebhookProductionConfig(
   );
   if (!own.ok) {
     refuse("signature_audit_unverifiable", `The signing audit entry does not verify (${own.problem}).`);
+  }
+  return value;
+}
+
+export type MarketingWebhookApplyScopeRequest = MarketingWebhookProductionApplyScope & {
+  /** `marketingWebhookStoredValueDigest()` of the value the screen read. */
+  readonly expectedStoredDigest: string;
+};
+
+/**
+ * Set the production apply scope (`marketing_webhook.apply_scope_changed`),
+ * against the stored value the screen read.
+ *
+ * A non-empty scope needs the signed production generation it names to still
+ * bind the live configuration -- the same check the apply decision makes --
+ * and every pair it lists to have been observed by that generation's record.
+ * An empty scope applies nothing, so it needs none of that: stopping
+ * production applying events has to work exactly when something else is wrong.
+ */
+export async function setMarketingWebhookProductionApplyScope(
+  tx: MarketingTransaction,
+  request: MarketingWebhookApplyScopeRequest,
+  deps: MarketingWebhookProductionConfigSignDeps = {},
+): Promise<MarketingWebhookProductionApplyScope> {
+  const env = deps.env ?? process.env;
+  const readRecordFile = deps.readRecordFile ?? readMarketingWebhookVerificationRecordFile;
+  const verifyAudit = deps.verifyAudit ?? verifyMarketingAuditEvidence;
+
+  if (marketingWebhookExplicitEnvironment(env) !== "production") {
+    refuse("environment_not_production", "The production apply scope is set in production only.");
+  }
+
+  let serialized = "";
+  try {
+    serialized = serializeMarketingWebhookProductionApplyScope({
+      recordId: request.recordId,
+      productionConfigGeneration: request.productionConfigGeneration,
+      scope: request.scope.map((entry) => ({ eventType: entry.eventType, channelId: entry.channelId })),
+    });
+  } catch {
+    refuse("apply_scope_invalid", "The apply scope is not a valid value.");
+  }
+  const parsed = readMarketingWebhookProductionApplyScope(serialized);
+  if (parsed.status !== "valid") {
+    refuse("apply_scope_invalid", "The apply scope is not a valid value.");
+  }
+  const value = parsed.value;
+
+  if (value.scope.length > 0) {
+    const live = await readMarketingWebhookProductionConfigLive(tx, env);
+    if (live.stored.status !== "valid" || live.stored.value.generation !== value.productionConfigGeneration) {
+      refuse("production_config_mismatch", "The scope names a production generation that is not the signed one.");
+    }
+    const signed = live.stored.value;
+    const audit = await verifyAudit(tx, marketingWebhookProductionConfigAuditRequirement(signed));
+    const reasons = marketingWebhookProductionConfigRefusals({
+      stored: { ok: true, value: live.stored },
+      audit: {
+        ok: true,
+        value: {
+          auditLogId: signed.signatureAuditLogId,
+          verified: audit.ok,
+          generation: signed.generation,
+          recordId: signed.recordId,
+          deployCommitSha: signed.deployCommitSha,
+          pipelineFingerprint: signed.pipelineFingerprint,
+          productionConfigSnapshotDigest: signed.productionConfigSnapshotDigest,
+        },
+      },
+      liveEnvironment: { ok: true, value: live.environment },
+      liveSnapshotDigest: { ok: true, value: live.productionConfigSnapshotDigest },
+      recordId: value.recordId,
+    });
+    if (reasons.length > 0) {
+      refuse(
+        "production_config_not_binding",
+        `The signed production configuration does not bind (${reasons.join(", ")}).`,
+      );
+    }
+
+    const fileText = await readRecordFile(value.recordId);
+    let recordJson: unknown = null;
+    try {
+      recordJson = fileText === null ? null : JSON.parse(canonicalMarketingWebhookFileText(fileText));
+    } catch {
+      recordJson = null;
+    }
+    const record = marketingWebhookVerificationRecordSchema.safeParse(recordJson);
+    if (!record.success || record.data.recordId !== value.recordId) {
+      refuse("record_invalid", "The verification record is not in the deployed tree, or is not a strict record.");
+    }
+    if (marketingWebhookScopeOutsideObserved(value.scope, record.data.observedScope).length > 0) {
+      refuse("scope_not_observed", "The scope lists a pair the verification record never observed.");
+    }
+  }
+
+  const current = await tx.appSetting.findUnique({
+    where: { key: MARKETING_WEBHOOK_APPLY_SCOPE_KEY },
+    select: { value: true },
+  });
+  if (marketingWebhookStoredValueDigest(current?.value) !== request.expectedStoredDigest) {
+    refuse("apply_scope_conflict", "The apply scope changed since the screen read it.");
+  }
+  if (current?.value === serialized) {
+    refuse("apply_scope_noop", "The apply scope is already this value.");
+  }
+  if (current === null) {
+    try {
+      await tx.appSetting.create({ data: { key: MARKETING_WEBHOOK_APPLY_SCOPE_KEY, value: serialized } });
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code === "P2002") {
+        refuse("apply_scope_conflict", "The apply scope changed since the screen read it.");
+      }
+      throw error;
+    }
+  } else {
+    const moved = await tx.appSetting.updateMany({
+      where: { key: MARKETING_WEBHOOK_APPLY_SCOPE_KEY, value: current.value },
+      data: { value: serialized },
+    });
+    if (moved.count !== 1) {
+      refuse("apply_scope_conflict", "The apply scope changed since the screen read it.");
+    }
   }
   return value;
 }

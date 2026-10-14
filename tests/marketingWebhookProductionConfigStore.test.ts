@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
   MARKETING_WEBHOOK_SHADOW_KEY,
   digestMarketingWebhookVerificationRecord,
@@ -19,12 +20,16 @@ import {
   MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY,
   MARKETING_WEBHOOK_PRODUCTION_CONFIG_SIGNED_ACTION,
   marketingWebhookProductionConfigSnapshotDigest,
+  marketingWebhookStoredValueDigest,
+  readMarketingWebhookProductionApplyScope,
   readMarketingWebhookProductionConfig,
+  serializeMarketingWebhookProductionApplyScope,
   serializeMarketingWebhookProductionConfig,
 } from "@/lib/marketingWebhookProductionConfig";
 import {
   MarketingWebhookProductionConfigRefusedError,
   readMarketingWebhookProductionConfigLive,
+  setMarketingWebhookProductionApplyScope,
   signMarketingWebhookProductionConfig,
   type MarketingWebhookProductionConfigSignRequest,
 } from "@/lib/marketingWebhookProductionConfigStore";
@@ -307,4 +312,113 @@ test("a racing first signature loses on the key, not silently", async () => {
     return original(args);
   }) as typeof original;
   await refusedWith(sign(tx, request()).promise, "production_config_conflict");
+});
+
+// ---------------------------------------------------------------------------
+// The apply scope
+// ---------------------------------------------------------------------------
+
+const SCOPE = [{ eventType: "post.platform.published", channelId: "chn-youtube" }];
+
+/** A store holding a production generation signed against the live configuration. */
+const signedStore = async (extra: Record<string, string> = {}) => {
+  const { tx, settings } = fakeTx(extra);
+  await sign(tx, request()).promise;
+  return { tx, settings };
+};
+
+const setScope = (
+  tx: MarketingTransaction,
+  body: Partial<Parameters<typeof setMarketingWebhookProductionApplyScope>[1]> = {},
+  options: { env?: Record<string, string | undefined>; file?: string | null; refuseAction?: string } = {},
+) => {
+  const { verify } = verifier(options.refuseAction);
+  return setMarketingWebhookProductionApplyScope(
+    tx,
+    {
+      recordId: RECORD_ID,
+      productionConfigGeneration: 1,
+      scope: SCOPE,
+      expectedStoredDigest: "absent",
+      ...body,
+    },
+    {
+      env: options.env ?? ENV,
+      readRecordFile: async () => (options.file === undefined ? RECORD : options.file),
+      verifyAudit: verify,
+    },
+  );
+};
+
+test("a scope of observed pairs under the signed generation is stored", async () => {
+  const { tx, settings } = await signedStore();
+  const value = await setScope(tx);
+  assert.deepEqual(value, { recordId: RECORD_ID, productionConfigGeneration: 1, scope: SCOPE });
+  const live = await readMarketingWebhookProductionConfigLive(tx, ENV);
+  assert.deepEqual(live.applyScope.status, "valid");
+  assert.equal(live.applyScope.storedDigest, marketingWebhookStoredValueDigest(settings.get(MARKETING_WEBHOOK_APPLY_SCOPE_KEY)));
+});
+
+test("a pair the record never observed is refused", async () => {
+  const { tx, settings } = await signedStore();
+  await refusedWith(
+    setScope(tx, { scope: [...SCOPE, { eventType: "post.failed", channelId: "chn-youtube" }] }),
+    "scope_not_observed",
+  );
+  assert.equal(settings.has(MARKETING_WEBHOOK_APPLY_SCOPE_KEY), false);
+});
+
+test("a scope needs the generation it names to be the signed one, still binding", async () => {
+  const { tx } = await signedStore();
+  await refusedWith(setScope(tx, { productionConfigGeneration: 2 }), "production_config_mismatch");
+  await refusedWith(
+    setScope(tx, {}, { refuseAction: MARKETING_WEBHOOK_PRODUCTION_CONFIG_SIGNED_ACTION }),
+    "production_config_not_binding",
+  );
+  // A configuration change after signing stops a scope being set over it.
+  await tx.appSetting.create({ data: { key: MARKETING_WEBHOOK_SHADOW_KEY, value: "false" } });
+  await refusedWith(setScope(tx), "production_config_not_binding");
+  const unsigned = fakeTx();
+  await refusedWith(setScope(unsigned.tx), "production_config_mismatch");
+});
+
+test("an empty scope stops applying and needs nothing else", async () => {
+  // No signed generation, no record: stopping must still work.
+  const { tx, settings } = fakeTx();
+  const value = await setScope(tx, { scope: [] }, { file: null, refuseAction: MARKETING_WEBHOOK_PRODUCTION_CONFIG_SIGNED_ACTION });
+  assert.deepEqual(value.scope, []);
+  assert.equal(readMarketingWebhookProductionApplyScope(settings.get(MARKETING_WEBHOOK_APPLY_SCOPE_KEY)).status, "valid");
+  // ...but only in production.
+  await refusedWith(
+    setScope(fakeTx().tx, { scope: [] }, { env: { ...ENV, APP_ENV: "staging", RAILWAY_ENVIRONMENT_NAME: "staging" } }),
+    "environment_not_production",
+  );
+});
+
+test("the scope is compare-and-set on the exact stored bytes", async () => {
+  const { tx, settings } = await signedStore();
+  await setScope(tx);
+  const stored = settings.get(MARKETING_WEBHOOK_APPLY_SCOPE_KEY);
+  await refusedWith(setScope(tx, { scope: [] }), "apply_scope_conflict");
+  await refusedWith(setScope(tx, { expectedStoredDigest: marketingWebhookStoredValueDigest(stored) }), "apply_scope_noop");
+  await setScope(tx, { scope: [], expectedStoredDigest: marketingWebhookStoredValueDigest(stored) });
+  assert.deepEqual(readMarketingWebhookProductionApplyScope(settings.get(MARKETING_WEBHOOK_APPLY_SCOPE_KEY)), {
+    status: "valid",
+    value: { recordId: RECORD_ID, productionConfigGeneration: 1, scope: [] },
+  });
+});
+
+test("duplicate pairs are not a scope", async () => {
+  const { tx } = await signedStore();
+  await refusedWith(setScope(tx, { scope: [...SCOPE, ...SCOPE] }), "apply_scope_invalid");
+});
+
+test("the same set of pairs is the same stored bytes, in any order", () => {
+  const a = { eventType: "post.platform.published", channelId: "chn-a" };
+  const b = { eventType: "post.platform.published", channelId: "chn-b" };
+  const base = { recordId: RECORD_ID, productionConfigGeneration: 1 };
+  assert.equal(
+    serializeMarketingWebhookProductionApplyScope({ ...base, scope: [a, b] }),
+    serializeMarketingWebhookProductionApplyScope({ ...base, scope: [b, a] }),
+  );
 });
