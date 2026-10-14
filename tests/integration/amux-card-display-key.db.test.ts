@@ -246,6 +246,42 @@ test("a deleted card's number is never issued again", async () => {
   });
 });
 
+test("the AMUX snapshot sync numbers a new card SYNC and an update keeps its number", async () => {
+  const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
+  process.env.TOMVERSE_AMUX_SYNC_SECRET = `display-key-sync-${randomUUID()}-${randomUUID()}`;
+  const { PUT } = await import("@/app/api/internal/amux/tasks/route");
+  const taskId = `display-key-sync-${randomUUID()}`;
+  const sync = (title: string) =>
+    PUT(new Request("http://localhost/api/internal/amux/tasks", {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${process.env.TOMVERSE_AMUX_SYNC_SECRET}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        tasks: [{
+          id: taskId, title, kind: "code", priority: "p3",
+          classification: { task_kind: "code", complexity: 1, risk: 1 },
+        }],
+      }),
+    }));
+  try {
+    const first = await sync("first snapshot");
+    assert.equal(first.status, 200, await first.clone().text());
+    const created = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.match(created.displayKey ?? "", /^AMUX-SYNC-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,8})$/);
+
+    assert.equal((await sync("second snapshot")).status, 200);
+    const updated = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.equal(updated.title, "second snapshot");
+    assert.equal(updated.displayKey, created.displayKey);
+  } finally {
+    await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
+    if (previousSecret === undefined) delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    else process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
+  }
+});
+
 // The existing portfolio parent guard (20261001102100_amux_v4_portfolio_schema)
 // reads public."AmuxPortfolioNode", so Feature nodes can be built only in the
 // public schema; the v4 schema tests run there for the same reason.

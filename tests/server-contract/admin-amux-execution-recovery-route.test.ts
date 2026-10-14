@@ -42,7 +42,7 @@ const safeStop = { action: "request_safe_stop", taskId: "task-1234", expectedRev
   sourceEvidenceDigest: "a".repeat(64), requestId };
 const acceptRisk = { action: "accept_unknown_prior_effects",
   taskId: "c48886b9-86f8-4631-8db8-c0b288a707af", expectedRevision: 8,
-  priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba9bd8",
+  priorAttemptId: "97858395-3d66-42fa-9bfb-0e5a6cba39d8",
   sourceEvidenceId: requestId, sourceEvidenceDigest: "a".repeat(64),
   requestId, acceptRisk: true };
 const post = (value: unknown, origin = "https://tomverse.test") => new Request(url, {
