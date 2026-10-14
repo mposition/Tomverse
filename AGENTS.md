@@ -1309,6 +1309,16 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   apply가 쓸 검증기로 다시 읽고, 검증되지 않으면 쓰기와 함께 되돌립니다. 거절 class는 store에
   닿지 않는 `lib/marketingWebhookProductionConfig.ts`에 둡니다 — route sweep이 트랜잭션 밖에서
   store 경로의 이름을 쓰는 것을 실패로 만듭니다.
+- **S2f apply scope**: `app/api/admin/marketing/webhook/apply-scope/route.ts`(PUT),
+  `setMarketingWebhookProductionApplyScope()`. 값은 `{recordId, productionConfigGeneration, scope}`이고
+  저장 바이트의 sha-256(`absent` 포함)으로 CAS합니다. 비어 있지 않은 범위는 그 세대가 서명돼 있고
+  지금도 실제 설정을 묶으며, 모든 쌍을 그 기록이 관측했을 때만 저장합니다. **서명된 세대를 읽는
+  모든 곳은 기록 파일의 지금 digest를 감사 요구 조건에 넣습니다** — 서명 행이 그 digest를 묶었으므로,
+  같은 ID로 다시 쓴 기록(관측 쌍 추가 등)은 행과 맞지 않아 옛 서명으로 새 쌍을 덮지 못합니다.
+  **빈 범위는 멈춤이라 아무것도 요구하지 않고**(서명·기록 없이도, kill switch 중에도) production에서만
+  씁니다. 판정 모듈(`lib/marketingAutomationAccess.ts`)은 아직 이 형태를 읽지 못해 거절합니다 — 그
+  모듈은 Prompt Refiner closure에 봉인돼 있어 repin이 필요하므로, 판정 연결은 production apply
+  slice에서 한 번에 합니다.
 
 # 엔지니어링 Agent
 
