@@ -683,9 +683,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20261014100000_amux_card_display_key/migration.sql",
     table: "AmuxCardDisplayKeyCounter",
     tableMentions: 3,
-    writeVerbs: 12,
+    writeVerbs: 18,
     reason:
-      "The card number migration (docs/policy/amux-card-display-key.md S2). It creates the counter table and its two triggers, which refuse an insert not at 1, an update that does anything but add one, every delete and every truncate. Its write verbs are the trigger events, the guard's TG_OP comparisons, the column ALTER TABLEs and words of comments; it writes no row.",
+      "The card number migration (docs/policy/amux-card-display-key.md S2). It creates the counter table and its two triggers, which refuse an insert not at 1, an update that does anything but add one, every delete and every truncate. Its write verbs are the trigger events, the guard's TG_OP comparisons, the column ALTER TABLEs, the issued-number ledger's trigger INSERT (into that ledger, not the counter) and words of comments; it writes no counter row.",
   },
   {
     path: "lib/accountDataExportDomains.ts",

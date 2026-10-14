@@ -7465,6 +7465,16 @@ model AmuxCardDisplayKeyCounter {
   lastNumber Int
 }
 
+/// Every card number ever issued (docs/policy/amux-card-display-key.md §3).
+/// Written only by a database trigger when a card first receives its number,
+/// never changed or removed, and deliberately without a foreign key so the
+/// number outlives a deleted card and can never be issued again.
+model AmuxCardDisplayKeyIssued {
+  displayKey String   @id
+  workItemId String
+  issuedAt   DateTime @default(now()) @db.Timestamptz(3)
+}
+
 model AmuxWorkDependency {
   taskId       String
   dependencyId String

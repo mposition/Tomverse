@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 // Feature's prefix are well formed, unique and immutable once set; a Feature
 // prefix is never a reserved path prefix and never on another level; the
 // per-prefix counter starts at 1, only advances by one and is never removed;
+// a number outlives its card in the issued ledger and is never written again;
 // and an allocation the caller rolls back spends no number.
 
 const requireDedicatedAmuxTestDatabase = () => {
@@ -50,11 +51,19 @@ class Rollback extends Error {}
 const allocate = (prefix: string) =>
   prisma.$transaction((tx) => allocateAmuxCardDisplayKey(tx, prefix));
 
-/** One pg connection in a transaction that is always rolled back. */
+/**
+ * One pg connection in a transaction that is always rolled back, on the same
+ * schema Prisma uses: `?schema=` is a Prisma setting pg does not read, so it is
+ * removed from the URL and applied as the search path instead.
+ */
 async function inRolledBackTransaction(body: (probe: Probe) => Promise<void>) {
-  const client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
+  const url = new URL(process.env.TEST_DATABASE_URL!);
+  const schema = url.searchParams.get("schema") || "public";
+  url.searchParams.delete("schema");
+  const client = new pg.Client({ connectionString: url.toString() });
   await client.connect();
   try {
+    await client.query(`SET search_path TO ${client.escapeIdentifier(schema)}`);
     await client.query("BEGIN");
     await body(new Probe(client));
   } finally {
@@ -90,7 +99,7 @@ class Probe {
   async addCard(displayKey: string | null = null) {
     const id = randomUUID();
     await this.query(
-      `INSERT INTO public."AmuxWorkItem" ("id", "title", "displayKey", "updatedAt")
+      `INSERT INTO "AmuxWorkItem" ("id", "title", "displayKey", "updatedAt")
        VALUES ($1, 'display key probe', $2, CURRENT_TIMESTAMP)`,
       [id, displayKey],
     );
@@ -100,7 +109,7 @@ class Probe {
   async addNode(level: "initiative" | "epic" | "feature", parentId: string | null, displayPrefix: string | null = null) {
     const id = randomUUID();
     await this.query(
-      `INSERT INTO public."AmuxPortfolioNode"
+      `INSERT INTO "AmuxPortfolioNode"
        ("id", "level", "parentId", "state", "revision", "titleCiphertext",
         "contentKeyId", "contentKeyVersion", "contentDigest", "contentDigestKeyId",
         "approvedByUserId", "authorizationAuditLogId", "displayPrefix", "updatedAt")
@@ -160,20 +169,20 @@ test("the counter only starts at one, only advances by one and is never removed"
   await allocate(prefix);
   await inRolledBackTransaction(async (db) => {
     const sequence = { constraint: "AmuxCardDisplayKeyCounter_sequence_check" };
-    await db.rejects(`INSERT INTO public."AmuxCardDisplayKeyCounter" ("prefix", "lastNumber") VALUES ($1, 5)`,
+    await db.rejects(`INSERT INTO "AmuxCardDisplayKeyCounter" ("prefix", "lastNumber") VALUES ($1, 5)`,
       [freshPrefix()], sequence);
-    await db.rejects(`UPDATE public."AmuxCardDisplayKeyCounter" SET "lastNumber" = "lastNumber" + 2 WHERE "prefix" = $1`,
+    await db.rejects(`UPDATE "AmuxCardDisplayKeyCounter" SET "lastNumber" = "lastNumber" + 2 WHERE "prefix" = $1`,
       [prefix], sequence);
-    await db.rejects(`UPDATE public."AmuxCardDisplayKeyCounter" SET "lastNumber" = "lastNumber" - 1 WHERE "prefix" = $1`,
+    await db.rejects(`UPDATE "AmuxCardDisplayKeyCounter" SET "lastNumber" = "lastNumber" - 1 WHERE "prefix" = $1`,
       [prefix], sequence);
-    await db.rejects(`UPDATE public."AmuxCardDisplayKeyCounter" SET "prefix" = $2 WHERE "prefix" = $1`,
+    await db.rejects(`UPDATE "AmuxCardDisplayKeyCounter" SET "prefix" = $2 WHERE "prefix" = $1`,
       [prefix, freshPrefix()], sequence);
-    await db.rejects(`DELETE FROM public."AmuxCardDisplayKeyCounter" WHERE "prefix" = $1`, [prefix], sequence);
-    await db.rejects(`TRUNCATE TABLE public."AmuxCardDisplayKeyCounter"`, [], sequence);
-    await db.rejects(`INSERT INTO public."AmuxCardDisplayKeyCounter" ("prefix", "lastNumber") VALUES ('lower', 1)`,
+    await db.rejects(`DELETE FROM "AmuxCardDisplayKeyCounter" WHERE "prefix" = $1`, [prefix], sequence);
+    await db.rejects(`TRUNCATE TABLE "AmuxCardDisplayKeyCounter"`, [], sequence);
+    await db.rejects(`INSERT INTO "AmuxCardDisplayKeyCounter" ("prefix", "lastNumber") VALUES ('lower', 1)`,
       [], { constraint: "AmuxCardDisplayKeyCounter_prefix_check" });
     const advanced = await db.query(
-      `UPDATE public."AmuxCardDisplayKeyCounter" SET "lastNumber" = "lastNumber" + 1 WHERE "prefix" = $1 RETURNING "lastNumber"`,
+      `UPDATE "AmuxCardDisplayKeyCounter" SET "lastNumber" = "lastNumber" + 1 WHERE "prefix" = $1 RETURNING "lastNumber"`,
       [prefix],
     );
     assert.equal(advanced.rows[0].lastNumber, 2);
@@ -187,28 +196,53 @@ test("a card's number is well formed, unique, and immutable once set", async () 
     const format = { constraint: "AmuxWorkItem_displayKey_format_check" };
     for (const bad of [`AMUX-${prefix}-000`, `AMUX-${prefix}-01`, `AMUX-${prefix}-0001`, "AMUX-github-001", "GITHUB-001"]) {
       await db.rejects(
-        `INSERT INTO public."AmuxWorkItem" ("id", "title", "displayKey", "updatedAt") VALUES ($1, 'probe', $2, CURRENT_TIMESTAMP)`,
+        `INSERT INTO "AmuxWorkItem" ("id", "title", "displayKey", "updatedAt") VALUES ($1, 'probe', $2, CURRENT_TIMESTAMP)`,
         [randomUUID(), bad], format);
     }
 
     const unnumbered = await db.addCard();
     // A card without a number may receive one, once.
-    await db.query(`UPDATE public."AmuxWorkItem" SET "displayKey" = $2 WHERE "id" = $1`, [unnumbered, `AMUX-${prefix}-001`]);
+    await db.query(`UPDATE "AmuxWorkItem" SET "displayKey" = $2 WHERE "id" = $1`, [unnumbered, `AMUX-${prefix}-001`]);
     // Other columns still change freely.
-    await db.query(`UPDATE public."AmuxWorkItem" SET "priority" = 'p1' WHERE "id" = $1`, [unnumbered]);
+    await db.query(`UPDATE "AmuxWorkItem" SET "priority" = 'p1' WHERE "id" = $1`, [unnumbered]);
     const immutable = { constraint: "AmuxWorkItem_displayKey_immutable_check" };
-    await db.rejects(`UPDATE public."AmuxWorkItem" SET "displayKey" = $2 WHERE "id" = $1`,
+    await db.rejects(`UPDATE "AmuxWorkItem" SET "displayKey" = $2 WHERE "id" = $1`,
       [unnumbered, `AMUX-${prefix}-002`], immutable);
-    await db.rejects(`UPDATE public."AmuxWorkItem" SET "displayKey" = NULL WHERE "id" = $1`, [unnumbered], immutable);
+    await db.rejects(`UPDATE "AmuxWorkItem" SET "displayKey" = NULL WHERE "id" = $1`, [unnumbered], immutable);
     // Archiving keeps the number.
-    await db.query(`UPDATE public."AmuxWorkItem" SET "archivedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`, [unnumbered]);
-    await db.rejects(`UPDATE public."AmuxWorkItem" SET "displayKey" = $2 WHERE "id" = $1`,
+    await db.query(`UPDATE "AmuxWorkItem" SET "archivedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`, [unnumbered]);
+    await db.rejects(`UPDATE "AmuxWorkItem" SET "displayKey" = $2 WHERE "id" = $1`,
       [unnumbered, `AMUX-${prefix}-003`], immutable);
 
     await db.addCard(`AMUX-${prefix}-1000`);
+    // The issued-number ledger refuses a second card before the card's own
+    // unique index is reached.
     await db.rejects(
-      `INSERT INTO public."AmuxWorkItem" ("id", "title", "displayKey", "updatedAt") VALUES ($1, 'probe', $2, CURRENT_TIMESTAMP)`,
-      [randomUUID(), `AMUX-${prefix}-001`], { constraint: "AmuxWorkItem_displayKey_key" });
+      `INSERT INTO "AmuxWorkItem" ("id", "title", "displayKey", "updatedAt") VALUES ($1, 'probe', $2, CURRENT_TIMESTAMP)`,
+      [randomUUID(), `AMUX-${prefix}-001`], { constraint: "AmuxCardDisplayKeyIssued_pkey" });
+  });
+});
+
+test("a deleted card's number is never issued again", async () => {
+  const prefix = freshPrefix();
+  await inRolledBackTransaction(async (db) => {
+    const key = `AMUX-${prefix}-007`;
+    const first = await db.addCard(key);
+    const issued = await db.query(`SELECT "workItemId" FROM "AmuxCardDisplayKeyIssued" WHERE "displayKey" = $1`, [key]);
+    assert.deepEqual(issued.rows, [{ workItemId: first }]);
+
+    await db.query(`DELETE FROM "AmuxWorkItem" WHERE "id" = $1`, [first]);
+    const pkey = { constraint: "AmuxCardDisplayKeyIssued_pkey" };
+    await db.rejects(
+      `INSERT INTO "AmuxWorkItem" ("id", "title", "displayKey", "updatedAt") VALUES ($1, 'probe', $2, CURRENT_TIMESTAMP)`,
+      [randomUUID(), key], pkey);
+    const unnumbered = await db.addCard();
+    await db.rejects(`UPDATE "AmuxWorkItem" SET "displayKey" = $2 WHERE "id" = $1`, [unnumbered, key], pkey);
+
+    const appendOnly = { constraint: "AmuxCardDisplayKeyIssued_append_only_check" };
+    await db.rejects(`DELETE FROM "AmuxCardDisplayKeyIssued" WHERE "displayKey" = $1`, [key], appendOnly);
+    await db.rejects(`UPDATE "AmuxCardDisplayKeyIssued" SET "workItemId" = 'other' WHERE "displayKey" = $1`, [key], appendOnly);
+    await db.rejects(`TRUNCATE TABLE "AmuxCardDisplayKeyIssued"`, [], appendOnly);
   });
 });
 
@@ -218,22 +252,22 @@ test("a Feature's prefix is Feature-only, not reserved, unique and immutable onc
     const epic = await db.addNode("epic", initiative);
     const check = { constraint: "AmuxPortfolioNode_displayPrefix_check" };
 
-    await db.rejects(`UPDATE public."AmuxPortfolioNode" SET "displayPrefix" = 'EPICCODE' WHERE "id" = $1`, [epic], check);
+    await db.rejects(`UPDATE "AmuxPortfolioNode" SET "displayPrefix" = 'EPICCODE' WHERE "id" = $1`, [epic], check);
 
     const feature = await db.addNode("feature", epic);
     for (const bad of ["github", "G", "GIT-HUB", "ABCDEFGHIJKLMNOPQ", "ENG", "WORKBOARD", "LEGACY"]) {
-      await db.rejects(`UPDATE public."AmuxPortfolioNode" SET "displayPrefix" = $2 WHERE "id" = $1`, [feature, bad], check);
+      await db.rejects(`UPDATE "AmuxPortfolioNode" SET "displayPrefix" = $2 WHERE "id" = $1`, [feature, bad], check);
     }
     const prefix = freshPrefix();
-    await db.query(`UPDATE public."AmuxPortfolioNode" SET "displayPrefix" = $2 WHERE "id" = $1`, [feature, prefix]);
+    await db.query(`UPDATE "AmuxPortfolioNode" SET "displayPrefix" = $2 WHERE "id" = $1`, [feature, prefix]);
 
     const immutable = { constraint: "AmuxPortfolioNode_displayPrefix_immutable_check" };
-    await db.rejects(`UPDATE public."AmuxPortfolioNode" SET "displayPrefix" = $2 WHERE "id" = $1`,
+    await db.rejects(`UPDATE "AmuxPortfolioNode" SET "displayPrefix" = $2 WHERE "id" = $1`,
       [feature, freshPrefix()], immutable);
-    await db.rejects(`UPDATE public."AmuxPortfolioNode" SET "displayPrefix" = NULL WHERE "id" = $1`, [feature], immutable);
+    await db.rejects(`UPDATE "AmuxPortfolioNode" SET "displayPrefix" = NULL WHERE "id" = $1`, [feature], immutable);
 
     const second = await db.addNode("feature", epic);
-    await db.rejects(`UPDATE public."AmuxPortfolioNode" SET "displayPrefix" = $2 WHERE "id" = $1`,
+    await db.rejects(`UPDATE "AmuxPortfolioNode" SET "displayPrefix" = $2 WHERE "id" = $1`,
       [second, prefix], { constraint: "AmuxPortfolioNode_displayPrefix_key" });
     await db.addNode("feature", epic, freshPrefix());
   });

@@ -1568,12 +1568,13 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
 
 - **번호는 표시용 이름이고 Task ID를 대체하지 않습니다.** API·링크·로그·복구 기록·승인 결속은
   계속 Task ID를 씁니다.
-- **한 번 쓴 번호와 Feature PREFIX는 바뀌지 않습니다.** DB trigger가 변경과 삭제를 거부하고,
+- **한 번 쓴 번호와 Feature PREFIX는 바뀌지 않습니다.** DB trigger가 변경과 비우기를 거부하고,
+  카드에 쓰인 번호는 `AmuxCardDisplayKeyIssued`에 남아 카드가 삭제돼도 다시 쓰이지 않습니다.
   카운터는 1씩만 증가하며 지워지지 않습니다.
 - **할당은 `allocateAmuxCardDisplayKey(tx, prefix)` 하나이고 카드를 쓰는 트랜잭션 안에서 합니다.**
   카운터에 직접 쓰지 않습니다(`npm run check:protected-table-writers`).
 - **Feature 없는 카드의 PREFIX는 등록 경로별 고정 목록입니다**
-  (`AMUX_CARD_DISPLAY_RESERVED_PREFIXES`). 새 등록 경로는 정책 문서 §4를 먼저 개정합니다.
+  (`lib/amux/cardDisplayKeyCore.ts`의 예약 목록). 새 등록 경로는 정책 문서 §4를 먼저 개정합니다.
 - **S2(schema와 할당기)**: `lib/amux/cardDisplayKeyCore.ts`, `lib/amux/cardDisplayKeyAllocator.ts`,
   `prisma/migrations/20261014100000_amux_card_display_key/migration.sql`,
   `tests/amuxCardDisplayKeyCore.test.mjs`, `tests/integration/amux-card-display-key.db.test.ts`.

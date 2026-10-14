@@ -73,6 +73,8 @@ test("reserved path prefixes are valid card prefixes but never Feature prefixes"
 
 test("the migration's CHECKs use the core's own patterns and reserved list", () => {
   assert.ok(statements.includes(`"displayKey" ~ '${AMUX_CARD_DISPLAY_KEY_PATTERN}'`));
+  // The issued-number ledger and the issue trigger use the same pattern.
+  assert.equal(statements.split(`'${AMUX_CARD_DISPLAY_KEY_PATTERN}'`).length - 1, 3);
   assert.ok(statements.includes(`"displayPrefix" ~ '${AMUX_CARD_DISPLAY_PREFIX_PATTERN}'`));
   assert.ok(statements.includes(`"prefix" ~ '${AMUX_CARD_DISPLAY_PREFIX_PATTERN}'`));
   assert.ok(statements.includes(`CHECK ("lastNumber" BETWEEN 1 AND ${AMUX_CARD_DISPLAY_MAX_NUMBER})`));
@@ -86,7 +88,16 @@ test("the migration's CHECKs use the core's own patterns and reserved list", () 
 test("the migration is additive and writes no row", () => {
   assert.match(statements, /^BEGIN;$/m);
   assert.match(statements, /^COMMIT;$/m);
-  assert.doesNotMatch(statements, /\bDROP\b|\bTRUNCATE\s+TABLE\b|\bVALIDATE\b|\bUPDATE\s+"|\bDELETE\s+FROM\b|\bINSERT\s+INTO\b/i);
+  assert.doesNotMatch(statements, /\bDROP\b|\bTRUNCATE\s+TABLE\b|\bVALIDATE\b|\bUPDATE\s+"|\bDELETE\s+FROM\b/i);
+  // The only INSERT is the issue trigger recording a card's first number.
+  assert.deepEqual(statements.match(/\bINSERT\s+INTO\s+"[A-Za-z]+"/gi), ['INSERT INTO "AmuxCardDisplayKeyIssued"']);
+  assert.match(statements, /BEFORE INSERT ON "AmuxWorkItem"\nFOR EACH ROW\nWHEN \(NEW\."displayKey" IS NOT NULL\)/);
+  assert.match(statements,
+    /BEFORE UPDATE ON "AmuxWorkItem"\nFOR EACH ROW\nWHEN \(OLD\."displayKey" IS NULL AND NEW\."displayKey" IS NOT NULL\)/);
+  assert.match(statements, /BEFORE UPDATE OR DELETE ON "AmuxCardDisplayKeyIssued"/);
+  assert.match(statements, /BEFORE TRUNCATE ON "AmuxCardDisplayKeyIssued"/);
+  // No foreign key, so a deleted card's number stays issued.
+  assert.doesNotMatch(statements, /REFERENCES/);
   assert.equal((statements.match(/^ALTER TABLE "[A-Za-z]+" ADD COLUMN /gm) ?? []).length, 2);
   assert.match(statements, /ALTER TABLE "AmuxWorkItem" ADD COLUMN "displayKey" TEXT;/);
   assert.match(statements, /ALTER TABLE "AmuxPortfolioNode" ADD COLUMN "displayPrefix" TEXT;/);
