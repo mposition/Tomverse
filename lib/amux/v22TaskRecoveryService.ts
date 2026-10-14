@@ -35,7 +35,8 @@ import { AMUX_V22_RECOVERY_HOST_SCOPE, AMUX_V22_TASK_RECOVERY_POLICY_VERSION,
   amuxV22ReadOnlyLaunchScopeMatchesIntent, amuxV22ReadOnlyLaunchExecutorKind,
   amuxV22RecoveryEvidenceSchema, amuxV22SafeStopEvidenceSchema,
   amuxV22ReadOnlyLaunchScopeSchema, amuxV22ReadOnlyLaunchCheckSchema,
-  amuxV22SafeStopProofReason, type AmuxV22RecoveryAdminInput,
+  amuxV22SafeStopProofReason, amuxV22RecoveryAddedRouteConsented,
+  type AmuxV22RecoveryAdminInput,
   type AmuxV22RecoveryEvidenceInput, type AmuxV22SafeStopEvidenceInput,
   type AmuxV22ReadOnlyLaunchProofInput,
   type AmuxV22RecoveryRead } from "./v22TaskRecoveryCore.ts";
@@ -227,6 +228,20 @@ async function lockCurrentSafeStopProfileRuntime(tx: Prisma.TransactionClient,
     row.workerName === workerNames[index] && row.instanceId === first.instanceId &&
     row.generation === first.generation) ?
     { instanceId: first.instanceId, generation: first.generation } : null;
+}
+/** The cost receipt the owner approved when the Task was registered. */
+export async function readTaskApprovedCostReceipt(tx: Prisma.TransactionClient,
+  sourceApprovalId: string | null): Promise<unknown> {
+  if (!sourceApprovalId) return null;
+  const source = await tx.amuxIdeaUnitDecision.findUnique({
+    where: { id: sourceApprovalId }, select: { confirmationSnapshot: true } });
+  const snapshot = source?.confirmationSnapshot;
+  const card = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) &&
+    "card" in snapshot ? snapshot.card : null;
+  const taskRow = card && typeof card === "object" && !Array.isArray(card) &&
+    "task" in card ? card.task : null;
+  return taskRow && typeof taskRow === "object" && !Array.isArray(taskRow) &&
+    "costReceipt" in taskRow ? taskRow.costReceipt : null;
 }
 async function lockPriorAttempt(tx: Prisma.TransactionClient, attemptId: string) {
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
@@ -1383,8 +1398,14 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
           "AmuxV22TaskRecoveryEvidence", evidence.id))
       throw new BoardImportError("recovery_evidence_unverified", 409);
     const ready = await evaluateAmuxV4TaskReadyInTransaction(tx, task.id, readyContext, null, "blocked");
-    if (!ready.ready) throw new BoardImportError("task_not_ready", 409);
+    // Policy v48: a cost reconfirmation is the one readiness reason the FIRST
+    // Task exception may carry, and only when the final consent below covers
+    // a route the catalog added after registration.
+    const reconfirmOnly = !ready.ready && ready.reasons.length === 1 &&
+      ready.reasons[0] === "cost_reconfirmation_required";
     const isRiskException = !!inspection.riskAcceptanceId;
+    if (!ready.ready && !(isRiskException && reconfirmOnly))
+      throw new BoardImportError("task_not_ready", 409);
     if (isRiskException !== !!input.riskAcceptanceId ||
         (!isRiskException && (input.riskAcceptanceDigest || input.launchProofId ||
           input.launchProofDigest || input.acceptRetry)))
@@ -1447,6 +1468,10 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
           maximumCostMicroUsd: launchCheck.additionalCapMicroUsd,
           workerName: launchCheck.workerName,
           profileConfigDigest: currentProfile.profileConfigDigest, now }) : null;
+      if (reconfirmOnly && (!launchCheck || !amuxV22RecoveryAddedRouteConsented(
+          await readTaskApprovedCostReceipt(tx, ready.sourceApprovalId),
+          current.receipt, launchCheck.routeId)))
+        throw new BoardImportError("task_not_ready", 409);
       if (!riskCost || !risk || risk.acceptedByUserId !== ownerId ||
           risk.acceptanceDigest !== input.riskAcceptanceDigest ||
           inspection.riskAcceptanceId !== risk.id ||

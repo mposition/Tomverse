@@ -75,7 +75,7 @@ import { amuxV22ApiModelAccessCurrent, readAmuxV22RecoveryAuthority,
   recoveryAttemptBudget } from "@/lib/amux/v22TaskRecoveryService";
 import { AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT,
   AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID,
-  amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
+  amuxV22RecoveryAddedRouteConsented, amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
   amuxV22ReadOnlyRetryRouteCost,
   currentAmuxV22ReadOnlyApiExecutionFrame } from "@/lib/amux/v22TaskRecoveryCore";
 import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
@@ -379,8 +379,11 @@ export async function startAmuxV22TaskExecution(input: {
         card.taskRole, card.executionGrade); }
       catch { return { started: false as const,
         reason: "cost_unverified" as const }; }
-      if (checkV4TaskApprovedCeiling(approved,
-        { ok: true, receipt: cost.receipt }).decision !== "allow") {
+      // Policy v48: the FIRST Task retry's added route is reconfirmed by the
+      // owner's final consent; that is checked once the recovery is read.
+      const ceilingAllowed = checkV4TaskApprovedCeiling(approved,
+        { ok: true, receipt: cost.receipt }).decision === "allow";
+      if (!ceilingAllowed && !assignment.recoveryApprovalId) {
         return { started: false as const,
           reason: "cost_reconfirmation_required" as const };
       }
@@ -399,6 +402,11 @@ export async function startAmuxV22TaskExecution(input: {
         input.taskId, assignment.taskRevision, assignment.recoveryApprovalId, now) : null;
       if (assignment.recoveryApprovalId && !recovery) return { started: false as const,
         reason: "recovery_approval_unbound" as const };
+      if (!ceilingAllowed && !(recovery?.riskAcceptanceId && recovery.routeId &&
+          recovery.routeId === assignment.routeId &&
+          amuxV22RecoveryAddedRouteConsented(approved, cost.receipt, recovery.routeId)))
+        return { started: false as const,
+          reason: "cost_reconfirmation_required" as const };
       if (!amuxV22ApiModelAccessCurrent(recovery, now)) {
         return { started: false as const,
           reason: "read_only_api_model_access_stale" as const };
