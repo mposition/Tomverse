@@ -171,6 +171,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261013320000_amux_v22_api_model_access_audit_xid_repair",
   "20261013330000_amux_v22_api_launch_proof_deadline",
   "20261013340000_amux_v22_api_assignment_cli_passthrough_repair",
+  // docs/policy/amux-card-display-key.md S2: readable card numbers. Two
+  // columns, a counter table and immutability guards; it changes no
+  // commit-deadline mechanism.
+  "20261014100000_amux_card_display_key",
   // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
   // no commit deadline and continues to use the existing mutation fence.
   "20261012170000_amux_verified_no_commit_halt_auto_clear",

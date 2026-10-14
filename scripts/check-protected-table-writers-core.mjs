@@ -370,6 +370,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/development-agent-orchestration.md 버전 35",
   },
   {
+    table: "AmuxCardDisplayKeyCounter",
+    delegate: "amuxCardDisplayKeyCounter",
+    writers: ["lib/amux/cardDisplayKeyAllocator.ts"],
+    contract: "docs/policy/amux-card-display-key.md §3",
+  },
+  {
     table: "AmuxDecisionMakerRequest",
     delegate: "amuxDecisionMakerRequest",
     writers: ["lib/amux/decisionMakerRequestStore.ts"],
@@ -664,6 +670,22 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 2,
     reason:
       "The capability event table's single writer (orchestration policy version 35, section 2). Its raw SQL is two constant SELECTs (the newest capability of every worker, and one worker's newest revision), one constant INSERT ... RETURNING and one constant SELECT subquery (the newest capability of every worker as JSON) that the assignment catalog reader composes into its one statement (version 35, section 3); every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
+  },
+  {
+    path: "lib/amux/cardDisplayKeyAllocator.ts",
+    table: "AmuxCardDisplayKeyCounter",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The card number counter's single writer (docs/policy/amux-card-display-key.md §3). Its raw SQL is one constant INSERT ... ON CONFLICT DO UPDATE ... RETURNING whose only value, the prefix, is a bound parameter; the two table mentions are the INSERT target and the qualified column in the increment. It never deletes a counter.",
+  },
+  {
+    path: "prisma/migrations/20261014100000_amux_card_display_key/migration.sql",
+    table: "AmuxCardDisplayKeyCounter",
+    tableMentions: 3,
+    writeVerbs: 12,
+    reason:
+      "The card number migration (docs/policy/amux-card-display-key.md S2). It creates the counter table and its two triggers, which refuse an insert not at 1, an update that does anything but add one, every delete and every truncate. Its write verbs are the trigger events, the guard's TG_OP comparisons, the column ALTER TABLEs and words of comments; it writes no row.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
