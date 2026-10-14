@@ -889,6 +889,19 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The v44 correction drops and re-adds four existing CHECKs with only the FIRST Task's prior attempt ID corrected. It performs no row DML; the scanner's write verbs are the ALTER TABLE DROP/ADD CONSTRAINT clauses.",
   })),
+  ...[
+    ["AdminAuditLog", 1],
+    ["AmuxV22TaskRecoveryInspectionRequest", 3],
+    ["AmuxV22TaskRecoveryEvidence", 2],
+    ["AmuxV22TaskRecoveryRiskAcceptance", 2],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261014140000_amux_v22_legacy_safe_stop_live_runtime/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 1,
+    reason:
+      "The v45 migration re-creates the recovery request guard so a legacy safe stop binds the profile's live runtime. It performs no row DML and never writes AdminAuditLog; the scanner's one write verb is the guard's existing FOR UPDATE lock.",
+  })),
   {
     path: "lib/amux/cliUsageLedgerStore.ts",
     table: "AmuxCliUsageEvent",
@@ -917,17 +930,17 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/amux/v22TaskRecoveryService.ts",
     table: "AmuxV22TaskRecoveryInspectionRequest",
     tableMentions: 7,
-    writeVerbs: 3,
+    writeVerbs: 4,
     reason:
-      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable inspection request. It adds no writer; the raw-SQL verbs remain the three reviewed SELECT FOR UPDATE locks and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
+      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable inspection request. It adds no writer; the raw-SQL verbs remain the four reviewed SELECT FOR UPDATE locks (v45 adds the live-profile runtime lock) and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
   },
   {
     path: "lib/amux/v22TaskRecoveryService.ts",
     table: "AmuxV22TaskRecoveryEvidence",
     tableMentions: 5,
-    writeVerbs: 3,
+    writeVerbs: 4,
     reason:
-      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable evidence receipt. It adds no writer; the raw-SQL verbs remain the three reviewed SELECT FOR UPDATE locks and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
+      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable evidence receipt. It adds no writer; the raw-SQL verbs remain the four reviewed SELECT FOR UPDATE locks (v45 adds the live-profile runtime lock) and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
   },
   ...[
     ["AmuxV22TaskRecoveryApproval", 3],
@@ -938,7 +951,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/amux/v22TaskRecoveryService.ts",
     table,
     tableMentions,
-    writeVerbs: 3,
+    writeVerbs: 4,
     reason:
       "The sole recovery-ledger writer names this model in fixed canonical audit targets and read-back checks. Its raw-SQL write verbs are constant SELECT FOR UPDATE locks in the global-first Task, prior-attempt and physical-profile order; all recovery ledger mutations and their same-transaction audits use the protected Prisma delegates in this file.",
   })),
