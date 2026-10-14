@@ -1574,7 +1574,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
 - **할당은 `allocateAmuxCardDisplayKey(tx, prefix)` 하나이고 카드를 쓰는 트랜잭션 안에서 합니다.**
   카운터에 직접 쓰지 않습니다(`npm run check:protected-table-writers`).
 - **Feature 없는 카드의 PREFIX는 등록 경로별 고정 목록입니다**
-  (`lib/amux/cardDisplayKeyCore.ts`의 예약 목록). 새 등록 경로는 정책 문서 §4를 먼저 개정합니다.
+  (`lib/amux/cardDisplayKeyCore.ts`의 예약 목록). 새 등록 경로는 `docs/policy/amux-card-display-key.md §4`를 먼저 개정합니다.
 - **S2(schema와 할당기)**: `lib/amux/cardDisplayKeyCore.ts`, `lib/amux/cardDisplayKeyAllocator.ts`,
   `prisma/migrations/20261014100000_amux_card_display_key/migration.sql`,
   `tests/amuxCardDisplayKeyCore.test.mjs`, `tests/integration/amux-card-display-key.db.test.ts`.
