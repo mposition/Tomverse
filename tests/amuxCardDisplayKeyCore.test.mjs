@@ -89,8 +89,11 @@ test("the migration is additive and writes no row", () => {
   assert.match(statements, /^BEGIN;$/m);
   assert.match(statements, /^COMMIT;$/m);
   assert.doesNotMatch(statements, /\bDROP\b|\bTRUNCATE\s+TABLE\b|\bVALIDATE\b|\bUPDATE\s+"|\bDELETE\s+FROM\b/i);
-  // The only INSERT is the issue trigger recording a card's first number.
-  assert.deepEqual(statements.match(/\bINSERT\s+INTO\s+"[A-Za-z]+"/gi), ['INSERT INTO "AmuxCardDisplayKeyIssued"']);
+  // The only INSERT is the issue trigger recording a card's first number, in
+  // the ledger of the card table's own schema.
+  assert.equal((statements.match(/\bINSERT\s+INTO\b/gi) ?? []).length, 1);
+  assert.match(statements,
+    /'INSERT INTO %I\.%I \("displayKey", "workItemId"\) VALUES \(\$1, \$2\)',\n\s+TG_TABLE_SCHEMA, 'AmuxCardDisplayKeyIssued'\n\s+\) USING NEW\."displayKey", NEW\."id";/);
   assert.match(statements, /BEFORE INSERT ON "AmuxWorkItem"\nFOR EACH ROW\nWHEN \(NEW\."displayKey" IS NOT NULL\)/);
   assert.match(statements,
     /BEFORE UPDATE ON "AmuxWorkItem"\nFOR EACH ROW\nWHEN \(OLD\."displayKey" IS NULL AND NEW\."displayKey" IS NOT NULL\)/);

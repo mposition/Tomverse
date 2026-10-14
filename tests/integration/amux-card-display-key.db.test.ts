@@ -246,7 +246,14 @@ test("a deleted card's number is never issued again", async () => {
   });
 });
 
-test("a Feature's prefix is Feature-only, not reserved, unique and immutable once set", async () => {
+// The existing portfolio parent guard (20261001102100_amux_v4_portfolio_schema)
+// reads public."AmuxPortfolioNode", so Feature nodes can be built only in the
+// public schema; the v4 schema tests run there for the same reason.
+const testSchema = new URL(process.env.TEST_DATABASE_URL!).searchParams.get("schema") || "public";
+
+test("a Feature's prefix is Feature-only, not reserved, unique and immutable once set", {
+  skip: testSchema === "public" ? undefined : "the v4 portfolio parent guard reads the public schema",
+}, async () => {
   await inRolledBackTransaction(async (db) => {
     const initiative = await db.addNode("initiative", null);
     const epic = await db.addNode("epic", initiative);

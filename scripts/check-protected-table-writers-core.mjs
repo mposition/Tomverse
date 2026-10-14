@@ -683,9 +683,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20261014100000_amux_card_display_key/migration.sql",
     table: "AmuxCardDisplayKeyCounter",
     tableMentions: 3,
-    writeVerbs: 18,
+    writeVerbs: 20,
     reason:
-      "The card number migration (docs/policy/amux-card-display-key.md S2). It creates the counter table and its two triggers, which refuse an insert not at 1, an update that does anything but add one, every delete and every truncate. Its write verbs are the trigger events, the guard's TG_OP comparisons, the column ALTER TABLEs, the issued-number ledger's trigger INSERT (into that ledger, not the counter) and words of comments; it writes no counter row.",
+      "The card number migration (docs/policy/amux-card-display-key.md S2). It creates the counter table and its two triggers, which refuse an insert not at 1, an update that does anything but add one, every delete and every truncate. Its write verbs are the trigger events, the guard's TG_OP comparisons, the column ALTER TABLEs, the issued-number ledger's trigger INSERT (into that ledger, not the counter), comments about INSERT ... ON CONFLICT and other words of comments; it writes no counter row.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
@@ -2378,6 +2378,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 1,
     reason:
       "The AMUX commit deadline trigger deletes its own AmuxCommitDeadline row during COMMIT with EXECUTE over TG_TABLE_SCHEMA and TG_TABLE_NAME -- the table the trigger is attached to -- because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. Both names are the trigger's own, never input, quoted with %I; the transaction id is bound with USING. It touches no protected table.",
+  },
+  {
+    path: "prisma/migrations/20261014100000_amux_card_display_key/migration.sql",
+    count: 1,
+    reason:
+      "The card number issue trigger records a card's first number in AmuxCardDisplayKeyIssued with EXECUTE over TG_TABLE_SCHEMA and that constant table name, because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. The schema is the trigger's own, never input, quoted with %I; both values are bound with USING. It writes only that append-only ledger and touches no protected table.",
   },
   {
     path: "prisma/migrations/20260930120000_amux_orchestrator_halt/migration.sql",

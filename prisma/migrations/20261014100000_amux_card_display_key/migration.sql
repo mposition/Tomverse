@@ -78,7 +78,7 @@ CREATE TABLE "AmuxCardDisplayKeyIssued" (
 );
 
 CREATE FUNCTION amux_card_display_key_issue()
-RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
     -- BEFORE triggers run ahead of the row's CHECKs; leave a malformed
     -- number to AmuxWorkItem_displayKey_format_check.
@@ -86,9 +86,18 @@ BEGIN
         RETURN NEW;
     END IF;
     -- A number already issued, to this card or a deleted one, fails on the
-    -- ledger's primary key.
-    INSERT INTO "AmuxCardDisplayKeyIssued" ("displayKey", "workItemId")
-    VALUES (NEW."displayKey", NEW."id");
+    -- ledger's primary key. The ledger is the one in the card table's own
+    -- schema: the function pins search_path to pg_catalog, pg_temp, where an
+    -- unqualified name would not resolve, and a hard-coded public. is wrong
+    -- under ?schema=.
+    --
+    -- The record is made before the row is written, so an INSERT ... ON
+    -- CONFLICT DO NOTHING that then skips the card would still spend the
+    -- number. Writers that assign a number insert plainly.
+    EXECUTE format(
+        'INSERT INTO %I.%I ("displayKey", "workItemId") VALUES ($1, $2)',
+        TG_TABLE_SCHEMA, 'AmuxCardDisplayKeyIssued'
+    ) USING NEW."displayKey", NEW."id";
     RETURN NEW;
 END;
 $$;
@@ -106,7 +115,7 @@ WHEN (OLD."displayKey" IS NULL AND NEW."displayKey" IS NOT NULL)
 EXECUTE FUNCTION amux_card_display_key_issue();
 
 CREATE FUNCTION amux_card_display_key_issued_guard()
-RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
     RAISE EXCEPTION 'AMUX issued card display keys are never changed or removed'
       USING ERRCODE = '23514', CONSTRAINT = 'AmuxCardDisplayKeyIssued_append_only_check';
@@ -122,7 +131,7 @@ BEFORE TRUNCATE ON "AmuxCardDisplayKeyIssued"
 FOR EACH STATEMENT EXECUTE FUNCTION amux_card_display_key_issued_guard();
 
 CREATE FUNCTION amux_card_display_key_immutable()
-RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
     RAISE EXCEPTION 'AMUX card display key is immutable once set'
       USING ERRCODE = '23514', CONSTRAINT = 'AmuxWorkItem_displayKey_immutable_check';
@@ -136,7 +145,7 @@ WHEN (OLD."displayKey" IS NOT NULL AND NEW."displayKey" IS DISTINCT FROM OLD."di
 EXECUTE FUNCTION amux_card_display_key_immutable();
 
 CREATE FUNCTION amux_feature_display_prefix_immutable()
-RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
     RAISE EXCEPTION 'AMUX Feature display prefix is immutable once set'
       USING ERRCODE = '23514', CONSTRAINT = 'AmuxPortfolioNode_displayPrefix_immutable_check';
@@ -150,7 +159,7 @@ WHEN (OLD."displayPrefix" IS NOT NULL AND NEW."displayPrefix" IS DISTINCT FROM O
 EXECUTE FUNCTION amux_feature_display_prefix_immutable();
 
 CREATE FUNCTION amux_card_display_counter_guard()
-RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
     IF TG_OP = 'INSERT' THEN
         IF NEW."lastNumber" IS DISTINCT FROM 1 THEN
