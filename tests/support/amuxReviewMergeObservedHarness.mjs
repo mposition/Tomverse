@@ -14,7 +14,7 @@ let writes;
 const fakeTx = {
   $queryRaw: async (strings) => {
     const sql = strings.join("?");
-    if (sql.includes(`FROM "AmuxWorkItem"`)) return task ? [task] : [];
+    if (sql.includes(`FROM "AmuxWorkItem"`)) { writes.push(["read-task"]); return task ? [task] : []; }
     if (sql.includes(`FROM "AmuxExecutionAttempt"`)) return attempt ? [attempt] : [];
     throw new Error(`unexpected query: ${sql}`);
   },
@@ -74,7 +74,8 @@ const refused = async (setup, reason, overrides) => {
   reset();
   setup();
   assert.deepEqual(await run(overrides), { completed: false, reason });
-  assert.deepEqual(writes, []);
+  // Only the audit chain lock, taken before the card is read; nothing written.
+  assert.deepEqual(writes.filter(([kind]) => !kind.startsWith("read-")), [["lock"]]);
 };
 await refused(() => { task.status = "doing"; }, "task_not_in_review");
 await refused(() => { task.owner = "worker"; }, "task_not_in_review");
@@ -105,5 +106,8 @@ await completeAmuxV22ReviewOnObservedMerge(
 );
 assert.deepEqual(fact, { taskId: "card", attemptId: "attempt", prNumber: 42, taskRevision: 9 });
 const kinds = writes.map(([kind]) => kind);
-assert.ok(kinds.indexOf("lock") < kinds.indexOf("attachment"));
-assert.ok(kinds.indexOf("audit") < kinds.indexOf("lock"));
+// The audit chain lock comes first of all, before the card's row lock.
+assert.equal(kinds[0], "lock");
+assert.ok(kinds.indexOf("lock") < kinds.indexOf("read-task"));
+assert.ok(kinds.indexOf("audit") < kinds.indexOf("attachment"));
+assert.equal(kinds.filter((kind) => kind === "lock").length, 1);
