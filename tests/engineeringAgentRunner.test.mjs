@@ -87,7 +87,7 @@ test("a full cycle drafts a T2 patch and ends the run as a T2 draft", async () =
   assert.deepEqual(result, { finishedNormally: true, halt: "none", reason: "t2_draft" });
   assert.deepEqual(
     calls.map((call) => call.path),
-    ["worker/register", "observe/known", "observe/known", "worker/heartbeat", "run/start", "delivery/pull", "delivery/ack", "run/draft", "run/finish", "worker/heartbeat"],
+    ["worker/register", "observe/known", "observe/known", "observe/pull-requests", "worker/heartbeat", "run/start", "delivery/pull", "delivery/ack", "run/draft", "run/finish", "worker/heartbeat"],
   );
   const start = calls.find((call) => call.path === "run/start").body;
   assert.equal(start.baseSha, SHA);
