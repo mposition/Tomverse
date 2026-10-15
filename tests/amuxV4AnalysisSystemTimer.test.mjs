@@ -32,8 +32,12 @@ test("a drop-in on the service or the timer refuses, before and after the reload
   const reloadAt = script.indexOf('"daemon-reload"');
   const enableAt = script.indexOf('"enable", "--now"');
   assert.ok(script.indexOf("requireUndropped(SYSTEM_UNIT);") < reloadAt, "the service is checked before anything is written");
-  assert.ok(reloadAt < script.indexOf("requireUndropped(SYSTEM_TIMER);"));
-  assert.ok(script.indexOf("requireUndropped(SYSTEM_TIMER);") < enableAt, "both are checked again before enabling");
+  assert.ok(reloadAt < script.lastIndexOf("requireUndropped(SYSTEM_TIMER);"));
+  assert.ok(script.lastIndexOf("requireUndropped(SYSTEM_TIMER);") < enableAt, "both are checked again before enabling");
+  // An already installed timer is checked before the probe returns.
+  const probeReturn = script.indexOf('if (mode === "--probe-only")');
+  assert.ok(script.indexOf("requireUndropped(SYSTEM_TIMER);") < probeReturn, "the probe sees an installed timer's drop-in");
+  assert.ok(script.indexOf("installed_timer_mismatch") < probeReturn, "and its pinned bytes");
 });
 
 test("no argument is the probe; an unknown or extra argument is refused", () => {

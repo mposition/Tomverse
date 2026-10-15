@@ -67,13 +67,20 @@ export function runAnalysisTimerEnable(mode = "--probe-only") {
   }
   const halted = existsSync(ANALYSIS_HALT_MARKER);
   const target = `/etc/systemd/system/${SYSTEM_TIMER}`;
-  if (mode === "--probe-only") {
-    return { timerInstalled: existsSync(target), liveSwitch, halted, enabled: false };
+  const timerInstalled = existsSync(target);
+  // An installed timer is held to the same standard before anything else:
+  // its pinned bytes, its own file, no drop-in. The probe reports it too.
+  if (timerInstalled) {
+    if (createHash("sha256").update(rootFile(target, 0o644)).digest("hex") !== SYSTEM_TIMER_SHA256) {
+      throw new Error("installed_timer_mismatch");
+    }
+    requireUndropped(SYSTEM_TIMER);
   }
-  if (!existsSync(target)) {
+  if (mode === "--probe-only") {
+    return { timerInstalled, liveSwitch, halted, enabled: false };
+  }
+  if (!timerInstalled) {
     writeFileSync(target, timer, { flag: "wx", mode: 0o644 });
-  } else if (createHash("sha256").update(rootFile(target, 0o644)).digest("hex") !== SYSTEM_TIMER_SHA256) {
-    throw new Error("installed_timer_mismatch");
   }
   command("/usr/bin/systemd-analyze", ["verify", target]);
   command("/usr/bin/systemctl", ["daemon-reload"]);
