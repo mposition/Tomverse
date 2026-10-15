@@ -139,4 +139,5 @@ test("an opened idea leads with its read-only detail, and the list follows its f
   const detail = read("components/admin/AmuxIdeaDetailSummary.tsx");
   assert.equal(/adminFetch|method:|<button/.test(detail), false, "the detail only reads and links");
   assert.ok(detail.includes("AMUX_IDEA_PROGRESS_STAGES.map"), "all six steps are drawn");
+  assert.ok(detail.includes("amuxIdeaHasUnsavedDraft() && !window.confirm(m.leaveDraft)"), "leaving a draft asks first");
 });

@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
+import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
 import { AMUX_IDEA_PROGRESS_STAGES, amuxIdeaProgressStep } from "@/lib/amux/ideaProgressCore";
 import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 
@@ -28,7 +29,10 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
         <h2 id="amux-idea-detail-heading" className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
           {row.displayKey ?? `${m.untitled} ${row.requestId.slice(0, 8)}`}
         </h2>
-        <Link href="/admin/amux-backlog?tab=ideas" className="min-h-11 content-center text-sm font-medium text-blue-800 underline dark:text-blue-200">
+        <Link href="/admin/amux-backlog?tab=ideas" onClick={(event) => {
+          // A new draft started from this idea is never stored; ask before leaving it.
+          if (amuxIdeaHasUnsavedDraft() && !window.confirm(m.leaveDraft)) event.preventDefault();
+        }} className="min-h-11 content-center text-sm font-medium text-blue-800 underline dark:text-blue-200">
           {m.backToList}
         </Link>
       </div>
