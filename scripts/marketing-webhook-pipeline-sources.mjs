@@ -102,13 +102,15 @@ const isPureExpression = (node) => {
     return isPureExpression(node.expression);
   }
   if (ts.isPrefixUnaryExpression(node)) return PURE_LITERALS.has(node.operand.kind);
-  if (ts.isTemplateExpression(node)) return node.templateSpans.every((span) => isPureExpression(span.expression));
+  // An interpolation converts its value to a string, which can call toString.
+  if (ts.isTemplateExpression(node)) return false;
   if (ts.isArrayLiteralExpression(node)) {
     return node.elements.every((element) => !ts.isSpreadElement(element) && isPureExpression(element));
   }
   if (ts.isObjectLiteralExpression(node)) {
     return node.properties.every((property) => {
-      if (property.name && ts.isComputedPropertyName(property.name) && !isPureExpression(property.name.expression)) {
+      // A computed key is converted to a property key, which can call toString.
+      if (property.name && ts.isComputedPropertyName(property.name) && !PURE_LITERALS.has(property.name.expression.kind)) {
         return false;
       }
       if (ts.isPropertyAssignment(property)) return isPureExpression(property.initializer);
@@ -129,7 +131,7 @@ const isPureClass = (node) =>
   node.members.every((member) => {
     if (ts.isClassStaticBlockDeclaration(member)) return false;
     if ((ts.getDecorators?.(member) ?? []).length) return false;
-    if (member.name && ts.isComputedPropertyName(member.name) && !isPureExpression(member.name.expression)) {
+    if (member.name && ts.isComputedPropertyName(member.name) && !PURE_LITERALS.has(member.name.expression.kind)) {
       return false;
     }
     const isStatic = (ts.getModifiers?.(member) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword);
@@ -139,7 +141,10 @@ const isPureClass = (node) =>
 /** Whether a top-level declaration does something when the module loads. */
 const declarationHasEffect = (statement) => {
   if (ts.isVariableStatement(statement)) {
-    return !statement.declarationList.declarations.every((declaration) => isPureExpression(declaration.initializer));
+    // Destructuring runs getters, iterators and defaults; only a plain name is judged by its initializer.
+    return !statement.declarationList.declarations.every(
+      (declaration) => ts.isIdentifier(declaration.name) && isPureExpression(declaration.initializer),
+    );
   }
   if (ts.isClassDeclaration(statement)) return !isPureClass(statement);
   if (ts.isEnumDeclaration(statement)) {
@@ -181,11 +186,13 @@ const parseModule = (repositoryRoot, filePath, source, exists) => {
   const imports = new Map(); // local name -> { file, name } (file null: a package)
   const always = []; // statement indexes with effects of their own
   const loads = new Set(); // local modules this one loads at run time
+  const loadOrder = []; // every run-time import and re-export, in evaluation order
   file.statements.forEach((statement, index) => {
     statements.push(statement);
     if (ts.isImportDeclaration(statement)) {
       const target = resolveLocalSpecifier(repositoryRoot, filePath, statement.moduleSpecifier.text, exists);
       const clause = statement.importClause;
+      if (!clause || !clause.isTypeOnly) loadOrder.push(statement.moduleSpecifier.text);
       if (!clause) {
         if (target) throw new Error(`${filePath}: a side-effect import of ${target} cannot be sliced`);
         return;
@@ -216,6 +223,7 @@ const parseModule = (repositoryRoot, filePath, source, exists) => {
         throw new Error(`${filePath}: a namespace re-export cannot be sliced`);
       }
       if (target && !statement.isTypeOnly) loads.add(target);
+      if (statement.moduleSpecifier && !statement.isTypeOnly) loadOrder.push(statement.moduleSpecifier.text);
       for (const element of statement.exportClause.elements) {
         const local = (element.propertyName ?? element.name).text;
         exported.set(
@@ -242,7 +250,7 @@ const parseModule = (repositoryRoot, filePath, source, exists) => {
     // Runs when the module loads, whether or not anything names it.
     if (declarationHasEffect(statement)) always.push(index);
   });
-  return { statements, declared, exported, imports, always, loads };
+  return { statements, declared, exported, imports, always, loads, loadOrder };
 };
 
 /**
@@ -358,7 +366,10 @@ export const marketingWebhookPipelineSources = ({
         const binding = parsed.imports.get(local);
         return `// import ${local} = ${binding.file ?? `package:${binding.specifier}`}#${binding.name}`;
       });
+    // Modules evaluate in import order, so their effects land in that order.
+    const order = parsed.loadOrder.map((specifier) => `// load ${specifier}`);
     const content = [
+      ...order,
       ...wiring,
       ...[...indexes].sort((left, right) => left - right).map((index) => parsed.statements[index].getText()),
     ].join("\n\n");

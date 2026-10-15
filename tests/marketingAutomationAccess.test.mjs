@@ -786,6 +786,45 @@ test("the slicer keeps load-time effects and import wiring, and refuses dynamic 
     wiring({ "lib/s.ts": 'import { no as a, yes as b } from "@/lib/y";\nexport const decide = () => [a(), b()];\n' }),
     wiring(),
   );
+  // Destructuring runs getters; an interpolation or a computed key runs toString.
+  const implicit = (declarations) =>
+    miniature({
+      "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+      "lib/s.ts": `${declarations}\nexport const decide = () => (globalThis as { allow?: boolean }).allow;\n`,
+    });
+  for (const [template, name] of [
+    ["const obj = { get x() { (globalThis as { allow?: boolean }).allow = FLAG; return 1; } };\nconst { x } = obj;", "destructuring"],
+    ['const obj = { toString() { (globalThis as { allow?: boolean }).allow = FLAG; return "x"; } };\nconst unused = `${obj}`;', "interpolation"],
+    ['const obj = { toString() { (globalThis as { allow?: boolean }).allow = FLAG; return "x"; } };\nconst unused = { [obj]: 1 };', "computed key"],
+  ]) {
+    const run = implicit(template.replaceAll("FLAG", "true"));
+    assert.notEqual(
+      run({
+        "lib/s.ts": `${template.replaceAll("FLAG", "false")}\nexport const decide = () => (globalThis as { allow?: boolean }).allow;\n`,
+      }),
+      run(),
+      name,
+    );
+  }
+  // Modules evaluate in import order, so swapping two imports is a change.
+  const order = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts": 'import "@/lib/noop";\nimport { a } from "@/lib/a";\nimport { b } from "@/lib/b";\nexport const decide = () => [a, b];\n',
+    "lib/noop.ts": "export {};\n",
+    "lib/a.ts": "export const a = 1;\n(globalThis as { v?: number }).v = 1;\n",
+    "lib/b.ts": "export const b = 2;\n(globalThis as { v?: number }).v = 2;\n",
+  });
+  assert.throws(() => order(), /side-effect import/);
+  const swapped = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts": 'import { a } from "@/lib/a";\nimport { b } from "@/lib/b";\nexport const decide = () => [a, b];\n',
+    "lib/a.ts": "export const a = 1;\n(globalThis as { v?: number }).v = 1;\n",
+    "lib/b.ts": "export const b = 2;\n(globalThis as { v?: number }).v = 2;\n",
+  });
+  assert.notEqual(
+    swapped({ "lib/s.ts": 'import { b } from "@/lib/b";\nimport { a } from "@/lib/a";\nexport const decide = () => [a, b];\n' }),
+    swapped(),
+  );
   // A module loaded by import() or require() cannot be followed.
   const dynamic = miniature({
     "lib/w.ts": 'export const later = () => import("@/lib/d");\n',
