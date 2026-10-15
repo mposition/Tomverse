@@ -36,11 +36,33 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{1
  * cost receipt and checks, exactly as the single routes write them; a refusal
  * of any unit rolls the whole plan back. An implement Task's public PR
  * consent is on unless the owner listed it in `publicPrConsentOff`. The
- * Features must already be approved (the node part of the plan).
+ * Features must already be approved, or be created by the node part of the
+ * same whole-plan transaction (`pendingFeatures`).
  */
 export async function approveAmuxV4CardPlan(session: Session, request: Request, input: {
   ideaId: string; reasons: Readonly<Record<string, string>>; publicPrConsentOff: readonly string[];
 }) {
+  const prepared = await prepareAmuxV4CardPlan(session, request, input);
+  let callbackReturned = false;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const cards = await runAmuxV4CardPlanInTx(tx, prepared);
+      callbackReturned = true;
+      return { ideaId: input.ideaId, cards, remaining: prepared.remaining,
+        backlogOnly: true as const, executionAuthorized: false as const };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 5_000, timeout: 90_000 });
+  } catch (error) {
+    throw amuxV4PlanFailure(error, callbackReturned);
+  }
+}
+
+export type AmuxV4CardPlanPrepared = Awaited<ReturnType<typeof prepareAmuxV4CardPlan>>;
+
+/** Everything the card part reads and makes before its transaction. */
+export async function prepareAmuxV4CardPlan(session: Session, request: Request, input: {
+  ideaId: string; reasons: Readonly<Record<string, string>>; publicPrConsentOff: readonly string[];
+}, options: { allowEmpty?: boolean; pendingFeatures?: ReadonlyMap<string, string> } = {}) {
   const actorUserId = session.user?.id;
   if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner") {
     throw new AmuxV4UnitDecisionError("forbidden");
@@ -61,7 +83,7 @@ export async function approveAmuxV4CardPlan(session: Session, request: Request, 
     where: { ideaId: input.ideaId, actorUserId, unitKind: "card", state: "proposed" },
     select: { id: true }, orderBy: { id: "asc" }, take: AMUX_V4_CARD_PLAN_MAX_PROPOSED + 1,
   });
-  if (proposed.length === 0) throw new AmuxV4CardPlanError("nothing_to_approve");
+  if (proposed.length === 0 && !options.allowEmpty) throw new AmuxV4CardPlanError("nothing_to_approve");
   if (proposed.length > AMUX_V4_CARD_PLAN_MAX_PROPOSED) throw new AmuxV4CardPlanError("too_many_units");
   const verified = await Promise.all(proposed.map((unit) =>
     readVerifiedAmuxCardProposal(session, input.ideaId, unit.id)));
@@ -81,6 +103,8 @@ export async function approveAmuxV4CardPlan(session: Session, request: Request, 
     const nodeId = decision?.resolvedNodeId ?? decision?.linkedNodeId ?? null;
     if (unit.localRef && nodeId) featureOf.set(unit.localRef, nodeId);
   }
+  // Features the node part of the same transaction will create, by local ref.
+  for (const [localRef, nodeId] of options.pendingFeatures ?? []) featureOf.set(localRef, nodeId);
   const unresolved = verified.filter((entry) =>
     !featureOf.has(entry.proposal.featureRef) && !UUID.test(entry.proposal.featureRef));
   if (unresolved.length > 0) {
@@ -97,8 +121,12 @@ export async function approveAmuxV4CardPlan(session: Session, request: Request, 
   // A large plan is approved in rounds; this one is the dependency-closed prefix.
   const { round: plan, remaining } = amuxV4CardPlanRound(ordered);
 
-  const scanner = await loadAmuxCardDuplicateScanner();
   const keys = loadCurrentAmuxContentKeys(process.env);
+  const nonce = randomBytes(32).toString("base64url");
+  const base = { session, request, actorUserId, ideaId: input.ideaId, reasons: input.reasons,
+    consentOff, plan, remaining, keys, nonce };
+  if (plan.length === 0) return { ...base, scanner: null, contentKeys: null };
+  const scanner = await loadAmuxCardDuplicateScanner();
   let contentKeys;
   try {
     contentKeys = await createAmuxContentKeyRing(
@@ -111,73 +139,78 @@ export async function approveAmuxV4CardPlan(session: Session, request: Request, 
           subjectId: entry.cardId }] : []),
       ]));
   } catch { throw new AmuxV4UnitDecisionError("integrity_unavailable"); }
-  const nonce = randomBytes(32).toString("base64url");
+  return { ...base, scanner, contentKeys };
+}
 
-  let callbackReturned = false;
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const cards: Array<{ draftUnitId: string; decisionId: string; cardId: string;
-        cardType: string; title: string; publicPrDisclosureApproved: boolean }> = [];
-      for (const entry of plan) {
-        const proposal = entry.verified.proposal;
-        const publicPr = amuxV4PlanPublicPrConsent({ draftUnitId: entry.draftUnitId,
-          cardType: entry.cardType, taskRole: proposal.taskRole ?? null }, consentOff);
-        const ownerSession = amuxV4UnitBrowserDigest({ decisionId: entry.decisionId, actorUserId,
-          authenticatedAt: session.user?.authenticatedAt, nonce, key: keys });
-        const { result, snapshot } = await prepareAmuxV4CardRegistrationInTx(tx, {
-          session, request, actorUserId,
-          choice: { ideaId: input.ideaId, draftUnitId: entry.draftUnitId,
-            featureNodeId: entry.featureNodeId, prepareRequestId: randomUUID(),
-            decisionReason: input.reasons[entry.draftUnitId] ?? null,
-            cardType: entry.cardType, publicPrDisclosureApproved: publicPr },
-          verified: entry.verified, scanner, keys, decisionId: entry.decisionId, ownerSession,
-        });
-        const current = deriveAmuxIdeaUnitConfirmation(snapshot, keys, snapshot.duplicates,
-          snapshot.card?.cardType === "task" ? { ok: true, receipt: snapshot.card.task!.costReceipt } : null);
-        if (!current.ok || !sameAmuxIdeaUnitConfirmation(current.confirmationDigest, result.confirmationDigest)) {
-          throw new AmuxV4UnitDecisionError("reconfirm");
+/** The card part inside the caller's transaction, in plan order. */
+export async function runAmuxV4CardPlanInTx(tx: Prisma.TransactionClient,
+  prepared: AmuxV4CardPlanPrepared) {
+  const { session, request, actorUserId, plan, consentOff, keys, nonce } = prepared;
+  const input = { ideaId: prepared.ideaId, reasons: prepared.reasons };
+  const cards: Array<{ draftUnitId: string; decisionId: string; cardId: string;
+    cardType: string; title: string; publicPrDisclosureApproved: boolean }> = [];
+  if (plan.length === 0) return cards;
+  const scanner = prepared.scanner!;
+  const contentKeys = prepared.contentKeys!;
+  for (const entry of plan) {
+    const proposal = entry.verified.proposal;
+    const publicPr = amuxV4PlanPublicPrConsent({ draftUnitId: entry.draftUnitId,
+      cardType: entry.cardType, taskRole: proposal.taskRole ?? null }, consentOff);
+    const ownerSession = amuxV4UnitBrowserDigest({ decisionId: entry.decisionId, actorUserId,
+      authenticatedAt: session.user?.authenticatedAt, nonce, key: keys });
+    const { result, snapshot } = await prepareAmuxV4CardRegistrationInTx(tx, {
+      session, request, actorUserId,
+      choice: { ideaId: input.ideaId, draftUnitId: entry.draftUnitId,
+        featureNodeId: entry.featureNodeId, prepareRequestId: randomUUID(),
+        decisionReason: input.reasons[entry.draftUnitId] ?? null,
+        cardType: entry.cardType, publicPrDisclosureApproved: publicPr },
+      verified: entry.verified, scanner, keys, decisionId: entry.decisionId, ownerSession,
+    });
+    const current = deriveAmuxIdeaUnitConfirmation(snapshot, keys, snapshot.duplicates,
+      snapshot.card?.cardType === "task" ? { ok: true, receipt: snapshot.card.task!.costReceipt } : null);
+    if (!current.ok || !sameAmuxIdeaUnitConfirmation(current.confirmationDigest, result.confirmationDigest)) {
+      throw new AmuxV4UnitDecisionError("reconfirm");
+    }
+    await commitAmuxV4CardRegistration(tx, {
+      session, request, snapshot, proposal, cardId: entry.cardId,
+      consumeRequestId: randomUUID(), keys: contentKeys,
+      recalculate: async (transaction) => {
+        let taskCost = null;
+        if (proposal.cardType === "task") {
+          if (!proposal.taskRole || !proposal.executionGrade) {
+            throw new AmuxV4UnitDecisionError("reconfirm");
+          }
+          const approved = await calculateCurrentApprovedAmuxV4TaskCost(transaction,
+            proposal.taskRole, proposal.executionGrade);
+          taskCost = { ok: true as const, receipt: approved.receipt };
         }
-        await commitAmuxV4CardRegistration(tx, {
-          session, request, snapshot, proposal, cardId: entry.cardId,
-          consumeRequestId: randomUUID(), keys: contentKeys,
-          recalculate: async (transaction) => {
-            let taskCost = null;
-            if (proposal.cardType === "task") {
-              if (!proposal.taskRole || !proposal.executionGrade) {
-                throw new AmuxV4UnitDecisionError("reconfirm");
-              }
-              const approved = await calculateCurrentApprovedAmuxV4TaskCost(transaction,
-                proposal.taskRole, proposal.executionGrade);
-              taskCost = { ok: true as const, receipt: approved.receipt };
-            }
-            return { duplicateScan: await scanner(transaction, { unitId: entry.draftUnitId,
-              proposal, featureNodeId: entry.featureNodeId }), taskCost };
-          },
-          context: { decisionId: entry.decisionId, ideaId: input.ideaId,
-            draftUnitId: entry.draftUnitId, actorUserId, recentOwnerStepUp: true,
-            ownerSessionDigest: ownerSession.digest, ownerSessionDigestKeyId: ownerSession.keyId },
-        });
-        // The next unit's scan sees this card as the plan's own.
-        await scanner.admitCreated(tx, { id: entry.cardId, title: proposal.title });
-        cards.push({ draftUnitId: entry.draftUnitId, decisionId: entry.decisionId,
-          cardId: entry.cardId, cardType: entry.cardType, title: proposal.title,
-          publicPrDisclosureApproved: publicPr });
-      }
-      callbackReturned = true;
-      return { ideaId: input.ideaId, cards, remaining, backlogOnly: true as const,
-        executionAuthorized: false as const };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      maxWait: 5_000, timeout: 90_000 });
-  } catch (error) {
-    if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
-    if (!callbackReturned && error instanceof AmuxV4TaskCatalogApprovalError) {
-      throw new AmuxV4UnitDecisionError("not_ready");
-    }
-    if (!callbackReturned && error instanceof AmuxCardDuplicateScanError) {
-      throw new AmuxV4UnitDecisionError(error.code === "integrity_unavailable" ?
-        "integrity_unavailable" : "reconfirm");
-    }
-    // The plan committed whole or not at all; the read-back by draft unit says which.
-    throw new AmuxV4UnitDecisionError("outcome_unknown");
+        return { duplicateScan: await scanner(transaction, { unitId: entry.draftUnitId,
+          proposal, featureNodeId: entry.featureNodeId }), taskCost };
+      },
+      context: { decisionId: entry.decisionId, ideaId: input.ideaId,
+        draftUnitId: entry.draftUnitId, actorUserId, recentOwnerStepUp: true,
+        ownerSessionDigest: ownerSession.digest, ownerSessionDigestKeyId: ownerSession.keyId },
+    });
+    // The next unit's scan sees this card as the plan's own.
+    await scanner.admitCreated(tx, { id: entry.cardId, title: proposal.title });
+    cards.push({ draftUnitId: entry.draftUnitId, decisionId: entry.decisionId,
+      cardId: entry.cardId, cardType: entry.cardType, title: proposal.title,
+      publicPrDisclosureApproved: publicPr });
   }
+  return cards;
+}
+
+/** Refusals from inside a plan transaction surface as themselves; anything
+ * after the callback returned is an unknown outcome. */
+export function amuxV4PlanFailure(error: unknown, callbackReturned: boolean): Error {
+  if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) return error;
+  if (!callbackReturned && error instanceof AmuxV4TaskCatalogApprovalError) {
+    return new AmuxV4UnitDecisionError("not_ready");
+  }
+  if (!callbackReturned && error instanceof AmuxCardDuplicateScanError) {
+    return new AmuxV4UnitDecisionError(error.code === "integrity_unavailable" ?
+      "integrity_unavailable" : "reconfirm");
+  }
+  // The plan committed whole or not at all; the read-back by draft unit says which.
+  return new AmuxV4UnitDecisionError("outcome_unknown");
 }
