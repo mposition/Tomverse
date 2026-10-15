@@ -123,3 +123,19 @@ test("an unknown or unrecoverable previous request can be set aside only by an e
   assert.ok(handler.indexOf("forgetIdeaRequestReceipts(") < handler.indexOf("resetInput()"),
     "the input unlocks only after the receipts are forgotten");
 });
+
+test("a state card stands in for the locked idea input, and the input has no dead transfer button", () => {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const panel = readFileSync(path.join(dir, "../components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
+  const render = panel.slice(panel.indexOf("const card: AmuxIdeaRequestCardState | null"));
+  // Every locked state has a card; the input renders only without one.
+  for (const [state, card] of [["pending", "checking"], ["outcome_unknown", "unknown"],
+    ["submitted", "saved"], ["recovery_unavailable", "locked"]]) {
+    assert.ok(render.includes(`submission.kind === "${state}"`) && render.includes(`kind: "${card}"`), state);
+  }
+  assert.ok(render.indexOf("{card ? (") < render.indexOf('id="amux-v4-idea"'), "the card comes first, in the input's place");
+  assert.equal(panel.includes("amux-v4-transfer-disabled"), false);
+  assert.ok(render.includes("onClick={recoverFromReceipts}"), "a locked browser can check its storage again");
+  const card = readFileSync(path.join(dir, "../components/admin/AmuxIdeaRequestStatusCard.tsx"), "utf8");
+  assert.equal(/adminFetch|readBack/.test(card), false, "the card itself never writes or reads back");
+});
