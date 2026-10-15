@@ -23,6 +23,13 @@ test("the plan screen posts once to the whole-plan route and reads back instead 
   // Every analysis page is read, so the screen shows what the server approves.
   assert.ok(panel.includes("async function readAllUnits("));
   assert.ok(panel.includes("page = view.nextChunkIndex"));
+  // After a refusal the plan is read again before the next approval.
+  const refusal = approve.slice(approve.indexOf("A refusal inside the one transaction"));
+  assert.ok(refusal.indexOf("setUnits(await load()") < refusal.indexOf('setState("idle")'));
+  // The plan and the screen name the same set: the analysis's own units only.
+  for (const file of ["lib/amux/ideaNodePlanApprovalService.ts", "lib/amux/ideaCardPlanApprovalService.ts"]) {
+    assert.ok(readFileSync(file, "utf8").includes("derivationGroupId: null"), file);
+  }
   // Model-derived text is rendered as text, never HTML.
   assert.doesNotMatch(panel, /dangerouslySetInnerHTML/);
 });

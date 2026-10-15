@@ -110,9 +110,11 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
         return;
       }
       if ([400, 401, 403, 404, 409, 413, 415, 428].includes(response.status)) {
-        // A refusal inside the one transaction: nothing was recorded.
+        // A refusal inside the one transaction: nothing was recorded. Read the
+        // plan again, so a unit decided elsewhere meanwhile is not resent.
         setFailure(await readAdminApiFailure(response, { fallback: m.transferConfirmRefused, locale }));
         writePending(ideaId, null);
+        setUnits(await load() ?? "failed");
         setState("idle");
         return;
       }

@@ -83,7 +83,11 @@ export async function prepareAmuxV4NodePlan(session: Session, request: Request,
     }
   }
   const proposed = await prisma.amuxIdeaDraftUnit.findMany({
-    where: { ideaId: input.ideaId, actorUserId, unitKind: "node", state: "proposed" },
+    // The analysis's own units only. A unit derived by split or merge keeps its
+    // own flow, and the plan screen (which reads the analysis result) never
+    // shows one, so the plan and the screen name the same set.
+    where: { ideaId: input.ideaId, actorUserId, unitKind: "node", state: "proposed",
+      derivationGroupId: null },
     select: { id: true }, orderBy: { id: "asc" }, take: AMUX_V4_NODE_PLAN_MAX_UNITS + 1,
   });
   if (proposed.length === 0 && !options.allowEmpty) throw new AmuxV4NodePlanError("nothing_to_approve");
