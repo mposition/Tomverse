@@ -562,6 +562,12 @@ export async function resolveAmuxReview(input: {
       data: {
         status: target,
         revision: { increment: 1 },
+        // Owner approval is the v22 completion judgement. A v4 Task becomes
+        // terminal here, once, on the DB clock; dependents, result retention
+        // and content purge all wait on this timestamp.
+        ...(target === "done" && state.task.sourceSystem === "admin-idea-v4"
+          ? { v4TerminalAt: now }
+          : {}),
         // A retried card starts a new attempt; the previous attempt's review
         // PR must not be approved as the new attempt's work.
         ...(proposal.outcome === "retry"
