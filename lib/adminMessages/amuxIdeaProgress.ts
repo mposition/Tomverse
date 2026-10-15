@@ -23,6 +23,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     listTitle: "Ideas in progress",
     listCount: (count: number) => `Newest ${count}`,
     listEmpty: "No ideas yet.",
+    refresh: "Refresh",
     unavailable: "The idea list could not be read. Nothing was changed; reload to try again.",
     stages: {
       execution_approval: "Execution approval",
@@ -64,6 +65,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     listTitle: "진행 중인 아이디어",
     listCount: (count: number) => `최근 ${count}건`,
     listEmpty: "아직 아이디어가 없습니다.",
+    refresh: "새로 고침",
     unavailable: "아이디어 목록을 읽지 못했습니다. 바뀐 것은 없습니다. 새로 고쳐 다시 시도하세요.",
     stages: {
       execution_approval: "실행 승인",

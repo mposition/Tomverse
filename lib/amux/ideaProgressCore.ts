@@ -55,6 +55,7 @@ const UNKNOWN = "outcome_unknown";
 const ACTIVE_PREVIEW = new Set(["confirmed", "in_flight"]);
 const ACTIVE_HOLD = new Set(["reserved", "in_flight"]);
 const NOT_YET_SENT = new Set(["pending", "collecting", "awaiting_preview"]);
+const FINISHED = new Set(["draft_ready", "partially_decided", "decided"]);
 
 export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress {
   const tasks = facts.cards.filter((card) => card.cardType !== "story");
@@ -64,16 +65,16 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
     done: tasks.filter((task) => task.merged).length,
     inReview: tasks.filter((task) => !closed(task) && task.status === "review" && task.reviewPrNumber !== null).length,
   };
-  const attention = facts.chunks.some((chunk) => chunk.state === UNKNOWN ||
-    chunk.previewState === UNKNOWN || chunk.holdStatus === UNKNOWN);
+  // Pages run in order, so the latest page says what happens now; a stale
+  // hold or unknown outcome left on an earlier page never hides a human step.
+  const latest = facts.chunks.reduce<AmuxIdeaProgressFacts["chunks"][number] | null>(
+    (last, chunk) => !last || chunk.chunkIndex > last.chunkIndex ? chunk : last, null);
+  const attention = latest !== null && (latest.state === UNKNOWN ||
+    latest.previewState === UNKNOWN || latest.holdStatus === UNKNOWN);
   const at = (stage: AmuxIdeaProgressStage, waitingFor: AmuxIdeaWaitingFor | null = null): AmuxIdeaProgress =>
     ({ stage, waitingFor: attention ? null : waitingFor, attention, tasks: counts });
 
   if (facts.cancelled || facts.state === "cancelled") return at("cancelled");
-  // Pages run in order, so the latest page says what happens now; a stale
-  // hold left on an earlier page never hides a human step.
-  const latest = facts.chunks.reduce<AmuxIdeaProgressFacts["chunks"][number] | null>(
-    (last, chunk) => !last || chunk.chunkIndex > last.chunkIndex ? chunk : last, null);
   if (latest && (latest.state === "in_flight" ||
     (latest.previewState !== null && ACTIVE_PREVIEW.has(latest.previewState)) ||
     (latest.holdStatus !== null && ACTIVE_HOLD.has(latest.holdStatus)))) {
@@ -93,6 +94,9 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
   // Cards registered without a Task yet (stories only) are still execution.
   if (facts.cards.length > 0) return at("execution");
   if (facts.state === "analyzing") return at("analysis");
+  // An analysis that finished with nothing left to decide (rejected, or every
+  // proposal refused or expired) waits for nobody.
+  if (latest && FINISHED.has(latest.state)) return at("plan_approval");
   return at("execution_approval", "execution_approval");
 }
 

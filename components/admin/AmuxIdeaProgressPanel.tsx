@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
@@ -32,6 +33,7 @@ export function AmuxIdeaProgressPanel({ rows, activeRequestId }: {
   activeRequestId: string | null;
 }) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages);
+  const router = useRouter();
   const keepDraft = (event: { preventDefault: () => void }) => {
     if (amuxIdeaHasUnsavedDraft() && !window.confirm(m.leaveDraft)) event.preventDefault();
   };
@@ -104,10 +106,17 @@ export function AmuxIdeaProgressPanel({ rows, activeRequestId }: {
 
       <section aria-labelledby="amux-idea-list-heading"
         className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 id="amux-idea-list-heading" className="flex items-baseline justify-between gap-2 text-base font-semibold text-zinc-900 dark:text-zinc-100">
-          {m.listTitle}
-          {rows.length > 0 ? <span className="text-xs font-normal text-zinc-600 dark:text-zinc-400">{m.listCount(rows.length)}</span> : null}
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="amux-idea-list-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+            {m.listTitle}
+            {rows.length > 0 ? <span className="ml-2 text-xs font-normal text-zinc-600 dark:text-zinc-400">{m.listCount(rows.length)}</span> : null}
+          </h2>
+          {/* A server read: saving or approving below changes it, so it can be read again. */}
+          <button type="button" onClick={() => router.refresh()}
+            className="min-h-11 rounded-lg border border-zinc-300 px-3 text-sm dark:border-zinc-700">
+            {m.refresh}
+          </button>
+        </div>
         {rows.length === 0 ? <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.listEmpty}</p> : (
           <ul className="grid gap-2 md:grid-cols-2">
             {rows.map((row) => {

@@ -41,6 +41,12 @@ test("each idea is at exactly one of the six stages, and a human step still open
   assert.deepEqual(stage({ chunks: [chunk()], cards: [task({ status: "done", merged: true }), task({ cardType: "story" })] }),
     ["done", null], "stories do not hold an idea open");
   assert.deepEqual(stage({ cancelled: true, cards: [task()] }), ["cancelled", null]);
+  assert.deepEqual(stage({ state: "awaiting_owner", chunks: [chunk({ state: "decided" })] }), ["plan_approval", null],
+    "a finished analysis with nothing left to decide waits for nobody");
+  // An unknown outcome on an earlier page does not hide the latest page's human step.
+  const mixed = amuxIdeaProgress(facts({ state: "analyzing", chunks: [chunk({ previewState: "outcome_unknown" }),
+    chunk({ chunkIndex: 1, coverageStatus: "more" })] }));
+  assert.deepEqual([mixed.waitingFor, mixed.attention], ["continuation", false]);
   assert.deepEqual(stage({ chunks: [chunk()], cards: [task({ status: "cancelled" })] }), ["cancelled", null],
     "tasks all cancelled are not done");
   assert.deepEqual(stage({ chunks: [chunk()], cards: [task({ merged: true }), task({ status: "cancelled" })] }), ["done", null]);
