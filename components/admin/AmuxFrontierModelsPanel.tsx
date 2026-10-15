@@ -503,7 +503,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       <h3 id="amux-v4-frontier-models-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
         {m.executionCardTitle}
       </h3>
-      <p className="text-zinc-700 dark:text-zinc-300">{m.executionCardLead}</p>
+      {/* Without an approved price there is no budget reservation: only the separate confirmation. */}
+      <p className="text-zinc-700 dark:text-zinc-300">
+        {executionPrice.kind === "none" ? m.executionCardLeadConfirmOnly : m.executionCardLead}
+      </p>
       <h4 className="pt-2 font-semibold text-zinc-900 dark:text-zinc-100">{m.executionStepModel}</h4>
       <p className="text-zinc-700 dark:text-zinc-300">{m.frontierModelsHint}</p>
       <p className="text-xs text-zinc-600 dark:text-zinc-400">
