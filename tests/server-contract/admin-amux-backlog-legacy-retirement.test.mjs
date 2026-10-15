@@ -105,7 +105,11 @@ test("Ideas holds only the idea flow; portfolio, cleanup and the cost catalogue 
   const page = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-backlog/page.tsx"), "utf8");
   assert.doesNotMatch(page, /AmuxTaskCostCatalogApprovalPanel/, "the catalogue lives in Operations settings");
   const settings = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-settings/page.tsx"), "utf8");
-  assert.match(settings, /tab\.id === "analysis"[\s\S]{0,200}<AmuxTaskCostCatalogApprovalPanel/);
+  const analysis = settings.slice(settings.indexOf('if (tab.id === "analysis")'));
+  for (const panel of ["<AmuxAnalysisMonthlyBudgetPanel", "<AmuxFrontierModelRegistrationPanel",
+    "<AmuxTaskCostCatalogApprovalPanel"]) {
+    assert.ok(analysis.slice(0, 1200).includes(panel), `${panel} is in Analysis settings`);
+  }
 });
 
 test("List reads the normalized filter and page only after recent authentication", async () => {

@@ -72,12 +72,11 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 }
 
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
-  initialPlanAvailable, frontierModelsAvailable, frontierModelWriteAvailable, transferPreviewAvailable,
+  initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
   openRequestId = null }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
-  frontierModelWriteAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
   analysisResultAvailable: boolean; analysisBudgetAvailable: boolean; operatorId: string;
   /** The idea a list row opened (`?idea=<requestId>`); read back like a saved request. */
@@ -543,7 +542,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         key={submission.kind === "submitted" ?
           `${submission.ideaId}:${continuationChunkIndex}` : "none"}
         available={frontierModelsAvailable}
-        writeAvailable={frontierModelWriteAvailable}
         previewAvailable={transferPreviewAvailable}
         confirmAvailable={transferConfirmAvailable}
         analysisBudgetAvailable={analysisBudgetAvailable}

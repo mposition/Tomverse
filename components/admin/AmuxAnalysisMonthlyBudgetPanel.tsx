@@ -17,7 +17,7 @@ type Snapshot = NonNullable<ReturnType<typeof readAnalysisBudgetSnapshotReply>>;
 export function AmuxAnalysisBudgetReauthenticationNotice() {
   const m = useAdminMessages(adminCommonMessages).apiFailure;
   return <p role="alert"><Link
-    href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}
+    href={adminRecentAuthenticationHref("/admin/amux-settings?tab=analysis")}
     className="inline-flex min-h-11 items-center rounded-lg border border-amber-500 px-4">
     {m.reauthenticate}
   </Link></p>;
