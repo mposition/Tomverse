@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   clearConfirmedIdeaRequest,
   clearPendingIdeaRequest,
+  forgetIdeaRequestReceipts,
   readConfirmedIdeaRequest,
   readPendingIdeaRequest,
   rememberConfirmedIdeaRequest,
@@ -78,4 +79,17 @@ test("failure to preserve a confirmed receipt keeps the unresolved receipt", () 
   assert.equal(rememberConfirmedIdeaRequest(noConfirm, "owner-1", firstId), false);
   assert.deepEqual(readPendingIdeaRequest(storage, "owner-1"),
     { kind: "pending", requestId: firstId });
+});
+
+test("forgetting the receipts clears both, for that operator only, and reports a storage that cannot", () => {
+  const map = new Map();
+  const store = { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, String(v)), removeItem: (k) => map.delete(k) };
+  assert.equal(reservePendingIdeaRequest(store, "op", "11111111-1111-4111-8111-111111111111"), true);
+  rememberConfirmedIdeaRequest(store, "op", "22222222-2222-4222-8222-222222222222");
+  assert.equal(reservePendingIdeaRequest(store, "other", "33333333-3333-4333-8333-333333333333"), true);
+  assert.equal(forgetIdeaRequestReceipts(store, "op"), true);
+  assert.deepEqual(readPendingIdeaRequest(store, "op"), { kind: "none" });
+  assert.equal(readPendingIdeaRequest(store, "other").kind, "pending");
+  assert.equal(forgetIdeaRequestReceipts(null, "op"), false);
+  assert.equal(forgetIdeaRequestReceipts({ getItem: () => "x", setItem() {}, removeItem() {} }, "op"), false);
 });

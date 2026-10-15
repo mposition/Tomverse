@@ -287,6 +287,10 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     outcomeUnknown: (requestId: string) =>
       `Save outcome is unknown. Request ID: ${requestId}. Do not submit this idea again; ask an operator to verify the record.`,
     checkSubmissionStatus: "Check this request again",
+    setAsideAcknowledge: "I understand: if the previous request was saved after all, the same idea may exist twice.",
+    setAsideAction: "Set the previous request aside and start a new idea",
+    setAsideNotice: (requestId: string) => `The previous request ${requestId} was set aside, not deleted. You can still open it with "Open this saved request".`,
+    setAsideUnavailable: "This browser could not forget the previous request. Open this page in a new tab.",
     recoveryUnavailable: "This browser cannot safely keep the request receipt. Saving is disabled here; use a browser session with storage available.",
     transfer: "Review exact external transfer",
     transferUnavailable: "External transfer stays unavailable until the approved model, complete payload and source scope can be shown for this run.",
@@ -605,6 +609,10 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     outcomeUnknown: (requestId: string) =>
       `저장 결과를 확인할 수 없습니다. 요청 ID: ${requestId}. 다시 제출하지 말고 운영 기록을 확인해 주세요.`,
     checkSubmissionStatus: "같은 요청 상태 다시 확인",
+    setAsideAcknowledge: "이전 요청이 실제로 저장됐다면 같은 아이디어가 두 번 생길 수 있음을 이해합니다.",
+    setAsideAction: "이전 요청은 두고 새 아이디어 시작",
+    setAsideNotice: (requestId: string) => `이전 요청 ${requestId}은(는) 지우지 않고 두었습니다. "이 저장된 요청 열기"로 나중에 확인할 수 있습니다.`,
+    setAsideUnavailable: "이 브라우저가 이전 요청을 잊지 못했습니다. 이 페이지를 새 탭에서 열어 주세요.",
     recoveryUnavailable: "이 브라우저가 요청 확인 ID를 안전하게 보존하지 못합니다. 여기서는 저장할 수 없습니다. 브라우저 세션 저장소를 사용할 수 있는 환경에서 다시 진행해 주세요.",
     transfer: "정확한 외부 전송 범위 검토",
     transferUnavailable: "이번 회차의 승인 모델·전체 전송 payload·자료 범위를 표시할 수 있을 때까지 외부 전송은 열지 않습니다.",

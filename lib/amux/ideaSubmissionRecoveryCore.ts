@@ -72,6 +72,17 @@ export function rememberConfirmedIdeaRequest(store: ReceiptStore | null,
   } catch { return false; }
 }
 
+/** Forgets both receipts for the operator after an explicit set-aside;
+ * returns false when the browser storage cannot be written. */
+export function forgetIdeaRequestReceipts(store: ReceiptStore | null, operatorId: string): boolean {
+  try {
+    if (!store) return false;
+    store.removeItem(keyFor(operatorId));
+    store.removeItem(confirmedKeyFor(operatorId));
+    return store.getItem(keyFor(operatorId)) === null && store.getItem(confirmedKeyFor(operatorId)) === null;
+  } catch { return false; }
+}
+
 export function clearConfirmedIdeaRequest(store: ReceiptStore | null,
   operatorId: string, requestId: string): void {
   try {
