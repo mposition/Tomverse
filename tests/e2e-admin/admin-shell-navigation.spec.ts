@@ -638,12 +638,13 @@ test.describe("admin console shell", () => {
     // One heading per page: the panel's title no longer competes with it.
     await expect(consoleHeading(page)).toHaveCount(1);
 
+    // Backlog opens on Ideas; the card list is its own section.
     await page.goto("/admin/amux-backlog");
     const backlog = page.getByRole("navigation", { name: "Backlog sections" });
-    await expect(backlog.getByRole("link")).toHaveCount(5);
-    await expect(backlog.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=list$/);
+    await expect(backlog.getByRole("link")).toHaveCount(7);
+    await expect(backlog.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=ideas$/);
+    await page.goto("/admin/amux-backlog?tab=list");
     await expect(page.getByTestId("amux-backlog-list")).toBeVisible();
-    await expect(backlog.locator('a[href$="tab=ideas"]')).toHaveCount(1);
     // Catalog import's code latch ships closed, so its chip reads off in any
     // environment; the chip is read from that latch, not written.
     await expect(
@@ -664,7 +665,7 @@ test.describe("the AMUX group by role", () => {
       await page.goto(url);
       await expect(consoleHeading(page)).toHaveText("Backlog");
       const strip = page.getByRole("navigation", { name: "Backlog sections" });
-      await expect(strip.getByRole("link")).toHaveCount(5);
+      await expect(strip.getByRole("link")).toHaveCount(7);
       await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=ideas/);
       await expect(strip.locator('a[href*="tab=intake"]')).toHaveCount(0);
       await expect(page.getByTestId("amux-v4-idea-input")).toBeVisible();

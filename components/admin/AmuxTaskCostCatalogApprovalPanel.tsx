@@ -147,7 +147,7 @@ export function AmuxTaskCostCatalogApprovalPanel({ approvalAvailable }: {
       className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
       {m.taskCatalogReadBack}</button> : null}
     {reauth ? <a className="underline"
-      href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>
+      href={adminRecentAuthenticationHref("/admin/amux-settings?tab=analysis")}>
       {m.analysisResultReauth}</a> : null}
     {error ? <p role="alert">{error}</p> : null}
   </section>;

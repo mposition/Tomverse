@@ -62,10 +62,10 @@ owner-only (rule 14).
 | Operations | Agent digests | `/admin/agent-digests` | `qa-release` |
 | Operations | Agent office | `/admin/office` | `live`, `dashboard` |
 | Operations | Platform settings | `/admin/platform` | — |
-| AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `import`, `reconciliation`, `metadata` |
+| AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio`, `import`, `reconciliation`, `metadata`, `recovery` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
 | AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment` |
-| AMUX | Operations settings | `/admin/amux-settings` | `automatic-admission` (owner only), `safety`, `decision-maker` |
+| AMUX | Operations settings | `/admin/amux-settings` | `automatic-admission` (owner only), `safety`, `decision-maker`, `analysis` (owner only) |
 | Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
 | Governance | Audit log | `/admin/audit` | — |
 | Governance | Retention | `/admin/retention` | — |
@@ -584,3 +584,7 @@ console has no copy for (French, German, …) reads English.
 The operator approved grouping execution safety and recovery with Decision Maker controls in Operations settings. Execution retains cards and assignment; its badge counts escalations. Operations settings counts open orchestrator halts, without adding those halts to the Execution badge again. The legacy `?tab=halts` and `?tab=decision-maker` addresses on Execution redirect to their respective settings sections while preserving other query parameters. Both settings sections remain readable to every admin role. Halt clear remains owner-only; Decision Maker changes retain `ops:write`. Both mutations require their existing recent authentication checks. Reauthentication returns to the exact settings section.
 
 The safety section distinguishes automatic recovery checks, operator confirmation and causes that need fixing. A missing admission is never presented as a confirmed non-commit. Automatic history is labelled only with the server-provided system clear kind and matching no-commit/audit evidence. Read failure is shown as unknown, never as an empty or healthy state. The existing 50 open / 20 cleared / 50 human-required display ceilings remain visible. Confirmation checkboxes guide the operator and confer no server authority; the clear endpoint still verifies role, recent authentication and the halt key.
+
+### AMUX Ideas holds only the idea flow (2026-10-15)
+
+The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ideas**, which is again the page's first section: entering an idea, building its preview, approving its execution and its plan, and the analysis claim resolution that `?tab=ideas&analysisHoldId=` opens. Strategic portfolio assessment moved to its own **Portfolio assessment** section (`?tab=portfolio`), the release of unused analysis reservations to **Cleanup and recovery** (`?tab=recovery`), and Task worker and model cost catalogue approval to **Operations settings › Analysis settings** (`?tab=analysis`, owner only like the catalogue route). Each moved panel's refused step-up returns to its new section. The card list stays at `?tab=list`, which every list link already names. No route was retired, so no redirect was added.

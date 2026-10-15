@@ -29,8 +29,8 @@ test("search and pagination survive direct links and summaries stay bounded", ()
   assert.equal(amuxBacklogSummary("a".repeat(400)).length, 240);
 });
 
-test("backlog opens its list and reads private summaries only after recent owner authentication", async () => {
-  assert.equal(adminNavItemTabs("amux-backlog")[0].id, "list");
+test("backlog opens on Ideas and reads private summaries only after recent owner authentication", async () => {
+  assert.deepEqual(adminNavItemTabs("amux-backlog").slice(0, 2).map((tab) => tab.id), ["ideas", "list"]);
   const page = await readFile(new URL("../app/(site)/(application)/admin/amux-backlog/page.tsx", import.meta.url), "utf8");
   assert.match(page, /getAdminRole\(session\) !== "owner"\) notFound\(\)/);
   assert.match(page, /tab\.id === "list" && search\.valid && hasRecentAdminAuthentication\(session\)/);
