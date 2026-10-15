@@ -63,7 +63,8 @@ import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { adminNavItemTabs, adminRedirectTarget, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
-import { readAmuxIdeaProgressForOwner, type AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
+import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
+import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 import { isAmuxIdeaRequestId } from "@/lib/amux/ideaRequestIdCore";
 import { AMUX_V4_PORTFOLIO_WRITE_ENV,
   amuxV4PortfolioWriteEnabled } from
