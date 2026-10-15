@@ -152,6 +152,13 @@ export const MARKETING_WEBHOOK_PIPELINE_FILES = [
   "lib/postgresConnectionConfigCore.mjs",
   "lib/prisma.ts",
   "lib/zernioPublishAdapter.ts",
+  // Every migration that shapes MarketingPost: the status whitelist and the
+  // history trigger the production apply relies on live in the first one. The
+  // test refuses a MarketingPost migration missing from this list.
+  "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+  "prisma/migrations/20260921170000_marketing_post_facts_digest/migration.sql",
+  "prisma/migrations/20260923140000_marketing_post_facts_digest_not_null/migration.sql",
+  "prisma/migrations/20260923160000_marketing_post_claim_pair_check/migration.sql",
   "prisma/migrations/20261002120000_marketing_webhook_shadow_event_unique/migration.sql",
   "prisma/schema.prisma",
 ] as const;
@@ -221,6 +228,8 @@ export const MARKETING_WEBHOOK_SCHEMA_MODELS = [
   "AdminAuditLog",
   "AppSetting",
   "MarketingChannel",
+  // S2f: production reads and writes the post's status and history.
+  "MarketingPost",
   "MarketingReport",
 ] as const;
 
@@ -609,7 +618,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * decision changes; the bytes moved, so prior evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "524d6358084c6db8012c70012bc975ebc73a0c0f437cbf336f5e120112601819";
+  "a9b4b84a5c09e1a354e5a43aa1d4bbc9f91212a485496c90d37d1c98874ec2e9";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -668,6 +668,19 @@ test("the pipeline file list is the receiver route's whole import closure", () =
   for (const file of MARKETING_WEBHOOK_PIPELINE_FILES) {
     assert.ok(isFile(path.join(repositoryRoot, file)), file);
   }
+});
+
+test("every migration that shapes MarketingPost is in the fingerprint (S2f applies posts)", () => {
+  const dir = path.join(repositoryRoot, "prisma", "migrations");
+  const shaping = readdirSync(dir)
+    .filter((name) => isFile(path.join(dir, name, "migration.sql")))
+    .filter((name) => readFileSync(path.join(dir, name, "migration.sql"), "utf8").includes('"MarketingPost"'))
+    .map((name) => `prisma/migrations/${name}/migration.sql`)
+    .sort();
+  assert.ok(shaping.length > 0);
+  const listed = MARKETING_WEBHOOK_PIPELINE_FILES.filter((file) => file.startsWith("prisma/migrations/"));
+  for (const file of shaping) assert.ok(listed.includes(file), file);
+  assert.ok(MARKETING_WEBHOOK_SCHEMA_MODELS.includes("MarketingPost"));
 });
 
 test("the fingerprint watches the receiver's schema models, not the whole schema", () => {
