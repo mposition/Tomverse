@@ -80,7 +80,9 @@ export async function prepareAmuxV4CardPlan(session: Session, request: Request, 
     }
   }
   const proposed = await prisma.amuxIdeaDraftUnit.findMany({
-    where: { ideaId: input.ideaId, actorUserId, unitKind: "card", state: "proposed" },
+    // The analysis's own units only; a derived unit keeps its own flow.
+    where: { ideaId: input.ideaId, actorUserId, unitKind: "card", state: "proposed",
+      derivationGroupId: null },
     select: { id: true }, orderBy: { id: "asc" }, take: AMUX_V4_CARD_PLAN_MAX_PROPOSED + 1,
   });
   if (proposed.length === 0 && !options.allowEmpty) throw new AmuxV4CardPlanError("nothing_to_approve");

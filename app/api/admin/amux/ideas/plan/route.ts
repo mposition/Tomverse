@@ -43,6 +43,7 @@ const body = z.object({
       id: opaqueId }).strict(), ...assessmentFields }).strict(),
   ])).max(64).default([]),
   scoreTaskUnitIds: z.array(unitId).max(32).default([]),
+  expectedUnitIds: z.array(unitId).min(1).max(36),
 }).strict();
 
 export async function POST(request: Request) {
