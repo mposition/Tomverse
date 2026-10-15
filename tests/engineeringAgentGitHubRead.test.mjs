@@ -12,6 +12,7 @@ import {
   readEngineeringAgentDevelopHead,
   readEngineeringAgentGitBlob,
   readEngineeringAgentPinnedBaseTree,
+  readEngineeringAgentPullObservation,
 } from "../lib/engineeringAgentGitHubRead.ts";
 
 // The app's read-only GitHub view for registration (docs/policy/engineering-
@@ -222,4 +223,72 @@ test("only dependabot's open pull requests are read, and only their failing chec
   assert.deepEqual(await readEngineeringAgentDependabotFailures({ env, fetchImpl }), [
     { prNumber: 7, headSha: head, failingChecks: ["unit", "e2e"] },
   ]);
+});
+
+/* The approval observer's read of one published pull request (§9-10). */
+
+
+const pullFetch = (overrides = {}) => {
+  const HEAD = "1".repeat(40);
+  const diff = "diff --git a/x b/x\n+one\n";
+  const routes = {
+    "/pulls/42": (accept) => accept === "application/vnd.github.diff" ? diff : {
+      number: 42, state: "open", merged: false, merge_commit_sha: null, merged_at: null, merged_by: null,
+      base: { ref: "develop", sha: "2".repeat(40) }, head: { sha: HEAD }, ...overrides.pull,
+    },
+    "/pulls/42/reviews": () => overrides.reviews ?? [
+      { id: 9, user: { id: 60078951, login: "mposition" }, state: "APPROVED", commit_id: HEAD, submitted_at: "2026-10-15T05:30:00Z" },
+      { id: 10, user: { id: 60078951, login: "mposition" }, state: "PENDING", commit_id: HEAD },
+    ],
+    "/branches/develop": () => overrides.branch ?? { protection: { required_status_checks: { checks: [{ context: "Fast Gate" }, { context: "status-only" }] } } },
+    [`/commits/${HEAD}/check-runs`]: () => runs(overrides.runs ?? [
+      { id: 1, name: "Fast Gate", conclusion: "failure" }, { id: 2, name: "Fast Gate", conclusion: "success" },
+    ]),
+    [`/commits/${HEAD}/status`]: () => overrides.status ?? { statuses: [{ context: "status-only", state: "success" }] },
+  };
+  return {
+    diff,
+    fetchImpl: async (url, init) => {
+      const path = String(url).replace("https://api.github.com/repos/mposition/Tomverse", "").split("?")[0];
+      const handler = routes[path];
+      if (!handler) return new Response("{}", { status: 404 });
+      const answer = handler(init.headers.Accept);
+      return new Response(typeof answer === "string" ? answer : JSON.stringify(answer), { status: 200 });
+    },
+  };
+};
+
+test("a published pull request is read with its reviews, required checks and diff digest", async () => {
+  const { fetchImpl, diff } = pullFetch();
+  const observed = await readEngineeringAgentPullObservation(42, { env, fetchImpl });
+  assert.equal(observed.state, "open");
+  assert.equal(observed.merged, false);
+  assert.equal(observed.baseRef, "develop");
+  // The newest re-run of a required check counts, and a status context is read too.
+  assert.deepEqual(observed.requiredChecks, { allPassed: true });
+  // A pending review is the reviewer's draft and is not read.
+  assert.deepEqual(observed.reviews.map((review) => [review.id, review.login]), [[9, "mposition"]]);
+  assert.equal(observed.diffDigest, createHash("sha256").update(diff).digest("hex"));
+});
+
+test("a check still running or missing decides nothing; a failed one is a failure", async () => {
+  const read = (overrides) => readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch(overrides).fetchImpl });
+  assert.equal((await read({ runs: [{ id: 2, name: "Fast Gate", conclusion: null }] })).requiredChecks, null);
+  assert.equal((await read({ status: { statuses: [] } })).requiredChecks, null);
+  assert.equal((await read({ branch: {} })).requiredChecks, null);
+  assert.deepEqual((await read({ runs: [{ id: 3, name: "Fast Gate", conclusion: "timed_out" }] })).requiredChecks, { allPassed: false });
+  assert.deepEqual((await read({ status: { statuses: [{ context: "status-only", state: "error" }] } })).requiredChecks, { allPassed: false });
+});
+
+test("a merge is read as its commit, time and merger kind; a merge without them is refused", async () => {
+  const merged = { state: "closed", merged: true, merge_commit_sha: "3".repeat(40), merged_at: "2026-10-15T06:00:00Z", merged_by: { type: "User" } };
+  const observed = await readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch({ pull: merged }).fetchImpl });
+  assert.equal(observed.mergeCommitSha, "3".repeat(40));
+  assert.equal(observed.mergedAt.toISOString(), "2026-10-15T06:00:00.000Z");
+  assert.equal(observed.mergedByKind, "user");
+  await assert.rejects(
+    readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch({ pull: { ...merged, merge_commit_sha: null } }).fetchImpl }),
+    (error) => error instanceof EngineeringAgentGitHubReadError && error.code === "invalid_response",
+  );
+  await assert.rejects(readEngineeringAgentPullObservation(0, { env, fetchImpl: pullFetch().fetchImpl }));
 });
