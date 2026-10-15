@@ -21,9 +21,6 @@ test("the frontier panel builds the preview in one request and recovers a lost a
   assert.ok(action.indexOf("reserveBuildPreviewReceipt(") < action.indexOf("build.reserve(requestId)") &&
     action.indexOf("build.reserve(requestId)") < action.indexOf("adminFetch("),
     "the preview half and the submission attempt are both recorded before the request");
-  assert.ok(action.includes('(row.step === "preview" && (response.status >= 500 || row.error === "outcome_unknown"))'),
-    "only a preview that may exist keeps a receipt; a definite preview refusal keeps none");
-  assert.ok(action.includes("if (previewMayExist && receipt)"));
   const unknownAt = action.lastIndexOf("build.onUnknown(requestId)");
   assert.ok(unknownAt > 0 && !action.slice(action.indexOf("// Unknown:"), unknownAt).includes("takeBuildPreviewReceipt"),
     "a lost answer keeps the receipt for the read-back");
@@ -35,10 +32,8 @@ test("the frontier panel builds the preview in one request and recovers a lost a
   assert.ok(input.includes('build={submission.kind === "submitted" ? null : buildHooks}'));
   assert.ok(input.includes("onUnknown: (requestId) => { void readBack(requestId); }"));
   assert.ok(input.includes('buildRequestId={submission.kind === "submitted" ? submission.requestId : null}'));
-  assert.ok(input.includes("onAbsent={onInitialPlanAbsent}"), "a plan read back absent discards the receipt");
-  const plan = readFileSync("components/admin/AmuxInitialPlanPanel.tsx", "utf8");
-  const absent = plan.slice(plan.indexOf('decision.kind === "absent"'));
-  assert.ok(absent.slice(0, 200).includes("onAbsent?.(ideaId)"));
+  assert.equal(readFileSync("components/admin/AmuxInitialPlanPanel.tsx", "utf8").includes("BuildPreview"), false,
+    "a plan read back absent never discards the receipt: the build may still be running");
   const messages = readFileSync("lib/adminMessages/amuxIdeaInput.ts", "utf8");
   for (const key of ["buildPreviewAction", "buildPreviewHint", "buildPreviewPending", "buildPreviewRecoveryUnavailable"]) {
     assert.equal((messages.match(new RegExp(`${key}:`, "g")) ?? []).length, 2, key);
@@ -60,4 +55,31 @@ test("the build receipt is kept per submission request, read once and refused wh
   map.set("amux-v4-build-preview:op:r2", JSON.stringify({ previewId: 1, model, effort: "high" }));
   assert.equal(takeBuildPreviewReceipt(storage, "op", "r2"), null);
   assert.equal(map.has("amux-v4-build-preview:op:r2"), false, "a malformed record is removed too");
+});
+
+test("a build answer keeps a preview receipt only for a prepared or unknown preview, and refuses only before the save", async () => {
+  const { classifyBuildPreviewAnswer: c } = await import("../lib/amux/ideaBuildPreviewUiCore.ts");
+  const ideaId = "11111111-1111-4111-8111-111111111111";
+  assert.deepEqual(c(201, { state: "prepared", ideaId }),
+    { kind: "saved", ideaId, hasExternalSources: false, planReady: true, previewMayExist: true });
+  assert.deepEqual(c(503, { step: "preview", error: "outcome_unknown", ideaId }).previewMayExist, true);
+  for (const [status, error] of [[409, "model_changed"], [409, "not_ready"], [503, "integrity_unavailable"],
+    [503, "preview_disabled"], [400, "schema_rejected"]]) {
+    const answer = c(status, { step: "preview", error, ideaId });
+    assert.deepEqual([answer.kind, answer.planReady, answer.previewMayExist], ["saved", true, false], error);
+  }
+  assert.deepEqual(c(503, { step: "plan", error: "outcome_unknown", ideaId }),
+    { kind: "saved", ideaId, hasExternalSources: false, planReady: false, previewMayExist: false });
+  assert.deepEqual(c(201, { state: "submitted", ideaId, hasExternalSources: true }).hasExternalSources, true);
+  // Before the save: only errors known to precede it.
+  assert.deepEqual(c(503, { error: "build_preview_disabled" }), { kind: "refused", code: "build_preview_disabled" });
+  assert.deepEqual(c(429, { error: "Too many", code: "API_RATE_LIMITED" }), { kind: "refused", code: "API_RATE_LIMITED" });
+  assert.deepEqual(c(400, { step: "submission", error: "schema_rejected" }), { kind: "refused", code: "schema_rejected" });
+  assert.deepEqual(c(503, { step: "submission", error: "audit_unavailable" }).kind, "refused");
+  for (const answer of [c(503, { step: "submission", error: "outcome_unknown", ideaId }),
+    c(409, { step: "submission", error: "request_already_seen" }), c(503, { error: "outcome_unknown" }),
+    c(500, null),
+    c(400, { error: "build_preview_disabled" }), c(503, { step: "submission", error: "key_store_unavailable" })]) {
+    assert.equal(answer?.kind, "verify");
+  }
 });

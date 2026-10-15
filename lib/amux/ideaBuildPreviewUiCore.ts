@@ -1,4 +1,51 @@
 import type { AvailableFrontierModel } from "./ideaFrontierCatalogUiCore.ts";
+import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
+import { isIdeaSubmissionPrewriteRefusal } from "./ideaSubmissionUiCore.ts";
+
+export type BuildPreviewAnswer =
+  | { kind: "saved"; ideaId: string; hasExternalSources: boolean; planReady: boolean; previewMayExist: boolean }
+  | { kind: "refused"; code: string }
+  | { kind: "verify" };
+
+/** Errors the build route returns before the idea is saved. */
+const BUILD_PREWRITE_REFUSALS: Record<string, number> = {
+  build_preview_disabled: 503,
+  content_type_refused: 415,
+  schema_rejected: 400,
+  ADMIN_REAUTHENTICATION_REQUIRED: 428,
+};
+/** The security layer's refusals, raised before the body is read. */
+const SECURITY_PREWRITE_REFUSALS: Record<string, number> = {
+  API_RATE_LIMITED: 429,
+  REQUEST_BODY_TOO_LARGE: 413,
+};
+const known = (table: Record<string, number>, code: unknown, status: number) =>
+  typeof code === "string" && Object.hasOwn(table, code) && table[code] === status;
+
+/**
+ * Classifies one build-preview answer. A saved idea keeps a preview receipt
+ * only when the preview was prepared or its outcome is unknown; a definite
+ * preview refusal keeps none, so a new preview can be prepared. Without a
+ * saved idea, only an error known to come before the save is a refusal;
+ * everything else, including a lost or malformed answer, is read back.
+ */
+export function classifyBuildPreviewAnswer(status: number, body: unknown): BuildPreviewAnswer {
+  const row = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  // A submission-step answer naming an idea is still an unknown submission:
+  // only the submission read-back confirms it.
+  if (typeof row.ideaId === "string" && isAmuxIdeaRequestId(row.ideaId) && row.step !== "submission") {
+    const prepared = status === 201 && row.state === "prepared";
+    return { kind: "saved", ideaId: row.ideaId, hasExternalSources: row.hasExternalSources === true,
+      planReady: prepared || row.step === "preview",
+      previewMayExist: prepared || (row.step === "preview" && row.error === "outcome_unknown") };
+  }
+  if (known(BUILD_PREWRITE_REFUSALS, row.error, status) ||
+      (row.step === "submission" && isIdeaSubmissionPrewriteRefusal(row.error, status))) {
+    return { kind: "refused", code: row.error as string };
+  }
+  if (known(SECURITY_PREWRITE_REFUSALS, row.code, status)) return { kind: "refused", code: row.code as string };
+  return { kind: "verify" };
+}
 
 /**
  * The preview half of a build-preview attempt, recorded before the request

@@ -24,7 +24,6 @@ import {
   reservePendingIdeaRequest,
 } from "@/lib/amux/ideaSubmissionRecoveryCore";
 import { classifySourceScopePreview } from "@/lib/amux/ideaSourceScopePreviewUiCore";
-import { takeBuildPreviewReceipt } from "@/lib/amux/ideaBuildPreviewUiCore";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas");
 const receiptStore = (): Storage | null => {
@@ -95,15 +94,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const onInitialPlanCommitted = useCallback((committedIdeaId: string) => {
     setPlanReadyIdeaId(committedIdeaId);
   }, []);
-  // A saved idea whose plan reads back absent never reached a build preview
-  // step, so a build receipt kept for its lost answer is discarded.
-  const savedRequestRef = useRef<string | null>(null);
-  const onInitialPlanAbsent = useCallback(() => {
-    if (savedRequestRef.current) takeBuildPreviewReceipt(receiptStore(), operatorId, savedRequestRef.current);
-  }, [operatorId]);
-  useEffect(() => {
-    savedRequestRef.current = submission.kind === "submitted" ? submission.requestId : null;
-  }, [submission]);
   const [sourceRepository, setSourceRepository] = useState("");
   const [sourceCommitSha, setSourceCommitSha] = useState("");
   const [sourcePath, setSourcePath] = useState("");
@@ -506,7 +496,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         operatorId={operatorId} available={initialPlanAvailable}
         declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
         onCommitted={onInitialPlanCommitted}
-        onAbsent={onInitialPlanAbsent}
       />
       <AmuxFrontierModelsPanel
         key={submission.kind === "submitted" ?
