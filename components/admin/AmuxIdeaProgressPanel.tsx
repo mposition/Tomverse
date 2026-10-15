@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
 import { amuxIdeaProgressStep, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 
@@ -31,6 +32,9 @@ export function AmuxIdeaProgressPanel({ rows, activeRequestId }: {
   activeRequestId: string | null;
 }) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages);
+  const keepDraft = (event: { preventDefault: () => void }) => {
+    if (amuxIdeaHasUnsavedDraft() && !window.confirm(m.leaveDraft)) event.preventDefault();
+  };
   if (rows === "reauthenticate") {
     return <p role="status" className="rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
       data-testid="amux-idea-progress-reauthenticate">
@@ -75,7 +79,7 @@ export function AmuxIdeaProgressPanel({ rows, activeRequestId }: {
                     {decision[row.waitingFor as AmuxIdeaWaitingFor][1]}
                   </p>
                 </div>
-                <Link href={amuxIdeaHref(row.requestId)}
+                <Link href={amuxIdeaHref(row.requestId)} onClick={keepDraft}
                   className="inline-flex min-h-11 items-center rounded-lg bg-blue-700 px-4 text-sm font-medium text-white dark:bg-blue-600">
                   {m.open}
                 </Link>
@@ -112,7 +116,7 @@ export function AmuxIdeaProgressPanel({ rows, activeRequestId }: {
               const active = row.requestId === activeRequestId;
               return (
                 <li key={row.ideaId}>
-                  <Link href={amuxIdeaHref(row.requestId)} aria-current={active ? "page" : undefined}
+                  <Link href={amuxIdeaHref(row.requestId)} onClick={keepDraft} aria-current={active ? "page" : undefined}
                     className={`block min-h-11 space-y-2 rounded-lg border p-3 text-sm ${active
                       ? "border-blue-500 ring-1 ring-blue-500" : "border-zinc-200 dark:border-zinc-800"}`}
                     data-testid="amux-idea-progress-row" data-stage={row.stage}>

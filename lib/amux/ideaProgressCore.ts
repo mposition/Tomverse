@@ -38,7 +38,8 @@ export type AmuxIdeaProgressFacts = {
   }>;
   proposedUnits: number;
   /** The idea's own registered cards (stories and tasks). */
-  cards: Array<{ cardType: string | null; status: string; reviewPrNumber: number | null; terminal: boolean }>;
+  /** `merged`: v4TerminalAt is set (the merge was observed); a cancelled card is closed but not merged. */
+  cards: Array<{ cardType: string | null; status: string; reviewPrNumber: number | null; merged: boolean }>;
 };
 
 export type AmuxIdeaProgress = {
@@ -57,10 +58,11 @@ const NOT_YET_SENT = new Set(["pending", "collecting", "awaiting_preview"]);
 
 export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress {
   const tasks = facts.cards.filter((card) => card.cardType !== "story");
+  const closed = (task: (typeof tasks)[number]) => task.merged || task.status === "cancelled";
   const counts = {
     total: tasks.length,
-    done: tasks.filter((task) => task.terminal).length,
-    inReview: tasks.filter((task) => !task.terminal && task.status === "review" && task.reviewPrNumber !== null).length,
+    done: tasks.filter((task) => task.merged).length,
+    inReview: tasks.filter((task) => !closed(task) && task.status === "review" && task.reviewPrNumber !== null).length,
   };
   const attention = facts.chunks.some((chunk) => chunk.state === UNKNOWN ||
     chunk.previewState === UNKNOWN || chunk.holdStatus === UNKNOWN);
@@ -68,13 +70,15 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
     ({ stage, waitingFor: attention ? null : waitingFor, attention, tasks: counts });
 
   if (facts.cancelled || facts.state === "cancelled") return at("cancelled");
-  const analysisActive = facts.chunks.some((chunk) => chunk.state === "in_flight" ||
-    (chunk.previewState !== null && ACTIVE_PREVIEW.has(chunk.previewState)) ||
-    (chunk.holdStatus !== null && ACTIVE_HOLD.has(chunk.holdStatus)));
-  if (analysisActive) return at("analysis");
-
+  // Pages run in order, so the latest page says what happens now; a stale
+  // hold left on an earlier page never hides a human step.
   const latest = facts.chunks.reduce<AmuxIdeaProgressFacts["chunks"][number] | null>(
     (last, chunk) => !last || chunk.chunkIndex > last.chunkIndex ? chunk : last, null);
+  if (latest && (latest.state === "in_flight" ||
+    (latest.previewState !== null && ACTIVE_PREVIEW.has(latest.previewState)) ||
+    (latest.holdStatus !== null && ACTIVE_HOLD.has(latest.holdStatus)))) {
+    return at("analysis");
+  }
   if (latest?.coverageStatus === "needs_owner_input") return at("execution_approval", "owner_input");
   if (latest?.coverageStatus === "more") return at("execution_approval", "continuation");
   if (latest && latest.chunkIndex > 0 && NOT_YET_SENT.has(latest.state)) {
@@ -83,7 +87,7 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
   if (facts.proposedUnits > 0) return at("plan_approval", "plan_approval");
 
   if (counts.total > 0) {
-    if (counts.done === counts.total) return at("done");
+    if (tasks.every(closed)) return at(counts.done > 0 ? "done" : "cancelled");
     return at(counts.inReview > 0 ? "review" : "execution");
   }
   // Cards registered without a Task yet (stories only) are still execution.

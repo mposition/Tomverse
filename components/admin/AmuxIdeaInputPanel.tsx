@@ -27,6 +27,7 @@ import {
   reservePendingIdeaRequest,
 } from "@/lib/amux/ideaSubmissionRecoveryCore";
 import { classifySourceScopePreview } from "@/lib/amux/ideaSourceScopePreviewUiCore";
+import { setAmuxIdeaUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas");
 const receiptStore = (): Storage | null => {
@@ -115,6 +116,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   };
 
   const [setAsideAcknowledged, setSetAsideAcknowledged] = useState(false);
+  // Leaving for another idea would lose an unsaved draft: the progress list asks first.
+  const draftAtRisk = hasUnsavedInput && (submission.kind === "idle" || submission.kind === "refused");
+  useEffect(() => {
+    setAmuxIdeaUnsavedDraft(draftAtRisk);
+    return () => setAmuxIdeaUnsavedDraft(false);
+  }, [draftAtRisk]);
   const [setAside, setSetAside] = useState<{ kind: "set_aside"; requestId: string } | { kind: "unavailable" } | null>(null);
   const resetInput = () => {
     inputRevision.current += 1;
@@ -380,7 +387,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
 
   const busy = pending || readBackPending || sourceScopePending;
   const card: AmuxIdeaRequestCardState | null =
-    submission.kind === "pending" ? { kind: "checking", requestId: submission.requestId } :
+    submission.kind === "pending" ? { kind: "saving", requestId: submission.requestId } :
       submission.kind === "outcome_unknown" ? (readBackPending
         ? { kind: "checking", requestId: submission.requestId }
         : { kind: "unknown", requestId: submission.requestId }) :

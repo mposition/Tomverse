@@ -287,6 +287,7 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     outcomeUnknown: (requestId: string) =>
       `Save outcome is unknown. Request ID: ${requestId}. Do not submit this idea again; ask an operator to verify the record.`,
     checkSubmissionStatus: "Check this request again",
+    statusSavingBody: "The idea is being saved. Wait for the result before doing anything else.",
     statusCheckingTitle: "Checking the save result",
     statusCheckingBody: "The remaining save request is being read back from the server.",
     statusUnknownTitle: "The previous save request's result is not known yet",
@@ -621,6 +622,7 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     outcomeUnknown: (requestId: string) =>
       `저장 결과를 확인할 수 없습니다. 요청 ID: ${requestId}. 다시 제출하지 말고 운영 기록을 확인해 주세요.`,
     checkSubmissionStatus: "같은 요청 상태 다시 확인",
+    statusSavingBody: "아이디어를 저장하고 있습니다. 결과가 나올 때까지 기다려 주세요.",
     statusCheckingTitle: "저장 결과를 확인하는 중입니다",
     statusCheckingBody: "남은 저장 요청을 서버에서 조회하고 있습니다.",
     statusUnknownTitle: "이전 저장 요청의 결과를 아직 모릅니다",

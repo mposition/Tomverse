@@ -27,11 +27,11 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
  */
 export async function readAmuxIdeaProgressForOwner(actorUserId: string): Promise<AmuxIdeaProgressRow[]> {
   return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.ideaProgressListRead,
-    (tx) => readAmuxIdeaProgressInTx(tx, actorUserId));
+    (tx, { dbNow }) => readAmuxIdeaProgressInTx(tx, actorUserId, dbNow));
 }
 
 export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
-  actorUserId: string): Promise<AmuxIdeaProgressRow[]> {
+  actorUserId: string, now: Date): Promise<AmuxIdeaProgressRow[]> {
   const ideas = await tx.amuxIdeaSubmission.findMany({
     where: { actorUserId }, orderBy: [{ submittedAt: "desc" }, { id: "asc" }],
     take: AMUX_IDEA_PROGRESS_LIMIT,
@@ -45,13 +45,15 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   });
   const previewIds = chunks.flatMap((chunk) => chunk.currentPreviewId ? [chunk.currentPreviewId] : []);
   const previews = await tx.amuxIdeaTransferPreview.findMany({
-    where: { id: { in: previewIds } }, select: { id: true, ideaId: true, state: true },
+    where: { id: { in: previewIds } }, select: { id: true, state: true },
   });
   const holds = await tx.amuxIdeaAnalysisBudgetHold.findMany({
     where: { previewId: { in: previewIds } }, select: { previewId: true, status: true },
   });
   const proposed = await tx.amuxIdeaDraftUnit.groupBy({
-    by: ["ideaId"], where: { ideaId: { in: ideaIds }, state: "proposed" }, _count: { _all: true },
+    // An expired proposal can no longer be approved, so it waits for nobody.
+    by: ["ideaId"], where: { ideaId: { in: ideaIds }, state: "proposed", expiresAt: { gt: now } },
+    _count: { _all: true },
   });
   const decisions = await tx.amuxIdeaUnitDecision.findMany({
     where: { ideaId: { in: ideaIds }, action: "register_card", state: "consumed",
@@ -86,7 +88,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       })),
       proposedUnits: proposed.find((row) => row.ideaId === idea.id)?._count._all ?? 0,
       cards: own.map((card) => ({ cardType: card.cardType, status: card.status,
-        reviewPrNumber: card.reviewPrNumber, terminal: card.v4TerminalAt !== null || card.status === "cancelled" })),
+        reviewPrNumber: card.reviewPrNumber, merged: card.v4TerminalAt !== null })),
     });
     return {
       ...progress,

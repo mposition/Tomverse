@@ -10,12 +10,14 @@ import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
  * says why the input is locked, names the request id and offers the next
  * action; nothing here writes or retries a request. */
 export type AmuxIdeaRequestCardState =
+  | { kind: "saving"; requestId: string }
   | { kind: "checking"; requestId: string }
   | { kind: "unknown"; requestId: string }
   | { kind: "saved"; requestId: string; ideaId: string }
   | { kind: "locked" };
 
 const tone = {
+  saving: "border-blue-200 bg-blue-50/60 dark:border-blue-900 dark:bg-blue-950/30",
   checking: "border-blue-200 bg-blue-50/60 dark:border-blue-900 dark:bg-blue-950/30",
   unknown: "border-amber-300 bg-amber-50/70 dark:border-amber-800 dark:bg-amber-950/30",
   saved: "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
@@ -34,10 +36,10 @@ export function AmuxIdeaRequestStatusCard({ state, children }: {
     if (!requestId) return;
     try { await navigator.clipboard.writeText(requestId); setCopied(true); } catch { setCopied(false); }
   };
-  const title = state.kind === "checking" ? m.statusCheckingTitle :
+  const title = state.kind === "saving" ? m.submitting : state.kind === "checking" ? m.statusCheckingTitle :
     state.kind === "unknown" ? m.statusUnknownTitle :
       state.kind === "saved" ? m.statusSavedTitle : m.statusLockedTitle;
-  const body = state.kind === "checking" ? m.statusCheckingBody :
+  const body = state.kind === "saving" ? m.statusSavingBody : state.kind === "checking" ? m.statusCheckingBody :
     state.kind === "unknown" ? m.statusUnknownBody :
       state.kind === "saved" ? m.statusSavedBody : m.recoveryUnavailable;
   return (

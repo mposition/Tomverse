@@ -13,7 +13,7 @@ const facts = (overrides = {}) => ({ state: "submitted", cancelled: false, chunk
   ...overrides });
 const chunk = (overrides = {}) => ({ chunkIndex: 0, state: "draft_ready", coverageStatus: "complete",
   previewState: "completed", holdStatus: "succeeded", ...overrides });
-const task = (overrides = {}) => ({ cardType: "task", status: "todo", reviewPrNumber: null, terminal: false, ...overrides });
+const task = (overrides = {}) => ({ cardType: "task", status: "todo", reviewPrNumber: null, merged: false, ...overrides });
 
 test("each idea is at exactly one of the six stages, and a human step still open always comes first", () => {
   const stage = (value) => { const result = amuxIdeaProgress(facts(value)); return [result.stage, result.waitingFor]; };
@@ -35,13 +35,19 @@ test("each idea is at exactly one of the six stages, and a human step still open
     ["execution_approval", "owner_input"]);
   assert.deepEqual(stage({ state: "awaiting_owner", proposedUnits: 3, chunks: [chunk()] }), ["plan_approval", "plan_approval"]);
   // Some cards registered one by one, proposals still undecided: the plan is still waiting.
-  assert.deepEqual(stage({ proposedUnits: 1, chunks: [chunk()], cards: [task({ terminal: true })] }), ["plan_approval", "plan_approval"]);
+  assert.deepEqual(stage({ proposedUnits: 1, chunks: [chunk()], cards: [task({ merged: true })] }), ["plan_approval", "plan_approval"]);
   assert.deepEqual(stage({ chunks: [chunk()], cards: [task(), task({ cardType: "story" })] }), ["execution", null]);
   assert.deepEqual(stage({ chunks: [chunk()], cards: [task({ status: "review", reviewPrNumber: 12 }), task()] }), ["review", null]);
-  assert.deepEqual(stage({ chunks: [chunk()], cards: [task({ status: "done", terminal: true }), task({ cardType: "story" })] }),
+  assert.deepEqual(stage({ chunks: [chunk()], cards: [task({ status: "done", merged: true }), task({ cardType: "story" })] }),
     ["done", null], "stories do not hold an idea open");
   assert.deepEqual(stage({ cancelled: true, cards: [task()] }), ["cancelled", null]);
-  const counts = amuxIdeaProgress(facts({ cards: [task({ terminal: true }), task({ status: "review", reviewPrNumber: 3 }), task()] })).tasks;
+  assert.deepEqual(stage({ chunks: [chunk()], cards: [task({ status: "cancelled" })] }), ["cancelled", null],
+    "tasks all cancelled are not done");
+  assert.deepEqual(stage({ chunks: [chunk()], cards: [task({ merged: true }), task({ status: "cancelled" })] }), ["done", null]);
+  // A stale hold on an earlier page never hides the human step on the latest one.
+  assert.deepEqual(stage({ state: "analyzing", chunks: [chunk({ holdStatus: "reserved" }), chunk({ chunkIndex: 1, coverageStatus: "needs_owner_input" })] }),
+    ["execution_approval", "owner_input"]);
+  const counts = amuxIdeaProgress(facts({ cards: [task({ merged: true }), task({ status: "review", reviewPrNumber: 3 }), task()] })).tasks;
   assert.deepEqual(counts, { total: 3, done: 1, inReview: 1 });
 });
 
@@ -77,7 +83,8 @@ test("the list is one bounded snapshot of seven reads that never reads idea text
     findMany: async (args) => { calls.push([model, args]); return rows[model] ?? []; },
     groupBy: async (args) => { calls.push([model, args]); return []; },
   }) });
-  const [row] = await readAmuxIdeaProgressInTx(tx, "owner-1");
+  const now = new Date("2026-10-15T03:00:00Z");
+  const [row] = await readAmuxIdeaProgressInTx(tx, "owner-1", now);
   assert.equal(calls.length, 7);
   assert.deepEqual(calls[0][1].where, { actorUserId: "owner-1" });
   assert.equal(calls[0][1].take, AMUX_IDEA_PROGRESS_LIMIT);
@@ -86,6 +93,8 @@ test("the list is one bounded snapshot of seven reads that never reads idea text
     assert.equal(selected.some((key) => /Ciphertext|title|body/i.test(key)), false, `no text: ${selected}`);
   }
   assert.equal(calls.find(([model]) => model === "amuxIdeaUnitDecision")[1].where.action, "register_card");
+  assert.deepEqual(calls.find(([model]) => model === "amuxIdeaDraftUnit")[1].where.expiresAt, { gt: now },
+    "an expired proposal waits for nobody");
   assert.deepEqual([row.stage, row.displayKey, row.reviewPullRequests],
     ["review", "AMUX-ADM-001", [{ number: 2540, displayKey: "AMUX-ADM-002" }]]);
 });
@@ -105,4 +114,12 @@ test("the Ideas tab shows the inbox and list above the input, and opens a row's 
   const recover = input.slice(input.indexOf("const recoverFromReceipts"), input.indexOf("useEffect(() => {", input.indexOf("const recoverFromReceipts")));
   assert.ok(recover.indexOf('recovered.kind === "pending"') < recover.indexOf("openRequestId &&"),
     "an unresolved request always comes before the idea a row opened");
+});
+
+test("the list asks before it leaves an unsaved draft", () => {
+  const panel = read("components/admin/AmuxIdeaProgressPanel.tsx");
+  assert.equal(panel.split("onClick={keepDraft}").length - 1, 2, "both links to an idea ask first");
+  const input = read("components/admin/AmuxIdeaInputPanel.tsx");
+  assert.ok(input.includes('const draftAtRisk = hasUnsavedInput && (submission.kind === "idle" || submission.kind === "refused");'));
+  assert.ok(input.includes("setAmuxIdeaUnsavedDraft(draftAtRisk)"));
 });
