@@ -9,8 +9,8 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { AmuxCardDuplicateScanError, loadAmuxCardDuplicateScanner } from
   "./ideaCardDuplicateScanService.ts";
-import { AMUX_V4_CARD_PLAN_MAX_UNITS, AmuxV4CardPlanError, amuxV4PlanPublicPrConsent,
-  orderAmuxV4CardPlan } from "./ideaCardPlanCore.ts";
+import { AMUX_V4_CARD_PLAN_MAX_PROPOSED, AmuxV4CardPlanError, amuxV4CardPlanRound,
+  amuxV4PlanPublicPrConsent, orderAmuxV4CardPlan } from "./ideaCardPlanCore.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { createAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { prepareAmuxV4CardRegistrationInTx } from "./ideaStoryRegistrationService.ts";
@@ -59,10 +59,10 @@ export async function approveAmuxV4CardPlan(session: Session, request: Request, 
   }
   const proposed = await prisma.amuxIdeaDraftUnit.findMany({
     where: { ideaId: input.ideaId, actorUserId, unitKind: "card", state: "proposed" },
-    select: { id: true }, orderBy: { id: "asc" }, take: AMUX_V4_CARD_PLAN_MAX_UNITS + 1,
+    select: { id: true }, orderBy: { id: "asc" }, take: AMUX_V4_CARD_PLAN_MAX_PROPOSED + 1,
   });
   if (proposed.length === 0) throw new AmuxV4CardPlanError("nothing_to_approve");
-  if (proposed.length > AMUX_V4_CARD_PLAN_MAX_UNITS) throw new AmuxV4CardPlanError("too_many_units");
+  if (proposed.length > AMUX_V4_CARD_PLAN_MAX_PROPOSED) throw new AmuxV4CardPlanError("too_many_units");
   const verified = await Promise.all(proposed.map((unit) =>
     readVerifiedAmuxCardProposal(session, input.ideaId, unit.id)));
 
@@ -87,13 +87,15 @@ export async function approveAmuxV4CardPlan(session: Session, request: Request, 
     throw new AmuxV4CardPlanError("feature_unresolved", unresolved.map((entry) => entry.unit.id));
   }
   const consentOff = new Set(input.publicPrConsentOff);
-  const plan = orderAmuxV4CardPlan(verified.map((entry) => ({
+  const ordered = orderAmuxV4CardPlan(verified.map((entry) => ({
     draftUnitId: entry.unit.id, localRef: entry.unit.localRef ?? "",
     cardType: entry.proposal.cardType, parentStoryRef: entry.proposal.parentStoryRef,
     dependencyRefs: entry.proposal.dependencyRefs, verified: entry,
     featureNodeId: featureOf.get(entry.proposal.featureRef) ?? entry.proposal.featureRef,
     decisionId: randomUUID(), cardId: randomUUID(),
   })));
+  // A large plan is approved in rounds; this one is the dependency-closed prefix.
+  const { round: plan, remaining } = amuxV4CardPlanRound(ordered);
 
   const scanner = await loadAmuxCardDuplicateScanner();
   const keys = loadCurrentAmuxContentKeys(process.env);
@@ -162,7 +164,7 @@ export async function approveAmuxV4CardPlan(session: Session, request: Request, 
           publicPrDisclosureApproved: publicPr });
       }
       callbackReturned = true;
-      return { ideaId: input.ideaId, cards, backlogOnly: true as const,
+      return { ideaId: input.ideaId, cards, remaining, backlogOnly: true as const,
         executionAuthorized: false as const };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       maxWait: 5_000, timeout: 90_000 });

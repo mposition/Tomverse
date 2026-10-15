@@ -1,8 +1,11 @@
 /** Pure ordering for the card part of the plan approval batch
  * (amux-intake.md v18 item 3). */
 
-/** A plan larger than this is approved in more than one round. */
+/** One approval commits at most this many cards; a larger plan takes more
+ * rounds, each a dependency-closed prefix of the ordered plan. */
 export const AMUX_V4_CARD_PLAN_MAX_UNITS = 24;
+/** The most proposed cards one idea may hold for a plan approval at all. */
+export const AMUX_V4_CARD_PLAN_MAX_PROPOSED = 200;
 
 export class AmuxV4CardPlanError extends Error {
   constructor(readonly code: "nothing_to_approve" | "too_many_units" | "feature_unresolved" |
@@ -39,6 +42,14 @@ export function orderAmuxV4CardPlan<T extends { draftUnitId: string; localRef: s
     remaining = remaining.filter((task) => !placed.has(task.localRef));
   }
   return [...stories, ...ordered];
+}
+
+/** This round: the first cards of the ordered plan. Every Task in the plan
+ * follows the plan's own cards it depends on, so any prefix carries its
+ * dependencies with it; the rest wait for the next round. */
+export function amuxV4CardPlanRound<T>(ordered: readonly T[]): { round: T[]; remaining: number } {
+  const round = ordered.slice(0, AMUX_V4_CARD_PLAN_MAX_UNITS);
+  return { round, remaining: ordered.length - round.length };
 }
 
 /** v18: an implement Task's public PR consent is on unless the owner turned it off. */

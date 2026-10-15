@@ -102,6 +102,7 @@ const run = (extra = {}) => approveAmuxV4CardPlan(session, request,
 reset();
 const approved = await run({ reasons: { "unit-task-02": "Different scope" } });
 assert.deepEqual(approved.cards.map((c) => c.draftUnitId), ["unit-story-1", "unit-task-01", "unit-task-02"]);
+assert.equal(approved.remaining, 0);
 const step = calls.filter(([k]) => ["prepare", "consume", "admit"].includes(k))
   .map(([k, tx, id]) => [k, tx, k === "admit" ? "card" : id]);
 assert.deepEqual(step, [
