@@ -19,12 +19,19 @@ import {
   marketingWebhookStagingConfigSnapshotDigest,
 } from "@/lib/marketingWebhookCore";
 import { handleZernioWebhook } from "@/lib/marketingWebhookReceiver";
+import {
+  handleMarketingWebhookProductionEvent,
+  marketingWebhookProductionConfigured,
+} from "@/lib/marketingWebhookProductionApply";
+import { marketingWebhookExplicitEnvironment } from "@/lib/marketingWebhookProductionConfigStore";
 import { consumeMarketingWebhookFaultArm } from "@/lib/marketingWebhookSettings";
 import { prisma } from "@/lib/prisma";
 
 /**
- * Zernio's webhook, received in staging only, recorded in shadow only
- * (S2 plan, S2e). Production answers 404 and reads nothing.
+ * Zernio's webhook: recorded in shadow in staging (S2 plan, S2e), and applied in
+ * production once a production configuration generation has been signed and the
+ * apply decision allows the event (S2f). Before that signature production
+ * answers 404 and reads nothing.
  *
  * `ZERNIO_WEBHOOK_SECRET` is read here and nowhere else. The status query a
  * shadow report compares against uses a short budget: Zernio wants a 2xx
@@ -79,6 +86,12 @@ export async function POST(request: Request) {
         if (await marketingWebhookShadowExists(prisma, input.eventIdDigest)) return "duplicate";
         throw error;
       }
+    },
+    production: {
+      isProduction: () => marketingWebhookExplicitEnvironment(process.env) === "production",
+      configured: () => marketingWebhookProductionConfigured(prisma),
+      handle: (event) =>
+        runMarketingTransaction(prisma, (tx) => handleMarketingWebhookProductionEvent(tx, event)),
     },
   });
 }

@@ -5589,3 +5589,50 @@ export async function applyMarketingWebhookEvent(
   });
   return { outcome: "applied", postId: post.id, from: post.status, to };
 }
+
+/**
+ * A signed event of ours that the apply decision refused (S2f,
+ * `marketing_webhook.status_refused` with code `apply_not_permitted`).
+ *
+ * No post is read or changed: the decision -- signature, signed production
+ * generation, apply scope -- said no before any post was looked at. The entry
+ * keeps the event-id digest and the decision's closed reasons, so an operator
+ * can see that production received the event and why it did nothing.
+ */
+export async function recordMarketingWebhookApplyNotPermitted(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly eventIdDigest: string;
+    readonly eventType: string;
+    readonly channelId: string;
+    readonly reasons: readonly string[];
+  },
+): Promise<void> {
+  const input = {
+    eventIdDigest: String(rawInput.eventIdDigest),
+    eventType: String(rawInput.eventType),
+    channelId: String(rawInput.channelId),
+    reasons: rawInput.reasons.map(String).slice(0, 40),
+  };
+  if (!/^[0-9a-f]{64}$/.test(input.eventIdDigest)) {
+    throw new MarketingStoreRefusedError(
+      "webhook_event_digest_invalid",
+      "A webhook event is named by the lowercase SHA-256 of its id",
+    );
+  }
+  await takeAuditChainLock(database);
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-webhook",
+    action: MARKETING_S2F_ACTIONS.statusRefused,
+    targetType: "MarketingPost",
+    summary: "A signed webhook event was not applied: the apply decision refused it.",
+    metadata: {
+      eventIdDigest: input.eventIdDigest,
+      eventType: input.eventType,
+      channelId: input.channelId,
+      code: "apply_not_permitted",
+      reasons: input.reasons,
+    },
+  });
+}
