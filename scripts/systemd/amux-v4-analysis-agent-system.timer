@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll the approved AMUX v4 idea analysis queue (system manager)
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=60s
+AccuracySec=10s
+Persistent=false
+Unit=amux-v4-analysis-agent-system.service
+
+[Install]
+WantedBy=timers.target
