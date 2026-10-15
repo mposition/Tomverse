@@ -378,3 +378,104 @@ test("a body with no declared length is cut off at the limit, not buffered whole
   // Four 64 KiB chunks reach the limit; the fifth passes it and stops the read.
   assert.ok(pulled <= 6, `read ${pulled} chunks`);
 });
+
+// ---------------------------------------------------------------------------
+// The production path (S2f)
+// ---------------------------------------------------------------------------
+
+const production = (
+  options: {
+    isProduction?: boolean;
+    configured?: boolean;
+    answer?: Record<string, unknown> & { status: string };
+  } = {},
+) => {
+  const calls: Calls = [];
+  const value = deps({
+    isStaging: () => false,
+    production: {
+      isProduction: () => options.isProduction ?? true,
+      configured: async () => {
+        calls.push({ name: "configured" });
+        return options.configured ?? true;
+      },
+      handle: async (event) => {
+        calls.push({ name: "handle", input: event });
+        return options.answer ?? { status: "applied", to: "published" };
+      },
+    },
+  });
+  return { value: value.value, calls, staging: value.calls };
+};
+
+test("production hands a signed event to the production path, and nothing to staging's", async () => {
+  const { value, calls, staging } = production();
+  const { status, body } = await answer(await handleZernioWebhook(request(payload()), value));
+  assert.equal(status, 200);
+  assert.deepEqual(body, { status: "applied", to: "published", pipeline: PIPELINE });
+  assert.deepEqual(calls, [
+    { name: "configured" },
+    {
+      name: "handle",
+      input: {
+        eventIdDigest: DIGEST,
+        eventType: "post.published",
+        derivedStatus: "published",
+        zernioPostId: "zpost_1",
+        accountId: "acct_9",
+      },
+    },
+  ]);
+  // No snapshot, latch, status query or shadow in production.
+  assert.deepEqual(staging, []);
+});
+
+test("production before a signed generation, or not labelled production, answers 404 unread", async () => {
+  for (const options of [{ configured: false }, { isProduction: false }]) {
+    const { value, calls } = production(options);
+    // A request whose body records being touched: a real Request may pull its
+    // stream at construction, which would say nothing about the receiver.
+    let bodyRead = false;
+    const probe = {
+      headers: new Headers({ "x-zernio-signature": "0".repeat(64) }),
+      get body() {
+        bodyRead = true;
+        return null;
+      },
+    } as unknown as Request;
+    const { status } = await answer(await handleZernioWebhook(probe, value));
+    assert.equal(status, 404, JSON.stringify(options));
+    assert.equal(bodyRead, false);
+    assert.equal(calls.some((call) => call.name === "handle"), false);
+  }
+  // No production path wired at all: as S2e left it.
+  const bare = deps({ isStaging: () => false });
+  assert.equal((await handleZernioWebhook(request(payload()), bare.value)).status, 404);
+});
+
+test("production still refuses a bad signature and honours the kill switch before handing anything on", async () => {
+  const bad = production();
+  const refused = await answer(await handleZernioWebhook(request(payload(), { signature: "f".repeat(64) }), bad.value));
+  assert.equal(refused.status, 401);
+  assert.equal(bad.calls.some((call) => call.name === "handle"), false);
+
+  const stopped = production();
+  stopped.value = { ...stopped.value, killSwitchOn: () => true };
+  const killed = await answer(await handleZernioWebhook(request(payload()), stopped.value));
+  assert.deepEqual(killed.body, { status: "kill_switch", pipeline: PIPELINE });
+  assert.equal(stopped.calls.some((call) => call.name === "handle"), false);
+});
+
+test("whatever the production path decides is a 2xx with its closed status", async () => {
+  for (const decided of [
+    { status: "not_applied" },
+    { status: "refused", code: "transition_not_permitted" },
+    { status: "duplicate" },
+    { status: "channel_unknown" },
+  ]) {
+    const { value } = production({ answer: decided });
+    const { status, body } = await answer(await handleZernioWebhook(request(payload()), value));
+    assert.equal(status, 200);
+    assert.deepEqual(body, { ...decided, pipeline: PIPELINE });
+  }
+});

@@ -25,6 +25,7 @@ import {
 
 const SCOPE = {
   recordId: "2026-09-22__linkedin-1",
+  productionConfigGeneration: 1,
   scope: [{ eventType: "post.published", channelId: "linkedin-1" }],
 };
 

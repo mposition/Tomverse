@@ -1209,9 +1209,68 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `lib/marketingWebhookVerification.ts`, `scripts/marketing-webhook-verification-record.mjs`,
   `app/api/admin/marketing/webhook/verification-sign/route.ts`. **증거는 현재 빌드가 현재 설정에서
   답한 전달만**입니다 — 수신기가 응답마다 pipeline fingerprint와 설정 digest를 찍고, 생성기는 그
-  표식이 맞는 전달만 셉니다. pipeline 파일 목록은 수신 route의 import closure 전체이며 테스트가
-  강제합니다. schema는 파일 전체가 아니라 수신 경로가 쓰는 모델·그 enum·datasource·generator만 감시합니다(운영자 결정
-  2026-10-03) — 무관한 모델 추가가 서명된 기록을 무효로 만들지 않게 하기 위해서입니다.
+  표식이 맞는 전달만 셉니다. **fingerprint는 사건을 정하는 코드만 hash합니다**(운영자 결정
+  2026-10-15, docs/policy/marketing-automation.md §8.1.1의 "조건 1–5에 영향을 주는 코드"):
+  webhook 모듈(접근 모듈의 pipeline 파일 목록)은 파일 전체, 그 밖에 닿는 파일은 webhook 경로가 쓰는
+  최상위 선언과 그 import 연결, 그리고 로드될 때 실행되는 최상위 코드만 주석 없이(`scripts/marketing-webhook-pipeline-sources.mjs`가 AST로 따라가며 손으로 고르지
+  않습니다), 감사 체인·DB client(공용 모듈 목록)는 0입니다 — 새 감사 actor나 다른
+  기능의 store 함수가 서명된 기록과 production 적용을 멈추게 하지 않기 위해서입니다. 새 `lib/marketingWebhook*.ts`는
+  파일 전체 목록에 들어가야 하며 테스트가 강제합니다. schema는 수신 경로가 쓰는 모델·그 enum·datasource·generator만
+  감시하고(운영자 결정 2026-10-03), 감시 모델 안의 감시 밖 모델을 가리키는 relation 필드(다른 기능의 역참조)는
+  뺍니다(2026-10-15).
+- **S2f(production 설정 세대와 적용)**: `lib/marketingWebhookProductionConfig.ts`,
+  `tests/marketingWebhookProductionConfig.test.ts`. staging 기록은 수신 경로만 증명하고
+  production은 **따로 서명한 설정 세대**로 묶습니다(S1 r7 amendment 1). 환경을 건너는
+  것은 pipeline fingerprint 하나이고, production digest는 이름부터 `production`이라 staging
+  digest를 대신 내밀 수 없습니다. apply scope는 digest에 넣지 않습니다 — 범위를 좁혀도
+  서명이 무효가 되지 않게 하고, 범위는 서명된 세대와 따로 대조합니다. 배포 commit은
+  출처로 기록할 뿐 비교하지 않습니다 — fingerprint를 바꾸지 않는 release가 production
+  적용을 조용히 멈추게 해서는 안 됩니다. 세대는 `OLD+1`이고, 저장값을 읽지 못했거나
+  거절하는 값이면 그 위에 서명하지 않습니다.
+- **S2f 적용 store**: `applyMarketingWebhookEvent()`·`marketingWebhookApplyTransition()`
+  (`lib/marketingStore.ts` — 게시물 테이블의 유일한 writer), `tests/marketingWebhookApplyTransition.test.mjs`,
+  `tests/integration/marketing-automation-schema.db.test.ts`의 webhook apply 절. 게시물은 provider post id
+  **와** 이벤트의 채널로 찾고 행 잠금 아래에서 판정합니다. 중복 제거는 staging shadow 색인이 아니라
+  그 게시물 이력의 `webhook_event` digest이며, 중복은 아무것도 쓰지 않습니다. 전이는 DB whitelist보다
+  좁습니다 — 같은 상태는 확인(이력만 추가), 살아 있는 게시물의 플랫폼 삭제만 `removed_by_platform`으로
+  옮기고, **`outcome_unknown`은 polling처럼 이벤트로도 풀지 않습니다**(사람만). 나머지는 게시물을 건드리지
+  않고 `status_refused`만 씁니다.
+- **S2f production 수신**: `lib/marketingWebhookProductionApply.ts`, `lib/marketingWebhookReceiver.ts`의
+  `production` 경로, `app/api/webhooks/zernio/route.ts`, `recordMarketingWebhookApplyNotPermitted()`.
+  **배포가 production이라고 밝히고 production 설정 세대가 서명돼 있을 때만** 본문을 읽습니다 — 그 전과
+  dev·라벨 없는 빌드는 S2e처럼 읽지 않고 404입니다. 서명·envelope 다음에는 latch·shadow·상태 조회 없이
+  production 경로로 넘깁니다. 판정은 판정 모듈의 `webhookApply` 하나이며, 감사 체인 잠금을 잡은 같은
+  트랜잭션에서 판정하고 적용합니다 — scope·서명 writer도 그 잠금을 먼저 잡으므로 판정과 쓰기 사이에
+  설정이 바뀌지 않습니다. 검증 기록의 서명은 별도 서명 파일이 아니라 서명된 세대의 감사 행이 이름 댄
+  행이고, 지금 트리의 기록 digest로 다시 검증합니다. 판정이 거절하면 게시물을 읽지 않고
+  `status_refused`(`apply_not_permitted`, 닫힌 사유)만 남기며, 우리 계정이 아닌 이벤트는 감사도 남기지
+  않습니다. 판정 모듈은 kill switch 값을 받지 못하면 모든 기능을 거절하므로 실제 값을 넘깁니다.
+- **S2f 서명**: `lib/marketingWebhookProductionConfigStore.ts`,
+  `app/api/admin/marketing/webhook/production-config/route.ts`(POST, 서명),
+  `app/api/admin/marketing/webhook/production-config/live/route.ts`(GET, 서명 전 화면이 볼 값),
+  `tests/marketingWebhookProductionConfigStore.test.ts`. **배포가 스스로 production이라고 밝힐 때만**(APP_ENV 또는 RAILWAY_ENVIRONMENT_NAME) 서명합니다 — `resolveDeploymentEnvironment()`는 라벨 없는 production 빌드도 production이라 답하므로 쓰지 않습니다. 서명할 때 화면이 본
+  값(다음 세대·기록·기록 서명 audit·배포 commit·fingerprint·실제 설정 digest)을 감사 행에 그대로
+  묶고 store가 같은 트랜잭션에서 하나씩 다시 계산해 움직인 값을 거절합니다. 방금 쓴 감사 행은
+  apply가 쓸 검증기로 다시 읽고, 검증되지 않으면 쓰기와 함께 되돌립니다. 거절 class는 store에
+  닿지 않는 `lib/marketingWebhookProductionConfig.ts`에 둡니다 — route sweep이 트랜잭션 밖에서
+  store 경로의 이름을 쓰는 것을 실패로 만듭니다.
+- **S2f apply scope**: `app/api/admin/marketing/webhook/apply-scope/route.ts`(PATCH),
+  `setMarketingWebhookProductionApplyScope()`. 값은 `{recordId, productionConfigGeneration, scope}`이고
+  저장 바이트의 sha-256(`absent` 포함)으로 CAS합니다. 비어 있지 않은 범위는 그 세대가 서명돼 있고
+  지금도 실제 설정을 묶으며, 모든 쌍을 그 기록이 관측했을 때만 저장합니다. **서명된 세대를 읽는
+  모든 곳은 기록 파일의 지금 digest를 감사 요구 조건에 넣습니다** — 서명 행이 그 digest를 묶었으므로,
+  같은 ID로 다시 쓴 기록(관측 쌍 추가 등)은 행과 맞지 않아 옛 서명으로 새 쌍을 덮지 못합니다.
+  **빈 범위는 멈춤이라 아무것도 요구하지 않고**(서명·기록 없이도, kill switch 중에도) production에서만
+  씁니다. 판정 모듈(`lib/marketingAutomationAccess.ts`)은 아직 이 형태를 읽지 못해 거절합니다 — 그
+  모듈은 Prompt Refiner closure에 봉인돼 있어 repin이 필요하므로, 판정 연결은 production apply
+  slice에서 한 번에 합니다.
+- **S2f 콘솔**: `components/admin/MarketingWebhookProduction.tsx`,
+  `tests/client/marketingWebhookProductionRender.test.tsx`, 읽기 route의 `?recordId=` 조회
+  (`readMarketingWebhookProductionRecord()`). 서버가 production이라고 답할 때만 그리며, 서명에 보내는
+  값은 운영자가 옮겨 적지 않고 화면이 읽은 값을 그대로 씁니다 — 기록 digest와, 그 바이트에 서명한
+  검증된 감사 행도 서버가 찾아 줍니다. 범위는 서명된 세대의 기록이 관측한 쌍 중에서만 고르고,
+  범위 비우기는 따로 언제나 제공합니다. 상태가 있는 wrapper와 hook 없는 view로 나눈 것은 render
+  테스트가 view를 함수로 불러 각 action의 body를 직접 읽기 위해서입니다.
 
 # 엔지니어링 Agent
 

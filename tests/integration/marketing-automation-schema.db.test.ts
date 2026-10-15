@@ -16,6 +16,7 @@ import {
 import { createHash } from "node:crypto";
 import { marketingEnvelopeDigest } from "@/lib/marketingStore";
 import {
+  applyMarketingWebhookEvent,
   approveMarketingPost,
   claimDueMarketingPost,
   releaseMarketingPostClaim,
@@ -33,6 +34,18 @@ import {
   runMarketingTransaction,
 } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
+import {
+  MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
+  MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+  digestMarketingWebhookVerificationRecord,
+} from "@/lib/marketingAutomationAccess";
+import {
+  MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY,
+  marketingWebhookProductionConfigSnapshotDigest,
+  serializeMarketingWebhookProductionApplyScope,
+  serializeMarketingWebhookProductionConfig,
+} from "@/lib/marketingWebhookProductionConfig";
+import { handleMarketingWebhookProductionEvent } from "@/lib/marketingWebhookProductionApply";
 import { resetTestFixture } from "./resetTestFixture";
 import {
   finishMarketingPublisherRun,
@@ -3155,4 +3168,267 @@ test("the statement ceiling is armed, not merely set", async () => {
     ),
     /statement timeout|canceling statement/i,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Production webhook apply (S2 plan, S2f): the post-lock / history-CAS path
+// ---------------------------------------------------------------------------
+
+const WEBHOOK_EVENT_DIGEST = "e".repeat(64);
+
+/** A published post the provider knows as `zernioPostId`. */
+async function publishedWithProviderId(zernioPostId: string) {
+  const row = await approvedChannel();
+  const published = await publishedPost(row.id);
+  await prisma.marketingPost.update({ where: { id: published.id }, data: { externalPostId: zernioPostId } });
+  return { channelId: row.id, postId: published.id };
+}
+
+const applyEvent = (
+  channelId: string,
+  derivedStatus: "published" | "removed_by_platform" | "failed",
+  eventIdDigest = WEBHOOK_EVENT_DIGEST,
+) =>
+  runMarketingTransaction(prisma, (tx) =>
+    applyMarketingWebhookEvent(tx, {
+      eventIdDigest,
+      eventType: derivedStatus === "removed_by_platform" ? "post.platform.deleted" : "post.platform.published",
+      derivedStatus,
+      zernioPostId: "zpost-apply-1",
+      channelId,
+    }),
+  );
+
+const webhookAudits = (action: string) => prisma.adminAuditLog.count({ where: { action } });
+
+test("two deliveries of one event racing on the post lock apply it once", async () => {
+  const { channelId, postId } = await publishedWithProviderId("zpost-apply-1");
+  const outcomes = await Promise.all([
+    applyEvent(channelId, "removed_by_platform"),
+    applyEvent(channelId, "removed_by_platform"),
+    applyEvent(channelId, "removed_by_platform"),
+  ]);
+  assert.deepEqual(outcomes.map((outcome) => outcome.outcome).sort(), ["applied", "duplicate", "duplicate"]);
+  const row = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(row.status, "removed_by_platform");
+  assert.equal(row.historyVersion, 1);
+  const entries = (row.history as Array<{ type: string; eventIdDigest?: string }>).filter(
+    (entry) => entry.type === "webhook_event",
+  );
+  assert.deepEqual(entries.map((entry) => entry.eventIdDigest), [WEBHOOK_EVENT_DIGEST]);
+  assert.equal(await webhookAudits("marketing_webhook.status_applied"), 1);
+  assert.equal(await webhookAudits("marketing_webhook.status_refused"), 0);
+});
+
+test("a confirming event is recorded in history without moving the status", async () => {
+  const { channelId, postId } = await publishedWithProviderId("zpost-apply-1");
+  const outcome = await applyEvent(channelId, "published");
+  assert.equal(outcome.outcome, "applied");
+  const row = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(row.status, "published");
+  assert.equal(row.historyVersion, 1);
+});
+
+test("an event the post cannot take leaves it untouched and is audited as refused", async () => {
+  const { channelId, postId } = await publishedWithProviderId("zpost-apply-1");
+  const outcome = await applyEvent(channelId, "failed");
+  assert.deepEqual(outcome, { outcome: "refused", code: "transition_not_permitted", postId });
+  const row = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(row.status, "published");
+  assert.equal(row.historyVersion, 0);
+  assert.equal(await webhookAudits("marketing_webhook.status_refused"), 1);
+});
+
+test("an event about another channel's post with the same provider id touches nothing", async () => {
+  const { postId } = await publishedWithProviderId("zpost-apply-1");
+  const other = await approvedChannel();
+  const outcome = await applyEvent(other.id, "removed_by_platform");
+  assert.deepEqual(outcome, { outcome: "refused", code: "post_not_found", postId: null });
+  const row = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(row.status, "published");
+});
+
+// ---------------------------------------------------------------------------
+// Production webhook apply, end to end (S2 plan, S2f): signed generation,
+// apply scope, decision and apply, against real audit rows
+// ---------------------------------------------------------------------------
+
+const PRODUCTION_ENV = {
+  APP_ENV: "production",
+  RAILWAY_ENVIRONMENT_NAME: "production",
+  ZERNIO_API_KEY: "zernio-key-for-db-tests",
+  ZERNIO_WEBHOOK_SECRET: "whsec-for-db-tests",
+};
+const PROD_RECORD_ID = "2026-10-15__production-apply-db";
+
+/** A live production setup, signed the way the console routes sign it. */
+async function signedProductionSetup(options: { scope?: "pair" | "empty" } = {}) {
+  const { channelId, postId } = await publishedWithProviderId("zpost-apply-1");
+  const pair = { eventType: "post.platform.deleted", channelId };
+  const recordText = `${JSON.stringify(
+    {
+      recordId: PROD_RECORD_ID,
+      executor: "db-test",
+      stagingCommitSha: "a".repeat(40),
+      observedScope: [pair],
+      conditions: { c1: "pass", c2: "pass", c3: "pass", c4: "pass", c5: "pass" },
+      evidenceRefs: ["db-test"],
+      pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+      stagingConfigSnapshotDigest: "5".repeat(64),
+    },
+    null,
+    2,
+  )}\n`;
+  const recordDigest = digestMarketingWebhookVerificationRecord(recordText);
+
+  const verificationSignatureAuditLogId = await writeAdminAuditLog({
+    session: operator,
+    request: new Request("https://tomverse.app/api/admin/marketing/webhook/verification-sign"),
+    action: "marketing_webhook.verification_signed",
+    targetType: "MarketingWebhookVerificationRecord",
+    targetId: PROD_RECORD_ID,
+    summary: "Signed a staging webhook verification record.",
+    metadata: { actorHadMarketingWrite: true, recordDigest },
+  });
+
+  const channels = await prisma.marketingChannel.findMany({
+    where: { provider: "zernio", externalAccountRef: { not: null } },
+    select: { id: true, externalAccountRef: true },
+  });
+  const bindings = channels.map((row) => ({ id: row.id, externalAccountRef: row.externalAccountRef ?? "" }));
+  const productionConfigSnapshotDigest = marketingWebhookProductionConfigSnapshotDigest(
+    PRODUCTION_ENV,
+    null,
+    bindings,
+  );
+  const signed = {
+    generation: 1,
+    recordId: PROD_RECORD_ID,
+    deployCommitSha: "c".repeat(40),
+    pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+    productionConfigSnapshotDigest,
+  };
+  const signatureAuditLogId = await writeAdminAuditLog({
+    session: operator,
+    request: new Request("https://tomverse.app/api/admin/marketing/webhook/production-config"),
+    action: "marketing_webhook.production_config_signed",
+    targetType: "AppSetting",
+    targetId: MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY,
+    summary: "Signed production webhook configuration generation 1.",
+    metadata: { actorHadMarketingWrite: true, ...signed, recordDigest, verificationSignatureAuditLogId },
+  });
+  await prisma.appSetting.create({
+    data: {
+      key: MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY,
+      value: serializeMarketingWebhookProductionConfig({
+        ...signed,
+        environment: "production",
+        signatureAuditLogId,
+      }),
+    },
+  });
+  await prisma.appSetting.create({
+    data: {
+      key: MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
+      value: serializeMarketingWebhookProductionApplyScope({
+        recordId: PROD_RECORD_ID,
+        productionConfigGeneration: 1,
+        scope: options.scope === "empty" ? [] : [pair],
+      }),
+    },
+  });
+  return { channelId, postId, recordText, accountId: bindings.find((row) => row.id === channelId)?.externalAccountRef ?? "" };
+}
+
+const productionEvent = (accountId: string, recordText: string, eventIdDigest = WEBHOOK_EVENT_DIGEST) =>
+  runMarketingTransaction(prisma, (tx) =>
+    handleMarketingWebhookProductionEvent(
+      tx,
+      {
+        eventIdDigest,
+        eventType: "post.platform.deleted",
+        derivedStatus: "removed_by_platform",
+        zernioPostId: "zpost-apply-1",
+        accountId,
+      },
+      { env: PRODUCTION_ENV, readRecordFile: async () => recordText },
+    ),
+  );
+
+const cleanProductionSettings = () =>
+  prisma.appSetting.deleteMany({
+    where: { key: { in: [MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY, MARKETING_WEBHOOK_APPLY_SCOPE_KEY] } },
+  });
+
+test("production: a signed generation, a scope and an in-scope event apply, once", async () => {
+  await cleanProductionSettings();
+  try {
+    const setup = await signedProductionSetup();
+    assert.deepEqual(await productionEvent(setup.accountId, setup.recordText), {
+      status: "applied",
+      to: "removed_by_platform",
+    });
+    assert.deepEqual(await productionEvent(setup.accountId, setup.recordText), { status: "duplicate" });
+    const row = await prisma.marketingPost.findUniqueOrThrow({ where: { id: setup.postId } });
+    assert.equal(row.status, "removed_by_platform");
+  } finally {
+    await cleanProductionSettings();
+  }
+});
+
+test("production: an empty scope, a rewritten record or another environment applies nothing", async () => {
+  await cleanProductionSettings();
+  try {
+    const stopped = await signedProductionSetup({ scope: "empty" });
+    assert.deepEqual(await productionEvent(stopped.accountId, stopped.recordText), { status: "not_applied" });
+
+    await cleanProductionSettings();
+    const rewritten = await signedProductionSetup();
+    const changedRecord = rewritten.recordText.replace('"db-test"', '"db-test-changed"');
+    assert.deepEqual(await productionEvent(rewritten.accountId, changedRecord, "f".repeat(64)), {
+      status: "not_applied",
+    });
+
+    const staging = await runMarketingTransaction(prisma, (tx) =>
+      handleMarketingWebhookProductionEvent(
+        tx,
+        {
+          eventIdDigest: "d".repeat(64),
+          eventType: "post.platform.deleted",
+          derivedStatus: "removed_by_platform",
+          zernioPostId: "zpost-apply-1",
+          accountId: rewritten.accountId,
+        },
+        {
+          env: { ...PRODUCTION_ENV, APP_ENV: "staging", RAILWAY_ENVIRONMENT_NAME: "staging" },
+          readRecordFile: async () => rewritten.recordText,
+        },
+      ),
+    );
+    assert.deepEqual(staging, { status: "not_applied" });
+
+    const post = await prisma.marketingPost.findUniqueOrThrow({ where: { id: rewritten.postId } });
+    assert.equal(post.status, "published");
+    const refused = await prisma.adminAuditLog.findMany({
+      where: { action: "marketing_webhook.status_refused" },
+      select: { metadata: true },
+    });
+    assert.equal(refused.length, 3);
+    for (const entry of refused) {
+      assert.equal((entry.metadata as { code?: string }).code, "apply_not_permitted");
+    }
+  } finally {
+    await cleanProductionSettings();
+  }
+});
+
+test("production: an event about an account that is not ours is not even audited", async () => {
+  await cleanProductionSettings();
+  try {
+    const setup = await signedProductionSetup();
+    assert.deepEqual(await productionEvent("acct-not-ours", setup.recordText), { status: "channel_unknown" });
+    assert.equal(await webhookAudits("marketing_webhook.status_refused"), 0);
+  } finally {
+    await cleanProductionSettings();
+  }
 });

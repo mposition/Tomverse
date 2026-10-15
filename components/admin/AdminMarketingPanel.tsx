@@ -10,6 +10,7 @@ import {
   localDateTimeValue,
   type MarketingAction,
 } from "@/components/admin/MarketingActions";
+import { MarketingWebhookProduction } from "@/components/admin/MarketingWebhookProduction";
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import {
@@ -221,6 +222,8 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
           m={m}
         />
       ) : null}
+
+      {view.canWrite ? <MarketingWebhookProduction section={view.section} /> : null}
 
       {error ? <p className="mt-4 text-sm text-red-300">{error}</p> : null}
 
