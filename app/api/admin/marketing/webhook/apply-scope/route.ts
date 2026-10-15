@@ -60,7 +60,7 @@ const scopeDigest = (body: z.infer<typeof schema>): string => {
 };
 
 /**
- * PUT: an operator sets which exact (event type, channel) pairs production may
+ * PATCH: an operator sets which exact (event type, channel) pairs production may
  * apply (S2f, `marketing_webhook.apply_scope_changed`).
  *
  * marketing:write and step-up through the shared runner. An empty scope is a
@@ -68,7 +68,7 @@ const scopeDigest = (body: z.infer<typeof schema>): string => {
  * and is stopped by the kill switch. The audit row binds the record, the signed
  * generation, the digest of the exact stored value and the value it replaced.
  */
-export async function PUT(req: Request) {
+export async function PATCH(req: Request) {
   return runMarketingAdminMutation({
     request: req,
     action: MARKETING_WEBHOOK_APPLY_SCOPE_CHANGED_ACTION,
