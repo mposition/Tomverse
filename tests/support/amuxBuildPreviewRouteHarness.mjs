@@ -33,6 +33,7 @@ mock.module(mod("lib/amux/ideaSubmissionService.ts"), {
     submitIdea: async ({ inspected }) => {
       calls.push(["submit", inspected.request?.requestId ?? inspected.requestId]);
       if (failAt === "submission") throw new SubmissionError("outcome_unknown", 503, "unavailable");
+      if (failAt === "submission-generic") throw new Error("database connection lost");
       return { ideaId: "11111111-1111-4111-8111-111111111111", requestId: "r", auditId: "a" };
     },
   },
@@ -43,6 +44,7 @@ mock.module(mod("lib/amux/ideaInitialSourcePlanAccess.ts"), {
     prepareInitialIdeaSourcePlan: async (_s, _r, ideaId) => {
       calls.push(["plan", ideaId]);
       if (failAt === "plan") throw new PlanError("not_ready");
+      if (failAt === "plan-generic") throw new Error("database connection lost");
       return { revisionId: "rev-1" };
     },
   },
@@ -54,6 +56,7 @@ mock.module(mod("lib/amux/ideaTransferPreviewService.ts"), {
     prepareIdeaOnlyTransferPreview: async (_s, _r, choice, nonce) => {
       calls.push(["preview", choice.ideaId, choice.previewId, nonce.length]);
       if (failAt === "preview") throw new PreviewError("outcome_unknown");
+      if (failAt === "preview-generic") throw new Error("key store unavailable");
       return { previewId: choice.previewId, payloadDigest: "d".repeat(64), payloadDigestKeyId: "k" };
     },
   },
@@ -132,3 +135,15 @@ assert.equal((await post(body())).status, 403);
 reset();
 assert.equal((await post({ ...body(), extra: 1 })).status, 400);
 assert.equal(calls.some(([k]) => k === "submit"), false);
+
+// Any other failure keeps its step and every id already known, as an unknown outcome.
+for (const [at, step, ids] of [["submission-generic", "submission", ["requestId"]],
+  ["plan-generic", "plan", ["requestId", "ideaId"]], ["preview-generic", "preview", ["requestId", "ideaId", "previewId"]]]) {
+  reset(); failAt = at;
+  response = await post(body());
+  json = await response.json();
+  assert.equal(response.status, 503, at);
+  assert.deepEqual([json.step, json.error, json.retryWrite], [step, "outcome_unknown", false], at);
+  for (const id of ids) assert.equal(typeof json[id], "string", `${at} keeps ${id}`);
+  if (step === "preview") assert.match(response.headers.get("set-cookie") ?? "", new RegExp(`amux-v4-preview-${previewId}=`));
+}

@@ -75,8 +75,10 @@ export async function POST(request: Request) {
     }
     await consumeApiRateLimit(request, session.user!.id!, "admin-amux-v4-build-preview",
       { minute: 3, day: 20 });
+    // A body over the limit is the security layer's own refusal; only bad JSON is ours.
+    const text = await readLimitedText(request, BODY_MAX_BYTES);
     let raw: unknown;
-    try { raw = JSON.parse(await readLimitedText(request, BODY_MAX_BYTES)); }
+    try { raw = JSON.parse(text); }
     catch { return NextResponse.json({ error: "schema_rejected", transferAuthorized: false },
       { status: 400, headers: noStore }); }
     const parsed = body.safeParse(raw);
@@ -92,7 +94,8 @@ export async function POST(request: Request) {
     try {
       ideaId = (await submitIdea({ session, request, inspected: submission })).ideaId;
     } catch (error) {
-      if (!(error instanceof IdeaSubmissionError)) throw error;
+      // Anything else may have committed: unknown, read back by requestId.
+      if (!(error instanceof IdeaSubmissionError)) return stopped("submission", 503, { error: "outcome_unknown", requestId });
       return stopped("submission", error.status, { error: error.code, requestId,
         ...(error.readBack ? { readBack: error.readBack } : {}), ...(error.ideaId ? { ideaId: error.ideaId } : {}) });
     }
@@ -115,7 +118,8 @@ export async function POST(request: Request) {
         return stopped("plan", error.code === "not_found" ? 404 :
           error.code === "integrity_unavailable" ? 503 : 409, { error: error.code, ideaId, requestId });
       }
-      throw error;
+      // Anything else may have committed: unknown, read back by ideaId.
+      return stopped("plan", 503, { error: "outcome_unknown", ideaId, requestId });
     }
 
     // 3. Prepare the exact transfer preview, bound to this browser.
@@ -135,7 +139,10 @@ export async function POST(request: Request) {
       return withCookie(NextResponse.json({ state: "prepared", ideaId, requestId, revisionId,
         preview: prepared, transferAuthorized: false }, { status: 201, headers: noStore }));
     } catch (error) {
-      if (!(error instanceof IdeaTransferPreviewError)) throw error;
+      // Anything else may have committed: unknown, read back by previewId, bound to this browser.
+      if (!(error instanceof IdeaTransferPreviewError)) {
+        return withCookie(stopped("preview", 503, { error: "outcome_unknown", ideaId, requestId, previewId }));
+      }
       const status = error.code === "not_found" ? 404 :
         error.code === "not_ready" || error.code === "model_changed" ? 409 : 503;
       const response = stopped("preview", status, { error: error.code, ideaId, requestId, previewId });
