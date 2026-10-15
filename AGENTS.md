@@ -1230,6 +1230,7 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   Git tree 목록만 검증하며, 게시 서비스의 검사는 거절만 할 수 있습니다.
 - **에이전트는 어떤 PR도 승인·병합하지 않고 auto-merge를 켜지 않습니다.** 공개된
   PR의 승인 증거는 docs/policy/engineering-agent.md §9-10의 일곱 조건입니다.
+  예외 내용: engineering-agent.md v6 3항 조건(졸업, 허용 목록, base 정책 테스트, 결속·최신성, 교차 검토, off 스위치)을 모두 충족한 develop 결정적 병합 호출 하나뿐이고, auto-merge는 켜지 않으며 승인도 하지 않습니다.
 - **상태 전이는 `lib/engineeringAgentCore.ts`의 표에만 있습니다.** trigger·store·
   테스트는 그 표에서 생성하거나 대조하며, 전이를 다른 곳에 옮겨 적지 않습니다.
   특히 lease 만료는 게시 항목을 `queued`로 되돌리지 않고 `needs_lookup`으로
