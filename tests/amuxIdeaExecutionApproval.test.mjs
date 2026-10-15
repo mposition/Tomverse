@@ -39,7 +39,14 @@ test("the screen offers one execution approval when an admissible price exists, 
   assert.match(panel, /row\.status === "approved" &&\s*row\.admissible === true/);
   // Without an admissible price the separate confirmation stays; never both buttons at once.
   assert.match(panel, /confirmation\.kind === "idle" && executionPriceId \?/);
-  assert.match(panel, /confirmation\.kind === "idle" && !executionPriceId \?/);
+  assert.match(panel, /confirmation\.kind === "idle" && executionPrice\.kind === "none" \?/);
+  // Loading and a failed read offer no button at all; the ceiling is shown beside the approval.
+  assert.match(panel, /executionPrice\.kind === "loading" \?/);
+  assert.match(panel, /executionPrice\.kind === "error" \?/);
+  assert.match(panel, /<p>\{budgetMessages\.price\}<\/p>/);
+  // A 409 refusal records nothing: its reason is shown and the attempt cleared.
+  assert.match(action, /response\.status === 409/);
+  assert.match(action, /monthly_cap_exceeded/);
 });
 
 test("both admin locales describe the execution approval", () => {

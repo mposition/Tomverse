@@ -8,6 +8,7 @@ import { AmuxAnalysisMonthlyBudgetPanel } from "@/components/admin/AmuxAnalysisM
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
+import { adminAmuxAnalysisBudgetMessages } from "@/lib/adminMessages/amuxAnalysisBudget";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import {
   classifyFrontierRegistrationReadFailure,
@@ -61,6 +62,7 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
   chunkIndex?: number;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
+  const budgetMessages = useAdminMessages(adminAmuxAnalysisBudgetMessages);
   const { locale } = useAdminLocale();
   const [models, setModels] = useState<AvailableFrontierModel[] | null>(null);
   const [loading, setLoading] = useState(available);
@@ -85,7 +87,13 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
   // The approved, admissible analysis price that one execution approval
   // reserves against (amux-intake.md v18 item 1). Without one, only the
   // separate confirmation remains.
-  const [executionPriceId, setExecutionPriceId] = useState<string | null>(null);
+  // "none" is a read that found no admissible price; loading and a failed
+  // read offer neither button, so a slow read never falls back to the
+  // separate confirmation.
+  const [executionPrice, setExecutionPrice] = useState<
+    { kind: "loading" | "none" | "error" } | { kind: "ready"; id: string }>({ kind: "loading" });
+  const executionPriceId = executionPrice.kind === "ready" ? executionPrice.id : null;
+  const [executionRefusal, setExecutionRefusal] = useState<string | null>(null);
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
 
   const readConfirmation = useCallback(async (pendingId: string,
@@ -485,12 +493,16 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
           (body as { latest?: unknown }).latest : null;
         const row = latest && typeof latest === "object" && !Array.isArray(latest) ?
           latest as Record<string, unknown> : null;
-        if (active) {
-          setExecutionPriceId(row && typeof row.id === "string" && row.status === "approved" &&
-            row.admissible === true ? row.id : null);
+        if (!active) return;
+        if (!response.ok || !body || typeof body !== "object" || Array.isArray(body) ||
+            (body as { state?: unknown }).state !== "profile") {
+          setExecutionPrice({ kind: "error" });
+          return;
         }
+        setExecutionPrice(row && typeof row.id === "string" && row.status === "approved" &&
+            row.admissible === true ? { kind: "ready", id: row.id } : { kind: "none" });
       })
-      .catch(() => { if (active) setExecutionPriceId(null); });
+      .catch(() => { if (active) setExecutionPrice({ kind: "error" }); });
     return () => { active = false; };
   }, [analysisBudgetAvailable, preview.kind]);
 
@@ -507,6 +519,7 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
     }
     setConfirmation({ kind: "pending" });
     setFailure(null);
+    setExecutionRefusal(null);
     try {
       const response = await adminFetch("/api/admin/amux/ideas/execution-approval", {
         method: "POST", headers: { "content-type": "application/json" },
@@ -514,6 +527,21 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
           payloadDigest: value.payloadDigest, payloadDigestKeyId: value.payloadDigestKeyId,
           holdId: crypto.randomUUID(), priceVersionId: executionPriceId }),
       });
+      // A 409 is a refusal inside the one transaction: nothing was recorded.
+      // Its reason is shown, and the monthly budget one says what to change.
+      if (response.status === 409) {
+        const refusal: unknown = await response.clone().json().catch(() => null);
+        const row = refusal && typeof refusal === "object" ? refusal as Record<string, unknown> : {};
+        if (row.error === "budget_hold" && row.reason === "monthly_cap_exceeded") {
+          setExecutionRefusal(budgetMessages.monthlyExceeded);
+        } else {
+          setFailure(await readAdminApiFailure(response, { fallback: m.transferConfirmRefused, locale }));
+        }
+        clearRefusedConfirmationAttempt(receiptStore(), operatorId, value.previewId,
+          ideaId, value.payloadDigest, value.payloadDigestKeyId);
+        setConfirmation((current) => current.kind === "confirmed" ? current : { kind: "refused" });
+        return;
+      }
       if ([400, 401, 403, 404, 413, 415, 428].includes(response.status)) {
         setFailure(await readAdminApiFailure(response, { fallback: m.transferConfirmRefused, locale }));
         clearRefusedConfirmationAttempt(receiptStore(), operatorId, value.previewId,
@@ -747,14 +775,19 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
           </pre>
           <p>{confirmation.kind === "confirmed" ? m.transferConfirmRecordedBoundary :
             m.transferPreviewBoundary}</p>
+          {confirmAvailable && confirmation.kind === "idle" && executionPrice.kind === "loading" ?
+            <p role="status">{m.executionApprovalPriceLoading}</p> : null}
+          {confirmAvailable && confirmation.kind === "idle" && executionPrice.kind === "error" ?
+            <p role="alert">{m.executionApprovalPriceUnavailable}</p> : null}
           {confirmAvailable && confirmation.kind === "idle" && executionPriceId ? <>
+            <p>{budgetMessages.price}</p>
             <p className="text-xs">{m.executionApprovalBoundary}</p>
             <button type="button" onClick={() => void approveExecution()}
               className="min-h-11 rounded-lg border border-blue-700 bg-blue-700 px-4 text-white dark:border-blue-400">
               {m.executionApprovalAction}
             </button>
           </> : null}
-          {confirmAvailable && confirmation.kind === "idle" && !executionPriceId ? <button type="button"
+          {confirmAvailable && confirmation.kind === "idle" && executionPrice.kind === "none" ? <button type="button"
             onClick={() => void confirmPreview()}
             className="min-h-11 rounded-lg border border-blue-700 px-4 text-blue-800 dark:border-blue-400 dark:text-blue-200">
             {m.transferConfirmAction}
@@ -762,6 +795,7 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
         </div>
       ) : null}
       {confirmation.kind === "pending" ? <p role="status">{m.transferConfirmPending}</p> : null}
+      {executionRefusal ? <p role="alert">{executionRefusal}</p> : null}
       {confirmation.kind === "confirmed" ? <p role="status">{m.transferConfirmRecorded}</p> : null}
       {confirmation.kind === "confirmed" ? <AmuxAnalysisBudgetPanel
         key={confirmation.value.previewId} confirmed={confirmation.value}
