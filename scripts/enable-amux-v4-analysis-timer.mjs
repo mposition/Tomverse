@@ -35,6 +35,14 @@ function rootFile(path, mode) {
   return readFileSync(path);
 }
 
+/** A unit runs exactly its pinned file: no drop-in may change it (a drop-in
+ * could reset the halt condition or swap ExecStart under the same digest). */
+function requireUndropped(unit) {
+  const fragment = command("/usr/bin/systemctl", ["show", "--property=FragmentPath", "--value", unit]);
+  const dropIns = command("/usr/bin/systemctl", ["show", "--property=DropInPaths", "--value", unit]);
+  if (fragment !== `/etc/systemd/system/${unit}` || dropIns !== "") throw new Error("unit_overridden");
+}
+
 /** The live switch as installed: "enabled" or "disabled", never the line itself. */
 export function liveSwitchOf(source) {
   const values = source.split(/\r?\n/)
@@ -43,7 +51,7 @@ export function liveSwitchOf(source) {
   return values.length === 1 ? values[0] : "invalid";
 }
 
-export function runAnalysisTimerEnable(mode) {
+export function runAnalysisTimerEnable(mode = "--probe-only") {
   if (process.platform !== "linux" || process.getuid() !== 0 ||
       !["--probe-only", "--enable"].includes(mode)) throw new Error("root_required");
   // The timer only drives the reviewed, already installed system service.
@@ -51,6 +59,7 @@ export function runAnalysisTimerEnable(mode) {
   if (createHash("sha256").update(service).digest("hex") !== SYSTEM_UNIT_SHA256) {
     throw new Error("service_mismatch");
   }
+  requireUndropped(SYSTEM_UNIT);
   const liveSwitch = liveSwitchOf(rootFile(ENVIRONMENT_FILE, 0o600).toString("utf8"));
   const timer = readFileSync(new URL(`./systemd/${SYSTEM_TIMER}`, import.meta.url));
   if (createHash("sha256").update(timer).digest("hex") !== SYSTEM_TIMER_SHA256) {
@@ -68,13 +77,17 @@ export function runAnalysisTimerEnable(mode) {
   }
   command("/usr/bin/systemd-analyze", ["verify", target]);
   command("/usr/bin/systemctl", ["daemon-reload"]);
+  // Read again after the reload: what the manager now holds is what runs.
+  requireUndropped(SYSTEM_UNIT);
+  requireUndropped(SYSTEM_TIMER);
   command("/usr/bin/systemctl", ["enable", "--now", SYSTEM_TIMER]);
   return { timerInstalled: true, liveSwitch, halted, enabled: true };
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
-    const mode = process.argv.length === 3 ? process.argv[2] : null;
+    // No argument is the probe; one known argument selects; anything else is refused.
+    const mode = process.argv.length === 2 ? "--probe-only" : process.argv.length === 3 ? process.argv[2] : null;
     console.log(JSON.stringify(runAnalysisTimerEnable(mode)));
   } catch {
     // Never emit environment values or raw subprocess output.

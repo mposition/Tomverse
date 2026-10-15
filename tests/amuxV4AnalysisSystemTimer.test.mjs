@@ -26,6 +26,21 @@ test("enabling is root-only, pinned, explicit, and never touches the halt, the s
   assert.doesNotMatch(script, /console\.(?:log|error)\(error/);
 });
 
+test("a drop-in on the service or the timer refuses, before and after the reload", () => {
+  assert.match(script, /--property=DropInPaths/);
+  assert.match(script, /--property=FragmentPath/);
+  const reloadAt = script.indexOf('"daemon-reload"');
+  const enableAt = script.indexOf('"enable", "--now"');
+  assert.ok(script.indexOf("requireUndropped(SYSTEM_UNIT);") < reloadAt, "the service is checked before anything is written");
+  assert.ok(reloadAt < script.indexOf("requireUndropped(SYSTEM_TIMER);"));
+  assert.ok(script.indexOf("requireUndropped(SYSTEM_TIMER);") < enableAt, "both are checked again before enabling");
+});
+
+test("no argument is the probe; an unknown or extra argument is refused", () => {
+  assert.match(script, /process\.argv\.length === 2 \? "--probe-only"/);
+  assert.match(script, /export function runAnalysisTimerEnable\(mode = "--probe-only"\)/);
+});
+
 test("the live switch is reported as a word, never the environment line", () => {
   assert.equal(liveSwitchOf("TOMVERSE_AMUX_V4_LIVE_ANALYSIS_CLI=enabled\nSECRET=x\n"), "enabled");
   assert.equal(liveSwitchOf("TOMVERSE_AMUX_V4_LIVE_ANALYSIS_CLI=disabled\n"), "disabled");
