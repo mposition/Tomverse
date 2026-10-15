@@ -16,6 +16,7 @@ import {
 import { createHash } from "node:crypto";
 import { marketingEnvelopeDigest } from "@/lib/marketingStore";
 import {
+  applyMarketingWebhookEvent,
   approveMarketingPost,
   claimDueMarketingPost,
   releaseMarketingPostClaim,
@@ -3155,4 +3156,82 @@ test("the statement ceiling is armed, not merely set", async () => {
     ),
     /statement timeout|canceling statement/i,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Production webhook apply (S2 plan, S2f): the post-lock / history-CAS path
+// ---------------------------------------------------------------------------
+
+const WEBHOOK_EVENT_DIGEST = "e".repeat(64);
+
+/** A published post the provider knows as `zernioPostId`. */
+async function publishedWithProviderId(zernioPostId: string) {
+  const row = await approvedChannel();
+  const published = await publishedPost(row.id);
+  await prisma.marketingPost.update({ where: { id: published.id }, data: { externalPostId: zernioPostId } });
+  return { channelId: row.id, postId: published.id };
+}
+
+const applyEvent = (
+  channelId: string,
+  derivedStatus: "published" | "removed_by_platform" | "failed",
+  eventIdDigest = WEBHOOK_EVENT_DIGEST,
+) =>
+  runMarketingTransaction(prisma, (tx) =>
+    applyMarketingWebhookEvent(tx, {
+      eventIdDigest,
+      eventType: derivedStatus === "removed_by_platform" ? "post.platform.deleted" : "post.platform.published",
+      derivedStatus,
+      zernioPostId: "zpost-apply-1",
+      channelId,
+    }),
+  );
+
+const webhookAudits = (action: string) => prisma.adminAuditLog.count({ where: { action } });
+
+test("two deliveries of one event racing on the post lock apply it once", async () => {
+  const { channelId, postId } = await publishedWithProviderId("zpost-apply-1");
+  const outcomes = await Promise.all([
+    applyEvent(channelId, "removed_by_platform"),
+    applyEvent(channelId, "removed_by_platform"),
+    applyEvent(channelId, "removed_by_platform"),
+  ]);
+  assert.deepEqual(outcomes.map((outcome) => outcome.outcome).sort(), ["applied", "duplicate", "duplicate"]);
+  const row = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(row.status, "removed_by_platform");
+  assert.equal(row.historyVersion, 1);
+  const entries = (row.history as Array<{ type: string; eventIdDigest?: string }>).filter(
+    (entry) => entry.type === "webhook_event",
+  );
+  assert.deepEqual(entries.map((entry) => entry.eventIdDigest), [WEBHOOK_EVENT_DIGEST]);
+  assert.equal(await webhookAudits("marketing_webhook.status_applied"), 1);
+  assert.equal(await webhookAudits("marketing_webhook.status_refused"), 0);
+});
+
+test("a confirming event is recorded in history without moving the status", async () => {
+  const { channelId, postId } = await publishedWithProviderId("zpost-apply-1");
+  const outcome = await applyEvent(channelId, "published");
+  assert.equal(outcome.outcome, "applied");
+  const row = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(row.status, "published");
+  assert.equal(row.historyVersion, 1);
+});
+
+test("an event the post cannot take leaves it untouched and is audited as refused", async () => {
+  const { channelId, postId } = await publishedWithProviderId("zpost-apply-1");
+  const outcome = await applyEvent(channelId, "failed");
+  assert.deepEqual(outcome, { outcome: "refused", code: "transition_not_permitted", postId });
+  const row = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(row.status, "published");
+  assert.equal(row.historyVersion, 0);
+  assert.equal(await webhookAudits("marketing_webhook.status_refused"), 1);
+});
+
+test("an event about another channel's post with the same provider id touches nothing", async () => {
+  const { postId } = await publishedWithProviderId("zpost-apply-1");
+  const other = await approvedChannel();
+  const outcome = await applyEvent(other.id, "removed_by_platform");
+  assert.deepEqual(outcome, { outcome: "refused", code: "post_not_found", postId: null });
+  const row = await prisma.marketingPost.findUniqueOrThrow({ where: { id: postId } });
+  assert.equal(row.status, "published");
 });

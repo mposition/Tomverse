@@ -1300,6 +1300,15 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   출처로 기록할 뿐 비교하지 않습니다 — fingerprint를 바꾸지 않는 release가 production
   적용을 조용히 멈추게 해서는 안 됩니다. 세대는 `OLD+1`이고, 저장값을 읽지 못했거나
   거절하는 값이면 그 위에 서명하지 않습니다.
+- **S2f 적용 store**: `applyMarketingWebhookEvent()`·`marketingWebhookApplyTransition()`
+  (`lib/marketingStore.ts` — 게시물 테이블의 유일한 writer), `tests/marketingWebhookApplyTransition.test.mjs`,
+  `tests/integration/marketing-automation-schema.db.test.ts`의 webhook apply 절. 게시물은 provider post id
+  **와** 이벤트의 채널로 찾고 행 잠금 아래에서 판정합니다. 중복 제거는 staging shadow 색인이 아니라
+  그 게시물 이력의 `webhook_event` digest이며, 중복은 아무것도 쓰지 않습니다. 전이는 DB whitelist보다
+  좁습니다 — 같은 상태는 확인(이력만 추가), 살아 있는 게시물의 플랫폼 삭제만 `removed_by_platform`으로
+  옮기고, **`outcome_unknown`은 polling처럼 이벤트로도 풀지 않습니다**(사람만). 나머지는 게시물을 건드리지
+  않고 `status_refused`만 씁니다. 아직 수신기가 부르지 않습니다 — 판정 모듈 연결과 production 수신은
+  다음 slice입니다.
 - **S2f 서명**: `lib/marketingWebhookProductionConfigStore.ts`,
   `app/api/admin/marketing/webhook/production-config/route.ts`(POST, 서명),
   `app/api/admin/marketing/webhook/production-config/live/route.ts`(GET, 서명 전 화면이 볼 값),

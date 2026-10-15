@@ -584,6 +584,8 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
     scopes_digest_unchanged: 400,
     account_slug_exhausted: 503,
     database_clock_unavailable: 503,
+    webhook_event_digest_invalid: 400,
+    webhook_apply_conflict: 409,
     autonomous_creation_not_available: 501,
     account_already_disconnected: 409,
     approval_conflict: 409,
@@ -5372,3 +5374,218 @@ export async function recordMarketingPostPollRemovedByPlatform(
 
 /** Unused by this module, exported so a caller can narrow a paused mode. */
 export type { MarketingPausableMode };
+
+// ---------------------------------------------------------------------------
+// Production webhook apply (S2 plan, S2f)
+// ---------------------------------------------------------------------------
+
+export const MARKETING_S2F_ACTIONS = Object.freeze({
+  statusApplied: "marketing_webhook.status_applied",
+  statusRefused: "marketing_webhook.status_refused",
+} as const);
+
+/** Why a signed, in-scope event did not change its post. Closed. */
+export type MarketingWebhookApplyRefusal =
+  | "post_not_found"
+  | "post_ambiguous"
+  | "history_unreadable"
+  | "history_full"
+  | "outcome_unknown_needs_person"
+  | "transition_not_permitted";
+
+/**
+ * What one webhook event may do to the post it names, from the post's status
+ * now and the status the event implies (`MARKETING_WEBHOOK_DERIVED_STATUS`).
+ *
+ * Narrower than the database's status whitelist on purpose. An event is a
+ * provider's report, not this system's own act and not a person's decision:
+ *
+ * - **The same status** is a confirmation: the event is recorded in the post's
+ *   history and nothing else moves. A `published` report about a `verified`
+ *   post is one too.
+ * - **Taken down by the platform** moves a live post (`published`, `verified`)
+ *   to `removed_by_platform` -- the one fact only the platform can report.
+ * - **`outcome_unknown` is never resolved here**, as polling never resolves it:
+ *   something may exist that this system cannot see, and only a person moves a
+ *   post out of it.
+ * - Everything else is refused and the post is untouched. A failure reported
+ *   for a published post, a cancellation (our own retraction, recorded by the
+ *   path that made it) or a partial outcome is not a transition an event may
+ *   make on its own.
+ */
+export const marketingWebhookApplyTransition = (
+  current: MarketingPostStatus,
+  derived: MarketingPostStatus,
+):
+  | { readonly kind: "confirm" }
+  | { readonly kind: "transition"; readonly to: MarketingPostStatus }
+  | { readonly kind: "refuse"; readonly code: MarketingWebhookApplyRefusal } => {
+  if (current === "outcome_unknown") return { kind: "refuse", code: "outcome_unknown_needs_person" };
+  if (current === derived) return { kind: "confirm" };
+  if (derived === "removed_by_platform" && (current === "published" || current === "verified")) {
+    return { kind: "transition", to: "removed_by_platform" };
+  }
+  if (derived === "published" && current === "verified") return { kind: "confirm" };
+  return { kind: "refuse", code: "transition_not_permitted" };
+};
+
+export type MarketingWebhookApplyOutcome =
+  | {
+      readonly outcome: "applied";
+      readonly postId: string;
+      readonly from: MarketingPostStatus;
+      readonly to: MarketingPostStatus;
+    }
+  | { readonly outcome: "duplicate"; readonly postId: string }
+  | {
+      readonly outcome: "refused";
+      readonly code: MarketingWebhookApplyRefusal;
+      readonly postId: string | null;
+    };
+
+/**
+ * Apply one signed, in-scope Zernio event to the post it names, in production.
+ *
+ * The caller has already decided the event may be applied at all (signature,
+ * the signed production generation, the apply scope); this decides what it
+ * does to the post, in one transaction with its audit entry:
+ *
+ * 1. the audit chain lock, then the post row lock -- found by the provider's
+ *    post id **and** the channel the event is about, so an event about another
+ *    account's post with the same id cannot touch this one;
+ * 2. the post's own history is the dedupe: an existing `webhook_event` with
+ *    this event-id digest makes this delivery a duplicate, which changes
+ *    nothing and writes nothing. It does not depend on the staging-only shadow
+ *    index;
+ * 3. a permitted transition appends exactly
+ *    `{at, type: 'webhook_event', eventIdDigest, eventType}` and moves the
+ *    status, under `historyVersion = OLD + 1`, with
+ *    `marketing_webhook.status_applied`;
+ * 4. anything else leaves the post untouched and writes only
+ *    `marketing_webhook.status_refused` with a closed code.
+ *
+ * Read committed is enough: the row lock is what two deliveries of one event
+ * wait on, and the second reads the first's appended history once it has it.
+ */
+export async function applyMarketingWebhookEvent(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly eventIdDigest: string;
+    readonly eventType: string;
+    readonly derivedStatus: MarketingPostStatus;
+    readonly zernioPostId: string;
+    readonly channelId: string;
+  },
+): Promise<MarketingWebhookApplyOutcome> {
+  const input = {
+    eventIdDigest: String(rawInput.eventIdDigest),
+    eventType: String(rawInput.eventType),
+    derivedStatus: rawInput.derivedStatus,
+    zernioPostId: String(rawInput.zernioPostId),
+    channelId: String(rawInput.channelId),
+  };
+  if (!/^[0-9a-f]{64}$/.test(input.eventIdDigest)) {
+    throw new MarketingStoreRefusedError(
+      "webhook_event_digest_invalid",
+      "A webhook event is named by the lowercase SHA-256 of its id",
+    );
+  }
+
+  const refuse = async (
+    code: MarketingWebhookApplyRefusal,
+    postId: string | null,
+    fromStatus: string | null,
+  ): Promise<MarketingWebhookApplyOutcome> => {
+    await writeSystemAuditLog({
+      tx: database,
+      systemActor: "marketing-webhook",
+      action: MARKETING_S2F_ACTIONS.statusRefused,
+      targetType: "MarketingPost",
+      targetId: postId ?? undefined,
+      summary: "A signed webhook event did not change its post.",
+      metadata: {
+        eventIdDigest: input.eventIdDigest,
+        eventType: input.eventType,
+        channelId: input.channelId,
+        derivedStatus: input.derivedStatus,
+        code,
+        fromStatus,
+      },
+    });
+    return { outcome: "refused", code, postId };
+  };
+
+  await takeAuditChainLock(database);
+  const rows = await database.$queryRaw<
+    Array<{ id: string; status: MarketingPostStatus; history: unknown; historyVersion: number }>
+  >(Prisma.sql`
+    SELECT "id", "status", "history", "historyVersion"
+    FROM "MarketingPost"
+    WHERE "externalPostId" = ${input.zernioPostId} AND "channelId" = ${input.channelId}
+    FOR UPDATE
+  `);
+  if (rows.length === 0) return refuse("post_not_found", null, null);
+  if (rows.length > 1) return refuse("post_ambiguous", null, null);
+  const post = rows[0];
+
+  const history = marketingHistorySchema.safeParse(post.history);
+  if (!history.success) return refuse("history_unreadable", post.id, post.status);
+  if (
+    history.data.some(
+      (entry) => entry.type === "webhook_event" && entry.eventIdDigest === input.eventIdDigest,
+    )
+  ) {
+    return { outcome: "duplicate", postId: post.id };
+  }
+
+  const decision = marketingWebhookApplyTransition(post.status, input.derivedStatus);
+  if (decision.kind === "refuse") return refuse(decision.code, post.id, post.status);
+
+  const now = await marketingDatabaseNow(database);
+  const next = marketingHistorySchema.safeParse([
+    ...history.data,
+    {
+      at: now.toISOString(),
+      type: "webhook_event",
+      eventIdDigest: input.eventIdDigest,
+      eventType: input.eventType,
+    },
+  ]);
+  if (!next.success) return refuse("history_full", post.id, post.status);
+
+  const to = decision.kind === "transition" ? decision.to : post.status;
+  const written = await database.marketingPost.updateMany({
+    where: { id: post.id, status: post.status, historyVersion: post.historyVersion },
+    data: {
+      ...(to === post.status ? {} : { status: to }),
+      history: next.data as Prisma.InputJsonValue,
+      historyVersion: post.historyVersion + 1,
+    },
+  });
+  if (written.count !== 1) {
+    throw new MarketingStoreRefusedError(
+      "webhook_apply_conflict",
+      "The post changed under its own row lock",
+    );
+  }
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-webhook",
+    action: MARKETING_S2F_ACTIONS.statusApplied,
+    targetType: "MarketingPost",
+    targetId: post.id,
+    summary:
+      to === post.status
+        ? "A signed webhook event confirmed the post's status."
+        : "A signed webhook event moved the post's status.",
+    metadata: {
+      eventIdDigest: input.eventIdDigest,
+      eventType: input.eventType,
+      channelId: input.channelId,
+      fromStatus: post.status,
+      toStatus: to,
+    },
+  });
+  return { outcome: "applied", postId: post.id, from: post.status, to };
+}
