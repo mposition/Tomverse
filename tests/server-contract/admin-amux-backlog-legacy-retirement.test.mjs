@@ -44,10 +44,13 @@ mock.module(mod("lib/amux/portfolioAssessmentService.ts"), { namedExports: {
   AMUX_V4_PORTFOLIO_WRITE_ENV: "TOMVERSE_AMUX_V4_PORTFOLIO_WRITE",
   amuxV4PortfolioWriteEnabled: () => false,
 } });
+mock.module(mod("lib/amux/ideaProgressRead.ts"), { namedExports: {
+  readAmuxIdeaProgressForOwner: async () => [],
+} });
 const panels = {};
 for (const name of ["AdminPageTabs", "AmuxBacklogListPanel", "AmuxBacklogMetadataPanel", "AmuxBoardImportPanel",
   "AmuxIdeaInputPanel", "AmuxUnusedAnalysisReservationPanel", "AmuxAnalysisClaimResolutionPanel",
-  "AmuxTaskCostCatalogApprovalPanel", "AmuxPortfolioPanel", "AmuxReconciliationPanel"]) {
+  "AmuxTaskCostCatalogApprovalPanel", "AmuxPortfolioPanel", "AmuxReconciliationPanel", "AmuxIdeaProgressPanel", "AmuxIdeaDetailSummary"]) {
   const panel = () => null;
   panels[name] = panel;
   mock.module(mod(`components/admin/${name}.tsx`), { namedExports: { [name]: panel } });
@@ -70,27 +73,43 @@ function elements(element) {
 }
 const query = (values = {}) => ({ searchParams: Promise.resolve(values) });
 
-test("default and unknown tabs render List without offering legacy intake", async () => {
+test("default and unknown tabs render Ideas without offering legacy intake", async () => {
   for (const values of [{}, { tab: "unknown" }]) {
     const tree = elements(await open(query(values)));
     const tabs = tree.find((element) => element.type === panels.AdminPageTabs).props;
-    assert.equal(tabs.activeTabId, "list");
-    assert.deepEqual(tabs.tabs.map((tab) => tab.id), ["list", "ideas", "import", "reconciliation", "metadata"]);
+    assert.equal(tabs.activeTabId, "ideas");
+    assert.deepEqual(tabs.tabs.map((tab) => tab.id),
+      ["ideas", "list", "portfolio", "import", "reconciliation", "metadata", "recovery"]);
     assert.equal("intake" in tabs.chips, false);
-    const list = tree.find((element) => element.type === panels.AmuxBacklogListPanel);
-    assert.equal(list.props.data, backlog);
-    assert.equal(tree.some((element) => element.type === panels.AmuxIdeaInputPanel), false);
+    assert.ok(tree.some((element) => element.type === panels.AmuxIdeaInputPanel));
+    assert.equal(tree.some((element) => element.type === panels.AmuxBacklogListPanel), false);
   }
-  assert.deepEqual(backlogReads, [{ search: "", page: 1 }, { search: "", page: 1 }]);
+  assert.deepEqual(backlogReads, []);
   const page = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-backlog/page.tsx"), "utf8");
   assert.doesNotMatch(page, /AmuxIntakePanel|AmuxLocalIntakePanel/);
 });
 
-test("explicit Ideas still renders the input panel without reading the backlog", async () => {
-  const tree = elements(await open(query({ tab: "ideas" })));
-  assert.ok(tree.some((element) => element.type === panels.AmuxIdeaInputPanel));
-  assert.equal(tree.some((element) => element.type === panels.AmuxBacklogListPanel), false);
+test("Ideas holds only the idea flow; portfolio, cleanup and the cost catalogue have their own sections", async () => {
+  const ideas = elements(await open(query({ tab: "ideas" })));
+  assert.ok(ideas.some((element) => element.type === panels.AmuxIdeaInputPanel));
+  for (const moved of ["AmuxPortfolioPanel", "AmuxUnusedAnalysisReservationPanel", "AmuxTaskCostCatalogApprovalPanel",
+    "AmuxBacklogListPanel"]) {
+    assert.equal(ideas.some((element) => element.type === panels[moved]), false, moved);
+  }
   assert.deepEqual(backlogReads, []);
+  const portfolio = elements(await open(query({ tab: "portfolio" })));
+  assert.ok(portfolio.some((element) => element.type === panels.AmuxPortfolioPanel));
+  assert.equal(portfolio.some((element) => element.type === panels.AmuxIdeaInputPanel), false);
+  const recovery = elements(await open(query({ tab: "recovery" })));
+  assert.ok(recovery.some((element) => element.type === panels.AmuxUnusedAnalysisReservationPanel));
+  const page = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-backlog/page.tsx"), "utf8");
+  assert.doesNotMatch(page, /AmuxTaskCostCatalogApprovalPanel/, "the catalogue lives in Operations settings");
+  const settings = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-settings/page.tsx"), "utf8");
+  const analysis = settings.slice(settings.indexOf('if (tab.id === "analysis")'));
+  for (const panel of ["<AmuxAnalysisMonthlyBudgetPanel", "<AmuxFrontierModelRegistrationPanel",
+    "<AmuxTaskCostCatalogApprovalPanel"]) {
+    assert.ok(analysis.slice(0, 1200).includes(panel), `${panel} is in Analysis settings`);
+  }
 });
 
 test("List reads the normalized filter and page only after recent authentication", async () => {

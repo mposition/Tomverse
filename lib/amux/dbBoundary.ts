@@ -342,6 +342,15 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 4,
     isolation: "read",
   },
+  // The Ideas tab's progress list (lib/amux/ideaProgressRead.ts): setup + the
+  // owner's newest ideas + their chunks + current previews + budget holds +
+  // proposed unit counts + card registrations + the registered cards + fence,
+  // pinned by tests/amuxIdeaProgress.test.mjs. One REPEATABLE READ snapshot.
+  ideaProgressListRead: {
+    operation: "idea_progress_list_read",
+    prismaCallCeiling: 9,
+    isolation: "read",
+  },
 } as const satisfies Record<string, AmuxDbBoundary>;
 
 /**

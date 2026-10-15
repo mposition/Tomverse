@@ -6,10 +6,12 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
 import { AmuxFrontierModelsPanel, type AmuxBuildPreviewHooks } from "@/components/admin/AmuxFrontierModelsPanel";
 import { AmuxIdeaAnalysisResultPanel } from "@/components/admin/AmuxIdeaAnalysisResultPanel";
+import { AmuxIdeaRequestStatusCard, type AmuxIdeaRequestCardState } from "@/components/admin/AmuxIdeaRequestStatusCard";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
+  canSetAsidePreviousIdea,
   canStartAnotherIdea,
   canOpenSavedIdea,
   classifyIdeaSubmissionPost,
@@ -18,12 +20,14 @@ import {
 import {
   clearConfirmedIdeaRequest,
   clearPendingIdeaRequest,
+  forgetIdeaRequestReceipts,
   readConfirmedIdeaRequest,
   readPendingIdeaRequest,
   rememberConfirmedIdeaRequest,
   reservePendingIdeaRequest,
 } from "@/lib/amux/ideaSubmissionRecoveryCore";
 import { classifySourceScopePreview } from "@/lib/amux/ideaSourceScopePreviewUiCore";
+import { setAmuxIdeaUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas");
 const receiptStore = (): Storage | null => {
@@ -68,13 +72,15 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 }
 
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
-  initialPlanAvailable, frontierModelsAvailable, frontierModelWriteAvailable, transferPreviewAvailable,
-  transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId }: {
+  initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
+  transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
+  openRequestId = null }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
-  frontierModelWriteAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
   analysisResultAvailable: boolean; analysisBudgetAvailable: boolean; operatorId: string;
+  /** The idea a list row opened (`?idea=<requestId>`); read back like a saved request. */
+  openRequestId?: string | null;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -108,11 +114,15 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     setSubmission({ kind: "idle" });
   };
 
-  const startAnotherIdea = () => {
-    if (!canStartAnotherIdea(submission.kind, pending || readBackPending || sourceScopePending)) return;
-    if (submission.kind === "submitted") {
-      clearConfirmedIdeaRequest(receiptStore(), operatorId, submission.requestId);
-    }
+  const [setAsideAcknowledged, setSetAsideAcknowledged] = useState(false);
+  // Leaving for another idea would lose an unsaved draft: the progress list asks first.
+  const draftAtRisk = hasUnsavedInput && (submission.kind === "idle" || submission.kind === "refused");
+  useEffect(() => {
+    setAmuxIdeaUnsavedDraft(draftAtRisk);
+    return () => setAmuxIdeaUnsavedDraft(false);
+  }, [draftAtRisk]);
+  const [setAside, setSetAside] = useState<{ kind: "set_aside"; requestId: string } | { kind: "unavailable" } | null>(null);
+  const resetInput = () => {
     inputRevision.current += 1;
     inFlight.current = false;
     setIdea("");
@@ -124,6 +134,29 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     setSourcePath("");
     setSourceScopeResult({ kind: "idle" });
     setSubmission({ kind: "idle" });
+  };
+  const startAnotherIdea = () => {
+    if (!canStartAnotherIdea(submission.kind, pending || readBackPending || sourceScopePending)) return;
+    if (submission.kind === "submitted") {
+      clearConfirmedIdeaRequest(receiptStore(), operatorId, submission.requestId);
+    }
+    setSetAside(null);
+    resetInput();
+  };
+  // An unknown or unrecoverable previous request no longer locks the input
+  // for good: the operator may set it aside explicitly. Nothing is retried;
+  // the old request keeps its id and can still be opened by it.
+  const setAsidePreviousIdea = () => {
+    if (!canSetAsidePreviousIdea(submission.kind, pending || readBackPending || sourceScopePending,
+      setAsideAcknowledged)) return;
+    const previous = submission.kind === "outcome_unknown" ? submission.requestId : null;
+    if (!forgetIdeaRequestReceipts(receiptStore(), operatorId)) {
+      setSetAside({ kind: "unavailable" });
+      return;
+    }
+    setSetAsideAcknowledged(false);
+    setSetAside(previous ? { kind: "set_aside", requestId: previous } : null);
+    resetInput();
   };
 
   const checkSourceScope = async () => {
@@ -179,11 +212,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     }
   }, [operatorId]);
 
-  const openSavedIdea = async () => {
-    const requestId = savedRequestId.trim().toLowerCase();
-    if (!recoveryChecked || !canOpenSavedIdea(submission.kind,
-      pending || readBackPending || sourceScopePending ||
-        (submission.kind !== "submitted" && hasUnsavedInput), requestId)) return;
+  // Opens an exact saved request by its id: a read-back only, never a write.
+  const openRequest = useCallback(async (requestId: string) => {
     setReadBackPending(true); setSavedRequestError(false); setSavedRequestReauth(false);
     try {
       const response = await adminFetch(`/api/admin/amux/ideas/submissions?${
@@ -203,32 +233,50 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         hasExternalSources: decision.hasExternalSources });
     } catch { setSavedRequestError(true); }
     finally { setReadBackPending(false); }
+  }, [operatorId]);
+  const openSavedIdea = async () => {
+    const requestId = savedRequestId.trim().toLowerCase();
+    if (!recoveryChecked || !canOpenSavedIdea(submission.kind,
+      pending || readBackPending || sourceScopePending ||
+        (submission.kind !== "submitted" && hasUnsavedInput), requestId)) return;
+    await openRequest(requestId);
   };
 
-  useEffect(() => {
-    let active = true;
+  // The browser receipts decide what the panel shows first: a request left
+  // pending or confirmed is read back, unreadable storage locks saving.
+  const recoverFromReceipts = useCallback(() => {
     const recovered = readPendingIdeaRequest(receiptStore(), operatorId);
     const confirmed = recovered.kind === "none"
       ? readConfirmedIdeaRequest(receiptStore(), operatorId) : null;
+    if (recovered.kind === "unavailable") {
+      setSubmission({ kind: "recovery_unavailable" });
+    } else if (recovered.kind === "pending") {
+      inFlight.current = true;
+      setSubmission({ kind: "outcome_unknown", requestId: recovered.requestId });
+      void readBack(recovered.requestId);
+    } else if (openRequestId && canOpenSavedIdea("idle", false, openRequestId)) {
+      void openRequest(openRequestId);
+    } else if (confirmed?.kind === "confirmed") {
+      inFlight.current = true;
+      setSubmission({ kind: "outcome_unknown", requestId: confirmed.requestId });
+      void readBack(confirmed.requestId);
+    } else if (confirmed?.kind === "unavailable") {
+      setSubmission({ kind: "recovery_unavailable" });
+    } else {
+      inFlight.current = false;
+      setSubmission({ kind: "idle" });
+    }
+  }, [openRequest, openRequestId, operatorId, readBack]);
+
+  useEffect(() => {
+    let active = true;
     queueMicrotask(() => {
       if (!active) return;
-      if (recovered.kind === "unavailable") {
-        setSubmission({ kind: "recovery_unavailable" });
-      } else if (recovered.kind === "pending") {
-        inFlight.current = true;
-        setSubmission({ kind: "outcome_unknown", requestId: recovered.requestId });
-        void readBack(recovered.requestId);
-      } else if (confirmed?.kind === "confirmed") {
-        inFlight.current = true;
-        setSubmission({ kind: "outcome_unknown", requestId: confirmed.requestId });
-        void readBack(confirmed.requestId);
-      } else if (confirmed?.kind === "unavailable") {
-        setSubmission({ kind: "recovery_unavailable" });
-      }
+      recoverFromReceipts();
       setRecoveryChecked(true);
     });
     return () => { active = false; };
-  }, [operatorId, readBack]);
+  }, [recoverFromReceipts]);
 
   const submit = async () => {
     if (!submissionAvailable || !recoveryChecked || inFlight.current ||
@@ -336,6 +384,31 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     ? (messages.errors[result.error as keyof typeof messages.errors] ?? messages.errors.preview_failed)
     : null;
 
+  const busy = pending || readBackPending || sourceScopePending;
+  const card: AmuxIdeaRequestCardState | null =
+    submission.kind === "pending" ? { kind: "saving", requestId: submission.requestId } :
+      submission.kind === "outcome_unknown" ? (readBackPending
+        ? { kind: "checking", requestId: submission.requestId }
+        : { kind: "unknown", requestId: submission.requestId }) :
+        submission.kind === "submitted"
+          ? { kind: "saved", requestId: submission.requestId, ideaId: submission.ideaId } :
+          submission.kind === "recovery_unavailable" ? { kind: "locked" } : null;
+  const setAsideControls = submission.kind === "outcome_unknown" || submission.kind === "recovery_unavailable" ? (
+    <div className="w-full space-y-2 border-t border-zinc-300 pt-3 dark:border-zinc-700" data-testid="amux-idea-set-aside">
+      <label className="flex items-start gap-2">
+        <input type="checkbox" className="mt-1 size-4" checked={setAsideAcknowledged}
+          onChange={(event) => setSetAsideAcknowledged(event.target.checked)} />
+        <span>{messages.setAsideAcknowledge}</span>
+      </label>
+      <button type="button" onClick={setAsidePreviousIdea}
+        disabled={!canSetAsidePreviousIdea(submission.kind, busy, setAsideAcknowledged)}
+        className="min-h-11 rounded-lg border border-zinc-400 px-4 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-zinc-600">
+        {messages.setAsideAction}
+      </button>
+      {setAside?.kind === "unavailable" ? <p role="alert">{messages.setAsideUnavailable}</p> : null}
+    </div>
+  ) : null;
+
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4" data-testid="amux-v4-idea-input">
       <div className="space-y-2 border-b border-zinc-200 pb-5 dark:border-zinc-800">
@@ -344,28 +417,34 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         <p className="max-w-2xl text-sm leading-6 text-zinc-700 dark:text-zinc-300">{messages.description}</p>
       </div>
 
-      <details className="space-y-2 rounded-xl border border-zinc-300 p-4 text-sm dark:border-zinc-700">
-        <summary className="cursor-pointer font-medium">{messages.openSavedTitle}</summary>
-        <p>{messages.openSavedHint}</p>
-        <label className="block" htmlFor="amux-saved-request-id">{messages.openSavedId}</label>
-        <input id="amux-saved-request-id" value={savedRequestId} maxLength={36}
-          onChange={(event) => setSavedRequestId(event.target.value)}
-          disabled={readBackPending}
-          className="min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2 font-mono" />
-        <button type="button" onClick={() => void openSavedIdea()}
-          disabled={!recoveryChecked || !canOpenSavedIdea(submission.kind,
-            pending || readBackPending || sourceScopePending ||
-              (submission.kind !== "submitted" && hasUnsavedInput), savedRequestId.trim().toLowerCase())}
-          className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
-          {messages.openSavedButton}</button>
-        {savedRequestError ? <p role="alert">{messages.openSavedFailed}</p> : null}
-        {savedRequestReauth ? <a className="underline" href={STEP_UP_HREF}>{messages.stepUp}</a> : null}
-      </details>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(17rem,0.85fr)]">
-        <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-4 text-sm font-medium text-zinc-800 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
+      {card ? (
+        <AmuxIdeaRequestStatusCard state={card}>
+          {card.kind === "unknown" ? <>
+            <button type="button" onClick={() => void readBack(card.requestId)} disabled={readBackPending}
+              className="min-h-11 rounded-lg border border-amber-700 px-3 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 disabled:opacity-50 dark:border-amber-300">
+              {messages.checkSubmissionStatus}
+            </button>
+            <a href={STEP_UP_HREF} className="font-medium underline">{messages.stepUp}</a>
+          </> : null}
+          {card.kind === "saved" ? (
+            <button type="button" onClick={startAnotherIdea}
+              disabled={!canStartAnotherIdea(submission.kind, busy)}
+              className="min-h-11 rounded-lg border border-zinc-400 px-4 text-sm font-medium text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100">
+              {messages.startAnotherIdea}
+            </button>
+          ) : null}
+          {card.kind === "locked" ? (
+            <button type="button" onClick={recoverFromReceipts} disabled={busy}
+              className="min-h-11 rounded-lg border border-zinc-400 px-4 font-medium disabled:opacity-50 dark:border-zinc-600">
+              {messages.statusRecheckStorage}
+            </button>
+          ) : null}
+          {setAsideControls}
+        </AmuxIdeaRequestStatusCard>
+      ) : (
+        <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-800 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
           <h3 className="text-base font-semibold">{messages.ideaSection}</h3>
-          <label htmlFor="amux-v4-idea">{messages.ideaLabel}</label>
+          <label htmlFor="amux-v4-idea" className="font-medium">{messages.ideaLabel}</label>
           <textarea
             id="amux-v4-idea"
             value={idea}
@@ -375,83 +454,69 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
             className="min-h-56 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-base font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             aria-describedby="amux-v4-idea-hint amux-v4-idea-count"
           />
-          <span id="amux-v4-idea-count" className="text-xs font-normal text-zinc-600 dark:text-zinc-400">{messages.byteCount(ideaBytes)}</span>
-          <span id="amux-v4-idea-hint" className="text-xs font-normal text-zinc-600 dark:text-zinc-400">{messages.ideaHint}</span>
-        </div>
-
-        <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="space-y-1">
-            <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceSection}</h3>
-            <p className="text-xs leading-5 text-zinc-600 dark:text-zinc-400">{messages.sourceSectionHint}</p>
+          <p className="flex flex-wrap justify-between gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+            <span id="amux-v4-idea-hint">{messages.ideaHint}</span>
+            <span id="amux-v4-idea-count">{messages.byteCount(ideaBytes)}</span>
+          </p>
+          <details className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+            <summary className="cursor-pointer font-medium text-blue-800 dark:text-blue-200">{messages.sourceSection}</summary>
+            <p className="mt-2 text-xs leading-5 text-zinc-600 dark:text-zinc-400">{messages.sourceSectionHint}</p>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="flex flex-col gap-2 font-medium" htmlFor="amux-v4-repositories">
+                {messages.repositoriesLabel}
+                <textarea
+                  id="amux-v4-repositories"
+                  value={repositories}
+                  onChange={(event) => { setRepositories(event.target.value); invalidateResult(); }}
+                  disabled={pending || frozen}
+                  className="min-h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                />
+              </label>
+              <label className="flex flex-col gap-2 font-medium" htmlFor="amux-v4-pull-requests">
+                {messages.pullRequestsLabel}
+                <textarea
+                  id="amux-v4-pull-requests"
+                  value={pullRequests}
+                  onChange={(event) => { setPullRequests(event.target.value); invalidateResult(); }}
+                  disabled={pending || frozen}
+                  className="min-h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                />
+              </label>
+            </div>
+          </details>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={checkInput}
+              disabled={pending || frozen || idea.trim().length === 0 || ideaBytes > 8192}
+              className="min-h-11 rounded-lg bg-blue-700 px-4 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:bg-blue-600 dark:focus-visible:outline-blue-300"
+            >
+              {messages.preview}
+            </button>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!submissionAvailable || !recoveryChecked || result?.outcome !== "input_checked" || frozen}
+              className="min-h-11 rounded-lg border border-blue-700 px-4 text-sm font-medium text-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200"
+            >
+              {messages.submit}
+            </button>
+            <span className="text-xs text-zinc-600 dark:text-zinc-400">
+              {submissionAvailable ? messages.submitBoundary : messages.submitUnavailable}
+            </span>
           </div>
-          <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-v4-repositories">
-            {messages.repositoriesLabel}
-            <textarea
-              id="amux-v4-repositories"
-              value={repositories}
-              onChange={(event) => { setRepositories(event.target.value); invalidateResult(); }}
-              disabled={pending || frozen}
-              className="min-h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-            />
-          </label>
-          <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-v4-pull-requests">
-            {messages.pullRequestsLabel}
-            <textarea
-              id="amux-v4-pull-requests"
-              value={pullRequests}
-              onChange={(event) => { setPullRequests(event.target.value); invalidateResult(); }}
-              disabled={pending || frozen}
-              className="min-h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-            />
-          </label>
+          <details className="rounded-lg bg-zinc-50 p-3 text-xs text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+            <summary className="cursor-pointer">
+              {messages.boundaryCurrentDetail}{" "}
+              <span className="font-medium text-blue-800 underline dark:text-blue-200">{messages.boundaryDetails}</span>
+            </summary>
+            <p className="mt-2 font-semibold">{messages.boundaryTitle}</p>
+            <p className="mt-1">{messages.boundaryCurrent}</p>
+            <p className="mt-1 font-semibold">{messages.boundaryNext}</p>
+            <p className="mt-1">{messages.boundaryNextDetail}</p>
+          </details>
         </div>
-      </div>
-
-      <section className="overflow-hidden rounded-xl border border-blue-200 bg-blue-50/60 dark:border-blue-900 dark:bg-blue-950/30" aria-labelledby="amux-v4-boundary-heading">
-        <div className="h-1 bg-blue-600 dark:bg-blue-400" aria-hidden="true" />
-        <h3 id="amux-v4-boundary-heading" className="px-4 pt-4 text-sm font-semibold text-blue-900 dark:text-blue-200">{messages.boundaryTitle}</h3>
-        <div className="grid md:grid-cols-2">
-          <div className="space-y-1 p-4 md:border-r md:border-blue-200 dark:md:border-blue-900">
-            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{messages.boundaryCurrent}</p>
-            <p className="text-xs leading-5 text-zinc-700 dark:text-zinc-300">{messages.boundaryCurrentDetail}</p>
-          </div>
-          <div className="space-y-1 border-t border-blue-200 p-4 md:border-t-0 dark:border-blue-900">
-            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{messages.boundaryNext}</p>
-            <p className="text-xs leading-5 text-zinc-700 dark:text-zinc-300">{messages.boundaryNextDetail}</p>
-          </div>
-        </div>
-      </section>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={checkInput}
-          disabled={pending || frozen || idea.trim().length === 0 || ideaBytes > 8192}
-          className="min-h-11 rounded-lg bg-blue-700 px-4 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:bg-blue-600 dark:focus-visible:outline-blue-300"
-        >
-          {messages.preview}
-        </button>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!submissionAvailable || !recoveryChecked || result?.outcome !== "input_checked" || frozen}
-          className="min-h-11 rounded-lg border border-blue-700 px-4 text-sm font-medium text-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200"
-        >
-          {submission.kind === "pending" ? messages.submitting : messages.submit}
-        </button>
-        <button
-          type="button"
-          disabled
-          aria-describedby="amux-v4-transfer-disabled"
-          className="min-h-11 rounded-lg border border-zinc-300 px-4 text-sm font-medium text-zinc-900 opacity-50 dark:border-zinc-600 dark:text-zinc-100"
-        >
-          {messages.transfer}
-        </button>
-      </div>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">
-        {submissionAvailable ? messages.submitBoundary : messages.submitUnavailable}
-      </p>
-      <p id="amux-v4-transfer-disabled" className="text-sm text-zinc-700 dark:text-zinc-300">{messages.transferUnavailable}</p>
+      )}
 
       {refusedForStepUp ? (
         <a href={STEP_UP_HREF} className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100">{messages.stepUp}</a>
@@ -461,34 +526,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           {messages.submitErrors[submission.code as keyof typeof messages.submitErrors] ?? messages.submitErrors.submit_failed}
         </p>
       ) : null}
-      {submission.kind === "submitted" ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <p role="status" className="text-sm text-zinc-800 dark:text-zinc-100">
-            {messages.submitted(submission.ideaId)}
-          </p>
-          <button
-            type="button"
-            onClick={startAnotherIdea}
-            disabled={!canStartAnotherIdea(submission.kind, pending || readBackPending || sourceScopePending)}
-            className="min-h-11 rounded-lg border border-zinc-400 px-4 text-sm font-medium text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
-          >
-            {messages.startAnotherIdea}
-          </button>
-        </div>
-      ) : null}
-      {submission.kind === "outcome_unknown" ? (
-        <div role="alert" className="space-y-2 text-sm text-amber-800 dark:text-amber-200">
-          <p>{messages.outcomeUnknown(submission.requestId)}</p>
-          <button
-            type="button"
-            onClick={() => readBack(submission.requestId)}
-            disabled={readBackPending}
-            className="min-h-11 rounded-lg border border-amber-700 px-3 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 disabled:opacity-50 dark:border-amber-300"
-          >
-            {messages.checkSubmissionStatus}
-          </button>
-          <a href={STEP_UP_HREF} className="ml-3 font-medium underline">{messages.stepUp}</a>
-        </div>
+      {setAside?.kind === "set_aside" && submission.kind === "idle" ? (
+        <p role="status" className="text-sm text-zinc-700 dark:text-zinc-300">
+          {messages.setAsideNotice(setAside.requestId)}
+        </p>
       ) : null}
       <AmuxInitialPlanPanel
         key={submission.kind === "submitted" ? submission.ideaId : "none"}
@@ -501,7 +542,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         key={submission.kind === "submitted" ?
           `${submission.ideaId}:${continuationChunkIndex}` : "none"}
         available={frontierModelsAvailable}
-        writeAvailable={frontierModelWriteAvailable}
         previewAvailable={transferPreviewAvailable}
         confirmAvailable={transferConfirmAvailable}
         analysisBudgetAvailable={analysisBudgetAvailable}
@@ -553,11 +593,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           {sourceScopeResult.kind === "error" ? <p role="alert" className="text-sm text-red-700 dark:text-red-300">{messages.sourceScopeError(sourceScopeResult.code)}</p> : null}
         </section>
       ) : null}
-      {submission.kind === "recovery_unavailable" ? (
-        <p role="alert" className="text-sm text-red-700 dark:text-red-300">
-          {messages.recoveryUnavailable}
-        </p>
-      ) : null}
       {result ? (
         <div className="rounded-md border border-zinc-200 p-4 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100" role="status">
           {errorMessage ? <p>{errorMessage}</p> : null}
@@ -572,6 +607,23 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           ) : null}
         </div>
       ) : null}
+      <details className="space-y-2 rounded-xl border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+        <summary className="cursor-pointer font-medium">{messages.openSavedTitle}</summary>
+        <p>{messages.openSavedHint}</p>
+        <label className="block" htmlFor="amux-saved-request-id">{messages.openSavedId}</label>
+        <input id="amux-saved-request-id" value={savedRequestId} maxLength={36}
+          onChange={(event) => setSavedRequestId(event.target.value)}
+          disabled={readBackPending}
+          className="min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2 font-mono" />
+        <button type="button" onClick={() => void openSavedIdea()}
+          disabled={!recoveryChecked || !canOpenSavedIdea(submission.kind,
+            pending || readBackPending || sourceScopePending ||
+              (submission.kind !== "submitted" && hasUnsavedInput), savedRequestId.trim().toLowerCase())}
+          className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+          {messages.openSavedButton}</button>
+        {savedRequestError ? <p role="alert">{messages.openSavedFailed}</p> : null}
+        {savedRequestReauth ? <a className="underline" href={STEP_UP_HREF}>{messages.stepUp}</a> : null}
+      </details>
     </section>
   );
 }
