@@ -128,3 +128,9 @@ test("review transport budgets keep the browser outside the complete server path
     4,
   );
 });
+
+test("owner approval to done stamps a v4 Task terminal in the same task write", () => {
+  // Nothing else writes v4TerminalAt; without it dependents stay
+  // dependency_incomplete, retention falls back and the brief is never purged.
+  assert.match(service, /status: target,\s*revision: \{ increment: 1 \},[\s\S]{0,400}?target === "done" && state\.task\.sourceSystem === "admin-idea-v4"\s*\?\s*\{ v4TerminalAt: now \}/);
+});

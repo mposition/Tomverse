@@ -463,7 +463,10 @@ export async function pullAmuxWorkDelivery(input: {
       // + 7: an approved recovery delivery re-reads its authority (approval,
       // approval audit, risk acceptance, launch proof and launch check) and
       // the proof and check it binds into the delivery.
-      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 3 + 7 },
+      // + 3: the base counts the canonical audit as one call, but appending it
+      // takes four (chain lock, clock, previous entry, insert). A recovery
+      // delivery makes 22 calls; 19 refused it on 2026-10-15 at the 20th.
+      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 3 + 7 + 3 },
     async (tx, context) => {
       const now = input.now ?? context.dbNow;
       // Safe-stop request and all ownership/start/delivery writers share this
