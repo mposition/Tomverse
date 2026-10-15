@@ -225,7 +225,7 @@ test("only dependabot's open pull requests are read, and only their failing chec
   ]);
 });
 
-/* The approval observer's read of one published pull request (§9-10). */
+/* The approval observer's read of one published pull request (engineering-agent.md §9-10). */
 
 
 const pullFetch = (overrides = {}) => {

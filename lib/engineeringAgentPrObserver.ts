@@ -38,7 +38,7 @@ import { prisma } from "@/lib/prisma";
 // audit entry (four) -- nine, and three to spare.
 const OBSERVATION_PRISMA_CALLS = 12;
 // Every round reads every binding it still has to watch, a page at a time, so
-// none can be crowded out by older ones that wait. The owner's PR queue (§12)
+// none can be crowded out by older ones that wait. The owner's PR queue (engineering-agent.md §12)
 // keeps the set small; the ceiling only stops a runaway round.
 const PAGE_SIZE = 20;
 const ROUND_CEILING = 200;
