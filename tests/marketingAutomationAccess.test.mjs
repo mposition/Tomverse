@@ -17,6 +17,7 @@ import {
   MARKETING_WEBHOOK_PIPELINE_FILES,
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
   MARKETING_WEBHOOK_PIPELINE_ROOT,
+  MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES,
   MARKETING_WEBHOOK_SCHEMA_MODELS,
   canonicalMarketingWebhookFileText,
   canonicalMarketingWebhookJson,
@@ -33,6 +34,7 @@ import {
   marketingWebhookSignatureAuditRequirement,
 } from "../lib/marketingAuditEvidence.ts";
 import { MARKETING_WEBHOOK_EVENT_TYPES } from "../lib/marketingWebhookCore.ts";
+import { marketingWebhookPipelineSources } from "../scripts/marketing-webhook-pipeline-sources.mjs";
 
 const readable = (value) => ({ ok: true, value });
 const unreadable = { ok: false };
@@ -656,18 +658,99 @@ test("the closure scanner names commented and template imports and refuses compu
   }
 });
 
-test("the pipeline file list is the receiver route's whole import closure", () => {
+// The fingerprint's sources (scripts/marketing-webhook-pipeline-sources.mjs):
+// webhook modules whole, the declarations they reach elsewhere, nothing from
+// the shared modules. `overrides` substitutes a file's text.
+const ACCESS_MODULE = "lib/marketingAutomationAccess.ts";
+const WHOLE_CODE_FILES = MARKETING_WEBHOOK_PIPELINE_FILES.filter(
+  (file) => file !== "prisma/schema.prisma" && !file.startsWith("prisma/migrations/"),
+);
+const pipeline = (overrides = {}) =>
+  marketingWebhookPipelineSources({
+    repositoryRoot,
+    wholeFiles: [...MARKETING_WEBHOOK_PIPELINE_FILES],
+    sharedModules: [...MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES],
+    selfModule: ACCESS_MODULE,
+    readText: (relative) =>
+      Object.hasOwn(overrides, relative)
+        ? overrides[relative]
+        : readFileSync(path.join(repositoryRoot, relative), "utf8"),
+  });
+const pipelineFingerprint = (overrides) =>
+  computeMarketingWebhookPipelineFingerprint(pipeline(overrides).sources, MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR);
+const sourceText = (relative) => readFileSync(path.join(repositoryRoot, relative), "utf8");
+
+test("the pipeline scope is classified against the receiver route's import closure", () => {
   const closure = localImportClosure(MARKETING_WEBHOOK_PIPELINE_ROOT);
-  // The module holding the fingerprint cannot hash itself.
-  closure.delete("lib/marketingAutomationAccess.ts");
-  const declared = MARKETING_WEBHOOK_PIPELINE_FILES.filter(
-    (file) => file !== "prisma/schema.prisma" && !file.startsWith("prisma/migrations/"),
-  );
-  assert.deepEqual([...declared].sort(), [...closure].sort());
+  closure.delete(ACCESS_MODULE);
   assert.deepEqual([...MARKETING_WEBHOOK_PIPELINE_FILES], [...MARKETING_WEBHOOK_PIPELINE_FILES].sort());
+  assert.deepEqual([...MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES], [...MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES].sort());
   for (const file of MARKETING_WEBHOOK_PIPELINE_FILES) {
     assert.ok(isFile(path.join(repositoryRoot, file)), file);
   }
+  // Every hashed or excluded module is one the route actually loads.
+  for (const file of [...WHOLE_CODE_FILES, ...MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES]) {
+    assert.ok(closure.has(file), `${file} is not in the receiver's import closure`);
+  }
+  // A webhook module is hashed whole, never sliced: a new one joins the list.
+  for (const file of closure) {
+    if (/^lib\/marketingWebhook\w*\.ts$/.test(file)) assert.ok(WHOLE_CODE_FILES.includes(file), file);
+  }
+  const { slicedFiles, reachedSharedModules } = pipeline();
+  // A shared entry the path no longer reaches is refused, not kept.
+  assert.deepEqual(reachedSharedModules, [...MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES]);
+  for (const file of slicedFiles) {
+    assert.ok(closure.has(file), file);
+    assert.ok(!WHOLE_CODE_FILES.includes(file), file);
+  }
+  // The store and the schema module are what the webhook path writes through.
+  assert.ok(slicedFiles.includes("lib/marketingStore.ts"));
+  assert.ok(slicedFiles.includes("lib/marketingAutomationSchema.ts"));
+});
+
+test("the fingerprint ignores what decides no event and follows what does", () => {
+  const base = pipelineFingerprint();
+  const store = sourceText("lib/marketingStore.ts");
+  // Another feature's store function, and a comment, change nothing.
+  assert.equal(
+    pipelineFingerprint({
+      "lib/marketingStore.ts": `${store}\n// a note\nexport async function unrelatedMarketingWriter(): Promise<number> {\n  return 1;\n}\n`,
+    }),
+    base,
+  );
+  // A new audit actor, or anything else in the shared audit chain, changes nothing.
+  const actors = sourceText("lib/adminAuditSystemActors.ts");
+  assert.equal(pipelineFingerprint({ "lib/adminAuditSystemActors.ts": `${actors}\nexport const LATER_ACTOR = "x";\n` }), base);
+  // The shadow writer itself does.
+  const marker = "export async function recordMarketingWebhookShadow(";
+  assert.ok(store.includes(marker));
+  assert.notEqual(
+    pipelineFingerprint({
+      "lib/marketingStore.ts": store.replace(
+        "// The audit chain first, as every writer here takes it.",
+        "// The audit chain first, as every writer here takes it.\n  void 0;",
+      ),
+    }),
+    base,
+  );
+  // So does a webhook module, even by a comment: it is hashed whole.
+  const core = sourceText("lib/marketingWebhookCore.ts");
+  assert.notEqual(pipelineFingerprint({ "lib/marketingWebhookCore.ts": `${core}\n// note\n` }), base);
+});
+
+test("the slicer refuses what it cannot follow", () => {
+  const sliceOf = (text) =>
+    marketingWebhookPipelineSources({
+      repositoryRoot,
+      wholeFiles: ["lib/marketingWebhookCore.ts"],
+      sharedModules: [],
+      selfModule: ACCESS_MODULE,
+      readText: (relative) =>
+        relative === "lib/marketingWebhookCore.ts" ? 'import { a } from "@/lib/marketingStore";\nexport const b = a;\n' : text,
+    });
+  assert.throws(() => sliceOf('export * from "@/lib/marketingAutomationSchema";\n'), /export \*/);
+  assert.throws(() => sliceOf('import * as s from "@/lib/marketingAutomationSchema";\nexport const a = s;\n'), /namespace import/);
+  assert.throws(() => sliceOf("export const notA = 1;\n"), /does not export a/);
 });
 
 test("every migration that shapes MarketingPost is in the fingerprint (S2f applies posts)", () => {
@@ -701,15 +784,26 @@ test("the fingerprint watches the receiver's schema models, not the whole schema
   // A change inside a watched model changes it.
   const changed = schema.replace("model MarketingReport {", "model MarketingReport {\n  addedColumn String?");
   assert.notEqual(fingerprint(changed), fingerprint(schema));
+  // Another feature's back relation on a watched model changes nothing; a
+  // relation between two watched models still does.
+  const backRelation = schema.replace(
+    "model AdminAuditLog {",
+    "model AdminAuditLog {\n  laterFeatureRows LaterFeature[]",
+  );
+  assert.equal(
+    fingerprint(`${backRelation}\nmodel LaterFeature {\n  id String @id\n}\n`),
+    fingerprint(`${schema}\nmodel LaterFeature {\n  id String @id\n}\n`),
+  );
+  assert.notEqual(
+    fingerprint(schema.replace("model AdminAuditLog {", "model AdminAuditLog {\n  watchedRows MarketingReport[]")),
+    fingerprint(schema),
+  );
   // A watched model that disappears is an error, not a smaller slice.
   assert.throws(() => marketingWebhookSchemaSlice(schema.replace("model AppSetting {", "model AppSettingRenamed {")));
 });
 
 test("pipeline fingerprint is current and independent of LF versus CRLF", () => {
-  const files = MARKETING_WEBHOOK_PIPELINE_FILES.map((path) => ({
-    path,
-    content: readFileSync(new URL(`../${path}`, import.meta.url), "utf8"),
-  }));
+  const files = pipeline().sources;
   assert.equal(
     computeMarketingWebhookPipelineFingerprint(
       files,
