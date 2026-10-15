@@ -14,8 +14,6 @@ import { AmuxAnalysisClaimResolutionPanel } from
   "@/components/admin/AmuxAnalysisClaimResolutionPanel";
 import { amuxAnalysisClaimRecoveryHoldId } from
   "@/lib/amux/ideaAnalysisClaimRecoveryCore";
-import { AmuxTaskCostCatalogApprovalPanel } from
-  "@/components/admin/AmuxTaskCostCatalogApprovalPanel";
 import { AmuxPortfolioPanel } from "@/components/admin/AmuxPortfolioPanel";
 import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
 import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
@@ -65,9 +63,6 @@ import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { adminNavItemTabs, adminRedirectTarget, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
-import { AMUX_V4_TASK_CATALOG_WRITE_ENV,
-  amuxV4TaskCatalogWriteEnabled } from
-  "@/lib/amux/v4TaskCostCatalogApprovalService";
 import { AMUX_V4_PORTFOLIO_WRITE_ENV,
   amuxV4PortfolioWriteEnabled } from
   "@/lib/amux/portfolioAssessmentService";
@@ -150,15 +145,8 @@ export default async function AdminAmuxBacklogPage({
         <AmuxBacklogListPanel data={backlogList} search={search.search} valid={search.valid} />
       ) : tab.id === "ideas" ? (
         <>
-        <AmuxUnusedAnalysisReservationPanel operatorId={session.user.id} available={
-          process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
-          process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"} />
         {recoveryHoldId ? <AmuxAnalysisClaimResolutionPanel
           key={recoveryHoldId} holdId={recoveryHoldId} /> : null}
-        <AmuxTaskCostCatalogApprovalPanel approvalAvailable={
-          amuxV4TaskCatalogWriteEnabled(process.env[AMUX_V4_TASK_CATALOG_WRITE_ENV])} />
-        <AmuxPortfolioPanel writeAvailable={amuxV4PortfolioWriteEnabled(
-          process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])} />
         <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
           initialPlanAvailable={initialPlanAvailable}
@@ -175,6 +163,13 @@ export default async function AdminAmuxBacklogPage({
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"}
           operatorId={session.user.id} />
         </>
+      ) : tab.id === "portfolio" ? (
+        <AmuxPortfolioPanel writeAvailable={amuxV4PortfolioWriteEnabled(
+          process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])} />
+      ) : tab.id === "recovery" ? (
+        <AmuxUnusedAnalysisReservationPanel operatorId={session.user.id} available={
+          process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
+          process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
       ) : tab.id === "reconciliation" ? (
