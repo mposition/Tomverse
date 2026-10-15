@@ -316,7 +316,7 @@ test("the AMUX group holds Backlog, Promotion, Execution and Operations settings
   );
   assert.deepEqual(
     adminNavItemTabs("amux-backlog").map((tab) => tab.id),
-    ["list", "ideas", "import", "reconciliation", "metadata"]
+    ["ideas", "list", "portfolio", "import", "reconciliation", "metadata", "recovery"]
   );
   assert.deepEqual(
     adminNavItemTabs("amux-promotion").map((tab) => tab.id),
@@ -328,7 +328,7 @@ test("the AMUX group holds Backlog, Promotion, Execution and Operations settings
   );
   assert.deepEqual(
     adminNavItemTabs("amux-settings").map((tab) => tab.id),
-    ["automatic-admission", "safety", "decision-maker"]
+    ["automatic-admission", "safety", "decision-maker", "analysis"]
   );
   // Between Operations and Governance.
   assert.deepEqual(
@@ -678,5 +678,5 @@ test("legacy execution controls retain their exact settings section and query", 
     "decision-maker": "/admin/amux-settings?tab=decision-maker",
   });
   assert.equal(adminRedirectTarget(ADMIN_AMUX_EXECUTION_LEGACY_TABS.halts, {tab:"halts", taskId:"task-1"}), "/admin/amux-settings?tab=safety&taskId=task-1");
-  assert.deepEqual(adminNavItemTabs("amux-settings").map(tab => tab.id), ["automatic-admission", "safety", "decision-maker"]);
+  assert.deepEqual(adminNavItemTabs("amux-settings").map(tab => tab.id), ["automatic-admission", "safety", "decision-maker", "analysis"]);
 });

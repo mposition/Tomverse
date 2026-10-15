@@ -717,14 +717,19 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
     tabs: [
       {
+        id: "ideas",
+        label: "Ideas",
+        description: "Enter an idea, approve its execution and its plan",
+      },
+      {
         id: "list",
         label: "List",
         description: "Backlog cards, creation dates, summaries and recorded scores",
       },
       {
-        id: "ideas",
-        label: "Ideas",
-        description: "Check an operator idea before any external transfer",
+        id: "portfolio",
+        label: "Portfolio assessment",
+        description: "Strategic assessment and score of each card",
       },
       {
         id: "import",
@@ -740,6 +745,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "metadata",
         label: "Card metadata",
         description: "Kind, priority and cost estimate for one backlog card",
+      },
+      {
+        id: "recovery",
+        label: "Cleanup and recovery",
+        description: "Release analysis reservations that were never used",
       },
     ],
   },
@@ -858,6 +868,12 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       },
       { id: "safety", label: "Execution safety and recovery", description: "Automatic recovery, evidence to inspect and operator halt decisions", badge: "amuxOrchestratorHalts" },
       { id: "decision-maker", label: "Decision Maker", description: "The Decision Maker kill switch and the mode of each instance" },
+      {
+        id: "analysis",
+        label: "Analysis settings",
+        description: "Task worker and model cost catalogue approval",
+        viewRoles: ["owner"],
+      },
     ],
   },
   {
