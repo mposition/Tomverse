@@ -1237,3 +1237,94 @@ async function closeClosedAdapterFixture(fixture: { runId: string; workItemId: s
     await runEngineeringAgentTransaction(prisma, (tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "pruned" }));
   }
 }
+
+test("an open adapter puts the publisher's pull request on the review of the worker that ran the attempt", async () => {
+  // engineering-agent.md version 5, item 2: a v22 Task runs on its own worker,
+  // not as engineering-runner. The fixture's worker is not engineering-runner
+  // either, so a publisher result naming a fixed worker would be refused here.
+  const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const inTx = <T>(work: Parameters<typeof runEngineeringAgentTransaction<T>>[1]) =>
+    runEngineeringAgentTransaction(prisma, work);
+  await setMode("t1");
+  try {
+    const fixture = await readyWorkerWithCard({ requiresHumanReview: true });
+    assert.notEqual(fixture.worker, ENGINEERING_AGENT_AMUX_WORKER);
+    const runId = nextRunId();
+    const started = await startWithRun(fixture, runId);
+    const { workItemId } = await inTx((tx) =>
+      openEngineeringAgentWorkItem(tx, {
+        kind: "publish",
+        causeKey: `publish:${runId}:attempt-worker`,
+        runId,
+        patchBody: "patch",
+        patchDigest: sha256("patch"),
+        baseSha: sha1(runId),
+        expectedTreeId: sha1("tree"),
+      }),
+    );
+    await inTx((tx) =>
+      issueEngineeringAgentCapability(tx, {
+        workItemId,
+        capability: {
+          baseSha: sha1(runId),
+          patchDigest: sha256("patch"),
+          expectedTreeId: sha1("tree"),
+          commit: {
+            identity: { name: "Tomverse Engineering Agent", email: "engineering-agent@users.noreply.github.com" },
+            baseCommitterDate: "1759000000 +1000",
+            runId,
+            cardRef: fixture.taskId,
+          },
+        },
+      }),
+    );
+    const settled = await withAmuxRouteBudget(
+      () =>
+        settleAmuxExecution(
+          {
+            attemptId: started.attemptId,
+            worker: fixture.worker,
+            instanceId: fixture.instanceId,
+            generation: fixture.generation,
+            taskRevision: started.taskRevision,
+            outcome: "succeeded",
+            toStatus: "review",
+            actualCostMicrousd: null,
+          },
+          engineeringRunEndAttachment({ runId, outcome: "t1_queued", halt: "none" }),
+        ),
+      ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+    );
+    assert.equal(settled.settled, true);
+    const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+
+    const prNumber = 900_000 + Math.floor(Math.random() * 90_000);
+    const result = await withExecutionApi(() =>
+      recordEngineeringAgentPublisherResult({
+        workItemId,
+        fencingToken: claim.fencingToken,
+        outcome: "confirmed",
+        pullRequest: {
+          prNumber,
+          headSha: sha1("head"),
+          verifiedHeadSha: sha1("head"),
+          snapshot: { baseSha: sha1(runId), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] },
+        },
+      }),
+    );
+    assert.equal(result.recorded, true);
+
+    const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.equal(card.reviewPrNumber, prNumber);
+    assert.equal(card.status, "review");
+    assert.equal(
+      await prisma.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", causeKey: `review_pr:${workItemId}` } }),
+      0,
+    );
+    const binding = await prisma.engineeringAgentBinding.findFirstOrThrow({ where: { runId, prNumber } });
+    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "closed" }));
+    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "pruned" }));
+  } finally {
+    await setMode("shadow");
+  }
+});

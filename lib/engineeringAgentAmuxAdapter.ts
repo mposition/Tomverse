@@ -585,15 +585,22 @@ export async function recordEngineeringAgentPublisherResult(input: {
   if (!(await engineeringAgentAmuxAdapterPermittedNow())) return settleWithoutCard("adapter_closed");
   const item = await prisma.engineeringAgentWorkItem.findUnique({
     where: { id: input.workItemId },
-    select: { run: { select: { cardId: true, amuxAttemptId: true } } },
+    select: { run: { select: { cardId: true, amuxAttemptId: true, attempt: { select: { worker: true } } } } },
   });
   const cardId = item?.run?.cardId ?? null;
   const attemptId = item?.run?.amuxAttemptId ?? null;
-  if (cardId === null || attemptId === null) throw new EngineeringAgentStoreRefusedError("publish_item_without_run");
+  const attemptWorker = item?.run?.attempt?.worker ?? null;
+  if (cardId === null || attemptId === null || attemptWorker === null) {
+    throw new EngineeringAgentStoreRefusedError("publish_item_without_run");
+  }
   // The number goes on the review of this item's own attempt, and AMUX takes
-  // it only while that attempt is still the card's latest.
+  // it only while that attempt is still the card's latest. The worker is the
+  // one that ran that attempt, read here from the run the capability was
+  // issued for (engineering-agent.md version 5, item 2): a v22 Task runs on an
+  // Ubuntu worker, not as engineering-runner. Nothing the publisher reports
+  // names it.
   const recorded = await recordAmuxReviewPullRequest(
-    { taskId: cardId, attemptId, worker: ENGINEERING_AGENT_AMUX_WORKER, prNumber: pullRequest.prNumber },
+    { taskId: cardId, attemptId, worker: attemptWorker, prNumber: pullRequest.prNumber },
     engineeringPublishResultAttachment({
       workItemId: input.workItemId,
       fencingToken: input.fencingToken,

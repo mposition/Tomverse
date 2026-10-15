@@ -23,7 +23,8 @@
 상태(v42 이력): **v42 FIRST Task 전용 API 인증·모델 접근 증거 승인.** 2026-10-13 운영자 `mposition`이 아래 v42 절의 전용 API key 인증과 선택 model 조회, alias→canonical 결속, 공급사 잔액 불명 표시, exact 비용 상한 예외를 승인했다. 실제 provider 호출·배포·DB 적용은 별도다.
 상태(v43 이력): **v43 유도 카탈로그 shadow R2b 코드 래치 승인.** 2026-10-14 운영자 `mposition`이 아래 v43 절을 승인했다. `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH`는 true가 되어 Admin이 유도 카탈로그와 카탈로그 환경 변수가 같은지 보인다. R2a는 2026-10-14 production 가져오기로 끝났다. 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이전 v42 상태 줄은 이력이다.
 상태(v44 이력): **v44 FIRST Task prior attempt ID 전사 오류 정정 승인.** 2026-10-14 운영자 `mposition`이 아래 v44 절의 정정을 승인했다. v39~v42가 가리키는 과거 attempt는 실제 DB attempt `97858395-3d66-42fa-9bfb-0e5a6cba39d8`이며, 기록에 잘못 옮겨 적은 값은 실재하지 않는 ID였다. 대상 Task, 한 번의 재시도, 비용 상한과 다른 계약은 바꾸지 않는다. 이전 v43 상태 줄은 이력이다.
-상태(최신): **v48 FIRST Task 재시도의 추가 경로를 최종 승인으로 비용 재확인 승인.** 2026-10-14 운영자 `mposition`이 아래 v48 절을 승인했다. FIRST Task 예외에서만, 등록 뒤 catalog에 추가된 경로가 일으킨 비용 재확인을 owner의 최종 승인이 대신한다. 기존 경로 변경·토큰 상한·비용 상한 인상과 다른 준비 사유는 그대로 거절한다. 이전 v47 상태 줄은 이력이다.
+상태(최신): **v49 사람 결정 두 번으로 줄인 v22 코드 작업 경로 승인.** 2026-10-15 운영자 `mposition`이 아래 v49 절을 승인했다. 아이디어당 사람 결정은 실행·계획 승인(`amux-intake.md` v18)과 PR마다 GitHub review·병합뿐이고, 공개 PR 게시 코드 래치를 연다. v22 `implement` Task는 본 앱이 관측한 권한 있는 사람의 승인 review와 병합으로 `done`이 된다. 이전 v48 상태 줄은 이력이다.
+상태(v48 이력): **v48 FIRST Task 재시도의 추가 경로를 최종 승인으로 비용 재확인 승인.** 2026-10-14 운영자 `mposition`이 아래 v48 절을 승인했다. FIRST Task 예외에서만, 등록 뒤 catalog에 추가된 경로가 일으킨 비용 재확인을 owner의 최종 승인이 대신한다. 기존 경로 변경·토큰 상한·비용 상한 인상과 다른 준비 사유는 그대로 거절한다. 이전 v47 상태 줄은 이력이다.
 상태(v47 이력): **v47 안전 종료 확인 뒤 같은 실행의 읽기 전용 launch check 처리 승인.** 2026-10-14 운영자 `mposition`이 아래 v47 절을 승인했다. recovery controller는 자기 실행이 기록한 verified process-gone evidence가 만든 launch check 하나를 같은 30초 실행 안에서 바로 처리한다. 90초 freshness와 다른 guard는 그대로다. 이전 v46 상태 줄은 이력이다.
 상태(v46 이력): **v46 legacy safe stop의 현재 실행 인스턴스 결속 승인.** 2026-10-14 운영자 `mposition`이 아래 v46 절을 승인했다. legacy 점검 증거는 실행 인스턴스가 바뀌어도 `legacy_invocation_unbound`로 남고, 안전 종료는 이전 attempt 당시가 아니라 지금 실행 중인 worker profile 인스턴스를 잠가 끄고 증명한다. 대상 Task, 재시도 1회, 비용 상한, 위험 수락, 영구 fence는 바꾸지 않는다. 이전 v45 상태 줄은 이력이다.
 상태(v45 이력): **v45 R2c 선택 단계의 역할 상한 검사 승인.** 2026-10-14 운영자 `mposition`이 아래 v45 절을 승인했다. v16 역할이 없는 레거시 카드는 `requiredRoutingRole`에서 수준을 유도하고(`review`는 `contract`), R2c가 켜지면 상한이 그보다 낮은 worker는 후보가 되지 않는다. 코드 래치는 바꾸지 않는다. 이전 v44 상태 줄은 이력이다.
@@ -73,6 +74,7 @@ approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 45
 approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 46
 approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 47
 approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 48
+approvedBy: mposition · approvedAt: 2026-10-15 · 정책 버전: 49
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -124,6 +126,7 @@ approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 48
 | 46 | 2026-10-14 mposition | v37 legacy safe stop이 이전 attempt 당시의 실행 인스턴스와 현재 인스턴스가 같기를 요구해, 그 뒤 bridge가 한 번이라도 다시 등록되면 점검 증거와 안전 종료가 모두 거절됐다. legacy 점검 증거는 인스턴스 비교로 사유를 덮어쓰지 않고, 안전 종료는 현재 profile 인스턴스를 잠가 결속한다. 점검 요청과 모든 원본 요청은 계속 이전 attempt 인스턴스에 결속하므로, 새 인스턴스에 결속된 안전 종료를 원본으로 한 재요청은 열리지 않는다. |
 | 47 | 2026-10-14 mposition | v39 최종 승인은 process-gone evidence 기록 뒤 90초 안이어야 하는데, 그 evidence가 만든 launch check는 controller의 다음 60초 주기에야 처리되고 API 모델 접근 증거가 그 뒤에 와서 사람이 승인할 시간이 남지 않았다. controller가 자기 실행에서 verified process-gone을 보고했으면 같은 실행 안에서 queue를 한 번 더 읽고, 그 항목이 read-only launch check일 때만 처리한다. 30초 실행 상한, 병렬 consumer·밀린 주기 처리 금지, 90초 freshness와 모든 결속은 그대로다. |
 | 48 | 2026-10-14 mposition | FIRST Task는 catalog v2로 등록됐고 재시도는 v3가 추가한 claude-contract 경로로만 할 수 있는데, 일반 준비 판정이 추가 경로를 이유로 비용 재확인을 요구하고 그 재확인 수단이 없어 승인·claim·start가 막혔다. FIRST Task 예외에서만 owner의 최종 승인(정확한 경로·모델·상한 결속)을 그 재확인으로 인정한다. 추가 경로를 뺀 나머지는 일반 판정을 그대로 통과해야 하고, 선택 경로는 추가된 경로여야 한다. |
+| 49 | 2026-10-15 mposition | 아이디어당 사람 결정을 실행 승인·계획 승인(`amux-intake.md` v18)과 PR마다 GitHub required review·병합으로 줄인다. `AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH`를 연다(운영 스위치·`t1`은 별개). v22 `implement` Task는 본 앱이 관측한 권한 있는 사람의 승인 review와 병합으로 `done`·`v4TerminalAt`이 된다(공통 기반 원칙 12의 예외). engineering Agent 조건은 `engineering-agent.md` v5 |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -2682,3 +2685,39 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
   비용 재확인이 `worker_unavailable`까지 함께 만들었다. worker 가용성은 비용과 별개의 사실이므로
   비용이 판정 가능하면(보류가 아니면) worker를 센다. 준비 여부는 바뀌지 않는다: 재확인이 필요한
   Task는 여전히 준비되지 않는다.
+
+## 버전 49 — 사람 결정 두 번으로 줄인 v22 코드 작업 경로
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-15`. 2026-10-15 작성, 작성자 Claude.
+운영자는 한 아이디어를 코드 작업까지 끝내는 데 사람 클릭이 너무 많고, 코드 작업이 공개 PR
+없이는 `done`에 갈 수 없다는 보고를 보고 이 버전을 승인했다. 1인 조직에서 사람이 할 일은
+되돌릴 수 없는 결정뿐이어야 한다는 것이 이유다.
+
+- **사람 결정은 두 종류뿐이다.** (1) **아이디어 실행 승인과 계획 승인**: `amux-intake.md`
+  v18이 정한다. 실행 승인은 아이디어·모델·전송 범위·비용 상한을 한 번에 승인하고, 계획
+  승인은 분석이 제안한 Story·Task·의존 관계·역할·점수·공개 PR 동의를 한 화면에서 한 번에
+  승인한다. (2) **PR마다 권한 있는 사람의 GitHub required review와 사람의 병합.** 그 밖의
+  단계(분석 시작, 등록 뒤 편입, claim, 실행, PR 게시, `done` 전환, 의존 카드 해제)는 기존
+  결정적 Guard·비용·정지·kill switch 아래에서 자동이다.
+- **공개 PR 게시 코드 래치를 연다.** v29가 false로 둔 `AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH`를
+  이 승인과 같은 변경에서 true로 바꾼다(v25의 방식). 운영 스위치
+  `TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION`과 engineering Agent의 `t1` 모드는 각각 별개로
+  남고, 게시는 여전히 별도의 최소 권한 Engineering Publisher만 하며 대상은 `develop` PR뿐이다.
+  `main` 병합과 production 배포는 계속 운영자 전용이다. engineering Agent 쪽 조건은
+  `engineering-agent.md` v5가 정한다.
+- **v22 `implement` Task의 `done`은 GitHub에서 관측한 사람의 승인과 병합이다.** 공통 기반
+  원칙 12의 예외(공개 PR을 초안으로, 권한 있는 사람의 required review를 승인으로)를 이 경로의
+  완료 판정으로 쓴다. 본 앱이 대상 저장소 한정 읽기 전용 토큰으로 직접 관측해, 결속
+  snapshot의 base·head·diff digest와 같은 head에 대한 권한 있는 사람의 승인 review와 그 PR의
+  병합이 모두 있을 때 같은 트랜잭션에서 카드를 `done`으로 바꾸고 `v4TerminalAt`을 DB
+  시각으로 기록한다. 이 경로에서 v22 §3의 "운영자 완료 판정"은 그 GitHub 승인 review다.
+  Admin의 별도 승인 클릭은 없다. stale-approval dismissal, 승인자 대조, 병합 주체의 관측
+  기록, runner 자기 보고 불인정은 공통 기반 원칙 12 그대로다.
+- **PR 없이 끝나는 역할**(design·test·review·verify·investigate·operate)은 지금처럼 Admin의
+  사람 승인으로 `done`이 된다. 이 버전은 그 경로를 바꾸지 않는다.
+- **바뀌지 않는 것**: 비용 상한과 예약, 정지와 incident, worker 용량, 의존 관계, 1회 승인의
+  결속, 결과 불명은 멈추고 사람에게 넘긴다는 원칙, 에이전트는 PR을 승인·병합하지 않고
+  auto-merge를 켜지 않는다는 원칙.
+- 이 버전은 코드 래치 변경을 포함하지만 운영 스위치 설정, Publisher·GitHub App 설치,
+  배포를 따로 열지 않는다. 각 활성화는 `engineering-agent.md` v5의 활성화 전 점검을 마친
+  뒤 운영자가 켠다.
