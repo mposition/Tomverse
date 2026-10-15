@@ -286,8 +286,8 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   "amux-backlog": {
     label: "백로그",
-    description: "아이디어 입력 확인, 카드 등록, 카탈로그 이관, 소스 재조정, 카드 메타데이터",
-    aliases: ["백로그", "아이디어", "아이디어 분석", "등록", "카드 등록", "카탈로그 이관", "이관", "재조정", "소스 개정", "메타데이터", "우선순위", "비용 추정"],
+    description: "아이디어 입력, 카드 목록, 포트폴리오 평가, 카탈로그 이관, 소스 재조정, 카드 메타데이터, 정리",
+    aliases: ["백로그", "아이디어", "아이디어 분석", "등록", "카드 등록", "카탈로그 이관", "이관", "재조정", "소스 개정", "메타데이터", "우선순위", "비용 추정", "포트폴리오", "평가", "정리", "미사용 예약"],
     tabs: {
       ideas: { label: "아이디어", description: "아이디어를 넣고 실행과 계획을 승인" },
       list: { label: "카드 목록", description: "백로그 카드번호, 생성일, 한줄 설명과 저장된 점수" },
@@ -324,7 +324,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   "amux-settings": {
     label: "운영 설정",
     description: "AMUX 자동 편입, 실행 안전, 복구 증거와 Decision Maker 제어",
-    aliases: ["운영 설정", "자동 편입", "실행 안전", "복구", "자동 복구", "정지", "해제", "결과 불명", "확인할 쓰기", "Decision Maker", "결정 도우미", "킬 스위치"],
+    aliases: ["운영 설정", "자동 편입", "실행 안전", "복구", "자동 복구", "정지", "해제", "결과 불명", "확인할 쓰기", "Decision Maker", "결정 도우미", "킬 스위치", "분석 설정", "비용 카탈로그"],
     tabs: {
       "automatic-admission": {
         label: "자동 편입",

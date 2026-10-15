@@ -697,7 +697,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     label: "Backlog",
     href: "/admin/amux-backlog",
     description:
-      "Idea input, card registration, catalog import, source reconciliation and card metadata",
+      "Idea input, card list, portfolio assessment, catalog import, source reconciliation, card metadata and cleanup",
     group: "AMUX",
     writeRoles: ["owner"],
     viewRoles: ["owner"],
@@ -714,6 +714,10 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "metadata",
       "priority",
       "cost estimate",
+      "portfolio",
+      "assessment",
+      "cleanup",
+      "unused reservation",
     ],
     tabs: [
       {
@@ -858,6 +862,8 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "outcome unknown",
       "decision maker",
       "kill switch",
+      "analysis settings",
+      "cost catalogue",
     ],
     tabs: [
       {
