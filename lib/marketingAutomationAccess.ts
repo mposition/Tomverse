@@ -50,6 +50,7 @@ export type MarketingAutomationAccessReason =
   | "webhook_pipeline_fingerprint_stale"
   | "webhook_config_snapshot_invalid"
   | "webhook_production_config_unsigned"
+  | "webhook_production_config_generation_mismatch"
   | "webhook_record_digest_mismatch"
   | "webhook_audit_invalid"
   | "webhook_record_mismatch"
@@ -88,12 +89,14 @@ export const marketingAutomationEnabledFromValue = (
 export const MARKETING_PRICE_FALLBACK_ALERT_READY = false;
 
 /**
- * The S2e receiver, dedupe, storage, mapping and status-query comparison now
- * exist and are in the fingerprint below. This stays false until S2f adds the
- * separately signed production configuration generation (S1 r7 amendment 1):
- * a staging record alone never applies an event in production.
+ * The S2e receiver, dedupe, storage, mapping and status-query comparison, and
+ * the S2f separately signed production configuration generation (S1 r7
+ * amendment 1), apply scope and production apply writer, all exist.
+ * Completeness is not permission: a staging record alone still never applies
+ * an event, because the decision below also needs the signed generation to
+ * bind the live production configuration and the event to be in scope.
  */
-export const MARKETING_WEBHOOK_PIPELINE_COMPLETE = false;
+export const MARKETING_WEBHOOK_PIPELINE_COMPLETE = true;
 
 export const MARKETING_WEBHOOK_SCHEMA_VERSION = "marketing-webhook-shadow-v1";
 /** Written out, not imported: the receiver's core imports this module. */
@@ -140,11 +143,22 @@ export const MARKETING_WEBHOOK_PIPELINE_FILES = [
   "lib/marketingPublishAdapter.ts",
   "lib/marketingStore.ts",
   "lib/marketingWebhookCore.ts",
+  "lib/marketingWebhookProductionApply.ts",
+  "lib/marketingWebhookProductionConfig.ts",
+  "lib/marketingWebhookProductionConfigStore.ts",
   "lib/marketingWebhookReceiver.ts",
   "lib/marketingWebhookSettings.ts",
+  "lib/marketingWebhookVerification.ts",
   "lib/postgresConnectionConfigCore.mjs",
   "lib/prisma.ts",
   "lib/zernioPublishAdapter.ts",
+  // Every migration that shapes MarketingPost: the status whitelist and the
+  // history trigger the production apply relies on live in the first one. The
+  // test refuses a MarketingPost migration missing from this list.
+  "prisma/migrations/20260918120000_marketing_automation_tables/migration.sql",
+  "prisma/migrations/20260921170000_marketing_post_facts_digest/migration.sql",
+  "prisma/migrations/20260923140000_marketing_post_facts_digest_not_null/migration.sql",
+  "prisma/migrations/20260923160000_marketing_post_claim_pair_check/migration.sql",
   "prisma/migrations/20261002120000_marketing_webhook_shadow_event_unique/migration.sql",
   "prisma/schema.prisma",
 ] as const;
@@ -214,6 +228,8 @@ export const MARKETING_WEBHOOK_SCHEMA_MODELS = [
   "AdminAuditLog",
   "AppSetting",
   "MarketingChannel",
+  // S2f: production reads and writes the post's status and history.
+  "MarketingPost",
   "MarketingReport",
 ] as const;
 
@@ -602,7 +618,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * decision changes; the bytes moved, so prior evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "baa1fb12e0d3ebf82ca8a1c682895b21dc2ede3172e03ce1f54f3151c4ebc37f";
+  "b153b250238e8ffd9a65a15f2a37ed41a03beb12bcb6f43bb698bc5bc04c17e2";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
@@ -779,7 +795,13 @@ export const marketingWebhookVerificationSignatureSchema = z
 export const marketingWebhookApplyScopeSchema = z
   .object({
     recordId: verificationRecordId,
-    scope: uniqueScope(marketingWebhookScopeEntrySchema),
+    /** The signed production generation the scope was set under (S2f). */
+    productionConfigGeneration: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    // Empty is a stored stop: it applies nothing, and every event is outside it.
+    scope: z.union([
+      z.array(marketingWebhookScopeEntrySchema).max(0),
+      uniqueScope(marketingWebhookScopeEntrySchema),
+    ]),
   })
   .strict();
 
@@ -851,6 +873,15 @@ export type MarketingAutomationAccessInputs = {
   webhookSignatureAuditEvidence: ReadResult<MarketingWebhookSignatureAuditEvidence>;
   webhookConfigSnapshot: ReadResult<MarketingWebhookConfigSnapshot>;
   webhookEvent: ReadResult<WebhookScopeEntry>;
+  /**
+   * The signed production generation and every reason it does not bind the
+   * live production configuration now (lib/marketingWebhookProductionConfig.ts
+   * computes them; this module cannot import it). No refusals means it binds.
+   */
+  webhookProductionConfig: ReadResult<{
+    readonly generation: number;
+    readonly refusals: readonly string[];
+  }>;
 };
 
 const add = (
@@ -980,8 +1011,21 @@ const webhookApplyDecision = (
   // S1 r7 amendment 1: the record's staging snapshot is staging evidence and is
   // never compared with the live one -- environment identity, shadow state and
   // secrets are meant to differ. Production is bound by its own separately
-  // signed configuration generation, which S2f adds; until then nothing is.
-  add(reasons, "webhook_production_config_unsigned");
+  // signed configuration generation, which must still bind the live production
+  // configuration, and the scope must have been set under that generation.
+  if (!input.webhookProductionConfig.ok) {
+    add(reasons, "input_unreadable:webhookProductionConfig");
+  } else {
+    if (input.webhookProductionConfig.value.refusals.length > 0) {
+      add(reasons, "webhook_production_config_unsigned");
+    }
+    if (
+      !configured ||
+      configured.productionConfigGeneration !== input.webhookProductionConfig.value.generation
+    ) {
+      add(reasons, "webhook_production_config_generation_mismatch");
+    }
+  }
 
   if (record && signature) {
     const recordText = input.webhookVerificationRecordText;
