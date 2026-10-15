@@ -168,13 +168,13 @@ export async function previewAmuxPortfolioScore(session: Session,
   { isolationLevel: "RepeatableRead", maxWait: 2_000, timeout: 8_000 });
 }
 
-/** Direct writer is for synthetic DB tests; the route uses the code latch. */
-export async function commitAmuxPortfolioScore(input: { session: Session;
-  request: Request; payload: AmuxPortfolioScorePayload;
-  confirmationDigest: string; digestKey: AmuxDigestKey }) {
+/** One score inside the caller's transaction. The single route passes the
+ * digest its preview showed; the plan approval passes null. */
+export async function writeAmuxPortfolioScoreInTx(tx: Prisma.TransactionClient, input: {
+  session: Session; request: Request; payload: AmuxPortfolioScorePayload;
+  confirmationDigest: string | null; digestKey: AmuxDigestKey }) {
   const actorUserId = amuxPortfolioOwnerId(input.session);
-  await assertRecentAdminAuthentication(input.session);
-  return prisma.$transaction(async (tx) => {
+  {
     await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
     await takeAuditChainLock(tx);
     const locked = await tx.$queryRaw<Array<{ id: string }>>`
@@ -187,7 +187,7 @@ export async function commitAmuxPortfolioScore(input: { session: Session;
     }
     const plan = await buildScorePlan(tx, actorUserId,
       input.payload, input.digestKey);
-    if (plan.inputDigest !== input.confirmationDigest) {
+    if (input.confirmationDigest !== null && plan.inputDigest !== input.confirmationDigest) {
       throw new AmuxPortfolioError("reconfirm");
     }
     const auditId = await writeAdminAuditLog({ tx, session: input.session,
@@ -219,7 +219,17 @@ export async function commitAmuxPortfolioScore(input: { session: Session;
     } });
     return { state: "confirmed" as const, scoreId: input.payload.id,
       score: plan.score, auditId };
-  }, { isolationLevel: "Serializable", maxWait: 5_000, timeout: 15_000 });
+  }
+}
+
+/** Direct writer is for synthetic DB tests; the route uses the code latch. */
+export async function commitAmuxPortfolioScore(input: { session: Session;
+  request: Request; payload: AmuxPortfolioScorePayload;
+  confirmationDigest: string; digestKey: AmuxDigestKey }) {
+  amuxPortfolioOwnerId(input.session);
+  await assertRecentAdminAuthentication(input.session);
+  return prisma.$transaction(async (tx) => writeAmuxPortfolioScoreInTx(tx, input),
+    { isolationLevel: "Serializable", maxWait: 5_000, timeout: 15_000 });
 }
 
 export async function confirmAmuxPortfolioScore(

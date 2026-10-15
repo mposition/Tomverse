@@ -111,37 +111,20 @@ export const MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES = [
 ] as const;
 
 /**
- * Every file whose bytes can decide what a received event becomes: the whole
- * local import closure of the receiver route (receiver, signature, dedupe,
- * storage and audit transaction, mapping, status query), plus the schema's receiver
- * models (MARKETING_WEBHOOK_SCHEMA_MODELS, not the whole file) and
- * the dedupe index it cannot see. Not a hand-picked subset -- the test derives
- * the closure and refuses any difference. This module itself is left out: it
- * holds the fingerprint, and its webhook inputs are in the descriptor below.
- * A change to any listed file makes a signed staging record stale.
+ * What the fingerprint hashes (docs/policy/marketing-automation.md §8.1.1: the
+ * code that affects conditions 1-5). The webhook modules below are hashed
+ * whole. Every other local file they load contributes its load-time effects
+ * and the top-level declarations the path uses, with their import wiring
+ * (scripts/marketing-webhook-pipeline-sources.mjs; the test derives
+ * it, nothing is hand-picked). The shared modules after this list contribute
+ * nothing: the audit chain and the database client are held by their own
+ * tests and triggers, and hashing them made every new audit actor, another
+ * feature's store function or a back relation on `AdminAuditLog` stale a
+ * signed record (operator decision 2026-10-15). This module itself is left
+ * out: it holds the fingerprint, and its webhook inputs are in the descriptor.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FILES = [
-  "app/api/_marketing/zernioAdapter.ts",
   "app/api/webhooks/zernio/route.ts",
-  "lib/adminAudit.ts",
-  "lib/adminAuditIntegrityCore.ts",
-  "lib/adminAuditSystemActors.ts",
-  "lib/clientIp.ts",
-  "lib/deploymentEnvironment.ts",
-  "lib/marketingAuditEvidence.ts",
-  "lib/marketingAutomationSchema.ts",
-  "lib/marketingBannedClaims.ts",
-  "lib/marketingClaimVerbs.ts",
-  "lib/marketingFacts.ts",
-  "lib/marketingGuardCore.ts",
-  "lib/marketingGuardNormalise.ts",
-  "lib/marketingGuardRules.ts",
-  "lib/marketingKoreanClaims.ts",
-  "lib/marketingMemoryClaims.ts",
-  "lib/marketingMinorsClaims.ts",
-  "lib/marketingNegation.ts",
-  "lib/marketingPublishAdapter.ts",
-  "lib/marketingStore.ts",
   "lib/marketingWebhookCore.ts",
   "lib/marketingWebhookProductionApply.ts",
   "lib/marketingWebhookProductionConfig.ts",
@@ -149,9 +132,6 @@ export const MARKETING_WEBHOOK_PIPELINE_FILES = [
   "lib/marketingWebhookReceiver.ts",
   "lib/marketingWebhookSettings.ts",
   "lib/marketingWebhookVerification.ts",
-  "lib/postgresConnectionConfigCore.mjs",
-  "lib/prisma.ts",
-  "lib/zernioPublishAdapter.ts",
   // Every migration that shapes MarketingPost: the status whitelist and the
   // history trigger the production apply relies on live in the first one. The
   // test refuses a MarketingPost migration missing from this list.
@@ -163,7 +143,20 @@ export const MARKETING_WEBHOOK_PIPELINE_FILES = [
   "prisma/schema.prisma",
 ] as const;
 
-/** The route whose import closure the list above must equal. */
+/**
+ * Reached by the webhook path, contributing nothing to the fingerprint. The
+ * test refuses an entry the path no longer reaches. What only these modules
+ * import (the client IP reader, the connection config) is never reached, so
+ * it needs no entry of its own.
+ */
+export const MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES = [
+  "lib/adminAudit.ts",
+  "lib/adminAuditIntegrityCore.ts",
+  "lib/adminAuditSystemActors.ts",
+  "lib/prisma.ts",
+] as const;
+
+/** The route whose import closure every listed module must belong to. */
 export const MARKETING_WEBHOOK_PIPELINE_ROOT = "app/api/webhooks/zernio/route.ts";
 
 /**
@@ -254,16 +247,22 @@ export const marketingWebhookSchemaSlice = (schemaText: string): string => {
   const wanted = new Set<string>(
     order.filter((key) => key.startsWith("datasource ") || key.startsWith("generator ")),
   );
+  const watched = new Set<string>(MARKETING_WEBHOOK_SCHEMA_MODELS);
   for (const model of MARKETING_WEBHOOK_SCHEMA_MODELS) {
     const block = blocks.get(`model ${model}`);
     if (block === undefined) {
       throw new Error(`Marketing webhook schema model is missing: ${model}`);
     }
     wanted.add(`model ${model}`);
-    for (const line of block.split("\n").slice(1)) {
-      const field = /^\s*\w+\s+(\w+)/.exec(line);
+    // A relation field to a model outside the watched set is another feature's
+    // back relation: it adds no column here and decides nothing the receiver
+    // stores, so it leaves the slice (operator decision 2026-10-15).
+    const kept = block.split("\n").filter((line, index) => {
+      const field = index === 0 ? null : /^\s*\w+\s+(\w+)/.exec(line);
       if (field && blocks.has(`enum ${field[1]}`)) wanted.add(`enum ${field[1]}`);
-    }
+      return !(field && blocks.has(`model ${field[1]}`) && !watched.has(field[1]));
+    });
+    blocks.set(`model ${model}`, kept.join("\n"));
   }
   return `${order
     .filter((key) => wanted.has(key))
@@ -315,15 +314,10 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * webhook account contraction changed it -- the old
  * `(provider, providerEventId)` unique and the `providerAccount` default are
  * gone, and `EmailDelivery(providerAccount, providerMessageId)` became unique
- * (docs/policy/email-notifications.md v24).
- *
- * This is not a change the marketing pipeline merely happens to sit beside: it
- * changes the storage rules the pipeline depends on. A marketing webhook event
- * carrying the same provider event id as a transactional one is now stored
- * rather than refused, and a marketing delivery's message id is now unique
- * within the marketing account rather than merely indexed. Both make the
- * per-account matching S1b-2b built true instead of assumed, and neither
- * changes a decision this module makes -- which is what the second look was
+ * (docs/policy/email-notifications.md v24). A marketing webhook event carrying
+ * a transactional provider event id is now stored rather than refused, and a
+ * marketing delivery's message id is unique within its account; neither
+ * changes a decision this module makes, which is what the second look was
  * for.
  *
  * 2026-09-21: the other watched file, `lib/marketingAutomationSchema.ts`,
@@ -616,9 +610,15 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * shared audit helper and their back relations to `AdminAuditLog` in the
  * watched schema. No marketing actor, descriptor, webhook writer or admission
  * decision changes; the bytes moved, so prior evidence is stale.
+ *
+ * 2026-10-15: the scope narrows to what decides an event (operator decision;
+ * see the file list above). Every entry from 2026-09-21 on records a change
+ * that moved this value without changing a webhook decision; under the new
+ * scope none of them would have. A change to a webhook module, a declaration
+ * it uses or a watched column still moves it, and still re-opens verification.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "b153b250238e8ffd9a65a15f2a37ed41a03beb12bcb6f43bb698bc5bc04c17e2";
+  "643befaf99794fbb478b6ad914996f6e1e4e6575122c88d6c2c14f35d447eb73";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

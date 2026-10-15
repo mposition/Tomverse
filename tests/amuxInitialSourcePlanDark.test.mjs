@@ -30,11 +30,21 @@ test("the v4 initial source-plan writer has only its gated Admin access caller",
       source.includes("createInitialIdeaOnlySourcePlan"))
     .map(({ path }) => path);
   assert.deepEqual(callSites, [
+    "app/api/admin/amux/ideas/build-preview/route.ts",
     "app/api/admin/amux/ideas/initial-source-plan/route.ts",
     "lib/amux/ideaInitialSourcePlanAccess.ts",
   ]);
-  const route = readFileSync(resolve(root, callSites[0]), "utf8");
-  const access = readFileSync(resolve(root, callSites[1]), "utf8");
+  const route = readFileSync(resolve(root, callSites[1]), "utf8");
+  const access = readFileSync(resolve(root, callSites[2]), "utf8");
+  // The one-request preview builder (amux-intake.md v18 item 1) reaches the
+  // writer only through the gated access function, behind the same switches.
+  const builder = readFileSync(resolve(root, callSites[0]), "utf8");
+  assert.ok(builder.includes("if (!buildPreviewPermitted(process.env))"));
+  assert.ok(builder.includes("prepareInitialIdeaSourcePlan(session, request, ideaId)"));
+  assert.ok(!builder.includes("createInitialIdeaOnlySourcePlan"));
+  const builderGate = readFileSync(resolve(root, "lib/amux/ideaBuildPreviewCore.ts"), "utf8");
+  assert.ok(builderGate.includes("initialPlanWritePermitted(env[AMUX_V4_INITIAL_PLAN_WRITE_ENV])"));
+  assert.ok(builderGate.includes("initialPlanReadbackPermitted(env[AMUX_V4_INITIAL_PLAN_READBACK_ENV])"));
   const core = readFileSync(resolve(root, "lib/amux/ideaInitialSourcePlanCore.ts"), "utf8");
   assert.match(route, /!initialPlanWritePermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_WRITE_ENV\]\)/);
   assert.match(route, /!initialPlanReadbackPermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_READBACK_ENV\]\)/);

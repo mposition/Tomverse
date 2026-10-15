@@ -103,31 +103,26 @@ export async function loadAmuxCardDuplicateScanner() {
     if (error instanceof AmuxCardDuplicateScanError) throw error;
     throw new AmuxCardDuplicateScanError("integrity_unavailable");
   }
-  const signatures = rows.map((row) => JSON.stringify({ id: row.id,
-    sourceSystem: row.sourceSystem, sourceSnapshot: row.sourceSnapshot,
-    title: row.title, revision: row.revision, cardType: row.cardType,
-    storyKind: row.storyKind, parentFeatureNodeId: row.parentFeatureNodeId,
-    archivedAt: row.archivedAt?.toISOString() ?? null, status: row.status,
-    titleDigest: row.v4TitleDigest, titleKeyId: row.v4TitleKeyId,
-    titleKeyVersion: row.v4TitleKeyVersion,
-    titleCiphertext: ciphertextFingerprint(row.v4TitleCiphertext) }));
-
-  return async (tx: Prisma.TransactionClient, input: {
-    unitId: string; proposal: AmuxAnalysisCard; featureNodeId: string;
-  }) => {
-    const fresh = await tx.amuxWorkItem.findMany({
-      take: LIMIT + 1, orderBy: { id: "asc" }, select,
-    });
-    const freshSignatures = fresh.map((row) => JSON.stringify({ id: row.id,
+  const signature = (row: Prisma.AmuxWorkItemGetPayload<{ select: typeof select }>) =>
+    JSON.stringify({ id: row.id,
       sourceSystem: row.sourceSystem, sourceSnapshot: row.sourceSnapshot,
       title: row.title, revision: row.revision, cardType: row.cardType,
       storyKind: row.storyKind, parentFeatureNodeId: row.parentFeatureNodeId,
       archivedAt: row.archivedAt?.toISOString() ?? null, status: row.status,
       titleDigest: row.v4TitleDigest, titleKeyId: row.v4TitleKeyId,
       titleKeyVersion: row.v4TitleKeyVersion,
-      titleCiphertext: ciphertextFingerprint(row.v4TitleCiphertext) }));
-    if (fresh.length > LIMIT || freshSignatures.length !== signatures.length ||
-        freshSignatures.some((value, index) => value !== signatures[index])) {
+      titleCiphertext: ciphertextFingerprint(row.v4TitleCiphertext) });
+  // Compared by id, not by position: the catalog is a set.
+  const signatures = new Map(rows.map((row) => [row.id, signature(row)]));
+
+  const scan = async (tx: Prisma.TransactionClient, input: {
+    unitId: string; proposal: AmuxAnalysisCard; featureNodeId: string;
+  }) => {
+    const fresh = await tx.amuxWorkItem.findMany({
+      take: LIMIT + 1, orderBy: { id: "asc" }, select,
+    });
+    if (fresh.length > LIMIT || fresh.length !== signatures.size ||
+        fresh.some((row) => signatures.get(row.id) !== signature(row))) {
       throw new AmuxCardDuplicateScanError("catalog_incomplete");
     }
     const clock = await tx.$queryRaw<Array<{ now: Date }>>`
@@ -143,4 +138,25 @@ export async function loadAmuxCardDuplicateScanner() {
     if (!result.ok) throw new AmuxCardDuplicateScanError(result.code);
     return result.scan;
   };
+  /** The plan approval batch registers cards inside the same transaction it
+   * scans in. Each card it has just created is read back from that
+   * transaction and admitted, with the title the batch wrote; anything else
+   * new or changed is still an incomplete catalog. */
+  const admitCreated = async (tx: Prisma.TransactionClient,
+    created: { id: string; title: string }) => {
+    const row = await tx.amuxWorkItem.findUnique({ where: { id: created.id }, select });
+    if (!row || signatures.has(row.id) || signatures.size >= LIMIT ||
+        row.sourceSystem !== "admin-idea-v4" || row.archivedAt !== null ||
+        row.status !== "backlog" || !row.v4TitleDigest || !row.v4TitleDigestKeyId ||
+        !["story", "task"].includes(row.cardType ?? "")) {
+      throw new AmuxCardDuplicateScanError("catalog_incomplete");
+    }
+    signatures.set(row.id, signature(row));
+    catalog.push({ id: row.id, title: created.title, revision: row.revision,
+      content: { digest: row.v4TitleDigest, keyId: row.v4TitleDigestKeyId },
+      cardType: row.cardType as "story" | "task",
+      storyKind: row.storyKind as "general" | "bug" | null,
+      featureNodeId: row.parentFeatureNodeId, archived: false });
+  };
+  return Object.assign(scan, { admitCreated });
 }
