@@ -1403,7 +1403,7 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   하위 프로세스·평가·네트워크 global·환경변수·로그를 쓰지 않습니다. 구문 검사는 정직한
   회귀만 잡으므로, **모듈을 고치면 테스트의 `REVIEWED_MODULE_SHA256`이 실패하고 그 digest를
   갱신하는 변경이 곧 독립 검토의 대상**입니다(docs/policy/engineering-agent.md §8).
-- **v5 승인·병합 관측**: `lib/engineeringAgentPrApprovalCore.ts`(§9-10 일곱 조건, 순수),
+- **v5 승인·병합 관측**: `lib/engineeringAgentPrApprovalCore.ts`(docs/policy/engineering-agent.md §9-10 일곱 조건, 순수),
   `lib/engineeringAgentPrObserver.ts`, `lib/amux/reviewMergeObserved.ts`,
   `app/api/internal/engineering-agent/observe/pull-requests/route.ts`. **승인은 병합 전에만 기록하고**,
   "아직 리뷰 없음"은 기록하지 않고 다음 주기에 다시 읽습니다. 병합 전에 승인이 기록된 PR의 병합만
