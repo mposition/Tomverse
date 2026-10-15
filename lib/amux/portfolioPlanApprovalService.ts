@@ -10,6 +10,7 @@ import { AMUX_V4_PORTFOLIO_WRITE_ENV, AmuxPortfolioError, amuxPortfolioOwnerId,
   amuxV4PortfolioWriteEnabled, writeAmuxPortfolioAssessmentInTx } from
   "./portfolioAssessmentService.ts";
 import { writeAmuxPortfolioScoreInTx } from "./portfolioScoreService.ts";
+import { amuxV4ScorePlanRowRequestId, isAmuxV4PlanRequestId } from "./portfolioPlanCore.ts";
 import type { AmuxPortfolioAssessmentPayload } from "./portfolioScoreSchemas.ts";
 
 export const AMUX_V4_SCORE_PLAN_MAX_ASSESSMENTS = 64;
@@ -43,7 +44,8 @@ export type AmuxV4ScorePlanAssessment = {
  * there is no separate preview digest to echo.
  */
 export async function approveAmuxV4ScorePlan(session: Session, request: Request, input: {
-  assessments: readonly AmuxV4ScorePlanAssessment[]; taskIds: readonly string[];
+  planRequestId: string; assessments: readonly AmuxV4ScorePlanAssessment[];
+  taskIds: readonly string[];
 }) {
   amuxPortfolioOwnerId(session);
   await assertRecentAdminAuthentication(session);
@@ -56,6 +58,7 @@ export async function approveAmuxV4ScorePlan(session: Session, request: Request,
       input.taskIds.length > AMUX_V4_SCORE_PLAN_MAX_TASKS ||
       new Set(subjects).size !== subjects.length ||
       new Set(input.taskIds).size !== input.taskIds.length ||
+      !isAmuxV4PlanRequestId(input.planRequestId) ||
       [...subjects, ...input.taskIds].some((id) => !ID.test(id))) {
     throw new AmuxPortfolioError("invalid_input");
   }
@@ -77,7 +80,9 @@ export async function approveAmuxV4ScorePlan(session: Session, request: Request,
       for (const entry of input.assessments) {
         const written = await writeAmuxPortfolioAssessmentInTx(tx, {
           session, request, digestKey, confirmationDigest: null,
-          payload: { id: randomUUID(), requestId: randomUUID(), subject: entry.subject,
+          payload: { id: randomUUID(),
+          requestId: amuxV4ScorePlanRowRequestId(input.planRequestId, "assessment", entry.subject.id),
+          subject: entry.subject,
             metrics: entry.metrics, uncertainty: entry.uncertainty,
             evidenceRefs: entry.evidenceRefs, evidenceAsOf,
             reasonCode: assessed.has(entry.subject.id) ? "operator_override" : "initial",
@@ -90,7 +95,8 @@ export async function approveAmuxV4ScorePlan(session: Session, request: Request,
       for (const taskId of input.taskIds) {
         const written = await writeAmuxPortfolioScoreInTx(tx, {
           session, request, digestKey, confirmationDigest: null,
-          payload: { id: randomUUID(), requestId: randomUUID(), taskId },
+          payload: { id: randomUUID(),
+            requestId: amuxV4ScorePlanRowRequestId(input.planRequestId, "score", taskId), taskId },
         });
         scores.push({ taskId, scoreId: written.scoreId, total: written.score.total });
       }
@@ -102,4 +108,39 @@ export async function approveAmuxV4ScorePlan(session: Session, request: Request,
     if (!callbackReturned && error instanceof AmuxPortfolioError) throw error;
     throw new AmuxV4ScorePlanError("outcome_unknown");
   }
+}
+
+/**
+ * Exact read-back after an unknown outcome: the client derives nothing; it
+ * sends the plan request id and the subjects it sent, and the rows found by
+ * their derived request ids say whether the plan committed. The plan is all
+ * or nothing, so every row is present or none is.
+ */
+export async function readAmuxV4ScorePlan(session: Session, input: {
+  planRequestId: string; subjectIds: readonly string[]; taskIds: readonly string[];
+}) {
+  const actorUserId = amuxPortfolioOwnerId(session);
+  if (!isAmuxV4PlanRequestId(input.planRequestId) ||
+      input.subjectIds.length > AMUX_V4_SCORE_PLAN_MAX_ASSESSMENTS ||
+      input.taskIds.length > AMUX_V4_SCORE_PLAN_MAX_TASKS ||
+      [...input.subjectIds, ...input.taskIds].some((id) => !ID.test(id))) {
+    throw new AmuxPortfolioError("invalid_input");
+  }
+  const [assessments, scores] = await Promise.all([
+    prisma.amuxPortfolioAssessment.findMany({
+      where: { approvedByUserId: actorUserId, requestId: { in: input.subjectIds.map((id) =>
+        amuxV4ScorePlanRowRequestId(input.planRequestId, "assessment", id)) } },
+      select: { id: true, nodeId: true, cardId: true, assessmentVersion: true },
+    }),
+    prisma.amuxPortfolioScoreSnapshot.findMany({
+      where: { approvedByUserId: actorUserId, requestId: { in: input.taskIds.map((id) =>
+        amuxV4ScorePlanRowRequestId(input.planRequestId, "score", id)) } },
+      select: { id: true, taskId: true, scoreTotal: true },
+    }),
+  ]);
+  const expected = input.subjectIds.length + input.taskIds.length;
+  const found = assessments.length + scores.length;
+  return { state: found === 0 ? "not_visible" as const : found === expected ?
+    "committed" as const : "inconsistent" as const, retryWrite: false as const,
+    assessments, scores };
 }

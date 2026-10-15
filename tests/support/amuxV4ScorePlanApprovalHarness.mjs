@@ -35,7 +35,7 @@ mock.module(mod("lib/amux/portfolioAssessmentService.ts"), {
     amuxV4PortfolioWriteEnabled: (value) => value === "enabled",
     writeAmuxPortfolioAssessmentInTx: async (tx, input) => {
       calls.push(["assess", tx, input.payload.subject.id, input.payload.reasonCode, input.confirmationDigest,
-        input.payload.evidenceAsOf]);
+        input.payload.evidenceAsOf, input.payload.requestId]);
       if (failOn === input.payload.subject.id) throw new PortfolioError("not_ready");
       return { assessmentId: input.payload.id, assessmentVersion: 1 };
     },
@@ -44,7 +44,7 @@ mock.module(mod("lib/amux/portfolioAssessmentService.ts"), {
 mock.module(mod("lib/amux/portfolioScoreService.ts"), {
   namedExports: {
     writeAmuxPortfolioScoreInTx: async (tx, input) => {
-      calls.push(["score", tx, input.payload.taskId, input.confirmationDigest]);
+      calls.push(["score", tx, input.payload.taskId, input.confirmationDigest, input.payload.requestId]);
       if (failOn === input.payload.taskId) throw new PortfolioError("not_ready");
       return { scoreId: input.payload.id, score: { total: 71 } };
     },
@@ -57,6 +57,7 @@ const request = new Request("https://t.test");
 const assessment = (kind, id) => ({ subject: { kind, id }, metrics: { value: 3 }, uncertainty: "low",
   evidenceRefs: ["evidence-01"], modelProposalDigest: null });
 const input = {
+  planRequestId: "11111111-2222-4333-8444-555555555555",
   assessments: [assessment("initiative", "node-init-01"), assessment("epic", "node-epic-01"),
     assessment("feature", "node-feat-01"), assessment("task", "card-task-01"), assessment("task", "card-task-02")],
   taskIds: ["card-task-01", "card-task-02"],
@@ -81,6 +82,12 @@ const assessCalls = calls.filter(([k]) => k === "assess");
 assert.deepEqual(assessCalls.map((c) => c[3]), ["operator_override", "initial", "initial", "initial", "initial"]);
 assert.ok(assessCalls.every((c) => c[4] === null));
 assert.ok(calls.filter(([k]) => k === "score").every((c) => c[3] === null));
+// Row request ids derive from the plan's id: the same plan sent again derives the same ids.
+const first = calls.filter(([k]) => k === "assess" || k === "score").map((c) => c[c.length - 1]);
+calls = [];
+await approveAmuxV4ScorePlan(session, request, input);
+assert.deepEqual(calls.filter(([k]) => k === "assess" || k === "score").map((c) => c[c.length - 1]), first);
+assert.equal(new Set(first).size, first.length);
 // Evidence time is in the past on the server clock.
 assert.ok(new Date(assessCalls[0][5]).getTime() < Date.now());
 
@@ -99,6 +106,8 @@ reset();
 await assert.rejects(approveAmuxV4ScorePlan(session, request, { ...input,
   assessments: [assessment("epic", "node-epic-01"), assessment("epic", "node-epic-01")] }),
 (error) => error.code === "invalid_input");
-await assert.rejects(approveAmuxV4ScorePlan(session, request, { assessments: [], taskIds: [] }),
+await assert.rejects(approveAmuxV4ScorePlan(session, request, { ...input, planRequestId: "not-a-uuid" }),
+  (error) => error.code === "invalid_input");
+await assert.rejects(approveAmuxV4ScorePlan(session, request, { planRequestId: input.planRequestId, assessments: [], taskIds: [] }),
   (error) => error.code === "invalid_input");
 assert.equal(calls.some(([k]) => k === "transaction"), false);
