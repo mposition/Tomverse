@@ -304,11 +304,15 @@ export const marketingWebhookPipelineSources = ({
     };
     visit(node);
   };
+  // A loaded module is in the sources even with nothing to include: its
+  // evaluation order (a re-export-only module has nothing else) still counts.
+  const touch = (relative) => {
+    if (included.has(relative)) return;
+    included.set(relative, new Set());
+    for (const always of moduleOf(relative).always) include(relative, always);
+  };
   const include = (relative, index) => {
-    if (!included.has(relative)) {
-      included.set(relative, new Set());
-      for (const always of moduleOf(relative).always) include(relative, always);
-    }
+    touch(relative);
     const set = included.get(relative);
     if (set.has(index)) return;
     set.add(index);
@@ -331,7 +335,7 @@ export const marketingWebhookPipelineSources = ({
     if (loaded.has(file) || shared.has(file) || file === selfModule) continue;
     loaded.add(file);
     const parsed = moduleOf(file);
-    if (!whole.has(file) && parsed.always.length > 0) include(file, parsed.always[0]);
+    if (!whole.has(file)) touch(file);
     toLoad.push(...parsed.loads);
   }
 

@@ -825,6 +825,20 @@ test("the slicer keeps load-time effects and import wiring, and refuses dynamic 
     swapped({ "lib/s.ts": 'import { b } from "@/lib/b";\nimport { a } from "@/lib/a";\nexport const decide = () => [a, b];\n' }),
     swapped(),
   );
+  // ... including in a module that only re-exports.
+  const reexport = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts": 'export { a } from "@/lib/a";\nexport { b } from "@/lib/b";\nexport { decide } from "@/lib/d";\n',
+    "lib/a.ts": "export const a = 1;\n(globalThis as { v?: number }).v = 1;\n",
+    "lib/b.ts": "export const b = 2;\n(globalThis as { v?: number }).v = 2;\n",
+    "lib/d.ts": "export const decide = () => (globalThis as { v?: number }).v;\n",
+  });
+  assert.notEqual(
+    reexport({
+      "lib/s.ts": 'export { b } from "@/lib/b";\nexport { a } from "@/lib/a";\nexport { decide } from "@/lib/d";\n',
+    }),
+    reexport(),
+  );
   // A module loaded by import() or require() cannot be followed.
   const dynamic = miniature({
     "lib/w.ts": 'export const later = () => import("@/lib/d");\n',
