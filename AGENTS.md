@@ -1307,8 +1307,17 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   그 게시물 이력의 `webhook_event` digest이며, 중복은 아무것도 쓰지 않습니다. 전이는 DB whitelist보다
   좁습니다 — 같은 상태는 확인(이력만 추가), 살아 있는 게시물의 플랫폼 삭제만 `removed_by_platform`으로
   옮기고, **`outcome_unknown`은 polling처럼 이벤트로도 풀지 않습니다**(사람만). 나머지는 게시물을 건드리지
-  않고 `status_refused`만 씁니다. 아직 수신기가 부르지 않습니다 — 판정 모듈 연결과 production 수신은
-  다음 slice입니다.
+  않고 `status_refused`만 씁니다.
+- **S2f production 수신**: `lib/marketingWebhookProductionApply.ts`, `lib/marketingWebhookReceiver.ts`의
+  `production` 경로, `app/api/webhooks/zernio/route.ts`, `recordMarketingWebhookApplyNotPermitted()`.
+  **배포가 production이라고 밝히고 production 설정 세대가 서명돼 있을 때만** 본문을 읽습니다 — 그 전과
+  dev·라벨 없는 빌드는 S2e처럼 읽지 않고 404입니다. 서명·envelope 다음에는 latch·shadow·상태 조회 없이
+  production 경로로 넘깁니다. 판정은 판정 모듈의 `webhookApply` 하나이며, 감사 체인 잠금을 잡은 같은
+  트랜잭션에서 판정하고 적용합니다 — scope·서명 writer도 그 잠금을 먼저 잡으므로 판정과 쓰기 사이에
+  설정이 바뀌지 않습니다. 검증 기록의 서명은 별도 서명 파일이 아니라 서명된 세대의 감사 행이 이름 댄
+  행이고, 지금 트리의 기록 digest로 다시 검증합니다. 판정이 거절하면 게시물을 읽지 않고
+  `status_refused`(`apply_not_permitted`, 닫힌 사유)만 남기며, 우리 계정이 아닌 이벤트는 감사도 남기지
+  않습니다. 판정 모듈은 kill switch 값을 받지 못하면 모든 기능을 거절하므로 실제 값을 넘깁니다.
 - **S2f 서명**: `lib/marketingWebhookProductionConfigStore.ts`,
   `app/api/admin/marketing/webhook/production-config/route.ts`(POST, 서명),
   `app/api/admin/marketing/webhook/production-config/live/route.ts`(GET, 서명 전 화면이 볼 값),

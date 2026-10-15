@@ -109,7 +109,7 @@ const completeInputs = () => ({
   resolvedDeploymentEnvironment: readable("staging"),
   webhookSignatureVerified: readable(true),
   webhookApplyScopeValue: readable(
-    JSON.stringify({ recordId: record.recordId, scope: [scopeEntry] }),
+    JSON.stringify({ recordId: record.recordId, productionConfigGeneration: 3, scope: [scopeEntry] }),
   ),
   webhookVerificationRecordText: readable(recordText),
   webhookVerificationSignatureText: readable(JSON.stringify(signature)),
@@ -122,6 +122,7 @@ const completeInputs = () => ({
   }),
   webhookConfigSnapshot: readable(configSnapshot),
   webhookEvent: readable(scopeEntry),
+  webhookProductionConfig: readable({ generation: 3, refusals: [] }),
 });
 
 const BOOLEAN_REQUIREMENTS = {
@@ -185,14 +186,10 @@ test("exports exactly the policy section 6.1 feature rows", () => {
   assert.equal(MARKETING_PRICE_FALLBACK_ALERT_READY, false);
 });
 
-test("the complete admitted inputs enable every S1 feature except apply", () => {
+test("the complete admitted inputs enable every feature, webhook apply included (S2f)", () => {
   const decisions = resolveMarketingAutomationAccess(completeInputs());
   for (const feature of MARKETING_AUTOMATION_FEATURES) {
-    assert.equal(
-      decisions[feature].enabled,
-      feature !== "webhookApply",
-      feature,
-    );
+    assert.equal(decisions[feature].enabled, true, feature);
   }
 });
 
@@ -378,12 +375,9 @@ test("webhook shadow requires exact staging and a verified signature", () => {
 });
 
 test("webhook apply validates record, sibling signature, scope, audit, and config", () => {
-  assert.equal(MARKETING_WEBHOOK_PIPELINE_COMPLETE, false);
+  assert.equal(MARKETING_WEBHOOK_PIPELINE_COMPLETE, true);
   const baseline = resolveMarketingAutomationAccess(completeInputs()).webhookApply;
-  assert.deepEqual(baseline, {
-    enabled: false,
-    reasons: ["webhook_pipeline_incomplete", "webhook_production_config_unsigned"],
-  });
+  assert.deepEqual(baseline, { enabled: true, reasons: [] });
 
   const cases = [
     ["webhookApplyScopeValue", readable("not json"), "webhook_scope_invalid"],
@@ -413,6 +407,30 @@ test("webhook apply validates record, sibling signature, scope, audit, and confi
       readable({ eventType: "post.failed", channelId: scopeEntry.channelId }),
       "webhook_event_outside_scope",
     ],
+    // The signed production generation no longer binds the live configuration.
+    [
+      "webhookProductionConfig",
+      readable({ generation: 3, refusals: ["production_config_snapshot_mismatch"] }),
+      "webhook_production_config_unsigned",
+    ],
+    // The scope was set under another generation than the signed one.
+    [
+      "webhookProductionConfig",
+      readable({ generation: 4, refusals: [] }),
+      "webhook_production_config_generation_mismatch",
+    ],
+    // An empty scope is a stop: nothing is in it.
+    [
+      "webhookApplyScopeValue",
+      readable(JSON.stringify({ recordId: record.recordId, productionConfigGeneration: 3, scope: [] })),
+      "webhook_event_outside_scope",
+    ],
+    // The pre-S2f scope shape, with no generation, is not a scope.
+    [
+      "webhookApplyScopeValue",
+      readable(JSON.stringify({ recordId: record.recordId, scope: [scopeEntry] })),
+      "webhook_scope_invalid",
+    ],
   ];
 
   for (const [name, value, reason] of cases) {
@@ -421,13 +439,14 @@ test("webhook apply validates record, sibling signature, scope, audit, and confi
     const decision = resolveMarketingAutomationAccess(inputs).webhookApply;
     assert.equal(decision.enabled, false, name);
     assert.ok(decision.reasons.includes(reason), `${name}: ${reason}`);
-    assert.ok(decision.reasons.includes("webhook_pipeline_incomplete"));
+    assert.equal(decision.reasons.includes("webhook_pipeline_incomplete"), false);
   }
 
   const notObserved = completeInputs();
   notObserved.webhookApplyScopeValue = readable(
     JSON.stringify({
       recordId: record.recordId,
+      productionConfigGeneration: 3,
       scope: [...record.observedScope, { eventType: "post.failed", channelId: "channel-2" }],
     }),
   );
@@ -444,6 +463,7 @@ test("webhook apply validates record, sibling signature, scope, audit, and confi
     "webhookSignatureAuditEvidence",
     "webhookConfigSnapshot",
     "webhookEvent",
+    "webhookProductionConfig",
   ]) {
     const inputs = completeInputs();
     inputs[name] = unreadable;
@@ -462,8 +482,8 @@ test("webhook apply validates record, sibling signature, scope, audit, and confi
   );
 
   // S1 r7 amendment 1: a live snapshot that differs from the staging one the
-  // record carries (here, production identity) is expected, not a refusal. What
-  // still refuses is the missing production generation, which S2f adds.
+  // record carries (here, production identity) is expected, not a refusal:
+  // production is bound by its own signed generation, judged separately.
   const productionSnapshot = completeInputs();
   productionSnapshot.webhookConfigSnapshot = readable({
     ...configSnapshot,

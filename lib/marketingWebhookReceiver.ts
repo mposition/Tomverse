@@ -1,12 +1,16 @@
 /**
- * The staging shadow receiver for Zernio webhooks (S2 plan, S2e).
+ * The Zernio webhook receiver: the staging shadow (S2 plan, S2e) and the
+ * production apply (S2f).
  *
  * The route reads the secret and builds what this needs; this decides, in an
  * order the plan fixes:
  *
- *   1. **Staging, or nothing.** Anywhere else the receiver answers 404 before it
- *      reads the body: production has no shadow and no deliberate failure, and
- *      S2f -- which applies events -- is not built.
+ *   1. **Staging, or production once signed, or nothing.** Anywhere else -- and
+ *      in production before a production configuration generation has been
+ *      signed -- the receiver answers 404 before it reads the body. Production
+ *      never has a shadow or a deliberate failure; after steps 2 and 3 it hands
+ *      the event to the production path, which decides and applies in one
+ *      transaction, and the steps below are staging's.
  *   2. **Signature over the raw bytes**, before anything parses them.
  *   3. **The envelope**, with the header's event id equal to the body's.
  *   4. **The fault latch**, in its own transaction, committed before the
@@ -16,8 +20,9 @@
  *      about an account this system has; a second delivery of the same event is
  *      answered as already recorded.
  *
- * Nothing here changes a post. The secret and the provider key never reach
- * this module as values it stores or logs.
+ * Nothing in staging changes a post; in production only the production path's
+ * apply writer does. The secret and the provider key never reach this module
+ * as values it stores or logs.
  */
 
 import {
@@ -28,6 +33,7 @@ import {
   parseZernioWebhookEnvelope,
   verifyZernioWebhookSignature,
 } from "@/lib/marketingWebhookCore";
+import type { MarketingPostStatus } from "@/lib/marketingAutomationSchema";
 import type { MarketingPublishAdapter } from "@/lib/marketingPublishAdapter";
 
 /** The largest body read. Zernio's post events are a few kilobytes. */
@@ -73,9 +79,27 @@ export type MarketingWebhookReceiverDeps = {
     readonly derivedStatus: string;
     readonly statusQueryMatch: boolean;
   }) => Promise<"recorded" | "duplicate">;
+  /**
+   * The production path (S2f). Absent, or answering false to either question,
+   * leaves production exactly as S2e left it: 404 before the body is read.
+   */
+  readonly production?: {
+    /** Labelled production explicitly -- never the NODE_ENV fallback. */
+    readonly isProduction: () => boolean;
+    /** Whether a production configuration generation has been signed at all. */
+    readonly configured: () => Promise<boolean>;
+    /** Decide and apply one signed event, in one transaction. */
+    readonly handle: (event: {
+      readonly eventIdDigest: string;
+      readonly eventType: string;
+      readonly derivedStatus: MarketingPostStatus;
+      readonly zernioPostId: string;
+      readonly accountId: string;
+    }) => Promise<Record<string, unknown> & { readonly status: string }>;
+  };
 };
 
-const json = (body: Record<string, unknown>, status: number) =>
+const json =(body: Record<string, unknown>, status: number) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json", "cache-control": "no-store" },
@@ -119,8 +143,15 @@ export async function handleZernioWebhook(
   request: Request,
   deps: MarketingWebhookReceiverDeps,
 ): Promise<Response> {
+  // Staging records shadows; production applies, and only once a production
+  // configuration generation has been signed. Anything else -- an unlabelled
+  // or dev build, or production before that signature -- answers 404 before
+  // the body is read, as it did before S2f.
+  const production = deps.isStaging() ? null : (deps.production ?? null);
   if (!deps.isStaging()) {
-    return json({ code: "not_found" }, 404);
+    if (!production || !production.isProduction() || !(await production.configured())) {
+      return json({ code: "not_found" }, 404);
+    }
   }
   // Every answer from here names the build that gave it; Zernio's log keeps it.
   const pipeline = deps.pipelineFingerprint;
@@ -151,6 +182,22 @@ export async function handleZernioWebhook(
       return unsigned({ status: "ignored", reason: parsed.refusal }, 200);
     }
     return unsigned({ code: parsed.refusal }, 400);
+  }
+
+  // Production: no latch, no shadow, no status query -- the decision and the
+  // apply, in one transaction behind `handle`. Every outcome is a 2xx with a
+  // closed status: the decision and the post said what they said, and a
+  // provider retry would only meet the same answer or the history dedupe.
+  if (production) {
+    const envelope = parsed.envelope;
+    const answer = await production.handle({
+      eventIdDigest: marketingWebhookEventIdDigest(MARKETING_WEBHOOK_PROVIDER, envelope.eventId),
+      eventType: envelope.eventType,
+      derivedStatus: MARKETING_WEBHOOK_DERIVED_STATUS[envelope.eventType],
+      zernioPostId: envelope.zernioPostId,
+      accountId: envelope.accountId,
+    });
+    return unsigned(answer, 200);
   }
 
   // A signed event of ours from here, so the answer also carries the

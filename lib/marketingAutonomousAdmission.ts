@@ -237,6 +237,7 @@ const admissionDecisionsFrom = (
     webhookSignatureAuditEvidence: unreadable,
     webhookConfigSnapshot: unreadable,
     webhookEvent: unreadable,
+    webhookProductionConfig: unreadable,
   });
 
   const deploymentId = String(process.env.RAILWAY_DEPLOYMENT_ID ?? "").trim();
