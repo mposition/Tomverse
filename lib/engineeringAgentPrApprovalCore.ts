@@ -8,7 +8,7 @@ import { ENGINEERING_AGENT_NOT_APPROVED_REASONS } from "./engineeringAgentCore.t
  * a refusal, and is looked at again on the next round (condition 3).
  */
 
-/** §9-10's PR approver list, by GitHub numeric user id: `mposition`. */
+/** engineering-agent.md §9-10's PR approver list, by GitHub numeric user id: `mposition`. */
 export const ENGINEERING_AGENT_PR_APPROVER_IDS: readonly number[] = [60078951];
 
 export type EngineeringAgentNotApprovedReason = (typeof ENGINEERING_AGENT_NOT_APPROVED_REASONS)[number];
@@ -92,7 +92,7 @@ export function decideEngineeringAgentPrApproval(input: EngineeringAgentPrApprov
 }
 
 /**
- * Approval is settled before the merge (§9-10). A pull request seen merged
+ * Approval is settled before the merge (engineering-agent.md §9-10). A pull request seen merged
  * with no approval recorded first is not approved, whatever its reviews say
  * now, and stops the agent.
  */
