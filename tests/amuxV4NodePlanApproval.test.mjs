@@ -13,6 +13,15 @@ test("one plan approval prepares and consumes every node in one transaction, par
   assert.equal(child.status, 0, child.stderr || child.stdout);
 });
 
+test("the real duplicate scanner admits the plan's own new nodes and nothing else", () => {
+  const child = spawnSync(process.execPath, [
+    "--experimental-test-module-mocks", "--conditions=react-server",
+    "--import", "tsx",
+    resolve("tests/support/amuxNodeDuplicateScannerHarness.mjs"),
+  ], { cwd: resolve(import.meta.dirname, ".."), encoding: "utf8" });
+  assert.equal(child.status, 0, child.stderr || child.stdout);
+});
+
 test("the node plan route keeps the single routes' owner, origin, step-up and switch checks", () => {
   const route = readFileSync("app/api/admin/amux/ideas/unit-decisions/nodes/plan/route.ts", "utf8");
   assert.match(route, /getAdminRole\(session\) !== "owner" \|\| !hasValidMutationOrigin\(request\)/);

@@ -125,6 +125,9 @@ export async function approveAmuxV4NodePlan(session: Session, request: Request,
             draftUnitId: entry.draftUnitId, actorUserId, recentOwnerStepUp: true,
             ownerSessionDigest: ownerSession.digest, ownerSessionDigestKeyId: ownerSession.keyId },
         });
+        // The next unit's scan sees this node as the plan's own, not as an
+        // unexpected change to the catalog.
+        await scanner.admitCreated(tx, { id: entry.nodeId, title: entry.verified.proposal.title });
         nodes.push({ draftUnitId: entry.draftUnitId, decisionId: entry.decisionId,
           nodeId: entry.nodeId, level: entry.level, title: entry.verified.proposal.title });
       }

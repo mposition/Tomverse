@@ -37,7 +37,8 @@ mock.module(mod("lib/prisma.ts"), {
 mock.module(mod("lib/adminAuth.ts"), { namedExports: { isAdminSession: () => true, getAdminRole: (s) => s.role } });
 mock.module(mod("lib/adminReauthentication.ts"), { namedExports: { assertRecentAdminAuthentication: async () => {} } });
 mock.module(mod("lib/amux/ideaNodeDuplicateScanService.ts"), {
-  namedExports: { AmuxNodeDuplicateScanError: class extends Error {}, loadAmuxNodeDuplicateScanner: async () => async () => ({ candidates: [] }) },
+  namedExports: { AmuxNodeDuplicateScanError: class extends Error {}, loadAmuxNodeDuplicateScanner: async () => Object.assign(async () => ({ candidates: [] }),
+    { admitCreated: async (tx, created) => { calls.push(["admit", tx, created.id]); } }) },
 });
 mock.module(mod("lib/amux/ideaKeyConfig.ts"), { namedExports: { loadCurrentAmuxContentKeys: () => "digest-keys" } });
 mock.module(mod("lib/amux/ideaKeyStore.ts"), {
@@ -111,6 +112,9 @@ assert.equal(prepares[1][3], prepares[0][5]);
 assert.equal(prepares[2][3], prepares[1][5]);
 assert.equal(prepares[1][4], "Distinct epic");
 assert.equal(prepares[0][4], null);
+// Each created node is admitted to the scanner in the same transaction, in order.
+assert.deepEqual(calls.filter(([kind]) => kind === "admit").map(([, tx, id]) => [tx, id]),
+  prepares.map((entry) => ["tx-1", entry[5]]));
 // Content keys for every unit and node are made before the transaction.
 assert.deepEqual(calls.find(([kind]) => kind === "keys"), ["keys", 3, 3]);
 assert.ok(calls.findIndex(([kind]) => kind === "keys") < calls.findIndex(([kind]) => kind === "transaction"));
