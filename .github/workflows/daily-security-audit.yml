@@ -149,17 +149,32 @@ jobs:
         continue-on-error: true
         run: npm run check:encoding:strict
 
+      # Both steps type-check the whole program, which needs about 5.5 GB of
+      # heap (tsc --extendedDiagnostics, 2026-10-15). Node's default limit on
+      # this runner is about 4 GB, so both aborted with "JavaScript heap out
+      # of memory" (exit 134) in run 101. 8 GB leaves room to grow; the heap
+      # limit is a ceiling, not an allocation.
       - name: Independent TypeScript validation
         id: typecheck
         if: steps.install.outcome == 'success'
         continue-on-error: true
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
         run: npm run typecheck
 
+      # `npm run build` rather than the `next build` inside `npm run check`:
+      # the wrapper keeps the configured heap limit for the build's workers
+      # and retries once on a corrupt Turbopack cache, which this job
+      # restores. ESLint runs first, with the same arguments `check` passes.
       - name: ESLint and production build
         id: production_check
         if: steps.install.outcome == 'success'
         continue-on-error: true
-        run: npm run check
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: |
+          npm run lint -- . --max-warnings=0
+          npm run build
 
       - name: Restore Playwright browser cache
         if: steps.install.outcome == 'success'
