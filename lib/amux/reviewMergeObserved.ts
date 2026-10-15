@@ -80,6 +80,10 @@ export async function completeAmuxV22ReviewOnObservedMerge(
   return withAmuxDbBoundary(
     amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.reviewMergeObserved, attachment),
     async (tx, context) => {
+      // The audit chain's lock comes before the card's row lock, as in the
+      // writers that read the card after taking it; the other order can wait
+      // in a cycle with them.
+      await takeAuditChainLock(tx);
       const tasks = await tx.$queryRaw<TaskRow[]>`
         SELECT "id", "status", "owner", "revision", "archivedAt", "sourceSystem",
                "cardType", "taskRole", "reviewPrNumber"
@@ -149,8 +153,8 @@ export async function completeAmuxV22ReviewOnObservedMerge(
       });
 
       if (attachment) {
-        // The audit chain's lock comes before any row an attachment locks.
-        await takeAuditChainLock(context.attachedTransaction);
+        // The audit chain's lock, taken first above, already precedes any row
+        // an attachment locks.
         await attachment.work(
           context.attachedTransaction,
           { taskId: task.id, attemptId: input.attemptId, prNumber: input.prNumber, taskRevision },
