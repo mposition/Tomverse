@@ -65,7 +65,8 @@ const input = (extra = {}) => ({ ideaId: "idea-0001", planRequestId: "11111111-2
   reasons: {}, publicPrConsentOff: ["unit-task-01"],
   assessments: [{ unitId: "unit-init-01", ...metrics }, { unitId: "unit-task-01", ...metrics },
     { subject: { kind: "epic", id: "node-existing-epic" }, ...metrics }],
-  scoreTaskUnitIds: ["unit-task-01"], ...extra });
+  scoreTaskUnitIds: ["unit-task-01"],
+  expectedUnitIds: ["unit-init-01", "unit-feat-01", "unit-task-01", "unit-story-1"], ...extra });
 
 // Nodes, then cards, then scores, in ONE transaction; parts are prepared first.
 reset();
@@ -98,7 +99,15 @@ await assert.rejects(approveAmuxV4Plan(session, request, input({ scoreTaskUnitId
   (error) => error instanceof AmuxV4PlanError && error.code === "unit_not_in_plan");
 await assert.rejects(approveAmuxV4Plan(session, request, input({ assessments: [{ unitId: "unit-nowhere", ...metrics }] })),
   (error) => error instanceof AmuxV4PlanError && error.draftUnitIds.includes("unit-nowhere"));
+// The owner approves what the screen showed: a unit missing or extra refuses before any transaction.
+reset();
+await assert.rejects(approveAmuxV4Plan(session, request, input({ expectedUnitIds: ["unit-init-01", "unit-feat-01", "unit-task-01"] })),
+  (error) => error instanceof AmuxV4PlanError && error.code === "plan_changed" && error.draftUnitIds.includes("unit-story-1"));
+await assert.rejects(approveAmuxV4Plan(session, request, input({ expectedUnitIds: [
+  "unit-init-01", "unit-feat-01", "unit-task-01", "unit-story-1", "unit-later-01"] })),
+(error) => error.code === "plan_changed" && error.draftUnitIds.includes("unit-later-01"));
+assert.equal(calls.some(([k]) => k === "transaction"), false);
 reset(); nodePlan = []; cardPlan = [];
-await assert.rejects(approveAmuxV4Plan(session, request, input({ assessments: [], scoreTaskUnitIds: [] })),
+await assert.rejects(approveAmuxV4Plan(session, request, input({ assessments: [], scoreTaskUnitIds: [], expectedUnitIds: [] })),
   (error) => error instanceof AmuxV4PlanError && error.code === "nothing_to_approve");
 assert.equal(calls.some(([k]) => k === "transaction"), false);
