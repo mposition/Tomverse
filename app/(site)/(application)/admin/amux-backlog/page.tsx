@@ -8,6 +8,7 @@ import { AmuxBacklogListPanel } from "@/components/admin/AmuxBacklogListPanel";
 import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
+import { AmuxIdeaProgressPanel } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxUnusedAnalysisReservationPanel } from
   "@/components/admin/AmuxUnusedAnalysisReservationPanel";
 import { AmuxAnalysisClaimResolutionPanel } from
@@ -63,6 +64,8 @@ import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { adminNavItemTabs, adminRedirectTarget, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
+import { readAmuxIdeaProgressForOwner, type AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
+import { isAmuxIdeaRequestId } from "@/lib/amux/ideaRequestIdCore";
 import { AMUX_V4_PORTFOLIO_WRITE_ENV,
   amuxV4PortfolioWriteEnabled } from
   "@/lib/amux/portfolioAssessmentService";
@@ -103,6 +106,19 @@ export default async function AdminAmuxBacklogPage({
   const backlogList = tab.id === "list" && search.valid && hasRecentAdminAuthentication(session)
     ? await readAmuxBacklogList(search.search, amuxBacklogPage(query.page)) : null;
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
+  // Ideas: the decide-now inbox and the progress list read the same snapshot,
+  // behind the submission read-back switch. A failed read is shown as
+  // unavailable (null), never as an empty list.
+  const ideaReadBackAvailable = ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV]);
+  let ideaProgress: AmuxIdeaProgressRow[] | null | undefined;
+  if (tab.id === "ideas" && ideaReadBackAvailable) {
+    ideaProgress = await readAmuxIdeaProgressForOwner(session.user.id).catch(() => {
+      console.warn(JSON.stringify({ subsystem: "amux", event: "idea_progress_read_failed" }));
+      return null;
+    });
+  }
+  const requestedIdea = typeof query.idea === "string" ? query.idea.trim().toLowerCase() : "";
+  const openRequestId = isAmuxIdeaRequestId(requestedIdea) ? requestedIdea : null;
   const ideaSubmissionAvailable =
     ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
     ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV]);
@@ -147,7 +163,10 @@ export default async function AdminAmuxBacklogPage({
         <>
         {recoveryHoldId ? <AmuxAnalysisClaimResolutionPanel
           key={recoveryHoldId} holdId={recoveryHoldId} /> : null}
-        <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable}
+        {ideaProgress !== undefined ? <AmuxIdeaProgressPanel rows={ideaProgress}
+          activeRequestId={openRequestId} /> : null}
+        <AmuxIdeaInputPanel key={openRequestId ?? "new"} openRequestId={openRequestId}
+          submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
           initialPlanAvailable={initialPlanAvailable}
           frontierModelsAvailable={frontierModelsAvailable}

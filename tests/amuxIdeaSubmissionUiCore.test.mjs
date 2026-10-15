@@ -30,7 +30,7 @@ test("saved idea lookup cannot reset pending or unknown writes", () => {
 
 test("manual reopen uses only the existing audited receipt readback", () => {
   const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
-  const reopen = panel.split("const openSavedIdea = async")[1]?.split("useEffect(")[0] ?? "";
+  const reopen = panel.split("const openRequest = useCallback(")[1]?.split("useEffect(")[0] ?? "";
   assert.match(reopen, /adminFetch\(`\/api\/admin\/amux\/ideas\/submissions\?/);
   assert.match(reopen, /classifyIdeaSubmissionReadBack/);
   assert.doesNotMatch(reopen, /method:\s*["']POST/);

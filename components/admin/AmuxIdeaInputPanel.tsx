@@ -72,12 +72,15 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
   initialPlanAvailable, frontierModelsAvailable, frontierModelWriteAvailable, transferPreviewAvailable,
-  transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId }: {
+  transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
+  openRequestId = null }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
   frontierModelWriteAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
   analysisResultAvailable: boolean; analysisBudgetAvailable: boolean; operatorId: string;
+  /** The idea a list row opened (`?idea=<requestId>`); read back like a saved request. */
+  openRequestId?: string | null;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -203,11 +206,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     }
   }, [operatorId]);
 
-  const openSavedIdea = async () => {
-    const requestId = savedRequestId.trim().toLowerCase();
-    if (!recoveryChecked || !canOpenSavedIdea(submission.kind,
-      pending || readBackPending || sourceScopePending ||
-        (submission.kind !== "submitted" && hasUnsavedInput), requestId)) return;
+  // Opens an exact saved request by its id: a read-back only, never a write.
+  const openRequest = useCallback(async (requestId: string) => {
     setReadBackPending(true); setSavedRequestError(false); setSavedRequestReauth(false);
     try {
       const response = await adminFetch(`/api/admin/amux/ideas/submissions?${
@@ -227,6 +227,13 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         hasExternalSources: decision.hasExternalSources });
     } catch { setSavedRequestError(true); }
     finally { setReadBackPending(false); }
+  }, [operatorId]);
+  const openSavedIdea = async () => {
+    const requestId = savedRequestId.trim().toLowerCase();
+    if (!recoveryChecked || !canOpenSavedIdea(submission.kind,
+      pending || readBackPending || sourceScopePending ||
+        (submission.kind !== "submitted" && hasUnsavedInput), requestId)) return;
+    await openRequest(requestId);
   };
 
   // The browser receipts decide what the panel shows first: a request left
@@ -241,6 +248,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       inFlight.current = true;
       setSubmission({ kind: "outcome_unknown", requestId: recovered.requestId });
       void readBack(recovered.requestId);
+    } else if (openRequestId && canOpenSavedIdea("idle", false, openRequestId)) {
+      void openRequest(openRequestId);
     } else if (confirmed?.kind === "confirmed") {
       inFlight.current = true;
       setSubmission({ kind: "outcome_unknown", requestId: confirmed.requestId });
@@ -251,7 +260,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       inFlight.current = false;
       setSubmission({ kind: "idle" });
     }
-  }, [operatorId, readBack]);
+  }, [openRequest, openRequestId, operatorId, readBack]);
 
   useEffect(() => {
     let active = true;

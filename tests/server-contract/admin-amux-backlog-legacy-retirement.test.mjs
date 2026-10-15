@@ -44,10 +44,13 @@ mock.module(mod("lib/amux/portfolioAssessmentService.ts"), { namedExports: {
   AMUX_V4_PORTFOLIO_WRITE_ENV: "TOMVERSE_AMUX_V4_PORTFOLIO_WRITE",
   amuxV4PortfolioWriteEnabled: () => false,
 } });
+mock.module(mod("lib/amux/ideaProgressRead.ts"), { namedExports: {
+  readAmuxIdeaProgressForOwner: async () => [],
+} });
 const panels = {};
 for (const name of ["AdminPageTabs", "AmuxBacklogListPanel", "AmuxBacklogMetadataPanel", "AmuxBoardImportPanel",
   "AmuxIdeaInputPanel", "AmuxUnusedAnalysisReservationPanel", "AmuxAnalysisClaimResolutionPanel",
-  "AmuxTaskCostCatalogApprovalPanel", "AmuxPortfolioPanel", "AmuxReconciliationPanel"]) {
+  "AmuxTaskCostCatalogApprovalPanel", "AmuxPortfolioPanel", "AmuxReconciliationPanel", "AmuxIdeaProgressPanel"]) {
   const panel = () => null;
   panels[name] = panel;
   mock.module(mod(`components/admin/${name}.tsx`), { namedExports: { [name]: panel } });
