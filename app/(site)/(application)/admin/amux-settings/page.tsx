@@ -6,6 +6,7 @@ import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxDecisionMakerReportPanel } from "@/components/admin/AmuxDecisionMakerReportPanel";
 import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
+import { AmuxTaskCostCatalogApprovalPanel } from "@/components/admin/AmuxTaskCostCatalogApprovalPanel";
 import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
 import {
   amuxSwitchedTabStatus,
@@ -27,6 +28,8 @@ import {
   readAmuxOrchestratorHaltsForAdmin,
 } from "@/lib/amux/orchestratorHaltStore";
 import { authOptions } from "@/lib/auth";
+import { AMUX_V4_TASK_CATALOG_WRITE_ENV, amuxV4TaskCatalogWriteEnabled } from
+  "@/lib/amux/v4TaskCostCatalogApprovalService";
 
 const TABS = adminNavItemTabs("amux-settings");
 
@@ -60,6 +63,12 @@ export default async function AdminAmuxSettingsPage({
   if (tab.id === "automatic-admission") {
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
       <AmuxV22PromotionControl /></div>;
+  }
+  // Owner only (the tab's viewRoles); resolveAdminTabFor has already refused other roles.
+  if (tab.id === "analysis") {
+    return <div className="flex min-w-0 flex-col gap-5">{tabs}
+      <AmuxTaskCostCatalogApprovalPanel approvalAvailable={
+        amuxV4TaskCatalogWriteEnabled(process.env[AMUX_V4_TASK_CATALOG_WRITE_ENV])} /></div>;
   }
   if (tab.id === "decision-maker") {
     // The switch and declaration-accuracy report are independent reads. A

@@ -697,7 +697,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     label: "Backlog",
     href: "/admin/amux-backlog",
     description:
-      "Idea input, card registration, catalog import, source reconciliation and card metadata",
+      "Idea input, card list, portfolio assessment, catalog import, source reconciliation, card metadata and cleanup",
     group: "AMUX",
     writeRoles: ["owner"],
     viewRoles: ["owner"],
@@ -714,17 +714,26 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "metadata",
       "priority",
       "cost estimate",
+      "portfolio",
+      "assessment",
+      "cleanup",
+      "unused reservation",
     ],
     tabs: [
+      {
+        id: "ideas",
+        label: "Ideas",
+        description: "Enter an idea, approve its execution and its plan",
+      },
       {
         id: "list",
         label: "List",
         description: "Backlog cards, creation dates, summaries and recorded scores",
       },
       {
-        id: "ideas",
-        label: "Ideas",
-        description: "Check an operator idea before any external transfer",
+        id: "portfolio",
+        label: "Portfolio assessment",
+        description: "Strategic assessment and score of each card",
       },
       {
         id: "import",
@@ -740,6 +749,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "metadata",
         label: "Card metadata",
         description: "Kind, priority and cost estimate for one backlog card",
+      },
+      {
+        id: "recovery",
+        label: "Cleanup and recovery",
+        description: "Release analysis reservations that were never used",
       },
     ],
   },
@@ -848,6 +862,8 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "outcome unknown",
       "decision maker",
       "kill switch",
+      "analysis settings",
+      "cost catalogue",
     ],
     tabs: [
       {
@@ -858,6 +874,12 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       },
       { id: "safety", label: "Execution safety and recovery", description: "Automatic recovery, evidence to inspect and operator halt decisions", badge: "amuxOrchestratorHalts" },
       { id: "decision-maker", label: "Decision Maker", description: "The Decision Maker kill switch and the mode of each instance" },
+      {
+        id: "analysis",
+        label: "Analysis settings",
+        description: "Task worker and model cost catalogue approval",
+        viewRoles: ["owner"],
+      },
     ],
   },
   {

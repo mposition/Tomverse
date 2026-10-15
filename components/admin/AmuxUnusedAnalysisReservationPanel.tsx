@@ -132,7 +132,7 @@ export function AmuxUnusedAnalysisReservationView({ m, holdId, hold, available, 
             className="rounded border border-white/20 px-3 py-2">{m.cancel}</button>
         </> : <p>{m.ineligible}</p>}
     </div> : null}
-    {failure ? <AdminApiFailureNotice failure={failure}
+    {failure ? <AdminApiFailureNotice failure={failure} returnTo="/admin/amux-backlog?tab=recovery"
       onRetry={busy ? undefined : onRead} /> : null}
   </section>;
 }

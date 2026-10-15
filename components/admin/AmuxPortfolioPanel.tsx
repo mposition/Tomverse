@@ -321,7 +321,7 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
     {result ? <p role="status">{result}</p> : null}
     {error ? <div role="alert"><p>{error}</p>
       {error === m.reauth ? <Link href={adminRecentAuthenticationHref(
-        "/admin/amux-backlog?tab=ideas")}
+        "/admin/amux-backlog?tab=portfolio")}
         className="inline-flex min-h-11 items-center underline">
         {common.apiFailure.reauthenticate}
       </Link> : null}
