@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  canSetAsidePreviousIdea,
   canStartAnotherIdea,
   canOpenSavedIdea,
   classifyIdeaSubmissionPost,
@@ -103,4 +104,22 @@ test("write route requires the independent read-back gate before admission", () 
   assert.match(post, /hasExternalSources: inspected\.counts\.repositoryCount \+ inspected\.counts\.pullRequestCount > 0/);
   const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
   assert.match(panel, /declaredExternalSources=\{submission\.kind === "submitted" && submission\.hasExternalSources\}/);
+});
+
+test("an unknown or unrecoverable previous request can be set aside only by an explicit, idle decision", () => {
+  for (const state of ["outcome_unknown", "recovery_unavailable"]) {
+    assert.equal(canSetAsidePreviousIdea(state, false, true), true, state);
+    assert.equal(canSetAsidePreviousIdea(state, false, false), false, `${state} needs the acknowledgement`);
+    assert.equal(canSetAsidePreviousIdea(state, true, true), false, `${state} waits for a read-back in flight`);
+  }
+  for (const state of ["idle", "pending", "submitted", "refused"]) {
+    assert.equal(canSetAsidePreviousIdea(state, false, true), false, state);
+  }
+  const panel = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)),
+    "../components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
+  const handler = panel.slice(panel.indexOf("const setAsidePreviousIdea = () =>"), panel.indexOf("const checkSourceScope"));
+  assert.equal(handler.includes("adminFetch(") || handler.includes("readBack("), false,
+    "setting aside never writes or retries the old request");
+  assert.ok(handler.indexOf("forgetIdeaRequestReceipts(") < handler.indexOf("resetInput()"),
+    "the input unlocks only after the receipts are forgotten");
 });

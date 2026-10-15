@@ -20,6 +20,19 @@ export function canStartAnotherIdea(
   return state === "submitted" && !busy;
 }
 
+/** An unknown or unrecoverable previous request may be set aside by an
+ * explicit operator decision, so the input is not locked for good. It is not
+ * a retry: the next idea gets a fresh request id and the old one is still
+ * readable by its id. The cost the operator accepts is a possible duplicate
+ * idea if the old request committed after all. */
+export function canSetAsidePreviousIdea(
+  state: Parameters<typeof canStartAnotherIdea>[0],
+  busy: boolean,
+  acknowledged: boolean,
+): boolean {
+  return (state === "outcome_unknown" || state === "recovery_unavailable") && !busy && acknowledged;
+}
+
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
