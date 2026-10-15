@@ -118,7 +118,7 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
       <p>{view.coveredScope ?? m.analysisResultScopeExpired}</p>
       {view.outcome === "reject" ? <p role="status">{m.analysisResultRejected}</p> : null}
       {view.state === "ready" && view.outcome === "propose" ? <AmuxIdeaPlanApprovalPanel
-        ideaId={ideaId} units={view.units} onChanged={() => void refresh()} /> : null}
+        ideaId={ideaId} onChanged={() => void refresh()} /> : null}
       <ol className="space-y-2">
         {view.units.map((unit) => <li key={unit.id}
           className="rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">

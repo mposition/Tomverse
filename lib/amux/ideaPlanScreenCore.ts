@@ -1,4 +1,5 @@
 import type { AmuxVisibleAnalysisUnit } from "./ideaAnalysisResultReadCore.ts";
+import { amuxV4CardPlanRound, orderAmuxV4CardPlan } from "./ideaCardPlanCore.ts";
 
 /** Pure assembly of the plan approval request from the analysis result the
  * screen shows (amux-intake.md v18 item 3). No I/O. */
@@ -14,6 +15,7 @@ export type AmuxV4PlanScreenUnit = {
   taskRole: string | null; metrics: Record<string, number> | null;
   uncertainty: "low" | "medium" | "high" | null; bodyDigest: string;
   featureRef: string | null; parentRef: string | null; parentStoryRef: string | null;
+  dependencyRefs: readonly string[];
 };
 
 const kindOf = (unit: AmuxVisibleAnalysisUnit): SubjectKind | null => {
@@ -54,8 +56,24 @@ export function amuxV4PlanScreenUnits(units: readonly AmuxVisibleAnalysisUnit[])
       featureRef: proposal.kind === "card" ? proposal.featureRef : null,
       parentRef: proposal.kind === "node" ? proposal.parentRef : null,
       parentStoryRef: proposal.kind === "card" ? proposal.parentStoryRef : null,
+      dependencyRefs: proposal.kind === "card" ? proposal.dependencyRefs : [],
     }];
   });
+}
+
+/**
+ * What one approval registers, computed exactly as the server does: every
+ * proposed node, and the first round of the ordered cards. The rest wait for
+ * the next approval. Throws the server's own error on a dependency cycle.
+ */
+export function amuxV4PlanRound(units: readonly AmuxV4PlanScreenUnit[]) {
+  const cards = units.filter((unit) => unit.kind === "story" || unit.kind === "task");
+  const ordered = orderAmuxV4CardPlan(cards.map((unit) => ({ ...unit, draftUnitId: unit.unitId,
+    cardType: unit.kind as "story" | "task" })));
+  const { round } = amuxV4CardPlanRound(ordered);
+  const inRound = new Set([...units.filter((unit) => unit.kind !== "story" && unit.kind !== "task")
+    .map((unit) => unit.unitId), ...round.map((unit) => unit.unitId)]);
+  return { inRound, deferred: units.filter((unit) => !inRound.has(unit.unitId)).map((unit) => unit.unitId) };
 }
 
 /**
@@ -70,8 +88,10 @@ export function buildAmuxV4PlanRequest(input: {
   ideaId: string; planRequestId: string; units: readonly AmuxV4PlanScreenUnit[];
   edits: ReadonlyMap<string, Record<string, number>>; consentOff: ReadonlySet<string>;
 }) {
+  const { inRound } = amuxV4PlanRound(input.units);
+  const units = input.units.filter((unit) => inRound.has(unit.unitId));
   const assessed = new Map<string, AmuxV4PlanScreenUnit>();
-  const assessments = input.units.flatMap((unit) => {
+  const assessments = units.flatMap((unit) => {
     const metrics = input.edits.has(unit.unitId)
       ? amuxV4PlanMetrics(unit.kind, input.edits.get(unit.unitId)) : unit.metrics;
     if (!metrics) return [];
@@ -83,7 +103,7 @@ export function buildAmuxV4PlanRequest(input: {
     const found = ref === null ? undefined : assessed.get(ref);
     return found?.kind === kind ? found : undefined;
   };
-  const scoreTaskUnitIds = input.units.filter((unit) => {
+  const scoreTaskUnitIds = units.filter((unit) => {
     if (unit.kind !== "task" || !assessed.has(unit.localRef)) return false;
     const feature = node(unit.featureRef, "feature");
     const epic = feature && node(feature.parentRef, "epic");
@@ -93,8 +113,8 @@ export function buildAmuxV4PlanRequest(input: {
   }).map((unit) => unit.unitId);
   return {
     ideaId: input.ideaId, planRequestId: input.planRequestId, reasons: {},
-    publicPrConsentOff: input.units.filter((unit) => unit.kind === "task" &&
+    publicPrConsentOff: units.filter((unit) => unit.kind === "task" &&
       unit.taskRole === "implement" && input.consentOff.has(unit.unitId)).map((unit) => unit.unitId),
-    assessments, scoreTaskUnitIds,
+    assessments, scoreTaskUnitIds, expectedUnitIds: units.map((unit) => unit.unitId),
   };
 }

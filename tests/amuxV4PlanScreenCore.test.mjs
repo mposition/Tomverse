@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { amuxV4PlanMetrics, amuxV4PlanScreenUnits, buildAmuxV4PlanRequest } from
+import { amuxV4PlanMetrics, amuxV4PlanRound, amuxV4PlanScreenUnits, buildAmuxV4PlanRequest } from
   "../lib/amux/ideaPlanScreenCore.ts";
 
 const signal = (metrics) => ({ metrics, uncertainty: "low", rationale: "r", evidenceRefIds: ["s1"] });
@@ -67,4 +67,30 @@ test("public PR consent is turned off only for implement Tasks the owner uncheck
     units: amuxV4PlanScreenUnits(units), edits: new Map(),
     consentOff: new Set(["unit-task-01", "unit-task-02", "unit-story-1"]) });
   assert.deepEqual(body.publicPrConsentOff, ["unit-task-01"]);
+});
+
+test("the request names exactly the units this approval registers", () => {
+  const body = buildAmuxV4PlanRequest({ ideaId: "idea-0001", planRequestId: plan,
+    units: amuxV4PlanScreenUnits(units), edits: new Map(), consentOff: new Set() });
+  assert.deepEqual([...body.expectedUnitIds].sort(),
+    ["unit-epic-01", "unit-feat-01", "unit-init-01", "unit-story-1", "unit-task-01", "unit-task-02"]);
+});
+
+test("a large plan sends only the server's first round, with that round's scores", () => {
+  const many = [node("unit-init-01", "i1", "initiative", null), node("unit-epic-01", "e1", "epic", "i1"),
+    node("unit-feat-01", "f1", "feature", "e1"), card("unit-s000000", "s0", "story")];
+  for (let index = 1; index <= 30; index += 1) {
+    many.push(card(`unit-t${String(index).padStart(6, "0")}`, `t${index}`, "task",
+      { parentStoryRef: "s0", dependencyRefs: index === 1 ? [] : [`t${index - 1}`] }));
+  }
+  const listed = amuxV4PlanScreenUnits(many);
+  const { inRound, deferred } = amuxV4PlanRound(listed);
+  assert.equal(inRound.size, 3 + 24);
+  assert.equal(deferred.length, 31 - 24);
+  const body = buildAmuxV4PlanRequest({ ideaId: "idea-0001", planRequestId: plan, units: listed,
+    edits: new Map(), consentOff: new Set() });
+  assert.equal(body.expectedUnitIds.length, 27);
+  assert.ok(body.assessments.every((a) => inRound.has(a.unitId)));
+  assert.ok(body.scoreTaskUnitIds.every((id) => inRound.has(id)));
+  assert.ok(deferred.every((id) => !body.expectedUnitIds.includes(id)));
 });
