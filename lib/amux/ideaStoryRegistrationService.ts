@@ -45,6 +45,166 @@ export type AmuxV4StoryPrepareChoice = {
 const ID = /^[A-Za-z0-9_-]{8,80}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
+export type AmuxV4CardPrepareInTx = {
+  session: Session; request: Request; actorUserId: string;
+  choice: AmuxV4StoryPrepareChoice;
+  verified: Awaited<ReturnType<typeof readVerifiedAmuxCardProposal>>;
+  scanner: Awaited<ReturnType<typeof loadAmuxCardDuplicateScanner>>;
+  keys: ReturnType<typeof loadCurrentAmuxContentKeys>;
+  decisionId: string;
+  ownerSession: ReturnType<typeof amuxV4UnitBrowserDigest>;
+};
+
+/** The preparation itself, inside the caller's transaction: the single
+ * prepare route and the plan approval batch both run exactly this. */
+export async function prepareAmuxV4CardRegistrationInTx(tx: Prisma.TransactionClient,
+  args: AmuxV4CardPrepareInTx) {
+  const { choice, verified, scanner, keys, decisionId, ownerSession,
+    actorUserId } = args;
+  const input = { session: args.session, request: args.request };
+  await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+  const idea = await tx.amuxIdeaSubmission.findFirst({
+    where: { id: choice.ideaId, actorUserId },
+    select: { id: true, state: true },
+  });
+  if (!idea || !["analyzing", "awaiting_owner"].includes(idea.state)) {
+    throw new AmuxV4UnitDecisionError("not_ready");
+  }
+  const unit = await tx.amuxIdeaDraftUnit.findFirst({
+    where: { id: choice.draftUnitId, ideaId: choice.ideaId, actorUserId },
+    select: { id: true, localRef: true, unitKind: true, state: true,
+      bodyDigest: true, bodyDigestKeyId: true, expiresAt: true,
+      chunkIndex: true },
+  });
+  if (!unit || unit.state !== "proposed" || unit.unitKind !== "card" ||
+      unit.localRef !== verified.unit.localRef ||
+      unit.bodyDigest !== verified.unit.bodyDigest ||
+      unit.bodyDigestKeyId !== verified.unit.bodyDigestKeyId ||
+      unit.chunkIndex !== verified.unit.chunkIndex ||
+      unit.expiresAt.getTime() !== verified.unit.expiresAt.getTime()) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const feature = await tx.amuxPortfolioNode.findUnique({
+    where: { id: choice.featureNodeId },
+  });
+  if (!feature || feature.level !== "feature" ||
+      feature.state !== "active" || !feature.parentId) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const epic = await tx.amuxPortfolioNode.findUnique({
+    where: { id: feature.parentId },
+  });
+  const initiative = epic?.parentId ? await tx.amuxPortfolioNode.findUnique({
+    where: { id: epic.parentId },
+  }) : null;
+  if (!epic || !initiative || epic.level !== "epic" ||
+      initiative.level !== "initiative" || initiative.parentId !== null ||
+      epic.state !== "active" || initiative.state !== "active") {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const nodes = [initiative, epic, feature] as const;
+  const revisions = await Promise.all(nodes.map((node) =>
+    tx.amuxPortfolioNodeRevision.findUnique({ where: {
+      nodeId_revision: { nodeId: node.id, revision: node.revision },
+    } })));
+  if (revisions.some((revision, index) => !revision ||
+      revision.contentDigest !== nodes[index].contentDigest ||
+      revision.contentDigestKeyId !== nodes[index].contentDigestKeyId)) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  let sourceFeatureRef = choice.featureNodeId;
+  if (verified.proposal.featureRef !== choice.featureNodeId) {
+    const sourceUnit = await tx.amuxIdeaDraftUnit.findFirst({ where: {
+      ideaId: choice.ideaId, actorUserId,
+      localRef: verified.proposal.featureRef, unitKind: "node",
+      state: "approved",
+    }, select: { id: true } });
+    const sourceDecision = sourceUnit ? await tx.amuxIdeaUnitDecision.findFirst({
+      where: { draftUnitId: sourceUnit.id, state: "consumed",
+        OR: [{ resolvedNodeId: choice.featureNodeId },
+          { linkedNodeId: choice.featureNodeId }] },
+      select: { id: true },
+    }) : null;
+    if (!sourceDecision) throw new AmuxV4UnitDecisionError("reconfirm");
+    sourceFeatureRef = verified.proposal.featureRef;
+  }
+  const preview = await tx.amuxIdeaTransferPreview.findUnique({
+    where: { id: verified.previewId },
+  });
+  if (!preview || preview.state !== "completed" ||
+      preview.ideaId !== choice.ideaId ||
+      preview.chunkIndex !== unit.chunkIndex) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const scope = preview.sourceScopeApprovalId ?
+    await tx.amuxIdeaSourceScopeApproval.findUnique({
+      where: { id: preview.sourceScopeApprovalId },
+      select: { id: true, scopeDigest: true,
+        scopeDigestKeyId: true, ideaId: true },
+    }) : null;
+  if (preview.sourceScopeApprovalId && (!scope || scope.ideaId !== choice.ideaId)) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const duplicates = await scanner(tx, { unitId: unit.id,
+    proposal: verified.proposal, featureNodeId: feature.id });
+  if (duplicates.candidates.length > 0 && choice.decisionReason === null) {
+    throw new AmuxV4DuplicateReasonRequired(
+      duplicates.candidates.map((candidate) => candidate.id));
+  }
+  const common = {
+    ideaId: choice.ideaId, decisionId, prepareRequestId: choice.prepareRequestId,
+    actorUserId, ownerSession,
+    unit: { id: unit.id, localRef: unit.localRef!,
+      bodyDigest: unit.bodyDigest, bodyDigestKeyId: unit.bodyDigestKeyId },
+    proposal: verified.proposal,
+    preview: { id: preview.id, payloadDigest: preview.payloadDigest,
+      payloadDigestKeyId: preview.payloadDigestKeyId,
+      scopeApprovalId: scope?.id ?? null, scopeDigest: scope?.scopeDigest ?? null,
+      scopeDigestKeyId: scope?.scopeDigestKeyId ?? null },
+    hierarchy: nodes.map((node, index) => ({ id: node.id,
+      level: node.level as "initiative" | "epic" | "feature",
+      parentId: node.parentId, revision: node.revision,
+      content: { digest: node.contentDigest,
+        keyId: node.contentDigestKeyId }, state: "active" as const,
+      approvedDecisionId: revisions[index]!.decisionId })) as
+        Parameters<typeof assembleAmuxV4StoryConfirmation>[0]["hierarchy"],
+    sourceFeatureRef, duplicateScan: duplicates,
+    decisionReason: choice.decisionReason, key: keys,
+  };
+  let taskCost = null;
+  let snapshot: AmuxIdeaUnitConfirmationSnapshot | null;
+  if (verified.proposal.cardType === "task") {
+    if (!verified.proposal.taskRole || !verified.proposal.executionGrade) {
+      throw new AmuxV4UnitDecisionError("not_ready");
+    }
+    const refs = await resolveAmuxV4TaskReferences(tx, {
+      ideaId: choice.ideaId, actorUserId, proposal: verified.proposal,
+      featureNodeId: feature.id,
+    });
+    try {
+      const approved = await calculateCurrentApprovedAmuxV4TaskCost(tx,
+        verified.proposal.taskRole, verified.proposal.executionGrade);
+      taskCost = { ok: true as const, receipt: approved.receipt };
+      snapshot = assembleAmuxV4TaskConfirmation({ ...common, ...refs,
+        costReceipt: approved.receipt,
+        publicPrDisclosureApproved:
+          choice.publicPrDisclosureApproved === true });
+    } catch (error) {
+      if (error instanceof AmuxV4TaskCatalogApprovalError) {
+        throw new AmuxV4UnitDecisionError("not_ready");
+      }
+      throw error;
+    }
+  } else {
+    snapshot = assembleAmuxV4StoryConfirmation(common);
+  }
+  if (!snapshot) throw new AmuxV4UnitDecisionError("reconfirm");
+  const result = await commitAmuxV4UnitPrepare(tx, { session: input.session,
+    request: input.request, snapshot, duplicateScan: duplicates,
+    taskCost, digestKey: keys });
+  return { result, unit, duplicates, taskCost, snapshot, feature };
+}
+
 /** One card under an approved Feature. A Task additionally needs an approved
  * versioned Agent-only cost catalog and resolved Story/dependency references. */
 export async function prepareAmuxV4CardRegistration(input: {
@@ -83,146 +243,10 @@ export async function prepareAmuxV4CardRegistration(input: {
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
-      const idea = await tx.amuxIdeaSubmission.findFirst({
-        where: { id: choice.ideaId, actorUserId },
-        select: { id: true, state: true },
-      });
-      if (!idea || !["analyzing", "awaiting_owner"].includes(idea.state)) {
-        throw new AmuxV4UnitDecisionError("not_ready");
-      }
-      const unit = await tx.amuxIdeaDraftUnit.findFirst({
-        where: { id: choice.draftUnitId, ideaId: choice.ideaId, actorUserId },
-        select: { id: true, localRef: true, unitKind: true, state: true,
-          bodyDigest: true, bodyDigestKeyId: true, expiresAt: true,
-          chunkIndex: true },
-      });
-      if (!unit || unit.state !== "proposed" || unit.unitKind !== "card" ||
-          unit.localRef !== verified.unit.localRef ||
-          unit.bodyDigest !== verified.unit.bodyDigest ||
-          unit.bodyDigestKeyId !== verified.unit.bodyDigestKeyId ||
-          unit.chunkIndex !== verified.unit.chunkIndex ||
-          unit.expiresAt.getTime() !== verified.unit.expiresAt.getTime()) {
-        throw new AmuxV4UnitDecisionError("reconfirm");
-      }
-      const feature = await tx.amuxPortfolioNode.findUnique({
-        where: { id: choice.featureNodeId },
-      });
-      if (!feature || feature.level !== "feature" ||
-          feature.state !== "active" || !feature.parentId) {
-        throw new AmuxV4UnitDecisionError("reconfirm");
-      }
-      const epic = await tx.amuxPortfolioNode.findUnique({
-        where: { id: feature.parentId },
-      });
-      const initiative = epic?.parentId ? await tx.amuxPortfolioNode.findUnique({
-        where: { id: epic.parentId },
-      }) : null;
-      if (!epic || !initiative || epic.level !== "epic" ||
-          initiative.level !== "initiative" || initiative.parentId !== null ||
-          epic.state !== "active" || initiative.state !== "active") {
-        throw new AmuxV4UnitDecisionError("reconfirm");
-      }
-      const nodes = [initiative, epic, feature] as const;
-      const revisions = await Promise.all(nodes.map((node) =>
-        tx.amuxPortfolioNodeRevision.findUnique({ where: {
-          nodeId_revision: { nodeId: node.id, revision: node.revision },
-        } })));
-      if (revisions.some((revision, index) => !revision ||
-          revision.contentDigest !== nodes[index].contentDigest ||
-          revision.contentDigestKeyId !== nodes[index].contentDigestKeyId)) {
-        throw new AmuxV4UnitDecisionError("reconfirm");
-      }
-      let sourceFeatureRef = choice.featureNodeId;
-      if (verified.proposal.featureRef !== choice.featureNodeId) {
-        const sourceUnit = await tx.amuxIdeaDraftUnit.findFirst({ where: {
-          ideaId: choice.ideaId, actorUserId,
-          localRef: verified.proposal.featureRef, unitKind: "node",
-          state: "approved",
-        }, select: { id: true } });
-        const sourceDecision = sourceUnit ? await tx.amuxIdeaUnitDecision.findFirst({
-          where: { draftUnitId: sourceUnit.id, state: "consumed",
-            OR: [{ resolvedNodeId: choice.featureNodeId },
-              { linkedNodeId: choice.featureNodeId }] },
-          select: { id: true },
-        }) : null;
-        if (!sourceDecision) throw new AmuxV4UnitDecisionError("reconfirm");
-        sourceFeatureRef = verified.proposal.featureRef;
-      }
-      const preview = await tx.amuxIdeaTransferPreview.findUnique({
-        where: { id: verified.previewId },
-      });
-      if (!preview || preview.state !== "completed" ||
-          preview.ideaId !== choice.ideaId ||
-          preview.chunkIndex !== unit.chunkIndex) {
-        throw new AmuxV4UnitDecisionError("reconfirm");
-      }
-      const scope = preview.sourceScopeApprovalId ?
-        await tx.amuxIdeaSourceScopeApproval.findUnique({
-          where: { id: preview.sourceScopeApprovalId },
-          select: { id: true, scopeDigest: true,
-            scopeDigestKeyId: true, ideaId: true },
-        }) : null;
-      if (preview.sourceScopeApprovalId && (!scope || scope.ideaId !== choice.ideaId)) {
-        throw new AmuxV4UnitDecisionError("reconfirm");
-      }
-      const duplicates = await scanner(tx, { unitId: unit.id,
-        proposal: verified.proposal, featureNodeId: feature.id });
-      if (duplicates.candidates.length > 0 && choice.decisionReason === null) {
-        throw new AmuxV4DuplicateReasonRequired(
-          duplicates.candidates.map((candidate) => candidate.id));
-      }
-      const common = {
-        ideaId: choice.ideaId, decisionId, prepareRequestId: choice.prepareRequestId,
-        actorUserId, ownerSession,
-        unit: { id: unit.id, localRef: unit.localRef!,
-          bodyDigest: unit.bodyDigest, bodyDigestKeyId: unit.bodyDigestKeyId },
-        proposal: verified.proposal,
-        preview: { id: preview.id, payloadDigest: preview.payloadDigest,
-          payloadDigestKeyId: preview.payloadDigestKeyId,
-          scopeApprovalId: scope?.id ?? null, scopeDigest: scope?.scopeDigest ?? null,
-          scopeDigestKeyId: scope?.scopeDigestKeyId ?? null },
-        hierarchy: nodes.map((node, index) => ({ id: node.id,
-          level: node.level as "initiative" | "epic" | "feature",
-          parentId: node.parentId, revision: node.revision,
-          content: { digest: node.contentDigest,
-            keyId: node.contentDigestKeyId }, state: "active" as const,
-          approvedDecisionId: revisions[index]!.decisionId })) as
-            Parameters<typeof assembleAmuxV4StoryConfirmation>[0]["hierarchy"],
-        sourceFeatureRef, duplicateScan: duplicates,
-        decisionReason: choice.decisionReason, key: keys,
-      };
-      let taskCost = null;
-      let snapshot: AmuxIdeaUnitConfirmationSnapshot | null;
-      if (verified.proposal.cardType === "task") {
-        if (!verified.proposal.taskRole || !verified.proposal.executionGrade) {
-          throw new AmuxV4UnitDecisionError("not_ready");
-        }
-        const refs = await resolveAmuxV4TaskReferences(tx, {
-          ideaId: choice.ideaId, actorUserId, proposal: verified.proposal,
-          featureNodeId: feature.id,
-        });
-        try {
-          const approved = await calculateCurrentApprovedAmuxV4TaskCost(tx,
-            verified.proposal.taskRole, verified.proposal.executionGrade);
-          taskCost = { ok: true as const, receipt: approved.receipt };
-          snapshot = assembleAmuxV4TaskConfirmation({ ...common, ...refs,
-            costReceipt: approved.receipt,
-            publicPrDisclosureApproved:
-              choice.publicPrDisclosureApproved === true });
-        } catch (error) {
-          if (error instanceof AmuxV4TaskCatalogApprovalError) {
-            throw new AmuxV4UnitDecisionError("not_ready");
-          }
-          throw error;
-        }
-      } else {
-        snapshot = assembleAmuxV4StoryConfirmation(common);
-      }
-      if (!snapshot) throw new AmuxV4UnitDecisionError("reconfirm");
-      const result = await commitAmuxV4UnitPrepare(tx, { session: input.session,
-        request: input.request, snapshot, duplicateScan: duplicates,
-        taskCost, digestKey: keys });
+      const { result, unit, duplicates, taskCost, snapshot, feature } =
+        await prepareAmuxV4CardRegistrationInTx(tx, { session: input.session,
+          request: input.request, actorUserId, choice, verified, scanner, keys,
+          decisionId, ownerSession });
       callbackReturned = true;
       return { ...result, draftUnitId: unit.id, title: verified.proposal.title,
         cardType: verified.proposal.cardType,
