@@ -10,6 +10,8 @@
 
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { REGISTRATION_SOURCES } from "@/lib/engineeringAgentRegistrationGuard";
 import { checkListing, gitObjectId, type TreeEntry } from
   "@/lib/engineeringAgentTreeVerify";
@@ -398,4 +400,181 @@ export async function readEngineeringAgentDependabotFailures(
     out.push({ prNumber, headSha, failingChecks });
   }
   return out;
+}
+
+/* ------------------------------------------------------------------------- */
+/* A published pull request, as the approval observer reads it (§9-10)        */
+/* ------------------------------------------------------------------------- */
+
+const MAX_REVIEWS = 100;
+const MAX_DIFF_BYTES = 1024 * 1024;
+const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
+const FAILING_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required", "stale", "startup_failure"]);
+
+export type EngineeringAgentPullObservation = {
+  state: "open" | "closed";
+  merged: boolean;
+  mergedAt: Date | null;
+  mergeCommitSha: string | null;
+  /** Who merged, as a kind only (§9-10: the merger is an observation, never an identity). */
+  mergedByKind: "user" | "bot" | "app" | "unknown";
+  baseRef: string;
+  baseSha: string;
+  headSha: string;
+  reviews: Array<{ id: number; userId: number; login: string; state: string; commitId: string; submittedAt: Date }>;
+  /** Every required check of the head, or null while one is pending or the list cannot be read whole. */
+  requiredChecks: { allPassed: boolean } | null;
+  /** sha256 of the diff's own bytes, as the publisher binds it; null when it could not be read. */
+  diffDigest: string | null;
+};
+
+const instant = (value: unknown): Date | null => {
+  if (typeof value !== "string") return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+async function readPullDiffDigest(
+  prNumber: number,
+  resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
+): Promise<string | null> {
+  const token = tokenFrom(resolved.env);
+  let response: Response;
+  try {
+    response = await resolved.fetchImpl(`${API_ORIGIN}/repos/${REPOSITORY}/pulls/${prNumber}`, {
+      method: "GET",
+      redirect: "error",
+      cache: "no-store",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: {
+        Accept: "application/vnd.github.diff",
+        Authorization: `Bearer ${token}`,
+        "X-GitHub-Api-Version": API_VERSION,
+      },
+    });
+  } catch {
+    return null;
+  }
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  try {
+    return createHash("sha256").update(await readBounded(response, MAX_DIFF_BYTES)).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
+/** Required check names of develop, or null when the protection is not readable with this token. */
+async function readRequiredCheckNames(
+  resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
+): Promise<string[] | null> {
+  const branch = record(await githubJson(`/branches/develop`, resolved));
+  const required = record(record(branch?.protection)?.required_status_checks);
+  if (!required) return null;
+  const checks = Array.isArray(required.checks)
+    ? required.checks.map((entry) => record(entry)?.context)
+    : required.contexts;
+  if (!Array.isArray(checks) || checks.some((name) => typeof name !== "string")) return null;
+  return checks as string[];
+}
+
+async function readRequiredChecks(
+  headSha: string,
+  resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
+): Promise<{ allPassed: boolean } | null> {
+  const names = await readRequiredCheckNames(resolved);
+  if (names === null) return null;
+  const runs = await checkRunsAt(headSha, resolved);
+  const combined = record(await githubJson(`/commits/${headSha}/status`, resolved));
+  const statuses = Array.isArray(combined?.statuses) ? combined.statuses.map(record) : null;
+  if (statuses === null) throw new EngineeringAgentGitHubReadError("invalid_response");
+  let pending = false;
+  for (const name of names) {
+    // A re-run leaves the earlier run beside it; the newest one counts.
+    const run = runs.filter((entry) => entry.name === name).sort((a, b) => b.id - a.id)[0];
+    const status = statuses.find((entry) => entry?.context === name);
+    // GitHub requires every result of a required name to pass: a check run
+    // and a commit status of the same name are both judged.
+    if (!run && !status) pending = true;
+    if (run) {
+      if (run.conclusion === null) pending = true;
+      else if (FAILING_CONCLUSIONS.has(run.conclusion)) return { allPassed: false };
+      else if (!PASSING_CONCLUSIONS.has(run.conclusion)) pending = true;
+    }
+    if (status) {
+      if (status.state === "failure" || status.state === "error") return { allPassed: false };
+      if (status.state !== "success") pending = true;
+    }
+  }
+  return pending ? null : { allPassed: true };
+}
+
+/**
+ * One published pull request with what the approval judgement needs: its
+ * state and merge, its reviews, its head's required checks and its diff
+ * digest. Reads only; a list that is not whole is a refusal, not a shorter
+ * list, and a check still running leaves the checks undecided.
+ */
+export async function readEngineeringAgentPullObservation(
+  prNumber: number,
+  deps: Deps = {},
+): Promise<EngineeringAgentPullObservation> {
+  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
+  const resolved = withDefaults(deps);
+  const pull = record(await githubJson(`/pulls/${prNumber}`, resolved));
+  const base = record(pull?.base);
+  const head = record(pull?.head);
+  const baseSha = typeof base?.sha === "string" ? base.sha.toLowerCase() : null;
+  const headSha = typeof head?.sha === "string" ? head.sha.toLowerCase() : null;
+  const state = pull?.state;
+  const merged = pull?.merged === true;
+  const mergeCommitSha = merged && typeof pull?.merge_commit_sha === "string" ? pull.merge_commit_sha.toLowerCase() : null;
+  const mergedAt = merged ? instant(pull?.merged_at) : null;
+  if (
+    pull?.number !== prNumber || (state !== "open" && state !== "closed") ||
+    typeof base?.ref !== "string" || baseSha === null || !SHA.test(baseSha) ||
+    headSha === null || !SHA.test(headSha) ||
+    (merged && (mergeCommitSha === null || !SHA.test(mergeCommitSha) || mergedAt === null))
+  ) {
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  }
+  const mergedBy = record(pull?.merged_by);
+  const mergedByKind = !merged ? "unknown" :
+    record(pull?.performed_via_github_app) ? "app" :
+    mergedBy?.type === "Bot" ? "bot" : mergedBy?.type === "User" ? "user" : "unknown";
+
+  const page = await githubPage(`/pulls/${prNumber}/reviews?per_page=${MAX_REVIEWS}`, resolved);
+  if (!Array.isArray(page.body) || page.hasNext || page.body.length > MAX_REVIEWS) {
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  }
+  const reviews: EngineeringAgentPullObservation["reviews"] = [];
+  for (const entry of page.body) {
+    const review = record(entry);
+    const user = record(review?.user);
+    const submittedAt = instant(review?.submitted_at);
+    const commitId = typeof review?.commit_id === "string" ? review.commit_id.toLowerCase() : null;
+    // A pending review is the reviewer's draft: not submitted, not counted.
+    if (review?.state === "PENDING" || submittedAt === null) continue;
+    if (typeof review?.id !== "number" || !Number.isSafeInteger(review.id) ||
+        typeof user?.id !== "number" || !Number.isSafeInteger(user.id) || typeof user.login !== "string" ||
+        typeof review.state !== "string" || commitId === null || !SHA.test(commitId)) {
+      throw new EngineeringAgentGitHubReadError("invalid_response");
+    }
+    reviews.push({ id: review.id, userId: user.id, login: user.login, state: review.state, commitId, submittedAt });
+  }
+  return {
+    state,
+    merged,
+    mergedAt,
+    mergeCommitSha,
+    mergedByKind,
+    baseRef: base.ref,
+    baseSha,
+    headSha,
+    reviews,
+    requiredChecks: await readRequiredChecks(headSha, resolved),
+    diffDigest: await readPullDiffDigest(prNumber, resolved),
+  };
 }
