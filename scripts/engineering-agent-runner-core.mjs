@@ -172,6 +172,11 @@ export async function runRunnerCycle(ports) {
     return { finishedNormally: recorded.status === 200, halt: observed, reason: "observed_unbound" };
   }
 
+  // The app reads its published pull requests' approvals and merges itself
+  // (§9-10); the runner only triggers the round. A failed round decides
+  // nothing and is repeated next cycle, so it does not stop this one.
+  await ports.app("observe/pull-requests", {});
+
   const ready = await ports.app("worker/heartbeat", { ...lease, status: "idle", dispatchReady: true });
   if (ready.status !== 200 || ready.json?.accepted !== true) {
     return { finishedNormally: false, halt: "unknown", reason: "runtime_lease_lost" };
