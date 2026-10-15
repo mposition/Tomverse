@@ -14,7 +14,11 @@ import {
   MARKETING_WEBHOOK_SHADOW_KEY,
   digestMarketingWebhookVerificationRecord,
 } from "@/lib/marketingAutomationAccess";
-import type { MarketingAuditRequirement, MarketingAuditVerdict } from "@/lib/marketingAuditEvidence";
+import type {
+  MarketingAuditReader,
+  MarketingAuditRequirement,
+  MarketingAuditVerdict,
+} from "@/lib/marketingAuditEvidence";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 import {
   MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY,
@@ -29,6 +33,7 @@ import {
 import {
   MarketingWebhookProductionConfigRefusedError,
   readMarketingWebhookProductionConfigLive,
+  readMarketingWebhookProductionRecord,
   setMarketingWebhookProductionApplyScope,
   signMarketingWebhookProductionConfig,
   type MarketingWebhookProductionConfigSignRequest,
@@ -463,4 +468,73 @@ test("a record rewritten under the same id cannot stretch the old signature to n
   assert.equal(settings.has(MARKETING_WEBHOOK_APPLY_SCOPE_KEY), false);
   // The bytes it was signed over still work.
   await setScope(tx);
+});
+
+// ---------------------------------------------------------------------------
+// The record lookup the production screen uses before signing
+// ---------------------------------------------------------------------------
+
+/** Rows as [id, the recordDigest their metadata names]; a bare id names RECORD_DIGEST. */
+const auditDb = (rows: Array<string | [string, string]>) =>
+  ({
+    adminAuditLog: {
+      findMany: async ({
+        where,
+        take,
+      }: {
+        where: { action: string; targetId: string; metadata: { path: string[]; equals: string } };
+        take: number;
+      }) =>
+        rows
+          .map((row) => (typeof row === "string" ? [row, RECORD_DIGEST] : row))
+          .filter(
+            ([, digest]) =>
+              where.action === "marketing_webhook.verification_signed" &&
+              where.targetId === RECORD_ID &&
+              where.metadata.path.join(".") === "recordDigest" &&
+              digest === where.metadata.equals,
+          )
+          .slice(0, take)
+          .map(([id]) => ({ id })),
+    },
+  }) as unknown as MarketingAuditReader;
+
+const lookup = (
+  ids: Array<string | [string, string]>,
+  options: { file?: string | null; verified?: (id: string, digest: unknown) => boolean } = {},
+) =>
+  readMarketingWebhookProductionRecord(auditDb(ids), RECORD_ID, {
+    readRecordFile: async () => (options.file === undefined ? RECORD : options.file),
+    verifyAudit: async (_tx, requirement) =>
+      (options.verified ?? (() => true))(requirement.auditLogId, requirement.metadata?.recordDigest)
+        ? { ok: true, createdAt: new Date() }
+        : { ok: false, problem: "metadata_mismatch" },
+  });
+
+test("the record lookup names the newest verified signature of exactly these bytes", async () => {
+  const view = await lookup(["audit-newest", "audit-older"], {
+    verified: (id, digest) => id === "audit-older" && digest === RECORD_DIGEST,
+  });
+  assert.deepEqual(view, {
+    recordId: RECORD_ID,
+    status: "found",
+    recordDigest: RECORD_DIGEST,
+    pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+    observedScope: SCOPE,
+    verificationSignatureAuditLogId: "audit-older",
+  });
+});
+
+test("a record nobody signed, or that is not in the tree, offers nothing to sign over", async () => {
+  assert.equal((await lookup([], {})).verificationSignatureAuditLogId, null);
+  assert.equal((await lookup(["audit-1"], { verified: () => false })).verificationSignatureAuditLogId, null);
+  assert.equal((await lookup(["audit-1"], { file: null })).status, "not_found");
+  assert.equal((await lookup(["audit-1"], { file: "not json" })).status, "invalid");
+  assert.equal((await lookup(["audit-1"], { file: recordText({ recordId: "2026-10-14__other" }) })).status, "invalid");
+});
+
+test("signatures of other bytes under the same id cannot crowd out the one that counts", async () => {
+  const others: Array<[string, string]> = Array.from({ length: 12 }, (_, index) => [`audit-old-${index}`, "0".repeat(64)]);
+  const view = await lookup([...others, "audit-current"]);
+  assert.equal(view.verificationSignatureAuditLogId, "audit-current");
 });
