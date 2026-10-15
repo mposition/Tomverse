@@ -47,4 +47,11 @@ test("the plan route takes the client's plan request id and reads the plan back 
   assert.ok(route.includes("planRequestId: z.uuid(),"));
   assert.ok(route.includes("export async function GET("));
   assert.ok(route.includes("readAmuxV4ScorePlan(session, query.data)"));
+  // Both reads of the read-back share one snapshot.
+  const service = readFileSync("lib/amux/portfolioPlanApprovalService.ts", "utf8");
+  const readBack = service.slice(service.indexOf("export async function readAmuxV4ScorePlan("));
+  assert.match(readBack, /isolationLevel: "RepeatableRead"/);
+  assert.match(readBack, /await tx.amuxPortfolioAssessment.findMany/);
+  assert.match(readBack, /await tx.amuxPortfolioScoreSnapshot.findMany/);
+  assert.doesNotMatch(readBack, /Promise.all/);
 });

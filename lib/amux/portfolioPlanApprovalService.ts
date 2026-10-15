@@ -126,18 +126,20 @@ export async function readAmuxV4ScorePlan(session: Session, input: {
       [...input.subjectIds, ...input.taskIds].some((id) => !ID.test(id))) {
     throw new AmuxPortfolioError("invalid_input");
   }
-  const [assessments, scores] = await Promise.all([
-    prisma.amuxPortfolioAssessment.findMany({
+  // One snapshot for both reads: a plan committing between them must not
+  // look half there.
+  const [assessments, scores] = await prisma.$transaction(async (tx) => [
+    await tx.amuxPortfolioAssessment.findMany({
       where: { approvedByUserId: actorUserId, requestId: { in: input.subjectIds.map((id) =>
         amuxV4ScorePlanRowRequestId(input.planRequestId, "assessment", id)) } },
       select: { id: true, nodeId: true, cardId: true, assessmentVersion: true },
     }),
-    prisma.amuxPortfolioScoreSnapshot.findMany({
+    await tx.amuxPortfolioScoreSnapshot.findMany({
       where: { approvedByUserId: actorUserId, requestId: { in: input.taskIds.map((id) =>
         amuxV4ScorePlanRowRequestId(input.planRequestId, "score", id)) } },
       select: { id: true, taskId: true, scoreTotal: true },
     }),
-  ]);
+  ] as const, { isolationLevel: "RepeatableRead", maxWait: 2_000, timeout: 8_000 });
   const expected = input.subjectIds.length + input.taskIds.length;
   const found = assessments.length + scores.length;
   return { state: found === 0 ? "not_visible" as const : found === expected ?
