@@ -10,6 +10,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
+  canSetAsidePreviousIdea,
   canStartAnotherIdea,
   canOpenSavedIdea,
   classifyIdeaSubmissionPost,
@@ -18,6 +19,7 @@ import {
 import {
   clearConfirmedIdeaRequest,
   clearPendingIdeaRequest,
+  forgetIdeaRequestReceipts,
   readConfirmedIdeaRequest,
   readPendingIdeaRequest,
   rememberConfirmedIdeaRequest,
@@ -108,11 +110,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     setSubmission({ kind: "idle" });
   };
 
-  const startAnotherIdea = () => {
-    if (!canStartAnotherIdea(submission.kind, pending || readBackPending || sourceScopePending)) return;
-    if (submission.kind === "submitted") {
-      clearConfirmedIdeaRequest(receiptStore(), operatorId, submission.requestId);
-    }
+  const [setAsideAcknowledged, setSetAsideAcknowledged] = useState(false);
+  const [setAside, setSetAside] = useState<{ kind: "set_aside"; requestId: string } | { kind: "unavailable" } | null>(null);
+  const resetInput = () => {
     inputRevision.current += 1;
     inFlight.current = false;
     setIdea("");
@@ -124,6 +124,29 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     setSourcePath("");
     setSourceScopeResult({ kind: "idle" });
     setSubmission({ kind: "idle" });
+  };
+  const startAnotherIdea = () => {
+    if (!canStartAnotherIdea(submission.kind, pending || readBackPending || sourceScopePending)) return;
+    if (submission.kind === "submitted") {
+      clearConfirmedIdeaRequest(receiptStore(), operatorId, submission.requestId);
+    }
+    setSetAside(null);
+    resetInput();
+  };
+  // An unknown or unrecoverable previous request no longer locks the input
+  // for good: the operator may set it aside explicitly. Nothing is retried;
+  // the old request keeps its id and can still be opened by it.
+  const setAsidePreviousIdea = () => {
+    if (!canSetAsidePreviousIdea(submission.kind, pending || readBackPending || sourceScopePending,
+      setAsideAcknowledged)) return;
+    const previous = submission.kind === "outcome_unknown" ? submission.requestId : null;
+    if (!forgetIdeaRequestReceipts(receiptStore(), operatorId)) {
+      setSetAside({ kind: "unavailable" });
+      return;
+    }
+    setSetAsideAcknowledged(false);
+    setSetAside(previous ? { kind: "set_aside", requestId: previous } : null);
+    resetInput();
   };
 
   const checkSourceScope = async () => {
@@ -489,6 +512,28 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           </button>
           <a href={STEP_UP_HREF} className="ml-3 font-medium underline">{messages.stepUp}</a>
         </div>
+      ) : null}
+      {submission.kind === "outcome_unknown" || submission.kind === "recovery_unavailable" ? (
+        <div className="space-y-2 rounded-lg border border-zinc-300 p-3 text-sm dark:border-zinc-700"
+          data-testid="amux-idea-set-aside">
+          <label className="flex items-start gap-2">
+            <input type="checkbox" className="mt-1 size-4" checked={setAsideAcknowledged}
+              onChange={(event) => setSetAsideAcknowledged(event.target.checked)} />
+            <span>{messages.setAsideAcknowledge}</span>
+          </label>
+          <button type="button" onClick={setAsidePreviousIdea}
+            disabled={!canSetAsidePreviousIdea(submission.kind,
+              pending || readBackPending || sourceScopePending, setAsideAcknowledged)}
+            className="min-h-11 rounded-lg border border-zinc-400 px-4 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-zinc-600">
+            {messages.setAsideAction}
+          </button>
+          {setAside?.kind === "unavailable" ? <p role="alert">{messages.setAsideUnavailable}</p> : null}
+        </div>
+      ) : null}
+      {setAside?.kind === "set_aside" && submission.kind === "idle" ? (
+        <p role="status" className="text-sm text-zinc-700 dark:text-zinc-300">
+          {messages.setAsideNotice(setAside.requestId)}
+        </p>
       ) : null}
       <AmuxInitialPlanPanel
         key={submission.kind === "submitted" ? submission.ideaId : "none"}
