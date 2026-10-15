@@ -474,18 +474,33 @@ test("a record rewritten under the same id cannot stretch the old signature to n
 // The record lookup the production screen uses before signing
 // ---------------------------------------------------------------------------
 
-const auditDb = (ids: string[]) =>
+/** Rows as [id, the recordDigest their metadata names]; a bare id names RECORD_DIGEST. */
+const auditDb = (rows: Array<string | [string, string]>) =>
   ({
     adminAuditLog: {
-      findMany: async ({ where }: { where: { action: string; targetId: string } }) =>
-        where.action === "marketing_webhook.verification_signed" && where.targetId === RECORD_ID
-          ? ids.map((id) => ({ id }))
-          : [],
+      findMany: async ({
+        where,
+        take,
+      }: {
+        where: { action: string; targetId: string; metadata: { path: string[]; equals: string } };
+        take: number;
+      }) =>
+        rows
+          .map((row) => (typeof row === "string" ? [row, RECORD_DIGEST] : row))
+          .filter(
+            ([, digest]) =>
+              where.action === "marketing_webhook.verification_signed" &&
+              where.targetId === RECORD_ID &&
+              where.metadata.path.join(".") === "recordDigest" &&
+              digest === where.metadata.equals,
+          )
+          .slice(0, take)
+          .map(([id]) => ({ id })),
     },
   }) as unknown as MarketingAuditReader;
 
 const lookup = (
-  ids: string[],
+  ids: Array<string | [string, string]>,
   options: { file?: string | null; verified?: (id: string, digest: unknown) => boolean } = {},
 ) =>
   readMarketingWebhookProductionRecord(auditDb(ids), RECORD_ID, {
@@ -516,4 +531,10 @@ test("a record nobody signed, or that is not in the tree, offers nothing to sign
   assert.equal((await lookup(["audit-1"], { file: null })).status, "not_found");
   assert.equal((await lookup(["audit-1"], { file: "not json" })).status, "invalid");
   assert.equal((await lookup(["audit-1"], { file: recordText({ recordId: "2026-10-14__other" }) })).status, "invalid");
+});
+
+test("signatures of other bytes under the same id cannot crowd out the one that counts", async () => {
+  const others: Array<[string, string]> = Array.from({ length: 12 }, (_, index) => [`audit-old-${index}`, "0".repeat(64)]);
+  const view = await lookup([...others, "audit-current"]);
+  assert.equal(view.verificationSignatureAuditLogId, "audit-current");
 });

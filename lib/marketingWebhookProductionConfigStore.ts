@@ -479,7 +479,7 @@ export type MarketingWebhookProductionRecordView = {
   readonly verificationSignatureAuditLogId: string | null;
 };
 
-/** How many signature rows for one record are looked at, newest first. */
+/** How many signature rows of one record's exact bytes are looked at, newest first. */
 const RECORD_SIGNATURE_CANDIDATES = 10;
 
 /**
@@ -514,8 +514,15 @@ export async function readMarketingWebhookProductionRecord(
   if (!record.success || record.data.recordId !== recordId) return { ...empty, status: "invalid" };
   const recordDigest = digestMarketingWebhookVerificationRecord(fileText);
 
+  // Narrowed to rows that name these exact bytes, so signatures of an earlier
+  // version of the record -- or anything else under its id -- cannot crowd the
+  // one that counts out of the window. The verifier still decides.
   const candidates = await db.adminAuditLog.findMany({
-    where: { action: MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION, targetId: recordId },
+    where: {
+      action: MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION,
+      targetId: recordId,
+      metadata: { path: ["recordDigest"], equals: recordDigest },
+    },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: RECORD_SIGNATURE_CANDIDATES,
     select: { id: true },

@@ -250,9 +250,22 @@ export function MarketingWebhookProductionView({
         ]
       : [];
 
-  // Emptying is a stop: offered whenever something is applied, with nothing else required.
+  // Emptying is a stop. It is offered whenever a stored scope exists that is
+  // not already empty -- including one this build cannot read, which is exactly
+  // when the operator needs a way out -- and needs nothing else: the server
+  // takes an empty scope without a signature or a record. Its record id and
+  // generation only label the stored value; when no readable source names
+  // them, the operator types the record id.
+  const stopSource =
+    scope.status === "valid"
+      ? { recordId: scope.value.recordId, generation: scope.value.productionConfigGeneration }
+      : signed
+        ? { recordId: signed.recordId, generation: signed.generation }
+        : record && record.status === "found"
+          ? { recordId: record.recordId, generation: 1 }
+          : null;
   const stopAction: MarketingAction[] =
-    scope.status === "valid" && scope.value.scope.length > 0
+    (scope.status === "valid" && scope.value.scope.length > 0) || scope.status === "invalid"
       ? [
           {
             id: "webhook-production-apply-scope-stop",
@@ -261,9 +274,12 @@ export function MarketingWebhookProductionView({
             method: "PATCH",
             danger: true,
             confirm: m.prodScopeStopConfirm,
-            body: () => ({
-              recordId: scope.value.recordId,
-              productionConfigGeneration: scope.value.productionConfigGeneration,
+            fields: stopSource
+              ? undefined
+              : [{ name: "recordId", label: m.fieldRecordId, kind: "text" as const, initial: "", hint: m.hintRecordId }],
+            body: (values) => ({
+              recordId: stopSource?.recordId ?? String(values.recordId ?? "").trim(),
+              productionConfigGeneration: stopSource?.generation ?? 1,
               scope: [],
               expectedStoredDigest: scope.storedDigest,
             }),

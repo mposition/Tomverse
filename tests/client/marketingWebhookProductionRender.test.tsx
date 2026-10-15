@@ -131,3 +131,39 @@ test("emptying an applied scope is offered on its own, against the stored bytes"
     expectedStoredDigest: "7".repeat(64),
   });
 });
+
+test("a stored scope this build cannot read can still be emptied", () => {
+  const invalid = { status: "invalid" as const, storedDigest: "8".repeat(64) };
+  // With nothing readable to name the record, the operator types its id.
+  const bare = actionsOf(render(live({ record: null, applyScope: invalid })));
+  assert.deepEqual(bare.map((action) => action.id), ["webhook-production-apply-scope-stop"]);
+  assert.deepEqual(bare[0].fields?.map((field) => field.name), ["recordId"]);
+  assert.deepEqual(bare[0].body({ recordId: " 2026-10-14__typed " }), {
+    recordId: "2026-10-14__typed",
+    productionConfigGeneration: 1,
+    scope: [],
+    expectedStoredDigest: "8".repeat(64),
+  });
+  // A signed generation names it instead.
+  const signed = { status: "valid" as const, value: { generation: 3, recordId: RECORD.recordId, signatureAuditLogId: "a" } };
+  const named = actionsOf(render(live({ record: null, stored: signed, applyScope: invalid })));
+  const stop = named.find((action) => action.id === "webhook-production-apply-scope-stop");
+  assert.ok(stop);
+  assert.equal(stop.fields, undefined);
+  assert.deepEqual(stop.body({}), {
+    recordId: RECORD.recordId,
+    productionConfigGeneration: 3,
+    scope: [],
+    expectedStoredDigest: "8".repeat(64),
+  });
+});
+
+test("an empty or absent scope offers no stop: nothing is applied", () => {
+  for (const applyScope of [
+    { status: "absent" as const, storedDigest: "absent" },
+    { status: "valid" as const, value: { recordId: RECORD.recordId, productionConfigGeneration: 1, scope: [] }, storedDigest: "6".repeat(64) },
+  ]) {
+    const ids = actionsOf(render(live({ record: null, applyScope }))).map((action) => action.id);
+    assert.equal(ids.includes("webhook-production-apply-scope-stop"), false);
+  }
+});
