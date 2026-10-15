@@ -19,7 +19,11 @@ let completeResult;
 
 mock.module(mod("lib/prisma.ts"), {
   namedExports: {
-    prisma: { engineeringAgentBinding: { findMany: async (args) => { calls.push(["findMany", args]); return bindings; } } },
+    prisma: { engineeringAgentBinding: { findMany: async (args) => {
+      calls.push(["findMany", args]);
+      const start = args.cursor ? bindings.findIndex((row) => row.id === args.cursor.id) + 1 : 0;
+      return bindings.slice(start, start + args.take);
+    } } },
   },
 });
 class ReadError extends Error {}
@@ -65,7 +69,7 @@ const pull = (overrides = {}) => ({
 const run = async (rows, read) => {
   bindings = rows;
   calls = [];
-  return observeEngineeringAgentPullRequests({}, { read, now: () => new Date("2026-10-15T05:40:00Z") });
+  return observeEngineeringAgentPullRequests({ read, now: () => new Date("2026-10-15T05:40:00Z") });
 };
 const recorded = () => calls.filter(([kind]) => kind !== "findMany");
 
@@ -130,4 +134,13 @@ for (const approval of [null, { verdict: "approved", reviewId: 9, observedAt: "2
     assert.deepEqual(recorded()[0][2].observation, { verdict: "not_approved", reason: "merged_without_approval",
       observedAt: "2026-10-15T05:40:00.000Z" });
   }
+}
+
+// A round reads every watched binding, page after page: none is crowded out by older ones that wait.
+{
+  const many = Array.from({ length: 45 }, (_, index) => binding({ id: `binding-${String(index).padStart(3, "0")}` }));
+  const outcomes = await run(many, async () => pull({ reviews: [] }));
+  assert.equal(outcomes.length, 45);
+  assert.equal(new Set(outcomes.map((entry) => entry.bindingId)).size, 45);
+  assert.equal(calls.filter(([kind]) => kind === "findMany").length, 3);
 }

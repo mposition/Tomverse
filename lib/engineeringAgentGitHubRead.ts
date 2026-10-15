@@ -495,15 +495,17 @@ async function readRequiredChecks(
     // A re-run leaves the earlier run beside it; the newest one counts.
     const run = runs.filter((entry) => entry.name === name).sort((a, b) => b.id - a.id)[0];
     const status = statuses.find((entry) => entry?.context === name);
+    // GitHub requires every result of a required name to pass: a check run
+    // and a commit status of the same name are both judged.
+    if (!run && !status) pending = true;
     if (run) {
       if (run.conclusion === null) pending = true;
       else if (FAILING_CONCLUSIONS.has(run.conclusion)) return { allPassed: false };
       else if (!PASSING_CONCLUSIONS.has(run.conclusion)) pending = true;
-    } else if (status) {
+    }
+    if (status) {
       if (status.state === "failure" || status.state === "error") return { allPassed: false };
       if (status.state !== "success") pending = true;
-    } else {
-      pending = true;
     }
   }
   return pending ? null : { allPassed: true };
