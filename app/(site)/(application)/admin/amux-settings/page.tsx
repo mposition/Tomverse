@@ -7,6 +7,8 @@ import { AmuxDecisionMakerReportPanel } from "@/components/admin/AmuxDecisionMak
 import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
 import { AmuxTaskCostCatalogApprovalPanel } from "@/components/admin/AmuxTaskCostCatalogApprovalPanel";
+import { AmuxAnalysisMonthlyBudgetPanel } from "@/components/admin/AmuxAnalysisMonthlyBudgetPanel";
+import { AmuxFrontierModelRegistrationPanel } from "@/components/admin/AmuxFrontierModelRegistrationPanel";
 import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
 import {
   amuxSwitchedTabStatus,
@@ -30,6 +32,12 @@ import {
 import { authOptions } from "@/lib/auth";
 import { AMUX_V4_TASK_CATALOG_WRITE_ENV, amuxV4TaskCatalogWriteEnabled } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
+import {
+  AMUX_V4_FRONTIER_CATALOG_READ_ENV,
+  AMUX_V4_FRONTIER_CATALOG_WRITE_ENV,
+  frontierCatalogReadPermitted,
+  frontierCatalogWritePermitted,
+} from "@/lib/amux/ideaFrontierCatalogWriteCore";
 
 const TABS = adminNavItemTabs("amux-settings");
 
@@ -65,8 +73,18 @@ export default async function AdminAmuxSettingsPage({
       <AmuxV22PromotionControl /></div>;
   }
   // Owner only (the tab's viewRoles); resolveAdminTabFor has already refused other roles.
+  // Approved backlog redesign, screen C: the monthly analysis budget, the
+  // approved analysis models and the Task cost catalogue, each behind the same
+  // server switches as before; the execution and plan approvals only read them.
   if (tab.id === "analysis") {
+    const budgetAvailable = process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
+      process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled";
+    const modelWriteAvailable =
+      frontierCatalogReadPermitted(process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV]) &&
+      frontierCatalogWritePermitted(process.env[AMUX_V4_FRONTIER_CATALOG_WRITE_ENV]);
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
+      <AmuxAnalysisMonthlyBudgetPanel available={budgetAvailable} operatorId={session.user.id} />
+      <AmuxFrontierModelRegistrationPanel writeAvailable={modelWriteAvailable} operatorId={session.user.id} />
       <AmuxTaskCostCatalogApprovalPanel approvalAvailable={
         amuxV4TaskCatalogWriteEnabled(process.env[AMUX_V4_TASK_CATALOG_WRITE_ENV])} /></div>;
   }

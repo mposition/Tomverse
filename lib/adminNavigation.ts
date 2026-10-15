@@ -877,7 +877,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       {
         id: "analysis",
         label: "Analysis settings",
-        description: "Task worker and model cost catalogue approval",
+        description: "Monthly analysis budget, approved analysis models and the Task cost catalogue",
         viewRoles: ["owner"],
       },
     ],

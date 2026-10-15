@@ -83,3 +83,12 @@ test("a build answer keeps a preview receipt only for a prepared or unknown prev
     assert.equal(answer?.kind, "verify");
   }
 });
+
+test("the execution approval reads as one numbered card: model, what is sent, cost and approval", () => {
+  const panel = readFileSync("components/admin/AmuxFrontierModelsPanel.tsx", "utf8");
+  const order = ["{m.executionCardTitle}", "{m.executionStepModel}", "{m.executionStepTransfer}",
+    "{m.executionTransferShow}", "{m.executionStepApprove}", "void approveExecution()"].map((text) => panel.indexOf(text));
+  assert.ok(order.every((at) => at > 0), "every step is drawn");
+  assert.deepEqual([...order].sort((a, b) => a - b), order, "in the mockup's order");
+  assert.ok(panel.includes("{preview.value.prompt}"), "the exact payload is still shown in full");
+});
