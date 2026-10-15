@@ -500,9 +500,11 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   return (
     <section className="space-y-2 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
       aria-labelledby="amux-v4-frontier-models-heading">
-      <h3 id="amux-v4-frontier-models-heading" className="font-semibold text-zinc-900 dark:text-zinc-100">
-        {m.frontierModelsTitle}
+      <h3 id="amux-v4-frontier-models-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+        {m.executionCardTitle}
       </h3>
+      <p className="text-zinc-700 dark:text-zinc-300">{m.executionCardLead}</p>
+      <h4 className="pt-2 font-semibold text-zinc-900 dark:text-zinc-100">{m.executionStepModel}</h4>
       <p className="text-zinc-700 dark:text-zinc-300">{m.frontierModelsHint}</p>
       <p className="text-xs text-zinc-600 dark:text-zinc-400">
         {m.frontierSettingsMoved}{" "}
@@ -577,14 +579,19 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       </div> : null}
       {preview.kind === "prepared" ? (
         <div className="space-y-2 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
+          <h4 className="pt-2 font-semibold text-zinc-900 dark:text-zinc-100">{m.executionStepTransfer}</h4>
           <p role="status">{m.transferPreviewPrepared}</p>
           <p className="break-all text-xs">{preview.value.provider} / {preview.value.modelId}
             {` · ${preview.value.reasoningEffort} · ${preview.value.previewId}`}</p>
           <p className="text-xs">{m.transferPreviewExpires}: {preview.value.expiresAt}</p>
           <p className="break-all text-xs">{m.transferPreviewDigest}: {preview.value.payloadDigest}</p>
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
-            {preview.value.prompt}
-          </pre>
+          <details className="rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
+            <summary className="min-h-11 cursor-pointer content-center font-medium">{m.executionTransferShow}</summary>
+            <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
+              {preview.value.prompt}
+            </pre>
+          </details>
+          <h4 className="pt-2 font-semibold text-zinc-900 dark:text-zinc-100">{m.executionStepApprove}</h4>
           <p>{confirmation.kind === "confirmed" ? m.transferConfirmRecordedBoundary :
             m.transferPreviewBoundary}</p>
           {confirmAvailable && confirmation.kind === "idle" && executionPrice.kind === "loading" ?
