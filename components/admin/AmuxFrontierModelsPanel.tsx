@@ -82,6 +82,10 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
   const [registrationFailure, setRegistrationFailure] = useState<AdminApiFailure | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const [confirmation, setConfirmation] = useState<ConfirmState>({ kind: "idle" });
+  // The approved, admissible analysis price that one execution approval
+  // reserves against (amux-intake.md v18 item 1). Without one, only the
+  // separate confirmation remains.
+  const [executionPriceId, setExecutionPriceId] = useState<string | null>(null);
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
 
   const readConfirmation = useCallback(async (pendingId: string,
@@ -471,6 +475,59 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
     void readBack(receipt.previewId, receipt.model, receipt.effort);
   };
 
+  useEffect(() => {
+    if (!analysisBudgetAvailable || preview.kind !== "prepared") return;
+    let active = true;
+    void adminFetch("/api/admin/amux/ideas/analysis-prices?profile=first-live", { cache: "no-store" })
+      .then(async (response) => {
+        const body: unknown = response.ok ? await response.json() : null;
+        const latest = body && typeof body === "object" && !Array.isArray(body) ?
+          (body as { latest?: unknown }).latest : null;
+        const row = latest && typeof latest === "object" && !Array.isArray(latest) ?
+          latest as Record<string, unknown> : null;
+        if (active) {
+          setExecutionPriceId(row && typeof row.id === "string" && row.status === "approved" &&
+            row.admissible === true ? row.id : null);
+        }
+      })
+      .catch(() => { if (active) setExecutionPriceId(null); });
+    return () => { active = false; };
+  }, [analysisBudgetAvailable, preview.kind]);
+
+  const approveExecution = async () => {
+    if (!confirmAvailable || !ideaId || preview.kind !== "prepared" ||
+        confirmation.kind !== "idle" || !executionPriceId) return;
+    const value = preview.value;
+    if (!reserveConfirmationAttempt(receiptStore(), operatorId, value.previewId,
+      ideaId, value.payloadDigest, value.payloadDigestKeyId)) {
+      setConfirmation({ kind: "unknown" });
+      await readConfirmation(value.previewId, ideaId, value.payloadDigest,
+        value.payloadDigestKeyId);
+      return;
+    }
+    setConfirmation({ kind: "pending" });
+    setFailure(null);
+    try {
+      const response = await adminFetch("/api/admin/amux/ideas/execution-approval", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1, previewId: value.previewId, ideaId,
+          payloadDigest: value.payloadDigest, payloadDigestKeyId: value.payloadDigestKeyId,
+          holdId: crypto.randomUUID(), priceVersionId: executionPriceId }),
+      });
+      if ([400, 401, 403, 404, 413, 415, 428].includes(response.status)) {
+        setFailure(await readAdminApiFailure(response, { fallback: m.transferConfirmRefused, locale }));
+        clearRefusedConfirmationAttempt(receiptStore(), operatorId, value.previewId,
+          ideaId, value.payloadDigest, value.payloadDigestKeyId);
+        setConfirmation((current) => current.kind === "confirmed" ? current : { kind: "refused" });
+        return;
+      }
+    } catch { /* A lost response must be read back by ID, not re-posted. */ }
+    // Success, a refusal of the decision or a lost response: the exact-ID
+    // read-back says what was recorded, and the budget panel then shows the hold.
+    await readConfirmation(value.previewId, ideaId, value.payloadDigest,
+      value.payloadDigestKeyId);
+  };
+
   const confirmPreview = async () => {
     if (!confirmAvailable || !ideaId || preview.kind !== "prepared" ||
         confirmation.kind !== "idle") return;
@@ -690,7 +747,14 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
           </pre>
           <p>{confirmation.kind === "confirmed" ? m.transferConfirmRecordedBoundary :
             m.transferPreviewBoundary}</p>
-          {confirmAvailable && confirmation.kind === "idle" ? <button type="button"
+          {confirmAvailable && confirmation.kind === "idle" && executionPriceId ? <>
+            <p className="text-xs">{m.executionApprovalBoundary}</p>
+            <button type="button" onClick={() => void approveExecution()}
+              className="min-h-11 rounded-lg border border-blue-700 bg-blue-700 px-4 text-white dark:border-blue-400">
+              {m.executionApprovalAction}
+            </button>
+          </> : null}
+          {confirmAvailable && confirmation.kind === "idle" && !executionPriceId ? <button type="button"
             onClick={() => void confirmPreview()}
             className="min-h-11 rounded-lg border border-blue-700 px-4 text-blue-800 dark:border-blue-400 dark:text-blue-200">
             {m.transferConfirmAction}

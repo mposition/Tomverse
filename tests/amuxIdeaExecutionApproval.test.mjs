@@ -28,3 +28,22 @@ test("the execution approval route keeps the confirmation route's owner, step-up
   assert.match(route, /\.strict\(\)/);
   assert.doesNotMatch(route, /export async function (GET|PUT|DELETE)/);
 });
+
+test("the screen offers one execution approval when an admissible price exists, and reads back instead of re-posting", () => {
+  const panel = readFileSync("components/admin/AmuxFrontierModelsPanel.tsx", "utf8");
+  const action = panel.slice(panel.indexOf("const approveExecution = async"), panel.indexOf("const confirmPreview = async"));
+  assert.match(action, /\/api\/admin\/amux\/ideas\/execution-approval/);
+  assert.match(action, /reserveConfirmationAttempt\(/, "an attempt is recorded before the request, so a reload cannot post twice");
+  assert.equal((action.match(/adminFetch\(/g) ?? []).length, 1, "one request, never a retry");
+  assert.match(action, /await readConfirmation\(value\.previewId/);
+  assert.match(panel, /row\.status === "approved" &&\s*row\.admissible === true/);
+  // Without an admissible price the separate confirmation stays; never both buttons at once.
+  assert.match(panel, /confirmation\.kind === "idle" && executionPriceId \?/);
+  assert.match(panel, /confirmation\.kind === "idle" && !executionPriceId \?/);
+});
+
+test("both admin locales describe the execution approval", () => {
+  const messages = readFileSync("lib/adminMessages/amuxIdeaInput.ts", "utf8");
+  assert.equal((messages.match(/executionApprovalAction:/g) ?? []).length, 2);
+  assert.equal((messages.match(/executionApprovalBoundary:/g) ?? []).length, 2);
+});
