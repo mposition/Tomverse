@@ -1309,7 +1309,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   apply가 쓸 검증기로 다시 읽고, 검증되지 않으면 쓰기와 함께 되돌립니다. 거절 class는 store에
   닿지 않는 `lib/marketingWebhookProductionConfig.ts`에 둡니다 — route sweep이 트랜잭션 밖에서
   store 경로의 이름을 쓰는 것을 실패로 만듭니다.
-- **S2f apply scope**: `app/api/admin/marketing/webhook/apply-scope/route.ts`(PUT),
+- **S2f apply scope**: `app/api/admin/marketing/webhook/apply-scope/route.ts`(PATCH),
   `setMarketingWebhookProductionApplyScope()`. 값은 `{recordId, productionConfigGeneration, scope}`이고
   저장 바이트의 sha-256(`absent` 포함)으로 CAS합니다. 비어 있지 않은 범위는 그 세대가 서명돼 있고
   지금도 실제 설정을 묶으며, 모든 쌍을 그 기록이 관측했을 때만 저장합니다. **서명된 세대를 읽는
@@ -1319,6 +1319,13 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   씁니다. 판정 모듈(`lib/marketingAutomationAccess.ts`)은 아직 이 형태를 읽지 못해 거절합니다 — 그
   모듈은 Prompt Refiner closure에 봉인돼 있어 repin이 필요하므로, 판정 연결은 production apply
   slice에서 한 번에 합니다.
+- **S2f 콘솔**: `components/admin/MarketingWebhookProduction.tsx`,
+  `tests/client/marketingWebhookProductionRender.test.tsx`, 읽기 route의 `?recordId=` 조회
+  (`readMarketingWebhookProductionRecord()`). 서버가 production이라고 답할 때만 그리며, 서명에 보내는
+  값은 운영자가 옮겨 적지 않고 화면이 읽은 값을 그대로 씁니다 — 기록 digest와, 그 바이트에 서명한
+  검증된 감사 행도 서버가 찾아 줍니다. 범위는 서명된 세대의 기록이 관측한 쌍 중에서만 고르고,
+  범위 비우기는 따로 언제나 제공합니다. 상태가 있는 wrapper와 hook 없는 view로 나눈 것은 render
+  테스트가 view를 함수로 불러 각 action의 body를 직접 읽기 위해서입니다.
 
 # 엔지니어링 Agent
 

@@ -14,7 +14,11 @@ import {
   MARKETING_WEBHOOK_SHADOW_KEY,
   digestMarketingWebhookVerificationRecord,
 } from "@/lib/marketingAutomationAccess";
-import type { MarketingAuditRequirement, MarketingAuditVerdict } from "@/lib/marketingAuditEvidence";
+import type {
+  MarketingAuditReader,
+  MarketingAuditRequirement,
+  MarketingAuditVerdict,
+} from "@/lib/marketingAuditEvidence";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 import {
   MARKETING_WEBHOOK_PRODUCTION_CONFIG_KEY,
@@ -29,6 +33,7 @@ import {
 import {
   MarketingWebhookProductionConfigRefusedError,
   readMarketingWebhookProductionConfigLive,
+  readMarketingWebhookProductionRecord,
   setMarketingWebhookProductionApplyScope,
   signMarketingWebhookProductionConfig,
   type MarketingWebhookProductionConfigSignRequest,
@@ -463,4 +468,52 @@ test("a record rewritten under the same id cannot stretch the old signature to n
   assert.equal(settings.has(MARKETING_WEBHOOK_APPLY_SCOPE_KEY), false);
   // The bytes it was signed over still work.
   await setScope(tx);
+});
+
+// ---------------------------------------------------------------------------
+// The record lookup the production screen uses before signing
+// ---------------------------------------------------------------------------
+
+const auditDb = (ids: string[]) =>
+  ({
+    adminAuditLog: {
+      findMany: async ({ where }: { where: { action: string; targetId: string } }) =>
+        where.action === "marketing_webhook.verification_signed" && where.targetId === RECORD_ID
+          ? ids.map((id) => ({ id }))
+          : [],
+    },
+  }) as unknown as MarketingAuditReader;
+
+const lookup = (
+  ids: string[],
+  options: { file?: string | null; verified?: (id: string, digest: unknown) => boolean } = {},
+) =>
+  readMarketingWebhookProductionRecord(auditDb(ids), RECORD_ID, {
+    readRecordFile: async () => (options.file === undefined ? RECORD : options.file),
+    verifyAudit: async (_tx, requirement) =>
+      (options.verified ?? (() => true))(requirement.auditLogId, requirement.metadata?.recordDigest)
+        ? { ok: true, createdAt: new Date() }
+        : { ok: false, problem: "metadata_mismatch" },
+  });
+
+test("the record lookup names the newest verified signature of exactly these bytes", async () => {
+  const view = await lookup(["audit-newest", "audit-older"], {
+    verified: (id, digest) => id === "audit-older" && digest === RECORD_DIGEST,
+  });
+  assert.deepEqual(view, {
+    recordId: RECORD_ID,
+    status: "found",
+    recordDigest: RECORD_DIGEST,
+    pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+    observedScope: SCOPE,
+    verificationSignatureAuditLogId: "audit-older",
+  });
+});
+
+test("a record nobody signed, or that is not in the tree, offers nothing to sign over", async () => {
+  assert.equal((await lookup([], {})).verificationSignatureAuditLogId, null);
+  assert.equal((await lookup(["audit-1"], { verified: () => false })).verificationSignatureAuditLogId, null);
+  assert.equal((await lookup(["audit-1"], { file: null })).status, "not_found");
+  assert.equal((await lookup(["audit-1"], { file: "not json" })).status, "invalid");
+  assert.equal((await lookup(["audit-1"], { file: recordText({ recordId: "2026-10-14__other" }) })).status, "invalid");
 });

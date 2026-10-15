@@ -29,6 +29,7 @@ import {
 import {
   MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION,
   verifyMarketingAuditEvidence,
+  type MarketingAuditReader,
   type MarketingAuditRequirement,
   type MarketingAuditVerdict,
 } from "@/lib/marketingAuditEvidence";
@@ -461,4 +462,87 @@ export async function setMarketingWebhookProductionApplyScope(
     }
   }
   return value;
+}
+
+export type MarketingWebhookProductionRecordView = {
+  readonly recordId: string;
+  /** `found` only when the record is in the tree and strict. */
+  readonly status: "found" | "not_found" | "invalid";
+  readonly recordDigest: string | null;
+  readonly pipelineFingerprint: string | null;
+  readonly observedScope: ReadonlyArray<{ readonly eventType: string; readonly channelId: string }>;
+  /**
+   * The newest human `verification_signed` row for exactly these bytes that the
+   * hash-chain verifier accepts, or null when there is none -- in which case
+   * nothing can be signed over this record yet.
+   */
+  readonly verificationSignatureAuditLogId: string | null;
+};
+
+/** How many signature rows for one record are looked at, newest first. */
+const RECORD_SIGNATURE_CANDIDATES = 10;
+
+/**
+ * One verification record as the production screen needs it before signing:
+ * its digest, what it observed, and which audit row signed exactly these bytes.
+ * Read-only; the signing route checks every one of these again.
+ */
+export async function readMarketingWebhookProductionRecord(
+  db: MarketingAuditReader,
+  recordId: string,
+  deps: {
+    readonly readRecordFile?: (recordId: string) => Promise<string | null>;
+    readonly verifyAudit?: (
+      db: MarketingAuditReader,
+      requirement: MarketingAuditRequirement,
+    ) => Promise<MarketingAuditVerdict>;
+  } = {},
+): Promise<MarketingWebhookProductionRecordView> {
+  const readRecordFile = deps.readRecordFile ?? readMarketingWebhookVerificationRecordFile;
+  const verifyAudit = deps.verifyAudit ?? verifyMarketingAuditEvidence;
+  const empty = { recordId, recordDigest: null, pipelineFingerprint: null, observedScope: [], verificationSignatureAuditLogId: null };
+
+  const fileText = await readRecordFile(recordId);
+  if (fileText === null) return { ...empty, status: "not_found" };
+  let json: unknown = null;
+  try {
+    json = JSON.parse(canonicalMarketingWebhookFileText(fileText));
+  } catch {
+    return { ...empty, status: "invalid" };
+  }
+  const record = marketingWebhookVerificationRecordSchema.safeParse(json);
+  if (!record.success || record.data.recordId !== recordId) return { ...empty, status: "invalid" };
+  const recordDigest = digestMarketingWebhookVerificationRecord(fileText);
+
+  const candidates = await db.adminAuditLog.findMany({
+    where: { action: MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION, targetId: recordId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: RECORD_SIGNATURE_CANDIDATES,
+    select: { id: true },
+  });
+  let verificationSignatureAuditLogId: string | null = null;
+  for (const candidate of candidates) {
+    const verdict = await verifyAudit(db, {
+      auditLogId: candidate.id,
+      action: MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION,
+      targetId: recordId,
+      metadata: { recordDigest },
+    });
+    if (verdict.ok) {
+      verificationSignatureAuditLogId = candidate.id;
+      break;
+    }
+  }
+
+  return {
+    recordId,
+    status: "found",
+    recordDigest,
+    pipelineFingerprint: record.data.pipelineFingerprint,
+    observedScope: record.data.observedScope.map((entry) => ({
+      eventType: entry.eventType,
+      channelId: entry.channelId,
+    })),
+    verificationSignatureAuditLogId,
+  };
 }
