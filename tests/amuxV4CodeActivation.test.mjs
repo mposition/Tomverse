@@ -72,12 +72,12 @@ test("unit no-commit recovery has a separate default-off switch", () => {
   assert.match(source, /!AMUX_V4_UNIT_WRITE_CODE_ENABLED \|\|\s*process\.env\[UNIT_RECOVERY_WRITE_ENV\] !== "enabled"/);
 });
 
-test("v29 opens only four v22 code latches, not publication or outcome writes", () => {
+test("v29 opens four v22 code latches and v49 adds publication, not outcome writes", () => {
   const sources = [
     ["../lib/amux/v22AutoPromotionCore.ts", "AMUX_V22_AUTO_PROMOTION_CODE_LATCH", true],
     ["../lib/amux/v22WorkerClaimCore.ts", "AMUX_V22_WORKER_CLAIM_CODE_LATCH", true],
     ["../lib/amux/v22TaskExecutionCore.ts", "AMUX_V22_TASK_EXECUTION_CODE_LATCH", true],
-    ["../lib/amux/v22TaskExecutionCore.ts", "AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH", false],
+    ["../lib/amux/v22TaskExecutionCore.ts", "AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH", true],
     ["../lib/amux/v22OutcomeObservationCore.ts", "AMUX_V22_OUTCOME_WRITE_CODE_LATCH", false],
     ["../lib/amux/v22OneShotSidecar.mjs", "AMUX_V22_SIDECAR_CODE_LATCH", true],
   ];
