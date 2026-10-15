@@ -41,6 +41,11 @@ const PREWRITE_REFUSALS: Record<string, number> = {
   audit_unavailable: 503,
 };
 
+/** True for an error the submission route returns before its transaction. */
+export function isIdeaSubmissionPrewriteRefusal(code: unknown, status: number): boolean {
+  return typeof code === "string" && Object.hasOwn(PREWRITE_REFUSALS, code) && PREWRITE_REFUSALS[code] === status;
+}
+
 export function classifyIdeaSubmissionPost(reply: Reply, requestId: string): PostDecision {
   const body = record(reply.body);
   if (reply.status === 201 && body?.state === "submitted" &&
