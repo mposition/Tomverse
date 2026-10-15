@@ -8,6 +8,8 @@ import { AmuxBacklogListPanel } from "@/components/admin/AmuxBacklogListPanel";
 import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
+import { AmuxIdeaProgressPanel } from "@/components/admin/AmuxIdeaProgressPanel";
+import { AmuxIdeaDetailSummary } from "@/components/admin/AmuxIdeaDetailSummary";
 import { AmuxUnusedAnalysisReservationPanel } from
   "@/components/admin/AmuxUnusedAnalysisReservationPanel";
 import { AmuxAnalysisClaimResolutionPanel } from
@@ -35,9 +37,7 @@ import {
 } from "@/lib/amux/ideaInitialSourcePlanCore";
 import {
   AMUX_V4_FRONTIER_CATALOG_READ_ENV,
-  AMUX_V4_FRONTIER_CATALOG_WRITE_ENV,
   frontierCatalogReadPermitted,
-  frontierCatalogWritePermitted,
 } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import {
   AMUX_V4_TRANSFER_PREVIEW_READ_ENV,
@@ -63,6 +63,9 @@ import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { adminNavItemTabs, adminRedirectTarget, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
+import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
+import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
+import { isAmuxIdeaRequestId } from "@/lib/amux/ideaRequestIdCore";
 import { AMUX_V4_PORTFOLIO_WRITE_ENV,
   amuxV4PortfolioWriteEnabled } from
   "@/lib/amux/portfolioAssessmentService";
@@ -103,6 +106,27 @@ export default async function AdminAmuxBacklogPage({
   const backlogList = tab.id === "list" && search.valid && hasRecentAdminAuthentication(session)
     ? await readAmuxBacklogList(search.search, amuxBacklogPage(query.page)) : null;
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
+  // Ideas: the decide-now inbox and the progress list read the same snapshot,
+  // behind the submission read-back switch. A failed read is shown as
+  // unavailable (null), never as an empty list.
+  const ideaReadBackAvailable = ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV]);
+  // Like the card list, it needs a recent owner sign-in (the idea read-back
+  // route asks for the same).
+  let ideaProgress: AmuxIdeaProgressRow[] | null | "reauthenticate" | undefined;
+  if (tab.id === "ideas" && ideaReadBackAvailable && !hasRecentAdminAuthentication(session)) {
+    ideaProgress = "reauthenticate";
+  } else if (tab.id === "ideas" && ideaReadBackAvailable) {
+    ideaProgress = await readAmuxIdeaProgressForOwner(session.user.id).catch(() => {
+      console.warn(JSON.stringify({ subsystem: "amux", event: "idea_progress_read_failed" }));
+      return null;
+    });
+  }
+  const requestedIdea = typeof query.idea === "string" ? query.idea.trim().toLowerCase() : "";
+  const openRequestId = isAmuxIdeaRequestId(requestedIdea) ? requestedIdea : null;
+  // An opened idea leads with its own detail (redesign B3); the list returns
+  // below the flow, so the page shows one idea at a time.
+  const openedIdea = Array.isArray(ideaProgress) && openRequestId
+    ? ideaProgress.find((row) => row.requestId === openRequestId) ?? null : null;
   const ideaSubmissionAvailable =
     ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
     ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV]);
@@ -112,8 +136,6 @@ export default async function AdminAmuxBacklogPage({
     initialPlanReadbackPermitted(process.env[AMUX_V4_INITIAL_PLAN_READBACK_ENV]);
   const frontierModelsAvailable = frontierCatalogReadPermitted(
     process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV]);
-  const frontierModelWriteAvailable = frontierModelsAvailable && frontierCatalogWritePermitted(
-    process.env[AMUX_V4_FRONTIER_CATALOG_WRITE_ENV]);
   const transferPreviewAvailable = initialPlanAvailable && frontierModelsAvailable &&
     transferPreviewWritePermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV]) &&
     transferPreviewReadPermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_READ_ENV]);
@@ -147,11 +169,14 @@ export default async function AdminAmuxBacklogPage({
         <>
         {recoveryHoldId ? <AmuxAnalysisClaimResolutionPanel
           key={recoveryHoldId} holdId={recoveryHoldId} /> : null}
-        <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable}
+        {openedIdea ? <AmuxIdeaDetailSummary row={openedIdea} /> : null}
+        {ideaProgress !== undefined && !openedIdea ? <AmuxIdeaProgressPanel rows={ideaProgress}
+          activeRequestId={openRequestId} /> : null}
+        <AmuxIdeaInputPanel key={openRequestId ?? "new"} openRequestId={openRequestId}
+          submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
           initialPlanAvailable={initialPlanAvailable}
           frontierModelsAvailable={frontierModelsAvailable}
-          frontierModelWriteAvailable={frontierModelWriteAvailable}
           transferPreviewAvailable={transferPreviewAvailable}
           transferConfirmAvailable={transferConfirmAvailable}
           analysisResultAvailable={amuxV4AnalysisResultReadEnabled(
@@ -162,6 +187,8 @@ export default async function AdminAmuxBacklogPage({
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"}
           operatorId={session.user.id} />
+        {openedIdea && ideaProgress !== undefined ? <AmuxIdeaProgressPanel rows={ideaProgress}
+          activeRequestId={openRequestId} /> : null}
         </>
       ) : tab.id === "portfolio" ? (
         <AmuxPortfolioPanel writeAvailable={amuxV4PortfolioWriteEnabled(

@@ -332,7 +332,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       },
       safety: { label: "실행 안전·복구", description: "자동 복구, 확인할 증거와 운영자 정지 해제 판단" },
       "decision-maker": { label: "Decision Maker", description: "Decision Maker kill switch와 인스턴스별 모드" },
-      analysis: { label: "분석 설정", description: "Task worker·모델 비용 카탈로그 승인" },
+      analysis: { label: "분석 설정", description: "분석 월 예산, 승인된 분석 모델, Task 비용 카탈로그" },
     },
   },
   "email-policy": {
