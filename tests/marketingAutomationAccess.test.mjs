@@ -17,6 +17,7 @@ import {
   MARKETING_WEBHOOK_PIPELINE_FILES,
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
   MARKETING_WEBHOOK_PIPELINE_ROOT,
+  MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES,
   MARKETING_WEBHOOK_SCHEMA_MODELS,
   canonicalMarketingWebhookFileText,
   canonicalMarketingWebhookJson,
@@ -33,6 +34,7 @@ import {
   marketingWebhookSignatureAuditRequirement,
 } from "../lib/marketingAuditEvidence.ts";
 import { MARKETING_WEBHOOK_EVENT_TYPES } from "../lib/marketingWebhookCore.ts";
+import { marketingWebhookPipelineSources } from "../scripts/marketing-webhook-pipeline-sources.mjs";
 
 const readable = (value) => ({ ok: true, value });
 const unreadable = { ok: false };
@@ -656,18 +658,212 @@ test("the closure scanner names commented and template imports and refuses compu
   }
 });
 
-test("the pipeline file list is the receiver route's whole import closure", () => {
+// The fingerprint's sources (scripts/marketing-webhook-pipeline-sources.mjs):
+// webhook modules whole, the declarations they reach elsewhere, nothing from
+// the shared modules. `overrides` substitutes a file's text.
+const ACCESS_MODULE = "lib/marketingAutomationAccess.ts";
+const WHOLE_CODE_FILES = MARKETING_WEBHOOK_PIPELINE_FILES.filter(
+  (file) => file !== "prisma/schema.prisma" && !file.startsWith("prisma/migrations/"),
+);
+const pipeline = (overrides = {}) =>
+  marketingWebhookPipelineSources({
+    repositoryRoot,
+    wholeFiles: [...MARKETING_WEBHOOK_PIPELINE_FILES],
+    sharedModules: [...MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES],
+    selfModule: ACCESS_MODULE,
+    readText: (relative) =>
+      Object.hasOwn(overrides, relative)
+        ? overrides[relative]
+        : readFileSync(path.join(repositoryRoot, relative), "utf8"),
+  });
+const pipelineFingerprint = (overrides) =>
+  computeMarketingWebhookPipelineFingerprint(pipeline(overrides).sources, MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR);
+const sourceText = (relative) => readFileSync(path.join(repositoryRoot, relative), "utf8");
+
+test("the pipeline scope is classified against the receiver route's import closure", () => {
   const closure = localImportClosure(MARKETING_WEBHOOK_PIPELINE_ROOT);
-  // The module holding the fingerprint cannot hash itself.
-  closure.delete("lib/marketingAutomationAccess.ts");
-  const declared = MARKETING_WEBHOOK_PIPELINE_FILES.filter(
-    (file) => file !== "prisma/schema.prisma" && !file.startsWith("prisma/migrations/"),
-  );
-  assert.deepEqual([...declared].sort(), [...closure].sort());
+  closure.delete(ACCESS_MODULE);
   assert.deepEqual([...MARKETING_WEBHOOK_PIPELINE_FILES], [...MARKETING_WEBHOOK_PIPELINE_FILES].sort());
+  assert.deepEqual([...MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES], [...MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES].sort());
   for (const file of MARKETING_WEBHOOK_PIPELINE_FILES) {
     assert.ok(isFile(path.join(repositoryRoot, file)), file);
   }
+  // Every hashed or excluded module is one the route actually loads.
+  for (const file of [...WHOLE_CODE_FILES, ...MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES]) {
+    assert.ok(closure.has(file), `${file} is not in the receiver's import closure`);
+  }
+  // A webhook module is hashed whole, never sliced: a new one joins the list.
+  for (const file of closure) {
+    if (/^lib\/marketingWebhook\w*\.ts$/.test(file)) assert.ok(WHOLE_CODE_FILES.includes(file), file);
+  }
+  const { slicedFiles, reachedSharedModules } = pipeline();
+  // A shared entry the path no longer reaches is refused, not kept.
+  assert.deepEqual(reachedSharedModules, [...MARKETING_WEBHOOK_PIPELINE_SHARED_MODULES]);
+  for (const file of slicedFiles) {
+    assert.ok(closure.has(file), file);
+    assert.ok(!WHOLE_CODE_FILES.includes(file), file);
+  }
+  // The store and the schema module are what the webhook path writes through.
+  assert.ok(slicedFiles.includes("lib/marketingStore.ts"));
+  assert.ok(slicedFiles.includes("lib/marketingAutomationSchema.ts"));
+});
+
+test("the fingerprint ignores what decides no event and follows what does", () => {
+  const base = pipelineFingerprint();
+  const store = sourceText("lib/marketingStore.ts");
+  // Another feature's store function, and a comment, change nothing.
+  assert.equal(
+    pipelineFingerprint({
+      "lib/marketingStore.ts": `${store}\n// a note\nexport async function unrelatedMarketingWriter(): Promise<number> {\n  return 1;\n}\n`,
+    }),
+    base,
+  );
+  // A new audit actor, or anything else in the shared audit chain, changes nothing.
+  const actors = sourceText("lib/adminAuditSystemActors.ts");
+  assert.equal(pipelineFingerprint({ "lib/adminAuditSystemActors.ts": `${actors}\nexport const LATER_ACTOR = "x";\n` }), base);
+  // The shadow writer itself does.
+  const marker = "export async function recordMarketingWebhookShadow(";
+  assert.ok(store.includes(marker));
+  assert.notEqual(
+    pipelineFingerprint({
+      "lib/marketingStore.ts": store.replace(
+        "// The audit chain first, as every writer here takes it.",
+        "// The audit chain first, as every writer here takes it.\n  void 0;",
+      ),
+    }),
+    base,
+  );
+  // So does a webhook module, even by a comment: it is hashed whole.
+  const core = sourceText("lib/marketingWebhookCore.ts");
+  assert.notEqual(pipelineFingerprint({ "lib/marketingWebhookCore.ts": `${core}\n// note\n` }), base);
+});
+
+// A miniature repository whose one whole-file module is "w".
+const miniature = (files) => {
+  const exists = (absolute) =>
+    Object.hasOwn(files, path.relative(repositoryRoot, absolute).split(path.sep).join("/"));
+  const run = (overrides = {}) =>
+    marketingWebhookPipelineSources({
+      repositoryRoot,
+      wholeFiles: ["lib/w.ts"],
+      sharedModules: [],
+      selfModule: ACCESS_MODULE,
+      readText: (relative) => ({ ...files, ...overrides })[relative],
+      exists,
+    });
+  return (overrides) =>
+    computeMarketingWebhookPipelineFingerprint(run(overrides).sources, MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR);
+};
+
+test("the slicer keeps load-time effects and import wiring, and refuses dynamic loads", () => {
+  // An effect nothing names still runs when the module loads.
+  const effects = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts":
+      "const setup = ((globalThis as { allow?: boolean }).allow = true);\nexport const decide = () => (globalThis as { allow?: boolean }).allow;\n",
+  });
+  assert.notEqual(
+    effects({
+      "lib/s.ts":
+        "const setup = ((globalThis as { allow?: boolean }).allow = false);\nexport const decide = () => (globalThis as { allow?: boolean }).allow;\n",
+    }),
+    effects(),
+  );
+  // ... even in a module loaded only for something the path never uses.
+  const unused = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts": 'import { other } from "@/lib/u";\nexport const decide = () => 1;\nexport const later = () => other;\n',
+    "lib/u.ts": "export const other = 1;\n(globalThis as { x?: number }).x = 1;\n",
+  });
+  assert.notEqual(unused({ "lib/u.ts": "export const other = 1;\n(globalThis as { x?: number }).x = 2;\n" }), unused());
+  // Swapping which import a local name stands for is a change.
+  const wiring = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts": 'import { yes as a, no as b } from "@/lib/y";\nexport const decide = () => [a(), b()];\n',
+    "lib/y.ts": "export const yes = () => true;\nexport const no = () => false;\n",
+  });
+  assert.notEqual(
+    wiring({ "lib/s.ts": 'import { no as a, yes as b } from "@/lib/y";\nexport const decide = () => [a(), b()];\n' }),
+    wiring(),
+  );
+  // Destructuring runs getters; an interpolation or a computed key runs toString.
+  const implicit = (declarations) =>
+    miniature({
+      "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+      "lib/s.ts": `${declarations}\nexport const decide = () => (globalThis as { allow?: boolean }).allow;\n`,
+    });
+  for (const [template, name] of [
+    ["const obj = { get x() { (globalThis as { allow?: boolean }).allow = FLAG; return 1; } };\nconst { x } = obj;", "destructuring"],
+    ['const obj = { toString() { (globalThis as { allow?: boolean }).allow = FLAG; return "x"; } };\nconst unused = `${obj}`;', "interpolation"],
+    ['const obj = { toString() { (globalThis as { allow?: boolean }).allow = FLAG; return "x"; } };\nconst unused = { [obj]: 1 };', "computed key"],
+  ]) {
+    const run = implicit(template.replaceAll("FLAG", "true"));
+    assert.notEqual(
+      run({
+        "lib/s.ts": `${template.replaceAll("FLAG", "false")}\nexport const decide = () => (globalThis as { allow?: boolean }).allow;\n`,
+      }),
+      run(),
+      name,
+    );
+  }
+  // Modules evaluate in import order, so swapping two imports is a change.
+  const order = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts": 'import "@/lib/noop";\nimport { a } from "@/lib/a";\nimport { b } from "@/lib/b";\nexport const decide = () => [a, b];\n',
+    "lib/noop.ts": "export {};\n",
+    "lib/a.ts": "export const a = 1;\n(globalThis as { v?: number }).v = 1;\n",
+    "lib/b.ts": "export const b = 2;\n(globalThis as { v?: number }).v = 2;\n",
+  });
+  assert.throws(() => order(), /side-effect import/);
+  const swapped = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts": 'import { a } from "@/lib/a";\nimport { b } from "@/lib/b";\nexport const decide = () => [a, b];\n',
+    "lib/a.ts": "export const a = 1;\n(globalThis as { v?: number }).v = 1;\n",
+    "lib/b.ts": "export const b = 2;\n(globalThis as { v?: number }).v = 2;\n",
+  });
+  assert.notEqual(
+    swapped({ "lib/s.ts": 'import { b } from "@/lib/b";\nimport { a } from "@/lib/a";\nexport const decide = () => [a, b];\n' }),
+    swapped(),
+  );
+  // ... including in a module that only re-exports.
+  const reexport = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts": 'export { a } from "@/lib/a";\nexport { b } from "@/lib/b";\nexport { decide } from "@/lib/d";\n',
+    "lib/a.ts": "export const a = 1;\n(globalThis as { v?: number }).v = 1;\n",
+    "lib/b.ts": "export const b = 2;\n(globalThis as { v?: number }).v = 2;\n",
+    "lib/d.ts": "export const decide = () => (globalThis as { v?: number }).v;\n",
+  });
+  assert.notEqual(
+    reexport({
+      "lib/s.ts": 'export { b } from "@/lib/b";\nexport { a } from "@/lib/a";\nexport { decide } from "@/lib/d";\n',
+    }),
+    reexport(),
+  );
+  // A module loaded by import() or require() cannot be followed.
+  const dynamic = miniature({
+    "lib/w.ts": 'export const later = () => import("@/lib/d");\n',
+    "lib/d.ts": "export const d = 1;\n",
+  });
+  assert.throws(() => dynamic(), /dynamic import or require of @\/lib\/d/);
+  assert.throws(
+    () => dynamic({ "lib/w.ts": 'export const later = () => require("@/lib/d");\n' }),
+    /dynamic import or require of @\/lib\/d/,
+  );
+});
+
+test("the slicer refuses what it cannot follow", () => {
+  const sliceOf = (text) =>
+    marketingWebhookPipelineSources({
+      repositoryRoot,
+      wholeFiles: ["lib/marketingWebhookCore.ts"],
+      sharedModules: [],
+      selfModule: ACCESS_MODULE,
+      readText: (relative) =>
+        relative === "lib/marketingWebhookCore.ts" ? 'import { a } from "@/lib/marketingStore";\nexport const b = a;\n' : text,
+    });
+  assert.throws(() => sliceOf('export * from "@/lib/marketingAutomationSchema";\n'), /export \*/);
+  assert.throws(() => sliceOf('import * as s from "@/lib/marketingAutomationSchema";\nexport const a = s;\n'), /namespace import/);
+  assert.throws(() => sliceOf("export const notA = 1;\n"), /does not export a/);
 });
 
 test("every migration that shapes MarketingPost is in the fingerprint (S2f applies posts)", () => {
@@ -701,15 +897,26 @@ test("the fingerprint watches the receiver's schema models, not the whole schema
   // A change inside a watched model changes it.
   const changed = schema.replace("model MarketingReport {", "model MarketingReport {\n  addedColumn String?");
   assert.notEqual(fingerprint(changed), fingerprint(schema));
+  // Another feature's back relation on a watched model changes nothing; a
+  // relation between two watched models still does.
+  const backRelation = schema.replace(
+    "model AdminAuditLog {",
+    "model AdminAuditLog {\n  laterFeatureRows LaterFeature[]",
+  );
+  assert.equal(
+    fingerprint(`${backRelation}\nmodel LaterFeature {\n  id String @id\n}\n`),
+    fingerprint(`${schema}\nmodel LaterFeature {\n  id String @id\n}\n`),
+  );
+  assert.notEqual(
+    fingerprint(schema.replace("model AdminAuditLog {", "model AdminAuditLog {\n  watchedRows MarketingReport[]")),
+    fingerprint(schema),
+  );
   // A watched model that disappears is an error, not a smaller slice.
   assert.throws(() => marketingWebhookSchemaSlice(schema.replace("model AppSetting {", "model AppSettingRenamed {")));
 });
 
 test("pipeline fingerprint is current and independent of LF versus CRLF", () => {
-  const files = MARKETING_WEBHOOK_PIPELINE_FILES.map((path) => ({
-    path,
-    content: readFileSync(new URL(`../${path}`, import.meta.url), "utf8"),
-  }));
+  const files = pipeline().sources;
   assert.equal(
     computeMarketingWebhookPipelineFingerprint(
       files,
