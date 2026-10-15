@@ -28,6 +28,7 @@ import {
   readPreparedIdeaTransferPreview, readPreviewReceipt, reservePreviewReceipt,
   type PreparedIdeaTransferPreview,
 } from "@/lib/amux/ideaTransferPreviewUiCore";
+import { reserveBuildPreviewReceipt, takeBuildPreviewReceipt } from "@/lib/amux/ideaBuildPreviewUiCore";
 import {
   clearRefusedConfirmationAttempt, readConfirmedIdeaTransfer, readConfirmationAttempt,
   readConfirmationAttemptForPreview, reserveConfirmationAttempt,
@@ -65,7 +66,7 @@ export type AmuxBuildPreviewHooks = {
 
 export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvailable, confirmAvailable,
   analysisBudgetAvailable, ideaId, planReady,
-  declaredExternalSources, operatorId, chunkIndex = 0, build = null }: {
+  declaredExternalSources, operatorId, chunkIndex = 0, build = null, buildRequestId = null }: {
   available: boolean; writeAvailable: boolean;
   previewAvailable: boolean; confirmAvailable: boolean;
   analysisBudgetAvailable: boolean;
@@ -73,6 +74,8 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
   chunkIndex?: number;
   build?: AmuxBuildPreviewHooks | null;
+  /** The saved idea's submission request id, which keys a build's receipt. */
+  buildRequestId?: string | null;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const budgetMessages = useAdminMessages(adminAmuxAnalysisBudgetMessages);
@@ -242,6 +245,25 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
     });
     return () => { active = false; };
   }, [chunkIndex, ideaId, operatorId, previewAvailable, readBack]);
+
+  // A build whose answer was lost: once the saved idea's plan reads back as
+  // committed, the preview may have been prepared after it, so the receipt
+  // recorded before the request becomes this idea's preview receipt and its
+  // exact preview is read back. A plan that reads back absent means no preview
+  // was attempted; the input panel discards the receipt then.
+  useEffect(() => {
+    if (!ideaId || !planReady || !buildRequestId || !previewAvailable || chunkIndex !== 0) return;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      const receipt = takeBuildPreviewReceipt(receiptStore(), operatorId, buildRequestId);
+      if (!receipt || !reservePreviewReceipt(receiptStore(), operatorId, ideaId, receipt.previewId,
+        receipt.model, receipt.effort, 0)) return;
+      setPreview({ kind: "pending" });
+      void readBack(receipt.previewId, receipt.model, receipt.effort);
+    });
+    return () => { active = false; };
+  }, [buildRequestId, chunkIndex, ideaId, operatorId, planReady, previewAvailable, readBack]);
 
   const refresh = () => {
     setLoading(true);
@@ -527,8 +549,18 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
     if (!build?.draft || !selected || !selectedEffort || building || ideaId !== null) return;
     const requestId = crypto.randomUUID();
     const previewId = crypto.randomUUID();
-    // The input panel records the submission attempt before the request.
-    if (!build.reserve(requestId)) return;
+    // The preview half is recorded before the request, keyed by the submission
+    // request id; the input panel records the submission attempt itself.
+    if (!reserveBuildPreviewReceipt(receiptStore(), operatorId, requestId,
+      { previewId, model: selected, effort: selectedEffort })) {
+      setFailure({ message: m.buildPreviewRecoveryUnavailable, tone: "error",
+        requiresReauthentication: false, approvalId: null });
+      return;
+    }
+    if (!build.reserve(requestId)) {
+      takeBuildPreviewReceipt(receiptStore(), operatorId, requestId);
+      return;
+    }
     setBuilding(true);
     setFailure(null);
     try {
@@ -543,20 +575,28 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
       const row = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
       const builtIdeaId = typeof row.ideaId === "string" ? row.ideaId : null;
       if (builtIdeaId) {
-        // Saved. A preview that was prepared, or may have been, is recovered by
-        // its own receipt once this panel remounts for the saved idea.
-        const previewReached = row.state === "prepared" || row.step === "preview";
-        if (previewReached) {
-          reservePreviewReceipt(receiptStore(), operatorId, builtIdeaId, previewId, selected, selectedEffort, 0);
+        // Saved. Only a preview that was prepared, or may have been, keeps a
+        // receipt, recovered once this panel remounts for the saved idea. A
+        // definite preview refusal keeps none, so a new preview can be prepared;
+        // a chain that stopped before the preview never attempted one.
+        const receipt = takeBuildPreviewReceipt(receiptStore(), operatorId, requestId);
+        const planReady = row.state === "prepared" || row.step === "preview";
+        const previewMayExist = row.state === "prepared" ||
+          (row.step === "preview" && (response.status >= 500 || row.error === "outcome_unknown"));
+        if (previewMayExist && receipt) {
+          reservePreviewReceipt(receiptStore(), operatorId, builtIdeaId, receipt.previewId,
+            receipt.model, receipt.effort, 0);
         }
         build.onBuilt({ requestId, ideaId: builtIdeaId, hasExternalSources: row.hasExternalSources === true,
-          planReady: previewReached });
+          planReady });
         return;
       }
       if (response.status < 500 && row.error !== "outcome_unknown") {
+        takeBuildPreviewReceipt(receiptStore(), operatorId, requestId);
         build.onRefused(requestId, typeof row.error === "string" ? row.error : "submit_failed");
         return;
       }
+      // Unknown: the receipt stays, and the submission read-back links it.
       build.onUnknown(requestId);
     } catch {
       build.onUnknown(requestId);

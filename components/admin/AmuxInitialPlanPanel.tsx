@@ -26,9 +26,11 @@ const receiptStore = (): Storage | null => {
 
 /** Idea-only plan preparation. The opaque idea ID is the recovery key. */
 export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredExternalSources,
-  onCommitted }: {
+  onCommitted, onAbsent }: {
   ideaId: string | null; operatorId: string; available: boolean; declaredExternalSources: boolean;
   onCommitted?: (ideaId: string) => void;
+  /** The saved idea has no plan yet, read back definitively. */
+  onAbsent?: (ideaId: string) => void;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const { locale } = useAdminLocale();
@@ -88,6 +90,7 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
             } else if (decision.kind === "absent") {
               setState({ kind: "idle" });
               setCheckedIdeaId(ideaId);
+              onAbsent?.(ideaId);
             } else {
               setState({ kind: "outcome_unknown", ideaId });
             }
@@ -103,7 +106,7 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
     });
     return () => { active = false; };
   }, [operatorId, readBack, ideaId, available, declaredExternalSources, locale,
-    m.initialPlanUnavailable, onCommitted]);
+    m.initialPlanUnavailable, onCommitted, onAbsent]);
 
   const prepare = async () => {
     if (!ideaId || !available || declaredExternalSources || !recoveryChecked ||
