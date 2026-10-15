@@ -38,11 +38,9 @@ const receiptStore = (): Storage | null => {
  * The receipt is kept before the write and an unknown answer is read back by
  * its exact approval id, never resent.
  */
-export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId, onChanged }: {
+export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId }: {
   writeAvailable: boolean;
   operatorId: string;
-  /** Called after an approval or revocation is confirmed. */
-  onChanged?: () => void;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const [registrationProvider, setRegistrationProvider] =
@@ -123,7 +121,7 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId,
         status: response.status,
         body: await response.json().catch(() => null),
       }, registration);
-      if (applyRegistrationPost(decision, registration)) onChanged?.();
+      applyRegistrationPost(decision, registration);
     } catch {
       applyRegistrationPost({ kind: "verify" }, registration);
     }
@@ -167,11 +165,10 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId,
       }
       setRegistrationState(observed.status);
       clearFrontierRegistrationReceipt(receiptStore(), operatorId, registration.approvalId);
-      onChanged?.();
     } catch {
       setRegistrationState("unknown");
     }
-  }, [onChanged, m.frontierRegistrationInvalidResponse,
+  }, [m.frontierRegistrationInvalidResponse,
     m.frontierRegistrationReadBackReauthentication,
     m.frontierRegistrationUnavailable, operatorId]);
 

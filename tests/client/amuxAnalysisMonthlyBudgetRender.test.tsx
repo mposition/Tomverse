@@ -19,9 +19,9 @@ test("disabled setting shows no enabled save or implied model execution", () => 
   assert.match(html, /disabled=""[^>]*>Save monthly ceiling/);
 });
 
-test("a stale sign-in offers an actionable return link to the ideas screen", () => {
+test("a stale sign-in offers an actionable return link to Analysis settings", () => {
   const html = renderToStaticMarkup(<AmuxAnalysisBudgetReauthenticationNotice />);
   assert.match(html, /role="alert"/);
   assert.match(html, /Sign in again to continue/);
-  assert.match(html, /href="\/auth\/admin-reauthenticate\?callbackUrl=%2Fadmin%2Famux-backlog%3Ftab%3Dideas&amp;mode=recent"/);
+  assert.match(html, /href="\/auth\/admin-reauthenticate\?callbackUrl=%2Fadmin%2Famux-settings%3Ftab%3Danalysis&amp;mode=recent"/);
 });
