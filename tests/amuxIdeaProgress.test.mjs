@@ -9,36 +9,50 @@ import { AMUX_IDEA_PROGRESS_LIMIT, readAmuxIdeaProgressInTx } from "../lib/amux/
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
-const facts = (overrides = {}) => ({ state: "submitted", analysisCompleted: false, cancelled: false,
-  previews: [], chunkStates: [], proposedUnits: 0, cards: [], ...overrides });
+const facts = (overrides = {}) => ({ state: "submitted", cancelled: false, chunks: [], proposedUnits: 0, cards: [],
+  ...overrides });
+const chunk = (overrides = {}) => ({ chunkIndex: 0, state: "draft_ready", coverageStatus: "complete",
+  previewState: "completed", holdStatus: "succeeded", ...overrides });
 const task = (overrides = {}) => ({ cardType: "task", status: "todo", reviewPrNumber: null, terminal: false, ...overrides });
 
-test("each idea is at exactly one of the six stages, and only the human ones wait for a decision", () => {
-  const stage = (value) => { const result = amuxIdeaProgress(facts(value)); return [result.stage, result.decisionWaiting]; };
-  assert.deepEqual(stage({}), ["execution_approval", true], "saved, nothing approved yet");
-  assert.deepEqual(stage({ previews: [{ state: "prepared", holdStatus: null }] }), ["execution_approval", true]);
-  assert.deepEqual(stage({ previews: [{ state: "expired", holdStatus: "released" }] }), ["execution_approval", true],
-    "an expired preview needs a new approval");
-  assert.deepEqual(stage({ previews: [{ state: "confirmed", holdStatus: "reserved" }] }), ["analysis", false]);
-  assert.deepEqual(stage({ state: "analyzing", previews: [{ state: "in_flight", holdStatus: "in_flight" }] }), ["analysis", false]);
-  assert.deepEqual(stage({ state: "awaiting_owner", analysisCompleted: true, proposedUnits: 3 }), ["plan_approval", true]);
-  assert.deepEqual(stage({ cards: [task(), task({ cardType: "story" })] }), ["execution", false]);
-  assert.deepEqual(stage({ cards: [task({ status: "review", reviewPrNumber: 12 }), task()] }), ["review", false]);
-  assert.deepEqual(stage({ cards: [task({ status: "done", terminal: true }), task({ cardType: "story" })] }), ["done", false],
-    "stories do not hold an idea open");
-  assert.deepEqual(stage({ cancelled: true, cards: [task()] }), ["cancelled", false]);
+test("each idea is at exactly one of the six stages, and a human step still open always comes first", () => {
+  const stage = (value) => { const result = amuxIdeaProgress(facts(value)); return [result.stage, result.waitingFor]; };
+  assert.deepEqual(stage({}), ["execution_approval", "execution_approval"], "saved, nothing approved yet");
+  assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "prepared", holdStatus: null })] }),
+    ["execution_approval", "execution_approval"]);
+  assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "expired", holdStatus: "released" })] }),
+    ["execution_approval", "execution_approval"], "an expired preview needs a new approval");
+  assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "confirmed", holdStatus: "reserved" })] }),
+    ["analysis", null]);
+  assert.deepEqual(stage({ state: "analyzing", chunks: [chunk({ state: "in_flight", coverageStatus: null, previewState: "in_flight", holdStatus: "in_flight" })] }),
+    ["analysis", null]);
+  // analyzing, but waiting on a person: the next page, or the owner's answer.
+  assert.deepEqual(stage({ state: "analyzing", proposedUnits: 2, chunks: [chunk({ coverageStatus: "more" })] }),
+    ["execution_approval", "continuation"]);
+  assert.deepEqual(stage({ state: "analyzing", chunks: [chunk(), chunk({ chunkIndex: 1, state: "awaiting_preview", coverageStatus: null,
+    previewState: "prepared", holdStatus: null })] }), ["execution_approval", "continuation"]);
+  assert.deepEqual(stage({ state: "analyzing", chunks: [chunk({ coverageStatus: "needs_owner_input" })] }),
+    ["execution_approval", "owner_input"]);
+  assert.deepEqual(stage({ state: "awaiting_owner", proposedUnits: 3, chunks: [chunk()] }), ["plan_approval", "plan_approval"]);
+  // Some cards registered one by one, proposals still undecided: the plan is still waiting.
+  assert.deepEqual(stage({ proposedUnits: 1, chunks: [chunk()], cards: [task({ terminal: true })] }), ["plan_approval", "plan_approval"]);
+  assert.deepEqual(stage({ chunks: [chunk()], cards: [task(), task({ cardType: "story" })] }), ["execution", null]);
+  assert.deepEqual(stage({ chunks: [chunk()], cards: [task({ status: "review", reviewPrNumber: 12 }), task()] }), ["review", null]);
+  assert.deepEqual(stage({ chunks: [chunk()], cards: [task({ status: "done", terminal: true }), task({ cardType: "story" })] }),
+    ["done", null], "stories do not hold an idea open");
+  assert.deepEqual(stage({ cancelled: true, cards: [task()] }), ["cancelled", null]);
   const counts = amuxIdeaProgress(facts({ cards: [task({ terminal: true }), task({ status: "review", reviewPrNumber: 3 }), task()] })).tasks;
   assert.deepEqual(counts, { total: 3, done: 1, inReview: 1 });
 });
 
 test("an unknown outcome is flagged, never a decision to retry", () => {
-  for (const value of [{ previews: [{ state: "outcome_unknown", holdStatus: null }] },
-    { previews: [{ state: "confirmed", holdStatus: "outcome_unknown" }] }, { chunkStates: ["outcome_unknown"] }]) {
-    const result = amuxIdeaProgress(facts(value));
+  for (const value of [chunk({ previewState: "outcome_unknown" }), chunk({ holdStatus: "outcome_unknown" }),
+    chunk({ state: "outcome_unknown" })]) {
+    const result = amuxIdeaProgress(facts({ proposedUnits: 1, chunks: [value] }));
     assert.equal(result.attention, true);
-    assert.equal(result.decisionWaiting, false, "a stopped idea is not offered as a decision");
+    assert.equal(result.waitingFor, null, "a stopped idea is not offered as a decision");
   }
-  assert.deepEqual([1, 6, null].map((step, index) => amuxIdeaProgressStep(["execution_approval", "done", "cancelled"][index])), [1, 6, null]);
+  assert.deepEqual(["execution_approval", "done", "cancelled"].map(amuxIdeaProgressStep), [1, 6, null]);
 });
 
 test("the list is one bounded snapshot of seven reads that never reads idea text", async () => {
@@ -49,7 +63,7 @@ test("the list is one bounded snapshot of seven reads that never reads idea text
   const rows = {
     amuxIdeaSubmission: [{ id: ideaId, requestId: "11111111-1111-4111-8111-111111111111", state: "awaiting_owner",
       submittedAt: new Date("2026-10-15T00:00:00Z"), analysisCompletedAt: new Date(), cancelledAt: null }],
-    amuxIdeaAnalysisChunk: [{ ideaId, state: "decided", currentPreviewId: "p1" }],
+    amuxIdeaAnalysisChunk: [{ ideaId, chunkIndex: 0, state: "decided", coverageStatus: "complete", currentPreviewId: "p1" }],
     amuxIdeaTransferPreview: [{ id: "p1", ideaId, state: "completed" }],
     amuxIdeaAnalysisBudgetHold: [{ previewId: "p1", status: "succeeded" }],
     amuxIdeaUnitDecision: [{ ideaId, registeredWorkItemId: "c1" }, { ideaId, registeredWorkItemId: "c2" }],
@@ -78,7 +92,9 @@ test("the list is one bounded snapshot of seven reads that never reads idea text
 
 test("the Ideas tab shows the inbox and list above the input, and opens a row's idea by its request id", () => {
   const page = read("app/(site)/(application)/admin/amux-backlog/page.tsx");
-  assert.match(page, /tab\.id === "ideas" && ideaReadBackAvailable\)/, "read only for the open Ideas tab, behind its switch");
+  assert.match(page, /tab\.id === "ideas" && ideaReadBackAvailable && !hasRecentAdminAuthentication\(session\)\) \{\n    ideaProgress = "reauthenticate";/,
+    "a stale sign-in reads nothing");
+  assert.match(page, /\} else if \(tab\.id === "ideas" && ideaReadBackAvailable\) \{/, "read only for the open Ideas tab, behind its switch");
   assert.match(page, /readAmuxIdeaProgressForOwner\(session\.user\.id\)\.catch/);
   assert.ok(page.indexOf("<AmuxIdeaProgressPanel") < page.indexOf("<AmuxIdeaInputPanel"));
   assert.match(page, /<AmuxIdeaInputPanel key=\{openRequestId \?\? "new"\} openRequestId=\{openRequestId\}/);

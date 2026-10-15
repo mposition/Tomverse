@@ -110,8 +110,12 @@ export default async function AdminAmuxBacklogPage({
   // behind the submission read-back switch. A failed read is shown as
   // unavailable (null), never as an empty list.
   const ideaReadBackAvailable = ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV]);
-  let ideaProgress: AmuxIdeaProgressRow[] | null | undefined;
-  if (tab.id === "ideas" && ideaReadBackAvailable) {
+  // Like the card list, it needs a recent owner sign-in (the idea read-back
+  // route asks for the same).
+  let ideaProgress: AmuxIdeaProgressRow[] | null | "reauthenticate" | undefined;
+  if (tab.id === "ideas" && ideaReadBackAvailable && !hasRecentAdminAuthentication(session)) {
+    ideaProgress = "reauthenticate";
+  } else if (tab.id === "ideas" && ideaReadBackAvailable) {
     ideaProgress = await readAmuxIdeaProgressForOwner(session.user.id).catch(() => {
       console.warn(JSON.stringify({ subsystem: "amux", event: "idea_progress_read_failed" }));
       return null;

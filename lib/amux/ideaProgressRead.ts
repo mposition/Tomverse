@@ -35,14 +35,13 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   const ideas = await tx.amuxIdeaSubmission.findMany({
     where: { actorUserId }, orderBy: [{ submittedAt: "desc" }, { id: "asc" }],
     take: AMUX_IDEA_PROGRESS_LIMIT,
-    select: { id: true, requestId: true, state: true, submittedAt: true,
-      analysisCompletedAt: true, cancelledAt: true },
+    select: { id: true, requestId: true, state: true, submittedAt: true, cancelledAt: true },
   });
   if (ideas.length === 0) return [];
   const ideaIds = ideas.map((idea) => idea.id);
   const chunks = await tx.amuxIdeaAnalysisChunk.findMany({
     where: { ideaId: { in: ideaIds } },
-    select: { ideaId: true, state: true, currentPreviewId: true },
+    select: { ideaId: true, chunkIndex: true, state: true, coverageStatus: true, currentPreviewId: true },
   });
   const previewIds = chunks.flatMap((chunk) => chunk.currentPreviewId ? [chunk.currentPreviewId] : []);
   const previews = await tx.amuxIdeaTransferPreview.findMany({
@@ -68,6 +67,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   });
 
   const holdOf = new Map(holds.map((hold) => [hold.previewId, hold.status]));
+  const previewOf = new Map(previews.map((preview) => [preview.id, preview.state]));
   const cardById = new Map(cards.map((card) => [card.id, card]));
   return ideas.map((idea) => {
     const own = decisions.filter((decision) => decision.ideaId === idea.id)
@@ -78,11 +78,12 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
     const progress = amuxIdeaProgress({
       state: idea.state,
-      analysisCompleted: idea.analysisCompletedAt !== null,
       cancelled: idea.cancelledAt !== null,
-      previews: previews.filter((preview) => preview.ideaId === idea.id)
-        .map((preview) => ({ state: preview.state, holdStatus: holdOf.get(preview.id) ?? null })),
-      chunkStates: chunks.filter((chunk) => chunk.ideaId === idea.id).map((chunk) => chunk.state),
+      chunks: chunks.filter((chunk) => chunk.ideaId === idea.id).map((chunk) => ({
+        chunkIndex: chunk.chunkIndex, state: chunk.state, coverageStatus: chunk.coverageStatus,
+        previewState: chunk.currentPreviewId ? previewOf.get(chunk.currentPreviewId) ?? null : null,
+        holdStatus: chunk.currentPreviewId ? holdOf.get(chunk.currentPreviewId) ?? null : null,
+      })),
       proposedUnits: proposed.find((row) => row.ideaId === idea.id)?._count._all ?? 0,
       cards: own.map((card) => ({ cardType: card.cardType, status: card.status,
         reviewPrNumber: card.reviewPrNumber, terminal: card.v4TerminalAt !== null || card.status === "cancelled" })),

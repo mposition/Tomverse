@@ -4,15 +4,17 @@ import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
-import { amuxIdeaProgressStep } from "@/lib/amux/ideaProgressCore";
+import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { amuxIdeaProgressStep, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaProgressCore";
 import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 
 const REPOSITORY_URL = "https://github.com/mposition/Tomverse";
 const HUMAN_STAGES = new Set(["execution_approval", "plan_approval", "review"]);
-const when = (iso: string) => new Intl.DateTimeFormat("en-AU", {
+const BRISBANE = new Intl.DateTimeFormat("en-AU", {
   timeZone: "Australia/Brisbane", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
   hour12: false,
-}).format(new Date(iso));
+});
+const when = (iso: string) => BRISBANE.format(new Date(iso));
 export const amuxIdeaHref = (requestId: string) =>
   `/admin/amux-backlog?${new URLSearchParams({ tab: "ideas", idea: requestId })}`;
 
@@ -24,16 +26,30 @@ export const amuxIdeaHref = (requestId: string) =>
  * read, shown as unavailable and never as an empty list.
  */
 export function AmuxIdeaProgressPanel({ rows, activeRequestId }: {
-  rows: AmuxIdeaProgressRow[] | null;
+  /** null: the read failed; "reauthenticate": the owner's sign-in is not recent. */
+  rows: AmuxIdeaProgressRow[] | null | "reauthenticate";
   activeRequestId: string | null;
 }) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages);
+  if (rows === "reauthenticate") {
+    return <p role="status" className="rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
+      data-testid="amux-idea-progress-reauthenticate">
+      {m.reauthenticate}{" "}
+      <a className="font-medium underline" href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>{m.signIn}</a>
+    </p>;
+  }
   if (rows === null) {
     return <p role="alert" className="rounded-xl border border-red-200 p-4 text-sm text-red-800 dark:border-red-900 dark:text-red-200"
       data-testid="amux-idea-progress-unavailable">{m.unavailable}</p>;
   }
   const label = (row: AmuxIdeaProgressRow) => row.displayKey ?? `${m.untitled} ${row.requestId.slice(0, 8)}`;
-  const decisions = rows.filter((row) => row.decisionWaiting);
+  const decisions = rows.filter((row) => row.waitingFor !== null);
+  const decision: Record<AmuxIdeaWaitingFor, [string, string]> = {
+    execution_approval: [m.executionApproval, m.executionApprovalHint],
+    continuation: [m.continuationApproval, m.continuationHint],
+    owner_input: [m.ownerInput, m.ownerInputHint],
+    plan_approval: [m.planApproval, m.planApprovalHint],
+  };
   const reviews = rows.flatMap((row) => row.reviewPullRequests.map((pr) => ({ row, pr })));
   const waiting = decisions.length + reviews.length;
 
@@ -52,11 +68,11 @@ export function AmuxIdeaProgressPanel({ rows, activeRequestId }: {
               <li key={row.ideaId} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white p-3 dark:border-amber-900 dark:bg-zinc-950">
                 <div className="min-w-0 space-y-1 text-sm">
                   <p className="font-semibold text-zinc-900 dark:text-zinc-100">
-                    {row.stage === "plan_approval" ? m.planApproval : m.executionApproval}
+                    {decision[row.waitingFor as AmuxIdeaWaitingFor][0]}
                   </p>
                   <p className="text-zinc-800 dark:text-zinc-200">{label(row)} · {m.savedAt(when(row.submittedAt))}</p>
                   <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                    {row.stage === "plan_approval" ? m.planApprovalHint : m.executionApprovalHint}
+                    {decision[row.waitingFor as AmuxIdeaWaitingFor][1]}
                   </p>
                 </div>
                 <Link href={amuxIdeaHref(row.requestId)}
@@ -92,7 +108,7 @@ export function AmuxIdeaProgressPanel({ rows, activeRequestId }: {
           <ul className="grid gap-2 md:grid-cols-2">
             {rows.map((row) => {
               const step = amuxIdeaProgressStep(row.stage);
-              const human = HUMAN_STAGES.has(row.stage) && row.stage !== "done";
+              const human = HUMAN_STAGES.has(row.stage);
               const active = row.requestId === activeRequestId;
               return (
                 <li key={row.ideaId}>
