@@ -11,7 +11,6 @@ import { amuxIdeaProgressStep, type AmuxIdeaWaitingFor } from "@/lib/amux/ideaPr
 import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 
 const REPOSITORY_URL = "https://github.com/mposition/Tomverse";
-const HUMAN_STAGES = new Set(["execution_approval", "plan_approval", "review"]);
 const BRISBANE = new Intl.DateTimeFormat("en-AU", {
   timeZone: "Australia/Brisbane", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
   hour12: false,
@@ -121,7 +120,8 @@ export function AmuxIdeaProgressPanel({ rows, activeRequestId }: {
           <ul className="grid gap-2 md:grid-cols-2">
             {rows.map((row) => {
               const step = amuxIdeaProgressStep(row.stage);
-              const human = HUMAN_STAGES.has(row.stage);
+              // A person acts when a decision waits, or a PR waits for GitHub review.
+              const human = row.waitingFor !== null || row.tasks.inReview > 0;
               const active = row.requestId === activeRequestId;
               return (
                 <li key={row.ideaId}>
