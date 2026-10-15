@@ -19,7 +19,8 @@ export type AmuxV4PlanAssessmentInput = Omit<AmuxV4ScorePlanAssessment, "subject
   ({ unitId: string; subject?: never } | { subject: AmuxV4ScorePlanAssessment["subject"]; unitId?: never });
 
 export class AmuxV4PlanError extends Error {
-  constructor(readonly code: "nothing_to_approve" | "unit_not_in_plan", readonly draftUnitIds: string[] = []) {
+  constructor(readonly code: "nothing_to_approve" | "unit_not_in_plan" | "plan_changed",
+    readonly draftUnitIds: string[] = []) {
     super(code);
     this.name = "AmuxV4PlanError";
   }
@@ -38,6 +39,8 @@ export async function approveAmuxV4Plan(session: Session, request: Request, inpu
   ideaId: string; planRequestId: string;
   reasons: Readonly<Record<string, string>>; publicPrConsentOff: readonly string[];
   assessments: readonly AmuxV4PlanAssessmentInput[]; scoreTaskUnitIds: readonly string[];
+  /** Exactly the units the screen showed for this approval. */
+  expectedUnitIds: readonly string[];
 }) {
   const nodes = await prepareAmuxV4NodePlan(session, request,
     { ideaId: input.ideaId, reasons: input.reasons }, { allowEmpty: true });
@@ -47,6 +50,17 @@ export async function approveAmuxV4Plan(session: Session, request: Request, inpu
     { ideaId: input.ideaId, reasons: input.reasons, publicPrConsentOff: input.publicPrConsentOff },
     { allowEmpty: true, pendingFeatures });
 
+  // The owner approves what the screen showed: every unit this approval would
+  // register, and nothing else. A difference (another analysis page, a
+  // later round, a unit decided elsewhere meanwhile) refuses before writing.
+  const willRegister = [...nodes.plan.map((entry) => entry.draftUnitId),
+    ...cards.plan.map((entry) => entry.draftUnitId)];
+  const expected = new Set(input.expectedUnitIds);
+  const differs = [...willRegister.filter((id) => !expected.has(id)),
+    ...input.expectedUnitIds.filter((id) => !willRegister.includes(id))];
+  if (differs.length > 0 || expected.size !== input.expectedUnitIds.length) {
+    throw new AmuxV4PlanError("plan_changed", [...new Set(differs)]);
+  }
   const subjectOfUnit = new Map<string, AmuxV4ScorePlanAssessment["subject"]>([
     ...nodes.plan.map((entry) => [entry.draftUnitId, { kind: entry.level, id: entry.nodeId }] as const),
     ...cards.plan.map((entry) => [entry.draftUnitId, { kind: entry.cardType, id: entry.cardId }] as const),
