@@ -80,6 +80,117 @@ export async function approvedAncestors(tx: Prisma.TransactionClient,
   return path;
 }
 
+export type AmuxV4NodePrepareInTx = {
+  session: Session; request: Request; actorUserId: string;
+  choice: { ideaId: string; draftUnitId: string; parentNodeId: string | null;
+    prepareRequestId: string; decisionReason: string | null };
+  verified: Awaited<ReturnType<typeof readVerifiedAmuxNodeProposal>>;
+  scanner: Awaited<ReturnType<typeof loadAmuxNodeDuplicateScanner>>;
+  keys: ReturnType<typeof loadCurrentAmuxContentKeys>;
+  decisionId: string; nodeId: string;
+  ownerSession: ReturnType<typeof amuxV4UnitBrowserDigest>;
+};
+
+/** The preparation itself, inside the caller's transaction: the single
+ * prepare route and the plan approval batch both run exactly this. */
+export async function prepareAmuxV4NodeCreationInTx(tx: Prisma.TransactionClient,
+  args: AmuxV4NodePrepareInTx) {
+  const { choice, verified, scanner, keys, decisionId, nodeId, ownerSession,
+    actorUserId } = args;
+  const input = { session: args.session, request: args.request };
+  await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+  const idea = await tx.amuxIdeaSubmission.findFirst({
+    where: { id: choice.ideaId, actorUserId },
+    select: { id: true, state: true },
+  });
+  if (!idea || !["analyzing", "awaiting_owner"].includes(idea.state)) {
+    throw new AmuxV4UnitDecisionError("not_ready");
+  }
+  const unit = await tx.amuxIdeaDraftUnit.findFirst({ where: {
+    id: choice.draftUnitId, ideaId: choice.ideaId, actorUserId },
+    select: { id: true, localRef: true, unitKind: true, state: true,
+      bodyDigest: true, bodyDigestKeyId: true, expiresAt: true,
+      chunkIndex: true },
+  });
+  if (!unit || unit.state !== "proposed" || unit.unitKind !== "node" ||
+      unit.localRef !== verified.unit.localRef ||
+      unit.bodyDigest !== verified.unit.bodyDigest ||
+      unit.bodyDigestKeyId !== verified.unit.bodyDigestKeyId ||
+      unit.chunkIndex !== verified.unit.chunkIndex ||
+      unit.expiresAt.getTime() !== verified.unit.expiresAt.getTime()) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const hierarchy = await approvedAncestors(tx, choice.parentNodeId);
+  if (hierarchy.length !== (["initiative", "epic", "feature"] as const)
+    .indexOf(verified.proposal.level)) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  let sourceParentRef = choice.parentNodeId;
+  if (verified.proposal.parentRef !== choice.parentNodeId) {
+    const sourceUnit = await tx.amuxIdeaDraftUnit.findFirst({ where: {
+      ideaId: choice.ideaId, actorUserId,
+      localRef: verified.proposal.parentRef ?? "", unitKind: "node",
+      state: "approved",
+    }, select: { id: true } });
+    const decision = sourceUnit ? await tx.amuxIdeaUnitDecision.findFirst({
+      where: { draftUnitId: sourceUnit.id, state: "consumed",
+        OR: [{ resolvedNodeId: choice.parentNodeId ?? "" },
+          { linkedNodeId: choice.parentNodeId ?? "" }] },
+      select: { id: true },
+    }) : null;
+    if (!decision) throw new AmuxV4UnitDecisionError("reconfirm");
+    sourceParentRef = verified.proposal.parentRef;
+  }
+  const preview = await tx.amuxIdeaTransferPreview.findUnique({
+    where: { id: verified.previewId },
+  });
+  if (!preview || preview.state !== "completed" ||
+      preview.ideaId !== choice.ideaId ||
+      preview.chunkIndex !== unit.chunkIndex) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const scope = preview.sourceScopeApprovalId ?
+    await tx.amuxIdeaSourceScopeApproval.findUnique({
+      where: { id: preview.sourceScopeApprovalId },
+      select: { id: true, scopeDigest: true,
+        scopeDigestKeyId: true, ideaId: true },
+    }) : null;
+  if (preview.sourceScopeApprovalId &&
+      (!scope || scope.ideaId !== choice.ideaId)) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const duplicates = await scanner(tx, { unitId: unit.id,
+    title: verified.proposal.title, level: verified.proposal.level,
+    parentId: choice.parentNodeId });
+  if (duplicates.candidates.length > 0 && choice.decisionReason === null) {
+    throw new AmuxV4DuplicateReasonRequired(
+      duplicates.candidates.map((candidate) => candidate.id));
+  }
+  const snapshot = assembleAmuxV4NodeConfirmation({
+    ideaId: choice.ideaId, decisionId,
+    prepareRequestId: choice.prepareRequestId,
+    actorUserId, ownerSession, nodeId,
+    unit: { id: unit.id, localRef: unit.localRef!,
+      bodyDigest: unit.bodyDigest,
+      bodyDigestKeyId: unit.bodyDigestKeyId },
+    proposal: verified.proposal,
+    preview: { id: preview.id, payloadDigest: preview.payloadDigest,
+      payloadDigestKeyId: preview.payloadDigestKeyId,
+      scopeApprovalId: scope?.id ?? null,
+      scopeDigest: scope?.scopeDigest ?? null,
+      scopeDigestKeyId: scope?.scopeDigestKeyId ?? null },
+    hierarchy, sourceParentRef, duplicateScan: duplicates,
+    decisionReason: choice.decisionReason, key: keys,
+  });
+  if (!snapshot) throw new AmuxV4UnitDecisionError("reconfirm");
+  const result = await commitAmuxV4UnitPrepare(tx, {
+    session: input.session, request: input.request,
+    snapshot, duplicateScan: duplicates, taskCost: null,
+    digestKey: keys,
+  });
+  return { result, unit, duplicates, snapshot };
+}
+
 export async function prepareAmuxV4NodeCreation(input: {
   session: Session; request: Request; browserNonce: string;
   choice: { ideaId: string; draftUnitId: string;
@@ -112,96 +223,9 @@ export async function prepareAmuxV4NodeCreation(input: {
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
-      const idea = await tx.amuxIdeaSubmission.findFirst({
-        where: { id: choice.ideaId, actorUserId },
-        select: { id: true, state: true },
-      });
-      if (!idea || !["analyzing", "awaiting_owner"].includes(idea.state)) {
-        throw new AmuxV4UnitDecisionError("not_ready");
-      }
-      const unit = await tx.amuxIdeaDraftUnit.findFirst({ where: {
-        id: choice.draftUnitId, ideaId: choice.ideaId, actorUserId },
-        select: { id: true, localRef: true, unitKind: true, state: true,
-          bodyDigest: true, bodyDigestKeyId: true, expiresAt: true,
-          chunkIndex: true },
-      });
-      if (!unit || unit.state !== "proposed" || unit.unitKind !== "node" ||
-          unit.localRef !== verified.unit.localRef ||
-          unit.bodyDigest !== verified.unit.bodyDigest ||
-          unit.bodyDigestKeyId !== verified.unit.bodyDigestKeyId ||
-          unit.chunkIndex !== verified.unit.chunkIndex ||
-          unit.expiresAt.getTime() !== verified.unit.expiresAt.getTime()) {
-        throw new AmuxV4UnitDecisionError("reconfirm");
-      }
-      const hierarchy = await approvedAncestors(tx, choice.parentNodeId);
-      if (hierarchy.length !== (["initiative", "epic", "feature"] as const)
-        .indexOf(verified.proposal.level)) {
-        throw new AmuxV4UnitDecisionError("reconfirm");
-      }
-      let sourceParentRef = choice.parentNodeId;
-      if (verified.proposal.parentRef !== choice.parentNodeId) {
-        const sourceUnit = await tx.amuxIdeaDraftUnit.findFirst({ where: {
-          ideaId: choice.ideaId, actorUserId,
-          localRef: verified.proposal.parentRef ?? "", unitKind: "node",
-          state: "approved",
-        }, select: { id: true } });
-        const decision = sourceUnit ? await tx.amuxIdeaUnitDecision.findFirst({
-          where: { draftUnitId: sourceUnit.id, state: "consumed",
-            OR: [{ resolvedNodeId: choice.parentNodeId ?? "" },
-              { linkedNodeId: choice.parentNodeId ?? "" }] },
-          select: { id: true },
-        }) : null;
-        if (!decision) throw new AmuxV4UnitDecisionError("reconfirm");
-        sourceParentRef = verified.proposal.parentRef;
-      }
-      const preview = await tx.amuxIdeaTransferPreview.findUnique({
-        where: { id: verified.previewId },
-      });
-      if (!preview || preview.state !== "completed" ||
-          preview.ideaId !== choice.ideaId ||
-          preview.chunkIndex !== unit.chunkIndex) {
-        throw new AmuxV4UnitDecisionError("reconfirm");
-      }
-      const scope = preview.sourceScopeApprovalId ?
-        await tx.amuxIdeaSourceScopeApproval.findUnique({
-          where: { id: preview.sourceScopeApprovalId },
-          select: { id: true, scopeDigest: true,
-            scopeDigestKeyId: true, ideaId: true },
-        }) : null;
-      if (preview.sourceScopeApprovalId &&
-          (!scope || scope.ideaId !== choice.ideaId)) {
-        throw new AmuxV4UnitDecisionError("reconfirm");
-      }
-      const duplicates = await scanner(tx, { unitId: unit.id,
-        title: verified.proposal.title, level: verified.proposal.level,
-        parentId: choice.parentNodeId });
-      if (duplicates.candidates.length > 0 && choice.decisionReason === null) {
-        throw new AmuxV4DuplicateReasonRequired(
-          duplicates.candidates.map((candidate) => candidate.id));
-      }
-      const snapshot = assembleAmuxV4NodeConfirmation({
-        ideaId: choice.ideaId, decisionId,
-        prepareRequestId: choice.prepareRequestId,
-        actorUserId, ownerSession, nodeId,
-        unit: { id: unit.id, localRef: unit.localRef!,
-          bodyDigest: unit.bodyDigest,
-          bodyDigestKeyId: unit.bodyDigestKeyId },
-        proposal: verified.proposal,
-        preview: { id: preview.id, payloadDigest: preview.payloadDigest,
-          payloadDigestKeyId: preview.payloadDigestKeyId,
-          scopeApprovalId: scope?.id ?? null,
-          scopeDigest: scope?.scopeDigest ?? null,
-          scopeDigestKeyId: scope?.scopeDigestKeyId ?? null },
-        hierarchy, sourceParentRef, duplicateScan: duplicates,
-        decisionReason: choice.decisionReason, key: keys,
-      });
-      if (!snapshot) throw new AmuxV4UnitDecisionError("reconfirm");
-      const result = await commitAmuxV4UnitPrepare(tx, {
-        session: input.session, request: input.request,
-        snapshot, duplicateScan: duplicates, taskCost: null,
-        digestKey: keys,
-      });
+      const { result, unit, duplicates } = await prepareAmuxV4NodeCreationInTx(tx, {
+        session: input.session, request: input.request, actorUserId, choice,
+        verified, scanner, keys, decisionId, nodeId, ownerSession });
       callbackReturned = true;
       return { ...result, draftUnitId: unit.id,
         title: verified.proposal.title, level: verified.proposal.level,

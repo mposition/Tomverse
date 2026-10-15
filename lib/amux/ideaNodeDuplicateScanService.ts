@@ -116,16 +116,17 @@ export async function loadAmuxNodeDuplicateScanner() {
     if (error instanceof AmuxNodeDuplicateScanError) throw error;
     throw new AmuxNodeDuplicateScanError("integrity_unavailable");
   }
-  const baseline = rows.map(signature);
-  return async (tx: Prisma.TransactionClient, input: {
+  // Compared by id, not by position: the catalog is a set.
+  const baseline = new Map(rows.map((row) => [row.id, signature(row)]));
+  const scan = async (tx: Prisma.TransactionClient, input: {
     unitId: string; title: string; level: AmuxDuplicateNode["level"];
     parentId: string | null;
   }) => {
     const fresh = await tx.amuxPortfolioNode.findMany({
       take: LIMIT + 1, orderBy: { id: "asc" }, select,
     });
-    if (fresh.length !== rows.length || fresh.map(signature)
-      .some((value, index) => value !== baseline[index])) {
+    if (fresh.length !== baseline.size ||
+        fresh.some((row) => baseline.get(row.id) !== signature(row))) {
       throw new AmuxNodeDuplicateScanError("catalog_incomplete");
     }
     const clock = await tx.$queryRaw<Array<{ now: Date }>>`
@@ -137,4 +138,23 @@ export async function loadAmuxNodeDuplicateScanner() {
     if (!result.ok) throw new AmuxNodeDuplicateScanError(result.code);
     return result.scan;
   };
+  /** The plan approval batch creates nodes inside the same transaction it
+   * scans in. Each node it has just created is read back from that
+   * transaction and admitted to the baseline and the catalog, with the title
+   * the batch wrote; anything else new is still an incomplete catalog. */
+  const admitCreated = async (tx: Prisma.TransactionClient,
+    created: { id: string; title: string }) => {
+    const row = await tx.amuxPortfolioNode.findUnique({ where: { id: created.id }, select });
+    if (!row || baseline.has(row.id) || baseline.size >= LIMIT ||
+        row.state !== "active" || row.archivedAt !== null ||
+        !["initiative", "epic", "feature"].includes(row.level)) {
+      throw new AmuxNodeDuplicateScanError("catalog_incomplete");
+    }
+    baseline.set(row.id, signature(row));
+    catalog.push({ id: row.id, level: row.level as AmuxDuplicateNode["level"],
+      title: created.title, parentId: row.parentId, revision: row.revision,
+      content: { digest: row.contentDigest, keyId: row.contentDigestKeyId },
+      archived: false });
+  };
+  return Object.assign(scan, { admitCreated });
 }

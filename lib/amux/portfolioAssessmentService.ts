@@ -152,14 +152,15 @@ export async function previewAmuxPortfolioAssessment(session: Session,
   { isolationLevel: "RepeatableRead", maxWait: 2_000, timeout: 8_000 });
 }
 
-/** Direct writer is for synthetic DB tests; the public route uses the latch. */
-export async function commitAmuxPortfolioAssessment(input: {
+/** One assessment inside the caller's transaction. The single route passes
+ * the digest its preview showed; the plan approval passes null, because the
+ * values it writes are the ones in the same request. */
+export async function writeAmuxPortfolioAssessmentInTx(tx: Prisma.TransactionClient, input: {
   session: Session; request: Request; payload: AmuxPortfolioAssessmentPayload;
-  confirmationDigest: string; digestKey: AmuxDigestKey;
+  confirmationDigest: string | null; digestKey: AmuxDigestKey;
 }) {
   const actorUserId = amuxPortfolioOwnerId(input.session);
-  await assertRecentAdminAuthentication(input.session);
-  return prisma.$transaction(async (tx) => {
+  {
     await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
     await takeAuditChainLock(tx);
     const target = input.payload.subject;
@@ -176,7 +177,7 @@ export async function commitAmuxPortfolioAssessment(input: {
     }
     const plan = await buildAssessmentPlan(tx, actorUserId,
       input.payload, input.digestKey);
-    if (plan.confirmationDigest !== input.confirmationDigest) {
+    if (input.confirmationDigest !== null && plan.confirmationDigest !== input.confirmationDigest) {
       throw new AmuxPortfolioError("reconfirm");
     }
     const auditId = await writeAdminAuditLog({ tx, session: input.session,
@@ -212,7 +213,22 @@ export async function commitAmuxPortfolioAssessment(input: {
       approvedAt: now,
     } });
     return { state: "approved" as const, assessmentId: input.payload.id,
-      assessmentVersion: plan.assessmentVersion, auditId };
+      assessmentVersion: plan.assessmentVersion, auditId,
+      confirmationDigest: plan.confirmationDigest };
+  }
+}
+
+/** Direct writer is for synthetic DB tests; the public route uses the latch. */
+export async function commitAmuxPortfolioAssessment(input: {
+  session: Session; request: Request; payload: AmuxPortfolioAssessmentPayload;
+  confirmationDigest: string; digestKey: AmuxDigestKey;
+}) {
+  amuxPortfolioOwnerId(input.session);
+  await assertRecentAdminAuthentication(input.session);
+  return prisma.$transaction(async (tx) => {
+    const written = await writeAmuxPortfolioAssessmentInTx(tx, input);
+    return { state: written.state, assessmentId: written.assessmentId,
+      assessmentVersion: written.assessmentVersion, auditId: written.auditId };
   }, { isolationLevel: "Serializable", maxWait: 5_000, timeout: 15_000 });
 }
 
