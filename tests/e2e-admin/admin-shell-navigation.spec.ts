@@ -665,7 +665,7 @@ test.describe("the AMUX group by role", () => {
       await page.goto(url);
       await expect(consoleHeading(page)).toHaveText("Backlog");
       const strip = page.getByRole("navigation", { name: "Backlog sections" });
-      await expect(strip.getByRole("link")).toHaveCount(5);
+      await expect(strip.getByRole("link")).toHaveCount(7);
       await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=ideas/);
       await expect(strip.locator('a[href*="tab=intake"]')).toHaveCount(0);
       await expect(page.getByTestId("amux-v4-idea-input")).toBeVisible();
