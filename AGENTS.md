@@ -1281,7 +1281,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   표식이 맞는 전달만 셉니다. **fingerprint는 사건을 정하는 코드만 hash합니다**(운영자 결정
   2026-10-15, docs/policy/marketing-automation.md §8.1.1의 "조건 1–5에 영향을 주는 코드"):
   webhook 모듈(접근 모듈의 pipeline 파일 목록)은 파일 전체, 그 밖에 닿는 파일은 webhook 경로가 쓰는
-  최상위 선언만 주석 없이(`scripts/marketing-webhook-pipeline-sources.mjs`가 AST로 따라가며 손으로 고르지
+  최상위 선언과 그 import 연결, 그리고 로드될 때 실행되는 최상위 코드만 주석 없이(`scripts/marketing-webhook-pipeline-sources.mjs`가 AST로 따라가며 손으로 고르지
   않습니다), 감사 체인·DB client(공용 모듈 목록)는 0입니다 — 새 감사 actor나 다른
   기능의 store 함수가 서명된 기록과 production 적용을 멈추게 하지 않기 위해서입니다. 새 `lib/marketingWebhook*.ts`는
   파일 전체 목록에 들어가야 하며 테스트가 강제합니다. schema는 수신 경로가 쓰는 모델·그 enum·datasource·generator만

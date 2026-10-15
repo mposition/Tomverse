@@ -113,9 +113,9 @@ export const MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES = [
 /**
  * What the fingerprint hashes (docs/policy/marketing-automation.md §8.1.1: the
  * code that affects conditions 1-5). The webhook modules below are hashed
- * whole. Every other local file they reach contributes only the top-level
- * declarations the webhook path uses, followed transitively and without
- * comments (scripts/marketing-webhook-pipeline-sources.mjs; the test derives
+ * whole. Every other local file they load contributes its load-time effects
+ * and the top-level declarations the path uses, with their import wiring
+ * (scripts/marketing-webhook-pipeline-sources.mjs; the test derives
  * it, nothing is hand-picked). The shared modules after this list contribute
  * nothing: the audit chain and the database client are held by their own
  * tests and triggers, and hashing them made every new audit actor, another
@@ -618,7 +618,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * it uses or a watched column still moves it, and still re-opens verification.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "4d4d4f888d4dfff77d3cd4ad16dc89f3a8e3e03c48d2cf70b5b135a75f3fec34";
+  "990c194c70b770e89471a13db281f8823da9bc97f32434f34a160c3b42167ada";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

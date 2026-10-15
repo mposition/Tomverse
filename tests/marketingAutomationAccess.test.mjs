@@ -738,6 +738,66 @@ test("the fingerprint ignores what decides no event and follows what does", () =
   assert.notEqual(pipelineFingerprint({ "lib/marketingWebhookCore.ts": `${core}\n// note\n` }), base);
 });
 
+// A miniature repository whose one whole-file module is "w".
+const miniature = (files) => {
+  const exists = (absolute) =>
+    Object.hasOwn(files, path.relative(repositoryRoot, absolute).split(path.sep).join("/"));
+  const run = (overrides = {}) =>
+    marketingWebhookPipelineSources({
+      repositoryRoot,
+      wholeFiles: ["lib/w.ts"],
+      sharedModules: [],
+      selfModule: ACCESS_MODULE,
+      readText: (relative) => ({ ...files, ...overrides })[relative],
+      exists,
+    });
+  return (overrides) =>
+    computeMarketingWebhookPipelineFingerprint(run(overrides).sources, MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR);
+};
+
+test("the slicer keeps load-time effects and import wiring, and refuses dynamic loads", () => {
+  // An effect nothing names still runs when the module loads.
+  const effects = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts":
+      "const setup = ((globalThis as { allow?: boolean }).allow = true);\nexport const decide = () => (globalThis as { allow?: boolean }).allow;\n",
+  });
+  assert.notEqual(
+    effects({
+      "lib/s.ts":
+        "const setup = ((globalThis as { allow?: boolean }).allow = false);\nexport const decide = () => (globalThis as { allow?: boolean }).allow;\n",
+    }),
+    effects(),
+  );
+  // ... even in a module loaded only for something the path never uses.
+  const unused = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts": 'import { other } from "@/lib/u";\nexport const decide = () => 1;\nexport const later = () => other;\n',
+    "lib/u.ts": "export const other = 1;\n(globalThis as { x?: number }).x = 1;\n",
+  });
+  assert.notEqual(unused({ "lib/u.ts": "export const other = 1;\n(globalThis as { x?: number }).x = 2;\n" }), unused());
+  // Swapping which import a local name stands for is a change.
+  const wiring = miniature({
+    "lib/w.ts": 'import { decide } from "@/lib/s";\nexport const answer = decide();\n',
+    "lib/s.ts": 'import { yes as a, no as b } from "@/lib/y";\nexport const decide = () => [a(), b()];\n',
+    "lib/y.ts": "export const yes = () => true;\nexport const no = () => false;\n",
+  });
+  assert.notEqual(
+    wiring({ "lib/s.ts": 'import { no as a, yes as b } from "@/lib/y";\nexport const decide = () => [a(), b()];\n' }),
+    wiring(),
+  );
+  // A module loaded by import() or require() cannot be followed.
+  const dynamic = miniature({
+    "lib/w.ts": 'export const later = () => import("@/lib/d");\n',
+    "lib/d.ts": "export const d = 1;\n",
+  });
+  assert.throws(() => dynamic(), /dynamic import or require of @\/lib\/d/);
+  assert.throws(
+    () => dynamic({ "lib/w.ts": 'export const later = () => require("@/lib/d");\n' }),
+    /dynamic import or require of @\/lib\/d/,
+  );
+});
+
 test("the slicer refuses what it cannot follow", () => {
   const sliceOf = (text) =>
     marketingWebhookPipelineSources({

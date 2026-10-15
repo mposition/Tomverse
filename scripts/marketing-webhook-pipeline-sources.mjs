@@ -71,14 +71,116 @@ const isDefaultExport = (statement) =>
     (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
   );
 
+const PURE_LITERALS = new Set([
+  ts.SyntaxKind.StringLiteral,
+  ts.SyntaxKind.NumericLiteral,
+  ts.SyntaxKind.BigIntLiteral,
+  ts.SyntaxKind.NoSubstitutionTemplateLiteral,
+  ts.SyntaxKind.RegularExpressionLiteral,
+  ts.SyntaxKind.TrueKeyword,
+  ts.SyntaxKind.FalseKeyword,
+  ts.SyntaxKind.NullKeyword,
+]);
+
+/**
+ * Whether evaluating this initializer can do anything but produce a value from
+ * literals, functions and references. Anything not proved pure is treated as
+ * an effect: a call, `new`, a property read (a getter), an assignment.
+ */
+const isPureExpression = (node) => {
+  if (node === undefined) return true;
+  if (PURE_LITERALS.has(node.kind) || ts.isIdentifier(node)) return true;
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return true;
+  if (ts.isClassExpression(node)) return isPureClass(node);
+  if (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node)
+  ) {
+    return isPureExpression(node.expression);
+  }
+  if (ts.isPrefixUnaryExpression(node)) return PURE_LITERALS.has(node.operand.kind);
+  if (ts.isTemplateExpression(node)) return node.templateSpans.every((span) => isPureExpression(span.expression));
+  if (ts.isArrayLiteralExpression(node)) {
+    return node.elements.every((element) => !ts.isSpreadElement(element) && isPureExpression(element));
+  }
+  if (ts.isObjectLiteralExpression(node)) {
+    return node.properties.every((property) => {
+      if (property.name && ts.isComputedPropertyName(property.name) && !isPureExpression(property.name.expression)) {
+        return false;
+      }
+      if (ts.isPropertyAssignment(property)) return isPureExpression(property.initializer);
+      return (
+        ts.isShorthandPropertyAssignment(property) ||
+        ts.isMethodDeclaration(property) ||
+        ts.isGetAccessorDeclaration(property) ||
+        ts.isSetAccessorDeclaration(property)
+      );
+    });
+  }
+  return false;
+};
+
+const isPureClass = (node) =>
+  !(ts.getDecorators?.(node) ?? []).length &&
+  (node.heritageClauses ?? []).every((clause) => clause.types.every((type) => isPureExpression(type.expression))) &&
+  node.members.every((member) => {
+    if (ts.isClassStaticBlockDeclaration(member)) return false;
+    if ((ts.getDecorators?.(member) ?? []).length) return false;
+    if (member.name && ts.isComputedPropertyName(member.name) && !isPureExpression(member.name.expression)) {
+      return false;
+    }
+    const isStatic = (ts.getModifiers?.(member) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword);
+    return !(isStatic && ts.isPropertyDeclaration(member) && !isPureExpression(member.initializer));
+  });
+
+/** Whether a top-level declaration does something when the module loads. */
+const declarationHasEffect = (statement) => {
+  if (ts.isVariableStatement(statement)) {
+    return !statement.declarationList.declarations.every((declaration) => isPureExpression(declaration.initializer));
+  }
+  if (ts.isClassDeclaration(statement)) return !isPureClass(statement);
+  if (ts.isEnumDeclaration(statement)) {
+    return !statement.members.every((member) => isPureExpression(member.initializer));
+  }
+  return false;
+};
+
+/** A module loaded some other way than a static import cannot be followed. */
+const refuseDynamicLoads = (repositoryRoot, filePath, file, exists) => {
+  const visit = (node) => {
+    let specifier = null;
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      if (callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.text === "require")) {
+        specifier = node.arguments[0] ?? null;
+        if (!specifier || !(ts.isStringLiteral(specifier) || ts.isNoSubstitutionTemplateLiteral(specifier))) {
+          throw new Error(`${filePath}: a dynamic import or require with a computed specifier cannot be followed`);
+        }
+      }
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      specifier = node.moduleReference.expression;
+    }
+    if (specifier && resolveLocalSpecifier(repositoryRoot, filePath, specifier.text, exists)) {
+      throw new Error(`${filePath}: a dynamic import or require of ${specifier.text} cannot be followed`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+};
+
 /** One file's top-level shape: declarations, exported aliases, import bindings. */
 const parseModule = (repositoryRoot, filePath, source, exists) => {
   const file = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
+  refuseDynamicLoads(repositoryRoot, filePath, file, exists);
   const statements = [];
   const declared = new Map(); // local name -> statement index
   const exported = new Map(); // exported name -> { local } | { file, name }
   const imports = new Map(); // local name -> { file, name } (file null: a package)
   const always = []; // statement indexes with effects of their own
+  const loads = new Set(); // local modules this one loads at run time
   file.statements.forEach((statement, index) => {
     statements.push(statement);
     if (ts.isImportDeclaration(statement)) {
@@ -88,13 +190,16 @@ const parseModule = (repositoryRoot, filePath, source, exists) => {
         if (target) throw new Error(`${filePath}: a side-effect import of ${target} cannot be sliced`);
         return;
       }
-      if (clause.name) imports.set(clause.name.text, { file: target, name: "default" });
+      if (target && !clause.isTypeOnly) loads.add(target);
+      const specifier = statement.moduleSpecifier.text;
+      if (clause.name) imports.set(clause.name.text, { file: target, specifier, name: "default" });
       const bindings = clause.namedBindings;
       if (bindings && ts.isNamespaceImport(bindings)) {
         if (target) throw new Error(`${filePath}: a namespace import of ${target} cannot be sliced`);
+        imports.set(bindings.name.text, { file: null, specifier, name: "*" });
       } else if (bindings) {
         for (const element of bindings.elements) {
-          imports.set(element.name.text, { file: target, name: (element.propertyName ?? element.name).text });
+          imports.set(element.name.text, { file: target, specifier, name: (element.propertyName ?? element.name).text });
         }
       }
       return;
@@ -110,6 +215,7 @@ const parseModule = (repositoryRoot, filePath, source, exists) => {
       if (!ts.isNamedExports(statement.exportClause)) {
         throw new Error(`${filePath}: a namespace re-export cannot be sliced`);
       }
+      if (target && !statement.isTypeOnly) loads.add(target);
       for (const element of statement.exportClause.elements) {
         const local = (element.propertyName ?? element.name).text;
         exported.set(
@@ -133,8 +239,10 @@ const parseModule = (repositoryRoot, filePath, source, exists) => {
       exported.set(name, { local: name });
     }
     if (isDefaultExport(statement)) exported.set("default", { local: names[0] ?? "default" });
+    // Runs when the module loads, whether or not anything names it.
+    if (declarationHasEffect(statement)) always.push(index);
   });
-  return { statements, declared, exported, imports, always };
+  return { statements, declared, exported, imports, always, loads };
 };
 
 /**
@@ -157,6 +265,7 @@ export const marketingWebhookPipelineSources = ({
     return modules.get(relative);
   };
   const included = new Map(); // sliced file -> Set(statement index)
+  const usedImports = new Map(); // sliced file -> Set(local import name)
   const reachedShared = new Set();
   const pending = [];
 
@@ -175,7 +284,13 @@ export const marketingWebhookPipelineSources = ({
         const text = child.text;
         if (parsed.declared.has(text)) pending.push([relative, { local: text }]);
         const imported = parsed.imports.get(text);
-        if (imported) reach(imported.file, imported.name);
+        if (imported) {
+          // Which module and name a local stands for is part of the code: the
+          // same declarations wired to swapped imports behave differently.
+          if (!usedImports.has(relative)) usedImports.set(relative, new Set());
+          usedImports.get(relative).add(text);
+          reach(imported.file, imported.name);
+        }
       }
       ts.forEachChild(child, visit);
     };
@@ -192,11 +307,24 @@ export const marketingWebhookPipelineSources = ({
     followIdentifiers(relative, moduleOf(relative).statements[index]);
   };
 
-  for (const file of wholeFiles) {
-    if (!file.endsWith(".ts") && !file.endsWith(".tsx") && !file.endsWith(".mjs")) continue;
+  const codeFiles = wholeFiles.filter((file) => /\.(ts|tsx|mjs)$/.test(file));
+  for (const file of codeFiles) {
     const parsed = moduleOf(file);
     for (const imported of parsed.imports.values()) reach(imported.file, imported.name);
     for (const target of parsed.exported.values()) if (target.file) reach(target.file, target.name);
+  }
+
+  // Every module the path loads runs its top-level effects, used or not. The
+  // shared modules' own imports are theirs, and this module is left out.
+  const loaded = new Set();
+  const toLoad = [...codeFiles];
+  while (toLoad.length > 0) {
+    const file = toLoad.pop();
+    if (loaded.has(file) || shared.has(file) || file === selfModule) continue;
+    loaded.add(file);
+    const parsed = moduleOf(file);
+    if (!whole.has(file) && parsed.always.length > 0) include(file, parsed.always[0]);
+    toLoad.push(...parsed.loads);
   }
 
   while (pending.length > 0) {
@@ -224,10 +352,16 @@ export const marketingWebhookPipelineSources = ({
   const sources = wholeFiles.map((file) => ({ path: file, content: readText(file) }));
   for (const [file, indexes] of included) {
     const parsed = moduleOf(file);
-    const content = [...indexes]
-      .sort((left, right) => left - right)
-      .map((index) => parsed.statements[index].getText())
-      .join("\n\n");
+    const wiring = [...(usedImports.get(file) ?? [])]
+      .sort()
+      .map((local) => {
+        const binding = parsed.imports.get(local);
+        return `// import ${local} = ${binding.file ?? `package:${binding.specifier}`}#${binding.name}`;
+      });
+    const content = [
+      ...wiring,
+      ...[...indexes].sort((left, right) => left - right).map((index) => parsed.statements[index].getText()),
+    ].join("\n\n");
     sources.push({ path: file, content: `${content}\n` });
   }
   return {
