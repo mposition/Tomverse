@@ -1,6 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
@@ -47,13 +48,40 @@ export async function approveAmuxV4ScorePlan(session: Session, request: Request,
   planRequestId: string; assessments: readonly AmuxV4ScorePlanAssessment[];
   taskIds: readonly string[];
 }) {
+  const prepared = await prepareAmuxV4ScorePlan(session, request, input);
+  let callbackReturned = false;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const written = await runAmuxV4ScorePlanInTx(tx, prepared);
+      callbackReturned = true;
+      return written;
+    }, { isolationLevel: "Serializable", maxWait: 5_000, timeout: 60_000 });
+  } catch (error) {
+    // A refusal inside the callback rolled the whole plan back.
+    if (!callbackReturned && error instanceof AmuxPortfolioError) throw error;
+    throw new AmuxV4ScorePlanError("outcome_unknown");
+  }
+}
+
+export type AmuxV4ScorePlanPrepared = Awaited<ReturnType<typeof prepareAmuxV4ScorePlan>>;
+
+/** Everything the score part checks and reads before its transaction. With
+ * allowEmpty, a plan with nothing to score yields an empty part. */
+export async function prepareAmuxV4ScorePlan(session: Session, request: Request, input: {
+  planRequestId: string; assessments: readonly AmuxV4ScorePlanAssessment[];
+  taskIds: readonly string[];
+}, options: { allowEmpty?: boolean } = {}) {
   amuxPortfolioOwnerId(session);
   await assertRecentAdminAuthentication(session);
-  if (!amuxV4PortfolioWriteEnabled(process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])) {
+  const empty = input.assessments.length + input.taskIds.length === 0;
+  // An empty part writes nothing, so it needs no portfolio switch: a plan of
+  // nodes and cards alone still goes through with portfolio writes off.
+  if (!(empty && options.allowEmpty) &&
+      !amuxV4PortfolioWriteEnabled(process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])) {
     throw new AmuxPortfolioError("write_disabled");
   }
   const subjects = input.assessments.map((entry) => entry.subject.id);
-  if (input.assessments.length + input.taskIds.length === 0 ||
+  if ((empty && !options.allowEmpty) ||
       input.assessments.length > AMUX_V4_SCORE_PLAN_MAX_ASSESSMENTS ||
       input.taskIds.length > AMUX_V4_SCORE_PLAN_MAX_TASKS ||
       new Set(subjects).size !== subjects.length ||
@@ -72,42 +100,38 @@ export async function approveAmuxV4ScorePlan(session: Session, request: Request,
   const digestKey = loadCurrentAmuxContentKeys(process.env);
   // A second in the past, so the writer's "not in the future" check holds on either clock.
   const evidenceAsOf = new Date(Date.now() - 1_000).toISOString();
+  return { session, request, input, assessed, digestKey, evidenceAsOf };
+}
 
-  let callbackReturned = false;
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const assessments = [];
-      for (const entry of input.assessments) {
-        const written = await writeAmuxPortfolioAssessmentInTx(tx, {
-          session, request, digestKey, confirmationDigest: null,
-          payload: { id: randomUUID(),
-          requestId: amuxV4ScorePlanRowRequestId(input.planRequestId, "assessment", entry.subject.id),
-          subject: entry.subject,
-            metrics: entry.metrics, uncertainty: entry.uncertainty,
-            evidenceRefs: entry.evidenceRefs, evidenceAsOf,
-            reasonCode: assessed.has(entry.subject.id) ? "operator_override" : "initial",
-            modelProposalDigest: entry.modelProposalDigest },
-        });
-        assessments.push({ subject: entry.subject, assessmentId: written.assessmentId,
-          assessmentVersion: written.assessmentVersion });
-      }
-      const scores = [];
-      for (const taskId of input.taskIds) {
-        const written = await writeAmuxPortfolioScoreInTx(tx, {
-          session, request, digestKey, confirmationDigest: null,
-          payload: { id: randomUUID(),
-            requestId: amuxV4ScorePlanRowRequestId(input.planRequestId, "score", taskId), taskId },
-        });
-        scores.push({ taskId, scoreId: written.scoreId, total: written.score.total });
-      }
-      callbackReturned = true;
-      return { assessments, scores };
-    }, { isolationLevel: "Serializable", maxWait: 5_000, timeout: 60_000 });
-  } catch (error) {
-    // A refusal inside the callback rolled the whole plan back.
-    if (!callbackReturned && error instanceof AmuxPortfolioError) throw error;
-    throw new AmuxV4ScorePlanError("outcome_unknown");
+/** The score part inside the caller's transaction: assessments, then scores. */
+export async function runAmuxV4ScorePlanInTx(tx: Prisma.TransactionClient,
+  prepared: AmuxV4ScorePlanPrepared) {
+  const { session, request, input, assessed, digestKey, evidenceAsOf } = prepared;
+  const assessments = [];
+  for (const entry of input.assessments) {
+    const written = await writeAmuxPortfolioAssessmentInTx(tx, {
+      session, request, digestKey, confirmationDigest: null,
+      payload: { id: randomUUID(),
+        requestId: amuxV4ScorePlanRowRequestId(input.planRequestId, "assessment", entry.subject.id),
+        subject: entry.subject,
+        metrics: entry.metrics, uncertainty: entry.uncertainty,
+        evidenceRefs: entry.evidenceRefs, evidenceAsOf,
+        reasonCode: assessed.has(entry.subject.id) ? "operator_override" : "initial",
+        modelProposalDigest: entry.modelProposalDigest },
+    });
+    assessments.push({ subject: entry.subject, assessmentId: written.assessmentId,
+      assessmentVersion: written.assessmentVersion });
   }
+  const scores = [];
+  for (const taskId of input.taskIds) {
+    const written = await writeAmuxPortfolioScoreInTx(tx, {
+      session, request, digestKey, confirmationDigest: null,
+      payload: { id: randomUUID(),
+        requestId: amuxV4ScorePlanRowRequestId(input.planRequestId, "score", taskId), taskId },
+    });
+    scores.push({ taskId, scoreId: written.scoreId, total: written.score.total });
+  }
+  return { assessments, scores };
 }
 
 /**
