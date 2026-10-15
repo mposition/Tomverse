@@ -137,6 +137,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/agent*",
   "tests/engineeringAgent*",
   "tests/support/engineeringAgentV22PublicationCheckHarness.mjs",
+  "tests/support/engineeringAgentPrObserverHarness.mjs",
   "tests/**/engineering-agent*",
   "tests/**/agent-digest*",
   "tests/security*",
