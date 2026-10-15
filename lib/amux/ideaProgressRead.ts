@@ -16,6 +16,8 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   displayKey: string | null;
   /** Task PRs waiting for GitHub review or merge. */
   reviewPullRequests: Array<{ number: number; displayKey: string | null }>;
+  /** The idea's Task cards in registration order, for its detail view. */
+  taskRows: Array<{ displayKey: string | null; status: string; reviewPrNumber: number | null; merged: boolean }>;
 };
 
 /**
@@ -99,6 +101,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       reviewPullRequests: own.filter((card) => card.cardType !== "story" && card.v4TerminalAt === null &&
         card.status === "review" && card.reviewPrNumber !== null)
         .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey })),
+      taskRows: own.filter((card) => card.cardType !== "story").map((card) => ({ displayKey: card.displayKey,
+        status: card.status, reviewPrNumber: card.reviewPrNumber, merged: card.v4TerminalAt !== null })),
     };
   });
 }

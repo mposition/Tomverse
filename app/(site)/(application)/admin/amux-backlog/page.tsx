@@ -9,6 +9,7 @@ import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadata
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
 import { AmuxIdeaProgressPanel } from "@/components/admin/AmuxIdeaProgressPanel";
+import { AmuxIdeaDetailSummary } from "@/components/admin/AmuxIdeaDetailSummary";
 import { AmuxUnusedAnalysisReservationPanel } from
   "@/components/admin/AmuxUnusedAnalysisReservationPanel";
 import { AmuxAnalysisClaimResolutionPanel } from
@@ -121,6 +122,10 @@ export default async function AdminAmuxBacklogPage({
   }
   const requestedIdea = typeof query.idea === "string" ? query.idea.trim().toLowerCase() : "";
   const openRequestId = isAmuxIdeaRequestId(requestedIdea) ? requestedIdea : null;
+  // An opened idea leads with its own detail (redesign B3); the list returns
+  // below the flow, so the page shows one idea at a time.
+  const openedIdea = Array.isArray(ideaProgress) && openRequestId
+    ? ideaProgress.find((row) => row.requestId === openRequestId) ?? null : null;
   const ideaSubmissionAvailable =
     ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
     ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV]);
@@ -163,7 +168,8 @@ export default async function AdminAmuxBacklogPage({
         <>
         {recoveryHoldId ? <AmuxAnalysisClaimResolutionPanel
           key={recoveryHoldId} holdId={recoveryHoldId} /> : null}
-        {ideaProgress !== undefined ? <AmuxIdeaProgressPanel rows={ideaProgress}
+        {openedIdea ? <AmuxIdeaDetailSummary row={openedIdea} /> : null}
+        {ideaProgress !== undefined && !openedIdea ? <AmuxIdeaProgressPanel rows={ideaProgress}
           activeRequestId={openRequestId} /> : null}
         <AmuxIdeaInputPanel key={openRequestId ?? "new"} openRequestId={openRequestId}
           submissionAvailable={ideaSubmissionAvailable}
@@ -180,6 +186,8 @@ export default async function AdminAmuxBacklogPage({
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"}
           operatorId={session.user.id} />
+        {openedIdea && ideaProgress !== undefined ? <AmuxIdeaProgressPanel rows={ideaProgress}
+          activeRequestId={openRequestId} /> : null}
         </>
       ) : tab.id === "portfolio" ? (
         <AmuxPortfolioPanel writeAvailable={amuxV4PortfolioWriteEnabled(

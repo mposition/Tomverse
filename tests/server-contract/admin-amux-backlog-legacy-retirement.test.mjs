@@ -50,7 +50,7 @@ mock.module(mod("lib/amux/ideaProgressRead.ts"), { namedExports: {
 const panels = {};
 for (const name of ["AdminPageTabs", "AmuxBacklogListPanel", "AmuxBacklogMetadataPanel", "AmuxBoardImportPanel",
   "AmuxIdeaInputPanel", "AmuxUnusedAnalysisReservationPanel", "AmuxAnalysisClaimResolutionPanel",
-  "AmuxTaskCostCatalogApprovalPanel", "AmuxPortfolioPanel", "AmuxReconciliationPanel", "AmuxIdeaProgressPanel"]) {
+  "AmuxTaskCostCatalogApprovalPanel", "AmuxPortfolioPanel", "AmuxReconciliationPanel", "AmuxIdeaProgressPanel", "AmuxIdeaDetailSummary"]) {
   const panel = () => null;
   panels[name] = panel;
   mock.module(mod(`components/admin/${name}.tsx`), { namedExports: { [name]: panel } });

@@ -103,6 +103,8 @@ test("the list is one bounded snapshot of seven reads that never reads idea text
     "an expired proposal waits for nobody");
   assert.deepEqual([row.stage, row.displayKey, row.reviewPullRequests],
     ["review", "AMUX-ADM-001", [{ number: 2540, displayKey: "AMUX-ADM-002" }]]);
+  assert.deepEqual(row.taskRows, [{ displayKey: "AMUX-ADM-002", status: "review", reviewPrNumber: 2540, merged: false }],
+    "the detail lists Tasks only, never stories");
 });
 
 test("the Ideas tab shows the inbox and list above the input, and opens a row's idea by its request id", () => {
@@ -128,4 +130,13 @@ test("the list asks before it leaves an unsaved draft", () => {
   const input = read("components/admin/AmuxIdeaInputPanel.tsx");
   assert.ok(input.includes('const draftAtRisk = hasUnsavedInput && (submission.kind === "idle" || submission.kind === "refused");'));
   assert.ok(input.includes("setAmuxIdeaUnsavedDraft(draftAtRisk)"));
+});
+
+test("an opened idea leads with its read-only detail, and the list follows its flow", () => {
+  const page = read("app/(site)/(application)/admin/amux-backlog/page.tsx");
+  assert.ok(page.indexOf("<AmuxIdeaDetailSummary") < page.indexOf("<AmuxIdeaInputPanel"));
+  assert.ok(page.includes("ideaProgress.find((row) => row.requestId === openRequestId)"));
+  const detail = read("components/admin/AmuxIdeaDetailSummary.tsx");
+  assert.equal(/adminFetch|method:|<button/.test(detail), false, "the detail only reads and links");
+  assert.ok(detail.includes("AMUX_IDEA_PROGRESS_STAGES.map"), "all six steps are drawn");
 });
