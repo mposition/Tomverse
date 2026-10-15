@@ -230,6 +230,13 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // engineering-agent.md version 5, item 1. setup + task lock + latest
+  // attempt + update + escalation close + canonical audit + fence
+  reviewMergeObserved: {
+    operation: "review_merge_observed",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
   // Policy version 20. setup + admission lock + receipt count + ackedAt + fence
   orchestratorAck: {
     operation: "orchestrator_ack",
