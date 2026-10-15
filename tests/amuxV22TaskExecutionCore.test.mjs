@@ -9,13 +9,13 @@ import { amuxV22EngineeringPublicationEnabled,
   v22SettlementPatchMatches } from
   "../lib/amux/v22TaskExecutionCore.ts";
 
-test("v22 execution needs its own switch and never opens publication", () => {
+test("v22 execution and publication each need their own exact switch", () => {
   assert.equal(amuxV22TaskExecutionEnabled("enabled"), true);
   for (const flag of [undefined, "", "disabled", "true", "1", " enabled", "ENABLED"]) {
     assert.equal(amuxV22TaskExecutionEnabled(flag), false);
     assert.equal(amuxV22EngineeringPublicationEnabled(flag), false);
   }
-  assert.equal(amuxV22EngineeringPublicationEnabled("enabled"), false);
+  assert.equal(amuxV22EngineeringPublicationEnabled("enabled"), true);
 });
 
 test("settlement refuses a patch inserted, removed, or changed after decrypt", () => {

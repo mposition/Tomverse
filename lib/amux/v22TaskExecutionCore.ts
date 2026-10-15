@@ -6,10 +6,10 @@ export function amuxV22TaskExecutionEnabled(value: string | undefined) {
   return AMUX_V22_TASK_EXECUTION_CODE_LATCH && value === "enabled";
 }
 
-/** Opening Task execution never opens its optional public PR path. The
- * separate publication latch remains closed until a verified image proof and
- * a separately approved activation. Policy v4 approval alone does not open it. */
-export const AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH = false;
+/** Orchestration policy v49 opens the code latch for the public PR path. The
+ * path still needs its own runtime switch, engineering mode t1 and a verified
+ * image proof; opening this latch alone publishes nothing. */
+export const AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH = true;
 export const AMUX_V22_ENGINEERING_PUBLICATION_ENV =
   "TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION";
 

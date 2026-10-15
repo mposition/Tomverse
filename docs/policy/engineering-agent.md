@@ -1,11 +1,12 @@
 # 엔지니어링 Agent 정책
 
 상태: **승인됨 — 단계별 구현 중.** 최초 작성 2026-09-21, 두 번째 초안 2026-09-27, 최초 승인 2026-09-28.
-approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 4
+approvedBy: mposition · approvedAt: 2026-10-15 · 정책 버전: 5
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | (미부여) | (미승인) | 최초 초안 |
+| 5 | 2026-10-15 mposition | v22 `implement` 게시 경로만: AMUX 작업 검토 단계를 없애고 GitHub에서 관측한 사람의 승인·병합으로 `done`, PR 번호는 게시 capability가 발급된 attempt에 기록, 이미지 증명은 배포 파이프라인이 산출하고 앱이 대조, `t1` 진입은 shadow 기간·판정 건수·비율 대신 일회성 점검 기록과 이 승인(§13 약화, 독립 검토). 판정 과소 관측 시 `shadow` 복귀, push 금지 집합·T1/T2·승인·병합 금지는 그대로 |
 | 4 | 2026-10-07 mposition | 배포 이미지에 실제로 없는 비런타임 파일만 통제 평면 slice에서 제외할 수 있는 좁은 예외. 동일 base commit·tree·운영자가 확인한 이미지 digest와 전체 파일 목록, 앱의 목록 SHA 재계산, 런타임 source SHA·deployment ID 대조, 동적 파일 접근 분석과 배포 후 실측이 모두 필요하다. 앱이 OCI digest를 독립 조회한다고 주장하지 않는다. v22 게시 경로는 Task 실행·기존 Publisher 스위치와 별도인 기본 꺼짐 코드 latch를 둔다. 게시 산출물이 없는 성공에는 `private_result`를 기록한다. 하나라도 없으면 기존 T2 유지 |
 | 3 | 2026-10-07 mposition | v22 경로에서 전체 결과 tree 목록 대신 변경 파일 경로·mode·새 blob 바이트만 제출하는 동등 검증 방식을 승인. 앱은 GitHub 기준 tree로 결과 tree를 재구성하지만 patch는 적용·실행하지 않으며 Publisher가 실제 적용 결과 hash를 다시 대조한다 |
 | 2 | 2026-10-06 mposition | v22 로컬 Ubuntu 구현 Task의 검증된 패치를 별도 Engineering Publisher의 기존 T1 경계로 전달하는 좁은 원천 예외. `develop` PR 게시까지만 허용하고 자동 병합·배포와 `main` 행위는 허용하지 않는다. 기존 auto-merge 없는 규칙을 명시한다 |
@@ -778,3 +779,36 @@ patch 본문을 파싱·적용·실행하지 않는다. 제출에 빠진 변경�
   고정한다.
   §2.2의 등록 상한과 §12의 대기 항목 합계는 이미 이 문서의 값이다.
 - 구현 파일의 경로. 구현이 병합될 때 이 문서가 그것을 지목하도록 갱신한다.
+
+## 버전 5 — v22 코드 작업의 게시와 완료 (2026-10-15)
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-15`. 2026-10-15 작성, 작성자 Claude.
+운영자가 `development-agent-orchestration.md` v49와 같은 결정으로 승인했고, 아래 4번의 `t1`
+진입 변경은 별도로 설명을 듣고 선택했다(2026-10-15). 대상은 **v22 로컬 Ubuntu `implement`
+Task의 게시 경로**(버전 2)뿐이다. engineering Agent 자신의 카드 작업은 바꾸지 않는다.
+
+1. **AMUX 작업 검토 단계를 이 경로에서 없앤다(§7).** 순서는 게시 서비스가 PR을 열고 결속
+   snapshot을 기록 → 권한 있는 사람이 GitHub에서 review → 사람이 병합 → 본 앱이 승인과
+   병합을 관측해 AMUX 카드를 `done`으로 바꾼다. 이 경로에서 AMUX의 `done`은 "결과를 받아
+   들였고 병합됐다"이다. §9-10의 승인 판정(권한 있는 사람의 required review, stale-approval
+   dismissal, 결속 head, 병합 주체는 관측 값)은 그대로다.
+2. **PR 번호는 실제로 실행한 worker의 attempt에 붙인다.** v22 attempt의 worker는 Ubuntu
+   worker이고 게시 결과를 보고하는 것은 게시 경로다. 본 앱은 게시 결과의 결속(카드·attempt·
+   capability·tree hash)으로 그 attempt를 찾아 PR을 기록한다. 보고 주체가 attempt의 worker와
+   같아야 한다는 조건은 이 경로에서 "게시 capability가 그 attempt에 발급됐다"로 바뀐다.
+3. **이미지 증명은 배포 파이프라인이 만든다(§4).** 배포 직후 자동화가 실제 이미지의 파일
+   목록과 digest, source commit, deployment ID를 산출해 앱에 기록하고, 앱이 목록 SHA를 다시
+   계산해 대조한다. 운영자가 배포마다 증명 JSON을 확인·서명하던 단계는 없다. 이 버전의
+   운영자 승인이 그 산출 절차를 승인한 것이다. 산출물이 없거나 대조가 하나라도 어긋나면
+   기존처럼 T2다.
+4. **`t1` 진입(§14).** shadow 기간·판정 건수 하한·"PR로 받을 만했다" 비율 대신, 아래 일회성
+   점검을 모두 통과한 기록과 이 버전의 운영자 승인으로 `t1`에 들어간다. 점검: 게시 App
+   설치 범위와 권한(Contents write, Pull requests write, Metadata read, Workflows 없음),
+   ruleset과 required review 1건, stale-approval dismissal, 게시 App 자격증명 전용성 기록,
+   병합 관측 일곱 조건과 last-look·기대 old OID의 합성 관측, dead-man monitor 탐지 실험.
+   **판정 과소가 하나라도 관측되면 즉시 `shadow`로 되돌린다.** 운영자가 이 변경으로 받아들인
+   것은, 에이전트의 T1/T2 판정이 실제로 보수적인지 실측하기 전에 공개 PR을 연다는 점이다.
+   병합 전 사람의 GitHub review가 그 위험을 막지만, 공개 저장소에 PR이 남는 것은 되돌릴 수
+   없다. 이 항목은 §13 조건의 약화이므로 독립 검토를 거친다(§15).
+5. **바뀌지 않는 것**: push 금지 집합(§4)과 T1/T2 판정, 에이전트는 승인·병합·auto-merge를
+   하지 않는다, 게시는 `develop` PR뿐, 무인 병합 없음, 결과 불명 처리, 비용·대기열 상한.
