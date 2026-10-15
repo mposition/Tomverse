@@ -54,3 +54,8 @@ test("both admin locales describe the execution approval", () => {
   assert.equal((messages.match(/executionApprovalAction:/g) ?? []).length, 2);
   assert.equal((messages.match(/executionApprovalBoundary:/g) ?? []).length, 2);
 });
+
+test("with the budget feature off the separate confirmation stays, never a permanent loading state", () => {
+  const panel = readFileSync("components/admin/AmuxFrontierModelsPanel.tsx", "utf8");
+  assert.match(panel, /const executionPrice = analysisBudgetAvailable \? readPrice : \{ kind: "none" as const \};/);
+});

@@ -90,8 +90,11 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
   // "none" is a read that found no admissible price; loading and a failed
   // read offer neither button, so a slow read never falls back to the
   // separate confirmation.
-  const [executionPrice, setExecutionPrice] = useState<
+  const [readPrice, setExecutionPrice] = useState<
     { kind: "loading" | "none" | "error" } | { kind: "ready"; id: string }>({ kind: "loading" });
+  // With the budget feature off there is nothing to reserve against: the
+  // separate confirmation is the only path, as before.
+  const executionPrice = analysisBudgetAvailable ? readPrice : { kind: "none" as const };
   const executionPriceId = executionPrice.kind === "ready" ? executionPrice.id : null;
   const [executionRefusal, setExecutionRefusal] = useState<string | null>(null);
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
