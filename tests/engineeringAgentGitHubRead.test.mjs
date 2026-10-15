@@ -278,6 +278,10 @@ test("a check still running or missing decides nothing; a failed one is a failur
   assert.equal((await read({ branch: {} })).requiredChecks, null);
   assert.deepEqual((await read({ runs: [{ id: 3, name: "Fast Gate", conclusion: "timed_out" }] })).requiredChecks, { allPassed: false });
   assert.deepEqual((await read({ status: { statuses: [{ context: "status-only", state: "error" }] } })).requiredChecks, { allPassed: false });
+  // A check run and a status of the same required name must both pass.
+  const both = [{ context: "status-only", state: "success" }];
+  assert.deepEqual((await read({ status: { statuses: [...both, { context: "Fast Gate", state: "failure" }] } })).requiredChecks, { allPassed: false });
+  assert.equal((await read({ status: { statuses: [...both, { context: "Fast Gate", state: "pending" }] } })).requiredChecks, null);
 });
 
 test("a merge is read as its commit, time and merger kind; a merge without them is refused", async () => {

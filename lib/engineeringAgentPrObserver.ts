@@ -37,7 +37,11 @@ import { prisma } from "@/lib/prisma";
 // The observation writer: binding lock, switches, current row, update and its
 // audit entry (four) -- nine, and three to spare.
 const OBSERVATION_PRISMA_CALLS = 12;
-const DEFAULT_LIMIT = 20;
+// Every round reads every binding it still has to watch, a page at a time, so
+// none can be crowded out by older ones that wait. The owner's PR queue (§12)
+// keeps the set small; the ceiling only stops a runaway round.
+const PAGE_SIZE = 20;
+const ROUND_CEILING = 200;
 
 export type EngineeringAgentPrObserverOutcome =
   | "approved"
@@ -56,22 +60,34 @@ const livePorts: Ports = { read: (prNumber) => readEngineeringAgentPullObservati
 
 type Approval = { verdict: string; reviewId?: number; observedAt?: string } | null;
 
+const BINDING_SELECT = {
+  id: true, runId: true, prNumber: true, verifiedHeadSha: true, snapshot: true, createdAt: true,
+  approvalObservation: true,
+  run: { select: { cardId: true, amuxAttemptId: true } },
+} as const;
+
+async function* watchedBindings() {
+  let cursor: string | null = null;
+  for (let read = 0; read < ROUND_CEILING; read += PAGE_SIZE) {
+    const page: Array<Prisma.EngineeringAgentBindingGetPayload<{ select: typeof BINDING_SELECT }>> =
+      await prisma.engineeringAgentBinding.findMany({
+        where: { state: "open", supersededAt: null, mergeObservation: { equals: Prisma.AnyNull } },
+        select: BINDING_SELECT,
+        orderBy: { id: "asc" },
+        take: PAGE_SIZE,
+        ...(cursor === null ? {} : { cursor: { id: cursor }, skip: 1 }),
+      });
+    yield* page;
+    if (page.length < PAGE_SIZE) return;
+    cursor = page[page.length - 1]!.id;
+  }
+}
+
 export async function observeEngineeringAgentPullRequests(
-  input: { limit?: number } = {},
   ports: Ports = livePorts,
 ): Promise<Array<{ bindingId: string; outcome: EngineeringAgentPrObserverOutcome }>> {
-  const bindings = await prisma.engineeringAgentBinding.findMany({
-    where: { state: "open", supersededAt: null, mergeObservation: { equals: Prisma.AnyNull } },
-    select: {
-      id: true, runId: true, prNumber: true, verifiedHeadSha: true, snapshot: true, createdAt: true,
-      approvalObservation: true,
-      run: { select: { cardId: true, amuxAttemptId: true } },
-    },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    take: Math.min(Math.max(input.limit ?? DEFAULT_LIMIT, 1), 100),
-  });
   const results: Array<{ bindingId: string; outcome: EngineeringAgentPrObserverOutcome }> = [];
-  for (const binding of bindings) {
+  for await (const binding of watchedBindings()) {
     let pull: EngineeringAgentPullObservation;
     try {
       pull = await ports.read(binding.prNumber);
