@@ -16,9 +16,17 @@
 // Pure and dependency-free on purpose: lib/buildInfo.ts is server-only and
 // reads the filesystem, and this has to be usable from anywhere that needs to
 // know which deployment it is.
+//
+// `dev` is the Railway environment that deploys every develop merge, so that
+// `staging` (shown to people as Test) can hold one release candidate while
+// develop keeps moving. It is not `development`, which is a local `next dev`
+// or an unlabelled non-production build. Before `dev` was listed here, a
+// Railway environment named "dev" fell through to NODE_ENV and resolved to
+// production -- live Stripe key required, Sentry events filed as production.
 
 export const DEPLOYMENT_ENVIRONMENTS = [
   "development",
+  "dev",
   "staging",
   "production",
   "test",
@@ -64,7 +72,7 @@ export const resolveDeploymentEnvironment = (
  * the one thing an environment tag is for.
  *
  * So the override is allowed to *name* something the resolver has no opinion
- * about (`production-eu`, `canary`), and refused when it names one of the four
+ * about (`production-eu`, `canary`), and refused when it names one of the five
  * canonical environments and picks a different one than this deployment is.
  * That kills the observed failure without killing the feature.
  *
