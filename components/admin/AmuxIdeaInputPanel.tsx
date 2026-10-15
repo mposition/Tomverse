@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
-import { AmuxFrontierModelsPanel } from "@/components/admin/AmuxFrontierModelsPanel";
+import { AmuxFrontierModelsPanel, type AmuxBuildPreviewHooks } from "@/components/admin/AmuxFrontierModelsPanel";
 import { AmuxIdeaAnalysisResultPanel } from "@/components/admin/AmuxIdeaAnalysisResultPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
@@ -274,6 +274,34 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     }
   };
 
+  // amux-intake.md v18 item 1: the frontier panel can save the idea, prepare
+  // its plan and its preview in one request. The submission bookkeeping stays
+  // here, so a lost answer recovers exactly as a lost submission does.
+  const buildRefs = parsePullRequests(pullRequests);
+  const buildHooks: AmuxBuildPreviewHooks = {
+    draft: submissionAvailable && recoveryChecked && submission.kind === "idle" &&
+      idea.trim() !== "" && buildRefs !== null
+      ? { idea, repositories: lines(repositories), pullRequests: buildRefs } : null,
+    reserve: (requestId) => {
+      if (inFlight.current || !reservePendingIdeaRequest(receiptStore(), operatorId, requestId)) return false;
+      inFlight.current = true;
+      setSubmission({ kind: "pending", requestId });
+      return true;
+    },
+    onBuilt: ({ requestId, ideaId, hasExternalSources, planReady }) => {
+      rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
+      setContinuationChunkIndex(0);
+      if (planReady) setPlanReadyIdeaId(ideaId);
+      setSubmission({ kind: "submitted", requestId, ideaId, hasExternalSources });
+    },
+    onUnknown: (requestId) => { void readBack(requestId); },
+    onRefused: (requestId, code) => {
+      clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
+      inFlight.current = false;
+      setSubmission({ kind: "refused", code });
+    },
+  };
+
   const checkInput = async () => {
     const refs = parsePullRequests(pullRequests);
     if (!refs) {
@@ -482,6 +510,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
         operatorId={operatorId}
         chunkIndex={continuationChunkIndex}
+        build={submission.kind === "submitted" ? null : buildHooks}
       />
       {analysisResultAvailable && submission.kind === "submitted" ?
         <AmuxIdeaAnalysisResultPanel key={submission.ideaId}

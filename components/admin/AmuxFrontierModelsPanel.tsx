@@ -51,15 +51,28 @@ const receiptStore = (): Storage | null => {
   try { return window.sessionStorage; } catch { return null; }
 };
 
+/** What the idea input hands over so this panel can build the preview in
+ * one request (amux-intake.md v18 item 1): the draft, and the input panel's
+ * own submission bookkeeping, so a lost answer recovers exactly as a lost
+ * submission does. */
+export type AmuxBuildPreviewHooks = {
+  draft: { idea: string; repositories: string[]; pullRequests: Array<{ repository: string; number: number }> } | null;
+  reserve: (requestId: string) => boolean;
+  onBuilt: (built: { requestId: string; ideaId: string; hasExternalSources: boolean; planReady: boolean }) => void;
+  onUnknown: (requestId: string) => void;
+  onRefused: (requestId: string, code: string) => void;
+};
+
 export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvailable, confirmAvailable,
   analysisBudgetAvailable, ideaId, planReady,
-  declaredExternalSources, operatorId, chunkIndex = 0 }: {
+  declaredExternalSources, operatorId, chunkIndex = 0, build = null }: {
   available: boolean; writeAvailable: boolean;
   previewAvailable: boolean; confirmAvailable: boolean;
   analysisBudgetAvailable: boolean;
   ideaId: string | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
   chunkIndex?: number;
+  build?: AmuxBuildPreviewHooks | null;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const budgetMessages = useAdminMessages(adminAmuxAnalysisBudgetMessages);
@@ -71,6 +84,7 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
   const [selectedEffort, setSelectedEffort] = useState("");
   const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState(false);
+  const [building, setBuilding] = useState(false);
   const [registrationProvider, setRegistrationProvider] =
     useState<"openai" | "anthropic">("openai");
   const [registrationModelId, setRegistrationModelId] = useState("");
@@ -509,6 +523,48 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
     return () => { active = false; };
   }, [analysisBudgetAvailable, preview.kind]);
 
+  const buildPreview = async () => {
+    if (!build?.draft || !selected || !selectedEffort || building || ideaId !== null) return;
+    const requestId = crypto.randomUUID();
+    const previewId = crypto.randomUUID();
+    // The input panel records the submission attempt before the request.
+    if (!build.reserve(requestId)) return;
+    setBuilding(true);
+    setFailure(null);
+    try {
+      const response = await adminFetch("/api/admin/amux/ideas/build-preview", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1, requestId, previewId,
+          input: { version: 1, ...build.draft },
+          model: { provider: selected.provider, modelId: selected.modelId, reasoningEffort: selectedEffort,
+            approvalId: selected.approvalId, approvalVersion: selected.approvalVersion } }),
+      });
+      const body: unknown = await response.json().catch(() => null);
+      const row = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+      const builtIdeaId = typeof row.ideaId === "string" ? row.ideaId : null;
+      if (builtIdeaId) {
+        // Saved. A preview that was prepared, or may have been, is recovered by
+        // its own receipt once this panel remounts for the saved idea.
+        const previewReached = row.state === "prepared" || row.step === "preview";
+        if (previewReached) {
+          reservePreviewReceipt(receiptStore(), operatorId, builtIdeaId, previewId, selected, selectedEffort, 0);
+        }
+        build.onBuilt({ requestId, ideaId: builtIdeaId, hasExternalSources: row.hasExternalSources === true,
+          planReady: previewReached });
+        return;
+      }
+      if (response.status < 500 && row.error !== "outcome_unknown") {
+        build.onRefused(requestId, typeof row.error === "string" ? row.error : "submit_failed");
+        return;
+      }
+      build.onUnknown(requestId);
+    } catch {
+      build.onUnknown(requestId);
+    } finally {
+      setBuilding(false);
+    }
+  };
+
   const approveExecution = async () => {
     if (!confirmAvailable || !ideaId || preview.kind !== "prepared" ||
         confirmation.kind !== "idle" || !executionPriceId) return;
@@ -744,6 +800,15 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
             {m.frontierSelectionCheck}
           </button>
           {checked ? <p role="status">{m.frontierSelectionCurrent}</p> : null}
+          {ideaId === null && build ? <div className="space-y-2">
+            <p className="text-xs">{m.buildPreviewHint}</p>
+            <button type="button" onClick={() => void buildPreview()}
+              disabled={!build.draft || !selected || !selectedEffort || building || !previewAvailable}
+              className="min-h-11 rounded-lg border border-blue-700 bg-blue-700 px-4 text-white disabled:opacity-50 dark:border-blue-400">
+              {m.buildPreviewAction}
+            </button>
+            {building ? <p role="status">{m.buildPreviewPending}</p> : null}
+          </div> : null}
           {ideaId ? <button type="button" onClick={() => void preparePreview()}
             disabled={!previewAvailable || !planReady || declaredExternalSources ||
               !checked || preview.kind !== "idle"}
