@@ -285,7 +285,10 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
         cost = checkV4TaskApprovedCeiling(
           snapshot.card.task.costReceipt, { ok: true,
             receipt: current.receipt }).decision;
-        if (cost === "allow") {
+        // Worker availability is its own fact (policy v48): a cost that needs
+        // reconfirmation must not also read as "no worker", or the FIRST Task
+        // retry, whose final consent is that reconfirmation, could never pass.
+        if (cost !== "hold") {
           // Orchestration policy version 35, section 3: the variables while R2c is
           // off; the catalog derived from the registry, read in this
           // transaction, once it is on.
