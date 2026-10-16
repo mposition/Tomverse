@@ -34,6 +34,7 @@ export type AmuxV4CardRegistrationPlan = {
     completionCriteria: string[] };
   executionBrief: string | null;
   taskRole: string | null;
+  proposedExecutionGrade: string | null;
   executionGrade: string | null;
   maximumCostMicroUsd: string | null;
   sourceSystem: "admin-idea-v4";
@@ -51,16 +52,35 @@ export type AmuxV4CardRegistrationInspection =
   | { ok: false; code: "reconfirm" | "reject" | "halt" | "proposal_mismatch" |
     AmuxV20TaskRegistrationRefusal };
 
+export const AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES = Object.freeze([
+  "task_expected_paths_missing",
+  "task_expected_paths_out_of_range",
+  "task_expected_path_invalid",
+  "task_expected_paths_duplicate",
+  "task_expected_paths_mixed",
+  "task_role_review_refused",
+  "task_execution_grade_mismatch",
+  "task_confirmation_grade_mismatch",
+  "task_cost_receipt_grade_mismatch",
+] as const);
+
 export type AmuxV20TaskRegistrationRefusal =
-  | "task_expected_paths_missing"
-  | "task_expected_paths_out_of_range"
-  | "task_expected_path_invalid"
-  | "task_expected_paths_duplicate"
-  | "task_expected_paths_mixed"
-  | "task_role_review_refused"
-  | "task_execution_grade_mismatch"
-  | "task_confirmation_grade_mismatch"
-  | "task_cost_receipt_grade_mismatch";
+  (typeof AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES)[number];
+
+const taskRegistrationRefusals = new Set<string>(
+  AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES,
+);
+
+export const isAmuxV20TaskRegistrationRefusal = (
+  value: unknown,
+): value is AmuxV20TaskRegistrationRefusal =>
+  typeof value === "string" && taskRegistrationRefusals.has(value);
+
+export const amuxV4CardRegistrationDecisionErrorCode = (
+  code: Extract<AmuxV4CardRegistrationInspection, { ok: false }>["code"],
+): "integrity_unavailable" | "reconfirm" | AmuxV20TaskRegistrationRefusal =>
+  code === "halt" ? "integrity_unavailable" :
+    isAmuxV20TaskRegistrationRefusal(code) ? code : "reconfirm";
 
 export type AmuxV20TaskRegistrationInspection =
   | { ok: true; executionGrade: AmuxExecutionGrade }
@@ -111,14 +131,15 @@ export function inspectAmuxV20TaskRegistration(
     if (contract && ordinary) {
       return { ok: false, code: "task_expected_paths_mixed" };
     }
+    if (!proposal.executionGrade ||
+        !["routine", "advanced", "frontier"].includes(proposal.executionGrade)) {
+      return { ok: false, code: "task_execution_grade_mismatch" };
+    }
     const executionGrade = deriveAmuxExecutionGrade({
       taskRole: proposal.taskRole,
       expectedPaths,
       proposedGrade: proposal.executionGrade,
     });
-    if (proposal.executionGrade !== executionGrade) {
-      return { ok: false, code: "task_execution_grade_mismatch" };
-    }
     return { ok: true, executionGrade };
   } catch {
     return { ok: false, code: "task_expected_path_invalid" };
@@ -193,6 +214,10 @@ export function inspectAmuxV4CardRegistration(input: {
     const taskGuard = inspectAmuxV20TaskRegistration(proposal);
     if (!taskGuard.ok) return taskGuard;
     executionGrade = taskGuard.executionGrade;
+    if (snapshot.policyVersion !== "amux-intake-v20" ||
+        card.task!.proposedGrade !== proposal.executionGrade) {
+      return { ok: false, code: "task_confirmation_grade_mismatch" };
+    }
     if (card.task!.grade !== taskGuard.executionGrade) {
       return { ok: false, code: "task_confirmation_grade_mismatch" };
     }
@@ -213,6 +238,7 @@ export function inspectAmuxV4CardRegistration(input: {
       completionCriteria: [...proposal.completionCriteria] },
     executionBrief: proposal.executionBrief,
     taskRole: proposal.taskRole,
+    proposedExecutionGrade: proposal.executionGrade,
     executionGrade,
     maximumCostMicroUsd: card.task?.costReceipt.ceilingMicroUsd ?? null,
     sourceSystem: "admin-idea-v4",

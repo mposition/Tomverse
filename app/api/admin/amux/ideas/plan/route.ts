@@ -14,6 +14,8 @@ import { AmuxV4NodePlanError } from "@/lib/amux/ideaNodePlanApprovalService";
 import { AmuxV4PlanError, approveAmuxV4Plan } from "@/lib/amux/ideaPlanApprovalService";
 import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4DuplicateReasonRequired,
   AmuxV4UnitDecisionError, amuxV4UnitWriteEnabled } from "@/lib/amux/ideaUnitDecisionStore";
+import { isAmuxV20TaskRegistrationRefusal } from
+  "@/lib/amux/ideaUnitRegistrationCore";
 import { amuxDatabaseDiagnosticCode } from "@/lib/amux/readFailureCore";
 import { AmuxPortfolioError } from "@/lib/amux/portfolioAssessmentService";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
@@ -94,7 +96,8 @@ export async function POST(request: Request) {
     }
     if (error instanceof AmuxV4UnitDecisionError) {
       return refuse(error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 :
-        error.code === "not_ready" || error.code === "reconfirm" ? 409 : 503, error.code);
+        error.code === "not_ready" || error.code === "reconfirm" ||
+        isAmuxV20TaskRegistrationRefusal(error.code) ? 409 : 503, error.code);
     }
     if (error instanceof AmuxPortfolioError) {
       return refuse(error.code === "forbidden" ? 403 : error.code === "invalid_input" ? 400 :

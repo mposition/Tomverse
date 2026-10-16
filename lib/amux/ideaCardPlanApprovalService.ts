@@ -21,6 +21,8 @@ import { deriveAmuxIdeaUnitConfirmation, sameAmuxIdeaUnitConfirmation } from
 import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4UnitDecisionError, amuxV4UnitWriteEnabled,
   commitAmuxV4CardRegistration } from "./ideaUnitDecisionStore.ts";
 import { readVerifiedAmuxCardProposal } from "./ideaUnitProposalReadService.ts";
+import { inspectAmuxV20TaskRegistration } from
+  "./ideaUnitRegistrationCore.ts";
 import { AmuxV4TaskCatalogApprovalError, calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 
@@ -183,8 +185,10 @@ export async function runAmuxV4CardPlanInTx(tx: Prisma.TransactionClient,
           if (!proposal.taskRole || !proposal.executionGrade) {
             throw new AmuxV4UnitDecisionError("reconfirm");
           }
+          const inspected = inspectAmuxV20TaskRegistration(proposal);
+          if (!inspected.ok) throw new AmuxV4UnitDecisionError(inspected.code);
           const approved = await calculateCurrentApprovedAmuxV4TaskCost(transaction,
-            proposal.taskRole, proposal.executionGrade);
+            proposal.taskRole, inspected.executionGrade);
           taskCost = { ok: true as const, receipt: approved.receipt };
         }
         return { duplicateScan: await scanner(transaction, { unitId: entry.draftUnitId,

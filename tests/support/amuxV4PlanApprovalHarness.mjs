@@ -37,7 +37,7 @@ mock.module(mod("lib/amux/ideaCardPlanApprovalService.ts"), {
       calls.push(["prepareCards", input.publicPrConsentOff, options.allowEmpty, [...options.pendingFeatures]]);
       return { plan: cardPlan, remaining: 0 };
     },
-    runAmuxV4CardPlanInTx: async (tx) => { calls.push(["runCards", tx]); if (failIn === "cards") throw new DecisionError("reconfirm"); return cardPlan; },
+    runAmuxV4CardPlanInTx: async (tx) => { calls.push(["runCards", tx]); if (failIn === "cards") throw new DecisionError("task_expected_paths_mixed"); return cardPlan; },
     amuxV4PlanFailure: (error, returned) => (!returned && error instanceof DecisionError ? error : new DecisionError("outcome_unknown")),
   },
 });
@@ -88,7 +88,8 @@ assert.equal(scoreInput.planRequestId, "11111111-2222-4333-8444-555555555555");
 for (const part of ["nodes", "cards", "scores"]) {
   reset(); failIn = part;
   await assert.rejects(approveAmuxV4Plan(session, request, input()),
-    (error) => error.code === (part === "scores" ? "not_ready" : "reconfirm"));
+    (error) => error.code === (part === "scores" ? "not_ready" :
+      part === "cards" ? "task_expected_paths_mixed" : "reconfirm"));
 }
 reset(); commitFails = true;
 await assert.rejects(approveAmuxV4Plan(session, request, input()), (error) => error.code === "outcome_unknown");

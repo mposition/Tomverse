@@ -21,7 +21,10 @@ import { amuxContentDigest, sealAmuxContent,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import type { AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import type { AmuxAnalysisNode } from "./ideaAnalysisChunkCore.ts";
-import { inspectAmuxV4CardRegistration } from "./ideaUnitRegistrationCore.ts";
+import { amuxV4CardRegistrationDecisionErrorCode,
+  inspectAmuxV4CardRegistration,
+  type AmuxV20TaskRegistrationRefusal } from
+  "./ideaUnitRegistrationCore.ts";
 import { inspectAmuxV4NodeCreation } from "./ideaNodeRegistrationCore.ts";
 import { checkAmuxIdeaUnitConsume,
   type AmuxIdeaUnitConsumeContext } from "./ideaUnitConsumeGuard.ts";
@@ -40,7 +43,8 @@ export const amuxV4UnitWriteEnabled = (value: string | undefined) =>
 export class AmuxV4UnitDecisionError extends Error {
   constructor(readonly code: "forbidden" | "not_found" | "not_ready" |
     "reconfirm" | "integrity_unavailable" | "write_disabled" |
-    "outcome_unknown" | "duplicate_reason_required") {
+    "outcome_unknown" | "duplicate_reason_required" |
+    AmuxV20TaskRegistrationRefusal) {
     super(code);
     this.name = "AmuxV4UnitDecisionError";
   }
@@ -416,8 +420,9 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     resolvedFeatureRef: hierarchy[2].id,
   });
   if (!inspected.ok) {
-    throw new AmuxV4UnitDecisionError(inspected.code === "halt"
-      ? "integrity_unavailable" : "reconfirm");
+    throw new AmuxV4UnitDecisionError(
+      amuxV4CardRegistrationDecisionErrorCode(inspected.code),
+    );
   }
   const plan = inspected.plan;
   const title = sealAmuxContent(Buffer.from(plan.title, "utf8"),
@@ -438,7 +443,11 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     sourceSystem: plan.sourceSystem, sourceKey: plan.sourceKey,
     sourceVersion: "1", sourceDigest: plan.sourceDigest,
     sourceSnapshot: { schemaVersion: "amux-v4", ideaId: plan.ideaId,
-      approvalId: plan.decisionId },
+      approvalId: plan.decisionId,
+      ...(plan.cardType === "task" ? {
+        proposedExecutionGrade: plan.proposedExecutionGrade,
+        finalExecutionGrade: plan.executionGrade,
+      } : {}) },
     cardType: plan.cardType, storyKind: plan.storyKind,
     parentFeatureNodeId: plan.featureNodeId,
     parentStoryCardId: plan.parentStoryCardId,
@@ -470,6 +479,10 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     metadata: { ideaId: plan.ideaId, draftUnitId: plan.draftUnitId,
       cardId: input.cardId, action: "register_card", status: "backlog",
       confirmationDigest: prepared.confirmationDigest,
+      ...(plan.cardType === "task" ? {
+        proposedExecutionGrade: plan.proposedExecutionGrade,
+        finalExecutionGrade: plan.executionGrade,
+      } : {}),
       publicPrDisclosureApproved:
         input.snapshot.card?.task?.publicPrDisclosureApproved === true,
       ownerAssigned: false, executionAttempted: false },

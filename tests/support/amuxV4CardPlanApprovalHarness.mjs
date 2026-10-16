@@ -68,7 +68,9 @@ mock.module(mod("lib/amux/ideaStoryRegistrationService.ts"), {
     prepareAmuxV4CardRegistrationInTx: async (tx, args) => {
       calls.push(["prepare", tx, args.choice.draftUnitId, args.choice.featureNodeId,
         args.choice.cardType, args.choice.publicPrDisclosureApproved, args.choice.decisionReason]);
-      if (failOn === args.choice.draftUnitId) throw new DecisionError("reconfirm");
+      if (failOn === args.choice.draftUnitId) {
+        throw new DecisionError("task_expected_paths_mixed");
+      }
       return { result: { confirmationDigest: `c:${args.decisionId}` },
         snapshot: { decisionId: args.decisionId, duplicates: null,
           card: { cardType: args.choice.cardType, task: args.choice.cardType === "task" ? { costReceipt: "r" } : null } } };
@@ -130,7 +132,7 @@ assert.deepEqual(calls.filter(([k]) => k === "prepare").map((entry) => entry[5])
 
 // A refusal of any unit surfaces as itself; after the callback, an unknown outcome.
 reset(); failOn = "unit-task-02";
-await assert.rejects(run(), (error) => error.code === "reconfirm");
+await assert.rejects(run(), (error) => error.code === "task_expected_paths_mixed");
 reset(); commitFails = true;
 await assert.rejects(run(), (error) => error.code === "outcome_unknown");
 
