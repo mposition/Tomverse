@@ -51,16 +51,35 @@ export type AmuxV4CardRegistrationInspection =
   | { ok: false; code: "reconfirm" | "reject" | "halt" | "proposal_mismatch" |
     AmuxV20TaskRegistrationRefusal };
 
+export const AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES = Object.freeze([
+  "task_expected_paths_missing",
+  "task_expected_paths_out_of_range",
+  "task_expected_path_invalid",
+  "task_expected_paths_duplicate",
+  "task_expected_paths_mixed",
+  "task_role_review_refused",
+  "task_execution_grade_mismatch",
+  "task_confirmation_grade_mismatch",
+  "task_cost_receipt_grade_mismatch",
+] as const);
+
 export type AmuxV20TaskRegistrationRefusal =
-  | "task_expected_paths_missing"
-  | "task_expected_paths_out_of_range"
-  | "task_expected_path_invalid"
-  | "task_expected_paths_duplicate"
-  | "task_expected_paths_mixed"
-  | "task_role_review_refused"
-  | "task_execution_grade_mismatch"
-  | "task_confirmation_grade_mismatch"
-  | "task_cost_receipt_grade_mismatch";
+  (typeof AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES)[number];
+
+const taskRegistrationRefusals = new Set<string>(
+  AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES,
+);
+
+export const isAmuxV20TaskRegistrationRefusal = (
+  value: unknown,
+): value is AmuxV20TaskRegistrationRefusal =>
+  typeof value === "string" && taskRegistrationRefusals.has(value);
+
+export const amuxV4CardRegistrationDecisionErrorCode = (
+  code: Extract<AmuxV4CardRegistrationInspection, { ok: false }>["code"],
+): "integrity_unavailable" | "reconfirm" | AmuxV20TaskRegistrationRefusal =>
+  code === "halt" ? "integrity_unavailable" :
+    isAmuxV20TaskRegistrationRefusal(code) ? code : "reconfirm";
 
 export type AmuxV20TaskRegistrationInspection =
   | { ok: true; executionGrade: AmuxExecutionGrade }

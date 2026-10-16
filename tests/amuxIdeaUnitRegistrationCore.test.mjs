@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { amuxCanonicalJson } from "../lib/amux/boardImportCore.ts";
 import { amuxContentDigest } from "../lib/amux/ideaCrypto.ts";
 import { deriveAmuxIdeaUnitConfirmation } from
   "../lib/amux/ideaUnitConfirmationCore.ts";
-import { inspectAmuxV4CardRegistration, inspectAmuxV20TaskRegistration } from
+import { AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES,
+  amuxV4CardRegistrationDecisionErrorCode,
+  inspectAmuxV4CardRegistration, inspectAmuxV20TaskRegistration,
+  isAmuxV20TaskRegistrationRefusal } from
   "../lib/amux/ideaUnitRegistrationCore.ts";
 import { calculateV4TaskCostCeiling } from
   "../lib/amux/v4TaskCostCeilingCore.ts";
@@ -236,4 +240,38 @@ test("final registration requires the derived grade in proposal, confirmation an
   assert.deepEqual(inspectAmuxV4CardRegistration(receiptTooLow), {
     ok: false, code: "task_cost_receipt_grade_mismatch",
   });
+});
+
+test("only stable metadata-only v20 refusals survive the decision-store mapping", () => {
+  assert.deepEqual(AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES, [
+    "task_expected_paths_missing",
+    "task_expected_paths_out_of_range",
+    "task_expected_path_invalid",
+    "task_expected_paths_duplicate",
+    "task_expected_paths_mixed",
+    "task_role_review_refused",
+    "task_execution_grade_mismatch",
+    "task_confirmation_grade_mismatch",
+    "task_cost_receipt_grade_mismatch",
+  ]);
+  for (const code of AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES) {
+    assert.equal(isAmuxV20TaskRegistrationRefusal(code), true);
+    assert.equal(amuxV4CardRegistrationDecisionErrorCode(code), code);
+  }
+  assert.equal(isAmuxV20TaskRegistrationRefusal("task_expected_path_invalid:lib/amux/secret.ts"), false);
+  assert.equal(isAmuxV20TaskRegistrationRefusal("proposal_mismatch"), false);
+  assert.equal(amuxV4CardRegistrationDecisionErrorCode("proposal_mismatch"), "reconfirm");
+  assert.equal(amuxV4CardRegistrationDecisionErrorCode("halt"), "integrity_unavailable");
+});
+
+test("the protected card writer uses the stable refusal mapper", () => {
+  const source = readFileSync("lib/amux/ideaUnitDecisionStore.ts", "utf8");
+  const start = source.indexOf("const inspected = inspectAmuxV4CardRegistration({");
+  const end = source.indexOf("const plan = inspected.plan;", start);
+  assert.ok(start >= 0 && end > start);
+  const boundary = source.slice(start, end);
+  assert.match(boundary,
+    /amuxV4CardRegistrationDecisionErrorCode\(inspected\.code\)/);
+  assert.doesNotMatch(boundary,
+    /inspected\.code === "halt"[\s\S]*"reconfirm"/);
 });
