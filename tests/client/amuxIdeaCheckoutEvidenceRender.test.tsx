@@ -51,14 +51,26 @@ test("Admin shows read-file count, digest and purge state without stored paths",
   };
   const active = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
     { row: row([evidence]) }));
+  const m = active.includes(adminAmuxIdeaProgressMessages.en.checkoutEvidenceTitle)
+    ? adminAmuxIdeaProgressMessages.en : adminAmuxIdeaProgressMessages.ko;
   assert.match(active, /data-testid="amux-checkout-read-manifest"/);
   assert.ok(active.includes("b".repeat(64)));
-  assert.ok(active.includes(adminAmuxIdeaProgressMessages.en.checkoutReadFiles(2)) ||
-    active.includes(adminAmuxIdeaProgressMessages.ko.checkoutReadFiles(2)));
+  assert.ok(active.includes(m.checkoutReadFiles(2)));
+  assert.ok(active.includes(m.checkoutReadEncrypted));
+  assert.ok(!active.includes(m.checkoutReadPurged));
   assert.ok(!active.includes("docs/private.md"));
   const purged = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
     { row: row([{ ...evidence, readManifest: { ...evidence.readManifest!,
       bodyPurged: true } }]) }));
-  assert.ok(purged.includes(adminAmuxIdeaProgressMessages.en.checkoutReadPurged) ||
-    purged.includes(adminAmuxIdeaProgressMessages.ko.checkoutReadPurged));
+  assert.ok(purged.includes(m.checkoutReadPurged));
+  assert.ok(!purged.includes(m.checkoutReadEncrypted));
+});
+
+test("both Admin locales distinguish retained and deleted read-file paths", () => {
+  assert.equal(adminAmuxIdeaProgressMessages.en.checkoutReadFiles(1), "1 file read by the CLI");
+  assert.equal(adminAmuxIdeaProgressMessages.ko.checkoutReadFiles(1), "CLI가 읽은 파일 1개");
+  assert.notEqual(adminAmuxIdeaProgressMessages.en.checkoutReadEncrypted,
+    adminAmuxIdeaProgressMessages.en.checkoutReadPurged);
+  assert.notEqual(adminAmuxIdeaProgressMessages.ko.checkoutReadEncrypted,
+    adminAmuxIdeaProgressMessages.ko.checkoutReadPurged);
 });
