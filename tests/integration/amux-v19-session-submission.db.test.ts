@@ -288,6 +288,35 @@ test("session submission queues one content-free analysis reservation in the sam
     /mposition\/Tomverse|Codex|sessionDisplay|reservedMicroUsd|ideaText/);
 });
 
+test("installed queue guard rejects missing and null system audit identity", async () => {
+  const [result] = await prisma.$queryRaw<Array<{
+    definition: string;
+    missingSystemActorDiffers: boolean;
+    nullActorScopeDiffers: boolean;
+  }>>`
+    SELECT
+      pg_get_functiondef(
+        'amux_v19_session_analysis_reservation_guard()'::regprocedure
+      ) AS definition,
+      ('{}'::jsonb->>'systemActor') IS DISTINCT FROM
+        'amux-session-intake' AS "missingSystemActorDiffers",
+      ('{"actorScope":null}'::jsonb->>'actorScope') IS DISTINCT FROM
+        'session-analysis-reservation-v1' AS "nullActorScopeDiffers"
+  `;
+  assert.ok(result);
+  assert.equal(result.missingSystemActorDiffers, true);
+  assert.equal(result.nullActorScopeDiffers, true);
+  const definition = result.definition.replace(/\s+/g, " ");
+  assert.match(definition,
+    /submission_audit\."metadata"->>'systemActor' IS DISTINCT FROM 'amux-session-intake'/);
+  assert.match(definition,
+    /submission_audit\."metadata"->>'actorScope' IS DISTINCT FROM 'session-submission-v1'/);
+  assert.match(definition,
+    /metadata->>'systemActor' IS DISTINCT FROM 'amux-session-intake'/);
+  assert.match(definition,
+    /metadata->>'actorScope' IS DISTINCT FROM 'session-analysis-reservation-v1'/);
+});
+
 test("database refuses late, mutable and forged queue reservations", async () => {
   await assert.rejects(prisma.amuxIdeaSessionAnalysisReservation.update({
     where: { id: committedReservationId }, data: { status: "queued" },

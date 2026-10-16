@@ -125,8 +125,10 @@ BEGIN
      submission_audit."actorEmail" IS NOT NULL OR
      submission_audit."ipAddress" IS NOT NULL OR
      submission_audit."userAgent" IS NOT NULL OR
-     submission_audit."metadata"->>'systemActor' <> 'amux-session-intake' OR
-     submission_audit."metadata"->>'actorScope' <> 'session-submission-v1' OR
+     submission_audit."metadata"->>'systemActor' IS DISTINCT FROM
+       'amux-session-intake' OR
+     submission_audit."metadata"->>'actorScope' IS DISTINCT FROM
+       'session-submission-v1' OR
      submission_audit."metadata"->>'requestId' IS DISTINCT FROM NEW."requestId"::text OR
      submission_audit."metadata"->>'operatingScopeSettingId' IS DISTINCT FROM
        NEW."operatingScopeSettingId" OR
@@ -167,8 +169,9 @@ BEGIN
        'operatingScopeSettingId', 'dataOwnerUserId', 'modelProvider',
        'modelId', 'reasoningEffort'
      ] OR (SELECT count(*) FROM jsonb_object_keys(metadata)) <> 12 OR
-     metadata->>'systemActor' <> 'amux-session-intake' OR
-     metadata->>'actorScope' <> 'session-analysis-reservation-v1' OR
+     metadata->>'systemActor' IS DISTINCT FROM 'amux-session-intake' OR
+     metadata->>'actorScope' IS DISTINCT FROM
+       'session-analysis-reservation-v1' OR
      metadata->'policyVersion' IS DISTINCT FROM to_jsonb(19) OR
      metadata->>'reservationId' IS DISTINCT FROM NEW."id"::text OR
      metadata->>'ideaId' IS DISTINCT FROM NEW."ideaId" OR
