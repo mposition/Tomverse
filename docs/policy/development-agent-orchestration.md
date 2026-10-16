@@ -2787,14 +2787,16 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
 4. AMUX 안의 review 단계와 review Task를 새로 만들지 않는다. 코드 작업의 검토는 runner가 Tomverse
    독립 검토 서버에 요청한다.
 5. Task의 `done`은 지금처럼 본 앱이 관측한 병합이다(v49·v50).
-6. 실행 뒤 chore·implementation worker의 변경이 contract 경로에 닿으면, 그 변경을 버리고 Task를
-   contract로 올려 처음부터 다시 실행한다. 그러면 Task 전체를 contract worker가 다시 하므로 남는
-   작업이 없다.
+6. 실행 뒤 chore·implementation worker의 변경이 contract 경로에 닿으면, 그 변경을 버리고 Task의
+   등급을 `frontier`로 올려 처음부터 다시 실행한다. 그러면 Task 전체를 contract worker가 다시 하므로
+   남는 작업이 없다.
 
 ### 1. 적용 범위
 
 - 대상은 `amux-intake.md` v20 이후 등록되는 v4 Task(`sourceSystem` `admin-idea-v4`, `cardType`
   `task`)다. 이미 등록된 Task는 등록 때의 등급과 비용 receipt 그대로 끝난다.
+- `amux-intake.md` v20이 승인·병합되기 전에는 이 버전의 대상 Task가 없다. 예상 경로와 4항의 판정을
+  등록에 넣는 것이 intake v20이기 때문이다. 그 전에 9항의 운영 스위치를 켜도 대상이 없다.
 - legacy 카드(보드 sync, `requiredRoutingRole`)는 바뀌지 않는다. 버전 35의 상한과 버전 45의 수준
   유도는 legacy 카드에만 적용된다.
 - **버전 16을 철회한다.** 역할 판정(`deriveAmuxRoutingBase()`와 LLM 신호 route 둘), 단계 사이클
@@ -2833,7 +2835,10 @@ v4 Task에 대해서는 등록부의 `roleCeiling`이 상한이 아니라 **그 
 - **정책과 계약 문서**: `docs/policy/`, `docs/ui-contracts/`
 - **자동화와 규칙 파일**(에이전트는 자기 gate를 바꾸지 않는다): `lib/amux/`, `apps/tomverse-orchestrator/`,
   `.github/`, `AGENTS.md`, `CLAUDE.md`, `.claude/`, `.codex/`
-- **ui-contract가 release blocker로 지키는 파일**(이 버전에서 추가):
+- **release blocker를 선언한 ui-contract가 지키는 파일**(이 버전에서 추가). 계약의 일부만 차단으로
+  정한 경우도 넣는다. 경로로는 차단 부분과 나머지를 나눌 수 없기 때문이다. Admin Console IA는 redirect
+  규칙, chat starter catalogue는 §9의 fail-closed 판정, 계정 모델 설정은 문서 전체(그 문서의 마지막
+  줄)가 차단이다.
   - 모바일 composer·drawer: `components/chat/ChatInput.tsx`, `components/chat/MobileChatShell.tsx`,
     `components/chat/ChatSidebar.tsx`, `components/chat/useVisualViewport.ts`
   - 비교 action rail: `components/chat/ComparisonActionRail.tsx`, `lib/comparisonReadiness.ts`
@@ -2857,7 +2862,8 @@ v4 Task에 대해서는 등록부의 `roleCeiling`이 상한이 아니라 **그 
 
 넣지 않은 것과 이유:
 
-- Prompt Refiner 파일(`lib/promptRefiner*` 등): 그 ui-contract에는 release blocker 문장이 없다.
+- Prompt Refiner 파일(`lib/promptRefiner*` 등): 그 ui-contract에는 release blocker를 선언한 부분이
+  없다.
 - Admin 패널과 route segment 전체: Admin Console IA에서 release blocker는 redirect 규칙뿐이다. route
   삭제는 `tests/adminNavigation.test.mjs`와 Admin E2E가 잡는다.
 - AI Review 근거 사슬 계약: 제품 문구의 의미를 지키는 계약이라 경로로 판정할 수 없다. 이런 경우는
@@ -2904,7 +2910,8 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
 
 ### 6. 실행 뒤 contract 경로 검사
 
-`implement` Task의 `routine`·`advanced` 시도에만 적용한다.
+역할과 무관하게 `routine`·`advanced` 시도 전부에 적용한다. 파일을 쓰지 않는 역할의 시도는 목록이
+비어 있으므로 그대로 통과한다.
 
 - sidecar가 worker의 정상 종료를 받으면, runner의 결정적 코드(모델이 아니다)가 base SHA 대비 바뀐
   파일 **이름** 목록을 만든다. 이 목록은 patch 본문의 크기 상한과 별개로 만든다.
@@ -2954,13 +2961,18 @@ switch, v22 용량 한도, 결과 불명은 멈추고 사람에게 넘긴다는 
 
 ### 9. 스위치와 출고
 
-- 코드 래치 `AMUX_EXECUTION_GRADE_CODE_LATCH`(`lib/amux/executionGradeCore.ts`)는 false로 출고한다.
-  이 래치 하나가 5항의 배정, 6항의 검사, 7항의 검토 서버 연결을 함께 연다. 4항의 판정 함수는 intake
-  v20 등록 Guard가 부르며, 그 스위치는 intake 정책이 정한다.
-- 래치를 true로 바꾸는 PR은 이 버전이 미리 승인한다. 단, 그 PR 본문은 staging에서 v4 Task 한 건이
-  등록 → 같은 등급 배정 → 검토 서버 → `develop` PR까지 간 기록을 가리켜야 한다. 그 PR의 병합은
-  운영자가 한다.
-- 새 환경 변수는 없다.
+- 5항의 배정, 6항의 검사, 7항의 검토 서버 연결은 두 스위치가 모두 켜졌을 때만 작동한다. 하나라도
+  꺼져 있으면 지금의 v22 경로 그대로다. 4항의 판정 함수는 intake v20 등록 Guard가 부르며, 그
+  스위치는 intake 정책이 정한다.
+  - **코드 래치** `AMUX_EXECUTION_GRADE_CODE_LATCH`(`lib/amux/executionGradeCore.ts`)는 false로
+    출고한다. S1~S4가 develop에 들어오고 테스트가 통과하면, 래치를 true로 바꾸는 PR을 이 버전이 미리
+    승인한다. 래치만으로는 아무것도 작동하지 않는다. 그 PR의 병합은 운영자가 한다.
+  - **운영 스위치** 환경 변수 `TOMVERSE_AMUX_EXECUTION_GRADE`는 값이 정확히 `enabled`일 때만 켜진다.
+    서버가 읽으며 어떤 route도 요청 본문으로 받지 않는다. 운영자가 staging에서 먼저 켜고, v4 Task
+    한 건이 등록 → 같은 등급 배정 → 검토 서버 → `develop` PR까지 간 기록을 확인한 뒤에 production에서
+    켠다.
+- 운영 스위치를 끄면 새로 claim되는 Task부터 지금의 경로로 돌아간다. 이미 검토 서버에 제출된 Task는
+  그 판정을 7항대로 처리한다.
 
 ### 10. 구현 단계
 
@@ -2982,7 +2994,7 @@ switch, v22 용량 한도, 결과 불명은 멈추고 사람에게 넘긴다는 
 - **6 자격증명**: 검토 클라이언트 key는 launcher 계정 전용이다(7항).
 - **8 비용**: 등급 상승은 같은 비용 namespace에서 결정적 계산으로 새 receipt를 만든다. 사용자 크레딧과
   섞지 않는다.
-- **9 스위치**: 9항의 코드 래치다.
+- **9 스위치**: 9항의 코드 래치와 운영 스위치이며, 운영 스위치를 끄면 지금의 경로로 돌아간다.
 - **10 결과 불명**: 6항의 목록 불명과 7항의 `unknown`은 멈추고 사람에게 간다.
 - **12 감사**: `amux.grade.escalated`와 `amux.review.recorded`는 시스템 actor로 남는다.
 - **15 실행 위치**: 판정과 재검사는 본 앱 내부의 결정적 코드다. 제출과 파일 목록은 전용 Ubuntu
