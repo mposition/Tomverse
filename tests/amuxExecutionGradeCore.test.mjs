@@ -63,6 +63,8 @@ test("remaining valid paths and roles use advanced", () => {
 
 test("one leading dot-slash is allowed, but every invalid repository path is refused", () => {
   assert.equal(normalizeAmuxExecutionPath("./lib/Ordinary.ts"), "lib/Ordinary.ts");
+  assert.equal(normalizeAmuxExecutionPath("docs/a:b.md"), "docs/a:b.md");
+  assert.equal(classifyAmuxExecutionPath("docs/a:b.md"), "ordinary");
   for (const path of [
     "", "./", "././lib/file.ts", ".", "..", "lib/./file.ts", "lib/../file.ts",
     "lib//file.ts", "lib/file.ts/", "/lib/file.ts", "C:/lib/file.ts", "C:lib/file.ts",

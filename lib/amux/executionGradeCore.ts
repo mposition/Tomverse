@@ -75,7 +75,9 @@ export const normalizeAmuxExecutionPath = (input: unknown): string | null => {
     return null;
   }
   const path = input.startsWith("./") ? input.slice(2) : input;
-  if (path.startsWith("/") || /(^|\/)[A-Za-z]:/.test(path)) return null;
+  if (path.startsWith("/") || /^[A-Za-z]:/.test(path) || /\/[A-Za-z]:(?:\/|$)/.test(path)) {
+    return null;
+  }
   if (path.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) {
     return null;
   }
