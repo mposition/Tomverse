@@ -77,11 +77,13 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
+  analysisStopAvailable,
   openRequestId = null, progressRows }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
-  analysisResultAvailable: boolean; analysisBudgetAvailable: boolean; operatorId: string;
+  analysisResultAvailable: boolean; analysisBudgetAvailable: boolean;
+  analysisStopAvailable: boolean; operatorId: string;
   /** The idea a list row opened (`?idea=<requestId>`); read back like a saved request. */
   openRequestId?: string | null;
   /** The Ideas main shows the list of ideas beside the input; omitted, the list is not drawn here. */
@@ -454,6 +456,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       previewAvailable={transferPreviewAvailable}
       confirmAvailable={transferConfirmAvailable}
       analysisBudgetAvailable={analysisBudgetAvailable}
+      analysisStopAvailable={analysisStopAvailable}
       ideaId={submission.kind === "submitted" ? submission.ideaId : null}
       ideaText={submission.kind === "submitted" ? idea.trim() : ""}
       planReady={submission.kind === "submitted" && planReadyIdeaId === submission.ideaId}

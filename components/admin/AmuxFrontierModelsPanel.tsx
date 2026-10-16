@@ -64,12 +64,12 @@ export type AmuxBuildPreviewHooks = {
 };
 
 export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
-  analysisBudgetAvailable, ideaId, planReady,
+  analysisBudgetAvailable, analysisStopAvailable, ideaId, planReady,
   declaredExternalSources, operatorId, chunkIndex = 0, build = null, buildRequestId = null,
   ideaText = "", onExecutionApproved }: {
   available: boolean;
   previewAvailable: boolean; confirmAvailable: boolean;
-  analysisBudgetAvailable: boolean;
+  analysisBudgetAvailable: boolean; analysisStopAvailable: boolean;
   ideaId: string | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
   chunkIndex?: number;
@@ -776,7 +776,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       {confirmation.kind === "confirmed" ? <p role="status">{m.transferConfirmRecorded}</p> : null}
       {confirmation.kind === "confirmed" ? <AmuxAnalysisBudgetPanel
         key={confirmation.value.previewId} confirmed={confirmation.value}
-        available={analysisBudgetAvailable} /> : null}
+        available={analysisBudgetAvailable} stopAvailable={analysisStopAvailable} /> : null}
       {confirmation.kind === "expired" ? <p role="status">{m.transferConfirmExpired}</p> : null}
       {confirmation.kind === "refused" && !failure ?
         <p role="alert">{m.transferConfirmRefused}</p> : null}

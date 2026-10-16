@@ -183,6 +183,7 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.json({ state: "found", hold: {
       id: hold.id, previewId: hold.previewId, status: hold.status,
       reservedMicroUsd: hold.reservedMicroUsd.toString(),
+      dispatchedAt: hold.dispatchedAt?.toISOString() ?? null,
       expiresAt: preview.expiresAt.toISOString(),
       canCancel: hold.namespace === AMUX_V4_ANALYSIS_NAMESPACE &&
         hold.reservedMicroUsd > BigInt(0) && hold.status === "reserved" && hold.dispatchedAt === null &&

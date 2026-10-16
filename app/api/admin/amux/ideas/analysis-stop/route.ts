@@ -79,8 +79,8 @@ export async function GET(request: Request): Promise<Response> {
   } catch (error) { return failure(error); }
 }
 
-/** Owner-confirmed DB fence. The worker kill and UI control are separate
- * slices; this route remains default-off until both are verified. */
+/** Owner-confirmed DB fence. The worker observes it through the stop-poll
+ * route; the read and write switches remain independently default-off. */
 export async function POST(request: Request): Promise<Response> {
   try {
     const session = await owner();
