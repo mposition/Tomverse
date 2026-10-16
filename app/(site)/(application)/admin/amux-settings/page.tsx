@@ -14,6 +14,7 @@ import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorH
 import { AmuxTaskCostCatalogApprovalPanel } from "@/components/admin/AmuxTaskCostCatalogApprovalPanel";
 import { AmuxAnalysisMonthlyBudgetPanel } from "@/components/admin/AmuxAnalysisMonthlyBudgetPanel";
 import { AmuxFrontierModelRegistrationPanel } from "@/components/admin/AmuxFrontierModelRegistrationPanel";
+import { AmuxOperatingScopePanel } from "@/components/admin/AmuxOperatingScopePanel";
 import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
 import {
   amuxSwitchedTabStatus,
@@ -92,7 +93,10 @@ export default async function AdminAmuxSettingsPage({
     const modelWriteAvailable =
       frontierCatalogReadPermitted(process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV]) &&
       frontierCatalogWritePermitted(process.env[AMUX_V4_FRONTIER_CATALOG_WRITE_ENV]);
+    // amux-intake v19 item 2: the operating scope is the one approval for
+    // unattended intake, so it comes first on this owner-only tab.
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
+      <AmuxOperatingScopePanel operatorId={session.user.id} />
       <AmuxAnalysisMonthlyBudgetPanel available={budgetAvailable} operatorId={session.user.id} />
       <AmuxFrontierModelRegistrationPanel writeAvailable={modelWriteAvailable} operatorId={session.user.id} />
       <AmuxTaskCostCatalogApprovalPanel approvalAvailable={

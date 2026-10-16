@@ -747,6 +747,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaOperatingScopeSetting",
+    publicName: "amux_idea_operating_scope_settings",
+    prismaModel: "AmuxIdeaOperatingScopeSetting",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaAnalysisPriceVersion",
     publicName: "amux_idea_analysis_price_versions",
     prismaModel: "AmuxIdeaAnalysisPriceVersion",
