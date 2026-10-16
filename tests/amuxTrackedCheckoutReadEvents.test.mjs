@@ -33,6 +33,14 @@ test("records successful Read results and deduplicates their paths", () => {
   assert.deepEqual(complete(observer), { kind: "complete", files: ["src/a.ts"] });
 });
 
+test("a bounded Read still records the file it touched", () => {
+  const observer = make();
+  observe(observer, use("read_1", "Read", { file_path: file,
+    offset: 2, limit: 1 }));
+  observe(observer, reply("read_1"));
+  assert.deepEqual(complete(observer), { kind: "complete", files: ["src/a.ts"] });
+});
+
 test("failed Read and tool summaries leave the file manifest unverified", () => {
   const failed = make();
   observe(failed, use("read_1", "Read", { file_path: file }));
@@ -61,6 +69,12 @@ test("rejects unauthorized paths, tools, unmatched results and missing final res
     [use("x", "Read", { file_path: file })],
     [use("x", "Glob", { pattern: "*.ts" }), reply("x"),
       use("x", "Read", { file_path: file })],
+    [use(undefined, "Read", { file_path: file }), reply(undefined)],
+    [use("x", "Read", { file_path: file }), reply("x"), reply("x")],
+    [use("x", "Read", { file_path: file }),
+      { type: "user", message: { content: [{ type: "tool_result",
+        tool_use_id: "x", content: "bytes" }] } }],
+    [{ type: "assistant", message: { content: [{ type: "server_tool_use" }] } }],
   ];
   for (const events of cases) {
     const observer = make();
