@@ -199,13 +199,16 @@ test("protocol handshake is exact, worker-bound, and never invokes the CLI", asy
   assert.equal(runs, 0);
 });
 
+// Poll by deadline, not by count: the terminal write fsyncs the result and its
+// directory, which can take hundreds of milliseconds on a loaded runner.
 async function readFinished(handler) {
-  for (let i = 0; i < 100; i += 1) {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
     const result = await handler({ op: "readback", attemptId });
     if (result.kind !== "in_progress") return result;
+    if (Date.now() > deadline) throw new Error("sidecar result was not recorded");
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
-  throw new Error("sidecar result was not recorded");
 }
 
 function fakeSpawn(result, options = {}) {
@@ -487,13 +490,14 @@ test("result text is available for exact transfer but never persisted in the sid
 
 test("a crash after the claim is unknown, never a second invocation", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "amux-v22-crash-"));
+  let release;
+  let first;
   try {
-    let release;
     const pending = new Promise((resolve) => { release = resolve; });
     let calls = 0;
     const run = async (input) => { calls += 1; await pending;
       return { kind: "failed", attemptId: input.attemptId }; };
-    const first = createAmuxV22SidecarHandler({ worker: "worker-a",
+    first = createAmuxV22SidecarHandler({ worker: "worker-a",
       stateDir, run });
     const execute = { op: "execute", ...request };
     assert.equal((await first(execute)).kind, "in_progress");
@@ -510,7 +514,14 @@ test("a crash after the claim is unknown, never a second invocation", async () =
     assert.equal((await readFinished(first)).kind, "failed");
     assert.equal((await restarted({ op: "readback", attemptId })).kind,
       "failed");
-  } finally { await rm(stateDir, { recursive: true, force: true }); }
+  } finally {
+    // The first handler writes its terminal in the background after release.
+    // Let that write finish before removing stateDir, so cleanup never races a
+    // file being created there and never replaces an earlier failure.
+    release?.();
+    if (first) await readFinished(first).catch(() => {});
+    await rm(stateDir, { recursive: true, force: true });
+  }
 });
 
 test("Ubuntu runs one synthetic CLI process and replays its durable result",
