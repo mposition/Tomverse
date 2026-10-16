@@ -79,8 +79,8 @@ test("v19 bridge rejects a command with a broader Read grant", () => {
 test("v19 checkout verification rejects extra, missing, linked and writable files", {
   skip: process.platform !== "linux",
 }, async (t) => {
-  for (const scenario of ["valid", "extra", "missing", "duplicate", "symlink",
-    "hardlink", "writable"]) {
+  for (const scenario of ["valid", "internal_hardlink", "extra", "missing",
+    "duplicate", "symlink", "hardlink", "writable"]) {
     await t.test(scenario, async () => {
       const directory = await mkdtemp("/tmp/amux-v19-checkout-");
       const outside = await mkdtemp("/tmp/amux-v19-test-");
@@ -88,7 +88,10 @@ test("v19 checkout verification rejects extra, missing, linked and writable file
         await chmod(directory, 0o700);
         await writeFile(`${directory}/source.txt`, "safe", { mode: 0o400 });
         const files = scenario === "missing" ? [] : ["source.txt"];
-        if (scenario === "extra") {
+        if (scenario === "internal_hardlink") {
+          await link(`${directory}/source.txt`, `${directory}/copy.txt`);
+          files.push("copy.txt");
+        } else if (scenario === "extra") {
           await writeFile(`${directory}/extra.txt`, "extra", { mode: 0o400 });
         } else if (scenario === "duplicate") {
           files.push("source.txt");
@@ -100,7 +103,8 @@ test("v19 checkout verification rejects extra, missing, linked and writable file
           await chmod(`${directory}/source.txt`, 0o600);
         }
         const check = () => verifyAmuxPreparedCheckout({ directory, files });
-        if (scenario === "valid") await assert.doesNotReject(check);
+        if (scenario === "valid" || scenario === "internal_hardlink")
+          await assert.doesNotReject(check);
         else await assert.rejects(check, /unsafe tracked checkout/);
       } finally {
         await rm(directory, { recursive: true, force: true });
