@@ -37,7 +37,8 @@ export const MARKETING_LEDGER_TIER_SENDER = Object.freeze({
   line: "service_tier: MARKETING_LLM_SERVICE_TIER,",
 });
 
-const isMarketingLedgerTierSender = (entry) =>
+/** Whether an allowlist entry is exactly the exception above. Shared with the pricing contract test. */
+export const isMarketingLedgerTierSender = (entry) =>
   entry.file === MARKETING_LEDGER_TIER_SENDER.file &&
   entry.pricedBy === MARKETING_LEDGER_TIER_SENDER.pricedBy &&
   Array.isArray(entry.sends) &&
