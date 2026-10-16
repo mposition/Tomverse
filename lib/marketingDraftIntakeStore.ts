@@ -19,8 +19,6 @@
 
 import "server-only";
 
-import { createHash } from "node:crypto";
-
 import { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
@@ -30,10 +28,7 @@ import {
   resolveMarketingAutomationAccess,
   type ReadResult,
 } from "@/lib/marketingAutomationAccess";
-import type {
-  MarketingChannel as MarketingChannelName,
-  MarketingFactSnapshot,
-} from "@/lib/marketingAutomationSchema";
+import type { MarketingChannel as MarketingChannelName } from "@/lib/marketingAutomationSchema";
 import {
   MARKETING_LLM_MONTHLY_CAP_ENV,
   parseMarketingLlmMonthlyCap,
@@ -45,7 +40,7 @@ import {
   marketingGeneratorDraftLogicalKey,
   type MarketingGeneratorDraft,
 } from "@/lib/marketingDraftIntakeCore";
-import { resolveMarketingFacts } from "@/lib/marketingFactResolution";
+import { resolveMarketingFactsWithSnapshot } from "@/lib/marketingFactResolution";
 import { guardDraft } from "@/lib/marketingGuardCore";
 import { resolveMarketingGuardContext } from "@/lib/marketingGuardContext";
 import {
@@ -63,20 +58,6 @@ export const MARKETING_S3_ACTIONS = {
 
 /** The renderer that turned a generator draft into an envelope. */
 export const MARKETING_GENERATOR_RENDERER_VERSION = "generator-intake-v1";
-
-/**
- * The snapshot of stored rows a draft rested on. Empty, because S3a admits
- * only drafts that rest on none: no claim, no asset. A draft with either needs
- * the rows its facts were read from, and recording them is S3a2's -- until
- * then such a draft is refused rather than stored with a snapshot that says
- * nothing was read.
- */
-const EMPTY_FACT_SNAPSHOT: MarketingFactSnapshot = {
-  priceRows: [],
-  catalogue: null,
-  modelRegistryRows: [],
-  evidenceDigests: [],
-};
 
 /**
  * The most one intake transaction may take, measured by statement count in
@@ -304,10 +285,6 @@ export async function intakeMarketingGeneratorDraft(
   const decision = await draftIntakeDecision(tx, input.killSwitchValue, readers);
   if (!decision.enabled) return { status: "refused", reasons: decision.reasons };
 
-  if (draft.claimIds.length > 0 || draft.assets.length > 0) {
-    return { status: "refused", reasons: ["intake_facts_snapshot_not_available"] };
-  }
-
   const channel = await tx.marketingChannel.findUnique({
     where: { id: draft.channelId },
     select: { accountSlug: true, channel: true },
@@ -320,20 +297,22 @@ export async function intakeMarketingGeneratorDraft(
     accountSlug: channel.accountSlug,
     locale: draft.locale,
     renderedText: draft.renderedText,
-    claimIds: [] as string[],
-    assets: [] as { assetId: string; altKey: string }[],
+    claimIds: [...draft.claimIds],
+    assets: draft.assets.map((asset) => ({ assetId: asset.assetId, altKey: asset.altKey })),
     finalUrl: null,
     scheduledAt: null,
     disclosureFlags: [...draft.disclosureFlags],
   };
-  const snapshotDigest = marketingEnvelopeFactSnapshotDigest(EMPTY_FACT_SNAPSHOT);
-  const facts = await resolveMarketingFacts(tx, {
-    claimIds: [],
-    assetIds: [],
+  const assetIds = envelope.assets.map((asset) => asset.assetId);
+  // S3a2: the facts, their clock and the rows they rest on are read in this
+  // transaction, and the snapshot stored with the post is the one the Guard's
+  // decision is bound to.
+  const { facts, factSnapshot } = await resolveMarketingFactsWithSnapshot(tx, {
+    claimIds: envelope.claimIds,
+    assetIds,
     channelId: draft.channelId,
     channel: channelName,
     locale: draft.locale,
-    factSnapshotDigest: snapshotDigest,
   });
   const verdict = guardDraft({
     draft: {
@@ -341,8 +320,8 @@ export async function intakeMarketingGeneratorDraft(
       locale: draft.locale,
       channel: channelName,
       channelId: draft.channelId,
-      claimIds: [],
-      assetIds: [],
+      claimIds: envelope.claimIds,
+      assetIds,
     },
     facts,
     // New copy: S3 binds no template, so the Guard has none to offer.
@@ -373,11 +352,11 @@ export async function intakeMarketingGeneratorDraft(
     rendererVersion: MARKETING_GENERATOR_RENDERER_VERSION,
     templateId: null,
     templateDigest: null,
-    claimIds: [],
-    assetIds: [],
+    claimIds: envelope.claimIds,
+    assetIds,
     claimRegistryVersion: facts.claimRegistryVersion,
     assetRegistryVersion: facts.assetRegistryVersion,
-    factSnapshot: EMPTY_FACT_SNAPSHOT,
+    factSnapshot,
     decision: verdict,
     draftedAt: now,
   });
@@ -438,22 +417,3 @@ export async function intakeMarketingGeneratorDraft(
 
   return { status: rejected ? "rejected" : "queued", postId: created.id, existing: false };
 }
-
-/** The store's own digest of a fact snapshot: sorted keys, SHA-256. */
-function marketingEnvelopeFactSnapshotDigest(snapshot: MarketingFactSnapshot): string {
-  return createHash("sha256")
-    .update(JSON.stringify(canonical(snapshot)), "utf8")
-    .digest("hex");
-}
-
-const canonical = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([key, inner]) => [key, canonical(inner)]),
-    );
-  }
-  return value;
-};

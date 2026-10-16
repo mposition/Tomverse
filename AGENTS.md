@@ -1280,13 +1280,28 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   같은 key에 다른 본문이 오면 접수 감사 행의 digest와 달라 conflict입니다. 판정·사실·Guard·게시물·
   `guard_result` 이력·감사가 감사 체인 잠금 뒤 한 트랜잭션이고, PG17 `transaction_timeout`을 마감까지
   남은 시간으로 걸어 늦은 성공을 서버가 되돌립니다. **이 빌드에서는 모든 제출이 거절됩니다** — 생성
-  예산(S3c)과 가격 경보(S3d)가 아직 없어 접수 판정이 닫혀 있고, 사실 snapshot을 만드는 S3a2 전에는
-  claim·asset이 없는 draft만 받습니다. 감사 actor는 기존 `marketing-guard`입니다.
+  예산(S3c)과 가격 경보(S3d)가 아직 없어 접수 판정이 닫혀 있습니다. 감사 actor는 기존 `marketing-guard`입니다.
 - **S3b(생성기 문맥)**: `app/api/internal/marketing-generator-context/route.ts`, `lib/marketingGeneratorContext.ts`,
   `lib/marketingGeneratorAuth.ts`(두 생성기 route가 공유하는 인증), `tests/integration/marketing-generator-context.db.test.ts`.
   POST만, run id 하나만 받고, 승인 모드 계정·근거를 뺀 claim 투영·최신 brief·시장 사실을 돌려줍니다. **URL은
   생성기에 가지 않습니다** — 모델은 URL을 쓰지 않으므로(docs/policy/marketing-automation.md §7.3) 시장 사실의 출처 URL도 빼고 보냅니다.
-  자산은 S3a2가 draft에 자산을 허용할 때 더합니다.
+  자산은 id·실을 수 있는 플랫폼·alt가 있는 locale만 보냅니다(alt 문장·출처·표시 규칙은 보내지 않음).
+- **S3a2(사실을 쓰기 트랜잭션 안에서)**: `lib/marketingFactResolution.ts`, `lib/marketingClaimGates.ts`,
+  `lib/billingConfig.ts`의 `getBillingPlansWithFieldSources(database)`, `lib/billingPriceCatalog.ts`의
+  `readBillingPriceCatalogSource()`, `tests/marketingFactResolution.test.mjs`. **사실은 호출자의 트랜잭션 하나와
+  DB 시계로 읽습니다** — 게이트·요금제·카탈로그 출처·모델 행·사용 이력이 같은 client를 지나고, 정해진 순서로
+  한 번에 하나씩 읽습니다. READ COMMITTED에서는 문장마다 snapshot이 다르므로, 가격·모델 사실이 기대는 행은
+  읽기 전에 `FOR SHARE`로 잡아 commit까지 바뀌지 않게 하고, **잠금이 실제로 잡은 행만 사실로 인정합니다** — 잠금 뒤에
+  삽입돼 읽기에만 보이는 행은 없는 것으로 보고 거절합니다(`holdMarketingFactRows()`,
+  `tests/integration/marketing-fact-row-hold.db.test.ts`). 접수 트랜잭션을 REPEATABLE READ로 올리지 않는 것은
+  snapshot이 감사 체인 잠금보다 먼저 잡혀 같은 key 재제출 확인과 원장 소비가 기다리는 동안 commit된 행을 못 보기
+  때문입니다. 새 draft는 `resolveMarketingFactsWithSnapshot()`이 읽은 행(요금제 행·카탈로그 출처·
+  모델 행의 id와 `updatedAt`, 증거 문장의 digest)으로 snapshot을 만들고, Guard 판정은 그 snapshot digest에
+  묶입니다. 그래서 claim·asset이 있는 draft도 접수합니다. **카탈로그 reader는 행을 만들지 않습니다** — 기존
+  `getBillingPriceCatalogWithMeta()`는 행이 없으면 기본값을 써 넣으므로 쓰기 트랜잭션 안의 사실 읽기에 쓰지
+  않습니다. 모델 행은 `lib/modelRegistry.ts`를 고치지 않고(Prompt Refiner closure 파일) id로 읽어 기존
+  `registryRowToModel()`로 바꿉니다. 접수 한 건의 트랜잭션 호출 수는
+  `tests/integration/marketing-draft-intake.db.test.ts`가 고정합니다(지금 21회).
 - **S3h1(보존 정리)**: `lib/marketingRetention.ts`, store의 `purgeExpiredMarketingRows()`,
   `lib/maintenance.ts`의 `marketing_retention` 단계, `tests/integration/marketing-retention.db.test.ts`.
   **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가

@@ -110,6 +110,7 @@ test("the context names approval-mode accounts, claims without evidence, and fac
       context: {
         channels: { id: string }[];
         claims: Record<string, unknown>[];
+        assets: unknown[];
         brief: { payload: { topicIds: string[] } } | null;
         marketIntel: { payload: { facts: Record<string, unknown>[]; unrepresentableFactCount: number } } | null;
       };
@@ -119,6 +120,8 @@ test("the context names approval-mode accounts, claims without evidence, and fac
       assert.equal("evidence" in claim, false);
       assert.equal("factSource" in claim, false);
     }
+    // The registry in this repository has no assets yet.
+    assert.deepEqual(context.assets, []);
     assert.deepEqual(context.brief?.payload.topicIds, ["topic_compare"]);
     assert.equal(context.marketIntel?.payload.unrepresentableFactCount, 2);
     assert.deepEqual(Object.keys(context.marketIntel?.payload.facts[0] ?? {}).sort(), [

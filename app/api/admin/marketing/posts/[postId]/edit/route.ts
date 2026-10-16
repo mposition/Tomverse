@@ -1,9 +1,8 @@
 export const dynamic = "force-dynamic";
 
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { marketingEnvelopeSchema } from "@/lib/marketingAutomationSchema";
-import { resolveMarketingFacts } from "@/lib/marketingFactResolution";
+import { marketingFactSnapshotDigest, resolveMarketingFacts } from "@/lib/marketingFactResolution";
 import { guardDraft } from "@/lib/marketingGuardCore";
 import { resolveMarketingGuardContext } from "@/lib/marketingGuardContext";
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
@@ -32,18 +31,6 @@ const schema = z
     renderedText: marketingEnvelopeSchema.shape.renderedText,
   })
   .strict();
-
-const canonical = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([key, inner]) => [key, canonical(inner)])
-    );
-  }
-  return value;
-};
 
 /**
  * POST: a person edits a draft, and the edit is re-judged before it is stored
@@ -97,9 +84,8 @@ export async function POST(req: Request, context: RouteContext) {
         channelId: post.channelId,
         channel: envelope.channel,
         locale: envelope.locale,
-        factSnapshotDigest: createHash("sha256")
-          .update(JSON.stringify(canonical(post.factSnapshot)), "utf8")
-          .digest("hex"),
+        // The same digest the intake binds a new draft's decision to.
+        factSnapshotDigest: marketingFactSnapshotDigest(post.factSnapshot),
       });
 
       const decision = guardDraft({

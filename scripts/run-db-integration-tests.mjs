@@ -657,6 +657,9 @@ run(
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.
     "tests/integration/marketing-generator-context.db.test.ts",
+    // The rows a draft's price and model facts rest on, held FOR SHARE until
+    // the reading transaction ends (S3a2): only two connections can show it.
+    "tests/integration/marketing-fact-row-hold.db.test.ts",
     // Marketing retention (S3h1): what the delete triggers let go goes, with an
     // audit row each and a retention_run report; what they keep stays.
     "tests/integration/marketing-retention.db.test.ts",

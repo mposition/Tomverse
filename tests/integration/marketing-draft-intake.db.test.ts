@@ -30,6 +30,8 @@ import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
 
 const SECRET = "g".repeat(48);
+const PINNED_PLAIN_CALLS = 21;
+const PINNED_WITH_IDS_CALLS = 21;
 const DIGEST = "b".repeat(64);
 
 const OPEN: MarketingDraftIntakeReaders = {
@@ -342,12 +344,111 @@ test("the Guard's rejection is stored and audited as a rejection", async () => {
   assert.equal(audits[0].action, MARKETING_S3_ACTIONS.intakeRejected);
 });
 
-test("a draft resting on claims or assets waits for the fact snapshot (S3a2)", async () => {
+test("a draft resting on claims and assets is judged on them and stored with what was read (S3a2)", async () => {
   const row = await approvedChannel();
   await draftsOn();
-  const outcome = await intake(draft(row.id, { claimIds: ["claim_1"] }), OPEN);
-  assert.deepEqual(outcome, { status: "refused", reasons: ["intake_facts_snapshot_not_available"] });
-  assert.equal(await prisma.marketingPost.count(), 0);
+  // Neither id is in its registry, so the Guard refuses both -- and the post
+  // records the ids it named and the snapshot of what answered: nothing.
+  const outcome = await intake(
+    draft(row.id, { claimIds: ["claim_1"], assets: [{ assetId: "asset_1", altKey: "alt_1" }] }),
+    OPEN,
+  );
+  assert.equal(outcome.status, "rejected");
+  assert.ok("postId" in outcome);
+  const post = await prisma.marketingPost.findUniqueOrThrow({ where: { id: outcome.postId } });
+  assert.equal(post.status, "guard_rejected");
+  assert.deepEqual(post.claimIds, ["claim_1"]);
+  assert.deepEqual(post.assetIds, ["asset_1"]);
+  assert.deepEqual(post.factSnapshot, { priceRows: [], catalogue: null, modelRegistryRows: [], evidenceDigests: [] });
+  const envelope = post.envelope as { claimIds: string[]; assets: { assetId: string; altKey: string }[] };
+  assert.deepEqual(envelope.claimIds, ["claim_1"]);
+  assert.deepEqual(envelope.assets, [{ assetId: "asset_1", altKey: "alt_1" }]);
+  const codes = (post.history as { type: string; codes?: string[] }[]).find((entry) => entry.type === "guard_result")?.codes ?? [];
+  assert.ok(codes.length > 0, "the rejection names why");
+});
+
+/**
+ * Calls one intake makes on its transaction: raw statements and model
+ * delegate calls, counted through a proxy over the real transaction.
+ *
+ * Pinned, so a read added to the intake or its fact resolver shows up here.
+ * The bound it serves is MARKETING_DRAFT_INTAKE_TRANSACTION_MS, and the
+ * database enforces that bound whatever this count is; the count is what makes
+ * the bound a realistic one. A draft whose claims name gates, plans, the
+ * catalogue or models adds one call per distinct gate and model and one each
+ * for plans and the catalogue -- with empty registries none can be named yet,
+ * so the pinned paths are the ones a draft can take today.
+ */
+async function countedIntake(value: MarketingGeneratorDraft, submissionId: string, call = 1) {
+  const calls: string[] = [];
+  const outcome = await runMarketingTransaction(prisma, (tx) => {
+    const counted = new Proxy(tx, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver);
+        if (typeof property !== "string") return value;
+        if (property.startsWith("$") && typeof value === "function") {
+          return (...args: unknown[]) => {
+            calls.push(property);
+            return (value as (...inner: unknown[]) => unknown).apply(target, args);
+          };
+        }
+        if (value && typeof value === "object" && !property.startsWith("$")) {
+          return new Proxy(value as object, {
+            get(model, method, modelReceiver) {
+              const fn = Reflect.get(model, method, modelReceiver);
+              if (typeof fn !== "function" || typeof method !== "string") return fn;
+              return (...args: unknown[]) => {
+                calls.push(`${property}.${method}`);
+                return (fn as (...inner: unknown[]) => unknown).apply(model, args);
+              };
+            },
+          });
+        }
+        return value;
+      },
+    });
+    return intakeMarketingGeneratorDraft(
+      counted,
+      {
+        generatorRunId: "run-1",
+        submissionId,
+        provenance: "a".repeat(64),
+        submissionDigest: submissionFor(value, { submissionId, llmCallRequestKeys: [callKey(call)] }).submissionDigest,
+        llmCallRequestKeys: [callKey(call)],
+        deadlineAt: FIXED_DEADLINE,
+        draft: value,
+        killSwitchValue: undefined,
+      },
+      OPEN,
+    );
+  });
+  return { outcome, calls };
+}
+
+test("an intake's calls on its transaction are counted and pinned, facts included", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  const plain = await countedIntake(draft(row.id), "sub-count-plain");
+  assert.equal(plain.outcome.status, "queued");
+  // Each submission consumes its own ledger call.
+  await ledgerCall(2);
+  const withIds = await countedIntake(
+    draft(row.id, {
+      logicalDraftId: "draft-ids",
+      claimIds: ["claim_1"],
+      assets: [{ assetId: "asset_1", altKey: "alt_1" }],
+    }),
+    "sub-count-ids",
+    2,
+  );
+  assert.equal(withIds.outcome.status, "rejected");
+  // The fact reads inside the transaction: the database clock and the usage.
+  assert.equal(plain.calls.filter((call) => call === "marketingPost.findMany").length, 1);
+  assert.deepEqual(
+    { plain: plain.calls.length, withIds: withIds.calls.length },
+    { plain: PINNED_PLAIN_CALLS, withIds: PINNED_WITH_IDS_CALLS },
+    JSON.stringify({ plain: plain.calls, withIds: withIds.calls }),
+  );
 });
 
 test("a draft with too little time before the service's deadline is not started", async () => {
