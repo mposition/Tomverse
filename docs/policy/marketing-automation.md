@@ -1,12 +1,13 @@
 # 마케팅 자동화 에이전트 정책
 
 상태: **승인됨 — 구현 없음.** 작성 2026-09-16, 승인 2026-09-17.
-approvedBy: mposition · approvedAt: 2026-09-21 · 정책 버전: 3
+approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 4
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | 1 | 2026-09-17 mposition | 최초 승인 |
 | 2 | 2026-09-17 mposition | webhook 검증 위치를 S0 로컬 도구에서 **S2 staging 수신 route**로 옮기고, 그 검증 전에는 webhook 이벤트를 게시 상태 판정에 쓰지 않는다. 검증용 shadow 처리와 운영 활성화를 나누고 통과 기준·범위 강제·기록·재검증 범위를 정함(§6.1, §8.1, §8.1.1, §8.3, §14). **O15**: API로 게시를 내릴 수 없는 Instagram·TikTok은 항상 승인 모드(§1, §6.1, §8.2, §15) |
+| 4 | 2026-10-16 mposition | §9.2: 졸업 후 `marketing-agent/to-develop/<topic>` PR에도 auto-merge를 켜지 않는다. 2026-10-02부터 `Auto PR to Develop`은 PR을 열기만 하고, 병합은 운영자가 실행하는 merge train(`npm run merge-train`)이나 사람이 한다. 졸업이 바꾸는 것은 사람 검토 없이 병합 대기열에 들어갈 수 있다는 것이지 auto-merge가 아니다. **(2026-10-16 운영자 결정, S3 계획 D1·D2·D7)** 마케팅 LLM 비용 원장 `MarketingLlmCall`을 다섯 번째 마케팅 전용 표로 더한다(§1 O1, §5, §12.2). 생성 서비스의 임시 전용 키 공급사는 OpenAI이고(O14), 월 상한은 US$100이다(§5) |
 | 3 | 2026-09-21 mposition | §7.1의 문장 해석 규칙 9개와 `rule.free-wording`을 거절기가 아닌 잠정 언어 진단으로 한정한다. 진단은 `provisional_language_flag` 하나와 세부 rule id를 남겨 사람에게 보내며, 입력 위생·claim/asset·provenance 거절은 그대로 둔다(§7.1, §7.2). 열세 번의 독립 검토가 이 판정기를 양방향으로 틀린 것으로 확인했고, 답은 패턴을 더하는 것이 아니라 tokeniser·형태소로 교체하는 것이다. 그 교체 전까지 거절 권한은 돌아오지 않는다. |
 
 운영자 결정(아래 §1)은 운영자가 대화 세션에서 내린 것이고, 나머지 계약은 Claude가 설계하고
@@ -36,7 +37,7 @@ Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-chan
 
 | # | 결정 |
 |---|---|
-| O1 | 범위: 에이전트 5개, 마케팅 전용 테이블 4개, Admin Console 관리 화면 |
+| O1 | 범위: 에이전트 5개, 마케팅 전용 테이블 5개(버전 4에서 LLM 비용 원장 추가), Admin Console 관리 화면 |
 | O2 | 소셜 게시·랜딩 문구 실험·SEO 코드 모두 **첫 1주 승인 → 졸업 후 자율**(D5). 단 Instagram·TikTok 계정은 제외(O15) |
 | O3 | 졸업 조건(계정·표면 단위, 모두 충족): 첫 실행 성공 후 7일(서버가 기록한 불변 시각) · 승인 3건 이상 · 수정률 1/3 이하(분모에 거절 포함) · 운영자 확인 1회 |
 | O4 | 자율 모드의 문구는 **승인된 템플릿·문구 라이브러리만**. 새 문구는 모드와 무관하게 승인 큐 |
@@ -49,7 +50,7 @@ Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-chan
 | O11 | Tomverse는 호주 법인이다. 호주를 1순위 영어 시장으로, 호주 광고·소비자법을 적용한다 |
 | O12 | 이메일 마케팅은 범위 밖 |
 | O13 | LLM은 구독이 아닌 API 키. 개발은 Claude 작성 ↔ Codex 검토(또는 반대)로 분리 |
-| O14 | LLM 호출은 어댑터 뒤에 두고, 공급 경로는 Tomverse Code의 어댑터 계층을 추출한 공용 LLM 게이트웨이(별도 저장소)로 한다. 게이트웨이 준비 전에는 같은 어댑터 뒤에서 전용 키를 임시로 쓴다 |
+| O14 | LLM 호출은 어댑터 뒤에 두고, 공급 경로는 Tomverse Code의 어댑터 계층을 추출한 공용 LLM 게이트웨이(별도 저장소)로 한다. 게이트웨이 준비 전에는 같은 어댑터 뒤에서 전용 키를 임시로 쓰며, 그 공급사는 OpenAI다(2026-10-16, 정책 버전 4) |
 | O15 | **Instagram·TikTok 계정은 졸업하지 않고 항상 승인 모드**다. 두 채널은 게시된 글을 API로 내릴 수 없어(S0 C10 관측, 앱에서 수동 삭제만 가능) 잘못 나간 공개 게시물을 자동으로 회수할 수 없기 때문이다. (2026-09-17, 정책 버전 2) |
 
 ## 2. 절대 조건
@@ -101,7 +102,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 - 플랫폼 OAuth 토큰은 Zernio가 보관한다. Tomverse는 저장하지 않는다.
 - 마케팅 이미지는 기존 private R2 버킷과 **분리된 전용 공개 버킷**과 전용 자격증명을 쓴다.
 
-## 5. 데이터 (마케팅 전용 테이블 4개)
+## 5. 데이터 (마케팅 전용 테이블 5개)
 
 사용자 콘텐츠를 담는 컬럼은 없다.
 
@@ -111,6 +112,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 | `MarketingPost` | 초안·승인·예약·게시·결과 단일 원장 | 고정 논리 키로 중복 차단, 승인·게시 직전 envelope digest 일치, lease·CAS 원자 claim, 일·주 슬롯 원자 예약, append-only history(버전 CAS) |
 | `MarketingReport` | 보고서·경쟁사 사실·실험 결과·댓글 알림·보유 실행 기록·webhook shadow 기록(§8.1.1) | 집계와 구조화 사실만 |
 | `AiVisibilityRun` | AI 답변 노출 측정 | 답변 본문 미저장, digest·인용 URL·플래그만 |
+| `MarketingLlmCall` | 마케팅 LLM 호출의 예약·정산(비용 원장, 버전 4) | 호출 **전에** 그 호출의 최대 비용을 예약하고, 이번 달(UTC) 예약·정산 합계가 상한을 넘으면 예약을 거절해 호출하지 않는다. 결과를 모르는 호출은 예약액을 쓴 것으로 남기고 재시도하지 않는다. 프롬프트·응답 본문을 저장하지 않는다(공급사·모델·토큰·비용·run id만). 사용자 크레딧·플랜·`CHAT_PROVIDER_*` 예산과 별개 namespace다. 월 상한은 앱 환경변수 `MARKETING_LLM_MONTHLY_USD_CAP`(US$100, 2026-10-16 운영자)이며, 없으면 예산을 알 수 없는 것으로 보고 접수·예약을 거절한다 |
 
 - 유입 기록은 새 테이블이 아니라 기존 분석 이벤트에 `marketing_touch`를 추가한다(§10).
 - §6.1의 기능별 스위치와 랜딩 실험 활성화 설정 등 **마케팅이 쓰는 모든 `AppSetting` key**는 `lib/appSettings.ts`에
@@ -311,8 +313,9 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
   판정 테스트는 사람 소유 파일이며 허용 목록에 없다.
 - PR 생성: 이 저장소 전용 GitHub App 토큰, 검증 산출 tree hash와 push 내용 일치 시에만.
 - 브랜치: 졸업 전 `marketing-agent/<topic>`(자동화 권한 없음, 사람 병합). 졸업 후
-  `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만들고 **그 실행에서만** auto-merge를 켠다
-  (`scripts/auto-pr-branch-policy.mjs`). 마케팅 workflow는 auto-merge를 직접 켜지 않는다. develop까지만.
+  `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만든다
+  (`scripts/auto-pr-branch-policy.mjs`). auto-merge는 어느 쪽도 켜지 않으며(버전 4 제안), 병합은 merge train
+  (`npm run merge-train`) 또는 사람이 한다. develop까지만.
 - robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
 
@@ -376,6 +379,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 | 댓글 알림 | 90일 | 삭제 |
 | 본토 차단 점검·보유 실행 기록 | 12개월 | 삭제 |
 | AI 노출 측정 | 24개월 | 삭제 |
+| LLM 비용 원장(`MarketingLlmCall`) | 24개월 | 삭제 |
 | 공개 버킷 이미지 | 게시 확인 후 7일 또는 게시 취소 즉시 | 삭제 |
 | 분석 전용 식별자 | 계정 삭제 시 즉시 | 삭제 + GA4 삭제 요청 |
 
