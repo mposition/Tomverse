@@ -6,7 +6,7 @@ approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 1
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
-| 2 | 후보(승인 전) | S0 실측(서명된 기록 셋)을 §5a "고정 실행 조건"으로 기록한다: 실행 파일을 root 소유 경로에 두고 sha256 대조, 두 CLI의 고정 argv·거부 argv·고정 환경, 결과를 읽는 곳 하나, v1의 "설정 digest"를 대신하는 실행 digest. §5의 "CLI 설정 디렉터리는 공급사 계정이 쓸 수 없다"를 "설정 파일을 읽지 않는 argv로 실행하고 홈은 그 계정이 쓴다"로 바꾼다. claude가 인증 파일을 다시 쓰고 두 CLI가 홈에 상태를 쓰지만 질문은 남기지 않았다는 S0 관측 때문이다. 공통 기반 r16의 조건(고정 argv, 쓰기·명령 실행·sandbox 우회 플래그 거부, 자기 공급사 API host만)은 바꾸지 않는다. 실행 파일 sha256 두 값은 승인 전에 채운다. |
+| 2 | 후보(승인 전) | S0 실측(서명된 기록 셋)을 §5a "고정 실행 조건"으로 기록한다: 실행 파일을 root 소유 경로에 두고 sha256 대조, 두 CLI의 고정 argv·거부 argv·고정 환경, 결과를 읽는 곳 하나, v1의 "설정 digest"를 대신하는 실행 digest. §5의 "CLI 설정 디렉터리는 공급사 계정이 쓸 수 없다"를 "설정 파일을 읽지 않는 argv로 실행하고, 홈은 그 계정이 쓰되 인증 파일 밖의 CLI 상태는 요청마다 지운다"로 바꾼다. claude가 인증 파일을 다시 쓰고 두 CLI가 홈에 상태를 쓴다는 S0 관측 때문이다. 질문 표식이 그 상태에서 발견되지 않았다는 관측은 압축·부호화된 저장을 배제하지 못하므로 삭제의 대체물로 쓰지 않는다. 공통 기반 r16의 조건(고정 argv, 쓰기·명령 실행·sandbox 우회 플래그 거부, 자기 공급사 API host만)은 바꾸지 않는다. 실행 파일 sha256 두 값은 승인 전에 채운다. |
 | 1 | 2026-10-07 mposition | 최초 승인. 같은 날 운영자가 공통 기반 r16과 S0 실측(§12)도 승인했다. 오케스트레이션 정책의 새 버전은 승인되지 않았다. 2026-10-07 운영자가 대화에서 정한 결정(§0)을 담는다. 운영자 결정 10에 따라 **제안 모드 전용**으로 줄였고, 2026-10-07 마지막 검토 회차의 지적까지 반영한 승인 요청본이다. 그 반영분은 다시 검토하지 않았다(운영자 결정 11). |
 
 운영자가 2026-10-07에 이 정책을 승인했다(공통 기반 원칙 1). 이 정책은 두 개정을 전제로 하며, 각각 운영자가
@@ -190,7 +190,7 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
   고정 argv, 고정 환경**으로 시작한다. 환경은 허용 목록(고정 `HOME`·`PATH`·locale)만 두고, proxy 변수·`LD_PRELOAD`·공급사
   설정 경로를 바꾸는 변수는 넣지 않는다. **CLI는 설정 파일을 읽지 않는 argv로 실행하고, DM이 지켜야 하는 설정은 전부
   고정 argv에 있다.** 공급사 계정의 홈은 그 계정이 쓴다. CLI가 인증을 갱신하고 자기 상태를 거기에 쓰기 때문이다(S0
-  실측, §5a). broker는 시작 전에 실행 파일의 sha256과 실행 digest(§5a)를 정책 버전에 기록된 값과 대조한다. 명령
+  실측, §5a). 인증 파일 밖의 CLI 상태는 질문 내용이 들어 있을 수 있는 것으로 보고 요청마다 지운다(§5a). broker는 시작 전에 실행 파일의 sha256과 실행 digest(§5a)를 정책 버전에 기록된 값과 대조한다. 명령
   실행을 끌 수 있는 모드가 있으면 그 모드를 쓴다. 실행 파일·argv·환경 가운데 하나라도 기록과 다르면 시작을 거부한다.
   값은 §5a에 있다.
 - **hard timeout:** 질문당 30분이 지나면 DM 프로세스를 강제 종료한다. 늦은 결과는 §9가 거절한다.
@@ -203,8 +203,9 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
 `docs/ops/amux/decision-maker-s0-records/2026-10-13__cli-surface.md`(CLI 실행 표면),
 `docs/ops/amux/decision-maker-s0-records/2026-10-16__paid-turns.md`(유료 turn). 이 절의 값이 하나라도 바뀌면 정책 버전이 바뀐다.
 
-**실행 파일.** 실행 파일은 공급사 계정의 홈이 아니라 **root 소유 경로**에 두고, 그 경로만 launcher가 부른다. 공급사
-계정의 CLI 자동 업데이트는 그 계정 홈의 사본만 바꾸므로 DM 실행 파일에 닿지 않는다. broker는 시작마다 실행 파일의
+**실행 파일.** 실행 파일은 공급사 계정의 홈이 아니라 **root 소유 경로**에 두고, 그 경로만 launcher가 부른다. S0에서
+실행 파일은 그 계정 홈 안에 그 계정 소유로 있었으므로 계정이 바꿀 수 있었다(`2026-10-13__cli-surface.md`). CLI의 자동
+업데이트가 무엇을 바꾸는지는 S0이 관측하지 않았다. 그래서 무엇이 바꾸든 잡히도록 broker는 시작마다 실행 파일의
 sha256을 아래 값과 대조한다. 다르면 시작을 거부하고, 새 버전은 S0 재측정과 새 정책 버전을 거친다.
 
 | 인스턴스 | CLI | 버전 | 실행 파일 sha256 |
@@ -212,8 +213,10 @@ sha256을 아래 값과 대조한다. 다르면 시작을 거부하고, 새 버�
 | `decision-maker-openai` | Codex CLI | `codex-cli 0.162.1` | 승인 전에 기록한다(root가 계산) |
 | `decision-maker-anthropic` | Claude Code | `2.1.296` | 승인 전에 기록한다(root가 계산) |
 
-**고정 argv.** 질문은 stdin으로만 넘기고 argv에는 질문 내용이 없다. `<요청 디렉터리>`, `<요청별 출력 파일>`,
-`<스키마 파일>`은 broker가 요청마다 만드는 경로이며 그 밖의 바이트는 아래와 같아야 한다.
+**고정 argv.** 질문은 stdin으로만 넘기고 argv에는 질문 내용이 없다. 요청마다 바뀌는 것은 `<요청 디렉터리>`와
+`<요청별 출력 파일>` 두 경로뿐이고 broker가 만든다. `<스키마 파일>`은 root 소유의 고정 파일이고 `<스키마 JSON>`은 그
+파일의 바이트 그대로다(§6의 출력 스키마. 내용은 S2-3 launcher의 상수이며 그 sha256이 실행 digest에 들어간다). 그 밖의
+바이트는 아래와 같아야 한다. claude의 작업 디렉터리는 `<요청 디렉터리>`다.
 
 ```text
 codex -a never --no-daemon exec --ephemeral --ignore-user-config --ignore-rules --strict-config --skip-git-repo-check
@@ -236,8 +239,9 @@ claude -p --tools "" --restricted --strict-mcp-config --setting-sources "" --dis
 (줄바꿈은 읽기 위한 것이다. argv는 공백으로 나뉜 위 토큰의 순서 그대로다.)
 
 - 설정 파일: codex는 `--ignore-user-config`·`--ignore-rules`로 `config.toml`과 execpolicy 규칙을 읽지 않는다. claude는
-  `--setting-sources ""`와 `--restricted`로 user·project·local 설정을 읽지 않는다. claude의 managed settings는
-  root만 만들 수 있는 경로이므로 broker가 시작 전에 그 파일이 없음을 확인한다. `--settings`는 쓰지 않는다.
+  `--setting-sources ""`와 `--restricted`로 user·project·local 설정을 읽지 않는다. 도움말에 따르면 `--restricted`도
+  managed settings는 적용한다(`2026-10-13__cli-surface.md`). 그래서 broker는 시작 전에 managed settings 파일이 없음을
+  확인한다. 그 경로는 S2-3에서 공급사 문서로 정한다. `--settings`는 쓰지 않는다.
 - 결과를 읽는 곳은 하나다. codex는 `-o` 파일, claude는 결과 객체의 `structured_output`이다. 사건 스트림·`result`
   문자열은 결과로 쓰지 않는다(S0에서 codex는 한 turn에 `agent_message`를 둘 낸 적이 있다).
 - 실패 판정: codex는 종료 코드 `1`과 `turn.failed`, claude는 종료 코드 `1`과 `is_error:true`다. 둘 중 하나라도 실패면
@@ -258,21 +262,28 @@ claude -p --tools "" --restricted --strict-mcp-config --setting-sources "" --dis
 **고정 환경.** `HOME=<그 공급사 계정의 홈>`, `PATH=/usr/bin:/bin`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8` 넷만 둔다.
 
 **실행 digest.** broker는 다음 값의 canonical JSON(`amux-json-v1`)을 sha256으로 계산해 기록과 대조한다: 인스턴스, 실행
-파일 경로와 sha256, 요청마다 바뀌는 세 경로를 자리표시자로 둔 argv 배열, 고정 환경. 이 digest가 v1의 "설정 digest"를
+파일 경로와 sha256, 스키마 파일의 sha256, 요청마다 바뀌는 두 경로를 자리표시자로 둔 argv 배열, 고정 환경, 아래 상태
+삭제 목록. 이 digest가 v1의 "설정 digest"를
 대신한다. 계산은 S2-3 launcher 코드의 상수이고, 그 값은 launcher 테스트가 고정한다.
 
-**공급사 계정 홈의 상태.** S0에서 두 CLI는 고정 argv로도 홈에 다음을 썼다. codex: 상태 DB 다섯 개(`*.sqlite`와
-`-wal`·`-shm`), `models_cache.json`, `installation_id`, 기본 skill 파일, 실행마다 하나씩 쌓이는 `.codex/tmp/arg0/*/.lock`.
-claude: `.claude.json`과 그 backup, `.credentials.json`(첫 실행에서만), `.claude/sessions/<번호>.json`, telemetry 실패
-기록, plugin directory·model catalog cache, `.local/state/claude/locks/`. **binary 포함 검색으로 질문 표식은 두 계정
-홈의 어느 파일에도 남지 않았다.** 그래서 v2는 다음과 같이 둔다.
+**공급사 계정 홈의 상태.** S0에서(고정 argv 후보, 고정 환경이 아닌 일반 로그인 환경) 두 CLI는 홈에 다음을 썼다.
+codex: 상태 DB 다섯 개(`*.sqlite`와 `-wal`·`-shm`), `models_cache.json`, `installation_id`, 기본 skill 파일과
+`.codex-system-skills.marker`, 실행마다 하나씩 쌓이는 `.codex/tmp/arg0/*/.lock`. claude: `.claude.json`과 그 backup,
+`.credentials.json`(첫 실행에서만), `.claude/sessions/<번호>.json`, telemetry 실패 기록, plugin directory·model catalog
+cache, `.claude/.last-cleanup`, `.local/state/claude/locks/`. 합성 질문의 표식 문자열은 binary 포함 검색으로도 이
+상태에서 찾지 못했다. **그러나 그 검색은 압축·부호화된 저장을 찾지 못하고, 실제 카드에서도 같다는 보장이 없다**(S0
+유료 turn 기록). 그래서 v2는 이 상태를 **질문 내용이 들어 있을 수 있는 것**으로 다룬다.
 
-- 이 상태는 그 공급사 계정의 홈에 남는 것을 허용한다. 홈은 그 계정만 읽는 `0700`이고(S0 계정 격리), worker·broker·
-  bridge는 읽지 못한다.
-- 질문·스냅샷·DM 출력은 이 상태가 아니라 §5의 요청 디렉터리와 요청별 임시 디렉터리에만 있고, 그것은 §5대로 지운다.
-- 이 허용은 위 실행 파일 sha256과 고정 argv에 묶인다. 버전이 바뀌면 질문이 상태에 남지 않는지를 S0에서 다시 잰다.
-- 상태가 쌓여 디스크를 채우는 것(lock 디렉터리 등)은 운영 정리 대상이며 질문 내용의 문제가 아니다. 정리 방식은 S2-3
-  launcher가 정한다.
+- **요청마다 지운다.** 요청이 끝나면, 강제 종료를 포함한 모든 종료 경로에서 launcher가 그 공급사 계정으로 아래
+  남김 목록 밖의 CLI 상태를 지운다. 대상은 codex의 `~/.codex/` 전체, claude의 `~/.claude/` 전체·`~/.claude.json`·
+  `~/.cache/claude/`·`~/.local/state/claude/`다.
+- **남김 목록은 인증 파일뿐이다.** codex `~/.codex/auth.json`, claude `~/.claude/.credentials.json`. CLI가 인증을 갱신해
+  다시 쓰므로(S0, claude) 이 두 파일은 그 계정이 쓸 수 있어야 한다. 남김 목록을 넓히는 것은 정책 버전 변경이다.
+- 지웠는지 확인하지 못하면 §5의 요청 디렉터리와 같이 `cleanup_unknown`으로 두고 그 인스턴스를 `off`로 latch한다.
+  다음 요청은 남김 목록 밖에 아무것도 없음을 확인한 뒤에만 시작한다.
+- 인증 파일만 남긴 상태에서 두 CLI가 고정 argv로 동작하는지는 S0이 확인하지 않았다. S2-3 launcher의 첫 실행(아래)에서
+  확인하고, 동작하지 않으면 남김 목록을 넓히는 새 정책 버전으로 다룬다. 그 전에는 S2-3을 끝난 것으로 보지 않는다.
+- 홈은 그 계정만 읽는 `0700`이고(S0 계정 격리) worker·broker·bridge는 읽지 못한다. 이것은 삭제와 별개의 방어다.
 
 **네트워크.** egress 허용 목록은 §5 그대로 그 공급사 API host다. S0에서 claude는 telemetry 실패 기록과 plugin
 directory·model catalog cache를, codex는 모델 목록 갱신을 남겼다. 그것이 다른 host로의 연결인지는 S0이 확인하지
@@ -283,8 +294,9 @@ directory·model catalog cache를, codex는 모델 목록 갱신을 남겼다. �
 짧으므로 hard timeout은 바꾸지 않는다.
 
 **S2-3 착수 전에 할 것(무료).** root 소유 경로로 옮긴 실행 파일이 그 경로에서 `--version`을 출력하는지, 그리고 그
-sha256을 위 표에 기록하는 정책 버전 2 승인 기록. 고정 환경으로 실제 질문이 되는지는 S2-3 launcher의 첫 실행에서
-확인하며, 그 실행은 S0과 같은 합성 질문으로 하고 보낼 내용을 운영자에게 먼저 보인다.
+sha256을 위 표에 기록하는 정책 버전 2 승인 기록. 고정 환경과 상태 삭제 뒤에도 실제 질문이 되는지, 그리고 고정 환경에서
+질문 표식이 남김 목록의 인증 파일에 남지 않는지는 S2-3 launcher의 첫 실행에서 확인한다. 그 실행은 S0과 같은 합성
+질문으로 하고 보낼 내용을 운영자에게 먼저 보인다.
 
 ## 6. DM 출력의 검증과 운영자 확정
 
