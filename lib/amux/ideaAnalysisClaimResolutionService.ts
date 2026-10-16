@@ -81,6 +81,7 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
           preview.outcomeUnknownAt === null))) {
     throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
   }
+  let retentionFencedHoldId: string | null = null;
   if (cancelledIdea) {
     const cancellations = await tx.adminAuditLog.findMany({ where: {
       action: AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
@@ -94,6 +95,13 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
         cancellationData.analysisDeadlineAt !== idea.analysisDeadlineAt.toISOString() ||
         cancellationData.rawPurgeAfter !== idea.rawPurgeAfter?.toISOString()) {
       throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
+    }
+    if (Object.hasOwn(cancellationData, "inFlightHoldId")) {
+      if (typeof cancellationData.inFlightHoldId !== "string" ||
+          !ID.test(cancellationData.inFlightHoldId)) {
+        throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
+      }
+      retentionFencedHoldId = cancellationData.inFlightHoldId;
     }
   }
   const claims = await tx.adminAuditLog.findMany({ where: {
@@ -121,9 +129,13 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
   }, take: 2 });
   const hasResult = results.length === 1 && stops.length === 0;
   const hasStop = results.length === 0 && stops.length === 1;
+  const hasRetentionFence = hold.status === "outcome_unknown" &&
+    cancelledIdea && retentionFencedHoldId === hold.id &&
+    results.length === 0 && stops.length === 0;
   if (results.length > 1 || stops.length > 1 ||
       (hold.status === "in_flight" && (results.length !== 0 || stops.length !== 0)) ||
-      (hold.status === "outcome_unknown" && !hasResult && !hasStop)) {
+      (hold.status === "outcome_unknown" &&
+        !hasResult && !hasStop && !hasRetentionFence)) {
     throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
   }
   const stop = stops[0] ?? null;
@@ -136,7 +148,7 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
       stopData.retryAutomatically !== false)) {
     throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
   }
-  if (stop) {
+  if (stop || hasRetentionFence) {
     const unknowns = await tx.adminAuditLog.findMany({ where: {
       action: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
       targetType: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET,
@@ -186,7 +198,7 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
       AmuxIdeaAnalysisClaimReadback["resultEffectiveOutcome"] ?? null,
     resultFailureReason: resultData?.failureReason as
       AmuxIdeaAnalysisClaimReadback["resultFailureReason"] ?? null,
-    zeroReleaseEligible: result === null && stop === null,
+    zeroReleaseEligible: result === null && stop === null && !hasRetentionFence,
   };
 }
 
