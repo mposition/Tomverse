@@ -94,11 +94,11 @@ test("the stoppable child bridge verifies a synthetic complete stream", {
   const output = Buffer.from(events.map(JSON.stringify).join("\n")).toString("base64");
   const script = "process.stdin.resume(); process.stdin.on('end', () => " +
     "process.stdout.end(Buffer.from(process.argv[1], 'base64')))";
-  const process = spawn(process.execPath, ["-e", script, output], {
+  const childProcess = spawn(process.execPath, ["-e", script, output], {
     detached: true, shell: false, stdio: ["pipe", "pipe", "pipe"],
   });
   const observed = await awaitAmuxTrackedCheckoutChild({ ...input,
-    child: process, prompt: Buffer.from("synthetic-only"),
+    child: childProcess, prompt: Buffer.from("synthetic-only"),
     stopCheck: async () => false,
   });
   assert.equal(observed.kind, "verified_success");
