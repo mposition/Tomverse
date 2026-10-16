@@ -16,6 +16,36 @@ export const PROCESSING_TIER_SELECTOR_PATTERN =
 const normalize = (line) => line.trim();
 
 /**
+ * The one request in the repository allowed to send a tier.
+ *
+ * The rule below exists because every lib/modelPricing.ts profile is a
+ * Standard price, which is only true while no request selects a tier. The
+ * marketing generator's adapter is not priced by those profiles at all: the
+ * marketing LLM cost ledger prices each call from a person's price pin, which
+ * records the worst rate across every tier, reserves that worst case before the
+ * call, stores the tier the adapter is bound to send in each reservation's
+ * config snapshot and keeps a call served at any other tier at its reservation
+ * (docs/policy/marketing-automation.md §5; S3 plan §2 names `service_tier:
+ * "default"` in the adapter's request allowlist).
+ *
+ * So exactly one line in exactly one file may send one, and only by naming the
+ * ledger's own constant -- a literal, or any other value, is still an error.
+ */
+export const MARKETING_LEDGER_TIER_SENDER = Object.freeze({
+  file: "lib/marketingLlmClientCore.ts",
+  pricedBy: "marketing-llm-price-pins",
+  line: "service_tier: MARKETING_LLM_SERVICE_TIER,",
+});
+
+const isMarketingLedgerTierSender = (entry) =>
+  entry.file === MARKETING_LEDGER_TIER_SENDER.file &&
+  entry.pricedBy === MARKETING_LEDGER_TIER_SENDER.pricedBy &&
+  Array.isArray(entry.sends) &&
+  entry.sends.length === 1 &&
+  normalize(entry.sends[0]) === MARKETING_LEDGER_TIER_SENDER.line &&
+  entry.mentions.map(normalize).includes(MARKETING_LEDGER_TIER_SENDER.line);
+
+/**
  * @param {{
  *   matchedLines: readonly { file: string, text: string }[],
  *   allowlist: readonly {
@@ -46,7 +76,7 @@ export function auditProcessingTierMentions({ matchedLines, allowlist }) {
       );
       continue;
     }
-    if (entry.sendsATier) {
+    if (entry.sendsATier && !isMarketingLedgerTierSender(entry)) {
       errors.push(
         `${file} is allowlisted with sendsATier: true, which requires the pricing profiles for that tier in the same change.`,
       );
@@ -102,7 +132,8 @@ export function auditProcessingTierMentions({ matchedLines, allowlist }) {
  *
  * `sendsATier` is the field that matters: no entry may set it to `true`
  * without the pricing profiles that describe that tier landing in the same
- * change.
+ * change. The one exception is MARKETING_LEDGER_TIER_SENDER above, which is
+ * priced by the marketing ledger's pins rather than by those profiles.
  *
  * @type {readonly {
  *   file: string,
@@ -112,6 +143,22 @@ export function auditProcessingTierMentions({ matchedLines, allowlist }) {
  * }[]}
  */
 export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
+  {
+    file: "lib/marketingLlmClientCore.ts",
+    sendsATier: true,
+    pricedBy: "marketing-llm-price-pins",
+    sends: ["service_tier: MARKETING_LLM_SERVICE_TIER,"],
+    reason:
+      "The marketing generator's adapter sends the ledger's tier (`default`) in its one provider request, as S3 plan §2's request allowlist requires; the call is priced by the person-set price pin's worst rate across tiers, never by lib/modelPricing.ts, and the reservation's config snapshot records the tier so a call served at another one is kept at its reservation. The other lines read the served tier off the response and pass it to the ledger.",
+    mentions: [
+      "service_tier: MARKETING_LLM_SERVICE_TIER,",
+      "readonly serviceTier: string;",
+      "service_tier?: unknown;",
+      "typeof root.service_tier !== \"string\" ||",
+      "return { content, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };",
+      "reportedServiceTier: answer.serviceTier,",
+    ],
+  },
   {
     file: "lib/marketingLlmBudgetCore.ts",
     sendsATier: false,

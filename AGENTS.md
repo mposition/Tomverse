@@ -1390,6 +1390,15 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   host가 공식인지는 사람이 그 항목을 넣는 변경에서 정합니다), 목록 밖의 사실은 저장하지 않고
   `unrepresentableFactCount`에 더합니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
   `marketing-generator`이고 범위는 `MarketingReport`의 `marketing_report.generator_recorded` 하나입니다.
+- **S3e1(생성기 LLM adapter)**: `lib/marketingLlmClientCore.ts`, `tests/marketingLlmClientCore.test.mjs`. 생성기
+  서비스가 `--experimental-strip-types`로 불러 쓰는 `MarketingLlmClient`이며, 순서가 계약입니다: 예약 → (포기하면
+  release) → dispatch → **첫 소비 영수증일 때만 공급사 HTTP 1회** → 받은 값으로 settle, 쓸 만한 답이 없으면 unknown.
+  재시도는 어디에도 없고(429·503·연결 끊김도 1회), dispatch 영수증 뒤에는 공급사를 부르지 않았어도 unknown이며,
+  예산 action의 답을 잃으면 추측하지 않고 멈춥니다(만료 sweep이 닫음). 요청 본문은 계획서의 허용 목록 그대로입니다.
+  **`service_tier`를 보내는 요청은 저장소 전체에서 이 한 줄뿐입니다** — `lib/modelPricing.ts` profile이 아니라 사람이
+  정한 pin(모든 tier 중 최악 단가)으로 가격이 정해지고 예약 snapshot이 tier를 기록하므로,
+  `scripts/check-processing-tier-core.mjs`가 이 파일의 원장 상수 한 줄만 예외로 받고 literal이나 다른 파일은
+  그대로 실패시킵니다. 모델 선택·첫 pin·서비스 배선은 S3e2 이후입니다(D4).
 - **S3h1(보존 정리)**: `lib/marketingRetention.ts`, store의 `purgeExpiredMarketingRows()`,
   `lib/maintenance.ts`의 `marketing_retention` 단계, `tests/integration/marketing-retention.db.test.ts`.
   **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가
