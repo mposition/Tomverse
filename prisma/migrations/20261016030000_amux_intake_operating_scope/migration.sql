@@ -49,10 +49,10 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'));
   SELECT "version" INTO latest_version
     FROM "AmuxIdeaOperatingScopeSetting" ORDER BY "version" DESC LIMIT 1;
-  SELECT a.*, a.xmin::text AS audit_xid INTO audit_row FROM "AdminAuditLog" a
+  SELECT a.*, a.xmin AS audit_xid INTO audit_row FROM "AdminAuditLog" a
     WHERE a."id" = NEW."approvalAuditLogId";
   IF NEW."version" <> COALESCE(latest_version, 0) + 1 OR
-    audit_row."id" IS NULL OR audit_row.audit_xid <> pg_current_xact_id()::text OR
+    audit_row."id" IS NULL OR audit_row.audit_xid <> pg_current_xact_id()::xid OR
     audit_row."actorUserId" IS DISTINCT FROM NEW."approvedByUserId" OR
     audit_row."actorUserId" IS NULL OR audit_row."entryHash" IS NULL OR
     audit_row."action" <> 'amux.idea.operating_scope.updated' OR
