@@ -48,6 +48,8 @@ test("prompt candidate states the bounded proposal schema and no write authority
   assert.ok(result.prompt.includes("required empty array for Story"));
   assert.ok(result.prompt.includes("parentStoryRef (nullable for Task"));
   assert.ok(result.prompt.includes("both contract and ordinary expected paths"));
+  assert.ok(result.prompt.includes(
+    "Regardless of work type, a mixed contract/ordinary path class must always be split"));
   assert.ok(result.prompt.includes("split it into separate Tasks"));
   assert.ok(result.prompt.includes("through dependencyRefs"));
   assert.ok(result.prompt.includes("Do not propose review work"));
