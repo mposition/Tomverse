@@ -43,6 +43,26 @@ test("a review commit is made from the exact patch and leaves HEAD clean", async
     { run, realpath: async (value) => value });
   assert.deepEqual(mismatch, { ok: false,
     reason: "review_commit_paths_mismatch" });
+  assert.equal(calls.at(-2)[0], "reset");
+  assert.equal(calls.at(-1)[0], "status");
+});
+
+test("a failed review commit creation resets the staged index", async () => {
+  const calls = [];
+  const run = async (_binary, args) => {
+    const command = args.slice(6);
+    calls.push(command[0]);
+    if (command[0] === "rev-parse") return { stdout: Buffer.from(
+      command[1] === "--show-toplevel" ? "/repo" : BASE) };
+    if (command[0] === "diff") return { stdout: Buffer.from(PATCH) };
+    if (command[0] === "write-tree") throw new Error("git write failed");
+    return { stdout: Buffer.alloc(0) };
+  };
+  assert.deepEqual(await captureAmuxV52ReviewCommit("/repo", BASE,
+    "11111111-1111-4111-8111-111111111111", ["lib/example.ts"], PATCH,
+    { run, realpath: async (value) => value }),
+  { ok: false, reason: "review_commit_unavailable" });
+  assert.deepEqual(calls.slice(-2), ["reset", "status"]);
 });
 
 function fixture({ sha = BASE, status = "", patch = PATCH, root = "/repo",

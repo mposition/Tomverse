@@ -100,7 +100,7 @@ function readState(path, input) {
 }
 
 function reviewVendors(status) {
-  if (!Array.isArray(status.reviews)) return null;
+  if (!Array.isArray(status.reviews) || status.reviews.length > 4) return null;
   const vendors = status.reviews.map((review) => review?.vendor);
   if (vendors.some((vendor) => !VENDOR.test(vendor)) ||
       new Set(vendors).size !== vendors.length) return null;
@@ -190,7 +190,8 @@ export function reviewFindings(jobId, options = {}) {
   let status;
   try { status = JSON.parse(statusReply.stdout); } catch {}
   if (statusReply.code !== 1 || status?.jobId !== jobId ||
-      status.status !== "reject" || !Array.isArray(status.reviews))
+      status.status !== "reject" || !Array.isArray(status.reviews) ||
+      status.reviews.length > 4)
     throw new Error("review findings unavailable");
   const reports = [];
   for (let index = 0; index < status.reviews.length; index += 1) {

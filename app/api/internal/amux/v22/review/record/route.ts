@@ -38,26 +38,28 @@ export async function GET(request: Request) {
   const attemptId = z.string().uuid().safeParse(query.get("attemptId"));
   if (!attemptId.success)
     return amuxJsonNoStore({ error: "Invalid request." }, 400);
-  try {
-    const record = await prisma.amuxV52ReviewRecord.findUnique({
-      where: { attemptId: attemptId.data },
-      select: { jobId: true, baseSha: true, commitSha: true,
-        verdict: true, authorVendor: true, reviewerVendors: true,
-        touchesContract: true, requestDigest: true,
-        auditLog: { select: { entryHash: true } } },
-    });
-    if (record && !record.auditLog.entryHash)
+  return withAmuxRouteBudget(async () => {
+    try {
+      const record = await prisma.amuxV52ReviewRecord.findUnique({
+        where: { attemptId: attemptId.data },
+        select: { jobId: true, baseSha: true, commitSha: true,
+          verdict: true, authorVendor: true, reviewerVendors: true,
+          touchesContract: true, requestDigest: true,
+          auditLog: { select: { entryHash: true } } },
+      });
+      if (record && !record.auditLog.entryHash)
+        return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
+      return amuxJsonNoStore(record ? { status: "recorded",
+        jobId: record.jobId, baseSha: record.baseSha,
+        commitSha: record.commitSha, verdict: record.verdict,
+        authorVendor: record.authorVendor,
+        reviewerVendors: record.reviewerVendors,
+        touchesContract: record.touchesContract,
+        requestDigest: record.requestDigest } : { status: "absent" });
+    } catch {
       return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
-    return amuxJsonNoStore(record ? { status: "recorded",
-      jobId: record.jobId, baseSha: record.baseSha,
-      commitSha: record.commitSha, verdict: record.verdict,
-      authorVendor: record.authorVendor,
-      reviewerVendors: record.reviewerVendors,
-      touchesContract: record.touchesContract,
-      requestDigest: record.requestDigest } : { status: "absent" });
-  } catch {
-    return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
-  }
+    }
+  }, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS);
 }
 
 export async function POST(request: Request) {

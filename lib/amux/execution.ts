@@ -1229,7 +1229,7 @@ export async function recordAmuxV52Review(input: {
     return { recorded: false as const, reason: "review_audit_key_missing" as const };
   const evidence = input.evidence;
   const candidate = await loadEngineeringAgentV22SettlementPatch(
-    input.attemptId).catch(() => null);
+    input.attemptId);
   const candidateKinds = candidate?.files?.map((file) =>
     classifyAmuxExecutionPath(file.path));
   if (!candidate || !candidateKinds?.length ||

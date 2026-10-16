@@ -2060,7 +2060,9 @@ async fn v52_review_helper_call(payload: serde_json::Value) -> Result<V52ReviewS
     let mut stdin = child.stdin.take().context("v52 review helper stdin missing")?;
     stdin.write_all(&bytes).await?;
     drop(stdin);
-    let output = tokio::time::timeout(Duration::from_secs(35), child.wait_with_output())
+    // Two Git reads, submit, and status can each reach the helper's 30-second
+    // bound; a rejected job can need up to four bounded report reads.
+    let output = tokio::time::timeout(Duration::from_secs(180), child.wait_with_output())
         .await.context("v52 review helper timed out")??;
     if !output.status.success() || output.stdout.len() > 16_384 {
         bail!("v52 review helper failed");

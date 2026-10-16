@@ -117,3 +117,17 @@ test("prior reject findings are read from the review server", () => {
   try { assert.equal(reviewFindings(jobId, options), "Fix the edge case."); }
   finally { cleanup(); }
 });
+
+test("review findings cap the number of remote report reads", () => {
+  const jobId = "r-20261016-110004-abcdef";
+  const { options, cleanup } = fixture((_program, args) => {
+    assert.ok(args.includes("status"));
+    return { code: 1, stdout: JSON.stringify({ jobId, status: "reject",
+      reviews: Array.from({ length: 5 }, (_, slot) =>
+        ({ slot, verdict: "reject" })) }) };
+  });
+  try {
+    assert.throws(() => reviewFindings(jobId, options),
+      /review findings unavailable/);
+  } finally { cleanup(); }
+});
