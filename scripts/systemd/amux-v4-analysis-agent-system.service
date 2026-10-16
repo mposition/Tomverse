@@ -16,7 +16,7 @@ WorkingDirectory=/home/tommy
 # This fixed executable has no credentials, tools, provider or network call.
 ExecStartPre=/usr/bin/bwrap --unshare-all --die-with-parent --clearenv --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp /usr/bin/true
 ExecStart=/usr/bin/node /opt/tomverse-amux-v4/analysis-agent-once.mjs
-TimeoutStartSec=650s
+TimeoutStartSec=infinity
 KillMode=control-group
 UMask=0077
 NoNewPrivileges=true
