@@ -124,6 +124,19 @@ const auditMetadata = (
   repositoryCount: inspected.counts.repositoryCount,
   pullRequestCount: inspected.counts.pullRequestCount,
 });
+const sqlState = (error: unknown): string | null => {
+  const candidate = error as {
+    code?: unknown;
+    meta?: { driverAdapterError?: {
+      cause?: { code?: unknown; originalCode?: unknown };
+    } };
+  };
+  const cause = candidate?.meta?.driverAdapterError?.cause;
+  for (const code of [cause?.originalCode, cause?.code, candidate?.code]) {
+    if (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) return code;
+  }
+  return null;
+};
 
 let authority: AmuxOperatingScopeAuthority;
 let committedIdeaId: string;
@@ -288,33 +301,91 @@ test("session submission queues one content-free analysis reservation in the sam
     /mposition\/Tomverse|Codex|sessionDisplay|reservedMicroUsd|ideaText/);
 });
 
-test("installed queue guard rejects missing and null system audit identity", async () => {
-  const [result] = await prisma.$queryRaw<Array<{
-    definition: string;
-    missingSystemActorDiffers: boolean;
-    nullActorScopeDiffers: boolean;
-  }>>`
-    SELECT
-      pg_get_functiondef(
-        'amux_v19_session_analysis_reservation_guard()'::regprocedure
-      ) AS definition,
-      ('{}'::jsonb->>'systemActor') IS DISTINCT FROM
-        'amux-session-intake' AS "missingSystemActorDiffers",
-      ('{"actorScope":null}'::jsonb->>'actorScope') IS DISTINCT FROM
-        'session-analysis-reservation-v1' AS "nullActorScopeDiffers"
-  `;
-  assert.ok(result);
-  assert.equal(result.missingSystemActorDiffers, true);
-  assert.equal(result.nullActorScopeDiffers, true);
-  const definition = result.definition.replace(/\s+/g, " ");
-  assert.match(definition,
-    /submission_audit\."metadata"->>'systemActor' IS DISTINCT FROM 'amux-session-intake'/);
-  assert.match(definition,
-    /submission_audit\."metadata"->>'actorScope' IS DISTINCT FROM 'session-submission-v1'/);
-  assert.match(definition,
-    /metadata->>'systemActor' IS DISTINCT FROM 'amux-session-intake'/);
-  assert.match(definition,
-    /metadata->>'actorScope' IS DISTINCT FROM 'session-analysis-reservation-v1'/);
+test("queue guard rejects missing and null system audit identity", async () => {
+  const rollbackFixtures = new Error("rollback null audit identity fixtures");
+  const ideaIds = [randomUUID(), randomUUID()];
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const fixtures = [];
+    for (const ideaId of ideaIds) {
+      const submission = await commitAmuxIdeaSessionSubmission(tx, {
+        inspected: inspect(ideaId), expectedAuthority: authority,
+        ideaId, keys: keysFor(ideaId),
+      });
+      const reservationId = randomUUID();
+      const reservationAuditLogId = await writeSystemAuditLog({
+        tx,
+        systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+        action: AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+        targetType: AMUX_SESSION_ANALYSIS_RESERVED_TARGET,
+        targetId: reservationId,
+        summary: AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY,
+        metadata: amuxSessionAnalysisReservationAuditMetadata({
+          reservationId,
+          ideaId,
+          requestId: submission.requestId,
+          submissionAuditId: submission.auditId,
+          operatingScopeSettingId: authority.settingId,
+          dataOwnerUserId: ownerId,
+          modelProvider: "openai",
+          modelId,
+          reasoningEffort: "high",
+        }),
+      });
+      fixtures.push({ submission, reservationId, reservationAuditLogId });
+    }
+
+    // Build otherwise-valid forged evidence behind the append-only boundary.
+    // The outer transaction always rolls these fixtures back.
+    await tx.$executeRawUnsafe(
+      'ALTER TABLE "AdminAuditLog" DISABLE TRIGGER "admin_audit_log_is_append_only"');
+    try {
+      await tx.$executeRaw`
+        UPDATE "AdminAuditLog"
+        SET "metadata" = "metadata" - 'systemActor'
+        WHERE "id" = ${fixtures[0].submission.auditId}
+      `;
+      await tx.$executeRaw`
+        UPDATE "AdminAuditLog"
+        SET "metadata" = jsonb_set(
+          "metadata", '{actorScope}', 'null'::jsonb, false
+        )
+        WHERE "id" = ${fixtures[1].reservationAuditLogId}
+      `;
+    } finally {
+      await tx.$executeRawUnsafe(
+        'ALTER TABLE "AdminAuditLog" ENABLE TRIGGER "admin_audit_log_is_append_only"');
+    }
+
+    for (const [index, expectedMessage] of [
+      [0, /session reservation submission audit mismatch/],
+      [1, /session reservation audit mismatch/],
+    ] as const) {
+      const fixture = fixtures[index];
+      await tx.$executeRawUnsafe(`SAVEPOINT null_audit_identity_${index}`);
+      await assert.rejects(tx.amuxIdeaSessionAnalysisReservation.create({ data: {
+        id: fixture.reservationId,
+        ideaId: fixture.submission.ideaId,
+        requestId: fixture.submission.requestId,
+        actorUserId: ownerId,
+        operatingScopeSettingId: authority.settingId,
+        status: "queued",
+        modelProvider: "openai",
+        modelId,
+        reasoningEffort: "high",
+        reservationAuditLogId: fixture.reservationAuditLogId,
+      } }), (error: unknown) => {
+        assert.equal(sqlState(error), "23514");
+        assert.match(String(error), expectedMessage);
+        return true;
+      });
+      await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT null_audit_identity_${index}`);
+      await tx.$executeRawUnsafe(`RELEASE SAVEPOINT null_audit_identity_${index}`);
+    }
+    throw rollbackFixtures;
+  }), (error: unknown) => error === rollbackFixtures);
+  assert.equal(await prisma.amuxIdeaSubmission.count({
+    where: { id: { in: ideaIds } },
+  }), 0);
 });
 
 test("database refuses late, mutable and forged queue reservations", async () => {
