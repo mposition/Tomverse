@@ -35,6 +35,11 @@ import type {
   MarketingFactSnapshot,
 } from "@/lib/marketingAutomationSchema";
 import {
+  MARKETING_LLM_MONTHLY_CAP_ENV,
+  parseMarketingLlmMonthlyCap,
+} from "@/lib/marketingLlmBudgetCore";
+import { consumeMarketingLlmCallsForSubmission } from "@/lib/marketingLlmBudgetStore";
+import {
   marketingDraftProvenanceDigest,
   marketingGeneratorDraftIntakeDigest,
   marketingGeneratorDraftLogicalKey,
@@ -169,7 +174,14 @@ export type MarketingDraftIntakeReaders = {
 };
 
 const BUILD_READERS: MarketingDraftIntakeReaders = {
-  llmGenerationBudgetAvailable: async () => unreadable,
+  // The budget is the cost ledger's (S3c): every call was reserved against the
+  // monthly cap before it ran, and the intake consumes the calls it names. What
+  // the intake asks is only that the cap can be read; an unreadable cap is
+  // unknown, and unknown refuses.
+  llmGenerationBudgetAvailable: async () =>
+    parseMarketingLlmMonthlyCap(process.env[MARKETING_LLM_MONTHLY_CAP_ENV]) === null
+      ? unreadable
+      : { ok: true, value: true },
   priceFallbackAlertReady: async () => ({ ok: true, value: MARKETING_PRICE_FALLBACK_ALERT_READY }),
 };
 
@@ -231,6 +243,9 @@ export async function intakeMarketingGeneratorDraft(
     readonly generatorRunId: string;
     readonly submissionId: string;
     readonly provenance: string;
+    /** The submission's digest (`marketingDraftSubmissionDigest`), the bytes its signature covers. */
+    readonly submissionDigest: string;
+    readonly llmCallRequestKeys: readonly string[];
     readonly deadlineAt: Date;
     readonly draft: MarketingGeneratorDraft;
     readonly killSwitchValue: string | undefined;
@@ -251,9 +266,8 @@ export async function intakeMarketingGeneratorDraft(
     logicalDraftId: draft.logicalDraftId,
   });
   const intakeDigest = marketingGeneratorDraftIntakeDigest({
-    generatorRunId: input.generatorRunId,
-    submissionId: input.submissionId,
-    draft,
+    submissionDigest: input.submissionDigest,
+    logicalDraftId: draft.logicalDraftId,
   });
   const existing = await tx.marketingPost.findUnique({
     where: { logicalKey },
@@ -340,6 +354,15 @@ export async function intakeMarketingGeneratorDraft(
     return { status: "refused", reasons: ["intake_unexpected_autonomous"] };
   }
 
+  // The first write: the calls this submission names become this
+  // submission's. A refusal here leaves nothing behind.
+  const consumed = await consumeMarketingLlmCallsForSubmission(tx, {
+    generatorRunId: input.generatorRunId,
+    requestKeys: input.llmCallRequestKeys,
+    submissionDigest: input.submissionDigest,
+  });
+  if (!consumed.ok) return { status: "refused", reasons: [consumed.code] };
+
   const created = await createMarketingPost(tx, {
     channelId: draft.channelId,
     locale: draft.locale,
@@ -403,6 +426,9 @@ export async function intakeMarketingGeneratorDraft(
       submissionId: input.submissionId,
       logicalDraftId: draft.logicalDraftId,
       intakeDigest,
+      submissionDigest: input.submissionDigest,
+      consumerDigest: consumed.consumerDigest,
+      llmCallRequestKeys: [...input.llmCallRequestKeys],
       provenanceDigest: marketingDraftProvenanceDigest(input.provenance),
       verdict: verdict.verdict,
       codes: "codes" in verdict ? [...verdict.codes] : [],

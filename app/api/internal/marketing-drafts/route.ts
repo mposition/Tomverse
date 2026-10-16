@@ -7,6 +7,7 @@ import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationA
 import {
   MARKETING_DRAFT_INTAKE_MAX_BODY_BYTES,
   marketingDraftProvenanceMatches,
+  marketingDraftSubmissionDigest,
   marketingDraftSubmissionSchema,
 } from "@/lib/marketingDraftIntakeCore";
 import {
@@ -26,9 +27,10 @@ import { prisma } from "@/lib/prisma";
 // publishing, bucket or GitHub credential; everything it sends is judged again
 // by the app's Guard, and nothing it sends can say what the verdict is.
 //
-// In this build every submission is refused by the `draftIntake` decision --
-// the generation budget (S3c) and the price-fallback alert (S3d) are not there
-// yet -- so the route answers with closed reasons and writes nothing.
+// Each submission names the cost-ledger calls that produced it (S3c4), and the
+// intake consumes them. In this build every submission is still refused by the
+// `draftIntake` decision -- the price-fallback alert (S3d) is not there yet --
+// so the route answers with closed reasons and writes nothing.
 
 const json = (body: Record<string, unknown>, status: number) =>
   NextResponse.json(body, { status, headers: { "cache-control": "no-store" } });
@@ -49,6 +51,7 @@ export async function POST(request: Request) {
   }
 
   const killSwitchValue = process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV];
+  const submissionDigest = marketingDraftSubmissionDigest(submission);
   const results = [];
   // One transaction per draft, answered in the submitted order: one draft's
   // refusal or conflict does not hold the others, and each is decided against
@@ -62,6 +65,8 @@ export async function POST(request: Request) {
           generatorRunId: submission.generatorRunId,
           submissionId: submission.submissionId,
           provenance: submission.provenance,
+          submissionDigest,
+          llmCallRequestKeys: submission.llmCallRequestKeys,
           deadlineAt: new Date(submission.deadlineAt),
           draft,
           killSwitchValue,
