@@ -1350,6 +1350,13 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   검증된 감사 행도 서버가 찾아 줍니다. 범위는 서명된 세대의 기록이 관측한 쌍 중에서만 고르고,
   범위 비우기는 따로 언제나 제공합니다. 상태가 있는 wrapper와 hook 없는 view로 나눈 것은 render
   테스트가 view를 함수로 불러 각 action의 body를 직접 읽기 위해서입니다.
+- **S3h1(보존 정리)**: `lib/marketingRetention.ts`, store의 `purgeExpiredMarketingRows()`,
+  `lib/maintenance.ts`의 `marketing_retention` 단계, `tests/integration/marketing-retention.db.test.ts`.
+  **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가
+  강제하고, 보존 설정을 트랜잭션 안에서 켜는 곳은 이 writer 하나뿐입니다(보호 테이블 검사가 허용 목록으로
+  강제). 지운 행마다 같은 트랜잭션에 `marketing-retention` 감사 행을, 지운 것이 있는 실행만 `retention_run`
+  보고서를 남깁니다. 일일 정리 cron의 한 단계이며 표마다 한 번에 200행까지입니다. 게시물 본문 정리와 history
+  압축은 S3h2입니다.
 
 # 엔지니어링 Agent
 
