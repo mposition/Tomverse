@@ -1301,6 +1301,12 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   증거 1회 설정·시각·사유와 관측 열의 짝·보존 삭제는 trigger와 CHECK가 직접 SQL에도 강제하고, 예약 시각은 writer가 DB
   시계에서 한 번 읽어 그 월을 잠그며 trigger는 다시 계산하지 않고 검증만 합니다. `MARKETING_LLM_PRICE_PINS`는 S3e가
   모델과 가격 근거를 가져올 때까지 비어 있으므로 모든 예약이 `model_not_pinned`입니다. writer·route·sweep은 S3c2 이후입니다.
+- **S3c2(원장 writer)**: `lib/marketingLlmBudgetStore.ts`, `tests/integration/marketing-llm-budget-store.db.test.ts`,
+  `lib/adminAuditSystemActors.ts`의 `marketing-generator`(원장 다섯 action·`MarketingLlmCall`만). 모든 action은 감사 chain →
+  UTC 월 → 행 순서로 잠그고, **재생은 현재 설정을 읽기 전에** 저장된 digest로 답합니다 — pin 교체·adapter 배포·kill
+  switch가 이미 기록된 요청의 답을 바꾸지 않습니다. 새 쓰기만 마감·kill switch·상한·pin을 읽으며, dispatch 영수증의
+  `firstConsumption`은 한 번만 `true`입니다. action별 statement 수는 시험이 고정합니다. route·만료 sweep·legal hold는
+  S3c3입니다.
 
 # 엔지니어링 Agent
 

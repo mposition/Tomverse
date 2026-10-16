@@ -262,6 +262,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/prompt-refiner-vnext-full-auto-release-exception-v1.md",
   },
   {
+    table: "MarketingLlmCall",
+    delegate: "marketingLlmCall",
+    writers: ["lib/marketingLlmBudgetStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
+  },
+  {
     table: "MarketingChannel",
     delegate: "marketingChannel",
     writers: ["lib/marketingStore.ts"],
@@ -2099,6 +2105,29 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 6,
     reason:
       "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
+  },
+  {
+    path: "lib/marketingLlmBudgetStore.ts",
+    table: "MarketingLlmCall",
+    tableMentions: 11,
+    writeVerbs: 5,
+    reason:
+      "The sole registered writer of the marketing LLM cost ledger: it inserts a reservation and moves a call to dispatched or to its one close, each after the generator's audit row in the same transaction. The database triggers own every transition rule and timestamp; the other mentions are the reads that lock the month and the row.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "MarketingLlmCall",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The marketing generator actor's exact audit target literal only; this module runs no SQL.",
+  },
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 18,
+    writeVerbs: 13,
+    reason:
+      "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
   },
   {
     path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",

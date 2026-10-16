@@ -15,6 +15,8 @@ import { createHash, createHmac } from "node:crypto";
 export const MARKETING_LLM_PROVIDER = "openai";
 export const MARKETING_LLM_ADAPTER_PROFILE = "text-only-v1";
 export const MARKETING_LLM_SERVICE_TIER = "default";
+/** The adapter release the app expects; a reservation stores it in its snapshot. */
+export const MARKETING_LLM_ADAPTER_VERSION = "1";
 
 export const MARKETING_LLM_PURPOSES = ["draft", "market_intel", "brief"] as const;
 export type MarketingLlmPurpose = (typeof MARKETING_LLM_PURPOSES)[number];
