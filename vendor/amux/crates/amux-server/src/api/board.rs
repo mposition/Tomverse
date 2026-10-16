@@ -109,6 +109,8 @@ pub fn routes() -> Router<AppState> {
         .route("/{id}/decompose", post(decompose_item))
         .route("/{id}/fan-out", post(fan_out_item))
         .route("/{id}/capsule", get(capsule))
+        // Read-only: what the Decision Maker side of a typed ask recorded.
+        .route("/{id}/typed-ask", get(super::board_typed_ask::get_typed_ask))
         .route("/{id}/verifications", get(list_verifications))
         .route("/{id}/artifacts", get(list_artifacts).post(create_artifact))
         .route(
@@ -4975,6 +4977,9 @@ pub async fn create_item(
         // one. Measured 2026-09-17: 14 eligible todos, every candidate refused,
         // the lane idle. Same shape the ask_* fields were fixed for.
         "next_action", "acceptance_criteria",
+        // The Decision Maker's typed-ask extension (crate::db::dm_ask), for a
+        // card filed straight into `needsyou`.
+        "typed_ask",
     ];
     let ignored: Vec<String> = map
         .keys()
@@ -4993,6 +4998,15 @@ pub async fn create_item(
             return err(StatusCode::BAD_REQUEST, json!({"error": error, "code": "invalid_acceptance_criteria"}));
         }
     };
+    // Same rule for the typed-ask extension: refused whole, before any write.
+    let typed_ask = match map.get("typed_ask") {
+        None => None,
+        Some(value) => match crate::db::dm_ask::parse_typed_ask(value) {
+            Ok(input) => Some(input),
+            Err(refusal) => return err(StatusCode::BAD_REQUEST, refusal.to_json()),
+        },
+    };
+    let typed_ask_w = typed_ask.clone();
     let _intake_guard = super::board_intake::lock(&session, &owner_type).await;
     let intake = super::board_intake::plan_create(&map, &item_type, || async {
         super::board_intake::plan(&state.store, &session, &owner_type, &title,
@@ -5188,6 +5202,18 @@ pub async fn create_item(
             let mut row = bs::create_issue(conn, &new, now)?;
             row.log = Some(bs::append_log(row.log.as_deref(), &hhmm(), &format!("{}; disposition=create", intake.log_line())));
             bs::save_patched(conn, &mut row)?;
+            // A card filed straight into `needsyou` gets its first question
+            // revision here, in the create's transaction (crate::db::dm_ask).
+            let filed_asking = bs::parse_status(&row.status) == Some(TaskStatus::NeedsYou);
+            if let Some(input) = typed_ask_w.as_ref() {
+                crate::db::dm_ask::write_draft(conn, &row.id, input, now)?;
+                crate::db::dm_ask::sync_question_revision(conn, &row.id, filed_asking, now)?;
+            } else if filed_asking {
+                if let Err(error) = crate::db::dm_ask::sync_question_revision(conn, &row.id, true, now) {
+                    tracing::error!(target: "amux::board", verdict = "dm_question_revision_failed",
+                        card = %row.id, %error, "question revision not recorded; the operator still has the card");
+                }
+            }
             let mut events = vec![ev_snap(&row, MutationKind::Created)];
             // AMUX-3391: fold the silent auto-capture card into this worker card
             // (see fold_capture_for_worker_card). The window is env-tunable.
@@ -5230,6 +5256,9 @@ pub async fn create_item(
             v["intake"] = json!({"action":if reused {intake_response.decision.action.as_str()} else {"create"}, "comparison":intake_response});
             if !ignored.is_empty() {
                 v["ignored_fields"] = json!(ignored);
+            }
+            if let (Some(input), false) = (typed_ask.as_ref(), reused) {
+                v["typed_ask"] = input.recorded_json();
             }
             // AMUX-3391: tell the caller the auto-capture card it just displaced,
             // so a worker sees the reconcile happened and never hand-discards it.
@@ -8699,7 +8728,7 @@ fn discarded_by_refusal(map: &serde_json::Map<String, Value>) -> Vec<String> {
     out
 }
 
-const PATCH_WRITABLE: [&str; 33] = [
+const PATCH_WRITABLE: [&str; 34] = [
     "title", "desc", "status", "session", "type", "depends_on", "tags", "reviewer", "shepherd",
     "epic", // AMUX-2992: assign/clear the epic a card rolls up under
     "due", "due_time", "owner_type", "pinned", "pos", "gate", "source_ref", "archived",
@@ -8724,6 +8753,10 @@ const PATCH_WRITABLE: [&str; 33] = [
     "ask_question",
     "ask_unblocks",
     "ask_actor",
+    // The Decision Maker's typed-ask extension (crate::db::dm_ask). Writable on
+    // its own for the same two-call reason as the ask fields above; it is
+    // stored beside the base ask it was written with.
+    "typed_ask",
     // The continuation contract (AMUX-3946). Writable on their own for the same
     // reason the ask fields are: a lane can write the continuation first and
     // then move the card in a second call that cannot fail on content, so a
@@ -9757,6 +9790,18 @@ pub async fn patch_item(
         actor_name.clone()
     };
 
+    // The Decision Maker's typed-ask extension, checked before any write
+    // (crate::db::dm_ask). A structural mistake refuses the whole PATCH rather
+    // than storing half an ask or quietly dropping the key.
+    let typed_ask = match map.get("typed_ask") {
+        None => None,
+        Some(value) => match crate::db::dm_ask::parse_typed_ask(value) {
+            Ok(input) => Some(input),
+            Err(refusal) => return err(StatusCode::BAD_REQUEST, refusal.to_json()),
+        },
+    };
+    let typed_ask_w = typed_ask.clone();
+
     let slot: Arc<Mutex<Option<PatchOut>>> = Arc::new(Mutex::new(None));
     let slot_w = slot.clone();
     let id_w = id.clone();
@@ -10200,6 +10245,14 @@ pub async fn patch_item(
             set_opt("ask_unblocks", &mut next.ask_unblocks, &mut changed);
             set_opt("ask_actor", &mut next.ask_actor, &mut changed);
             set_opt("next_action", &mut next.next_action, &mut changed);
+            // Not a column: the extension lives in its own table, so compare
+            // it there, or a PATCH carrying only `typed_ask` reads as a no-op.
+            if let Some(input) = typed_ask_w.as_ref() {
+                let base = (next.ask_type.as_deref(), next.ask_question.as_deref(), next.ask_unblocks.as_deref());
+                if crate::db::dm_ask::draft_differs(conn, &row.id, input, base)? {
+                    changed.push("typed_ask".into());
+                }
+            }
             // Once a terminal transition has recorded the authoritative
             // board summary, a replaying provider payload must not replace it
             // with stale prose and turn an idempotent retry into a second
@@ -12893,6 +12946,29 @@ pub async fn patch_item(
             }
             next.updated = now_secs();
             bs::save_patched(conn, &mut next)?;
+            // The Decision Maker's question revision (crate::db::dm_ask), in this
+            // transaction so a revision never describes a card write that rolled
+            // back.
+            let entered_needsyou = changed.iter().any(|c| c == "status")
+                && bs::parse_status(&next.status) == Some(TaskStatus::NeedsYou)
+                && bs::parse_status(&row.status) != Some(TaskStatus::NeedsYou);
+            if let Some(input) = typed_ask_w.as_ref() {
+                crate::db::dm_ask::write_draft(conn, &next.id, input, next.updated)?;
+                crate::db::dm_ask::sync_question_revision(conn, &next.id, entered_needsyou, next.updated)?;
+            } else if ["status", "ask_type", "ask_question", "ask_unblocks"]
+                .iter()
+                .any(|key| changed.iter().any(|c| c == key))
+            {
+                // The caller sent no `typed_ask`, so a failure here must not take
+                // the ask itself down: without a revision the question simply
+                // never goes to a Decision Maker, and the operator still has it.
+                if let Err(error) =
+                    crate::db::dm_ask::sync_question_revision(conn, &next.id, entered_needsyou, next.updated)
+                {
+                    tracing::error!(target: "amux::board", verdict = "dm_question_revision_failed",
+                        card = %next.id, %error, "question revision not recorded; the operator still has the card");
+                }
+            }
             // RR-0052 Invariant 1: the PATCH door is the other lease choke point.
             // After the save, so a refusal above can never leave an attempt behind.
             crate::db::attempts::record_lease_change(
@@ -13239,6 +13315,9 @@ pub async fn patch_item(
         }
         Some(PatchOut::Noop { mut body, ignored, all_ignored }) => {
             body["applied"] = json!(false);
+            if let Some(input) = typed_ask.as_ref() {
+                body["typed_ask"] = input.recorded_json();
+            }
             if !ignored.is_empty() {
                 body["ignored_fields"] = json!(ignored);
                 body["ignored_note"] = json!(
@@ -13309,6 +13388,9 @@ pub async fn patch_item(
             reviewer_notify,
         }) => {
             body["applied"] = json!(true);
+            if let Some(input) = typed_ask.as_ref() {
+                body["typed_ask"] = input.recorded_json();
+            }
             if !advisories.is_empty() {
                 body["advisories"] = json!(advisories);
             }
