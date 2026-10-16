@@ -102,9 +102,12 @@ export type AmuxExecutionGradeInput = {
 export const deriveAmuxExecutionGrade = (input: AmuxExecutionGradeInput): AmuxExecutionGrade => {
   const { taskRole, expectedPaths, proposedGrade } = input;
   if (taskRole === "design" || !Array.isArray(expectedPaths) ||
-      expectedPaths.length === 0 || expectedPaths.length > 40 ||
-      expectedPaths.some((path) => classifyAmuxExecutionPath(path) !== "ordinary")) {
+      expectedPaths.length === 0 || expectedPaths.length > 40) {
     return "frontier";
+  }
+  // Unlike Array#some, iteration also visits missing slots as undefined.
+  for (const path of expectedPaths) {
+    if (classifyAmuxExecutionPath(path) !== "ordinary") return "frontier";
   }
   if (proposedGrade === "frontier") return "frontier";
   if (["implement", "test", "investigate", "verify"].includes(taskRole ?? "") &&

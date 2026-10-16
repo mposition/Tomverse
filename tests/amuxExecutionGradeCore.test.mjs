@@ -32,6 +32,7 @@ test("hard frontier conditions precede the intake proposal", () => {
     assert.equal(deriveAmuxExecutionGrade(task({ expectedPaths, proposedGrade: "routine" })), "frontier");
   }
   assert.equal(deriveAmuxExecutionGrade(task({ expectedPaths: ["lib/ordinary.ts", "../escape"] })), "frontier");
+  assert.equal(deriveAmuxExecutionGrade(task({ expectedPaths: Array(1), proposedGrade: "routine" })), "frontier");
   assert.equal(deriveAmuxExecutionGrade(task({ expectedPaths: ["LiB/AmUx/grade.ts"] })), "frontier");
 });
 
