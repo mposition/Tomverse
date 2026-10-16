@@ -443,6 +443,11 @@ test("the marketing generator writes only the LLM cost ledger's five actions", (
   }
   assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_post.intake_queued", "MarketingPost"), false);
   assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_llm.legal_hold_set", "MarketingLlmCall"), false);
+  // Its recorded report (S3f), about a report row and nothing else.
+  assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_report.generator_recorded", "MarketingReport"), true);
+  assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_report.generator_recorded", "MarketingPost"), false);
+  assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_report.generator_recorded", "MarketingLlmCall"), false);
+  assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_llm.reserved", "MarketingReport"), false);
   // Other actors are unaffected by the generator's scope.
   assert.equal(systemAuditActionAllowed("marketing-guard", "marketing_post.intake_queued", "MarketingPost"), true);
 });

@@ -1381,6 +1381,24 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   않습니다. 모델 행은 `lib/modelRegistry.ts`를 고치지 않고(Prompt Refiner closure 파일) id로 읽어 기존
   `registryRowToModel()`로 바꿉니다. 접수 한 건의 트랜잭션 호출 수는
   `tests/integration/marketing-draft-intake.db.test.ts`가 고정합니다(지금 21회).
+- **S3f(생성기 보고서 접수)**: `app/api/internal/marketing-intel-reports/route.ts`, `lib/marketingIntelReportCore.ts`,
+  `lib/marketingIntelReportStore.ts`, `tests/marketingIntelReportCore.test.mjs`,
+  `tests/integration/marketing-intel-reports.db.test.ts`. 생성기 secret으로 쓸 수 있는 보고서는 `brief`·`market_intel`
+  둘뿐입니다. key는 앱이 종류·run·보고서 id로 유도하고, 같은 key에 다른 바이트가 오면 conflict이며, 이미 기록된
+  보고서는 모든 게이트보다 먼저 되읽습니다. 마감은 draft 접수와 같은 helper로 겁니다. **시장 사실은 앱의 공식 host
+  목록에 있는 출처만 저장합니다** — `MARKETING_COMPETITOR_SOURCE_HOSTS`는 비어 있고(어느 경쟁사를 추적하고 어느
+  host가 공식인지는 사람이 그 항목을 넣는 변경에서 정합니다), 목록 밖의 사실은 저장하지 않고
+  `unrepresentableFactCount`에 더합니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
+  `marketing-generator`이고 범위는 `MarketingReport`의 `marketing_report.generator_recorded` 하나입니다.
+- **S3e1(생성기 LLM adapter)**: `lib/marketingLlmClientCore.ts`, `tests/marketingLlmClientCore.test.mjs`. 생성기
+  서비스가 `--experimental-strip-types`로 불러 쓰는 `MarketingLlmClient`이며, 순서가 계약입니다: 예약 → (포기하면
+  release) → dispatch → **첫 소비 영수증일 때만 공급사 HTTP 1회** → 받은 값으로 settle, 쓸 만한 답이 없으면 unknown.
+  재시도는 어디에도 없고(429·503·연결 끊김도 1회), dispatch 영수증 뒤에는 공급사를 부르지 않았어도 unknown이며,
+  예산 action의 답을 잃으면 추측하지 않고 멈춥니다(만료 sweep이 닫음). 요청 본문은 계획서의 허용 목록 그대로입니다.
+  **`service_tier`를 보내는 요청은 저장소 전체에서 이 한 줄뿐입니다** — `lib/modelPricing.ts` profile이 아니라 사람이
+  정한 pin(모든 tier 중 최악 단가)으로 가격이 정해지고 예약 snapshot이 tier를 기록하므로,
+  `scripts/check-processing-tier-core.mjs`가 이 파일의 원장 상수 한 줄만 예외로 받고 literal이나 다른 파일은
+  그대로 실패시킵니다. 모델 선택·첫 pin·서비스 배선은 S3e2 이후입니다(D4).
 - **S3h1(보존 정리)**: `lib/marketingRetention.ts`, store의 `purgeExpiredMarketingRows()`,
   `lib/maintenance.ts`의 `marketing_retention` 단계, `tests/integration/marketing-retention.db.test.ts`.
   **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가

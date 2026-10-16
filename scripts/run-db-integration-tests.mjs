@@ -727,6 +727,10 @@ run(
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.
     "tests/integration/marketing-generator-context.db.test.ts",
+    // The generator's internal reports (S3f): only a brief or market facts, signed
+    // and keyed by the app, a market fact kept only from an official host, a
+    // resend read back after the gates close, and the deadline enforced.
+    "tests/integration/marketing-intel-reports.db.test.ts",
     // The rows a draft's price and model facts rest on, held FOR SHARE until
     // the reading transaction ends (S3a2): only two connections can show it.
     "tests/integration/marketing-fact-row-hold.db.test.ts",
