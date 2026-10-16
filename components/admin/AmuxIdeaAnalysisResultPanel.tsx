@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxIdeaResolutionPanel } from "@/components/admin/AmuxIdeaResolutionPanel";
@@ -64,8 +64,14 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watch
   }
   const autoPoll = watchToken > 0;
 
+  // The latest approval's token: a read issued under an earlier one is answered after the watch restarted, and its
+  // answer (the page that was current before the approval) must not overwrite the restarted view.
+  const latestToken = useRef(watchToken);
+  useEffect(() => { latestToken.current = watchToken; }, [watchToken]);
+
   const refresh = async (page = chunkIndex) => {
     if (loading) return;
+    const issuedUnder = watchToken;
     setLoading(true);
     setUnavailable(false);
     setNeedsReauthentication(false);
@@ -73,14 +79,16 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watch
       const params = new URLSearchParams({ ideaId, chunkIndex: String(page) });
       const response = await adminFetch(`/api/admin/amux/ideas/analysis-result?${params}`,
         { cache: "no-store" });
+      if (latestToken.current !== issuedUnder) return;
       if (response.status === 428) {
         setView(null);
         setNeedsReauthentication(true);
         setWatchEnded(true);
         return;
       }
-      const parsed = parseAmuxIdeaAnalysisResultView(response.status,
-        await response.json(), ideaId);
+      const body: unknown = await response.json();
+      if (latestToken.current !== issuedUnder) return;
+      const parsed = parseAmuxIdeaAnalysisResultView(response.status, body, ideaId);
       if (!parsed) { setView(null); setUnavailable(true); setWatchEnded(true); }
       else {
         setView(parsed); setChunkIndex(page);

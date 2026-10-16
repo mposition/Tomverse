@@ -67,6 +67,8 @@ test("the analysis is watched on a gentle, bounded schedule that respects the re
     "a new approval restarts the watch from a clean state");
   assert.ok(panel.includes("void refresh(watchChunk)"), "and the watch reads the page that was approved, not page 0");
   assert.ok(panel.includes("const autoPoll = watchToken > 0;"));
+  assert.equal((panel.match(/if \(latestToken\.current !== issuedUnder\) return;/g) ?? []).length, 2,
+    "an answer to a read issued under an earlier approval is dropped, before and after its body is parsed");
 });
 
 test("the default new-idea view has one primary button; the separate steps wait in a collapsed recovery section", () => {
