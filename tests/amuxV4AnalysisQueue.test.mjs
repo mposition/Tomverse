@@ -118,17 +118,19 @@ test("AMUX v4 queue route refuses unauthenticated and env-off requests before DB
   }
 });
 
-test("AMUX v4 claim route requires both dedicated read and write environments", async () => {
+test("AMUX v19 claim requires read, write and live stop polling before DB", async () => {
   const imported = await import("../app/api/internal/amux/v4/analysis-claim/route.ts");
   const POST = imported.POST ?? imported.default.POST;
   const GET = imported.GET ?? imported.default.GET;
   const previousSecret = process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV];
   const previousWrite = process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE;
   const previousRead = process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_READ;
+  const previousStop = process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_POLL_READ;
   const previousSync = process.env.TOMVERSE_AMUX_SYNC_SECRET;
   try {
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = secret;
     process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE = "enabled";
+    delete process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_POLL_READ;
     delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_READ;
     delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     const endpoint = "https://tomverse.example/api/internal/amux/v4/analysis-claim";
@@ -151,6 +153,16 @@ test("AMUX v4 claim route requires both dedicated read and write environments", 
     assert.deepEqual(await readDisabled.json(),
       { available: false, reason: "analysis_claim_read_disabled" });
     process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_READ = "enabled";
+    const stopPollOff = await POST(new Request(endpoint,
+      { method: "POST", headers, body }));
+    assert.equal(stopPollOff.status, 409);
+    assert.deepEqual(await stopPollOff.json(),
+      { available: false, reason: "analysis_claim_disabled" });
+    process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_POLL_READ = "enabled";
+    assert.equal((await POST(new Request(endpoint,
+      { method: "POST", headers: { ...headers, "content-type": "text/plain" },
+        body }))).status, 415,
+    "all switches enabled reaches validation before DB");
     delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE;
     const writeEnvOff = await POST(new Request(endpoint,
       { method: "POST", headers, body }));
@@ -168,6 +180,8 @@ test("AMUX v4 claim route requires both dedicated read and write environments", 
     else process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE = previousWrite;
     if (previousRead === undefined) delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_READ;
     else process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_READ = previousRead;
+    if (previousStop === undefined) delete process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_POLL_READ;
+    else process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_POLL_READ = previousStop;
     if (previousSync === undefined) delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     else process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSync;
   }

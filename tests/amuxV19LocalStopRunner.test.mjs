@@ -4,7 +4,8 @@ import test from "node:test";
 
 import { shouldStopAmuxV19LocalAnalysis } from
   "../lib/amux/ideaLocalAnalysisStopPoll.mjs";
-import { amuxV4CliExitFailureStage, awaitAmuxV19StoppableChild } from
+import { AMUX_V4_LIVE_ANALYSIS_CLI_ENV, amuxV4CliExitFailureStage,
+  awaitAmuxV19StoppableChild, runAmuxV4IsolatedApprovedAnalysis } from
   "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
 import { amuxV4AnalysisCliDiagnostic } from
   "../lib/amux/ideaLocalAnalysisDiagnostics.mjs";
@@ -58,6 +59,30 @@ test("local stop poll fails closed for stop, stale identity and uncertain transp
   assert.equal(await check(async () => { throw new Error("network"); }), true);
 });
 
+test("live CLI refuses a stopped or uncertain pre-spawn poll without invocation", {
+  skip: process.platform !== "linux",
+}, async () => {
+  const previous = process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
+  const prompt = Buffer.from("synthetic no-provider-call prompt");
+  const selection = { provider: "anthropic", modelId: "claude-opus-5-5",
+    reasoningEffort: "high", prompt };
+  try {
+    process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV] = "enabled";
+    for (const stopCheck of [async () => true,
+      async () => { throw new Error("unavailable"); }]) {
+      const result = await runAmuxV4IsolatedApprovedAnalysis(selection,
+        stopCheck);
+      assert.equal(result.kind, "outcome_unknown");
+      assert.equal(result.failureStage, "stop_requested");
+      assert.equal(result.cliStarted, undefined);
+    }
+  } finally {
+    prompt.fill(0);
+    if (previous === undefined) delete process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
+    else process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV] = previous;
+  }
+});
+
 test("v19 stop signals the entire fake CLI process group without a time deadline", {
   skip: process.platform !== "linux",
 }, async () => {
@@ -85,8 +110,13 @@ test("v19 live child can complete after an interval without forced timeout", {
   const child = spawn(process.execPath, ["-e",
     "setTimeout(() => process.exit(0), 80)"],
   { detached: true, stdio: "ignore", shell: false });
-  const exit = await awaitAmuxV19StoppableChild(child, async () => false, 10);
+  let observedSignal;
+  const exit = await awaitAmuxV19StoppableChild(child, async (signal) => {
+    observedSignal = signal;
+    return false;
+  }, 10);
   assert.equal(exit.code, 0);
   assert.equal(exit.stopped, false);
   assert.equal(exit.timedOut, false);
+  assert.equal(observedSignal?.aborted, true);
 });

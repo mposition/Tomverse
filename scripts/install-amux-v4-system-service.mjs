@@ -14,7 +14,7 @@ export const ANALYSIS_BUNDLE_SHA256 =
 // not the hash of its source entrypoint. A new bundle needs a reviewed pin.
 export const SYSTEM_UNIT = "amux-v4-analysis-agent-system.service";
 export const SYSTEM_UNIT_SHA256 =
-  "d319510cdf0df44e0e447a85c105d0689aa3739924d63bdea900c23e8695a7d8";
+  "e8fd8537e494e5f9ad445b9cf02fd5a4899991949ec77c64f912376937e964f7";
 export const SYSTEM_PROBE_PROPERTIES = Object.freeze([
   "User=tommy", "Group=tommy", "WorkingDirectory=/home/tommy",
   "NoNewPrivileges=yes", "PrivateTmp=yes", "ProtectSystem=strict",
