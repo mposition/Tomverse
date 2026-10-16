@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { planAmuxTrackedCheckoutClaudeCli } from "../lib/amux/ideaTrackedCheckoutCli.ts";
 import { materializeAmuxTrackedCheckout, withAmuxTrackedCheckout } from "../lib/amux/ideaTrackedCheckoutMaterialize.ts";
 
 const git = (directory, ...args) => execFileSync("git", ["-C", directory, ...args], {
@@ -44,9 +45,23 @@ test("checkout contains only scanned bytes from the pinned tracked tree", async 
       repositoryPath, commitSha: pinned, digestSecret: "d".repeat(32), signal: stopped.signal,
     }), /invalid_tree/);
 
-    checkout = await materializeAmuxTrackedCheckout({
-      repositoryPath, commitSha: pinned, digestSecret: "d".repeat(32),
-    });
+    const originalTmpdir = process.env.TMPDIR;
+    try {
+      if (process.platform === "linux") process.env.TMPDIR = repositoryPath;
+      checkout = await materializeAmuxTrackedCheckout({
+        repositoryPath, commitSha: pinned, digestSecret: "d".repeat(32),
+      });
+    } finally {
+      if (originalTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = originalTmpdir;
+    }
+    if (process.platform === "linux") {
+      const cli = planAmuxTrackedCheckoutClaudeCli({
+        directory: checkout.directory, modelId: "claude-opus-5-5",
+        reasoningEffort: "high",
+      });
+      assert.equal(cli.cwd, checkout.directory);
+    }
     assert.deepEqual(checkout.files, ["src/safe-copy.txt", "src/safe.txt"]);
     assert.deepEqual(checkout.excludedReasons, {
       secret_path: 1, secret_content: 4, non_regular: 0, unscannable_content: 2,
