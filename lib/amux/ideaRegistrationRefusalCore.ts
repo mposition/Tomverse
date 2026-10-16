@@ -14,17 +14,35 @@ export const AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES = Object.freeze([
   "task_cost_receipt_grade_mismatch",
 ] as const);
 
+export const AMUX_V19_PLAN_REGISTRATION_REFUSAL_CODES = Object.freeze([
+  "plan_schema_invalid",
+  "plan_hierarchy_invalid",
+  "plan_dependency_invalid",
+  "plan_dependency_cycle",
+  "plan_score_invalid",
+  "plan_duplicate_unresolved",
+] as const);
+
+export const AMUX_REGISTRATION_REFUSAL_CODES = Object.freeze([
+  ...AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES,
+  ...AMUX_V19_PLAN_REGISTRATION_REFUSAL_CODES,
+] as const);
+
 export const AMUX_V20_REGISTRATION_REFUSAL_ACTION =
   "amux.v20.registration.refuse";
 export const AMUX_V20_REGISTRATION_REFUSAL_TARGET =
   "AmuxIdeaRegistrationRefusal";
 export const AMUX_V20_REGISTRATION_REFUSAL_SUMMARY =
-  "Recorded one deterministic AMUX v20 Task registration refusal for operator review.";
+  "Recorded one deterministic AMUX registration refusal for operator review.";
 
 export type AmuxV20RegistrationRefusalAttemptKind =
   (typeof AMUX_V20_REGISTRATION_REFUSAL_ATTEMPT_KINDS)[number];
 export type AmuxV20TaskRegistrationRefusal =
   (typeof AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES)[number];
+export type AmuxV19PlanRegistrationRefusal =
+  (typeof AMUX_V19_PLAN_REGISTRATION_REFUSAL_CODES)[number];
+export type AmuxRegistrationRefusalCode = AmuxV20TaskRegistrationRefusal |
+  AmuxV19PlanRegistrationRefusal;
 export type AmuxV20RegistrationRefusalGrade =
   "routine" | "advanced" | "frontier";
 
@@ -32,7 +50,7 @@ export type AmuxV20RegistrationRefusalView = {
   state: "awaiting_operator";
   requestId: string;
   attemptKind: AmuxV20RegistrationRefusalAttemptKind;
-  refusalCode: AmuxV20TaskRegistrationRefusal;
+  refusalCode: AmuxRegistrationRefusalCode;
   draftUnitId: string;
   analysisPreviewId: string;
   sourcePlanRevisionId: string;
@@ -67,7 +85,7 @@ const GRADES = new Set<AmuxV20RegistrationRefusalGrade>(
   ["routine", "advanced", "frontier"],
 );
 const ATTEMPT_KINDS = new Set<string>(AMUX_V20_REGISTRATION_REFUSAL_ATTEMPT_KINDS);
-const REFUSAL_CODES = new Set<string>(AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES);
+const REFUSAL_CODES = new Set<string>(AMUX_REGISTRATION_REFUSAL_CODES);
 
 export const isAmuxV20RegistrationRefusalAttemptKind = (value: unknown):
   value is AmuxV20RegistrationRefusalAttemptKind =>
@@ -80,6 +98,10 @@ export const isAmuxV20RegistrationRefusalGrade = (value: unknown):
 export const isAmuxV20TaskRegistrationRefusal = (value: unknown):
   value is AmuxV20TaskRegistrationRefusal =>
   typeof value === "string" && REFUSAL_CODES.has(value);
+
+export const isAmuxRegistrationRefusalCode = (value: unknown):
+  value is AmuxRegistrationRefusalCode => typeof value === "string" &&
+  REFUSAL_CODES.has(value);
 
 export const amuxV20RegistrationRefusalMetadata = (
   row: AmuxV20RegistrationRefusalRecord,
@@ -116,7 +138,7 @@ export const amuxV20RegistrationRefusalView = (
   state: "awaiting_operator",
   requestId: row.requestId,
   attemptKind: row.attemptKind as AmuxV20RegistrationRefusalAttemptKind,
-  refusalCode: row.refusalCode as AmuxV20TaskRegistrationRefusal,
+  refusalCode: row.refusalCode as AmuxRegistrationRefusalCode,
   draftUnitId: row.draftUnitId,
   analysisPreviewId: row.analysisPreviewId,
   sourcePlanRevisionId: row.sourcePlanRevisionId,

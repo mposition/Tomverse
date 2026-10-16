@@ -141,8 +141,11 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // writer; keep both latch digests pinned to this 17-file closure.
 // Review r-20261016-095415-ada10c scoped that metadata read to the exact
 // displayed preview and source plan, while keeping the same read-only closure.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "294318e3ec8097b5a1bd7e9b80f704aa50a694ff90727200838c7890228cec22";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "efced24d680f8b4db974bb02cc51ca476a67afce70170ab7bf1282c57ce12fa6";
+// Intake v19.5 adds a data-owner form of the same stored-result read and the
+// closed whole-plan refusal vocabulary. On 2026-10-16 the 17-file closure was
+// recomputed unchanged, with no writer, outbound I/O or dynamic import added.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "699d1adbe4d638b9c6478a36e5b2f1d06414fa4bcc3694dc174865942326773c";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "5aa742e9349b0d11ef9a36af744c21f46e1872fd309fe113ad81b90f143ca426";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

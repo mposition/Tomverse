@@ -5,6 +5,11 @@ import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import {
+  auditRowActorKind,
+  AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+  AMUX_SESSION_IDEA_SUBMITTED_SCOPE,
+  AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+  AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
   AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
 } from "@/lib/adminAuditSystemActors";
@@ -45,6 +50,7 @@ export async function createInitialIdeaOnlySourcePlan(
     where: { id: input.ideaId },
     select: {
       state: true, actorUserId: true, analysisDeadlineAt: true,
+      submissionOrigin: true, submissionAuditLogId: true,
       currentSourcePlanRevisionId: true, rawCiphertext: true,
       rawKeyId: true, rawKeyVersion: true, rawDigest: true,
       rawDigestKeyId: true, rawPurgedAt: true,
@@ -59,12 +65,44 @@ export async function createInitialIdeaOnlySourcePlan(
       !idea.rawDigest || !idea.rawDigestKeyId) {
     throw new InitialSourcePlanError("not_ready");
   }
-  const submittedAudit = await tx.adminAuditLog.findFirst({
-    where: { action: "AMUX_V4_IDEA_SUBMITTED", targetType: "AmuxIdeaSubmission",
-      targetId: input.ideaId, actorUserId: input.actorUserId },
-    select: { id: true },
-  });
-  if (!submittedAudit) throw new InitialSourcePlanError("integrity_unavailable");
+  const submittedAuditSelect = { id: true, action: true, targetType: true,
+    targetId: true, actorUserId: true, actorEmail: true, ipAddress: true,
+    userAgent: true, metadata: true, entryHash: true } as const;
+  // Owner submissions predate the canonical audit pointer and remain bound by
+  // their exact human actor/action/target tuple. Session submissions were born
+  // with the pointer, so accepting a search result there would weaken the
+  // canonical system-evidence boundary.
+  const submittedAudit = idea.submissionOrigin === "owner" ?
+    await tx.adminAuditLog.findFirst({
+      where: { action: "AMUX_V4_IDEA_SUBMITTED",
+        targetType: "AmuxIdeaSubmission", targetId: input.ideaId,
+        actorUserId: input.actorUserId },
+      select: submittedAuditSelect,
+    }) : idea.submissionAuditLogId ? await tx.adminAuditLog.findUnique({
+      where: { id: idea.submissionAuditLogId },
+      select: submittedAuditSelect,
+    }) : null;
+  const submittedMetadata = submittedAudit?.metadata;
+  const ownerSubmission = idea.submissionOrigin === "owner" &&
+    submittedAudit?.action === "AMUX_V4_IDEA_SUBMITTED" &&
+    submittedAudit.targetType === "AmuxIdeaSubmission" &&
+    submittedAudit.targetId === input.ideaId &&
+    submittedAudit.actorUserId === input.actorUserId &&
+    auditRowActorKind(submittedAudit) === "human";
+  const sessionSubmission = idea.submissionOrigin === "session" &&
+    submittedAudit?.action === AMUX_SESSION_IDEA_SUBMITTED_ACTION &&
+    submittedAudit.targetType === AMUX_SESSION_IDEA_SUBMITTED_TARGET &&
+    submittedAudit.targetId === input.ideaId &&
+    auditRowActorKind(submittedAudit) === "system" &&
+    !!submittedMetadata && typeof submittedMetadata === "object" &&
+    !Array.isArray(submittedMetadata) &&
+    (submittedMetadata as Record<string, unknown>).systemActor ===
+      AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR &&
+    (submittedMetadata as Record<string, unknown>).actorScope ===
+      AMUX_SESSION_IDEA_SUBMITTED_SCOPE;
+  if (!submittedAudit?.entryHash || (!ownerSubmission && !sessionSubmission)) {
+    throw new InitialSourcePlanError("integrity_unavailable");
+  }
 
   let plain: Buffer;
   try {

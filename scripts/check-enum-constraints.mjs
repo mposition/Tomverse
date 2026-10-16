@@ -692,9 +692,9 @@ const REGISTRY = {
   AmuxIdeaRegistrationRefusal_code_check: {
     owner: "list",
     module: "lib/amux/ideaRegistrationRefusalCore.ts",
-    list: "AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES",
+    list: "AMUX_REGISTRATION_REFUSAL_CODES",
     reason:
-      "The exact nine deterministic v20 Task Guard refusals are shared with the registration core and Admin API; arbitrary text and expected paths never enter the record.",
+      "The deterministic v20 Task Guard and v19 whole-plan refusal codes are shared with the system registration core and Admin API; arbitrary text and expected paths never enter the record.",
   },
   AmuxIdeaRegistrationRefusal_proposed_grade_check: {
     owner: "type_only",

@@ -1,5 +1,6 @@
 import type { AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import { isAmuxV20RegistrationRefusalGrade,
+  type AmuxV19PlanRegistrationRefusal,
   type AmuxV20RegistrationRefusalIdentity,
   type AmuxV20TaskRegistrationRefusal } from
   "./ideaRegistrationRefusalCore.ts";
@@ -22,6 +23,20 @@ export class AmuxV20RegistrationRefusalDetected extends Error {
     const grades = amuxV20RegistrationRefusalGrades(proposal);
     this.proposedExecutionGrade = grades.proposedExecutionGrade;
     this.finalExecutionGrade = grades.finalExecutionGrade;
+  }
+}
+
+/** Closed plan-level refusal evidence for the v19 unattended registrar.
+ * It carries identifiers and grades only; proposal text and paths stay out of
+ * the durable record and audit metadata. */
+export class AmuxV19PlanRegistrationRefusalDetected extends Error {
+  readonly proposedExecutionGrade = null;
+  readonly finalExecutionGrade = null;
+
+  constructor(readonly code: AmuxV19PlanRegistrationRefusal,
+    readonly identity: AmuxV20RegistrationRefusalIdentity) {
+    super(code);
+    this.name = "AmuxV19PlanRegistrationRefusalDetected";
   }
 }
 

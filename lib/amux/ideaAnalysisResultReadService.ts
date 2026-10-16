@@ -34,7 +34,20 @@ export async function readAmuxFirstIdeaAnalysisResult(
   chunkIndex = 0,
 ): Promise<AmuxIdeaAnalysisResultView> {
   const actorUserId = session.user?.id;
-  if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner" ||
+  if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner") {
+    throw new AmuxIdeaAnalysisResultReadError("not_found");
+  }
+  return readAmuxFirstIdeaAnalysisResultForDataOwner(actorUserId, ideaId,
+    keys, chunkIndex);
+}
+
+/** Server-only read for the v19 system registrar. The caller supplies the
+ * data owner from a locked idea row; no human session or step-up is implied. */
+export async function readAmuxFirstIdeaAnalysisResultForDataOwner(
+  actorUserId: string, ideaId: string, keys: AmuxContentKeys,
+  chunkIndex = 0,
+): Promise<AmuxIdeaAnalysisResultView> {
+  if (!/^[A-Za-z0-9:_-]{8,128}$/.test(actorUserId) ||
       !/^[A-Za-z0-9:_-]{1,128}$/.test(ideaId) ||
       !Number.isSafeInteger(chunkIndex) || chunkIndex < 0 ||
       chunkIndex >= 2_147_483_647) {

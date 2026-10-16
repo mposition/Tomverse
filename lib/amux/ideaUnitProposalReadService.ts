@@ -4,7 +4,8 @@ import type { Session } from "next-auth";
 
 import { prisma } from "@/lib/prisma";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
-import { readAmuxFirstIdeaAnalysisResult } from "./ideaAnalysisResultReadService.ts";
+import { readAmuxFirstIdeaAnalysisResultForDataOwner } from
+  "./ideaAnalysisResultReadService.ts";
 import { loadAmuxContentKeyRing, type AmuxContentKeyIdentity } from
   "./ideaKeyStore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
@@ -29,7 +30,23 @@ export async function readVerifiedAmuxUnitProposal(session: Session,
     previewId: string;
   }> {
   const actorUserId = session.user?.id;
-  if (!actorUserId || !/^[A-Za-z0-9:_-]{8,80}$/.test(ideaId) ||
+  if (!actorUserId) throw new AmuxIdeaUnitProposalReadError("not_found");
+  return readVerifiedAmuxUnitProposalForDataOwner(actorUserId, ideaId,
+    draftUnitId);
+}
+
+/** System-registration read with an explicit data owner. It preserves every
+ * commitment and key check of the owner reader without inventing a Session. */
+export async function readVerifiedAmuxUnitProposalForDataOwner(
+  actorUserId: string, ideaId: string, draftUnitId: string,
+): Promise<{
+  proposal: AmuxAnalysisCard | AmuxAnalysisNode;
+  unit: { id: string; localRef: string; bodyDigest: string;
+    bodyDigestKeyId: string; chunkIndex: number; expiresAt: Date };
+  previewId: string;
+}> {
+  if (!/^[A-Za-z0-9:_-]{8,128}$/.test(actorUserId) ||
+      !/^[A-Za-z0-9:_-]{8,80}$/.test(ideaId) ||
       !/^[A-Za-z0-9_-]{8,80}$/.test(draftUnitId)) {
     throw new AmuxIdeaUnitProposalReadError("not_found");
   }
@@ -117,8 +134,8 @@ export async function readVerifiedAmuxUnitProposal(session: Session,
     subjectId: amuxAnalysisFreeformSubjectId(ideaId, chunk.currentPreviewId) });
   try {
     const keys = await loadAmuxContentKeyRing(identities);
-    const result = await readAmuxFirstIdeaAnalysisResult(session, ideaId,
-      keys, unit.chunkIndex);
+    const result = await readAmuxFirstIdeaAnalysisResultForDataOwner(
+      actorUserId, ideaId, keys, unit.chunkIndex);
     if (result.state !== "ready" && result.state !== "partial" &&
         result.state !== "needs_owner_input") {
       throw new AmuxIdeaUnitProposalReadError("not_ready");
@@ -151,9 +168,31 @@ export async function readVerifiedAmuxCardProposal(session: Session,
   return { ...result, proposal: result.proposal };
 }
 
+export async function readVerifiedAmuxCardProposalForDataOwner(
+  actorUserId: string, ideaId: string, draftUnitId: string,
+) {
+  const result = await readVerifiedAmuxUnitProposalForDataOwner(actorUserId,
+    ideaId, draftUnitId);
+  if (result.proposal.kind !== "card") {
+    throw new AmuxIdeaUnitProposalReadError("not_ready");
+  }
+  return { ...result, proposal: result.proposal };
+}
+
 export async function readVerifiedAmuxNodeProposal(session: Session,
   ideaId: string, draftUnitId: string) {
   const result = await readVerifiedAmuxUnitProposal(session, ideaId, draftUnitId);
+  if (result.proposal.kind !== "node") {
+    throw new AmuxIdeaUnitProposalReadError("not_ready");
+  }
+  return { ...result, proposal: result.proposal };
+}
+
+export async function readVerifiedAmuxNodeProposalForDataOwner(
+  actorUserId: string, ideaId: string, draftUnitId: string,
+) {
+  const result = await readVerifiedAmuxUnitProposalForDataOwner(actorUserId,
+    ideaId, draftUnitId);
   if (result.proposal.kind !== "node") {
     throw new AmuxIdeaUnitProposalReadError("not_ready");
   }

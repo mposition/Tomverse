@@ -40,6 +40,9 @@ import { deriveAmuxIdeaUnitConfirmation,
   sameAmuxIdeaUnitConfirmation,
   type AmuxIdeaUnitConfirmationSnapshot } from
   "./ideaUnitConfirmationCore.ts";
+import { isAmuxSystemRegistrationAuthority,
+  type AmuxRegistrationAuditAuthority } from
+  "./ideaRegistrationAuditAuthority.ts";
 
 export type AmuxV4StoryPrepareChoice = {
   ideaId: string;
@@ -54,14 +57,15 @@ export type AmuxV4StoryPrepareChoice = {
 const ID = /^[A-Za-z0-9_-]{8,80}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
-export type AmuxV4CardPrepareInTx = {
-  session: Session; request: Request; actorUserId: string;
+export type AmuxV4CardPrepareInTx = AmuxRegistrationAuditAuthority & {
+  actorUserId: string;
   choice: AmuxV4StoryPrepareChoice;
   verified: Awaited<ReturnType<typeof readVerifiedAmuxCardProposal>>;
   scanner: Awaited<ReturnType<typeof loadAmuxCardDuplicateScanner>>;
   keys: ReturnType<typeof loadCurrentAmuxContentKeys>;
   decisionId: string;
   ownerSession: ReturnType<typeof amuxV4UnitBrowserDigest>;
+  registrationAuthority?: AmuxIdeaUnitConfirmationSnapshot["registrationAuthority"];
 };
 
 const requireAmuxV20TaskGrade = (
@@ -103,7 +107,6 @@ export async function prepareAmuxV4CardRegistrationInTx(tx: Prisma.TransactionCl
   args: AmuxV4CardPrepareInTx) {
   const { choice, verified, scanner, keys, decisionId, ownerSession,
     actorUserId } = args;
-  const input = { session: args.session, request: args.request };
   await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
   const idea = await tx.amuxIdeaSubmission.findFirst({
     where: { id: choice.ideaId, actorUserId },
@@ -200,6 +203,8 @@ export async function prepareAmuxV4CardRegistrationInTx(tx: Prisma.TransactionCl
   const common = {
     ideaId: choice.ideaId, decisionId, prepareRequestId: choice.prepareRequestId,
     actorUserId, ownerSession,
+    ...(args.registrationAuthority ?
+      { registrationAuthority: args.registrationAuthority } : {}),
     unit: { id: unit.id, localRef: unit.localRef!,
       bodyDigest: unit.bodyDigest, bodyDigestKeyId: unit.bodyDigestKeyId },
     proposal: verified.proposal,
@@ -246,8 +251,11 @@ export async function prepareAmuxV4CardRegistrationInTx(tx: Prisma.TransactionCl
     snapshot = assembleAmuxV4StoryConfirmation(common);
   }
   if (!snapshot) throw new AmuxV4UnitDecisionError("reconfirm");
-  const result = await commitAmuxV4UnitPrepare(tx, { session: input.session,
-    request: input.request, snapshot, duplicateScan: duplicates,
+  const authority = isAmuxSystemRegistrationAuthority(args) ?
+    { systemActor: args.systemActor, actorUserId: args.actorUserId } :
+    { session: args.session, request: args.request };
+  const result = await commitAmuxV4UnitPrepare(tx, { ...authority,
+    snapshot, duplicateScan: duplicates,
     taskCost, digestKey: keys });
   return { result, unit, duplicates, taskCost, snapshot, feature };
 }

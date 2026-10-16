@@ -125,6 +125,22 @@ export const AMUX_V4_UNIT_INVALIDATE_ACTION = "amux.v4.unit.invalidate" as const
 export const AMUX_V4_UNIT_EXPIRE_ACTION = "amux.v4.unit.expire" as const;
 export const AMUX_V4_UNIT_DECISION_TARGET = "AmuxIdeaUnitDecision" as const;
 export const AMUX_V4_UNIT_HOUSEKEEPING_SCOPE = "unit-decision-housekeeping-v1" as const;
+/** Intake v19 system registration uses the v4 intake actor as a narrowly
+ * scoped registrar. Data ownership remains the saved operating-scope owner. */
+export const AMUX_V19_UNIT_REGISTRATION_SCOPE =
+  "system-unit-registration-v1" as const;
+export const AMUX_V19_PORTFOLIO_ASSESSMENT_SCOPE =
+  "system-portfolio-assessment-v1" as const;
+export const AMUX_V19_PORTFOLIO_SCORE_SCOPE =
+  "system-portfolio-score-v1" as const;
+export const AMUX_V19_SYSTEM_REGISTRATION_ACTION =
+  "amux.v19.plan.auto_registered" as const;
+export const AMUX_V19_SYSTEM_REGISTRATION_TARGET =
+  "AmuxIdeaSubmission" as const;
+export const AMUX_V19_SYSTEM_REGISTRATION_SCOPE =
+  "system-plan-registration-v1" as const;
+export const AMUX_V19_REGISTRATION_REFUSAL_SCOPE =
+  "system-registration-refusal-v1" as const;
 /** One authenticated source collector claims one already owner-approved file. */
 
 /**
@@ -234,6 +250,27 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
        action === AMUX_V4_UNIT_INVALIDATE_ACTION ||
        action === AMUX_V4_UNIT_EXPIRE_ACTION)) {
     return AMUX_V4_UNIT_HOUSEKEEPING_SCOPE;
+  }
+  if (targetType === AMUX_V4_UNIT_DECISION_TARGET &&
+      (action === "amux.v4.unit.prepare" ||
+       action === "amux.v4.unit.consume")) {
+    return AMUX_V19_UNIT_REGISTRATION_SCOPE;
+  }
+  if (action === "amux.v4.portfolio.assessment.approve" &&
+      targetType === "AmuxPortfolioAssessment") {
+    return AMUX_V19_PORTFOLIO_ASSESSMENT_SCOPE;
+  }
+  if (action === "amux.v4.portfolio.score.confirm" &&
+      targetType === "AmuxPortfolioScoreSnapshot") {
+    return AMUX_V19_PORTFOLIO_SCORE_SCOPE;
+  }
+  if (action === AMUX_V19_SYSTEM_REGISTRATION_ACTION &&
+      targetType === AMUX_V19_SYSTEM_REGISTRATION_TARGET) {
+    return AMUX_V19_SYSTEM_REGISTRATION_SCOPE;
+  }
+  if (action === "amux.v20.registration.refuse" &&
+      targetType === "AmuxIdeaRegistrationRefusal") {
+    return AMUX_V19_REGISTRATION_REFUSAL_SCOPE;
   }
   return null;
 };

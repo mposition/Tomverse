@@ -36,7 +36,11 @@ const actorEmail = "amux-v20-refusal-owner@example.test";
 process.env.ADMIN_USER_IDS = actorUserId;
 process.env.ADMIN_EMAILS = actorEmail;
 process.env.ADMIN_OWNER_EMAILS = actorEmail;
-process.env.ADMIN_AUDIT_INTEGRITY_KEY = `synthetic-audit-${randomUUID()}`;
+// This suite shares the agents-lane database with the v19 operating-scope,
+// session-submission and system-registration suites. Audit-chain verification
+// therefore has to use the same synthetic integrity key across all four.
+process.env.ADMIN_AUDIT_INTEGRITY_KEY =
+  "synthetic-amux-intake-operating-scope-audit-key-2026";
 const session = { user: { id: actorUserId, email: actorEmail,
   authenticatedAt: new Date().toISOString() },
 expires: new Date(Date.now() + 60 * 60_000).toISOString() } as Session;

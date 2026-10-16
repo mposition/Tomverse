@@ -199,6 +199,20 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // amux-intake v20: durable final-Guard refusal evidence and operator wait
   // metadata; it adds no commit-deadline marker, trigger or classifier.
   "20261016060000_amux_v20_registration_refusal",
+  // amux-intake v19.5: completion receipt, scoped system audit evidence,
+  // closed whole-plan refusals and inert backlog registration. These add no
+  // commit-deadline marker, trigger or classifier.
+  "20261016070000_amux_v19_system_registration_receipt",
+  "20261016070100_amux_v19_unit_system_audit",
+  "20261016070200_amux_v19_portfolio_assessment_system_audit",
+  "20261016070300_amux_v19_portfolio_score_system_audit",
+  "20261016070400_amux_v19_plan_refusal_codes",
+  "20261016070500_amux_v19_system_registration_refusal",
+  // v20 Task snapshots bind proposed/final grades; the following repair lets
+  // the deferred v4 consistency check accept the same scoped system audit.
+  // Neither changes the commit-deadline mechanism.
+  "20261016070600_amux_v20_work_item_grade_snapshot",
+  "20261016070700_amux_v19_registration_consistency_system_audit",
   // Orchestration v52: audited execution-grade revision only, with no
   // commit-deadline marker, trigger, guard or classifier change.
   "20261016090000_amux_v52_grade_escalation_guard",

@@ -2,13 +2,14 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
+import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { AMUX_V20_REGISTRATION_REFUSAL_ACTION,
   AMUX_V20_REGISTRATION_REFUSAL_TARGET,
   amuxV20RegistrationRefusalMetadata,
   amuxV20RegistrationRefusalView,
   isAmuxV20RegistrationRefusalAttemptKind,
   isAmuxV20RegistrationRefusalGrade,
-  isAmuxV20TaskRegistrationRefusal,
+  isAmuxRegistrationRefusalCode,
   matchesAmuxV20RegistrationRefusalMetadata,
   type AmuxV20RegistrationRefusalView } from
   "./ideaRegistrationRefusalCore.ts";
@@ -24,23 +25,35 @@ export async function readLatestAmuxV20RegistrationRefusalInTx(
       analysisPreviewId, sourcePlanRevisionId,
       draftUnit: { state: "proposed" } },
     orderBy: [{ attemptedAt: "desc" }, { id: "desc" }],
-    include: { auditLog: { select: { actorUserId: true, action: true,
+    include: { auditLog: { select: { actorUserId: true, actorEmail: true,
+      ipAddress: true, userAgent: true, action: true,
       targetType: true, targetId: true, metadata: true, entryHash: true } } },
   });
   if (!row) return null;
   const expected = amuxV20RegistrationRefusalMetadata(row);
+  const actorKind = auditRowActorKind(row.auditLog);
+  const metadata = row.auditLog.metadata &&
+    typeof row.auditLog.metadata === "object" &&
+    !Array.isArray(row.auditLog.metadata) ?
+    { ...(row.auditLog.metadata as Record<string, unknown>) } : null;
+  if (actorKind === "system" && metadata) {
+    delete metadata.systemActor;
+    delete metadata.actorScope;
+  }
   if (!isAmuxV20RegistrationRefusalAttemptKind(row.attemptKind) ||
-      !isAmuxV20TaskRegistrationRefusal(row.refusalCode) ||
+      !isAmuxRegistrationRefusalCode(row.refusalCode) ||
       (row.proposedExecutionGrade !== null &&
         !isAmuxV20RegistrationRefusalGrade(row.proposedExecutionGrade)) ||
       (row.finalExecutionGrade !== null &&
         !isAmuxV20RegistrationRefusalGrade(row.finalExecutionGrade)) ||
-      !row.auditLog.entryHash || row.auditLog.actorUserId !== actorUserId ||
+      !row.auditLog.entryHash ||
+      (actorKind !== "system" &&
+        (actorKind !== "human" || row.auditLog.actorUserId !== actorUserId)) ||
       row.auditLog.action !== AMUX_V20_REGISTRATION_REFUSAL_ACTION ||
       row.auditLog.targetType !== AMUX_V20_REGISTRATION_REFUSAL_TARGET ||
       row.auditLog.targetId !== row.id ||
       !matchesAmuxV20RegistrationRefusalMetadata(
-        row.auditLog.metadata, expected)) {
+        metadata, expected)) {
     throw new Error("AMUX v20 registration refusal evidence unavailable");
   }
   return amuxV20RegistrationRefusalView(row);

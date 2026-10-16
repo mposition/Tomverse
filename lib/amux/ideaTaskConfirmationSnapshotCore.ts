@@ -6,6 +6,8 @@ import { deriveAmuxExecutionGrade, type AmuxExecutionGrade } from
 import type { AmuxIdeaDuplicateScan, AmuxIdeaUnitConfirmationSnapshot } from
   "./ideaUnitConfirmationCore.ts";
 import type { V4TaskCostCeilingReceipt } from "./v4TaskCostCeilingCore.ts";
+import type { AmuxV19UnitRegistrationAuthority } from
+  "./ideaSystemRegistrationCore.ts";
 
 type Keyed = { digest: string; keyId: string };
 type Node = AmuxIdeaUnitConfirmationSnapshot["hierarchy"][number];
@@ -17,6 +19,7 @@ type CardReference = NonNullable<
 export function assembleAmuxV4TaskConfirmation(input: {
   ideaId: string; decisionId: string; prepareRequestId: string;
   actorUserId: string; ownerSession: Keyed;
+  registrationAuthority?: AmuxV19UnitRegistrationAuthority;
   unit: { id: string; localRef: string; bodyDigest: string;
     bodyDigestKeyId: string };
   proposal: AmuxAnalysisCard;
@@ -81,6 +84,8 @@ export function assembleAmuxV4TaskConfirmation(input: {
       ideaId: input.ideaId, decisionId: input.decisionId,
       prepareRequestId: input.prepareRequestId,
       actorUserId: input.actorUserId, ownerSession: input.ownerSession,
+      ...(input.registrationAuthority ?
+        { registrationAuthority: input.registrationAuthority } : {}),
       draftUnitId: unit.id, localRef: unit.localRef,
       unitVersion: 1, unitKind: "card", unitBody: body,
       draftShape: { kind: "card", cardType: "task", storyKind: null },

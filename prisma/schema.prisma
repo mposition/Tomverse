@@ -2441,6 +2441,7 @@ model AdminAuditLog {
   amuxV4AnalysisBudgetSettings AmuxIdeaAnalysisBudgetSetting[] @relation("AmuxV4AnalysisBudgetSettingAudit")
   amuxIdeaOperatingScopeSettings AmuxIdeaOperatingScopeSetting[] @relation("AmuxIdeaOperatingScopeSettingAudit")
   amuxIdeaSessionSubmissions AmuxIdeaSubmission[] @relation("AmuxIdeaSessionSubmissionAudit")
+  amuxIdeaSystemRegistrations AmuxIdeaSubmission[] @relation("AmuxIdeaSystemRegistrationAudit")
   amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
   amuxV4ContentPurgeAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4ContentPurgeAudit")
   amuxV4KeyDeleteAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4KeyDeleteAudit")
@@ -9710,6 +9711,8 @@ model AmuxIdeaSubmission {
   submissionOrigin    String    @default("owner")
   sessionOperatingScopeSettingId String?
   submissionAuditLogId String?   @unique
+  /// Same-transaction canonical system evidence for a complete v19 plan.
+  systemRegistrationAuditLogId String? @unique
   sourceProvenanceCiphertext Bytes?
   sourceProvenanceKeyId String?
   sourceProvenanceKeyVersion Int?
@@ -9746,6 +9749,7 @@ model AmuxIdeaSubmission {
   retentionHolds AmuxIdeaRetentionHold[]
   sessionOperatingScopeSetting AmuxIdeaOperatingScopeSetting? @relation("AmuxIdeaSessionOperatingScope", fields: [sessionOperatingScopeSettingId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSubmission_session_scope_fkey")
   submissionAudit AdminAuditLog? @relation("AmuxIdeaSessionSubmissionAudit", fields: [submissionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSubmission_submission_audit_fkey")
+  systemRegistrationAudit AdminAuditLog? @relation("AmuxIdeaSystemRegistrationAudit", fields: [systemRegistrationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSubmission_system_registration_audit_fkey")
   currentSourcePlan AmuxIdeaSourcePlanRevision? @relation("AmuxCurrentIdeaPlan", fields: [currentSourcePlanRevisionId, id], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([id, actorUserId])

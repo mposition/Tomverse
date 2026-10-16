@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "b32df9341c9b8aa588c59e950d6a02d74bfd8547550060255dbe15c2b60e09ec",
+  "replacedChecks": [
+    {
+      "table": "AmuxWorkItem",
+      "constraint": "AmuxWorkItem_v4_source_snapshot_shape_check",
+      "previousDefinitionSha256": "66257a3013a73eca26ee288aeaec0b17df9213e060db917b8bb52b7b8cf6f53b"
+    }
+  ]
+}

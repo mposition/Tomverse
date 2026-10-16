@@ -2,10 +2,8 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
-import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
-import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
+import { takeAuditChainLock } from "@/lib/adminAudit";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { AMUX_V20_REGISTRATION_REFUSAL_ACTION,
@@ -15,13 +13,17 @@ import { AMUX_V20_REGISTRATION_REFUSAL_ACTION,
   amuxV20RegistrationRefusalView,
   isAmuxV20RegistrationRefusalAttemptKind,
   isAmuxV20RegistrationRefusalGrade,
-  isAmuxV20TaskRegistrationRefusal,
+  isAmuxRegistrationRefusalCode,
   type AmuxV20RegistrationRefusalAttemptKind,
   type AmuxV20RegistrationRefusalRecord,
-  type AmuxV20TaskRegistrationRefusal,
+  type AmuxRegistrationRefusalCode,
   type AmuxV20RegistrationRefusalView } from
   "./ideaRegistrationRefusalCore.ts";
 import type { AmuxExecutionGrade } from "./executionGradeCore.ts";
+import { amuxRegistrationAuthorityActor,
+  isAmuxSystemRegistrationAuthority,
+  type AmuxRegistrationAuditAuthority,
+  writeAmuxRegistrationAudit } from "./ideaRegistrationAuditAuthority.ts";
 
 const ID = /^[A-Za-z0-9:_-]{8,128}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -32,12 +34,10 @@ export class AmuxV20RegistrationRefusalStoreError extends Error {
   }
 }
 
-type RecordInput = {
-  session: Session;
-  request: Request;
+type RecordInput = AmuxRegistrationAuditAuthority & {
   requestId: string;
   attemptKind: AmuxV20RegistrationRefusalAttemptKind;
-  refusalCode: AmuxV20TaskRegistrationRefusal;
+  refusalCode: AmuxRegistrationRefusalCode;
   ideaId: string;
   draftUnitId: string;
   analysisPreviewId: string;
@@ -59,7 +59,7 @@ const matchesInput = (row: AmuxV20RegistrationRefusalRecord, input: RecordInput,
 
 const validInput = (input: RecordInput) => UUID.test(input.requestId) &&
   isAmuxV20RegistrationRefusalAttemptKind(input.attemptKind) &&
-  isAmuxV20TaskRegistrationRefusal(input.refusalCode) &&
+  isAmuxRegistrationRefusalCode(input.refusalCode) &&
   ID.test(input.ideaId) && ID.test(input.draftUnitId) &&
   ID.test(input.analysisPreviewId) &&
   (input.proposedExecutionGrade === null ||
@@ -72,12 +72,13 @@ const validInput = (input: RecordInput) => UUID.test(input.requestId) &&
 export async function recordAmuxV20RegistrationRefusal(
   input: RecordInput,
 ): Promise<AmuxV20RegistrationRefusalView> {
-  const actorUserId = input.session.user?.id;
-  if (!actorUserId || !isAdminSession(input.session) ||
-      getAdminRole(input.session) !== "owner") {
+  let actorUserId: string;
+  try { actorUserId = amuxRegistrationAuthorityActor(input); } catch {
     throw new AmuxV20RegistrationRefusalStoreError("forbidden");
   }
-  await assertRecentAdminAuthentication(input.session);
+  if (!isAmuxSystemRegistrationAuthority(input)) {
+    await assertRecentAdminAuthentication(input.session);
+  }
   if (!validInput(input)) {
     throw new AmuxV20RegistrationRefusalStoreError("integrity_unavailable");
   }
@@ -132,8 +133,8 @@ export async function recordAmuxV20RegistrationRefusal(
         sourcePlanRevisionId: preview.sourcePlanRevisionId,
         proposedExecutionGrade: input.proposedExecutionGrade,
         finalExecutionGrade: input.finalExecutionGrade, attemptedAt };
-      const auditLogId = await writeAdminAuditLog({ tx, session: input.session,
-        request: input.request, action: AMUX_V20_REGISTRATION_REFUSAL_ACTION,
+      const auditLogId = await writeAmuxRegistrationAudit({ tx,
+        authority: input, action: AMUX_V20_REGISTRATION_REFUSAL_ACTION,
         targetType: AMUX_V20_REGISTRATION_REFUSAL_TARGET, targetId: id,
         summary: AMUX_V20_REGISTRATION_REFUSAL_SUMMARY,
         metadata: amuxV20RegistrationRefusalMetadata({ id, ...row }) });

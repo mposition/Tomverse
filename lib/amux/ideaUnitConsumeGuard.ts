@@ -31,7 +31,10 @@ export type AmuxIdeaUnitConsumeContext = {
   ideaId: string;
   draftUnitId: string;
   actorUserId: string;
-  /** Caller-verified recent owner step-up bound to this actor and app session. */
+  /** Explicit authorization path. Missing means the legacy owner path. */
+  registrationAuthority?: "owner" | "system";
+  /** Caller-verified recent owner step-up bound to this actor and app session.
+   * A system registration never claims or synthesizes this evidence. */
   recentOwnerStepUp: boolean;
   /** Recomputed for the current browser session using the stored key ID. */
   ownerSessionDigest: string;
@@ -70,8 +73,15 @@ export function checkAmuxIdeaUnitConsume(
       !sameAmuxIdeaUnitConfirmation(prepared.ownerSessionDigest, current.ownerSessionDigest)) {
     return { decision: "reject", reason: "session_mismatch" };
   }
-  if (current.recentOwnerStepUp !== true) {
+  const authority = current.registrationAuthority ?? "owner";
+  if (!["owner", "system"].includes(authority)) {
+    return { decision: "halt", reason: "registration_authority_unavailable" };
+  }
+  if (authority === "owner" && current.recentOwnerStepUp !== true) {
     return { decision: "reconfirm", reason: "owner_step_up_required" };
+  }
+  if (authority === "system" && current.recentOwnerStepUp !== false) {
+    return { decision: "halt", reason: "system_claimed_owner_step_up" };
   }
   if (!validDate(current.databaseNow) || !validDate(prepared.preparedAt) ||
       !validDate(prepared.expiresAt)) {
