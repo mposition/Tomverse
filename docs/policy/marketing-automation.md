@@ -102,7 +102,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 - 플랫폼 OAuth 토큰은 Zernio가 보관한다. Tomverse는 저장하지 않는다.
 - 마케팅 이미지는 기존 private R2 버킷과 **분리된 전용 공개 버킷**과 전용 자격증명을 쓴다.
 
-## 5. 데이터 (마케팅 전용 테이블 5개)
+## 5. 데이터 (마케팅 전용 테이블 5개 — 다섯 번째는 버전 4)
 
 사용자 콘텐츠를 담는 컬럼은 없다.
 
