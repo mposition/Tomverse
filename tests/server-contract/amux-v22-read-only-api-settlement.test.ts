@@ -406,7 +406,7 @@ test("v52 contract touch discards the ordinary grade and binds one frontier rece
   });
 });
 
-test("v52 settlement escalates a contract publish file omitted from the runner inventory", async () => {
+test("v52 settlement blocks a contract publish file omitted from the runner inventory", async () => {
   world = makeWorld("succeeded");
   world.taskId = "00000000-0000-4000-8000-000000000099";
   world.recoveryApprovalId = null;
@@ -434,9 +434,10 @@ test("v52 settlement escalates a contract publish file omitted from the runner i
     changedPaths: ["src/ordinary.ts"],
   });
   assert.deepEqual(result, { settled: true, taskRevision: 6 });
-  assert.equal(world.taskUpdateData?.status, "todo");
-  assert.equal(world.taskUpdateData?.executionGrade, "frontier");
-  assert.equal(world.gradeEscalationAudits.length, 1);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.taskUpdateData?.executionGrade, undefined);
+  assert.equal(world.attemptUpdateData?.reason, "changed_paths_unavailable");
+  assert.equal(world.gradeEscalationAudits.length, 0);
 });
 
 test("v52 contract touch on the final attempt blocks for human recovery", async () => {

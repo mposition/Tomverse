@@ -268,6 +268,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/prompt-refiner-vnext-full-auto-release-exception-v1.md",
   },
   {
+    table: "MarketingLlmCall",
+    delegate: "marketingLlmCall",
+    writers: ["lib/marketingLlmBudgetStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
+  },
+  {
     table: "MarketingChannel",
     delegate: "marketingChannel",
     writers: ["lib/marketingStore.ts"],
@@ -1056,6 +1062,27 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 2,
     writeVerbs: 13,
     reason: "The setting migration adds an audit foreign key and reads same-transaction human approval evidence. Its DDL/trigger verbs affect only the budget setting and window; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261016050000_amux_budget_setting_xid_epoch/migration.sql",
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason: "This repair replaces only the existing setting trigger function and reads the latest setting while validating same-transaction owner evidence. It changes no row and creates no new writer.",
+  },
+  {
+    path: "prisma/migrations/20261016050000_amux_budget_setting_xid_epoch/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason: "This repair reads the named audit row inside the existing setting guard. Its only write verb is function DDL; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261016050100_amux_budget_window_xid_epoch/migration.sql",
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "This repair replaces only the existing window trigger function and reads the latest setting. Its DDL and TG_OP update spelling do not write the protected setting table.",
   },
   {
     path: "lib/opsObserverDigest.ts",
@@ -2226,6 +2253,37 @@ export const RAW_SQL_ALLOWLIST = [
       "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
   },
   {
+    path: "lib/marketingLlmBudgetStore.ts",
+    table: "MarketingLlmCall",
+    tableMentions: 11,
+    writeVerbs: 5,
+    reason:
+      "The sole registered writer of the marketing LLM cost ledger: it inserts a reservation and moves a call to dispatched or to its one close, each after the generator's audit row in the same transaction. The database triggers own every transition rule and timestamp; the other mentions are the reads that lock the month and the row.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "MarketingLlmCall",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The marketing generator actor's exact audit target literal only; this module runs no SQL.",
+  },
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 18,
+    writeVerbs: 13,
+    reason:
+      "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
+  },
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 13,
+    reason:
+      "The marketing LLM cost ledger migration creates its own table, constraints and guards. All three AdminAuditLog mentions are restrictive foreign keys from the ledger's audit columns to the existing audit writer; no audit row is inserted, updated or deleted here. The write verbs are the ledger's own CREATE statements and the triggers that refuse or constrain writes.",
+  },
+  {
     path: "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 2,
@@ -2360,6 +2418,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    count: 1,
+    reason:
+      "One read in the marketing LLM cost ledger's truncate guard: SELECT EXISTS over the trigger's own table, named from TG_TABLE_SCHEMA and TG_TABLE_NAME and quoted with %I, because the function pins search_path to pg_catalog, pg_temp and an empty temporary table of the same name must not answer for the ledger. Nothing in it is input; it reads and never writes.",
+  },
   {
     path: "prisma/migrations/20261013100000_amux_worker_capability/migration.sql",
     count: 3,
@@ -3654,6 +3718,12 @@ export const PROTECTED_EXPORT_ALLOWLIST = [
 // a publication nobody approved.
 
 export const RETENTION_SETTING_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    count: 1,
+    reason:
+      "The marketing LLM cost ledger's delete guard reads the setting to refuse any deletion that is not retention's. Reading it is the check; setting it is what this rule is about.",
+  },
   {
     path: "lib/marketingAutomationSchema.ts",
     count: 2,

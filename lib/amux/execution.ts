@@ -314,8 +314,9 @@ export async function startAmuxV22TaskExecution(input: {
     /^[0-9a-f]{40}$/.test(input.publicationBaseSha)
     ? input.publicationBaseSha : null;
   return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionStart,
+    // One more read is needed only after an audited frontier escalation.
     prismaCallCeiling: AMUX_DB_BOUNDARIES.executionStart.prismaCallCeiling +
-      (publicationBaseSha ? 24 : 0) + 2 },
+      (publicationBaseSha ? 24 : 0) + 3 },
     async (tx, context) => {
       const now = context.dbNow;
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);

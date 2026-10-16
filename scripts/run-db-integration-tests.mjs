@@ -730,6 +730,16 @@ run(
     // Marketing retention (S3h1): what the delete triggers let go goes, with an
     // audit row each and a retention_run report; what they keep stays.
     "tests/integration/marketing-retention.db.test.ts",
+    // The LLM cost ledger's own rules (S3c1), in plain SQL against a scratch
+    // schema: born reserved, five transitions, evidence set once, the
+    // reservation clock checked rather than recomputed, reasons paired to
+    // observations, and deletion left to retention.
+    "tests/integration/marketing-llm-call-ledger.db.test.ts",
+    // The ledger's one writer (S3c2): reserve, dispatch once, one close per
+    // call, replays answered before any current setting is read, the monthly
+    // cap under one month lock across two connections, and each action's
+    // statement count pinned.
+    "tests/integration/marketing-llm-budget-store.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them

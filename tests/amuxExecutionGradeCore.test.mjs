@@ -85,7 +85,7 @@ test("v52 post-run inventory blocks unknown paths and escalates contract touches
 test("v52 settlement checks publish files against the complete inventory", () => {
   const file = (path) => ({ path });
   assert.equal(decideAmuxV52SettlementPaths("routine",
-    ["src/ordinary.ts"], [file("lib/amux/guard.ts")]), "escalate");
+    ["src/ordinary.ts"], [file("lib/amux/guard.ts")]), "blocked");
   assert.equal(decideAmuxV52SettlementPaths("advanced",
     ["src/ordinary.ts"], [file("src/omitted.ts")]), "blocked");
   assert.equal(decideAmuxV52SettlementPaths("advanced",

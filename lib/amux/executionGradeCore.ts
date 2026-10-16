@@ -162,9 +162,7 @@ export const decideAmuxV52SettlementPaths = (grade: unknown,
   const names = changedPaths as string[];
   const missing = publishFiles.map((file) => file.path)
     .filter((path) => !names.includes(path));
-  if (missing.length === 0) return reported;
-  const combined = decideAmuxV52ChangedPaths(grade, [...names, ...missing]);
-  return combined === "escalate" ? "escalate" : "blocked";
+  return missing.length === 0 ? reported : "blocked";
 };
 
 export type AmuxExecutionGradeInput = {

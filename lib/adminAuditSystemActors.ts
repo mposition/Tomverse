@@ -143,7 +143,7 @@ export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
 export const SYSTEM_AUDIT_ACTORS = [
   "marketing-publisher",
   "marketing-retention",
-  "marketing-guard", "marketing-webhook",
+  "marketing-guard", "marketing-webhook", "marketing-generator",
   "prompt-refiner-shadow-runner",
   "prompt-refiner-vnext-one-shot-runner",
   "prompt-refiner-auto-budget",
@@ -250,7 +250,7 @@ export const amuxSessionIntakeSystemAuditScope = (
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
 ): actor is SystemAuditActor =>
-  isSystemAuditActor(actor) &&
+  isSystemAuditActor(actor) && marketingGeneratorAuditScope(actor, action, targetType) &&
   (actor !== AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.inspected" &&
       targetType === "AmuxV22TaskRecoveryEvidence")) &&
@@ -394,3 +394,22 @@ export const AMUX_DECISION_MAKER_SYSTEM_AUDIT_ACTORS = [
 ] as const satisfies readonly SystemAuditActor[];
 export type AmuxDecisionMakerSystemAuditActor =
   (typeof AMUX_DECISION_MAKER_SYSTEM_AUDIT_ACTORS)[number];
+
+/**
+ * The marketing generator writes only the LLM cost ledger's five actions, each
+ * about one ledger row (docs/policy/marketing-automation.md §5). Declared at the end of the
+ * file and joined into `systemAuditActionAllowed()` on its existing first line,
+ * so no access above it moves.
+ */
+const MARKETING_GENERATOR_AUDIT_ACTIONS: readonly string[] = [
+  "marketing_llm.reserved",
+  "marketing_llm.dispatched",
+  "marketing_llm.settled",
+  "marketing_llm.unknown_retained",
+  "marketing_llm.released",
+];
+function marketingGeneratorAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
+  return actor !== "marketing-generator" ||
+    (typeof action === "string" && MARKETING_GENERATOR_AUDIT_ACTIONS.includes(action) &&
+      targetType === "MarketingLlmCall");
+}
