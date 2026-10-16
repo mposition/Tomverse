@@ -11,6 +11,10 @@ const world = {
   modelPublic: true,
   featurePublic: true,
   assetKnown: true,
+  // Whether the row was there when the resolver locked it. A row the read
+  // sees but the lock did not take was inserted in between (S3a2 review).
+  planHeld: true,
+  modelHeld: true,
 };
 
 const claims = [
@@ -138,8 +142,15 @@ const {
 } = await import(mod("lib/marketingGuardCore.ts"));
 
 const database = {
-  // The resolver's clock is the database's, read through the same client.
-  $queryRaw: async () => [{ now: new Date() }],
+  // The resolver's clock is the database's, read through the same client,
+  // and its locks answer with the rows they took.
+  $queryRaw: async (strings) => {
+    const sql = strings.join("?");
+    if (sql.includes("clock_timestamp")) return [{ now: new Date() }];
+    if (sql.includes("\"BillingPlan\"")) return world.planHeld ? [{ id: "pro" }] : [];
+    if (sql.includes("\"ModelRegistryEntry\"")) return world.modelHeld ? [{ id: "model.fixture" }] : [];
+    return [];
+  },
   modelRegistryEntry: {
     findUnique: async ({ where }) =>
       world.modelPublic && where.id === "model.fixture"
@@ -259,12 +270,33 @@ const results = [
     { assetIds: ["asset.hero"], renderedText: "One view of the workspace." },
     "asset_unknown",
   ),
+  // Inserted between the lock and the read: the read sees the row, the lock
+  // never took it, so it is not a fact.
+  await bothDirections(
+    "price row inserted after the lock",
+    { good: { priceStored: true, planHeld: true }, bad: { priceStored: true, planHeld: false } },
+    { claimIds: ["claim.price"], renderedText: "Pro gives teams room to work." },
+    "price_source_not_stored",
+  ),
+  await bothDirections(
+    "model row inserted after the lock",
+    { good: { modelPublic: true, modelHeld: true }, bad: { modelPublic: true, modelHeld: false } },
+    { claimIds: ["claim.model"], renderedText: "A reviewed model is available." },
+    "model_claim_false",
+  ),
 ];
 
 const { resolveMarketingFactsWithSnapshot, marketingFactSnapshotDigest } = await import(
   mod("lib/marketingFactResolution.ts")
 );
-Object.assign(world, { priceStored: true, modelPublic: true, featurePublic: true, assetKnown: true });
+Object.assign(world, {
+  priceStored: true,
+  modelPublic: true,
+  featurePublic: true,
+  assetKnown: true,
+  planHeld: true,
+  modelHeld: true,
+});
 const recorded = await resolveMarketingFactsWithSnapshot(database, {
   claimIds: ["claim.price", "claim.model", "claim.feature"],
   assetIds: ["asset.hero"],
