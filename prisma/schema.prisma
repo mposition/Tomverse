@@ -9806,7 +9806,7 @@ model AmuxIdeaTrackedCheckoutReadManifest {
   createdAt          DateTime @default(now()) @db.Timestamptz(3)
 
   idea     AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [ideaId, referenceOrdinal], references: [ideaId, referenceOrdinal], onDelete: Restrict, onUpdate: Restrict)
+  evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [ideaId, referenceOrdinal], references: [ideaId, referenceOrdinal], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaTrackedCheckoutReadManifest_evidence_fkey")
   audit    AdminAuditLog @relation("AmuxIdeaTrackedCheckoutReadManifestAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([ideaId, referenceOrdinal])
