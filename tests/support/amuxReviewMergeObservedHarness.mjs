@@ -12,6 +12,7 @@ let attempt;
 let writes;
 let gradeGuard;
 let auditPresent;
+let auditValid;
 
 const fakeTx = {
   $queryRaw: async (strings) => {
@@ -25,7 +26,8 @@ const fakeTx = {
     authorizationAuditLogId: "assignment-audit", grade: task.executionGrade,
   }) },
   adminAuditLog: { findUnique: async () => !auditPresent ? null : ({ entryHash: "hash",
-    action: "amux.v22.worker.assigned", targetId: "assignment",
+    action: auditValid ? "amux.v22.worker.assigned" : "unexpected",
+    targetId: "assignment",
     metadata: { v52GradeRouting: gradeGuard },
   }) },
   amuxHumanEscalation: { updateMany: async (args) => { writes.push(["escalation", args]); return { count: 1 }; } },
@@ -53,12 +55,13 @@ const reset = () => {
   task = {
     id: "card", status: "review", owner: null, revision: 8, archivedAt: null,
     sourceSystem: "admin-idea-v4", cardType: "task", taskRole: "implement",
-    executionGrade: "medium", reviewPrNumber: 42,
+    executionGrade: "routine", reviewPrNumber: 42,
   };
   attempt = { id: "attempt", outcome: "succeeded", toStatus: "review", endedAt: dbNow, v22AssignmentId: "assignment" };
   writes = [];
   gradeGuard = false;
   auditPresent = true;
+  auditValid = true;
 };
 const run = (overrides = {}) => completeAmuxV22ReviewOnObservedMerge({
   taskId: "card", attemptId: "attempt", prNumber: 42, mergeCommitSha: MERGE, approvalReviewId: 7, ...overrides,
@@ -114,7 +117,7 @@ assert.deepEqual(await run({ changedFiles: ["components/chat/Ordinary.tsx"] }),
 reset();
 auditPresent = false;
 assert.deepEqual(await run(), { completed: true, taskRevision: 9 });
-await refused(() => { auditPresent = false; task.executionGrade = "routine"; },
+await refused(() => { auditValid = false; gradeGuard = true; },
   "pr_file_state_mismatch");
 
 // Malformed input is a programming error, not a refusal.

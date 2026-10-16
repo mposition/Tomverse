@@ -35,7 +35,9 @@ function makeWorld(outcome: Outcome) {
     frontierPriceAvailable: true,
     taskRole: null as string | null,
     taskGrade: "medium",
+    assignmentGrade: null as string | null,
     assignmentAuditPresent: true,
+    assignmentAuditAction: "amux.v22.worker.assigned",
     sourceApprovalId: null as string | null,
     taskUpdates: 0,
     gradeAuditsAtTaskUpdate: -1,
@@ -153,7 +155,7 @@ const tx = {
     throw new Error(`unexpected SQL: ${sql}`);
   },
   amuxV22WorkerAssignment: { findUnique: async () => ({
-    id: "assignment-one", grade: world.taskGrade,
+    id: "assignment-one", grade: world.assignmentGrade ?? world.taskGrade,
     authorizationAuditLogId: "assignment-audit",
     recoveryApprovalId: world.recoveryApprovalId, taskRevision: 5,
   }) },
@@ -212,7 +214,7 @@ const tx = {
   adminAuditLog: { findUnique: async (args: { where: { id: string } }) =>
     args.where.id === "assignment-audit" ?
       !world.assignmentAuditPresent ? null : {
-      entryHash: "a".repeat(64), action: "amux.v22.worker.assigned",
+      entryHash: "a".repeat(64), action: world.assignmentAuditAction,
       targetId: "assignment-one", metadata: { v52GradeRouting: world.gradeGuard },
     } : { entryHash: "a".repeat(64),
       action: "amux.v4.task_catalog.approve", actorUserId: "owner-one",
@@ -340,17 +342,18 @@ test("other Tasks keep the global five-attempt settlement budget", async () => {
 test("legacy settlement does not acquire the v52 assignment-audit gate", async () => {
   world = makeWorld("succeeded");
   world.assignmentAuditPresent = false;
+  world.taskGrade = "routine";
   const result = await (await execution).settleAmuxV22TaskExecution(
     await settlementInput("succeeded"));
   assert.equal(result.settled, true);
   assert.equal(world.taskUpdateData?.status, "review");
 });
 
-test("v52 settlement fails closed when its assignment audit is missing", async () => {
+test("v52 settlement refuses a marked but invalid assignment audit", async () => {
   world = makeWorld("succeeded");
-  world.assignmentAuditPresent = false;
   world.gradeGuard = true;
   world.taskGrade = "advanced";
+  world.assignmentAuditAction = "unexpected";
   const result = await (await execution).settleAmuxV22TaskExecution(
     await settlementInput("succeeded"));
   assert.deepEqual(result, { settled: false,
@@ -440,6 +443,19 @@ test("v52 missing inventory blocks even a successful execution", async () => {
   assert.equal(world.gradeEscalationAudits.length, 0);
 });
 
+test("v52 worker-blocked outcome keeps its cause without an inventory", async () => {
+  world = makeWorld("failed");
+  world.gradeGuard = true;
+  world.taskGrade = "routine";
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    attemptId: world.attemptId, worker, instanceId, generation: 1,
+    taskRevision: 5, outcome: "blocked", invocationIds: [],
+  });
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.notEqual(world.attemptUpdateData?.reason, "changed_paths_unavailable");
+});
+
 test("v52 ordinary paths preserve the normal successful destination", async () => {
   world = makeWorld("succeeded");
   world.gradeGuard = true;
@@ -467,6 +483,23 @@ test("v52 contract touch blocks when a new frontier price is unavailable", async
   assert.equal(world.taskUpdateData?.status, "blocked");
   assert.equal(world.taskUpdateData?.executionGrade, undefined);
   assert.equal(world.attemptUpdateData?.reason, "grade_receipt_unavailable");
+  assert.equal(world.gradeEscalationAudits.length, 0);
+});
+
+test("v52 contract touch reports a task-assignment grade mismatch", async () => {
+  world = makeWorld("failed");
+  world.gradeGuard = true;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.assignmentGrade = "advanced";
+  world.sourceApprovalId = "source-one";
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...await settlementInput("failed"),
+    changedPaths: ["lib/amux/execution.ts"],
+  });
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.attemptUpdateData?.reason, "grade_binding_unverified");
   assert.equal(world.gradeEscalationAudits.length, 0);
 });
 

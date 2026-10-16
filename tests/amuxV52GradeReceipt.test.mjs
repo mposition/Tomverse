@@ -41,7 +41,9 @@ const transaction = (rows) => ({ adminAuditLog: {
   },
 } });
 const audit = (overrides = {}) => ({ entryHash: "c".repeat(64),
-  metadata: { reason: "contract_path_touched",
+  actorUserId: null, actorEmail: null, ipAddress: null, userAgent: null,
+  metadata: { systemActor: "tomverse-amux-orchestrator",
+    classificationFailure: true, reason: "contract_path_touched",
     originalReceiptDigest: original.receiptDigest,
     previousGrade: "routine", nextGrade: "frontier",
     newReceipt: escalated, ...overrides } });
@@ -60,7 +62,9 @@ test("frontier grade requires exactly one digest-bound audited replacement", asy
   for (const rows of [[], [audit(), audit()],
     [audit({ originalReceiptDigest: "d".repeat(64) })],
     [audit({ newReceipt: original })],
-    [audit({ reason: "other" })]]) {
+    [audit({ reason: "other" })],
+    [audit({ systemActor: "other" })],
+    [{ ...audit(), actorUserId: "owner" }]]) {
     assert.equal(await readAmuxV52TaskReceipt(transaction(rows),
       "task-one", original, "frontier"), null);
   }

@@ -3,8 +3,7 @@ import "server-only";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
-import { amuxWorkerRoleForExecutionGrade,
-  decideAmuxV52ChangedPaths } from "@/lib/amux/executionGradeCore";
+import { decideAmuxV52ChangedPaths } from "@/lib/amux/executionGradeCore";
 import {
   AMUX_DB_BOUNDARIES,
   amuxBoundaryWithAttachment,
@@ -134,16 +133,14 @@ export async function completeAmuxV22ReviewOnObservedMerge(
         authorization.action === "amux.v22.worker.assigned" &&
         authorization.targetId === last.v22AssignmentId;
       const metadata = authorization?.metadata;
-      const v52Grade = !!assignment &&
-        amuxWorkerRoleForExecutionGrade(assignment.grade) !== null;
-      const gradeGuard = v52Grade && authorizationVerified &&
-        !!metadata && typeof metadata === "object" &&
+      const gradeGuard = !!metadata && typeof metadata === "object" &&
         !Array.isArray(metadata) &&
         (metadata as Record<string, unknown>).v52GradeRouting === true;
-      if (!assignment || (v52Grade && !gradeGuard))
+      if (gradeGuard && (!assignment || !authorizationVerified))
         return { completed: false as const,
           reason: "pr_file_state_mismatch" as const };
-      if (gradeGuard && (assignment.grade !== task.executionGrade ||
+      if (gradeGuard && assignment &&
+          (assignment.grade !== task.executionGrade ||
           decideAmuxV52ChangedPaths(assignment.grade,
             input.changedFiles) !== "pass"))
         return { completed: false as const,

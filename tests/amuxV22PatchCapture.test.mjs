@@ -140,14 +140,15 @@ test("v52 includes ignored contract paths without scanning unrelated ignored fil
     if (command[0] === "rev-parse") return { stdout: Buffer.from(
       command[1] === "--show-toplevel" ? "/repo" : BASE) };
     if (command[0] === "ls-files" && command.includes("--ignored"))
-      return { stdout: Buffer.from("LIB/AMUX/cache/new.ts\0") };
+      return { stdout: Buffer.from("LIB/AMUX/cache/new.ts\0lib/ordinary-cache.ts\0") };
     return { stdout: Buffer.alloc(0) };
   };
   const result = await captureAmuxV52ChangedPaths("/repo", BASE,
     { run, realpath: async (path) => path });
   assert.deepEqual(result.contractPaths, ["LIB/AMUX/cache/new.ts"]);
   const ignored = calls.find((command) => command.includes("--ignored"));
-  assert.ok(ignored.includes(":(icase,glob)lib/amux/**"));
+  assert.ok(ignored.includes(":(icase,literal)lib/amux/"));
+  assert.ok(ignored.includes(":(icase,literal)app/api/conversations/[conversationId]/"));
   assert.ok(!ignored.some((item) => item.includes("node_modules")));
 });
 
@@ -194,15 +195,22 @@ test("v52 discards a contract attempt only from its original clean base", async 
     calls.push(command);
     if (command[0] === "rev-parse") return { stdout: Buffer.from(
       command[1] === "--show-toplevel" ? "/repo" : BASE) };
+    if (command[0] === "ls-files") return { stdout: Buffer.from(
+      calls.filter((item) => item[0] === "ls-files").length === 1 ?
+        "lib/amux/new.ts\0components/chat/ordinary.ts\0" :
+        "components/chat/ordinary.ts\0") };
     if (command[0] === "status") return { stdout: Buffer.alloc(0) };
     return { stdout: Buffer.alloc(0) };
   };
   assert.equal(await discardAmuxV52ContractChanges("/repo", BASE,
     { run, realpath: async (path) => path }), true);
   assert.deepEqual(calls.map((command) => command[0]),
-    ["rev-parse", "rev-parse", "reset", "clean", "status"]);
-  assert.ok(calls.find((command) => command[0] === "clean").includes("-fdx"));
-  assert.ok(calls.find((command) => command[0] === "status").includes("--ignored"));
+    ["rev-parse", "rev-parse", "ls-files", "reset", "clean", "clean",
+      "status", "ls-files"]);
+  assert.deepEqual(calls.find((command) => command[0] === "clean"),
+    ["clean", "-fd", "--"]);
+  assert.deepEqual(calls.find((command) => command.includes("-fdx")),
+    ["clean", "-fdx", "--", ":(literal)lib/amux/new.ts"]);
   assert.equal(await discardAmuxV52ContractChanges("/repo", BASE,
     { run: async (_binary, args) => ({ stdout: Buffer.from(
       args.slice(6)[1] === "--show-toplevel" ? "/repo" : "b".repeat(40)) }),

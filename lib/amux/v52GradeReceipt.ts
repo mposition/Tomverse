@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { AMUX_SYSTEM_AUDIT_ACTOR } from "../adminAuditSystemActors.ts";
 
 import {
   checkV4TaskApprovedCeiling,
@@ -25,13 +26,18 @@ export async function readAmuxV52TaskReceipt(tx: Prisma.TransactionClient,
   const rows = await tx.adminAuditLog.findMany({ where: {
     action: AMUX_GRADE_ESCALATED_ACTION,
     targetType: "AmuxWorkItem", targetId: taskId,
-  }, select: { entryHash: true, metadata: true }, take: 2 });
-  if (rows.length !== 1 || !rows[0]?.entryHash) return null;
+  }, select: { entryHash: true, actorUserId: true, actorEmail: true,
+    ipAddress: true, userAgent: true, metadata: true }, take: 2 });
+  if (rows.length !== 1 || !rows[0]?.entryHash ||
+      rows[0].actorUserId !== null || rows[0].actorEmail !== null ||
+      rows[0].ipAddress !== null || rows[0].userAgent !== null) return null;
   const metadata = rows[0].metadata;
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
   const value = metadata as Record<string, unknown>;
   const escalated = receipt(value.newReceipt);
-  return value.reason === "contract_path_touched" &&
+  return value.systemActor === AMUX_SYSTEM_AUDIT_ACTOR &&
+    value.classificationFailure === true &&
+    value.reason === "contract_path_touched" &&
     value.originalReceiptDigest === approved.receiptDigest &&
     value.previousGrade === approved.grade && value.nextGrade === "frontier" &&
     escalated?.role === approved.role && escalated.grade === "frontier" ?
