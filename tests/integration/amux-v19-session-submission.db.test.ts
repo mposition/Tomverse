@@ -378,7 +378,9 @@ test("queue guard rejects missing and null system audit identity", async () => {
       `;
       await tx.$executeRaw`
         UPDATE "AdminAuditLog"
-        SET "metadata" = "metadata" - 'systemActor'
+        SET "metadata" = jsonb_set(
+          "metadata", '{systemActor}', 'null'::jsonb, false
+        )
         WHERE "id" = ${fixtures[2].reservationAuditLogId}
       `;
       await tx.$executeRaw`
