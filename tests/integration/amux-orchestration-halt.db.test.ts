@@ -26,6 +26,7 @@ import {
   resolveAmuxOrchestratorWriteLocked,
 } from "@/lib/amux/orchestratorHaltStore";
 import { buildAmuxRoutingSnapshot } from "@/lib/amux/routing";
+import { seedAmuxWorkerCatalog } from "./amuxDerivedCatalogFixture.ts";
 import { scoreAmuxWorkers } from "@/lib/amux/workerRouterCore";
 import {
   heartbeatAmuxWorkerRuntime,
@@ -158,10 +159,11 @@ const dbNow = async () =>
 /** Sets up one claimable card and one execution-ready worker, and the evidence a claim carries. */
 const claimableCard = async (prefix: string) => {
   const taskId = await createTodo(prefix);
-  const worker = `halt-${randomUUID().slice(0, 8)}`;
-  const catalog = JSON.stringify([
-    { worker_name: worker, provider: "codex", routing_roles: ["feature", "implementation"] },
-  ]);
+  // Version 35 (R2c): the worker comes from the registry the catalog is
+  // derived from, so it is one of the seven seed workers.
+  const worker = "codex-impl";
+  await seedAmuxWorkerCatalog([{ worker_name: worker, routing_roles: ["implementation"] }]);
+  const catalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
   return withEnv({ TOMVERSE_AMUX_WORKER_CATALOG_JSON: catalog }, async () => {
     const instanceId = randomUUID();
     const base = new Date();
