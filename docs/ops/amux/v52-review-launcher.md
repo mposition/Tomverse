@@ -1,7 +1,8 @@
 # AMUX v52 review launcher staging 준비
 
 v52의 검토 호출은 worker의 모델이나 sidecar가 아니라 worker별 v22 bridge의
-결정적 코드가 수행한다. `AMUX_EXECUTION_GRADE_CODE_LATCH`의 출고 값은 false이고,
+결정적 코드가 수행한다. S1~S4의 `AMUX_EXECUTION_GRADE_CODE_LATCH` 출고 값은 false였고,
+이 래치 활성화 PR이 병합되면 true가 된다.
 운영 스위치 `TOMVERSE_AMUX_EXECUTION_GRADE`도 운영자가 staging에서 따로 켜기
 전에는 닫혀 있다. 이 문서는 배치 준비이며 스위치 활성화 승인이 아니다.
 
