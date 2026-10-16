@@ -2477,6 +2477,9 @@ model AdminAuditLog {
   promptRefinerAutoBudgetDispatches PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetDispatchAudit")
   promptRefinerAutoBudgetUnknowns PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetUnknownAudit")
   promptRefinerAutoBudgetSettlements PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetSettlementAudit")
+  marketingLlmCallReservations MarketingLlmCall[] @relation("MarketingLlmCallReservationAudit")
+  marketingLlmCallDispatches   MarketingLlmCall[] @relation("MarketingLlmCallDispatchAudit")
+  marketingLlmCallCloses       MarketingLlmCall[] @relation("MarketingLlmCallCloseAudit")
   promptRefinerProductOperationalGuard PromptRefinerProductOperationalGuard? @relation("PromptRefinerProductOperationalGuardTransitionAudit")
 
   /// No actor relation on purpose: see
@@ -7259,8 +7262,7 @@ model AiVisibilityRun {
 
 /// The marketing generator's LLM cost ledger (marketing policy v4). One row per
 /// call; a dispatched call counts at its reservation. The migration's triggers
-/// own every transition rule and timestamp. The three audit ids are foreign
-/// keys to AdminAuditLog in SQL, deliberately not Prisma relations.
+/// own every transition rule and timestamp.
 model MarketingLlmCall {
   id                    String    @id
   state                 String
@@ -7295,6 +7297,10 @@ model MarketingLlmCall {
   reportedInputTokens   Int?
   reportedOutputTokens  Int?
   consumerDigest        String?
+
+  reservationAudit AdminAuditLog  @relation("MarketingLlmCallReservationAudit", fields: [reservationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  dispatchAudit    AdminAuditLog? @relation("MarketingLlmCallDispatchAudit", fields: [dispatchAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  closeAudit       AdminAuditLog? @relation("MarketingLlmCallCloseAudit", fields: [closeAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([monthStart, state])
   @@index([state, createdAt])
