@@ -8,6 +8,9 @@ import { AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR } from
   "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
+import { AMUX_EXECUTION_GRADE_ENV,
+  amuxExecutionGradeRoutingEnabled, amuxWorkerMatchesExecutionGrade,
+  isAmuxV52TaskConfirmation } from "./executionGradeCore.ts";
 import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
 import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { lockAmuxAdmissionAndReadIncident } from "./incident.ts";
@@ -18,6 +21,7 @@ import { TICK_TRANSACTION_LIMITS, withAutoTransaction } from
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
+import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { amuxV22ApiModelAccessCurrent, readAmuxV22RecoveryAuthority } from
   "./v22TaskRecoveryService.ts";
 import { amuxV22RecoveryAddedRouteConsented, amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
@@ -140,7 +144,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
       // Orchestration policy version 35, section 3: the variables while R2c is
       // off; the catalog derived from the registry, read in this transaction,
       // once it is on.
-      const { v22: catalog } = await readAmuxAssignmentCatalogs(tx);
+      const { v22: catalog, ceilings } = await readAmuxAssignmentCatalogs(tx);
       if (!catalog) throw new BoardImportError("worker_catalog_unavailable", 409);
       const safeStopFenced = await amuxV22SafeStopFencedWorkers(tx,
         catalog.map((worker) => worker.worker_name));
@@ -194,6 +198,13 @@ async function claimCandidate(taskId: string, assignmentId: string,
           select: { confirmationSnapshot: true },
         }) : null;
       const snapshot = source?.confirmationSnapshot;
+      const exactGradeRouting = amuxExecutionGradeRoutingEnabled(
+        process.env[AMUX_EXECUTION_GRADE_ENV]) &&
+        isAmuxV52TaskConfirmation(snapshot, card.executionGrade);
+      if (exactGradeRouting &&
+          !inspectV52TaskCatalogGrades(approved.catalog, ceilings).ok) {
+        throw new BoardImportError("grade_catalog_mismatch", 409);
+      }
       const approvedCost = snapshot && typeof snapshot === "object" &&
         !Array.isArray(snapshot) && "card" in snapshot &&
         snapshot.card && typeof snapshot.card === "object" &&
@@ -228,6 +239,9 @@ async function claimCandidate(taskId: string, assignmentId: string,
           worker.provider === route.provider.toLowerCase() &&
           worker.model === route.modelId &&
           worker.routing_roles.includes(card.taskRole!) &&
+          (!exactGradeRouting ||
+            amuxWorkerMatchesExecutionGrade(card.executionGrade,
+              worker.worker_name, ceilings)) &&
           worker.tool_capabilities.includes(requiredTool) &&
           (!nativeApiOnly || (!!recovery?.riskAcceptanceId &&
             recovery.readOnlyExecutorKind ===
@@ -279,7 +293,9 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const route = chooseAmuxV22WorkerRoute({ routes: quotaRoutes,
         priorAuthorWorkers: authorWorkers, priorAuthorProviders: authorProviders,
         isReview: card.taskRole === "review" });
-      if (!route) throw new BoardImportError("worker_unavailable", 409);
+      if (!route) throw new BoardImportError(
+        exactGradeRouting && matchingRoutes.length === 0 ?
+          "no_worker_for_grade" : "worker_unavailable", 409);
       if (recovery) {
         const prior = await tx.amuxExecutionAttempt.aggregate({ where: { taskId },
           _count: { _all: true }, _max: { attemptNumber: true },
@@ -415,6 +431,7 @@ export async function tickV22WorkerClaim() {
   }
   const rows = await prisma.$transaction((tx) => candidates(tx));
   if (!rows.length) return { claimed: false as const, reason: "no_candidate" as const };
+  let noWorkerForGrade = false;
   for (const candidate of rows) {
     let context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>;
     try { context = await loadAmuxV4TaskReadyContext(candidate.id); }
@@ -428,6 +445,10 @@ export async function tickV22WorkerClaim() {
         catch { return { claimed: false as const,
           reason: "outcome_unknown" as const }; }
       }
+      if (error.code === "no_worker_for_grade") {
+        noWorkerForGrade = true;
+        continue;
+      }
       if (["not_unassigned_todo", "task_not_ready", "worker_unavailable",
         "one_shot_role_unavailable",
         "review_author_unknown", "reserved_capacity_unavailable",
@@ -435,5 +456,6 @@ export async function tickV22WorkerClaim() {
       return { claimed: false as const, reason: error.code };
     }
   }
-  return { claimed: false as const, reason: "no_ready_candidate" as const };
+  return { claimed: false as const, reason:
+    noWorkerForGrade ? "no_worker_for_grade" as const : "no_ready_candidate" as const };
 }
