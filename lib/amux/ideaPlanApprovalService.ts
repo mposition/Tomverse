@@ -10,6 +10,10 @@ import { prepareAmuxV4NodePlan, runAmuxV4NodePlanInTx } from "./ideaNodePlanAppr
 import { AmuxNodeDuplicateScanError } from "./ideaNodeDuplicateScanService.ts";
 import { AMUX_IDEA_PLAN_APPROVAL_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
 import { AmuxV4UnitDecisionError } from "./ideaUnitDecisionStore.ts";
+import { AmuxV20RegistrationRefusalDetected } from
+  "./ideaRegistrationRefusalDetectionCore.ts";
+import { recordAmuxV20RegistrationRefusal } from
+  "./ideaRegistrationRefusalService.ts";
 import { AmuxPortfolioError } from "./portfolioAssessmentService.ts";
 import { prepareAmuxV4ScorePlan, runAmuxV4ScorePlanInTx,
   type AmuxV4ScorePlanAssessment } from "./portfolioPlanApprovalService.ts";
@@ -43,6 +47,7 @@ export async function approveAmuxV4Plan(session: Session, request: Request, inpu
   /** Exactly the units the screen showed for this approval. */
   expectedUnitIds: readonly string[];
 }) {
+  try {
   const nodes = await prepareAmuxV4NodePlan(session, request,
     { ideaId: input.ideaId, reasons: input.reasons }, { allowEmpty: true });
   const pendingFeatures = new Map(nodes.plan.filter((entry) => entry.level === "feature")
@@ -98,11 +103,26 @@ export async function approveAmuxV4Plan(session: Session, request: Request, inpu
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       ...AMUX_IDEA_PLAN_APPROVAL_TRANSACTION });
   } catch (error) {
+    if (!callbackReturned &&
+        error instanceof AmuxV20RegistrationRefusalDetected) throw error;
     if (!callbackReturned && error instanceof AmuxPortfolioError) throw error;
     if (!callbackReturned && error instanceof AmuxNodeDuplicateScanError) {
       throw new AmuxV4UnitDecisionError(error.code === "integrity_unavailable" ?
         "integrity_unavailable" : "reconfirm");
     }
     throw amuxV4PlanFailure(error, callbackReturned);
+  }
+  } catch (error) {
+    if (!(error instanceof AmuxV20RegistrationRefusalDetected)) throw error;
+    try {
+      await recordAmuxV20RegistrationRefusal({ session, request,
+        requestId: input.planRequestId, attemptKind: "whole_plan",
+        refusalCode: error.code, ...error.identity,
+        proposedExecutionGrade: error.proposedExecutionGrade,
+        finalExecutionGrade: error.finalExecutionGrade });
+    } catch {
+      throw new AmuxV4UnitDecisionError("integrity_unavailable");
+    }
+    throw new AmuxV4UnitDecisionError(error.code);
   }
 }

@@ -638,6 +638,14 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261016060000_amux_v20_registration_refusal/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 16,
+    reason:
+      "The v20 refusal migration adds one restrictive audit foreign key and its insert guard reads the exact same-transaction human audit row. Its DDL and trigger verbs affect only the new refusal table; it never inserts, updates or deletes AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20261016040000_amux_v19_session_submission/migration.sql",
     table: "AmuxIdeaOperatingScopeSetting",
     tableMentions: 3,

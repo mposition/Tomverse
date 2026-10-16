@@ -14,6 +14,12 @@ import { amuxV4UnitBrowserDigest } from "./ideaUnitBrowserCore.ts";
 import { createAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { inspectAmuxV20TaskRegistration } from
   "./ideaUnitRegistrationCore.ts";
+import type { AmuxV20RegistrationRefusalIdentity } from
+  "./ideaRegistrationRefusalCore.ts";
+import { AmuxV20RegistrationRefusalDetected } from
+  "./ideaRegistrationRefusalDetectionCore.ts";
+import { recordAmuxV20RegistrationRefusal } from
+  "./ideaRegistrationRefusalService.ts";
 import { readVerifiedAmuxCardProposal } from "./ideaUnitProposalReadService.ts";
 import { assembleAmuxV4StoryConfirmation } from
   "./ideaStoryConfirmationSnapshotCore.ts";
@@ -59,10 +65,34 @@ export type AmuxV4CardPrepareInTx = {
 
 const requireAmuxV20TaskGrade = (
   proposal: Parameters<typeof inspectAmuxV20TaskRegistration>[0],
+  identity: AmuxV20RegistrationRefusalIdentity,
 ) => {
   const inspected = inspectAmuxV20TaskRegistration(proposal);
-  if (!inspected.ok) throw new AmuxV4UnitDecisionError(inspected.code);
+  if (!inspected.ok) {
+    throw new AmuxV20RegistrationRefusalDetected(inspected.code, identity,
+      proposal);
+  }
   return inspected.executionGrade;
+};
+
+const persistAmuxV20RegistrationRefusal = async (input: {
+  error: AmuxV20RegistrationRefusalDetected;
+  session: Session;
+  request: Request;
+  requestId: string;
+  attemptKind: "prepare" | "consume";
+}) => {
+  try {
+    await recordAmuxV20RegistrationRefusal({
+      session: input.session, request: input.request,
+      requestId: input.requestId, attemptKind: input.attemptKind,
+      refusalCode: input.error.code, ...input.error.identity,
+      proposedExecutionGrade: input.error.proposedExecutionGrade,
+      finalExecutionGrade: input.error.finalExecutionGrade,
+    });
+  } catch {
+    throw new AmuxV4UnitDecisionError("integrity_unavailable");
+  }
 };
 
 /** The preparation itself, inside the caller's transaction: the single
@@ -156,7 +186,9 @@ export async function prepareAmuxV4CardRegistrationInTx(tx: Prisma.TransactionCl
     throw new AmuxV4UnitDecisionError("reconfirm");
   }
   const finalTaskGrade = verified.proposal.cardType === "task" ?
-    requireAmuxV20TaskGrade(verified.proposal) : null;
+    requireAmuxV20TaskGrade(verified.proposal, { ideaId: choice.ideaId,
+      draftUnitId: choice.draftUnitId,
+      analysisPreviewId: verified.previewId }) : null;
   const duplicates = await scanner(tx, { unitId: unit.id,
     proposal: verified.proposal, featureNodeId: feature.id });
   if (duplicates.candidates.length > 0 && choice.decisionReason === null) {
@@ -272,6 +304,13 @@ export async function prepareAmuxV4CardRegistration(input: {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
+    if (!callbackReturned &&
+        error instanceof AmuxV20RegistrationRefusalDetected) {
+      await persistAmuxV20RegistrationRefusal({ error,
+        session: input.session, request: input.request,
+        requestId: choice.prepareRequestId, attemptKind: "prepare" });
+      throw new AmuxV4UnitDecisionError(error.code);
+    }
     if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
     if (!callbackReturned && error instanceof AmuxCardDuplicateScanError) {
       throw new AmuxV4UnitDecisionError(error.code === "integrity_unavailable" ?
@@ -356,7 +395,9 @@ export async function consumeAmuxV4CardRegistration(input: {
           if (!verified.proposal.taskRole || !verified.proposal.executionGrade) {
             throw new AmuxV4UnitDecisionError("reconfirm");
           }
-          const finalExecutionGrade = requireAmuxV20TaskGrade(verified.proposal);
+          const finalExecutionGrade = requireAmuxV20TaskGrade(verified.proposal,
+            { ideaId: prepared.ideaId, draftUnitId: prepared.draftUnitId,
+              analysisPreviewId: verified.previewId });
           const approved = await calculateCurrentApprovedAmuxV4TaskCost(transaction,
             verified.proposal.taskRole, finalExecutionGrade);
           taskCost = { ok: true as const, receipt: approved.receipt };
@@ -389,6 +430,13 @@ export async function consumeAmuxV4CardRegistration(input: {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
+    if (!callbackReturned &&
+        error instanceof AmuxV20RegistrationRefusalDetected) {
+      await persistAmuxV20RegistrationRefusal({ error,
+        session: input.session, request: input.request,
+        requestId: input.consumeRequestId, attemptKind: "consume" });
+      throw new AmuxV4UnitDecisionError(error.code);
+    }
     if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
     if (!callbackReturned && error instanceof AmuxV4TaskCatalogApprovalError) {
       throw new AmuxV4UnitDecisionError("not_ready");

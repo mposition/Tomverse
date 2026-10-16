@@ -5,6 +5,10 @@ import { classifyAmuxExecutionPath, deriveAmuxExecutionGrade,
   normalizeAmuxExecutionPath,
   type AmuxExecutionGrade } from "./executionGradeCore.ts";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
+import { AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES,
+  isAmuxV20TaskRegistrationRefusal,
+  type AmuxV20TaskRegistrationRefusal } from
+  "./ideaRegistrationRefusalCore.ts";
 import { type AmuxIdeaUnitConfirmationSnapshot,
   type AmuxIdeaUnitConfirmationResult } from "./ideaUnitConfirmationCore.ts";
 import { checkAmuxIdeaUnitConsume, type AmuxIdeaUnitConsumeContext,
@@ -52,29 +56,9 @@ export type AmuxV4CardRegistrationInspection =
   | { ok: false; code: "reconfirm" | "reject" | "halt" | "proposal_mismatch" |
     AmuxV20TaskRegistrationRefusal };
 
-export const AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES = Object.freeze([
-  "task_expected_paths_missing",
-  "task_expected_paths_out_of_range",
-  "task_expected_path_invalid",
-  "task_expected_paths_duplicate",
-  "task_expected_paths_mixed",
-  "task_role_review_refused",
-  "task_execution_grade_mismatch",
-  "task_confirmation_grade_mismatch",
-  "task_cost_receipt_grade_mismatch",
-] as const);
-
-export type AmuxV20TaskRegistrationRefusal =
-  (typeof AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES)[number];
-
-const taskRegistrationRefusals = new Set<string>(
-  AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES,
-);
-
-export const isAmuxV20TaskRegistrationRefusal = (
-  value: unknown,
-): value is AmuxV20TaskRegistrationRefusal =>
-  typeof value === "string" && taskRegistrationRefusals.has(value);
+export { AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES,
+  isAmuxV20TaskRegistrationRefusal };
+export type { AmuxV20TaskRegistrationRefusal };
 
 export const amuxV4CardRegistrationDecisionErrorCode = (
   code: Extract<AmuxV4CardRegistrationInspection, { ok: false }>["code"],

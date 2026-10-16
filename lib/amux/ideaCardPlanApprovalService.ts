@@ -23,6 +23,8 @@ import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4UnitDecisionError, amuxV4UnitWriteEnabled
 import { readVerifiedAmuxCardProposal } from "./ideaUnitProposalReadService.ts";
 import { inspectAmuxV20TaskRegistration } from
   "./ideaUnitRegistrationCore.ts";
+import { AmuxV20RegistrationRefusalDetected } from
+  "./ideaRegistrationRefusalDetectionCore.ts";
 import { AmuxV4TaskCatalogApprovalError, calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 
@@ -92,6 +94,16 @@ export async function prepareAmuxV4CardPlan(session: Session, request: Request, 
   if (proposed.length > AMUX_V4_CARD_PLAN_MAX_PROPOSED) throw new AmuxV4CardPlanError("too_many_units");
   const verified = await Promise.all(proposed.map((unit) =>
     readVerifiedAmuxCardProposal(session, input.ideaId, unit.id)));
+  for (const entry of verified) {
+    if (entry.proposal.cardType !== "task") continue;
+    const inspected = inspectAmuxV20TaskRegistration(entry.proposal);
+    if (!inspected.ok) {
+      throw new AmuxV20RegistrationRefusalDetected(inspected.code, {
+        ideaId: input.ideaId, draftUnitId: entry.unit.id,
+        analysisPreviewId: entry.previewId,
+      }, entry.proposal);
+    }
+  }
 
   // A Feature is a node a consumed decision of this idea created or linked, or a node id.
   const approvedNodes = await prisma.amuxIdeaDraftUnit.findMany({
@@ -186,7 +198,12 @@ export async function runAmuxV4CardPlanInTx(tx: Prisma.TransactionClient,
             throw new AmuxV4UnitDecisionError("reconfirm");
           }
           const inspected = inspectAmuxV20TaskRegistration(proposal);
-          if (!inspected.ok) throw new AmuxV4UnitDecisionError(inspected.code);
+          if (!inspected.ok) {
+            throw new AmuxV20RegistrationRefusalDetected(inspected.code, {
+              ideaId: input.ideaId, draftUnitId: entry.draftUnitId,
+              analysisPreviewId: entry.verified.previewId,
+            }, proposal);
+          }
           const approved = await calculateCurrentApprovedAmuxV4TaskCost(transaction,
             proposal.taskRole, inspected.executionGrade);
           taskCost = { ok: true as const, receipt: approved.receipt };
@@ -210,6 +227,9 @@ export async function runAmuxV4CardPlanInTx(tx: Prisma.TransactionClient,
 /** Refusals from inside a plan transaction surface as themselves; anything
  * after the callback returned is an unknown outcome. */
 export function amuxV4PlanFailure(error: unknown, callbackReturned: boolean): Error {
+  if (!callbackReturned && error instanceof AmuxV20RegistrationRefusalDetected) {
+    return new AmuxV4UnitDecisionError(error.code);
+  }
   if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) return error;
   if (!callbackReturned && error instanceof AmuxV4TaskCatalogApprovalError) {
     return new AmuxV4UnitDecisionError("not_ready");

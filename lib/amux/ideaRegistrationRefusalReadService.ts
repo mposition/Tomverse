@@ -1,0 +1,44 @@
+import "server-only";
+
+import type { Prisma } from "@prisma/client";
+
+import { AMUX_V20_REGISTRATION_REFUSAL_ACTION,
+  AMUX_V20_REGISTRATION_REFUSAL_TARGET,
+  amuxV20RegistrationRefusalMetadata,
+  amuxV20RegistrationRefusalView,
+  isAmuxV20RegistrationRefusalAttemptKind,
+  isAmuxV20RegistrationRefusalGrade,
+  isAmuxV20TaskRegistrationRefusal,
+  matchesAmuxV20RegistrationRefusalMetadata,
+  type AmuxV20RegistrationRefusalView } from
+  "./ideaRegistrationRefusalCore.ts";
+
+/** Owner-scoped metadata read for the analysis detail. Trigger-enforced audit
+ * evidence is checked again before returning the latest waiting refusal. */
+export async function readLatestAmuxV20RegistrationRefusalInTx(
+  tx: Prisma.TransactionClient, ideaId: string, actorUserId: string,
+): Promise<AmuxV20RegistrationRefusalView | null> {
+  const row = await tx.amuxIdeaRegistrationRefusal.findFirst({
+    where: { ideaId, actorUserId, state: "awaiting_operator" },
+    orderBy: [{ attemptedAt: "desc" }, { id: "desc" }],
+    include: { auditLog: { select: { actorUserId: true, action: true,
+      targetType: true, targetId: true, metadata: true, entryHash: true } } },
+  });
+  if (!row) return null;
+  const expected = amuxV20RegistrationRefusalMetadata(row);
+  if (!isAmuxV20RegistrationRefusalAttemptKind(row.attemptKind) ||
+      !isAmuxV20TaskRegistrationRefusal(row.refusalCode) ||
+      (row.proposedExecutionGrade !== null &&
+        !isAmuxV20RegistrationRefusalGrade(row.proposedExecutionGrade)) ||
+      (row.finalExecutionGrade !== null &&
+        !isAmuxV20RegistrationRefusalGrade(row.finalExecutionGrade)) ||
+      !row.auditLog.entryHash || row.auditLog.actorUserId !== actorUserId ||
+      row.auditLog.action !== AMUX_V20_REGISTRATION_REFUSAL_ACTION ||
+      row.auditLog.targetType !== AMUX_V20_REGISTRATION_REFUSAL_TARGET ||
+      row.auditLog.targetId !== row.id ||
+      !matchesAmuxV20RegistrationRefusalMetadata(
+        row.auditLog.metadata, expected)) {
+    throw new Error("AMUX v20 registration refusal evidence unavailable");
+  }
+  return amuxV20RegistrationRefusalView(row);
+}

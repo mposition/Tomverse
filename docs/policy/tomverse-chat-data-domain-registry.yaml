@@ -2093,6 +2093,29 @@ domains:
       decision exists; a retention-preserving account-deletion plan is needed
       before any live owner-decision writer can be enabled.
 
+  - domain: amuxIdeaRegistrationRefusal
+    prismaModel: AmuxIdeaRegistrationRefusal
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v20, AMUX final-Guard refusal account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The actor is the operator whose Admin registration request reached the
+      final deterministic Guard. This append-only row keeps identifiers, a
+      closed refusal code, a database timestamp, and closed proposed/final
+      grades; it never stores expected paths or proposal text. A restrictive
+      reference binds the same-transaction canonical human audit. The approved
+      seven-year decision-metadata rule does not yet resolve account deletion,
+      legal hold enforcement, end-of-retention cleanup, or unified export.
+
   - domain: amuxIdeaSourceScopeApproval
     prismaModel: AmuxIdeaSourceScopeApproval
     userLinkageRole: actor

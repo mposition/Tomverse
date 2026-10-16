@@ -12,8 +12,8 @@ let failOn;
 let commitFails;
 const proposals = {
   "unit-story-1": { localRef: "s1", cardType: "story", featureRef: "f1", parentStoryRef: null, dependencyRefs: [], taskRole: null, title: "Story" },
-  "unit-task-01": { localRef: "t1", cardType: "task", featureRef: "f1", parentStoryRef: "s1", dependencyRefs: [], taskRole: "implement", executionGrade: "routine", title: "Task one" },
-  "unit-task-02": { localRef: "t2", cardType: "task", featureRef: "f1", parentStoryRef: "s1", dependencyRefs: ["t1"], taskRole: "test", executionGrade: "routine", title: "Task two" },
+  "unit-task-01": { localRef: "t1", cardType: "task", featureRef: "f1", parentStoryRef: "s1", dependencyRefs: [], taskRole: "implement", executionGrade: "routine", expectedPaths: ["components/example.tsx"], title: "Task one" },
+  "unit-task-02": { localRef: "t2", cardType: "task", featureRef: "f1", parentStoryRef: "s1", dependencyRefs: ["t1"], taskRole: "test", executionGrade: "routine", expectedPaths: ["tests/example.test.ts"], title: "Task two" },
 };
 
 class DecisionError extends Error { constructor(code) { super(code); this.code = code; } }
@@ -59,7 +59,8 @@ mock.module(mod("lib/amux/ideaUnitProposalReadService.ts"), {
   namedExports: {
     readVerifiedAmuxCardProposal: async (_session, _ideaId, unitId) => {
       const p = proposals[unitId];
-      return { unit: { id: unitId, localRef: p.localRef }, proposal: p };
+      return { unit: { id: unitId, localRef: p.localRef }, proposal: p,
+        previewId: "preview-0001" };
     },
   },
 });

@@ -22,7 +22,7 @@ import { amuxContentDigest, sealAmuxContent,
 import type { AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import type { AmuxAnalysisNode } from "./ideaAnalysisChunkCore.ts";
 import { amuxV4CardRegistrationDecisionErrorCode,
-  inspectAmuxV4CardRegistration,
+  inspectAmuxV4CardRegistration, isAmuxV20TaskRegistrationRefusal,
   type AmuxV20TaskRegistrationRefusal } from
   "./ideaUnitRegistrationCore.ts";
 import { inspectAmuxV4NodeCreation } from "./ideaNodeRegistrationCore.ts";
@@ -32,6 +32,8 @@ import type { V4TaskCostCeilingResult } from "./v4TaskCostCeilingCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { allocateAmuxCardDisplayKey,
   chooseAmuxFeatureDisplayPrefix } from "./cardDisplayKeyAllocator.ts";
+import { AmuxV20RegistrationRefusalDetected } from
+  "./ideaRegistrationRefusalDetectionCore.ts";
 
 /** A09's protected writer still requires the dedicated environment gate and
  * the route's owner approval before its transaction body is reachable. */
@@ -420,6 +422,13 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     resolvedFeatureRef: hierarchy[2].id,
   });
   if (!inspected.ok) {
+    if (isAmuxV20TaskRegistrationRefusal(inspected.code)) {
+      throw new AmuxV20RegistrationRefusalDetected(inspected.code, {
+        ideaId: prepared.ideaId,
+        draftUnitId: prepared.draftUnitId,
+        analysisPreviewId: prepared.sourcePreviewId,
+      }, input.proposal);
+    }
     throw new AmuxV4UnitDecisionError(
       amuxV4CardRegistrationDecisionErrorCode(inspected.code),
     );

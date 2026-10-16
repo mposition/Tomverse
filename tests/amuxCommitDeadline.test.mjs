@@ -196,6 +196,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // xid comparison. Neither repair adds a commit-deadline mechanism.
   "20261016050000_amux_budget_setting_xid_epoch",
   "20261016050100_amux_budget_window_xid_epoch",
+  // amux-intake v20: durable final-Guard refusal evidence and operator wait
+  // metadata; it adds no commit-deadline marker, trigger or classifier.
+  "20261016060000_amux_v20_registration_refusal",
   // Orchestration v52: audited execution-grade revision only, with no
   // commit-deadline marker, trigger, guard or classifier change.
   "20261016090000_amux_v52_grade_escalation_guard",

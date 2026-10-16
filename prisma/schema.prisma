@@ -2433,6 +2433,7 @@ model AdminAuditLog {
   amuxV4UnitFinalDecisions   AmuxIdeaUnitDecision[] @relation("AmuxV4UnitFinalAudit")
   amuxV4UnitUnknownDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4UnitUnknownAudit")
   amuxV4UnitUnknownResolvedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4UnitUnknownResolvedAudit")
+  amuxV20RegistrationRefusals AmuxIdeaRegistrationRefusal[] @relation("AmuxV20RegistrationRefusalAudit")
   amuxV4FrontierApprovals AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierApprovalAudit")
   amuxV4FrontierRevocations AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierRevocationAudit")
   amuxV4SourcePlanCreations AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanCreationAudit")
@@ -9739,6 +9740,7 @@ model AmuxIdeaSubmission {
   draftUnits        AmuxIdeaDraftUnit[]
   derivationGroups  AmuxIdeaDerivationGroup[]
   unitDecisions     AmuxIdeaUnitDecision[]
+  registrationRefusals AmuxIdeaRegistrationRefusal[]
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
   contentKeyRetirements AmuxIdeaContentKeyRetirement[]
   retentionHolds AmuxIdeaRetentionHold[]
@@ -9828,6 +9830,7 @@ model AmuxIdeaSourcePlanRevision {
   currentForIdea       AmuxIdeaSubmission? @relation("AmuxCurrentIdeaPlan")
   predecessor          AmuxIdeaSourcePlanRevision? @relation("AmuxIdeaPlanPredecessor", fields: [predecessorId, ideaId], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
   successors           AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanPredecessor")
+  registrationRefusals AmuxIdeaRegistrationRefusal[]
   creationAudit        AdminAuditLog @relation("AmuxIdeaPlanCreationAudit", fields: [creationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   previews             AmuxIdeaTransferPreview[]
   chunks               AmuxIdeaAnalysisChunk[]
@@ -9911,6 +9914,7 @@ model AmuxIdeaTransferPreview {
   currentForChunk     AmuxIdeaAnalysisChunk?         @relation("AmuxCurrentChunkPreview")
   planBoundCurrentForChunk AmuxIdeaAnalysisChunk? @relation("AmuxPlanBoundCurrentPreview")
   unitDecisions       AmuxIdeaUnitDecision[]
+  registrationRefusals AmuxIdeaRegistrationRefusal[]
   analysisBudgetHold  AmuxIdeaAnalysisBudgetHold?
 
   @@unique([ideaId, chunkIndex, attempt])
@@ -10129,6 +10133,7 @@ model AmuxIdeaDraftUnit {
   idea  AmuxIdeaSubmission    @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
   chunk AmuxIdeaAnalysisChunk @relation(fields: [ideaId, chunkIndex], references: [ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
   decisions AmuxIdeaUnitDecision[]
+  registrationRefusals AmuxIdeaRegistrationRefusal[]
   derivationGroup AmuxIdeaDerivationGroup? @relation("AmuxV4DerivedDrafts", fields: [derivationGroupId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDraftUnit_derivation_group_fkey")
   derivationSources AmuxIdeaDerivationEdge[] @relation("AmuxV4DerivationSource")
   derivationTargets AmuxIdeaDerivationEdge[] @relation("AmuxV4DerivationTarget")
@@ -10253,6 +10258,36 @@ model AmuxIdeaUnitDecision {
   /// Prepared/consumed uniqueness and partial state/source/audit guards are
   /// SQL-only. The future writer must still bind owner step-up, base revision
   /// and keyed digest, and atomic card/node/unit writes before activation.
+}
+
+/// One deterministic v20 Task registration refusal. The row is immutable and
+/// contains identifiers and closed metadata only; expected paths and proposal
+/// text never enter it. A retry with the same request id reads this row rather
+/// than recording a second refusal.
+model AmuxIdeaRegistrationRefusal {
+  id                     String   @id @db.Uuid
+  requestId              String   @unique @db.Uuid
+  attemptKind            String
+  state                  String
+  refusalCode            String
+  ideaId                 String
+  draftUnitId            String
+  actorUserId            String
+  analysisPreviewId      String
+  sourcePlanRevisionId   String
+  proposedExecutionGrade String?
+  finalExecutionGrade    String?
+  attemptedAt            DateTime
+  auditLogId             String   @unique
+
+  idea       AmuxIdeaSubmission @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  draftUnit  AmuxIdeaDraftUnit @relation(fields: [draftUnitId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  preview    AmuxIdeaTransferPreview @relation(fields: [analysisPreviewId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sourcePlan AmuxIdeaSourcePlanRevision @relation(fields: [sourcePlanRevisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog   AdminAuditLog @relation("AmuxV20RegistrationRefusalAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([ideaId, state, attemptedAt])
+  @@index([draftUnitId, attemptedAt])
 }
 
 /// Non-runnable Initiative -> Epic -> Feature hierarchy. Node content is

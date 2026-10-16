@@ -117,6 +117,8 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaHierarchyDecisionCore.ts",
   "lib/amux/ideaKeyConfig.ts",
   "lib/amux/ideaKeyStore.ts",
+  "lib/amux/ideaRegistrationRefusalCore.ts",
+  "lib/amux/ideaRegistrationRefusalReadService.ts",
   "lib/amux/ideaResolutionChoiceCore.ts",
   "lib/amux/ideaResolutionPreviewService.ts",
   "lib/amux/localIntakeCore.ts",
@@ -134,8 +136,11 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // same closure; it adds no import, I/O or writer. Repin both latch states.
 // The same v19 idea_raw size change touches ideaCrypto here. No route,
 // import, writer or reviewed file changes in this preview closure.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "2315d4d7b2ecdab857edf0731f831c80482ff9d57cc0f969ec042cc2d373572b";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "d11a2c350fe6c8c81e4110fc79bef22d6b84342f2f2feb20d3d5df9a86ba9b0c";
+// Intake v20.5 adds an audited refusal metadata read to the existing analysis
+// read. Its two-module boundary is read-only and does not import the refusal
+// writer; keep both latch digests pinned to this 17-file closure.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "ad62cce712b3940db06d937c60f3312af1bd95a6172ff42573f6f8907cd150fb";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "fa827eb9250d2c0ede02855c3f3e7ca7ef35b2c25d221e5b37ead943815ba7cb";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

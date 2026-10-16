@@ -14,6 +14,8 @@ import { matchesAmuxIdeaAnalysisUnitCommitments } from
   "./ideaAnalysisResultReadCore.ts";
 import type { AmuxIdeaAnalysisResultView, AmuxVisibleAnalysisUnit } from
   "./ideaAnalysisResultReadCore.ts";
+import { readLatestAmuxV20RegistrationRefusalInTx } from
+  "./ideaRegistrationRefusalReadService.ts";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 
@@ -92,6 +94,13 @@ export async function readAmuxFirstIdeaAnalysisResult(
       }
     }
     if (chunk.state !== "draft_ready") return { state: "pending" };
+    let registrationRefusal;
+    try {
+      registrationRefusal = await readLatestAmuxV20RegistrationRefusalInTx(
+        tx, ideaId, actorUserId);
+    } catch {
+      throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+    }
     const partial = chunk.coverageStatus === "more" &&
       chunk.continuationKind === "output";
     const needsOwnerInput = chunk.coverageStatus === "needs_owner_input" &&
@@ -260,19 +269,20 @@ export async function readAmuxFirstIdeaAnalysisResult(
         completedAt: chunk.analysisCompletedAt.toISOString(), outcome: "propose",
         coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
         remainingScope: freeformValue?.remainingScope as string | undefined ?? null,
-        nextChunkIndex: chunkIndex + 1, units: visibleUnits };
+        nextChunkIndex: chunkIndex + 1, units: visibleUnits,
+        registrationRefusal };
       if (needsOwnerInput) return { state: "needs_owner_input", ideaId, previewId,
         completedAt: chunk.analysisCompletedAt.toISOString(),
         outcome: "needs_information",
         coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
         remainingScope: freeformValue?.remainingScope as string | undefined ?? null,
         ownerQuestion: freeformValue?.ownerQuestion as string | undefined ?? null,
-        units: visibleUnits };
+        units: visibleUnits, registrationRefusal };
       return { state: "ready", ideaId, previewId,
         completedAt: chunk.analysisCompletedAt.toISOString(),
         outcome: meta!.outcome as "propose" | "reject",
         coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
-        units: visibleUnits };
+        units: visibleUnits, registrationRefusal };
     } catch {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     } finally {
