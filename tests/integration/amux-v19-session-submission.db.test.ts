@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import type { Session } from "next-auth";
 
@@ -65,6 +65,10 @@ const scope = {
 };
 const masterKey = randomBytes(32);
 const digestKey = randomBytes(32);
+const oversizedIdeaTail = "i".repeat(1024 * 1024 + 257);
+const oversizedSessionDisplay =
+  "AMUX v19 synthetic DB test " + "s".repeat(1024 * 1024 + 257);
+const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 const keysFor = (ideaId: string) => ({
   masterKeyId: amuxContentUnitKeyId({ ideaId, purpose: "idea_raw", subjectId: ideaId }),
   masterKeyVersion: 1,
@@ -75,14 +79,15 @@ const keysFor = (ideaId: string) => ({
 const inspect = (
   ideaId: string,
   repositories = ["mposition/Tomverse"],
+  content?: { idea: string; sessionDisplay: string },
 ): Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }> => {
   const result = inspectAmuxIdeaSessionSubmission({
     version: 1,
     requestId: ideaId,
-    input: { version: 1, idea: "Synthetic session idea " + ideaId,
+    input: { version: 1, idea: content?.idea ?? "Synthetic session idea " + ideaId,
       repositories, pullRequests: [] },
     source: { toolName: "Codex", modelProvider: "OpenAI",
-      sessionDisplay: "AMUX v19 synthetic DB test" },
+      sessionDisplay: content?.sessionDisplay ?? "AMUX v19 synthetic DB test" },
   });
   if (!result.ok) throw new Error("Synthetic session input rejected: " + result.code);
   return result;
@@ -140,7 +145,10 @@ before(async () => {
   if (!current) throw new Error("Synthetic operating scope was not stored");
   authority = current;
   committedIdeaId = randomUUID();
-  const inspected = inspect(committedIdeaId);
+  const inspected = inspect(committedIdeaId, undefined, {
+    idea: "Synthetic session idea " + committedIdeaId + oversizedIdeaTail,
+    sessionDisplay: oversizedSessionDisplay,
+  });
   committedRequestId = inspected.requestId;
   const committed = await prisma.$transaction((tx) =>
     commitAmuxIdeaSessionSubmission(tx, {
@@ -168,6 +176,8 @@ test("session submission encrypts idea and provenance under the scope owner with
   assert.equal(row.sourceProvenanceKeyId, row.rawKeyId);
   assert.equal(row.sourceProvenanceKeyVersion, row.rawKeyVersion);
   assert.notEqual(row.sourceProvenanceDigest, row.rawDigest);
+  assert.ok((row.rawCiphertext?.byteLength ?? 0) > 1024 * 1024);
+  assert.ok((row.sourceProvenanceCiphertext?.byteLength ?? 0) > 1024 * 1024);
   const keys = keysFor(committedIdeaId);
   const raw = openAmuxContent({
     ciphertext: Buffer.from(row.rawCiphertext ?? []),
@@ -179,12 +189,15 @@ test("session submission encrypts idea and provenance under the scope owner with
     keyId: row.sourceProvenanceKeyId ?? "",
     keyVersion: row.sourceProvenanceKeyVersion ?? 0,
   }, "idea_raw", committedIdeaId, keys);
-  assert.equal(JSON.parse(raw.toString("utf8")).idea,
-    "Synthetic session idea " + committedIdeaId);
-  assert.deepEqual(JSON.parse(source.toString("utf8")), {
-    toolName: "Codex", modelProvider: "OpenAI",
-    sessionDisplay: "AMUX v19 synthetic DB test",
-  });
+  const openedIdea = JSON.parse(raw.toString("utf8"));
+  const expectedIdea = "Synthetic session idea " + committedIdeaId + oversizedIdeaTail;
+  assert.ok(Buffer.byteLength(openedIdea.idea, "utf8") > 1024 * 1024);
+  assert.equal(sha256(openedIdea.idea), sha256(expectedIdea));
+  const openedSource = JSON.parse(source.toString("utf8"));
+  assert.equal(openedSource.toolName, "Codex");
+  assert.equal(openedSource.modelProvider, "OpenAI");
+  assert.ok(Buffer.byteLength(openedSource.sessionDisplay, "utf8") > 1024 * 1024);
+  assert.equal(sha256(openedSource.sessionDisplay), sha256(oversizedSessionDisplay));
   assert.equal(audit.actorUserId, null);
   assert.equal(audit.actorEmail, null);
   assert.equal(audit.ipAddress, null);
