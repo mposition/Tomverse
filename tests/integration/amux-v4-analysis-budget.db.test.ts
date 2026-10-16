@@ -10,6 +10,8 @@ import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE,
   AMUX_V4_ANALYSIS_CLAIM_ACTION,
+  AMUX_V4_ANALYSIS_CLAIM_TARGET,
+  AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE,
   AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
@@ -909,6 +911,14 @@ test("seven-day expiry fences an in-flight child before cancelling its idea", as
       reservedMicroUsd: sourceHold.reservedMicroUsd,
       status: "in_flight", createdAt: confirmedAt, dispatchedAt: consumedAt,
     } });
+    await writeSystemAuditLog({ tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
+      targetType: AMUX_V4_ANALYSIS_CLAIM_TARGET, targetId: previewId,
+      summary: "Recorded one synthetic in-flight analysis claim.",
+      metadata: { requestId: randomUUID(), previewId, ideaId, chunkIndex: 0,
+        holdId, payloadDigest: "b".repeat(64), leaseGeneration: 1,
+        modelCallStarted: false },
+    });
     const before = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
       where: { namespace_monthStart: { namespace, monthStart } },
     });
@@ -930,11 +940,14 @@ test("seven-day expiry fences an in-flight child before cancelling its idea", as
     });
     assert.deepEqual([afterWindow.reservedMicroUsd, afterWindow.spentMicroUsd],
       [before.reservedMicroUsd, before.spentMicroUsd]);
-    assert.equal((await tx.adminAuditLog.findUniqueOrThrow({
+    const cancellationAudit = await tx.adminAuditLog.findUniqueOrThrow({
       where: { id: cancelled.auditId },
-    })).action, AMUX_V4_IDEA_AUTO_CANCEL_ACTION);
+    });
+    assert.equal(cancellationAudit.action, AMUX_V4_IDEA_AUTO_CANCEL_ACTION);
+    assert.equal((cancellationAudit.metadata as Record<string, unknown>)
+      .inFlightHoldId, holdId);
     assert.equal(await tx.adminAuditLog.count({ where: {
-      action: "AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN", targetId: holdId,
+      action: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION, targetId: holdId,
     } }), 1);
     await assert.rejects(commitAmuxIdeaAnalysisResult(tx, {
       requestId: randomUUID(), ideaId, previewId, holdId,
@@ -942,6 +955,20 @@ test("seven-day expiry fences an in-flight child before cancelling its idea", as
       rawModelOutput: null, inputTokens: null, outputTokens: null, keys,
     }), (error: unknown) => error instanceof AmuxIdeaAnalysisResultError &&
       error.code === "not_ready");
+    const readback = await readAmuxIdeaAnalysisClaimResolution(tx,
+      { session, holdId });
+    assert.equal(readback.holdStatus, "outcome_unknown");
+    assert.equal(readback.zeroReleaseEligible, false);
+    const resolved = await commitAmuxIdeaAnalysisClaimResolution(tx, {
+      session, request, resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest, evidenceDigest: "c".repeat(64),
+      disposition: "evidence_insufficient",
+    });
+    assert.equal(resolved.settledMicroUsd,
+      sourceHold.reservedMicroUsd.toString());
+    assert.equal((await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+      where: { id: holdId },
+    })).status, "owner_consumed");
     throw rollback;
   }, { timeout: 30_000 }), (error: unknown) => error === rollback);
 });

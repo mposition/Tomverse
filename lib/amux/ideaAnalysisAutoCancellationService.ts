@@ -66,6 +66,7 @@ export async function commitAmuxOverdueIdeaAnalysisCancellation(
       (!inFlight[0]!.currentPreviewId || idea.state !== "analyzing"))) {
     throw new AmuxIdeaAutoCancellationError("integrity_unavailable");
   }
+  let inFlightHoldId: string | null = null;
   if (inFlight.length === 1) {
     const chunk = inFlight[0]!;
     const preview = await tx.amuxIdeaTransferPreview.findUnique({
@@ -95,6 +96,7 @@ export async function commitAmuxOverdueIdeaAnalysisCancellation(
     if (fenced.count !== 1) {
       throw new AmuxIdeaAutoCancellationError("integrity_unavailable");
     }
+    inFlightHoldId = preview.analysisBudgetHold.id;
   }
   const auditId = await writeSystemAuditLog({
     tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
@@ -104,7 +106,8 @@ export async function commitAmuxOverdueIdeaAnalysisCancellation(
     summary: "Stopped an unfinished AMUX v4 idea analysis at its seven-day deadline.",
     metadata: { submittedAt: idea.submittedAt.toISOString(),
       analysisDeadlineAt: idea.analysisDeadlineAt.toISOString(),
-      rawPurgeAfter: idea.rawPurgeAfter.toISOString() },
+      rawPurgeAfter: idea.rawPurgeAfter.toISOString(),
+      ...(inFlightHoldId ? { inFlightHoldId } : {}) },
   });
   const updated = await tx.amuxIdeaSubmission.updateMany({
     where: { id: ideaId, state: { in: UNFINISHED_STATES },
