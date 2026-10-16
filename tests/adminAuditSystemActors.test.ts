@@ -114,6 +114,9 @@ test("the system actor list is closed and changes only by review", () => {
     // S2e: the staging shadow receiver. On the guard's line in the source so
     // the sealed Prompt Refiner closure's positions do not move.
     "marketing-webhook",
+    // S3c2: the LLM cost ledger's writer, on the same line for the same reason,
+    // scoped to the ledger's five actions on MarketingLlmCall.
+    "marketing-generator",
     "prompt-refiner-shadow-runner",
     "prompt-refiner-vnext-one-shot-runner",
     "prompt-refiner-auto-budget",
@@ -423,4 +426,21 @@ test("no administrator audit call site names the reserved key", () => {
       .map(({ path }) => path),
     []
   );
+});
+
+test("the marketing generator writes only the LLM cost ledger's five actions", () => {
+  for (const action of [
+    "marketing_llm.reserved",
+    "marketing_llm.dispatched",
+    "marketing_llm.settled",
+    "marketing_llm.unknown_retained",
+    "marketing_llm.released",
+  ]) {
+    assert.equal(systemAuditActionAllowed("marketing-generator", action, "MarketingLlmCall"), true, action);
+    assert.equal(systemAuditActionAllowed("marketing-generator", action, "MarketingPost"), false, action);
+  }
+  assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_post.intake_queued", "MarketingPost"), false);
+  assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_llm.legal_hold_set", "MarketingLlmCall"), false);
+  // Other actors are unaffected by the generator's scope.
+  assert.equal(systemAuditActionAllowed("marketing-guard", "marketing_post.intake_queued", "MarketingPost"), true);
 });
