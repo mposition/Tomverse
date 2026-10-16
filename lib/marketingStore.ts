@@ -5949,17 +5949,22 @@ export async function purgeExpiredMarketingPostContent(
   const take = Math.max(0, Math.min(Math.floor(limit), MARKETING_RETENTION_BATCH_LIMIT));
   const cutoff = new Date(marketingUtcMinusMonths(now, 24).getTime() - 1);
 
+  // The same condition selects and writes: a post that moved between the two
+  // -- to a status this keeps, or to published with a new publication time --
+  // is no longer this run's to purge.
+  const due = {
+    contentPurgedAt: null,
+    legalHold: false,
+    status: { in: [...CONTENT_PURGEABLE_STATUSES] },
+    OR: [
+      { publishedAt: { lte: cutoff } },
+      { publishedAt: null, createdAt: { lte: cutoff } },
+    ],
+  } satisfies Prisma.MarketingPostWhereInput;
+
   const ids = (
     await tx.marketingPost.findMany({
-      where: {
-        contentPurgedAt: null,
-        legalHold: false,
-        status: { in: [...CONTENT_PURGEABLE_STATUSES] },
-        OR: [
-          { publishedAt: { lte: cutoff } },
-          { publishedAt: null, createdAt: { lte: cutoff } },
-        ],
-      },
+      where: due,
       orderBy: { createdAt: "asc" },
       take,
       select: { id: true },
@@ -5969,7 +5974,7 @@ export async function purgeExpiredMarketingPostContent(
   let purged = 0;
   for (const id of ids) {
     const updated = await tx.marketingPost.updateMany({
-      where: { id, contentPurgedAt: null, legalHold: false },
+      where: { ...due, id },
       data: { envelope: Prisma.DbNull, contentPurgedAt: now },
     });
     if (updated.count !== 1) continue;
