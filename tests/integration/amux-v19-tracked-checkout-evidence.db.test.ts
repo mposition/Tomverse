@@ -21,8 +21,12 @@ import { readAmuxIdeaProgressInTx } from "@/lib/amux/ideaProgressRead";
 import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
-import { readAmuxContentPurgeOutcome, retireVerifiedAmuxContentKey } from
+import { readAmuxContentPurgeOutcome, recordAmuxContentBodyPurge,
+  retireVerifiedAmuxContentKey } from
   "@/lib/amux/ideaContentKeyRetirementService";
+import { commitAmuxIdeaRetentionHold, commitAmuxIdeaRetentionHoldRelease,
+  readAmuxIdeaRetentionHoldScope } from
+  "@/lib/amux/ideaRetentionHoldService";
 import { openAmuxContent, verifyAmuxContentDigest } from "@/lib/amux/ideaCrypto";
 import { parseAmuxTrackedCheckoutReadManifest } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestCore";
@@ -31,6 +35,8 @@ import { amuxTrackedCheckoutReadManifestKeyIdentity,
   amuxReadManifestDueAt, commitAmuxDueReadManifestPurge,
   recordAmuxTrackedCheckoutReadManifest } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestStore";
+import { purgeDueAmuxReadManifests } from
+  "@/lib/amux/ideaTrackedCheckoutReadManifestRetention";
 import {
   commitAmuxOperatingScope,
   readAmuxOperatingScopeAuthority,
@@ -348,10 +354,35 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
   const manifest = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
     where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
   });
+  await prisma.$transaction((tx) =>
+    recordAmuxTrackedCheckoutEvidence(tx, evidenceInput(ideaId, 1)));
+  const secondManifestId = randomUUID();
+  const secondKeys = { masterKeyId: amuxContentUnitKeyId(
+    amuxTrackedCheckoutReadManifestKeyIdentity(ideaId, secondManifestId)),
+    masterKeyVersion: 1, masterKey: randomBytes(32),
+    digestKeyId: "synthetic-checkout-read-digest", digestKey: randomBytes(32) };
+  try {
+    await prisma.$transaction((tx) => recordAmuxTrackedCheckoutReadManifest(tx, {
+      manifestId: secondManifestId, ideaId, referenceOrdinal: 1,
+      pinnedCommitSha: "a".repeat(40),
+      observed: { kind: "verified_success", readFiles: ["docs/second.md"] },
+    }, secondKeys));
+  } finally {
+    secondKeys.masterKey.fill(0);
+    secondKeys.digestKey.fill(0);
+  }
   assert.equal(amuxReadManifestDueAt(new Date("2026-10-01T00:00:00Z"))
     .toISOString(), "2026-10-08T00:00:00.000Z");
   assert.equal(await prisma.$transaction((tx) =>
     commitAmuxDueReadManifestPurge(tx, manifest.id)), "skipped");
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaRetentionHoldScope(tx, ideaId)),
+  { remainingBodies: 3, alreadyPurgedBodies: 0 });
+  const holdId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaRetentionHold(tx, {
+    session, request, id: holdId, ideaId, reasonCode: "legal_request",
+    days: 1, expectedRemainingBodies: 3, expectedAlreadyPurgedBodies: 0,
+  }));
   const submittedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000);
   const analysisDeadlineAt = amuxReadManifestDueAt(submittedAt);
   // The real insert guard forbids an expired idea. Move only this synthetic
@@ -370,7 +401,26 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
   await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.update({
     where: { id: manifest.id }, data: { ciphertext: null, keyId: null,
       keyVersion: null, bodyPurgedAt: new Date() },
+  }), /retention is not due/);
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueReadManifestPurge(tx, manifest.id)), "skipped");
+  await prisma.$transaction((tx) => commitAmuxIdeaRetentionHoldRelease(tx, {
+    session, request, holdId, ideaId,
+  }));
+  await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.update({
+    where: { id: manifest.id }, data: { ciphertext: null, keyId: null,
+      keyVersion: null, bodyPurgedAt: new Date() },
   }), /retirement is missing/);
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const target = amuxTrackedCheckoutReadManifestKeyIdentity(ideaId, manifest.id);
+    await recordAmuxContentBodyPurge(tx, target, now, "c".repeat(64),
+      manifest.digestKeyId);
+    await tx.amuxIdeaTrackedCheckoutReadManifest.update({
+      where: { id: manifest.id }, data: { ciphertext: null, keyId: null,
+        keyVersion: null, bodyPurgedAt: now },
+    });
+  }), /purge audit mismatch/);
   assert.equal(await prisma.$transaction((tx) =>
     commitAmuxDueReadManifestPurge(tx, manifest.id)), "purged");
   const target = amuxTrackedCheckoutReadManifestKeyIdentity(ideaId, manifest.id);
@@ -385,11 +435,25 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
   assert.equal(purged.fileCount, 2);
   assert.equal(purged.digest, manifest.digest);
   assert.equal(purged.auditLogId, manifest.auditLogId);
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaRetentionHoldScope(tx, ideaId)),
+  { remainingBodies: 1, alreadyPurgedBodies: 2 });
   const deleted: string[] = [];
-  assert.equal(await retireVerifiedAmuxContentKey(target, async (identity) => {
+  await assert.rejects(purgeDueAmuxReadManifests(async () => {
+    throw new Error("synthetic key-store uncertainty");
+  }), /key_store_unavailable/);
+  assert.ok((await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
+    where: { id: secondManifestId },
+  })).ciphertext);
+  const batch = await purgeDueAmuxReadManifests(async (identity) => {
     deleted.push(identity.subjectId);
-  }), "deleted");
-  assert.deepEqual(deleted, [manifest.id]);
+  });
+  assert.equal(batch.bodiesPurged, 1);
+  assert.equal(batch.keysDeleted, 2);
+  assert.deepEqual(deleted, [manifest.id, secondManifestId]);
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaRetentionHoldScope(tx, ideaId)),
+  { remainingBodies: 0, alreadyPurgedBodies: 3 });
   assert.equal(await retireVerifiedAmuxContentKey(target, async () => {
     throw new Error("already deleted key must not be retried");
   }), "already_deleted");

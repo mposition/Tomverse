@@ -9836,7 +9836,8 @@ model AmuxIdeaContentKeyRetirement {
   @@index([keyDeletedAt, bodyPurgedAt])
 }
 
-/// One owner-approved idea-wide hold pauses all four analysis content clocks.
+/// One owner-approved idea-wide hold pauses analysis content clocks, including
+/// CLI read-file paths.
 /// It never moves those clocks; expiry or release makes overdue rows due again.
 model AmuxIdeaRetentionHold {
   id                String    @id @db.Uuid

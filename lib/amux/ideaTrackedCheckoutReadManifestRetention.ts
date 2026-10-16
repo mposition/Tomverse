@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { AmuxContentRetirementError, readAmuxContentPurgeOutcome,
   retireVerifiedAmuxContentKey,
   type AmuxRetirableContent } from "./ideaContentKeyRetirementService.ts";
+import { deleteAmuxContentUnitKey } from "./ideaKeyStore.ts";
 import { AMUX_READ_MANIFEST_RETENTION_MS,
   commitAmuxDueReadManifestPurge } from
   "./ideaTrackedCheckoutReadManifestStore.ts";
@@ -16,7 +17,9 @@ function keyIdentity(ideaId: string, manifestId: string): AmuxRetirableContent {
 
 /** A missing/uncertain S3 outcome stops this tick. Pending durable key
  * retirements are processed before another body is purged. */
-export async function purgeDueAmuxReadManifests() {
+export async function purgeDueAmuxReadManifests(
+  deleteKey: typeof deleteAmuxContentUnitKey = deleteAmuxContentUnitKey,
+) {
   const pending = await prisma.amuxIdeaContentKeyRetirement.findMany({
     where: { purpose: "repository_read_manifest", keyDeletedAt: null },
     orderBy: [{ bodyPurgedAt: "asc" }, { ideaId: "asc" }],
@@ -24,8 +27,9 @@ export async function purgeDueAmuxReadManifests() {
   });
   let keysDeleted = 0;
   for (const row of pending) {
-    await retireVerifiedAmuxContentKey(keyIdentity(row.ideaId, row.subjectId));
-    keysDeleted += 1;
+    const result = await retireVerifiedAmuxContentKey(keyIdentity(row.ideaId, row.subjectId),
+      deleteKey);
+    if (result === "deleted") keysDeleted += 1;
   }
   const nowRows = await prisma.$queryRaw<Array<{ now: Date }>>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"`;
@@ -42,21 +46,24 @@ export async function purgeDueAmuxReadManifests() {
   let bodiesPurged = 0;
   for (const row of due) {
     const target = keyIdentity(row.ideaId, row.id);
+    let result: "purged" | "skipped";
     try {
-      const result = await prisma.$transaction((tx) =>
+      result = await prisma.$transaction((tx) =>
         commitAmuxDueReadManifestPurge(tx, row.id),
       { maxWait: 3_000, timeout: 12_000 });
-      if (result === "purged") {
-        bodiesPurged += 1;
-        await retireVerifiedAmuxContentKey(target);
-        keysDeleted += 1;
-      }
     } catch (error) {
-      if (error instanceof AmuxContentRetirementError &&
-          error.code === "key_store_unavailable") throw error;
       const readBack = await readAmuxContentPurgeOutcome(target)
         .catch(() => "unavailable" as const);
+      if (error instanceof AmuxContentRetirementError &&
+          error.code === "integrity_unavailable" && readBack === "not_purged") {
+        throw error;
+      }
       throw new AmuxContentRetirementError("outcome_unknown", target, readBack);
+    }
+    if (result === "purged") {
+      bodiesPurged += 1;
+      const retired = await retireVerifiedAmuxContentKey(target, deleteKey);
+      if (retired === "deleted") keysDeleted += 1;
     }
   }
   return { bodiesPurged, keysDeleted, scanned: pending.length + due.length,
