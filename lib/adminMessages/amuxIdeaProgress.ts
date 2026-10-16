@@ -41,6 +41,10 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     checkoutExcluded: (count: number) => `${count} ${count === 1 ? "file" : "files"} excluded`,
     checkoutReasons: { secretPath: "secret path", secretContent: "secret content",
       nonRegular: "non-regular file", unscannableContent: "unscannable content" },
+    checkoutReadFiles: (count: number) => `${count} ${count === 1 ? "file" : "files"} read by the CLI`,
+    checkoutReadDigest: "Read-file digest",
+    checkoutReadEncrypted: "Read-file paths stored encrypted",
+    checkoutReadPurged: "Read-file paths and key deleted; count and digest retained",
     unavailable: "The idea list could not be read. Nothing was changed; reload to try again.",
     listUnavailable: "The list is not shown because it could not be read.",
     stages: {
@@ -101,6 +105,10 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     checkoutExcluded: (count: number) => `제외한 파일 ${count}개`,
     checkoutReasons: { secretPath: "비밀 경로", secretContent: "비밀 내용",
       nonRegular: "일반 파일 아님", unscannableContent: "내용 검사 불가" },
+    checkoutReadFiles: (count: number) => `CLI가 읽은 파일 ${count}개`,
+    checkoutReadDigest: "읽은 파일 digest",
+    checkoutReadEncrypted: "읽은 파일 경로 암호화 보관 중",
+    checkoutReadPurged: "읽은 파일 경로와 키 삭제됨 · 건수와 digest 보존",
     unavailable: "아이디어 목록을 읽지 못했습니다. 바뀐 것은 없습니다. 새로 고쳐 다시 시도하세요.",
     listUnavailable: "목록을 읽지 못해 표시하지 못했습니다.",
     stages: {

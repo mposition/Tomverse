@@ -79,6 +79,15 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
                       </li>)}
                   </ul>
                 ) : null}
+                {evidence.readManifest ? (
+                  <div className="mt-2 space-y-1 border-t border-zinc-800 pt-2 text-xs text-zinc-300"
+                    data-testid="amux-checkout-read-manifest">
+                    <p>{m.checkoutReadFiles(evidence.readManifest.fileCount)}</p>
+                    <p>{evidence.readManifest.bodyPurged ? m.checkoutReadPurged : m.checkoutReadEncrypted}</p>
+                    <p>{m.checkoutReadDigest}: <code className="break-all text-zinc-100">
+                      {evidence.readManifest.digest}</code></p>
+                  </div>
+                ) : null}
               </li>
             ))}
           </ol>
