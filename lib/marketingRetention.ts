@@ -7,6 +7,9 @@
  * audit chain and a `retention_run` report. Run by the daily maintenance
  * cleanup; a table with more due than one batch finishes on later days.
  *
+ * The LLM cost ledger (S3c3c) is the fourth table: closed calls past their 24
+ * months and not on legal hold, through the ledger's own writer.
+ *
  * Not here yet: purging the content of published posts after 24 months and
  * compacting history entries after 90 days (S3h2), and the public image bucket,
  * which has no port to delete through.
@@ -16,6 +19,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 
+import { purgeExpiredMarketingLlmCalls } from "@/lib/marketingLlmBudgetStore";
 import {
   purgeExpiredMarketingRows,
   runMarketingTransaction,
@@ -30,8 +34,8 @@ const TABLES: readonly MarketingRetentionTable[] = [
 
 export async function runMarketingRetention(
   client: PrismaClient,
-): Promise<Record<MarketingRetentionTable, number>> {
-  const purged = {} as Record<MarketingRetentionTable, number>;
+): Promise<Record<MarketingRetentionTable | "MarketingLlmCall", number>> {
+  const purged = {} as Record<MarketingRetentionTable | "MarketingLlmCall", number>;
   for (const table of TABLES) {
     const result = await runMarketingTransaction(
       client,
@@ -40,5 +44,10 @@ export async function runMarketingRetention(
     );
     purged[table] = result.purged;
   }
+  const ledger = await client.$transaction((tx) => purgeExpiredMarketingLlmCalls(tx), {
+    maxWait: 5_000,
+    timeout: 60_000,
+  });
+  purged.MarketingLlmCall = ledger.purged;
   return purged;
 }
