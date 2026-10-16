@@ -154,3 +154,26 @@ test("the route as built pins no model, so every reservation is refused", async 
   }
   assert.equal(await prisma.marketingLlmCall.count(), 0);
 });
+
+test("a failure inside the transaction answers 503 and reports an incident without the request", async () => {
+  const reports: Array<Record<string, unknown>> = [];
+  const failing = {
+    $transaction: async () => {
+      throw new Error("connection lost");
+    },
+  } as unknown as typeof prisma;
+  const response = await handleMarketingLlmBudgetRequest(post(reserveBody()), {
+    prisma: failing,
+    env: ENV,
+    budget: BUDGET,
+    report: async (incident) => {
+      reports.push(incident as unknown as Record<string, unknown>);
+      return undefined as never;
+    },
+  });
+  assert.deepEqual(response, { status: 503, body: { code: "ledger_unavailable" } });
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].code, "MARKETING_LLM_BUDGET_LEDGER_UNAVAILABLE");
+  assert.deepEqual(reports[0].context, { component: "marketing-llm-budget", action: "reserve" });
+  assert.ok(!JSON.stringify(reports[0].context).includes("run-1"), "no request field is reported");
+});

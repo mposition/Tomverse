@@ -35,6 +35,7 @@ import {
   parseMarketingGeneratorJson,
   readMarketingGeneratorBody,
 } from "@/lib/marketingGeneratorAuth";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 export const MARKETING_LLM_BUDGET_MAX_BODY_BYTES = 4 * 1024;
 
@@ -190,6 +191,10 @@ async function run(
  * rolls everything back, so the answer is "unavailable" and the generator may
  * send the same request again: every action is keyed, and a repeat reads back
  * whatever did commit.
+ *
+ * The failure is reported as an operational incident with the action and the
+ * error class only -- no body, no key, no secret -- so a database outage and
+ * a defect both leave a record rather than a silent 503.
  */
 export async function handleMarketingLlmBudgetRequest(
   request: Request,
@@ -197,13 +202,17 @@ export async function handleMarketingLlmBudgetRequest(
     readonly prisma: PrismaClient;
     readonly env: Readonly<Record<string, string | undefined>>;
     readonly budget: MarketingLlmBudgetEnvironment;
+    readonly report?: typeof reportOperationalIncident;
   },
 ): Promise<MarketingLlmBudgetResponse> {
   const secret = marketingGeneratorSecret(deps.env);
   if (!secret || !marketingGeneratorAuthorized(request, secret)) {
     return { status: 401, body: { error: "Unauthorized" } };
   }
-  const raw = await readMarketingGeneratorBody(request, MARKETING_LLM_BUDGET_MAX_BODY_BYTES);
+  const raw = await readMarketingGeneratorBody(request, MARKETING_LLM_BUDGET_MAX_BODY_BYTES).catch(
+    () => undefined,
+  );
+  if (raw === undefined) return { status: 400, body: { code: "invalid_request" } };
   if (raw === null) return { status: 413, body: { code: "body_too_large" } };
   const parsed = marketingLlmBudgetRequestSchema.safeParse(parseMarketingGeneratorJson(raw));
   if (!parsed.success) return { status: 400, body: { code: "invalid_request" } };
@@ -212,7 +221,17 @@ export async function handleMarketingLlmBudgetRequest(
   }
   try {
     return answer(await run(deps.prisma, parsed.data, deps.budget));
-  } catch {
+  } catch (error) {
+    await (deps.report ?? reportOperationalIncident)({
+      code: "MARKETING_LLM_BUDGET_LEDGER_UNAVAILABLE",
+      title: "Marketing LLM budget request could not be recorded",
+      error,
+      severity: "error",
+      cooldownMs: 30 * 60 * 1_000,
+      context: { component: "marketing-llm-budget", action: parsed.data.action },
+    }).catch((reportError: unknown) => {
+      console.error("Marketing LLM budget incident could not be reported:", reportError);
+    });
     return { status: 503, body: { code: "ledger_unavailable" } };
   }
 }
