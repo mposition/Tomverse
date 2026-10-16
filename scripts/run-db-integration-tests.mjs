@@ -654,6 +654,9 @@ run(
     // transaction_timeout armed against the service's deadline -- which only a
     // real PostgreSQL 17 can show.
     "tests/integration/marketing-draft-intake.db.test.ts",
+    // What the generator reads before it writes (S3b): approval-mode accounts,
+    // claims without evidence, market facts without the pages they came from.
+    "tests/integration/marketing-generator-context.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them

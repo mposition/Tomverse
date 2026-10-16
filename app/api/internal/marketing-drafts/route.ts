@@ -1,8 +1,6 @@
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-import { createHash, timingSafeEqual } from "node:crypto";
-
 import { NextResponse } from "next/server";
 
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
@@ -11,6 +9,12 @@ import {
   marketingDraftProvenanceMatches,
   marketingDraftSubmissionSchema,
 } from "@/lib/marketingDraftIntakeCore";
+import {
+  marketingGeneratorAuthorized,
+  marketingGeneratorSecret,
+  parseMarketingGeneratorJson,
+  readMarketingGeneratorBody,
+} from "@/lib/marketingGeneratorAuth";
 import { intakeMarketingGeneratorDraft } from "@/lib/marketingDraftIntakeStore";
 import { runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
@@ -26,72 +30,18 @@ import { prisma } from "@/lib/prisma";
 // the generation budget (S3c) and the price-fallback alert (S3d) are not there
 // yet -- so the route answers with closed reasons and writes nothing.
 
-/**
- * Only `MARKETING_GENERATOR_SUBMIT_SECRET`, by the publisher route's rule: at
- * least 32 characters, compared as SHA-256 digests in constant time, and no
- * other secret as a fallback.
- */
-const generatorSecret = (): string | null => {
-  const secret = process.env.MARKETING_GENERATOR_SUBMIT_SECRET;
-  return secret && secret.length >= 32 ? secret : null;
-};
-
-const authorized = (request: Request, secret: string): boolean => {
-  const authorization = request.headers.get("authorization");
-  const provided = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
-  if (!provided) return false;
-  return timingSafeEqual(
-    createHash("sha256").update(secret).digest(),
-    createHash("sha256").update(provided).digest(),
-  );
-};
-
 const json = (body: Record<string, unknown>, status: number) =>
   NextResponse.json(body, { status, headers: { "cache-control": "no-store" } });
 
-/** Read chunk by chunk and abandon the stream at the first byte over the limit. */
-const readBody = async (request: Request): Promise<Uint8Array | null> => {
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declared) && declared > MARKETING_DRAFT_INTAKE_MAX_BODY_BYTES) return null;
-  if (!request.body) return new Uint8Array(0);
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MARKETING_DRAFT_INTAKE_MAX_BODY_BYTES) {
-      await reader.cancel().catch(() => undefined);
-      return null;
-    }
-    chunks.push(value);
-  }
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
-};
-
 export async function POST(request: Request) {
-  const secret = generatorSecret();
-  if (!secret || !authorized(request, secret)) {
+  const secret = marketingGeneratorSecret();
+  if (!secret || !marketingGeneratorAuthorized(request, secret)) {
     return json({ error: "Unauthorized" }, 401);
   }
 
-  const raw = await readBody(request);
+  const raw = await readMarketingGeneratorBody(request, MARKETING_DRAFT_INTAKE_MAX_BODY_BYTES);
   if (raw === null) return json({ code: "body_too_large" }, 413);
-
-  let body: unknown;
-  try {
-    body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
-  } catch {
-    return json({ code: "invalid_request" }, 400);
-  }
-  const parsed = marketingDraftSubmissionSchema.safeParse(body);
+  const parsed = marketingDraftSubmissionSchema.safeParse(parseMarketingGeneratorJson(raw));
   if (!parsed.success) return json({ code: "invalid_request" }, 400);
   const submission = parsed.data;
   if (!marketingDraftProvenanceMatches(secret, submission)) {
