@@ -8,7 +8,7 @@ export type AmuxV4TaskReadyReason =
   | "role_or_grade_missing" | "parent_path_changed"
   | "dependency_set_changed" | "dependency_incomplete"
   | "cost_reconfirmation_required" | "cost_unavailable"
-  | "worker_unavailable" | "orchestrator_halted";
+  | "worker_unavailable" | "no_worker_for_grade" | "orchestrator_halted";
 
 export type AmuxV4TaskReadyFacts = {
   card: { sourceSystem: string | null; cardType: string | null;
@@ -22,6 +22,7 @@ export type AmuxV4TaskReadyFacts = {
     status: string; terminal: boolean }[];
   cost: "allow" | "reconfirm" | "hold";
   compatibleWorkerCount: number;
+  exactGradeRouting?: boolean;
   orchestratorHalted: boolean;
 };
 
@@ -53,7 +54,8 @@ export function evaluateAmuxV4TaskReady(facts: AmuxV4TaskReadyFacts,
   if (facts.cost === "reconfirm") reasons.push("cost_reconfirmation_required");
   if (facts.cost === "hold") reasons.push("cost_unavailable");
   if (!Number.isSafeInteger(facts.compatibleWorkerCount) ||
-      facts.compatibleWorkerCount < 1) reasons.push("worker_unavailable");
+      facts.compatibleWorkerCount < 1) reasons.push(
+        facts.exactGradeRouting ? "no_worker_for_grade" : "worker_unavailable");
   if (facts.orchestratorHalted) reasons.push("orchestrator_halted");
   return { version: AMUX_V4_TASK_READY_VERSION, ready: reasons.length === 0,
     reasons, dependencyCount: facts.dependencies.length,
