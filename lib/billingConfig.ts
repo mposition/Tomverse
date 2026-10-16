@@ -3,6 +3,7 @@ import "server-only";
 import type {
   BillingPlan as PrismaBillingPlan,
   BillingPromotion as PrismaBillingPromotion,
+  Prisma,
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { ModelTier } from "@/lib/models";
@@ -188,7 +189,17 @@ export type BillingPlanWithFieldSources = {
   plan: BillingPlanConfig;
   /** One entry per field of the merged plan. */
   sources: Record<keyof BillingPlanConfig, BillingPlanFieldSource>;
+  /**
+   * The stored row these values were read from, or `null` when the plan is
+   * the compiled default with no row at all. A marketing claim records the
+   * row id and its `updatedAt` so a later change to the price is visible
+   * without keeping a second copy of it (docs/policy/marketing-automation.md §7.2).
+   */
+  row: { readonly id: string; readonly updatedAt: string } | null;
 };
+
+/** What the field-source reader needs from a client: the plan table, read only. */
+export type BillingPlanReadClient = Pick<Prisma.TransactionClient, "billingPlan">;
 
 /**
  * The same plans `getBillingPlans()` returns, each with where its fields came
@@ -200,12 +211,14 @@ export type BillingPlanWithFieldSources = {
  * plans this returns are identical to the existing reader's, so the two cannot
  * drift into disagreeing about the values while agreeing about their sources.
  */
-export async function getBillingPlansWithFieldSources(): Promise<
-  BillingPlanWithFieldSources[]
-> {
+export async function getBillingPlansWithFieldSources(
+  // A caller judging a claim inside its own transaction passes it, so the
+  // plans are read in the same snapshot as everything else it decides on.
+  database: BillingPlanReadClient = prisma,
+): Promise<BillingPlanWithFieldSources[]> {
   // One read, and the plans are merged from it rather than fetched again: see
   // `mergeBillingPlanRows`.
-  const rows = await prisma.billingPlan.findMany({
+  const rows = await database.billingPlan.findMany({
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   });
   const plans = mergeBillingPlanRows(rows);
@@ -241,7 +254,11 @@ export async function getBillingPlansWithFieldSources(): Promise<
       ]),
     ) as Record<keyof BillingPlanConfig, BillingPlanFieldSource>;
 
-    return { plan, sources };
+    return {
+      plan,
+      sources,
+      row: row ? { id: row.id, updatedAt: row.updatedAt.toISOString() } : null,
+    };
   });
 }
 

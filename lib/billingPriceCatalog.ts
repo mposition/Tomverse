@@ -10,6 +10,7 @@ import {
 } from "@/lib/billingMarkets";
 import { CREDIT_PACKS, type CreditPackId } from "@/lib/creditPacks";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 export const BILLING_PRICE_CATALOG_KEY = "billing.fixed-prices.v1";
 export const LOCALIZED_BILLING_CURRENCIES = ["AUD", "CNY", "EUR", "KRW"] as const;
@@ -218,6 +219,33 @@ export async function readBillingPriceCatalog(): Promise<BillingPriceCatalog> {
   }
   reportCatalogFallback(source);
   return cloneDefaultCatalog();
+}
+
+/**
+ * Where the catalogue a customer is quoted comes from, through the caller's
+ * client and without creating anything.
+ *
+ * For a marketing claim about a price (docs/policy/marketing-automation.md §7.2): only
+ * `stored` can back one, and the claim records the row's `updatedAt`. This
+ * is not a serving path, so it neither writes the default row nor reports a
+ * fallback -- the readers that quote prices do both. `updatedAt` is `null`
+ * when there is no row.
+ */
+export async function readBillingPriceCatalogSource(
+  database: Pick<Prisma.TransactionClient, "appSetting"> = prisma,
+): Promise<{ source: BillingPriceCatalogSource; updatedAt: string | null }> {
+  const row = await database.appSetting.findUnique({
+    where: { key: BILLING_PRICE_CATALOG_KEY },
+    select: { value: true, updatedAt: true },
+  });
+  if (!row) return { source: "default_row_missing", updatedAt: null };
+  const updatedAt = row.updatedAt.toISOString();
+  try {
+    const parsed = billingPriceCatalogSchema.safeParse(JSON.parse(row.value));
+    return { source: parsed.success ? "stored" : "default_row_invalid", updatedAt };
+  } catch {
+    return { source: "default_row_unparseable", updatedAt };
+  }
 }
 
 export async function saveBillingPriceCatalog(catalog: BillingPriceCatalog) {
