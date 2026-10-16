@@ -250,6 +250,8 @@ test("session POST requires both default-off write and readback switch pairs", a
   assert.deepEqual(await (await route.POST(post())).json(), {
     error: "submission_disabled", retryWrite: false,
   });
+  process.env.TOMVERSE_AMUX_SESSION_INTAKE = "enabled";
+  assert.equal((await route.POST(post())).status, 503);
   enableWrite();
   delete process.env.TOMVERSE_AMUX_SESSION_INTAKE_READBACK;
   assert.equal((await route.POST(post())).status, 503);
@@ -330,6 +332,7 @@ test("session POST exposes closed refusal codes and sends ambiguous writes to ex
 
   for (const [code, status, readBack] of [
     ["request_already_seen", 409, "committed"],
+    ["request_already_seen", 409, "partial"],
     ["outcome_unknown", 503, "unavailable"],
   ] as const) {
     reset();
@@ -343,6 +346,17 @@ test("session POST exposes closed refusal codes and sends ambiguous writes to ex
       readBack, ideaId,
     }, code);
   }
+
+  reset();
+  enableWrite();
+  writeError = new FakeAmuxIdeaSessionSubmissionError(
+    "scope_unavailable", "committed", ideaId,
+  );
+  const closed = await route.POST(post());
+  assert.deepEqual(await closed.json(), {
+    error: "scope_unavailable", retryWrite: false, requestId,
+    readbackPath: `/api/internal/amux/ideas/session-intake?requestId=${requestId}`,
+  });
 });
 
 test("session POST hides unexpected writer failures and forbids blind retry", async () => {

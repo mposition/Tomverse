@@ -55,12 +55,14 @@ const submissionFailure = (
   requestId?: string,
 ): Response => {
   if (error instanceof AmuxIdeaSessionSubmissionError) {
+    const hasReadback = error.code === "request_already_seen" ||
+      error.code === "outcome_unknown";
     return amuxJsonNoStore({
       error: error.code,
       retryWrite: false,
       ...(requestId ? { requestId, readbackPath: readbackPath(requestId) } : {}),
-      ...(error.readBack ? { readBack: error.readBack } : {}),
-      ...(error.ideaId ? { ideaId: error.ideaId } : {}),
+      ...(hasReadback && error.readBack ? { readBack: error.readBack } : {}),
+      ...(hasReadback && error.ideaId ? { ideaId: error.ideaId } : {}),
     }, SUBMISSION_ERROR_STATUS[error.code]);
   }
   return amuxJsonNoStore({
