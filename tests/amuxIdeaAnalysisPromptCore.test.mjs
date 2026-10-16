@@ -3,9 +3,12 @@ import test from "node:test";
 
 import {
   AMUX_V4_ANALYSIS_DATA_MAX_BYTES,
+  AMUX_V4_ANALYSIS_PROMPT_VERSION,
+  amuxAnalysisSchemaForTemplate,
   buildAmuxIdeaAnalysisPrompt,
   continuationFromAmuxAnalysisChunk,
 } from "../lib/amux/ideaAnalysisPromptCore.ts";
+import { AMUX_CONTRACT_PATHS } from "../lib/amux/executionGradeCore.ts";
 
 const valid = () => ({
   previewId: "preview_12345678",
@@ -32,6 +35,7 @@ const valid = () => ({
 test("prompt candidate states the bounded proposal schema and no write authority", () => {
   const result = buildAmuxIdeaAnalysisPrompt(valid());
   assert.equal(result.status, "prompt_candidate");
+  assert.equal(result.version, "amux-v4-analysis-prompt-v7");
   assert.ok(result.prompt.includes("You do not approve, register, prioritize, promote, execute"));
   assert.ok(result.prompt.includes("at most 8 card units"));
   assert.ok(result.prompt.includes("needs_information"));
@@ -43,6 +47,17 @@ test("prompt candidate states the bounded proposal schema and no write authority
   assert.equal(result.prompt.includes("c<chunkIndex>:"), false);
   assert.ok(result.prompt.includes("required empty array for Story"));
   assert.ok(result.prompt.includes("parentStoryRef (nullable for Task"));
+  assert.ok(result.prompt.includes("both contract and ordinary expected paths"));
+  assert.ok(result.prompt.includes(
+    "Regardless of work type, a mixed contract/ordinary path class must always be split"));
+  assert.ok(result.prompt.includes("split it into separate Tasks"));
+  assert.ok(result.prompt.includes("through dependencyRefs"));
+  assert.ok(result.prompt.includes("Do not propose review work"));
+  assert.doesNotMatch(result.prompt,
+    /separate design, implementation, test, review, and verification/);
+  const contractPathsJson = result.prompt.split("BEGIN_SHARED_CONTRACT_PATHS_JSON\n")[1]
+    .split("\nEND_SHARED_CONTRACT_PATHS_JSON")[0];
+  assert.deepEqual(JSON.parse(contractPathsJson), [...AMUX_CONTRACT_PATHS]);
   assert.ok(result.dataBytes <= AMUX_V4_ANALYSIS_DATA_MAX_BYTES);
   const data = JSON.parse(result.prompt.split("BEGIN_CONFIRMED_DATA_JSON\n")[1]
     .split("\nEND_CONFIRMED_DATA_JSON")[0]);
@@ -50,6 +65,14 @@ test("prompt candidate states the bounded proposal schema and no write authority
   assert.equal(data.continuation.previousChunkIndex, 1);
   assert.equal(data.continuation.previousContinuationKind, "input");
   assert.equal(data.sourceTexts.length, 2);
+});
+
+test("prompt v7 keeps the admitted schemas for stored v6 and v5 analyses", () => {
+  assert.equal(AMUX_V4_ANALYSIS_PROMPT_VERSION, "amux-v4-analysis-prompt-v7");
+  assert.equal(amuxAnalysisSchemaForTemplate(AMUX_V4_ANALYSIS_PROMPT_VERSION), 5);
+  assert.equal(amuxAnalysisSchemaForTemplate("amux-v4-analysis-prompt-v6"), 5);
+  assert.equal(amuxAnalysisSchemaForTemplate("amux-v4-analysis-prompt-v5"), 4);
+  assert.equal(amuxAnalysisSchemaForTemplate("amux-v4-analysis-prompt-v4"), null);
 });
 
 test("untrusted delimiter text stays inside one JSON data line", () => {

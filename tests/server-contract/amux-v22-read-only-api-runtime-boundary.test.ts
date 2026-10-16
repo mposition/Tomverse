@@ -91,6 +91,7 @@ const tx = {
     updateMany: async () => { taskWrites += 1; return { count: 1 }; },
   },
   amuxV22WorkerAssignment: { findUnique: async () => ({
+    id: assignmentId, authorizationAuditLogId: "assignment-audit",
     workItemId: taskId, taskRevision: 5, workerName: worker,
     workerInstanceId: instanceId, workerGeneration: 1,
     modelId: "claude-opus-5-5", role: "investigate", grade: "high",
@@ -99,6 +100,10 @@ const tx = {
     catalogVersion: "v1", costReceiptDigest: receipt.receiptDigest,
     recoveryApprovalId: assignmentRecoveryApprovalId,
     perAttemptMicroUsd: BigInt("3400000"),
+  }) },
+  adminAuditLog: { findUnique: async () => ({
+    action: "amux.v22.worker.assigned", targetId: assignmentId,
+    metadata: { v52GradeRouting: false },
   }) },
   amuxV22PromotionReceipt: { findUnique: async () => ({ workItemId: taskId,
     sourceApprovalId: "source-one", briefDigest: "b".repeat(64) }) },

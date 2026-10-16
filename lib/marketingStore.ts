@@ -5642,15 +5642,36 @@ export async function recordMarketingWebhookApplyNotPermitted(
 // Retention (S3 plan, S3h1; docs/policy/marketing-automation.md §12.2)
 // ---------------------------------------------------------------------------
 
-/** S3h's audit action: one row per deleted row, in the transaction that deleted it. */
+/**
+ * S3h's audit actions: one row per row retention changed, in the transaction
+ * that changed it. A deleted row, a post whose content went, and a post whose
+ * old history entries were summarised are three different answers to "what did
+ * retention do to this", so they are three actions.
+ */
 export const MARKETING_RETENTION_ACTIONS = {
   rowPurged: "marketing_retention.row_purged",
+  contentPurged: "marketing_retention.content_purged",
+  historyCompacted: "marketing_retention.history_compacted",
 } as const;
 
 /** Rows one run deletes per table; the rest wait for the next run. */
 export const MARKETING_RETENTION_BATCH_LIMIT = 200;
 
 export type MarketingRetentionTable = "MarketingPost" | "MarketingReport" | "AiVisibilityRun";
+
+/**
+ * How every retention writer starts: the transaction-local setting that lets
+ * the triggers consider a retention change at all, the audit chain lock its
+ * audit rows are appended under, and the database clock the cutoffs are
+ * measured from. The one place in this module that turns retention on.
+ */
+async function beginMarketingRetention(tx: MarketingTransaction): Promise<Date> {
+  await tx.$queryRaw(
+    Prisma.sql`SELECT set_config(${MARKETING_RETENTION_SETTING}, 'on', true)`,
+  );
+  await takeAuditChainLock(tx);
+  return marketingDatabaseNow(tx);
+}
 
 /** Draft statuses §12.2 deletes after ninety days, when nothing reached a platform. */
 const DELETABLE_DRAFT_STATUSES = ["guard_rejected", "rejected", "approval_expired"] as const;
@@ -5677,11 +5698,7 @@ export async function purgeExpiredMarketingRows(
   table: MarketingRetentionTable,
   limit: number = MARKETING_RETENTION_BATCH_LIMIT,
 ): Promise<{ readonly purged: number }> {
-  await tx.$queryRaw(
-    Prisma.sql`SELECT set_config(${MARKETING_RETENTION_SETTING}, 'on', true)`,
-  );
-  await takeAuditChainLock(tx);
-  const now = await marketingDatabaseNow(tx);
+  const now = await beginMarketingRetention(tx);
   const take = Math.max(0, Math.min(Math.floor(limit), MARKETING_RETENTION_BATCH_LIMIT));
 
   let ids: string[];
@@ -5760,4 +5777,338 @@ export async function purgeExpiredMarketingRows(
     sourceVersion: "marketing-retention-v1",
   });
   return { purged };
+}
+
+// ---------------------------------------------------------------------------
+// Retention of posts that are kept (S3 plan, S3h2; docs/policy/marketing-automation.md §12.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Statuses whose content retention purges. The update trigger allows a purge of
+ * any post twenty-four months old; this is narrower on purpose. A failed post
+ * can still be re-queued against its content, an unknown outcome is still being
+ * resolved, and every status before publication is a draft some person or the
+ * publisher is still working on. Those keep their content until they reach one
+ * of these, and then wait out the same twenty-four months.
+ */
+const CONTENT_PURGEABLE_STATUSES = [
+  "published",
+  "verified",
+  "removed_by_platform",
+  "deleted",
+  "guard_rejected",
+  "rejected",
+  "approval_expired",
+] as const;
+
+/**
+ * `at` minus whole calendar months, the way PostgreSQL subtracts an interval of
+ * months from a timestamp: the day of the month is kept where it exists and
+ * clamped to the last day where it does not (31 March minus one month is
+ * 28 or 29 February, not 3 March, which is what `setUTCMonth` would give).
+ */
+export function marketingUtcMinusMonths(at: Date, months: number): Date {
+  const firstOfTarget = new Date(
+    Date.UTC(
+      at.getUTCFullYear(),
+      at.getUTCMonth() - months,
+      1,
+      at.getUTCHours(),
+      at.getUTCMinutes(),
+      at.getUTCSeconds(),
+      at.getUTCMilliseconds(),
+    ),
+  );
+  const lastDay = new Date(
+    Date.UTC(firstOfTarget.getUTCFullYear(), firstOfTarget.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  firstOfTarget.setUTCDate(Math.min(at.getUTCDate(), lastDay));
+  return firstOfTarget;
+}
+
+/**
+ * A history instant as milliseconds plus the digits past the millisecond.
+ *
+ * The schema accepts any number of fractional digits and the trigger compares
+ * them as PostgreSQL timestamps, to the microsecond. A JS Date drops everything
+ * past the millisecond, so two entries a few microseconds apart would compare
+ * equal here and unequal there -- and a summary naming the wrong one as the
+ * first or last would fail the whole batch.
+ */
+function historyInstant(value: string): { readonly ms: number; readonly rest: string } {
+  const match = /^([^.]*T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(.*)$/u.exec(value);
+  if (!match) throw new Error(`Not a history instant: ${value}`);
+  const fraction = match[2] ?? "";
+  const ms = Date.parse(`${match[1]}.${`${fraction}000`.slice(0, 3)}${match[3]}`);
+  if (!Number.isFinite(ms)) throw new Error(`Not a history instant: ${value}`);
+  return { ms, rest: fraction.slice(3).replace(/0+$/u, "") };
+}
+
+function compareHistoryInstants(a: string, b: string): number {
+  const left = historyInstant(a);
+  const right = historyInstant(b);
+  if (left.ms !== right.ms) return left.ms - right.ms;
+  const width = Math.max(left.rest.length, right.rest.length);
+  const l = left.rest.padEnd(width, "0");
+  const r = right.rest.padEnd(width, "0");
+  return l < r ? -1 : l > r ? 1 : 0;
+}
+
+/** The latest millisecond an instant could be in, rounding included. */
+function historyInstantCeilingMs(value: string): number {
+  const instant = historyInstant(value);
+  return instant.ms + (instant.rest === "" ? 0 : 1);
+}
+
+/**
+ * What compaction would make of one post's history, or null when nothing in
+ * it may go yet.
+ *
+ * The shape is the update trigger's, exactly: the entries that stay, in their
+ * order and unchanged; then one summary per kind of entry removed, counting it
+ * and naming its first and last instant; then one closing entry counting
+ * everything removed. Only attempts and webhook ids older than ninety days may
+ * go, and never the failed attempt a failed post's re-queue is measured
+ * against. Membership is decided per entry, and byte-identical entries always
+ * get the same answer -- which matters, because the trigger decides "kept" by
+ * containment and cannot tell two identical entries apart.
+ *
+ * `cutoffMs` is the caller's: entries whose latest possible instant is at or
+ * before it are old enough.
+ */
+export function planMarketingHistoryCompaction(input: {
+  readonly history: readonly MarketingHistoryEntry[];
+  readonly status: string;
+  readonly publishAttempt: number;
+  readonly cutoffMs: number;
+  readonly at: string;
+}): { readonly history: MarketingHistoryEntry[]; readonly removedEntryCount: number } | null {
+  const removable = (entry: MarketingHistoryEntry): boolean => {
+    if (entry.type !== "attempt" && entry.type !== "webhook_event") return false;
+    if (historyInstantCeilingMs(entry.at) > input.cutoffMs) return false;
+    if (
+      entry.type === "attempt" &&
+      input.status === "failed" &&
+      entry.outcome === "failed" &&
+      entry.attempt === input.publishAttempt
+    ) {
+      return false;
+    }
+    return true;
+  };
+
+  const kept: MarketingHistoryEntry[] = [];
+  const removed: MarketingHistoryEntry[] = [];
+  for (const entry of input.history) (removable(entry) ? removed : kept).push(entry);
+  if (removed.length === 0) return null;
+
+  const summaries: MarketingHistoryEntry[] = [];
+  for (const summarises of ["attempt", "webhook_event"] as const) {
+    const instants = removed.filter((entry) => entry.type === summarises).map((entry) => entry.at);
+    if (instants.length === 0) continue;
+    const sorted = [...instants].sort(compareHistoryInstants);
+    summaries.push({
+      at: input.at,
+      type: "retention_summary",
+      summarises,
+      count: instants.length,
+      firstAt: sorted[0],
+      lastAt: sorted[sorted.length - 1],
+    });
+  }
+
+  const history: MarketingHistoryEntry[] = [
+    ...kept,
+    ...summaries,
+    { at: input.at, type: "retention_compaction", removedEntryCount: removed.length },
+  ];
+  // What is written is what this store reads back. Removing one entry adds
+  // two, so a history already at its length ceiling cannot be compacted by
+  // removing that little; it waits until more of it is old.
+  if (!marketingHistorySchema.safeParse(history).success) return null;
+  return { history, removedEntryCount: removed.length };
+}
+
+/**
+ * Purge the content of posts §12.2 keeps for twenty-four months, one bounded
+ * batch, and record the run.
+ *
+ * The row stays -- its digests, its status, its history and its audit trail
+ * are what still answer "what was posted and on whose authority". Only the
+ * envelope goes, and `contentPurgedAt` says when. The update trigger is the
+ * rule: retention setting on, no legal hold, and twenty-four months since
+ * publication, or since creation for a post never published. The cutoff here
+ * is a millisecond earlier than the trigger's so that a row this selects is a
+ * row the trigger accepts.
+ */
+export async function purgeExpiredMarketingPostContent(
+  tx: MarketingTransaction,
+  limit: number = MARKETING_RETENTION_BATCH_LIMIT,
+): Promise<{ readonly purged: number }> {
+  const now = await beginMarketingRetention(tx);
+  const take = Math.max(0, Math.min(Math.floor(limit), MARKETING_RETENTION_BATCH_LIMIT));
+  const cutoff = new Date(marketingUtcMinusMonths(now, 24).getTime() - 1);
+
+  // The same condition selects and writes: a post that moved between the two
+  // -- to a status this keeps, or to published with a new publication time --
+  // is no longer this run's to purge.
+  const due = {
+    contentPurgedAt: null,
+    legalHold: false,
+    status: { in: [...CONTENT_PURGEABLE_STATUSES] },
+    OR: [
+      { publishedAt: { lte: cutoff } },
+      { publishedAt: null, createdAt: { lte: cutoff } },
+    ],
+  } satisfies Prisma.MarketingPostWhereInput;
+
+  const ids = (
+    await tx.marketingPost.findMany({
+      where: due,
+      orderBy: { createdAt: "asc" },
+      take,
+      select: { id: true },
+    })
+  ).map((row) => row.id);
+
+  let purged = 0;
+  for (const id of ids) {
+    const updated = await tx.marketingPost.updateMany({
+      where: { ...due, id },
+      data: { envelope: Prisma.DbNull, contentPurgedAt: now },
+    });
+    if (updated.count !== 1) continue;
+    purged += 1;
+    await writeSystemAuditLog({
+      tx,
+      systemActor: "marketing-retention",
+      action: MARKETING_RETENTION_ACTIONS.contentPurged,
+      targetType: "MarketingPost",
+      targetId: id,
+      summary: "Purged the content of a marketing post its retention period had ended for.",
+      metadata: { table: "MarketingPost" },
+    });
+  }
+
+  if (purged === 0) return { purged };
+  // `retention_run` has two counts: rows deleted and rows changed in place. A
+  // purged post is the second kind -- the row is still there.
+  await insertMarketingReport(tx, {
+    kind: "retention_run",
+    periodStart: now,
+    periodEnd: now,
+    payload: {
+      startedAt: now.toISOString(),
+      table: "MarketingPost",
+      purgedRowCount: 0,
+      compactedRowCount: purged,
+    },
+    sourceVersion: "marketing-retention-v1",
+  });
+  return { purged };
+}
+
+type MarketingCompactionCandidate = {
+  id: string;
+  status: string;
+  publishAttempt: number;
+  history: Prisma.JsonValue;
+  historyVersion: number;
+};
+
+/**
+ * Replace history entries §12.2 keeps for ninety days with their summary, one
+ * bounded batch of posts, and record the run.
+ *
+ * Candidates are posts with an attempt or a webhook entry still in their
+ * history, created before the cutoff and not on legal hold; which entries go
+ * is `planMarketingHistoryCompaction()`'s answer and the trigger's rule. The
+ * write is a compare-and-set on `historyVersion`, so a post appended to since
+ * it was read is left for the next run rather than overwritten.
+ *
+ * The cutoff is an hour and a millisecond earlier than ninety days. The trigger
+ * subtracts ninety *days* from a timestamp with a time zone, which is ninety
+ * calendar days in the session's zone; across a daylight-saving change that is
+ * an hour off ninety times twenty-four. Compacting an hour late costs nothing,
+ * and selecting an entry the trigger then refuses fails the batch.
+ *
+ * A history this store cannot parse is not one it can rewrite; it is skipped
+ * rather than failing every other post's compaction with it.
+ */
+export async function compactMarketingPostHistory(
+  tx: MarketingTransaction,
+  limit: number = MARKETING_RETENTION_BATCH_LIMIT,
+): Promise<{ readonly compacted: number }> {
+  const now = await beginMarketingRetention(tx);
+  const take = Math.max(0, Math.min(Math.floor(limit), MARKETING_RETENTION_BATCH_LIMIT));
+  // Ninety days and one hour, in milliseconds, inside the function: a
+  // top-level product is a load-time effect to the webhook fingerprint.
+  const cutoffMs = now.getTime() - (90 * 24 + 1) * 60 * 60 * 1000 - 1;
+  const at = now.toISOString();
+
+  let compacted = 0;
+  let after: string | null = null;
+  while (compacted < take) {
+    const page: MarketingCompactionCandidate[] = await tx.marketingPost.findMany({
+      where: {
+        legalHold: false,
+        createdAt: { lte: new Date(cutoffMs) },
+        OR: [
+          { history: { array_contains: [{ type: "attempt" }] } },
+          { history: { array_contains: [{ type: "webhook_event" }] } },
+        ],
+        ...(after === null ? {} : { id: { gt: after } }),
+      },
+      orderBy: { id: "asc" },
+      take: MARKETING_RETENTION_BATCH_LIMIT,
+      select: { id: true, status: true, publishAttempt: true, history: true, historyVersion: true },
+    });
+    if (page.length === 0) break;
+    after = page[page.length - 1].id;
+
+    for (const post of page) {
+      if (compacted >= take) break;
+      const parsed = marketingHistorySchema.safeParse(post.history);
+      if (!parsed.success) continue;
+      const plan = planMarketingHistoryCompaction({
+        history: parsed.data,
+        status: post.status,
+        publishAttempt: post.publishAttempt,
+        cutoffMs,
+        at,
+      });
+      if (plan === null) continue;
+      const updated = await tx.marketingPost.updateMany({
+        where: { id: post.id, historyVersion: post.historyVersion, legalHold: false },
+        data: { history: asJson(plan.history), historyVersion: post.historyVersion + 1 },
+      });
+      if (updated.count !== 1) continue;
+      compacted += 1;
+      await writeSystemAuditLog({
+        tx,
+        systemActor: "marketing-retention",
+        action: MARKETING_RETENTION_ACTIONS.historyCompacted,
+        targetType: "MarketingPost",
+        targetId: post.id,
+        summary: "Summarised marketing post history entries their retention period had ended for.",
+        metadata: { table: "MarketingPost", removedEntryCount: plan.removedEntryCount },
+      });
+    }
+    if (page.length < MARKETING_RETENTION_BATCH_LIMIT) break;
+  }
+
+  if (compacted === 0) return { compacted };
+  await insertMarketingReport(tx, {
+    kind: "retention_run",
+    periodStart: now,
+    periodEnd: now,
+    payload: {
+      startedAt: now.toISOString(),
+      table: "MarketingPost",
+      purgedRowCount: 0,
+      compactedRowCount: compacted,
+    },
+    sourceVersion: "marketing-retention-v1",
+  });
+  return { compacted };
 }

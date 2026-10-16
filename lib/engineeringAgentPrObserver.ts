@@ -49,7 +49,8 @@ export type EngineeringAgentPrObserverOutcome =
   | "merge_recorded"
   | "merged_without_approval"
   | "waiting"
-  | "unreadable";
+  | "unreadable"
+  | "pr_file_state_mismatch";
 
 type Ports = {
   read: (prNumber: number) => Promise<EngineeringAgentPullObservation>;
@@ -154,7 +155,7 @@ export async function observeEngineeringAgentPullRequests(
       if (cardId !== null && attemptId !== null && typeof approval?.reviewId === "number") {
         const completed = await completeAmuxV22ReviewOnObservedMerge(
           { taskId: cardId, attemptId, prNumber: binding.prNumber, mergeCommitSha: pull.mergeCommitSha!,
-            approvalReviewId: approval.reviewId },
+            approvalReviewId: approval.reviewId, changedFiles: pull.changedFiles ?? null },
           {
             prismaCalls: OBSERVATION_PRISMA_CALLS,
             work: async (lent) => {
@@ -166,6 +167,21 @@ export async function observeEngineeringAgentPullRequests(
         );
         if (completed.completed) {
           results.push({ bindingId: binding.id, outcome: "completed" });
+          continue;
+        }
+        if (completed.reason === "pr_file_state_mismatch") {
+          await runEngineeringAgentTransaction(prisma, async (tx) => {
+            await recordEngineeringAgentBindingObservation(tx, {
+              bindingId: binding.id, kind: "merge", observation: mergeObservation,
+            });
+            await openEngineeringAgentWorkItem(tx, {
+              kind: "state_mismatch",
+              causeKey: `pr_file_state_mismatch:${binding.id}`,
+              runId: binding.runId,
+              reason: "pr_file_state_mismatch",
+            });
+          });
+          results.push({ bindingId: binding.id, outcome: "pr_file_state_mismatch" });
           continue;
         }
       }
