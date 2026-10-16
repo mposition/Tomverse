@@ -100,7 +100,7 @@ t1이 실패하면 그 공급사는 멈추도록 했다. 두 공급사 모두 t1
   `apply_patch`는 이름으로 따로 호출되지 않았으므로 그것만 막혔는지는 이 관측이 말하지 않는다.
 - **질문이 남는가:** `--ephemeral`에서 질문 표식은 홈의 어느 파일에도 남지 않았다. 다만 실행마다 상태 DB 다섯 개,
   `models_cache.json`, 기본 skill 파일, 실행별 lock 디렉터리를 쓴다. 기본 skill에는 GitHub에서 skill을 설치하는
-  스크립트가 있다.
+  스크립트가 있다(파일 이름 `install-skill-from-github.py`로 본 것이고 내용은 읽지 않았다).
 - **S0-5 네트워크 실패:** 무한 재시도 없이 13초 만에 `turn.failed`와 종료 코드 `1`로 끝났다. WebSocket 재연결 뒤 HTTPS로
   바꿔 다시 5회까지 시도한다. 최종 메시지는 없었다.
 - **S0-5 강제 종료:** SIGKILL 뒤 남는 프로세스가 없었다(`--no-daemon`, `daemon_auto_start` 끔). 20초 안에 답이 오지
@@ -147,8 +147,10 @@ t1이 실패하면 그 공급사는 멈추도록 했다. 두 공급사 모두 t1
 - **인증 파일을 CLI가 다시 쓴다.** t1에서 `.credentials.json`이 바뀌었다(크기는 같다). 정책 §5의 "설정 디렉터리는 공급사
   계정이 쓸 수 없다"를 그대로 지키면 이 쓰기가 실패한다. `2026-10-13__cli-surface.md`의 "정책과 맞지 않는 점"이 관측으로
   확인된 것이다.
-- **API 밖의 연결이 있다.** n1에서 telemetry 사건 전송이 실패해 `.claude/telemetry/`에 남았다. t3에서는 2.6 MB의 plugin
-  directory cache를 받아 썼다. 정확한 host는 이 출력에 없다.
+- **답과 무관한 파일을 쓴다(관측).** n1에서 `.claude/telemetry/1p_failed_events.…json`(37822)이, t3에서
+  `.claude/plugins/plugin-directory-cache-v2.json`(2644756)과 `.claude/cache/model-catalog/…`(t1)이 생겼다. 관측한 것은 파일의
+  경로와 크기뿐이다. 이름으로 보아 telemetry 전송 실패분과 내려받은 목록으로 읽히지만, **API 밖의 연결이 있었는지, 어느
+  host로 갔는지는 내용도 네트워크도 보지 않았으므로 확인하지 않았다**("열린 질문" 2).
 - **`--no-session-persistence`에서도 `.claude/sessions/991114.json`이 생겼다.** 이름은 프로세스 번호처럼 보이지만 내용은
   읽지 않았다.
 - **S0-5 네트워크 실패:** 연결 실패 뒤 약 179초 동안 시도하다가 `is_error:true`, `terminal_reason:"api_error"`, 종료 코드
@@ -167,10 +169,12 @@ t1이 실패하면 그 공급사는 멈추도록 했다. 두 공급사 모두 t1
 | 강제 종료 뒤 프로세스 | 없음 | 없음 |
 | 인증 파일 다시 쓰기 | 이번 네 turn에서는 없음 | t1에서 있음 |
 | 질문 표식이 남은 파일 | 없음(binary 포함) | 없음(binary 포함) |
-| API 밖에서 받거나 쓰는 것 | 모델 목록 cache, 기본 skill | telemetry, plugin directory, model catalog |
+| 답과 무관하게 쓰는 파일 | 모델 목록 cache, 기본 skill, 상태 DB | telemetry, plugin directory, model catalog 이름의 파일 |
+| 그 밖의 연결 시도 관측 | n1 stderr의 모델 목록 갱신 실패 | 관측 없음(파일만 있음) |
 
-두 CLI 모두 정책의 hard timeout(30분) 안에서 스스로 끝났다. 네트워크 실패 시간은 두 CLI가 다르므로, broker의 대기
-상한은 둘 중 긴 쪽보다 길어야 한다.
+t1·t2·n1은 두 CLI 모두 정책의 hard timeout(30분) 안에서 스스로 끝났다. t3는 스크립트의 20초 timeout이 강제로 끝냈다.
+**설계 제안(관측이 아니다):** 네트워크 실패까지의 시간이 두 CLI에서 크게 다르므로(약 13초와 약 179초), broker의 대기
+상한을 정할 때 이 차이를 고려한다.
 
 ## 이 측정이 증명하지 않는 것
 
@@ -198,8 +202,8 @@ t1이 실패하면 그 공급사는 멈추도록 했다. 두 공급사 모두 t1
 ## 열린 질문
 
 1. **출력 원본 대조.** runner의 두 로그 파일 sha256이 위 표의 값과 같은지.
-2. **API 밖의 연결.** claude의 telemetry·plugin directory·model catalog와 codex의 모델 목록 갱신이 어느 host로 가는지,
-   nftables 허용 목록에 그 host가 있는지, 그리고 끄는 방법. 끄는 방법이 환경 변수라면 정책 §5의 환경 허용 목록에
+2. **API 밖의 연결.** claude의 telemetry·plugin directory·model catalog 이름의 파일이 실제 연결에서 온 것인지, codex의 모델
+   목록 갱신과 함께 어느 host로 가는지, nftables 허용 목록에 그 host가 있는지, 그리고 끄는 방법. 끄는 방법이 환경 변수라면 정책 §5의 환경 허용 목록에
    들어간다. 끄는 방법은 관측하지 않았다.
 3. **요청별 상태.** codex의 상태 DB·skill·lock 디렉터리와 claude의 `.claude.json`·`sessions`·`backups`가 요청마다 쌓인다.
    요청별 임시 홈을 쓸지, 고정 홈에서 지울 목록을 둘지는 정책 버전 변경에서 정한다.
