@@ -19,6 +19,8 @@ test("a pinned tree exposes only ordinary tracked files and excludes secret path
     file(".claude/settings.json"),
     file(".codex/config.toml"),
     file(".mcp.json"),
+    file(".envrc"),
+    file(".direnv/allow"),
     file("docs/guide.md"),
     file(".env.example"),
     file("production.env"),
@@ -35,7 +37,9 @@ test("a pinned tree exposes only ordinary tracked files and excludes secret path
   assert.deepEqual(result.excluded, [
     { path: ".claude/settings.json", reason: "secret_path" },
     { path: ".codex/config.toml", reason: "secret_path" },
+    { path: ".direnv/allow", reason: "secret_path" },
     { path: ".env.example", reason: "secret_path" },
+    { path: ".envrc", reason: "secret_path" },
     { path: ".mcp.json", reason: "secret_path" },
     { path: ".ssh/config", reason: "secret_path" },
     { path: "assets/link", reason: "non_regular" },
