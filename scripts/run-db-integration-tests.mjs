@@ -470,6 +470,9 @@ run(
     // v19 session intake stores encrypted source provenance under the latest
     // owner scope while its canonical audit remains a dedicated system actor.
     "tests/integration/amux-v19-session-submission.db.test.ts",
+    // Each prepared v19 direct-read reference records only its pinned SHA and
+    // aggregate exclusion proof under same-transaction system evidence.
+    "tests/integration/amux-v19-tracked-checkout-evidence.db.test.ts",
     // v20 final Guard refusals are append-only, audit-bound, request-id
     // idempotent and readable without retaining expected path values.
     "tests/integration/amux-v20-registration-refusal.db.test.ts",

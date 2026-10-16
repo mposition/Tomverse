@@ -577,12 +577,16 @@ const compilerOptions = parsedConfig.options;
 // system actors extend lib/adminAuditSystemActors.ts above its existing
 // computed access. Count 228 and the position-free inventory remain unchanged;
 // only that source position moves.
+// 2026-10-17, AMUX v19 pinned-checkout evidence: its closed system action,
+// target and scope extend lib/adminAuditSystemActors.ts above the same reviewed
+// computed access. Count 228 and the position-free inventory remain unchanged;
+// only source positions are repinned.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "c5a021b21d18821b8a0a3449f7f012d7",
-  "21f3e73a95931195081a3c3804209291",
+  "f065542c56a26b83b57461c9894677d8",
+  "c60fe3fe474e1c923477b10af9675aa5",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

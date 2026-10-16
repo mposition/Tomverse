@@ -2,7 +2,7 @@ schemaVersion: 4
 
 metadata:
   status: draft
-  lastUpdated: "2026-10-16"
+  lastUpdated: "2026-10-17"
   owner: security-privacy
   validatorCommand: npm run check:data-domain-registry
   purpose: >-
@@ -1979,6 +1979,27 @@ domains:
       unresolved account-deletion and export decisions. Child chunks have their
       own registered actor link and privacy decision; no session intake route is
       enabled.
+
+  - domain: amuxIdeaTrackedCheckoutEvidence
+    prismaModel: AmuxIdeaTrackedCheckoutEvidence
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, AMUX tracked-checkout evidence account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The append-only row records one source reference ordinal, its fixed commit
+      SHA, aggregate exclusion counts, and a keyed exclusion-path digest. It
+      stores no repository path, excluded path, temporary checkout directory,
+      file content, or read-event detail. The restrictive parent and audit
+      references do not resolve account deletion, retention, or unified export.
 
   - domain: amuxIdeaAnalysisChunk
     prismaModel: AmuxIdeaAnalysisChunk
