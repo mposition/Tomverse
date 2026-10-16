@@ -3,7 +3,14 @@ import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 import { isIdeaSubmissionPrewriteRefusal } from "./ideaSubmissionUiCore.ts";
 
 export type BuildPreviewAnswer =
-  | { kind: "saved"; ideaId: string; hasExternalSources: boolean; planReady: boolean; previewMayExist: boolean }
+  | {
+    kind: "saved"; ideaId: string; hasExternalSources: boolean; planReady: boolean; previewMayExist: boolean;
+    /** The exact transfer preview was prepared (the only answer that finishes the chain). */
+    previewPrepared: boolean;
+    /** The step that stopped after the save (a refusal or an unknown outcome), or null. */
+    stoppedAt: "plan" | "preview" | null;
+    error: string | null;
+  }
   | { kind: "refused"; code: string }
   | { kind: "verify" };
 
@@ -37,7 +44,10 @@ export function classifyBuildPreviewAnswer(status: number, body: unknown): Build
     const prepared = status === 201 && row.state === "prepared";
     return { kind: "saved", ideaId: row.ideaId, hasExternalSources: row.hasExternalSources === true,
       planReady: prepared || row.step === "preview",
-      previewMayExist: prepared || (row.step === "preview" && row.error === "outcome_unknown") };
+      previewMayExist: prepared || (row.step === "preview" && row.error === "outcome_unknown"),
+      previewPrepared: prepared,
+      stoppedAt: row.step === "plan" || row.step === "preview" ? row.step : null,
+      error: typeof row.error === "string" ? row.error : null };
   }
   if (known(BUILD_PREWRITE_REFUSALS, row.error, status) ||
       (row.step === "submission" && isIdeaSubmissionPrewriteRefusal(row.error, status))) {

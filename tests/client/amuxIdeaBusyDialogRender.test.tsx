@@ -42,7 +42,7 @@ for (const locale of ["ko", "en"] as const) {
       "even if a caller hands an onClose, the working view offers no close");
   });
 
-  for (const tone of ["success", "refused", "unknown"] as const) {
+  for (const tone of ["success", "partial", "refused", "unknown"] as const) {
     test(`${locale}: a settled request (${tone}) turns the dialog into its answer, with a 44px close`, () => {
       const html = render(tone, 12, { onClose: () => {} });
       assert.ok(html.includes('role="dialog"') && html.includes('aria-modal="true"') && html.includes(`data-tone="${tone}"`));
@@ -60,13 +60,19 @@ for (const locale of ["ko", "en"] as const) {
 
   test(`${locale}: the result titles and texts are distinct and the unknown one forbids approving again`, () => {
     const keys = ["busyPlanTitle", "busyPlanDoneTitle", "busyExecutionTitle", "busyExecutionDoneTitle", "busyPreviewTitle",
-      "busyPreviewDoneTitle", "busyRefusedTitle", "busyUnknownTitle"] as const;
+      "busyPreviewDoneTitle", "busyPreviewPartialTitle", "busyRefusedTitle", "busyUnknownTitle"] as const;
     assert.equal(new Set(keys.map((key) => m[key])).size, keys.length);
     for (const key of ["busyPlanBody", "busyPlanDoneBody", "busyExecutionBody", "busyExecutionDoneBody", "busyPreviewBody",
       "busyPreviewDoneBody", "busyRefusedBody", "busyUnknownBody", "busyChecking", "busyClose"] as const) {
       assert.ok(typeof m[key] === "string" && m[key].length > 0, key);
     }
     assert.ok(locale === "ko" ? m.busyUnknownBody.includes("다시 승인하거나 저장하지") : m.busyUnknownBody.includes("Do not approve or save again"));
+    // A save that stopped, or that only saved an idea naming sources, never reads as "ready".
+    const partial = [m.busyPreviewPartialBody("sources", "x"), m.busyPreviewPartialBody("plan", "plan_code"),
+      m.busyPreviewPartialBody("preview", "preview_code")];
+    assert.equal(new Set(partial).size, 3);
+    assert.ok(partial[1].includes("plan_code") && partial[2].includes("preview_code"));
+    assert.ok(partial.every((text) => !text.includes(m.busyPreviewDoneTitle)));
   });
 }
 
@@ -76,7 +82,7 @@ test("Escape is ignored while the request is in flight and closes only a settled
   });
   assert.deepEqual(act({ key: "Escape", tone: "working" }), { preventDefault: true, close: false, focusIndex: null },
     "Escape does nothing while in flight");
-  for (const tone of ["success", "refused", "unknown"] as const) {
+  for (const tone of ["success", "partial", "refused", "unknown"] as const) {
     assert.deepEqual(act({ key: "Escape", tone }), { preventDefault: true, close: true, focusIndex: null }, tone);
   }
   assert.deepEqual(act({}), { preventDefault: true, close: false, focusIndex: -1 }, "nothing to focus: Tab stays on the dialog");
@@ -119,6 +125,11 @@ test("the three long writes open it: plan approval, execution approval and build
 
   const input = read("components/admin/AmuxIdeaInputPanel.tsx");
   assert.ok(input.includes("m.busyPreviewTitle") === false && input.includes("messages.busyPreviewTitle"));
-  for (const hook of ['tone: "success"', 'tone: "unknown"', 'tone: "refused"', 'tone: "working"']) assert.ok(input.includes(hook), hook);
+  for (const hook of ['tone: "unknown"', 'tone: "refused"', 'tone: "working"']) assert.ok(input.includes(hook), hook);
+  // Only a prepared preview is "ready": a stop after the save, an unknown step and a save of an idea that names
+  // sources are each said as what they are (review finding, round 2).
+  assert.ok(input.includes('tone: previewPrepared ? "success" : error === "outcome_unknown" || previewMayExist ? "unknown" : "partial"'));
+  assert.ok(input.includes("messages.busyPreviewPartialBody("));
+  assert.equal(/onBuilt:[^]*tone: "success" \}\)/.test(input), false, "built never sets success on its own");
   assert.ok(input.includes("aria-busy={readBackPending}"), "the check inside the dialog shows busy");
 });

@@ -62,16 +62,24 @@ test("a build answer keeps a preview receipt only for a prepared or unknown prev
   const { classifyBuildPreviewAnswer: c } = await import("../lib/amux/ideaBuildPreviewUiCore.ts");
   const ideaId = "11111111-1111-4111-8111-111111111111";
   assert.deepEqual(c(201, { state: "prepared", ideaId }),
-    { kind: "saved", ideaId, hasExternalSources: false, planReady: true, previewMayExist: true });
+    { kind: "saved", ideaId, hasExternalSources: false, planReady: true, previewMayExist: true,
+      previewPrepared: true, stoppedAt: null, error: null });
   assert.deepEqual(c(503, { step: "preview", error: "outcome_unknown", ideaId }).previewMayExist, true);
   for (const [status, error] of [[409, "model_changed"], [409, "not_ready"], [503, "integrity_unavailable"],
     [503, "preview_disabled"], [400, "schema_rejected"]]) {
     const answer = c(status, { step: "preview", error, ideaId });
     assert.deepEqual([answer.kind, answer.planReady, answer.previewMayExist], ["saved", true, false], error);
+    // A refusal after the save is a stop, never a prepared preview: the screen must not say "ready".
+    assert.deepEqual([answer.previewPrepared, answer.stoppedAt, answer.error], [false, "preview", error], error);
   }
   assert.deepEqual(c(503, { step: "plan", error: "outcome_unknown", ideaId }),
-    { kind: "saved", ideaId, hasExternalSources: false, planReady: false, previewMayExist: false });
-  assert.deepEqual(c(201, { state: "submitted", ideaId, hasExternalSources: true }).hasExternalSources, true);
+    { kind: "saved", ideaId, hasExternalSources: false, planReady: false, previewMayExist: false,
+      previewPrepared: false, stoppedAt: "plan", error: "outcome_unknown" });
+  const sources = c(201, { state: "submitted", ideaId, hasExternalSources: true });
+  assert.deepEqual([sources.hasExternalSources, sources.previewPrepared, sources.stoppedAt], [true, false, null],
+    "an idea naming sources stops after the save: saved, not prepared");
+  assert.deepEqual([c(503, { step: "preview", error: "outcome_unknown", ideaId }).previewPrepared], [false],
+    "an unknown preview is not a prepared one");
   // Before the save: only errors known to precede it.
   assert.deepEqual(c(503, { error: "build_preview_disabled" }), { kind: "refused", code: "build_preview_disabled" });
   assert.deepEqual(c(429, { error: "Too many", code: "API_RATE_LIMITED" }), { kind: "refused", code: "API_RATE_LIMITED" });

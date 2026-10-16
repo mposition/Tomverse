@@ -50,7 +50,10 @@ const receiptStore = (): Storage | null => {
 export type AmuxBuildPreviewHooks = {
   draft: { idea: string; repositories: string[]; pullRequests: Array<{ repository: string; number: number }> } | null;
   reserve: (requestId: string) => boolean;
-  onBuilt: (built: { requestId: string; ideaId: string; hasExternalSources: boolean; planReady: boolean }) => void;
+  onBuilt: (built: {
+    requestId: string; ideaId: string; hasExternalSources: boolean; planReady: boolean;
+    previewPrepared: boolean; previewMayExist: boolean; stoppedAt: "plan" | "preview" | null; error: string | null;
+  }) => void;
   onUnknown: (requestId: string) => void;
   onRefused: (requestId: string, code: string) => void;
 };
@@ -395,7 +398,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
             receipt.model, receipt.effort, 0);
         }
         build.onBuilt({ requestId, ideaId: answer.ideaId, hasExternalSources: answer.hasExternalSources,
-          planReady: answer.planReady });
+          planReady: answer.planReady, previewPrepared: answer.previewPrepared,
+          previewMayExist: answer.previewMayExist, stoppedAt: answer.stoppedAt, error: answer.error });
         return;
       }
       if (answer.kind === "refused") {
