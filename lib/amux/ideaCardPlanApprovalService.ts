@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import { AMUX_IDEA_CARD_PLAN_APPROVAL_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
 import type { Session } from "next-auth";
 
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
@@ -51,7 +52,7 @@ export async function approveAmuxV4CardPlan(session: Session, request: Request, 
       return { ideaId: input.ideaId, cards, remaining: prepared.remaining,
         backlogOnly: true as const, executionAuthorized: false as const };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      maxWait: 5_000, timeout: 90_000 });
+      ...AMUX_IDEA_CARD_PLAN_APPROVAL_TRANSACTION });
   } catch (error) {
     throw amuxV4PlanFailure(error, callbackReturned);
   }

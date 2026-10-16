@@ -10,6 +10,7 @@ import { AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH, AmuxIdeaAnalysisReservation
   commitAmuxIdeaAnalysisBudgetReservation } from "./ideaAnalysisBudgetReservationService.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
+import { AMUX_IDEA_EXECUTION_APPROVAL_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
 import { AMUX_V4_TRANSFER_CONFIRM_READ_ENV, AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV,
   type IdeaTransferConfirmationRequest, transferConfirmReadPermitted,
   transferConfirmWritePermitted } from "./ideaTransferConfirmationCore.ts";
@@ -96,7 +97,7 @@ export async function approveIdeaExecution(session: Session, request: Request,
         holdId: reserved.holdId, reservedMicroUsd: reserved.reservedMicroUsd,
         reservationAuditId: reserved.auditId,
       };
-    }, { maxWait: 5_000, timeout: 20_000 });
+    }, { ...AMUX_IDEA_EXECUTION_APPROVAL_TRANSACTION });
   } catch (error) {
     // A refusal raised inside the callback rolled the whole decision back.
     // Anything after the callback returned is a commit whose outcome is unknown.
