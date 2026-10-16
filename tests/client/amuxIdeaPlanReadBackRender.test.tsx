@@ -23,7 +23,18 @@ import {
 
 const attempt = (startedAt: number) => ({ startedAt, unitIds: ["u1", "u2"] });
 const read = (...states: string[]) => states.map((decisionState, index) => ({ id: `u${index + 1}`, decisionState }));
-const text = (markup: string) => markup.replace(/<[^>]*>/g, "").replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
+// The visible text of rendered markup: characters outside tags. A scan, not a tag-stripping replace,
+// because this reads trusted test output and must not look like an HTML sanitizer.
+const text = (markup: string) => {
+  let out = "";
+  let inTag = false;
+  for (const ch of markup) {
+    if (ch === "<") inTag = true;
+    else if (ch === ">") inTag = false;
+    else if (!inTag) out += ch;
+  }
+  return out.replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
+};
 
 test("a read-back is one of recorded, not recorded, settling, mixed or failed, and only a settled read with nothing approved frees the approval", () => {
   const started = 1_000_000;

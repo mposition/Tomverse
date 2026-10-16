@@ -12,7 +12,18 @@ import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 // once it has settled. The operator pressed other controls while an approval was still being recorded.
 
 const read = (path: string) => readFileSync(path, "utf8");
-const text = (markup: string) => markup.replace(/<[^>]*>/g, "").replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
+// The visible text of rendered markup: characters outside tags. A scan, not a tag-stripping replace,
+// because this reads trusted test output and must not look like an HTML sanitizer.
+const text = (markup: string) => {
+  let out = "";
+  let inTag = false;
+  for (const ch of markup) {
+    if (ch === "<") inTag = true;
+    else if (ch === ">") inTag = false;
+    else if (!inTag) out += ch;
+  }
+  return out.replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
+};
 
 for (const locale of ["ko", "en"] as const) {
   const m = adminAmuxIdeaInputMessages[locale];
