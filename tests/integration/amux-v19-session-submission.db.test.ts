@@ -6,6 +6,7 @@ import type { Session } from "next-auth";
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
 import {
   AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+  AMUX_SESSION_IDEA_SUBMITTED_SCOPE,
   AMUX_SESSION_IDEA_SUBMITTED_TARGET,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   auditRowActorKind,
@@ -225,9 +226,9 @@ test("request collision and references outside the saved scope are read-only ref
 });
 
 test("database refuses fake-human, wrong-owner and extra-metadata evidence", async () => {
-  await prisma.$transaction(async (tx) => {
+  const rollbackForgedEvidence = new Error("rollback forged evidence fixtures");
+  await assert.rejects(prisma.$transaction(async (tx) => {
     for (const actorKind of ["human", "wrong_owner", "extra_metadata"] as const) {
-      await tx.$executeRawUnsafe("SAVEPOINT forged_session");
       const ideaId = randomUUID();
       const inspected = inspect(ideaId);
       const keys = keysFor(ideaId);
@@ -246,14 +247,38 @@ test("database refuses fake-human, wrong-owner and extra-metadata evidence", asy
         ? await writeAdminAuditLog({
           tx, session, request, action: AMUX_SESSION_IDEA_SUBMITTED_ACTION,
           targetType: AMUX_SESSION_IDEA_SUBMITTED_TARGET, targetId: ideaId,
-          summary: "Synthetic human impersonation attempt.", metadata,
+          summary: "Stored one encrypted AMUX session idea under the current owner-approved operating scope.",
+          metadata,
         })
         : await writeSystemAuditLog({
           tx, systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
           action: AMUX_SESSION_IDEA_SUBMITTED_ACTION,
           targetType: AMUX_SESSION_IDEA_SUBMITTED_TARGET, targetId: ideaId,
-          summary: "Synthetic wrong-owner attempt.", metadata,
+          summary: "Stored one encrypted AMUX session idea under the current owner-approved operating scope.",
+          metadata,
         });
+      const audit = await tx.adminAuditLog.findUniqueOrThrow({ where: { id: auditId } });
+      assert.equal(audit.summary,
+        "Stored one encrypted AMUX session idea under the current owner-approved operating scope.");
+      if (actorKind === "human") {
+        assert.equal(auditRowActorKind(audit), "human");
+        assert.equal(audit.actorUserId, ownerId);
+        assert.deepEqual(audit.metadata, metadata);
+      } else {
+        assert.equal(auditRowActorKind(audit), "system");
+        assert.equal(audit.actorUserId, null);
+        assert.deepEqual(audit.metadata, {
+          ...metadata,
+          systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+          actorScope: AMUX_SESSION_IDEA_SUBMITTED_SCOPE,
+        });
+      }
+      const sameTransaction = await tx.$queryRaw<Array<{ same: boolean }>>`
+        SELECT xmin = pg_current_xact_id()::xid AS same
+        FROM "AdminAuditLog" WHERE "id" = ${auditId}
+      `;
+      assert.deepEqual(sameTransaction, [{ same: true }]);
+      await tx.$executeRawUnsafe("SAVEPOINT forged_session");
       await assert.rejects(tx.amuxIdeaSubmission.create({ data: {
         ...prepared.data,
         actorUserId: actorKind === "wrong_owner" ? "not-the-scope-owner" : ownerId,
@@ -267,8 +292,10 @@ test("database refuses fake-human, wrong-owner and extra-metadata evidence", asy
         sourceProvenanceDigestKeyId: source.digestKeyId,
       } }), /session submission evidence mismatch/);
       await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT forged_session");
+      await tx.$executeRawUnsafe("RELEASE SAVEPOINT forged_session");
     }
-  });
+    throw rollbackForgedEvidence;
+  }), (error: unknown) => error === rollbackForgedEvidence);
 });
 
 test("audited identity and encrypted bodies are immutable except for one complete raw purge", async () => {

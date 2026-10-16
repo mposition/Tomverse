@@ -25,7 +25,8 @@ export type AmuxIdeaSessionSubmissionInspection =
   | { ok: false; code: "schema_rejected" | "content_refused" | "metadata_incomplete" };
 
 const exactKeys = (value: Record<string, unknown>, keys: readonly string[]) =>
-  Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+  Object.keys(value).length === keys.length &&
+  keys.every((key) => Object.hasOwn(value, key));
 const REPOSITORY = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
 const validRepository = (value: string) => REPOSITORY.test(value) &&
   value.split("/").every((part) => part !== "." && part !== "..");

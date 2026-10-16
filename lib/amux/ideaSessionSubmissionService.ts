@@ -13,7 +13,10 @@ import {
 } from "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
 import { sealAmuxContent, type AmuxContentKeys } from "./ideaCrypto.ts";
-import { readCurrentAmuxIdeaFrontierSelection } from "./ideaFrontierCatalogRead.ts";
+import {
+  readCurrentAmuxIdeaFrontierSelection,
+  readCurrentAmuxIdeaFrontierSelectionFromTx,
+} from "./ideaFrontierCatalogRead.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { amuxContentKeyRing, createAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { amuxIdeaReferencesOutsideScope,
@@ -72,10 +75,14 @@ const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
   return now;
 };
 
-const requireCurrentModel = async (authority: AmuxOperatingScopeAuthority) => {
-  const model = await readCurrentAmuxIdeaFrontierSelection(
-    amuxOperatingScopeSelection(authority.scope),
-  );
+const requireCurrentModel = async (
+  authority: AmuxOperatingScopeAuthority,
+  tx?: Prisma.TransactionClient,
+) => {
+  const selection = amuxOperatingScopeSelection(authority.scope);
+  const model = tx
+    ? await readCurrentAmuxIdeaFrontierSelectionFromTx(tx, selection)
+    : await readCurrentAmuxIdeaFrontierSelection(selection);
   if (model.decision === "hold") {
     throw new AmuxIdeaSessionSubmissionError("scope_unavailable");
   }
@@ -112,7 +119,7 @@ export async function commitAmuxIdeaSessionSubmission(
     throw new AmuxIdeaSessionSubmissionError("scope_unavailable");
   }
   requireInputWithinScope(authority, input.inspected);
-  await requireCurrentModel(authority);
+  await requireCurrentModel(authority, tx);
   const existing = await tx.amuxIdeaSubmission.findUnique({
     where: { requestId: input.inspected.requestId },
     select: { id: true },

@@ -96,7 +96,8 @@ BEGIN
     ORDER BY "version" DESC LIMIT 1;
   SELECT * INTO scope_row FROM "AmuxIdeaOperatingScopeSetting"
     WHERE "id" = NEW."sessionOperatingScopeSettingId";
-  SELECT a.*, a.xmin::text AS audit_xid INTO audit_row FROM "AdminAuditLog" a
+  SELECT a.*, a.xmin = pg_current_xact_id()::xid AS audit_same_transaction
+    INTO audit_row FROM "AdminAuditLog" a
     WHERE a."id" = NEW."submissionAuditLogId";
   metadata := audit_row."metadata";
 
@@ -106,7 +107,7 @@ BEGIN
      NEW."rawDigest" IS NULL OR NEW."rawDigestKeyId" IS NULL OR
      NEW."sourceProvenanceKeyId" IS DISTINCT FROM NEW."rawKeyId" OR
      NEW."sourceProvenanceKeyVersion" IS DISTINCT FROM NEW."rawKeyVersion" OR
-     audit_row."id" IS NULL OR audit_row.audit_xid <> pg_current_xact_id()::text OR
+     audit_row."id" IS NULL OR audit_row.audit_same_transaction IS NOT TRUE OR
      audit_row."actorUserId" IS NOT NULL OR audit_row."actorEmail" IS NOT NULL OR
      audit_row."ipAddress" IS NOT NULL OR audit_row."userAgent" IS NOT NULL OR
      audit_row."entryHash" IS NULL OR
