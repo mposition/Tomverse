@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createAmuxTrackedCheckoutReadObserver,
-  createAmuxTrackedCheckoutReadStreamObserver } from
+  createAmuxTrackedCheckoutReadStreamObserver,
+  createAmuxTrackedCheckoutAnalysisStreamObserver } from
   "../lib/amux/ideaTrackedCheckoutReadEvents.mjs";
 
 const directory = "/tmp/amux-v19-checkout-abcdef";
@@ -167,4 +168,81 @@ test("stream decoder fails closed on broken UTF-8, blank lines and invalid chunk
   });
   crlf.observeChunk(Buffer.from('{"type":"system"}\r\n{"type":"result","subtype":"success","is_error":false}\r\n'));
   assert.deepEqual(crlf.finish(), { kind: "complete", files: [] });
+});
+
+const modelId = "claude-opus-5-5";
+const analysisInit = { type: "system", subtype: "init",
+  tools: ["Read", "Grep", "Glob"], permissionMode: "dontAsk",
+  mcp_servers: [], skills: [], plugins: [], agents: [] };
+const analysisResult = { type: "result", subtype: "success", is_error: false,
+  num_turns: 2, result: '{"schemaVersion":2,"plan":[]}',
+  modelUsage: { [modelId]: { inputTokens: 10, outputTokens: 2,
+    cacheReadInputTokens: 3, cacheCreationInputTokens: 1 } } };
+const analyze = (events, options = {}) => {
+  const observer = createAmuxTrackedCheckoutAnalysisStreamObserver({
+    directory, files: ["src/a.ts"], modelId,
+  });
+  const bytes = Buffer.from(events.map(JSON.stringify).join("\n"), "utf8");
+  for (let offset = 0; offset < bytes.length; offset += 3)
+    observer.observeChunk(bytes.subarray(offset, offset + 3));
+  return observer.finish({ exitCode: 0, stdoutComplete: true, ...options });
+};
+
+test("analysis stream returns result, measured usage and exact successful Read manifest", () => {
+  assert.deepEqual(analyze([analysisInit,
+    use("read_1", "Read", { file_path: file }), reply("read_1"),
+    analysisResult]), {
+    kind: "verified_success", rawModelOutput: analysisResult.result,
+    readFiles: ["src/a.ts"], inputTokens: 14, outputTokens: 2,
+  });
+});
+
+test("analysis stream accepts only the pinned inert Claude metadata shape", () => {
+  const init = { ...analysisInit,
+    plugins: ["a", "b"].map((name) => ({ path: `bundled/${name}`,
+      source: `${name}@bundled` })), agents: [{}, {}, {}, {}] };
+  const events = [init, use("read_1", "Read", { file_path: file }),
+    reply("read_1"), analysisResult];
+  assert.equal(analyze(events).kind, "verified_success");
+  assert.deepEqual(analyze([{ ...init, plugins: [
+    { ...init.plugins[0], path: "../outside" }, init.plugins[1],
+  ] }, ...events.slice(1)]), { kind: "outcome_unknown" });
+});
+
+test("analysis stream refuses incomplete file enumeration and untrusted result envelopes", () => {
+  const read = [use("read_1", "Read", { file_path: file }), reply("read_1")];
+  for (const events of [
+    [analysisInit, use("grep_1", "Grep", { pattern: "x" }),
+      reply("grep_1"), analysisResult],
+    [{ ...analysisInit, tools: ["Read", "Grep", "Bash"] },
+      ...read, analysisResult],
+    [{ ...analysisInit, mcp_servers: [{ name: "external" }] },
+      ...read, analysisResult],
+    [{ ...analysisInit, mcp_servers: { length: 0 } },
+      ...read, analysisResult],
+    [{ ...analysisInit, permissionMode: "bypassPermissions" },
+      ...read, analysisResult],
+    [analysisInit, ...read, { ...analysisResult,
+      modelUsage: { "claude-other": analysisResult.modelUsage[modelId] } }],
+    [analysisInit, ...read, { ...analysisResult, modelUsage: {} }],
+    [analysisInit, ...read, { ...analysisResult, result: "" }],
+    [analysisInit, ...read],
+  ]) assert.deepEqual(analyze(events), { kind: "outcome_unknown" });
+  assert.deepEqual(analyze([analysisInit, ...read, analysisResult],
+    { exitCode: 1 }), { kind: "outcome_unknown" });
+  assert.deepEqual(analyze([analysisInit, ...read, analysisResult],
+    { stdoutComplete: false }), { kind: "outcome_unknown" });
+});
+
+test("analysis stream invalidates a result if bytes arrive after finish", () => {
+  const observer = createAmuxTrackedCheckoutAnalysisStreamObserver({
+    directory, files: ["src/a.ts"], modelId,
+  });
+  observer.observeChunk(Buffer.from([analysisInit,
+    use("read_1", "Read", { file_path: file }), reply("read_1"),
+    analysisResult].map(JSON.stringify).join("\n")));
+  assert.equal(observer.finish({ exitCode: 0, stdoutComplete: true }).kind,
+    "verified_success");
+  observer.observeChunk(Buffer.from("late"));
+  assert.deepEqual(observer.finish(), { kind: "outcome_unknown" });
 });
