@@ -11,6 +11,7 @@ import {
 } from "@/lib/marketingDraftIntakeCore";
 import {
   MARKETING_GENERATOR_CALL_BUDGET_MS,
+  marketingGeneratorAppPorts,
   marketingGeneratorWorkerConfig,
   runMarketingGeneratorCycle,
 } from "@/lib/marketingGeneratorCycleCore";
@@ -161,6 +162,28 @@ test("no context, or too little time for another call, is a stop before any call
   const summary = await cycle(late);
   assert.deepEqual(summary.stoppedAt, { stage: "deadline", detail: "deadline_too_close" });
   assert.equal(late.asked.length, 0);
+});
+
+test("a 4xx the app did not write -- a proxy's HTML -- keeps its status and is not resent", async () => {
+  const sent = [];
+  const ports = marketingGeneratorAppPorts({
+    appUrl: new URL("https://tomverse.app"),
+    secret: SECRET,
+    generatorRunId: "run-1",
+    fetch: async (url) => {
+      sent.push(String(url));
+      return new Response("<html>Forbidden</html>", { status: 403, headers: { "content-type": "text/html" } });
+    },
+  });
+  assert.deepEqual(await ports.submit({ drafts: [] }), { httpStatus: 403, body: {} });
+  const h = harness();
+  const summary = await runMarketingGeneratorCycle(
+    { generatorRunId: "run-1", deadlineAt: DEADLINE, postsPerAccount: 3 },
+    { ...h.deps, submit: ports.submit },
+  );
+  assert.deepEqual(summary.stoppedAt, { stage: "submit", detail: "http_403" });
+  // One direct send above and one inside the run: no resend.
+  assert.equal(sent.length, 2);
 });
 
 test("the worker needs every variable, a long secret, HTTPS and a price pin for its model", () => {

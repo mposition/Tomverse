@@ -220,9 +220,10 @@ export function marketingGeneratorAppPorts(input: {
       body: JSON.stringify(body),
       signal: input.signal,
     });
+    // A response that came back is an answer, whatever its body: its status
+    // decides what happens next. Only a request with no response throws.
     const answer = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-    if (answer === null || typeof answer !== "object") throw new Error(`${path}: no readable answer`);
-    return { httpStatus: response.status, body: answer };
+    return { httpStatus: response.status, body: answer !== null && typeof answer === "object" ? answer : {} };
   };
   return {
     readContext: async () => {
