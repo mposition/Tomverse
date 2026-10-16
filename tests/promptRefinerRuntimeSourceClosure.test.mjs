@@ -569,12 +569,16 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-13, guarded v22 Task recovery: the marketing webhook fingerprint's
 // history comment in lib/marketingAutomationAccess.ts grows by six lines. Count
 // 228 and the position-free inventory remain unchanged; positions only.
+// 2026-10-16, AMUX v19 session submission: the scoped session actor extends
+// `lib/adminAudit.ts` and `lib/adminAuditSystemActors.ts` above their existing
+// computed accesses. The asserted count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so this repins source positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e0987bce239a897bce44c965a844501f",
-  "36caf11139d37ea5c641c2cfa9a7f5d5",
+  "888c5e2bc4dfc00ffb570c99f3c522c9",
+  "5796bf45b55790e72d0aad740de95b91",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
