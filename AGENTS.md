@@ -1694,6 +1694,27 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   돌려줍니다(`runDmJudgment()`). 화면은 확정한 답이 승인 계약의 승인이 아님을 적습니다. 이 route는 전달 경로를 부르지 않으므로
   여기서 worker에게 가는 것은 없습니다. 상한 12는 무결성 키가 있는 고친 답 확정의 10문장 + setup + fence이고, judgment unit
   테스트가 그 셈을, judgment DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
+- **S2-2a(bridge·broker 내부 route)**: `app/api/internal/amux/decision-maker/assignments/route.ts`,
+  `app/api/internal/amux/decision-maker/assignments/discard/route.ts`,
+  `app/api/internal/amux/decision-maker/transmissions/route.ts`,
+  `app/api/internal/amux/decision-maker/transmissions/outcome/route.ts`,
+  `app/api/internal/amux/decision-maker/results/route.ts`, `app/api/internal/amux/decision-maker/results/lookup/route.ts`,
+  `app/api/internal/amux/decision-maker/results/unknown/route.ts`, `lib/amux/decisionMakerInternalRoute.ts`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerAssignment`(상한 11)·`decisionMakerAssignmentDiscard`(9)·
+  `decisionMakerTransmitIntent`(10)·`decisionMakerTransmitOutcome`(9)·`decisionMakerResultSubmission`(12)·
+  `decisionMakerResultLookupRead`(3)·`decisionMakerResultUnknown`(9),
+  `tests/server-contract/amux-decision-maker-broker-routes.test.ts`,
+  `tests/server-contract/amux-decision-maker-broker-routes-budget.test.ts`. 라우팅 뒤에 bridge·broker가 부르는 원장 기록
+  route이며, S1f3과 같이 **`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409 `dm_routing_disabled`**이고 key
+  ring도 DB도 건드리지 않습니다. route는 인증·body·key ring·예산·경계만 하고 판정은 동작마다 store 함수 하나입니다 — 배정과
+  결과 제출은 body store의 조합, 나머지는 request store이며, route에는 SQL도 스위치 읽기도 없습니다. store가 돌려준 거절은
+  `unknown_request` 404, `digest_key_unavailable`·`settings_unreadable` 503, 그 밖은 409이고, 결과 제출은 원장의 확정
+  답(accepted·existing·rejected·already_rejected)이 모두 200과 그 status입니다. **요청 키 K_R은 배정 응답에만 있습니다** —
+  broker가 payload·manifest·결과 digest를 keyed로 만들고 잃은 결과를 조회하는 데 쓰며, period 키는 어떤 응답에도 없고 로그에는
+  key ring 오류 코드만 남습니다. 결과 응답을 잃으면 다시 제출하지 않고 `results/lookup`(읽기 경계, 쓰기 없음)으로 확인하고,
+  확인하지 못하면 `results/unknown`입니다. **경계 상한은 각 store 연산의 무결성 키 포함 최대 문장 수 + setup + fence**이고,
+  request·body unit 테스트가 그 셈을, body DB 테스트가 하나 줄인 상한의 거부를 고정합니다. 전달·판정 route와 worker에게 가는
+  경로는 없습니다.
 
 # AMUX 카드 표시 번호
 
