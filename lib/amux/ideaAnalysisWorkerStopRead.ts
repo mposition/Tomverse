@@ -28,6 +28,15 @@ type StopSnapshot = {
   now: Date;
 };
 
+export function shouldAmuxIdeaAnalysisWorkerStop(row: StopSnapshot): boolean {
+  return !(row.holdStatus === "in_flight" &&
+    row.dispatchedAt instanceof Date &&
+    row.previewState === "in_flight" &&
+    row.ideaState === "analyzing" && row.cancelledAt === null &&
+    row.analysisDeadlineAt > row.now && row.chunkState === "in_flight" &&
+    row.currentPreviewId === row.previewId && row.leaseGeneration === 1);
+}
+
 /** One database snapshot for a running child. An uncertain read never grants
  * permission to keep running; the caller kills the process group on any
  * non-200 reply. This exposes no idea, prompt, path, model or cost content. */
@@ -57,11 +66,5 @@ export async function readAmuxIdeaAnalysisWorkerStopState(
       !(row.now instanceof Date) || !Number.isFinite(row.now.getTime())) {
     throw new AmuxIdeaAnalysisWorkerStopReadError("integrity_unavailable");
   }
-  const continueRunning = row.holdStatus === "in_flight" &&
-    row.dispatchedAt instanceof Date &&
-    row.previewState === "in_flight" &&
-    row.ideaState === "analyzing" && row.cancelledAt === null &&
-    row.analysisDeadlineAt > row.now && row.chunkState === "in_flight" &&
-    row.currentPreviewId === row.previewId && row.leaseGeneration === 1;
-  return { holdId, stop: !continueRunning };
+  return { holdId, stop: shouldAmuxIdeaAnalysisWorkerStop(row) };
 }
