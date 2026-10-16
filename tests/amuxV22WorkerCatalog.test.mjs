@@ -95,7 +95,8 @@ test("Task readiness, promotion capacity and claim use the same separated catalo
     const source = readFileSync(path, "utf8");
     // Version 35, section 3 (R2c): each reads the assignment catalog in its
     // own transaction, which is the v22 variable while R2c is off.
-    assert.match(source, /const \{ v22: \w+ \} = await readAmuxAssignmentCatalogs\(tx\);/);
+    assert.match(source,
+      /const \{ v22: \w+(?:, ceilings)? \} = await readAmuxAssignmentCatalogs\(tx\);/);
     assert.doesNotMatch(source, /getConfiguredAmuxWorkerCatalog\(\)|getConfiguredAmuxV22WorkerCatalog\(\)/);
   }
   // The variables' parser moved out of routing.ts (orchestration policy
