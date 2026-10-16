@@ -110,6 +110,29 @@ test("sendsATier: true is an error even for an allowlisted file", () => {
   assert.match(errors[0], /sendsATier: true/);
 });
 
+test("the marketing ledger's adapter may send the ledger's tier, and nothing else may", () => {
+  const LINE = "service_tier: MARKETING_LLM_SERVICE_TIER,";
+  const ledger = {
+    file: "lib/marketingLlmClientCore.ts",
+    sendsATier: true,
+    pricedBy: "marketing-llm-price-pins",
+    sends: [LINE],
+    reason: "priced by the marketing ledger's pins",
+    mentions: [LINE],
+  };
+  const audit = (entry, text = LINE) =>
+    auditProcessingTierMentions({ matchedLines: lines([entry.file, text]), allowlist: [entry] }).errors;
+
+  assert.deepEqual(audit(ledger), []);
+  // Another file, no pricing source, a literal tier, or a second sending line:
+  // each is still the general rule's error.
+  assert.match(audit({ ...ledger, file: "lib/someRequestBuilder.ts" }).join(), /sendsATier: true/);
+  assert.match(audit({ ...ledger, pricedBy: undefined }).join(), /sendsATier: true/);
+  const literal = 'service_tier: "default",';
+  assert.match(audit({ ...ledger, sends: [literal], mentions: [literal] }, literal).join(), /sendsATier: true/);
+  assert.match(audit({ ...ledger, sends: [LINE, "serviceTier: other,"] }).join(), /sendsATier: true/);
+});
+
 test("the live allowlist is clean, line for line", () => {
   // Run against the real tree with the real pattern. `--untracked` matters for
   // the same reason it does in the check: a guard that answers differently

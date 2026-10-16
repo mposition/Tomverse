@@ -75,6 +75,7 @@ test("the default new-idea view has one primary button; the separate steps wait 
   const markup = renderToStaticMarkup(createElement(AmuxIdeaInputPanel, {
     submissionAvailable: true, sourceScopePreviewAvailable: true, initialPlanAvailable: true, frontierModelsAvailable: true,
     transferPreviewAvailable: true, transferConfirmAvailable: true, analysisResultAvailable: true, analysisBudgetAvailable: true,
+    analysisStopAvailable: false,
     operatorId: "owner-1",
   }));
   // Buttons that sit outside every <details>: the default view's controls.

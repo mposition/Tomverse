@@ -2316,6 +2316,13 @@ export const RAW_SQL_ALLOWLIST = [
     reason: "The marketing generator actor's exact audit target literal only; this module runs no SQL.",
   },
   {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "MarketingReport",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The marketing generator actor's S3f report audit target literal only; this module runs no SQL, and the report row is written by lib/marketingStore.ts.",
+  },
+  {
     path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
     table: "MarketingLlmCall",
     tableMentions: 18,

@@ -100,9 +100,11 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // The v19 idea_raw size change touches ideaCrypto in this unchanged read-only
-// closure. Repin both latch states only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "beb5245ef5530c88f909e8bb236c3006bdb6d73e4a70c0aae80c6991eac7c205";
-const SOURCE_SCOPE_DISABLED_DIGEST = "8fe36387516d811a0a478deb1c0975ebdf9c34d028e432c2d5bf269f88a6e721";
+// closure. The v19 tracked checkout adds localIntakeCore to the existing
+// closure without a route, import, writer or reviewed-file-list change.
+// Repin both latch states only after independent review.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "dd6553e948926408d13269262f2e3d4977f5b07f75911dcfe67d5d1068612d1c";
+const SOURCE_SCOPE_DISABLED_DIGEST = "af2b0d5ad56ccb6848ac842b6c2c61bfea2a6b8306d38558a90618c5c5f1ca34";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -150,8 +152,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // registrar. The same 17-file owner preview closure remains read-only.
 // The v19.5 replay repair adds an optional attempt-kind query predicate to the
 // same refusal reader. On 2026-10-16 the file list and writer scan stayed fixed.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "39328bd9a0013a571d308bdf9996d3879de6adccde873c8fabf7d0536a99cf5e";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "0d9c5590665d9a3be73139fa3c788cdaf6dda488cfdcaa551b0c9b9dd350eb17";
+// Recomputed for the merged v19.5 and develop sources; the 17-file closure,
+// read-only scan and both latch states remain explicitly pinned.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "15c8fb25f33f8fb90b693bb8917a23e165c38d3ffc013d3d17483c60ba2f96d0";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "13c48112baa4c52d3f1e4d0a4f9c327441553a0009ed9fd23be69635c7a7fe62";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

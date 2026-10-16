@@ -17,6 +17,7 @@ import {
   readMarketingGeneratorBody,
 } from "@/lib/marketingGeneratorAuth";
 import { runMarketingTransaction } from "@/lib/marketingStore";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 
 // What the marketing generator reads before it writes (S3 plan, S3b;
@@ -57,11 +58,26 @@ export async function POST(request: Request) {
     return json({ code: "kill_switch" }, 503);
   }
 
-  const context = await runMarketingTransaction(
-    prisma,
-    (tx) => readMarketingGeneratorContext(tx),
-    { maxWait: 5_000, timeout: 10_000 },
-  );
+  let context;
+  try {
+    context = await runMarketingTransaction(
+      prisma,
+      (tx) => readMarketingGeneratorContext(tx),
+      { maxWait: 5_000, timeout: 10_000 },
+    );
+  } catch (error) {
+    void reportOperationalIncident({
+      code: "MARKETING_GENERATOR_ROUTE_FAILED",
+      title: "Marketing generator context could not be read",
+      error,
+      severity: "error",
+      cooldownMs: 30 * 60 * 1_000,
+      context: { component: "marketing-generator-context" },
+    }).catch((reportError: unknown) => {
+      console.error("Marketing generator incident could not be reported:", reportError);
+    });
+    return json({ code: "context_unavailable" }, 500);
+  }
   const answer = { context };
   if (Buffer.byteLength(JSON.stringify(answer), "utf8") > MARKETING_GENERATOR_CONTEXT_MAX_BYTES) {
     return json({ code: "context_too_large" }, 500);

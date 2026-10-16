@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxAnalysisClaimResolutionPanel } from
   "@/components/admin/AmuxAnalysisClaimResolutionPanel";
+import { AmuxIdeaAnalysisStopPanel } from
+  "@/components/admin/AmuxIdeaAnalysisStopPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxAnalysisBudgetMessages } from "@/lib/adminMessages/amuxAnalysisBudget";
 import type { ConfirmedIdeaTransfer } from "@/lib/amux/ideaTransferConfirmationUiCore";
@@ -12,8 +14,9 @@ import type { ConfirmedIdeaTransfer } from "@/lib/amux/ideaTransferConfirmationU
 type PriceReply = { state: "profile"; latest: null | {
   id: string; version: number; status: string; expiresAt: string;
   admissible: boolean } };
-type HoldReply = { state: "found"; hold: { id: string; previewId: string;
-  status: string; reservedMicroUsd: string } } | { state: "not_visible" };
+type Hold = { id: string; previewId: string;
+  status: string; reservedMicroUsd: string; dispatchedAt: string | null };
+type HoldReply = { state: "found"; hold: Hold } | { state: "not_visible" };
 
 function priceReply(value: unknown): PriceReply | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -38,12 +41,15 @@ function holdReply(value: unknown): HoldReply | null {
   if (row.state !== "found" || !row.hold || typeof row.hold !== "object") return null;
   const hold = row.hold as Record<string, unknown>;
   return ["id", "previewId", "status", "reservedMicroUsd"].every((field) =>
-    typeof hold[field] === "string") ? { state: "found", hold: hold as
-      { id: string; previewId: string; status: string; reservedMicroUsd: string } } : null;
+    typeof hold[field] === "string") &&
+    (hold.dispatchedAt === null ||
+      (typeof hold.dispatchedAt === "string" &&
+        Number.isFinite(Date.parse(hold.dispatchedAt)))) ?
+    { state: "found", hold: hold as Hold } : null;
 }
 
-export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
-  confirmed: ConfirmedIdeaTransfer; available: boolean;
+export function AmuxAnalysisBudgetPanel({ confirmed, available, stopAvailable }: {
+  confirmed: ConfirmedIdeaTransfer; available: boolean; stopAvailable: boolean;
 }) {
   const m = useAdminMessages(adminAmuxAnalysisBudgetMessages);
   const [price, setPrice] = useState<PriceReply | null>(null);
@@ -231,6 +237,18 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
     </button> : null}
     {holdStatus === "reserved" ? <p role="status">{m.reserved}</p> : null}
     {holdStatus === "in_flight" ? <p role="status">{m.inFlight}</p> : null}
+    {available && hold?.state === "found" &&
+      ["reserved", "in_flight"].includes(hold.hold.status) ? <button type="button"
+        disabled={busy} onClick={() => void loadHold().catch(() => setFailure(true))}
+        className="min-h-11 rounded-lg border border-zinc-600 px-4 disabled:opacity-50">
+        {m.refreshHold}
+      </button> : null}
+    {stopAvailable && hold?.state === "found" &&
+      ["in_flight", "outcome_unknown"].includes(hold.hold.status) ?
+      <AmuxIdeaAnalysisStopPanel key={hold.hold.id} holdId={hold.hold.id}
+        previewId={hold.hold.previewId} ideaId={confirmed.ideaId}
+        holdStatus={hold.hold.status} dispatchedAt={hold.hold.dispatchedAt}
+        onStopped={() => { void loadHold().catch(() => setFailure(true)); }} /> : null}
     {holdStatus === "outcome_unknown"
       ? <p role="alert">{m.outcomeUnknown}</p> : null}
     {holdStatus === "owner_released_unstarted"
