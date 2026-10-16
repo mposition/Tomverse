@@ -149,6 +149,7 @@ export const APPEND_ONLY_LEDGER_TABLES = [
   "AmuxV22ReadOnlyLaunchProof",
   "AmuxV22ApiModelAccessEvidence",
   "AmuxIdeaTrackedCheckoutEvidence",
+  "AmuxIdeaTrackedCheckoutReadManifest",
 ];
 
 /**
@@ -190,6 +191,12 @@ export const PROTECTED_TABLES = [
     table: "AmuxIdeaTrackedCheckoutEvidence",
     delegate: "amuxIdeaTrackedCheckoutEvidence",
     writers: ["lib/amux/ideaTrackedCheckoutEvidenceStore.ts"],
+    contract: "docs/policy/amux-intake.md v19 items 3 and 7",
+  },
+  {
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    delegate: "amuxIdeaTrackedCheckoutReadManifest",
+    writers: ["lib/amux/ideaTrackedCheckoutReadManifestStore.ts"],
     contract: "docs/policy/amux-intake.md v19 items 3 and 7",
   },
   {
@@ -556,6 +563,12 @@ export const EXCLUDED_PREFIXES = [
 export const DELEGATE_NAME_ALLOWLIST = [
   {
     path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxIdeaTrackedCheckoutReadManifest",
+    count: 1,
+    reason: "Account export domain key only; no client is indexed or database connection opened in this metadata file.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     delegate: "amuxIdeaTrackedCheckoutEvidence",
     count: 1,
     reason: "Account export domain key only; no client is indexed and no database connection or writer exists in this metadata file.",
@@ -650,6 +663,41 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason: "The account export registry describes this model; it opens no database connection or SQL writer.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The closed system actor manifest names the audit target; it executes no SQL.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_tracked_checkout_read_manifest/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 2,
+    writeVerbs: 11,
+    reason: "The manifest migration references and reads the existing immutable checkout proof; its DDL writes only the new manifest table.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_tracked_checkout_read_manifest/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 7,
+    writeVerbs: 11,
+    reason: "The migration creates the append-only manifest table and insert guard; it inserts no manifest row.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_tracked_checkout_read_manifest/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 11,
+    reason: "The new table references and reads the canonical audit; its DDL never writes an audit row.",
+  },
   {
     path: "lib/accountDataExportDomains.ts",
     table: "AmuxIdeaTrackedCheckoutEvidence",

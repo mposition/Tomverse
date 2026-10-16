@@ -777,6 +777,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaTrackedCheckoutReadManifest",
+    publicName: "amux_idea_tracked_checkout_read_manifests",
+    prismaModel: "AmuxIdeaTrackedCheckoutReadManifest",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaAnalysisChunk",
     publicName: "amux_idea_analysis_chunks",
     prismaModel: "AmuxIdeaAnalysisChunk",
