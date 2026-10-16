@@ -31,6 +31,8 @@ export async function purgeDueAmuxReadManifests(
       deleteKey);
     if (result === "deleted") keysDeleted += 1;
   }
+  if (pending.length === BATCH_SIZE) return { bodiesPurged: 0,
+    keysDeleted, scanned: pending.length, batchLimit: BATCH_SIZE };
   const nowRows = await prisma.$queryRaw<Array<{ now: Date }>>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"`;
   const now = nowRows[0]?.now;

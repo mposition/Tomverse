@@ -468,3 +468,75 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
     where: { id: manifest.id }, data: { ciphertext: Uint8Array.of(1) },
   }), /append only/);
 });
+
+test("a full pending-key batch leaves due manifest bodies for the next tick", async () => {
+  const batchIdeaId = randomUUID();
+  const repository = authority.scope.repositories[0];
+  if (!repository) throw new Error("Synthetic repository unavailable");
+  const inspected = inspectAmuxIdeaSessionSubmission({
+    version: 1, requestId: randomUUID(),
+    input: { version: 1, idea: "Synthetic full retention batch",
+      repositories: [repository], pullRequests: Array.from({ length: 9 },
+        (_, index) => ({ repository, number: index + 1 })) },
+    source: { toolName: "Codex", modelProvider: "OpenAI",
+      sessionDisplay: "AMUX v19 retention batch DB test" },
+  });
+  if (!inspected.ok) throw new Error("Synthetic session input rejected");
+  await prisma.$transaction((tx) => commitAmuxIdeaSessionSubmission(tx, {
+    inspected, expectedAuthority: authority, ideaId: batchIdeaId,
+    keys: keysFor(batchIdeaId),
+  }));
+  const manifestIds: string[] = [];
+  for (let ordinal = 0; ordinal < 9; ordinal += 1) {
+    await prisma.$transaction((tx) =>
+      recordAmuxTrackedCheckoutEvidence(tx, evidenceInput(batchIdeaId, ordinal)));
+    const manifestId = randomUUID();
+    manifestIds.push(manifestId);
+    const readKeys = { masterKeyId: amuxContentUnitKeyId(
+      amuxTrackedCheckoutReadManifestKeyIdentity(batchIdeaId, manifestId)),
+      masterKeyVersion: 1, masterKey: randomBytes(32),
+      digestKeyId: "synthetic-checkout-read-digest", digestKey: randomBytes(32) };
+    try {
+      await prisma.$transaction((tx) => recordAmuxTrackedCheckoutReadManifest(tx, {
+        manifestId, ideaId: batchIdeaId, referenceOrdinal: ordinal,
+        pinnedCommitSha: "a".repeat(40),
+        observed: { kind: "verified_success", readFiles: [`docs/${ordinal}.md`] },
+      }, readKeys));
+    } finally {
+      readKeys.masterKey.fill(0);
+      readKeys.digestKey.fill(0);
+    }
+  }
+  const submittedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+  const analysisDeadlineAt = amuxReadManifestDueAt(submittedAt);
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+    await tx.amuxIdeaSubmission.update({ where: { id: batchIdeaId }, data: {
+      submittedAt, analysisDeadlineAt, rawPurgeAfter: analysisDeadlineAt,
+      rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
+      sourceProvenanceCiphertext: null, sourceProvenanceKeyId: null,
+      sourceProvenanceKeyVersion: null, rawPurgedAt: new Date(),
+    } });
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" ENABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+  });
+  for (const manifestId of manifestIds.slice(0, 8)) {
+    assert.equal(await prisma.$transaction((tx) =>
+      commitAmuxDueReadManifestPurge(tx, manifestId)), "purged");
+  }
+  const deleted: string[] = [];
+  const first = await purgeDueAmuxReadManifests(async (identity) => {
+    deleted.push(identity.subjectId);
+  });
+  assert.deepEqual(first, { bodiesPurged: 0, keysDeleted: 8, scanned: 8,
+    batchLimit: 8 });
+  assert.deepEqual(deleted, manifestIds.slice(0, 8));
+  assert.ok((await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
+    where: { id: manifestIds[8] },
+  })).ciphertext);
+  const second = await purgeDueAmuxReadManifests(async (identity) => {
+    deleted.push(identity.subjectId);
+  });
+  assert.deepEqual(second, { bodiesPurged: 1, keysDeleted: 1, scanned: 1,
+    batchLimit: 8 });
+  assert.deepEqual(deleted, manifestIds);
+});
