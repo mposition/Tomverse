@@ -6,10 +6,13 @@ import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import {
+  DM_SWITCH_ACTOR_KINDS,
   DM_SWITCH_AUDIT_TARGET_TYPE,
   decisionMakerSwitchStateFromRows,
   dmOperatorSwitchAction,
   dmSwitchAuditMetadata,
+  isDmInstanceScope,
+  isDmSwitchLatchRequestId,
   parseDmOperatorSwitchChange,
   parseDmSwitchLatch,
   unreadableDecisionMakerSwitches,
@@ -76,6 +79,52 @@ export async function readDecisionMakerSwitches(
   } catch {
     return unreadableDecisionMakerSwitches();
   }
+}
+
+/** An instance's newest switch event: who recorded it, and its database clock. */
+export type DecisionMakerInstanceNewestEvent = {
+  actorKind: DmSwitchActorKind;
+  createdAtMs: number;
+};
+
+/**
+ * One instance's newest switch event, in one statement, or null when it has
+ * none: the boundary §8's validation latch counts failures from
+ * (docs/policy/amux-decision-maker.md §8). A system event is a latch that has
+ * not been released; a person's is a change -- a release included -- after
+ * which the count starts again. The caller holds the audit chain lock, which
+ * every switch change takes before it writes, so the event read here is still
+ * the newest when the caller's transaction commits.
+ *
+ * A row the table's CHECKs could not have produced throws: a latch is not
+ * decided on a row nobody understands. A statement that fails is not caught;
+ * it has aborted the caller's transaction.
+ */
+export async function readDecisionMakerInstanceNewestEvent(
+  client: SwitchReader,
+  instance: unknown,
+): Promise<DecisionMakerInstanceNewestEvent | null> {
+  if (!isDmInstanceScope(instance)) throw new DecisionMakerSwitchWriteError("invalid_latch");
+  const rows = await client.$queryRaw<Array<{ actorKind: unknown; createdAtEpochMs: unknown }>>`
+    SELECT "actorKind", floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"
+    FROM "AmuxDecisionMakerSwitchEvent"
+    WHERE "scope" = ${instance}
+    ORDER BY "sequence" DESC
+    LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  const createdAtMs =
+    typeof row.createdAtEpochMs === "bigint" || typeof row.createdAtEpochMs === "number"
+      ? Number(row.createdAtEpochMs)
+      : Number.NaN;
+  if (
+    !(DM_SWITCH_ACTOR_KINDS as readonly unknown[]).includes(row.actorKind) ||
+    !Number.isSafeInteger(createdAtMs)
+  ) {
+    throw new Error("AMUX Decision Maker switch event is unreadable");
+  }
+  return { actorKind: row.actorKind as DmSwitchActorKind, createdAtMs };
 }
 
 export class DecisionMakerSwitchWriteError extends Error {
@@ -190,18 +239,26 @@ export async function recordDecisionMakerSwitchByOperator(
  * failures; §5: a request directory whose deletion could not be confirmed).
  * The latch is always written, even over an instance that is already `off`:
  * the operator then has to release it before the instance can propose again,
- * and a second cause is a second record. The audit comes first, under the
- * instance's own actor, then the event naming it.
+ * and a second cause is a second record. Whether a latch is due is the
+ * caller's decision (lib/amux/decisionMakerRequestStore.ts): §8's count does
+ * not latch an instance whose newest event is already a latch. The audit
+ * comes first, under the instance's own actor, then the event naming it; a
+ * latch one request caused names that request in its audit (`requestId`).
  *
  * Statements: the system writer's 3 (4 with an integrity key), 1 insert --
  * 4, or 5.
  */
 export async function latchDecisionMakerInstanceOff(
   tx: Prisma.TransactionClient,
-  input: { instance: unknown; reason: unknown },
+  input: { instance: unknown; reason: unknown; requestId?: unknown },
 ): Promise<DecisionMakerSwitchEventRecord> {
   const latch = parseDmSwitchLatch(input.instance, input.reason);
   if (!latch) throw new DecisionMakerSwitchWriteError("invalid_latch");
+  let requestId: string | null = null;
+  if (input.requestId !== undefined && input.requestId !== null) {
+    if (!isDmSwitchLatchRequestId(input.requestId)) throw new DecisionMakerSwitchWriteError("invalid_latch");
+    requestId = input.requestId;
+  }
 
   const eventId = randomUUID();
   const auditLogId = await writeDecisionMakerLatchAudit(tx, {
@@ -212,6 +269,7 @@ export async function latchDecisionMakerInstanceOff(
       scope: latch.instance,
       value: "off",
       reason_code: latch.reason,
+      request_id: requestId,
     }),
   });
   const inserted = await tx.$queryRaw<InsertedRow[]>`

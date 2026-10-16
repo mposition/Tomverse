@@ -10,13 +10,16 @@ import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisio
 import {
   DM_ROUTING_BINDING_KEYS,
   DM_STALE_CLOSE_AFTER_MS,
+  DM_VALIDATION_LATCH_WINDOW,
   DM_VENDOR_FOR_INSTANCE,
+  dmCleanupUnknownRefusal,
   dmEventAuditMetadata,
   dmEventRefusal,
   dmRequestAuditMetadata,
   dmRequestStateFromRow,
   dmTransmitSwitchRefusal,
   dmResultLookup,
+  dmValidationLatchDecision,
   parseDmCard,
   dmResultSubmissionOutcome,
   isDmDeadlineResultKind,
@@ -26,6 +29,7 @@ import {
   parseDmRoutingBinding,
   parseDmResultSubmission,
   parseDmTransmission,
+  type DmCleanupUnknownRefusal,
   type DmEventAttempt,
   type DmEventRefusal,
   type DmRequestRoute,
@@ -34,8 +38,10 @@ import {
   type DmResultLookup,
   type DmResultRejectionReason,
   type DmTransmitSwitchRefusal,
+  type DmValidationLatchDecision,
 } from "@/lib/amux/decisionMakerRequestCore";
 import {
+  writeDecisionMakerCleanupUnknownAudit,
   writeDecisionMakerEventAudit,
   writeDecisionMakerRouteAudit,
 } from "@/lib/amux/decisionMakerRequestSystemAudit";
@@ -45,7 +51,12 @@ import {
   isDmInstanceScope,
   type DmInstanceScope,
 } from "@/lib/amux/decisionMakerSwitchCore";
-import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
+import {
+  latchDecisionMakerInstanceOff,
+  readDecisionMakerInstanceNewestEvent,
+  readDecisionMakerSwitchesOrThrow,
+  type DecisionMakerSwitchEventRecord,
+} from "@/lib/amux/decisionMakerSwitchStore";
 
 /**
  * The one module that reads and writes `AmuxDecisionMakerRequest` and
@@ -88,6 +99,12 @@ import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitch
  * refuses the same writes even for a caller that skipped this module. Lock
  * order: the audit chain lock, the switch gate (in the triggers), then the
  * per-request or per-scope lock.
+ *
+ * Since 2026-10-17 it also decides the two latches that follow from the
+ * ledger (§5, §8): three validation failures in a row, and a request
+ * directory whose deletion the broker could not confirm. It decides on its own
+ * reads and the switch store's newest-event read, and turns the instance off
+ * through the switch store's latch -- it never names the switch table.
  *
  * No card text, prompt, proposal or free text is written by it.
  */
@@ -1001,4 +1018,144 @@ export async function staleCloseDecisionMakerRequest(
   const refusal = dmEventRefusal(state, { kind: "stale_close" });
   if (refusal) return { recorded: false, reason: refusal };
   return { recorded: true, event: await appendEvent(tx, requestId, { kind: "stale_close", ...NO_COLUMNS }) };
+}
+
+// ---------------------------------------------------------------------------
+// The two latches (§5, §8)
+// ---------------------------------------------------------------------------
+
+/**
+ * The kinds of an instance's terminal results recorded at or after `sinceMs`
+ * by the database clock -- every one when it is null -- newest first, at most
+ * DM_VALIDATION_LATCH_WINDOW, in one statement: what §8's count reads
+ * (`dmValidationLatchDecision()`). Every ledger write takes the audit chain
+ * lock first, so the sequence is the order the results committed in. A result
+ * event names its request's own instance, which the event guard requires.
+ * The kinds are returned as read; the core refuses one outside §6's five.
+ */
+export async function readDecisionMakerInstanceResultKinds(
+  client: LedgerReader,
+  input: { instance: DmInstanceScope; sinceMs: number | null },
+): Promise<unknown[]> {
+  if (
+    !isDmInstanceScope(input.instance) ||
+    (input.sinceMs !== null && (!Number.isSafeInteger(input.sinceMs) || input.sinceMs < 0))
+  ) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  // The epoch itself when there is no boundary: every result is after it.
+  const sinceMs = input.sinceMs ?? 0;
+  const rows = await client.$queryRaw<Array<{ resultKind: unknown }>>`
+    SELECT ev."resultKind"
+    FROM "AmuxDecisionMakerRequestEvent" ev
+    WHERE ev."kind" = 'result'
+      AND ev."instance" = ${input.instance}
+      AND ev."createdAt" >= 'epoch'::timestamptz + ${sinceMs} * INTERVAL '1 millisecond'
+    ORDER BY ev."sequence" DESC
+    LIMIT ${DM_VALIDATION_LATCH_WINDOW}
+  `;
+  return rows.map((row) => row.resultKind);
+}
+
+export type DecisionMakerValidationLatchWrite =
+  | { latched: true; event: DecisionMakerSwitchEventRecord }
+  | { latched: false; reason: Extract<DmValidationLatchDecision, { latch: false }>["reason"] };
+
+/**
+ * §8: latches `instance` off when three of its validation failures in a row
+ * stand since its newest switch event (`dmValidationLatchDecision()`), in the
+ * caller's transaction, in this order: the audit chain lock -- which every
+ * switch change and every ledger write takes first, so no result and no
+ * release commits between the reads and the latch, and two checks of one
+ * instance cannot both latch; the instance's newest switch event, by the
+ * switch store's reader; the instance's terminal results since that event's
+ * database clock; and then the switch store's latch (`validation_latch`),
+ * under the instance's own actor.
+ *
+ * A result and its switch boundary are compared by their database clocks,
+ * which are milliseconds: a result in the same millisecond as the boundary is
+ * counted, the side that latches sooner.
+ *
+ * Two callers, each in a boundary transaction of its own: the result route,
+ * once a validation failure it recorded has committed
+ * (app/api/internal/amux/decision-maker/results/route.ts), and the maintenance
+ * sweep for both instances every fifteen minutes
+ * (lib/amux/decisionMakerRetentionSweep.ts), which writes a latch whose first
+ * check did not commit. A latch only turns an instance off, which no row of
+ * §6's kill switch table refuses, so the kill switch is not read.
+ *
+ * A switch event or a result the stores could not have written throws
+ * `settings_unreadable` or `state_unreadable`, and nothing is written.
+ *
+ * Statements: 1 lock, 1 newest switch event, 1 result read -- 3 when nothing
+ * is due; then the latch's 4 (5 with an integrity key) -- 7, or 8.
+ */
+export async function recordDecisionMakerValidationLatch(
+  tx: Prisma.TransactionClient,
+  input: { instance: unknown },
+): Promise<DecisionMakerValidationLatchWrite> {
+  const instance = requireInstance(input.instance);
+  await takeAuditChainLock(tx);
+  let newestEvent: Awaited<ReturnType<typeof readDecisionMakerInstanceNewestEvent>>;
+  try {
+    newestEvent = await readDecisionMakerInstanceNewestEvent(tx, instance);
+  } catch {
+    throw new DecisionMakerRequestWriteError("settings_unreadable");
+  }
+  const resultKindsNewestFirst = await readDecisionMakerInstanceResultKinds(tx, {
+    instance,
+    sinceMs: newestEvent?.createdAtMs ?? null,
+  });
+  const decision = dmValidationLatchDecision({ newestEvent, resultKindsNewestFirst });
+  if (decision === null) throw new DecisionMakerRequestWriteError("state_unreadable");
+  if (!decision.latch) return { latched: false, reason: decision.reason };
+  return { latched: true, event: await latchDecisionMakerInstanceOff(tx, { instance, reason: "validation_latch" }) };
+}
+
+export type DecisionMakerCleanupUnknownWrite =
+  | { recorded: true; auditLogId: string; latch: DecisionMakerSwitchEventRecord }
+  | { recorded: false; reason: DmCleanupUnknownRefusal | "unknown_request" };
+
+/**
+ * §5: the broker could not confirm that a request's directory -- the card,
+ * the snapshot, the prompt and the temporary output -- was deleted. In the
+ * caller's transaction: the request's state; `amux.decision.cleanup_unknown`
+ * under the request's instance, naming the request; and the switch store's
+ * latch of that instance (`cleanup_latch`), whose audit names the request
+ * too. The latch is written whatever the instance's switch says -- already
+ * `off`, or latched for another cause: each unconfirmed directory is its own
+ * record, and an instance is never left on with one.
+ *
+ * The state is read before the audit chain lock, which the first audit append
+ * then takes: what the read decides on -- that the request exists, its
+ * instance, that it was assigned -- never changes once written (the request
+ * row is immutable and an assignment is never undone), so a read under the
+ * lock would decide the same. Taking the lock first would be a thirteenth
+ * statement with the boundary's two, over §9's 12.
+ *
+ * Not idempotent: a report sent again records another pair. Neither turns
+ * anything on, so a broker that lost the answer sends it again rather than
+ * leave the instance on. A latch only turns an instance off, so the kill
+ * switch is not read.
+ *
+ * Statements: 1 state read -- 1 for a refusal; then the instance's audit 3 (4
+ * with an integrity key) and the latch's 4 (5) -- 8, or 10.
+ */
+export async function recordDecisionMakerCleanupUnknown(
+  tx: Prisma.TransactionClient,
+  input: { requestId: unknown; instance: unknown },
+): Promise<DecisionMakerCleanupUnknownWrite> {
+  const requestId = requireRequestId(input.requestId);
+  const instance = requireInstance(input.instance);
+  const state = await readDecisionMakerRequestState(tx, requestId);
+  if (!state) return { recorded: false, reason: "unknown_request" };
+  const refusal = dmCleanupUnknownRefusal(state, instance);
+  if (refusal) return { recorded: false, reason: refusal };
+  const auditLogId = await writeDecisionMakerCleanupUnknownAudit(tx, {
+    requestId,
+    instance,
+    metadata: dmEventAuditMetadata({ request_id: requestId, instance }),
+  });
+  const latch = await latchDecisionMakerInstanceOff(tx, { instance, reason: "cleanup_latch", requestId });
+  return { recorded: true, auditLogId, latch };
 }

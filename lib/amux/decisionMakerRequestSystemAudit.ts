@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import {
+  DM_CLEANUP_UNKNOWN_AUDIT_ACTION,
   DM_REQUEST_AUDIT_ACTION,
   DM_REQUEST_AUDIT_TARGET_TYPE,
   DM_REQUEST_EVENT_AUDIT_TARGET_TYPE,
@@ -12,7 +13,7 @@ import {
   dmEventAuditActor,
   type DmRequestEventKind,
 } from "@/lib/amux/decisionMakerRequestCore";
-import type { DmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
+import { DM_SWITCH_LATCH_ACTOR_FOR_INSTANCE, type DmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
 
 /**
  * The system audit of the Decision Maker request ledger
@@ -21,7 +22,10 @@ import type { DmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
  * for assignment and closing, by the request's own instance for transmission
  * and results. Migration 20261008090100_amux_decision_maker_request_ledger
  * requires exactly that action and actor, in the same transaction, naming the
- * row.
+ * row. And `amux.decision.cleanup_unknown` (§5), by the request's own
+ * instance, naming the request: no ledger row is written with it, so no
+ * trigger asks for it; the cleanup latch of the same transaction is the state
+ * change it explains.
  *
  * Kept apart from lib/amux/decisionMakerRequestStore.ts, as the switch store
  * keeps its latch audit apart, so the store names no system actor and a later
@@ -54,6 +58,20 @@ export const writeDecisionMakerRouteAudit = (
     targetType: DM_REQUEST_AUDIT_TARGET_TYPE,
     targetId: entry.requestId,
     summary: "Routed an AMUX Decision Maker request.",
+    metadata: entry.metadata,
+  });
+
+export const writeDecisionMakerCleanupUnknownAudit = (
+  tx: Prisma.TransactionClient,
+  entry: { requestId: string; instance: DmInstanceScope; metadata: Prisma.InputJsonObject },
+): Promise<string> =>
+  writeSystemAuditLog({
+    tx,
+    systemActor: DM_SWITCH_LATCH_ACTOR_FOR_INSTANCE[entry.instance],
+    action: DM_CLEANUP_UNKNOWN_AUDIT_ACTION,
+    targetType: DM_REQUEST_AUDIT_TARGET_TYPE,
+    targetId: entry.requestId,
+    summary: "Recorded an AMUX Decision Maker request directory of unknown deletion.",
     metadata: entry.metadata,
   });
 

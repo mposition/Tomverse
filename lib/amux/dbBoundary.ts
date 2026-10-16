@@ -397,6 +397,26 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 9,
     isolation: "mutation",
   },
+  // The validation latch of docs/policy/amux-decision-maker.md §8, which the
+  // result route runs after a validation failure commits and the maintenance
+  // sweep runs for each instance (lock, the instance's newest switch event,
+  // its results, the instance's audit 4, the switch event: 8, pinned by
+  // tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerValidationLatch: {
+    operation: "decision_maker_validation_latch",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // An unconfirmed request directory, docs/policy/amux-decision-maker.md §5
+  // (the request state, the instance's cleanup_unknown audit 4, the latch's
+  // audit 4, the switch event: 10, pinned by
+  // tests/amuxDecisionMakerRequest.test.mjs) -- exactly
+  // docs/policy/amux-decision-maker.md §9's 12 with setup and fence.
+  decisionMakerCleanupUnknown: {
+    operation: "decision_maker_cleanup_unknown",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
   // Stage S2's judgment route: setup + a person's judgment at its largest
   // (an edited confirmation with an integrity key: the audit chain lock, the
   // request state, the switches, the proposal, the administrator audit's 4,

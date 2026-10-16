@@ -858,6 +858,90 @@ export const dmResultSubmissionOutcome = (
   return { outcome: "accept" };
 };
 
+// ---------------------------------------------------------------------------
+// The two latches (§5, §8)
+// ---------------------------------------------------------------------------
+
+/** §8: this many validation failures in a row latch the instance `off`. */
+export const DM_VALIDATION_LATCH_THRESHOLD = 3;
+
+/**
+ * How many of an instance's newest terminal results the latch reads. §3-6
+ * caps an instance at 100 routed requests a day, so this covers at least a
+ * day of its results -- far longer than the fifteen minutes before the
+ * maintenance sweep checks again -- and bounds the read whatever the age of
+ * the instance's newest switch event.
+ */
+export const DM_VALIDATION_LATCH_WINDOW = 100;
+
+export type DmValidationLatchDecision =
+  | { latch: true }
+  | { latch: false; reason: "already_latched" | "no_streak" };
+
+/**
+ * §8: whether three validation failures in a row latch an instance now.
+ *
+ * - The count runs over the instance's terminal results (§6: one per
+ *   request), in the order the ledger recorded them. Any other terminal
+ *   result -- a proposal, an escalation, a timeout, an unavailable DM --
+ *   breaks a run. A rejected or unknown result is not a terminal result and
+ *   neither counts nor breaks one: the ledger keeps no output kind for it.
+ * - It starts at the instance's newest switch event. An instance whose newest
+ *   event is the system's is latched and not yet released, so nothing is due
+ *   (one run is never latched twice); a person's change -- the release of a
+ *   latch included -- starts the count again. With no event at all every
+ *   result counts.
+ * - Any run of three among the results read is due, not only one at the newest
+ *   end: a latch whose write failed after its third failure was recorded is
+ *   still owed when a later result breaks the run, and the next check writes
+ *   it.
+ *
+ * `resultKindsNewestFirst` is what the store read: the kinds recorded at or
+ * after that event's database clock, newest first, at most
+ * DM_VALIDATION_LATCH_WINDOW. A kind outside §6's five makes the read
+ * unreadable (null), and nothing is latched on it.
+ */
+export const dmValidationLatchDecision = (input: {
+  newestEvent: { actorKind: "human" | "system" } | null;
+  resultKindsNewestFirst: readonly unknown[];
+}): DmValidationLatchDecision | null => {
+  if (!input.resultKindsNewestFirst.every((kind) => isOneOf(DM_RESULT_KINDS, kind))) return null;
+  if (input.newestEvent?.actorKind === "system") return { latch: false, reason: "already_latched" };
+  let run = 0;
+  for (const kind of input.resultKindsNewestFirst) {
+    run = kind === "validation_failure" ? run + 1 : 0;
+    if (run >= DM_VALIDATION_LATCH_THRESHOLD) return { latch: true };
+  }
+  return { latch: false, reason: "no_streak" };
+};
+
+/**
+ * §5, §10: the broker could not confirm that a request's directory was
+ * deleted. Recorded under the request's own instance as
+ * `amux.decision.cleanup_unknown`, targeting the request, beside the cleanup
+ * latch of that instance. It is an audit action of §10's list and not a ledger
+ * event kind: the request's state does not change.
+ */
+export const DM_CLEANUP_UNKNOWN_AUDIT_ACTION = "amux.decision.cleanup_unknown" as const;
+
+export type DmCleanupUnknownRefusal = "instance_mismatch" | "not_assigned";
+
+/**
+ * Whether a cleanup report names a request that can have had a directory:
+ * the request's own instance, and assigned -- the broker makes the directory
+ * only after the assignment (§2-4), so a request routed to the operator or
+ * never assigned had none. Closed or not, with a result or not: a directory
+ * outlives any of those, and the report is accepted after them.
+ */
+export const dmCleanupUnknownRefusal = (
+  state: DmRequestState,
+  instance: DmInstanceScope,
+): DmCleanupUnknownRefusal | null => {
+  if (state.instance !== instance) return "instance_mismatch";
+  if (!state.assigned) return "not_assigned";
+  return null;
+};
+
 /** §9: what a submitter that lost a response learns from the (request, digest) pair. */
 export type DmResultLookup =
   | { status: "accepted"; eventId: string; resultKind: DmResultKind }

@@ -46,6 +46,7 @@ import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
 import {
   DecisionMakerSwitchWriteError,
   latchDecisionMakerInstanceOff,
+  readDecisionMakerInstanceNewestEvent,
   readDecisionMakerSwitches,
   readDecisionMakerSwitchesOrThrow,
   recordDecisionMakerSwitchByOperator,
@@ -320,7 +321,15 @@ test("switch audit metadata carries closed keys and short identifiers only", () 
     dmSwitchAuditMetadata({ event_id: "e", scope: "kill_switch", value: "on", reason_code: "operator", previous_value: null }),
     { event_id: "e", scope: "kill_switch", value: "on", reason_code: "operator" },
   );
-  assert.deepEqual([...DM_SWITCH_AUDIT_METADATA_KEYS], ["event_id", "scope", "value", "reason_code", "previous_value"]);
+  assert.deepEqual([...DM_SWITCH_AUDIT_METADATA_KEYS], [
+    "event_id",
+    "scope",
+    "value",
+    "reason_code",
+    "previous_value",
+    // A latch one request caused (§5's cleanup latch) names it.
+    "request_id",
+  ]);
   assert.throws(() => dmSwitchAuditMetadata({ systemActor: "amux-decision-router" }), /key refused/);
   assert.throws(() => dmSwitchAuditMetadata({ note: "x" }), /key refused/);
   assert.throws(() => dmSwitchAuditMetadata({ value: "Turn it on please" }), /value refused/);
@@ -405,7 +414,7 @@ test("one store module reads and writes the table; nothing else in the applicati
 // Statements per operation (§9: 12 at most, pinned exactly)
 // ---------------------------------------------------------------------------
 
-const recordingTx = ({ newest = [], failRead = false } = {}) => {
+const recordingTx = ({ newest = [], newestAt = [], failRead = false } = {}) => {
   const sent = [];
   const tx = {
     $executeRaw: (strings, ...values) => {
@@ -421,6 +430,7 @@ const recordingTx = ({ newest = [], failRead = false } = {}) => {
         return Promise.resolve([{ sequence: 41n, createdAtEpochMs: 1_790_000_000_000n }]);
       }
       if (sql.includes('SELECT "actorKind", "value"')) return Promise.resolve(newest);
+      if (sql.includes('SELECT "actorKind", floor(')) return Promise.resolve(newestAt);
       if (sql.includes("DISTINCT ON")) return Promise.resolve([{ scope: "decision-maker-openai", value: "proposal" }]);
       return Promise.reject(new Error(`unexpected statement: ${sql}`));
     },
@@ -610,6 +620,87 @@ test("a refused change or latch sends nothing at all", async () => {
     const { tx, sent } = recordingTx();
     await assert.rejects(
       latchDecisionMakerInstanceOff(tx, { instance, reason }),
+      (error) => error instanceof DecisionMakerSwitchWriteError && error.code === "invalid_latch",
+    );
+    assert.equal(sent.length, 0);
+  }
+  // A latch names a request only by the ledger's id format.
+  for (const requestId of ["", "request-1", "11111111-2222-4333-8444-55555555555", "11111111-2222-4333-8444-55555555555A", 7]) {
+    const { tx, sent } = recordingTx();
+    await assert.rejects(
+      latchDecisionMakerInstanceOff(tx, { instance: "decision-maker-openai", reason: "cleanup_latch", requestId }),
+      (error) => error instanceof DecisionMakerSwitchWriteError && error.code === "invalid_latch",
+      String(requestId),
+    );
+    assert.equal(sent.length, 0);
+  }
+});
+
+test("a latch one request caused names it in its audit, and its statements are the same", async () => {
+  // §5's cleanup latch (docs/policy/amux-decision-maker.md): the request whose
+  // directory could not be confirmed deleted.
+  const requestId = "11111111-2222-4333-8444-555555555555";
+  await withIntegrityKey("unit-test-integrity-key", async () => {
+    const { tx, sent } = recordingTx();
+    const result = await latchDecisionMakerInstanceOff(tx, {
+      instance: "decision-maker-openai",
+      reason: "cleanup_latch",
+      requestId,
+    });
+    assert.equal(sent.length, 5);
+    const audit = sent.find((statement) => statement.kind === "create").data;
+    assert.equal(audit.action, "amux.decision.latch");
+    assert.deepEqual(audit.metadata, {
+      event_id: result.eventId,
+      scope: "decision-maker-openai",
+      value: "off",
+      reason_code: "cleanup_latch",
+      request_id: requestId,
+      systemActor: "amux-decision-maker-openai",
+    });
+    assert.deepEqual(sent.at(-1).values, [result.eventId, "decision-maker-openai", "cleanup_latch", "audit-row-1"]);
+  });
+  // Null and undefined are the same as no request.
+  for (const none of [null, undefined]) {
+    const { tx, sent } = recordingTx();
+    const result = await latchDecisionMakerInstanceOff(tx, { instance: "decision-maker-openai", reason: "validation_latch", requestId: none });
+    assert.equal(sent.find((statement) => statement.kind === "create").data.metadata.request_id, undefined);
+    assert.equal(typeof result.eventId, "string");
+  }
+});
+
+test("an instance's newest event is one statement: its actor and its database clock, or null", async () => {
+  {
+    const { tx, sent } = recordingTx({ newestAt: [{ actorKind: "system", createdAtEpochMs: 1_790_000_000_123n }] });
+    assert.deepEqual(await readDecisionMakerInstanceNewestEvent(tx, "decision-maker-anthropic"), {
+      actorKind: "system",
+      createdAtMs: 1_790_000_000_123,
+    });
+    assert.equal(sent.length, 1);
+    assert.match(
+      sent[0].sql,
+      /SELECT "actorKind", floor\(extract\(epoch FROM "createdAt"\) \* 1000\)::bigint AS "createdAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+WHERE "scope" = \$\s+ORDER BY "sequence" DESC\s+LIMIT 1/,
+    );
+    assert.deepEqual(sent[0].values, ["decision-maker-anthropic"]);
+  }
+  {
+    const { tx } = recordingTx({ newestAt: [] });
+    assert.equal(await readDecisionMakerInstanceNewestEvent(tx, "decision-maker-openai"), null);
+  }
+  // A row the CHECKs could not have produced is not decided on.
+  for (const row of [
+    { actorKind: "operator", createdAtEpochMs: 1n },
+    { actorKind: "human", createdAtEpochMs: "1" },
+    { actorKind: "human", createdAtEpochMs: 2n ** 60n },
+  ]) {
+    const { tx } = recordingTx({ newestAt: [row] });
+    await assert.rejects(readDecisionMakerInstanceNewestEvent(tx, "decision-maker-openai"), /unreadable/, JSON.stringify(row, (_, v) => String(v)));
+  }
+  // Only an instance has a latch boundary; nothing is sent for anything else.
+  for (const scope of ["kill_switch", "decision-maker-gemini", null]) {
+    const { tx, sent } = recordingTx();
+    await assert.rejects(
+      readDecisionMakerInstanceNewestEvent(tx, scope),
       (error) => error instanceof DecisionMakerSwitchWriteError && error.code === "invalid_latch",
     );
     assert.equal(sent.length, 0);
