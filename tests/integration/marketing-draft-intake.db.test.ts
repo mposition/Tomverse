@@ -244,6 +244,52 @@ test("a pause after the first reading cannot stretch the transaction past the de
   assert.equal(await prisma.marketingPost.count(), 0);
 });
 
+test("a transaction whose timer someone else already armed is refused, not trusted", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  const outcome = await runMarketingTransaction(prisma, async (tx) => {
+    await tx.$queryRaw`SELECT set_config('transaction_timeout', '60000', true)`;
+    return intakeMarketingGeneratorDraft(
+      tx,
+      {
+        generatorRunId: "run-1",
+        submissionId: "sub-armed",
+        provenance: "a".repeat(64),
+        deadlineAt: inAMinute(),
+        draft: draft(row.id),
+        killSwitchValue: undefined,
+      },
+      OPEN,
+    );
+  });
+  assert.deepEqual(outcome, { status: "refused", reasons: ["intake_timeout_already_armed"] });
+  assert.equal(await prisma.marketingPost.count(), 0);
+});
+
+test("a failure after the post is written leaves neither the post nor its audit", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  await assert.rejects(
+    runMarketingTransaction(prisma, async (tx) => {
+      await intakeMarketingGeneratorDraft(
+        tx,
+        {
+          generatorRunId: "run-1",
+          submissionId: "sub-rollback",
+          provenance: "a".repeat(64),
+          deadlineAt: inAMinute(),
+          draft: draft(row.id),
+          killSwitchValue: undefined,
+        },
+        OPEN,
+      );
+      throw new Error("the caller's transaction fails after the intake");
+    }),
+  );
+  assert.equal(await prisma.marketingPost.count(), 0);
+  assert.equal((await intakeAudits()).length, 0);
+});
+
 test("an unknown channel is refused, not created", async () => {
   await draftsOn();
   const outcome = await intake(draft("chn_missing"), OPEN);

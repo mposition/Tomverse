@@ -364,6 +364,18 @@ export async function intakeMarketingGeneratorDraft(
     throw new Error("The intake's own post changed inside its transaction");
   }
 
+  // The last statement before the audit row: past the deadline by the
+  // database's clock, the whole intake rolls back. The timer already makes the
+  // transaction unable to run past it; this makes the *success record* refuse
+  // too. What stays unbounded is COMMIT's durable phase -- if its answer is
+  // lost, the generator learns the outcome by resubmitting the same key.
+  const late = await tx.$queryRaw<Array<{ late: boolean }>>(Prisma.sql`
+    SELECT clock_timestamp() > ${input.deadlineAt}::timestamptz AS "late"
+  `);
+  if (late[0]?.late !== false) {
+    throw new Error("The intake reached its success record after the service's deadline");
+  }
+
   await writeSystemAuditLog({
     tx,
     systemActor: "marketing-guard",
