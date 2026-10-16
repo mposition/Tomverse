@@ -12,6 +12,8 @@ import { AmuxCardDuplicateScanError, loadAmuxCardDuplicateScanner } from
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { amuxV4UnitBrowserDigest } from "./ideaUnitBrowserCore.ts";
 import { createAmuxContentKeyRing } from "./ideaKeyStore.ts";
+import { inspectAmuxV20TaskRegistration } from
+  "./ideaUnitRegistrationCore.ts";
 import { readVerifiedAmuxCardProposal } from "./ideaUnitProposalReadService.ts";
 import { assembleAmuxV4StoryConfirmation } from
   "./ideaStoryConfirmationSnapshotCore.ts";
@@ -53,6 +55,14 @@ export type AmuxV4CardPrepareInTx = {
   keys: ReturnType<typeof loadCurrentAmuxContentKeys>;
   decisionId: string;
   ownerSession: ReturnType<typeof amuxV4UnitBrowserDigest>;
+};
+
+const requireAmuxV20TaskGrade = (
+  proposal: Parameters<typeof inspectAmuxV20TaskRegistration>[0],
+) => {
+  const inspected = inspectAmuxV20TaskRegistration(proposal);
+  if (!inspected.ok) throw new AmuxV4UnitDecisionError(inspected.code);
+  return inspected.executionGrade;
 };
 
 /** The preparation itself, inside the caller's transaction: the single
@@ -145,6 +155,8 @@ export async function prepareAmuxV4CardRegistrationInTx(tx: Prisma.TransactionCl
   if (preview.sourceScopeApprovalId && (!scope || scope.ideaId !== choice.ideaId)) {
     throw new AmuxV4UnitDecisionError("reconfirm");
   }
+  const finalTaskGrade = verified.proposal.cardType === "task" ?
+    requireAmuxV20TaskGrade(verified.proposal) : null;
   const duplicates = await scanner(tx, { unitId: unit.id,
     proposal: verified.proposal, featureNodeId: feature.id });
   if (duplicates.candidates.length > 0 && choice.decisionReason === null) {
@@ -183,9 +195,10 @@ export async function prepareAmuxV4CardRegistrationInTx(tx: Prisma.TransactionCl
     });
     try {
       const approved = await calculateCurrentApprovedAmuxV4TaskCost(tx,
-        verified.proposal.taskRole, verified.proposal.executionGrade);
+        verified.proposal.taskRole, finalTaskGrade!);
       taskCost = { ok: true as const, receipt: approved.receipt };
       snapshot = assembleAmuxV4TaskConfirmation({ ...common, ...refs,
+        finalExecutionGrade: finalTaskGrade!,
         costReceipt: approved.receipt,
         publicPrDisclosureApproved:
           choice.publicPrDisclosureApproved === true });
@@ -343,8 +356,9 @@ export async function consumeAmuxV4CardRegistration(input: {
           if (!verified.proposal.taskRole || !verified.proposal.executionGrade) {
             throw new AmuxV4UnitDecisionError("reconfirm");
           }
+          const finalExecutionGrade = requireAmuxV20TaskGrade(verified.proposal);
           const approved = await calculateCurrentApprovedAmuxV4TaskCost(transaction,
-            verified.proposal.taskRole, verified.proposal.executionGrade);
+            verified.proposal.taskRole, finalExecutionGrade);
           taskCost = { ok: true as const, receipt: approved.receipt };
         }
         return { duplicateScan: await scanner(transaction, {

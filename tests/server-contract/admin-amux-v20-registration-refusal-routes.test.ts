@@ -47,9 +47,12 @@ mock.module(mod("lib/amux/ideaUnitDecisionStore.ts"), { namedExports: {
 } });
 mock.module(mod("lib/amux/ideaUnitBrowserCore.ts"), { namedExports: {
   readAmuxV4UnitBrowserNonce: () => "browser-nonce",
+  amuxV4UnitBrowserCookieName: () => "amux-browser-nonce",
+  newAmuxV4UnitBrowserNonce: () => "browser-nonce",
 } });
 mock.module(mod("lib/amux/ideaStoryRegistrationService.ts"), { namedExports: {
   consumeAmuxV4StoryRegistration: async () => { throw new FakeCodeError(refusalCode); },
+  prepareAmuxV4StoryRegistration: async () => { throw new FakeCodeError(refusalCode); },
 } });
 mock.module(mod("lib/amux/ideaCardPlanApprovalService.ts"), { namedExports: {
   AmuxV4CardPlanError: FakePlanError,
@@ -57,11 +60,27 @@ mock.module(mod("lib/amux/ideaCardPlanApprovalService.ts"), { namedExports: {
 } });
 
 const loadRoutes = async () => Promise.all([
+  import(mod("app/api/admin/amux/ideas/unit-decisions/prepare/route.ts")) as
+    Promise<{ POST(request: Request): Promise<Response> }>,
   import(mod("app/api/admin/amux/ideas/unit-decisions/consume/route.ts")) as
     Promise<{ POST(request: Request): Promise<Response> }>,
   import(mod("app/api/admin/amux/ideas/unit-decisions/cards/plan/route.ts")) as
     Promise<{ POST(request: Request): Promise<Response> }>,
 ]);
+
+const prepareRequest = () => new Request("https://tomverse.test/api/admin/amux/ideas/unit-decisions/prepare", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    ideaId: "idea-0001",
+    draftUnitId: "draft-0001",
+    featureNodeId: "feature-0001",
+    prepareRequestId: "123e4567-e89b-42d3-a456-426614174000",
+    cardType: "task",
+    publicPrDisclosureApproved: false,
+    decisionReason: null,
+  }),
+});
 
 const unitRequest = () => new Request("https://tomverse.test/api/admin/amux/ideas/unit-decisions/consume", {
   method: "POST",
@@ -79,11 +98,12 @@ const planRequest = () => new Request("https://tomverse.test/api/admin/amux/idea
   body: JSON.stringify({ ideaId: "idea-0001", reasons: {}, publicPrConsentOff: [] }),
 });
 
-test("single and plan registration routes return every stable v20 refusal without proposal data", async () => {
-  const [unitRoute, planRoute] = await loadRoutes();
+test("prepare, consume and plan routes return every stable v20 refusal without proposal data", async () => {
+  const [prepareRoute, unitRoute, planRoute] = await loadRoutes();
   for (const code of AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES) {
     refusalCode = code;
     for (const [label, response] of [
+      ["prepare", await prepareRoute.POST(prepareRequest())],
       ["single", await unitRoute.POST(unitRequest())],
       ["plan", await planRoute.POST(planRequest())],
     ] as const) {

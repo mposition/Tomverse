@@ -99,8 +99,11 @@ function taskFixture(options = {}) {
   input.snapshot.draftShape = { kind: "card", cardType: "task", storyKind: null };
   input.snapshot.card.cardType = "task";
   input.snapshot.card.storyKind = null;
+  const finalExecutionGrade = Array.isArray(expectedPaths) &&
+    expectedPaths.some((path) => typeof path === "string" && path.startsWith("lib/amux/")) ?
+    "frontier" : executionGrade;
   const cost = calculateV4TaskCostCeiling({
-    role: taskRole, grade: executionGrade, catalogVersion: "catalog-v1",
+    role: taskRole, grade: finalExecutionGrade, catalogVersion: "catalog-v1",
     catalogDigest: "e".repeat(64), pricingVersion: "price-v1",
     gradeRulesVersion: "rules-v1", asOfIso: "2026-10-01T01:00:00.000Z",
     caps: { uncachedInputTokens: 1000, outputTokens: 1000,
@@ -108,7 +111,7 @@ function taskFixture(options = {}) {
     routes: [{ routeId: `codex/${taskRole}`, workerName: "worker-codex",
       provider: "openai", modelId: "openai/frontier-model",
       routePolicyDigest: "f".repeat(64), enabled: true,
-      roles: [taskRole], grades: [executionGrade],
+      roles: [taskRole], grades: [finalExecutionGrade],
       pricingSource: "verified-record", pricingVerifiedAt: "2026-10-01T00:00:00.000Z",
       uncachedInputMicroUsdPerMillion: 1_000_000,
       outputMicroUsdPerMillion: 2_000_000,
@@ -123,7 +126,9 @@ function taskFixture(options = {}) {
   input.prepared.unitDigest = body.digest;
   input.snapshot.unitBody.digest = body.digest;
   input.snapshot.card.normalizedBody.digest = body.digest;
-  input.snapshot.card.task = { role: taskRole, grade: executionGrade,
+  input.snapshot.policyVersion = "amux-intake-v20";
+  input.snapshot.card.task = { role: taskRole, proposedGrade: executionGrade,
+    grade: finalExecutionGrade,
     brief: { digest: brief.digest, keyId: brief.digestKeyId },
     costReceipt: cost.receipt };
   input.snapshot.duplicates = { ...input.snapshot.duplicates };
@@ -188,7 +193,7 @@ test("v20 Task guard reports each path and role refusal before registration", ()
     [(value) => { value.expectedPaths = ["lib/amux/guard.ts", "src/worker.ts"]; },
       "task_expected_paths_mixed"],
     [(value) => { value.taskRole = "review"; }, "task_role_review_refused"],
-    [(value) => { value.expectedPaths = ["lib/amux/guard.ts"]; },
+    [(value) => { value.executionGrade = "standard"; },
       "task_execution_grade_mismatch"],
   ]) {
     const candidate = structuredClone(proposal);
@@ -216,7 +221,7 @@ test("the final card registration boundary preserves v20 path and role refusals"
   }
 });
 
-test("final registration requires the derived grade in proposal, confirmation and cost receipt", () => {
+test("final registration upgrades contract proposals and binds proposed, final and receipt grades", () => {
   const contract = taskFixture({ expectedPaths: ["lib/amux/guard.ts"],
     executionGrade: "frontier" }).input;
   const registered = inspectAmuxV4CardRegistration(contract);
@@ -225,9 +230,13 @@ test("final registration requires the derived grade in proposal, confirmation an
 
   const proposedTooLow = taskFixture({ expectedPaths: ["lib/amux/guard.ts"],
     executionGrade: "advanced" }).input;
-  assert.deepEqual(inspectAmuxV4CardRegistration(proposedTooLow), {
-    ok: false, code: "task_execution_grade_mismatch",
-  });
+  const upgraded = inspectAmuxV4CardRegistration(proposedTooLow);
+  assert.equal(upgraded.ok, true);
+  assert.equal(upgraded.plan.proposedExecutionGrade, "advanced");
+  assert.equal(upgraded.plan.executionGrade, "frontier");
+  assert.equal(proposedTooLow.snapshot.card.task.proposedGrade, "advanced");
+  assert.equal(proposedTooLow.snapshot.card.task.grade, "frontier");
+  assert.equal(proposedTooLow.snapshot.card.task.costReceipt.grade, "frontier");
 
   const confirmationTooLow = { ...structuredClone(contract), digestKey: key };
   confirmationTooLow.snapshot.card.task.grade = "advanced";
@@ -239,6 +248,12 @@ test("final registration requires the derived grade in proposal, confirmation an
   receiptTooLow.snapshot.card.task.costReceipt.grade = "advanced";
   assert.deepEqual(inspectAmuxV4CardRegistration(receiptTooLow), {
     ok: false, code: "task_cost_receipt_grade_mismatch",
+  });
+
+  const proposedBindingChanged = { ...structuredClone(contract), digestKey: key };
+  proposedBindingChanged.snapshot.card.task.proposedGrade = "advanced";
+  assert.deepEqual(inspectAmuxV4CardRegistration(proposedBindingChanged), {
+    ok: false, code: "task_confirmation_grade_mismatch",
   });
 });
 
@@ -266,6 +281,14 @@ test("only stable metadata-only v20 refusals survive the decision-store mapping"
 
 test("the protected card writer uses the stable refusal mapper", () => {
   const source = readFileSync("lib/amux/ideaUnitDecisionStore.ts", "utf8");
+  const cardStart = source.indexOf('sourceSnapshot: { schemaVersion: "amux-v4"');
+  const cardEnd = source.indexOf("cardType: plan.cardType", cardStart);
+  assert.ok(cardStart >= 0 && cardEnd > cardStart);
+  const cardMetadata = source.slice(cardStart, cardEnd);
+  assert.match(cardMetadata, /proposedExecutionGrade: plan\.proposedExecutionGrade/);
+  assert.match(cardMetadata, /finalExecutionGrade: plan\.executionGrade/);
+  assert.doesNotMatch(cardMetadata, /expectedPaths|sourcePath|pathValue/);
+
   const start = source.indexOf("const inspected = inspectAmuxV4CardRegistration({");
   const end = source.indexOf("const plan = inspected.plan;", start);
   assert.ok(start >= 0 && end > start);
@@ -274,4 +297,12 @@ test("the protected card writer uses the stable refusal mapper", () => {
     /amuxV4CardRegistrationDecisionErrorCode\(inspected\.code\)/);
   assert.doesNotMatch(boundary,
     /inspected\.code === "halt"[\s\S]*"reconfirm"/);
+
+  const auditStart = source.indexOf("metadata: { ideaId: plan.ideaId", end);
+  const auditEnd = source.indexOf("ownerAssigned: false", auditStart);
+  assert.ok(auditStart > end && auditEnd > auditStart);
+  const auditMetadata = source.slice(auditStart, auditEnd);
+  assert.match(auditMetadata, /proposedExecutionGrade: plan\.proposedExecutionGrade/);
+  assert.match(auditMetadata, /finalExecutionGrade: plan\.executionGrade/);
+  assert.doesNotMatch(auditMetadata, /expectedPaths|sourcePath|pathValue/);
 });

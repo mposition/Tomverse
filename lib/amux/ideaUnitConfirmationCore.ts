@@ -127,6 +127,8 @@ const card = z.object({
   evidence: z.array(evidence).max(128),
   task: z.object({
     role: routeLabel,
+    /** Present on v20 confirmations; the model proposal remains a signal. */
+    proposedGrade: routeLabel.optional(),
     grade: routeLabel,
     brief: keyedDigest,
     costReceipt,
@@ -143,7 +145,7 @@ const draftShape = z.discriminatedUnion("kind", [
 
 const snapshotSchema = z.object({
   schemaVersion: z.literal(1),
-  policyVersion: z.literal("amux-intake-v11"),
+  policyVersion: z.enum(["amux-intake-v11", "amux-intake-v20"]),
   canonicalizerVersion: z.literal("amux-canonical-v1"),
   scannerVersion: version,
   ideaId: id,
@@ -273,6 +275,9 @@ const semanticShapeValid = (
           c.dependencies.length !== 0 || currentTaskCost !== null) return false;
     } else {
       if (c.storyKind !== null || c.task === null) return false;
+      const v20 = value.policyVersion === "amux-intake-v20";
+      if ((v20 && c.task.proposedGrade === undefined) ||
+          (!v20 && c.task.proposedGrade !== undefined)) return false;
       if (c.task.publicPrDisclosureApproved === true &&
           c.task.role !== "implement") return false;
       if (currentTaskCost?.ok !== true) return false;
@@ -290,6 +295,10 @@ const semanticShapeValid = (
       }
     }
   } else if (currentTaskCost !== null) {
+    return false;
+  }
+  if (value.policyVersion === "amux-intake-v20" &&
+      (value.action !== "register_card" || value.card?.cardType !== "task")) {
     return false;
   }
   if (value.action === "link_existing_card" &&
