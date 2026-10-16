@@ -156,6 +156,16 @@ test("v52 treats missing, malformed and invalid path inventories as unavailable"
         args.slice(6)[0] === "diff" ? tooMany : "") }),
       realpath: async (path) => path }),
     { ok: false, reason: "changed_paths_unavailable" });
+  const tooLarge = Array.from({ length: 600 }, (_, index) =>
+    `p/${index.toString(36).padStart(3, "0")}${"x".repeat(36)}\0`).join("");
+  assert.ok(Buffer.byteLength(tooLarge, "utf8") < 32 * 1024);
+  assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
+    { run: async (_binary, args) => ({ stdout: Buffer.from(
+      args.slice(6)[0] === "rev-parse" ?
+        args.slice(6)[1] === "--show-toplevel" ? "/repo" : BASE :
+        args.slice(6)[0] === "diff" ? tooLarge : "") }),
+      realpath: async (path) => path }),
+    { ok: false, reason: "changed_paths_unavailable" });
 });
 
 test("v52 discards a contract attempt only from its original clean base", async () => {
