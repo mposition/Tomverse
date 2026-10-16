@@ -28,13 +28,13 @@ async function localGit(repositoryPath: string, args: string[], signal?: AbortSi
     throw new AmuxTrackedCheckoutManifestError();
   }
   return new Promise((resolve, reject) => {
-    const child = spawn("git", ["--no-optional-locks", "-C", repositoryPath, ...args], {
+    const child = spawn(process.platform === "win32" ? "git" : "/usr/bin/git",
+      ["--no-optional-locks", "-C", repositoryPath, ...args], {
       shell: false,
       windowsHide: true,
       signal,
       env: {
         NODE_ENV: process.env.NODE_ENV ?? "production",
-        PATH: process.env.PATH ?? "",
         SYSTEMROOT: process.env.SYSTEMROOT ?? "",
         GIT_CONFIG_NOSYSTEM: "1",
         GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
