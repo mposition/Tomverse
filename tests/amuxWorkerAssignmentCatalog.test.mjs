@@ -104,8 +104,15 @@ test("version 53 turns R2c's derived assignment catalog on, and the policy recor
   assert.equal(amuxWorkerDerivedCatalogAssignmentOpen(), true);
   const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8");
   const normalized = policy.split(String.fromCharCode(13)).join("");
-  const heading = "## 버전 53 — R1·R2b 관측 종료와 R2c 배정 카탈로그 전환";
-  assert.ok(normalized.split(String.fromCharCode(10)).includes(heading));
+  const lines = normalized.split(String.fromCharCode(10));
+  const heading = lines.indexOf("## 버전 53 — R1·R2b 관측 종료와 R2c 배정 카탈로그 전환");
+  assert.ok(heading >= 0, "version 53 section");
+  // The latch may be true only with the operator's approval recorded, and no
+  // earlier than the UTC day R2b's 72-hour window closes (2026-10-17 08:21Z):
+  // a candidate still awaiting approval fails here, so it cannot merge.
+  const record = /^승인 기록: `approvedBy: mposition`, `approvedAt: (\d{4}-\d{2}-\d{2})`/.exec(lines[heading + 2] ?? "");
+  assert.ok(record, "version 53 approval record");
+  assert.ok(record[1] >= "2026-10-17", `approvedAt ${record[1]} is before R2b's window closes`);
   // With no argument the reader now asks the registry.
   useProductionVariables();
   const client = fakeClient(statement());

@@ -3015,7 +3015,8 @@ switch, v22 용량 한도, 결과 불명은 멈추고 사람에게 넘긴다는 
 
 승인 기록: **승인 대기.** 2026-10-16 작성, 작성자 Claude. `approvedBy`·`approvedAt`은 운영자가 승인할 때
 채우며, `approvedAt`은 병합하는 UTC 날짜다. 병합은 R2b 관측이 끝나는 2026-10-17 18:21 AEST(08:21Z) 뒤에만
-한다. 운영자는 2026-10-16에 R1 종료 기록을 따로 두지 않고 이 R2c 활성화 기록에 함께 넣기로 정했다.
+한다. 이 순서는 문구가 아니라 테스트가 강제한다. 래치가 true이면 `tests/amuxWorkerAssignmentCatalog.test.mjs`가
+이 절의 승인 기록과 2026-10-17 이후의 `approvedAt`을 요구하므로, 승인 전 후보는 CI를 통과하지 못한다. 운영자는 2026-10-16에 R1 종료 기록을 따로 두지 않고 이 R2c 활성화 기록에 함께 넣기로 정했다.
 
 이 버전은 버전 35 5항의 R2c를 켠다. R2c는 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH`
 (`lib/amux/workerDerivedCatalogCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다. 이
