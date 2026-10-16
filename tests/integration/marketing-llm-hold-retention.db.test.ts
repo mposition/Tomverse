@@ -90,7 +90,7 @@ const humanAudit = (action: string, targetId: string, previous: string | null, c
     targetType: "MarketingLlmCall",
     targetId,
     summary: "Legal hold decision.",
-    metadata: { actorHadMarketingWrite: true, previousHoldAuditLogId: previous ?? "none" },
+    metadata: { actorHadMarketingWrite: true, previousHoldAuditLogId: previous ?? ":none" },
     ...(client ? { tx: client } : {}),
   });
 
@@ -162,6 +162,7 @@ test("a legal hold is set and released only on a person's audit row for exactly 
     tx((client) =>
       setMarketingLlmCallLegalHold(client, { callId: id, hold: false, auditLogId: release, expectedHoldAuditLogId: firstHold }),
     ),
+    code("legal_hold_conflict"),
   );
   assert.equal((await prisma.marketingLlmCall.findUniqueOrThrow({ where: { id } })).legalHold, true);
   // ... and a release made from a page that still showed the first hold is a
@@ -178,6 +179,47 @@ test("a legal hold is set and released only on a person's audit row for exactly 
   await assert.rejects(
     prisma.$executeRawUnsafe(`UPDATE "MarketingLlmCall" SET "legalHoldAuditLogId" = $2 WHERE "id" = $1`, id, release),
     /update_invalid|unique|duplicate/,
+  );
+  // Nor can an earlier decision be put back by hand: (true, H1) -> (false, R1)
+  // -> (true, H2), then (false, R1) again. R1 is referenced by no row now, so
+  // only the chain refuses it -- R1's predecessor is H1, not H2.
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      `UPDATE "MarketingLlmCall" SET "legalHold" = false, "legalHoldAuditLogId" = $2 WHERE "id" = $1`,
+      id,
+      release,
+    ),
+    /hold_decision_invalid/,
+  );
+  // A decision for the other direction, or for another call, is refused too.
+  const otherCall = await releasedCall(9);
+  const wrongTarget = await humanAudit(MARKETING_LLM_HOLD_ACTIONS.released, otherCall, await currentDecision(id));
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      `UPDATE "MarketingLlmCall" SET "legalHold" = false, "legalHoldAuditLogId" = $2 WHERE "id" = $1`,
+      id,
+      wrongTarget,
+    ),
+    /hold_decision_invalid/,
+  );
+  assert.equal((await prisma.marketingLlmCall.findUniqueOrThrow({ where: { id } })).legalHold, true);
+});
+
+test("a row cannot be born with a hold decision", async () => {
+  const id = await releasedCall(1);
+  const decision = await humanAudit(MARKETING_LLM_HOLD_ACTIONS.set, id, null);
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      `WITH t AS (SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS at)
+       INSERT INTO "MarketingLlmCall" ("id", "state", "requestKey", "reservePayloadDigest", "requestDigest",
+         "configSnapshot", "generatorRunId", "purpose", "provider", "model", "reservedInputTokens",
+         "reservedOutputTokens", "reservedMicroUsd", "monthStart", "reservationAuditLogId", "createdAt",
+         "legalHoldAuditLogId")
+       SELECT 'cborn00000000000000000001', 'reserved', '${uuid(77)}', repeat('a', 64), repeat('b', 64), '{}'::jsonb,
+         'run-1', 'draft', 'openai', 'm', 1, 1, 1, date_trunc('month', t.at), $1, t.at, $1 FROM t`,
+      decision,
+    ),
+    /insert_not_reserved/,
   );
 });
 

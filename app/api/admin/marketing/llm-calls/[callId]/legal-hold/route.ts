@@ -2,7 +2,11 @@ export const dynamic = "force-dynamic";
 
 import { z } from "zod";
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
-import { MARKETING_LLM_HOLD_ACTIONS, setMarketingLlmCallLegalHold } from "@/lib/marketingLlmBudgetStore";
+import {
+  MARKETING_LLM_HOLD_ACTIONS,
+  MARKETING_LLM_NO_HOLD_DECISION,
+  setMarketingLlmCallLegalHold,
+} from "@/lib/marketingLlmBudgetStore";
 
 type RouteContext = { params: Promise<{ callId: string }> };
 
@@ -36,7 +40,7 @@ export async function POST(req: Request, context: RouteContext) {
     gate: (body) => (body.hold ? "operator_restriction" : "account_control"),
     bucket: "admin-marketing-llm-call-legal-hold",
     schema,
-    metadata: (body) => ({ previousHoldAuditLogId: body.expectedHoldAuditLogId ?? "none" }),
+    metadata: (body) => ({ previousHoldAuditLogId: body.expectedHoldAuditLogId ?? MARKETING_LLM_NO_HOLD_DECISION }),
     run: async (tx, { body, auditLogId }) => {
       await setMarketingLlmCallLegalHold(tx, {
         callId,

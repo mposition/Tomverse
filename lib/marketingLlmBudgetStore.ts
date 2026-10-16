@@ -668,6 +668,12 @@ export async function expireMarketingLlmCalls(
 // ---------------------------------------------------------------------------
 // legal hold and retention (S3c3c)
 
+/**
+ * The predecessor a first hold decision names. Outside the id alphabet, so it
+ * cannot be mistaken for an audit row; the database's guard uses the same.
+ */
+export const MARKETING_LLM_NO_HOLD_DECISION = ":none";
+
 export const MARKETING_LLM_HOLD_ACTIONS = {
   set: "marketing_llm.legal_hold_set",
   released: "marketing_llm.legal_hold_released",
@@ -699,7 +705,7 @@ export async function setMarketingLlmCallLegalHold(
     auditLogId: input.auditLogId,
     action: input.hold ? MARKETING_LLM_HOLD_ACTIONS.set : MARKETING_LLM_HOLD_ACTIONS.released,
     targetId: input.callId,
-    metadata: { previousHoldAuditLogId: input.expectedHoldAuditLogId ?? "none" },
+    metadata: { previousHoldAuditLogId: input.expectedHoldAuditLogId ?? MARKETING_LLM_NO_HOLD_DECISION },
   });
   if (!verdict.ok) {
     throw new MarketingStoreRefusedError(

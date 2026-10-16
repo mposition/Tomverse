@@ -6,9 +6,12 @@
 -- could be presented again after a new hold, and a delayed release meant for
 -- an old hold could lift a new one -- and an unheld row past its retention is
 -- deleted. Now the row stores the audit row of the decision that last moved
--- the hold. A new decision must name the one it replaces, its own audit row
--- must say the same, and the database moves the flag and the reference only
--- together, to a reference no other decision has used.
+-- the hold. A new decision must name the one it replaces, and the database
+-- holds that on its own: the flag and the reference move only together, and
+-- only to a person's audit row for this direction on this call whose recorded
+-- predecessor is the row's current decision. Decisions form one chain per row,
+-- so no earlier decision can be presented again: its predecessor is no longer
+-- the current one.
 
 ALTER TABLE "MarketingLlmCall" ADD COLUMN "legalHoldAuditLogId" TEXT;
 CREATE UNIQUE INDEX "MarketingLlmCall_legalHoldAuditLogId_key" ON "MarketingLlmCall"("legalHoldAuditLogId");
@@ -44,6 +47,9 @@ DECLARE
                                'reportedInputTokens', 'reportedOutputTokens'];
     old_rest JSONB;
     new_rest JSONB;
+    decision_action TEXT;
+    decision_target TEXT;
+    decision_previous TEXT;
 BEGIN
     IF OLD."state" = NEW."state" THEN
         -- Same state: a legal-hold decision, or the one consumer write on a
@@ -60,6 +66,22 @@ BEGIN
                 <> (OLD."legalHoldAuditLogId" IS DISTINCT FROM NEW."legalHoldAuditLogId")
             OR (OLD."legalHold" IS DISTINCT FROM NEW."legalHold" AND NEW."legalHoldAuditLogId" IS NULL) THEN
             RAISE EXCEPTION 'marketing_llm_call_update_invalid';
+        END IF;
+        IF OLD."legalHold" IS DISTINCT FROM NEW."legalHold" THEN
+            -- The decision's own audit row, named from the trigger's schema
+            -- because search_path is pinned: this direction, this call, and the
+            -- row's current decision as its predecessor (':none' for none).
+            EXECUTE format(
+                'SELECT "action", "targetId", "metadata" ->> ''previousHoldAuditLogId'' FROM %I."AdminAuditLog" WHERE "id" = $1',
+                TG_TABLE_SCHEMA)
+                INTO decision_action, decision_target, decision_previous
+                USING NEW."legalHoldAuditLogId";
+            IF decision_action IS DISTINCT FROM (CASE WHEN NEW."legalHold"
+                    THEN 'marketing_llm.legal_hold_set' ELSE 'marketing_llm.legal_hold_released' END)
+                OR decision_target IS DISTINCT FROM NEW."id"
+                OR decision_previous IS DISTINCT FROM COALESCE(OLD."legalHoldAuditLogId", ':none') THEN
+                RAISE EXCEPTION 'marketing_llm_call_hold_decision_invalid';
+            END IF;
         END IF;
         IF OLD."consumerDigest" IS DISTINCT FROM NEW."consumerDigest" THEN
             IF OLD."consumerDigest" IS NOT NULL
