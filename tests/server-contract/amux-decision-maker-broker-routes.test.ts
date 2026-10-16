@@ -5,7 +5,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
-// AMUX Decision Maker policy version 1, sections 2, 9 and 10: the internal
+// AMUX Decision Maker policy version 1 (docs/policy/amux-decision-maker.md),
+// sections 2, 9 and 10: the internal
 // routes the bridge and the broker call after the routing -- assignment,
 // assignment discard, transmission intent, transmission outcome, result
 // submission, result lookup and result unknown. Only the sync token reaches
