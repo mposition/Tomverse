@@ -1,0 +1,38 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+export const adminAmuxOperatingScopeMessages = defineAdminMessages({
+  en: {
+    title: "Intake operating scope",
+    hint: "The one approval for unattended intake: ideas from any session that stay inside this scope are analysed and registered without a per-idea decision. Saving starts nothing; session intake has its own switch.",
+    current: "Current scope", none: "No scope is saved, so intake is closed.", version: "Version",
+    repositories: "Allowed repositories", repositoriesHint: "One owner/name per line. Private repositories may be listed; their contents are sent to the analysis model's provider.",
+    model: "Analysis model", effort: "Reasoning effort", noModels: "No approved analysis model is available. Approve one below first.",
+    confirm: "I approve this repository allowlist and analysis model for unattended intake",
+    save: "Save operating scope", refresh: "Refresh", readBack: "Read back this exact save",
+    loading: "Checking the scope…", unavailable: "The operating scope cannot be read right now.",
+    invalid: "Enter 1 to 64 distinct owner/name repositories, one per line.",
+    changed: "The scope changed. Refresh it and confirm again before saving.",
+    notApproved: "That model or effort is not currently approved. Choose an approved one.",
+    refused: "This save was refused before committing. Check permissions and recent authentication.",
+    unknown: "The save outcome is unknown. Do not submit another change; read back the same request.",
+    saved: "Operating scope saved. Nothing was started.", audit: "Approval audit ID",
+    storage: "Recovery storage is unavailable. Saving is disabled to prevent a duplicate write after reload.",
+  },
+  ko: {
+    title: "접수 운영 범위",
+    hint: "무인 접수를 위한 단 하나의 승인입니다. 어느 세션에서 들어온 아이디어든 이 범위 안이면 아이디어별 결정 없이 분석·등록됩니다. 저장해도 아무것도 시작되지 않으며, 세션 접수는 별도 스위치로 켭니다.",
+    current: "현재 범위", none: "저장된 범위가 없어 접수가 닫혀 있습니다.", version: "버전",
+    repositories: "허용 저장소", repositoriesHint: "한 줄에 owner/name 하나씩 입력합니다. 비공개 저장소도 넣을 수 있으며, 그 내용은 분석 모델 공급사로 전송됩니다.",
+    model: "분석 모델", effort: "추론 수준", noModels: "승인된 분석 모델이 없습니다. 아래에서 먼저 승인하세요.",
+    confirm: "이 허용 저장소 목록과 분석 모델을 무인 접수에 쓰도록 승인합니다",
+    save: "운영 범위 저장", refresh: "새로고침", readBack: "이 저장 요청 재조회",
+    loading: "범위를 확인하는 중…", unavailable: "지금은 운영 범위를 읽을 수 없습니다.",
+    invalid: "서로 다른 owner/name 저장소를 한 줄에 하나씩 1~64개 입력하세요.",
+    changed: "다른 변경이 먼저 저장됐습니다. 새로고침한 뒤 다시 확인하세요.",
+    notApproved: "그 모델이나 추론 수준은 지금 승인 상태가 아닙니다. 승인된 것을 고르세요.",
+    refused: "저장 전에 거절되었습니다. 권한과 최근 관리자 인증을 확인하세요.",
+    unknown: "저장 결과를 알 수 없습니다. 다른 변경을 제출하지 말고 같은 요청을 재조회하세요.",
+    saved: "운영 범위를 저장했습니다. 시작된 것은 없습니다.", audit: "승인 감사 ID",
+    storage: "복구 정보를 보관할 수 없어 저장을 비활성화했습니다. 새로고침 뒤 중복 쓰기를 방지하기 위한 조치입니다.",
+  },
+});

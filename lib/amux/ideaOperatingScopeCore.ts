@@ -109,3 +109,18 @@ export function amuxOperatingScopeSavedMatches(value: unknown, pending: PendingA
     typeof value.auditId === "string" && value.auditId.length > 0 && saved.ok &&
     JSON.stringify(saved.scope) === JSON.stringify(pending.scope);
 }
+
+export type AmuxOperatingScopeReply =
+  | { state: "none"; version: 0 }
+  | { state: "current"; version: number; scope: AmuxOperatingScope };
+
+/** The Admin screen trusts only an exact, admissible GET answer. */
+export function readAmuxOperatingScopeReply(value: unknown): AmuxOperatingScopeReply | null {
+  if (exactKeys(value, ["state", "version"]) && value.state === "none" && value.version === 0) {
+    return { state: "none", version: 0 };
+  }
+  if (!exactKeys(value, ["state", "version", "scope"]) || value.state !== "current" ||
+      !Number.isSafeInteger(value.version) || (value.version as number) < 1) return null;
+  const scope = normalizeAmuxOperatingScope(value.scope);
+  return scope.ok ? { state: "current", version: value.version as number, scope: scope.scope } : null;
+}
