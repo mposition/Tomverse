@@ -58,12 +58,14 @@ export async function commitAmuxOverdueIdeaAnalysisCancellation(
   // that order. Fence an in-flight child before cancelling its parent so a
   // late CLI result cannot turn the expired attempt into a successful draft.
   const inFlight = await tx.$queryRaw<Array<{ chunkIndex: number;
-    currentPreviewId: string | null }>>`
-    SELECT "chunkIndex", "currentPreviewId" FROM "AmuxIdeaAnalysisChunk"
+    currentPreviewId: string | null; leaseGeneration: number }>>`
+    SELECT "chunkIndex", "currentPreviewId", "leaseGeneration"
+    FROM "AmuxIdeaAnalysisChunk"
     WHERE "ideaId" = ${ideaId} AND "state" = 'in_flight' FOR UPDATE
   `;
   if (inFlight.length > 1 || (inFlight.length === 1 &&
-      (!inFlight[0]!.currentPreviewId || idea.state !== "analyzing"))) {
+      (!inFlight[0]!.currentPreviewId ||
+        inFlight[0]!.leaseGeneration !== 1 || idea.state !== "analyzing"))) {
     throw new AmuxIdeaAutoCancellationError("integrity_unavailable");
   }
   let inFlightHoldId: string | null = null;

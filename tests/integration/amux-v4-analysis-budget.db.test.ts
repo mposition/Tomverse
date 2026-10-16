@@ -50,7 +50,8 @@ import { commitAmuxIdeaAnalysisUnknownOutcome,
 import { commitAmuxIdeaAnalysisStop,
   readAmuxIdeaAnalysisStopReceipt,
   AmuxIdeaAnalysisStopError } from "@/lib/amux/ideaAnalysisStopService";
-import { commitAmuxOverdueIdeaAnalysisCancellation } from
+import { AmuxIdeaAutoCancellationError,
+  commitAmuxOverdueIdeaAnalysisCancellation } from
   "@/lib/amux/ideaAnalysisAutoCancellationService";
 import { readAmuxIdeaAnalysisWorkerStopState } from
   "@/lib/amux/ideaAnalysisWorkerStopRead";
@@ -918,6 +919,20 @@ test("seven-day expiry fences an in-flight child before cancelling its idea", as
       metadata: { requestId: randomUUID(), previewId, ideaId, chunkIndex: 0,
         holdId, payloadDigest: "b".repeat(64), leaseGeneration: 1,
         modelCallStarted: false },
+    });
+    await tx.amuxIdeaAnalysisChunk.update({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+      data: { leaseGeneration: 2 },
+    });
+    await assert.rejects(commitAmuxOverdueIdeaAnalysisCancellation(tx, ideaId),
+      (error: unknown) => error instanceof AmuxIdeaAutoCancellationError &&
+        error.code === "integrity_unavailable");
+    assert.equal((await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+      where: { id: holdId },
+    })).status, "in_flight");
+    await tx.amuxIdeaAnalysisChunk.update({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+      data: { leaseGeneration: 1 },
     });
     const before = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
       where: { namespace_monthStart: { namespace, monthStart } },
