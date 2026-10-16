@@ -129,8 +129,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // docs/policy/amux-intake.md v17 adds lib/amux/cardDisplayKeyCore.ts to the
 // closure through ideaAnalysisChunkCore's Feature prefix check: a pure module
 // with no import, I/O or writer. Repinned for that 15-file closure only.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "d67dc3e773f95508cdbffab9c84ba3fe8892065a312a58d81b0f14b8796e5996";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "37537b37803c99e7d390e4c58966c6da40760697172ca162e17a74d673be68b2";
+// Intake v20 changes only schema validation and stored-chunk readback in the
+// same closure; it adds no import, I/O or writer. Repin both latch states.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "24421aa0d183b14ced6bbe9f50481595df471c8c6cc83f8f6f5c05693fcd6547";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "55e1864778ddcf405836748619b0cfa3d0b262c9219a51e886e857b877242e1a";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
