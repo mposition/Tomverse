@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   AMUX_SESSION_INTAKE_ORIGIN_ENV,
   amuxSessionIntakeEndpoint,
+  isAmuxSessionIntakeClientSecret,
   prepareAmuxSessionIntakeSubmission,
   readAmuxSessionIntakeClientRequest,
   submitAmuxSessionIntakeClientRequest,
@@ -48,6 +49,23 @@ const print = (value) => new Promise((resolve, reject) => {
   });
 });
 
+const CLOSED_CLIENT_ERRORS = new Set([
+  "client_failed",
+  "command_invalid",
+  "credential_unavailable",
+  "origin_invalid",
+  "request_id_invalid",
+  "input_unavailable",
+  "schema_rejected",
+  "content_refused",
+  "metadata_incomplete",
+]);
+
+const closedErrorCode = (error) =>
+  error instanceof Error && CLOSED_CLIENT_ERRORS.has(error.message)
+    ? error.message
+    : "client_failed";
+
 export async function runAmuxSessionIntakeClient(
   args,
   env = process.env,
@@ -55,7 +73,7 @@ export async function runAmuxSessionIntakeClient(
 ) {
   const { command, flags } = parseArgs(args);
   const secret = env[AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV];
-  if (typeof secret !== "string" || !/^[A-Za-z0-9_-]{32,256}$/.test(secret)) {
+  if (!isAmuxSessionIntakeClientSecret(secret)) {
     throw new Error("credential_unavailable");
   }
   const endpoint = amuxSessionIntakeEndpoint(
@@ -68,9 +86,14 @@ export async function runAmuxSessionIntakeClient(
     return readAmuxSessionIntakeClientRequest({ endpoint, secret, requestId, fetcher });
   }
   const inputPath = flags["--input"] ?? "-";
-  const inputText = dependencies.readInput
-    ? dependencies.readInput(inputPath)
-    : readFileSync(inputPath === "-" ? 0 : inputPath, "utf8");
+  let inputText;
+  try {
+    inputText = dependencies.readInput
+      ? dependencies.readInput(inputPath)
+      : readFileSync(inputPath === "-" ? 0 : inputPath, "utf8");
+  } catch {
+    throw new Error("input_unavailable");
+  }
   let input;
   try {
     input = JSON.parse(inputText);
@@ -95,7 +118,7 @@ async function main() {
     process.exitCode = result.state === "committed" ? 0
       : result.state === "refused" ? 2 : 3;
   } catch (error) {
-    console.error(error instanceof Error ? error.message : "client_failed");
+    console.error(closedErrorCode(error));
     process.exitCode = 1;
   }
 }

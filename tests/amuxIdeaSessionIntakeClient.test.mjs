@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test } from "node:test";
@@ -201,6 +202,33 @@ test("readback rejects mismatched and expanded server replies as unknown", async
   }
 });
 
+test("readback reports unavailable and disabled states without widening recovery", async () => {
+  const cases = [
+    {
+      fetcher: async () => { throw new Error("private transport detail"); },
+      observation: "unavailable",
+    },
+    {
+      fetcher: async () => response(503, {
+        error: "session_intake_readback_unavailable", retryWrite: false,
+      }),
+      observation: "unavailable",
+    },
+    {
+      fetcher: async () => response(409, {
+        available: false, reason: "session_intake_readback_disabled",
+      }),
+      observation: "disabled",
+    },
+  ];
+  for (const item of cases) {
+    assert.deepEqual(await readAmuxSessionIntakeClientRequest({
+      endpoint, secret, requestId, fetcher: item.fetcher,
+    }), { state: "outcome_unknown", requestId,
+      observation: item.observation, retryWrite: false });
+  }
+});
+
 test("a refusal code on the wrong status is recovered by exact-ID readback", async () => {
   const methods = [];
   const inspected = prepareAmuxSessionIntakeSubmission(clientInput, () => requestId);
@@ -290,4 +318,25 @@ test("the client keeps the v19 no-cap payload and never logs content or credenti
   assert.deepEqual(prepared, [{ status: "dispatching", requestId }]);
   assert.equal(JSON.stringify(result).includes("i".repeat(100)), false);
   assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("the CLI closes input read errors without printing a local path", () => {
+  const privatePath = "C:\\private\\operator-session\\idea.json";
+  const script = resolve(import.meta.dirname, "..", "scripts",
+    "amux-session-intake-client.mjs");
+  const result = spawnSync(process.execPath, [
+    "--import", "tsx", script, "submit", "--input", privatePath,
+  ], {
+    cwd: resolve(import.meta.dirname, ".."),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET: secret,
+      TOMVERSE_AMUX_SESSION_INTAKE_ORIGIN: "https://tomverse.test",
+    },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr.trim(), "input_unavailable");
+  assert.equal(result.stderr.includes(privatePath), false);
 });

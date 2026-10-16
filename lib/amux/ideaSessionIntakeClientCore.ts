@@ -12,6 +12,10 @@ export const AMUX_SESSION_INTAKE_ROUTE =
   "/api/internal/amux/ideas/session-intake";
 const CLIENT_SECRET = /^[A-Za-z0-9_-]{32,256}$/;
 
+export const isAmuxSessionIntakeClientSecret = (
+  value: unknown,
+): value is string => typeof value === "string" && CLIENT_SECRET.test(value);
+
 const CLOSED_REFUSALS = new Map<string, number>([
   ["Unauthorized", 401],
   ["submission_disabled", 503],
@@ -43,7 +47,8 @@ export type AmuxSessionIntakeClientResult =
   | { state: "refused"; requestId: string; code: string;
       httpStatus: number; retryWrite: false }
   | { state: "outcome_unknown"; requestId: string;
-      observation: "absent" | "partial" | "unavailable" | "invalid_response";
+      observation: "absent" | "partial" | "unavailable" | "disabled" |
+        "invalid_response";
       ideaId?: string; retryWrite: false };
 
 export type AmuxSessionIntakeClientTransport = (
@@ -97,7 +102,9 @@ const verifiedEndpoint = (endpoint: string): string => {
 };
 
 const verifiedSecret = (secret: string): string => {
-  if (!CLIENT_SECRET.test(secret)) throw new Error("credential_unavailable");
+  if (!isAmuxSessionIntakeClientSecret(secret)) {
+    throw new Error("credential_unavailable");
+  }
   return secret;
 };
 
@@ -187,6 +194,11 @@ export async function readAmuxSessionIntakeClientRequest(input: {
       body.retryWrite === false) {
     return { state: "outcome_unknown", requestId: input.requestId,
       observation: "unavailable", retryWrite: false };
+  }
+  if (response.status === 409 && body?.available === false &&
+      body.reason === "session_intake_readback_disabled") {
+    return { state: "outcome_unknown", requestId: input.requestId,
+      observation: "disabled", retryWrite: false };
   }
   return { state: "outcome_unknown", requestId: input.requestId,
     observation: "invalid_response", retryWrite: false };
