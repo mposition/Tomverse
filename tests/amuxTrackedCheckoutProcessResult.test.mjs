@@ -28,6 +28,15 @@ const events = [init,
 const child = () => Object.assign(new EventEmitter(), {
   stdout: new PassThrough(), stderr: new PassThrough(),
 });
+const fakeRunnableChild = () => {
+  const process = Object.assign(child(), { stdin: new PassThrough(), kills: 0,
+    kill() {
+      this.kills += 1;
+      queueMicrotask(() => this.emit("close", null, "SIGKILL"));
+    },
+  });
+  return process;
+};
 const send = async (process, sequence = events) => {
   const bytes = Buffer.from(sequence.map(JSON.stringify).join("\n"));
   process.stdout.write(bytes.subarray(0, 7));
@@ -51,6 +60,7 @@ test("child output returns a verified result only after stdout closes", async ()
 test("stop, signal and incomplete stdout never release model output", async () => {
   for (const exit of [
     { code: 0, signal: null, stopped: true },
+    { code: 0, signal: null, timedOut: true },
     { code: 0, signal: "SIGKILL", stopped: false },
     { code: 1, signal: null, stopped: false },
   ]) {
@@ -93,4 +103,44 @@ test("the stoppable child bridge verifies a synthetic complete stream", {
   });
   assert.equal(observed.kind, "verified_success");
   assert.deepEqual(observed.readFiles, ["src/a.ts"]);
+});
+
+test("the stoppable child bridge refuses an operator stop", {
+  skip: process.platform !== "linux",
+}, async () => {
+  const process = fakeRunnableChild();
+  const observed = await awaitAmuxTrackedCheckoutChild({ ...input,
+    child: process, prompt: Buffer.from("synthetic-only"),
+    stopCheck: async () => true,
+  });
+  assert.deepEqual(observed, { kind: "outcome_unknown" });
+  assert.equal(process.kills, 1);
+});
+
+test("the stoppable child bridge refuses a child transport error", {
+  skip: process.platform !== "linux",
+}, async () => {
+  const process = fakeRunnableChild();
+  queueMicrotask(() => process.emit("error", new Error("synthetic failure")));
+  const observed = await awaitAmuxTrackedCheckoutChild({ ...input,
+    child: process, prompt: Buffer.from("synthetic-only"),
+    stopCheck: async () => false,
+  });
+  assert.deepEqual(observed, { kind: "outcome_unknown" });
+  assert.equal(process.kills, 1);
+});
+
+test("the stoppable child bridge refuses a prompt pipe failure", {
+  skip: process.platform !== "linux",
+}, async () => {
+  const process = fakeRunnableChild();
+  queueMicrotask(() => {
+    process.stdin.emit("error", new Error("EPIPE"));
+    process.emit("close", 0, null);
+  });
+  const observed = await awaitAmuxTrackedCheckoutChild({ ...input,
+    child: process, prompt: Buffer.from("synthetic-only"),
+    stopCheck: async () => false,
+  });
+  assert.deepEqual(observed, { kind: "outcome_unknown" });
 });
