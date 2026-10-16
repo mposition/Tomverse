@@ -129,7 +129,9 @@ test("malformed proof or lookup never touches the writer or readback", async () 
   }
   assert.equal(writes, 0);
   assert.equal(reads, 0);
-  assert.deepEqual(await (await route.GET(get())).json(), {
+  const absent = await route.GET(get());
+  assert.equal(absent.status, 404);
+  assert.deepEqual(await absent.json(), {
     status: "absent", ideaId, referenceOrdinal: 0, retryWrite: false });
   assert.equal(reads, 1);
 });
