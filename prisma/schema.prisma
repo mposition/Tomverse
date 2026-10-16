@@ -2429,6 +2429,7 @@ model AdminAuditLog {
 
   promptRefinerReservationStage PromptRefinerReservationStage?
   amuxReviewDecision            AmuxReviewDecision?
+  amuxV52ReviewRecord           AmuxV52ReviewRecord?
   amuxV4UnitPrepareDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4UnitPrepareAudit")
   amuxV4UnitFinalDecisions   AmuxIdeaUnitDecision[] @relation("AmuxV4UnitFinalAudit")
   amuxV4UnitUnknownDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4UnitUnknownAudit")
@@ -7472,6 +7473,7 @@ model AmuxWorkItem {
   executionAttempts AmuxExecutionAttempt[]
   v22TaskResults    AmuxV22TaskResult[]
   v22TaskPatches    AmuxV22TaskPatch[]
+  v52ReviewRecords  AmuxV52ReviewRecord[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
@@ -7587,6 +7589,7 @@ model AmuxExecutionAttempt {
   cliUsageEvents    AmuxCliUsageEvent[]
   v22TaskResult     AmuxV22TaskResult?
   v22TaskPatch      AmuxV22TaskPatch?
+  v52ReviewRecord   AmuxV52ReviewRecord?
   v22AssignmentId   String? @unique @db.Uuid
   v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
@@ -7654,6 +7657,30 @@ model AmuxV22TaskPatch {
   @@unique([attemptId, taskId])
   @@index([taskId, createdAt])
   @@index([ideaId, bodyPurgedAt])
+}
+
+/// One immutable review-server verdict for a v52 implement attempt. Findings
+/// stay on the review server; only the content-free binding is stored here.
+model AmuxV52ReviewRecord {
+  attemptId       String   @id
+  taskId          String
+  jobId           String?  @unique
+  baseSha         String
+  commitSha       String
+  verdict         String
+  authorVendor    String
+  reviewerVendors String[]
+  touchesContract Boolean
+  requestDigest   String
+  auditLogId      String   @unique
+  createdAt       DateTime @default(now())
+
+  attempt  AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task     AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog        @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([taskId, createdAt])
 }
 
 model AmuxCostLedgerEntry {
