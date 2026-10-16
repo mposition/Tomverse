@@ -124,3 +124,41 @@ export function readAmuxOperatingScopeReply(value: unknown): AmuxOperatingScopeR
   const scope = normalizeAmuxOperatingScope(value.scope);
   return scope.ok ? { state: "current", version: value.version as number, scope: scope.scope } : null;
 }
+
+export type AmuxOperatingScopeSaveAnswer =
+  | { kind: "saved" }
+  | { kind: "refused"; notice: "changed" | "notApproved" | "invalid" | "refused" }
+  | { kind: "unknown" };
+
+/** Refusals the route answers before the writer runs: { error, retryWrite: false }. */
+const STORE_REFUSALS: Record<string, { status: number; notice: "changed" | "notApproved" | "invalid" | "refused" }> = {
+  forbidden: { status: 403, notice: "refused" },
+  invalid_scope: { status: 400, notice: "invalid" },
+  model_not_approved: { status: 409, notice: "notApproved" },
+  revision_changed: { status: 409, notice: "changed" },
+  request_already_seen: { status: 409, notice: "refused" },
+  // Thrown only before the audit and the row are written (keys, catalog, stored row).
+  scope_unavailable: { status: 503, notice: "refused" },
+};
+/** Security-layer refusals ({ error, code }) raised before the body reaches the writer. */
+const SECURITY_REFUSALS: Record<string, number> = {
+  API_RATE_LIMITED: 429, REQUEST_BODY_TOO_LARGE: 413, INVALID_JSON: 400, INVALID_REQUEST: 400,
+};
+
+/**
+ * Classifies one save answer. Only an answer known to come before the write is
+ * a refusal; anything else that is not the exact saved row (a lost, malformed
+ * or 5xx answer) is unknown and may only be read back by the same ID.
+ */
+export function classifyAmuxOperatingScopeSaveAnswer(status: number, body: unknown,
+  pending: PendingAmuxOperatingScope): AmuxOperatingScopeSaveAnswer {
+  if (status === 201) return amuxOperatingScopeSavedMatches(body, pending) ? { kind: "saved" } : { kind: "unknown" };
+  const row = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const store = typeof row.error === "string" && Object.hasOwn(STORE_REFUSALS, row.error)
+    ? STORE_REFUSALS[row.error] : null;
+  if (store && store.status === status && row.retryWrite === false) return { kind: "refused", notice: store.notice };
+  if (status === 428 && row.error === "ADMIN_REAUTHENTICATION_REQUIRED") return { kind: "refused", notice: "refused" };
+  if (typeof row.code === "string" && Object.hasOwn(SECURITY_REFUSALS, row.code) &&
+      SECURITY_REFUSALS[row.code] === status) return { kind: "refused", notice: "refused" };
+  return { kind: "unknown" };
+}

@@ -86,3 +86,33 @@ test("the allowlist grammar and the idea input grammar agree on every sample", a
     assert.equal(isAmuxScopeRepositoryName(sample), input.ok, sample);
   }
 });
+
+test("only an answer known to come before the write is a refusal; the rest is read back", async () => {
+  // Review finding: the rate limiter answers { error, code: "API_RATE_LIMITED" }.
+  const { classifyAmuxOperatingScopeSaveAnswer } = await import("../lib/amux/ideaOperatingScopeCore.ts");
+  const admitted = normalizeAmuxOperatingScope(scope());
+  assert.equal(admitted.ok, true);
+  if (!admitted.ok) return;
+  const pending = { id: "3d6f5ade-f448-40c3-80ef-79eb90399dc9", expectedPreviousVersion: 0, scope: admitted.scope };
+  const classify = (status, body) => classifyAmuxOperatingScopeSaveAnswer(status, body, pending);
+  assert.deepEqual(classify(201, { state: "saved", id: pending.id, version: 1, scope: admitted.scope, auditId: "a" }),
+    { kind: "saved" });
+  assert.deepEqual(classify(201, { state: "saved", id: pending.id, version: 2, scope: admitted.scope, auditId: "a" }),
+    { kind: "unknown" });
+  assert.deepEqual(classify(429, { error: "Too many requests.", code: "API_RATE_LIMITED" }),
+    { kind: "refused", notice: "refused" });
+  assert.deepEqual(classify(413, { error: "Request body too large.", code: "REQUEST_BODY_TOO_LARGE" }),
+    { kind: "refused", notice: "refused" });
+  assert.deepEqual(classify(409, { error: "revision_changed", retryWrite: false }), { kind: "refused", notice: "changed" });
+  assert.deepEqual(classify(409, { error: "model_not_approved", retryWrite: false }),
+    { kind: "refused", notice: "notApproved" });
+  assert.deepEqual(classify(400, { error: "invalid_scope", retryWrite: false }), { kind: "refused", notice: "invalid" });
+  assert.deepEqual(classify(428, { error: "ADMIN_REAUTHENTICATION_REQUIRED" }), { kind: "refused", notice: "refused" });
+  assert.deepEqual(classify(503, { error: "scope_unavailable", retryWrite: false }), { kind: "refused", notice: "refused" });
+  // A mismatched status, a 5xx, an unknown code or a lost body stays unknown.
+  for (const [status, body] of [[429, { error: "revision_changed", retryWrite: false }],
+    [503, { error: "outcome_unknown", retryWrite: false }],
+    [429, { error: "Too many requests.", code: "SOMETHING_ELSE" }], [500, null], [409, { error: "revision_changed" }]]) {
+    assert.deepEqual(classify(status, body), { kind: "unknown" }, `${status} ${JSON.stringify(body)}`);
+  }
+});

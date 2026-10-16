@@ -9,7 +9,7 @@ import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { adminAmuxOperatingScopeMessages } from "@/lib/adminMessages/amuxOperatingScope";
 import { readAvailableFrontierModels, type AvailableFrontierModel } from "@/lib/amux/ideaFrontierCatalogUiCore";
 import {
-  amuxOperatingScopeSavedMatches, normalizeAmuxOperatingScope, readAmuxOperatingScopeReply,
+  amuxOperatingScopeSavedMatches, classifyAmuxOperatingScopeSaveAnswer, normalizeAmuxOperatingScope, readAmuxOperatingScopeReply,
   readPendingAmuxOperatingScope, type AmuxOperatingScopeReply, type PendingAmuxOperatingScope,
 } from "@/lib/amux/ideaOperatingScopeCore";
 
@@ -103,22 +103,16 @@ export function AmuxOperatingScopePanel({ operatorId }: { operatorId: string }) 
       const response = await adminFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...attempt, ownerConfirmed: true }) });
       setRequiresReauthentication(response.status === 428);
-      const body: unknown = await response.json();
-      if (!response.ok) {
-        const error = body && typeof body === "object" ? String((body as { error?: unknown }).error) : "";
-        if ([400, 403, 409, 428, 429].includes(response.status) && ["forbidden", "invalid_scope",
-          "model_not_approved", "revision_changed", "request_already_seen",
-          "ADMIN_REAUTHENTICATION_REQUIRED", "RATE_LIMIT_EXCEEDED"].includes(error)) {
-          clearPending();
-          setNotice(error === "revision_changed" ? "changed" : error === "model_not_approved" ? "notApproved"
-            : error === "invalid_scope" ? "invalid" : "refused");
-          if (error === "revision_changed") await refresh().catch(() => setNotice("unavailable"));
-          return;
-        }
-        throw new Error("unknown_save");
+      const body: unknown = await response.json().catch(() => null);
+      const answer = classifyAmuxOperatingScopeSaveAnswer(response.status, body, attempt);
+      if (answer.kind === "saved") { await settleSaved(body); return; }
+      if (answer.kind === "refused") {
+        // Known to come before the write: nothing was saved, so the pending ID is released.
+        clearPending(); setNotice(answer.notice);
+        if (answer.notice === "changed") await refresh().catch(() => setNotice("unavailable"));
+        return;
       }
-      if (!amuxOperatingScopeSavedMatches(body, attempt)) throw new Error("unknown_save");
-      await settleSaved(body);
+      throw new Error("unknown_save");
     } catch { /* The pending ID remains; only read-back is allowed. */ }
     finally { setBusy(false); }
   };
