@@ -25,6 +25,7 @@ let runtimeWrites = 0;
 let attemptWrites = 0;
 let deliveryWrites = 0;
 let auditWrites = 0;
+let loadedKeyPurposes: string[] = [];
 
 const receipt = {
   role: "investigate", grade: "high", catalogVersion: "v1",
@@ -177,7 +178,10 @@ mock.module(mod("lib/amux/v4TaskCostCeilingCore.ts"), { namedExports: {
   checkV4TaskApprovedCeiling: () => ({ decision: "allow" }),
 } });
 mock.module(mod("lib/amux/ideaKeyStore.ts"), { namedExports: {
-  loadAmuxContentKeyRing: async () => ({}),
+  loadAmuxContentKeyRing: async (identities: Array<{ purpose: string }>) => {
+    loadedKeyPurposes = identities.map((item) => item.purpose);
+    return {};
+  },
 } });
 mock.module(mod("lib/amux/ideaCrypto.ts"), { namedExports: {
   openAmuxContent: () => { decryptCalls += 1; return Buffer.from("brief"); },
@@ -207,6 +211,7 @@ const workerRuntime = import(mod("lib/amux/workerRuntime.ts"));
 const resetWrites = () => {
   decryptCalls = 0; liveAttemptReads = 0; taskWrites = 0; runtimeWrites = 0;
   attemptWrites = 0; deliveryWrites = 0; auditWrites = 0;
+  loadedKeyPurposes = [];
 };
 
 test("an API-only runtime cannot start an ordinary assignment", async () => {
@@ -375,6 +380,7 @@ test("an API-only runtime is refused before ordinary delivery decrypt or lease",
     await assert.rejects((await delivery).pullAmuxWorkDelivery({
       worker, instanceId, generation: 1, now,
     }), /ordinary delivery cannot use a read-only API runtime/);
+    assert.deepEqual(loadedKeyPurposes, ["card_brief"]);
     assert.equal(decryptCalls, 0);
     assert.equal(deliveryWrites, 0);
     assert.equal(auditWrites, 0);

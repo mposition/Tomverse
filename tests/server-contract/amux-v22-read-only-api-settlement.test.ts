@@ -37,12 +37,17 @@ function makeWorld(outcome: Outcome) {
     taskRole: null as string | null,
     taskGrade: "medium",
     assignmentGrade: null as string | null,
+    assignmentRole: "investigate",
+    reviewVerdict: null as "accept" | "reject" | "unknown" | null,
+    priorReviewRejections: 0,
+    reviewAuditCount: 0,
+    reviewCreated: null as Record<string, unknown> | null,
     assignmentAuditPresent: true,
     assignmentAuditAction: "amux.v22.worker.assigned",
     sourceApprovalId: null as string | null,
     patch: null as { taskId: string; baseSha: string; sha256: string;
       text: string; files: Array<{ path: string; mode: "100644";
-        bytesBase64: string }> } | null,
+        bytesBase64: string }> | null } | null,
     taskUpdates: 0,
     gradeAuditsAtTaskUpdate: -1,
     attemptUpdates: 0,
@@ -75,6 +80,7 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
       world.settlementAudits += 1;
     if (input.action === "amux.grade.escalated")
       world.gradeEscalationAudits.push(input as unknown as Record<string, unknown>);
+    if (input.action === "amux.review.recorded") world.reviewAuditCount += 1;
     return `audit-${input.action}`;
   },
 } });
@@ -144,7 +150,7 @@ const tx = {
       leaseExpiresAt: new Date("2026-10-13T12:01:00.000Z"), endedAt: null,
     }];
     if (sql.includes('FROM "AmuxWorkItem"')) return [{
-      id: world.taskId, sourceSystem: "admin-idea-v4",
+      id: world.taskId, sourceSystem: "admin-idea-v4", cardType: "task",
       taskRole: world.taskRole, executionGrade: world.taskGrade,
       v4SourceApprovalId: world.sourceApprovalId,
       v22AssignmentId: "assignment-one", owner: worker, status: "doing",
@@ -163,6 +169,7 @@ const tx = {
   },
   amuxV22WorkerAssignment: { findUnique: async () => ({
     id: "assignment-one", grade: world.assignmentGrade ?? world.taskGrade,
+    role: world.assignmentRole, provider: "anthropic",
     authorizationAuditLogId: "assignment-audit",
     recoveryApprovalId: world.recoveryApprovalId, taskRevision: 5,
   }) },
@@ -177,6 +184,18 @@ const tx = {
     taskId: world.patch.taskId, baseSha: world.patch.baseSha,
     patchSha256: world.patch.sha256, bodyPurgedAt: null,
   } : null },
+  amuxV52ReviewRecord: {
+    findUnique: async () => world.reviewCreated ?? (world.reviewVerdict ? {
+      jobId: "r-20261016-110000-abcdef", baseSha: world.patch?.baseSha,
+      verdict: world.reviewVerdict, authorVendor: "anthropic",
+      auditLog: { entryHash: "a".repeat(64) },
+    } : null),
+    count: async () => world.priorReviewRejections,
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      world.reviewCreated = data;
+      return data;
+    },
+  },
   amuxIdeaUnitDecision: { findUnique: async () => ({
     confirmationSnapshot: { card: { task: { costReceipt: {
       role: "implement", grade: "routine", receiptDigest: "a".repeat(64),
@@ -226,6 +245,9 @@ const tx = {
       !world.assignmentAuditPresent ? null : {
       entryHash: "a".repeat(64), action: world.assignmentAuditAction,
       targetId: "assignment-one", metadata: { v52GradeRouting: world.gradeGuard },
+    } : args.where.id === "audit-amux.review.recorded" ? {
+      entryHash: "a".repeat(64), action: "amux.review.recorded",
+      targetId: world.taskId,
     } : { entryHash: "a".repeat(64),
       action: "amux.v4.task_catalog.approve", actorUserId: "owner-one",
       targetId: "catalog-one", targetType: "AmuxV4TaskCostCatalogApproval" } },
@@ -444,6 +466,108 @@ test("v52 settlement blocks a contract publish file omitted from the runner inve
   assert.equal(world.gradeEscalationAudits.length, 0);
 });
 
+test("v52 review reject retries once at the same grade, then blocks", async () => {
+  for (const [prior, expected, reason] of [
+    [0, "todo", "review_server_rejected"],
+    [1, "blocked", "review_server_rejected_twice"],
+  ] as const) {
+    world = makeWorld("succeeded");
+    world.attemptNumber = 1;
+    world.gradeGuard = true;
+    world.assignmentRole = "implement";
+    world.taskGrade = "advanced";
+    world.reviewVerdict = "reject";
+    world.priorReviewRejections = prior;
+    world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+      sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+      files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+    const input = await settlementInput("succeeded");
+    const result = await (await execution).settleAmuxV22TaskExecution({
+      ...input, changedPaths: ["lib/ordinary.ts"],
+    });
+    assert.equal(result.settled, true);
+    assert.equal(world.taskUpdateData?.status, expected);
+    assert.equal(world.attemptUpdateData?.reason, reason);
+    assert.equal(world.taskUpdateData?.executionGrade, undefined,
+      "review rejection cannot escalate grade");
+  }
+});
+
+test("v52 review record binds an implement patch, assignment and audit once", async () => {
+  const previousKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = "v52-review-test-key".repeat(4);
+  try {
+  world = makeWorld("succeeded");
+  world.gradeGuard = true;
+  world.assignmentRole = "implement";
+  world.taskGrade = "advanced";
+  world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+    sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+    files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+  const input = { attemptId, worker, instanceId, generation: 1,
+    taskRevision: 5, changedPaths: ["lib/ordinary.ts"], evidence: {
+      jobId: "r-20261016-110000-abcdef", baseSha: "a".repeat(40),
+      commitSha: "c".repeat(40), verdict: "accept" as const,
+      authorVendor: "anthropic", reviewerVendors: ["openai"],
+      touchesContract: false,
+    } };
+  const first = await (await execution).recordAmuxV52Review(input);
+  assert.deepEqual(first, { recorded: true, duplicate: false });
+  assert.equal(world.reviewAuditCount, 1);
+  assert.equal(world.reviewCreated?.attemptId, attemptId);
+  const second = await (await execution).recordAmuxV52Review(input);
+  assert.deepEqual(second, { recorded: true, duplicate: true });
+  assert.equal(world.reviewAuditCount, 1);
+  const mismatch = await (await execution).recordAmuxV52Review({
+    ...input, evidence: { ...input.evidence, touchesContract: true,
+      reviewerVendors: ["openai", "xai"] },
+  });
+  assert.deepEqual(mismatch, { recorded: false,
+    reason: "review_patch_unverified" });
+  const incomplete = await (await execution).recordAmuxV52Review({
+    ...input, changedPaths: ["app/page.tsx"],
+  });
+  assert.deepEqual(incomplete, { recorded: false,
+    reason: "review_patch_unverified" });
+  world = makeWorld("succeeded");
+  world.gradeGuard = true;
+  world.assignmentRole = "implement";
+  world.taskGrade = "frontier";
+  world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+    sha256: "b".repeat(64),
+    text: "diff --git a/lib/amux/execution.ts b/lib/amux/execution.ts\n",
+    files: null };
+  const largePatch = await (await execution).recordAmuxV52Review({
+    ...input, changedPaths: ["lib/amux/execution.ts"],
+    evidence: { ...input.evidence, touchesContract: true,
+      reviewerVendors: ["openai", "xai"] },
+  });
+  assert.deepEqual(largePatch, { recorded: true, duplicate: false });
+  } finally {
+    if (previousKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+    else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousKey;
+  }
+});
+
+test("v52 review unknown blocks without another attempt", async () => {
+  world = makeWorld("succeeded");
+  world.attemptNumber = 1;
+  world.gradeGuard = true;
+  world.assignmentRole = "implement";
+  world.taskGrade = "advanced";
+  world.reviewVerdict = "unknown";
+  world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+    sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+    files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+  const input = await settlementInput("succeeded");
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...input, changedPaths: ["lib/ordinary.ts"],
+  });
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.attemptUpdateData?.reason, "review_server_unknown");
+});
+
 test("v52 contract touch on the final attempt blocks for human recovery", async () => {
   world = makeWorld("failed");
   world.taskId = "00000000-0000-4000-8000-000000000099";
@@ -498,6 +622,39 @@ test("v52 worker-blocked outcome keeps its cause without an inventory", async ()
   assert.equal(result.settled, true);
   assert.equal(world.taskUpdateData?.status, "blocked");
   assert.notEqual(world.attemptUpdateData?.reason, "changed_paths_unavailable");
+});
+
+test("worker-blocked outcome preserves owner retry eligibility with and without v52", async () => {
+  for (const gradeGuard of [false, true]) {
+    world = makeWorld("failed");
+    world.gradeGuard = gradeGuard;
+    world.taskGrade = "routine";
+    world.storedEvents = [{ invocationId: world.attemptId,
+      receiptDigest: "7".repeat(64), status: "failed",
+      completeness: "reported_complete", projectedApiCostMicrousd: BigInt(1),
+      cli: "claude", source: "claude_result", actualModelId: "claude-opus-5-5",
+      selectedModelId: "claude-opus-5-5", provider: "anthropic",
+      authentication: "subscription", inputTokens: BigInt(1),
+      outputTokens: BigInt(1), cacheReadInputTokens: BigInt(0),
+      cacheCreationInputTokens: BigInt(0), inputTokensIncludeCacheRead: false,
+      inputTokensIncludeCacheWrite: false, completedTurns: 1,
+      pricingVersion: null }];
+    const result = await (await execution).settleAmuxV22TaskExecution({
+      attemptId: world.attemptId, worker, instanceId, generation: 1,
+      taskRevision: 5, outcome: "blocked", invocationIds: [world.attemptId],
+      ...(gradeGuard ? { changedPaths: ["app/page.tsx"] } : {}),
+    });
+    assert.equal(result.settled, true);
+    assert.equal(world.taskUpdateData?.status, "blocked");
+    assert.equal(world.attemptUpdateData?.reason, "reported_result");
+    const { amuxV22ReviewRetryHasVerifiedOutcome } =
+      await import(mod("lib/amux/reviewApprovalCore.ts"));
+    assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
+      sourceSystem: "admin-idea-v4",
+      attempt: { v22AssignmentId: "assignment-one", outcome: "blocked",
+        toStatus: "blocked", reason: String(world.attemptUpdateData?.reason) },
+    }), true);
+  }
 });
 
 test("v52 ordinary paths preserve the normal successful destination", async () => {

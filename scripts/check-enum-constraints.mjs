@@ -878,6 +878,13 @@ const REGISTRY = {
     reason:
       "AmuxExecutionToStatus in lib/amux/execution.ts types the four worker settlement destinations. Cancelled is a board lifecycle state rather than a worker-supplied settlement result, so it remains in the durable constraint but outside the route's union and zod input.",
   },
+  AmuxV52ReviewRecord_verdict_check: {
+    owner: "list",
+    module: "lib/amux/v52ReviewCore.ts",
+    list: "AMUX_V52_REVIEW_VERDICTS",
+    reason:
+      "A v52 review records the independent server's accept, reject or unknown outcome. The app's settlement has a distinct deterministic branch for each value, so a stored fourth verdict could not be settled safely.",
+  },
   AmuxBoardImportApproval_status_check: {
     owner: "list",
     module: "lib/amux/boardImportCore.ts",

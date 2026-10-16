@@ -34,6 +34,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
   "@/lib/amux/v22ReadOnlyApiProtocol.mjs";
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
+import { formatAmuxV52ReviewScope } from "@/lib/amux/v52ReviewCore";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -265,6 +266,10 @@ export type AmuxPulledDelivery =
           budgetMicrousd: number;
           gradeGuard?: true;
           executionGrade?: string;
+          reviewAuthor?: "claude";
+          reviewAuthorVendor?: string;
+          reviewScope?: string;
+          reviewFeedbackJobId?: string;
           readOnlyRetry?: AmuxV22ReadOnlyDeliveryBinding;
         } | null;
         receiptId: string;
@@ -298,7 +303,10 @@ export async function pullAmuxWorkDelivery(input: {
       });
       const candidateCard = sealedCandidate ? await tx.amuxWorkItem.findUnique({
         where: { id: sealedCandidate.taskId },
-        select: { sourceSnapshot: true },
+        select: { sourceSnapshot: true,
+          v22AcceptedAssignment: { select: { id: true, role: true,
+            authorizationAuditLog: { select: { action: true, targetId: true,
+              metadata: true } } } } },
       }) : null;
       return { sealedCandidate, candidateCard };
     }) : { sealedCandidate: null, candidateCard: null };
@@ -306,9 +314,24 @@ export async function pullAmuxWorkDelivery(input: {
   const ideaId = snapshot && typeof snapshot === "object" &&
     !Array.isArray(snapshot) && typeof snapshot.ideaId === "string" ?
       snapshot.ideaId : null;
+  const candidateAssignment = candidateCard?.v22AcceptedAssignment;
+  const candidateAudit = candidateAssignment?.authorizationAuditLog;
+  const needReviewKeys = candidateAssignment?.role === "implement" &&
+    candidateAudit?.action === "amux.v22.worker.assigned" &&
+    candidateAudit.targetId === candidateAssignment.id &&
+    !!candidateAudit.metadata && typeof candidateAudit.metadata === "object" &&
+    !Array.isArray(candidateAudit.metadata) &&
+    (candidateAudit.metadata as Record<string, unknown>).v52GradeRouting === true;
   const briefKeys = sealedCandidate && ideaId ?
-    await loadAmuxContentKeyRing([{ ideaId, purpose: "card_brief",
-      subjectId: sealedCandidate.taskId }]) : null;
+    await loadAmuxContentKeyRing([
+      { ideaId, purpose: "card_brief", subjectId: sealedCandidate.taskId },
+      ...(needReviewKeys ? [
+        { ideaId, purpose: "card_title" as const,
+          subjectId: sealedCandidate.taskId },
+        { ideaId, purpose: "card_body" as const,
+          subjectId: sealedCandidate.taskId },
+      ] : []),
+    ]) : null;
   const deliveryContent = async (tx: Prisma.TransactionClient,
     delivery: DeliveryLockRow, now: Date,
     protocolCapabilities: readonly string[]) => {
@@ -324,6 +347,12 @@ export async function pullAmuxWorkDelivery(input: {
     const card = await tx.amuxWorkItem.findUnique({
       where: { id: delivery.taskId },
       select: { sourceSystem: true, cardType: true,
+        v4TitleCiphertext: true, v4TitleKeyId: true,
+        v4TitleKeyVersion: true, v4TitleDigest: true,
+        v4TitleDigestKeyId: true,
+        v4BodyCiphertext: true, v4BodyKeyId: true,
+        v4BodyKeyVersion: true, v4BodyDigest: true,
+        v4BodyDigestKeyId: true, v4BodyPurgedAt: true,
         v4BriefCiphertext: true, v4BriefKeyId: true,
         v4BriefKeyVersion: true, v4BriefDigest: true,
         v4BriefDigestKeyId: true, v4BriefPurgedAt: true,
@@ -451,6 +480,8 @@ export async function pullAmuxWorkDelivery(input: {
       recoveryApprovalId = recovery.id;
     }
     let plain: Buffer | null = null;
+    let title: Buffer | null = null;
+    let body: Buffer | null = null;
     try {
       plain = openAmuxContent({
         ciphertext: Buffer.from(card.v4BriefCiphertext),
@@ -460,6 +491,47 @@ export async function pullAmuxWorkDelivery(input: {
       if (!verifyAmuxContentDigest(plain, "card_brief", delivery.taskId,
         card.v4BriefDigest, card.v4BriefDigestKeyId, briefKeys as AmuxContentKeys))
         throw new Error("v22 sealed delivery digest mismatch");
+      let reviewScope: string | undefined;
+      let reviewFeedbackJobId: string | undefined;
+      if (gradeGuard && assignment.role === "implement") {
+        if (!card.v4TitleCiphertext || !card.v4TitleKeyId ||
+            !card.v4TitleKeyVersion || !card.v4TitleDigest ||
+            !card.v4TitleDigestKeyId || !card.v4BodyCiphertext ||
+            !card.v4BodyKeyId || !card.v4BodyKeyVersion ||
+            !card.v4BodyDigest || !card.v4BodyDigestKeyId ||
+            card.v4BodyPurgedAt !== null)
+          throw new Error("v52 review scope unavailable");
+        title = openAmuxContent({ ciphertext: Buffer.from(card.v4TitleCiphertext),
+          keyId: card.v4TitleKeyId, keyVersion: card.v4TitleKeyVersion },
+          "card_title", delivery.taskId, briefKeys as AmuxContentKeys);
+        body = openAmuxContent({ ciphertext: Buffer.from(card.v4BodyCiphertext),
+          keyId: card.v4BodyKeyId, keyVersion: card.v4BodyKeyVersion },
+          "card_body", delivery.taskId, briefKeys as AmuxContentKeys);
+        if (!verifyAmuxContentDigest(title, "card_title", delivery.taskId,
+          card.v4TitleDigest, card.v4TitleDigestKeyId, briefKeys as AmuxContentKeys) ||
+            !verifyAmuxContentDigest(body, "card_body", delivery.taskId,
+              card.v4BodyDigest, card.v4BodyDigestKeyId, briefKeys as AmuxContentKeys))
+          throw new Error("v52 review scope digest mismatch");
+        const decoded = JSON.parse(body.toString("utf8")) as
+          { completionCriteria?: unknown };
+        const titleText = title.toString("utf8").trim();
+        const criteria = decoded?.completionCriteria;
+        if (!titleText || titleText.length > 500 ||
+            /[\u0000-\u001f]/.test(titleText) ||
+            !Array.isArray(criteria) || criteria.length < 1 ||
+            criteria.length > 12 || criteria.some((item) =>
+              typeof item !== "string" || !item.trim() ||
+              item.length > 500))
+          throw new Error("v52 review scope invalid");
+        reviewScope = formatAmuxV52ReviewScope(titleText, criteria);
+        const prior = await tx.amuxV52ReviewRecord.findFirst({
+          where: { taskId: delivery.taskId },
+          orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
+          select: { jobId: true, verdict: true },
+        });
+        reviewFeedbackJobId = prior?.verdict === "reject" ?
+          prior.jobId ?? undefined : undefined;
+      }
       return {
         prompt: `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
           `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n` +
@@ -467,11 +539,18 @@ export async function pullAmuxWorkDelivery(input: {
           AMUX_V22_WORKER_AUTHORITY_NOTICE,
         v22Execution: { modelId: assignment.modelId, role: assignment.role,
           budgetMicrousd, ...(gradeGuard ? { gradeGuard: true as const,
-            executionGrade: assignment.grade } : {}),
+            executionGrade: assignment.grade,
+            ...(reviewScope ? {
+              // The approved v22 one-shot catalog uses the fixed Claude CLI.
+              reviewAuthor: "claude" as const,
+              reviewAuthorVendor: assignment.provider,
+              reviewScope,
+              ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}) } : {}),
+          } : {}),
           ...(readOnlyRetry ? { readOnlyRetry } : {}) },
         recoveryApprovalId,
       };
-    } finally { plain?.fill(0); }
+    } finally { plain?.fill(0); title?.fill(0); body?.fill(0); }
   };
   return withAmuxDbBoundary(
     { ...AMUX_DB_BOUNDARIES.deliveryPull,
