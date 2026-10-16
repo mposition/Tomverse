@@ -1,7 +1,7 @@
 // Orchestration policy version 35, section 3 (stage R2c): the one reader the
-// assignment paths will ask for the worker catalog. With R2c's latch off it is
-// the catalog variables and sends nothing; with it on, one statement whose
-// result, for production's values, is exactly what the variables give today.
+// assignment paths ask for the worker catalog. With R2c's latch off it is the
+// catalog variables and sends nothing; with it on (version 53), one statement
+// whose result, for production's values, is exactly what the variables give.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -97,9 +97,20 @@ const fakeClient = (row) => {
 };
 const statement = (registry = REGISTRY_ROWS, latches = [], capabilities = CAPABILITY_ROWS) => ({ registry, latches, capabilities });
 
-test("R2c ships with the derived assignment catalog latched off", () => {
-  assert.equal(AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH, false);
-  assert.equal(amuxWorkerDerivedCatalogAssignmentOpen(), false);
+test("version 53 turns R2c's derived assignment catalog on, and the policy records it", async () => {
+  // Version 35 section 5: R2c shipped latched off; version 53 is the
+  // operator's activation record. The latch and its record move together.
+  assert.equal(AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH, true);
+  assert.equal(amuxWorkerDerivedCatalogAssignmentOpen(), true);
+  const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8");
+  const normalized = policy.split(String.fromCharCode(13)).join("");
+  const heading = "## 버전 53 — R1·R2b 관측 종료와 R2c 배정 카탈로그 전환";
+  assert.ok(normalized.split(String.fromCharCode(10)).includes(heading));
+  // With no argument the reader now asks the registry.
+  useProductionVariables();
+  const client = fakeClient(statement());
+  assert.equal((await readAmuxAssignmentCatalogs(client)).source, "derived");
+  assert.equal(client.sent.length, 1);
 });
 
 // The catalog variable parser, which the variable path (latch off) uses until
@@ -130,7 +141,7 @@ test("the catalog variable parser: missing or any bad entry means no catalog; pr
 test("latched off, the catalog is the variables and nothing is sent", async () => {
   useProductionVariables();
   const client = fakeClient(statement());
-  const catalogs = await readAmuxAssignmentCatalogs(client);
+  const catalogs = await readAmuxAssignmentCatalogs(client, false);
   assert.equal(client.sent.length, 0);
   assert.equal(catalogs.source, "variables");
   assert.deepEqual(catalogs.workers, getConfiguredAmuxWorkerCatalog());
@@ -264,7 +275,7 @@ test("R2d ships with the bridge session list latched off, and the route only rea
 
 test("the derived catalog carries each registered worker's ceiling; the variables carry none", async () => {
   useProductionVariables();
-  const variables = await readAmuxAssignmentCatalogs(fakeClient(statement()));
+  const variables = await readAmuxAssignmentCatalogs(fakeClient(statement()), false);
   assert.equal(variables.ceilings, null);
   const derived = await readAmuxAssignmentCatalogs(fakeClient(statement()), true);
   assert.equal(derived.ceilings?.get("claude-chore"), "chore");

@@ -75,9 +75,34 @@ mock.module(mod("lib/amux/routing.ts"), {
     },
   },
 });
+// R2c (orchestration policy version 53): the routes check the name against the
+// derived catalog inside the runtime's own transaction, through these.
+const DERIVED_CATALOG = ["claude-impl"];
+mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), {
+  namedExports: {
+    amuxWorkerCatalogRefusal: async (_tx: unknown, name: string, open: boolean) => {
+      assert.equal(open, true);
+      return DERIVED_CATALOG.includes(name) ? null : "worker_not_configured";
+    },
+  },
+});
+class TestRegistrationRefusedError extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+  }
+}
 mock.module(mod("lib/amux/workerRuntime.ts"), {
   namedExports: {
-    registerAmuxWorkerRuntime: async (workerName: string, instanceId: string) => {
+    AmuxWorkerRegistrationRefusedError: TestRegistrationRefusedError,
+    registerAmuxWorkerRuntime: async (
+      workerName: string,
+      instanceId: string,
+      _now?: Date,
+      _boundary?: unknown,
+      refuse?: (tx: unknown) => Promise<string | null>,
+    ) => {
+      const refusal = refuse ? await refuse({}) : null;
+      if (refusal !== null) throw new TestRegistrationRefusedError(refusal);
       record("registerAmuxWorkerRuntime", { workerName, instanceId });
       return { generation: 3, leaseExpiresAt: LEASE };
     },

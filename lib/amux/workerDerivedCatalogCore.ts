@@ -27,12 +27,14 @@ export const AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH = true;
 export const amuxWorkerDerivedCatalogShadowOpen = (): boolean => AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH;
 
 /**
- * R2c ships with its own code latch off (version 35 section 5). While it is
- * false the assignment catalog is the catalog variables, as before, and
- * reading it sends no statement. The operator's activation record turns it
- * on, and only after R1's observation has ended (version 35 section 5).
+ * R2c shipped with its own code latch off (version 35 section 5); version 53
+ * is the operator's activation record, written after R1's observation and
+ * R2b's equality observation had both ended, and sets it true. The seven
+ * consumers then read the catalog the registry derives, one statement inside
+ * their own boundary. While it is false the assignment catalog is the catalog
+ * variables and reading it sends no statement.
  */
-export const AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH = false;
+export const AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH = true;
 export const amuxWorkerDerivedCatalogAssignmentOpen = (): boolean => AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH;
 
 /**
