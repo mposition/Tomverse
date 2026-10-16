@@ -12,7 +12,8 @@ import { AMUX_IDEA_PLAN_APPROVAL_TRANSACTION } from "./ideaRequestTimeoutsCore.t
 import { AmuxV4UnitDecisionError } from "./ideaUnitDecisionStore.ts";
 import { AmuxV20RegistrationRefusalDetected } from
   "./ideaRegistrationRefusalDetectionCore.ts";
-import { recordAmuxV20RegistrationRefusal } from
+import { AmuxV20RegistrationRefusalStoreError,
+  recordAmuxV20RegistrationRefusal } from
   "./ideaRegistrationRefusalService.ts";
 import { AmuxPortfolioError } from "./portfolioAssessmentService.ts";
 import { prepareAmuxV4ScorePlan, runAmuxV4ScorePlanInTx,
@@ -120,7 +121,10 @@ export async function approveAmuxV4Plan(session: Session, request: Request, inpu
         refusalCode: error.code, ...error.identity,
         proposedExecutionGrade: error.proposedExecutionGrade,
         finalExecutionGrade: error.finalExecutionGrade });
-    } catch {
+    } catch (storeError) {
+      if (!(storeError instanceof AmuxV20RegistrationRefusalStoreError)) {
+        throw storeError;
+      }
       throw new AmuxV4UnitDecisionError("integrity_unavailable");
     }
     throw new AmuxV4UnitDecisionError(error.code);

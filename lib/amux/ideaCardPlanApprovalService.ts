@@ -25,7 +25,8 @@ import { inspectAmuxV20TaskRegistration } from
   "./ideaUnitRegistrationCore.ts";
 import { AmuxV20RegistrationRefusalDetected } from
   "./ideaRegistrationRefusalDetectionCore.ts";
-import { recordAmuxV20RegistrationRefusal } from
+import { AmuxV20RegistrationRefusalStoreError,
+  recordAmuxV20RegistrationRefusal } from
   "./ideaRegistrationRefusalService.ts";
 import { AmuxV4TaskCatalogApprovalError, calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
@@ -73,7 +74,10 @@ export async function approveAmuxV4CardPlan(session: Session, request: Request, 
           refusalCode: error.code, ...error.identity,
           proposedExecutionGrade: error.proposedExecutionGrade,
           finalExecutionGrade: error.finalExecutionGrade });
-      } catch {
+      } catch (storeError) {
+        if (!(storeError instanceof AmuxV20RegistrationRefusalStoreError)) {
+          throw storeError;
+        }
         throw new AmuxV4UnitDecisionError("integrity_unavailable");
       }
       throw new AmuxV4UnitDecisionError(error.code);
@@ -115,17 +119,6 @@ export async function prepareAmuxV4CardPlan(session: Session, request: Request, 
   if (proposed.length > AMUX_V4_CARD_PLAN_MAX_PROPOSED) throw new AmuxV4CardPlanError("too_many_units");
   const verified = await Promise.all(proposed.map((unit) =>
     readVerifiedAmuxCardProposal(session, input.ideaId, unit.id)));
-  for (const entry of verified) {
-    if (entry.proposal.cardType !== "task") continue;
-    const inspected = inspectAmuxV20TaskRegistration(entry.proposal);
-    if (!inspected.ok) {
-      throw new AmuxV20RegistrationRefusalDetected(inspected.code, {
-        ideaId: input.ideaId, draftUnitId: entry.unit.id,
-        analysisPreviewId: entry.previewId,
-      }, entry.proposal);
-    }
-  }
-
   // A Feature is a node a consumed decision of this idea created or linked, or a node id.
   const approvedNodes = await prisma.amuxIdeaDraftUnit.findMany({
     where: { ideaId: input.ideaId, actorUserId, unitKind: "node", state: "approved" },
@@ -158,6 +151,20 @@ export async function prepareAmuxV4CardPlan(session: Session, request: Request, 
   })));
   // A large plan is approved in rounds; this one is the dependency-closed prefix.
   const { round: plan, remaining } = amuxV4CardPlanRound(ordered);
+  for (const entry of plan) {
+    const proposal = entry.verified.proposal;
+    if (proposal.cardType !== "task") continue;
+    if (!proposal.taskRole || !proposal.executionGrade) {
+      throw new AmuxV4UnitDecisionError("reconfirm");
+    }
+    const inspected = inspectAmuxV20TaskRegistration(proposal);
+    if (!inspected.ok) {
+      throw new AmuxV20RegistrationRefusalDetected(inspected.code, {
+        ideaId: input.ideaId, draftUnitId: entry.draftUnitId,
+        analysisPreviewId: entry.verified.previewId,
+      }, proposal);
+    }
+  }
 
   const keys = loadCurrentAmuxContentKeys(process.env);
   const nonce = randomBytes(32).toString("base64url");

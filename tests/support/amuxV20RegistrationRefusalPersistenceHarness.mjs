@@ -8,11 +8,14 @@ const mod = (path) => pathToFileURL(resolve(root, path)).href;
 
 let refusal;
 let storeFails = false;
+let reauthenticationFails = false;
 const writes = [];
 
 class DecisionError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
+class StoreError extends Error {}
+class ReauthenticationError extends Error {}
 
 const proposal = {
   kind: "card", localId: "c0:card-0", cardType: "task",
@@ -89,8 +92,10 @@ mock.module(mod("lib/amux/ideaUnitConfirmationCore.ts"), { namedExports: {
   sameAmuxIdeaUnitConfirmation: () => true,
 } });
 mock.module(mod("lib/amux/ideaRegistrationRefusalService.ts"), { namedExports: {
+  AmuxV20RegistrationRefusalStoreError: StoreError,
   recordAmuxV20RegistrationRefusal: async (input) => {
-    if (storeFails) throw new Error("refusal store unavailable");
+    if (reauthenticationFails) throw new ReauthenticationError("step-up expired");
+    if (storeFails) throw new StoreError("refusal store unavailable");
     writes.push(input);
     return { state: "awaiting_operator" };
   },
@@ -143,3 +148,13 @@ await assert.rejects(prepareAmuxV4StoryRegistration({ session, request,
     cardType: "task", publicPrDisclosureApproved: false },
   browserNonce: "browser-nonce" }),
 (error) => error.code === "integrity_unavailable");
+
+storeFails = false;
+reauthenticationFails = true;
+refusal = makeRefusal();
+await assert.rejects(prepareAmuxV4StoryRegistration({ session, request,
+  choice: { ideaId: identity.ideaId, draftUnitId: identity.draftUnitId,
+    featureNodeId: "feature-0001", prepareRequestId, decisionReason: null,
+    cardType: "task", publicPrDisclosureApproved: false },
+  browserNonce: "browser-nonce" }),
+(error) => error instanceof ReauthenticationError);

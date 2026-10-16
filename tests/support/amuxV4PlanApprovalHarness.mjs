@@ -15,6 +15,7 @@ let refusalWrites;
 let refusalStoreFails;
 class DecisionError extends Error { constructor(code) { super(code); this.code = code; } }
 class PortfolioError extends Error { constructor(code) { super(code); this.code = code; } }
+class StoreError extends Error {}
 const refusedProposal = { kind: "card", localId: "c0:card-0",
   cardType: "task", taskRole: "implement", executionGrade: "routine",
   expectedPaths: ["lib/amux/contract.ts", "components/ordinary.tsx"],
@@ -63,8 +64,9 @@ mock.module(mod("lib/amux/portfolioPlanApprovalService.ts"), {
   },
 });
 mock.module(mod("lib/amux/ideaRegistrationRefusalService.ts"), {
-  namedExports: { recordAmuxV20RegistrationRefusal: async (input) => {
-    if (refusalStoreFails) throw new Error("refusal store unavailable");
+  namedExports: { AmuxV20RegistrationRefusalStoreError: StoreError,
+    recordAmuxV20RegistrationRefusal: async (input) => {
+    if (refusalStoreFails) throw new StoreError("refusal store unavailable");
     calls.push(["recordRefusal"]);
     refusalWrites.push(input);
     return { state: "awaiting_operator" };

@@ -18,7 +18,8 @@ import type { AmuxV20RegistrationRefusalIdentity } from
   "./ideaRegistrationRefusalCore.ts";
 import { AmuxV20RegistrationRefusalDetected } from
   "./ideaRegistrationRefusalDetectionCore.ts";
-import { recordAmuxV20RegistrationRefusal } from
+import { AmuxV20RegistrationRefusalStoreError,
+  recordAmuxV20RegistrationRefusal } from
   "./ideaRegistrationRefusalService.ts";
 import { readVerifiedAmuxCardProposal } from "./ideaUnitProposalReadService.ts";
 import { assembleAmuxV4StoryConfirmation } from
@@ -90,7 +91,8 @@ const persistAmuxV20RegistrationRefusal = async (input: {
       proposedExecutionGrade: input.error.proposedExecutionGrade,
       finalExecutionGrade: input.error.finalExecutionGrade,
     });
-  } catch {
+  } catch (error) {
+    if (!(error instanceof AmuxV20RegistrationRefusalStoreError)) throw error;
     throw new AmuxV4UnitDecisionError("integrity_unavailable");
   }
 };

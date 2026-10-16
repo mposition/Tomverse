@@ -16,9 +16,11 @@ const proposals = {
   "unit-task-01": { localRef: "t1", cardType: "task", featureRef: "f1", parentStoryRef: "s1", dependencyRefs: [], taskRole: "implement", executionGrade: "routine", expectedPaths: ["components/example.tsx"], title: "Task one" },
   "unit-task-02": { localRef: "t2", cardType: "task", featureRef: "f1", parentStoryRef: "s1", dependencyRefs: ["t1"], taskRole: "test", executionGrade: "routine", expectedPaths: ["tests/example.test.ts"], title: "Task two" },
   "unit-task-bad": { localRef: "bad", cardType: "task", featureRef: "f1", parentStoryRef: "s1", dependencyRefs: [], taskRole: "implement", executionGrade: "routine", expectedPaths: ["lib/amux/ideaUnitRegistrationCore.ts", "components/example.tsx"], title: "Mixed Task" },
+  "unit-task-grade-missing": { localRef: "missing", cardType: "task", featureRef: "f1", parentStoryRef: "s1", dependencyRefs: [], taskRole: "implement", expectedPaths: ["components/example.tsx"], title: "Incomplete Task" },
 };
 
 class DecisionError extends Error { constructor(code) { super(code); this.code = code; } }
+class StoreError extends Error {}
 
 mock.module(mod("lib/prisma.ts"), {
   namedExports: {
@@ -67,8 +69,9 @@ mock.module(mod("lib/amux/ideaUnitProposalReadService.ts"), {
   },
 });
 mock.module(mod("lib/amux/ideaRegistrationRefusalService.ts"), {
-  namedExports: { recordAmuxV20RegistrationRefusal: async (input) => {
-    if (refusalFails) throw new Error("refusal persistence failed");
+  namedExports: { AmuxV20RegistrationRefusalStoreError: StoreError,
+    recordAmuxV20RegistrationRefusal: async (input) => {
+    if (refusalFails) throw new StoreError("refusal persistence failed");
     calls.push(["refusal", input.requestId, input.attemptKind, input.refusalCode,
       input.ideaId, input.draftUnitId, input.analysisPreviewId]);
     return { state: "awaiting_operator" };
@@ -151,6 +154,22 @@ assert.deepEqual(calls.filter(([kind]) => kind === "refusal"), [["refusal",
 assert.equal(calls.some(([kind]) => kind === "transaction"), false);
 reset(); proposedUnits = [{ id: "unit-task-bad" }]; refusalFails = true;
 await assert.rejects(run(), (error) => error.code === "integrity_unavailable");
+reset(); proposedUnits = [{ id: "unit-task-grade-missing" }];
+await assert.rejects(run(), (error) => error.code === "reconfirm");
+assert.equal(calls.some(([kind]) => kind === "refusal"), false);
+
+reset();
+const firstRoundStories = Array.from({ length: 24 }, (_, index) => {
+  const id = `unit-story-${String(index).padStart(2, "0")}`;
+  proposals[id] = { localRef: `s${index}`, cardType: "story", featureRef: "f1",
+    parentStoryRef: null, dependencyRefs: [], taskRole: null, title: `Story ${index}` };
+  return { id };
+});
+proposedUnits = [...firstRoundStories, { id: "unit-task-bad" }];
+const firstRound = await run();
+assert.equal(firstRound.cards.length, 24);
+assert.equal(firstRound.remaining, 1);
+assert.equal(calls.some(([kind]) => kind === "refusal"), false);
 reset(); failOn = "unit-task-02";
 await assert.rejects(run(), (error) => error.code === "task_expected_paths_mixed");
 reset(); commitFails = true;
