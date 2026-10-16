@@ -624,6 +624,39 @@ test("v52 worker-blocked outcome keeps its cause without an inventory", async ()
   assert.notEqual(world.attemptUpdateData?.reason, "changed_paths_unavailable");
 });
 
+test("worker-blocked outcome preserves owner retry eligibility with and without v52", async () => {
+  for (const gradeGuard of [false, true]) {
+    world = makeWorld("failed");
+    world.gradeGuard = gradeGuard;
+    world.taskGrade = "routine";
+    world.storedEvents = [{ invocationId: world.attemptId,
+      receiptDigest: "7".repeat(64), status: "failed",
+      completeness: "reported_complete", projectedApiCostMicrousd: BigInt(1),
+      cli: "claude", source: "claude_result", actualModelId: "claude-opus-5-5",
+      selectedModelId: "claude-opus-5-5", provider: "anthropic",
+      authentication: "subscription", inputTokens: BigInt(1),
+      outputTokens: BigInt(1), cacheReadInputTokens: BigInt(0),
+      cacheCreationInputTokens: BigInt(0), inputTokensIncludeCacheRead: false,
+      inputTokensIncludeCacheWrite: false, completedTurns: 1,
+      pricingVersion: null }];
+    const result = await (await execution).settleAmuxV22TaskExecution({
+      attemptId: world.attemptId, worker, instanceId, generation: 1,
+      taskRevision: 5, outcome: "blocked", invocationIds: [world.attemptId],
+      ...(gradeGuard ? { changedPaths: ["app/page.tsx"] } : {}),
+    });
+    assert.equal(result.settled, true);
+    assert.equal(world.taskUpdateData?.status, "blocked");
+    assert.equal(world.attemptUpdateData?.reason, "reported_result");
+    const { amuxV22ReviewRetryHasVerifiedOutcome } =
+      await import(mod("lib/amux/reviewApprovalCore.ts"));
+    assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
+      sourceSystem: "admin-idea-v4",
+      attempt: { v22AssignmentId: "assignment-one", outcome: "blocked",
+        toStatus: "blocked", reason: String(world.attemptUpdateData?.reason) },
+    }), true);
+  }
+});
+
 test("v52 ordinary paths preserve the normal successful destination", async () => {
   world = makeWorld("succeeded");
   world.gradeGuard = true;

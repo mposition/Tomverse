@@ -638,6 +638,14 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261016130000_amux_v52_review_record/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 11,
+    reason:
+      "The v52 review migration adds a restrictive foreign key to the canonical audit row. Its DDL and append-only trigger constrain AmuxV52ReviewRecord; it never writes AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20261016040000_amux_v19_session_submission/migration.sql",
     table: "AmuxIdeaOperatingScopeSetting",
     tableMentions: 3,

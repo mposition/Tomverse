@@ -1657,7 +1657,9 @@ export async function settleAmuxV22TaskExecution(input: {
           (pathDecision === "escalate" ? escalationBlockReason :
             "changed_paths_unavailable") :
         budget.exhausted_limit ?? reviewDisposition?.reason ??
-          (receiptsComplete ? "execution_blocked" : "usage_outcome_unknown");
+          (receiptsComplete ?
+            (input.outcome === "blocked" ? "reported_result" : "execution_blocked") :
+            "usage_outcome_unknown");
       if (gradeEscalated && escalationReceipt) {
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: AMUX_GRADE_ESCALATED_ACTION,
