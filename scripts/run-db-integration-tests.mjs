@@ -727,6 +727,10 @@ run(
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.
     "tests/integration/marketing-generator-context.db.test.ts",
+    // The generator's internal reports (S3f): only a brief or market facts, signed
+    // and keyed by the app, a market fact kept only from an official host, a
+    // resend read back after the gates close, and the deadline enforced.
+    "tests/integration/marketing-intel-reports.db.test.ts",
     // Marketing retention (S3h1): what the delete triggers let go goes, with an
     // audit row each and a retention_run report; what they keep stays.
     "tests/integration/marketing-retention.db.test.ts",

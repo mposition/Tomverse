@@ -397,7 +397,8 @@ export type AmuxDecisionMakerSystemAuditActor =
 
 /**
  * The marketing generator writes only the LLM cost ledger's five actions, each
- * about one ledger row (docs/policy/marketing-automation.md §5). Declared at the end of the
+ * about one ledger row (docs/policy/marketing-automation.md §5), and its own recorded report
+ * (S3f), about one report row. Declared at the end of the
  * file and joined into `systemAuditActionAllowed()` on its existing first line,
  * so no access above it moves.
  */
@@ -411,5 +412,6 @@ const MARKETING_GENERATOR_AUDIT_ACTIONS: readonly string[] = [
 function marketingGeneratorAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
   return actor !== "marketing-generator" ||
     (typeof action === "string" && MARKETING_GENERATOR_AUDIT_ACTIONS.includes(action) &&
-      targetType === "MarketingLlmCall");
+      targetType === "MarketingLlmCall") ||
+    (action === "marketing_report.generator_recorded" && targetType === "MarketingReport");
 }
