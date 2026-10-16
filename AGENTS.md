@@ -1381,6 +1381,15 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   않습니다. 모델 행은 `lib/modelRegistry.ts`를 고치지 않고(Prompt Refiner closure 파일) id로 읽어 기존
   `registryRowToModel()`로 바꿉니다. 접수 한 건의 트랜잭션 호출 수는
   `tests/integration/marketing-draft-intake.db.test.ts`가 고정합니다(지금 21회).
+- **S3f(생성기 보고서 접수)**: `app/api/internal/marketing-intel-reports/route.ts`, `lib/marketingIntelReportCore.ts`,
+  `lib/marketingIntelReportStore.ts`, `tests/marketingIntelReportCore.test.mjs`,
+  `tests/integration/marketing-intel-reports.db.test.ts`. 생성기 secret으로 쓸 수 있는 보고서는 `brief`·`market_intel`
+  둘뿐입니다. key는 앱이 종류·run·보고서 id로 유도하고, 같은 key에 다른 바이트가 오면 conflict이며, 이미 기록된
+  보고서는 모든 게이트보다 먼저 되읽습니다. 마감은 draft 접수와 같은 helper로 겁니다. **시장 사실은 앱의 공식 host
+  목록에 있는 출처만 저장합니다** — `MARKETING_COMPETITOR_SOURCE_HOSTS`는 비어 있고(어느 경쟁사를 추적하고 어느
+  host가 공식인지는 사람이 그 항목을 넣는 변경에서 정합니다), 목록 밖의 사실은 저장하지 않고
+  `unrepresentableFactCount`에 더합니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
+  `marketing-generator`이고 범위는 `MarketingReport`의 `marketing_report.generator_recorded` 하나입니다.
 - **S3h1(보존 정리)**: `lib/marketingRetention.ts`, store의 `purgeExpiredMarketingRows()`,
   `lib/maintenance.ts`의 `marketing_retention` 단계, `tests/integration/marketing-retention.db.test.ts`.
   **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가
