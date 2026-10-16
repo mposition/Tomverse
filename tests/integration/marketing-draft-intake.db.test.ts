@@ -207,6 +207,43 @@ test("the time left is measured where the timer is armed: just under the bound i
   assert.equal(over.status, "queued");
 });
 
+test("a pause after the first reading cannot stretch the transaction past the deadline", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  // 11.5 seconds left at the first statement; the next one waits 2.5 seconds.
+  // Measured once and armed later, this would start with 9 seconds left and a
+  // 10-second timer. Measured where the timer is armed, it is refused.
+  const deadlineAt = new Date(Date.now() + 11_500);
+  const outcome = await runMarketingTransaction(prisma, (tx) => {
+    let calls = 0;
+    const slowed = new Proxy(tx, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver);
+        if (property !== "$queryRaw" || typeof value !== "function") return value;
+        return async (...args: unknown[]) => {
+          calls += 1;
+          if (calls === 2) await new Promise((resolve) => setTimeout(resolve, 2_500));
+          return (value as (...inner: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    return intakeMarketingGeneratorDraft(
+      slowed,
+      {
+        generatorRunId: "run-1",
+        submissionId: "sub-slow",
+        provenance: "a".repeat(64),
+        deadlineAt,
+        draft: draft(row.id),
+        killSwitchValue: undefined,
+      },
+      OPEN,
+    );
+  }, { timeout: 20_000 });
+  assert.deepEqual(outcome, { status: "refused", reasons: ["intake_deadline_too_close"] });
+  assert.equal(await prisma.marketingPost.count(), 0);
+});
+
 test("an unknown channel is refused, not created", async () => {
   await draftsOn();
   const outcome = await intake(draft("chn_missing"), OPEN);
