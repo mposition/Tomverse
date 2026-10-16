@@ -3,18 +3,37 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { AmuxIdeaBusyDialog, type AmuxBusyTone } from "@/components/admin/AmuxIdeaBusyDialog";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
+import { AMUX_IDEA_PLAN_APPROVAL_REQUEST_TIMEOUT_MS } from "@/lib/amux/ideaRequestTimeoutsCore";
 import { parseAmuxIdeaAnalysisResultView,
   type AmuxVisibleAnalysisUnit } from "@/lib/amux/ideaAnalysisResultReadCore";
 import { amuxV4PlanRound, amuxV4PlanScreenUnits,
   buildAmuxV4PlanRequest } from "@/lib/amux/ideaPlanScreenCore";
+import { decidePlanReadBack, planReadBackSeconds,
+  type PlanReadBackOutcome } from "@/lib/amux/ideaPlanReadBackCore";
 
-/** Longer than the plan transaction can run (120 s) plus the request around it. */
-const PLAN_SETTLED_AFTER_MS = 180_000;
 const MAX_PAGES = 20;
+
+type Messages = (typeof adminAmuxIdeaInputMessages)["en"];
+
+/** What the last "check what was recorded" showed; `reading` while it runs. */
+export type ReadBackView =
+  | { kind: "none" }
+  | { kind: "reading" }
+  | { kind: "outcome"; outcome: Exclude<PlanReadBackOutcome, { kind: "no_attempt" }>; settlesAt: number };
+
+const NOTICE_CLASS: Record<string, string> = {
+  recorded: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+  not_recorded: "border-amber-500/30 bg-amber-500/10 text-amber-200",
+  settling: "border-amber-500/30 bg-amber-500/10 text-amber-200",
+  read_failed: "border-red-500/30 bg-red-500/10 text-red-200",
+  mixed: "border-red-500/30 bg-red-500/10 text-red-200",
+  reading: "border-blue-500/30 bg-blue-500/10 text-blue-200",
+};
 
 type Pending = { planRequestId: string; startedAt: number; unitIds: string[] };
 const pendingKey = (ideaId: string) => `amux-v4-plan:${ideaId}`;
@@ -34,6 +53,39 @@ const writePending = (ideaId: string, value: Pending | null) => {
     else window.sessionStorage.setItem(pendingKey(ideaId), JSON.stringify(value));
   } catch { /* the server's derived ids still refuse a resend of the same plan */ }
 };
+
+/**
+ * The answer of the last "check what was recorded", without hooks so a test can
+ * call it. Each outcome says something different: reading (busy), recorded,
+ * not recorded (safe to approve again), still settling (with the seconds left)
+ * and a failed read. A recorded plan leaves nothing to approve, so this notice
+ * is also what the panel renders once its list of proposals is empty.
+ */
+export function AmuxIdeaPlanReadBackNotice({ m, view, clock }: { m: Messages; view: ReadBackView; clock: number }) {
+  if (view.kind === "none") return null;
+  if (view.kind === "reading") {
+    return <p role="status" aria-live="polite" data-testid="amux-plan-readback-reading"
+      className={`rounded-lg border p-3 ${NOTICE_CLASS.reading}`}>{m.planApprovalReading}</p>;
+  }
+  const { outcome, settlesAt } = view;
+  const remainingMs = settlesAt - clock;
+  const text = outcome.kind === "recorded" ? m.planApprovalRecorded
+    : outcome.kind === "not_recorded" ? m.planApprovalNotRecorded
+      : outcome.kind === "read_failed" ? m.planApprovalReadFailed
+        : outcome.kind === "mixed" ? m.planApprovalMixed
+          : remainingMs > 0 ? m.planApprovalSettling(planReadBackSeconds(remainingMs)) : m.planApprovalSettled;
+  return <p role={outcome.kind === "recorded" ? "status" : "alert"} data-testid={`amux-plan-readback-${outcome.kind}`}
+    className={`rounded-lg border p-3 ${NOTICE_CLASS[outcome.kind]}`}>{text}</p>;
+}
+
+/** The button of an unknown or processing approval; disabled and busy while it reads. */
+export function AmuxIdeaPlanReadBackButton({ m, view, onClick }: { m: Messages; view: ReadBackView; onClick: () => void }) {
+  return <button type="button" onClick={onClick} disabled={view.kind === "reading"}
+    aria-busy={view.kind === "reading"} data-testid="amux-plan-readback-button"
+    className="min-h-11 rounded-lg border px-4 border-zinc-600 disabled:opacity-50">
+    {m.planApprovalReadBack}
+  </button>;
+}
 
 /** Every page of an idea's analysis, so the screen shows all that the server approves. */
 async function readAllUnits(ideaId: string): Promise<AmuxVisibleAnalysisUnit[] | null> {
@@ -67,6 +119,17 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
   const [consentOff, setConsentOff] = useState<Set<string>>(new Set());
   const [state, setState] = useState<"idle" | "pending" | "unknown" | "processing">("idle");
   const [failure, setFailure] = useState<AdminApiFailure | null>(null);
+  const [readBackView, setReadBackView] = useState<ReadBackView>({ kind: "none" });
+  // The blocking dialog: working while the approval is in flight, then its answer until it is closed.
+  const [resultTone, setResultTone] = useState<"success" | "refused" | "unknown" | null>(null);
+  // A ticking clock only while a wait is on screen, so its seconds count down.
+  const [clock, setClock] = useState(() => Date.now());
+  const settling = readBackView.kind === "outcome" && readBackView.outcome.kind === "settling";
+  useEffect(() => {
+    if (!settling) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [settling]);
 
   const load = useCallback(() => readAllUnits(ideaId).catch(() => null), [ideaId]);
   useEffect(() => {
@@ -83,12 +146,6 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
     planRequestId: "00000000-0000-4000-8000-000000000000", units: listed, edits, consentOff }) : null,
   [ideaId, listed, edits, consentOff, round]);
 
-  if (units === null) return <p role="status">{m.planApprovalLoading}</p>;
-  if (units === "failed") return <p role="alert">{m.planApprovalLoadFailed}</p>;
-  if (listed.length === 0) return null;
-  const scored = new Set(preview?.scoreTaskUnitIds ?? []);
-  const deferred = new Set(round?.deferred ?? []);
-
   const approve = async () => {
     if (state !== "idle" || !preview) return;
     // An earlier attempt whose answer was lost is read back first, never sent again.
@@ -96,14 +153,22 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
     const planRequestId = crypto.randomUUID();
     const body = buildAmuxV4PlanRequest({ ideaId, planRequestId, units: listed, edits, consentOff });
     writePending(ideaId, { planRequestId, startedAt: Date.now(), unitIds: body.expectedUnitIds });
+    setResultTone(null);
     setState("pending");
     setFailure(null);
+    setReadBackView({ kind: "none" });
     try {
+      // The server approves in one transaction that may run for 120 s. The default 15 s deadline
+      // aborted the request in production while the approval was still being recorded, and the
+      // operator saw an unknown outcome for a write that went on to commit. A lost answer is
+      // still read back below, never re-posted.
       const response = await adminFetch("/api/admin/amux/ideas/plan", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+        timeoutMs: AMUX_IDEA_PLAN_APPROVAL_REQUEST_TIMEOUT_MS,
       });
       if (response.status === 201) {
         writePending(ideaId, null);
+        setResultTone("success");
         setState("idle");
         onChanged();
         setUnits(await load() ?? "failed");
@@ -114,49 +179,108 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
         // plan again, so a unit decided elsewhere meanwhile is not resent.
         setFailure(await readAdminApiFailure(response, { fallback: m.transferConfirmRefused, locale }));
         writePending(ideaId, null);
+        setResultTone("refused");
         setUnits(await load() ?? "failed");
         setState("idle");
         return;
       }
     } catch { /* A lost answer is read back, never re-posted. */ }
+    setResultTone("unknown");
     setState("unknown");
   };
 
+  // Reads what the lost attempt left behind and says which of its outcomes it is. It only ever
+  // reads: the approval is never posted again from here.
   const readBack = async () => {
-    const pending = readPending(ideaId);
+    if (readBackView.kind === "reading") return;
+    setReadBackView({ kind: "reading" });
+    const attempt = readPending(ideaId);
     const read = await load();
-    if (!read) { setState("unknown"); return; }
-    setUnits(read);
-    if (!pending) { setState("idle"); onChanged(); return; }
-    const stillProposed = read.filter((unit) => pending.unitIds.includes(unit.id) &&
-      unit.decisionState === "proposed");
-    // All or nothing: none proposed means it committed; all still proposed
-    // long after it could have run means it did not. Anything sooner waits.
-    if (stillProposed.length === 0 ||
-        (stillProposed.length === pending.unitIds.length &&
-          Date.now() - pending.startedAt > PLAN_SETTLED_AFTER_MS)) {
-      writePending(ideaId, null);
-      setState("idle");
-      onChanged();
-      return;
+    const outcome = decidePlanReadBack({ attempt, units: read, now: Date.now() });
+    if (read) setUnits(read);
+    const now = Date.now();
+    setClock(now);
+    switch (outcome.kind) {
+      case "no_attempt":
+        // Settled elsewhere meanwhile: the screen is current again.
+        setReadBackView({ kind: "none" });
+        setState("idle");
+        onChanged();
+        return;
+      case "read_failed":
+        setState("unknown");
+        setReadBackView({ kind: "outcome", outcome, settlesAt: now });
+        return;
+      case "recorded":
+      case "not_recorded":
+        // Nothing is left in doubt: the attempt is released (a recorded plan has nothing to approve,
+        // an unrecorded one may be approved again) and the parent reads its own state again.
+        writePending(ideaId, null);
+        setState("idle");
+        setReadBackView({ kind: "outcome", outcome, settlesAt: now });
+        onChanged();
+        return;
+      case "settling":
+        setState("processing");
+        setReadBackView({ kind: "outcome", outcome, settlesAt: now + outcome.remainingMs });
+        return;
+      case "mixed":
+        setState("processing");
+        setReadBackView({ kind: "outcome", outcome, settlesAt: now });
+        return;
     }
-    setState("processing");
   };
+
+  // The answer of the last read-back: each outcome says something different, and a recorded plan
+  // leaves nothing to approve, so its notice must outlive the list of proposals.
+  const readBackNotice = <AmuxIdeaPlanReadBackNotice m={m} view={readBackView} clock={clock} />;
+
+  // After a check inside the dialog the answer is final when the plan is recorded or was not recorded.
+  const checkOutcome = readBackView.kind === "outcome" ? readBackView.outcome.kind : null;
+  const dialogTone: AmuxBusyTone = state === "pending" ? "working"
+    : resultTone === "unknown" && checkOutcome === "recorded" ? "success"
+      : resultTone === "unknown" && checkOutcome === "not_recorded" ? "refused"
+        : resultTone ?? "working";
+  const finalCheck = checkOutcome === "recorded" || checkOutcome === "not_recorded";
+  const dialog = (
+    <AmuxIdeaBusyDialog open={state === "pending" || resultTone !== null} tone={dialogTone}
+      title={dialogTone === "working" ? m.busyPlanTitle : dialogTone === "success" ? m.busyPlanDoneTitle
+        : dialogTone === "refused" ? m.busyRefusedTitle : m.busyUnknownTitle}
+      message={m.busyPlanBody}
+      onClose={readBackView.kind === "reading" ? undefined : () => setResultTone(null)}>
+      {resultTone === "success" ? <p>{m.busyPlanDoneBody}</p> : null}
+      {resultTone === "refused" ? <>
+        <p>{m.busyRefusedBody}</p>
+        {failure ? <AdminApiFailureNotice failure={failure} /> : null}
+      </> : null}
+      {resultTone === "unknown" ? <>
+        {!finalCheck ? <p>{m.busyUnknownBody}</p> : null}
+        {readBackNotice}
+        {!finalCheck ? <AmuxIdeaPlanReadBackButton m={m} view={readBackView} onClick={() => void readBack()} /> : null}
+      </> : null}
+    </AmuxIdeaBusyDialog>
+  );
+
+  if (units === null) return <><p role="status">{m.planApprovalLoading}</p>{dialog}</>;
+  if (units === "failed") return <><p role="alert">{m.planApprovalLoadFailed}</p>{dialog}</>;
+  if (listed.length === 0) return <>{readBackNotice}{dialog}</>;
+  const scored = new Set(preview?.scoreTaskUnitIds ?? []);
+  const deferred = new Set(round?.deferred ?? []);
 
   const setMetric = (unitId: string, base: Record<string, number>, key: string, value: number) => {
     setEdits((current) => new Map(current).set(unitId, { ...(current.get(unitId) ?? base), [key]: value }));
   };
 
-  return <section className="space-y-3 rounded-xl border border-zinc-300 p-4 text-sm dark:border-zinc-700"
+  return <><section className="space-y-3 rounded-xl border p-4 text-sm border-zinc-700"
     aria-labelledby={`amux-v4-plan-${ideaId}`}>
     <h4 id={`amux-v4-plan-${ideaId}`} className="font-semibold">{m.planApprovalTitle}</h4>
-    <p className="text-zinc-700 dark:text-zinc-300">{m.planApprovalHint}</p>
+    <p className="text-zinc-300">{m.planApprovalHint}</p>
     <ul className="space-y-2">
       {listed.map((unit) => {
         const metrics = edits.get(unit.unitId) ?? unit.metrics;
         const later = deferred.has(unit.unitId);
-        return <li key={unit.unitId} className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-          <p className="text-xs text-zinc-600 dark:text-zinc-400">{unit.kind}{unit.taskRole ? ` · ${unit.taskRole}` : ""}</p>
+        return <li key={unit.unitId} className="rounded-lg border p-3 border-zinc-800">
+          <p className="text-xs text-zinc-400">{unit.kind}{unit.taskRole ? ` · ${unit.taskRole}` : ""}</p>
           <p className="font-medium">{unit.title}</p>
           {later ? <p className="text-xs">{m.planApprovalNextRound}</p> : null}
           {metrics && !later ? <fieldset className="mt-2 flex flex-wrap gap-2">
@@ -167,7 +291,7 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
                 disabled={state !== "idle"}
                 onChange={(event) => setMetric(unit.unitId, metrics, key,
                   Math.max(0, Math.min(5, Math.trunc(Number(event.target.value) || 0))))}
-                className="min-h-11 w-16 rounded border border-zinc-300 px-2 dark:border-zinc-700 dark:bg-zinc-900" />
+                className="min-h-11 w-16 rounded border px-2 border-zinc-700 bg-zinc-900" />
             </label>)}
           </fieldset> : null}
           {unit.kind === "task" && !later ? <p className="mt-1 text-xs">
@@ -186,18 +310,18 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
       })}
     </ul>
     {state === "idle" && preview ? <button type="button" onClick={() => void approve()}
-      className="min-h-11 rounded-lg border border-blue-700 bg-blue-700 px-4 text-white dark:border-blue-400">
+      className="min-h-11 rounded-lg border bg-blue-700 px-4 text-white border-blue-400">
       {m.planApprovalAction}
     </button> : null}
     {!preview ? <p role="alert">{m.planApprovalLoadFailed}</p> : null}
     {state === "pending" ? <p role="status">{m.planApprovalPending}</p> : null}
     {state === "unknown" || state === "processing" ? <div className="space-y-2">
-      <p role="alert">{state === "processing" ? m.planApprovalStillProcessing : m.planApprovalUnknown}</p>
-      <button type="button" onClick={() => void readBack()}
-        className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">
-        {m.planApprovalReadBack}
-      </button>
-    </div> : null}
+      {/* Until a check has answered, the standing explanation; afterwards the answer replaces it. */}
+      {readBackView.kind === "none"
+        ? <p role="alert">{state === "processing" ? m.planApprovalStillProcessing : m.planApprovalUnknown}</p> : null}
+      {readBackNotice}
+      <AmuxIdeaPlanReadBackButton m={m} view={readBackView} onClick={() => void readBack()} />
+    </div> : readBackNotice}
     {failure ? <AdminApiFailureNotice failure={failure} /> : null}
-  </section>;
+  </section>{dialog}</>;
 }
