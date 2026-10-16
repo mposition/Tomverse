@@ -10,8 +10,13 @@ import test from "node:test";
 import {
   AMUX_CONTRACT_PATHS,
   AMUX_EXECUTION_GRADE_CODE_LATCH,
+  AMUX_EXECUTION_GRADE_ENV,
+  amuxExecutionGradeRoutingEnabled,
+  amuxExecutionGradeRoutingOpen,
+  amuxWorkerMatchesExecutionGrade,
   classifyAmuxExecutionPath,
   deriveAmuxExecutionGrade,
+  isAmuxV52TaskConfirmation,
   normalizeAmuxExecutionPath,
 } from "../lib/amux/executionGradeCore.ts";
 
@@ -24,6 +29,45 @@ const task = (overrides = {}) => ({
 
 test("S1 ships the code latch off", () => {
   assert.equal(AMUX_EXECUTION_GRADE_CODE_LATCH, false);
+  assert.equal(AMUX_EXECUTION_GRADE_ENV, "TOMVERSE_AMUX_EXECUTION_GRADE");
+  assert.equal(amuxExecutionGradeRoutingEnabled("enabled"), false);
+  assert.equal(amuxExecutionGradeRoutingOpen(true, "enabled"), true);
+  for (const value of [undefined, "", "true", "ENABLED", " enabled"])
+    assert.equal(amuxExecutionGradeRoutingOpen(true, value), false);
+  assert.equal(amuxExecutionGradeRoutingOpen(false, "enabled"), false);
+});
+
+test("only v20-or-later confirmed Tasks opt into exact grade routing", () => {
+  const confirmation = (policyVersion, grade) => ({ policyVersion,
+    card: { task: { grade } } });
+  assert.equal(isAmuxV52TaskConfirmation(
+    confirmation("amux-intake-v20", "routine"), "routine"), true);
+  assert.equal(isAmuxV52TaskConfirmation(
+    confirmation("amux-intake-v21", "advanced"), "advanced"), true);
+  for (const value of [confirmation("amux-intake-v11", "routine"),
+    confirmation("amux-intake-v20", "advanced"),
+    confirmation("amux-intake-v20", "standard"), null]) {
+    assert.equal(isAmuxV52TaskConfirmation(value, "routine"), false);
+  }
+});
+
+test("an exact worker grade never borrows a higher or lower worker", () => {
+  const registry = new Map([
+    ["chore", "chore"], ["impl", "implementation"],
+    ["contract", "contract"],
+  ]);
+  for (const [grade, worker] of [
+    ["routine", "chore"], ["advanced", "impl"],
+    ["frontier", "contract"],
+  ]) {
+    assert.equal(amuxWorkerMatchesExecutionGrade(grade, worker, registry), true);
+    for (const other of ["chore", "impl", "contract", "missing"].filter(
+      (name) => name !== worker)) {
+      assert.equal(amuxWorkerMatchesExecutionGrade(grade, other, registry), false);
+    }
+  }
+  assert.equal(amuxWorkerMatchesExecutionGrade("routine", "chore", null), false);
+  assert.equal(amuxWorkerMatchesExecutionGrade("standard", "chore", registry), false);
 });
 
 test("hard frontier conditions precede the intake proposal", () => {
