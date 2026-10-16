@@ -108,12 +108,12 @@ export function AmuxIdeaResolutionPanel({ ideaId, chunkIndex, units }: {
   };
 
   if (proposals.length === 0) return null;
-  return <section className="space-y-3 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700"
+  return <section className="space-y-3 rounded-lg border p-3 border-zinc-700"
     aria-labelledby="amux-v4-resolution-heading">
     <h4 id="amux-v4-resolution-heading" className="font-semibold">{m.resolutionTitle}</h4>
     <p>{m.resolutionHint}</p>
     <button type="button" onClick={() => void load()} disabled={busy}
-      className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+      className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
       {busy && !catalog ? m.resolutionLoading : m.resolutionLoad}
     </button>
     {bodyExpired ? <p role="alert">{m.analysisResultBodyExpired}</p> : null}
@@ -143,22 +143,22 @@ export function AmuxIdeaResolutionPanel({ ideaId, chunkIndex, units }: {
           entry.level === proposal.level && entry.state === "active") :
           catalog.cards.filter((entry) => entry.cardType === proposal.cardType &&
             entry.storyKind === proposal.storyKind && entry.status !== "cancelled");
-        return <div key={unit.id} className="space-y-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+        return <div key={unit.id} className="space-y-2 rounded-lg border p-3 border-zinc-800">
           <p className="font-medium">{proposal.title} · {unit.localRef}</p>
           {!isNode && (sameTitleRefs.length > 0 || proposal.duplicateCandidateRefs.length > 0) ?
-            <p className="text-xs text-amber-700 dark:text-amber-300">
+            <p className="text-xs text-amber-300">
               {m.resolutionPotentialOverlap}: {Array.from(new Set([
                 ...sameTitleRefs, ...proposal.duplicateCandidateRefs,
               ])).join(", ")}
             </p> : null}
-          {legacyMatches.length > 0 ? <p className="text-xs text-amber-700 dark:text-amber-300">
+          {legacyMatches.length > 0 ? <p className="text-xs text-amber-300">
             {m.resolutionLegacyOverlap}: {legacyMatches.map((entry) => entry.ref).join(", ")}
           </p> : null}
           <label className="block">{isNode ? m.resolutionNodeAction : m.resolutionCardAction}
             <select value={action} onChange={(event) => {
               setActions((current) => ({ ...current, [unit.id]: event.target.value }));
               setValid(false);
-            }} className="mt-1 min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2">
+            }} className="mt-1 min-h-11 w-full rounded border border-zinc-600 bg-transparent px-2">
               <option value="">{m.resolutionChoose}</option>
               {isNode ? <><option value="create">{m.resolutionCreate}</option>
                 <option value="select_existing">{m.resolutionLink}</option>
@@ -175,7 +175,7 @@ export function AmuxIdeaResolutionPanel({ ideaId, chunkIndex, units }: {
               <select value={targets[unit.id] ?? ""} onChange={(event) => {
                 setTargets((current) => ({ ...current, [unit.id]: event.target.value }));
                 setValid(false);
-              }} className="mt-1 min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2">
+              }} className="mt-1 min-h-11 w-full rounded border border-zinc-600 bg-transparent px-2">
                 <option value="">{m.resolutionChoose}</option>
                 {options.map((entry) => <option key={entry.ref} value={entry.ref}>
                   {entry.ref} · {"level" in entry ? entry.level : entry.cardType} · r{entry.revision}
@@ -187,7 +187,7 @@ export function AmuxIdeaResolutionPanel({ ideaId, chunkIndex, units }: {
               <textarea value={reasons[unit.id] ?? ""} maxLength={500}
                 onChange={(event) => { setReasons((current) => ({ ...current,
                   [unit.id]: event.target.value })); setValid(false); }}
-                className="mt-1 w-full rounded border border-zinc-400 bg-transparent p-2" />
+                className="mt-1 w-full rounded border border-zinc-600 bg-transparent p-2" />
             </label> : null}
           {!isNode && action === "register" &&
             (proposal.duplicateCandidateRefs.length > 0 || sameTitleRefs.length > 0) ?
@@ -195,19 +195,19 @@ export function AmuxIdeaResolutionPanel({ ideaId, chunkIndex, units }: {
               <textarea value={reasons[unit.id] ?? ""} maxLength={500}
                 onChange={(event) => { setReasons((current) => ({ ...current,
                   [unit.id]: event.target.value })); setValid(false); }}
-                className="mt-1 w-full rounded border border-zinc-400 bg-transparent p-2" />
+                className="mt-1 w-full rounded border border-zinc-600 bg-transparent p-2" />
             </label> : null}
           {!isNode && (action === "split" || action === "merge") ?
             <label className="block">{m.resolutionRelated}
               <input value={related[unit.id] ?? ""} onChange={(event) => {
                 setRelated((current) => ({ ...current, [unit.id]: event.target.value }));
                 setValid(false);
-              }} className="mt-1 min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2" />
+              }} className="mt-1 min-h-11 w-full rounded border border-zinc-600 bg-transparent px-2" />
             </label> : null}
         </div>;
       })}
       <button type="button" onClick={() => void preview()} disabled={busy}
-        className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+        className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
         {busy ? m.resolutionChecking : m.resolutionPreview}
       </button>
     </div> : null}

@@ -263,7 +263,8 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
 
   if (units === null) return <><p role="status">{m.planApprovalLoading}</p>{dialog}</>;
   if (units === "failed") return <><p role="alert">{m.planApprovalLoadFailed}</p>{dialog}</>;
-  if (listed.length === 0) return <>{readBackNotice}{dialog}</>;
+  // The dialog already carries the notice while it shows an unknown outcome.
+  if (listed.length === 0) return <>{resultTone === "unknown" ? null : readBackNotice}{dialog}</>;
   const scored = new Set(preview?.scoreTaskUnitIds ?? []);
   const deferred = new Set(round?.deferred ?? []);
 
