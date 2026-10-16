@@ -1394,7 +1394,9 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **S3c3b(만료 sweep)**: store의 `expireMarketingLlmCalls()`, `lib/marketingLlmExpiry.ts`(15분 주기 maintenance 단계),
   `tests/integration/marketing-llm-expiry.db.test.ts`. 15분 안에 dispatch되지 않은 예약은 `released`, 1시간 안에 보고되지
   않은 dispatch는 예약액 그대로 `unknown_retained`입니다. 만료 종결은 action `expire`라 그 뒤의 생성기 보고는 conflict이고,
-  행마다 트랜잭션 하나이며 생성기가 잡고 있는 행은 기다리지 않고 건너뜁니다. kill switch 중에는 아무것도 하지 않습니다.
+  행마다 트랜잭션 하나입니다. **sweep은 감사 chain·월·행 잠금 어느 것도 기다리지 않습니다** — 생성기 요청이 행보다 먼저
+  chain과 월을 잡으므로, 기다리면 그 뒤에 줄을 서게 됩니다. 셋 중 하나라도 잡혀 있으면 그 행은 다음 실행으로 넘기고, 실패한
+  행은 세어 보고하되 나머지는 계속 처리합니다. kill switch 중에는 아무것도 하지 않습니다.
 
 # 엔지니어링 Agent
 

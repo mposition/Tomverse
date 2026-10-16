@@ -18,6 +18,7 @@ import {
   settleMarketingLlmCall,
   type MarketingLlmBudgetEnvironment,
 } from "@/lib/marketingLlmBudgetStore";
+import { takeAuditChainLock } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
 
@@ -104,7 +105,7 @@ test("stale reservations are released and stale dispatches kept as unknown, each
   await backdate(staleDispatched, "dispatchedAt", "61 minutes");
 
   const result = await expireMarketingLlmCalls(prisma, { killSwitchOn: false });
-  assert.deepEqual(result, { skipped: null, examined: 2, released: 1, unknownRetained: 1, untouched: 0 });
+  assert.deepEqual(result, { skipped: null, examined: 2, released: 1, unknownRetained: 1, untouched: 0, failed: 0 });
 
   const released = await row(staleReserved);
   assert.equal(released.state, "released");
@@ -176,6 +177,7 @@ test("stale reservations are released and stale dispatches kept as unknown, each
     released: 0,
     unknownRetained: 0,
     untouched: 0,
+    failed: 0,
   });
 });
 
@@ -191,9 +193,8 @@ test("the sweep does nothing while the kill switch is on or unreadable, and hono
   assert.equal(await prisma.marketingLlmCall.count({ where: { state: "reserved" } }), 1);
 });
 
-test("a row a generator request is holding is skipped, not waited on", async () => {
-  const id = await reserve(1);
-  await backdate(id, "createdAt", "20 minutes");
+// Hold what a generator request holds, in its order, until released.
+const holdLike = async (id: string, what: "chain" | "month" | "row") => {
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
     release = resolve;
@@ -204,19 +205,55 @@ test("a row a generator request is holding is skipped, not waited on", async () 
   });
   const holder = prisma.$transaction(
     async (client) => {
-      await client.$queryRawUnsafe(`SELECT "id" FROM "MarketingLlmCall" WHERE "id" = $1 FOR UPDATE`, id);
+      if (what === "chain") await takeAuditChainLock(client);
+      if (what === "month") {
+        await client.$queryRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtextextended('marketing-llm-month:' || to_char("monthStart", 'YYYY-MM'), 0))::text
+             FROM "MarketingLlmCall" WHERE "id" = $1`,
+          id,
+        );
+      }
+      if (what === "row") await client.$queryRawUnsafe(`SELECT "id" FROM "MarketingLlmCall" WHERE "id" = $1 FOR UPDATE`, id);
       locked();
       await held;
     },
     { timeout: 30_000 },
   );
   await isLocked;
-  try {
-    const result = await expireMarketingLlmCalls(prisma, { killSwitchOn: false });
-    assert.deepEqual(result, { skipped: null, examined: 1, released: 0, unknownRetained: 0, untouched: 1 });
-  } finally {
+  return async () => {
     release();
     await holder;
+  };
+};
+
+test("a row whose chain, month or row lock is held elsewhere is skipped at once, not waited on", async () => {
+  const id = await reserve(1);
+  await backdate(id, "createdAt", "20 minutes");
+  for (const what of ["chain", "month", "row"] as const) {
+    const free = await holdLike(id, what);
+    const started = Date.now();
+    try {
+      const result = await expireMarketingLlmCalls(prisma, { killSwitchOn: false });
+      assert.deepEqual(result, { skipped: null, examined: 1, released: 0, unknownRetained: 0, untouched: 1, failed: 0 }, what);
+      assert.ok(Date.now() - started < 3_000, `${what}: skipped without waiting`);
+    } finally {
+      await free();
+    }
   }
   assert.equal((await expireMarketingLlmCalls(prisma, { killSwitchOn: false })).released, 1);
+});
+
+test("one failing row is counted and the rest of the batch still runs", async () => {
+  const ids = [await reserve(1), await reserve(2), await reserve(3)];
+  for (const id of ids) await backdate(id, "createdAt", "20 minutes");
+  const first = ids[0];
+  const result = await expireMarketingLlmCalls(prisma, {
+    killSwitchOn: false,
+    expire: async (client, callId, next) => {
+      if (callId === first) throw new Error("fixture failure");
+      return next(client, callId);
+    },
+  });
+  assert.deepEqual(result, { skipped: null, examined: 3, released: 2, unknownRetained: 0, untouched: 0, failed: 1 });
+  assert.equal((await row(first)).state, "reserved");
 });

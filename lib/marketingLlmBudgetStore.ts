@@ -523,7 +523,11 @@ export const releaseMarketingLlmCall = (
 /** Rows the sweep examines in one run; the rest wait for the next. */
 export const MARKETING_LLM_EXPIRY_BATCH_LIMIT = 200;
 
-/** How long one sweep transaction may take before it is not recorded. */
+/**
+ * The sweep has no caller's deadline. bound() is used for its timers -- the
+ * statement, idle and transaction bounds -- and this value only gives it a
+ * deadline far enough off that the run is never `late`.
+ */
 const EXPIRY_TRANSACTION_DEADLINE_MS = 60_000;
 
 export type MarketingLlmExpiryResult = {
@@ -532,6 +536,8 @@ export type MarketingLlmExpiryResult = {
   readonly released: number;
   readonly unknownRetained: number;
   readonly untouched: number;
+  /** Rows whose transaction failed; the rest of the batch still ran. */
+  readonly failed: number;
 };
 
 type ExpiryOutcome = "released" | "unknown_retained" | "untouched";
@@ -539,23 +545,29 @@ type ExpiryOutcome = "released" | "unknown_retained" | "untouched";
 /**
  * Close one stale call, in its own transaction, by the database's clock.
  *
- * Same lock order as every action: the audit chain, the call's month, then the
- * row -- here `FOR UPDATE SKIP LOCKED`, so a generator request holding the row
- * wins and the sweep comes back next run. Which rows are stale is decided in
- * that same row read, not from the candidate list, so a call closed in between
- * is left alone. The close is the `expire` action: its digest differs from
+ * Same lock order as every action -- the audit chain, the call's month, then
+ * the row -- but none of the three is waited for. A generator request takes the
+ * chain and the month before it touches a row, so a sweep that waited on either
+ * would queue behind it; instead each is tried once and, if another
+ * transaction holds it, the row is left for the next run. The chain lock is
+ * the shared one `takeAuditChainLock()` takes, by the same key; the test holds
+ * that function's lock to show the sweep steps past it. Which rows are stale is
+ * decided in the row read, not from the candidate list, so a call closed in
+ * between is left alone. The close is the `expire` action: its digest differs from
  * every generator close, so a generator report that arrives later is a
  * conflict, not a second close.
  */
 async function expireOne(tx: Tx, callId: string): Promise<ExpiryOutcome> {
   const bounds = await bound(tx, new Date(Date.now() + EXPIRY_TRANSACTION_DEADLINE_MS));
   if ("refused" in bounds || bounds.late) return "untouched";
-  await takeAuditChainLock(tx);
-  const month = await tx.$queryRaw<Array<{ locked: string }>>(Prisma.sql`
-    SELECT pg_advisory_xact_lock(hashtextextended('marketing-llm-month:' || to_char("monthStart", 'YYYY-MM'), 0))::text AS "locked"
+  // CASE fixes the order: the month is tried only once the chain is held.
+  const locks = await tx.$queryRaw<Array<{ held: boolean | null }>>(Prisma.sql`
+    SELECT CASE WHEN pg_try_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))
+                THEN pg_try_advisory_xact_lock(hashtextextended('marketing-llm-month:' || to_char("monthStart", 'YYYY-MM'), 0))
+           END AS "held"
     FROM "MarketingLlmCall" WHERE "id" = ${callId}
   `);
-  if (!month[0]) return "untouched";
+  if (locks[0]?.held !== true) return "untouched";
   const rows = await tx.$queryRaw<
     Array<{ id: string; requestKey: string; dispatchIntentId: string | null; reservationExpired: boolean; dispatchExpired: boolean }>
   >(Prisma.sql`
@@ -602,14 +614,27 @@ async function expireOne(tx: Tx, callId: string): Promise<ExpiryOutcome> {
  * The 15-minute sweep: a reservation never dispatched within 15 minutes is
  * released, and a dispatch never reported within an hour is kept at its
  * reservation as unknown. Nothing runs while the kill switch is on; the
- * sweep resumes when it is lifted. Each row is its own transaction, so one
- * failure leaves the others, and a rerun finds only what is still open.
+ * sweep resumes when it is lifted. Each row is its own transaction: a row that
+ * fails is counted and the rest of the batch still runs, so one bad row cannot
+ * keep every later reservation holding the month's budget. A rerun finds only
+ * what is still open.
+ *
+ * `expire` wraps the per-row step, given it as `next`, only so a test can make
+ * one row fail; production passes nothing.
  */
 export async function expireMarketingLlmCalls(
   prisma: PrismaClient,
-  input: { readonly killSwitchOn: boolean | null; readonly limit?: number },
+  input: {
+    readonly killSwitchOn: boolean | null;
+    readonly limit?: number;
+    readonly expire?: (
+      tx: Tx,
+      callId: string,
+      next: (tx: Tx, callId: string) => Promise<ExpiryOutcome>,
+    ) => Promise<ExpiryOutcome>;
+  },
 ): Promise<MarketingLlmExpiryResult> {
-  const empty = { examined: 0, released: 0, unknownRetained: 0, untouched: 0 };
+  const empty = { examined: 0, released: 0, unknownRetained: 0, untouched: 0, failed: 0 };
   if (input.killSwitchOn !== false) return { skipped: "kill_switch", ...empty };
   const candidates = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     SELECT "id" FROM "MarketingLlmCall"
@@ -619,8 +644,17 @@ export async function expireMarketingLlmCalls(
     LIMIT ${input.limit ?? MARKETING_LLM_EXPIRY_BATCH_LIMIT}
   `);
   const counts = { ...empty, examined: candidates.length };
+  const expire = input.expire
+    ? (tx: Tx, callId: string) => input.expire!(tx, callId, expireOne)
+    : expireOne;
   for (const { id } of candidates) {
-    const outcome = await prisma.$transaction((tx) => expireOne(tx, id), { maxWait: 5_000, timeout: 15_000 });
+    let outcome: ExpiryOutcome;
+    try {
+      outcome = await prisma.$transaction((tx) => expire(tx, id), { maxWait: 5_000, timeout: 15_000 });
+    } catch {
+      counts.failed += 1;
+      continue;
+    }
     if (outcome === "released") counts.released += 1;
     else if (outcome === "unknown_retained") counts.unknownRetained += 1;
     else counts.untouched += 1;
