@@ -2622,7 +2622,7 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/amux-v4-activation-preflight.mjs",
-    sha256: "9f97102e046c32707c45d474c57c6a10fbad8896ce65b22f1f9014ef23adb04b",
+    sha256: "f2a9503f7add087b0b077185aa9561ec43428fdae8f65ced13da2630291599b5",
     count: 1,
     reason:
       "AMUX v4 activation diagnostic: one pg import; a fixed allowlist of ciphertext/key columns yields counts only inside BEGIN REPEATABLE READ READ ONLY with statement and idle-transaction timeouts. No audit, model call, switch or body write. The S3 operation is a read-only version-listing probe in an unused namespace, not key deletion evidence. Fingerprint is bound to the complete reviewed script.",
