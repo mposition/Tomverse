@@ -9779,9 +9779,9 @@ model AmuxIdeaSessionAnalysisReservation {
   reservationAuditLogId   String   @unique
   createdAt               DateTime @default(now()) @db.Timestamptz(3)
 
-  idea             AmuxIdeaSubmission            @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
-  operatingScope   AmuxIdeaOperatingScopeSetting @relation(fields: [operatingScopeSettingId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  reservationAudit AdminAuditLog                 @relation("AmuxIdeaSessionAnalysisReservationAudit", fields: [reservationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea             AmuxIdeaSubmission            @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisReservation_idea_owner_fkey")
+  operatingScope   AmuxIdeaOperatingScopeSetting @relation(fields: [operatingScopeSettingId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisReservation_scope_fkey")
+  reservationAudit AdminAuditLog                 @relation("AmuxIdeaSessionAnalysisReservationAudit", fields: [reservationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisReservation_audit_fkey")
 
   @@unique([ideaId, actorUserId])
   @@index([status, createdAt])
