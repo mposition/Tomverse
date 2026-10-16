@@ -9,7 +9,6 @@ import { AmuxIdeaAnalysisWorkerStopReadError,
 import { prisma } from "@/lib/prisma";
 
 const READ_ENV = "TOMVERSE_AMUX_V19_ANALYSIS_STOP_POLL_READ";
-const READ_CODE_LATCH = true;
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 
 export async function GET(request: Request): Promise<Response> {
@@ -18,7 +17,7 @@ export async function GET(request: Request): Promise<Response> {
     process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!READ_CODE_LATCH || process.env[READ_ENV] !== "enabled") {
+  if (process.env[READ_ENV] !== "enabled") {
     return amuxJsonNoStore({ error: "analysis_stop_poll_disabled" }, 409);
   }
   const params = new URL(request.url).searchParams;

@@ -81,6 +81,13 @@ test("worker stop route denies unauthenticated, disabled and malformed polling b
     const denied = await GET(new Request(`${endpoint}?holdId=hold_1`));
     assert.equal(denied.status, 401);
     assert.match(denied.headers.get("cache-control") ?? "", /no-store/);
+    assert.equal((await GET(new Request(`${endpoint}?holdId=hold_1`, {
+      headers: { ...headers, authorization: "Bearer wrong" },
+    }))).status, 401);
+    process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
+    assert.equal((await GET(new Request(`${endpoint}?holdId=hold_1`,
+      { headers }))).status, 401);
+    delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     const dark = await GET(new Request(`${endpoint}?holdId=hold_1`, { headers }));
     assert.equal(dark.status, 409);
     assert.deepEqual(await dark.json(), { error: "analysis_stop_poll_disabled" });
