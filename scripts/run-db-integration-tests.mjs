@@ -343,6 +343,10 @@ run(
     // the previewed plan is written exactly, under the owner's audit, with
     // updatedAt untouched; a stale digest writes nothing.
     "tests/integration/amux-card-display-key-backfill.db.test.ts",
+    // The Ideas tab's progress list: one statement inside its three-call read
+    // boundary (the seven-read version failed the 100 ms idle-in-transaction
+    // timeout), newest first, bounded and owner scoped.
+    "tests/integration/amux-idea-progress.db.test.ts",
     // AMUX assignment catalog (orchestration policy version 35, section 3):
     // the registry, stop latches and capabilities read in one statement and
     // the catalog derived from them.

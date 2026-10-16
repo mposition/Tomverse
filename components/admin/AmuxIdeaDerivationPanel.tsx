@@ -148,14 +148,14 @@ export function AmuxIdeaDerivationPanel({ ideaId, chunkIndex, units }: {
     finally { setBusy(false); }
   };
 
-  return <section className="space-y-3 rounded-xl border border-zinc-300 p-4 dark:border-zinc-700"
+  return <section className="space-y-3 rounded-xl border p-4 border-zinc-700"
     aria-label={m.derivationTitle}>
     <h4 className="font-semibold">{m.derivationTitle}</h4>
-    <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.derivationHint}</p>
+    <p className="text-xs text-zinc-400">{m.derivationHint}</p>
     <label className="block">{m.derivationOperation}
       <select value={operation} onChange={(event) => {
         setOperation(event.target.value as "split" | "merge"); edited(); }}
-        className="mt-1 block min-h-11 w-full rounded border border-zinc-400 bg-transparent p-2">
+        className="mt-1 block min-h-11 w-full rounded border border-zinc-600 bg-transparent p-2">
         <option value="split">split</option><option value="merge">merge</option>
       </select>
     </label>
@@ -179,28 +179,28 @@ export function AmuxIdeaDerivationPanel({ ideaId, chunkIndex, units }: {
             .map((value) => value.trim()).filter(Boolean));
           edited();
         }}
-        className="mt-1 w-full rounded border border-zinc-400 bg-transparent p-2 font-mono text-xs" />
+        className="mt-1 w-full rounded border border-zinc-600 bg-transparent p-2 font-mono text-xs" />
     </label>
     <label className="block">{m.derivationReason}
       <textarea value={reason} onChange={(event) => {
         setReason(event.target.value); edited(); }} maxLength={500} rows={2}
-        className="mt-1 w-full rounded border border-zinc-400 bg-transparent p-2" />
+        className="mt-1 w-full rounded border border-zinc-600 bg-transparent p-2" />
     </label>
     <button type="button" onClick={useTemplate} disabled={!sourceUnitIds.length || busy}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.derivationCards} · template
     </button>
     <label className="block">{m.derivationCards}
       <textarea value={cardsJson} onChange={(event) => {
         setCardsJson(event.target.value); edited(); }} rows={14}
-        className="mt-1 w-full rounded border border-zinc-400 bg-transparent p-2 font-mono text-xs" />
+        className="mt-1 w-full rounded border border-zinc-600 bg-transparent p-2 font-mono text-xs" />
     </label>
     <button type="button" onClick={() => void runPreview()}
       disabled={busy || !!unknownRequestId}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.derivationPreview}
     </button>
-    {preview ? <div className="space-y-2 rounded border border-zinc-300 p-3 text-xs dark:border-zinc-700">
+    {preview ? <div className="space-y-2 rounded border p-3 text-xs border-zinc-700">
       <p>{preview.payload.operation} · {preview.payload.sourceUnitIds.length} → {preview.targets.length}</p>
       <p className="break-all">{preview.confirmationDigest}</p>
       <p>{preview.expiresAt}</p>
@@ -208,29 +208,29 @@ export function AmuxIdeaDerivationPanel({ ideaId, chunkIndex, units }: {
         {target.localRef} · {target.id} · {target.bodyDigest}
       </li>)}</ul>
       <button type="button" onClick={() => void approve()} disabled={busy}
-        className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+        className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
         {m.derivationApprove}
       </button>
     </div> : null}
     {unknownRequestId ? <button type="button" onClick={() => void readback()}
-      disabled={busy} className="min-h-11 rounded border border-zinc-400 px-3">
+      disabled={busy} className="min-h-11 rounded border border-zinc-600 px-3">
       {m.derivationReadback} · {unknownRequestId}
     </button> : null}
     {approved ? <button type="button" onClick={() => {
       setUnknownRequestId(null); setPreview(null); setApproved(false); setError(null);
-    }} disabled={busy} className="min-h-11 rounded border border-zinc-400 px-3">
+    }} disabled={busy} className="min-h-11 rounded border border-zinc-600 px-3">
       {m.derivationNew}
     </button> : null}
     {approved ? <p role="status">{m.derivationApproved}</p> : null}
     {error ? <p role="alert">{error}</p> : null}
     <div className="space-y-3">
       <button type="button" onClick={() => void loadDerived()} disabled={busy}
-        className="min-h-11 rounded border border-zinc-400 px-3">
+        className="min-h-11 rounded border border-zinc-600 px-3">
         {m.derivationLoad}
       </button>
       {derivedLoaded && derived.length === 0 ? <p>{m.derivationNone}</p> : null}
       {derived.map((unit) => <div key={unit.id}
-        className="space-y-2 rounded border border-zinc-300 p-3 dark:border-zinc-700">
+        className="space-y-2 rounded border p-3 border-zinc-700">
         <p>{unit.localRef} · {unit.decisionState} · {unit.id}</p>
         {unit.proposal?.kind === "card" ? <p>{unit.proposal.title}</p> : null}
         {unit.decisionState === "proposed" && unit.proposal?.kind === "card" ? <>
@@ -241,7 +241,7 @@ export function AmuxIdeaDerivationPanel({ ideaId, chunkIndex, units }: {
       </div>)}
       {nextCursor ? <button type="button"
         onClick={() => void loadDerived(nextCursor)} disabled={busy}
-        className="min-h-11 rounded border border-zinc-400 px-3">
+        className="min-h-11 rounded border border-zinc-600 px-3">
         {m.derivationMore}
       </button> : null}
     </div>

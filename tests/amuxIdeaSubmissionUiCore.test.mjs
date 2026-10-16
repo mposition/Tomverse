@@ -35,7 +35,7 @@ test("manual reopen uses only the existing audited receipt readback", () => {
   assert.match(reopen, /classifyIdeaSubmissionReadBack/);
   assert.doesNotMatch(reopen, /method:\s*["']POST/);
   assert.match(panel, /htmlFor="amux-saved-request-id"/);
-  assert.match(panel, /const frozen = readBackPending \|\|/);
+  assert.match(panel, /const frozen = chainRunning \|\| readBackPending \|\|/);
   assert.match(panel, /hasUnsavedInput = !!\(idea\.trim\(\) \|\| repositories\.trim\(\) \|\| pullRequests\.trim\(\)\)/);
 });
 

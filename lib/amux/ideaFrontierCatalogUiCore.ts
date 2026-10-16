@@ -8,6 +8,28 @@ export type AvailableFrontierModel = {
 
 export type CheckedFrontierSelection = { approvalId: string; approvalVersion: number };
 
+/** The approved analysis price profile is for this model (lib/amux/ideaAnalysisApprovedCostProfile.ts). */
+const PRICED_FRONTIER_MODEL = { provider: "anthropic", modelId: "claude-opus-5-5" } as const;
+const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
+
+/**
+ * What the one-button flow starts with, so a new idea needs no model choice: the model that has the approved
+ * analysis price when it is approved here, else the first approved model; and "high" when that model allows
+ * it (the level the approved mockup shows), else its highest allowed level. The operator can change both in
+ * the collapsed model control. Null when nothing is approved.
+ */
+export function defaultFrontierSelection(models: readonly AvailableFrontierModel[]):
+  { approvalId: string; effort: string } | null {
+  const model = models.find((candidate) => candidate.provider === PRICED_FRONTIER_MODEL.provider &&
+    candidate.modelId === PRICED_FRONTIER_MODEL.modelId && candidate.allowedEfforts.length > 0) ??
+    models.find((candidate) => candidate.allowedEfforts.length > 0);
+  if (!model) return null;
+  const rank = (effort: string) => EFFORT_ORDER.indexOf(effort as (typeof EFFORT_ORDER)[number]);
+  const effort = model.allowedEfforts.includes("high") ? "high"
+    : [...model.allowedEfforts].sort((a, b) => rank(b) - rank(a))[0];
+  return { approvalId: model.approvalId, effort };
+}
+
 export type PendingFrontierCatalogApproval = {
   approvalId: string;
   provider: "openai" | "anthropic";

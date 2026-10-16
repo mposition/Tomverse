@@ -17,11 +17,11 @@ export type AmuxIdeaRequestCardState =
   | { kind: "locked" };
 
 const tone = {
-  saving: "border-blue-200 bg-blue-50/60 dark:border-blue-900 dark:bg-blue-950/30",
-  checking: "border-blue-200 bg-blue-50/60 dark:border-blue-900 dark:bg-blue-950/30",
-  unknown: "border-amber-300 bg-amber-50/70 dark:border-amber-800 dark:bg-amber-950/30",
-  saved: "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
-  locked: "border-red-200 bg-red-50/60 dark:border-red-900 dark:bg-red-950/30",
+  saving: "border-blue-500/30 bg-blue-500/10",
+  checking: "border-blue-500/30 bg-blue-500/10",
+  unknown: "border-amber-500/40 bg-amber-500/10",
+  saved: "border-zinc-800 bg-zinc-900/60",
+  locked: "border-red-500/30 bg-red-500/10",
 } as const;
 
 export function AmuxIdeaRequestStatusCard({ state, children }: {
@@ -46,14 +46,14 @@ export function AmuxIdeaRequestStatusCard({ state, children }: {
     <section className={`space-y-3 rounded-xl border p-4 text-sm ${tone[state.kind]}`}
       role={state.kind === "unknown" || state.kind === "locked" ? "alert" : "status"}
       data-testid="amux-idea-request-status" data-state={state.kind}>
-      <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{title}</h3>
-      <p className="text-zinc-700 dark:text-zinc-300">{body}</p>
+      <h3 className="text-base font-semibold text-zinc-100">{title}</h3>
+      <p className="text-zinc-300">{body}</p>
       {requestId ? (
-        <p className="flex flex-wrap items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+        <p className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
           <span>{m.statusRequestId}</span>
-          <code className="break-all font-mono text-zinc-800 dark:text-zinc-200">{requestId}</code>
+          <code className="break-all font-mono text-zinc-200">{requestId}</code>
           <button type="button" onClick={() => void copy()}
-            className="min-h-11 rounded border border-zinc-300 px-2 dark:border-zinc-700">
+            className="min-h-11 rounded border px-2 border-zinc-700">
             {copied ? m.statusCopied : m.statusCopy}
           </button>
         </p>

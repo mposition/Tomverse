@@ -8,7 +8,7 @@ import { AmuxBacklogListPanel } from "@/components/admin/AmuxBacklogListPanel";
 import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
-import { AmuxIdeaProgressPanel } from "@/components/admin/AmuxIdeaProgressPanel";
+import { AmuxIdeaInbox, AmuxIdeaProgressPanel } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxIdeaDetailSummary } from "@/components/admin/AmuxIdeaDetailSummary";
 import { AmuxUnusedAnalysisReservationPanel } from
   "@/components/admin/AmuxUnusedAnalysisReservationPanel";
@@ -64,6 +64,8 @@ import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { adminNavItemTabs, adminRedirectTarget, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
+import { amuxIdeaProgressFailureLog } from "@/lib/amux/ideaProgressCore";
+import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 import { isAmuxIdeaRequestId } from "@/lib/amux/ideaRequestIdCore";
 import { AMUX_V4_PORTFOLIO_WRITE_ENV,
@@ -106,6 +108,7 @@ export default async function AdminAmuxBacklogPage({
   const backlogList = tab.id === "list" && search.valid && hasRecentAdminAuthentication(session)
     ? await readAmuxBacklogList(search.search, amuxBacklogPage(query.page)) : null;
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
+  const ideaMessages = await getAdminMessages(adminAmuxIdeaProgressMessages);
   // Ideas: the decide-now inbox and the progress list read the same snapshot,
   // behind the submission read-back switch. A failed read is shown as
   // unavailable (null), never as an empty list.
@@ -116,8 +119,9 @@ export default async function AdminAmuxBacklogPage({
   if (tab.id === "ideas" && ideaReadBackAvailable && !hasRecentAdminAuthentication(session)) {
     ideaProgress = "reauthenticate";
   } else if (tab.id === "ideas" && ideaReadBackAvailable) {
-    ideaProgress = await readAmuxIdeaProgressForOwner(session.user.id).catch(() => {
-      console.warn(JSON.stringify({ subsystem: "amux", event: "idea_progress_read_failed" }));
+    ideaProgress = await readAmuxIdeaProgressForOwner(session.user.id).catch((error: unknown) => {
+      // Codes and class names only (never a message or a row), so a failure can be told apart.
+      console.warn(JSON.stringify(amuxIdeaProgressFailureLog(error)));
       return null;
     });
   }
@@ -170,9 +174,13 @@ export default async function AdminAmuxBacklogPage({
         {recoveryHoldId ? <AmuxAnalysisClaimResolutionPanel
           key={recoveryHoldId} holdId={recoveryHoldId} /> : null}
         {openedIdea ? <AmuxIdeaDetailSummary row={openedIdea} /> : null}
-        {ideaProgress !== undefined && !openedIdea ? <AmuxIdeaProgressPanel rows={ideaProgress}
-          activeRequestId={openRequestId} /> : null}
+        {/* Ideas main (approved v49 mockup): "Decide now" on top at full width, then the
+            input beside the list of ideas in progress. An opened idea leads with its
+            detail and its flow; the inbox and the list follow it. */}
+        {!openedIdea ? <p className="max-w-3xl text-sm text-zinc-300" data-testid="amux-ideas-lede">{ideaMessages.lede}</p> : null}
+        {ideaProgress !== undefined && !openedIdea ? <AmuxIdeaInbox rows={ideaProgress} /> : null}
         <AmuxIdeaInputPanel key={openRequestId ?? "new"} openRequestId={openRequestId}
+          progressRows={openedIdea ? undefined : ideaProgress}
           submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
           initialPlanAvailable={initialPlanAvailable}
