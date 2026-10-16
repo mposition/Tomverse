@@ -101,6 +101,7 @@ export function AmuxIdeaAnalysisStopPanel({ holdId, previewId, ideaId,
           setRefused(true);
           setNeedsReauthentication(response.status === 428);
           setPhase("idle");
+          if (response.status === 409) onStopped();
         } catch { setPhase("unknown"); }
       } else {
         setPhase("unknown");
@@ -156,7 +157,8 @@ export function AmuxIdeaAnalysisStopPanel({ holdId, previewId, ideaId,
       href={adminRecentAuthenticationHref(typeof window === "undefined"
         ? "/admin/amux-backlog?tab=ideas"
         : `${window.location.pathname}${window.location.search}`)}>
-      {m.reauthenticate}
+      {phase === "unknown" ? m.reauthenticateToReadBack :
+        m.reauthenticateToStop}
     </a> : null}
     {open && typeof document !== "undefined" ? createPortal(
       <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-4">
