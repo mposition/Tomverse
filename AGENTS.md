@@ -1371,8 +1371,56 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가
   강제하고, 보존 설정을 트랜잭션 안에서 켜는 곳은 이 writer 하나뿐입니다(보호 테이블 검사가 허용 목록으로
   강제). 지운 행마다 같은 트랜잭션에 `marketing-retention` 감사 행을, 지운 것이 있는 실행만 `retention_run`
-  보고서를 남깁니다. 일일 정리 cron의 한 단계이며 표마다 한 번에 200행까지입니다. 게시물 본문 정리와 history
-  압축은 S3h2입니다.
+  보고서를 남깁니다. 일일 정리 cron의 한 단계이며 표마다 한 번에 200행까지입니다.
+- **S3h2(남는 게시물의 보존)**: store의 `purgeExpiredMarketingPostContent()`·`compactMarketingPostHistory()`·
+  `planMarketingHistoryCompaction()`, `tests/marketingRetentionCompaction.test.mjs`. 게시물 행은 남기고 본문
+  (`envelope`)만 게시 후 24개월에 지우며, history의 `attempt`·`webhook_event` 항목은 90일 뒤 종류별 요약과 닫는
+  항목으로 바꿉니다. **판정은 여전히 update trigger의 것이고, writer의 선택은 그보다 좁아야 합니다** — 본문
+  정리는 종결 상태만(재대기할 수 있는 `failed`, 확인 중인 `outcome_unknown`, 게시 전 상태는 본문을 유지), 시각
+  기준은 trigger보다 1 ms(압축은 일광절약 차이까지 1시간) 이르게, history 시각은 µs까지 비교합니다. 선택한 행을
+  trigger가 거절하면 그 batch 전체가 실패하기 때문입니다. 압축은 `historyVersion` CAS이고, failed 게시물의 재대기
+  기준 실패 항목은 남깁니다. 세 보존 writer는 `beginMarketingRetention()` 하나에서 보존 설정을 켭니다. 결과는 기존
+  `retention_run` 모양 그대로(`compactedRowCount` = 제자리에서 바뀐 행)이며, webhook fingerprint를 움직이지 않도록
+  store에 최상위 계산식을 두지 않습니다. 공개 버킷 이미지는 삭제 port가 생길 때입니다.
+- **S3c1(LLM 비용 원장 표와 결정적 핵심)**: `lib/marketingLlmBudgetCore.ts`,
+  `prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql`, `tests/marketingLlmBudgetCore.test.mjs`,
+  `tests/integration/marketing-llm-call-ledger.db.test.ts`. 정책 v4의 다섯 번째 표 `MarketingLlmCall`입니다. **dispatch된
+  호출은 언제나 예약액으로 셉니다** — 앱은 생성기가 실제로 보낸 것을 볼 수 없으므로 보고된 토큰은 관측값입니다. 상태 전이·
+  증거 1회 설정·시각·사유와 관측 열의 짝·보존 삭제는 trigger와 CHECK가 직접 SQL에도 강제하고, 예약 시각은 writer가 DB
+  시계에서 한 번 읽어 그 월을 잠그며 trigger는 다시 계산하지 않고 검증만 합니다. `MARKETING_LLM_PRICE_PINS`는 S3e가
+  모델과 가격 근거를 가져올 때까지 비어 있으므로 모든 예약이 `model_not_pinned`입니다. writer·route·sweep은 S3c2 이후입니다.
+- **S3c2(원장 writer)**: `lib/marketingLlmBudgetStore.ts`, `tests/integration/marketing-llm-budget-store.db.test.ts`,
+  `lib/adminAuditSystemActors.ts`의 `marketing-generator`(원장 다섯 action·`MarketingLlmCall`만). 모든 action은 감사 chain →
+  UTC 월 → 행 순서로 잠그고, **재생은 현재 설정을 읽기 전에** 저장된 digest로 답합니다 — pin 교체·adapter 배포·kill
+  switch가 이미 기록된 요청의 답을 바꾸지 않습니다. 새 쓰기만 마감·kill switch·상한·pin을 읽으며, dispatch 영수증의
+  `firstConsumption`은 한 번만 `true`입니다. action별 statement 수는 시험이 고정합니다. route·만료 sweep·legal hold는
+  S3c3입니다.
+- **S3c3a(생성기 예산 route)**: `app/api/internal/marketing-llm-budget/route.ts`, `lib/marketingLlmBudgetRequest.ts`,
+  `tests/integration/marketing-llm-budget-route.db.test.ts`. 생성기 bearer secret, 4KB 상한, action별 strict schema, 그리고
+  **budget HMAC이 action·deadline·모든 필드를 덮습니다** — 가로챈 요청을 더 늦은 deadline이나 다른 call의 필드로 다시
+  보낼 수 없습니다. action마다 트랜잭션 하나이며, 트랜잭션 안의 실패는 전부 되돌려지므로 같은 요청을 다시 보내면
+  커밋된 것을 읽어 옵니다. 빌드에는 pin이 없어 모든 예약이 거절됩니다.
+- **S3c3b(만료 sweep)**: store의 `expireMarketingLlmCalls()`, `lib/marketingLlmExpiry.ts`(15분 주기 maintenance 단계),
+  `tests/integration/marketing-llm-expiry.db.test.ts`. 15분 안에 dispatch되지 않은 예약은 `released`, 1시간 안에 보고되지
+  않은 dispatch는 예약액 그대로 `unknown_retained`입니다. 만료 종결은 action `expire`라 그 뒤의 생성기 보고는 conflict이고,
+  행마다 트랜잭션 하나입니다. **sweep은 감사 chain·월·행 잠금 어느 것도 기다리지 않습니다** — 생성기 요청이 행보다 먼저
+  chain과 월을 잡으므로, 기다리면 그 뒤에 줄을 서게 됩니다. 셋 중 하나라도 잡혀 있으면 그 행은 다음 실행으로 넘기고, 실패한
+  행은 세어 보고하되 나머지는 계속 처리합니다. kill switch 중에는 아무것도 하지 않습니다.
+- **S3c3c(원장 legal hold·보존)**: `app/api/admin/marketing/llm-calls/[callId]/legal-hold/route.ts`, store의
+  `setMarketingLlmCallLegalHold()`·`purgeExpiredMarketingLlmCalls()`, `lib/marketingRetention.ts`의 네 번째 표,
+  `prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql`,
+  `tests/integration/marketing-llm-hold-retention.db.test.ts`. hold는 `runMarketingAdminMutation`을 지나고 그 사람 감사 행이
+  바로 그 결정의 증거일 때만 쓰입니다(설정은 막지 않고 해제는 kill switch가 막습니다). **결정은 자기가 대체하는 결정을
+  이름 댑니다** — 행이 마지막 hold 결정의 감사 id(`legalHoldAuditLogId`)를 갖고, DB가 flag와 그 id를 함께만, 쓰인 적 없는
+  id로만 바꿉니다. 이전 해제 감사 행의 재사용도, 옛 hold를 보고 보낸 지연 해제도 새 hold를 풀지 못합니다. 보존은 닫혔고 hold가 없으며 24개월이
+  지난 행만 지우고 행마다 `marketing-retention` 감사 행을 남깁니다. **`retention_run` 보고서는 쓰지 않습니다** — 그 보고서의
+  표 목록이 webhook pipeline의 감시 소스라 원장을 넣으면 fingerprint가 움직이고 서명된 검증이 다시 열립니다.
+- **S3c4(접수와 원장의 결속)**: `lib/marketingDraftIntakeCore.ts`(제출 v2), `lib/marketingDraftIntakeStore.ts`, store의
+  `consumeMarketingLlmCallsForSubmission()`. 제출은 자기를 만든 원장 호출을 `llmCallRequestKeys`로 이름 대고, **서명·제출
+  digest·draft의 접수 digest·원장의 consumer digest가 모두 같은 canonical 바이트**에 묶입니다. 접수는 이름 댄 호출이 모두
+  같은 run의 draft용이고 닫혀 있으며 아직 소비되지 않았거나 이 제출이 소비했을 때만 받고, 같은 트랜잭션에서 소비를
+  기록합니다. 응답을 잃은 생성기는 서명된 같은 제출을 그대로 다시 보냅니다(deadline이 다르면 다른 제출이라 conflict).
+  예산 reader는 이제 "상한을 읽을 수 있다"이고, 월 상한으로 막는 것은 예약입니다.
 
 # 엔지니어링 Agent
 

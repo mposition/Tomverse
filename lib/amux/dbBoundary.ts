@@ -58,6 +58,10 @@ export const AMUX_ROUTE_BUDGET_MS = 15_000;
 // The Rust client allows fifteen seconds for connect, route and response
 // transport, leaving a three-second margin around the server budget.
 export const AMUX_LIFECYCLE_ROUTE_BUDGET_MS = 12_000;
+// v22 execution start and settlement can include publication and v52 grade
+// evidence in the same fenced transaction; their declared call ceilings need
+// a longer route than the other lifecycle operations.
+export const AMUX_V22_EXECUTION_ROUTE_BUDGET_MS = 24_000;
 
 export type AmuxDbBoundary = {
   operation: string;

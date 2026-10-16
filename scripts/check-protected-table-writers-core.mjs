@@ -268,6 +268,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/prompt-refiner-vnext-full-auto-release-exception-v1.md",
   },
   {
+    table: "MarketingLlmCall",
+    delegate: "marketingLlmCall",
+    writers: ["lib/marketingLlmBudgetStore.ts"],
+    contract: "docs/policy/marketing-automation.md §5",
+  },
+  {
     table: "MarketingChannel",
     delegate: "marketingChannel",
     writers: ["lib/marketingStore.ts"],
@@ -1058,6 +1064,27 @@ export const RAW_SQL_ALLOWLIST = [
     reason: "The setting migration adds an audit foreign key and reads same-transaction human approval evidence. Its DDL/trigger verbs affect only the budget setting and window; it never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261016050000_amux_budget_setting_xid_epoch/migration.sql",
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason: "This repair replaces only the existing setting trigger function and reads the latest setting while validating same-transaction owner evidence. It changes no row and creates no new writer.",
+  },
+  {
+    path: "prisma/migrations/20261016050000_amux_budget_setting_xid_epoch/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason: "This repair reads the named audit row inside the existing setting guard. Its only write verb is function DDL; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261016050100_amux_budget_window_xid_epoch/migration.sql",
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "This repair replaces only the existing window trigger function and reads the latest setting. Its DDL and TG_OP update spelling do not write the protected setting table.",
+  },
+  {
     path: "lib/opsObserverDigest.ts",
     table: "AgentDigestItem",
     tableMentions: 2,
@@ -1100,10 +1127,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingStore.ts",
     table: "MarketingPost",
-    tableMentions: 24,
+    tableMentions: 30,
     writeVerbs: 13,
     reason:
-      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil. S2d2 adds two more mentions and one more verb, all in the dispatch path: a constant SELECT ... FOR UPDATE that re-reads the claim, the lease, the history version and the attempt count immediately before the vendor call, and the prose naming the UPDATE that transition is -- which is a delegate call, like every other write here. The dispatch writes only status, providerRequestKey and publishAttempt, and it writes them once. S2d2 polling adds four more mentions and two more verbs across its three lookup writers: two constant SELECT ... FOR UPDATE statements that re-read the status and the history version under lock, and the prose naming the UPDATEs that the verified and platform-removed transitions are. Both are delegate calls, both leave history untouched, and the removal writes its evidence into the audit entry rather than onto the row. The three outcome writers add two more mentions and one more verb: a constant SELECT ... FOR UPDATE that re-reads the status, the request key, the attempt and the history under lock, and the prose naming the single UPDATE all three share. That UPDATE is a delegate call bound by the request key rather than by a live claim, because a lease can expire after a call has begun and the answer still has to be recordable. S2f production webhook apply adds three mentions and one verb: one constant SELECT ... FOR UPDATE that locks the post the event names by provider post id and channel, and the two audit targetType names of its applied and refused entries. Its one write is a delegate updateMany bound by id, status and history version that appends a webhook_event entry and may move a live post to removed_by_platform. The decision-refusal writer adds one more mention, its audit targetType name; it reads and writes no post. S3h1 adds the twenty-fourth mention: the retention writer's table union and target type, which name the table a deleted row came from for its audit entry; the delete itself is the delegate's deleteMany by id.",
+      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil. S2d2 adds two more mentions and one more verb, all in the dispatch path: a constant SELECT ... FOR UPDATE that re-reads the claim, the lease, the history version and the attempt count immediately before the vendor call, and the prose naming the UPDATE that transition is -- which is a delegate call, like every other write here. The dispatch writes only status, providerRequestKey and publishAttempt, and it writes them once. S2d2 polling adds four more mentions and two more verbs across its three lookup writers: two constant SELECT ... FOR UPDATE statements that re-read the status and the history version under lock, and the prose naming the UPDATEs that the verified and platform-removed transitions are. Both are delegate calls, both leave history untouched, and the removal writes its evidence into the audit entry rather than onto the row. The three outcome writers add two more mentions and one more verb: a constant SELECT ... FOR UPDATE that re-reads the status, the request key, the attempt and the history under lock, and the prose naming the single UPDATE all three share. That UPDATE is a delegate call bound by the request key rather than by a live claim, because a lease can expire after a call has begun and the answer still has to be recordable. S2f production webhook apply adds three mentions and one verb: one constant SELECT ... FOR UPDATE that locks the post the event names by provider post id and channel, and the two audit targetType names of its applied and refused entries. Its one write is a delegate updateMany bound by id, status and history version that appends a webhook_event entry and may move a live post to removed_by_platform. The decision-refusal writer adds one more mention, its audit targetType name; it reads and writes no post. S3h1 adds the twenty-fourth mention: the retention writer's table union and target type, which name the table a deleted row came from for its audit entry; the delete itself is the delegate's deleteMany by id. S3h2 adds six more, three in each of its two writers for posts that are kept: the audit targetType, the audit metadata's table and the retention_run report's table, which together say which table a purged content or a compacted history belongs to. Neither writer has raw SQL naming the table: the content purge is a delegate updateMany by id setting envelope to NULL and contentPurgedAt, and the compaction is a delegate updateMany by id and history version writing the summarised history.",
   },
   {
     path: "lib/marketingStore.ts",
@@ -2226,6 +2253,53 @@ export const RAW_SQL_ALLOWLIST = [
       "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
   },
   {
+    path: "lib/marketingLlmBudgetStore.ts",
+    table: "MarketingLlmCall",
+    tableMentions: 23,
+    writeVerbs: 12,
+    reason:
+      "The sole registered writer of the marketing LLM cost ledger: it inserts a reservation and moves a call to dispatched or to its one close (including the 15-minute expiry), sets or releases a person's legal hold, records which draft submission consumed a closed call, and deletes rows retention lets go, each after the generator's audit row in the same transaction. The database triggers own every transition rule and timestamp; the other mentions are the reads that lock the month and the row.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "MarketingLlmCall",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The marketing generator actor's exact audit target literal only; this module runs no SQL.",
+  },
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 18,
+    writeVerbs: 13,
+    reason:
+      "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
+  },
+  {
+    path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 6,
+    reason:
+      "Adds the ledger's legal-hold decision column. One AdminAuditLog mention is a restrictive foreign key; the other is the update guard's read of the decision's own audit row (action, target, recorded predecessor). No audit row is written.",
+  },
+  {
+    path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 5,
+    writeVerbs: 6,
+    reason:
+      "Adds the legal-hold decision column, its index, foreign key and check, an insert trigger that refuses a decision at birth, and the replaced update guard that moves the flag and the decision only together. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 13,
+    reason:
+      "The marketing LLM cost ledger migration creates its own table, constraints and guards. All three AdminAuditLog mentions are restrictive foreign keys from the ledger's audit columns to the existing audit writer; no audit row is inserted, updated or deleted here. The write verbs are the ledger's own CREATE statements and the triggers that refuse or constrain writes.",
+  },
+  {
     path: "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 2,
@@ -2360,6 +2434,18 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
+    count: 1,
+    reason:
+      "One read in the ledger's update guard: the hold decision's own AdminAuditLog row (action, target, recorded predecessor), with EXECUTE over a name built from TG_TABLE_SCHEMA because the function pins search_path to pg_catalog, pg_temp. The schema is the trigger's own, quoted with %I, and the id is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    count: 1,
+    reason:
+      "One read in the marketing LLM cost ledger's truncate guard: SELECT EXISTS over the trigger's own table, named from TG_TABLE_SCHEMA and TG_TABLE_NAME and quoted with %I, because the function pins search_path to pg_catalog, pg_temp and an empty temporary table of the same name must not answer for the ledger. Nothing in it is input; it reads and never writes.",
+  },
   {
     path: "prisma/migrations/20261013100000_amux_worker_capability/migration.sql",
     count: 3,
@@ -3655,6 +3741,18 @@ export const PROTECTED_EXPORT_ALLOWLIST = [
 
 export const RETENTION_SETTING_ALLOWLIST = [
   {
+    path: "lib/marketingLlmBudgetStore.ts",
+    count: 2,
+    reason:
+      "The marketing LLM cost ledger's retention writer: it imports the setting's constant and sets it for its own transaction before deleting closed, unheld rows past their 24 months. The delete trigger still applies every rule to each row.",
+  },
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    count: 1,
+    reason:
+      "The marketing LLM cost ledger's delete guard reads the setting to refuse any deletion that is not retention's. Reading it is the check; setting it is what this rule is about.",
+  },
+  {
     path: "lib/marketingAutomationSchema.ts",
     count: 2,
     reason:
@@ -3670,7 +3768,7 @@ export const RETENTION_SETTING_ALLOWLIST = [
     path: "lib/marketingStore.ts",
     count: 2,
     reason:
-      "S3h1's retention writer, purgeExpiredMarketingRows: the import of the constant and the one transaction-local set_config that turns retention on for its own delete batch. The triggers still apply the age, legal-hold and shape rules to every row it asks about; this is the reviewed place that asks.",
+      "The import of the constant and the one transaction-local set_config, in beginMarketingRetention, that turns retention on for the retention writers' own batches: S3h1's row deletes and S3h2's content purge and history compaction all start there. The triggers still apply the age, legal-hold and shape rules to every row they ask about; this is the reviewed place that asks.",
   },
 ];
 
