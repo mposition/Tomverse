@@ -9,7 +9,12 @@ import { scanAmuxV4Input } from "./localIntakeCore.ts";
  * transfer preview; the model cannot grant itself another source.
  */
 // 4 (amux-intake v17): a Feature node may propose its card number prefix.
-export const AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION = 4 as const;
+// 5 (amux-intake v20): every Task names its expected paths, and no new
+// proposal uses taskRole review.
+export const AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION = 5 as const;
+/** amux-intake v20 item 3: repository-relative paths, 1 to 40 per Task. */
+export const AMUX_TASK_EXPECTED_PATHS_MAX = 40;
+export const AMUX_TASK_EXPECTED_PATH_MAX_BYTES = 512;
 export const AMUX_ANALYSIS_CHUNK_MAX_BYTES = 65_536;
 export const AMUX_ANALYSIS_CHUNK_CARD_CAP = 8;
 export const AMUX_ANALYSIS_CHUNK_NODE_CAP = 16;
@@ -131,6 +136,10 @@ export type AmuxAnalysisCard = {
   executionBrief: string | null;
   sourceRefIds: string[];
   portfolioSignal?: AmuxPortfolioModelSignal;
+  /** Task only, chunk schema 5 (amux-intake v20): the paths the Task is
+   * expected to change, exactly as proposed. Normalisation and the contract
+   * path split are the registration guard's, not this parser's. */
+  expectedPaths?: string[];
 };
 
 /** Untrusted model suggestion; approval and score calculation happen later. */
@@ -151,7 +160,7 @@ export type AmuxAnalysisEvidence = {
 };
 
 export type AmuxAnalysisChunk = {
-  schemaVersion: 2 | 3 | typeof AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION;
+  schemaVersion: 2 | 3 | 4 | typeof AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION;
   previewId: string;
   chunkIndex: number;
   outcome: "propose" | "needs_information" | "reject";
@@ -335,11 +344,13 @@ const parseNode = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
 const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: number): AmuxAnalysisCard => {
   const hasSignal = value !== null && typeof value === "object" &&
     Object.hasOwn(value, "portfolioSignal");
+  const hasPaths = value !== null && typeof value === "object" &&
+    Object.hasOwn(value, "expectedPaths");
   const data = object(value, [
     "kind", "localId", "cardType", "storyKind", "title", "problem", "scopeIn", "scopeOut",
     "completionCriteria", "featureRef", "parentStoryRef", "dependencyRefs", "duplicateCandidateRefs",
     "taskRole", "executionGrade", "executionBrief", "sourceRefIds",
-    ...(hasSignal ? ["portfolioSignal"] : []),
+    ...(hasSignal ? ["portfolioSignal"] : []), ...(hasPaths ? ["expectedPaths"] : []),
   ]);
   const cardType = oneOf(data.cardType, ["story", "task"] as const);
   const storyKind = data.storyKind === null ? null : oneOf(data.storyKind, ["general", "bug"] as const);
@@ -353,6 +364,11 @@ const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
   } else if (storyKind !== null || taskRole === null || executionGrade === null || executionBrief === null) {
     reject("schema_rejected");
   }
+  // amux-intake v20 item 3: a Story has no expected paths.
+  if (hasPaths && cardType !== "task") reject("schema_rejected");
+  const expectedPaths = hasPaths ? list(data.expectedPaths, AMUX_TASK_EXPECTED_PATHS_MAX, 1,
+    (item) => singleLineText(item, AMUX_TASK_EXPECTED_PATH_MAX_BYTES)) : null;
+  if (expectedPaths && new Set(expectedPaths).size !== expectedPaths.length) reject("schema_rejected");
   const unitSources = sourceRefs(data.sourceRefIds, permitted);
   return {
     kind: "card",
@@ -376,6 +392,7 @@ const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
       cardType === "story" ? ["impact"] : ["contribution", "urgency",
         "dependencyUnlock", "workerCoverage", "effort", "deliveryRisk"],
       unitSources) } : {}),
+    ...(expectedPaths ? { expectedPaths } : {}),
   };
 };
 
@@ -556,7 +573,7 @@ export function inspectAmuxAnalysisChunk(
       "schemaVersion", "previewId", "chunkIndex", "outcome", "coverageStatus", "continuationKind", "ownerQuestion",
       "coveredScope", "remainingScope", "units",
     ]);
-    if ((data.schemaVersion !== 2 && data.schemaVersion !== 3 &&
+    if ((data.schemaVersion !== 2 && data.schemaVersion !== 3 && data.schemaVersion !== 4 &&
          data.schemaVersion !== AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION) ||
         data.previewId !== expectedPreviewId || data.chunkIndex !== expectedChunkIndex) {
       reject("schema_rejected");
@@ -570,8 +587,18 @@ export function inspectAmuxAnalysisChunk(
       reject("schema_rejected");
     }
     // A Feature prefix proposal exists only from schema 4 (amux-intake v17).
-    if (data.schemaVersion !== AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION &&
+    if ((data.schemaVersion === 2 || data.schemaVersion === 3) &&
         units.some((unit) => unit.kind === "node" && unit.displayPrefix !== undefined)) {
+      reject("schema_rejected");
+    }
+    // amux-intake v20: from schema 5 every Task names its expected paths and
+    // no Task is a review Task; before it, no unit has expected paths. Stored
+    // units are re-read by inspectAmuxStoredAnalysisUnit, which keeps both.
+    const tasks = units.filter((unit) => unit.kind === "card" && unit.cardType === "task");
+    if (data.schemaVersion === AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION
+      ? tasks.some((unit) => unit.kind === "card" &&
+          (unit.expectedPaths === undefined || unit.taskRole === "review"))
+      : units.some((unit) => unit.kind === "card" && unit.expectedPaths !== undefined)) {
       reject("schema_rejected");
     }
     const counts = {

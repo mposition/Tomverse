@@ -5,6 +5,8 @@ import {
   AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP,
   AMUX_ANALYSIS_CHUNK_NODE_CAP,
   AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION,
+  AMUX_TASK_EXPECTED_PATH_MAX_BYTES,
+  AMUX_TASK_EXPECTED_PATHS_MAX,
   type AmuxAnalysisChunk,
   amuxAnalysisRefSafe,
   amuxAnalysisInputTextSafe,
@@ -19,7 +21,7 @@ import {
  * runner must bind this exact data to an owner-confirmed, unconsumed receipt,
  * repeat current source/model/budget checks, and spawn a tool-less CLI in a
  * credential-free sandbox. No live runner imports this module today. */
-export const AMUX_V4_ANALYSIS_PROMPT_VERSION = "amux-v4-analysis-prompt-v5" as const;
+export const AMUX_V4_ANALYSIS_PROMPT_VERSION = "amux-v4-analysis-prompt-v6" as const;
 export const AMUX_V4_ANALYSIS_DATA_MAX_BYTES = 16 * 1024;
 export const AMUX_V4_ANALYSIS_SOURCE_CAP = 12;
 export const AMUX_V4_ANALYSIS_TARGET_CAP = 96;
@@ -143,14 +145,15 @@ Each unit must have a localId beginning c<chunkIndex>: followed by its matching 
 
 Node keys: kind="node", localId, level (initiative|epic|feature), parentRef (null for initiative), title, description, sourceRefIds, portfolioSignal, and for a feature only, displayPrefix.
 displayPrefix names the Feature in its cards' numbers, such as GITHUB in AMUX-GITHUB-001: 2 to 16 characters, uppercase A-Z and digits only, short and recognisable from the Feature's subject. Never use any of ${AMUX_CARD_DISPLAY_RESERVED_PREFIXES.join(", ")}. An initiative or epic has no displayPrefix key.
-Card keys: kind="card", localId, cardType (story|task), storyKind (general|bug for Story, null for Task), title, problem, scopeIn, scopeOut, completionCriteria, featureRef, parentStoryRef (nullable for Task, null for Story), dependencyRefs (Task dependencies; required empty array for Story), duplicateCandidateRefs, taskRole (design|implement|test|review|verify|investigate|operate for Task, null for Story), executionGrade (routine|advanced|frontier for Task, null for Story), executionBrief (nonempty for Task, null for Story), sourceRefIds, portfolioSignal.
+Card keys: kind="card", localId, cardType (story|task), storyKind (general|bug for Story, null for Task), title, problem, scopeIn, scopeOut, completionCriteria, featureRef, parentStoryRef (nullable for Task, null for Story), dependencyRefs (Task dependencies; required empty array for Story), duplicateCandidateRefs, taskRole (design|implement|test|verify|investigate|operate for Task, null for Story), executionGrade (routine|advanced|frontier for Task, null for Story), executionBrief (nonempty for Task, null for Story), sourceRefIds, portfolioSignal, and for a Task only, expectedPaths.
+expectedPaths lists the repository-relative paths the Task is expected to change, such as lib/amux/example.ts: 1 to ${AMUX_TASK_EXPECTED_PATHS_MAX} distinct paths, forward slashes, no leading slash, drive letter, . or .. segment. A Story has no expectedPaths key. Do not propose a review Task: an independent review runs after a worker finishes, outside this plan.
 Evidence keys: kind="evidence", localId, evidenceType (observed_error|source_finding), summary, cardRef, sourceRefIds. An observed_error belongs to a Bug Story.
 
 An Epic parent must be an Initiative; a Feature parent must be an Epic. A Story has no parentStoryRef. A Task's parentStoryRef, when present, must point to a Story in the same Feature. scopeIn and completionCriteria are nonempty arrays. Text fields are trimmed; title is a single line.
 
-Keep each title within 200 UTF-8 bytes; description, problem, and executionBrief within 2,000 bytes; evidence summary within 1,000 bytes; each scope/criterion item within 500 bytes. Each scope array has at most 12 items, sourceRefIds at most 16, dependencyRefs at most 16, and duplicateCandidateRefs at most 8. coveredScope and remainingScope are each within 2,000 bytes and coveredScope is nonempty.
+Keep each title within 200 UTF-8 bytes; description, problem, and executionBrief within 2,000 bytes; evidence summary within 1,000 bytes; each scope/criterion item within 500 bytes. Each scope array has at most 12 items, each expected path is within ${AMUX_TASK_EXPECTED_PATH_MAX_BYTES} bytes, sourceRefIds at most 16, dependencyRefs at most 16, and duplicateCandidateRefs at most 8. coveredScope and remainingScope are each within 2,000 bytes and coveredScope is nonempty.
 
-Check before answering: every proposed unit has a permitted source, every portfolioSignal cites only that unit's confirmed source refs, every parent and dependency ref resolves, Task dependencies are acyclic, no unit silently grants an approval, and every JSON key above is present with no extra key. The application will independently reject malformed or unsupported output; your proposal is never the final decision.`;
+Check before answering: every proposed unit has a permitted source, every portfolioSignal cites only that unit's confirmed source refs, every parent and dependency ref resolves, Task dependencies are acyclic, every Task has expectedPaths, no unit silently grants an approval, and every JSON key above is present with no extra key. The application will independently reject malformed or unsupported output; your proposal is never the final decision.`;
 
 function buildCheckedPrompt(
   input: AmuxIdeaAnalysisPromptInput,
