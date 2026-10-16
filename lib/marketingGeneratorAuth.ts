@@ -75,3 +75,37 @@ export const parseMarketingGeneratorJson = (raw: Uint8Array): unknown => {
     return undefined;
   }
 };
+
+
+/** The generator routes, by the name an incident line carries. */
+export type MarketingGeneratorRoute = "marketing-drafts" | "marketing-generator-context" | "marketing-intel-reports";
+
+/**
+ * One structured line for a generator route that could not finish
+ * (docs/policy/marketing-automation.md §4: "실패 시 구조화 incident 로그").
+ *
+ * What failed and where, never what was sent: no body, no draft words, no
+ * error message -- a database or provider message is internal text, and the
+ * line is read by whoever reads the logs. The error's class and, when it has
+ * one, its database code are enough to tell a lock timeout from a deadline
+ * from an outage. The caller still answers 500, so the generator learns the
+ * outcome is unknown and resends the same key, which the route reads back.
+ */
+export function reportMarketingGeneratorIncident(
+  route: MarketingGeneratorRoute,
+  error: unknown,
+  log: (line: string) => void = (line) => console.error(line),
+): void {
+  const code =
+    error && typeof error === "object" && "code" in error && typeof (error as { code: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : null;
+  log(
+    JSON.stringify({
+      event: "marketing_generator_route_failed",
+      route,
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorCode: code,
+    }),
+  );
+}

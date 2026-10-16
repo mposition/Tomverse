@@ -15,6 +15,7 @@ import {
   marketingGeneratorSecret,
   parseMarketingGeneratorJson,
   readMarketingGeneratorBody,
+  reportMarketingGeneratorIncident,
 } from "@/lib/marketingGeneratorAuth";
 import { runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
@@ -57,11 +58,17 @@ export async function POST(request: Request) {
     return json({ code: "kill_switch" }, 503);
   }
 
-  const context = await runMarketingTransaction(
-    prisma,
-    (tx) => readMarketingGeneratorContext(tx),
-    { maxWait: 5_000, timeout: 10_000 },
-  );
+  let context;
+  try {
+    context = await runMarketingTransaction(
+      prisma,
+      (tx) => readMarketingGeneratorContext(tx),
+      { maxWait: 5_000, timeout: 10_000 },
+    );
+  } catch (error) {
+    reportMarketingGeneratorIncident("marketing-generator-context", error);
+    return json({ code: "context_unavailable" }, 500);
+  }
   const answer = { context };
   if (Buffer.byteLength(JSON.stringify(answer), "utf8") > MARKETING_GENERATOR_CONTEXT_MAX_BYTES) {
     return json({ code: "context_too_large" }, 500);

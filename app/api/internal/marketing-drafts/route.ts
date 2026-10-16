@@ -15,6 +15,7 @@ import {
   marketingGeneratorSecret,
   parseMarketingGeneratorJson,
   readMarketingGeneratorBody,
+  reportMarketingGeneratorIncident,
 } from "@/lib/marketingGeneratorAuth";
 import { intakeMarketingGeneratorDraft } from "@/lib/marketingDraftIntakeStore";
 import { runMarketingTransaction } from "@/lib/marketingStore";
@@ -58,22 +59,29 @@ export async function POST(request: Request) {
   // the switches as they are then. The submission is not atomic; the
   // per-draft key and digest make a retry of the whole safe.
   for (const draft of submission.drafts) {
-    const outcome = await runMarketingTransaction(
-      prisma,
-      (tx) =>
-        intakeMarketingGeneratorDraft(tx, {
-          generatorRunId: submission.generatorRunId,
-          submissionId: submission.submissionId,
-          provenance: submission.provenance,
-          submissionDigest,
-          llmCallRequestKeys: submission.llmCallRequestKeys,
-          deadlineAt: new Date(submission.deadlineAt),
-          draft,
-          killSwitchValue,
-        }),
-      { maxWait: 5_000, timeout: 15_000 },
-    );
-    results.push({ logicalDraftId: draft.logicalDraftId, ...outcome });
+    try {
+      const outcome = await runMarketingTransaction(
+        prisma,
+        (tx) =>
+          intakeMarketingGeneratorDraft(tx, {
+            generatorRunId: submission.generatorRunId,
+            submissionId: submission.submissionId,
+            provenance: submission.provenance,
+            submissionDigest,
+            llmCallRequestKeys: submission.llmCallRequestKeys,
+            deadlineAt: new Date(submission.deadlineAt),
+            draft,
+            killSwitchValue,
+          }),
+        { maxWait: 5_000, timeout: 15_000 },
+      );
+      results.push({ logicalDraftId: draft.logicalDraftId, ...outcome });
+    } catch (error) {
+      // This draft's outcome is unknown; the ones before it are answered. The
+      // generator resends the whole submission and each key is read back.
+      reportMarketingGeneratorIncident("marketing-drafts", error);
+      return json({ results, code: "outcome_unknown", at: draft.logicalDraftId }, 500);
+    }
   }
   return json({ results }, 200);
 }
