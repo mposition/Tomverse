@@ -39,6 +39,9 @@ function makeWorld(outcome: Outcome) {
     assignmentAuditPresent: true,
     assignmentAuditAction: "amux.v22.worker.assigned",
     sourceApprovalId: null as string | null,
+    patch: null as { taskId: string; baseSha: string; sha256: string;
+      text: string; files: Array<{ path: string; mode: "100644";
+        bytesBase64: string }> } | null,
     taskUpdates: 0,
     gradeAuditsAtTaskUpdate: -1,
     attemptUpdates: 0,
@@ -81,7 +84,7 @@ mock.module(mod("lib/amux/escalation.ts"), { namedExports: {
   openAmuxHumanEscalation: async () => undefined,
 } });
 mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), {
-  namedExports: { loadEngineeringAgentV22SettlementPatch: async () => null },
+  namedExports: { loadEngineeringAgentV22SettlementPatch: async () => world.patch },
 });
 mock.module(mod("lib/engineeringAgentV22StoredCandidate.ts"), {
   namedExports: { loadEngineeringAgentV22StoredCandidate: async () => null },
@@ -165,8 +168,11 @@ const tx = {
     findUnique: async () => null,
   },
   amuxV22TaskResult: { findUnique: async () => world.outcome === "succeeded" ?
-    { taskId, bodyPurgedAt: null } : null },
-  amuxV22TaskPatch: { findUnique: async () => null },
+    { taskId: world.taskId, bodyPurgedAt: null } : null },
+  amuxV22TaskPatch: { findUnique: async () => world.patch ? {
+    taskId: world.patch.taskId, baseSha: world.patch.baseSha,
+    patchSha256: world.patch.sha256, bodyPurgedAt: null,
+  } : null },
   amuxIdeaUnitDecision: { findUnique: async () => ({
     confirmationSnapshot: { card: { task: { costReceipt: {
       role: "implement", grade: "routine", receiptDigest: "a".repeat(64),
@@ -398,6 +404,39 @@ test("v52 contract touch discards the ordinary grade and binds one frontier rece
     originalReceiptDigest: "a".repeat(64), newReceipt: null,
     classificationFailure: true,
   });
+});
+
+test("v52 settlement escalates a contract publish file omitted from the runner inventory", async () => {
+  world = makeWorld("succeeded");
+  world.taskId = "00000000-0000-4000-8000-000000000099";
+  world.recoveryApprovalId = null;
+  world.gradeGuard = true;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.sourceApprovalId = "source-one";
+  world.patch = { taskId: world.taskId, baseSha: "b".repeat(40),
+    sha256: "d".repeat(64), text: "diff --git a/lib/amux/guard.ts b/lib/amux/guard.ts\n",
+    files: [{ path: "lib/amux/guard.ts", mode: "100644",
+      bytesBase64: "Y29udHJhY3Q=" }] };
+  world.storedEvents = [{ invocationId: world.attemptId,
+    receiptDigest: "7".repeat(64), status: "succeeded",
+    completeness: "reported_complete", projectedApiCostMicrousd: BigInt(1),
+    cli: "claude", source: "claude_result", actualModelId: "claude-opus-5-5",
+    selectedModelId: "claude-opus-5-5", provider: "anthropic",
+    authentication: "subscription", inputTokens: BigInt(1),
+    outputTokens: BigInt(1), cacheReadInputTokens: BigInt(0),
+    cacheCreationInputTokens: BigInt(0), inputTokensIncludeCacheRead: false,
+    inputTokensIncludeCacheWrite: false, completedTurns: 1,
+    pricingVersion: null }];
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    attemptId: world.attemptId, worker, instanceId, generation: 1,
+    taskRevision: 5, outcome: "succeeded", invocationIds: [world.attemptId],
+    changedPaths: ["src/ordinary.ts"],
+  });
+  assert.deepEqual(result, { settled: true, taskRevision: 6 });
+  assert.equal(world.taskUpdateData?.status, "todo");
+  assert.equal(world.taskUpdateData?.executionGrade, "frontier");
+  assert.equal(world.gradeEscalationAudits.length, 1);
 });
 
 test("v52 contract touch on the final attempt blocks for human recovery", async () => {

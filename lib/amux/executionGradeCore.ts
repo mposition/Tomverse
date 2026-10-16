@@ -153,6 +153,20 @@ export const decideAmuxV52ChangedPaths = (grade: unknown,
   return contract && grade !== "frontier" ? "escalate" : "pass";
 };
 
+/** A publish candidate must be covered by the runner's complete path inventory. */
+export const decideAmuxV52SettlementPaths = (grade: unknown,
+  changedPaths: unknown, publishFiles: readonly { path: string }[] | null):
+  AmuxV52PathDecision => {
+  const reported = decideAmuxV52ChangedPaths(grade, changedPaths);
+  if (reported === "blocked" || !publishFiles?.length) return reported;
+  const names = changedPaths as string[];
+  const missing = publishFiles.map((file) => file.path)
+    .filter((path) => !names.includes(path));
+  if (missing.length === 0) return reported;
+  const combined = decideAmuxV52ChangedPaths(grade, [...names, ...missing]);
+  return combined === "escalate" ? "escalate" : "blocked";
+};
+
 export type AmuxExecutionGradeInput = {
   taskRole: string | null | undefined;
   expectedPaths: readonly unknown[] | null | undefined;

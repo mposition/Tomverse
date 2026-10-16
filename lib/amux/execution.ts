@@ -41,7 +41,7 @@ import { calculateCurrentApprovedAmuxV4TaskCost } from
 import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
   "@/lib/amux/v52GradeReceipt";
-import { decideAmuxV52ChangedPaths } from "@/lib/amux/executionGradeCore";
+import { decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
 import {
@@ -1278,8 +1278,8 @@ export async function settleAmuxV22TaskExecution(input: {
           reason: "assignment_audit_unverified" as const };
       const pathDecision = gradeGuard && settlementAssignment &&
         input.outcome !== "blocked" ?
-        decideAmuxV52ChangedPaths(
-        settlementAssignment.grade, input.changedPaths) : "pass";
+        decideAmuxV52SettlementPaths(settlementAssignment.grade,
+          input.changedPaths, patch?.files ?? null) : "pass";
       const settlementRecovery = settlementAssignment?.recoveryApprovalId ?
         await readAmuxV22RecoveryAuthority(tx, attempt.taskId,
           settlementAssignment.taskRevision,
