@@ -5,6 +5,8 @@ import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { commitAmuxOperatingScope, readAmuxOperatingScope } from "@/lib/amux/ideaOperatingScopeStore";
+import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
+import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 
 // docs/policy/amux-intake.md v19 item 2: the owner's operating scope is append-only,
 // one version per save, each bound to the human audit written in the same transaction.
@@ -37,6 +39,14 @@ async function rollback(work: (tx: Prisma.TransactionClient) => Promise<void>) {
 
 before(async () => {
   assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), 0, "use a fresh DB, not an existing operator scope");
+  // The scope's model must be in the approved catalog (v19 item 2), so approve
+  // exactly one synthetic selection through the real catalog writer.
+  const frontier = inspectFrontierCatalogWrite(JSON.stringify({ schemaVersion: 1, action: "approve",
+    approvalId: randomUUID(), provider: "anthropic", modelId: "claude-opus-5-5", allowedEfforts: ["high"],
+    expectedPreviousVersion: 0, ownerConfirmedFrontierEligibility: true }));
+  assert.equal(frontier.ok, true);
+  if (!frontier.ok) throw new Error("synthetic frontier request invalid");
+  await prisma.$transaction((tx) => commitFrontierCatalogDecision(tx, { session, request, decision: frontier.request }));
 });
 after(async () => { await prisma.$disconnect(); });
 
@@ -111,4 +121,15 @@ test("the database refuses a row without its audit evidence and any change to a 
     }
     assert.equal((await readAmuxOperatingScope(tx))?.scope.model.modelId, "claude-opus-5-5");
   });
+});
+
+test("a model or effort outside the approved catalog is refused before any write", async () => {
+  for (const model of [{ ...scope.model, modelId: "claude-unapproved-1" },
+    { ...scope.model, reasoningEffort: "max" }, { ...scope.model, provider: "openai" }]) {
+    const auditCount = await prisma.adminAuditLog.count();
+    await assert.rejects(prisma.$transaction((tx) => commitAmuxOperatingScope(tx, input({ scope: { ...scope, model } }))),
+      (error: unknown) => error instanceof Error && error.message === "model_not_approved", JSON.stringify(model));
+    assert.equal(await prisma.adminAuditLog.count(), auditCount);
+    assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), 0);
+  }
 });

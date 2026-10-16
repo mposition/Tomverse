@@ -33,6 +33,8 @@ function failure(error: unknown) {
   if (error instanceof AmuxOperatingScopeError) {
     return NextResponse.json({ error: error.code, retryWrite: false }, { status: error.code === "forbidden" ? 403
       : error.code === "scope_unavailable" ? 503 : error.code === "invalid_scope" ? 400 : 409, headers: noStore });
+    // model_not_approved, revision_changed and request_already_seen are 409: the
+    // request was well formed but the current state refuses it.
   }
   const security = apiSecurityResponse(error);
   if (security) { security.headers.set("Cache-Control", noStore["Cache-Control"]); return security; }

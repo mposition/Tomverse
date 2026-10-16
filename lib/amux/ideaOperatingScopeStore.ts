@@ -5,16 +5,17 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
+import { readCurrentAmuxIdeaFrontierSelection } from "./ideaFrontierCatalogRead.ts";
 import {
   AMUX_OPERATING_SCOPE_ACTION, AMUX_OPERATING_SCOPE_POLICY_VERSION, AMUX_OPERATING_SCOPE_TARGET,
-  normalizeAmuxOperatingScope, type AmuxOperatingScope,
+  amuxOperatingScopeSelection, normalizeAmuxOperatingScope, type AmuxOperatingScope,
 } from "./ideaOperatingScopeCore.ts";
 
 type Tx = Prisma.TransactionClient;
 const REQUEST_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
 export class AmuxOperatingScopeError extends Error {
-  constructor(readonly code: "forbidden" | "invalid_scope" | "revision_changed" |
+  constructor(readonly code: "forbidden" | "invalid_scope" | "model_not_approved" | "revision_changed" |
     "request_already_seen" | "scope_unavailable") {
     super(code);
   }
@@ -58,6 +59,13 @@ export async function commitAmuxOperatingScope(tx: Tx, input: {
     throw new AmuxOperatingScopeError("invalid_scope");
   }
   if (!adminAuditIntegrityKeys(process.env)[0]) throw new AmuxOperatingScopeError("scope_unavailable");
+  // v19 item 2: the model is chosen within the approved catalog. Check the exact
+  // provider, model and effort against the verified catalog before any write;
+  // a catalog that cannot be read is a refusal, never an approval. The same
+  // check is repeated whenever the scope is used.
+  const model = await readCurrentAmuxIdeaFrontierSelection(amuxOperatingScopeSelection(admitted.scope));
+  if (model.decision === "hold") throw new AmuxOperatingScopeError("scope_unavailable");
+  if (model.decision !== "selection_current") throw new AmuxOperatingScopeError("model_not_approved");
   await tx.$queryRaw`SELECT set_config('statement_timeout', '5000', true),
     set_config('idle_in_transaction_session_timeout', '10000', true)`;
   await takeAuditChainLock(tx);

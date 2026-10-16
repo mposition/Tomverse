@@ -92,7 +92,7 @@ test("a save records the exact scope; a refusal says what it was and never claim
   const response = await POST(request());
   assert.equal(response.status, 201);
   assert.deepEqual(await response.json(), { state: "saved", id, version: 1, scope, auditId: "synthetic-audit" });
-  for (const [code, status] of [["revision_changed", 409], ["request_already_seen", 409],
+  for (const [code, status] of [["revision_changed", 409], ["request_already_seen", 409], ["model_not_approved", 409],
     ["invalid_scope", 400], ["scope_unavailable", 503]] as const) {
     reset(); storeError = code;
     const refused = await POST(request());
