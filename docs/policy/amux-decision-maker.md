@@ -269,7 +269,7 @@ claude -p --tools "" --restricted --strict-mcp-config --setting-sources "" --dis
 **공급사 계정 홈의 상태.** S0에서(고정 argv 후보, 고정 환경이 아닌 일반 로그인 환경) 두 CLI는 홈에 다음을 썼다.
 codex: 상태 DB 다섯 개(`*.sqlite`와 `-wal`·`-shm`), `models_cache.json`, `installation_id`, 기본 skill 파일과
 `.codex-system-skills.marker`, 실행마다 하나씩 쌓이는 `.codex/tmp/arg0/*/.lock`. claude: `.claude.json`과 그 backup,
-`.credentials.json`(첫 실행에서만), `.claude/sessions/<번호>.json`, telemetry 실패 기록, plugin directory·model catalog
+`.claude/.credentials.json`(첫 실행에서만), `.claude/sessions/<번호>.json`, telemetry 실패 기록, plugin directory·model catalog
 cache, `.claude/.last-cleanup`, `.local/state/claude/locks/`. 합성 질문의 표식 문자열은 binary 포함 검색으로도 이
 상태에서 찾지 못했다. **그러나 그 검색은 압축·부호화된 저장을 찾지 못하고, 실제 카드에서도 같다는 보장이 없다**(S0
 유료 turn 기록). 그래서 v2는 이 상태를 **질문 내용이 들어 있을 수 있는 것**으로 다룬다.
