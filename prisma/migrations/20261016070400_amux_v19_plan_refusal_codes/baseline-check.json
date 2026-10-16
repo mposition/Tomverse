@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "f4b698dd2a2025d86a038bd89ce647d609cf24bf645ffc6a8cef0a56c8ea3cdb",
+  "replacedChecks": [
+    {
+      "table": "AmuxIdeaRegistrationRefusal",
+      "constraint": "AmuxIdeaRegistrationRefusal_code_check",
+      "previousDefinitionSha256": "0edee3b8dee6e5e85a94efc21770b541c2d57c7f5ee18e9424eea927b78a3c95"
+    }
+  ]
+}

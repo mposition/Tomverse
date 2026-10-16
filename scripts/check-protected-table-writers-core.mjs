@@ -148,6 +148,7 @@ export const APPEND_ONLY_LEDGER_TABLES = [
   "AmuxV22ReadOnlyLaunchCheck",
   "AmuxV22ReadOnlyLaunchProof",
   "AmuxV22ApiModelAccessEvidence",
+  "AmuxIdeaTrackedCheckoutEvidence",
 ];
 
 /**
@@ -185,6 +186,12 @@ export const findTruncateStatements = ({ sources }) => {
 };
 
 export const PROTECTED_TABLES = [
+  {
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    delegate: "amuxIdeaTrackedCheckoutEvidence",
+    writers: ["lib/amux/ideaTrackedCheckoutEvidenceStore.ts"],
+    contract: "docs/policy/amux-intake.md v19 items 3 and 7",
+  },
   {
     table: "AmuxIdeaOperatingScopeSetting",
     delegate: "amuxIdeaOperatingScopeSetting",
@@ -549,6 +556,12 @@ export const EXCLUDED_PREFIXES = [
 export const DELEGATE_NAME_ALLOWLIST = [
   {
     path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxIdeaTrackedCheckoutEvidence",
+    count: 1,
+    reason: "Account export domain key only; no client is indexed and no database connection or writer exists in this metadata file.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     delegate: "amuxIdeaOperatingScopeSetting",
     count: 1,
     reason: "Account export domain key only; no client is indexed and no database connection or writer exists in this metadata file.",
@@ -637,6 +650,86 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the tracked-checkout evidence model as its domain key and prismaModel. Other domain descriptions contain write verbs; this metadata module opens no database connection and executes no SQL.",
+  },
+  {
+    path: "prisma/migrations/20261017000000_amux_v19_tracked_checkout_evidence/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 7,
+    writeVerbs: 9,
+    reason:
+      "The v19 migration creates the protected append-only checkout evidence table and its insert evidence guard. It seeds no evidence row; the runtime writer remains lib/amux/ideaTrackedCheckoutEvidenceStore.ts.",
+  },
+  {
+    path: "prisma/migrations/20261017000000_amux_v19_tracked_checkout_evidence/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 9,
+    reason:
+      "The v19 tracked-checkout evidence migration adds one restrictive audit foreign key and reads the immutable submission audit plus the same-transaction evidence audit. Its DDL and trigger verbs affect only the new evidence table; it never writes AdminAuditLog.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed v4 intake actor manifest names this audit target once. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  {
+    path: "prisma/migrations/20261016070000_amux_v19_system_registration_receipt/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 1,
+    writeVerbs: 5,
+    reason:
+      "The v19 registration receipt guard reads the exact immutable owner-approved operating scope with SELECT FOR KEY SHARE. Its DDL and trigger verbs affect only AmuxIdeaSubmission; it never writes an operating-scope row.",
+  },
+  {
+    path: "prisma/migrations/20261016070000_amux_v19_system_registration_receipt/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 5,
+    reason:
+      "The v19 registration receipt migration adds one restrictive audit foreign key and its guard reads the referenced canonical system audit. Its DDL and trigger verbs affect only AmuxIdeaSubmission; it never inserts, updates or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261016070200_amux_v19_portfolio_assessment_system_audit/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The assessment guard replacement reads the referenced same-transaction audit to distinguish exact human and scoped system evidence. Its write verbs are trigger event syntax and the guarded assessment row; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261016070300_amux_v19_portfolio_score_system_audit/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The score guard replacement reads the referenced same-transaction audit to distinguish exact human and scoped system evidence. CREATE OR REPLACE affects only the guard function; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261016070500_amux_v19_system_registration_refusal/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The refusal guard replacement reads the referenced same-transaction audit to admit only the scoped system registrar or the existing human owner. CREATE OR REPLACE affects only the guard function; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261016060000_amux_v20_registration_refusal/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 16,
+    reason:
+      "The v20 refusal migration adds one restrictive audit foreign key and its insert guard reads the exact same-transaction human audit row. Its DDL and trigger verbs affect only the new refusal table; it never inserts, updates or deletes AdminAuditLog.",
+  },
   {
     path: "prisma/migrations/20261016040000_amux_v19_session_submission/migration.sql",
     table: "AmuxIdeaOperatingScopeSetting",
@@ -2266,6 +2359,13 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 1,
     writeVerbs: 2,
     reason: "The marketing generator actor's exact audit target literal only; this module runs no SQL.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "MarketingReport",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The marketing generator actor's S3f report audit target literal only; this module runs no SQL, and the report row is written by lib/marketingStore.ts.",
   },
   {
     path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",

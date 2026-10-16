@@ -94,7 +94,7 @@ const unreadable: ReadResult<never> = { ok: false };
  * agent foundation's timeout rule. Statement and idle bounds are shorter, so
  * both stay armed.
  */
-async function boundByDeadline(
+export async function boundMarketingGeneratorWriteByDeadline(
   tx: MarketingTransaction,
   deadlineAt: Date,
 ): Promise<{ readonly now: Date } | { readonly refused: string }> {
@@ -133,8 +133,8 @@ async function boundByDeadline(
   return { now: armedRow.now };
 }
 
-/** Statement and idle bounds, set before the first statement that can wait. */
-async function boundStatements(tx: MarketingTransaction): Promise<void> {
+/** Statement and idle bounds, set before the first statement that can wait. Shared with the report writer. */
+export async function boundMarketingGeneratorStatements(tx: MarketingTransaction): Promise<void> {
   await tx.$queryRaw(
     Prisma.sql`SELECT set_config('statement_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true)`,
   );
@@ -233,7 +233,7 @@ export async function intakeMarketingGeneratorDraft(
   },
   readers: MarketingDraftIntakeReaders = BUILD_READERS,
 ): Promise<MarketingDraftIntakeOutcome> {
-  await boundStatements(tx);
+  await boundMarketingGeneratorStatements(tx);
   // First, before any read an answer rests on.
   await takeAuditChainLock(tx);
 
@@ -278,7 +278,7 @@ export async function intakeMarketingGeneratorDraft(
   // that has to work after the switch, the budget or the kill switch has
   // closed -- answering `refused` there would say the draft was never taken
   // when it was. The gates decide whether a *new* draft is written.
-  const bounded = await boundByDeadline(tx, input.deadlineAt);
+  const bounded = await boundMarketingGeneratorWriteByDeadline(tx, input.deadlineAt);
   if ("refused" in bounded) return { status: "refused", reasons: [bounded.refused] };
   const now = bounded.now;
 

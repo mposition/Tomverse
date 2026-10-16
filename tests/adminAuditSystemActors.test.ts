@@ -414,7 +414,14 @@ test("no administrator audit call site names the reserved key", () => {
   // free of it, so a future caller that needs both has to come through review.
   // It reads source text only: metadata built at runtime (a parsed body, a
   // result object) is covered by the writer's own refusal, not by this scan.
-  const allowed = new Set(["lib/adminAudit.ts", "lib/adminAuditSystemActors.ts"]);
+  const allowed = new Set([
+    "lib/adminAudit.ts",
+    "lib/adminAuditSystemActors.ts",
+    // Reviewed authority multiplexer: it sends system registrations to the
+    // system writer and leaves owner registrations on the administrator writer.
+    // Both writers independently reject a reserved-key mismatch.
+    "lib/amux/ideaRegistrationAuditAuthority.ts",
+  ]);
   const callSites = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(resolve(ROOT, top)))
     .map((path) => relative(ROOT, path).split("\\").join("/"))
@@ -430,6 +437,17 @@ test("no administrator audit call site names the reserved key", () => {
   );
 });
 
+test("the AMUX registration authority keeps owner and system audit writers separate", () => {
+  const source = readFileSync(resolve(ROOT,
+    "lib/amux/ideaRegistrationAuditAuthority.ts"), "utf8");
+  const writer = source.slice(source.indexOf(
+    "export async function writeAmuxRegistrationAudit"));
+  assert.equal((writer.match(/writeSystemAuditLog\(/g) ?? []).length, 1);
+  assert.equal((writer.match(/writeAdminAuditLog\(/g) ?? []).length, 1);
+  assert.match(writer,
+    /if \(isAmuxSystemRegistrationAuthority\(input\.authority\)\) \{[\s\S]*?return writeSystemAuditLog\([\s\S]*?\}\);[\s\S]*?\}\s+return writeAdminAuditLog\(/);
+});
+
 test("the marketing generator writes only the LLM cost ledger's five actions", () => {
   for (const action of [
     "marketing_llm.reserved",
@@ -443,6 +461,11 @@ test("the marketing generator writes only the LLM cost ledger's five actions", (
   }
   assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_post.intake_queued", "MarketingPost"), false);
   assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_llm.legal_hold_set", "MarketingLlmCall"), false);
+  // Its recorded report (S3f), about a report row and nothing else.
+  assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_report.generator_recorded", "MarketingReport"), true);
+  assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_report.generator_recorded", "MarketingPost"), false);
+  assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_report.generator_recorded", "MarketingLlmCall"), false);
+  assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_llm.reserved", "MarketingReport"), false);
   // Other actors are unaffected by the generator's scope.
   assert.equal(systemAuditActionAllowed("marketing-guard", "marketing_post.intake_queued", "MarketingPost"), true);
 });

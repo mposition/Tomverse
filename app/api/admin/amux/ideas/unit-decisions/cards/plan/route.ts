@@ -29,8 +29,12 @@ import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const id = z.string().regex(/^[A-Za-z0-9_-]{8,80}$/);
+const uuid = z.uuid().regex(
+  /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+);
 const body = z.object({
   ideaId: id,
+  planRequestId: uuid,
   reasons: z.record(id, z.string().min(3).max(500)).default({}),
   publicPrConsentOff: z.array(id).max(24).default([]),
 }).strict();

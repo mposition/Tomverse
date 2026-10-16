@@ -1381,6 +1381,38 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   않습니다. 모델 행은 `lib/modelRegistry.ts`를 고치지 않고(Prompt Refiner closure 파일) id로 읽어 기존
   `registryRowToModel()`로 바꿉니다. 접수 한 건의 트랜잭션 호출 수는
   `tests/integration/marketing-draft-intake.db.test.ts`가 고정합니다(지금 21회).
+- **S3f(생성기 보고서 접수)**: `app/api/internal/marketing-intel-reports/route.ts`, `lib/marketingIntelReportCore.ts`,
+  `lib/marketingIntelReportStore.ts`, `tests/marketingIntelReportCore.test.mjs`,
+  `tests/integration/marketing-intel-reports.db.test.ts`. 생성기 secret으로 쓸 수 있는 보고서는 `brief`·`market_intel`
+  둘뿐입니다. key는 앱이 종류·run·보고서 id로 유도하고, 같은 key에 다른 바이트가 오면 conflict이며, 이미 기록된
+  보고서는 모든 게이트보다 먼저 되읽습니다. 마감은 draft 접수와 같은 helper로 겁니다. **시장 사실은 앱의 공식 host
+  목록에 있는 출처만 저장합니다** — `MARKETING_COMPETITOR_SOURCE_HOSTS`는 비어 있고(어느 경쟁사를 추적하고 어느
+  host가 공식인지는 사람이 그 항목을 넣는 변경에서 정합니다), 목록 밖의 사실은 저장하지 않고
+  `unrepresentableFactCount`에 더합니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
+  `marketing-generator`이고 범위는 `MarketingReport`의 `marketing_report.generator_recorded` 하나입니다.
+- **S3e1(생성기 LLM adapter)**: `lib/marketingLlmClientCore.ts`, `tests/marketingLlmClientCore.test.mjs`. 생성기
+  서비스가 `--experimental-strip-types`로 불러 쓰는 `MarketingLlmClient`이며, 순서가 계약입니다: 예약 → (포기하면
+  release) → dispatch → **첫 소비 영수증일 때만 공급사 HTTP 1회** → 받은 값으로 settle, 쓸 만한 답이 없으면 unknown.
+  재시도는 어디에도 없고(429·503·연결 끊김도 1회), dispatch 영수증 뒤에는 공급사를 부르지 않았어도 unknown이며,
+  예산 action의 답을 잃으면 추측하지 않고 멈춥니다(만료 sweep이 닫음). 요청 본문은 계획서의 허용 목록 그대로입니다.
+  **`service_tier`를 보내는 요청은 저장소 전체에서 이 한 줄뿐입니다** — `lib/modelPricing.ts` profile이 아니라 사람이
+  정한 pin(모든 tier 중 최악 단가)으로 가격이 정해지고 예약 snapshot이 tier를 기록하므로,
+  `scripts/check-processing-tier-core.mjs`가 이 파일의 원장 상수 한 줄만 예외로 받고 literal이나 다른 파일은
+  그대로 실패시킵니다. 모델 선택·첫 pin·서비스 배선은 S3e2 이후입니다(D4).
+- **S3e2(A5 문안 생성 core)**: `lib/marketingGeneratorDraftingCore.ts`, `tests/marketingGeneratorDraftingCore.test.mjs`.
+  모델에게는 고정 system 지시와, S3b 문맥 중 그 계정·locale의 조각을 **데이터로** 줍니다. 답은 하나의 JSON 객체만
+  받고(아니면 통째로 거절), 초안마다 링크·문맥에 없는 claim·asset id·접수 schema 위반이면 그 초안만 버리고 사유별로
+  셉니다. `logicalDraftId`·채널·locale·kind는 서비스가 정하며, 서명된 제출 본문은 접수 core의 서명 그대로입니다.
+  서비스가 strip-types로 불러야 하므로 `lib/marketingDraftIntakeCore.ts`의 schema import는 상대 경로입니다. 판정은 여전히
+  앱의 Guard입니다.
+- **S3e3(생성기 한 주기와 감독자)**: `lib/marketingGeneratorCycleCore.ts`, `scripts/marketing-generator-worker.mjs`,
+  `scripts/marketing-generator-service.mjs`, `tests/marketingGeneratorCycle.test.mjs`. 한 실행은 문맥을 읽고, 승인 모드
+  계정마다 A5를 한 번 부르고, 호출마다 그 호출의 원장 key로 초안을 제출합니다. **멈추는 쪽을 택합니다** — 예약 거절과
+  결과 불명은 그 자리에서 실행을 끝냅니다. **다시 보내는 것은 제출 하나뿐입니다** — 답을 잃었거나 5xx이면 서명된 같은
+  바이트를 최대 세 번까지 보내고(접수가 key로 되읽음), 공급사는 다시 부르지 않으며 4xx는 다시 보내지 않습니다. 감독자는
+  게시기와 같은 모양으로 마감에 worker를 SIGKILL하고, worker에는 변수 넷만 넘깁니다. **worker는 가격 pin이 있는 모델이
+  아니면 시작하지 않습니다** — 지금은 pin이 없어 항상 거절합니다. `.railway/agent-runners.ts` 배선은 D4(전용 OpenAI
+  프로젝트·키·pin) 뒤입니다.
 - **S3h1(보존 정리)**: `lib/marketingRetention.ts`, store의 `purgeExpiredMarketingRows()`,
   `lib/maintenance.ts`의 `marketing_retention` 단계, `tests/integration/marketing-retention.db.test.ts`.
   **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가
@@ -1709,6 +1741,27 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   돌려줍니다(`runDmJudgment()`). 화면은 확정한 답이 승인 계약의 승인이 아님을 적습니다. 이 route는 전달 경로를 부르지 않으므로
   여기서 worker에게 가는 것은 없습니다. 상한 12는 무결성 키가 있는 고친 답 확정의 10문장 + setup + fence이고, judgment unit
   테스트가 그 셈을, judgment DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
+- **S2-2a(bridge·broker 내부 route)**: `app/api/internal/amux/decision-maker/assignments/route.ts`,
+  `app/api/internal/amux/decision-maker/assignments/discard/route.ts`,
+  `app/api/internal/amux/decision-maker/transmissions/route.ts`,
+  `app/api/internal/amux/decision-maker/transmissions/outcome/route.ts`,
+  `app/api/internal/amux/decision-maker/results/route.ts`, `app/api/internal/amux/decision-maker/results/lookup/route.ts`,
+  `app/api/internal/amux/decision-maker/results/unknown/route.ts`, `lib/amux/decisionMakerInternalRoute.ts`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerAssignment`(상한 11)·`decisionMakerAssignmentDiscard`(9)·
+  `decisionMakerTransmitIntent`(10)·`decisionMakerTransmitOutcome`(9)·`decisionMakerResultSubmission`(12)·
+  `decisionMakerResultLookupRead`(3)·`decisionMakerResultUnknown`(9),
+  `tests/server-contract/amux-decision-maker-broker-routes.test.ts`,
+  `tests/server-contract/amux-decision-maker-broker-routes-budget.test.ts`. 라우팅 뒤에 bridge·broker가 부르는 원장 기록
+  route이며, S1f3과 같이 **`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409 `dm_routing_disabled`**이고 key
+  ring도 DB도 건드리지 않습니다. route는 인증·body·key ring·예산·경계만 하고 판정은 동작마다 store 함수 하나입니다 — 배정과
+  결과 제출은 body store의 조합, 나머지는 request store이며, route에는 SQL도 스위치 읽기도 없습니다. store가 돌려준 거절은
+  `unknown_request` 404, `digest_key_unavailable`·`settings_unreadable` 503, 그 밖은 409이고, 결과 제출은 원장의 확정
+  답(accepted·existing·rejected·already_rejected)이 모두 200과 그 status입니다. **요청 키 K_R은 배정 응답에만 있습니다** —
+  broker가 payload·manifest·결과 digest를 keyed로 만들고 잃은 결과를 조회하는 데 쓰며, period 키는 어떤 응답에도 없고 로그에는
+  key ring 오류 코드만 남습니다. 결과 응답을 잃으면 다시 제출하지 않고 `results/lookup`(읽기 경계, 쓰기 없음)으로 확인하고,
+  확인하지 못하면 `results/unknown`입니다. **경계 상한은 각 store 연산의 무결성 키 포함 최대 문장 수 + setup + fence**이고,
+  request·body unit 테스트가 그 셈을, body DB 테스트가 하나 줄인 상한의 거부를 고정합니다. 전달·판정 route와 worker에게 가는
+  경로는 없습니다.
 
 # AMUX 카드 표시 번호
 

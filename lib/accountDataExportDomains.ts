@@ -771,6 +771,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaTrackedCheckoutEvidence",
+    publicName: "amux_idea_tracked_checkout_evidence",
+    prismaModel: "AmuxIdeaTrackedCheckoutEvidence",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaAnalysisChunk",
     publicName: "amux_idea_analysis_chunks",
     prismaModel: "AmuxIdeaAnalysisChunk",
@@ -798,6 +804,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "amuxIdeaUnitDecision",
     publicName: "amux_idea_unit_decisions",
     prismaModel: "AmuxIdeaUnitDecision",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaRegistrationRefusal",
+    publicName: "amux_idea_registration_refusals",
+    prismaModel: "AmuxIdeaRegistrationRefusal",
     state: "unverified",
   },
   {
