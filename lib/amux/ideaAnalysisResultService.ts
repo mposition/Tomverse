@@ -196,7 +196,7 @@ export async function commitAmuxIdeaAnalysisResult(
   if (prior) return prior;
   const identity = await tx.amuxIdeaTransferPreview.findUnique({
     where: { id: input.previewId },
-    select: { ideaId: true, chunkIndex: true },
+    select: { ideaId: true, chunkIndex: true, templateVersion: true },
   });
   const holdIdentity = await tx.amuxIdeaAnalysisBudgetHold.findUnique({
     where: { id: input.holdId },
@@ -301,7 +301,8 @@ export async function commitAmuxIdeaAnalysisResult(
         remainingStartOrdinal: row.remainingStartOrdinal,
         remainingEndOrdinal: row.remainingEndOrdinal,
         coverageStatus: row.coverageStatus as "complete" | "more" | "needs_owner_input",
-        outputPartIndex: row.outputPartIndex!, outputPending: row.outputPending! })) })
+        outputPartIndex: row.outputPartIndex!, outputPending: row.outputPending! })),
+      templateVersion: identity.templateVersion })
     : null;
   const invalidReason = prepared?.decision === "hold" ? prepared.reason :
     null;

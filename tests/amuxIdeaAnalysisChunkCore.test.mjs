@@ -17,6 +17,7 @@ const inspect = (value, overrides = {}) => inspectAmuxAnalysisChunk({
   previousContinuationKind: (overrides.expectedRevisionChunkIndex ?? overrides.expectedChunkIndex ?? 0) === 0 ? null : "input",
   permittedSourceRefIds: [sourceRef],
   permittedTargetRefs: [{ ref: "feature_existing_01", kind: "node", level: "feature" }],
+  requiredSchemaVersion: null,
   ...overrides,
 });
 
@@ -463,6 +464,7 @@ test("raw and normalized output are bounded without silent truncation", () => {
     previousContinuationKind: null,
     permittedSourceRefIds: [sourceRef],
     permittedTargetRefs: [],
+    requiredSchemaVersion: null,
   }), { ok: false, code: "too_large" });
   const huge = story();
   huge.title = "x".repeat(201);
@@ -519,4 +521,80 @@ test("v4 Feature proposals may carry a card number prefix; nothing else may", ()
   });
   assert.equal(stored.ok, true);
   if (stored.ok) assert.equal(stored.unit.displayPrefix, "GITHUB");
+});
+
+test("v5 Tasks name their expected paths and never propose a review Task", () => {
+  // docs/policy/amux-intake.md v20 items 2 and 3.
+  const signal = (metrics) => ({ metrics, uncertainty: "low",
+    rationale: "A bounded proposal.", evidenceRefIds: [sourceRef] });
+  const storySignal = signal({ impact: 3 });
+  const taskSignal = signal({ contribution: 3, urgency: 2, dependencyUnlock: 2,
+    workerCoverage: 3, effort: 2, deliveryRisk: 1 });
+  const v5Story = (extra = {}) => ({ ...story(), portfolioSignal: storySignal, ...extra });
+  const v5Task = (extra = {}) => ({ ...task(), portfolioSignal: taskSignal,
+    expectedPaths: ["components/admin/AmuxReason.tsx", "tests/amuxReason.test.mjs"], ...extra });
+  const v5 = (units) => ({ ...chunk(units), schemaVersion: 5 });
+  const rejected = { ok: false, code: "schema_rejected" };
+
+  const accepted = inspect(v5([v5Story(), v5Task()]));
+  assert.equal(accepted.ok, true, JSON.stringify(accepted));
+  if (accepted.ok) {
+    assert.deepEqual(accepted.chunk.units[1].expectedPaths,
+      ["components/admin/AmuxReason.tsx", "tests/amuxReason.test.mjs"]);
+    assert.equal(Object.hasOwn(accepted.chunk.units[0], "expectedPaths"), false);
+  }
+
+  // A v5 Task without paths, with none, with too many or with a duplicate is refused.
+  const withoutPaths = v5Task();
+  delete withoutPaths.expectedPaths;
+  assert.deepEqual(inspect(v5([v5Story(), withoutPaths])), rejected);
+  assert.deepEqual(inspect(v5([v5Story(), v5Task({ expectedPaths: [] })])),
+    { ok: false, code: "metadata_incomplete" });
+  const fortyOne = Array.from({ length: 41 }, (_, index) => `lib/example/file${index}.ts`);
+  assert.deepEqual(inspect(v5([v5Story(), v5Task({ expectedPaths: fortyOne })])),
+    { ok: false, code: "too_large" });
+  assert.equal(inspect(v5([v5Story(), v5Task({ expectedPaths: fortyOne.slice(0, 40) })])).ok, true);
+  assert.deepEqual(inspect(v5([v5Story(), v5Task({ expectedPaths: ["lib/a.ts", "lib/a.ts"] })])), rejected);
+  for (const bad of [7, null, "", " lib/a.ts", "lib/a.ts\nlib/b.ts"]) {
+    assert.equal(inspect(v5([v5Story(), v5Task({ expectedPaths: [bad] })])).ok, false, String(bad));
+  }
+  // A Story never carries paths.
+  assert.deepEqual(inspect(v5([v5Story({ expectedPaths: ["lib/a.ts"] }), v5Task()])), rejected);
+  // A new proposal may not be a review Task.
+  assert.deepEqual(inspect(v5([v5Story(), v5Task({ taskRole: "review" })])), rejected);
+
+  // Before schema 5: no paths, and a review Task stays readable as it was.
+  const v4 = (units) => ({ ...chunk(units), schemaVersion: 4 });
+  assert.equal(inspect(v4([v5Story(), { ...withoutPaths, taskRole: "review" }])).ok, true);
+  assert.deepEqual(inspect(v4([v5Story(), v5Task()])), rejected);
+
+  // Stored units are re-read whether or not they carry paths or a review role.
+  for (const unit of [v5Task(), { ...withoutPaths, taskRole: "review" }]) {
+    const stored = inspectAmuxStoredAnalysisUnit({ raw: JSON.stringify(unit),
+      chunkIndex: 0, permittedSourceRefIds: [sourceRef] });
+    assert.equal(stored.ok, true, JSON.stringify(unit.taskRole));
+    if (stored.ok) assert.deepEqual(stored.unit.expectedPaths, unit.expectedPaths);
+  }
+});
+
+test("a new response is admitted only under the schema its prompt asked for", () => {
+  // Review finding on amux-intake v20: declaring an older schema must not skip
+  // the expected-path and no-review contract.
+  const reviewTaskV4 = { ...chunk([story(), { ...task(), taskRole: "review" }]), schemaVersion: 4 };
+  for (const unit of reviewTaskV4.units) {
+    unit.portfolioSignal = unit.cardType === "story"
+      ? { metrics: { impact: 3 }, uncertainty: "low", rationale: "Bounded.", evidenceRefIds: [sourceRef] }
+      : { metrics: { contribution: 3, urgency: 2, dependencyUnlock: 2, workerCoverage: 3, effort: 2,
+        deliveryRisk: 1 }, uncertainty: "low", rationale: "Bounded.", evidenceRefIds: [sourceRef] };
+  }
+  assert.equal(inspect(reviewTaskV4, { requiredSchemaVersion: 4 }).ok, true);
+  assert.deepEqual(inspect(reviewTaskV4, { requiredSchemaVersion: 5 }), { ok: false, code: "schema_rejected" });
+  // A caller that names no binding at all is refused rather than defaulted.
+  const { requiredSchemaVersion: _unbound, ...withoutBinding } = {
+    raw: JSON.stringify(reviewTaskV4), expectedPreviewId: "preview-01", expectedChunkIndex: 0,
+    expectedRevisionChunkIndex: 0, previousContinuationKind: null,
+    permittedSourceRefIds: [sourceRef], permittedTargetRefs: [], requiredSchemaVersion: 4 };
+  void _unbound;
+  assert.deepEqual(inspectAmuxAnalysisChunk(withoutBinding), { ok: false, code: "metadata_incomplete" });
+  assert.deepEqual(inspect(reviewTaskV4, { requiredSchemaVersion: 6 }), { ok: false, code: "metadata_incomplete" });
 });
