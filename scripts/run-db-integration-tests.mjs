@@ -731,6 +731,9 @@ run(
     // and keyed by the app, a market fact kept only from an official host, a
     // resend read back after the gates close, and the deadline enforced.
     "tests/integration/marketing-intel-reports.db.test.ts",
+    // The rows a draft's price and model facts rest on, held FOR SHARE until
+    // the reading transaction ends (S3a2): only two connections can show it.
+    "tests/integration/marketing-fact-row-hold.db.test.ts",
     // Marketing retention (S3h1): what the delete triggers let go goes, with an
     // audit row each and a retention_run report; what they keep stays.
     "tests/integration/marketing-retention.db.test.ts",
