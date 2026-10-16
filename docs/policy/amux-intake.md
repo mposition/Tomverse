@@ -14,8 +14,8 @@ review는 없애고, worker 작업이 끝나면 runner가 Tomverse 독립 검토
 관측됐을 때 `done`이 된다. 배정, 등급 판정, 실행 뒤 diff 검사, 검토 서버 호출, `done` 전환은
 `development-agent-orchestration.md`가 정하며 이 절은 다루지 않는다.
 
-이 구조는 "Task 하나 = 등급 하나"를 전제로 한다. review가 끝나면 Task가 끝나므로, contract 작업과
-그 밖의 작업이 한 Task에 섞이면 한쪽이 처리되지 않거나 contract worker가 간단한 부분까지 맡게
+이 구조는 "Task 하나 = 등급 하나"를 전제로 한다. Task 하나는 검토 한 번과 병합 하나로 끝나므로,
+contract 작업과 그 밖의 작업이 한 Task에 섞이면 한쪽이 처리되지 않거나 contract worker가 간단한 부분까지 맡게
 된다. intake는 분석과 등록 단계에서 이를 막는다.
 
 1. **Task 분해(v4 "계층, 분해, 승인" 2항 개정).** Task는 "한 완료 단위"이면서 **"등급 하나"**다.
@@ -30,7 +30,7 @@ review는 없애고, worker 작업이 끝나면 runner가 Tomverse 독립 검토
 3. **예상 경로는 Task의 필수 출력(v4 같은 절 4항 개정).** 분석 단위의 Task는 `expectedPaths`를
    반드시 낸다. 저장소 상대 경로이고, Task당 1~40개다. Story에는 이 필드가 없다. 분석 chunk
    schema를 5로 올리며, schema 4 이하로 이미 저장된 분석 기록은 그대로 읽힌다(그 기록의 Task는
-   아래 4항의 Guard에서 예상 경로 없음으로 거절된다).
+   아래 5항의 Guard에서 예상 경로 없음으로 거절된다).
 4. **분석 프롬프트.** 프롬프트에 contract 경로 목록과 1항의 분할 규칙을 넣는다. 목록은 코드의 단일
    공유 상수에서 읽고, 프롬프트나 다른 모듈에 손으로 옮겨 적지 않는다.
 5. **등록 Guard(v19 5항에 추가).** 아래는 모두 결정적 코드이며, LLM 출력은 입력 데이터일 뿐이다.
