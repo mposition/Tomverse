@@ -2,6 +2,11 @@ export type AmuxAnalysisStopReceipt = {
   holdId: string; previewId: string; ideaId: string; auditId: string;
 };
 
+export type AmuxAnalysisStopPost =
+  | { kind: "committed"; receipt: AmuxAnalysisStopReceipt }
+  | { kind: "refused" }
+  | { kind: "unknown" };
+
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 
 export function parseAmuxAnalysisStopReceipt(status: number, value: unknown,
@@ -25,4 +30,18 @@ export function amuxAnalysisStopRequestKey(holdId: string): string {
 
 export function isAmuxAnalysisStopRequestId(value: string | null): value is string {
   return value !== null && ID.test(value);
+}
+
+/** Only these route statuses are decided before a write or after a known
+ * transaction refusal. A transport error, 503, or malformed success stays
+ * read-back-only because its commit outcome cannot be inferred. */
+export function classifyAmuxAnalysisStopPost(status: number, body: unknown,
+  expected: { holdId: string; previewId: string; ideaId: string },
+): AmuxAnalysisStopPost {
+  const receipt = parseAmuxAnalysisStopReceipt(status, body, expected);
+  if (receipt) return { kind: "committed", receipt };
+  if ([400, 401, 403, 404, 409, 415, 428, 429].includes(status)) {
+    return { kind: "refused" };
+  }
+  return { kind: "unknown" };
 }

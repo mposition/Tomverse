@@ -8,7 +8,8 @@ import { useModalDialog } from "@/components/useModalDialog";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxAnalysisBudgetMessages } from "@/lib/adminMessages/amuxAnalysisBudget";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
-import { amuxAnalysisStopRequestKey, isAmuxAnalysisStopRequestId,
+import { amuxAnalysisStopRequestKey, classifyAmuxAnalysisStopPost,
+  isAmuxAnalysisStopRequestId,
   parseAmuxAnalysisStopReceipt } from "@/lib/amux/ideaAnalysisStopUiCore";
 
 type Phase = "loading" | "idle" | "sending" | "unknown" | "stopped" |
@@ -36,6 +37,7 @@ export function AmuxIdeaAnalysisStopPanel({ holdId, previewId, ideaId,
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(0);
   const [needsReauthentication, setNeedsReauthentication] = useState(false);
+  const [refused, setRefused] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -77,6 +79,7 @@ export function AmuxIdeaAnalysisStopPanel({ holdId, previewId, ideaId,
     } catch { setPhase("unavailable"); setOpen(false); return; }
     setRequestId(id);
     setNeedsReauthentication(false);
+    setRefused(false);
     setPhase("sending");
     inFlight.current = true;
     try {
@@ -86,10 +89,20 @@ export function AmuxIdeaAnalysisStopPanel({ holdId, previewId, ideaId,
           ownerConfirmed: true }),
       });
       const body: unknown = await response.json().catch(() => null);
-      if (parseAmuxAnalysisStopReceipt(response.status, body, expected)) {
+      const decision = classifyAmuxAnalysisStopPost(response.status, body, expected);
+      if (decision.kind === "committed") {
         setPhase("stopped"); onStopped();
+      } else if (decision.kind === "refused") {
+        // The server definitively refused this request. Only a successfully
+        // cleared receipt allows a new owner-confirmed attempt.
+        try {
+          window.sessionStorage.removeItem(amuxAnalysisStopRequestKey(holdId));
+          setRequestId(null);
+          setRefused(true);
+          setNeedsReauthentication(response.status === 428);
+          setPhase("idle");
+        } catch { setPhase("unknown"); }
       } else {
-        setNeedsReauthentication(response.status === 428);
         setPhase("unknown");
       }
     } catch { setPhase("unknown"); }
@@ -138,8 +151,11 @@ export function AmuxIdeaAnalysisStopPanel({ holdId, previewId, ideaId,
       </button>
     </> : null}
     {phase === "unavailable" ? <p role="alert">{m.unavailable}</p> : null}
+    {refused ? <p role="alert">{m.refused}</p> : null}
     {needsReauthentication ? <a className="underline"
-      href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>
+      href={adminRecentAuthenticationHref(typeof window === "undefined"
+        ? "/admin/amux-backlog?tab=ideas"
+        : `${window.location.pathname}${window.location.search}`)}>
       {m.reauthenticate}
     </a> : null}
     {open && typeof document !== "undefined" ? createPortal(
