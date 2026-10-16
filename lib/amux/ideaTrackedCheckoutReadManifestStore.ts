@@ -86,7 +86,8 @@ export async function recordAmuxTrackedCheckoutReadManifest(
   })) throw new AmuxTrackedCheckoutReadManifestError("already_recorded");
   const sealed = sealAmuxContent(inspected.plaintext,
     "repository_read_manifest", inspected.manifestId, keys);
-  if (sealed.keyId !== keys.masterKeyId || sealed.keyVersion !== 1) {
+  if (sealed.keyId !== keys.masterKeyId ||
+      sealed.keyVersion !== keys.masterKeyVersion) {
     throw new AmuxTrackedCheckoutReadManifestError("invalid_manifest");
   }
   const auditLogId = await writeSystemAuditLog({ tx,

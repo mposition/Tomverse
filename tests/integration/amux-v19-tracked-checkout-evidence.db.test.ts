@@ -233,6 +233,11 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
       recordAmuxTrackedCheckoutReadManifest(tx, input, readKeys)),
     (error: unknown) => error instanceof AmuxTrackedCheckoutReadManifestError &&
       error.code === "already_recorded");
+    await assert.rejects(prisma.$transaction((tx) =>
+      recordAmuxTrackedCheckoutReadManifest(tx,
+        { ...input, pinnedCommitSha: "c".repeat(40) }, readKeys)),
+    (error: unknown) => error instanceof AmuxTrackedCheckoutReadManifestError &&
+      error.code === "evidence_unavailable");
     assert.equal(await prisma.adminAuditLog.count(), beforeAuditCount);
     await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.update({
       where: { id: manifestId }, data: { fileCount: 1 },
@@ -247,6 +252,20 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
         keyVersion: row.keyVersion, digest: row.digest,
         digestKeyId: row.digestKeyId, auditLogId: row.auditLogId },
     }), /audit evidence mismatch/);
+    await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
+      data: { id: randomUUID(), ideaId, referenceOrdinal: 0,
+        pinnedCommitSha: "c".repeat(40), fileCount: row.fileCount,
+        ciphertext: Uint8Array.from(row.ciphertext), keyId: row.keyId,
+        keyVersion: row.keyVersion, digest: row.digest,
+        digestKeyId: row.digestKeyId, auditLogId: row.auditLogId },
+    }), /pinned reference mismatch/);
+    await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
+      data: { id: randomUUID(), ideaId: randomUUID(), referenceOrdinal: 0,
+        pinnedCommitSha: "a".repeat(40), fileCount: row.fileCount,
+        ciphertext: Uint8Array.from(row.ciphertext), keyId: row.keyId,
+        keyVersion: row.keyVersion, digest: row.digest,
+        digestKeyId: row.digestKeyId, auditLogId: row.auditLogId },
+    }), /idea is unavailable/);
   } finally {
     readKeys.masterKey.fill(0);
     readKeys.digestKey.fill(0);

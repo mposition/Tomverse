@@ -1994,6 +1994,22 @@ domains:
       parentColumn: ideaId
       parentModel: AmuxIdeaSubmission
     inUnifiedExport: unverified
+
+  - domain: amuxIdeaTrackedCheckoutReadManifest
+    prismaModel: AmuxIdeaTrackedCheckoutReadManifest
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, encrypted CLI read-manifest account deletion,
+      external key retirement, retention, and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
     note: >-
       The append-only row records one source reference ordinal, its fixed commit
       SHA, aggregate exclusion counts, and a keyed exclusion-path digest. It
