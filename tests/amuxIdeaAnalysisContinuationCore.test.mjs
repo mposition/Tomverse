@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { inspectAmuxAnalysisContinuation } from "../lib/amux/ideaAnalysisContinuationCore.ts";
+import { AMUX_V4_ANALYSIS_PROMPT_VERSION } from "../lib/amux/ideaAnalysisPromptCore.ts";
 
 const sourceRef = "idea:opaque-source";
 const feature = { ref: "feature_existing_01", kind: "node", level: "feature" };
@@ -24,10 +25,12 @@ const card = (chunkIndex) => ({
   executionGrade: null,
   executionBrief: null,
   sourceRefIds: [sourceRef],
+  portfolioSignal: { metrics: { impact: 3 }, uncertainty: "low",
+    rationale: "A bounded page.", evidenceRefIds: [sourceRef] },
 });
 
 const chunk = (chunkIndex, overrides = {}) => ({
-  schemaVersion: 2,
+  schemaVersion: 5,
   previewId: `preview-${chunkIndex}`,
   chunkIndex,
   outcome: "propose",
@@ -51,6 +54,7 @@ const inspect = (value, overrides = {}) => inspectAmuxAnalysisContinuation({
   coveredStartOrdinal: 0,
   coveredEndOrdinal: 0,
   history: [],
+  templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION,
   ...overrides,
 });
 
@@ -251,4 +255,17 @@ test("noninteger source ordinal and overflowing output part are held by the curs
   };
   assert.deepEqual(inspect(chunk(1), { history: [overflow] }),
     { ok: false, stage: "cursor", reason: "metadata_incomplete" });
+});
+
+test("the confirmed prompt version fixes the admitted schema", () => {
+  // amux-intake v20: v6 asks for schema 5, the earlier v5 for schema 4.
+  assert.equal(inspect(chunk(0)).ok, true);
+  assert.deepEqual(inspect(chunk(0, { schemaVersion: 4 })), { ok: false, stage: "chunk", code: "schema_rejected" });
+  assert.equal(inspect(chunk(0, { schemaVersion: 4 }), { templateVersion: "amux-v4-analysis-prompt-v5" }).ok, true);
+  assert.deepEqual(inspect(chunk(0), { templateVersion: "amux-v4-analysis-prompt-v5" }),
+    { ok: false, stage: "chunk", code: "schema_rejected" });
+  for (const templateVersion of ["amux-v4-analysis-prompt-v4", "", "__proto__", 6]) {
+    assert.deepEqual(inspect(chunk(0), { templateVersion }), { ok: false, stage: "chunk", code: "schema_rejected" },
+      String(templateVersion));
+  }
 });

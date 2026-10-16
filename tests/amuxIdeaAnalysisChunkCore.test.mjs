@@ -17,6 +17,7 @@ const inspect = (value, overrides = {}) => inspectAmuxAnalysisChunk({
   previousContinuationKind: (overrides.expectedRevisionChunkIndex ?? overrides.expectedChunkIndex ?? 0) === 0 ? null : "input",
   permittedSourceRefIds: [sourceRef],
   permittedTargetRefs: [{ ref: "feature_existing_01", kind: "node", level: "feature" }],
+  requiredSchemaVersion: null,
   ...overrides,
 });
 
@@ -463,6 +464,7 @@ test("raw and normalized output are bounded without silent truncation", () => {
     previousContinuationKind: null,
     permittedSourceRefIds: [sourceRef],
     permittedTargetRefs: [],
+    requiredSchemaVersion: null,
   }), { ok: false, code: "too_large" });
   const huge = story();
   huge.title = "x".repeat(201);
@@ -573,4 +575,26 @@ test("v5 Tasks name their expected paths and never propose a review Task", () =>
     assert.equal(stored.ok, true, JSON.stringify(unit.taskRole));
     if (stored.ok) assert.deepEqual(stored.unit.expectedPaths, unit.expectedPaths);
   }
+});
+
+test("a new response is admitted only under the schema its prompt asked for", () => {
+  // Review finding on amux-intake v20: declaring an older schema must not skip
+  // the expected-path and no-review contract.
+  const reviewTaskV4 = { ...chunk([story(), { ...task(), taskRole: "review" }]), schemaVersion: 4 };
+  for (const unit of reviewTaskV4.units) {
+    unit.portfolioSignal = unit.cardType === "story"
+      ? { metrics: { impact: 3 }, uncertainty: "low", rationale: "Bounded.", evidenceRefIds: [sourceRef] }
+      : { metrics: { contribution: 3, urgency: 2, dependencyUnlock: 2, workerCoverage: 3, effort: 2,
+        deliveryRisk: 1 }, uncertainty: "low", rationale: "Bounded.", evidenceRefIds: [sourceRef] };
+  }
+  assert.equal(inspect(reviewTaskV4, { requiredSchemaVersion: 4 }).ok, true);
+  assert.deepEqual(inspect(reviewTaskV4, { requiredSchemaVersion: 5 }), { ok: false, code: "schema_rejected" });
+  // A caller that names no binding at all is refused rather than defaulted.
+  const { requiredSchemaVersion: _unbound, ...withoutBinding } = {
+    raw: JSON.stringify(reviewTaskV4), expectedPreviewId: "preview-01", expectedChunkIndex: 0,
+    expectedRevisionChunkIndex: 0, previousContinuationKind: null,
+    permittedSourceRefIds: [sourceRef], permittedTargetRefs: [], requiredSchemaVersion: 4 };
+  void _unbound;
+  assert.deepEqual(inspectAmuxAnalysisChunk(withoutBinding), { ok: false, code: "metadata_incomplete" });
+  assert.deepEqual(inspect(reviewTaskV4, { requiredSchemaVersion: 6 }), { ok: false, code: "metadata_incomplete" });
 });

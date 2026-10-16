@@ -515,7 +515,14 @@ type AmuxAnalysisChunkInspectionInput = {
   previousContinuationKind: "input" | "output" | null;
   permittedSourceRefIds: readonly string[];
   permittedTargetRefs: readonly AmuxPermittedTargetRef[];
+  /** The schema the prompt that produced this response asked for. A new model
+   * response is admitted only under it, so declaring an older schema cannot
+   * skip the newer contract (amux-intake v20). Null only when re-reading a
+   * stored, digest-verified chunk, whose schema was fixed when it was admitted. */
+  requiredSchemaVersion: AmuxAnalysisChunk["schemaVersion"] | null;
 };
+
+const SCHEMA_VERSIONS: readonly unknown[] = [2, 3, 4, AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION];
 
 const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
   raw: string;
@@ -525,19 +532,21 @@ const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
   previousContinuationKind: "input" | "output" | null;
   sourceRefs: string[];
   targetRefs: AmuxPermittedTargetRef[];
+  requiredSchemaVersion: AmuxAnalysisChunk["schemaVersion"] | null;
 } | null => {
   try {
     if (!input || typeof input !== "object") return null;
     const { raw, expectedPreviewId, expectedChunkIndex, expectedRevisionChunkIndex,
       previousContinuationKind,
-      permittedSourceRefIds, permittedTargetRefs } = input;
+      permittedSourceRefIds, permittedTargetRefs, requiredSchemaVersion } = input;
     if (typeof raw !== "string" || !amuxAnalysisRefSafe(expectedPreviewId) ||
         !Number.isSafeInteger(expectedChunkIndex) || expectedChunkIndex < 0 ||
         !Number.isSafeInteger(expectedRevisionChunkIndex) ||
         expectedRevisionChunkIndex < 0 || expectedRevisionChunkIndex > expectedChunkIndex ||
         (expectedRevisionChunkIndex === 0 ? previousContinuationKind !== null :
           previousContinuationKind !== "input" && previousContinuationKind !== "output") ||
-        !Array.isArray(permittedSourceRefIds) || !Array.isArray(permittedTargetRefs)) return null;
+        !Array.isArray(permittedSourceRefIds) || !Array.isArray(permittedTargetRefs) ||
+        !(requiredSchemaVersion === null || SCHEMA_VERSIONS.includes(requiredSchemaVersion))) return null;
     const sourceRefs = copyBoundedAmuxArray<string>(permittedSourceRefIds, 256);
     const rawTargets = copyBoundedAmuxArray<AmuxPermittedTargetRef>(permittedTargetRefs, 512);
     if (sourceRefs === null || rawTargets === null || sourceRefs.length === 0 ||
@@ -548,7 +557,7 @@ const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
     if (verifiedTargets.some((target) => !amuxPermittedTargetRefSafe(target, expectedChunkIndex))) return null;
     return { raw, expectedPreviewId, expectedChunkIndex, expectedRevisionChunkIndex,
       previousContinuationKind,
-      sourceRefs, targetRefs: verifiedTargets };
+      sourceRefs, targetRefs: verifiedTargets, requiredSchemaVersion };
   } catch {
     return null;
   }
@@ -560,7 +569,7 @@ export function inspectAmuxAnalysisChunk(
   const snapshot = snapshotInspectionInput(input);
   if (snapshot === null) return { ok: false, code: "metadata_incomplete" };
   const { raw, expectedPreviewId, expectedChunkIndex, previousContinuationKind,
-    sourceRefs, targetRefs } = snapshot;
+    sourceRefs, targetRefs, requiredSchemaVersion } = snapshot;
   if (byteLength(raw) > AMUX_ANALYSIS_CHUNK_MAX_BYTES) return { ok: false, code: "too_large" };
   let parsed: unknown;
   try {
@@ -575,6 +584,7 @@ export function inspectAmuxAnalysisChunk(
     ]);
     if ((data.schemaVersion !== 2 && data.schemaVersion !== 3 && data.schemaVersion !== 4 &&
          data.schemaVersion !== AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION) ||
+        (requiredSchemaVersion !== null && data.schemaVersion !== requiredSchemaVersion) ||
         data.previewId !== expectedPreviewId || data.chunkIndex !== expectedChunkIndex) {
       reject("schema_rejected");
     }

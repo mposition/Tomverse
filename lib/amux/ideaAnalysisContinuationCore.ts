@@ -3,6 +3,7 @@ import {
   type AmuxAnalysisChunkInspection,
   type AmuxPermittedTargetRef,
 } from "./ideaAnalysisChunkCore.ts";
+import { amuxAnalysisSchemaForTemplate } from "./ideaAnalysisPromptCore.ts";
 import {
   assessAmuxOutputCursorHistory,
   type AmuxAnalysisOutputPage,
@@ -31,6 +32,8 @@ export type AmuxAnalysisContinuationInput = {
   coveredStartOrdinal: number;
   coveredEndOrdinal: number;
   history: unknown;
+  /** The confirmed preview's prompt version; it fixes the admitted chunk schema. */
+  templateVersion: string;
 };
 
 export type AmuxAnalysisContinuationInspection =
@@ -101,7 +104,8 @@ export function inspectAmuxAnalysisContinuation(
     const descriptors = Object.getOwnPropertyDescriptors(input);
     const keys = ["raw", "expectedPreviewId", "expectedChunkIndex", "expectedRevisionChunkIndex",
       "permittedSourceRefIds",
-      "permittedTargetRefs", "sourceUnitCount", "coveredStartOrdinal", "coveredEndOrdinal", "history"];
+      "permittedTargetRefs", "sourceUnitCount", "coveredStartOrdinal", "coveredEndOrdinal", "history",
+      "templateVersion"];
     if (Reflect.ownKeys(descriptors).length !== keys.length ||
         !keys.every((key) => "value" in (descriptors[key] ?? {}))) {
       return { ok: false, stage: "history", reason: "history_invalid" };
@@ -131,6 +135,8 @@ export function inspectAmuxAnalysisContinuation(
   const previousKind = priorContinuationKind(history);
   if (previousKind === "closed") return { ok: false, stage: "history", reason: "history_closed" };
 
+  const requiredSchemaVersion = amuxAnalysisSchemaForTemplate(fields.templateVersion);
+  if (requiredSchemaVersion === null) return { ok: false, stage: "chunk", code: "schema_rejected" };
   const parsed = inspectAmuxAnalysisChunk({
     raw: fields.raw,
     expectedPreviewId: fields.expectedPreviewId,
@@ -139,6 +145,7 @@ export function inspectAmuxAnalysisContinuation(
     previousContinuationKind: previousKind,
     permittedSourceRefIds: fields.permittedSourceRefIds,
     permittedTargetRefs: fields.permittedTargetRefs,
+    requiredSchemaVersion,
   });
   if (!parsed.ok) return { ok: false, stage: "chunk", code: parsed.code };
 

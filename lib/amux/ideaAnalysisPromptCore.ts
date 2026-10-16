@@ -22,6 +22,15 @@ import {
  * repeat current source/model/budget checks, and spawn a tool-less CLI in a
  * credential-free sandbox. No live runner imports this module today. */
 export const AMUX_V4_ANALYSIS_PROMPT_VERSION = "amux-v4-analysis-prompt-v6" as const;
+/** The chunk schema each prompt version asks for (amux-intake v17, v20). A model
+ * response is admitted only under the schema of the prompt that produced it. */
+const AMUX_V4_ANALYSIS_PROMPT_SCHEMAS: Readonly<Record<string, 4 | 5>> = Object.freeze({
+  "amux-v4-analysis-prompt-v5": 4,
+  [AMUX_V4_ANALYSIS_PROMPT_VERSION]: AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION,
+});
+export const amuxAnalysisSchemaForTemplate = (templateVersion: unknown): 4 | 5 | null =>
+  typeof templateVersion === "string" && Object.hasOwn(AMUX_V4_ANALYSIS_PROMPT_SCHEMAS, templateVersion)
+    ? AMUX_V4_ANALYSIS_PROMPT_SCHEMAS[templateVersion] : null;
 export const AMUX_V4_ANALYSIS_DATA_MAX_BYTES = 16 * 1024;
 export const AMUX_V4_ANALYSIS_SOURCE_CAP = 12;
 export const AMUX_V4_ANALYSIS_TARGET_CAP = 96;
