@@ -1,3 +1,4 @@
+-- baseline-check: replace-function-if-body-sha256 "amux_v4_task_approval_binding_guard" "fbd8527953062c9bcd766e1001aa7ddca935d8d332a8aeb4ced5f1529257c704"
 -- Preserve the v4 owner approval binding. The sole grade revision is an
 -- audited, attempt-bound routine/advanced -> frontier contract-path escalation.
 BEGIN;

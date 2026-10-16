@@ -192,6 +192,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // amux-intake v19: encrypted session submission provenance and its audit
   // guards; it adds no commit-deadline marker, trigger or classifier.
   "20261016040000_amux_v19_session_submission",
+  // Orchestration v52: audited execution-grade revision only, with no
+  // commit-deadline marker, trigger, guard or classifier change.
+  "20261016090000_amux_v52_grade_escalation_guard",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
