@@ -24,6 +24,7 @@ import {
   type MarketingDraftSubmission,
   type MarketingGeneratorDraft,
 } from "./marketingDraftIntakeCore.ts";
+import { marketingTextHygiene } from "./marketingGuardNormalise.ts";
 import type { MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Recorded with each run, so a change to what the model is asked is a new version. */
@@ -102,25 +103,33 @@ export function marketingA5Messages(
   ];
 }
 
+/**
+ * The answer's envelope: one object holding a bounded list. The items are
+ * read one by one below, so one malformed draft costs that draft only.
+ */
+const answerSchema = z
+  .object({ drafts: z.array(z.unknown()).max(MARKETING_A5_MAX_DRAFTS_PER_CALL) })
+  .strict();
+
 const proposalSchema = z
   .object({
-    drafts: z
-      .array(
-        z
-          .object({
-            renderedText: z.string(),
-            claimIds: z.array(z.string()),
-            assetIds: z.array(z.string()),
-            disclosureFlags: z.array(z.string()),
-          })
-          .strict(),
-      )
-      .max(MARKETING_A5_MAX_DRAFTS_PER_CALL),
+    renderedText: z.string(),
+    claimIds: z.array(z.string()),
+    assetIds: z.array(z.string()),
+    disclosureFlags: z.array(z.string()),
   })
   .strict();
 
-/** Anything that reads as a link, in any form a platform would turn into one. */
-const LINK = /(https?:\/\/|www\.|\b[a-z0-9-]+\.(com|app|net|org|io|ai|co|au|dev)\b)/iu;
+/**
+ * Whether the words carry a link, by the Guard's own reading
+ * (lib/marketingGuardNormalise.ts): anything that reads as an address in any
+ * script, case or scheme, and any link markup. The Guard refuses these too;
+ * dropping them here keeps them out of the intake rather than relying on it.
+ */
+const hasLink = (text: string) => {
+  const codes = marketingTextHygiene(text);
+  return codes.includes("url_like") || codes.includes("link_markup");
+};
 
 export type MarketingA5Refusal =
   | "answer_not_json"
@@ -153,7 +162,7 @@ export function readMarketingA5Answer(
     drop("answer_not_json");
     return { drafts: [], dropped };
   }
-  const parsed = proposalSchema.safeParse(raw);
+  const parsed = answerSchema.safeParse(raw);
   if (!parsed.success) {
     drop("answer_shape");
     return { drafts: [], dropped };
@@ -170,8 +179,11 @@ export function readMarketingA5Answer(
   );
 
   const drafts: MarketingGeneratorDraft[] = [];
-  parsed.data.drafts.forEach((proposal, index) => {
-    if (LINK.test(proposal.renderedText)) return drop("draft_has_link");
+  parsed.data.drafts.forEach((item, index) => {
+    const read = proposalSchema.safeParse(item);
+    if (!read.success) return drop("draft_shape");
+    const proposal = read.data;
+    if (hasLink(proposal.renderedText)) return drop("draft_has_link");
     if (proposal.claimIds.some((id) => !claimIds.has(id))) return drop("draft_names_unknown_claim");
     if (proposal.assetIds.some((id) => !assetIds.has(id))) return drop("draft_names_unknown_asset");
     const draft = marketingGeneratorDraftSchema.safeParse({

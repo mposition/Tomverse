@@ -93,6 +93,21 @@ test("a link, an id the context did not offer, or a shape the intake refuses dro
   );
   assert.deepEqual(drafts, []);
   assert.deepEqual(dropped, { draft_has_link: 3, draft_names_unknown_claim: 2 });
+  // Any address the Guard reads as one: other TLDs, other schemes, an IP, markup.
+  assert.deepEqual(
+    readMarketingA5Answer(
+      answer([
+        proposal({ renderedText: "Read more at example.xyz." }),
+        proposal({ renderedText: "Mirror on ftp://example.test/notes." }),
+        proposal({ renderedText: "Try http://192.168.0.1/a." }),
+        proposal({ renderedText: "Our [notes](notes) are up." }),
+        proposal({ renderedText: "See example.uk for more." }),
+      ]),
+      context,
+      SCOPE,
+    ).dropped,
+    { draft_has_link: 5 },
+  );
   // An asset this platform may not carry.
   assert.deepEqual(readMarketingA5Answer(answer([proposal({ assetIds: ["asset_tiktok"] })]), context, SCOPE).dropped, {
     draft_names_unknown_asset: 1,
@@ -110,11 +125,23 @@ test("an answer that is not the one JSON object asked for is refused whole", () 
   });
   for (const content of [
     JSON.stringify({ drafts: [proposal()], verdict: "approve" }),
-    JSON.stringify({ drafts: [{ ...proposal(), status: "published" }] }),
     JSON.stringify({ drafts: Array.from({ length: MARKETING_A5_MAX_DRAFTS_PER_CALL + 1 }, () => proposal()) }),
+    JSON.stringify({ posts: [proposal()] }),
   ]) {
     assert.deepEqual(readMarketingA5Answer(content, context, SCOPE).dropped, { answer_shape: 1 });
   }
+});
+
+test("one malformed draft costs that draft, not the good ones beside it", () => {
+  const withoutAssets = proposal();
+  delete withoutAssets.assetIds;
+  const { drafts, dropped } = readMarketingA5Answer(
+    answer([withoutAssets, proposal({ renderedText: 42 }), { ...proposal(), status: "published" }, proposal()]),
+    context,
+    SCOPE,
+  );
+  assert.deepEqual(dropped, { draft_shape: 3 });
+  assert.deepEqual(drafts.map((draft) => draft.logicalDraftId), ["c0-d3"]);
 });
 
 test("the submission is what the intake parses and verifies, with the ledger calls sorted once", () => {
