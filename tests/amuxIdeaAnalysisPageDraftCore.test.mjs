@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { prepareAmuxAnalysisPageDraft } from
   "../lib/amux/ideaAnalysisPageDraftCore.ts";
+import { AMUX_V4_ANALYSIS_PROMPT_VERSION } from "../lib/amux/ideaAnalysisPromptCore.ts";
 
 const keys = {
   masterKeyId: "test-master", masterKeyVersion: 1,
@@ -20,9 +21,11 @@ const card = (chunkIndex, index) => ({
   featureRef: feature.ref, parentStoryRef: null, dependencyRefs: [],
   duplicateCandidateRefs: [], taskRole: null, executionGrade: null,
   executionBrief: null, sourceRefIds: [source],
+  portfolioSignal: { metrics: { impact: 3 }, uncertainty: "low",
+    rationale: "A bounded page.", evidenceRefIds: [source] },
 });
 const chunk = (index, overrides = {}) => ({
-  schemaVersion: 2, previewId: `preview-${index}`, chunkIndex: index,
+  schemaVersion: 5, previewId: `preview-${index}`, chunkIndex: index,
   outcome: "propose", coverageStatus: "complete", continuationKind: null,
   ownerQuestion: null, coveredScope: "The approved source unit was analyzed.",
   remainingScope: null, units: [card(index, 0)], ...overrides,
@@ -32,7 +35,7 @@ const prepare = (value, overrides = {}) => prepareAmuxAnalysisPageDraft({
   keys, chunkIndex: value.chunkIndex, revisionChunkIndex: value.chunkIndex,
   permittedSourceRefIds: [source], permittedTargetRefs: [feature],
   sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
-  history: [], ...overrides,
+  history: [], templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION, ...overrides,
 });
 
 test("nine proposals remain two pages, not one rejected package or a silent truncation", () => {
