@@ -8,8 +8,10 @@ export const AMUX_IDEA_REPOSITORY_MAX = 8;
 export const AMUX_IDEA_PR_MAX = 16;
 
 const REPOSITORY = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
-const validRepository = (value: string) =>
+/** One `owner/name` grammar for idea references and the operating scope allowlist. */
+export const isAmuxIdeaRepositoryName = (value: string) =>
   REPOSITORY.test(value) && value.split("/").every((part) => part !== "." && part !== "..");
+const validRepository = isAmuxIdeaRepositoryName;
 
 export type IdeaInput = {
   version: typeof AMUX_IDEA_INPUT_VERSION;

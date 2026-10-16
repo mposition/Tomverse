@@ -1,0 +1,75 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  AMUX_OPERATING_SCOPE_REPOSITORY_MAX,
+  amuxIdeaReferencesOutsideScope,
+  amuxOperatingScopeSavedMatches,
+  amuxOperatingScopeSelection,
+  amuxRepositoryAllowed,
+  normalizeAmuxOperatingScope,
+  readPendingAmuxOperatingScope,
+} from "../lib/amux/ideaOperatingScopeCore.ts";
+
+// docs/policy/amux-intake.md v19 item 2: the one human approval is the owner's operating scope.
+const model = { provider: "anthropic", modelId: "claude-opus-5-5", reasoningEffort: "high" };
+const scope = (repositories = ["mposition/Tomverse", "mposition/tomverse-private-docs"]) => ({ repositories, model });
+
+test("a scope names allowed repositories and one model selection, ordered case-insensitively", () => {
+  const result = normalizeAmuxOperatingScope(scope(["mposition/tomverse-private-docs", "mposition/Tomverse"]));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  // The owner's spelling is kept; only the order is canonical.
+  assert.deepEqual(result.scope.repositories, ["mposition/Tomverse", "mposition/tomverse-private-docs"]);
+  assert.deepEqual(amuxOperatingScopeSelection(result.scope), model);
+});
+
+test("a malformed scope is refused with a reason, never repaired", () => {
+  const refused = (value, code) => assert.deepEqual(normalizeAmuxOperatingScope(value), { ok: false, code });
+  refused(null, "scope_shape_invalid");
+  refused({ ...scope(), extra: true }, "scope_shape_invalid");
+  refused(scope([]), "repositories_invalid");
+  for (const bad of ["Tomverse", "mposition/", "/Tomverse", "a/b/c", "mposition/..", "mposition/To mverse", 7]) {
+    refused(scope([bad]), "repositories_invalid");
+  }
+  const tooMany = Array.from({ length: AMUX_OPERATING_SCOPE_REPOSITORY_MAX + 1 }, (_, index) => `owner/repo${index}`);
+  refused(scope(tooMany), "repositories_invalid");
+  refused(scope(["mposition/Tomverse", "MPOSITION/tomverse"]), "repository_duplicate");
+  refused({ repositories: ["mposition/Tomverse"], model: { ...model, provider: "xai" } }, "model_invalid");
+  refused({ repositories: ["mposition/Tomverse"], model: { ...model, reasoningEffort: "extreme" } }, "model_invalid");
+  refused({ repositories: ["mposition/Tomverse"], model: { ...model, modelId: "" } }, "model_invalid");
+  refused({ repositories: ["mposition/Tomverse"], model: { ...model, extra: 1 } }, "model_invalid");
+});
+
+test("an idea reference outside the allowlist is named, through repositories and pull requests", () => {
+  const admitted = normalizeAmuxOperatingScope(scope());
+  assert.equal(admitted.ok, true);
+  if (!admitted.ok) return;
+  assert.equal(amuxRepositoryAllowed(admitted.scope, "MPOSITION/tomverse"), true);
+  assert.equal(amuxRepositoryAllowed(admitted.scope, "mposition/other"), false);
+  assert.equal(amuxRepositoryAllowed(admitted.scope, "not a repository"), false);
+  assert.deepEqual(amuxIdeaReferencesOutsideScope(admitted.scope, {
+    repositories: ["mposition/Tomverse", "someone/else"],
+    pullRequests: [{ repository: "mposition/tomverse-private-docs" }, { repository: "someone/else" },
+      { repository: "another/repo" }],
+  }), ["someone/else", "another/repo"]);
+  assert.deepEqual(amuxIdeaReferencesOutsideScope(admitted.scope, { repositories: [], pullRequests: [] }), []);
+});
+
+test("a lost save is matched to its pending request exactly, never re-sent", () => {
+  const admitted = normalizeAmuxOperatingScope(scope());
+  assert.equal(admitted.ok, true);
+  if (!admitted.ok) return;
+  const pending = readPendingAmuxOperatingScope({
+    id: "3d6f5ade-f448-40c3-80ef-79eb90399dc9", expectedPreviousVersion: 2, scope: scope() });
+  assert.ok(pending);
+  assert.equal(readPendingAmuxOperatingScope({ ...pending, id: "not-a-uuid" }), null);
+  assert.equal(readPendingAmuxOperatingScope({ ...pending, expectedPreviousVersion: -1 }), null);
+  assert.equal(readPendingAmuxOperatingScope({ ...pending, scope: scope([]) }), null);
+  const saved = { state: "saved", id: pending.id, version: 3, scope: admitted.scope, auditId: "audit-1" };
+  assert.equal(amuxOperatingScopeSavedMatches(saved, pending), true);
+  assert.equal(amuxOperatingScopeSavedMatches({ ...saved, version: 2 }, pending), false);
+  assert.equal(amuxOperatingScopeSavedMatches({ ...saved, scope: scope(["mposition/Tomverse"]) }, pending), false);
+  assert.equal(amuxOperatingScopeSavedMatches({ ...saved, auditId: "" }, pending), false);
+  assert.equal(amuxOperatingScopeSavedMatches({ ...saved, extra: 1 }, pending), false);
+});
