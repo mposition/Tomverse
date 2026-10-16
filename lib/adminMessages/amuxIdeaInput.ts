@@ -148,6 +148,10 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     busyPreviewBody: "The idea is being saved and its first analysis plan and the exact transfer preview are being prepared. Nothing is sent and no model is called.",
     busyPreviewDoneTitle: "The preview is ready",
     busyPreviewDoneBody: "The idea is saved and its transfer preview is prepared. Check what would be sent, then approve execution.",
+    busyPreviewPartialTitle: "The idea is saved, the preview is not ready",
+    busyPreviewPartialBody: (step: "sources" | "plan" | "preview", code: string) => step === "sources"
+      ? "This idea names GitHub sources, so only the save was done. Their exact scope needs a separate review before a plan and a preview can be prepared. Nothing was sent and no model was called."
+      : `The ${step === "plan" ? "source plan" : "transfer preview"} was not prepared (${code}). Nothing was sent and no model was called. Continue with the separate steps below.`,
     busyRefusedTitle: "Nothing was recorded",
     busyRefusedBody: "The request was refused before anything was recorded.",
     busyUnknownTitle: "The result is unknown",
@@ -516,6 +520,10 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     busyPreviewBody: "아이디어를 저장하고 첫 분석 계획과 전송할 내용의 미리보기를 만들고 있습니다. 아무것도 전송하지 않고 모델도 호출하지 않습니다.",
     busyPreviewDoneTitle: "미리보기가 준비됐습니다",
     busyPreviewDoneBody: "아이디어가 저장됐고 전송 미리보기가 준비됐습니다. 보낼 내용을 확인한 뒤 실행을 승인하세요.",
+    busyPreviewPartialTitle: "아이디어는 저장됐지만 미리보기는 준비되지 않았습니다",
+    busyPreviewPartialBody: (step: "sources" | "plan" | "preview", code: string) => step === "sources"
+      ? "이 아이디어는 GitHub 자료를 가리키므로 저장까지만 했습니다. 자료 범위는 별도 검토를 거쳐야 계획과 미리보기를 준비할 수 있습니다. 아무것도 전송하지 않았고 모델도 호출하지 않았습니다."
+      : `${step === "plan" ? "자료 계획" : "전송 미리보기"}을(를) 준비하지 못했습니다(${code}). 아무것도 전송하지 않았고 모델도 호출하지 않았습니다. 아래의 단계별 화면에서 이어 가세요.`,
     busyRefusedTitle: "기록된 것이 없습니다",
     busyRefusedBody: "요청이 아무것도 기록되기 전에 거절됐습니다.",
     busyUnknownTitle: "결과를 알 수 없습니다",

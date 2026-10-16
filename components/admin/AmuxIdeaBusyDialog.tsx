@@ -9,7 +9,7 @@ import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 type Messages = (typeof adminAmuxIdeaInputMessages)["en"];
 
 /** `working` while the request is in flight; the three others once it has settled. */
-export type AmuxBusyTone = "working" | "success" | "refused" | "unknown";
+export type AmuxBusyTone = "working" | "success" | "partial" | "refused" | "unknown";
 
 /**
  * What a key does inside the dialog, as data so a test can run it. Escape is
@@ -41,6 +41,7 @@ const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), selec
 const TONE_CLASS: Record<AmuxBusyTone, string> = {
   working: "border-blue-500/30 bg-blue-500/10 text-blue-200",
   success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+  partial: "border-amber-500/30 bg-amber-500/10 text-amber-200",
   refused: "border-amber-500/30 bg-amber-500/10 text-amber-200",
   unknown: "border-red-500/30 bg-red-500/10 text-red-200",
 };
