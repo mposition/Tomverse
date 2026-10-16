@@ -51,8 +51,9 @@ export const marketingDraftSubmissionSchema = z
     submissionId: id,
     /**
      * When the service stops waiting. Signed with the rest, and enforced by the
-     * database: a draft whose transaction could outlast it is not started, and
-     * one that does is rolled back by its own `transaction_timeout`.
+     * database: a new draft whose transaction could outlast it is not started,
+     * and no success is recorded after it. COMMIT's durable phase is not
+     * bounded by it; a lost answer is read back by resubmitting the same key.
      */
     deadlineAt: isoInstant,
     drafts: z.array(marketingGeneratorDraftSchema).min(1).max(MARKETING_DRAFT_INTAKE_MAX_DRAFTS),

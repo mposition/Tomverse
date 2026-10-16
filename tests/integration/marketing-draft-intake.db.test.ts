@@ -164,6 +164,25 @@ test("a resubmission is the same draft only if it says the same thing", async ()
   assert.equal((await intakeAudits()).length, 1);
 });
 
+test("an intake that committed is read back after every gate has closed", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  const first = await intake(draft(row.id), OPEN);
+  assert.equal(first.status, "queued");
+  // The answer was lost; then the budget closed, the switch went off and the
+  // kill switch went on. Resubmitting the same key still says what happened.
+  await prisma.appSetting.update({ where: { key: MARKETING_DRAFTS_KEY }, data: { value: "false" } });
+  const readBack = await intake(draft(row.id), undefined, { killSwitchValue: "true" });
+  assert.deepEqual(readBack, { ...first, existing: true });
+  const conflict = await intake(draft(row.id, { renderedText: "Other words, gates closed." }), undefined, {
+    killSwitchValue: "true",
+  });
+  assert.equal(conflict.status, "conflict");
+  // Past its deadline too: the read-back is not a new success.
+  const late = await intake(draft(row.id), undefined, { deadlineAt: new Date(Date.now() - 1_000) });
+  assert.deepEqual(late, { ...first, existing: true });
+});
+
 test("the Guard's rejection is stored and audited as a rejection", async () => {
   const row = await approvedChannel();
   await draftsOn();
