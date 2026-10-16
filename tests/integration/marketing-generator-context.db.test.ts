@@ -65,6 +65,8 @@ test("only the generator's secret and a run id are answered", () =>
     assert.equal((await call({ generatorRunId: "run-1" }, "x".repeat(48))).status, 401);
     assert.equal((await call({ generatorRunId: "run-1", channelId: "x" })).status, 400);
     assert.equal((await call({})).status, 400);
+    // The body is counted while it is read, not after.
+    assert.equal((await call({ generatorRunId: "run-1", pad: "x".repeat(4096) })).status, 413);
   }));
 
 test("the context names approval-mode accounts, claims without evidence, and facts without their pages", () =>

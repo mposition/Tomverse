@@ -29,3 +29,49 @@ export const marketingGeneratorAuthorized = (request: Request, secret: string): 
     createHash("sha256").update(provided).digest(),
   );
 };
+
+/**
+ * The body, read chunk by chunk and abandoned the moment it passes `maxBytes`.
+ *
+ * Not `request.json()` or `arrayBuffer()`: those hold the whole body before
+ * anything can count it, and the generator is authenticated but not trusted --
+ * a body of any size would be parsed before the schema could refuse it.
+ * `null` means too large.
+ */
+export const readMarketingGeneratorBody = async (
+  request: Request,
+  maxBytes: number,
+): Promise<Uint8Array | null> => {
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > maxBytes) return null;
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+};
+
+/** Strict UTF-8 JSON, or undefined. */
+export const parseMarketingGeneratorJson = (raw: Uint8Array): unknown => {
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
+  } catch {
+    return undefined;
+  }
+};

@@ -8,7 +8,12 @@ import {
   MARKETING_GENERATOR_CONTEXT_MAX_BYTES,
   readMarketingGeneratorContext,
 } from "@/lib/marketingGeneratorContext";
-import { marketingGeneratorAuthorized, marketingGeneratorSecret } from "@/lib/marketingGeneratorAuth";
+import {
+  marketingGeneratorAuthorized,
+  marketingGeneratorSecret,
+  parseMarketingGeneratorJson,
+  readMarketingGeneratorBody,
+} from "@/lib/marketingGeneratorAuth";
 import { runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 
@@ -33,8 +38,12 @@ export async function POST(request: Request) {
   if (!secret || !marketingGeneratorAuthorized(request, secret)) {
     return json({ error: "Unauthorized" }, 401);
   }
-  const body = await request.json().catch(() => null);
-  if (!requestSchema.safeParse(body).success) return json({ code: "invalid_request" }, 400);
+  // A run id is a few dozen bytes; the body is read no further than this.
+  const raw = await readMarketingGeneratorBody(request, 1024);
+  if (raw === null) return json({ code: "body_too_large" }, 413);
+  if (!requestSchema.safeParse(parseMarketingGeneratorJson(raw)).success) {
+    return json({ code: "invalid_request" }, 400);
+  }
 
   const context = await runMarketingTransaction(
     prisma,
