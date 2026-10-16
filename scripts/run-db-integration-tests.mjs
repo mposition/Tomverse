@@ -714,6 +714,14 @@ run(
     // digest refusing a second report inside the transaction that would have
     // audited it, and one winner among deliveries racing for an armed fault.
     "tests/integration/marketing-webhook-shadow.db.test.ts",
+    // The generator's draft intake (S3a): the decision, the Guard, the post, its
+    // history and its audit in one transaction, closed by default, and a
+    // transaction_timeout armed against the service's deadline -- which only a
+    // real PostgreSQL 17 can show.
+    "tests/integration/marketing-draft-intake.db.test.ts",
+    // What the generator reads before it writes (S3b): approval-mode accounts,
+    // claims without evidence, market facts without the pages they came from.
+    "tests/integration/marketing-generator-context.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them
