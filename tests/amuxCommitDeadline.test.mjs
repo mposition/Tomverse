@@ -186,6 +186,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
   // no commit deadline and continues to use the existing mutation fence.
   "20261012170000_amux_verified_no_commit_halt_auto_clear",
+  // amux-intake v19: the owner operating scope setting. It is an append-only
+  // owner setting guarded by its own audit trigger and adds no commit deadline.
+  "20261016030000_amux_intake_operating_scope",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

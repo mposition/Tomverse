@@ -186,6 +186,12 @@ export const findTruncateStatements = ({ sources }) => {
 
 export const PROTECTED_TABLES = [
   {
+    table: "AmuxIdeaOperatingScopeSetting",
+    delegate: "amuxIdeaOperatingScopeSetting",
+    writers: ["lib/amux/ideaOperatingScopeStore.ts"],
+    contract: "docs/policy/amux-intake.md v19",
+  },
+  {
     table: "AmuxIdeaAnalysisBudgetSetting",
     delegate: "amuxIdeaAnalysisBudgetSetting",
     writers: ["lib/amux/ideaAnalysisBudgetSettingStore.ts"],
@@ -535,6 +541,12 @@ export const EXCLUDED_PREFIXES = [
 
 /** Non-type string literals equal to a protected delegate name, by file. */
 export const DELEGATE_NAME_ALLOWLIST = [
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxIdeaOperatingScopeSetting",
+    count: 1,
+    reason: "Account export domain key only; no client is indexed and no database connection or writer exists in this metadata file.",
+  },
   {
     path: "lib/accountDataExportDomains.ts",
     delegate: "amuxIdeaAnalysisBudgetSetting",
@@ -990,6 +1002,27 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/accountDataExportDomains.ts",
     table: "AmuxIdeaAnalysisBudgetSetting",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason: "Only the domain key and prismaModel name this setting; the three existing prose verbs belong to other descriptors. This metadata builds no SQL or database client. Exact counts still reject added literals or writes.",
+  },
+  {
+    path: "prisma/migrations/20261016030000_amux_intake_operating_scope/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 5,
+    writeVerbs: 7,
+    reason: "This migration creates the protected append-only operating scope and its audited version guard. No row is seeded.",
+  },
+  {
+    path: "prisma/migrations/20261016030000_amux_intake_operating_scope/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 7,
+    reason: "The operating scope migration adds an audit foreign key and reads same-transaction human approval evidence. Its DDL/trigger verbs affect only the scope setting; it never writes AdminAuditLog.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxIdeaOperatingScopeSetting",
     tableMentions: 2,
     writeVerbs: 3,
     reason: "Only the domain key and prismaModel name this setting; the three existing prose verbs belong to other descriptors. This metadata builds no SQL or database client. Exact counts still reject added literals or writes.",

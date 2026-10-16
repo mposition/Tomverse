@@ -2438,6 +2438,7 @@ model AdminAuditLog {
   amuxV4SourcePlanCreations AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanCreationAudit")
   amuxV4AnalysisPriceApprovals AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceApprovalAudit")
   amuxV4AnalysisBudgetSettings AmuxIdeaAnalysisBudgetSetting[] @relation("AmuxV4AnalysisBudgetSettingAudit")
+  amuxIdeaOperatingScopeSettings AmuxIdeaOperatingScopeSetting[] @relation("AmuxIdeaOperatingScopeSettingAudit")
   amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
   amuxV4ContentPurgeAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4ContentPurgeAudit")
   amuxV4KeyDeleteAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4KeyDeleteAudit")
@@ -9865,6 +9866,23 @@ model AmuxIdeaAnalysisBudgetSetting {
   createdAt          DateTime @default(now())
 
   approvalAudit AdminAuditLog @relation("AmuxV4AnalysisBudgetSettingAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetSetting_audit_fkey")
+}
+
+/// docs/policy/amux-intake.md v19 item 2: the owner operating scope (repository
+/// allowlist and analysis model). Append-only; each version is bound to its
+/// same-transaction human audit. No row means intake is refused.
+model AmuxIdeaOperatingScopeSetting {
+  id                 String   @id
+  version            Int      @unique
+  repositories       Json
+  modelProvider      String
+  modelId            String
+  reasoningEffort    String
+  approvedByUserId   String
+  approvalAuditLogId String   @unique
+  createdAt          DateTime @default(now())
+
+  approvalAudit AdminAuditLog @relation("AmuxIdeaOperatingScopeSettingAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaOperatingScopeSetting_audit_fkey")
 }
 
 model AmuxIdeaAnalysisBudgetWindow {

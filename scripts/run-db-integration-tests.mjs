@@ -462,6 +462,9 @@ run(
     // Owner-managed monthly ceilings preserve usage and bind one canonical
     // audit/version without permitting unaudited or duplicate changes.
     "tests/integration/amux-v4-analysis-monthly-setting.db.test.ts",
+    // The v19 operating scope is append-only and bound to one owner audit per
+    // version; the database refuses a row without that evidence or any change.
+    "tests/integration/amux-intake-operating-scope.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",
