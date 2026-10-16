@@ -108,7 +108,8 @@ test("Escape is ignored while the request is in flight and closes only a settled
 test("the wrapper makes the page behind inert, moves focus in, restores it and warns before a refresh", () => {
   const source = read("components/admin/AmuxIdeaBusyDialog.tsx");
   assert.ok(source.includes('setAttribute("inert", "")') && source.includes("document.body.children"), "the page behind is inert");
-  assert.ok(source.includes('document.body.style.overflow = "hidden"'), "the page behind does not scroll");
+  assert.ok(source.includes("const releaseScroll = lockBodyScroll();") && source.includes("releaseScroll();"),
+    "the page behind does not scroll, through the shared counted lock");
   assert.ok(source.includes("dialog?.focus()") && source.includes("previous.focus()"), "focus moves in and comes back");
   assert.ok(source.includes('addEventListener("focusin"'), "focus that escapes is brought back");
   assert.ok(source.includes('addEventListener("keydown", swallowEscape, true)'), "Escape is swallowed at the document while in flight");
