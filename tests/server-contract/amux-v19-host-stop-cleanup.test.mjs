@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn as realSpawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import * as realFs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { PassThrough } from "node:stream";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 
@@ -14,13 +16,27 @@ let stageCount = 0;
 let sandboxCount = 0;
 let cleanupPath;
 let gitStarted;
+let checkoutSignal;
+let gitAbortObserved = false;
 let repositoryPath;
 let commitSha;
 
 mock.module("node:child_process", { namedExports: {
   spawn(command, args, options) {
     if (command !== "/usr/bin/bwrap") {
-      if (command === "/usr/bin/git") gitStarted?.();
+      if (command === "/usr/bin/git") {
+        checkoutSignal = options.signal;
+        if (mode === "stop") {
+          const child = new EventEmitter();
+          child.stdout = new PassThrough();
+          options.signal.addEventListener("abort", () => {
+            gitAbortObserved = true;
+            queueMicrotask(() => child.emit("error", new Error("synthetic abort")));
+          }, { once: true });
+          gitStarted?.();
+          return child;
+        }
+      }
       return realSpawn(command, args, options);
     }
     spawnCount += 1;
@@ -86,8 +102,9 @@ const withSwitch = async (run) => {
 test.before(async () => {
   if (process.platform !== "linux") return;
   repositoryPath = await realFs.mkdtemp(join(tmpdir(), "amux-v19-host-proof-"));
-  const git = (args, options = {}) => execFileSync("git", ["-C", repositoryPath,
-    ...args], { stdio: "pipe", ...options });
+  const git = (args, options = {}) => execFileSync("/usr/bin/git", ["-C", repositoryPath,
+    ...args], { stdio: "pipe", env: { ...process.env,
+      GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" }, ...options });
   git(["init", "-q"]);
   await realFs.writeFile(join(repositoryPath, "note.txt"), "synthetic tracked note\n");
   git(["add", "note.txt"]);
@@ -106,15 +123,20 @@ test("operator stop aborts checkout materialization before any CLI spawn", {
   mode = "stop";
   spawnCount = 0;
   stageCount = 0;
+  checkoutSignal = null;
+  gitAbortObserved = false;
   let checks = 0;
   const started = new Promise((resolveStarted) => { gitStarted = resolveStarted; });
-  assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis(input(
-    async () => ++checks === 1 ? false : (await started, true))),
-  { kind: "outcome_unknown", cliStarted: false });
-  assert.ok(checks >= 2);
-  assert.equal(spawnCount, 0);
-  assert.equal(stageCount, 0);
-  gitStarted = null;
+  try {
+    assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis(input(
+      async () => ++checks === 1 ? false : (await started, true))),
+    { kind: "outcome_unknown", cliStarted: false });
+    assert.ok(checks >= 2);
+    assert.equal(checkoutSignal.aborted, true);
+    assert.equal(gitAbortObserved, true);
+    assert.equal(spawnCount, 0);
+    assert.equal(stageCount, 0);
+  } finally { gitStarted = null; }
 }));
 
 test("cleanup failure after child spawn preserves the provider-use signal", {
