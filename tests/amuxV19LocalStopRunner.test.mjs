@@ -5,7 +5,8 @@ import test from "node:test";
 
 import { shouldStopAmuxV19LocalAnalysis } from
   "../lib/amux/ideaLocalAnalysisStopPoll.mjs";
-import { AMUX_V4_LIVE_ANALYSIS_CLI_ENV, amuxV4CliExitFailureStage,
+import { AMUX_V4_LIVE_ANALYSIS_CLI_ENV, amuxV4ApprovedCliBinarySource,
+  amuxV4CliExitFailureStage,
   awaitAmuxV19StoppableChild, runAmuxV4IsolatedApprovedAnalysis } from
   "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
 import { amuxV4AnalysisCliDiagnostic } from
@@ -64,7 +65,9 @@ test("live CLI refuses a stopped or uncertain pre-spawn poll without invocation"
   skip: process.platform !== "linux",
 }, async (t) => {
   // A regression must never invoke the real paid CLI on the operator host.
-  if (existsSync("/home/tommy/.local/share/claude/versions/2.1.288")) {
+  const binarySource = amuxV4ApprovedCliBinarySource("anthropic");
+  assert.equal(typeof binarySource, "string");
+  if (existsSync(binarySource)) {
     t.skip("real CLI binary is installed on this host");
     return;
   }
