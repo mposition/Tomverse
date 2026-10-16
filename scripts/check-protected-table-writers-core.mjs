@@ -2234,10 +2234,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingLlmBudgetStore.ts",
     table: "MarketingLlmCall",
-    tableMentions: 16,
-    writeVerbs: 7,
+    tableMentions: 21,
+    writeVerbs: 10,
     reason:
-      "The sole registered writer of the marketing LLM cost ledger: it inserts a reservation and moves a call to dispatched or to its one close (including the 15-minute expiry), each after the generator's audit row in the same transaction. The database triggers own every transition rule and timestamp; the other mentions are the reads that lock the month and the row.",
+      "The sole registered writer of the marketing LLM cost ledger: it inserts a reservation and moves a call to dispatched or to its one close (including the 15-minute expiry), sets or releases a person's legal hold, and deletes rows retention lets go, each after the generator's audit row in the same transaction. The database triggers own every transition rule and timestamp; the other mentions are the reads that lock the month and the row.",
   },
   {
     path: "lib/adminAuditSystemActors.ts",
@@ -3697,6 +3697,12 @@ export const PROTECTED_EXPORT_ALLOWLIST = [
 // a publication nobody approved.
 
 export const RETENTION_SETTING_ALLOWLIST = [
+  {
+    path: "lib/marketingLlmBudgetStore.ts",
+    count: 2,
+    reason:
+      "The marketing LLM cost ledger's retention writer: it imports the setting's constant and sets it for its own transaction before deleting closed, unheld rows past their 24 months. The delete trigger still applies every rule to each row.",
+  },
   {
     path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
     count: 1,
