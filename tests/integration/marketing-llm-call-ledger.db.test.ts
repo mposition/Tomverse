@@ -282,11 +282,14 @@ test("MarketingLlmCall holds its state machine, clock, pairing and deletion rule
     // An empty temporary table of the same name earlier on search_path does
     // not answer for the ledger.
     await client.query(`CREATE TEMP TABLE "MarketingLlmCall" ("id" TEXT)`);
-    await rejects(`TRUNCATE "${schema}"."MarketingLlmCall"`, [], /delete_forbidden/);
-    await client.query(`SET search_path TO pg_temp, "${schema}"`);
-    await rejects(`TRUNCATE "${schema}"."MarketingLlmCall"`, [], /delete_forbidden/);
-    await client.query(`DROP TABLE pg_temp."MarketingLlmCall"`);
-    await client.query(`SET search_path TO "${schema}"`);
+    try {
+      await rejects(`TRUNCATE "${schema}"."MarketingLlmCall"`, [], /delete_forbidden/);
+      await client.query(`SET search_path TO pg_temp, "${schema}"`);
+      await rejects(`TRUNCATE "${schema}"."MarketingLlmCall"`, [], /delete_forbidden/);
+    } finally {
+      await client.query(`SET search_path TO "${schema}"`);
+      await client.query(`DROP TABLE pg_temp."MarketingLlmCall"`);
+    }
     // The audit rows the ledger points at cannot be removed under it.
     await assert.rejects(client.query(`DELETE FROM "AdminAuditLog" WHERE "id" = 'audit_1'`), /foreign key/);
   } finally {
