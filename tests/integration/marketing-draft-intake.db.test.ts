@@ -269,9 +269,10 @@ test("a transaction whose timer someone else already armed is refused, not trust
 test("a failure after the post is written leaves neither the post nor its audit", async () => {
   const row = await approvedChannel();
   await draftsOn();
+  let postId: string | null = null;
   await assert.rejects(
     runMarketingTransaction(prisma, async (tx) => {
-      await intakeMarketingGeneratorDraft(
+      const outcome = await intakeMarketingGeneratorDraft(
         tx,
         {
           generatorRunId: "run-1",
@@ -283,11 +284,16 @@ test("a failure after the post is written leaves neither the post nor its audit"
         },
         OPEN,
       );
+      assert.equal(outcome.status, "queued");
+      postId = "postId" in outcome ? outcome.postId : null;
       throw new Error("the caller's transaction fails after the intake");
     }),
   );
+  assert.ok(postId, "the intake wrote a post before the failure");
   assert.equal(await prisma.marketingPost.count(), 0);
-  assert.equal((await intakeAudits()).length, 0);
+  // By the id the rolled-back post had: an audit row left behind would still be
+  // there under it, whatever else exists.
+  assert.equal(await prisma.adminAuditLog.count({ where: { targetId: postId } }), 0);
 });
 
 test("an unknown channel is refused, not created", async () => {
