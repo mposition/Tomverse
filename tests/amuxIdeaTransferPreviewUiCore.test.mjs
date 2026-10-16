@@ -53,6 +53,8 @@ test("current server template is accepted on creation and exact-ID read-back", (
 test("legacy and unknown prompt versions remain fail-closed", () => {
   for (const templateVersion of ["amux-v4-analysis-prompt-v1",
     "amux-v4-analysis-prompt-v2", "amux-v4-analysis-prompt-v3",
+    "amux-v4-analysis-prompt-v4", "amux-v4-analysis-prompt-v5",
+    "amux-v4-analysis-prompt-v6",
     "amux-v4-analysis-prompt-v999", "", null]) {
     const changed = { ...reply, payload: { ...reply.payload, templateVersion } };
     assert.equal(readPreparedIdeaTransferPreview(200, changed, previewId, ideaId,

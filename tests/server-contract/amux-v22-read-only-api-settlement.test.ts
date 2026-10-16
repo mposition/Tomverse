@@ -30,7 +30,21 @@ function makeWorld(outcome: Outcome) {
     usageInserts: 0,
     usageAudits: 0,
     settlementAudits: 0,
+    gradeEscalationAudits: [] as Array<Record<string, unknown>>,
+    gradeGuard: false,
+    frontierPriceAvailable: true,
+    frontierPriceDatabaseError: false,
+    taskRole: null as string | null,
+    taskGrade: "medium",
+    assignmentGrade: null as string | null,
+    assignmentAuditPresent: true,
+    assignmentAuditAction: "amux.v22.worker.assigned",
+    sourceApprovalId: null as string | null,
+    patch: null as { taskId: string; baseSha: string; sha256: string;
+      text: string; files: Array<{ path: string; mode: "100644";
+        bytesBase64: string }> } | null,
     taskUpdates: 0,
+    gradeAuditsAtTaskUpdate: -1,
     attemptUpdates: 0,
     runtimeUpdates: 0,
     taskUpdateData: null as Record<string, unknown> | null,
@@ -59,6 +73,8 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
     if (input.action === "amux.cli_usage.recorded") world.usageAudits += 1;
     if (input.action === "amux.v22.execution.settled")
       world.settlementAudits += 1;
+    if (input.action === "amux.grade.escalated")
+      world.gradeEscalationAudits.push(input as unknown as Record<string, unknown>);
     return `audit-${input.action}`;
   },
 } });
@@ -69,7 +85,7 @@ mock.module(mod("lib/amux/escalation.ts"), { namedExports: {
   openAmuxHumanEscalation: async () => undefined,
 } });
 mock.module(mod("lib/engineeringAgentV22SettlementPatch.ts"), {
-  namedExports: { loadEngineeringAgentV22SettlementPatch: async () => null },
+  namedExports: { loadEngineeringAgentV22SettlementPatch: async () => world.patch },
 });
 mock.module(mod("lib/engineeringAgentV22StoredCandidate.ts"), {
   namedExports: { loadEngineeringAgentV22StoredCandidate: async () => null },
@@ -89,11 +105,23 @@ mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
   amuxV22ApiModelAccessCurrent: () => true,
   recoveryAttemptBudget: async () => ({ allowed: false }),
 } });
+class CatalogApprovalError extends Error {}
 mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), {
   namedExports: {
-    calculateCurrentApprovedAmuxV4TaskCost: async () => null,
+    AmuxV4TaskCatalogApprovalError: CatalogApprovalError,
+    calculateCurrentApprovedAmuxV4TaskCost: async () => {
+      if (world.frontierPriceDatabaseError) throw new Error("database unavailable");
+      if (!world.frontierPriceAvailable) throw new CatalogApprovalError("price unavailable");
+      return { receipt: { role: "implement", grade: "frontier",
+        receiptDigest: "f".repeat(64) } };
+    },
   },
 });
+mock.module(mod("lib/amux/v52GradeReceipt.ts"), { namedExports: {
+  AMUX_GRADE_ESCALATED_ACTION: "amux.grade.escalated",
+  readAmuxV52TaskReceipt: async () => ({ role: "implement",
+    grade: "routine", receiptDigest: "a".repeat(64) }),
+} });
 mock.module(mod("lib/amux/v4TaskCostCatalogCore.ts"), { namedExports: {
   inspectV4TaskCostCatalog: () => ({ ok: true, catalogDigest }),
 } });
@@ -117,6 +145,8 @@ const tx = {
     }];
     if (sql.includes('FROM "AmuxWorkItem"')) return [{
       id: world.taskId, sourceSystem: "admin-idea-v4",
+      taskRole: world.taskRole, executionGrade: world.taskGrade,
+      v4SourceApprovalId: world.sourceApprovalId,
       v22AssignmentId: "assignment-one", owner: worker, status: "doing",
       revision: 5, claimedAt: new Date("2026-10-13T11:59:00.000Z"),
       archivedAt: null, projectKey: null, teamKey: null,
@@ -132,6 +162,8 @@ const tx = {
     throw new Error(`unexpected SQL: ${sql}`);
   },
   amuxV22WorkerAssignment: { findUnique: async () => ({
+    id: "assignment-one", grade: world.assignmentGrade ?? world.taskGrade,
+    authorizationAuditLogId: "assignment-audit",
     recoveryApprovalId: world.recoveryApprovalId, taskRevision: 5,
   }) },
   amuxWorkDelivery: { findUnique: async () => ({ status: "acknowledged" }) },
@@ -140,11 +172,20 @@ const tx = {
     findUnique: async () => null,
   },
   amuxV22TaskResult: { findUnique: async () => world.outcome === "succeeded" ?
-    { taskId, bodyPurgedAt: null } : null },
-  amuxV22TaskPatch: { findUnique: async () => null },
+    { taskId: world.taskId, bodyPurgedAt: null } : null },
+  amuxV22TaskPatch: { findUnique: async () => world.patch ? {
+    taskId: world.patch.taskId, baseSha: world.patch.baseSha,
+    patchSha256: world.patch.sha256, bodyPurgedAt: null,
+  } : null },
+  amuxIdeaUnitDecision: { findUnique: async () => ({
+    confirmationSnapshot: { card: { task: { costReceipt: {
+      role: "implement", grade: "routine", receiptDigest: "a".repeat(64),
+    } } } },
+  }) },
   engineeringAgentWorkItem: { findFirst: async () => null },
   amuxWorkItem: { update: async (input: { data: Record<string, unknown> }) => {
     world.taskUpdates += 1;
+    world.gradeAuditsAtTaskUpdate = world.gradeEscalationAudits.length;
     world.taskUpdateData = input.data;
   } },
   amuxExecutionAttempt: {
@@ -180,9 +221,14 @@ const tx = {
       cacheWriteMicroUsdPerMillion: 200_000,
       outputMicroUsdPerMillion: 2_000_000 }] },
   }) },
-  adminAuditLog: { findUnique: async () => ({ entryHash: "a".repeat(64),
-    action: "amux.v4.task_catalog.approve", actorUserId: "owner-one",
-    targetId: "catalog-one", targetType: "AmuxV4TaskCostCatalogApproval" }) },
+  adminAuditLog: { findUnique: async (args: { where: { id: string } }) =>
+    args.where.id === "assignment-audit" ?
+      !world.assignmentAuditPresent ? null : {
+      entryHash: "a".repeat(64), action: world.assignmentAuditAction,
+      targetId: "assignment-one", metadata: { v52GradeRouting: world.gradeGuard },
+    } : { entryHash: "a".repeat(64),
+      action: "amux.v4.task_catalog.approve", actorUserId: "owner-one",
+      targetId: "catalog-one", targetType: "AmuxV4TaskCostCatalogApproval" } },
 };
 
 const protocol = import(mod("lib/amux/v22ReadOnlyApiProtocol.mjs"));
@@ -301,6 +347,219 @@ test("other Tasks keep the global five-attempt settlement budget", async () => {
     assert.equal(world.attemptUpdateData?.reason,
       attemptNumber === 5 ? "attempts" : "reported_result");
   }
+});
+
+test("legacy settlement does not acquire the v52 assignment-audit gate", async () => {
+  world = makeWorld("succeeded");
+  world.assignmentAuditPresent = false;
+  world.taskGrade = "routine";
+  const result = await (await execution).settleAmuxV22TaskExecution(
+    await settlementInput("succeeded"));
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "review");
+});
+
+test("v52 settlement refuses a marked but invalid assignment audit", async () => {
+  world = makeWorld("succeeded");
+  world.gradeGuard = true;
+  world.taskGrade = "advanced";
+  world.assignmentAuditAction = "unexpected";
+  const result = await (await execution).settleAmuxV22TaskExecution(
+    await settlementInput("succeeded"));
+  assert.deepEqual(result, { settled: false,
+    reason: "assignment_audit_unverified" });
+});
+
+test("v52 contract touch discards the ordinary grade and binds one frontier receipt", async () => {
+  world = makeWorld("failed");
+  world.taskId = "00000000-0000-4000-8000-000000000099";
+  world.attemptNumber = 1;
+  world.recoveryApprovalId = null;
+  world.gradeGuard = true;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.sourceApprovalId = "source-one";
+  world.storedEvents = [{ invocationId: world.attemptId,
+    receiptDigest: "7".repeat(64), status: "failed",
+    completeness: "reported_complete", projectedApiCostMicrousd: BigInt(1),
+    cli: "claude", source: "claude_result", actualModelId: "claude-opus-5-5",
+    selectedModelId: "claude-opus-5-5", provider: "anthropic",
+    authentication: "subscription", inputTokens: BigInt(1),
+    outputTokens: BigInt(1), cacheReadInputTokens: BigInt(0),
+    cacheCreationInputTokens: BigInt(0), inputTokensIncludeCacheRead: false,
+    inputTokensIncludeCacheWrite: false, completedTurns: 1,
+    pricingVersion: null }];
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    attemptId: world.attemptId, worker, instanceId, generation: 1,
+    taskRevision: 5, outcome: "failed", invocationIds: [world.attemptId],
+    changedPaths: ["LIB/AMUX/execution.ts"],
+  });
+  assert.deepEqual(result, { settled: true, taskRevision: 6 });
+  assert.equal(world.taskUpdateData?.status, "todo");
+  assert.equal(world.taskUpdateData?.executionGrade, "frontier");
+  assert.equal(world.attemptUpdateData?.reason, "contract_path_touched");
+  assert.equal(world.gradeEscalationAudits.length, 1);
+  assert.equal(world.gradeAuditsAtTaskUpdate, 1);
+  assert.deepEqual({ ...(world.gradeEscalationAudits[0]?.metadata as
+    Record<string, unknown>), newReceipt: null }, {
+    attemptId: world.attemptId, assignmentId: "assignment-one",
+    fromRevision: 5, reason: "contract_path_touched",
+    previousGrade: "routine", nextGrade: "frontier",
+    originalReceiptDigest: "a".repeat(64), newReceipt: null,
+    classificationFailure: true,
+  });
+});
+
+test("v52 settlement blocks a contract publish file omitted from the runner inventory", async () => {
+  world = makeWorld("succeeded");
+  world.taskId = "00000000-0000-4000-8000-000000000099";
+  world.recoveryApprovalId = null;
+  world.gradeGuard = true;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.sourceApprovalId = "source-one";
+  world.patch = { taskId: world.taskId, baseSha: "b".repeat(40),
+    sha256: "d".repeat(64), text: "diff --git a/lib/amux/guard.ts b/lib/amux/guard.ts\n",
+    files: [{ path: "lib/amux/guard.ts", mode: "100644",
+      bytesBase64: "Y29udHJhY3Q=" }] };
+  world.storedEvents = [{ invocationId: world.attemptId,
+    receiptDigest: "7".repeat(64), status: "succeeded",
+    completeness: "reported_complete", projectedApiCostMicrousd: BigInt(1),
+    cli: "claude", source: "claude_result", actualModelId: "claude-opus-5-5",
+    selectedModelId: "claude-opus-5-5", provider: "anthropic",
+    authentication: "subscription", inputTokens: BigInt(1),
+    outputTokens: BigInt(1), cacheReadInputTokens: BigInt(0),
+    cacheCreationInputTokens: BigInt(0), inputTokensIncludeCacheRead: false,
+    inputTokensIncludeCacheWrite: false, completedTurns: 1,
+    pricingVersion: null }];
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    attemptId: world.attemptId, worker, instanceId, generation: 1,
+    taskRevision: 5, outcome: "succeeded", invocationIds: [world.attemptId],
+    changedPaths: ["src/ordinary.ts"],
+  });
+  assert.deepEqual(result, { settled: true, taskRevision: 6 });
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.taskUpdateData?.executionGrade, undefined);
+  assert.equal(world.attemptUpdateData?.reason, "changed_paths_unavailable");
+  assert.equal(world.gradeEscalationAudits.length, 0);
+});
+
+test("v52 contract touch on the final attempt blocks for human recovery", async () => {
+  world = makeWorld("failed");
+  world.taskId = "00000000-0000-4000-8000-000000000099";
+  world.attemptNumber = 5;
+  world.recoveryApprovalId = null;
+  world.gradeGuard = true;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.sourceApprovalId = "source-one";
+  world.storedEvents = [{ invocationId: world.attemptId,
+    receiptDigest: "7".repeat(64), status: "failed",
+    completeness: "reported_complete", projectedApiCostMicrousd: BigInt(1),
+    cli: "claude", source: "claude_result", actualModelId: "claude-opus-5-5",
+    selectedModelId: "claude-opus-5-5", provider: "anthropic",
+    authentication: "subscription", inputTokens: BigInt(1),
+    outputTokens: BigInt(1), cacheReadInputTokens: BigInt(0),
+    cacheCreationInputTokens: BigInt(0), inputTokensIncludeCacheRead: false,
+    inputTokensIncludeCacheWrite: false, completedTurns: 1,
+    pricingVersion: null }];
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    attemptId: world.attemptId, worker, instanceId, generation: 1,
+    taskRevision: 5, outcome: "failed", invocationIds: [world.attemptId],
+    changedPaths: ["lib/amux/execution.ts"],
+  });
+  assert.deepEqual(result, { settled: true, taskRevision: 6 });
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.taskUpdateData?.executionGrade, undefined);
+  assert.equal(world.attemptUpdateData?.reason, "attempt_budget_exhausted");
+  assert.equal(world.gradeEscalationAudits.length, 0);
+});
+
+test("v52 missing inventory blocks even a successful execution", async () => {
+  world = makeWorld("succeeded");
+  world.gradeGuard = true;
+  world.taskGrade = "advanced";
+  const result = await (await execution).settleAmuxV22TaskExecution(
+    await settlementInput("succeeded"));
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.attemptUpdateData?.reason, "changed_paths_unavailable");
+  assert.equal(world.gradeEscalationAudits.length, 0);
+});
+
+test("v52 worker-blocked outcome keeps its cause without an inventory", async () => {
+  world = makeWorld("failed");
+  world.gradeGuard = true;
+  world.taskGrade = "routine";
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    attemptId: world.attemptId, worker, instanceId, generation: 1,
+    taskRevision: 5, outcome: "blocked", invocationIds: [],
+  });
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.notEqual(world.attemptUpdateData?.reason, "changed_paths_unavailable");
+});
+
+test("v52 ordinary paths preserve the normal successful destination", async () => {
+  world = makeWorld("succeeded");
+  world.gradeGuard = true;
+  world.taskGrade = "advanced";
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...await settlementInput("succeeded"), changedPaths: ["app/page.tsx"],
+  });
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "review");
+  assert.equal(world.gradeEscalationAudits.length, 0);
+});
+
+test("v52 contract touch blocks when a new frontier price is unavailable", async () => {
+  world = makeWorld("failed");
+  world.gradeGuard = true;
+  world.frontierPriceAvailable = false;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.sourceApprovalId = "source-one";
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...await settlementInput("failed"),
+    changedPaths: ["lib/amux/execution.ts"],
+  });
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.taskUpdateData?.executionGrade, undefined);
+  assert.equal(world.attemptUpdateData?.reason, "grade_receipt_unavailable");
+  assert.equal(world.gradeEscalationAudits.length, 0);
+});
+
+test("v52 frontier price database error cannot be swallowed inside a transaction", async () => {
+  world = makeWorld("failed");
+  world.gradeGuard = true;
+  world.frontierPriceDatabaseError = true;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.sourceApprovalId = "source-one";
+  await assert.rejects((await execution).settleAmuxV22TaskExecution({
+    ...await settlementInput("failed"),
+    changedPaths: ["lib/amux/execution.ts"],
+  }), /database unavailable/);
+  assert.equal(world.taskUpdateData, null);
+  assert.equal(world.gradeEscalationAudits.length, 0);
+});
+
+test("v52 contract touch reports a task-assignment grade mismatch", async () => {
+  world = makeWorld("failed");
+  world.gradeGuard = true;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.assignmentGrade = "advanced";
+  world.sourceApprovalId = "source-one";
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...await settlementInput("failed"),
+    changedPaths: ["lib/amux/execution.ts"],
+  });
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.attemptUpdateData?.reason, "grade_binding_unverified");
+  assert.equal(world.gradeEscalationAudits.length, 0);
 });
 
 test("unknown or incomplete native receipt writes no usage or settlement", async () => {

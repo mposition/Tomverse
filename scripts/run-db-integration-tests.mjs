@@ -255,6 +255,8 @@ run(
     "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
     "tests/integration/amuxV4DerivationService.db.test.mjs",
     "tests/integration/amuxV4PortfolioScore.db.test.mjs",
+    // v52 permits only one audited, attempt-bound contract-path grade increase.
+    "tests/integration/amuxV52GradeEscalation.db.test.mjs",
     // Policy v46: a legacy safe stop binds the live runtime after re-registration.
     "tests/integration/amuxV22LegacySafeStopLiveRuntime.db.test.mjs",
     "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
@@ -728,6 +730,27 @@ run(
     // Marketing retention (S3h1): what the delete triggers let go goes, with an
     // audit row each and a retention_run report; what they keep stays.
     "tests/integration/marketing-retention.db.test.ts",
+    // The LLM cost ledger's own rules (S3c1), in plain SQL against a scratch
+    // schema: born reserved, five transitions, evidence set once, the
+    // reservation clock checked rather than recomputed, reasons paired to
+    // observations, and deletion left to retention.
+    "tests/integration/marketing-llm-call-ledger.db.test.ts",
+    // The ledger's one writer (S3c2): reserve, dispatch once, one close per
+    // call, replays answered before any current setting is read, the monthly
+    // cap under one month lock across two connections, and each action's
+    // statement count pinned.
+    "tests/integration/marketing-llm-budget-store.db.test.ts",
+    // The generator's budget route (S3c3a): signed, bounded, strict requests,
+    // each action in its own transaction, and no model pinned as built.
+    "tests/integration/marketing-llm-budget-route.db.test.ts",
+    // The ledger's expiry (S3c3b): stale reservations released, stale
+    // dispatches kept as unknown, a late generator report a conflict, nothing
+    // under the kill switch, and a held row skipped rather than waited on.
+    "tests/integration/marketing-llm-expiry.db.test.ts",
+    // Legal hold and retention for the ledger (S3c3c): a hold only on a
+    // person's audit row for exactly that decision; retention deletes closed,
+    // unheld calls past 24 months, each with an audit row.
+    "tests/integration/marketing-llm-hold-retention.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them

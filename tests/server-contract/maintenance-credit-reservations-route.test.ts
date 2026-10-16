@@ -204,6 +204,17 @@ const loadRoute = () => {
         }),
       },
     });
+    mock.module(mod("lib/marketingLlmExpiry.ts"), {
+      namedExports: {
+        runMarketingLlmExpiryQuietly: quiet({
+          skipped: null,
+          examined: 43,
+          released: 44,
+          unknownRetained: 45,
+          untouched: 46,
+        }),
+      },
+    });
     mock.module(mod("lib/externalImportService.ts"), {
       namedExports: {
         reconcileExpiredExternalImportStaging: quiet({ expiredImports: 26 }),
@@ -381,6 +392,8 @@ test("every ride-along sweep's result reaches the response body and the run row"
   assert.equal(body.decisionMakerRetention.staleClosed, 39);
   assert.equal(body.decisionMakerRetention.purged, 40);
   assert.equal(body.decisionMakerRetention.keysDestroyed, 41);
+  assert.equal(body.marketingLlmExpiry.released, 44);
+  assert.equal(body.marketingLlmExpiry.unknownRetained, 45);
   assert.equal(body.messageAttachments.cleanup.examined, 36);
   assert.equal(body.messageAttachments.cleanup.deleted, 37);
   assert.deepEqual(body.memoryExtractionProviderCalls, { settled: 31 });
@@ -407,6 +420,7 @@ test("every ride-along sweep's result reaches the response body and the run row"
     "messageAttachments",
     "knowledge",
     "decisionMakerRetention",
+    "marketingLlmExpiry",
     "externalImportStaging",
     "memoryExtractionProviderCalls",
     "memoryExtractionDispatch",

@@ -447,6 +447,7 @@ pub struct V22SidecarResult {
     pub patch_digest: Option<String>,
     pub publish_files: Option<serde_json::Value>,
     pub publish_files_digest: Option<String>,
+    pub changed_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -500,7 +501,8 @@ pub trait LocalAmux {
             usage_receipt: None, usage_receipt_digest: None,
             result_text: None, result_sha256: None,
             patch_body: None, patch_base_sha: None, patch_digest: None,
-            publish_files: None, publish_files_digest: None })
+            publish_files: None, publish_files_digest: None,
+            changed_paths: None })
     }
 
     async fn confirm_v22_result(&mut self, _attempt_id: &str, _sha256: &str) -> Result<()> {
@@ -1864,6 +1866,12 @@ async fn v22_sidecar_call(
         let publish_files = value.get("publishFiles").filter(|v| !v.is_null());
         let publish_files_digest = value.get("publishFilesDigest")
             .and_then(|v| v.as_str());
+        let changed_paths = value.get("changedPaths").map(|paths| {
+            paths.as_array().context("invalid changed paths")?.iter().map(|path|
+                path.as_str().map(str::to_owned)
+                    .context("invalid changed path")
+            ).collect::<Result<Vec<String>>>()
+        }).transpose()?;
         let read_only_retry = match value.get("readOnlyRetry") {
             None => None,
             Some(item) => {
@@ -1968,7 +1976,8 @@ async fn v22_sidecar_call(
             patch_base_sha: patch_base_sha.map(str::to_owned),
             patch_digest: patch_digest.map(str::to_owned),
             publish_files: publish_files.cloned(),
-            publish_files_digest: publish_files_digest.map(str::to_owned) })
+            publish_files_digest: publish_files_digest.map(str::to_owned),
+            changed_paths })
     };
     tokio::time::timeout(Duration::from_secs(5), operation)
         .await.context("v22 sidecar transport timed out")?
@@ -2225,6 +2234,17 @@ impl LocalAmux for HttpLocal {
             "prompt": delivery.prompt,
             "recoveryBinding": v22_recovery_binding(delivery, instance_id, generation)?,
         });
+        if profile.grade_guard {
+            if !matches!(profile.execution_grade.as_deref(),
+                Some("routine" | "advanced" | "frontier")) {
+                bail!("invalid v52 execution grade");
+            }
+            payload.as_object_mut().context("v22 payload object")?
+                .insert("gradeGuard".into(), serde_json::Value::Bool(true));
+            payload.as_object_mut().context("v22 payload object")?
+                .insert("executionGrade".into(),
+                    serde_json::json!(profile.execution_grade));
+        }
         if let Some(read_only_retry) = read_only_retry {
             payload.as_object_mut().context("v22 payload object")?
                 .insert("readOnlyRetry".into(), read_only_retry);
@@ -2951,10 +2971,20 @@ pub async fn run_from_env() -> i32 {
                                         };
                                         match usage_record {
                                             Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
-                                                let answer = api.v22_execution_settle_verified(
-                                                    &entry.delivery, &session.instance_id,
-                                                    session.generation, outcome,
-                                                    settlement_retry_echo).await;
+                                                let answer = if entry.delivery.v22_execution.as_ref()
+                                                    .is_some_and(|profile| profile.grade_guard) {
+                                                    api.v22_execution_settle_v52(
+                                                        &entry.delivery, &session.instance_id,
+                                                        session.generation, outcome,
+                                                        settlement_retry_echo,
+                                                        v22_result.as_ref().and_then(|result|
+                                                            result.changed_paths.as_deref())).await
+                                                } else {
+                                                    api.v22_execution_settle_verified(
+                                                        &entry.delivery, &session.instance_id,
+                                                        session.generation, outcome,
+                                                        settlement_retry_echo).await
+                                                };
                                                 if api_retry { answer } else { match answer {
                                                     Ok(ref refused) if !refused.settled &&
                                                         matches!(refused.reason.as_deref(),
@@ -3370,6 +3400,7 @@ mod tests {
             patch_base_sha: Some("b".repeat(40)), patch_digest: Some("c".repeat(64)),
             publish_files: Some(serde_json::json!([{"path":"a"}])),
             publish_files_digest: Some("d".repeat(64)),
+            changed_paths: None,
         };
         assert_eq!(v22_result_transfer(&result), V22ResultTransfer::Write);
         result.patch_body = None;
@@ -4565,6 +4596,8 @@ mod tests {
         delivery.assignment_id = Some(Uuid::new_v4().to_string());
         delivery.v22_execution = Some(crate::tomverse_api::V22ExecutionProfile {
             model_id: "claude-opus-5-5".into(), role: "design".into(),
+            grade_guard: false,
+            execution_grade: None,
             budget_microusd: 1_000_000,
             read_only_retry: None,
         });
@@ -4596,6 +4629,8 @@ mod tests {
         let retry = read_only_retry_profile();
         delivery.v22_execution = Some(crate::tomverse_api::V22ExecutionProfile {
             model_id: retry.model_id.clone(), role: "investigate".into(),
+            grade_guard: false,
+            execution_grade: None,
             budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
         });
         let payload = v22_read_only_retry_payload(&delivery, &retry).unwrap();
@@ -4642,6 +4677,8 @@ mod tests {
         let retry = read_only_api_retry_profile();
         delivery.v22_execution = Some(crate::tomverse_api::V22ExecutionProfile {
             model_id: retry.model_id.clone(), role: "investigate".into(),
+            grade_guard: false,
+            execution_grade: None,
             budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
         });
         let payload = v22_read_only_retry_payload(&delivery, &retry).unwrap();

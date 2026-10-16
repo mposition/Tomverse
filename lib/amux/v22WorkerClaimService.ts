@@ -21,6 +21,7 @@ import { TICK_TRANSACTION_LIMITS, withAutoTransaction } from
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
+import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { amuxV22ApiModelAccessCurrent, readAmuxV22RecoveryAuthority } from
   "./v22TaskRecoveryService.ts";
@@ -198,20 +199,26 @@ async function claimCandidate(taskId: string, assignmentId: string,
           select: { confirmationSnapshot: true },
         }) : null;
       const snapshot = source?.confirmationSnapshot;
-      const exactGradeRouting = amuxExecutionGradeRoutingEnabled(
-        process.env[AMUX_EXECUTION_GRADE_ENV]) &&
-        isAmuxV52TaskConfirmation(snapshot, card.executionGrade);
-      if (exactGradeRouting &&
-          !inspectV52TaskCatalogGrades(approved.catalog, ceilings).ok) {
-        throw new BoardImportError("grade_catalog_mismatch", 409);
-      }
-      const approvedCost = snapshot && typeof snapshot === "object" &&
+      const sourceApprovedCost = snapshot && typeof snapshot === "object" &&
         !Array.isArray(snapshot) && "card" in snapshot &&
         snapshot.card && typeof snapshot.card === "object" &&
         !Array.isArray(snapshot.card) && "task" in snapshot.card &&
         snapshot.card.task && typeof snapshot.card.task === "object" &&
         !Array.isArray(snapshot.card.task) && "costReceipt" in snapshot.card.task ?
           snapshot.card.task.costReceipt : null;
+      const approvedCost = await readAmuxV52TaskReceipt(tx, taskId,
+        sourceApprovedCost, card.executionGrade);
+      const sourceGrade = sourceApprovedCost && typeof sourceApprovedCost === "object" &&
+        !Array.isArray(sourceApprovedCost) && "grade" in sourceApprovedCost ?
+        sourceApprovedCost.grade : null;
+      const exactGradeRouting = amuxExecutionGradeRoutingEnabled(
+        process.env[AMUX_EXECUTION_GRADE_ENV]) &&
+        isAmuxV52TaskConfirmation(snapshot, sourceGrade) &&
+        approvedCost !== null;
+      if (exactGradeRouting &&
+          !inspectV52TaskCatalogGrades(approved.catalog, ceilings).ok) {
+        throw new BoardImportError("grade_catalog_mismatch", 409);
+      }
       const addedRouteConsented = !!recovery?.riskAcceptanceId && !!recovery.routeId &&
         amuxV22RecoveryAddedRouteConsented(approvedCost, approved.receipt, recovery.routeId);
       if (reconfirmOnly && !addedRouteConsented)
@@ -363,6 +370,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
           laneDecisionSequence: lane.sequence?.toString() ?? null,
           routeId: route.routeId, catalogApprovalId: approved.approvalId,
           costReceiptDigest: recoveryApproved.receipt.receiptDigest,
+          v52GradeRouting: exactGradeRouting,
           ...(recovery ? { recoveryApprovalId: recovery.id,
             recoveryCostDigest: recovery.costDigest } : {}),
           capacityAssigned: occupied.length,

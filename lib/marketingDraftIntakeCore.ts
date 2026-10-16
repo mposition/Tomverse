@@ -27,6 +27,10 @@ export const MARKETING_DRAFT_INTAKE_SOURCE = "marketing-generator";
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 const isoInstant = z.string().datetime({ offset: false });
 const hex64 = z.string().regex(/^[0-9a-f]{64}$/);
+const requestKey = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+
+/** The LLM calls one submission may name; each was reserved in the cost ledger. */
+export const MARKETING_DRAFT_INTAKE_MAX_LLM_CALLS = 8;
 
 const envelope = marketingEnvelopeSchema.shape;
 
@@ -57,6 +61,12 @@ export const marketingDraftSubmissionSchema = z
      */
     deadlineAt: isoInstant,
     drafts: z.array(marketingGeneratorDraftSchema).min(1).max(MARKETING_DRAFT_INTAKE_MAX_DRAFTS),
+    /**
+     * The cost-ledger calls that produced these drafts, by their request keys,
+     * sorted and each once (S3c4). The intake consumes them for this
+     * submission; a call can be consumed by one submission only.
+     */
+    llmCallRequestKeys: z.array(requestKey).min(1).max(MARKETING_DRAFT_INTAKE_MAX_LLM_CALLS),
     provenance: hex64,
   })
   .strict()
@@ -72,6 +82,14 @@ export const marketingDraftSubmissionSchema = z
         return;
       }
       seen.add(draft.logicalDraftId);
+    }
+    const keys = value.llmCallRequestKeys;
+    if (keys.some((key, index) => index > 0 && keys[index - 1] >= key)) {
+      context.addIssue({
+        code: "custom",
+        message: "LLM call keys are sorted and named once",
+        path: ["llmCallRequestKeys"],
+      });
     }
   });
 
@@ -94,26 +112,32 @@ export const canonicalMarketingDraftJson = (value: unknown): string =>
   JSON.stringify(canonical(value));
 
 /**
- * The provenance of a whole submission: HMAC-SHA256 under the submit secret
- * over everything in it but this field. Signing the drafts alone left the run
- * and submission ids free to be swapped onto someone else's words.
+ * The canonical bytes of a whole submission but its signature, v2 (S3c4): the
+ * run and submission ids, the deadline, every draft in order and the LLM calls
+ * it consumes. The signature, the submission digest, each draft's intake digest
+ * and the ledger's consumer digest all rest on these same bytes, so none of
+ * them can be swapped onto another submission's words or calls.
  */
+const submissionBytes = (submission: Omit<MarketingDraftSubmission, "provenance">): string =>
+  canonicalMarketingDraftJson({
+    domain: "marketing-draft-submission-v2",
+    generatorRunId: submission.generatorRunId,
+    submissionId: submission.submissionId,
+    deadlineAt: submission.deadlineAt,
+    drafts: submission.drafts,
+    llmCallRequestKeys: submission.llmCallRequestKeys,
+  });
+
+/** HMAC-SHA256 under the submit secret over the submission's canonical bytes. */
 export const marketingDraftProvenance = (
   secret: string,
   submission: Omit<MarketingDraftSubmission, "provenance">,
-): string =>
-  createHmac("sha256", secret)
-    .update(
-      canonicalMarketingDraftJson({
-        domain: "marketing-draft-submission-v1",
-        generatorRunId: submission.generatorRunId,
-        submissionId: submission.submissionId,
-        deadlineAt: submission.deadlineAt,
-        drafts: submission.drafts,
-      }),
-      "utf8",
-    )
-    .digest("hex");
+): string => createHmac("sha256", secret).update(submissionBytes(submission), "utf8").digest("hex");
+
+/** SHA-256 of the same bytes the signature covers. */
+export const marketingDraftSubmissionDigest = (
+  submission: Omit<MarketingDraftSubmission, "provenance">,
+): string => createHash("sha256").update(submissionBytes(submission), "utf8").digest("hex");
 
 export const marketingDraftProvenanceMatches = (
   secret: string,
@@ -151,23 +175,23 @@ export const marketingGeneratorDraftLogicalKey = (input: {
     .digest("hex");
 
 /**
- * What one draft said, bound to where it came from: stored with the audit row
- * of its intake, so a resubmission under the same ids is the same draft only
- * if it says the same thing. Different words under the same key are a
- * conflict, not a second success.
+ * One draft of one submission: stored with the audit row of its intake, so a
+ * resubmission under the same key is the same draft only if it is the same
+ * signed submission. A generator that lost its answer sends that submission
+ * again, byte for byte -- the read-back comes before the deadline is checked --
+ * and different words, calls or deadline under the same key are a conflict,
+ * not a second success.
  */
 export const marketingGeneratorDraftIntakeDigest = (input: {
-  generatorRunId: string;
-  submissionId: string;
-  draft: MarketingGeneratorDraft;
+  submissionDigest: string;
+  logicalDraftId: string;
 }): string =>
   createHash("sha256")
     .update(
       canonicalMarketingDraftJson({
-        domain: "marketing-draft-intake-v1",
-        generatorRunId: input.generatorRunId,
-        submissionId: input.submissionId,
-        draft: input.draft,
+        domain: "marketing-draft-intake-v2",
+        submissionDigest: input.submissionDigest,
+        logicalDraftId: input.logicalDraftId,
       }),
       "utf8",
     )
