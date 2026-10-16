@@ -2441,6 +2441,7 @@ model AdminAuditLog {
   amuxV4AnalysisBudgetSettings AmuxIdeaAnalysisBudgetSetting[] @relation("AmuxV4AnalysisBudgetSettingAudit")
   amuxIdeaOperatingScopeSettings AmuxIdeaOperatingScopeSetting[] @relation("AmuxIdeaOperatingScopeSettingAudit")
   amuxIdeaSessionSubmissions AmuxIdeaSubmission[] @relation("AmuxIdeaSessionSubmissionAudit")
+  amuxIdeaSessionAnalysisReservations AmuxIdeaSessionAnalysisReservation[] @relation("AmuxIdeaSessionAnalysisReservationAudit")
   amuxIdeaSystemRegistrations AmuxIdeaSubmission[] @relation("AmuxIdeaSystemRegistrationAudit")
   amuxIdeaTrackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[] @relation("AmuxIdeaTrackedCheckoutAudit")
   amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
@@ -9746,6 +9747,7 @@ model AmuxIdeaSubmission {
   unitDecisions     AmuxIdeaUnitDecision[]
   registrationRefusals AmuxIdeaRegistrationRefusal[]
   trackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[]
+  sessionAnalysisReservation AmuxIdeaSessionAnalysisReservation?
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
   contentKeyRetirements AmuxIdeaContentKeyRetirement[]
   retentionHolds AmuxIdeaRetentionHold[]
@@ -9759,6 +9761,30 @@ model AmuxIdeaSubmission {
   @@index([state, analysisDeadlineAt])
   @@index([rawPurgeAfter, rawPurgedAt])
   @@index([actorUserId, submittedAt])
+}
+
+/// Intake v19 queue identity created atomically with one session submission.
+/// It reserves no money and grants no CLI dispatch permission; later analysis
+/// stages must independently satisfy the monthly budget and execution gates.
+model AmuxIdeaSessionAnalysisReservation {
+  id                      String   @id @db.Uuid
+  ideaId                  String   @unique
+  requestId               String   @unique @db.Uuid
+  actorUserId             String
+  operatingScopeSettingId String
+  status                  String
+  modelProvider           String
+  modelId                 String
+  reasoningEffort         String
+  reservationAuditLogId   String   @unique
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+
+  idea             AmuxIdeaSubmission            @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisReservation_idea_owner_fkey")
+  operatingScope   AmuxIdeaOperatingScopeSetting @relation(fields: [operatingScopeSettingId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisReservation_scope_fkey")
+  reservationAudit AdminAuditLog                 @relation("AmuxIdeaSessionAnalysisReservationAudit", fields: [reservationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisReservation_audit_fkey")
+
+  @@unique([ideaId, actorUserId])
+  @@index([status, createdAt])
 }
 
 /// Content-free evidence for one fixed Git reference prepared for v19 direct
@@ -9987,6 +10013,7 @@ model AmuxIdeaOperatingScopeSetting {
 
   approvalAudit AdminAuditLog @relation("AmuxIdeaOperatingScopeSettingAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaOperatingScopeSetting_audit_fkey")
   sessionSubmissions AmuxIdeaSubmission[] @relation("AmuxIdeaSessionOperatingScope")
+  sessionAnalysisReservations AmuxIdeaSessionAnalysisReservation[]
 }
 
 model AmuxIdeaAnalysisBudgetWindow {

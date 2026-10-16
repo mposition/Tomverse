@@ -8,6 +8,7 @@ const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const requestId = "34340477-7664-42f4-b3fe-845d10365051";
 const ideaId = "8486a25b-919f-4714-a3d8-45ef5a18b175";
+const reservationId = "788e5cd2-4615-46e6-b287-0b84ca217c7c";
 const secret = "session_intake_only_012345678901234567890123";
 const conflictingEnvNames = [
   "ROUTING_FAULT_INJECTION_SECRET",
@@ -122,13 +123,14 @@ test("session readback rejects malformed or expanded lookups before the database
 
 test("session readback returns committed metadata without content or credential fields", async () => {
   reset();
-  readback = { requestId, status: "committed", ideaId, hasExternalSources: true,
+  readback = { requestId, status: "committed", ideaId, reservationId,
+    hasExternalSources: true,
     rawIdea: "private idea", sourceProvenance: "private session", credential: secret };
   const response = await route.GET(get());
   assert.equal(response.status, 200);
   assert.match(response.headers.get("cache-control") ?? "", /no-store/);
   assert.deepEqual(await response.json(), {
-    status: "committed", requestId, ideaId, hasExternalSources: true,
+    status: "committed", requestId, ideaId, reservationId, hasExternalSources: true,
     adminPath: `/admin/amux-backlog?tab=ideas&idea=${requestId}`,
   });
   const source = readFileSync(resolve(root,
@@ -166,7 +168,7 @@ test("session readback reports an unavailable read without leaking its failure",
 test("session readback refuses a service result for a different request ID", async () => {
   reset();
   readback = { requestId: "a2e13249-c51b-4256-b77f-44b863d58690", status: "committed",
-    ideaId, hasExternalSources: false };
+    ideaId, reservationId, hasExternalSources: false };
   const response = await route.GET(get());
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), {
