@@ -100,9 +100,11 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // The v19 idea_raw size change touches ideaCrypto in this unchanged read-only
-// closure. Repin both latch states only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "beb5245ef5530c88f909e8bb236c3006bdb6d73e4a70c0aae80c6991eac7c205";
-const SOURCE_SCOPE_DISABLED_DIGEST = "8fe36387516d811a0a478deb1c0975ebdf9c34d028e432c2d5bf269f88a6e721";
+// closure. The v19 tracked checkout adds localIntakeCore to the existing
+// closure without a route, import, writer or reviewed-file-list change.
+// Repin both latch states only after independent review.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "dd6553e948926408d13269262f2e3d4977f5b07f75911dcfe67d5d1068612d1c";
+const SOURCE_SCOPE_DISABLED_DIGEST = "af2b0d5ad56ccb6848ac842b6c2c61bfea2a6b8306d38558a90618c5c5f1ca34";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -134,8 +136,8 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // same closure; it adds no import, I/O or writer. Repin both latch states.
 // The same v19 idea_raw size change touches ideaCrypto here. No route,
 // import, writer or reviewed file changes in this preview closure.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "2315d4d7b2ecdab857edf0731f831c80482ff9d57cc0f969ec042cc2d373572b";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "d11a2c350fe6c8c81e4110fc79bef22d6b84342f2f2feb20d3d5df9a86ba9b0c";
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "5f25e4a965a2e90dc9ca7e7748eba4e50b1151e8553105cbc31d76bee3ef333d";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "fe80ccc5b7e24545622d481ffa46c553b2d0de7ad3bcec12a2650be1de0335e6";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
