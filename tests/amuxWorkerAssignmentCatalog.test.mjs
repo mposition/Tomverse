@@ -107,12 +107,14 @@ test("version 53 turns R2c's derived assignment catalog on, and the policy recor
   const lines = normalized.split(String.fromCharCode(10));
   const heading = lines.indexOf("## 버전 53 — R1·R2b 관측 종료와 R2c 배정 카탈로그 전환");
   assert.ok(heading >= 0, "version 53 section");
-  // The latch may be true only with the operator's approval recorded, and no
-  // earlier than the UTC day R2b's 72-hour window closes (2026-10-17 08:21Z):
-  // a candidate still awaiting approval fails here, so it cannot merge.
+  // The latch may be true only with the operator's approval recorded, and only
+  // once R2b's 72-hour window has closed (2026-10-17 08:21Z). Before then this
+  // fails on every run, so no passing check -- and no merge -- can exist; after
+  // it, the clock condition holds for good.
   const record = /^승인 기록: `approvedBy: mposition`, `approvedAt: (\d{4}-\d{2}-\d{2})`/.exec(lines[heading + 2] ?? "");
   assert.ok(record, "version 53 approval record");
   assert.ok(record[1] >= "2026-10-17", `approvedAt ${record[1]} is before R2b's window closes`);
+  assert.ok(Date.now() >= Date.parse("2026-10-17T08:21:00Z"), "R2b's observation window has not closed");
   // With no argument the reader now asks the registry.
   useProductionVariables();
   const client = fakeClient(statement());
