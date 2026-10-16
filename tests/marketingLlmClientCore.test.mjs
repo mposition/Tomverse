@@ -237,6 +237,30 @@ test("the HTTP budget port signs each action the way the app's route verifies it
   assert.equal(marketingLlmBudgetRequestSigned("h".repeat(48), parsed), false);
 });
 
+test("a budget request that hangs is aborted into a lost answer, which stops the call", async () => {
+  const controller = new AbortController();
+  const port = marketingLlmBudgetHttpPort({
+    appUrl: "https://app.example.invalid",
+    secret: "g".repeat(48),
+    deadlineAt: "2026-10-16T01:00:00.000Z",
+    signal: controller.signal,
+    fetch: (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      }),
+  });
+  const p = provider(() => jsonResponse(200, completion()));
+  const pending = runMarketingLlmCall(
+    { pin: PIN, generatorRunId: "run-1", purpose: "draft", messages: MESSAGES },
+    { budget: port, transport: p.transport, apiKey: "sk-fixture", newId: ids },
+  );
+  controller.abort();
+  const outcome = await pending;
+  assert.equal(outcome.status, "stopped");
+  assert.equal(outcome.stage, "reserve");
+  assert.equal(p.requests.length, 0);
+});
+
 test("a provider answer is read only when every field the ledger needs is there", () => {
   assert.deepEqual(readMarketingLlmProviderAnswer(completion()), {
     content: "Three answers, side by side.",
