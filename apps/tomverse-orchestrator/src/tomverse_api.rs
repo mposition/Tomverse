@@ -818,6 +818,10 @@ pub const TOMVERSE_INTERNAL_CLAIM_TIMEOUT: Duration = Duration::from_secs(18);
 /// transport. Unknown outcomes stop; never blindly retry.
 pub const TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// v22 execution start and settlement use a 24-second app route budget.
+/// Three seconds cover connection and response transport.
+pub const TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT: Duration = Duration::from_secs(27);
+
 /// The auto-promotion tick runs several short transactions -- the expiry of
 /// due grants, at most one consume, and the record of a lost consume -- inside
 /// a 27-second route budget anchored on the database clock
@@ -3528,10 +3532,15 @@ impl TomverseApi {
         } else {
             "execution/start"
         };
+        let request_timeout = if assignment_id.is_some() {
+            TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT
+        } else {
+            TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT
+        };
         let response = self
             .client
             .post(format!("{}/api/internal/amux/{}", self.base_url, route))
-            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .timeout(request_timeout)
             .bearer_auth(&self.secret)
             .json(&ExecutionStartRequest {
                 task_id,
@@ -3712,7 +3721,7 @@ impl TomverseApi {
         }
         let response = self.client
             .post(format!("{}/api/internal/amux/v22/execution/settle", self.base_url))
-            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .timeout(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT)
             .bearer_auth(&self.secret)
             .json(&V22ExecutionSettleRequest {
                 attempt_id: &delivery.attempt_id,

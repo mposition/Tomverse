@@ -33,6 +33,7 @@ function makeWorld(outcome: Outcome) {
     gradeEscalationAudits: [] as Array<Record<string, unknown>>,
     gradeGuard: false,
     frontierPriceAvailable: true,
+    frontierPriceDatabaseError: false,
     taskRole: null as string | null,
     taskGrade: "medium",
     assignmentGrade: null as string | null,
@@ -104,10 +105,13 @@ mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
   amuxV22ApiModelAccessCurrent: () => true,
   recoveryAttemptBudget: async () => ({ allowed: false }),
 } });
+class CatalogApprovalError extends Error {}
 mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), {
   namedExports: {
+    AmuxV4TaskCatalogApprovalError: CatalogApprovalError,
     calculateCurrentApprovedAmuxV4TaskCost: async () => {
-      if (!world.frontierPriceAvailable) throw new Error("price unavailable");
+      if (world.frontierPriceDatabaseError) throw new Error("database unavailable");
+      if (!world.frontierPriceAvailable) throw new CatalogApprovalError("price unavailable");
       return { receipt: { role: "implement", grade: "frontier",
         receiptDigest: "f".repeat(64) } };
     },
@@ -523,6 +527,21 @@ test("v52 contract touch blocks when a new frontier price is unavailable", async
   assert.equal(world.taskUpdateData?.status, "blocked");
   assert.equal(world.taskUpdateData?.executionGrade, undefined);
   assert.equal(world.attemptUpdateData?.reason, "grade_receipt_unavailable");
+  assert.equal(world.gradeEscalationAudits.length, 0);
+});
+
+test("v52 frontier price database error cannot be swallowed inside a transaction", async () => {
+  world = makeWorld("failed");
+  world.gradeGuard = true;
+  world.frontierPriceDatabaseError = true;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.sourceApprovalId = "source-one";
+  await assert.rejects((await execution).settleAmuxV22TaskExecution({
+    ...await settlementInput("failed"),
+    changedPaths: ["lib/amux/execution.ts"],
+  }), /database unavailable/);
+  assert.equal(world.taskUpdateData, null);
   assert.equal(world.gradeEscalationAudits.length, 0);
 });
 

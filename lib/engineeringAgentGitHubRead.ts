@@ -407,6 +407,7 @@ export async function readEngineeringAgentDependabotFailures(
 /* ------------------------------------------------------------------------- */
 
 const MAX_REVIEWS = 100;
+const MAX_PR_FILES = 3_000;
 const MAX_DIFF_BYTES = 1024 * 1024;
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 const FAILING_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required", "stale", "startup_failure"]);
@@ -435,29 +436,35 @@ async function readPullFileNames(prNumber: number,
   resolved: { env: Readonly<Record<string, string | undefined>>;
     fetchImpl: FetchLike }): Promise<string[] | null> {
   if (!Number.isSafeInteger(comparison.changedFiles) ||
-      comparison.changedFiles < 0 || comparison.changedFiles > 100) return null;
-  try {
-    const page = await githubPage(`/pulls/${prNumber}/files?per_page=100&page=1`, resolved);
-    if (page.hasNext || !Array.isArray(page.body) ||
-        page.body.length !== comparison.changedFiles) return null;
-    const names: string[] = [];
+      comparison.changedFiles < 0 || comparison.changedFiles > MAX_PR_FILES) return null;
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const pages = Math.max(1, Math.ceil(comparison.changedFiles / 100));
+  for (let pageNumber = 1; pageNumber <= pages; pageNumber++) {
+    const page = await githubPage(
+      `/pulls/${prNumber}/files?per_page=100&page=${pageNumber}`, resolved);
+    const expectedLength = Math.min(100,
+      comparison.changedFiles - (pageNumber - 1) * 100);
+    if (!Array.isArray(page.body) || page.body.length !== expectedLength ||
+        page.hasNext !== (pageNumber < pages)) return null;
     for (const raw of page.body) {
       const file = record(raw);
       if (typeof file?.filename !== "string" ||
-          typeof file.status !== "string") return null;
+          typeof file.status !== "string" || seen.has(file.filename)) return null;
+      seen.add(file.filename);
       names.push(file.filename);
       if (file.status === "renamed") {
         if (typeof file.previous_filename !== "string") return null;
         names.push(file.previous_filename);
       }
     }
-    const current = record(await githubJson(`/pulls/${prNumber}`, resolved));
-    if (current?.number !== prNumber ||
-        record(current.base)?.sha !== comparison.baseSha ||
-        record(current.head)?.sha !== comparison.headSha ||
-        current.changed_files !== comparison.changedFiles) return null;
-    return names;
-  } catch { return null; }
+  }
+  const current = record(await githubJson(`/pulls/${prNumber}`, resolved));
+  if (current?.number !== prNumber ||
+      record(current.base)?.sha !== comparison.baseSha ||
+      record(current.head)?.sha !== comparison.headSha ||
+      current.changed_files !== comparison.changedFiles) return null;
+  return names;
 }
 
 const instant = (value: unknown): Date | null => {

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { captureAmuxV22Patch, captureAmuxV22PatchBaseline,
-  captureAmuxV52ChangedPaths, discardAmuxV52ContractChanges } from
+  captureAmuxV52ChangedPaths, discardAmuxV52AttemptChanges } from
   "../lib/amux/v22PatchCapture.mjs";
 
 const BASE = "a".repeat(40);
@@ -71,6 +71,37 @@ test("dirty or foreign baseline is rejected before a model run", async () => {
   assert.deepEqual(await captureAmuxV22PatchBaseline("/repo",
     fixture({ root: "/other" })),
     { ok: false, reason: "foreign_worktree" });
+});
+
+test("v52 refuses pre-existing ignored contract files before execution", async () => {
+  const calls = [];
+  const run = async (_binary, args) => {
+    const command = args.slice(6);
+    calls.push(command);
+    if (command[0] === "rev-parse") return { stdout: Buffer.from(
+      command[1] === "--show-toplevel" ? "/repo" : BASE) };
+    if (command[0] === "status") return { stdout: Buffer.alloc(0) };
+    if (command[0] === "ls-files") return { stdout: Buffer.from(
+      "lib/amux/ignored.ts\0lib/unrelated-ignored.ts\0") };
+    throw new Error("unexpected git command");
+  };
+  const options = { run, realpath: async (path) => path,
+    guardIgnoredContract: true };
+  assert.deepEqual(await captureAmuxV22PatchBaseline("/repo", options),
+    { ok: false, reason: "dirty_worktree" });
+  const ignored = calls.find((command) => command[0] === "ls-files");
+  assert.ok(ignored.includes(":(icase,literal)lib/amux/"));
+  assert.ok(ignored.includes(":(icase,glob)lib/credit*"));
+  assert.ok(!ignored.includes(":(icase,literal)lib/"));
+  assert.ok(ignored.includes(
+    ":(icase,literal)app/api/conversations/[conversationId]/"));
+  assert.deepEqual(await captureAmuxV22PatchBaseline("/repo", {
+    ...options, run: async (binary, args, config) => {
+      if (args.includes("ls-files"))
+        return { stdout: Buffer.from("lib/unrelated-ignored.ts\0") };
+      return run(binary, args, config);
+    },
+  }), { ok: true, baseSha: BASE });
 });
 
 test("moved HEAD and untracked files never produce a partial candidate", async () => {
@@ -149,6 +180,8 @@ test("v52 includes ignored contract paths without scanning unrelated ignored fil
   const ignored = calls.find((command) => command.includes("--ignored"));
   assert.ok(ignored.includes(":(icase,literal)lib/amux/"));
   assert.ok(ignored.includes(":(icase,literal)app/api/conversations/[conversationId]/"));
+  assert.ok(ignored.includes(":(icase,glob)lib/credit*"));
+  assert.ok(!ignored.includes(":(icase,literal)lib/"));
   assert.ok(!ignored.some((item) => item.includes("node_modules")));
 });
 
@@ -202,7 +235,7 @@ test("v52 discards a contract attempt only from its original clean base", async 
     if (command[0] === "status") return { stdout: Buffer.alloc(0) };
     return { stdout: Buffer.alloc(0) };
   };
-  assert.equal(await discardAmuxV52ContractChanges("/repo", BASE,
+  assert.equal(await discardAmuxV52AttemptChanges("/repo", BASE,
     { run, realpath: async (path) => path }), true);
   assert.deepEqual(calls.map((command) => command[0]),
     ["rev-parse", "rev-parse", "ls-files", "reset", "clean", "clean",
@@ -211,7 +244,7 @@ test("v52 discards a contract attempt only from its original clean base", async 
     ["clean", "-fd", "--"]);
   assert.deepEqual(calls.find((command) => command.includes("-fdx")),
     ["clean", "-fdx", "--", ":(literal)lib/amux/new.ts"]);
-  assert.equal(await discardAmuxV52ContractChanges("/repo", BASE,
+  assert.equal(await discardAmuxV52AttemptChanges("/repo", BASE,
     { run: async (_binary, args) => ({ stdout: Buffer.from(
       args.slice(6)[1] === "--show-toplevel" ? "/repo" : "b".repeat(40)) }),
       realpath: async (path) => path }), false);

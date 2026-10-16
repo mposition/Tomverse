@@ -36,7 +36,8 @@ import {
   buildAmuxDeliveryPrompt,
   classifyApprovedExecutionBrief,
 } from "@/lib/amux/deliveryPrompt";
-import { calculateCurrentApprovedAmuxV4TaskCost } from
+import { AmuxV4TaskCatalogApprovalError,
+  calculateCurrentApprovedAmuxV4TaskCost } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
 import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
@@ -389,8 +390,11 @@ export async function startAmuxV22TaskExecution(input: {
       let cost;
       try { cost = await calculateCurrentApprovedAmuxV4TaskCost(tx,
         card.taskRole, card.executionGrade); }
-      catch { return { started: false as const,
-        reason: "cost_unverified" as const }; }
+      catch (error) {
+        if (!(error instanceof AmuxV4TaskCatalogApprovalError)) throw error;
+        return { started: false as const,
+          reason: "cost_unverified" as const };
+      }
       // Policy v48: the FIRST Task retry's added route is reconfirmed by the
       // owner's final consent; that is checked once the recovery is read.
       const ceilingAllowed = checkV4TaskApprovedCeiling(approved,
@@ -1411,7 +1415,11 @@ export async function settleAmuxV22TaskExecution(input: {
             escalationReceipt = (await calculateCurrentApprovedAmuxV4TaskCost(
               tx, task.taskRole, "frontier")).receipt;
           }
-        } catch { /* An unavailable frontier price blocks instead of requeueing. */ }
+        } catch (error) {
+          // A catalog refusal is a known price hold. A failed SQL statement
+          // aborts PostgreSQL's transaction and must reach the route as unknown.
+          if (!(error instanceof AmuxV4TaskCatalogApprovalError)) throw error;
+        }
       }
       const effectivePathDecision = pathDecision === "escalate" &&
         escalationReceipt === null ? "blocked" : pathDecision;

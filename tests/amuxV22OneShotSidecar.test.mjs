@@ -362,7 +362,10 @@ test("one child returns a reviewable result and a content-free receipt", async (
 });
 
 test("v52 guard inventories non-implement attempts and withholds a contract patch", async () => {
-  const baseline = async () => ({ ok: true, baseSha: "a".repeat(40) });
+  const baseline = async (_path, options) => {
+    assert.equal(options.guardIgnoredContract, true);
+    return { ok: true, baseSha: "a".repeat(40) };
+  };
   const fake = fakeSpawn(JSON.stringify(usage));
   const inspected = await runAmuxV22OneShot({ ...request,
     role: "investigate", gradeGuard: true, executionGrade: "advanced" }, config, {
@@ -381,13 +384,23 @@ test("v52 guard inventories non-implement attempts and withholds a contract patc
       captureChangedPaths: async () => ({ ok: true,
         files: ["lib/amux/execution.ts"],
         contractPaths: ["lib/amux/execution.ts"] }),
-      discardContractChanges: async () => { discarded++; return true; },
+      discardAttemptChanges: async () => { discarded++; return true; },
       capturePatch: async () => { patchCalls++; throw new Error("not reachable"); },
     });
   assert.deepEqual(contract.changedPaths, ["lib/amux/execution.ts"]);
   assert.equal(contract.patchDigest, undefined);
   assert.equal(patchCalls, 0);
   assert.equal(discarded, 1);
+  const readOnlyEdit = await runAmuxV22OneShot({ ...request,
+    role: "investigate", gradeGuard: true, executionGrade: "advanced" },
+    config, { syntheticPlatform: true, spawnChild: fake.spawnChild,
+      captureBaseline: baseline,
+      captureChangedPaths: async () => ({ ok: true,
+        files: ["lib/ordinary.ts"], contractPaths: [] }),
+      discardAttemptChanges: async () => { discarded++; return true; },
+    });
+  assert.deepEqual(readOnlyEdit.changedPaths, ["lib/ordinary.ts"]);
+  assert.equal(discarded, 2);
   const missing = await runAmuxV22OneShot({ ...request, gradeGuard: true,
     executionGrade: "routine" },
     config, { syntheticPlatform: true, spawnChild: fake.spawnChild,
