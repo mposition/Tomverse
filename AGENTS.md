@@ -1364,7 +1364,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **S3b(생성기 문맥)**: `app/api/internal/marketing-generator-context/route.ts`, `lib/marketingGeneratorContext.ts`,
   `lib/marketingGeneratorAuth.ts`(두 생성기 route가 공유하는 인증), `tests/integration/marketing-generator-context.db.test.ts`.
   POST만, run id 하나만 받고, 승인 모드 계정·근거를 뺀 claim 투영·최신 brief·시장 사실을 돌려줍니다. **URL은
-  생성기에 가지 않습니다** — 모델은 URL을 쓰지 않으므로(정책 §7.3) 시장 사실의 출처 URL도 빼고 보냅니다.
+  생성기에 가지 않습니다** — 모델은 URL을 쓰지 않으므로(docs/policy/marketing-automation.md §7.3) 시장 사실의 출처 URL도 빼고 보냅니다.
   자산은 S3a2가 draft에 자산을 허용할 때 더합니다.
 
 # 엔지니어링 Agent
