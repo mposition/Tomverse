@@ -36,7 +36,12 @@ export function planAmuxTrackedCheckoutClaudeCli(input: {
       "--no-session-persistence", "--strict-mcp-config",
       "--output-format", "stream-json", "--verbose",
       "--permission-mode", "dontAsk", "--permission-prompts", "none",
-      "--tools", READ_TOOLS, "--allowedTools", READ_TOOLS,
+      "--tools", READ_TOOLS,
+      // The bare Read permission would include mounted auth and /proc files.
+      // This absolute-path rule limits file reads to the scanned checkout;
+      // --restricted separately confines Grep and Glob to the cwd.
+      "--allowedTools", `Read(//${input.directory.slice(1)}/**),Grep,Glob`,
+      "--disallowedTools", "Read(//run/**),Read(//proc/**),Read(//tmp/.claude/**)",
       "--model", input.modelId, "--effort", input.reasoningEffort,
     ]),
   });
