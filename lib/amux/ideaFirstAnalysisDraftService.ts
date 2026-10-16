@@ -195,7 +195,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     permittedSourceRefIds: ["operator_idea"],
     permittedTargetRefs: previous?.permittedTargetRefs ?? [],
     sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
-    history,
+    history, templateVersion: preview.templateVersion,
   });
   if (prepared.decision === "hold") {
     throw new AmuxFirstAnalysisDraftError("invalid_result");

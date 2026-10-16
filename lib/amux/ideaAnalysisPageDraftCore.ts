@@ -23,6 +23,7 @@ export function prepareAmuxAnalysisPageDraft(input: {
   coveredStartOrdinal: number;
   coveredEndOrdinal: number;
   history: readonly AmuxAnalysisOutputPage[];
+  templateVersion: string;
 }):
   | { decision: "ready"; draft: SealedAmuxAnalysisDraft;
       page: AmuxAnalysisOutputPage;
@@ -41,6 +42,7 @@ export function prepareAmuxAnalysisPageDraft(input: {
     coveredStartOrdinal: input.coveredStartOrdinal,
     coveredEndOrdinal: input.coveredEndOrdinal,
     history: input.history,
+    templateVersion: input.templateVersion,
   });
   if (!inspected.ok && inspected.stage !== "owner_input") {
     return { decision: "hold", reason: "invalid_result" };

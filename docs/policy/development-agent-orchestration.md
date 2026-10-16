@@ -30,7 +30,8 @@
 상태(v45 이력): **v45 R2c 선택 단계의 역할 상한 검사 승인.** 2026-10-14 운영자 `mposition`이 아래 v45 절을 승인했다. v16 역할이 없는 레거시 카드는 `requiredRoutingRole`에서 수준을 유도하고(`review`는 `contract`), R2c가 켜지면 상한이 그보다 낮은 worker는 후보가 되지 않는다. 코드 래치는 바꾸지 않는다. 이전 v44 상태 줄은 이력이다.
 상태(R2a 부속 이력): **2026-10-13에 원래 orchestration v36으로 승인된 worker 능력 R2a 코드 래치를 부속 계약 `worker-capability-r2a-latch-2026-10-13`로 보존한다.** `AMUX_WORKER_CAPABILITY_WRITES_LATCH`는 true이고 owner의 Admin 능력 기록만 열며, 배정은 R2c 전까지 카탈로그 환경 변수를 따른다. 이는 번호가 겹치는 승인 이력의 식별자 구분일 뿐 새 정책 버전·권한·활성화를 승인하지 않는다.
 상태(v50 이력): **v50 졸업한 v22 코드 작업의 develop 자동 병합을 완료로 인정.** 2026-10-15 운영자 `mposition`이 아래 v50 절을 승인했다. `engineering-agent.md` v6 3항의 조건을 모두 충족해 게시 서비스가 `develop`에 병합한 v22 `implement` Task는 본 앱이 그 병합을 관측하면 `done`·`v4TerminalAt`이 된다. 그 밖의 경로는 v49 그대로다.
-상태(최신): **v51 아이디어당 사람 결정 0: 세션 접수와 무인 분석·등록.** 2026-10-16 운영자 `mposition`이 아래 v51 절을 `amux-intake.md` v19와 같은 결정으로 승인했다. 아이디어마다 하던 실행 승인과 계획 승인을 owner의 운영 범위 설정 한 번으로 바꾸고, 결정적 Guard를 통과한 계획은 시스템 actor가 등록한다. 사람 결정은 PR마다 GitHub review·병합(v49·v50)과 Guard에 걸린 계획의 검토뿐이다. 이전 v50 상태 줄은 이력이다.
+상태(v51 이력): **v51 아이디어당 사람 결정 0: 세션 접수와 무인 분석·등록.** 2026-10-16 운영자 `mposition`이 아래 v51 절을 `amux-intake.md` v19와 같은 결정으로 승인했다. 아이디어마다 하던 실행 승인과 계획 승인을 owner의 운영 범위 설정 한 번으로 바꾸고, 결정적 Guard를 통과한 계획은 시스템 actor가 등록한다. 사람 결정은 PR마다 GitHub review·병합(v49·v50)과 Guard에 걸린 계획의 검토뿐이다. 이전 v50 상태 줄은 이력이다.
+상태(최신): **v52 v4 Task 실행 등급 판정, 같은 등급 배정, 검토 서버 연결.** 2026-10-16 운영자 `mposition`이 아래 v52 절을 승인했다. v4 Task는 결정적 함수가 정한 실행 등급 하나를 갖고 같은 등급의 worker만 맡으며, 실행 뒤 contract 경로에 닿은 변경은 버리고 `frontier`로 다시 실행한다. AMUX의 review 단계 대신 runner가 독립 검토 서버를 호출하고, `done`은 v49·v50의 병합 관측 그대로다. 버전 16은 철회됐다. 코드 래치와 운영 스위치는 꺼진 채이며, 이 승인 자체로 켜지 않는다. 이전 v51 상태 줄은 이력이다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -79,6 +80,7 @@ approvedBy: mposition · approvedAt: 2026-10-14 · 정책 버전: 48
 approvedBy: mposition · approvedAt: 2026-10-15 · 정책 버전: 49
 approvedBy: mposition · approvedAt: 2026-10-15 · 정책 버전: 50
 approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 51
+approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 52
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -133,6 +135,7 @@ approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 51
 | 49 | 2026-10-15 mposition | 아이디어당 사람 결정을 실행 승인·계획 승인(`amux-intake.md` v18)과 PR마다 GitHub required review·병합으로 줄인다. `AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH`를 연다(운영 스위치·`t1`은 별개). v22 `implement` Task는 본 앱이 관측한 권한 있는 사람의 승인 review와 병합으로 `done`·`v4TerminalAt`이 된다(공통 기반 원칙 12의 예외). engineering Agent 조건은 `engineering-agent.md` v5 |
 | 50 | 2026-10-15 mposition | `engineering-agent.md` v6 3항의 develop 자동 병합(졸업·정확한 허용 목록·base commit 정책 테스트·결속과 최신성·교차 검토·off 스위치)을 본 앱이 관측하면 v22 `implement` Task가 `done`·`v4TerminalAt`이 된다. 그 회차는 사람 승인으로 기록하지 않고, 근거는 사전 운영자 승인과 결정적 판정 통과다. 사람 승인 경로와 PR 없는 역할은 v49 그대로 |
 | 51 | 2026-10-16 mposition | 아이디어당 사람 결정을 0으로 한다(`amux-intake.md` v19). 접수는 Admin 화면이나 코딩 도구 세션에서 들어오고, owner가 한 번 저장한 운영 범위 설정(허용 저장소·분석 모델) 안에서 분석과 카드 등록이 사람 없이 이어진다. Guard에 걸린 계획만 운영자 검토로 간다. v22 편입 규칙과 PR review·병합의 사람 결정(v49·v50)은 바뀌지 않는다. |
+| 52 | 2026-10-16 mposition | v4 Task는 실행 등급 하나(`routine`·`advanced`·`frontier`)를 갖고 같은 등급의 worker만 맡으며, 위 등급으로 넘기지 않고 기다린다. 등급은 결정적 함수가 contract 경로 목록·역할·예상 경로로 정하고 intake의 제안은 신호다(정해진 범위 안에서는 하향도 받는다). 실행 뒤 변경이 contract 경로에 닿으면 버리고 `frontier`로 다시 실행한다. AMUX의 review 단계 대신 runner가 독립 검토 서버를 호출한다. `done`은 v49·v50의 병합 관측 그대로다. 버전 16을 철회하고, legacy 카드는 바꾸지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -2768,3 +2771,240 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
   결과 불명은 멈추고 사람에게 넘긴다는 원칙, 에이전트는 PR을 승인하지 않는다는 원칙.
 - 이 버전은 문서만 바꾼다. 세션 접수·저장소 직접 읽기·자동 등록은 각각 기본 꺼진 스위치를 운영자가
   켤 때만 일어난다.
+
+## 버전 52 — v4 Task 실행 등급 판정, 같은 등급 배정, 검토 서버 연결
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-16`. 2026-10-16 작성, 작성자 Claude. 운영자가
+2026-10-16에 정한 결정(0항)을 옮기고, 같은 날 이 절을 승인했다. 작성자와 다른 공급사의 독립 검토는 두
+회차였다. r-20261016-023802-36345d에서 codex와 copilot이 reject했고(래치와 staging 기록의 순서, 목록
+선정 기준 등), 고친 뒤 r-20261016-024338-33cfa6에서 둘 다 accept했다. `amux-intake.md` v20(Task 하나에
+등급 하나, 예상 경로 필수, review Task 제안 중단)과 짝을 이룬다. 이 승인 자체로 코드 래치나 운영
+스위치를 켜지 않는다.
+
+### 0. 운영자 결정 (2026-10-16)
+
+1. v4 Task는 실행 등급 하나를 갖고, 같은 등급의 worker만 그 Task를 맡는다. 위 등급 worker가 아래
+   등급 Task를 맡으면 토큰 낭비다.
+2. 등급은 결정적 코드가 정한다. intake 분석이 낸 등급 제안(LLM)은 신호이며, 4항의 범위 안에서는
+   implementation을 chore로 내리는 신호도 받는다.
+3. 맞는 등급의 worker가 없으면 위 등급 worker에게 넘기지 않고 기다린다.
+4. AMUX 안의 review 단계와 review Task를 새로 만들지 않는다. 코드 작업의 검토는 runner가 Tomverse
+   독립 검토 서버에 요청한다.
+5. Task의 `done`은 지금처럼 본 앱이 관측한 병합이다(v49·v50).
+6. 실행 뒤 chore·implementation worker의 변경이 contract 경로에 닿으면, 그 변경을 버리고 Task의
+   등급을 `frontier`로 올려 처음부터 다시 실행한다. 그러면 Task 전체를 contract worker가 다시 하므로
+   남는 작업이 없다.
+
+### 1. 적용 범위
+
+- 대상은 `amux-intake.md` v20 이후 등록되는 v4 Task(`sourceSystem` `admin-idea-v4`, `cardType`
+  `task`)다. 이미 등록된 Task는 등록 때의 등급과 비용 receipt 그대로 끝난다.
+- `amux-intake.md` v20이 승인·병합되기 전에는 이 버전의 대상 Task가 없다. 예상 경로와 4항의 판정을
+  등록에 넣는 것이 intake v20이기 때문이다. 그 전에 9항의 운영 스위치를 켜도 대상이 없다.
+- legacy 카드(보드 sync, `requiredRoutingRole`)는 바뀌지 않는다. 버전 35의 상한과 버전 45의 수준
+  유도는 legacy 카드에만 적용된다.
+- **버전 16을 철회한다.** 역할 판정(`deriveAmuxRoutingBase()`와 LLM 신호 route 둘), 단계 사이클
+  (`design → develop → test → review`), review 단계의 다른 공급사 배정은 구현된 적이 없다. 등급
+  판정은 이 버전 4항이, 검토는 7항이 대신한다. 버전 16 Authority 개정이 더한 내부 route 둘
+  (`role-judgement/pending`, `role-judgement/signal`)도 허용 목록에서 뺀다.
+
+### 2. 등급의 이름
+
+| `executionGrade` | worker 등급(등록부 `roleCeiling`) | AGENTS.md 역할 |
+|---|---|---|
+| `routine` | `chore` | `chore` |
+| `advanced` | `implementation` | `impl` |
+| `frontier` | `contract` | `contract` |
+
+v4 Task에 대해서는 등록부의 `roleCeiling`이 상한이 아니라 **그 worker의 등급**이다. legacy 카드에는
+버전 35·45의 상한 의미가 그대로 남는다.
+
+### 3. contract 경로 목록
+
+- 코드 상수 `AMUX_CONTRACT_PATHS`(`lib/amux/executionGradeCore.ts`) 하나가 유일한 출처다. 이 파일은
+  아직 없으며 10항의 S1이 만든다. intake
+  등록 Guard, 4항의 판정, 6항의 실행 뒤 검사가 모두 같은 함수로 비교한다. 목록은 이 문서의
+  개정으로만 바꾼다. 버전 16의 같은 이름 목록은 이 목록으로 대체된다.
+- 비교는 양쪽을 소문자로 바꾼 뒤 한다. 끝이 `/`인 항목은 디렉터리 접두사이고, 그 밖의 항목은 경로
+  문자열 접두사다(`lib/credit`은 `lib/creditLedger.ts`와 일치한다).
+- 테스트는 항목마다 트리에 실제 파일이 있는지 확인한다. 접두사 항목은 그 아래 파일이 하나 이상이어야
+  한다. 파일 이름이 바뀌어 보호가 조용히 빠지는 것을 막기 위해서다.
+
+목록:
+
+- **과금·크레딧·가격·플랜·프로모션**: `lib/modelPricing.ts`, `lib/credit`, `lib/chatCostGuardrails.ts`,
+  `lib/models.ts`, `lib/billingPriceCatalog.ts`, `lib/planChange`, `lib/billingPromotionAdminPolicy.ts`,
+  `app/api/billing/plan-change/`, `app/api/billing/checkout/`
+- **데이터와 제품 정체성**: `prisma/`, `lib/conversationProduct.ts`
+- **이메일 발송 경로**: `lib/email`
+- **정책과 계약 문서**: `docs/policy/`, `docs/ui-contracts/`
+- **자동화와 규칙 파일**(에이전트는 자기 gate를 바꾸지 않는다): `lib/amux/`, `apps/tomverse-orchestrator/`,
+  `.github/`, `AGENTS.md`, `CLAUDE.md`, `.claude/`, `.codex/`
+- **release blocker를 선언한 ui-contract가 지키는 파일**(이 버전에서 추가). 계약의 일부만 차단으로
+  정한 경우도 넣는다. 경로로는 차단 부분과 나머지를 나눌 수 없기 때문이다. Admin Console IA는 redirect
+  규칙, chat starter catalogue는 §9의 fail-closed 판정, 계정 모델 설정은 문서 전체(그 문서의 마지막
+  줄)가 차단이다. 차단 대상이 파일이 아니라 문구의 의미여서 경로로 판정할 수 없는 계약은 아래 "넣지
+  않은 것"에 적는다.
+  - 모바일 composer·drawer: `components/chat/ChatInput.tsx`, `components/chat/MobileChatShell.tsx`,
+    `components/chat/ChatSidebar.tsx`, `components/chat/useVisualViewport.ts`
+  - 비교 action rail: `components/chat/ComparisonActionRail.tsx`, `lib/comparisonReadiness.ts`
+  - typography: `lib/fonts.ts`, `app/globals.css`, `components/DocumentShell.tsx`
+    (`lib/emailTypography.ts`는 `lib/email`이 이미 덮는다)
+  - 이미지 생성 workspace: `components/images/ImageGenerationWorkspace.tsx`,
+    `components/chat/NewConversationLauncher.tsx`, `components/chat/ImageModelTabPanel.tsx`,
+    `components/chat/ModelPickerPanel.tsx`, `app/(site)/(application)/chat/ChatPageClient.tsx`,
+    `lib/imageGroupLimits.ts`
+  - 설정 navigation: `components/auth/AuthButton.tsx`, `lib/settingsNavigation.ts`,
+    `lib/accountSettingsEvents.ts`, `components/settings/`, `app/(site)/(application)/settings/imports/`,
+    `app/(site)/(application)/settings/memory/`
+  - Admin Console IA(release blocker는 redirect 규칙뿐): `lib/adminNavigation.ts`
+  - Auto 모델 선택: `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`,
+    `lib/autoRoutingUi.ts`, `lib/autoProductBoundary.ts`, `lib/autoRoutingCopy.ts`,
+    `app/api/conversations/[conversationId]/route.ts`
+  - 채팅 starter catalogue: `lib/chatStarter`, `components/chat/ChatStarterGallery.tsx`,
+    `components/chat/ChatWelcomeScreen.tsx`, `components/chat/ReviewWorkspaceShell.tsx`,
+    `scripts/check-starter-catalog.mjs`
+  - 계정 모델 설정: `app/api/user/settings/route.ts`, `lib/newConversationModels.ts`
+
+넣지 않은 것과 이유:
+
+- Prompt Refiner 파일(`lib/promptRefiner*` 등): 그 ui-contract에는 release blocker를 선언한 부분이
+  없다.
+- Admin 패널과 route segment 전체: Admin Console IA에서 release blocker는 redirect 규칙뿐이다. route
+  삭제는 `tests/adminNavigation.test.mjs`와 Admin E2E가 잡는다.
+- AI Review 근거 사슬 계약: 제품 문구의 의미를 지키는 계약이라 경로로 판정할 수 없다. 이런 경우는
+  intake의 신호가 등급을 올려야 한다.
+
+### 4. 등급 판정
+
+서버 순수 함수 `deriveAmuxExecutionGrade()`(`lib/amux/executionGradeCore.ts`)가 정한다. 입력은
+Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐이다. 제목, brief, 완료 조건은
+입력이 아니다. 모델을 따로 부르지 않는다.
+
+1. 다음 가운데 하나라도 해당하면 `frontier`다. 신호로 낮출 수 없다.
+   - `taskRole`이 `design`이다.
+   - 예상 경로가 없거나, 비었거나, 40개를 넘는다.
+   - 경로 하나라도 정규화에 실패한다.
+   - 경로 하나라도 3항의 목록과 일치한다.
+2. 그렇지 않고 제안이 `frontier`이면 `frontier`다.
+3. 그렇지 않고 다음을 모두 만족하면 `routine`이다.
+   - `taskRole`이 `implement`, `test`, `investigate`, `verify` 가운데 하나다.
+   - 예상 경로가 2개 이하다.
+   - 제안이 `routine`이다.
+4. 그 밖에는 `advanced`다.
+
+**경로 정규화**는 버전 16의 규칙을 그대로 옮긴다. 저장소 상대 경로여야 한다. 앞의 `./` 하나만
+제거하고, 그 뒤 `/`로 나눈 조각에 `.`, `..`, 빈 조각이 하나라도 있으면 거절한다. 역슬래시, 절대경로,
+드라이브 문자, 제어 문자도 거절한다.
+
+**판정 시점.** intake v20의 등록 Guard가 이 함수를 비용 receipt 계산 **전에** 부르고, 그 결과를
+카드의 `executionGrade`로 저장한다. 비용 receipt와 배정이 이 값에 결속되므로, 등록 뒤에는 6항의
+경우 말고는 바뀌지 않는다. 제안값과 최종값은 등록 감사의 metadata에 함께 남긴다. 판정이 제안을
+얼마나 바꾸는지 보기 위해서다.
+
+### 5. 같은 등급 배정
+
+- 비용 catalog의 route는 등급을 **정확히 하나** 가지며, 그 등급은 route worker의 등록부 등급(2항)과
+  같아야 한다. catalog 승인은 이를 어기는 catalog를 거절한다.
+- claim은 Task 등급, route 등급, route worker의 등록부 등급이 모두 같을 때만 배정한다.
+- **위 등급으로 넘기지 않는다.** 맞는 worker가 모두 바쁘면 Task는 `todo`에서 기다린다. Admin 실행
+  화면은 그 사유를 `no_worker_for_grade`로 보인다.
+- 지금 승인된 catalog가 이 규칙을 어기면, owner가 규칙에 맞는 catalog를 승인한 뒤에 9항의 운영
+  스위치를 켠다.
+- 새 catalog에는 `review` 역할 route가 필요 없다. 이미 등록된 review Task는 기존 route와 v49의 Admin
+  사람 승인으로 끝난다. `claude-review`는 legacy 카드를 위해 등록부에 남는다.
+
+### 6. 실행 뒤 contract 경로 검사
+
+역할과 무관하게 `routine`·`advanced` 시도 전부에 적용한다. 파일을 쓰지 않는 역할의 시도는 목록이
+비어 있으므로 그대로 통과한다.
+
+- sidecar가 worker의 정상 종료를 받으면, runner의 결정적 코드(모델이 아니다)가 base SHA 대비 바뀐
+  파일 **이름** 목록을 만든다. 이 목록은 patch 본문의 크기 상한과 별개로 만든다.
+- 목록을 얻지 못하면 검토와 게시로 가지 않는다. Task는 `blocked`가 되고 사람에게 간다.
+- 목록의 경로 하나라도 3항과 일치하면:
+  - 그 변경은 검토하지도 게시하지도 않고 버린다.
+  - 등급을 `frontier`로 올리고, 등록 때와 같은 결정적 비용 계산으로 새 receipt를 만든다. 계산이
+    실패하면 Task는 `blocked`가 되고 사람에게 간다.
+  - 실행 시작의 승인 상한 검사(`checkV4TaskApprovedCeiling()`)는 그 뒤로 이 새 receipt를 기준으로
+    한다. 새 receipt는 등급 상승 감사 행에 결속되며, 등록과 같은 운영 범위 설정 안에서만 만든다.
+    원래 등급의 receipt는 지우지 않는다.
+  - Task를 `todo`로 되돌린다. 다음 시도는 base에서 새로 시작한다.
+  - 시스템 감사 `amux.grade.escalated`(사유 `contract_path_touched`)를 같은 트랜잭션에 남긴다.
+  - 이 사례는 분류 실패로 세어 보고한다. `frontier`가 가장 높으므로 한 Task에서 한 번만 일어난다.
+- **본 앱이 한 번 더 검사한다.** runner의 목록은 자기 보고다. 그래서 본 앱은 v49가 GitHub에서
+  관측하는 PR의 파일 목록으로 같은 검사를 다시 하고, 걸리면 `done`으로 바꾸지 않고 상태 불일치로
+  사람에게 보낸다.
+
+### 7. 검토 서버 연결
+
+- **호출 시점과 주체.** `implement` 시도가 정상 종료하고 6항을 통과하면 runner의 결정적 코드가
+  호출한다. worker의 모델은 검토를 부르거나, 건너뛰거나, reviewer를 고르지 않는다.
+- **제출.** runner가 Task worktree에 base SHA 위의 로컬 commit을 만들고 검토 클라이언트로 제출한다.
+  - `--author`는 route의 확인된 공급사다(Cursor는 `--author-vendor`를 함께 적는다).
+  - `--scope`는 Task 제목과 완료 조건이며 데이터로 넘긴다.
+  - base는 클라이언트의 규칙을 따르고 `--base`를 붙이지 않는다.
+  - reviewer 배정, 작성자와 다른 공급사, contract 경로 변경의 2인 검토는 검토 서버가 정한다.
+- **기록.** 본 앱 내부 route가 job id, commit SHA, base SHA, 판정, reviewer 공급사를 기록하고, 시스템
+  감사 `amux.review.recorded`를 같은 트랜잭션에 남긴다. 지적 원문은 본 앱에 저장하지 않는다. 다시
+  작업할 때 runner가 검토 서버에서 읽어 다음 시도의 prompt에 데이터로 넣는다.
+- **판정별 처리.**
+  - `accept`: v49의 게시 경로(Engineering Publisher의 `develop` PR)로 간다. `done`은 v49·v50의 병합
+    관측이다.
+  - `reject`: Task는 같은 등급으로 `todo`에 돌아간다. 두 번째 reject 뒤에는 `blocked`가 되고 사람에게
+    간다.
+  - `unknown`, 요청 오류, 서버 오류: 다시 보내지 않는다. Task는 `blocked`가 되고 사람에게 간다.
+- **신호이지 승인이 아니다.** accept는 PR의 사람 required review·병합(v49)이나 v50 자동 병합의
+  조건을 대신하지 않으며, 이 버전은 그 조건을 바꾸지 않는다.
+- **자격증명.** 검토 클라이언트의 SSH key는 launcher 계정만 읽는다. worker 계정이 읽을 수 있으면
+  worker가 검토를 직접 제출하거나 판정을 꾸밀 수 있기 때문이다.
+
+### 8. 바뀌지 않는 것
+
+v49·v50의 `done` 판정, PR의 사람 review와 병합, 에이전트는 PR을 승인·병합하지 않고 auto-merge를
+켜지 않는다는 원칙, `main` 병합은 운영자의 release라는 원칙, 비용 namespace와 예약, 정지와 kill
+switch, v22 용량 한도, 결과 불명은 멈추고 사람에게 넘긴다는 원칙, legacy 카드의 배정.
+
+### 9. 스위치와 출고
+
+- 5항의 배정, 6항의 검사, 7항의 검토 서버 연결은 두 스위치가 모두 켜졌을 때만 작동한다. 하나라도
+  꺼져 있으면 지금의 v22 경로 그대로다. 4항의 판정 함수는 intake v20 등록 Guard가 부르며, 그
+  스위치는 intake 정책이 정한다.
+  - **코드 래치** `AMUX_EXECUTION_GRADE_CODE_LATCH`(`lib/amux/executionGradeCore.ts`)는 false로
+    출고한다. S1~S4가 develop에 들어오고 테스트가 통과하면, 래치를 true로 바꾸는 PR을 이 버전이 미리
+    승인한다. 래치만으로는 아무것도 작동하지 않는다. 그 PR의 병합은 운영자가 한다.
+  - **운영 스위치** 환경 변수 `TOMVERSE_AMUX_EXECUTION_GRADE`는 값이 정확히 `enabled`일 때만 켜진다.
+    서버가 읽으며 어떤 route도 요청 본문으로 받지 않는다. 운영자가 staging에서 먼저 켜고, v4 Task
+    한 건이 등록 → 같은 등급 배정 → 검토 서버 → `develop` PR까지 간 기록을 확인한 뒤에 production에서
+    켠다.
+- 운영 스위치를 끄면 새로 claim되는 Task부터 지금의 경로로 돌아간다. 이미 검토 서버에 제출된 Task는
+  그 판정을 7항대로 처리한다.
+
+### 10. 구현 단계
+
+각 단계는 contract 역할로 작업하고, 끝난 diff를 검토 서버에 한 번 제출한다.
+
+| 단계 | 내용 | 쓰기 |
+|---|---|---|
+| S1 | `lib/amux/executionGradeCore.ts`: 목록, 정규화, 판정 함수, 테스트(항목 실재 포함), 읽기 전용 분포 보고. 새 파일은 `lib/agentAuthorityFiles.ts` manifest 분류가 먼저다 | 없음 |
+| S2 | catalog 승인의 단일 등급 규칙과 claim의 같은 등급 배정 | 래치 뒤 |
+| S3 | 바뀐 파일 목록, contract 경로 검사, 등급 상승 route, 본 앱의 PR 파일 재검사 | 래치 뒤 |
+| S4 | 검토 서버 제출, 기록 route, reject 재작업 | 래치 뒤 |
+
+### 11. 공통 기반 체크리스트 (이 버전이 바꾸는 항목)
+
+- **3 되돌릴 수 없는 행위**: 새로 생기지 않는다. PR 병합은 계속 사람 또는 v50의 조건이다.
+- **4 결정적 Guard**: 4항과 6항이며, 입력은 역할·경로·제안뿐이다. LLM 출력은 신호다.
+- **5 외부 텍스트**: Task 제목과 완료 조건이 검토 서버로, 지적이 다음 시도로 간다. 둘 다 데이터로
+  넣는다.
+- **6 자격증명**: 검토 클라이언트 key는 launcher 계정 전용이다(7항).
+- **8 비용**: 등급 상승은 같은 비용 namespace에서 결정적 계산으로 새 receipt를 만든다. 사용자 크레딧과
+  섞지 않는다.
+- **9 스위치**: 9항의 코드 래치와 운영 스위치이며, 운영 스위치를 끄면 지금의 경로로 돌아간다.
+- **10 결과 불명**: 6항의 목록 불명과 7항의 `unknown`은 멈추고 사람에게 간다.
+- **12 감사**: `amux.grade.escalated`와 `amux.review.recorded`는 시스템 actor로 남는다.
+- **15 실행 위치**: 판정과 재검사는 본 앱 내부의 결정적 코드다. 제출과 파일 목록은 전용 Ubuntu
+  runner(v23)의 launcher가 한다.
+- **16 상태 위치**: 등급, 상승, 검토 기록은 본 앱 DB에 둔다. GitHub는 상태 저장소가 아니다.
+
+그 밖의 항목은 이 버전이 바꾸지 않는다.

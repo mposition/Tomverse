@@ -243,6 +243,8 @@ export async function readAmuxFirstIdeaAnalysisResult(
           expectedPreviewId: previewId, expectedChunkIndex: 0,
           expectedRevisionChunkIndex: 0, previousContinuationKind: null,
           permittedSourceRefIds: ["operator_idea"], permittedTargetRefs: [],
+          // A stored chunk: its schema was fixed when it was admitted.
+          requiredSchemaVersion: null,
         });
         if (!inspected.ok || inspected.chunk.coverageStatus !==
               (needsOwnerInput ? "needs_owner_input" : partial ? "more" : "complete") ||

@@ -152,6 +152,13 @@ export const PLANNED_REFERENCES = {
         document: "docs/policy/marketing-automation.md",
         reason: "Fourth file of the SEO agent's exact allowlist (section 9.2). Planned, not built: the policy is approved and the route lands in stage S5.",
     },
+    // Orchestration v52 (approved 2026-10-16) names the module that holds the
+    // contract path list and the grade judgement. Section 3 says it does not
+    // exist yet; stage S1 builds it, and this entry leaves when it exists.
+    "lib/amux/executionGradeCore.ts": {
+        document: "docs/policy/development-agent-orchestration.md",
+        reason: "Single source of AMUX_CONTRACT_PATHS and deriveAmuxExecutionGrade() (v52 sections 3-4). Planned, not built: the policy is approved and the module lands in stage S1.",
+    },
     // An entry here is a document telling the reader about something that does
     // not exist yet. Empty is the healthy state; `lib/marketingMemoryClaims.ts`
     // was the last one and now exists, so the boundary in
