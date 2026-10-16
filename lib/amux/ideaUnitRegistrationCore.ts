@@ -1,5 +1,9 @@
-import type { AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
+import { AMUX_TASK_EXPECTED_PATHS_MAX,
+  type AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { classifyAmuxExecutionPath, deriveAmuxExecutionGrade,
+  normalizeAmuxExecutionPath,
+  type AmuxExecutionGrade } from "./executionGradeCore.ts";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
 import { type AmuxIdeaUnitConfirmationSnapshot,
   type AmuxIdeaUnitConfirmationResult } from "./ideaUnitConfirmationCore.ts";
@@ -44,10 +48,82 @@ export type AmuxV4CardRegistrationPlan = {
 
 export type AmuxV4CardRegistrationInspection =
   | { ok: true; plan: AmuxV4CardRegistrationPlan }
-  | { ok: false; code: "reconfirm" | "reject" | "halt" | "proposal_mismatch" };
+  | { ok: false; code: "reconfirm" | "reject" | "halt" | "proposal_mismatch" |
+    AmuxV20TaskRegistrationRefusal };
+
+export type AmuxV20TaskRegistrationRefusal =
+  | "task_expected_paths_missing"
+  | "task_expected_paths_out_of_range"
+  | "task_expected_path_invalid"
+  | "task_expected_paths_duplicate"
+  | "task_expected_paths_mixed"
+  | "task_role_review_refused"
+  | "task_execution_grade_mismatch"
+  | "task_confirmation_grade_mismatch"
+  | "task_cost_receipt_grade_mismatch";
+
+export type AmuxV20TaskRegistrationInspection =
+  | { ok: true; executionGrade: AmuxExecutionGrade }
+  | { ok: false; code: AmuxV20TaskRegistrationRefusal };
 
 const id = /^[A-Za-z0-9:_-]{1,128}$/;
 const digest = /^[a-f0-9]{64}$/;
+
+/** amux-intake v20 final registration fence. Stored schema 4 Tasks remain
+ * readable, but cannot become new cards without reviewed expected paths. */
+export function inspectAmuxV20TaskRegistration(
+  proposal: AmuxAnalysisCard,
+): AmuxV20TaskRegistrationInspection {
+  try {
+    if (proposal.taskRole === "review") {
+      return { ok: false, code: "task_role_review_refused" };
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(proposal, "expectedPaths");
+    if (!descriptor || !("value" in descriptor) || descriptor.value === undefined ||
+        descriptor.value === null) {
+      return { ok: false, code: "task_expected_paths_missing" };
+    }
+    if (!Array.isArray(descriptor.value)) {
+      return { ok: false, code: "task_expected_path_invalid" };
+    }
+    const expectedPaths = descriptor.value as unknown[];
+    if (expectedPaths.length < 1 || expectedPaths.length > AMUX_TASK_EXPECTED_PATHS_MAX) {
+      return { ok: false, code: "task_expected_paths_out_of_range" };
+    }
+    let contract = false;
+    let ordinary = false;
+    const normalizedPaths = new Set<string>();
+    for (let index = 0; index < expectedPaths.length; index += 1) {
+      const pathDescriptor = Object.getOwnPropertyDescriptor(expectedPaths, String(index));
+      const path = pathDescriptor && "value" in pathDescriptor ? pathDescriptor.value : null;
+      const normalizedPath = normalizeAmuxExecutionPath(path);
+      if (normalizedPath === null) {
+        return { ok: false, code: "task_expected_path_invalid" };
+      }
+      if (normalizedPaths.has(normalizedPath)) {
+        return { ok: false, code: "task_expected_paths_duplicate" };
+      }
+      normalizedPaths.add(normalizedPath);
+      const pathClass = classifyAmuxExecutionPath(path);
+      contract ||= pathClass === "contract";
+      ordinary ||= pathClass === "ordinary";
+    }
+    if (contract && ordinary) {
+      return { ok: false, code: "task_expected_paths_mixed" };
+    }
+    const executionGrade = deriveAmuxExecutionGrade({
+      taskRole: proposal.taskRole,
+      expectedPaths,
+      proposedGrade: proposal.executionGrade,
+    });
+    if (proposal.executionGrade !== executionGrade) {
+      return { ok: false, code: "task_execution_grade_mismatch" };
+    }
+    return { ok: true, executionGrade };
+  } catch {
+    return { ok: false, code: "task_expected_path_invalid" };
+  }
+}
 
 export function inspectAmuxV4CardRegistration(input: {
   prepared: PreparedCardDecision;
@@ -108,10 +184,21 @@ export function inspectAmuxV4CardRegistration(input: {
         (proposal.executionBrief === null || proposal.taskRole === null ||
           proposal.executionGrade === null || card.task === null ||
           card.task.role !== proposal.taskRole ||
-          card.task.grade !== proposal.executionGrade ||
           briefDigest?.digest !== card.task.brief.digest ||
           briefDigest?.digestKeyId !== card.task.brief.keyId))) {
     return { ok: false, code: "proposal_mismatch" };
+  }
+  let executionGrade = proposal.executionGrade;
+  if (proposal.cardType === "task") {
+    const taskGuard = inspectAmuxV20TaskRegistration(proposal);
+    if (!taskGuard.ok) return taskGuard;
+    executionGrade = taskGuard.executionGrade;
+    if (card.task!.grade !== taskGuard.executionGrade) {
+      return { ok: false, code: "task_confirmation_grade_mismatch" };
+    }
+    if (card.task!.costReceipt.grade !== taskGuard.executionGrade) {
+      return { ok: false, code: "task_cost_receipt_grade_mismatch" };
+    }
   }
   return { ok: true, plan: {
     decisionId: prepared.id, ideaId: prepared.ideaId,
@@ -126,7 +213,7 @@ export function inspectAmuxV4CardRegistration(input: {
       completionCriteria: [...proposal.completionCriteria] },
     executionBrief: proposal.executionBrief,
     taskRole: proposal.taskRole,
-    executionGrade: proposal.executionGrade,
+    executionGrade,
     maximumCostMicroUsd: card.task?.costReceipt.ceilingMicroUsd ?? null,
     sourceSystem: "admin-idea-v4",
     sourceKey: prepared.draftUnitId.toUpperCase(),
