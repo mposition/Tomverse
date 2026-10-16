@@ -2821,7 +2821,8 @@ v4 Task에 대해서는 등록부의 `roleCeiling`이 상한이 아니라 **그 
 
 ### 3. contract 경로 목록
 
-- 코드 상수 `AMUX_CONTRACT_PATHS`(`lib/amux/executionGradeCore.ts`) 하나가 유일한 출처다. intake
+- 코드 상수 `AMUX_CONTRACT_PATHS`(`lib/amux/executionGradeCore.ts`) 하나가 유일한 출처다. 이 파일은
+  아직 없으며 10항의 S1이 만든다. intake
   등록 Guard, 4항의 판정, 6항의 실행 뒤 검사가 모두 같은 함수로 비교한다. 목록은 이 문서의
   개정으로만 바꾼다. 버전 16의 같은 이름 목록은 이 목록으로 대체된다.
 - 비교는 양쪽을 소문자로 바꾼 뒤 한다. 끝이 `/`인 항목은 디렉터리 접두사이고, 그 밖의 항목은 경로
