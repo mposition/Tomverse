@@ -1994,6 +1994,12 @@ domains:
       parentColumn: ideaId
       parentModel: AmuxIdeaSubmission
     inUnifiedExport: unverified
+    note: >-
+      The append-only row records one source reference ordinal, its fixed commit
+      SHA, aggregate exclusion counts, and a keyed exclusion-path digest. It
+      stores no repository path, excluded path, temporary checkout directory,
+      file content, or read-event detail. The restrictive parent and audit
+      references do not resolve account deletion, retention, or unified export.
 
   - domain: amuxIdeaTrackedCheckoutReadManifest
     prismaModel: AmuxIdeaTrackedCheckoutReadManifest
@@ -2011,11 +2017,11 @@ domains:
       parentModel: AmuxIdeaSubmission
     inUnifiedExport: unverified
     note: >-
-      The append-only row records one source reference ordinal, its fixed commit
-      SHA, aggregate exclusion counts, and a keyed exclusion-path digest. It
-      stores no repository path, excluded path, temporary checkout directory,
-      file content, or read-event detail. The restrictive parent and audit
-      references do not resolve account deletion, retention, or unified export.
+      The append-only row stores CLI-observed read-file paths as ciphertext under
+      a separate external content key. Its plaintext metadata includes the
+      reference ordinal, fixed commit SHA, file count, and keyed payload digest;
+      the audit contains no paths. The restrictive parent and audit references
+      do not resolve account deletion, key retirement, retention, or export.
 
   - domain: amuxIdeaAnalysisChunk
     prismaModel: AmuxIdeaAnalysisChunk

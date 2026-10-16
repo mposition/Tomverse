@@ -28,6 +28,18 @@ export class AmuxTrackedCheckoutReadManifestError extends Error {
   }
 }
 
+function referenceAlreadyRecorded(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; meta?: { modelName?: unknown;
+    target?: unknown } };
+  return candidate.code === "P2002" &&
+    candidate.meta?.modelName === "AmuxIdeaTrackedCheckoutReadManifest" &&
+    Array.isArray(candidate.meta.target) &&
+    candidate.meta.target.length === 2 &&
+    candidate.meta.target[0] === "ideaId" &&
+    candidate.meta.target[1] === "referenceOrdinal";
+}
+
 export function amuxTrackedCheckoutReadManifestKeyIdentity(
   ideaId: string, manifestId: string,
 ) {
@@ -99,15 +111,22 @@ export async function recordAmuxTrackedCheckoutReadManifest(
     metadata: amuxTrackedCheckoutReadManifestAuditMetadata(inspected,
       sealed.digest, sealed.digestKeyId),
   });
-  await tx.amuxIdeaTrackedCheckoutReadManifest.create({ data: {
-    id: inspected.manifestId, ideaId: inspected.ideaId,
-    referenceOrdinal: inspected.referenceOrdinal,
-    pinnedCommitSha: inspected.pinnedCommitSha,
-    fileCount: inspected.files.length,
-    ciphertext: Uint8Array.from(sealed.ciphertext), keyId: sealed.keyId,
-    keyVersion: sealed.keyVersion, digest: sealed.digest,
-    digestKeyId: sealed.digestKeyId, auditLogId,
-  } });
+  try {
+    await tx.amuxIdeaTrackedCheckoutReadManifest.create({ data: {
+      id: inspected.manifestId, ideaId: inspected.ideaId,
+      referenceOrdinal: inspected.referenceOrdinal,
+      pinnedCommitSha: inspected.pinnedCommitSha,
+      fileCount: inspected.files.length,
+      ciphertext: Uint8Array.from(sealed.ciphertext), keyId: sealed.keyId,
+      keyVersion: sealed.keyVersion, digest: sealed.digest,
+      digestKeyId: sealed.digestKeyId, auditLogId,
+    } });
+  } catch (error) {
+    if (referenceAlreadyRecorded(error)) {
+      throw new AmuxTrackedCheckoutReadManifestError("already_recorded");
+    }
+    throw error;
+  }
   return { manifestId: inspected.manifestId, auditLogId,
     fileCount: inspected.files.length };
   } finally { inspected.plaintext.fill(0); }
