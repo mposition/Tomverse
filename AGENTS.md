@@ -1326,6 +1326,14 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   셉니다. `logicalDraftId`·채널·locale·kind는 서비스가 정하며, 서명된 제출 본문은 접수 core의 서명 그대로입니다.
   서비스가 strip-types로 불러야 하므로 `lib/marketingDraftIntakeCore.ts`의 schema import는 상대 경로입니다. 판정은 여전히
   앱의 Guard입니다.
+- **S3e3(생성기 한 주기와 감독자)**: `lib/marketingGeneratorCycleCore.ts`, `scripts/marketing-generator-worker.mjs`,
+  `scripts/marketing-generator-service.mjs`, `tests/marketingGeneratorCycle.test.mjs`. 한 실행은 문맥을 읽고, 승인 모드
+  계정마다 A5를 한 번 부르고, 호출마다 그 호출의 원장 key로 초안을 제출합니다. **멈추는 쪽을 택합니다** — 예약 거절과
+  결과 불명은 그 자리에서 실행을 끝냅니다. **다시 보내는 것은 제출 하나뿐입니다** — 답을 잃었거나 5xx이면 서명된 같은
+  바이트를 최대 세 번까지 보내고(접수가 key로 되읽음), 공급사는 다시 부르지 않으며 4xx는 다시 보내지 않습니다. 감독자는
+  게시기와 같은 모양으로 마감에 worker를 SIGKILL하고, worker에는 변수 넷만 넘깁니다. **worker는 가격 pin이 있는 모델이
+  아니면 시작하지 않습니다** — 지금은 pin이 없어 항상 거절합니다. `.railway/agent-runners.ts` 배선은 D4(전용 OpenAI
+  프로젝트·키·pin) 뒤입니다.
 - **S3h1(보존 정리)**: `lib/marketingRetention.ts`, store의 `purgeExpiredMarketingRows()`,
   `lib/maintenance.ts`의 `marketing_retention` 단계, `tests/integration/marketing-retention.db.test.ts`.
   **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가
