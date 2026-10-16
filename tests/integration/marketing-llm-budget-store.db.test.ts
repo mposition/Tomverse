@@ -332,3 +332,18 @@ test("an action arms the transaction timer inside the caller's transaction", asy
   assert.ok(elapsed < 11_500, `the transaction was stopped by its 10 s timer, not after ${elapsed} ms`);
   assert.ok(elapsed >= 9_000, `and not before it: ${elapsed} ms`);
 });
+
+test("a refused bound leaves the caller's transaction settings untouched", async () => {
+  const settings = await tx(async (client) => {
+    await client.$executeRawUnsafe("SET LOCAL transaction_timeout = '20s'");
+    const before = await client.$queryRawUnsafe<Array<{ statement: string }>>("SELECT current_setting('statement_timeout') AS statement");
+    const outcome = await reserveMarketingLlmCall(client, { payload: payload(1), deadlineAt: deadline() }, OPEN);
+    const after = await client.$queryRawUnsafe<Array<{ statement: string; timer: string }>>(
+      "SELECT current_setting('statement_timeout') AS statement, current_setting('transaction_timeout') AS timer",
+    );
+    return { outcome, before: before[0].statement, after: after[0] };
+  });
+  assert.deepEqual(settings.outcome, { status: "refused", code: "timeout_already_armed" });
+  assert.equal(settings.after.statement, settings.before);
+  assert.equal(settings.after.timer, "20s");
+});

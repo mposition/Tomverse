@@ -12,7 +12,7 @@
  * Each action expects a transaction of its own. The statement, idle and
  * transaction bounds it sets are transaction-local and stay in force until
  * that transaction ends, so a caller that ran more work in the same
- * transaction would run it under them; the route opens one per request.
+ * transaction would run it under them. The route (S3c3) opens one per request.
  *
  * The database holds the transition rules on its own (the migration's
  * triggers); this module decides which transition a request asks for and
@@ -115,16 +115,18 @@ async function bound(
     WITH settings AS (
       SELECT current_setting('server_version_num')::int AS num,
              current_setting('transaction_timeout', true) AS armed,
-             set_config('statement_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true) AS statement_set,
-             set_config('idle_in_transaction_session_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true) AS idle_set,
              clock_timestamp() AS at
+    ), checked AS (
+      SELECT *, num >= ${MIN_SERVER_VERSION_NUM} AND trim(coalesce(armed, '')) IN ('0', '0ms') AS ok
+      FROM settings
     )
+    -- A refusal changes nothing: every bound is set only when all three are.
     SELECT num AS "num", armed AS "armed",
-           CASE WHEN num >= ${MIN_SERVER_VERSION_NUM} AND trim(coalesce(armed, '')) IN ('0', '0ms')
-                THEN set_config('transaction_timeout', ${String(MARKETING_LLM_TRANSACTION_MS)}, true)
-           END AS "set",
+           CASE WHEN ok THEN set_config('statement_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true) END AS "statementSet",
+           CASE WHEN ok THEN set_config('idle_in_transaction_session_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true) END AS "idleSet",
+           CASE WHEN ok THEN set_config('transaction_timeout', ${String(MARKETING_LLM_TRANSACTION_MS)}, true) END AS "set",
            EXTRACT(EPOCH FROM (${deadlineAt}::timestamptz - at)) * 1000 < ${MARKETING_LLM_TRANSACTION_MS} AS "late"
-    FROM settings
+    FROM checked
   `);
   const row = rows[0];
   if (!row || !(Number(row.num) >= MIN_SERVER_VERSION_NUM)) return { refused: "server_too_old" };
@@ -324,9 +326,8 @@ export async function dispatchMarketingLlmCall(
     if (row.dispatchDigest !== dispatchDigest) return conflict;
     return { status: "ok", replay: true, value: { callId: row.id, dispatchDigest, firstConsumption: false } };
   }
-  if (row.intentElsewhere) return conflict;
-
   if (row.state !== "reserved") return refused("call_state");
+  if (row.intentElsewhere) return conflict;
   if (bounds.late) return refused("deadline_too_close");
   if (env.killSwitchOn !== false) return refused("kill_switch");
   if (input.adapterConfigDigest !== marketingLlmAdapterConfigDigest(row.configSnapshot)) {
