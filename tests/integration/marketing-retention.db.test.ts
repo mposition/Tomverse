@@ -141,7 +141,7 @@ test("expired reports and old rejected drafts go, each with its audit row, and t
   const notDraft = await agedPost(row.id, 100, { status: "drafted", guardDecision: "approval_required" });
 
   const result = await runMarketingRetention(prisma);
-  assert.deepEqual(result, { MarketingReport: 1, AiVisibilityRun: 0, MarketingPost: 1 });
+  assert.deepEqual(result, { MarketingReport: 1, AiVisibilityRun: 0, MarketingPost: 1, MarketingLlmCall: 0 });
 
   assert.equal(await prisma.marketingReport.count({ where: { id: expired.id } }), 0);
   assert.equal(await prisma.marketingReport.count({ where: { id: fresh.id } }), 1);
@@ -178,7 +178,7 @@ test("expired reports and old rejected drafts go, each with its audit row, and t
 test("a run with nothing due writes nothing", async () => {
   await channel();
   const result = await runMarketingRetention(prisma);
-  assert.deepEqual(result, { MarketingReport: 0, AiVisibilityRun: 0, MarketingPost: 0 });
+  assert.deepEqual(result, { MarketingReport: 0, AiVisibilityRun: 0, MarketingPost: 0, MarketingLlmCall: 0 });
   assert.equal(await prisma.marketingReport.count({ where: { kind: "retention_run" } }), 0);
 });
 
