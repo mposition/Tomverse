@@ -40,7 +40,7 @@ const secret = (value: string) =>
   /xox[baprs]-/.test(value) || /-----BEGIN /.test(value) || /DATABASE_URL\s*=/.test(value) ||
   /(?:api[\s_-]*key|secret|password|token)\s*[:=]\s*\S{8,}/i.test(value);
 const personalData = (value: string) =>
-  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(value) ||
+  /(?<=[A-Za-z0-9._%+-])@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(value) ||
   /\b\d{3}[-. ]\d{3}[-. ]\d{4}\b/.test(value);
 const absolutePath = (value: string) => /[A-Za-z]:\\/.test(value) ||
   /\\\\[A-Za-z0-9_.$-]+\\/.test(value) ||
