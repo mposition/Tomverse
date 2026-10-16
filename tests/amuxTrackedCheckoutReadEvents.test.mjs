@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createAmuxTrackedCheckoutReadObserver } from
+import { createAmuxTrackedCheckoutReadObserver,
+  createAmuxTrackedCheckoutReadStreamObserver } from
   "../lib/amux/ideaTrackedCheckoutReadEvents.mjs";
 
 const directory = "/tmp/amux-v19-checkout-abcdef";
@@ -90,4 +91,80 @@ test("malformed and trailing events invalidate a previously complete manifest", 
   assert.deepEqual(complete(observer), { kind: "complete", files: [] });
   observer.observeLine("not-json");
   assert.deepEqual(observer.finish(), { kind: "unverified" });
+});
+
+test("streamed CLI chunks preserve a Unicode Read path across byte boundaries", () => {
+  const relative = "src/π.ts";
+  const observer = createAmuxTrackedCheckoutReadStreamObserver({
+    directory, files: [relative],
+  });
+  const output = [
+    use("read_unicode", "Read", { file_path: `${directory}/${relative}` }),
+    reply("read_unicode"),
+    { type: "result", subtype: "success", is_error: false },
+  ].map(JSON.stringify).join("\n");
+  const bytes = Buffer.from(output, "utf8");
+  for (let offset = 0; offset < bytes.length; offset++) {
+    observer.observeChunk(bytes.subarray(offset, offset + 1));
+  }
+  assert.deepEqual(observer.finish(), { kind: "complete", files: [relative] });
+});
+
+test("malformed and truncated streamed events cannot certify a read manifest", () => {
+  const malformed = createAmuxTrackedCheckoutReadStreamObserver({
+    directory, files: ["src/a.ts"],
+  });
+  malformed.observeChunk(Buffer.from(JSON.stringify(use("x", "Read", {
+    file_path: file,
+  })) + "\n"));
+  malformed.observeChunk(Buffer.from([0xff, 0x0a]));
+  malformed.observeChunk(Buffer.from(JSON.stringify(reply("x")) + "\n"));
+  assert.deepEqual(malformed.finish(), { kind: "unverified" });
+
+  const truncated = createAmuxTrackedCheckoutReadStreamObserver({
+    directory, files: ["src/a.ts"],
+  });
+  truncated.observeChunk(Buffer.from('{"type":"result","subtype":'));
+  assert.deepEqual(truncated.finish(), { kind: "unverified" });
+
+  const trailing = createAmuxTrackedCheckoutReadStreamObserver({
+    directory, files: [],
+  });
+  trailing.observeChunk(Buffer.from('{"type":"result","subtype":"success","is_error":false}'));
+  assert.deepEqual(trailing.finish(), { kind: "complete", files: [] });
+  trailing.observeChunk(Buffer.from("\n"));
+  assert.deepEqual(trailing.finish(), { kind: "unverified" });
+});
+
+test("stream decoder fails closed on broken UTF-8, blank lines and invalid chunks", () => {
+  const brokenUtf8 = createAmuxTrackedCheckoutReadStreamObserver({
+    directory, files: [],
+  });
+  brokenUtf8.observeChunk(Buffer.from([0xc3]));
+  assert.deepEqual(brokenUtf8.finish(), { kind: "unverified" });
+
+  const invalidChunk = createAmuxTrackedCheckoutReadStreamObserver({
+    directory, files: [],
+  });
+  invalidChunk.observeChunk("not bytes");
+  assert.deepEqual(invalidChunk.finish(), { kind: "unverified" });
+
+  const blankLine = createAmuxTrackedCheckoutReadStreamObserver({
+    directory, files: [],
+  });
+  blankLine.observeChunk(Buffer.from('\n{"type":"result","subtype":"success","is_error":false}\n'));
+  assert.deepEqual(blankLine.finish(), { kind: "unverified" });
+
+  const bom = createAmuxTrackedCheckoutReadStreamObserver({
+    directory, files: [],
+  });
+  bom.observeChunk(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]),
+    Buffer.from('{"type":"result","subtype":"success","is_error":false}')]));
+  assert.deepEqual(bom.finish(), { kind: "unverified" });
+
+  const crlf = createAmuxTrackedCheckoutReadStreamObserver({
+    directory, files: [],
+  });
+  crlf.observeChunk(Buffer.from('{"type":"system"}\r\n{"type":"result","subtype":"success","is_error":false}\r\n'));
+  assert.deepEqual(crlf.finish(), { kind: "complete", files: [] });
 });
