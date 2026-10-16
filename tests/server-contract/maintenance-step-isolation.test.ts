@@ -228,6 +228,13 @@ mock.module(mod("lib/opsObserverStore.ts"), {
     purgeOpsObserverDeliveries: async () => ({ deleted: 43 }),
   },
 });
+// Marketing retention (docs/policy/marketing-automation.md §12.2), mocked as its
+// runner: the per-table counts it reports, so the step's answer is visible.
+mock.module(mod("lib/marketingRetention.ts"), {
+  namedExports: {
+    runMarketingRetention: async () => ({ MarketingReport: 3, AiVisibilityRun: 0, MarketingPost: 2 }),
+  },
+});
 mock.module(mod("lib/productResearchObservationRouteAuth.ts"), {
   namedExports: {
     // On, so the silence step does its reads: off would make it report
@@ -479,6 +486,7 @@ test("a clean run reports no failed steps and every count", async () => {
 
   assert.deepEqual(result.failedSteps, []);
   assert.equal(result.creditReservations, 1);
+  assert.deepEqual(result.marketingRetention, { MarketingReport: 3, AiVisibilityRun: 0, MarketingPost: 2 });
   assert.equal(result.scheduledAccountsDeleted, 1);
 
   // Nothing reports `null` on a clean run: `null` means "this step did not

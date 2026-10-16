@@ -83,6 +83,7 @@ import {
   sweepAbandonedKnowledgeObjects,
 } from "@/lib/assistantKnowledgeLifecycle";
 import { processPendingKnowledgeFiles } from "@/lib/assistantKnowledgeProcessor";
+import { runMarketingRetention } from "@/lib/marketingRetention";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
 import {
   GUEST_ATTACHMENT_PREFIX,
@@ -1047,11 +1048,18 @@ export async function cleanupExpiredData() {
     return purged;
   });
 
+  // Marketing rows §12.2 says have expired (docs/policy/marketing-automation.md);
+  // the database's delete triggers decide what may go.
+  const marketingRetention = await step("marketing_retention", () =>
+    runMarketingRetention(prisma)
+  );
+
   // `null` reads as "this step did not report", which is what a step that threw
   // did. It is deliberately distinct from the `0` of a step that ran and found
   // nothing, and the callers that sum these numbers skip it rather than
   // counting a failure as no work.
   return {
+    marketingRetention,
     accountDataExportRequests,
     contextManifestsCompacted: contextManifests?.compacted ?? null,
     // A backlog that is not shrinking is the signal the batch size is too
