@@ -34,6 +34,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
   "@/lib/amux/v22ReadOnlyApiProtocol.mjs";
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
+import { formatAmuxV52ReviewScope } from "@/lib/amux/v52ReviewCore";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -265,6 +266,7 @@ export type AmuxPulledDelivery =
           budgetMicrousd: number;
           gradeGuard?: true;
           executionGrade?: string;
+          reviewAuthor?: "claude";
           reviewAuthorVendor?: string;
           reviewScope?: string;
           reviewFeedbackJobId?: string;
@@ -521,10 +523,7 @@ export async function pullAmuxWorkDelivery(input: {
               typeof item !== "string" || !item.trim() ||
               item.length > 500))
           throw new Error("v52 review scope invalid");
-        reviewScope = `Title: ${titleText}\nCompletion criteria:\n` +
-          criteria.map((item) => `- ${item}`).join("\n");
-        if (reviewScope.length > 4_000)
-          throw new Error("v52 review scope exceeds server limit");
+        reviewScope = formatAmuxV52ReviewScope(titleText, criteria);
         const prior = await tx.amuxV52ReviewRecord.findFirst({
           where: { taskId: delivery.taskId },
           orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
@@ -541,7 +540,10 @@ export async function pullAmuxWorkDelivery(input: {
         v22Execution: { modelId: assignment.modelId, role: assignment.role,
           budgetMicrousd, ...(gradeGuard ? { gradeGuard: true as const,
             executionGrade: assignment.grade,
-            ...(reviewScope ? { reviewAuthorVendor: assignment.provider,
+            ...(reviewScope ? {
+              ...(assignment.provider === "anthropic" ?
+                { reviewAuthor: "claude" as const } : {}),
+              reviewAuthorVendor: assignment.provider,
               reviewScope,
               ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}) } : {}),
           } : {}),

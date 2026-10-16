@@ -2981,6 +2981,8 @@ pub struct V22ExecutionProfile {
     #[serde(default)]
     pub execution_grade: Option<String>,
     #[serde(default)]
+    pub review_author: Option<String>,
+    #[serde(default)]
     pub review_author_vendor: Option<String>,
     #[serde(default)]
     pub review_scope: Option<String>,

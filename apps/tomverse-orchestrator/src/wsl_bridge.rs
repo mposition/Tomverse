@@ -2088,7 +2088,7 @@ async fn v52_review_helper_call(payload: serde_json::Value) -> Result<V52ReviewS
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true).spawn()?;
     let bytes = serde_json::to_vec(&payload)?;
-    if bytes.len() > 12_288 { bail!("v52 review helper input exceeds limit"); }
+    if bytes.len() > 65_536 { bail!("v52 review helper input exceeds limit"); }
     let mut stdin = child.stdin.take().context("v52 review helper stdin missing")?;
     stdin.write_all(&bytes).await?;
     drop(stdin);
@@ -3163,15 +3163,14 @@ pub async fn run_from_env() -> i32 {
                                                 let mut review_unverified = false;
                                                 if let Some((profile, result)) = review_profile {
                                                     if let (Some(base), Some(commit), Some(review_ref), Some(touches),
-                                                        Some(author_vendor), Some(scope)) = (
+                                                        Some(author), Some(author_vendor), Some(scope)) = (
                                                         result.review_base_sha.as_deref(),
                                                         result.review_commit_sha.as_deref(),
                                                         result.review_ref.as_deref(),
                                                         result.review_touches_contract,
+                                                        profile.review_author.as_deref(),
                                                         profile.review_author_vendor.as_deref(),
                                                         profile.review_scope.as_deref()) {
-                                                        let author = entry.delivery.worker
-                                                            .split('-').next().unwrap_or("");
                                                         let expected = serde_json::json!({
                                                             "attemptId": entry.delivery.attempt_id,
                                                             "baseSha": base, "commitSha": commit,
@@ -3690,7 +3689,8 @@ mod tests {
             model_id: "claude-test".into(), role: "implement".into(),
             budget_microusd: 1_000_000, grade_guard: true,
             execution_grade: Some("routine".into()),
-            review_author_vendor: Some("claude".into()),
+            review_author: Some("claude".into()),
+            review_author_vendor: Some("anthropic".into()),
             review_scope: Some("test".into()), review_feedback_job_id: None,
             read_only_retry: None,
         };
@@ -4935,6 +4935,7 @@ mod tests {
             model_id: "claude-opus-5-5".into(), role: "design".into(),
             grade_guard: false,
             execution_grade: None,
+            review_author: None,
             review_author_vendor: None, review_scope: None,
             review_feedback_job_id: None,
             budget_microusd: 1_000_000,
@@ -4982,6 +4983,7 @@ mod tests {
             model_id: retry.model_id.clone(), role: "investigate".into(),
             grade_guard: false,
             execution_grade: None,
+            review_author: None,
             review_author_vendor: None, review_scope: None,
             review_feedback_job_id: None,
             budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),
@@ -5032,6 +5034,7 @@ mod tests {
             model_id: retry.model_id.clone(), role: "investigate".into(),
             grade_guard: false,
             execution_grade: None,
+            review_author: None,
             review_author_vendor: None, review_scope: None,
             review_feedback_job_id: None,
             budget_microusd: 3_400_000, read_only_retry: Some(retry.clone()),

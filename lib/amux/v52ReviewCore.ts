@@ -1,6 +1,17 @@
 /** The review server is a signal for v4 Tasks, not a PR approval. */
 export type AmuxV52ReviewVerdict = "accept" | "reject" | "unknown";
 
+export const AMUX_V52_REVIEW_SCOPE_MAX_CHARS = 8_192;
+
+export function formatAmuxV52ReviewScope(title: string,
+  completionCriteria: string[]): string {
+  const scope = `Title: ${title}\nCompletion criteria:\n` +
+    completionCriteria.map((item) => `- ${item}`).join("\n");
+  if (scope.length > AMUX_V52_REVIEW_SCOPE_MAX_CHARS)
+    throw new Error("v52 review scope exceeds server limit");
+  return scope;
+}
+
 export type AmuxV52ReviewEvidence = {
   jobId: string | null;
   baseSha: string;

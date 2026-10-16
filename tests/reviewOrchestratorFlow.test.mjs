@@ -355,7 +355,8 @@ test("the reviewer sees the diff and the scope note, and none of the daemon's se
   try {
     f.config.providers.find((p) => p.id === "claude").passEnv = ["FAKE_REVIEWER_PROMPT_OUT"];
     f.commit("a.txt", "six\n");
-    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo", "--scope", "scope-marker").stdout);
+    const scope = `scope-marker-${"x".repeat(5_000)}-scope-end`;
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo", "--scope", scope).stdout);
     const orchestrator = new Orchestrator(f.config);
     orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
@@ -363,6 +364,7 @@ test("the reviewer sees the diff and the scope note, and none of the daemon's se
     assert.equal(summary.reviews[0].findings[0].summary, "leak=none");
     const prompt = readFileSync(promptOut, "utf8");
     assert.match(prompt, /scope-marker/);
+    assert.match(prompt, /scope-end/);
     assert.match(prompt, /\+six/);
   } finally {
     delete process.env.REVIEW_ORCH_SECRET_PROBE;

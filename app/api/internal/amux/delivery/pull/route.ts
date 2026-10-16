@@ -123,6 +123,7 @@ export async function POST(request: Request) {
                 { grade_guard: true,
                   execution_grade: outcome.delivery.v22Execution.executionGrade,
                   ...(outcome.delivery.v22Execution.reviewScope ? {
+                     review_author: outcome.delivery.v22Execution.reviewAuthor,
                     review_author_vendor:
                       outcome.delivery.v22Execution.reviewAuthorVendor,
                     review_scope: outcome.delivery.v22Execution.reviewScope,
