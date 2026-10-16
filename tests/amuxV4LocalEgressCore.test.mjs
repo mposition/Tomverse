@@ -178,6 +178,8 @@ test("proxy caps simultaneous tunnels and releases a slot after disconnect", asy
     resolve: async () => ["104.18.6.192"],
     dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
   });
+  const proxyClients = [];
+  proxy.on("connection", (socket) => proxyClients.push(socket));
   const proxyPort = await listen(proxy);
   const request = "CONNECT api.openai.com:443 HTTP/1.1\r\nHost: api.openai.com:443\r\n\r\n";
   const sockets = [];
@@ -200,9 +202,11 @@ test("proxy caps simultaneous tunnels and releases a slot after disconnect", asy
     assert.match(await exchange(proxyPort, request, "429 Too Many Requests"),
       /429 Too Many Requests/);
     const closed = once(sockets[0], "close");
+    const proxyClientClosed = once(proxyClients[0], "close");
     const upstreamClosed = once(echoSockets[0], "close");
     sockets[0].destroy();
     await closed;
+    await proxyClientClosed;
     await upstreamClosed;
     sockets.push(await openTunnel());
   } finally {
@@ -292,27 +296,45 @@ test("v4 tunnel still closes beyond its 16 MiB byte ceiling", async () => {
   }
 });
 
-test("v19 direct-read tunnel has no inherited ten-minute deadline", async (t) => {
-  const echo = createTcpServer((socket) => socket.pipe(socket));
+test("v4 tunnel expires at ten minutes while v19 remains open", async (t) => {
+  const echo = createTcpServer((socket) => {
+    socket.on("error", () => {});
+    socket.pipe(socket);
+  });
   const echoPort = await listen(echo);
-  const proxy = createAmuxV19EgressProxy(["api.anthropic.com"], {
+  const deps = {
     resolve: async () => ["104.18.6.192"],
     dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
-  });
-  const proxyPort = await listen(proxy);
+  };
+  const v4 = createAmuxV4EgressProxy(["api.anthropic.com"], deps);
+  const v19 = createAmuxV19EgressProxy(["api.anthropic.com"], deps);
+  const v4Port = await listen(v4);
+  const v19Port = await listen(v19);
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  let socket;
+  let v4Socket;
+  let v19Socket;
   try {
-    socket = await openTunnel(proxyPort);
+    v4Socket = await openTunnel(v4Port);
+    v19Socket = await openTunnel(v19Port);
+    v4Socket.on("error", () => {});
+    const v4Closed = new Promise((resolve) => v4Socket.once("close", resolve));
     t.mock.timers.tick(600_001);
-    assert.equal(socket.destroyed, false);
-    const echoed = once(socket, "data");
-    socket.write("STILL_OPEN");
-    assert.equal((await echoed)[0].toString(), "STILL_OPEN");
+    t.mock.timers.reset();
+    let deadline;
+    try {
+      await Promise.race([v4Closed, new Promise((_resolve, reject) => {
+        deadline = setTimeout(() =>
+          reject(new Error("v4 deadline did not close tunnel")), 1_000);
+      })]);
+    } finally { clearTimeout(deadline); }
+    assert.equal(v4Socket.destroyed, true);
+    assert.equal(v19Socket.destroyed, false);
   } finally {
     t.mock.timers.reset();
-    socket?.destroy();
-    await close(proxy);
+    v4Socket?.destroy();
+    v19Socket?.destroy();
+    await close(v4);
+    await close(v19);
     await close(echo);
   }
 });

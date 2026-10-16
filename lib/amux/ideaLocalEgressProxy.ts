@@ -16,8 +16,8 @@ const MAX_HEAD_BYTES = 4_096;
 const MAX_ACTIVE_TUNNELS = 4;
 const MAX_PROXY_CONNECTIONS = 16;
 const V4_MAX_DIRECTION_BYTES = 16 * 1024 * 1024;
-// The historical v4 probe keeps its original tunnel limits. A v19 direct-read
-// call instead runs until its owner stop or retention fence settles the claim.
+// The historical v4 probe keeps its original tunnel limits. A v19 live
+// analysis call instead runs until its owner stop or retention fence settles it.
 const V4_TUNNEL_DEADLINE_MS = 600_000;
 const CONNECT_DEADLINE_MS = 5_000;
 
@@ -159,7 +159,7 @@ export function createAmuxV4EgressProxy(
   return createAmuxEgressProxy(approvedHosts, deps, V4_BOUNDS);
 }
 
-/** Direct-read traffic has no elapsed-time or byte ceiling. The caller must
+/** v19 analysis traffic has no elapsed-time or byte ceiling. The caller must
  * still enforce the owner stop, retention fence and approved-host catalog. */
 export function createAmuxV19EgressProxy(
   approvedHosts: readonly string[], deps: AmuxV4EgressProxyDeps = {},
