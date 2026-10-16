@@ -10,8 +10,6 @@ import { auditRowActorKind, AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_IDEA_SYSTEM_ACTOR } from
   "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
-import { AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT } from
-  "./ideaAnalysisInvocationLimitsCore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from
   "./ideaAnalysisPriceVersionRead.ts";
 import { openAmuxContent, verifyAmuxContentDigest,
@@ -28,8 +26,10 @@ export class AmuxIdeaAnalysisClaimError extends Error {
 }
 
 /** Called by the only production claim entrypoint while holding the audit
- * chain lock. The DB clock, not the app server clock, selects the UTC day. */
-export async function enforceAmuxV4DailyClaimLimit(
+ * chain lock. The DB clock, not the app server clock, selects the UTC day the
+ * claim audit records. AMUX intake policy v19 removed v13's limit of 12 claims
+ * per UTC day, so the day is recorded and nothing is refused on it. */
+export async function readAmuxV4ClaimDayUtc(
   tx: Prisma.TransactionClient,
 ): Promise<string> {
   const rows = await tx.$queryRaw<Array<{ dayUtc: string }>>`
@@ -39,14 +39,6 @@ export async function enforceAmuxV4DailyClaimLimit(
   const dayUtc = rows[0]?.dayUtc;
   if (!dayUtc || !/^\d{4}-\d{2}-\d{2}$/.test(dayUtc)) {
     throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
-  }
-  const count = await tx.adminAuditLog.count({ where: {
-    action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
-    targetType: AMUX_V4_ANALYSIS_CLAIM_TARGET,
-    metadata: { path: ["claimDayUtc"], equals: dayUtc },
-  } });
-  if (count >= AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT) {
-    throw new AmuxIdeaAnalysisClaimError("not_ready");
   }
   return dayUtc;
 }
@@ -389,7 +381,7 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
     // shift the 12-per-UTC-day admission boundary. If midnight passes since
     // the earlier readiness clock, counting the claim on the later day is
     // conservative and does not permit an extra claim on the earlier day.
-    const claimDayUtc = await enforceAmuxV4DailyClaimLimit(tx);
+    const claimDayUtc = await readAmuxV4ClaimDayUtc(tx);
     const auditId = await writeSystemAuditLog({ tx,
       systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
       action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
