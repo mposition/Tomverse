@@ -96,8 +96,9 @@ export async function readAmuxFirstIdeaAnalysisResult(
     if (chunk.state !== "draft_ready") return { state: "pending" };
     let registrationRefusal;
     try {
-      registrationRefusal = await readLatestAmuxV20RegistrationRefusalInTx(
-        tx, ideaId, actorUserId);
+      registrationRefusal = chunk.currentPreviewId && chunk.sourcePlanRevisionId ?
+        await readLatestAmuxV20RegistrationRefusalInTx(tx, ideaId, actorUserId,
+          chunk.currentPreviewId, chunk.sourcePlanRevisionId) : null;
     } catch {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }

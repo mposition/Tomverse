@@ -139,8 +139,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // Intake v20.5 adds an audited refusal metadata read to the existing analysis
 // read. Its two-module boundary is read-only and does not import the refusal
 // writer; keep both latch digests pinned to this 17-file closure.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "ad62cce712b3940db06d937c60f3312af1bd95a6172ff42573f6f8907cd150fb";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "fa827eb9250d2c0ede02855c3f3e7ca7ef35b2c25d221e5b37ead943815ba7cb";
+// Review r-20261016-095415-ada10c scoped that metadata read to the exact
+// displayed preview and source plan, while keeping the same read-only closure.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "294318e3ec8097b5a1bd7e9b80f704aa50a694ff90727200838c7890228cec22";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "efced24d680f8b4db974bb02cc51ca476a67afce70170ab7bf1282c57ce12fa6";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

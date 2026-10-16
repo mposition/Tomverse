@@ -144,7 +144,19 @@ test("a refusal and human audit are durable, path-free and idempotent by request
   assert.equal(await prisma.adminAuditLog.count({ where: {
     action: "amux.v20.registration.refuse", targetId: row.id } }), 1);
   assert.deepEqual(await prisma.$transaction((tx) =>
-    readLatestAmuxV20RegistrationRefusalInTx(tx, seeded.ideaId, actorUserId)), first);
+    readLatestAmuxV20RegistrationRefusalInTx(tx, seeded.ideaId, actorUserId,
+      seeded.previewId, seeded.sourcePlanRevisionId)), first);
+  assert.equal(await prisma.$transaction((tx) =>
+    readLatestAmuxV20RegistrationRefusalInTx(tx, seeded.ideaId, actorUserId,
+      randomUUID(), seeded.sourcePlanRevisionId)), null);
+  assert.equal(await prisma.$transaction((tx) =>
+    readLatestAmuxV20RegistrationRefusalInTx(tx, seeded.ideaId, actorUserId,
+      seeded.previewId, randomUUID())), null);
+  await prisma.amuxIdeaDraftUnit.update({ where: { id: seeded.unitId },
+    data: { state: "approved" } });
+  assert.equal(await prisma.$transaction((tx) =>
+    readLatestAmuxV20RegistrationRefusalInTx(tx, seeded.ideaId, actorUserId,
+      seeded.previewId, seeded.sourcePlanRevisionId)), null);
   await assert.rejects(recordAmuxV20RegistrationRefusal({ ...input,
     refusalCode: "task_role_review_refused" }),
   (error: unknown) => error instanceof AmuxV20RegistrationRefusalStoreError &&

@@ -25,6 +25,8 @@ import { inspectAmuxV20TaskRegistration } from
   "./ideaUnitRegistrationCore.ts";
 import { AmuxV20RegistrationRefusalDetected } from
   "./ideaRegistrationRefusalDetectionCore.ts";
+import { recordAmuxV20RegistrationRefusal } from
+  "./ideaRegistrationRefusalService.ts";
 import { AmuxV4TaskCatalogApprovalError, calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 
@@ -45,11 +47,17 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{1
  * same whole-plan transaction (`pendingFeatures`).
  */
 export async function approveAmuxV4CardPlan(session: Session, request: Request, input: {
-  ideaId: string; reasons: Readonly<Record<string, string>>; publicPrConsentOff: readonly string[];
+  ideaId: string; planRequestId: string;
+  reasons: Readonly<Record<string, string>>; publicPrConsentOff: readonly string[];
 }) {
-  const prepared = await prepareAmuxV4CardPlan(session, request, input);
+  if (!UUID.test(input.planRequestId)) {
+    throw new AmuxV4UnitDecisionError("not_ready");
+  }
+  let preparedComplete = false;
   let callbackReturned = false;
   try {
+    const prepared = await prepareAmuxV4CardPlan(session, request, input);
+    preparedComplete = true;
     return await prisma.$transaction(async (tx) => {
       const cards = await runAmuxV4CardPlanInTx(tx, prepared);
       callbackReturned = true;
@@ -58,6 +66,19 @@ export async function approveAmuxV4CardPlan(session: Session, request: Request, 
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       ...AMUX_IDEA_CARD_PLAN_APPROVAL_TRANSACTION });
   } catch (error) {
+    if (!callbackReturned && error instanceof AmuxV20RegistrationRefusalDetected) {
+      try {
+        await recordAmuxV20RegistrationRefusal({ session, request,
+          requestId: input.planRequestId, attemptKind: "whole_plan",
+          refusalCode: error.code, ...error.identity,
+          proposedExecutionGrade: error.proposedExecutionGrade,
+          finalExecutionGrade: error.finalExecutionGrade });
+      } catch {
+        throw new AmuxV4UnitDecisionError("integrity_unavailable");
+      }
+      throw new AmuxV4UnitDecisionError(error.code);
+    }
+    if (!preparedComplete) throw error;
     throw amuxV4PlanFailure(error, callbackReturned);
   }
 }

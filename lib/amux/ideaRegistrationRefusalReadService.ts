@@ -17,9 +17,12 @@ import { AMUX_V20_REGISTRATION_REFUSAL_ACTION,
  * evidence is checked again before returning the latest waiting refusal. */
 export async function readLatestAmuxV20RegistrationRefusalInTx(
   tx: Prisma.TransactionClient, ideaId: string, actorUserId: string,
+  analysisPreviewId: string, sourcePlanRevisionId: string,
 ): Promise<AmuxV20RegistrationRefusalView | null> {
   const row = await tx.amuxIdeaRegistrationRefusal.findFirst({
-    where: { ideaId, actorUserId, state: "awaiting_operator" },
+    where: { ideaId, actorUserId, state: "awaiting_operator",
+      analysisPreviewId, sourcePlanRevisionId,
+      draftUnit: { state: "proposed" } },
     orderBy: [{ attemptedAt: "desc" }, { id: "desc" }],
     include: { auditLog: { select: { actorUserId: true, action: true,
       targetType: true, targetId: true, metadata: true, entryHash: true } } },
