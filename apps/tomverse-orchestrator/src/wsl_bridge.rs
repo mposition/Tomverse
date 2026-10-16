@@ -2048,6 +2048,16 @@ enum V52ReviewStep {
     Findings { text: String },
 }
 
+fn v52_review_required(
+    profile: &crate::tomverse_api::V22ExecutionProfile,
+    result: &V22SidecarResult,
+    outcome: &str,
+) -> bool {
+    profile.grade_guard && profile.role == "implement" && outcome == "succeeded" &&
+        (result.review_touches_contract != Some(true) ||
+            profile.execution_grade.as_deref() == Some("frontier"))
+}
+
 #[cfg(unix)]
 async fn v52_review_helper_call(payload: serde_json::Value) -> Result<V52ReviewStep> {
     use std::os::unix::fs::MetadataExt;
@@ -3147,12 +3157,11 @@ pub async fn run_from_env() -> i32 {
                                         match usage_record {
                                             Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
                                                 let review_profile = entry.delivery.v22_execution.as_ref()
-                                                    .filter(|profile| profile.grade_guard &&
-                                                        profile.role == "implement" &&
-                                                        outcome == "succeeded");
+                                                    .zip(v22_result.as_ref())
+                                                    .filter(|(profile, result)|
+                                                        v52_review_required(profile, result, outcome));
                                                 let mut review_unverified = false;
-                                                if let (Some(profile), Some(result)) =
-                                                    (review_profile, v22_result.as_ref()) {
+                                                if let Some((profile, result)) = review_profile {
                                                     if let (Some(base), Some(commit), Some(review_ref), Some(touches),
                                                         Some(author_vendor), Some(scope)) = (
                                                         result.review_base_sha.as_deref(),
@@ -3674,6 +3683,40 @@ mod tests {
     const ATTEMPT_ID: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
     const ATTEMPT_ID_2: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e70";
     const ATTEMPT_ID_3: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e71";
+
+    #[test]
+    fn lower_grade_contract_touch_skips_review_before_settlement() {
+        let mut profile = crate::tomverse_api::V22ExecutionProfile {
+            model_id: "claude-test".into(), role: "implement".into(),
+            budget_microusd: 1_000_000, grade_guard: true,
+            execution_grade: Some("routine".into()),
+            review_author_vendor: Some("claude".into()),
+            review_scope: Some("test".into()), review_feedback_job_id: None,
+            read_only_retry: None,
+        };
+        let mut result = V22SidecarResult {
+            state: V22SidecarState::Succeeded, read_only_retry: None,
+            api_execution_receipt: None, usage_receipt: None,
+            usage_receipt_digest: None, result_text: None,
+            result_sha256: Some("a".repeat(64)), patch_body: None,
+            patch_base_sha: None, patch_digest: None,
+            publish_files: None, publish_files_digest: None,
+            changed_paths: Some(vec!["lib/amux/execution.ts".into()]),
+            review_commit_sha: Some("b".repeat(40)),
+            review_base_sha: Some("c".repeat(40)),
+            review_touches_contract: Some(true),
+            review_ref: Some(format!("refs/amux-v52-review/{ATTEMPT_ID}")),
+        };
+        assert!(!v52_review_required(&profile, &result, "succeeded"));
+        profile.execution_grade = Some("advanced".into());
+        assert!(!v52_review_required(&profile, &result, "succeeded"));
+        profile.execution_grade = Some("frontier".into());
+        assert!(v52_review_required(&profile, &result, "succeeded"));
+        profile.execution_grade = Some("routine".into());
+        result.review_touches_contract = Some(false);
+        assert!(v52_review_required(&profile, &result, "succeeded"));
+        assert!(!v52_review_required(&profile, &result, "failed"));
+    }
 
     #[test]
     fn confirmed_patch_retries_by_exact_readback_without_volatile_bytes() {

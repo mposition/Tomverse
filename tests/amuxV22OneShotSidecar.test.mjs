@@ -389,6 +389,8 @@ test("v52 guard inventories non-implement attempts and withholds a contract patc
     });
   assert.deepEqual(contract.changedPaths, ["lib/amux/execution.ts"]);
   assert.equal(contract.patchDigest, undefined);
+  assert.equal(contract.reviewCommitSha, undefined);
+  assert.equal(contract.reviewTouchesContract, undefined);
   assert.equal(patchCalls, 0);
   assert.equal(discarded, 1);
   const readOnlyEdit = await runAmuxV22OneShot({ ...request,
