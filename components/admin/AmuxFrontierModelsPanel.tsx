@@ -51,6 +51,8 @@ const receiptStore = (): Storage | null => {
 export type AmuxBuildPreviewHooks = {
   /** Runs before the request: the existing input check. Resolves false when the input did not pass. */
   beforeBuild?: () => Promise<boolean>;
+  /** True from the click to the end of the chain: the idea and its sources cannot be edited meanwhile. */
+  onChain?: (running: boolean) => void;
   draft: { idea: string; repositories: string[]; pullRequests: Array<{ repository: string; number: number }> } | null;
   reserve: (requestId: string) => boolean;
   onBuilt: (built: {
@@ -316,12 +318,16 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   const [reviewing, setReviewing] = useState(false);
   const startReview = async () => {
     if (!build?.draft || !selected || !selectedEffort || building || reviewing || ideaId !== null || !previewAvailable) return;
+    // The draft the operator clicked on is the one that is checked, saved and approved: it is snapshotted here, and the
+    // idea cannot be edited until the chain ends (onChain), so the approval screen shows what was saved.
+    const draft = build.draft;
     setReviewing(true);
+    build.onChain?.(true);
     try {
       if (build.beforeBuild && !(await build.beforeBuild())) return;
       if (!checked && !(await checkSelection())) return;
-      await buildPreview();
-    } finally { setReviewing(false); }
+      await buildPreview(draft);
+    } finally { setReviewing(false); build.onChain?.(false); }
   };
 
   // A saved idea whose preview is not prepared yet continues with one button too: eligibility, then the preview.
@@ -329,14 +335,16 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     if (!ideaId || !planReady || !previewAvailable || declaredExternalSources || preview.kind !== "idle" || reviewing) return;
     setReviewing(true);
     try {
-      if (!checked && !(await checkSelection())) return;
-      await preparePreview();
+      // The check just answered is passed on: this render's `checked` is still the one before it.
+      const eligible = checked || (await checkSelection());
+      if (!eligible) return;
+      await preparePreview(true);
     } finally { setReviewing(false); }
   };
 
-  const preparePreview = async () => {
+  const preparePreview = async (eligibleNow = false) => {
     if (!ideaId || !previewAvailable || !planReady || declaredExternalSources ||
-        !selected || !checked ||
+        !selected || !(checked || eligibleNow) ||
         !selected.allowedEfforts.includes(selectedEffort) || preview.kind !== "idle") return;
     const model = selected;
     const effort = selectedEffort;
@@ -400,8 +408,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     return () => { active = false; };
   }, [analysisBudgetAvailable, preview.kind]);
 
-  const buildPreview = async () => {
-    if (!build?.draft || !selected || !selectedEffort || building || ideaId !== null) return;
+  const buildPreview = async (draft = build?.draft ?? null) => {
+    if (!build || !draft || !selected || !selectedEffort || building || ideaId !== null) return;
     const requestId = crypto.randomUUID();
     const previewId = crypto.randomUUID();
     // The preview half is recorded before the request, keyed by the submission
@@ -424,7 +432,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         method: "POST", headers: { "content-type": "application/json" },
         timeoutMs: AMUX_IDEA_BUILD_PREVIEW_REQUEST_TIMEOUT_MS,
         body: JSON.stringify({ version: 1, requestId, previewId,
-          input: { version: 1, ...build.draft },
+          input: { version: 1, ...draft },
           model: { provider: selected.provider, modelId: selected.modelId, reasoningEffort: selectedEffort,
             approvalId: selected.approvalId, approvalVersion: selected.approvalVersion } }),
       });

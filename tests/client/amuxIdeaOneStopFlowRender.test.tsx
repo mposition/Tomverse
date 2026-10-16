@@ -59,8 +59,14 @@ test("the analysis is watched on a gentle, bounded schedule that respects the re
   assert.ok(panel.includes("{m.analysisResultRefresh}"), "the manual re-read stays as a fallback");
   assert.ok(panel.includes("data-testid=\"amux-analysis-running\"") && panel.includes("m.analysisRunning"));
   const input = read("components/admin/AmuxIdeaInputPanel.tsx");
-  assert.ok(input.includes("autoPoll={analysisStartedIdeaId === submission.ideaId}"), "watched only after the execution approval");
-  assert.ok(input.includes("onExecutionApproved="));
+  assert.ok(input.includes("watchToken={analysisWatch?.ideaId === submission.ideaId ? analysisWatch.token : 0}"),
+    "watched only after an execution approval, and once more after each next page's approval");
+  assert.ok(input.includes("watchChunk={continuationChunkIndex}") && input.includes("onExecutionApproved="));
+  // Review finding: a multi-page analysis. The next page's approval must restart the watch and read that page.
+  assert.ok(panel.includes("if (watchToken !== seenToken) {") && panel.includes("setReadsDone(0);") && panel.includes("setWatchEnded(false);"),
+    "a new approval restarts the watch from a clean state");
+  assert.ok(panel.includes("void refresh(watchChunk)"), "and the watch reads the page that was approved, not page 0");
+  assert.ok(panel.includes("const autoPoll = watchToken > 0;"));
 });
 
 test("the default new-idea view has one primary button; the separate steps wait in a collapsed recovery section", () => {
@@ -100,11 +106,19 @@ test("the default path holds exactly two decisions: the execution approval and t
   }
   // The compose view: input check, eligibility check and build-preview behind the one button, in that order.
   const start = frontier.slice(frontier.indexOf("const startReview = async"), frontier.indexOf("const continueReview = async"));
-  assert.ok(start.indexOf("build.beforeBuild") < start.indexOf("checkSelection()") && start.indexOf("checkSelection()") < start.indexOf("await buildPreview()"));
+  assert.ok(start.indexOf("build.beforeBuild") < start.indexOf("checkSelection()") && start.indexOf("checkSelection()") < start.indexOf("await buildPreview(draft)"));
   assert.ok(start.includes("if (build.beforeBuild && !(await build.beforeBuild())) return;"), "a failed input check stops the chain");
   assert.ok(start.includes("if (!checked && !(await checkSelection())) return;"), "a failed eligibility check stops it too");
   const input = read("components/admin/AmuxIdeaInputPanel.tsx");
   assert.ok(input.includes("beforeBuild: () => checkInput(),"), "the input check is the existing one");
+  // Review findings: the chain saves what was clicked on and the idea cannot change under it; the saved idea's
+  // one button passes the eligibility it just checked on to the preview.
+  assert.ok(start.includes("const draft = build.draft;") && start.includes("await buildPreview(draft)"), "the clicked draft is the saved one");
+  assert.ok(start.includes("build.onChain?.(true)") && start.includes("build.onChain?.(false)"));
+  assert.ok(input.includes("onChain: setChainRunning,") && input.includes("const frozen = chainRunning ||"), "the idea is locked while the chain runs");
+  const cont = frontier.slice(frontier.indexOf("const continueReview = async"), frontier.indexOf("const preparePreview = async"));
+  assert.ok(cont.includes("await preparePreview(true)") && frontier.includes("!(checked || eligibleNow)"),
+    "the check that just answered is not lost to a stale render");
   assert.ok(input.indexOf("const checkInput = async") < input.indexOf("const buildHooks"), "defined before the hooks that call it");
   // The plan approval opens by itself: it is part of the analysis result, mounted from the save on.
   const result = read("components/admin/AmuxIdeaAnalysisResultPanel.tsx");

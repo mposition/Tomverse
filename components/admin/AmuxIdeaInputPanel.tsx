@@ -95,7 +95,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [pending, setPending] = useState(false);
   const [readBackPending, setReadBackPending] = useState(false);
   // The idea whose execution approval was recorded in this browser: its analysis result is then watched on its own.
-  const [analysisStartedIdeaId, setAnalysisStartedIdeaId] = useState<string | null>(null);
+  // Each recorded execution approval (one per analysis page) starts a new watch of the result.
+  const [analysisWatch, setAnalysisWatch] = useState<{ ideaId: string; token: number } | null>(null);
+  // The idea cannot be edited while the one button's chain runs (input check, eligibility, build).
+  const [chainRunning, setChainRunning] = useState(false);
   // The blocking dialog of the build-preview request (save, plan, preview in one request): working while
   // it is in flight, then its answer until it is closed. It lives here, not in the frontier panel, because
   // that panel is remounted for the saved idea the moment the request succeeds.
@@ -365,7 +368,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     }
   };
 
-
   // amux-intake.md v18 item 1: the frontier panel can save the idea, prepare
   // its plan and its preview in one request. The submission bookkeeping stays
   // here, so a lost answer recovers exactly as a lost submission does.
@@ -375,6 +377,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       idea.trim() !== "" && buildRefs !== null
       ? { idea, repositories: lines(repositories), pullRequests: buildRefs } : null,
     beforeBuild: () => checkInput(),
+    onChain: setChainRunning,
     reserve: (requestId) => {
       if (inFlight.current || !reservePendingIdeaRequest(receiptStore(), operatorId, requestId)) return false;
       inFlight.current = true;
@@ -406,7 +409,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   };
 
   const ideaBytes = new TextEncoder().encode(idea.trim()).length;
-  const frozen = readBackPending || submission.kind === "pending" || submission.kind === "outcome_unknown" ||
+  const frozen = chainRunning || readBackPending || submission.kind === "pending" || submission.kind === "outcome_unknown" ||
     submission.kind === "submitted" || submission.kind === "recovery_unavailable";
   const refusedForStepUp = result?.error === "ADMIN_REAUTHENTICATION_REQUIRED" ||
     (submission.kind === "refused" && submission.code === "ADMIN_REAUTHENTICATION_REQUIRED") ||
@@ -459,7 +462,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       chunkIndex={continuationChunkIndex}
       build={submission.kind === "submitted" ? null : buildHooks}
       buildRequestId={submission.kind === "submitted" ? submission.requestId : null}
-      onExecutionApproved={() => setAnalysisStartedIdeaId(submission.kind === "submitted" ? submission.ideaId : null)}
+      onExecutionApproved={() => setAnalysisWatch((current) => submission.kind === "submitted"
+        ? { ideaId: submission.ideaId, token: (current?.token ?? 0) + 1 } : current)}
     />
   );
 
@@ -700,7 +704,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       {analysisResultAvailable && submission.kind === "submitted" ?
         <AmuxIdeaAnalysisResultPanel key={submission.ideaId}
           ideaId={submission.ideaId}
-          autoPoll={analysisStartedIdeaId === submission.ideaId}
+          watchToken={analysisWatch?.ideaId === submission.ideaId ? analysisWatch.token : 0}
+          watchChunk={continuationChunkIndex}
           onContinuationReady={setContinuationChunkIndex} /> : null}
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border p-4 border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">

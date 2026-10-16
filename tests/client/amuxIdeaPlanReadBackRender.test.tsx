@@ -142,7 +142,7 @@ test("the read-back only reads: it never posts the approval again, and its outco
       `${kind} keeps the attempt, so the approval stays refused`);
   }
   // A recorded plan leaves no proposals, so the notice outlives the list.
-  assert.ok(source.includes("if (listed.length === 0) return <>{readBackNotice}{dialog}</>;"));
+  assert.ok(source.includes('if (listed.length === 0) return <>{resultTone === "unknown" ? null : readBackNotice}{dialog}</>;'));
   // A new approval clears the old answer.
   assert.ok(source.includes('setReadBackView({ kind: "none" });'));
 });

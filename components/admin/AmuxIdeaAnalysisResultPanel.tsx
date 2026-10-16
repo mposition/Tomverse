@@ -33,10 +33,14 @@ const list = (values: string[]) => <ul className="list-disc pl-5">
 
 /** Owner-only page section. Model-derived text is rendered as React text,
  * never as HTML; the separate Story panel owns the gated confirmation flow. */
-export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, autoPoll = false }: {
+export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watchToken = 0, watchChunk = 0 }: {
   ideaId: string; onContinuationReady?: (chunkIndex: number) => void;
-  /** The execution approval is recorded: watch the result on its own (lib/amux/ideaAnalysisPollCore.ts). */
-  autoPoll?: boolean;
+  /**
+   * Counts the recorded execution approvals of this idea (one per analysis page): each new value starts a fresh
+   * watch of the page `watchChunk` (lib/amux/ideaAnalysisPollCore.ts). 0 means no approval yet: nothing is watched.
+   */
+  watchToken?: number;
+  watchChunk?: number;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const [loading, setLoading] = useState(false);
@@ -48,6 +52,17 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, autoP
   const [readsDone, setReadsDone] = useState(0);
   const [watchEnded, setWatchEnded] = useState(false);
   const [tabVisible, setTabVisible] = useState(true);
+  // A new approval (the next page of a multi-page analysis) restarts the watch from a clean state, and the page it
+  // waits for is shown as running until its own result arrives. Adjusted during render, not in an effect.
+  const [seenToken, setSeenToken] = useState(0);
+  if (watchToken !== seenToken) {
+    setSeenToken(watchToken);
+    setReadsDone(0);
+    setWatchEnded(false);
+    setView(null);
+    setUnavailable(false);
+  }
+  const autoPoll = watchToken > 0;
 
   const refresh = async (page = chunkIndex) => {
     if (loading) return;
@@ -89,7 +104,7 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, autoP
     if (!watching || loading) return;
     const delay = analysisPollDelayMs(readsDone);
     if (delay === null) return;
-    const timer = window.setTimeout(() => { setReadsDone((count) => count + 1); void refresh(0); },
+    const timer = window.setTimeout(() => { setReadsDone((count) => count + 1); void refresh(watchChunk); },
       readsDone === 0 ? 0 : delay);
     return () => window.clearTimeout(timer);
     // refresh closes over the latest state each render; the watch only depends on what decides it
