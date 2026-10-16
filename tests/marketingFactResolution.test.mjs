@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 const child = spawnSync(
@@ -46,3 +47,23 @@ for (const result of results) {
     );
   });
 }
+
+const snapshotLine = child.stdout
+  .split(/\r?\n/u)
+  .find((candidate) => candidate.startsWith("MARKETING_FACT_SNAPSHOT="));
+assert.ok(snapshotLine, `resolver harness returned no snapshot\n${child.stdout}`);
+const recorded = JSON.parse(snapshotLine.slice("MARKETING_FACT_SNAPSHOT=".length));
+
+test("a new draft's facts are sealed against the rows that answered them (S3a2)", () => {
+  assert.deepEqual(recorded.factSnapshot, {
+    priceRows: [{ rowId: "pro", updatedAt: "2026-10-01T00:00:00.000Z" }],
+    // No price claim here rests on the catalogue, so it is not recorded.
+    catalogue: null,
+    modelRegistryRows: [{ rowId: "model.fixture", updatedAt: "2026-09-30T00:00:00.000Z" }],
+    evidenceDigests: [
+      createHash("sha256").update("Three answers to one question, side by side.", "utf8").digest("hex"),
+    ],
+  });
+  // The decision is bound to exactly that record.
+  assert.equal(recorded.sealedDigest, recorded.recomputedDigest);
+});

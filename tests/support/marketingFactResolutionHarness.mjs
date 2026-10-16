@@ -88,13 +88,14 @@ mock.module(mod("lib/billingConfig.ts"), {
         sources: {
           monthlyPriceCents: world.priceStored ? "stored" : "compiled_default",
         },
+        row: { id: "pro", updatedAt: "2026-10-01T00:00:00.000Z" },
       },
     ],
   },
 });
 
 mock.module(mod("lib/billingPriceCatalog.ts"), {
-  namedExports: { getBillingPriceCatalogWithMeta: async () => null },
+  namedExports: { readBillingPriceCatalogSource: async () => ({ source: "stored", updatedAt: null }) },
 });
 
 mock.module(mod("lib/marketingClaimGates.ts"), {
@@ -110,20 +111,10 @@ mock.module(mod("lib/marketingEvidencePages.ts"), {
   },
 });
 
+// The resolver reads the registry row through its client and maps it with the
+// registry's own mapper; the fixture row carries the mapped model.
 mock.module(mod("lib/modelRegistry.ts"), {
-  namedExports: {
-    getRuntimeModel: async () =>
-      world.modelPublic
-        ? {
-            id: "model.fixture",
-            minimumPlan: "Pro",
-            enabled: true,
-            publiclyListed: true,
-            status: "available",
-            catalogDeleted: false,
-          }
-        : null,
-  },
+  namedExports: { registryRowToModel: (row) => row.model },
 });
 
 mock.module(mod("lib/marketingAssets.ts"), {
@@ -147,6 +138,25 @@ const {
 } = await import(mod("lib/marketingGuardCore.ts"));
 
 const database = {
+  // The resolver's clock is the database's, read through the same client.
+  $queryRaw: async () => [{ now: new Date() }],
+  modelRegistryEntry: {
+    findUnique: async ({ where }) =>
+      world.modelPublic && where.id === "model.fixture"
+        ? {
+            id: "model.fixture",
+            updatedAt: new Date("2026-09-30T00:00:00.000Z"),
+            model: {
+              id: "model.fixture",
+              minimumPlan: "Pro",
+              enabled: true,
+              publiclyListed: true,
+              status: "available",
+              catalogDeleted: false,
+            },
+          }
+        : null,
+  },
   marketingPost: {
     findMany: async () => [
       {
@@ -251,4 +261,22 @@ const results = [
   ),
 ];
 
+const { resolveMarketingFactsWithSnapshot, marketingFactSnapshotDigest } = await import(
+  mod("lib/marketingFactResolution.ts")
+);
+Object.assign(world, { priceStored: true, modelPublic: true, featurePublic: true, assetKnown: true });
+const recorded = await resolveMarketingFactsWithSnapshot(database, {
+  claimIds: ["claim.price", "claim.model", "claim.feature"],
+  assetIds: ["asset.hero"],
+  channelId: "channel-1",
+  channel: "linkedin",
+  locale: "en",
+});
+const snapshot = {
+  factSnapshot: recorded.factSnapshot,
+  sealedDigest: recorded.facts.factSnapshotDigest,
+  recomputedDigest: marketingFactSnapshotDigest(recorded.factSnapshot),
+};
+
 process.stdout.write(`MARKETING_FACT_RESULTS=${JSON.stringify(results)}\n`);
+process.stdout.write(`MARKETING_FACT_SNAPSHOT=${JSON.stringify(snapshot)}\n`);

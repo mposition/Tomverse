@@ -23,15 +23,23 @@
 
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
+
+/**
+ * The client a gate reads through: the caller's transaction, so a flag is read
+ * in the same snapshot as the facts it gates (S3 plan, S3a2). Settings only.
+ */
+export type MarketingClaimGateDatabase = Pick<Prisma.TransactionClient, "appSetting">;
+
 /**
  * Gate id -> the reader that owns it.
  *
- * The reader returns the product's answer, not the row. A reader that throws is
- * handled by the resolver rather than here, so a gate never has to decide what
- * a database failure means.
+ * The reader returns the product's answer, not the row, read through the client
+ * it is given. A reader that throws is handled by the resolver rather than
+ * here, so a gate never has to decide what a database failure means.
  */
 export const MARKETING_CLAIM_GATES: Readonly<
-  Record<string, () => Promise<boolean>>
+  Record<string, (database: MarketingClaimGateDatabase) => Promise<boolean>>
 > = Object.freeze({});
 
 /**
@@ -49,6 +57,7 @@ export const MARKETING_CLAIM_GATES: Readonly<
  */
 export async function resolveMarketingClaimGate(
   gate: string,
+  database: MarketingClaimGateDatabase,
 ): Promise<boolean | null> {
   const reader = Object.prototype.hasOwnProperty.call(
     MARKETING_CLAIM_GATES,
@@ -57,7 +66,7 @@ export async function resolveMarketingClaimGate(
     ? MARKETING_CLAIM_GATES[gate]
     : undefined;
   if (!reader) return null;
-  return readGateSafely(reader);
+  return readGateSafely(() => reader(database));
 }
 
 /**

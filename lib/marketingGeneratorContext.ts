@@ -4,8 +4,9 @@
  * Read-only, and only what a draft can be built from: the accounts a draft may
  * be for, the claims as the generator may see them, and the latest internal
  * brief and market facts -- structured values, never the pages they came from.
- * No URL, no evidence, no credential, no post. Assets join when S3a2 lets a
- * draft rest on one; until then a draft that names an asset is refused anyway.
+ * No URL, no evidence, no credential, no post. The assets a draft may name are
+ * listed by id, channels and the locales that have alt text -- not the alt
+ * text, which the platform is given and the model does not write (S3a2).
  */
 
 import "server-only";
@@ -14,7 +15,9 @@ import {
   MARKETING_REPORT_PAYLOAD_SCHEMAS,
   type MarketingReportKind,
 } from "@/lib/marketingAutomationSchema";
+import type { MarketingAssetRegistry } from "@/lib/marketingAssets";
 import { generatorProjection, type MarketingClaimProjection } from "@/lib/marketingClaims";
+import { readMarketingAssetRegistry } from "@/lib/marketingFactResolution";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 
 /**
@@ -45,9 +48,43 @@ export type MarketingGeneratorContext = {
     readonly allowedLocales: readonly string[];
   }>;
   readonly claims: readonly MarketingClaimProjection[];
+  readonly assets: readonly MarketingGeneratorAsset[];
   readonly brief: MarketingGeneratorReport | null;
   readonly marketIntel: MarketingGeneratorReport | null;
 };
+
+/** An asset as the generator may see it: what to name, where, in which locales. */
+export type MarketingGeneratorAsset = {
+  readonly id: string;
+  readonly allowedChannels: readonly string[];
+  readonly altLocales: readonly string[];
+  readonly claimIds: readonly string[];
+  readonly validUntil: string;
+};
+
+/**
+ * The registry's assets that one of these accounts' platforms may carry, as
+ * the generator may see them. No provenance, disclosure or alt prose: the
+ * Guard judges an asset from the registry itself, so nothing the generator is
+ * told here can stand in for that judgement.
+ */
+export function generatorAssetProjection(
+  registry: MarketingAssetRegistry | null,
+  channels: readonly string[],
+): MarketingGeneratorAsset[] {
+  if (!registry) return [];
+  const platforms = new Set(channels);
+  return registry.assets
+    .filter((asset) => asset.allowedChannels.some((channel) => platforms.has(channel)))
+    .map((asset) => ({
+      id: asset.id,
+      allowedChannels: asset.allowedChannels.filter((channel) => platforms.has(channel)).sort(),
+      altLocales: Object.keys(asset.alt).sort(),
+      claimIds: [...asset.claimIds],
+      validUntil: asset.validUntil,
+    }))
+    .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+}
 
 export type MarketingGeneratorReport = {
   readonly reportId: string;
@@ -129,6 +166,10 @@ export async function readMarketingGeneratorContext(
       allowedLocales: [...row.allowedLocales],
     })),
     claims: generatorProjection(),
+    assets: generatorAssetProjection(
+      await readMarketingAssetRegistry(),
+      channels.map((row) => row.channel),
+    ),
     brief,
     marketIntel,
   };
