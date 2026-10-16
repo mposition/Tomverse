@@ -62,6 +62,27 @@ const exchange = (port, request, until) => new Promise((resolve, reject) => {
   });
   socket.once("connect", () => socket.write(request));
 });
+const openTunnel = (port) => new Promise((resolve, reject) => {
+  const socket = connectTcp({ host: "127.0.0.1", port });
+  let header = "";
+  const fail = (error) => { socket.destroy(); reject(error); };
+  socket.once("error", fail);
+  socket.once("connect", () => socket.write(
+    "CONNECT api.anthropic.com:443 HTTP/1.1\r\n" +
+    "Host: api.anthropic.com:443\r\n\r\n"));
+  const onData = (bytes) => {
+    header += bytes.toString("utf8");
+    if (!header.includes("\r\n\r\n")) return;
+    socket.off("data", onData);
+    socket.off("error", fail);
+    if (!/^HTTP\/1\.1 200/.test(header)) {
+      fail(new Error("approved tunnel was rejected"));
+      return;
+    }
+    resolve(socket);
+  };
+  socket.on("data", onData);
+});
 
 test("proxy rejects unapproved targets before DNS and dials only the checked IP", async () => {
   const echo = createTcpServer((socket) => socket.pipe(socket));
@@ -237,6 +258,60 @@ test("v19 direct-read tunnel carries more than the v4 byte ceiling", async () =>
     });
   } finally {
     socket.destroy();
+    await close(proxy);
+    await close(echo);
+  }
+});
+
+test("v4 tunnel still closes beyond its 16 MiB byte ceiling", async () => {
+  const echo = createTcpServer((socket) => {
+    socket.on("error", () => {});
+    socket.pipe(socket);
+  });
+  const echoPort = await listen(echo);
+  const proxy = createAmuxV4EgressProxy(["api.anthropic.com"], {
+    resolve: async () => ["104.18.6.192"],
+    dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
+  });
+  const proxyPort = await listen(proxy);
+  const socket = await openTunnel(proxyPort);
+  try {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("v4 tunnel did not close")), 15_000);
+      socket.on("data", () => {});
+      socket.on("error", () => {});
+      socket.once("close", () => { clearTimeout(timeout); resolve(); });
+      for (let index = 0; index < 17; index += 1)
+        socket.write(Buffer.alloc(1024 * 1024, 0x61));
+    });
+    assert.equal(socket.destroyed, true);
+  } finally {
+    socket.destroy();
+    await close(proxy);
+    await close(echo);
+  }
+});
+
+test("v19 direct-read tunnel has no inherited ten-minute deadline", async (t) => {
+  const echo = createTcpServer((socket) => socket.pipe(socket));
+  const echoPort = await listen(echo);
+  const proxy = createAmuxV19EgressProxy(["api.anthropic.com"], {
+    resolve: async () => ["104.18.6.192"],
+    dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
+  });
+  const proxyPort = await listen(proxy);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let socket;
+  try {
+    socket = await openTunnel(proxyPort);
+    t.mock.timers.tick(600_001);
+    assert.equal(socket.destroyed, false);
+    const echoed = once(socket, "data");
+    socket.write("STILL_OPEN");
+    assert.equal((await echoed)[0].toString(), "STILL_OPEN");
+  } finally {
+    t.mock.timers.reset();
+    socket?.destroy();
     await close(proxy);
     await close(echo);
   }
