@@ -8,6 +8,7 @@ import { amuxV4PlanFailure, prepareAmuxV4CardPlan, runAmuxV4CardPlanInTx } from
   "./ideaCardPlanApprovalService.ts";
 import { prepareAmuxV4NodePlan, runAmuxV4NodePlanInTx } from "./ideaNodePlanApprovalService.ts";
 import { AmuxNodeDuplicateScanError } from "./ideaNodeDuplicateScanService.ts";
+import { AMUX_IDEA_PLAN_APPROVAL_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
 import { AmuxV4UnitDecisionError } from "./ideaUnitDecisionStore.ts";
 import { AmuxPortfolioError } from "./portfolioAssessmentService.ts";
 import { prepareAmuxV4ScorePlan, runAmuxV4ScorePlanInTx,
@@ -95,7 +96,7 @@ export async function approveAmuxV4Plan(session: Session, request: Request, inpu
         remainingCards: cards.remaining, ...scored,
         backlogOnly: true as const, executionAuthorized: false as const };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      maxWait: 5_000, timeout: 120_000 });
+      ...AMUX_IDEA_PLAN_APPROVAL_TRANSACTION });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxPortfolioError) throw error;
     if (!callbackReturned && error instanceof AmuxNodeDuplicateScanError) {

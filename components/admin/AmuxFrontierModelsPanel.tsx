@@ -20,6 +20,9 @@ import {
   type PreparedIdeaTransferPreview,
 } from "@/lib/amux/ideaTransferPreviewUiCore";
 import {
+  AMUX_IDEA_BUILD_PREVIEW_REQUEST_TIMEOUT_MS, AMUX_IDEA_EXECUTION_APPROVAL_REQUEST_TIMEOUT_MS,
+} from "@/lib/amux/ideaRequestTimeoutsCore";
+import {
   classifyBuildPreviewAnswer, reserveBuildPreviewReceipt, takeBuildPreviewReceipt,
 } from "@/lib/amux/ideaBuildPreviewUiCore";
 import {
@@ -365,8 +368,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     setBuilding(true);
     setFailure(null);
     try {
+      // Three transactions one after the other (save, plan, preview): the deadline outlasts all three.
       const response = await adminFetch("/api/admin/amux/ideas/build-preview", {
         method: "POST", headers: { "content-type": "application/json" },
+        timeoutMs: AMUX_IDEA_BUILD_PREVIEW_REQUEST_TIMEOUT_MS,
         body: JSON.stringify({ version: 1, requestId, previewId,
           input: { version: 1, ...build.draft },
           model: { provider: selected.provider, modelId: selected.modelId, reasoningEffort: selectedEffort,
@@ -415,8 +420,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     setFailure(null);
     setExecutionRefusal(null);
     try {
+      // The approval transaction may run for 20 s after a 5 s wait; the deadline outlasts it.
       const response = await adminFetch("/api/admin/amux/ideas/execution-approval", {
         method: "POST", headers: { "content-type": "application/json" },
+        timeoutMs: AMUX_IDEA_EXECUTION_APPROVAL_REQUEST_TIMEOUT_MS,
         body: JSON.stringify({ version: 1, previewId: value.previewId, ideaId,
           payloadDigest: value.payloadDigest, payloadDigestKeyId: value.payloadDigestKeyId,
           holdId: crypto.randomUUID(), priceVersionId: executionPriceId }),
