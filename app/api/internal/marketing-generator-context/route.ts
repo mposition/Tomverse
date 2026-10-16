@@ -4,8 +4,10 @@ export const maxDuration = 30;
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import {
   MARKETING_GENERATOR_CONTEXT_MAX_BYTES,
+  marketingGeneratorContextAllowed,
   readMarketingGeneratorContext,
 } from "@/lib/marketingGeneratorContext";
 import {
@@ -43,6 +45,16 @@ export async function POST(request: Request) {
   if (raw === null) return json({ code: "body_too_large" }, 413);
   if (!requestSchema.safeParse(parseMarketingGeneratorJson(raw)).success) {
     return json({ code: "invalid_request" }, 400);
+  }
+
+  // Stopped means stopped: no accounts, no claims, nothing to write from.
+  if (
+    !marketingGeneratorContextAllowed({
+      ok: true,
+      value: process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV],
+    })
+  ) {
+    return json({ code: "kill_switch" }, 503);
   }
 
   const context = await runMarketingTransaction(

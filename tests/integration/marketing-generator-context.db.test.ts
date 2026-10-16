@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
 import { POST } from "@/app/api/internal/marketing-generator-context/route";
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
+import { marketingGeneratorContextAllowed } from "@/lib/marketingGeneratorContext";
 import { createMarketingChannel, insertMarketingReport } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
@@ -127,3 +129,27 @@ test("the context names approval-mode accounts, claims without evidence, and fac
     ]);
     assert.equal(/https?:\/\//.test(text), false, "no URL reaches the generator");
   }));
+
+test("the kill switch stops the context, even for the right secret", () =>
+  withSecret(async () => {
+    await channelIn("approval_mode");
+    const previous = process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV];
+    process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV] = "incident-2026-10-16";
+    try {
+      const response = await call({ generatorRunId: "run-1" });
+      assert.equal(response.status, 503);
+      const text = await response.text();
+      assert.equal(text.includes("approval_mode") || text.includes("channels"), false);
+    } finally {
+      if (previous === undefined) delete process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV];
+      else process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV] = previous;
+    }
+  }));
+
+test("the context gate follows the resolver's kill-switch rule", () => {
+  assert.equal(marketingGeneratorContextAllowed({ ok: true, value: undefined }), true);
+  assert.equal(marketingGeneratorContextAllowed({ ok: true, value: "" }), true);
+  assert.equal(marketingGeneratorContextAllowed({ ok: true, value: "   " }), true);
+  assert.equal(marketingGeneratorContextAllowed({ ok: true, value: "on" }), false);
+  assert.equal(marketingGeneratorContextAllowed({ ok: false }), false);
+});

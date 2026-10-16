@@ -17,6 +17,22 @@ import {
 import { generatorProjection, type MarketingClaimProjection } from "@/lib/marketingClaims";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 
+/**
+ * Whether the generator may be given context at all.
+ *
+ * The kill switch stops everything but reading the record
+ * (docs/policy/marketing-automation.md §6.1), and the generator reading the
+ * accounts and claims is not reading the record -- it is the first step of
+ * writing. Same rule as the access resolver: an unreadable switch stops, and
+ * any non-empty value is on.
+ */
+export const marketingGeneratorContextAllowed = (killSwitchValue: {
+  readonly ok: boolean;
+  readonly value?: string | undefined;
+}): boolean =>
+  killSwitchValue.ok &&
+  !(typeof killSwitchValue.value === "string" && killSwitchValue.value.trim().length > 0);
+
 /** The largest answer, so a report that grew cannot grow the prompt with it. */
 export const MARKETING_GENERATOR_CONTEXT_MAX_BYTES = 128 * 1024;
 
