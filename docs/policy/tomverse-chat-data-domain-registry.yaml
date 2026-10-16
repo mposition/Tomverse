@@ -2,7 +2,7 @@ schemaVersion: 4
 
 metadata:
   status: draft
-  lastUpdated: "2026-10-01"
+  lastUpdated: "2026-10-16"
   owner: security-privacy
   validatorCommand: npm run check:data-domain-registry
   purpose: >-
@@ -1964,17 +1964,21 @@ domains:
     retentionPolicy: unverified
     implementationStatus: planned
     plannedWorkRef: >-
-      docs/policy/amux-intake.md v4-v7, AMUX v4 account deletion and export gate
+      docs/policy/amux-intake.md v4-v7 and v19, AMUX account deletion and export gate
     subjectReference:
       kind: none
     inUnifiedExport: unverified
     note: >-
-      actorUserId names the operator. Encrypted raw idea text may contain a
-      third party's data even though there is no typed customer subject link.
-      The approved 7-day analysis and 24-hour body purge clocks are separate
-      from the unresolved account-deletion and export decisions. Child chunks
-      have their own registered actor link and privacy decision; no v4 live
-      input is enabled.
+      For an owner submission actorUserId names the operator. For a v19 session
+      submission it names the owner who approved the current operating scope
+      and owns the stored data; its canonical submission audit uses a separate
+      system actor. Encrypted raw idea text and encrypted source provenance may
+      contain third-party data even though there is no typed customer subject
+      link, and the same raw-content purge clears both ciphertexts before their
+      shared external key is retired. The approved clocks are separate from the
+      unresolved account-deletion and export decisions. Child chunks have their
+      own registered actor link and privacy decision; no session intake route is
+      enabled.
 
   - domain: amuxIdeaAnalysisChunk
     prismaModel: AmuxIdeaAnalysisChunk
