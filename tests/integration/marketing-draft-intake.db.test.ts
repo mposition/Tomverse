@@ -291,6 +291,9 @@ test("a resubmission is the same draft only if it says the same thing", async ()
 test("an intake that committed is read back after every gate has closed", async () => {
   const row = await approvedChannel();
   await draftsOn();
+  // A deadline just far enough off for the first intake to start, so the same
+  // signed submission can be resent once the database's clock has passed it.
+  FIXED_DEADLINE = new Date(Date.now() + 11_000);
   const first = await intake(draft(row.id), OPEN);
   assert.equal(first.status, "queued");
   // The answer was lost; then the budget closed, the switch went off and the
@@ -304,9 +307,18 @@ test("an intake that committed is read back after every gate has closed", async 
   assert.equal(conflict.status, "conflict");
   // The same signed submission, resent once its deadline has passed, still
   // reads back: the read-back is not a new success.
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  for (;;) {
+    const [clock] = await prisma.$queryRaw<Array<{ past: boolean }>>`
+      SELECT clock_timestamp() > ${FIXED_DEADLINE}::timestamptz AS "past"`;
+    if (clock.past) break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
   const late = await intake(draft(row.id), undefined);
   assert.deepEqual(late, { ...first, existing: true });
+  // Opened, the same late submission is not a new success either: past its
+  // deadline, a new draft under another key is refused.
+  const lateNew = await intake(draft(row.id, { logicalDraftId: "draft-late" }), OPEN);
+  assert.equal(lateNew.status, "refused");
   // A different deadline is a different submission under the same key.
   const resigned = await intake(draft(row.id), undefined, { deadlineAt: new Date(Date.now() + 90_000) });
   assert.equal(resigned.status, "conflict");
