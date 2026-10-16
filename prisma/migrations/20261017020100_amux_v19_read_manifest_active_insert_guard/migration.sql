@@ -1,5 +1,6 @@
 -- A read manifest is created with its encrypted body. Only the seven-day
 -- retention transition may produce the purged shape and retirement audit.
+-- baseline-check: present-if-function "amux_v19_read_manifest_active_insert_guard"
 BEGIN;
 
 CREATE FUNCTION "amux_v19_read_manifest_active_insert_guard"() RETURNS trigger
