@@ -99,6 +99,8 @@ type PreparedPlan = {
   ideaId: string;
   actorUserId: string;
   sourcePlanRevisionId: string;
+  operatingScopeSettingId: string;
+  operatingScopeApprovalAuditLogId: string;
   nodes: Array<PreparedNode & { parent: { kind: "none" } |
     { kind: "existing"; nodeId: string } |
     { kind: "batch"; localRef: string } }>;
@@ -117,6 +119,7 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
   const idea = await prisma.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
     select: { id: true, actorUserId: true, submissionOrigin: true, state: true,
       analysisCompletedAt: true, currentSourcePlanRevisionId: true,
+      sessionOperatingScopeSettingId: true,
       systemRegistrationAuditLogId: true },
   });
   if (!idea || idea.submissionOrigin !== "session") {
@@ -126,8 +129,16 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
     throw new AmuxV19SystemRegistrationError("reconfirm");
   }
   if (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt ||
-      !idea.currentSourcePlanRevisionId) {
+      !idea.currentSourcePlanRevisionId || !idea.sessionOperatingScopeSettingId) {
     throw new AmuxV19SystemRegistrationError("not_ready");
+  }
+  const operatingScope = await prisma.amuxIdeaOperatingScopeSetting.findFirst({
+    where: { id: idea.sessionOperatingScopeSettingId,
+      approvedByUserId: idea.actorUserId },
+    select: { id: true, approvalAuditLogId: true },
+  });
+  if (!operatingScope) {
+    throw new AmuxV19SystemRegistrationError("integrity_unavailable");
   }
   const units = await prisma.amuxIdeaDraftUnit.findMany({ where: {
     ideaId, actorUserId: idea.actorUserId, derivationGroupId: null,
@@ -241,6 +252,9 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
         verified.proposal.featureRef,
     })));
   } catch (error) {
+    // orderAmuxV4CardPlan emits only dependency_cycle. Parent Story and
+    // dependency reference validity are checked immediately below and mapped
+    // to the corresponding durable whole-plan refusal.
     if (!(error instanceof AmuxV4CardPlanError) ||
         error.code !== "dependency_cycle" || !error.draftUnitIds[0]) throw error;
     const unit = units.find((entry) => entry.id === error.draftUnitIds[0]);
@@ -310,6 +324,8 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
   const keys = loadCurrentAmuxContentKeys(process.env);
   return { ideaId, actorUserId: idea.actorUserId,
     sourcePlanRevisionId: idea.currentSourcePlanRevisionId,
+    operatingScopeSettingId: operatingScope.id,
+    operatingScopeApprovalAuditLogId: operatingScope.approvalAuditLogId,
     nodes, cards, nodeIdOf, keys,
     nodeScanner: nodes.length ? await loadAmuxNodeDuplicateScanner() : null,
     cardScanner: cards.length ? await loadAmuxCardDuplicateScanner() : null,
@@ -377,24 +393,44 @@ async function assertSystemRegistrationReadyInTx(
   await takeAuditChainLock(tx);
   const locked = await tx.$queryRaw<Array<{ id: string; state: string;
     actorUserId: string; currentSourcePlanRevisionId: string | null;
+    sessionOperatingScopeSettingId: string | null;
     systemRegistrationAuditLogId: string | null }>>`
     SELECT "id", "state", "actorUserId", "currentSourcePlanRevisionId",
-           "systemRegistrationAuditLogId"
+           "sessionOperatingScopeSettingId", "systemRegistrationAuditLogId"
     FROM "AmuxIdeaSubmission" WHERE "id" = ${plan.ideaId} FOR UPDATE
   `;
   const idea = locked[0];
   if (locked.length !== 1 || !idea || idea.state !== "awaiting_owner" ||
       idea.actorUserId !== plan.actorUserId ||
       idea.currentSourcePlanRevisionId !== plan.sourcePlanRevisionId ||
+      idea.sessionOperatingScopeSettingId !== plan.operatingScopeSettingId ||
       idea.systemRegistrationAuditLogId !== null) {
     throw new AmuxV19SystemRegistrationError("reconfirm");
   }
   if (await findOpenAmuxOrchestratorHalt(tx)) {
     throw new AmuxV19SystemRegistrationError("halted");
   }
+  const operatingScope = await tx.amuxIdeaOperatingScopeSetting.findFirst({
+    where: { id: plan.operatingScopeSettingId,
+      approvedByUserId: plan.actorUserId,
+      approvalAuditLogId: plan.operatingScopeApprovalAuditLogId },
+    select: { id: true },
+  });
+  if (!operatingScope) {
+    throw new AmuxV19SystemRegistrationError("integrity_unavailable");
+  }
   if (await tx.amuxIdeaUnitDecision.count({ where: {
     ideaId: plan.ideaId,
   } }) !== 0) {
+    throw new AmuxV19SystemRegistrationError("reconfirm");
+  }
+  const pendingRefusal = await tx.amuxIdeaRegistrationRefusal.findFirst({
+    where: { ideaId: plan.ideaId, actorUserId: plan.actorUserId,
+      state: "awaiting_operator", attemptKind: "whole_plan",
+      sourcePlanRevisionId: plan.sourcePlanRevisionId },
+    select: { id: true },
+  });
+  if (pendingRefusal) {
     throw new AmuxV19SystemRegistrationError("reconfirm");
   }
 }
@@ -522,6 +558,8 @@ async function commitAmuxV19CompletedIdeaSystemRegistration(
       const cards = [];
       for (const entry of plan.cards) {
         const proposal = entry.verified.proposal;
+        // amux-intake.md v19 item 5 explicitly makes this default true for
+        // unattended implement Tasks under the saved operating scope.
         const publicPrDisclosureApproved = entry.cardType === "task" &&
           proposal.taskRole === "implement";
         const ownerSession = deriveAmuxV19SystemRegistrationBinding({
@@ -650,6 +688,9 @@ async function commitAmuxV19CompletedIdeaSystemRegistration(
         summary: "Registered one completed AMUX intake plan into inert backlog.",
         metadata: { ideaId: plan.ideaId,
           sourcePlanRevisionId: plan.sourcePlanRevisionId,
+          operatingScopeSettingId: plan.operatingScopeSettingId,
+          operatingScopeApprovalAuditLogId:
+            plan.operatingScopeApprovalAuditLogId,
           nodeCount: nodes.length, cardCount: cards.length,
           assessmentCount: assessments.length, scoreCount: scores.length,
           publicPrConsentCount: cards.filter((card) =>
@@ -711,6 +752,7 @@ export async function readAmuxV19SystemRegistration(ideaId: string) {
   }
   const idea = await prisma.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
     select: { id: true, state: true, currentSourcePlanRevisionId: true,
+      actorUserId: true, sessionOperatingScopeSettingId: true,
       systemRegistrationAuditLogId: true },
   });
   if (!idea) throw new AmuxV19SystemRegistrationError("not_found");
@@ -731,8 +773,17 @@ export async function readAmuxV19SystemRegistration(ideaId: string) {
     !Array.isArray(audit.metadata) ?
     audit.metadata as Record<string, unknown> : null;
   if (!metadata || !idea.currentSourcePlanRevisionId ||
+      !idea.sessionOperatingScopeSettingId ||
       metadata.systemActor !== AMUX_V19_SYSTEM_REGISTRATION_AUDIT_ACTOR ||
       metadata.actorScope !== AMUX_V19_SYSTEM_REGISTRATION_SCOPE) {
+    return { state: "inconsistent" as const, retryWrite: false as const };
+  }
+  const operatingScope = await prisma.amuxIdeaOperatingScopeSetting.findFirst({
+    where: { id: idea.sessionOperatingScopeSettingId,
+      approvedByUserId: idea.actorUserId },
+    select: { approvalAuditLogId: true },
+  });
+  if (!operatingScope) {
     return { state: "inconsistent" as const, retryWrite: false as const };
   }
   const decisions = await prisma.amuxIdeaUnitDecision.findMany({ where: {
@@ -800,6 +851,8 @@ export async function readAmuxV19SystemRegistration(ideaId: string) {
     actorScope: AMUX_V19_SYSTEM_REGISTRATION_SCOPE,
     ideaId,
     sourcePlanRevisionId: idea.currentSourcePlanRevisionId,
+    operatingScopeSettingId: idea.sessionOperatingScopeSettingId,
+    operatingScopeApprovalAuditLogId: operatingScope.approvalAuditLogId,
     nodeCount: nodeIds.length,
     cardCount: cardIds.length,
     assessmentCount,

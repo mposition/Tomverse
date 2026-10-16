@@ -639,6 +639,14 @@ export const DELEGATE_NAME_ALLOWLIST = [
 export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20261016070000_amux_v19_system_registration_receipt/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 1,
+    writeVerbs: 5,
+    reason:
+      "The v19 registration receipt guard reads the exact immutable owner-approved operating scope with SELECT FOR KEY SHARE. Its DDL and trigger verbs affect only AmuxIdeaSubmission; it never writes an operating-scope row.",
+  },
+  {
+    path: "prisma/migrations/20261016070000_amux_v19_system_registration_receipt/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 2,
     writeVerbs: 5,

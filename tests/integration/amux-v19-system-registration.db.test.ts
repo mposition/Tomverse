@@ -6,8 +6,11 @@ import { after, before, test } from "node:test";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
-import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
+import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
+import { auditRowActorKind,
+  AMUX_V19_SYSTEM_REGISTRATION_ACTION,
+  AMUX_V19_SYSTEM_REGISTRATION_TARGET } from
+  "@/lib/adminAuditSystemActors";
 import { commitAmuxIdeaAnalysisBudgetReservation } from
   "@/lib/amux/ideaAnalysisBudgetReservationService";
 import { commitAmuxIdeaOnlyAnalysisClaim } from
@@ -39,8 +42,13 @@ import { commitAmuxIdeaSessionSubmission } from
 import { commitAmuxV19CompletedIdeaSystemRegistrationForTest,
   readAmuxV19SystemRegistration } from
   "@/lib/amux/ideaSystemRegistrationService";
-import { recordAmuxV20RegistrationRefusal } from
+import { AmuxV20RegistrationRefusalStoreError,
+  recordAmuxV20RegistrationRefusal } from
   "@/lib/amux/ideaRegistrationRefusalService";
+import { AMUX_V20_REGISTRATION_REFUSAL_ACTION,
+  AMUX_V20_REGISTRATION_REFUSAL_SUMMARY,
+  AMUX_V20_REGISTRATION_REFUSAL_TARGET } from
+  "@/lib/amux/ideaRegistrationRefusalCore";
 import { AmuxIdeaUnitProposalReadError } from
   "@/lib/amux/ideaUnitProposalReadService";
 import { writeAmuxPortfolioAssessmentInTx } from
@@ -85,6 +93,9 @@ let session: Session;
 let request: Request;
 let registeredSystemDecisionId: string;
 let registeredSystemDecisionAuditId: string;
+let registeredSystemIdeaId: string;
+let registeredSystemIdeaPreviewId: string;
+let registeredSystemIdeaUnitIds: string[];
 let registeredTaskTitle: string;
 
 const listen = (server: Server) => new Promise<void>((resolve, reject) => {
@@ -347,13 +358,13 @@ async function completedSessionIdea(options: {
   assert.equal(plan.revisionId, (await prisma.amuxIdeaSubmission.findUniqueOrThrow({
     where: { id: ideaId }, select: { currentSourcePlanRevisionId: true },
   })).currentSourcePlanRevisionId);
-  return { ideaId, unitIds, taskTitle: units[3]!.title,
+  return { ideaId, previewId, unitIds, taskTitle: units[3]!.title,
     objectKeys: [...objects.keys()].filter((key) => !initialObjectKeys.has(key)) };
 }
 
 test("one completed session plan registers atomically under system evidence", async () => {
   await approveSyntheticTaskCatalog();
-  const { ideaId, unitIds, taskTitle } = await completedSessionIdea();
+  const { ideaId, previewId, unitIds, taskTitle } = await completedSessionIdea();
   const before = {
     decisions: await prisma.amuxIdeaUnitDecision.count({ where: { ideaId } }),
     cards: await prisma.amuxWorkItem.count({ where: {
@@ -393,6 +404,9 @@ test("one completed session plan registers atomically under system evidence", as
   assert.ok(systemDecision?.finalAuditLogId);
   registeredSystemDecisionId = systemDecision.id;
   registeredSystemDecisionAuditId = systemDecision.finalAuditLogId;
+  registeredSystemIdeaId = ideaId;
+  registeredSystemIdeaPreviewId = previewId;
+  registeredSystemIdeaUnitIds = unitIds;
   registeredTaskTitle = taskTitle;
   const taskSnapshot = decisions.find((entry) =>
     entry.registeredWorkItemId === task.id)?.confirmationSnapshot as
@@ -406,10 +420,35 @@ test("one completed session plan registers atomically under system evidence", as
   assert.equal(score.taskId, task.id);
   assert.equal(assessmentCount, 4);
   assert.equal(auditRowActorKind(audit), "system");
+  assert.deepEqual(audit.metadata && typeof audit.metadata === "object" &&
+    !Array.isArray(audit.metadata) ? {
+      operatingScopeSettingId: audit.metadata.operatingScopeSettingId,
+      operatingScopeApprovalAuditLogId:
+        audit.metadata.operatingScopeApprovalAuditLogId,
+    } : null, {
+      operatingScopeSettingId: authority.settingId,
+      operatingScopeApprovalAuditLogId: (await prisma
+        .amuxIdeaOperatingScopeSetting.findUniqueOrThrow({ where: {
+          id: authority.settingId,
+        } })).approvalAuditLogId,
+    });
   assert.equal(JSON.stringify(audit.metadata).includes("lib/amux"), false);
   assert.deepEqual(await readAmuxV19SystemRegistration(ideaId), {
     state: "committed", retryWrite: false, ideaId, auditId: result.auditId,
   });
+  const lateRefusalRequestId = randomUUID();
+  await assert.rejects(recordAmuxV20RegistrationRefusal({
+    systemActor: "amux-v4-intake", actorUserId: authority.approvedByUserId,
+    requestId: lateRefusalRequestId, attemptKind: "whole_plan",
+    refusalCode: "plan_schema_invalid", ideaId,
+    draftUnitId: unitIds[3]!, analysisPreviewId: previewId,
+    proposedExecutionGrade: null, finalExecutionGrade: null,
+  }), (error: unknown) =>
+    error instanceof AmuxV20RegistrationRefusalStoreError &&
+    error.code === "integrity_unavailable");
+  assert.equal(await prisma.amuxIdeaRegistrationRefusal.count({ where: {
+    requestId: lateRefusalRequestId,
+  } }), 0);
   const priorTaskAssessment = await prisma.amuxPortfolioAssessment.findFirstOrThrow({
     where: { cardId: task.id }, orderBy: { assessmentVersion: "desc" },
     select: { metrics: true, uncertainty: true },
@@ -435,6 +474,92 @@ test("one completed session plan registers atomically under system evidence", as
   } }), 2);
   assert.deepEqual(await readAmuxV19SystemRegistration(ideaId), {
     state: "committed", retryWrite: false, ideaId, auditId: result.auditId,
+  });
+});
+
+test("the receipt DB guard requires session scope evidence and no waiting refusal", async () => {
+  assert.ok(registeredSystemIdeaId);
+  assert.ok(registeredSystemIdeaPreviewId);
+  assert.equal(registeredSystemIdeaUnitIds.length, 4);
+  const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: {
+    id: registeredSystemIdeaId,
+  } });
+  assert.ok(idea.systemRegistrationAuditLogId);
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: {
+    id: idea.systemRegistrationAuditLogId,
+  } });
+  assert.ok(idea.currentSourcePlanRevisionId);
+  assert.ok(audit.metadata && typeof audit.metadata === "object" &&
+    !Array.isArray(audit.metadata));
+  const receiptMetadata = { ...audit.metadata } as Record<string, unknown>;
+  delete receiptMetadata.systemActor;
+  delete receiptMetadata.actorScope;
+  const writeReceiptAudit = (tx: Prisma.TransactionClient) =>
+    writeSystemAuditLog({ tx, systemActor: "amux-v4-intake",
+      action: AMUX_V19_SYSTEM_REGISTRATION_ACTION,
+      targetType: AMUX_V19_SYSTEM_REGISTRATION_TARGET,
+      targetId: registeredSystemIdeaId,
+      summary: "Registered one completed AMUX intake plan into inert backlog.",
+      metadata: receiptMetadata as Prisma.InputJsonObject });
+
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const ownerIdeaId = randomUUID();
+    const submittedAt = new Date();
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    await tx.amuxIdeaSubmission.create({ data: { id: ownerIdeaId,
+      requestId: randomUUID(), actorUserId: authority.approvedByUserId,
+      submissionOrigin: "owner", state: "awaiting_owner", submittedAt,
+      analysisDeadlineAt: new Date(submittedAt.getTime() + 7 * 86_400_000),
+      analysisCompletedAt: submittedAt } });
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
+    const auditId = await writeReceiptAudit(tx);
+    await tx.amuxIdeaSubmission.update({ where: { id: ownerIdeaId },
+      data: { state: "completed", systemRegistrationAuditLogId: auditId } });
+  }), /AmuxIdeaSubmission_system_registration_transition_check|transition invalid/);
+
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    await tx.amuxIdeaSubmission.update({ where: { id: registeredSystemIdeaId },
+      data: { state: "awaiting_owner", systemRegistrationAuditLogId: null } });
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
+    const refusalId = randomUUID();
+    const refusalRequestId = randomUUID();
+    const attemptedAt = new Date();
+    const refusalMetadata = { policyVersion: "20",
+      state: "awaiting_operator", requestId: refusalRequestId,
+      attemptKind: "whole_plan", refusalCode: "plan_schema_invalid",
+      ideaId: registeredSystemIdeaId,
+      draftUnitId: registeredSystemIdeaUnitIds[3]!,
+      analysisPreviewId: registeredSystemIdeaPreviewId,
+      sourcePlanRevisionId: idea.currentSourcePlanRevisionId,
+      proposedExecutionGrade: null, finalExecutionGrade: null,
+      attemptedAt: attemptedAt.toISOString() };
+    const refusalAuditId = await writeSystemAuditLog({ tx,
+      systemActor: "amux-v4-intake",
+      action: AMUX_V20_REGISTRATION_REFUSAL_ACTION,
+      targetType: AMUX_V20_REGISTRATION_REFUSAL_TARGET,
+      targetId: refusalId, summary: AMUX_V20_REGISTRATION_REFUSAL_SUMMARY,
+      metadata: refusalMetadata });
+    await tx.amuxIdeaRegistrationRefusal.create({ data: {
+      id: refusalId, requestId: refusalRequestId, attemptKind: "whole_plan",
+      state: "awaiting_operator", refusalCode: "plan_schema_invalid",
+      ideaId: registeredSystemIdeaId,
+      draftUnitId: registeredSystemIdeaUnitIds[3]!,
+      actorUserId: authority.approvedByUserId,
+      analysisPreviewId: registeredSystemIdeaPreviewId,
+      sourcePlanRevisionId: idea.currentSourcePlanRevisionId!,
+      proposedExecutionGrade: null, finalExecutionGrade: null,
+      attemptedAt, auditLogId: refusalAuditId,
+    } });
+    const receiptAuditId = await writeReceiptAudit(tx);
+    await tx.amuxIdeaSubmission.update({ where: { id: registeredSystemIdeaId },
+      data: { state: "completed",
+        systemRegistrationAuditLogId: receiptAuditId } });
+  }), /AmuxIdeaSubmission_system_registration_evidence_check|evidence mismatch/);
+
+  assert.deepEqual(await readAmuxV19SystemRegistration(registeredSystemIdeaId), {
+    state: "committed", retryWrite: false, ideaId: registeredSystemIdeaId,
+    auditId: idea.systemRegistrationAuditLogId,
   });
 });
 
@@ -536,6 +661,26 @@ test("an unresolved duplicate writes one plan refusal and no backlog rows", asyn
   } }), 0);
   assert.equal(await prisma.amuxIdeaRegistrationRefusal.count({ where: {
     ideaId, refusalCode: "plan_duplicate_unresolved",
+  } }), 1);
+});
+
+test("a system hierarchy refusal is durable before any backlog write", async () => {
+  const { ideaId, previewId, unitIds } = await completedSessionIdea();
+  const result = await recordAmuxV20RegistrationRefusal({
+    systemActor: "amux-v4-intake", actorUserId: authority.approvedByUserId,
+    requestId: randomUUID(), attemptKind: "whole_plan",
+    refusalCode: "plan_hierarchy_invalid", ideaId,
+    draftUnitId: unitIds[3]!, analysisPreviewId: previewId,
+    proposedExecutionGrade: null, finalExecutionGrade: null,
+  });
+  assert.equal(result.state, "awaiting_operator");
+  assert.equal(result.refusalCode, "plan_hierarchy_invalid");
+  assert.equal(result.attemptKind, "whole_plan");
+  assert.equal(await prisma.amuxWorkItem.count({ where: {
+    sourceSystem: "admin-idea-v4", sourceKey: { in: unitIds },
+  } }), 0);
+  assert.equal(await prisma.amuxIdeaRegistrationRefusal.count({ where: {
+    ideaId, refusalCode: "plan_hierarchy_invalid",
   } }), 1);
 });
 

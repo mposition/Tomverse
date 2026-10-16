@@ -117,16 +117,33 @@ export async function recordAmuxV20RegistrationRefusal(
         where: { id: input.analysisPreviewId },
         select: { ideaId: true, chunkIndex: true, sourcePlanRevisionId: true },
       });
-      const idea = await tx.amuxIdeaSubmission.findFirst({
-        where: { id: input.ideaId, actorUserId }, select: { id: true },
-      });
+      const idea = systemAuthority ? (await tx.$queryRaw<Array<{ id: string;
+        state: string; submissionOrigin: string;
+        currentSourcePlanRevisionId: string | null;
+        systemRegistrationAuditLogId: string | null }>>`
+          SELECT "id", "state", "submissionOrigin",
+                 "currentSourcePlanRevisionId", "systemRegistrationAuditLogId"
+          FROM "AmuxIdeaSubmission"
+          WHERE "id" = ${input.ideaId} AND "actorUserId" = ${actorUserId}
+          FOR UPDATE
+        `)[0] : await tx.amuxIdeaSubmission.findFirst({
+          where: { id: input.ideaId, actorUserId }, select: { id: true,
+            state: true, submissionOrigin: true,
+            currentSourcePlanRevisionId: true,
+            systemRegistrationAuditLogId: true },
+        });
       if (!idea || units.length !== 1 || !unit || unit.ideaId !== input.ideaId ||
           unit.actorUserId !== actorUserId ||
           (systemAuthority ? !["node", "card"].includes(unit.unitKind) :
             unit.unitKind !== "card") ||
           !preview || !preview.sourcePlanRevisionId ||
           preview.ideaId !== input.ideaId ||
-          preview.chunkIndex !== unit.chunkIndex) {
+          preview.chunkIndex !== unit.chunkIndex ||
+          (systemAuthority &&
+            (idea.submissionOrigin !== "session" ||
+              idea.state !== "awaiting_owner" ||
+              idea.systemRegistrationAuditLogId !== null ||
+              idea.currentSourcePlanRevisionId !== preview.sourcePlanRevisionId))) {
         throw new AmuxV20RegistrationRefusalStoreError("integrity_unavailable");
       }
       const clock = await tx.$queryRaw<Array<{ attemptedAt: Date }>>`

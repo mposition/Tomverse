@@ -19,6 +19,7 @@ CREATE FUNCTION amux_v19_system_registration_receipt_guard()
 RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   audit_row record;
+  scope_row record;
   metadata jsonb;
   unit_count integer;
   decision_count integer;
@@ -34,6 +35,7 @@ BEGIN
   END IF;
   IF OLD."systemRegistrationAuditLogId" IS NOT NULL OR
      NEW."systemRegistrationAuditLogId" IS NULL OR
+     NEW."submissionOrigin" IS DISTINCT FROM 'session' OR
      OLD."state" IS DISTINCT FROM 'awaiting_owner' OR
      NEW."state" IS DISTINCT FROM 'completed' OR
      NEW."analysisCompletedAt" IS NULL OR
@@ -47,6 +49,9 @@ BEGIN
   SELECT a.*, a.xmin = pg_current_xact_id()::xid AS audit_same_transaction
     INTO audit_row FROM "AdminAuditLog" a
     WHERE a."id" = NEW."systemRegistrationAuditLogId" FOR KEY SHARE;
+  SELECT "id", "approvedByUserId", "approvalAuditLogId"
+    INTO scope_row FROM "AmuxIdeaOperatingScopeSetting"
+    WHERE "id" = NEW."sessionOperatingScopeSettingId" FOR KEY SHARE;
   metadata := audit_row."metadata";
 
   SELECT count(*) INTO unit_count FROM "AmuxIdeaDraftUnit"
@@ -86,17 +91,26 @@ BEGIN
      audit_row."targetId" IS DISTINCT FROM NEW."id" OR
      audit_row."summary" IS DISTINCT FROM
        'Registered one completed AMUX intake plan into inert backlog.' OR
+     scope_row."id" IS NULL OR
+     scope_row."approvedByUserId" IS DISTINCT FROM NEW."actorUserId" OR
      jsonb_typeof(metadata) IS DISTINCT FROM 'object' OR
      (metadata ?& ARRAY['systemActor', 'actorScope', 'ideaId',
-       'sourcePlanRevisionId', 'nodeCount', 'cardCount', 'assessmentCount',
+       'sourcePlanRevisionId', 'operatingScopeSettingId',
+       'operatingScopeApprovalAuditLogId',
+       'nodeCount', 'cardCount', 'assessmentCount',
        'scoreCount', 'publicPrConsentCount', 'executionAttempted']) IS NOT TRUE OR
      metadata - ARRAY['systemActor', 'actorScope', 'ideaId',
-       'sourcePlanRevisionId', 'nodeCount', 'cardCount', 'assessmentCount',
+       'sourcePlanRevisionId', 'operatingScopeSettingId',
+       'operatingScopeApprovalAuditLogId',
+       'nodeCount', 'cardCount', 'assessmentCount',
        'scoreCount', 'publicPrConsentCount', 'executionAttempted'] <> '{}'::jsonb OR
      metadata->>'systemActor' IS DISTINCT FROM 'amux-v4-intake' OR
      metadata->>'actorScope' IS DISTINCT FROM 'system-plan-registration-v1' OR
      metadata->>'ideaId' IS DISTINCT FROM NEW."id" OR
      metadata->>'sourcePlanRevisionId' IS DISTINCT FROM NEW."currentSourcePlanRevisionId" OR
+     metadata->>'operatingScopeSettingId' IS DISTINCT FROM scope_row."id" OR
+     metadata->>'operatingScopeApprovalAuditLogId' IS DISTINCT FROM
+       scope_row."approvalAuditLogId" OR
      jsonb_typeof(metadata->'nodeCount') IS DISTINCT FROM 'number' OR
      jsonb_typeof(metadata->'cardCount') IS DISTINCT FROM 'number' OR
      jsonb_typeof(metadata->'assessmentCount') IS DISTINCT FROM 'number' OR
@@ -121,6 +135,10 @@ BEGIN
        d."state" = 'consumed' AND
        d."confirmationSnapshot"->'registrationAuthority' IS DISTINCT FROM
          '{"kind":"system","systemActor":"amux-v4-intake","bindingVersion":"amux-v19-system-registration-v1"}'::jsonb) OR
+     EXISTS (SELECT 1 FROM "AmuxIdeaRegistrationRefusal" r
+       WHERE r."ideaId" = NEW."id" AND r."actorUserId" = NEW."actorUserId" AND
+         r."state" = 'awaiting_operator' AND r."attemptKind" = 'whole_plan' AND
+         r."sourcePlanRevisionId" = NEW."currentSourcePlanRevisionId") OR
      EXISTS (SELECT 1 FROM "AmuxIdeaUnitDecision" d WHERE d."ideaId" = NEW."id" AND
        d."state" = 'consumed' AND
        d."confirmationSnapshot"->'card'->'task'->>'role' = 'implement' AND

@@ -90,6 +90,7 @@ export async function createInitialIdeaOnlySourcePlan(
     submittedAudit.actorUserId === input.actorUserId &&
     auditRowActorKind(submittedAudit) === "human";
   const sessionSubmission = idea.submissionOrigin === "session" &&
+    idea.actorUserId === input.actorUserId &&
     submittedAudit?.action === AMUX_SESSION_IDEA_SUBMITTED_ACTION &&
     submittedAudit.targetType === AMUX_SESSION_IDEA_SUBMITTED_TARGET &&
     submittedAudit.targetId === input.ideaId &&

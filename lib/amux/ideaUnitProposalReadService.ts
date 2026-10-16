@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Session } from "next-auth";
 
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
 import { AmuxIdeaAnalysisResultReadError,
@@ -32,7 +33,10 @@ export async function readVerifiedAmuxUnitProposal(session: Session,
     previewId: string;
   }> {
   const actorUserId = session.user?.id;
-  if (!actorUserId) throw new AmuxIdeaUnitProposalReadError("not_found");
+  if (!actorUserId || !isAdminSession(session) ||
+      getAdminRole(session) !== "owner") {
+    throw new AmuxIdeaUnitProposalReadError("not_found");
+  }
   return readVerifiedAmuxUnitProposalForDataOwnerInternal(actorUserId, ideaId,
     draftUnitId, false);
 }
