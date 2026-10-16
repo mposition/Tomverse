@@ -27,6 +27,7 @@ import {
   commitAmuxIdeaSessionSubmission,
   readAmuxIdeaSessionSubmissionRequest,
   AmuxIdeaSessionSubmissionError,
+  type CommittedAmuxIdeaSessionSubmission,
 } from "@/lib/amux/ideaSessionSubmissionService";
 import {
   inspectAmuxIdeaSessionSubmission,
@@ -303,9 +304,13 @@ test("session submission queues one content-free analysis reservation in the sam
 
 test("queue guard rejects missing and null system audit identity", async () => {
   const rollbackFixtures = new Error("rollback null audit identity fixtures");
-  const ideaIds = [randomUUID(), randomUUID()];
+  const ideaIds = Array.from({ length: 5 }, () => randomUUID());
   await assert.rejects(prisma.$transaction(async (tx) => {
-    const fixtures = [];
+    const fixtures: Array<{
+      submission: CommittedAmuxIdeaSessionSubmission;
+      reservationId: string;
+      reservationAuditLogId: string;
+    }> = [];
     for (const ideaId of ideaIds) {
       const submission = await commitAmuxIdeaSessionSubmission(tx, {
         inspected: inspect(ideaId), expectedAuthority: authority,
@@ -333,6 +338,26 @@ test("queue guard rejects missing and null system audit identity", async () => {
       });
       fixtures.push({ submission, reservationId, reservationAuditLogId });
     }
+    const reservationData = (index: number) => {
+      const fixture = fixtures[index];
+      return {
+        id: fixture.reservationId,
+        ideaId: fixture.submission.ideaId,
+        requestId: fixture.submission.requestId,
+        actorUserId: ownerId,
+        operatingScopeSettingId: authority.settingId,
+        status: "queued" as const,
+        modelProvider: "openai",
+        modelId,
+        reasoningEffort: "high",
+        reservationAuditLogId: fixture.reservationAuditLogId,
+      };
+    };
+
+    const control = await tx.amuxIdeaSessionAnalysisReservation.create({
+      data: reservationData(4),
+    });
+    assert.equal(control.id, fixtures[4].reservationId);
 
     // Build otherwise-valid forged evidence behind the append-only boundary.
     // The outer transaction always rolls these fixtures back.
@@ -349,7 +374,19 @@ test("queue guard rejects missing and null system audit identity", async () => {
         SET "metadata" = jsonb_set(
           "metadata", '{actorScope}', 'null'::jsonb, false
         )
-        WHERE "id" = ${fixtures[1].reservationAuditLogId}
+        WHERE "id" = ${fixtures[1].submission.auditId}
+      `;
+      await tx.$executeRaw`
+        UPDATE "AdminAuditLog"
+        SET "metadata" = "metadata" - 'systemActor'
+        WHERE "id" = ${fixtures[2].reservationAuditLogId}
+      `;
+      await tx.$executeRaw`
+        UPDATE "AdminAuditLog"
+        SET "metadata" = jsonb_set(
+          "metadata", '{actorScope}', 'null'::jsonb, false
+        )
+        WHERE "id" = ${fixtures[3].reservationAuditLogId}
       `;
     } finally {
       await tx.$executeRawUnsafe(
@@ -358,22 +395,14 @@ test("queue guard rejects missing and null system audit identity", async () => {
 
     for (const [index, expectedMessage] of [
       [0, /session reservation submission audit mismatch/],
-      [1, /session reservation audit mismatch/],
+      [1, /session reservation submission audit mismatch/],
+      [2, /session reservation audit mismatch/],
+      [3, /session reservation audit mismatch/],
     ] as const) {
-      const fixture = fixtures[index];
       await tx.$executeRawUnsafe(`SAVEPOINT null_audit_identity_${index}`);
-      await assert.rejects(tx.amuxIdeaSessionAnalysisReservation.create({ data: {
-        id: fixture.reservationId,
-        ideaId: fixture.submission.ideaId,
-        requestId: fixture.submission.requestId,
-        actorUserId: ownerId,
-        operatingScopeSettingId: authority.settingId,
-        status: "queued",
-        modelProvider: "openai",
-        modelId,
-        reasoningEffort: "high",
-        reservationAuditLogId: fixture.reservationAuditLogId,
-      } }), (error: unknown) => {
+      await assert.rejects(tx.amuxIdeaSessionAnalysisReservation.create({
+        data: reservationData(index),
+      }), (error: unknown) => {
         assert.equal(sqlState(error), "23514");
         assert.match(String(error), expectedMessage);
         return true;
