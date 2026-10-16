@@ -1,10 +1,10 @@
 # AMUX intake
 
-## v20 — Task 하나는 등급 하나: 경로 분할·예상 경로 필수·review 제안 제거 [초안, 운영자 승인 전]
+## v20 — Task 하나는 등급 하나: 경로 분할·예상 경로 필수·review 제안 제거 [결정, 운영자 mposition 2026-10-16]
 
-승인 줄(운영자가 채운다. approvedAt은 병합하는 UTC 날짜): `approvedBy: ____ · approvedAt: ____ · 정책 버전: __`
+approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 20
 
-이 절은 **승인되지 않은 초안**이다. 승인 전에는 아무 코드도 이 절을 근거로 삼지 않고, v19가 현행이다.
+운영자 mposition이 2026-10-16 대화에서 이 절을 승인했다.
 
 **배경(운영자 결정 2026-10-16).** AMUX 개발 worker는 등급이 셋이다. intake 분석이 제안하는 이름과
 worker 등급은 `routine`=chore, `advanced`=implementation, `frontier`=contract로 대응한다. 운영자는
@@ -327,7 +327,7 @@ v1 승인은 설계 권고 16개를 승인했고 그때 법적 보존 기간과 
 | 17 | 2026-10-14 mposition | v4 분석이 Feature마다 카드 번호 PREFIX를 제안하고(chunk schema 4), `create_node`가 같은 트랜잭션에서 Feature에 쓰며, v4 카드는 그 PREFIX로 번호를 받는다. 위 v17 절. |
 | 18 | 2026-10-15 mposition | 아이디어당 실행 승인 한 번(입력·전송 preview·모델·비용 상한)과 계획 승인 한 번(노드·Story·Task·의존·역할·점수·공개 PR 동의를 한 트랜잭션, 단위별 결정 행 유지, 실패 시 전체 롤백). 분석은 고정 주기 timer로 자동 시작한다. `development-agent-orchestration.md` v49와 같은 결정 |
 | 19 | 2026-10-16 mposition | 시작점을 Admin 화면과 모든 코딩 도구 세션으로 넓히고(접수 전용 클라이언트), 아이디어별 실행·계획 승인을 owner의 운영 범위 설정(허용 저장소·분석 모델) 한 번으로 바꾼다. 분석 CLI가 고정 SHA의 추적 파일 checkout을 읽기 도구로만 직접 읽고, 결정적 Guard를 통과한 계획은 시스템 actor가 한 트랜잭션으로 등록한다. 접수·아이디어·등록·바이트 상한, v13의 일일 12회 상한과 10분 hard deadline을 없애고 운영자 중지로 대신한다. 월 예산(v16)과 v6의 입력 후 7일 보존 기한(그때 미종료 분석은 중지와 같게 처리)은 남는다. 공통 기반 r17·orchestration v51과 함께 승인. |
-| 20 | approvedAt: ____ · approvedBy: ____ (운영자 기입, approvedAt은 병합하는 UTC 날짜) | Task 하나는 등급 하나다. 예상 경로가 contract 경로와 그 밖의 경로에 걸치면 분할하고 선행 edge로 잇는다. 새 분석은 `review` Task를 제안하지 않는다(기존 기록 읽기는 유지). Task의 `expectedPaths`(저장소 상대 경로 1~40개)를 필수로 하고 chunk schema를 5로 올린다. 등록 Guard는 경로 없음·정규화 실패·섞인 경로·`review` 제안을 거절하고, contract 경로만 있는 Task를 frontier로 확정한 뒤 비용 상한 receipt를 계산한다. |
+| 20 | 2026-10-16 mposition | Task 하나는 등급 하나다. 예상 경로가 contract 경로와 그 밖의 경로에 걸치면 분할하고 선행 edge로 잇는다. 새 분석은 `review` Task를 제안하지 않는다(기존 기록 읽기는 유지). Task의 `expectedPaths`(저장소 상대 경로 1~40개)를 필수로 하고 chunk schema를 5로 올린다. 등록 Guard는 경로 없음·정규화 실패·섞인 경로·`review` 제안을 거절하고, contract 경로만 있는 Task를 frontier로 확정한 뒤 비용 상한 receipt를 계산한다. |
 
 아래 v3 절은 2026-09-29에 운영자 mposition이 승인했다. 더 세밀한 시각은 없다. 그 설계 승인은 코드 래치를 켜지 않고 환경 값을 설정하지 않는다. 2026-09-30 활성화 승인이 코드 래치를 켜고, 환경 값이 `enabled`일 때만 writer를 연다. v1과 v2의 writer는 바뀌지 않는다.
 
