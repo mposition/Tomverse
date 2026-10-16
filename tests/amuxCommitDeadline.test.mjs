@@ -216,6 +216,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration v52: audited execution-grade revision only, with no
   // commit-deadline marker, trigger, guard or classifier change.
   "20261016090000_amux_v52_grade_escalation_guard",
+  // Intake v19 direct-read checkout evidence is append-only and audit-bound;
+  // it adds no commit-deadline marker, trigger or classifier change.
+  "20261017000000_amux_v19_tracked_checkout_evidence",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

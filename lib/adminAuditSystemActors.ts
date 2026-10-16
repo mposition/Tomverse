@@ -102,6 +102,14 @@ export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE = "analysis-budget-settle-v1" 
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION = "AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN" as const;
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE = "analysis-outcome-unknown-v1" as const;
+/** v19 direct-read checkout evidence contains only a fixed SHA and aggregate
+ * exclusion proof. It grants no repository credential and starts no CLI. */
+export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_ACTION =
+  "amux.v19.tracked_checkout.recorded" as const;
+export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET =
+  "AmuxIdeaTrackedCheckoutEvidence" as const;
+export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_SCOPE =
+  "tracked-checkout-evidence-v1" as const;
 /** One complete, normalized first analysis is stored as independently purgeable units. */
 export const AMUX_V4_FIRST_DRAFT_SAVED_ACTION = "AMUX_V4_FIRST_ANALYSIS_DRAFT_SAVED" as const;
 export const AMUX_V4_FIRST_DRAFT_SAVED_TARGET = "AmuxIdeaAnalysisChunk" as const;
@@ -224,6 +232,10 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION &&
       targetType === AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET) {
     return AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE;
+  }
+  if (action === AMUX_V19_TRACKED_CHECKOUT_RECORDED_ACTION &&
+      targetType === AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET) {
+    return AMUX_V19_TRACKED_CHECKOUT_RECORDED_SCOPE;
   }
   if (action === AMUX_V4_FIRST_DRAFT_SAVED_ACTION &&
       targetType === AMUX_V4_FIRST_DRAFT_SAVED_TARGET) {
