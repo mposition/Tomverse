@@ -15,7 +15,9 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 import { z } from "zod";
 
-import { marketingEnvelopeSchema } from "@/lib/marketingAutomationSchema";
+// Relative, so the generator service can load this module with
+// --experimental-strip-types and sign exactly what the intake verifies.
+import { marketingEnvelopeSchema } from "./marketingAutomationSchema.ts";
 
 /** The largest body read; the route abandons the stream at the first byte over. */
 export const MARKETING_DRAFT_INTAKE_MAX_BODY_BYTES = 64 * 1024;
