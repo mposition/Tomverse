@@ -1366,6 +1366,13 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   POST만, run id 하나만 받고, 승인 모드 계정·근거를 뺀 claim 투영·최신 brief·시장 사실을 돌려줍니다. **URL은
   생성기에 가지 않습니다** — 모델은 URL을 쓰지 않으므로(docs/policy/marketing-automation.md §7.3) 시장 사실의 출처 URL도 빼고 보냅니다.
   자산은 S3a2가 draft에 자산을 허용할 때 더합니다.
+- **S3h1(보존 정리)**: `lib/marketingRetention.ts`, store의 `purgeExpiredMarketingRows()`,
+  `lib/maintenance.ts`의 `marketing_retention` 단계, `tests/integration/marketing-retention.db.test.ts`.
+  **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가
+  강제하고, 보존 설정을 트랜잭션 안에서 켜는 곳은 이 writer 하나뿐입니다(보호 테이블 검사가 허용 목록으로
+  강제). 지운 행마다 같은 트랜잭션에 `marketing-retention` 감사 행을, 지운 것이 있는 실행만 `retention_run`
+  보고서를 남깁니다. 일일 정리 cron의 한 단계이며 표마다 한 번에 200행까지입니다. 게시물 본문 정리와 history
+  압축은 S3h2입니다.
 - **S3c1(LLM 비용 원장 표와 결정적 핵심)**: `lib/marketingLlmBudgetCore.ts`,
   `prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql`, `tests/marketingLlmBudgetCore.test.mjs`,
   `tests/integration/marketing-llm-call-ledger.db.test.ts`. 정책 v4의 다섯 번째 표 `MarketingLlmCall`입니다. **dispatch된

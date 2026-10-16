@@ -722,6 +722,9 @@ run(
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.
     "tests/integration/marketing-generator-context.db.test.ts",
+    // Marketing retention (S3h1): what the delete triggers let go goes, with an
+    // audit row each and a retention_run report; what they keep stays.
+    "tests/integration/marketing-retention.db.test.ts",
     // The LLM cost ledger's own rules (S3c1), in plain SQL against a scratch
     // schema: born reserved, five transitions, evidence set once, the
     // reservation clock checked rather than recomputed, reasons paired to
