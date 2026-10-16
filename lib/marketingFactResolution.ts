@@ -187,7 +187,9 @@ export async function resolveMarketingFacts(
     readUsage(database, request.channelId),
     needsPlans ? getBillingPlansWithFieldSources() : Promise.resolve([]),
     needsCatalogue ? getBillingPriceCatalogWithMeta() : Promise.resolve(null),
-    request.assetIds.length > 0 ? readAssetRegistry() : Promise.resolve(null),
+    // Always: the registry version a post records is the one in force, whether
+    // or not this draft names an asset, and the table refuses a version of 0.
+    readAssetRegistry(),
   ]);
 
   const claims = await Promise.all(request.claimIds.map(async (claimId) => {

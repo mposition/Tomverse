@@ -1350,6 +1350,17 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   검증된 감사 행도 서버가 찾아 줍니다. 범위는 서명된 세대의 기록이 관측한 쌍 중에서만 고르고,
   범위 비우기는 따로 언제나 제공합니다. 상태가 있는 wrapper와 hook 없는 view로 나눈 것은 render
   테스트가 view를 함수로 불러 각 action의 body를 직접 읽기 위해서입니다.
+- **S3(생성 서비스와 A1·A3·A5)**: 계획 작성은 운영자 승인(2026-10-16)으로 Claude, 검토는 Codex입니다.
+- **S3a(draft 접수)**: `app/api/internal/marketing-drafts/route.ts`, `lib/marketingDraftIntakeCore.ts`,
+  `lib/marketingDraftIntakeStore.ts`, `tests/marketingDraftIntakeCore.test.mjs`,
+  `tests/integration/marketing-draft-intake.db.test.ts`. **생성기는 신뢰하지 않습니다** — 제출에는 판정·상태·
+  mode·템플릿·링크·예약 필드가 없고(strict), 앱의 Guard가 다시 판정합니다. 인증은 생성기 전용 secret
+  하나(게시기 route와 같은 규칙), 서명은 마감 시각까지 포함한 요청 전체의 HMAC, 저장 key는 서버가 유도하고,
+  같은 key에 다른 본문이 오면 접수 감사 행의 digest와 달라 conflict입니다. 판정·사실·Guard·게시물·
+  `guard_result` 이력·감사가 감사 체인 잠금 뒤 한 트랜잭션이고, PG17 `transaction_timeout`을 마감까지
+  남은 시간으로 걸어 늦은 성공을 서버가 되돌립니다. **이 빌드에서는 모든 제출이 거절됩니다** — 생성
+  예산(S3c)과 가격 경보(S3d)가 아직 없어 접수 판정이 닫혀 있고, 사실 snapshot을 만드는 S3a2 전에는
+  claim·asset이 없는 draft만 받습니다. 감사 actor는 기존 `marketing-guard`입니다.
 
 # 엔지니어링 Agent
 
