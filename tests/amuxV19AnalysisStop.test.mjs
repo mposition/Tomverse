@@ -82,7 +82,8 @@ test("worker stop route denies unauthenticated, disabled and malformed polling b
     assert.equal(denied.status, 401);
     assert.match(denied.headers.get("cache-control") ?? "", /no-store/);
     assert.equal((await GET(new Request(`${endpoint}?holdId=hold_1`, {
-      headers: { ...headers, authorization: "Bearer wrong" },
+      headers: { ...headers,
+        authorization: "Bearer v19_stop_poll_012345678901234567890123456788" },
     }))).status, 401);
     process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
     assert.equal((await GET(new Request(`${endpoint}?holdId=hold_1`,
