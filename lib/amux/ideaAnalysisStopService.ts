@@ -97,6 +97,7 @@ export async function readAmuxIdeaAnalysisStopReceipt(
     resolutionData.disposition === "evidence_insufficient" &&
     resolutionData.previewId === data.previewId &&
     resolutionData.ideaId === data.ideaId &&
+    resolutionData.chunkIndex === data.chunkIndex &&
     resolutionData.settledMicroUsd === hold.reservedMicroUsd.toString() &&
     resolutionData.zeroReleaseEligible === false;
   if (!hold || !preview || !chunk || hold.previewId !== preview.id ||
