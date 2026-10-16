@@ -32,12 +32,18 @@ test("checkout contains only scanned bytes from the pinned tracked tree", async 
     await writeFile(join(repositoryPath, "src", "safe.txt"), "changed worktree bytes\n");
     await writeFile(join(repositoryPath, "untracked.txt"), "not available\n");
 
+    const stopped = new AbortController();
+    stopped.abort();
+    await assert.rejects(() => materializeAmuxTrackedCheckout({
+      repositoryPath, commitSha: pinned, digestSecret: "d".repeat(32), signal: stopped.signal,
+    }), /invalid_tree/);
+
     checkout = await materializeAmuxTrackedCheckout({
       repositoryPath, commitSha: pinned, digestSecret: "d".repeat(32),
     });
     assert.deepEqual(checkout.files, ["src/safe.txt"]);
     assert.deepEqual(checkout.excludedReasons, {
-      secret_path: 1, secret_content: 2, non_regular: 0, non_text: 1,
+      secret_path: 1, secret_content: 2, non_regular: 0, unscannable_content: 1,
     });
     assert.equal(checkout.excludedCount, 4);
     assert.match(checkout.excludedPathDigest, /^[a-f0-9]{64}$/);

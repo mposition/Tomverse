@@ -14,6 +14,9 @@ test("a pinned tree exposes only ordinary tracked files and excludes secret path
     file("src/server.ts"),
     file("docs/guide.md"),
     file(".env.example"),
+    file("production.env"),
+    file(".ssh/config"),
+    file("terraform/live.tfstate"),
     file("config/private.pem"),
     file("assets/link", "120000"),
     file("vendor/module", "160000", "commit"),
@@ -21,8 +24,11 @@ test("a pinned tree exposes only ordinary tracked files and excludes secret path
   assert.deepEqual(result.files.map((entry) => entry.path), ["docs/guide.md", "src/server.ts"]);
   assert.deepEqual(result.excluded, [
     { path: ".env.example", reason: "secret_path" },
+    { path: ".ssh/config", reason: "secret_path" },
     { path: "assets/link", reason: "non_regular" },
     { path: "config/private.pem", reason: "secret_path" },
+    { path: "production.env", reason: "secret_path" },
+    { path: "terraform/live.tfstate", reason: "secret_path" },
     { path: "vendor/module", reason: "non_regular" },
   ]);
 });

@@ -13,16 +13,16 @@ export type AmuxPreparedTrackedCheckout = {
   files: string[];
   excludedCount: number;
   excludedPathDigest: string;
-  excludedReasons: Record<"secret_path" | "secret_content" | "non_regular" | "non_text", number>;
+  excludedReasons: Record<"secret_path" | "secret_content" | "non_regular" | "unscannable_content", number>;
 };
 
 const DIGEST_DOMAIN = "amux-v19-checkout-excluded-paths-v1\n";
 
 function containsSecret(bytes: Buffer): boolean {
   // The existing secret rules are ASCII shaped. Decode once, without a size
-  // ceiling, and reject non-text before a model could interpret it otherwise.
+  // ceiling, and reject undecodable bytes before a model could interpret them otherwise.
   const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  if (text.includes("\0")) throw new TypeError("non_text");
+  if (text.includes("\0")) throw new TypeError("unscannable_content");
   return amuxV4RepositoryContainsSecret(text) ||
     ASSISTANT_PACKAGE_SECRET_RULES.some((rule) =>
       new RegExp(rule.pattern.source, rule.pattern.flags).test(text));
@@ -35,23 +35,26 @@ export async function materializeAmuxTrackedCheckout(input: {
   repositoryPath: string;
   commitSha: string;
   digestSecret: string;
+  signal?: AbortSignal;
 }): Promise<AmuxPreparedTrackedCheckout> {
   if (typeof input.digestSecret !== "string" ||
       Buffer.byteLength(input.digestSecret, "utf8") < 32) {
     throw new AmuxTrackedCheckoutManifestError();
   }
-  const manifest = await readAmuxPinnedTrackedTree(input.repositoryPath, input.commitSha);
+  const manifest = await readAmuxPinnedTrackedTree(input.repositoryPath, input.commitSha, input.signal);
   const directory = await mkdtemp(join(tmpdir(), "amux-v19-checkout-"));
   const excluded: Array<{ path: string; reason: keyof AmuxPreparedTrackedCheckout["excludedReasons"] }> =
     [...manifest.excluded];
   const files: string[] = [];
   try {
     for (const file of manifest.files) {
-      const bytes = await readAmuxPinnedTrackedBlob(input.repositoryPath, file.objectId);
+      if (input.signal?.aborted) throw new AmuxTrackedCheckoutManifestError();
+      const bytes = await readAmuxPinnedTrackedBlob(
+        input.repositoryPath, file.objectId, input.signal);
       try {
         let secret: boolean;
         try { secret = containsSecret(bytes); }
-        catch { excluded.push({ path: file.path, reason: "non_text" }); continue; }
+        catch { excluded.push({ path: file.path, reason: "unscannable_content" }); continue; }
         if (secret) {
           excluded.push({ path: file.path, reason: "secret_content" });
           continue;
@@ -67,7 +70,7 @@ export async function materializeAmuxTrackedCheckout(input: {
       } finally { bytes.fill(0); }
     }
     const excludedReasons = {
-      secret_path: 0, secret_content: 0, non_regular: 0, non_text: 0,
+      secret_path: 0, secret_content: 0, non_regular: 0, unscannable_content: 0,
     };
     const hmac = createHmac("sha256", input.digestSecret).update(DIGEST_DOMAIN);
     for (const entry of excluded.sort((a, b) =>

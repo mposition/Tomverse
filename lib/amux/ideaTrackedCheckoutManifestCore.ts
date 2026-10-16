@@ -22,8 +22,9 @@ export class AmuxTrackedCheckoutManifestError extends Error {
 }
 
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
-const SECRET_BASENAME = /^(?:\.env(?:\..+)?|\.npmrc|\.pypirc|\.netrc|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|(?:client[_-])?secrets?(?:[._-].+)?|credentials?(?:[._-].+)?)$/i;
-const SECRET_EXTENSION = /\.(?:pem|key|p12|pfx|jks|keystore|kdbx|crt|cer|p7b)$/i;
+const SECRET_BASENAME = /^(?:\.npmrc|\.pypirc|\.netrc|\.git-credentials|\.gitconfig|\.htpasswd|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|(?:client[_-])?secrets?(?:[._-].+)?|credentials?(?:[._-].+)?)$/i;
+const SECRET_DIRECTORY = /^(?:\.ssh|\.aws|\.gnupg|\.kube|\.docker)$/i;
+const SECRET_EXTENSION = /(?:^|\.)env(?:\..+)?$|\.(?:pem|key|p12|pfx|jks|keystore|kdbx|crt|cer|p7b|tfstate(?:\..+)?)$/i;
 
 const validPath = (path: string): boolean => {
   if (!path || path.startsWith("/") || path.includes("\\") || /[\x00-\x1f\x7f]/.test(path)) {
@@ -35,7 +36,8 @@ const validPath = (path: string): boolean => {
 };
 
 const secretPath = (path: string): boolean =>
-  path.split("/").some((part) => SECRET_BASENAME.test(part) || SECRET_EXTENSION.test(part));
+  path.split("/").some((part) => SECRET_BASENAME.test(part) ||
+    SECRET_DIRECTORY.test(part) || SECRET_EXTENSION.test(part));
 
 /**
  * Plan a read-only checkout from an already pinned, recursively listed Git

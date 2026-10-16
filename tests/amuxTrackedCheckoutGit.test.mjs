@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { deflateSync } from "node:zlib";
 
 import { readAmuxPinnedTrackedTree } from "../lib/amux/ideaTrackedCheckoutGit.ts";
 
@@ -39,6 +40,16 @@ test("local Git enumerates the pinned commit, omitting untracked and secret path
     assert.deepEqual(result.excluded, [{ path: ".env", reason: "secret_path" }]);
     assert.notEqual(result.files[0].objectId, laterBlob);
     await assert.rejects(() => readAmuxPinnedTrackedTree(directory, "HEAD"), /invalid_tree/);
+    await assert.rejects(() => readAmuxPinnedTrackedTree(join(directory, "docs"), pinned),
+      /invalid_tree/);
+
+    // A loose object may be replaced on disk without changing its filename.
+    // The fixed SHA must authenticate the commit bytes before tree traversal.
+    const otherCommit = git(directory, "cat-file", "commit", laterCommit);
+    const loosePath = join(directory, ".git", "objects", pinned.slice(0, 2), pinned.slice(2));
+    await chmod(loosePath, 0o600);
+    await writeFile(loosePath, deflateSync(Buffer.from(otherCommit, "utf8")));
+    await assert.rejects(() => readAmuxPinnedTrackedTree(directory, pinned), /invalid_tree/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
