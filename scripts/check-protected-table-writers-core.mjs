@@ -2337,6 +2337,12 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    count: 1,
+    reason:
+      "One read in the marketing LLM cost ledger's truncate guard: SELECT EXISTS over the trigger's own table, named from TG_TABLE_SCHEMA and TG_TABLE_NAME and quoted with %I, because the function pins search_path to pg_catalog, pg_temp and an empty temporary table of the same name must not answer for the ledger. Nothing in it is input; it reads and never writes.",
+  },
+  {
     path: "prisma/migrations/20261013100000_amux_worker_capability/migration.sql",
     count: 3,
     reason:
