@@ -1292,8 +1292,17 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가
   강제하고, 보존 설정을 트랜잭션 안에서 켜는 곳은 이 writer 하나뿐입니다(보호 테이블 검사가 허용 목록으로
   강제). 지운 행마다 같은 트랜잭션에 `marketing-retention` 감사 행을, 지운 것이 있는 실행만 `retention_run`
-  보고서를 남깁니다. 일일 정리 cron의 한 단계이며 표마다 한 번에 200행까지입니다. 게시물 본문 정리와 history
-  압축은 S3h2입니다.
+  보고서를 남깁니다. 일일 정리 cron의 한 단계이며 표마다 한 번에 200행까지입니다.
+- **S3h2(남는 게시물의 보존)**: store의 `purgeExpiredMarketingPostContent()`·`compactMarketingPostHistory()`·
+  `planMarketingHistoryCompaction()`, `tests/marketingRetentionCompaction.test.mjs`. 게시물 행은 남기고 본문
+  (`envelope`)만 게시 후 24개월에 지우며, history의 `attempt`·`webhook_event` 항목은 90일 뒤 종류별 요약과 닫는
+  항목으로 바꿉니다. **판정은 여전히 update trigger의 것이고, writer의 선택은 그보다 좁아야 합니다** — 본문
+  정리는 종결 상태만(재대기할 수 있는 `failed`, 확인 중인 `outcome_unknown`, 게시 전 상태는 본문을 유지), 시각
+  기준은 trigger보다 1 ms(압축은 일광절약 차이까지 1시간) 이르게, history 시각은 µs까지 비교합니다. 선택한 행을
+  trigger가 거절하면 그 batch 전체가 실패하기 때문입니다. 압축은 `historyVersion` CAS이고, failed 게시물의 재대기
+  기준 실패 항목은 남깁니다. 세 보존 writer는 `beginMarketingRetention()` 하나에서 보존 설정을 켭니다. 결과는 기존
+  `retention_run` 모양 그대로(`compactedRowCount` = 제자리에서 바뀐 행)이며, webhook fingerprint를 움직이지 않도록
+  store에 최상위 계산식을 두지 않습니다. 공개 버킷 이미지는 삭제 port가 생길 때입니다.
 - **S3c1(LLM 비용 원장 표와 결정적 핵심)**: `lib/marketingLlmBudgetCore.ts`,
   `prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql`, `tests/marketingLlmBudgetCore.test.mjs`,
   `tests/integration/marketing-llm-call-ledger.db.test.ts`. 정책 v4의 다섯 번째 표 `MarketingLlmCall`입니다. **dispatch된

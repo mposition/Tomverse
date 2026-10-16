@@ -232,7 +232,14 @@ mock.module(mod("lib/opsObserverStore.ts"), {
 // runner: the per-table counts it reports, so the step's answer is visible.
 mock.module(mod("lib/marketingRetention.ts"), {
   namedExports: {
-    runMarketingRetention: async () => ({ MarketingReport: 3, AiVisibilityRun: 0, MarketingPost: 2 }),
+    runMarketingRetention: async () => ({
+      MarketingReport: 3,
+      AiVisibilityRun: 0,
+      MarketingPost: 2,
+      MarketingLlmCall: 0,
+      MarketingPostContent: 1,
+      MarketingPostHistory: 4,
+    }),
   },
 });
 mock.module(mod("lib/productResearchObservationRouteAuth.ts"), {
@@ -486,7 +493,14 @@ test("a clean run reports no failed steps and every count", async () => {
 
   assert.deepEqual(result.failedSteps, []);
   assert.equal(result.creditReservations, 1);
-  assert.deepEqual(result.marketingRetention, { MarketingReport: 3, AiVisibilityRun: 0, MarketingPost: 2 });
+  assert.deepEqual(result.marketingRetention, {
+    MarketingReport: 3,
+    AiVisibilityRun: 0,
+    MarketingPost: 2,
+    MarketingLlmCall: 0,
+    MarketingPostContent: 1,
+    MarketingPostHistory: 4,
+  });
   assert.equal(result.scheduledAccountsDeleted, 1);
 
   // Nothing reports `null` on a clean run: `null` means "this step did not
