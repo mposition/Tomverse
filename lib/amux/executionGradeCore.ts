@@ -71,7 +71,7 @@ export type AmuxExecutionPathClass = "invalid" | "contract" | "ordinary";
 
 /** A path as stored in Git, allowing only the policy's single leading `./`. */
 export const normalizeAmuxExecutionPath = (input: unknown): string | null => {
-  if (typeof input !== "string" || input.length === 0 || /[\\\p{Cc}]/u.test(input)) {
+  if (typeof input !== "string" || input.length === 0 || /[\\\p{Cc}\p{Cf}]/u.test(input)) {
     return null;
   }
   const path = input.startsWith("./") ? input.slice(2) : input;
@@ -100,7 +100,7 @@ export type AmuxExecutionGradeInput = {
   proposedGrade: string | null | undefined;
 };
 
-/** Policy v52 §4 order; the intake proposal is only a bounded signal. */
+/** docs/policy/development-agent-orchestration.md v52 §4 order; the intake proposal is only a bounded signal. */
 export const deriveAmuxExecutionGrade = (input: AmuxExecutionGradeInput): AmuxExecutionGrade => {
   const { taskRole, expectedPaths, proposedGrade } = input;
   if (taskRole === "design" || !Array.isArray(expectedPaths) ||

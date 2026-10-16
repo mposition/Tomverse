@@ -7,11 +7,25 @@ if (args.length !== 2 || args[0] !== "--input") {
   throw new Error("Usage: npm run report:amux-execution-grades -- --input <task-proposals.json>");
 }
 
-const file = statSync(args[1]);
-if (!file.isFile() || file.size > 8 * 1024 * 1024) {
-  throw new Error("Execution grade report input must be a file no larger than 8 MiB");
+let source;
+try {
+  const file = statSync(args[1]);
+  if (!file.isFile() || file.size > 8 * 1024 * 1024) {
+    throw new Error("invalid input file");
+  }
+  source = readFileSync(args[1], "utf8");
+  if (Buffer.byteLength(source, "utf8") > 8 * 1024 * 1024) {
+    throw new Error("input file changed while reading");
+  }
+} catch {
+  throw new Error("Execution grade report input must be a readable file no larger than 8 MiB");
 }
-const proposals = JSON.parse(readFileSync(args[1], "utf8"));
+let proposals;
+try {
+  proposals = JSON.parse(source);
+} catch {
+  throw new Error("Execution grade report input is not valid JSON");
+}
 if (!Array.isArray(proposals) || proposals.length > 10_000) {
   throw new Error("Execution grade report expects an array of at most 10,000 Task proposals");
 }

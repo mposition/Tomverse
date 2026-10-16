@@ -69,7 +69,7 @@ test("one leading dot-slash is allowed, but every invalid repository path is ref
     "", "./", "././lib/file.ts", ".", "..", "lib/./file.ts", "lib/../file.ts",
     "lib//file.ts", "lib/file.ts/", "/lib/file.ts", "C:/lib/file.ts", "C:lib/file.ts",
     "lib/D:/file.ts", "lib\\file.ts", "lib/file\u0000.ts", "lib/file\u001f.ts",
-    "lib/file\u007f.ts", "lib/file\u0085.ts", 42, null,
+    "lib/file\u007f.ts", "lib/file\u0085.ts", "lib/amux\u200b/x.ts", "lib/\u202efoo.ts", 42, null,
   ]) {
     assert.equal(normalizeAmuxExecutionPath(path), null, JSON.stringify(path));
     assert.equal(classifyAmuxExecutionPath(path), "invalid", JSON.stringify(path));
@@ -129,6 +129,12 @@ test("distribution report reads proposals and prints counts without their paths"
       transitions: { "routine->routine": 1, "routine->frontier": 1, "advanced->advanced": 1 },
     });
     assert.equal(run.stdout.includes("private-path-marker"), false);
+    writeFileSync(inputFile, "{private-path-marker");
+    const invalid = spawnSync(process.execPath, [
+      "--import", "tsx", "scripts/report-amux-execution-grades.mjs", "--input", inputFile,
+    ], { cwd: new URL("..", import.meta.url), encoding: "utf8" });
+    assert.notEqual(invalid.status, 0);
+    assert.equal(invalid.stderr.includes("private-path-marker"), false);
   } finally {
     unlinkSync(inputFile);
   }
