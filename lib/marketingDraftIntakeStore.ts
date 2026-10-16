@@ -102,8 +102,9 @@ const unreadable: ReadResult<never> = { ok: false };
  * before the deadline at that same instant, so a transaction cannot commit
  * after the deadline: the late success is rolled back by the server, not
  * noticed by this process. Left unbounded: the stretch
- * from BEGIN to this statement and COMMIT's durable phase (agent foundation
- * §6.2a). Statement and idle bounds are shorter, so both stay armed.
+ * from BEGIN to this statement and COMMIT's durable phase, which is the
+ * agent foundation's timeout rule. Statement and idle bounds are shorter, so
+ * both stay armed.
  */
 async function boundByDeadline(
   tx: MarketingTransaction,
