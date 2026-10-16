@@ -48,6 +48,8 @@ import { commitAmuxIdeaAnalysisUnknownOutcome,
 import { commitAmuxIdeaAnalysisStop,
   readAmuxIdeaAnalysisStopReceipt,
   AmuxIdeaAnalysisStopError } from "@/lib/amux/ideaAnalysisStopService";
+import { readAmuxIdeaAnalysisWorkerStopState } from
+  "@/lib/amux/ideaAnalysisWorkerStopRead";
 import { commitAmuxIdeaAnalysisClaimResolution,
   readAmuxIdeaAnalysisClaimResolution,
   readAmuxIdeaAnalysisClaimResolutionReceipt,
@@ -859,8 +861,12 @@ test("owner stop fences an in-flight result and preserves the full budget hold",
     const before = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
       where: { namespace_monthStart: { namespace, monthStart } },
     });
+    assert.deepEqual(await readAmuxIdeaAnalysisWorkerStopState(tx, holdId),
+      { holdId, stop: false });
     const stopped = await commitAmuxIdeaAnalysisStop(tx, { session, request,
       stopRequestId, holdId, ownerConfirmed: true });
+    assert.deepEqual(await readAmuxIdeaAnalysisWorkerStopState(tx, holdId),
+      { holdId, stop: true });
     assert.equal(stopped.previewId, previewId);
     assert.equal(stopped.ideaId, claim.ideaId);
     assert.equal((await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
@@ -913,6 +919,8 @@ test("owner stop fences an in-flight result and preserves the full budget hold",
       where: { ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } },
       data: { currentPreviewId: null },
     });
+    assert.deepEqual(await readAmuxIdeaAnalysisWorkerStopState(tx, holdId),
+      { holdId, stop: true });
     assert.equal((await readAmuxIdeaAnalysisStopReceipt(tx, { session,
       stopRequestId })).status, "committed");
     throw new Error("rollback synthetic owner stop");
