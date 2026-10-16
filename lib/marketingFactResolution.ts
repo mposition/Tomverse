@@ -146,10 +146,12 @@ async function readUsage(
  *
  * The clock is this process's, not the caller's. It is not the database's
  * either. The gate, usage, price, model and asset reads are also not one
- * transactional snapshot. That is acceptable only while every S1 feature is
- * off and `createMarketingPost()` refuses autonomous creation outright. The
- * S2 route must move the clock and all publish-relevant reads into the write
- * transaction before enabling a feature; this comment is the hand-off marker.
+ * transactional snapshot. That is acceptable only while every feature that
+ * would act on them is off and `createMarketingPost()` refuses autonomous
+ * creation outright. S3a2 (S3 plan) moves the clock and every read here into
+ * the write transaction and builds the fact snapshot from the rows read; the
+ * generator's draft intake cannot be enabled before it. This comment is the
+ * hand-off marker.
  */
 export async function resolveMarketingFacts(
   database: MarketingFactDatabase,
@@ -187,7 +189,9 @@ export async function resolveMarketingFacts(
     readUsage(database, request.channelId),
     needsPlans ? getBillingPlansWithFieldSources() : Promise.resolve([]),
     needsCatalogue ? getBillingPriceCatalogWithMeta() : Promise.resolve(null),
-    request.assetIds.length > 0 ? readAssetRegistry() : Promise.resolve(null),
+    // Always: the registry version a post records is the one in force, whether
+    // or not this draft names an asset, and the table refuses a version of 0.
+    readAssetRegistry(),
   ]);
 
   const claims = await Promise.all(request.claimIds.map(async (claimId) => {
