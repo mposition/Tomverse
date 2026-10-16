@@ -12,6 +12,10 @@ const file = (path, mode = "100644", type = "blob") => ({ path, mode, type, obje
 test("a pinned tree exposes only ordinary tracked files and excludes secret paths and links", () => {
   const result = planAmuxTrackedCheckout([
     file("src/server.ts"),
+    file("src/env/index.ts"),
+    file("lib/env.ts"),
+    file("lib/secret-scan.ts"),
+    file("lib/credentials.ts"),
     file("docs/guide.md"),
     file(".env.example"),
     file("production.env"),
@@ -21,7 +25,10 @@ test("a pinned tree exposes only ordinary tracked files and excludes secret path
     file("assets/link", "120000"),
     file("vendor/module", "160000", "commit"),
   ]);
-  assert.deepEqual(result.files.map((entry) => entry.path), ["docs/guide.md", "src/server.ts"]);
+  assert.deepEqual(result.files.map((entry) => entry.path), [
+    "docs/guide.md", "lib/credentials.ts", "lib/env.ts", "lib/secret-scan.ts",
+    "src/env/index.ts", "src/server.ts",
+  ]);
   assert.deepEqual(result.excluded, [
     { path: ".env.example", reason: "secret_path" },
     { path: ".ssh/config", reason: "secret_path" },

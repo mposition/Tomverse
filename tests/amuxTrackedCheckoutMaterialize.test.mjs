@@ -24,6 +24,8 @@ test("checkout contains only scanned bytes from the pinned tracked tree", async 
     await writeFile(join(repositoryPath, "src", "payload.txt"), `token=${"A".repeat(24)}\n`);
     await writeFile(join(repositoryPath, "src", "late.txt"),
       `${"ordinary text\n".repeat(2_000)}token=${"B".repeat(24)}\n`);
+    await writeFile(join(repositoryPath, "src", "keyblock.txt"),
+      "-----BEGIN ENCRYPTED PRIVATE KEY-----\nexample\n");
     await writeFile(join(repositoryPath, "src", "binary.dat"), Buffer.from([0, 1, 2]));
     await writeFile(join(repositoryPath, ".env"), "path excluded before read\n");
     git(repositoryPath, "add", "--", "src", ".env");
@@ -43,9 +45,9 @@ test("checkout contains only scanned bytes from the pinned tracked tree", async 
     });
     assert.deepEqual(checkout.files, ["src/safe.txt"]);
     assert.deepEqual(checkout.excludedReasons, {
-      secret_path: 1, secret_content: 2, non_regular: 0, unscannable_content: 1,
+      secret_path: 1, secret_content: 3, non_regular: 0, unscannable_content: 1,
     });
-    assert.equal(checkout.excludedCount, 4);
+    assert.equal(checkout.excludedCount, 5);
     assert.match(checkout.excludedPathDigest, /^[a-f0-9]{64}$/);
     assert.equal(await readFile(join(checkout.directory, "src", "safe.txt"), "utf8"),
       "safe pinned bytes\n");

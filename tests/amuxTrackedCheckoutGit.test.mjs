@@ -48,7 +48,16 @@ test("local Git enumerates the pinned commit, omitting untracked and secret path
     const otherCommit = git(directory, "cat-file", "commit", laterCommit);
     const loosePath = join(directory, ".git", "objects", pinned.slice(0, 2), pinned.slice(2));
     await chmod(loosePath, 0o600);
-    await writeFile(loosePath, deflateSync(Buffer.from(otherCommit, "utf8")));
+    const forgedBody = Buffer.from(otherCommit, "utf8");
+    const forgedObject = Buffer.concat([
+      Buffer.from(`commit ${forgedBody.length}\0`, "utf8"), forgedBody,
+    ]);
+    await writeFile(loosePath, deflateSync(forgedObject));
+    const acceptedForgedBody = execFileSync("git", ["-C", directory, "cat-file", "commit", pinned], {
+      encoding: "utf8", windowsHide: true,
+      env: { ...process.env, GIT_NO_REPLACE_OBJECTS: "1" },
+    });
+    assert.equal(acceptedForgedBody, otherCommit);
     await assert.rejects(() => readAmuxPinnedTrackedTree(directory, pinned), /invalid_tree/);
   } finally {
     await rm(directory, { recursive: true, force: true });
