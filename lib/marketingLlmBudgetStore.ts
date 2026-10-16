@@ -26,6 +26,8 @@ import { randomBytes } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { MARKETING_RETENTION_SETTING } from "@/lib/marketingAutomationSchema";
+import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
 import {
   MARKETING_LLM_ADAPTER_PROFILE,
   MARKETING_LLM_ADAPTER_VERSION,
@@ -34,6 +36,7 @@ import {
   marketingLlmAdapterConfigDigest,
   marketingLlmCloseDigest,
   marketingLlmConfigSnapshot,
+  marketingLlmConsumerDigest,
   marketingLlmDispatchDigest,
   marketingLlmRequestDigest,
   marketingLlmReservation,
@@ -48,6 +51,7 @@ import {
   type MarketingLlmReservePayload,
   type MarketingLlmTerminalState,
 } from "@/lib/marketingLlmBudgetCore";
+import { MARKETING_RETENTION_ACTIONS, MarketingStoreRefusedError } from "@/lib/marketingStore";
 
 export const MARKETING_LLM_SYSTEM_ACTOR = "marketing-generator";
 
@@ -660,4 +664,164 @@ export async function expireMarketingLlmCalls(
     else counts.untouched += 1;
   }
   return { skipped: null, ...counts };
+}
+
+// ---------------------------------------------------------------------------
+// legal hold and retention (S3c3c)
+
+/**
+ * The predecessor a first hold decision names. Outside the id alphabet, so it
+ * cannot be mistaken for an audit row; the database's guard uses the same.
+ */
+export const MARKETING_LLM_NO_HOLD_DECISION = ":none";
+
+export const MARKETING_LLM_HOLD_ACTIONS = {
+  set: "marketing_llm.legal_hold_set",
+  released: "marketing_llm.legal_hold_released",
+} as const;
+
+/**
+ * A person puts a call under legal hold, or takes it off. The hold keeps the
+ * row past its 24-month retention until it is released.
+ *
+ * Each decision names the one it replaces: `expectedHoldAuditLogId` is the
+ * audit row of the decision the person's page showed (null for a row never
+ * held). The audit row this decision wrote -- a person's, written by the
+ * admin mutation before this runs -- must be evidence of exactly this action
+ * on this call and must name the same predecessor; the update then moves the
+ * flag and the stored decision together, and only from that predecessor. So
+ * neither an earlier release presented again nor a release meant for an older
+ * hold can lift a newer one.
+ */
+export async function setMarketingLlmCallLegalHold(
+  tx: Tx,
+  input: {
+    readonly callId: string;
+    readonly hold: boolean;
+    readonly auditLogId: string;
+    readonly expectedHoldAuditLogId: string | null;
+  },
+): Promise<void> {
+  const verdict = await verifyMarketingAuditEvidence(tx, {
+    auditLogId: input.auditLogId,
+    action: input.hold ? MARKETING_LLM_HOLD_ACTIONS.set : MARKETING_LLM_HOLD_ACTIONS.released,
+    targetId: input.callId,
+    metadata: { previousHoldAuditLogId: input.expectedHoldAuditLogId ?? MARKETING_LLM_NO_HOLD_DECISION },
+  });
+  if (!verdict.ok) {
+    throw new MarketingStoreRefusedError(
+      `audit_evidence_${verdict.problem}`,
+      `The audit entry is not evidence of this write: ${verdict.problem}`,
+    );
+  }
+  const updated = await tx.$executeRaw(Prisma.sql`
+    UPDATE "MarketingLlmCall" SET "legalHold" = ${input.hold}, "legalHoldAuditLogId" = ${input.auditLogId}
+    WHERE "id" = ${input.callId} AND "legalHold" = ${!input.hold}
+      AND "legalHoldAuditLogId" IS NOT DISTINCT FROM ${input.expectedHoldAuditLogId}
+  `);
+  if (updated !== 1) {
+    throw new MarketingStoreRefusedError("legal_hold_conflict", "The call or its legal-hold state changed");
+  }
+}
+
+/** Rows retention deletes in one run; the rest wait for the next. */
+export const MARKETING_LLM_RETENTION_BATCH_LIMIT = 200;
+
+/**
+ * Delete closed calls whose 24-month retention has ended and that are not on
+ * legal hold (docs/policy/marketing-automation.md §12.2), each with a
+ * `marketing-retention` audit row in this transaction. The delete trigger
+ * repeats every condition and refuses anything else; the retention setting is
+ * what tells it this is retention. No `retention_run` report: that report's
+ * table list is part of the webhook pipeline's watched source, and the audit
+ * rows and the step's count already record what went.
+ */
+export async function purgeExpiredMarketingLlmCalls(
+  tx: Tx,
+  limit: number = MARKETING_LLM_RETENTION_BATCH_LIMIT,
+): Promise<{ readonly purged: number }> {
+  await tx.$queryRaw(Prisma.sql`SELECT set_config(${MARKETING_RETENTION_SETTING}, 'on', true)`);
+  await takeAuditChainLock(tx);
+  const take = Math.max(0, Math.min(Math.floor(limit), MARKETING_LLM_RETENTION_BATCH_LIMIT));
+  const due = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id" FROM "MarketingLlmCall"
+    WHERE "retentionUntil" < (clock_timestamp() AT TIME ZONE 'UTC')
+      AND NOT "legalHold"
+      AND "state" IN ('settled', 'unknown_retained', 'released')
+    ORDER BY "retentionUntil", "id"
+    LIMIT ${take}
+    FOR UPDATE SKIP LOCKED
+  `);
+  let purged = 0;
+  for (const { id } of due) {
+    await writeSystemAuditLog({
+      tx,
+      systemActor: "marketing-retention",
+      action: MARKETING_RETENTION_ACTIONS.rowPurged,
+      targetType: "MarketingLlmCall",
+      targetId: id,
+      summary: "Deleted a marketing LLM cost ledger row its retention period had ended for.",
+      metadata: { table: "MarketingLlmCall" },
+    });
+    const deleted = await tx.$executeRaw(Prisma.sql`DELETE FROM "MarketingLlmCall" WHERE "id" = ${id}`);
+    if (deleted !== 1) throw new Error("marketing_llm_retention_lost_its_row");
+    purged += 1;
+  }
+  return { purged };
+}
+
+// ---------------------------------------------------------------------------
+// consumption by a draft submission (S3c4)
+
+export type MarketingLlmConsumptionRefusal =
+  | "intake_llm_call_missing"
+  | "intake_llm_call_other_run"
+  | "intake_llm_call_not_draft"
+  | "intake_llm_call_open"
+  | "intake_llm_call_consumed";
+
+/**
+ * Bind the calls a submission names to that submission, in the intake's
+ * transaction. Every named call must exist, belong to the same generator run,
+ * have been made for a draft, and be closed (settled or kept at its
+ * reservation as unknown); it must be unconsumed or already consumed by this
+ * very submission -- the same submission's next draft, or its resubmission.
+ * Anything else refuses the draft and writes nothing.
+ *
+ * The caller holds the audit chain lock, which every ledger action takes
+ * first, so no ledger action is between its locks while these rows are read;
+ * the sweep tries its locks and steps past.
+ */
+export async function consumeMarketingLlmCallsForSubmission(
+  tx: Tx,
+  input: {
+    readonly generatorRunId: string;
+    readonly requestKeys: readonly string[];
+    readonly submissionDigest: string;
+  },
+): Promise<{ readonly ok: true; readonly consumerDigest: string } | { readonly ok: false; readonly code: MarketingLlmConsumptionRefusal }> {
+  const consumerDigest = marketingLlmConsumerDigest(input.submissionDigest);
+  const keys = [...input.requestKeys];
+  const rows = await tx.$queryRaw<
+    Array<{ requestKey: string; generatorRunId: string; purpose: string; state: string; consumerDigest: string | null }>
+  >(Prisma.sql`
+    SELECT "requestKey", "generatorRunId", "purpose", "state", "consumerDigest"
+    FROM "MarketingLlmCall" WHERE "requestKey" = ANY(${keys}::text[])
+    ORDER BY "id"
+    FOR UPDATE
+  `);
+  if (rows.length !== new Set(keys).size) return { ok: false, code: "intake_llm_call_missing" };
+  for (const row of rows) {
+    if (row.generatorRunId !== input.generatorRunId) return { ok: false, code: "intake_llm_call_other_run" };
+    if (row.purpose !== "draft") return { ok: false, code: "intake_llm_call_not_draft" };
+    if (row.state !== "settled" && row.state !== "unknown_retained") return { ok: false, code: "intake_llm_call_open" };
+    if (row.consumerDigest !== null && row.consumerDigest !== consumerDigest) {
+      return { ok: false, code: "intake_llm_call_consumed" };
+    }
+  }
+  await tx.$executeRaw(Prisma.sql`
+    UPDATE "MarketingLlmCall" SET "consumerDigest" = ${consumerDigest}
+    WHERE "requestKey" = ANY(${keys}::text[]) AND "consumerDigest" IS NULL
+  `);
+  return { ok: true, consumerDigest };
 }

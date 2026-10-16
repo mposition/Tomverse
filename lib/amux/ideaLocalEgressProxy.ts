@@ -15,11 +15,17 @@ export type AmuxV4EgressProxyDeps = {
 const MAX_HEAD_BYTES = 4_096;
 const MAX_ACTIVE_TUNNELS = 4;
 const MAX_PROXY_CONNECTIONS = 16;
-const MAX_DIRECTION_BYTES = 16 * 1024 * 1024;
-// Equal to the v13 process hard deadline; the process supervisor, not a
-// shorter tunnel lifetime, decides whether the one-shot analysis timed out.
-const TUNNEL_DEADLINE_MS = 600_000;
+const V4_MAX_DIRECTION_BYTES = 16 * 1024 * 1024;
+// The historical v4 probe keeps its original tunnel limits. A v19 live
+// analysis call instead runs until its owner stop or retention fence settles it.
+const V4_TUNNEL_DEADLINE_MS = 600_000;
 const CONNECT_DEADLINE_MS = 5_000;
+
+type TunnelBounds = { deadlineMs: number | null; directionBytes: number | null };
+const V4_BOUNDS: TunnelBounds = {
+  deadlineMs: V4_TUNNEL_DEADLINE_MS, directionBytes: V4_MAX_DIRECTION_BYTES,
+};
+const V19_BOUNDS: TunnelBounds = { deadlineMs: null, directionBytes: null };
 
 const refuse = (socket: Socket, status: 403 | 429 | 502) => {
   if (socket.destroyed) return;
@@ -36,8 +42,9 @@ const refuse = (socket: Socket, status: 403 | 429 | 502) => {
  * namespace. The supervising process must bind this proxy to a private Unix
  * socket, expose only that socket to the namespace, and provide an approved
  * exact-host catalog. This module does not enable model calls by itself. */
-export function createAmuxV4EgressProxy(
+function createAmuxEgressProxy(
   approvedHosts: readonly string[], deps: AmuxV4EgressProxyDeps = {},
+  bounds: TunnelBounds,
 ) {
   // A running proxy must not inherit later mutations of the owner's catalog.
   const hosts = Object.freeze([...approvedHosts]);
@@ -85,9 +92,10 @@ export function createAmuxV4EgressProxy(
     const release = () => { if (!released) { released = true; active -= 1; } };
     client.once("close", release);
     client.on("error", () => client.destroy());
-    const deadline = setTimeout(() => client.destroy(), TUNNEL_DEADLINE_MS);
-    deadline.unref();
-    client.once("close", () => clearTimeout(deadline));
+    const deadline = bounds.deadlineMs === null ? null :
+      setTimeout(() => client.destroy(), bounds.deadlineMs);
+    deadline?.unref();
+    client.once("close", () => { if (deadline) clearTimeout(deadline); });
     let addresses: string[];
     try {
       addresses = await Promise.race([
@@ -126,11 +134,11 @@ export function createAmuxV4EgressProxy(
     let inbound = 0;
     client.on("data", (bytes: Buffer) => {
       outbound += bytes.length;
-      if (outbound > MAX_DIRECTION_BYTES) close();
+      if (bounds.directionBytes !== null && outbound > bounds.directionBytes) close();
     });
     upstream.on("data", (bytes: Buffer) => {
       inbound += bytes.length;
-      if (inbound > MAX_DIRECTION_BYTES) close();
+      if (bounds.directionBytes !== null && inbound > bounds.directionBytes) close();
     });
     upstream.once("connect", () => {
       clearTimeout(connectDeadline);
@@ -143,4 +151,18 @@ export function createAmuxV4EgressProxy(
     });
   });
   return server;
+}
+
+export function createAmuxV4EgressProxy(
+  approvedHosts: readonly string[], deps: AmuxV4EgressProxyDeps = {},
+) {
+  return createAmuxEgressProxy(approvedHosts, deps, V4_BOUNDS);
+}
+
+/** v19 analysis traffic has no elapsed-time or byte ceiling. The caller must
+ * still enforce the owner stop, retention fence and approved-host catalog. */
+export function createAmuxV19EgressProxy(
+  approvedHosts: readonly string[], deps: AmuxV4EgressProxyDeps = {},
+) {
+  return createAmuxEgressProxy(approvedHosts, deps, V19_BOUNDS);
 }

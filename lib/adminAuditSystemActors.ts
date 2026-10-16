@@ -27,6 +27,12 @@ export const AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR = "amux-session-intake" as c
 export const AMUX_SESSION_IDEA_SUBMITTED_ACTION = "amux.idea.session_submitted" as const;
 export const AMUX_SESSION_IDEA_SUBMITTED_TARGET = "AmuxIdeaSubmission" as const;
 export const AMUX_SESSION_IDEA_SUBMITTED_SCOPE = "session-submission-v1" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_ACTION =
+  "amux.idea.session_analysis_reserved" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_TARGET =
+  "AmuxIdeaSessionAnalysisReservation" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_SCOPE =
+  "session-analysis-reservation-v1" as const;
 
 /**
  * The legacy internal auto-promotion tick consumes an owner-bound grant.
@@ -102,6 +108,14 @@ export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE = "analysis-budget-settle-v1" 
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION = "AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN" as const;
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE = "analysis-outcome-unknown-v1" as const;
+/** v19 direct-read checkout evidence contains only a fixed SHA and aggregate
+ * exclusion proof. It grants no repository credential and starts no CLI. */
+export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_ACTION =
+  "amux.v19.tracked_checkout.recorded" as const;
+export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET =
+  "AmuxIdeaTrackedCheckoutEvidence" as const;
+export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_SCOPE =
+  "tracked-checkout-evidence-v1" as const;
 /** One complete, normalized first analysis is stored as independently purgeable units. */
 export const AMUX_V4_FIRST_DRAFT_SAVED_ACTION = "AMUX_V4_FIRST_ANALYSIS_DRAFT_SAVED" as const;
 export const AMUX_V4_FIRST_DRAFT_SAVED_TARGET = "AmuxIdeaAnalysisChunk" as const;
@@ -125,6 +139,22 @@ export const AMUX_V4_UNIT_INVALIDATE_ACTION = "amux.v4.unit.invalidate" as const
 export const AMUX_V4_UNIT_EXPIRE_ACTION = "amux.v4.unit.expire" as const;
 export const AMUX_V4_UNIT_DECISION_TARGET = "AmuxIdeaUnitDecision" as const;
 export const AMUX_V4_UNIT_HOUSEKEEPING_SCOPE = "unit-decision-housekeeping-v1" as const;
+/** Intake v19 system registration uses the v4 intake actor as a narrowly
+ * scoped registrar. Data ownership remains the saved operating-scope owner. */
+export const AMUX_V19_UNIT_REGISTRATION_SCOPE =
+  "system-unit-registration-v1" as const;
+export const AMUX_V19_PORTFOLIO_ASSESSMENT_SCOPE =
+  "system-portfolio-assessment-v1" as const;
+export const AMUX_V19_PORTFOLIO_SCORE_SCOPE =
+  "system-portfolio-score-v1" as const;
+export const AMUX_V19_SYSTEM_REGISTRATION_ACTION =
+  "amux.v19.plan.auto_registered" as const;
+export const AMUX_V19_SYSTEM_REGISTRATION_TARGET =
+  "AmuxIdeaSubmission" as const;
+export const AMUX_V19_SYSTEM_REGISTRATION_SCOPE =
+  "system-plan-registration-v1" as const;
+export const AMUX_V19_REGISTRATION_REFUSAL_SCOPE =
+  "system-registration-refusal-v1" as const;
 /** One authenticated source collector claims one already owner-approved file. */
 
 /**
@@ -209,6 +239,10 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
       targetType === AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET) {
     return AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE;
   }
+  if (action === AMUX_V19_TRACKED_CHECKOUT_RECORDED_ACTION &&
+      targetType === AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET) {
+    return AMUX_V19_TRACKED_CHECKOUT_RECORDED_SCOPE;
+  }
   if (action === AMUX_V4_FIRST_DRAFT_SAVED_ACTION &&
       targetType === AMUX_V4_FIRST_DRAFT_SAVED_TARGET) {
     return AMUX_V4_FIRST_DRAFT_SAVED_SCOPE;
@@ -235,6 +269,27 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
        action === AMUX_V4_UNIT_EXPIRE_ACTION)) {
     return AMUX_V4_UNIT_HOUSEKEEPING_SCOPE;
   }
+  if (targetType === AMUX_V4_UNIT_DECISION_TARGET &&
+      (action === "amux.v4.unit.prepare" ||
+       action === "amux.v4.unit.consume")) {
+    return AMUX_V19_UNIT_REGISTRATION_SCOPE;
+  }
+  if (action === "amux.v4.portfolio.assessment.approve" &&
+      targetType === "AmuxPortfolioAssessment") {
+    return AMUX_V19_PORTFOLIO_ASSESSMENT_SCOPE;
+  }
+  if (action === "amux.v4.portfolio.score.confirm" &&
+      targetType === "AmuxPortfolioScoreSnapshot") {
+    return AMUX_V19_PORTFOLIO_SCORE_SCOPE;
+  }
+  if (action === AMUX_V19_SYSTEM_REGISTRATION_ACTION &&
+      targetType === AMUX_V19_SYSTEM_REGISTRATION_TARGET) {
+    return AMUX_V19_SYSTEM_REGISTRATION_SCOPE;
+  }
+  if (action === "amux.v20.registration.refuse" &&
+      targetType === "AmuxIdeaRegistrationRefusal") {
+    return AMUX_V19_REGISTRATION_REFUSAL_SCOPE;
+  }
   return null;
 };
 
@@ -245,7 +300,10 @@ export const amuxSessionIntakeSystemAuditScope = (
   action === AMUX_SESSION_IDEA_SUBMITTED_ACTION &&
   targetType === AMUX_SESSION_IDEA_SUBMITTED_TARGET
     ? AMUX_SESSION_IDEA_SUBMITTED_SCOPE
-    : null;
+    : action === AMUX_SESSION_ANALYSIS_RESERVED_ACTION &&
+        targetType === AMUX_SESSION_ANALYSIS_RESERVED_TARGET
+      ? AMUX_SESSION_ANALYSIS_RESERVED_SCOPE
+      : null;
 
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
@@ -397,7 +455,8 @@ export type AmuxDecisionMakerSystemAuditActor =
 
 /**
  * The marketing generator writes only the LLM cost ledger's five actions, each
- * about one ledger row (docs/policy/marketing-automation.md §5). Declared at the end of the
+ * about one ledger row (docs/policy/marketing-automation.md §5), and its own recorded report
+ * (S3f), about one report row. Declared at the end of the
  * file and joined into `systemAuditActionAllowed()` on its existing first line,
  * so no access above it moves.
  */
@@ -411,5 +470,6 @@ const MARKETING_GENERATOR_AUDIT_ACTIONS: readonly string[] = [
 function marketingGeneratorAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
   return actor !== "marketing-generator" ||
     (typeof action === "string" && MARKETING_GENERATOR_AUDIT_ACTIONS.includes(action) &&
-      targetType === "MarketingLlmCall");
+      targetType === "MarketingLlmCall") ||
+    (action === "marketing_report.generator_recorded" && targetType === "MarketingReport");
 }

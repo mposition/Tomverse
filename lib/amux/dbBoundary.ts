@@ -344,6 +344,64 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
+  // Stage S2's internal routes for the bridge and the broker
+  // (app/api/internal/amux/decision-maker/**): each is setup + its one store
+  // operation at its largest, with an integrity key + fence, so a ceiling
+  // below it refuses every such call and one above it would let a statement
+  // nobody counted run inside the budget. All are within
+  // docs/policy/amux-decision-maker.md §9's 12.
+  // The keyed assignment (the request, the key registry, then the ledger's
+  // assignment: lock, state, the router's audit 4, the event: 9, pinned by
+  // tests/amuxDecisionMakerBody.test.mjs).
+  decisionMakerAssignment: {
+    operation: "decision_maker_assignment",
+    prismaCallCeiling: 11,
+    isolation: "mutation",
+  },
+  // A discarded assignment (lock, state, the router's audit 4, the event: 7,
+  // pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerAssignmentDiscard: {
+    operation: "decision_maker_assignment_discard",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // A transmission intent (lock, state, the switches, the instance's audit 4,
+  // the event: 8, pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerTransmitIntent: {
+    operation: "decision_maker_transmit_intent",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // A transmission receipt or unknown (lock, state, the instance's audit 4,
+  // the event: 7, pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerTransmitOutcome: {
+    operation: "decision_maker_transmit_outcome",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // A DM output accepted as the request's result (the request, then the
+  // ledger's submission: lock, state, the switches, the instance's audit 4,
+  // the event; then its detail and bodies: 10, pinned by
+  // tests/amuxDecisionMakerBody.test.mjs).
+  decisionMakerResultSubmission: {
+    operation: "decision_maker_result_submission",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // §9's lookup of a (request, result digest) pair: the state read (1, pinned
+  // by tests/amuxDecisionMakerRequest.test.mjs). It writes nothing.
+  decisionMakerResultLookupRead: {
+    operation: "decision_maker_result_lookup_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // §9's result_unknown (lock, state, the instance's audit 4, the event: 7,
+  // pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerResultUnknown: {
+    operation: "decision_maker_result_unknown",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // Stage S2's judgment route: setup + a person's judgment at its largest
   // (an edited confirmation with an integrity key: the audit chain lock, the
   // request state, the switches, the proposal, the administrator audit's 4,

@@ -196,12 +196,35 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // xid comparison. Neither repair adds a commit-deadline mechanism.
   "20261016050000_amux_budget_setting_xid_epoch",
   "20261016050100_amux_budget_window_xid_epoch",
+  // amux-intake v20: durable final-Guard refusal evidence and operator wait
+  // metadata; it adds no commit-deadline marker, trigger or classifier.
+  "20261016060000_amux_v20_registration_refusal",
+  // amux-intake v19.5: completion receipt, scoped system audit evidence,
+  // closed whole-plan refusals and inert backlog registration. These add no
+  // commit-deadline marker, trigger or classifier.
+  "20261016070000_amux_v19_system_registration_receipt",
+  "20261016070100_amux_v19_unit_system_audit",
+  "20261016070200_amux_v19_portfolio_assessment_system_audit",
+  "20261016070300_amux_v19_portfolio_score_system_audit",
+  "20261016070400_amux_v19_plan_refusal_codes",
+  "20261016070500_amux_v19_system_registration_refusal",
+  // v20 Task snapshots bind proposed/final grades; the following repair lets
+  // the deferred v4 consistency check accept the same scoped system audit.
+  // Neither changes the commit-deadline mechanism.
+  "20261016070600_amux_v20_work_item_grade_snapshot",
+  "20261016070700_amux_v19_registration_consistency_system_audit",
   // Orchestration v52: audited execution-grade revision only, with no
   // commit-deadline marker, trigger, guard or classifier change.
   "20261016090000_amux_v52_grade_escalation_guard",
   // Orchestration v52: the immutable review receipt table and constraints use
   // the existing mutation boundary without changing commit-deadline behavior.
   "20261016130000_amux_v52_review_record",
+  // Intake v19 direct-read checkout evidence is append-only and audit-bound;
+  // it adds no commit-deadline marker, trigger or classifier change.
+  "20261017000000_amux_v19_tracked_checkout_evidence",
+  // Intake v19 session analysis queue reservation is append-only and bound to
+  // the submission transaction; it adds no commit-deadline mechanism.
+  "20261017010000_amux_v19_session_analysis_reservation",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -446,16 +469,23 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // The analysis admission routes predate A09 and own their explicit
-  // reconciliation contracts; the commit-deadline boundary still governs
-  // orchestration task execution.
+  // Analysis admission and the v19 stop snapshot own bounded read-only
+  // transactions; the commit-deadline boundary still governs task execution.
   assert.deepEqual(direct, [
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
+    "app/api/internal/amux/v19/analysis-stop/route.ts",
     "app/api/internal/amux/v22/execution/result/route.ts",
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
   ]);
+  const stopPoll = withoutComments(read(
+    "app/api/internal/amux/v19/analysis-stop/route.ts"));
+  assert.ok(stopPoll.indexOf("isAmuxV4AnalysisAgentAuthorized") <
+    stopPoll.indexOf("prisma.$transaction"));
+  assert.ok(stopPoll.indexOf('process.env[READ_ENV] !== "enabled"') <
+    stopPoll.indexOf("prisma.$transaction"));
+  assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   // Intake v15 opens only the code latches. The independent runtime write
   // and receipt-read switches still fail closed before a transaction opens.
   // Both transaction bounds remain independent of execution commit deadlines.

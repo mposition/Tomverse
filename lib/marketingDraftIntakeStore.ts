@@ -19,8 +19,6 @@
 
 import "server-only";
 
-import { createHash } from "node:crypto";
-
 import { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
@@ -30,17 +28,19 @@ import {
   resolveMarketingAutomationAccess,
   type ReadResult,
 } from "@/lib/marketingAutomationAccess";
-import type {
-  MarketingChannel as MarketingChannelName,
-  MarketingFactSnapshot,
-} from "@/lib/marketingAutomationSchema";
+import type { MarketingChannel as MarketingChannelName } from "@/lib/marketingAutomationSchema";
+import {
+  MARKETING_LLM_MONTHLY_CAP_ENV,
+  parseMarketingLlmMonthlyCap,
+} from "@/lib/marketingLlmBudgetCore";
+import { consumeMarketingLlmCallsForSubmission } from "@/lib/marketingLlmBudgetStore";
 import {
   marketingDraftProvenanceDigest,
   marketingGeneratorDraftIntakeDigest,
   marketingGeneratorDraftLogicalKey,
   type MarketingGeneratorDraft,
 } from "@/lib/marketingDraftIntakeCore";
-import { resolveMarketingFacts } from "@/lib/marketingFactResolution";
+import { resolveMarketingFactsWithSnapshot } from "@/lib/marketingFactResolution";
 import { guardDraft } from "@/lib/marketingGuardCore";
 import { resolveMarketingGuardContext } from "@/lib/marketingGuardContext";
 import {
@@ -58,20 +58,6 @@ export const MARKETING_S3_ACTIONS = {
 
 /** The renderer that turned a generator draft into an envelope. */
 export const MARKETING_GENERATOR_RENDERER_VERSION = "generator-intake-v1";
-
-/**
- * The snapshot of stored rows a draft rested on. Empty, because S3a admits
- * only drafts that rest on none: no claim, no asset. A draft with either needs
- * the rows its facts were read from, and recording them is S3a2's -- until
- * then such a draft is refused rather than stored with a snapshot that says
- * nothing was read.
- */
-const EMPTY_FACT_SNAPSHOT: MarketingFactSnapshot = {
-  priceRows: [],
-  catalogue: null,
-  modelRegistryRows: [],
-  evidenceDigests: [],
-};
 
 /**
  * The most one intake transaction may take, measured by statement count in
@@ -108,7 +94,7 @@ const unreadable: ReadResult<never> = { ok: false };
  * agent foundation's timeout rule. Statement and idle bounds are shorter, so
  * both stay armed.
  */
-async function boundByDeadline(
+export async function boundMarketingGeneratorWriteByDeadline(
   tx: MarketingTransaction,
   deadlineAt: Date,
 ): Promise<{ readonly now: Date } | { readonly refused: string }> {
@@ -147,8 +133,8 @@ async function boundByDeadline(
   return { now: armedRow.now };
 }
 
-/** Statement and idle bounds, set before the first statement that can wait. */
-async function boundStatements(tx: MarketingTransaction): Promise<void> {
+/** Statement and idle bounds, set before the first statement that can wait. Shared with the report writer. */
+export async function boundMarketingGeneratorStatements(tx: MarketingTransaction): Promise<void> {
   await tx.$queryRaw(
     Prisma.sql`SELECT set_config('statement_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true)`,
   );
@@ -169,7 +155,14 @@ export type MarketingDraftIntakeReaders = {
 };
 
 const BUILD_READERS: MarketingDraftIntakeReaders = {
-  llmGenerationBudgetAvailable: async () => unreadable,
+  // The budget is the cost ledger's (S3c): every call was reserved against the
+  // monthly cap before it ran, and the intake consumes the calls it names. What
+  // the intake asks is only that the cap can be read; an unreadable cap is
+  // unknown, and unknown refuses.
+  llmGenerationBudgetAvailable: async () =>
+    parseMarketingLlmMonthlyCap(process.env[MARKETING_LLM_MONTHLY_CAP_ENV]) === null
+      ? unreadable
+      : { ok: true, value: true },
   priceFallbackAlertReady: async () => ({ ok: true, value: MARKETING_PRICE_FALLBACK_ALERT_READY }),
 };
 
@@ -231,13 +224,16 @@ export async function intakeMarketingGeneratorDraft(
     readonly generatorRunId: string;
     readonly submissionId: string;
     readonly provenance: string;
+    /** The submission's digest (`marketingDraftSubmissionDigest`), the bytes its signature covers. */
+    readonly submissionDigest: string;
+    readonly llmCallRequestKeys: readonly string[];
     readonly deadlineAt: Date;
     readonly draft: MarketingGeneratorDraft;
     readonly killSwitchValue: string | undefined;
   },
   readers: MarketingDraftIntakeReaders = BUILD_READERS,
 ): Promise<MarketingDraftIntakeOutcome> {
-  await boundStatements(tx);
+  await boundMarketingGeneratorStatements(tx);
   // First, before any read an answer rests on.
   await takeAuditChainLock(tx);
 
@@ -251,9 +247,8 @@ export async function intakeMarketingGeneratorDraft(
     logicalDraftId: draft.logicalDraftId,
   });
   const intakeDigest = marketingGeneratorDraftIntakeDigest({
-    generatorRunId: input.generatorRunId,
-    submissionId: input.submissionId,
-    draft,
+    submissionDigest: input.submissionDigest,
+    logicalDraftId: draft.logicalDraftId,
   });
   const existing = await tx.marketingPost.findUnique({
     where: { logicalKey },
@@ -283,16 +278,12 @@ export async function intakeMarketingGeneratorDraft(
   // that has to work after the switch, the budget or the kill switch has
   // closed -- answering `refused` there would say the draft was never taken
   // when it was. The gates decide whether a *new* draft is written.
-  const bounded = await boundByDeadline(tx, input.deadlineAt);
+  const bounded = await boundMarketingGeneratorWriteByDeadline(tx, input.deadlineAt);
   if ("refused" in bounded) return { status: "refused", reasons: [bounded.refused] };
   const now = bounded.now;
 
   const decision = await draftIntakeDecision(tx, input.killSwitchValue, readers);
   if (!decision.enabled) return { status: "refused", reasons: decision.reasons };
-
-  if (draft.claimIds.length > 0 || draft.assets.length > 0) {
-    return { status: "refused", reasons: ["intake_facts_snapshot_not_available"] };
-  }
 
   const channel = await tx.marketingChannel.findUnique({
     where: { id: draft.channelId },
@@ -306,20 +297,22 @@ export async function intakeMarketingGeneratorDraft(
     accountSlug: channel.accountSlug,
     locale: draft.locale,
     renderedText: draft.renderedText,
-    claimIds: [] as string[],
-    assets: [] as { assetId: string; altKey: string }[],
+    claimIds: [...draft.claimIds],
+    assets: draft.assets.map((asset) => ({ assetId: asset.assetId, altKey: asset.altKey })),
     finalUrl: null,
     scheduledAt: null,
     disclosureFlags: [...draft.disclosureFlags],
   };
-  const snapshotDigest = marketingEnvelopeFactSnapshotDigest(EMPTY_FACT_SNAPSHOT);
-  const facts = await resolveMarketingFacts(tx, {
-    claimIds: [],
-    assetIds: [],
+  const assetIds = envelope.assets.map((asset) => asset.assetId);
+  // S3a2: the facts, their clock and the rows they rest on are read in this
+  // transaction, and the snapshot stored with the post is the one the Guard's
+  // decision is bound to.
+  const { facts, factSnapshot } = await resolveMarketingFactsWithSnapshot(tx, {
+    claimIds: envelope.claimIds,
+    assetIds,
     channelId: draft.channelId,
     channel: channelName,
     locale: draft.locale,
-    factSnapshotDigest: snapshotDigest,
   });
   const verdict = guardDraft({
     draft: {
@@ -327,8 +320,8 @@ export async function intakeMarketingGeneratorDraft(
       locale: draft.locale,
       channel: channelName,
       channelId: draft.channelId,
-      claimIds: [],
-      assetIds: [],
+      claimIds: envelope.claimIds,
+      assetIds,
     },
     facts,
     // New copy: S3 binds no template, so the Guard has none to offer.
@@ -340,6 +333,15 @@ export async function intakeMarketingGeneratorDraft(
     return { status: "refused", reasons: ["intake_unexpected_autonomous"] };
   }
 
+  // The first write: the calls this submission names become this
+  // submission's. A refusal here leaves nothing behind.
+  const consumed = await consumeMarketingLlmCallsForSubmission(tx, {
+    generatorRunId: input.generatorRunId,
+    requestKeys: input.llmCallRequestKeys,
+    submissionDigest: input.submissionDigest,
+  });
+  if (!consumed.ok) return { status: "refused", reasons: [consumed.code] };
+
   const created = await createMarketingPost(tx, {
     channelId: draft.channelId,
     locale: draft.locale,
@@ -350,11 +352,11 @@ export async function intakeMarketingGeneratorDraft(
     rendererVersion: MARKETING_GENERATOR_RENDERER_VERSION,
     templateId: null,
     templateDigest: null,
-    claimIds: [],
-    assetIds: [],
+    claimIds: envelope.claimIds,
+    assetIds,
     claimRegistryVersion: facts.claimRegistryVersion,
     assetRegistryVersion: facts.assetRegistryVersion,
-    factSnapshot: EMPTY_FACT_SNAPSHOT,
+    factSnapshot,
     decision: verdict,
     draftedAt: now,
   });
@@ -403,6 +405,9 @@ export async function intakeMarketingGeneratorDraft(
       submissionId: input.submissionId,
       logicalDraftId: draft.logicalDraftId,
       intakeDigest,
+      submissionDigest: input.submissionDigest,
+      consumerDigest: consumed.consumerDigest,
+      llmCallRequestKeys: [...input.llmCallRequestKeys],
       provenanceDigest: marketingDraftProvenanceDigest(input.provenance),
       verdict: verdict.verdict,
       codes: "codes" in verdict ? [...verdict.codes] : [],
@@ -412,22 +417,3 @@ export async function intakeMarketingGeneratorDraft(
 
   return { status: rejected ? "rejected" : "queued", postId: created.id, existing: false };
 }
-
-/** The store's own digest of a fact snapshot: sorted keys, SHA-256. */
-function marketingEnvelopeFactSnapshotDigest(snapshot: MarketingFactSnapshot): string {
-  return createHash("sha256")
-    .update(JSON.stringify(canonical(snapshot)), "utf8")
-    .digest("hex");
-}
-
-const canonical = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([key, inner]) => [key, canonical(inner)]),
-    );
-  }
-  return value;
-};

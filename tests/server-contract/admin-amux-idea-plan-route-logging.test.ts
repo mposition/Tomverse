@@ -108,6 +108,9 @@ test("a 201 logs nothing, and every other answer logs one refusal line with its 
     ["unit not found", () => { world.approve = async () => { throw new FakeCodeError("not_found"); }; }, 404, "not_found"],
     ["unit forbidden", () => { world.approve = async () => { throw new FakeCodeError("forbidden"); }; }, 403, "forbidden"],
     ["unit not ready", () => { world.approve = async () => { throw new FakeCodeError("not_ready"); }; }, 409, "not_ready"],
+    ["v20 task split refusal", () => { world.approve = async () => {
+      throw new FakeCodeError("task_expected_paths_mixed");
+    }; }, 409, "task_expected_paths_mixed"],
     ["unit unavailable", () => { world.approve = async () => { throw new FakeCodeError("integrity_unavailable"); }; }, 503, "integrity_unavailable"],
   ];
   for (const [label, arrange, status, code] of cases) {

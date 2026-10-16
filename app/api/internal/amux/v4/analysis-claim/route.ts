@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 
 const CLAIM_CODE_LATCH = true;
 const CLAIM_WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE";
+const STOP_POLL_READ_ENV = "TOMVERSE_AMUX_V19_ANALYSIS_STOP_POLL_READ";
 // Read-back is independently gated so turning off writes cannot prevent an
 // operator from reconciling a lost claim response. It never returns a prompt.
 const CLAIM_RECEIPT_READ_CODE_LATCH = true;
@@ -23,7 +24,8 @@ const bodySchema = z.object({ requestId: id, previewId: id }).strict();
 
 /** The v15 code latch still requires verified local isolation, exact owner
  * transfer, live model eligibility, bounded costs, the failure latch, both
- * environment switches and outcome-unknown read-back before a model call. */
+ * environment switches, v19 stop polling and outcome-unknown read-back
+ * before a model call. */
 export async function POST(request: Request): Promise<Response> {
   if (!isAmuxV4AnalysisAgentAuthorized(request,
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
@@ -32,7 +34,8 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (!CLAIM_CODE_LATCH || process.env[CLAIM_WRITE_ENV] !== "enabled" ||
       !CLAIM_RECEIPT_READ_CODE_LATCH ||
-      process.env[CLAIM_RECEIPT_READ_ENV] !== "enabled") {
+      process.env[CLAIM_RECEIPT_READ_ENV] !== "enabled" ||
+      process.env[STOP_POLL_READ_ENV] !== "enabled") {
     return amuxJsonNoStore({ available: false, reason: "analysis_claim_disabled" }, 409);
   }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==

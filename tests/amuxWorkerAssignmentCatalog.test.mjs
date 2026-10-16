@@ -102,6 +102,31 @@ test("R2c ships with the derived assignment catalog latched off", () => {
   assert.equal(amuxWorkerDerivedCatalogAssignmentOpen(), false);
 });
 
+// The catalog variable parser, which the variable path (latch off) uses until
+// R2e deletes it. These rules were pinned by the routing snapshot DB tests
+// before R2c moved those to the derived catalog.
+test("the catalog variable parser: missing or any bad entry means no catalog; providers and roles normalised", () => {
+  delete process.env[LEGACY_ENV];
+  assert.equal(getConfiguredAmuxWorkerCatalog(), null);
+  for (const workerName of ["codex-", " codex-a ", "a".repeat(121)]) {
+    process.env[LEGACY_ENV] = JSON.stringify([{ worker_name: workerName, provider: "codex", routing_roles: ["migration"] }]);
+    assert.equal(getConfiguredAmuxWorkerCatalog(), null, workerName);
+  }
+  process.env[LEGACY_ENV] = JSON.stringify([
+    { worker_name: "z-migration", provider: "DEVIN", routing_roles: ["migration", "multi_file", "migration"] },
+    { worker_name: "a-implementation", provider: "CODEX", model: "explicit-model", routing_roles: ["implementation"] },
+  ]);
+  const catalog = getConfiguredAmuxWorkerCatalog();
+  assert.deepEqual(catalog?.map((worker) => worker.worker_name), ["a-implementation", "z-migration"]);
+  assert.equal(catalog?.[0]?.provider, "codex");
+  assert.equal(catalog?.[0]?.model, "explicit-model");
+  assert.equal(catalog?.[1]?.provider, "devin");
+  assert.deepEqual(catalog?.[1]?.routing_roles, ["migration", "multi_file"]);
+  for (const worker of catalog ?? []) {
+    assert.deepEqual([worker.running, worker.status, worker.dispatch_ready], [false, "stopped", false]);
+  }
+});
+
 test("latched off, the catalog is the variables and nothing is sent", async () => {
   useProductionVariables();
   const client = fakeClient(statement());

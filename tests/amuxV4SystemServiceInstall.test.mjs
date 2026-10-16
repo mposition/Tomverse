@@ -16,7 +16,7 @@ test("system manager runs both fixed probe and analysis as tommy with existing i
   assert.equal(createHash("sha256").update(unit).digest("hex"), SYSTEM_UNIT_SHA256);
   for (const line of ["User=tommy", "Group=tommy", "NoNewPrivileges=true",
     "PrivateTmp=true", "ProtectSystem=strict", "ProtectHome=read-only",
-    "TimeoutStartSec=650s", "KillMode=control-group", "UMask=0077"]) {
+    "TimeoutStartSec=infinity", "KillMode=control-group", "UMask=0077"]) {
     assert.ok(unit.split("\n").includes(line));
   }
   assert.match(unit, /ConditionPathExists=!.*analysis-outcome-unknown\.halt/);

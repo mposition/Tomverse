@@ -682,6 +682,51 @@ const REGISTRY = {
     reason:
       "An AMUX idea is stored either by the existing owner Admin path or by the v19 session path under the current owner-approved operating scope. The origin selects distinct human-versus-system audit evidence and cannot be relabelled after insert.",
   },
+  AmuxIdeaSessionAnalysisReservation_status_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_STATUSES",
+    reason:
+      "A v19 session reservation is an append-only queue identity. Later dispatch, stop and cost evidence use separate rows rather than relabelling this receipt.",
+  },
+  AmuxIdeaSessionAnalysisReservation_provider_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_PROVIDERS",
+    reason:
+      "The queue receipt copies the provider from the immutable owner-approved operating scope. Its trigger requires an exact match, and this list keeps malformed standalone rows out of the queue.",
+  },
+  AmuxIdeaSessionAnalysisReservation_reasoning_effort_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_REASONING_EFFORTS",
+    reason:
+      "The queue receipt copies the reasoning effort from the immutable owner-approved operating scope. Its trigger requires an exact match, and this list keeps malformed standalone rows out of the queue.",
+  },
+  AmuxIdeaRegistrationRefusal_attempt_kind_check: {
+    owner: "list",
+    module: "lib/amux/ideaRegistrationRefusalCore.ts",
+    list: "AMUX_V20_REGISTRATION_REFUSAL_ATTEMPT_KINDS",
+    reason:
+      "The durable v20 refusal identifies the prepare, consume or whole-plan boundary that rolled back before the separate refusal transaction recorded it.",
+  },
+  AmuxIdeaRegistrationRefusal_code_check: {
+    owner: "list",
+    module: "lib/amux/ideaRegistrationRefusalCore.ts",
+    list: "AMUX_REGISTRATION_REFUSAL_CODES",
+    reason:
+      "The deterministic v20 Task Guard and v19 whole-plan refusal codes are shared with the system registration core and Admin API; arbitrary text and expected paths never enter the record.",
+  },
+  AmuxIdeaRegistrationRefusal_proposed_grade_check: {
+    owner: "type_only",
+    reason:
+      "AmuxExecutionGrade in lib/amux/executionGradeCore.ts is the routine, advanced or frontier union. NULL preserves an invalid or absent model proposal without inventing a grade.",
+  },
+  AmuxIdeaRegistrationRefusal_final_grade_check: {
+    owner: "type_only",
+    reason:
+      "The final deterministic grade uses the same AmuxExecutionGrade union. NULL means the Guard could not derive a valid final grade before refusing the proposal.",
+  },
   AmuxIdeaSourcePlanRevision_state_check: {
     owner: "database",
     reason:
