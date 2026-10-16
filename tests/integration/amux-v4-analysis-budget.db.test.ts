@@ -73,6 +73,12 @@ if (!url || !["postgres:", "postgresql:"].includes(url.protocol) ||
   throw new Error("REFUSE: AMUX v4 budget DB test requires one dedicated loopback test database");
 }
 
+// The current analysis prompt asks for chunk schema 5; nodes and cards carry portfolio signals.
+const withSignals = (units: Array<Record<string, unknown>>) => units.map((unit) => unit.kind === "node"
+  ? { ...unit, portfolioSignal: { metrics: { value: 3 }, uncertainty: "low",
+    rationale: "A bounded proposal.", evidenceRefIds: unit.sourceRefIds } }
+  : unit.kind === "card" ? { ...unit, portfolioSignal: { metrics: { impact: 3 }, uncertainty: "low",
+    rationale: "A bounded proposal.", evidenceRefIds: unit.sourceRefIds } } : unit);
 const actorUserId = `synthetic-amux-budget-owner-${randomUUID()}`;
 const actorEmail = "amux-v4-budget-owner@example.test";
 process.env.ADMIN_USER_IDS = actorUserId;
@@ -679,14 +685,14 @@ test("one confirmed first analysis is claimed, locally simulated, saved and read
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
   // Fake local result: no provider CLI or external request occurs in this test.
-  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+  const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "propose", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "One synthetic operator idea was analyzed.",
     remainingScope: null,
-    units: [{ kind: "node", localId: "c0:node-0", level: "initiative",
+    units: withSignals([{ kind: "node", localId: "c0:node-0", level: "initiative",
       parentRef: null, title: "Synthetic initiative",
-      description: "One bounded scope.", sourceRefIds: ["operator_idea"] }],
+      description: "One bounded scope.", sourceRefIds: ["operator_idea"] }]),
   });
   const resultInput = { requestId: randomUUID(), ideaId: claim.ideaId,
     previewId, holdId, leaseGeneration: 1 as const,
@@ -718,6 +724,34 @@ test("one confirmed first analysis is claimed, locally simulated, saved and read
   assert.equal(await prisma.amuxWorkItem.count({ where: {
     sourceSystem: "admin-idea-v4", sourceKey: claim.ideaId,
   } }), 0);
+});
+
+test("a response in an older schema than its prompt asked for is a failed call, not a draft", async () => {
+  // Review finding on amux-intake v20: the current prompt asks for chunk schema
+  // 5, so a response declaring schema 4 cannot skip the expected-path and
+  // no-review rules by being admitted under the older contract. Run inside a
+  // rolled-back transaction so the fixture leaves no claim, failure or hold for
+  // the daily claim limit and the failure streak the later cases depend on.
+  const rollback = new Error("rollback older-schema fixture");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const { claim, previewId, holdId } = await syntheticFirstClaimInTransaction(tx);
+    const rawModelOutput = JSON.stringify({ schemaVersion: 4, previewId,
+      chunkIndex: 0, outcome: "propose", coverageStatus: "complete",
+      continuationKind: null, ownerQuestion: null,
+      coveredScope: "One synthetic operator idea was analyzed.",
+      remainingScope: null,
+      units: withSignals([{ kind: "node", localId: "c0:node-0", level: "initiative",
+        parentRef: null, title: "Synthetic initiative",
+        description: "One bounded scope.", sourceRefIds: ["operator_idea"] }]),
+    });
+    const saved = await commitAmuxIdeaAnalysisResult(tx, {
+      requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
+      leaseGeneration: 1 as const, outcome: "verified_success" as const, rawModelOutput,
+      inputTokens: 100, outputTokens: 50, keys });
+    assert.equal(saved.state, "provider_failed");
+    assert.equal(await tx.amuxIdeaDraftUnit.count({ where: { ideaId: claim.ideaId } }), 0);
+    throw rollback;
+  }, { timeout: 30_000 }), (error: unknown) => error === rollback);
 });
 
 async function syntheticFirstClaim() {
@@ -945,7 +979,7 @@ test("insufficient evidence consumes the full reported-unknown reservation", asy
 
 test("a usage-unverified receipt forbids zero release and consumes the full reservation", async () => {
   const { claim, previewId, holdId } = await syntheticFirstClaim();
-  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+  const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "reject", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "The synthetic idea was reviewed.", remainingScope: null,
@@ -1126,12 +1160,12 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
     duplicateCandidateRefs: [], taskRole: null, executionGrade: null,
     executionBrief: null, sourceRefIds: ["operator_idea"],
   }));
-  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+  const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "propose", coverageStatus: "more",
     continuationKind: "output", ownerQuestion: null,
     coveredScope: "Eight independently reviewable stories were proposed.",
     remainingScope: "At least one further story remains from the same idea.",
-    units: [...nodes, ...cards] });
+    units: withSignals([...nodes, ...cards]) });
   const saved = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
       ideaId: claim.ideaId, previewId, holdId, leaseGeneration: 1,
@@ -1206,12 +1240,12 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
     duplicateCandidateRefs: [], taskRole: null, executionGrade: null,
     executionBrief: null, sourceRefIds: ["operator_idea"],
   }));
-  const secondOutput = JSON.stringify({ schemaVersion: 2, previewId: secondPreviewId,
+  const secondOutput = JSON.stringify({ schemaVersion: 5, previewId: secondPreviewId,
     chunkIndex: 1, outcome: "propose", coverageStatus: "more",
     continuationKind: "output", ownerQuestion: null,
     coveredScope: "Eight more independent stories were proposed.",
     remainingScope: "A seventeenth story remains from the same idea.",
-    units: nextEight });
+    units: withSignals(nextEight) });
   const secondResult = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
       ideaId: claim.ideaId, previewId: secondPreviewId,
@@ -1243,12 +1277,12 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
   const thirdClaim = await prisma.$transaction((tx) =>
     commitAmuxIdeaOnlyAnalysisClaim(tx,
       { requestId: randomUUID(), previewId: thirdPreviewId, keys }));
-  const finalOutput = JSON.stringify({ schemaVersion: 2, previewId: thirdPreviewId,
+  const finalOutput = JSON.stringify({ schemaVersion: 5, previewId: thirdPreviewId,
     chunkIndex: 2, outcome: "propose", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "The seventeenth story was proposed.",
-    remainingScope: null, units: [{ ...nextEight[0], localId: "c2:card-0",
-      title: "Story 17" }] });
+    remainingScope: null, units: withSignals([{ ...nextEight[0], localId: "c2:card-0",
+      title: "Story 17" }]) });
   const finished = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
       ideaId: claim.ideaId, previewId: thirdPreviewId,
@@ -1290,7 +1324,7 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
 test("a bounded owner question is saved as a pause, not a provider failure", async () => {
   const { claim, previewId, holdId } = await syntheticFirstClaim();
   const question = "Which existing Feature should this story belong to?";
-  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+  const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "needs_information",
     coverageStatus: "needs_owner_input", continuationKind: "input",
     ownerQuestion: question, coveredScope: "The idea was read; hierarchy is unresolved.",
@@ -1393,13 +1427,13 @@ test("an unresolved in-flight result blocks a second Agent claim", async () => {
     commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId: nextPreviewId, keys })),
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
-  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+  const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "propose", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "One synthetic idea was analyzed.", remainingScope: null,
-    units: [{ kind: "node", localId: "c0:node-0", level: "initiative",
+    units: withSignals([{ kind: "node", localId: "c0:node-0", level: "initiative",
       parentRef: null, title: "Synthetic initiative",
-      description: "A bounded result.", sourceRefIds: ["operator_idea"] }],
+      description: "A bounded result.", sourceRefIds: ["operator_idea"] }]),
   });
   const settled = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
@@ -1609,10 +1643,10 @@ test("a complete first result saves independent encrypted units and closes only 
     executionGrade: null, executionBrief: null, sourceRefIds: ["operator_idea"],
   };
   const result = {
-    schemaVersion: 2, previewId, chunkIndex: 0,
+    schemaVersion: 5, previewId, chunkIndex: 0,
     outcome: "propose", coverageStatus: "complete", continuationKind: null,
     ownerQuestion: null, coveredScope: "The operator idea was analyzed.",
-    remainingScope: null, units: [...nodes, card],
+    remainingScope: null, units: withSignals([...nodes, card]),
   };
   const input = { ideaId, previewId, holdId, leaseGeneration: 1,
     rawModelOutput: JSON.stringify(result), keys };
@@ -1623,7 +1657,7 @@ test("a complete first result saves independent encrypted units and closes only 
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxFirstIdeaAnalysisDraft(tx, { ...input,
       rawModelOutput: JSON.stringify({ ...result,
-        units: [...nodes, { ...card, sourceRefIds: ["unapproved_source"] }] }) })),
+        units: withSignals([...nodes, { ...card, sourceRefIds: ["unapproved_source"] }]) }) })),
   (error: unknown) => error instanceof AmuxFirstAnalysisDraftError &&
     error.code === "invalid_result");
   await assert.rejects(prisma.$transaction(async (tx) => {
@@ -1753,7 +1787,7 @@ test("a complete rejection closes analysis without creating proposal cards", asy
   const result = await prisma.$transaction((tx) => commitAmuxFirstIdeaAnalysisDraft(tx, {
     ideaId, previewId, holdId, leaseGeneration: 1, keys,
     rawModelOutput: JSON.stringify({
-      schemaVersion: 2, previewId, chunkIndex: 0,
+      schemaVersion: 5, previewId, chunkIndex: 0,
       outcome: "reject", coverageStatus: "complete", continuationKind: null,
       ownerQuestion: null, coveredScope: "The idea cannot yield an actionable card.",
       remainingScope: null, units: [],
@@ -1899,3 +1933,4 @@ test("a saved USD 1000 setting immediately admits a real reservation that the ol
   assert.equal(await prisma.amuxIdeaAnalysisBudgetSetting.count(), 0);
   assert.equal(await prisma.amuxIdeaAnalysisBudgetHold.count({ where: { id: holdId } }), 0);
 });
+
