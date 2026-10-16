@@ -1307,6 +1307,11 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   switch가 이미 기록된 요청의 답을 바꾸지 않습니다. 새 쓰기만 마감·kill switch·상한·pin을 읽으며, dispatch 영수증의
   `firstConsumption`은 한 번만 `true`입니다. action별 statement 수는 시험이 고정합니다. route·만료 sweep·legal hold는
   S3c3입니다.
+- **S3c3a(생성기 예산 route)**: `app/api/internal/marketing-llm-budget/route.ts`, `lib/marketingLlmBudgetRequest.ts`,
+  `tests/integration/marketing-llm-budget-route.db.test.ts`. 생성기 bearer secret, 4KB 상한, action별 strict schema, 그리고
+  **budget HMAC이 action·deadline·모든 필드를 덮습니다** — 가로챈 요청을 더 늦은 deadline이나 다른 call의 필드로 다시
+  보낼 수 없습니다. action마다 트랜잭션 하나이며, 트랜잭션 안의 실패는 전부 되돌려지므로 같은 요청을 다시 보내면
+  커밋된 것을 읽어 옵니다. 빌드에는 pin이 없어 모든 예약이 거절됩니다.
 
 # 엔지니어링 Agent
 
