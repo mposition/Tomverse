@@ -147,6 +147,15 @@ test("v52 treats missing, malformed and invalid path inventories as unavailable"
   assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
     { run: async () => { throw new Error("git failed"); } }),
     { ok: false, reason: "changed_paths_unavailable" });
+  const tooMany = Array.from({ length: 4_097 }, (_, index) =>
+    `${index.toString(36)}\0`).join("");
+  assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
+    { run: async (_binary, args) => ({ stdout: Buffer.from(
+      args.slice(6)[0] === "rev-parse" ?
+        args.slice(6)[1] === "--show-toplevel" ? "/repo" : BASE :
+        args.slice(6)[0] === "diff" ? tooMany : "") }),
+      realpath: async (path) => path }),
+    { ok: false, reason: "changed_paths_unavailable" });
 });
 
 test("v52 discards a contract attempt only from its original clean base", async () => {
