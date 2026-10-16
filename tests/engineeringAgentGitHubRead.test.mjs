@@ -234,8 +234,11 @@ const pullFetch = (overrides = {}) => {
   const routes = {
     "/pulls/42": (accept) => accept === "application/vnd.github.diff" ? diff : {
       number: 42, state: "open", merged: false, merge_commit_sha: null, merged_at: null, merged_by: null,
+      changed_files: 1,
       base: { ref: "develop", sha: "2".repeat(40) }, head: { sha: HEAD }, ...overrides.pull,
     },
+    "/pulls/42/files": () => overrides.files ??
+      [{ filename: "components/chat/Ordinary.tsx", status: "modified" }],
     "/pulls/42/reviews": () => overrides.reviews ?? [
       { id: 9, user: { id: 60078951, login: "mposition" }, state: "APPROVED", commit_id: HEAD, submitted_at: "2026-10-15T05:30:00Z" },
       { id: 10, user: { id: 60078951, login: "mposition" }, state: "PENDING", commit_id: HEAD },
@@ -290,9 +293,23 @@ test("a merge is read as its commit, time and merger kind; a merge without them 
   assert.equal(observed.mergeCommitSha, "3".repeat(40));
   assert.equal(observed.mergedAt.toISOString(), "2026-10-15T06:00:00.000Z");
   assert.equal(observed.mergedByKind, "user");
+  assert.deepEqual(observed.changedFiles, ["components/chat/Ordinary.tsx"]);
   await assert.rejects(
     readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch({ pull: { ...merged, merge_commit_sha: null } }).fetchImpl }),
     (error) => error instanceof EngineeringAgentGitHubReadError && error.code === "invalid_response",
   );
   await assert.rejects(readEngineeringAgentPullObservation(0, { env, fetchImpl: pullFetch().fetchImpl }));
+});
+
+test("merged PR file names are complete and include a rename source", async () => {
+  const merged = { state: "closed", merged: true,
+    merge_commit_sha: "3".repeat(40), merged_at: "2026-10-15T06:00:00Z" };
+  const read = (overrides) => readEngineeringAgentPullObservation(42,
+    { env, fetchImpl: pullFetch({ pull: merged, ...overrides }).fetchImpl });
+  assert.deepEqual((await read({ files: [{ filename: "src/new.ts",
+    previous_filename: "lib/amux/old.ts", status: "renamed" }] })).changedFiles,
+  ["src/new.ts", "lib/amux/old.ts"]);
+  assert.equal((await read({ pull: { ...merged, changed_files: 2 } })).changedFiles, null);
+  assert.equal((await read({ files: [{ filename: "src/new.ts",
+    status: "renamed" }] })).changedFiles, null);
 });

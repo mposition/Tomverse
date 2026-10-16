@@ -137,6 +137,22 @@ export const classifyAmuxExecutionPath = (input: unknown): AmuxExecutionPathClas
     : "ordinary";
 };
 
+export type AmuxV52PathDecision = "pass" | "blocked" | "escalate";
+
+/** A missing inventory is unknown, never an empty inventory. */
+export const decideAmuxV52ChangedPaths = (grade: unknown,
+  changedPaths: unknown): AmuxV52PathDecision => {
+  if (!amuxWorkerRoleForExecutionGrade(grade) ||
+      !Array.isArray(changedPaths)) return "blocked";
+  let contract = false;
+  for (const path of changedPaths) {
+    const kind = classifyAmuxExecutionPath(path);
+    if (kind === "invalid") return "blocked";
+    if (kind === "contract") contract = true;
+  }
+  return contract && grade !== "frontier" ? "escalate" : "pass";
+};
+
 export type AmuxExecutionGradeInput = {
   taskRole: string | null | undefined;
   expectedPaths: readonly unknown[] | null | undefined;

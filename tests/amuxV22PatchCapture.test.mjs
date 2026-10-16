@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { captureAmuxV22Patch, captureAmuxV22PatchBaseline } from
+import { captureAmuxV22Patch, captureAmuxV22PatchBaseline,
+  captureAmuxV52ChangedPaths, discardAmuxV52ContractChanges } from
   "../lib/amux/v22PatchCapture.mjs";
 
 const BASE = "a".repeat(40);
@@ -103,4 +104,66 @@ test("local scanner refuses patch secrets and withholds unsafe file evidence", a
   assert.equal(file.ok, true);
   assert.equal(file.publishReason, "publish_files_secret_or_binary");
   assert.equal(file.publishFiles, undefined);
+});
+
+test("v52 inventories every changed name independently of the publish patch cap", async () => {
+  const names = Array.from({ length: 42 }, (_, index) =>
+    `lib/ordinary-${index}.ts`);
+  names.push("LIB/AMUX/Execution.ts", "docs/policy/new.md");
+  const calls = [];
+  const run = async (_binary, args, options) => {
+    const command = args.slice(6);
+    calls.push({ command, maxBuffer: options.maxBuffer });
+    if (command[0] === "rev-parse") return { stdout: Buffer.from(
+      command[1] === "--show-toplevel" ? "/repo" : BASE) };
+    if (command[0] === "diff") return { stdout: Buffer.from(
+      names.join("\0") + "\0") };
+    if (command[0] === "ls-files") return { stdout: Buffer.from(
+      "new/one.ts\0") };
+    throw new Error("unexpected git command");
+  };
+  const result = await captureAmuxV52ChangedPaths("/repo", BASE,
+    { run, realpath: async (path) => path });
+  assert.equal(result.ok, true);
+  assert.equal(result.files.length, 45);
+  assert.deepEqual(result.contractPaths,
+    ["LIB/AMUX/Execution.ts", "docs/policy/new.md"]);
+  assert.equal(calls.find(({ command }) => command[0] === "diff")
+    .maxBuffer, 32 * 1024);
+});
+
+test("v52 treats missing, malformed and invalid path inventories as unavailable", async () => {
+  const run = async (_binary, args) => {
+    const command = args.slice(6);
+    if (command[0] === "rev-parse") return { stdout: Buffer.from(
+      command[1] === "--show-toplevel" ? "/repo" : BASE) };
+    if (command[0] === "diff") return { stdout: Buffer.from("../escape.ts\0") };
+    if (command[0] === "ls-files") return { stdout: Buffer.alloc(0) };
+    throw new Error("unexpected git command");
+  };
+  assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
+    { run, realpath: async (path) => path }),
+    { ok: false, reason: "invalid_path" });
+  assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
+    { run: async () => { throw new Error("git failed"); } }),
+    { ok: false, reason: "changed_paths_unavailable" });
+});
+
+test("v52 discards a contract attempt only from its original clean base", async () => {
+  const calls = [];
+  const run = async (_binary, args) => {
+    const command = args.slice(6);
+    calls.push(command[0]);
+    if (command[0] === "rev-parse") return { stdout: Buffer.from(
+      command[1] === "--show-toplevel" ? "/repo" : BASE) };
+    if (command[0] === "status") return { stdout: Buffer.alloc(0) };
+    return { stdout: Buffer.alloc(0) };
+  };
+  assert.equal(await discardAmuxV52ContractChanges("/repo", BASE,
+    { run, realpath: async (path) => path }), true);
+  assert.deepEqual(calls, ["rev-parse", "rev-parse", "reset", "clean", "status"]);
+  assert.equal(await discardAmuxV52ContractChanges("/repo", BASE,
+    { run: async (_binary, args) => ({ stdout: Buffer.from(
+      args.slice(6)[1] === "--show-toplevel" ? "/repo" : "b".repeat(40)) }),
+      realpath: async (path) => path }), false);
 });

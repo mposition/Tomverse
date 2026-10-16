@@ -3,6 +3,7 @@ import "server-only";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
+import { decideAmuxV52ChangedPaths } from "@/lib/amux/executionGradeCore";
 import {
   AMUX_DB_BOUNDARIES,
   amuxBoundaryWithAttachment,
@@ -24,7 +25,8 @@ export type AmuxReviewMergeObservedRefusal =
   | "task_not_in_review"
   | "not_a_v22_implement_task"
   | "review_pr_mismatch"
-  | "not_the_latest_attempt";
+  | "not_the_latest_attempt"
+  | "pr_file_state_mismatch";
 
 type TaskRow = {
   id: string;
@@ -35,6 +37,7 @@ type TaskRow = {
   sourceSystem: string | null;
   cardType: string | null;
   taskRole: string | null;
+  executionGrade: string | null;
   reviewPrNumber: number | null;
 };
 
@@ -64,6 +67,7 @@ export async function completeAmuxV22ReviewOnObservedMerge(
     prNumber: number;
     mergeCommitSha: string;
     approvalReviewId: number;
+    changedFiles?: string[] | null;
   },
   attachment?: AmuxAttachment<AmuxReviewMergeObservedFact>,
 ): Promise<
@@ -77,8 +81,10 @@ export async function completeAmuxV22ReviewOnObservedMerge(
   if (!Number.isSafeInteger(input.approvalReviewId) || input.approvalReviewId <= 0) {
     throw new Error("AMUX approval review id is invalid");
   }
+  const boundary = amuxBoundaryWithAttachment(
+    AMUX_DB_BOUNDARIES.reviewMergeObserved, attachment);
   return withAmuxDbBoundary(
-    amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.reviewMergeObserved, attachment),
+    { ...boundary, prismaCallCeiling: boundary.prismaCallCeiling + 2 },
     async (tx, context) => {
       // The audit chain's lock comes before the card's row lock, as in the
       // writers that read the card after taking it; the other order can wait
@@ -86,7 +92,7 @@ export async function completeAmuxV22ReviewOnObservedMerge(
       await takeAuditChainLock(tx);
       const tasks = await tx.$queryRaw<TaskRow[]>`
         SELECT "id", "status", "owner", "revision", "archivedAt", "sourceSystem",
-               "cardType", "taskRole", "reviewPrNumber"
+               "cardType", "taskRole", "executionGrade", "reviewPrNumber"
         FROM "AmuxWorkItem"
         WHERE "id" = ${input.taskId}
         FOR UPDATE
@@ -114,6 +120,29 @@ export async function completeAmuxV22ReviewOnObservedMerge(
           last.toStatus !== "review" || last.v22AssignmentId === null) {
         return { completed: false as const, reason: "not_the_latest_attempt" as const };
       }
+      const assignment = await tx.amuxV22WorkerAssignment.findUnique({
+        where: { id: last.v22AssignmentId },
+        select: { authorizationAuditLogId: true, grade: true },
+      });
+      const authorization = assignment ? await tx.adminAuditLog.findUnique({
+        where: { id: assignment.authorizationAuditLogId },
+        select: { entryHash: true, action: true, targetId: true,
+          metadata: true },
+      }) : null;
+      if (!assignment || !authorization?.entryHash ||
+          authorization.action !== "amux.v22.worker.assigned" ||
+          authorization.targetId !== last.v22AssignmentId)
+        return { completed: false as const,
+          reason: "pr_file_state_mismatch" as const };
+      const metadata = authorization.metadata;
+      const gradeGuard = !!metadata && typeof metadata === "object" &&
+        !Array.isArray(metadata) &&
+        (metadata as Record<string, unknown>).v52GradeRouting === true;
+      if (gradeGuard && (assignment.grade !== task.executionGrade ||
+          decideAmuxV52ChangedPaths(assignment.grade,
+            input.changedFiles) !== "pass"))
+        return { completed: false as const,
+          reason: "pr_file_state_mismatch" as const };
 
       const moved = await tx.amuxWorkItem.updateMany({
         where: { id: task.id, status: "review", owner: null, archivedAt: null, revision: task.revision,

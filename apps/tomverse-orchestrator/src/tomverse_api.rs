@@ -1636,6 +1636,7 @@ mod tests {
             outcome: "blocked",
             invocation_ids: &[],
             read_only_retry: None,
+            changed_paths: None,
         }).unwrap();
         assert_eq!(body["outcome"], "blocked");
         assert_eq!(body["invocation_ids"], serde_json::json!([]));
@@ -1644,6 +1645,23 @@ mod tests {
             serde_json::json!({"settled":true,"taskRevision":4})
         ).unwrap();
         assert!(response.settled);
+    }
+
+    #[test]
+    fn v52_settlement_carries_an_empty_or_complete_path_inventory() {
+        let paths = ["lib/amux/execution.ts".to_owned(), "app/page.tsx".to_owned()];
+        for inventory in [Some(paths.as_slice()), Some([].as_slice()), None] {
+            let body = serde_json::to_value(V22ExecutionSettleRequest {
+                attempt_id: "attempt", worker: "worker", instance_id: "instance",
+                generation: 1, task_revision: 3, outcome: "succeeded",
+                invocation_ids: &["attempt"], read_only_retry: None,
+                changed_paths: inventory,
+            }).unwrap();
+            match inventory {
+                Some(names) => assert_eq!(body["changed_paths"], serde_json::json!(names)),
+                None => assert!(body.get("changed_paths").is_none()),
+            }
+        }
     }
 
     #[test]
@@ -1657,6 +1675,7 @@ mod tests {
             attempt_id: "attempt", worker: "worker", instance_id: "instance",
             generation: 1, task_revision: 3, outcome: "succeeded",
             invocation_ids: &["attempt"], read_only_retry: Some(&echo),
+            changed_paths: None,
         }).unwrap();
         assert_eq!(body["read_only_retry"], serde_json::json!({
             "version": 1,
@@ -1689,6 +1708,7 @@ mod tests {
             attempt_id: "attempt", worker: "worker", instance_id: "instance",
             generation: 1, task_revision: 3, outcome: "succeeded",
             invocation_ids: &["attempt"], read_only_retry: Some(&echo),
+            changed_paths: None,
         }).unwrap();
         assert_eq!(body["read_only_retry"]["executor_kind"],
             "read_only_api_retry_v1");
@@ -2953,6 +2973,10 @@ pub struct V22ExecutionProfile {
     pub role: String,
     pub budget_microusd: i64,
     #[serde(default)]
+    pub grade_guard: bool,
+    #[serde(default)]
+    pub execution_grade: Option<String>,
+    #[serde(default)]
     pub read_only_retry: Option<V22ReadOnlyRetryProfile>,
 }
 
@@ -3085,6 +3109,8 @@ struct V22ExecutionSettleRequest<'a> {
     invocation_ids: &'a [&'a str],
     #[serde(skip_serializing_if = "Option::is_none")]
     read_only_retry: Option<&'a V22ReadOnlyRetryEcho>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_paths: Option<&'a [String]>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3679,6 +3705,7 @@ impl TomverseApi {
         outcome: &str,
         invocation_ids: &[&str],
         read_only_retry: Option<&V22ReadOnlyRetryEcho>,
+        changed_paths: Option<&[String]>,
     ) -> Result<ExecutionSettleResponse> {
         if delivery.assignment_id.is_none() {
             bail!("v22 settlement requires an assignment-bound delivery");
@@ -3696,6 +3723,7 @@ impl TomverseApi {
                 outcome,
                 invocation_ids,
                 read_only_retry,
+                changed_paths,
             })
             .send().await?;
         let (status, body): (_, ExecutionSettleResponse) = read_bounded_json(
@@ -3729,7 +3757,23 @@ impl TomverseApi {
             bail!("verified v22 settlement requires a terminal CLI result");
         }
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            outcome, &[&delivery.attempt_id], read_only_retry).await
+            outcome, &[&delivery.attempt_id], read_only_retry, None).await
+    }
+
+    pub async fn v22_execution_settle_v52(
+        &self,
+        delivery: &PulledDelivery,
+        instance_id: &str,
+        generation: i64,
+        outcome: &str,
+        read_only_retry: Option<&V22ReadOnlyRetryEcho>,
+        changed_paths: Option<&[String]>,
+    ) -> Result<ExecutionSettleResponse> {
+        if !matches!(outcome, "succeeded" | "failed") {
+            bail!("v52 settlement requires a terminal CLI result");
+        }
+        self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
+            outcome, &[&delivery.attempt_id], read_only_retry, changed_paths).await
     }
 
     /// A local AMUX card is not an A14 usage receipt. Without a verified
@@ -3743,7 +3787,7 @@ impl TomverseApi {
         read_only_retry: Option<&V22ReadOnlyRetryEcho>,
     ) -> Result<ExecutionSettleResponse> {
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            "blocked", &[], read_only_retry).await
+            "blocked", &[], read_only_retry, None).await
     }
 
     /// Policy version 15: the system consumer of pre-approved automatic

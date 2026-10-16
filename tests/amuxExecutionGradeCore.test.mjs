@@ -15,6 +15,7 @@ import {
   amuxExecutionGradeRoutingOpen,
   amuxWorkerMatchesExecutionGrade,
   classifyAmuxExecutionPath,
+  decideAmuxV52ChangedPaths,
   deriveAmuxExecutionGrade,
   isAmuxV52TaskConfirmation,
   normalizeAmuxExecutionPath,
@@ -68,6 +69,16 @@ test("an exact worker grade never borrows a higher or lower worker", () => {
   }
   assert.equal(amuxWorkerMatchesExecutionGrade("routine", "chore", null), false);
   assert.equal(amuxWorkerMatchesExecutionGrade("standard", "chore", registry), false);
+});
+
+test("v52 post-run inventory blocks unknown paths and escalates contract touches", () => {
+  assert.equal(decideAmuxV52ChangedPaths("routine", []), "pass");
+  assert.equal(decideAmuxV52ChangedPaths("advanced", ["src/ordinary.ts"]), "pass");
+  assert.equal(decideAmuxV52ChangedPaths("routine", ["LIB/AMUX/Foo.ts"]), "escalate");
+  assert.equal(decideAmuxV52ChangedPaths("frontier", ["lib/amux/Foo.ts"]), "pass");
+  assert.equal(decideAmuxV52ChangedPaths("advanced", undefined), "blocked");
+  assert.equal(decideAmuxV52ChangedPaths("advanced", ["../escape"]), "blocked");
+  assert.equal(decideAmuxV52ChangedPaths("advanced", ["src/a.ts", "./../escape"]), "blocked");
 });
 
 test("hard frontier conditions precede the intake proposal", () => {

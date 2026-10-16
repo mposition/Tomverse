@@ -361,6 +361,45 @@ test("one child returns a reviewable result and a content-free receipt", async (
     undefined);
 });
 
+test("v52 guard inventories non-implement attempts and withholds a contract patch", async () => {
+  const baseline = async () => ({ ok: true, baseSha: "a".repeat(40) });
+  const fake = fakeSpawn(JSON.stringify(usage));
+  const inspected = await runAmuxV22OneShot({ ...request,
+    role: "investigate", gradeGuard: true, executionGrade: "advanced" }, config, {
+    syntheticPlatform: true, spawnChild: fake.spawnChild,
+    captureBaseline: baseline,
+    captureChangedPaths: async () => ({ ok: true, files: [], contractPaths: [] }),
+  });
+  assert.deepEqual(inspected.changedPaths, []);
+  assert.equal(inspected.gradeGuard, true);
+  let patchCalls = 0;
+  let discarded = 0;
+  const contract = await runAmuxV22OneShot({ ...request, gradeGuard: true,
+    executionGrade: "routine" },
+    config, { syntheticPlatform: true, spawnChild: fake.spawnChild,
+      captureBaseline: baseline,
+      captureChangedPaths: async () => ({ ok: true,
+        files: ["lib/amux/execution.ts"],
+        contractPaths: ["lib/amux/execution.ts"] }),
+      discardContractChanges: async () => { discarded++; return true; },
+      capturePatch: async () => { patchCalls++; throw new Error("not reachable"); },
+    });
+  assert.deepEqual(contract.changedPaths, ["lib/amux/execution.ts"]);
+  assert.equal(contract.patchDigest, undefined);
+  assert.equal(patchCalls, 0);
+  assert.equal(discarded, 1);
+  const missing = await runAmuxV22OneShot({ ...request, gradeGuard: true,
+    executionGrade: "routine" },
+    config, { syntheticPlatform: true, spawnChild: fake.spawnChild,
+      captureBaseline: baseline,
+      captureChangedPaths: async () => ({ ok: false,
+        reason: "changed_paths_unavailable" }),
+      capturePatch: async () => { patchCalls++; throw new Error("not reachable"); },
+    });
+  assert.equal(missing.changedPathsReason, "changed_paths_unavailable");
+  assert.equal(patchCalls, 0);
+});
+
 test("implement refuses a dirty baseline before CLI and holds a patch only in memory", async () => {
   const refused = fakeSpawn(JSON.stringify(usage));
   const blocked = await runAmuxV22OneShot(request, config, {

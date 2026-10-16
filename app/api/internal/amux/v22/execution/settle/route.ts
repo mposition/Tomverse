@@ -34,6 +34,7 @@ const requestSchema = z.object({ attempt_id: z.string().uuid(),
   task_revision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
   outcome: z.enum(["succeeded", "failed", "blocked"]),
   invocation_ids: z.array(z.string().uuid()).max(128),
+  changed_paths: z.array(z.string().max(32 * 1024)).max(4_096).optional(),
   read_only_retry: readOnlyRetrySchema.optional(),
 }).strict();
 
@@ -47,12 +48,13 @@ export async function POST(request: Request) {
       reason: "v22_execution_disabled" }, 409);
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, 8 * 1_024, requestSchema);
+      const body = await readLimitedJson(request, 64 * 1_024, requestSchema);
       const result = await settleAmuxV22TaskExecution({
         attemptId: body.attempt_id, worker: body.worker,
         instanceId: body.instance_id, generation: body.generation,
         taskRevision: body.task_revision, outcome: body.outcome,
         invocationIds: body.invocation_ids,
+        ...(body.changed_paths ? { changedPaths: body.changed_paths } : {}),
         readOnlyRetry: body.read_only_retry ? {
           version: body.read_only_retry.version,
           launchBindingId: body.read_only_retry.launch_binding_id,

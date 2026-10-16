@@ -426,7 +426,39 @@ export type EngineeringAgentPullObservation = {
   requiredChecks: { allPassed: boolean } | null;
   /** sha256 of the diff's own bytes, as the publisher binds it; null when it could not be read. */
   diffDigest: string | null;
+  /** Complete GitHub PR file names at the observed base/head, or unknown. */
+  changedFiles?: string[] | null;
 };
+
+async function readPullFileNames(prNumber: number,
+  comparison: { baseSha: string; headSha: string; changedFiles: number },
+  resolved: { env: Readonly<Record<string, string | undefined>>;
+    fetchImpl: FetchLike }): Promise<string[] | null> {
+  if (!Number.isSafeInteger(comparison.changedFiles) ||
+      comparison.changedFiles < 0 || comparison.changedFiles > 100) return null;
+  try {
+    const page = await githubPage(`/pulls/${prNumber}/files?per_page=100&page=1`, resolved);
+    if (page.hasNext || !Array.isArray(page.body) ||
+        page.body.length !== comparison.changedFiles) return null;
+    const names: string[] = [];
+    for (const raw of page.body) {
+      const file = record(raw);
+      if (typeof file?.filename !== "string" ||
+          typeof file.status !== "string") return null;
+      names.push(file.filename);
+      if (file.status === "renamed") {
+        if (typeof file.previous_filename !== "string") return null;
+        names.push(file.previous_filename);
+      }
+    }
+    const current = record(await githubJson(`/pulls/${prNumber}`, resolved));
+    if (current?.number !== prNumber ||
+        record(current.base)?.sha !== comparison.baseSha ||
+        record(current.head)?.sha !== comparison.headSha ||
+        current.changed_files !== comparison.changedFiles) return null;
+    return names;
+  } catch { return null; }
+}
 
 const instant = (value: unknown): Date | null => {
   if (typeof value !== "string") return null;
@@ -576,5 +608,8 @@ export async function readEngineeringAgentPullObservation(
     reviews,
     requiredChecks: await readRequiredChecks(headSha, resolved),
     diffDigest: await readPullDiffDigest(prNumber, resolved),
+    changedFiles: merged ? await readPullFileNames(prNumber, {
+      baseSha, headSha, changedFiles: pull.changed_files as number,
+    }, resolved) : null,
   };
 }
