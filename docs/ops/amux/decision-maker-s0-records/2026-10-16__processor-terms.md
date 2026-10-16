@@ -68,8 +68,8 @@ Commercial Terms를 적용한다고 적는다.
 - 학습: 개인 플랜에서 Codex를 쓰면 ChatGPT의 "Improve the model for everyone" 설정이 Codex 작업에도 적용된다. 그 설정을
   끄거나 Privacy Portal에서 학습 제외를 고르면 된다. Codex의 "Include environments" 설정은 별개다(Codex 환경의 추가
   맥락에 대한 것).
-- 보존: 안내문에 안전 목적으로 "up to 30 days" 보존한다는 문구가 있다. 그것이 어떤 대화에 적용되는지(임시 대화인지,
-  학습을 끈 대화 전체인지)와 Codex CLI 작업의 보존 기간은 이 검토가 확인하지 않았다.
+- 보존: 안내문의 안전 목적 "up to 30 days" 보존 문구는 임시 대화(Temporary chat) 절에 있다. 학습을 끈 일반 대화와
+  Codex CLI 작업의 보존 기간은 이 안내문에서 찾지 못했고 이 검토가 확인하지 않았다.
 - DPA: 개인 플랜에는 Services Agreement가 적용되지 않는다. 처리위탁 계약은 확인되지 않았다.
 - 자동 실행: Codex 인증 문서는 CI·CD 같은 프로그램 방식의 Codex CLI 작업에 API 키 인증을 쓰라고 적는다. ChatGPT
   workspace 접근이 필요한 자동화에는 access token을 쓰며, 그것은 신뢰된 비대화형 로컬 작업을 위한 것이라고 적는다.
