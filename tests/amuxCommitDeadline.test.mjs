@@ -189,6 +189,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // amux-intake v19: the owner operating scope setting. It is an append-only
   // owner setting guarded by its own audit trigger and adds no commit deadline.
   "20261016030000_amux_intake_operating_scope",
+  // amux-intake v19: replace only the budget setting and window audit guards'
+  // xid comparison. Neither repair adds a commit-deadline mechanism.
+  "20261016050000_amux_budget_setting_xid_epoch",
+  "20261016050100_amux_budget_window_xid_epoch",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
