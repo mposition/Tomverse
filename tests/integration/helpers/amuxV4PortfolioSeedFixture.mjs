@@ -12,6 +12,10 @@ import { appendSyntheticAdminAudit } from
 export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
   const recoveryExecutorKind = input.recoveryExecutorKind ??
     "read_only_api_retry_v1";
+  const executionGrade = input.executionGrade ?? "medium";
+  const costReceiptDigest = input.costReceiptDigest ?? null;
+  const settlementStatus = input.settlementStatus ?? "review";
+  const settlementGrade = input.settlementGrade ?? executionGrade;
   const ids = { initiative: randomUUID(), epic: randomUUID(),
     feature: randomUUID(), task: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID,
     sourceApproval: randomUUID() };
@@ -54,11 +58,11 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
              $4::jsonb, 'task', $5, $6, 'synthetic', 1,
              $7, 'synthetic', $6, 'synthetic', 1, $3, 'synthetic',
              $6, 'synthetic', 1, $3, 'synthetic', $8,
-             'investigate', 'medium', CURRENT_TIMESTAMP)`,
+             'investigate', $9, CURRENT_TIMESTAMP)`,
     [ids.task, unitId.toUpperCase(), digest,
       JSON.stringify({ schemaVersion: "amux-v4", ideaId,
         approvalId: ids.sourceApproval }), ids.feature, synthetic,
-      titleDigest, ids.sourceApproval]);
+      titleDigest, ids.sourceApproval, executionGrade]);
 
   const assessments = {};
   for (const [kind, subjectId, metrics] of [
@@ -198,7 +202,11 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
      CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '15 minutes',
      $9, CURRENT_TIMESTAMP)`,
   [ids.sourceApproval, ideaId, unitId, randomUUID(), digest,
-    JSON.stringify({ card: { cardType: "task", dependencies: [] } }),
+    JSON.stringify({ card: { cardType: "task", dependencies: [],
+      ...(costReceiptDigest ? { task: { costReceipt: {
+        role: "investigate", grade: executionGrade,
+        receiptDigest: costReceiptDigest,
+      } } } : {}) } }),
     previewId, ids.feature, prepareAudit]);
   const consumeAudit = await appendSyntheticAdminAudit(db, {
     actorUserId: "synthetic-owner", action: "amux.v4.unit.consume",
@@ -270,9 +278,10 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
      "catalogVersion", "costReceiptDigest", "perAttemptMicroUsd",
      "authorizationAuditLogId", "assignedAt") VALUES
     ($1, $2, $3, $4, 'sev1', 1, 'worker-one', '${instanceId}',
-     1, 'openai', 'model-one', 'investigate', 'medium', 'route-one', $5,
+     1, 'openai', 'model-one', 'investigate', $7, 'route-one', $5,
      'catalog-one', 'v1', $5, 3400000, $6, CURRENT_TIMESTAMP)`,
-  [assignmentId, ids.task, receiptId, laneSeq, digest, assignmentAudit]);
+  [assignmentId, ids.task, receiptId, laneSeq, digest, assignmentAudit,
+    executionGrade]);
   await db.query(`UPDATE public."AmuxWorkItem"
     SET "owner" = 'worker-one', "claimedAt" = CURRENT_TIMESTAMP,
       "v22AssignmentId" = $2, "revision" = 2
@@ -331,13 +340,14 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
   await db.query(`SET CONSTRAINTS amux_v22_execution_attempt_guard_trigger,
     amux_v22_doing_guard_trigger DEFERRED`);
   await db.query(`UPDATE public."AmuxWorkItem"
-    SET "status" = 'review', "owner" = NULL, "claimedAt" = NULL,
-        "v22AssignmentId" = NULL, "revision" = 4
-    WHERE "id" = $1`, [ids.task]);
+    SET "status" = $2, "owner" = NULL, "claimedAt" = NULL,
+        "v22AssignmentId" = NULL, "executionGrade" = $3, "revision" = 4
+    WHERE "id" = $1`, [ids.task, settlementStatus, settlementGrade]);
   await db.query(`UPDATE public."AmuxExecutionAttempt"
     SET "endedAt" = CURRENT_TIMESTAMP, "leaseExpiresAt" = NULL,
-        "outcome" = 'succeeded', "toStatus" = 'review',
-        "endedBy" = 'worker-one' WHERE "id" = $1`, [attemptId]);
+        "outcome" = 'succeeded', "toStatus" = $2,
+        "endedBy" = 'worker-one' WHERE "id" = $1`,
+  [attemptId, settlementStatus]);
   await db.query(`SET CONSTRAINTS amux_v22_execution_attempt_guard_trigger,
     amux_v22_doing_guard_trigger IMMEDIATE`);
   await input.afterSettlement?.({ ids });

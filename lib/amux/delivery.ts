@@ -263,6 +263,8 @@ export type AmuxPulledDelivery =
           modelId: string;
           role: string;
           budgetMicrousd: number;
+          gradeGuard?: true;
+          executionGrade?: string;
           readOnlyRetry?: AmuxV22ReadOnlyDeliveryBinding;
         } | null;
         receiptId: string;
@@ -341,11 +343,12 @@ export async function pullAmuxWorkDelivery(input: {
       throw new Error("v22 sealed delivery is not assignment-bound");
     const assignment = await tx.amuxV22WorkerAssignment.findUnique({
       where: { id: card.v22AssignmentId },
-      select: { workItemId: true, workerName: true,
+      select: { id: true, workItemId: true, workerName: true,
         workerInstanceId: true, workerGeneration: true,
-        modelId: true, role: true, provider: true, routeId: true,
+        modelId: true, role: true, grade: true, provider: true, routeId: true,
         routePolicyDigest: true, catalogApprovalId: true, catalogVersion: true,
         costReceiptDigest: true, recoveryApprovalId: true, taskRevision: true,
+        authorizationAuditLogId: true,
         perAttemptMicroUsd: true },
     });
     const budgetMicrousd = Number(assignment?.perAttemptMicroUsd);
@@ -356,6 +359,17 @@ export async function pullAmuxWorkDelivery(input: {
         !Number.isSafeInteger(budgetMicrousd) ||
         budgetMicrousd < 1 || budgetMicrousd > 5_000_000)
       throw new Error("v22 delivery assignment profile is invalid");
+    const assignmentAudit = await tx.adminAuditLog.findUnique({
+      where: { id: assignment.authorizationAuditLogId },
+      select: { action: true, targetId: true, metadata: true },
+    });
+    if (assignmentAudit?.action !== "amux.v22.worker.assigned" ||
+        assignmentAudit.targetId !== assignment.id)
+      throw new Error("v22 delivery assignment audit is invalid");
+    const gradeGuard = !!assignmentAudit.metadata &&
+      typeof assignmentAudit.metadata === "object" &&
+      !Array.isArray(assignmentAudit.metadata) &&
+      (assignmentAudit.metadata as Record<string, unknown>).v52GradeRouting === true;
     const recovery = assignment.recoveryApprovalId ?
       await readAmuxV22RecoveryAuthority(tx, delivery.taskId,
         assignment.taskRevision, assignment.recoveryApprovalId, now) : null;
@@ -452,7 +466,9 @@ export async function pullAmuxWorkDelivery(input: {
           `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
           AMUX_V22_WORKER_AUTHORITY_NOTICE,
         v22Execution: { modelId: assignment.modelId, role: assignment.role,
-          budgetMicrousd, ...(readOnlyRetry ? { readOnlyRetry } : {}) },
+          budgetMicrousd, ...(gradeGuard ? { gradeGuard: true as const,
+            executionGrade: assignment.grade } : {}),
+          ...(readOnlyRetry ? { readOnlyRetry } : {}) },
         recoveryApprovalId,
       };
     } finally { plain?.fill(0); }
@@ -466,7 +482,7 @@ export async function pullAmuxWorkDelivery(input: {
       // + 3: the base counts the canonical audit as one call, but appending it
       // takes four (chain lock, clock, previous entry, insert). A recovery
       // delivery makes 22 calls; 19 refused it on 2026-10-15 at the 20th.
-      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 3 + 7 + 3 },
+      prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryPull.prismaCallCeiling + 3 + 7 + 3 + 1 },
     async (tx, context) => {
       const now = input.now ?? context.dbNow;
       // Safe-stop request and all ownership/start/delivery writers share this

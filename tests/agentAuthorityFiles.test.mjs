@@ -104,6 +104,8 @@ test("classification of representative paths", () => {
     ["docs/policy/engineering-agent.md", "control-plane"],
     ["lib/amux/guard.ts", "control-plane"],
     ["lib/amux/executionGradeCore.ts", "control-plane"],
+    ["lib/amux/v52GradeReceipt.ts", "control-plane"],
+    ["tests/amuxV52GradeReceipt.test.mjs", "control-plane"],
     ["tests/amuxExecutionGradeCore.test.mjs", "control-plane"],
     ["scripts/report-amux-execution-grades.mjs", "control-plane"],
     ["lib/agentPushPolicy.ts", "control-plane"],

@@ -16,6 +16,7 @@ import type { AmuxIdeaUnitConfirmationSnapshot } from
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
+import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
 import { evaluateAmuxV4TaskReady, type AmuxV4TaskReadyFacts } from
@@ -228,10 +229,12 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           finalAuditLogId: true, registeredWorkItemId: true },
       }) : null;
     const snapshot = parseAmuxV4TaskReceipt(decision?.confirmationSnapshot ?? null);
+    const approvedCost = card.executionGrade ? await readAmuxV52TaskReceipt(
+      tx, taskId, snapshot?.card?.task?.costReceipt, card.executionGrade) : null;
     const exactGradeRouting = amuxExecutionGradeRoutingEnabled(
       process.env[AMUX_EXECUTION_GRADE_ENV]) &&
       isAmuxV52TaskConfirmation(decision?.confirmationSnapshot,
-        card.executionGrade);
+        snapshot?.card?.task?.grade) && approvedCost !== null;
     const audit = decision?.finalAuditLogId ? await tx.adminAuditLog.findUnique({
       where: { id: decision.finalAuditLogId },
       select: { action: true, actorUserId: true, targetId: true,
@@ -252,7 +255,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
       snapshot.card.normalizedBody.keyId === decision.unitDigestKeyId &&
       /^[a-f0-9]{64}$/.test(snapshot.card.task?.brief.digest ?? "") &&
       snapshot.card.task?.role === card.taskRole &&
-      snapshot.card.task.grade === card.executionGrade &&
+      approvedCost !== null &&
       audit?.entryHash !== null && audit?.entryHash !== undefined &&
       audit.action === "amux.v4.unit.consume" &&
       audit.actorUserId === decision.actorUserId && audit.targetId === decision.id &&
@@ -291,7 +294,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
         const current = await calculateCurrentApprovedAmuxV4TaskCost(tx,
           role, card.executionGrade);
         cost = checkV4TaskApprovedCeiling(
-          snapshot.card.task.costReceipt, { ok: true,
+          approvedCost, { ok: true,
             receipt: current.receipt }).decision;
         // Worker availability is its own fact (policy v48): a cost that needs
         // reconfirmation must not also read as "no worker", or the FIRST Task
