@@ -70,7 +70,7 @@ export type AmuxSessionIntakeReadback =
   | { requestId: string; status: "absent" }
   | { requestId: string; status: "partial"; ideaId: string }
   | { requestId: string; status: "committed"; ideaId: string;
-      hasExternalSources: boolean };
+      reservationId: string; hasExternalSources: boolean };
 
 /** Closed response projection. Extra service fields, including encrypted or
  * plaintext content added by mistake, never reach the intake client. */
@@ -96,6 +96,7 @@ export function amuxSessionIntakeReadbackReply(
     status: "committed",
     requestId: readback.requestId,
     ideaId: readback.ideaId,
+    reservationId: readback.reservationId,
     hasExternalSources: readback.hasExternalSources,
     adminPath: `/admin/amux-backlog?tab=ideas&idea=${encodeURIComponent(readback.requestId)}`,
   } };

@@ -26,6 +26,16 @@ import { readAmuxOperatingScopeAuthority,
 import { AMUX_IDEA_STANDARD_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
 import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 import {
+  AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY,
+  AMUX_SESSION_ANALYSIS_RESERVATION_POLICY_VERSION,
+  AMUX_SESSION_ANALYSIS_RESERVATION_STATUS,
+  AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+  AMUX_SESSION_ANALYSIS_RESERVED_SCOPE,
+  AMUX_SESSION_ANALYSIS_RESERVED_TARGET,
+} from "./ideaSessionAnalysisReservationCore.ts";
+import { commitAmuxSessionAnalysisReservation } from
+  "./ideaSessionAnalysisReservationStore.ts";
+import {
   AMUX_SESSION_INTAKE_ENV,
   amuxSessionIntakeWritePermitted,
   sameAmuxOperatingScopeAuthority,
@@ -63,6 +73,12 @@ export type CommittedAmuxIdeaSessionSubmission = {
   auditId: string;
   operatingScopeSettingId: string;
 };
+
+export type CommittedAmuxIdeaSessionIntake =
+  CommittedAmuxIdeaSessionSubmission & {
+    reservationId: string;
+    reservationAuditId: string;
+  };
 
 const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
   const rows = await tx.$queryRaw<Array<{ now: Date }>>`
@@ -177,7 +193,8 @@ export async function commitAmuxIdeaSessionSubmission(
 export async function readAmuxIdeaSessionSubmissionRequest(requestId: string): Promise<
   | { requestId: string; status: "absent" }
   | { requestId: string; status: "partial"; ideaId: string }
-  | { requestId: string; status: "committed"; ideaId: string; hasExternalSources: boolean }
+  | { requestId: string; status: "committed"; ideaId: string;
+      reservationId: string; hasExternalSources: boolean }
 > {
   if (!isAmuxIdeaRequestId(requestId)) return { requestId, status: "absent" };
   const row = await prisma.amuxIdeaSubmission.findUnique({
@@ -189,6 +206,8 @@ export async function readAmuxIdeaSessionSubmissionRequest(requestId: string): P
       sourceProvenanceCiphertext: true, sourceProvenanceKeyId: true,
       sourceProvenanceKeyVersion: true, sourceProvenanceDigest: true,
       sourceProvenanceDigestKeyId: true,
+      actorUserId: true,
+      sessionAnalysisReservation: true,
     },
   });
   if (!row || row.submissionOrigin !== "session" || !row.submissionAuditLogId) {
@@ -226,15 +245,61 @@ export async function readAmuxIdeaSessionSubmissionRequest(requestId: string): P
       (!activeSource && !purgedSource)) {
     return { requestId, status: "partial", ideaId: row.id };
   }
+  const reservation = row.sessionAnalysisReservation;
+  if (!reservation || reservation.requestId !== requestId ||
+      reservation.ideaId !== row.id ||
+      reservation.actorUserId !== row.actorUserId ||
+      reservation.operatingScopeSettingId !== row.sessionOperatingScopeSettingId ||
+      reservation.status !== AMUX_SESSION_ANALYSIS_RESERVATION_STATUS) {
+    return { requestId, status: "partial", ideaId: row.id };
+  }
+  const reservationAudit = await prisma.adminAuditLog.findUnique({
+    where: { id: reservation.reservationAuditLogId },
+  });
+  const reservationMetadata = reservationAudit?.metadata;
+  if (!reservationAudit?.entryHash ||
+      auditRowActorKind(reservationAudit) !== "system" ||
+      reservationAudit.action !== AMUX_SESSION_ANALYSIS_RESERVED_ACTION ||
+      reservationAudit.targetType !== AMUX_SESSION_ANALYSIS_RESERVED_TARGET ||
+      reservationAudit.targetId !== reservation.id ||
+      reservationAudit.summary !== AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY ||
+      !reservationMetadata || typeof reservationMetadata !== "object" ||
+      Array.isArray(reservationMetadata)) {
+    return { requestId, status: "partial", ideaId: row.id };
+  }
+  const reservationValues = reservationMetadata as Record<string, unknown>;
+  const expectedReservationValues = {
+    systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+    actorScope: AMUX_SESSION_ANALYSIS_RESERVED_SCOPE,
+    policyVersion: AMUX_SESSION_ANALYSIS_RESERVATION_POLICY_VERSION,
+    reservationId: reservation.id,
+    ideaId: row.id,
+    requestId,
+    submissionAuditId: row.submissionAuditLogId,
+    operatingScopeSettingId: row.sessionOperatingScopeSettingId,
+    dataOwnerUserId: row.actorUserId,
+    modelProvider: reservation.modelProvider,
+    modelId: reservation.modelId,
+    reasoningEffort: reservation.reasoningEffort,
+  };
+  if (Object.keys(reservationValues).length !==
+        Object.keys(expectedReservationValues).length ||
+      Object.entries(expectedReservationValues).some(([key, value]) =>
+        reservationValues[key] !== value)) {
+    return { requestId, status: "partial", ideaId: row.id };
+  }
   return { requestId, status: "committed", ideaId: row.id,
+    reservationId: reservation.id,
     hasExternalSources: (repositoryCount as number) + (pullRequestCount as number) > 0 };
 }
 
-/** Default-off write service. There is intentionally no route until the
- * remaining source-plan, transfer and budget writes share this transaction. */
+/** Default-off write service. It atomically stores the encrypted submission
+ * and its append-only queue identity. There is intentionally no POST route
+ * until direct-read source evidence and the system transfer/cost gates form a
+ * complete analysis boundary; this queue receipt reserves no money. */
 export async function submitAmuxIdeaFromSession(input: {
   inspected: Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }>;
-}): Promise<CommittedAmuxIdeaSessionSubmission> {
+}): Promise<CommittedAmuxIdeaSessionIntake> {
   if (!amuxSessionIntakeWritePermitted(
     process.env[AMUX_SESSION_INTAKE_ENV],
     process.env[AMUX_V4_IDEA_SUBMISSION_ENV],
@@ -271,8 +336,15 @@ export async function submitAmuxIdeaFromSession(input: {
       const committed = await commitAmuxIdeaSessionSubmission(tx, {
         ...input, expectedAuthority, ideaId, keys,
       });
+      const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+        ideaId: committed.ideaId,
+        requestId: committed.requestId,
+        submissionAuditId: committed.auditId,
+        authority: expectedAuthority,
+      });
       callbackReturned = true;
-      return committed;
+      return { ...committed, reservationId: reservation.reservationId,
+        reservationAuditId: reservation.reservationAuditId };
     }, { ...AMUX_IDEA_STANDARD_TRANSACTION });
   } catch (error) {
     if (error instanceof AmuxIdeaSessionSubmissionError &&
