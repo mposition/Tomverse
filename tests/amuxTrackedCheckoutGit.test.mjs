@@ -22,12 +22,12 @@ test("local Git enumerates the pinned commit, omitting untracked and secret path
     await mkdir(join(directory, "docs"));
     await mkdir(join(directory, "mirror"));
     await writeFile(join(directory, "docs", "guide.md"), "pinned content\n");
-    await writeFile(join(directory, "mirror", "guide.md"), "pinned content\n");
+    await writeFile(join(directory, "mirror", "guide.md"), "other pinned content\n");
     await writeFile(join(directory, ".env"), "excluded\n");
     git(directory, "add", "--", "docs/guide.md", "mirror/guide.md", ".env");
     git(directory, "commit", "--quiet", "-m", "pinned");
     const pinned = git(directory, "rev-parse", "HEAD").trim();
-    assert.equal(git(directory, "rev-parse", `${pinned}:docs`).trim(),
+    assert.notEqual(git(directory, "rev-parse", `${pinned}:docs`).trim(),
       git(directory, "rev-parse", `${pinned}:mirror`).trim());
     await writeFile(join(directory, "docs", "guide.md"), "new content\n");
     await writeFile(join(directory, "untracked.txt"), "never in the tree\n");
@@ -63,6 +63,28 @@ test("local Git enumerates the pinned commit, omitting untracked and secret path
       env: { ...process.env, GIT_NO_REPLACE_OBJECTS: "1" },
     });
     assert.equal(acceptedForgedBody, otherCommit);
+    await assert.rejects(() => readAmuxPinnedTrackedTree(directory, pinned), /invalid_tree/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a repeated child tree object is refused before path amplification", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "amux-tree-alias-"));
+  try {
+    git(directory, "init", "--quiet");
+    git(directory, "config", "core.autocrlf", "false");
+    git(directory, "config", "user.name", "AMUX Test");
+    git(directory, "config", "user.email", "amux-test@example.invalid");
+    await mkdir(join(directory, "one"));
+    await mkdir(join(directory, "two"));
+    await writeFile(join(directory, "one", "same.txt"), "same pinned bytes\n");
+    await writeFile(join(directory, "two", "same.txt"), "same pinned bytes\n");
+    git(directory, "add", "--", "one", "two");
+    git(directory, "commit", "--quiet", "-m", "aliased trees");
+    const pinned = git(directory, "rev-parse", "HEAD").trim();
+    assert.equal(git(directory, "rev-parse", `${pinned}:one`).trim(),
+      git(directory, "rev-parse", `${pinned}:two`).trim());
     await assert.rejects(() => readAmuxPinnedTrackedTree(directory, pinned), /invalid_tree/);
   } finally {
     await rm(directory, { recursive: true, force: true });
