@@ -584,9 +584,12 @@ const compilerOptions = parsedConfig.options;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
+// AMUX v19 adds a separate repository-read content purpose above an existing
+// computed access in the reviewed closure. All 228 expressions and their
+// position-free digest remain byte-identical; only source lines moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "f065542c56a26b83b57461c9894677d8",
-  "c60fe3fe474e1c923477b10af9675aa5",
+  "1c87dd5fdf533ebdb7fd272093049da8",
+  "ff04d2f262ae66755abd79d974ebd98c",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
