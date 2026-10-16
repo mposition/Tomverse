@@ -73,3 +73,16 @@ test("a lost save is matched to its pending request exactly, never re-sent", () 
   assert.equal(amuxOperatingScopeSavedMatches({ ...saved, auditId: "" }, pending), false);
   assert.equal(amuxOperatingScopeSavedMatches({ ...saved, extra: 1 }, pending), false);
 });
+
+test("the allowlist grammar and the idea input grammar agree on every sample", async () => {
+  const { inspectAmuxIdeaInput } = await import("../lib/amux/ideaInputCore.ts");
+  const { isAmuxScopeRepositoryName } = await import("../lib/amux/ideaOperatingScopeCore.ts");
+  const samples = ["mposition/Tomverse", "a/b", "a.b/c_d-e", "Tomverse", "mposition/", "/Tomverse", "a/b/c",
+    "mposition/..", "./x", "mposition/To mverse", `${"a".repeat(64)}/b`, `${"a".repeat(65)}/b`,
+    `a/${"b".repeat(100)}`, `a/${"b".repeat(101)}`, "a/.", "ünicode/x"];
+  for (const sample of samples) {
+    const input = inspectAmuxIdeaInput(JSON.stringify({ version: 1, idea: "Compare the repository grammar.",
+      repositories: [sample], pullRequests: [] }));
+    assert.equal(isAmuxScopeRepositoryName(sample), input.ok, sample);
+  }
+});

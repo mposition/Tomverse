@@ -1,5 +1,12 @@
-import { isAmuxIdeaRepositoryName } from "./ideaInputCore.ts";
 import type { AmuxIdeaModelSelection } from "./ideaFrontierSelectionCore.ts";
+
+// The idea input's owner/name grammar (lib/amux/ideaInputCore.ts). It is
+// repeated rather than imported because that module sits inside a reviewed,
+// digest-pinned route closure; tests/amuxIdeaOperatingScopeCore.test.mjs
+// proves the two agree.
+const REPOSITORY = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
+export const isAmuxScopeRepositoryName = (value: string) =>
+  REPOSITORY.test(value) && value.split("/").every((part) => part !== "." && part !== "..");
 
 /**
  * The owner's operating scope (docs/policy/amux-intake.md v19 item 2): the one
@@ -43,7 +50,7 @@ export function normalizeAmuxOperatingScope(value: unknown):
   const { repositories, model } = value;
   if (!Array.isArray(repositories) || repositories.length === 0 ||
       repositories.length > AMUX_OPERATING_SCOPE_REPOSITORY_MAX ||
-      !repositories.every((entry) => typeof entry === "string" && isAmuxIdeaRepositoryName(entry))) {
+      !repositories.every((entry) => typeof entry === "string" && isAmuxScopeRepositoryName(entry))) {
     return { ok: false, code: "repositories_invalid" };
   }
   const keys = repositories.map((entry: string) => entry.toLowerCase());
@@ -63,7 +70,7 @@ export function normalizeAmuxOperatingScope(value: unknown):
 
 /** v19 item 2: a reference outside the allowlist is refused at intake. */
 export function amuxRepositoryAllowed(scope: AmuxOperatingScope, repository: string): boolean {
-  if (typeof repository !== "string" || !isAmuxIdeaRepositoryName(repository)) return false;
+  if (typeof repository !== "string" || !isAmuxScopeRepositoryName(repository)) return false;
   const key = repository.toLowerCase();
   return scope.repositories.some((entry) => entry.toLowerCase() === key);
 }
