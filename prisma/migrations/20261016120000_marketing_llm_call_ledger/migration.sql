@@ -163,8 +163,7 @@ BEGIN
     END IF;
     -- The writer read createdAt from this clock once and locked its month; the
     -- row must be counted in that month, so the value is checked, not replaced.
-    IF NEW."createdAt" IS NULL
-        OR NEW."createdAt" > now_utc
+    IF NEW."createdAt" > now_utc
         OR NEW."createdAt" < now_utc - INTERVAL '10 seconds'
         OR NEW."monthStart" IS DISTINCT FROM date_trunc('month', NEW."createdAt") THEN
         RAISE EXCEPTION 'marketing_llm_call_reservation_clock_invalid';
@@ -172,7 +171,7 @@ BEGIN
     NEW."retentionUntil" := NEW."createdAt" + INTERVAL '24 months';
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 CREATE FUNCTION "marketing_llm_call_update_guard"() RETURNS trigger AS $$
 DECLARE
@@ -216,8 +215,10 @@ BEGIN
         new_rest := to_jsonb(NEW) - 'state' - dispatch_keys;
         NEW."dispatchedAt" := now_utc;
     ELSIF OLD."state" = 'reserved' AND NEW."state" = 'released' THEN
+        -- A reservation is dispatchable strictly before createdAt + 15 minutes
+        -- and expirable from that instant on, so no moment is neither.
         IF NEW."closeReason" = 'reservation_expired'
-            AND now_utc <= OLD."createdAt" + INTERVAL '15 minutes' THEN
+            AND now_utc < OLD."createdAt" + INTERVAL '15 minutes' THEN
             RAISE EXCEPTION 'marketing_llm_call_expiry_early';
         END IF;
         old_rest := to_jsonb(OLD) - 'state' - close_keys;
@@ -225,7 +226,7 @@ BEGIN
         NEW."closedAt" := now_utc;
     ELSIF OLD."state" = 'dispatched' AND NEW."state" IN ('settled', 'unknown_retained') THEN
         IF NEW."closeReason" = 'dispatch_expired'
-            AND now_utc <= OLD."dispatchedAt" + INTERVAL '1 hour' THEN
+            AND now_utc < OLD."dispatchedAt" + INTERVAL '1 hour' THEN
             RAISE EXCEPTION 'marketing_llm_call_expiry_early';
         END IF;
         old_rest := to_jsonb(OLD) - 'state' - close_keys;
@@ -242,7 +243,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 CREATE FUNCTION "marketing_llm_call_delete_guard"() RETURNS trigger AS $$
 BEGIN
@@ -254,16 +255,22 @@ BEGIN
     END IF;
     RETURN OLD;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
+-- The table is named from the trigger's own arguments, never by search_path:
+-- an empty temporary table of the same name would otherwise answer for it.
 CREATE FUNCTION "marketing_llm_call_no_nonempty_truncate"() RETURNS trigger AS $$
+DECLARE
+    non_empty BOOLEAN;
 BEGIN
-    IF EXISTS (SELECT 1 FROM "MarketingLlmCall") THEN
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I)', TG_TABLE_SCHEMA, TG_TABLE_NAME)
+        INTO non_empty;
+    IF non_empty THEN
         RAISE EXCEPTION 'marketing_llm_call_delete_forbidden';
     END IF;
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp;
 
 CREATE TRIGGER "MarketingLlmCall_insert_guard"
     BEFORE INSERT ON "MarketingLlmCall"

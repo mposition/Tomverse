@@ -39,6 +39,7 @@ test("MarketingLlmCall holds its state machine, clock, pairing and deletion rule
 
   // A reserved row stamped from this clock, the way the writer stamps it.
   let ordinal = 0;
+  let observation = 0;
   const reserve = async (overrides: Record<string, unknown> = {}) => {
     ordinal += 1;
     const row = {
@@ -78,7 +79,7 @@ test("MarketingLlmCall holds its state machine, clock, pairing and deletion rule
          "closeAuditLogId" = $2, "closedAt" = TIMESTAMP '2000-01-01'
          ${withObservation ? `, ${observed}` : ", \"observationId\" = $3::text"}
        WHERE "id" = $1`,
-      [id, await auditId(), withObservation ? uuid(2000 + ordinal + Math.floor(Math.random() * 1000)) : null, state, reason],
+      [id, await auditId(), withObservation ? uuid(5000 + (observation += 1)) : null, state, reason],
     );
   };
   const backdate = async (id: string, column: string, interval: string) => {
@@ -178,7 +179,7 @@ test("MarketingLlmCall holds its state machine, clock, pairing and deletion rule
       ["released", "reported_unknown", false],
     ];
     for (const [state, reason, withObservation] of pairings) {
-      const id = state === "released" ? await reserve() : await reserve();
+      const id = await reserve();
       if (state !== "released") await dispatch(id);
       await assert.rejects(close(id, state, reason, withObservation), /MarketingLlmCall_state_check|violates check/, `${state}/${reason}/${withObservation}`);
     }
@@ -278,6 +279,14 @@ test("MarketingLlmCall holds its state machine, clock, pairing and deletion rule
     await client.query("ROLLBACK");
 
     await rejects(`TRUNCATE "MarketingLlmCall"`, [], /delete_forbidden/);
+    // An empty temporary table of the same name earlier on search_path does
+    // not answer for the ledger.
+    await client.query(`CREATE TEMP TABLE "MarketingLlmCall" ("id" TEXT)`);
+    await rejects(`TRUNCATE "${schema}"."MarketingLlmCall"`, [], /delete_forbidden/);
+    await client.query(`SET search_path TO pg_temp, "${schema}"`);
+    await rejects(`TRUNCATE "${schema}"."MarketingLlmCall"`, [], /delete_forbidden/);
+    await client.query(`DROP TABLE pg_temp."MarketingLlmCall"`);
+    await client.query(`SET search_path TO "${schema}"`);
     // The audit rows the ledger points at cannot be removed under it.
     await assert.rejects(client.query(`DELETE FROM "AdminAuditLog" WHERE "id" = 'audit_1'`), /foreign key/);
   } finally {
