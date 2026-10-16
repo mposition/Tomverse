@@ -2838,7 +2838,8 @@ v4 Task에 대해서는 등록부의 `roleCeiling`이 상한이 아니라 **그 
 - **release blocker를 선언한 ui-contract가 지키는 파일**(이 버전에서 추가). 계약의 일부만 차단으로
   정한 경우도 넣는다. 경로로는 차단 부분과 나머지를 나눌 수 없기 때문이다. Admin Console IA는 redirect
   규칙, chat starter catalogue는 §9의 fail-closed 판정, 계정 모델 설정은 문서 전체(그 문서의 마지막
-  줄)가 차단이다.
+  줄)가 차단이다. 차단 대상이 파일이 아니라 문구의 의미여서 경로로 판정할 수 없는 계약은 아래 "넣지
+  않은 것"에 적는다.
   - 모바일 composer·drawer: `components/chat/ChatInput.tsx`, `components/chat/MobileChatShell.tsx`,
     `components/chat/ChatSidebar.tsx`, `components/chat/useVisualViewport.ts`
   - 비교 action rail: `components/chat/ComparisonActionRail.tsx`, `lib/comparisonReadiness.ts`
@@ -2903,8 +2904,8 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
 - claim은 Task 등급, route 등급, route worker의 등록부 등급이 모두 같을 때만 배정한다.
 - **위 등급으로 넘기지 않는다.** 맞는 worker가 모두 바쁘면 Task는 `todo`에서 기다린다. Admin 실행
   화면은 그 사유를 `no_worker_for_grade`로 보인다.
-- 지금 승인된 catalog가 이 규칙을 어기면, owner가 규칙에 맞는 catalog를 승인한 뒤에 9항의 래치를
-  켠다.
+- 지금 승인된 catalog가 이 규칙을 어기면, owner가 규칙에 맞는 catalog를 승인한 뒤에 9항의 운영
+  스위치를 켠다.
 - 새 catalog에는 `review` 역할 route가 필요 없다. 이미 등록된 review Task는 기존 route와 v49의 Admin
   사람 승인으로 끝난다. `claude-review`는 legacy 카드를 위해 등록부에 남는다.
 
