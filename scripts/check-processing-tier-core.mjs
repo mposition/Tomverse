@@ -51,6 +51,8 @@ const isMarketingLedgerTierSender = (entry) =>
  *   allowlist: readonly {
  *     file: string,
  *     sendsATier: boolean,
+ *     pricedBy?: string,
+ *     sends?: readonly string[],
  *     reason: string,
  *     mentions: readonly string[],
  *   }[],
@@ -138,6 +140,8 @@ export function auditProcessingTierMentions({ matchedLines, allowlist }) {
  * @type {readonly {
  *   file: string,
  *   sendsATier: boolean,
+ *   pricedBy?: string,
+ *   sends?: readonly string[],
  *   reason: string,
  *   mentions: readonly string[],
  * }[]}

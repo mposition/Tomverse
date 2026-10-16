@@ -84,6 +84,8 @@ export function marketingLlmBudgetHttpPort(input: {
   readonly secret: string;
   readonly deadlineAt: string;
   readonly fetch: typeof fetch;
+  /** Aborts a budget request that hangs, which the client then treats as a lost answer. */
+  readonly signal?: AbortSignal;
 }): MarketingLlmBudgetPort {
   const endpoint = new URL("/api/internal/marketing-llm-budget", input.appUrl);
   return async (action, fields) => {
@@ -92,6 +94,7 @@ export function marketingLlmBudgetHttpPort(input: {
       method: "POST",
       headers: { authorization: `Bearer ${input.secret}`, "content-type": "application/json" },
       body: JSON.stringify({ action, deadlineAt: input.deadlineAt, ...fields, signature }),
+      signal: input.signal,
     });
     const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
     if (body === null || typeof body !== "object") throw new Error(`budget ${action}: no readable answer`);
