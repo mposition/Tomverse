@@ -6,6 +6,7 @@ import { after, before, test } from "node:test";
 import { GET, POST } from "@/app/api/internal/amux/quota/route";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { prisma, prismaPoolUsage } from "@/lib/prisma";
+import { seedAmuxWorkerCatalog } from "./amuxDerivedCatalogFixture.ts";
 
 // The quota route against PostgreSQL. On 2026-10-12 four
 // tomverse-amux-v22-bridge@claude-* units halted with
@@ -41,33 +42,29 @@ const requireDedicatedAmuxTestDatabase = () => {
 };
 requireDedicatedAmuxTestDatabase();
 
-const WORKER = "claude-quota-db-test";
+// Version 35 (R2c): the worker comes from the registry the catalog is derived
+// from, so it is one of the seven seed workers.
+const WORKER = "claude-impl";
 const secret = `amux-test-${randomUUID()}`;
-const saved = {
-  secret: process.env.TOMVERSE_AMUX_SYNC_SECRET,
-  catalog: process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON,
-  v22Catalog: process.env.TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON,
-};
+const saved = { secret: process.env.TOMVERSE_AMUX_SYNC_SECRET };
+let restoreCatalog: () => Promise<void> = async () => {};
 const restore = (name: string, value: string | undefined) => {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 };
 
-before(() => {
+before(async () => {
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
-    { worker_name: WORKER, provider: "CLAUDE", routing_roles: ["implementation"] },
-  ]);
-  process.env.TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON = JSON.stringify([
-    { worker_name: WORKER, provider: "anthropic", model: "claude-opus-5-5",
-      routing_roles: ["investigate"], tool_capabilities: ["repo_read"] },
-  ]);
+  restoreCatalog = await seedAmuxWorkerCatalog([{
+    worker_name: WORKER,
+    routing_roles: ["implementation"],
+    v22: { model: "claude-opus-5-5", routing_roles: ["investigate"], tool_capabilities: ["repo_read"] },
+  }]);
 });
 
 after(async () => {
   restore("TOMVERSE_AMUX_SYNC_SECRET", saved.secret);
-  restore("TOMVERSE_AMUX_WORKER_CATALOG_JSON", saved.catalog);
-  restore("TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON", saved.v22Catalog);
+  await restoreCatalog();
   await prisma.$disconnect();
 });
 

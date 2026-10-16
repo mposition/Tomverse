@@ -44,6 +44,7 @@ import {
 } from "@/lib/amux/commitDeadlineCore";
 import { readAmuxCommitDeadlineInstallSql } from "../../scripts/amux-commit-deadline-install.mjs";
 import { buildAmuxRoutingSnapshot } from "@/lib/amux/routing";
+import { truncateAmuxWorkerRegistry, seedAmuxWorkerCatalog } from "./amuxDerivedCatalogFixture.ts";
 import { scoreAmuxWorkers } from "@/lib/amux/workerRouterCore";
 import {
   amuxWorkerRuntimeByName,
@@ -127,6 +128,7 @@ const requireDedicatedAmuxTestDatabase = () => {
 requireDedicatedAmuxTestDatabase();
 
 after(async () => {
+  await truncateAmuxWorkerRegistry();
   await prisma.$disconnect();
 });
 
@@ -1747,9 +1749,12 @@ test("live dependents contribute to dependent_count exactly once", async () => {
   });
 });
 
-test("routing snapshot fails closed without an explicit worker catalog", async () => {
+// Version 35 (R2c): the catalog is derived from the registry, so "no catalog"
+// is a registry with no AMUX worker in it. The catalog variable parser's own
+// rules (missing variable, names outside the machine-id contract, provider and
+// role normalisation) are pinned in tests/amuxWorkerAssignmentCatalog.test.mjs.
+test("routing snapshot offers no AMUX worker when none is registered", async () => {
   const taskId = await createTodo("amux-routing-no-catalog");
-
   await prisma.amuxWorkItem.update({
     where: { id: taskId },
     data: {
@@ -1761,82 +1766,25 @@ test("routing snapshot fails closed without an explicit worker catalog", async (
       },
     },
   });
-
   const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-
-  delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-
+  const restoreCatalog = await seedAmuxWorkerCatalog([]);
   try {
     const snapshot = await buildAmuxRoutingSnapshot(taskId, 0);
-
-    assert.deepEqual(snapshot, {
-      eligible: false,
-      execution_ready: false,
-      reason: "worker_catalog_unavailable",
-      task: null,
-      candidates: [],
-      telemetry: {},
-    });
+    if (!snapshot.eligible) assert.fail("expected an eligible routing snapshot");
+    assert.equal(snapshot.execution_ready, false);
+    // Only the engineering runner's constant entry, with no runtime evidence.
+    assert.deepEqual(snapshot.candidates.map((candidate) => candidate.worker.worker_name), ["engineering-runner"]);
+    assert.equal(snapshot.candidates[0]?.worker.dispatch_ready, false);
   } finally {
-    if (previousCatalog === undefined) {
-      delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-    } else {
-      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
-    }
-
-    await prisma.amuxWorkItem.delete({
-      where: { id: taskId },
-    });
-  }
-});
-
-test("routing snapshot rejects worker names outside the response machine-id contract", async () => {
-  const taskId = await createTodo("amux-routing-invalid-worker-name");
-  const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-
-  try {
-    await prisma.amuxWorkItem.update({
-      where: { id: taskId },
-      data: {
-        classification: {
-          task_kind: "migration",
-          complexity: 8,
-          risk: 2,
-          files_expected: 2,
-        },
-      },
-    });
-    for (const workerName of ["codex-", " codex-a ", "a".repeat(121)]) {
-      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
-        {
-          worker_name: workerName,
-          provider: "codex",
-          routing_roles: ["migration"],
-        },
-      ]);
-
-      assert.deepEqual(await buildAmuxRoutingSnapshot(taskId, 0), {
-        eligible: false,
-        execution_ready: false,
-        reason: "worker_catalog_unavailable",
-        task: null,
-        candidates: [],
-        telemetry: {},
-      });
-    }
-  } finally {
-    if (previousCatalog === undefined) {
-      delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-    } else {
-      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
-    }
+    await restoreCatalog();
+    if (previousCatalog === undefined) delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
+    else process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
     await prisma.amuxWorkItem.delete({ where: { id: taskId } });
   }
 });
 
-test("routing snapshot exposes explicit workers without inventing runtime evidence", async () => {
+test("routing snapshot exposes registered workers without inventing runtime evidence", async () => {
   const taskId = await createTodo("amux-routing-catalog");
-
   await prisma.amuxWorkItem.update({
     where: { id: taskId },
     data: {
@@ -1848,66 +1796,31 @@ test("routing snapshot exposes explicit workers without inventing runtime eviden
       },
     },
   });
-
   const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-
-  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
-    {
-      worker_name: "z-migration",
-      provider: "DEVIN",
-      routing_roles: ["migration", "multi_file", "migration"],
-    },
-    {
-      worker_name: "a-implementation",
-      provider: "CODEX",
-      model: "explicit-model",
-      routing_roles: ["implementation"],
-    },
+  const restoreCatalog = await seedAmuxWorkerCatalog([
+    { worker_name: "codex-impl", model: "explicit-model", routing_roles: ["implementation"] },
+    { worker_name: "claude-chore", routing_roles: ["multi_file", "chore"] },
   ]);
-
   try {
     const snapshot = await buildAmuxRoutingSnapshot(taskId, 0);
-
-    assert.equal(snapshot.eligible, true);
-
-    if (!snapshot.eligible) {
-      assert.fail("expected an eligible routing snapshot");
-    }
-
+    if (!snapshot.eligible) assert.fail("expected an eligible routing snapshot");
     assert.equal(snapshot.execution_ready, false);
-
-    assert.deepEqual(snapshot.task, {
-      task_kind: "migration",
-      complexity: 8,
-      risk: 3,
-      files_expected: 2,
-    });
-
+    assert.deepEqual(snapshot.task, { task_kind: "migration", complexity: 8, risk: 3, files_expected: 2 });
     assert.deepEqual(
       snapshot.candidates.map((candidate) => candidate.worker.worker_name),
-      ["a-implementation", "z-migration"],
+      ["claude-chore", "codex-impl", "engineering-runner"],
     );
-
-    const implementation = snapshot.candidates[0];
-    const migration = snapshot.candidates[1];
-
+    const [chore, implementation] = snapshot.candidates;
+    assert.ok(chore);
     assert.ok(implementation);
-    assert.ok(migration);
-
     assert.equal(implementation.worker.provider, "codex");
     assert.equal(implementation.worker.model, "explicit-model");
-
-    assert.equal(migration.worker.provider, "devin");
-    assert.deepEqual(migration.worker.routing_roles, [
-      "migration",
-      "multi_file",
-    ]);
-
+    assert.equal(chore.worker.provider, "claude");
+    assert.deepEqual(chore.worker.routing_roles, ["chore", "multi_file"]);
     for (const candidate of snapshot.candidates) {
       assert.equal(candidate.worker.running, false);
       assert.equal(candidate.worker.status, "stopped");
       assert.equal(candidate.worker.dispatch_ready, false);
-
       assert.equal(candidate.predicted_success, null);
       assert.equal(candidate.quota_remaining, null);
       assert.equal(candidate.expected_speed, null);
@@ -1917,15 +1830,10 @@ test("routing snapshot exposes explicit workers without inventing runtime eviden
       assert.equal(candidate.provider_exhausted, false);
     }
   } finally {
-    if (previousCatalog === undefined) {
-      delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-    } else {
-      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
-    }
-
-    await prisma.amuxWorkItem.delete({
-      where: { id: taskId },
-    });
+    await restoreCatalog();
+    if (previousCatalog === undefined) delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
+    else process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
   }
 });
 
@@ -2220,7 +2128,7 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
   // worker can be the authoritative choice, so the test registers one; without
   // it the server finds no authoritative worker at all and refuses for that
   // reason instead of the mismatch this test is about.
-  const authoritativeWorker = `codex-authoritative-${randomUUID()}`;
+  const authoritativeWorker = "codex-impl";
   const requestedWorker = "claude-mismatch";
   const secret = makeAmuxSyncSecret();
 
@@ -2242,13 +2150,9 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
   process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
-  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
-    {
-      worker_name: authoritativeWorker,
-      provider: "CODEX",
-      routing_roles: ["feature", "implementation"],
-    },
-  ]);
+  // Version 35 (R2c): workers come from the registry the catalog is derived
+  // from, so they are seed workers; the fixture also writes the variable.
+  await seedAmuxWorkerCatalog([{ worker_name: authoritativeWorker, routing_roles: ["implementation"] }]);
 
   try {
     const instanceId = randomUUID();
@@ -2345,7 +2249,7 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
 // it is refused before any ownership evidence exists.
 test("claim API refuses ownership when no worker is execution-ready", async () => {
   const taskId = await createTodo("amux-api-lifecycle-gate");
-  const worker = "codex-evidence";
+  const worker = "codex-impl";
   const secret = makeAmuxSyncSecret();
 
   await prisma.amuxWorkItem.update({
@@ -2366,13 +2270,9 @@ test("claim API refuses ownership when no worker is execution-ready", async () =
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
   process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
-  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
-    {
-      worker_name: worker,
-      provider: "CODEX",
-      routing_roles: ["feature", "implementation"],
-    },
-  ]);
+  // Version 35 (R2c): workers come from the registry the catalog is derived
+  // from, so they are seed workers; the fixture also writes the variable.
+  await seedAmuxWorkerCatalog([{ worker_name: worker, routing_roles: ["implementation"] }]);
 
   try {
     /*
@@ -4659,23 +4559,17 @@ test("claim API persists authoritative routing when consistent client evidence d
 
   const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
-  const worker = `a-codex-${randomUUID()}`;
+  const worker = "codex-impl";
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
 
   process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
 
-  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
-    {
-      worker_name: worker,
-      provider: "codex",
-      routing_roles: ["feature", "implementation"],
-    },
-    {
-      worker_name: "b-claude",
-      provider: "claude",
-      routing_roles: ["reasoning"],
-    },
+  // Version 35 (R2c): workers come from the registry the catalog is derived
+  // from, so they are seed workers; the fixture also writes the variable.
+  await seedAmuxWorkerCatalog([
+    { worker_name: worker, routing_roles: ["implementation"] },
+    { worker_name: "claude-chore", routing_roles: ["reasoning"] },
   ]);
 
   try {
@@ -5270,14 +5164,16 @@ test("a worker that already owns an open card is not claimed a second one", asyn
 });
 
 test("routing does not offer a worker that already owns an open card", async () => {
-  const busy = `amux-route-busy-${randomUUID()}`;
-  const free = `amux-route-free-${randomUUID()}`;
+  const busy = "codex-impl";
+  const free = "claude-impl";
   const owned = await createTodo("amux-route-owned");
   const next = await createTodo("amux-route-next");
   const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
-    { worker_name: busy, provider: "codex", routing_roles: ["implementation"] },
-    { worker_name: free, provider: "codex", routing_roles: ["implementation"] },
+  // Version 35 (R2c): workers come from the registry the catalog is derived
+  // from, so they are seed workers; the fixture also writes the variable.
+  await seedAmuxWorkerCatalog([
+    { worker_name: busy, routing_roles: ["implementation"] },
+    { worker_name: free, routing_roles: ["implementation"] },
   ]);
   try {
     await prisma.amuxWorkItem.update({
@@ -5317,7 +5213,9 @@ test("routing does not offer a worker that already owns an open card", async () 
         candidate.worker.dispatch_ready,
       ]),
     );
-    assert.deepEqual(readiness, { [busy]: false, [free]: true });
+    // The engineering runner's constant entry is in every derived catalog; it
+    // has no runtime here, so it is never offered either.
+    assert.deepEqual(readiness, { [busy]: false, [free]: true, "engineering-runner": false });
     assert.equal(snapshot.execution_ready, true);
   } finally {
     if (previousCatalog === undefined) {
