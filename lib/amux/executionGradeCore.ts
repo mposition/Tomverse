@@ -4,7 +4,7 @@
  * the same path judgement without reading a switch or calling a model.
  */
 
-export const AMUX_EXECUTION_GRADE_CODE_LATCH = false;
+export const AMUX_EXECUTION_GRADE_CODE_LATCH = true;
 export const AMUX_EXECUTION_GRADE_ENV = "TOMVERSE_AMUX_EXECUTION_GRADE";
 
 export const amuxExecutionGradeRoutingOpen = (codeLatch: boolean,
