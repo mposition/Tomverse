@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import { AMUX_IDEA_NODE_PLAN_APPROVAL_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
 import type { Session } from "next-auth";
 
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
@@ -46,7 +47,7 @@ export async function approveAmuxV4NodePlan(session: Session, request: Request,
       callbackReturned = true;
       return { ideaId: input.ideaId, nodes, executionAuthorized: false as const };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      maxWait: 5_000, timeout: 60_000 });
+      ...AMUX_IDEA_NODE_PLAN_APPROVAL_TRANSACTION });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
     if (!callbackReturned && error instanceof AmuxNodeDuplicateScanError) {

@@ -16,10 +16,11 @@ test("the plan screen posts once to the whole-plan route and reads back instead 
   const readBack = panel.slice(panel.indexOf("const readBack = async"), panel.indexOf("const setMetric ="));
   assert.ok(readBack.indexOf("await load()") < readBack.indexOf("writePending(ideaId, null)"),
     "the attempt is released only after the fresh read");
-  assert.ok(readBack.includes("stillProposed.length === 0 ||"));
-  assert.ok(readBack.includes("Date.now() - pending.startedAt > PLAN_SETTLED_AFTER_MS"));
+  assert.ok(readBack.includes("decidePlanReadBack({"), "the decision is the pure one, tested in amuxIdeaPlanReadBackRender");
   assert.ok(readBack.includes('setState("processing")'));
-  assert.ok(panel.includes("const PLAN_SETTLED_AFTER_MS = 180_000;"));
+  const decision = readFileSync("lib/amux/ideaPlanReadBackCore.ts", "utf8");
+  assert.ok(decision.includes("export const PLAN_SETTLED_AFTER_MS = 180_000;"));
+  assert.ok(decision.includes("attempt.startedAt + PLAN_SETTLED_AFTER_MS - now"));
   // Every analysis page is read, so the screen shows what the server approves.
   assert.ok(panel.includes("async function readAllUnits("));
   assert.ok(panel.includes("page = view.nextChunkIndex"));
