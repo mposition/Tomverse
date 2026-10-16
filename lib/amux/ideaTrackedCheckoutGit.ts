@@ -107,10 +107,10 @@ export async function readAmuxPinnedTrackedTree(
   }
   const entries: AmuxTrackedTreeEntry[] = [];
   const pending = [{ path: "", objectId: match[1] }];
-  // Reusing one tree object at two paths permits a tiny Git DAG to expand
-  // exponentially. Refuse that structure before it can exhaust the runner;
-  // this is a structural safety check, not a file-count ceiling.
-  const expandedTreeIds = new Set<string>();
+  // One tree object may legitimately appear under several paths. Parse it
+  // once, then expand each path while yielding so an operator stop can abort
+  // even a highly shared Git DAG without imposing a file-count ceiling.
+  const parsedTrees = new Map<string, ReturnType<typeof parseRawTree>>();
   let visited = 0;
   while (pending.length > 0) {
     if (signal?.aborted) throw new AmuxTrackedCheckoutManifestError();
@@ -119,11 +119,13 @@ export async function readAmuxPinnedTrackedTree(
       if (signal?.aborted) throw new AmuxTrackedCheckoutManifestError();
     }
     const next = pending.pop()!;
-    if (expandedTreeIds.has(next.objectId)) throw new AmuxTrackedCheckoutManifestError();
-    expandedTreeIds.add(next.objectId);
-    const tree = await localGit(repositoryPath, ["cat-file", "tree", next.objectId], signal);
-    verifyGitObject("tree", tree, next.objectId);
-    const parsed = parseRawTree(tree, commitSha.length);
+    let parsed = parsedTrees.get(next.objectId);
+    if (!parsed) {
+      const tree = await localGit(repositoryPath, ["cat-file", "tree", next.objectId], signal);
+      verifyGitObject("tree", tree, next.objectId);
+      parsed = parseRawTree(tree, commitSha.length);
+      parsedTrees.set(next.objectId, parsed);
+    }
     for (const file of parsed.files) entries.push({ ...file, path: next.path + file.path });
     for (const child of parsed.childTrees) {
       pending.push({ path: `${next.path}${child.path}/`, objectId: child.objectId });

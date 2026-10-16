@@ -69,7 +69,7 @@ test("local Git enumerates the pinned commit, omitting untracked and secret path
   }
 });
 
-test("a repeated child tree object is refused before path amplification", async () => {
+test("a repeated child tree object preserves both tracked paths", async () => {
   const directory = await mkdtemp(join(tmpdir(), "amux-tree-alias-"));
   try {
     git(directory, "init", "--quiet");
@@ -85,7 +85,9 @@ test("a repeated child tree object is refused before path amplification", async 
     const pinned = git(directory, "rev-parse", "HEAD").trim();
     assert.equal(git(directory, "rev-parse", `${pinned}:one`).trim(),
       git(directory, "rev-parse", `${pinned}:two`).trim());
-    await assert.rejects(() => readAmuxPinnedTrackedTree(directory, pinned), /invalid_tree/);
+    const result = await readAmuxPinnedTrackedTree(directory, pinned);
+    assert.deepEqual(result.files.map((file) => file.path),
+      ["one/same.txt", "two/same.txt"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

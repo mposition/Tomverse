@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -21,7 +21,10 @@ test("checkout contains only scanned bytes from the pinned tracked tree", async 
     git(repositoryPath, "config", "user.email", "amux-test@example.invalid");
     await mkdir(join(repositoryPath, "src"));
     await writeFile(join(repositoryPath, "src", "safe.txt"), "safe pinned bytes\n");
+    await writeFile(join(repositoryPath, "src", "safe-copy.txt"), "safe pinned bytes\n");
     await writeFile(join(repositoryPath, "src", "payload.txt"), `token=${"A".repeat(24)}\n`);
+    await writeFile(join(repositoryPath, "src", "payload-copy.txt"),
+      `token=${"A".repeat(24)}\n`);
     await writeFile(join(repositoryPath, "src", "late.txt"),
       `${"ordinary text\n".repeat(2_000)}token=${"B".repeat(24)}\n`);
     await writeFile(join(repositoryPath, "src", "keyblock.txt"),
@@ -43,15 +46,18 @@ test("checkout contains only scanned bytes from the pinned tracked tree", async 
     checkout = await materializeAmuxTrackedCheckout({
       repositoryPath, commitSha: pinned, digestSecret: "d".repeat(32),
     });
-    assert.deepEqual(checkout.files, ["src/safe.txt"]);
+    assert.deepEqual(checkout.files, ["src/safe-copy.txt", "src/safe.txt"]);
     assert.deepEqual(checkout.excludedReasons, {
-      secret_path: 1, secret_content: 3, non_regular: 0, unscannable_content: 1,
+      secret_path: 1, secret_content: 4, non_regular: 0, unscannable_content: 1,
     });
-    assert.equal(checkout.excludedCount, 5);
+    assert.equal(checkout.excludedCount, 6);
     assert.match(checkout.excludedPathDigest, /^[a-f0-9]{64}$/);
     assert.equal(await readFile(join(checkout.directory, "src", "safe.txt"), "utf8"),
       "safe pinned bytes\n");
-    assert.deepEqual(await readdir(join(checkout.directory, "src")), ["safe.txt"]);
+    assert.equal((await stat(join(checkout.directory, "src", "safe.txt"))).ino,
+      (await stat(join(checkout.directory, "src", "safe-copy.txt"))).ino);
+    assert.deepEqual(await readdir(join(checkout.directory, "src")),
+      ["safe-copy.txt", "safe.txt"]);
   } finally {
     if (checkout) await rm(checkout.directory, { recursive: true, force: true });
     await rm(repositoryPath, { recursive: true, force: true });

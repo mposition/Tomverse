@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -46,26 +46,48 @@ export async function materializeAmuxTrackedCheckout(input: {
   const excluded: Array<{ path: string; reason: keyof AmuxPreparedTrackedCheckout["excludedReasons"] }> =
     [...manifest.excluded];
   const files: string[] = [];
+  const contentOutcomes = new Map<string,
+    { kind: "excluded"; reason: "secret_content" | "unscannable_content" } |
+    { kind: "written"; destination: string }>();
   try {
     for (const file of manifest.files) {
       if (input.signal?.aborted) throw new AmuxTrackedCheckoutManifestError();
+      const destination = resolve(directory, file.path);
+      const within = relative(directory, destination);
+      if (!within || within === ".." || within.startsWith(`..${sep}`) || isAbsolute(within)) {
+        throw new AmuxTrackedCheckoutManifestError();
+      }
+      const prior = contentOutcomes.get(file.objectId);
+      if (prior?.kind === "excluded") {
+        excluded.push({ path: file.path, reason: prior.reason });
+        continue;
+      }
+      if (prior?.kind === "written") {
+        await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+        await link(prior.destination, destination);
+        files.push(file.path);
+        continue;
+      }
       const bytes = await readAmuxPinnedTrackedBlob(
         input.repositoryPath, file.objectId, input.signal);
       try {
         let secret: boolean;
         try { secret = containsSecret(bytes); }
-        catch { excluded.push({ path: file.path, reason: "unscannable_content" }); continue; }
+        catch {
+          contentOutcomes.set(file.objectId,
+            { kind: "excluded", reason: "unscannable_content" });
+          excluded.push({ path: file.path, reason: "unscannable_content" });
+          continue;
+        }
         if (secret) {
+          contentOutcomes.set(file.objectId,
+            { kind: "excluded", reason: "secret_content" });
           excluded.push({ path: file.path, reason: "secret_content" });
           continue;
         }
-        const destination = resolve(directory, file.path);
-        const within = relative(directory, destination);
-        if (!within || within === ".." || within.startsWith(`..${sep}`) || isAbsolute(within)) {
-          throw new AmuxTrackedCheckoutManifestError();
-        }
         await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
         await writeFile(destination, bytes, { flag: "wx", mode: 0o400 });
+        contentOutcomes.set(file.objectId, { kind: "written", destination });
         files.push(file.path);
       } finally { bytes.fill(0); }
     }
