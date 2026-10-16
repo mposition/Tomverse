@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { materializeAmuxTrackedCheckout } from "../lib/amux/ideaTrackedCheckoutMaterialize.ts";
+import { materializeAmuxTrackedCheckout, withAmuxTrackedCheckout } from "../lib/amux/ideaTrackedCheckoutMaterialize.ts";
 
 const git = (directory, ...args) => execFileSync("git", ["-C", directory, ...args], {
   encoding: "utf8", windowsHide: true,
@@ -30,6 +30,7 @@ test("checkout contains only scanned bytes from the pinned tracked tree", async 
     await writeFile(join(repositoryPath, "src", "keyblock.txt"),
       "-----BEGIN ENCRYPTED PRIVATE KEY-----\nexample\n");
     await writeFile(join(repositoryPath, "src", "binary.dat"), Buffer.from([0, 1, 2]));
+    await writeFile(join(repositoryPath, "src", "invalid-utf8.dat"), Buffer.from([0xc3, 0x28]));
     await writeFile(join(repositoryPath, ".env"), "path excluded before read\n");
     git(repositoryPath, "add", "--", "src", ".env");
     git(repositoryPath, "commit", "--quiet", "-m", "pinned");
@@ -48,9 +49,9 @@ test("checkout contains only scanned bytes from the pinned tracked tree", async 
     });
     assert.deepEqual(checkout.files, ["src/safe-copy.txt", "src/safe.txt"]);
     assert.deepEqual(checkout.excludedReasons, {
-      secret_path: 1, secret_content: 4, non_regular: 0, unscannable_content: 1,
+      secret_path: 1, secret_content: 4, non_regular: 0, unscannable_content: 2,
     });
-    assert.equal(checkout.excludedCount, 6);
+    assert.equal(checkout.excludedCount, 7);
     assert.match(checkout.excludedPathDigest, /^[a-f0-9]{64}$/);
     assert.equal(await readFile(join(checkout.directory, "src", "safe.txt"), "utf8"),
       "safe pinned bytes\n");
@@ -58,6 +59,27 @@ test("checkout contains only scanned bytes from the pinned tracked tree", async 
       (await stat(join(checkout.directory, "src", "safe-copy.txt"))).ino);
     assert.deepEqual(await readdir(join(checkout.directory, "src")),
       ["safe-copy.txt", "safe.txt"]);
+
+    let completedPath;
+    const result = await withAmuxTrackedCheckout({
+      repositoryPath, commitSha: pinned, digestSecret: "d".repeat(32),
+    }, async (prepared) => {
+      completedPath = prepared.directory;
+      assert.equal(await readFile(join(prepared.directory, "src", "safe.txt"), "utf8"),
+        "safe pinned bytes\n");
+      return "finished";
+    });
+    assert.equal(result, "finished");
+    await assert.rejects(() => access(completedPath), { code: "ENOENT" });
+
+    let failedPath;
+    await assert.rejects(() => withAmuxTrackedCheckout({
+      repositoryPath, commitSha: pinned, digestSecret: "d".repeat(32),
+    }, async (prepared) => {
+      failedPath = prepared.directory;
+      throw new Error("analysis stopped");
+    }), /analysis stopped/);
+    await assert.rejects(() => access(failedPath), { code: "ENOENT" });
   } finally {
     if (checkout) await rm(checkout.directory, { recursive: true, force: true });
     await rm(repositoryPath, { recursive: true, force: true });

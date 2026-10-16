@@ -110,3 +110,18 @@ export async function materializeAmuxTrackedCheckout(input: {
     throw new AmuxTrackedCheckoutManifestError();
   }
 }
+
+/** Keep the staged source lifetime inside one analysis attempt. The CLI path
+ * receives only the checkout directory; the callback must settle on stop so
+ * success and failure both remove the checkout before returning. */
+export async function withAmuxTrackedCheckout<T>(
+  input: Parameters<typeof materializeAmuxTrackedCheckout>[0],
+  run: (checkout: AmuxPreparedTrackedCheckout) => Promise<T>,
+): Promise<T> {
+  const checkout = await materializeAmuxTrackedCheckout(input);
+  try {
+    return await run(checkout);
+  } finally {
+    await rm(checkout.directory, { recursive: true, force: true });
+  }
+}
