@@ -248,6 +248,42 @@ test("a refusal code on the wrong status is recovered by exact-ID readback", asy
     observation: "absent", retryWrite: false });
 });
 
+test("ambiguous POST replies always resolve through exact-ID readback", async () => {
+  for (const [postStatus, postBody, readStatus, readBody, expected] of [
+    [503, { error: "outcome_unknown", requestId, retryWrite: false,
+      readbackPath: `${AMUX_SESSION_INTAKE_ROUTE}?requestId=${requestId}` },
+    200, committed(), { state: "committed", recoveredByReadback: true }],
+    [409, { error: "request_already_seen", requestId, retryWrite: false,
+      readbackPath: `${AMUX_SESSION_INTAKE_ROUTE}?requestId=${requestId}` },
+    409, { status: "partial", requestId, ideaId, retryWrite: false },
+    { state: "outcome_unknown", observation: "partial" }],
+    [503, { error: "outcome_unknown", requestId, retryWrite: false,
+      readbackPath: `${AMUX_SESSION_INTAKE_ROUTE}?requestId=${requestId}` },
+    409, { available: false, reason: "session_intake_readback_disabled" },
+    { state: "outcome_unknown", observation: "disabled" }],
+  ]) {
+    const methods = [];
+    const inspected = prepareAmuxSessionIntakeSubmission(clientInput, () => requestId);
+    const result = await submitAmuxSessionIntakeClientRequest({
+      endpoint,
+      secret,
+      inspected,
+      fetcher: async (_url, init) => {
+        methods.push(init.method);
+        return init.method === "POST"
+          ? response(postStatus, postBody)
+          : response(readStatus, readBody);
+      },
+    });
+    assert.deepEqual(methods, ["POST", "GET"]);
+    for (const [key, value] of Object.entries(expected)) {
+      assert.equal(result[key], value);
+    }
+    assert.equal(result.requestId, requestId);
+    assert.equal(result.state === "refused", false);
+  }
+});
+
 test("the fixed CLI entrypoint prints the request ID before one write and supports readback-only", async () => {
   const prepared = [];
   const methods = [];

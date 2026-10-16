@@ -5,13 +5,14 @@ import { fileURLToPath } from "node:url";
 import {
   AMUX_SESSION_INTAKE_ORIGIN_ENV,
   amuxSessionIntakeEndpoint,
-  isAmuxSessionIntakeClientSecret,
   prepareAmuxSessionIntakeSubmission,
   readAmuxSessionIntakeClientRequest,
   submitAmuxSessionIntakeClientRequest,
 } from "../lib/amux/ideaSessionIntakeClientCore.ts";
-import { AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV } from
-  "../lib/amux/ideaSessionIntakeReadbackCore.ts";
+import {
+  AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
+  isAmuxSessionIntakeClientSecret,
+} from "../lib/amux/ideaSessionIntakeReadbackCore.ts";
 
 /**
  * Fixed repository client for coding-tool sessions.

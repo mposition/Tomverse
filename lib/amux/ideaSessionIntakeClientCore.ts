@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
+import { isAmuxSessionIntakeClientSecret } from
+  "./ideaSessionIntakeReadbackCore.ts";
 import {
   inspectAmuxIdeaSessionSubmission,
   type AmuxIdeaSessionSubmissionInspection,
@@ -10,11 +12,6 @@ export const AMUX_SESSION_INTAKE_ORIGIN_ENV =
   "TOMVERSE_AMUX_SESSION_INTAKE_ORIGIN";
 export const AMUX_SESSION_INTAKE_ROUTE =
   "/api/internal/amux/ideas/session-intake";
-const CLIENT_SECRET = /^[A-Za-z0-9_-]{32,256}$/;
-
-export const isAmuxSessionIntakeClientSecret = (
-  value: unknown,
-): value is string => typeof value === "string" && CLIENT_SECRET.test(value);
 
 const CLOSED_REFUSALS = new Map<string, number>([
   ["Unauthorized", 401],

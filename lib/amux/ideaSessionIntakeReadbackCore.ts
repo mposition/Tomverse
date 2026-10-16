@@ -30,6 +30,10 @@ export function amuxSessionIntakeConflictingSecretValues(
 
 const SECRET = /^[A-Za-z0-9_-]{32,256}$/;
 
+export const isAmuxSessionIntakeClientSecret = (
+  value: unknown,
+): value is string => typeof value === "string" && SECRET.test(value);
+
 export const amuxSessionIntakeReadbackEnabled = (
   sessionIntakeReadback: string | undefined,
   ideaReadback: string | undefined,
@@ -43,12 +47,12 @@ export function isAmuxSessionIntakeClientAuthorized(
   configured: string | undefined,
   otherSecrets: readonly (string | undefined)[],
 ): boolean {
-  if (typeof configured !== "string" || !SECRET.test(configured) ||
+  if (!isAmuxSessionIntakeClientSecret(configured) ||
       otherSecrets.some((secret) => secret === configured)) return false;
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ")) return false;
   const provided = authorization.slice(7);
-  if (!SECRET.test(provided)) return false;
+  if (!isAmuxSessionIntakeClientSecret(provided)) return false;
   return timingSafeEqual(
     createHash("sha256").update(configured).digest(),
     createHash("sha256").update(provided).digest(),
