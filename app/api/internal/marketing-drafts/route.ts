@@ -15,10 +15,10 @@ import {
   marketingGeneratorSecret,
   parseMarketingGeneratorJson,
   readMarketingGeneratorBody,
-  reportMarketingGeneratorIncident,
 } from "@/lib/marketingGeneratorAuth";
 import { intakeMarketingGeneratorDraft } from "@/lib/marketingDraftIntakeStore";
 import { runMarketingTransaction } from "@/lib/marketingStore";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 
 // The generator's draft intake (S3 plan, S3a; docs/policy/marketing-automation.md §4).
@@ -79,7 +79,16 @@ export async function POST(request: Request) {
     } catch (error) {
       // This draft's outcome is unknown; the ones before it are answered. The
       // generator resends the whole submission and each key is read back.
-      reportMarketingGeneratorIncident("marketing-drafts", error);
+      void reportOperationalIncident({
+        code: "MARKETING_GENERATOR_ROUTE_FAILED",
+        title: "Marketing generator draft could not be recorded",
+        error,
+        severity: "error",
+        cooldownMs: 30 * 60 * 1_000,
+        context: { component: "marketing-drafts" },
+      }).catch((reportError: unknown) => {
+        console.error("Marketing generator incident could not be reported:", reportError);
+      });
       return json({ results, code: "outcome_unknown", at: draft.logicalDraftId }, 500);
     }
   }

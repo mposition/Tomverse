@@ -9,7 +9,6 @@ import {
   marketingGeneratorSecret,
   parseMarketingGeneratorJson,
   readMarketingGeneratorBody,
-  reportMarketingGeneratorIncident,
 } from "@/lib/marketingGeneratorAuth";
 import {
   MARKETING_INTEL_REPORT_MAX_BODY_BYTES,
@@ -18,6 +17,7 @@ import {
 } from "@/lib/marketingIntelReportCore";
 import { recordMarketingGeneratorReport } from "@/lib/marketingIntelReportStore";
 import { runMarketingTransaction } from "@/lib/marketingStore";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 
 // The generator's internal reports (S3 plan, S3f; docs/policy/marketing-automation.md §4).
@@ -60,7 +60,16 @@ export async function POST(request: Request) {
   } catch (error) {
     // Rolled back, or committed with the answer lost: unknown either way, and
     // the same report resent is read back.
-    reportMarketingGeneratorIncident("marketing-intel-reports", error);
+    void reportOperationalIncident({
+      code: "MARKETING_GENERATOR_ROUTE_FAILED",
+      title: "Marketing generator report could not be recorded",
+      error,
+      severity: "error",
+      cooldownMs: 30 * 60 * 1_000,
+      context: { component: "marketing-intel-reports" },
+    }).catch((reportError: unknown) => {
+      console.error("Marketing generator incident could not be reported:", reportError);
+    });
     return json({ code: "outcome_unknown" }, 500);
   }
 }
