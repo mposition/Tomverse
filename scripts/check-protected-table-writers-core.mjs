@@ -2218,10 +2218,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingLlmBudgetStore.ts",
     table: "MarketingLlmCall",
-    tableMentions: 11,
-    writeVerbs: 5,
+    tableMentions: 16,
+    writeVerbs: 7,
     reason:
-      "The sole registered writer of the marketing LLM cost ledger: it inserts a reservation and moves a call to dispatched or to its one close, each after the generator's audit row in the same transaction. The database triggers own every transition rule and timestamp; the other mentions are the reads that lock the month and the row.",
+      "The sole registered writer of the marketing LLM cost ledger: it inserts a reservation and moves a call to dispatched or to its one close (including the 15-minute expiry), each after the generator's audit row in the same transaction. The database triggers own every transition rule and timestamp; the other mentions are the reads that lock the month and the row.",
   },
   {
     path: "lib/adminAuditSystemActors.ts",

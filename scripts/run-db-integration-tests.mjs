@@ -738,6 +738,10 @@ run(
     // The generator's budget route (S3c3a): signed, bounded, strict requests,
     // each action in its own transaction, and no model pinned as built.
     "tests/integration/marketing-llm-budget-route.db.test.ts",
+    // The ledger's expiry (S3c3b): stale reservations released, stale
+    // dispatches kept as unknown, a late generator report a conflict, nothing
+    // under the kill switch, and a held row skipped rather than waited on.
+    "tests/integration/marketing-llm-expiry.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them

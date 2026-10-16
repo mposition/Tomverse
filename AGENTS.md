@@ -1391,6 +1391,10 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   **budget HMAC이 action·deadline·모든 필드를 덮습니다** — 가로챈 요청을 더 늦은 deadline이나 다른 call의 필드로 다시
   보낼 수 없습니다. action마다 트랜잭션 하나이며, 트랜잭션 안의 실패는 전부 되돌려지므로 같은 요청을 다시 보내면
   커밋된 것을 읽어 옵니다. 빌드에는 pin이 없어 모든 예약이 거절됩니다.
+- **S3c3b(만료 sweep)**: store의 `expireMarketingLlmCalls()`, `lib/marketingLlmExpiry.ts`(15분 주기 maintenance 단계),
+  `tests/integration/marketing-llm-expiry.db.test.ts`. 15분 안에 dispatch되지 않은 예약은 `released`, 1시간 안에 보고되지
+  않은 dispatch는 예약액 그대로 `unknown_retained`입니다. 만료 종결은 action `expire`라 그 뒤의 생성기 보고는 conflict이고,
+  행마다 트랜잭션 하나이며 생성기가 잡고 있는 행은 기다리지 않고 건너뜁니다. kill switch 중에는 아무것도 하지 않습니다.
 
 # 엔지니어링 Agent
 
