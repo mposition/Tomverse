@@ -297,9 +297,8 @@ export async function readAmuxIdeaSessionSubmissionRequest(requestId: string): P
 }
 
 /** Default-off write service. It atomically stores the encrypted submission
- * and its append-only queue identity. There is intentionally no POST route
- * until direct-read source evidence and the system transfer/cost gates form a
- * complete analysis boundary; this queue receipt reserves no money. */
+ * and its append-only queue identity. The intake route may call only this
+ * complete boundary; this queue receipt reserves no money. */
 export async function submitAmuxIdeaFromSession(input: {
   inspected: Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }>;
 }): Promise<CommittedAmuxIdeaSessionIntake> {
