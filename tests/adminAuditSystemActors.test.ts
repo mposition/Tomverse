@@ -5,6 +5,10 @@ import test from "node:test";
 
 import {
   AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS,
+  AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+  AMUX_SESSION_IDEA_SUBMITTED_SCOPE,
+  AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+  AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET,
@@ -127,6 +131,7 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-v22-recovery-controller",
     "amux-v22-api-model-access",
     "amux-v4-intake",
+    "amux-session-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",
     "engineering-agent-retention",
@@ -190,6 +195,22 @@ test("the system actor list is closed and changes only by review", () => {
   assert.equal(AMUX_V4_IDEA_SOURCE_SYSTEM, "admin-idea-v4");
   assert.equal(AMUX_V4_IDEA_AGENT_ID, "amux-intake");
   assert.equal(isSystemAuditActor(AMUX_V4_IDEA_SYSTEM_ACTOR), true);
+  assert.equal(isSystemAuditActor(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR), true);
+  assert.equal(systemAuditActionAllowed(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+    AMUX_SESSION_IDEA_SUBMITTED_ACTION, AMUX_SESSION_IDEA_SUBMITTED_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+    "amux.idea.operating_scope.updated", "AmuxIdeaOperatingScopeSetting"), false);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+    targetType: AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+    metadata: { systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+      actorScope: AMUX_SESSION_IDEA_SUBMITTED_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+    targetType: AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+    metadata: { systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR },
+  })), "unknown");
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
     AMUX_V4_UNIT_UNKNOWN_ACTION, AMUX_V4_UNIT_DECISION_TARGET), true);
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,

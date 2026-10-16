@@ -8,6 +8,7 @@ import { loadCurrentAmuxContentKeys } from "../lib/amux/ideaKeyConfig.ts";
 
 export const CONTENT_COLUMNS = Object.freeze([
   ["AmuxIdeaSubmission", "rawCiphertext", "rawKeyId"],
+  ["AmuxIdeaSubmission", "sourceProvenanceCiphertext", "sourceProvenanceKeyId"],
   ["AmuxIdeaSourceScopeApproval", "scopeCiphertext", "scopeKeyId"],
   ["AmuxIdeaTransferPreview", "payloadCiphertext", "payloadKeyId"],
   ["AmuxIdeaAnalysisChunk", "draftCiphertext", "draftKeyId"],
