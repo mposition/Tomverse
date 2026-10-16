@@ -58,6 +58,41 @@ const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
 
 export type CommittedIdeaSubmission = { ideaId: string; requestId: string; auditId: string };
 
+/**
+ * The owner and session intake paths share the exact encrypted idea body and
+ * seven-day clock. Actor authority and audit evidence stay in their separate
+ * writers so a system submission can never manufacture a human session.
+ */
+export function prepareIdeaSubmissionStorage(input: {
+  inspected: Pick<Extract<IdeaSubmissionInspection, { ok: true }>, "requestId" | "input">;
+  ideaId: string;
+  keys: AmuxContentKeys;
+  submittedAt: Date;
+}) {
+  const analysisDeadline = analysisDeadlineAt(input.submittedAt);
+  const body = Buffer.from(JSON.stringify(input.inspected.input), "utf8");
+  const sealed = sealAmuxContent(body, "idea_raw", input.ideaId, input.keys);
+  return {
+    sealed,
+    data: {
+      id: input.ideaId,
+      requestId: input.inspected.requestId,
+      state: "submitted",
+      rawCiphertext: new Uint8Array(sealed.ciphertext),
+      rawKeyId: sealed.keyId,
+      rawKeyVersion: sealed.keyVersion,
+      rawDigest: sealed.digest,
+      rawDigestKeyId: sealed.digestKeyId,
+      submittedAt: input.submittedAt,
+      analysisDeadlineAt: analysisDeadline,
+      // This is eligibility, not the 24-hour latest-compliant SLA time.
+      rawPurgeAfter: analysisDeadline,
+      createdAt: input.submittedAt,
+      updatedAt: input.submittedAt,
+    },
+  };
+}
+
 /** Transaction body for synthetic DB tests. The public entry below owns the
  * closed shipment latch, owner step-up and key preflight. Never route here. */
 export async function commitIdeaSubmission(
@@ -78,26 +113,12 @@ export async function commitIdeaSubmission(
   if (existing) throw new IdeaSubmissionError("request_already_seen", 409);
 
   const submittedAt = await databaseNow(tx);
-  const analysisDeadline = analysisDeadlineAt(submittedAt);
-  const body = Buffer.from(JSON.stringify(input.inspected.input), "utf8");
-  const sealed = sealAmuxContent(body, "idea_raw", input.ideaId, input.keys);
+  const prepared = prepareIdeaSubmissionStorage({ ...input, submittedAt });
+  const { sealed } = prepared;
   await tx.amuxIdeaSubmission.create({
     data: {
-      id: input.ideaId,
-      requestId: input.inspected.requestId,
+      ...prepared.data,
       actorUserId,
-      state: "submitted",
-      rawCiphertext: new Uint8Array(sealed.ciphertext),
-      rawKeyId: sealed.keyId,
-      rawKeyVersion: sealed.keyVersion,
-      rawDigest: sealed.digest,
-      rawDigestKeyId: sealed.digestKeyId,
-      submittedAt,
-      analysisDeadlineAt: analysisDeadline,
-      // This is eligibility, not the 24-hour latest-compliant SLA time.
-      rawPurgeAfter: analysisDeadline,
-      createdAt: submittedAt,
-      updatedAt: submittedAt,
     },
   });
   const auditId = await writeAdminAuditLog({

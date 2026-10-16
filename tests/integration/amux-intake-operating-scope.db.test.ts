@@ -113,12 +113,23 @@ test("the database refuses a row without its audit evidence and any change to a 
     for (const statement of [
       `UPDATE "AmuxIdeaOperatingScopeSetting" SET "modelId" = 'other-model'`,
       `DELETE FROM "AmuxIdeaOperatingScopeSetting"`,
-      `TRUNCATE "AmuxIdeaOperatingScopeSetting"`,
     ]) {
       await tx.$executeRawUnsafe("SAVEPOINT change_attempt");
       await assert.rejects(tx.$executeRawUnsafe(statement), /append only/, statement);
       await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT change_attempt");
     }
+    await tx.$executeRawUnsafe("SAVEPOINT truncate_attempt");
+    await assert.rejects(
+      tx.$executeRawUnsafe(`TRUNCATE "AmuxIdeaOperatingScopeSetting"`),
+      /referenced in a foreign key constraint/,
+    );
+    await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT truncate_attempt");
+    await tx.$executeRawUnsafe("SAVEPOINT truncate_cascade_attempt");
+    await assert.rejects(
+      tx.$executeRawUnsafe(`TRUNCATE "AmuxIdeaOperatingScopeSetting" CASCADE`),
+      /append only/,
+    );
+    await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT truncate_cascade_attempt");
     assert.equal((await readAmuxOperatingScope(tx))?.scope.model.modelId, "claude-opus-5-5");
   });
 });

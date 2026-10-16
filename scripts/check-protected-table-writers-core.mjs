@@ -631,6 +631,22 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261016040000_amux_v19_session_submission/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 3,
+    writeVerbs: 9,
+    reason:
+      "The v19 session-submission migration adds one restrictive scope foreign key and its submission guard reads the referenced and latest immutable scope rows. It never writes an operating-scope row; the write verbs are DDL, trigger events and the guard's refused UPDATE path on AmuxIdeaSubmission.",
+  },
+  {
+    path: "prisma/migrations/20261016040000_amux_v19_session_submission/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 9,
+    reason:
+      "The v19 session-submission migration adds one restrictive audit foreign key and its guard reads the same-transaction canonical system audit before accepting AmuxIdeaSubmission. It never writes AdminAuditLog; the write verbs are DDL, trigger events and the guarded submission update path.",
+  },
   ...[
     "AmuxV22TaskRecoveryInspectionRequest",
     "AmuxV22TaskRecoveryApproval",
@@ -1360,7 +1376,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "scripts/check-enum-constraints.mjs",
     table: "AgentDigestItem",
     tableMentions: 1,
-    writeVerbs: 19,
+    writeVerbs: 20,
     reason:
       "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
   },
@@ -2321,7 +2337,7 @@ export const RAW_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/check-enum-constraints.mjs", table: "PromptRefinerProductOperationalGuard",
-    tableMentions: 2, writeVerbs: 19,
+    tableMentions: 2, writeVerbs: 20,
     reason: "Two closed constraint-registry identifiers link the latch state and reason checks to their runtime lists. This checker reads source and migration SQL, holds no database client and executes no SQL.",
   },
 ];
