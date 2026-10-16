@@ -97,6 +97,9 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // The marketing LLM cost ledger's price pins and cap ceiling (marketing
   // policy v4): a price is a person's decision here as in modelPricing.ts.
   "lib/marketingLlmBudgetCore.ts",
+  // The official hosts a market fact may cite (S3f): which competitor and which
+  // host is a person's decision about content.
+  "lib/marketingIntelReportCore.ts",
   "docs/release-gates/**",
   "prisma/**",
   // §4-2: the execution environment. Root files and root dot-directories are
@@ -293,6 +296,8 @@ export const RESERVED_DECISION_CONSTANTS: ReadonlyArray<{
   },
   { name: "CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED", definedIn: ["lib/modelPricing.ts"] },
   { name: "MARKETING_LLM_PRICE_PINS", definedIn: ["lib/marketingLlmBudgetCore.ts"] },
+  // Which competitors A3 tracks and which of their hosts are official (S3f).
+  { name: "MARKETING_COMPETITOR_SOURCE_HOSTS", definedIn: ["lib/marketingIntelReportCore.ts"] },
   { name: "STATIC_CATALOG_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
   { name: "OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
   { name: "RESERVATION_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
