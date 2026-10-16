@@ -76,7 +76,8 @@ export async function POST(request: Request) {
         { status: error.code === "forbidden" ? 403 :
           error.code === "schema_rejected" ? 400 :
           error.code === "catalog_changed" ||
-          error.code === "evidence_unverified" ? 409 : 503,
+          error.code === "evidence_unverified" ||
+          error.code === "grade_route_mismatch" ? 409 : 503,
           headers: noStore });
     }
     const security = apiSecurityResponse(error);

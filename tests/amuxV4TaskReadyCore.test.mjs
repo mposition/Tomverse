@@ -62,6 +62,14 @@ test("missing approval, path, scope, role, price, worker and halt fail closed", 
   }
 });
 
+test("v52 Task with no exact-grade worker reports the grade-specific hold", () => {
+  assert.deepEqual(evaluateAmuxV4TaskReady({ ...base(),
+    compatibleWorkerCount: 0, exactGradeRouting: true }).reasons,
+  ["no_worker_for_grade"]);
+  assert.deepEqual(evaluateAmuxV4TaskReady({ ...base(),
+    compatibleWorkerCount: 0 }).reasons, ["worker_unavailable"]);
+});
+
 test("only explicit approved completed dependencies count", () => {
   const missing = evaluateAmuxV4TaskReady({ ...base(), dependencies: [] });
   assert.deepEqual(missing.reasons, ["dependency_set_changed"]);

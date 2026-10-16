@@ -5,6 +5,13 @@
  */
 
 export const AMUX_EXECUTION_GRADE_CODE_LATCH = false;
+export const AMUX_EXECUTION_GRADE_ENV = "TOMVERSE_AMUX_EXECUTION_GRADE";
+
+export const amuxExecutionGradeRoutingOpen = (codeLatch: boolean,
+  value: string | undefined) => codeLatch && value === "enabled";
+
+export const amuxExecutionGradeRoutingEnabled = (value: string | undefined) =>
+  amuxExecutionGradeRoutingOpen(AMUX_EXECUTION_GRADE_CODE_LATCH, value);
 
 /** The sole contract-path list. Change it only with the approved policy. */
 export const AMUX_CONTRACT_PATHS = [
@@ -68,6 +75,42 @@ export const AMUX_CONTRACT_PATHS = [
 
 export type AmuxExecutionGrade = "routine" | "advanced" | "frontier";
 export type AmuxExecutionPathClass = "invalid" | "contract" | "ordinary";
+
+export const AMUX_EXECUTION_GRADE_WORKER_ROLE = {
+  routine: "chore",
+  advanced: "implementation",
+  frontier: "contract",
+} as const;
+
+export const amuxWorkerRoleForExecutionGrade = (grade: unknown):
+  (typeof AMUX_EXECUTION_GRADE_WORKER_ROLE)[AmuxExecutionGrade] | null =>
+  typeof grade === "string" &&
+  Object.hasOwn(AMUX_EXECUTION_GRADE_WORKER_ROLE, grade) ?
+    AMUX_EXECUTION_GRADE_WORKER_ROLE[grade as AmuxExecutionGrade] : null;
+
+export const amuxWorkerMatchesExecutionGrade = (grade: unknown,
+  workerName: string,
+  workerGrades: ReadonlyMap<string, string> | null): boolean => {
+  const requiredRole = amuxWorkerRoleForExecutionGrade(grade);
+  return requiredRole !== null &&
+    workerGrades?.get(workerName) === requiredRole;
+};
+
+/** Only v20-or-later intake confirmations opt a Task into v52 routing. */
+export const isAmuxV52TaskConfirmation = (value: unknown, grade: unknown):
+  grade is AmuxExecutionGrade => {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !amuxWorkerRoleForExecutionGrade(grade)) return false;
+  const snapshot = value as Record<string, unknown>;
+  const match = typeof snapshot.policyVersion === "string" ?
+    /^amux-intake-v(\d+)$/.exec(snapshot.policyVersion) : null;
+  if (!match || Number(match[1]) < 20) return false;
+  const card = snapshot.card;
+  if (!card || typeof card !== "object" || Array.isArray(card)) return false;
+  const task = (card as Record<string, unknown>).task;
+  return !!task && typeof task === "object" && !Array.isArray(task) &&
+    (task as Record<string, unknown>).grade === grade;
+};
 
 /** A path as stored in Git, allowing only the policy's single leading `./`. */
 export const normalizeAmuxExecutionPath = (input: unknown): string | null => {
