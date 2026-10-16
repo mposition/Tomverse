@@ -677,18 +677,29 @@ export const MARKETING_LLM_HOLD_ACTIONS = {
  * A person puts a call under legal hold, or takes it off. The hold keeps the
  * row past its 24-month retention until it is released.
  *
- * The audit row is a person's, written by the admin mutation before this runs;
- * the write refuses unless that row is evidence of exactly this decision, and
- * unless the call is in the opposite state, so a stale page cannot flip it.
+ * Each decision names the one it replaces: `expectedHoldAuditLogId` is the
+ * audit row of the decision the person's page showed (null for a row never
+ * held). The audit row this decision wrote -- a person's, written by the
+ * admin mutation before this runs -- must be evidence of exactly this action
+ * on this call and must name the same predecessor; the update then moves the
+ * flag and the stored decision together, and only from that predecessor. So
+ * neither an earlier release presented again nor a release meant for an older
+ * hold can lift a newer one.
  */
 export async function setMarketingLlmCallLegalHold(
   tx: Tx,
-  input: { readonly callId: string; readonly hold: boolean; readonly auditLogId: string },
+  input: {
+    readonly callId: string;
+    readonly hold: boolean;
+    readonly auditLogId: string;
+    readonly expectedHoldAuditLogId: string | null;
+  },
 ): Promise<void> {
   const verdict = await verifyMarketingAuditEvidence(tx, {
     auditLogId: input.auditLogId,
     action: input.hold ? MARKETING_LLM_HOLD_ACTIONS.set : MARKETING_LLM_HOLD_ACTIONS.released,
     targetId: input.callId,
+    metadata: { previousHoldAuditLogId: input.expectedHoldAuditLogId ?? "none" },
   });
   if (!verdict.ok) {
     throw new MarketingStoreRefusedError(
@@ -697,8 +708,9 @@ export async function setMarketingLlmCallLegalHold(
     );
   }
   const updated = await tx.$executeRaw(Prisma.sql`
-    UPDATE "MarketingLlmCall" SET "legalHold" = ${input.hold}
+    UPDATE "MarketingLlmCall" SET "legalHold" = ${input.hold}, "legalHoldAuditLogId" = ${input.auditLogId}
     WHERE "id" = ${input.callId} AND "legalHold" = ${!input.hold}
+      AND "legalHoldAuditLogId" IS NOT DISTINCT FROM ${input.expectedHoldAuditLogId}
   `);
   if (updated !== 1) {
     throw new MarketingStoreRefusedError("legal_hold_conflict", "The call or its legal-hold state changed");

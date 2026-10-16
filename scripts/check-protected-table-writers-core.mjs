@@ -2255,6 +2255,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
   },
   {
+    path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "Adds the ledger's legal-hold decision column; its one AdminAuditLog mention is a restrictive foreign key to the existing audit writer. No audit row is written.",
+  },
+  {
+    path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 5,
+    writeVerbs: 6,
+    reason:
+      "Adds the legal-hold decision column, its index, foreign key and check, an insert trigger that refuses a decision at birth, and the replaced update guard that moves the flag and the decision only together. It writes no row.",
+  },
+  {
     path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 3,

@@ -82,7 +82,7 @@ const releasedCall = async (n: number) => {
   return callId;
 };
 
-const humanAudit = (action: string, targetId: string, client?: Prisma.TransactionClient) =>
+const humanAudit = (action: string, targetId: string, previous: string | null, client?: Prisma.TransactionClient) =>
   writeAdminAuditLog({
     session: operator,
     request: new Request("https://tomverse.app/api/admin/marketing/llm-calls/x/legal-hold"),
@@ -90,21 +90,29 @@ const humanAudit = (action: string, targetId: string, client?: Prisma.Transactio
     targetType: "MarketingLlmCall",
     targetId,
     summary: "Legal hold decision.",
-    metadata: { actorHadMarketingWrite: true },
+    metadata: { actorHadMarketingWrite: true, previousHoldAuditLogId: previous ?? "none" },
     ...(client ? { tx: client } : {}),
   });
 
+const currentDecision = async (callId: string) =>
+  (await prisma.marketingLlmCall.findUniqueOrThrow({ where: { id: callId } })).legalHoldAuditLogId;
+
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
 
-const hold = (callId: string, value: boolean) =>
-  tx(async (client) => {
+/** A decision made from a page that showed `seen` (default: the current one). */
+const hold = async (callId: string, value: boolean, seen?: string | null) => {
+  const expected = seen === undefined ? await currentDecision(callId) : seen;
+  return tx(async (client) => {
     const auditLogId = await humanAudit(
       value ? MARKETING_LLM_HOLD_ACTIONS.set : MARKETING_LLM_HOLD_ACTIONS.released,
       callId,
+      expected,
       client,
     );
-    await setMarketingLlmCallLegalHold(client, { callId, hold: value, auditLogId });
+    await setMarketingLlmCallLegalHold(client, { callId, hold: value, auditLogId, expectedHoldAuditLogId: expected });
+    return auditLogId;
   });
+};
 
 const age = async (id: string) => {
   await prisma.$executeRawUnsafe(`ALTER TABLE "MarketingLlmCall" DISABLE TRIGGER "MarketingLlmCall_update_guard"`);
@@ -127,8 +135,9 @@ test("a legal hold is set and released only on a person's audit row for exactly 
   // An audit row for the other decision is not evidence of this one.
   await assert.rejects(
     tx(async (client) => {
-      const auditLogId = await humanAudit(MARKETING_LLM_HOLD_ACTIONS.set, id, client);
-      await setMarketingLlmCallLegalHold(client, { callId: id, hold: false, auditLogId });
+      const expected = await currentDecision(id);
+      const auditLogId = await humanAudit(MARKETING_LLM_HOLD_ACTIONS.set, id, expected, client);
+      await setMarketingLlmCallLegalHold(client, { callId: id, hold: false, auditLogId, expectedHoldAuditLogId: expected });
     }),
     code("audit_evidence_action_mismatch"),
   );
@@ -136,13 +145,40 @@ test("a legal hold is set and released only on a person's audit row for exactly 
   const other = await releasedCall(2);
   await assert.rejects(
     tx(async (client) => {
-      const auditLogId = await humanAudit(MARKETING_LLM_HOLD_ACTIONS.released, other, client);
-      await setMarketingLlmCallLegalHold(client, { callId: id, hold: false, auditLogId });
+      const expected = await currentDecision(id);
+      const auditLogId = await humanAudit(MARKETING_LLM_HOLD_ACTIONS.released, other, expected, client);
+      await setMarketingLlmCallLegalHold(client, { callId: id, hold: false, auditLogId, expectedHoldAuditLogId: expected });
     }),
     code("audit_evidence_target_mismatch"),
   );
-  await hold(id, false);
+  const firstHold = await currentDecision(id);
+  const release = await hold(id, false);
   assert.equal((await prisma.marketingLlmCall.findUniqueOrThrow({ where: { id } })).legalHold, false);
+
+  // Held again. The earlier release, presented again, is refused and does not
+  // lift it: its predecessor is no longer the row's decision.
+  await hold(id, true);
+  await assert.rejects(
+    tx((client) =>
+      setMarketingLlmCallLegalHold(client, { callId: id, hold: false, auditLogId: release, expectedHoldAuditLogId: firstHold }),
+    ),
+  );
+  assert.equal((await prisma.marketingLlmCall.findUniqueOrThrow({ where: { id } })).legalHold, true);
+  // ... and a release made from a page that still showed the first hold is a
+  // conflict, even with a fresh audit row of its own.
+  await assert.rejects(hold(id, false, firstHold), code("legal_hold_conflict"));
+  assert.equal((await prisma.marketingLlmCall.findUniqueOrThrow({ where: { id } })).legalHold, true);
+
+  // The database holds the pairing on its own: the flag cannot move without
+  // the decision, nor the decision without the flag.
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`UPDATE "MarketingLlmCall" SET "legalHold" = false WHERE "id" = $1`, id),
+    /update_invalid/,
+  );
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`UPDATE "MarketingLlmCall" SET "legalHoldAuditLogId" = $2 WHERE "id" = $1`, id, release),
+    /update_invalid|unique|duplicate/,
+  );
 });
 
 test("retention deletes closed calls past 24 months, never a held or open one, with an audit row each", async () => {

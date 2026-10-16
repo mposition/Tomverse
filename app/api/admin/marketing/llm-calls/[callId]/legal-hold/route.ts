@@ -6,7 +6,13 @@ import { MARKETING_LLM_HOLD_ACTIONS, setMarketingLlmCallLegalHold } from "@/lib/
 
 type RouteContext = { params: Promise<{ callId: string }> };
 
-const schema = z.object({ hold: z.boolean() }).strict();
+const schema = z
+  .object({
+    hold: z.boolean(),
+    /** The audit row of the hold decision the page showed; null if never held. */
+    expectedHoldAuditLogId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).nullable(),
+  })
+  .strict();
 
 /**
  * POST: a person puts a marketing LLM cost ledger row under legal hold, or
@@ -30,9 +36,14 @@ export async function POST(req: Request, context: RouteContext) {
     gate: (body) => (body.hold ? "operator_restriction" : "account_control"),
     bucket: "admin-marketing-llm-call-legal-hold",
     schema,
-    metadata: () => ({}),
+    metadata: (body) => ({ previousHoldAuditLogId: body.expectedHoldAuditLogId ?? "none" }),
     run: async (tx, { body, auditLogId }) => {
-      await setMarketingLlmCallLegalHold(tx, { callId, hold: body.hold, auditLogId });
+      await setMarketingLlmCallLegalHold(tx, {
+        callId,
+        hold: body.hold,
+        auditLogId,
+        expectedHoldAuditLogId: body.expectedHoldAuditLogId,
+      });
       return { id: callId, hold: body.hold };
     },
   });
