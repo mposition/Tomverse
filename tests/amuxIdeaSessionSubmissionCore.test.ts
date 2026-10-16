@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 
 import {
@@ -64,6 +65,38 @@ test("session input does not inherit the owner parser's byte or item caps", () =
   assert.equal(inspected.counts.repositoryCount, 9);
   assert.equal(inspected.counts.pullRequestCount, 17);
   assert.equal(inspected.input.idea, longIdea);
+});
+
+test("session email refusal preserves its existing address boundaries", () => {
+  for (const value of [
+    "person@example.test",
+    "prefix person.name+tag@example-domain.test suffix",
+    "person@example.test!",
+  ]) {
+    assert.deepEqual(inspectAmuxIdeaSessionSubmission(submission(idea({ idea: value }))),
+      { ok: false, code: "content_refused" });
+  }
+  for (const value of [
+    "@example.test",
+    "person!@example.test",
+    "person@example",
+    "person@example.c",
+  ]) {
+    assert.equal(inspectAmuxIdeaSessionSubmission(submission(idea({ idea: value }))).ok, true);
+  }
+});
+
+test("session parser scans multi-megabyte non-email content without quadratic slowdown", () => {
+  const overOneMiB = 1_048_576 + 257;
+  const startedAt = performance.now();
+  const inspected = inspectAmuxIdeaSessionSubmission({
+    ...submission(idea({ idea: "i".repeat(overOneMiB) })),
+    source: { ...source, sessionDisplay: "s".repeat(overOneMiB) },
+  });
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(inspected.ok, true);
+  assert.ok(elapsedMs < 10_000, `session parser took ${elapsedMs.toFixed(1)}ms`);
 });
 
 test("session input refuses schema ambiguity and sensitive content", () => {

@@ -27,6 +27,31 @@ test("AMUX content is sealed with a per-row data key and a subject-bound digest"
   assert.equal(first.ciphertext.includes(raw), false);
 });
 
+test("idea raw content has no crypto byte ceiling while other purposes stay bounded", () => {
+  const keyring = keys();
+  const raw = Buffer.alloc(1024 * 1024 + 257, 0x61);
+  const sealed = sealAmuxContent(raw, "idea_raw", "idea-large-test-1", keyring);
+  assert.deepEqual(openAmuxContent(
+    sealed, "idea_raw", "idea-large-test-1", keyring,
+  ), raw);
+  assert.equal(verifyAmuxContentDigest(
+    raw, "idea_raw", "idea-large-test-1", sealed.digest, sealed.digestKeyId, keyring,
+  ), true);
+  const changed = Buffer.from(raw);
+  changed[changed.length - 1] ^= 1;
+  assert.equal(verifyAmuxContentDigest(
+    changed, "idea_raw", "idea-large-test-1", sealed.digest, sealed.digestKeyId, keyring,
+  ), false);
+  const tampered = { ...sealed, ciphertext: Buffer.from(sealed.ciphertext) };
+  tampered.ciphertext[tampered.ciphertext.length - 1] ^= 1;
+  assert.throws(() => openAmuxContent(
+    tampered, "idea_raw", "idea-large-test-1", keyring,
+  ));
+  assert.throws(() => sealAmuxContent(
+    raw, "source_scope", "idea-large-test-1", keyring,
+  ));
+});
+
 test("AMUX content rejects swapped purpose, subject, key, ciphertext and digest", () => {
   const keyring = keys();
   const sealed = sealAmuxContent(Buffer.from("synthetic-only"), "card_brief", "card-test-1", keyring);
@@ -53,7 +78,7 @@ test("AMUX content rejects swapped purpose, subject, key, ciphertext and digest"
   assert.equal(verifyAmuxContentDigest(Buffer.from("synthetic-only"), "card_brief", "card-test-1", sealed.digest, sealed.digestKeyId, digestOnlyChanged), false);
 });
 
-test("AMUX content fails closed on missing key configuration and oversized input", () => {
+test("AMUX content fails closed on missing key configuration and oversized bounded content", () => {
   const keyring = keys();
   assert.throws(() => sealAmuxContent(Buffer.from("x"), "idea_raw", "../idea", keyring));
   assert.throws(() => sealAmuxContent(Buffer.from("x"), "idea_raw\0bad", "idea-test-1", keyring));
@@ -61,7 +86,9 @@ test("AMUX content fails closed on missing key configuration and oversized input
     ...keyring,
     digestKeyId: "",
   }));
-  assert.throws(() => sealAmuxContent(Buffer.alloc(1024 * 1024 + 1), "idea_raw", "idea-test-1", keyring));
+  assert.throws(() => sealAmuxContent(
+    Buffer.alloc(1024 * 1024 + 1), "card_brief", "card-test-1", keyring,
+  ));
   assert.deepEqual(openAmuxContent(sealAmuxContent(Buffer.alloc(0), "idea_raw", "idea-test-1", keyring), "idea_raw", "idea-test-1", keyring), Buffer.alloc(0));
   assert.deepEqual(openAmuxContent(sealAmuxContent(Buffer.alloc(1024 * 1024), "idea_raw", "idea-test-1", keyring), "idea_raw", "idea-test-1", keyring), Buffer.alloc(1024 * 1024));
 });
