@@ -24,7 +24,7 @@ export class AmuxTrackedCheckoutManifestError extends Error {
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const SECRET_BASENAME = /^(?:\.npmrc|\.pypirc|\.netrc|\.git-credentials|\.gitconfig|\.htpasswd|\.mcp\.json|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|(?:client[_-])?secrets?(?:\.(?:json|ya?ml|toml|ini|cfg|conf|txt|csv|local))?|credentials?(?:\.(?:json|ya?ml|toml|ini|cfg|conf|txt|csv|local))?|client_secret[^/]*\.json)$/i;
 const SECRET_DIRECTORY = /^(?:\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.direnv|\.claude|\.codex|\.cursor|\.gemini|\.opencode)$/i;
-const SECRET_ENV_BASENAME = /^(?:\.env(?:\..+)?|\.envrc|.+\.env(?:\..+)?)$/i;
+const SECRET_ENV_BASENAME = /^(?:\.env(?:\..+)?|\.envrc(?:\..+)?|.+\.env(?:\..+)?)$/i;
 const SECRET_EXTENSION = /\.(?:pem|key|p12|pfx|jks|keystore|kdbx|crt|cer|p7b|tfstate(?:\..+)?)$/i;
 
 const validPath = (path: string): boolean => {
