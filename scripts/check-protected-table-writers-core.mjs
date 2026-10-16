@@ -664,6 +664,13 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261017020100_amux_v19_read_manifest_active_insert_guard/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The additive trigger DDL rejects an inserted already-purged manifest; it performs no row DML.",
+  },
+  {
     path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
     table: "AmuxIdeaTrackedCheckoutEvidence",
     tableMentions: 1,

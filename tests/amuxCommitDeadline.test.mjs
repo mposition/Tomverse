@@ -225,6 +225,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // The v19 retention transition changes only the read-manifest body and
   // external key retirement purpose, without touching commit deadlines.
   "20261017020000_amux_v19_read_manifest_retention",
+  // The next migration closes an insert-only purged-shape loophole on that
+  // same manifest table; it does not alter commit-deadline evidence.
+  "20261017020100_amux_v19_read_manifest_active_insert_guard",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

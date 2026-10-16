@@ -266,6 +266,13 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
     }), /audit evidence mismatch/);
     await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
       data: { id: randomUUID(), ideaId, referenceOrdinal: 0,
+        pinnedCommitSha: "a".repeat(40), fileCount: 1,
+        ciphertext: null, keyId: null, keyVersion: null,
+        bodyPurgedAt: new Date(), digest: row.digest,
+        digestKeyId: row.digestKeyId, auditLogId: row.auditLogId },
+    }), /insert requires an active body/);
+    await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
+      data: { id: randomUUID(), ideaId, referenceOrdinal: 0,
         pinnedCommitSha: "c".repeat(40), fileCount: row.fileCount,
         ciphertext: Uint8Array.from(row.ciphertext), keyId: row.keyId,
         keyVersion: row.keyVersion, digest: row.digest,
