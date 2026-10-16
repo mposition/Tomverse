@@ -17,15 +17,15 @@ import {
   parseAmuxV4AnalysisQueueCursor,
 } from "../lib/amux/ideaAnalysisQueueCursorCore.ts";
 import { buildAmuxV4AnalysisCandidateWhere } from "../lib/amux/ideaAnalysisQueueWhereCore.ts";
-import { AMUX_V4_ANALYSIS_CLI_HARD_DEADLINE_MS,
-  AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT,
-  amuxV4AnalysisUtcDayKey } from "../lib/amux/ideaAnalysisInvocationLimitsCore.ts";
+import * as invocationLimits from "../lib/amux/ideaAnalysisInvocationLimitsCore.ts";
+const { AMUX_V4_ANALYSIS_CLI_HARD_DEADLINE_MS, amuxV4AnalysisUtcDayKey } = invocationLimits;
 
 const secret = "v4_intake_only_012345678901234567890123456789";
 
 test("AMUX v4 approved CLI admission values use UTC days", () => {
   assert.equal(AMUX_V4_ANALYSIS_CLI_HARD_DEADLINE_MS, 600_000);
-  assert.equal(AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT, 12);
+  // AMUX intake policy v19 removed v13's daily claim limit.
+  assert.equal("AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT" in invocationLimits, false);
   assert.equal(amuxV4AnalysisUtcDayKey(new Date("2026-10-04T23:59:59.999Z")),
     "2026-10-04");
   assert.equal(amuxV4AnalysisUtcDayKey(new Date("2026-10-05T00:00:00.000Z")),
@@ -59,8 +59,10 @@ test("only the guarded claim route calls the production claim service", async ()
   const service = await readFile(join(root,
     "lib/amux/ideaAnalysisClaimService.ts"), "utf8");
   assert.match(route, /commitAmuxIdeaOnlyAnalysisClaim\(tx,/);
-  assert.match(service, /await takeAuditChainLock\(tx\);[\s\S]*?await enforceAmuxV4DailyClaimLimit\(tx\);[\s\S]*?writeSystemAuditLog\(/);
+  assert.match(service, /await takeAuditChainLock\(tx\);[\s\S]*?await readAmuxV4ClaimDayUtc\(tx\);[\s\S]*?writeSystemAuditLog\(/);
   assert.match(service, /to_char\(clock_timestamp\(\) AT TIME ZONE 'UTC', 'YYYY-MM-DD'\)/);
+  // v19: no count of the day's claims and no refusal on it.
+  assert.doesNotMatch(service, /DAILY_CLAIM_LIMIT|adminAuditLog\.count\(/);
   assert.match(route, /const CLAIM_CODE_LATCH = true/);
 });
 const request = (token, agentId = AMUX_V4_ANALYSIS_AGENT_ID) => new Request(
