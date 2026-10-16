@@ -185,6 +185,19 @@ export async function recordAmuxTrackedCheckoutReadManifest(
   } finally { inspected.plaintext.fill(0); }
 }
 
+/** Content-free exact-reference readback for a worker whose POST outcome is
+ * unknown. Never select ciphertext or the external content key here. */
+export async function readAmuxTrackedCheckoutReadManifestReceipt(
+  tx: Prisma.TransactionClient, ideaId: string, referenceOrdinal: number,
+) {
+  return tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
+    where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal } },
+    select: { id: true, ideaId: true, referenceOrdinal: true,
+      pinnedCommitSha: true, fileCount: true, digest: true,
+      digestKeyId: true, bodyPurgedAt: true },
+  });
+}
+
 /** Owner-scoped Admin read. Key retrieval happens after the read transaction,
  * since the external key store must not occupy a DB transaction. */
 export async function readAmuxTrackedCheckoutReadManifestForOwner(
