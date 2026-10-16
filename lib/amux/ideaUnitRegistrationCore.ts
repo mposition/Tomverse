@@ -34,6 +34,7 @@ export type AmuxV4CardRegistrationPlan = {
     completionCriteria: string[] };
   executionBrief: string | null;
   taskRole: string | null;
+  proposedExecutionGrade: string | null;
   executionGrade: string | null;
   maximumCostMicroUsd: string | null;
   sourceSystem: "admin-idea-v4";
@@ -130,14 +131,15 @@ export function inspectAmuxV20TaskRegistration(
     if (contract && ordinary) {
       return { ok: false, code: "task_expected_paths_mixed" };
     }
+    if (!proposal.executionGrade ||
+        !["routine", "advanced", "frontier"].includes(proposal.executionGrade)) {
+      return { ok: false, code: "task_execution_grade_mismatch" };
+    }
     const executionGrade = deriveAmuxExecutionGrade({
       taskRole: proposal.taskRole,
       expectedPaths,
       proposedGrade: proposal.executionGrade,
     });
-    if (proposal.executionGrade !== executionGrade) {
-      return { ok: false, code: "task_execution_grade_mismatch" };
-    }
     return { ok: true, executionGrade };
   } catch {
     return { ok: false, code: "task_expected_path_invalid" };
@@ -212,6 +214,10 @@ export function inspectAmuxV4CardRegistration(input: {
     const taskGuard = inspectAmuxV20TaskRegistration(proposal);
     if (!taskGuard.ok) return taskGuard;
     executionGrade = taskGuard.executionGrade;
+    if (snapshot.policyVersion !== "amux-intake-v20" ||
+        card.task!.proposedGrade !== proposal.executionGrade) {
+      return { ok: false, code: "task_confirmation_grade_mismatch" };
+    }
     if (card.task!.grade !== taskGuard.executionGrade) {
       return { ok: false, code: "task_confirmation_grade_mismatch" };
     }
@@ -232,6 +238,7 @@ export function inspectAmuxV4CardRegistration(input: {
       completionCriteria: [...proposal.completionCriteria] },
     executionBrief: proposal.executionBrief,
     taskRole: proposal.taskRole,
+    proposedExecutionGrade: proposal.executionGrade,
     executionGrade,
     maximumCostMicroUsd: card.task?.costReceipt.ceilingMicroUsd ?? null,
     sourceSystem: "admin-idea-v4",
