@@ -30,7 +30,8 @@ test("the frontier panel builds the preview in one request and recovers a lost a
   assert.ok(link.indexOf("takeBuildPreviewReceipt(") < link.indexOf("readBack(receipt.previewId"));
   const input = readFileSync("components/admin/AmuxIdeaInputPanel.tsx", "utf8");
   assert.ok(input.includes('build={submission.kind === "submitted" ? null : buildHooks}'));
-  assert.ok(input.includes("onUnknown: (requestId) => { void readBack(requestId); }"));
+  // An unknown answer is read back by its request id (after the blocking dialog says it is unknown), never posted again.
+  assert.match(input, /onUnknown: \(requestId\) => \{\n[^}]*tone: "unknown"[^}]*\}\);\n\s*void readBack\(requestId\);\n\s*\},/);
   assert.ok(input.includes('buildRequestId={submission.kind === "submitted" ? submission.requestId : null}'));
   assert.equal(readFileSync("components/admin/AmuxInitialPlanPanel.tsx", "utf8").includes("BuildPreview"), false,
     "a plan read back absent never discards the receipt: the build may still be running");

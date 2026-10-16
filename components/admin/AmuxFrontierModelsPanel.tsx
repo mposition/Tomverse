@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { AmuxAnalysisBudgetPanel } from "@/components/admin/AmuxAnalysisBudgetPanel";
+import { AmuxIdeaBusyDialog, type AmuxBusyTone } from "@/components/admin/AmuxIdeaBusyDialog";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
@@ -93,6 +94,12 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   const executionPrice = analysisBudgetAvailable ? readPrice : { kind: "none" as const };
   const executionPriceId = executionPrice.kind === "ready" ? executionPrice.id : null;
   const [executionRefusal, setExecutionRefusal] = useState<string | null>(null);
+  // The blocking dialog of the execution approval: working while the request is in flight (`settled` false),
+  // then the answer the confirmation state reached, until it is closed. `target` is what a read-back asks for.
+  const [executionDialog, setExecutionDialog] = useState<{
+    settled: boolean; checking: boolean;
+    target: { previewId: string; ideaId: string; payloadDigest: string; payloadDigestKeyId: string };
+  } | null>(null);
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
 
   const readConfirmation = useCallback(async (pendingId: string,
@@ -419,6 +426,9 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     setConfirmation({ kind: "pending" });
     setFailure(null);
     setExecutionRefusal(null);
+    setExecutionDialog({ settled: false, checking: false, target: {
+      previewId: value.previewId, ideaId, payloadDigest: value.payloadDigest,
+      payloadDigestKeyId: value.payloadDigestKeyId } });
     try {
       // The approval transaction may run for 20 s after a 5 s wait; the deadline outlasts it.
       const response = await adminFetch("/api/admin/amux/ideas/execution-approval", {
@@ -441,6 +451,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         clearRefusedConfirmationAttempt(receiptStore(), operatorId, value.previewId,
           ideaId, value.payloadDigest, value.payloadDigestKeyId);
         setConfirmation((current) => current.kind === "confirmed" ? current : { kind: "refused" });
+        settleExecutionDialog();
         return;
       }
       if ([400, 401, 403, 404, 413, 415, 428].includes(response.status)) {
@@ -448,6 +459,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         clearRefusedConfirmationAttempt(receiptStore(), operatorId, value.previewId,
           ideaId, value.payloadDigest, value.payloadDigestKeyId);
         setConfirmation((current) => current.kind === "confirmed" ? current : { kind: "refused" });
+        settleExecutionDialog();
         return;
       }
     } catch { /* A lost response must be read back by ID, not re-posted. */ }
@@ -455,6 +467,17 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     // read-back says what was recorded, and the budget panel then shows the hold.
     await readConfirmation(value.previewId, ideaId, value.payloadDigest,
       value.payloadDigestKeyId);
+    settleExecutionDialog();
+  };
+
+  const settleExecutionDialog = () => setExecutionDialog((current) => current && { ...current, settled: true });
+  // Reads back the exact confirmation (never posts): the dialog shows busy while it runs and then the answer.
+  const checkExecution = async () => {
+    const target = executionDialog?.target;
+    if (!target || executionDialog.checking) return;
+    setExecutionDialog((current) => current && { ...current, checking: true });
+    await readConfirmation(target.previewId, target.ideaId, target.payloadDigest, target.payloadDigestKeyId);
+    setExecutionDialog((current) => current && { ...current, checking: false });
   };
 
   const confirmPreview = async () => {
@@ -504,9 +527,39 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       value.payloadDigestKeyId);
   };
 
+  const executionTone: AmuxBusyTone | null = executionDialog === null ? null
+    : !executionDialog.settled ? "working"
+      : confirmation.kind === "confirmed" ? "success"
+        : confirmation.kind === "refused" || confirmation.kind === "expired" ? "refused" : "unknown";
+  const executionDialogView = executionDialog && executionTone ? (
+    <AmuxIdeaBusyDialog open tone={executionTone}
+      title={executionTone === "working" ? m.busyExecutionTitle : executionTone === "success" ? m.busyExecutionDoneTitle
+        : executionTone === "refused" ? m.busyRefusedTitle : m.busyUnknownTitle}
+      message={m.busyExecutionBody}
+      onClose={executionDialog.checking ? undefined : () => setExecutionDialog(null)}>
+      {executionTone === "success" ? <p>{m.busyExecutionDoneBody}</p> : null}
+      {executionTone === "refused" ? <>
+        <p>{m.busyRefusedBody}</p>
+        {confirmation.kind === "expired" ? <p role="alert" className="text-amber-200">{m.transferConfirmExpired}</p> : null}
+        {executionRefusal ? <p role="alert" className="text-amber-200">{executionRefusal}</p> : null}
+        {failure ? <AdminApiFailureNotice failure={failure} /> : null}
+      </> : null}
+      {executionTone === "unknown" ? <>
+        <p>{m.busyUnknownBody}</p>
+        {executionDialog.checking ? <p role="status" aria-live="polite" className="text-blue-200">{m.busyChecking}</p> : null}
+        <button type="button" onClick={() => void checkExecution()} disabled={executionDialog.checking}
+          aria-busy={executionDialog.checking}
+          className="min-h-11 w-full rounded-lg border border-amber-500/40 px-3 font-medium text-amber-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300 disabled:opacity-50">
+          {m.transferConfirmReadBack}
+        </button>
+      </> : null}
+    </AmuxIdeaBusyDialog>
+  ) : null;
+
   return (
     <section className="space-y-2 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
       aria-labelledby="amux-v4-frontier-models-heading">
+      {executionDialogView}
       <h3 id="amux-v4-frontier-models-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
         {m.executionCardTitle}
       </h3>

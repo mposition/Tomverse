@@ -25,35 +25,47 @@ const attempt = (startedAt: number) => ({ startedAt, unitIds: ["u1", "u2"] });
 const read = (...states: string[]) => states.map((decisionState, index) => ({ id: `u${index + 1}`, decisionState }));
 const text = (markup: string) => markup.replace(/<[^>]*>/g, "").replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
 
-test("a read-back is one of recorded, not recorded, settling, mixed or failed, and only a settled read with nothing decided frees the approval", () => {
+test("a read-back is one of recorded, not recorded, settling, mixed or failed, and only a settled read with nothing approved frees the approval", () => {
   const started = 1_000_000;
   const at = (offset: number) => started + offset;
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: read("consumed", "consumed"), now: at(5_000) }),
-    { kind: "recorded" });
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: read("proposed", "proposed"), now: at(PLAN_SETTLED_AFTER_MS + 1) }),
-    { kind: "not_recorded" });
+  const decide = (units: Array<{ id: string; decisionState: string }> | null, now: number, withAttempt = true) =>
+    decidePlanReadBack({ attempt: withAttempt ? attempt(started) : null, units, now });
+  const window = PLAN_SETTLED_AFTER_MS;
+
+  // The units' states are the four the analysis result reports: proposed, approved, rejected, expired.
+  assert.deepEqual(decide(read("approved", "approved"), at(5_000)), { kind: "recorded" });
+  assert.deepEqual(decide(read("proposed", "proposed"), at(window + 1)), { kind: "not_recorded" });
+  assert.deepEqual(decide(read("proposed", "proposed"), at(30_000)), { kind: "settling", remainingMs: window - 30_000 });
+  assert.deepEqual(decide(read("proposed", "proposed"), at(window)), { kind: "not_recorded" },
+    "the window is over exactly when no time is left");
+
+  // Review finding: only `approved` is evidence of a commit. An unapproved proposal expires on its own and a
+  // rejection is the owner's refusal; neither is a registered plan, and neither may announce one.
+  assert.deepEqual(decide(read("expired", "expired"), at(window + 1)), { kind: "not_recorded" },
+    "expired proposals after a failed approval: not recorded, never 'cards were registered'");
+  assert.deepEqual(decide(read("rejected", "rejected"), at(window + 1)), { kind: "not_recorded" });
+  assert.deepEqual(decide(read("expired", "expired"), at(10_000)), { kind: "settling", remainingMs: window - 10_000 },
+    "and before the window they say nothing either");
+  assert.deepEqual(decide(read("approved", "expired"), at(window + 60_000)), { kind: "mixed" },
+    "one approved and one expired is a half-recorded plan, however late it is");
+  assert.deepEqual(decide(read("approved", "proposed"), at(window + 60_000)), { kind: "mixed" });
+
   // Production, 2026-10-16: a unit of the attempt that is missing from the read used to be neither "decided" nor
   // "proposed", so the panel waited for all or none forever (10+ minutes) with every visible unit untouched.
   const missingOne = [{ id: "u1", decisionState: "proposed" }];
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: missingOne, now: at(PLAN_SETTLED_AFTER_MS + 600_000) }),
-    { kind: "not_recorded" }, "one unit missing, the other untouched: the settled read releases the approval");
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: missingOne, now: at(10_000) }),
-    { kind: "settling", remainingMs: PLAN_SETTLED_AFTER_MS - 10_000 }, "and before the window it counts down");
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: [], now: at(PLAN_SETTLED_AFTER_MS + 1) }),
-    { kind: "not_recorded" }, "nothing of the attempt in the read, nothing decided: not recorded after the window");
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: [{ id: "other", decisionState: "consumed" }], now: at(5_000) }),
-    { kind: "settling", remainingMs: PLAN_SETTLED_AFTER_MS - 5_000 }, "a unit outside the attempt says nothing about it");
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: [{ id: "u2", decisionState: "consumed" }], now: at(5_000) }),
-    { kind: "recorded" }, "a decided unit with the rest missing: it committed");
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: read("proposed", "proposed"), now: at(30_000) }),
-    { kind: "settling", remainingMs: PLAN_SETTLED_AFTER_MS - 30_000 });
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: read("proposed", "proposed"), now: at(PLAN_SETTLED_AFTER_MS) }),
-    { kind: "not_recorded" }, "the window is over exactly when no time is left");
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: read("proposed", "consumed"), now: at(PLAN_SETTLED_AFTER_MS + 60_000) }),
-    { kind: "mixed" }, "a half-decided plan is never a reason to approve again, however late it is");
-  assert.deepEqual(decidePlanReadBack({ attempt: attempt(started), units: null, now: at(5_000) }), { kind: "read_failed" },
-    "a failed read is not an answer about the approval");
-  assert.deepEqual(decidePlanReadBack({ attempt: null, units: read("proposed"), now: at(5_000) }), { kind: "no_attempt" });
+  assert.deepEqual(decide(missingOne, at(window + 600_000)), { kind: "not_recorded" },
+    "one unit missing, the other untouched: the settled read releases the approval");
+  assert.deepEqual(decide(missingOne, at(10_000)), { kind: "settling", remainingMs: window - 10_000 },
+    "and before the window it counts down");
+  assert.deepEqual(decide([], at(window + 1)), { kind: "not_recorded" },
+    "nothing of the attempt in the read, nothing approved: not recorded after the window");
+  assert.deepEqual(decide([{ id: "other", decisionState: "approved" }], at(5_000)),
+    { kind: "settling", remainingMs: window - 5_000 }, "a unit outside the attempt says nothing about it");
+  assert.deepEqual(decide([{ id: "u2", decisionState: "approved" }], at(5_000)), { kind: "mixed" },
+    "an approved unit with another one missing is not a whole plan");
+
+  assert.deepEqual(decide(null, at(5_000)), { kind: "read_failed" }, "a failed read is not an answer about the approval");
+  assert.deepEqual(decide(read("proposed"), at(5_000), false), { kind: "no_attempt" });
   assert.equal(planReadBackSeconds(120_001), 121);
   assert.equal(planReadBackSeconds(1), 1, "never shows 0 while time is left");
   assert.ok(PLAN_SETTLED_AFTER_MS > 120_000 + 5_000, "the window outlasts the plan transaction and its wait");
@@ -130,7 +142,7 @@ test("the read-back only reads: it never posts the approval again, and its outco
       `${kind} keeps the attempt, so the approval stays refused`);
   }
   // A recorded plan leaves no proposals, so the notice outlives the list.
-  assert.ok(source.includes("if (listed.length === 0) return readBackNotice;"));
+  assert.ok(source.includes("if (listed.length === 0) return <>{readBackNotice}{dialog}</>;"));
   // A new approval clears the old answer.
   assert.ok(source.includes('setReadBackView({ kind: "none" });'));
 });

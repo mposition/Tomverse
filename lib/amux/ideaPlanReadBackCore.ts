@@ -3,18 +3,26 @@
  * answer was lost (components/admin/AmuxIdeaPlanApprovalPanel.tsx).
  *
  * The approval is all or nothing in one transaction, so a fresh read of the
- * attempt's units decides it, and each unit of the attempt is one of three
- * things in that read: still proposed (nothing happened to it), decided (the
- * approval reached it), or missing from the read (it cannot say anything).
- * Only the first two carry information:
+ * attempt's units decides it. A unit's state in that read is one of the four
+ * the analysis result reports (lib/amux/ideaAnalysisResultReadCore.ts) or it
+ * is missing from the read:
  *
- * - some unit decided and none still proposed: the approval committed;
- * - some unit decided and some still proposed: not an all-or-nothing state,
- *   so never a reason to approve again;
- * - no unit decided: the approval changed nothing the read can see. Until the
+ * - `approved`: the approval reached the unit. This is the only evidence that
+ *   it committed. `rejected` and `expired` are not: an unapproved proposal
+ *   expires on its own (the retention sweep marks it `expired`), and a
+ *   rejection is the owner's own refusal, so treating "anything but proposed"
+ *   as success would announce cards that were never registered;
+ * - `proposed`: nothing happened to it;
+ * - `rejected`, `expired` or missing: it says nothing about the attempt.
+ *
+ * Hence:
+ * - some unit approved and every unit of the attempt approved: it committed;
+ * - some unit approved and some not: not an all-or-nothing state, so never a
+ *   reason to approve again;
+ * - no unit approved: the approval changed nothing the read can see. Until the
  *   settle window has passed the transaction may still be running; after it,
- *   nothing was recorded, whether the other units are still proposed or have
- *   dropped out of the read.
+ *   nothing was recorded, whether the other units are still proposed, expired,
+ *   rejected or have dropped out of the read.
  *
  * An earlier version counted a missing unit as neither decided nor proposed and
  * waited for "all proposed" or "none proposed", so one unit that left the read
@@ -39,13 +47,13 @@ export type PlanReadBackOutcome =
   | { kind: "read_failed" }
   /** No attempt is remembered (it was settled elsewhere): nothing to say beyond going back to idle. */
   | { kind: "no_attempt" }
-  /** The approval reached the units and none is still proposed: it committed. */
+  /** Every unit of the attempt is approved: it committed. */
   | { kind: "recorded" }
-  /** Nothing the read can see changed and the settle window has passed: nothing was recorded. */
+  /** No unit is approved and the settle window has passed: nothing was recorded. */
   | { kind: "not_recorded" }
-  /** Nothing changed yet, but the transaction may still be running. */
+  /** No unit is approved yet, but the transaction may still be running. */
   | { kind: "settling"; remainingMs: number }
-  /** Some units are decided and some are still proposed: never a reason to approve again. */
+  /** Some units are approved and some are not: never a reason to approve again. */
   | { kind: "mixed" };
 
 export function decidePlanReadBack(input: {
@@ -59,9 +67,10 @@ export function decidePlanReadBack(input: {
   const { attempt, now } = input;
   const named = new Set(attempt.unitIds);
   const own = input.units.filter((unit) => named.has(unit.id));
-  const decided = own.filter((unit) => unit.decisionState !== "proposed").length;
-  const proposed = own.length - decided;
-  if (decided > 0) return proposed === 0 ? { kind: "recorded" } : { kind: "mixed" };
+  const approved = own.filter((unit) => unit.decisionState === "approved").length;
+  // Every unit of the attempt must be there and approved: a unit that is missing, proposed, rejected or
+  // expired beside an approved one is a half-recorded plan, which is never a reason to approve again.
+  if (approved > 0) return approved === attempt.unitIds.length ? { kind: "recorded" } : { kind: "mixed" };
   const remainingMs = attempt.startedAt + PLAN_SETTLED_AFTER_MS - now;
   return remainingMs > 0 ? { kind: "settling", remainingMs } : { kind: "not_recorded" };
 }

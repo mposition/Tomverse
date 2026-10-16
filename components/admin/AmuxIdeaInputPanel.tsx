@@ -6,6 +6,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
 import { AmuxFrontierModelsPanel, type AmuxBuildPreviewHooks } from "@/components/admin/AmuxFrontierModelsPanel";
 import { AmuxIdeaAnalysisResultPanel } from "@/components/admin/AmuxIdeaAnalysisResultPanel";
+import { AmuxIdeaBusyDialog, type AmuxBusyTone } from "@/components/admin/AmuxIdeaBusyDialog";
 import { AmuxIdeaRequestStatusCard, type AmuxIdeaRequestCardState } from "@/components/admin/AmuxIdeaRequestStatusCard";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
@@ -89,6 +90,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const hasUnsavedInput = !!(idea.trim() || repositories.trim() || pullRequests.trim());
   const [pending, setPending] = useState(false);
   const [readBackPending, setReadBackPending] = useState(false);
+  // The blocking dialog of the build-preview request (save, plan, preview in one request): working while
+  // it is in flight, then its answer until it is closed. It lives here, not in the frontier panel, because
+  // that panel is remounted for the saved idea the moment the request succeeds.
+  const [buildDialog, setBuildDialog] = useState<{
+    tone: AmuxBusyTone; reason: string | null; requestId: string;
+  } | null>(null);
   const [savedRequestId, setSavedRequestId] = useState("");
   const [savedRequestError, setSavedRequestError] = useState(false);
   const [savedRequestReauth, setSavedRequestReauth] = useState(false);
@@ -334,16 +341,23 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       if (inFlight.current || !reservePendingIdeaRequest(receiptStore(), operatorId, requestId)) return false;
       inFlight.current = true;
       setSubmission({ kind: "pending", requestId });
+      setBuildDialog({ tone: "working", reason: null, requestId });
       return true;
     },
     onBuilt: ({ requestId, ideaId, hasExternalSources, planReady }) => {
+      setBuildDialog((current) => current && { ...current, tone: "success" });
       rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
       setContinuationChunkIndex(0);
       if (planReady) setPlanReadyIdeaId(ideaId);
       setSubmission({ kind: "submitted", requestId, ideaId, hasExternalSources });
     },
-    onUnknown: (requestId) => { void readBack(requestId); },
+    onUnknown: (requestId) => {
+      setBuildDialog((current) => current && { ...current, tone: "unknown", requestId });
+      void readBack(requestId);
+    },
     onRefused: (requestId, code) => {
+      setBuildDialog((current) => current && { ...current, tone: "refused",
+        reason: messages.submitErrors[code as keyof typeof messages.submitErrors] ?? messages.submitErrors.submit_failed });
       clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
       inFlight.current = false;
       setSubmission({ kind: "refused", code });
@@ -409,8 +423,36 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     </div>
   ) : null;
 
+  // A lost answer that the read-back then confirms as saved is a success of the save, said as such.
+  const savedAfterUnknown = buildDialog?.tone === "unknown" && submission.kind === "submitted";
+  const buildDialogTone: AmuxBusyTone | null = buildDialog === null ? null : savedAfterUnknown ? "success" : buildDialog.tone;
+  const buildDialogView = buildDialog && buildDialogTone ? (
+    <AmuxIdeaBusyDialog open tone={buildDialogTone}
+      title={buildDialogTone === "working" ? messages.busyPreviewTitle
+        : buildDialogTone === "success" ? (savedAfterUnknown ? messages.statusSavedTitle : messages.busyPreviewDoneTitle)
+          : buildDialogTone === "refused" ? messages.busyRefusedTitle : messages.busyUnknownTitle}
+      message={messages.busyPreviewBody}
+      onClose={readBackPending ? undefined : () => setBuildDialog(null)}>
+      {buildDialogTone === "success" ? <p>{savedAfterUnknown ? messages.statusSavedBody : messages.busyPreviewDoneBody}</p> : null}
+      {buildDialogTone === "refused" ? <>
+        <p>{messages.busyRefusedBody}</p>
+        {buildDialog.reason ? <p role="alert" className="text-amber-200">{buildDialog.reason}</p> : null}
+      </> : null}
+      {buildDialogTone === "unknown" ? <>
+        <p>{messages.busyUnknownBody}</p>
+        {readBackPending ? <p role="status" aria-live="polite" className="text-blue-200">{messages.busyChecking}</p> : null}
+        <button type="button" onClick={() => void readBack(buildDialog.requestId)} disabled={readBackPending}
+          aria-busy={readBackPending}
+          className="min-h-11 w-full rounded-lg border border-amber-500/40 px-3 font-medium text-amber-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300 disabled:opacity-50">
+          {messages.checkSubmissionStatus}
+        </button>
+      </> : null}
+    </AmuxIdeaBusyDialog>
+  ) : null;
+
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4" data-testid="amux-v4-idea-input">
+      {buildDialogView}
       <div className="space-y-2 border-b border-zinc-200 pb-5 dark:border-zinc-800">
         <p className="text-xs font-semibold tracking-[0.18em] text-blue-700 uppercase dark:text-blue-300">{messages.step}</p>
         <h2 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">{messages.title}</h2>
