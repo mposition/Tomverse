@@ -8,7 +8,8 @@ import {
   planAmuxV4EgressConnect,
   planAmuxV4EgressTarget,
 } from "../lib/amux/ideaLocalEgressCore.ts";
-import { createAmuxV4EgressProxy } from "../lib/amux/ideaLocalEgressProxy.ts";
+import { createAmuxV4EgressProxy, createAmuxV19EgressProxy } from
+  "../lib/amux/ideaLocalEgressProxy.ts";
 
 const candidate = (changes = {}) => ({
   method: "CONNECT",
@@ -185,6 +186,57 @@ test("proxy caps simultaneous tunnels and releases a slot after disconnect", asy
     sockets.push(await openTunnel());
   } finally {
     for (const socket of sockets) socket.destroy();
+    await close(proxy);
+    await close(echo);
+  }
+});
+
+test("v19 direct-read tunnel carries more than the v4 byte ceiling", async () => {
+  const echo = createTcpServer((socket) => socket.pipe(socket));
+  const echoPort = await listen(echo);
+  const proxy = createAmuxV19EgressProxy(["api.anthropic.com"], {
+    resolve: async () => ["104.18.6.192"],
+    dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
+  });
+  const proxyPort = await listen(proxy);
+  const total = 17 * 1024 * 1024;
+  const socket = connectTcp({ host: "127.0.0.1", port: proxyPort });
+  try {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("v19 tunnel stalled")), 15_000);
+      let established = false;
+      let header = Buffer.alloc(0);
+      let received = 0;
+      const fail = (error) => { clearTimeout(timeout); reject(error); };
+      socket.once("error", fail);
+      socket.once("close", () => fail(new Error("v19 tunnel closed early")));
+      socket.once("connect", () => socket.write(
+        "CONNECT api.anthropic.com:443 HTTP/1.1\r\n" +
+        "Host: api.anthropic.com:443\r\n\r\n"));
+      socket.on("data", (bytes) => {
+        if (!established) {
+          header = Buffer.concat([header, bytes]);
+          const end = header.indexOf("\r\n\r\n");
+          if (end < 0) return;
+          if (!/^HTTP\/1\.1 200/.test(header.subarray(0, end).toString())) {
+            fail(new Error("v19 tunnel rejected approved host"));
+            return;
+          }
+          received += header.length - end - 4;
+          established = true;
+          header = Buffer.alloc(0);
+          for (let index = 0; index < 17; index += 1)
+            socket.write(Buffer.alloc(1024 * 1024, 0x61));
+        } else received += bytes.length;
+        if (received >= total) {
+          clearTimeout(timeout);
+          if (received === total) resolve();
+          else fail(new Error("v19 tunnel returned too many bytes"));
+        }
+      });
+    });
+  } finally {
+    socket.destroy();
     await close(proxy);
     await close(echo);
   }
