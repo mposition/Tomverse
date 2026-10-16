@@ -307,3 +307,28 @@ test("every action stays inside its statement ceiling", async () => {
     { reserve: 10, dispatch: 9, settle: 9, unknown: 9, release: 9 },
   );
 });
+
+// PostgreSQL 17 arms transaction_timeout from the moment it is set inside the
+// transaction. The ledger relies on that, so it is shown here rather than
+// assumed: after an action's bound() has run, the transaction cannot outlive
+// the timer, even with every statement under the statement timeout.
+test("an action arms the transaction timer inside the caller's transaction", async () => {
+  const started = Date.now();
+  await assert.rejects(
+    prisma.$transaction(
+      async (client) => {
+        // Refused after bound() -- no pin -- so nothing is written.
+        assert.deepEqual(
+          await reserveMarketingLlmCall(client, { payload: payload(1), deadlineAt: deadline() }, { ...OPEN, pins: [] }),
+          { status: "refused", code: "model_not_pinned" },
+        );
+        for (let i = 0; i < 3; i += 1) await client.$queryRawUnsafe("SELECT pg_sleep(4)::text");
+      },
+      { timeout: 30_000, maxWait: 30_000 },
+    ),
+    (error: unknown) => /transaction timeout|terminat|Server has closed|connection/i.test(String((error as Error)?.message ?? error)),
+  );
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 11_500, `the transaction was stopped by its 10 s timer, not after ${elapsed} ms`);
+  assert.ok(elapsed >= 9_000, `and not before it: ${elapsed} ms`);
+});

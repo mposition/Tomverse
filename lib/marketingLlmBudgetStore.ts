@@ -9,6 +9,11 @@
  * write reads the deadline, the kill switch, the cap and the pins; the audit
  * row is written first and the ledger row names it.
  *
+ * Each action expects a transaction of its own. The statement, idle and
+ * transaction bounds it sets are transaction-local and stay in force until
+ * that transaction ends, so a caller that ran more work in the same
+ * transaction would run it under them; the route opens one per request.
+ *
  * The database holds the transition rules on its own (the migration's
  * triggers); this module decides which transition a request asks for and
  * refuses the ones it should not make before the trigger would.
