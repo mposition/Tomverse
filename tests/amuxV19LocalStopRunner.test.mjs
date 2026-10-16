@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import test from "node:test";
 
 import { shouldStopAmuxV19LocalAnalysis } from
@@ -61,7 +62,12 @@ test("local stop poll fails closed for stop, stale identity and uncertain transp
 
 test("live CLI refuses a stopped or uncertain pre-spawn poll without invocation", {
   skip: process.platform !== "linux",
-}, async () => {
+}, async (t) => {
+  // A regression must never invoke the real paid CLI on the operator host.
+  if (existsSync("/home/tommy/.local/share/claude/versions/2.1.288")) {
+    t.skip("real CLI binary is installed on this host");
+    return;
+  }
   const previous = process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
   const prompt = Buffer.from("synthetic no-provider-call prompt");
   const selection = { provider: "anthropic", modelId: "claude-opus-5-5",
