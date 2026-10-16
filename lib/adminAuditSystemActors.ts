@@ -21,6 +21,13 @@ export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
  * acquire an unrelated AMUX module in their fixed runtime source closure. */
 export const AMUX_V4_IDEA_SYSTEM_ACTOR = "amux-v4-intake" as const;
 
+/** Intake v19: a coding-tool session submits an idea under the owner's saved
+ * operating scope. This actor is never the data owner and never human approval. */
+export const AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR = "amux-session-intake" as const;
+export const AMUX_SESSION_IDEA_SUBMITTED_ACTION = "amux.idea.session_submitted" as const;
+export const AMUX_SESSION_IDEA_SUBMITTED_TARGET = "AmuxIdeaSubmission" as const;
+export const AMUX_SESSION_IDEA_SUBMITTED_SCOPE = "session-submission-v1" as const;
+
 /**
  * The legacy internal auto-promotion tick consumes an owner-bound grant.
  */
@@ -152,6 +159,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
+  AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
   ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic",
 ] as const;
@@ -230,6 +238,15 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   return null;
 };
 
+export const amuxSessionIntakeSystemAuditScope = (
+  action: unknown,
+  targetType: unknown,
+): string | null =>
+  action === AMUX_SESSION_IDEA_SUBMITTED_ACTION &&
+  targetType === AMUX_SESSION_IDEA_SUBMITTED_TARGET
+    ? AMUX_SESSION_IDEA_SUBMITTED_SCOPE
+    : null;
+
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
 ): actor is SystemAuditActor =>
@@ -280,7 +297,9 @@ export const systemAuditActionAllowed = (
     (action === "amux.auto_promotion.halted" &&
       targetType === "AmuxRecommendationAutoHalt")) &&
   (actor !== AMUX_V4_IDEA_SYSTEM_ACTOR ||
-    amuxV4SystemAuditScope(action, targetType) !== null);
+    amuxV4SystemAuditScope(action, targetType) !== null) &&
+  (actor !== AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR ||
+    amuxSessionIntakeSystemAuditScope(action, targetType) !== null);
 
 /** Whether caller-supplied metadata claims the reserved key at its top level. */
 export const metadataClaimsSystemActor = (metadata: unknown): boolean =>
@@ -327,6 +346,12 @@ export const auditRowActorKind = (
     const metadata = row.metadata as Record<string, unknown>;
     return systemAuditActionAllowed(actor, row.action, row.targetType) &&
       metadata.actorScope === amuxV4SystemAuditScope(row.action, row.targetType)
+      ? "system" : "unknown";
+  }
+  if (actor === AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR) {
+    const metadata = row.metadata as Record<string, unknown>;
+    return systemAuditActionAllowed(actor, row.action, row.targetType) &&
+      metadata.actorScope === amuxSessionIntakeSystemAuditScope(row.action, row.targetType)
       ? "system" : "unknown";
   }
   return "system";

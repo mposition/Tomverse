@@ -56,6 +56,7 @@ import {
   marketingHistorySchema,
   parseMarketingReportPayload,
   MARKETING_APPENDABLE_HISTORY_TYPES,
+  MARKETING_RETENTION_SETTING,
   type AiVisibilitySearchMode,
   type MarketingChannelStatus,
   type MarketingChannel as MarketingChannelName,
@@ -5635,4 +5636,128 @@ export async function recordMarketingWebhookApplyNotPermitted(
       reasons: input.reasons,
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Retention (S3 plan, S3h1; docs/policy/marketing-automation.md §12.2)
+// ---------------------------------------------------------------------------
+
+/** S3h's audit action: one row per deleted row, in the transaction that deleted it. */
+export const MARKETING_RETENTION_ACTIONS = {
+  rowPurged: "marketing_retention.row_purged",
+} as const;
+
+/** Rows one run deletes per table; the rest wait for the next run. */
+export const MARKETING_RETENTION_BATCH_LIMIT = 200;
+
+export type MarketingRetentionTable = "MarketingPost" | "MarketingReport" | "AiVisibilityRun";
+
+/** Draft statuses §12.2 deletes after ninety days, when nothing reached a platform. */
+const DELETABLE_DRAFT_STATUSES = ["guard_rejected", "rejected", "approval_expired"] as const;
+
+/**
+ * Delete what §12.2 says has expired in one table, one bounded batch, and
+ * record the run.
+ *
+ * The rules are the database's, not this function's: the delete triggers
+ * refuse a report or a measurement before its `retentionUntil`, a post under
+ * legal hold, a post that reached a platform, a post that is not a rejected or
+ * expired draft and one younger than ninety days -- and refuse all of it unless
+ * this transaction has set the retention setting, which nothing else sets. The
+ * candidates below are only which rows to ask about; a row the trigger refuses
+ * fails the whole batch, so the selection mirrors the trigger exactly rather
+ * than approximately.
+ *
+ * Each deleted row gets its audit row in the same transaction, and a run that
+ * deleted anything is a `retention_run` report with the count, so "what did
+ * retention remove and when" has an answer after the rows are gone.
+ */
+export async function purgeExpiredMarketingRows(
+  tx: MarketingTransaction,
+  table: MarketingRetentionTable,
+  limit: number = MARKETING_RETENTION_BATCH_LIMIT,
+): Promise<{ readonly purged: number }> {
+  await tx.$queryRaw(
+    Prisma.sql`SELECT set_config(${MARKETING_RETENTION_SETTING}, 'on', true)`,
+  );
+  await takeAuditChainLock(tx);
+  const now = await marketingDatabaseNow(tx);
+  const take = Math.max(0, Math.min(Math.floor(limit), MARKETING_RETENTION_BATCH_LIMIT));
+
+  let ids: string[];
+  if (table === "MarketingReport") {
+    ids = (
+      await tx.marketingReport.findMany({
+        where: { retentionUntil: { lte: now } },
+        orderBy: { retentionUntil: "asc" },
+        take,
+        select: { id: true },
+      })
+    ).map((row) => row.id);
+  } else if (table === "AiVisibilityRun") {
+    ids = (
+      await tx.aiVisibilityRun.findMany({
+        where: { retentionUntil: { lte: now } },
+        orderBy: { retentionUntil: "asc" },
+        take,
+        select: { id: true },
+      })
+    ).map((row) => row.id);
+  } else {
+    ids = (
+      await tx.marketingPost.findMany({
+        where: {
+          status: { in: [...DELETABLE_DRAFT_STATUSES] },
+          legalHold: false,
+          publishAttempt: 0,
+          publishedAt: null,
+          providerRequestKey: null,
+          externalPostId: null,
+          createdAt: { lte: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000) },
+        },
+        orderBy: { createdAt: "asc" },
+        take,
+        select: { id: true },
+      })
+    ).map((row) => row.id);
+  }
+
+  let purged = 0;
+  for (const id of ids) {
+    const deleted =
+      table === "MarketingReport"
+        ? await tx.marketingReport.deleteMany({ where: { id } })
+        : table === "AiVisibilityRun"
+          ? await tx.aiVisibilityRun.deleteMany({ where: { id } })
+          : await tx.marketingPost.deleteMany({ where: { id } });
+    // A row another run already took is not this run's to record.
+    if (deleted.count !== 1) continue;
+    purged += 1;
+    await writeSystemAuditLog({
+      tx,
+      systemActor: "marketing-retention",
+      action: MARKETING_RETENTION_ACTIONS.rowPurged,
+      targetType: table,
+      targetId: id,
+      summary: "Deleted a marketing row its retention period had ended for.",
+      metadata: { table },
+    });
+  }
+
+  // Recorded when something went; a run that found nothing due leaves no row,
+  // or every quiet day would add three.
+  if (purged === 0) return { purged };
+  await insertMarketingReport(tx, {
+    kind: "retention_run",
+    periodStart: now,
+    periodEnd: now,
+    payload: {
+      startedAt: now.toISOString(),
+      table,
+      purgedRowCount: purged,
+      compactedRowCount: 0,
+    },
+    sourceVersion: "marketing-retention-v1",
+  });
+  return { purged };
 }

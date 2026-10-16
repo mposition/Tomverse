@@ -5,6 +5,7 @@ import {
   calculateV4TaskCeilingFromCatalog,
   checkV4TaskApprovedCatalogCeiling,
   inspectV4TaskCostCatalog,
+  inspectV52TaskCatalogGrades,
   resolveV4TaskApiExecutionBasis,
 } from "../lib/amux/v4TaskCostCatalogCore.ts";
 
@@ -56,6 +57,30 @@ const calculate = (rawCatalog = catalog(), overrides = {}) =>
     asOfIso: "2026-10-01T01:00:00.000Z",
     ...overrides,
   });
+
+test("v52 catalog approval requires one route grade matching the worker registry", () => {
+  const exact = catalog({ routes: [route({ grades: ["routine"] })] });
+  const registry = new Map([["worker-codex", "chore"]]);
+  assert.deepEqual(inspectV52TaskCatalogGrades(exact, registry), { ok: true });
+  assert.deepEqual(inspectV52TaskCatalogGrades(exact, null), {
+    ok: false, code: "worker_registry_unavailable",
+  });
+  for (const bad of [
+    route({ grades: ["routine", "advanced"] }),
+    route({ grades: ["advanced"] }),
+    route({ grades: ["standard"] }),
+    route({ workerName: "missing", grades: ["routine"] }),
+    route({ enabled: false, grades: ["routine", "frontier"] }),
+  ]) {
+    assert.deepEqual(inspectV52TaskCatalogGrades(
+      catalog({ routes: [bad] }), registry),
+    { ok: false, code: "grade_route_mismatch" });
+  }
+  assert.deepEqual(inspectV52TaskCatalogGrades({ ...exact, extra: true }, registry),
+    { ok: false, code: "schema_rejected" });
+  assert.equal(inspectV4TaskCostCatalog(catalog()).ok, true,
+    "the existing catalog parser remains compatible while the v52 latch is off");
+});
 
 test("catalog parser computes its own digest and derives a ceiling from grade caps", () => {
   const inspected = inspectV4TaskCostCatalog(catalog());

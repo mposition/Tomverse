@@ -465,6 +465,9 @@ run(
     // The v19 operating scope is append-only and bound to one owner audit per
     // version; the database refuses a row without that evidence or any change.
     "tests/integration/amux-intake-operating-scope.db.test.ts",
+    // v19 session intake stores encrypted source provenance under the latest
+    // owner scope while its canonical audit remains a dedicated system actor.
+    "tests/integration/amux-v19-session-submission.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",
@@ -722,6 +725,9 @@ run(
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.
     "tests/integration/marketing-generator-context.db.test.ts",
+    // Marketing retention (S3h1): what the delete triggers let go goes, with an
+    // audit row each and a retention_run report; what they keep stays.
+    "tests/integration/marketing-retention.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them

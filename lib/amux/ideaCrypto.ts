@@ -39,13 +39,19 @@ const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const HEADER_BYTES = MAGIC.length + 1 + IV_BYTES + TAG_BYTES + KEY_BYTES + IV_BYTES + TAG_BYTES;
-const MAX_CONTENT_BYTES = 1024 * 1024;
+const MAX_BOUNDED_CONTENT_BYTES = 1024 * 1024;
 const SUBJECT_ID = /^[A-Za-z0-9:_-]{1,160}$/;
 const KEY_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const PURPOSES: ReadonlySet<string> = new Set<AmuxContentPurpose>([
   "idea_raw", "source_scope", "collection_result", "transfer_payload", "analysis_result", "analysis_draft", "analysis_freeform", "derivation_confirmation", "derivation_reason", "portfolio_assessment", "portfolio_score",
   "node_content", "card_title", "card_body", "card_brief", "task_result", "task_patch",
 ]);
+
+/** Intake v19 sets no byte ceiling for an idea or its encrypted session
+ * provenance. Both use the existing idea_raw coordinate; every other AMUX
+ * content purpose keeps the v4 one-MiB defensive bound. */
+const contentSizeAccepted = (bytes: number, purpose: AmuxContentPurpose) =>
+  purpose === "idea_raw" || bytes <= MAX_BOUNDED_CONTENT_BYTES;
 
 const assertMaster = (keys: AmuxMasterKey) => {
   if (!KEY_ID.test(keys.masterKeyId) || !Number.isSafeInteger(keys.masterKeyVersion) ||
@@ -101,7 +107,7 @@ export function amuxContentDigest(
   key: AmuxDigestKey,
 ): { digest: string; digestKeyId: string } {
   assertDigestKey(key);
-  if (!Buffer.isBuffer(plain) || plain.length > MAX_CONTENT_BYTES) {
+  if (!Buffer.isBuffer(plain) || !contentSizeAccepted(plain.length, purpose)) {
     throw new Error("AMUX digest content size is invalid");
   }
   return { digest: digestFor(plain, aadFor(purpose, subjectId), key.digestKey),
@@ -115,7 +121,7 @@ export function sealAmuxContent(
   keys: AmuxContentKeys,
 ): SealedAmuxContent {
   assertDigestKey(keys);
-  if (!Buffer.isBuffer(plain) || plain.length > MAX_CONTENT_BYTES) {
+  if (!Buffer.isBuffer(plain) || !contentSizeAccepted(plain.length, purpose)) {
     throw new Error("AMUX content size is invalid");
   }
   const context = aadFor(purpose, subjectId);
@@ -159,7 +165,7 @@ export function openAmuxContent(
   const master = masterFor(keys, purpose, subjectId);
   if (sealed.keyId !== master.masterKeyId || sealed.keyVersion !== master.masterKeyVersion ||
       !Buffer.isBuffer(sealed.ciphertext) || sealed.ciphertext.length < HEADER_BYTES ||
-      sealed.ciphertext.length > HEADER_BYTES + MAX_CONTENT_BYTES) {
+      !contentSizeAccepted(sealed.ciphertext.length - HEADER_BYTES, purpose)) {
     throw new Error("AMUX content envelope is invalid");
   }
   const bytes = sealed.ciphertext;
@@ -201,7 +207,7 @@ export function verifyAmuxContentDigest(
   key: AmuxDigestKey,
 ): boolean {
   assertDigestKey(key);
-  if (!Buffer.isBuffer(plain) || plain.length > MAX_CONTENT_BYTES ||
+  if (!Buffer.isBuffer(plain) || !contentSizeAccepted(plain.length, purpose) ||
       expectedDigestKeyId !== key.digestKeyId || !/^[a-f0-9]{64}$/.test(expectedDigest)) {
     return false;
   }
