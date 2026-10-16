@@ -443,16 +443,23 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // The analysis admission routes predate A09 and own their explicit
-  // reconciliation contracts; the commit-deadline boundary still governs
-  // orchestration task execution.
+  // Analysis admission and the v19 stop snapshot own bounded read-only
+  // transactions; the commit-deadline boundary still governs task execution.
   assert.deepEqual(direct, [
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
+    "app/api/internal/amux/v19/analysis-stop/route.ts",
     "app/api/internal/amux/v22/execution/result/route.ts",
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
   ]);
+  const stopPoll = withoutComments(read(
+    "app/api/internal/amux/v19/analysis-stop/route.ts"));
+  assert.ok(stopPoll.indexOf("isAmuxV4AnalysisAgentAuthorized") <
+    stopPoll.indexOf("prisma.$transaction"));
+  assert.ok(stopPoll.indexOf('process.env[READ_ENV] !== "enabled"') <
+    stopPoll.indexOf("prisma.$transaction"));
+  assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   // Intake v15 opens only the code latches. The independent runtime write
   // and receipt-read switches still fail closed before a transaction opens.
   // Both transaction bounds remain independent of execution commit deadlines.
