@@ -96,3 +96,12 @@ test("a hold names only what was asked for", async () => {
   release();
   await reader;
 });
+
+test("a hold reports the rows it took, and a row that was not there is not among them", async () => {
+  const held = await prisma.$transaction((tx) =>
+    holdMarketingFactRows(tx, { plans: true, catalogue: true, modelIds: [modelId, "model-that-is-not-there"] }),
+  );
+  assert.deepEqual([...held.modelIds], [modelId]);
+  assert.equal(held.catalogue, true);
+  assert.ok(held.planIds.has("pro"));
+});

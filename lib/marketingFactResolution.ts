@@ -29,14 +29,15 @@
  * A transaction at READ COMMITTED -- the intake's, deliberately, because its
  * read-back and its ledger writes must see what committed while it waited for
  * the audit chain lock -- gives each statement its own snapshot. So the rows a
- * price or model fact rests on are locked FOR SHARE immediately before they are
- * read: none of them can change until the caller commits, and the facts are the
- * rows as they all stood at the last lock, which is one moment that existed. A
- * row that does not exist cannot be locked, and its absence is the refusing
- * answer (no plan row is a compiled default, no model row is no model), so a
- * row appearing later can only have made a claim acceptable, never the other
- * way round. Usage is read once and can only make a post less eligible for
- * autonomy, which a generated draft is refused anyway.
+ * price or model fact rests on are locked FOR SHARE before they are read, and
+ * **only a row the lock actually took counts.** A locked row cannot change or
+ * go until the caller commits; a row that was not there when the lock ran was
+ * not locked, so if a later read sees it -- inserted in between -- it is
+ * treated as still absent, which is the refusing answer (no plan row is a
+ * compiled default, no catalogue row is not stored, no model row is no model).
+ * The facts are therefore the held rows as they all stood at the last lock: one
+ * moment that existed. Usage is read once and can only make a post less
+ * eligible for autonomy, which a generated draft is refused anyway.
  */
 
 import "server-only";
@@ -141,8 +142,16 @@ async function readGates(
   return gates;
 }
 
+/** Which rows a hold took: only these may answer a fact. */
+export type HeldMarketingFactRows = {
+  readonly planIds: ReadonlySet<string>;
+  readonly catalogue: boolean;
+  readonly modelIds: ReadonlySet<string>;
+};
+
 /**
- * Lock the rows a fact is about to be read from, until the caller commits.
+ * Lock the rows a fact is about to be read from, until the caller commits, and
+ * say which rows were there to lock.
  *
  * FOR SHARE: other readers go on, a writer waits. Outside a transaction (a
  * caller passing the client itself) the lock lasts one statement and holds
@@ -151,16 +160,24 @@ async function readGates(
 export async function holdMarketingFactRows(
   database: MarketingFactDatabase,
   rows: { readonly plans: boolean; readonly catalogue: boolean; readonly modelIds: readonly string[] },
-): Promise<void> {
-  if (rows.plans) {
-    await database.$queryRaw`SELECT "id" FROM "BillingPlan" ORDER BY "id" FOR SHARE`;
-  }
-  if (rows.catalogue) {
-    await database.$queryRaw`SELECT "key" FROM "AppSetting" WHERE "key" = ${BILLING_PRICE_CATALOG_KEY} FOR SHARE`;
-  }
-  if (rows.modelIds.length > 0) {
-    await database.$queryRaw`SELECT "id" FROM "ModelRegistryEntry" WHERE "id" = ANY(${[...rows.modelIds]}::text[]) ORDER BY "id" FOR SHARE`;
-  }
+): Promise<HeldMarketingFactRows> {
+  const planIds = rows.plans
+    ? (await database.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "BillingPlan" ORDER BY "id" FOR SHARE`).map(
+        (row) => row.id,
+      )
+    : [];
+  const catalogue = rows.catalogue
+    ? (
+        await database.$queryRaw<Array<{ key: string }>>`SELECT "key" FROM "AppSetting" WHERE "key" = ${BILLING_PRICE_CATALOG_KEY} FOR SHARE`
+      ).length === 1
+    : false;
+  const modelIds =
+    rows.modelIds.length > 0
+      ? (
+          await database.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ModelRegistryEntry" WHERE "id" = ANY(${[...rows.modelIds]}::text[]) ORDER BY "id" FOR SHARE`
+        ).map((row) => row.id)
+      : [];
+  return { planIds: new Set(planIds), catalogue, modelIds: new Set(modelIds) };
 }
 
 /** The database's "now", read through the same client as the facts. */
@@ -361,17 +378,21 @@ async function readMarketingFacts(
   ].sort();
 
   // In a fixed order, through the one client: the rows held first, then read.
-  await holdMarketingFactRows(database, { plans: needsPlans, catalogue: needsCatalogue, modelIds });
+  const held = await holdMarketingFactRows(database, { plans: needsPlans, catalogue: needsCatalogue, modelIds });
   const gates = await readGates(database, gateKeys);
   const usage = await readUsage(database, request.channelId);
   const plans: BillingPlanWithFieldSources[] = needsPlans
     ? await getBillingPlansWithFieldSources(database)
     : [];
-  const catalogue: { source: BillingPriceCatalogSource; updatedAt: string | null } | null =
-    needsCatalogue ? await readBillingPriceCatalogSource(database) : null;
+  // A catalogue row the hold did not take is not read: absent then, absent now.
+  const catalogue: { source: BillingPriceCatalogSource; updatedAt: string | null } | null = !needsCatalogue
+    ? null
+    : held.catalogue
+      ? await readBillingPriceCatalogSource(database)
+      : { source: "default_row_missing", updatedAt: null };
   const modelRows = new Map<string, ModelRow | null>();
   for (const modelId of modelIds) {
-    modelRows.set(modelId, await readModelRow(database, modelId));
+    modelRows.set(modelId, held.modelIds.has(modelId) ? await readModelRow(database, modelId) : null);
   }
   // Always: the registry version a post records is the one in force, whether
   // or not this draft names an asset, and the table refuses a version of 0.
@@ -415,7 +436,9 @@ async function readMarketingFacts(
     if (claim.type === "pricing" || claim.type === "plan") {
       const factSource = claim.factSource;
       if (factSource?.kind === "billing_plan") {
-        const plan = plans.find((entry) => entry.plan.id === factSource.planId);
+        const found = plans.find((entry) => entry.plan.id === factSource.planId);
+        // A plan row the hold did not take -- inserted after it -- is no row.
+        const plan = found?.row && held.planIds.has(found.row.id) ? found : undefined;
         if (plan?.row) priceRows.set(plan.row.id, plan.row.updatedAt);
         const decision = plan
           ? priceClaimSourceDecision(

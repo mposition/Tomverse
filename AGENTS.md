@@ -1370,7 +1370,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `readBillingPriceCatalogSource()`, `tests/marketingFactResolution.test.mjs`. **사실은 호출자의 트랜잭션 하나와
   DB 시계로 읽습니다** — 게이트·요금제·카탈로그 출처·모델 행·사용 이력이 같은 client를 지나고, 정해진 순서로
   한 번에 하나씩 읽습니다. READ COMMITTED에서는 문장마다 snapshot이 다르므로, 가격·모델 사실이 기대는 행은
-  읽기 직전에 `FOR SHARE`로 잡아 commit까지 바뀌지 않게 합니다(`holdMarketingFactRows()`,
+  읽기 전에 `FOR SHARE`로 잡아 commit까지 바뀌지 않게 하고, **잠금이 실제로 잡은 행만 사실로 인정합니다** — 잠금 뒤에
+  삽입돼 읽기에만 보이는 행은 없는 것으로 보고 거절합니다(`holdMarketingFactRows()`,
   `tests/integration/marketing-fact-row-hold.db.test.ts`). 접수 트랜잭션을 REPEATABLE READ로 올리지 않는 것은
   snapshot이 감사 체인 잠금보다 먼저 잡혀 같은 key 재제출 확인과 원장 소비가 기다리는 동안 commit된 행을 못 보기
   때문입니다. 새 draft는 `resolveMarketingFactsWithSnapshot()`이 읽은 행(요금제 행·카탈로그 출처·
