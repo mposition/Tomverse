@@ -764,7 +764,7 @@ const REGISTRY = {
   AmuxIdeaContentKeyRetirement_purpose_check: {
     owner: "database",
     reason:
-      "Only the four per-unit AMUX analysis bodies with approved retention clocks can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
+      "Only AMUX content purposes with an approved retention clock, including the seven-day CLI read manifest, can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
   },
   AmuxIdeaRetentionHold_reason_check: {
     owner: "database",

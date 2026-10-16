@@ -21,11 +21,14 @@ import { readAmuxIdeaProgressInTx } from "@/lib/amux/ideaProgressRead";
 import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
+import { readAmuxContentPurgeOutcome, retireVerifiedAmuxContentKey } from
+  "@/lib/amux/ideaContentKeyRetirementService";
 import { openAmuxContent, verifyAmuxContentDigest } from "@/lib/amux/ideaCrypto";
 import { parseAmuxTrackedCheckoutReadManifest } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestCore";
 import { amuxTrackedCheckoutReadManifestKeyIdentity,
   AmuxTrackedCheckoutReadManifestError,
+  amuxReadManifestDueAt, commitAmuxDueReadManifestPurge,
   recordAmuxTrackedCheckoutReadManifest } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestStore";
 import {
@@ -206,6 +209,9 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
     const row = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
       where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
     });
+    if (!row.ciphertext || !row.keyId || !row.keyVersion) {
+      throw new Error("Synthetic read manifest was unexpectedly purged");
+    }
     const audit = await prisma.adminAuditLog.findUniqueOrThrow({
       where: { id: receipt.auditLogId },
     });
@@ -335,5 +341,59 @@ test("database rejects mismatched canonical audit and mutation of stored evidenc
   }), /append only/);
   await assert.rejects(prisma.amuxIdeaTrackedCheckoutEvidence.delete({
     where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
+  }), /append only/);
+});
+
+test("seven-day read-manifest purge clears paths and retires only its key", async () => {
+  const manifest = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
+    where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
+  });
+  assert.equal(amuxReadManifestDueAt(new Date("2026-10-01T00:00:00Z"))
+    .toISOString(), "2026-10-08T00:00:00.000Z");
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueReadManifestPurge(tx, manifest.id)), "skipped");
+  const submittedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+  const analysisDeadlineAt = amuxReadManifestDueAt(submittedAt);
+  // The real insert guard forbids an expired idea. Move only this synthetic
+  // fixture's immutable clock after insertion; re-enable its guard before
+  // exercising the real retention and audit transition.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+    await tx.amuxIdeaSubmission.update({ where: { id: ideaId }, data: {
+      submittedAt, analysisDeadlineAt, rawPurgeAfter: analysisDeadlineAt,
+      rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
+      sourceProvenanceCiphertext: null, sourceProvenanceKeyId: null,
+      sourceProvenanceKeyVersion: null, rawPurgedAt: new Date(),
+    } });
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" ENABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+  });
+  await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.update({
+    where: { id: manifest.id }, data: { ciphertext: null, keyId: null,
+      keyVersion: null, bodyPurgedAt: new Date() },
+  }), /retirement is missing/);
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueReadManifestPurge(tx, manifest.id)), "purged");
+  const target = amuxTrackedCheckoutReadManifestKeyIdentity(ideaId, manifest.id);
+  assert.equal(await readAmuxContentPurgeOutcome(target), "purged");
+  const purged = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
+    where: { id: manifest.id },
+  });
+  assert.equal(purged.ciphertext, null);
+  assert.equal(purged.keyId, null);
+  assert.equal(purged.keyVersion, null);
+  assert.ok(purged.bodyPurgedAt);
+  assert.equal(purged.fileCount, 2);
+  assert.equal(purged.digest, manifest.digest);
+  assert.equal(purged.auditLogId, manifest.auditLogId);
+  const deleted: string[] = [];
+  assert.equal(await retireVerifiedAmuxContentKey(target, async (identity) => {
+    deleted.push(identity.subjectId);
+  }), "deleted");
+  assert.deepEqual(deleted, [manifest.id]);
+  assert.equal(await retireVerifiedAmuxContentKey(target, async () => {
+    throw new Error("already deleted key must not be retried");
+  }), "already_deleted");
+  await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.update({
+    where: { id: manifest.id }, data: { ciphertext: Uint8Array.of(1) },
   }), /append only/);
 });

@@ -664,6 +664,34 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The sole manifest writer locks and reads pinned checkout evidence; its SQL does not modify the evidence row.",
+  },
+  {
+    path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason: "The sole manifest writer uses SQL only to lock the row; guarded insert and purge use Prisma delegates in audited transactions.",
+  },
+  {
+    path: "prisma/migrations/20261017020000_amux_v19_read_manifest_retention/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 5,
+    writeVerbs: 15,
+    reason: "The additive migration changes manifest shape and guard DDL; it performs no manifest row DML.",
+  },
+  {
+    path: "prisma/migrations/20261017020000_amux_v19_read_manifest_retention/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 15,
+    reason: "The retention guard reads a canonical audit row created by the application; the migration writes no audit row.",
+  },
+  {
     path: "lib/accountDataExportDomains.ts",
     table: "AmuxIdeaTrackedCheckoutReadManifest",
     tableMentions: 2,

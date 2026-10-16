@@ -9797,13 +9797,14 @@ model AmuxIdeaTrackedCheckoutReadManifest {
   referenceOrdinal   Int
   pinnedCommitSha    String
   fileCount          Int
-  ciphertext         Bytes
-  keyId              String
-  keyVersion         Int
+  ciphertext         Bytes?
+  keyId              String?
+  keyVersion         Int?
   digest             String
   digestKeyId        String
   auditLogId         String   @unique
   createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  bodyPurgedAt       DateTime?
 
   idea     AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [ideaId, referenceOrdinal], references: [ideaId, referenceOrdinal], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaTrackedCheckoutReadManifest_evidence_fkey")
@@ -9811,6 +9812,7 @@ model AmuxIdeaTrackedCheckoutReadManifest {
 
   @@unique([ideaId, referenceOrdinal])
   @@index([ideaId, createdAt])
+  @@index([bodyPurgedAt, createdAt])
 }
 
 /// A DB body purge and its external per-unit key deletion are separate
