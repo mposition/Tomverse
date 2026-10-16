@@ -98,18 +98,24 @@ test("only the dedicated analysis agent can use the closed proof route", async (
   assert.equal((await route.GET(get())).status, 404,
     "readback remains available when writes stop");
   delete process.env.TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ;
+  process.env.TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE = "enabled";
+  assert.equal((await route.POST(post())).status, 409,
+    "a write needs its readback gate too");
   assert.equal((await route.GET(get())).status, 409);
 });
 
 test("malformed proof or lookup never touches the writer or readback", async () => {
   reset();
   for (const payload of [{ ...body, pinnedCommitSha: "short" },
+    { ...body, referenceOrdinal: 2_147_483_648 },
+    { ...body, excludedCount: 2_147_483_648 },
     { ...body, excludedReasons: { ...body.excludedReasons, unexpected: 1 } },
     { ...body, filePaths: ["private/secret.md"] }]) {
     assert.equal((await route.POST(post(payload))).status, 400);
   }
   assert.equal((await route.POST(post(body, { "content-type": "text/plain" }))).status, 415);
   for (const query of ["", `?ideaId=${ideaId}&referenceOrdinal=00`,
+    `?ideaId=${ideaId}&referenceOrdinal=2147483648`,
     `?ideaId=${ideaId}&referenceOrdinal=0&other=x`,
     `?ideaId=${ideaId}&ideaId=${ideaId}&referenceOrdinal=0`]) {
     assert.equal((await route.GET(get(query))).status, 400);
@@ -127,16 +133,23 @@ test("verified proof commits once and returns only content-free identity", async
   assert.equal(writes, 1);
   const readback = await route.GET(get());
   assert.equal(readback.status, 200);
-  assert.equal((await readback.json()).status, "recorded");
+  assert.deepEqual(await readback.json(), { status: "recorded", evidenceId,
+    ideaId, referenceOrdinal: 0, pinnedCommitSha: body.pinnedCommitSha,
+    excludedCount: body.excludedCount,
+    excludedReasons: body.excludedReasons,
+    excludedPathDigest: body.excludedPathDigest,
+    excludedPathDigestKeyId: body.excludedPathDigestKeyId });
   assert.equal(reads, 1);
 });
 
 test("known refusal and unknown commit both forbid blind POST retry", async () => {
   reset();
-  writeCode = "already_recorded";
-  const refused = await route.POST(post());
-  assert.equal(refused.status, 409);
-  assert.deepEqual(await refused.json(), { error: "already_recorded", retryWrite: false });
+  for (const code of ["already_recorded", "idea_unavailable", "invalid_evidence"]) {
+    writeCode = code;
+    const refused = await route.POST(post());
+    assert.equal(refused.status, 409);
+    assert.deepEqual(await refused.json(), { error: code, retryWrite: false });
+  }
   reset();
   unknownCommit = true;
   const uncertain = await route.POST(post());

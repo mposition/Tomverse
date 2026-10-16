@@ -15,7 +15,8 @@ import { prisma } from "@/lib/prisma";
 const WRITE_ENV = "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE";
 const READ_ENV = "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ";
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
-const ordinal = z.number().int().nonnegative();
+// These values land in PostgreSQL Int columns, not BigInt columns.
+const ordinal = z.number().int().min(0).max(2_147_483_647);
 const lookupSchema = z.object({ ideaId: id, referenceOrdinal: ordinal }).strict();
 const bodySchema = lookupSchema.extend({
   pinnedCommitSha: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
@@ -33,8 +34,11 @@ function authorized(request: Request): boolean {
     process.env.TOMVERSE_AMUX_SYNC_SECRET);
 }
 
-/** A content-free proof from the isolated analysis worker. A lost write reply
- * is read back by idea/reference; the worker never blindly repeats POST. */
+/** A content-free proof from the isolated analysis worker. Admission and the
+ * CLI run have their own existing switches; this records an already prepared
+ * checkout, even if admission has since stopped. Its dedicated write switch
+ * can stop evidence writes. A lost reply is read back by idea/reference; the
+ * worker never blindly repeats POST. */
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   if (process.env[WRITE_ENV] !== "enabled" || process.env[READ_ENV] !== "enabled") {
@@ -94,7 +98,14 @@ export async function GET(request: Request): Promise<Response> {
     { maxWait: 3_000, timeout: 10_000 });
     if (!evidence) return amuxJsonNoStore({ status: "absent",
       ...parsed.data, retryWrite: false }, 404);
-    return amuxJsonNoStore({ status: "recorded", ...evidence });
+    return amuxJsonNoStore({ status: "recorded",
+      evidenceId: evidence.evidenceId, ideaId: evidence.ideaId,
+      referenceOrdinal: evidence.referenceOrdinal,
+      pinnedCommitSha: evidence.pinnedCommitSha,
+      excludedCount: evidence.excludedCount,
+      excludedReasons: evidence.excludedReasons,
+      excludedPathDigest: evidence.excludedPathDigest,
+      excludedPathDigestKeyId: evidence.excludedPathDigestKeyId });
   } catch {
     return amuxJsonNoStore({ error: "readback_unavailable",
       retryWrite: false }, 503);
