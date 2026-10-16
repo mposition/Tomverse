@@ -21,7 +21,10 @@ import { amuxContentDigest, sealAmuxContent,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import type { AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import type { AmuxAnalysisNode } from "./ideaAnalysisChunkCore.ts";
-import { inspectAmuxV4CardRegistration } from "./ideaUnitRegistrationCore.ts";
+import { amuxV4CardRegistrationDecisionErrorCode,
+  inspectAmuxV4CardRegistration,
+  type AmuxV20TaskRegistrationRefusal } from
+  "./ideaUnitRegistrationCore.ts";
 import { inspectAmuxV4NodeCreation } from "./ideaNodeRegistrationCore.ts";
 import { checkAmuxIdeaUnitConsume,
   type AmuxIdeaUnitConsumeContext } from "./ideaUnitConsumeGuard.ts";
@@ -40,7 +43,8 @@ export const amuxV4UnitWriteEnabled = (value: string | undefined) =>
 export class AmuxV4UnitDecisionError extends Error {
   constructor(readonly code: "forbidden" | "not_found" | "not_ready" |
     "reconfirm" | "integrity_unavailable" | "write_disabled" |
-    "outcome_unknown" | "duplicate_reason_required") {
+    "outcome_unknown" | "duplicate_reason_required" |
+    AmuxV20TaskRegistrationRefusal) {
     super(code);
     this.name = "AmuxV4UnitDecisionError";
   }
@@ -416,8 +420,9 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     resolvedFeatureRef: hierarchy[2].id,
   });
   if (!inspected.ok) {
-    throw new AmuxV4UnitDecisionError(inspected.code === "halt"
-      ? "integrity_unavailable" : "reconfirm");
+    throw new AmuxV4UnitDecisionError(
+      amuxV4CardRegistrationDecisionErrorCode(inspected.code),
+    );
   }
   const plan = inspected.plan;
   const title = sealAmuxContent(Buffer.from(plan.title, "utf8"),

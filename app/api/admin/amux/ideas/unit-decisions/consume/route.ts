@@ -12,6 +12,8 @@ import { apiSecurityResponse, consumeApiRateLimit,
 import { authOptions } from "@/lib/auth";
 import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4UnitDecisionError,
   amuxV4UnitWriteEnabled } from "@/lib/amux/ideaUnitDecisionStore";
+import { isAmuxV20TaskRegistrationRefusal } from
+  "@/lib/amux/ideaUnitRegistrationCore";
 import { readAmuxV4UnitBrowserNonce } from
   "@/lib/amux/ideaUnitBrowserCore";
 import { consumeAmuxV4StoryRegistration } from
@@ -74,7 +76,8 @@ export async function POST(request: Request) {
     if (error instanceof AmuxV4UnitDecisionError) {
       return NextResponse.json({ error: error.code, retryWrite: false },
         { status: error.code === "not_found" ? 404 :
-          error.code === "not_ready" || error.code === "reconfirm" ? 409 : 503,
+          error.code === "not_ready" || error.code === "reconfirm" ||
+          isAmuxV20TaskRegistrationRefusal(error.code) ? 409 : 503,
           headers: noStore });
     }
     const security = apiSecurityResponse(error);
