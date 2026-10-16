@@ -55,16 +55,16 @@ BEGIN
   SELECT * INTO atask FROM "AmuxPortfolioAssessment" WHERE "id" = NEW."taskAssessmentId";
   IF story_id IS NOT NULL THEN
     SELECT * INTO ast FROM "AmuxPortfolioAssessment" WHERE "id" = NEW."storyAssessmentId";
-    story_evidence := ast."evidenceAsOf";
-    story_version := ast."assessmentVersion";
-    story_uncertainty := ast."uncertainty";
-    story_component := (ast."metrics" ->> 'impact')::integer * 2;
-    task_multiplier := 4;
     IF NEW."storyAssessmentId" IS NULL OR
        ast."cardId" IS DISTINCT FROM story_id OR ast."subjectKind" IS DISTINCT FROM 'story' THEN
       RAISE EXCEPTION 'portfolio score Story assessment changed'
         USING ERRCODE = '23514', CONSTRAINT = 'AmuxPortfolioScoreSnapshot_assessments_check';
     END IF;
+    story_evidence := ast."evidenceAsOf";
+    story_version := ast."assessmentVersion";
+    story_uncertainty := ast."uncertainty";
+    story_component := (ast."metrics" ->> 'impact')::integer * 2;
+    task_multiplier := 4;
   ELSIF NEW."storyAssessmentId" IS NOT NULL THEN
     RAISE EXCEPTION 'portfolio score unexpected Story assessment'
       USING ERRCODE = '23514', CONSTRAINT = 'AmuxPortfolioScoreSnapshot_assessments_check';

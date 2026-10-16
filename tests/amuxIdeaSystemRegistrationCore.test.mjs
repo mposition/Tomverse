@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -6,6 +7,7 @@ import {
   AMUX_V19_SYSTEM_REGISTRATION_ENV,
   AMUX_V19_UNIT_REGISTRATION_AUTHORITY,
   amuxV19SystemRegistrationEnabled,
+  amuxV19SystemRegistrationTestBoundary,
   deriveAmuxV19RegistrationRefusalRequestId,
   deriveAmuxV19SystemRegistrationBinding,
   isAmuxV19UnitRegistrationAuthority,
@@ -14,6 +16,11 @@ import {
 
 const key = { digestKeyId: "amux-digest-v1",
   digestKey: Buffer.alloc(32, 7) };
+
+const serviceSource = readFileSync(
+  new URL("../lib/amux/ideaSystemRegistrationService.ts", import.meta.url),
+  "utf8",
+);
 
 test("system registration remains code-latched off when every env switch is enabled", () => {
   const env = {
@@ -29,6 +36,26 @@ test("system registration remains code-latched off when every env switch is enab
   };
   assert.equal(AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED, false);
   assert.equal(amuxV19SystemRegistrationEnabled(env), false);
+});
+
+test("the ungated system registration primitive accepts only an isolated local test DB", () => {
+  const testUrl = "postgresql://postgres@127.0.0.1:55467/tomverse_test";
+  assert.equal(amuxV19SystemRegistrationTestBoundary({ NODE_ENV: "test",
+    TEST_DATABASE_URL: testUrl, DATABASE_URL: testUrl,
+    DIRECT_DATABASE_URL: testUrl }), true);
+  assert.equal(amuxV19SystemRegistrationTestBoundary({ NODE_ENV: "production",
+    TEST_DATABASE_URL: testUrl, DATABASE_URL: testUrl }), false);
+  assert.equal(amuxV19SystemRegistrationTestBoundary({ NODE_ENV: "test",
+    TEST_DATABASE_URL: testUrl,
+    DATABASE_URL: "postgresql://prod.example/tomverse" }), false);
+  assert.equal(amuxV19SystemRegistrationTestBoundary({ NODE_ENV: "test",
+    TEST_DATABASE_URL: "postgresql://postgres@db/tomverse_test",
+    DATABASE_URL: "postgresql://postgres@db/tomverse_test" }), false);
+  assert.doesNotMatch(serviceSource,
+    /export async function commitAmuxV19CompletedIdeaSystemRegistration\(/);
+  assert.ok(serviceSource.indexOf("assertSystemRegistrationReadyInTx(tx, plan)") <
+    serviceSource.indexOf("createSystemRegistrationContentKeys(plan)"));
+  assert.match(serviceSource, /if \(!callbackReturned\) throw error;/);
 });
 
 test("system authorization binding is keyed, deterministic and identity-bound", () => {

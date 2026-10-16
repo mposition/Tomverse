@@ -136,6 +136,8 @@ $$;
 
 CREATE TRIGGER "AmuxIdeaSubmission_system_registration_guard"
   BEFORE UPDATE ON "AmuxIdeaSubmission"
-  FOR EACH ROW EXECUTE FUNCTION amux_v19_system_registration_receipt_guard();
+  FOR EACH ROW WHEN (NEW."systemRegistrationAuditLogId" IS DISTINCT FROM
+    OLD."systemRegistrationAuditLogId")
+  EXECUTE FUNCTION amux_v19_system_registration_receipt_guard();
 
 COMMIT;

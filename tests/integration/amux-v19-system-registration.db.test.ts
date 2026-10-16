@@ -35,7 +35,7 @@ import { inspectAmuxIdeaSessionSubmission } from
   "@/lib/amux/ideaSessionSubmissionCore";
 import { commitAmuxIdeaSessionSubmission } from
   "@/lib/amux/ideaSessionSubmissionService";
-import { commitAmuxV19CompletedIdeaSystemRegistration,
+import { commitAmuxV19CompletedIdeaSystemRegistrationForTest,
   readAmuxV19SystemRegistration } from
   "@/lib/amux/ideaSystemRegistrationService";
 import { AmuxIdeaUnitProposalReadError } from
@@ -355,7 +355,7 @@ test("one completed session plan registers atomically under system evidence", as
       sourceSystem: "admin-idea-v4", sourceKey: { in: unitIds } } }),
   };
   assert.deepEqual(before, { decisions: 0, cards: 0 });
-  const result = await commitAmuxV19CompletedIdeaSystemRegistration(ideaId);
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
   assert.equal(result.state, "committed");
   if (result.state !== "committed") throw new Error("system registration refused");
   const decisions = await prisma.amuxIdeaUnitDecision.findMany({ where: { ideaId },
@@ -420,7 +420,7 @@ test("a mixed-path plan writes one durable refusal and no backlog rows", async (
     prisma.amuxPortfolioScoreSnapshot.count(),
   ]);
 
-  const first = await commitAmuxV19CompletedIdeaSystemRegistration(ideaId);
+  const first = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
   assert.equal(first.state, "awaiting_operator");
   if (first.state !== "awaiting_operator") {
     throw new Error("mixed plan was not refused");
@@ -432,7 +432,18 @@ test("a mixed-path plan writes one durable refusal and no backlog rows", async (
   }, { code: "task_expected_paths_mixed", attemptKind: "whole_plan",
     proposed: "advanced", final: null });
 
-  const second = await commitAmuxV19CompletedIdeaSystemRegistration(ideaId);
+  const digestKeyId = process.env.AMUX_V4_CONTENT_DIGEST_KEY_ID;
+  const digestKey = process.env.AMUX_V4_CONTENT_DIGEST_KEY_B64;
+  process.env.AMUX_V4_CONTENT_DIGEST_KEY_ID =
+    "synthetic-system-registration-rotated-digest";
+  process.env.AMUX_V4_CONTENT_DIGEST_KEY_B64 = randomBytes(32).toString("base64");
+  let second;
+  try {
+    second = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+  } finally {
+    process.env.AMUX_V4_CONTENT_DIGEST_KEY_ID = digestKeyId;
+    process.env.AMUX_V4_CONTENT_DIGEST_KEY_B64 = digestKey;
+  }
   assert.deepEqual(second, first);
   const after = await Promise.all([
     prisma.amuxIdeaUnitDecision.count(),
@@ -469,7 +480,7 @@ test("an unresolved duplicate writes one plan refusal and no backlog rows", asyn
     prisma.amuxPortfolioNode.count(),
     prisma.amuxWorkItem.count(),
   ]);
-  const result = await commitAmuxV19CompletedIdeaSystemRegistration(ideaId);
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
   assert.equal(result.state, "awaiting_operator");
   if (result.state !== "awaiting_operator") {
     throw new Error("unresolved duplicate was not refused");
@@ -492,7 +503,7 @@ test("a key-store failure writes neither a refusal nor backlog rows", async () =
   const { ideaId, objectKeys } = await completedSessionIdea();
   assert.ok(objectKeys.length > 0, "the fixture did not create key objects");
   for (const key of objectKeys) objects.delete(key);
-  await assert.rejects(commitAmuxV19CompletedIdeaSystemRegistration(ideaId),
+  await assert.rejects(commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId),
     (error: unknown) => error instanceof AmuxIdeaUnitProposalReadError &&
       error.code === "integrity_unavailable");
   assert.equal(await prisma.amuxIdeaRegistrationRefusal.count({ where: {

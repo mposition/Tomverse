@@ -124,3 +124,25 @@ export function amuxV19SystemRegistrationEnabled(env: NodeJS.ProcessEnv): boolea
     env.TOMVERSE_AMUX_V4_UNIT_WRITE === "enabled" &&
     env.TOMVERSE_AMUX_V4_PORTFOLIO_WRITE === "enabled";
 }
+
+/** The ungated transaction primitive is exposed only to an isolated local DB
+ * test. Production callers must use the default-off public service. */
+export function amuxV19SystemRegistrationTestBoundary(
+  env: NodeJS.ProcessEnv,
+): boolean {
+  if (env.NODE_ENV !== "test") return false;
+  const testUrl = env.TEST_DATABASE_URL?.trim();
+  if (!testUrl || env.DATABASE_URL !== testUrl ||
+      (env.DIRECT_DATABASE_URL && env.DIRECT_DATABASE_URL !== testUrl)) {
+    return false;
+  }
+  try {
+    const url = new URL(testUrl);
+    return ["postgres:", "postgresql:"].includes(url.protocol) &&
+      ["127.0.0.1", "localhost"].includes(url.hostname) &&
+      /^\/[A-Za-z0-9_-]+(?:[_-]test[0-9]*)$/i.test(url.pathname) &&
+      url.search === "" && url.hash === "";
+  } catch {
+    return false;
+  }
+}

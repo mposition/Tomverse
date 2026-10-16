@@ -24,7 +24,7 @@ import { prepareAmuxV4CardRegistrationInTx } from
 import { deriveAmuxIdeaUnitConfirmation,
   sameAmuxIdeaUnitConfirmation } from "./ideaUnitConfirmationCore.ts";
 import { commitAmuxV4CardRegistration, commitAmuxV4NodeCreation,
-  AmuxV4DuplicateReasonRequired, AmuxV4UnitDecisionError } from
+  AmuxV4DuplicateReasonRequired } from
   "./ideaUnitDecisionStore.ts";
 import { inspectAmuxV20TaskRegistration } from
   "./ideaUnitRegistrationCore.ts";
@@ -45,12 +45,15 @@ import { AmuxV19PlanRegistrationRefusalDetected,
   "./ideaRegistrationRefusalDetectionCore.ts";
 import { recordAmuxV20RegistrationRefusal } from
   "./ideaRegistrationRefusalService.ts";
+import { readLatestAmuxV20RegistrationRefusalInTx } from
+  "./ideaRegistrationRefusalReadService.ts";
 import { AMUX_V19_SYSTEM_REGISTRATION_ACTION,
   AMUX_V19_SYSTEM_REGISTRATION_AUDIT_ACTOR,
   AMUX_V19_SYSTEM_REGISTRATION_SCOPE,
   AMUX_V19_SYSTEM_REGISTRATION_TARGET,
   AMUX_V19_UNIT_REGISTRATION_AUTHORITY,
   amuxV19SystemRegistrationEnabled,
+  amuxV19SystemRegistrationTestBoundary,
   deriveAmuxV19RegistrationRefusalRequestId,
   deriveAmuxV19SystemRegistrationBinding } from
   "./ideaSystemRegistrationCore.ts";
@@ -100,7 +103,6 @@ type PreparedPlan = {
   cards: PreparedCard[];
   nodeIdOf: Map<string, string>;
   keys: ReturnType<typeof loadCurrentAmuxContentKeys>;
-  contentKeys: Awaited<ReturnType<typeof createAmuxContentKeyRing>>;
   nodeScanner: Awaited<ReturnType<typeof loadAmuxNodeDuplicateScanner>> | null;
   cardScanner: Awaited<ReturnType<typeof loadAmuxCardDuplicateScanner>> | null;
   evidenceAsOf: string;
@@ -304,20 +306,9 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
     }
   }
   const keys = loadCurrentAmuxContentKeys(process.env);
-  const contentKeys = await createAmuxContentKeyRing(
-    every.map((entry) => ({ ideaId, purpose: "analysis_draft" as const,
-      subjectId: entry.draftUnitId })),
-    [...nodes.map((entry) => ({ ideaId,
-      purpose: "node_content" as const, subjectId: entry.nodeId })),
-    ...cards.flatMap((entry) => [
-      { ideaId, purpose: "card_title" as const, subjectId: entry.cardId },
-      { ideaId, purpose: "card_body" as const, subjectId: entry.cardId },
-      ...(entry.cardType === "task" ? [{ ideaId,
-        purpose: "card_brief" as const, subjectId: entry.cardId }] : []),
-    ])]);
   return { ideaId, actorUserId: idea.actorUserId,
     sourcePlanRevisionId: idea.currentSourcePlanRevisionId,
-    nodes, cards, nodeIdOf, keys, contentKeys,
+    nodes, cards, nodeIdOf, keys,
     nodeScanner: nodes.length ? await loadAmuxNodeDuplicateScanner() : null,
     cardScanner: cards.length ? await loadAmuxCardDuplicateScanner() : null,
     evidenceAsOf: new Date(Date.now() - 1_000).toISOString() };
@@ -336,6 +327,75 @@ const isSystemRegistrationRefusal = (
 ): error is SystemRegistrationRefusal =>
   error instanceof AmuxV20RegistrationRefusalDetected ||
   error instanceof AmuxV19PlanRegistrationRefusalDetected;
+
+async function readExistingSystemRegistrationRefusal(ideaId: string) {
+  if (!IDEA_ID.test(ideaId)) return null;
+  const idea = await prisma.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
+    select: { actorUserId: true, state: true, currentSourcePlanRevisionId: true,
+      systemRegistrationAuditLogId: true },
+  });
+  if (!idea || idea.state !== "awaiting_owner" ||
+      !idea.currentSourcePlanRevisionId || idea.systemRegistrationAuditLogId) {
+    return null;
+  }
+  const candidate = await prisma.amuxIdeaRegistrationRefusal.findFirst({ where: {
+    ideaId, actorUserId: idea.actorUserId, state: "awaiting_operator",
+    attemptKind: "whole_plan",
+    sourcePlanRevisionId: idea.currentSourcePlanRevisionId,
+  }, orderBy: [{ attemptedAt: "desc" }, { id: "desc" }],
+  select: { analysisPreviewId: true } });
+  if (!candidate) return null;
+  return prisma.$transaction((tx) => readLatestAmuxV20RegistrationRefusalInTx(
+    tx, ideaId, idea.actorUserId, candidate.analysisPreviewId,
+    idea.currentSourcePlanRevisionId!,
+  ));
+}
+
+async function assertSystemRegistrationReadyInTx(
+  tx: Prisma.TransactionClient,
+  plan: PreparedPlan,
+) {
+  await takeAuditChainLock(tx);
+  const locked = await tx.$queryRaw<Array<{ id: string; state: string;
+    actorUserId: string; currentSourcePlanRevisionId: string | null;
+    systemRegistrationAuditLogId: string | null }>>`
+    SELECT "id", "state", "actorUserId", "currentSourcePlanRevisionId",
+           "systemRegistrationAuditLogId"
+    FROM "AmuxIdeaSubmission" WHERE "id" = ${plan.ideaId} FOR UPDATE
+  `;
+  const idea = locked[0];
+  if (locked.length !== 1 || !idea || idea.state !== "awaiting_owner" ||
+      idea.actorUserId !== plan.actorUserId ||
+      idea.currentSourcePlanRevisionId !== plan.sourcePlanRevisionId ||
+      idea.systemRegistrationAuditLogId !== null) {
+    throw new AmuxV19SystemRegistrationError("reconfirm");
+  }
+  if (await findOpenAmuxOrchestratorHalt(tx)) {
+    throw new AmuxV19SystemRegistrationError("halted");
+  }
+  if (await tx.amuxIdeaUnitDecision.count({ where: {
+    ideaId: plan.ideaId,
+  } }) !== 0) {
+    throw new AmuxV19SystemRegistrationError("reconfirm");
+  }
+}
+
+async function createSystemRegistrationContentKeys(plan: PreparedPlan) {
+  const every = [...plan.nodes, ...plan.cards];
+  return createAmuxContentKeyRing(
+    every.map((entry) => ({ ideaId: plan.ideaId,
+      purpose: "analysis_draft" as const, subjectId: entry.draftUnitId })),
+    [...plan.nodes.map((entry) => ({ ideaId: plan.ideaId,
+      purpose: "node_content" as const, subjectId: entry.nodeId })),
+    ...plan.cards.flatMap((entry) => [
+      { ideaId: plan.ideaId, purpose: "card_title" as const,
+        subjectId: entry.cardId },
+      { ideaId: plan.ideaId, purpose: "card_body" as const,
+        subjectId: entry.cardId },
+      ...(entry.cardType === "task" ? [{ ideaId: plan.ideaId,
+        purpose: "card_brief" as const, subjectId: entry.cardId }] : []),
+    ])]);
+}
 
 async function persistSystemRegistrationRefusal(
   error: SystemRegistrationRefusal,
@@ -361,11 +421,15 @@ async function persistSystemRegistrationRefusal(
   });
 }
 
-/** Transaction primitive for synthetic DB tests and the future gated caller.
- * No Session or owner step-up is accepted on this system-only boundary. */
-export async function commitAmuxV19CompletedIdeaSystemRegistration(
+/** No Session or owner step-up is accepted on this system-only boundary. */
+async function commitAmuxV19CompletedIdeaSystemRegistration(
   ideaId: string,
 ) {
+  const existingRefusal = await readExistingSystemRegistrationRefusal(ideaId);
+  if (existingRefusal) {
+    return { state: "awaiting_operator" as const, retryWrite: false as const,
+      ideaId, refusal: existingRefusal };
+  }
   let plan: PreparedPlan;
   try {
     plan = await prepareCompletedPlan(ideaId);
@@ -377,34 +441,17 @@ export async function commitAmuxV19CompletedIdeaSystemRegistration(
   }
   const authority = { systemActor: AMUX_V19_SYSTEM_REGISTRATION_AUDIT_ACTOR,
     actorUserId: plan.actorUserId } as const;
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+    await assertSystemRegistrationReadyInTx(tx, plan);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    ...AMUX_IDEA_PLAN_APPROVAL_TRANSACTION });
+  const contentKeys = await createSystemRegistrationContentKeys(plan);
   let callbackReturned = false;
   try {
     const result = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
-      await takeAuditChainLock(tx);
-      const locked = await tx.$queryRaw<Array<{ id: string; state: string;
-        actorUserId: string; currentSourcePlanRevisionId: string | null;
-        systemRegistrationAuditLogId: string | null }>>`
-        SELECT "id", "state", "actorUserId", "currentSourcePlanRevisionId",
-               "systemRegistrationAuditLogId"
-        FROM "AmuxIdeaSubmission" WHERE "id" = ${plan.ideaId} FOR UPDATE
-      `;
-      const idea = locked[0];
-      if (locked.length !== 1 || !idea || idea.state !== "awaiting_owner" ||
-          idea.actorUserId !== plan.actorUserId ||
-          idea.currentSourcePlanRevisionId !== plan.sourcePlanRevisionId ||
-          idea.systemRegistrationAuditLogId !== null) {
-        throw new AmuxV19SystemRegistrationError("reconfirm");
-      }
-      if (await findOpenAmuxOrchestratorHalt(tx)) {
-        throw new AmuxV19SystemRegistrationError("halted");
-      }
-      const decisionCount = await tx.amuxIdeaUnitDecision.count({ where: {
-        ideaId: plan.ideaId,
-      } });
-      if (decisionCount !== 0) {
-        throw new AmuxV19SystemRegistrationError("reconfirm");
-      }
+      await assertSystemRegistrationReadyInTx(tx, plan);
       const nodes = [];
       for (const entry of plan.nodes) {
         const parent = parentNodeId(plan, entry);
@@ -437,7 +484,7 @@ export async function commitAmuxV19CompletedIdeaSystemRegistration(
         }
         await commitAmuxV4NodeCreation(tx, { ...authority,
           snapshot: prepared.snapshot, proposal: entry.verified.proposal,
-          consumeRequestId: randomUUID(), keys: plan.contentKeys,
+          consumeRequestId: randomUUID(), keys: contentKeys,
           recalculate: (transaction) => plan.nodeScanner!(transaction, {
             unitId: entry.draftUnitId, title: entry.verified.proposal.title,
             level: entry.verified.proposal.level, parentId: parent }),
@@ -490,7 +537,7 @@ export async function commitAmuxV19CompletedIdeaSystemRegistration(
         }
         await commitAmuxV4CardRegistration(tx, { ...authority,
           snapshot: prepared.snapshot, proposal, cardId: entry.cardId,
-          consumeRequestId: randomUUID(), keys: plan.contentKeys,
+          consumeRequestId: randomUUID(), keys: contentKeys,
           recalculate: async (transaction) => {
             let taskCost = null;
             if (proposal.cardType === "task") {
@@ -610,8 +657,7 @@ export async function commitAmuxV19CompletedIdeaSystemRegistration(
       return { state: "awaiting_operator" as const,
         retryWrite: false as const, ideaId: plan.ideaId, refusal };
     }
-    if (!callbackReturned && (error instanceof AmuxV19SystemRegistrationError ||
-        error instanceof AmuxV4UnitDecisionError)) throw error;
+    if (!callbackReturned) throw error;
     const readback = await readAmuxV19SystemRegistration(ideaId)
       .catch(() => ({ state: "inconsistent" as const,
         retryWrite: false as const }));
@@ -624,6 +670,16 @@ export async function commitAmuxV19CompletedIdeaSystemRegistration(
  * review; an environment value alone cannot open this write path. */
 export async function registerCompletedAmuxIdeaFromSystem(ideaId: string) {
   if (!amuxV19SystemRegistrationEnabled(process.env)) {
+    throw new AmuxV19SystemRegistrationError("write_disabled");
+  }
+  return commitAmuxV19CompletedIdeaSystemRegistration(ideaId);
+}
+
+/** Isolated synthetic DB entry point. This cannot run against a production DB. */
+export async function commitAmuxV19CompletedIdeaSystemRegistrationForTest(
+  ideaId: string,
+) {
+  if (!amuxV19SystemRegistrationTestBoundary(process.env)) {
     throw new AmuxV19SystemRegistrationError("write_disabled");
   }
   return commitAmuxV19CompletedIdeaSystemRegistration(ideaId);
