@@ -45,6 +45,9 @@ import { commitAmuxKnownIdeaAnalysisSettlement,
   AmuxIdeaAnalysisSettlementError } from "@/lib/amux/ideaAnalysisBudgetSettlementService";
 import { commitAmuxIdeaAnalysisUnknownOutcome,
   AmuxIdeaAnalysisUnknownOutcomeError } from "@/lib/amux/ideaAnalysisUnknownOutcomeService";
+import { commitAmuxIdeaAnalysisStop,
+  readAmuxIdeaAnalysisStopReceipt,
+  AmuxIdeaAnalysisStopError } from "@/lib/amux/ideaAnalysisStopService";
 import { commitAmuxIdeaAnalysisClaimResolution,
   readAmuxIdeaAnalysisClaimResolution,
   readAmuxIdeaAnalysisClaimResolutionReceipt,
@@ -848,6 +851,69 @@ async function syntheticFirstClaimInTransaction(tx: Prisma.TransactionClient) {
     { requestId: randomUUID(), previewId: choice.previewId, keys });
   return { claim, previewId: choice.previewId, holdId };
 }
+
+test("owner stop fences an in-flight result and preserves the full budget hold", async () => {
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const { claim, previewId, holdId } = await syntheticFirstClaimInTransaction(tx);
+    const stopRequestId = randomUUID();
+    const before = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    });
+    const stopped = await commitAmuxIdeaAnalysisStop(tx, { session, request,
+      stopRequestId, holdId, ownerConfirmed: true });
+    assert.equal(stopped.previewId, previewId);
+    assert.equal(stopped.ideaId, claim.ideaId);
+    assert.equal((await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+      where: { id: holdId },
+    })).status, "outcome_unknown");
+    assert.equal((await tx.amuxIdeaTransferPreview.findUniqueOrThrow({
+      where: { id: previewId },
+    })).state, "outcome_unknown");
+    assert.equal((await tx.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } },
+    })).state, "outcome_unknown");
+    const after = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    });
+    assert.equal(after.reservedMicroUsd, before.reservedMicroUsd);
+    assert.equal(after.spentMicroUsd, before.spentMicroUsd);
+    const audit = await tx.adminAuditLog.findUniqueOrThrow({
+      where: { id: stopped.auditId },
+    });
+    assert.equal(auditRowActorKind(audit), "human");
+    assert.equal((await readAmuxIdeaAnalysisStopReceipt(tx, { session,
+      stopRequestId })).status, "committed");
+    const readback = await readAmuxIdeaAnalysisClaimResolution(tx,
+      { session, holdId });
+    assert.equal(readback.zeroReleaseEligible, false);
+    await assert.rejects(commitAmuxIdeaAnalysisStop(tx, { session, request,
+      stopRequestId: randomUUID(), holdId, ownerConfirmed: true }),
+    (error: unknown) => error instanceof AmuxIdeaAnalysisStopError &&
+      error.code === "conflict");
+    await assert.rejects(commitAmuxIdeaAnalysisResult(tx, {
+      requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
+      leaseGeneration: 1, outcome: "outcome_unknown",
+      rawModelOutput: null, inputTokens: null, outputTokens: null, keys,
+    }), (error: unknown) => error instanceof AmuxIdeaAnalysisResultError &&
+      error.code === "not_ready");
+    await assert.rejects(commitAmuxIdeaAnalysisClaimResolution(tx, { session,
+      request, resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest,
+      evidenceDigest: randomBytes(32).toString("hex"),
+      disposition: "not_started_proven" }),
+    (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
+      error.code === "not_resolvable");
+    const resolved = await commitAmuxIdeaAnalysisClaimResolution(tx, { session,
+      request, resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest,
+      evidenceDigest: randomBytes(32).toString("hex"),
+      disposition: "evidence_insufficient" });
+    assert.equal(resolved.settledMicroUsd, "5000");
+    assert.equal((await readAmuxIdeaAnalysisStopReceipt(tx, { session,
+      stopRequestId })).status, "committed");
+    throw new Error("rollback synthetic owner stop");
+  }), /rollback synthetic owner stop/);
+});
 
 async function simulateClaimedIdeaDeadlineCancellation(
   tx: Prisma.TransactionClient, ideaId: string,

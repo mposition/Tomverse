@@ -8,13 +8,16 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { auditRowActorKind, AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_ANALYSIS_CLAIM_TARGET, AMUX_V4_ANALYSIS_RESULT_ACTION,
-  AMUX_V4_ANALYSIS_RESULT_TARGET, AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
+  AMUX_V4_ANALYSIS_RESULT_TARGET, AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
+  AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET, AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
   AMUX_V4_IDEA_AUTO_CANCEL_TARGET } from "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { amuxIdeaAnalysisClaimReadbackDigest,
   type AmuxIdeaAnalysisClaimReadback,
   type AmuxIdeaAnalysisClaimResolutionDisposition } from
   "./ideaAnalysisClaimResolutionCore.ts";
+import { AMUX_V19_ANALYSIS_STOP_ACTION,
+  AMUX_V19_ANALYSIS_STOP_TARGET } from "./ideaAnalysisStopService.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
@@ -112,9 +115,43 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
     action: AMUX_V4_ANALYSIS_RESULT_ACTION,
     targetType: AMUX_V4_ANALYSIS_RESULT_TARGET, targetId: preview.id,
   }, take: 2 });
-  if ((hold.status === "in_flight" && results.length !== 0) ||
-      (hold.status === "outcome_unknown" && results.length !== 1)) {
+  const stops = await tx.adminAuditLog.findMany({ where: {
+    action: AMUX_V19_ANALYSIS_STOP_ACTION,
+    targetType: AMUX_V19_ANALYSIS_STOP_TARGET, targetId: hold.id,
+  }, take: 2 });
+  const hasResult = results.length === 1 && stops.length === 0;
+  const hasStop = results.length === 0 && stops.length === 1;
+  if (results.length > 1 || stops.length > 1 ||
+      (hold.status === "in_flight" && (results.length !== 0 || stops.length !== 0)) ||
+      (hold.status === "outcome_unknown" && !hasResult && !hasStop)) {
     throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
+  }
+  const stop = stops[0] ?? null;
+  const stopData = stop && record(stop.metadata);
+  if (stop && (!stop.entryHash || auditRowActorKind(stop) !== "human" ||
+      stop.actorUserId !== actorUserId || !stopData ||
+      typeof stopData.stopRequestId !== "string" ||
+      !ID.test(stopData.stopRequestId) || stopData.previewId !== preview.id ||
+      stopData.ideaId !== idea.id || stopData.chunkIndex !== preview.chunkIndex ||
+      stopData.retryAutomatically !== false)) {
+    throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
+  }
+  if (stop) {
+    const unknowns = await tx.adminAuditLog.findMany({ where: {
+      action: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
+      targetType: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET,
+      targetId: hold.id,
+    }, take: 2 });
+    const unknown = unknowns[0];
+    const unknownData = unknown && record(unknown.metadata);
+    if (unknowns.length !== 1 || !unknown?.entryHash ||
+        auditRowActorKind(unknown) !== "system" || !unknownData ||
+        unknownData.previewId !== preview.id ||
+        unknownData.reason !== "invocation_unverified" ||
+        unknownData.reservedMicroUsd !== hold.reservedMicroUsd.toString() ||
+        unknownData.retryAllowed !== false) {
+      throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
+    }
   }
   const result = results[0] ?? null;
   const resultData = result && record(result.metadata);
@@ -149,7 +186,7 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
       AmuxIdeaAnalysisClaimReadback["resultEffectiveOutcome"] ?? null,
     resultFailureReason: resultData?.failureReason as
       AmuxIdeaAnalysisClaimReadback["resultFailureReason"] ?? null,
-    zeroReleaseEligible: result === null,
+    zeroReleaseEligible: result === null && stop === null,
   };
 }
 
