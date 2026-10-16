@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, before, mock, test } from "node:test";
+
+import { AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS } from
+  "../../lib/amux/ideaSessionIntakeReadbackCore.ts";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
@@ -13,8 +17,7 @@ const envNames = [
   "TOMVERSE_AMUX_SESSION_INTAKE",
   "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
   "TOMVERSE_AMUX_V4_IDEA_READBACK",
-  "TOMVERSE_AMUX_SYNC_SECRET",
-  "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
+  ...AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS,
 ] as const;
 const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
 let reads = 0;
@@ -49,8 +52,9 @@ const reset = () => {
   delete process.env.TOMVERSE_AMUX_SESSION_INTAKE;
   process.env.TOMVERSE_AMUX_SESSION_INTAKE_READBACK = "enabled";
   process.env.TOMVERSE_AMUX_V4_IDEA_READBACK = "enabled";
-  delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET;
+  for (const name of AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS) {
+    delete process.env[name];
+  }
 };
 const get = (query = `?requestId=${requestId}`, token = secret,
   headers: Record<string, string> = {}) => new Request(
@@ -65,11 +69,11 @@ test("session readback accepts only its bearer and never falls back to an owner 
   });
   assert.equal((await route.GET(cookieOnly)).status, 401);
   assert.equal((await route.GET(get("", "wrong_credential_value_0123456789"))).status, 401);
-  process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
-  assert.equal((await route.GET(get())).status, 401);
-  delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
-  assert.equal((await route.GET(get())).status, 401);
+  for (const name of AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS) {
+    reset();
+    process.env[name] = secret;
+    assert.equal((await route.GET(get())).status, 401, name);
+  }
   assert.equal(reads, 0);
 });
 
@@ -118,6 +122,9 @@ test("session readback returns committed metadata without content or credential 
     status: "committed", requestId, ideaId, hasExternalSources: true,
     adminPath: `/admin/amux-backlog?tab=ideas&idea=${requestId}`,
   });
+  const source = readFileSync(resolve(root,
+    "app/api/internal/amux/ideas/session-intake/route.ts"), "utf8");
+  assert.doesNotMatch(source, /\bsubmitAmuxIdeaFromSession\b/);
   assert.equal("POST" in route, false);
   assert.equal(reads, 1);
 });

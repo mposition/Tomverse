@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
+  AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS,
   AMUX_SESSION_INTAKE_READBACK_CODE_LATCH,
   AMUX_SESSION_INTAKE_READBACK_ENV,
   amuxSessionIntakeReadbackEnabled,
@@ -26,6 +27,12 @@ test("session readback has an independent credential and two exact off-by-defaul
   assert.equal(AMUX_SESSION_INTAKE_READBACK_ENV,
     "TOMVERSE_AMUX_SESSION_INTAKE_READBACK");
   assert.equal(AMUX_SESSION_INTAKE_READBACK_CODE_LATCH, true);
+  for (const name of ["MAINTENANCE_SECRET", "MARKETING_PUBLISH_SECRET",
+    "AUTO_FIX_SYNC_SECRET", "PROVIDER_MODEL_CATALOG_SYNC_SECRET",
+    "PROVIDER_PROBE_SECRET", "PROVIDER_USAGE_SYNC_SECRET",
+    "MOBILE_AUTH_KEYRING_HEALTH_SECRET"]) {
+    assert.ok(AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS.includes(name));
+  }
   assert.equal(amuxSessionIntakeReadbackEnabled(undefined, undefined), false);
   assert.equal(amuxSessionIntakeReadbackEnabled("enabled", undefined), false);
   assert.equal(amuxSessionIntakeReadbackEnabled(undefined, "enabled"), false);

@@ -4,6 +4,7 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import { AMUX_V4_IDEA_READBACK_ENV } from "@/lib/amux/ideaSubmissionCore";
 import {
   AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
+  AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS,
   AMUX_SESSION_INTAKE_READBACK_ENV,
   amuxSessionIntakeReadbackEnabled,
   amuxSessionIntakeReadbackReply,
@@ -13,16 +14,8 @@ import {
 import { readAmuxIdeaSessionSubmissionRequest } from
   "@/lib/amux/ideaSessionSubmissionService";
 
-const otherCapabilitySecrets = (): Array<string | undefined> => [
-  process.env.TOMVERSE_AMUX_SYNC_SECRET,
-  process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET,
-  process.env.TOMVERSE_AMUX_V4_COLLECTION_AGENT_SECRET,
-  process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET,
-  process.env.TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET,
-  process.env.TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET,
-  process.env.AUTH_SECRET,
-  process.env.NEXTAUTH_SECRET,
-];
+const otherCapabilitySecrets = (): Array<string | undefined> =>
+  AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS.map((name) => process.env[name]);
 
 /** Exact-ID, metadata-only recovery after an uncertain session intake reply. */
 export async function GET(request: Request): Promise<Response> {
