@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { AMUX_DB_BOUNDARIES, isAmuxDbBusyError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { amuxIdeaProgress, type AmuxIdeaProgress } from "@/lib/amux/ideaProgressCore";
 
 /** How many of the owner's newest ideas the Ideas tab lists. */
@@ -33,8 +33,12 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
  *
  * It reads no idea text, title or body (all encrypted or purged); a failed read
  * throws, and the page shows it as unavailable, never as an empty list. One
- * more attempt is made after a busy answer, which is safe because nothing was
- * written.
+ * more attempt is made after a failure, which is safe because nothing was
+ * written. Outside a route budget (the page has none) the boundary does not
+ * classify a dropped session as busy: the pg client reports it as a plain Error
+ * with no code, so the retry cannot wait for a "busy" answer. Only the
+ * boundary's own deterministic refusals (call ceiling, commit check) are not
+ * retried.
  */
 export async function readAmuxIdeaProgressForOwner(actorUserId: string): Promise<AmuxIdeaProgressRow[]> {
   const attempt = () => withAmuxDbBoundary(AMUX_DB_BOUNDARIES.ideaProgressListRead,
@@ -42,7 +46,8 @@ export async function readAmuxIdeaProgressForOwner(actorUserId: string): Promise
   try {
     return await attempt();
   } catch (error) {
-    if (!isAmuxDbBusyError(error)) throw error;
+    if (error instanceof AmuxDbBoundaryError && (error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED" ||
+        error.code === "AMUX_DB_COMMIT_CHECK_MISSING")) throw error;
     return attempt();
   }
 }

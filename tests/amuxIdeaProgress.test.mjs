@@ -105,6 +105,17 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.deepEqual([empty.stage, empty.displayKey, empty.taskRows], ["execution_approval", null, []]);
 });
 
+test("a failed read is tried once more, outside a route too, except for the boundary's own deterministic refusals", () => {
+  const source = read("lib/amux/ideaProgressRead.ts");
+  const body = source.slice(source.indexOf("export async function readAmuxIdeaProgressForOwner"), source.indexOf("type SqlChunk"));
+  assert.ok(body.includes("return attempt();"), "one more attempt");
+  assert.ok(body.includes('"AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"') && body.includes('"AMUX_DB_COMMIT_CHECK_MISSING"'));
+  assert.equal((body.match(/\battempt\(\)/g) ?? []).length, 2, "called twice at most");
+  assert.equal(/\b(?:while|for)\s*\(/.test(body), false, "never a loop");
+  assert.equal(body.includes("isAmuxDbBusyError"), false,
+    "the page runs outside a route budget, where a dropped session is a plain Error and never classified busy");
+});
+
 test("a failed read logs a reason made of codes and class names only", () => {
   const log = amuxIdeaProgressFailureLog(Object.assign(new Error("SELECT secret FROM t"), {
     name: "AmuxDbBoundaryError", code: "AMUX_DB_READ_BUSY",

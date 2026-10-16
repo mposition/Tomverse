@@ -3,11 +3,35 @@
  * answer was lost (components/admin/AmuxIdeaPlanApprovalPanel.tsx).
  *
  * The approval is all or nothing in one transaction, so a fresh read of the
- * attempt's units decides it: none still proposed means it committed; all still
- * proposed long after the transaction could have run means it did not; anything
- * in between waits. Each answer is its own outcome, so the screen can say a
- * different thing for each, and a failed read says the read failed instead of
- * repeating the earlier "unknown". The POST is never sent again from here.
+ * attempt's units decides it. A unit's state in that read is one of the four
+ * the analysis result reports (lib/amux/ideaAnalysisResultReadCore.ts) or it
+ * is missing from the read:
+ *
+ * - `approved`: the approval reached the unit. This is the only evidence that
+ *   it committed. `rejected` and `expired` are not: an unapproved proposal
+ *   expires on its own (the retention sweep marks it `expired`), and a
+ *   rejection is the owner's own refusal, so treating "anything but proposed"
+ *   as success would announce cards that were never registered;
+ * - `proposed`: nothing happened to it;
+ * - `rejected`, `expired` or missing: it says nothing about the attempt.
+ *
+ * Hence:
+ * - some unit approved and every unit of the attempt approved: it committed;
+ * - some unit approved and some not: not an all-or-nothing state, so never a
+ *   reason to approve again;
+ * - no unit approved: the approval changed nothing the read can see. Until the
+ *   settle window has passed the transaction may still be running; after it,
+ *   nothing was recorded, whether the other units are still proposed, expired,
+ *   rejected or have dropped out of the read.
+ *
+ * An earlier version counted a missing unit as neither decided nor proposed and
+ * waited for "all proposed" or "none proposed", so one unit that left the read
+ * kept the panel on "may still be processing" for good, with every remaining
+ * unit untouched and the approval locked.
+ *
+ * Each answer is its own outcome, so the screen can say a different thing for
+ * each, and a failed read says the read failed instead of repeating the earlier
+ * "unknown". The POST is never sent again from here.
  *
  * Pure: no database, no `server-only`, no clock of its own.
  */
@@ -23,13 +47,13 @@ export type PlanReadBackOutcome =
   | { kind: "read_failed" }
   /** No attempt is remembered (it was settled elsewhere): nothing to say beyond going back to idle. */
   | { kind: "no_attempt" }
-  /** None of the attempt's units is still proposed: the approval committed. */
+  /** Every unit of the attempt is approved: it committed. */
   | { kind: "recorded" }
-  /** Every unit is still proposed and the settle window has passed: nothing was recorded. */
+  /** No unit is approved and the settle window has passed: nothing was recorded. */
   | { kind: "not_recorded" }
-  /** Every unit is still proposed but the transaction may still be running. */
+  /** No unit is approved yet, but the transaction may still be running. */
   | { kind: "settling"; remainingMs: number }
-  /** Only some units are decided: not an all-or-nothing state, so never a reason to approve again. */
+  /** Some units are approved and some are not: never a reason to approve again. */
   | { kind: "mixed" };
 
 export function decidePlanReadBack(input: {
@@ -41,10 +65,12 @@ export function decidePlanReadBack(input: {
   if (input.units === null) return { kind: "read_failed" };
   if (input.attempt === null) return { kind: "no_attempt" };
   const { attempt, now } = input;
-  const stillProposed = input.units.filter((unit) =>
-    attempt.unitIds.includes(unit.id) && unit.decisionState === "proposed").length;
-  if (stillProposed === 0) return { kind: "recorded" };
-  if (stillProposed < attempt.unitIds.length) return { kind: "mixed" };
+  const named = new Set(attempt.unitIds);
+  const own = input.units.filter((unit) => named.has(unit.id));
+  const approved = own.filter((unit) => unit.decisionState === "approved").length;
+  // Every unit of the attempt must be there and approved: a unit that is missing, proposed, rejected or
+  // expired beside an approved one is a half-recorded plan, which is never a reason to approve again.
+  if (approved > 0) return approved === attempt.unitIds.length ? { kind: "recorded" } : { kind: "mixed" };
   const remainingMs = attempt.startedAt + PLAN_SETTLED_AFTER_MS - now;
   return remainingMs > 0 ? { kind: "settling", remainingMs } : { kind: "not_recorded" };
 }

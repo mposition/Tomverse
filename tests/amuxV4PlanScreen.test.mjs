@@ -20,7 +20,6 @@ test("the plan screen posts once to the whole-plan route and reads back instead 
   assert.ok(readBack.includes('setState("processing")'));
   const decision = readFileSync("lib/amux/ideaPlanReadBackCore.ts", "utf8");
   assert.ok(decision.includes("export const PLAN_SETTLED_AFTER_MS = 180_000;"));
-  assert.ok(decision.includes('if (stillProposed === 0) return { kind: "recorded" };'));
   assert.ok(decision.includes("attempt.startedAt + PLAN_SETTLED_AFTER_MS - now"));
   // Every analysis page is read, so the screen shows what the server approves.
   assert.ok(panel.includes("async function readAllUnits("));
