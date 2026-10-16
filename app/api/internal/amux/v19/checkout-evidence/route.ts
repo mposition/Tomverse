@@ -41,6 +41,7 @@ function authorized(request: Request): boolean {
  * worker never blindly repeats POST. */
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
+  // Readback must be available before a write can have an unknown outcome.
   if (process.env[WRITE_ENV] !== "enabled" || process.env[READ_ENV] !== "enabled") {
     return amuxJsonNoStore({ available: false,
       reason: "checkout_evidence_write_disabled" }, 409);
@@ -92,9 +93,14 @@ export async function GET(request: Request): Promise<Response> {
     return amuxJsonNoStore({ error: "Invalid request." }, 400);
   }
   try {
-    const evidence = await prisma.$transaction((tx) =>
-      readAmuxTrackedCheckoutEvidence(tx, parsed.data.ideaId,
-        parsed.data.referenceOrdinal),
+    const evidence = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+               set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
+      `;
+      return readAmuxTrackedCheckoutEvidence(tx, parsed.data.ideaId,
+        parsed.data.referenceOrdinal);
+    },
     { maxWait: 3_000, timeout: 10_000 });
     if (!evidence) return amuxJsonNoStore({ status: "absent",
       ...parsed.data, retryWrite: false }, 404);

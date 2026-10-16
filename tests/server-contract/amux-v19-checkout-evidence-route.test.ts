@@ -113,6 +113,13 @@ test("malformed proof or lookup never touches the writer or readback", async () 
     { ...body, filePaths: ["private/secret.md"] }]) {
     assert.equal((await route.POST(post(payload))).status, 400);
   }
+  assert.equal((await route.POST(new Request(
+    "https://tomverse.test/api/internal/amux/v19/checkout-evidence", {
+      method: "POST", headers: { ...headers, "content-type": "application/json" },
+      body: "{invalid-json",
+    }))).status, 400);
+  assert.equal((await route.POST(post({ ...body,
+    excess: "x".repeat(5 * 1024) }))).status, 400);
   assert.equal((await route.POST(post(body, { "content-type": "text/plain" }))).status, 415);
   for (const query of ["", `?ideaId=${ideaId}&referenceOrdinal=00`,
     `?ideaId=${ideaId}&referenceOrdinal=2147483648`,
@@ -122,6 +129,9 @@ test("malformed proof or lookup never touches the writer or readback", async () 
   }
   assert.equal(writes, 0);
   assert.equal(reads, 0);
+  assert.deepEqual(await (await route.GET(get())).json(), {
+    status: "absent", ideaId, referenceOrdinal: 0, retryWrite: false });
+  assert.equal(reads, 1);
 });
 
 test("verified proof commits once and returns only content-free identity", async () => {
