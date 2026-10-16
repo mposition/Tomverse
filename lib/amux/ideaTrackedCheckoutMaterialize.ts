@@ -42,7 +42,10 @@ export async function materializeAmuxTrackedCheckout(input: {
     throw new AmuxTrackedCheckoutManifestError();
   }
   const manifest = await readAmuxPinnedTrackedTree(input.repositoryPath, input.commitSha, input.signal);
-  const directory = await mkdtemp(join(tmpdir(), "amux-v19-checkout-"));
+  // The restricted Ubuntu CLI plan mounts a fixed /tmp checkout path. Do not
+  // let a runner environment override relocate staged source outside it.
+  const directory = await mkdtemp(join(process.platform === "linux" ? "/tmp" : tmpdir(),
+    "amux-v19-checkout-"));
   const excluded: Array<{ path: string; reason: keyof AmuxPreparedTrackedCheckout["excludedReasons"] }> =
     [...manifest.excluded];
   const files: string[] = [];
