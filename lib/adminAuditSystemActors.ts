@@ -62,6 +62,12 @@ export const AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR = "amux-v22-recovery-contr
 /** Policy v42: records only content-free, exact FIRST model-access evidence. */
 export const AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR = "amux-v22-api-model-access" as const;
 
+/** Provider-free CHAT-01 optimizer metadata only. The scoped actions below
+ * cannot authorize a paid call, external dispatch or candidate promotion
+ * (docs/policy/chat-unified-router-refiner-v1.md §§7, 12). */
+export const CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR =
+  "chat-unified-optimizer" as const;
+
 /**
  * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
  * names the service or app path whose action the entry records; none of them
@@ -223,6 +229,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR,
   AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
   AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR,
+  CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
@@ -382,6 +389,12 @@ export const systemAuditActionAllowed = (
   (actor !== AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.api_model_access_observed" &&
       targetType === "AmuxV22ApiModelAccessEvidence")) &&
+  (actor !== CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR ||
+    (action === "chat.unified_optimizer.run_admitted" &&
+      targetType === "ChatUnifiedOptimizerRun") ||
+    ((action === "chat.unified_optimizer.dispatch_intended" ||
+      action === "chat.unified_optimizer.run_terminal") &&
+      targetType === "ChatUnifiedOptimizerRoleJob")) &&
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||
     (action === "prompt_refiner.product_disposition_recorded" && targetType === "PromptRefinerProductDispositionReceipt") ||

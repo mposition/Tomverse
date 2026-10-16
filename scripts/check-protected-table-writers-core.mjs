@@ -286,6 +286,18 @@ export const PROTECTED_TABLES = [
     writers: ["lib/promptRefinerChatExecutionStore.ts", "lib/promptRefinerProductReceiptStore.ts", "lib/chatDraftMessageConsume.ts"],
     contract: "docs/ui-contracts/prompt-refiner-suggestion.md",
   },
+  ...[
+    "ChatUnifiedOptimizerCycle",
+    "ChatUnifiedOptimizerCandidate",
+    "ChatUnifiedOptimizerRun",
+    "ChatUnifiedOptimizerRoleJob",
+    "ChatUnifiedOptimizerEvidence",
+  ].map(table => ({
+    table,
+    delegate: table[0].toLowerCase() + table.slice(1),
+    writers: ["lib/chatUnifiedOptimizerLedgerStore.ts"],
+    contract: "docs/policy/chat-unified-router-refiner-v1.md §7 and docs/policy/chat-unified-router-refiner-v1.md §12",
+  })),
   {
     table: "PromptRefinerProductOperationalGuard", delegate: "promptRefinerProductOperationalGuard",
     writers: ["lib/promptRefinerProductOperationalGuard.ts"],
@@ -2963,6 +2975,51 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 2, writeVerbs: 20,
     reason: "Two closed constraint-registry identifiers link the latch state and reason checks to their runtime lists. This checker reads source and migration SQL, holds no database client and executes no SQL.",
   },
+  ...[
+    ["ChatUnifiedOptimizerCycle", 7],
+    ["ChatUnifiedOptimizerCandidate", 5],
+    ["ChatUnifiedOptimizerRun", 7],
+    ["ChatUnifiedOptimizerRoleJob", 13],
+    ["ChatUnifiedOptimizerEvidence", 2],
+  ].map(([table, tableMentions]) => ({
+    path: "lib/chatUnifiedOptimizerLedgerStore.ts",
+    table,
+    tableMentions,
+    writeVerbs: 11,
+    reason: "The registered U18 single writer uses fixed raw SQL for one provider-free cycle registration, one-at-a-time role claims and exact-capability terminal evidence binding. All writes run under the canonical audit and optimizer locks; no body, paid dispatch, promotion or runtime authority is stored (docs/policy/chat-unified-router-refiner-v1.md §7 and docs/policy/chat-unified-router-refiner-v1.md §12).",
+  })),
+  ...[
+    ["AdminAuditLog", 11],
+    ["ChatUnifiedOptimizerCycle", 13],
+    ["ChatUnifiedOptimizerCandidate", 13],
+    ["ChatUnifiedOptimizerRun", 20],
+    ["ChatUnifiedOptimizerRoleJob", 25],
+    ["ChatUnifiedOptimizerEvidence", 16],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261016200000_chat_unified_optimizer_ledger/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 66,
+    reason: "Additive U18 DDL creates only the content-free provider-free optimizer metadata ledger, its exact same-transaction audit/FK bindings, immutable evidence and lifecycle/CAS guards. It seeds no row and never writes AdminAuditLog, paid authority, external dispatch authority, promotion authority or product runtime state.",
+  })),
+  ...[
+    ["ChatUnifiedOptimizerCycle", 3],
+    ["ChatUnifiedOptimizerRun", 3],
+    ["ChatUnifiedOptimizerRoleJob", 1],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261016201000_chat_unified_optimizer_deadline_guard/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 6,
+    reason: "Additive U18 deadline-guard DDL installs only deferred database-clock checks on the existing optimizer lifecycle tables. It writes no ledger or audit row and grants no provider, paid, promotion or product-runtime authority.",
+  })),
+  ...["ChatUnifiedOptimizerRun", "ChatUnifiedOptimizerRoleJob"].map((table) => ({
+    path: "lib/adminAuditSystemActors.ts",
+    table,
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The closed U18 system-actor predicate names this content-free provider-free ledger audit target. It executes no SQL and grants no paid call, external dispatch, promotion or product-runtime authority.",
+  })),
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */

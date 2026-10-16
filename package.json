@@ -10,6 +10,8 @@
     "node": "22.x"
   },
   "scripts": {
+    "test:chat-unified-optimizer": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/chatUnifiedOptimizerCandidate.test.mjs tests/chatUnifiedOptimizerLedgerCore.test.mjs",
+    "test:chat-unified-optimizer-db": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/chat-unified-optimizer-ledger.db.test.ts",
     "dev": "next dev --webpack",
     "predev": "node scripts/generate-build-info.mjs",
     "prebuild": "node scripts/check-native-swc.mjs && node scripts/generate-build-info.mjs",

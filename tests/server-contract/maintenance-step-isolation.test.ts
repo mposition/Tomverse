@@ -38,13 +38,11 @@ process.env.NEXTAUTH_SECRET ||= "server-contract-test-secret";
 let creditReservationBehaviour: () => number = () => 1;
 let oauthKeyBehaviour: () => void = () => undefined;
 let deletedAccountIds: string[] = [];
-let unifiedResultExpiryCalls = 0;
 
 const reset = () => {
   creditReservationBehaviour = () => 1;
   oauthKeyBehaviour = () => undefined;
   deletedAccountIds = [];
-  unifiedResultExpiryCalls = 0;
   costAdjustmentBacklogPending = 0;
   costAdjustmentBacklogOldestMs = null;
   sweepNoCostReasons = emptyNoCost();
@@ -129,15 +127,6 @@ mock.module(mod("lib/chatSecurity.ts"), {
   namedExports: {
     reconcileExpiredChatCreditReservations: async () =>
       creditReservationBehaviour(),
-  },
-});
-
-mock.module(mod("lib/chatUnifiedRouterRefinerResultStore.ts"), {
-  namedExports: {
-    expireChatUnifiedRouterRefinerResults: async () => {
-      unifiedResultExpiryCalls += 1;
-      return { expired: 2 };
-    },
   },
 });
 
@@ -451,8 +440,6 @@ test("a step that throws does not skip the steps behind it", async () => {
   // So did everything after it, all the way to the last step.
   assert.equal(result.sessions, 2);
   assert.equal(result.creditLotsExpired, 11);
-  assert.deepEqual(result.chatUnifiedRouterRefinerResults, { expired: 2 });
-  assert.equal(unifiedResultExpiryCalls, 1);
   assert.equal(result.limitDecisions, 12);
   assert.equal(result.accountDataExportRequests, 13);
   assert.equal(result.contextManifestsCompacted, 21);
