@@ -747,6 +747,10 @@ run(
     // dispatches kept as unknown, a late generator report a conflict, nothing
     // under the kill switch, and a held row skipped rather than waited on.
     "tests/integration/marketing-llm-expiry.db.test.ts",
+    // Legal hold and retention for the ledger (S3c3c): a hold only on a
+    // person's audit row for exactly that decision; retention deletes closed,
+    // unheld calls past 24 months, each with an audit row.
+    "tests/integration/marketing-llm-hold-retention.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them

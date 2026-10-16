@@ -2481,6 +2481,7 @@ model AdminAuditLog {
   marketingLlmCallReservations MarketingLlmCall[] @relation("MarketingLlmCallReservationAudit")
   marketingLlmCallDispatches   MarketingLlmCall[] @relation("MarketingLlmCallDispatchAudit")
   marketingLlmCallCloses       MarketingLlmCall[] @relation("MarketingLlmCallCloseAudit")
+  marketingLlmCallLegalHolds   MarketingLlmCall[] @relation("MarketingLlmCallLegalHoldAudit")
   promptRefinerProductOperationalGuard PromptRefinerProductOperationalGuard? @relation("PromptRefinerProductOperationalGuardTransitionAudit")
 
   /// No actor relation on purpose: see
@@ -7298,10 +7299,13 @@ model MarketingLlmCall {
   reportedInputTokens   Int?
   reportedOutputTokens  Int?
   consumerDigest        String?
+  /// The person's audit row for the decision that last moved legalHold.
+  legalHoldAuditLogId   String?   @unique
 
   reservationAudit AdminAuditLog  @relation("MarketingLlmCallReservationAudit", fields: [reservationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   dispatchAudit    AdminAuditLog? @relation("MarketingLlmCallDispatchAudit", fields: [dispatchAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   closeAudit       AdminAuditLog? @relation("MarketingLlmCallCloseAudit", fields: [closeAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  legalHoldAudit   AdminAuditLog? @relation("MarketingLlmCallLegalHoldAudit", fields: [legalHoldAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([monthStart, state])
   @@index([state, createdAt])

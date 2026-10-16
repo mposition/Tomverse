@@ -1397,6 +1397,15 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   행마다 트랜잭션 하나입니다. **sweep은 감사 chain·월·행 잠금 어느 것도 기다리지 않습니다** — 생성기 요청이 행보다 먼저
   chain과 월을 잡으므로, 기다리면 그 뒤에 줄을 서게 됩니다. 셋 중 하나라도 잡혀 있으면 그 행은 다음 실행으로 넘기고, 실패한
   행은 세어 보고하되 나머지는 계속 처리합니다. kill switch 중에는 아무것도 하지 않습니다.
+- **S3c3c(원장 legal hold·보존)**: `app/api/admin/marketing/llm-calls/[callId]/legal-hold/route.ts`, store의
+  `setMarketingLlmCallLegalHold()`·`purgeExpiredMarketingLlmCalls()`, `lib/marketingRetention.ts`의 네 번째 표,
+  `prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql`,
+  `tests/integration/marketing-llm-hold-retention.db.test.ts`. hold는 `runMarketingAdminMutation`을 지나고 그 사람 감사 행이
+  바로 그 결정의 증거일 때만 쓰입니다(설정은 막지 않고 해제는 kill switch가 막습니다). **결정은 자기가 대체하는 결정을
+  이름 댑니다** — 행이 마지막 hold 결정의 감사 id(`legalHoldAuditLogId`)를 갖고, DB가 flag와 그 id를 함께만, 쓰인 적 없는
+  id로만 바꿉니다. 이전 해제 감사 행의 재사용도, 옛 hold를 보고 보낸 지연 해제도 새 hold를 풀지 못합니다. 보존은 닫혔고 hold가 없으며 24개월이
+  지난 행만 지우고 행마다 `marketing-retention` 감사 행을 남깁니다. **`retention_run` 보고서는 쓰지 않습니다** — 그 보고서의
+  표 목록이 webhook pipeline의 감시 소스라 원장을 넣으면 fingerprint가 움직이고 서명된 검증이 다시 열립니다.
 
 # 엔지니어링 Agent
 

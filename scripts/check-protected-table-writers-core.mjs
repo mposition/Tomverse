@@ -2255,10 +2255,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingLlmBudgetStore.ts",
     table: "MarketingLlmCall",
-    tableMentions: 16,
-    writeVerbs: 7,
+    tableMentions: 21,
+    writeVerbs: 10,
     reason:
-      "The sole registered writer of the marketing LLM cost ledger: it inserts a reservation and moves a call to dispatched or to its one close (including the 15-minute expiry), each after the generator's audit row in the same transaction. The database triggers own every transition rule and timestamp; the other mentions are the reads that lock the month and the row.",
+      "The sole registered writer of the marketing LLM cost ledger: it inserts a reservation and moves a call to dispatched or to its one close (including the 15-minute expiry), sets or releases a person's legal hold, and deletes rows retention lets go, each after the generator's audit row in the same transaction. The database triggers own every transition rule and timestamp; the other mentions are the reads that lock the month and the row.",
   },
   {
     path: "lib/adminAuditSystemActors.ts",
@@ -2274,6 +2274,22 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 13,
     reason:
       "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
+  },
+  {
+    path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 6,
+    reason:
+      "Adds the ledger's legal-hold decision column. One AdminAuditLog mention is a restrictive foreign key; the other is the update guard's read of the decision's own audit row (action, target, recorded predecessor). No audit row is written.",
+  },
+  {
+    path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 5,
+    writeVerbs: 6,
+    reason:
+      "Adds the legal-hold decision column, its index, foreign key and check, an insert trigger that refuses a decision at birth, and the replaced update guard that moves the flag and the decision only together. It writes no row.",
   },
   {
     path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
@@ -2418,6 +2434,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
+    count: 1,
+    reason:
+      "One read in the ledger's update guard: the hold decision's own AdminAuditLog row (action, target, recorded predecessor), with EXECUTE over a name built from TG_TABLE_SCHEMA because the function pins search_path to pg_catalog, pg_temp. The schema is the trigger's own, quoted with %I, and the id is bound with USING. It reads and never writes.",
+  },
   {
     path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
     count: 1,
@@ -3718,6 +3740,12 @@ export const PROTECTED_EXPORT_ALLOWLIST = [
 // a publication nobody approved.
 
 export const RETENTION_SETTING_ALLOWLIST = [
+  {
+    path: "lib/marketingLlmBudgetStore.ts",
+    count: 2,
+    reason:
+      "The marketing LLM cost ledger's retention writer: it imports the setting's constant and sets it for its own transaction before deleting closed, unheld rows past their 24 months. The delete trigger still applies every rule to each row.",
+  },
   {
     path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
     count: 1,
