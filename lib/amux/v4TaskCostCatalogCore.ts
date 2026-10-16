@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { amuxWorkerMatchesExecutionGrade } from "./executionGradeCore.ts";
+import type { AmuxWorkerRoleCeiling } from "./workerRegistryCore.ts";
 import {
   calculateV4TaskCostCeiling,
   checkV4TaskApprovedCeiling,
@@ -148,6 +150,24 @@ export function inspectV4TaskCostCatalog(raw: unknown): V4TaskCatalogInspection 
     ruleCount: parsed.catalog.gradeRules.length,
     routeCount: parsed.catalog.routes.length,
   };
+}
+
+/** v52 approval guard: every route has one grade and its registered worker has that grade. */
+export function inspectV52TaskCatalogGrades(raw: unknown,
+  workerGrades: ReadonlyMap<string, AmuxWorkerRoleCeiling> | null):
+  { ok: true } | { ok: false; code: "schema_rejected" |
+    "worker_registry_unavailable" | "grade_route_mismatch" } {
+  const parsed = parseCatalog(raw);
+  if ("ok" in parsed) return { ok: false, code: "schema_rejected" };
+  if (!workerGrades) return { ok: false, code: "worker_registry_unavailable" };
+  for (const route of parsed.catalog.routes) {
+    if (route.grades.length !== 1 ||
+        !amuxWorkerMatchesExecutionGrade(route.grades[0], route.workerName,
+          workerGrades)) {
+      return { ok: false, code: "grade_route_mismatch" };
+    }
+  }
+  return { ok: true };
 }
 
 export type V4TaskCatalogCeilingResult =
