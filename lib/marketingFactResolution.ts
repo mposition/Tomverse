@@ -18,15 +18,45 @@
  * before is read from `MarketingPost` for the named account. A caller names
  * the account and locale whose question is being asked; it never supplies the
  * answer.
+ *
+ * **One client, one clock, rows held** (S3 plan, S3a2). Every database read
+ * here -- the gates, the plans, the catalogue's provenance, the model rows and
+ * the usage -- goes through the client the caller passes, which for a write is
+ * its transaction, and "today" is the database's clock read through the same
+ * client. The rows read become the post's fact snapshot, so what a decision
+ * rested on is recorded with it rather than re-read later.
+ *
+ * A transaction at READ COMMITTED -- the intake's, deliberately, because its
+ * read-back and its ledger writes must see what committed while it waited for
+ * the audit chain lock -- gives each statement its own snapshot. So the rows a
+ * price or model fact rests on are locked FOR SHARE before they are read, and
+ * **only a row the lock actually took counts.** A locked row cannot change or
+ * go until the caller commits; a row that was not there when the lock ran was
+ * not locked, so if a later read sees it -- inserted in between -- it is
+ * treated as still absent, which is the refusing answer (no plan row is a
+ * compiled default, no catalogue row is not stored, no model row is no model).
+ * The facts are therefore the held rows as they all stood at the last lock: one
+ * moment that existed. Usage is read once and can only make a post less
+ * eligible for autonomy, which a generated draft is refused anyway.
  */
 
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { getBillingPlansWithFieldSources } from "@/lib/billingConfig";
-import { getBillingPriceCatalogWithMeta } from "@/lib/billingPriceCatalog";
+import type { Prisma } from "@prisma/client";
+
+import {
+  getBillingPlansWithFieldSources,
+  type BillingPlanWithFieldSources,
+} from "@/lib/billingConfig";
+import {
+  BILLING_PRICE_CATALOG_KEY,
+  readBillingPriceCatalogSource,
+  type BillingPriceCatalogSource,
+} from "@/lib/billingPriceCatalog";
 import {
   loadMarketingAssetRegistry,
   MARKETING_ASSET_REGISTRY_PATH,
@@ -34,7 +64,11 @@ import {
   type LoadedAssetRegistry,
 } from "@/lib/marketingAssets";
 import { resolveMarketingClaimGate } from "@/lib/marketingClaimGates";
-import type { MarketingGuardFacts } from "@/lib/marketingFacts";
+import type {
+  MarketingGuardAssetFact,
+  MarketingGuardClaimFact,
+  MarketingGuardFacts,
+} from "@/lib/marketingFacts";
 import { sealMarketingFacts } from "@/lib/marketingGuardCore";
 import {
   MARKETING_CLAIM_REGISTRY_VERSION,
@@ -43,6 +77,7 @@ import {
 } from "@/lib/marketingClaims";
 import {
   MARKETING_LOCALES,
+  type MarketingFactSnapshot,
   type MarketingLocale,
 } from "@/lib/marketingAutomationSchema";
 import { resolveMarketingPageEvidence } from "@/lib/marketingEvidencePages";
@@ -51,10 +86,8 @@ import {
   modelClaimDecision,
   priceClaimSourceDecision,
 } from "@/lib/marketingFactSources";
-import { getRuntimeModel } from "@/lib/modelRegistry";
-import type { PrismaClient } from "@prisma/client";
+import { registryRowToModel } from "@/lib/modelRegistry";
 
-/** The usage table this file reads through the caller's transaction/client. */
 /**
  * Whether a string is one of the four locales this system knows.
  *
@@ -64,7 +97,11 @@ import type { PrismaClient } from "@prisma/client";
 const isMarketingLocale = (value: string): value is MarketingLocale =>
   (MARKETING_LOCALES as readonly string[]).includes(value);
 
-export type MarketingFactDatabase = Pick<PrismaClient, "marketingPost">;
+/** Everything this file reads, through one client: the caller's transaction. */
+export type MarketingFactDatabase = Pick<
+  Prisma.TransactionClient,
+  "marketingPost" | "billingPlan" | "appSetting" | "modelRegistryEntry" | "$queryRaw"
+>;
 
 /**
  * What a caller may say: which ids, and which post they are for.
@@ -88,21 +125,122 @@ export type MarketingFactRequest = {
   readonly factSnapshotDigest: string | null;
 };
 
-/** What a claim's gate is, from its production reader rather than a caller. */
+/**
+ * What a claim's gate is, from its production reader rather than a caller.
+ *
+ * One at a time: a transaction runs one statement at a time anyway, and a
+ * fixed order makes the statement count the tests measure the same every run.
+ */
 async function readGates(
+  database: MarketingFactDatabase,
   gateKeys: readonly string[],
 ): Promise<Map<string, boolean | null>> {
   const gates = new Map<string, boolean | null>();
-  await Promise.all(
-    [...new Set(gateKeys)].map(async (key) => {
-      gates.set(key, await resolveMarketingClaimGate(key));
-    }),
-  );
-
+  for (const key of [...new Set(gateKeys)].sort()) {
+    gates.set(key, await resolveMarketingClaimGate(key, database));
+  }
   return gates;
 }
 
-const readAssetRegistry = async (): Promise<LoadedAssetRegistry | null> => {
+/** Which rows a hold took: only these may answer a fact. */
+export type HeldMarketingFactRows = {
+  readonly planIds: ReadonlySet<string>;
+  readonly catalogue: boolean;
+  readonly modelIds: ReadonlySet<string>;
+};
+
+/**
+ * Lock the rows a fact is about to be read from, until the caller commits, and
+ * say which rows were there to lock.
+ *
+ * FOR SHARE: other readers go on, a writer waits. Outside a transaction (a
+ * caller passing the client itself) the lock lasts one statement and holds
+ * nothing, which is what such a caller asked for.
+ */
+export async function holdMarketingFactRows(
+  database: MarketingFactDatabase,
+  rows: { readonly plans: boolean; readonly catalogue: boolean; readonly modelIds: readonly string[] },
+): Promise<HeldMarketingFactRows> {
+  const planIds = rows.plans
+    ? (await database.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "BillingPlan" ORDER BY "id" FOR SHARE`).map(
+        (row) => row.id,
+      )
+    : [];
+  const catalogue = rows.catalogue
+    ? (
+        await database.$queryRaw<Array<{ key: string }>>`SELECT "key" FROM "AppSetting" WHERE "key" = ${BILLING_PRICE_CATALOG_KEY} FOR SHARE`
+      ).length === 1
+    : false;
+  const modelIds =
+    rows.modelIds.length > 0
+      ? (
+          await database.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ModelRegistryEntry" WHERE "id" = ANY(${[...rows.modelIds]}::text[]) ORDER BY "id" FOR SHARE`
+        ).map((row) => row.id)
+      : [];
+  return { planIds: new Set(planIds), catalogue, modelIds: new Set(modelIds) };
+}
+
+/** The database's "now", read through the same client as the facts. */
+async function readDatabaseClock(database: MarketingFactDatabase): Promise<Date> {
+  const rows = await database.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS "now"`;
+  const now = rows[0]?.now;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new Error("The database clock did not return a timestamp");
+  }
+  return now;
+}
+
+type ModelRow = { readonly model: ReturnType<typeof registryRowToModel>; readonly updatedAt: string };
+
+/**
+ * The registry row a model claim is about, or `null` when there is none.
+ *
+ * Read by id through the caller's client. The runtime reader the chat uses
+ * seeds missing rows and reads the whole table on its own connection, neither
+ * of which a fact read inside a write may do; a row this cannot parse is no
+ * model, which the claim decision already refuses.
+ */
+async function readModelRow(database: MarketingFactDatabase, modelId: string): Promise<ModelRow | null> {
+  const row = await database.modelRegistryEntry.findUnique({ where: { id: modelId } });
+  if (!row) return null;
+  try {
+    return { model: registryRowToModel(row), updatedAt: row.updatedAt.toISOString() };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The store's digest of a fact snapshot: keys sorted at every level, SHA-256.
+ * Takes the stored JSON as it is, so a post's snapshot is digested exactly as
+ * the store digests it when it checks a decision against the row.
+ */
+export function marketingFactSnapshotDigest(snapshot: unknown): string {
+  return createHash("sha256").update(JSON.stringify(canonical(snapshot)), "utf8").digest("hex");
+}
+
+const canonical = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, inner]) => [key, canonical(inner)]),
+    );
+  }
+  return value;
+};
+
+const byRowId = (left: { rowId: string }, right: { rowId: string }) =>
+  left.rowId < right.rowId ? -1 : left.rowId > right.rowId ? 1 : 0;
+
+/**
+ * The asset registry in force, or `null` when it is missing or invalid.
+ *
+ * Shared with the generator's context, which lists the assets a draft may
+ * name from the same file the Guard judges them against.
+ */
+export const readMarketingAssetRegistry = async (): Promise<LoadedAssetRegistry | null> => {
   try {
     const raw = JSON.parse(
       await readFile(resolve(process.cwd(), MARKETING_ASSET_REGISTRY_PATH), "utf8"),
@@ -138,23 +276,72 @@ async function readUsage(
   return { claims, assets };
 }
 
+type ResolvedMarketingFacts = {
+  readonly request: MarketingFactRequest;
+  readonly claims: readonly MarketingGuardClaimFact[];
+  readonly assets: readonly MarketingGuardAssetFact[];
+  readonly assetRegistryVersion: number;
+  readonly factSnapshot: MarketingFactSnapshot;
+};
+
 /**
- * Ask the registries and the database, and seal the answer.
+ * Ask the registries and the database, and seal the answer against the
+ * snapshot the post already stores.
+ *
+ * For re-judging a post that exists -- an edit keeps the post's snapshot,
+ * because the store's edit writer records new words, not new evidence. A new
+ * draft uses `resolveMarketingFactsWithSnapshot()`, which records the rows it
+ * read.
  *
  * A claim the registry does not have resolves to `known: false`, which the
  * Guard refuses -- rather than being absent, which it would not notice.
- *
- * The clock is this process's, not the caller's. It is not the database's
- * either. The gate, usage, price, model and asset reads are also not one
- * transactional snapshot. That is acceptable only while every S1 feature is
- * off and `createMarketingPost()` refuses autonomous creation outright. The
- * S2 route must move the clock and all publish-relevant reads into the write
- * transaction before enabling a feature; this comment is the hand-off marker.
  */
 export async function resolveMarketingFacts(
   database: MarketingFactDatabase,
   rawRequest: MarketingFactRequest,
 ): Promise<MarketingGuardFacts> {
+  const resolved = await readMarketingFacts(database, rawRequest);
+  return seal(resolved, resolved.request.factSnapshotDigest);
+}
+
+/**
+ * Ask the registries and the database, record which rows answered, and seal
+ * the answer against that record.
+ *
+ * The snapshot is what the post stores: the plan rows a price claim rested on,
+ * the catalogue's provenance, the model rows, and a digest of each page
+ * statement used as evidence. Its digest is the one the Guard's decision is
+ * bound to, so the store refuses to record this decision with any other
+ * snapshot.
+ */
+export async function resolveMarketingFactsWithSnapshot(
+  database: MarketingFactDatabase,
+  rawRequest: Omit<MarketingFactRequest, "factSnapshotDigest">,
+): Promise<{ readonly facts: MarketingGuardFacts; readonly factSnapshot: MarketingFactSnapshot }> {
+  const resolved = await readMarketingFacts(database, { ...rawRequest, factSnapshotDigest: null });
+  return {
+    facts: seal(resolved, marketingFactSnapshotDigest(resolved.factSnapshot)),
+    factSnapshot: resolved.factSnapshot,
+  };
+}
+
+function seal(resolved: ResolvedMarketingFacts, factSnapshotDigest: string | null): MarketingGuardFacts {
+  return sealMarketingFacts({
+    channelId: resolved.request.channelId,
+    channel: resolved.request.channel,
+    locale: resolved.request.locale,
+    claims: resolved.claims,
+    assets: resolved.assets,
+    claimRegistryVersion: MARKETING_CLAIM_REGISTRY_VERSION,
+    assetRegistryVersion: resolved.assetRegistryVersion,
+    factSnapshotDigest,
+  });
+}
+
+async function readMarketingFacts(
+  database: MarketingFactDatabase,
+  rawRequest: MarketingFactRequest,
+): Promise<ResolvedMarketingFacts> {
   // The ids name the lookups and the scope names where those answers apply.
   // Snapshot both before the first await so an accessor cannot make the
   // resolver read channel A and then seal the answers as channel B.
@@ -169,7 +356,7 @@ export async function resolveMarketingFacts(
         ? null
         : String(rawRequest.factSnapshotDigest),
   };
-  const on = new Date();
+  const on = await readDatabaseClock(database);
   const registryClaims = request.claimIds.map((id) => marketingClaimById(id));
   const gateKeys = registryClaims
     .map((claim) => claim?.gate)
@@ -182,15 +369,42 @@ export async function resolveMarketingFacts(
     (claim) => claim?.factSource?.kind === "localized_catalogue",
   );
 
-  const [gates, usage, plans, catalogue, assetRegistry] = await Promise.all([
-    readGates(gateKeys),
-    readUsage(database, request.channelId),
-    needsPlans ? getBillingPlansWithFieldSources() : Promise.resolve([]),
-    needsCatalogue ? getBillingPriceCatalogWithMeta() : Promise.resolve(null),
-    request.assetIds.length > 0 ? readAssetRegistry() : Promise.resolve(null),
-  ]);
+  const modelIds = [
+    ...new Set(
+      registryClaims.flatMap((claim) =>
+        claim?.factSource?.kind === "model_registry" ? [claim.factSource.modelId] : [],
+      ),
+    ),
+  ].sort();
 
-  const claims = await Promise.all(request.claimIds.map(async (claimId) => {
+  // In a fixed order, through the one client: the rows held first, then read.
+  const held = await holdMarketingFactRows(database, { plans: needsPlans, catalogue: needsCatalogue, modelIds });
+  const gates = await readGates(database, gateKeys);
+  const usage = await readUsage(database, request.channelId);
+  const plans: BillingPlanWithFieldSources[] = needsPlans
+    ? await getBillingPlansWithFieldSources(database)
+    : [];
+  // A catalogue row the hold did not take is not read: absent then, absent now.
+  const catalogue: { source: BillingPriceCatalogSource; updatedAt: string | null } | null = !needsCatalogue
+    ? null
+    : held.catalogue
+      ? await readBillingPriceCatalogSource(database)
+      : { source: "default_row_missing", updatedAt: null };
+  const modelRows = new Map<string, ModelRow | null>();
+  for (const modelId of modelIds) {
+    modelRows.set(modelId, held.modelIds.has(modelId) ? await readModelRow(database, modelId) : null);
+  }
+  // Always: the registry version a post records is the one in force, whether
+  // or not this draft names an asset, and the table refuses a version of 0.
+  const assetRegistry = await readMarketingAssetRegistry();
+
+  // What the decision rested on, collected as each claim is resolved.
+  const priceRows = new Map<string, string>();
+  const modelRegistryRows = new Map<string, string>();
+  const evidenceDigests = new Set<string>();
+  let catalogueUsed = false;
+
+  const claims = request.claimIds.map((claimId) => {
     const registryClaim = marketingClaimById(claimId);
     const resolution = resolveMarketingClaim({
       id: claimId,
@@ -222,7 +436,10 @@ export async function resolveMarketingFacts(
     if (claim.type === "pricing" || claim.type === "plan") {
       const factSource = claim.factSource;
       if (factSource?.kind === "billing_plan") {
-        const plan = plans.find((entry) => entry.plan.id === factSource.planId);
+        const found = plans.find((entry) => entry.plan.id === factSource.planId);
+        // A plan row the hold did not take -- inserted after it -- is no row.
+        const plan = found?.row && held.planIds.has(found.row.id) ? found : undefined;
+        if (plan?.row) priceRows.set(plan.row.id, plan.row.updatedAt);
         const decision = plan
           ? priceClaimSourceDecision(
               factSource.fields.map((field) => ({
@@ -239,6 +456,7 @@ export async function resolveMarketingFacts(
         };
       }
       if (factSource?.kind === "localized_catalogue") {
+        catalogueUsed = true;
         const decision = catalogue
           ? catalogueClaimSourceDecision(catalogue.source)
           : { ok: false as const };
@@ -257,7 +475,9 @@ export async function resolveMarketingFacts(
       if (factSource?.kind !== "model_registry") {
         return { ...fact, modelMatches: false };
       }
-      const model = (await getRuntimeModel(factSource.modelId)) ?? null;
+      const row = modelRows.get(factSource.modelId) ?? null;
+      if (row) modelRegistryRows.set(factSource.modelId, row.updatedAt);
+      const model = row?.model ?? null;
       return {
         ...fact,
         modelMatches: modelClaimDecision({
@@ -284,9 +504,9 @@ export async function resolveMarketingFacts(
         localeKey: claim.evidence.localeKey,
         locale: request.locale,
       });
-      return evidence.ok
-        ? { ...fact, featurePublic: true, evidenceStatement: evidence.text }
-        : { ...fact, featurePublic: false };
+      if (!evidence.ok) return { ...fact, featurePublic: false };
+      evidenceDigests.add(createHash("sha256").update(evidence.text, "utf8").digest("hex"));
+      return { ...fact, featurePublic: true, evidenceStatement: evidence.text };
     }
 
     if (claim.type === "comparison") {
@@ -300,7 +520,7 @@ export async function resolveMarketingFacts(
     }
 
     return fact;
-  }));
+  });
 
   const assets = request.assetIds.map((assetId) => {
     const resolution = assetRegistry
@@ -319,14 +539,31 @@ export async function resolveMarketingFacts(
     };
   });
 
-  return sealMarketingFacts({
-    channelId: request.channelId,
-    channel: request.channel,
-    locale: request.locale,
+  const factSnapshot: MarketingFactSnapshot = {
+    priceRows: [...priceRows].map(([rowId, updatedAt]) => ({ rowId, updatedAt })).sort(byRowId),
+    // No row is nothing to point at, and the claim that asked is refused for
+    // resting on the compiled default; a timestamp made up for it would say a
+    // row was read. A row that exists but does not parse is recorded as the
+    // compiled default it serves, with that row's own updatedAt -- the same
+    // pairing the billing reader reports.
+    catalogue:
+      catalogueUsed && catalogue?.updatedAt
+        ? {
+            source: catalogue.source === "stored" ? "stored_row" : "compiled_default",
+            updatedAt: catalogue.updatedAt,
+          }
+        : null,
+    modelRegistryRows: [...modelRegistryRows]
+      .map(([rowId, updatedAt]) => ({ rowId, updatedAt }))
+      .sort(byRowId),
+    evidenceDigests: [...evidenceDigests].sort(),
+  };
+
+  return {
+    request,
     claims,
     assets,
-    claimRegistryVersion: MARKETING_CLAIM_REGISTRY_VERSION,
     assetRegistryVersion: assetRegistry?.version ?? 0,
-    factSnapshotDigest: request.factSnapshotDigest,
-  });
+    factSnapshot,
+  };
 }

@@ -6,8 +6,8 @@
     "lib/marketingFacts.ts",
     "lib/marketingStore.ts"
   ],
-  "digest": "a27bc9a653b7b779381127e22259d648d5c5a0e916d07e47d4574157efb8d9c5",
-  "totalSizeBytes": 529683,
+  "digest": "685d8ca992cbcd0668cc72ad53a066026336478b3483d1fe6e4c7c16498e8cf8",
+  "totalSizeBytes": 548974,
   "files": [
     {
       "path": "lib/adminAudit.ts",
@@ -21,8 +21,8 @@
     },
     {
       "path": "lib/adminAuditSystemActors.ts",
-      "sizeBytes": 18731,
-      "sha256": "51c0aa56f63385b3e0723ff1efded95bac172cfe545eaa1c0da9a01d61c1f18e"
+      "sizeBytes": 19758,
+      "sha256": "50ecd00fa8b442580fadbfed15db3723b4c152d4ab0c46476ff364b8b347d0ff"
     },
     {
       "path": "lib/clientIp.ts",
@@ -101,8 +101,8 @@
     },
     {
       "path": "lib/marketingStore.ts",
-      "sizeBytes": 216944,
-      "sha256": "f93ef316f0c8114e2749a8ba662595d9490bad42bb978b33e62494840517d7c7"
+      "sizeBytes": 235208,
+      "sha256": "90226e04f42de747bff99b7115186f3eedf6e94dc9404f164d07f7cff77ef7a4"
     },
     {
       "path": "lib/postgresConnectionConfigCore.mjs",

@@ -37,6 +37,7 @@ import { runImageAssetMaintenanceQuietly } from "@/lib/imageAssetLifecycle";
 import { runKnowledgeMaintenanceQuietly } from "@/lib/assistantKnowledgeLifecycle";
 import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactStorage";
 import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
+import { runMarketingLlmExpiryQuietly } from "@/lib/marketingLlmExpiry";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -144,6 +145,11 @@ export async function POST(request: Request) {
     // stayed dead for the same, against a ten-minute staleness threshold.
     // The bucket-listing arm is deliberately not here; it stays daily.
     const knowledge = await runKnowledgeMaintenanceQuietly();
+    // The marketing LLM cost ledger: release reservations never dispatched in
+    // 15 minutes and keep dispatches never reported in an hour at their
+    // reservation (docs/policy/marketing-automation.md §5). DB-only, skipped
+    // while the marketing kill switch is on, and never throws.
+    const marketingLlmExpiry = await runMarketingLlmExpiryQuietly();
     // Staged external-import payloads carry user conversation content and a
     // 24h-idle / 72h-absolute lifetime (policy §5.5). The lazy checks in
     // batch/finalize are the primary guard; this sweep clears content whose
@@ -227,6 +233,7 @@ export async function POST(request: Request) {
         generatedArtifacts,
         messageAttachments,
         knowledge,
+        marketingLlmExpiry,
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,
@@ -247,6 +254,7 @@ export async function POST(request: Request) {
         generatedArtifacts,
         messageAttachments,
         knowledge,
+        marketingLlmExpiry,
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,
