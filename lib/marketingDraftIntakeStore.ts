@@ -99,9 +99,11 @@ const unreadable: ReadResult<never> = { ok: false };
  * PostgreSQL 17 arms `transaction_timeout` from the moment it is set inside the
  * transaction when no timer is already running. It is set to the longest an
  * intake transaction takes, and only when at least that much time is left
- * before the deadline at that same instant, so a transaction cannot commit
- * after the deadline: the late success is rolled back by the server, not
- * noticed by this process. Left unbounded: the stretch
+ * before the deadline at that same instant, so a new success cannot be
+ * *recorded* after the deadline: past it, the server rolls the work back. What
+ * this does not bound is when COMMIT's durable phase finishes; a generator
+ * that loses the answer learns it by resubmitting the same key, which reads
+ * the row back. Also unbounded: the stretch
  * from BEGIN to this statement and COMMIT's durable phase, which is the
  * agent foundation's timeout rule. Statement and idle bounds are shorter, so
  * both stay armed.
@@ -142,14 +144,17 @@ async function boundByDeadline(
   `);
   const armedRow = armedRows[0];
   if (!armedRow || armedRow.set === null) return { refused: "intake_deadline_too_close" };
+  return { now: armedRow.now };
+}
 
+/** Statement and idle bounds, set before the first statement that can wait. */
+async function boundStatements(tx: MarketingTransaction): Promise<void> {
   await tx.$queryRaw(
     Prisma.sql`SELECT set_config('statement_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true)`,
   );
   await tx.$queryRaw(
     Prisma.sql`SELECT set_config('idle_in_transaction_session_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true)`,
   );
-  return { now: armedRow.now };
 }
 
 /**
@@ -232,20 +237,11 @@ export async function intakeMarketingGeneratorDraft(
   },
   readers: MarketingDraftIntakeReaders = BUILD_READERS,
 ): Promise<MarketingDraftIntakeOutcome> {
-  const bounded = await boundByDeadline(tx, input.deadlineAt);
-  if ("refused" in bounded) return { status: "refused", reasons: [bounded.refused] };
-  const now = bounded.now;
-  // First, before any read the decision rests on.
+  await boundStatements(tx);
+  // First, before any read an answer rests on.
   await takeAuditChainLock(tx);
 
-  const decision = await draftIntakeDecision(tx, input.killSwitchValue, readers);
-  if (!decision.enabled) return { status: "refused", reasons: decision.reasons };
-
   const draft = input.draft;
-  if (draft.claimIds.length > 0 || draft.assets.length > 0) {
-    return { status: "refused", reasons: ["intake_facts_snapshot_not_available"] };
-  }
-
   // Derived, so the generator cannot name another draft's key. Under the chain
   // lock a second intake of the same key waits for this one, so this read sees
   // the row the first one made; the unique index is the second lock.
@@ -280,6 +276,22 @@ export async function intakeMarketingGeneratorDraft(
       postId: existing.id,
       existing: true,
     };
+  }
+
+  // **The read-back above comes before every gate below.** A first intake that
+  // committed and lost its answer is learned by resubmitting the same key, and
+  // that has to work after the switch, the budget or the kill switch has
+  // closed -- answering `refused` there would say the draft was never taken
+  // when it was. The gates decide whether a *new* draft is written.
+  const bounded = await boundByDeadline(tx, input.deadlineAt);
+  if ("refused" in bounded) return { status: "refused", reasons: [bounded.refused] };
+  const now = bounded.now;
+
+  const decision = await draftIntakeDecision(tx, input.killSwitchValue, readers);
+  if (!decision.enabled) return { status: "refused", reasons: decision.reasons };
+
+  if (draft.claimIds.length > 0 || draft.assets.length > 0) {
+    return { status: "refused", reasons: ["intake_facts_snapshot_not_available"] };
   }
 
   const channel = await tx.marketingChannel.findUnique({
