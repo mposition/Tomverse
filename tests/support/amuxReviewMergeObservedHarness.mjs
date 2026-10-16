@@ -11,6 +11,7 @@ let task;
 let attempt;
 let writes;
 let gradeGuard;
+let auditPresent;
 
 const fakeTx = {
   $queryRaw: async (strings) => {
@@ -23,7 +24,7 @@ const fakeTx = {
   amuxV22WorkerAssignment: { findUnique: async () => ({
     authorizationAuditLogId: "assignment-audit", grade: task.executionGrade,
   }) },
-  adminAuditLog: { findUnique: async () => ({ entryHash: "hash",
+  adminAuditLog: { findUnique: async () => !auditPresent ? null : ({ entryHash: "hash",
     action: "amux.v22.worker.assigned", targetId: "assignment",
     metadata: { v52GradeRouting: gradeGuard },
   }) },
@@ -52,11 +53,12 @@ const reset = () => {
   task = {
     id: "card", status: "review", owner: null, revision: 8, archivedAt: null,
     sourceSystem: "admin-idea-v4", cardType: "task", taskRole: "implement",
-    executionGrade: "routine", reviewPrNumber: 42,
+    executionGrade: "medium", reviewPrNumber: 42,
   };
   attempt = { id: "attempt", outcome: "succeeded", toStatus: "review", endedAt: dbNow, v22AssignmentId: "assignment" };
   writes = [];
   gradeGuard = false;
+  auditPresent = true;
 };
 const run = (overrides = {}) => completeAmuxV22ReviewOnObservedMerge({
   taskId: "card", attemptId: "attempt", prNumber: 42, mergeCommitSha: MERGE, approvalReviewId: 7, ...overrides,
@@ -99,13 +101,21 @@ await refused(() => { attempt.id = "newer"; }, "not_the_latest_attempt");
 await refused(() => { attempt.v22AssignmentId = null; }, "not_the_latest_attempt");
 await refused(() => { attempt.toStatus = "todo"; }, "not_the_latest_attempt");
 await refused(() => { attempt = null; }, "not_the_latest_attempt");
-await refused(() => { gradeGuard = true; }, "pr_file_state_mismatch");
-await refused(() => { gradeGuard = true; }, "pr_file_state_mismatch",
+await refused(() => { gradeGuard = true; task.executionGrade = "routine"; },
+  "pr_file_state_mismatch");
+await refused(() => { gradeGuard = true; task.executionGrade = "routine"; },
+  "pr_file_state_mismatch",
   { changedFiles: ["LIB/AMUX/execution.ts"] });
 reset();
 gradeGuard = true;
+task.executionGrade = "routine";
 assert.deepEqual(await run({ changedFiles: ["components/chat/Ordinary.tsx"] }),
   { completed: true, taskRevision: 9 });
+reset();
+auditPresent = false;
+assert.deepEqual(await run(), { completed: true, taskRevision: 9 });
+await refused(() => { auditPresent = false; task.executionGrade = "routine"; },
+  "pr_file_state_mismatch");
 
 // Malformed input is a programming error, not a refusal.
 reset();

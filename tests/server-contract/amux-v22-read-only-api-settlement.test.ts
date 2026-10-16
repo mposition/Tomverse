@@ -34,7 +34,8 @@ function makeWorld(outcome: Outcome) {
     gradeGuard: false,
     frontierPriceAvailable: true,
     taskRole: null as string | null,
-    taskGrade: "advanced",
+    taskGrade: "medium",
+    assignmentAuditPresent: true,
     sourceApprovalId: null as string | null,
     taskUpdates: 0,
     gradeAuditsAtTaskUpdate: -1,
@@ -209,7 +210,8 @@ const tx = {
       outputMicroUsdPerMillion: 2_000_000 }] },
   }) },
   adminAuditLog: { findUnique: async (args: { where: { id: string } }) =>
-    args.where.id === "assignment-audit" ? {
+    args.where.id === "assignment-audit" ?
+      !world.assignmentAuditPresent ? null : {
       entryHash: "a".repeat(64), action: "amux.v22.worker.assigned",
       targetId: "assignment-one", metadata: { v52GradeRouting: world.gradeGuard },
     } : { entryHash: "a".repeat(64),
@@ -335,6 +337,26 @@ test("other Tasks keep the global five-attempt settlement budget", async () => {
   }
 });
 
+test("legacy settlement does not acquire the v52 assignment-audit gate", async () => {
+  world = makeWorld("succeeded");
+  world.assignmentAuditPresent = false;
+  const result = await (await execution).settleAmuxV22TaskExecution(
+    await settlementInput("succeeded"));
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "review");
+});
+
+test("v52 settlement fails closed when its assignment audit is missing", async () => {
+  world = makeWorld("succeeded");
+  world.assignmentAuditPresent = false;
+  world.gradeGuard = true;
+  world.taskGrade = "advanced";
+  const result = await (await execution).settleAmuxV22TaskExecution(
+    await settlementInput("succeeded"));
+  assert.deepEqual(result, { settled: false,
+    reason: "assignment_audit_unverified" });
+});
+
 test("v52 contract touch discards the ordinary grade and binds one frontier receipt", async () => {
   world = makeWorld("failed");
   world.taskId = "00000000-0000-4000-8000-000000000099";
@@ -375,9 +397,41 @@ test("v52 contract touch discards the ordinary grade and binds one frontier rece
   });
 });
 
+test("v52 contract touch on the final attempt blocks for human recovery", async () => {
+  world = makeWorld("failed");
+  world.taskId = "00000000-0000-4000-8000-000000000099";
+  world.attemptNumber = 5;
+  world.recoveryApprovalId = null;
+  world.gradeGuard = true;
+  world.taskRole = "implement";
+  world.taskGrade = "routine";
+  world.sourceApprovalId = "source-one";
+  world.storedEvents = [{ invocationId: world.attemptId,
+    receiptDigest: "7".repeat(64), status: "failed",
+    completeness: "reported_complete", projectedApiCostMicrousd: BigInt(1),
+    cli: "claude", source: "claude_result", actualModelId: "claude-opus-5-5",
+    selectedModelId: "claude-opus-5-5", provider: "anthropic",
+    authentication: "subscription", inputTokens: BigInt(1),
+    outputTokens: BigInt(1), cacheReadInputTokens: BigInt(0),
+    cacheCreationInputTokens: BigInt(0), inputTokensIncludeCacheRead: false,
+    inputTokensIncludeCacheWrite: false, completedTurns: 1,
+    pricingVersion: null }];
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    attemptId: world.attemptId, worker, instanceId, generation: 1,
+    taskRevision: 5, outcome: "failed", invocationIds: [world.attemptId],
+    changedPaths: ["lib/amux/execution.ts"],
+  });
+  assert.deepEqual(result, { settled: true, taskRevision: 6 });
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.taskUpdateData?.executionGrade, undefined);
+  assert.equal(world.attemptUpdateData?.reason, "attempt_budget_exhausted");
+  assert.equal(world.gradeEscalationAudits.length, 0);
+});
+
 test("v52 missing inventory blocks even a successful execution", async () => {
   world = makeWorld("succeeded");
   world.gradeGuard = true;
+  world.taskGrade = "advanced";
   const result = await (await execution).settleAmuxV22TaskExecution(
     await settlementInput("succeeded"));
   assert.equal(result.settled, true);
@@ -389,6 +443,7 @@ test("v52 missing inventory blocks even a successful execution", async () => {
 test("v52 ordinary paths preserve the normal successful destination", async () => {
   world = makeWorld("succeeded");
   world.gradeGuard = true;
+  world.taskGrade = "advanced";
   const result = await (await execution).settleAmuxV22TaskExecution({
     ...await settlementInput("succeeded"), changedPaths: ["app/page.tsx"],
   });

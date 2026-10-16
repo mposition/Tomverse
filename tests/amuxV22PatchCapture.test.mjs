@@ -132,6 +132,25 @@ test("v52 inventories every changed name independently of the publish patch cap"
     .maxBuffer, 32 * 1024);
 });
 
+test("v52 includes ignored contract paths without scanning unrelated ignored files", async () => {
+  const calls = [];
+  const run = async (_binary, args) => {
+    const command = args.slice(6);
+    calls.push(command);
+    if (command[0] === "rev-parse") return { stdout: Buffer.from(
+      command[1] === "--show-toplevel" ? "/repo" : BASE) };
+    if (command[0] === "ls-files" && command.includes("--ignored"))
+      return { stdout: Buffer.from("LIB/AMUX/cache/new.ts\0") };
+    return { stdout: Buffer.alloc(0) };
+  };
+  const result = await captureAmuxV52ChangedPaths("/repo", BASE,
+    { run, realpath: async (path) => path });
+  assert.deepEqual(result.contractPaths, ["LIB/AMUX/cache/new.ts"]);
+  const ignored = calls.find((command) => command.includes("--ignored"));
+  assert.ok(ignored.includes(":(icase,glob)lib/amux/**"));
+  assert.ok(!ignored.some((item) => item.includes("node_modules")));
+});
+
 test("v52 treats missing, malformed and invalid path inventories as unavailable", async () => {
   const run = async (_binary, args) => {
     const command = args.slice(6);
@@ -172,7 +191,7 @@ test("v52 discards a contract attempt only from its original clean base", async 
   const calls = [];
   const run = async (_binary, args) => {
     const command = args.slice(6);
-    calls.push(command[0]);
+    calls.push(command);
     if (command[0] === "rev-parse") return { stdout: Buffer.from(
       command[1] === "--show-toplevel" ? "/repo" : BASE) };
     if (command[0] === "status") return { stdout: Buffer.alloc(0) };
@@ -180,7 +199,10 @@ test("v52 discards a contract attempt only from its original clean base", async 
   };
   assert.equal(await discardAmuxV52ContractChanges("/repo", BASE,
     { run, realpath: async (path) => path }), true);
-  assert.deepEqual(calls, ["rev-parse", "rev-parse", "reset", "clean", "status"]);
+  assert.deepEqual(calls.map((command) => command[0]),
+    ["rev-parse", "rev-parse", "reset", "clean", "status"]);
+  assert.ok(calls.find((command) => command[0] === "clean").includes("-fdx"));
+  assert.ok(calls.find((command) => command[0] === "status").includes("--ignored"));
   assert.equal(await discardAmuxV52ContractChanges("/repo", BASE,
     { run: async (_binary, args) => ({ stdout: Buffer.from(
       args.slice(6)[1] === "--show-toplevel" ? "/repo" : "b".repeat(40)) }),

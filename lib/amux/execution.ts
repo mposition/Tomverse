@@ -41,7 +41,8 @@ import { calculateCurrentApprovedAmuxV4TaskCost } from
 import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
   "@/lib/amux/v52GradeReceipt";
-import { decideAmuxV52ChangedPaths } from "@/lib/amux/executionGradeCore";
+import { amuxWorkerRoleForExecutionGrade,
+  decideAmuxV52ChangedPaths } from "@/lib/amux/executionGradeCore";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
 import {
@@ -1264,16 +1265,20 @@ export async function settleAmuxV22TaskExecution(input: {
           select: { entryHash: true, action: true, targetId: true,
             metadata: true },
         }) : null;
-      if (!settlementAssignment || !assignmentAudit?.entryHash ||
-          assignmentAudit.action !== "amux.v22.worker.assigned" ||
-          assignmentAudit.targetId !== settlementAssignment.id)
-        return { settled: false as const,
-          reason: "assignment_audit_unverified" as const };
-      const assignmentMetadata = assignmentAudit.metadata;
-      const gradeGuard = !!assignmentMetadata &&
-        typeof assignmentMetadata === "object" &&
+      const assignmentAuditVerified = !!settlementAssignment &&
+        !!assignmentAudit?.entryHash &&
+        assignmentAudit.action === "amux.v22.worker.assigned" &&
+        assignmentAudit.targetId === settlementAssignment.id;
+      const assignmentMetadata = assignmentAudit?.metadata;
+      const v52Grade = !!settlementAssignment &&
+        amuxWorkerRoleForExecutionGrade(settlementAssignment.grade) !== null;
+      const gradeGuard = v52Grade && assignmentAuditVerified &&
+        !!assignmentMetadata && typeof assignmentMetadata === "object" &&
         !Array.isArray(assignmentMetadata) &&
         (assignmentMetadata as Record<string, unknown>).v52GradeRouting === true;
+      if (!settlementAssignment || (v52Grade && !gradeGuard))
+        return { settled: false as const,
+          reason: "assignment_audit_unverified" as const };
       const pathDecision = gradeGuard ? decideAmuxV52ChangedPaths(
         settlementAssignment.grade, input.changedPaths) : "pass";
       const settlementRecovery = settlementAssignment?.recoveryApprovalId ?
@@ -1466,7 +1471,8 @@ export async function settleAmuxV22TaskExecution(input: {
         });
       }
       const budget = settlementDestinationForBudget({
-        requested_status: input.outcome === "succeeded" ? "review" :
+        requested_status: effectivePathDecision === "escalate" ? "todo" :
+          input.outcome === "succeeded" ? "review" :
           input.outcome === "failed" ? "todo" : "blocked",
         attempt_number: attempt.attemptNumber,
         ...(attempt.taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID &&
@@ -1474,9 +1480,11 @@ export async function settleAmuxV22TaskExecution(input: {
           max_attempts: AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT,
         } : {}),
       });
-      const next = effectivePathDecision === "escalate" ? "todo" :
-        effectivePathDecision === "blocked" ? "blocked" : budget.to_status;
-      if (effectivePathDecision === "escalate" && escalationReceipt) {
+      const next = effectivePathDecision === "blocked" ? "blocked" :
+        budget.to_status;
+      const gradeEscalated = effectivePathDecision === "escalate" &&
+        next === "todo";
+      if (gradeEscalated && escalationReceipt) {
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: AMUX_GRADE_ESCALATED_ACTION,
           targetType: "AmuxWorkItem", targetId: task.id,
@@ -1494,15 +1502,16 @@ export async function settleAmuxV22TaskExecution(input: {
       await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
         status: next, owner: null, claimedAt: null, v22AssignmentId: null,
         reviewPrNumber: null,
-        ...(effectivePathDecision === "escalate" ?
+        ...(gradeEscalated ?
           { executionGrade: "frontier" } : {}),
         revision: { increment: 1 },
       } });
       await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },
         data: { endedAt: now, leaseExpiresAt: null, heartbeatAt: now,
           outcome: input.outcome, toStatus: next, endedBy: input.worker,
-          reason: effectivePathDecision === "escalate" ?
-            "contract_path_touched" : effectivePathDecision === "blocked" ?
+          reason: gradeEscalated ? "contract_path_touched" :
+            effectivePathDecision === "escalate" ?
+              "attempt_budget_exhausted" : effectivePathDecision === "blocked" ?
               (pathDecision === "escalate" ? "grade_receipt_unavailable" :
                 "changed_paths_unavailable") : budget.exhausted_limit ??
                 (receiptsComplete ? "reported_result" : "usage_outcome_unknown") },
@@ -1516,7 +1525,8 @@ export async function settleAmuxV22TaskExecution(input: {
           specialty: next === "review" ? AMUX_DEFAULT_REVIEW_SPECIALTY :
             "execution-recovery",
           reason: next === "review" ? "human_review_required" :
-            effectivePathDecision === "blocked" ?
+            effectivePathDecision === "escalate" ?
+              "attempt_budget_exhausted" : effectivePathDecision === "blocked" ?
               (pathDecision === "escalate" ? "grade_receipt_unavailable" :
                 "changed_paths_unavailable") :
             budget.exhausted_limit ?? (receiptsComplete ?
@@ -1531,7 +1541,9 @@ export async function settleAmuxV22TaskExecution(input: {
           receiptsComplete, reservedCostMicrousd:
             attempt.reservedCostMicrousd.toString(),
           apiExecutionReceiptDigest: apiExecutionReceipt?.digest ?? null,
-          v52PathDecision: gradeGuard ? effectivePathDecision : null,
+          v52PathDecision: gradeGuard ?
+            (gradeEscalated ? "escalate" : next === "blocked" ? "blocked" :
+              effectivePathDecision) : null,
           imageProofDigest: product?.kind === "publish" &&
             publication?.ok ? publication.imageProofDigest : null },
       });
@@ -1539,7 +1551,8 @@ export async function settleAmuxV22TaskExecution(input: {
         await endEngineeringAgentRun(
           engineeringAgentTransactionInAmux(context.attachedTransaction), {
             runId: run.id, amuxAttemptId: attempt.id,
-            outcome: effectivePathDecision === "pass" ?
+            outcome: pathDecision === "blocked" ? "schema_invalid" :
+              effectivePathDecision === "pass" ?
               v22RunOutcomeForProduct({ taskOutcome: input.outcome,
                 productKind: product?.kind ?? null }) : "scope_violation",
             halt: "none",
