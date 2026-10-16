@@ -3,12 +3,13 @@ import test from "node:test";
 
 import {
   AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
-  AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS,
   AMUX_SESSION_INTAKE_READBACK_CODE_LATCH,
   AMUX_SESSION_INTAKE_READBACK_ENV,
+  amuxSessionIntakeConflictingSecretValues,
   amuxSessionIntakeReadbackEnabled,
   amuxSessionIntakeReadbackReply,
   amuxSessionIntakeReadbackRequestId,
+  isAmuxSessionIntakeConflictingSecretEnvName,
   isAmuxSessionIntakeClientAuthorized,
 } from "../lib/amux/ideaSessionIntakeReadbackCore.ts";
 
@@ -27,12 +28,6 @@ test("session readback has an independent credential and two exact off-by-defaul
   assert.equal(AMUX_SESSION_INTAKE_READBACK_ENV,
     "TOMVERSE_AMUX_SESSION_INTAKE_READBACK");
   assert.equal(AMUX_SESSION_INTAKE_READBACK_CODE_LATCH, true);
-  for (const name of ["MAINTENANCE_SECRET", "MARKETING_PUBLISH_SECRET",
-    "AUTO_FIX_SYNC_SECRET", "PROVIDER_MODEL_CATALOG_SYNC_SECRET",
-    "PROVIDER_PROBE_SECRET", "PROVIDER_USAGE_SYNC_SECRET",
-    "MOBILE_AUTH_KEYRING_HEALTH_SECRET"]) {
-    assert.ok(AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS.includes(name));
-  }
   assert.equal(amuxSessionIntakeReadbackEnabled(undefined, undefined), false);
   assert.equal(amuxSessionIntakeReadbackEnabled("enabled", undefined), false);
   assert.equal(amuxSessionIntakeReadbackEnabled(undefined, "enabled"), false);
@@ -49,6 +44,35 @@ test("session readback has an independent credential and two exact off-by-defaul
   assert.equal(isAmuxSessionIntakeClientAuthorized(new Request(request().url, {
     headers: { cookie: "authjs.session-token=synthetic-owner-cookie" },
   }), secret, []), false);
+});
+
+test("session readback rejects current and future secret-like environment collisions", () => {
+  for (const name of [
+    "ROUTING_FAULT_INJECTION_SECRET",
+    "CHAT_GUEST_SMART_ADAPTIVE_AUTHORITY_SECRET",
+    "ZERNIO_WEBHOOK_SECRET",
+    "STRIPE_WEBHOOK_SECRET",
+    "MOBILE_AUTH_SIGNING_KEYS",
+    "OPENAI_API_KEY",
+    "FUTURE_INTERNAL_CAPABILITY_SECRET",
+    "FUTURE_PROVIDER_API_KEY",
+    "FUTURE_WORKER_TOKEN",
+    "FUTURE_KEYRING",
+  ]) assert.equal(isAmuxSessionIntakeConflictingSecretEnvName(name), true, name);
+
+  for (const name of [
+    AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
+    "PUBLIC_APP_URL",
+    "RAILWAY_ENVIRONMENT",
+    "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
+  ]) assert.equal(isAmuxSessionIntakeConflictingSecretEnvName(name), false, name);
+
+  assert.deepEqual(amuxSessionIntakeConflictingSecretValues({
+    [AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV]: secret,
+    FUTURE_INTERNAL_CAPABILITY_SECRET: secret,
+    FUTURE_PROVIDER_API_KEY: "",
+    PUBLIC_APP_URL: secret,
+  }), [secret]);
 });
 
 test("session readback accepts one exact request ID and no lookup extensions", () => {

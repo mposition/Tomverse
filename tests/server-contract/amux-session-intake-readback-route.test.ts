@@ -4,20 +4,29 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, before, mock, test } from "node:test";
 
-import { AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS } from
-  "../../lib/amux/ideaSessionIntakeReadbackCore.ts";
-
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const requestId = "34340477-7664-42f4-b3fe-845d10365051";
 const ideaId = "8486a25b-919f-4714-a3d8-45ef5a18b175";
 const secret = "session_intake_only_012345678901234567890123";
+const conflictingEnvNames = [
+  "ROUTING_FAULT_INJECTION_SECRET",
+  "CHAT_GUEST_SMART_ADAPTIVE_AUTHORITY_SECRET",
+  "ZERNIO_WEBHOOK_SECRET",
+  "STRIPE_WEBHOOK_SECRET",
+  "MOBILE_AUTH_SIGNING_KEYS",
+  "OPENAI_API_KEY",
+  "FUTURE_INTERNAL_CAPABILITY_SECRET",
+  "FUTURE_PROVIDER_API_KEY",
+  "FUTURE_WORKER_TOKEN",
+  "FUTURE_KEYRING",
+] as const;
 const envNames = [
   "TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET",
   "TOMVERSE_AMUX_SESSION_INTAKE",
   "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
   "TOMVERSE_AMUX_V4_IDEA_READBACK",
-  ...AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS,
+  ...conflictingEnvNames,
 ] as const;
 const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
 let reads = 0;
@@ -52,7 +61,7 @@ const reset = () => {
   delete process.env.TOMVERSE_AMUX_SESSION_INTAKE;
   process.env.TOMVERSE_AMUX_SESSION_INTAKE_READBACK = "enabled";
   process.env.TOMVERSE_AMUX_V4_IDEA_READBACK = "enabled";
-  for (const name of AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS) {
+  for (const name of conflictingEnvNames) {
     delete process.env[name];
   }
 };
@@ -69,7 +78,7 @@ test("session readback accepts only its bearer and never falls back to an owner 
   });
   assert.equal((await route.GET(cookieOnly)).status, 401);
   assert.equal((await route.GET(get("", "wrong_credential_value_0123456789"))).status, 401);
-  for (const name of AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS) {
+  for (const name of conflictingEnvNames) {
     reset();
     process.env[name] = secret;
     assert.equal((await route.GET(get())).status, 401, name);

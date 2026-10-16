@@ -4,8 +4,8 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import { AMUX_V4_IDEA_READBACK_ENV } from "@/lib/amux/ideaSubmissionCore";
 import {
   AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
-  AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS,
   AMUX_SESSION_INTAKE_READBACK_ENV,
+  amuxSessionIntakeConflictingSecretValues,
   amuxSessionIntakeReadbackEnabled,
   amuxSessionIntakeReadbackReply,
   amuxSessionIntakeReadbackRequestId,
@@ -14,15 +14,12 @@ import {
 import { readAmuxIdeaSessionSubmissionRequest } from
   "@/lib/amux/ideaSessionSubmissionService";
 
-const otherCapabilitySecrets = (): Array<string | undefined> =>
-  AMUX_SESSION_INTAKE_CONFLICTING_SECRET_ENVS.map((name) => process.env[name]);
-
 /** Exact-ID, metadata-only recovery after an uncertain session intake reply. */
 export async function GET(request: Request): Promise<Response> {
   if (!isAmuxSessionIntakeClientAuthorized(
     request,
     process.env[AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV],
-    otherCapabilitySecrets(),
+    amuxSessionIntakeConflictingSecretValues(process.env),
   )) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
 
   if (!amuxSessionIntakeReadbackEnabled(
