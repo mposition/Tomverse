@@ -1,8 +1,6 @@
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-import { createHash, timingSafeEqual } from "node:crypto";
-
 import { NextResponse } from "next/server";
 
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
@@ -11,6 +9,7 @@ import {
   marketingDraftProvenanceMatches,
   marketingDraftSubmissionSchema,
 } from "@/lib/marketingDraftIntakeCore";
+import { marketingGeneratorAuthorized, marketingGeneratorSecret } from "@/lib/marketingGeneratorAuth";
 import { intakeMarketingGeneratorDraft } from "@/lib/marketingDraftIntakeStore";
 import { runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
@@ -25,26 +24,6 @@ import { prisma } from "@/lib/prisma";
 // In this build every submission is refused by the `draftIntake` decision --
 // the generation budget (S3c) and the price-fallback alert (S3d) are not there
 // yet -- so the route answers with closed reasons and writes nothing.
-
-/**
- * Only `MARKETING_GENERATOR_SUBMIT_SECRET`, by the publisher route's rule: at
- * least 32 characters, compared as SHA-256 digests in constant time, and no
- * other secret as a fallback.
- */
-const generatorSecret = (): string | null => {
-  const secret = process.env.MARKETING_GENERATOR_SUBMIT_SECRET;
-  return secret && secret.length >= 32 ? secret : null;
-};
-
-const authorized = (request: Request, secret: string): boolean => {
-  const authorization = request.headers.get("authorization");
-  const provided = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
-  if (!provided) return false;
-  return timingSafeEqual(
-    createHash("sha256").update(secret).digest(),
-    createHash("sha256").update(provided).digest(),
-  );
-};
 
 const json = (body: Record<string, unknown>, status: number) =>
   NextResponse.json(body, { status, headers: { "cache-control": "no-store" } });
@@ -77,8 +56,8 @@ const readBody = async (request: Request): Promise<Uint8Array | null> => {
 };
 
 export async function POST(request: Request) {
-  const secret = generatorSecret();
-  if (!secret || !authorized(request, secret)) {
+  const secret = marketingGeneratorSecret();
+  if (!secret || !marketingGeneratorAuthorized(request, secret)) {
     return json({ error: "Unauthorized" }, 401);
   }
 
