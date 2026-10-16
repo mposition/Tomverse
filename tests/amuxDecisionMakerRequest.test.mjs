@@ -1150,6 +1150,49 @@ const routedCard = (overrides = {}) => ({
 const BOUNDARY_STATEMENTS = 2;
 const WITH_KEY = 1;
 
+/**
+ * The boundary each event write below runs in when a caller other than a
+ * test makes it: the retention sweep's stale close, and stage S2's internal
+ * routes (app/api/internal/amux/decision-maker/**). The assignment and the
+ * result run through the body store's keyed compositions, whose boundaries
+ * tests/amuxDecisionMakerBody.test.mjs pins.
+ */
+const EVENT_WRITE_BOUNDARIES = {
+  assign_discarded: "decisionMakerAssignmentDiscard",
+  transmit_intent: "decisionMakerTransmitIntent",
+  transmit_receipt: "decisionMakerTransmitOutcome",
+  transmit_unknown: "decisionMakerTransmitOutcome",
+  result_unknown: "decisionMakerResultUnknown",
+  stale_close: "decisionMakerStaleClose",
+};
+
+test("stage S2's internal routes run each ledger operation in a boundary of its own name and isolation", async () => {
+  assert.deepEqual(
+    Object.fromEntries(
+      ["decisionMakerAssignmentDiscard", "decisionMakerTransmitIntent", "decisionMakerTransmitOutcome", "decisionMakerResultUnknown"].map(
+        (name) => [name, { operation: AMUX_DB_BOUNDARIES[name].operation, isolation: AMUX_DB_BOUNDARIES[name].isolation }],
+      ),
+    ),
+    {
+      decisionMakerAssignmentDiscard: { operation: "decision_maker_assignment_discard", isolation: "mutation" },
+      decisionMakerTransmitIntent: { operation: "decision_maker_transmit_intent", isolation: "mutation" },
+      decisionMakerTransmitOutcome: { operation: "decision_maker_transmit_outcome", isolation: "mutation" },
+      decisionMakerResultUnknown: { operation: "decision_maker_result_unknown", isolation: "mutation" },
+    },
+  );
+  // §9's lookup writes nothing: its one state read, plus setup and fence, in a read boundary.
+  // A ceiling below it refuses every lookup; one above it lets a statement the tests here never
+  // counted run inside the budget.
+  const { tx, sent } = recordingTx({ state: STATES.terminal });
+  await lookupDecisionMakerResult(tx, { requestId: REQUEST_ID, resultDigest: DIGEST_C });
+  assert.equal(sent.length, 1);
+  assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerResultLookupRead, {
+    operation: "decision_maker_result_lookup_read",
+    prismaCallCeiling: sent.length + BOUNDARY_STATEMENTS,
+    isolation: "read",
+  });
+});
+
 const kindsOf = (sent) => sent.map((statement) => statement.kind);
 const auditOf = (sent) => sent.find((statement) => statement.kind === "create").data;
 const LOCK = /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/;
@@ -1444,11 +1487,15 @@ for (const [label, key] of [
         const expected = (entry.switchRead ? 7 : 6) + extra;
         assert.equal(sent.length, expected, entry.name);
         assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12, entry.name);
-        // The retention sweep closes stale requests in their own boundary:
-        // this write at its largest, with an integrity key, plus setup and fence.
-        if (entry.name === "stale_close") {
-          assert.ok(sent.length + BOUNDARY_STATEMENTS <= AMUX_DB_BOUNDARIES.decisionMakerStaleClose.prismaCallCeiling);
-          if (extra > 0) assert.equal(sent.length + BOUNDARY_STATEMENTS, AMUX_DB_BOUNDARIES.decisionMakerStaleClose.prismaCallCeiling);
+        // The retention sweep closes stale requests, and stage S2's internal
+        // routes write the bridge's and the broker's events, each in its own
+        // boundary: this write at its largest, with an integrity key, plus
+        // setup and fence.
+        const routeBoundary = EVENT_WRITE_BOUNDARIES[entry.name];
+        if (routeBoundary) {
+          const ceiling = AMUX_DB_BOUNDARIES[routeBoundary].prismaCallCeiling;
+          assert.ok(sent.length + BOUNDARY_STATEMENTS <= ceiling, entry.name);
+          if (extra > 0) assert.equal(sent.length + BOUNDARY_STATEMENTS, ceiling, entry.name);
         }
         assert.deepEqual(
           kindsOf(sent),
