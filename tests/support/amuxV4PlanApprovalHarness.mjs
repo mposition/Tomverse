@@ -11,8 +11,17 @@ let nodePlan;
 let cardPlan;
 let failIn;
 let commitFails;
+let refusalWrites;
+let refusalStoreFails;
 class DecisionError extends Error { constructor(code) { super(code); this.code = code; } }
 class PortfolioError extends Error { constructor(code) { super(code); this.code = code; } }
+class StoreError extends Error {}
+const refusedProposal = { kind: "card", localId: "c0:card-0",
+  cardType: "task", taskRole: "implement", executionGrade: "routine",
+  expectedPaths: ["lib/amux/contract.ts", "components/ordinary.tsx"],
+  featureRef: "f1", parentStoryRef: null, dependencyRefs: [], title: "Task",
+  problem: "Mixed paths", scopeIn: ["Change both"], scopeOut: [],
+  completionCriteria: ["Complete"] };
 
 mock.module(mod("lib/prisma.ts"), {
   namedExports: { prisma: { $transaction: async (work, options) => {
@@ -35,9 +44,16 @@ mock.module(mod("lib/amux/ideaCardPlanApprovalService.ts"), {
   namedExports: {
     prepareAmuxV4CardPlan: async (_s, _r, input, options) => {
       calls.push(["prepareCards", input.publicPrConsentOff, options.allowEmpty, [...options.pendingFeatures]]);
+      if (failIn === "prepareCards") throw new RefusalError(
+        "task_expected_paths_mixed", { ideaId: input.ideaId,
+          draftUnitId: "unit-task-01", analysisPreviewId: "preview-0001" },
+        refusedProposal);
       return { plan: cardPlan, remaining: 0 };
     },
-    runAmuxV4CardPlanInTx: async (tx) => { calls.push(["runCards", tx]); if (failIn === "cards") throw new DecisionError("task_expected_paths_mixed"); return cardPlan; },
+    runAmuxV4CardPlanInTx: async (tx) => { calls.push(["runCards", tx]); if (failIn === "cards") throw new RefusalError(
+      "task_expected_paths_mixed", { ideaId: "idea-0001",
+        draftUnitId: "unit-task-01", analysisPreviewId: "preview-0001" },
+      refusedProposal); return cardPlan; },
     amuxV4PlanFailure: (error, returned) => (!returned && error instanceof DecisionError ? error : new DecisionError("outcome_unknown")),
   },
 });
@@ -47,12 +63,25 @@ mock.module(mod("lib/amux/portfolioPlanApprovalService.ts"), {
     runAmuxV4ScorePlanInTx: async (tx) => { calls.push(["runScores", tx]); if (failIn === "scores") throw new PortfolioError("not_ready"); return { assessments: [1], scores: [2] }; },
   },
 });
+mock.module(mod("lib/amux/ideaRegistrationRefusalService.ts"), {
+  namedExports: { AmuxV20RegistrationRefusalStoreError: StoreError,
+    recordAmuxV20RegistrationRefusal: async (input) => {
+    if (refusalStoreFails) throw new StoreError("refusal store unavailable");
+    calls.push(["recordRefusal"]);
+    refusalWrites.push(input);
+    return { state: "awaiting_operator" };
+  } },
+});
+
+const { AmuxV20RegistrationRefusalDetected: RefusalError } = await import(
+  mod("lib/amux/ideaRegistrationRefusalDetectionCore.ts"));
 
 const { approveAmuxV4Plan, AmuxV4PlanError } = await import(mod("lib/amux/ideaPlanApprovalService.ts"));
 const session = { user: { id: "owner-1" }, role: "owner" };
 const request = new Request("https://t.test");
 const reset = () => {
   calls = []; failIn = null; commitFails = false;
+  refusalWrites = []; refusalStoreFails = false;
   nodePlan = [
     { draftUnitId: "unit-init-01", localRef: "i1", level: "initiative", nodeId: "node-i" },
     { draftUnitId: "unit-feat-01", localRef: "f1", level: "feature", nodeId: "node-f" },
@@ -90,7 +119,25 @@ for (const part of ["nodes", "cards", "scores"]) {
   await assert.rejects(approveAmuxV4Plan(session, request, input()),
     (error) => error.code === (part === "scores" ? "not_ready" :
       part === "cards" ? "task_expected_paths_mixed" : "reconfirm"));
+  if (part === "cards") {
+    assert.deepEqual(refusalWrites.map(({ attemptKind, requestId, refusalCode }) =>
+      ({ attemptKind, requestId, refusalCode })), [{ attemptKind: "whole_plan",
+      requestId: input().planRequestId,
+      refusalCode: "task_expected_paths_mixed" }]);
+    assert.ok(calls.findIndex(([kind]) => kind === "transaction") <
+      calls.findIndex(([kind]) => kind === "recordRefusal"),
+    "the registration transaction rolled back before refusal persistence");
+  } else assert.equal(refusalWrites.length, 0);
 }
+reset(); failIn = "prepareCards";
+await assert.rejects(approveAmuxV4Plan(session, request, input()),
+  (error) => error.code === "task_expected_paths_mixed");
+assert.equal(refusalWrites[0]?.attemptKind, "whole_plan",
+  "a refusal found during whole-plan preparation is durable too");
+assert.equal(calls.some(([kind]) => kind === "transaction"), false);
+reset(); failIn = "cards"; refusalStoreFails = true;
+await assert.rejects(approveAmuxV4Plan(session, request, input()),
+  (error) => error.code === "integrity_unavailable");
 reset(); commitFails = true;
 await assert.rejects(approveAmuxV4Plan(session, request, input()), (error) => error.code === "outcome_unknown");
 

@@ -20,6 +20,8 @@ import { AmuxIdeaDerivationPanel } from
   "@/components/admin/AmuxIdeaDerivationPanel";
 import { AmuxIdeaPlanApprovalPanel } from
   "@/components/admin/AmuxIdeaPlanApprovalPanel";
+import { AmuxIdeaRegistrationRefusalNotice } from
+  "@/components/admin/AmuxIdeaRegistrationRefusalNotice";
 import { adminFetch } from "@/lib/adminFetch";
 import { analysisPollDelayMs, analysisPollWanted } from "@/lib/amux/ideaAnalysisPollCore";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
@@ -173,6 +175,8 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watch
         <p className="whitespace-pre-wrap">{view.remainingScope ?? m.analysisResultScopeExpired}</p>
       </div> : null}
       <p>{view.coveredScope ?? m.analysisResultScopeExpired}</p>
+      {view.registrationRefusal ? <AmuxIdeaRegistrationRefusalNotice
+        m={m} refusal={view.registrationRefusal} /> : null}
       {view.outcome === "reject" ? <p role="status">{m.analysisResultRejected}</p> : null}
       {view.state === "ready" && view.outcome === "propose" ? <AmuxIdeaPlanApprovalPanel
         ideaId={ideaId} onChanged={() => void refresh()} /> : null}

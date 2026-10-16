@@ -146,3 +146,14 @@ test("non-prepared states and digest key changes fail closed", () => {
   assert.deepEqual(checkAmuxIdeaUnitConsume(prepared(), wrongConfirmationKey),
     { decision: "reconfirm", reason: "confirmation_changed" });
 });
+
+test("system registration consumes without claiming owner step-up", () => {
+  const system = current();
+  system.registrationAuthority = "system";
+  system.recentOwnerStepUp = false;
+  assert.deepEqual(checkAmuxIdeaUnitConsume(prepared(), system),
+    { decision: "allow" });
+  system.recentOwnerStepUp = true;
+  assert.deepEqual(checkAmuxIdeaUnitConsume(prepared(), system),
+    { decision: "halt", reason: "system_claimed_owner_step_up" });
+});

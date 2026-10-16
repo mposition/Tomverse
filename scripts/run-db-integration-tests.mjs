@@ -470,6 +470,13 @@ run(
     // v19 session intake stores encrypted source provenance under the latest
     // owner scope while its canonical audit remains a dedicated system actor.
     "tests/integration/amux-v19-session-submission.db.test.ts",
+    // v20 final Guard refusals are append-only, audit-bound, request-id
+    // idempotent and readable without retaining expected path values.
+    "tests/integration/amux-v20-registration-refusal.db.test.ts",
+    // v19 unattended registration turns one completed session analysis into
+    // nodes, cards, assessments and scores under exact system evidence, or
+    // leaves the backlog untouched and records one durable refusal.
+    "tests/integration/amux-v19-system-registration.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",

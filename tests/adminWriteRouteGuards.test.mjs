@@ -119,6 +119,8 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaHierarchyDecisionCore.ts",
   "lib/amux/ideaKeyConfig.ts",
   "lib/amux/ideaKeyStore.ts",
+  "lib/amux/ideaRegistrationRefusalCore.ts",
+  "lib/amux/ideaRegistrationRefusalReadService.ts",
   "lib/amux/ideaResolutionChoiceCore.ts",
   "lib/amux/ideaResolutionPreviewService.ts",
   "lib/amux/localIntakeCore.ts",
@@ -136,8 +138,24 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // same closure; it adds no import, I/O or writer. Repin both latch states.
 // The same v19 idea_raw size change touches ideaCrypto here. No route,
 // import, writer or reviewed file changes in this preview closure.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "5f25e4a965a2e90dc9ca7e7748eba4e50b1151e8553105cbc31d76bee3ef333d";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "fe80ccc5b7e24545622d481ffa46c553b2d0de7ad3bcec12a2650be1de0335e6";
+// Intake v20.5 adds an audited refusal metadata read to the existing analysis
+// read. Its two-module boundary is read-only and does not import the refusal
+// writer; keep both latch digests pinned to this 17-file closure.
+// Review r-20261016-095415-ada10c scoped that metadata read to the exact
+// displayed preview and source plan, while keeping the same read-only closure.
+// Intake v19.5 adds a data-owner form of the same stored-result read and the
+// closed whole-plan refusal vocabulary. On 2026-10-16 the 17-file closure was
+// recomputed unchanged, with no writer, outbound I/O or dynamic import added.
+// The v19.5 review repair separates task and whole-plan refusal predicates and
+// verifies the stored system actor/scope. The import closure remains identical.
+// The v19.5 follow-up surfaces stored schema failures only to the unattended
+// registrar. The same 17-file owner preview closure remains read-only.
+// The v19.5 replay repair adds an optional attempt-kind query predicate to the
+// same refusal reader. On 2026-10-16 the file list and writer scan stayed fixed.
+// Recomputed for the merged v19.5 and develop sources; the 17-file closure,
+// read-only scan and both latch states remain explicitly pinned.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "15c8fb25f33f8fb90b693bb8917a23e165c38d3ffc013d3d17483c60ba2f96d0";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "13c48112baa4c52d3f1e4d0a4f9c327441553a0009ed9fd23be69635c7a7fe62";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

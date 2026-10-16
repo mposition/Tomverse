@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { AMUX_V4_IDEA_SOURCE_SYSTEM } from "./ideaIdentityCore.ts";
+import { AMUX_V19_UNIT_REGISTRATION_AUTHORITY } from
+  "./ideaSystemRegistrationCore.ts";
 import { checkV4TaskApprovedCeiling, type V4TaskCostCeilingResult } from "./v4TaskCostCeilingCore.ts";
 
 /**
@@ -153,6 +155,12 @@ const snapshotSchema = z.object({
   prepareRequestId: z.uuid().regex(/^[0-9a-f-]+$/),
   actorUserId: id,
   ownerSession: keyedDigest,
+  registrationAuthority: z.object({
+    kind: z.literal(AMUX_V19_UNIT_REGISTRATION_AUTHORITY.kind),
+    systemActor: z.literal(AMUX_V19_UNIT_REGISTRATION_AUTHORITY.systemActor),
+    bindingVersion: z.literal(
+      AMUX_V19_UNIT_REGISTRATION_AUTHORITY.bindingVersion),
+  }).strict().optional(),
   draftUnitId: id,
   localRef,
   unitVersion: revision,

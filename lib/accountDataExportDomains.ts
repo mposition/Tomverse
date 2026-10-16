@@ -801,6 +801,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaRegistrationRefusal",
+    publicName: "amux_idea_registration_refusals",
+    prismaModel: "AmuxIdeaRegistrationRefusal",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaSourceScopeApproval",
     publicName: "amux_idea_source_scope_approvals",
     prismaModel: "AmuxIdeaSourceScopeApproval",

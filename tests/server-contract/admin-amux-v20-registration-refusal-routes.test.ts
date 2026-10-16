@@ -95,7 +95,9 @@ const unitRequest = () => new Request("https://tomverse.test/api/admin/amux/idea
 const planRequest = () => new Request("https://tomverse.test/api/admin/amux/ideas/unit-decisions/cards/plan", {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ ideaId: "idea-0001", reasons: {}, publicPrConsentOff: [] }),
+  body: JSON.stringify({ ideaId: "idea-0001",
+    planRequestId: "11111111-2222-4333-8444-555555555555",
+    reasons: {}, publicPrConsentOff: [] }),
 });
 
 test("prepare, consume and plan routes return every stable v20 refusal without proposal data", async () => {
@@ -111,5 +113,21 @@ test("prepare, consume and plan routes return every stable v20 refusal without p
       assert.equal(response.status, 409, `${label}:${code}`);
       assert.deepEqual(body, { error: code, retryWrite: false }, `${label}:${code}`);
     }
+  }
+});
+
+test("the card plan route requires a stable v4 request id before calling the writer", async () => {
+  const [, , planRoute] = await loadRoutes();
+  for (const planRequestId of [undefined, "11111111-2222-1333-8444-555555555555"]) {
+    const response = await planRoute.POST(new Request(
+      "https://tomverse.test/api/admin/amux/ideas/unit-decisions/cards/plan", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ideaId: "idea-0001", planRequestId,
+          reasons: {}, publicPrConsentOff: [] }),
+      }));
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "schema_rejected", retryWrite: false,
+    });
   }
 });
