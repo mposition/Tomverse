@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import { createPortal } from "react-dom";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { lockBodyScroll } from "@/components/useBodyScrollLock";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 
 type Messages = (typeof adminAmuxIdeaInputMessages)["en"];
@@ -143,8 +144,7 @@ export function AmuxIdeaBusyDialog({ open, tone, title, message, onClose, childr
       inerted.push([element, element.getAttribute("inert")]);
       element.setAttribute("inert", "");
     }
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const releaseScroll = lockBodyScroll();
     dialog?.focus();
     // Focus that escapes the dialog (a script, a screen reader) is brought back.
     const keepFocus = (event: FocusEvent) => {
@@ -161,7 +161,7 @@ export function AmuxIdeaBusyDialog({ open, tone, title, message, onClose, childr
     return () => {
       document.removeEventListener("focusin", keepFocus);
       document.removeEventListener("keydown", swallowEscape, true);
-      document.body.style.overflow = overflow;
+      releaseScroll();
       for (const [element, value] of inerted) {
         if (value === null) element.removeAttribute("inert"); else element.setAttribute("inert", value);
       }

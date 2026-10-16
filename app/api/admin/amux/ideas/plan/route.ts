@@ -85,7 +85,13 @@ export async function POST(request: Request) {
     if (error instanceof AmuxV4DuplicateReasonRequired) {
       return refuse(409, error.code, { candidateIds: error.candidateIds });
     }
-    if (isAdminReauthenticationError(error)) return refuse(428, "ADMIN_REAUTHENTICATION_REQUIRED");
+    if (isAdminReauthenticationError(error)) {
+      // Spelled out (not through refuse()) so the admin write-route guard sees the step-up refusal mapped to 428.
+      console.warn(JSON.stringify({ subsystem: "amux", event: "idea_plan_approval_refused",
+        code: "ADMIN_REAUTHENTICATION_REQUIRED", status: 428 }));
+      return NextResponse.json({ error: "ADMIN_REAUTHENTICATION_REQUIRED", retryWrite: false },
+        { status: 428, headers: noStore });
+    }
     if (error instanceof AmuxV4UnitDecisionError) {
       return refuse(error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 :
         error.code === "not_ready" || error.code === "reconfirm" ? 409 : 503, error.code);
