@@ -54,6 +54,22 @@ test("with no saved scope there is nothing to fall back to", async () => {
   assert.equal(await prisma.$transaction((tx) => readAmuxOperatingScope(tx)), null);
 });
 
+test("the audit guard compares epoch-safe xid values", async () => {
+  const guard = await prisma.$queryRaw<Array<{ definition: string }>>`
+    SELECT pg_get_functiondef(p.oid) AS definition
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = current_schema()
+       AND p.proname = 'amux_idea_operating_scope_setting_guard'
+  `;
+  assert.equal(guard.length, 1);
+  assert.match(guard[0]!.definition, /a\.xmin AS audit_xid/);
+  assert.match(guard[0]!.definition,
+    /audit_row\.audit_xid <> pg_current_xact_id\(\)::xid/);
+  assert.doesNotMatch(guard[0]!.definition,
+    /(?:xmin|pg_current_xact_id\(\))::text/);
+});
+
 test("an owner save is one version and one same-transaction human audit", async () => {
   await rollback(async (tx) => {
     const saved = await commitAmuxOperatingScope(tx, input());
