@@ -37,6 +37,7 @@ function makeWorld(outcome: Outcome) {
     taskGrade: "advanced",
     sourceApprovalId: null as string | null,
     taskUpdates: 0,
+    gradeAuditsAtTaskUpdate: -1,
     attemptUpdates: 0,
     runtimeUpdates: 0,
     taskUpdateData: null as Record<string, unknown> | null,
@@ -171,6 +172,7 @@ const tx = {
   engineeringAgentWorkItem: { findFirst: async () => null },
   amuxWorkItem: { update: async (input: { data: Record<string, unknown> }) => {
     world.taskUpdates += 1;
+    world.gradeAuditsAtTaskUpdate = world.gradeEscalationAudits.length;
     world.taskUpdateData = input.data;
   } },
   amuxExecutionAttempt: {
@@ -362,8 +364,15 @@ test("v52 contract touch discards the ordinary grade and binds one frontier rece
   assert.equal(world.taskUpdateData?.executionGrade, "frontier");
   assert.equal(world.attemptUpdateData?.reason, "contract_path_touched");
   assert.equal(world.gradeEscalationAudits.length, 1);
-  assert.equal((world.gradeEscalationAudits[0]?.metadata as Record<string, unknown>)
-    .classificationFailure, true);
+  assert.equal(world.gradeAuditsAtTaskUpdate, 1);
+  assert.deepEqual({ ...(world.gradeEscalationAudits[0]?.metadata as
+    Record<string, unknown>), newReceipt: null }, {
+    attemptId: world.attemptId, assignmentId: "assignment-one",
+    fromRevision: 5, reason: "contract_path_touched",
+    previousGrade: "routine", nextGrade: "frontier",
+    originalReceiptDigest: "a".repeat(64), newReceipt: null,
+    classificationFailure: true,
+  });
 });
 
 test("v52 missing inventory blocks even a successful execution", async () => {

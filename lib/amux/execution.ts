@@ -1476,6 +1476,21 @@ export async function settleAmuxV22TaskExecution(input: {
       });
       const next = effectivePathDecision === "escalate" ? "todo" :
         effectivePathDecision === "blocked" ? "blocked" : budget.to_status;
+      if (effectivePathDecision === "escalate" && escalationReceipt) {
+        await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+          action: AMUX_GRADE_ESCALATED_ACTION,
+          targetType: "AmuxWorkItem", targetId: task.id,
+          summary: "Escalated an AMUX Task after a contract path touch.",
+          metadata: { attemptId: attempt.id,
+            assignmentId: attempt.v22AssignmentId,
+            fromRevision: task.revision,
+            reason: "contract_path_touched",
+            previousGrade: task.executionGrade, nextGrade: "frontier",
+            originalReceiptDigest,
+            newReceipt: escalationReceipt, classificationFailure: true,
+          },
+        });
+      }
       await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
         status: next, owner: null, claimedAt: null, v22AssignmentId: null,
         reviewPrNumber: null,
@@ -1520,18 +1535,6 @@ export async function settleAmuxV22TaskExecution(input: {
           imageProofDigest: product?.kind === "publish" &&
             publication?.ok ? publication.imageProofDigest : null },
       });
-      if (effectivePathDecision === "escalate" && escalationReceipt) {
-        await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
-          action: AMUX_GRADE_ESCALATED_ACTION,
-          targetType: "AmuxWorkItem", targetId: task.id,
-          summary: "Escalated an AMUX Task after a contract path touch.",
-          metadata: { attemptId: attempt.id, reason: "contract_path_touched",
-            previousGrade: task.executionGrade, nextGrade: "frontier",
-            originalReceiptDigest,
-            newReceipt: escalationReceipt, classificationFailure: true,
-          },
-        });
-      }
       if (run?.status === "active") {
         await endEngineeringAgentRun(
           engineeringAgentTransactionInAmux(context.attachedTransaction), {
