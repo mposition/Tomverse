@@ -1,5 +1,6 @@
 /** The review server is a signal for v4 Tasks, not a PR approval. */
-export type AmuxV52ReviewVerdict = "accept" | "reject" | "unknown";
+export const AMUX_V52_REVIEW_VERDICTS = ["accept", "reject", "unknown"] as const;
+export type AmuxV52ReviewVerdict = (typeof AMUX_V52_REVIEW_VERDICTS)[number];
 
 export const AMUX_V52_REVIEW_SCOPE_MAX_CHARS = 8_192;
 
@@ -30,7 +31,7 @@ const VENDOR = /^[a-z][a-z0-9-]{0,63}$/;
 export function validAmuxV52ReviewEvidence(value: AmuxV52ReviewEvidence) {
   if (!SHA.test(value.baseSha) || !SHA.test(value.commitSha) ||
       value.baseSha === value.commitSha ||
-      !["accept", "reject", "unknown"].includes(value.verdict) ||
+      !AMUX_V52_REVIEW_VERDICTS.includes(value.verdict) ||
       !VENDOR.test(value.authorVendor) ||
       !Array.isArray(value.reviewerVendors) ||
       value.reviewerVendors.length > 4 ||
