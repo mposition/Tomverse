@@ -36,6 +36,7 @@ import {
   marketingLlmAdapterConfigDigest,
   marketingLlmCloseDigest,
   marketingLlmConfigSnapshot,
+  marketingLlmConsumerDigest,
   marketingLlmDispatchDigest,
   marketingLlmRequestDigest,
   marketingLlmReservation,
@@ -767,4 +768,60 @@ export async function purgeExpiredMarketingLlmCalls(
     purged += 1;
   }
   return { purged };
+}
+
+// ---------------------------------------------------------------------------
+// consumption by a draft submission (S3c4)
+
+export type MarketingLlmConsumptionRefusal =
+  | "intake_llm_call_missing"
+  | "intake_llm_call_other_run"
+  | "intake_llm_call_not_draft"
+  | "intake_llm_call_open"
+  | "intake_llm_call_consumed";
+
+/**
+ * Bind the calls a submission names to that submission, in the intake's
+ * transaction. Every named call must exist, belong to the same generator run,
+ * have been made for a draft, and be closed (settled or kept at its
+ * reservation as unknown); it must be unconsumed or already consumed by this
+ * very submission -- the same submission's next draft, or its resubmission.
+ * Anything else refuses the draft and writes nothing.
+ *
+ * The caller holds the audit chain lock, which every ledger action takes
+ * first, so no ledger action is between its locks while these rows are read;
+ * the sweep tries its locks and steps past.
+ */
+export async function consumeMarketingLlmCallsForSubmission(
+  tx: Tx,
+  input: {
+    readonly generatorRunId: string;
+    readonly requestKeys: readonly string[];
+    readonly submissionDigest: string;
+  },
+): Promise<{ readonly ok: true; readonly consumerDigest: string } | { readonly ok: false; readonly code: MarketingLlmConsumptionRefusal }> {
+  const consumerDigest = marketingLlmConsumerDigest(input.submissionDigest);
+  const keys = [...input.requestKeys];
+  const rows = await tx.$queryRaw<
+    Array<{ requestKey: string; generatorRunId: string; purpose: string; state: string; consumerDigest: string | null }>
+  >(Prisma.sql`
+    SELECT "requestKey", "generatorRunId", "purpose", "state", "consumerDigest"
+    FROM "MarketingLlmCall" WHERE "requestKey" = ANY(${keys}::text[])
+    ORDER BY "id"
+    FOR UPDATE
+  `);
+  if (rows.length !== new Set(keys).size) return { ok: false, code: "intake_llm_call_missing" };
+  for (const row of rows) {
+    if (row.generatorRunId !== input.generatorRunId) return { ok: false, code: "intake_llm_call_other_run" };
+    if (row.purpose !== "draft") return { ok: false, code: "intake_llm_call_not_draft" };
+    if (row.state !== "settled" && row.state !== "unknown_retained") return { ok: false, code: "intake_llm_call_open" };
+    if (row.consumerDigest !== null && row.consumerDigest !== consumerDigest) {
+      return { ok: false, code: "intake_llm_call_consumed" };
+    }
+  }
+  await tx.$executeRaw(Prisma.sql`
+    UPDATE "MarketingLlmCall" SET "consumerDigest" = ${consumerDigest}
+    WHERE "requestKey" = ANY(${keys}::text[]) AND "consumerDigest" IS NULL
+  `);
+  return { ok: true, consumerDigest };
 }

@@ -1406,6 +1406,12 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   id로만 바꿉니다. 이전 해제 감사 행의 재사용도, 옛 hold를 보고 보낸 지연 해제도 새 hold를 풀지 못합니다. 보존은 닫혔고 hold가 없으며 24개월이
   지난 행만 지우고 행마다 `marketing-retention` 감사 행을 남깁니다. **`retention_run` 보고서는 쓰지 않습니다** — 그 보고서의
   표 목록이 webhook pipeline의 감시 소스라 원장을 넣으면 fingerprint가 움직이고 서명된 검증이 다시 열립니다.
+- **S3c4(접수와 원장의 결속)**: `lib/marketingDraftIntakeCore.ts`(제출 v2), `lib/marketingDraftIntakeStore.ts`, store의
+  `consumeMarketingLlmCallsForSubmission()`. 제출은 자기를 만든 원장 호출을 `llmCallRequestKeys`로 이름 대고, **서명·제출
+  digest·draft의 접수 digest·원장의 consumer digest가 모두 같은 canonical 바이트**에 묶입니다. 접수는 이름 댄 호출이 모두
+  같은 run의 draft용이고 닫혀 있으며 아직 소비되지 않았거나 이 제출이 소비했을 때만 받고, 같은 트랜잭션에서 소비를
+  기록합니다. 응답을 잃은 생성기는 서명된 같은 제출을 그대로 다시 보냅니다(deadline이 다르면 다른 제출이라 conflict).
+  예산 reader는 이제 "상한을 읽을 수 있다"이고, 월 상한으로 막는 것은 예약입니다.
 
 # 엔지니어링 Agent
 
