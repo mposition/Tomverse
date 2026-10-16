@@ -246,6 +246,9 @@ export async function readAmuxIdeaSessionSubmissionRequest(requestId: string): P
     return { requestId, status: "partial", ideaId: row.id };
   }
   const reservation = row.sessionAnalysisReservation;
+  // The reservation audit must share the submission transaction, so an older
+  // standalone session row cannot be backfilled honestly. It remains partial
+  // and readback never presents it as the atomic intake contract.
   if (!reservation || reservation.requestId !== requestId ||
       reservation.ideaId !== row.id ||
       reservation.actorUserId !== row.actorUserId ||

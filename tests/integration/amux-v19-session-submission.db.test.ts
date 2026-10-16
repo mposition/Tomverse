@@ -362,6 +362,59 @@ test("database refuses late, mutable and forged queue reservations", async () =>
   }), 0);
 });
 
+test("reservation store refuses duplicate and superseded-scope attempts", async () => {
+  const duplicateIdeaId = randomUUID();
+  const duplicate = inspect(duplicateIdeaId);
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: duplicate, expectedAuthority: authority, ideaId: duplicateIdeaId,
+      keys: keysFor(duplicateIdeaId),
+    });
+    await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId: submission.ideaId,
+      requestId: submission.requestId,
+      submissionAuditId: submission.auditId,
+      authority,
+    });
+    await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId: submission.ideaId,
+      requestId: submission.requestId,
+      submissionAuditId: submission.auditId,
+      authority,
+    });
+  }), (error: unknown) =>
+    error instanceof AmuxSessionAnalysisReservationError &&
+      error.code === "already_reserved");
+  assert.equal(await prisma.amuxIdeaSubmission.count({
+    where: { id: duplicateIdeaId },
+  }), 0);
+
+  const supersededIdeaId = randomUUID();
+  const superseded = inspect(supersededIdeaId);
+  const scopeCount = await prisma.amuxIdeaOperatingScopeSetting.count();
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: superseded, expectedAuthority: authority, ideaId: supersededIdeaId,
+      keys: keysFor(supersededIdeaId),
+    });
+    await commitAmuxOperatingScope(tx, {
+      session, request, id: randomUUID(),
+      expectedPreviousVersion: authority.version,
+      scope, ownerConfirmed: true,
+    });
+    await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId: submission.ideaId,
+      requestId: submission.requestId,
+      submissionAuditId: submission.auditId,
+      authority,
+    });
+  }), /session reservation operating scope mismatch/);
+  assert.equal(await prisma.amuxIdeaSubmission.count({
+    where: { id: supersededIdeaId },
+  }), 0);
+  assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), scopeCount);
+});
+
 test("request collision and references outside the saved scope are read-only refusals", async () => {
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaSessionSubmission(tx, {

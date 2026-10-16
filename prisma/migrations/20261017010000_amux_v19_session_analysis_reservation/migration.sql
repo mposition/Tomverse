@@ -61,6 +61,7 @@ DECLARE
   scope_row record;
   submission_audit record;
   reservation_audit record;
+  reservation_audit_found boolean;
   metadata jsonb;
   latest_scope_id text;
 BEGIN
@@ -145,8 +146,10 @@ BEGIN
   INTO reservation_audit
   FROM "AdminAuditLog" a
   WHERE a."id" = NEW."reservationAuditLogId";
+  reservation_audit_found := FOUND;
   metadata := reservation_audit."metadata";
-  IF NOT FOUND OR reservation_audit.xmin <> pg_current_xact_id()::xid OR
+  IF NOT reservation_audit_found OR
+     reservation_audit.xmin <> pg_current_xact_id()::xid OR
      reservation_audit."entryHash" IS NULL OR
      reservation_audit."action" <> 'amux.idea.session_analysis_reserved' OR
      reservation_audit."targetType" <> 'AmuxIdeaSessionAnalysisReservation' OR

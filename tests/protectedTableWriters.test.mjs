@@ -1062,6 +1062,13 @@ test("every append-only ledger table is one an exact migration protects", () => 
     ),
     "utf8"
   );
+  const sessionAnalysisReservationSql = readFileSync(
+    new URL(
+      "../prisma/migrations/20261017010000_amux_v19_session_analysis_reservation/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
   const recoveryTables = new Set([
     "AmuxV22TaskRecoveryInspectionRequest",
     "AmuxV22TaskRecoveryEvidence",
@@ -1074,11 +1081,15 @@ test("every append-only ledger table is one an exact migration protects", () => 
   ]);
   const apiAccessTables = new Set(["AmuxV22ApiModelAccessEvidence"]);
   const trackedCheckoutTables = new Set(["AmuxIdeaTrackedCheckoutEvidence"]);
+  const sessionAnalysisReservationTables =
+    new Set(["AmuxIdeaSessionAnalysisReservation"]);
   for (const table of APPEND_ONLY_LEDGER_TABLES) {
     const sql = recoveryTables.has(table) ? recoverySql :
       riskRetryTables.has(table) ? riskRetrySql :
         apiAccessTables.has(table) ? apiAccessSql :
-          trackedCheckoutTables.has(table) ? trackedCheckoutSql : emailSql;
+          trackedCheckoutTables.has(table) ? trackedCheckoutSql :
+            sessionAnalysisReservationTables.has(table)
+              ? sessionAnalysisReservationSql : emailSql;
     assert.match(
       sql,
       new RegExp(`BEFORE (?:INSERT OR )?UPDATE OR DELETE(?: OR TRUNCATE)?\\s+ON "${table}"`),
