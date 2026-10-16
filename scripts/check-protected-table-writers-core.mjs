@@ -1064,6 +1064,27 @@ export const RAW_SQL_ALLOWLIST = [
     reason: "The setting migration adds an audit foreign key and reads same-transaction human approval evidence. Its DDL/trigger verbs affect only the budget setting and window; it never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261016050000_amux_budget_setting_xid_epoch/migration.sql",
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason: "This repair replaces only the existing setting trigger function and reads the latest setting while validating same-transaction owner evidence. It changes no row and creates no new writer.",
+  },
+  {
+    path: "prisma/migrations/20261016050000_amux_budget_setting_xid_epoch/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason: "This repair reads the named audit row inside the existing setting guard. Its only write verb is function DDL; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261016050100_amux_budget_window_xid_epoch/migration.sql",
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "This repair replaces only the existing window trigger function and reads the latest setting. Its DDL and TG_OP update spelling do not write the protected setting table.",
+  },
+  {
     path: "lib/opsObserverDigest.ts",
     table: "AgentDigestItem",
     tableMentions: 2,

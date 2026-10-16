@@ -9,9 +9,12 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { scanAmuxV4Input } from "./localIntakeCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { AMUX_EXECUTION_GRADE_CODE_LATCH } from "./executionGradeCore.ts";
 import { calculateV4TaskCeilingFromCatalog,
-  inspectV4TaskCostCatalog, type V4TaskCostCatalog } from
+  inspectV4TaskCostCatalog, inspectV52TaskCatalogGrades,
+  type V4TaskCostCatalog } from
   "./v4TaskCostCatalogCore.ts";
+import { readAmuxRegistryAndDerivedCatalog } from "./workerAssignmentCatalog.ts";
 
 const DIGEST = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -25,6 +28,7 @@ export const amuxV4TaskCatalogWriteEnabled = (value: string | undefined) =>
 export class AmuxV4TaskCatalogApprovalError extends Error {
   constructor(readonly code: "forbidden" | "schema_rejected" |
     "catalog_changed" | "evidence_unverified" | "unavailable" |
+    "grade_route_mismatch" | "worker_registry_unavailable" |
     "outcome_unknown") {
     super(code);
     this.name = "AmuxV4TaskCatalogApprovalError";
@@ -124,6 +128,17 @@ export async function approveAmuxV4TaskCatalog(input: {
           (route.pricingVerifiedAt > now.toISOString() ||
             route.pricingExpiresAt <= now.toISOString()))) {
         throw new AmuxV4TaskCatalogApprovalError("evidence_unverified");
+      }
+      if (AMUX_EXECUTION_GRADE_CODE_LATCH) {
+        const { registrations } = await readAmuxRegistryAndDerivedCatalog(tx);
+        const workerGrades = registrations ? new Map(registrations.map(
+          (registration) => [registration.workerName, registration.roleCeiling] as const)) : null;
+        const gradeCheck = inspectV52TaskCatalogGrades(catalog, workerGrades);
+        if (!gradeCheck.ok) {
+          throw new AmuxV4TaskCatalogApprovalError(
+            gradeCheck.code === "worker_registry_unavailable" ?
+              "worker_registry_unavailable" : "grade_route_mismatch");
+        }
       }
       const latest = await tx.amuxV4TaskCostCatalogApproval.findFirst({
         orderBy: { version: "desc" }, select: { version: true },

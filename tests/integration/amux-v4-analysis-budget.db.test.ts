@@ -5,7 +5,7 @@ import { after, test } from "node:test";
 import type { Session } from "next-auth";
 import type { Prisma } from "@prisma/client";
 
-import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE,
@@ -59,6 +59,8 @@ import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation,
   AmuxIdeaAnalysisPriceApprovalError } from "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "@/lib/amux/ideaAnalysisPriceVersionRead";
+import { AMUX_ANALYSIS_BUDGET_SETTING_ACTION,
+  AMUX_ANALYSIS_BUDGET_SETTING_TARGET } from "@/lib/amux/ideaAnalysisBudgetSettingCore";
 import { commitAnalysisBudgetSetting } from "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { prisma } from "@/lib/prisma";
 
@@ -177,6 +179,18 @@ const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(),
   new Date().getUTCMonth(), 1));
 const runner = { tokenCapsEnforceable: true, billableToolsDisabled: true };
 const modelId = () => `gpt-frontier-synthetic-${randomUUID()}`;
+
+async function writeSyntheticBudgetSettingAudit(tx: Prisma.TransactionClient,
+  settingId: string, limitMicroUsd = "1000000000") {
+  return writeAdminAuditLog({ session, request,
+    action: AMUX_ANALYSIS_BUDGET_SETTING_ACTION,
+    targetType: AMUX_ANALYSIS_BUDGET_SETTING_TARGET,
+    targetId: settingId,
+    summary: "Owner changed the AMUX analysis monthly ceiling; usage preserved.",
+    metadata: { namespace, version: 1, previousVersion: 0,
+      previousLimitMicroUsd: "50000000", limitMicroUsd,
+      effectiveMonth: monthStart.toISOString(), policyVersion: 16 }, tx });
+}
 
 async function approvedPriceVersionId(provider: "openai" | "anthropic",
   selectedModelId: string, expiresInMs = 24 * 60 * 60_000): Promise<string> {
@@ -1891,6 +1905,97 @@ test("two confirmed previews cannot reserve the last monthly allowance twice", a
   }), 1);
 });
 
+test("budget guards compare same-transaction evidence in the PostgreSQL xid domain", async () => {
+  const guards = await prisma.$queryRaw<Array<{ name: string; body: string }>>`
+    SELECT p.proname AS "name", p.prosrc AS "body"
+    FROM pg_catalog.pg_proc p
+    JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname IN (
+      'amux_idea_analysis_budget_setting_guard',
+      'amux_idea_analysis_budget_window_limit_guard'
+    )
+    ORDER BY p.proname
+  `;
+  assert.equal(guards.length, 2);
+  const settingGuard = guards.find((guard) =>
+    guard.name === "amux_idea_analysis_budget_setting_guard")?.body;
+  const windowGuard = guards.find((guard) =>
+    guard.name === "amux_idea_analysis_budget_window_limit_guard")?.body;
+  assert.ok(settingGuard);
+  assert.match(settingGuard,
+    /SELECT a\.\*, a\.xmin AS audit_xid[\s\S]+audit_row\.audit_xid <> pg_current_xact_id\(\)::xid/);
+  assert.doesNotMatch(settingGuard, /xmin::text|pg_current_xact_id\(\)::text/);
+  assert.ok(windowGuard);
+  assert.match(windowGuard,
+    /SELECT s\.\*, s\.xmin AS setting_xid[\s\S]+latest_setting\.setting_xid <> pg_current_xact_id\(\)::xid/);
+  assert.doesNotMatch(windowGuard, /xmin::text|pg_current_xact_id\(\)::text/);
+});
+
+test("same-transaction human audit with the wrong owner cannot approve a budget setting", async () => {
+  const settingId = randomUUID();
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const auditId = await writeSyntheticBudgetSettingAudit(tx, settingId);
+    const evidence = await tx.$queryRaw<Array<{ sameTransaction: boolean }>>`
+      SELECT a.xmin = pg_current_xact_id()::xid AS "sameTransaction"
+      FROM "AdminAuditLog" a WHERE a."id" = ${auditId}
+    `;
+    assert.equal(evidence[0]?.sameTransaction, true);
+    await tx.amuxIdeaAnalysisBudgetSetting.create({ data: {
+      id: settingId, version: 1, limitMicroUsd: BigInt(1_000_000_000),
+      effectiveMonth: monthStart, approvedByUserId: `not-the-owner-${randomUUID()}`,
+      approvalAuditLogId: auditId,
+    } });
+  }), /analysis budget approval evidence mismatch/);
+  assert.equal(await prisma.amuxIdeaAnalysisBudgetSetting.count({ where: { id: settingId } }), 0);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: AMUX_ANALYSIS_BUDGET_SETTING_ACTION, targetId: settingId,
+  } }), 0);
+});
+
+test("same-transaction owner approval cannot reset usage while changing the budget limit", async () => {
+  const settingId = randomUUID();
+  const spentMicroUsd = BigInt(49_995_000);
+  const reservedMicroUsd = BigInt(5_000);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000),
+      spentMicroUsd, reservedMicroUsd },
+    update: { limitMicroUsd: BigInt(50_000_000), spentMicroUsd, reservedMicroUsd },
+  });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const auditId = await writeSyntheticBudgetSettingAudit(tx, settingId);
+    await tx.amuxIdeaAnalysisBudgetSetting.create({ data: {
+      id: settingId, version: 1, limitMicroUsd: BigInt(1_000_000_000),
+      effectiveMonth: monthStart, approvedByUserId: actorUserId,
+      approvalAuditLogId: auditId,
+    } });
+    const evidence = await tx.$queryRaw<Array<{
+      auditSameTransaction: boolean; settingSameTransaction: boolean;
+    }>>`
+      SELECT a.xmin = pg_current_xact_id()::xid AS "auditSameTransaction",
+        s.xmin = pg_current_xact_id()::xid AS "settingSameTransaction"
+      FROM "AdminAuditLog" a
+      JOIN "AmuxIdeaAnalysisBudgetSetting" s ON s."approvalAuditLogId" = a."id"
+      WHERE s."id" = ${settingId}
+    `;
+    assert.deepEqual(evidence[0], {
+      auditSameTransaction: true, settingSameTransaction: true,
+    });
+    await tx.amuxIdeaAnalysisBudgetWindow.update({
+      where: { namespace_monthStart: { namespace, monthStart } },
+      data: { limitMicroUsd: BigInt(1_000_000_000),
+        spentMicroUsd: BigInt(0), reservedMicroUsd: BigInt(0) },
+    });
+  }), /analysis budget limit requires current owner approval; usage cannot reset/);
+  const window = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  assert.equal(window.limitMicroUsd, BigInt(50_000_000));
+  assert.equal(window.spentMicroUsd, spentMicroUsd);
+  assert.equal(window.reservedMicroUsd, reservedMicroUsd);
+  assert.equal(await prisma.amuxIdeaAnalysisBudgetSetting.count({ where: { id: settingId } }), 0);
+});
+
 test("budget window rejects another namespace or a cap without owner approval", async () => {
   const invalidMonth = new Date("2026-11-01T00:00:00.000Z");
   await assert.rejects(prisma.amuxIdeaAnalysisBudgetWindow.create({
@@ -1919,6 +2024,18 @@ test("a saved USD 1000 setting immediately admits a real reservation that the ol
       error instanceof AmuxIdeaAnalysisReservationError && error.reason === "monthly_cap_exceeded");
     await commitAnalysisBudgetSetting(tx, { session, request, id: randomUUID(),
       expectedPreviousVersion: 0, monthlyUsd: "1000", ownerConfirmed: true });
+    const sameTransactionEvidence = await tx.$queryRaw<Array<{
+      auditSameTransaction: boolean; settingSameTransaction: boolean;
+    }>>`
+      SELECT a.xmin = pg_current_xact_id()::xid AS "auditSameTransaction",
+        s.xmin = pg_current_xact_id()::xid AS "settingSameTransaction"
+      FROM "AmuxIdeaAnalysisBudgetSetting" s
+      JOIN "AdminAuditLog" a ON a."id" = s."approvalAuditLogId"
+      WHERE s."version" = 1
+    `;
+    assert.deepEqual(sameTransactionEvidence[0], {
+      auditSameTransaction: true, settingSameTransaction: true,
+    });
     const reserved = await commitAmuxIdeaAnalysisBudgetReservation(tx,
       { holdId, previewId, priceVersionId, runner, keys });
     assert.equal(reserved.reservedMicroUsd, "5000");
