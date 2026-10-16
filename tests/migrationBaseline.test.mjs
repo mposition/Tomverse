@@ -571,6 +571,21 @@ test("the AMUX chunk deadline migration pins the exact previous function body", 
   });
 });
 
+test("the AMUX v52 grade guard pins the existing approval binding body", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(join(MIGRATIONS,
+    "20261016090000_amux_v52_grade_escalation_guard", "migration.sql"), "utf8");
+  const previousSql = readFileSync(join(MIGRATIONS,
+    "20261005120000_amux_v4_task_dag_guard", "migration.sql"), "utf8");
+  const previousBody = /CREATE FUNCTION amux_v4_task_approval_binding_guard\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$/.exec(previousSql)?.[1];
+  assert.ok(previousBody);
+  assert.deepEqual(presenceDeclarationIn(sql), {
+    kind: "function-replacement",
+    function: "amux_v4_task_approval_binding_guard",
+    previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
+  });
+});
+
 test("the AMUX unit actor replacement pins its five-text-argument predecessor", async () => {
   const { presenceDeclarationIn, pendingProbes } = await import("../scripts/baseline-presence-core.mjs");
   const sql = readFileSync(join(MIGRATIONS,

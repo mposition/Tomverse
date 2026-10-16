@@ -167,6 +167,8 @@ test("the system actor list is closed and changes only by review", () => {
   assert.equal(isSystemAuditActor("marketing-guard"), true);
   assert.equal(isSystemAuditActor("Marketing-Guard"), false);
   assert.equal(isSystemAuditActor("tomverse-amux-orchestrator"), true);
+  assert.equal(systemAuditActionAllowed("tomverse-amux-orchestrator",
+    "amux.grade.escalated", "AmuxWorkItem"), true);
   assert.equal(isSystemAuditActor("amux-auto-promoter"), true);
   assert.equal(isSystemAuditActor("amux-v22-auto-admit"), true);
   // Only explicitly scoped v4 actions use the intake identity. The

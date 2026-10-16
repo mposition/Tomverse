@@ -4,7 +4,7 @@ import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { AMUX_MAX_EXPECTED_REVISION, AMUX_PRISMA_INT_MAX,
   amuxMachineIdSchema } from "@/lib/amux/claimContract";
-import { AMUX_LIFECYCLE_ROUTE_BUDGET_MS,
+import { AMUX_V22_EXECUTION_ROUTE_BUDGET_MS,
   withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { amuxInternalErrorResponse, amuxJsonNoStore,
   isAmuxInputError } from "@/lib/amux/internalRoute";
@@ -68,5 +68,5 @@ export async function POST(request: Request) {
         return amuxJsonNoStore({ error: "Invalid request." }, 400);
       return amuxInternalErrorResponse("v22_execution_start", error);
     }
-  }, AMUX_LIFECYCLE_ROUTE_BUDGET_MS);
+  }, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS);
 }

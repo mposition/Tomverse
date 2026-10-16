@@ -407,6 +407,7 @@ export async function readEngineeringAgentDependabotFailures(
 /* ------------------------------------------------------------------------- */
 
 const MAX_REVIEWS = 100;
+const MAX_PR_FILES = 3_000;
 const MAX_DIFF_BYTES = 1024 * 1024;
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 const FAILING_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required", "stale", "startup_failure"]);
@@ -426,7 +427,45 @@ export type EngineeringAgentPullObservation = {
   requiredChecks: { allPassed: boolean } | null;
   /** sha256 of the diff's own bytes, as the publisher binds it; null when it could not be read. */
   diffDigest: string | null;
+  /** Complete GitHub PR file names at the observed base/head, or unknown. */
+  changedFiles?: string[] | null;
 };
+
+async function readPullFileNames(prNumber: number,
+  comparison: { baseSha: string; headSha: string; changedFiles: number },
+  resolved: { env: Readonly<Record<string, string | undefined>>;
+    fetchImpl: FetchLike }): Promise<string[] | null> {
+  if (!Number.isSafeInteger(comparison.changedFiles) ||
+      comparison.changedFiles < 0 || comparison.changedFiles > MAX_PR_FILES) return null;
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const pages = Math.max(1, Math.ceil(comparison.changedFiles / 100));
+  for (let pageNumber = 1; pageNumber <= pages; pageNumber++) {
+    const page = await githubPage(
+      `/pulls/${prNumber}/files?per_page=100&page=${pageNumber}`, resolved);
+    const expectedLength = Math.min(100,
+      comparison.changedFiles - (pageNumber - 1) * 100);
+    if (!Array.isArray(page.body) || page.body.length !== expectedLength ||
+        page.hasNext !== (pageNumber < pages)) return null;
+    for (const raw of page.body) {
+      const file = record(raw);
+      if (typeof file?.filename !== "string" ||
+          typeof file.status !== "string" || seen.has(file.filename)) return null;
+      seen.add(file.filename);
+      names.push(file.filename);
+      if (file.status === "renamed") {
+        if (typeof file.previous_filename !== "string") return null;
+        names.push(file.previous_filename);
+      }
+    }
+  }
+  const current = record(await githubJson(`/pulls/${prNumber}`, resolved));
+  if (current?.number !== prNumber ||
+      record(current.base)?.sha !== comparison.baseSha ||
+      record(current.head)?.sha !== comparison.headSha ||
+      current.changed_files !== comparison.changedFiles) return null;
+  return names;
+}
 
 const instant = (value: unknown): Date | null => {
   if (typeof value !== "string") return null;
@@ -576,5 +615,8 @@ export async function readEngineeringAgentPullObservation(
     reviews,
     requiredChecks: await readRequiredChecks(headSha, resolved),
     diffDigest: await readPullDiffDigest(prNumber, resolved),
+    changedFiles: merged ? await readPullFileNames(prNumber, {
+      baseSha, headSha, changedFiles: pull.changed_files as number,
+    }, resolved) : null,
   };
 }

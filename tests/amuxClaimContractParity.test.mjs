@@ -594,11 +594,19 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
     assert.match(routeSource, /\}, AMUX_LIFECYCLE_ROUTE_BUDGET_MS\);/);
     const source = rustPublicAsyncMethodSource(rustSource, method);
     assert.ok(source, method);
-    assert.equal(
-      everyRustHttpRequestHasLifecycleDeadline(source),
-      true,
-      `${method} must apply the lifecycle deadline to its HTTP request`,
-    );
+    if (method === "execution_start") {
+      assert.match(source,
+        /let request_timeout = if assignment_id\.is_some\(\) \{\s*TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT\s*\} else \{\s*TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT\s*\};/);
+      const requests = rustHttpRequestChains(source);
+      assert.ok(requests.length > 0 && requests.every((request) =>
+        request.complete && /\.timeout\(request_timeout\)/.test(request.source)));
+    } else {
+      assert.equal(
+        everyRustHttpRequestHasLifecycleDeadline(source),
+        true,
+        `${method} must apply the lifecycle deadline to its HTTP request`,
+      );
+    }
   }
 
   const heartbeat = rustPublicAsyncMethodSource(rustSource, "execution_heartbeat");
@@ -616,6 +624,34 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
   const settle = rustSource.slice(settleStart, settleEnd);
   assert.match(settle, /self\.execution_settle_with_review_pr\(/);
   assert.doesNotMatch(settle, /\.send\(\)/);
+});
+
+test("v22 execution routes cover their expanded DB ceilings and client transport", () => {
+  const number = (source, name) => Number(source.match(
+    new RegExp(`(?:export|pub) const ${name}(?::[^=]+)? = ([0-9_]+)`))?.[1]
+    ?.replaceAll("_", ""));
+  const routeMs = number(dbBoundarySource,
+    "AMUX_V22_EXECUTION_ROUTE_BUDGET_MS");
+  const clientSeconds = Number(rustSource.match(
+    /TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/)?.[1]);
+  const connectMs = number(dbBoundarySource, "AMUX_DB_MAX_WAIT_MS");
+  assert.ok(clientSeconds * 1_000 >= routeMs + 3_000);
+  const callMs = number(dbBoundarySource, "AMUX_DB_STATEMENT_TIMEOUT_MS") +
+    number(dbBoundarySource, "AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS");
+  const reserveMs = number(dbBoundarySource, "AMUX_DB_COMMIT_RESERVE_MS");
+  const admittedCall = number(dbBoundarySource,
+    "AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS");
+  assert.ok((30 + 24 + 3 + admittedCall) * callMs + reserveMs +
+    connectMs <= routeMs);
+  assert.ok((26 + 40 + admittedCall) * callMs + reserveMs +
+    connectMs <= routeMs);
+  for (const route of ["start", "settle"]) {
+    const source = readFileSync(join(process.cwd(), "app", "api", "internal",
+      "amux", "v22", "execution", route, "route.ts"), "utf8");
+    assert.match(source, /\}, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS\);/);
+  }
+  const settle = rustSource.match(/async fn v22_execution_settle_with_receipt\([\s\S]*?\n    \}/)?.[0];
+  assert.match(settle, /\.timeout\(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT\)/);
 });
 
 test("selection reads reserve connect and response time beyond both route budgets", () => {
