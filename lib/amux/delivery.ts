@@ -541,8 +541,8 @@ export async function pullAmuxWorkDelivery(input: {
           budgetMicrousd, ...(gradeGuard ? { gradeGuard: true as const,
             executionGrade: assignment.grade,
             ...(reviewScope ? {
-              ...(assignment.provider === "anthropic" ?
-                { reviewAuthor: "claude" as const } : {}),
+              // The approved v22 one-shot catalog uses the fixed Claude CLI.
+              reviewAuthor: "claude" as const,
               reviewAuthorVendor: assignment.provider,
               reviewScope,
               ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}) } : {}),

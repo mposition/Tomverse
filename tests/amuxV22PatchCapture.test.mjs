@@ -36,6 +36,8 @@ test("a review commit is made from the exact patch and leaves HEAD clean", async
   assert.deepEqual(result, { ok: true, baseSha: BASE,
     commitSha: "d".repeat(40),
     reviewRef: "refs/amux-v52-review/11111111-1111-4111-8111-111111111111" });
+  assert.ok(calls.some((call) => call[0] === "add" &&
+    call.includes("-A") && call.includes(":(literal)lib/example.ts")));
   assert.ok(calls.some((call) => call[0] === "reset" &&
     call.includes("--hard")));
   const mismatch = await captureAmuxV52ReviewCommit("/repo", BASE,
@@ -45,6 +47,54 @@ test("a review commit is made from the exact patch and leaves HEAD clean", async
     reason: "review_commit_paths_mismatch" });
   assert.equal(calls.at(-2)[0], "reset");
   assert.equal(calls.at(-1)[0], "status");
+});
+
+test("v52 includes a new regular file in the patch, publish evidence, and review commit", async () => {
+  const newPatch = "diff --git a/lib/new.ts b/lib/new.ts\n" +
+    "new file mode 100644\n--- /dev/null\n+++ b/lib/new.ts\n@@ -0,0 +1 @@\n+new\n";
+  const calls = [];
+  const run = async (_binary, args) => {
+    const command = args.slice(6);
+    calls.push(command);
+    if (command[0] === "rev-parse") return { stdout: Buffer.from(
+      command[1] === "--show-toplevel" ? "/repo" : BASE) };
+    if (command[0] === "status") return { stdout: Buffer.from(
+      calls.some((call) => call[0] === "reset") ? "" : "?? lib/new.ts\0") };
+    if (command[0] === "ls-files") return { stdout: Buffer.from("lib/new.ts\0") };
+    if (command[0] === "diff" && command.includes("--name-status"))
+      return { stdout: Buffer.from("A\0lib/new.ts\0") };
+    if (command[0] === "diff" && command.includes("--cached"))
+      return { stdout: Buffer.from(newPatch) };
+    if (command[0] === "diff") return { stdout: Buffer.from(newPatch) };
+    if (command[0] === "write-tree") return { stdout: Buffer.from("c".repeat(40)) };
+    if (command[0] === "-c" && command.includes("commit-tree"))
+      return { stdout: Buffer.from("d".repeat(40)) };
+    if (command[0] === "diff-tree")
+      return { stdout: Buffer.from("lib/new.ts\0") };
+    if (["add", "reset", "update-ref"].includes(command[0]))
+      return { stdout: Buffer.alloc(0) };
+    throw new Error("unexpected git command");
+  };
+  const options = { run, realpath: async (value) => value,
+    allowUntracked: true, openFile: async () => ({
+      stat: async () => ({ isFile: () => true, size: 4 }),
+      readFile: async () => Buffer.from("new\n"), close: async () => {},
+    }) };
+  const candidate = await captureAmuxV22Patch("/repo", BASE, options);
+  assert.equal(candidate.ok, true);
+  assert.equal(candidate.patchBody, newPatch);
+  assert.deepEqual(candidate.publishFiles, [{ path: "lib/new.ts", mode: "100644",
+    bytesBase64: Buffer.from("new\n").toString("base64") }]);
+  assert.ok(calls.some((call) => call[0] === "add" &&
+    call.includes("-N") && call.includes(":(literal)lib/new.ts")));
+  assert.ok(calls.some((call) => call[0] === "reset" &&
+    call.includes(":(literal)lib/new.ts")));
+  const review = await captureAmuxV52ReviewCommit("/repo", BASE,
+    "11111111-1111-4111-8111-111111111111", ["lib/new.ts"], newPatch,
+    options);
+  assert.equal(review.ok, true);
+  assert.ok(calls.some((call) => call[0] === "add" &&
+    call.includes("-A") && call.includes(":(literal)lib/new.ts")));
 });
 
 test("a failed review commit creation resets the staged index", async () => {

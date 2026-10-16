@@ -424,11 +424,14 @@ test("v52 frontier implement binds a review commit to the captured patch", async
     captureChangedPaths: async () => ({ ok: true,
       files: ["lib/amux/execution.ts"],
       contractPaths: ["lib/amux/execution.ts"] }),
-    capturePatch: async () => ({ ok: true, baseSha: "a".repeat(40),
+    capturePatch: async (_worktree, _base, options) => {
+      assert.equal(options.allowUntracked, true);
+      return { ok: true, baseSha: "a".repeat(40),
       patchDigest: "c".repeat(64),
       patchBody: "diff --git a/lib/amux/execution.ts b/lib/amux/execution.ts\n",
       publishFiles: [{ path: "lib/amux/execution.ts", mode: "100644",
-        bytesBase64: "YQ==" }] }),
+        bytesBase64: "YQ==" }] };
+    },
     captureReviewCommit: async (_worktree, base, attempt, files, patch) => {
       assert.equal(base, "a".repeat(40));
       assert.equal(attempt, attemptId);
