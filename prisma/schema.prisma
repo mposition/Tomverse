@@ -7257,6 +7257,51 @@ model AiVisibilityRun {
   @@index([retentionUntil])
 }
 
+/// The marketing generator's LLM cost ledger (marketing policy v4). One row per
+/// call; a dispatched call counts at its reservation. The migration's triggers
+/// own every transition rule and timestamp. The three audit ids are foreign
+/// keys to AdminAuditLog in SQL, deliberately not Prisma relations.
+model MarketingLlmCall {
+  id                    String    @id
+  state                 String
+  requestKey            String    @unique
+  reservePayloadDigest  String
+  requestDigest         String
+  configSnapshot        Json
+  generatorRunId        String
+  purpose               String
+  provider              String
+  model                 String
+  reservedInputTokens   Int
+  reservedOutputTokens  Int
+  reservedMicroUsd      Int
+  monthStart            DateTime
+  reservationAuditLogId String    @unique
+  legalHold             Boolean   @default(false)
+  createdAt             DateTime
+  retentionUntil        DateTime  @default(now())
+  dispatchIntentId      String?   @unique
+  adapterConfigDigest   String?
+  dispatchDigest        String?
+  dispatchAuditLogId    String?   @unique
+  dispatchedAt          DateTime?
+  closeDigest           String?
+  closeAuditLogId       String?   @unique
+  closedAt              DateTime?
+  closeReason           String?
+  observationId         String?   @unique
+  reportedModel         String?
+  reportedServiceTier   String?
+  reportedInputTokens   Int?
+  reportedOutputTokens  Int?
+  consumerDigest        String?
+
+  @@index([monthStart, state])
+  @@index([state, createdAt])
+  @@index([state, dispatchedAt])
+  @@index([retentionUntil])
+}
+
 model AmuxWorkerRuntime {
   workerName     String   @id
   instanceId     String

@@ -722,6 +722,11 @@ run(
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.
     "tests/integration/marketing-generator-context.db.test.ts",
+    // The LLM cost ledger's own rules (S3c1), in plain SQL against a scratch
+    // schema: born reserved, five transitions, evidence set once, the
+    // reservation clock checked rather than recomputed, reasons paired to
+    // observations, and deletion left to retention.
+    "tests/integration/marketing-llm-call-ledger.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them
