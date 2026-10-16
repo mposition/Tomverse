@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import React, { type ReactNode } from "react";
 
-import { AmuxIdeaCardRegistrationPanel,
-  amuxTaskRegistrationRefusalPresentation } from
+import { AmuxIdeaCardRegistrationPanel } from
   "@/components/admin/AmuxIdeaStoryRegistrationPanel";
+import { amuxTaskRegistrationRefusalPresentation } from
+  "@/components/admin/amuxIdeaRegistrationRefusalUi";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import type { AmuxVisibleAnalysisUnit } from "@/lib/amux/ideaAnalysisResultReadCore";
 
@@ -132,10 +133,12 @@ function mount(locale: "en" | "ko" = "en") {
     if (dirty) render();
   };
   render();
-  return { flush, get tree() { return tree; } };
+  return { flush, get tree() { return tree; },
+    get duplicateIds() { return slots[4] as string[]; },
+    get reason() { return slots[2] as string; } };
 }
 
-test("a stable Task refusal removes a prior duplicate prompt and shows only actionable localized guidance", async (t: TestContext) => {
+test("a consume-time Task refusal clears stale duplicate state and keeps the prepared confirmation recoverable", async (t: TestContext) => {
   let prepareCalls = 0;
   t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -144,14 +147,27 @@ test("a stable Task refusal removes a prior duplicate prompt and shows only acti
         parentRef: "epic-1234", revision: 1, contentDigest: "a".repeat(64),
         state: "active" }] });
     }
-    assert.equal(url, "/api/admin/amux/ideas/unit-decisions/prepare");
     assert.equal(init?.method, "POST");
+    if (url === "/api/admin/amux/ideas/unit-decisions/consume") {
+      return Response.json({ error: "task_expected_paths_mixed",
+        retryWrite: false }, { status: 409 });
+    }
+    assert.equal(url, "/api/admin/amux/ideas/unit-decisions/prepare");
     prepareCalls += 1;
     return prepareCalls === 1 ?
       Response.json({ error: "duplicate_reason_required",
         candidateIds: ["candidate-123"] }, { status: 409 }) :
-      Response.json({ error: "task_expected_paths_mixed",
-        retryWrite: false }, { status: 409 });
+      Response.json({ state: "prepared", decisionId: "decision-123",
+        confirmationDigest: "c".repeat(64), expiresAt: "2099-01-01T00:00:00.000Z",
+        draftUnitId: UNIT.id, title: "Implement the guarded change", cardType: "task",
+        storyKind: null, featureNodeId: "feature-123",
+        duplicateCandidateIds: ["candidate-123"],
+        taskCostReceipt: { ceilingMicroUsd: "1200", catalogVersion: "catalog-v1",
+          pricingVersion: "pricing-v1", routes: [{ routeId: "route-1",
+            workerName: "worker-1", provider: "provider-1", modelId: "model-1",
+            perAttemptMicroUsd: "1200", routePolicyDigest: "d".repeat(64) }] },
+        publicPrDisclosureApproved: false, backlogOnly: true,
+        executionAuthorized: false, retryWrite: false, auditId: "audit-1234" });
   });
 
   const panel = mount("en");
@@ -182,8 +198,15 @@ test("a stable Task refusal removes a prior duplicate prompt and shows only acti
   );
   await panel.flush();
   await click(adminAmuxIdeaInputMessages.en.taskRegistrationPrepare);
+  assert.match(textOf(panel.tree), /decision-123/);
+  assert.deepEqual(panel.duplicateIds, ["candidate-123"]);
+  assert.equal(panel.reason, "Distinct scope");
+  await click(adminAmuxIdeaInputMessages.en.taskRegistrationConsume);
 
   const text = textOf(panel.tree);
-  assert.doesNotMatch(text, /candidate-123|task_expected_paths_mixed/);
+  assert.match(text, /decision-123/, "the refused confirmation remains available to cancel or read back");
+  assert.doesNotMatch(text, /task_expected_paths_mixed/);
   assert.match(text, /Split it into dependent Tasks by path class/);
+  assert.deepEqual(panel.duplicateIds, []);
+  assert.equal(panel.reason, "");
 });

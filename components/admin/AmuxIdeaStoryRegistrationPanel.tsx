@@ -4,6 +4,8 @@ import { useState } from "react";
 import { z } from "zod";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { amuxTaskRegistrationRefusalPresentation } from
+  "@/components/admin/amuxIdeaRegistrationRefusalUi";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -38,42 +40,6 @@ const preparedSchema = z.object({
   retryWrite: z.literal(false), auditId: ref,
 }).strict();
 type Prepared = z.infer<typeof preparedSchema>;
-
-export type AmuxTaskRegistrationRefusalPresentation = {
-  messageKey:
-    | "taskRegistrationExpectedPathsRefused"
-    | "taskRegistrationMixedPathsRefused"
-    | "taskRegistrationReviewRoleRefused"
-    | "taskRegistrationGradeRefused";
-  clearDuplicateState: true;
-};
-
-/** Closed client copy mapping for the stable Admin API refusal codes. */
-export function amuxTaskRegistrationRefusalPresentation(
-  code: string,
-): AmuxTaskRegistrationRefusalPresentation | null {
-  switch (code) {
-    case "task_expected_paths_missing":
-    case "task_expected_paths_out_of_range":
-    case "task_expected_path_invalid":
-    case "task_expected_paths_duplicate":
-      return { messageKey: "taskRegistrationExpectedPathsRefused",
-        clearDuplicateState: true };
-    case "task_expected_paths_mixed":
-      return { messageKey: "taskRegistrationMixedPathsRefused",
-        clearDuplicateState: true };
-    case "task_role_review_refused":
-      return { messageKey: "taskRegistrationReviewRoleRefused",
-        clearDuplicateState: true };
-    case "task_execution_grade_mismatch":
-    case "task_confirmation_grade_mismatch":
-    case "task_cost_receipt_grade_mismatch":
-      return { messageKey: "taskRegistrationGradeRefused",
-        clearDuplicateState: true };
-    default:
-      return null;
-  }
-}
 
 /** Per-card, two-click approval. Browser text never supplies the proposal. */
 export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {

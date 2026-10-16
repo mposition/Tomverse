@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { AmuxIdeaBusyDialog, type AmuxBusyTone } from "@/components/admin/AmuxIdeaBusyDialog";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { amuxTaskRegistrationRefusalFailure } from
+  "@/components/admin/amuxIdeaRegistrationRefusalUi";
 import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
@@ -19,6 +21,23 @@ import { decidePlanReadBack, planReadBackSeconds,
 const MAX_PAGES = 20;
 
 type Messages = (typeof adminAmuxIdeaInputMessages)["en"];
+
+export async function readAmuxIdeaPlanApprovalFailure(
+  response: Response,
+  messages: Messages,
+  locale: "en" | "ko",
+): Promise<AdminApiFailure> {
+  try {
+    const body: unknown = await response.clone().json();
+    const code = body && typeof body === "object" && "error" in body &&
+      typeof body.error === "string" ? body.error : null;
+    if (response.status === 409 && code) {
+      const taskFailure = amuxTaskRegistrationRefusalFailure(code, messages);
+      if (taskFailure) return taskFailure;
+    }
+  } catch { /* Fall through to the shared status and reauthentication handling. */ }
+  return readAdminApiFailure(response, { fallback: messages.transferConfirmRefused, locale });
+}
 
 /** What the last "check what was recorded" showed; `reading` while it runs. */
 export type ReadBackView =
@@ -177,7 +196,7 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
       if ([400, 401, 403, 404, 409, 413, 415, 428].includes(response.status)) {
         // A refusal inside the one transaction: nothing was recorded. Read the
         // plan again, so a unit decided elsewhere meanwhile is not resent.
-        setFailure(await readAdminApiFailure(response, { fallback: m.transferConfirmRefused, locale }));
+        setFailure(await readAmuxIdeaPlanApprovalFailure(response, m, locale));
         writePending(ideaId, null);
         setResultTone("refused");
         setUnits(await load() ?? "failed");
