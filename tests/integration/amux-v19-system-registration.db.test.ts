@@ -26,6 +26,7 @@ import { listApprovedAmuxIdeaFrontierModels } from
   "@/lib/amux/ideaFrontierCatalogRead";
 import { createAmuxContentKeyRing, createAmuxContentUnitKeys } from
   "@/lib/amux/ideaKeyStore";
+import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
 import { createInitialIdeaOnlySourcePlan } from
   "@/lib/amux/ideaInitialSourcePlanService";
 import { commitAmuxOperatingScope, readAmuxOperatingScopeAuthority,
@@ -40,6 +41,8 @@ import { commitAmuxV19CompletedIdeaSystemRegistrationForTest,
   "@/lib/amux/ideaSystemRegistrationService";
 import { AmuxIdeaUnitProposalReadError } from
   "@/lib/amux/ideaUnitProposalReadService";
+import { writeAmuxPortfolioAssessmentInTx } from
+  "@/lib/amux/portfolioAssessmentService";
 import { amuxAnalysisFreeformSubjectId } from
   "@/lib/amux/ideaAnalysisDraftSealCore";
 import { commitIdeaOnlyTransferPreview } from
@@ -402,6 +405,32 @@ test("one completed session plan registers atomically under system evidence", as
   assert.equal(assessmentCount, 4);
   assert.equal(auditRowActorKind(audit), "system");
   assert.equal(JSON.stringify(audit.metadata).includes("lib/amux"), false);
+  assert.deepEqual(await readAmuxV19SystemRegistration(ideaId), {
+    state: "committed", retryWrite: false, ideaId, auditId: result.auditId,
+  });
+  const priorTaskAssessment = await prisma.amuxPortfolioAssessment.findFirstOrThrow({
+    where: { cardId: task.id }, orderBy: { assessmentVersion: "desc" },
+    select: { metrics: true, uncertainty: true },
+  });
+  const later = await prisma.$transaction((tx) =>
+    writeAmuxPortfolioAssessmentInTx(tx, {
+      session, request, digestKey: loadCurrentAmuxContentKeys(process.env),
+      confirmationDigest: null,
+      payload: { id: randomUUID(), requestId: randomUUID(),
+        subject: { kind: "task", id: task.id },
+        metrics: priorTaskAssessment.metrics,
+        uncertainty: priorTaskAssessment.uncertainty as "low" | "medium" | "high",
+        evidenceRefs: ["manual:readback"],
+        evidenceAsOf: new Date(Date.now() - 1_000).toISOString(),
+        reasonCode: "new_evidence", modelProposalDigest: null },
+    }));
+  const laterAudit = await prisma.adminAuditLog.findUniqueOrThrow({ where: {
+    id: later.auditId,
+  } });
+  assert.equal(auditRowActorKind(laterAudit), "human");
+  assert.equal(await prisma.amuxPortfolioAssessment.count({ where: {
+    cardId: task.id,
+  } }), 2);
   assert.deepEqual(await readAmuxV19SystemRegistration(ideaId), {
     state: "committed", retryWrite: false, ideaId, auditId: result.auditId,
   });

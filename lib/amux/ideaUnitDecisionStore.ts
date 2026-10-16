@@ -34,7 +34,8 @@ import { allocateAmuxCardDisplayKey,
   chooseAmuxFeatureDisplayPrefix } from "./cardDisplayKeyAllocator.ts";
 import { AmuxV20RegistrationRefusalDetected } from
   "./ideaRegistrationRefusalDetectionCore.ts";
-import { amuxRegistrationAuthorityKind, amuxRegistrationDataOwner,
+import { amuxRegistrationAuthorityActor, amuxRegistrationAuthorityKind,
+  amuxRegistrationDataOwner,
   type AmuxRegistrationAuditAuthority, writeAmuxRegistrationAudit } from
   "./ideaRegistrationAuditAuthority.ts";
 
@@ -70,6 +71,27 @@ const ownerId = (session: Session): string => {
   }
   return id;
 };
+
+/** Preserve the owner route's existence-hiding split while a system actor
+ * remains unable to claim a human owner identity. */
+function unitDecisionDataOwner(
+  input: AmuxRegistrationAuditAuthority,
+  snapshot: AmuxIdeaUnitConfirmationSnapshot,
+): string {
+  try {
+    return amuxRegistrationDataOwner(input, snapshot);
+  } catch {
+    if (amuxRegistrationAuthorityKind(input) === "system") {
+      throw new AmuxV4UnitDecisionError("not_found");
+    }
+    try {
+      amuxRegistrationAuthorityActor(input);
+    } catch {
+      throw new AmuxV4UnitDecisionError("forbidden");
+    }
+    throw new AmuxV4UnitDecisionError("not_found");
+  }
+}
 
 async function assertCurrentProposalSource(tx: Prisma.TransactionClient,
   snapshot: AmuxIdeaUnitConfirmationSnapshot, chunkIndex: number) {
@@ -120,12 +142,7 @@ export async function commitAmuxV4UnitPrepare(tx: Prisma.TransactionClient,
 }): Promise<{ decisionId: string; confirmationDigest: string; expiresAt: Date;
   auditId: string }> {
   const { snapshot } = input;
-  let actorUserId: string;
-  try { actorUserId = amuxRegistrationDataOwner(input, snapshot); } catch {
-    throw new AmuxV4UnitDecisionError(
-      amuxRegistrationAuthorityKind(input) === "owner" ? "forbidden" : "not_found",
-    );
-  }
+  const actorUserId = unitDecisionDataOwner(input, snapshot);
   const derived = deriveAmuxIdeaUnitConfirmation(snapshot, input.digestKey,
     input.duplicateScan, input.taskCost);
   if (!derived.ok) throw new AmuxV4UnitDecisionError("reconfirm");
@@ -304,12 +321,7 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     taskCost: V4TaskCostCeilingResult | null;
   }>;
 }): Promise<{ decisionId: string; cardId: string; auditId: string }> {
-  let actorUserId: string;
-  try { actorUserId = amuxRegistrationDataOwner(input, input.snapshot); } catch {
-    throw new AmuxV4UnitDecisionError(
-      amuxRegistrationAuthorityKind(input) === "owner" ? "forbidden" : "not_found",
-    );
-  }
+  const actorUserId = unitDecisionDataOwner(input, input.snapshot);
   if (
       !/^[A-Za-z0-9_-]{8,80}$/.test(input.cardId) ||
       !/^[0-9a-f-]{36}$/.test(input.consumeRequestId)) {
@@ -536,12 +548,7 @@ export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient,
   consumeRequestId: string; keys: AmuxContentKeys;
   recalculate: (tx: Prisma.TransactionClient) => Promise<AmuxIdeaDuplicateScan>;
 }): Promise<{ decisionId: string; nodeId: string; auditId: string }> {
-  let actorUserId: string;
-  try { actorUserId = amuxRegistrationDataOwner(input, input.snapshot); } catch {
-    throw new AmuxV4UnitDecisionError(
-      amuxRegistrationAuthorityKind(input) === "owner" ? "forbidden" : "not_found",
-    );
-  }
+  const actorUserId = unitDecisionDataOwner(input, input.snapshot);
   if (
       input.snapshot.action !== "create_node" ||
       !/^[0-9a-f-]{36}$/.test(input.consumeRequestId)) {

@@ -4,7 +4,8 @@ import type { Session } from "next-auth";
 
 import { prisma } from "@/lib/prisma";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
-import { readAmuxFirstIdeaAnalysisResultForDataOwner } from
+import { AmuxIdeaAnalysisResultReadError,
+  readAmuxFirstIdeaAnalysisResultForDataOwner } from
   "./ideaAnalysisResultReadService.ts";
 import { loadAmuxContentKeyRing, type AmuxContentKeyIdentity } from
   "./ideaKeyStore.ts";
@@ -32,14 +33,22 @@ export async function readVerifiedAmuxUnitProposal(session: Session,
   }> {
   const actorUserId = session.user?.id;
   if (!actorUserId) throw new AmuxIdeaUnitProposalReadError("not_found");
-  return readVerifiedAmuxUnitProposalForDataOwner(actorUserId, ideaId,
-    draftUnitId);
+  return readVerifiedAmuxUnitProposalForDataOwnerInternal(actorUserId, ideaId,
+    draftUnitId, false);
 }
 
 /** System-registration read with an explicit data owner. It preserves every
  * commitment and key check of the owner reader without inventing a Session. */
 export async function readVerifiedAmuxUnitProposalForDataOwner(
   actorUserId: string, ideaId: string, draftUnitId: string,
+): ReturnType<typeof readVerifiedAmuxUnitProposalForDataOwnerInternal> {
+  return readVerifiedAmuxUnitProposalForDataOwnerInternal(actorUserId, ideaId,
+    draftUnitId, true);
+}
+
+async function readVerifiedAmuxUnitProposalForDataOwnerInternal(
+  actorUserId: string, ideaId: string, draftUnitId: string,
+  surfaceStoredSchemaInvalid: boolean,
 ): Promise<{
   proposal: AmuxAnalysisCard | AmuxAnalysisNode;
   unit: { id: string; localRef: string; bodyDigest: string;
@@ -108,10 +117,10 @@ export async function readVerifiedAmuxUnitProposalForDataOwner(
           raw: plain.toString("utf8"), chunkIndex: unit.chunkIndex,
           permittedSourceRefIds: ["operator_idea"],
         });
-        if (!inspected.ok) {
+        if (!inspected.ok && surfaceStoredSchemaInvalid) {
           throw new AmuxIdeaUnitProposalReadError("schema_invalid");
         }
-        if (inspected.unit.kind !== "card" ||
+        if (!inspected.ok || inspected.unit.kind !== "card" ||
             inspected.unit.localId !== unit.localRef) {
           throw new AmuxIdeaUnitProposalReadError("integrity_unavailable");
         }
@@ -139,7 +148,8 @@ export async function readVerifiedAmuxUnitProposalForDataOwner(
   try {
     const keys = await loadAmuxContentKeyRing(identities);
     const result = await readAmuxFirstIdeaAnalysisResultForDataOwner(
-      actorUserId, ideaId, keys, unit.chunkIndex);
+      actorUserId, ideaId, keys, unit.chunkIndex,
+      { surfaceStoredSchemaInvalid });
     if (result.state !== "ready" && result.state !== "partial" &&
         result.state !== "needs_owner_input") {
       throw new AmuxIdeaUnitProposalReadError("not_ready");
@@ -159,6 +169,11 @@ export async function readVerifiedAmuxUnitProposalForDataOwner(
       expiresAt: unit.expiresAt }, previewId: result.previewId };
   } catch (error) {
     if (error instanceof AmuxIdeaUnitProposalReadError) throw error;
+    if (surfaceStoredSchemaInvalid &&
+        error instanceof AmuxIdeaAnalysisResultReadError &&
+        error.code === "schema_invalid") {
+      throw new AmuxIdeaUnitProposalReadError("schema_invalid");
+    }
     throw new AmuxIdeaUnitProposalReadError("integrity_unavailable");
   }
 }

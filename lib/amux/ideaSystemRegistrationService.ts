@@ -4,7 +4,9 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
-import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
+import { AMUX_V19_PORTFOLIO_ASSESSMENT_SCOPE,
+  AMUX_V19_PORTFOLIO_SCORE_SCOPE,
+  auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
 import { loadAmuxCardDuplicateScanner } from
   "./ideaCardDuplicateScanService.ts";
@@ -327,6 +329,23 @@ const isSystemRegistrationRefusal = (
 ): error is SystemRegistrationRefusal =>
   error instanceof AmuxV20RegistrationRefusalDetected ||
   error instanceof AmuxV19PlanRegistrationRefusalDetected;
+
+const isSystemPortfolioAudit = (audit: {
+  action: string; targetType: string; targetId: string | null;
+  actorUserId: string | null; actorEmail: string | null;
+  ipAddress: string | null; userAgent: string | null;
+  metadata: Prisma.JsonValue; entryHash: string | null;
+}, expected: { action: string; targetType: string; targetId: string;
+  actorScope: string }): boolean => {
+  const metadata = audit.metadata && typeof audit.metadata === "object" &&
+    !Array.isArray(audit.metadata) ?
+    audit.metadata as Record<string, unknown> : null;
+  return !!audit.entryHash && auditRowActorKind(audit) === "system" &&
+    audit.action === expected.action && audit.targetType === expected.targetType &&
+    audit.targetId === expected.targetId &&
+    metadata?.systemActor === AMUX_V19_SYSTEM_REGISTRATION_AUDIT_ACTOR &&
+    metadata.actorScope === expected.actorScope;
+};
 
 async function readExistingSystemRegistrationRefusal(ideaId: string) {
   if (!IDEA_ID.test(ideaId)) return null;
@@ -735,16 +754,36 @@ export async function readAmuxV19SystemRegistration(ideaId: string) {
     ...(nodeIds.length > 0 ? [{ nodeId: { in: nodeIds } }] : []),
     ...(cardIds.length > 0 ? [{ cardId: { in: cardIds } }] : []),
   ];
-  const [assessmentCount, scoreCount] = await Promise.all([
-    assessmentSubjects.length === 0 ? 0 :
-      prisma.amuxPortfolioAssessment.count({ where: {
+  const [assessments, scores] = await Promise.all([
+    assessmentSubjects.length === 0 ? [] :
+      prisma.amuxPortfolioAssessment.findMany({ where: {
         OR: assessmentSubjects,
-      } }),
-    cardIds.length === 0 ? 0 :
-      prisma.amuxPortfolioScoreSnapshot.count({ where: {
+      }, select: { id: true, approvalAudit: { select: {
+        action: true, targetType: true, targetId: true,
+        actorUserId: true, actorEmail: true, ipAddress: true, userAgent: true,
+        metadata: true, entryHash: true,
+      } } } }),
+    cardIds.length === 0 ? [] :
+      prisma.amuxPortfolioScoreSnapshot.findMany({ where: {
         taskId: { in: cardIds },
-      } }),
+      }, select: { id: true, approvalAudit: { select: {
+        action: true, targetType: true, targetId: true,
+        actorUserId: true, actorEmail: true, ipAddress: true, userAgent: true,
+        metadata: true, entryHash: true,
+      } } } }),
   ]);
+  const assessmentCount = assessments.filter(({ id, approvalAudit }) =>
+    isSystemPortfolioAudit(approvalAudit, {
+      action: "amux.v4.portfolio.assessment.approve",
+      targetType: "AmuxPortfolioAssessment", targetId: id,
+      actorScope: AMUX_V19_PORTFOLIO_ASSESSMENT_SCOPE,
+    })).length;
+  const scoreCount = scores.filter(({ id, approvalAudit }) =>
+    isSystemPortfolioAudit(approvalAudit, {
+      action: "amux.v4.portfolio.score.confirm",
+      targetType: "AmuxPortfolioScoreSnapshot", targetId: id,
+      actorScope: AMUX_V19_PORTFOLIO_SCORE_SCOPE,
+    })).length;
   const publicPrConsentCount = decisions.filter((decision) => {
     const snapshot = decision.confirmationSnapshot;
     if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {

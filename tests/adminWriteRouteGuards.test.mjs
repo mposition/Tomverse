@@ -146,8 +146,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // recomputed unchanged, with no writer, outbound I/O or dynamic import added.
 // The v19.5 review repair separates task and whole-plan refusal predicates and
 // verifies the stored system actor/scope. The import closure remains identical.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "dabc9a3d1da569b25c4bac2782295472a895d82a2f0f721d7835ae69e9275cc7";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "d862492048bed40f72a1c0abcbea57475a86b390fd6a6a81a5f65e90ff2556c8";
+// The v19.5 follow-up surfaces stored schema failures only to the unattended
+// registrar. The same 17-file owner preview closure remains read-only.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "33ec8c62dda7657438e76d6a9665bdf5a01eaac1741fca3f837e39779e64ed7d";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "d264ea37a540d99a3da3bda951233aa2279da66feb55dea5eeccd1ecc1079382";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

@@ -20,7 +20,8 @@ import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 
 export class AmuxIdeaAnalysisResultReadError extends Error {
-  constructor(readonly code: "not_found" | "integrity_unavailable") {
+  constructor(readonly code: "not_found" | "schema_invalid" |
+    "integrity_unavailable") {
     super(code);
     this.name = "AmuxIdeaAnalysisResultReadError";
   }
@@ -46,6 +47,7 @@ export async function readAmuxFirstIdeaAnalysisResult(
 export async function readAmuxFirstIdeaAnalysisResultForDataOwner(
   actorUserId: string, ideaId: string, keys: AmuxContentKeys,
   chunkIndex = 0,
+  options: { surfaceStoredSchemaInvalid?: boolean } = {},
 ): Promise<AmuxIdeaAnalysisResultView> {
   if (!/^[A-Za-z0-9:_-]{8,128}$/.test(actorUserId) ||
       !/^[A-Za-z0-9:_-]{1,128}$/.test(ideaId) ||
@@ -249,7 +251,13 @@ export async function readAmuxFirstIdeaAnalysisResultForDataOwner(
           raw: plain.toString("utf8"), chunkIndex,
           permittedSourceRefIds: ["operator_idea"],
         });
-        if (!inspectedUnit.ok || inspectedUnit.unit.localId !== unit.localRef ||
+        if (!inspectedUnit.ok) {
+          if (options.surfaceStoredSchemaInvalid) {
+            throw new AmuxIdeaAnalysisResultReadError("schema_invalid");
+          }
+          throw new Error("proposal structure mismatch");
+        }
+        if (inspectedUnit.unit.localId !== unit.localRef ||
             inspectedUnit.unit.kind !== unit.unitKind) {
           throw new Error("proposal structure mismatch");
         }
@@ -269,7 +277,13 @@ export async function readAmuxFirstIdeaAnalysisResultForDataOwner(
           // A stored chunk: its schema was fixed when it was admitted.
           requiredSchemaVersion: null,
         });
-        if (!inspected.ok || inspected.chunk.coverageStatus !==
+        if (!inspected.ok) {
+          if (options.surfaceStoredSchemaInvalid) {
+            throw new AmuxIdeaAnalysisResultReadError("schema_invalid");
+          }
+          throw new Error("proposal mismatch");
+        }
+        if (inspected.chunk.coverageStatus !==
               (needsOwnerInput ? "needs_owner_input" : partial ? "more" : "complete") ||
             (needsOwnerInput ?
               inspected.chunk.continuationKind !== "input" &&
@@ -297,7 +311,12 @@ export async function readAmuxFirstIdeaAnalysisResultForDataOwner(
         outcome: meta!.outcome as "propose" | "reject",
         coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
         units: visibleUnits, registrationRefusal };
-    } catch {
+    } catch (error) {
+      if (options.surfaceStoredSchemaInvalid &&
+          error instanceof AmuxIdeaAnalysisResultReadError &&
+          error.code === "schema_invalid") {
+        throw error;
+      }
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     } finally {
       freeform?.fill(0);
