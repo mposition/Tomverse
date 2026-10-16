@@ -227,13 +227,13 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
 
 
   return (
-    <section className="space-y-2 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
+    <section className="space-y-2 rounded-xl border p-4 text-sm border-zinc-800"
       data-testid="amux-frontier-model-registration">
-      <div className="space-y-3 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
-        <h4 className="font-semibold text-zinc-900 dark:text-zinc-100">
+      <div className="space-y-3 rounded-lg border p-3 border-zinc-700">
+        <h4 className="font-semibold text-zinc-100">
           {m.frontierRegistrationTitle}
         </h4>
-        <p className="text-zinc-700 dark:text-zinc-300">{m.frontierRegistrationHint}</p>
+        <p className="text-zinc-300">{m.frontierRegistrationHint}</p>
         {!writeAvailable ? <p role="status">{m.frontierRegistrationDisabled}</p> : null}
         <div className="grid gap-3 md:grid-cols-2">
           <label className="flex flex-col gap-1" htmlFor="amux-v4-frontier-registration-provider">
@@ -245,7 +245,7 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
                 setRegistrationProvider(event.target.value as "openai" | "anthropic");
                 setRegistrationConfirmed(false);
               }}
-              className="min-h-11 rounded-lg border border-zinc-400 px-3 dark:border-zinc-600 dark:bg-zinc-900">
+              className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900">
               <option value="openai">openai</option>
               <option value="anthropic">anthropic</option>
             </select>
@@ -259,7 +259,7 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
                 setRegistrationModelId(event.target.value);
                 setRegistrationConfirmed(false);
               }}
-              className="min-h-11 rounded-lg border border-zinc-400 px-3 font-mono dark:border-zinc-600 dark:bg-zinc-900" />
+              className="min-h-11 rounded-lg border px-3 font-mono border-zinc-600 bg-zinc-900" />
           </label>
           <label className="flex flex-col gap-1" htmlFor="amux-v4-frontier-registration-version">
             {m.frontierRegistrationExpectedVersion}
@@ -270,7 +270,7 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
                 setRegistrationVersion(event.target.value);
                 setRegistrationConfirmed(false);
               }}
-              className="min-h-11 rounded-lg border border-zinc-400 px-3 font-mono dark:border-zinc-600 dark:bg-zinc-900" />
+              className="min-h-11 rounded-lg border px-3 font-mono border-zinc-600 bg-zinc-900" />
           </label>
           <fieldset className="space-y-1" disabled={registrationLocked}>
             <legend>{m.frontierRegistrationEfforts}</legend>
@@ -292,7 +292,7 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
         </label>
         <button type="button" onClick={() => void registerModel()}
           disabled={registrationLocked || !registrationConfirmed || !registrationInputValid}
-          className="min-h-11 rounded-lg border border-blue-700 px-4 text-blue-800 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200">
+          className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-blue-400 text-blue-200">
           {m.frontierRegistrationAction}
         </button>
         {pendingRegistration ? <p className="break-all text-xs">
@@ -314,12 +314,12 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
           <p role="status">{m.frontierRegistrationRevoked}</p> : null}
         {registrationState === "approved" || registrationState === "revoked" ?
           <button type="button" onClick={startAnotherRegistration}
-            className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">
+            className="min-h-11 rounded-lg border px-4 border-zinc-600">
             {m.frontierRegistrationAnother}
           </button> : null}
         {pendingRegistration && ["unknown", "not_visible"].includes(registrationState) ?
           <button type="button" onClick={() => void readRegistration(pendingRegistration)}
-            className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">
+            className="min-h-11 rounded-lg border px-4 border-zinc-600">
             {m.frontierRegistrationReadBack}
           </button> : null}
       </div>

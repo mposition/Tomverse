@@ -1,11 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
 import { AmuxFrontierModelsPanel, type AmuxBuildPreviewHooks } from "@/components/admin/AmuxFrontierModelsPanel";
 import { AmuxIdeaAnalysisResultPanel } from "@/components/admin/AmuxIdeaAnalysisResultPanel";
+import { AmuxIdeaList, type AmuxIdeaProgressRows } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxIdeaRequestStatusCard, type AmuxIdeaRequestCardState } from "@/components/admin/AmuxIdeaRequestStatusCard";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
@@ -74,13 +76,15 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
-  openRequestId = null }: {
+  openRequestId = null, progressRows }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
   analysisResultAvailable: boolean; analysisBudgetAvailable: boolean; operatorId: string;
   /** The idea a list row opened (`?idea=<requestId>`); read back like a saved request. */
   openRequestId?: string | null;
+  /** The Ideas main shows the list of ideas beside the input; omitted, the list is not drawn here. */
+  progressRows?: AmuxIdeaProgressRows;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -394,7 +398,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           ? { kind: "saved", requestId: submission.requestId, ideaId: submission.ideaId } :
           submission.kind === "recovery_unavailable" ? { kind: "locked" } : null;
   const setAsideControls = submission.kind === "outcome_unknown" || submission.kind === "recovery_unavailable" ? (
-    <div className="w-full space-y-2 border-t border-zinc-300 pt-3 dark:border-zinc-700" data-testid="amux-idea-set-aside">
+    <div className="w-full space-y-2 border-t pt-3 border-zinc-700" data-testid="amux-idea-set-aside">
       <label className="flex items-start gap-2">
         <input type="checkbox" className="mt-1 size-4" checked={setAsideAcknowledged}
           onChange={(event) => setSetAsideAcknowledged(event.target.checked)} />
@@ -402,135 +406,186 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       </label>
       <button type="button" onClick={setAsidePreviousIdea}
         disabled={!canSetAsidePreviousIdea(submission.kind, busy, setAsideAcknowledged)}
-        className="min-h-11 rounded-lg border border-zinc-400 px-4 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-zinc-600">
+        className="min-h-11 rounded-lg border px-4 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 border-zinc-600">
         {messages.setAsideAction}
       </button>
       {setAside?.kind === "unavailable" ? <p role="alert">{messages.setAsideUnavailable}</p> : null}
     </div>
   ) : null;
 
+  const openSavedRequest = (
+    <details className="space-y-2 rounded-lg border p-3 text-sm border-zinc-800" data-testid="amux-open-saved">
+      <summary className="min-h-11 cursor-pointer content-center font-medium text-blue-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300">
+        {messages.openSavedTitle} →
+      </summary>
+      <p className="text-zinc-300">{messages.openSavedHint}</p>
+      <label className="block text-zinc-200" htmlFor="amux-saved-request-id">{messages.openSavedId}</label>
+      <input id="amux-saved-request-id" value={savedRequestId} maxLength={36}
+        onChange={(event) => setSavedRequestId(event.target.value)}
+        disabled={readBackPending}
+        className="min-h-11 w-full rounded border border-zinc-600 bg-zinc-900 px-2 font-mono text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300" />
+      <button type="button" onClick={() => void openSavedIdea()}
+        disabled={!recoveryChecked || !canOpenSavedIdea(submission.kind,
+          pending || readBackPending || sourceScopePending ||
+            (submission.kind !== "submitted" && hasUnsavedInput), savedRequestId.trim().toLowerCase())}
+        className="min-h-11 rounded border border-zinc-600 px-3 text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50">
+        {messages.openSavedButton}</button>
+      {savedRequestError ? <p role="alert" className="text-red-200">{messages.openSavedFailed}</p> : null}
+      {savedRequestReauth ? <a className="text-blue-300 underline" href={STEP_UP_HREF}>{messages.stepUp}</a> : null}
+    </details>
+  );
+
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4" data-testid="amux-v4-idea-input">
-      <div className="space-y-2 border-b border-zinc-200 pb-5 dark:border-zinc-800">
-        <p className="text-xs font-semibold tracking-[0.18em] text-blue-700 uppercase dark:text-blue-300">{messages.step}</p>
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">{messages.title}</h2>
-        <p className="max-w-2xl text-sm leading-6 text-zinc-700 dark:text-zinc-300">{messages.description}</p>
+    <section className="flex w-full min-w-0 flex-col gap-5" data-testid="amux-v4-idea-input">
+      {/* Ideas main (approved v49 mockup): the new-idea card on the left and the
+          ideas in progress on the right, one column on a narrow screen. The
+          flow panels of the saved idea follow below at full width. */}
+      <div className={progressRows === undefined ? "flex min-w-0 flex-col gap-4"
+        : "grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_23.75rem] lg:items-start"}
+      data-testid="amux-idea-main-grid">
+        <div className="flex min-w-0 flex-col gap-4">
+          {card ? (
+            <AmuxIdeaRequestStatusCard state={card}>
+              {card.kind === "unknown" ? <>
+                <button type="button" onClick={() => void readBack(card.requestId)} disabled={readBackPending}
+                  className="min-h-11 rounded-lg border border-amber-500/40 px-3 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300 disabled:opacity-50">
+                  {messages.checkSubmissionStatus}
+                </button>
+                <a href={STEP_UP_HREF} className="font-medium underline">{messages.stepUp}</a>
+              </> : null}
+              {card.kind === "saved" ? (
+                <button type="button" onClick={startAnotherIdea}
+                  disabled={!canStartAnotherIdea(submission.kind, busy)}
+                  className="min-h-11 rounded-lg border border-zinc-600 px-4 text-sm font-medium text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50">
+                  {messages.startAnotherIdea}
+                </button>
+              ) : null}
+              {card.kind === "locked" ? (
+                <button type="button" onClick={recoverFromReceipts} disabled={busy}
+                  className="min-h-11 rounded-lg border border-zinc-600 px-4 font-medium disabled:opacity-50">
+                  {messages.statusRecheckStorage}
+                </button>
+              ) : null}
+              {setAsideControls}
+            </AmuxIdeaRequestStatusCard>
+          ) : (
+            <div className="flex flex-col gap-3 rounded-xl border p-4 text-sm border-zinc-800 bg-zinc-900/60 text-zinc-100">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-semibold">{messages.title}</h2>
+                <span data-testid="amux-idea-save-chip" className={`rounded-md border px-2 py-0.5 text-xs font-medium ${submissionAvailable
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                  : "border-zinc-700 bg-zinc-800 text-zinc-300"}`}>
+                  {submissionAvailable ? messages.saveOpen : messages.saveClosed}
+                </span>
+              </div>
+              <label htmlFor="amux-v4-idea" className="font-medium">{messages.ideaLabel}</label>
+              <textarea
+                id="amux-v4-idea"
+                value={idea}
+                onChange={(event) => { setIdea(event.target.value); invalidateResult(); }}
+                disabled={pending || frozen}
+                maxLength={8192}
+                className="min-h-56 w-full rounded-lg border p-3 text-base font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 border-zinc-700 bg-zinc-900 text-zinc-100"
+                aria-describedby="amux-v4-idea-hint amux-v4-idea-count"
+              />
+              <p className="flex flex-wrap justify-between gap-2 text-xs text-zinc-400">
+                <span id="amux-v4-idea-hint">{messages.ideaHint}</span>
+                <span id="amux-v4-idea-count">{messages.byteCount(ideaBytes)}</span>
+              </p>
+              <details className="rounded-lg border p-3 border-zinc-800">
+                <summary className="min-h-11 cursor-pointer content-center font-medium text-blue-300">{messages.sourceSection}</summary>
+                <p className="mt-2 text-xs leading-5 text-zinc-400">{messages.sourceSectionHint}</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <label className="flex flex-col gap-2 font-medium" htmlFor="amux-v4-repositories">
+                    {messages.repositoriesLabel}
+                    <textarea
+                      id="amux-v4-repositories"
+                      value={repositories}
+                      onChange={(event) => { setRepositories(event.target.value); invalidateResult(); }}
+                      disabled={pending || frozen}
+                      className="min-h-24 w-full rounded-lg border p-3 text-sm font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 border-zinc-700 bg-zinc-900 text-zinc-100"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 font-medium" htmlFor="amux-v4-pull-requests">
+                    {messages.pullRequestsLabel}
+                    <textarea
+                      id="amux-v4-pull-requests"
+                      value={pullRequests}
+                      onChange={(event) => { setPullRequests(event.target.value); invalidateResult(); }}
+                      disabled={pending || frozen}
+                      className="min-h-24 w-full rounded-lg border p-3 text-sm font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 border-zinc-700 bg-zinc-900 text-zinc-100"
+                    />
+                  </label>
+                </div>
+              </details>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={checkInput}
+                  disabled={pending || frozen || idea.trim().length === 0 || ideaBytes > 8192}
+                  className="min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50"
+                >
+                  {messages.preview}
+                </button>
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={!submissionAvailable || !recoveryChecked || result?.outcome !== "input_checked" || frozen}
+                  className="min-h-11 rounded-lg border border-blue-400 px-4 text-sm font-medium text-blue-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50"
+                >
+                  {messages.submit}
+                </button>
+                <span className="text-xs text-zinc-400">
+                  {submissionAvailable ? messages.submitBoundary : messages.submitUnavailable}
+                </span>
+              </div>
+              <details className="rounded-lg bg-zinc-800/60 p-3 text-xs text-zinc-300">
+                <summary className="min-h-11 cursor-pointer content-center">
+                  {messages.boundaryCurrentDetail}{" "}
+                  <span className="font-medium text-blue-300 underline">{messages.boundaryDetails}</span>
+                </summary>
+                <p className="mt-2 font-semibold">{messages.boundaryTitle}</p>
+                <p className="mt-1">{messages.boundaryCurrent}</p>
+                <p className="mt-1 font-semibold">{messages.boundaryNext}</p>
+                <p className="mt-1">{messages.boundaryNextDetail}</p>
+              </details>
+            </div>
+          )}
+
+          {refusedForStepUp ? (
+            <a href={STEP_UP_HREF} className="text-sm font-medium underline text-zinc-100">{messages.stepUp}</a>
+          ) : null}
+          {submission.kind === "refused" ? (
+            <p role="alert" className="text-sm text-red-300">
+              {messages.submitErrors[submission.code as keyof typeof messages.submitErrors] ?? messages.submitErrors.submit_failed}
+            </p>
+          ) : null}
+          {setAside?.kind === "set_aside" && submission.kind === "idle" ? (
+            <p role="status" className="text-sm text-zinc-300">
+              {messages.setAsideNotice(setAside.requestId)}
+            </p>
+          ) : null}
+          {result ? (
+            <div className="rounded-md border p-4 text-sm border-zinc-700 text-zinc-100" role="status">
+              {errorMessage ? <p>{errorMessage}</p> : null}
+              {result.outcome === "input_checked" ? (
+                <>
+                  <p>{messages.result(result.ideaBytes ?? 0, result.repositoryCount ?? 0, result.pullRequestCount ?? 0)}</p>
+                  <p className="mt-2">{messages.excluded}</p>
+                </>
+              ) : null}
+              {submission.kind === "idle" || submission.kind === "refused" ? (
+                <p className="mt-2 text-zinc-400">{messages.noWrite}</p>
+              ) : null}
+            </div>
+          ) : null}
+          {progressRows === undefined ? openSavedRequest : null}
+        </div>
+        {progressRows !== undefined ? (
+          <AmuxIdeaList rows={progressRows} activeRequestId={openRequestId}>{openSavedRequest}</AmuxIdeaList>
+        ) : null}
       </div>
 
-      {card ? (
-        <AmuxIdeaRequestStatusCard state={card}>
-          {card.kind === "unknown" ? <>
-            <button type="button" onClick={() => void readBack(card.requestId)} disabled={readBackPending}
-              className="min-h-11 rounded-lg border border-amber-700 px-3 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 disabled:opacity-50 dark:border-amber-300">
-              {messages.checkSubmissionStatus}
-            </button>
-            <a href={STEP_UP_HREF} className="font-medium underline">{messages.stepUp}</a>
-          </> : null}
-          {card.kind === "saved" ? (
-            <button type="button" onClick={startAnotherIdea}
-              disabled={!canStartAnotherIdea(submission.kind, busy)}
-              className="min-h-11 rounded-lg border border-zinc-400 px-4 text-sm font-medium text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100">
-              {messages.startAnotherIdea}
-            </button>
-          ) : null}
-          {card.kind === "locked" ? (
-            <button type="button" onClick={recoverFromReceipts} disabled={busy}
-              className="min-h-11 rounded-lg border border-zinc-400 px-4 font-medium disabled:opacity-50 dark:border-zinc-600">
-              {messages.statusRecheckStorage}
-            </button>
-          ) : null}
-          {setAsideControls}
-        </AmuxIdeaRequestStatusCard>
-      ) : (
-        <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-800 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
-          <h3 className="text-base font-semibold">{messages.ideaSection}</h3>
-          <label htmlFor="amux-v4-idea" className="font-medium">{messages.ideaLabel}</label>
-          <textarea
-            id="amux-v4-idea"
-            value={idea}
-            onChange={(event) => { setIdea(event.target.value); invalidateResult(); }}
-            disabled={pending || frozen}
-            maxLength={8192}
-            className="min-h-56 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-base font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-            aria-describedby="amux-v4-idea-hint amux-v4-idea-count"
-          />
-          <p className="flex flex-wrap justify-between gap-2 text-xs text-zinc-600 dark:text-zinc-400">
-            <span id="amux-v4-idea-hint">{messages.ideaHint}</span>
-            <span id="amux-v4-idea-count">{messages.byteCount(ideaBytes)}</span>
-          </p>
-          <details className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-            <summary className="cursor-pointer font-medium text-blue-800 dark:text-blue-200">{messages.sourceSection}</summary>
-            <p className="mt-2 text-xs leading-5 text-zinc-600 dark:text-zinc-400">{messages.sourceSectionHint}</p>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <label className="flex flex-col gap-2 font-medium" htmlFor="amux-v4-repositories">
-                {messages.repositoriesLabel}
-                <textarea
-                  id="amux-v4-repositories"
-                  value={repositories}
-                  onChange={(event) => { setRepositories(event.target.value); invalidateResult(); }}
-                  disabled={pending || frozen}
-                  className="min-h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                />
-              </label>
-              <label className="flex flex-col gap-2 font-medium" htmlFor="amux-v4-pull-requests">
-                {messages.pullRequestsLabel}
-                <textarea
-                  id="amux-v4-pull-requests"
-                  value={pullRequests}
-                  onChange={(event) => { setPullRequests(event.target.value); invalidateResult(); }}
-                  disabled={pending || frozen}
-                  className="min-h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                />
-              </label>
-            </div>
-          </details>
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={checkInput}
-              disabled={pending || frozen || idea.trim().length === 0 || ideaBytes > 8192}
-              className="min-h-11 rounded-lg bg-blue-700 px-4 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:bg-blue-600 dark:focus-visible:outline-blue-300"
-            >
-              {messages.preview}
-            </button>
-            <button
-              type="button"
-              onClick={submit}
-              disabled={!submissionAvailable || !recoveryChecked || result?.outcome !== "input_checked" || frozen}
-              className="min-h-11 rounded-lg border border-blue-700 px-4 text-sm font-medium text-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200"
-            >
-              {messages.submit}
-            </button>
-            <span className="text-xs text-zinc-600 dark:text-zinc-400">
-              {submissionAvailable ? messages.submitBoundary : messages.submitUnavailable}
-            </span>
-          </div>
-          <details className="rounded-lg bg-zinc-50 p-3 text-xs text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-            <summary className="cursor-pointer">
-              {messages.boundaryCurrentDetail}{" "}
-              <span className="font-medium text-blue-800 underline dark:text-blue-200">{messages.boundaryDetails}</span>
-            </summary>
-            <p className="mt-2 font-semibold">{messages.boundaryTitle}</p>
-            <p className="mt-1">{messages.boundaryCurrent}</p>
-            <p className="mt-1 font-semibold">{messages.boundaryNext}</p>
-            <p className="mt-1">{messages.boundaryNextDetail}</p>
-          </details>
-        </div>
-      )}
-
-      {refusedForStepUp ? (
-        <a href={STEP_UP_HREF} className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100">{messages.stepUp}</a>
-      ) : null}
-      {submission.kind === "refused" ? (
-        <p role="alert" className="text-sm text-red-700 dark:text-red-300">
-          {messages.submitErrors[submission.code as keyof typeof messages.submitErrors] ?? messages.submitErrors.submit_failed}
-        </p>
-      ) : null}
-      {setAside?.kind === "set_aside" && submission.kind === "idle" ? (
-        <p role="status" className="text-sm text-zinc-700 dark:text-zinc-300">
-          {messages.setAsideNotice(setAside.requestId)}
-        </p>
-      ) : null}
       <AmuxInitialPlanPanel
         key={submission.kind === "submitted" ? submission.ideaId : "none"}
         ideaId={submission.kind === "submitted" ? submission.ideaId : null}
@@ -558,72 +613,45 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           ideaId={submission.ideaId}
           onContinuationReady={setContinuationChunkIndex} /> : null}
       {submission.kind === "submitted" ? (
-        <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
-          <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceScopeTitle}</h3>
-          <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.sourceScopeHint}</p>
+        <section className="space-y-3 rounded-xl border p-4 border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
+          <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-100">{messages.sourceScopeTitle}</h3>
+          <p className="text-sm text-zinc-300">{messages.sourceScopeHint}</p>
           <div className="grid gap-3 md:grid-cols-3">
-            <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
+            <label className="flex flex-col gap-1 text-sm text-zinc-100">
               {messages.sourceRepositoryLabel}
               <input value={sourceRepository} maxLength={165} spellCheck={false} onChange={(event) => { setSourceRepository(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
-                disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:focus-visible:outline-blue-300" />
+                disabled={sourceScopePending} className="min-h-11 rounded-lg border px-3 focus-visible:outline-2 focus-visible:outline-offset-2 border-zinc-700 bg-zinc-900 focus-visible:outline-blue-300" />
             </label>
-            <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
+            <label className="flex flex-col gap-1 text-sm text-zinc-100">
               {messages.sourceCommitLabel}
               <input value={sourceCommitSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceCommitSha(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
-                disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:focus-visible:outline-blue-300" />
+                disabled={sourceScopePending} className="min-h-11 rounded-lg border px-3 focus-visible:outline-2 focus-visible:outline-offset-2 border-zinc-700 bg-zinc-900 focus-visible:outline-blue-300" />
             </label>
-            <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
+            <label className="flex flex-col gap-1 text-sm text-zinc-100">
               {messages.sourcePathLabel}
               <input value={sourcePath} maxLength={256} spellCheck={false} onChange={(event) => { setSourcePath(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
-                disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:focus-visible:outline-blue-300" />
+                disabled={sourceScopePending} className="min-h-11 rounded-lg border px-3 focus-visible:outline-2 focus-visible:outline-offset-2 border-zinc-700 bg-zinc-900 focus-visible:outline-blue-300" />
             </label>
           </div>
           <button type="button" onClick={checkSourceScope}
             disabled={!sourceScopePreviewAvailable || sourceScopePending || !sourceRepository.trim() || !sourceCommitSha.trim() || !sourcePath.trim()}
-            className="min-h-11 rounded-lg border border-blue-700 px-4 text-sm font-medium text-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200 dark:focus-visible:outline-blue-300">
+            className="min-h-11 rounded-lg border px-4 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 border-blue-400 text-blue-200 focus-visible:outline-blue-300">
             {sourceScopePending ? messages.sourceScopeChecking : messages.sourceScopeCheck}
           </button>
-          {!sourceScopePreviewAvailable ? <p className="text-sm text-zinc-600 dark:text-zinc-400">{messages.sourceScopeUnavailable}</p> : null}
+          {!sourceScopePreviewAvailable ? <p className="text-sm text-zinc-400">{messages.sourceScopeUnavailable}</p> : null}
           {sourceScopeResult.kind === "checked" ? (
-            <div role="status" className="space-y-2 text-sm text-zinc-800 dark:text-zinc-100">
+            <div role="status" className="space-y-2 text-sm text-zinc-100">
               <p>{messages.sourceScopeChecked}</p>
-              <code className="block break-all rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">{sourceScopeResult.canonicalScopeJson}</code>
+              <code className="block break-all rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-100">{sourceScopeResult.canonicalScopeJson}</code>
             </div>
           ) : null}
-          {sourceScopeResult.kind === "error" ? <p role="alert" className="text-sm text-red-700 dark:text-red-300">{messages.sourceScopeError(sourceScopeResult.code)}</p> : null}
+          {sourceScopeResult.kind === "error" ? <p role="alert" className="text-sm text-red-300">{messages.sourceScopeError(sourceScopeResult.code)}</p> : null}
         </section>
       ) : null}
-      {result ? (
-        <div className="rounded-md border border-zinc-200 p-4 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100" role="status">
-          {errorMessage ? <p>{errorMessage}</p> : null}
-          {result.outcome === "input_checked" ? (
-            <>
-              <p>{messages.result(result.ideaBytes ?? 0, result.repositoryCount ?? 0, result.pullRequestCount ?? 0)}</p>
-              <p className="mt-2">{messages.excluded}</p>
-            </>
-          ) : null}
-          {submission.kind === "idle" || submission.kind === "refused" ? (
-            <p className="mt-2 text-zinc-600 dark:text-zinc-400">{messages.noWrite}</p>
-          ) : null}
-        </div>
-      ) : null}
-      <details className="space-y-2 rounded-xl border border-zinc-300 p-4 text-sm dark:border-zinc-700">
-        <summary className="cursor-pointer font-medium">{messages.openSavedTitle}</summary>
-        <p>{messages.openSavedHint}</p>
-        <label className="block" htmlFor="amux-saved-request-id">{messages.openSavedId}</label>
-        <input id="amux-saved-request-id" value={savedRequestId} maxLength={36}
-          onChange={(event) => setSavedRequestId(event.target.value)}
-          disabled={readBackPending}
-          className="min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2 font-mono" />
-        <button type="button" onClick={() => void openSavedIdea()}
-          disabled={!recoveryChecked || !canOpenSavedIdea(submission.kind,
-            pending || readBackPending || sourceScopePending ||
-              (submission.kind !== "submitted" && hasUnsavedInput), savedRequestId.trim().toLowerCase())}
-          className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
-          {messages.openSavedButton}</button>
-        {savedRequestError ? <p role="alert">{messages.openSavedFailed}</p> : null}
-        {savedRequestReauth ? <a className="underline" href={STEP_UP_HREF}>{messages.stepUp}</a> : null}
-      </details>
+      <p className="text-xs text-zinc-400" data-testid="amux-idea-settings-footnote">
+        {messages.frontierSettingsMoved}{" "}
+        <Link href="/admin/amux-settings?tab=analysis" className="font-medium text-blue-300 underline">{messages.frontierSettingsLink}</Link>
+      </p>
     </section>
   );
 }

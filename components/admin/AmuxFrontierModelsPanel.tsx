@@ -20,6 +20,9 @@ import {
   type PreparedIdeaTransferPreview,
 } from "@/lib/amux/ideaTransferPreviewUiCore";
 import {
+  AMUX_IDEA_BUILD_PREVIEW_REQUEST_TIMEOUT_MS, AMUX_IDEA_EXECUTION_APPROVAL_REQUEST_TIMEOUT_MS,
+} from "@/lib/amux/ideaRequestTimeoutsCore";
+import {
   classifyBuildPreviewAnswer, reserveBuildPreviewReceipt, takeBuildPreviewReceipt,
 } from "@/lib/amux/ideaBuildPreviewUiCore";
 import {
@@ -365,8 +368,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     setBuilding(true);
     setFailure(null);
     try {
+      // Three transactions one after the other (save, plan, preview): the deadline outlasts all three.
       const response = await adminFetch("/api/admin/amux/ideas/build-preview", {
         method: "POST", headers: { "content-type": "application/json" },
+        timeoutMs: AMUX_IDEA_BUILD_PREVIEW_REQUEST_TIMEOUT_MS,
         body: JSON.stringify({ version: 1, requestId, previewId,
           input: { version: 1, ...build.draft },
           model: { provider: selected.provider, modelId: selected.modelId, reasoningEffort: selectedEffort,
@@ -415,8 +420,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     setFailure(null);
     setExecutionRefusal(null);
     try {
+      // The approval transaction may run for 20 s after a 5 s wait; the deadline outlasts it.
       const response = await adminFetch("/api/admin/amux/ideas/execution-approval", {
         method: "POST", headers: { "content-type": "application/json" },
+        timeoutMs: AMUX_IDEA_EXECUTION_APPROVAL_REQUEST_TIMEOUT_MS,
         body: JSON.stringify({ version: 1, previewId: value.previewId, ideaId,
           payloadDigest: value.payloadDigest, payloadDigestKeyId: value.payloadDigestKeyId,
           holdId: crypto.randomUUID(), priceVersionId: executionPriceId }),
@@ -498,24 +505,24 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   };
 
   return (
-    <section className="space-y-2 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
+    <section className="space-y-2 rounded-xl border p-4 text-sm border-zinc-800"
       aria-labelledby="amux-v4-frontier-models-heading">
-      <h3 id="amux-v4-frontier-models-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+      <h3 id="amux-v4-frontier-models-heading" className="text-base font-semibold text-zinc-100">
         {m.executionCardTitle}
       </h3>
       {/* Without an approved price there is no budget reservation: only the separate confirmation. */}
-      <p className="text-zinc-700 dark:text-zinc-300">
+      <p className="text-zinc-300">
         {executionPrice.kind === "none" ? m.executionCardLeadConfirmOnly : m.executionCardLead}
       </p>
-      <h4 className="pt-2 font-semibold text-zinc-900 dark:text-zinc-100">{m.executionStepModel}</h4>
-      <p className="text-zinc-700 dark:text-zinc-300">{m.frontierModelsHint}</p>
-      <p className="text-xs text-zinc-600 dark:text-zinc-400">
+      <h4 className="pt-2 font-semibold text-zinc-100">{m.executionStepModel}</h4>
+      <p className="text-zinc-300">{m.frontierModelsHint}</p>
+      <p className="text-xs text-zinc-400">
         {m.frontierSettingsMoved}{" "}
         <Link href="/admin/amux-settings?tab=analysis" className="font-medium underline">{m.frontierSettingsLink}</Link>
       </p>
       {!available ? <p>{m.frontierModelsUnavailable}</p> : null}
       {available ? <button type="button" onClick={refresh} disabled={loading || checking}
-        className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+        className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
         {m.frontierModelsRefresh}
       </button> : null}
       {loading ? <p role="status">{m.frontierModelsLoading}</p> : null}
@@ -527,7 +534,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
             {m.frontierSelectionModel}
             <select value={selectedApprovalId} disabled={checking}
               onChange={(event) => { setSelectedApprovalId(event.target.value); setSelectedEffort(""); setChecked(false); }}
-              className="min-h-11 rounded-lg border border-zinc-400 px-3 dark:border-zinc-600 dark:bg-zinc-900">
+              className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900">
               <option value="">{m.frontierSelectionChoose}</option>
               {models.map((model) => <option key={model.approvalId} value={model.approvalId}>
                 {model.provider} / {model.modelId}
@@ -538,14 +545,14 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
             {m.frontierModelsEfforts}
             <select value={selectedEffort} disabled={checking}
               onChange={(event) => { setSelectedEffort(event.target.value); setChecked(false); }}
-              className="min-h-11 rounded-lg border border-zinc-400 px-3 dark:border-zinc-600 dark:bg-zinc-900">
+              className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900">
               <option value="">{m.frontierSelectionChoose}</option>
               {selected.allowedEfforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
             </select>
           </label> : null}
           <button type="button" onClick={() => void checkSelection()}
             disabled={!selected || !selectedEffort || checking}
-            className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+            className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
             {m.frontierSelectionCheck}
           </button>
           {checked ? <p role="status">{m.frontierSelectionCurrent}</p> : null}
@@ -553,7 +560,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
             <p className="text-xs">{m.buildPreviewHint}</p>
             <button type="button" onClick={() => void buildPreview()}
               disabled={!build.draft || !selected || !selectedEffort || building || !previewAvailable}
-              className="min-h-11 rounded-lg border border-blue-700 bg-blue-700 px-4 text-white disabled:opacity-50 dark:border-blue-400">
+              className="min-h-11 rounded-lg border bg-blue-700 px-4 text-white disabled:opacity-50 border-blue-400">
               {m.buildPreviewAction}
             </button>
             {building ? <p role="status">{m.buildPreviewPending}</p> : null}
@@ -561,7 +568,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           {ideaId ? <button type="button" onClick={() => void preparePreview()}
             disabled={!previewAvailable || !planReady || declaredExternalSources ||
               !checked || preview.kind !== "idle"}
-            className="min-h-11 rounded-lg border border-blue-700 px-4 text-blue-800 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200">
+            className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-blue-400 text-blue-200">
             {m.transferPreviewPrepare}
           </button> : null}
         </div>
@@ -576,25 +583,25 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       {preview.kind === "expired" ? <p role="status">{m.transferPreviewExpired}</p> : null}
       {preview.kind === "unknown" && confirmation.kind === "idle" ? <div className="space-y-2">
         <p role="alert">{m.transferPreviewUnknown}</p>
-        <button type="button" onClick={recoverPreview} className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">
+        <button type="button" onClick={recoverPreview} className="min-h-11 rounded-lg border px-4 border-zinc-600">
           {m.transferPreviewReadBack}
         </button>
       </div> : null}
       {preview.kind === "prepared" ? (
-        <div className="space-y-2 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
-          <h4 className="pt-2 font-semibold text-zinc-900 dark:text-zinc-100">{m.executionStepTransfer}</h4>
+        <div className="space-y-2 rounded-lg border p-3 border-zinc-700">
+          <h4 className="pt-2 font-semibold text-zinc-100">{m.executionStepTransfer}</h4>
           <p role="status">{m.transferPreviewPrepared}</p>
           <p className="break-all text-xs">{preview.value.provider} / {preview.value.modelId}
             {` · ${preview.value.reasoningEffort} · ${preview.value.previewId}`}</p>
           <p className="text-xs">{m.transferPreviewExpires}: {preview.value.expiresAt}</p>
           <p className="break-all text-xs">{m.transferPreviewDigest}: {preview.value.payloadDigest}</p>
-          <details className="rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
+          <details className="rounded-lg border p-2 border-zinc-800">
             <summary className="min-h-11 cursor-pointer content-center font-medium">{m.executionTransferShow}</summary>
-            <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
+            <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-100">
               {preview.value.prompt}
             </pre>
           </details>
-          <h4 className="pt-2 font-semibold text-zinc-900 dark:text-zinc-100">{m.executionStepApprove}</h4>
+          <h4 className="pt-2 font-semibold text-zinc-100">{m.executionStepApprove}</h4>
           <p>{confirmation.kind === "confirmed" ? m.transferConfirmRecordedBoundary :
             m.transferPreviewBoundary}</p>
           {confirmAvailable && confirmation.kind === "idle" && executionPrice.kind === "loading" ?
@@ -605,13 +612,13 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
             <p>{budgetMessages.price}</p>
             <p className="text-xs">{m.executionApprovalBoundary}</p>
             <button type="button" onClick={() => void approveExecution()}
-              className="min-h-11 rounded-lg border border-blue-700 bg-blue-700 px-4 text-white dark:border-blue-400">
+              className="min-h-11 rounded-lg border bg-blue-700 px-4 text-white border-blue-400">
               {m.executionApprovalAction}
             </button>
           </> : null}
           {confirmAvailable && confirmation.kind === "idle" && executionPrice.kind === "none" ? <button type="button"
             onClick={() => void confirmPreview()}
-            className="min-h-11 rounded-lg border border-blue-700 px-4 text-blue-800 dark:border-blue-400 dark:text-blue-200">
+            className="min-h-11 rounded-lg border px-4 border-blue-400 text-blue-200">
             {m.transferConfirmAction}
           </button> : null}
         </div>
@@ -637,7 +644,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
             void readConfirmation(receipt.previewId, ideaId,
               attempt.payloadDigest, attempt.payloadDigestKeyId);
           } else { setPreview({ kind: "recovery_unavailable" }); }
-        }} className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">
+        }} className="min-h-11 rounded-lg border px-4 border-zinc-600">
           {m.transferConfirmReadBack}
         </button>
       </div> : null}

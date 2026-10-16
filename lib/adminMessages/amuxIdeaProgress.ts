@@ -2,6 +2,7 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 
 export const adminAmuxIdeaProgressMessages = defineAdminMessages({
   en: {
+    lede: "Add an idea and follow its progress. Only the steps that need a person are gathered at the top.",
     inboxTitle: "Decide now",
     inboxCount: (count: number) => `${count}`,
     inboxEmpty: "Nothing is waiting for you. New ideas appear here when they need an approval or a GitHub review.",
@@ -35,6 +36,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     taskMerged: "Merged, done",
     mergeObserved: "Review and merge on GitHub. The app observes the approval and the merge and completes the card; there is no separate AMUX approval.",
     unavailable: "The idea list could not be read. Nothing was changed; reload to try again.",
+    listUnavailable: "The list is not shown because it could not be read.",
     stages: {
       execution_approval: "Execution approval",
       analysis: "Analysis",
@@ -54,6 +56,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     untitled: "Idea",
   },
   ko: {
+    lede: "아이디어를 넣고 진행 상황을 확인하세요. 사람이 정해야 하는 단계만 위에 모아 보여 드립니다.",
     inboxTitle: "지금 결정할 일",
     inboxCount: (count: number) => `${count}건`,
     inboxEmpty: "지금 기다리는 결정이 없습니다. 승인이나 GitHub 리뷰가 필요하면 여기에 올라옵니다.",
@@ -87,6 +90,7 @@ export const adminAmuxIdeaProgressMessages = defineAdminMessages({
     taskMerged: "병합 → 완료",
     mergeObserved: "PR은 GitHub에서 리뷰하고 병합합니다. 앱이 승인과 병합을 관측해 카드를 자동으로 완료하므로 AMUX에서 따로 누를 승인은 없습니다.",
     unavailable: "아이디어 목록을 읽지 못했습니다. 바뀐 것은 없습니다. 새로 고쳐 다시 시도하세요.",
+    listUnavailable: "목록을 읽지 못해 표시하지 못했습니다.",
     stages: {
       execution_approval: "실행 승인",
       analysis: "분석",

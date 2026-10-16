@@ -178,7 +178,7 @@ export function AmuxIdeaNodeRegistrationPanel({ ideaId, unit }: {
     } catch { setUnknown(true); }
     finally { setBusy(false); }
   };
-  return <section className="space-y-2 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
+  return <section className="space-y-2 rounded-lg border p-3 border-zinc-700">
     <h5 className="font-medium">{m.nodeRegistrationTitle} · {proposal.title}</h5>
     <p className="text-sm">{m.nodeRegistrationHint}</p>
     {/* docs/policy/amux-intake.md v17 item 2: shown, never typed; the server assigns it. */}
@@ -188,13 +188,13 @@ export function AmuxIdeaNodeRegistrationPanel({ ideaId, unit }: {
       <span className="block text-xs opacity-70">{m.nodeRegistrationDisplayPrefixHint}</span></p> : null}
     {expectedParentLevel ? <><button type="button" onClick={() => void load()}
       disabled={busy || unknown}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.resolutionLoad}</button>
       <label className="block text-sm">{m.nodeRegistrationParent}
         <select value={parentId} disabled={busy || !!prepared || unknown}
           onChange={(event) => { setParentId(event.target.value);
             setDuplicateIds([]); setReason(""); }}
-          className="mt-1 min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2">
+          className="mt-1 min-h-11 w-full rounded border border-zinc-600 bg-transparent px-2">
           <option value="">{m.resolutionChoose}</option>
           {nodes.filter((node) => node.level === expectedParentLevel)
             .map((node) => <option key={node.ref} value={node.ref}>
@@ -207,11 +207,11 @@ export function AmuxIdeaNodeRegistrationPanel({ ideaId, unit }: {
       {m.resolutionReason}
       <textarea value={reason} onChange={(event) => setReason(event.target.value)}
         maxLength={500} disabled={busy || unknown}
-        className="mt-1 w-full rounded border border-zinc-400 bg-transparent p-2" />
+        className="mt-1 w-full rounded border border-zinc-600 bg-transparent p-2" />
     </label> : null}<button type="button" onClick={() => void prepare()}
       disabled={busy || unknown || (expectedParentLevel !== null && !parentId) ||
         (duplicateIds.length > 0 && reason.trim().length < 3)}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.nodeRegistrationPrepare}</button></> : null}
     {prepared ? <div className="space-y-1 text-sm">
       <p>{m.storyRegistrationDecisionId}: <code>{prepared.decisionId}</code></p>
@@ -221,7 +221,7 @@ export function AmuxIdeaNodeRegistrationPanel({ ideaId, unit }: {
       <p>{m.storyRegistrationDuplicates}: {prepared.duplicateCandidateIds.join(", ") || "—"}</p>
       {!registeredNodeId ? <button type="button" onClick={() => void consume()}
         disabled={busy || unknown}
-        className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+        className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
         {m.nodeRegistrationConsume}</button> : null}
     </div> : null}
     {requestId ? <p className="text-xs">{m.storyRegistrationRequestId}: <code>
@@ -233,15 +233,15 @@ export function AmuxIdeaNodeRegistrationPanel({ ideaId, unit }: {
       {m.storyRegistrationRecoveryId}
       <input value={recoveryRequestId}
         onChange={(event) => setRecoveryRequestId(event.target.value)}
-        className="mt-1 min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2" />
+        className="mt-1 min-h-11 w-full rounded border border-zinc-600 bg-transparent px-2" />
     </label> : null}
     {unknown || prepared || recoveryRequestId ? <button type="button"
       onClick={() => void readBack()} disabled={busy}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.storyRegistrationReadBack}</button> : null}
     {((prepared && !unknown) || readbackPreparedId) && !registeredNodeId && !closed ?
       <button type="button" onClick={() => void cancel()} disabled={busy}
-        className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+        className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
         {m.storyRegistrationCancel}</button> : null}
     {reauth ? <a className="underline"
       href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>

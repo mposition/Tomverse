@@ -171,17 +171,17 @@ export function AmuxIdeaCardLinkPanel({ ideaId, unit }: {
     } catch { setUnknown(true); }
     finally { setBusy(false); }
   };
-  return <section className="space-y-2 rounded border border-zinc-300 p-3 dark:border-zinc-700">
+  return <section className="space-y-2 rounded border p-3 border-zinc-700">
     <h5 className="font-medium">{m.cardLinkTitle} · {proposal.title}</h5>
     <p className="text-xs">{m.cardLinkHint}</p>
     <button type="button" onClick={() => void load()} disabled={busy || unknown}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.resolutionLoad}</button>
     {!prepared && !linkedId && !cancelled ? <>
       <label className="block">{m.cardLinkTarget}
         <select value={targetId} disabled={busy || unknown}
           onChange={(event) => setTargetId(event.target.value)}
-          className="mt-1 min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2">
+          className="mt-1 min-h-11 w-full rounded border border-zinc-600 bg-transparent px-2">
           <option value="">{m.resolutionChoose}</option>
           {cards.filter((card) => card.cardType === proposal.cardType &&
             card.storyKind === proposal.storyKind).map((card) =>
@@ -191,11 +191,11 @@ export function AmuxIdeaCardLinkPanel({ ideaId, unit }: {
       <label className="block">{m.unitRejectReason}
         <textarea value={reason} maxLength={500} disabled={busy || unknown}
           onChange={(event) => setReason(event.target.value)}
-          className="mt-1 w-full rounded border border-zinc-400 bg-transparent p-2" />
+          className="mt-1 w-full rounded border border-zinc-600 bg-transparent p-2" />
       </label>
       <button type="button" onClick={() => void prepare()}
         disabled={busy || unknown || !target || reason.trim().length < 3}
-        className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+        className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
         {m.cardLinkPrepare}</button>
     </> : null}
     {prepared ? <div className="space-y-1 text-xs">
@@ -205,27 +205,27 @@ export function AmuxIdeaCardLinkPanel({ ideaId, unit }: {
       <p>{m.storyRegistrationExpires}: {prepared.expiresAt}</p>
       {!linkedId ? <button type="button" onClick={() => void consume()}
         disabled={busy || unknown}
-        className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+        className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
         {m.cardLinkConsume}</button> : null}
     </div> : null}
     {requestId ? <p className="break-all text-xs">{m.storyRegistrationRequestId}: {requestId}</p> : null}
     {!prepared && !requestId ? <label className="block text-xs">
       {m.storyRegistrationRecoveryId}
       <input value={recoveryId} onChange={(event) => setRecoveryId(event.target.value)}
-        className="mt-1 min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2" />
+        className="mt-1 min-h-11 w-full rounded border border-zinc-600 bg-transparent px-2" />
     </label> : null}
     {unknown ? <p role="alert">{m.storyRegistrationUnknown}</p> : null}
     {linkedId ? <p role="status">{m.cardLinkDone} · {linkedId}</p> : null}
     {cancelled ? <p role="status">{m.storyRegistrationCancelled}</p> : null}
     {unknown || prepared || recoveryId ? <button type="button"
       onClick={() => void readBack()} disabled={busy}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.storyRegistrationReadBack}</button> : null}
     {readbackId ? <p className="break-all text-xs">
       {m.storyRegistrationDecisionId}: {readbackId}</p> : null}
     {(prepared || readbackId) && !linkedId && !cancelled ? <button type="button"
       onClick={() => void cancel()} disabled={busy}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.storyRegistrationCancel}</button> : null}
     {reauth ? <a className="underline"
       href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>

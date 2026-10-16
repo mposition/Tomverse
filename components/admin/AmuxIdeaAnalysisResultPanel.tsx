@@ -67,19 +67,19 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
     finally { setLoading(false); }
   };
 
-  return <section className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
+  return <section className="space-y-3 rounded-xl border p-4 text-sm border-zinc-800"
     aria-labelledby="amux-v4-analysis-result-heading">
-    <h3 id="amux-v4-analysis-result-heading" className="font-semibold text-zinc-900 dark:text-zinc-100">
+    <h3 id="amux-v4-analysis-result-heading" className="font-semibold text-zinc-100">
       {m.analysisResultTitle}
     </h3>
-    <p className="text-zinc-700 dark:text-zinc-300">{m.analysisResultHint}</p>
+    <p className="text-zinc-300">{m.analysisResultHint}</p>
     <button type="button" onClick={() => void refresh()} disabled={loading}
-      className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+      className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
       {m.analysisResultRefresh}
     </button>
     {chunkIndex > 0 ? <button type="button" disabled={loading}
       onClick={() => void refresh(chunkIndex - 1)}
-      className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+      className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
       {m.analysisResultPreviousPage}
     </button> : null}
     {loading ? <p role="status">{m.analysisResultLoading}</p> : null}
@@ -96,7 +96,7 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
     </p> : null}
     {view?.state === "ready" || view?.state === "partial" ||
       view?.state === "needs_owner_input" ? <div className="space-y-3">
-      <p className="text-xs text-zinc-600 dark:text-zinc-400">
+      <p className="text-xs text-zinc-400">
         {view.completedAt} · {view.previewId}
       </p>
       {view.state === "partial" ? <div role="status" className="space-y-1">
@@ -105,7 +105,7 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
         <p className="whitespace-pre-wrap">{view.remainingScope ?? m.analysisResultScopeExpired}</p>
         <button type="button" disabled={loading}
           onClick={() => void refresh(view.nextChunkIndex)}
-          className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+          className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
           {m.analysisResultNextPage}
         </button>
       </div> : null}
@@ -121,8 +121,8 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
         ideaId={ideaId} onChanged={() => void refresh()} /> : null}
       <ol className="space-y-2">
         {view.units.map((unit) => <li key={unit.id}
-          className="rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
-          <p className="text-xs text-zinc-600 dark:text-zinc-400">
+          className="rounded-lg border p-3 border-zinc-700">
+          <p className="text-xs text-zinc-400">
             {unit.localRef} · {unit.decisionState}
           </p>
           {!unit.proposal ? <p>{m.analysisResultBodyExpired}</p> : null}
@@ -154,12 +154,12 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
             <p className="text-xs">{unit.proposal.cardRef}</p>
           </div> : null}
           {unit.proposal?.kind !== "evidence" &&
-            unit.proposal?.portfolioSignal ? <div className="space-y-1 rounded border border-zinc-300 p-2 dark:border-zinc-700">
+            unit.proposal?.portfolioSignal ? <div className="space-y-1 rounded border p-2 border-zinc-700">
             <p className="font-medium">{m.portfolioSignalTitle}</p>
             <p>{m.portfolioSignalHint}</p>
             <p className="break-all font-mono text-xs">{unit.bodyDigest}</p>
             <p className="whitespace-pre-wrap">{unit.proposal.portfolioSignal.rationale}</p>
-            <pre className="overflow-auto whitespace-pre-wrap break-all text-xs">
+            <pre className="overflow-auto whitespace-pre-wrap break-all rounded border border-zinc-800 bg-zinc-900 p-2 text-xs text-zinc-100">
               {JSON.stringify({ metrics: unit.proposal.portfolioSignal.metrics,
                 uncertainty: unit.proposal.portfolioSignal.uncertainty,
                 evidenceRefIds: unit.proposal.portfolioSignal.evidenceRefIds }, null, 2)}
@@ -196,7 +196,7 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
           key={`reject:${unit.id}`} ideaId={ideaId} unit={unit} />) : null}
       {view.outcome === "propose" ? <AmuxIdeaUnknownDecisionRecoveryPanel
         ideaId={ideaId} /> : null}
-      <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.analysisResultNoApproval}</p>
+      <p className="text-xs text-zinc-400">{m.analysisResultNoApproval}</p>
     </div> : null}
   </section>;
 }

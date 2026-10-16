@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
+import { AMUX_IDEA_STANDARD_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
@@ -195,7 +196,7 @@ export async function submitIdea(input: {
       const committed = await commitIdeaSubmission(tx, { ...input, ideaId, keys });
       callbackReturned = true;
       return committed;
-    }, { maxWait: 5_000, timeout: 15_000 });
+    }, { ...AMUX_IDEA_STANDARD_TRANSACTION });
   } catch (error) {
     const kind = submissionFailureKind(callbackReturned, error);
     if (kind === "request_already_seen") {

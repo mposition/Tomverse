@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import { AMUX_IDEA_STANDARD_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
@@ -134,7 +135,7 @@ export async function prepareInitialIdeaSourcePlan(session: Session, request: Re
       const result = await commitInitialIdeaSourcePlan(tx, { session, request, ideaId, keys });
       callbackReturned = true;
       return result;
-    }, { maxWait: 5_000, timeout: 15_000 });
+    }, { ...AMUX_IDEA_STANDARD_TRANSACTION });
   } catch (error) {
     if (!callbackReturned && error instanceof InitialSourcePlanError) throw error;
     let readBack: InitialPlanAccessError["readBack"] = "unavailable";

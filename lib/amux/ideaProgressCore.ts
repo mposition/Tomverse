@@ -1,3 +1,5 @@
+import { amuxDatabaseDiagnosticCode } from "./readFailureCore.ts";
+
 /**
  * The approved v49 backlog redesign shows each idea at one of six stages
  * (execution approval → analysis → plan approval → execution → PR review and
@@ -104,4 +106,38 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
 export function amuxIdeaProgressStep(stage: AmuxIdeaProgressStage): number | null {
   const index = (AMUX_IDEA_PROGRESS_STAGES as readonly string[]).indexOf(stage);
   return index < 0 ? null : index + 1;
+}
+
+/**
+ * What the page logs when the progress read fails: codes and class names only,
+ * never a message, a query, a parameter or a row. The Ideas tab used to log
+ * the bare event, so a production failure could not be told apart (a busy
+ * database, a statement timeout, a missing column and a refused boundary all
+ * looked the same).
+ */
+export function amuxIdeaProgressFailureLog(error: unknown): {
+  subsystem: "amux"; event: "idea_progress_read_failed";
+  name: string | null; boundaryCode: string | null; prismaCode: string | null; sqlState: string | null;
+  signal: "connection_closed" | "timeout" | null;
+} {
+  const record = (error && typeof error === "object" ? error : {}) as Record<string, unknown>;
+  const cause = (record.cause && typeof record.cause === "object" ? record.cause : {}) as Record<string, unknown>;
+  const short = (value: unknown, pattern: RegExp) =>
+    typeof value === "string" && pattern.test(value) ? value : null;
+  // A session ended for idling in its transaction (SQLSTATE 25P03) reaches the pg client as a
+  // plain Error with no code at all ("Client has encountered a connection error and is not
+  // queryable"). The message is matched against fixed patterns and only the class is logged,
+  // never the text: the text of a database error can carry a query or a value.
+  const text = typeof record.message === "string" ? record.message : "";
+  const signal = /not queryable|connection (?:error|terminated|closed)|terminating connection|ECONNRESET/i.test(text)
+    ? "connection_closed" as const : /time(?:d)? ?out/i.test(text) ? "timeout" as const : null;
+  return {
+    subsystem: "amux",
+    event: "idea_progress_read_failed",
+    name: short(record.name, /^[A-Za-z][A-Za-z0-9]{0,63}$/),
+    boundaryCode: short(record.code, /^AMUX_DB_[A-Z_]{1,48}$/),
+    prismaCode: short(record.code, /^P\d{4}$/) ?? short(cause.code, /^P\d{4}$/),
+    sqlState: amuxDatabaseDiagnosticCode(error),
+    signal,
+  };
 }
