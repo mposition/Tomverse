@@ -5,7 +5,7 @@ import { amuxCanonicalJson } from "../lib/amux/boardImportCore.ts";
 import { amuxContentDigest } from "../lib/amux/ideaCrypto.ts";
 import { deriveAmuxIdeaUnitConfirmation } from
   "../lib/amux/ideaUnitConfirmationCore.ts";
-import { inspectAmuxV4CardRegistration } from
+import { inspectAmuxV4CardRegistration, inspectAmuxV20TaskRegistration } from
   "../lib/amux/ideaUnitRegistrationCore.ts";
 import { calculateV4TaskCostCeiling } from
   "../lib/amux/v4TaskCostCeilingCore.ts";
@@ -80,6 +80,57 @@ function fixture() {
     digestKey: key, resolvedFeatureRef: "feature_00001" };
 }
 
+function taskFixture(options = {}) {
+  const { taskRole = "implement", executionGrade = "advanced" } = options;
+  const expectedPaths = Object.hasOwn(options, "expectedPaths") ?
+    options.expectedPaths : ["src/worker.ts"];
+  const input = fixture();
+  input.proposal.cardType = "task";
+  input.proposal.storyKind = null;
+  input.proposal.taskRole = taskRole;
+  input.proposal.executionGrade = executionGrade;
+  input.proposal.executionBrief = "Implement and test one bounded change";
+  if (expectedPaths === undefined) delete input.proposal.expectedPaths;
+  else input.proposal.expectedPaths = expectedPaths;
+  input.snapshot.draftShape = { kind: "card", cardType: "task", storyKind: null };
+  input.snapshot.card.cardType = "task";
+  input.snapshot.card.storyKind = null;
+  const cost = calculateV4TaskCostCeiling({
+    role: taskRole, grade: executionGrade, catalogVersion: "catalog-v1",
+    catalogDigest: "e".repeat(64), pricingVersion: "price-v1",
+    gradeRulesVersion: "rules-v1", asOfIso: "2026-10-01T01:00:00.000Z",
+    caps: { uncachedInputTokens: 1000, outputTokens: 1000,
+      cacheReadTokens: 0, cacheWriteTokens: 0, maxAttempts: 2 },
+    routes: [{ routeId: `codex/${taskRole}`, workerName: "worker-codex",
+      provider: "openai", modelId: "openai/frontier-model",
+      routePolicyDigest: "f".repeat(64), enabled: true,
+      roles: [taskRole], grades: [executionGrade],
+      pricingSource: "verified-record", pricingVerifiedAt: "2026-10-01T00:00:00.000Z",
+      uncachedInputMicroUsdPerMillion: 1_000_000,
+      outputMicroUsdPerMillion: 2_000_000,
+      cacheReadMicroUsdPerMillion: 0, cacheWriteMicroUsdPerMillion: 0,
+      toolCostCapMicroUsdPerAttempt: 0 }],
+  });
+  assert.equal(cost.ok, true);
+  const body = amuxContentDigest(Buffer.from(amuxCanonicalJson(input.proposal), "utf8"),
+    "analysis_draft", input.prepared.draftUnitId, key);
+  const brief = amuxContentDigest(Buffer.from(input.proposal.executionBrief, "utf8"),
+    "analysis_draft", input.prepared.draftUnitId, key);
+  input.prepared.unitDigest = body.digest;
+  input.snapshot.unitBody.digest = body.digest;
+  input.snapshot.card.normalizedBody.digest = body.digest;
+  input.snapshot.card.task = { role: taskRole, grade: executionGrade,
+    brief: { digest: brief.digest, keyId: brief.digestKeyId },
+    costReceipt: cost.receipt };
+  input.snapshot.duplicates = { ...input.snapshot.duplicates };
+  input.confirmation = deriveAmuxIdeaUnitConfirmation(input.snapshot,
+    key, input.snapshot.duplicates, cost);
+  assert.equal(input.confirmation.ok, true);
+  input.context.currentConfirmation = input.confirmation;
+  input.prepared.confirmationDigest = input.confirmation.confirmationDigest;
+  return { input, cost };
+}
+
 test("one checked Story becomes one inert backlog plan", () => {
   const result = inspectAmuxV4CardRegistration(fixture());
   assert.equal(result.ok, true);
@@ -105,50 +156,10 @@ test("modified proposal, source, feature or expired confirmation cannot register
 });
 
 test("Task brief and approved cost must match the stored proposal and current price", () => {
-  const input = fixture();
-  input.proposal.cardType = "task";
-  input.proposal.storyKind = null;
-  input.proposal.taskRole = "implementation";
-  input.proposal.executionGrade = "standard";
-  input.proposal.executionBrief = "Implement and test one bounded change";
-  input.snapshot.draftShape = { kind: "card", cardType: "task", storyKind: null };
-  input.snapshot.card.cardType = "task";
-  input.snapshot.card.storyKind = null;
-  const cost = calculateV4TaskCostCeiling({
-    role: "implementation", grade: "standard", catalogVersion: "catalog-v1",
-    catalogDigest: "e".repeat(64), pricingVersion: "price-v1",
-    gradeRulesVersion: "rules-v1", asOfIso: "2026-10-01T01:00:00.000Z",
-    caps: { uncachedInputTokens: 1000, outputTokens: 1000,
-      cacheReadTokens: 0, cacheWriteTokens: 0, maxAttempts: 2 },
-    routes: [{ routeId: "codex/implementation", workerName: "worker-codex",
-      provider: "openai", modelId: "openai/frontier-model",
-      routePolicyDigest: "f".repeat(64), enabled: true,
-      roles: ["implementation"], grades: ["standard"],
-      pricingSource: "verified-record", pricingVerifiedAt: "2026-10-01T00:00:00.000Z",
-      uncachedInputMicroUsdPerMillion: 1_000_000,
-      outputMicroUsdPerMillion: 2_000_000,
-      cacheReadMicroUsdPerMillion: 0, cacheWriteMicroUsdPerMillion: 0,
-      toolCostCapMicroUsdPerAttempt: 0 }],
-  });
-  assert.equal(cost.ok, true);
-  const body = amuxContentDigest(Buffer.from(amuxCanonicalJson(input.proposal), "utf8"),
-    "analysis_draft", input.prepared.draftUnitId, key);
-  const brief = amuxContentDigest(Buffer.from(input.proposal.executionBrief, "utf8"),
-    "analysis_draft", input.prepared.draftUnitId, key);
-  input.prepared.unitDigest = body.digest;
-  input.snapshot.unitBody.digest = body.digest;
-  input.snapshot.card.normalizedBody.digest = body.digest;
-  input.snapshot.card.task = { role: "implementation", grade: "standard",
-    brief: { digest: brief.digest, keyId: brief.digestKeyId },
-    costReceipt: cost.receipt };
-  input.snapshot.duplicates = { ...input.snapshot.duplicates };
-  input.confirmation = deriveAmuxIdeaUnitConfirmation(input.snapshot,
-    key, input.snapshot.duplicates, cost);
-  assert.equal(input.confirmation.ok, true);
-  input.context.currentConfirmation = input.confirmation;
-  input.prepared.confirmationDigest = input.confirmation.confirmationDigest;
+  const { input, cost } = taskFixture();
   const registered = inspectAmuxV4CardRegistration(input);
   assert.equal(registered.ok, true);
+  assert.equal(registered.plan.executionGrade, "advanced");
   assert.equal(registered.plan.maximumCostMicroUsd, cost.receipt.ceilingMicroUsd);
 
   const altered = { ...structuredClone(input), digestKey: key };
@@ -158,4 +169,71 @@ test("Task brief and approved cost must match the stored proposal and current pr
   stalePrice.confirmation = deriveAmuxIdeaUnitConfirmation(stalePrice.snapshot,
     key, stalePrice.snapshot.duplicates, null);
   assert.equal(inspectAmuxV4CardRegistration(stalePrice).ok, false);
+});
+
+test("v20 Task guard reports each path and role refusal before registration", () => {
+  const proposal = taskFixture().input.proposal;
+  for (const [mutate, code] of [
+    [(value) => { delete value.expectedPaths; }, "task_expected_paths_missing"],
+    [(value) => { value.expectedPaths = []; }, "task_expected_paths_out_of_range"],
+    [(value) => { value.expectedPaths = Array.from({ length: 41 }, (_, index) => `src/${index}.ts`); },
+      "task_expected_paths_out_of_range"],
+    [(value) => { value.expectedPaths = ["../escape.ts"]; }, "task_expected_path_invalid"],
+    [(value) => { value.expectedPaths = ["src/worker.ts", "./src/worker.ts"]; },
+      "task_expected_paths_duplicate"],
+    [(value) => { value.expectedPaths = ["lib/amux/guard.ts", "src/worker.ts"]; },
+      "task_expected_paths_mixed"],
+    [(value) => { value.taskRole = "review"; }, "task_role_review_refused"],
+    [(value) => { value.expectedPaths = ["lib/amux/guard.ts"]; },
+      "task_execution_grade_mismatch"],
+  ]) {
+    const candidate = structuredClone(proposal);
+    mutate(candidate);
+    assert.deepEqual(inspectAmuxV20TaskRegistration(candidate), { ok: false, code });
+  }
+});
+
+test("the final card registration boundary preserves v20 path and role refusals", () => {
+  for (const [options, code] of [
+    [{ expectedPaths: undefined }, "task_expected_paths_missing"],
+    [{ expectedPaths: [] }, "task_expected_paths_out_of_range"],
+    [{ expectedPaths: Array.from({ length: 41 }, (_, index) => `src/${index}.ts`) },
+      "task_expected_paths_out_of_range"],
+    [{ expectedPaths: ["../escape.ts"] }, "task_expected_path_invalid"],
+    [{ expectedPaths: ["src/worker.ts", "./src/worker.ts"] },
+      "task_expected_paths_duplicate"],
+    [{ expectedPaths: ["lib/amux/guard.ts", "src/worker.ts"] },
+      "task_expected_paths_mixed"],
+    [{ taskRole: "review" }, "task_role_review_refused"],
+  ]) {
+    assert.deepEqual(inspectAmuxV4CardRegistration(taskFixture(options).input), {
+      ok: false, code,
+    });
+  }
+});
+
+test("final registration requires the derived grade in proposal, confirmation and cost receipt", () => {
+  const contract = taskFixture({ expectedPaths: ["lib/amux/guard.ts"],
+    executionGrade: "frontier" }).input;
+  const registered = inspectAmuxV4CardRegistration(contract);
+  assert.equal(registered.ok, true);
+  assert.equal(registered.plan.executionGrade, "frontier");
+
+  const proposedTooLow = taskFixture({ expectedPaths: ["lib/amux/guard.ts"],
+    executionGrade: "advanced" }).input;
+  assert.deepEqual(inspectAmuxV4CardRegistration(proposedTooLow), {
+    ok: false, code: "task_execution_grade_mismatch",
+  });
+
+  const confirmationTooLow = { ...structuredClone(contract), digestKey: key };
+  confirmationTooLow.snapshot.card.task.grade = "advanced";
+  assert.deepEqual(inspectAmuxV4CardRegistration(confirmationTooLow), {
+    ok: false, code: "task_confirmation_grade_mismatch",
+  });
+
+  const receiptTooLow = { ...structuredClone(contract), digestKey: key };
+  receiptTooLow.snapshot.card.task.costReceipt.grade = "advanced";
+  assert.deepEqual(inspectAmuxV4CardRegistration(receiptTooLow), {
+    ok: false, code: "task_cost_receipt_grade_mismatch",
+  });
 });
