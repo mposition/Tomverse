@@ -631,6 +631,22 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261016040000_amux_v19_session_submission/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 3,
+    writeVerbs: 9,
+    reason:
+      "The v19 session-submission migration adds one restrictive scope foreign key and its submission guard reads the referenced and latest immutable scope rows. It never writes an operating-scope row; the write verbs are DDL, trigger events and the guard's refused UPDATE path on AmuxIdeaSubmission.",
+  },
+  {
+    path: "prisma/migrations/20261016040000_amux_v19_session_submission/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 9,
+    reason:
+      "The v19 session-submission migration adds one restrictive audit foreign key and its guard reads the same-transaction canonical system audit before accepting AmuxIdeaSubmission. It never writes AdminAuditLog; the write verbs are DDL, trigger events and the guarded submission update path.",
+  },
   ...[
     "AmuxV22TaskRecoveryInspectionRequest",
     "AmuxV22TaskRecoveryApproval",
@@ -1376,7 +1392,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "scripts/check-enum-constraints.mjs",
     table: "AgentDigestItem",
     tableMentions: 1,
-    writeVerbs: 19,
+    writeVerbs: 20,
     reason:
       "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
   },
@@ -2337,7 +2353,7 @@ export const RAW_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/check-enum-constraints.mjs", table: "PromptRefinerProductOperationalGuard",
-    tableMentions: 2, writeVerbs: 19,
+    tableMentions: 2, writeVerbs: 20,
     reason: "Two closed constraint-registry identifiers link the latch state and reason checks to their runtime lists. This checker reads source and migration SQL, holds no database client and executes no SQL.",
   },
 ];
@@ -2622,7 +2638,7 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/amux-v4-activation-preflight.mjs",
-    sha256: "9f97102e046c32707c45d474c57c6a10fbad8896ce65b22f1f9014ef23adb04b",
+    sha256: "f2a9503f7add087b0b077185aa9561ec43428fdae8f65ced13da2630291599b5",
     count: 1,
     reason:
       "AMUX v4 activation diagnostic: one pg import; a fixed allowlist of ciphertext/key columns yields counts only inside BEGIN REPEATABLE READ READ ONLY with statement and idle-transaction timeouts. No audit, model call, switch or body write. The S3 operation is a read-only version-listing probe in an unused namespace, not key deletion evidence. Fingerprint is bound to the complete reviewed script.",

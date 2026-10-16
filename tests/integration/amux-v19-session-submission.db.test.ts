@@ -1,0 +1,341 @@
+import assert from "node:assert/strict";
+import { randomBytes, randomUUID } from "node:crypto";
+import { after, before, test } from "node:test";
+import type { Session } from "next-auth";
+
+import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
+import {
+  AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+  AMUX_SESSION_IDEA_SUBMITTED_SCOPE,
+  AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+  AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+  auditRowActorKind,
+} from "@/lib/adminAuditSystemActors";
+import { openAmuxContent, sealAmuxContent } from "@/lib/amux/ideaCrypto";
+import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
+import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
+import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
+import {
+  commitAmuxOperatingScope,
+  readAmuxOperatingScopeAuthority,
+  type AmuxOperatingScopeAuthority,
+} from "@/lib/amux/ideaOperatingScopeStore";
+import { commitAmuxDueRawIdeaPurge } from "@/lib/amux/ideaRawRetentionService";
+import {
+  commitAmuxIdeaSessionSubmission,
+  readAmuxIdeaSessionSubmissionRequest,
+  AmuxIdeaSessionSubmissionError,
+} from "@/lib/amux/ideaSessionSubmissionService";
+import {
+  inspectAmuxIdeaSessionSubmission,
+  type AmuxIdeaSessionSubmissionInspection,
+} from "@/lib/amux/ideaSessionSubmissionCore";
+import { prepareIdeaSubmissionStorage } from "@/lib/amux/ideaSubmissionService";
+import { prisma } from "@/lib/prisma";
+
+const testUrl = process.env.TEST_DATABASE_URL?.trim();
+const url = testUrl ? new URL(testUrl) : null;
+if (!url || !["postgres:", "postgresql:"].includes(url.protocol) ||
+    !["127.0.0.1", "localhost"].includes(url.hostname) ||
+    !/^\/[A-Za-z0-9_-]+(?:[_-]test[0-9]*)$/i.test(url.pathname) ||
+    url.search !== "" || url.hash !== "" ||
+    process.env.DATABASE_URL !== testUrl ||
+    (process.env.DIRECT_DATABASE_URL && process.env.DIRECT_DATABASE_URL !== testUrl)) {
+  throw new Error("REFUSE: AMUX v19 session submission test requires a dedicated loopback test database");
+}
+
+const ownerId = "synthetic-session-owner-" + randomUUID();
+const ownerEmail = "amux-session-owner@example.test";
+process.env.ADMIN_USER_IDS = ownerId;
+process.env.ADMIN_EMAILS = ownerEmail;
+process.env.ADMIN_OWNER_EMAILS = ownerEmail;
+process.env.ADMIN_AUDIT_INTEGRITY_KEY =
+  "synthetic-amux-intake-operating-scope-audit-key-2026";
+const session = {
+  user: { id: ownerId, email: ownerEmail, authenticatedAt: new Date().toISOString() },
+  expires: new Date(Date.now() + 60 * 60_000).toISOString(),
+} as Session;
+const request = new Request("https://tomverse.test/internal/amux/session-intake", {
+  method: "POST",
+});
+const modelId = "synthetic-session-model-" + randomUUID();
+const scope = {
+  repositories: ["mposition/Tomverse", "mposition/tomverse-private-docs"],
+  model: { provider: "openai", modelId, reasoningEffort: "high" },
+};
+const masterKey = randomBytes(32);
+const digestKey = randomBytes(32);
+const keysFor = (ideaId: string) => ({
+  masterKeyId: amuxContentUnitKeyId({ ideaId, purpose: "idea_raw", subjectId: ideaId }),
+  masterKeyVersion: 1,
+  masterKey,
+  digestKeyId: "synthetic-session-digest",
+  digestKey,
+});
+const inspect = (
+  ideaId: string,
+  repositories = ["mposition/Tomverse"],
+): Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }> => {
+  const result = inspectAmuxIdeaSessionSubmission({
+    version: 1,
+    requestId: ideaId,
+    input: { version: 1, idea: "Synthetic session idea " + ideaId,
+      repositories, pullRequests: [] },
+    source: { toolName: "Codex", modelProvider: "OpenAI",
+      sessionDisplay: "AMUX v19 synthetic DB test" },
+  });
+  if (!result.ok) throw new Error("Synthetic session input rejected: " + result.code);
+  return result;
+};
+const auditMetadata = (
+  inspected: Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }>,
+  authority: AmuxOperatingScopeAuthority,
+  rawDigest: string,
+  rawDigestKeyId: string,
+  sourceDigest: string,
+  sourceDigestKeyId: string,
+) => ({
+  policyVersion: 19,
+  requestId: inspected.requestId,
+  rawDigest,
+  rawDigestKeyId,
+  sourceProvenanceDigest: sourceDigest,
+  sourceProvenanceDigestKeyId: sourceDigestKeyId,
+  operatingScopeSettingId: authority.settingId,
+  operatingScopeVersion: authority.version,
+  modelProvider: authority.scope.model.provider,
+  modelId: authority.scope.model.modelId,
+  reasoningEffort: authority.scope.model.reasoningEffort,
+  ideaBytes: inspected.counts.ideaBytes,
+  repositoryCount: inspected.counts.repositoryCount,
+  pullRequestCount: inspected.counts.pullRequestCount,
+});
+
+let authority: AmuxOperatingScopeAuthority;
+let committedIdeaId: string;
+let committedRequestId: string;
+let committedAuditId: string;
+
+before(async () => {
+  assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), 0,
+    "use the fresh DB runner before any persistent scope fixture");
+  const frontier = inspectFrontierCatalogWrite(JSON.stringify({
+    schemaVersion: 1,
+    action: "approve",
+    approvalId: randomUUID(),
+    provider: "openai",
+    modelId,
+    allowedEfforts: ["high"],
+    expectedPreviousVersion: 0,
+    ownerConfirmedFrontierEligibility: true,
+  }));
+  if (!frontier.ok) throw new Error("Synthetic Frontier input rejected: " + frontier.code);
+  await prisma.$transaction((tx) =>
+    commitFrontierCatalogDecision(tx, { session, request, decision: frontier.request }));
+  await prisma.$transaction((tx) => commitAmuxOperatingScope(tx, {
+    session, request, id: randomUUID(), expectedPreviousVersion: 0,
+    scope, ownerConfirmed: true,
+  }));
+  const current = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
+  if (!current) throw new Error("Synthetic operating scope was not stored");
+  authority = current;
+  committedIdeaId = randomUUID();
+  const inspected = inspect(committedIdeaId);
+  committedRequestId = inspected.requestId;
+  const committed = await prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionSubmission(tx, {
+      inspected, expectedAuthority: authority, ideaId: committedIdeaId,
+      keys: keysFor(committedIdeaId),
+    }));
+  committedAuditId = committed.auditId;
+});
+
+after(async () => {
+  masterKey.fill(0);
+  digestKey.fill(0);
+  await prisma.$disconnect();
+});
+
+test("session submission encrypts idea and provenance under the scope owner with system audit", async () => {
+  const [row, audit] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: committedIdeaId } }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: committedAuditId } }),
+  ]);
+  assert.equal(row.submissionOrigin, "session");
+  assert.equal(row.actorUserId, ownerId);
+  assert.equal(row.sessionOperatingScopeSettingId, authority.settingId);
+  assert.equal(row.submissionAuditLogId, audit.id);
+  assert.equal(row.sourceProvenanceKeyId, row.rawKeyId);
+  assert.equal(row.sourceProvenanceKeyVersion, row.rawKeyVersion);
+  assert.notEqual(row.sourceProvenanceDigest, row.rawDigest);
+  const keys = keysFor(committedIdeaId);
+  const raw = openAmuxContent({
+    ciphertext: Buffer.from(row.rawCiphertext ?? []),
+    keyId: row.rawKeyId ?? "",
+    keyVersion: row.rawKeyVersion ?? 0,
+  }, "idea_raw", committedIdeaId, keys);
+  const source = openAmuxContent({
+    ciphertext: Buffer.from(row.sourceProvenanceCiphertext ?? []),
+    keyId: row.sourceProvenanceKeyId ?? "",
+    keyVersion: row.sourceProvenanceKeyVersion ?? 0,
+  }, "idea_raw", committedIdeaId, keys);
+  assert.equal(JSON.parse(raw.toString("utf8")).idea,
+    "Synthetic session idea " + committedIdeaId);
+  assert.deepEqual(JSON.parse(source.toString("utf8")), {
+    toolName: "Codex", modelProvider: "OpenAI",
+    sessionDisplay: "AMUX v19 synthetic DB test",
+  });
+  assert.equal(audit.actorUserId, null);
+  assert.equal(audit.actorEmail, null);
+  assert.equal(audit.ipAddress, null);
+  assert.equal(audit.userAgent, null);
+  assert.equal(auditRowActorKind(audit), "system");
+  assert.equal(JSON.stringify(audit.metadata).includes("Codex"), false);
+  assert.equal(JSON.stringify(audit.metadata).includes("synthetic DB test"), false);
+  assert.deepEqual(await readAmuxIdeaSessionSubmissionRequest(committedRequestId), {
+    requestId: committedRequestId,
+    status: "committed",
+    ideaId: committedIdeaId,
+    hasExternalSources: true,
+  });
+});
+
+test("request collision and references outside the saved scope are read-only refusals", async () => {
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(committedRequestId),
+      expectedAuthority: authority,
+      ideaId: randomUUID(),
+      keys: keysFor(randomUUID()),
+    })), (error: unknown) =>
+    error instanceof AmuxIdeaSessionSubmissionError &&
+    error.code === "request_already_seen");
+  const outsideId = randomUUID();
+  const auditCount = await prisma.adminAuditLog.count();
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(outsideId, ["someone/else"]),
+      expectedAuthority: authority,
+      ideaId: outsideId,
+      keys: keysFor(outsideId),
+    })), (error: unknown) =>
+    error instanceof AmuxIdeaSessionSubmissionError &&
+    error.code === "outside_scope");
+  assert.equal(await prisma.amuxIdeaSubmission.count({ where: { id: outsideId } }), 0);
+  assert.equal(await prisma.adminAuditLog.count(), auditCount);
+});
+
+test("database refuses fake-human, wrong-owner and extra-metadata evidence", async () => {
+  const rollbackForgedEvidence = new Error("rollback forged evidence fixtures");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    for (const actorKind of ["human", "wrong_owner", "extra_metadata"] as const) {
+      const ideaId = randomUUID();
+      const inspected = inspect(ideaId);
+      const keys = keysFor(ideaId);
+      const submittedAt = new Date();
+      const prepared = prepareIdeaSubmissionStorage({ inspected, ideaId, keys, submittedAt });
+      const source = sealAmuxContent(Buffer.from(JSON.stringify(inspected.source), "utf8"),
+        "idea_raw", ideaId, keys);
+      const metadata = { ...auditMetadata(inspected, authority,
+        prepared.sealed.digest, prepared.sealed.digestKeyId,
+        source.digest, source.digestKeyId),
+        ...(actorKind === "extra_metadata"
+          ? { sessionDisplay: "must never enter canonical audit metadata" }
+          : {}),
+      };
+      const auditId = actorKind === "human"
+        ? await writeAdminAuditLog({
+          tx, session, request, action: AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+          targetType: AMUX_SESSION_IDEA_SUBMITTED_TARGET, targetId: ideaId,
+          summary: "Stored one encrypted AMUX session idea under the current owner-approved operating scope.",
+          metadata,
+        })
+        : await writeSystemAuditLog({
+          tx, systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+          action: AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+          targetType: AMUX_SESSION_IDEA_SUBMITTED_TARGET, targetId: ideaId,
+          summary: "Stored one encrypted AMUX session idea under the current owner-approved operating scope.",
+          metadata,
+        });
+      const audit = await tx.adminAuditLog.findUniqueOrThrow({ where: { id: auditId } });
+      assert.equal(audit.summary,
+        "Stored one encrypted AMUX session idea under the current owner-approved operating scope.");
+      if (actorKind === "human") {
+        assert.equal(auditRowActorKind(audit), "human");
+        assert.equal(audit.actorUserId, ownerId);
+        assert.deepEqual(audit.metadata, metadata);
+      } else {
+        assert.equal(auditRowActorKind(audit), "system");
+        assert.equal(audit.actorUserId, null);
+        assert.deepEqual(audit.metadata, {
+          ...metadata,
+          systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+          actorScope: AMUX_SESSION_IDEA_SUBMITTED_SCOPE,
+        });
+      }
+      const sameTransaction = await tx.$queryRaw<Array<{ same: boolean }>>`
+        SELECT xmin = pg_current_xact_id()::xid AS same
+        FROM "AdminAuditLog" WHERE "id" = ${auditId}
+      `;
+      assert.deepEqual(sameTransaction, [{ same: true }]);
+      await tx.$executeRawUnsafe("SAVEPOINT forged_session");
+      await assert.rejects(tx.amuxIdeaSubmission.create({ data: {
+        ...prepared.data,
+        actorUserId: actorKind === "wrong_owner" ? "not-the-scope-owner" : ownerId,
+        submissionOrigin: "session",
+        sessionOperatingScopeSettingId: authority.settingId,
+        submissionAuditLogId: auditId,
+        sourceProvenanceCiphertext: new Uint8Array(source.ciphertext),
+        sourceProvenanceKeyId: source.keyId,
+        sourceProvenanceKeyVersion: source.keyVersion,
+        sourceProvenanceDigest: source.digest,
+        sourceProvenanceDigestKeyId: source.digestKeyId,
+      } }), /session submission evidence mismatch/);
+      await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT forged_session");
+      await tx.$executeRawUnsafe("RELEASE SAVEPOINT forged_session");
+    }
+    throw rollbackForgedEvidence;
+  }), (error: unknown) => error === rollbackForgedEvidence);
+});
+
+test("audited identity and encrypted bodies are immutable except for one complete raw purge", async () => {
+  for (const data of [
+    { rawDigest: "f".repeat(64) },
+    { sourceProvenanceDigest: "e".repeat(64) },
+    { sourceProvenanceCiphertext: Buffer.from("replacement") },
+    { submissionOrigin: "owner" },
+  ]) {
+    await assert.rejects(prisma.amuxIdeaSubmission.update({
+      where: { id: committedIdeaId }, data,
+    }), /immutable|only during raw purge|session_shape_check/);
+  }
+  const row = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: committedIdeaId },
+  });
+  const completedAt = new Date(Math.min(Date.now(), row.analysisDeadlineAt.getTime() - 1));
+  await prisma.amuxIdeaSubmission.update({ where: { id: committedIdeaId },
+    data: { state: "completed", analysisCompletedAt: completedAt,
+      rawPurgeAfter: completedAt } });
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueRawIdeaPurge(tx, committedIdeaId)), "purged");
+  const purged = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: committedIdeaId },
+  });
+  assert.equal(purged.rawCiphertext, null);
+  assert.equal(purged.rawKeyId, null);
+  assert.equal(purged.sourceProvenanceCiphertext, null);
+  assert.equal(purged.sourceProvenanceKeyId, null);
+  assert.ok(purged.sourceProvenanceDigest);
+  assert.deepEqual(await readAmuxIdeaSessionSubmissionRequest(committedRequestId), {
+    requestId: committedRequestId,
+    status: "committed",
+    ideaId: committedIdeaId,
+    hasExternalSources: true,
+  });
+  await assert.rejects(prisma.amuxIdeaSubmission.update({
+    where: { id: committedIdeaId },
+    data: { sourceProvenanceCiphertext: Buffer.from("restored"),
+      sourceProvenanceKeyId: keysFor(committedIdeaId).masterKeyId,
+      sourceProvenanceKeyVersion: 1 },
+  }), /cannot be restored|session_shape_check/);
+});

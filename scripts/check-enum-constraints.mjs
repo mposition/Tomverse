@@ -677,6 +677,11 @@ const REGISTRY = {
     reason:
       "AMUX v4 idea analysis storage is a closed lifecycle. This schema-only migration does not enable a writer; the future intake service must validate exactly these states before activation.",
   },
+  AmuxIdeaSubmission_origin_check: {
+    owner: "database",
+    reason:
+      "An AMUX idea is stored either by the existing owner Admin path or by the v19 session path under the current owner-approved operating scope. The origin selects distinct human-versus-system audit evidence and cannot be relabelled after insert.",
+  },
   AmuxIdeaSourcePlanRevision_state_check: {
     owner: "database",
     reason:

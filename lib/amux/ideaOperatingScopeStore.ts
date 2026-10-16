@@ -22,13 +22,19 @@ export class AmuxOperatingScopeError extends Error {
 }
 
 export type AmuxOperatingScopeVersion = { version: number; scope: AmuxOperatingScope };
+export type AmuxOperatingScopeAuthority = AmuxOperatingScopeVersion & {
+  settingId: string;
+  approvedByUserId: string;
+};
 
 /**
  * The current scope, or null when the owner has never saved one (v19: intake is
  * then refused). A stored row that no longer passes the core check throws, so a
  * reader never falls back to an older or default scope.
  */
-export async function readAmuxOperatingScope(tx: Tx): Promise<AmuxOperatingScopeVersion | null> {
+export async function readAmuxOperatingScopeAuthority(
+  tx: Tx,
+): Promise<AmuxOperatingScopeAuthority | null> {
   const latest = await tx.amuxIdeaOperatingScopeSetting.findFirst({ orderBy: { version: "desc" } });
   if (!latest) return null;
   const admitted = normalizeAmuxOperatingScope({ repositories: latest.repositories,
@@ -36,7 +42,17 @@ export async function readAmuxOperatingScope(tx: Tx): Promise<AmuxOperatingScope
   if (!admitted.ok || JSON.stringify(admitted.scope.repositories) !== JSON.stringify(latest.repositories)) {
     throw new AmuxOperatingScopeError("scope_unavailable");
   }
-  return { version: latest.version, scope: admitted.scope };
+  return {
+    settingId: latest.id,
+    version: latest.version,
+    approvedByUserId: latest.approvedByUserId,
+    scope: admitted.scope,
+  };
+}
+
+export async function readAmuxOperatingScope(tx: Tx): Promise<AmuxOperatingScopeVersion | null> {
+  const authority = await readAmuxOperatingScopeAuthority(tx);
+  return authority ? { version: authority.version, scope: authority.scope } : null;
 }
 
 /**
