@@ -97,9 +97,11 @@ const unreadable: ReadResult<never> = { ok: false };
  * Bound this transaction by the service's deadline, in the database.
  *
  * PostgreSQL 17 arms `transaction_timeout` from the moment it is set inside the
- * transaction when no timer is already running, so a transaction set here to
- * the time left cannot commit after the deadline: the late success is rolled
- * back by the server, not noticed by this process. Left unbounded: the stretch
+ * transaction when no timer is already running. It is set to the longest an
+ * intake transaction takes, and only when at least that much time is left
+ * before the deadline at that same instant, so a transaction cannot commit
+ * after the deadline: the late success is rolled back by the server, not
+ * noticed by this process. Left unbounded: the stretch
  * from BEGIN to this statement and COMMIT's durable phase (agent foundation
  * §6.2a). Statement and idle bounds are shorter, so both stay armed.
  */
@@ -107,12 +109,11 @@ async function boundByDeadline(
   tx: MarketingTransaction,
   deadlineAt: Date,
 ): Promise<{ readonly now: Date } | { readonly refused: string }> {
-  const rows = await tx.$queryRaw<
-    Array<{ num: number; armed: string; now: Date }>
-  >(Prisma.sql`
+  // `missing_ok`, so a server without the setting answers NULL rather than
+  // failing the statement before the version can be checked.
+  const rows = await tx.$queryRaw<Array<{ num: number; armed: string | null }>>(Prisma.sql`
     SELECT current_setting('server_version_num')::int AS "num",
-           current_setting('transaction_timeout') AS "armed",
-           (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+           current_setting('transaction_timeout', true) AS "armed"
   `);
   const row = rows[0];
   if (!row || !(Number(row.num) >= MIN_SERVER_VERSION_NUM)) {
@@ -120,17 +121,34 @@ async function boundByDeadline(
   }
   const armed = String(row.armed ?? "").trim();
   if (armed !== "0" && armed !== "0ms") return { refused: "intake_timeout_already_armed" };
-  const left = deadlineAt.getTime() - row.now.getTime();
-  if (!(left >= MARKETING_DRAFT_INTAKE_TRANSACTION_MS)) return { refused: "intake_deadline_too_close" };
-  const bound = Math.min(left, MARKETING_DRAFT_INTAKE_TRANSACTION_MS);
-  await tx.$queryRaw(Prisma.sql`SELECT set_config('transaction_timeout', ${String(bound)}, true)`);
+
+  // **The time left and the timer are one statement.** Read in one round trip
+  // and set in another, a pause between them -- the network, this process --
+  // left the timer starting later than the reading it was sized from, and the
+  // transaction able to outlive the deadline. Here the server measures the
+  // time left at the instant it arms the timer, and arms it only when the
+  // whole transaction fits.
+  const armedRows = await tx.$queryRaw<Array<{ now: Date; set: string | null }>>(Prisma.sql`
+    WITH clock AS (
+      SELECT clock_timestamp() AS at,
+             EXTRACT(EPOCH FROM (${deadlineAt}::timestamptz - clock_timestamp())) * 1000 AS left_ms
+    )
+    SELECT (clock.at AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now",
+           CASE WHEN clock.left_ms >= ${MARKETING_DRAFT_INTAKE_TRANSACTION_MS}
+                THEN set_config('transaction_timeout', ${String(MARKETING_DRAFT_INTAKE_TRANSACTION_MS)}, true)
+                ELSE NULL END AS "set"
+    FROM clock
+  `);
+  const armedRow = armedRows[0];
+  if (!armedRow || armedRow.set === null) return { refused: "intake_deadline_too_close" };
+
   await tx.$queryRaw(
     Prisma.sql`SELECT set_config('statement_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true)`,
   );
   await tx.$queryRaw(
     Prisma.sql`SELECT set_config('idle_in_transaction_session_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true)`,
   );
-  return { now: row.now };
+  return { now: armedRow.now };
 }
 
 /**

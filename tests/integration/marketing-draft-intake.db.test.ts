@@ -198,6 +198,15 @@ test("a draft with too little time before the service's deadline is not started"
   assert.equal(await prisma.marketingPost.count(), 0);
 });
 
+test("the time left is measured where the timer is armed: just under the bound is refused, just over is started", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  const under = await intake(draft(row.id), OPEN, { deadlineAt: new Date(Date.now() + 9_000) });
+  assert.deepEqual(under, { status: "refused", reasons: ["intake_deadline_too_close"] });
+  const over = await intake(draft(row.id), OPEN, { deadlineAt: new Date(Date.now() + 13_000) });
+  assert.equal(over.status, "queued");
+});
+
 test("an unknown channel is refused, not created", async () => {
   await draftsOn();
   const outcome = await intake(draft("chn_missing"), OPEN);
