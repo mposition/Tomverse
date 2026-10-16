@@ -156,6 +156,14 @@ test("a refusal and human audit are durable, path-free and idempotent by request
   assert.equal(await prisma.$transaction((tx) =>
     readLatestAmuxV20RegistrationRefusalInTx(tx, seeded.ideaId, actorUserId,
       seeded.previewId, randomUUID())), null);
+  const planRequestId = randomUUID();
+  await assert.rejects(recordAmuxV20RegistrationRefusal({ ...input,
+    requestId: planRequestId, refusalCode: "plan_schema_invalid" }),
+  (error: unknown) => error instanceof AmuxV20RegistrationRefusalStoreError &&
+    error.code === "integrity_unavailable");
+  assert.equal(await prisma.amuxIdeaRegistrationRefusal.count({
+    where: { requestId: planRequestId },
+  }), 0);
   await prisma.amuxIdeaDraftUnit.update({ where: { id: seeded.unitId },
     data: { state: "approved" } });
   assert.equal(await prisma.$transaction((tx) =>

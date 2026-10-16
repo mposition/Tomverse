@@ -14,7 +14,8 @@ import type { AmuxAnalysisCard, AmuxAnalysisNode } from
   "./ideaAnalysisChunkCore.ts";
 
 export class AmuxIdeaUnitProposalReadError extends Error {
-  constructor(readonly code: "not_found" | "not_ready" | "integrity_unavailable") {
+  constructor(readonly code: "not_found" | "not_ready" | "schema_invalid" |
+    "integrity_unavailable") {
     super(code);
     this.name = "AmuxIdeaUnitProposalReadError";
   }
@@ -107,7 +108,10 @@ export async function readVerifiedAmuxUnitProposalForDataOwner(
           raw: plain.toString("utf8"), chunkIndex: unit.chunkIndex,
           permittedSourceRefIds: ["operator_idea"],
         });
-        if (!inspected.ok || inspected.unit.kind !== "card" ||
+        if (!inspected.ok) {
+          throw new AmuxIdeaUnitProposalReadError("schema_invalid");
+        }
+        if (inspected.unit.kind !== "card" ||
             inspected.unit.localId !== unit.localRef) {
           throw new AmuxIdeaUnitProposalReadError("integrity_unavailable");
         }

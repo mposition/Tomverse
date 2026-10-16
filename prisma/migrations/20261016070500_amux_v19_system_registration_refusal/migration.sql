@@ -48,6 +48,12 @@ BEGIN
      ]) IS NOT TRUE OR
      NOT (
        (audit_row."actorUserId" = NEW."actorUserId" AND
+        unit_row."unitKind" = 'card' AND
+        NEW."refusalCode" NOT IN (
+          'plan_schema_invalid', 'plan_hierarchy_invalid',
+          'plan_dependency_invalid', 'plan_dependency_cycle',
+          'plan_score_invalid', 'plan_duplicate_unresolved'
+        ) AND
         metadata->>'systemActor' IS NULL AND
         metadata - ARRAY[
           'policyVersion', 'state', 'requestId', 'attemptKind', 'refusalCode',
@@ -56,6 +62,7 @@ BEGIN
         ] = '{}'::jsonb) OR
        (audit_row."actorUserId" IS NULL AND audit_row."actorEmail" IS NULL AND
         audit_row."ipAddress" IS NULL AND audit_row."userAgent" IS NULL AND
+        NEW."attemptKind" = 'whole_plan' AND
         metadata->>'systemActor' = 'amux-v4-intake' AND
         metadata->>'actorScope' = 'system-registration-refusal-v1' AND
         metadata - ARRAY[

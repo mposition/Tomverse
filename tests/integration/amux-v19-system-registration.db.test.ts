@@ -38,6 +38,8 @@ import { commitAmuxIdeaSessionSubmission } from
 import { commitAmuxV19CompletedIdeaSystemRegistration,
   readAmuxV19SystemRegistration } from
   "@/lib/amux/ideaSystemRegistrationService";
+import { AmuxIdeaUnitProposalReadError } from
+  "@/lib/amux/ideaUnitProposalReadService";
 import { amuxAnalysisFreeformSubjectId } from
   "@/lib/amux/ideaAnalysisDraftSealCore";
 import { commitIdeaOnlyTransferPreview } from
@@ -78,6 +80,7 @@ let session: Session;
 let request: Request;
 let registeredSystemDecisionId: string;
 let registeredSystemDecisionAuditId: string;
+let registeredTaskTitle: string;
 
 const listen = (server: Server) => new Promise<void>((resolve, reject) => {
   server.once("error", reject);
@@ -209,7 +212,9 @@ async function approveSyntheticTaskCatalog() {
 
 async function completedSessionIdea(options: {
   expectedPaths?: string[];
+  taskTitle?: string;
 } = {}) {
+  const initialObjectKeys = new Set(objects.keys());
   const ideaId = randomUUID();
   const inspected = inspectAmuxIdeaSessionSubmission({ version: 1,
     requestId: ideaId, input: { version: 1,
@@ -308,9 +313,11 @@ async function completedSessionIdea(options: {
       title: `Synthetic feature ${ideaId}`, description: "System registration fixture.",
       sourceRefIds: ["operator_idea"], portfolioSignal: signal({ value: 3 }) },
     { kind: "card", localId: "c0:card-0", cardType: "task", storyKind: null,
-      title: `Synthetic Task ${ideaId}`, problem: "Register one bounded plan.",
+      title: options.taskTitle ?? `Synthetic Task ${ideaId}`,
+      problem: "Register one bounded plan.",
       scopeIn: ["Register this fixture"], scopeOut: ["Do not execute it"],
-      completionCriteria: ["The inert Task is auditable"], featureRef: "c0:node-2",
+      completionCriteria: ["The inert Task is auditable"],
+      featureRef: "c0:node-2",
       parentStoryRef: null, dependencyRefs: [], duplicateCandidateRefs: [],
       taskRole: "implement", executionGrade: "advanced",
       expectedPaths: options.expectedPaths ??
@@ -335,12 +342,13 @@ async function completedSessionIdea(options: {
   assert.equal(plan.revisionId, (await prisma.amuxIdeaSubmission.findUniqueOrThrow({
     where: { id: ideaId }, select: { currentSourcePlanRevisionId: true },
   })).currentSourcePlanRevisionId);
-  return { ideaId, unitIds };
+  return { ideaId, unitIds, taskTitle: units[3]!.title,
+    objectKeys: [...objects.keys()].filter((key) => !initialObjectKeys.has(key)) };
 }
 
 test("one completed session plan registers atomically under system evidence", async () => {
   await approveSyntheticTaskCatalog();
-  const { ideaId, unitIds } = await completedSessionIdea();
+  const { ideaId, unitIds, taskTitle } = await completedSessionIdea();
   const before = {
     decisions: await prisma.amuxIdeaUnitDecision.count({ where: { ideaId } }),
     cards: await prisma.amuxWorkItem.count({ where: {
@@ -380,6 +388,7 @@ test("one completed session plan registers atomically under system evidence", as
   assert.ok(systemDecision?.finalAuditLogId);
   registeredSystemDecisionId = systemDecision.id;
   registeredSystemDecisionAuditId = systemDecision.finalAuditLogId;
+  registeredTaskTitle = taskTitle;
   const taskSnapshot = decisions.find((entry) =>
     entry.registeredWorkItemId === task.id)?.confirmationSnapshot as
       { card?: { task?: { proposedGrade?: string; grade?: string;
@@ -448,6 +457,48 @@ test("a mixed-path plan writes one durable refusal and no backlog rows", async (
     auditMetadata: rows[0]!.auditLog.metadata });
   assert.equal(evidence.includes("components/admin"), false);
   assert.equal(evidence.includes("lib/amux"), false);
+});
+
+test("an unresolved duplicate writes one plan refusal and no backlog rows", async () => {
+  assert.ok(registeredTaskTitle);
+  const { ideaId, unitIds } = await completedSessionIdea({
+    taskTitle: registeredTaskTitle,
+  });
+  const before = await Promise.all([
+    prisma.amuxIdeaUnitDecision.count(),
+    prisma.amuxPortfolioNode.count(),
+    prisma.amuxWorkItem.count(),
+  ]);
+  const result = await commitAmuxV19CompletedIdeaSystemRegistration(ideaId);
+  assert.equal(result.state, "awaiting_operator");
+  if (result.state !== "awaiting_operator") {
+    throw new Error("unresolved duplicate was not refused");
+  }
+  assert.equal(result.refusal.refusalCode, "plan_duplicate_unresolved");
+  assert.deepEqual(await Promise.all([
+    prisma.amuxIdeaUnitDecision.count(),
+    prisma.amuxPortfolioNode.count(),
+    prisma.amuxWorkItem.count(),
+  ]), before);
+  assert.equal(await prisma.amuxWorkItem.count({ where: {
+    sourceSystem: "admin-idea-v4", sourceKey: { in: unitIds },
+  } }), 0);
+  assert.equal(await prisma.amuxIdeaRegistrationRefusal.count({ where: {
+    ideaId, refusalCode: "plan_duplicate_unresolved",
+  } }), 1);
+});
+
+test("a key-store failure writes neither a refusal nor backlog rows", async () => {
+  const { ideaId, objectKeys } = await completedSessionIdea();
+  assert.ok(objectKeys.length > 0, "the fixture did not create key objects");
+  for (const key of objectKeys) objects.delete(key);
+  await assert.rejects(commitAmuxV19CompletedIdeaSystemRegistration(ideaId),
+    (error: unknown) => error instanceof AmuxIdeaUnitProposalReadError &&
+      error.code === "integrity_unavailable");
+  assert.equal(await prisma.amuxIdeaRegistrationRefusal.count({ where: {
+    ideaId,
+  } }), 0);
+  assert.equal(await prisma.amuxIdeaUnitDecision.count({ where: { ideaId } }), 0);
 });
 
 test("the deferred DB guard rejects a forged system actor scope", async () => {

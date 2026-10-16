@@ -2,7 +2,10 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
+import { auditRowActorKind,
+  AMUX_V4_IDEA_SYSTEM_ACTOR,
+  AMUX_V19_REGISTRATION_REFUSAL_SCOPE } from
+  "@/lib/adminAuditSystemActors";
 import { AMUX_V20_REGISTRATION_REFUSAL_ACTION,
   AMUX_V20_REGISTRATION_REFUSAL_TARGET,
   amuxV20RegistrationRefusalMetadata,
@@ -36,7 +39,10 @@ export async function readLatestAmuxV20RegistrationRefusalInTx(
     typeof row.auditLog.metadata === "object" &&
     !Array.isArray(row.auditLog.metadata) ?
     { ...(row.auditLog.metadata as Record<string, unknown>) } : null;
-  if (actorKind === "system" && metadata) {
+  const exactSystemAuthority = actorKind !== "system" ||
+    (metadata?.systemActor === AMUX_V4_IDEA_SYSTEM_ACTOR &&
+      metadata.actorScope === AMUX_V19_REGISTRATION_REFUSAL_SCOPE);
+  if (actorKind === "system" && exactSystemAuthority && metadata) {
     delete metadata.systemActor;
     delete metadata.actorScope;
   }
@@ -47,6 +53,7 @@ export async function readLatestAmuxV20RegistrationRefusalInTx(
       (row.finalExecutionGrade !== null &&
         !isAmuxV20RegistrationRefusalGrade(row.finalExecutionGrade)) ||
       !row.auditLog.entryHash ||
+      !exactSystemAuthority ||
       (actorKind !== "system" &&
         (actorKind !== "human" || row.auditLog.actorUserId !== actorUserId)) ||
       row.auditLog.action !== AMUX_V20_REGISTRATION_REFUSAL_ACTION ||

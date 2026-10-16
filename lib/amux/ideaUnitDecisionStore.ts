@@ -419,9 +419,11 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
   const evidence = await input.recalculate(tx);
   const confirmation = deriveAmuxIdeaUnitConfirmation(input.snapshot,
     input.keys, evidence.duplicateScan, evidence.taskCost);
+  const authorityKind = amuxRegistrationAuthorityKind(input);
   const inspected = inspectAmuxV4CardRegistration({
     prepared: { ...prepared, state: prepared.state as "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
-    context: { ...input.context, databaseNow: now,
+    context: { ...input.context, registrationAuthority: authorityKind,
+      databaseNow: now,
       currentConfirmation: confirmation }, confirmation,
     snapshot: input.snapshot, proposal: input.proposal,
     digestKey: input.keys,
@@ -487,7 +489,6 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     await tx.amuxWorkDependency.createMany({ data: plan.dependencyIds.map(
       (dependencyId) => ({ taskId: input.cardId, dependencyId })) });
   }
-  const authorityKind = amuxRegistrationAuthorityKind(input);
   const auditId = await writeAmuxRegistrationAudit({ tx, authority: input,
     action: "amux.v4.unit.consume",
     targetType: "AmuxIdeaUnitDecision", targetId: plan.decisionId,
@@ -602,10 +603,12 @@ export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient,
   const duplicates = await input.recalculate(tx);
   const confirmation = deriveAmuxIdeaUnitConfirmation(input.snapshot,
     input.keys, duplicates, null);
+  const authorityKind = amuxRegistrationAuthorityKind(input);
   const inspected = inspectAmuxV4NodeCreation({
     prepared: { ...prepared, state: prepared.state as
       "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
-    context: { ...input.context, databaseNow: now,
+    context: { ...input.context, registrationAuthority: authorityKind,
+      databaseNow: now,
       currentConfirmation: confirmation }, confirmation,
     snapshot: input.snapshot, proposal: input.proposal,
     digestKey: input.keys,
@@ -625,7 +628,6 @@ export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient,
   // refuses a concurrent creation that took the same one.
   const displayPrefix = plan.level === "feature" ?
     await chooseAmuxFeatureDisplayPrefix(tx, plan.displayPrefix) : null;
-  const authorityKind = amuxRegistrationAuthorityKind(input);
   const auditId = await writeAmuxRegistrationAudit({ tx, authority: input,
     action: "amux.v4.unit.consume",
     targetType: "AmuxIdeaUnitDecision", targetId: plan.decisionId,
@@ -736,7 +738,8 @@ export async function commitAmuxV4UnitRejection(tx: Prisma.TransactionClient, in
     input.keys, null, null);
   const guard = checkAmuxIdeaUnitConsume({ ...prepared,
     state: prepared.state as "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
-  { ...input.context, databaseNow: now, currentConfirmation: confirmation });
+  { ...input.context, registrationAuthority: "owner", databaseNow: now,
+    currentConfirmation: confirmation });
   if (guard.decision !== "allow") {
     throw new AmuxV4UnitDecisionError(guard.decision === "halt" ?
       "integrity_unavailable" : "reconfirm");
@@ -873,7 +876,8 @@ export async function commitAmuxV4NodeSelection(tx: Prisma.TransactionClient, in
   }
   const guard = checkAmuxIdeaUnitConsume({ ...prepared,
     state: prepared.state as "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
-  { ...input.context, databaseNow: now, currentConfirmation: confirmation });
+  { ...input.context, registrationAuthority: "owner", databaseNow: now,
+    currentConfirmation: confirmation });
   if (guard.decision !== "allow") {
     throw new AmuxV4UnitDecisionError(guard.decision === "halt" ?
       "integrity_unavailable" : "reconfirm");
@@ -1046,7 +1050,8 @@ export async function commitAmuxV4CardLink(tx: Prisma.TransactionClient, input: 
   }
   const guard = checkAmuxIdeaUnitConsume({ ...prepared,
     state: prepared.state as "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
-  { ...input.context, databaseNow: now, currentConfirmation: confirmation });
+  { ...input.context, registrationAuthority: "owner", databaseNow: now,
+    currentConfirmation: confirmation });
   if (guard.decision !== "allow") {
     throw new AmuxV4UnitDecisionError(guard.decision === "halt" ?
       "integrity_unavailable" : "reconfirm");

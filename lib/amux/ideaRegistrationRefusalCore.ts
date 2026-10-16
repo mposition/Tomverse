@@ -85,6 +85,8 @@ const GRADES = new Set<AmuxV20RegistrationRefusalGrade>(
   ["routine", "advanced", "frontier"],
 );
 const ATTEMPT_KINDS = new Set<string>(AMUX_V20_REGISTRATION_REFUSAL_ATTEMPT_KINDS);
+const TASK_REFUSAL_CODES = new Set<string>(AMUX_V20_TASK_REGISTRATION_REFUSAL_CODES);
+const PLAN_REFUSAL_CODES = new Set<string>(AMUX_V19_PLAN_REGISTRATION_REFUSAL_CODES);
 const REFUSAL_CODES = new Set<string>(AMUX_REGISTRATION_REFUSAL_CODES);
 
 export const isAmuxV20RegistrationRefusalAttemptKind = (value: unknown):
@@ -97,7 +99,11 @@ export const isAmuxV20RegistrationRefusalGrade = (value: unknown):
 
 export const isAmuxV20TaskRegistrationRefusal = (value: unknown):
   value is AmuxV20TaskRegistrationRefusal =>
-  typeof value === "string" && REFUSAL_CODES.has(value);
+  typeof value === "string" && TASK_REFUSAL_CODES.has(value);
+
+export const isAmuxV19PlanRegistrationRefusal = (value: unknown):
+  value is AmuxV19PlanRegistrationRefusal =>
+  typeof value === "string" && PLAN_REFUSAL_CODES.has(value);
 
 export const isAmuxRegistrationRefusalCode = (value: unknown):
   value is AmuxRegistrationRefusalCode => typeof value === "string" &&

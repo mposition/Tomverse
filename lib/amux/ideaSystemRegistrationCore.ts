@@ -95,6 +95,7 @@ export function deriveAmuxV19RegistrationRefusalRequestId(input: {
 }): string {
   if (![input.ideaId, input.draftUnitId, input.analysisPreviewId,
     input.refusalCode].every((value) => ID.test(value)) ||
+      !ID.test(input.key.digestKeyId) ||
       !Buffer.isBuffer(input.key.digestKey) || input.key.digestKey.length !== 32) {
     throw new Error("AMUX system refusal identity unavailable");
   }

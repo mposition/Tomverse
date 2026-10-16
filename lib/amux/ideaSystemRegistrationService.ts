@@ -29,7 +29,8 @@ import { commitAmuxV4CardRegistration, commitAmuxV4NodeCreation,
 import { inspectAmuxV20TaskRegistration } from
   "./ideaUnitRegistrationCore.ts";
 import { readVerifiedAmuxCardProposalForDataOwner,
-  readVerifiedAmuxNodeProposalForDataOwner } from
+  readVerifiedAmuxNodeProposalForDataOwner,
+  AmuxIdeaUnitProposalReadError } from
   "./ideaUnitProposalReadService.ts";
 import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { AmuxPortfolioError, writeAmuxPortfolioAssessmentInTx } from
@@ -46,6 +47,7 @@ import { recordAmuxV20RegistrationRefusal } from
   "./ideaRegistrationRefusalService.ts";
 import { AMUX_V19_SYSTEM_REGISTRATION_ACTION,
   AMUX_V19_SYSTEM_REGISTRATION_AUDIT_ACTOR,
+  AMUX_V19_SYSTEM_REGISTRATION_SCOPE,
   AMUX_V19_SYSTEM_REGISTRATION_TARGET,
   AMUX_V19_UNIT_REGISTRATION_AUTHORITY,
   amuxV19SystemRegistrationEnabled,
@@ -151,7 +153,9 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
     try {
       verifiedNodes.push(await readVerifiedAmuxNodeProposalForDataOwner(
         idea.actorUserId, ideaId, unit.id));
-    } catch {
+    } catch (error) {
+      if (!(error instanceof AmuxIdeaUnitProposalReadError) ||
+          error.code !== "schema_invalid") throw error;
       throw new AmuxV19PlanRegistrationRefusalDetected(
         "plan_schema_invalid", refusalIdentity(unit));
     }
@@ -162,7 +166,9 @@ async function prepareCompletedPlan(ideaId: string): Promise<PreparedPlan> {
     try {
       verifiedCards.push(await readVerifiedAmuxCardProposalForDataOwner(
         idea.actorUserId, ideaId, unit.id));
-    } catch {
+    } catch (error) {
+      if (!(error instanceof AmuxIdeaUnitProposalReadError) ||
+          error.code !== "schema_invalid") throw error;
       throw new AmuxV19PlanRegistrationRefusalDetected(
         "plan_schema_invalid", refusalIdentity(unit));
     }
@@ -541,8 +547,7 @@ export async function commitAmuxV19CompletedIdeaSystemRegistration(
           });
         } catch (error) {
           if (!(error instanceof AmuxPortfolioError) ||
-              error.code === "integrity_unavailable" ||
-              error.code === "forbidden") throw error;
+              error.code !== "invalid_input") throw error;
           throw new AmuxV19PlanRegistrationRefusalDetected(
             "plan_score_invalid", { ideaId: plan.ideaId,
               draftUnitId: entry.draftUnitId,
@@ -562,8 +567,7 @@ export async function commitAmuxV19CompletedIdeaSystemRegistration(
           });
         } catch (error) {
           if (!(error instanceof AmuxPortfolioError) ||
-              error.code === "integrity_unavailable" ||
-              error.code === "forbidden") throw error;
+              error.code !== "invalid_input") throw error;
           throw new AmuxV19PlanRegistrationRefusalDetected(
             "plan_score_invalid", { ideaId: plan.ideaId,
               draftUnitId: entry.draftUnitId,
@@ -631,7 +635,8 @@ export async function readAmuxV19SystemRegistration(ideaId: string) {
     throw new AmuxV19SystemRegistrationError("not_found");
   }
   const idea = await prisma.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
-    select: { id: true, state: true, systemRegistrationAuditLogId: true },
+    select: { id: true, state: true, currentSourcePlanRevisionId: true,
+      systemRegistrationAuditLogId: true },
   });
   if (!idea) throw new AmuxV19SystemRegistrationError("not_found");
   if (!idea.systemRegistrationAuditLogId) {
@@ -645,6 +650,73 @@ export async function readAmuxV19SystemRegistration(ideaId: string) {
       audit.action !== AMUX_V19_SYSTEM_REGISTRATION_ACTION ||
       audit.targetType !== AMUX_V19_SYSTEM_REGISTRATION_TARGET ||
       audit.targetId !== idea.id || auditRowActorKind(audit) !== "system") {
+    return { state: "inconsistent" as const, retryWrite: false as const };
+  }
+  const metadata = audit.metadata && typeof audit.metadata === "object" &&
+    !Array.isArray(audit.metadata) ?
+    audit.metadata as Record<string, unknown> : null;
+  if (!metadata || !idea.currentSourcePlanRevisionId ||
+      metadata.systemActor !== AMUX_V19_SYSTEM_REGISTRATION_AUDIT_ACTOR ||
+      metadata.actorScope !== AMUX_V19_SYSTEM_REGISTRATION_SCOPE) {
+    return { state: "inconsistent" as const, retryWrite: false as const };
+  }
+  const decisions = await prisma.amuxIdeaUnitDecision.findMany({ where: {
+    ideaId, state: "consumed", action: { in: ["create_node", "register_card"] },
+  }, select: { action: true, resolvedNodeId: true,
+    registeredWorkItemId: true, confirmationSnapshot: true } });
+  const nodeIds = decisions.flatMap((decision) =>
+    decision.action === "create_node" && decision.resolvedNodeId ?
+      [decision.resolvedNodeId] : []);
+  const cardIds = decisions.flatMap((decision) =>
+    decision.action === "register_card" && decision.registeredWorkItemId ?
+      [decision.registeredWorkItemId] : []);
+  if (nodeIds.length + cardIds.length !== decisions.length ||
+      new Set(nodeIds).size !== nodeIds.length ||
+      new Set(cardIds).size !== cardIds.length) {
+    return { state: "inconsistent" as const, retryWrite: false as const };
+  }
+  const assessmentSubjects: Prisma.AmuxPortfolioAssessmentWhereInput[] = [
+    ...(nodeIds.length > 0 ? [{ nodeId: { in: nodeIds } }] : []),
+    ...(cardIds.length > 0 ? [{ cardId: { in: cardIds } }] : []),
+  ];
+  const [assessmentCount, scoreCount] = await Promise.all([
+    assessmentSubjects.length === 0 ? 0 :
+      prisma.amuxPortfolioAssessment.count({ where: {
+        OR: assessmentSubjects,
+      } }),
+    cardIds.length === 0 ? 0 :
+      prisma.amuxPortfolioScoreSnapshot.count({ where: {
+        taskId: { in: cardIds },
+      } }),
+  ]);
+  const publicPrConsentCount = decisions.filter((decision) => {
+    const snapshot = decision.confirmationSnapshot;
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+      return false;
+    }
+    const card = (snapshot as Record<string, unknown>).card;
+    if (!card || typeof card !== "object" || Array.isArray(card)) return false;
+    const task = (card as Record<string, unknown>).task;
+    return !!task && typeof task === "object" && !Array.isArray(task) &&
+      (task as Record<string, unknown>).publicPrDisclosureApproved === true;
+  }).length;
+  const expectedMetadata = {
+    systemActor: AMUX_V19_SYSTEM_REGISTRATION_AUDIT_ACTOR,
+    actorScope: AMUX_V19_SYSTEM_REGISTRATION_SCOPE,
+    ideaId,
+    sourcePlanRevisionId: idea.currentSourcePlanRevisionId,
+    nodeCount: nodeIds.length,
+    cardCount: cardIds.length,
+    assessmentCount,
+    scoreCount,
+    publicPrConsentCount,
+    executionAttempted: false,
+  };
+  const metadataKeys = Object.keys(expectedMetadata);
+  if (Object.keys(metadata).length !== metadataKeys.length ||
+      metadataKeys.some((key) => !Object.hasOwn(metadata, key) ||
+        metadata[key] !== expectedMetadata[
+          key as keyof typeof expectedMetadata])) {
     return { state: "inconsistent" as const, retryWrite: false as const };
   }
   return { state: "committed" as const, retryWrite: false as const,

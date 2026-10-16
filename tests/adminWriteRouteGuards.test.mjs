@@ -144,8 +144,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // Intake v19.5 adds a data-owner form of the same stored-result read and the
 // closed whole-plan refusal vocabulary. On 2026-10-16 the 17-file closure was
 // recomputed unchanged, with no writer, outbound I/O or dynamic import added.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "699d1adbe4d638b9c6478a36e5b2f1d06414fa4bcc3694dc174865942326773c";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "5aa742e9349b0d11ef9a36af744c21f46e1872fd309fe113ad81b90f143ca426";
+// The v19.5 review repair separates task and whole-plan refusal predicates and
+// verifies the stored system actor/scope. The import closure remains identical.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "dabc9a3d1da569b25c4bac2782295472a895d82a2f0f721d7835ae69e9275cc7";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "d862492048bed40f72a1c0abcbea57475a86b390fd6a6a81a5f65e90ff2556c8";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

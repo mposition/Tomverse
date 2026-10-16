@@ -13,6 +13,7 @@ import { AMUX_V20_REGISTRATION_REFUSAL_ACTION,
   amuxV20RegistrationRefusalView,
   isAmuxV20RegistrationRefusalAttemptKind,
   isAmuxV20RegistrationRefusalGrade,
+  isAmuxV19PlanRegistrationRefusal,
   isAmuxRegistrationRefusalCode,
   type AmuxV20RegistrationRefusalAttemptKind,
   type AmuxV20RegistrationRefusalRecord,
@@ -24,11 +25,13 @@ import { amuxRegistrationAuthorityActor,
   isAmuxSystemRegistrationAuthority,
   type AmuxRegistrationAuditAuthority,
   writeAmuxRegistrationAudit } from "./ideaRegistrationAuditAuthority.ts";
+import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 
 const ID = /^[A-Za-z0-9:_-]{8,128}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 export class AmuxV20RegistrationRefusalStoreError extends Error {
-  constructor(readonly code: "forbidden" | "integrity_unavailable") {
+  constructor(readonly code: "forbidden" | "halted" |
+    "integrity_unavailable") {
     super(code);
     this.name = "AmuxV20RegistrationRefusalStoreError";
   }
@@ -57,9 +60,13 @@ const matchesInput = (row: AmuxV20RegistrationRefusalRecord, input: RecordInput,
   row.proposedExecutionGrade === input.proposedExecutionGrade &&
   row.finalExecutionGrade === input.finalExecutionGrade;
 
-const validInput = (input: RecordInput) => UUID.test(input.requestId) &&
+const validInput = (input: RecordInput, systemAuthority: boolean) =>
+  UUID.test(input.requestId) &&
   isAmuxV20RegistrationRefusalAttemptKind(input.attemptKind) &&
   isAmuxRegistrationRefusalCode(input.refusalCode) &&
+  (!systemAuthority || input.attemptKind === "whole_plan") &&
+  (!isAmuxV19PlanRegistrationRefusal(input.refusalCode) ||
+    (systemAuthority && input.attemptKind === "whole_plan")) &&
   ID.test(input.ideaId) && ID.test(input.draftUnitId) &&
   ID.test(input.analysisPreviewId) &&
   (input.proposedExecutionGrade === null ||
@@ -76,10 +83,11 @@ export async function recordAmuxV20RegistrationRefusal(
   try { actorUserId = amuxRegistrationAuthorityActor(input); } catch {
     throw new AmuxV20RegistrationRefusalStoreError("forbidden");
   }
-  if (!isAmuxSystemRegistrationAuthority(input)) {
+  const systemAuthority = isAmuxSystemRegistrationAuthority(input);
+  if (!systemAuthority) {
     await assertRecentAdminAuthentication(input.session);
   }
-  if (!validInput(input)) {
+  if (!validInput(input, systemAuthority)) {
     throw new AmuxV20RegistrationRefusalStoreError("integrity_unavailable");
   }
   try {
@@ -94,6 +102,9 @@ export async function recordAmuxV20RegistrationRefusal(
           throw new AmuxV20RegistrationRefusalStoreError("integrity_unavailable");
         }
         return amuxV20RegistrationRefusalView(existing);
+      }
+      if (systemAuthority && await findOpenAmuxOrchestratorHalt(tx)) {
+        throw new AmuxV20RegistrationRefusalStoreError("halted");
       }
       const units = await tx.$queryRaw<Array<{ id: string; ideaId: string;
         actorUserId: string; chunkIndex: number; unitKind: string }>>`
@@ -110,7 +121,9 @@ export async function recordAmuxV20RegistrationRefusal(
         where: { id: input.ideaId, actorUserId }, select: { id: true },
       });
       if (!idea || units.length !== 1 || !unit || unit.ideaId !== input.ideaId ||
-          unit.actorUserId !== actorUserId || unit.unitKind !== "card" ||
+          unit.actorUserId !== actorUserId ||
+          (systemAuthority ? !["node", "card"].includes(unit.unitKind) :
+            unit.unitKind !== "card") ||
           !preview || !preview.sourcePlanRevisionId ||
           preview.ideaId !== input.ideaId ||
           preview.chunkIndex !== unit.chunkIndex) {
