@@ -67,6 +67,51 @@ test("ambiguous submit records unknown and never submits again", () => {
   } finally { cleanup(); }
 });
 
+test("a known job survives transient status failure without resubmission", () => {
+  let submits = 0;
+  let statuses = 0;
+  const jobId = "r-20261016-110005-abcdef";
+  const { options, cleanup } = fixture((_program, args) => {
+    if (args[0] === "rev-parse") return { code: 0,
+      stdout: `${args[2].startsWith("refs/") ? input.commitSha : input.baseSha}\n` };
+    if (args.includes("submit")) {
+      submits += 1;
+      return { code: 3, stdout: JSON.stringify({ jobId }) };
+    }
+    statuses += 1;
+    return statuses === 1 ? { code: 65, stdout: "" } :
+      { code: 0, stdout: JSON.stringify({ jobId, base: input.baseSha,
+        head: input.commitSha, author: input.author, repo: "tomverse",
+        authorVendor: input.authorVendor, touchesContract: false,
+        status: "accept", reviews: [{ vendor: "openai" }] }) };
+  });
+  try {
+    assert.deepEqual(reviewStep(input, options), { kind: "pending", jobId });
+    assert.equal(reviewStep(input, options).evidence.verdict, "accept");
+    assert.equal(submits, 1);
+  } finally { cleanup(); }
+});
+
+test("three failed reads of a known job end unknown without resubmission", () => {
+  let submits = 0;
+  const jobId = "r-20261016-110006-abcdef";
+  const { options, cleanup } = fixture((_program, args) => {
+    if (args[0] === "rev-parse") return { code: 0,
+      stdout: `${args[2].startsWith("refs/") ? input.commitSha : input.baseSha}\n` };
+    if (args.includes("submit")) {
+      submits += 1;
+      return { code: 3, stdout: JSON.stringify({ jobId }) };
+    }
+    return { code: 65, stdout: "" };
+  });
+  try {
+    assert.equal(reviewStep(input, options).kind, "pending");
+    assert.equal(reviewStep(input, options).kind, "pending");
+    assert.equal(reviewStep(input, options).evidence.verdict, "unknown");
+    assert.equal(submits, 1);
+  } finally { cleanup(); }
+});
+
 test("contract acceptance requires two other reviewer vendors", () => {
   const contract = { ...input, touchesContract: true };
   const jobId = "r-20261016-110001-abcdef";

@@ -156,6 +156,12 @@ export function reviewStep(input, options = {}) {
     return { kind: "final", evidence: final };
   }
   const reply = run("/usr/bin/node", [client, "status", state.jobId], worktree);
+  if (reply.code === 65 && (state.statusFailures ?? 0) < 2) {
+    // A known submission is already durable. Retry only its read, never submit.
+    durableWrite(path, { ...state,
+      statusFailures: (state.statusFailures ?? 0) + 1 });
+    return { kind: "pending", jobId: state.jobId };
+  }
   let status;
   try { status = JSON.parse(reply.stdout); } catch {}
   const expectedCode = { pending: 3, accept: 0, reject: 1, unknown: 2 }[status?.status];
@@ -165,7 +171,11 @@ export function reviewStep(input, options = {}) {
     status.repo === (options.repo ?? "tomverse") &&
     status.authorVendor === input.authorVendor &&
     typeof status.touchesContract === "boolean";
-  if (valid && status.status === "pending") return { kind: "pending", jobId: state.jobId };
+  if (valid && status.status === "pending") {
+    if (state.statusFailures) durableWrite(path, { input,
+      jobId: state.jobId, statusFailures: 0 });
+    return { kind: "pending", jobId: state.jobId };
+  }
   const vendors = valid ? reviewVendors(status) : null;
   const verdict = valid && vendors &&
     ["accept", "reject"].includes(status.status) &&

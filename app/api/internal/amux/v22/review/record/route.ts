@@ -26,6 +26,7 @@ const requestSchema = z.object({
   instance_id: z.string().uuid(),
   generation: z.number().int().min(1).max(AMUX_PRISMA_INT_MAX),
   task_revision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
+  changed_paths: z.array(z.string().min(1)).min(1).max(4_096),
   evidence: evidenceSchema,
 }).strict();
 
@@ -70,11 +71,12 @@ export async function POST(request: Request) {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, 8 * 1_024, requestSchema);
+      const body = await readLimitedJson(request, 32 * 1_024, requestSchema);
       const result = await recordAmuxV52Review({
         attemptId: body.attempt_id, worker: body.worker,
         instanceId: body.instance_id, generation: body.generation,
         taskRevision: body.task_revision,
+        changedPaths: body.changed_paths,
         evidence: { jobId: body.evidence.job_id,
           baseSha: body.evidence.base_sha,
           commitSha: body.evidence.commit_sha,

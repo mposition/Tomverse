@@ -1221,6 +1221,7 @@ export const heartbeatAmuxV22TaskExecution = (
 export async function recordAmuxV52Review(input: {
   attemptId: string; worker: string; instanceId: string;
   generation: number; taskRevision: number;
+  changedPaths: string[];
   evidence: AmuxV52ReviewEvidence;
 }) {
   if (!validAmuxV52ReviewEvidence(input.evidence))
@@ -1230,18 +1231,17 @@ export async function recordAmuxV52Review(input: {
   const evidence = input.evidence;
   const candidate = await loadEngineeringAgentV22SettlementPatch(
     input.attemptId);
-  const candidateKinds = candidate?.files?.map((file) =>
-    classifyAmuxExecutionPath(file.path));
-  if (!candidate || !candidateKinds?.length ||
-      candidateKinds.includes("invalid") ||
-      candidateKinds.includes("contract") !== evidence.touchesContract ||
+  const pathKinds = input.changedPaths?.map(classifyAmuxExecutionPath);
+  if (!candidate || !pathKinds?.length ||
+      pathKinds.includes("invalid") ||
+      pathKinds.includes("contract") !== evidence.touchesContract ||
       candidate.baseSha !== evidence.baseSha)
     return { recorded: false as const,
       reason: "review_patch_unverified" as const };
   const requestDigest = createHash("sha256").update(JSON.stringify({
     attemptId: input.attemptId, worker: input.worker,
     instanceId: input.instanceId, generation: input.generation,
-    taskRevision: input.taskRevision, evidence,
+    taskRevision: input.taskRevision, changedPaths: input.changedPaths, evidence,
   })).digest("hex");
   return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.v52ReviewRecord,
     async (tx, context) => {
@@ -1286,6 +1286,10 @@ export async function recordAmuxV52Review(input: {
           assignment.provider !== evidence.authorVendor)
         return { recorded: false as const,
           reason: "review_assignment_unverified" as const };
+      if (decideAmuxV52SettlementPaths(assignment.grade,
+          input.changedPaths, candidate.files) !== "pass")
+        return { recorded: false as const,
+          reason: "review_patch_unverified" as const };
       const patch = await tx.amuxV22TaskPatch.findUnique({
         where: { attemptId: attempt.id },
         select: { taskId: true, baseSha: true, bodyPurgedAt: true },

@@ -511,11 +511,12 @@ export async function pullAmuxWorkDelivery(input: {
         if (reviewScope.length > 4_000)
           throw new Error("v52 review scope exceeds server limit");
         const prior = await tx.amuxV52ReviewRecord.findFirst({
-          where: { taskId: delivery.taskId, verdict: "reject" },
+          where: { taskId: delivery.taskId },
           orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
-          select: { jobId: true },
+          select: { jobId: true, verdict: true },
         });
-        reviewFeedbackJobId = prior?.jobId ?? undefined;
+        reviewFeedbackJobId = prior?.verdict === "reject" ?
+          prior.jobId ?? undefined : undefined;
       }
       return {
         prompt: `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +

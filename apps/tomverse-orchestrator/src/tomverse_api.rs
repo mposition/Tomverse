@@ -3008,6 +3008,7 @@ struct V52ReviewRecordRequest<'a> {
     instance_id: &'a str,
     generation: i64,
     task_revision: i64,
+    changed_paths: &'a [String],
     evidence: &'a V52ReviewEvidence,
 }
 
@@ -3864,6 +3865,7 @@ impl TomverseApi {
 
     pub async fn v52_review_record(&self, delivery: &PulledDelivery,
         instance_id: &str, generation: i64,
+        changed_paths: &[String],
         evidence: &V52ReviewEvidence) -> Result<V52ReviewRecordResponse> {
         let response = self.client
             .post(format!("{}/api/internal/amux/v22/review/record", self.base_url))
@@ -3872,7 +3874,7 @@ impl TomverseApi {
             .json(&V52ReviewRecordRequest {
                 attempt_id: &delivery.attempt_id,
                 worker: &delivery.worker, instance_id, generation,
-                task_revision: delivery.task_revision, evidence,
+                task_revision: delivery.task_revision, changed_paths, evidence,
             }).send().await?;
         let (status, body): (_, V52ReviewRecordResponse) = read_bounded_json(response,
             &[StatusCode::OK, StatusCode::CONFLICT],

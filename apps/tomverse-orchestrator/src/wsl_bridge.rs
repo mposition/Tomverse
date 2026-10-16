@@ -3167,6 +3167,7 @@ pub async fn run_from_env() -> i32 {
                                                         };
                                                         match api.v52_review_record(&entry.delivery,
                                                             &session.instance_id, session.generation,
+                                                            result.changed_paths.as_deref().unwrap_or(&[]),
                                                             &evidence).await {
                                                             Ok(answer) if answer.recorded => {},
                                                             Ok(_) => review_unverified = true,

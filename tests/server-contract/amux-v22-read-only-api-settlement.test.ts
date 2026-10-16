@@ -47,7 +47,7 @@ function makeWorld(outcome: Outcome) {
     sourceApprovalId: null as string | null,
     patch: null as { taskId: string; baseSha: string; sha256: string;
       text: string; files: Array<{ path: string; mode: "100644";
-        bytesBase64: string }> } | null,
+        bytesBase64: string }> | null } | null,
     taskUpdates: 0,
     gradeAuditsAtTaskUpdate: -1,
     attemptUpdates: 0,
@@ -505,7 +505,7 @@ test("v52 review record binds an implement patch, assignment and audit once", as
     sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
     files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
   const input = { attemptId, worker, instanceId, generation: 1,
-    taskRevision: 5, evidence: {
+    taskRevision: 5, changedPaths: ["lib/ordinary.ts"], evidence: {
       jobId: "r-20261016-110000-abcdef", baseSha: "a".repeat(40),
       commitSha: "c".repeat(40), verdict: "accept" as const,
       authorVendor: "anthropic", reviewerVendors: ["openai"],
@@ -524,6 +524,25 @@ test("v52 review record binds an implement patch, assignment and audit once", as
   });
   assert.deepEqual(mismatch, { recorded: false,
     reason: "review_patch_unverified" });
+  const incomplete = await (await execution).recordAmuxV52Review({
+    ...input, changedPaths: ["app/page.tsx"],
+  });
+  assert.deepEqual(incomplete, { recorded: false,
+    reason: "review_patch_unverified" });
+  world = makeWorld("succeeded");
+  world.gradeGuard = true;
+  world.assignmentRole = "implement";
+  world.taskGrade = "frontier";
+  world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+    sha256: "b".repeat(64),
+    text: "diff --git a/lib/amux/execution.ts b/lib/amux/execution.ts\n",
+    files: null };
+  const largePatch = await (await execution).recordAmuxV52Review({
+    ...input, changedPaths: ["lib/amux/execution.ts"],
+    evidence: { ...input.evidence, touchesContract: true,
+      reviewerVendors: ["openai", "xai"] },
+  });
+  assert.deepEqual(largePatch, { recorded: true, duplicate: false });
   } finally {
     if (previousKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
     else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousKey;
