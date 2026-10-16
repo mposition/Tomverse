@@ -219,6 +219,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Intake v19 direct-read checkout evidence is append-only and audit-bound;
   // it adds no commit-deadline marker, trigger or classifier change.
   "20261017000000_amux_v19_tracked_checkout_evidence",
+  // The v19 encrypted read manifest is another independent, audit-bound
+  // content table; it does not touch the commit-deadline mechanism.
+  "20261017010000_amux_v19_tracked_checkout_read_manifest",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
