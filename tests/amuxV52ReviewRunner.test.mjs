@@ -54,7 +54,7 @@ test("one submission stays pending and then records independent acceptance", () 
 
 test("ambiguous submit records unknown and never submits again", () => {
   let submits = 0;
-  const { options, cleanup } = fixture((_program, args) => {
+  const { options, cleanup } = fixture(() => {
     submits += 1;
     return { code: 65, stdout: "" };
   });
