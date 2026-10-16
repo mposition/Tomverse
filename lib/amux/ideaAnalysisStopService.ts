@@ -8,6 +8,9 @@ import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
+import { AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_ACTION,
+  AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_TARGET } from
+  "./ideaAnalysisClaimResolutionCore.ts";
 import { AmuxIdeaAnalysisUnknownOutcomeError,
   commitAmuxIdeaAnalysisUnknownOutcome } from
   "./ideaAnalysisUnknownOutcomeService.ts";
@@ -63,23 +66,28 @@ export async function readAmuxIdeaAnalysisStopReceipt(
       data.stopRequestId !== input.stopRequestId ||
       typeof data.previewId !== "string" || !ID.test(data.previewId) ||
       typeof data.ideaId !== "string" || !ID.test(data.ideaId) ||
+      !Number.isSafeInteger(data.chunkIndex) ||
+      Number(data.chunkIndex) < 0 ||
       data.retryAutomatically !== false) {
     throw new AmuxIdeaAnalysisStopError("integrity_unavailable");
   }
   const [hold, preview, chunk, resolutions] = await Promise.all([
     tx.amuxIdeaAnalysisBudgetHold.findUnique({ where: { id: audit.targetId } }),
     tx.amuxIdeaTransferPreview.findUnique({ where: { id: data.previewId } }),
-    tx.amuxIdeaAnalysisChunk.findFirst({ where: {
-      ideaId: data.ideaId, currentPreviewId: data.previewId } }),
+    tx.amuxIdeaAnalysisChunk.findUnique({ where: {
+      ideaId_chunkIndex: { ideaId: data.ideaId,
+        chunkIndex: Number(data.chunkIndex) } } }),
     tx.adminAuditLog.findMany({ where: {
-      action: "amux.v4.analysis_claim.owner_resolved",
-      targetType: AMUX_V19_ANALYSIS_STOP_TARGET, targetId: audit.targetId,
+      action: AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_ACTION,
+      targetType: AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_TARGET,
+      targetId: audit.targetId,
     }, take: 2 }),
   ]);
   const resolution = resolutions[0];
   const resolutionData = resolution && metadata(resolution.metadata);
   const unresolved = hold?.status === "outcome_unknown" &&
     preview?.state === "outcome_unknown" && chunk?.state === "outcome_unknown" &&
+    chunk.currentPreviewId === data.previewId &&
     resolutions.length === 0;
   const settled = hold?.status === "owner_consumed" &&
     hold.closedAt !== null && hold.settledMicroUsd === hold.reservedMicroUsd &&

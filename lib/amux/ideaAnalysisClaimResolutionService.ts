@@ -13,6 +13,8 @@ import { auditRowActorKind, AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_IDEA_AUTO_CANCEL_TARGET } from "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { amuxIdeaAnalysisClaimReadbackDigest,
+  AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_ACTION as ACTION,
+  AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_TARGET as TARGET,
   type AmuxIdeaAnalysisClaimReadback,
   type AmuxIdeaAnalysisClaimResolutionDisposition } from
   "./ideaAnalysisClaimResolutionCore.ts";
@@ -21,8 +23,6 @@ import { AMUX_V19_ANALYSIS_STOP_ACTION,
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
-const ACTION = "amux.v4.analysis_claim.owner_resolved";
-const TARGET = "AmuxIdeaAnalysisBudgetHold";
 
 export class AmuxIdeaAnalysisClaimResolutionError extends Error {
   constructor(readonly code: "forbidden" | "not_resolvable" |

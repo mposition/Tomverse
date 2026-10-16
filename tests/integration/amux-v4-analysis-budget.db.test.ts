@@ -909,6 +909,10 @@ test("owner stop fences an in-flight result and preserves the full budget hold",
       evidenceDigest: randomBytes(32).toString("hex"),
       disposition: "evidence_insufficient" });
     assert.equal(resolved.settledMicroUsd, "5000");
+    await tx.amuxIdeaAnalysisChunk.update({
+      where: { ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } },
+      data: { currentPreviewId: null },
+    });
     assert.equal((await readAmuxIdeaAnalysisStopReceipt(tx, { session,
       stopRequestId })).status, "committed");
     throw new Error("rollback synthetic owner stop");
