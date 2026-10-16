@@ -366,7 +366,7 @@ async function readExistingSystemRegistrationRefusal(ideaId: string) {
   if (!candidate) return null;
   return prisma.$transaction((tx) => readLatestAmuxV20RegistrationRefusalInTx(
     tx, ideaId, idea.actorUserId, candidate.analysisPreviewId,
-    idea.currentSourcePlanRevisionId!,
+    idea.currentSourcePlanRevisionId!, { attemptKind: "whole_plan" },
   ));
 }
 

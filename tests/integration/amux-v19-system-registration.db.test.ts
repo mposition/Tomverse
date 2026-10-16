@@ -39,6 +39,8 @@ import { commitAmuxIdeaSessionSubmission } from
 import { commitAmuxV19CompletedIdeaSystemRegistrationForTest,
   readAmuxV19SystemRegistration } from
   "@/lib/amux/ideaSystemRegistrationService";
+import { recordAmuxV20RegistrationRefusal } from
+  "@/lib/amux/ideaRegistrationRefusalService";
 import { AmuxIdeaUnitProposalReadError } from
   "@/lib/amux/ideaUnitProposalReadService";
 import { writeAmuxPortfolioAssessmentInTx } from
@@ -461,6 +463,15 @@ test("a mixed-path plan writes one durable refusal and no backlog rows", async (
   }, { code: "task_expected_paths_mixed", attemptKind: "whole_plan",
     proposed: "advanced", final: null });
 
+  const laterOwnerRefusal = await recordAmuxV20RegistrationRefusal({
+    session, request, requestId: randomUUID(), attemptKind: "prepare",
+    refusalCode: "task_role_review_refused", ideaId,
+    draftUnitId: unitIds[3]!,
+    analysisPreviewId: first.refusal.analysisPreviewId,
+    proposedExecutionGrade: "advanced", finalExecutionGrade: null,
+  });
+  assert.equal(laterOwnerRefusal.attemptKind, "prepare");
+
   const digestKeyId = process.env.AMUX_V4_CONTENT_DIGEST_KEY_ID;
   const digestKey = process.env.AMUX_V4_CONTENT_DIGEST_KEY_B64;
   process.env.AMUX_V4_CONTENT_DIGEST_KEY_ID =
@@ -487,7 +498,7 @@ test("a mixed-path plan writes one durable refusal and no backlog rows", async (
   } }), 0);
 
   const rows = await prisma.amuxIdeaRegistrationRefusal.findMany({
-    where: { ideaId }, include: { auditLog: true },
+    where: { ideaId, attemptKind: "whole_plan" }, include: { auditLog: true },
   });
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.state, "awaiting_operator");

@@ -5,6 +5,8 @@ import { after, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { AMUX_V4_IDEA_SYSTEM_ACTOR } from
+  "@/lib/adminAuditSystemActors";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { commitInitialIdeaSourcePlan } from
@@ -173,6 +175,23 @@ test("a refusal and human audit are durable, path-free and idempotent by request
     refusalCode: "task_role_review_refused" }),
   (error: unknown) => error instanceof AmuxV20RegistrationRefusalStoreError &&
     error.code === "integrity_unavailable");
+});
+
+test("the system refusal boundary rejects an owner-origin idea", async () => {
+  const seeded = await fixture();
+  const requestId = randomUUID();
+  await assert.rejects(recordAmuxV20RegistrationRefusal({
+    systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+    actorUserId, requestId, attemptKind: "whole_plan",
+    refusalCode: "plan_schema_invalid", ideaId: seeded.ideaId,
+    draftUnitId: seeded.unitId, analysisPreviewId: seeded.previewId,
+    proposedExecutionGrade: null, finalExecutionGrade: null,
+  }), (error: unknown) =>
+    error instanceof AmuxV20RegistrationRefusalStoreError &&
+    error.code === "integrity_unavailable");
+  assert.equal(await prisma.amuxIdeaRegistrationRefusal.count({
+    where: { requestId },
+  }), 0);
 });
 
 test("the DB requires same-transaction exact audit evidence and append-only rows", async () => {

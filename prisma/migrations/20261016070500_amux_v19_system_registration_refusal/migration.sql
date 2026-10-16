@@ -6,6 +6,7 @@ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   unit_row record;
   preview_row record;
+  idea_row record;
   audit_row record;
   metadata jsonb;
 BEGIN
@@ -22,6 +23,9 @@ BEGIN
   SELECT "id", "ideaId", "chunkIndex", "sourcePlanRevisionId"
     INTO preview_row FROM "AmuxIdeaTransferPreview"
     WHERE "id" = NEW."analysisPreviewId" FOR KEY SHARE;
+  SELECT "id", "submissionOrigin"
+    INTO idea_row FROM "AmuxIdeaSubmission"
+    WHERE "id" = NEW."ideaId" FOR KEY SHARE;
   SELECT a.*, a.xmin = pg_current_xact_id()::xid AS audit_same_transaction
     INTO audit_row FROM "AdminAuditLog" a
     WHERE a."id" = NEW."auditLogId" FOR KEY SHARE;
@@ -62,6 +66,7 @@ BEGIN
         ] = '{}'::jsonb) OR
        (audit_row."actorUserId" IS NULL AND audit_row."actorEmail" IS NULL AND
         audit_row."ipAddress" IS NULL AND audit_row."userAgent" IS NULL AND
+        idea_row."id" IS NOT NULL AND idea_row."submissionOrigin" = 'session' AND
         NEW."attemptKind" = 'whole_plan' AND
         metadata->>'systemActor' = 'amux-v4-intake' AND
         metadata->>'actorScope' = 'system-registration-refusal-v1' AND

@@ -14,6 +14,7 @@ import { AMUX_V20_REGISTRATION_REFUSAL_ACTION,
   isAmuxV20RegistrationRefusalGrade,
   isAmuxRegistrationRefusalCode,
   matchesAmuxV20RegistrationRefusalMetadata,
+  type AmuxV20RegistrationRefusalAttemptKind,
   type AmuxV20RegistrationRefusalView } from
   "./ideaRegistrationRefusalCore.ts";
 
@@ -22,10 +23,12 @@ import { AMUX_V20_REGISTRATION_REFUSAL_ACTION,
 export async function readLatestAmuxV20RegistrationRefusalInTx(
   tx: Prisma.TransactionClient, ideaId: string, actorUserId: string,
   analysisPreviewId: string, sourcePlanRevisionId: string,
+  options: { attemptKind?: AmuxV20RegistrationRefusalAttemptKind } = {},
 ): Promise<AmuxV20RegistrationRefusalView | null> {
   const row = await tx.amuxIdeaRegistrationRefusal.findFirst({
     where: { ideaId, actorUserId, state: "awaiting_operator",
       analysisPreviewId, sourcePlanRevisionId,
+      attemptKind: options.attemptKind,
       draftUnit: { state: "proposed" } },
     orderBy: [{ attemptedAt: "desc" }, { id: "desc" }],
     include: { auditLog: { select: { actorUserId: true, actorEmail: true,
