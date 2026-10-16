@@ -39,6 +39,42 @@ const preparedSchema = z.object({
 }).strict();
 type Prepared = z.infer<typeof preparedSchema>;
 
+export type AmuxTaskRegistrationRefusalPresentation = {
+  messageKey:
+    | "taskRegistrationExpectedPathsRefused"
+    | "taskRegistrationMixedPathsRefused"
+    | "taskRegistrationReviewRoleRefused"
+    | "taskRegistrationGradeRefused";
+  clearDuplicateState: true;
+};
+
+/** Closed client copy mapping for the stable Admin API refusal codes. */
+export function amuxTaskRegistrationRefusalPresentation(
+  code: string,
+): AmuxTaskRegistrationRefusalPresentation | null {
+  switch (code) {
+    case "task_expected_paths_missing":
+    case "task_expected_paths_out_of_range":
+    case "task_expected_path_invalid":
+    case "task_expected_paths_duplicate":
+      return { messageKey: "taskRegistrationExpectedPathsRefused",
+        clearDuplicateState: true };
+    case "task_expected_paths_mixed":
+      return { messageKey: "taskRegistrationMixedPathsRefused",
+        clearDuplicateState: true };
+    case "task_role_review_refused":
+      return { messageKey: "taskRegistrationReviewRoleRefused",
+        clearDuplicateState: true };
+    case "task_execution_grade_mismatch":
+    case "task_confirmation_grade_mismatch":
+    case "task_cost_receipt_grade_mismatch":
+      return { messageKey: "taskRegistrationGradeRefused",
+        clearDuplicateState: true };
+    default:
+      return null;
+  }
+}
+
 /** Per-card, two-click approval. Browser text never supplies the proposal. */
 export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
   ideaId: string; unit: AmuxVisibleAnalysisUnit;
@@ -69,6 +105,8 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
     const value: unknown = await response.json().catch(() => null);
     const code = value && typeof value === "object" && "error" in value &&
       typeof value.error === "string" ? value.error : "unavailable";
+    const taskRefusal = isTask ?
+      amuxTaskRegistrationRefusalPresentation(code) : null;
     if (response.status === 428) setReauth(true);
     if (code === "duplicate_reason_required" && value &&
         typeof value === "object" && "candidateIds" in value &&
@@ -78,8 +116,13 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
       setDuplicateIds(value.candidateIds); setRequestId(null);
       setError(null);
     } else if (code === "outcome_unknown") { setUnknown(true); setError(null); }
-    else { if (code === "reconfirm") { setDuplicateIds([]); setReason(""); }
-      setError(isTask ? m.taskRegistrationFailed(code) : m.storyRegistrationFailed(code)); }
+    else {
+      if (code === "reconfirm" || taskRefusal?.clearDuplicateState) {
+        setDuplicateIds([]); setReason("");
+      }
+      setError(taskRefusal ? m[taskRefusal.messageKey] :
+        isTask ? m.taskRegistrationFailed(code) : m.storyRegistrationFailed(code));
+    }
   };
   const load = async () => {
     if (busy || unknown) return;
