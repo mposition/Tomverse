@@ -3,12 +3,47 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { captureAmuxV22Patch, captureAmuxV22PatchBaseline,
-  captureAmuxV52ChangedPaths, discardAmuxV52AttemptChanges } from
+  captureAmuxV52ChangedPaths, captureAmuxV52ReviewCommit,
+  discardAmuxV52AttemptChanges } from
   "../lib/amux/v22PatchCapture.mjs";
 
 const BASE = "a".repeat(40);
 const PATCH = "diff --git a/lib/example.ts b/lib/example.ts\n" +
   "--- a/lib/example.ts\n+++ b/lib/example.ts\n@@ -1 +1 @@\n-old\n+new\n";
+
+test("a review commit is made from the exact patch and leaves HEAD clean", async () => {
+  const calls = [];
+  const run = async (_binary, args) => {
+    const command = args.slice(6);
+    calls.push(command);
+    if (command[0] === "rev-parse") return { stdout: Buffer.from(
+      command[1] === "--show-toplevel" ? "/repo" : BASE) };
+    if (command[0] === "diff" && command.includes("--cached"))
+      return { stdout: Buffer.from(PATCH) };
+    if (command[0] === "write-tree")
+      return { stdout: Buffer.from("c".repeat(40)) };
+    if (command[0] === "-c" && command.includes("commit-tree"))
+      return { stdout: Buffer.from("d".repeat(40)) };
+    if (command[0] === "diff-tree")
+      return { stdout: Buffer.from("lib/example.ts\0") };
+    if (["add", "reset", "status", "update-ref"].includes(command[0]))
+      return { stdout: Buffer.alloc(0) };
+    throw new Error("unexpected git command");
+  };
+  const result = await captureAmuxV52ReviewCommit("/repo", BASE,
+    "11111111-1111-4111-8111-111111111111", ["lib/example.ts"], PATCH,
+    { run, realpath: async (value) => value });
+  assert.deepEqual(result, { ok: true, baseSha: BASE,
+    commitSha: "d".repeat(40),
+    reviewRef: "refs/amux-v52-review/11111111-1111-4111-8111-111111111111" });
+  assert.ok(calls.some((call) => call[0] === "reset" &&
+    call.includes("--hard")));
+  const mismatch = await captureAmuxV52ReviewCommit("/repo", BASE,
+    "11111111-1111-4111-8111-111111111111", ["lib/other.ts"], PATCH,
+    { run, realpath: async (value) => value });
+  assert.deepEqual(mismatch, { ok: false,
+    reason: "review_commit_paths_mismatch" });
+});
 
 function fixture({ sha = BASE, status = "", patch = PATCH, root = "/repo",
   names = "M\0lib/example.ts\0", file = "new\n" } = {}) {

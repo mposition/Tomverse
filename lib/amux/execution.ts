@@ -1,8 +1,9 @@
 import "server-only";
 
-import { randomInt, randomUUID } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
 import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
@@ -42,7 +43,10 @@ import { AmuxV4TaskCatalogApprovalError,
 import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
   "@/lib/amux/v52GradeReceipt";
-import { decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
+import { classifyAmuxExecutionPath,
+  decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
+import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
+  type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
 import {
@@ -171,6 +175,7 @@ type AttemptLockRow = {
 type TaskLockRow = {
   id: string;
   sourceSystem: string | null;
+  cardType: string | null;
   taskRole: string | null;
   executionGrade: string | null;
   v4SourceApprovalId: string | null;
@@ -247,6 +252,7 @@ const lockTask = async (
     SELECT
       "id",
       "sourceSystem",
+      "cardType",
       "taskRole",
       "executionGrade",
       "v4SourceApprovalId",
@@ -1209,6 +1215,124 @@ export const heartbeatAmuxV22TaskExecution = (
   },
 }, true);
 
+/** The launcher records only the review server's binding, never findings.
+ * A lost response is resolved by reading the attempt-keyed record, not by
+ * submitting the same diff again. */
+export async function recordAmuxV52Review(input: {
+  attemptId: string; worker: string; instanceId: string;
+  generation: number; taskRevision: number;
+  evidence: AmuxV52ReviewEvidence;
+}) {
+  if (!validAmuxV52ReviewEvidence(input.evidence))
+    return { recorded: false as const, reason: "review_evidence_invalid" as const };
+  if (!adminAuditIntegrityKeys(process.env)[0])
+    return { recorded: false as const, reason: "review_audit_key_missing" as const };
+  const evidence = input.evidence;
+  const candidate = await loadEngineeringAgentV22SettlementPatch(
+    input.attemptId).catch(() => null);
+  const candidateKinds = candidate?.files?.map((file) =>
+    classifyAmuxExecutionPath(file.path));
+  if (!candidate || !candidateKinds?.length ||
+      candidateKinds.includes("invalid") ||
+      candidateKinds.includes("contract") !== evidence.touchesContract ||
+      candidate.baseSha !== evidence.baseSha)
+    return { recorded: false as const,
+      reason: "review_patch_unverified" as const };
+  const requestDigest = createHash("sha256").update(JSON.stringify({
+    attemptId: input.attemptId, worker: input.worker,
+    instanceId: input.instanceId, generation: input.generation,
+    taskRevision: input.taskRevision, evidence,
+  })).digest("hex");
+  return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.v52ReviewRecord,
+    async (tx, context) => {
+      const now = context.dbNow;
+      const runtime = await lockRuntime(tx, input.worker);
+      if (!runtimeGenerationMatches(runtime, input, now) ||
+          runtime?.status !== "busy")
+        return { recorded: false as const, reason: "fenced_out" as const };
+      const attempt = await lockAttempt(tx, input.attemptId);
+      if (!attempt || !attempt.v22AssignmentId || attempt.endedAt ||
+          attempt.worker !== input.worker ||
+          attempt.workerInstanceId !== input.instanceId ||
+          attempt.workerGeneration !== input.generation ||
+          attempt.taskRevision !== input.taskRevision ||
+          !attempt.leaseExpiresAt || attempt.leaseExpiresAt <= now)
+        return { recorded: false as const, reason: "fenced_out" as const };
+      const task = await lockTask(tx, attempt.taskId);
+      if (!task || task.sourceSystem !== "admin-idea-v4" ||
+          task.cardType !== "task" || task.status !== "doing" ||
+          task.owner !== input.worker || task.revision !== input.taskRevision ||
+          task.v22AssignmentId !== attempt.v22AssignmentId)
+        return { recorded: false as const, reason: "fenced_out" as const };
+      const assignment = await tx.amuxV22WorkerAssignment.findUnique({
+        where: { id: attempt.v22AssignmentId },
+        select: { id: true, role: true, grade: true, provider: true,
+          authorizationAuditLogId: true },
+      });
+      const assignmentAudit = assignment ? await tx.adminAuditLog.findUnique({
+        where: { id: assignment.authorizationAuditLogId },
+        select: { action: true, targetId: true, entryHash: true,
+          metadata: true },
+      }) : null;
+      const metadata = assignmentAudit?.metadata;
+      const gradeGuard = !!metadata && typeof metadata === "object" &&
+        !Array.isArray(metadata) &&
+        (metadata as Record<string, unknown>).v52GradeRouting === true;
+      if (!gradeGuard || !assignmentAudit?.entryHash ||
+          assignmentAudit.action !== "amux.v22.worker.assigned" ||
+          assignmentAudit.targetId !== assignment?.id ||
+          assignment?.role !== "implement" ||
+          assignment.grade !== task.executionGrade ||
+          assignment.provider !== evidence.authorVendor)
+        return { recorded: false as const,
+          reason: "review_assignment_unverified" as const };
+      const patch = await tx.amuxV22TaskPatch.findUnique({
+        where: { attemptId: attempt.id },
+        select: { taskId: true, baseSha: true, bodyPurgedAt: true },
+      });
+      if (patch?.taskId !== task.id || patch.bodyPurgedAt ||
+          patch.baseSha !== evidence.baseSha)
+        return { recorded: false as const,
+          reason: "review_patch_unverified" as const };
+      const existing = await tx.amuxV52ReviewRecord.findUnique({
+        where: { attemptId: attempt.id },
+        select: { requestDigest: true },
+      });
+      if (existing) return existing.requestDigest === requestDigest ?
+        { recorded: true as const, duplicate: true as const } :
+        { recorded: false as const, reason: "review_record_conflict" as const };
+      const auditLogId = await writeSystemAuditLog({
+        tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+        action: "amux.review.recorded", targetType: "AmuxWorkItem",
+        targetId: task.id,
+        summary: "Recorded an independent AMUX Task review verdict.",
+        metadata: { attemptId: attempt.id, jobId: evidence.jobId,
+          baseSha: evidence.baseSha, commitSha: evidence.commitSha,
+          verdict: evidence.verdict, authorVendor: evidence.authorVendor,
+          reviewerVendors: evidence.reviewerVendors,
+          touchesContract: evidence.touchesContract, requestDigest },
+      });
+      const recordedAudit = await tx.adminAuditLog.findUnique({
+        where: { id: auditLogId },
+        select: { action: true, targetId: true, entryHash: true },
+      });
+      if (!recordedAudit?.entryHash ||
+          recordedAudit.action !== "amux.review.recorded" ||
+          recordedAudit.targetId !== task.id)
+        throw new Error("v52 review audit unbound");
+      await tx.amuxV52ReviewRecord.create({ data: {
+        attemptId: attempt.id, taskId: task.id, jobId: evidence.jobId,
+        baseSha: evidence.baseSha, commitSha: evidence.commitSha,
+        verdict: evidence.verdict, authorVendor: evidence.authorVendor,
+        reviewerVendors: evidence.reviewerVendors,
+        touchesContract: evidence.touchesContract, requestDigest, auditLogId,
+      } });
+      context.requireLeaseAt(runtime.leaseExpiresAt);
+      context.requireLeaseAt(attempt.leaseExpiresAt);
+      return { recorded: true as const, duplicate: false as const };
+    });
+}
+
 /** A reported result is not a cost observation. Only exact, recorded A14
  * invocation receipts allow success or automatic requeue after a failure. */
 export async function settleAmuxV22TaskExecution(input: {
@@ -1261,7 +1385,8 @@ export async function settleAmuxV22TaskExecution(input: {
         return { settled: false as const, reason: "fenced_out" as const };
       const settlementAssignment = await tx.amuxV22WorkerAssignment.findUnique({
         where: { id: attempt.v22AssignmentId },
-        select: { id: true, grade: true, recoveryApprovalId: true,
+        select: { id: true, role: true, provider: true, grade: true,
+          recoveryApprovalId: true,
           taskRevision: true, authorizationAuditLogId: true } });
       const assignmentAudit = settlementAssignment ?
         await tx.adminAuditLog.findUnique({
@@ -1285,6 +1410,30 @@ export async function settleAmuxV22TaskExecution(input: {
         input.outcome !== "blocked" ?
         decideAmuxV52SettlementPaths(settlementAssignment.grade,
           input.changedPaths, patch?.files ?? null) : "pass";
+      const reviewRequired = gradeGuard &&
+        settlementAssignment?.role === "implement" &&
+        input.outcome === "succeeded" && pathDecision === "pass";
+      const reviewRecord = reviewRequired ?
+        await tx.amuxV52ReviewRecord.findUnique({
+          where: { attemptId: attempt.id },
+          select: { jobId: true, baseSha: true, verdict: true,
+            authorVendor: true,
+            auditLog: { select: { entryHash: true } } },
+        }) : null;
+      if (reviewRequired && (!reviewRecord?.auditLog.entryHash ||
+          !patch || reviewRecord.baseSha !== patch.baseSha ||
+          reviewRecord.authorVendor !== settlementAssignment.provider ||
+          !["accept", "reject", "unknown"].includes(reviewRecord.verdict)))
+        return { settled: false as const, reason: "review_unverified" as const };
+      const priorReviewRejections = reviewRecord ?
+        await tx.amuxV52ReviewRecord.count({ where: {
+          taskId: task.id, verdict: "reject",
+          attemptId: { not: attempt.id },
+        } }) : 0;
+      const reviewDisposition = reviewRecord ?
+        decideAmuxV52ReviewDisposition(
+          reviewRecord.verdict as "accept" | "reject" | "unknown",
+          priorReviewRejections) : null;
       const settlementRecovery = settlementAssignment?.recoveryApprovalId ?
         await readAmuxV22RecoveryAuthority(tx, attempt.taskId,
           settlementAssignment.taskRevision,
@@ -1432,7 +1581,8 @@ export async function settleAmuxV22TaskExecution(input: {
         where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
         select: { id: true, kind: true, patchDigest: true, baseSha: true },
       }) : null;
-      if (patch && effectivePathDecision === "pass") {
+      if (patch && effectivePathDecision === "pass" &&
+          (!reviewRequired || reviewDisposition?.status === "review")) {
         const assignment = await tx.amuxV22WorkerAssignment.findUnique({
           where: { id: attempt.v22AssignmentId },
           select: { role: true, workItemId: true },
@@ -1484,6 +1634,7 @@ export async function settleAmuxV22TaskExecution(input: {
       }
       const budget = settlementDestinationForBudget({
         requested_status: effectivePathDecision === "escalate" ? "todo" :
+          reviewDisposition ? reviewDisposition.status :
           input.outcome === "succeeded" ? "review" :
           input.outcome === "failed" ? "todo" : "blocked",
         attempt_number: attempt.attemptNumber,
@@ -1496,6 +1647,13 @@ export async function settleAmuxV22TaskExecution(input: {
         budget.to_status;
       const gradeEscalated = effectivePathDecision === "escalate" &&
         next === "todo";
+      const blockedReason = effectivePathDecision === "escalate" ?
+        "attempt_budget_exhausted" :
+        effectivePathDecision === "blocked" ?
+          (pathDecision === "escalate" ? escalationBlockReason :
+            "changed_paths_unavailable") :
+        budget.exhausted_limit ?? reviewDisposition?.reason ??
+          (receiptsComplete ? "execution_blocked" : "usage_outcome_unknown");
       if (gradeEscalated && escalationReceipt) {
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: AMUX_GRADE_ESCALATED_ACTION,
@@ -1522,27 +1680,21 @@ export async function settleAmuxV22TaskExecution(input: {
         data: { endedAt: now, leaseExpiresAt: null, heartbeatAt: now,
           outcome: input.outcome, toStatus: next, endedBy: input.worker,
           reason: gradeEscalated ? "contract_path_touched" :
-            effectivePathDecision === "escalate" ?
-              "attempt_budget_exhausted" : effectivePathDecision === "blocked" ?
-              (pathDecision === "escalate" ? escalationBlockReason :
-                "changed_paths_unavailable") : budget.exhausted_limit ??
+            next === "blocked" ? blockedReason :
+            budget.exhausted_limit ?? reviewDisposition?.reason ??
                 (receiptsComplete ? "reported_result" : "usage_outcome_unknown") },
       });
       await tx.amuxWorkerRuntime.updateMany({ where: {
         workerName: input.worker, instanceId: input.instanceId,
         generation: input.generation, status: "busy",
       }, data: { status: "idle", dispatchReady: false } });
-      if (next === "review" || next === "blocked")
+      if ((next === "review" && (!reviewRequired ||
+          product?.kind !== "publish")) || next === "blocked")
         await openAmuxHumanEscalation(tx, { taskId: task.id,
           specialty: next === "review" ? AMUX_DEFAULT_REVIEW_SPECIALTY :
             "execution-recovery",
           reason: next === "review" ? "human_review_required" :
-            effectivePathDecision === "escalate" ?
-              "attempt_budget_exhausted" : effectivePathDecision === "blocked" ?
-              (pathDecision === "escalate" ? escalationBlockReason :
-                "changed_paths_unavailable") :
-            budget.exhausted_limit ?? (receiptsComplete ?
-              "execution_blocked" : "usage_outcome_unknown"),
+            blockedReason,
           openedBy: input.worker });
       await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
       await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
@@ -1556,6 +1708,8 @@ export async function settleAmuxV22TaskExecution(input: {
           v52PathDecision: gradeGuard ?
             (gradeEscalated ? "escalate" : next === "blocked" ? "blocked" :
               effectivePathDecision) : null,
+          v52ReviewJobId: reviewRecord?.jobId ?? null,
+          v52ReviewVerdict: reviewRecord?.verdict ?? null,
           imageProofDigest: product?.kind === "publish" &&
             publication?.ok ? publication.imageProofDigest : null },
       });

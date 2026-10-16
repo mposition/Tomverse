@@ -37,6 +37,11 @@ function makeWorld(outcome: Outcome) {
     taskRole: null as string | null,
     taskGrade: "medium",
     assignmentGrade: null as string | null,
+    assignmentRole: "investigate",
+    reviewVerdict: null as "accept" | "reject" | "unknown" | null,
+    priorReviewRejections: 0,
+    reviewAuditCount: 0,
+    reviewCreated: null as Record<string, unknown> | null,
     assignmentAuditPresent: true,
     assignmentAuditAction: "amux.v22.worker.assigned",
     sourceApprovalId: null as string | null,
@@ -75,6 +80,7 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
       world.settlementAudits += 1;
     if (input.action === "amux.grade.escalated")
       world.gradeEscalationAudits.push(input as unknown as Record<string, unknown>);
+    if (input.action === "amux.review.recorded") world.reviewAuditCount += 1;
     return `audit-${input.action}`;
   },
 } });
@@ -144,7 +150,7 @@ const tx = {
       leaseExpiresAt: new Date("2026-10-13T12:01:00.000Z"), endedAt: null,
     }];
     if (sql.includes('FROM "AmuxWorkItem"')) return [{
-      id: world.taskId, sourceSystem: "admin-idea-v4",
+      id: world.taskId, sourceSystem: "admin-idea-v4", cardType: "task",
       taskRole: world.taskRole, executionGrade: world.taskGrade,
       v4SourceApprovalId: world.sourceApprovalId,
       v22AssignmentId: "assignment-one", owner: worker, status: "doing",
@@ -163,6 +169,7 @@ const tx = {
   },
   amuxV22WorkerAssignment: { findUnique: async () => ({
     id: "assignment-one", grade: world.assignmentGrade ?? world.taskGrade,
+    role: world.assignmentRole, provider: "anthropic",
     authorizationAuditLogId: "assignment-audit",
     recoveryApprovalId: world.recoveryApprovalId, taskRevision: 5,
   }) },
@@ -177,6 +184,18 @@ const tx = {
     taskId: world.patch.taskId, baseSha: world.patch.baseSha,
     patchSha256: world.patch.sha256, bodyPurgedAt: null,
   } : null },
+  amuxV52ReviewRecord: {
+    findUnique: async () => world.reviewCreated ?? (world.reviewVerdict ? {
+      jobId: "r-20261016-110000-abcdef", baseSha: world.patch?.baseSha,
+      verdict: world.reviewVerdict, authorVendor: "anthropic",
+      auditLog: { entryHash: "a".repeat(64) },
+    } : null),
+    count: async () => world.priorReviewRejections,
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      world.reviewCreated = data;
+      return data;
+    },
+  },
   amuxIdeaUnitDecision: { findUnique: async () => ({
     confirmationSnapshot: { card: { task: { costReceipt: {
       role: "implement", grade: "routine", receiptDigest: "a".repeat(64),
@@ -226,6 +245,9 @@ const tx = {
       !world.assignmentAuditPresent ? null : {
       entryHash: "a".repeat(64), action: world.assignmentAuditAction,
       targetId: "assignment-one", metadata: { v52GradeRouting: world.gradeGuard },
+    } : args.where.id === "audit-amux.review.recorded" ? {
+      entryHash: "a".repeat(64), action: "amux.review.recorded",
+      targetId: world.taskId,
     } : { entryHash: "a".repeat(64),
       action: "amux.v4.task_catalog.approve", actorUserId: "owner-one",
       targetId: "catalog-one", targetType: "AmuxV4TaskCostCatalogApproval" } },
@@ -442,6 +464,89 @@ test("v52 settlement blocks a contract publish file omitted from the runner inve
   assert.equal(world.taskUpdateData?.executionGrade, undefined);
   assert.equal(world.attemptUpdateData?.reason, "changed_paths_unavailable");
   assert.equal(world.gradeEscalationAudits.length, 0);
+});
+
+test("v52 review reject retries once at the same grade, then blocks", async () => {
+  for (const [prior, expected, reason] of [
+    [0, "todo", "review_server_rejected"],
+    [1, "blocked", "review_server_rejected_twice"],
+  ] as const) {
+    world = makeWorld("succeeded");
+    world.attemptNumber = 1;
+    world.gradeGuard = true;
+    world.assignmentRole = "implement";
+    world.taskGrade = "advanced";
+    world.reviewVerdict = "reject";
+    world.priorReviewRejections = prior;
+    world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+      sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+      files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+    const input = await settlementInput("succeeded");
+    const result = await (await execution).settleAmuxV22TaskExecution({
+      ...input, changedPaths: ["lib/ordinary.ts"],
+    });
+    assert.equal(result.settled, true);
+    assert.equal(world.taskUpdateData?.status, expected);
+    assert.equal(world.attemptUpdateData?.reason, reason);
+    assert.equal(world.taskUpdateData?.executionGrade, undefined,
+      "review rejection cannot escalate grade");
+  }
+});
+
+test("v52 review record binds an implement patch, assignment and audit once", async () => {
+  const previousKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = "v52-review-test-key".repeat(4);
+  try {
+  world = makeWorld("succeeded");
+  world.gradeGuard = true;
+  world.assignmentRole = "implement";
+  world.taskGrade = "advanced";
+  world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+    sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+    files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+  const input = { attemptId, worker, instanceId, generation: 1,
+    taskRevision: 5, evidence: {
+      jobId: "r-20261016-110000-abcdef", baseSha: "a".repeat(40),
+      commitSha: "c".repeat(40), verdict: "accept" as const,
+      authorVendor: "anthropic", reviewerVendors: ["openai"],
+      touchesContract: false,
+    } };
+  const first = await (await execution).recordAmuxV52Review(input);
+  assert.deepEqual(first, { recorded: true, duplicate: false });
+  assert.equal(world.reviewAuditCount, 1);
+  assert.equal(world.reviewCreated?.attemptId, attemptId);
+  const second = await (await execution).recordAmuxV52Review(input);
+  assert.deepEqual(second, { recorded: true, duplicate: true });
+  assert.equal(world.reviewAuditCount, 1);
+  const mismatch = await (await execution).recordAmuxV52Review({
+    ...input, evidence: { ...input.evidence, touchesContract: true,
+      reviewerVendors: ["openai", "xai"] },
+  });
+  assert.deepEqual(mismatch, { recorded: false,
+    reason: "review_patch_unverified" });
+  } finally {
+    if (previousKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+    else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousKey;
+  }
+});
+
+test("v52 review unknown blocks without another attempt", async () => {
+  world = makeWorld("succeeded");
+  world.attemptNumber = 1;
+  world.gradeGuard = true;
+  world.assignmentRole = "implement";
+  world.taskGrade = "advanced";
+  world.reviewVerdict = "unknown";
+  world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+    sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+    files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+  const input = await settlementInput("succeeded");
+  const result = await (await execution).settleAmuxV22TaskExecution({
+    ...input, changedPaths: ["lib/ordinary.ts"],
+  });
+  assert.equal(result.settled, true);
+  assert.equal(world.taskUpdateData?.status, "blocked");
+  assert.equal(world.attemptUpdateData?.reason, "review_server_unknown");
 });
 
 test("v52 contract touch on the final attempt blocks for human recovery", async () => {

@@ -2981,7 +2981,66 @@ pub struct V22ExecutionProfile {
     #[serde(default)]
     pub execution_grade: Option<String>,
     #[serde(default)]
+    pub review_author_vendor: Option<String>,
+    #[serde(default)]
+    pub review_scope: Option<String>,
+    #[serde(default)]
+    pub review_feedback_job_id: Option<String>,
+    #[serde(default)]
     pub read_only_retry: Option<V22ReadOnlyRetryProfile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct V52ReviewEvidence {
+    pub job_id: Option<String>,
+    pub base_sha: String,
+    pub commit_sha: String,
+    pub verdict: String,
+    pub author_vendor: String,
+    pub reviewer_vendors: Vec<String>,
+    pub touches_contract: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct V52ReviewRecordRequest<'a> {
+    attempt_id: &'a str,
+    worker: &'a str,
+    instance_id: &'a str,
+    generation: i64,
+    task_revision: i64,
+    evidence: &'a V52ReviewEvidence,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V52ReviewRecordResponse {
+    pub recorded: bool,
+    #[serde(default)]
+    pub duplicate: Option<bool>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V52ReviewReadback {
+    pub status: String,
+    #[serde(rename = "jobId", default)]
+    pub job_id: Option<String>,
+    #[serde(rename = "baseSha", default)]
+    pub base_sha: Option<String>,
+    #[serde(rename = "commitSha", default)]
+    pub commit_sha: Option<String>,
+    #[serde(default)]
+    pub verdict: Option<String>,
+    #[serde(rename = "authorVendor", default)]
+    pub author_vendor: Option<String>,
+    #[serde(rename = "reviewerVendors", default)]
+    pub reviewer_vendors: Option<Vec<String>>,
+    #[serde(rename = "touchesContract", default)]
+    pub touches_contract: Option<bool>,
+    #[serde(rename = "requestDigest", default)]
+    pub request_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3783,6 +3842,49 @@ impl TomverseApi {
         }
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
             outcome, &[&delivery.attempt_id], read_only_retry, changed_paths).await
+    }
+
+    pub async fn v52_review_readback(&self, attempt_id: &str) -> Result<V52ReviewReadback> {
+        if Uuid::parse_str(attempt_id).is_err() {
+            bail!("invalid review attempt ID");
+        }
+        let response = self.client
+            .get(format!("{}/api/internal/amux/v22/review/record", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&[("attemptId", attempt_id)])
+            .send().await?;
+        let (_, body): (_, V52ReviewReadback) = read_bounded_json(response,
+            &[StatusCode::OK], MAX_LIFECYCLE_RESPONSE_BYTES).await?;
+        if body.status != "absent" && body.status != "recorded" {
+            bail!("invalid v52 review readback status");
+        }
+        Ok(body)
+    }
+
+    pub async fn v52_review_record(&self, delivery: &PulledDelivery,
+        instance_id: &str, generation: i64,
+        evidence: &V52ReviewEvidence) -> Result<V52ReviewRecordResponse> {
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/review/record", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(&V52ReviewRecordRequest {
+                attempt_id: &delivery.attempt_id,
+                worker: &delivery.worker, instance_id, generation,
+                task_revision: delivery.task_revision, evidence,
+            }).send().await?;
+        let (status, body): (_, V52ReviewRecordResponse) = read_bounded_json(response,
+            &[StatusCode::OK, StatusCode::CONFLICT],
+            MAX_LIFECYCLE_RESPONSE_BYTES).await?;
+        if (status == StatusCode::OK && body.recorded &&
+            body.reason.is_none()) ||
+           (status == StatusCode::CONFLICT && !body.recorded &&
+            body.reason.as_ref().is_some_and(|reason| !reason.is_empty())) {
+            Ok(body)
+        } else {
+            bail!("invalid v52 review record response")
+        }
     }
 
     /// A local AMUX card is not an A14 usage receipt. Without a verified

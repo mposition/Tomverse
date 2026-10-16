@@ -121,7 +121,17 @@ export async function POST(request: Request) {
               budget_microusd: outcome.delivery.v22Execution.budgetMicrousd,
               ...(outcome.delivery.v22Execution.gradeGuard ?
                 { grade_guard: true,
-                  execution_grade: outcome.delivery.v22Execution.executionGrade } : {}),
+                  execution_grade: outcome.delivery.v22Execution.executionGrade,
+                  ...(outcome.delivery.v22Execution.reviewScope ? {
+                    review_author_vendor:
+                      outcome.delivery.v22Execution.reviewAuthorVendor,
+                    review_scope: outcome.delivery.v22Execution.reviewScope,
+                    ...(outcome.delivery.v22Execution.reviewFeedbackJobId ? {
+                      review_feedback_job_id:
+                        outcome.delivery.v22Execution.reviewFeedbackJobId,
+                    } : {}),
+                  } : {}),
+                } : {}),
               ...(outcome.delivery.v22Execution.readOnlyRetry ? {
                 read_only_retry: serializeReadOnlyRetry(
                   outcome.delivery.v22Execution.readOnlyRetry),
