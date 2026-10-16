@@ -12,6 +12,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxAnalysisBudgetMessages } from "@/lib/adminMessages/amuxAnalysisBudget";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import {
+  defaultFrontierSelection,
   readAvailableFrontierModels,
   readCheckedFrontierSelection,
   type AvailableFrontierModel,
@@ -48,6 +49,8 @@ const receiptStore = (): Storage | null => {
  * own submission bookkeeping, so a lost answer recovers exactly as a lost
  * submission does. */
 export type AmuxBuildPreviewHooks = {
+  /** Runs before the request: the existing input check. Resolves false when the input did not pass. */
+  beforeBuild?: () => Promise<boolean>;
   draft: { idea: string; repositories: string[]; pullRequests: Array<{ repository: string; number: number }> } | null;
   reserve: (requestId: string) => boolean;
   onBuilt: (built: {
@@ -60,7 +63,8 @@ export type AmuxBuildPreviewHooks = {
 
 export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
   analysisBudgetAvailable, ideaId, planReady,
-  declaredExternalSources, operatorId, chunkIndex = 0, build = null, buildRequestId = null }: {
+  declaredExternalSources, operatorId, chunkIndex = 0, build = null, buildRequestId = null,
+  ideaText = "", onExecutionApproved }: {
   available: boolean;
   previewAvailable: boolean; confirmAvailable: boolean;
   analysisBudgetAvailable: boolean;
@@ -70,6 +74,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   build?: AmuxBuildPreviewHooks | null;
   /** The saved idea's submission request id, which keys a build's receipt. */
   buildRequestId?: string | null;
+  /** The saved idea's text as typed in this browser, shown on the execution approval (never read back from storage). */
+  ideaText?: string;
+  /** Called once the execution approval is recorded, so the analysis result can be watched on its own. */
+  onExecutionApproved?: () => void;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const budgetMessages = useAdminMessages(adminAmuxAnalysisBudgetMessages);
@@ -199,7 +207,13 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           setModels(null);
           setFailure({ message: m.frontierModelsInvalid, tone: "error",
             requiresReauthentication: false, approvalId: null });
-        } else { setFailure(null); setModels(parsed); }
+        } else {
+          setFailure(null);
+          setModels(parsed);
+          // The one-button flow starts from a default, changeable in the collapsed model control.
+          const first = defaultFrontierSelection(parsed);
+          if (first) { setSelectedApprovalId(first.approvalId); setSelectedEffort(first.effort); setChecked(false); }
+        }
       }
     } catch {
       if (!signal?.aborted) {
@@ -264,8 +278,9 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     void load();
   };
 
-  const checkSelection = async () => {
-    if (!selected || !selected.allowedEfforts.includes(selectedEffort) || checking) return;
+  /** The existing eligibility check of the chosen model. Resolves true only for a current, approved choice. */
+  const checkSelection = async (): Promise<boolean> => {
+    if (!selected || !selected.allowedEfforts.includes(selectedEffort) || checking) return false;
     setChecking(true);
     setChecked(false);
     setFailure(null);
@@ -278,19 +293,45 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         setFailure(await readAdminApiFailure(response, {
           fallback: m.frontierSelectionUnavailable, locale,
         }));
-        return;
+        return false;
       }
       const result = readCheckedFrontierSelection(response.status, await response.json(), selected);
       if (!result) {
         setFailure({ message: m.frontierModelsInvalid, tone: "error",
           requiresReauthentication: false, approvalId: null });
-        return;
+        return false;
       }
       setChecked(true);
+      return true;
     } catch {
       setFailure({ message: m.frontierSelectionUnavailable, tone: "error",
         requiresReauthentication: false, approvalId: null });
+      return false;
     } finally { setChecking(false); }
+  };
+
+  // The one button of a new idea: the existing input check, then the model's eligibility check, then the existing
+  // build-preview request (save, idea-only plan and exact preview in one request, receipt before the request, an
+  // unknown answer read back and never retried). A step that does not pass stops here with its own message.
+  const [reviewing, setReviewing] = useState(false);
+  const startReview = async () => {
+    if (!build?.draft || !selected || !selectedEffort || building || reviewing || ideaId !== null || !previewAvailable) return;
+    setReviewing(true);
+    try {
+      if (build.beforeBuild && !(await build.beforeBuild())) return;
+      if (!checked && !(await checkSelection())) return;
+      await buildPreview();
+    } finally { setReviewing(false); }
+  };
+
+  // A saved idea whose preview is not prepared yet continues with one button too: eligibility, then the preview.
+  const continueReview = async () => {
+    if (!ideaId || !planReady || !previewAvailable || declaredExternalSources || preview.kind !== "idle" || reviewing) return;
+    setReviewing(true);
+    try {
+      if (!checked && !(await checkSelection())) return;
+      await preparePreview();
+    } finally { setReviewing(false); }
   };
 
   const preparePreview = async () => {
@@ -474,6 +515,11 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     settleExecutionDialog();
   };
 
+  useEffect(() => {
+    if (confirmation.kind === "confirmed") onExecutionApproved?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the callback is a fresh closure each render; only the state change matters
+  }, [confirmation.kind]);
+
   const settleExecutionDialog = () => setExecutionDialog((current) => current && { ...current, settled: true });
   // Reads back the exact confirmation (never posts): the dialog shows busy while it runs and then the answer.
   const checkExecution = async () => {
@@ -560,6 +606,85 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     </AmuxIdeaBusyDialog>
   ) : null;
 
+  // The model choice, shared by both views and collapsed by default: a default is already chosen.
+  const modelControls = (
+    <div className="space-y-3" data-testid="amux-idea-model-controls">
+      <p className="text-xs text-zinc-300">{m.frontierModelsHint}</p>
+      <p className="text-xs text-zinc-400">
+        {m.frontierSettingsMoved}{" "}
+        <Link href="/admin/amux-settings?tab=analysis" className="font-medium text-blue-300 underline">{m.frontierSettingsLink}</Link>
+      </p>
+      {available ? <button type="button" onClick={refresh} disabled={loading || checking}
+        className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
+        {m.frontierModelsRefresh}
+      </button> : null}
+      {models && models.length > 0 ? <>
+        <label className="flex flex-col gap-1">
+          {m.frontierSelectionModel}
+          <select value={selectedApprovalId} disabled={checking}
+            onChange={(event) => { setSelectedApprovalId(event.target.value); setSelectedEffort(""); setChecked(false); }}
+            className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900">
+            <option value="">{m.frontierSelectionChoose}</option>
+            {models.map((model) => <option key={model.approvalId} value={model.approvalId}>
+              {model.provider} / {model.modelId}
+            </option>)}
+          </select>
+        </label>
+        {selected ? <label className="flex flex-col gap-1">
+          {m.frontierModelsEfforts}
+          <select value={selectedEffort} disabled={checking}
+            onChange={(event) => { setSelectedEffort(event.target.value); setChecked(false); }}
+            className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900">
+            <option value="">{m.frontierSelectionChoose}</option>
+            {selected.allowedEfforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
+          </select>
+        </label> : null}
+        <button type="button" onClick={() => void checkSelection()}
+          disabled={!selected || !selectedEffort || checking}
+          className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
+          {m.frontierSelectionCheck}
+        </button>
+        {checked ? <p role="status">{m.frontierSelectionCurrent}</p> : null}
+      </> : null}
+    </div>
+  );
+  const modelLine = selected && selectedEffort ? (
+    <p className="text-zinc-200" data-testid="amux-idea-model-line">
+      {m.composeModelLine(`${selected.provider} / ${selected.modelId}`, selectedEffort)}
+    </p>
+  ) : null;
+  const modelStatus = (
+    <>
+      {!available ? <p>{m.frontierModelsUnavailable}</p> : null}
+      {loading ? <p role="status">{m.frontierModelsLoading}</p> : null}
+      {failure ? <AdminApiFailureNotice failure={failure} /> : null}
+      {models?.length === 0 ? <p role="status">{m.frontierModelsEmpty}</p> : null}
+    </>
+  );
+
+  // A new idea: the model line and the one button. Nothing else to press until the review screen exists.
+  if (ideaId === null && build) {
+    return (
+      <section className="space-y-3 rounded-xl border p-4 text-sm border-zinc-800 bg-zinc-900/60"
+        aria-label={m.composeTitle} data-testid="amux-idea-compose">
+        {modelStatus}
+        {modelLine}
+        <details className="rounded-lg border p-3 border-zinc-800" data-testid="amux-idea-compose-model-details">
+          <summary className="min-h-11 cursor-pointer content-center font-medium text-blue-300">{m.composeChangeModel}</summary>
+          <div className="mt-2">{modelControls}</div>
+        </details>
+        <p className="text-xs text-zinc-400">{m.composeHint}</p>
+        <button type="button" onClick={() => void startReview()} data-testid="amux-idea-compose-action"
+          disabled={!build.draft || !selected || !selectedEffort || building || reviewing || !previewAvailable}
+          aria-busy={building || reviewing}
+          className="min-h-11 w-full rounded-lg bg-blue-600 px-4 font-medium text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50 sm:w-auto">
+          {building || reviewing ? m.buildPreviewPending : m.composeAction}
+        </button>
+        {!previewAvailable ? <p className="text-xs text-zinc-400">{m.transferPreviewUnavailable}</p> : null}
+      </section>
+    );
+  }
+
   return (
     <section className="space-y-2 rounded-xl border p-4 text-sm border-zinc-800"
       aria-labelledby="amux-v4-frontier-models-heading">
@@ -571,65 +696,23 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       <p className="text-zinc-300">
         {executionPrice.kind === "none" ? m.executionCardLeadConfirmOnly : m.executionCardLead}
       </p>
+      {ideaText ? <div className="rounded-lg border p-3 border-zinc-800" data-testid="amux-idea-approval-text">
+        <p className="text-xs text-zinc-400">{m.executionIdeaTitle}</p>
+        <p className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-zinc-100">{ideaText}</p>
+      </div> : null}
       <h4 className="pt-2 font-semibold text-zinc-100">{m.executionStepModel}</h4>
-      <p className="text-zinc-300">{m.frontierModelsHint}</p>
-      <p className="text-xs text-zinc-400">
-        {m.frontierSettingsMoved}{" "}
-        <Link href="/admin/amux-settings?tab=analysis" className="font-medium underline">{m.frontierSettingsLink}</Link>
-      </p>
-      {!available ? <p>{m.frontierModelsUnavailable}</p> : null}
-      {available ? <button type="button" onClick={refresh} disabled={loading || checking}
-        className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
-        {m.frontierModelsRefresh}
+      {modelStatus}
+      {modelLine}
+      <details className="rounded-lg border p-3 border-zinc-800" data-testid="amux-idea-approval-model-details">
+        <summary className="min-h-11 cursor-pointer content-center font-medium text-blue-300">{m.composeChangeModel}</summary>
+        <div className="mt-2">{modelControls}</div>
+      </details>
+      {ideaId ? <button type="button" onClick={() => void continueReview()} data-testid="amux-idea-continue-action"
+        disabled={!previewAvailable || !planReady || declaredExternalSources || !selected || !selectedEffort ||
+          reviewing || checking || preview.kind !== "idle"}
+        className={`min-h-11 rounded-lg border border-blue-400 px-4 text-blue-200 disabled:opacity-50 ${preview.kind === "idle" ? "" : "hidden"}`}>
+        {reviewing ? m.buildPreviewPending : m.continueReviewAction}
       </button> : null}
-      {loading ? <p role="status">{m.frontierModelsLoading}</p> : null}
-      {failure ? <AdminApiFailureNotice failure={failure} /> : null}
-      {models?.length === 0 ? <p role="status">{m.frontierModelsEmpty}</p> : null}
-      {models && models.length > 0 ? (
-        <div className="space-y-3">
-          <label className="flex flex-col gap-1">
-            {m.frontierSelectionModel}
-            <select value={selectedApprovalId} disabled={checking}
-              onChange={(event) => { setSelectedApprovalId(event.target.value); setSelectedEffort(""); setChecked(false); }}
-              className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900">
-              <option value="">{m.frontierSelectionChoose}</option>
-              {models.map((model) => <option key={model.approvalId} value={model.approvalId}>
-                {model.provider} / {model.modelId}
-              </option>)}
-            </select>
-          </label>
-          {selected ? <label className="flex flex-col gap-1">
-            {m.frontierModelsEfforts}
-            <select value={selectedEffort} disabled={checking}
-              onChange={(event) => { setSelectedEffort(event.target.value); setChecked(false); }}
-              className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900">
-              <option value="">{m.frontierSelectionChoose}</option>
-              {selected.allowedEfforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
-            </select>
-          </label> : null}
-          <button type="button" onClick={() => void checkSelection()}
-            disabled={!selected || !selectedEffort || checking}
-            className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
-            {m.frontierSelectionCheck}
-          </button>
-          {checked ? <p role="status">{m.frontierSelectionCurrent}</p> : null}
-          {ideaId === null && build ? <div className="space-y-2">
-            <p className="text-xs">{m.buildPreviewHint}</p>
-            <button type="button" onClick={() => void buildPreview()}
-              disabled={!build.draft || !selected || !selectedEffort || building || !previewAvailable}
-              className="min-h-11 rounded-lg border bg-blue-700 px-4 text-white disabled:opacity-50 border-blue-400">
-              {m.buildPreviewAction}
-            </button>
-            {building ? <p role="status">{m.buildPreviewPending}</p> : null}
-          </div> : null}
-          {ideaId ? <button type="button" onClick={() => void preparePreview()}
-            disabled={!previewAvailable || !planReady || declaredExternalSources ||
-              !checked || preview.kind !== "idle"}
-            className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-blue-400 text-blue-200">
-            {m.transferPreviewPrepare}
-          </button> : null}
-        </div>
-      ) : null}
       {ideaId && !previewAvailable ? <p>{m.transferPreviewUnavailable}</p> : null}
       {ideaId && previewAvailable && declaredExternalSources ?
         <p>{m.transferPreviewIdeaOnly}</p> : null}

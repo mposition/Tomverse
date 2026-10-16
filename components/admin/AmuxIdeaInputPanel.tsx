@@ -94,6 +94,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const hasUnsavedInput = !!(idea.trim() || repositories.trim() || pullRequests.trim());
   const [pending, setPending] = useState(false);
   const [readBackPending, setReadBackPending] = useState(false);
+  // The idea whose execution approval was recorded in this browser: its analysis result is then watched on its own.
+  const [analysisStartedIdeaId, setAnalysisStartedIdeaId] = useState<string | null>(null);
   // The blocking dialog of the build-preview request (save, plan, preview in one request): working while
   // it is in flight, then its answer until it is closed. It lives here, not in the frontier panel, because
   // that panel is remounted for the saved idea the moment the request succeeds.
@@ -336,6 +338,34 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     }
   };
 
+  /** The existing input check (inspection, writes nothing). Resolves true only for a passed check. */
+  const checkInput = async (): Promise<boolean> => {
+    const refs = parsePullRequests(pullRequests);
+    if (!refs) {
+      setResult({ error: "schema_rejected", ideaWrites: 0 });
+      return false;
+    }
+    const requestRevision = inputRevision.current;
+    setPending(true);
+    setResult(null);
+    try {
+      const response = await adminFetch("/api/admin/amux/ideas/input-preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1, idea, repositories: lines(repositories), pullRequests: refs }),
+      });
+      const next = (await response.json()) as InputPreviewResult;
+      if (requestRevision === inputRevision.current) setResult(next);
+      return requestRevision === inputRevision.current && next.outcome === "input_checked";
+    } catch {
+      if (requestRevision === inputRevision.current) setResult({ error: "preview_failed", ideaWrites: 0 });
+      return false;
+    } finally {
+      setPending(false);
+    }
+  };
+
+
   // amux-intake.md v18 item 1: the frontier panel can save the idea, prepare
   // its plan and its preview in one request. The submission bookkeeping stays
   // here, so a lost answer recovers exactly as a lost submission does.
@@ -344,6 +374,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     draft: submissionAvailable && recoveryChecked && submission.kind === "idle" &&
       idea.trim() !== "" && buildRefs !== null
       ? { idea, repositories: lines(repositories), pullRequests: buildRefs } : null,
+    beforeBuild: () => checkInput(),
     reserve: (requestId) => {
       if (inFlight.current || !reservePendingIdeaRequest(receiptStore(), operatorId, requestId)) return false;
       inFlight.current = true;
@@ -372,30 +403,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       inFlight.current = false;
       setSubmission({ kind: "refused", code });
     },
-  };
-
-  const checkInput = async () => {
-    const refs = parsePullRequests(pullRequests);
-    if (!refs) {
-      setResult({ error: "schema_rejected", ideaWrites: 0 });
-      return;
-    }
-    const requestRevision = inputRevision.current;
-    setPending(true);
-    setResult(null);
-    try {
-      const response = await adminFetch("/api/admin/amux/ideas/input-preview", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ version: 1, idea, repositories: lines(repositories), pullRequests: refs }),
-      });
-      const next = (await response.json()) as InputPreviewResult;
-      if (requestRevision === inputRevision.current) setResult(next);
-    } catch {
-      if (requestRevision === inputRevision.current) setResult({ error: "preview_failed", ideaWrites: 0 });
-    } finally {
-      setPending(false);
-    }
   };
 
   const ideaBytes = new TextEncoder().encode(idea.trim()).length;
@@ -432,6 +439,29 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       {setAside?.kind === "unavailable" ? <p role="alert">{messages.setAsideUnavailable}</p> : null}
     </div>
   ) : null;
+
+  // One frontier panel serves the whole path: as the model line and the one button of the new idea (placed in
+  // the card's column), then, once the idea is saved, as the execution approval below. It is rendered in one
+  // place at a time and keeps its instance while a build is in flight.
+  const composePanel = (
+    <AmuxFrontierModelsPanel
+      key={submission.kind === "submitted" ?
+        `${submission.ideaId}:${continuationChunkIndex}` : "none"}
+      available={frontierModelsAvailable}
+      previewAvailable={transferPreviewAvailable}
+      confirmAvailable={transferConfirmAvailable}
+      analysisBudgetAvailable={analysisBudgetAvailable}
+      ideaId={submission.kind === "submitted" ? submission.ideaId : null}
+      ideaText={submission.kind === "submitted" ? idea.trim() : ""}
+      planReady={submission.kind === "submitted" && planReadyIdeaId === submission.ideaId}
+      declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
+      operatorId={operatorId}
+      chunkIndex={continuationChunkIndex}
+      build={submission.kind === "submitted" ? null : buildHooks}
+      buildRequestId={submission.kind === "submitted" ? submission.requestId : null}
+      onExecutionApproved={() => setAnalysisStartedIdeaId(submission.kind === "submitted" ? submission.ideaId : null)}
+    />
+  );
 
   // A lost answer that the read-back then confirms as saved is a success of the save, said as such.
   const savedAfterUnknown = buildDialog?.tone === "unknown" && buildDialog.saved === null && submission.kind === "submitted";
@@ -578,27 +608,34 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                   </label>
                 </div>
               </details>
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={checkInput}
-                  disabled={pending || frozen || idea.trim().length === 0 || ideaBytes > 8192}
-                  className="min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50"
-                >
-                  {messages.preview}
-                </button>
-                <button
-                  type="button"
-                  onClick={submit}
-                  disabled={!submissionAvailable || !recoveryChecked || result?.outcome !== "input_checked" || frozen}
-                  className="min-h-11 rounded-lg border border-blue-400 px-4 text-sm font-medium text-blue-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50"
-                >
-                  {messages.submit}
-                </button>
-                <span className="text-xs text-zinc-400">
-                  {submissionAvailable ? messages.submitBoundary : messages.submitUnavailable}
-                </span>
-              </div>
+              {/* The default path is the one button of the model line right below this card: it runs the input
+                  check, the model's eligibility check and the build-preview request. These separate steps stay
+                  for recovery only. */}
+              <details className="rounded-lg border p-3 border-zinc-800" data-testid="amux-idea-stepwise">
+                <summary className="min-h-11 cursor-pointer content-center text-sm font-medium text-zinc-300">{messages.stepwiseTitle}</summary>
+                <p className="mt-2 text-xs text-zinc-400">{messages.stepwiseHint}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void checkInput()}
+                    disabled={pending || frozen || idea.trim().length === 0 || ideaBytes > 8192}
+                    className="min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50"
+                  >
+                    {messages.preview}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submit}
+                    disabled={!submissionAvailable || !recoveryChecked || result?.outcome !== "input_checked" || frozen}
+                    className="min-h-11 rounded-lg border border-blue-400 px-4 text-sm font-medium text-blue-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50"
+                  >
+                    {messages.submit}
+                  </button>
+                  <span className="text-xs text-zinc-400">
+                    {submissionAvailable ? messages.submitBoundary : messages.submitUnavailable}
+                  </span>
+                </div>
+              </details>
               <details className="rounded-lg bg-zinc-800/60 p-3 text-xs text-zinc-300">
                 <summary className="min-h-11 cursor-pointer content-center">
                   {messages.boundaryCurrentDetail}{" "}
@@ -612,6 +649,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
             </div>
           )}
 
+          {/* The model line and the one button. It stays mounted while a request is in flight (the status card
+              replaces the idea card then, and this strip is only hidden), and moves below as the execution
+              approval once the idea is saved. */}
+          {submission.kind !== "submitted" ? (
+            <div className={card === null ? "block" : "hidden"} data-testid="amux-idea-compose-slot">{composePanel}</div>
+          ) : null}
           {refusedForStepUp ? (
             <a href={STEP_UP_HREF} className="text-sm font-medium underline text-zinc-100">{messages.stepUp}</a>
           ) : null}
@@ -646,31 +689,18 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         ) : null}
       </div>
 
-      <AmuxInitialPlanPanel
-        key={submission.kind === "submitted" ? submission.ideaId : "none"}
-        ideaId={submission.kind === "submitted" ? submission.ideaId : null}
+      {submission.kind === "submitted" ? <AmuxInitialPlanPanel
+        key={submission.ideaId}
+        ideaId={submission.ideaId}
         operatorId={operatorId} available={initialPlanAvailable}
-        declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
+        declaredExternalSources={submission.hasExternalSources}
         onCommitted={onInitialPlanCommitted}
-      />
-      <AmuxFrontierModelsPanel
-        key={submission.kind === "submitted" ?
-          `${submission.ideaId}:${continuationChunkIndex}` : "none"}
-        available={frontierModelsAvailable}
-        previewAvailable={transferPreviewAvailable}
-        confirmAvailable={transferConfirmAvailable}
-        analysisBudgetAvailable={analysisBudgetAvailable}
-        ideaId={submission.kind === "submitted" ? submission.ideaId : null}
-        planReady={submission.kind === "submitted" && planReadyIdeaId === submission.ideaId}
-        declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
-        operatorId={operatorId}
-        chunkIndex={continuationChunkIndex}
-        build={submission.kind === "submitted" ? null : buildHooks}
-        buildRequestId={submission.kind === "submitted" ? submission.requestId : null}
-      />
+      /> : null}
+      {submission.kind === "submitted" ? composePanel : null}
       {analysisResultAvailable && submission.kind === "submitted" ?
         <AmuxIdeaAnalysisResultPanel key={submission.ideaId}
           ideaId={submission.ideaId}
+          autoPoll={analysisStartedIdeaId === submission.ideaId}
           onContinuationReady={setContinuationChunkIndex} /> : null}
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border p-4 border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">

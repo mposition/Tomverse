@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxIdeaResolutionPanel } from "@/components/admin/AmuxIdeaResolutionPanel";
@@ -21,6 +21,7 @@ import { AmuxIdeaDerivationPanel } from
 import { AmuxIdeaPlanApprovalPanel } from
   "@/components/admin/AmuxIdeaPlanApprovalPanel";
 import { adminFetch } from "@/lib/adminFetch";
+import { analysisPollDelayMs, analysisPollWanted } from "@/lib/amux/ideaAnalysisPollCore";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { parseAmuxIdeaAnalysisResultView,
@@ -32,8 +33,10 @@ const list = (values: string[]) => <ul className="list-disc pl-5">
 
 /** Owner-only page section. Model-derived text is rendered as React text,
  * never as HTML; the separate Story panel owns the gated confirmation flow. */
-export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
+export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, autoPoll = false }: {
   ideaId: string; onContinuationReady?: (chunkIndex: number) => void;
+  /** The execution approval is recorded: watch the result on its own (lib/amux/ideaAnalysisPollCore.ts). */
+  autoPoll?: boolean;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const [loading, setLoading] = useState(false);
@@ -41,6 +44,10 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
   const [view, setView] = useState<AmuxIdeaAnalysisResultView | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [needsReauthentication, setNeedsReauthentication] = useState(false);
+  // The watch: reads done so far, whether it was ended by a failed or refused read, and whether the tab is visible.
+  const [readsDone, setReadsDone] = useState(0);
+  const [watchEnded, setWatchEnded] = useState(false);
+  const [tabVisible, setTabVisible] = useState(true);
 
   const refresh = async (page = chunkIndex) => {
     if (loading) return;
@@ -54,18 +61,42 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
       if (response.status === 428) {
         setView(null);
         setNeedsReauthentication(true);
+        setWatchEnded(true);
         return;
       }
       const parsed = parseAmuxIdeaAnalysisResultView(response.status,
         await response.json(), ideaId);
-      if (!parsed) { setView(null); setUnavailable(true); }
+      if (!parsed) { setView(null); setUnavailable(true); setWatchEnded(true); }
       else {
         setView(parsed); setChunkIndex(page);
         if (parsed.state === "partial") onContinuationReady?.(parsed.nextChunkIndex);
       }
-    } catch { setView(null); setUnavailable(true); }
+    } catch { setView(null); setUnavailable(true); setWatchEnded(true); }
     finally { setLoading(false); }
   };
+
+  useEffect(() => {
+    const onVisibility = () => setTabVisible(!document.hidden);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  // After the execution approval the result is read on a gentle schedule until it arrives, so the plan
+  // approval screen opens by itself. A hidden tab, a failed or refused read and any terminal state stop the
+  // reads; the manual button stays. Nothing is ever written here.
+  const watching = autoPoll && !watchEnded && tabVisible && analysisPollWanted(view?.state ?? null);
+  useEffect(() => {
+    if (!watching || loading) return;
+    const delay = analysisPollDelayMs(readsDone);
+    if (delay === null) return;
+    const timer = window.setTimeout(() => { setReadsDone((count) => count + 1); void refresh(0); },
+      readsDone === 0 ? 0 : delay);
+    return () => window.clearTimeout(timer);
+    // refresh closes over the latest state each render; the watch only depends on what decides it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watching, loading, view, readsDone]);
+  const watchOver = autoPoll && analysisPollWanted(view?.state ?? null) &&
+    (watchEnded || analysisPollDelayMs(readsDone) === null);
 
   return <section className="space-y-3 rounded-xl border p-4 text-sm border-zinc-800"
     aria-labelledby="amux-v4-analysis-result-heading">
@@ -88,6 +119,9 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
       {m.analysisResultReauth}
     </a> : null}
     {unavailable ? <p role="alert">{m.analysisResultUnavailable}</p> : null}
+    {autoPoll && !watchOver && analysisPollWanted(view?.state ?? null) ? <p role="status" data-testid="amux-analysis-running"
+      className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-blue-200">{m.analysisRunning}</p> : null}
+    {watchOver ? <p role="status" data-testid="amux-analysis-watch-ended">{m.analysisWatchEnded}</p> : null}
     {view?.state === "pending" ? <p role="status">{m.analysisResultPending}</p> : null}
     {view?.state === "cancelled" ? <p role="status">{m.analysisResultCancelled}</p> : null}
     {view?.state === "provider_failed" ? <p role="alert">{m.analysisResultProviderFailed}</p> : null}
