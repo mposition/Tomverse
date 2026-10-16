@@ -55,7 +55,7 @@ async function localGit(repositoryPath: string, args: string[], signal?: AbortSi
   });
 }
 
-function parseRawTree(bytes: Buffer, objectIdLength: number, prefix: string):
+function parseRawTree(bytes: Buffer, objectIdLength: number):
     { files: AmuxTrackedTreeEntry[]; childTrees: Array<{ path: string; objectId: string }> } {
   const files: AmuxTrackedTreeEntry[] = [];
   const childTrees: Array<{ path: string; objectId: string }> = [];
@@ -75,7 +75,7 @@ function parseRawTree(bytes: Buffer, objectIdLength: number, prefix: string):
         throw new AmuxTrackedCheckoutManifestError();
       }
       const objectId = bytes.subarray(nul + 1, nul + 1 + oidBytes).toString("hex");
-      const path = prefix + name;
+      const path = name;
       if (mode === "40000") childTrees.push({ path, objectId });
       else files.push({ path, mode,
         type: mode === "160000" ? "commit" : "blob", objectId });
@@ -107,14 +107,22 @@ export async function readAmuxPinnedTrackedTree(
   }
   const entries: AmuxTrackedTreeEntry[] = [];
   const pending = [{ path: "", objectId: match[1] }];
+  // A valid tree object can appear at several paths. Authenticate and parse
+  // each unique object once, then expand its entries at every path so no
+  // tracked file disappears from the checkout.
+  const parsedTrees = new Map<string, ReturnType<typeof parseRawTree>>();
   while (pending.length > 0) {
     const next = pending.pop()!;
-    const tree = await localGit(repositoryPath, ["cat-file", "tree", next.objectId], signal);
-    verifyGitObject("tree", tree, next.objectId);
-    const parsed = parseRawTree(tree, commitSha.length, next.path);
-    for (const file of parsed.files) entries.push(file);
+    let parsed = parsedTrees.get(next.objectId);
+    if (!parsed) {
+      const tree = await localGit(repositoryPath, ["cat-file", "tree", next.objectId], signal);
+      verifyGitObject("tree", tree, next.objectId);
+      parsed = parseRawTree(tree, commitSha.length);
+      parsedTrees.set(next.objectId, parsed);
+    }
+    for (const file of parsed.files) entries.push({ ...file, path: next.path + file.path });
     for (const child of parsed.childTrees) {
-      pending.push({ path: `${child.path}/`, objectId: child.objectId });
+      pending.push({ path: `${next.path}${child.path}/`, objectId: child.objectId });
     }
   }
   return planAmuxTrackedCheckout(entries);

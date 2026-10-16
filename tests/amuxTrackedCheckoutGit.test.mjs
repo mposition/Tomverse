@@ -20,11 +20,15 @@ test("local Git enumerates the pinned commit, omitting untracked and secret path
     git(directory, "config", "user.name", "AMUX Test");
     git(directory, "config", "user.email", "amux-test@example.invalid");
     await mkdir(join(directory, "docs"));
+    await mkdir(join(directory, "mirror"));
     await writeFile(join(directory, "docs", "guide.md"), "pinned content\n");
+    await writeFile(join(directory, "mirror", "guide.md"), "pinned content\n");
     await writeFile(join(directory, ".env"), "excluded\n");
-    git(directory, "add", "--", "docs/guide.md", ".env");
+    git(directory, "add", "--", "docs/guide.md", "mirror/guide.md", ".env");
     git(directory, "commit", "--quiet", "-m", "pinned");
     const pinned = git(directory, "rev-parse", "HEAD").trim();
+    assert.equal(git(directory, "rev-parse", `${pinned}:docs`).trim(),
+      git(directory, "rev-parse", `${pinned}:mirror`).trim());
     await writeFile(join(directory, "docs", "guide.md"), "new content\n");
     await writeFile(join(directory, "untracked.txt"), "never in the tree\n");
     git(directory, "add", "--", "docs/guide.md");
@@ -36,7 +40,8 @@ test("local Git enumerates the pinned commit, omitting untracked and secret path
     git(directory, "replace", pinned, laterCommit);
 
     const result = await readAmuxPinnedTrackedTree(directory, pinned);
-    assert.deepEqual(result.files.map((file) => file.path), ["docs/guide.md"]);
+    assert.deepEqual(result.files.map((file) => file.path),
+      ["docs/guide.md", "mirror/guide.md"]);
     assert.deepEqual(result.excluded, [{ path: ".env", reason: "secret_path" }]);
     assert.notEqual(result.files[0].objectId, laterBlob);
     await assert.rejects(() => readAmuxPinnedTrackedTree(directory, "HEAD"), /invalid_tree/);
