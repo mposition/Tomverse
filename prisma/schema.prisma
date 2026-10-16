@@ -2439,6 +2439,7 @@ model AdminAuditLog {
   amuxV4AnalysisPriceApprovals AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceApprovalAudit")
   amuxV4AnalysisBudgetSettings AmuxIdeaAnalysisBudgetSetting[] @relation("AmuxV4AnalysisBudgetSettingAudit")
   amuxIdeaOperatingScopeSettings AmuxIdeaOperatingScopeSetting[] @relation("AmuxIdeaOperatingScopeSettingAudit")
+  amuxIdeaSessionSubmissions AmuxIdeaSubmission[] @relation("AmuxIdeaSessionSubmissionAudit")
   amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
   amuxV4ContentPurgeAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4ContentPurgeAudit")
   amuxV4KeyDeleteAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4KeyDeleteAudit")
@@ -9699,6 +9700,16 @@ model AmuxIdeaSubmission {
   id                  String    @id
   requestId           String    @unique @db.Uuid
   actorUserId         String
+  /// owner: existing Admin path; session: v19 coding-tool intake. A session
+  /// audit is system evidence while actorUserId remains the scope's data owner.
+  submissionOrigin    String    @default("owner")
+  sessionOperatingScopeSettingId String?
+  submissionAuditLogId String?   @unique
+  sourceProvenanceCiphertext Bytes?
+  sourceProvenanceKeyId String?
+  sourceProvenanceKeyVersion Int?
+  sourceProvenanceDigest String?
+  sourceProvenanceDigestKeyId String?
   state               String
   rawCiphertext       Bytes?
   rawKeyId            String?
@@ -9727,6 +9738,8 @@ model AmuxIdeaSubmission {
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
   contentKeyRetirements AmuxIdeaContentKeyRetirement[]
   retentionHolds AmuxIdeaRetentionHold[]
+  sessionOperatingScopeSetting AmuxIdeaOperatingScopeSetting? @relation("AmuxIdeaSessionOperatingScope", fields: [sessionOperatingScopeSettingId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSubmission_session_scope_fkey")
+  submissionAudit AdminAuditLog? @relation("AmuxIdeaSessionSubmissionAudit", fields: [submissionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSubmission_submission_audit_fkey")
   currentSourcePlan AmuxIdeaSourcePlanRevision? @relation("AmuxCurrentIdeaPlan", fields: [currentSourcePlanRevisionId, id], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([id, actorUserId])
@@ -9934,6 +9947,7 @@ model AmuxIdeaOperatingScopeSetting {
   createdAt          DateTime @default(now())
 
   approvalAudit AdminAuditLog @relation("AmuxIdeaOperatingScopeSettingAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaOperatingScopeSetting_audit_fkey")
+  sessionSubmissions AmuxIdeaSubmission[] @relation("AmuxIdeaSessionOperatingScope")
 }
 
 model AmuxIdeaAnalysisBudgetWindow {

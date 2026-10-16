@@ -9,8 +9,10 @@ import {
   computeAdminAuditEntryHash,
 } from "@/lib/adminAuditIntegrityCore";
 import {
+  AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   SYSTEM_AUDIT_ACTOR_METADATA_KEY,
+  amuxSessionIntakeSystemAuditScope,
   amuxV4SystemAuditScope,
   isSystemAuditActor,
   metadataClaimsSystemActor,
@@ -303,6 +305,8 @@ export async function writeSystemAuditLogEntry({
       [SYSTEM_AUDIT_ACTOR_METADATA_KEY]: systemActor,
       ...(systemActor === AMUX_V4_IDEA_SYSTEM_ACTOR
         ? { actorScope: amuxV4SystemAuditScope(action, targetType) } : {}),
+      ...(systemActor === AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR
+        ? { actorScope: amuxSessionIntakeSystemAuditScope(action, targetType) } : {}),
     },
     ipAddress: null,
     userAgent: null,

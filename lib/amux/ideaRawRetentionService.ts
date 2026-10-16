@@ -67,8 +67,12 @@ export async function commitAmuxDueRawIdeaPurge(tx: Prisma.TransactionClient,
   `;
   if (locked.length !== 1) return "skipped";
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
-    select: { id: true, state: true, rawCiphertext: true, rawKeyId: true,
+    select: { id: true, state: true, submissionOrigin: true,
+      rawCiphertext: true, rawKeyId: true,
       rawKeyVersion: true, rawDigest: true, rawDigestKeyId: true,
+      sourceProvenanceCiphertext: true, sourceProvenanceKeyId: true,
+      sourceProvenanceKeyVersion: true, sourceProvenanceDigest: true,
+      sourceProvenanceDigestKeyId: true,
       rawPurgeAfter: true, rawPurgedAt: true,
       analysisCompletedAt: true, cancelledAt: true } });
   const now = await dbNow(tx);
@@ -79,6 +83,13 @@ export async function commitAmuxDueRawIdeaPurge(tx: Prisma.TransactionClient,
   if ((!idea.analysisCompletedAt && !idea.cancelledAt) ||
       idea.rawKeyId !== amuxContentUnitKeyId(identity) ||
       idea.rawKeyVersion !== 1 || !idea.rawDigest || !idea.rawDigestKeyId) {
+    throw new AmuxIdeaRawRetentionError("integrity_unavailable", ideaId);
+  }
+  if (idea.submissionOrigin === "session" &&
+      (!idea.sourceProvenanceCiphertext ||
+       idea.sourceProvenanceKeyId !== idea.rawKeyId ||
+       idea.sourceProvenanceKeyVersion !== idea.rawKeyVersion ||
+       !idea.sourceProvenanceDigest || !idea.sourceProvenanceDigestKeyId)) {
     throw new AmuxIdeaRawRetentionError("integrity_unavailable", ideaId);
   }
   const auditId = await writeSystemAuditLog({ tx,
@@ -95,6 +106,8 @@ export async function commitAmuxDueRawIdeaPurge(tx: Prisma.TransactionClient,
     where: { id: ideaId, rawCiphertext: { not: null }, rawPurgedAt: null,
       rawPurgeAfter: { lte: now }, state: { in: TERMINAL_STATES } },
     data: { rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
+      sourceProvenanceCiphertext: null, sourceProvenanceKeyId: null,
+      sourceProvenanceKeyVersion: null,
       rawPurgedAt: now },
   });
   if (changed.count !== 1) {
@@ -113,7 +126,9 @@ export async function readAmuxRawIdeaPurgeOutcome(ideaId: string): Promise<
   const identity = keyIdentity(ideaId);
   const [idea, retirement] = await Promise.all([
     prisma.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
-      select: { rawCiphertext: true, rawKeyId: true, rawKeyVersion: true,
+      select: { submissionOrigin: true, rawCiphertext: true, rawKeyId: true,
+        rawKeyVersion: true, sourceProvenanceCiphertext: true,
+        sourceProvenanceKeyId: true, sourceProvenanceKeyVersion: true,
         rawPurgedAt: true } }),
     prisma.amuxIdeaContentKeyRetirement.findUnique({
       where: { ideaId_purpose_subjectId: identity },
@@ -121,11 +136,19 @@ export async function readAmuxRawIdeaPurgeOutcome(ideaId: string): Promise<
     }),
   ]);
   if (!idea) return "partial";
-  if (idea.rawCiphertext !== null && idea.rawPurgedAt === null && !retirement) {
+  const activeSource = idea.submissionOrigin !== "session" ||
+    (idea.sourceProvenanceCiphertext !== null &&
+      idea.sourceProvenanceKeyId === idea.rawKeyId &&
+      idea.sourceProvenanceKeyVersion === idea.rawKeyVersion);
+  if (idea.rawCiphertext !== null && idea.rawPurgedAt === null && !retirement &&
+      activeSource) {
     return "not_purged";
   }
   if (idea.rawCiphertext !== null || idea.rawKeyId !== null ||
       idea.rawKeyVersion !== null || idea.rawPurgedAt === null ||
+      idea.sourceProvenanceCiphertext !== null ||
+      idea.sourceProvenanceKeyId !== null ||
+      idea.sourceProvenanceKeyVersion !== null ||
       !retirement || !retirement.purgeAuditLogId ||
       retirement.bodyPurgedAt.getTime() !== idea.rawPurgedAt.getTime()) {
     return "partial";
@@ -161,8 +184,13 @@ async function commitVerifiedRawKeyDeletion(tx: Prisma.TransactionClient,
     where: { ideaId_purpose_subjectId: identity },
   });
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
-    select: { rawCiphertext: true, rawPurgedAt: true } });
+    select: { rawCiphertext: true, sourceProvenanceCiphertext: true,
+      sourceProvenanceKeyId: true, sourceProvenanceKeyVersion: true,
+      rawPurgedAt: true } });
   if (!row || !idea || idea.rawCiphertext !== null ||
+      idea.sourceProvenanceCiphertext !== null ||
+      idea.sourceProvenanceKeyId !== null ||
+      idea.sourceProvenanceKeyVersion !== null ||
       idea.rawPurgedAt?.getTime() !== row.bodyPurgedAt.getTime()) {
     throw new AmuxIdeaRawRetentionError("integrity_unavailable", ideaId);
   }
