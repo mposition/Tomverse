@@ -30,7 +30,7 @@ import { commitAmuxIdeaAnalysisBudgetReservation as commitReservationWithOwnerAu
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
 import { listAmuxV4AnalysisCandidates } from "@/lib/amux/ideaAnalysisQueueService";
 import { commitAmuxIdeaOnlyAnalysisClaim,
-  enforceAmuxV4DailyClaimLimit,
+  readAmuxV4ClaimDayUtc,
   AmuxIdeaAnalysisClaimError } from "@/lib/amux/ideaAnalysisClaimService";
 import { commitAmuxIdeaAnalysisResult,
   readAmuxIdeaAnalysisResultReceipt,
@@ -113,7 +113,7 @@ test("daily claim key is the database UTC date regardless of process or session 
         SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD')
           AS "dayUtc"
       `;
-      assert.equal(await enforceAmuxV4DailyClaimLimit(tx), expected[0]?.dayUtc);
+      assert.equal(await readAmuxV4ClaimDayUtc(tx), expected[0]?.dayUtc);
     });
   } finally {
     if (priorTz === undefined) delete process.env.TZ;
