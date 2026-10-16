@@ -1899,6 +1899,26 @@ domains:
       than inferred from the protected audit relation. Registering this domain
       does not change the stored ceiling, usage, reservations or execution gates.
 
+  - domain: amuxIdeaOperatingScopeSetting
+    prismaModel: AmuxIdeaOperatingScopeSetting
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, AMUX operating-scope setting account deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      approvedByUserId identifies the operator without a User foreign key.
+      The append-only row stores a repository allowlist, model selection,
+      version and canonical approval audit reference, never an idea or model
+      response. The protected audit reference and v19 approval provenance do
+      not settle account deletion, retention or unified export. Registering
+      this domain does not change the operating scope or its execution gates.
+
   - domain: amuxIdeaAnalysisPriceVersion
     prismaModel: AmuxIdeaAnalysisPriceVersion
     userLinkageRole: actor
