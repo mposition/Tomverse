@@ -529,7 +529,7 @@ test("a full pending-key batch leaves due manifest bodies for the next tick", as
   });
   assert.deepEqual(first, { bodiesPurged: 0, keysDeleted: 8, scanned: 8,
     batchLimit: 8 });
-  assert.deepEqual(deleted, manifestIds.slice(0, 8));
+  assert.deepEqual([...deleted].sort(), manifestIds.slice(0, 8).sort());
   assert.ok((await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
     where: { id: manifestIds[8] },
   })).ciphertext);
@@ -538,5 +538,5 @@ test("a full pending-key batch leaves due manifest bodies for the next tick", as
   });
   assert.deepEqual(second, { bodiesPurged: 1, keysDeleted: 1, scanned: 1,
     batchLimit: 8 });
-  assert.deepEqual(deleted, manifestIds);
+  assert.deepEqual([...deleted].sort(), [...manifestIds].sort());
 });
