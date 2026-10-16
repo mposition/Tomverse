@@ -113,6 +113,17 @@ export function auditProcessingTierMentions({ matchedLines, allowlist }) {
  */
 export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
   {
+    file: "lib/marketingLlmBudgetCore.ts",
+    sendsATier: false,
+    reason:
+      "The marketing LLM cost ledger records, in each reservation's immutable config snapshot and in the adapter digest, the tier the generator's adapter is bound to send (`default`, Standard price), so a call billed under another tier is detected and kept at its reservation. The module builds no request and calls no provider; the marketing ledger is priced from its own pins, not lib/modelPricing.ts. These three lines are pinned, not the whole file.",
+    mentions: [
+      "serviceTier: typeof MARKETING_LLM_SERVICE_TIER;",
+      "serviceTier: MARKETING_LLM_SERVICE_TIER,",
+      "serviceTier: snapshot.serviceTier,",
+    ],
+  },
+  {
     file: "lib/agentPushPolicy.ts",
     sendsATier: false,
     reason:

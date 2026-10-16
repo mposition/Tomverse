@@ -2101,6 +2101,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 13,
+    reason:
+      "The marketing LLM cost ledger migration creates its own table, constraints and guards. All three AdminAuditLog mentions are restrictive foreign keys from the ledger's audit columns to the existing audit writer; no audit row is inserted, updated or deleted here. The write verbs are the ledger's own CREATE statements and the triggers that refuse or constrain writes.",
+  },
+  {
     path: "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 2,
@@ -2235,6 +2243,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    count: 1,
+    reason:
+      "One read in the marketing LLM cost ledger's truncate guard: SELECT EXISTS over the trigger's own table, named from TG_TABLE_SCHEMA and TG_TABLE_NAME and quoted with %I, because the function pins search_path to pg_catalog, pg_temp and an empty temporary table of the same name must not answer for the ledger. Nothing in it is input; it reads and never writes.",
+  },
   {
     path: "prisma/migrations/20261013100000_amux_worker_capability/migration.sql",
     count: 3,
@@ -3499,6 +3513,12 @@ export const PROTECTED_EXPORT_ALLOWLIST = [
 // a publication nobody approved.
 
 export const RETENTION_SETTING_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql",
+    count: 1,
+    reason:
+      "The marketing LLM cost ledger's delete guard reads the setting to refuse any deletion that is not retention's. Reading it is the check; setting it is what this rule is about.",
+  },
   {
     path: "lib/marketingAutomationSchema.ts",
     count: 2,

@@ -1294,6 +1294,13 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   강제). 지운 행마다 같은 트랜잭션에 `marketing-retention` 감사 행을, 지운 것이 있는 실행만 `retention_run`
   보고서를 남깁니다. 일일 정리 cron의 한 단계이며 표마다 한 번에 200행까지입니다. 게시물 본문 정리와 history
   압축은 S3h2입니다.
+- **S3c1(LLM 비용 원장 표와 결정적 핵심)**: `lib/marketingLlmBudgetCore.ts`,
+  `prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql`, `tests/marketingLlmBudgetCore.test.mjs`,
+  `tests/integration/marketing-llm-call-ledger.db.test.ts`. 정책 v4의 다섯 번째 표 `MarketingLlmCall`입니다. **dispatch된
+  호출은 언제나 예약액으로 셉니다** — 앱은 생성기가 실제로 보낸 것을 볼 수 없으므로 보고된 토큰은 관측값입니다. 상태 전이·
+  증거 1회 설정·시각·사유와 관측 열의 짝·보존 삭제는 trigger와 CHECK가 직접 SQL에도 강제하고, 예약 시각은 writer가 DB
+  시계에서 한 번 읽어 그 월을 잠그며 trigger는 다시 계산하지 않고 검증만 합니다. `MARKETING_LLM_PRICE_PINS`는 S3e가
+  모델과 가격 근거를 가져올 때까지 비어 있으므로 모든 예약이 `model_not_pinned`입니다. writer·route·sweep은 S3c2 이후입니다.
 
 # 엔지니어링 Agent
 
