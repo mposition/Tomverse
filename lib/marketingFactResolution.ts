@@ -19,12 +19,24 @@
  * the account and locale whose question is being asked; it never supplies the
  * answer.
  *
- * **One snapshot, one clock** (S3 plan, S3a2). Every database read here -- the
- * gates, the plans, the catalogue's provenance, the model rows and the usage --
- * goes through the client the caller passes, which for a write is its
- * transaction, and "today" is the database's clock read through the same
+ * **One client, one clock, rows held** (S3 plan, S3a2). Every database read
+ * here -- the gates, the plans, the catalogue's provenance, the model rows and
+ * the usage -- goes through the client the caller passes, which for a write is
+ * its transaction, and "today" is the database's clock read through the same
  * client. The rows read become the post's fact snapshot, so what a decision
  * rested on is recorded with it rather than re-read later.
+ *
+ * A transaction at READ COMMITTED -- the intake's, deliberately, because its
+ * read-back and its ledger writes must see what committed while it waited for
+ * the audit chain lock -- gives each statement its own snapshot. So the rows a
+ * price or model fact rests on are locked FOR SHARE immediately before they are
+ * read: none of them can change until the caller commits, and the facts are the
+ * rows as they all stood at the last lock, which is one moment that existed. A
+ * row that does not exist cannot be locked, and its absence is the refusing
+ * answer (no plan row is a compiled default, no model row is no model), so a
+ * row appearing later can only have made a claim acceptable, never the other
+ * way round. Usage is read once and can only make a post less eligible for
+ * autonomy, which a generated draft is refused anyway.
  */
 
 import "server-only";
@@ -40,6 +52,7 @@ import {
   type BillingPlanWithFieldSources,
 } from "@/lib/billingConfig";
 import {
+  BILLING_PRICE_CATALOG_KEY,
   readBillingPriceCatalogSource,
   type BillingPriceCatalogSource,
 } from "@/lib/billingPriceCatalog";
@@ -128,6 +141,28 @@ async function readGates(
   return gates;
 }
 
+/**
+ * Lock the rows a fact is about to be read from, until the caller commits.
+ *
+ * FOR SHARE: other readers go on, a writer waits. Outside a transaction (a
+ * caller passing the client itself) the lock lasts one statement and holds
+ * nothing, which is what such a caller asked for.
+ */
+export async function holdMarketingFactRows(
+  database: MarketingFactDatabase,
+  rows: { readonly plans: boolean; readonly catalogue: boolean; readonly modelIds: readonly string[] },
+): Promise<void> {
+  if (rows.plans) {
+    await database.$queryRaw`SELECT "id" FROM "BillingPlan" ORDER BY "id" FOR SHARE`;
+  }
+  if (rows.catalogue) {
+    await database.$queryRaw`SELECT "key" FROM "AppSetting" WHERE "key" = ${BILLING_PRICE_CATALOG_KEY} FOR SHARE`;
+  }
+  if (rows.modelIds.length > 0) {
+    await database.$queryRaw`SELECT "id" FROM "ModelRegistryEntry" WHERE "id" = ANY(${[...rows.modelIds]}::text[]) ORDER BY "id" FOR SHARE`;
+  }
+}
+
 /** The database's "now", read through the same client as the facts. */
 async function readDatabaseClock(database: MarketingFactDatabase): Promise<Date> {
   const rows = await database.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS "now"`;
@@ -158,8 +193,12 @@ async function readModelRow(database: MarketingFactDatabase, modelId: string): P
   }
 }
 
-/** The store's digest of a fact snapshot: keys sorted at every level, SHA-256. */
-export function marketingFactSnapshotDigest(snapshot: MarketingFactSnapshot): string {
+/**
+ * The store's digest of a fact snapshot: keys sorted at every level, SHA-256.
+ * Takes the stored JSON as it is, so a post's snapshot is digested exactly as
+ * the store digests it when it checks a decision against the row.
+ */
+export function marketingFactSnapshotDigest(snapshot: unknown): string {
   return createHash("sha256").update(JSON.stringify(canonical(snapshot)), "utf8").digest("hex");
 }
 
@@ -313,7 +352,16 @@ async function readMarketingFacts(
     (claim) => claim?.factSource?.kind === "localized_catalogue",
   );
 
-  // In a fixed order, through the one client.
+  const modelIds = [
+    ...new Set(
+      registryClaims.flatMap((claim) =>
+        claim?.factSource?.kind === "model_registry" ? [claim.factSource.modelId] : [],
+      ),
+    ),
+  ].sort();
+
+  // In a fixed order, through the one client: the rows held first, then read.
+  await holdMarketingFactRows(database, { plans: needsPlans, catalogue: needsCatalogue, modelIds });
   const gates = await readGates(database, gateKeys);
   const usage = await readUsage(database, request.channelId);
   const plans: BillingPlanWithFieldSources[] = needsPlans
@@ -322,13 +370,7 @@ async function readMarketingFacts(
   const catalogue: { source: BillingPriceCatalogSource; updatedAt: string | null } | null =
     needsCatalogue ? await readBillingPriceCatalogSource(database) : null;
   const modelRows = new Map<string, ModelRow | null>();
-  for (const modelId of [
-    ...new Set(
-      registryClaims.flatMap((claim) =>
-        claim?.factSource?.kind === "model_registry" ? [claim.factSource.modelId] : [],
-      ),
-    ),
-  ].sort()) {
+  for (const modelId of modelIds) {
     modelRows.set(modelId, await readModelRow(database, modelId));
   }
   // Always: the registry version a post records is the one in force, whether
@@ -478,7 +520,9 @@ async function readMarketingFacts(
     priceRows: [...priceRows].map(([rowId, updatedAt]) => ({ rowId, updatedAt })).sort(byRowId),
     // No row is nothing to point at, and the claim that asked is refused for
     // resting on the compiled default; a timestamp made up for it would say a
-    // row was read.
+    // row was read. A row that exists but does not parse is recorded as the
+    // compiled default it serves, with that row's own updatedAt -- the same
+    // pairing the billing reader reports.
     catalogue:
       catalogueUsed && catalogue?.updatedAt
         ? {

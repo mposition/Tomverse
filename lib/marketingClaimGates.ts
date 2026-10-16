@@ -35,7 +35,9 @@ export type MarketingClaimGateDatabase = Pick<Prisma.TransactionClient, "appSett
  * Gate id -> the reader that owns it.
  *
  * The reader returns the product's answer, not the row, read through the client
- * it is given. A reader that throws is handled by the resolver rather than
+ * it is given -- and the row it reads it locks FOR SHARE first, as the fact
+ * resolver does for plans and models, so the gate cannot change before the
+ * caller commits. A reader that throws is handled by the resolver rather than
  * here, so a gate never has to decide what a database failure means.
  */
 export const MARKETING_CLAIM_GATES: Readonly<

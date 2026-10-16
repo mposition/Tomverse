@@ -1369,7 +1369,11 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `lib/billingConfig.ts`의 `getBillingPlansWithFieldSources(database)`, `lib/billingPriceCatalog.ts`의
   `readBillingPriceCatalogSource()`, `tests/marketingFactResolution.test.mjs`. **사실은 호출자의 트랜잭션 하나와
   DB 시계로 읽습니다** — 게이트·요금제·카탈로그 출처·모델 행·사용 이력이 같은 client를 지나고, 정해진 순서로
-  한 번에 하나씩 읽습니다. 새 draft는 `resolveMarketingFactsWithSnapshot()`이 읽은 행(요금제 행·카탈로그 출처·
+  한 번에 하나씩 읽습니다. READ COMMITTED에서는 문장마다 snapshot이 다르므로, 가격·모델 사실이 기대는 행은
+  읽기 직전에 `FOR SHARE`로 잡아 commit까지 바뀌지 않게 합니다(`holdMarketingFactRows()`,
+  `tests/integration/marketing-fact-row-hold.db.test.ts`). 접수 트랜잭션을 REPEATABLE READ로 올리지 않는 것은
+  snapshot이 감사 체인 잠금보다 먼저 잡혀 같은 key 재제출 확인과 원장 소비가 기다리는 동안 commit된 행을 못 보기
+  때문입니다. 새 draft는 `resolveMarketingFactsWithSnapshot()`이 읽은 행(요금제 행·카탈로그 출처·
   모델 행의 id와 `updatedAt`, 증거 문장의 digest)으로 snapshot을 만들고, Guard 판정은 그 snapshot digest에
   묶입니다. 그래서 claim·asset이 있는 draft도 접수합니다. **카탈로그 reader는 행을 만들지 않습니다** — 기존
   `getBillingPriceCatalogWithMeta()`는 행이 없으면 기본값을 써 넣으므로 쓰기 트랜잭션 안의 사실 읽기에 쓰지
