@@ -5,11 +5,17 @@
  * the service and the tests drive the same code.
  *
  * **It stops rather than presses on.** A refused reservation (no pin, budget
- * spent, kill switch) refuses every later call too, an unknown outcome is a
- * thing a person looks at (agent foundation rule 7), and a submission whose
- * answer is lost is resolved by resending the same key -- which a new run,
- * with a new run id, cannot do. So the run ends at the first of these and
- * reports where.
+ * spent, kill switch) refuses every later call too, and an unknown outcome is
+ * a thing a person looks at (agent foundation rule 7), so the run ends at the
+ * first of these and reports where.
+ *
+ * **A submission is the one thing it resends** -- the same signed bytes, never
+ * a new call to the provider. The intake commits each draft on its own and
+ * reads a key it has already taken back, so an answer lost part-way, or a 5xx,
+ * is resolved by sending exactly that submission again: what committed is read
+ * back, the rest is taken. Only this run holds those bytes, so the resend
+ * happens here, a bounded number of times, and a run that still has no answer
+ * ends and says so.
  *
  * Imports node built-ins and relative modules only, so the service loads it
  * with `--experimental-strip-types`.
@@ -28,6 +34,12 @@ import type { MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLl
 /** Time a call is not started without: one reservation, one provider answer and one submission. */
 export const MARKETING_GENERATOR_CALL_BUDGET_MS = 90_000;
 
+/** Sends of one signed submission when its answer is lost or a 5xx: the first and two resends. */
+export const MARKETING_GENERATOR_SUBMIT_ATTEMPTS = 3;
+
+/** The wait before each resend. */
+export const MARKETING_GENERATOR_SUBMIT_BACKOFF_MS = [2_000, 5_000] as const;
+
 export type MarketingGeneratorCycleDeps = {
   /** The app's context route, answered as JSON. Throws when there is no answer. */
   readonly readContext: () => Promise<unknown>;
@@ -40,6 +52,8 @@ export type MarketingGeneratorCycleDeps = {
   readonly secret: string;
   readonly newId: () => string;
   readonly now: () => number;
+  /** Waits between resends of a submission. */
+  readonly sleep: (ms: number) => Promise<void>;
 };
 
 export type MarketingGeneratorCycleSummary = {
@@ -116,12 +130,21 @@ export async function runMarketingGeneratorCycle(
       drafts: read.drafts,
       llmCallRequestKeys: [outcome.requestKey],
     });
-    let answer;
-    try {
-      answer = await deps.submit(submission);
-    } catch {
-      return summary({ stage: "submit", detail: "outcome_unknown" });
+    // The same bytes each time: a resend is a read-back of what committed and
+    // the intake of what did not, never a second draft.
+    let answer: { readonly httpStatus: number; readonly body: Record<string, unknown> } | null = null;
+    for (let attempt = 0; attempt < MARKETING_GENERATOR_SUBMIT_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) await deps.sleep(MARKETING_GENERATOR_SUBMIT_BACKOFF_MS[attempt - 1] ?? 5_000);
+      try {
+        answer = await deps.submit(submission);
+      } catch {
+        answer = null;
+        continue;
+      }
+      // A 4xx is this submission's fault, and sending it again changes nothing.
+      if (answer.httpStatus < 500) break;
     }
+    if (answer === null) return summary({ stage: "submit", detail: "outcome_unknown" });
     if (answer.httpStatus !== 200 || !Array.isArray(answer.body.results)) {
       return summary({ stage: "submit", detail: `http_${answer.httpStatus}` });
     }

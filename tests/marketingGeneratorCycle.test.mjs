@@ -37,10 +37,12 @@ const goodAnswer = JSON.stringify({
 function harness({ outcomes = [], submitAnswer, readContext, now } = {}) {
   const asked = [];
   const submitted = [];
+  const slept = [];
   let id = 0;
   return {
     asked,
     submitted,
+    slept,
     deps: {
       readContext: readContext ?? (async () => context),
       callLlm: async (messages, requestKey) => {
@@ -56,6 +58,9 @@ function harness({ outcomes = [], submitAnswer, readContext, now } = {}) {
       secret: SECRET,
       newId: () => `00000000-0000-4000-8000-${String(++id).padStart(12, "0")}`,
       now: now ?? (() => NOW),
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
     },
   };
 }
@@ -95,7 +100,28 @@ for (const status of ["unknown", "stopped"]) {
   });
 }
 
-test("a submission whose answer is lost ends the run rather than resending under a new run", async () => {
+test("a lost or 5xx submission is resent as the same signed bytes, never as a new call", async () => {
+  let sends = 0;
+  const h = harness({
+    submitAnswer: (submission) => {
+      sends += 1;
+      if (sends === 1) throw new Error("socket hang up");
+      // Part-way: the route answers 500 after some drafts committed.
+      if (sends === 2) return { httpStatus: 500, body: { results: [], code: "outcome_unknown" } };
+      return { httpStatus: 200, body: { results: submission.drafts.map(() => ({ status: "queued", existing: true })) } };
+    },
+  });
+  const summary = await cycle(h);
+  assert.equal(summary.stoppedAt, null);
+  // Three sends of the first submission, one of the second; one model call each.
+  assert.equal(h.asked.length, 2);
+  assert.equal(h.submitted.length, 4);
+  assert.deepEqual(h.submitted[0], h.submitted[1]);
+  assert.deepEqual(h.submitted[1], h.submitted[2]);
+  assert.deepEqual(h.slept, [2_000, 5_000]);
+});
+
+test("a submission that never gets an answer ends the run after its resends", async () => {
   const h = harness({
     submitAnswer: () => {
       throw new Error("socket hang up");
@@ -104,6 +130,14 @@ test("a submission whose answer is lost ends the run rather than resending under
   const summary = await cycle(h);
   assert.deepEqual(summary.stoppedAt, { stage: "submit", detail: "outcome_unknown" });
   assert.equal(h.asked.length, 1);
+  assert.equal(h.submitted.length, 3);
+});
+
+test("a 4xx is not resent: the same bytes would be refused the same way", async () => {
+  const h = harness({ submitAnswer: () => ({ httpStatus: 401, body: { code: "provenance_invalid" } }) });
+  const summary = await cycle(h);
+  assert.deepEqual(summary.stoppedAt, { stage: "submit", detail: "http_401" });
+  assert.equal(h.submitted.length, 1);
 });
 
 test("an answer with nothing usable submits nothing and goes on to the next account", async () => {

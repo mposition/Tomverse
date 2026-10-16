@@ -67,6 +67,7 @@ try {
       secret,
       newId: randomUUID,
       now: Date.now,
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     },
   );
   // Counts and the stop reason only: no words, no ids a reader could act on.
