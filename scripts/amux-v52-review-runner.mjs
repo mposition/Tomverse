@@ -30,7 +30,7 @@ function evidence(input, verdict, jobId = null, reviewerVendors = []) {
     touches_contract: input.touchesContract };
 }
 
-function checkedRun(program, args, cwd, timeout = 30_000) {
+function checkedRun(program, args, cwd, timeout = 30_000, objectsDir) {
   const result = spawnSync(program, args, { cwd, encoding: "utf8",
     timeout, maxBuffer: MAX_OUTPUT, windowsHide: true,
     env: { HOME: process.env.HOME, PATH: "/usr/bin:/bin",
@@ -38,8 +38,35 @@ function checkedRun(program, args, cwd, timeout = 30_000) {
       GIT_CONFIG_GLOBAL: "/dev/null", GIT_NO_REPLACE_OBJECTS: "1",
       GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_COUNT: "2",
       GIT_CONFIG_KEY_0: "core.fsmonitor", GIT_CONFIG_VALUE_0: "false",
-      GIT_CONFIG_KEY_1: "core.hooksPath", GIT_CONFIG_VALUE_1: "/dev/null" } });
+      GIT_CONFIG_KEY_1: "core.hooksPath", GIT_CONFIG_VALUE_1: "/dev/null",
+      ...(objectsDir ? { GIT_ALTERNATE_OBJECT_DIRECTORIES: objectsDir } : {}) } });
   return { code: result.status ?? 65, stdout: result.stdout ?? "" };
+}
+
+/** Only object bytes cross the worker/bridge boundary. Git config and refs
+ * used by the SSH-key holder live in its own private bare repository. */
+export function prepareReviewRepository(input, directory, objectsDir,
+  run = checkedRun) {
+  if (!isAbsolute(objectsDir ?? "") ||
+      !lstatSync(objectsDir).isDirectory())
+    throw new Error("review object directory unavailable");
+  const repository = join(directory, `${input.attemptId}.git`);
+  const git = (args, cwd = repository) => {
+    const reply = run("/usr/bin/git", args, cwd, 5_000, objectsDir);
+    if (reply.code !== 0) throw new Error("isolated review git failed");
+    return reply.stdout.trim();
+  };
+  git(["init", "--bare", "--quiet", repository], directory);
+  if (!lstatSync(repository).isDirectory())
+    throw new Error("isolated review repository unavailable");
+  git(["update-ref", "refs/remotes/origin/develop", input.baseSha]);
+  git(["update-ref", input.reviewRef, input.commitSha]);
+  if (git(["rev-parse", "--verify", `${input.commitSha}^`]) !==
+      input.baseSha ||
+      git(["rev-parse", "--verify", `${input.reviewRef}^{commit}`]) !==
+        input.commitSha)
+    throw new Error("review commit does not bind the base");
+  return repository;
 }
 
 function requireRootOwnedClient(path) {
@@ -110,9 +137,10 @@ function reviewVendors(status) {
 export function reviewStep(input, options = {}) {
   if (!validInput(input)) throw new Error("invalid review request");
   const directory = options.stateDir ?? process.env.AMUX_V52_REVIEW_STATE_DIR;
-  const worktree = options.worktree ?? process.env.AMUX_V52_REVIEW_WORKTREE;
+  const objectsDir = options.objectsDir ??
+    process.env.AMUX_V52_REVIEW_OBJECTS_DIR;
   const client = options.client ?? process.env.AMUX_V52_REVIEW_CLIENT;
-  if (!isAbsolute(directory ?? "") || !isAbsolute(worktree ?? "") ||
+  if (!isAbsolute(directory ?? "") ||
       !isAbsolute(client ?? "")) throw new Error("review launcher configuration missing");
   if (!options.run) requireRootOwnedClient(client);
   const dirStat = lstatSync(directory);
@@ -122,23 +150,27 @@ export function reviewStep(input, options = {}) {
     throw new Error("unsafe review state directory");
   const path = join(directory, `${input.attemptId}.json`);
   const run = options.run ?? checkedRun;
-  const git = (args) => run("/usr/bin/git", args, worktree);
-  if (git(["rev-parse", "--verify", `${input.commitSha}^`]).stdout.trim() !==
-      input.baseSha ||
-      git(["rev-parse", "--verify", `${input.reviewRef}^{commit}`])
-        .stdout.trim() !== input.commitSha)
-    throw new Error("review ref does not bind the commit and base");
   const fresh = claim(path, input);
   let state = readState(path, input);
   if (state.final) return { kind: "final", evidence: state.final };
   if (fresh) {
+    let repository;
+    try {
+      repository = options.prepareRepository ?
+        options.prepareRepository(input, directory, objectsDir, run) :
+        prepareReviewRepository(input, directory, objectsDir, run);
+    } catch {
+      const final = evidence(input, "unknown");
+      durableWrite(path, { input, final });
+      return { kind: "final", evidence: final };
+    }
     const args = [client, "submit", "--author", input.author,
       "--author-vendor", input.authorVendor,
       "--repo", options.repo ?? "tomverse",
       "--scope", input.scope, "--head", input.commitSha,
       "--head-ref", input.reviewRef];
     if (input.touchesContract) args.push("--reviewers", "2");
-    const reply = run("/usr/bin/node", args, worktree);
+    const reply = run("/usr/bin/node", args, repository, 30_000, objectsDir);
     let submitted;
     try { submitted = JSON.parse(reply.stdout); } catch {}
     if (reply.code !== 3 || !JOB.test(submitted?.jobId)) {
@@ -148,6 +180,7 @@ export function reviewStep(input, options = {}) {
     }
     state = { input, jobId: submitted.jobId };
     durableWrite(path, state);
+    return { kind: "pending", jobId: state.jobId };
   }
   if (!JOB.test(state.jobId)) {
     // A claim without a durable job id may have reached the review server.
@@ -155,7 +188,7 @@ export function reviewStep(input, options = {}) {
     durableWrite(path, { input, final });
     return { kind: "final", evidence: final };
   }
-  const reply = run("/usr/bin/node", [client, "status", state.jobId], worktree);
+  const reply = run("/usr/bin/node", [client, "status", state.jobId], directory);
   if (reply.code === 65 && (state.statusFailures ?? 0) < 2) {
     // A known submission is already durable. Retry only its read, never submit.
     durableWrite(path, { ...state,
@@ -190,24 +223,25 @@ export function reviewStep(input, options = {}) {
 
 export function reviewFindings(jobId, options = {}) {
   if (!JOB.test(jobId)) throw new Error("invalid review job ID");
-  const worktree = options.worktree ?? process.env.AMUX_V52_REVIEW_WORKTREE;
+  const worktree = options.stateDir ?? process.env.AMUX_V52_REVIEW_STATE_DIR;
   const client = options.client ?? process.env.AMUX_V52_REVIEW_CLIENT;
   if (!isAbsolute(worktree ?? "") || !isAbsolute(client ?? ""))
     throw new Error("review launcher configuration missing");
   if (!options.run) requireRootOwnedClient(client);
   const run = options.run ?? checkedRun;
-  const statusReply = run("/usr/bin/node", [client, "status", jobId], worktree);
+  const statusReply = run("/usr/bin/node", [client, "status", jobId],
+    worktree, 12_000);
   let status;
   try { status = JSON.parse(statusReply.stdout); } catch {}
   if (statusReply.code !== 1 || status?.jobId !== jobId ||
       status.status !== "reject" || !Array.isArray(status.reviews) ||
-      status.reviews.length > 4)
+      status.reviews.length > 2)
     throw new Error("review findings unavailable");
   const reports = [];
   for (let index = 0; index < status.reviews.length; index += 1) {
     if (status.reviews[index]?.verdict !== "reject") continue;
     const reply = run("/usr/bin/node", [client, "report", jobId,
-      "--slot", String(status.reviews[index].slot)], worktree);
+      "--slot", String(status.reviews[index].slot)], worktree, 12_000);
     if (reply.code !== 0 || !reply.stdout.trim())
       throw new Error("review findings unavailable");
     reports.push(reply.stdout.trim());

@@ -16,7 +16,8 @@ const input = { attemptId: "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f",
 function fixture(run) {
   const stateDir = mkdtempSync(join(tmpdir(), "amux-v52-review-"));
   return { options: { stateDir, worktree: stateDir,
-    client: join(stateDir, "review.mjs"), uid: statSync(stateDir).uid, run },
+    client: join(stateDir, "review.mjs"), uid: statSync(stateDir).uid,
+    prepareRepository: () => stateDir, run },
   cleanup: () => rmSync(stateDir, { recursive: true, force: true }) };
 }
 
@@ -25,8 +26,6 @@ test("one submission stays pending and then records independent acceptance", () 
   let statuses = 0;
   const jobId = "r-20261016-110000-abcdef";
   const { options, cleanup } = fixture((_program, args) => {
-    if (args[0] === "rev-parse") return { code: 0,
-      stdout: `${args[2].startsWith("refs/") ? input.commitSha : input.baseSha}\n` };
     if (args.includes("submit")) {
       submits += 1;
       assert.equal(args.includes("--base"), false);
@@ -45,6 +44,7 @@ test("one submission stays pending and then records independent acceptance", () 
   });
   try {
     assert.deepEqual(reviewStep(input, options), { kind: "pending", jobId });
+    assert.deepEqual(reviewStep(input, options), { kind: "pending", jobId });
     assert.equal(reviewStep(input, options).evidence.verdict, "accept");
     assert.equal(reviewStep(input, options).evidence.verdict, "accept");
     assert.equal(submits, 1);
@@ -55,8 +55,6 @@ test("one submission stays pending and then records independent acceptance", () 
 test("ambiguous submit records unknown and never submits again", () => {
   let submits = 0;
   const { options, cleanup } = fixture((_program, args) => {
-    if (args[0] === "rev-parse") return { code: 0,
-      stdout: `${args[2].startsWith("refs/") ? input.commitSha : input.baseSha}\n` };
     submits += 1;
     return { code: 65, stdout: "" };
   });
@@ -72,8 +70,6 @@ test("a known job survives transient status failure without resubmission", () =>
   let statuses = 0;
   const jobId = "r-20261016-110005-abcdef";
   const { options, cleanup } = fixture((_program, args) => {
-    if (args[0] === "rev-parse") return { code: 0,
-      stdout: `${args[2].startsWith("refs/") ? input.commitSha : input.baseSha}\n` };
     if (args.includes("submit")) {
       submits += 1;
       return { code: 3, stdout: JSON.stringify({ jobId }) };
@@ -87,6 +83,7 @@ test("a known job survives transient status failure without resubmission", () =>
   });
   try {
     assert.deepEqual(reviewStep(input, options), { kind: "pending", jobId });
+    assert.deepEqual(reviewStep(input, options), { kind: "pending", jobId });
     assert.equal(reviewStep(input, options).evidence.verdict, "accept");
     assert.equal(submits, 1);
   } finally { cleanup(); }
@@ -96,8 +93,6 @@ test("three failed reads of a known job end unknown without resubmission", () =>
   let submits = 0;
   const jobId = "r-20261016-110006-abcdef";
   const { options, cleanup } = fixture((_program, args) => {
-    if (args[0] === "rev-parse") return { code: 0,
-      stdout: `${args[2].startsWith("refs/") ? input.commitSha : input.baseSha}\n` };
     if (args.includes("submit")) {
       submits += 1;
       return { code: 3, stdout: JSON.stringify({ jobId }) };
@@ -105,6 +100,7 @@ test("three failed reads of a known job end unknown without resubmission", () =>
     return { code: 65, stdout: "" };
   });
   try {
+    assert.equal(reviewStep(input, options).kind, "pending");
     assert.equal(reviewStep(input, options).kind, "pending");
     assert.equal(reviewStep(input, options).kind, "pending");
     assert.equal(reviewStep(input, options).evidence.verdict, "unknown");
@@ -116,8 +112,6 @@ test("contract acceptance requires two other reviewer vendors", () => {
   const contract = { ...input, touchesContract: true };
   const jobId = "r-20261016-110001-abcdef";
   const { options, cleanup } = fixture((_program, args) => {
-    if (args[0] === "rev-parse") return { code: 0,
-      stdout: `${args[2].startsWith("refs/") ? input.commitSha : input.baseSha}\n` };
     if (args.includes("submit")) {
       assert.deepEqual(args.slice(-2), ["--reviewers", "2"]);
       return { code: 3, stdout: JSON.stringify({ jobId }) };
@@ -128,7 +122,10 @@ test("contract acceptance requires two other reviewer vendors", () => {
       authorVendor: input.authorVendor, touchesContract: true,
       status: "accept", reviews: [{ vendor: "openai" }] }) };
   });
-  try { assert.equal(reviewStep(contract, options).evidence.verdict, "unknown"); }
+  try {
+    assert.equal(reviewStep(contract, options).kind, "pending");
+    assert.equal(reviewStep(contract, options).evidence.verdict, "unknown");
+  }
   finally { cleanup(); }
 });
 
@@ -136,8 +133,6 @@ test("AMUX contract classification accepts two vendors even when server paths di
   const contract = { ...input, touchesContract: true };
   const jobId = "r-20261016-110003-abcdef";
   const { options, cleanup } = fixture((_program, args) => {
-    if (args[0] === "rev-parse") return { code: 0,
-      stdout: `${args[2].startsWith("refs/") ? input.commitSha : input.baseSha}\n` };
     if (args.includes("submit")) return { code: 3,
       stdout: JSON.stringify({ jobId }) };
     return { code: 0, stdout: JSON.stringify({ jobId,
@@ -148,6 +143,7 @@ test("AMUX contract classification accepts two vendors even when server paths di
         { vendor: "moonshot" }] }) };
   });
   try {
+    assert.equal(reviewStep(contract, options).kind, "pending");
     assert.equal(reviewStep(contract, options).evidence.verdict, "accept");
   } finally { cleanup(); }
 });

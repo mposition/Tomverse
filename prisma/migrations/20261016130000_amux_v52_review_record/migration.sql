@@ -45,3 +45,15 @@ ALTER TABLE "AmuxV52ReviewRecord"
   ADD CONSTRAINT "AmuxV52ReviewRecord_auditLogId_fkey"
   FOREIGN KEY ("auditLogId") REFERENCES "AdminAuditLog"("id")
   ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+CREATE FUNCTION amux_v52_review_record_immutable() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'AMUX v52 review records are append-only'
+    USING ERRCODE = '23514';
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER amux_v52_review_record_immutable
+  BEFORE UPDATE OR DELETE ON "AmuxV52ReviewRecord"
+  FOR EACH ROW EXECUTE FUNCTION amux_v52_review_record_immutable();

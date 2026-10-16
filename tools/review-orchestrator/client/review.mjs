@@ -82,8 +82,24 @@ function createBundle(base, head, headRef) {
   const ref = `refs/review-orchestrator/${randomBytes(8).toString("hex")}`;
   try {
     if (!headRef) git(["update-ref", ref, head]);
-    git(["bundle", "create", path, headRef ?? ref, `^${base}`]);
-    if (headRef) {
+    if (headRef && git(["rev-parse", "--is-bare-repository"]) === "true") {
+      // Git bundle omits objects held only in an alternate object directory.
+      // The bridge's isolated bare repo reads worker objects as data; pack the
+      // reviewed delta explicitly so the server receives every new object.
+      const packed = spawnSync("git", ["pack-objects", "--stdout", "--revs"], {
+        input: `${headRef}\n^${base}\n`, maxBuffer: 64 * 1024 * 1024,
+        timeout: 10_000,
+      });
+      if (packed.status !== 0 || !packed.stdout?.subarray(0, 4)
+        .equals(Buffer.from("PACK")))
+        throw new Error("review pack unavailable");
+      writeFileSync(path, Buffer.concat([
+        Buffer.from(`# v2 git bundle\n-${base} base\n${head} ${ref}\n\n`),
+        packed.stdout,
+      ]));
+      git(["bundle", "verify", path]);
+    } else git(["bundle", "create", path, headRef ?? ref, `^${base}`]);
+    if (headRef && git(["rev-parse", "--is-bare-repository"]) !== "true") {
       // Git requires a named source ref for an unreachable local commit.
       // Rename only the bundle header to the server's short-lived namespace;
       // its pack data and source repository remain untouched.
@@ -153,9 +169,12 @@ function transport(token, stdinPath, { capture = false } = {}) {
     args = ["-o", "BatchMode=yes", host, process.env.REVIEW_ORCH_REMOTE || "review-orchestrator", "rpc", token];
   }
   return new Promise((resolve, reject) => {
+    const remoteEnv = { ...process.env };
+    delete remoteEnv.GIT_ALTERNATE_OBJECT_DIRECTORIES;
     const child = spawn(command, args, {
       stdio: [stdinPath ? "pipe" : "ignore", capture ? "pipe" : "inherit", "inherit"],
       timeout: capture ? 30_000 : undefined,
+      env: remoteEnv,
     });
     let stdout = "";
     if (capture) child.stdout.on("data", (chunk) => {
@@ -197,7 +216,8 @@ async function submit(options) {
   // --focus <rev>: show the reviewer only <rev>..HEAD (say, what changed since
   // the last review round). The server checks it lies between base and HEAD.
   const focus = options.focus ? git(["rev-parse", "--verify", `${options.focus}^{commit}`]) : undefined;
-  if (git(["status", "--porcelain", "--untracked-files=no"]) !== "") {
+  if (git(["rev-parse", "--is-bare-repository"]) !== "true" &&
+      git(["status", "--porcelain", "--untracked-files=no"]) !== "") {
     process.stderr.write("warning: uncommitted changes are not part of the review; only committed work is sent\n");
   }
   const repo = options.repo ?? repoNameFromRemote(git(["remote", "get-url", "origin"]));

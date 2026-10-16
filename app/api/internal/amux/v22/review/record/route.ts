@@ -71,7 +71,7 @@ export async function POST(request: Request) {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, 32 * 1_024, requestSchema);
+      const body = await readLimitedJson(request, 64 * 1_024, requestSchema);
       const result = await recordAmuxV52Review({
         attemptId: body.attempt_id, worker: body.worker,
         instanceId: body.instance_id, generation: body.generation,

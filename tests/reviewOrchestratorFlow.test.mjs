@@ -100,25 +100,36 @@ test("AMUX launcher follows the real client's pending and accept exit codes", as
     git(f.work, "reset", "--hard", base);
     const stateDir = join(f.root, "bridge-state");
     mkdirSync(stateDir, { mode: 0o700 });
-    const options = { stateDir, worktree: f.work, client: CLIENT,
+    const objectsDir = join(git(f.work, "rev-parse", "--absolute-git-dir"),
+      "objects");
+    const options = { stateDir, objectsDir, client: CLIENT,
       repo: "demo",
       uid: statSync(stateDir).uid,
-      run: (program, args, cwd) => run(program === "/usr/bin/git" ?
-        "git" : process.execPath, args, { cwd,
-        env: { ...process.env, REVIEW_ORCH_CONFIG: f.configPath,
-          REVIEW_ORCH_LOCAL_BIN: SERVER } }) };
+      run: (program, args, cwd, _timeout, alternate) => {
+        assert.notEqual(cwd, f.work,
+          "the key holder must never run Git in the worker worktree");
+        return run(program === "/usr/bin/git" ? "git" : process.execPath,
+          args, { cwd, env: { ...process.env,
+            REVIEW_ORCH_CONFIG: f.configPath, REVIEW_ORCH_LOCAL_BIN: SERVER,
+            ...(alternate ? { GIT_ALTERNATE_OBJECT_DIRECTORIES: alternate } : {}) } });
+      } };
     const review = { attemptId, baseSha: base, commitSha: head,
       reviewRef, author: "codex", authorVendor: "openai",
       scope: "Title: Review launcher\nCompletion criteria:\n- Works",
       touchesContract: false };
     const pending = reviewStep(review, options);
     assert.equal(pending.kind, "pending");
-    const orchestrator = new Orchestrator(f.config);
+    assert.equal(git(join(stateDir, `${attemptId}.git`),
+      "rev-parse", "--is-bare-repository"), "true");
+    const logs = [];
+    const orchestrator = new Orchestrator(f.config,
+      { log: (line) => logs.push(line) });
     orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
     const final = reviewStep(review, options);
     assert.equal(final.kind, "final");
-    assert.equal(final.evidence.verdict, "accept");
+    assert.equal(final.evidence.verdict, "accept", JSON.stringify({
+      final, status: JSON.parse(f.client("status", pending.jobId).stdout), logs }));
     assert.deepEqual(final.evidence.reviewer_vendors, ["anthropic"]);
   } finally { f.cleanup(); }
 });

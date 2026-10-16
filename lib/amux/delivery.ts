@@ -301,7 +301,10 @@ export async function pullAmuxWorkDelivery(input: {
       });
       const candidateCard = sealedCandidate ? await tx.amuxWorkItem.findUnique({
         where: { id: sealedCandidate.taskId },
-        select: { sourceSnapshot: true },
+        select: { sourceSnapshot: true,
+          v22AcceptedAssignment: { select: { id: true, role: true,
+            authorizationAuditLog: { select: { action: true, targetId: true,
+              metadata: true } } } } },
       }) : null;
       return { sealedCandidate, candidateCard };
     }) : { sealedCandidate: null, candidateCard: null };
@@ -309,11 +312,23 @@ export async function pullAmuxWorkDelivery(input: {
   const ideaId = snapshot && typeof snapshot === "object" &&
     !Array.isArray(snapshot) && typeof snapshot.ideaId === "string" ?
       snapshot.ideaId : null;
+  const candidateAssignment = candidateCard?.v22AcceptedAssignment;
+  const candidateAudit = candidateAssignment?.authorizationAuditLog;
+  const needReviewKeys = candidateAssignment?.role === "implement" &&
+    candidateAudit?.action === "amux.v22.worker.assigned" &&
+    candidateAudit.targetId === candidateAssignment.id &&
+    !!candidateAudit.metadata && typeof candidateAudit.metadata === "object" &&
+    !Array.isArray(candidateAudit.metadata) &&
+    (candidateAudit.metadata as Record<string, unknown>).v52GradeRouting === true;
   const briefKeys = sealedCandidate && ideaId ?
     await loadAmuxContentKeyRing([
       { ideaId, purpose: "card_brief", subjectId: sealedCandidate.taskId },
-      { ideaId, purpose: "card_title", subjectId: sealedCandidate.taskId },
-      { ideaId, purpose: "card_body", subjectId: sealedCandidate.taskId },
+      ...(needReviewKeys ? [
+        { ideaId, purpose: "card_title" as const,
+          subjectId: sealedCandidate.taskId },
+        { ideaId, purpose: "card_body" as const,
+          subjectId: sealedCandidate.taskId },
+      ] : []),
     ]) : null;
   const deliveryContent = async (tx: Prisma.TransactionClient,
     delivery: DeliveryLockRow, now: Date,
