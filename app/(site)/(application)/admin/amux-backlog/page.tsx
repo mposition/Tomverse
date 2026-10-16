@@ -194,6 +194,9 @@ export default async function AdminAmuxBacklogPage({
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_PRICE_WRITE === "enabled" &&
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"}
+          analysisStopAvailable={
+            process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_READ === "enabled" &&
+            process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_WRITE === "enabled"}
           operatorId={session.user.id} />
         {openedIdea && ideaProgress !== undefined ? <AmuxIdeaProgressPanel rows={ideaProgress}
           activeRequestId={openRequestId} /> : null}
