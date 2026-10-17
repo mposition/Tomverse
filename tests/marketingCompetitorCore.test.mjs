@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   MARKETING_COMPETITOR_ACTIONS,
   MARKETING_COMPETITOR_MAX_CANDIDATES,
+  MARKETING_COMPETITOR_STATUSES,
   marketingCompetitorCandidateSchema,
   marketingCompetitorHostsSchema,
   marketingCompetitorIdSchema,
@@ -24,6 +25,12 @@ test("audit actions match the statuses the database checks them against", () => 
     assert.equal(action, `marketing_competitor.${status}`);
   }
   assert.equal(MARKETING_COMPETITOR_MAX_CANDIDATES, 5);
+});
+
+test("the statuses sort in the order the console promises: approved, proposed, rejected, retired", () => {
+  // lib/marketingConsoleRead.ts orders by status ascending and states that
+  // order on screen; a renamed or added status must not reorder it silently.
+  assert.deepEqual([...MARKETING_COMPETITOR_STATUSES].sort(), ["approved", "proposed", "rejected", "retired"]);
 });
 
 test("hosts are stored the way they are compared: lower case, unique, sorted", () => {

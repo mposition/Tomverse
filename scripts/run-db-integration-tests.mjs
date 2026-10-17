@@ -981,6 +981,24 @@ run(
   ],
   "Running the administrator refund decision transaction and its outbox"
 );
+// Also its own process: it replaces next-auth. The competitor registry's Admin
+// routes (S3f-R3): a person's add, approve, reject and retire through the
+// marketing mutation wrapper, whose audit row the registry's write guard
+// checks; a stale page and a disallowed move are 409s, and the kill switch
+// refuses only what makes a host a source.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/marketing-competitor-routes.db.test.ts",
+  ],
+  "Running the marketing competitor registry Admin routes"
+);
 // Also its own process, and for the same reason: it replaces next-auth. What
 // it pins is which requests reach the lift at all -- a stale cause set, a dead
 // handle and an unknown handle are three different refusals, and every one of

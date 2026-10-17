@@ -278,10 +278,10 @@ test("a competitor moves only along the decisions a person can make", async () =
   await propose("alpha", "beta");
   const approved = { displayName: "Alpha", officialHosts: ["alpha.example"] };
   // A proposal is not retired.
-  await assert.rejects(decide("alpha", "retired"), refusedBy("marketing_competitor_transition_invalid"));
+  await assert.rejects(decide("alpha", "retired"), code("competitor_transition_invalid"));
   await decide("alpha", "approved", approved);
   // An approval is not rejected.
-  await assert.rejects(decide("alpha", "rejected"), refusedBy("marketing_competitor_transition_invalid"));
+  await assert.rejects(decide("alpha", "rejected"), code("competitor_transition_invalid"));
   await decide("alpha", "retired");
   assert.deepEqual(await readApprovedMarketingCompetitorHosts(prisma), {});
   await decide("alpha", "approved", approved);
