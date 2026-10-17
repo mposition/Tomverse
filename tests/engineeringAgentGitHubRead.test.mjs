@@ -234,8 +234,13 @@ const pullFetch = (overrides = {}) => {
   const routes = {
     "/pulls/42": (accept) => accept === "application/vnd.github.diff" ? diff : {
       number: 42, state: "open", merged: false, merge_commit_sha: null, merged_at: null, merged_by: null,
+      changed_files: 1,
       base: { ref: "develop", sha: "2".repeat(40) }, head: { sha: HEAD }, ...overrides.pull,
     },
+    "/pulls/42/files": (_accept, url) =>
+      typeof overrides.files === "function" ? overrides.files(url) :
+        overrides.files ?? [{ filename: "components/chat/Ordinary.tsx",
+          status: "modified" }],
     "/pulls/42/reviews": () => overrides.reviews ?? [
       { id: 9, user: { id: 60078951, login: "mposition" }, state: "APPROVED", commit_id: HEAD, submitted_at: "2026-10-15T05:30:00Z" },
       { id: 10, user: { id: 60078951, login: "mposition" }, state: "PENDING", commit_id: HEAD },
@@ -252,8 +257,10 @@ const pullFetch = (overrides = {}) => {
       const path = String(url).replace("https://api.github.com/repos/mposition/Tomverse", "").split("?")[0];
       const handler = routes[path];
       if (!handler) return new Response("{}", { status: 404 });
-      const answer = handler(init.headers.Accept);
-      return new Response(typeof answer === "string" ? answer : JSON.stringify(answer), { status: 200 });
+      const answer = handler(init.headers.Accept, String(url));
+      const body = answer?.body ?? answer;
+      return new Response(typeof body === "string" ? body : JSON.stringify(body),
+        { status: 200, headers: answer?.link ? { Link: answer.link } : {} });
     },
   };
 };
@@ -290,9 +297,51 @@ test("a merge is read as its commit, time and merger kind; a merge without them 
   assert.equal(observed.mergeCommitSha, "3".repeat(40));
   assert.equal(observed.mergedAt.toISOString(), "2026-10-15T06:00:00.000Z");
   assert.equal(observed.mergedByKind, "user");
+  assert.deepEqual(observed.changedFiles, ["components/chat/Ordinary.tsx"]);
   await assert.rejects(
     readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch({ pull: { ...merged, merge_commit_sha: null } }).fetchImpl }),
     (error) => error instanceof EngineeringAgentGitHubReadError && error.code === "invalid_response",
   );
   await assert.rejects(readEngineeringAgentPullObservation(0, { env, fetchImpl: pullFetch().fetchImpl }));
+});
+
+test("merged PR file names are complete and include a rename source", async () => {
+  const merged = { state: "closed", merged: true,
+    merge_commit_sha: "3".repeat(40), merged_at: "2026-10-15T06:00:00Z" };
+  const read = (overrides) => readEngineeringAgentPullObservation(42,
+    { env, fetchImpl: pullFetch({ pull: merged, ...overrides }).fetchImpl });
+  assert.deepEqual((await read({ files: [{ filename: "src/new.ts",
+    previous_filename: "lib/amux/old.ts", status: "renamed" }] })).changedFiles,
+  ["src/new.ts", "lib/amux/old.ts"]);
+  assert.equal((await read({ pull: { ...merged, changed_files: 2 } })).changedFiles, null);
+  assert.equal((await read({ files: [{ filename: "src/new.ts",
+    status: "renamed" }] })).changedFiles, null);
+});
+
+test("merged PR file names span pages and transient read errors remain unreadable", async () => {
+  const merged = { state: "closed", merged: true,
+    merge_commit_sha: "3".repeat(40), merged_at: "2026-10-15T06:00:00Z",
+    changed_files: 101 };
+  const names = Array.from({ length: 101 }, (_, index) =>
+    ({ filename: `src/file-${index}.ts`, status: "modified" }));
+  const files = (url) => new URL(url).searchParams.get("page") === "1" ?
+    { body: names.slice(0, 100),
+      link: '<https://api.github.com/repos/mposition/Tomverse/pulls/42/files?per_page=100&page=2>; rel="next"' } :
+    names.slice(100);
+  const { fetchImpl } = pullFetch({ pull: merged, files });
+  const observed = await readEngineeringAgentPullObservation(42,
+    { env, fetchImpl });
+  assert.deepEqual(observed.changedFiles, names.map((file) => file.filename));
+  const failSecondPage = (url, init) => String(url).includes("/files?") &&
+    String(url).includes("page=2") ?
+    new Response("unavailable", { status: 503 }) : fetchImpl(url, init);
+  await assert.rejects(readEngineeringAgentPullObservation(42,
+    { env, fetchImpl: failSecondPage }),
+  (error) => error instanceof EngineeringAgentGitHubReadError &&
+    error.code === "http_error");
+  const missingSecondPage = pullFetch({ pull: merged,
+    files: (url) => new URL(url).searchParams.get("page") === "1" ?
+      names.slice(0, 100) : names.slice(100) });
+  assert.equal((await readEngineeringAgentPullObservation(42,
+    { env, fetchImpl: missingSecondPage.fetchImpl })).changedFiles, null);
 });

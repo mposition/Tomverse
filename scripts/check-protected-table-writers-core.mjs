@@ -613,6 +613,14 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261016130000_amux_v52_review_record/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 11,
+    reason:
+      "The v52 review migration adds a restrictive foreign key to the canonical audit row. Its DDL and append-only trigger constrain AmuxV52ReviewRecord; it never writes AdminAuditLog.",
+  },
   ...[
     "AmuxV22TaskRecoveryInspectionRequest",
     "AmuxV22TaskRecoveryApproval",

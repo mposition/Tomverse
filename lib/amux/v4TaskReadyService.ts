@@ -5,6 +5,9 @@ import type { Session } from "next-auth";
 
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
+import { AMUX_EXECUTION_GRADE_ENV,
+  amuxExecutionGradeRoutingEnabled, amuxWorkerMatchesExecutionGrade,
+  isAmuxV52TaskConfirmation } from "./executionGradeCore.ts";
 import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
@@ -13,6 +16,8 @@ import type { AmuxIdeaUnitConfirmationSnapshot } from
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
+import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
+import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
 import { evaluateAmuxV4TaskReady, type AmuxV4TaskReadyFacts } from
   "./v4TaskReadyCore.ts";
@@ -224,6 +229,12 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           finalAuditLogId: true, registeredWorkItemId: true },
       }) : null;
     const snapshot = parseAmuxV4TaskReceipt(decision?.confirmationSnapshot ?? null);
+    const approvedCost = card.executionGrade ? await readAmuxV52TaskReceipt(
+      tx, taskId, snapshot?.card?.task?.costReceipt, card.executionGrade) : null;
+    const exactGradeRouting = amuxExecutionGradeRoutingEnabled(
+      process.env[AMUX_EXECUTION_GRADE_ENV]) &&
+      isAmuxV52TaskConfirmation(decision?.confirmationSnapshot,
+        snapshot?.card?.task?.grade) && approvedCost !== null;
     const audit = decision?.finalAuditLogId ? await tx.adminAuditLog.findUnique({
       where: { id: decision.finalAuditLogId },
       select: { action: true, actorUserId: true, targetId: true,
@@ -244,7 +255,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
       snapshot.card.normalizedBody.keyId === decision.unitDigestKeyId &&
       /^[a-f0-9]{64}$/.test(snapshot.card.task?.brief.digest ?? "") &&
       snapshot.card.task?.role === card.taskRole &&
-      snapshot.card.task.grade === card.executionGrade &&
+      approvedCost !== null &&
       audit?.entryHash !== null && audit?.entryHash !== undefined &&
       audit.action === "amux.v4.unit.consume" &&
       audit.actorUserId === decision.actorUserId && audit.targetId === decision.id &&
@@ -283,7 +294,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
         const current = await calculateCurrentApprovedAmuxV4TaskCost(tx,
           role, card.executionGrade);
         cost = checkV4TaskApprovedCeiling(
-          snapshot.card.task.costReceipt, { ok: true,
+          approvedCost, { ok: true,
             receipt: current.receipt }).decision;
         // Worker availability is its own fact (policy v48): a cost that needs
         // reconfirmation must not also read as "no worker", or the FIRST Task
@@ -292,21 +303,27 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           // Orchestration policy version 35, section 3: the variables while R2c is
           // off; the catalog derived from the registry, read in this
           // transaction, once it is on.
-          const { v22: configured } = await readAmuxAssignmentCatalogs(tx);
-          workerNames = current.receipt.routes.filter((route) =>
+          const { v22: configured, ceilings } = await readAmuxAssignmentCatalogs(tx);
+          const gradeCatalogValid = !exactGradeRouting ||
+            inspectV52TaskCatalogGrades(current.catalog, ceilings).ok;
+          workerNames = gradeCatalogValid ? current.receipt.routes.filter((route) =>
             configured?.some((worker) =>
               worker.worker_name === route.workerName &&
               worker.provider === route.provider.toLowerCase() &&
               worker.model === route.modelId &&
               worker.routing_roles.includes(role) &&
+              (!exactGradeRouting ||
+                amuxWorkerMatchesExecutionGrade(card.executionGrade,
+                  worker.worker_name, ceilings)) &&
               !worker.archived && !worker.paused && !worker.isolated &&
-              !worker.blocked)).map((route) => route.workerName);
+              !worker.blocked)).map((route) => route.workerName) : [];
         }
       } catch { cost = "hold"; }
     }
     const workers = workerNames.length ? await tx.amuxWorkerRuntime.findMany({
       where: { workerName: { in: workerNames }, dispatchReady: true,
-        status: { in: ["idle", "busy"] }, leaseExpiresAt: { gt: now } },
+        status: exactGradeRouting ? "idle" : { in: ["idle", "busy"] },
+        leaseExpiresAt: { gt: now } },
       select: { workerName: true },
     }) : [];
     const approvals = await tx.amuxIdeaUnitDecision.findMany({
@@ -339,6 +356,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
       approvedDependencyIds: Array.isArray(approvedIds) ?
         approvedIds.map((item) => item.id) : null,
       dependencies, cost, compatibleWorkerCount: workers.length,
+      exactGradeRouting,
       orchestratorHalted: halted !== null,
     };
     return { taskId, taskRevision: card.revision, observedAt: now.toISOString(),

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { AMUX_MAX_EXPECTED_REVISION, AMUX_PRISMA_INT_MAX,
   amuxMachineIdSchema } from "@/lib/amux/claimContract";
-import { AMUX_LIFECYCLE_ROUTE_BUDGET_MS,
+import { AMUX_V22_EXECUTION_ROUTE_BUDGET_MS,
   withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { settleAmuxV22TaskExecution } from "@/lib/amux/execution";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
@@ -34,6 +34,7 @@ const requestSchema = z.object({ attempt_id: z.string().uuid(),
   task_revision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
   outcome: z.enum(["succeeded", "failed", "blocked"]),
   invocation_ids: z.array(z.string().uuid()).max(128),
+  changed_paths: z.array(z.string().max(32 * 1024)).max(4_096).optional(),
   read_only_retry: readOnlyRetrySchema.optional(),
 }).strict();
 
@@ -47,12 +48,13 @@ export async function POST(request: Request) {
       reason: "v22_execution_disabled" }, 409);
   return withAmuxRouteBudget(async () => {
     try {
-      const body = await readLimitedJson(request, 8 * 1_024, requestSchema);
+      const body = await readLimitedJson(request, 64 * 1_024, requestSchema);
       const result = await settleAmuxV22TaskExecution({
         attemptId: body.attempt_id, worker: body.worker,
         instanceId: body.instance_id, generation: body.generation,
         taskRevision: body.task_revision, outcome: body.outcome,
         invocationIds: body.invocation_ids,
+        ...(body.changed_paths ? { changedPaths: body.changed_paths } : {}),
         readOnlyRetry: body.read_only_retry ? {
           version: body.read_only_retry.version,
           launchBindingId: body.read_only_retry.launch_binding_id,
@@ -72,5 +74,5 @@ export async function POST(request: Request) {
         return amuxJsonNoStore({ error: "Invalid request." }, 400);
       return amuxInternalErrorResponse("v22_execution_settle", error);
     }
-  }, AMUX_LIFECYCLE_ROUTE_BUDGET_MS);
+  }, AMUX_V22_EXECUTION_ROUTE_BUDGET_MS);
 }

@@ -169,6 +169,11 @@ test("dedicated API host advertises only a current frame and never enters the CL
     assert.equal(result.apiExecutionReceipt.apiExecutionFrameDigest,
       amuxV22ReadOnlyApiExecutionFrameDigest(frame));
     assert.equal(fetches, 2);
+    const guarded = await runAmuxV22ReadOnlyApiOneShot({ ...request,
+      gradeGuard: true, executionGrade: "advanced" }, host);
+    assert.deepEqual(guarded.changedPaths, []);
+    assert.equal(guarded.gradeGuard, true);
+    assert.equal(fetches, 2, "the same bound API attempt is never sent twice");
 
     const handler = createAmuxV22SidecarHandler({ worker,
       stateDir: join(base, "state"), run: async () => result,
