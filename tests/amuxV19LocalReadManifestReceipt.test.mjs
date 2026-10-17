@@ -83,6 +83,26 @@ test("lost POST response permits exact-ID readback but never a second POST", asy
   assert.deepEqual(methods, ["POST", "GET"]);
 });
 
+test("a mismatched 200 POST receipt needs an exact-ID readback", async () => {
+  const methods = [];
+  let manifestId;
+  const fetchImpl = async (_url, options) => {
+    methods.push(options.method);
+    if (options.method === "POST") {
+      manifestId = JSON.parse(options.body).manifestId;
+      return json({ manifestId: "dc86a25b-919f-4714-a3d8-45ef5a18b175",
+        ideaId, referenceOrdinal: 0, fileCount: 1 });
+    }
+    return json({ status: "recorded", manifestId, ideaId,
+      referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
+      fileCount: 1, digest: "d".repeat(64), digestKeyId: "digest-key",
+      bodyPurged: false });
+  };
+  assert.deepEqual(await recordAmuxV19LocalReadManifest(input(fetchImpl)),
+    { kind: "recorded", manifestId, fileCount: 1, via: "readback" });
+  assert.deepEqual(methods, ["POST", "GET"]);
+});
+
 test("another attempt's receipt and pending key intent never certify this POST", async () => {
   for (const responseBody of [
     { status: "recorded", manifestId: "dc86a25b-919f-4714-a3d8-45ef5a18b175",
