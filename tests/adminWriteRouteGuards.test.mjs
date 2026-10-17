@@ -110,8 +110,11 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
 // The orphan sweeper's version-specific delete is exported from the same key
 // store but is not called by this read-only preview; its 13-file closure and
 // route's read-only transaction remain fixed in both latch states.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "68800dbe53836b6db12615ccac1a7a2969642d4f98dac26b831b0f4be5f4bc37";
-const SOURCE_SCOPE_DISABLED_DIGEST = "3ce80f0e6aee081a1fe251b962531614fe78d9001a2325f13b912710605c0e8c";
+// The v19 read-manifest retirement fence adds a conditional-write recovery
+// export in the same key-store file. This preview imports only its key loader;
+// the 13-file closure, read-only transaction and outbound-call scan are fixed.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "1ab76bdaec8f26996b78253414b67d207bed1fe44c77756bb6b4cb65b36b3ace";
+const SOURCE_SCOPE_DISABLED_DIGEST = "f732c7a24fb74eccafaeb132930117df5bd2fc743240c373bbf6611287e6ef7d";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -167,8 +170,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // the preview's route, imports, writer scan, or outbound-call guard.
 // The exact-version retirement export is not invoked by the resolution
 // reader. Its 17-file closure and read-only route/service guards remain fixed.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "2f4810eef7154e220c45aad3a537b7c48f977b78db5b67a10616b0705926585e";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "ced20122d2f98361c787a8a32d378bc71dd2846242b1fb74a876efe2c4298b4c";
+// The fixed-fence retirement functions remain unreachable from this reader.
+// Its 17-file closure and both latch-state writer checks are unchanged.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "5279c0d44fa01e4861b1b5e4024dfa7c25dc80416197ba02cec4667b5fda6258";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "5e7236a60559efd9ad1d8511522efb5d4991b4de58e1a93d2ce48a66a6e14bd2";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
