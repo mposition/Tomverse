@@ -59,9 +59,9 @@ export async function POST(request: Request): Promise<Response> {
   let prepared: Awaited<ReturnType<typeof prepareAmuxTrackedCheckoutReadManifest>>;
   try { prepared = await prepareAmuxTrackedCheckoutReadManifest(body); }
   catch (error) {
-    if (error instanceof AmuxTrackedCheckoutReadManifestError &&
-        error.code === "invalid_manifest") {
-      return amuxJsonNoStore({ error: error.code, retryWrite: false }, 400);
+    if (error instanceof AmuxTrackedCheckoutReadManifestError) {
+      return amuxJsonNoStore({ error: error.code, retryWrite: false },
+        error.code === "invalid_manifest" ? 400 : 409);
     }
     return amuxJsonNoStore({ error: "outcome_unknown", retryWrite: false }, 503);
   }

@@ -726,9 +726,9 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
     table: "AmuxIdeaReadManifestKeyIntent",
-    tableMentions: 13,
-    writeVerbs: 20,
-    reason: "The migration creates the guarded key-intent table, validates claim and deletion transitions, and serializes manifest/hold inserts against claims; it seeds no row.",
+    tableMentions: 12,
+    writeVerbs: 18,
+    reason: "The migration creates the guarded key-intent table, validates claim and deletion transitions, and serializes manifest inserts against claims; it seeds no row.",
   },
   {
     path: "lib/adminAuditSystemActors.ts",
@@ -818,21 +818,21 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
     table: "AmuxIdeaTrackedCheckoutEvidence",
     tableMentions: 2,
-    writeVerbs: 20,
+    writeVerbs: 18,
     reason: "The new intent table references and reads the immutable checkout evidence; migration DDL never writes an evidence row.",
   },
   {
     path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
     table: "AmuxIdeaTrackedCheckoutReadManifest",
     tableMentions: 3,
-    writeVerbs: 20,
+    writeVerbs: 18,
     reason: "The intent guard only reads whether a manifest exists, and the manifest insert guard locks the intent; migration DDL never writes a manifest row.",
   },
   {
     path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 6,
-    writeVerbs: 20,
+    writeVerbs: 18,
     reason: "The intent guard validates canonical audit rows from the same transaction and references them with restrictive foreign keys; migration DDL never writes an audit row.",
   },
   {

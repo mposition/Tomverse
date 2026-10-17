@@ -23,6 +23,7 @@ let reads = 0;
 let stored: Record<string, unknown> | null = null;
 let intentStored = false;
 let writeCode: string | null = null;
+let prepareCode: string | null = null;
 let prepareFails = false;
 let unknownCommit = false;
 let readFails = false;
@@ -40,6 +41,7 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestStore.ts"), { namedExpo
       typeof inspectAmuxTrackedCheckoutReadManifest>[0]);
     if (!inspected) throw new SyntheticManifestError("invalid_manifest");
     inspected.plaintext.fill(0);
+    if (prepareCode) throw new SyntheticManifestError(prepareCode);
     intentStored = true;
     if (prepareFails) throw new Error("synthetic uncertain key write");
     return { input, keys: {} };
@@ -97,7 +99,8 @@ after(() => {
 const reset = () => {
   prepares = 0; writes = 0; reads = 0; stored = null;
   intentStored = false;
-  writeCode = null; prepareFails = false; unknownCommit = false;
+  writeCode = null; prepareCode = null; prepareFails = false;
+  unknownCommit = false;
   readFails = false;
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
@@ -197,6 +200,16 @@ test("large verified read list is accepted without an arbitrary byte or file cap
 });
 
 test("known refusals and uncertain key or commit outcomes forbid blind retries", async () => {
+  reset();
+  for (const code of ["already_recorded", "idea_unavailable",
+    "evidence_unavailable"]) {
+    prepareCode = code;
+    const refused = await route.POST(post());
+    assert.equal(refused.status, 409);
+    assert.deepEqual(await refused.json(), { error: code, retryWrite: false });
+    assert.equal(intentStored, false);
+    assert.equal(writes, 0);
+  }
   reset();
   for (const code of ["already_recorded", "idea_unavailable",
     "evidence_unavailable"]) {
