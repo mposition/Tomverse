@@ -486,13 +486,14 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // Analysis admission and the v19 stop and budget receipt snapshots own bounded
-  // transactions; the commit-deadline boundary still governs task execution.
+  // Analysis admission, v19 stop and budget receipts, and checkout evidence
+  // own bounded transactions; the commit-deadline boundary still governs task execution.
   assert.deepEqual(direct, [
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts",
     "app/api/internal/amux/v19/analysis-stop/route.ts",
+    "app/api/internal/amux/v19/checkout-evidence/route.ts",
     "app/api/internal/amux/v22/execution/result/route.ts",
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
@@ -502,6 +503,20 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
   assertBefore(stopPoll, 'process.env[READ_ENV] !== "enabled"');
   assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
+  const checkoutEvidence = withoutComments(read(
+    "app/api/internal/amux/v19/checkout-evidence/route.ts"));
+  const evidenceWrite = between(checkoutEvidence,
+    "export async function POST", "export async function GET");
+  const evidenceRead = checkoutEvidence.slice(
+    checkoutEvidence.indexOf("export async function GET"));
+  assertBefore(evidenceWrite, "authorized(request)");
+  assertBefore(evidenceWrite, 'process.env[WRITE_ENV] !== "enabled"');
+  assertBefore(evidenceWrite, 'process.env[READ_ENV] !== "enabled"');
+  assertBefore(evidenceRead, "authorized(request)");
+  assertBefore(evidenceRead, 'process.env[READ_ENV] !== "enabled"');
+  assert.ok(!evidenceRead.includes("process.env[WRITE_ENV]"));
+  assert.match(evidenceWrite, /maxWait: 3_000, timeout: 12_000/);
+  assert.match(evidenceRead, /maxWait: 3_000, timeout: 10_000/);
   const budgetReceipt = withoutComments(read(
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts"));
   assertBefore(budgetReceipt, "isAmuxV4AnalysisAgentAuthorized(request");
