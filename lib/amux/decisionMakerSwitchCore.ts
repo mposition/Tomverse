@@ -113,6 +113,53 @@ export const decisionMakerSwitchStateFromRows = (rows: unknown): DecisionMakerSw
   return state;
 };
 
+/** An instance's newest switch event: who recorded it, and its database clock. */
+export type DecisionMakerInstanceNewestEvent = { actorKind: DmSwitchActorKind; createdAtMs: number };
+
+/**
+ * What the request ledger's writers read in one statement
+ * (docs/policy/amux-decision-maker.md §6, §8): the switch state, and each
+ * instance's newest event -- the boundary §8's validation count starts from.
+ * A system event there is a latch nobody has released; a person's is a
+ * change, a release included.
+ */
+export type DecisionMakerSwitchRead = {
+  state: DecisionMakerSwitchState;
+  newest: Record<DmInstanceScope, DecisionMakerInstanceNewestEvent | null>;
+};
+
+const noNewestEvents = (): DecisionMakerSwitchRead["newest"] => ({
+  "decision-maker-openai": null,
+  "decision-maker-anthropic": null,
+});
+
+/**
+ * The state and the boundaries from the newest event of each scope, with its
+ * actor and database clock. Any row the state mapping refuses, or whose actor
+ * or clock the table's CHECKs could not have produced, makes the whole read
+ * unreadable -- every state field null and no boundary -- as
+ * `decisionMakerSwitchStateFromRows()` does for one bad row.
+ */
+export const decisionMakerSwitchReadFromRows = (rows: unknown): DecisionMakerSwitchRead => {
+  const unreadable = { state: unreadableDecisionMakerSwitches(), newest: noNewestEvents() };
+  const state = decisionMakerSwitchStateFromRows(rows);
+  if (state.killSwitch === null || !Array.isArray(rows)) return unreadable;
+  const newest = noNewestEvents();
+  for (const row of rows as Array<{ scope: unknown; actorKind?: unknown; createdAtEpochMs?: unknown }>) {
+    const createdAtMs =
+      typeof row.createdAtEpochMs === "bigint" || typeof row.createdAtEpochMs === "number"
+        ? Number(row.createdAtEpochMs)
+        : Number.NaN;
+    if (!(DM_SWITCH_ACTOR_KINDS as readonly unknown[]).includes(row.actorKind) || !Number.isSafeInteger(createdAtMs)) {
+      return unreadable;
+    }
+    if (isDmInstanceScope(row.scope)) {
+      newest[row.scope] = { actorKind: row.actorKind as DmSwitchActorKind, createdAtMs };
+    }
+  }
+  return { state, newest };
+};
+
 /**
  * The two switch inputs of `routeDmQuestion()` for the instance a question
  * would be assigned to. An instance that is not a DM instance (an unverified

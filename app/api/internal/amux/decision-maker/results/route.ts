@@ -15,6 +15,7 @@ import {
   dmReturnedRefusalStatus,
   dmRouteErrorResponse,
   dmRouteRefusal,
+  settleDmValidationLatch,
 } from "@/lib/amux/decisionMakerInternalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
@@ -40,6 +41,13 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * already accepted, rejected or already rejected -- and the DM output, its
  * bodies and the result's detail never appear in it. Whatever the answer, the
  * card the worker sees does not change (§2-5): nothing here reaches it.
+ *
+ * A validation failure counts toward §8's latch: once one the ledger holds as
+ * the request's result -- accepted now, or already -- has committed, the
+ * route runs the latch check in a second boundary transaction
+ * (`settleDmValidationLatch()`), which can only turn the instance off. The
+ * answer is the result's whatever that check does; one that could not be
+ * written stays owed to the next check.
  *
  * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
@@ -100,6 +108,9 @@ export async function POST(request: Request) {
         case "existing":
         case "rejected":
         case "already_rejected":
+          if ((result.status === "accepted" || result.status === "existing") && result.resultKind === "validation_failure") {
+            await settleDmValidationLatch(body.instance);
+          }
           return amuxJsonNoStore({
             submitted: true,
             status: result.status,
