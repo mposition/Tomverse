@@ -16,6 +16,7 @@ export const MARKETING_CONSOLE_SECTIONS = [
   "accounts",
   "experiments",
   "reports",
+  "competitors",
   "comments",
 ] as const;
 
@@ -23,6 +24,13 @@ export type MarketingConsoleSection = (typeof MARKETING_CONSOLE_SECTIONS)[number
 
 /** How many rows a section lists. The panel states this number on screen. */
 export const MARKETING_READ_PAGE_SIZE = 20;
+
+/**
+ * How many registry rows the competitors section lists. Larger than a page of
+ * posts because the registry is a short list a person decides on: an approved
+ * competitor that fell off the page could not be retired from it.
+ */
+export const MARKETING_COMPETITOR_READ_LIMIT = 100;
 
 export type MarketingSectionAvailability =
   | { available: true }

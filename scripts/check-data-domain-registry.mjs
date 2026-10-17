@@ -254,6 +254,11 @@ const USER_COLUMN = /^\s{2}(?:\w*[Uu]serId|approvedBy)\s+String\b/m;
 // key-retire receipts). The relation name/field order may change; indirect
 // paths through other models still require explicit privacy review.
 const AMUX_IDEA_PARENT_LINK = /\bAmuxIdeaSubmission\??\s+@relation\(/;
+// A session budget claim points to the session reservation, whose actorUserId
+// is bound to the idea owner. Its own row has no repeated person column, but
+// the restrictive reservation FK still makes the claim attributable to them.
+const AMUX_SESSION_RESERVATION_PARENT_LINK =
+  /\bAmuxIdeaSessionAnalysisReservation\??\s+@relation\(/;
 // The AMUX Decision Maker body table holds worker-written free text with no
 // account key, and docs/policy/amux-decision-maker.md section 10 registers it
 // here as an operational record ("본문 표 ... 공개 data-domain registry에 운영
@@ -268,6 +273,7 @@ const holdsUserData = new Set(
       ({ body }) =>
         USER_LINK.test(body) || USER_COLUMN.test(body) ||
         holdsActorIdentity(body) || AMUX_IDEA_PARENT_LINK.test(body) ||
+        AMUX_SESSION_RESERVATION_PARENT_LINK.test(body) ||
         AMUX_DECISION_MAKER_BODY_TEXT(body)
     )
     .map(({ name }) => name)

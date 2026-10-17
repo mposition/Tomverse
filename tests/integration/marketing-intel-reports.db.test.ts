@@ -1,20 +1,31 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
+import type { Session } from "next-auth";
+
 import { POST } from "@/app/api/internal/marketing-intel-reports/route";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
+import { MARKETING_COMPETITOR_ACTIONS } from "@/lib/marketingCompetitorCore";
+import {
+  createApprovedMarketingCompetitor,
+  holdApprovedMarketingCompetitorHosts,
+} from "@/lib/marketingCompetitorStore";
 import {
   MARKETING_GENERATOR_REPORT_ACTION,
   marketingGeneratorReportProvenance,
 } from "@/lib/marketingIntelReportCore";
+import { runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
 
 const SECRET = "r".repeat(48);
 const DIGEST = "b".repeat(64);
 
+// The registry starts empty in each test (the reset clears the migration's
+// proposals too), so no competitor is approved unless a test approves it.
 const reset = () =>
-  resetTestFixture(prisma, `TRUNCATE TABLE "MarketingReport" RESTART IDENTITY CASCADE`);
+  resetTestFixture(prisma, `TRUNCATE TABLE "MarketingReport", "MarketingCompetitor" RESTART IDENTITY CASCADE`);
 
 beforeEach(reset);
 after(async () => {
@@ -120,6 +131,27 @@ test("only the generator's secret, a signed body and the two generator kinds are
     assert.equal(await prisma.marketingReport.count(), 0);
   }));
 
+const operator = {
+  user: { id: "marketing-operator", email: "owner@example.test" },
+  expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+} as Session;
+
+/** A person adds an approved competitor, as the Admin route will. */
+const approve = (competitorId: string, displayName: string, officialHosts: string[]) =>
+  runMarketingTransaction(prisma, async (tx) => {
+    const auditLogId = await writeAdminAuditLog({
+      session: operator,
+      request: new Request("https://tomverse.app/api/admin/marketing/competitors"),
+      action: MARKETING_COMPETITOR_ACTIONS.approved,
+      targetType: "MarketingCompetitor",
+      targetId: competitorId,
+      summary: "Approved a competitor.",
+      metadata: { actorHadMarketingWrite: true, previousDecisionAuditLogId: ":none", displayName, officialHosts },
+      tx,
+    });
+    await createApprovedMarketingCompetitor(tx, { competitorId, displayName, officialHosts, auditLogId });
+  });
+
 test("market facts are recorded with the facts from no official host counted, not stored", () =>
   withSecret(async () => {
     const response = await call(sign(intel()));
@@ -134,8 +166,8 @@ test("market facts are recorded with the facts from no official host counted, no
 
     const row = await prisma.marketingReport.findUniqueOrThrow({ where: { id: result.reportRowId } });
     assert.equal(row.kind, "market_intel");
-    // The official host list is empty in this build: the fact is counted with
-    // the two the generator could not represent.
+    // No competitor is approved: the fact is counted with the two the
+    // generator could not represent.
     assert.deepEqual(row.payload, { facts: [], unrepresentableFactCount: 3 });
     assert.ok(row.retentionUntil > row.createdAt, "the trigger dated its retention");
 
@@ -147,14 +179,22 @@ test("market facts are recorded with the facts from no official host counted, no
     assert.equal(metadata.kind, "market_intel");
     assert.equal(metadata.droppedFactCount, 1);
     assert.match(String(metadata.reportDigest), /^[0-9a-f]{64}$/);
-    assert.equal(JSON.stringify(metadata).includes("poe.com"), false, "no source URL in the audit row");
+    // No value in the audit row is a URL: the source stays with the report.
+    const values = Object.values(metadata).filter((value): value is string => typeof value === "string");
+    assert.equal(values.some((value) => /^[a-z][a-z0-9+.-]*:\/\//iu.test(value)), false, "no URL in the audit row");
   }));
 
 test("a resend is the same report only if it is the same bytes, and is read back after the gates close", () =>
   withSecret(async () => {
     const first = (await (await call(sign(intel()))).json()) as { result: { reportRowId: string } };
     const again = (await (await call(sign(intel()))).json()) as { result: Record<string, unknown> };
-    assert.deepEqual(again.result, { status: "recorded", reportRowId: first.result.reportRowId, existing: true, droppedFactCount: 1 });
+    assert.deepEqual(again.result, {
+      status: "recorded",
+      reportRowId: first.result.reportRowId,
+      existing: true,
+      droppedFactCount: 1,
+      proposedCompetitorCount: 0,
+    });
 
     const changed = await call(sign(intel({ payload: { facts: [], unrepresentableFactCount: 9 } })));
     assert.equal(changed.status, 409);
@@ -196,3 +236,117 @@ test("a report with too little time before the service's deadline is not started
     assert.deepEqual(tight.result, { status: "refused", reasons: ["intake_deadline_too_close"] });
     assert.equal(await prisma.marketingReport.count(), 0);
   }));
+
+test("a fact from a host a person approved is kept, and only from that host", () =>
+  withSecret(async () => {
+    await approve("poe", "Poe", ["poe.com"]);
+    const report = intel({
+      payload: {
+        facts: [
+          (intel().payload as { facts: unknown[] }).facts[0],
+          {
+            competitorId: "poe",
+            factType: "launch_date",
+            value: { kind: "date", value: "2026-10-02" },
+            sourceUrl: "https://blog.poe.com/launch",
+            checkedAt: "2026-10-16T00:00:00.000Z",
+          },
+        ],
+        unrepresentableFactCount: 0,
+      },
+    });
+    const { result } = (await (await call(sign(report))).json()) as {
+      result: { status: string; reportRowId: string; droppedFactCount: number };
+    };
+    assert.equal(result.status, "recorded");
+    assert.equal(result.droppedFactCount, 1);
+    const row = await prisma.marketingReport.findUniqueOrThrow({ where: { id: result.reportRowId } });
+    const payload = row.payload as { facts: Array<{ sourceUrl: string }>; unrepresentableFactCount: number };
+    assert.deepEqual(payload.facts.map((fact) => fact.sourceUrl), ["https://poe.com/blog/launch"]);
+    assert.equal(payload.unrepresentableFactCount, 1);
+  }));
+
+test("candidates become proposals once, and a known competitor is not touched", () =>
+  withSecret(async () => {
+    await approve("poe", "Poe", ["poe.com"]);
+    const candidate = (competitorId: string, host: string) => ({
+      competitorId,
+      displayName: competitorId.toUpperCase(),
+      officialHosts: [host],
+      evidenceUrls: [`https://${host}/pricing`],
+      rationale: "Sells the same comparison.",
+    });
+    const report = intel({ competitorCandidates: [candidate("alpha", "alpha.example"), candidate("poe", "evil.example")] });
+    const first = (await (await call(sign(report))).json()) as {
+      result: { status: string; proposedCompetitorCount: number };
+    };
+    assert.equal(first.result.status, "recorded");
+    assert.equal(first.result.proposedCompetitorCount, 1);
+    const alpha = await prisma.marketingCompetitor.findUniqueOrThrow({ where: { id: "alpha" } });
+    assert.equal(alpha.status, "proposed");
+    assert.equal(alpha.proposedBy, "generator");
+    assert.equal(alpha.proposedRunId, RUN);
+    const poe = await prisma.marketingCompetitor.findUniqueOrThrow({ where: { id: "poe" } });
+    assert.deepEqual(poe.officialHosts, ["poe.com"]);
+
+    // A resend is read back; it proposes nothing again.
+    const again = (await (await call(sign(report))).json()) as {
+      result: { existing: boolean; proposedCompetitorCount: number };
+    };
+    assert.equal(again.result.existing, true);
+    assert.equal(again.result.proposedCompetitorCount, 1);
+    const proposals = await prisma.adminAuditLog.count({
+      where: { action: MARKETING_COMPETITOR_ACTIONS.proposed, targetId: "alpha", metadata: { path: ["generatorRunId"], equals: RUN } },
+    });
+    assert.equal(proposals, 1);
+    // A candidate the registry would store differently is malformed, not a
+    // bad signature: the generator signs exactly what is stored.
+    const unsorted = await call(
+      sign(intel({ reportId: "intel-unsorted", competitorCandidates: [{ ...candidate("beta", "www.beta.example"), officialHosts: ["www.beta.example", "beta.example"] }] })),
+    );
+    assert.equal(unsorted.status, 400);
+    const sorted = (await (
+      await call(
+        sign(intel({ reportId: "intel-sorted", competitorCandidates: [{ ...candidate("beta", "beta.example"), officialHosts: ["beta.example", "www.beta.example"] }] })),
+      )
+    ).json()) as { result: { status: string; proposedCompetitorCount: number } };
+    assert.equal(sorted.result.status, "recorded");
+    assert.equal(sorted.result.proposedCompetitorCount, 1);
+    assert.deepEqual((await prisma.marketingCompetitor.findUniqueOrThrow({ where: { id: "beta" } })).officialHosts, [
+      "beta.example",
+      "www.beta.example",
+    ]);
+    // A proposal is never a source.
+    assert.deepEqual(Object.keys(await runMarketingTransaction(prisma, (tx) => holdApprovedMarketingCompetitorHosts(tx))), ["poe"]);
+  }));
+
+test("the approved hosts a report read cannot change until it commits", async () => {
+  await approve("poe", "Poe", ["poe.com"]);
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let held!: () => void;
+  const holding = new Promise<void>((resolve) => {
+    held = resolve;
+  });
+  const reader = runMarketingTransaction(
+    prisma,
+    async (tx) => {
+      await holdApprovedMarketingCompetitorHosts(tx);
+      held();
+      await released;
+    },
+    { timeout: 20_000 },
+  );
+  const lockElsewhere = () =>
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL lock_timeout = '300ms'`;
+      await tx.$queryRaw`SELECT 1 FROM "MarketingCompetitor" WHERE "id" = 'poe' FOR UPDATE`;
+    });
+  await holding;
+  await assert.rejects(lockElsewhere(), /lock|55P03/iu);
+  release();
+  await reader;
+  await lockElsewhere();
+});

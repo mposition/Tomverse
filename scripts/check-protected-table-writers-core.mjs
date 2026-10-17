@@ -148,6 +148,7 @@ export const APPEND_ONLY_LEDGER_TABLES = [
   "AmuxV22ReadOnlyLaunchCheck",
   "AmuxV22ReadOnlyLaunchProof",
   "AmuxV22ApiModelAccessEvidence",
+  "AmuxIdeaSessionAnalysisReservation",
   "AmuxIdeaTrackedCheckoutEvidence",
   "AmuxIdeaTrackedCheckoutReadManifest",
 ];
@@ -187,6 +188,20 @@ export const findTruncateStatements = ({ sources }) => {
 };
 
 export const PROTECTED_TABLES = [
+  {
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    delegate: "amuxIdeaSessionAnalysisBudgetClaim",
+    writers: ["lib/amux/ideaSessionAnalysisBudgetClaimService.ts",
+      "lib/amux/ideaSessionAnalysisBudgetSettlementService.ts",
+      "lib/amux/ideaSessionAnalysisBudgetResolutionService.ts"],
+    contract: "docs/policy/amux-intake.md v19 item 6",
+  },
+  {
+    table: "AmuxIdeaSessionAnalysisReservation",
+    delegate: "amuxIdeaSessionAnalysisReservation",
+    writers: ["lib/amux/ideaSessionAnalysisReservationStore.ts"],
+    contract: "docs/policy/amux-intake.md v19 items 4, 8 and 9",
+  },
   {
     table: "AmuxIdeaTrackedCheckoutEvidence",
     delegate: "amuxIdeaTrackedCheckoutEvidence",
@@ -286,6 +301,12 @@ export const PROTECTED_TABLES = [
     delegate: "marketingLlmCall",
     writers: ["lib/marketingLlmBudgetStore.ts"],
     contract: "docs/policy/marketing-automation.md §5",
+  },
+  {
+    table: "MarketingCompetitor",
+    delegate: "marketingCompetitor",
+    writers: ["lib/marketingCompetitorStore.ts"],
+    contract: "docs/policy/marketing-automation.md §3",
   },
   {
     table: "MarketingChannel",
@@ -563,9 +584,21 @@ export const EXCLUDED_PREFIXES = [
 export const DELEGATE_NAME_ALLOWLIST = [
   {
     path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxIdeaSessionAnalysisBudgetClaim",
+    count: 1,
+    reason: "Account export domain key only; no client is indexed or database connection opened in this metadata file.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     delegate: "amuxIdeaTrackedCheckoutReadManifest",
     count: 1,
     reason: "Account export domain key only; no client is indexed or database connection opened in this metadata file.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxIdeaSessionAnalysisReservation",
+    count: 1,
+    reason: "Account export domain key only; no client is indexed and no database connection or writer exists in this metadata file.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
@@ -664,6 +697,62 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/amux/ideaSessionAnalysisBudgetClaimService.ts",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The session budget claimant locks and reads the immutable queue reservation; it writes only the separate claim and shared cost window.",
+  },
+  {
+    path: "lib/amux/ideaSessionAnalysisBudgetSettlementService.ts",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The settlement writer uses this SQL only to lock an exact claim; the guarded mutation uses its authorized Prisma delegate.",
+  },
+  {
+    path: "lib/amux/ideaSessionAnalysisBudgetResolutionService.ts",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The owner resolution writer uses SQL only to lock the exact claim before its authorized guarded Prisma update.",
+  },
+  {
+    path: "prisma/migrations/20261017070000_amux_v19_session_budget_claim/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 8,
+    writeVerbs: 15,
+    reason: "The additive migration creates the claim table and its restrictive lifecycle trigger without inserting a claim row.",
+  },
+  {
+    path: "prisma/migrations/20261017070000_amux_v19_session_budget_claim/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 2,
+    writeVerbs: 15,
+    reason: "The additive claim migration references the immutable queue reservation through a restrictive foreign key and reads its identity in the insert guard; it writes no queue row.",
+  },
+  {
+    path: "prisma/migrations/20261017070000_amux_v19_session_budget_claim/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 15,
+    reason: "The claim migration adds restrictive audit foreign keys and reads canonical evidence in its trigger; it never writes the audit chain.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason: "The account export registry names the claim model but opens no database connection and executes no SQL.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The closed audit action manifest names the claim target only; it executes no SQL.",
+  },
+  {
     path: "prisma/migrations/20261017020100_amux_v19_read_manifest_active_insert_guard/migration.sql",
     table: "AmuxIdeaTrackedCheckoutReadManifest",
     tableMentions: 1,
@@ -697,6 +786,54 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 1,
     writeVerbs: 15,
     reason: "The retention guard reads a canonical audit row created by the application; the migration writes no audit row.",
+  },
+  {
+    path: "prisma/migrations/20261016130000_amux_v52_review_record/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 11,
+    reason:
+      "The v52 review migration adds a restrictive foreign key to the canonical audit row. Its DDL and append-only trigger constrain AmuxV52ReviewRecord; it never writes AdminAuditLog.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the session analysis reservation model as its domain key and prismaModel. Other domain descriptions contain write verbs; this metadata module opens no database connection and executes no SQL.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_session_analysis_reservation/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 10,
+    writeVerbs: 12,
+    reason:
+      "The v19 migration creates the protected append-only reservation table and its insert evidence guard. It seeds no reservation row; the runtime writer remains lib/amux/ideaSessionAnalysisReservationStore.ts.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_session_analysis_reservation/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 3,
+    writeVerbs: 12,
+    reason:
+      "The reservation migration adds one restrictive scope foreign key and reads both the referenced and latest immutable owner-approved scope. Its DDL and trigger verbs affect only the new reservation table; it never writes an operating-scope row.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_session_analysis_reservation/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 12,
+    reason:
+      "The reservation migration adds one restrictive audit foreign key and reads the same-transaction submission and reservation system audits. Its DDL and trigger verbs affect only the new reservation table; it never writes AdminAuditLog.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed v19 intake actor manifest names this audit target once. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
@@ -2015,10 +2152,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerSwitchStore.ts",
     table: "AmuxDecisionMakerSwitchEvent",
-    tableMentions: 4,
+    tableMentions: 5,
     writeVerbs: 3,
     reason:
-      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is two constant SELECTs (the newest event of every scope, and of one scope) and two constant INSERT ... RETURNING statements, a person's event and a latch; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is three constant SELECTs (the newest event of every scope; of one scope for a person's change; and since 2026-10-17 the newest event of every scope with its actor and clock, which the request ledger's writers read for the boundary section 8's validation count starts from) and two constant INSERT ... RETURNING statements, a person's event and a latch; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
@@ -2079,10 +2216,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
     table: "AmuxDecisionMakerRequestEvent",
-    tableMentions: 6,
+    tableMentions: 8,
     writeVerbs: 4,
     reason:
-      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08; a judgment's closing kinds since S1e), in the stale-close candidates' NOT EXISTS over the same closing kinds (S1g, 2026-10-12), in the proposal timeline of section 4's report (S1e), in the events of Admin's newest requests (S2, 2026-10-13), and in its one constant INSERT ... RETURNING of an event; every value is a bound parameter. It never updates or deletes an event; a judgment's closing event is written by the judgment table's trigger.",
+      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08; a judgment's closing kinds since S1e), in the stale-close candidates' NOT EXISTS over the same closing kinds (S1g, 2026-10-12), in the proposal timeline of section 4's report (S1e), in the events of Admin's newest requests (S2, 2026-10-13), in one instance's newest terminal result kinds -- a bounded SELECT section 8's validation latch counts, read on its own and inside the routing's throughput SELECT (2026-10-17) -- and in its one constant INSERT ... RETURNING of an event; every value is a bound parameter. It never updates or deletes an event; a judgment's closing event is written by the judgment table's trigger.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
@@ -2459,6 +2596,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
   },
   {
+    path: "prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 14,
+    reason:
+      "Creates the competitor registry. Its one AdminAuditLog mention is the decision check's read of a person's own audit row (action, target, actor, recorded predecessor and approved hosts). No audit row is written.",
+  },
+  {
+    path: "prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql",
+    table: "MarketingCompetitor",
+    tableMentions: 16,
+    writeVerbs: 14,
+    reason:
+      "Creates the competitor registry, its checks, the one insert-and-update guard and the delete guard, and inserts the eleven seed proposals (status proposed, no decision) the market analysis of 2026-10-17 found. Every other mention names the table to constrain or refuse a write.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "MarketingCompetitor",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed system-actor manifest names the competitor proposal target for marketing-generator. It executes no SQL; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  {
     path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 2,
@@ -2617,6 +2778,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql",
+    count: 1,
+    reason:
+      "One read in the registry's decision check: the decision's own AdminAuditLog row, with EXECUTE over a name built from the trigger's TG_TABLE_SCHEMA because the function pins search_path to pg_catalog, pg_temp. The schema is quoted with %I and the id is bound with USING. It reads and never writes.",
+  },
   {
     path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
     count: 1,

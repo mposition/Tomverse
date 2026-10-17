@@ -216,6 +216,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration v52: audited execution-grade revision only, with no
   // commit-deadline marker, trigger, guard or classifier change.
   "20261016090000_amux_v52_grade_escalation_guard",
+  // Orchestration v52: the immutable review receipt table and constraints use
+  // the existing mutation boundary without changing commit-deadline behavior.
+  "20261016130000_amux_v52_review_record",
   // Intake v19 direct-read checkout evidence is append-only and audit-bound;
   // it adds no commit-deadline marker, trigger or classifier change.
   "20261017000000_amux_v19_tracked_checkout_evidence",
@@ -228,6 +231,12 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // The next migration closes an insert-only purged-shape loophole on that
   // same manifest table; it does not alter commit-deadline evidence.
   "20261017020100_amux_v19_read_manifest_active_insert_guard",
+  // Intake v19 session analysis queue reservation is append-only and bound to
+  // the submission transaction; it adds no commit-deadline mechanism.
+  "20261017010000_amux_v19_session_analysis_reservation",
+  // v19 session CLI claims share the monthly ledger but add no deadline
+  // classifier, marker, function or trigger to the commit-deadline protocol.
+  "20261017070000_amux_v19_session_budget_claim",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -477,11 +486,12 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // Analysis admission, v19 stop snapshot and checkout evidence have their
+  // Analysis admission, v19 stop and budget receipts, and checkout evidence
   // own bounded transactions; the commit-deadline boundary still governs task execution.
   assert.deepEqual(direct, [
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
+    "app/api/internal/amux/v19/analysis-budget/claim/route.ts",
     "app/api/internal/amux/v19/analysis-stop/route.ts",
     "app/api/internal/amux/v19/checkout-evidence/route.ts",
     "app/api/internal/amux/v22/execution/result/route.ts",
@@ -507,6 +517,11 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   assert.ok(!evidenceRead.includes("process.env[WRITE_ENV]"));
   assert.match(evidenceWrite, /maxWait: 3_000, timeout: 12_000/);
   assert.match(evidenceRead, /maxWait: 3_000, timeout: 10_000/);
+  const budgetReceipt = withoutComments(read(
+    "app/api/internal/amux/v19/analysis-budget/claim/route.ts"));
+  assertBefore(budgetReceipt, "isAmuxV4AnalysisAgentAuthorized(request");
+  assertBefore(budgetReceipt, 'process.env[READ_ENV] !== "enabled"');
+  assert.match(budgetReceipt, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   // Intake v15 opens only the code latches. The independent runtime write
   // and receipt-read switches still fail closed before a transaction opens.
   // Both transaction bounds remain independent of execution commit deadlines.

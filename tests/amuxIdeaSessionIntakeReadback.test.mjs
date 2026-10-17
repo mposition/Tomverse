@@ -15,6 +15,7 @@ import {
 
 const requestId = "34340477-7664-42f4-b3fe-845d10365051";
 const ideaId = "8486a25b-919f-4714-a3d8-45ef5a18b175";
+const reservationId = "788e5cd2-4615-46e6-b287-0b84ca217c7c";
 const secret = "session_intake_only_012345678901234567890123";
 const request = (query = `?requestId=${requestId}`, token = secret,
   headers = {}) => new Request(
@@ -97,11 +98,11 @@ test("session readback responses expose only closed metadata and never invite an
     body: { status: "partial", requestId, ideaId, retryWrite: false },
   });
   const reply = amuxSessionIntakeReadbackReply(requestId,
-    { requestId, status: "committed", ideaId,
+    { requestId, status: "committed", ideaId, reservationId,
     hasExternalSources: true, rawIdea: "must-not-leak", sourceProvenance: "must-not-leak",
     credential: secret });
   assert.deepEqual(reply, { status: 200, body: {
-    status: "committed", requestId, ideaId, hasExternalSources: true,
+    status: "committed", requestId, ideaId, reservationId, hasExternalSources: true,
     adminPath: `/admin/amux-backlog?tab=ideas&idea=${requestId}`,
   } });
   assert.doesNotMatch(JSON.stringify(reply), /must-not-leak|credential|sourceProvenance|rawIdea/);

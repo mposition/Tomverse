@@ -133,7 +133,8 @@ export type MarketingMutationSpec<TBody, TResult> = {
     | "MarketingChannel"
     | "AppSetting"
     | "MarketingWebhookVerificationRecord"
-    | "MarketingLlmCall";
+    | "MarketingLlmCall"
+    | "MarketingCompetitor";
   /** Absent for a create, where the id does not exist until the write. */
   targetId?: string | ((body: TBody) => string);
   summary: string | ((body: TBody) => string);

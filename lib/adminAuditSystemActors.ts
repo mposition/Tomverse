@@ -27,6 +27,24 @@ export const AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR = "amux-session-intake" as c
 export const AMUX_SESSION_IDEA_SUBMITTED_ACTION = "amux.idea.session_submitted" as const;
 export const AMUX_SESSION_IDEA_SUBMITTED_TARGET = "AmuxIdeaSubmission" as const;
 export const AMUX_SESSION_IDEA_SUBMITTED_SCOPE = "session-submission-v1" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_ACTION =
+  "amux.idea.session_analysis_reserved" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_TARGET =
+  "AmuxIdeaSessionAnalysisReservation" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_SCOPE =
+  "session-analysis-reservation-v1" as const;
+/** Session CLI cost uses the same monthly Agent ledger as v4, but never a
+ * preview receipt or a user credit. */
+export const AMUX_V19_SESSION_BUDGET_CLAIM_ACTION =
+  "amux.v19.session_budget.claimed" as const;
+export const AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION =
+  "amux.v19.session_budget.resolved" as const;
+export const AMUX_V19_SESSION_BUDGET_TARGET =
+  "AmuxIdeaSessionAnalysisBudgetClaim" as const;
+export const AMUX_V19_SESSION_BUDGET_CLAIM_SCOPE =
+  "session-budget-claim-v1" as const;
+export const AMUX_V19_SESSION_BUDGET_RESOLVE_SCOPE =
+  "session-budget-resolve-v1" as const;
 
 /**
  * The legacy internal auto-promotion tick consumes an owner-bound grant.
@@ -211,6 +229,14 @@ export const isSystemAuditActor = (value: unknown): value is SystemAuditActor =>
 /** Existing actors retain their established call-site contracts. Each v4
  * intake action/target pair has its own immutable scope marker. */
 export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): string | null => {
+  if (targetType === AMUX_V19_SESSION_BUDGET_TARGET) {
+    if (action === AMUX_V19_SESSION_BUDGET_CLAIM_ACTION) {
+      return AMUX_V19_SESSION_BUDGET_CLAIM_SCOPE;
+    }
+    if (action === AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION) {
+      return AMUX_V19_SESSION_BUDGET_RESOLVE_SCOPE;
+    }
+  }
   if (action === AMUX_V4_INITIAL_SOURCE_PLAN_ACTION &&
       targetType === AMUX_V4_INITIAL_SOURCE_PLAN_TARGET) {
     return AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE;
@@ -304,7 +330,10 @@ export const amuxSessionIntakeSystemAuditScope = (
   action === AMUX_SESSION_IDEA_SUBMITTED_ACTION &&
   targetType === AMUX_SESSION_IDEA_SUBMITTED_TARGET
     ? AMUX_SESSION_IDEA_SUBMITTED_SCOPE
-    : null;
+    : action === AMUX_SESSION_ANALYSIS_RESERVED_ACTION &&
+        targetType === AMUX_SESSION_ANALYSIS_RESERVED_TARGET
+      ? AMUX_SESSION_ANALYSIS_RESERVED_SCOPE
+      : null;
 
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
@@ -472,5 +501,6 @@ function marketingGeneratorAuditScope(actor: unknown, action: unknown, targetTyp
   return actor !== "marketing-generator" ||
     (typeof action === "string" && MARKETING_GENERATOR_AUDIT_ACTIONS.includes(action) &&
       targetType === "MarketingLlmCall") ||
-    (action === "marketing_report.generator_recorded" && targetType === "MarketingReport");
+    (action === "marketing_report.generator_recorded" && targetType === "MarketingReport") ||
+    (action === "marketing_competitor.proposed" && targetType === "MarketingCompetitor");
 }

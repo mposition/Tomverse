@@ -389,6 +389,8 @@ test("v52 guard inventories non-implement attempts and withholds a contract patc
     });
   assert.deepEqual(contract.changedPaths, ["lib/amux/execution.ts"]);
   assert.equal(contract.patchDigest, undefined);
+  assert.equal(contract.reviewCommitSha, undefined);
+  assert.equal(contract.reviewTouchesContract, undefined);
   assert.equal(patchCalls, 0);
   assert.equal(discarded, 1);
   const readOnlyEdit = await runAmuxV22OneShot({ ...request,
@@ -411,6 +413,39 @@ test("v52 guard inventories non-implement attempts and withholds a contract patc
     });
   assert.equal(missing.changedPathsReason, "changed_paths_unavailable");
   assert.equal(patchCalls, 0);
+});
+
+test("v52 frontier implement binds a review commit to the captured patch", async () => {
+  const fake = fakeSpawn(JSON.stringify(usage));
+  const result = await runAmuxV22OneShot({ ...request,
+    gradeGuard: true, executionGrade: "frontier" }, config, {
+    syntheticPlatform: true, spawnChild: fake.spawnChild,
+    captureBaseline: async () => ({ ok: true, baseSha: "a".repeat(40) }),
+    captureChangedPaths: async () => ({ ok: true,
+      files: ["lib/amux/execution.ts"],
+      contractPaths: ["lib/amux/execution.ts"] }),
+    capturePatch: async (_worktree, _base, options) => {
+      assert.equal(options.allowUntracked, true);
+      return { ok: true, baseSha: "a".repeat(40),
+      patchDigest: "c".repeat(64),
+      patchBody: "diff --git a/lib/amux/execution.ts b/lib/amux/execution.ts\n",
+      publishFiles: [{ path: "lib/amux/execution.ts", mode: "100644",
+        bytesBase64: "YQ==" }] };
+    },
+    captureReviewCommit: async (_worktree, base, attempt, files, patch) => {
+      assert.equal(base, "a".repeat(40));
+      assert.equal(attempt, attemptId);
+      assert.deepEqual(files, ["lib/amux/execution.ts"]);
+      assert.match(patch, /^diff --git /);
+      return { ok: true, baseSha: base, commitSha: "b".repeat(40),
+        reviewRef: `refs/amux-v52-review/${attemptId}` };
+    },
+  });
+  assert.equal(result.kind, "succeeded");
+  assert.equal(result.reviewBaseSha, "a".repeat(40));
+  assert.equal(result.reviewCommitSha, "b".repeat(40));
+  assert.equal(result.reviewTouchesContract, true);
+  assert.equal(result.reviewRef, `refs/amux-v52-review/${attemptId}`);
 });
 
 test("implement refuses a dirty baseline before CLI and holds a patch only in memory", async () => {

@@ -10,7 +10,6 @@ import ts from "typescript";
 import {
   MARKETING_AUTOMATION_FEATURES,
   MARKETING_AUTOMATION_KILL_SWITCH_ENV,
-  MARKETING_PRICE_FALLBACK_ALERT_READY,
   MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES,
   MARKETING_WEBHOOK_PIPELINE_COMPLETE,
   MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR,
@@ -185,7 +184,6 @@ test("exports exactly the policy section 6.1 feature rows", () => {
     "webhookShadow",
     "webhookApply",
   ]);
-  assert.equal(MARKETING_PRICE_FALLBACK_ALERT_READY, false);
 });
 
 test("the complete admitted inputs enable every feature, webhook apply included (S2f)", () => {
