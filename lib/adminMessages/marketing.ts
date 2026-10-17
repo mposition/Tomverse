@@ -172,6 +172,29 @@ export const adminMarketingMessages = defineAdminMessages({
     refresh: "Refresh",
     empty: "Nothing here yet.",
     showing: "Newest {count} of this section, not a total.",
+    showingByStatus:
+      "Up to {count} competitors: approved first, then proposals, rejections and retirements.",
+    competitorsTitle: "Competitors",
+    competitorsDescription:
+      "Who the market-intelligence agent tracks. It proposes; a person approves, edits, rejects or retires. Only an approved competitor's hosts are sources for market facts.",
+    colCompetitor: "Competitor",
+    colHosts: "Official hosts",
+    colDecided: "Decided",
+    colEvidence: "Evidence:",
+    actApproveCompetitor: "Approve",
+    actRejectCompetitor: "Reject",
+    actRetireCompetitor: "Retire",
+    confirmRetireCompetitor:
+      "Retire this competitor? Facts from its hosts are no longer kept from the next report on.",
+    createCompetitorTitle: "Add a competitor",
+    createCompetitorNote:
+      "Approved as it is added. Its hosts become sources for market facts from the next report on.",
+    actCreateCompetitor: "Add and approve",
+    fieldCompetitorId: "Id",
+    fieldDisplayName: "Name",
+    fieldOfficialHosts: "Official hosts",
+    hintCompetitorId: "Lower case letters, digits, - and _.",
+    hintOfficialHosts: "Exact host names, comma separated. A subdomain is a different host.",
     unavailableS4:
       "Comment monitoring is built in stage S4. Nothing writes this section yet, so it is empty because it is unbuilt rather than because nothing is waiting.",
     unavailableS5:
@@ -398,6 +421,26 @@ export const adminMarketingMessages = defineAdminMessages({
     refresh: "새로 가져오기",
     empty: "아직 아무것도 없습니다.",
     showing: "이 구획의 최신 {count}건이며 전체 수가 아닙니다.",
+    showingByStatus: "경쟁사 최대 {count}건입니다. 승인된 것이 먼저, 그다음 제안·거절·은퇴 순입니다.",
+    competitorsTitle: "경쟁사",
+    competitorsDescription:
+      "시장 분석 에이전트가 추적하는 경쟁사입니다. 에이전트는 제안만 하고, 사람이 승인·수정·거절·은퇴를 정합니다. 승인된 경쟁사의 host만 시장 사실의 출처가 됩니다.",
+    colCompetitor: "경쟁사",
+    colHosts: "공식 host",
+    colDecided: "결정",
+    colEvidence: "근거:",
+    actApproveCompetitor: "승인",
+    actRejectCompetitor: "거절",
+    actRetireCompetitor: "은퇴",
+    confirmRetireCompetitor: "이 경쟁사를 은퇴시킬까요? 다음 보고서부터 이 host의 사실은 저장되지 않습니다.",
+    createCompetitorTitle: "경쟁사 추가",
+    createCompetitorNote: "추가하는 즉시 승인됩니다. 다음 보고서부터 이 host가 시장 사실의 출처가 됩니다.",
+    actCreateCompetitor: "추가하고 승인",
+    fieldCompetitorId: "Id",
+    fieldDisplayName: "이름",
+    fieldOfficialHosts: "공식 host",
+    hintCompetitorId: "영어 소문자, 숫자, -와 _만 씁니다.",
+    hintOfficialHosts: "정확한 host 이름을 쉼표로 구분합니다. 하위 도메인은 다른 host입니다.",
     unavailableS4:
       "댓글 모니터링은 S4 단계에서 만듭니다. 아직 이 구획에 쓰는 것이 없으므로, 기다리는 일이 없어서가 아니라 아직 만들지 않아서 비어 있습니다.",
     unavailableS5:

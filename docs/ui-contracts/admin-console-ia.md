@@ -57,7 +57,7 @@ owner-only (rule 14).
 | Operations | Alerts | `/admin/alerts` | `policy`, `templates`, `deliveries` |
 | Operations | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule` |
 | Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
-| Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `comments` |
+| Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `competitors`, `comments` |
 | Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
 | Operations | Agent digests | `/admin/agent-digests` | `qa-release` |
 | Operations | Agent office | `/admin/office` | `live`, `dashboard` |

@@ -554,6 +554,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         description: "Weekly summaries, competitor facts, and retention runs",
       },
       {
+        id: "competitors",
+        label: "Competitors",
+        description: "Who the market agent tracks, and which hosts a person approved as official",
+      },
+      {
         id: "comments",
         label: "Comments",
         description: "Comment alerts the monitor raised and nobody has answered",

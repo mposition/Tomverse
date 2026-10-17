@@ -1484,7 +1484,12 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   정규화된 뒤의 이름·host를 적습니다(write guard가 저장값과 정확히 대조). **승인·추가는 host를 출처로 만드는 시작이라 kill
   switch가 막고, 거절·은퇴는 출처를 줄이는 정지라 아무것도 막지 않습니다.** 화면이 본 결정과 다르거나 상태가 허락하지
   않는 이동은 409이고 감사 행을 남기지 않습니다. 거절의 상태 코드는 `MarketingCompetitorRefusedError`가 들고 다닙니다 —
-  route sweep이 `refusal` 안의 호출과 store 식별자를 막기 때문입니다. Admin 화면은 R3b입니다.
+  route sweep이 `refusal` 안의 호출과 store 식별자를 막기 때문입니다.
+- **S3f-R3b(경쟁사 Admin 화면)**: `/admin/marketing?tab=competitors` — `lib/marketingConsoleSections.ts`,
+  `lib/marketingConsoleRead.ts`, `components/admin/AdminMarketingPanel.tsx`, `lib/adminMessages/marketing.ts`. 승인된 것이
+  먼저, 최대 `MARKETING_COMPETITOR_READ_LIMIT`건이고 화면이 그 수를 말합니다. 행마다 그 행이 보여 준
+  `decisionAuditLogId`로 결정하며, 승인은 이름·host를 고쳐서 보낼 수 있습니다. A3의 근거 URL은 링크가 아니라 텍스트로
+  보입니다 — 생성기가 읽은 것은 판정할 데이터이지 따라갈 링크가 아닙니다.
 
 # 엔지니어링 Agent
 

@@ -41,7 +41,7 @@ type Row = Record<string, unknown>;
 export type MarketingConsoleView = {
   section: MarketingConsoleSection;
   availability: Availability;
-  ordering: "newest" | "by-account";
+  ordering: "newest" | "by-account" | "by-status";
   pageSize: number;
   rows: Row[];
   switches: Record<string, SwitchState>;
@@ -105,6 +105,15 @@ const POST = (id: unknown, action: string) =>
   `/api/admin/marketing/posts/${encodeURIComponent(String(id))}/${action}`;
 const ACCOUNT = (id: unknown, action: string) =>
   `/api/admin/marketing/accounts/${encodeURIComponent(String(id))}/${action}`;
+const COMPETITOR_DECISION = (id: unknown) =>
+  `/api/admin/marketing/competitors/${encodeURIComponent(String(id))}/decision`;
+
+/** What the person typed into a host box, as the list the route parses. */
+const hostList = (value: string) =>
+  value
+    .split(/[\s,]+/u)
+    .map((host) => host.trim())
+    .filter((host) => host !== "");
 
 /**
  * The whole Marketing console.
@@ -160,6 +169,7 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
     published: { title: m.publishedTitle, description: m.publishedDescription },
     accounts: { title: m.accountsTitle, description: m.accountsDescription },
     reports: { title: m.reportsTitle, description: m.reportsDescription },
+    competitors: { title: m.competitorsTitle, description: m.competitorsDescription },
     experiments: { title: m.experimentsTitle, description: m.experimentsDescription },
     comments: { title: m.commentsTitle, description: m.commentsDescription },
   }[view.section];
@@ -241,8 +251,18 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
               m={m}
             />
           ) : null}
+          {view.section === "competitors" && view.canWrite ? (
+            <MarketingCompetitorCreate
+              section={view.section}
+              onDone={() => void refresh()}
+              m={m}
+            />
+          ) : null}
           <p className="mt-4 text-xs text-zinc-500">
-            {m.showing.replace("{count}", String(view.pageSize))}
+            {(view.ordering === "by-status" ? m.showingByStatus : m.showing).replace(
+              "{count}",
+              String(view.pageSize)
+            )}
           </p>
           {view.rows.length === 0 ? (
             <p className="mt-4 text-sm text-zinc-400">{m.empty}</p>
@@ -764,6 +784,49 @@ function MarketingAccountCreate({
 }
 
 /**
+ * A person adds a competitor A3 has not proposed, approved as it is created.
+ * Its hosts become sources for market facts from the next report on.
+ */
+function MarketingCompetitorCreate({
+  section,
+  onDone,
+  m,
+}: {
+  section: string;
+  onDone: () => void;
+  m: Record<string, string>;
+}) {
+  const action: MarketingAction = {
+    id: "competitor-create",
+    label: m.actCreateCompetitor,
+    path: "/api/admin/marketing/competitors",
+    fields: [
+      { name: "competitorId", label: m.fieldCompetitorId, kind: "text", hint: m.hintCompetitorId },
+      { name: "displayName", label: m.fieldDisplayName, kind: "text" },
+      { name: "officialHosts", label: m.fieldOfficialHosts, kind: "text", hint: m.hintOfficialHosts },
+    ],
+    body: (values) => ({
+      competitorId: values.competitorId.trim(),
+      displayName: values.displayName,
+      officialHosts: hostList(values.officialHosts),
+    }),
+  };
+
+  return (
+    <div
+      data-testid="marketing-competitor-create"
+      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
+    >
+      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+        {m.createCompetitorTitle}
+      </p>
+      <p className="mt-1 text-xs text-zinc-500">{m.createCompetitorNote}</p>
+      <MarketingActionRail actions={[action]} section={section} onDone={onDone} m={m} />
+    </div>
+  );
+}
+
+/**
  * Which controls a row can take, decided from the row's own state.
  *
  * The server decides every one of these again, and it is the server's answer
@@ -779,7 +842,66 @@ function rowActions(
   if (section === "queue") return queueActions(row, m);
   if (section === "published") return publishedActions(row, m);
   if (section === "accounts") return accountActions(row, m);
+  if (section === "competitors") return competitorActions(row, m);
   return [];
+}
+
+/**
+ * A competitor's decisions. Each is made against the decision this row showed
+ * (`decisionAuditLogId`), so a page left open across another person's change
+ * is refused rather than applied. An approval sends the name and hosts as
+ * edited here: what A3 proposed is a suggestion, and the person decides what
+ * counts as official.
+ */
+function competitorActions(row: Row, m: Record<string, string>): MarketingAction[] {
+  const expected = { expectedDecisionAuditLogId: text(row.decisionAuditLogId) };
+  const hosts = Array.isArray(row.officialHosts) ? (row.officialHosts as string[]) : [];
+  const approve: MarketingAction = {
+    id: "competitor-approve",
+    label: m.actApproveCompetitor,
+    path: COMPETITOR_DECISION(row.id),
+    fields: [
+      { name: "displayName", label: m.fieldDisplayName, kind: "text", initial: str(row.displayName) },
+      {
+        name: "officialHosts",
+        label: m.fieldOfficialHosts,
+        kind: "text",
+        initial: hosts.join(", "),
+        hint: m.hintOfficialHosts,
+      },
+    ],
+    body: (values) => ({
+      decision: "approved",
+      ...expected,
+      displayName: values.displayName,
+      officialHosts: hostList(values.officialHosts),
+    }),
+  };
+  if (row.status === "proposed") {
+    return [
+      approve,
+      {
+        id: "competitor-reject",
+        label: m.actRejectCompetitor,
+        path: COMPETITOR_DECISION(row.id),
+        body: () => ({ decision: "rejected", ...expected }),
+      },
+    ];
+  }
+  if (row.status === "approved") {
+    return [
+      {
+        id: "competitor-retire",
+        label: m.actRetireCompetitor,
+        path: COMPETITOR_DECISION(row.id),
+        confirm: m.confirmRetireCompetitor,
+        danger: true,
+        body: () => ({ decision: "retired", ...expected }),
+      },
+    ];
+  }
+  // Rejected or retired: a person may change their mind.
+  return [approve];
 }
 
 /** The two values every post writer compares against. */
@@ -1308,6 +1430,31 @@ function MarketingRow({
           value={`v${row.policyVersion} / e${row.graduationEpoch} / c${row.connectionGeneration}`}
         />
       </div>
+    );
+  }
+
+  if (section === "competitors") {
+    const hosts = Array.isArray(row.officialHosts) ? (row.officialHosts as string[]) : [];
+    const evidence = Array.isArray(row.evidenceUrls) ? (row.evidenceUrls as string[]) : [];
+    return (
+      <>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label={m.colCompetitor} value={`${str(row.displayName)} (${str(row.id)})`} />
+          <Field label={m.colStatus} value={`${str(row.status)} / ${str(row.proposedBy)}`} />
+          <Field label={m.colHosts} value={hosts.join(", ") || m.none} />
+          <Field label={m.colDecided} value={stamp(row.decidedAt) ?? m.none} />
+        </div>
+        {/*
+          A3's own words and the pages it cites, shown as text: they are what
+          the generator read, which is data to judge, not links to follow.
+        */}
+        <p className="mt-3 text-sm leading-6 text-zinc-300">{text(row.rationale) ?? m.none}</p>
+        {evidence.length > 0 ? (
+          <p className="mt-2 break-all text-xs text-zinc-500">
+            {m.colEvidence} {evidence.join(" / ")}
+          </p>
+        ) : null}
+      </>
     );
   }
 

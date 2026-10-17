@@ -218,3 +218,28 @@ test("a stale sign-in is the step-up answer, and a non-administrator learns noth
   assert.equal((await decide("alpha", { decision: "rejected", expectedDecisionAuditLogId: null })).status, 404);
   assert.equal((await row("alpha")).status, "proposed");
 });
+
+test("the console lists approved competitors first, with the decision each change is checked against", async () => {
+  const { readMarketingConsole } = (await import(mod("lib/marketingConsoleRead.ts"))) as typeof import(
+    "@/lib/marketingConsoleRead"
+  );
+  await proposal("alpha");
+  await proposal("beta");
+  await decide("beta", {
+    decision: "approved",
+    expectedDecisionAuditLogId: null,
+    displayName: "Beta",
+    officialHosts: ["beta.example"],
+  });
+  const view = await readMarketingConsole("competitors", true);
+  assert.equal(view.ordering, "by-status");
+  assert.deepEqual(
+    view.rows.map((r) => [r.id, r.status]),
+    [
+      ["beta", "approved"],
+      ["alpha", "proposed"],
+    ],
+  );
+  assert.equal(view.rows[0].decisionAuditLogId, (await row("beta")).decisionAuditLogId);
+  assert.equal(view.rows[1].decisionAuditLogId, null);
+});
