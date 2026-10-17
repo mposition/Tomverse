@@ -1478,6 +1478,13 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   본 결정과 현재 결정이 다르면 `competitor_decision_conflict`입니다. 행은 지우지 않고 은퇴시킵니다. migration은 시장
   분석의 11개를 `seed` 제안으로만 넣으며 아무것도 승인하지 않습니다. 사실 필터는 R2부터 이 등록부를 읽고, 사람이
   결정하는 Admin 화면과 route는 R3입니다.
+- **S3f-R3a(경쟁사 결정 route)**: `app/api/admin/marketing/competitors/route.ts`(사람이 승인된 경쟁사를 추가),
+  `app/api/admin/marketing/competitors/[competitorId]/decision/route.ts`(승인·거절·은퇴),
+  `tests/integration/marketing-competitor-routes.db.test.ts`. 둘 다 `runMarketingAdminMutation`을 지나고, 감사 metadata는
+  정규화된 뒤의 이름·host를 적습니다(write guard가 저장값과 정확히 대조). **승인·추가는 host를 출처로 만드는 시작이라 kill
+  switch가 막고, 거절·은퇴는 출처를 줄이는 정지라 아무것도 막지 않습니다.** 화면이 본 결정과 다르거나 상태가 허락하지
+  않는 이동은 409이고 감사 행을 남기지 않습니다. 거절의 상태 코드는 `MarketingCompetitorRefusedError`가 들고 다닙니다 —
+  route sweep이 `refusal` 안의 호출과 store 식별자를 막기 때문입니다. Admin 화면은 R3b입니다.
 
 # 엔지니어링 Agent
 

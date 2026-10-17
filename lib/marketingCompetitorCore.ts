@@ -16,6 +16,9 @@ export const MARKETING_COMPETITOR_ACTIONS = {
   retired: "marketing_competitor.retired",
 } as const;
 
+/** What a decision's audit row records as its predecessor when there is none. */
+export const MARKETING_COMPETITOR_NO_DECISION = ":none";
+
 export const MARKETING_COMPETITOR_STATUSES = ["proposed", "approved", "rejected", "retired"] as const;
 export type MarketingCompetitorStatus = (typeof MARKETING_COMPETITOR_STATUSES)[number];
 
@@ -60,3 +63,25 @@ export type MarketingCompetitorCandidate = z.infer<typeof marketingCompetitorCan
 
 /** Approved competitor id -> its official hosts: the only sources a market fact may cite. */
 export type MarketingCompetitorSourceHosts = Readonly<Record<string, readonly string[]>>;
+
+/**
+ * A registry refusal, carrying the status an Admin route answers it with.
+ * Conflicts are 409s, and so is a move the write guard refuses (rejecting an
+ * approved competitor, retiring a proposal): the page showed a state the
+ * request does not fit, which is not a fault.
+ *
+ * Its own class, here rather than the store's: the route sweep lets a route's
+ * `refusal` read an error but not call anything or name a store binding, so
+ * the status travels on the error.
+ */
+export class MarketingCompetitorRefusedError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, status: number, message: string) {
+    super(message);
+    this.name = "MarketingCompetitorRefusedError";
+    this.code = code;
+    this.status = status;
+  }
+}

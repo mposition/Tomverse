@@ -22,10 +22,11 @@ import { Prisma } from "@prisma/client";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import {
   MARKETING_COMPETITOR_ACTIONS,
+  MarketingCompetitorRefusedError,
   type MarketingCompetitorCandidate,
   type MarketingCompetitorSourceHosts,
 } from "@/lib/marketingCompetitorCore";
-import { MarketingStoreRefusedError, type MarketingTransaction } from "@/lib/marketingStore";
+import type { MarketingTransaction } from "@/lib/marketingStore";
 
 type CompetitorReader = Pick<MarketingTransaction, "marketingCompetitor">;
 
@@ -151,21 +152,40 @@ export async function decideMarketingCompetitor(
   },
 ): Promise<{ readonly competitorId: string; readonly status: string }> {
   if (input.decision === "approved" && (!input.officialHosts || !input.displayName)) {
-    throw new MarketingStoreRefusedError("competitor_hosts_required", "An approval names the name and hosts it approves");
+    throw new MarketingCompetitorRefusedError(
+      "competitor_hosts_required",
+      422,
+      "An approval names the name and hosts it approves",
+    );
   }
-  const updated = await tx.marketingCompetitor.updateMany({
-    where: { id: input.competitorId, decisionAuditLogId: input.expectedDecisionAuditLogId },
-    data: {
-      status: input.decision,
-      decisionAuditLogId: input.auditLogId,
-      ...(input.decision === "approved"
-        ? { displayName: input.displayName, officialHosts: [...(input.officialHosts ?? [])] }
-        : {}),
-    },
-  });
+  let updated: { count: number };
+  try {
+    updated = await tx.marketingCompetitor.updateMany({
+      where: { id: input.competitorId, decisionAuditLogId: input.expectedDecisionAuditLogId },
+      data: {
+        status: input.decision,
+        decisionAuditLogId: input.auditLogId,
+        ...(input.decision === "approved"
+          ? { displayName: input.displayName, officialHosts: [...(input.officialHosts ?? [])] }
+          : {}),
+      },
+    });
+  } catch (error) {
+    // The write guard's answer to a move the status does not allow. The
+    // transaction is already aborted; this only names the refusal.
+    if (error instanceof Error && error.message.includes("marketing_competitor_transition_invalid")) {
+      throw new MarketingCompetitorRefusedError(
+        "competitor_transition_invalid",
+        409,
+        "That decision does not apply to the competitor's current status",
+      );
+    }
+    throw error;
+  }
   if (updated.count !== 1) {
-    throw new MarketingStoreRefusedError(
+    throw new MarketingCompetitorRefusedError(
       "competitor_decision_conflict",
+      409,
       "The competitor changed, or does not exist, since it was shown",
     );
   }
@@ -188,7 +208,7 @@ export async function createApprovedMarketingCompetitor(
 ): Promise<{ readonly competitorId: string }> {
   const existing = await tx.marketingCompetitor.findUnique({ where: { id: input.competitorId }, select: { id: true } });
   if (existing) {
-    throw new MarketingStoreRefusedError("competitor_exists", "That competitor is already in the registry");
+    throw new MarketingCompetitorRefusedError("competitor_exists", 409, "That competitor is already in the registry");
   }
   await tx.marketingCompetitor.create({
     data: {
