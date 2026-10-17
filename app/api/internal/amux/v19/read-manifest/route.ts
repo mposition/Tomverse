@@ -43,6 +43,8 @@ export async function POST(request: Request): Promise<Response> {
   }
   let body: z.infer<typeof bodySchema>;
   try {
+    // v19 intentionally has no read-file count or byte ceiling; the host
+    // reports its complete verified observation, including large manifests.
     const parsed = bodySchema.safeParse(await request.json());
     if (!parsed.success) throw new Error("invalid_body");
     body = parsed.data;
