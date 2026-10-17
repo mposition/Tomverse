@@ -21,7 +21,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, parse } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -198,3 +198,68 @@ test("review (3): the build marks what it made, refreshes it, and refuses it onc
     assert.equal(existsSync(join(out, "manifest.sha256")), true, "nothing of the earlier release was removed either");
   }),
 );
+
+// ---------------------------------------------------------------------------
+// r-20261017-121031-9ff0a9: hard links
+// ---------------------------------------------------------------------------
+
+/** Someone's file outside the output, and a second name for it inside. */
+const secondName = (outside, path) => {
+  const original = join(outside, "someone-else.txt");
+  writeFileSync(original, "someone else's");
+  linkSync(original, path);
+  return original;
+};
+
+test("third review, reproduced: a marker that is a hard link to someone's file is refused, and that file is untouched", () =>
+  withLayout(({ outside, options }) => {
+    const out = options.defaultOut;
+    mkdirSync(out, { recursive: true });
+    const original = secondName(outside, join(out, DM_RELEASE_MARKER));
+    assert.equal(dmReleaseOutRefusal(out, options), "hard_link");
+    assert.throws(() => dmPrepareReleaseOut(out, options), /hard_link/);
+    assert.equal(readFileSync(original, "utf8"), "someone else's");
+  }),
+);
+
+test("third review: a release file or unit with a second name anywhere refuses the output, and the other name is untouched", () => {
+  for (const name of ["broker.mjs", "manifest.sha256", "install-amux-decision-maker.sh", "systemd/amux-dm-launcher-openai@.service"]) {
+    withLayout(({ outside, options }) => {
+      const out = options.defaultOut;
+      makeRelease(out);
+      rmSync(join(out, name));
+      const original = secondName(outside, join(out, name));
+      assert.equal(dmReleaseOutRefusal(out, options), "hard_link", name);
+      assert.throws(() => dmPrepareReleaseOut(out, options), /hard_link/, name);
+      assert.equal(readFileSync(original, "utf8"), "someone else's", name);
+    });
+  }
+});
+
+test("third review, reproduced through the build: a hard-linked marker is refused and someone's file keeps its bytes", () =>
+  withLayout(({ root, outside }) => {
+    const out = join(root, "release");
+    mkdirSync(out);
+    const original = secondName(outside, join(out, DM_RELEASE_MARKER));
+    const run = build(out);
+    assert.equal(run.status, 2, run.stderr);
+    assert.match(run.stderr, /hard_link/);
+    assert.equal(readFileSync(original, "utf8"), "someone else's");
+  }),
+);
+
+test("third review: the build and the preparation write only new files -- unlinked first, then created exclusively", () => {
+  const source = (relative) => readFileSync(join(realRepository, relative), "utf8").replace(/^\s*\/\/.*$/gm, "");
+  for (const file of ["scripts/build-amux-decision-maker.mjs", "scripts/amux-decision-maker-release-out.mjs"]) {
+    const code = source(file);
+    const writes = [...code.matchAll(/writeFileSync\(([\s\S]*?)\);/g)].map((match) => match[1]);
+    assert.ok(writes.length > 0, file);
+    for (const call of writes) assert.match(call, /flag: "wx"/, `${file}: ${call.slice(0, 80)}`);
+    for (const call of [...code.matchAll(/copyFileSync\(([\s\S]*?)\);/g)].map((match) => match[1])) {
+      assert.match(call, /COPYFILE_EXCL/, `${file}: ${call.slice(0, 80)}`);
+    }
+    assert.doesNotMatch(code, /\bappendFileSync|createWriteStream|openSync\(/, file);
+  }
+  // esbuild hands the bytes back; it does not write into the output itself.
+  assert.match(source("scripts/build-amux-decision-maker.mjs"), /write: false/);
+});

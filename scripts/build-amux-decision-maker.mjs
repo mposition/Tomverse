@@ -22,7 +22,7 @@
 //   npm run build:amux-decision-maker [-- --out <directory>]
 
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { constants, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { builtinModules } from "node:module";
 import { join } from "node:path";
@@ -60,15 +60,22 @@ const DM_RELEASE_BUNDLES = [
   { entry: "scripts/amux-dm-launcher.mjs", output: "launcher.mjs" },
 ];
 
+// Every file is new: the preparation unlinked every earlier name, and each
+// write below creates exclusively (`wx`, `COPYFILE_EXCL`) -- an entry that
+// reappeared in between fails the build rather than being written through.
 mkdirSync(join(outDirectory, "systemd"));
+const writeNew = (name, bytes) => writeFileSync(join(outDirectory, name), bytes, { flag: "wx" });
+const copyNew = (from, name) => copyFileSync(from, join(outDirectory, name), constants.COPYFILE_EXCL);
 
 const files = [];
 for (const { entry, output } of DM_RELEASE_BUNDLES) {
   const outfile = join(outDirectory, output);
+  // esbuild hands the bytes back and writes nothing itself.
   const result = await build({
     absWorkingDir: repositoryRoot,
     entryPoints: [entry],
     outfile,
+    write: false,
     bundle: true,
     platform: "node",
     format: "esm",
@@ -87,6 +94,13 @@ for (const { entry, output } of DM_RELEASE_BUNDLES) {
     process.stderr.write(`${output} imports outside node's builtins: ${[...new Set(external)].join(", ")}\n`);
     process.exit(1);
   }
+  const bundle = result.outputFiles.find((file) => file.path === outfile);
+  if (bundle === undefined || result.outputFiles.length !== 1) {
+    process.stderr.write(`${output}: esbuild did not return exactly that one file
+`);
+    process.exit(1);
+  }
+  writeNew(output, bundle.contents);
   files.push(output);
 }
 
@@ -96,13 +110,13 @@ if (sha256(schemaBytes) !== DM_OUTPUT_SCHEMA_SHA256) {
   process.stderr.write("the schema bytes do not hash to the launcher's constant\n");
   process.exit(1);
 }
-writeFileSync(join(outDirectory, schemaName), schemaBytes);
+writeNew(schemaName, schemaBytes);
 files.push(schemaName);
 
-copyFileSync(join(repositoryRoot, "scripts", "install-amux-decision-maker.sh"), join(outDirectory, "install-amux-decision-maker.sh"));
+copyNew(join(repositoryRoot, "scripts", "install-amux-decision-maker.sh"), "install-amux-decision-maker.sh");
 files.push("install-amux-decision-maker.sh");
 for (const unit of DM_RELEASE_UNIT_FILES) {
-  copyFileSync(join(repositoryRoot, "scripts", "systemd", unit), join(outDirectory, "systemd", unit));
+  copyNew(join(repositoryRoot, "scripts", "systemd", unit), `systemd/${unit}`);
   files.push(`systemd/${unit}`);
 }
 
@@ -116,6 +130,6 @@ for (const name of [...files, "manifest.sha256"]) {
   }
 }
 const manifest = files.map((name) => `${sha256(readFileSync(join(outDirectory, name)))}  ${name}\n`).join("");
-writeFileSync(join(outDirectory, "manifest.sha256"), manifest);
+writeNew("manifest.sha256", manifest);
 process.stdout.write(`${outDirectory}\n${manifest}`);
 process.stdout.write(`${sha256(Buffer.from(manifest, "utf8"))}  manifest.sha256\n`);

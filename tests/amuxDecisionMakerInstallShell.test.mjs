@@ -193,3 +193,17 @@ test("re-review sweep: the release tree is checked in the dry run, and the apply
   assert.ok(keep.includes('dm_ancestors_problem "$backup${DM_PLAN_DEST[$index]}"'), "the way to each backup copy is checked");
   assert.ok(keep.indexOf("dm_ancestors_problem") < keep.indexOf("/usr/bin/cp -a"));
 });
+
+test("third review sweep: no write goes into an existing name -- copies land on names that are new, and replacements are renames", () => {
+  const code = installer.replace(/^\s*#.*$/gm, "");
+  const main = code.slice(code.indexOf("dm_main() {"));
+  const keep = main.slice(main.indexOf("replace|repair)"), main.indexOf('dm_put "${DM_PLAN_DEST'));
+  // The backup copy's own name must not exist yet (it could be a second name of anything).
+  const absent = keep.search(/\[\[ ! -e "\$backup\$\{DM_PLAN_DEST\[\$index\]\}" && ! -L "\$backup\$\{DM_PLAN_DEST\[\$index\]\}" \]\] \|\|\s+dm_fail/);
+  assert.ok(absent >= 0 && absent < keep.indexOf("/usr/bin/cp -a"), "the backup copy's name is checked to be new");
+  // A staged copy is mktemp's new file in a checked root-only directory, and only a rename touches the destination.
+  const put = code.slice(code.indexOf("dm_put() {"), code.indexOf("dm_main() {"));
+  assert.ok(put.indexOf("/usr/bin/mktemp --") < put.indexOf('/usr/bin/cp -- "$source" "$stage"'));
+  assert.match(put, /\/usr\/bin\/mv -fT -- "\$stage" "\$dest"/);
+  assert.doesNotMatch(code, /(?:cp|install|tee|cat)[^\n]*(?:>|--)\s*"\$dest"/, "nothing writes to a destination name directly");
+});

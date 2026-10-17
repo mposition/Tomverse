@@ -1870,7 +1870,8 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   멈춥니다(재검토 r-20261017-114940-a271fb의 sweep). 빌드의 `--out`은 저장소·홈·파일시스템 루트와 그 조상을 언제나 거부하고, **경로 자신과
   이미 있는 모든 조상 중 하나라도 link이거나 realpath가 적힌 경로와 다르면 기본 경로라도 거부합니다**. 비어 있지 않은 디렉터리는 빌드가 남긴
   표식(`.amux-decision-maker-release`)이 있고 그 밖의 항목이 모두 release 자신의 일반 파일일 때만 쓰며, 재귀 삭제 없이 그 파일들만 이름으로
-  지웁니다(검토 3, 재검토).
+  지웁니다(검토 3, 재검토). 표식을 포함해 이름이 둘 이상인(hard link) 항목이 있으면 `hard_link`로 거부하고, 빌드는 기존 항목을 먼저 unlink한
+  뒤 모든 파일을 배타적 생성(`wx`, `COPYFILE_EXCL`)으로만 씁니다 — 기존 파일 안에 쓰지 않습니다(세 번째 검토 r-20261017-121031-9ff0a9).
   unit을 enable·start하지 않고, CLI는 `--version`만(nobody, 네트워크 없는 namespace, 빈
   환경) 실행하며, 앱의 `TOMVERSE_AMUX_DM_ROUTING`은 그대로 꺼져 있습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
   없습니다.

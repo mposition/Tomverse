@@ -11,11 +11,14 @@
 //     refused, the default output (.next/amux-decision-maker) included;
 //   - a missing or empty directory: used;
 //   - a non-empty directory: used only when this build's marker is in it and
-//     everything else is a release file of its own, each a regular file (and
-//     `systemd/` a real directory of the six units).
+//     everything else is a release file of its own, each a regular file with
+//     no second name (and `systemd/` a real directory of the six units); a
+//     hard link anywhere refuses (r-20261017-121031-9ff0a9).
 //
-// Nothing is deleted recursively. Preparing a marked release unlinks its own
-// files by name, removes the emptied `systemd/` and keeps the directory.
+// Nothing is deleted recursively and nothing existing is written into.
+// Preparing a marked release unlinks its own files and the marker by name,
+// removes the emptied `systemd/`, keeps the directory and creates a new
+// marker exclusively; the build creates every other file the same way.
 
 import { lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, parse, relative, resolve } from "node:path";
@@ -89,20 +92,31 @@ const deepestExisting = (path) => {
 const isRegularFile = (stats) => stats !== null && stats.isFile() && !stats.isSymbolicLink();
 const isRealDirectory = (stats) => stats !== null && stats.isDirectory() && !stats.isSymbolicLink();
 
-/** Everything in a non-empty output is the marker or a release file of its own kind. */
-const onlyReleaseEntries = (path) => {
+/**
+ * One file of the release, as found: a regular file with no other name. A
+ * second name (a hard link) means the bytes belong to someone else as well;
+ * the build never writes into an existing file anyway, but it does not take
+ * such a directory for its own.
+ */
+const releaseFileProblem = (stats) => (!isRegularFile(stats) ? "unexpected_entry" : stats.nlink !== 1 ? "hard_link" : null);
+
+/** Everything in a non-empty output is the marker or a release file of its own kind, each with one name. */
+const releaseEntriesProblem = (path) => {
   for (const name of readdirSync(path)) {
     const stats = lstatOrNull(join(path, name));
     if (name === DM_RELEASE_MARKER || DM_RELEASE_TOP_FILES.includes(name)) {
-      if (!isRegularFile(stats)) return false;
+      const problem = releaseFileProblem(stats);
+      if (problem !== null) return problem;
       continue;
     }
-    if (name !== "systemd" || !isRealDirectory(stats)) return false;
+    if (name !== "systemd" || !isRealDirectory(stats)) return "unexpected_entry";
     for (const unit of readdirSync(join(path, name))) {
-      if (!DM_RELEASE_UNIT_FILES.includes(unit) || !isRegularFile(lstatOrNull(join(path, name, unit)))) return false;
+      if (!DM_RELEASE_UNIT_FILES.includes(unit)) return "unexpected_entry";
+      const problem = releaseFileProblem(lstatOrNull(join(path, name, unit)));
+      if (problem !== null) return problem;
     }
   }
-  return true;
+  return null;
 };
 
 /**
@@ -130,7 +144,7 @@ export const dmReleaseOutRefusal = (out, { repositoryRoot, home }) => {
   if (!isRealDirectory(stats)) return "not_a_directory";
   if (readdirSync(path).length === 0) return null;
   if (!isRegularFile(lstatOrNull(join(path, DM_RELEASE_MARKER)))) return "not_empty_without_marker";
-  return onlyReleaseEntries(path) ? null : "unexpected_entry";
+  return releaseEntriesProblem(path);
 };
 
 const unlinkRegularFile = (path) => {
@@ -141,9 +155,12 @@ const unlinkRegularFile = (path) => {
 };
 
 /**
- * Makes `out` a marked release directory with none of the release's files in
- * it, or throws without touching anything when `dmReleaseOutRefusal()`
- * refuses it. Never deletes recursively and never deletes the directory.
+ * Makes `out` an empty release directory holding only a new marker, or
+ * throws without touching anything when `dmReleaseOutRefusal()` refuses it.
+ * Every existing name -- the release's files, the units and the marker -- is
+ * unlinked, never written through; the marker is then created exclusively
+ * (`wx`), as the build creates every other file. Never deletes recursively
+ * and never deletes the directory.
  */
 export const dmPrepareReleaseOut = (out, options) => {
   const refusal = dmReleaseOutRefusal(out, options);
@@ -157,8 +174,10 @@ export const dmPrepareReleaseOut = (out, options) => {
       for (const unit of DM_RELEASE_UNIT_FILES) unlinkRegularFile(join(units, unit));
       rmdirSync(units);
     }
-    for (const name of DM_RELEASE_TOP_FILES) unlinkRegularFile(join(path, name));
+    for (const name of [...DM_RELEASE_TOP_FILES, DM_RELEASE_MARKER]) unlinkRegularFile(join(path, name));
   }
-  writeFileSync(join(path, DM_RELEASE_MARKER), "AMUX Decision Maker release, made by scripts/build-amux-decision-maker.mjs\n");
+  writeFileSync(join(path, DM_RELEASE_MARKER), "AMUX Decision Maker release, made by scripts/build-amux-decision-maker.mjs\n", {
+    flag: "wx",
+  });
   return path;
 };

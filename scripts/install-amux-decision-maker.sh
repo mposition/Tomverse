@@ -512,6 +512,10 @@ dm_main() {
         fi
         /usr/bin/install -d -o root -g root -m 0700 -- "$backup$(/usr/bin/dirname -- "${DM_PLAN_DEST[$index]}")"
         problem=$(dm_ancestors_problem "$backup${DM_PLAN_DEST[$index]}") || dm_fail "not keeping a backup: unsafe directory $problem"
+        # cp writes into an existing name (and so into every other name of that
+        # file); the backup copy's name must be new.
+        [[ ! -e "$backup${DM_PLAN_DEST[$index]}" && ! -L "$backup${DM_PLAN_DEST[$index]}" ]] ||
+          dm_fail "the backup copy $backup${DM_PLAN_DEST[$index]} already exists; stopped before replacing anything more"
         /usr/bin/cp -a -- "${DM_PLAN_DEST[$index]}" "$backup${DM_PLAN_DEST[$index]}"
         printf 'kept     %s -> %s\n' "${DM_PLAN_DEST[$index]}" "$backup${DM_PLAN_DEST[$index]}" ;;
     esac
