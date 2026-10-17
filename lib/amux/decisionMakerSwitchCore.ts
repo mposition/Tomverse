@@ -122,10 +122,17 @@ export type DecisionMakerInstanceNewestEvent = { actorKind: DmSwitchActorKind; c
  * instance's newest event -- the boundary §8's validation count starts from.
  * A system event there is a latch nobody has released; a person's is a
  * change, a release included.
+ *
+ * Since stage S2-2a3 the same statement also carries the database clock of
+ * each instance's newest `cleanup_latch` (§5): the one event that settles a
+ * `cleanup_unknown` report. A person's ordinary mode change does not
+ * (review r-20261017-115136-888d76), so the report's latch is decided on this
+ * clock and not on the newest event.
  */
 export type DecisionMakerSwitchRead = {
   state: DecisionMakerSwitchState;
   newest: Record<DmInstanceScope, DecisionMakerInstanceNewestEvent | null>;
+  cleanupLatchedAtMs: Record<DmInstanceScope, number | null>;
 };
 
 const noNewestEvents = (): DecisionMakerSwitchRead["newest"] => ({
@@ -133,31 +140,51 @@ const noNewestEvents = (): DecisionMakerSwitchRead["newest"] => ({
   "decision-maker-anthropic": null,
 });
 
+const noCleanupLatches = (): DecisionMakerSwitchRead["cleanupLatchedAtMs"] => ({
+  "decision-maker-openai": null,
+  "decision-maker-anthropic": null,
+});
+
+const epochClock = (value: unknown): number =>
+  typeof value === "bigint" || typeof value === "number" ? Number(value) : Number.NaN;
+
 /**
  * The state and the boundaries from the newest event of each scope, with its
- * actor and database clock. Any row the state mapping refuses, or whose actor
- * or clock the table's CHECKs could not have produced, makes the whole read
- * unreadable -- every state field null and no boundary -- as
+ * actor and database clock, and each instance's newest cleanup latch clock.
+ * Any row the state mapping refuses, or whose actor or clocks the table's
+ * CHECKs could not have produced -- a cleanup latch clock that is missing,
+ * not an epoch millisecond, or on the kill switch -- makes the whole read
+ * unreadable:
+ * every state field null, no boundary and no cleanup latch, as
  * `decisionMakerSwitchStateFromRows()` does for one bad row.
  */
 export const decisionMakerSwitchReadFromRows = (rows: unknown): DecisionMakerSwitchRead => {
-  const unreadable = { state: unreadableDecisionMakerSwitches(), newest: noNewestEvents() };
+  const unreadable = { state: unreadableDecisionMakerSwitches(), newest: noNewestEvents(), cleanupLatchedAtMs: noCleanupLatches() };
   const state = decisionMakerSwitchStateFromRows(rows);
   if (state.killSwitch === null || !Array.isArray(rows)) return unreadable;
   const newest = noNewestEvents();
-  for (const row of rows as Array<{ scope: unknown; actorKind?: unknown; createdAtEpochMs?: unknown }>) {
-    const createdAtMs =
-      typeof row.createdAtEpochMs === "bigint" || typeof row.createdAtEpochMs === "number"
-        ? Number(row.createdAtEpochMs)
-        : Number.NaN;
+  const cleanupLatchedAtMs = noCleanupLatches();
+  for (const row of rows as Array<{
+    scope: unknown;
+    actorKind?: unknown;
+    createdAtEpochMs?: unknown;
+    newestCleanupLatchAtEpochMs?: unknown;
+  }>) {
+    const createdAtMs = epochClock(row.createdAtEpochMs);
     if (!(DM_SWITCH_ACTOR_KINDS as readonly unknown[]).includes(row.actorKind) || !Number.isSafeInteger(createdAtMs)) {
+      return unreadable;
+    }
+    const latchedAt = row.newestCleanupLatchAtEpochMs;
+    const latchedAtMs = latchedAt === null ? null : epochClock(latchedAt);
+    if (latchedAtMs !== null && (!Number.isSafeInteger(latchedAtMs) || latchedAtMs < 0 || !isDmInstanceScope(row.scope))) {
       return unreadable;
     }
     if (isDmInstanceScope(row.scope)) {
       newest[row.scope] = { actorKind: row.actorKind as DmSwitchActorKind, createdAtMs };
+      cleanupLatchedAtMs[row.scope] = latchedAtMs;
     }
   }
-  return { state, newest };
+  return { state, newest, cleanupLatchedAtMs };
 };
 
 /**

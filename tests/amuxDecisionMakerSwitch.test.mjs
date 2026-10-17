@@ -620,13 +620,18 @@ test("a refused change or latch sends nothing at all", async () => {
   }
 });
 
-const at = (row, createdAtEpochMs = 1_790_000_000_123n, actorKind = "human") => ({ actorKind, createdAtEpochMs, ...row });
+const at = (row, createdAtEpochMs = 1_790_000_000_123n, actorKind = "human", newestCleanupLatchAtEpochMs = null) => ({
+  actorKind,
+  createdAtEpochMs,
+  newestCleanupLatchAtEpochMs,
+  ...row,
+});
 
 test("the ledger's switch read is the state and each instance's newest actor and clock, from one statement", async () => {
   const { tx, sent } = recordingTx({
     boundaryRows: [
       at({ scope: "kill_switch", value: "off" }, 1n),
-      at({ scope: "decision-maker-openai", value: "off" }, 1_790_000_000_123n, "system"),
+      at({ scope: "decision-maker-openai", value: "off" }, 1_790_000_000_123n, "system", 1_790_000_000_123n),
       at({ scope: "decision-maker-anthropic", value: "proposal" }, 1_790_000_000_456n),
     ],
   });
@@ -636,11 +641,13 @@ test("the ledger's switch read is the state and each instance's newest actor and
       "decision-maker-openai": { actorKind: "system", createdAtMs: 1_790_000_000_123 },
       "decision-maker-anthropic": { actorKind: "human", createdAtMs: 1_790_000_000_456 },
     },
+    // Stage S2-2a3: each instance's newest cleanup latch, the one event that settles a cleanup report.
+    cleanupLatchedAtMs: { "decision-maker-openai": 1_790_000_000_123, "decision-maker-anthropic": null },
   });
   assert.equal(sent.length, 1);
   assert.match(
     sent[0].sql,
-    /SELECT DISTINCT ON \("scope"\)\s+"scope", "value", "actorKind",\s+floor\(extract\(epoch FROM "createdAt"\) \* 1000\)::bigint AS "createdAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+ORDER BY "scope", "sequence" DESC/,
+    /SELECT DISTINCT ON \("scope"\)\s+"scope", "value", "actorKind",\s+floor\(extract\(epoch FROM "createdAt"\) \* 1000\)::bigint AS "createdAtEpochMs",\s+floor\(extract\(epoch FROM max\("createdAt"\) FILTER \(\s+WHERE "reasonCode" = 'cleanup_latch' AND "actorKind" = 'system'\s+\) OVER \(PARTITION BY "scope"\)\) \* 1000\)::bigint AS "newestCleanupLatchAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+ORDER BY "scope", "sequence" DESC/,
   );
   // A failed statement is not caught: it has aborted the caller's transaction.
   await assert.rejects(readDecisionMakerSwitchesWithBoundariesOrThrow(recordingTx({ failRead: true }).tx), /relation does not exist/);
@@ -650,8 +657,13 @@ test("an instance with no event has no boundary; a row the CHECKs could not have
   assert.deepEqual(decisionMakerSwitchReadFromRows([]), {
     state: { killSwitch: false, instances: { "decision-maker-openai": "off", "decision-maker-anthropic": "off" } },
     newest: { "decision-maker-openai": null, "decision-maker-anthropic": null },
+    cleanupLatchedAtMs: { "decision-maker-openai": null, "decision-maker-anthropic": null },
   });
-  const unreadable = { state: unreadableDecisionMakerSwitches(), newest: { "decision-maker-openai": null, "decision-maker-anthropic": null } };
+  const unreadable = {
+    state: unreadableDecisionMakerSwitches(),
+    newest: { "decision-maker-openai": null, "decision-maker-anthropic": null },
+    cleanupLatchedAtMs: { "decision-maker-openai": null, "decision-maker-anthropic": null },
+  };
   for (const rows of [
     null,
     [{ scope: "decision-maker-openai", value: "proposal" }],
@@ -662,6 +674,12 @@ test("an instance with no event has no boundary; a row the CHECKs could not have
     [at({ scope: "decision-maker-openai", value: "autonomous" })],
     // And one bad boundary spoils a good state.
     [at({ scope: "kill_switch", value: "off" }), at({ scope: "decision-maker-anthropic", value: "proposal" }, 1n, "robot")],
+    // Stage S2-2a3: the cleanup latch clock is in every row, an epoch millisecond, and only on an instance.
+    [{ ...at({ scope: "decision-maker-openai", value: "proposal" }), newestCleanupLatchAtEpochMs: undefined }],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, 5n, "human", "4")],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, 5n, "human", -1n)],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, 5n, "human", 2n ** 60n)],
+    [at({ scope: "kill_switch", value: "off" }, 5n, "human", 4n)],
   ]) {
     assert.deepEqual(decisionMakerSwitchReadFromRows(rows), unreadable, JSON.stringify(rows, (_, v) => (typeof v === "bigint" ? String(v) : v)));
   }

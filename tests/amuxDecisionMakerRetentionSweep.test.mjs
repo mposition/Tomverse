@@ -237,7 +237,7 @@ test("§5's cleanup latch check comes before §8's for each instance, is counted
     const { deps, calls } = fakeDeps({
       answers: {
         "cleanupLatch:decision-maker-anthropic": { latched: true, event: { eventId: "e" } },
-        "cleanupLatch:decision-maker-openai": { latched: false, reason: "settled" },
+        "cleanupLatch:decision-maker-openai": { latched: false, reason: "latched" },
       },
     });
     const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));

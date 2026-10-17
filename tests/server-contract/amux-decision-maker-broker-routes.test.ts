@@ -129,7 +129,7 @@ const reset = (changes: Partial<World> = {}) => {
     storeError: null,
     latchResult: { latched: false, reason: "no_streak" },
     latchError: null,
-    cleanupLatchResult: { latched: false, reason: "settled" },
+    cleanupLatchResult: { latched: false, reason: "latched" },
     cleanupLatchError: null,
     internalErrors: [],
     logged: [],
@@ -914,7 +914,7 @@ test("a cleanup report recorded or found runs §5's latch check in a boundary of
     ],
   } as const;
   for (const [storeResult, answer] of Object.values(answers)) {
-    for (const cleanupLatchResult of [{ latched: true, event: LATCH_EVENT }, { latched: false, reason: "settled" }, { latched: false, reason: "no_cleanup_unknown" }]) {
+    for (const cleanupLatchResult of [{ latched: true, event: LATCH_EVENT }, { latched: false, reason: "latched" }, { latched: false, reason: "no_cleanup_unknown" }]) {
       reset({ storeResult, cleanupLatchResult });
       const response = await POST(post(route, route.body));
       assert.equal(response.status, 200);

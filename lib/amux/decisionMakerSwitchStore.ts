@@ -91,14 +91,25 @@ export async function readDecisionMakerSwitches(
  * writes, so what is read here is still the newest when it commits. A row the
  * mapping does not accept is the unreadable read; a statement that fails is
  * not caught, as above.
+ *
+ * Since stage S2-2a3 each row also carries the database clock of its scope's
+ * newest system `cleanup_latch`, a window over the same scan: the only event
+ * that settles §5's `cleanup_unknown` report (review r-20261017-115136-888d76
+ * -- a person's ordinary mode change does not). It rides in this statement
+ * because a routing already sends §9's 12 with setup and fence.
  */
 export async function readDecisionMakerSwitchesWithBoundariesOrThrow(
   client: SwitchReader,
 ): Promise<DecisionMakerSwitchRead> {
-  const rows = await client.$queryRaw<Array<{ scope: string; value: string; actorKind: string; createdAtEpochMs: bigint }>>`
+  const rows = await client.$queryRaw<
+    Array<{ scope: string; value: string; actorKind: string; createdAtEpochMs: bigint; newestCleanupLatchAtEpochMs: bigint | null }>
+  >`
     SELECT DISTINCT ON ("scope")
       "scope", "value", "actorKind",
-      floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"
+      floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs",
+      floor(extract(epoch FROM max("createdAt") FILTER (
+        WHERE "reasonCode" = 'cleanup_latch' AND "actorKind" = 'system'
+      ) OVER (PARTITION BY "scope")) * 1000)::bigint AS "newestCleanupLatchAtEpochMs"
     FROM "AmuxDecisionMakerSwitchEvent"
     ORDER BY "scope", "sequence" DESC
   `;

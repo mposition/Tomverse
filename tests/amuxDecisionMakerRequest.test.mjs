@@ -1281,7 +1281,7 @@ const recordingTx = ({
         // Each scope's newest event carries its actor and clock: a person's, a minute ago, unless a row says otherwise.
         return failSwitchRead
           ? Promise.reject(new Error("switch read failed"))
-          : Promise.resolve(switches.map((row) => ({ actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000), ...row })));
+          : Promise.resolve(switches.map((row) => ({ actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000), newestCleanupLatchAtEpochMs: null, ...row })));
       }
       if (sql.includes('LEFT JOIN "AmuxDecisionMakerRequest" r')) {
         return Promise.resolve([existing[0] ? { dbNowEpochMs: BigInt(NOW), ...existing[0] } : { ...NO_REQUEST, dbNowEpochMs: BigInt(NOW) }]);
@@ -1404,7 +1404,9 @@ const NEWEST_REPORT_IN_READ = /\(\s+SELECT floor\(extract\(epoch FROM max\(c\."c
 // §5's latch check reads that clock alone.
 const CLEANUP_REPORT_READ = /^\s+SELECT floor\(extract\(epoch FROM max\(c\."createdAt"\)\) \* 1000\)::bigint AS "newestCleanupUnknownAtEpochMs"\s+FROM "AmuxDecisionMakerRequestEvent" c\s+WHERE c\."kind" = 'cleanup_unknown'\s+AND c\."instance" = \$\s+$/;
 // The ledger's switch read (since 2026-10-17 with each scope's newest actor and clock).
-const SWITCH_READ = /SELECT DISTINCT ON \("scope"\)\s+"scope", "value", "actorKind",\s+floor\(extract\(epoch FROM "createdAt"\) \* 1000\)::bigint AS "createdAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent"/;
+// Since stage S2-2a3 it also carries each scope's newest system cleanup latch, the one event that settles
+// a cleanup report (review r-20261017-115136-888d76).
+const SWITCH_READ = /SELECT DISTINCT ON \("scope"\)\s+"scope", "value", "actorKind",\s+floor\(extract\(epoch FROM "createdAt"\) \* 1000\)::bigint AS "createdAtEpochMs",\s+floor\(extract\(epoch FROM max\("createdAt"\) FILTER \(\s+WHERE "reasonCode" = 'cleanup_latch' AND "actorKind" = 'system'\s+\) OVER \(PARTITION BY "scope"\)\) \* 1000\)::bigint AS "newestCleanupLatchAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent"/;
 
 test("the reads are one statement each", async () => {
   {
@@ -2355,44 +2357,45 @@ test("the latch check runs in a boundary of its own: the check at its largest, w
 // §5's cleanup report and latch (stage S2-2a3)
 // ---------------------------------------------------------------------------
 
-test("§5: a report after the instance's newest switch event is owed; its latch or a person's change after it settles it", () => {
-  const at = (createdAtMs, actorKind) => ({ actorKind, createdAtMs });
-  const decide = (newestEvent, newestCleanupUnknownAtMs) => dmCleanupLatchDecision({ newestEvent, newestCleanupUnknownAtMs });
+test("§5: a report is owed until a cleanup latch at or after it; nothing else settles it", () => {
+  const decide = (cleanupLatchedAtMs, newestCleanupUnknownAtMs) => dmCleanupLatchDecision({ cleanupLatchedAtMs, newestCleanupUnknownAtMs });
   assert.deepEqual(decide(null, null), { latch: false, reason: "no_cleanup_unknown" });
-  assert.deepEqual(decide(at(NOW, "human"), null), { latch: false, reason: "no_cleanup_unknown" });
-  // With no switch event any report is owed.
+  assert.deepEqual(decide(NOW, null), { latch: false, reason: "no_cleanup_unknown" });
+  // With no cleanup latch at all any report is owed -- whatever a person changed since
+  // (review r-20261017-115136-888d76): the person's changes are not an input.
   assert.deepEqual(decide(null, NOW), { latch: true });
-  assert.deepEqual(decide(at(NOW - 1, "human"), NOW), { latch: true });
-  // A report after a latch of another cause is owed: a second cause is a second record.
-  assert.deepEqual(decide(at(NOW - 1, "system"), NOW), { latch: true });
-  // Its own latch, or a person's change after it -- a release included -- settles it: sent
-  // again, the same report never latches twice.
-  assert.deepEqual(decide(at(NOW + 1, "system"), NOW), { latch: false, reason: "settled" });
-  assert.deepEqual(decide(at(NOW + 1, "human"), NOW), { latch: false, reason: "settled" });
-  // In the same millisecond a person's change does not settle it (the side that latches sooner),
-  // and a system latch does (the report's own latch is not written twice).
-  assert.deepEqual(decide(at(NOW, "human"), NOW), { latch: true });
-  assert.deepEqual(decide(at(NOW, "system"), NOW), { latch: false, reason: "settled" });
-  for (const bad of [-1, 1.5, "1", 1n, undefined, {}]) assert.equal(decide(null, bad), null, String(bad));
+  // A cleanup latch from before the report is an earlier report's.
+  assert.deepEqual(decide(NOW - 1, NOW), { latch: true });
+  // Its own latch settles it, including one in the report's own millisecond, so the same report sent
+  // again -- or after the operator released that latch -- never latches twice.
+  assert.deepEqual(decide(NOW + 1, NOW), { latch: false, reason: "latched" });
+  assert.deepEqual(decide(NOW, NOW), { latch: false, reason: "latched" });
+  for (const bad of [-1, 1.5, "1", 1n, undefined, {}]) {
+    assert.equal(decide(null, bad), null, `report ${String(bad)}`);
+    assert.equal(decide(bad, NOW), null, `latch ${String(bad)}`);
+  }
 });
 
 test("§5 before §8: the latch an owed report holds the instance off for comes first", () => {
   const person = { actorKind: "human", createdAtMs: NOW - 10 };
   const latched = { actorKind: "system", createdAtMs: NOW - 10 };
-  const owed = (resultKindsNewestFirst, newestCleanupUnknownAtMs, newestEvent = person) =>
-    dmOwedLatchReason({ newestEvent, resultKindsNewestFirst, newestCleanupUnknownAtMs });
+  const owed = (resultKindsNewestFirst, newestCleanupUnknownAtMs, newestEvent = person, cleanupLatchedAtMs = null) =>
+    dmOwedLatchReason({ newestEvent, cleanupLatchedAtMs, resultKindsNewestFirst, newestCleanupUnknownAtMs });
   assert.deepEqual(owed([], null), { reason: null });
   assert.deepEqual(owed([FAILURE, FAILURE, FAILURE], null), { reason: "validation_latch" });
   assert.deepEqual(owed([], NOW), { reason: "cleanup_latch" });
   assert.deepEqual(owed([FAILURE, FAILURE, FAILURE], NOW), { reason: "cleanup_latch" });
-  // A report from before the newest event owes nothing.
-  assert.deepEqual(owed([], NOW - 20), { reason: null });
-  // Latched already: the run is not owed again, a later report is.
+  // A report from before a person's newest change is still owed (review r-20261017-115136-888d76).
+  assert.deepEqual(owed([], NOW - 20), { reason: "cleanup_latch" });
+  // One its own cleanup latch followed owes nothing.
+  assert.deepEqual(owed([], NOW - 20, latched, NOW - 10), { reason: null });
+  // Latched already for §8: the run is not owed again, a report the latch did not follow is.
   assert.deepEqual(owed([FAILURE, FAILURE, FAILURE], null, latched), { reason: null });
   assert.deepEqual(owed([FAILURE, FAILURE, FAILURE], NOW, latched), { reason: "cleanup_latch" });
   // Either input unreadable is unreadable.
   assert.equal(owed([FAILURE, "autonomous"], null), null);
   assert.equal(owed([], "soon"), null);
+  assert.equal(owed([], NOW, person, "soon"), null);
 });
 
 for (const [label, key] of [
@@ -2429,19 +2432,29 @@ for (const [label, key] of [
       assert.deepEqual(due.sent.at(-1).values, [latched.event.eventId, "decision-maker-anthropic", "cleanup_latch", "audit-row-1"]);
       assert.equal(latched.latched, true);
 
-      // Not due: no report, or one its latch or a person's release already followed.
+      // Not due: no report, or one its own cleanup latch followed -- that latch standing, in the report's
+      // own millisecond, or released by a person since.
       for (const [options, reason] of [
         [{}, "no_cleanup_unknown"],
-        [{ cleanupAt: BigInt(NOW - 120_000) }, "settled"],
         [
           {
             switches: [
               { scope: "kill_switch", value: "off" },
-              { scope: OPENAI, value: "off", actorKind: "system", createdAtEpochMs: BigInt(NOW) },
+              { scope: OPENAI, value: "off", actorKind: "system", createdAtEpochMs: BigInt(NOW), newestCleanupLatchAtEpochMs: BigInt(NOW) },
             ],
             cleanupAt: BigInt(NOW),
           },
-          "settled",
+          "latched",
+        ],
+        [
+          {
+            switches: [
+              { scope: "kill_switch", value: "off" },
+              { scope: OPENAI, value: "proposal", actorKind: "human", createdAtEpochMs: BigInt(NOW), newestCleanupLatchAtEpochMs: BigInt(NOW - 10) },
+            ],
+            cleanupAt: BigInt(NOW - 20),
+          },
+          "latched",
         ],
       ]) {
         const { tx, sent } = recordingTx(options);
@@ -2506,7 +2519,14 @@ test("§5: while a report's latch is owed, a routing goes to the operator as ins
   assert.deepEqual([routed.route, routed.instance, routed.refusalCodes], ["operator", OPENAI, ["instance_off"]]);
   // Nothing more than any routing: the report rides in the throughput statement.
   assert.deepEqual(kindsOf(owed.sent).slice(0, 4), ["execute", "query", "query", "query"]);
-  const settled = recordingTx({ cleanupAt: BigInt(NOW - 120_000) });
+  // Its own cleanup latch followed it, and a person released that latch: nothing is held.
+  const settled = recordingTx({
+    switches: [
+      { scope: "kill_switch", value: "off" },
+      { scope: OPENAI, value: "proposal", actorKind: "human", createdAtEpochMs: BigInt(NOW), newestCleanupLatchAtEpochMs: BigInt(NOW - 1) },
+    ],
+    cleanupAt: BigInt(NOW - 1),
+  });
   assert.equal((await recordDecisionMakerRequest(settled.tx, { binding: routingBinding(), card: routedCard(), keyRing: RING })).route, "dm_proposal");
   // Another instance is not held by it.
   const other = recordingTx({ cleanupAt: BigInt(NOW - 1) });
@@ -2573,4 +2593,71 @@ test("the cleanup latch check runs in a boundary of its own: the check at its la
   for (const name of ["decisionMakerCleanupLatch", "decisionMakerCleanupUnknown"]) {
     assert.ok(AMUX_DB_BOUNDARIES[name].prismaCallCeiling <= 12, name);
   }
+});
+
+// Review r-20261017-115136-888d76 (major): only the report's own cleanup latch settles it. A person's
+// ordinary mode change after the report -- the same mode saved again, off and back to proposal -- is not
+// that latch, and leaves it owed.
+const AFTER_REPORT = NOW;
+const REPORT_AT = NOW - 1;
+/** The report at REPORT_AT; the operator saved the instance's mode at AFTER_REPORT; `latchedAt` is its newest cleanup latch. */
+const savedAfterReport = (latchedAt = null, extra = {}) => ({
+  switches: [
+    { scope: "kill_switch", value: "off" },
+    { scope: OPENAI, value: "proposal", actorKind: "human", createdAtEpochMs: BigInt(AFTER_REPORT), newestCleanupLatchAtEpochMs: latchedAt },
+    { scope: "decision-maker-anthropic", value: "proposal" },
+  ],
+  cleanupAt: BigInt(REPORT_AT),
+  ...extra,
+});
+
+test("§5 review r-20261017-115136-888d76: a mode saved after a report leaves its latch owed -- a routing and an intent refuse, the check latches", async () => {
+  // A routing goes to the operator as instance_off.
+  const routing = recordingTx(savedAfterReport());
+  const routed = await recordDecisionMakerRequest(routing.tx, { binding: routingBinding(), card: routedCard(), keyRing: RING });
+  assert.deepEqual([routed.route, routed.instance, routed.refusalCodes], ["operator", OPENAI, ["instance_off"]]);
+
+  // An intent sends nothing and writes the report's latch.
+  const intent = recordingTx(savedAfterReport(null, { state: STATES.assigned }));
+  const refused = await recordDecisionMakerTransmitIntent(intent.tx, {
+    requestId: REQUEST_ID,
+    instance: OPENAI,
+    transmission: { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B },
+    requireLeaseAt: () => assert.fail("no lease for a refused intent"),
+  });
+  assert.deepEqual([refused.recorded, refused.reason], [false, "instance_off"]);
+  assert.ok(!intent.sent.some((statement) => statement.sql?.includes('INSERT INTO "AmuxDecisionMakerRequestEvent"')));
+  assert.equal(auditOf(intent.sent).metadata.reason_code, "cleanup_latch");
+
+  // The check -- the route's or the sweep's -- writes it.
+  const check = recordingTx(savedAfterReport());
+  const latched = await recordDecisionMakerCleanupLatch(check.tx, { instance: OPENAI });
+  assert.equal(latched.latched, true);
+  assert.equal(auditOf(check.sent).metadata.reason_code, "cleanup_latch");
+
+  // A latch of another cause after the report is not the report's own either.
+  const validation = recordingTx(
+    savedAfterReport(null, {
+      switches: [
+        { scope: "kill_switch", value: "off" },
+        { scope: OPENAI, value: "off", actorKind: "system", createdAtEpochMs: BigInt(AFTER_REPORT), newestCleanupLatchAtEpochMs: null },
+      ],
+    }),
+  );
+  assert.equal((await recordDecisionMakerCleanupLatch(validation.tx, { instance: OPENAI })).latched, true);
+});
+
+test("§5 review r-20261017-115136-888d76: the report's own latch settles it, and a release after that latch reopens nothing", async () => {
+  // The report's latch at the report's millisecond or after it, then a person's release: nothing is owed,
+  // so a routing reaches the DM and a resend's check latches nothing.
+  for (const latchedAt of [BigInt(REPORT_AT), BigInt(REPORT_AT + 1)]) {
+    const routing = recordingTx(savedAfterReport(latchedAt));
+    assert.equal((await recordDecisionMakerRequest(routing.tx, { binding: routingBinding(), card: routedCard(), keyRing: RING })).route, "dm_proposal");
+    const check = recordingTx(savedAfterReport(latchedAt));
+    assert.deepEqual(await recordDecisionMakerCleanupLatch(check.tx, { instance: OPENAI }), { latched: false, reason: "latched" });
+    assert.deepEqual(kindsOf(check.sent), ["execute", "query", "query"]);
+  }
+  // A cleanup latch from before the report is an earlier report's: this one is owed.
+  const earlier = recordingTx(savedAfterReport(BigInt(REPORT_AT - 1)));
+  assert.equal((await recordDecisionMakerCleanupLatch(earlier.tx, { instance: OPENAI })).latched, true);
 });

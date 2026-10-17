@@ -971,43 +971,49 @@ export const dmSwitchInputWithOwedLatch = <T extends { killSwitch: boolean | nul
 
 export type DmCleanupLatchDecision =
   | { latch: true }
-  | { latch: false; reason: "no_cleanup_unknown" | "settled" };
+  | { latch: false; reason: "no_cleanup_unknown" | "latched" };
 
 /**
  * §5: "지웠는지 확인하지 못하면 cleanup_unknown으로 두고 그 인스턴스를 off로
  * latch한다" -- whether the instance's newest `cleanup_unknown` report
  * latches it now.
  *
- * - A report after the instance's newest switch event is owed: no latch and
- *   no person's change has followed it. With no switch event at all, any
- *   report is owed.
- * - A report at or before the newest event is settled: a latch was written
- *   after it, or a person changed the instance after it -- a release of the
- *   latch included -- which, as for §8's count, starts afresh. So the same
- *   report sent again, after a response was lost or after the operator
- *   released its latch, never latches the instance a second time.
- * - Unlike §8's count, a report after a latch of another cause is owed: the
- *   second cause is a second record, and the operator releases both.
- * - The clocks are the database's milliseconds. A report in the same
- *   millisecond as the newest event is owed when that event is a person's --
- *   the side that latches sooner -- and settled when it is the system's, so a
- *   latch written in the report's own millisecond is not written twice.
+ * - The one event that settles a report is the system's `cleanup_latch` of
+ *   the same instance at or after it. A person's release can only follow that
+ *   latch (the switch guard makes the first change after a latch
+ *   `amux.decision.latch_release`), so it is settled as well. Nothing else
+ *   settles it: not a person's ordinary mode change -- the same mode saved
+ *   again, off and back to proposal (review r-20261017-115136-888d76: the
+ *   latch §5 requires would otherwise be dropped in the time between the
+ *   report's commit and the latch's own transaction) -- and not a latch of
+ *   another cause, after which the report is a second cause and a second
+ *   record.
+ * - A report is one per request, so the same report sent again -- after a
+ *   lost response, or after the operator released its latch -- is the same
+ *   event, at or before its latch, and never latches the instance twice. A
+ *   later request's report is a new one and is owed until a latch follows it.
+ * - The clocks are the database's milliseconds. A cleanup latch in the
+ *   report's own millisecond settles it: the latch is written after the
+ *   report commits, so that latch is the report's own, and counting it as not
+ *   would latch again after the operator released it.
  *
- * `newestCleanupUnknownAtMs` is what the store read: the database clock of
- * the instance's newest report, or null when it has none. Anything else is
- * unreadable (null), and nothing is latched on it.
+ * `cleanupLatchedAtMs` is the database clock of the instance's newest
+ * `cleanup_latch`, or null when it has none (the switch store's read);
+ * `newestCleanupUnknownAtMs` the clock of its newest report, or null (the
+ * ledger's). Anything else is unreadable (null), and nothing is latched on it.
  */
 export const dmCleanupLatchDecision = (input: {
-  newestEvent: { actorKind: "human" | "system"; createdAtMs: number } | null;
+  cleanupLatchedAtMs: unknown;
   newestCleanupUnknownAtMs: unknown;
 }): DmCleanupLatchDecision | null => {
+  const isClock = (value: unknown): value is number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
   const reportedAtMs = input.newestCleanupUnknownAtMs;
+  const latchedAtMs = input.cleanupLatchedAtMs;
+  if ((reportedAtMs !== null && !isClock(reportedAtMs)) || (latchedAtMs !== null && !isClock(latchedAtMs))) return null;
   if (reportedAtMs === null) return { latch: false, reason: "no_cleanup_unknown" };
-  if (typeof reportedAtMs !== "number" || !Number.isSafeInteger(reportedAtMs) || reportedAtMs < 0) return null;
-  const newest = input.newestEvent;
-  if (newest === null || reportedAtMs > newest.createdAtMs) return { latch: true };
-  if (reportedAtMs === newest.createdAtMs && newest.actorKind === "human") return { latch: true };
-  return { latch: false, reason: "settled" };
+  if (latchedAtMs === null || reportedAtMs > latchedAtMs) return { latch: true };
+  return { latch: false, reason: "latched" };
 };
 
 /**
@@ -1019,6 +1025,7 @@ export const dmCleanupLatchDecision = (input: {
  */
 export const dmOwedLatchReason = (input: {
   newestEvent: { actorKind: "human" | "system"; createdAtMs: number } | null;
+  cleanupLatchedAtMs: unknown;
   resultKindsNewestFirst: readonly unknown[];
   newestCleanupUnknownAtMs: unknown;
 }): { reason: DmSwitchLatchReason | null } | null => {

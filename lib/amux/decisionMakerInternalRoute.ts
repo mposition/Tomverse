@@ -92,8 +92,9 @@ export const settleDmValidationLatch = async (instance: unknown): Promise<DmLatc
  * be written is logged by its code and stays owed: a routing and a
  * transmission intent treat the instance as off while it is owed (the intent
  * also writes it), and the next check -- the same report sent again, or the
- * maintenance sweep's within fifteen minutes -- writes it. The report alone
- * decides, so it is latched once whatever the number of checks. Never throws.
+ * maintenance sweep's within fifteen minutes -- writes it, whatever mode a
+ * person saved meanwhile. Only the report's own latch settles it, so it is
+ * latched once whatever the number of checks. Never throws.
  */
 export const settleDmCleanupLatch = async (instance: unknown): Promise<DmLatchSettlement> => {
   try {

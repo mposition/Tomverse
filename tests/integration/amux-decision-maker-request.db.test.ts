@@ -1935,7 +1935,7 @@ test("§5: a report latches its instance once -- sent again, checked again or af
 
   // Sent again after a lost answer: the recorded report, and the check owes nothing.
   assert.equal((await reportCleanup(requestId)).status, "existing");
-  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "settled" });
+  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "latched" });
   assert.equal((await systemLatchesOf(OPENAI)).length, 1);
 
   // Released by a person: the same report sent late latches nothing.
@@ -1943,7 +1943,7 @@ test("§5: a report latches its instance once -- sent again, checked again or af
   assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
   await pause();
   assert.equal((await reportCleanup(requestId)).status, "existing");
-  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "settled" });
+  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "latched" });
   assert.equal((await readDecisionMakerSwitches(prisma)).instances[OPENAI], "proposal");
   assert.equal((await systemLatchesOf(OPENAI)).length, 1);
   // The other instance has no report.
@@ -1978,7 +1978,7 @@ test("§5: between a report and its latch, a routing goes to the operator and an
   assert.deepEqual((await rowsOf(pending)).map((row) => row.kind), ["assign"]);
   assert.deepEqual((await systemLatchesOf(OPENAI)).map((row) => row.reasonCode), ["cleanup_latch"]);
   // The check that follows owes nothing: one latch.
-  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "settled" });
+  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "latched" });
 
   // Released, then a validation run and a new report both owed: the report's latch is the one written,
   // and §8's check finds the instance latched.
@@ -2032,4 +2032,51 @@ test("§5: each boundary is its operation at its largest; one call fewer refuses
     assert.equal(written.latched, true);
     assert.equal((await switchEventsOf(OPENAI)).length, before + 1);
   });
+});
+
+// Review r-20261017-115136-888d76 (major): only the report's own cleanup latch settles it. A person's
+// ordinary mode change between the report's commit and its latch -- the same mode saved again, or off
+// and back to proposal -- is not that latch and must not drop it.
+test("§5 review r-20261017-115136-888d76: a mode saved after the report leaves its latch owed; routing and intent refuse, and the latch is written", async () => {
+  const pending = await STATE_BUILDERS.assigned!();
+  const reported = await transmittedFor();
+  await reportCleanup(reported);
+  // The latch check after the report did not commit, and the operator saves the instance's mode again.
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.mode");
+  await pause();
+  assert.deepEqual(await systemLatchesOf(OPENAI), []);
+
+  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { keyRing: RING, binding: binding(), card: CARD }));
+  assert.deepEqual([routed.route, routed.refusalCodes], ["operator", ["instance_off"]]);
+  const intent = await prisma.$transaction((tx) =>
+    recordDecisionMakerTransmitIntent(tx, { requestId: pending, instance: OPENAI, transmission: TRANSMISSION_NONE, requireLeaseAt: noLease }),
+  );
+  assert.deepEqual([intent.recorded, intent.recorded ? null : intent.reason], [false, "instance_off"]);
+  assert.deepEqual((await rowsOf(pending)).map((row) => row.kind), ["assign"]);
+  assert.deepEqual((await systemLatchesOf(OPENAI)).map((row) => row.reasonCode), ["cleanup_latch"]);
+  assert.equal((await readDecisionMakerSwitches(prisma)).instances[OPENAI], "off");
+
+  // Latched: the check owes nothing more; released, a late resend of the same report latches nothing.
+  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "latched" });
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+  await pause();
+  assert.equal((await reportCleanup(reported)).status, "existing");
+  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "latched" });
+  assert.equal((await readDecisionMakerSwitches(prisma)).instances[OPENAI], "proposal");
+  assert.equal((await systemLatchesOf(OPENAI)).length, 1);
+});
+
+test("§5 review r-20261017-115136-888d76: off and back to proposal after a report is not its latch; the sweep's check writes it", async () => {
+  await reportCleanup(await transmittedFor());
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "off")).action, "amux.decision.mode");
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.mode");
+  await pause();
+  assert.equal((await decisionMakerRetentionSweepDeps().cleanupLatch(OPENAI)).latched, true);
+  assert.deepEqual((await systemLatchesOf(OPENAI)).map((row) => row.reasonCode), ["cleanup_latch"]);
+  assert.equal((await readDecisionMakerSwitches(prisma)).instances[OPENAI], "off");
+  assert.equal((await decisionMakerRetentionSweepDeps().cleanupLatch(OPENAI)).latched, false);
 });

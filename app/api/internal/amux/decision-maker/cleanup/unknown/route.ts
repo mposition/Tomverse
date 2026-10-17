@@ -35,8 +35,10 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * §5 then latches the instance off: once the report is recorded or found, the
  * route runs the cleanup latch check in a second boundary transaction
  * (`settleDmCleanupLatch()`), which can only turn the instance off and does so
- * once per report -- a report the latch or a person's release already
- * followed owes nothing. The answer is the report's whatever that check does;
+ * once per report -- only the report's own `cleanup_latch` settles it, so a
+ * resend after that latch or its release owes nothing, while a person's
+ * ordinary mode change before it does not settle it (review
+ * r-20261017-115136-888d76). The answer is the report's whatever that check does;
  * a latch that could not be written stays owed, and a routing or a
  * transmission intent of the instance is refused meanwhile.
  *

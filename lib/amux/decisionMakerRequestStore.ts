@@ -164,19 +164,25 @@ const readSwitchesForWrite = async (tx: Prisma.TransactionClient): Promise<Decis
 };
 
 /**
- * §5, §8: the latch `instance` owes, if any -- §5's when a `cleanup_unknown`
- * report stands after its newest switch event, otherwise §8's when a run of
- * three validation failures does (`dmOwedLatchReason()`) -- on what the
- * caller read. A kind the ledger could not hold, or a report clock it could
- * not have written, throws `state_unreadable`, and nothing is written: an
- * owed latch is never guessed away.
+ * §5, §8: the latch `instance` owes, if any -- §5's when its newest
+ * `cleanup_unknown` report has no `cleanup_latch` at or after it, otherwise
+ * §8's when a run of three validation failures stands since its newest switch
+ * event (`dmOwedLatchReason()`) -- on what the caller read. A kind the ledger
+ * could not hold, or a clock the stores could not have written, throws
+ * `state_unreadable`, and nothing is written: an owed latch is never guessed
+ * away.
  */
 const owedLatch = (
   read: DecisionMakerSwitchRead,
   instance: DmInstanceScope,
   inputs: { resultKindsNewestFirst: unknown[]; newestCleanupUnknownAtMs: number | null },
 ): DmSwitchLatchReason | null => {
-  const owed = dmOwedLatchReason({ newestEvent: read.newest[instance], ...inputs });
+  const owed = dmOwedLatchReason({
+    newestEvent: read.newest[instance],
+    cleanupLatchedAtMs: read.cleanupLatchedAtMs[instance],
+    resultKindsNewestFirst: inputs.resultKindsNewestFirst,
+    newestCleanupUnknownAtMs: inputs.newestCleanupUnknownAtMs,
+  });
   if (owed === null) throw new DecisionMakerRequestWriteError("state_unreadable");
   return owed.reason;
 };
@@ -629,9 +635,10 @@ type ExistingRequestRow = Record<string, unknown> & {
  * between its third failure and its latch. The result kinds ride in the
  * throughput statement. A result kind the ledger could not hold throws
  * `state_unreadable` and writes nothing. §5 (stage S2-2a3): so is an instance
- * whose newest `cleanup_unknown` report stands after its newest switch event,
- * between the report and its latch; the report's clock rides in the same
- * statement.
+ * whose newest `cleanup_unknown` report has no `cleanup_latch` at or after
+ * it, between the report and its latch -- a person's mode change in between
+ * does not settle it (review r-20261017-115136-888d76); the report's clock
+ * rides in the throughput statement and the latch's in the switch read.
  *
  * Statements: 1 lock, 1 read (the clock and any request of the card revision)
  * -- 2 for an existing request or a key the ring lacks; then the switch read
@@ -941,9 +948,10 @@ export async function discardDecisionMakerAssignment(
  * one refusal of this function that writes, and only that latch. A result
  * kind the ledger could not hold throws `state_unreadable` and writes nothing.
  * §5 (stage S2-2a3): the same statement reads the instance's newest
- * `cleanup_unknown` report, and a report after its newest switch event owes
- * `cleanup_latch`, which is refused and written the same way -- in place of
- * the validation latch when both are owed (`dmOwedLatchReason()`).
+ * `cleanup_unknown` report, and a report with no `cleanup_latch` at or after
+ * it (the switch read's clock; a person's mode change does not settle it)
+ * owes `cleanup_latch`, which is refused and written the same way -- in
+ * place of the validation latch when both are owed (`dmOwedLatchReason()`).
  *
  * Statements: 1 lock, 1 state read -- 2 for an unknown request or a ledger
  * refusal; then the switch read -- 3 for a switch refusal or a failed read;
@@ -1384,19 +1392,22 @@ export type DecisionMakerCleanupLatchWrite =
   | { latched: false; reason: Extract<DmCleanupLatchDecision, { latch: false }>["reason"] };
 
 /**
- * §5: latches `instance` off when its newest `cleanup_unknown` report stands
- * after its newest switch event (`dmCleanupLatchDecision()`), in the caller's
- * transaction, in this order: the audit chain lock -- which every switch
- * change and every ledger write takes first, so no report and no release
- * commits between the reads and the latch, and two checks of one instance
- * cannot both latch; the switch read with each instance's newest event; the
- * instance's newest report; and then the switch store's latch
- * (`cleanup_latch`), under the instance's own actor.
+ * §5: latches `instance` off when its newest `cleanup_unknown` report has no
+ * `cleanup_latch` at or after it (`dmCleanupLatchDecision()`), in the
+ * caller's transaction, in this order: the audit chain lock -- which every
+ * switch change and every ledger write takes first, so no report and no
+ * latch commits between the reads and the latch, and two checks of one
+ * instance cannot both latch; the switch read with each instance's newest
+ * event and newest cleanup latch; the instance's newest report; and then the
+ * switch store's latch (`cleanup_latch`), under the instance's own actor.
  *
- * The report is the only input, so the same report never latches twice: the
- * latch it causes, or a person's release after it, is the newest switch event
- * from then on. A report after a latch of another cause latches again -- a
- * second cause is a second record (lib/amux/decisionMakerSwitchStore.ts).
+ * Only the report's own latch settles it, so the same report never latches
+ * twice: sent again, or sent again after the operator released the latch, it
+ * is the same event, before that latch. A person's ordinary mode change
+ * between the report and the latch -- the same mode saved again, off and back
+ * -- does not settle it (review r-20261017-115136-888d76), and neither does a
+ * latch of another cause: a second cause is a second record
+ * (lib/amux/decisionMakerSwitchStore.ts).
  *
  * Two callers, each in a boundary transaction of its own: the cleanup route,
  * once a report has committed or was found already recorded
@@ -1422,7 +1433,10 @@ export async function recordDecisionMakerCleanupLatch(
   const switches = await readSwitchesForWrite(tx);
   if (switches.state.killSwitch === null) throw new DecisionMakerRequestWriteError("settings_unreadable");
   const newestCleanupUnknownAtMs = await readDecisionMakerInstanceNewestCleanupUnknown(tx, { instance });
-  const decision = dmCleanupLatchDecision({ newestEvent: switches.newest[instance], newestCleanupUnknownAtMs });
+  const decision = dmCleanupLatchDecision({
+    cleanupLatchedAtMs: switches.cleanupLatchedAtMs[instance],
+    newestCleanupUnknownAtMs,
+  });
   if (decision === null) throw new DecisionMakerRequestWriteError("state_unreadable");
   if (!decision.latch) return { latched: false, reason: decision.reason };
   return { latched: true, event: await latchDecisionMakerInstanceOff(tx, { instance, reason: "cleanup_latch" }) };

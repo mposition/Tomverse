@@ -866,7 +866,7 @@ const recordingTx = ({
       if (sql.includes('AS "open"')) return Promise.resolve([{ open }]);
       // The ledger's switch read carries each scope's newest actor and clock (2026-10-17): a person's, a minute ago.
       if (sql.includes("SELECT DISTINCT ON")) {
-        return Promise.resolve(switches.map((row) => ({ actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000), ...row })));
+        return Promise.resolve(switches.map((row) => ({ actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000), newestCleanupLatchAtEpochMs: null, ...row })));
       }
       if (sql.includes('ORDER BY re."retentionUntil"')) return Promise.resolve(candidates);
       if (sql.includes('FROM "AmuxDecisionMakerBody"')) return Promise.resolve([]);
