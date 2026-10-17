@@ -78,6 +78,22 @@ export async function readMarketingCompetitorsForGenerator(
 }
 
 /**
+ * Every competitor id the registry holds, in any status, so A3 proposes only
+ * what it has not proposed before. A rejected id is in the list on purpose: a
+ * person's rejection is an answer, and asking again is the generator reopening
+ * it.
+ *
+ * All of them, with no limit: a list cut at some size would drop the oldest
+ * answers first, and those are the ones A3 would then ask about again. The
+ * context route's byte limit is what bounds the answer, and it refuses rather
+ * than truncates.
+ */
+export async function readKnownMarketingCompetitorIds(db: CompetitorReader): Promise<string[]> {
+  const rows = await db.marketingCompetitor.findMany({ orderBy: { id: "asc" }, select: { id: true } });
+  return rows.map((row) => row.id);
+}
+
+/**
  * Store A3's candidates as proposals. A competitor id the registry already has
  * -- proposed, approved, rejected or retired -- is left as it is: A3 cannot
  * reopen a person's rejection or rename an approved competitor by proposing
