@@ -14,6 +14,7 @@ import {
   readApprovedMarketingCompetitorHosts,
   readMarketingCompetitorsForGenerator,
 } from "@/lib/marketingCompetitorStore";
+import { runMarketingTransaction, type MarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
 
@@ -42,7 +43,7 @@ const operator = {
   expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
 } as Session;
 
-const tx = <T>(fn: (client: Prisma.TransactionClient) => Promise<T>) => prisma.$transaction(fn);
+const tx = <T>(fn: (client: MarketingTransaction) => Promise<T>) => runMarketingTransaction(prisma, fn);
 const refusedBy = (message: string) => (error: unknown) =>
   error instanceof Error && error.message.includes(message);
 const code = (expected: string) => (error: unknown) => (error as { code?: string }).code === expected;
