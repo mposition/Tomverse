@@ -490,7 +490,7 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   ]);
   const stopPoll = withoutComments(read(
     "app/api/internal/amux/v19/analysis-stop/route.ts"));
-  assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized");
+  assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
   assertBefore(stopPoll, 'process.env[READ_ENV] !== "enabled"');
   assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   const checkoutEvidence = withoutComments(read(
