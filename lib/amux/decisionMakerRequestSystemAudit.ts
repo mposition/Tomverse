@@ -18,8 +18,9 @@ import type { DmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
  * The system audit of the Decision Maker request ledger
  * (docs/policy/amux-decision-maker.md §10): `amux.decision.route` for a
  * request, and `amux.decision.<kind>` for each request event -- by the router
- * for assignment and closing, by the request's own instance for transmission
- * and results. Migration 20261008090100_amux_decision_maker_request_ledger
+ * for assignment and closing, by the request's own instance for transmission,
+ * results and (since stage S2-2a3) §5's cleanup report. Migration
+ * 20261008090100_amux_decision_maker_request_ledger
  * requires exactly that action and actor, in the same transaction, naming the
  * row.
  *
@@ -41,6 +42,7 @@ const EVENT_SUMMARIES: Readonly<Record<DmRequestEventKind, string>> = {
   result_rejected: "Rejected an AMUX Decision Maker result.",
   result_unknown: "Recorded an AMUX Decision Maker result of unknown outcome.",
   stale_close: "Closed a stale AMUX Decision Maker request.",
+  cleanup_unknown: "Recorded an AMUX Decision Maker request cleanup of unknown outcome.",
 };
 
 export const writeDecisionMakerRouteAudit = (

@@ -358,7 +358,9 @@ test("each replaced function is its previous body with only the listed lines cha
 test("the request event table's kinds, instance rule and one closing take a judgment's three kinds", () => {
   const sql = withoutSqlComments(read(MIGRATION));
   const kindCheck = sql.slice(sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"'), sql.indexOf("));", sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"')));
-  assert.deepEqual(quoted(kindCheck), [...DM_LEDGER_EVENT_KINDS]);
+  // The twelve of this stage; stage S2-2a3 adds cleanup_unknown in a CHECK of its own
+  // (tests/amuxDecisionMakerRequest.test.mjs), which check:enum-constraints compares with the list.
+  assert.deepEqual(quoted(kindCheck), DM_LEDGER_EVENT_KINDS.filter((kind) => kind !== "cleanup_unknown"));
   assert.match(sql, /DROP CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check",\n\s+ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"/);
   const instanceKind = sql.slice(sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_instance_kind_check"'), sql.indexOf(") IS TRUE);", sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_instance_kind_check"')) + 11);
   assert.deepEqual(quoted(instanceKind), [...DM_ROUTER_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS]);
@@ -683,6 +685,8 @@ const requestRow = (overrides = {}) => ({
   terminalResultKind: "proposal",
   terminalResultDigest: "c".repeat(64),
   resultUnknown: false,
+  cleanupUnknownEventId: null,
+  cleanupUnknownAtEpochMs: null,
   closingKind: null,
   probedRejection: null,
   ...overrides,

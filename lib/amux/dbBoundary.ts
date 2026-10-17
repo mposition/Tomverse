@@ -414,6 +414,23 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // §5's cleanup report of docs/policy/amux-decision-maker.md, stage S2-2a3
+  // (lock, state, the instance's audit 4, the event: 7, pinned by
+  // tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerCleanupUnknown: {
+    operation: "decision_maker_cleanup_unknown",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // The latch §5's report owes, which the cleanup route runs after the report
+  // and the maintenance sweep runs for each instance (lock, the switches with
+  // each instance's newest event, its newest report, the instance's audit 4,
+  // the switch event: 8, pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerCleanupLatch: {
+    operation: "decision_maker_cleanup_latch",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
   // Stage S2's judgment route: setup + a person's judgment at its largest
   // (an edited confirmation with an integrity key: the audit chain lock, the
   // request state, the switches, the proposal, the administrator audit's 4,
