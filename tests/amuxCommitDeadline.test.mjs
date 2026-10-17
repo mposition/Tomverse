@@ -225,6 +225,12 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // The v19 encrypted read manifest is another independent, audit-bound
   // content table; it does not touch the commit-deadline mechanism.
   "20261017010000_amux_v19_tracked_checkout_read_manifest",
+  // The v19 retention transition changes only the read-manifest body and
+  // external key retirement purpose, without touching commit deadlines.
+  "20261017020000_amux_v19_read_manifest_retention",
+  // The next migration closes an insert-only purged-shape loophole on that
+  // same manifest table; it does not alter commit-deadline evidence.
+  "20261017020100_amux_v19_read_manifest_active_insert_guard",
   // Intake v19 session analysis queue reservation is append-only and bound to
   // the submission transaction; it adds no commit-deadline mechanism.
   "20261017010000_amux_v19_session_analysis_reservation",

@@ -2017,11 +2017,13 @@ domains:
       parentModel: AmuxIdeaSubmission
     inUnifiedExport: unverified
     note: >-
-      The append-only row stores CLI-observed read-file paths as ciphertext under
-      a separate external content key. Its plaintext metadata includes the
-      reference ordinal, fixed commit SHA, file count, and keyed payload digest;
-      the audit contains no paths. The restrictive parent and audit references
-      do not resolve account deletion, key retirement, retention, or export.
+      The row stores CLI-observed read-file paths as ciphertext under a separate
+      external content key. The operator approved deletion of both at the
+      submission's absolute seven-day mark, subject only to a valid legal hold.
+      A dark, bounded purge path retains the reference ordinal, fixed commit
+      SHA, file count, keyed digest, and canonical audit without paths. Scheduler
+      activation, backup deletion evidence, account deletion, and export remain
+      unverified; restrictive parent and audit references remain.
 
   - domain: amuxIdeaSessionAnalysisReservation
     prismaModel: AmuxIdeaSessionAnalysisReservation

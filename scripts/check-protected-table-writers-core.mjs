@@ -677,6 +677,41 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261017020100_amux_v19_read_manifest_active_insert_guard/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The additive trigger DDL rejects an inserted already-purged manifest; it performs no row DML.",
+  },
+  {
+    path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The sole manifest writer locks and reads pinned checkout evidence; its SQL does not modify the evidence row.",
+  },
+  {
+    path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason: "The sole manifest writer uses SQL only to lock the row; guarded insert and purge use Prisma delegates in audited transactions.",
+  },
+  {
+    path: "prisma/migrations/20261017020000_amux_v19_read_manifest_retention/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 5,
+    writeVerbs: 15,
+    reason: "The additive migration changes manifest shape and guard DDL; it performs no manifest row DML.",
+  },
+  {
+    path: "prisma/migrations/20261017020000_amux_v19_read_manifest_retention/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 15,
+    reason: "The retention guard reads a canonical audit row created by the application; the migration writes no audit row.",
+  },
+  {
     path: "prisma/migrations/20261016130000_amux_v52_review_record/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -2933,7 +2968,7 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/amux-v4-activation-preflight.mjs",
-    sha256: "f2a9503f7add087b0b077185aa9561ec43428fdae8f65ced13da2630291599b5",
+    sha256: "e4bae3b801195230c4b8c9e097ce42aae50e14193b9ae81ee1b8f384dd8f8bdf",
     count: 1,
     reason:
       "AMUX v4 activation diagnostic: one pg import; a fixed allowlist of ciphertext/key columns yields counts only inside BEGIN REPEATABLE READ READ ONLY with statement and idle-transaction timeouts. No audit, model call, switch or body write. The S3 operation is a read-only version-listing probe in an unused namespace, not key deletion evidence. Fingerprint is bound to the complete reviewed script.",

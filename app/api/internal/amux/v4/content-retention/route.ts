@@ -15,6 +15,8 @@ import { cancelOverdueAmuxIdeaAnalyses, purgeDueAmuxRawIdeas } from
   "@/lib/amux/ideaRawRetentionService";
 import { notifyDueAmuxRetentionHolds } from
   "@/lib/amux/ideaRetentionHoldNoticeService";
+import { purgeDueAmuxReadManifests } from
+  "@/lib/amux/ideaTrackedCheckoutReadManifestRetention";
 import { purgeDueAmuxV22TaskResults } from
   "@/lib/amux/v22TaskResultRetention";
 
@@ -44,6 +46,7 @@ export async function POST(request: Request): Promise<Response> {
     const holdNotices = await notifyDueAmuxRetentionHolds();
     const cancellation = await cancelOverdueAmuxIdeaAnalyses();
     const raw = await purgeDueAmuxRawIdeas();
+    await purgeDueAmuxReadManifests();
     const analysis = await purgeDueAmuxAnalysisContent();
     const taskResults = amuxV22TaskResultRetentionEnabled(
       process.env[AMUX_V22_TASK_RESULT_RETENTION_ENV])

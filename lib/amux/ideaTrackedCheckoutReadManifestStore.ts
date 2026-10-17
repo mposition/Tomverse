@@ -8,6 +8,9 @@ import { openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { amuxContentUnitKeyId, createAmuxContentUnitKeys,
   loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
+import { AmuxContentRetirementError, recordAmuxContentBodyPurge } from
+  "./ideaContentKeyRetirementService.ts";
+import { amuxIdeaHasActiveRetentionHold } from "./ideaRetentionHoldRead.ts";
 import { prisma } from "../prisma.ts";
 import {
   AMUX_V19_READ_MANIFEST_AUDIT_ACTOR,
@@ -45,6 +48,56 @@ export function amuxTrackedCheckoutReadManifestKeyIdentity(
 ) {
   return { ideaId, purpose: "repository_read_manifest" as const,
     subjectId: manifestId };
+}
+
+export const AMUX_READ_MANIFEST_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function amuxReadManifestDueAt(submittedAt: Date): Date {
+  return new Date(submittedAt.getTime() + AMUX_READ_MANIFEST_RETENTION_MS);
+}
+
+/** The only DB writer of the read-manifest table. Its guarded purge keeps
+ * the count, keyed digest, and immutable original audit. */
+export async function commitAmuxDueReadManifestPurge(tx: Prisma.TransactionClient,
+  manifestId: string): Promise<"purged" | "skipped"> {
+  await tx.$queryRaw`
+    SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+           set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
+  `;
+  await takeAuditChainLock(tx);
+  const found = await tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
+    where: { id: manifestId }, select: { ideaId: true },
+  });
+  if (!found) return "skipped";
+  await tx.$queryRaw`SELECT "id" FROM "AmuxIdeaSubmission"
+    WHERE "id" = ${found.ideaId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT "id" FROM "AmuxIdeaTrackedCheckoutReadManifest"
+    WHERE "id" = ${manifestId} FOR UPDATE`;
+  const row = await tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
+    where: { id: manifestId },
+  });
+  const idea = await tx.amuxIdeaSubmission.findUnique({
+    where: { id: found.ideaId }, select: { submittedAt: true },
+  });
+  const nowRows = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"`;
+  const now = nowRows[0]?.now;
+  if (!row || !idea || !now || row.bodyPurgedAt || !row.ciphertext) return "skipped";
+  if (amuxReadManifestDueAt(idea.submittedAt) > now ||
+      await amuxIdeaHasActiveRetentionHold(tx, row.ideaId, now)) return "skipped";
+  const target = amuxTrackedCheckoutReadManifestKeyIdentity(row.ideaId, row.id);
+  if (row.keyId !== amuxContentUnitKeyId(target) || row.keyVersion !== 1) {
+    throw new AmuxContentRetirementError("integrity_unavailable", target);
+  }
+  await recordAmuxContentBodyPurge(tx, target, now, row.digest, row.digestKeyId);
+  const changed = await tx.amuxIdeaTrackedCheckoutReadManifest.updateMany({
+    where: { id: row.id, ciphertext: { not: null }, bodyPurgedAt: null },
+    data: { ciphertext: null, keyId: null, keyVersion: null, bodyPurgedAt: now },
+  });
+  if (changed.count !== 1) {
+    throw new AmuxContentRetirementError("integrity_unavailable", target);
+  }
+  return "purged";
 }
 
 /** Prepare an independently deletable content key outside the DB transaction.
@@ -141,6 +194,10 @@ export async function readAmuxTrackedCheckoutReadManifestForOwner(
     where: { ideaId, referenceOrdinal, idea: { actorUserId } },
   });
   if (!row) return null;
+  if (row.bodyPurgedAt) return null;
+  if (!row.ciphertext || !row.keyId || !row.keyVersion) {
+    throw new Error("read_manifest_integrity_unavailable");
+  }
   const keys = await loadAmuxContentUnitKeys(
     amuxTrackedCheckoutReadManifestKeyIdentity(row.ideaId, row.id));
   const plain = openAmuxContent({ ciphertext: Buffer.from(row.ciphertext),
