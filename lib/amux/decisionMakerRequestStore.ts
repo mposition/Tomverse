@@ -10,6 +10,7 @@ import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisio
 import {
   DM_ROUTING_BINDING_KEYS,
   DM_STALE_CLOSE_AFTER_MS,
+  DM_VALIDATION_LATCH_WINDOW,
   DM_VENDOR_FOR_INSTANCE,
   dmEventAuditMetadata,
   dmEventRefusal,
@@ -17,6 +18,8 @@ import {
   dmRequestStateFromRow,
   dmTransmitSwitchRefusal,
   dmResultLookup,
+  dmSwitchInputWithOwedLatch,
+  dmValidationLatchDecision,
   parseDmCard,
   dmResultSubmissionOutcome,
   isDmDeadlineResultKind,
@@ -34,6 +37,7 @@ import {
   type DmResultLookup,
   type DmResultRejectionReason,
   type DmTransmitSwitchRefusal,
+  type DmValidationLatchDecision,
 } from "@/lib/amux/decisionMakerRequestCore";
 import {
   writeDecisionMakerEventAudit,
@@ -43,9 +47,14 @@ import {
   DM_INSTANCE_SCOPES,
   dmSwitchRoutingInput,
   isDmInstanceScope,
+  type DecisionMakerSwitchRead,
   type DmInstanceScope,
 } from "@/lib/amux/decisionMakerSwitchCore";
-import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
+import {
+  latchDecisionMakerInstanceOff,
+  readDecisionMakerSwitchesWithBoundariesOrThrow,
+  type DecisionMakerSwitchEventRecord,
+} from "@/lib/amux/decisionMakerSwitchStore";
 
 /**
  * The one module that reads and writes `AmuxDecisionMakerRequest` and
@@ -89,6 +98,19 @@ import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitch
  * order: the audit chain lock, the switch gate (in the triggers), then the
  * per-request or per-scope lock.
  *
+ * Since 2026-10-17 it also decides §8's validation latch, which follows from
+ * the ledger: three validation failures in a row. It decides on its own reads
+ * and the switch store's, and turns the instance off through the switch
+ * store's latch -- it never names the switch table. (§5's report of a request
+ * directory whose deletion could not be confirmed is not here: the request's
+ * `cleanup_unknown` state needs a ledger event kind, and so a migration, of
+ * its own stage.) A latch that is owed but
+ * not yet written already holds the instance off for a routing and a
+ * transmission intent (`dmSwitchInputWithOwedLatch()`): the switch read those
+ * writers take carries each instance's newest event, and the result kinds
+ * since it ride in a statement they already send (the routing) or one more
+ * (the intent), so no question reaches that instance and no card its vendor.
+ *
  * No card text, prompt, proposal or free text is written by it.
  */
 
@@ -123,13 +145,29 @@ export class DecisionMakerRequestWriteError extends Error {
  * intent and result -- a routing with an integrity key would then send 13
  * with the boundary's two, over §9's 12. Rows the switch store could not have
  * written still read as unreadable and are decided as before.
+ *
+ * Since 2026-10-17 the same one statement also carries each instance's newest
+ * switch event, the boundary §8's validation count starts from.
  */
-const readSwitchesForWrite = async (tx: Prisma.TransactionClient) => {
+const readSwitchesForWrite = async (tx: Prisma.TransactionClient): Promise<DecisionMakerSwitchRead> => {
   try {
-    return await readDecisionMakerSwitchesOrThrow(tx);
+    return await readDecisionMakerSwitchesWithBoundariesOrThrow(tx);
   } catch {
     throw new DecisionMakerRequestWriteError("settings_unreadable");
   }
+};
+
+/**
+ * §8: whether `instance` has a latch owed -- a run of three validation
+ * failures since its newest switch event, with no latch since -- on the
+ * result kinds the caller read. A kind the ledger could not hold throws
+ * `state_unreadable`, and nothing is written: an owed latch is never guessed
+ * away.
+ */
+const latchOwed = (read: DecisionMakerSwitchRead, instance: DmInstanceScope, resultKindsNewestFirst: unknown[]) => {
+  const decision = dmValidationLatchDecision({ newestEvent: read.newest[instance], resultKindsNewestFirst });
+  if (decision === null) throw new DecisionMakerRequestWriteError("state_unreadable");
+  return decision.latch;
 };
 
 const safeInteger = (value: unknown, label: string): number => {
@@ -144,30 +182,64 @@ const isoOf = (epochMs: number) => new Date(epochMs).toISOString();
 // Reads
 // ---------------------------------------------------------------------------
 
+const requireSinceMs = (sinceMs: unknown): number => {
+  if (sinceMs !== null && (typeof sinceMs !== "number" || !Number.isSafeInteger(sinceMs) || sinceMs < 0)) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  // The epoch itself when there is no boundary: every result is after it.
+  return sinceMs ?? 0;
+};
+
 /**
- * Requests routed to `instance` for a proposal in the trailing hour and day,
- * by the database clock, in one statement: the throughput input of
- * `routeDmQuestion()` (§3-6). `recordDecisionMakerRequest()` reads it after
- * the audit chain lock, so two routings of the same instance count each other.
+ * What a routing reads of `instance`, in one statement: requests routed to it
+ * for a proposal in the trailing hour and day by the database clock -- the
+ * throughput input of `routeDmQuestion()` (§3-6) -- and, since 2026-10-17,
+ * the kinds of its terminal results recorded at or after `sinceMs` (its newest
+ * switch event's database clock), newest first, at most
+ * DM_VALIDATION_LATCH_WINDOW: whether §8's latch is owed. Both ride in the
+ * statement the routing already sent, so the routing's count is unchanged.
+ * `recordDecisionMakerRequest()` reads it after the audit chain lock, so two
+ * routings of the same instance count each other.
  */
-export async function readDecisionMakerThroughput(
+export async function readDecisionMakerInstanceLoad(
   client: LedgerReader,
-  instance: DmInstanceScope,
-): Promise<{ lastHour: number; lastDay: number }> {
-  if (!isDmInstanceScope(instance)) throw new DecisionMakerRequestWriteError("invalid_input");
-  const rows = await client.$queryRaw<Array<{ lastHour: bigint | number; lastDay: bigint | number }>>`
-    WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS "now")
+  input: { instance: DmInstanceScope; sinceMs: number | null },
+): Promise<{ lastHour: number; lastDay: number; resultKindsNewestFirst: unknown[] }> {
+  if (!isDmInstanceScope(input.instance)) throw new DecisionMakerRequestWriteError("invalid_input");
+  const sinceMs = requireSinceMs(input.sinceMs);
+  const rows = await client.$queryRaw<Array<{ lastHour: bigint | number; lastDay: bigint | number; resultKinds: unknown }>>`
+    WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS "now"),
+    throughput AS MATERIALIZED (
+      SELECT
+        count(*) FILTER (WHERE r."createdAt" > db_clock."now" - INTERVAL '1 hour') AS "lastHour",
+        count(*) AS "lastDay"
+      FROM "AmuxDecisionMakerRequest" r CROSS JOIN db_clock
+      WHERE r."route" = 'dm_proposal'
+        AND r."instance" = ${input.instance}
+        AND r."createdAt" > db_clock."now" - INTERVAL '1 day'
+    )
     SELECT
-      count(*) FILTER (WHERE r."createdAt" > db_clock."now" - INTERVAL '1 hour') AS "lastHour",
-      count(*) AS "lastDay"
-    FROM "AmuxDecisionMakerRequest" r CROSS JOIN db_clock
-    WHERE r."route" = 'dm_proposal'
-      AND r."instance" = ${instance}
-      AND r."createdAt" > db_clock."now" - INTERVAL '1 day'
+      throughput."lastHour",
+      throughput."lastDay",
+      ARRAY(
+        SELECT ev."resultKind"
+        FROM "AmuxDecisionMakerRequestEvent" ev
+        WHERE ev."kind" = 'result'
+          AND ev."instance" = ${input.instance}
+          AND ev."createdAt" >= 'epoch'::timestamptz + ${sinceMs} * INTERVAL '1 millisecond'
+        ORDER BY ev."sequence" DESC
+        LIMIT ${DM_VALIDATION_LATCH_WINDOW}
+      ) AS "resultKinds"
+    FROM throughput
   `;
   const row = rows[0];
-  if (!row) throw new Error("AMUX Decision Maker throughput read returned no row");
-  return { lastHour: safeInteger(row.lastHour, "count"), lastDay: safeInteger(row.lastDay, "count") };
+  if (!row) throw new Error("AMUX Decision Maker instance load read returned no row");
+  if (!Array.isArray(row.resultKinds)) throw new DecisionMakerRequestWriteError("state_unreadable");
+  return {
+    lastHour: safeInteger(row.lastHour, "count"),
+    lastDay: safeInteger(row.lastDay, "count"),
+    resultKindsNewestFirst: [...row.resultKinds],
+  };
 }
 
 /**
@@ -506,12 +578,19 @@ type ExistingRequestRow = Record<string, unknown> & {
  * operator as a route failure does (§2-1). Rows the switch store could not
  * have written are still recorded as `settings_unreadable`.
  *
+ * §8 (2026-10-17): an instance whose latch is owed -- three validation
+ * failures in a row since its newest switch event, not yet latched -- is
+ * routed as off (`instance_off`), so no question reaches it in the time
+ * between its third failure and its latch. The result kinds ride in the
+ * throughput statement. A result kind the ledger could not hold throws
+ * `state_unreadable` and writes nothing.
+ *
  * Statements: 1 lock, 1 read (the clock and any request of the card revision)
  * -- 2 for an existing request or a key the ring lacks; then the switch read
- * -- 3 when it fails; then the throughput read (none for a provider without
- * an instance), the system writer's 3 (4 with an integrity key) and 1 insert
- * -- 8, or 9 (7, or 8, without an instance). The body store's card text adds
- * 1 to a new request routed to a DM.
+ * -- 3 when it fails; then the throughput and result read (none for a provider
+ * without an instance), the system writer's 3 (4 with an integrity key) and 1
+ * insert -- 8, or 9 (7, or 8, without an instance). The body store's card text
+ * adds 1 to a new request routed to a DM.
  */
 export async function recordDecisionMakerRequest(
   tx: Prisma.TransactionClient,
@@ -568,11 +647,19 @@ export async function recordDecisionMakerRequest(
 
   const switches = await readSwitchesForWrite(tx);
   const instance = dmInstanceForProvider(binding.askingProvider);
-  const throughput = isDmInstanceScope(instance)
-    ? await readDecisionMakerThroughput(tx, instance)
-    : { lastHour: 0, lastDay: 0 };
+  let throughput = { lastHour: 0, lastDay: 0 };
+  let routingSwitches = dmSwitchRoutingInput(switches.state, instance);
+  if (isDmInstanceScope(instance)) {
+    const load = await readDecisionMakerInstanceLoad(tx, {
+      instance,
+      sinceMs: switches.newest[instance]?.createdAtMs ?? null,
+    });
+    throughput = { lastHour: load.lastHour, lastDay: load.lastDay };
+    // §8: an owed latch is the instance off -- the question goes to the operator.
+    routingSwitches = dmSwitchInputWithOwedLatch(routingSwitches, latchOwed(switches, instance, load.resultKindsNewestFirst));
+  }
   const decision = routeDmQuestion({
-    ...dmSwitchRoutingInput(switches, instance),
+    ...routingSwitches,
     card,
     askingProvider: binding.askingProvider,
     throughput,
@@ -798,9 +885,18 @@ export async function discardDecisionMakerAssignment(
  * given to `requireLeaseAt`, and the database refuses an intent whose COMMIT
  * reaches it, as it does a late DM output.
  *
+ * §8 (2026-10-17): with the instance in proposal mode, its terminal results
+ * since its newest switch event are read too. When three validation failures
+ * in a row stand there with no latch since, the latch is owed: no intent is
+ * recorded, the refusal is `instance_off`, and the owed latch is written in
+ * this transaction (`validation_latch`, under the instance's own actor) -- the
+ * one refusal of this function that writes, and only that latch. A result
+ * kind the ledger could not hold throws `state_unreadable` and writes nothing.
+ *
  * Statements: 1 lock, 1 state read -- 2 for an unknown request or a ledger
  * refusal; then the switch read -- 3 for a switch refusal or a failed read;
- * then the system writer's 3 (4 with an integrity key) and 1 insert -- 7, or 8.
+ * then the result read -- 4; then either the owed latch's 4 (5 with an
+ * integrity key) or the system writer's 3 (4) and 1 insert -- 8, or 9.
  */
 export async function recordDecisionMakerTransmitIntent(
   tx: Prisma.TransactionClient,
@@ -810,7 +906,10 @@ export async function recordDecisionMakerTransmitIntent(
     transmission: unknown;
     requireLeaseAt: (deadline: Date) => void;
   },
-): Promise<DecisionMakerEventWrite | { recorded: false; reason: DmTransmitSwitchRefusal }> {
+): Promise<
+  | DecisionMakerEventWrite
+  | { recorded: false; reason: DmTransmitSwitchRefusal; latch?: DecisionMakerSwitchEventRecord }
+> {
   const requestId = requireRequestId(input.requestId);
   const instance = requireInstance(input.instance);
   const transmission = parseDmTransmission(input.transmission);
@@ -821,10 +920,17 @@ export async function recordDecisionMakerTransmitIntent(
   if (!state) return { recorded: false, reason: "unknown_request" };
   const refusal = dmEventRefusal(state, { kind: "transmit_intent", instance });
   if (refusal) return { recorded: false, reason: refusal };
-  const switchRefusal = dmTransmitSwitchRefusal(
-    dmSwitchRoutingInput(await readSwitchesForWrite(tx), instance),
-  );
+  const switches = await readSwitchesForWrite(tx);
+  const switchRefusal = dmTransmitSwitchRefusal(dmSwitchRoutingInput(switches.state, instance));
   if (switchRefusal) return { recorded: false, reason: switchRefusal };
+  const resultKindsNewestFirst = await readDecisionMakerInstanceResultKinds(tx, {
+    instance,
+    sinceMs: switches.newest[instance]?.createdAtMs ?? null,
+  });
+  if (latchOwed(switches, instance, resultKindsNewestFirst)) {
+    const latch = await latchDecisionMakerInstanceOff(tx, { instance, reason: "validation_latch" });
+    return { recorded: false, reason: "instance_off", latch };
+  }
   if (state.resultDeadlineAtMs === null) throw new DecisionMakerRequestWriteError("state_unreadable");
   input.requireLeaseAt(new Date(state.resultDeadlineAtMs));
   return {
@@ -920,7 +1026,7 @@ export async function submitDecisionMakerResult(
   }
   if (recorded.status === "rejected") return { status: "already_rejected", reason: recorded.reason };
 
-  const { killSwitch } = await readSwitchesForWrite(tx);
+  const { killSwitch } = (await readSwitchesForWrite(tx)).state;
   if (killSwitch === null) throw new DecisionMakerRequestWriteError("settings_unreadable");
   const decision = dmResultSubmissionOutcome(state, submission, killSwitch);
   switch (decision.outcome) {
@@ -1001,4 +1107,91 @@ export async function staleCloseDecisionMakerRequest(
   const refusal = dmEventRefusal(state, { kind: "stale_close" });
   if (refusal) return { recorded: false, reason: refusal };
   return { recorded: true, event: await appendEvent(tx, requestId, { kind: "stale_close", ...NO_COLUMNS }) };
+}
+
+// ---------------------------------------------------------------------------
+// §8's validation latch
+// ---------------------------------------------------------------------------
+
+/**
+ * The kinds of an instance's terminal results recorded at or after `sinceMs`
+ * by the database clock -- every one when it is null -- newest first, at most
+ * DM_VALIDATION_LATCH_WINDOW, in one statement: what §8's count reads
+ * (`dmValidationLatchDecision()`). Every ledger write takes the audit chain
+ * lock first, so the sequence is the order the results committed in. A result
+ * event names its request's own instance, which the event guard requires.
+ * The kinds are returned as read; the core refuses one outside §6's five.
+ * A transmission intent and the latch check read it; a routing reads the same
+ * kinds inside its throughput statement (`readDecisionMakerInstanceLoad()`).
+ */
+export async function readDecisionMakerInstanceResultKinds(
+  client: LedgerReader,
+  input: { instance: DmInstanceScope; sinceMs: number | null },
+): Promise<unknown[]> {
+  if (!isDmInstanceScope(input.instance)) throw new DecisionMakerRequestWriteError("invalid_input");
+  const sinceMs = requireSinceMs(input.sinceMs);
+  const rows = await client.$queryRaw<Array<{ resultKind: unknown }>>`
+    SELECT ev."resultKind"
+    FROM "AmuxDecisionMakerRequestEvent" ev
+    WHERE ev."kind" = 'result'
+      AND ev."instance" = ${input.instance}
+      AND ev."createdAt" >= 'epoch'::timestamptz + ${sinceMs} * INTERVAL '1 millisecond'
+    ORDER BY ev."sequence" DESC
+    LIMIT ${DM_VALIDATION_LATCH_WINDOW}
+  `;
+  return rows.map((row) => row.resultKind);
+}
+
+export type DecisionMakerValidationLatchWrite =
+  | { latched: true; event: DecisionMakerSwitchEventRecord }
+  | { latched: false; reason: Extract<DmValidationLatchDecision, { latch: false }>["reason"] };
+
+/**
+ * §8: latches `instance` off when three of its validation failures in a row
+ * stand since its newest switch event (`dmValidationLatchDecision()`), in the
+ * caller's transaction, in this order: the audit chain lock -- which every
+ * switch change and every ledger write takes first, so no result and no
+ * release commits between the reads and the latch, and two checks of one
+ * instance cannot both latch; the switch read with each instance's newest
+ * event; the instance's terminal results since that event's database clock;
+ * and then the switch store's latch (`validation_latch`), under the
+ * instance's own actor.
+ *
+ * A result and its switch boundary are compared by their database clocks,
+ * which are milliseconds: a result in the same millisecond as the boundary is
+ * counted, the side that latches sooner.
+ *
+ * Two callers, each in a boundary transaction of its own: the result route,
+ * once a validation failure it recorded has committed
+ * (app/api/internal/amux/decision-maker/results/route.ts), and the maintenance
+ * sweep for both instances every fifteen minutes
+ * (lib/amux/decisionMakerRetentionSweep.ts). Neither is what stops the
+ * instance in the meantime: a routing and a transmission intent refuse an
+ * owed latch themselves, and the intent writes it. A latch only turns an
+ * instance off, which no row of §6's kill switch table refuses, so the kill
+ * switch does not decide anything here.
+ *
+ * A switch event or a result the stores could not have written throws
+ * `settings_unreadable` or `state_unreadable`, and nothing is written.
+ *
+ * Statements: 1 lock, 1 switch read, 1 result read -- 3 when nothing is due;
+ * then the latch's 4 (5 with an integrity key) -- 7, or 8.
+ */
+export async function recordDecisionMakerValidationLatch(
+  tx: Prisma.TransactionClient,
+  input: { instance: unknown },
+): Promise<DecisionMakerValidationLatchWrite> {
+  const instance = requireInstance(input.instance);
+  await takeAuditChainLock(tx);
+  const switches = await readSwitchesForWrite(tx);
+  if (switches.state.killSwitch === null) throw new DecisionMakerRequestWriteError("settings_unreadable");
+  const newestEvent = switches.newest[instance];
+  const resultKindsNewestFirst = await readDecisionMakerInstanceResultKinds(tx, {
+    instance,
+    sinceMs: newestEvent?.createdAtMs ?? null,
+  });
+  const decision = dmValidationLatchDecision({ newestEvent, resultKindsNewestFirst });
+  if (decision === null) throw new DecisionMakerRequestWriteError("state_unreadable");
+  if (!decision.latch) return { latched: false, reason: decision.reason };
+  return { latched: true, event: await latchDecisionMakerInstanceOff(tx, { instance, reason: "validation_latch" }) };
 }
