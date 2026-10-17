@@ -17,6 +17,8 @@
 
 import "server-only";
 
+import { Prisma } from "@prisma/client";
+
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import {
   MARKETING_COMPETITOR_ACTIONS,
@@ -36,6 +38,25 @@ export async function readApprovedMarketingCompetitorHosts(
     orderBy: { id: "asc" },
     select: { id: true, officialHosts: true },
   });
+  return Object.freeze(Object.fromEntries(rows.map((row) => [row.id, Object.freeze([...row.officialHosts])])));
+}
+
+/**
+ * The approved hosts as a fact filter inside a writing transaction uses them,
+ * each approved row held FOR SHARE until the transaction ends: a retirement or
+ * a host change waits for the facts read against the old hosts to commit,
+ * rather than landing between the read and the write (READ COMMITTED reads
+ * each statement afresh, so a plain read would not hold).
+ */
+export async function holdApprovedMarketingCompetitorHosts(
+  tx: MarketingTransaction,
+): Promise<MarketingCompetitorSourceHosts> {
+  const rows = await tx.$queryRaw<Array<{ id: string; officialHosts: string[] }>>(Prisma.sql`
+    SELECT "id", "officialHosts" FROM "MarketingCompetitor"
+     WHERE "status" = 'approved'
+     ORDER BY "id"
+       FOR SHARE
+  `);
   return Object.freeze(Object.fromEntries(rows.map((row) => [row.id, Object.freeze([...row.officialHosts])])));
 }
 

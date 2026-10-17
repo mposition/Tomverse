@@ -1385,10 +1385,10 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `lib/marketingIntelReportStore.ts`, `tests/marketingIntelReportCore.test.mjs`,
   `tests/integration/marketing-intel-reports.db.test.ts`. 생성기 secret으로 쓸 수 있는 보고서는 `brief`·`market_intel`
   둘뿐입니다. key는 앱이 종류·run·보고서 id로 유도하고, 같은 key에 다른 바이트가 오면 conflict이며, 이미 기록된
-  보고서는 모든 게이트보다 먼저 되읽습니다. 마감은 draft 접수와 같은 helper로 겁니다. **시장 사실은 앱의 공식 host
-  목록에 있는 출처만 저장합니다** — `MARKETING_COMPETITOR_SOURCE_HOSTS`는 비어 있고(어느 경쟁사를 추적하고 어느
-  host가 공식인지는 사람이 그 항목을 넣는 변경에서 정합니다), 목록 밖의 사실은 저장하지 않고
-  `unrepresentableFactCount`에 더합니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
+  보고서는 모든 게이트보다 먼저 되읽습니다. 마감은 draft 접수와 같은 helper로 겁니다. **시장 사실은 사람이 승인한
+  경쟁사의 공식 host에서 온 것만 저장합니다** — host는 같은 트랜잭션에서 등록부의 승인 행을 FOR SHARE로 읽은
+  것이고(S3f-R1·R2), 그 밖의 사실은 저장하지 않고 `unrepresentableFactCount`에 더합니다. `market_intel` 보고서는
+  후보(`competitorCandidates`, 최대 5개)를 함께 서명해 보낼 수 있고, 후보는 제안으로만 저장됩니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
   `marketing-generator`이고 범위는 `MarketingReport`의 `marketing_report.generator_recorded` 하나입니다.
 - **S3e1(생성기 LLM adapter)**: `lib/marketingLlmClientCore.ts`, `tests/marketingLlmClientCore.test.mjs`. 생성기
   서비스가 `--experimental-strip-types`로 불러 쓰는 `MarketingLlmClient`이며, 순서가 계약입니다: 예약 → (포기하면
@@ -1476,8 +1476,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   제안 없음). 승인·거절·은퇴·추가는 사람의 감사 행이 있어야 하며, `MarketingCompetitor_write_guard`가 그 행의
   action·대상·actor·`previousDecisionAuditLogId`(없으면 `':none'`)와 **승인이면 이름과 host까지** 대조합니다. 화면이
   본 결정과 현재 결정이 다르면 `competitor_decision_conflict`입니다. 행은 지우지 않고 은퇴시킵니다. migration은 시장
-  분석의 11개를 `seed` 제안으로만 넣으며 아무것도 승인하지 않습니다. route·Admin 화면·사실 필터 연결은 아직 없습니다
-  (`MARKETING_COMPETITOR_SOURCE_HOSTS`는 R2가 DB 읽기로 바꿉니다).
+  분석의 11개를 `seed` 제안으로만 넣으며 아무것도 승인하지 않습니다. 사실 필터는 R2부터 이 등록부를 읽고, 사람이
+  결정하는 Admin 화면과 route는 R3입니다.
 
 # 엔지니어링 Agent
 

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  MARKETING_COMPETITOR_SOURCE_HOSTS,
   marketIntelSourceAllowed,
   marketingGeneratorReportDigest,
   marketingGeneratorReportKey,
@@ -81,11 +80,51 @@ test("the key names the report; the digest names its bytes", () => {
   );
 });
 
-test("the official host list is empty, so no fact is kept until a person adds one", () => {
-  assert.deepEqual(Object.keys(MARKETING_COMPETITOR_SOURCE_HOSTS), []);
-  assert.equal(Object.isFrozen(MARKETING_COMPETITOR_SOURCE_HOSTS), true);
-  const stored = marketingGeneratorReportStoredPayload(signed());
+test("with no approved competitor, no fact is kept", () => {
+  const stored = marketingGeneratorReportStoredPayload(signed(), {});
   assert.deepEqual(stored, { payload: { facts: [], unrepresentableFactCount: 1 }, droppedFactCount: 1 });
+});
+
+const candidate = (overrides = {}) => ({
+  competitorId: "alpha",
+  displayName: "Alpha",
+  officialHosts: ["alpha.example"],
+  evidenceUrls: ["https://alpha.example/pricing"],
+  rationale: "Sells the same comparison.",
+  ...overrides,
+});
+
+test("market facts may carry up to five signed competitor candidates, each once", () => {
+  assert.equal(marketingGeneratorReportSchema.safeParse(signed({ competitorCandidates: [candidate()] })).success, true);
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse(
+      signed({ competitorCandidates: Array.from({ length: 6 }, (_, i) => candidate({ competitorId: `c${i}` })) }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse(signed({ competitorCandidates: [candidate(), candidate()] })).success,
+    false,
+  );
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse(signed({ competitorCandidates: [candidate({ status: "approved" })] })).success,
+    false,
+  );
+  // A brief proposes nothing.
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse(
+      signed({ kind: "brief", payload: { topicIds: ["t"], claimIds: [], sourceDigests: [] }, competitorCandidates: [] }),
+    ).success,
+    false,
+  );
+  // The candidates are signed: changing one changes the report.
+  const a = unsigned({ competitorCandidates: [candidate()] });
+  assert.notEqual(
+    marketingGeneratorReportDigest(a),
+    marketingGeneratorReportDigest({ ...a, competitorCandidates: [candidate({ officialHosts: ["evil.example"] })] }),
+  );
+  // Proposing nothing leaves the bytes as they were before candidates existed.
+  assert.equal(marketingGeneratorReportDigest(unsigned()), marketingGeneratorReportDigest({ ...unsigned(), competitorCandidates: undefined }));
 });
 
 test("a fact is kept only for an exact official host of its own competitor", () => {
