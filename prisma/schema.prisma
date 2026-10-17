@@ -9913,7 +9913,7 @@ model AmuxIdeaReadManifestKeyIntent {
   keyDeleteAuditLogId String?   @unique
 
   idea AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [ideaId, referenceOrdinal], references: [ideaId, referenceOrdinal], onDelete: Restrict, onUpdate: Restrict)
+  evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [ideaId, referenceOrdinal], references: [ideaId, referenceOrdinal], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaReadManifestKeyIntent_evidence_fkey")
   audit AdminAuditLog @relation("AmuxIdeaReadManifestKeyIntentAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   claimAudit AdminAuditLog? @relation("AmuxIdeaReadManifestKeyClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   keyDeleteAudit AdminAuditLog? @relation("AmuxIdeaReadManifestKeyDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
