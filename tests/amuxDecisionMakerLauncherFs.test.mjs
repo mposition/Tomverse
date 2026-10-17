@@ -7,7 +7,7 @@
 // owner or a permission bit run where the platform has them.
 
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -344,6 +344,87 @@ test("a directory with another owner than S0's on the path is unsafe", { skip: !
     });
     assert.equal(existsSync(fixture.at(fixture.paths.requestDirectory)), true);
   }, { hostOptions: { owners } });
+});
+
+// ---------------------------------------------------------------------------
+// Review r-20261017-024124-0cb1bd: the removal walks the tree itself and
+// enters only directories of the cleaning account that no group or other can
+// write, so nobody else can change a directory while it is being removed.
+// ---------------------------------------------------------------------------
+
+/** The one entry the removal moved aside in `directory`, if any. */
+const stagedIn = (fixture, directory) =>
+  readdirSync(fixture.at(directory)).filter((name) => name.startsWith(".amux-dm-removing-"));
+
+test("re-review (a): a subdirectory its group can write is not entered; the cleanup is cleanup_unknown", { skip: !canChmod }, () => {
+  withFixture(OPENAI, (fixture) => {
+    fixture.write(`${fixture.paths.requestDirectory}/snapshot/inner/file.txt`, "card text");
+    chmodSync(fixture.at(`${fixture.paths.requestDirectory}/snapshot`), 0o775);
+    const cleanup = dmCleanupRequestDirectory(fixture.host, OPENAI, REQUEST_ID);
+    assert.equal(cleanup.status, "cleanup_unknown", JSON.stringify(cleanup));
+    const [staged] = stagedIn(fixture, DM_REQUEST_ROOT);
+    assert.ok(staged, "the request directory was moved aside, not removed");
+    assert.deepEqual(cleanup.residue, [{ kind: "path_unsafe", path: `${DM_REQUEST_ROOT}/${staged}/snapshot` }]);
+    assert.equal(existsSync(fixture.at(`${DM_REQUEST_ROOT}/${staged}/snapshot/inner/file.txt`)), true);
+  });
+  withFixture(OPENAI, (fixture) => {
+    fixture.write("/home/amux-dm-openai/.codex/skills/.system/x/SKILL.md", "state");
+    chmodSync(fixture.at("/home/amux-dm-openai/.codex/skills/.system"), 0o777);
+    const cleanup = dmCleanupVendor(fixture.host, OPENAI, REQUEST_ID);
+    assert.equal(cleanup.status, "cleanup_unknown", JSON.stringify(cleanup));
+    assert.ok(cleanup.residue.some((entry) => entry.kind === "path_unsafe" && entry.path.endsWith("/.system")), JSON.stringify(cleanup));
+  });
+});
+
+test("re-review (b): a subdirectory with another owner is not entered; the cleanup is cleanup_unknown", { skip: !posix }, () => {
+  withFixture(OPENAI, (fixture) => {
+    fixture.write(`${fixture.paths.requestDirectory}/snapshot/inner/file.txt`, "card text");
+    // The test process cannot chown; the test host reports this one directory as another account's.
+    const host = dmTestHost(fixture.root, { foreignOwnedInodes: new Set([statSync(fixture.at(`${fixture.paths.requestDirectory}/snapshot`)).ino]) });
+    const cleanup = dmCleanupRequestDirectory(host, OPENAI, REQUEST_ID);
+    assert.equal(cleanup.status, "cleanup_unknown", JSON.stringify(cleanup));
+    const [staged] = stagedIn(fixture, DM_REQUEST_ROOT);
+    assert.deepEqual(cleanup.residue, [{ kind: "path_unsafe", path: `${DM_REQUEST_ROOT}/${staged}/snapshot` }]);
+    assert.equal(existsSync(fixture.at(`${DM_REQUEST_ROOT}/${staged}/snapshot/inner/file.txt`)), true);
+  });
+});
+
+test("re-review (c): a link anywhere inside is unlinked, never followed; what it points at stays", { skip: !posix }, () => {
+  withOutside((outside) =>
+    withFixture(ANTHROPIC, (fixture) => {
+      mkdirSync(join(outside, "dir"));
+      writeFileSync(join(outside, "dir", "precious"), "not the request's");
+      writeFileSync(join(outside, "file"), "not the request's");
+      fixture.directory(`${fixture.paths.requestDirectory}/a/b`, 0o750);
+      symlinkSync(join(outside, "dir"), fixture.at(`${fixture.paths.requestDirectory}/a/b/dirlink`));
+      symlinkSync(join(outside, "file"), fixture.at(`${fixture.paths.requestDirectory}/a/filelink`));
+      fixture.directory("/home/amux-dm-anthropic/.claude/plugins/cache", 0o755);
+      symlinkSync(join(outside, "dir"), fixture.at("/home/amux-dm-anthropic/.claude/plugins/cache/dirlink"));
+      assert.deepEqual(dmCleanupRequestDirectory(fixture.host, ANTHROPIC, REQUEST_ID), { status: "verified" });
+      assert.deepEqual(dmCleanupVendor(fixture.host, ANTHROPIC, REQUEST_ID), { status: "verified" });
+      assert.equal(existsSync(join(outside, "dir", "precious")), true);
+      assert.equal(existsSync(join(outside, "file")), true);
+      assert.deepEqual(readdirSync(fixture.at(DM_REQUEST_ROOT)), []);
+    }),
+  );
+});
+
+test("re-review (d): a request directory its group can write is refused by the cleanup as by the preflight", { skip: !canChmod }, () => {
+  withFixture(OPENAI, (fixture) => {
+    fixture.write(`${fixture.paths.requestDirectory}/snapshot/file.txt`, "card text");
+    chmodSync(fixture.at(fixture.paths.requestDirectory), 0o770);
+    assert.deepEqual(preflight(fixture), ["request_directories_unusable"]);
+    assert.deepEqual(dmCleanupRequestDirectory(fixture.host, OPENAI, REQUEST_ID), {
+      status: "cleanup_unknown",
+      residue: [
+        { kind: "path_unsafe", path: fixture.paths.requestDirectory },
+        { kind: "request_path_present", path: fixture.paths.requestDirectory },
+      ],
+    });
+    // Left where it was: nothing was moved or entered.
+    assert.equal(existsSync(fixture.at(`${fixture.paths.requestDirectory}/snapshot/file.txt`)), true);
+    assert.deepEqual(stagedIn(fixture, DM_REQUEST_ROOT), []);
+  });
 });
 
 test("an entry the account cannot delete is cleanup_unknown", { skip: !canChmod }, () => {
