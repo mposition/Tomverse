@@ -1,0 +1,43 @@
+[Unit]
+Description=Tomverse AMUX Decision Maker broker (started by amux-dm-broker.socket)
+Requires=amux-dm-broker.socket
+After=amux-dm-broker.socket
+ConditionFileNotEmpty=/opt/tomverse-amux-dm/broker.mjs
+
+[Service]
+Type=simple
+User=amux-dm-broker
+Group=amux-dm-broker
+ExecStart=/usr/bin/node /opt/tomverse-amux-dm/broker.mjs
+Restart=no
+KillMode=control-group
+UMask=0077
+# docs/policy/amux-decision-maker.md §5: the broker writes only the request
+# directories, and its network is the bridge's and the launchers' local
+# sockets (S2b's GitHub fetch will need AF_INET/AF_INET6 here).
+ProtectSystem=strict
+ReadWritePaths=/var/lib/amux-dm/requests
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectProc=invisible
+ProcSubset=pid
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amux-dm-broker
+
+# No [Install]: amux-dm-broker.socket starts it on the bridge's first connection.

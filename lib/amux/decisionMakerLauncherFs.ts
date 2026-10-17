@@ -1,8 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
+  chmodSync,
   closeSync,
   constants,
   fstatSync,
+  lchownSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -45,7 +47,9 @@ import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
  * docs/policy/amux-decision-maker.md policy version 2, §5 (request directory
  * deletion, `cleanup_unknown`) and §5a (root-owned executables and their
  * sha256, the schema file, the managed-settings check, the per-request state
- * deletion and its verification), stage S2-3a.
+ * deletion and its verification), stage S2-3a. Stage S2-3b added the
+ * broker's other half: making the request directory with the vendor's group
+ * and checking the request root for leftovers before a request starts.
  *
  * Paths. A request names no path: its two directories are fixed roots plus
  * its id (lib/amux/decisionMakerLauncherCore.ts `dmRequestPaths`). Every
@@ -586,6 +590,104 @@ export const dmCleanupVendor = (
       : [];
   removal.push(...deleteCliState(host, instance));
   return outcomeOf([...removal, ...dmVerifyScratch(host, instance), ...dmVerifyCliState(host, instance)]);
+};
+
+// ---------------------------------------------------------------------------
+// §5: the broker makes the request directory (stage S2-3b)
+// ---------------------------------------------------------------------------
+
+/** The request directory's mode (§5: "0750(파일 0640)"). */
+export const DM_REQUEST_DIRECTORY_MODE = 0o750;
+
+/**
+ * §5: "요청 디렉터리는 broker 소유, 그 공급사 계정 그룹만 읽는 0750". The group
+ * is the vendor account's own: S0 made every account with `--user-group` and
+ * its home owned by that account and group, and put the broker in both
+ * vendor groups (docs/ops/amux/decision-maker-s0-records/2026-10-13__a3f51403afccf147442f7c2ca7eeb4ccf97b8068.md).
+ * So the group is read from the home S0 made, not configured: the home must
+ * pass the same check as on every path (the account's own, `0700`), and its
+ * group must be one the broker is in. On the system host it must also not be
+ * root's or the broker's own group, and the two vendor homes must have
+ * different groups -- otherwise the other vendor could read the directory.
+ * A test host checks only membership (all its accounts are the test
+ * process). `null` where the platform has no POSIX owners (no group is set).
+ */
+export type DmVendorGroup = { ok: true; groupId: number | null } | { ok: false };
+
+const groupOfHome = (host: DmLauncherHost, instance: DmInstanceScope): number | null => {
+  const home = DM_LAUNCHER_SPECS[instance].home;
+  const checked = checkChain(host, instance, home);
+  return checked.state === "ok" ? checked.stats.gid : null;
+};
+
+export const dmVendorGroupId = (host: DmLauncherHost, instance: DmInstanceScope): DmVendorGroup => {
+  if (host.owners === null) return { ok: true, groupId: null };
+  const groupId = groupOfHome(host, instance);
+  if (groupId === null || typeof process.getgroups !== "function") return { ok: false };
+  if (!process.getgroups().includes(groupId)) return { ok: false };
+  if (host.root === null) {
+    const other: DmInstanceScope = instance === "decision-maker-openai" ? "decision-maker-anthropic" : "decision-maker-openai";
+    const ownPrimary = typeof process.getegid === "function" ? process.getegid() : null;
+    if (groupId === 0 || groupId === ownPrimary || groupOfHome(host, other) === groupId) return { ok: false };
+  }
+  return { ok: true, groupId };
+};
+
+/**
+ * What is in the broker's request root besides the requests in flight. §5:
+ * "broker는 다음 요청을 시작하기 전에 남은 요청 디렉터리가 없음을 확인한다" --
+ * any other entry (a request directory, or one a failed deletion moved aside)
+ * is left over. `unusable` when the root itself fails the path check or cannot
+ * be listed.
+ */
+export type DmRequestRootState = { state: "unusable" } | { state: "ok"; leftover: number };
+
+export const dmRequestRootState = (host: DmLauncherHost, inFlight: ReadonlySet<string>): DmRequestRootState => {
+  // Every rule for the request root is the broker's, whichever instance names it.
+  if (checkChain(host, "decision-maker-openai", DM_REQUEST_ROOT).state !== "ok") return { state: "unusable" };
+  const names = listChecked(host, DM_REQUEST_ROOT);
+  if (names === null) return { state: "unusable" };
+  return { state: "ok", leftover: names.filter((name) => !inFlight.has(name)).length };
+};
+
+/**
+ * The broker makes a request's directory, empty, under its checked root: made
+ * `0700`, given the vendor's group, set to exactly `0750`, and checked again
+ * -- a directory, not a link, the broker's, the vendor's group, `0750`, and a
+ * checked chain. An existing entry of that name is never reused. False when
+ * any step fails; the caller then runs `dmCleanupRequestDirectory()`.
+ *
+ * Nobody but root and the broker can write the root (`0711`, the broker's;
+ * the chain check holds that), so nothing can be swapped in between the steps.
+ */
+export const dmCreateRequestDirectory = (
+  host: DmLauncherHost,
+  instance: DmInstanceScope,
+  requestId: unknown,
+  groupId: number | null,
+): boolean => {
+  if (!isDmRequestId(requestId)) return false;
+  if (checkChain(host, instance, DM_REQUEST_ROOT).state !== "ok") return false;
+  const path = dmRequestPaths(instance, requestId).requestDirectory;
+  const hostPath = dmHostPath(host, path);
+  if (probe(hostPath).state !== "absent") return false;
+  try {
+    mkdirSync(hostPath, { mode: 0o700 });
+    if (host.owners !== null) {
+      if (groupId === null) return false;
+      lchownSync(hostPath, -1, groupId);
+      chmodSync(hostPath, DM_REQUEST_DIRECTORY_MODE);
+    }
+  } catch {
+    return false;
+  }
+  const made = probe(hostPath);
+  if (made.state !== "present" || made.stats.isSymbolicLink() || !made.stats.isDirectory()) return false;
+  if (host.owners !== null) {
+    if (made.stats.uid !== host.owners.broker || made.stats.gid !== groupId) return false;
+    if ((made.stats.mode & 0o7777) !== DM_REQUEST_DIRECTORY_MODE) return false;
+  }
+  return checkChain(host, instance, path).state === "ok";
 };
 
 /**

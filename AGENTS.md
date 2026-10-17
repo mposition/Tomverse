@@ -1847,6 +1847,42 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   결과와 따로 보고합니다(latch는 앱의 일). 실행 파일·스키마의 root 소유 경로와 임시 디렉터리 위치는 정책 본문에 없는 launcher
   상수입니다. 테스트용 host만 다른 실행 파일 sha256·timeout·소유자를 받고, 시스템 host에서는 sha256·timeout override가 거부됩니다.
   broker·bridge·route 호출·설치·unit은 없습니다.
+- **S2-3b(broker와 runner 설치 파일)**: `lib/amux/decisionMakerBrokerCore.ts`, `lib/amux/decisionMakerBroker.ts`,
+  `lib/amux/decisionMakerLauncherService.ts`, `lib/amux/decisionMakerSocketLine.ts`, launcher Fs의
+  `dmCreateRequestDirectory()`·`dmRequestRootState()`·`dmVendorGroupId()`, `scripts/amux-dm-broker.mjs`,
+  `scripts/amux-dm-launcher.mjs`, `scripts/build-amux-decision-maker.mjs`(`npm run build:amux-decision-maker`),
+  `scripts/install-amux-decision-maker.sh`, `scripts/systemd/amux-dm-broker.{socket,service}`,
+  `scripts/systemd/amux-dm-launcher-{openai,anthropic}.socket`·`@.service`, `tests/amuxDecisionMakerBrokerCore.test.mjs`,
+  `tests/amuxDecisionMakerBroker.test.mjs`, `tests/amuxDecisionMakerInstall.test.mjs`, `tests/amuxDecisionMakerInstallShell.test.mjs`,
+  `scripts/amux-decision-maker-release-out.mjs`, `tests/amuxDecisionMakerReleaseOut.test.mjs`, `tests/support/amuxDmBrokerFixture.mjs`.
+  **sudo·setuid 없이 계정을 나누는 것은 systemd입니다** — bridge는 broker 소켓(`/run/amux-dm-broker/broker.sock`, broker 소유·
+  `tomverse-bridge` 그룹·`0660`)에, broker만 공급사별 launcher 소켓(`/run/amux-dm-launcher/<instance>.sock`, broker 소유·`0600`)에
+  닿고, launcher 소켓은 `Accept=yes`·`MaxConnections=1`이라 연결마다 그 공급사 계정의 unit 하나가 뜹니다. 그 unit의
+  `KillMode=control-group`·`RuntimeMaxSec=32min`이 launcher가 죽어도 CLI가 요청을 넘어 살지 못하게 하는 backstop입니다(launcher
+  자신은 30분에 죽임). 소켓 파일의 소유·권한은 systemd가 만들고 broker는 넘겨받은 fd에서만 듣습니다. **프로토콜은 연결 하나에
+  요청 하나, 양쪽 한 줄씩**(JSON 한 줄, 줄마다 상한과 기한)입니다. launcher는 먼저 자기 인스턴스로 `ready`를 보내고 그 뒤에만
+  요청을 읽으므로, `ready` 전에 끊긴 연결은 아무것도 보내지 않은 것이 증명됩니다. broker는 앱 route를 부르지 않습니다 — bridge가
+  전송 의도를 기록한 뒤 그 바이트·K_R·의도 응답을 보내면, broker가 의도를 그 바이트와 대조하고(아니면 디렉터리도 launcher도 없음),
+  요청 루트에 진행 중이 아닌 것이 없음을 확인하고(있으면 거부와 `cleanup_unknown`), S0이 만든 홈의 그룹으로 빈 요청 디렉터리
+  (broker 소유, `0750`)를 만들고, launcher의 한 답을 받은 뒤 **어떤 경로에서든** 그 디렉터리를 지우고 bridge에 한 줄로 답합니다.
+  답에는 `transmission`(`process_ended`·`not_started`·`unknown` — 영수증 기록용), docs/policy/amux-decision-maker.md §9의 결과 digest를 붙인 결과(출력·시간 초과·DM 불가),
+  `cleanup`(범위와 종류만, 경로 없음)이 있습니다. 같은 인스턴스의 두 번째 요청은 아무것도 건드리지 않고 `busy`입니다. 카드는
+  stdin으로만 가고 요청 디렉터리는 비어 있으며, S2b 스냅샷은 없습니다. **설치는 dry run이 기본입니다** — build가 만든 릴리스 디렉터리
+  (번들·스키마·unit·설치기·`manifest.sha256`)를 root 소유 위치로 옮겨 그 manifest의 sha256을 주고 실행하며, `--apply`일 때만
+  docs/policy/amux-decision-maker.md §5a의 경로로 CLI를 복사(복사본의 sha256을 정책 값과 대조)하고 `daemon-reload`까지만 합니다.
+  **같은 바이트만으로는 그대로 두지 않습니다** — root 소유·root 그룹·정확한 mode·링크 1개인 일반 파일일 때만 `same`이고, 바이트가
+  같아도 그 밖이면 `repair`로 다른 바이트(`replace`)처럼 `/var/backups/tomverse-amux-dm/<시각>/`에 보존한 뒤 목적지 디렉터리 안에서
+  만든 사본을 rename으로 원자 교체합니다. 목적지의 link·디렉터리는 거부합니다. **목적지와 백업으로 가는 길의 이미 있는 모든 디렉터리**는
+  link 아님·root 소유·그룹/기타 쓰기 없음이어야 하며, dry run이 보고하고 apply가 첫 변경 직전과 각 이동 직전에 다시 확인합니다
+  (검토 r-20261017-113433-e16efc 1·2). release의 `systemd/`도 같은 검사를 받고, 백업 디렉터리는 실행마다 새로 만들며 이미 있으면
+  멈춥니다(재검토 r-20261017-114940-a271fb의 sweep). 빌드의 `--out`은 저장소·홈·파일시스템 루트와 그 조상을 언제나 거부하고, **경로 자신과
+  이미 있는 모든 조상 중 하나라도 link이거나 realpath가 적힌 경로와 다르면 기본 경로라도 거부합니다**. 비어 있지 않은 디렉터리는 빌드가 남긴
+  표식(`.amux-decision-maker-release`)이 있고 그 밖의 항목이 모두 release 자신의 일반 파일일 때만 쓰며, 재귀 삭제 없이 그 파일들만 이름으로
+  지웁니다(검토 3, 재검토). 표식을 포함해 이름이 둘 이상인(hard link) 항목이 있으면 `hard_link`로 거부하고, 빌드는 기존 항목을 먼저 unlink한
+  뒤 모든 파일을 배타적 생성(`wx`, `COPYFILE_EXCL`)으로만 씁니다 — 기존 파일 안에 쓰지 않습니다(세 번째 검토 r-20261017-121031-9ff0a9).
+  unit을 enable·start하지 않고, CLI는 `--version`만(nobody, 네트워크 없는 namespace, 빈
+  환경) 실행하며, 앱의 `TOMVERSE_AMUX_DM_ROUTING`은 그대로 꺼져 있습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
+  없습니다.
 
 # AMUX 카드 표시 번호
 
