@@ -16,10 +16,16 @@
 #   /opt/tomverse-amux-dm/claude-code-2.1.296/claude     copied from the vendor account's install
 #   /etc/systemd/system/amux-dm-*.{socket,service}       six units
 #
-# A file already there with other bytes is first copied to
-# /var/backups/tomverse-amux-dm/<UTC time>/; one with the same bytes is left.
-# Every copy is checked against its expected sha256 before it is moved into
-# place. Then `systemctl daemon-reload`.
+# A destination is left alone only when it is already root's regular file,
+# root's group, exactly the wanted mode, one link, with the expected bytes.
+# Anything else there -- other bytes, or the right bytes with another owner,
+# mode or a second link -- is first copied to
+# /var/backups/tomverse-amux-dm/<UTC time>/ and then replaced. A link or a
+# directory at a destination is refused. Every existing directory on the way
+# to a destination or the backup must be root's, not a link and not writable
+# by group or others (checked in the dry run too, and again before each move).
+# Every copy is staged in its destination's directory, checked against its
+# expected sha256 and renamed into place. Then `systemctl daemon-reload`.
 #
 # It never enables, starts, stops or restarts a unit; never runs a CLI except
 # `--version` (as nobody, with no network and an empty environment); sends
@@ -115,19 +121,119 @@ dm_parse_args() {
   [[ -n $DM_MANIFEST_SHA256 ]] || dm_usage
 }
 
-# install (absent), same (equal bytes, left alone) or replace (kept in the backup first).
-dm_file_action() {
-  local current=${1:-} wanted=${2:-}
-  dm_is_sha256 "$wanted" || return 1
-  if [[ -z $current ]]; then
-    printf 'install\n'
-  elif [[ $current == "$wanted" ]]; then
-    printf 'same\n'
-  elif dm_is_sha256 "$current"; then
-    printf 'replace\n'
+dm_sha256_of() {
+  local digest
+  digest=$(/usr/bin/sha256sum -- "$1" 2>/dev/null) || return 1
+  printf '%s\n' "${digest%% *}"
+}
+
+# What is at a destination, without following a link:
+#   absent | link | other | unreadable | file <uid> <gid> <mode> <links> <sha256>
+dm_file_state() {
+  local path=$1 meta digest
+  if [[ -L $path ]]; then
+    printf 'link\n'
+  elif [[ ! -e $path ]]; then
+    printf 'absent\n'
+  elif [[ ! -f $path ]]; then
+    printf 'other\n'
+  elif meta=$(/usr/bin/stat -c '%u %g %a %h' -- "$path" 2>/dev/null) && digest=$(dm_sha256_of "$path"); then
+    printf 'file %s %s\n' "$meta" "$digest"
   else
-    return 1
+    printf 'unreadable\n'
   fi
+}
+
+# The action for one destination, from its state, the wanted sha256 and mode:
+#   install  nothing there
+#   same     root's regular file, root's group, exactly the mode, one link, the bytes: left alone
+#   repair   the bytes, but anything else differs: replaced atomically like any other file
+#   replace  other bytes: kept in the backup, then replaced
+# A link, a directory, anything else or anything unreadable is refused (non-zero).
+# Equal bytes alone never mean "same": a file its account can rewrite, or with a
+# second name somebody else holds, would change what systemd runs later.
+dm_file_action() {
+  local state=${1:-} wanted=${2:-} mode=${3:-} kind uid gid have links digest extra
+  dm_is_sha256 "$wanted" && [[ $mode =~ ^0?[0-7]{3}$ ]] || return 1
+  read -r kind uid gid have links digest extra <<<"$state"
+  case $kind in
+    absent)
+      [[ -z $uid ]] || return 1
+      printf 'install\n'
+      return 0 ;;
+    file) ;;
+    *) return 1 ;;
+  esac
+  [[ $uid =~ ^[0-9]+$ && $gid =~ ^[0-9]+$ && $have =~ ^[0-7]{3,4}$ && $links =~ ^[1-9][0-9]*$ && -z $extra ]] || return 1
+  dm_is_sha256 "$digest" || return 1
+  if [[ $digest != "$wanted" ]]; then
+    printf 'replace\n'
+  elif [[ $uid == 0 && $gid == 0 && $links == 1 ]] && ((8#$have == 8#$mode)); then
+    printf 'same\n'
+  else
+    printf 'repair\n'
+  fi
+}
+
+# A directory, without following a link: absent | link | other | dir <uid> <mode>
+dm_directory_state() {
+  local path=$1 meta
+  if [[ -L $path ]]; then
+    printf 'link\n'
+  elif [[ ! -e $path ]]; then
+    printf 'absent\n'
+  elif [[ ! -d $path ]]; then
+    printf 'other\n'
+  elif meta=$(/usr/bin/stat -c '%u %a' -- "$path" 2>/dev/null); then
+    printf 'dir %s\n' "$meta"
+  else
+    printf 'other\n'
+  fi
+}
+
+# A directory something is installed or backed up under: root's, a real directory, no group or other write.
+dm_directory_fits() {
+  local kind uid mode extra
+  read -r kind uid mode extra <<<"${1:-}"
+  [[ $kind == dir && $uid == 0 && $mode =~ ^[0-7]{3,4}$ && -z $extra ]] && (((8#$mode & 0022) == 0))
+}
+
+# Every existing directory from the one holding $1 up to /, deepest first.
+# Prints the first that does not fit, with why (link, not-a-directory, owner,
+# writable), and fails. Directories that do not exist yet are skipped: the
+# installer makes them, under one that was checked.
+dm_ancestors_problem() {
+  local cursor state kind uid mode reasons
+  cursor=$(/usr/bin/dirname -- "$1")
+  while :; do
+    state=$(dm_directory_state "$cursor")
+    if [[ $state != absent ]] && ! dm_directory_fits "$state"; then
+      read -r kind uid mode <<<"$state"
+      case $kind in
+        link) reasons=link ;;
+        dir)
+          reasons=
+          [[ $uid == 0 ]] || reasons="$reasons owner"
+          [[ $mode =~ ^[0-7]{3,4}$ ]] && (((8#$mode & 0022) == 0)) || reasons="$reasons writable"
+          reasons=${reasons# } ;;
+        *) reasons=not-a-directory ;;
+      esac
+      printf '%s %s\n' "$cursor" "$reasons"
+      return 1
+    fi
+    [[ $cursor == / ]] && return 0
+    cursor=$(/usr/bin/dirname -- "$cursor")
+  done
+}
+
+# Every path the apply may write: the eleven destinations, and one inside the backup root.
+dm_destination_paths() {
+  local unit
+  printf '%s\n' "$DM_OPT/broker.mjs" "$DM_OPT/launcher.mjs" "$DM_SCHEMA_DEST" "$DM_CODEX_DEST" "$DM_CLAUDE_DEST"
+  for unit in "${DM_UNITS[@]}"; do
+    printf '%s\n' "$DM_UNIT_DIR/$unit"
+  done
+  printf '%s\n' "$DM_BACKUP_ROOT/run"
 }
 
 # Two word lists name the same set (order and repeats ignored).
@@ -173,12 +279,6 @@ dm_check() {
     printf 'check FAIL  %s\n' "$name"
     DM_FAILURES=$((DM_FAILURES + 1))
   fi
-}
-
-dm_sha256_of() {
-  local digest
-  digest=$(/usr/bin/sha256sum -- "$1" 2>/dev/null) || return 1
-  printf '%s\n' "${digest%% *}"
 }
 
 # A regular file, not a link, owned by root and not writable by group or others, one link.
@@ -274,19 +374,27 @@ dm_cli_version_fits() {
   [[ $output == *"$expected"* ]]
 }
 
+# Every directory that exists on the way to a destination or the backup fits
+# (dm_ancestors_problem); each one that does not is listed once.
+dm_destinations_safe() {
+  local path problem problems=""
+  while IFS= read -r path; do
+    problem=$(dm_ancestors_problem "$path") || problems+="$problem"$'\n'
+  done < <(dm_destination_paths)
+  [[ -z $problems ]] && return 0
+  printf '%s' "$problems" | LC_ALL=C sort -u | while IFS= read -r problem; do
+    printf '            unsafe directory: %s\n' "$problem"
+  done
+  return 1
+}
+
 # One destination: its source in the release (or a vendor home), wanted sha256 and mode.
 declare -a DM_PLAN_DEST=() DM_PLAN_SOURCE=() DM_PLAN_SHA=() DM_PLAN_MODE=() DM_PLAN_ACTION=()
 dm_plan() {
-  local dest=$1 source=$2 wanted=$3 mode=$4 current="" action
-  if [[ -e $dest || -L $dest ]]; then
-    if [[ -f $dest && ! -L $dest ]]; then
-      current=$(dm_sha256_of "$dest") || current=unreadable
-    else
-      current=not-a-regular-file
-    fi
-  fi
-  action=$(dm_file_action "$current" "$wanted") || {
-    printf 'plan FAIL   %s exists and is not a regular readable file\n' "$dest"
+  local dest=$1 source=$2 wanted=$3 mode=$4 state action
+  state=$(dm_file_state "$dest")
+  action=$(dm_file_action "$state" "$wanted" "$mode") || {
+    printf 'plan FAIL   %s is %s, which this script does not replace\n' "$dest" "${state%% *}"
     DM_FAILURES=$((DM_FAILURES + 1))
     return 0
   }
@@ -298,16 +406,35 @@ dm_plan() {
   printf 'plan %-8s %s  %s\n' "$action" "$dest" "$wanted"
 }
 
-# Copies through a root-only staging directory, checks the copy, then moves it into place.
+# Staged files not yet moved into place; removed on any exit.
+DM_STAGED=()
+dm_remove_staged() {
+  local stage
+  for stage in "${DM_STAGED[@]}"; do
+    /usr/bin/rm -f -- "$stage"
+  done
+}
+
+# Stages a copy in the destination's own checked directory (root's 0600 file,
+# same filesystem), checks its bytes, gives it root's owner and the mode, checks
+# the directories on the way again, and renames it over the destination -- an
+# atomic replacement that never follows a link and leaves no second name. The
+# result must then be exactly what the plan calls "same".
 dm_put() {
-  local dest=$1 source=$2 wanted=$3 mode=$4 stage
-  stage=$DM_STAGE/$(printf '%s' "$dest" | /usr/bin/sha256sum | /usr/bin/cut -c1-16)
-  /usr/bin/install -o root -g root -m 0600 -- "$source" "$stage"
+  local dest=$1 source=$2 wanted=$3 mode=$4 directory problem stage
+  directory=$(/usr/bin/dirname -- "$dest")
+  problem=$(dm_ancestors_problem "$dest") || dm_fail "not installing $dest: unsafe directory $problem"
+  [[ -d $directory && ! -L $directory ]] || dm_fail "not installing $dest: its directory is missing"
+  stage=$(/usr/bin/mktemp -- "$directory/.amux-dm-install.XXXXXXXX") || dm_fail "not installing $dest: cannot stage it"
+  DM_STAGED+=("$stage")
+  /usr/bin/cp -- "$source" "$stage"
   [[ $(dm_sha256_of "$stage") == "$wanted" ]] || dm_fail "copy of $dest does not match its sha256; nothing moved for it"
+  /usr/bin/chown root:root -- "$stage"
   /usr/bin/chmod "$mode" -- "$stage"
-  [[ -d $(/usr/bin/dirname -- "$dest") ]] || dm_fail "the directory of $dest is missing"
+  problem=$(dm_ancestors_problem "$dest") || dm_fail "not installing $dest: unsafe directory $problem"
   /usr/bin/mv -fT -- "$stage" "$dest"
-  [[ $(dm_sha256_of "$dest") == "$wanted" ]] || dm_fail "installed $dest does not match its sha256"
+  [[ $(dm_file_action "$(dm_file_state "$dest")" "$wanted" "$mode") == same ]] ||
+    dm_fail "installed $dest is not root's regular file with mode $mode, one link and its sha256"
 }
 
 dm_main() {
@@ -338,6 +465,8 @@ dm_main() {
   dm_check "codex source is §5a's file" dm_cli_source_fits "$DM_CODEX_SOURCE" "$DM_CODEX_SHA256"
   dm_check "claude source is §5a's file" dm_cli_source_fits "$DM_CLAUDE_SOURCE" "$DM_CLAUDE_SHA256"
   dm_check "no Decision Maker unit is running" dm_units_not_running
+  dm_check "every existing directory on the way to a destination or the backup is root's, not a link, not writable by others" \
+    dm_destinations_safe
 
   if ((DM_FAILURES == 0)); then
     dm_plan "$DM_OPT/broker.mjs" "$DM_RELEASE/broker.mjs" "${DM_RELEASE_SHA256[broker.mjs]}" 0444
@@ -362,20 +491,22 @@ dm_main() {
     exit 0
   fi
 
-  local stamp backup index
+  local stamp backup index problem
   stamp=$(/usr/bin/date -u +%Y%m%dT%H%M%SZ)
   backup=$DM_BACKUP_ROOT/$stamp
-  # Only directories of this installation are made or given a mode.
+  trap dm_remove_staged EXIT
+  # Again right before the first change; then only directories of this
+  # installation are made or given a mode, each under a checked one.
+  dm_destinations_safe || dm_fail "a directory on the way to a destination or the backup is unsafe; nothing was changed"
   /usr/bin/install -d -o root -g root -m 0700 -- "$DM_BACKUP_ROOT"
-  /usr/bin/install -d -o root -g root -m 0755 -- "$DM_OPT" \
+  /usr/bin/install -d -o root -g root -m 0755 -- "$DM_OPT"
+  /usr/bin/install -d -o root -g root -m 0755 -- \
     "$(/usr/bin/dirname -- "$DM_CODEX_DEST")" "$(/usr/bin/dirname -- "$DM_CLAUDE_DEST")"
-  DM_STAGE=$(/usr/bin/mktemp -d -- "$DM_OPT/.install-XXXXXXXX")
-  /usr/bin/chmod 0700 -- "$DM_STAGE"
-  trap '/usr/bin/rm -rf -- "$DM_STAGE"' EXIT
   for index in "${!DM_PLAN_DEST[@]}"; do
     case ${DM_PLAN_ACTION[$index]} in
       same) continue ;;
-      replace)
+      replace|repair)
+        problem=$(dm_ancestors_problem "$backup/x") || dm_fail "not keeping a backup: unsafe directory $problem"
         /usr/bin/install -d -o root -g root -m 0700 -- "$backup$(/usr/bin/dirname -- "${DM_PLAN_DEST[$index]}")"
         /usr/bin/cp -a -- "${DM_PLAN_DEST[$index]}" "$backup${DM_PLAN_DEST[$index]}"
         printf 'kept     %s -> %s\n' "${DM_PLAN_DEST[$index]}" "$backup${DM_PLAN_DEST[$index]}" ;;

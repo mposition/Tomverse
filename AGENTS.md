@@ -1845,7 +1845,8 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `scripts/amux-dm-launcher.mjs`, `scripts/build-amux-decision-maker.mjs`(`npm run build:amux-decision-maker`),
   `scripts/install-amux-decision-maker.sh`, `scripts/systemd/amux-dm-broker.{socket,service}`,
   `scripts/systemd/amux-dm-launcher-{openai,anthropic}.socket`·`@.service`, `tests/amuxDecisionMakerBrokerCore.test.mjs`,
-  `tests/amuxDecisionMakerBroker.test.mjs`, `tests/amuxDecisionMakerInstall.test.mjs`, `tests/support/amuxDmBrokerFixture.mjs`.
+  `tests/amuxDecisionMakerBroker.test.mjs`, `tests/amuxDecisionMakerInstall.test.mjs`, `tests/amuxDecisionMakerInstallShell.test.mjs`,
+  `scripts/amux-decision-maker-release-out.mjs`, `tests/amuxDecisionMakerReleaseOut.test.mjs`, `tests/support/amuxDmBrokerFixture.mjs`.
   **sudo·setuid 없이 계정을 나누는 것은 systemd입니다** — bridge는 broker 소켓(`/run/amux-dm-broker/broker.sock`, broker 소유·
   `tomverse-bridge` 그룹·`0660`)에, broker만 공급사별 launcher 소켓(`/run/amux-dm-launcher/<instance>.sock`, broker 소유·`0600`)에
   닿고, launcher 소켓은 `Accept=yes`·`MaxConnections=1`이라 연결마다 그 공급사 계정의 unit 하나가 뜹니다. 그 unit의
@@ -1860,8 +1861,14 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `cleanup`(범위와 종류만, 경로 없음)이 있습니다. 같은 인스턴스의 두 번째 요청은 아무것도 건드리지 않고 `busy`입니다. 카드는
   stdin으로만 가고 요청 디렉터리는 비어 있으며, S2b 스냅샷은 없습니다. **설치는 dry run이 기본입니다** — build가 만든 릴리스 디렉터리
   (번들·스키마·unit·설치기·`manifest.sha256`)를 root 소유 위치로 옮겨 그 manifest의 sha256을 주고 실행하며, `--apply`일 때만
-  docs/policy/amux-decision-maker.md §5a의 경로로 CLI를 복사(복사본의 sha256을 정책 값과 대조), 다른 바이트의 기존 파일은 `/var/backups/tomverse-amux-dm/<시각>/`에
-  보존하고, `daemon-reload`까지만 합니다. unit을 enable·start하지 않고, CLI는 `--version`만(nobody, 네트워크 없는 namespace, 빈
+  docs/policy/amux-decision-maker.md §5a의 경로로 CLI를 복사(복사본의 sha256을 정책 값과 대조)하고 `daemon-reload`까지만 합니다.
+  **같은 바이트만으로는 그대로 두지 않습니다** — root 소유·root 그룹·정확한 mode·링크 1개인 일반 파일일 때만 `same`이고, 바이트가
+  같아도 그 밖이면 `repair`로 다른 바이트(`replace`)처럼 `/var/backups/tomverse-amux-dm/<시각>/`에 보존한 뒤 목적지 디렉터리 안에서
+  만든 사본을 rename으로 원자 교체합니다. 목적지의 link·디렉터리는 거부합니다. **목적지와 백업으로 가는 길의 이미 있는 모든 디렉터리**는
+  link 아님·root 소유·그룹/기타 쓰기 없음이어야 하며, dry run이 보고하고 apply가 첫 변경 직전과 각 이동 직전에 다시 확인합니다
+  (검토 r-20261017-113433-e16efc 1·2). 빌드의 `--out`은 저장소·홈·파일시스템 루트와 그 조상을 언제나 거부하고, 기본 경로 밖의 비어 있지
+  않은 디렉터리는 빌드가 남긴 표식(`.amux-decision-maker-release`)이 있을 때만 교체합니다(같은 검토 3).
+  unit을 enable·start하지 않고, CLI는 `--version`만(nobody, 네트워크 없는 namespace, 빈
   환경) 실행하며, 앱의 `TOMVERSE_AMUX_DM_ROUTING`은 그대로 꺼져 있습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
   없습니다.
 

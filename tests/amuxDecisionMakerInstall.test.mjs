@@ -189,15 +189,17 @@ test("the installer is a dry run unless --apply is given, and needs the manifest
   }
 });
 
-test("a file is installed when absent, left when equal, and kept in the backup before it is replaced", () => {
-  const action = (current, wanted) => bash('dm_file_action "$1" "$2"', current, wanted);
-  assert.equal(action("", SHA).stdout, "install\n");
-  assert.equal(action(SHA, SHA).stdout, "same\n");
-  assert.equal(action(OTHER_SHA, SHA).stdout, "replace\n");
-  for (const [current, wanted] of [["unreadable", SHA], ["not-a-regular-file", SHA], [SHA, ""], ["", "x"]]) {
-    assert.notEqual(action(current, wanted).status, 0, `${current} -> ${wanted}`);
+test("a file is installed when absent, left only when already right, and kept in the backup before it is replaced", () => {
+  // The full judgement is tests/amuxDecisionMakerInstallShell.test.mjs (review (1)).
+  const action = (state, wanted) => bash('dm_file_action "$1" "$2" 0444', state, wanted);
+  assert.equal(action("absent", SHA).stdout, "install\n");
+  assert.equal(action(`file 0 0 444 1 ${SHA}`, SHA).stdout, "same\n");
+  assert.equal(action(`file 0 0 444 1 ${OTHER_SHA}`, SHA).stdout, "replace\n");
+  assert.equal(action(`file 993 993 644 1 ${SHA}`, SHA).stdout, "repair\n");
+  for (const [state, wanted] of [["unreadable", SHA], ["link", SHA], ["other", SHA], [`file 0 0 444 1 ${SHA}`, ""]]) {
+    assert.notEqual(action(state, wanted).status, 0, `${state} -> ${wanted}`);
   }
-  assert.match(installer, /replace\)\n\s+\/usr\/bin\/install -d [^\n]*\$backup[\s\S]*?\/usr\/bin\/cp -a -- "\$\{DM_PLAN_DEST\[\$index\]\}" "\$backup/);
+  assert.match(installer, /replace\|repair\)\n[\s\S]*?\/usr\/bin\/install -d [^\n]*\$backup[\s\S]*?\/usr\/bin\/cp -a -- "\$\{DM_PLAN_DEST\[\$index\]\}" "\$backup/);
 });
 
 test("the manifest names exactly the release's files, each once, in sha256sum's format", () => {
