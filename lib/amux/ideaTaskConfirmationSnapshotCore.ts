@@ -1,9 +1,13 @@
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import type { AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
+import { deriveAmuxExecutionGrade, type AmuxExecutionGrade } from
+  "./executionGradeCore.ts";
 import type { AmuxIdeaDuplicateScan, AmuxIdeaUnitConfirmationSnapshot } from
   "./ideaUnitConfirmationCore.ts";
 import type { V4TaskCostCeilingReceipt } from "./v4TaskCostCeilingCore.ts";
+import type { AmuxV19UnitRegistrationAuthority } from
+  "./ideaSystemRegistrationCore.ts";
 
 type Keyed = { digest: string; keyId: string };
 type Node = AmuxIdeaUnitConfirmationSnapshot["hierarchy"][number];
@@ -15,6 +19,7 @@ type CardReference = NonNullable<
 export function assembleAmuxV4TaskConfirmation(input: {
   ideaId: string; decisionId: string; prepareRequestId: string;
   actorUserId: string; ownerSession: Keyed;
+  registrationAuthority?: AmuxV19UnitRegistrationAuthority;
   unit: { id: string; localRef: string; bodyDigest: string;
     bodyDigestKeyId: string };
   proposal: AmuxAnalysisCard;
@@ -23,6 +28,7 @@ export function assembleAmuxV4TaskConfirmation(input: {
     scopeDigestKeyId: string | null };
   hierarchy: [Node, Node, Node]; sourceFeatureRef: string;
   parentStory: CardReference | null; dependencies: CardReference[];
+  finalExecutionGrade: AmuxExecutionGrade;
   costReceipt: V4TaskCostCeilingReceipt;
   publicPrDisclosureApproved: boolean;
   duplicateScan: AmuxIdeaDuplicateScan; decisionReason: string | null;
@@ -35,9 +41,15 @@ export function assembleAmuxV4TaskConfirmation(input: {
       hierarchy[2].level !== "feature" ||
       proposal.executionBrief === null || proposal.taskRole === null ||
       proposal.executionGrade === null ||
+      !["routine", "advanced", "frontier"].includes(proposal.executionGrade) ||
+      input.finalExecutionGrade !== deriveAmuxExecutionGrade({
+        taskRole: proposal.taskRole,
+        expectedPaths: proposal.expectedPaths,
+        proposedGrade: proposal.executionGrade,
+      }) ||
       (input.publicPrDisclosureApproved && proposal.taskRole !== "implement") ||
       input.costReceipt.role !== proposal.taskRole ||
-      input.costReceipt.grade !== proposal.executionGrade ||
+      input.costReceipt.grade !== input.finalExecutionGrade ||
       (proposal.parentStoryRef === null) !== (input.parentStory === null) ||
       proposal.dependencyRefs.length !== input.dependencies.length ||
       new Set(input.dependencies.map((entry) => entry.id)).size !==
@@ -66,12 +78,14 @@ export function assembleAmuxV4TaskConfirmation(input: {
         "analysis_draft", unit.id, input.key);
       return { digest: value.digest, keyId: value.digestKeyId };
     })();
-    return { schemaVersion: 1, policyVersion: "amux-intake-v11",
+    return { schemaVersion: 1, policyVersion: "amux-intake-v20",
       canonicalizerVersion: "amux-canonical-v1",
       scannerVersion: input.duplicateScan.scanVersion,
       ideaId: input.ideaId, decisionId: input.decisionId,
       prepareRequestId: input.prepareRequestId,
       actorUserId: input.actorUserId, ownerSession: input.ownerSession,
+      ...(input.registrationAuthority ?
+        { registrationAuthority: input.registrationAuthority } : {}),
       draftUnitId: unit.id, localRef: unit.localRef,
       unitVersion: 1, unitKind: "card", unitBody: body,
       draftShape: { kind: "card", cardType: "task", storyKind: null },
@@ -87,7 +101,8 @@ export function assembleAmuxV4TaskConfirmation(input: {
         featureNodeId: hierarchy[2].id,
         parentStory: input.parentStory, dependencies: input.dependencies,
         evidence: [], task: { role: proposal.taskRole,
-          grade: proposal.executionGrade,
+          proposedGrade: proposal.executionGrade,
+          grade: input.finalExecutionGrade,
           publicPrDisclosureApproved: input.publicPrDisclosureApproved,
           brief: { digest: brief.digest, keyId: brief.digestKeyId },
           costReceipt: input.costReceipt } },

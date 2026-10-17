@@ -2,7 +2,7 @@ schemaVersion: 4
 
 metadata:
   status: draft
-  lastUpdated: "2026-10-16"
+  lastUpdated: "2026-10-17"
   owner: security-privacy
   validatorCommand: npm run check:data-domain-registry
   purpose: >-
@@ -1980,6 +1980,116 @@ domains:
       own registered actor link and privacy decision; no session intake route is
       enabled.
 
+  - domain: amuxIdeaTrackedCheckoutEvidence
+    prismaModel: AmuxIdeaTrackedCheckoutEvidence
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, AMUX tracked-checkout evidence account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The append-only row records one source reference ordinal, its fixed commit
+      SHA, aggregate exclusion counts, and a keyed exclusion-path digest. It
+      stores no repository path, excluded path, temporary checkout directory,
+      file content, or read-event detail. The restrictive parent and audit
+      references do not resolve account deletion, retention, or unified export.
+
+  - domain: amuxIdeaTrackedCheckoutReadManifest
+    prismaModel: AmuxIdeaTrackedCheckoutReadManifest
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, encrypted CLI read-manifest account deletion,
+      external key retirement, retention, and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The row stores CLI-observed read-file paths as ciphertext under a separate
+      external content key. The operator approved deletion of both at the
+      submission's absolute seven-day mark, subject only to a valid legal hold.
+      A dark, bounded purge path retains the reference ordinal, fixed commit
+      SHA, file count, keyed digest, and canonical audit without paths. Scheduler
+      activation, backup deletion evidence, account deletion, and export remain
+      unverified; restrictive parent and audit references remain.
+
+  - domain: amuxIdeaReadManifestKeyIntent
+    prismaModel: AmuxIdeaReadManifestKeyIntent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, read-manifest key-intent account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The row records durable creation and retirement intent for one external
+      read-manifest key, with canonical audit references and no file paths or
+      ciphertext. It permits a seven-day orphan-key sweep, but its restrictive
+      parent and audit references do not settle account deletion or export.
+
+  - domain: amuxIdeaSessionAnalysisReservation
+    prismaModel: AmuxIdeaSessionAnalysisReservation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, AMUX session analysis reservation account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The append-only queue receipt links the scope owner's identifier to one
+      session idea, request identifier, saved operating-scope version, selected
+      model, and canonical system audit. It stores no idea text, source labels,
+      repository names, paths, model response, or cost amount. The restrictive
+      parent and audit references do not resolve account deletion, retention,
+      or unified export.
+
+  - domain: amuxIdeaSessionAnalysisBudgetClaim
+    prismaModel: AmuxIdeaSessionAnalysisBudgetClaim
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, session CLI budget-claim account deletion,
+      retention and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: reservationId
+      parentModel: AmuxIdeaSessionAnalysisReservation
+    inUnifiedExport: unverified
+    note: >-
+      The claim follows the session reservation to the scope owner and keeps
+      the selected model, UTC budget month, token and money caps, settlement
+      amounts, status and canonical audit references. It stores no idea text,
+      repository paths or model response. Restrictive reservation, ledger,
+      price-version and audit references do not establish account deletion,
+      retention cleanup or unified export; live CLI admission remains gated.
+
   - domain: amuxIdeaAnalysisChunk
     prismaModel: AmuxIdeaAnalysisChunk
     userLinkageRole: actor
@@ -2092,6 +2202,29 @@ domains:
       guards and RESTRICT references exclude child-first deletion after a
       decision exists; a retention-preserving account-deletion plan is needed
       before any live owner-decision writer can be enabled.
+
+  - domain: amuxIdeaRegistrationRefusal
+    prismaModel: AmuxIdeaRegistrationRefusal
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v20, AMUX final-Guard refusal account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The actor is the operator whose Admin registration request reached the
+      final deterministic Guard. This append-only row keeps identifiers, a
+      closed refusal code, a database timestamp, and closed proposed/final
+      grades; it never stores expected paths or proposal text. A restrictive
+      reference binds the same-transaction canonical human audit. The approved
+      seven-year decision-metadata rule does not yet resolve account deletion,
+      legal hold enforcement, end-of-retention cleanup, or unified export.
 
   - domain: amuxIdeaSourceScopeApproval
     prismaModel: AmuxIdeaSourceScopeApproval

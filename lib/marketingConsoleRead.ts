@@ -14,6 +14,7 @@ import {
   parseMarketingWebhookFaultArm,
 } from "@/lib/marketingWebhookCore";
 import {
+  MARKETING_COMPETITOR_READ_LIMIT,
   MARKETING_READ_PAGE_SIZE,
   marketingSectionAvailability,
   type MarketingConsoleSection,
@@ -115,7 +116,7 @@ export type MarketingConsolePayload = {
   section: MarketingConsoleSection;
   availability: MarketingSectionAvailability;
   /** How the listed rows were chosen, so the screen can say it exactly. */
-  ordering: "newest" | "by-account";
+  ordering: "newest" | "by-account" | "by-status";
   pageSize: number;
   rows: Record<string, unknown>[];
   switches: MarketingSwitchStates;
@@ -142,6 +143,12 @@ export type MarketingConsolePayload = {
   configGeneration: number | null;
   /** Null outside staging; see `MarketingWebhookStagingView`. */
   webhookStaging: MarketingWebhookStagingView | null;
+  /**
+   * Whether rows were left out at the section's limit. Said only where the
+   * limit is not a "newest N" page: a registry row past the cut is one the
+   * screen cannot act on, and stating the cap alone would not say it was hit.
+   */
+  truncated?: boolean;
 };
 
 const state = (
@@ -535,6 +542,48 @@ export async function readMarketingConsole(
         approvalStartedAt: channel.approvalStartedAt?.toISOString() ?? null,
         graduatedAt: channel.graduatedAt?.toISOString() ?? null,
         pausedAt: channel.pausedAt?.toISOString() ?? null,
+      })),
+    };
+  }
+
+  if (section === "competitors") {
+    // Approved first, then proposals, rejections and retirements (the status
+    // names sort that way, which tests/marketingCompetitorCore.test.mjs pins),
+    // newest change first within each. One row past the limit is read to tell
+    // a full page from a cut one. Everything a
+    // decision compares against travels with the row: the decision the page
+    // showed is what a change is checked against.
+    const competitors = await prisma.marketingCompetitor.findMany({
+      orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
+      take: MARKETING_COMPETITOR_READ_LIMIT + 1,
+      select: {
+        id: true,
+        displayName: true,
+        officialHosts: true,
+        status: true,
+        proposedBy: true,
+        proposedRunId: true,
+        evidenceUrls: true,
+        rationale: true,
+        decisionAuditLogId: true,
+        decidedAt: true,
+        createdAt: true,
+      },
+    });
+    return {
+      section,
+      availability,
+      ordering: "by-status",
+      pageSize: MARKETING_COMPETITOR_READ_LIMIT,
+      switches,
+      configGeneration,
+      webhookStaging,
+      canWrite,
+      truncated: competitors.length > MARKETING_COMPETITOR_READ_LIMIT,
+      rows: competitors.slice(0, MARKETING_COMPETITOR_READ_LIMIT).map((competitor) => ({
+        ...competitor,
+        decidedAt: competitor.decidedAt?.toISOString() ?? null,
+        createdAt: competitor.createdAt.toISOString(),
       })),
     };
   }

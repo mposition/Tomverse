@@ -15,6 +15,8 @@ import {
   amuxExecutionGradeRoutingOpen,
   amuxWorkerMatchesExecutionGrade,
   classifyAmuxExecutionPath,
+  decideAmuxV52ChangedPaths,
+  decideAmuxV52SettlementPaths,
   deriveAmuxExecutionGrade,
   isAmuxV52TaskConfirmation,
   normalizeAmuxExecutionPath,
@@ -27,13 +29,15 @@ const task = (overrides = {}) => ({
   ...overrides,
 });
 
-test("S1 ships the code latch off", () => {
-  assert.equal(AMUX_EXECUTION_GRADE_CODE_LATCH, false);
+test("v52 code latch requires the exact enabled operation switch", () => {
+  assert.equal(AMUX_EXECUTION_GRADE_CODE_LATCH, true);
   assert.equal(AMUX_EXECUTION_GRADE_ENV, "TOMVERSE_AMUX_EXECUTION_GRADE");
-  assert.equal(amuxExecutionGradeRoutingEnabled("enabled"), false);
+  assert.equal(amuxExecutionGradeRoutingEnabled("enabled"), true);
   assert.equal(amuxExecutionGradeRoutingOpen(true, "enabled"), true);
-  for (const value of [undefined, "", "true", "ENABLED", " enabled"])
+  for (const value of [undefined, "", "true", "ENABLED", " enabled"]) {
+    assert.equal(amuxExecutionGradeRoutingEnabled(value), false);
     assert.equal(amuxExecutionGradeRoutingOpen(true, value), false);
+  }
   assert.equal(amuxExecutionGradeRoutingOpen(false, "enabled"), false);
 });
 
@@ -68,6 +72,30 @@ test("an exact worker grade never borrows a higher or lower worker", () => {
   }
   assert.equal(amuxWorkerMatchesExecutionGrade("routine", "chore", null), false);
   assert.equal(amuxWorkerMatchesExecutionGrade("standard", "chore", registry), false);
+});
+
+test("v52 post-run inventory blocks unknown paths and escalates contract touches", () => {
+  assert.equal(decideAmuxV52ChangedPaths("routine", []), "pass");
+  assert.equal(decideAmuxV52ChangedPaths("advanced", ["src/ordinary.ts"]), "pass");
+  assert.equal(decideAmuxV52ChangedPaths("routine", ["LIB/AMUX/Foo.ts"]), "escalate");
+  assert.equal(decideAmuxV52ChangedPaths("frontier", ["lib/amux/Foo.ts"]), "pass");
+  assert.equal(decideAmuxV52ChangedPaths("advanced", undefined), "blocked");
+  assert.equal(decideAmuxV52ChangedPaths("advanced", ["../escape"]), "blocked");
+  assert.equal(decideAmuxV52ChangedPaths("advanced", ["src/a.ts", "./../escape"]), "blocked");
+});
+
+test("v52 settlement checks publish files against the complete inventory", () => {
+  const file = (path) => ({ path });
+  assert.equal(decideAmuxV52SettlementPaths("routine",
+    ["src/ordinary.ts"], [file("lib/amux/guard.ts")]), "blocked");
+  assert.equal(decideAmuxV52SettlementPaths("advanced",
+    ["src/ordinary.ts"], [file("src/omitted.ts")]), "blocked");
+  assert.equal(decideAmuxV52SettlementPaths("advanced",
+    ["src/ordinary.ts"], [file("src/ordinary.ts")]), "pass");
+  assert.equal(decideAmuxV52SettlementPaths("frontier",
+    ["src/ordinary.ts"], [file("lib/amux/guard.ts")]), "blocked");
+  assert.equal(decideAmuxV52SettlementPaths("routine",
+    undefined, [file("lib/amux/guard.ts")]), "blocked");
 });
 
 test("hard frontier conditions precede the intake proposal", () => {

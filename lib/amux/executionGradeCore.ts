@@ -4,7 +4,7 @@
  * the same path judgement without reading a switch or calling a model.
  */
 
-export const AMUX_EXECUTION_GRADE_CODE_LATCH = false;
+export const AMUX_EXECUTION_GRADE_CODE_LATCH = true;
 export const AMUX_EXECUTION_GRADE_ENV = "TOMVERSE_AMUX_EXECUTION_GRADE";
 
 export const amuxExecutionGradeRoutingOpen = (codeLatch: boolean,
@@ -135,6 +135,34 @@ export const classifyAmuxExecutionPath = (input: unknown): AmuxExecutionPathClas
   return AMUX_CONTRACT_PATHS.some((prefix) => lowerPath.startsWith(prefix.toLowerCase()))
     ? "contract"
     : "ordinary";
+};
+
+export type AmuxV52PathDecision = "pass" | "blocked" | "escalate";
+
+/** A missing inventory is unknown, never an empty inventory. */
+export const decideAmuxV52ChangedPaths = (grade: unknown,
+  changedPaths: unknown): AmuxV52PathDecision => {
+  if (!amuxWorkerRoleForExecutionGrade(grade) ||
+      !Array.isArray(changedPaths)) return "blocked";
+  let contract = false;
+  for (const path of changedPaths) {
+    const kind = classifyAmuxExecutionPath(path);
+    if (kind === "invalid") return "blocked";
+    if (kind === "contract") contract = true;
+  }
+  return contract && grade !== "frontier" ? "escalate" : "pass";
+};
+
+/** A publish candidate must be covered by the runner's complete path inventory. */
+export const decideAmuxV52SettlementPaths = (grade: unknown,
+  changedPaths: unknown, publishFiles: readonly { path: string }[] | null):
+  AmuxV52PathDecision => {
+  const reported = decideAmuxV52ChangedPaths(grade, changedPaths);
+  if (reported === "blocked" || !publishFiles?.length) return reported;
+  const names = changedPaths as string[];
+  const missing = publishFiles.map((file) => file.path)
+    .filter((path) => !names.includes(path));
+  return missing.length === 0 ? reported : "blocked";
 };
 
 export type AmuxExecutionGradeInput = {

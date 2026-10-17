@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
-import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary, type AmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import {
   DM_KEY_PERIOD_MS,
   dmBodyDigest,
@@ -40,9 +40,12 @@ import {
 import {
   DecisionMakerRequestWriteError,
   discardDecisionMakerAssignment,
+  lookupDecisionMakerResult,
   readDecisionMakerRequestState,
   recordDecisionMakerRequest,
+  recordDecisionMakerResultUnknown,
   recordDecisionMakerTransmitIntent,
+  recordDecisionMakerTransmitOutcome,
   staleCloseDecisionMakerRequest,
 } from "@/lib/amux/decisionMakerRequestStore";
 import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
@@ -574,6 +577,127 @@ test("the routing route's boundary is the routing at its largest: one call fewer
     );
     assert.equal(routed.route, "dm_proposal");
     assert.ok(routed.cardText);
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});
+
+/**
+ * Stage S2's internal routes for the bridge and the broker
+ * (app/api/internal/amux/decision-maker/**): each runs one store operation in
+ * a boundary of its own, whose ceiling is that operation at its largest --
+ * with an integrity key -- plus setup and fence. The statements are counted in
+ * tests/amuxDecisionMakerBody.test.mjs and tests/amuxDecisionMakerRequest.test.mjs;
+ * here the real database and the real boundary agree with that count.
+ */
+test("stage S2's internal route boundaries hold each operation at its largest: one call fewer refuses it and leaves nothing", async () => {
+  const names = ["ADMIN_AUDIT_INTEGRITY_KEY", "ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = "dm-internal-routes-db-test-key";
+  delete process.env.ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS;
+  try {
+    const period = await currentPeriod();
+    const ring = new Map([[period, KEY]]);
+    const B = AMUX_DB_BOUNDARIES;
+    const kinds = async (requestId: string) =>
+      (
+        await prisma.$queryRaw<Array<{ kind: string }>>`
+          SELECT "kind" FROM "AmuxDecisionMakerRequestEvent" WHERE "requestId" = ${requestId} ORDER BY "sequence"
+        `
+      ).map((row) => row.kind);
+    /** One call fewer refuses the operation and leaves the request's events as they were; its own boundary runs it. */
+    const atCeiling = async <T,>(
+      boundary: AmuxDbBoundary,
+      requestId: string,
+      work: (tx: Prisma.TransactionClient, context: { requireLeaseAt: (deadline: Date) => void }) => Promise<T>,
+    ): Promise<T> => {
+      const before = await kinds(requestId);
+      await assert.rejects(
+        withAmuxDbBoundary({ ...boundary, prismaCallCeiling: boundary.prismaCallCeiling - 1 }, work),
+        (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+        boundary.operation,
+      );
+      assert.deepEqual(await kinds(requestId), before, boundary.operation);
+      return withAmuxDbBoundary(boundary, work);
+    };
+    const route = async () => {
+      const routed = await prisma.$transaction((tx) =>
+        recordDecisionMakerRequestWithCardText(tx, { binding: routingBindingFor(), card: ROUTED_CARD, keyRing: ring }),
+      );
+      assert.equal(routed.route, "dm_proposal");
+      return routed.requestId;
+    };
+    const assign = (requestId: string) =>
+      withAmuxDbBoundary(B.decisionMakerAssignment, (tx, context) =>
+        assignDecisionMakerRequestWithDigestKey(tx, { requestId, requireLeaseAt: context.requireLeaseAt, keyRing: ring }),
+      );
+    const transmission = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
+    const intend = (requestId: string, context: { requireLeaseAt: (deadline: Date) => void }, tx: Prisma.TransactionClient) =>
+      recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, requireLeaseAt: context.requireLeaseAt });
+
+    // The assignment, the intent, the receipt, the result and its lookup, each in its route's boundary.
+    const requestId = await route();
+    const assigned = await atCeiling(B.decisionMakerAssignment, requestId, (tx, context) =>
+      assignDecisionMakerRequestWithDigestKey(tx, { requestId, requireLeaseAt: context.requireLeaseAt, keyRing: ring }),
+    );
+    if (!assigned.recorded) throw new Error(`assignment refused: ${assigned.reason}`);
+    assert.equal((await atCeiling(B.decisionMakerTransmitIntent, requestId, (tx, context) => intend(requestId, context, tx))).recorded, true);
+    const receipt = await atCeiling(B.decisionMakerTransmitOutcome, requestId, (tx) =>
+      recordDecisionMakerTransmitOutcome(tx, { requestId, instance: OPENAI, outcome: "receipt" }),
+    );
+    assert.equal(receipt.recorded, true);
+    const stored: Record<string, unknown> = { ...(await readDecisionMakerRequestState(prisma, requestId))!.binding };
+    delete stored.askingProvider;
+    const raw = JSON.stringify({ kind: "free_text", answer: "Use the model id only.", rationale: "The locale is already in the path.", irreversible: false });
+    const submitted = await atCeiling(B.decisionMakerResultSubmission, requestId, (tx, context) =>
+      submitDecisionMakerOutput(tx, {
+        requestId,
+        instance: OPENAI,
+        binding: { ...stored, transmission },
+        output: { kind: "output", raw, options: ROUTED_CARD.options },
+        requireLeaseAt: context.requireLeaseAt,
+        keyRing: ring,
+      }),
+    );
+    if (submitted.status !== "submitted" || submitted.result.status !== "accepted") {
+      throw new Error(`result not accepted: ${JSON.stringify(submitted.status)}`);
+    }
+    // The refused submission left no detail and no body either.
+    assert.deepEqual(await bodyFields(requestId), ["card_text", "dm_answer", "dm_rationale"]);
+    const details = await prisma.$queryRaw<Array<{ n: bigint }>>`
+      SELECT count(*)::bigint AS "n" FROM "AmuxDecisionMakerResultDetail" WHERE "requestId" = ${requestId}
+    `;
+    assert.equal(Number(details[0]!.n), 1);
+    // The request key the assignment handed out is what lets a broker that lost this answer look the pair up (§9).
+    const brokerDigest = dmResultDigest(assigned.requestKey, { kind: "output", raw });
+    assert.equal(submitted.resultDigest, brokerDigest);
+    const lookup = await atCeiling(B.decisionMakerResultLookupRead, requestId, (tx) =>
+      lookupDecisionMakerResult(tx, { requestId, resultDigest: brokerDigest }),
+    );
+    assert.deepEqual(lookup, { status: "accepted", eventId: submitted.result.event.eventId, resultKind: "proposal" });
+    assert.deepEqual(await kinds(requestId), ["assign", "transmit_intent", "transmit_receipt", "result"]);
+
+    // A discarded assignment.
+    const discardId = await route();
+    assert.equal((await assign(discardId)).recorded, true);
+    const discarded = await atCeiling(B.decisionMakerAssignmentDiscard, discardId, (tx) =>
+      discardDecisionMakerAssignment(tx, { requestId: discardId }),
+    );
+    assert.equal(discarded.recorded, true);
+    assert.deepEqual(await kinds(discardId), ["assign", "assign_discarded"]);
+
+    // A result the broker could not settle by its pair.
+    const unknownId = await route();
+    assert.equal((await assign(unknownId)).recorded, true);
+    assert.equal((await withAmuxDbBoundary(B.decisionMakerTransmitIntent, (tx, context) => intend(unknownId, context, tx))).recorded, true);
+    const unknown = await atCeiling(B.decisionMakerResultUnknown, unknownId, (tx) =>
+      recordDecisionMakerResultUnknown(tx, { requestId: unknownId, instance: OPENAI, resultDigest: DIGEST_A }),
+    );
+    assert.equal(unknown.recorded, true);
+    assert.deepEqual(await kinds(unknownId), ["assign", "transmit_intent", "result_unknown"]);
   } finally {
     for (const name of names) {
       if (previous[name] === undefined) delete process.env[name];
@@ -1387,6 +1511,9 @@ test("the retention sweep rotates the next key in, closes a stale request, purge
 
   const first = await sweep();
   assert.deepEqual(first, {
+    // No instance has a validation failure, so §8's check latches nothing.
+    validationLatched: 0,
+    validationLatchUnsettled: 0,
     keyRing: "loaded",
     keysRotated: 1,
     staleClosed: 1,
@@ -1410,10 +1537,10 @@ test("the retention sweep rotates the next key in, closes a stale request, purge
 
   // The next run finds the expired request's period empty and destroys its key; the one after finds nothing.
   const second = await sweep();
-  assert.deepEqual(second, { keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 1, refused: 0, stopped: null });
+  assert.deepEqual(second, { validationLatched: 0, validationLatchUnsettled: 0, keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 1, refused: 0, stopped: null });
   assert.ok(new Set((await keyEvents()).filter((row) => row.kind === "destroy").map((row) => Number(row.keyPeriod))).has(expiredPeriod));
   const third = await sweep();
-  assert.deepEqual(third, { keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 0, refused: 0, stopped: null });
+  assert.deepEqual(third, { validationLatched: 0, validationLatchUnsettled: 0, keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 0, refused: 0, stopped: null });
 
   // Each write is the router's own, under the audit its row names.
   const audits = await prisma.$queryRaw<Array<{ action: string; systemActor: string | null }>>`

@@ -573,12 +573,31 @@ const compilerOptions = parsedConfig.options;
 // `lib/adminAudit.ts` and `lib/adminAuditSystemActors.ts` above their existing
 // computed accesses. The asserted count remains 228 and the position-free
 // inventory remains 9aa7ec49..., so this repins source positions only.
+// 2026-10-16, AMUX v19.5 system registration: the registration and portfolio
+// system actors extend lib/adminAuditSystemActors.ts above its existing
+// computed access. Count 228 and the position-free inventory remain unchanged;
+// only that source position moves.
+// 2026-10-17, AMUX v19 pinned-checkout evidence: its closed system action,
+// target and scope extend lib/adminAuditSystemActors.ts above the same reviewed
+// computed access. Count 228 and the position-free inventory remain unchanged;
+// only source positions are repinned.
+// 2026-10-17, the closed v19 session budget audit actions move those same
+// accesses again. The count and position-free digest still match unchanged.
+// 2026-10-17, AMUX v19 session analysis reservation: its closed system action,
+// target and scope extend lib/adminAuditSystemActors.ts above the same reviewed
+// computed access. Count 228 and the position-free inventory remain unchanged;
+// only source positions are repinned.
+// 2026-10-17, AMUX v19 read-manifest orphan-key audit actions move the existing
+// computed access in lib/adminAuditSystemActors.ts from line 424 to 454. The
+// count and position-free inventory remain unchanged; only its position moves.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
+// AMUX v19 repository-read and session-reservation additions shift source
+// positions in the reviewed closure. The position-free digest stays fixed.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "888c5e2bc4dfc00ffb570c99f3c522c9",
-  "5796bf45b55790e72d0aad740de95b91",
+  "93b601659c97d6ad9beb1a2ce73cd938",
+  "d51c6dc976aba1d8b16258235a298ec0",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -75,7 +75,7 @@ test("the v4 node commit writes the chosen Feature prefix and audits both values
   const commit = source.slice(source.indexOf("export async function commitAmuxV4NodeCreation"),
     source.indexOf("export async function commitAmuxV4UnitRejection"));
   const chooseAt = commit.indexOf("await chooseAmuxFeatureDisplayPrefix(tx, plan.displayPrefix)");
-  const auditAt = commit.indexOf("await writeAdminAuditLog(");
+  const auditAt = commit.indexOf("await writeAmuxRegistrationAudit(");
   const createAt = commit.indexOf("await tx.amuxPortfolioNode.create(");
   assert.ok(chooseAt > 0 && chooseAt < auditAt && auditAt < createAt, "choose, then audit, then create");
   assert.match(commit.slice(auditAt, createAt),

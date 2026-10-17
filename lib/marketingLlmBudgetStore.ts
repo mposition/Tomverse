@@ -23,9 +23,11 @@ import "server-only";
 
 import { randomBytes } from "node:crypto";
 
-import { Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { MARKETING_RETENTION_SETTING } from "@/lib/marketingAutomationSchema";
+import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
 import {
   MARKETING_LLM_ADAPTER_PROFILE,
   MARKETING_LLM_ADAPTER_VERSION,
@@ -34,6 +36,7 @@ import {
   marketingLlmAdapterConfigDigest,
   marketingLlmCloseDigest,
   marketingLlmConfigSnapshot,
+  marketingLlmConsumerDigest,
   marketingLlmDispatchDigest,
   marketingLlmRequestDigest,
   marketingLlmReservation,
@@ -48,6 +51,7 @@ import {
   type MarketingLlmReservePayload,
   type MarketingLlmTerminalState,
 } from "@/lib/marketingLlmBudgetCore";
+import { MARKETING_RETENTION_ACTIONS, MarketingStoreRefusedError } from "@/lib/marketingStore";
 
 export const MARKETING_LLM_SYSTEM_ACTOR = "marketing-generator";
 
@@ -516,3 +520,308 @@ export const releaseMarketingLlmCall = (
   input: { readonly callId: string; readonly deadlineAt: Date },
   env: MarketingLlmBudgetEnvironment,
 ) => closeMarketingLlmCall(tx, { callId: input.callId, deadlineAt: input.deadlineAt, request: { action: "release" } }, env);
+
+// ---------------------------------------------------------------------------
+// expiry (S3c3b)
+
+/** Rows the sweep examines in one run; the rest wait for the next. */
+export const MARKETING_LLM_EXPIRY_BATCH_LIMIT = 200;
+
+/**
+ * The sweep has no caller's deadline. bound() is used for its timers -- the
+ * statement, idle and transaction bounds -- and this value only gives it a
+ * deadline far enough off that the run is never `late`.
+ */
+const EXPIRY_TRANSACTION_DEADLINE_MS = 60_000;
+
+export type MarketingLlmExpiryResult = {
+  readonly skipped: "kill_switch" | null;
+  readonly examined: number;
+  readonly released: number;
+  readonly unknownRetained: number;
+  readonly untouched: number;
+  /** Rows whose transaction failed; the rest of the batch still ran. */
+  readonly failed: number;
+};
+
+type ExpiryOutcome = "released" | "unknown_retained" | "untouched";
+
+/**
+ * Close one stale call, in its own transaction, by the database's clock.
+ *
+ * Same lock order as every action -- the audit chain, the call's month, then
+ * the row -- but none of the three is waited for. A generator request takes the
+ * chain and the month before it touches a row, so a sweep that waited on either
+ * would queue behind it; instead each is tried once and, if another
+ * transaction holds it, the row is left for the next run. The chain lock is
+ * the shared one `takeAuditChainLock()` takes, by the same key; the test holds
+ * that function's lock to show the sweep steps past it. Which rows are stale is
+ * decided in the row read, not from the candidate list, so a call closed in
+ * between is left alone. The close is the `expire` action: its digest differs from
+ * every generator close, so a generator report that arrives later is a
+ * conflict, not a second close.
+ */
+async function expireOne(tx: Tx, callId: string): Promise<ExpiryOutcome> {
+  const bounds = await bound(tx, new Date(Date.now() + EXPIRY_TRANSACTION_DEADLINE_MS));
+  if ("refused" in bounds || bounds.late) return "untouched";
+  // CASE fixes the order: the month is tried only once the chain is held.
+  const locks = await tx.$queryRaw<Array<{ held: boolean | null }>>(Prisma.sql`
+    SELECT CASE WHEN pg_try_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))
+                THEN pg_try_advisory_xact_lock(hashtextextended('marketing-llm-month:' || to_char("monthStart", 'YYYY-MM'), 0))
+           END AS "held"
+    FROM "MarketingLlmCall" WHERE "id" = ${callId}
+  `);
+  if (locks[0]?.held !== true) return "untouched";
+  const rows = await tx.$queryRaw<
+    Array<{ id: string; requestKey: string; dispatchIntentId: string | null; reservationExpired: boolean; dispatchExpired: boolean }>
+  >(Prisma.sql`
+    SELECT "id", "requestKey", "dispatchIntentId",
+           ("state" = 'reserved' AND "createdAt" + INTERVAL '15 minutes' <= (clock_timestamp() AT TIME ZONE 'UTC')) AS "reservationExpired",
+           ("state" = 'dispatched' AND "dispatchedAt" + INTERVAL '1 hour' <= (clock_timestamp() AT TIME ZONE 'UTC')) AS "dispatchExpired"
+    FROM "MarketingLlmCall" WHERE "id" = ${callId}
+    FOR UPDATE SKIP LOCKED
+  `);
+  const row = rows[0];
+  if (!row || (!row.reservationExpired && !row.dispatchExpired)) return "untouched";
+
+  const close: MarketingLlmClose = row.reservationExpired
+    ? { callId: row.id, requestKey: row.requestKey, action: "expire", terminalState: "released", reason: "reservation_expired" }
+    : {
+        callId: row.id,
+        requestKey: row.requestKey,
+        action: "expire",
+        terminalState: "unknown_retained",
+        reason: "dispatch_expired",
+        dispatchIntentId: row.dispatchIntentId ?? undefined,
+      };
+  const fromState = row.reservationExpired ? "reserved" : "dispatched";
+  const closeDigest = marketingLlmCloseDigest(close);
+  const auditId = await writeSystemAuditLog({
+    tx,
+    systemActor: MARKETING_LLM_SYSTEM_ACTOR,
+    action: CLOSE_AUDIT_ACTION[close.terminalState],
+    targetType: "MarketingLlmCall",
+    targetId: row.id,
+    summary: "Closed a stale marketing generator LLM call in the cost ledger.",
+    metadata: { closeAction: close.action, reason: close.reason, closeDigest },
+  });
+  const updated = await tx.$executeRaw(Prisma.sql`
+    UPDATE "MarketingLlmCall" SET "state" = ${close.terminalState}, "closeDigest" = ${closeDigest},
+      "closeAuditLogId" = ${auditId}, "closeReason" = ${close.reason}
+    WHERE "id" = ${row.id} AND "state" = ${fromState}
+  `);
+  if (updated !== 1) throw new Error("marketing_llm_expiry_lost_its_row");
+  return close.terminalState === "released" ? "released" : "unknown_retained";
+}
+
+/**
+ * The 15-minute sweep: a reservation never dispatched within 15 minutes is
+ * released, and a dispatch never reported within an hour is kept at its
+ * reservation as unknown. Nothing runs while the kill switch is on; the
+ * sweep resumes when it is lifted. Each row is its own transaction: a row that
+ * fails is counted and the rest of the batch still runs, so one bad row cannot
+ * keep every later reservation holding the month's budget. A rerun finds only
+ * what is still open.
+ *
+ * `expire` wraps the per-row step, given it as `next`, only so a test can make
+ * one row fail; production passes nothing.
+ */
+export async function expireMarketingLlmCalls(
+  prisma: PrismaClient,
+  input: {
+    readonly killSwitchOn: boolean | null;
+    readonly limit?: number;
+    readonly expire?: (
+      tx: Tx,
+      callId: string,
+      next: (tx: Tx, callId: string) => Promise<ExpiryOutcome>,
+    ) => Promise<ExpiryOutcome>;
+  },
+): Promise<MarketingLlmExpiryResult> {
+  const empty = { examined: 0, released: 0, unknownRetained: 0, untouched: 0, failed: 0 };
+  if (input.killSwitchOn !== false) return { skipped: "kill_switch", ...empty };
+  const candidates = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id" FROM "MarketingLlmCall"
+    WHERE ("state" = 'reserved' AND "createdAt" + INTERVAL '15 minutes' <= (clock_timestamp() AT TIME ZONE 'UTC'))
+       OR ("state" = 'dispatched' AND "dispatchedAt" + INTERVAL '1 hour' <= (clock_timestamp() AT TIME ZONE 'UTC'))
+    ORDER BY "createdAt", "id"
+    LIMIT ${input.limit ?? MARKETING_LLM_EXPIRY_BATCH_LIMIT}
+  `);
+  const counts = { ...empty, examined: candidates.length };
+  const expire = input.expire
+    ? (tx: Tx, callId: string) => input.expire!(tx, callId, expireOne)
+    : expireOne;
+  for (const { id } of candidates) {
+    let outcome: ExpiryOutcome;
+    try {
+      outcome = await prisma.$transaction((tx) => expire(tx, id), { maxWait: 5_000, timeout: 15_000 });
+    } catch {
+      counts.failed += 1;
+      continue;
+    }
+    if (outcome === "released") counts.released += 1;
+    else if (outcome === "unknown_retained") counts.unknownRetained += 1;
+    else counts.untouched += 1;
+  }
+  return { skipped: null, ...counts };
+}
+
+// ---------------------------------------------------------------------------
+// legal hold and retention (S3c3c)
+
+/**
+ * The predecessor a first hold decision names. Outside the id alphabet, so it
+ * cannot be mistaken for an audit row; the database's guard uses the same.
+ */
+export const MARKETING_LLM_NO_HOLD_DECISION = ":none";
+
+export const MARKETING_LLM_HOLD_ACTIONS = {
+  set: "marketing_llm.legal_hold_set",
+  released: "marketing_llm.legal_hold_released",
+} as const;
+
+/**
+ * A person puts a call under legal hold, or takes it off. The hold keeps the
+ * row past its 24-month retention until it is released.
+ *
+ * Each decision names the one it replaces: `expectedHoldAuditLogId` is the
+ * audit row of the decision the person's page showed (null for a row never
+ * held). The audit row this decision wrote -- a person's, written by the
+ * admin mutation before this runs -- must be evidence of exactly this action
+ * on this call and must name the same predecessor; the update then moves the
+ * flag and the stored decision together, and only from that predecessor. So
+ * neither an earlier release presented again nor a release meant for an older
+ * hold can lift a newer one.
+ */
+export async function setMarketingLlmCallLegalHold(
+  tx: Tx,
+  input: {
+    readonly callId: string;
+    readonly hold: boolean;
+    readonly auditLogId: string;
+    readonly expectedHoldAuditLogId: string | null;
+  },
+): Promise<void> {
+  const verdict = await verifyMarketingAuditEvidence(tx, {
+    auditLogId: input.auditLogId,
+    action: input.hold ? MARKETING_LLM_HOLD_ACTIONS.set : MARKETING_LLM_HOLD_ACTIONS.released,
+    targetId: input.callId,
+    metadata: { previousHoldAuditLogId: input.expectedHoldAuditLogId ?? MARKETING_LLM_NO_HOLD_DECISION },
+  });
+  if (!verdict.ok) {
+    throw new MarketingStoreRefusedError(
+      `audit_evidence_${verdict.problem}`,
+      `The audit entry is not evidence of this write: ${verdict.problem}`,
+    );
+  }
+  const updated = await tx.$executeRaw(Prisma.sql`
+    UPDATE "MarketingLlmCall" SET "legalHold" = ${input.hold}, "legalHoldAuditLogId" = ${input.auditLogId}
+    WHERE "id" = ${input.callId} AND "legalHold" = ${!input.hold}
+      AND "legalHoldAuditLogId" IS NOT DISTINCT FROM ${input.expectedHoldAuditLogId}
+  `);
+  if (updated !== 1) {
+    throw new MarketingStoreRefusedError("legal_hold_conflict", "The call or its legal-hold state changed");
+  }
+}
+
+/** Rows retention deletes in one run; the rest wait for the next. */
+export const MARKETING_LLM_RETENTION_BATCH_LIMIT = 200;
+
+/**
+ * Delete closed calls whose 24-month retention has ended and that are not on
+ * legal hold (docs/policy/marketing-automation.md §12.2), each with a
+ * `marketing-retention` audit row in this transaction. The delete trigger
+ * repeats every condition and refuses anything else; the retention setting is
+ * what tells it this is retention. No `retention_run` report: that report's
+ * table list is part of the webhook pipeline's watched source, and the audit
+ * rows and the step's count already record what went.
+ */
+export async function purgeExpiredMarketingLlmCalls(
+  tx: Tx,
+  limit: number = MARKETING_LLM_RETENTION_BATCH_LIMIT,
+): Promise<{ readonly purged: number }> {
+  await tx.$queryRaw(Prisma.sql`SELECT set_config(${MARKETING_RETENTION_SETTING}, 'on', true)`);
+  await takeAuditChainLock(tx);
+  const take = Math.max(0, Math.min(Math.floor(limit), MARKETING_LLM_RETENTION_BATCH_LIMIT));
+  const due = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id" FROM "MarketingLlmCall"
+    WHERE "retentionUntil" < (clock_timestamp() AT TIME ZONE 'UTC')
+      AND NOT "legalHold"
+      AND "state" IN ('settled', 'unknown_retained', 'released')
+    ORDER BY "retentionUntil", "id"
+    LIMIT ${take}
+    FOR UPDATE SKIP LOCKED
+  `);
+  let purged = 0;
+  for (const { id } of due) {
+    await writeSystemAuditLog({
+      tx,
+      systemActor: "marketing-retention",
+      action: MARKETING_RETENTION_ACTIONS.rowPurged,
+      targetType: "MarketingLlmCall",
+      targetId: id,
+      summary: "Deleted a marketing LLM cost ledger row its retention period had ended for.",
+      metadata: { table: "MarketingLlmCall" },
+    });
+    const deleted = await tx.$executeRaw(Prisma.sql`DELETE FROM "MarketingLlmCall" WHERE "id" = ${id}`);
+    if (deleted !== 1) throw new Error("marketing_llm_retention_lost_its_row");
+    purged += 1;
+  }
+  return { purged };
+}
+
+// ---------------------------------------------------------------------------
+// consumption by a draft submission (S3c4)
+
+export type MarketingLlmConsumptionRefusal =
+  | "intake_llm_call_missing"
+  | "intake_llm_call_other_run"
+  | "intake_llm_call_not_draft"
+  | "intake_llm_call_open"
+  | "intake_llm_call_consumed";
+
+/**
+ * Bind the calls a submission names to that submission, in the intake's
+ * transaction. Every named call must exist, belong to the same generator run,
+ * have been made for a draft, and be closed (settled or kept at its
+ * reservation as unknown); it must be unconsumed or already consumed by this
+ * very submission -- the same submission's next draft, or its resubmission.
+ * Anything else refuses the draft and writes nothing.
+ *
+ * The caller holds the audit chain lock, which every ledger action takes
+ * first, so no ledger action is between its locks while these rows are read;
+ * the sweep tries its locks and steps past.
+ */
+export async function consumeMarketingLlmCallsForSubmission(
+  tx: Tx,
+  input: {
+    readonly generatorRunId: string;
+    readonly requestKeys: readonly string[];
+    readonly submissionDigest: string;
+  },
+): Promise<{ readonly ok: true; readonly consumerDigest: string } | { readonly ok: false; readonly code: MarketingLlmConsumptionRefusal }> {
+  const consumerDigest = marketingLlmConsumerDigest(input.submissionDigest);
+  const keys = [...input.requestKeys];
+  const rows = await tx.$queryRaw<
+    Array<{ requestKey: string; generatorRunId: string; purpose: string; state: string; consumerDigest: string | null }>
+  >(Prisma.sql`
+    SELECT "requestKey", "generatorRunId", "purpose", "state", "consumerDigest"
+    FROM "MarketingLlmCall" WHERE "requestKey" = ANY(${keys}::text[])
+    ORDER BY "id"
+    FOR UPDATE
+  `);
+  if (rows.length !== new Set(keys).size) return { ok: false, code: "intake_llm_call_missing" };
+  for (const row of rows) {
+    if (row.generatorRunId !== input.generatorRunId) return { ok: false, code: "intake_llm_call_other_run" };
+    if (row.purpose !== "draft") return { ok: false, code: "intake_llm_call_not_draft" };
+    if (row.state !== "settled" && row.state !== "unknown_retained") return { ok: false, code: "intake_llm_call_open" };
+    if (row.consumerDigest !== null && row.consumerDigest !== consumerDigest) {
+      return { ok: false, code: "intake_llm_call_consumed" };
+    }
+  }
+  await tx.$executeRaw(Prisma.sql`
+    UPDATE "MarketingLlmCall" SET "consumerDigest" = ${consumerDigest}
+    WHERE "requestKey" = ANY(${keys}::text[]) AND "consumerDigest" IS NULL
+  `);
+  return { ok: true, consumerDigest };
+}

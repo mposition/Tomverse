@@ -8,6 +8,9 @@ import {
 } from "@/lib/marketingClaimGates";
 import { marketingClaimUsable } from "@/lib/marketingClaims";
 
+// A gate the registry does not bind never reaches its client.
+const NO_DATABASE = {};
+
 // The S1 plan's S1e fact-source list: "feature public: claim `gate` resolves
 // via existing production flag reader; unreadable -> not public".
 
@@ -29,7 +32,7 @@ test("an unbound gate is unreadable, not off", () => {
   // A claim naming a flag this build does not bind means the registry has
   // drifted from the claims, which somebody has to look at. Answering `false`
   // would report it as a feature that was switched off.
-  return resolveMarketingClaimGate("feature.nobodyBoundThis").then((value) => {
+  return resolveMarketingClaimGate("feature.nobodyBoundThis", NO_DATABASE).then((value) => {
     assert.equal(value, null);
   });
 });
@@ -54,7 +57,7 @@ test("a reader that throws is unreadable, and carries nothing out with it", asyn
 
 test("a prototype key is not a bound gate", async () => {
   for (const gate of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
-    assert.equal(await resolveMarketingClaimGate(gate), null, gate);
+    assert.equal(await resolveMarketingClaimGate(gate, NO_DATABASE), null, gate);
   }
 });
 

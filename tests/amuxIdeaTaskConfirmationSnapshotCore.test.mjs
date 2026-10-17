@@ -29,11 +29,12 @@ function fixture() {
     completionCriteria: ["one passing test"], featureRef: "c0:node-2",
     parentStoryRef: null, dependencyRefs: ["c0:card-0"],
     duplicateCandidateRefs: [], taskRole: "implement",
-    executionGrade: "standard", executionBrief: "Fix and test only this result",
+    executionGrade: "advanced", expectedPaths: ["src/result.ts"],
+    executionBrief: "Fix and test only this result",
     sourceRefIds: [] };
   const body = amuxContentDigest(Buffer.from(amuxCanonicalJson(proposal), "utf8"),
     "analysis_draft", "draft_0000001", key);
-  const cost = calculateV4TaskCostCeiling({ role: "implement", grade: "standard",
+  const cost = calculateV4TaskCostCeiling({ role: "implement", grade: "advanced",
     catalogVersion: "catalog_v1", catalogDigest: "d".repeat(64),
     pricingVersion: "prices_v1", gradeRulesVersion: "grades_v1",
     asOfIso: "2026-10-05T01:00:00.000Z",
@@ -41,7 +42,7 @@ function fixture() {
       cacheReadTokens: 0, cacheWriteTokens: 0, maxAttempts: 2 },
     routes: [{ routeId: "codex/implement", workerName: "worker-codex",
       provider: "openai", modelId: "frontier-test", routePolicyDigest: "e".repeat(64),
-      enabled: true, roles: ["implement"], grades: ["standard"],
+      enabled: true, roles: ["implement"], grades: ["advanced"],
       pricingSource: "synthetic-test", pricingVerifiedAt: "2026-10-01T00:00:00.000Z",
       uncachedInputMicroUsdPerMillion: 1_000_000,
       outputMicroUsdPerMillion: 2_000_000,
@@ -64,6 +65,7 @@ function fixture() {
       scopeDigest: null, scopeDigestKeyId: null },
     hierarchy: structuredClone(hierarchy), sourceFeatureRef: "c0:node-2",
     parentStory: null, dependencies: [dependency], costReceipt: cost.receipt,
+    finalExecutionGrade: "advanced",
     duplicateScan: scan, decisionReason: null,
     publicPrDisclosureApproved: false, key };
 }
@@ -77,7 +79,23 @@ test("Task directly under a Feature binds approved cost and dependency without p
   assert.equal(deriveAmuxIdeaUnitConfirmation(snapshot, key,
     input.duplicateScan, { ok: true, receipt: input.costReceipt }).ok, true);
   assert.equal(JSON.stringify(snapshot).includes(input.proposal.executionBrief), false);
+  assert.equal(snapshot.policyVersion, "amux-intake-v20");
+  assert.equal(snapshot.card.task.proposedGrade, "advanced");
+  assert.equal(snapshot.card.task.grade, "advanced");
   assert.equal(snapshot.card.task.publicPrDisclosureApproved, false);
+  const confirmed = deriveAmuxIdeaUnitConfirmation(snapshot, key,
+    input.duplicateScan, { ok: true, receipt: input.costReceipt });
+  const changedProposalSignal = structuredClone(snapshot);
+  changedProposalSignal.card.task.proposedGrade = "frontier";
+  const changed = deriveAmuxIdeaUnitConfirmation(changedProposalSignal, key,
+    input.duplicateScan, { ok: true, receipt: input.costReceipt });
+  assert.equal(confirmed.ok, true);
+  assert.equal(changed.ok, true);
+  assert.notEqual(changed.confirmationDigest, confirmed.confirmationDigest);
+  delete changedProposalSignal.card.task.proposedGrade;
+  assert.deepEqual(deriveAmuxIdeaUnitConfirmation(changedProposalSignal, key,
+    input.duplicateScan, { ok: true, receipt: input.costReceipt }),
+  { ok: false, code: "semantic_conflict" });
 });
 
 test("public PR consent is a separate digest-bound implementation-only decision", () => {

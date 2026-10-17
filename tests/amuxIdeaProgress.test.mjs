@@ -18,6 +18,8 @@ const task = (overrides = {}) => ({ cardType: "task", status: "todo", reviewPrNu
 test("each idea is at exactly one of the six stages, and a human step still open always comes first", () => {
   const stage = (value) => { const result = amuxIdeaProgress(facts(value)); return [result.stage, result.waitingFor]; };
   assert.deepEqual(stage({}), ["execution_approval", "execution_approval"], "saved, nothing approved yet");
+  assert.deepEqual(stage({ submissionOrigin: "session" }), ["analysis", null],
+    "v19 queued session intake does not require an execution approval");
   assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "prepared", holdStatus: null })] }),
     ["execution_approval", "execution_approval"]);
   assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "expired", holdStatus: "released" })] }),
@@ -81,10 +83,14 @@ test("the list is one statement in one bounded snapshot that never reads idea te
     cards: [
       { id: "c1", cardType: "story", status: "backlog", reviewPrNumber: null, terminal: false, displayKey: "AMUX-ADM-001" },
       { id: "c2", cardType: "task", status: "review", reviewPrNumber: 2540, terminal: false, displayKey: "AMUX-ADM-002" }],
+    checkoutEvidence: [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 2,
+      secretPath: 1, secretContent: 1, nonRegular: 0, unscannableContent: 0,
+      readFileCount: 2, readDigest: "b".repeat(64), readBodyPurged: false }],
   }, {
     // An idea with no chunk and no card comes back with SQL NULL aggregates.
     id: "idea-2", requestId: "22222222-2222-4222-8222-222222222222", state: "submitted",
     submittedAtMs: Date.parse("2026-10-14T00:00:00Z"), cancelled: false, proposedUnits: 0, chunks: null, cards: null,
+    checkoutEvidence: null,
   }];
   const tx = { $queryRaw: async (strings, ...values) => { calls.push({ sql: strings.join("?"), values }); return rows; } };
   const now = new Date("2026-10-15T03:00:00Z");
@@ -98,11 +104,19 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.ok(sql.includes(`d."action" = 'register_card' AND d."state" = 'consumed'`));
   assert.ok(sql.includes(`ORDER BY c."chunkIndex"`));
   assert.ok(sql.includes(`ORDER BY w."createdAt" ASC, w."id" ASC`));
+  assert.ok(sql.includes(`FROM "AmuxIdeaTrackedCheckoutEvidence" e`));
+  assert.ok(sql.includes(`LEFT JOIN "AmuxIdeaTrackedCheckoutReadManifest" m`));
+  assert.ok(sql.includes(`ORDER BY e."referenceOrdinal"`));
   assert.deepEqual([row.stage, row.displayKey, row.reviewPullRequests, row.submittedAt],
     ["review", "AMUX-ADM-001", [{ number: 2540, displayKey: "AMUX-ADM-002" }], "2026-10-15T00:00:00.123Z"]);
   assert.deepEqual(row.taskRows, [{ displayKey: "AMUX-ADM-002", status: "review", reviewPrNumber: 2540, merged: false }],
     "the detail lists Tasks only, never stories");
+  assert.deepEqual(row.checkoutEvidence, [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
+    excludedCount: 2, excludedReasons: { secretPath: 1, secretContent: 1,
+      nonRegular: 0, unscannableContent: 0 },
+    readManifest: { fileCount: 2, digest: "b".repeat(64), bodyPurged: false } }]);
   assert.deepEqual([empty.stage, empty.displayKey, empty.taskRows], ["execution_approval", null, []]);
+  assert.deepEqual(empty.checkoutEvidence, []);
 });
 
 test("a failed read is tried once more, outside a route too, except for the boundary's own deterministic refusals", () => {

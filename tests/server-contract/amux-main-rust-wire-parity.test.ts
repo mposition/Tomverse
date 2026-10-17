@@ -40,7 +40,9 @@ const LEASE = new Date("2026-09-29T00:01:30.000Z");
 const ATTEMPT = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
 const RECEIPT = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 let v22DeliveryProfile: { modelId: string; role: string;
-  budgetMicrousd: number; readOnlyRetry?: Record<string, unknown> } | null = null;
+  budgetMicrousd: number; readOnlyRetry?: Record<string, unknown>;
+  gradeGuard?: true; executionGrade?: string; reviewAuthor?: "claude";
+  reviewAuthorVendor?: string; reviewScope?: string } | null = null;
 let recoveryApprovalId: string | null = null;
 const calls: { writer: string; input: unknown }[] = [];
 const record = (writer: string, input: unknown) => {
@@ -217,6 +219,24 @@ test("v22 delivery carries its approved one-shot model, role and ceiling", async
     });
     assert.equal(body.delivery.assignment_id,
       "0a7e13db-0373-4b92-9e74-0b2a79e0e8c7");
+  } finally { v22DeliveryProfile = null; }
+});
+
+test("v52 delivery carries the route-bound review author explicitly", async () => {
+  v22DeliveryProfile = { modelId: "claude-opus-5-5", role: "implement",
+    budgetMicrousd: 1_250_000, gradeGuard: true,
+    executionGrade: "advanced", reviewAuthor: "claude",
+    reviewAuthorVendor: "anthropic", reviewScope: "Title: Task\nCompletion criteria:\n- Works" };
+  try {
+    const exchange = wire.exchanges.find((entry) => entry.name === "delivery_pull");
+    assert.ok(exchange);
+    const response = await post(exchange.path, exchange.request);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.delivery.v22_execution.review_author, "claude");
+    assert.equal(body.delivery.v22_execution.review_author_vendor, "anthropic");
+    assert.equal(body.delivery.v22_execution.review_scope,
+      "Title: Task\nCompletion criteria:\n- Works");
   } finally { v22DeliveryProfile = null; }
 });
 

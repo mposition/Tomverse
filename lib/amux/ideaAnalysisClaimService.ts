@@ -5,13 +5,13 @@ import type { Prisma } from "@prisma/client";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind, AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_ANALYSIS_CLAIM_TARGET,
-  AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION,
-  AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET,
   AMUX_V4_IDEA_SYSTEM_ACTOR } from
   "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from
   "./ideaAnalysisPriceVersionRead.ts";
+import { readAmuxIdeaAnalysisFailureStreak } from
+  "./ideaAnalysisFailureStreakService.ts";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { checkAmuxIdeaTransferReceipt } from "./ideaTransferReceiptCore.ts";
@@ -334,33 +334,27 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
       where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown" },
       select: { id: true },
     });
-    if (unknown) throw new AmuxIdeaAnalysisClaimError("not_ready");
+    const sessionUnknown = await tx.amuxIdeaSessionAnalysisBudgetClaim.findFirst({
+      where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown" },
+      select: { id: true },
+    });
+    if (unknown || sessionUnknown) throw new AmuxIdeaAnalysisClaimError("not_ready");
     // A lost result POST/read-back can leave the prior hold in_flight. Until
     // owner resolution, admit at most one analysis invocation Agent-wide.
     const active = await tx.amuxIdeaAnalysisBudgetHold.findFirst({ where: {
       namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "in_flight",
       id: { not: hold.id },
     }, select: { id: true } });
-    if (active) throw new AmuxIdeaAnalysisClaimError("not_ready");
-    // Canonical settlement entries are strictly ordered by the audit writer's
-    // monotonically increasing createdAt. Refusals/cancellations do not count;
-    // one verified success breaks a streak. No new claim after three failures.
-    const latestSettlements = await tx.adminAuditLog.findMany({ where: {
-      action: AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION,
-      targetType: AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET,
-    }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 3 });
-    if (latestSettlements.some((entry) => {
-      const details = entry.metadata;
-      return !entry.entryHash || auditRowActorKind(entry) !== "system" ||
-        !details || typeof details !== "object" || Array.isArray(details) ||
-        (details as Record<string, unknown>).namespace !==
-          AMUX_V4_ANALYSIS_NAMESPACE ||
-        !["failed", "succeeded"].includes(String(
-          (details as Record<string, unknown>).status));
-    })) throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
-    if (latestSettlements.length === 3 && latestSettlements.every((entry) =>
-      (entry.metadata as Record<string, unknown>).status === "failed")) {
-      throw new AmuxIdeaAnalysisClaimError("not_ready");
+    const sessionActive = await tx.amuxIdeaSessionAnalysisBudgetClaim.findFirst({
+      where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "in_flight" },
+      select: { id: true },
+    });
+    if (active || sessionActive) throw new AmuxIdeaAnalysisClaimError("not_ready");
+    // A verified success breaks the Agent-wide streak across both runners.
+    const failureStreak = await readAmuxIdeaAnalysisFailureStreak(tx);
+    if (failureStreak !== "ready") {
+      throw new AmuxIdeaAnalysisClaimError(failureStreak === "stopped"
+        ? "not_ready" : "integrity_unavailable");
     }
     const windowLock = await tx.$queryRaw<Array<{ reservedMicroUsd: bigint }>>`
       SELECT "reservedMicroUsd" FROM "AmuxIdeaAnalysisBudgetWindow"

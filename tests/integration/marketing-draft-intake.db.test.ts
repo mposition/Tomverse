@@ -5,8 +5,21 @@ import { POST } from "@/app/api/internal/marketing-drafts/route";
 import { MARKETING_DRAFTS_KEY } from "@/lib/marketingAutomationAccess";
 import {
   marketingDraftProvenance,
+  marketingDraftSubmissionDigest,
   type MarketingGeneratorDraft,
 } from "@/lib/marketingDraftIntakeCore";
+import {
+  MARKETING_LLM_ADAPTER_VERSION,
+  marketingLlmAdapterConfigDigest,
+  marketingLlmConfigSnapshot,
+  type MarketingLlmPricePin,
+} from "@/lib/marketingLlmBudgetCore";
+import {
+  dispatchMarketingLlmCall,
+  reserveMarketingLlmCall,
+  settleMarketingLlmCall,
+  type MarketingLlmBudgetEnvironment,
+} from "@/lib/marketingLlmBudgetStore";
 import {
   MARKETING_S3_ACTIONS,
   intakeMarketingGeneratorDraft,
@@ -17,6 +30,8 @@ import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
 
 const SECRET = "g".repeat(48);
+const PINNED_PLAIN_CALLS = 21;
+const PINNED_WITH_IDS_CALLS = 21;
 const DIGEST = "b".repeat(64);
 
 const OPEN: MarketingDraftIntakeReaders = {
@@ -27,12 +42,91 @@ const OPEN: MarketingDraftIntakeReaders = {
 const reset = async () => {
   await resetTestFixture(
     prisma,
-    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun" RESTART IDENTITY CASCADE`,
+    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun", "MarketingLlmCall" RESTART IDENTITY CASCADE`,
   );
   await prisma.appSetting.deleteMany({ where: { key: MARKETING_DRAFTS_KEY } });
 };
 
-beforeEach(reset);
+// The cost ledger's calls a submission consumes (S3c4). Every test starts
+// with one closed draft call, key 1 of run-1, which the default submission
+// names; tests about consumption make others.
+const day = 24 * 60 * 60 * 1000;
+const pinVerifiedAt = Math.floor(Date.now() / day) * day - day;
+const PIN: MarketingLlmPricePin = {
+  model: "fixture-model-2026-10-01",
+  tokenizerFamily: "o200k",
+  projectId: "proj_fixture",
+  region: "us",
+  tiers: ["default"],
+  contextWindowTokens: 128_000,
+  worstInputMicroUsdPerMillion: 800_000,
+  worstOutputMicroUsdPerMillion: 3_200_000,
+  maxOutputTokens: 4_096,
+  priceVersion: "fixture-v1",
+  verifiedAt: new Date(pinVerifiedAt).toISOString(),
+  expiresAt: new Date(pinVerifiedAt + 90 * day).toISOString(),
+  source: "https://example.invalid/pricing",
+};
+const LEDGER: MarketingLlmBudgetEnvironment = { killSwitchOn: false, monthlyCapRaw: "1", pins: [PIN] };
+const callKey = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+/** A ledger call for run `run` and `purpose`, taken as far as `until`. */
+async function ledgerCall(
+  n: number,
+  { run = "run-1", purpose = "draft" as "draft" | "brief", until = "settled" as "reserved" | "dispatched" | "settled" } = {},
+) {
+  const deadlineAt = new Date(Date.now() + 60_000);
+  const reserved = await prisma.$transaction((tx) =>
+    reserveMarketingLlmCall(
+      tx,
+      { payload: { requestKey: callKey(n), generatorRunId: run, purpose, model: PIN.model, adapterProfile: "text-only-v1" }, deadlineAt },
+      LEDGER,
+    ),
+  );
+  assert.equal(reserved.status, "ok");
+  const callId = reserved.status === "ok" ? reserved.value.callId : "";
+  if (until === "reserved") return callId;
+  await prisma.$transaction((tx) =>
+    dispatchMarketingLlmCall(
+      tx,
+      {
+        callId,
+        requestKey: callKey(n),
+        dispatchIntentId: callKey(10_000 + n),
+        adapterConfigDigest: marketingLlmAdapterConfigDigest(
+          marketingLlmConfigSnapshot({ pin: PIN, adapterVersion: MARKETING_LLM_ADAPTER_VERSION }),
+        ),
+        deadlineAt,
+      },
+      LEDGER,
+    ),
+  );
+  if (until === "dispatched") return callId;
+  await prisma.$transaction((tx) =>
+    settleMarketingLlmCall(
+      tx,
+      {
+        callId,
+        dispatchIntentId: callKey(10_000 + n),
+        observation: {
+          observationId: callKey(20_000 + n),
+          reportedModel: PIN.model,
+          reportedServiceTier: "default",
+          reportedInputTokens: 100,
+          reportedOutputTokens: 50,
+        },
+        deadlineAt,
+      },
+      LEDGER,
+    ),
+  );
+  return callId;
+}
+
+beforeEach(async () => {
+  await reset();
+  await ledgerCall(1);
+});
 after(async () => {
   await reset();
   await prisma.$disconnect();
@@ -71,26 +165,58 @@ const draft = (channelId: string, overrides: Partial<MarketingGeneratorDraft> = 
 });
 
 const inAMinute = () => new Date(Date.now() + 60_000);
+beforeEach(() => {
+  FIXED_DEADLINE = inAMinute();
+});
+
+/** The submission one draft belongs to: its digest is what the intake binds. */
+const submissionFor = (
+  value: MarketingGeneratorDraft,
+  options: { deadlineAt?: Date; submissionId?: string; llmCallRequestKeys?: string[]; generatorRunId?: string } = {},
+) => {
+  const body = {
+    generatorRunId: options.generatorRunId ?? "run-1",
+    submissionId: options.submissionId ?? "sub-1",
+    deadlineAt: (options.deadlineAt ?? FIXED_DEADLINE).toISOString(),
+    drafts: [value],
+    llmCallRequestKeys: options.llmCallRequestKeys ?? [callKey(1)],
+  };
+  return { body, submissionDigest: marketingDraftSubmissionDigest(body) };
+};
+
+// One signed deadline for the default submission, so a resubmission is the
+// same submission byte for byte; tests about time pass their own.
+let FIXED_DEADLINE = inAMinute();
 
 const intake = (
   value: MarketingGeneratorDraft,
   readers?: MarketingDraftIntakeReaders,
-  options: { deadlineAt?: Date; killSwitchValue?: string; submissionId?: string } = {},
-) =>
-  runMarketingTransaction(prisma, (tx) =>
+  options: {
+    deadlineAt?: Date;
+    killSwitchValue?: string;
+    submissionId?: string;
+    llmCallRequestKeys?: string[];
+    generatorRunId?: string;
+  } = {},
+) => {
+  const { body, submissionDigest } = submissionFor(value, options);
+  return runMarketingTransaction(prisma, (tx) =>
     intakeMarketingGeneratorDraft(
       tx,
       {
-        generatorRunId: "run-1",
-        submissionId: options.submissionId ?? "sub-1",
+        generatorRunId: body.generatorRunId,
+        submissionId: body.submissionId,
         provenance: "a".repeat(64),
-        deadlineAt: options.deadlineAt ?? inAMinute(),
+        submissionDigest,
+        llmCallRequestKeys: body.llmCallRequestKeys,
+        deadlineAt: new Date(body.deadlineAt),
         draft: value,
         killSwitchValue: options.killSwitchValue,
       },
       readers,
     ),
   );
+};
 
 // The audit chain is append-only and outlives each test's reset, so a test
 // counts only the rows about its own posts.
@@ -105,10 +231,21 @@ const intakeAudits = async () => {
   });
 };
 
-test("in this build every draft is refused before anything is written", async () => {
+test("with no alert recipient configured, every draft is refused before anything is written", async () => {
   const row = await approvedChannel();
   await draftsOn();
-  const outcome = await intake(draft(row.id));
+  // The build's readers: the cap is unreadable here, and the price alert has
+  // no recipient, so both closed inputs are named.
+  const saved = { ops: process.env.OPS_ALERT_EMAIL, admin: process.env.ADMIN_ALERT_EMAIL };
+  delete process.env.OPS_ALERT_EMAIL;
+  delete process.env.ADMIN_ALERT_EMAIL;
+  let outcome;
+  try {
+    outcome = await intake(draft(row.id));
+  } finally {
+    if (saved.ops !== undefined) process.env.OPS_ALERT_EMAIL = saved.ops;
+    if (saved.admin !== undefined) process.env.ADMIN_ALERT_EMAIL = saved.admin;
+  }
   assert.equal(outcome.status, "refused");
   assert.ok("reasons" in outcome);
   assert.ok(outcome.reasons.includes("input_unreadable:llmGenerationBudgetAvailable"), outcome.reasons.join());
@@ -167,6 +304,9 @@ test("a resubmission is the same draft only if it says the same thing", async ()
 test("an intake that committed is read back after every gate has closed", async () => {
   const row = await approvedChannel();
   await draftsOn();
+  // A deadline just far enough off for the first intake to start, so the same
+  // signed submission can be resent once the database's clock has passed it.
+  FIXED_DEADLINE = new Date(Date.now() + 11_000);
   const first = await intake(draft(row.id), OPEN);
   assert.equal(first.status, "queued");
   // The answer was lost; then the budget closed, the switch went off and the
@@ -178,9 +318,23 @@ test("an intake that committed is read back after every gate has closed", async 
     killSwitchValue: "true",
   });
   assert.equal(conflict.status, "conflict");
-  // Past its deadline too: the read-back is not a new success.
-  const late = await intake(draft(row.id), undefined, { deadlineAt: new Date(Date.now() - 1_000) });
+  // The same signed submission, resent once its deadline has passed, still
+  // reads back: the read-back is not a new success.
+  for (;;) {
+    const [clock] = await prisma.$queryRaw<Array<{ past: boolean }>>`
+      SELECT clock_timestamp() > ${FIXED_DEADLINE}::timestamptz AS "past"`;
+    if (clock.past) break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  const late = await intake(draft(row.id), undefined);
   assert.deepEqual(late, { ...first, existing: true });
+  // Opened, the same late submission is not a new success either: past its
+  // deadline, a new draft under another key is refused.
+  const lateNew = await intake(draft(row.id, { logicalDraftId: "draft-late" }), OPEN);
+  assert.equal(lateNew.status, "refused");
+  // A different deadline is a different submission under the same key.
+  const resigned = await intake(draft(row.id), undefined, { deadlineAt: new Date(Date.now() + 90_000) });
+  assert.equal(resigned.status, "conflict");
 });
 
 test("the Guard's rejection is stored and audited as a rejection", async () => {
@@ -201,12 +355,111 @@ test("the Guard's rejection is stored and audited as a rejection", async () => {
   assert.equal(audits[0].action, MARKETING_S3_ACTIONS.intakeRejected);
 });
 
-test("a draft resting on claims or assets waits for the fact snapshot (S3a2)", async () => {
+test("a draft resting on claims and assets is judged on them and stored with what was read (S3a2)", async () => {
   const row = await approvedChannel();
   await draftsOn();
-  const outcome = await intake(draft(row.id, { claimIds: ["claim_1"] }), OPEN);
-  assert.deepEqual(outcome, { status: "refused", reasons: ["intake_facts_snapshot_not_available"] });
-  assert.equal(await prisma.marketingPost.count(), 0);
+  // Neither id is in its registry, so the Guard refuses both -- and the post
+  // records the ids it named and the snapshot of what answered: nothing.
+  const outcome = await intake(
+    draft(row.id, { claimIds: ["claim_1"], assets: [{ assetId: "asset_1", altKey: "alt_1" }] }),
+    OPEN,
+  );
+  assert.equal(outcome.status, "rejected");
+  assert.ok("postId" in outcome);
+  const post = await prisma.marketingPost.findUniqueOrThrow({ where: { id: outcome.postId } });
+  assert.equal(post.status, "guard_rejected");
+  assert.deepEqual(post.claimIds, ["claim_1"]);
+  assert.deepEqual(post.assetIds, ["asset_1"]);
+  assert.deepEqual(post.factSnapshot, { priceRows: [], catalogue: null, modelRegistryRows: [], evidenceDigests: [] });
+  const envelope = post.envelope as { claimIds: string[]; assets: { assetId: string; altKey: string }[] };
+  assert.deepEqual(envelope.claimIds, ["claim_1"]);
+  assert.deepEqual(envelope.assets, [{ assetId: "asset_1", altKey: "alt_1" }]);
+  const codes = (post.history as { type: string; codes?: string[] }[]).find((entry) => entry.type === "guard_result")?.codes ?? [];
+  assert.ok(codes.length > 0, "the rejection names why");
+});
+
+/**
+ * Calls one intake makes on its transaction: raw statements and model
+ * delegate calls, counted through a proxy over the real transaction.
+ *
+ * Pinned, so a read added to the intake or its fact resolver shows up here.
+ * The bound it serves is MARKETING_DRAFT_INTAKE_TRANSACTION_MS, and the
+ * database enforces that bound whatever this count is; the count is what makes
+ * the bound a realistic one. A draft whose claims name gates, plans, the
+ * catalogue or models adds one call per distinct gate and model and one each
+ * for plans and the catalogue -- with empty registries none can be named yet,
+ * so the pinned paths are the ones a draft can take today.
+ */
+async function countedIntake(value: MarketingGeneratorDraft, submissionId: string, call = 1) {
+  const calls: string[] = [];
+  const outcome = await runMarketingTransaction(prisma, (tx) => {
+    const counted = new Proxy(tx, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver);
+        if (typeof property !== "string") return value;
+        if (property.startsWith("$") && typeof value === "function") {
+          return (...args: unknown[]) => {
+            calls.push(property);
+            return (value as (...inner: unknown[]) => unknown).apply(target, args);
+          };
+        }
+        if (value && typeof value === "object" && !property.startsWith("$")) {
+          return new Proxy(value as object, {
+            get(model, method, modelReceiver) {
+              const fn = Reflect.get(model, method, modelReceiver);
+              if (typeof fn !== "function" || typeof method !== "string") return fn;
+              return (...args: unknown[]) => {
+                calls.push(`${property}.${method}`);
+                return (fn as (...inner: unknown[]) => unknown).apply(model, args);
+              };
+            },
+          });
+        }
+        return value;
+      },
+    });
+    return intakeMarketingGeneratorDraft(
+      counted,
+      {
+        generatorRunId: "run-1",
+        submissionId,
+        provenance: "a".repeat(64),
+        submissionDigest: submissionFor(value, { submissionId, llmCallRequestKeys: [callKey(call)] }).submissionDigest,
+        llmCallRequestKeys: [callKey(call)],
+        deadlineAt: FIXED_DEADLINE,
+        draft: value,
+        killSwitchValue: undefined,
+      },
+      OPEN,
+    );
+  });
+  return { outcome, calls };
+}
+
+test("an intake's calls on its transaction are counted and pinned, facts included", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  const plain = await countedIntake(draft(row.id), "sub-count-plain");
+  assert.equal(plain.outcome.status, "queued");
+  // Each submission consumes its own ledger call.
+  await ledgerCall(2);
+  const withIds = await countedIntake(
+    draft(row.id, {
+      logicalDraftId: "draft-ids",
+      claimIds: ["claim_1"],
+      assets: [{ assetId: "asset_1", altKey: "alt_1" }],
+    }),
+    "sub-count-ids",
+    2,
+  );
+  assert.equal(withIds.outcome.status, "rejected");
+  // The fact reads inside the transaction: the database clock and the usage.
+  assert.equal(plain.calls.filter((call) => call === "marketingPost.findMany").length, 1);
+  assert.deepEqual(
+    { plain: plain.calls.length, withIds: withIds.calls.length },
+    { plain: PINNED_PLAIN_CALLS, withIds: PINNED_WITH_IDS_CALLS },
+    JSON.stringify({ plain: plain.calls, withIds: withIds.calls }),
+  );
 });
 
 test("a draft with too little time before the service's deadline is not started", async () => {
@@ -252,6 +505,8 @@ test("a pause after the first reading cannot stretch the transaction past the de
         generatorRunId: "run-1",
         submissionId: "sub-slow",
         provenance: "a".repeat(64),
+        submissionDigest: submissionFor(draft(row.id), { submissionId: "sub-slow" }).submissionDigest,
+        llmCallRequestKeys: [callKey(1)],
         deadlineAt,
         draft: draft(row.id),
         killSwitchValue: undefined,
@@ -274,6 +529,8 @@ test("a transaction whose timer someone else already armed is refused, not trust
         generatorRunId: "run-1",
         submissionId: "sub-armed",
         provenance: "a".repeat(64),
+        submissionDigest: submissionFor(draft(row.id), { submissionId: "sub-armed" }).submissionDigest,
+        llmCallRequestKeys: [callKey(1)],
         deadlineAt: inAMinute(),
         draft: draft(row.id),
         killSwitchValue: undefined,
@@ -297,6 +554,8 @@ test("a failure after the post is written leaves neither the post nor its audit"
           generatorRunId: "run-1",
           submissionId: "sub-rollback",
           provenance: "a".repeat(64),
+          submissionDigest: submissionFor(draft(row.id), { submissionId: "sub-rollback" }).submissionDigest,
+          llmCallRequestKeys: [callKey(1)],
           deadlineAt: inAMinute(),
           draft: draft(row.id),
           killSwitchValue: undefined,
@@ -321,6 +580,71 @@ test("an unknown channel is refused, not created", async () => {
   assert.deepEqual(outcome, { status: "refused", reasons: ["intake_channel_unknown"] });
 });
 
+test("the intake consumes the calls it names, for this submission only", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  const first = await intake(draft(row.id), OPEN);
+  assert.equal(first.status, "queued");
+  const consumed = await prisma.marketingLlmCall.findUniqueOrThrow({ where: { requestKey: callKey(1) } });
+  assert.match(String(consumed.consumerDigest), /^[0-9a-f]{64}$/);
+  const audit = (await intakeAudits())[0].metadata as Record<string, unknown>;
+  assert.equal(audit.consumerDigest, consumed.consumerDigest);
+  assert.deepEqual(audit.llmCallRequestKeys, [callKey(1)]);
+
+  // Another submission naming the same call is refused and writes nothing.
+  const other = await intake(draft(row.id, { logicalDraftId: "draft-2" }), OPEN, { submissionId: "sub-2" });
+  assert.deepEqual(other, { status: "refused", reasons: ["intake_llm_call_consumed"] });
+  assert.equal(await prisma.marketingPost.count(), 1);
+});
+
+test("a call that is missing, another run's, not a draft's or still open is refused", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  await ledgerCall(2, { run: "run-2" });
+  await ledgerCall(3, { purpose: "brief" });
+  await ledgerCall(4, { until: "dispatched" });
+  await ledgerCall(5, { until: "reserved" });
+  const cases: Array<[string, string]> = [
+    [callKey(99), "intake_llm_call_missing"],
+    [callKey(2), "intake_llm_call_other_run"],
+    [callKey(3), "intake_llm_call_not_draft"],
+    [callKey(4), "intake_llm_call_open"],
+    [callKey(5), "intake_llm_call_open"],
+  ];
+  for (const [key, reason] of cases) {
+    const outcome = await intake(draft(row.id), OPEN, { llmCallRequestKeys: [key], submissionId: `sub-${reason}-${key.slice(-2)}` });
+    assert.deepEqual(outcome, { status: "refused", reasons: [reason] }, key);
+  }
+  assert.equal(await prisma.marketingPost.count(), 0);
+  assert.equal(await prisma.marketingLlmCall.count({ where: { consumerDigest: { not: null } } }), 0);
+});
+
+test("a rolled-back intake leaves its calls unconsumed", async () => {
+  const row = await approvedChannel();
+  await draftsOn();
+  await assert.rejects(
+    runMarketingTransaction(prisma, async (tx) => {
+      const { body, submissionDigest } = submissionFor(draft(row.id), { submissionId: "sub-undo" });
+      await intakeMarketingGeneratorDraft(
+        tx,
+        {
+          generatorRunId: body.generatorRunId,
+          submissionId: body.submissionId,
+          provenance: "a".repeat(64),
+          submissionDigest,
+          llmCallRequestKeys: body.llmCallRequestKeys,
+          deadlineAt: new Date(body.deadlineAt),
+          draft: draft(row.id),
+          killSwitchValue: undefined,
+        },
+        OPEN,
+      );
+      throw new Error("the caller's transaction fails after the intake");
+    }),
+  );
+  assert.equal((await prisma.marketingLlmCall.findUniqueOrThrow({ where: { requestKey: callKey(1) } })).consumerDigest, null);
+});
+
 // ---------------------------------------------------------------------------
 // The route
 // ---------------------------------------------------------------------------
@@ -331,6 +655,7 @@ const submission = (channelId: string) => {
     submissionId: "sub-route",
     deadlineAt: inAMinute().toISOString(),
     drafts: [draft(channelId)],
+    llmCallRequestKeys: [callKey(1)],
   };
   return { ...body, provenance: marketingDraftProvenance(SECRET, body) };
 };

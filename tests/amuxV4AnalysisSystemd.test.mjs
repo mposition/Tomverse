@@ -7,9 +7,9 @@ const service = readFileSync(new URL("../scripts/systemd/amux-v4-analysis-agent.
 const timer = readFileSync(new URL("../scripts/systemd/amux-v4-analysis-agent.timer",
   import.meta.url), "utf8");
 
-test("local analysis uses a bounded one-shot without a product DB credential", () => {
+test("local analysis awaits owner stop without a product DB credential", () => {
   assert.match(service, /^Type=oneshot$/m);
-  assert.match(service, /^TimeoutStartSec=650s$/m);
+  assert.match(service, /^TimeoutStartSec=infinity$/m);
   assert.match(service, /^KillMode=control-group$/m);
   assert.match(service, /^ConditionFileNotEmpty=%h\/\.local\/lib\/tomverse-amux-v4\/analysis-agent-once\.mjs$/m);
   assert.match(service, /^EnvironmentFile=%h\/\.config\/tomverse-amux-v4\/analysis-agent\.env$/m);

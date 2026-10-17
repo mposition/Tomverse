@@ -97,6 +97,9 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // The marketing LLM cost ledger's price pins and cap ceiling (marketing
   // policy v4): a price is a person's decision here as in modelPricing.ts.
   "lib/marketingLlmBudgetCore.ts",
+  // The official hosts a market fact may cite (S3f): which competitor and which
+  // host is a person's decision about content.
+  "lib/marketingIntelReportCore.ts",
   "docs/release-gates/**",
   "prisma/**",
   // §4-2: the execution environment. Root files and root dot-directories are

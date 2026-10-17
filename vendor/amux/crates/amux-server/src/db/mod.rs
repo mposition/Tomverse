@@ -22,6 +22,7 @@ pub mod task_graph_store;
 pub mod trace_store;
 pub mod throughput_store;
 pub mod commands;
+pub mod dm_ask;
 pub mod harness_store;
 pub mod interactions;
 pub mod memories;

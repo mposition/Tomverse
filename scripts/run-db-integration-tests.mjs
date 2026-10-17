@@ -255,6 +255,8 @@ run(
     "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
     "tests/integration/amuxV4DerivationService.db.test.mjs",
     "tests/integration/amuxV4PortfolioScore.db.test.mjs",
+    // v52 permits only one audited, attempt-bound contract-path grade increase.
+    "tests/integration/amuxV52GradeEscalation.db.test.mjs",
     // Policy v46: a legacy safe stop binds the live runtime after re-registration.
     "tests/integration/amuxV22LegacySafeStopLiveRuntime.db.test.mjs",
     "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
@@ -468,6 +470,16 @@ run(
     // v19 session intake stores encrypted source provenance under the latest
     // owner scope while its canonical audit remains a dedicated system actor.
     "tests/integration/amux-v19-session-submission.db.test.ts",
+    // Each prepared v19 direct-read reference records only its pinned SHA and
+    // aggregate exclusion proof under same-transaction system evidence.
+    "tests/integration/amux-v19-tracked-checkout-evidence.db.test.ts",
+    // v20 final Guard refusals are append-only, audit-bound, request-id
+    // idempotent and readable without retaining expected path values.
+    "tests/integration/amux-v20-registration-refusal.db.test.ts",
+    // v19 unattended registration turns one completed session analysis into
+    // nodes, cards, assessments and scores under exact system evidence, or
+    // leaves the backlog untouched and records one durable refusal.
+    "tests/integration/amux-v19-system-registration.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",
@@ -725,6 +737,17 @@ run(
     // What the generator reads before it writes (S3b): approval-mode accounts,
     // claims without evidence, market facts without the pages they came from.
     "tests/integration/marketing-generator-context.db.test.ts",
+    // The generator's internal reports (S3f): only a brief or market facts, signed
+    // and keyed by the app, a market fact kept only from an official host, a
+    // resend read back after the gates close, and the deadline enforced.
+    "tests/integration/marketing-intel-reports.db.test.ts",
+    // The competitor registry (S3f): A3 proposes, a person decides on their own
+    // audit row (action, row, predecessor, and an approval's exact name and
+    // hosts), and only approved hosts are a source. Needs a real audit chain.
+    "tests/integration/marketing-competitor-registry.db.test.ts",
+    // The rows a draft's price and model facts rest on, held FOR SHARE until
+    // the reading transaction ends (S3a2): only two connections can show it.
+    "tests/integration/marketing-fact-row-hold.db.test.ts",
     // Marketing retention (S3h1): what the delete triggers let go goes, with an
     // audit row each and a retention_run report; what they keep stays.
     "tests/integration/marketing-retention.db.test.ts",
@@ -741,6 +764,14 @@ run(
     // The generator's budget route (S3c3a): signed, bounded, strict requests,
     // each action in its own transaction, and no model pinned as built.
     "tests/integration/marketing-llm-budget-route.db.test.ts",
+    // The ledger's expiry (S3c3b): stale reservations released, stale
+    // dispatches kept as unknown, a late generator report a conflict, nothing
+    // under the kill switch, and a held row skipped rather than waited on.
+    "tests/integration/marketing-llm-expiry.db.test.ts",
+    // Legal hold and retention for the ledger (S3c3c): a hold only on a
+    // person's audit row for exactly that decision; retention deletes closed,
+    // unheld calls past 24 months, each with an audit row.
+    "tests/integration/marketing-llm-hold-retention.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them
@@ -949,6 +980,24 @@ run(
     "tests/integration/refund-decision-route.db.test.ts",
   ],
   "Running the administrator refund decision transaction and its outbox"
+);
+// Also its own process: it replaces next-auth. The competitor registry's Admin
+// routes (S3f-R3): a person's add, approve, reject and retire through the
+// marketing mutation wrapper, whose audit row the registry's write guard
+// checks; a stale page and a disallowed move are 409s, and the kill switch
+// refuses only what makes a host a source.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/marketing-competitor-routes.db.test.ts",
+  ],
+  "Running the marketing competitor registry Admin routes"
 );
 // Also its own process, and for the same reason: it replaces next-auth. What
 // it pins is which requests reach the lift at all -- a stale cause set, a dead

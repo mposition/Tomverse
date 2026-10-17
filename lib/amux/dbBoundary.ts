@@ -58,6 +58,10 @@ export const AMUX_ROUTE_BUDGET_MS = 15_000;
 // The Rust client allows fifteen seconds for connect, route and response
 // transport, leaving a three-second margin around the server budget.
 export const AMUX_LIFECYCLE_ROUTE_BUDGET_MS = 12_000;
+// v22 execution start and settlement can include publication and v52 grade
+// evidence in the same fenced transaction; their declared call ceilings need
+// a longer route than the other lifecycle operations.
+export const AMUX_V22_EXECUTION_ROUTE_BUDGET_MS = 24_000;
 
 export type AmuxDbBoundary = {
   operation: string;
@@ -177,6 +181,11 @@ export const AMUX_DB_BOUNDARIES = {
   executionSettle: {
     operation: "execution_settle",
     prismaCallCeiling: 26,
+    isolation: "mutation",
+  },
+  v52ReviewRecord: {
+    operation: "v52_review_record",
+    prismaCallCeiling: 20,
     isolation: "mutation",
   },
   executionRecoveryRead: {
@@ -333,6 +342,77 @@ export const AMUX_DB_BOUNDARIES = {
   decisionMakerRouting: {
     operation: "decision_maker_routing",
     prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // Stage S2's internal routes for the bridge and the broker
+  // (app/api/internal/amux/decision-maker/**): each is setup + its one store
+  // operation at its largest, with an integrity key + fence, so a ceiling
+  // below it refuses every such call and one above it would let a statement
+  // nobody counted run inside the budget. All are within
+  // docs/policy/amux-decision-maker.md §9's 12.
+  // The keyed assignment (the request, the key registry, then the ledger's
+  // assignment: lock, state, the router's audit 4, the event: 9, pinned by
+  // tests/amuxDecisionMakerBody.test.mjs).
+  decisionMakerAssignment: {
+    operation: "decision_maker_assignment",
+    prismaCallCeiling: 11,
+    isolation: "mutation",
+  },
+  // A discarded assignment (lock, state, the router's audit 4, the event: 7,
+  // pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerAssignmentDiscard: {
+    operation: "decision_maker_assignment_discard",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // A transmission intent (lock, state, the switches, the instance's results
+  // since its newest switch event -- added 2026-10-17 for the owed latch of
+  // docs/policy/amux-decision-maker.md §8 -- then the instance's audit 4 and the
+  // event, or the owed latch's audit 4 and switch event: 9, pinned by
+  // tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerTransmitIntent: {
+    operation: "decision_maker_transmit_intent",
+    prismaCallCeiling: 11,
+    isolation: "mutation",
+  },
+  // A transmission receipt or unknown (lock, state, the instance's audit 4,
+  // the event: 7, pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerTransmitOutcome: {
+    operation: "decision_maker_transmit_outcome",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // A DM output accepted as the request's result (the request, then the
+  // ledger's submission: lock, state, the switches, the instance's audit 4,
+  // the event; then its detail and bodies: 10, pinned by
+  // tests/amuxDecisionMakerBody.test.mjs).
+  decisionMakerResultSubmission: {
+    operation: "decision_maker_result_submission",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // §9's lookup of a (request, result digest) pair: the state read (1, pinned
+  // by tests/amuxDecisionMakerRequest.test.mjs). It writes nothing.
+  decisionMakerResultLookupRead: {
+    operation: "decision_maker_result_lookup_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // §9's result_unknown (lock, state, the instance's audit 4, the event: 7,
+  // pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerResultUnknown: {
+    operation: "decision_maker_result_unknown",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // The validation latch of docs/policy/amux-decision-maker.md §8, which the
+  // result route runs after a validation failure commits and the maintenance
+  // sweep runs for each instance (lock, the switches with each instance's
+  // newest event, its results, the instance's audit 4, the switch event: 8,
+  // pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerValidationLatch: {
+    operation: "decision_maker_validation_latch",
+    prismaCallCeiling: 10,
     isolation: "mutation",
   },
   // Stage S2's judgment route: setup + a person's judgment at its largest

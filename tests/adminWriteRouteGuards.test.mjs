@@ -100,9 +100,18 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // The v19 idea_raw size change touches ideaCrypto in this unchanged read-only
-// closure. Repin both latch states only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "beb5245ef5530c88f909e8bb236c3006bdb6d73e4a70c0aae80c6991eac7c205";
-const SOURCE_SCOPE_DISABLED_DIGEST = "8fe36387516d811a0a478deb1c0975ebdf9c34d028e432c2d5bf269f88a6e721";
+// closure. The v19 tracked checkout adds localIntakeCore to the existing
+// closure without a route, import, writer or reviewed-file-list change.
+// The encrypted v19 read manifest adds a content purpose to ideaCrypto and
+// ideaKeyStore. This preview's reviewed closure still has the same 13 files,
+// no new write or outbound capability, and both latch states stay pinned.
+// v19 orphan-key retirement adds a readback-only S3 verifier to the existing
+// key-store module; the preview closure still has 13 files and no new call.
+// The orphan sweeper's version-specific delete is exported from the same key
+// store but is not called by this read-only preview; its 13-file closure and
+// route's read-only transaction remain fixed in both latch states.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "68800dbe53836b6db12615ccac1a7a2969642d4f98dac26b831b0f4be5f4bc37";
+const SOURCE_SCOPE_DISABLED_DIGEST = "3ce80f0e6aee081a1fe251b962531614fe78d9001a2325f13b912710605c0e8c";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -117,6 +126,8 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaHierarchyDecisionCore.ts",
   "lib/amux/ideaKeyConfig.ts",
   "lib/amux/ideaKeyStore.ts",
+  "lib/amux/ideaRegistrationRefusalCore.ts",
+  "lib/amux/ideaRegistrationRefusalReadService.ts",
   "lib/amux/ideaResolutionChoiceCore.ts",
   "lib/amux/ideaResolutionPreviewService.ts",
   "lib/amux/localIntakeCore.ts",
@@ -134,8 +145,30 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // same closure; it adds no import, I/O or writer. Repin both latch states.
 // The same v19 idea_raw size change touches ideaCrypto here. No route,
 // import, writer or reviewed file changes in this preview closure.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "2315d4d7b2ecdab857edf0731f831c80482ff9d57cc0f969ec042cc2d373572b";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "d11a2c350fe6c8c81e4110fc79bef22d6b84342f2f2feb20d3d5df9a86ba9b0c";
+// Intake v20.5 adds an audited refusal metadata read to the existing analysis
+// read. Its two-module boundary is read-only and does not import the refusal
+// writer; keep both latch digests pinned to this 17-file closure.
+// Review r-20261016-095415-ada10c scoped that metadata read to the exact
+// displayed preview and source plan, while keeping the same read-only closure.
+// Intake v19.5 adds a data-owner form of the same stored-result read and the
+// closed whole-plan refusal vocabulary. On 2026-10-16 the 17-file closure was
+// recomputed unchanged, with no writer, outbound I/O or dynamic import added.
+// The v19.5 review repair separates task and whole-plan refusal predicates and
+// verifies the stored system actor/scope. The import closure remains identical.
+// The v19.5 follow-up surfaces stored schema failures only to the unattended
+// registrar. The same 17-file owner preview closure remains read-only.
+// The v19.5 replay repair adds an optional attempt-kind query predicate to the
+// same refusal reader. On 2026-10-16 the file list and writer scan stayed fixed.
+// Recomputed for the merged v19.5 and develop sources; the 17-file closure,
+// read-only scan and both latch states remain explicitly pinned.
+// The same v19 content-purpose extension changes these reviewed sources, but
+// does not add a writer, import, or outbound call to the resolution preview.
+// The same verifier changes the existing 17-file closure without changing
+// the preview's route, imports, writer scan, or outbound-call guard.
+// The exact-version retirement export is not invoked by the resolution
+// reader. Its 17-file closure and read-only route/service guards remain fixed.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "2f4810eef7154e220c45aad3a537b7c48f977b78db5b67a10616b0705926585e";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "ced20122d2f98361c787a8a32d378bc71dd2846242b1fb74a876efe2c4298b4c";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
