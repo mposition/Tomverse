@@ -7330,6 +7330,7 @@ model MarketingCompetitor {
   id                 String    @id
   displayName        String
   officialHosts      String[]
+  trackedPages       String[]  @default([])
   status             String
   proposedBy         String
   proposedRunId      String?

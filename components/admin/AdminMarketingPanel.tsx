@@ -110,7 +110,7 @@ const ACCOUNT = (id: unknown, action: string) =>
 const COMPETITOR_DECISION = (id: unknown) =>
   `/api/admin/marketing/competitors/${encodeURIComponent(String(id))}/decision`;
 
-/** What the person typed into a host box, as the list the route parses. */
+/** What the person typed into a host or page box, as the list the route parses. */
 const hostList = (value: string) =>
   value
     .split(/[\s,]+/u)
@@ -809,11 +809,13 @@ function MarketingCompetitorCreate({
       { name: "competitorId", label: m.fieldCompetitorId, kind: "text", hint: m.hintCompetitorId },
       { name: "displayName", label: m.fieldDisplayName, kind: "text" },
       { name: "officialHosts", label: m.fieldOfficialHosts, kind: "text", hint: m.hintOfficialHosts },
+      { name: "trackedPages", label: m.fieldTrackedPages, kind: "textarea", hint: m.hintTrackedPages },
     ],
     body: (values) => ({
       competitorId: values.competitorId.trim(),
       displayName: values.displayName,
       officialHosts: hostList(values.officialHosts),
+      trackedPages: hostList(values.trackedPages),
     }),
   };
 
@@ -861,6 +863,7 @@ function rowActions(
 function competitorActions(row: Row, m: Record<string, string>): MarketingAction[] {
   const expected = { expectedDecisionAuditLogId: text(row.decisionAuditLogId) };
   const hosts = Array.isArray(row.officialHosts) ? (row.officialHosts as string[]) : [];
+  const pages = Array.isArray(row.trackedPages) ? (row.trackedPages as string[]) : [];
   const approve: MarketingAction = {
     id: "competitor-approve",
     label: m.actApproveCompetitor,
@@ -874,12 +877,20 @@ function competitorActions(row: Row, m: Record<string, string>): MarketingAction
         initial: hosts.join(", "),
         hint: m.hintOfficialHosts,
       },
+      {
+        name: "trackedPages",
+        label: m.fieldTrackedPages,
+        kind: "textarea",
+        initial: pages.join("\n"),
+        hint: m.hintTrackedPages,
+      },
     ],
     body: (values) => ({
       decision: "approved",
       ...expected,
       displayName: values.displayName,
       officialHosts: hostList(values.officialHosts),
+      trackedPages: hostList(values.trackedPages),
     }),
   };
   if (row.status === "proposed") {
@@ -1449,6 +1460,11 @@ function MarketingRow({
           <Field label={m.colHosts} value={hosts.join(", ") || m.none} />
           <Field label={m.colDecided} value={stamp(row.decidedAt) ?? m.none} />
         </div>
+        {Array.isArray(row.trackedPages) && row.trackedPages.length > 0 ? (
+          <p className="mt-2 break-all text-xs text-zinc-400">
+            {m.colTrackedPages} {(row.trackedPages as string[]).join(" / ")}
+          </p>
+        ) : null}
         {/*
           A3's own words and the pages it cites, shown as text: they are what
           the generator read, which is data to judge, not links to follow.

@@ -64,14 +64,17 @@ export type MarketingGeneratorContext = {
  * approved competitors and the hosts a person approved for each: what to look
  * at, and the only hosts a fact may cite. `knownIds` is every id the registry
  * holds in any status, so a candidate is something new rather than a proposal
- * a person has already answered. Hosts are names, not URLs; A5 is not given
- * them (lib/marketingGeneratorDraftingCore.ts picks its fields).
+ * a person has already answered. The tracked pages are the one place a URL
+ * appears in this context: A3 reads them, and A5 is given none of this
+ * (lib/marketingGeneratorDraftingCore.ts picks its fields).
  */
 export type MarketingGeneratorCompetitors = {
   readonly tracked: ReadonlyArray<{
     readonly competitorId: string;
     readonly displayName: string;
     readonly officialHosts: readonly string[];
+    /** The pages a person approved for A3 to read: the context's only URLs. */
+    readonly trackedPages: readonly string[];
   }>;
   readonly knownIds: readonly string[];
 };

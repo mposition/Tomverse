@@ -57,6 +57,7 @@ type Recorded = {
   readonly previous?: string | null;
   readonly displayName?: string;
   readonly officialHosts?: readonly string[];
+  readonly trackedPages?: readonly string[];
 };
 
 /** A person's audit row, as `runMarketingAdminMutation` writes it. */
@@ -73,6 +74,7 @@ const humanAudit = (client: Prisma.TransactionClient, decision: Decision, compet
       previousDecisionAuditLogId: recorded.previous ?? ":none",
       ...(recorded.displayName ? { displayName: recorded.displayName } : {}),
       ...(recorded.officialHosts ? { officialHosts: [...recorded.officialHosts] } : {}),
+      ...(decision === "approved" ? { trackedPages: [...(recorded.trackedPages ?? [])] } : {}),
     },
     tx: client,
   });
@@ -176,7 +178,12 @@ test("an approval makes exactly the approved name and hosts a source", async () 
   assert.ok(row.decidedAt);
   assert.deepEqual(await readApprovedMarketingCompetitorHosts(prisma), { alpha: ["alpha.example", "www.alpha.example"] });
   assert.deepEqual(await readMarketingCompetitorsForGenerator(prisma), [
-    { competitorId: "alpha", displayName: "Alpha AI", officialHosts: ["alpha.example", "www.alpha.example"] },
+    {
+      competitorId: "alpha",
+      displayName: "Alpha AI",
+      officialHosts: ["alpha.example", "www.alpha.example"],
+      trackedPages: [],
+    },
   ]);
 });
 
@@ -364,6 +371,7 @@ test("only a proposal or a person's approval is born, and a host is stored the w
       competitorId: "delta",
       displayName: "Delta",
       officialHosts: ["delta.example"],
+      trackedPages: [],
       auditLogId,
     });
   });
@@ -378,6 +386,7 @@ test("only a proposal or a person's approval is born, and a host is stored the w
         competitorId: "delta",
         displayName: "Delta",
         officialHosts: ["delta.example"],
+        trackedPages: [],
         auditLogId,
       });
     }),
@@ -394,9 +403,100 @@ test("only a proposal or a person's approval is born, and a host is stored the w
         competitorId: "epsilon",
         displayName: "Epsilon",
         officialHosts: ["evil.example"],
+        trackedPages: [],
         auditLogId,
       });
     }),
     refusedBy("marketing_competitor_decision_not_a_person"),
   );
+});
+
+test("tracked pages are on the row's own hosts, move only into an approval, and match the person's audit row", async () => {
+  await propose("alpha");
+  const pages = ["https://alpha.example/pricing", "https://www.alpha.example/changelog"];
+  const approved = { displayName: "Alpha", officialHosts: ["alpha.example", "www.alpha.example"] };
+  // A page the audit row does not record is not what the person approved.
+  await assert.rejects(
+    (async () => {
+      const expected = await current("alpha");
+      return tx(async (client) => {
+        const auditLogId = await humanAudit(client, "approved", "alpha", { previous: expected, ...approved, trackedPages: [] });
+        await decideMarketingCompetitor(client, {
+          competitorId: "alpha",
+          decision: "approved",
+          expectedDecisionAuditLogId: expected,
+          auditLogId,
+          ...approved,
+          trackedPages: pages,
+        });
+      });
+    })(),
+    refusedBy("marketing_competitor_decision_not_a_person"),
+  );
+  // A page on a host the row does not have is refused before any write (the
+  // database refuses it too; its function is checked directly below).
+  await assert.rejects(
+    (async () => {
+      const expected = await current("alpha");
+      return tx(async (client) => {
+        const evil = ["https://evil.example/pricing"];
+        const auditLogId = await humanAudit(client, "approved", "alpha", { previous: expected, ...approved, trackedPages: evil });
+        await decideMarketingCompetitor(client, {
+          competitorId: "alpha",
+          decision: "approved",
+          expectedDecisionAuditLogId: expected,
+          auditLogId,
+          ...approved,
+          trackedPages: evil,
+        });
+      });
+    })(),
+    code("competitor_pages_off_hosts"),
+  );
+  // As recorded, it is applied.
+  const expected = await current("alpha");
+  await tx(async (client) => {
+    const auditLogId = await humanAudit(client, "approved", "alpha", { previous: expected, ...approved, trackedPages: pages });
+    await decideMarketingCompetitor(client, {
+      competitorId: "alpha",
+      decision: "approved",
+      expectedDecisionAuditLogId: expected,
+      auditLogId,
+      ...approved,
+      trackedPages: pages,
+    });
+  });
+  assert.deepEqual((await readMarketingCompetitorsForGenerator(prisma))[0].trackedPages, pages);
+  // A retirement keeps the pages it had; it cannot change them.
+  const decided = await current("alpha");
+  await assert.rejects(
+    tx(async (client) => {
+      const auditLogId = await humanAudit(client, "retired", "alpha", { previous: decided });
+      await client.$executeRawUnsafe(
+        `UPDATE "MarketingCompetitor" SET "status" = 'retired', "decisionAuditLogId" = $1, "trackedPages" = ARRAY[]::TEXT[] WHERE "id" = 'alpha'`,
+        auditLogId,
+      );
+    }),
+    refusedBy("marketing_competitor_hosts_change_only_on_approval"),
+  );
+  // A proposal tracks nothing.
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "MarketingCompetitor" ("id", "displayName", "officialHosts", "trackedPages", "status", "proposedBy", "evidenceUrls", "updatedAt")
+       VALUES ('beta', 'Beta', ARRAY['beta.example'], ARRAY['https://beta.example/pricing'], 'proposed', 'seed', ARRAY[]::TEXT[], CURRENT_TIMESTAMP)`,
+    ),
+    refusedBy("MarketingCompetitor_proposal_tracks_nothing_check"),
+  );
+  for (const page of ["http://alpha.example/x", "https://alpha.example:8443/x", "https://user@alpha.example/x", "https://blog.alpha.example/x"]) {
+    assert.equal(
+      (
+        await prisma.$queryRawUnsafe<Array<{ ok: boolean }>>(
+          `SELECT "marketing_competitor_pages_valid"(ARRAY[$1], ARRAY['alpha.example']) AS "ok"`,
+          page,
+        )
+      )[0].ok,
+      false,
+      page,
+    );
+  }
 });
