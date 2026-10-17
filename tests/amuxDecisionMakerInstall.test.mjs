@@ -224,6 +224,15 @@ test("a unit file is replaced only while the unit is not running", () => {
 // The release
 // ---------------------------------------------------------------------------
 
+test("what a later build may remove is exactly what the installer reads, plus the manifest", async () => {
+  const { DM_RELEASE_TOP_FILES, DM_RELEASE_UNIT_FILES } = await import("../scripts/amux-decision-maker-release-out.mjs");
+  const expected = installer.match(/readonly DM_RELEASE_FILES=\(\n([\s\S]*?)\n\)/)[1].split("\n").map((line) => line.trim().replace(/^"|"$/g, ""));
+  assert.deepEqual(
+    [...DM_RELEASE_TOP_FILES.filter((name) => name !== "manifest.sha256"), ...DM_RELEASE_UNIT_FILES.map((unit) => `systemd/${unit}`)].sort(),
+    [...expected].sort(),
+  );
+});
+
 test("the release holds exactly what the installer expects, with the launcher's schema bytes", () => {
   const scripts = JSON.parse(read("package.json")).scripts;
   assert.equal(scripts["build:amux-decision-maker"], "node --import tsx scripts/build-amux-decision-maker.mjs");

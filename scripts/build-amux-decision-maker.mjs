@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 import { DM_OUTPUT_SCHEMA_JSON, DM_OUTPUT_SCHEMA_PATH, DM_OUTPUT_SCHEMA_SHA256 } from "../lib/amux/decisionMakerLauncherCore.ts";
-import { dmPrepareReleaseOut } from "./amux-decision-maker-release-out.mjs";
+import { DM_RELEASE_TOP_FILES, DM_RELEASE_UNIT_FILES, dmPrepareReleaseOut } from "./amux-decision-maker-release-out.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
@@ -58,14 +58,6 @@ const builtins = new Set([...builtinModules, ...builtinModules.map((name) => `no
 const DM_RELEASE_BUNDLES = [
   { entry: "scripts/amux-dm-broker.mjs", output: "broker.mjs" },
   { entry: "scripts/amux-dm-launcher.mjs", output: "launcher.mjs" },
-];
-const DM_RELEASE_UNITS = [
-  "amux-dm-broker.socket",
-  "amux-dm-broker.service",
-  "amux-dm-launcher-openai.socket",
-  "amux-dm-launcher-openai@.service",
-  "amux-dm-launcher-anthropic.socket",
-  "amux-dm-launcher-anthropic@.service",
 ];
 
 mkdirSync(join(outDirectory, "systemd"));
@@ -109,11 +101,20 @@ files.push(schemaName);
 
 copyFileSync(join(repositoryRoot, "scripts", "install-amux-decision-maker.sh"), join(outDirectory, "install-amux-decision-maker.sh"));
 files.push("install-amux-decision-maker.sh");
-for (const unit of DM_RELEASE_UNITS) {
+for (const unit of DM_RELEASE_UNIT_FILES) {
   copyFileSync(join(repositoryRoot, "scripts", "systemd", unit), join(outDirectory, "systemd", unit));
   files.push(`systemd/${unit}`);
 }
 
+// Only names a later build may remove again (scripts/amux-decision-maker-release-out.mjs).
+const known = new Set([...DM_RELEASE_TOP_FILES, ...DM_RELEASE_UNIT_FILES.map((unit) => `systemd/${unit}`)]);
+for (const name of [...files, "manifest.sha256"]) {
+  if (!known.has(name)) {
+    process.stderr.write(`${name} is not a release file a later build may remove
+`);
+    process.exit(1);
+  }
+}
 const manifest = files.map((name) => `${sha256(readFileSync(join(outDirectory, name)))}  ${name}\n`).join("");
 writeFileSync(join(outDirectory, "manifest.sha256"), manifest);
 process.stdout.write(`${outDirectory}\n${manifest}`);

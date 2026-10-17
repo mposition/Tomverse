@@ -20,7 +20,8 @@
 # root's group, exactly the wanted mode, one link, with the expected bytes.
 # Anything else there -- other bytes, or the right bytes with another owner,
 # mode or a second link -- is first copied to
-# /var/backups/tomverse-amux-dm/<UTC time>/ and then replaced. A link or a
+# /var/backups/tomverse-amux-dm/<UTC time>/ (made fresh by this run; an
+# existing one stops the install) and then replaced. A link or a
 # directory at a destination is refused. Every existing directory on the way
 # to a destination or the backup must be root's, not a link and not writable
 # by group or others (checked in the dry run too, and again before each move).
@@ -226,6 +227,14 @@ dm_ancestors_problem() {
   done
 }
 
+# The release directory and its systemd/, where every file is read from: each
+# directory from there up to / fits (dm_ancestors_problem). DM_RELEASE is the
+# release directory as `pwd -P` resolved it; systemd/ below it is not resolved
+# by that, so it is walked too.
+dm_release_tree_problem() {
+  dm_ancestors_problem "$DM_RELEASE/systemd/unit"
+}
+
 # Every path the apply may write: the eleven destinations, and one inside the backup root.
 dm_destination_paths() {
   local unit
@@ -287,18 +296,6 @@ dm_root_file() {
   local uid mode links
   IFS=: read -r uid mode links < <(/usr/bin/stat -c '%u:%a:%h' -- "$1") || return 1
   [[ $uid == 0 && $links == 1 && $mode =~ ^[0-7]{3,4}$ ]] && (((8#$mode & 0022) == 0))
-}
-
-# Every directory from $1 up to / is root's, not a link, and not group/other writable.
-dm_root_chain() {
-  local cursor=$1 uid mode
-  while :; do
-    [[ -d $cursor && ! -L $cursor ]] || return 1
-    IFS=: read -r uid mode < <(/usr/bin/stat -c '%u:%a' -- "$cursor") || return 1
-    [[ $uid == 0 && $mode =~ ^[0-7]{3,4}$ ]] && (((8#$mode & 0022) == 0)) || return 1
-    [[ $cursor == / ]] && return 0
-    cursor=$(/usr/bin/dirname -- "$cursor")
-  done
 }
 
 dm_owner_mode_is() {
@@ -445,7 +442,7 @@ dm_main() {
 
   printf 'AMUX Decision Maker install (%s)\n' "$( ((DM_APPLY)) && printf apply || printf 'dry run: nothing is changed')"
   dm_check "tools present" dm_tools_present
-  dm_check "release directory is root's and not writable by others" dm_root_chain "$DM_RELEASE"
+  dm_check "release directory and its systemd/ are root's, not links, not writable by others" dm_release_tree_problem
   dm_check "manifest.sha256 has the given sha256 and every release file matches it" dm_manifest_fits
   dm_check "account $DM_BROKER_USER is uid $DM_BROKER_UID in its own and both vendor groups" \
     dm_account_is "$DM_BROKER_USER" "$DM_BROKER_UID" "$DM_BROKER_USER $DM_OPENAI_USER $DM_ANTHROPIC_USER"
@@ -491,7 +488,7 @@ dm_main() {
     exit 0
   fi
 
-  local stamp backup index problem
+  local stamp backup index problem backup_made=0
   stamp=$(/usr/bin/date -u +%Y%m%dT%H%M%SZ)
   backup=$DM_BACKUP_ROOT/$stamp
   trap dm_remove_staged EXIT
@@ -506,8 +503,15 @@ dm_main() {
     case ${DM_PLAN_ACTION[$index]} in
       same) continue ;;
       replace|repair)
-        problem=$(dm_ancestors_problem "$backup/x") || dm_fail "not keeping a backup: unsafe directory $problem"
+        if ((backup_made == 0)); then
+          # This run's own backup directory: made here or not at all, so no
+          # copy is ever written into (or through) one an earlier run left.
+          problem=$(dm_ancestors_problem "$backup") || dm_fail "not keeping a backup: unsafe directory $problem"
+          /usr/bin/mkdir -m 0700 -- "$backup" || dm_fail "the backup directory $backup already exists; stopped before replacing anything more"
+          backup_made=1
+        fi
         /usr/bin/install -d -o root -g root -m 0700 -- "$backup$(/usr/bin/dirname -- "${DM_PLAN_DEST[$index]}")"
+        problem=$(dm_ancestors_problem "$backup${DM_PLAN_DEST[$index]}") || dm_fail "not keeping a backup: unsafe directory $problem"
         /usr/bin/cp -a -- "${DM_PLAN_DEST[$index]}" "$backup${DM_PLAN_DEST[$index]}"
         printf 'kept     %s -> %s\n' "${DM_PLAN_DEST[$index]}" "$backup${DM_PLAN_DEST[$index]}" ;;
     esac

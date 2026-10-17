@@ -165,3 +165,31 @@ test("review (2): every destination and the backup are walked before any change,
   const put = code.slice(code.indexOf("dm_put() {"), code.indexOf("dm_main() {"));
   assert.ok(put.indexOf("dm_ancestors_problem") >= 0 && put.indexOf("dm_ancestors_problem") < put.indexOf("/usr/bin/mv"));
 });
+
+// ---------------------------------------------------------------------------
+// The re-review's sweep (r-20261017-114940-a271fb): other links on the way
+// ---------------------------------------------------------------------------
+
+test("re-review sweep, on disk: the release's own systemd directory is checked like every directory on the way", { skip: !posix }, () =>
+  withTemporary((root) => {
+    const release = join(root, "release");
+    mkdirSync(join(root, "elsewhere"));
+    mkdirSync(release);
+    symlinkSync(join(root, "elsewhere"), join(release, "systemd"));
+    const run = bash('DM_RELEASE="$1" dm_release_tree_problem', release);
+    assert.equal(run.status, 1);
+    assert.equal(run.stdout.trim(), `${join(release, "systemd")} link`);
+  }),
+);
+
+test("re-review sweep: the release tree is checked in the dry run, and the apply never writes a backup through an earlier one", () => {
+  const code = installer.replace(/^\s*#.*$/gm, "");
+  const main = code.slice(code.indexOf("dm_main() {"));
+  const tree = main.indexOf("dm_release_tree_problem");
+  assert.ok(tree > 0 && tree < main.indexOf("if ((DM_APPLY == 0)); then"), "the dry run reports the release tree");
+  // A fresh backup directory per run: plain mkdir fails when it already exists.
+  assert.match(main, /\/usr\/bin\/mkdir -m 0700 -- "\$backup" \|\| dm_fail/);
+  const keep = main.slice(main.indexOf("replace|repair)"), main.indexOf('dm_put "${DM_PLAN_DEST'));
+  assert.ok(keep.includes('dm_ancestors_problem "$backup${DM_PLAN_DEST[$index]}"'), "the way to each backup copy is checked");
+  assert.ok(keep.indexOf("dm_ancestors_problem") < keep.indexOf("/usr/bin/cp -a"));
+});

@@ -1866,8 +1866,11 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   같아도 그 밖이면 `repair`로 다른 바이트(`replace`)처럼 `/var/backups/tomverse-amux-dm/<시각>/`에 보존한 뒤 목적지 디렉터리 안에서
   만든 사본을 rename으로 원자 교체합니다. 목적지의 link·디렉터리는 거부합니다. **목적지와 백업으로 가는 길의 이미 있는 모든 디렉터리**는
   link 아님·root 소유·그룹/기타 쓰기 없음이어야 하며, dry run이 보고하고 apply가 첫 변경 직전과 각 이동 직전에 다시 확인합니다
-  (검토 r-20261017-113433-e16efc 1·2). 빌드의 `--out`은 저장소·홈·파일시스템 루트와 그 조상을 언제나 거부하고, 기본 경로 밖의 비어 있지
-  않은 디렉터리는 빌드가 남긴 표식(`.amux-decision-maker-release`)이 있을 때만 교체합니다(같은 검토 3).
+  (검토 r-20261017-113433-e16efc 1·2). release의 `systemd/`도 같은 검사를 받고, 백업 디렉터리는 실행마다 새로 만들며 이미 있으면
+  멈춥니다(재검토 r-20261017-114940-a271fb의 sweep). 빌드의 `--out`은 저장소·홈·파일시스템 루트와 그 조상을 언제나 거부하고, **경로 자신과
+  이미 있는 모든 조상 중 하나라도 link이거나 realpath가 적힌 경로와 다르면 기본 경로라도 거부합니다**. 비어 있지 않은 디렉터리는 빌드가 남긴
+  표식(`.amux-decision-maker-release`)이 있고 그 밖의 항목이 모두 release 자신의 일반 파일일 때만 쓰며, 재귀 삭제 없이 그 파일들만 이름으로
+  지웁니다(검토 3, 재검토).
   unit을 enable·start하지 않고, CLI는 `--version`만(nobody, 네트워크 없는 namespace, 빈
   환경) 실행하며, 앱의 `TOMVERSE_AMUX_DM_ROUTING`은 그대로 꺼져 있습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
   없습니다.
