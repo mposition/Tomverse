@@ -23,6 +23,10 @@ import {
   type AmuxOperatingScopeAuthority,
 } from "@/lib/amux/ideaOperatingScopeStore";
 import { commitAmuxDueRawIdeaPurge } from "@/lib/amux/ideaRawRetentionService";
+import { commitAmuxIdeaSessionCancellation,
+  readAmuxIdeaSessionCancellationReceipt,
+  AmuxIdeaSessionCancellationError } from
+  "@/lib/amux/ideaSessionCancellationService";
 import {
   commitAmuxIdeaSessionSubmission,
   readAmuxIdeaSessionSubmissionRequest,
@@ -699,6 +703,58 @@ test("database refuses fake-human, wrong-owner and extra-metadata evidence", asy
     }
     throw rollbackForgedEvidence;
   }), (error: unknown) => error === rollbackForgedEvidence);
+});
+
+test("owner cancellation removes a queued session idea and makes raw purge due", async () => {
+  const ideaId = randomUUID();
+  const inspected = inspect(ideaId);
+  const created = await prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected, expectedAuthority: authority, ideaId, keys: keysFor(ideaId),
+    });
+    const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: inspected.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+    return reservation;
+  });
+  assert.ok((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === created.reservationId));
+  const cancellation = await prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionCancellation(tx, { session, request, ideaId,
+      ownerConfirmed: true }));
+  const [idea, reservation, audit] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } }),
+    prisma.amuxIdeaSessionAnalysisReservation.findUniqueOrThrow({ where: { ideaId } }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: cancellation.auditId } }),
+  ]);
+  assert.equal(idea.state, "cancelled");
+  assert.equal(idea.cancelledAt?.toISOString(), cancellation.cancelledAt);
+  assert.equal(idea.rawPurgeAfter?.toISOString(), cancellation.cancelledAt);
+  assert.equal(reservation.status, "queued", "append-only queue evidence is retained");
+  assert.equal(auditRowActorKind(audit), "human");
+  assert.equal(audit.actorUserId, ownerId);
+  assert.equal(audit.action, "amux.idea.session_cancelled_before_analysis");
+  assert.equal(JSON.stringify(audit.metadata).includes("Synthetic session idea"), false);
+  assert.equal((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === created.reservationId), false);
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
+      state: "cancelled", ideaId, cancelledAt: cancellation.cancelledAt,
+      auditId: cancellation.auditId, retryWrite: false,
+    });
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionCancellation(tx, { session, request, ideaId,
+      ownerConfirmed: true })), (error: unknown) =>
+    error instanceof AmuxIdeaSessionCancellationError &&
+    error.code === "not_cancellable");
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueRawIdeaPurge(tx, ideaId)), "purged");
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
+      state: "cancelled", ideaId, cancelledAt: cancellation.cancelledAt,
+      auditId: cancellation.auditId, retryWrite: false,
+    });
 });
 
 test("audited identity and encrypted bodies are immutable except for one complete raw purge", async () => {
