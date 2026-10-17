@@ -72,6 +72,17 @@ test("unit no-commit recovery has a separate default-off switch", () => {
   assert.match(source, /!AMUX_V4_UNIT_WRITE_CODE_ENABLED \|\|\s*process\.env\[UNIT_RECOVERY_WRITE_ENV\] !== "enabled"/);
 });
 
+test("v4 live CLI retains its v13 child and tunnel limits", () => {
+  const source = readFileSync(new URL(
+    "../lib/amux/ideaLocalIsolatedCliRunner.mjs", import.meta.url), "utf8");
+  const runOnce = source.slice(source.indexOf("async function runIsolatedCliOnce("),
+    source.indexOf("export async function runAmuxV4IsolatedSyntheticCliS0("));
+  assert.ok(runOnce.startsWith("async function runIsolatedCliOnce("));
+  assert.match(runOnce, /createAmuxV4EgressProxy\(selection\.egressHosts/);
+  assert.match(runOnce, /await awaitAmuxV4BoundedChild\(child,\s*AMUX_V4_CLI_HARD_DEADLINE_MS\)/);
+  assert.doesNotMatch(runOnce, /createAmuxV19EgressProxy|awaitAmuxV19StoppableChild/);
+});
+
 test("v29 opens four v22 code latches and v49 adds publication, not outcome writes", () => {
   const sources = [
     ["../lib/amux/v22AutoPromotionCore.ts", "AMUX_V22_AUTO_PROMOTION_CODE_LATCH", true],
