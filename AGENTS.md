@@ -1413,6 +1413,13 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   게시기와 같은 모양으로 마감에 worker를 SIGKILL하고, worker에는 변수 넷만 넘깁니다. **worker는 가격 pin이 있는 모델이
   아니면 시작하지 않습니다** — 지금은 pin이 없어 항상 거절합니다. `.railway/agent-runners.ts` 배선은 D4(전용 OpenAI
   프로젝트·키·pin) 뒤입니다.
+- **S3d(가격 경보)**: `lib/marketingPriceAlertCore.ts`, `lib/marketingPriceAlert.ts`, `tests/marketingPriceAlert.test.mjs`.
+  가격 출처 거절(docs/policy/marketing-automation.md §7.2(2))은 **기존 운영 알림**으로 보냅니다(운영자 결정 D5, 2026-10-17) —
+  `reportOperationalIncident()`가 `OPS_ALERT_EMAIL`(없으면 `ADMIN_ALERT_EMAIL`)과 설정된 chat webhook으로 직접 보내고,
+  본문은 Admin 링크와 게시물 id뿐입니다. **준비 상태는 그 수신자 변수가 있는가**이며, Guard 문맥·draft 접수·자율
+  admission이 같은 판정을 읽습니다(고정 상수는 지웠고, 위치가 밀리지 않게 같은 줄 수의 주석으로 남김). 수신자가 없으면
+  Guard는 가격 claim을 `alert_path_not_ready`로 승인에 보내고 draft 접수는 닫혀 있습니다. 경보는 접수 트랜잭션이
+  commit된 뒤 route가 보내며, 실패해도 접수 결과를 바꾸지 않습니다.
 - **S3h1(보존 정리)**: `lib/marketingRetention.ts`, store의 `purgeExpiredMarketingRows()`,
   `lib/maintenance.ts`의 `marketing_retention` 단계, `tests/integration/marketing-retention.db.test.ts`.
   **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가
