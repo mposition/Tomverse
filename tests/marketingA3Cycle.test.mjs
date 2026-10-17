@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MARKETING_A3_COMPETITOR_BUDGET_MS, runMarketingA3Cycle } from "@/lib/marketingA3CycleCore";
 import {
+  MARKETING_A3_COMPETITOR_BUDGET_MS,
+  MARKETING_A3_REPORT_MARGIN_MS,
+  runMarketingA3Cycle,
+} from "@/lib/marketingA3CycleCore";
+import {
+  MARKETING_INTEL_REPORT_MAX_BODY_BYTES,
   marketingGeneratorReportProvenanceMatches,
   marketingGeneratorReportSchema,
 } from "@/lib/marketingIntelReportCore";
@@ -168,4 +173,82 @@ test("an unreadable context stops before any page is read", async () => {
     assert.equal(summary.stoppedAt?.stage, "context");
     assert.equal(seen.pages.length, 0);
   }
+});
+
+test("a call that throws is an unknown outcome: the run stops and reports nothing", async () => {
+  const { deps, seen } = ports({
+    callLlm: async () => {
+      throw new Error("aborted");
+    },
+  });
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  assert.deepEqual(summary.stoppedAt, { stage: "llm", detail: "threw" });
+  assert.equal(seen.reports.length, 0);
+});
+
+test("a page read cut off by the deadline is a read that did not happen", async () => {
+  const { deps } = ports({
+    fetchPage: async () => {
+      throw new DOMException("aborted", "AbortError");
+    },
+  });
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  assert.deepEqual(summary.pagesRefused, { timeout: 2 });
+  assert.equal(summary.calls, 0);
+  assert.equal(summary.stoppedAt, null);
+});
+
+test("with too little time left the report is not sent, which is a deadline and not a failure", async () => {
+  let clock = NOW;
+  const { deps, seen } = ports({
+    now: () => clock,
+    callLlm: async (messages, requestKey) => {
+      // The call returns with less than the report's margin left.
+      clock = Date.parse(DEADLINE) - MARKETING_A3_REPORT_MARGIN_MS + 1;
+      return {
+        status: "answered",
+        callId: "c",
+        requestKey,
+        content: JSON.stringify({ facts: [fact("https://poe.com/pricing")], unrepresentable: 0 }),
+        ledgerState: "settled",
+      };
+    },
+  });
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  assert.deepEqual(summary.stoppedAt, { stage: "deadline", detail: "report_deadline_too_close" });
+  assert.equal(seen.reports.length, 0);
+});
+
+test("a report never exceeds the route's byte limit; the facts that do not fit are counted", async () => {
+  const longUrl = `https://poe.com/${"p".repeat(480)}`;
+  const many = Array.from({ length: 40 }, (_, index) => ({
+    factType: `f${"x".repeat(50)}${index}`,
+    value: { kind: "number", value: index, unit: null },
+    sourceUrl: longUrl,
+  }));
+  const competitorsList = Array.from({ length: 6 }, (_, index) => ({
+    competitorId: `c${index}`,
+    displayName: `C${index}`,
+    officialHosts: ["poe.com"],
+    trackedPages: [longUrl],
+  }));
+  const { deps, seen } = ports({
+    readContext: async () => context(competitorsList),
+    fetchPage: async (url) => ({ ok: true, page: { url, text: "numbers" } }),
+    callLlm: async (messages, requestKey) => ({
+      status: "answered",
+      callId: "c",
+      requestKey,
+      content: JSON.stringify({ facts: many, unrepresentable: 0 }),
+      ledgerState: "settled",
+    }),
+  });
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  assert.equal(summary.stoppedAt, null);
+  const report = seen.reports[0];
+  assert.ok(Buffer.byteLength(JSON.stringify(report), "utf8") <= MARKETING_INTEL_REPORT_MAX_BODY_BYTES);
+  assert.ok(report.payload.facts.length < 200, `kept ${report.payload.facts.length}`);
+  assert.equal(report.payload.facts.length + report.payload.unrepresentableFactCount, 240);
+  assert.equal(summary.factsKept + summary.unrepresentable, 240);
+  assert.equal(marketingGeneratorReportSchema.safeParse(report).success, true);
 });

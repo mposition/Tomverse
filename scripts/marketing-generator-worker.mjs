@@ -70,26 +70,51 @@ const budget = marketingLlmBudgetHttpPort({
 const app = marketingGeneratorAppPorts({ appUrl, secret, generatorRunId: runId, fetch, signal: controller.signal });
 
 try {
+  // A3's share is enforced, not just checked between competitors: every
+  // request A3 makes is aborted when the share runs out, a call not yet sent
+  // is given up rather than dispatched, and its ledger rows and report carry
+  // the share's deadline, so nothing of A3's is recorded after it.
   const a3DeadlineAt = new Date(Math.min(Date.parse(deadlineAt), Date.now() + A3_SHARE_MS)).toISOString();
+  const a3Controller = new AbortController();
+  const a3Timer = setTimeout(() => a3Controller.abort(), Math.max(0, Date.parse(a3DeadlineAt) - Date.now()));
+  // Not what keeps the worker alive: a run that ends early exits at once.
+  a3Timer.unref();
+  const a3Signal = AbortSignal.any([controller.signal, a3Controller.signal]);
+  const a3Budget = marketingLlmBudgetHttpPort({
+    appUrl: appUrl.toString(),
+    secret,
+    deadlineAt: a3DeadlineAt,
+    fetch,
+    signal: a3Signal,
+  });
+  const a3App = marketingGeneratorAppPorts({ appUrl, secret, generatorRunId: runId, fetch, signal: a3Signal });
   const intel = await runMarketingA3Cycle(
     { generatorRunId: runId, deadlineAt: a3DeadlineAt },
     {
-      readContext: app.readContext,
+      readContext: a3App.readContext,
       // A page gets no credential and no header of the app's: the plain fetch,
-      // bounded by fetchMarketingA3Page and by this run's deadline.
-      fetchPage: (url, hosts) => fetchMarketingA3Page({ url, hosts }, { fetch, signal: controller.signal }),
+      // bounded by fetchMarketingA3Page and by A3's share.
+      fetchPage: (url, hosts) => fetchMarketingA3Page({ url, hosts }, { fetch, signal: a3Signal }),
       callLlm: (messages, requestKey) =>
         runMarketingLlmCall(
           { pin, generatorRunId: runId, purpose: "market_intel", messages, requestKey },
-          { budget, transport: fetch, apiKey, signal: controller.signal },
+          {
+            budget: a3Budget,
+            transport: fetch,
+            apiKey,
+            signal: a3Signal,
+            // A minute before the share ends, a reserved call is released, not sent.
+            proceed: () => Date.parse(a3DeadlineAt) - Date.now() > 60_000,
+          },
         ),
-      submitReport: app.submitReport,
+      submitReport: a3App.submitReport,
       secret,
       newId: randomUUID,
       now: Date.now,
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     },
   );
+  clearTimeout(a3Timer);
   // Counts and the stop reason only: no page text, no fact, no URL.
   console.log(JSON.stringify({ event: "marketing_generator_a3", runId, model: pin.model, ...intel }));
   if (intel.stoppedAt !== null && (intel.stoppedAt.stage === "llm" || intel.stoppedAt.stage === "submit")) {

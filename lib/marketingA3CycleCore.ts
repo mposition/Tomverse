@@ -26,7 +26,10 @@ import {
   type MarketingA3Page,
   type MarketingA3PageRefusal,
 } from "./marketingA3Core.ts";
-import type { MarketingGeneratorReport } from "./marketingIntelReportCore.ts";
+import {
+  MARKETING_INTEL_REPORT_MAX_BODY_BYTES,
+  type MarketingGeneratorReport,
+} from "./marketingIntelReportCore.ts";
 import type { MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /**
@@ -43,6 +46,16 @@ export const MARKETING_A3_SUBMIT_BACKOFF_MS = [2_000, 5_000] as const;
 
 /** Facts one report holds (the payload schema's limit); the rest are counted. */
 export const MARKETING_A3_REPORT_MAX_FACTS = 200;
+
+/**
+ * Time the report is not sent without. Past it the route would refuse the
+ * report as too late, and a refused report stops the run; a report not sent
+ * only means no market facts this run.
+ */
+export const MARKETING_A3_REPORT_MARGIN_MS = 30_000;
+
+/** The report's serialised size limit, under the route's own with room to spare. */
+const REPORT_BYTE_LIMIT = MARKETING_INTEL_REPORT_MAX_BODY_BYTES - 4 * 1024;
 
 /** The report's id within a run: one A3 report per run. */
 export const MARKETING_A3_REPORT_ID = "a3-tracked-pages";
@@ -142,7 +155,7 @@ export async function runMarketingA3Cycle(
     pagesRead,
     pagesRefused,
     calls,
-    factsKept: Math.min(facts.length, MARKETING_A3_REPORT_MAX_FACTS),
+    factsKept: facts.length,
     unrepresentable,
     report,
     stoppedAt,
@@ -163,8 +176,11 @@ export async function runMarketingA3Cycle(
     }
     competitors += 1;
     // Read together, so one competitor's pages take one fetch timeout, not ten.
+    // A read cut off by the run's own deadline is a read that did not happen.
     const reads = await Promise.all(
-      competitor.trackedPages.map((url) => deps.fetchPage(url, competitor.officialHosts)),
+      competitor.trackedPages.map((url) =>
+        deps.fetchPage(url, competitor.officialHosts).catch(() => ({ ok: false as const, reason: "timeout" as const })),
+      ),
     );
     const pages: MarketingA3Page[] = [];
     for (const read of reads) {
@@ -179,7 +195,13 @@ export async function runMarketingA3Cycle(
 
     const checkedAt = new Date(deps.now()).toISOString();
     calls += 1;
-    const outcome = await deps.callLlm(marketingA3Messages(competitor, pages), deps.newId());
+    let outcome: MarketingLlmCallOutcome;
+    try {
+      outcome = await deps.callLlm(marketingA3Messages(competitor, pages), deps.newId());
+    } catch {
+      // Nothing says whether the provider was reached: unknown, and the run stops.
+      return summary({ stage: "llm", detail: "threw" });
+    }
     if (outcome.status === "refused") return summary({ stage: "llm", detail: `${outcome.stage}:${outcome.code}` });
     if (outcome.status !== "answered") return summary({ stage: "llm", detail: outcome.status });
     const read = readMarketingA3Answer(outcome.content, { competitorId: competitor.competitorId, pages, checkedAt });
@@ -189,17 +211,30 @@ export async function runMarketingA3Cycle(
   }
 
   if (facts.length === 0 && unrepresentable === 0) return summary(null);
-  const overflow = Math.max(0, facts.length - MARKETING_A3_REPORT_MAX_FACTS);
-  const report = marketingA3ReportBody(deps.secret, {
-    generatorRunId: input.generatorRunId,
-    reportId: MARKETING_A3_REPORT_ID,
-    periodStart: startedAt,
-    periodEnd: new Date(deps.now()).toISOString(),
-    deadlineAt: input.deadlineAt,
-    facts: facts.slice(0, MARKETING_A3_REPORT_MAX_FACTS),
-    unrepresentableFactCount: unrepresentable + overflow,
-  });
-  unrepresentable += overflow;
+  if (deadline - deps.now() < MARKETING_A3_REPORT_MARGIN_MS) {
+    return summary({ stage: "deadline", detail: "report_deadline_too_close" });
+  }
+  const periodEnd = new Date(deps.now()).toISOString();
+  const build = (kept: number) =>
+    marketingA3ReportBody(deps.secret, {
+      generatorRunId: input.generatorRunId,
+      reportId: MARKETING_A3_REPORT_ID,
+      periodStart: startedAt,
+      periodEnd,
+      deadlineAt: input.deadlineAt,
+      facts: facts.slice(0, kept),
+      unrepresentableFactCount: unrepresentable + (facts.length - kept),
+    });
+  // At most the payload's fact limit, and no more than the route will read:
+  // facts past either are counted with the unrepresentable ones, not lost.
+  let kept = Math.min(facts.length, MARKETING_A3_REPORT_MAX_FACTS);
+  let report = build(kept);
+  while (kept > 0 && Buffer.byteLength(JSON.stringify(report), "utf8") > REPORT_BYTE_LIMIT) {
+    kept = Math.max(0, kept - Math.max(1, Math.ceil(kept / 10)));
+    report = build(kept);
+  }
+  unrepresentable += facts.length - kept;
+  facts.length = kept;
 
   let answer: { readonly httpStatus: number; readonly body: Record<string, unknown> } | null = null;
   for (let attempt = 0; attempt < MARKETING_A3_SUBMIT_ATTEMPTS; attempt += 1) {

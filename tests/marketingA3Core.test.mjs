@@ -187,3 +187,19 @@ test("the report is a signed market_intel report the app's route accepts as is",
   assert.equal(marketingGeneratorReportProvenanceMatches(secret, parsed.data), true);
   assert.equal(marketingGeneratorReportProvenanceMatches("t".repeat(48), parsed.data), false);
 });
+
+test("a host the URL parser reads as an address is refused, however it is written", async () => {
+  const { impl, asked } = fakeFetch({});
+  for (const host of ["0x7f.0.0.1", "127.1", "0177.0.0.1", "10.0.0.1"]) {
+    const url = `https://${host}/pricing`;
+    assert.deepEqual(await fetchMarketingA3Page({ url, hosts: [host] }, { fetch: impl }), { ok: false, reason: "host_is_address" }, host);
+  }
+  // A redirect onto such a host is refused the same way.
+  const onto = fakeFetch({ [PAGE]: { status: 302, headers: { location: "https://0x7f.0.0.1/admin" }, body: "" } });
+  assert.deepEqual(
+    await fetchMarketingA3Page({ url: PAGE, hosts: [...HOSTS, "0x7f.0.0.1"] }, { fetch: onto.impl }),
+    { ok: false, reason: "redirect_off_hosts" },
+  );
+  assert.equal(asked.length, 0);
+  assert.equal(onto.asked.length, 1);
+});

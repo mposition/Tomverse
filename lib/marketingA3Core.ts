@@ -66,13 +66,29 @@ export type MarketingA3PageRefusal =
   | "empty";
 
 /**
- * A host that is an IPv4 address. The registry's host shape lets digits
- * through, and a page on a bare address is not a competitor's site; refusing
- * it also keeps the fetch off the service's own network.
+ * Whether the host the request would actually go to is the host as written,
+ * and is a name rather than an address.
+ *
+ * Judged on the URL parser's own reading, because that is what fetch uses:
+ * the registry's host shape lets `0x7f.0.0.1` through, and the parser reads
+ * it as 127.0.0.1. A host the parser rewrites at all is refused, and so is
+ * any IPv4 or IPv6 address -- a page on an address is not a competitor's
+ * site, and refusing it keeps the fetch off the service's own network.
  */
-const isAddress = (host: string) => /^[0-9.]+$/u.test(host);
-
-const pageHost = (url: string) => /^https:\/\/([^/?#]+)/u.exec(url)?.[1] ?? null;
+function hostIsNamedAsWritten(url: string): boolean {
+  const written = /^https:\/\/([^/?#]+)/u.exec(url)?.[1];
+  if (!written) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const host = parsed.hostname;
+  if (host !== written) return false;
+  if (host.startsWith("[") || /^[0-9.]+$/u.test(host)) return false;
+  return true;
+}
 
 /** HTML to the words a reader sees: no script, style, comment or tag, entities decoded, space collapsed. */
 export function marketingA3PageText(html: string): string {
@@ -130,7 +146,7 @@ export async function fetchMarketingA3Page(
   deps: { readonly fetch: typeof fetch; readonly signal?: AbortSignal },
 ): Promise<{ readonly ok: true; readonly page: MarketingA3Page } | { readonly ok: false; readonly reason: MarketingA3PageRefusal }> {
   if (!marketingCompetitorPagesOnHosts([input.url], input.hosts)) return { ok: false, reason: "page_not_on_hosts" };
-  if (isAddress(pageHost(input.url) ?? "")) return { ok: false, reason: "host_is_address" };
+  if (!hostIsNamedAsWritten(input.url)) return { ok: false, reason: "host_is_address" };
 
   const timeout = AbortSignal.timeout(MARKETING_A3_PAGE_TIMEOUT_MS);
   const signal = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout;
@@ -154,7 +170,7 @@ export async function fetchMarketingA3Page(
         } catch {
           return { ok: false, reason: "redirect_off_hosts" };
         }
-        if (!marketingCompetitorPagesOnHosts([next], input.hosts) || isAddress(pageHost(next) ?? "")) {
+        if (!marketingCompetitorPagesOnHosts([next], input.hosts) || !hostIsNamedAsWritten(next)) {
           return { ok: false, reason: "redirect_off_hosts" };
         }
         target = next;
