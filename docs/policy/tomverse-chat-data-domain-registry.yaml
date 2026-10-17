@@ -2023,6 +2023,28 @@ domains:
       the audit contains no paths. The restrictive parent and audit references
       do not resolve account deletion, key retirement, retention, or export.
 
+  - domain: amuxIdeaSessionAnalysisReservation
+    prismaModel: AmuxIdeaSessionAnalysisReservation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, AMUX session analysis reservation account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The append-only queue receipt links the scope owner's identifier to one
+      session idea, request identifier, saved operating-scope version, selected
+      model, and canonical system audit. It stores no idea text, source labels,
+      repository names, paths, model response, or cost amount. The restrictive
+      parent and audit references do not resolve account deletion, retention,
+      or unified export.
+
   - domain: amuxIdeaAnalysisChunk
     prismaModel: AmuxIdeaAnalysisChunk
     userLinkageRole: actor

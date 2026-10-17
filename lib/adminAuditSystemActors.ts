@@ -27,6 +27,12 @@ export const AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR = "amux-session-intake" as c
 export const AMUX_SESSION_IDEA_SUBMITTED_ACTION = "amux.idea.session_submitted" as const;
 export const AMUX_SESSION_IDEA_SUBMITTED_TARGET = "AmuxIdeaSubmission" as const;
 export const AMUX_SESSION_IDEA_SUBMITTED_SCOPE = "session-submission-v1" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_ACTION =
+  "amux.idea.session_analysis_reserved" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_TARGET =
+  "AmuxIdeaSessionAnalysisReservation" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_SCOPE =
+  "session-analysis-reservation-v1" as const;
 
 /**
  * The legacy internal auto-promotion tick consumes an owner-bound grant.
@@ -304,7 +310,10 @@ export const amuxSessionIntakeSystemAuditScope = (
   action === AMUX_SESSION_IDEA_SUBMITTED_ACTION &&
   targetType === AMUX_SESSION_IDEA_SUBMITTED_TARGET
     ? AMUX_SESSION_IDEA_SUBMITTED_SCOPE
-    : null;
+    : action === AMUX_SESSION_ANALYSIS_RESERVED_ACTION &&
+        targetType === AMUX_SESSION_ANALYSIS_RESERVED_TARGET
+      ? AMUX_SESSION_ANALYSIS_RESERVED_SCOPE
+      : null;
 
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,

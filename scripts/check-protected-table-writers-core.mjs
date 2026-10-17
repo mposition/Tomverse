@@ -148,6 +148,7 @@ export const APPEND_ONLY_LEDGER_TABLES = [
   "AmuxV22ReadOnlyLaunchCheck",
   "AmuxV22ReadOnlyLaunchProof",
   "AmuxV22ApiModelAccessEvidence",
+  "AmuxIdeaSessionAnalysisReservation",
   "AmuxIdeaTrackedCheckoutEvidence",
   "AmuxIdeaTrackedCheckoutReadManifest",
 ];
@@ -187,6 +188,12 @@ export const findTruncateStatements = ({ sources }) => {
 };
 
 export const PROTECTED_TABLES = [
+  {
+    table: "AmuxIdeaSessionAnalysisReservation",
+    delegate: "amuxIdeaSessionAnalysisReservation",
+    writers: ["lib/amux/ideaSessionAnalysisReservationStore.ts"],
+    contract: "docs/policy/amux-intake.md v19 items 4, 8 and 9",
+  },
   {
     table: "AmuxIdeaTrackedCheckoutEvidence",
     delegate: "amuxIdeaTrackedCheckoutEvidence",
@@ -569,6 +576,12 @@ export const DELEGATE_NAME_ALLOWLIST = [
   },
   {
     path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxIdeaSessionAnalysisReservation",
+    count: 1,
+    reason: "Account export domain key only; no client is indexed and no database connection or writer exists in this metadata file.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     delegate: "amuxIdeaTrackedCheckoutEvidence",
     count: 1,
     reason: "Account export domain key only; no client is indexed and no database connection or writer exists in this metadata file.",
@@ -663,6 +676,54 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261016130000_amux_v52_review_record/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 11,
+    reason:
+      "The v52 review migration adds a restrictive foreign key to the canonical audit row. Its DDL and append-only trigger constrain AmuxV52ReviewRecord; it never writes AdminAuditLog.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the session analysis reservation model as its domain key and prismaModel. Other domain descriptions contain write verbs; this metadata module opens no database connection and executes no SQL.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_session_analysis_reservation/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 10,
+    writeVerbs: 12,
+    reason:
+      "The v19 migration creates the protected append-only reservation table and its insert evidence guard. It seeds no reservation row; the runtime writer remains lib/amux/ideaSessionAnalysisReservationStore.ts.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_session_analysis_reservation/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 3,
+    writeVerbs: 12,
+    reason:
+      "The reservation migration adds one restrictive scope foreign key and reads both the referenced and latest immutable owner-approved scope. Its DDL and trigger verbs affect only the new reservation table; it never writes an operating-scope row.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_session_analysis_reservation/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 12,
+    reason:
+      "The reservation migration adds one restrictive audit foreign key and reads the same-transaction submission and reservation system audits. Its DDL and trigger verbs affect only the new reservation table; it never writes AdminAuditLog.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed v19 intake actor manifest names this audit target once. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
   {
     path: "lib/accountDataExportDomains.ts",
     table: "AmuxIdeaTrackedCheckoutReadManifest",

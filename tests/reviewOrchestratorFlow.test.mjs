@@ -3,13 +3,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import { Orchestrator } from "../tools/review-orchestrator/lib/service.mjs";
 import { probeProviderQuotas, recordManualQuota } from "../tools/review-orchestrator/lib/quota.mjs";
 import { Store } from "../tools/review-orchestrator/lib/store.mjs";
+import { reviewStep } from "../scripts/amux-v52-review-runner.mjs";
 
 const allAvailable = (config) => Object.fromEntries(config.providers.map((provider) => [provider.id, { state: "available" }]));
 
@@ -66,6 +67,72 @@ function fixture(modes, extra = {}) {
   };
   return { root, work, origin, configPath, config: validateConfig(raw), client, commit, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
+
+test("AMUX submits a detached local commit through its read-only review ref", () => {
+  const f = fixture({});
+  try {
+    const base = git(f.work, "rev-parse", "HEAD");
+    f.commit("a.txt", "reviewed change\n");
+    const head = git(f.work, "rev-parse", "HEAD");
+    const ref = "refs/amux-v52-review/4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
+    git(f.work, "update-ref", ref, head);
+    git(f.work, "reset", "--hard", base);
+    const submitted = f.client("submit", "--author", "codex",
+      "--repo", "demo", "--head", head, "--head-ref", ref,
+      "--scope", "Title: Review this change\nCompletion criteria:\n- Works");
+    assert.equal(submitted.code, 3, submitted.stderr);
+    const job = JSON.parse(submitted.stdout);
+    assert.equal(job.jobId?.startsWith("r-"), true);
+    assert.equal(git(f.work, "rev-parse", ref), head);
+    assert.equal(git(f.work, "rev-parse", "HEAD"), base);
+  } finally { f.cleanup(); }
+});
+
+test("AMUX launcher follows the real client's pending and accept exit codes", async () => {
+  const f = fixture({});
+  try {
+    const base = git(f.work, "rev-parse", "HEAD");
+    f.commit("a.txt", "launcher result\n");
+    const head = git(f.work, "rev-parse", "HEAD");
+    const attemptId = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
+    const reviewRef = `refs/amux-v52-review/${attemptId}`;
+    git(f.work, "update-ref", reviewRef, head);
+    git(f.work, "reset", "--hard", base);
+    const stateDir = join(f.root, "bridge-state");
+    mkdirSync(stateDir, { mode: 0o700 });
+    const objectsDir = join(git(f.work, "rev-parse", "--absolute-git-dir"),
+      "objects");
+    const options = { stateDir, objectsDir, client: CLIENT,
+      repo: "demo",
+      uid: statSync(stateDir).uid,
+      run: (program, args, cwd, _timeout, alternate) => {
+        assert.notEqual(cwd, f.work,
+          "the key holder must never run Git in the worker worktree");
+        return run(program === "/usr/bin/git" ? "git" : process.execPath,
+          args, { cwd, env: { ...process.env,
+            REVIEW_ORCH_CONFIG: f.configPath, REVIEW_ORCH_LOCAL_BIN: SERVER,
+            ...(alternate ? { GIT_ALTERNATE_OBJECT_DIRECTORIES: alternate } : {}) } });
+      } };
+    const review = { attemptId, baseSha: base, commitSha: head,
+      reviewRef, author: "codex", authorVendor: "openai",
+      scope: "Title: Review launcher\nCompletion criteria:\n- Works",
+      touchesContract: false };
+    const pending = reviewStep(review, options);
+    assert.equal(pending.kind, "pending");
+    assert.equal(git(join(stateDir, `${attemptId}.git`),
+      "rev-parse", "--is-bare-repository"), "true");
+    const logs = [];
+    const orchestrator = new Orchestrator(f.config,
+      { log: (line) => logs.push(line) });
+    orchestrator.tick(allAvailable(f.config));
+    await orchestrator.idle();
+    const final = reviewStep(review, options);
+    assert.equal(final.kind, "final");
+    assert.equal(final.evidence.verdict, "accept", JSON.stringify({
+      final, status: JSON.parse(f.client("status", pending.jobId).stdout), logs }));
+    assert.deepEqual(final.evidence.reviewer_vendors, ["anthropic"]);
+  } finally { f.cleanup(); }
+});
 
 test("an explicit reviewer survives RPC, queue restart and quota wait without fallback", async () => {
   const f = fixture({});
@@ -288,7 +355,8 @@ test("the reviewer sees the diff and the scope note, and none of the daemon's se
   try {
     f.config.providers.find((p) => p.id === "claude").passEnv = ["FAKE_REVIEWER_PROMPT_OUT"];
     f.commit("a.txt", "six\n");
-    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo", "--scope", "scope-marker").stdout);
+    const scope = `scope-marker-${"x".repeat(5_000)}-scope-end`;
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo", "--scope", scope).stdout);
     const orchestrator = new Orchestrator(f.config);
     orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
@@ -296,6 +364,7 @@ test("the reviewer sees the diff and the scope note, and none of the daemon's se
     assert.equal(summary.reviews[0].findings[0].summary, "leak=none");
     const prompt = readFileSync(promptOut, "utf8");
     assert.match(prompt, /scope-marker/);
+    assert.match(prompt, /scope-end/);
     assert.match(prompt, /\+six/);
   } finally {
     delete process.env.REVIEW_ORCH_SECRET_PROBE;
