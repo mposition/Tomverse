@@ -28,10 +28,14 @@ export const PAYLOAD = Buffer.from("Synthetic AMUX Decision Maker question for a
 
 export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-/** `executable` is the stand-in CLI's content, or a function of the root that returns it. */
+/**
+ * `executable` is the stand-in CLI's content, or a function of the root that
+ * returns it. `requestDirectory: false` leaves the request directory to the
+ * broker (stage S2-3b), which makes it itself.
+ */
 export const makeLauncherFixture = (
   instance,
-  { executable: content = "not a real CLI\n", executableMode = 0o755, hostOptions } = {},
+  { executable: content = "not a real CLI\n", executableMode = 0o755, hostOptions, requestDirectory = true } = {},
 ) => {
   const root = mkdtempSync(join(tmpdir(), "amux-dm-launcher-"));
   const executable = typeof content === "function" ? content(root) : content;
@@ -53,8 +57,10 @@ export const makeLauncherFixture = (
   for (const keep of spec.stateKeep) write(`${spec.home}/${keep.slice(2)}`, '{"synthetic":"auth"}');
   const paths = dmRequestPaths(instance, REQUEST_ID);
   directory(DM_REQUEST_ROOT, 0o711);
-  directory(paths.requestDirectory, 0o750);
-  writeFileSync(at(`${paths.requestDirectory}/card.json`), '{"synthetic":"card"}');
+  if (requestDirectory) {
+    directory(paths.requestDirectory, 0o750);
+    writeFileSync(at(`${paths.requestDirectory}/card.json`), '{"synthetic":"card"}');
+  }
   mkdirSync(at("/observed"), { recursive: true });
 
   const evidence = {
