@@ -216,6 +216,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration v52: audited execution-grade revision only, with no
   // commit-deadline marker, trigger, guard or classifier change.
   "20261016090000_amux_v52_grade_escalation_guard",
+  // Orchestration v52: the immutable review receipt table and constraints use
+  // the existing mutation boundary without changing commit-deadline behavior.
+  "20261016130000_amux_v52_review_record",
   // Intake v19 direct-read checkout evidence is append-only and audit-bound;
   // it adds no commit-deadline marker, trigger or classifier change.
   "20261017000000_amux_v19_tracked_checkout_evidence",
@@ -228,6 +231,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // The next migration closes an insert-only purged-shape loophole on that
   // same manifest table; it does not alter commit-deadline evidence.
   "20261017020100_amux_v19_read_manifest_active_insert_guard",
+  // Intake v19 session analysis queue reservation is append-only and bound to
+  // the submission transaction; it adds no commit-deadline mechanism.
+  "20261017010000_amux_v19_session_analysis_reservation",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

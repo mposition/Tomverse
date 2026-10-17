@@ -682,6 +682,27 @@ const REGISTRY = {
     reason:
       "An AMUX idea is stored either by the existing owner Admin path or by the v19 session path under the current owner-approved operating scope. The origin selects distinct human-versus-system audit evidence and cannot be relabelled after insert.",
   },
+  AmuxIdeaSessionAnalysisReservation_status_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_STATUSES",
+    reason:
+      "A v19 session reservation is an append-only queue identity. Later dispatch, stop and cost evidence use separate rows rather than relabelling this receipt.",
+  },
+  AmuxIdeaSessionAnalysisReservation_provider_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_PROVIDERS",
+    reason:
+      "The queue receipt copies the provider from the immutable owner-approved operating scope. Its trigger requires an exact match, and this list keeps malformed standalone rows out of the queue.",
+  },
+  AmuxIdeaSessionAnalysisReservation_reasoning_effort_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_REASONING_EFFORTS",
+    reason:
+      "The queue receipt copies the reasoning effort from the immutable owner-approved operating scope. Its trigger requires an exact match, and this list keeps malformed standalone rows out of the queue.",
+  },
   AmuxIdeaRegistrationRefusal_attempt_kind_check: {
     owner: "list",
     module: "lib/amux/ideaRegistrationRefusalCore.ts",
@@ -906,6 +927,13 @@ const REGISTRY = {
     owner: "type_only",
     reason:
       "AmuxExecutionToStatus in lib/amux/execution.ts types the four worker settlement destinations. Cancelled is a board lifecycle state rather than a worker-supplied settlement result, so it remains in the durable constraint but outside the route's union and zod input.",
+  },
+  AmuxV52ReviewRecord_verdict_check: {
+    owner: "list",
+    module: "lib/amux/v52ReviewCore.ts",
+    list: "AMUX_V52_REVIEW_VERDICTS",
+    reason:
+      "A v52 review records the independent server's accept, reject or unknown outcome. The app's settlement has a distinct deterministic branch for each value, so a stored fourth verdict could not be settled safely.",
   },
   AmuxBoardImportApproval_status_check: {
     owner: "list",
