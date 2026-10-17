@@ -39,6 +39,10 @@ export async function reportMarketingPriceSourceRefusal(
       code: MARKETING_PRICE_ALERT_INCIDENT_CODE,
       title: "A generated marketing draft was refused: a price it names is not a stored value",
       severity: "warning",
+      // Every refusal is a different post the operator has to look at; the
+      // per-code cooldown would deliver the first of a burst and drop the rest,
+      // and a dropped one is never raised again.
+      forceNotification: true,
       context: { component: "marketing-guard", postId: input.postId, admin: adminConsoleUrl(env) },
     });
   } catch (error) {

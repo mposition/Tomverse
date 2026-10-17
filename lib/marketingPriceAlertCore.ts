@@ -22,11 +22,16 @@ export const MARKETING_PRICE_ALERT_RECIPIENT_ENVS = ["OPS_ALERT_EMAIL", "ADMIN_A
 /** The Guard's refusal code the alert answers. */
 export const MARKETING_PRICE_SOURCE_REFUSAL_CODE = "price_source_not_stored";
 
-/** Whether the operational alert path has a recipient. */
+/**
+ * Whether the operational alert path has a recipient, decided the way it
+ * decides: the first variable that is set at all wins, and only then is it
+ * trimmed. A blank `OPS_ALERT_EMAIL` therefore means no recipient even when
+ * `ADMIN_ALERT_EMAIL` is set -- the alert would go nowhere, so this is not ready.
+ */
 export function marketingPriceAlertReady(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): boolean {
-  return MARKETING_PRICE_ALERT_RECIPIENT_ENVS.some((name) => (env[name] ?? "").trim().length > 0);
+  return Boolean((env.OPS_ALERT_EMAIL || env.ADMIN_ALERT_EMAIL)?.trim());
 }
 
 /** The same, as the access resolver's input. Reading an environment variable cannot fail. */

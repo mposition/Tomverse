@@ -15,6 +15,13 @@ test("the alert is ready exactly when the operational alert has a recipient", ()
   assert.equal(marketingPriceAlertReady({ OPS_ALERT_EMAIL: "  " }), false);
   assert.equal(marketingPriceAlertReady({ OPS_ALERT_EMAIL: "ops@example.invalid" }), true);
   assert.equal(marketingPriceAlertReady({ ADMIN_ALERT_EMAIL: "admin@example.invalid" }), true);
+  // The operational alert picks a set OPS_ALERT_EMAIL before trimming it, so a
+  // blank one means no recipient, whatever ADMIN_ALERT_EMAIL says.
+  assert.equal(
+    marketingPriceAlertReady({ OPS_ALERT_EMAIL: "  ", ADMIN_ALERT_EMAIL: "admin@example.invalid" }),
+    false,
+  );
+  assert.equal(marketingPriceAlertReady({ OPS_ALERT_EMAIL: "", ADMIN_ALERT_EMAIL: "admin@example.invalid" }), true);
   assert.deepEqual(marketingPriceAlertReadyInput({}), { ok: true, value: false });
 });
 
@@ -39,12 +46,31 @@ test("a refusal is reported as an operational incident carrying a link and an id
   assert.equal(reported.length, 1);
   assert.equal(reported[0].code, MARKETING_PRICE_ALERT_INCIDENT_CODE);
   assert.equal(reported[0].severity, "warning");
+  assert.equal(reported[0].forceNotification, true, "each refusal reaches the operator, cooldown or not");
   assert.deepEqual(reported[0].context, {
     component: "marketing-guard",
     postId: "post_123",
     admin: "https://staging.tomverse.app/admin/marketing",
   });
   assert.equal("error" in reported[0], false);
+});
+
+test("two refusals in a row both reach the real reporter's notification step", async () => {
+  // The cooldown gate in lib/operationalMonitoring.ts is skipped only by
+  // forceNotification; the source is read so the two cannot part silently.
+  const source = readFileSync("lib/operationalMonitoring.ts", "utf8");
+  assert.ok(
+    source.includes("if (!forceNotification && Date.now() - lastNotifiedAt < cooldownMs)"),
+    "the operational alert's cooldown gate moved",
+  );
+  const reported = [];
+  for (const postId of ["post_a", "post_b"]) {
+    await reportMarketingPriceSourceRefusal({ postId }, { report: async (incident) => reported.push(incident), env: {} });
+  }
+  assert.deepEqual(reported.map((incident) => [incident.context.postId, incident.forceNotification]), [
+    ["post_a", true],
+    ["post_b", true],
+  ]);
 });
 
 test("a failed alert is logged, never thrown into the intake", async () => {
