@@ -99,10 +99,15 @@ triggers and legal-hold decision columns. No existing table or row changes.
       - The remaining AMUX files need the same care, and
         `tests/promptRefinerRuntimeSourceClosure.test.mjs` holds pins only the
         operator moves.
-- [ ] Confirm or correct the risk statement above, including whether the first
+- [x] Confirm or correct the risk statement above, including whether the first
       production retention run should be checked, and sign below
 
 ```
-Reviewed by:   ____________________
-Reviewed on:   ____________________
+Reviewed by:   mposition
+Reviewed on:   2026-10-17
 ```
+
+**Signed.** `mposition` gave the signature above in the session on
+2026-10-17 and the agent transcribed it. It confirms this record's account of
+the gap and the risk judgement. It is not a Test measurement of the RC, which
+did not happen. The back-merge item stays open until the back-merge lands.
