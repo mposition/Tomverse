@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, parse } from "node:path";
+import { dirname, isAbsolute, join, parse, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -119,8 +119,17 @@ test("review (3): the repository, a home, a filesystem root and any ancestor of 
   assert.equal(dmReleaseOutRefusal(`${realRepository}/`, realOptions), "repository_or_ancestor");
   assert.equal(dmReleaseOutRefusal(dirname(realRepository), realOptions), "repository_or_ancestor");
   assert.equal(dmReleaseOutRefusal(parse(realRepository).root, realOptions), "filesystem_root");
-  assert.equal(dmReleaseOutRefusal(homedir(), realOptions), "home_or_ancestor");
-  if (dirname(homedir()) !== parse(homedir()).root) assert.equal(dmReleaseOutRefusal(dirname(homedir()), realOptions), "home_or_ancestor");
+  // A home that also holds the repository (a CI runner's /home/runner) is
+  // refused as the repository's ancestor first; either way it is refused.
+  const holdsRepository = (path) => {
+    const rest = relative(path, realRepository);
+    return !rest.startsWith("..") && !isAbsolute(rest);
+  };
+  const homeReason = (path) => (holdsRepository(path) ? "repository_or_ancestor" : "home_or_ancestor");
+  assert.equal(dmReleaseOutRefusal(homedir(), realOptions), homeReason(homedir()));
+  if (dirname(homedir()) !== parse(homedir()).root) {
+    assert.equal(dmReleaseOutRefusal(dirname(homedir()), realOptions), homeReason(dirname(homedir())));
+  }
   // Relative paths are judged as the build resolves them, from the repository.
   assert.equal(dmReleaseOutRefusal(".", realOptions), "repository_or_ancestor");
   assert.equal(dmReleaseOutRefusal("..", realOptions), "repository_or_ancestor");

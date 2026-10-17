@@ -27,6 +27,10 @@ const OWN_SCRATCH = /\bmkdtemp(Sync)?\s*\(|\btmpdir\s*\(/;
 // Files that match WRITES without writing to the tree. Each needs a reason.
 const REVIEWED_NOT_TREE_WRITERS = new Map([
   [
+    "tests/amuxDecisionMakerBroker.test.mjs",
+    "writes only inside the temporary root tests/support/amuxDmLauncherFixture.mjs creates with mkdtempSync (fixture.at maps every path under it); the writeFileSync lines are the stand-in CLI's source text",
+  ],
+  [
     "tests/stampPromotionMetadataCore.test.mjs",
     "searches a script's source text for its writeFileSync call; writes nothing",
   ],
