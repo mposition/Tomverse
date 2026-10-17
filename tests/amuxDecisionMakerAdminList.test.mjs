@@ -371,6 +371,8 @@ const stateRow = (overrides = {}) => ({
   terminalResultKind: "proposal",
   terminalResultDigest: DIGEST("d"),
   resultUnknown: false,
+  cleanupUnknownEventId: null,
+  cleanupUnknownAtEpochMs: null,
   closingKind: null,
   probedRejection: null,
   ...overrides,

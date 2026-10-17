@@ -5,6 +5,7 @@ import { DecisionMakerBodyWriteError } from "@/lib/amux/decisionMakerBodyStore";
 import { DecisionMakerDigestKeyError } from "@/lib/amux/decisionMakerDigestKeys";
 import {
   DecisionMakerRequestWriteError,
+  recordDecisionMakerCleanupLatch,
   recordDecisionMakerValidationLatch,
 } from "@/lib/amux/decisionMakerRequestStore";
 import {
@@ -18,13 +19,14 @@ import {
  * (app/api/internal/amux/decision-maker/**, stage S2 of
  * docs/policy/amux-decision-maker.md §12) share: the operator's enable switch,
  * the answer to a refusal, the mapping of a store's thrown error to an
- * answer, and -- since 2026-10-17 -- the one store operation a route runs
- * after its own transaction, §8's validation latch. Nothing here decides
+ * answer, and -- since 2026-10-17 -- the store operations a route runs after
+ * its own transaction: §8's validation latch and, since stage S2-2a3, §5's
+ * cleanup latch. Nothing here decides
  * anything about a request -- every decision is the store's, made on reads it
  * takes under its own locks -- and nothing here names a table.
  *
  * No card text, DM output, digest or key reaches a log line from here: the
- * only lines written are the key ring loader's error code and the latch's.
+ * only lines written are the key ring loader's error code and the latches'.
  */
 
 /**
@@ -54,7 +56,7 @@ const latchErrorCode = (error: unknown): string | null => {
   return typeof code === "string" && /^[A-Za-z0-9_]{1,64}$/.test(code) ? code : null;
 };
 
-export type DmValidationLatchSettlement = "latched" | "not_due" | "unsettled";
+export type DmLatchSettlement = "latched" | "not_due" | "unsettled";
 
 /**
  * §8, once a validation failure the result route recorded has committed: the
@@ -68,7 +70,7 @@ export type DmValidationLatchSettlement = "latched" | "not_due" | "unsettled";
  * the instance's next validation failure, or the maintenance sweep's within
  * fifteen minutes. Never throws.
  */
-export const settleDmValidationLatch = async (instance: unknown): Promise<DmValidationLatchSettlement> => {
+export const settleDmValidationLatch = async (instance: unknown): Promise<DmLatchSettlement> => {
   try {
     const write = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerValidationLatch, (tx) =>
       recordDecisionMakerValidationLatch(tx, { instance }),
@@ -76,6 +78,32 @@ export const settleDmValidationLatch = async (instance: unknown): Promise<DmVali
     return write.latched ? "latched" : "not_due";
   } catch (error) {
     console.warn(JSON.stringify({ subsystem: "amux", event: "dm_validation_latch_unsettled", code: latchErrorCode(error) }));
+    return "unsettled";
+  }
+};
+
+/**
+ * §5, once the cleanup route has recorded a request's `cleanup_unknown` report
+ * -- or found it already recorded, when a broker sent it again: the request
+ * store's cleanup latch, in a boundary transaction of its own (the report's 7
+ * statements, a switch read and the latch's 5 would be 15 with setup and
+ * fence, over docs/policy/amux-decision-maker.md §9's 12). It never changes
+ * the report's answer. A latch that could not
+ * be written is logged by its code and stays owed: a routing and a
+ * transmission intent treat the instance as off while it is owed (the intent
+ * also writes it), and the next check -- the same report sent again, or the
+ * maintenance sweep's within fifteen minutes -- writes it, whatever mode a
+ * person saved meanwhile. Only the report's own latch settles it, so it is
+ * latched once whatever the number of checks. Never throws.
+ */
+export const settleDmCleanupLatch = async (instance: unknown): Promise<DmLatchSettlement> => {
+  try {
+    const write = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerCleanupLatch, (tx) =>
+      recordDecisionMakerCleanupLatch(tx, { instance }),
+    );
+    return write.latched ? "latched" : "not_due";
+  } catch (error) {
+    console.warn(JSON.stringify({ subsystem: "amux", event: "dm_cleanup_latch_unsettled", code: latchErrorCode(error) }));
     return "unsettled";
   }
 };

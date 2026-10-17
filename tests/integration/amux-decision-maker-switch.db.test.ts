@@ -243,9 +243,15 @@ test("a person changes only as operator and is named; the system only latches an
     /AMUX_DM_SWITCH_UNAUDITED|AmuxDecisionMakerSwitchEvent_actor_kind_check/,
   );
   assert.equal((await rowsOf()).length, 0);
-  // Both latch reasons on both instances are accepted.
+  // A latch on either instance is accepted. Since stage S2-2a3 a cleanup latch names the cleanup_unknown
+  // report it settles (20261017160000_amux_decision_maker_cleanup_unknown), so one without it is refused
+  // here; tests/integration/amux-decision-maker-request.db.test.ts writes one with its report.
+  await rejectsWith(
+    append(latch("decision-maker-anthropic", "cleanup_latch").row, latch("decision-maker-anthropic").audit),
+    /AmuxDecisionMakerSwitchEvent_cleanup_event_check/,
+  );
   await append(latch("decision-maker-openai", "validation_latch").row, latch("decision-maker-openai").audit);
-  await append(latch("decision-maker-anthropic", "cleanup_latch").row, latch("decision-maker-anthropic").audit);
+  await append(latch("decision-maker-anthropic", "validation_latch").row, latch("decision-maker-anthropic").audit);
   assert.equal((await rowsOf()).length, 2);
 });
 
@@ -383,7 +389,7 @@ test("an event under any isolation level but READ COMMITTED is refused, by the s
     );
     await rejectsWith(
       prisma.$transaction(
-        (tx) => latchDecisionMakerInstanceOff(tx, { instance: "decision-maker-anthropic", reason: "cleanup_latch" }),
+        (tx) => latchDecisionMakerInstanceOff(tx, { instance: "decision-maker-anthropic", reason: "validation_latch" }),
         { isolationLevel },
       ),
       /AMUX_DM_SWITCH_ISOLATION/,
@@ -464,7 +470,7 @@ test("the store writes a person's change and a latch with their audit rows, and 
   });
 
   const latched = await prisma.$transaction((tx) =>
-    latchDecisionMakerInstanceOff(tx, { instance: "decision-maker-openai", reason: "cleanup_latch" }),
+    latchDecisionMakerInstanceOff(tx, { instance: "decision-maker-openai", reason: "validation_latch" }),
   );
   assert.ok(BigInt(latched.sequence) > BigInt(first.sequence));
   assert.deepEqual(await readDecisionMakerSwitches(prisma), {
@@ -479,7 +485,7 @@ test("the store writes a person's change and a latch with their audit rows, and 
     event_id: latched.eventId,
     scope: "decision-maker-openai",
     value: "off",
-    reason_code: "cleanup_latch",
+    reason_code: "validation_latch",
     systemActor: "amux-decision-maker-openai",
   });
 

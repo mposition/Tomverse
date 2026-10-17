@@ -122,10 +122,18 @@ export type DecisionMakerInstanceNewestEvent = { actorKind: DmSwitchActorKind; c
  * instance's newest event -- the boundary §8's validation count starts from.
  * A system event there is a latch nobody has released; a person's is a
  * change, a release included.
+ *
+ * Since stage S2-2a3 the same statement also carries, per instance, the
+ * ledger event id of the `cleanup_unknown` report its newest `cleanup_latch`
+ * names (§5): a cleanup latch settles the report it names and no other. Not a
+ * person's ordinary mode change (review r-20261017-115136-888d76), and not a
+ * clock -- a later report can share a latch's database millisecond (review
+ * r-20261017-123200-7609b7).
  */
 export type DecisionMakerSwitchRead = {
   state: DecisionMakerSwitchState;
   newest: Record<DmInstanceScope, DecisionMakerInstanceNewestEvent | null>;
+  cleanupLatchedEventId: Record<DmInstanceScope, string | null>;
 };
 
 const noNewestEvents = (): DecisionMakerSwitchRead["newest"] => ({
@@ -133,31 +141,53 @@ const noNewestEvents = (): DecisionMakerSwitchRead["newest"] => ({
   "decision-maker-anthropic": null,
 });
 
+const noCleanupLatches = (): DecisionMakerSwitchRead["cleanupLatchedEventId"] => ({
+  "decision-maker-openai": null,
+  "decision-maker-anthropic": null,
+});
+
+const epochClock = (value: unknown): number =>
+  typeof value === "bigint" || typeof value === "number" ? Number(value) : Number.NaN;
+
+/** A ledger event id: the request ledger's id format (migration 20261008090100). */
+const LEDGER_EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const isDmLedgerEventId = (value: unknown): value is string =>
+  typeof value === "string" && LEDGER_EVENT_ID.test(value);
+
 /**
  * The state and the boundaries from the newest event of each scope, with its
- * actor and database clock. Any row the state mapping refuses, or whose actor
- * or clock the table's CHECKs could not have produced, makes the whole read
- * unreadable -- every state field null and no boundary -- as
- * `decisionMakerSwitchStateFromRows()` does for one bad row.
+ * actor and database clock, and the report each instance's newest cleanup
+ * latch names. Any row the state mapping refuses, or whose actor, clock or
+ * named report the table's CHECKs could not have produced -- a named report
+ * that is missing from the row, not a ledger event id, or on the kill switch
+ * -- makes the whole read unreadable: every state field null, no boundary and
+ * no cleanup latch, as `decisionMakerSwitchStateFromRows()` does for one bad
+ * row.
  */
 export const decisionMakerSwitchReadFromRows = (rows: unknown): DecisionMakerSwitchRead => {
-  const unreadable = { state: unreadableDecisionMakerSwitches(), newest: noNewestEvents() };
+  const unreadable = { state: unreadableDecisionMakerSwitches(), newest: noNewestEvents(), cleanupLatchedEventId: noCleanupLatches() };
   const state = decisionMakerSwitchStateFromRows(rows);
   if (state.killSwitch === null || !Array.isArray(rows)) return unreadable;
   const newest = noNewestEvents();
-  for (const row of rows as Array<{ scope: unknown; actorKind?: unknown; createdAtEpochMs?: unknown }>) {
-    const createdAtMs =
-      typeof row.createdAtEpochMs === "bigint" || typeof row.createdAtEpochMs === "number"
-        ? Number(row.createdAtEpochMs)
-        : Number.NaN;
+  const cleanupLatchedEventId = noCleanupLatches();
+  for (const row of rows as Array<{
+    scope: unknown;
+    actorKind?: unknown;
+    createdAtEpochMs?: unknown;
+    newestCleanupLatchEventId?: unknown;
+  }>) {
+    const createdAtMs = epochClock(row.createdAtEpochMs);
     if (!(DM_SWITCH_ACTOR_KINDS as readonly unknown[]).includes(row.actorKind) || !Number.isSafeInteger(createdAtMs)) {
       return unreadable;
     }
+    const named = row.newestCleanupLatchEventId;
+    if (named !== null && (!isDmLedgerEventId(named) || !isDmInstanceScope(row.scope))) return unreadable;
     if (isDmInstanceScope(row.scope)) {
       newest[row.scope] = { actorKind: row.actorKind as DmSwitchActorKind, createdAtMs };
+      cleanupLatchedEventId[row.scope] = named;
     }
   }
-  return { state, newest };
+  return { state, newest, cleanupLatchedEventId };
 };
 
 /**
@@ -191,15 +221,25 @@ export const parseDmOperatorSwitchChange = (
   return null;
 };
 
-export type DmSwitchLatch = { instance: DmInstanceScope; reason: DmSwitchLatchReason };
+/**
+ * A system latch. Since stage S2-2a3 a `cleanup_latch` names the ledger event
+ * id of the `cleanup_unknown` report it settles (§5), and no other latch names
+ * one; the migration's CHECK holds the same pairing.
+ */
+export type DmSwitchLatch = { instance: DmInstanceScope; reason: DmSwitchLatchReason; cleanupEventId: string | null };
 
-/** A system latch, or null when the instance or the reason is outside the lists. */
-export const parseDmSwitchLatch = (instance: unknown, reason: unknown): DmSwitchLatch | null =>
-  isDmInstanceScope(instance) &&
-  typeof reason === "string" &&
-  (DM_SWITCH_LATCH_REASONS as readonly string[]).includes(reason)
-    ? { instance, reason: reason as DmSwitchLatchReason }
-    : null;
+/**
+ * A system latch, or null when the instance or the reason is outside the
+ * lists, or the named report is missing from a cleanup latch, malformed, or
+ * given with another reason.
+ */
+export const parseDmSwitchLatch = (instance: unknown, reason: unknown, cleanupEventId: unknown = null): DmSwitchLatch | null => {
+  if (!isDmInstanceScope(instance) || typeof reason !== "string" || !(DM_SWITCH_LATCH_REASONS as readonly string[]).includes(reason)) {
+    return null;
+  }
+  if (reason === "cleanup_latch" ? !isDmLedgerEventId(cleanupEventId) : cleanupEventId !== null) return null;
+  return { instance, reason: reason as DmSwitchLatchReason, cleanupEventId: reason === "cleanup_latch" ? (cleanupEventId as string) : null };
+};
 
 /**
  * Which audit action a person's change is recorded under: the release of a

@@ -17,6 +17,7 @@ import {
 } from "@/lib/amux/decisionMakerDigestKeys";
 import {
   listDecisionMakerStaleCloseCandidates,
+  recordDecisionMakerCleanupLatch,
   recordDecisionMakerValidationLatch,
   staleCloseDecisionMakerRequest,
 } from "@/lib/amux/decisionMakerRequestStore";
@@ -39,7 +40,10 @@ import { DM_INSTANCE_SCOPES, type DmInstanceScope } from "@/lib/amux/decisionMak
  * -- a switch read, a result it cannot read, a transaction -- is logged by its
  * code and counted, and neither the other instance's check nor any retention
  * step waits on it. An owed latch is not left to this check meanwhile: a
- * routing and a transmission intent refuse the instance themselves.
+ * routing and a transmission intent refuse the instance themselves. Since
+ * stage S2-2a3 each instance's check is two: §5's cleanup latch first -- the
+ * latch a `cleanup_unknown` report owes when the cleanup route's own check did
+ * not commit -- and then §8's, each a failure boundary of its own.
  *
  * Every candidate is read first, in one read transaction, and each is then
  * written in a transaction of its own inside the AMUX DB boundary, by the
@@ -55,7 +59,7 @@ import { DM_INSTANCE_SCOPES, type DmInstanceScope } from "@/lib/amux/decisionMak
  * 모르면 다시 읽어 행이 남았는지로 확정한다"). The sweep never throws.
  *
  * There is nothing to do until stage S2 routes a question; the sweep is then
- * two latch checks of three statements each and a read of three every
+ * four latch checks of three statements each and a read of three every
  * fifteen minutes.
  */
 
@@ -114,6 +118,10 @@ export const dmKeyPeriodsToDestroy = (registry: DecisionMakerDigestKeyRegistry):
 export type DmRetentionSweepStep = "read" | "rotate" | "stale_close" | "purge" | "destroy";
 
 export type DecisionMakerRetentionSweepResult = {
+  /** Instances §5's cleanup latch turned off in this run. */
+  cleanupLatched: number;
+  /** Instances whose cleanup latch check failed in this run; each is logged by its code. */
+  cleanupLatchUnsettled: number;
   /** Instances §8's validation latch turned off in this run. */
   validationLatched: number;
   /** Instances whose latch check failed in this run; each is logged by its code. */
@@ -131,6 +139,7 @@ export type DecisionMakerRetentionSweepResult = {
 };
 
 export type DecisionMakerRetentionSweepDeps = {
+  cleanupLatch: (instance: DmInstanceScope) => Promise<{ latched: boolean }>;
   validationLatch: (instance: DmInstanceScope) => Promise<{ latched: boolean }>;
   readCandidates: () => Promise<DecisionMakerRetentionCandidates>;
   loadKeyRing: () => DmDigestKeyRing;
@@ -144,6 +153,10 @@ export type DecisionMakerRetentionSweepDeps = {
 export const decisionMakerRetentionSweepDeps = (
   overrides: Partial<DecisionMakerRetentionSweepDeps> = {},
 ): DecisionMakerRetentionSweepDeps => ({
+  cleanupLatch: (instance) =>
+    withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerCleanupLatch, (tx) =>
+      recordDecisionMakerCleanupLatch(tx, { instance }),
+    ),
   validationLatch: (instance) =>
     withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerValidationLatch, (tx) =>
       recordDecisionMakerValidationLatch(tx, { instance }),
@@ -201,6 +214,8 @@ export async function runDecisionMakerRetentionSweep(
   deps: DecisionMakerRetentionSweepDeps,
 ): Promise<DecisionMakerRetentionSweepResult> {
   const result: DecisionMakerRetentionSweepResult = {
+    cleanupLatched: 0,
+    cleanupLatchUnsettled: 0,
     validationLatched: 0,
     validationLatchUnsettled: 0,
     keyRing: "not_configured",
@@ -218,9 +233,25 @@ export async function runDecisionMakerRetentionSweep(
       throw new SweepStop(name, error);
     }
   };
-  // §8's latch check, one failure boundary per instance: a failed check is
-  // counted and logged by its code, and stops nothing else.
+  // §5's and then §8's latch check, one failure boundary per instance and
+  // check: a failed check is counted and logged by its code, and stops nothing
+  // else. The cleanup latch comes first, so a report owed beside a validation
+  // run is recorded under its own cause.
   for (const instance of DM_INSTANCE_SCOPES) {
+    try {
+      const written = await deps.cleanupLatch(instance);
+      if (written.latched) result.cleanupLatched += 1;
+    } catch (error) {
+      result.cleanupLatchUnsettled += 1;
+      console.warn(
+        JSON.stringify({
+          subsystem: "amux",
+          event: "decision_maker_cleanup_latch_check_failed",
+          instance,
+          code: errorCode(error),
+        }),
+      );
+    }
     try {
       const written = await deps.validationLatch(instance);
       if (written.latched) result.validationLatched += 1;

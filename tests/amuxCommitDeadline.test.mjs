@@ -240,6 +240,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // v19 session CLI claims share the monthly ledger but add no deadline
   // classifier, marker, function or trigger to the commit-deadline protocol.
   "20261017070000_amux_v19_session_budget_claim",
+  // AMUX Decision Maker S2-2a3: section 5's cleanup_unknown report. It adds
+  // no commit deadline: the report holds no deadline, and the ledger's
+  // deferred check is unchanged and does not cover the new kind.
+  "20261017160000_amux_decision_maker_cleanup_unknown",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
