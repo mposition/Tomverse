@@ -23,6 +23,7 @@ const uuid = z.string().uuid();
 const bodySchema = z.object({ claimId: uuid,
   verification: z.enum(["proven_not_started", "not_proven"]),
   localEvidenceDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  readbackDigest: z.string().regex(/^[a-f0-9]{64}$/),
   ownerConfirmed: z.literal(true) }).strict();
 
 async function owner() {
@@ -47,6 +48,7 @@ function failure(error: unknown): Response {
     security.headers.set("Cache-Control", noStore["Cache-Control"]);
     return security;
   }
+  console.error("AMUX v19 session budget resolution unavailable");
   return NextResponse.json({ error: "outcome_unknown", retryWrite: false },
     { status: 503, headers: noStore });
 }

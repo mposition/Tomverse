@@ -15,7 +15,9 @@ test("v19 unknown-cost resolution is owner-only, step-up, same-origin and dark",
   assert.match(route, /hasValidMutationOrigin\(request\)/);
   assert.match(route, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(route, /retryAutomatically: false/);
+  assert.match(route, /readbackDigest: z\.string\(\)/);
   assert.match(service, /assertRecentAdminAuthentication\(input\.session\)/);
+  assert.match(service, /readback\.readbackDigest !== input\.readbackDigest/);
   assert.match(service, /writeAdminAuditLog/);
   assert.match(service, /verification === "proven_not_started"/);
   assert.match(service, /claim\.reservedMicroUsd/);
