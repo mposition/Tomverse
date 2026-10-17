@@ -45,6 +45,7 @@ CREATE TABLE "AmuxIdeaSessionAnalysisBudgetClaim" (
       "settledMicroUsd" BETWEEN 0 AND "reservedMicroUsd" AND
       "resolutionAuditLogId" IS NOT NULL AND
       (("status" IN ('succeeded', 'failed') AND
+        "settledMicroUsd" > 0 AND
         "inputTokens" >= 0 AND "outputTokens" >= 0 AND
         "inputTokens" + "outputTokens" > 0) OR
        ("status" = 'owner_consumed' AND
@@ -173,6 +174,8 @@ BEGIN
          NEW."invocationOrdinal"::text OR
        audit_row."metadata"->>'requestId' IS DISTINCT FROM NEW."requestId"::text OR
        audit_row."metadata"->>'priceVersionId' IS DISTINCT FROM NEW."priceVersionId" OR
+       ((audit_row."metadata"->>'monthStart')::timestamptz AT TIME ZONE 'UTC')
+         IS DISTINCT FROM NEW."monthStart" OR
        audit_row."metadata"->>'reservedMicroUsd' IS DISTINCT FROM NEW."reservedMicroUsd"::text THEN
       RAISE EXCEPTION 'session budget claim audit mismatch' USING ERRCODE = '23514';
     END IF;

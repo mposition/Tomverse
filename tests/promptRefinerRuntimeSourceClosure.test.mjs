@@ -593,8 +593,8 @@ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
 // AMUX v19 repository-read and session-reservation additions shift source
 // positions in the reviewed closure. The position-free digest stays fixed.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "9286b845822b101eb714d2d3e4051df",
-  "61253d2f4c5d744df24ca0a80f11bdf81",
+  "9286b845822b101eb714d2d3e4051df6",
+  "1253d2f4c5d744df24ca0a80f11bdf81",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -714,7 +714,7 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20261017070000_amux_v19_session_budget_claim/migration.sql",
     table: "AmuxIdeaSessionAnalysisBudgetClaim",
-    tableMentions: 7,
+    tableMentions: 8,
     writeVerbs: 15,
     reason: "The additive migration creates the claim table and its restrictive lifecycle trigger without inserting a claim row.",
   },
