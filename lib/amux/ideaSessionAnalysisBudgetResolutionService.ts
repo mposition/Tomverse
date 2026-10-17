@@ -5,9 +5,11 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
-import { AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION,
+import { auditRowActorKind, AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION,
   AMUX_V19_SESSION_BUDGET_TARGET } from "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
+import { readAmuxSessionBudgetClaimReceipt } from
+  "./ideaSessionAnalysisBudgetClaimService.ts";
 
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -19,6 +21,61 @@ export class AmuxSessionBudgetResolutionError extends Error {
     super(code);
     this.name = "AmuxSessionBudgetResolutionError";
   }
+}
+
+/** Content-free owner read-back for an uncertain or terminal claim. It does
+ * not decide whether local evidence proves the CLI never started. */
+export async function readAmuxSessionBudgetResolution(tx: Tx, input: {
+  claimId: string; session: Session;
+}): Promise<{ claimId: string; reservationId: string; requestId: string;
+  invocationOrdinal: number; status: string; reservedMicroUsd: string;
+  settledMicroUsd: string | null; createdAt: string; closedAt: string | null }> {
+  if (!UUID.test(input.claimId) || !isAdminSession(input.session) ||
+      getAdminRole(input.session) !== "owner" || !input.session.user?.id) {
+    throw new AmuxSessionBudgetResolutionError("forbidden");
+  }
+  const claim = await tx.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
+    where: { id: input.claimId },
+  });
+  if (!claim || claim.namespace !== AMUX_V4_ANALYSIS_NAMESPACE) {
+    throw new AmuxSessionBudgetResolutionError("not_resolvable");
+  }
+  const receipt = await readAmuxSessionBudgetClaimReceipt(tx, {
+    requestId: claim.requestId, reservationId: claim.reservationId,
+    invocationOrdinal: claim.invocationOrdinal,
+  });
+  if (receipt.status !== "committed" || receipt.claimId !== claim.id ||
+      receipt.claimStatus !== claim.status) {
+    throw new AmuxSessionBudgetResolutionError("integrity_unavailable");
+  }
+  if (claim.resolutionAuditLogId) {
+    const audit = await tx.adminAuditLog.findUnique({
+      where: { id: claim.resolutionAuditLogId },
+      select: { action: true, targetType: true, targetId: true,
+        entryHash: true, metadata: true, actorUserId: true,
+        actorEmail: true, ipAddress: true, userAgent: true },
+    });
+    const metadata = audit?.metadata;
+    const actorKind = ["released", "owner_consumed"].includes(claim.status)
+      ? "human" : "system";
+    if (!audit?.entryHash ||
+        audit.action !== AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION ||
+        audit.targetType !== AMUX_V19_SESSION_BUDGET_TARGET ||
+        audit.targetId !== claim.id ||
+        auditRowActorKind(audit) !== actorKind ||
+        !metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
+        (metadata as Record<string, unknown>).status !== claim.status) {
+      throw new AmuxSessionBudgetResolutionError("integrity_unavailable");
+    }
+  } else if (claim.status !== "in_flight") {
+    throw new AmuxSessionBudgetResolutionError("integrity_unavailable");
+  }
+  return { claimId: claim.id, reservationId: claim.reservationId,
+    requestId: claim.requestId, invocationOrdinal: claim.invocationOrdinal,
+    status: claim.status, reservedMicroUsd: claim.reservedMicroUsd.toString(),
+    settledMicroUsd: claim.settledMicroUsd?.toString() ?? null,
+    createdAt: claim.createdAt.toISOString(),
+    closedAt: claim.closedAt?.toISOString() ?? null };
 }
 
 /** The owner records an exact claim read-back and local execution proof. Only

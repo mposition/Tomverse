@@ -57,7 +57,8 @@ import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
   "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
 import { commitAmuxSessionBudgetOutcome } from
   "@/lib/amux/ideaSessionAnalysisBudgetSettlementService";
-import { commitAmuxSessionBudgetUnknownResolution } from
+import { commitAmuxSessionBudgetUnknownResolution,
+  readAmuxSessionBudgetResolution } from
   "@/lib/amux/ideaSessionAnalysisBudgetResolutionService";
 import { commitAmuxIdeaAnalysisPriceApproval } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
@@ -420,6 +421,10 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
       invocationOrdinal: 0,
     })), { status: "committed", claimId: first.claimId,
     claimStatus: "in_flight" });
+  const ownerReadback = await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetResolution(tx, { claimId: first.claimId, session }));
+  assert.equal(ownerReadback.status, "in_flight");
+  assert.equal(ownerReadback.reservedMicroUsd, first.reservedMicroUsd);
   const windowBefore = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
     where: { namespace_monthStart: { namespace: "agent/amux-intake",
       monthStart: new Date(new Date().toISOString().slice(0, 7) + "-01T00:00:00.000Z") } },
@@ -507,6 +512,9 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
     }));
   assert.equal(released.status, "released");
   assert.equal(released.settledMicroUsd, "0");
+  assert.equal((await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetResolution(tx, {
+      claimId: secondClaim.claimId, session }))).status, "released");
   const thirdClaim = await prisma.$transaction((tx) =>
     commitAmuxSessionBudgetClaim(tx, {
       claimId: randomUUID(), requestId: randomUUID(),
