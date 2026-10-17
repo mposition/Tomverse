@@ -57,6 +57,13 @@ export async function readMarketingCompetitorsForGenerator(
  * reopen a person's rejection or rename an approved competitor by proposing
  * it again. Each new proposal gets a `marketing-generator` audit row in this
  * transaction. The caller holds the audit chain lock or this takes it.
+ *
+ * The lock is also what makes the existence check sound. Every writer of this
+ * table holds it before it looks: this function takes it, and a person's
+ * decision is written after the mutation wrapper's audit row, which takes it
+ * too. Two runs proposing the same new id therefore run one after the other,
+ * and the second reads -- at READ COMMITTED, in a statement of its own -- the
+ * row the first committed, rather than racing it into a unique violation.
  */
 export async function proposeMarketingCompetitors(
   tx: MarketingTransaction,
@@ -140,7 +147,11 @@ export async function decideMarketingCompetitor(
   return { competitorId: input.competitorId, status: input.decision };
 }
 
-/** A person adds a competitor A3 did not propose, approved as it is created. */
+/**
+ * A person adds a competitor A3 did not propose, approved as it is created.
+ * Called after the person's audit row is written, so the audit chain lock is
+ * held and the existence check below cannot race a proposal.
+ */
 export async function createApprovedMarketingCompetitor(
   tx: MarketingTransaction,
   input: {
