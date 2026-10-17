@@ -15,6 +15,8 @@ import { cancelOverdueAmuxIdeaAnalyses, purgeDueAmuxRawIdeas } from
   "@/lib/amux/ideaRawRetentionService";
 import { notifyDueAmuxRetentionHolds } from
   "@/lib/amux/ideaRetentionHoldNoticeService";
+import { purgeDueAmuxReadManifests } from
+  "@/lib/amux/ideaTrackedCheckoutReadManifestRetention";
 import { purgeDueAmuxV22TaskResults } from
   "@/lib/amux/v22TaskResultRetention";
 
@@ -44,12 +46,13 @@ export async function POST(request: Request): Promise<Response> {
     const holdNotices = await notifyDueAmuxRetentionHolds();
     const cancellation = await cancelOverdueAmuxIdeaAnalyses();
     const raw = await purgeDueAmuxRawIdeas();
+    const readManifests = await purgeDueAmuxReadManifests();
     const analysis = await purgeDueAmuxAnalysisContent();
     const taskResults = amuxV22TaskResultRetentionEnabled(
       process.env[AMUX_V22_TASK_RESULT_RETENTION_ENV])
       ? await purgeDueAmuxV22TaskResults()
       : { available: false, reason: "v22_task_result_retention_disabled" };
-    return amuxJsonNoStore({ holdNotices, cancellation, raw, analysis,
+    return amuxJsonNoStore({ holdNotices, cancellation, raw, readManifests, analysis,
       taskResults });
   } catch {
     // The worker stops on unknown DB or S3 outcome. The response carries no
