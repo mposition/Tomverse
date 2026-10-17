@@ -62,11 +62,13 @@ mod tests {
 
     const WORKER: &str = "dm-typed-ask-test-worker";
 
-    fn app() -> (Router, crate::db::SharedStore) {
+    /// The temp directory is returned, not leaked: each test holds it to its
+    /// end, so the database is removed when the test finishes. Leaking it
+    /// (`mem::forget`) left one directory per test per run in /tmp, and on the
+    /// shared Ubuntu runner /tmp is a tmpfs with a per-user quota.
+    fn app() -> (Router, crate::db::SharedStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(crate::db::Store::open(&dir.path().join("typed-ask.db")).unwrap());
-        // The writer and read pool outlive this helper.
-        std::mem::forget(dir);
         let state = AppState {
             store: store.clone(),
             started: std::time::Instant::now(),
@@ -79,6 +81,7 @@ mod tests {
                 .nest("/api/board", crate::api::board::routes())
                 .with_state(state),
             store,
+            dir,
         )
     }
 
@@ -159,7 +162,7 @@ mod tests {
     async fn a_card_filed_asking_with_a_typed_ask_has_revision_one_as_recorded() {
         let home = tempfile::tempdir().unwrap();
         let _home = crate::api::settings::test_env::set_home(home.path());
-        let (app, _store) = app();
+        let (app, _store, _db_dir) = app();
         let (status, created) = call(
             &app,
             "POST",
@@ -203,7 +206,7 @@ mod tests {
     async fn an_existing_ask_without_a_typed_ask_still_works_and_gets_an_empty_extension() {
         let home = tempfile::tempdir().unwrap();
         let _home = crate::api::settings::test_env::set_home(home.path());
-        let (app, _store) = app();
+        let (app, _store, _db_dir) = app();
         let (status, created) = call(&app, "POST", "/api/board", Some(asking(json!({})))).await;
         assert_eq!(status, StatusCode::CREATED, "{created}");
         assert!(
@@ -221,7 +224,7 @@ mod tests {
     async fn a_patch_carrying_only_typed_ask_is_applied_and_recorded_on_the_card() {
         let home = tempfile::tempdir().unwrap();
         let _home = crate::api::settings::test_env::set_home(home.path());
-        let (app, store) = app();
+        let (app, store, _db_dir) = app();
         let (_, created) = call(
             &app,
             "POST",
@@ -270,7 +273,7 @@ mod tests {
     async fn re_asking_without_typed_ask_drops_the_previous_options() {
         let home = tempfile::tempdir().unwrap();
         let _home = crate::api::settings::test_env::set_home(home.path());
-        let (app, store) = app();
+        let (app, store, _db_dir) = app();
         let (_, created) = call(
             &app,
             "POST",
@@ -328,7 +331,7 @@ mod tests {
     async fn a_malformed_typed_ask_refuses_the_whole_patch_and_writes_nothing() {
         let home = tempfile::tempdir().unwrap();
         let _home = crate::api::settings::test_env::set_home(home.path());
-        let (app, store) = app();
+        let (app, store, _db_dir) = app();
         let (_, created) = call(
             &app,
             "POST",
@@ -378,7 +381,7 @@ mod tests {
     async fn an_unknown_card_is_404() {
         let home = tempfile::tempdir().unwrap();
         let _home = crate::api::settings::test_env::set_home(home.path());
-        let (app, _store) = app();
+        let (app, _store, _db_dir) = app();
         let (status, body) = call(&app, "GET", "/api/board/NOPE-404/typed-ask", None).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     }
