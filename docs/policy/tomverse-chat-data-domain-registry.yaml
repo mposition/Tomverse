@@ -2047,6 +2047,29 @@ domains:
       parent and audit references do not resolve account deletion, retention,
       or unified export.
 
+  - domain: amuxIdeaSessionAnalysisBudgetClaim
+    prismaModel: AmuxIdeaSessionAnalysisBudgetClaim
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, session CLI budget-claim account deletion,
+      retention and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: reservationId
+      parentModel: AmuxIdeaSessionAnalysisReservation
+    inUnifiedExport: unverified
+    note: >-
+      The claim follows the session reservation to the scope owner and keeps
+      the selected model, UTC budget month, token and money caps, settlement
+      amounts, status and canonical audit references. It stores no idea text,
+      repository paths or model response. Restrictive reservation, ledger,
+      price-version and audit references do not establish account deletion,
+      retention cleanup or unified export; live CLI admission remains gated.
+
   - domain: amuxIdeaAnalysisChunk
     prismaModel: AmuxIdeaAnalysisChunk
     userLinkageRole: actor
