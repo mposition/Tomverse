@@ -2045,6 +2045,51 @@ domains:
       ciphertext. It permits a seven-day orphan-key sweep, but its restrictive
       parent and audit references do not settle account deletion or export.
 
+  - domain: amuxIdeaSessionAnalysisReservation
+    prismaModel: AmuxIdeaSessionAnalysisReservation
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, AMUX session analysis reservation account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The append-only queue receipt links the scope owner's identifier to one
+      session idea, request identifier, saved operating-scope version, selected
+      model, and canonical system audit. It stores no idea text, source labels,
+      repository names, paths, model response, or cost amount. The restrictive
+      parent and audit references do not resolve account deletion, retention,
+      or unified export.
+
+  - domain: amuxIdeaSessionAnalysisBudgetClaim
+    prismaModel: AmuxIdeaSessionAnalysisBudgetClaim
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, session CLI budget-claim account deletion,
+      retention and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: reservationId
+      parentModel: AmuxIdeaSessionAnalysisReservation
+    inUnifiedExport: unverified
+    note: >-
+      The claim follows the session reservation to the scope owner and keeps
+      the selected model, UTC budget month, token and money caps, settlement
+      amounts, status and canonical audit references. It stores no idea text,
+      repository paths or model response. Restrictive reservation, ledger,
+      price-version and audit references do not establish account deletion,
+      retention cleanup or unified export; live CLI admission remains gated.
+
   - domain: amuxIdeaAnalysisChunk
     prismaModel: AmuxIdeaAnalysisChunk
     userLinkageRole: actor

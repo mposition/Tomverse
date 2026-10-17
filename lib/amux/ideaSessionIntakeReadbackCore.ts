@@ -30,6 +30,10 @@ export function amuxSessionIntakeConflictingSecretValues(
 
 const SECRET = /^[A-Za-z0-9_-]{32,256}$/;
 
+export const isAmuxSessionIntakeClientSecret = (
+  value: unknown,
+): value is string => typeof value === "string" && SECRET.test(value);
+
 export const amuxSessionIntakeReadbackEnabled = (
   sessionIntakeReadback: string | undefined,
   ideaReadback: string | undefined,
@@ -43,12 +47,12 @@ export function isAmuxSessionIntakeClientAuthorized(
   configured: string | undefined,
   otherSecrets: readonly (string | undefined)[],
 ): boolean {
-  if (typeof configured !== "string" || !SECRET.test(configured) ||
+  if (!isAmuxSessionIntakeClientSecret(configured) ||
       otherSecrets.some((secret) => secret === configured)) return false;
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ")) return false;
   const provided = authorization.slice(7);
-  if (!SECRET.test(provided)) return false;
+  if (!isAmuxSessionIntakeClientSecret(provided)) return false;
   return timingSafeEqual(
     createHash("sha256").update(configured).digest(),
     createHash("sha256").update(provided).digest(),
@@ -70,7 +74,7 @@ export type AmuxSessionIntakeReadback =
   | { requestId: string; status: "absent" }
   | { requestId: string; status: "partial"; ideaId: string }
   | { requestId: string; status: "committed"; ideaId: string;
-      hasExternalSources: boolean };
+      reservationId: string; hasExternalSources: boolean };
 
 /** Closed response projection. Extra service fields, including encrypted or
  * plaintext content added by mistake, never reach the intake client. */
@@ -96,6 +100,7 @@ export function amuxSessionIntakeReadbackReply(
     status: "committed",
     requestId: readback.requestId,
     ideaId: readback.ideaId,
+    reservationId: readback.reservationId,
     hasExternalSources: readback.hasExternalSources,
     adminPath: `/admin/amux-backlog?tab=ideas&idea=${encodeURIComponent(readback.requestId)}`,
   } };

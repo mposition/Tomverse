@@ -231,10 +231,21 @@ const intakeAudits = async () => {
   });
 };
 
-test("in this build every draft is refused before anything is written", async () => {
+test("with no alert recipient configured, every draft is refused before anything is written", async () => {
   const row = await approvedChannel();
   await draftsOn();
-  const outcome = await intake(draft(row.id));
+  // The build's readers: the cap is unreadable here, and the price alert has
+  // no recipient, so both closed inputs are named.
+  const saved = { ops: process.env.OPS_ALERT_EMAIL, admin: process.env.ADMIN_ALERT_EMAIL };
+  delete process.env.OPS_ALERT_EMAIL;
+  delete process.env.ADMIN_ALERT_EMAIL;
+  let outcome;
+  try {
+    outcome = await intake(draft(row.id));
+  } finally {
+    if (saved.ops !== undefined) process.env.OPS_ALERT_EMAIL = saved.ops;
+    if (saved.admin !== undefined) process.env.ADMIN_ALERT_EMAIL = saved.admin;
+  }
   assert.equal(outcome.status, "refused");
   assert.ok("reasons" in outcome);
   assert.ok(outcome.reasons.includes("input_unreadable:llmGenerationBudgetAvailable"), outcome.reasons.join());

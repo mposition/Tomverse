@@ -8,7 +8,13 @@ import {
   AMUX_SESSION_IDEA_SUBMITTED_ACTION,
   AMUX_SESSION_IDEA_SUBMITTED_SCOPE,
   AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+  AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+  AMUX_SESSION_ANALYSIS_RESERVED_TARGET,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+  AMUX_V4_IDEA_SYSTEM_ACTOR,
+  AMUX_V19_SESSION_BUDGET_CLAIM_ACTION,
+  AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION,
+  AMUX_V19_SESSION_BUDGET_TARGET,
   auditRowActorKind,
 } from "@/lib/adminAuditSystemActors";
 import { openAmuxContent, sealAmuxContent } from "@/lib/amux/ideaCrypto";
@@ -21,16 +27,51 @@ import {
   type AmuxOperatingScopeAuthority,
 } from "@/lib/amux/ideaOperatingScopeStore";
 import { commitAmuxDueRawIdeaPurge } from "@/lib/amux/ideaRawRetentionService";
+import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
+import { commitAmuxIdeaSessionCancellation,
+  readAmuxIdeaSessionCancellationReceipt,
+  AmuxIdeaSessionCancellationError } from
+  "@/lib/amux/ideaSessionCancellationService";
 import {
   commitAmuxIdeaSessionSubmission,
   readAmuxIdeaSessionSubmissionRequest,
   AmuxIdeaSessionSubmissionError,
+  type CommittedAmuxIdeaSessionSubmission,
 } from "@/lib/amux/ideaSessionSubmissionService";
 import {
   inspectAmuxIdeaSessionSubmission,
   type AmuxIdeaSessionSubmissionInspection,
 } from "@/lib/amux/ideaSessionSubmissionCore";
 import { prepareIdeaSubmissionStorage } from "@/lib/amux/ideaSubmissionService";
+import { AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY,
+  amuxSessionAnalysisReservationAuditMetadata } from
+  "@/lib/amux/ideaSessionAnalysisReservationCore";
+import {
+  commitAmuxSessionAnalysisReservation,
+  AmuxSessionAnalysisReservationError,
+} from "@/lib/amux/ideaSessionAnalysisReservationStore";
+import { listAmuxSessionAnalysisCandidates } from
+  "@/lib/amux/ideaSessionAnalysisQueueService";
+import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
+  AmuxSessionBudgetClaimError } from
+  "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
+import { commitAmuxSessionBudgetOutcome } from
+  "@/lib/amux/ideaSessionAnalysisBudgetSettlementService";
+import { AmuxSessionBudgetResolutionError,
+  commitAmuxSessionBudgetUnknownResolution,
+  readAmuxSessionBudgetResolution } from
+  "@/lib/amux/ideaSessionAnalysisBudgetResolutionService";
+import { commitAmuxIdeaAnalysisPriceApproval } from
+  "@/lib/amux/ideaAnalysisPriceVersionWrite";
+import { readAmuxIdeaAnalysisFailureStreak } from
+  "@/lib/amux/ideaAnalysisFailureStreakService";
+import { commitAnalysisBudgetSetting } from
+  "@/lib/amux/ideaAnalysisBudgetSettingStore";
+import { encodeAmuxSessionAnalysisQueueCursor,
+  parseAmuxSessionAnalysisQueueCursor } from
+  "@/lib/amux/ideaSessionAnalysisQueueCursorCore";
+import { buildAmuxSessionAnalysisQueueWhere } from
+  "@/lib/amux/ideaSessionAnalysisQueueWhereCore";
 import { prisma } from "@/lib/prisma";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -115,11 +156,26 @@ const auditMetadata = (
   repositoryCount: inspected.counts.repositoryCount,
   pullRequestCount: inspected.counts.pullRequestCount,
 });
+const sqlState = (error: unknown): string | null => {
+  const candidate = error as {
+    code?: unknown;
+    meta?: { driverAdapterError?: {
+      cause?: { code?: unknown; originalCode?: unknown };
+    } };
+  };
+  const cause = candidate?.meta?.driverAdapterError?.cause;
+  for (const code of [cause?.originalCode, cause?.code, candidate?.code]) {
+    if (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) return code;
+  }
+  return null;
+};
 
 let authority: AmuxOperatingScopeAuthority;
 let committedIdeaId: string;
 let committedRequestId: string;
 let committedAuditId: string;
+let committedReservationId: string;
+let committedReservationAuditId: string;
 
 before(async () => {
   assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), 0,
@@ -150,12 +206,22 @@ before(async () => {
     sessionDisplay: oversizedSessionDisplay,
   });
   committedRequestId = inspected.requestId;
-  const committed = await prisma.$transaction((tx) =>
-    commitAmuxIdeaSessionSubmission(tx, {
+  const committed = await prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
       inspected, expectedAuthority: authority, ideaId: committedIdeaId,
       keys: keysFor(committedIdeaId),
-    }));
-  committedAuditId = committed.auditId;
+    });
+    const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId: submission.ideaId,
+      requestId: submission.requestId,
+      submissionAuditId: submission.auditId,
+      authority,
+    });
+    return { submission, reservation };
+  });
+  committedAuditId = committed.submission.auditId;
+  committedReservationId = committed.reservation.reservationId;
+  committedReservationAuditId = committed.reservation.reservationAuditId;
 });
 
 after(async () => {
@@ -209,8 +275,668 @@ test("session submission encrypts idea and provenance under the scope owner with
     requestId: committedRequestId,
     status: "committed",
     ideaId: committedIdeaId,
+    reservationId: committedReservationId,
     hasExternalSources: true,
   });
+});
+
+test("session submission queues one content-free analysis reservation in the same transaction", async () => {
+  const [reservation, audit] = await Promise.all([
+    prisma.amuxIdeaSessionAnalysisReservation.findUniqueOrThrow({
+      where: { id: committedReservationId },
+    }),
+    prisma.adminAuditLog.findUniqueOrThrow({
+      where: { id: committedReservationAuditId },
+    }),
+  ]);
+  assert.deepEqual({
+    ideaId: reservation.ideaId,
+    requestId: reservation.requestId,
+    actorUserId: reservation.actorUserId,
+    operatingScopeSettingId: reservation.operatingScopeSettingId,
+    status: reservation.status,
+    modelProvider: reservation.modelProvider,
+    modelId: reservation.modelId,
+    reasoningEffort: reservation.reasoningEffort,
+    reservationAuditLogId: reservation.reservationAuditLogId,
+  }, {
+    ideaId: committedIdeaId,
+    requestId: committedRequestId,
+    actorUserId: ownerId,
+    operatingScopeSettingId: authority.settingId,
+    status: "queued",
+    modelProvider: "openai",
+    modelId,
+    reasoningEffort: "high",
+    reservationAuditLogId: committedReservationAuditId,
+  });
+  assert.equal(auditRowActorKind(audit), "system");
+  assert.equal(audit.action, AMUX_SESSION_ANALYSIS_RESERVED_ACTION);
+  assert.equal(audit.targetType, AMUX_SESSION_ANALYSIS_RESERVED_TARGET);
+  assert.equal(audit.targetId, committedReservationId);
+  assert.equal(audit.summary, AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY);
+  assert.deepEqual(audit.metadata, {
+    policyVersion: 19,
+    reservationId: committedReservationId,
+    ideaId: committedIdeaId,
+    requestId: committedRequestId,
+    submissionAuditId: committedAuditId,
+    operatingScopeSettingId: authority.settingId,
+    dataOwnerUserId: ownerId,
+    modelProvider: "openai",
+    modelId,
+    reasoningEffort: "high",
+    systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+    actorScope: "session-analysis-reservation-v1",
+  });
+  assert.doesNotMatch(JSON.stringify(audit.metadata),
+    /mposition\/Tomverse|Codex|sessionDisplay|reservedMicroUsd|ideaText/);
+});
+
+test("session analysis queue lists the live reservation and advances past its DB position", async () => {
+  const [reservation, idea] = await Promise.all([
+    prisma.amuxIdeaSessionAnalysisReservation.findUniqueOrThrow({
+      where: { id: committedReservationId }, select: { createdAt: true },
+    }),
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({
+      where: { id: committedIdeaId }, select: { analysisDeadlineAt: true },
+    }),
+  ]);
+  const first = await listAmuxSessionAnalysisCandidates(null);
+  assert.deepEqual(first, {
+    candidates: [{ reservationId: committedReservationId, ideaId: committedIdeaId,
+      modelId, expiresAt: idea.analysisDeadlineAt.toISOString() }],
+    hasMore: false, nextCursor: null,
+  });
+  const cursor = encodeAmuxSessionAnalysisQueueCursor({
+    createdAt: reservation.createdAt, reservationId: committedReservationId,
+  });
+  const parsed = parseAmuxSessionAnalysisQueueCursor(cursor);
+  assert.ok(parsed);
+  const after = await listAmuxSessionAnalysisCandidates(parsed);
+  assert.equal(after.candidates.some((candidate) =>
+    candidate.reservationId === committedReservationId), false);
+
+  const switches = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
+    "TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ", "TOMVERSE_AMUX_SESSION_INTAKE",
+    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ"];
+  const previous = new Map(switches.map((key) => [key, process.env[key]]));
+  const secret = "synthetic-amux-session-queue-secret-0123456789";
+  try {
+    process.env[switches[0]] = secret;
+    for (const key of switches.slice(1)) process.env[key] = "enabled";
+    const { POST } = await import("@/app/api/internal/amux/v19/analysis-queue/route");
+    const poll = (body: object) => POST(new Request(
+      "https://tomverse.test/api/internal/amux/v19/analysis-queue", {
+        method: "POST", headers: { authorization: `Bearer ${secret}`,
+          "x-amux-agent-id": "amux-intake", "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }));
+    const response = await poll({});
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), first);
+    const next = await poll({ after: cursor });
+    assert.equal(next.status, 200);
+    assert.deepEqual(await next.json(), after);
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
+
+test("session claims share the monthly ledger, settle known usage and hold unknown usage", async () => {
+  const priceVersionId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisPriceApproval(tx, {
+    session, request, approval: {
+      id: priceVersionId, provider: "openai", modelId,
+      mode: "subscription_cli", expectedPreviousVersion: 0,
+      inputTokensCap: 1_000, outputTokensCap: 2_000,
+      inputMicroUsdPerMillion: 1_000_000,
+      outputMicroUsdPerMillion: 2_000_000,
+      evidenceDigest: randomBytes(32).toString("hex"),
+      ownerConfirmedWorstTier: true,
+      verifiedAt: new Date(Date.now() - 60_000),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
+    },
+  }));
+  const runner = { tokenCapsEnforceable: true, billableToolsDisabled: true };
+  const firstClaimId = randomUUID();
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetClaim(tx, {
+      claimId: firstClaimId, requestId: randomUUID(),
+      reservationId: committedReservationId, invocationOrdinal: 0, priceVersionId,
+      runner: { ...runner, tokenCapsEnforceable: false },
+    })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
+      error.code === "budget_hold");
+  const first = await prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetClaim(tx, {
+      claimId: firstClaimId, requestId: randomUUID(),
+      reservationId: committedReservationId, invocationOrdinal: 0,
+      priceVersionId, runner,
+    }));
+  assert.equal(first.reservedMicroUsd, "5000");
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetClaimReceipt(tx, {
+      requestId: first.requestId, reservationId: first.reservationId,
+      invocationOrdinal: 0,
+    })), { status: "committed", claimId: first.claimId,
+    claimStatus: "in_flight" });
+  const ownerReadback = await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetResolution(tx, { claimId: first.claimId, session }));
+  assert.equal(ownerReadback.status, "in_flight");
+  assert.equal(ownerReadback.reservedMicroUsd, first.reservedMicroUsd);
+  const windowBefore = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace: "agent/amux-intake",
+      monthStart: new Date(new Date().toISOString().slice(0, 7) + "-01T00:00:00.000Z") } },
+  });
+  assert.equal(windowBefore.reservedMicroUsd, BigInt(5000));
+  assert.equal((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === committedReservationId), false);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: committedReservationId, invocationOrdinal: 0,
+      priceVersionId, runner,
+    })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
+      error.code === "not_ready");
+
+  const secondIdeaId = randomUUID();
+  const secondInspected = inspect(secondIdeaId);
+  const second = await prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: secondInspected, expectedAuthority: authority,
+      ideaId: secondIdeaId, keys: keysFor(secondIdeaId),
+    });
+    return commitAmuxSessionAnalysisReservation(tx, {
+      ideaId: secondIdeaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+  });
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: second.reservationId, invocationOrdinal: 0,
+      priceVersionId, runner,
+    })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
+      error.code === "not_ready");
+  const settled = await prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetOutcome(tx, {
+      claimId: first.claimId, outcome: "verified_success",
+      inputTokens: 10, outputTokens: 20,
+    }));
+  assert.equal(settled.status, "succeeded");
+  assert.equal(settled.settledMicroUsd, "50");
+  const settledReadback = await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetResolution(tx, {
+      claimId: first.claimId, session }));
+  assert.equal(settledReadback.status, "succeeded");
+  assert.equal(settledReadback.settledMicroUsd, "50");
+  assert.match(settledReadback.readbackDigest, /^[a-f0-9]{64}$/);
+  const secondClaim = await prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: second.reservationId, invocationOrdinal: 0,
+      priceVersionId, runner,
+    }));
+  const unknown = await prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetOutcome(tx, {
+      claimId: secondClaim.claimId, outcome: "outcome_unknown",
+      inputTokens: null, outputTokens: null,
+    }));
+  assert.equal(unknown.status, "outcome_unknown");
+  const secondReadback = await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetResolution(tx, {
+      claimId: secondClaim.claimId, session }));
+  assert.equal(secondReadback.status, "outcome_unknown");
+  assert.match(secondReadback.readbackDigest, /^[a-f0-9]{64}$/);
+  const windowAfter = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace: "agent/amux-intake",
+      monthStart: windowBefore.monthStart } },
+  });
+  assert.equal(windowAfter.reservedMicroUsd, BigInt(5000));
+  assert.equal(windowAfter.spentMicroUsd, BigInt(50));
+  const thirdIdeaId = randomUUID();
+  const thirdInspected = inspect(thirdIdeaId);
+  const third = await prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: thirdInspected, expectedAuthority: authority,
+      ideaId: thirdIdeaId, keys: keysFor(thirdIdeaId),
+    });
+    return commitAmuxSessionAnalysisReservation(tx, {
+      ideaId: thirdIdeaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+  });
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: third.reservationId, invocationOrdinal: 0,
+      priceVersionId, runner,
+    })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
+      error.code === "budget_hold" && error.reason === "usage_unknown");
+  const released = await prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetUnknownResolution(tx, {
+      claimId: secondClaim.claimId, session, request,
+      verification: "proven_not_started",
+      localEvidenceDigest: sha256("synthetic no-start read-back"),
+      readbackDigest: secondReadback.readbackDigest,
+      ownerConfirmed: true,
+    }));
+  assert.equal(released.status, "released");
+  assert.equal(released.settledMicroUsd, "0");
+  assert.equal((await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetResolution(tx, {
+      claimId: secondClaim.claimId, session }))).status, "released");
+  const thirdClaim = await prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: third.reservationId, invocationOrdinal: 0,
+      priceVersionId, runner,
+    }));
+  await prisma.$transaction((tx) => commitAmuxSessionBudgetOutcome(tx, {
+    claimId: thirdClaim.claimId, outcome: "outcome_unknown",
+    inputTokens: null, outputTokens: null,
+  }));
+  const thirdReadback = await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetResolution(tx, {
+      claimId: thirdClaim.claimId, session }));
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetUnknownResolution(tx, {
+      claimId: thirdClaim.claimId, session, request,
+      verification: "not_proven",
+      localEvidenceDigest: sha256("synthetic inconclusive local read-back"),
+      readbackDigest: "0".repeat(64), ownerConfirmed: true,
+    })), (error: unknown) => error instanceof AmuxSessionBudgetResolutionError &&
+      error.code === "not_resolvable");
+  const consumed = await prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetUnknownResolution(tx, {
+      claimId: thirdClaim.claimId, session, request,
+      verification: "not_proven",
+      localEvidenceDigest: sha256("synthetic inconclusive local read-back"),
+      readbackDigest: thirdReadback.readbackDigest,
+      ownerConfirmed: true,
+    }));
+  assert.equal(consumed.status, "owner_consumed");
+  assert.equal(consumed.settledMicroUsd, "5000");
+  const consumedReadback = await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetResolution(tx, {
+      claimId: thirdClaim.claimId, session }));
+  assert.equal(consumedReadback.status, "owner_consumed");
+  assert.equal(consumedReadback.settledMicroUsd, "5000");
+  assert.match(consumedReadback.readbackDigest, /^[a-f0-9]{64}$/);
+  const finalWindow = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace: "agent/amux-intake",
+      monthStart: windowBefore.monthStart } },
+  });
+  assert.equal(finalWindow.reservedMicroUsd, BigInt(0));
+  assert.equal(finalWindow.spentMicroUsd, BigInt(5050));
+});
+
+test("database refuses a second CLI claim while the idea remains submitted", async () => {
+  const prior = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findFirstOrThrow({
+    where: { reservationId: committedReservationId, invocationOrdinal: 0 },
+  });
+  const nextId = randomUUID();
+  const requestId = randomUUID();
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const auditId = await writeSystemAuditLog({
+      tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      action: AMUX_V19_SESSION_BUDGET_CLAIM_ACTION,
+      targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: nextId,
+      summary: "Synthetic next-chunk claim with no accepted result.",
+      metadata: { reservationId: committedReservationId,
+        invocationOrdinal: 1, requestId,
+        priceVersionId: prior.priceVersionId,
+        reservedMicroUsd: prior.reservedMicroUsd.toString() },
+    });
+    await tx.amuxIdeaAnalysisBudgetWindow.update({
+      where: { namespace_monthStart: {
+        namespace: prior.namespace, monthStart: prior.monthStart,
+      } },
+      data: { reservedMicroUsd: { increment: prior.reservedMicroUsd } },
+    });
+    await tx.amuxIdeaSessionAnalysisBudgetClaim.create({ data: {
+      id: nextId, requestId, reservationId: committedReservationId,
+      invocationOrdinal: 1, namespace: prior.namespace,
+      monthStart: prior.monthStart, priceVersionId: prior.priceVersionId,
+      provider: prior.provider, modelId: prior.modelId,
+      inputTokensCap: prior.inputTokensCap,
+      outputTokensCap: prior.outputTokensCap,
+      inputMicroUsdPerMillion: prior.inputMicroUsdPerMillion,
+      outputMicroUsdPerMillion: prior.outputMicroUsdPerMillion,
+      reservedMicroUsd: prior.reservedMicroUsd,
+      status: "in_flight", claimAuditLogId: auditId,
+    } });
+  }), (error: unknown) => sqlState(error) === "23514");
+  assert.equal(await prisma.amuxIdeaSessionAnalysisBudgetClaim.count({
+    where: { reservationId: committedReservationId },
+  }), 1);
+});
+
+test("session claim insert binds its audit to the exact UTC budget month", async () => {
+  const previous = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findFirstOrThrow({
+    where: { reservationId: committedReservationId, invocationOrdinal: 0 },
+  });
+  const tryClaim = (auditMonth: Date) => prisma.$transaction(async (tx) => {
+    const ideaId = randomUUID();
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(ideaId), expectedAuthority: authority,
+      ideaId, keys: keysFor(ideaId),
+    });
+    const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+    const claimId = randomUUID();
+    const requestId = randomUUID();
+    const auditId = await writeSystemAuditLog({
+      tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      action: AMUX_V19_SESSION_BUDGET_CLAIM_ACTION,
+      targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: claimId,
+      summary: "Synthetic claim to test exact budget-month audit binding.",
+      metadata: { reservationId: reservation.reservationId,
+        invocationOrdinal: 0, requestId,
+        namespace: previous.namespace,
+        monthStart: auditMonth.toISOString(),
+        priceVersionId: previous.priceVersionId,
+        reservedMicroUsd: previous.reservedMicroUsd.toString() },
+    });
+    await tx.amuxIdeaAnalysisBudgetWindow.update({
+      where: { namespace_monthStart: {
+        namespace: previous.namespace, monthStart: previous.monthStart,
+      } },
+      data: { reservedMicroUsd: { increment: previous.reservedMicroUsd } },
+    });
+    await tx.amuxIdeaSessionAnalysisBudgetClaim.create({ data: {
+      id: claimId, requestId, reservationId: reservation.reservationId,
+      invocationOrdinal: 0, namespace: previous.namespace,
+      monthStart: previous.monthStart, priceVersionId: previous.priceVersionId,
+      provider: previous.provider, modelId: previous.modelId,
+      inputTokensCap: previous.inputTokensCap,
+      outputTokensCap: previous.outputTokensCap,
+      inputMicroUsdPerMillion: previous.inputMicroUsdPerMillion,
+      outputMicroUsdPerMillion: previous.outputMicroUsdPerMillion,
+      reservedMicroUsd: previous.reservedMicroUsd,
+      status: "in_flight", claimAuditLogId: auditId,
+    } });
+    throw new Error("valid month control rolled back");
+  });
+  await assert.rejects(tryClaim(previous.monthStart),
+    (error: unknown) => error instanceof Error &&
+      error.message === "valid month control rolled back");
+  const nextMonth = new Date(Date.UTC(previous.monthStart.getUTCFullYear(),
+    previous.monthStart.getUTCMonth() + 1, 1));
+  await assert.rejects(tryClaim(nextMonth),
+    (error: unknown) => sqlState(error) === "23514");
+});
+
+test("known session outcome cannot settle at zero even with lifecycle trigger bypassed", async () => {
+  const known = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findFirstOrThrow({
+    where: { reservationId: committedReservationId, status: "succeeded" },
+  });
+  const trySettlement = (status: "succeeded" | "failed",
+    settledMicroUsd: bigint) =>
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'ALTER TABLE "AmuxIdeaSessionAnalysisBudgetClaim" DISABLE TRIGGER "AmuxIdeaSessionAnalysisBudgetClaim_guard"');
+      await tx.amuxIdeaSessionAnalysisBudgetClaim.update({
+        where: { id: known.id },
+        data: { status, settledMicroUsd },
+      });
+      throw new Error("positive settlement control rolled back");
+    });
+  for (const status of ["succeeded", "failed"] as const) {
+    await assert.rejects(trySettlement(status, BigInt(1)),
+      (error: unknown) => error instanceof Error &&
+        error.message === "positive settlement control rolled back");
+    await assert.rejects(trySettlement(status, BigInt(0)),
+      (error: unknown) => sqlState(error) === "23514");
+  }
+});
+
+test("queue guard rejects missing and null system audit identity", async () => {
+  const rollbackFixtures = new Error("rollback null audit identity fixtures");
+  const ideaIds = Array.from({ length: 5 }, () => randomUUID());
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const fixtures: Array<{
+      submission: CommittedAmuxIdeaSessionSubmission;
+      reservationId: string;
+      reservationAuditLogId: string;
+    }> = [];
+    for (const ideaId of ideaIds) {
+      const submission = await commitAmuxIdeaSessionSubmission(tx, {
+        inspected: inspect(ideaId), expectedAuthority: authority,
+        ideaId, keys: keysFor(ideaId),
+      });
+      const reservationId = randomUUID();
+      const reservationAuditLogId = await writeSystemAuditLog({
+        tx,
+        systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+        action: AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+        targetType: AMUX_SESSION_ANALYSIS_RESERVED_TARGET,
+        targetId: reservationId,
+        summary: AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY,
+        metadata: amuxSessionAnalysisReservationAuditMetadata({
+          reservationId,
+          ideaId,
+          requestId: submission.requestId,
+          submissionAuditId: submission.auditId,
+          operatingScopeSettingId: authority.settingId,
+          dataOwnerUserId: ownerId,
+          modelProvider: "openai",
+          modelId,
+          reasoningEffort: "high",
+        }),
+      });
+      fixtures.push({ submission, reservationId, reservationAuditLogId });
+    }
+    const reservationData = (index: number) => {
+      const fixture = fixtures[index];
+      return {
+        id: fixture.reservationId,
+        ideaId: fixture.submission.ideaId,
+        requestId: fixture.submission.requestId,
+        actorUserId: ownerId,
+        operatingScopeSettingId: authority.settingId,
+        status: "queued" as const,
+        modelProvider: "openai",
+        modelId,
+        reasoningEffort: "high",
+        reservationAuditLogId: fixture.reservationAuditLogId,
+      };
+    };
+
+    const control = await tx.amuxIdeaSessionAnalysisReservation.create({
+      data: reservationData(4),
+    });
+    assert.equal(control.id, fixtures[4].reservationId);
+
+    // Build otherwise-valid forged evidence behind the append-only boundary.
+    // The outer transaction always rolls these fixtures back.
+    await tx.$executeRawUnsafe(
+      'ALTER TABLE "AdminAuditLog" DISABLE TRIGGER "admin_audit_log_is_append_only"');
+    try {
+      await tx.$executeRaw`
+        UPDATE "AdminAuditLog"
+        SET "metadata" = "metadata" - 'systemActor'
+        WHERE "id" = ${fixtures[0].submission.auditId}
+      `;
+      await tx.$executeRaw`
+        UPDATE "AdminAuditLog"
+        SET "metadata" = jsonb_set(
+          "metadata", '{actorScope}', 'null'::jsonb, false
+        )
+        WHERE "id" = ${fixtures[1].submission.auditId}
+      `;
+      await tx.$executeRaw`
+        UPDATE "AdminAuditLog"
+        SET "metadata" = jsonb_set(
+          "metadata", '{systemActor}', 'null'::jsonb, false
+        )
+        WHERE "id" = ${fixtures[2].reservationAuditLogId}
+      `;
+      await tx.$executeRaw`
+        UPDATE "AdminAuditLog"
+        SET "metadata" = jsonb_set(
+          "metadata", '{actorScope}', 'null'::jsonb, false
+        )
+        WHERE "id" = ${fixtures[3].reservationAuditLogId}
+      `;
+    } finally {
+      await tx.$executeRawUnsafe(
+        'ALTER TABLE "AdminAuditLog" ENABLE TRIGGER "admin_audit_log_is_append_only"');
+    }
+
+    for (const [index, expectedMessage] of [
+      [0, /session reservation submission audit mismatch/],
+      [1, /session reservation submission audit mismatch/],
+      [2, /session reservation audit mismatch/],
+      [3, /session reservation audit mismatch/],
+    ] as const) {
+      await tx.$executeRawUnsafe(`SAVEPOINT null_audit_identity_${index}`);
+      await assert.rejects(tx.amuxIdeaSessionAnalysisReservation.create({
+        data: reservationData(index),
+      }), (error: unknown) => {
+        assert.equal(sqlState(error), "23514");
+        assert.match(String(error), expectedMessage);
+        return true;
+      });
+      await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT null_audit_identity_${index}`);
+      await tx.$executeRawUnsafe(`RELEASE SAVEPOINT null_audit_identity_${index}`);
+    }
+    throw rollbackFixtures;
+  }), (error: unknown) => error === rollbackFixtures);
+  assert.equal(await prisma.amuxIdeaSubmission.count({
+    where: { id: { in: ideaIds } },
+  }), 0);
+});
+
+test("database refuses late, mutable and forged queue reservations", async () => {
+  await assert.rejects(prisma.amuxIdeaSessionAnalysisReservation.update({
+    where: { id: committedReservationId }, data: { status: "queued" },
+  }), /append only/);
+  await assert.rejects(prisma.amuxIdeaSessionAnalysisReservation.delete({
+    where: { id: committedReservationId },
+  }), /append only/);
+  await assert.rejects(prisma.$executeRawUnsafe(
+    'TRUNCATE "AmuxIdeaSessionAnalysisReservation" CASCADE'), /append only/);
+
+  const lateIdeaId = randomUUID();
+  const late = inspect(lateIdeaId);
+  const submission = await prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionSubmission(tx, {
+      inspected: late, expectedAuthority: authority, ideaId: lateIdeaId,
+      keys: keysFor(lateIdeaId),
+    }));
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSessionAnalysisReservation(tx, {
+      ideaId: submission.ideaId,
+      requestId: submission.requestId,
+      submissionAuditId: submission.auditId,
+      authority,
+    })), (error: unknown) =>
+    error instanceof AmuxSessionAnalysisReservationError &&
+      error.code === "submission_unavailable");
+  assert.deepEqual(await readAmuxIdeaSessionSubmissionRequest(late.requestId), {
+    requestId: late.requestId, status: "partial", ideaId: lateIdeaId,
+  });
+
+  const forgedIdeaId = randomUUID();
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const forgedSubmission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(forgedIdeaId), expectedAuthority: authority,
+      ideaId: forgedIdeaId, keys: keysFor(forgedIdeaId),
+    });
+    const reservationId = randomUUID();
+    const reservationAuditLogId = await writeSystemAuditLog({
+      tx,
+      systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+      action: AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+      targetType: AMUX_SESSION_ANALYSIS_RESERVED_TARGET,
+      targetId: reservationId,
+      summary: AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY,
+      metadata: amuxSessionAnalysisReservationAuditMetadata({
+        reservationId,
+        ideaId: forgedIdeaId,
+        requestId: forgedSubmission.requestId,
+        submissionAuditId: forgedSubmission.auditId,
+        operatingScopeSettingId: authority.settingId,
+        dataOwnerUserId: ownerId,
+        modelProvider: "openai",
+        modelId,
+        reasoningEffort: "low",
+      }),
+    });
+    await tx.amuxIdeaSessionAnalysisReservation.create({ data: {
+      id: reservationId,
+      ideaId: forgedIdeaId,
+      requestId: forgedSubmission.requestId,
+      actorUserId: ownerId,
+      operatingScopeSettingId: authority.settingId,
+      status: "queued",
+      modelProvider: "openai",
+      modelId,
+      reasoningEffort: "high",
+      reservationAuditLogId,
+    } });
+  }), /session reservation audit mismatch/);
+  assert.equal(await prisma.amuxIdeaSubmission.count({
+    where: { id: forgedIdeaId },
+  }), 0);
+});
+
+test("reservation store refuses duplicate and superseded-scope attempts", async () => {
+  const duplicateIdeaId = randomUUID();
+  const duplicate = inspect(duplicateIdeaId);
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: duplicate, expectedAuthority: authority, ideaId: duplicateIdeaId,
+      keys: keysFor(duplicateIdeaId),
+    });
+    await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId: submission.ideaId,
+      requestId: submission.requestId,
+      submissionAuditId: submission.auditId,
+      authority,
+    });
+    await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId: submission.ideaId,
+      requestId: submission.requestId,
+      submissionAuditId: submission.auditId,
+      authority,
+    });
+  }), (error: unknown) =>
+    error instanceof AmuxSessionAnalysisReservationError &&
+      error.code === "already_reserved");
+  assert.equal(await prisma.amuxIdeaSubmission.count({
+    where: { id: duplicateIdeaId },
+  }), 0);
+
+  const supersededIdeaId = randomUUID();
+  const superseded = inspect(supersededIdeaId);
+  const scopeCount = await prisma.amuxIdeaOperatingScopeSetting.count();
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: superseded, expectedAuthority: authority, ideaId: supersededIdeaId,
+      keys: keysFor(supersededIdeaId),
+    });
+    await commitAmuxOperatingScope(tx, {
+      session, request, id: randomUUID(),
+      expectedPreviousVersion: authority.version,
+      scope, ownerConfirmed: true,
+    });
+    await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId: submission.ideaId,
+      requestId: submission.requestId,
+      submissionAuditId: submission.auditId,
+      authority,
+    });
+  }), /session reservation operating scope mismatch/);
+  assert.equal(await prisma.amuxIdeaSubmission.count({
+    where: { id: supersededIdeaId },
+  }), 0);
+  assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), scopeCount);
 });
 
 test("request collision and references outside the saved scope are read-only refusals", async () => {
@@ -311,6 +1037,68 @@ test("database refuses fake-human, wrong-owner and extra-metadata evidence", asy
   }), (error: unknown) => error === rollbackForgedEvidence);
 });
 
+test("owner cancellation removes a queued session idea and makes raw purge due", async () => {
+  const ideaId = randomUUID();
+  const inspected = inspect(ideaId);
+  const created = await prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected, expectedAuthority: authority, ideaId, keys: keysFor(ideaId),
+    });
+    const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: inspected.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+    return reservation;
+  });
+  assert.ok((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === created.reservationId));
+  const beforeCancel = (await readAmuxIdeaProgressForOwner(ownerId)).find(
+    (row) => row.ideaId === ideaId);
+  assert.equal(beforeCancel?.stage, "analysis");
+  assert.equal(beforeCancel?.waitingFor, null);
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
+      state: "queued", ideaId, retryWrite: false,
+    });
+  const cancellation = await prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionCancellation(tx, { session, request, ideaId,
+      ownerConfirmed: true }));
+  const [idea, reservation, audit] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } }),
+    prisma.amuxIdeaSessionAnalysisReservation.findUniqueOrThrow({ where: { ideaId } }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: cancellation.auditId } }),
+  ]);
+  assert.equal(idea.state, "cancelled");
+  assert.equal(idea.cancelledAt?.toISOString(), cancellation.cancelledAt);
+  assert.equal(idea.rawPurgeAfter?.toISOString(), cancellation.cancelledAt);
+  assert.equal(reservation.status, "queued", "append-only queue evidence is retained");
+  assert.equal(auditRowActorKind(audit), "human");
+  assert.equal(audit.actorUserId, ownerId);
+  assert.equal(audit.action, "amux.idea.session_cancelled_before_analysis");
+  assert.equal(JSON.stringify(audit.metadata).includes("Synthetic session idea"), false);
+  assert.equal((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === created.reservationId), false);
+  assert.equal((await readAmuxIdeaProgressForOwner(ownerId)).find(
+    (row) => row.ideaId === ideaId)?.stage, "cancelled");
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
+      state: "cancelled", ideaId, cancelledAt: cancellation.cancelledAt,
+      auditId: cancellation.auditId, retryWrite: false,
+    });
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionCancellation(tx, { session, request, ideaId,
+      ownerConfirmed: true })), (error: unknown) =>
+    error instanceof AmuxIdeaSessionCancellationError &&
+    error.code === "not_cancellable");
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueRawIdeaPurge(tx, ideaId)), "purged");
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
+      state: "cancelled", ideaId, cancelledAt: cancellation.cancelledAt,
+      auditId: cancellation.auditId, retryWrite: false,
+    });
+});
+
 test("audited identity and encrypted bodies are immutable except for one complete raw purge", async () => {
   for (const data of [
     { rawDigest: "f".repeat(64) },
@@ -339,10 +1127,13 @@ test("audited identity and encrypted bodies are immutable except for one complet
   assert.equal(purged.sourceProvenanceCiphertext, null);
   assert.equal(purged.sourceProvenanceKeyId, null);
   assert.ok(purged.sourceProvenanceDigest);
+  assert.equal((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === committedReservationId), false);
   assert.deepEqual(await readAmuxIdeaSessionSubmissionRequest(committedRequestId), {
     requestId: committedRequestId,
     status: "committed",
     ideaId: committedIdeaId,
+    reservationId: committedReservationId,
     hasExternalSources: true,
   });
   await assert.rejects(prisma.amuxIdeaSubmission.update({
@@ -351,4 +1142,229 @@ test("audited identity and encrypted bodies are immutable except for one complet
       sourceProvenanceKeyId: keysFor(committedIdeaId).masterKeyId,
       sourceProvenanceKeyVersion: 1 },
   }), /cannot be restored|session_shape_check/);
+});
+
+test("session claim normalizes a non-UTC transaction before price admission", async () => {
+  const price = await prisma.amuxIdeaAnalysisPriceVersion.findFirstOrThrow({
+    where: { modelId, mode: "subscription_cli", status: "approved" },
+    select: { id: true },
+  });
+  const rollback = new Error("rollback non-UTC claim");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'Australia/Brisbane'");
+    const ideaId = randomUUID();
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(ideaId), expectedAuthority: authority,
+      ideaId, keys: keysFor(ideaId),
+    });
+    const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+    const claim = await commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: reservation.reservationId,
+      invocationOrdinal: 0, priceVersionId: price.id,
+      runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
+    });
+    assert.equal(claim.reservationId, reservation.reservationId);
+    throw rollback;
+  }), (error: unknown) => error === rollback);
+});
+
+test("a verified first chunk remains eligible for a second budgeted invocation", async () => {
+  const price = await prisma.amuxIdeaAnalysisPriceVersion.findFirstOrThrow({
+    where: { modelId, mode: "subscription_cli", status: "approved" },
+    select: { id: true },
+  });
+  const rollback = new Error("rollback synthetic next chunk");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const ideaId = randomUUID();
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(ideaId), expectedAuthority: authority,
+      ideaId, keys: keysFor(ideaId),
+    });
+    const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+    const claimed = await commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: reservation.reservationId,
+      invocationOrdinal: 0, priceVersionId: price.id,
+      runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
+    });
+    await commitAmuxSessionBudgetOutcome(tx, {
+      claimId: claimed.claimId, outcome: "verified_success",
+      inputTokens: 10, outputTokens: 1,
+    });
+    await tx.amuxIdeaSubmission.update({ where: { id: ideaId },
+      data: { state: "analyzing" } });
+    const candidates = await tx.amuxIdeaSessionAnalysisReservation.findMany({
+      where: buildAmuxSessionAnalysisQueueWhere(new Date(), null),
+      select: { id: true },
+    });
+    assert.ok(candidates.some((row) => row.id === reservation.reservationId));
+    throw rollback;
+  }), (error: unknown) => error === rollback);
+});
+
+test("three session CLI failures stop the shared Agent-wide claim breaker", async () => {
+  const price = await prisma.amuxIdeaAnalysisPriceVersion.findFirstOrThrow({
+    where: { modelId, mode: "subscription_cli", status: "approved" },
+    select: { id: true },
+  });
+  const rollback = new Error("rollback synthetic failure streak");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const reservations: string[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const ideaId = randomUUID();
+      const submission = await commitAmuxIdeaSessionSubmission(tx, {
+        inspected: inspect(ideaId), expectedAuthority: authority,
+        ideaId, keys: keysFor(ideaId),
+      });
+      const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+        ideaId, requestId: submission.requestId,
+        submissionAuditId: submission.auditId, authority,
+      });
+      reservations.push(reservation.reservationId);
+    }
+    for (const reservationId of reservations.slice(0, 3)) {
+      const claimed = await commitAmuxSessionBudgetClaim(tx, {
+        claimId: randomUUID(), requestId: randomUUID(),
+        reservationId, invocationOrdinal: 0, priceVersionId: price.id,
+        runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
+      });
+      const outcome = await commitAmuxSessionBudgetOutcome(tx, {
+        claimId: claimed.claimId, outcome: "invocation_failed",
+        inputTokens: 10, outputTokens: 1,
+      });
+      assert.equal(outcome.status, "failed");
+    }
+    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx), "stopped");
+    await assert.rejects(commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: reservations[3]!, invocationOrdinal: 0,
+      priceVersionId: price.id,
+      runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
+    }), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
+      error.code === "not_ready");
+    throw rollback;
+  }), (error: unknown) => error === rollback);
+});
+
+test("a malformed recent session settlement fails the shared breaker closed", async () => {
+  const rollback = new Error("rollback malformed session audit");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await writeSystemAuditLog({
+      tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      action: AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION,
+      targetType: AMUX_V19_SESSION_BUDGET_TARGET,
+      targetId: randomUUID(),
+      summary: "Synthetic malformed session settlement audit.",
+      metadata: { namespace: "agent/amux-intake", status: "unexpected" },
+    });
+    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx),
+      "integrity_unavailable");
+    throw rollback;
+  }), (error: unknown) => error === rollback);
+});
+
+test("database rejects a second claim that borrows another claim's reserved balance", async () => {
+  const price = await prisma.amuxIdeaAnalysisPriceVersion.findFirstOrThrow({
+    where: { modelId, mode: "subscription_cli", status: "approved" },
+    select: { id: true },
+  });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const reservations: string[] = [];
+    for (let index = 0; index < 2; index += 1) {
+      const ideaId = randomUUID();
+      const submission = await commitAmuxIdeaSessionSubmission(tx, {
+        inspected: inspect(ideaId), expectedAuthority: authority,
+        ideaId, keys: keysFor(ideaId),
+      });
+      const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+        ideaId, requestId: submission.requestId,
+        submissionAuditId: submission.auditId, authority,
+      });
+      reservations.push(reservation.reservationId);
+    }
+    const first = await commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: reservations[0]!, invocationOrdinal: 0,
+      priceVersionId: price.id,
+      runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
+    });
+    const existing = await tx.amuxIdeaSessionAnalysisBudgetClaim.findUniqueOrThrow({
+      where: { id: first.claimId },
+    });
+    const secondId = randomUUID();
+    const requestId = randomUUID();
+    const auditId = await writeSystemAuditLog({
+      tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      action: AMUX_V19_SESSION_BUDGET_CLAIM_ACTION,
+      targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: secondId,
+      summary: "Synthetic claim without a matching ledger increment.",
+      metadata: { reservationId: reservations[1],
+        invocationOrdinal: 0, requestId, priceVersionId: price.id,
+        reservedMicroUsd: existing.reservedMicroUsd.toString() },
+    });
+    await tx.amuxIdeaSessionAnalysisBudgetClaim.create({ data: {
+      id: secondId, requestId, reservationId: reservations[1]!,
+      invocationOrdinal: 0, namespace: existing.namespace,
+      monthStart: existing.monthStart, priceVersionId: price.id,
+      provider: existing.provider, modelId: existing.modelId,
+      inputTokensCap: existing.inputTokensCap,
+      outputTokensCap: existing.outputTokensCap,
+      inputMicroUsdPerMillion: existing.inputMicroUsdPerMillion,
+      outputMicroUsdPerMillion: existing.outputMicroUsdPerMillion,
+      reservedMicroUsd: existing.reservedMicroUsd,
+      status: "in_flight", claimAuditLogId: auditId,
+    } });
+  }), (error: unknown) => sqlState(error) === "23514");
+});
+
+test("session claim waits in the queue when the owner monthly limit is insufficient", async () => {
+  await prisma.$transaction((tx) => commitAnalysisBudgetSetting(tx, {
+    session, request, id: randomUUID(), expectedPreviousVersion: 0,
+    monthlyUsd: "0.01", ownerConfirmed: true,
+  }));
+  const ideaId = randomUUID();
+  const inspected = inspect(ideaId);
+  const reservation = await prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected, expectedAuthority: authority, ideaId, keys: keysFor(ideaId),
+    });
+    return commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+  });
+  const price = await prisma.amuxIdeaAnalysisPriceVersion.findFirstOrThrow({
+    where: { modelId, mode: "subscription_cli", status: "approved" },
+    select: { id: true },
+  });
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: reservation.reservationId, invocationOrdinal: 0,
+      priceVersionId: price.id,
+      runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
+    })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
+      error.code === "budget_hold" && error.reason === "monthly_cap_exceeded");
+  assert.equal(await prisma.amuxIdeaSessionAnalysisBudgetClaim.findFirst({
+    where: { reservationId: reservation.reservationId },
+  }), null);
+  assert.equal((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === reservation.reservationId), true);
+});
+
+test("a superseded operating scope removes stale reservations from dispatch hints", async () => {
+  await prisma.$transaction((tx) => commitAmuxOperatingScope(tx, {
+    session, request, id: randomUUID(), expectedPreviousVersion: authority.version,
+    scope, ownerConfirmed: true,
+  }));
+  const queue = await listAmuxSessionAnalysisCandidates(null);
+  assert.equal(queue.candidates.some((candidate) =>
+    candidate.reservationId === committedReservationId), false);
 });

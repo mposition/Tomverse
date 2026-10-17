@@ -240,10 +240,16 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   if (!window || window.limitMicroUsd !== BigInt(monthlySetting.limitMicroUsd)) {
     refuse("budget_unavailable");
   }
-  const unknown = await tx.amuxIdeaAnalysisBudgetHold.findFirst({
-    where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown" },
-    select: { id: true },
-  });
+  const [v4Unknown, sessionUnknown] = await Promise.all([
+    tx.amuxIdeaAnalysisBudgetHold.findFirst({
+      where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown" },
+      select: { id: true },
+    }),
+    tx.amuxIdeaSessionAnalysisBudgetClaim.findFirst({
+      where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown" },
+      select: { id: true },
+    }),
+  ]);
   const decision = assessAmuxIdeaAnalysisBudget({
     ...pricing,
     ...input.runner,
@@ -253,7 +259,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     monthlyLimitMicroUsd: window.limitMicroUsd.toString(),
     consumedMicroUsd: window.spentMicroUsd.toString(),
     reservedMicroUsd: window.reservedMicroUsd.toString(),
-    usageState: unknown ? "unknown" : "known",
+    usageState: v4Unknown || sessionUnknown ? "unknown" : "known",
   });
   if (decision.decision !== "reservation_candidate") refuse("budget_hold", decision.reason);
   const reserve = BigInt(decision.worstCaseMicroUsd);

@@ -241,8 +241,9 @@ test("retention deletes closed calls past 24 months, never a held or open one, w
   // Released from hold, the aged row goes on the next run, through the
   // retention step that runs every table.
   await hold(held, false);
-  const counts = await runMarketingRetention(prisma);
-  assert.equal(counts.MarketingLlmCall, 1);
+  const counts = await runMarketingRetention(prisma, {});
+  assert.equal(counts.skipped, null);
+  assert.equal(counts.skipped === null ? counts.MarketingLlmCall : -1, 1);
   assert.equal(await prisma.marketingLlmCall.count({ where: { id: held } }), 0);
   assert.equal(await prisma.marketingLlmCall.count({ where: { id: young } }), 1);
 });
