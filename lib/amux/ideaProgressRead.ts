@@ -10,6 +10,8 @@ export const AMUX_IDEA_PROGRESS_LIMIT = 20;
 
 export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   ideaId: string;
+  /** A session idea has no per-idea execution approval. */
+  submissionOrigin?: "owner" | "session";
   requestId: string;
   submittedAt: string;
   /** The first registered card's display key, the only plaintext label an idea has. */
@@ -77,7 +79,8 @@ type SqlCheckoutEvidence = {
   readBodyPurged: boolean;
 };
 type SqlIdea = {
-  id: string; requestId: string; state: string; submittedAtMs: number; cancelled: boolean;
+  id: string; requestId: string; state: string; submissionOrigin: "owner" | "session";
+  submittedAtMs: number; cancelled: boolean;
   proposedUnits: number; chunks: SqlChunk[] | null; cards: SqlCard[] | null;
   checkoutEvidence: SqlCheckoutEvidence[] | null;
 };
@@ -91,7 +94,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   // nobody. Chunks keep their index order and cards their registration order.
   const ideas = await tx.$queryRaw<SqlIdea[]>`
     WITH newest AS (
-      SELECT "id", "requestId", "state", "submittedAt", "cancelledAt"
+      SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt"
       FROM "AmuxIdeaSubmission"
       WHERE "actorUserId" = ${actorUserId}
       ORDER BY "submittedAt" DESC, "id" ASC
@@ -101,6 +104,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       n."id" AS "id",
       n."requestId"::text AS "requestId",
       n."state" AS "state",
+      n."submissionOrigin" AS "submissionOrigin",
       (extract(epoch FROM n."submittedAt") * 1000)::double precision AS "submittedAtMs",
       (n."cancelledAt" IS NOT NULL) AS "cancelled",
       (SELECT count(*)::int FROM "AmuxIdeaDraftUnit" u
@@ -143,6 +147,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
     const own = idea.cards ?? [];
     const progress = amuxIdeaProgress({
       state: idea.state,
+      submissionOrigin: idea.submissionOrigin,
       cancelled: idea.cancelled,
       chunks: (idea.chunks ?? []).map((chunk) => ({ ...chunk })),
       proposedUnits: idea.proposedUnits,
@@ -152,6 +157,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
     return {
       ...progress,
       ideaId: idea.id,
+      submissionOrigin: idea.submissionOrigin,
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,
