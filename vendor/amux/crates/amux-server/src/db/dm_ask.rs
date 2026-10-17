@@ -13,7 +13,10 @@
 //! 2. **Question revisions.** The app binds a Decision Maker request to
 //!    (card id, question revision) (docs/policy/amux-decision-maker.md §9), so
 //!    a revision is an immutable snapshot of what the card was asking, taken
-//!    when a typed card enters `needsyou` or changes its ask while there.
+//!    when a typed card enters `needsyou` or changes its ask while there. It
+//!    is bound to two counters the database keeps for every writer (a status
+//!    epoch and an ask epoch, migration 0083), never to a clock or to the
+//!    wording, so any status change or rewording by any door ends it.
 //! 3. **The DM-pending marker**, set by one compare-and-swap against the
 //!    card's current question revision and removed by the request that set it,
 //!    with no parameter for what the result was.
@@ -481,11 +484,14 @@ pub fn parse_typed_ask(value: &Value) -> Result<TypedAskInput, TypedAskRefusal> 
 // Drafts and question revisions
 // ---------------------------------------------------------------------------
 
-/// The card's base ask, from the row as stored.
+/// The card's base ask, from the row as stored, with the card's two epochs
+/// (migration 0083: the status epoch moves on every status change and the ask
+/// epoch on every change of the base ask, whoever writes the row).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CardAsk {
     status: String,
-    entered_state_at: Option<i64>,
+    status_epoch: i64,
+    ask_epoch: i64,
     ask_type: Option<String>,
     ask_question: Option<String>,
     ask_unblocks: Option<String>,
@@ -503,16 +509,19 @@ impl CardAsk {
 
 fn card_ask(conn: &Connection, issue_id: &str) -> rusqlite::Result<Option<CardAsk>> {
     conn.query_row(
-        "SELECT status, entered_state_at, ask_type, ask_question, ask_unblocks \
-         FROM issues WHERE id = ?1 AND deleted IS NULL",
+        "SELECT i.status, COALESCE(e.status_epoch, 0), COALESCE(e.ask_epoch, 0), \
+                i.ask_type, i.ask_question, i.ask_unblocks \
+         FROM issues i LEFT JOIN _amux_dm_card_epochs e ON e.issue_id = i.id \
+         WHERE i.id = ?1 AND i.deleted IS NULL",
         params![issue_id],
         |r| {
             Ok(CardAsk {
                 status: r.get(0)?,
-                entered_state_at: r.get(1)?,
-                ask_type: r.get(2)?,
-                ask_question: r.get(3)?,
-                ask_unblocks: r.get(4)?,
+                status_epoch: r.get(1)?,
+                ask_epoch: r.get(2)?,
+                ask_type: r.get(3)?,
+                ask_question: r.get(4)?,
+                ask_unblocks: r.get(5)?,
             })
         },
     )
@@ -520,9 +529,10 @@ fn card_ask(conn: &Connection, issue_id: &str) -> rusqlite::Result<Option<CardAs
 }
 
 /// The extension a worker last wrote for a card, with the base ask it was
-/// written beside.
+/// written beside and the ask epoch it belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TypedAskDraft {
+    pub ask_epoch: i64,
     pub ask_type: Option<String>,
     pub ask_question: Option<String>,
     pub ask_unblocks: Option<String>,
@@ -530,22 +540,54 @@ pub struct TypedAskDraft {
     pub updated_at: i64,
 }
 
+impl TypedAskDraft {
+    /// The draft belongs to the card's question as it stands: written in this
+    /// ask generation, beside this base ask. The epoch is the binding; the
+    /// wording is compared too so that a draft never applies to text it was
+    /// not written beside.
+    fn applies_to(&self, card: &CardAsk) -> bool {
+        self.ask_epoch == card.ask_epoch
+            && (
+                self.ask_type.as_deref(),
+                self.ask_question.as_deref(),
+                self.ask_unblocks.as_deref(),
+            ) == card.base()
+    }
+}
+
 pub fn draft_for(conn: &Connection, issue_id: &str) -> rusqlite::Result<Option<TypedAskDraft>> {
-    let row: Option<(Option<String>, Option<String>, Option<String>, String, i64)> = conn
+    let row: Option<(
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+        i64,
+    )> = conn
         .query_row(
-            "SELECT ask_type, ask_question, ask_unblocks, detail, updated_at \
+            "SELECT ask_epoch, ask_type, ask_question, ask_unblocks, detail, updated_at \
              FROM _amux_dm_typed_asks WHERE issue_id = ?1",
             params![issue_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .optional()?;
     Ok(row.and_then(
-        |(ask_type, ask_question, ask_unblocks, detail, updated_at)| {
+        |(ask_epoch, ask_type, ask_question, ask_unblocks, detail, updated_at)| {
             // A row this module did not write is not an extension.
             serde_json::from_str::<TypedAsk>(&detail)
                 .ok()
                 .filter(|d| d.format == TYPED_ASK_FORMAT && d.canonical() == detail)
                 .map(|detail| TypedAskDraft {
+                    ask_epoch,
                     ask_type,
                     ask_question,
                     ask_unblocks,
@@ -560,9 +602,10 @@ pub fn draft_for(conn: &Connection, issue_id: &str) -> rusqlite::Result<Option<T
 /// `typed_ask` otherwise reads as a no-op and never reaches the write.
 ///
 /// `base` is the base ask (type, question, unblocks) the card will hold after
-/// this write. It is part of the comparison because the draft is stored
-/// beside a base ask: re-sending the same extension for a re-asked question is
-/// what attaches it to that question, and it must not read as a no-op.
+/// this write. The draft is bound to a question generation, so re-sending the
+/// same extension is a change whenever it would attach it to a question it
+/// does not belong to yet: a base ask this write changes, or one that has
+/// moved on since the draft was written, even back to the same wording.
 pub fn draft_differs(
     conn: &Connection,
     issue_id: &str,
@@ -572,19 +615,27 @@ pub fn draft_differs(
     let stored = draft_for(conn, issue_id)?;
     Ok(match input {
         TypedAskInput::Clear => stored.is_some(),
-        TypedAskInput::Set(ask) => stored.is_none_or(|d| {
-            d.detail != *ask
+        TypedAskInput::Set(ask) => {
+            let Some(stored) = stored else {
+                return Ok(true);
+            };
+            let Some(card) = card_ask(conn, issue_id)? else {
+                return Ok(true);
+            };
+            stored.detail != *ask
+                || !stored.applies_to(&card)
                 || (
-                    d.ask_type.as_deref(),
-                    d.ask_question.as_deref(),
-                    d.ask_unblocks.as_deref(),
+                    stored.ask_type.as_deref(),
+                    stored.ask_question.as_deref(),
+                    stored.ask_unblocks.as_deref(),
                 ) != base
-        }),
+        }
     })
 }
 
-/// Store (or remove) the card's extension, beside the base ask the card holds
-/// NOW. Call after the card row is written, in the same transaction.
+/// Store (or remove) the card's extension, beside the base ask and the ask
+/// epoch the card holds NOW. Call after the card row is written, in the same
+/// transaction, so the epoch already counts this write's own change.
 pub fn write_draft(
     conn: &Connection,
     issue_id: &str,
@@ -604,13 +655,15 @@ pub fn write_draft(
             };
             conn.execute(
                 "INSERT INTO _amux_dm_typed_asks \
-                     (issue_id, ask_type, ask_question, ask_unblocks, detail, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-                 ON CONFLICT(issue_id) DO UPDATE SET ask_type = excluded.ask_type, \
-                     ask_question = excluded.ask_question, ask_unblocks = excluded.ask_unblocks, \
-                     detail = excluded.detail, updated_at = excluded.updated_at",
+                     (issue_id, ask_epoch, ask_type, ask_question, ask_unblocks, detail, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+                 ON CONFLICT(issue_id) DO UPDATE SET ask_epoch = excluded.ask_epoch, \
+                     ask_type = excluded.ask_type, ask_question = excluded.ask_question, \
+                     ask_unblocks = excluded.ask_unblocks, detail = excluded.detail, \
+                     updated_at = excluded.updated_at",
                 params![
                     issue_id,
+                    card.ask_epoch,
                     card.ask_type,
                     card.ask_question,
                     card.ask_unblocks,
@@ -628,7 +681,8 @@ pub fn write_draft(
 pub struct QuestionRevision {
     pub issue_id: String,
     pub question_revision: i64,
-    pub entered_state_at: Option<i64>,
+    pub status_epoch: i64,
+    pub ask_epoch: i64,
     pub ask_type: Option<String>,
     pub ask_question: Option<String>,
     pub ask_unblocks: Option<String>,
@@ -637,8 +691,14 @@ pub struct QuestionRevision {
 }
 
 impl QuestionRevision {
+    /// Is the card still asking this revision's question? Only if no status
+    /// change and no change of the base ask has happened since it was
+    /// recorded, by any writer. Both epochs count every such change, so a
+    /// round trip inside one second, or a question reworded back to the same
+    /// text, still ends the revision.
     fn asks(&self, card: &CardAsk) -> bool {
-        self.entered_state_at == card.entered_state_at
+        self.status_epoch == card.status_epoch
+            && self.ask_epoch == card.ask_epoch
             && (
                 self.ask_type.as_deref(),
                 self.ask_question.as_deref(),
@@ -647,60 +707,68 @@ impl QuestionRevision {
     }
 }
 
+const REVISION_COLUMNS: &str =
+    "question_revision, status_epoch, ask_epoch, ask_type, ask_question, ask_unblocks, detail, created_at";
+
+fn revision_from_row(issue_id: &str, r: &rusqlite::Row<'_>) -> rusqlite::Result<QuestionRevision> {
+    let detail: String = r.get(6)?;
+    Ok(QuestionRevision {
+        issue_id: issue_id.to_string(),
+        question_revision: r.get(0)?,
+        status_epoch: r.get(1)?,
+        ask_epoch: r.get(2)?,
+        ask_type: r.get(3)?,
+        ask_question: r.get(4)?,
+        ask_unblocks: r.get(5)?,
+        // Only this module writes the column, so a row that does not parse is
+        // a corrupt file; an empty extension keeps it from ever offering
+        // options it did not record.
+        detail: serde_json::from_str(&detail).unwrap_or_else(|_| TypedAsk::empty()),
+        created_at: r.get(7)?,
+    })
+}
+
 fn latest_revision(
     conn: &Connection,
     issue_id: &str,
 ) -> rusqlite::Result<Option<QuestionRevision>> {
-    let row: Option<(i64, Option<i64>, Option<String>, Option<String>, Option<String>, String, i64)> = conn
-        .query_row(
-            "SELECT question_revision, entered_state_at, ask_type, ask_question, ask_unblocks, detail, created_at \
-             FROM _amux_dm_ask_revisions WHERE issue_id = ?1 ORDER BY question_revision DESC LIMIT 1",
-            params![issue_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
-        )
-        .optional()?;
-    Ok(row.map(
-        |(
-            question_revision,
-            entered_state_at,
-            ask_type,
-            ask_question,
-            ask_unblocks,
-            detail,
-            created_at,
-        )| {
-            QuestionRevision {
-                issue_id: issue_id.to_string(),
-                question_revision,
-                entered_state_at,
-                ask_type,
-                ask_question,
-                ask_unblocks,
-                // Only this module writes the column, so a row that does not
-                // parse is a corrupt file; an empty extension keeps it from ever
-                // offering options it did not record.
-                detail: serde_json::from_str(&detail).unwrap_or_else(|_| TypedAsk::empty()),
-                created_at,
-            }
-        },
-    ))
+    conn.query_row(
+        &format!(
+            "SELECT {REVISION_COLUMNS} FROM _amux_dm_ask_revisions \
+             WHERE issue_id = ?1 ORDER BY question_revision DESC LIMIT 1"
+        ),
+        params![issue_id],
+        |r| revision_from_row(issue_id, r),
+    )
+    .optional()
+}
+
+/// One recorded revision, current or not.
+pub fn revision(
+    conn: &Connection,
+    issue_id: &str,
+    question_revision: i64,
+) -> rusqlite::Result<Option<QuestionRevision>> {
+    conn.query_row(
+        &format!(
+            "SELECT {REVISION_COLUMNS} FROM _amux_dm_ask_revisions \
+             WHERE issue_id = ?1 AND question_revision = ?2"
+        ),
+        params![issue_id, question_revision],
+        |r| revision_from_row(issue_id, r),
+    )
+    .optional()
 }
 
 /// The extension that belongs to the card's question as it stands: the draft
-/// when it was written beside this exact base ask, otherwise none.
+/// written in this ask generation beside this base ask, otherwise none.
 fn effective_detail(
     conn: &Connection,
     issue_id: &str,
     card: &CardAsk,
 ) -> rusqlite::Result<TypedAsk> {
     Ok(draft_for(conn, issue_id)?
-        .filter(|d| {
-            (
-                d.ask_type.as_deref(),
-                d.ask_question.as_deref(),
-                d.ask_unblocks.as_deref(),
-            ) == card.base()
-        })
+        .filter(|d| d.applies_to(card))
         .map_or_else(TypedAsk::empty, |d| d.detail))
 }
 
@@ -708,14 +776,13 @@ fn effective_detail(
 ///
 /// Called after a create or PATCH writes the card, in the same transaction.
 /// A card gets a revision only while it is a typed ask in `needsyou`. A new
-/// revision is recorded when the card has just entered `needsyou`
-/// (`entered_needsyou`), or when its base ask, its applicable extension or its
-/// `needsyou` entry time differs from the latest revision. Otherwise the
-/// latest revision stands. Returns the card's current revision, if any.
+/// revision is recorded unless the latest one is still current (same status
+/// epoch, same ask epoch, same base ask) and carries the same applicable
+/// extension; otherwise the latest revision stands. Returns the card's current
+/// revision, if any.
 pub fn sync_question_revision(
     conn: &Connection,
     issue_id: &str,
-    entered_needsyou: bool,
     now: i64,
 ) -> rusqlite::Result<Option<i64>> {
     let Some(card) = card_ask(conn, issue_id)? else {
@@ -728,19 +795,21 @@ pub fn sync_question_revision(
     let latest = latest_revision(conn, issue_id)?;
     if let Some(latest) = latest
         .as_ref()
-        .filter(|r| !entered_needsyou && r.asks(&card) && r.detail == detail)
+        .filter(|r| r.asks(&card) && r.detail == detail)
     {
         return Ok(Some(latest.question_revision));
     }
     let next = latest.map_or(1, |r| r.question_revision + 1);
     conn.execute(
         "INSERT INTO _amux_dm_ask_revisions \
-             (issue_id, question_revision, entered_state_at, ask_type, ask_question, ask_unblocks, detail, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (issue_id, question_revision, status_epoch, ask_epoch, ask_type, ask_question, \
+              ask_unblocks, detail, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             issue_id,
             next,
-            card.entered_state_at,
+            card.status_epoch,
+            card.ask_epoch,
             card.ask_type,
             card.ask_question,
             card.ask_unblocks,
@@ -752,9 +821,10 @@ pub fn sync_question_revision(
 }
 
 /// The revision the card is asking right now: its latest revision, provided
-/// the card is still a typed ask in `needsyou` from the same entry and with
-/// the same base ask. A card moved or re-asked by a writer that does not
-/// record revisions has none, which sends the question to the operator only.
+/// the card is still a typed ask in `needsyou` and neither its status nor its
+/// base ask has changed since (both epochs equal). A card moved or reworded by
+/// a writer that records no revision therefore has none, which sends the
+/// question to the operator only until a recording write gives it a new one.
 pub fn current_revision(
     conn: &Connection,
     issue_id: &str,
@@ -766,52 +836,6 @@ pub fn current_revision(
         return Ok(None);
     }
     Ok(latest_revision(conn, issue_id)?.filter(|r| r.asks(&card)))
-}
-
-/// One recorded revision, current or not.
-pub fn revision(
-    conn: &Connection,
-    issue_id: &str,
-    question_revision: i64,
-) -> rusqlite::Result<Option<QuestionRevision>> {
-    let row: Option<(
-        Option<i64>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        String,
-        i64,
-    )> = conn
-        .query_row(
-            "SELECT entered_state_at, ask_type, ask_question, ask_unblocks, detail, created_at \
-             FROM _amux_dm_ask_revisions WHERE issue_id = ?1 AND question_revision = ?2",
-            params![issue_id, question_revision],
-            |r| {
-                Ok((
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
-                ))
-            },
-        )
-        .optional()?;
-    Ok(row.map(
-        |(entered_state_at, ask_type, ask_question, ask_unblocks, detail, created_at)| {
-            QuestionRevision {
-                issue_id: issue_id.to_string(),
-                question_revision,
-                entered_state_at,
-                ask_type,
-                ask_question,
-                ask_unblocks,
-                detail: serde_json::from_str(&detail).unwrap_or_else(|_| TypedAsk::empty()),
-                created_at,
-            }
-        },
-    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -1464,17 +1488,14 @@ mod tests {
         card(&conn, "DM-1", "doing", 100);
         write_draft(&conn, "DM-1", &TypedAskInput::Set(ask(two_options())), 100).unwrap();
         assert_eq!(
-            sync_question_revision(&conn, "DM-1", false, 100).unwrap(),
+            sync_question_revision(&conn, "DM-1", 100).unwrap(),
             None,
             "doing is not asking"
         );
         assert_eq!(current_revision(&conn, "DM-1").unwrap(), None);
 
         move_to(&conn, "DM-1", "needsyou", 200);
-        assert_eq!(
-            sync_question_revision(&conn, "DM-1", true, 200).unwrap(),
-            Some(1)
-        );
+        assert_eq!(sync_question_revision(&conn, "DM-1", 200).unwrap(), Some(1));
         let current = current_revision(&conn, "DM-1").unwrap().unwrap();
         assert_eq!(current.question_revision, 1);
         assert_eq!(
@@ -1483,10 +1504,7 @@ mod tests {
             "the draft written first is the question's extension"
         );
         // An unrelated write leaves the revision alone.
-        assert_eq!(
-            sync_question_revision(&conn, "DM-1", false, 210).unwrap(),
-            Some(1)
-        );
+        assert_eq!(sync_question_revision(&conn, "DM-1", 210).unwrap(), Some(1));
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM _amux_dm_ask_revisions", [], |r| {
                 r.get(0)
@@ -1504,16 +1522,10 @@ mod tests {
             [],
         )
         .unwrap();
-        assert_eq!(
-            sync_question_revision(&conn, "OLD-1", true, 5).unwrap(),
-            None
-        );
+        assert_eq!(sync_question_revision(&conn, "OLD-1", 5).unwrap(), None);
         // Legacy spelling still counts as asking, once the ask is typed.
         card(&conn, "OLD-2", "needs_you", 1);
-        assert_eq!(
-            sync_question_revision(&conn, "OLD-2", true, 5).unwrap(),
-            Some(1)
-        );
+        assert_eq!(sync_question_revision(&conn, "OLD-2", 5).unwrap(), Some(1));
     }
 
     #[test]
@@ -1521,20 +1533,14 @@ mod tests {
         let conn = db();
         card(&conn, "DM-2", "needsyou", 100);
         write_draft(&conn, "DM-2", &TypedAskInput::Set(ask(two_options())), 100).unwrap();
-        assert_eq!(
-            sync_question_revision(&conn, "DM-2", true, 100).unwrap(),
-            Some(1)
-        );
+        assert_eq!(sync_question_revision(&conn, "DM-2", 100).unwrap(), Some(1));
         // The worker re-asks without restating typed_ask.
         conn.execute(
             "UPDATE issues SET ask_question = 'Should the index be dropped instead?' WHERE id = 'DM-2'",
             [],
         )
         .unwrap();
-        assert_eq!(
-            sync_question_revision(&conn, "DM-2", false, 110).unwrap(),
-            Some(2)
-        );
+        assert_eq!(sync_question_revision(&conn, "DM-2", 110).unwrap(), Some(2));
         let current = current_revision(&conn, "DM-2").unwrap().unwrap();
         assert_eq!(
             current.detail,
@@ -1555,10 +1561,7 @@ mod tests {
         let conn = db();
         card(&conn, "DM-3", "needsyou", 100);
         write_draft(&conn, "DM-3", &TypedAskInput::Set(ask(two_options())), 100).unwrap();
-        assert_eq!(
-            sync_question_revision(&conn, "DM-3", true, 100).unwrap(),
-            Some(1)
-        );
+        assert_eq!(sync_question_revision(&conn, "DM-3", 100).unwrap(), Some(1));
         let narrower = ask(
             json!({"options": [{"id": "sqlite", "label": "Keep SQLite", "effect": "choice_only"}]}),
         );
@@ -1575,20 +1578,14 @@ mod tests {
         // attaches the extension to the re-asked question.
         let reasked = (base.0, Some("Should the index be dropped?"), base.2);
         assert!(draft_differs(&conn, "DM-3", &set, reasked).unwrap());
-        assert_eq!(
-            sync_question_revision(&conn, "DM-3", false, 110).unwrap(),
-            Some(2)
-        );
+        assert_eq!(sync_question_revision(&conn, "DM-3", 110).unwrap(), Some(2));
         assert_eq!(
             current_revision(&conn, "DM-3").unwrap().unwrap().detail,
             narrower
         );
         write_draft(&conn, "DM-3", &TypedAskInput::Clear, 120).unwrap();
         assert_eq!(draft_for(&conn, "DM-3").unwrap(), None);
-        assert_eq!(
-            sync_question_revision(&conn, "DM-3", false, 120).unwrap(),
-            Some(3)
-        );
+        assert_eq!(sync_question_revision(&conn, "DM-3", 120).unwrap(), Some(3));
         assert_eq!(
             current_revision(&conn, "DM-3").unwrap().unwrap().detail,
             TypedAsk::empty()
@@ -1599,33 +1596,24 @@ mod tests {
     fn re_entering_needsyou_is_a_new_revision_even_with_the_same_text() {
         let conn = db();
         card(&conn, "DM-4", "needsyou", 100);
-        assert_eq!(
-            sync_question_revision(&conn, "DM-4", true, 100).unwrap(),
-            Some(1)
-        );
+        assert_eq!(sync_question_revision(&conn, "DM-4", 100).unwrap(), Some(1));
         move_to(&conn, "DM-4", "doing", 150);
         assert_eq!(
             current_revision(&conn, "DM-4").unwrap(),
             None,
             "a card that left needsyou is asking nothing"
         );
-        // Back within the same second: entered_state_at alone cannot tell,
-        // the transition flag does.
+        // Back with the same entry second: the clock cannot tell the two
+        // episodes apart, the status epoch can.
         move_to(&conn, "DM-4", "needsyou", 100);
-        assert_eq!(
-            sync_question_revision(&conn, "DM-4", true, 100).unwrap(),
-            Some(2)
-        );
+        assert_eq!(sync_question_revision(&conn, "DM-4", 100).unwrap(), Some(2));
     }
 
     #[test]
     fn a_card_moved_by_a_writer_that_records_no_revision_has_no_current_revision() {
         let conn = db();
         card(&conn, "DM-5", "needsyou", 100);
-        assert_eq!(
-            sync_question_revision(&conn, "DM-5", true, 100).unwrap(),
-            Some(1)
-        );
+        assert_eq!(sync_question_revision(&conn, "DM-5", 100).unwrap(), Some(1));
         // Another door re-enters needsyou and never calls sync.
         move_to(&conn, "DM-5", "doing", 120);
         move_to(&conn, "DM-5", "needsyou", 130);
@@ -1636,11 +1624,179 @@ mod tests {
         );
     }
 
+    fn epochs(conn: &Connection, id: &str) -> (i64, i64) {
+        conn.query_row(
+            "SELECT status_epoch, ask_epoch FROM _amux_dm_card_epochs WHERE issue_id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    }
+
+    /// The counters are the database's, so every writer moves them: a status
+    /// change, a base-ask change and a replaced row each count once, and a
+    /// write that leaves those columns as they were counts nothing.
+    #[test]
+    fn the_epochs_count_every_status_and_ask_change_by_any_writer() {
+        let conn = db();
+        card(&conn, "EP-1", "needsyou", 100);
+        assert_eq!(epochs(&conn, "EP-1"), (1, 1), "an inserted row starts both");
+        conn.execute(
+            "UPDATE issues SET status = 'needsyou', ask_question = ask_question, \"desc\" = 'x' WHERE id = 'EP-1'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            epochs(&conn, "EP-1"),
+            (1, 1),
+            "same values are not a change"
+        );
+        move_to(&conn, "EP-1", "doing", 100);
+        move_to(&conn, "EP-1", "needsyou", 100);
+        assert_eq!(epochs(&conn, "EP-1"), (3, 1));
+        reword(&conn, "EP-1", "Another question?");
+        conn.execute(
+            "UPDATE issues SET ask_unblocks = NULL WHERE id = 'EP-1'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(epochs(&conn, "EP-1"), (3, 3));
+        conn.execute(
+            "INSERT OR REPLACE INTO issues (id, title, status, created, updated) \
+             VALUES ('EP-1', 'replaced', 'needsyou', 1, 1)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            epochs(&conn, "EP-1"),
+            (4, 4),
+            "a replaced row counts as a change, and never resets the counters"
+        );
+        // The firing statement's conflict policy reaches into the trigger;
+        // an outer OR REPLACE / OR IGNORE must not reset or skip the count.
+        conn.execute(
+            "UPDATE OR REPLACE issues SET status = 'doing' WHERE id = 'EP-1'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE OR IGNORE issues SET ask_question = 'Third question?' WHERE id = 'EP-1'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(epochs(&conn, "EP-1"), (5, 5));
+    }
+
+    fn reword(conn: &Connection, id: &str, question: &str) {
+        conn.execute(
+            "UPDATE issues SET ask_question = ?2 WHERE id = ?1",
+            params![id, question],
+        )
+        .unwrap();
+    }
+
+    /// Review r-20261016-230112-9bf37c, finding 1. A door that records no
+    /// revision moves the card needsyou -> doing -> needsyou inside one
+    /// second and keeps the wording. Seconds cannot tell the two episodes
+    /// apart, so the old revision must not be current: its assignment and
+    /// its answer belong to a question the card is no longer asking.
+    #[test]
+    fn another_door_re_entering_needsyou_within_the_same_second_voids_the_revision() {
+        let conn = db();
+        card(&conn, "DM-13", "needsyou", 100);
+        assert_eq!(
+            sync_question_revision(&conn, "DM-13", 100).unwrap(),
+            Some(1)
+        );
+        assert!(matches!(
+            claim_answer(&conn, "DM-13", 1, &AnswerSource::Operator, "Ethan", 100).unwrap(),
+            AnswerClaim::Claimed(_)
+        ));
+        move_to(&conn, "DM-13", "doing", 100);
+        move_to(&conn, "DM-13", "needsyou", 100);
+        assert_eq!(
+            current_revision(&conn, "DM-13").unwrap(),
+            None,
+            "the old revision must not stand for the new episode"
+        );
+        assert_eq!(
+            set_pending(&conn, "DM-13", 1, REQUEST_A, "decision-maker-openai", 100).unwrap(),
+            PendingSet::Discarded(PendingDiscard::StaleRevision)
+        );
+        // The next recording write gives the new episode its own revision,
+        // and the old answer does not block the new question's answer.
+        assert_eq!(
+            sync_question_revision(&conn, "DM-13", 101).unwrap(),
+            Some(2)
+        );
+        let confirmed = AnswerSource::DmConfirmed {
+            request_id: REQUEST_A.into(),
+        };
+        assert!(matches!(
+            claim_answer(&conn, "DM-13", 2, &confirmed, "amux-bridge", 102).unwrap(),
+            AnswerClaim::Claimed(_)
+        ));
+    }
+
+    /// The same finding, without a status change: another writer rewords the
+    /// question and puts the old wording back. The wording matches, the
+    /// question generation does not.
+    #[test]
+    fn another_writer_restoring_the_old_wording_does_not_revive_the_revision() {
+        let conn = db();
+        card(&conn, "DM-14", "needsyou", 100);
+        assert_eq!(
+            sync_question_revision(&conn, "DM-14", 100).unwrap(),
+            Some(1)
+        );
+        reword(&conn, "DM-14", "Should the index be dropped instead?");
+        reword(&conn, "DM-14", "Which store should the index use?");
+        assert_eq!(current_revision(&conn, "DM-14").unwrap(), None);
+        assert_eq!(
+            set_pending(&conn, "DM-14", 1, REQUEST_A, "decision-maker-openai", 101).unwrap(),
+            PendingSet::Discarded(PendingDiscard::StaleRevision)
+        );
+    }
+
+    /// Review r-20261016-230112-9bf37c, finding 2. Question A is recorded
+    /// with a typed ask, then A -> B -> A without `typed_ask`. The last A is
+    /// a new question generation and must not get the first A's options,
+    /// resolution or context back.
+    #[test]
+    fn a_question_reworded_back_does_not_get_its_old_draft_back() {
+        let conn = db();
+        card(&conn, "DM-15", "needsyou", 100);
+        write_draft(&conn, "DM-15", &TypedAskInput::Set(ask(two_options())), 100).unwrap();
+        assert_eq!(
+            sync_question_revision(&conn, "DM-15", 100).unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            current_revision(&conn, "DM-15").unwrap().unwrap().detail,
+            ask(two_options())
+        );
+        reword(&conn, "DM-15", "Should the index be dropped instead?");
+        assert_eq!(
+            sync_question_revision(&conn, "DM-15", 110).unwrap(),
+            Some(2)
+        );
+        reword(&conn, "DM-15", "Which store should the index use?");
+        assert_eq!(
+            sync_question_revision(&conn, "DM-15", 120).unwrap(),
+            Some(3)
+        );
+        assert_eq!(
+            current_revision(&conn, "DM-15").unwrap().unwrap().detail,
+            TypedAsk::empty(),
+            "the first A's extension must not ride on the restored wording"
+        );
+    }
+
     #[test]
     fn revisions_and_answers_are_immutable_in_the_database() {
         let conn = db();
         card(&conn, "DM-6", "needsyou", 100);
-        sync_question_revision(&conn, "DM-6", true, 100).unwrap();
+        sync_question_revision(&conn, "DM-6", 100).unwrap();
         claim_answer(&conn, "DM-6", 1, &AnswerSource::Operator, "Ethan", 101).unwrap();
         for sql in [
             "UPDATE _amux_dm_ask_revisions SET ask_question = 'rewritten'",
@@ -1684,7 +1840,7 @@ mod tests {
     fn the_marker_is_one_compare_and_swap_against_the_current_revision() {
         let conn = db();
         card(&conn, "DM-7", "needsyou", 100);
-        sync_question_revision(&conn, "DM-7", true, 100).unwrap();
+        sync_question_revision(&conn, "DM-7", 100).unwrap();
         let set = |rev: i64, request: &str, instance: &str| {
             set_pending(&conn, "DM-7", rev, request, instance, 101).unwrap()
         };
@@ -1731,7 +1887,7 @@ mod tests {
     fn an_answered_question_cannot_be_marked() {
         let conn = db();
         card(&conn, "DM-8", "needsyou", 100);
-        sync_question_revision(&conn, "DM-8", true, 100).unwrap();
+        sync_question_revision(&conn, "DM-8", 100).unwrap();
         assert!(matches!(
             claim_answer(&conn, "DM-8", 1, &AnswerSource::Operator, "Ethan", 101).unwrap(),
             AnswerClaim::Claimed(_)
@@ -1746,7 +1902,7 @@ mod tests {
     fn release_compares_the_request_and_nothing_else() {
         let conn = db();
         card(&conn, "DM-9", "needsyou", 100);
-        sync_question_revision(&conn, "DM-9", true, 100).unwrap();
+        sync_question_revision(&conn, "DM-9", 100).unwrap();
         set_pending(&conn, "DM-9", 1, REQUEST_A, "decision-maker-openai", 101).unwrap();
         assert!(matches!(
             release_pending(&conn, "DM-9", 1, REQUEST_B).unwrap(),
@@ -1787,7 +1943,7 @@ mod tests {
             let conn = db();
             card(&conn, "DM-10", "needsyou", 100);
             write_draft(&conn, "DM-10", &TypedAskInput::Set(ask(two_options())), 100).unwrap();
-            sync_question_revision(&conn, "DM-10", true, 100).unwrap();
+            sync_question_revision(&conn, "DM-10", 100).unwrap();
             let before = card_state(&conn, "DM-10");
             assert!(matches!(
                 set_pending(&conn, "DM-10", 1, REQUEST_A, "decision-maker-openai", 101).unwrap(),
@@ -1837,7 +1993,7 @@ mod tests {
         for operator_first in [true, false] {
             let conn = db();
             card(&conn, "DM-11", "needsyou", 100);
-            sync_question_revision(&conn, "DM-11", true, 100).unwrap();
+            sync_question_revision(&conn, "DM-11", 100).unwrap();
             set_pending(&conn, "DM-11", 1, REQUEST_A, "decision-maker-openai", 101).unwrap();
 
             let mut delivered: Vec<String> = Vec::new();
@@ -1905,13 +2061,13 @@ mod tests {
     fn an_answer_to_a_question_the_worker_replaced_is_refused() {
         let conn = db();
         card(&conn, "DM-12", "needsyou", 100);
-        sync_question_revision(&conn, "DM-12", true, 100).unwrap();
+        sync_question_revision(&conn, "DM-12", 100).unwrap();
         conn.execute(
             "UPDATE issues SET ask_question = 'A different question?' WHERE id = 'DM-12'",
             [],
         )
         .unwrap();
-        sync_question_revision(&conn, "DM-12", false, 110).unwrap();
+        sync_question_revision(&conn, "DM-12", 110).unwrap();
         let confirmed = AnswerSource::DmConfirmed {
             request_id: REQUEST_A.into(),
         };

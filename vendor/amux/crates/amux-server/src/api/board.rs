@@ -5207,9 +5207,9 @@ pub async fn create_item(
             let filed_asking = bs::parse_status(&row.status) == Some(TaskStatus::NeedsYou);
             if let Some(input) = typed_ask_w.as_ref() {
                 crate::db::dm_ask::write_draft(conn, &row.id, input, now)?;
-                crate::db::dm_ask::sync_question_revision(conn, &row.id, filed_asking, now)?;
+                crate::db::dm_ask::sync_question_revision(conn, &row.id, now)?;
             } else if filed_asking {
-                if let Err(error) = crate::db::dm_ask::sync_question_revision(conn, &row.id, true, now) {
+                if let Err(error) = crate::db::dm_ask::sync_question_revision(conn, &row.id, now) {
                     tracing::error!(target: "amux::board", verdict = "dm_question_revision_failed",
                         card = %row.id, %error, "question revision not recorded; the operator still has the card");
                 }
@@ -12948,13 +12948,11 @@ pub async fn patch_item(
             bs::save_patched(conn, &mut next)?;
             // The Decision Maker's question revision (crate::db::dm_ask), in this
             // transaction so a revision never describes a card write that rolled
-            // back.
-            let entered_needsyou = changed.iter().any(|c| c == "status")
-                && bs::parse_status(&next.status) == Some(TaskStatus::NeedsYou)
-                && bs::parse_status(&row.status) != Some(TaskStatus::NeedsYou);
+            // back. The save above already moved the card's epochs (migration
+            // 0083 triggers), so a re-entry or a rewording is a new revision.
             if let Some(input) = typed_ask_w.as_ref() {
                 crate::db::dm_ask::write_draft(conn, &next.id, input, next.updated)?;
-                crate::db::dm_ask::sync_question_revision(conn, &next.id, entered_needsyou, next.updated)?;
+                crate::db::dm_ask::sync_question_revision(conn, &next.id, next.updated)?;
             } else if ["status", "ask_type", "ask_question", "ask_unblocks"]
                 .iter()
                 .any(|key| changed.iter().any(|c| c == key))
@@ -12962,9 +12960,7 @@ pub async fn patch_item(
                 // The caller sent no `typed_ask`, so a failure here must not take
                 // the ask itself down: without a revision the question simply
                 // never goes to a Decision Maker, and the operator still has it.
-                if let Err(error) =
-                    crate::db::dm_ask::sync_question_revision(conn, &next.id, entered_needsyou, next.updated)
-                {
+                if let Err(error) = crate::db::dm_ask::sync_question_revision(conn, &next.id, next.updated) {
                     tracing::error!(target: "amux::board", verdict = "dm_question_revision_failed",
                         card = %next.id, %error, "question revision not recorded; the operator still has the card");
                 }
