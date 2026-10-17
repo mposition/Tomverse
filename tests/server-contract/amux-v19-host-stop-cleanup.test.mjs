@@ -70,7 +70,8 @@ mock.module(mod("lib/amux/ideaLocalIsolatedCliRunner.mjs"), {
     const binary = Buffer.from("synthetic staged CLI");
     await realFs.writeFile(path, binary, { mode: 0o500 });
     await realFs.chmod(path, 0o500);
-    return { path, sha256: createHash("sha256").update(binary).digest("hex"),
+    return { path, sha256: mode === "invalid_mount" ? "0".repeat(64) :
+      createHash("sha256").update(binary).digest("hex"),
       authPath: "/tmp/synthetic-auth" };
   } },
 });
@@ -170,4 +171,18 @@ test("cleanup failure after child spawn preserves the provider-use signal", {
   assert.deepEqual(Object.keys(sandboxInput.cliMount).sort(),
     ["path", "sha256"]);
   assert.equal(sandboxInput.authPath, "/tmp/synthetic-auth");
+}));
+
+test("staged CLI digest mismatch refuses before any child spawn", {
+  skip: process.platform !== "linux", timeout: 5_000,
+}, async () => withSwitch(async () => {
+  mode = "invalid_mount";
+  spawnCount = 0;
+  stageCount = 0;
+  sandboxCount = 0;
+  assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis(input(
+    async () => false)), { kind: "outcome_unknown", cliStarted: false });
+  assert.equal(stageCount, 1);
+  assert.equal(sandboxCount, 1);
+  assert.equal(spawnCount, 0);
 }));
