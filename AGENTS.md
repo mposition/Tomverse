@@ -1505,6 +1505,13 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `MarketingCompetitor.trackedPages`(운영자 결정 2026-10-17: 사실은 사람이 승인한 고정 페이지에서, 웹 검색은 신규 경쟁사 탐색에만).
   페이지는 그 행의 공식 host 위의 https URL이고(DB CHECK), 제안 상태에는 없으며, 이름·host처럼 승인으로만 바뀌고 승인 감사 행의
   `trackedPages`와 정확히 대조됩니다. 생성기 문맥에서 URL이 나오는 곳은 이 페이지뿐이며 A5에는 가지 않습니다.
+- **S3f-R5b(A3 실행)**: `lib/marketingA3Core.ts`, `lib/marketingA3CycleCore.ts`, `scripts/marketing-generator-worker.mjs`,
+  `tests/marketingA3Core.test.mjs`, `tests/marketingA3Cycle.test.mjs`. 서비스가 추적 페이지를 직접 읽습니다 — https·승인 host만,
+  redirect도 승인 host로만, IP 주소 host 거부, 자격증명·앱 header 없음, 바이트·시간 상한. 페이지 텍스트는 A3 추출 메시지에만
+  데이터로 들어가고, 사실의 경쟁사 id·확인 시각은 서비스가 정하며 출처는 실제로 읽은 페이지여야 합니다. 경쟁사당 한 번 원장을
+  거쳐 호출하고(`market_intel` 목적), 실행당 서명된 보고서 하나를 제출합니다. 결과를 모르는 호출이나 답이 없는 제출은
+  실행 전체를 멈추고 보고서를 내지 않으며, 시간 몫(20분)을 넘기면 보고서 없이 A5로 넘어갑니다. pin이 없으면(D4) worker는
+  시작하지 않습니다.
 
 # 엔지니어링 Agent
 

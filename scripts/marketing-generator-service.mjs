@@ -18,11 +18,13 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 /**
- * Twenty minutes: nine accounts at the cycle's ninety-second call budget, and
- * room to spare. The ledger's reservation lives fifteen minutes and its
- * dispatch an hour, each call's own, so a run this long does not outlive them.
+ * Forty minutes: A3's twenty-minute share (about thirteen tracked competitors
+ * at its ninety-second budget), then nine A5 accounts at the cycle's
+ * ninety-second call budget, and room to spare. The ledger's reservation
+ * lives fifteen minutes and its dispatch an hour, each call's own, so a run
+ * this long does not outlive them.
  */
-export const RUN_DEADLINE_MS = 20 * 60 * 1000;
+export const RUN_DEADLINE_MS = 40 * 60 * 1000;
 
 export const DEFAULT_WORKER = fileURLToPath(new URL("./marketing-generator-worker.mjs", import.meta.url));
 

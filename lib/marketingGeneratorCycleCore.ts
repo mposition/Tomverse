@@ -29,6 +29,7 @@ import {
   type MarketingA5Refusal,
 } from "./marketingGeneratorDraftingCore.ts";
 import type { MarketingDraftSubmission } from "./marketingDraftIntakeCore.ts";
+import type { MarketingGeneratorReport } from "./marketingIntelReportCore.ts";
 import type { MarketingLlmCallOutcome, MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Time a call is not started without: one reservation, one provider answer and one submission. */
@@ -205,14 +206,18 @@ export function marketingGeneratorWorkerConfig<Pin extends { readonly model: str
   return { ok: true, config: { appUrl, secret, apiKey: env.MARKETING_LLM_API_KEY as string, pin } };
 }
 
-/** The context and intake routes, over HTTP with the generator's secret. */
+/** The context, intake and report routes, over HTTP with the generator's secret. */
 export function marketingGeneratorAppPorts(input: {
   readonly appUrl: URL;
   readonly secret: string;
   readonly generatorRunId: string;
   readonly fetch: typeof fetch;
   readonly signal?: AbortSignal;
-}): Pick<MarketingGeneratorCycleDeps, "readContext" | "submit"> {
+}): Pick<MarketingGeneratorCycleDeps, "readContext" | "submit"> & {
+  readonly submitReport: (
+    report: MarketingGeneratorReport,
+  ) => Promise<{ readonly httpStatus: number; readonly body: Record<string, unknown> }>;
+} {
   const post = async (path: string, body: unknown) => {
     const response = await input.fetch(new URL(path, input.appUrl), {
       method: "POST",
@@ -232,5 +237,6 @@ export function marketingGeneratorAppPorts(input: {
       return answer.body.context;
     },
     submit: (submission) => post("/api/internal/marketing-drafts", submission),
+    submitReport: (report) => post("/api/internal/marketing-intel-reports", report),
   };
 }
