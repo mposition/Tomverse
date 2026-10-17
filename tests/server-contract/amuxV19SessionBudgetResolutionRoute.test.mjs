@@ -73,6 +73,7 @@ test.after(() => {
 
 test("owner route refuses anonymous, non-owner and disabled requests before DB access", async () => {
   const route = await routePromise;
+  readCount = 0;
   session = null;
   assert.equal((await route.GET(new Request(`${endpoint}?claimId=${claimId}`))).status, 404);
   session = { user: { id: "owner-id" } };
@@ -86,6 +87,7 @@ test("owner route refuses anonymous, non-owner and disabled requests before DB a
 
 test("owner GET requires one exact claim ID and returns content-free unknown readback", async () => {
   const route = await routePromise;
+  readCount = 0;
   session = { user: { id: "owner-id" } };
   role = "owner";
   process.env[readSwitch] = "enabled";
@@ -105,6 +107,10 @@ test("owner GET requires one exact claim ID and returns content-free unknown rea
 
 test("owner POST is separately switched, same-origin and exact-body gated", async () => {
   const route = await routePromise;
+  session = { user: { id: "owner-id" } };
+  role = "owner";
+  writeCount = 0;
+  originAllowed = true;
   process.env[readSwitch] = "enabled";
   const body = { claimId, verification: "not_proven",
     localEvidenceDigest: "b".repeat(64), readbackDigest: "a".repeat(64),
@@ -126,23 +132,27 @@ test("owner POST is separately switched, same-origin and exact-body gated", asyn
   assert.equal(response.status, 201);
   assert.equal((await response.json()).retryAutomatically, false);
   assert.equal(writeCount, 1);
-  writeError = { code: "reauth" };
-  const stepUp = await send({ "content-type": "application/json" });
-  assert.equal(stepUp.status, 428);
-  writeError = null;
+  try {
+    writeError = { code: "reauth" };
+    const stepUp = await send({ "content-type": "application/json" });
+    assert.equal(stepUp.status, 428);
+  } finally { writeError = null; }
 });
 
 test("owner GET maps integrity failures without exposing claim content", async () => {
   const route = await routePromise;
+  session = { user: { id: "owner-id" } };
+  role = "owner";
   process.env[readSwitch] = "enabled";
-  for (const [error, status] of [
-    [new AmuxSessionBudgetResolutionError("integrity_unavailable"), 503],
-    [new AmuxSessionBudgetResolutionError("not_resolvable"), 409],
-  ]) {
-    readError = error;
-    const response = await route.GET(new Request(`${endpoint}?claimId=${claimId}`));
-    assert.equal(response.status, status);
-    assert.equal(JSON.stringify(await response.json()).includes("5000"), false);
-  }
-  readError = null;
+  try {
+    for (const [error, status] of [
+      [new AmuxSessionBudgetResolutionError("integrity_unavailable"), 503],
+      [new AmuxSessionBudgetResolutionError("not_resolvable"), 409],
+    ]) {
+      readError = error;
+      const response = await route.GET(new Request(`${endpoint}?claimId=${claimId}`));
+      assert.equal(response.status, status);
+      assert.equal(JSON.stringify(await response.json()).includes("5000"), false);
+    }
+  } finally { readError = null; }
 });
