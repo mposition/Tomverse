@@ -25,8 +25,13 @@ export async function listAmuxSessionAnalysisCandidates(
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
       throw new Error("AMUX session analysis queue clock unavailable");
     }
+    const latestScope = await tx.amuxIdeaOperatingScopeSetting.findFirst({
+      orderBy: { version: "desc" }, select: { id: true },
+    });
+    if (!latestScope) return { candidates: [], hasMore: false, nextCursor: null };
     const rows = await tx.amuxIdeaSessionAnalysisReservation.findMany({
-      where: buildAmuxSessionAnalysisQueueWhere(now, cursor),
+      where: { ...buildAmuxSessionAnalysisQueueWhere(now, cursor),
+        operatingScopeSettingId: latestScope.id },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: PAGE_SIZE + 1,
       select: { id: true, ideaId: true, modelId: true, createdAt: true,
         idea: { select: { analysisDeadlineAt: true } } },

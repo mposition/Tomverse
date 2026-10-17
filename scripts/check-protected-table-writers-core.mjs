@@ -189,6 +189,14 @@ export const findTruncateStatements = ({ sources }) => {
 
 export const PROTECTED_TABLES = [
   {
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    delegate: "amuxIdeaSessionAnalysisBudgetClaim",
+    writers: ["lib/amux/ideaSessionAnalysisBudgetClaimService.ts",
+      "lib/amux/ideaSessionAnalysisBudgetSettlementService.ts",
+      "lib/amux/ideaSessionAnalysisBudgetResolutionService.ts"],
+    contract: "docs/policy/amux-intake.md v19 item 6",
+  },
+  {
     table: "AmuxIdeaSessionAnalysisReservation",
     delegate: "amuxIdeaSessionAnalysisReservation",
     writers: ["lib/amux/ideaSessionAnalysisReservationStore.ts"],
@@ -570,6 +578,12 @@ export const EXCLUDED_PREFIXES = [
 export const DELEGATE_NAME_ALLOWLIST = [
   {
     path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxIdeaSessionAnalysisBudgetClaim",
+    count: 1,
+    reason: "Account export domain key only; no client is indexed or database connection opened in this metadata file.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     delegate: "amuxIdeaTrackedCheckoutReadManifest",
     count: 1,
     reason: "Account export domain key only; no client is indexed or database connection opened in this metadata file.",
@@ -676,6 +690,62 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "lib/amux/ideaSessionAnalysisBudgetClaimService.ts",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The session budget claimant locks and reads the immutable queue reservation; it writes only the separate claim and shared cost window.",
+  },
+  {
+    path: "lib/amux/ideaSessionAnalysisBudgetSettlementService.ts",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The settlement writer uses this SQL only to lock an exact claim; the guarded mutation uses its authorized Prisma delegate.",
+  },
+  {
+    path: "lib/amux/ideaSessionAnalysisBudgetResolutionService.ts",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The owner resolution writer uses SQL only to lock the exact claim before its authorized guarded Prisma update.",
+  },
+  {
+    path: "prisma/migrations/20261017070000_amux_v19_session_budget_claim/migration.sql",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 7,
+    writeVerbs: 15,
+    reason: "The additive migration creates the claim table and its restrictive lifecycle trigger without inserting a claim row.",
+  },
+  {
+    path: "prisma/migrations/20261017070000_amux_v19_session_budget_claim/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 2,
+    writeVerbs: 15,
+    reason: "The additive claim migration references the immutable queue reservation through a restrictive foreign key and reads its identity in the insert guard; it writes no queue row.",
+  },
+  {
+    path: "prisma/migrations/20261017070000_amux_v19_session_budget_claim/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 15,
+    reason: "The claim migration adds restrictive audit foreign keys and reads canonical evidence in its trigger; it never writes the audit chain.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason: "The account export registry names the claim model but opens no database connection and executes no SQL.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxIdeaSessionAnalysisBudgetClaim",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The closed audit action manifest names the claim target only; it executes no SQL.",
+  },
   {
     path: "prisma/migrations/20261017020100_amux_v19_read_manifest_active_insert_guard/migration.sql",
     table: "AmuxIdeaTrackedCheckoutReadManifest",
