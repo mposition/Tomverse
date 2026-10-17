@@ -137,7 +137,7 @@ const operator = {
 } as Session;
 
 /** A person adds an approved competitor, as the Admin route will. */
-const approve = (competitorId: string, displayName: string, officialHosts: string[]) =>
+const approve = (competitorId: string, displayName: string, officialHosts: string[], trackedPages: string[] = []) =>
   runMarketingTransaction(prisma, async (tx) => {
     const auditLogId = await writeAdminAuditLog({
       session: operator,
@@ -146,10 +146,10 @@ const approve = (competitorId: string, displayName: string, officialHosts: strin
       targetType: "MarketingCompetitor",
       targetId: competitorId,
       summary: "Approved a competitor.",
-      metadata: { actorHadMarketingWrite: true, previousDecisionAuditLogId: ":none", displayName, officialHosts },
+      metadata: { actorHadMarketingWrite: true, previousDecisionAuditLogId: ":none", displayName, officialHosts, trackedPages },
       tx,
     });
-    await createApprovedMarketingCompetitor(tx, { competitorId, displayName, officialHosts, auditLogId });
+    await createApprovedMarketingCompetitor(tx, { competitorId, displayName, officialHosts, trackedPages, auditLogId });
   });
 
 test("market facts are recorded with the facts from no official host counted, not stored", () =>

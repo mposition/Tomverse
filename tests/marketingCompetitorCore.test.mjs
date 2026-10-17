@@ -8,6 +8,8 @@ import {
   marketingCompetitorCandidateSchema,
   marketingCompetitorHostsSchema,
   marketingCompetitorIdSchema,
+  marketingCompetitorPagesOnHosts,
+  marketingCompetitorPagesSchema,
 } from "@/lib/marketingCompetitorCore";
 
 const candidate = (overrides = {}) => ({
@@ -67,4 +69,27 @@ test("a candidate is strict, bounded and cites only https evidence", () => {
   ]) {
     assert.equal(marketingCompetitorCandidateSchema.safeParse(bad).success, false, JSON.stringify(bad).slice(0, 80));
   }
+});
+
+test("a tracked page is an https URL whose host part is exactly one of the hosts", () => {
+  const hosts = ["alpha.example", "www.alpha.example"];
+  for (const page of ["https://alpha.example", "https://alpha.example/pricing", "https://www.alpha.example/a?b#c"]) {
+    assert.equal(marketingCompetitorPagesOnHosts([page], hosts), true, page);
+  }
+  for (const page of [
+    "http://alpha.example/pricing",
+    "https://alpha.example:8443/pricing",
+    "https://user@alpha.example/pricing",
+    "https://blog.alpha.example/pricing",
+    "https://ALPHA.example/pricing",
+    "https://alpha.example.evil.example/pricing",
+    "alpha.example/pricing",
+  ]) {
+    assert.equal(marketingCompetitorPagesOnHosts([page], hosts), false, page);
+  }
+  assert.equal(marketingCompetitorPagesOnHosts([], hosts), true);
+  assert.equal(
+    marketingCompetitorPagesSchema.safeParse(Array.from({ length: 11 }, (_, i) => `https://alpha.example/${i}`)).success,
+    false,
+  );
 });

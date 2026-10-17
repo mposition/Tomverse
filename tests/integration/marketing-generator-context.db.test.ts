@@ -169,7 +169,7 @@ const operator = {
   expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
 } as Session;
 
-const approve = (competitorId: string, displayName: string, officialHosts: string[]) =>
+const approve = (competitorId: string, displayName: string, officialHosts: string[], trackedPages: string[] = []) =>
   runMarketingTransaction(prisma, async (tx) => {
     const auditLogId = await writeAdminAuditLog({
       session: operator,
@@ -178,10 +178,10 @@ const approve = (competitorId: string, displayName: string, officialHosts: strin
       targetType: "MarketingCompetitor",
       targetId: competitorId,
       summary: "Approved a competitor.",
-      metadata: { actorHadMarketingWrite: true, previousDecisionAuditLogId: ":none", displayName, officialHosts },
+      metadata: { actorHadMarketingWrite: true, previousDecisionAuditLogId: ":none", displayName, officialHosts, trackedPages },
       tx,
     });
-    await createApprovedMarketingCompetitor(tx, { competitorId, displayName, officialHosts, auditLogId });
+    await createApprovedMarketingCompetitor(tx, { competitorId, displayName, officialHosts, trackedPages, auditLogId });
   });
 
 const propose = (id: string, status: "proposed" = "proposed") =>
@@ -203,14 +203,14 @@ test("the context tells A3 whom to track on which hosts, and every id it already
     const { context } = JSON.parse(text) as {
       context: {
         competitors: {
-          tracked: Array<{ competitorId: string; displayName: string; officialHosts: string[] }>;
+          tracked: Array<{ competitorId: string; displayName: string; officialHosts: string[]; trackedPages: string[] }>;
           knownIds: string[];
         };
       };
     };
     // Only the approved one is tracked; the proposal is known but not a source.
     assert.deepEqual(context.competitors.tracked, [
-      { competitorId: "poe", displayName: "Poe", officialHosts: ["poe.com"] },
+      { competitorId: "poe", displayName: "Poe", officialHosts: ["poe.com"], trackedPages: [] },
     ]);
     assert.deepEqual(context.competitors.knownIds, ["alpha", "poe"]);
     assert.equal(/https?:\/\//.test(text), false, "a host is a name, not a URL");
@@ -227,4 +227,16 @@ test("every known id reaches A3, however large the registry and however old the 
     const { context } = (await response.json()) as { context: { competitors: { knownIds: string[] } } };
     assert.equal(context.competitors.knownIds.length, 251);
     assert.equal(context.competitors.knownIds.includes("aaa-oldest"), true);
+  }));
+
+test("A3 is given the pages a person approved, and those are the context's only URLs", () =>
+  withSecret(async () => {
+    await approve("poe", "Poe", ["poe.com"], ["https://poe.com/pricing"]);
+    const response = await call({ generatorRunId: "run-4" });
+    const text = await response.text();
+    const { context } = JSON.parse(text) as {
+      context: { competitors: { tracked: Array<{ trackedPages: string[] }> } };
+    };
+    assert.deepEqual(context.competitors.tracked[0].trackedPages, ["https://poe.com/pricing"]);
+    assert.deepEqual(text.match(/https?:\/\/[^"]*/gu), ["https://poe.com/pricing"]);
   }));

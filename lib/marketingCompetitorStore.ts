@@ -23,6 +23,7 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import {
   MARKETING_COMPETITOR_ACTIONS,
   MarketingCompetitorRefusedError,
+  marketingCompetitorPagesOnHosts,
   type MarketingCompetitorCandidate,
   type MarketingCompetitorSourceHosts,
 } from "@/lib/marketingCompetitorCore";
@@ -68,13 +69,25 @@ export async function holdApprovedMarketingCompetitorHosts(
 /** The approved competitors as the generator may see them: who to track, and where. */
 export async function readMarketingCompetitorsForGenerator(
   db: CompetitorReader,
-): Promise<Array<{ readonly competitorId: string; readonly displayName: string; readonly officialHosts: readonly string[] }>> {
+): Promise<
+  Array<{
+    readonly competitorId: string;
+    readonly displayName: string;
+    readonly officialHosts: readonly string[];
+    readonly trackedPages: readonly string[];
+  }>
+> {
   const rows = await db.marketingCompetitor.findMany({
     where: { status: "approved" },
     orderBy: { id: "asc" },
-    select: { id: true, displayName: true, officialHosts: true },
+    select: { id: true, displayName: true, officialHosts: true, trackedPages: true },
   });
-  return rows.map((row) => ({ competitorId: row.id, displayName: row.displayName, officialHosts: [...row.officialHosts] }));
+  return rows.map((row) => ({
+    competitorId: row.id,
+    displayName: row.displayName,
+    officialHosts: [...row.officialHosts],
+    trackedPages: [...row.trackedPages],
+  }));
 }
 
 /**
@@ -150,6 +163,22 @@ export async function proposeMarketingCompetitors(
 }
 
 /**
+ * A tracked page off the competitor's own hosts, refused before any write
+ * with the reason a person can act on. The database's check refuses it too;
+ * this only names it. Here rather than in the route's schema because the
+ * route sweep lets a schema parse but not call anything.
+ */
+function refuseOffHostPages(pages: readonly string[], hosts: readonly string[]): void {
+  if (!marketingCompetitorPagesOnHosts(pages, hosts)) {
+    throw new MarketingCompetitorRefusedError(
+      "competitor_pages_off_hosts",
+      400,
+      "A tracked page is an https URL on one of the competitor's own official hosts",
+    );
+  }
+}
+
+/**
  * A person's decision about a competitor, recorded by the audit row the
  * mutation wrapper has just written (`auditLogId`). The row moves only if its
  * current decision is the one the person saw (`expectedDecisionAuditLogId`),
@@ -162,9 +191,10 @@ export async function decideMarketingCompetitor(
     readonly decision: "approved" | "rejected" | "retired";
     readonly expectedDecisionAuditLogId: string | null;
     readonly auditLogId: string;
-    /** For an approval: the name and hosts the person approved, as their audit row records them. */
+    /** For an approval: the name, hosts and pages the person approved, as their audit row records them. */
     readonly displayName?: string;
     readonly officialHosts?: readonly string[];
+    readonly trackedPages?: readonly string[];
   },
 ): Promise<{ readonly competitorId: string; readonly status: string }> {
   if (input.decision === "approved" && (!input.officialHosts || !input.displayName)) {
@@ -174,6 +204,7 @@ export async function decideMarketingCompetitor(
       "An approval names the name and hosts it approves",
     );
   }
+  if (input.decision === "approved") refuseOffHostPages(input.trackedPages ?? [], input.officialHosts ?? []);
   let updated: { count: number };
   try {
     updated = await tx.marketingCompetitor.updateMany({
@@ -182,7 +213,11 @@ export async function decideMarketingCompetitor(
         status: input.decision,
         decisionAuditLogId: input.auditLogId,
         ...(input.decision === "approved"
-          ? { displayName: input.displayName, officialHosts: [...(input.officialHosts ?? [])] }
+          ? {
+              displayName: input.displayName,
+              officialHosts: [...(input.officialHosts ?? [])],
+              trackedPages: [...(input.trackedPages ?? [])],
+            }
           : {}),
       },
     });
@@ -219,9 +254,11 @@ export async function createApprovedMarketingCompetitor(
     readonly competitorId: string;
     readonly displayName: string;
     readonly officialHosts: readonly string[];
+    readonly trackedPages: readonly string[];
     readonly auditLogId: string;
   },
 ): Promise<{ readonly competitorId: string }> {
+  refuseOffHostPages(input.trackedPages, input.officialHosts);
   const existing = await tx.marketingCompetitor.findUnique({ where: { id: input.competitorId }, select: { id: true } });
   if (existing) {
     throw new MarketingCompetitorRefusedError("competitor_exists", 409, "That competitor is already in the registry");
@@ -231,6 +268,7 @@ export async function createApprovedMarketingCompetitor(
       id: input.competitorId,
       displayName: input.displayName,
       officialHosts: [...input.officialHosts],
+      trackedPages: [...input.trackedPages],
       status: "approved",
       proposedBy: "operator",
       evidenceUrls: [],

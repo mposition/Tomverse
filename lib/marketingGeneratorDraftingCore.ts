@@ -64,7 +64,12 @@ export const marketingGeneratorContextSchema = z.object({
   competitors: z
     .object({
       tracked: z.array(
-        z.object({ competitorId: z.string(), displayName: z.string(), officialHosts: z.array(z.string()) }),
+        z.object({
+          competitorId: z.string(),
+          displayName: z.string(),
+          officialHosts: z.array(z.string()),
+          trackedPages: z.array(z.string()).default([]),
+        }),
       ),
       knownIds: z.array(z.string()),
     })
