@@ -840,7 +840,7 @@ const recordingTx = ({
       // The routing's throughput read carries the instance's result kinds since 2026-10-17, and its newest
       // cleanup report since stage S2-2a3 (none here).
       if (sql.includes('AS "lastHour"')) {
-        return Promise.resolve([{ lastHour: 0n, lastDay: 0n, resultKinds: [], newestCleanupUnknownAtEpochMs: null }]);
+        return Promise.resolve([{ lastHour: 0n, lastDay: 0n, resultKinds: [], newestCleanupUnknownEventId: null }]);
       }
       if (sql.includes('INSERT INTO "AmuxDecisionMakerResultDetail"')) {
         return Promise.resolve([{ details: registryHoldsKey ? 1n : 0n, fields: registryHoldsKey ? values[DETAIL.fields] : [] }]);
@@ -866,7 +866,7 @@ const recordingTx = ({
       if (sql.includes('AS "open"')) return Promise.resolve([{ open }]);
       // The ledger's switch read carries each scope's newest actor and clock (2026-10-17): a person's, a minute ago.
       if (sql.includes("SELECT DISTINCT ON")) {
-        return Promise.resolve(switches.map((row) => ({ actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000), newestCleanupLatchAtEpochMs: null, ...row })));
+        return Promise.resolve(switches.map((row) => ({ actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000), newestCleanupLatchEventId: null, ...row })));
       }
       if (sql.includes('ORDER BY re."retentionUntil"')) return Promise.resolve(candidates);
       if (sql.includes('FROM "AmuxDecisionMakerBody"')) return Promise.resolve([]);

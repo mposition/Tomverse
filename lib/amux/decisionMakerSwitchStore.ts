@@ -92,26 +92,36 @@ export async function readDecisionMakerSwitches(
  * mapping does not accept is the unreadable read; a statement that fails is
  * not caught, as above.
  *
- * Since stage S2-2a3 each row also carries the database clock of its scope's
- * newest system `cleanup_latch`, a window over the same scan: the only event
- * that settles §5's `cleanup_unknown` report (review r-20261017-115136-888d76
- * -- a person's ordinary mode change does not). It rides in this statement
- * because a routing already sends §9's 12 with setup and fence.
+ * Since stage S2-2a3 each row also carries the ledger event id its scope's
+ * newest `cleanup_latch` names: a cleanup latch settles the `cleanup_unknown`
+ * report it names and no other (§5) -- not a person's ordinary mode change
+ * (review r-20261017-115136-888d76), and not a report that shares its
+ * database millisecond (review r-20261017-123200-7609b7). A subquery on the
+ * scope's index, for each newest row; it rides in this statement because a
+ * routing already sends §9's 12 with setup and fence.
  */
 export async function readDecisionMakerSwitchesWithBoundariesOrThrow(
   client: SwitchReader,
 ): Promise<DecisionMakerSwitchRead> {
   const rows = await client.$queryRaw<
-    Array<{ scope: string; value: string; actorKind: string; createdAtEpochMs: bigint; newestCleanupLatchAtEpochMs: bigint | null }>
+    Array<{ scope: string; value: string; actorKind: string; createdAtEpochMs: bigint; newestCleanupLatchEventId: string | null }>
   >`
-    SELECT DISTINCT ON ("scope")
-      "scope", "value", "actorKind",
-      floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs",
-      floor(extract(epoch FROM max("createdAt") FILTER (
-        WHERE "reasonCode" = 'cleanup_latch' AND "actorKind" = 'system'
-      ) OVER (PARTITION BY "scope")) * 1000)::bigint AS "newestCleanupLatchAtEpochMs"
-    FROM "AmuxDecisionMakerSwitchEvent"
-    ORDER BY "scope", "sequence" DESC
+    SELECT
+      n."scope", n."value", n."actorKind", n."createdAtEpochMs",
+      (
+        SELECT c."cleanupEventId"
+        FROM "AmuxDecisionMakerSwitchEvent" c
+        WHERE c."scope" = n."scope" AND c."reasonCode" = 'cleanup_latch'
+        ORDER BY c."sequence" DESC
+        LIMIT 1
+      ) AS "newestCleanupLatchEventId"
+    FROM (
+      SELECT DISTINCT ON ("scope")
+        "scope", "value", "actorKind",
+        floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"
+      FROM "AmuxDecisionMakerSwitchEvent"
+      ORDER BY "scope", "sequence" DESC
+    ) n
   `;
   return decisionMakerSwitchReadFromRows(rows);
 }
@@ -233,14 +243,19 @@ export async function recordDecisionMakerSwitchByOperator(
  * not latch an instance whose newest event is already a latch. The audit
  * comes first, under the instance's own actor, then the event naming it.
  *
+ * Since stage S2-2a3 a cleanup latch names the ledger event id of the
+ * `cleanup_unknown` report it settles, and no other latch names one; the
+ * database refuses a cleanup latch that names anything but a report of its
+ * own instance, and a second latch naming the same report.
+ *
  * Statements: the system writer's 3 (4 with an integrity key), 1 insert --
  * 4, or 5.
  */
 export async function latchDecisionMakerInstanceOff(
   tx: Prisma.TransactionClient,
-  input: { instance: unknown; reason: unknown },
+  input: { instance: unknown; reason: unknown; cleanupEventId?: unknown },
 ): Promise<DecisionMakerSwitchEventRecord> {
-  const latch = parseDmSwitchLatch(input.instance, input.reason);
+  const latch = parseDmSwitchLatch(input.instance, input.reason, input.cleanupEventId ?? null);
   if (!latch) throw new DecisionMakerSwitchWriteError("invalid_latch");
 
   const eventId = randomUUID();
@@ -256,9 +271,9 @@ export async function latchDecisionMakerInstanceOff(
   });
   const inserted = await tx.$queryRaw<InsertedRow[]>`
     INSERT INTO "AmuxDecisionMakerSwitchEvent"
-      ("id", "scope", "value", "reasonCode", "actorKind", "actorUserId", "auditLogId")
+      ("id", "scope", "value", "reasonCode", "actorKind", "actorUserId", "cleanupEventId", "auditLogId")
     VALUES
-      (${eventId}, ${latch.instance}, 'off', ${latch.reason}, 'system', NULL, ${auditLogId})
+      (${eventId}, ${latch.instance}, 'off', ${latch.reason}, 'system', NULL, ${latch.cleanupEventId}, ${auditLogId})
     RETURNING
       "sequence",
       floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"

@@ -8794,10 +8794,17 @@ model AmuxDecisionMakerSwitchEvent {
   actorKind   String
   actorUserId String?
   auditLogId  String   @unique
+  /// Since migration 20261017160000_amux_decision_maker_cleanup_unknown: the
+  /// `cleanup_unknown` report a `cleanup_latch` settles
+  /// (docs/policy/amux-decision-maker.md §5), exactly on a
+  /// cleanup latch (a CHECK), once per report, and only a report of the
+  /// latch's own instance (the guard).
+  cleanupEventId String?  @unique
   /// Overwritten by the insert trigger from the database clock.
   createdAt   DateTime @default(now()) @db.Timestamptz(3)
 
-  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog     AdminAuditLog                  @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cleanupEvent AmuxDecisionMakerRequestEvent? @relation(fields: [cleanupEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([scope, sequence])
 }
@@ -8891,6 +8898,8 @@ model AmuxDecisionMakerRequestEvent {
   auditLog     AdminAuditLog                  @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   resultDetail AmuxDecisionMakerResultDetail?
   judgment     AmuxDecisionMakerJudgment?
+  /// The cleanup latch that settles this `cleanup_unknown` report, if any.
+  cleanupLatch AmuxDecisionMakerSwitchEvent?
 
   @@index([requestId, sequence])
 }

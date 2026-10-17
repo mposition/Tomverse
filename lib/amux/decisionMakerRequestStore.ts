@@ -165,26 +165,26 @@ const readSwitchesForWrite = async (tx: Prisma.TransactionClient): Promise<Decis
 
 /**
  * §5, §8: the latch `instance` owes, if any -- §5's when its newest
- * `cleanup_unknown` report has no `cleanup_latch` at or after it, otherwise
- * §8's when a run of three validation failures stands since its newest switch
- * event (`dmOwedLatchReason()`) -- on what the caller read. A kind the ledger
- * could not hold, or a clock the stores could not have written, throws
- * `state_unreadable`, and nothing is written: an owed latch is never guessed
- * away.
+ * `cleanup_unknown` report is not the one its newest `cleanup_latch` names,
+ * otherwise §8's when a run of three validation failures stands since its
+ * newest switch event (`dmOwedLatchReason()`) -- with the report a cleanup
+ * latch names, on what the caller read. A kind the ledger could not hold, or
+ * an id the stores could not have written, throws `state_unreadable`, and
+ * nothing is written: an owed latch is never guessed away.
  */
 const owedLatch = (
   read: DecisionMakerSwitchRead,
   instance: DmInstanceScope,
-  inputs: { resultKindsNewestFirst: unknown[]; newestCleanupUnknownAtMs: number | null },
-): DmSwitchLatchReason | null => {
+  inputs: { resultKindsNewestFirst: unknown[]; newestCleanupUnknownEventId: string | null },
+): { reason: DmSwitchLatchReason; cleanupEventId: string | null } | null => {
   const owed = dmOwedLatchReason({
     newestEvent: read.newest[instance],
-    cleanupLatchedAtMs: read.cleanupLatchedAtMs[instance],
+    cleanupLatchedEventId: read.cleanupLatchedEventId[instance],
     resultKindsNewestFirst: inputs.resultKindsNewestFirst,
-    newestCleanupUnknownAtMs: inputs.newestCleanupUnknownAtMs,
+    newestCleanupUnknownEventId: inputs.newestCleanupUnknownEventId,
   });
   if (owed === null) throw new DecisionMakerRequestWriteError("state_unreadable");
-  return owed.reason;
+  return owed.reason === null ? null : owed;
 };
 
 const safeInteger = (value: unknown, label: string): number => {
@@ -194,16 +194,15 @@ const safeInteger = (value: unknown, label: string): number => {
 };
 
 /**
- * The database clock of an instance's newest `cleanup_unknown` report as a
- * read returned it: null when there is none, otherwise epoch milliseconds. A
- * value the read could not have produced -- a missing column included --
- * throws `state_unreadable`.
+ * The ledger event id of an instance's newest `cleanup_unknown` report, by the
+ * ledger's sequence, as a read returned it: null when there is none. A value
+ * the read could not have produced -- a missing column included -- throws
+ * `state_unreadable`.
  */
-const newestReportClock = (value: unknown): number | null => {
+const newestReportId = (value: unknown): string | null => {
   if (value === null) return null;
-  const number = typeof value === "bigint" || typeof value === "number" ? Number(value) : Number.NaN;
-  if (!Number.isSafeInteger(number) || number < 0) throw new DecisionMakerRequestWriteError("state_unreadable");
-  return number;
+  if (!isDmRequestId(value)) throw new DecisionMakerRequestWriteError("state_unreadable");
+  return value;
 };
 
 const isoOf = (epochMs: number) => new Date(epochMs).toISOString();
@@ -227,7 +226,7 @@ const requireSinceMs = (sinceMs: unknown): number => {
  * the kinds of its terminal results recorded at or after `sinceMs` (its newest
  * switch event's database clock), newest first, at most
  * DM_VALIDATION_LATCH_WINDOW: whether §8's latch is owed -- and, since stage
- * S2-2a3, the database clock of its newest `cleanup_unknown` report: whether
+ * S2-2a3, the ledger event id of its newest `cleanup_unknown` report: whether
  * §5's latch is owed. All ride in the statement the routing already sent, so
  * the routing's count is unchanged.
  * `recordDecisionMakerRequest()` reads it after the audit chain lock, so two
@@ -240,12 +239,12 @@ export async function readDecisionMakerInstanceLoad(
   lastHour: number;
   lastDay: number;
   resultKindsNewestFirst: unknown[];
-  newestCleanupUnknownAtMs: number | null;
+  newestCleanupUnknownEventId: string | null;
 }> {
   if (!isDmInstanceScope(input.instance)) throw new DecisionMakerRequestWriteError("invalid_input");
   const sinceMs = requireSinceMs(input.sinceMs);
   const rows = await client.$queryRaw<
-    Array<{ lastHour: bigint | number; lastDay: bigint | number; resultKinds: unknown; newestCleanupUnknownAtEpochMs: unknown }>
+    Array<{ lastHour: bigint | number; lastDay: bigint | number; resultKinds: unknown; newestCleanupUnknownEventId: unknown }>
   >`
     WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS "now"),
     throughput AS MATERIALIZED (
@@ -270,11 +269,13 @@ export async function readDecisionMakerInstanceLoad(
         LIMIT ${DM_VALIDATION_LATCH_WINDOW}
       ) AS "resultKinds",
       (
-        SELECT floor(extract(epoch FROM max(c."createdAt")) * 1000)::bigint
+        SELECT c."id"
         FROM "AmuxDecisionMakerRequestEvent" c
         WHERE c."kind" = 'cleanup_unknown'
           AND c."instance" = ${input.instance}
-      ) AS "newestCleanupUnknownAtEpochMs"
+        ORDER BY c."sequence" DESC
+        LIMIT 1
+      ) AS "newestCleanupUnknownEventId"
     FROM throughput
   `;
   const row = rows[0];
@@ -284,7 +285,7 @@ export async function readDecisionMakerInstanceLoad(
     lastHour: safeInteger(row.lastHour, "count"),
     lastDay: safeInteger(row.lastDay, "count"),
     resultKindsNewestFirst: [...row.resultKinds],
-    newestCleanupUnknownAtMs: newestReportClock(row.newestCleanupUnknownAtEpochMs),
+    newestCleanupUnknownEventId: newestReportId(row.newestCleanupUnknownEventId),
   };
 }
 
@@ -635,10 +636,12 @@ type ExistingRequestRow = Record<string, unknown> & {
  * between its third failure and its latch. The result kinds ride in the
  * throughput statement. A result kind the ledger could not hold throws
  * `state_unreadable` and writes nothing. §5 (stage S2-2a3): so is an instance
- * whose newest `cleanup_unknown` report has no `cleanup_latch` at or after
- * it, between the report and its latch -- a person's mode change in between
- * does not settle it (review r-20261017-115136-888d76); the report's clock
- * rides in the throughput statement and the latch's in the switch read.
+ * whose newest `cleanup_unknown` report is not the one its newest
+ * `cleanup_latch` names, between the report and its latch -- a person's mode
+ * change in between does not settle it (review r-20261017-115136-888d76), nor
+ * does an earlier report's latch in the same millisecond (review
+ * r-20261017-123200-7609b7); the report's id rides in the throughput
+ * statement and the latch's in the switch read.
  *
  * Statements: 1 lock, 1 read (the clock and any request of the card revision)
  * -- 2 for an existing request or a key the ring lacks; then the switch read
@@ -948,10 +951,11 @@ export async function discardDecisionMakerAssignment(
  * one refusal of this function that writes, and only that latch. A result
  * kind the ledger could not hold throws `state_unreadable` and writes nothing.
  * §5 (stage S2-2a3): the same statement reads the instance's newest
- * `cleanup_unknown` report, and a report with no `cleanup_latch` at or after
- * it (the switch read's clock; a person's mode change does not settle it)
- * owes `cleanup_latch`, which is refused and written the same way -- in
- * place of the validation latch when both are owed (`dmOwedLatchReason()`).
+ * `cleanup_unknown` report, and a report its instance's newest
+ * `cleanup_latch` does not name (the switch read's; a person's mode change does
+ * not settle it) owes `cleanup_latch`, which is refused and written the same
+ * way, naming that report -- in place of the validation latch when both are
+ * owed (`dmOwedLatchReason()`).
  *
  * Statements: 1 lock, 1 state read -- 2 for an unknown request or a ledger
  * refusal; then the switch read -- 3 for a switch refusal or a failed read;
@@ -989,7 +993,7 @@ export async function recordDecisionMakerTransmitIntent(
   });
   const owed = owedLatch(switches, instance, latchInputs);
   if (owed !== null) {
-    const latch = await latchDecisionMakerInstanceOff(tx, { instance, reason: owed });
+    const latch = await latchDecisionMakerInstanceOff(tx, { instance, reason: owed.reason, cleanupEventId: owed.cleanupEventId });
     return { recorded: false, reason: "instance_off", latch };
   }
   if (state.resultDeadlineAtMs === null) throw new DecisionMakerRequestWriteError("state_unreadable");
@@ -1329,17 +1333,18 @@ export async function recordDecisionMakerValidationLatch(
  * What a transmission intent reads to know whether `instance` owes a latch,
  * in one statement: the kinds of its terminal results recorded at or after
  * `sinceMs` (as `readDecisionMakerInstanceResultKinds()`), and the database
- * clock of its newest `cleanup_unknown` report, null when it has none. The
- * report is read whatever its age; `dmCleanupLatchDecision()` compares it with
- * the newest switch event.
+ * ledger event id of its newest `cleanup_unknown` report by the ledger's
+ * sequence, null when it has none. The report is read whatever its age;
+ * `dmCleanupLatchDecision()` compares it with the report the instance's newest
+ * cleanup latch names.
  */
 export async function readDecisionMakerInstanceLatchInputs(
   client: LedgerReader,
   input: { instance: DmInstanceScope; sinceMs: number | null },
-): Promise<{ resultKindsNewestFirst: unknown[]; newestCleanupUnknownAtMs: number | null }> {
+): Promise<{ resultKindsNewestFirst: unknown[]; newestCleanupUnknownEventId: string | null }> {
   if (!isDmInstanceScope(input.instance)) throw new DecisionMakerRequestWriteError("invalid_input");
   const sinceMs = requireSinceMs(input.sinceMs);
-  const rows = await client.$queryRaw<Array<{ resultKinds: unknown; newestCleanupUnknownAtEpochMs: unknown }>>`
+  const rows = await client.$queryRaw<Array<{ resultKinds: unknown; newestCleanupUnknownEventId: unknown }>>`
     SELECT
       ARRAY(
         SELECT ev."resultKind"
@@ -1351,40 +1356,46 @@ export async function readDecisionMakerInstanceLatchInputs(
         LIMIT ${DM_VALIDATION_LATCH_WINDOW}
       ) AS "resultKinds",
       (
-        SELECT floor(extract(epoch FROM max(c."createdAt")) * 1000)::bigint
+        SELECT c."id"
         FROM "AmuxDecisionMakerRequestEvent" c
         WHERE c."kind" = 'cleanup_unknown'
           AND c."instance" = ${input.instance}
-      ) AS "newestCleanupUnknownAtEpochMs"
+        ORDER BY c."sequence" DESC
+        LIMIT 1
+      ) AS "newestCleanupUnknownEventId"
   `;
   const row = rows[0];
   if (!row) throw new Error("AMUX Decision Maker latch input read returned no row");
   if (!Array.isArray(row.resultKinds)) throw new DecisionMakerRequestWriteError("state_unreadable");
   return {
     resultKindsNewestFirst: [...row.resultKinds],
-    newestCleanupUnknownAtMs: newestReportClock(row.newestCleanupUnknownAtEpochMs),
+    newestCleanupUnknownEventId: newestReportId(row.newestCleanupUnknownEventId),
   };
 }
 
 /**
- * The database clock of `instance`'s newest `cleanup_unknown` report, or null
- * when it has none, in one statement on the reports' own partial index: what
- * §5's latch check reads.
+ * The ledger event id of `instance`'s newest `cleanup_unknown` report by the
+ * ledger's sequence, or null when it has none, in one statement on the
+ * reports' own partial index: what §5's latch check reads.
  */
 export async function readDecisionMakerInstanceNewestCleanupUnknown(
   client: LedgerReader,
   input: { instance: DmInstanceScope },
-): Promise<number | null> {
+): Promise<string | null> {
   if (!isDmInstanceScope(input.instance)) throw new DecisionMakerRequestWriteError("invalid_input");
-  const rows = await client.$queryRaw<Array<{ newestCleanupUnknownAtEpochMs: unknown }>>`
-    SELECT floor(extract(epoch FROM max(c."createdAt")) * 1000)::bigint AS "newestCleanupUnknownAtEpochMs"
-    FROM "AmuxDecisionMakerRequestEvent" c
-    WHERE c."kind" = 'cleanup_unknown'
-      AND c."instance" = ${input.instance}
+  const rows = await client.$queryRaw<Array<{ newestCleanupUnknownEventId: unknown }>>`
+    SELECT (
+      SELECT c."id"
+      FROM "AmuxDecisionMakerRequestEvent" c
+      WHERE c."kind" = 'cleanup_unknown'
+        AND c."instance" = ${input.instance}
+      ORDER BY c."sequence" DESC
+      LIMIT 1
+    ) AS "newestCleanupUnknownEventId"
   `;
   const row = rows[0];
   if (!row) throw new Error("AMUX Decision Maker cleanup report read returned no row");
-  return newestReportClock(row.newestCleanupUnknownAtEpochMs);
+  return newestReportId(row.newestCleanupUnknownEventId);
 }
 
 export type DecisionMakerCleanupLatchWrite =
@@ -1392,8 +1403,9 @@ export type DecisionMakerCleanupLatchWrite =
   | { latched: false; reason: Extract<DmCleanupLatchDecision, { latch: false }>["reason"] };
 
 /**
- * §5: latches `instance` off when its newest `cleanup_unknown` report has no
- * `cleanup_latch` at or after it (`dmCleanupLatchDecision()`), in the
+ * §5: latches `instance` off, naming the report, when its newest
+ * `cleanup_unknown` report is not the one its newest `cleanup_latch` names
+ * (`dmCleanupLatchDecision()`), in the
  * caller's transaction, in this order: the audit chain lock -- which every
  * switch change and every ledger write takes first, so no report and no
  * latch commits between the reads and the latch, and two checks of one
@@ -1401,13 +1413,14 @@ export type DecisionMakerCleanupLatchWrite =
  * event and newest cleanup latch; the instance's newest report; and then the
  * switch store's latch (`cleanup_latch`), under the instance's own actor.
  *
- * Only the report's own latch settles it, so the same report never latches
- * twice: sent again, or sent again after the operator released the latch, it
- * is the same event, before that latch. A person's ordinary mode change
- * between the report and the latch -- the same mode saved again, off and back
- * -- does not settle it (review r-20261017-115136-888d76), and neither does a
- * latch of another cause: a second cause is a second record
- * (lib/amux/decisionMakerSwitchStore.ts).
+ * Only the latch that names the report settles it, so the same report never
+ * latches twice: sent again, or sent again after the operator released the
+ * latch, it is the same event, which that latch names. A person's ordinary
+ * mode change between the report and the latch -- the same mode saved again,
+ * off and back -- does not settle it (review r-20261017-115136-888d76), nor
+ * does an earlier report's latch, even in the same database millisecond
+ * (review r-20261017-123200-7609b7), nor a latch of another cause: a second
+ * cause is a second record (lib/amux/decisionMakerSwitchStore.ts).
  *
  * Two callers, each in a boundary transaction of its own: the cleanup route,
  * once a report has committed or was found already recorded
@@ -1432,12 +1445,15 @@ export async function recordDecisionMakerCleanupLatch(
   await takeAuditChainLock(tx);
   const switches = await readSwitchesForWrite(tx);
   if (switches.state.killSwitch === null) throw new DecisionMakerRequestWriteError("settings_unreadable");
-  const newestCleanupUnknownAtMs = await readDecisionMakerInstanceNewestCleanupUnknown(tx, { instance });
+  const newestCleanupUnknownEventId = await readDecisionMakerInstanceNewestCleanupUnknown(tx, { instance });
   const decision = dmCleanupLatchDecision({
-    cleanupLatchedAtMs: switches.cleanupLatchedAtMs[instance],
-    newestCleanupUnknownAtMs,
+    cleanupLatchedEventId: switches.cleanupLatchedEventId[instance],
+    newestCleanupUnknownEventId,
   });
   if (decision === null) throw new DecisionMakerRequestWriteError("state_unreadable");
   if (!decision.latch) return { latched: false, reason: decision.reason };
-  return { latched: true, event: await latchDecisionMakerInstanceOff(tx, { instance, reason: "cleanup_latch" }) };
+  return {
+    latched: true,
+    event: await latchDecisionMakerInstanceOff(tx, { instance, reason: "cleanup_latch", cleanupEventId: decision.cleanupEventId }),
+  };
 }

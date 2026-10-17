@@ -1,20 +1,28 @@
--- baseline-check: replace-function-if-body-sha256 "amux_decision_maker_request_event_guard" "1c3c0a8c374bac1c9b0257aaf4f470b272c0699616457a2ccb9446435c88279f"
 -- AMUX Decision Maker policy version 1 (docs/policy/amux-decision-maker.md),
 -- sections 5 and 10: a request whose directories the broker could not confirm
--- deleted, stage S2-2a3. On the request event table, the kind CHECK replaced,
--- two partial indexes added and the event guard's body replaced, pinned to
--- its previous body above. No table, column or trigger is created, and no
--- existing row changes.
+-- deleted, stage S2-2a3. On the request event table, the kind CHECK replaced
+-- and two partial indexes added; on the switch event table, one nullable
+-- column with its CHECK, unique index and foreign key; and two function
+-- bodies replaced, each pinned to its previous body below. No table is
+-- created and no existing row changes.
 --
 -- Section 5: "지웠는지 확인하지 못하면 cleanup_unknown으로 두고 그 인스턴스를
 -- off로 latch한다". The request's state is a new event kind, cleanup_unknown,
 -- named after its section 10 audit action, amux.decision.cleanup_unknown. The
 -- latch is the switch store's own system event (reason cleanup_latch, which
 -- the switch CHECK has held since 20261008030000_amux_decision_maker_switch),
--- written by the application in a transaction of its own after this event
+-- written by the application in a transaction of its own after the report
 -- commits; until then the request store refuses a routing and a transmission
 -- intent of the instance as if it were off (the owed latch of section 8). The
 -- database does not look for an owed latch, as it does not for section 8's.
+--
+-- A cleanup latch names the report it settles ("cleanupEventId"), and the
+-- application decides whether a report is owed by that name: the instance's
+-- newest report is settled only when its newest cleanup latch names it. Not by
+-- a clock -- an earlier report's latch and a later report can share a
+-- database millisecond, since a report is accepted with the instance off
+-- (review r-20261017-123200-7609b7) -- and not by a person's ordinary mode
+-- change (review r-20261017-115136-888d76).
 --
 -- What the database enforces, rather than the application:
 --
@@ -41,18 +49,35 @@
 --   one-closing index could not be. So the closing kinds, the one-closing
 --   index, the retention trigger and every guard that reads the closing kinds
 --   are unchanged.
--- * A second partial index, on the instance and the clock of cleanup_unknown
---   events only, keeps the request store's read of an instance's newest report
---   (the owed latch) to an index lookup.
+-- * A switch event names a report ("cleanupEventId") exactly when it is a
+--   cleanup latch (a CHECK, held to IS TRUE), names it once (a unique index),
+--   never names a request event that could be removed under it (a restrictive
+--   foreign key), and -- by the replaced switch guard -- names only a
+--   cleanup_unknown report of the latch's own instance. No cleanup latch has
+--   been written before this stage (the S1b store had no caller for it), so the
+--   CHECK holds for every existing row; a database that had one stops this
+--   migration rather than keep a latch that names nothing.
+-- * A partial index on the instance and sequence of cleanup_unknown events
+--   keeps the request store's read of an instance's newest report to an index
+--   lookup.
 --
--- The one replaced body is its previous body (20261008130100_amux_decision_maker_judgment_delivery)
--- with these lines added and nothing else: the cleanup_unknown flag declared
--- and read with the rest of the request's events, and the cleanup_unknown
--- transition. The header pins that previous body by the SHA-256 of
--- pg_proc.prosrc, as the baseline guard compares a replacement
--- (scripts/baseline-presence-core.mjs).
+-- The two replaced bodies, each its previous body with only these lines
+-- added:
+--   amux_decision_maker_request_event_guard (from
+--     20261008130100_amux_decision_maker_judgment_delivery): the
+--     cleanup_unknown flag declared and read with the rest of the request's
+--     events, and the cleanup_unknown transition.
+--   amux_decision_maker_switch_event_guard (from
+--     20261008090000_amux_decision_maker_switch_serialization): a cleanup
+--     latch's named report read and refused unless it is a cleanup_unknown
+--     report of the latch's instance.
+-- The DO block that opens the transaction pins each to the SHA-256 of its
+-- previous body (pg_proc.prosrc, as scripts/baseline-presence-core.mjs
+-- compares a replacement) and stops the migration on any other. The new
+-- column makes this migration visible to the baseline guard's schema
+-- comparison, so its header declares no probe.
 --
--- The function pins search_path to pg_catalog, pg_temp and reads the tables
+-- Every function pins search_path to pg_catalog, pg_temp and reads the tables
 -- through TG_TABLE_SCHEMA, so no object earlier on a session's path can stand
 -- in for them.
 --
@@ -60,13 +85,44 @@
 -- The DB integration suite runs on the migration history, which is where they
 -- are tested (tests/integration/amux-decision-maker-request.db.test.ts).
 --
--- Rollback, in one transaction: re-run the CREATE OR REPLACE FUNCTION of
--- 20261008130100_amux_decision_maker_judgment_delivery, drop the two indexes,
--- and replace the kind CHECK with its 20261008130100 definition -- which
--- fails while a cleanup_unknown event remains, so a rollback after the first
--- report means deciding what those requests are.
+-- Rollback, in one transaction: re-run the CREATE OR REPLACE FUNCTION of both
+-- previous migrations; drop the switch event's foreign key, unique index,
+-- CHECK and column; drop the two request event indexes; and replace the kind
+-- CHECK with its 20261008130100 definition -- which fails while a
+-- cleanup_unknown event remains, so a rollback after the first report means
+-- deciding what those requests are, and dropping the column discards which
+-- report each cleanup latch settled.
 
 BEGIN;
+
+-- Each function this migration replaces must still be the exact body it was
+-- written against, by the SHA-256 of pg_proc.prosrc: a hand edit or an
+-- unknown version stops the migration before anything changes.
+DO $pin$
+DECLARE
+    pinned RECORD;
+    actual TEXT;
+BEGIN
+    FOR pinned IN
+        SELECT * FROM (VALUES
+            ('1c3c0a8c374bac1c9b0257aaf4f470b272c0699616457a2ccb9446435c88279f', 'amux_decision_maker_request_event_guard'),
+            ('e27be7b524dcb7cedbd566880c6409ba40d9887746b9019990b9ef25d5dd8333', 'amux_decision_maker_switch_event_guard')
+        ) AS pins("sha256", "name")
+    LOOP
+        SELECT pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc, 'UTF8')), 'hex')
+          INTO actual
+          FROM pg_catalog.pg_proc p
+          JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = pg_catalog.current_schema()
+           AND p.proname = pinned."name"
+           AND p.pronargs = 0
+           AND p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype;
+        IF actual IS DISTINCT FROM pinned."sha256" THEN
+            RAISE EXCEPTION 'AMUX_DM_UNEXPECTED_FUNCTION_BODY %', pinned."name";
+        END IF;
+    END LOOP;
+END
+$pin$;
 
 ALTER TABLE "AmuxDecisionMakerRequestEvent"
   DROP CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check",
@@ -80,13 +136,24 @@ ALTER TABLE "AmuxDecisionMakerRequestEvent"
 -- Section 5: one report per request.
 CREATE UNIQUE INDEX "AmuxDecisionMakerRequestEvent_one_cleanup_unknown_key"
   ON "AmuxDecisionMakerRequestEvent"("requestId") WHERE "kind" = 'cleanup_unknown';
--- An instance's newest report, which the owed latch reads.
+-- An instance's newest report by the ledger's sequence, which the owed latch reads.
 CREATE INDEX "AmuxDecisionMakerRequestEvent_cleanup_unknown_instance_idx"
-  ON "AmuxDecisionMakerRequestEvent"("instance", "createdAt") WHERE "kind" = 'cleanup_unknown';
+  ON "AmuxDecisionMakerRequestEvent"("instance", "sequence") WHERE "kind" = 'cleanup_unknown';
 
--- The replaced function: its previous body with the lines the header lists
--- added and nothing else (tests/amuxDecisionMakerRequest.test.mjs compares
--- them line by line).
+-- A cleanup latch names the report it settles, and nothing else names one.
+ALTER TABLE "AmuxDecisionMakerSwitchEvent" ADD COLUMN "cleanupEventId" TEXT;
+ALTER TABLE "AmuxDecisionMakerSwitchEvent"
+  ADD CONSTRAINT "AmuxDecisionMakerSwitchEvent_cleanup_event_check"
+    CHECK ((("reasonCode" = 'cleanup_latch') = ("cleanupEventId" IS NOT NULL)) IS TRUE);
+CREATE UNIQUE INDEX "AmuxDecisionMakerSwitchEvent_cleanupEventId_key"
+  ON "AmuxDecisionMakerSwitchEvent"("cleanupEventId");
+ALTER TABLE "AmuxDecisionMakerSwitchEvent"
+  ADD CONSTRAINT "AmuxDecisionMakerSwitchEvent_cleanupEventId_fkey"
+  FOREIGN KEY ("cleanupEventId") REFERENCES "AmuxDecisionMakerRequestEvent"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- The replaced functions: each its previous body with the lines the header
+-- lists added and nothing else (tests/amuxDecisionMakerRequest.test.mjs
+-- compares them line by line).
 
 CREATE OR REPLACE FUNCTION "amux_decision_maker_request_event_guard"()
 RETURNS TRIGGER
@@ -308,6 +375,96 @@ BEGIN
     IF NEW."kind" = 'assign' THEN
         NEW."resultDeadlineAt" := NEW."createdAt" + INTERVAL '30 minutes';
     END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION "amux_decision_maker_switch_event_guard"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    newest_sequence BIGINT;
+    newest_actor_kind TEXT;
+    expected_action TEXT;
+    expected_actor TEXT;
+    audited BOOLEAN;
+    named BOOLEAN;
+BEGIN
+    IF TG_OP <> 'INSERT' THEN
+        RAISE EXCEPTION 'AMUX_DM_SWITCH_IMMUTABLE';
+    END IF;
+    -- The newest event below is read after a lock. Only READ COMMITTED gives
+    -- that read a snapshot taken after the lock was granted.
+    IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'AMUX_DM_SWITCH_ISOLATION';
+    END IF;
+    -- The switch gate, exclusive: no request ledger write that reads the
+    -- switches is in flight while a switch changes.
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtext('tomverse-amux-decision-maker-switch-gate')
+    );
+
+    -- One insert per scope at a time, so the newest event read below is still
+    -- the newest when this one commits. The writer already holds the audit
+    -- chain lock, which every audit append takes first; this lock is the
+    -- database's own and does not rely on that.
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtext('tomverse-amux-decision-maker-switch:' || NEW."scope")
+    );
+    -- A separate statement after the lock: under READ COMMITTED it reads what
+    -- a transaction the lock waited for has committed.
+    EXECUTE pg_catalog.format(
+        'SELECT "sequence", "actorKind" FROM %I.%I WHERE "scope" = $1 ORDER BY "sequence" DESC LIMIT 1',
+        TG_TABLE_SCHEMA,
+        'AmuxDecisionMakerSwitchEvent'
+    ) INTO newest_sequence, newest_actor_kind USING NEW."scope";
+    IF newest_sequence IS NOT NULL AND NEW."sequence" <= newest_sequence THEN
+        RAISE EXCEPTION 'AMUX_DM_SWITCH_OUT_OF_ORDER';
+    END IF;
+
+    -- Stage S2-2a3, section 5: a cleanup latch names the cleanup_unknown
+    -- report of its own instance that it settles. The CHECK requires the
+    -- name on a cleanup latch and on nothing else, and the unique index
+    -- one latch per report.
+    IF NEW."cleanupEventId" IS NOT NULL THEN
+        EXECUTE pg_catalog.format(
+            'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE "id" = $1 AND "kind" = ''cleanup_unknown'' AND "instance" = $2)',
+            TG_TABLE_SCHEMA,
+            'AmuxDecisionMakerRequestEvent'
+        ) INTO named USING NEW."cleanupEventId", NEW."scope";
+        IF named IS DISTINCT FROM TRUE THEN
+            RAISE EXCEPTION 'AMUX_DM_SWITCH_CLEANUP_EVENT';
+        END IF;
+    END IF;
+
+    IF NEW."actorKind" = 'human' THEN
+        expected_action := CASE
+            WHEN newest_actor_kind = 'system' THEN 'amux.decision.latch_release'
+            ELSE 'amux.decision.mode'
+        END;
+        EXECUTE pg_catalog.format(
+            'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE "id" = $1 AND "action" = $2 AND "targetType" = $3 AND "targetId" = $4 AND "actorUserId" = $5 AND NOT coalesce(pg_catalog.jsonb_typeof("metadata") = ''object'' AND "metadata" ? ''systemActor'', false) AND xmin = pg_catalog.pg_current_xact_id()::xid)',
+            TG_TABLE_SCHEMA,
+            'AdminAuditLog'
+        ) INTO audited USING NEW."auditLogId", expected_action, 'AmuxDecisionMakerSwitchEvent', NEW."id", NEW."actorUserId";
+    ELSE
+        expected_actor := CASE NEW."scope"
+            WHEN 'decision-maker-openai' THEN 'amux-decision-maker-openai'
+            WHEN 'decision-maker-anthropic' THEN 'amux-decision-maker-anthropic'
+        END;
+        EXECUTE pg_catalog.format(
+            'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE "id" = $1 AND "action" = $2 AND "targetType" = $3 AND "targetId" = $4 AND "actorUserId" IS NULL AND "actorEmail" IS NULL AND "ipAddress" IS NULL AND "userAgent" IS NULL AND pg_catalog.jsonb_typeof("metadata") = ''object'' AND "metadata" ->> ''systemActor'' = $5 AND xmin = pg_catalog.pg_current_xact_id()::xid)',
+            TG_TABLE_SCHEMA,
+            'AdminAuditLog'
+        ) INTO audited USING NEW."auditLogId", 'amux.decision.latch', 'AmuxDecisionMakerSwitchEvent', NEW."id", expected_actor;
+    END IF;
+    IF audited IS DISTINCT FROM TRUE THEN
+        RAISE EXCEPTION 'AMUX_DM_SWITCH_UNAUDITED';
+    END IF;
+
+    NEW."createdAt" := pg_catalog.clock_timestamp();
     RETURN NEW;
 END;
 $$;

@@ -2152,10 +2152,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerSwitchStore.ts",
     table: "AmuxDecisionMakerSwitchEvent",
-    tableMentions: 5,
+    tableMentions: 6,
     writeVerbs: 3,
     reason:
-      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is three constant SELECTs (the newest event of every scope; of one scope for a person's change; and since 2026-10-17 the newest event of every scope with its actor and clock, which the request ledger's writers read for the boundary section 8's validation count starts from -- since stage S2-2a3 with each scope's newest system cleanup_latch clock as a window over the same scan, the one event that settles section 5's cleanup report) and two constant INSERT ... RETURNING statements, a person's event and a latch; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is three constant SELECTs (the newest event of every scope; of one scope for a person's change; and since 2026-10-17 the newest event of every scope with its actor and clock, which the request ledger's writers read for the boundary section 8's validation count starts from -- since stage S2-2a3 with, in a subquery of the same statement, the cleanup_unknown report each scope's newest cleanup_latch names, the one report that latch settles) and two constant INSERT ... RETURNING statements, a person's event and a latch, which since S2-2a3 names a cleanup latch's report; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
@@ -2448,40 +2448,40 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
     table: "AdminAuditLog",
-    tableMentions: 2,
-    writeVerbs: 3,
+    tableMentions: 4,
+    writeVerbs: 10,
     reason:
-      "Replaces the Decision Maker request event guard's body with the same body and section 5's cleanup_unknown transition (docs/policy/amux-decision-maker.md §5, §10, stage S2-2a3). Its two AdminAuditLog mentions are the guard's two SELECT EXISTS reads, the judgment audit join and the system audit check, unchanged from 20261008130100; the report's audit is the system check's existing rule. It never writes AdminAuditLog; its verbs are the kind CHECK's ALTER TABLE and DROP CONSTRAINT and the 'INSERT' the guard compares TG_OP with.",
+      "Replaces the Decision Maker request event guard's body with the same body and section 5's cleanup_unknown transition, and the switch event guard's body with the same body and a cleanup latch's named report checked (docs/policy/amux-decision-maker.md §5, §10, stage S2-2a3). Its four AdminAuditLog mentions are the two guards' SELECT EXISTS reads, unchanged from 20261008130100 and 20261008090000: the event guard's judgment audit join and system audit check, and the switch guard's person's and system audit checks; the report's and the latch's audits are those checks' existing rules. It never writes AdminAuditLog; its verbs are the ALTER TABLE statements (the kind CHECK's DROP CONSTRAINT, the switch event's ADD COLUMN, CHECK and foreign key with its ON DELETE / ON UPDATE RESTRICT), the 'INSERT' both guards compare TG_OP with, and words of comments.",
   },
   {
     path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
     table: "AmuxDecisionMakerSwitchEvent",
-    tableMentions: 1,
-    writeVerbs: 3,
+    tableMentions: 8,
+    writeVerbs: 10,
     reason:
-      "The same function body reads the newest kill switch and instance events under the shared switch gate, unchanged from 20261008130100; a cleanup report reads neither. It writes no switch event: the report's latch is the switch store's, written by the application.",
+      "Adds the switch event's cleanupEventId -- the report a cleanup latch settles -- with its CHECK (exactly on a cleanup latch), unique index (once per report) and restrictive foreign key, and replaces the switch event guard with its previous body (20261008090000), which reads the scope's newest event and names the table as an audit target, plus the check that a cleanup latch names a cleanup_unknown report of its own instance. The event guard reads the newest kill switch and instance events under the shared switch gate, unchanged from 20261008130100. Nothing here inserts, updates or deletes a switch event: the latch is the switch store's, written by the application.",
   },
   {
     path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
     table: "AmuxDecisionMakerRequest",
     tableMentions: 2,
-    writeVerbs: 3,
+    writeVerbs: 10,
     reason:
       "The same function body reads the request row and names the request as a judgment audit's target type, unchanged from 20261008130100. It writes no request.",
   },
   {
     path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
     table: "AmuxDecisionMakerRequestEvent",
-    tableMentions: 5,
-    writeVerbs: 3,
+    tableMentions: 7,
+    writeVerbs: 10,
     reason:
-      "Replaces the request event table's kind CHECK with cleanup_unknown added, adds its one-per-request partial unique index and the partial index on the instance and clock of its reports, and replaces the event guard, which reads the request's events after the per-request lock and names the event table as a system audit's target type. Nothing here inserts, updates or deletes an event.",
+      "Replaces the request event table's kind CHECK with cleanup_unknown added, adds its one-per-request partial unique index and the partial index on the instance and sequence of its reports, references a report from the switch event's cleanupEventId with a restrictive foreign key, and replaces the event guard, which reads the request's events after the per-request lock and names the event table as a system audit's target type; the replaced switch guard reads whether a cleanup latch's named event is a cleanup_unknown report of its instance. Nothing here inserts, updates or deletes an event.",
   },
   {
     path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
     table: "AmuxDecisionMakerJudgment",
     tableMentions: 1,
-    writeVerbs: 3,
+    writeVerbs: 10,
     reason:
       "The same function body reads a judgment's closing event beside its judgment row, unchanged from 20261008130100. Nothing here writes a judgment.",
   },
@@ -3012,9 +3012,9 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
-    count: 5,
+    count: 9,
     reason:
-      "The five reads of the Decision Maker request event guard, unchanged from 20261008130100 but for section 5's cleanup_unknown flag in its event aggregate (stage S2-2a3): EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp -- the request row, the aggregate of its events after the per-request lock, the newest kill switch and instance events under the shared switch gate, the audit read for a judgment's closing event and the audit read for a system event. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
+      "Nine reads in the two replaced guards (stage S2-2a3), all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp. The request event guard's five, unchanged from 20261008130100 but for section 5's cleanup_unknown flag in its event aggregate: the request row, the aggregate of its events after the per-request lock, the newest kill switch and instance events under the shared switch gate, the audit read for a judgment's closing event and the audit read for a system event. The switch event guard's four: its three unchanged from 20261008090000 (the scope's newest event after the per-scope lock, the person's audit, the system audit) and whether a cleanup latch's named event is a cleanup_unknown report of its instance. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",

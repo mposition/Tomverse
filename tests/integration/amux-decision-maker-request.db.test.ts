@@ -18,6 +18,7 @@ import {
 import { dmKeyPeriodOf } from "@/lib/amux/decisionMakerBodyCore";
 import { dmSwitchRoutingInput } from "@/lib/amux/decisionMakerSwitchCore";
 import {
+  latchDecisionMakerInstanceOff,
   readDecisionMakerSwitches,
   recordDecisionMakerSwitchByOperator,
 } from "@/lib/amux/decisionMakerSwitchStore";
@@ -1275,13 +1276,13 @@ test("throughput counts requests routed to one instance for a proposal in the tr
     lastHour: 2,
     lastDay: 3,
     resultKindsNewestFirst: [],
-    newestCleanupUnknownAtMs: null,
+    newestCleanupUnknownEventId: null,
   });
   assert.deepEqual(await readDecisionMakerInstanceLoad(prisma, { instance: ANTHROPIC, sinceMs: null }), {
     lastHour: 1,
     lastDay: 1,
     resultKindsNewestFirst: [],
-    newestCleanupUnknownAtMs: null,
+    newestCleanupUnknownEventId: null,
   });
 });
 
@@ -2079,4 +2080,120 @@ test("§5 review r-20261017-115136-888d76: off and back to proposal after a repo
   assert.deepEqual((await systemLatchesOf(OPENAI)).map((row) => row.reasonCode), ["cleanup_latch"]);
   assert.equal((await readDecisionMakerSwitches(prisma)).instances[OPENAI], "off");
   assert.equal((await decisionMakerRetentionSweepDeps().cleanupLatch(OPENAI)).latched, false);
+});
+
+// Review r-20261017-123200-7609b7 (major): request A's cleanup latch commits, and the already assigned
+// request B of the same instance records its report in the same database millisecond (a report is
+// accepted with the instance off). The guard sets every event's clock, so B's report is placed at A's
+// latch's millisecond by hand, with the guard disabled for that one insert in the test's own transaction.
+const reportAt = (requestId: string, createdAt: Date) =>
+  prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerRequestEvent" DISABLE TRIGGER "amux_decision_maker_request_event_guard"`);
+    const id = randomUUID();
+    const auditLogId = await writeAudit(tx, eventAudit(CLEANUP), EVENT, id);
+    await tx.$executeRaw`
+      INSERT INTO "AmuxDecisionMakerRequestEvent" ("id", "requestId", "kind", "instance", "auditLogId", "createdAt")
+      VALUES (${id}, ${requestId}, 'cleanup_unknown', ${OPENAI}, ${auditLogId}, ${createdAt})
+    `;
+    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerRequestEvent" ENABLE TRIGGER "amux_decision_maker_request_event_guard"`);
+    return id;
+  });
+
+/** A's report and its latch, then B's report in that latch's millisecond. */
+const bReportedInALatchMillisecond = async () => {
+  const a = await transmittedFor();
+  const b = await transmittedFor();
+  await reportCleanup(a);
+  assert.equal((await cleanupLatch()).latched, true);
+  const latchA = (
+    await prisma.$queryRaw<Array<{ createdAt: Date }>>`
+      SELECT "createdAt" FROM "AmuxDecisionMakerSwitchEvent"
+      WHERE "scope" = ${OPENAI} AND "reasonCode" = 'cleanup_latch' ORDER BY "sequence" DESC LIMIT 1
+    `
+  )[0]!;
+  const reportB = await reportAt(b, latchA.createdAt);
+  const placed = (await rowsOf(b)).find((row) => row.kind === "cleanup_unknown")!;
+  assert.equal(placed.createdAt.getTime(), latchA.createdAt.getTime(), "B's report shares A's latch's millisecond");
+  return { a, b, reportB };
+};
+
+test("§5 review r-20261017-123200-7609b7: A's latch does not settle B's report in its millisecond; released, B still refuses routing and intent", async () => {
+  const pending = await STATE_BUILDERS.assigned!();
+  const { b } = await bReportedInALatchMillisecond();
+  // A person releases A's latch before any check: B's report is still owed.
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+  await pause();
+
+  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { keyRing: RING, binding: binding(), card: CARD }));
+  assert.deepEqual([routed.route, routed.refusalCodes], ["operator", ["instance_off"]]);
+  const intent = await prisma.$transaction((tx) =>
+    recordDecisionMakerTransmitIntent(tx, { requestId: pending, instance: OPENAI, transmission: TRANSMISSION_NONE, requireLeaseAt: noLease }),
+  );
+  assert.deepEqual([intent.recorded, intent.recorded ? null : intent.reason], [false, "instance_off"]);
+  assert.deepEqual((await rowsOf(pending)).map((row) => row.kind), ["assign"]);
+  assert.deepEqual((await systemLatchesOf(OPENAI)).map((row) => row.reasonCode), ["cleanup_latch", "cleanup_latch"]);
+  assert.equal((await readDecisionMakerSwitches(prisma)).instances[OPENAI], "off");
+  // B is settled by its own latch now; released, a resend of B latches nothing.
+  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "latched" });
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+  assert.equal((await reportCleanup(b)).status, "existing");
+  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "latched" });
+  assert.equal((await readDecisionMakerSwitches(prisma)).instances[OPENAI], "proposal");
+});
+
+test("§5 review r-20261017-123200-7609b7: with B's report in A's latch's millisecond, the next check writes B's own latch", async () => {
+  await bReportedInALatchMillisecond();
+  assert.equal((await cleanupLatch()).latched, true);
+  assert.deepEqual((await systemLatchesOf(OPENAI)).map((row) => row.reasonCode), ["cleanup_latch", "cleanup_latch"]);
+  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "latched" });
+});
+
+// Stage S2-2a3, review r-20261017-123200-7609b7: the database holds what a cleanup latch names.
+test("§5: a cleanup latch names a cleanup_unknown report of its own instance, once; no other latch names one", async () => {
+  const requestId = await transmittedFor();
+  await reportCleanup(requestId);
+  const rows = await rowsOf(requestId);
+  const report = rows.find((row) => row.kind === "cleanup_unknown")!;
+  const assign = rows.find((row) => row.kind === "assign")!;
+  const otherRequest = await transmittedFor(ANTHROPIC);
+  await reportCleanup(otherRequest, ANTHROPIC);
+  const otherReport = (await rowsOf(otherRequest)).find((row) => row.kind === "cleanup_unknown")!;
+  const latchNaming = (cleanupEventId: string) =>
+    prisma.$transaction((tx) => latchDecisionMakerInstanceOff(tx, { instance: OPENAI, reason: "cleanup_latch", cleanupEventId }));
+
+  // Not a report, another instance's report, no event at all: the guard refuses each.
+  for (const named of [assign.id, otherReport.id, randomUUID()]) {
+    await rejectsWith(latchNaming(named), /AMUX_DM_SWITCH_CLEANUP_EVENT/);
+  }
+  // A latch of another cause naming a report, written by hand past the store's own refusal: the CHECK.
+  await rejectsWith(
+    prisma.$transaction(async (tx) => {
+      const id = randomUUID();
+      const auditLogId = await writeSystemAuditLog({
+        tx,
+        systemActor: "amux-decision-maker-openai",
+        action: "amux.decision.latch",
+        targetType: "AmuxDecisionMakerSwitchEvent",
+        targetId: id,
+        summary: "test",
+      });
+      await tx.$executeRaw`
+        INSERT INTO "AmuxDecisionMakerSwitchEvent"
+          ("id", "scope", "value", "reasonCode", "actorKind", "actorUserId", "cleanupEventId", "auditLogId")
+        VALUES (${id}, ${OPENAI}, 'off', 'validation_latch', 'system', NULL, ${report.id}, ${auditLogId})
+      `;
+    }),
+    /AmuxDecisionMakerSwitchEvent_cleanup_event_check/,
+  );
+  assert.deepEqual(await systemLatchesOf(OPENAI), []);
+
+  // Its own report, once: a second latch naming the same report is refused by the unique key.
+  await latchNaming(report.id);
+  await rejectsWith(latchNaming(report.id), /AmuxDecisionMakerSwitchEvent_cleanupEventId_key|duplicate key|Unique constraint/i);
+  const named = await prisma.$queryRaw<Array<{ cleanupEventId: string | null }>>`
+    SELECT "cleanupEventId" FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = ${OPENAI} AND "actorKind" = 'system'
+  `;
+  assert.deepEqual(named, [{ cleanupEventId: report.id }]);
 });

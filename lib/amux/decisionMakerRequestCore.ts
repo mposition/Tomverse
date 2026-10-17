@@ -970,7 +970,7 @@ export const dmSwitchInputWithOwedLatch = <T extends { killSwitch: boolean | nul
 // ---------------------------------------------------------------------------
 
 export type DmCleanupLatchDecision =
-  | { latch: true }
+  | { latch: true; cleanupEventId: string }
   | { latch: false; reason: "no_cleanup_unknown" | "latched" };
 
 /**
@@ -978,62 +978,63 @@ export type DmCleanupLatchDecision =
  * latch한다" -- whether the instance's newest `cleanup_unknown` report
  * latches it now.
  *
- * - The one event that settles a report is the system's `cleanup_latch` of
- *   the same instance at or after it. A person's release can only follow that
- *   latch (the switch guard makes the first change after a latch
- *   `amux.decision.latch_release`), so it is settled as well. Nothing else
- *   settles it: not a person's ordinary mode change -- the same mode saved
- *   again, off and back to proposal (review r-20261017-115136-888d76: the
- *   latch §5 requires would otherwise be dropped in the time between the
- *   report's commit and the latch's own transaction) -- and not a latch of
- *   another cause, after which the report is a second cause and a second
- *   record.
- * - A report is one per request, so the same report sent again -- after a
- *   lost response, or after the operator released its latch -- is the same
- *   event, at or before its latch, and never latches the instance twice. A
- *   later request's report is a new one and is owed until a latch follows it.
- * - The clocks are the database's milliseconds. A cleanup latch in the
- *   report's own millisecond settles it: the latch is written after the
- *   report commits, so that latch is the report's own, and counting it as not
- *   would latch again after the operator released it.
+ * - A cleanup latch names the ledger event id of the report it settles, and
+ *   settles that report and no other. The instance's newest report is owed
+ *   unless its newest cleanup latch names it.
+ * - Nothing but that latch settles a report: not a person's ordinary mode
+ *   change -- the same mode saved again, off and back to proposal (review
+ *   r-20261017-115136-888d76) -- not a latch of another cause, and not a
+ *   cleanup latch of an earlier report, even one that shares the new report's
+ *   database millisecond: a report is accepted with the instance off, and a
+ *   clock cannot tell the two apart (review r-20261017-123200-7609b7).
+ * - A person's release can only follow a latch (the switch guard makes the
+ *   first change after a system latch `amux.decision.latch_release`), so a
+ *   report whose own latch was released stays settled. A report is one per
+ *   request, so the same report sent again -- after a lost response, or after
+ *   that release -- is the same event and never latches the instance twice.
+ * - Comparing with the newest cleanup latch alone is exact: a latch is only
+ *   ever written for the newest report the writer read under the audit chain
+ *   lock, which every report write also takes first, so no cleanup latch names
+ *   a report older than one an earlier latch named.
  *
- * `cleanupLatchedAtMs` is the database clock of the instance's newest
- * `cleanup_latch`, or null when it has none (the switch store's read);
- * `newestCleanupUnknownAtMs` the clock of its newest report, or null (the
- * ledger's). Anything else is unreadable (null), and nothing is latched on it.
+ * `cleanupLatchedEventId` is the report the instance's newest cleanup latch
+ * names, or null when it has none (the switch store's read);
+ * `newestCleanupUnknownEventId` the id of its newest report by the ledger's
+ * sequence, or null (the ledger's). Anything but null or a ledger event id is
+ * unreadable (null), and nothing is latched on it. When a latch is due, the
+ * decision names the report it settles.
  */
 export const dmCleanupLatchDecision = (input: {
-  cleanupLatchedAtMs: unknown;
-  newestCleanupUnknownAtMs: unknown;
+  cleanupLatchedEventId: unknown;
+  newestCleanupUnknownEventId: unknown;
 }): DmCleanupLatchDecision | null => {
-  const isClock = (value: unknown): value is number =>
-    typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-  const reportedAtMs = input.newestCleanupUnknownAtMs;
-  const latchedAtMs = input.cleanupLatchedAtMs;
-  if ((reportedAtMs !== null && !isClock(reportedAtMs)) || (latchedAtMs !== null && !isClock(latchedAtMs))) return null;
-  if (reportedAtMs === null) return { latch: false, reason: "no_cleanup_unknown" };
-  if (latchedAtMs === null || reportedAtMs > latchedAtMs) return { latch: true };
+  const report = input.newestCleanupUnknownEventId;
+  const latched = input.cleanupLatchedEventId;
+  if ((report !== null && !isDmRequestId(report)) || (latched !== null && !isDmRequestId(latched))) return null;
+  if (report === null) return { latch: false, reason: "no_cleanup_unknown" };
+  if (latched !== report) return { latch: true, cleanupEventId: report };
   return { latch: false, reason: "latched" };
 };
 
 /**
  * The latch a routing and a transmission intent hold an instance off for
  * before it is written (`dmSwitchInputWithOwedLatch()`), and the one the
- * intent then writes: §5's cleanup latch when a report is owed -- the more
- * specific cause, written first -- otherwise §8's validation latch when a run
- * is owed, otherwise none. Null when either input is unreadable.
+ * intent then writes: §5's cleanup latch, naming the report it settles, when a
+ * report is owed -- the more specific cause, written first -- otherwise §8's
+ * validation latch when a run is owed, otherwise none. Null when either input
+ * is unreadable.
  */
 export const dmOwedLatchReason = (input: {
   newestEvent: { actorKind: "human" | "system"; createdAtMs: number } | null;
-  cleanupLatchedAtMs: unknown;
+  cleanupLatchedEventId: unknown;
   resultKindsNewestFirst: readonly unknown[];
-  newestCleanupUnknownAtMs: unknown;
-}): { reason: DmSwitchLatchReason | null } | null => {
+  newestCleanupUnknownEventId: unknown;
+}): { reason: DmSwitchLatchReason; cleanupEventId: string | null } | { reason: null } | null => {
   const cleanup = dmCleanupLatchDecision(input);
   const validation = dmValidationLatchDecision(input);
   if (cleanup === null || validation === null) return null;
-  if (cleanup.latch) return { reason: "cleanup_latch" };
-  if (validation.latch) return { reason: "validation_latch" };
+  if (cleanup.latch) return { reason: "cleanup_latch", cleanupEventId: cleanup.cleanupEventId };
+  if (validation.latch) return { reason: "validation_latch", cleanupEventId: null };
   return { reason: null };
 };
 

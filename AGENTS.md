@@ -1819,7 +1819,8 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `recordDecisionMakerCleanupLatch()`·`readDecisionMakerInstanceLatchInputs()`·`readDecisionMakerInstanceNewestCleanupUnknown()`,
   request core의 `dmCleanupLatchDecision()`·`dmOwedLatchReason()`, `lib/amux/decisionMakerInternalRoute.ts`의
   `settleDmCleanupLatch()`, `lib/amux/dbBoundary.ts`의 `decisionMakerCleanupUnknown`(상한 9)·`decisionMakerCleanupLatch`(10),
-  `lib/amux/decisionMakerRetentionSweep.ts`의 인스턴스별 첫 확인. docs/policy/amux-decision-maker.md §5의 "지웠는지 확인하지 못하면
+  `lib/amux/decisionMakerRetentionSweep.ts`의 인스턴스별 첫 확인, switch store·core의 `cleanupEventId`(latch가 처리한 보고)와
+  그것을 싣는 스위치 읽기, `prisma/schema.prisma`의 그 열과 관계. docs/policy/amux-decision-maker.md §5의 "지웠는지 확인하지 못하면
   `cleanup_unknown`으로 두고 그 인스턴스를 `off`로 latch한다"입니다. broker가 요청 자신의 인스턴스로 보고하면 원장에 사건 종류
   `cleanup_unknown`(열세 번째 종류)이 그 인스턴스 actor의 `amux.decision.cleanup_unknown` 감사와 같은 트랜잭션에 남습니다. **요청당
   하나이고**(부분 유일 index와 trigger), 배정 뒤에만 받으며(broker는 전송 의도 전에 요청 디렉터리를 만듭니다), 마감이 없고, 요청이
@@ -1827,14 +1828,18 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   제안은 운영자에게 열린 채 남고, 닫힌 뒤 온 보고도 기록됩니다. 그래서 닫힘 목록과 그것을 쓰는 guard·store 읽기는 바뀌지 않습니다.
   같은 보고를 다시 보내면 기록된 사건을 돌려주고 아무것도 쓰지 않으며, 다른 인스턴스의 보고는 그 전에 거절합니다. **latch는 보고가
   commit된 뒤 별도 경계에서 씁니다**(보고 7 + 스위치 읽기 + latch 5는 setup·fence와 15로 docs/policy/amux-decision-maker.md §9의 12를
-  넘음) — route는 기록했든 이미 있었든 그 확인을 돌리고, 실패해도 답은 보고의 것이며 로그는 코드만입니다. **보고를 처리한 것으로
-  치는 사건은 그 보고 시점 이후(같은 ms 포함)의 시스템 `cleanup_latch` 하나뿐입니다**(검토 r-20261017-115136-888d76) — 그 latch 뒤의
-  `amux.decision.latch_release`는 latch가 있어야만 오므로 함께 끝난 것입니다. 사람의 일반 mode 변경(같은 값 재저장, off 뒤 proposal)과
-  다른 원인의 latch는 보고를 처리하지 않으므로, 보고 commit과 latch 사이에 운영자가 mode를 바꿔도 latch는 밀린 채 남고 다음 라우팅·전송
-  의도·sweep이 씁니다. 보고는 요청당 하나라 재전송은 같은 사건이므로, 재전송·재확인·해제 뒤 늦은 재전송은 다시 끄지 않습니다. 그래서
-  판정 입력은 인스턴스의 가장 새 보고 시계(원장)와 가장 새 `cleanup_latch` 시계(스위치 읽기의 같은 문장에 window로 실림)이고, 가장 새
-  스위치 사건은 쓰지 않습니다. **밀린 latch는 쓰이기 전에도 인스턴스를 끕니다** — 라우팅은 처리량 문장에, 전송 의도는 결과 종류 읽기
-  문장에 가장 새 보고 시계를 실어(문장 수 그대로) `instance_off`로 막고, 전송 의도는 밀린 latch를 같은 트랜잭션에 씁니다. 둘 다 밀렸으면 `cleanup_latch`가
+  넘음) — route는 기록했든 이미 있었든 그 확인을 돌리고, 실패해도 답은 보고의 것이며 로그는 코드만입니다. **`cleanup_latch`는 자기가
+  처리한 보고의 원장 사건 id를 스위치 사건의 `cleanupEventId`에 담고, 보고를 처리한 것으로 치는 것은 그 이름이 붙은 latch 하나뿐입니다**
+  — 시각으로 비교하지 않습니다. 이전 보고의 latch와 다음 보고가 같은 DB ms에 놓일 수 있기 때문입니다(검토 r-20261017-123200-7609b7,
+  보고는 off 중에도 받음). 판정은 "인스턴스의 가장 새 보고(원장 sequence 순) id = 가장 새 `cleanup_latch`가 담은 id"이고, latch는 언제나
+  audit chain lock 아래 읽은 가장 새 보고를 이름 대므로 가장 새 latch와만 비교해도 정확합니다. DB는 그 이름을 `cleanup_latch`에만
+  있게(CHECK), 보고당 한 번(unique), 지울 수 없는 원장 사건을(제한 FK), 그리고 latch와 같은 인스턴스의 `cleanup_unknown` 보고만(교체한
+  스위치 guard) 받습니다. 그래서 사람의 일반 mode 변경(같은 값 재저장, off 뒤 proposal, 검토 r-20261017-115136-888d76)과 다른 원인의
+  latch, 다른 보고의 latch는 보고를 처리하지 않고 latch는 밀린 채 남아 다음 라우팅·전송 의도·sweep이 씁니다. 보고는 요청당 하나라
+  재전송은 같은 사건이므로, 재전송·재확인·해제 뒤 늦은 재전송은 다시 끄지 않습니다. migration은 두 함수(원장 event guard와 스위치
+  guard)를 바꾸므로 이전 본문 digest를 첫 DO 블록에서 대조하고, 새 열 때문에 baseline guard의 schema 비교에 보이므로 header 선언은
+  두지 않습니다. **밀린 latch는 쓰이기 전에도 인스턴스를 끕니다** — 라우팅은 처리량 문장에, 전송 의도는 결과 종류 읽기 문장에 가장 새
+  보고 id를, 스위치 읽기는 가장 새 latch가 담은 id를 실어(문장 수 그대로) `instance_off`로 막고, 전송 의도는 밀린 latch를 같은 트랜잭션에 씁니다. 둘 다 밀렸으면 `cleanup_latch`가
   먼저입니다. 15분 sweep은 인스턴스마다 정리 latch 확인 뒤 docs/policy/amux-decision-maker.md §8 확인을 하며 각 확인이 따로 실패 경계입니다. DB trigger는 원장 삽입 때
   밀린 latch를 보지 않고, latch는 끄기만 하므로 kill switch를 보지 않습니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 +
   setup + fence이고, request unit 테스트가 그 셈을, request DB 테스트가 하나 줄인 상한의 거부를 고정합니다. Admin 화면 표시는
