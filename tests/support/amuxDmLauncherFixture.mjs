@@ -1,8 +1,10 @@
 // A re-rooted host for the AMUX Decision Maker launcher's tests
 // (lib/amux/decisionMakerLauncherFs.ts `dmTestHost`): the root-owned
-// executable and schema, the vendor account's home with its kept
-// authentication file, and the request's two directories, all under one
-// temporary directory. Nothing outside it is touched.
+// executable and schema, the broker's request root with this request's
+// directory, and the vendor account's `0700` home with its kept
+// authentication file, all under one temporary directory. Every directory is
+// made without group or other write, as the launcher's path checks require.
+// Nothing outside the temporary directory is touched.
 
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -14,6 +16,8 @@ import {
   DM_LAUNCHER_SPECS,
   DM_OUTPUT_SCHEMA_JSON,
   DM_OUTPUT_SCHEMA_PATH,
+  DM_REQUEST_ROOT,
+  dmRequestPaths,
 } from "../../lib/amux/decisionMakerLauncherCore.ts";
 import { dmHostPath, dmTestHost } from "../../lib/amux/decisionMakerLauncherFs.ts";
 
@@ -25,32 +29,34 @@ export const PAYLOAD = Buffer.from("Synthetic AMUX Decision Maker question for a
 export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 /** `executable` is the stand-in CLI's content, or a function of the root that returns it. */
-export const makeLauncherFixture = (instance, { executable: content = "not a real CLI\n", executableMode = 0o755 } = {}) => {
+export const makeLauncherFixture = (
+  instance,
+  { executable: content = "not a real CLI\n", executableMode = 0o755, hostOptions } = {},
+) => {
   const root = mkdtempSync(join(tmpdir(), "amux-dm-launcher-"));
   const executable = typeof content === "function" ? content(root) : content;
-  const host = dmTestHost(root);
+  const host = dmTestHost(root, hostOptions);
   const spec = DM_LAUNCHER_SPECS[instance];
   const at = (path) => dmHostPath(host, path);
+  const directory = (path, mode = 0o755) => {
+    mkdirSync(at(path), { recursive: true, mode });
+    chmodSync(at(path), mode);
+  };
   const write = (path, content, mode) => {
-    mkdirSync(dirname(at(path)), { recursive: true });
+    mkdirSync(dirname(at(path)), { recursive: true, mode: 0o755 });
     writeFileSync(at(path), content, mode === undefined ? undefined : { mode });
   };
 
   write(spec.executablePath, executable, executableMode);
   write(DM_OUTPUT_SCHEMA_PATH, DM_OUTPUT_SCHEMA_JSON);
-  mkdirSync(at(spec.home), { recursive: true });
+  directory(spec.home, 0o700);
   for (const keep of spec.stateKeep) write(`${spec.home}/${keep.slice(2)}`, '{"synthetic":"auth"}');
-
-  const requestDirectory = "/var/lib/amux-dm/requests/r1";
-  const temporaryDirectory = `/var/lib/amux-dm/scratch/${spec.cli}/r1`;
-  mkdirSync(at(requestDirectory), { recursive: true });
-  mkdirSync(at(temporaryDirectory), { recursive: true });
+  const paths = dmRequestPaths(instance, REQUEST_ID);
+  directory(DM_REQUEST_ROOT, 0o711);
+  directory(paths.requestDirectory, 0o750);
+  writeFileSync(at(`${paths.requestDirectory}/card.json`), '{"synthetic":"card"}');
   mkdirSync(at("/observed"), { recursive: true });
-  const paths = {
-    requestDirectory,
-    temporaryDirectory,
-    outputFile: spec.cli === "codex" ? `${temporaryDirectory}/last-message.json` : null,
-  };
+
   const evidence = {
     requestId: REQUEST_ID,
     instance,
@@ -64,13 +70,14 @@ export const makeLauncherFixture = (instance, { executable: content = "not a rea
     host,
     spec,
     at,
+    directory,
     write,
     paths,
     evidence,
     executableSha256: sha256(Buffer.from(executable)),
     input: (overrides = {}) => ({
       instance,
-      paths,
+      requestId: REQUEST_ID,
       evidence,
       requestKey: REQUEST_KEY,
       payload: PAYLOAD,
@@ -120,7 +127,7 @@ export const fakeCli = (root, body) =>
     `const ROOT = ${JSON.stringify(root)};`,
     "const at = (p) => path.join(ROOT, ...p.split('/').filter(Boolean));",
     "const argv = process.argv.slice(2);",
-    "const touch = (p, c = 'x') => { fs.mkdirSync(path.dirname(at(p)), { recursive: true }); fs.writeFileSync(at(p), c); };",
+    "const touch = (p, c = 'x') => { fs.mkdirSync(path.dirname(at(p)), { recursive: true, mode: 0o700 }); fs.writeFileSync(at(p), c); };",
     body,
     "",
   ].join("\n");

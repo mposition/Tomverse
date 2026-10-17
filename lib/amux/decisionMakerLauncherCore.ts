@@ -140,6 +140,47 @@ export const DM_OPENAI_HOME = "/home/amux-dm-openai";
 export const DM_ANTHROPIC_HOME = "/home/amux-dm-anthropic";
 
 /**
+ * Where a request's two directories live. A request names neither path: both
+ * are this fixed root plus the request id, one level down, so no caller can
+ * point a recursive delete anywhere else.
+ *
+ * The request directory's root is the broker's, as S0 created it
+ * (docs/ops/amux/decision-maker-s0-records/2026-10-13__a3f51403afccf147442f7c2ca7eeb4ccf97b8068.md:
+ * `install -d -o root -g root -m 0755 /var/lib/amux-dm` and
+ * `install -d -o amux-dm-broker -g amux-dm-broker -m 0711 /var/lib/amux-dm/requests`).
+ */
+export const DM_REQUEST_ROOT = "/var/lib/amux-dm/requests";
+
+/**
+ * The vendor account's per-request temporary directory (§5 "공급사 계정의
+ * 요청별 임시 디렉터리") lives in that account's own home, which S0 made `0700`
+ * and owned by the account: `<home>/dm-scratch/<request id>`. Not in the
+ * policy or S0; S2-3a's choice, so only the account can reach it and no new
+ * root-owned directory is needed. codex's `-o` file is a fixed name in it.
+ */
+export const DM_SCRATCH_DIRECTORY_NAME = "dm-scratch";
+export const DM_CODEX_OUTPUT_FILE_NAME = "last-message.json";
+
+/**
+ * The owners every directory on a request's paths must have (S0's accounts,
+ * same record: `amux-dm-broker` 993, `amux-dm-openai` 992,
+ * `amux-dm-anthropic` 991). A directory with another owner, or writable by its
+ * group or others, could be swapped by someone the launcher does not trust,
+ * so the launcher neither reads through nor deletes under it.
+ */
+export type DmPathOwners = {
+  root: number;
+  broker: number;
+  vendor: Readonly<Record<DmInstanceScope, number>>;
+};
+
+export const DM_SYSTEM_PATH_OWNERS: DmPathOwners = Object.freeze({
+  root: 0,
+  broker: 993,
+  vendor: Object.freeze({ "decision-maker-openai": 992, "decision-maker-anthropic": 991 }),
+});
+
+/**
  * §5a: "broker는 시작 전에 managed settings 파일이 없음을 확인한다. 그 경로는
  * S2-3에서 공급사 문서로 정한다." Claude Code's documentation names, for Linux,
  * `/etc/claude-code/managed-settings.json`, the drop-in directory
@@ -301,7 +342,7 @@ export const DM_RECORDED_EXECUTION_DIGESTS: Readonly<Record<DmInstanceScope, str
 /** Why the launcher did not start a process. Nothing was sent to a vendor. */
 export const DM_LAUNCH_REFUSALS = [
   "instance_unknown",
-  "request_paths_invalid",
+  "request_id_invalid",
   "request_directories_unusable",
   "execution_digest_mismatch",
   "executable_unreadable",
@@ -359,15 +400,16 @@ export const dmAppResultKindFor = (result: DmLaunchResult): "output" | "timeout"
 /** §5 / §5a: what was found where nothing may remain. Any of these is `cleanup_unknown`. */
 export const DM_CLEANUP_RESIDUE_KINDS = [
   "instance_unknown",
-  "request_paths_invalid",
+  "request_id_invalid",
+  /** A directory on the way is a link, not a directory, another owner's, or writable by group or others. */
+  "path_unsafe",
+  "path_unreadable",
   "request_path_present",
-  "request_path_unreadable",
+  "scratch_entry_present",
   "state_entry_present",
   "state_keep_not_regular_file",
-  "state_root_not_directory",
-  "state_ancestor_not_directory",
-  "state_unreadable",
-  "home_not_directory",
+  /** An entry was moved aside to be deleted and is still there. */
+  "removal_failed",
 ] as const;
 export type DmCleanupResidueKind = (typeof DM_CLEANUP_RESIDUE_KINDS)[number];
 export type DmCleanupResidue = { kind: DmCleanupResidueKind; path: string };
@@ -388,17 +430,19 @@ export const DM_LAUNCH_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
 // ---------------------------------------------------------------------------
 
 export type DmRequestPaths = {
-  /** The broker's request directory (§5): read-only to the vendor account. */
+  /** The broker's request directory (§5), `DM_REQUEST_ROOT/<request id>`: read-only to the vendor account. */
   requestDirectory: string;
-  /** The vendor account's per-request temporary directory (§5), empty at start. */
+  /** The vendor account's per-request temporary directory (§5), `<home>/dm-scratch/<request id>`. */
   temporaryDirectory: string;
-  /** codex only: `-o`, a direct child of the temporary directory. Null for claude. */
+  /** codex only: `-o`, a fixed name in the temporary directory. Null for claude. */
   outputFile: string | null;
 };
 
 export type DmExecutionPlan = {
   instance: DmInstanceScope;
   cli: DmLauncherCli;
+  /** The request this plan is for; the transmission intent must name the same. */
+  requestId: string;
   executable: string;
   /** The process's whole argv, the program first. */
   argv: string[];
@@ -408,61 +452,37 @@ export type DmExecutionPlan = {
   paths: DmRequestPaths;
 };
 
-const PATH_MAX_BYTES = 4096;
-
-/** An absolute POSIX path in its one spelling: no empty, `.` or `..` segment, no trailing `/`, no control byte. */
-export const isDmAbsolutePath = (value: unknown): value is string => {
-  if (typeof value !== "string" || !value.startsWith("/") || value.length < 2) return false;
-  if (Buffer.byteLength(value, "utf8") > PATH_MAX_BYTES || !value.isWellFormed()) return false;
-  if (/[\u0000-\u001f\u007f]/.test(value)) return false;
-  return value
-    .slice(1)
-    .split("/")
-    .every((segment) => segment !== "" && segment !== "." && segment !== "..");
-};
-
-const isInside = (path: string, directory: string) => path === directory || path.startsWith(`${directory}/`);
-
-const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
+/** The vendor account's scratch root, which holds one temporary directory per running request. */
+export const dmScratchRoot = (instance: DmInstanceScope): string =>
+  `${DM_LAUNCHER_SPECS[instance].home}/${DM_SCRATCH_DIRECTORY_NAME}`;
 
 /**
- * The request's paths, if they can be used at all. Both directories are
- * deleted whole after the request, so neither may be, or hold, the account's
- * home (its kept authentication file), the root-owned executable or schema,
- * or the other directory.
+ * A request's paths, derived from its id alone: the id is the app's request
+ * id (a lowercase UUID), so it is one path segment with no `/`, `.` or `..`.
  */
-export const dmRequestPathsRefusal = (spec: DmLauncherSpec, paths: unknown): "request_paths_invalid" | null => {
-  if (paths === null || typeof paths !== "object" || Array.isArray(paths)) return "request_paths_invalid";
-  const record = paths as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
-  if (keys.join(",") !== "outputFile,requestDirectory,temporaryDirectory") return "request_paths_invalid";
-  const { requestDirectory, temporaryDirectory, outputFile } = record;
-  if (!isDmAbsolutePath(requestDirectory) || !isDmAbsolutePath(temporaryDirectory)) return "request_paths_invalid";
-  if (isInside(requestDirectory, temporaryDirectory) || isInside(temporaryDirectory, requestDirectory)) {
-    return "request_paths_invalid";
-  }
-  const protectedPaths = [spec.home, spec.executablePath, DM_OUTPUT_SCHEMA_PATH];
-  if (protectedPaths.some((path) => isInside(path, requestDirectory) || isInside(path, temporaryDirectory))) {
-    return "request_paths_invalid";
-  }
-  if (spec.cli === "claude") return outputFile === null ? null : "request_paths_invalid";
-  if (!isDmAbsolutePath(outputFile) || parentOf(outputFile) !== temporaryDirectory) return "request_paths_invalid";
-  return null;
+export const dmRequestPaths = (instance: DmInstanceScope, requestId: string): DmRequestPaths => {
+  if (!isDmRequestId(requestId)) throw new Error("AMUX Decision Maker request id must be a lowercase UUID");
+  const temporaryDirectory = `${dmScratchRoot(instance)}/${requestId}`;
+  return {
+    requestDirectory: `${DM_REQUEST_ROOT}/${requestId}`,
+    temporaryDirectory,
+    outputFile: DM_LAUNCHER_SPECS[instance].cli === "codex" ? `${temporaryDirectory}/${DM_CODEX_OUTPUT_FILE_NAME}` : null,
+  };
 };
 
 /**
  * §5a: the one command a request may start. The schema's two placeholders
  * become the root-owned file and its bytes, the two per-request ones become
- * the broker's paths; nothing else varies.
+ * the request's derived paths; nothing else varies.
  */
 export const dmExecutionPlan = (
   instance: unknown,
-  paths: unknown,
-): { ok: true; plan: DmExecutionPlan } | { ok: false; refusal: "instance_unknown" | "request_paths_invalid" } => {
+  requestId: unknown,
+): { ok: true; plan: DmExecutionPlan } | { ok: false; refusal: "instance_unknown" | "request_id_invalid" } => {
   if (!isDmLauncherInstance(instance)) return { ok: false, refusal: "instance_unknown" };
+  if (!isDmRequestId(requestId)) return { ok: false, refusal: "request_id_invalid" };
   const spec = DM_LAUNCHER_SPECS[instance];
-  if (dmRequestPathsRefusal(spec, paths) !== null) return { ok: false, refusal: "request_paths_invalid" };
-  const request = paths as DmRequestPaths;
+  const paths = dmRequestPaths(instance, requestId);
   const substitute = (token: string) => {
     switch (token) {
       case DM_ARGV_SCHEMA_FILE:
@@ -470,9 +490,9 @@ export const dmExecutionPlan = (
       case DM_ARGV_SCHEMA_JSON:
         return DM_OUTPUT_SCHEMA_JSON;
       case DM_ARGV_REQUEST_DIRECTORY:
-        return request.requestDirectory;
+        return paths.requestDirectory;
       case DM_ARGV_OUTPUT_FILE:
-        return request.outputFile as string;
+        return paths.outputFile as string;
       default:
         return token;
     }
@@ -482,15 +502,12 @@ export const dmExecutionPlan = (
     plan: {
       instance,
       cli: spec.cli,
+      requestId,
       executable: spec.executablePath,
       argv: [spec.executablePath, ...spec.argv.map(substitute)],
       environment: dmFixedEnvironment(instance).map(([name, value]) => [name, value]),
-      workingDirectory: request.requestDirectory,
-      paths: {
-        requestDirectory: request.requestDirectory,
-        temporaryDirectory: request.temporaryDirectory,
-        outputFile: request.outputFile,
-      },
+      workingDirectory: paths.requestDirectory,
+      paths,
     },
   };
 };
@@ -588,13 +605,19 @@ const EVIDENCE_KEYS = ["eventId", "inputPayloadDigest", "instance", "recorded", 
  * "그 바이트 그대로". The evidence must be the route's recorded answer for
  * this instance, and its payload digest must be the request-keyed digest
  * (`dmPayloadDigest`, the app's own function) of the exact bytes the process
- * would read on stdin. A caller-made boolean is not evidence.
+ * would read on stdin, for this request. A caller-made boolean is not
+ * evidence.
+ *
+ * The caller passes the launcher's own copy of the payload, taken before the
+ * first asynchronous step (lib/amux/decisionMakerLauncherProcess.ts), and
+ * sends that same copy: checking one buffer and sending another would let a
+ * change in between reach the vendor unrecorded.
  */
 export const dmTransmitIntentRefusal = (
-  instance: DmInstanceScope,
+  plan: { instance: DmInstanceScope; requestId: string },
   evidence: unknown,
   requestKey: unknown,
-  payload: Uint8Array,
+  payload: unknown,
 ): "transmit_intent_missing" | "transmit_intent_mismatch" | null => {
   if (evidence === null || typeof evidence !== "object" || Array.isArray(evidence)) return "transmit_intent_missing";
   const record = evidence as Record<string, unknown>;
@@ -604,7 +627,8 @@ export const dmTransmitIntentRefusal = (
   }
   if (!isDmDigest(record.inputPayloadDigest)) return "transmit_intent_missing";
   if (!Buffer.isBuffer(requestKey) || requestKey.length !== 32) return "transmit_intent_missing";
-  if (record.instance !== instance) return "transmit_intent_mismatch";
+  if (!(payload instanceof Uint8Array)) return "transmit_intent_mismatch";
+  if (record.instance !== plan.instance || record.requestId !== plan.requestId) return "transmit_intent_mismatch";
   const actual = Buffer.from(dmPayloadDigest(requestKey, payload), "hex");
   const recorded = Buffer.from(record.inputPayloadDigest, "hex");
   return timingSafeEqual(actual, recorded) ? null : "transmit_intent_mismatch";
@@ -756,7 +780,9 @@ export const dmStateTargets = (instance: DmInstanceScope): DmStateTarget[] => {
   const keep = spec.stateKeep.map(homeRelative);
   return spec.stateDelete.map((entry) => {
     const path = homeRelative(entry);
-    const kept = keep.filter((file) => parentOf(`/${file}`) === `/${path}`).map((file) => file.slice(path.length + 1));
+    const kept = keep
+      .filter((file) => file.slice(0, file.lastIndexOf("/")) === path)
+      .map((file) => file.slice(path.length + 1));
     return kept.length > 0 ? { kind: "directory_keeping", path, keep: kept } : { kind: "whole", path };
   });
 };

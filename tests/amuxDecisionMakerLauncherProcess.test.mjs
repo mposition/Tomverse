@@ -5,21 +5,26 @@
 //
 // §12's blocking criteria this file holds: the launcher refuses a forbidden
 // flag and a non-fixed environment before anything starts; no DM process
-// starts without the recorded transmission intent; the request's directories
-// and the account's CLI state are deleted on every exit path, and a deletion
-// that cannot be verified is reported as cleanup_unknown (the app's latch
-// acts on it).
+// starts without the recorded transmission intent, and what it receives is
+// the bytes that intent recorded; the request's directories and the
+// account's CLI state are deleted on every exit path (the request directory
+// by the broker's call after the launcher returns), and a deletion that
+// cannot be verified is reported as cleanup_unknown (the app's latch acts on
+// it).
 //
 // A refusal starts nothing, so those tests run everywhere. Starting a process
 // group and killing it needs POSIX.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { dmExecutionPlan } from "../lib/amux/decisionMakerLauncherCore.ts";
+import { DM_REQUEST_ROOT, dmExecutionPlan } from "../lib/amux/decisionMakerLauncherCore.ts";
+import { dmCleanupRequestDirectory } from "../lib/amux/decisionMakerLauncherFs.ts";
 import { DM_LAUNCH_HARD_TIMEOUT_MS, launchDecisionMaker } from "../lib/amux/decisionMakerLauncherProcess.ts";
-import { PAYLOAD, fakeCli, makeLauncherFixture } from "./support/amuxDmLauncherFixture.mjs";
+import { PAYLOAD, REQUEST_ID, fakeCli, makeLauncherFixture } from "./support/amuxDmLauncherFixture.mjs";
 
 const OPENAI = "decision-maker-openai";
 const ANTHROPIC = "decision-maker-anthropic";
@@ -55,15 +60,24 @@ const claudeResult = (overrides = {}) =>
     JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "ignored", structured_output: { output: select }, ...overrides }),
   )});`;
 
-const run = async (instance, body, { input = {}, options = {}, mode } = {}) => {
+/**
+ * One request as the broker would run it: the launcher, then the broker's own
+ * cleanup of the request directory, whatever the launcher returned.
+ */
+const run = async (instance, body, { input = {}, options = {}, mode, prepare, mutate } = {}) => {
   const fixture = makeLauncherFixture(instance, { executable: (root) => fakeCli(root, body), executableMode: mode });
   try {
-    const report = await launchDecisionMaker(fixture.input(input), {
+    prepare?.(fixture);
+    const launchInput = fixture.input(input);
+    const pending = launchDecisionMaker(launchInput, {
       host: fixture.host,
       expectedExecutableSha256: fixture.executableSha256,
       timeoutMs: 20_000,
       ...options,
     });
+    mutate?.(launchInput);
+    const report = await pending;
+    const requestCleanup = dmCleanupRequestDirectory(fixture.host, instance, REQUEST_ID);
     // Read before dispose() removes the fixture.
     const files = Object.fromEntries(
       ["started", "argv.json", "env.json", "cwd", "stdin", "grandchild.pid", "self.pid"].map((name) => {
@@ -82,6 +96,7 @@ const run = async (instance, body, { input = {}, options = {}, mode } = {}) => {
     };
     return {
       report,
+      requestCleanup,
       fixture,
       observed,
       pidOf,
@@ -108,16 +123,19 @@ const settle = async (pid) => {
   return alive(pid);
 };
 
+const VERIFIED = { status: "verified" };
+
 // ---------------------------------------------------------------------------
 // Refusals: nothing starts
 // ---------------------------------------------------------------------------
 
-test("§10: without the recorded transmission intent no DM process starts, and cleanup still runs", async () => {
+test("§10: without the recorded transmission intent no DM process starts, and both cleanups still run", async () => {
   for (const evidence of [undefined, null, { recorded: true }]) {
     const result = await run(OPENAI, recording(""), { input: { evidence } });
     assert.deepEqual(result.report.result, { outcome: "refused", refusals: ["transmit_intent_missing"] });
     assert.equal(result.started, false);
-    assert.deepEqual(result.report.cleanup, { status: "verified" });
+    assert.deepEqual(result.report.cleanup, VERIFIED);
+    assert.deepEqual(result.requestCleanup, VERIFIED);
     assert.equal(result.requestGone && result.temporaryGone, true);
   }
 });
@@ -128,6 +146,20 @@ test("§2-4: bytes other than the ones the intent recorded are not sent", async 
   assert.equal(result.started, false);
 });
 
+test("§10: an intent recorded for another request does not start this one", async () => {
+  const fixture = makeLauncherFixture(OPENAI);
+  try {
+    const evidence = { ...fixture.evidence, requestId: "0a1b2c3d-4e5f-4a6b-8c7d-000000000001" };
+    const report = await launchDecisionMaker(fixture.input({ evidence }), {
+      host: fixture.host,
+      expectedExecutableSha256: fixture.executableSha256,
+    });
+    assert.deepEqual(report.result, { outcome: "refused", refusals: ["transmit_intent_mismatch"] });
+  } finally {
+    fixture.dispose();
+  }
+});
+
 test("§5a: an executable that is not the policy's sha256 does not start", async () => {
   // No expected-sha256 override: the policy's value, which the stand-in is not.
   const result = await run(OPENAI, recording(""), { options: { expectedExecutableSha256: undefined } });
@@ -136,32 +168,29 @@ test("§5a: an executable that is not the policy's sha256 does not start", async
 });
 
 test("§5a: state an earlier request left refuses the start; this request's cleanup then removes it", async () => {
-  const fixture = makeLauncherFixture(OPENAI, { executable: (root) => fakeCli(root, recording("")) });
-  try {
-    fixture.write("/home/amux-dm-openai/.codex/state_5.sqlite", "left over");
-    const report = await launchDecisionMaker(fixture.input(), { host: fixture.host, expectedExecutableSha256: fixture.executableSha256 });
-    assert.deepEqual(report.result, { outcome: "refused", refusals: ["cli_state_residue"] });
-    assert.equal(existsSync(fixture.at("/observed/started")), false);
-    assert.deepEqual(report.cleanup, { status: "verified" });
-    assert.deepEqual(fixture.homeEntries().sort(), [".codex/", ".codex/auth.json"]);
-  } finally {
-    fixture.dispose();
-  }
+  const result = await run(OPENAI, recording(""), {
+    prepare: (fixture) => fixture.write("/home/amux-dm-openai/.codex/state_5.sqlite", "left over"),
+  });
+  assert.deepEqual(result.report.result, { outcome: "refused", refusals: ["cli_state_residue"] });
+  assert.equal(result.started, false);
+  assert.deepEqual(result.report.cleanup, VERIFIED);
+  assert.deepEqual(result.home, [".codex/", ".codex/auth.json"]);
 });
 
-test("an unknown instance or unusable paths start nothing and cannot be verified clean", async () => {
-  const unknown = await launchDecisionMaker({ instance: "decision-maker-gemini", paths: {}, evidence: null, requestKey: null, payload: PAYLOAD });
+test("an unknown instance or a request id that is not the app's starts nothing", async () => {
+  const unknown = await launchDecisionMaker({ instance: "decision-maker-gemini", requestId: REQUEST_ID, evidence: null, requestKey: null, payload: PAYLOAD });
   assert.deepEqual(unknown, {
     result: { outcome: "refused", refusals: ["instance_unknown"] },
     cleanup: { status: "cleanup_unknown", residue: [{ kind: "instance_unknown", path: "" }] },
   });
   const fixture = makeLauncherFixture(ANTHROPIC);
   try {
-    const report = await launchDecisionMaker(fixture.input({ paths: { ...fixture.paths, requestDirectory: "../escape" } }), {
-      host: fixture.host,
-    });
-    assert.deepEqual(report.result, { outcome: "refused", refusals: ["request_paths_invalid"] });
-    assert.equal(report.cleanup.status, "cleanup_unknown");
+    for (const requestId of ["../escape", "/var/lib/amux-dm/requests/x", null]) {
+      const report = await launchDecisionMaker(fixture.input({ requestId }), { host: fixture.host });
+      assert.deepEqual(report.result, { outcome: "refused", refusals: ["request_id_invalid"] });
+      // Nothing was made for an id that names no request; the account's state is still checked.
+      assert.deepEqual(report.cleanup, VERIFIED);
+    }
   } finally {
     fixture.dispose();
   }
@@ -170,9 +199,49 @@ test("an unknown instance or unusable paths start nothing and cannot be verified
 test("on the system host the hard timeout and the executable sha256 are §5a's, not the caller's", async () => {
   assert.equal(DM_LAUNCH_HARD_TIMEOUT_MS, 30 * 60 * 1000);
   // Both are refused before the launcher reads or deletes anything on the real host.
-  const input = { instance: OPENAI, paths: {}, evidence: null, requestKey: null, payload: PAYLOAD };
+  const input = { instance: OPENAI, requestId: REQUEST_ID, evidence: null, requestKey: null, payload: PAYLOAD };
   await assert.rejects(launchDecisionMaker(input, { timeoutMs: 1_000 }), /fixed on the system host/);
   await assert.rejects(launchDecisionMaker(input, { expectedExecutableSha256: "00".repeat(32) }), /fixed on the system host/);
+});
+
+// ---------------------------------------------------------------------------
+// Review r-20261017-022204-8754f3
+// ---------------------------------------------------------------------------
+
+test("finding 1: a link on the request root's path deletes nothing outside, on the refusal path and after", { skip: !posix }, async () => {
+  const outside = mkdtempSync(join(tmpdir(), "amux-dm-launcher-outside-"));
+  try {
+    mkdirSync(join(outside, REQUEST_ID));
+    writeFileSync(join(outside, REQUEST_ID, "precious"), "not the request's");
+    const result = await run(OPENAI, recording(""), {
+      // No intent: the refusal path, where cleanup still runs.
+      input: { evidence: undefined },
+      prepare: (fixture) => {
+        rmSync(fixture.at(DM_REQUEST_ROOT), { recursive: true });
+        symlinkSync(outside, fixture.at(DM_REQUEST_ROOT));
+      },
+    });
+    assert.deepEqual(result.report.result, {
+      outcome: "refused",
+      refusals: ["request_directories_unusable", "transmit_intent_missing"],
+    });
+    assert.deepEqual(result.requestCleanup, {
+      status: "cleanup_unknown",
+      residue: [{ kind: "path_unsafe", path: DM_REQUEST_ROOT }],
+    });
+    assert.equal(existsSync(join(outside, REQUEST_ID, "precious")), true);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("finding 2: bytes the caller changes right after the call are not what is sent", { skip: !posix }, async () => {
+  const result = await run(OPENAI, recording(writeOutput({ output: select })), {
+    input: { payload: Buffer.from(PAYLOAD) },
+    mutate: (launchInput) => launchInput.payload.fill(0x41),
+  });
+  assert.deepEqual(result.report.result, { outcome: "output", raw: JSON.stringify(select) });
+  assert.deepEqual(result.observed("stdin"), PAYLOAD);
 });
 
 // ---------------------------------------------------------------------------
@@ -181,8 +250,9 @@ test("on the system host the hard timeout and the executable sha256 are §5a's, 
 
 test("codex: the planned command runs with the fixed environment and the question on stdin; -o is the result", { skip: !posix }, async () => {
   const result = await run(OPENAI, recording(`${CODEX_STATE}\n${writeOutput({ output: select })}\n${events({ type: "thread.started" }, { type: "turn.completed" })}`));
-  assert.deepEqual(result.report, { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: { status: "verified" } });
-  const planned = dmExecutionPlan(OPENAI, result.fixture.paths);
+  assert.deepEqual(result.report, { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
+  assert.deepEqual(result.requestCleanup, VERIFIED);
+  const planned = dmExecutionPlan(OPENAI, REQUEST_ID);
   assert.deepEqual(JSON.parse(result.observed("argv.json")), planned.plan.argv.slice(1));
   assert.deepEqual(JSON.parse(result.observed("env.json")), {
     HOME: "/home/amux-dm-openai",
@@ -191,18 +261,18 @@ test("codex: the planned command runs with the fixed environment and the questio
     LC_ALL: "C.UTF-8",
   });
   assert.deepEqual(result.observed("stdin"), PAYLOAD);
-  assert.equal(result.observed("cwd").toString().endsWith("/var/lib/amux-dm/requests/r1"), true);
-  assert.deepEqual(result.home, [".codex/", ".codex/auth.json"]);
+  assert.equal(result.observed("cwd").toString().endsWith(`/var/lib/amux-dm/requests/${REQUEST_ID}`), true);
+  assert.deepEqual(result.home, [".codex/", ".codex/auth.json", "dm-scratch/"]);
   assert.equal(result.requestGone && result.temporaryGone, true);
 });
 
 test("claude: structured_output is the result; the account's state is gone afterwards", { skip: !posix }, async () => {
   const result = await run(ANTHROPIC, recording(`${CLAUDE_STATE}\n${claudeResult()}`));
-  assert.deepEqual(result.report, { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: { status: "verified" } });
-  assert.deepEqual(JSON.parse(result.observed("argv.json")), dmExecutionPlan(ANTHROPIC, result.fixture.paths).plan.argv.slice(1));
+  assert.deepEqual(result.report, { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
+  assert.deepEqual(JSON.parse(result.observed("argv.json")), dmExecutionPlan(ANTHROPIC, REQUEST_ID).plan.argv.slice(1));
   // §5a: claude's working directory is the request directory.
-  assert.equal(result.observed("cwd").toString().endsWith("/var/lib/amux-dm/requests/r1"), true);
-  assert.deepEqual(result.home, [".cache/", ".claude/", ".claude/.credentials.json", ".local/", ".local/state/"]);
+  assert.equal(result.observed("cwd").toString().endsWith(`/var/lib/amux-dm/requests/${REQUEST_ID}`), true);
+  assert.deepEqual(result.home, [".cache/", ".claude/", ".claude/.credentials.json", ".local/", ".local/state/", "dm-scratch/"]);
 });
 
 test("§5a failure signals are no result, and cleanup runs after each", { skip: !posix }, async () => {
@@ -217,7 +287,8 @@ test("§5a failure signals are no result, and cleanup runs after each", { skip: 
   ];
   for (const [instance, body, reason] of cases) {
     const result = await run(instance, recording(body));
-    assert.deepEqual(result.report, { result: { outcome: "unavailable", reason }, cleanup: { status: "verified" } }, reason);
+    assert.deepEqual(result.report, { result: { outcome: "unavailable", reason }, cleanup: VERIFIED }, reason);
+    assert.deepEqual(result.requestCleanup, VERIFIED, reason);
     assert.equal(result.requestGone && result.temporaryGone, true);
   }
 });
@@ -225,7 +296,7 @@ test("§5a failure signals are no result, and cleanup runs after each", { skip: 
 test("codex: an -o that links to another file is never read", { skip: !posix }, async () => {
   const body = `fs.symlinkSync(at(process.env.HOME + "/.codex/auth.json"), at(argv[argv.indexOf("-o") + 1]));`;
   const result = await run(OPENAI, recording(body));
-  assert.deepEqual(result.report, { result: { outcome: "unavailable", reason: "result_unreadable" }, cleanup: { status: "verified" } });
+  assert.deepEqual(result.report, { result: { outcome: "unavailable", reason: "result_unreadable" }, cleanup: VERIFIED });
 });
 
 test("§5: the hard timeout kills the whole process group; it is a timeout and cleanup runs", { skip: !posix }, async () => {
@@ -237,11 +308,12 @@ touch("/observed/self.pid", String(process.pid));
 setTimeout(() => {}, 60000);`;
   const started = Date.now();
   const result = await run(OPENAI, recording(body), { options: { timeoutMs: 1_500 } });
-  assert.deepEqual(result.report, { result: { outcome: "timeout" }, cleanup: { status: "verified" } });
+  assert.deepEqual(result.report, { result: { outcome: "timeout" }, cleanup: VERIFIED });
+  assert.deepEqual(result.requestCleanup, VERIFIED);
   assert.ok(Date.now() - started < 15_000);
   assert.equal(await settle(result.pidOf("self.pid")), false);
   assert.equal(await settle(result.pidOf("grandchild.pid")), false);
-  assert.deepEqual(result.home, [".codex/", ".codex/auth.json"]);
+  assert.deepEqual(result.home, [".codex/", ".codex/auth.json", "dm-scratch/"]);
 });
 
 test("nothing of the process group outlives a normal exit, even holding stdout", { skip: !posix }, async () => {
@@ -251,13 +323,13 @@ const child = spawn("/bin/sleep", ["60"], { stdio: ["ignore", "inherit", "ignore
 touch("/observed/grandchild.pid", String(child.pid));
 child.unref();`;
   const result = await run(OPENAI, recording(body));
-  assert.deepEqual(result.report, { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: { status: "verified" } });
+  assert.deepEqual(result.report, { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
   assert.equal(await settle(result.pidOf("grandchild.pid")), false);
 });
 
 test("an executable the account cannot run is spawn_failed, and cleanup runs", { skip: !posix }, async () => {
   const result = await run(ANTHROPIC, recording(claudeResult()), { mode: 0o644 });
-  assert.deepEqual(result.report, { result: { outcome: "unavailable", reason: "spawn_failed" }, cleanup: { status: "verified" } });
+  assert.deepEqual(result.report, { result: { outcome: "unavailable", reason: "spawn_failed" }, cleanup: VERIFIED });
   assert.equal(result.started, false);
   assert.equal(result.requestGone && result.temporaryGone, true);
 });
@@ -268,8 +340,6 @@ touch(process.env.HOME + "/.codex/locked/session.json", "question text could be 
 fs.chmodSync(at(process.env.HOME + "/.codex/locked"), 0o500);`;
   const result = await run(OPENAI, recording(body));
   assert.deepEqual(result.report.result, { outcome: "output", raw: JSON.stringify(select) });
-  assert.deepEqual(result.report.cleanup, {
-    status: "cleanup_unknown",
-    residue: [{ kind: "state_entry_present", path: "/home/amux-dm-openai/.codex/locked" }],
-  });
+  assert.equal(result.report.cleanup.status, "cleanup_unknown");
+  assert.deepEqual(result.report.cleanup.residue.map((entry) => entry.kind).sort(), ["removal_failed", "state_entry_present"]);
 });

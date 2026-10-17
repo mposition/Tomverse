@@ -32,6 +32,8 @@ import {
   DM_OUTPUT_SCHEMA_PATH,
   DM_OUTPUT_SCHEMA_SHA256,
   DM_RECORDED_EXECUTION_DIGESTS,
+  DM_REQUEST_ROOT,
+  DM_SYSTEM_PATH_OWNERS,
   dmAppResultKindFor,
   dmClassifyProcess,
   dmCommandRefusals,
@@ -41,6 +43,8 @@ import {
   dmExecutionPlan,
   dmFixedEnvironment,
   dmForbiddenArgv,
+  dmRequestPaths,
+  dmScratchRoot,
   dmStateTargets,
   dmTransmitIntentRefusal,
   dmUnwrappedOutput,
@@ -162,19 +166,13 @@ test("§5a refused argv: the launcher's lists are the policy's, entry for entry"
 // The plan and the command check
 // ---------------------------------------------------------------------------
 
-const codexPaths = {
-  requestDirectory: "/var/lib/amux-dm/requests/r1",
-  temporaryDirectory: "/var/lib/amux-dm/scratch/codex/r1",
-  outputFile: "/var/lib/amux-dm/scratch/codex/r1/last-message.json",
-};
-const claudePaths = {
-  requestDirectory: "/var/lib/amux-dm/requests/r2",
-  temporaryDirectory: "/var/lib/amux-dm/scratch/claude/r2",
-  outputFile: null,
-};
+const CODEX_REQUEST = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b";
+const CLAUDE_REQUEST = "0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d";
+const codexPaths = dmRequestPaths(OPENAI, CODEX_REQUEST);
+const claudePaths = dmRequestPaths(ANTHROPIC, CLAUDE_REQUEST);
 
-const planFor = (instance, paths) => {
-  const planned = dmExecutionPlan(instance, paths);
+const planFor = (instance, requestId) => {
+  const planned = dmExecutionPlan(instance, requestId);
   assert.equal(planned.ok, true);
   return planned.plan;
 };
@@ -185,8 +183,41 @@ const commandOf = (plan, overrides = {}) => ({
   ...overrides,
 });
 
+test("a request's two directories are fixed roots plus its id, one level down", () => {
+  assert.equal(DM_REQUEST_ROOT, "/var/lib/amux-dm/requests");
+  assert.deepEqual(codexPaths, {
+    requestDirectory: `/var/lib/amux-dm/requests/${CODEX_REQUEST}`,
+    temporaryDirectory: `/home/amux-dm-openai/dm-scratch/${CODEX_REQUEST}`,
+    outputFile: `/home/amux-dm-openai/dm-scratch/${CODEX_REQUEST}/last-message.json`,
+  });
+  assert.deepEqual(claudePaths, {
+    requestDirectory: `/var/lib/amux-dm/requests/${CLAUDE_REQUEST}`,
+    temporaryDirectory: `/home/amux-dm-anthropic/dm-scratch/${CLAUDE_REQUEST}`,
+    outputFile: null,
+  });
+  assert.equal(dmScratchRoot(OPENAI), "/home/amux-dm-openai/dm-scratch");
+  // The broker's root as S0 made it (install -d -o amux-dm-broker -m 0711).
+  const isolation = readFileSync(
+    new URL(
+      "../docs/ops/amux/decision-maker-s0-records/2026-10-13__a3f51403afccf147442f7c2ca7eeb4ccf97b8068.md",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.ok(isolation.includes(`install -d -o amux-dm-broker -g amux-dm-broker -m 0711 ${DM_REQUEST_ROOT}`));
+  assert.match(isolation, /\| DM broker \| `amux-dm-broker` \| 993 \|/);
+  assert.match(isolation, /\| DM OpenAI \| `amux-dm-openai` \| 992 \|/);
+  assert.match(isolation, /\| DM Anthropic \| `amux-dm-anthropic` \| 991 \|/);
+  assert.deepEqual(DM_SYSTEM_PATH_OWNERS, {
+    root: 0,
+    broker: 993,
+    vendor: { "decision-maker-openai": 992, "decision-maker-anthropic": 991 },
+  });
+});
+
 test("the plan is §5a's argv with the schema and the request's two paths, and nothing else", () => {
-  const codex = planFor(OPENAI, codexPaths);
+  const codex = planFor(OPENAI, CODEX_REQUEST);
+  assert.equal(codex.requestId, CODEX_REQUEST);
   assert.equal(codex.executable, "/opt/tomverse-amux-dm/codex-cli-0.162.1/codex");
   assert.equal(codex.argv[0], codex.executable);
   assert.deepEqual(
@@ -200,7 +231,8 @@ test("the plan is §5a's argv with the schema and the request's two paths, and n
     ),
   );
   assert.equal(codex.workingDirectory, codexPaths.requestDirectory);
-  const claude = planFor(ANTHROPIC, claudePaths);
+  assert.deepEqual(codex.paths, codexPaths);
+  const claude = planFor(ANTHROPIC, CLAUDE_REQUEST);
   assert.equal(claude.argv[claude.argv.indexOf("--json-schema") + 1], DM_OUTPUT_SCHEMA_JSON);
   assert.equal(claude.workingDirectory, claudePaths.requestDirectory);
   assert.ok(!claude.argv.some((token) => token.includes(claudePaths.temporaryDirectory)));
@@ -210,35 +242,22 @@ test("the plan is §5a's argv with the schema and the request's two paths, and n
   assert.deepEqual(dmForbiddenArgv("claude", claude.argv), []);
 });
 
-test("the plan refuses an unknown instance and any path that is not one clean absolute path", () => {
-  assert.deepEqual(dmExecutionPlan("decision-maker-gemini", codexPaths), { ok: false, refusal: "instance_unknown" });
-  const invalid = (instance, paths) => assert.deepEqual(dmExecutionPlan(instance, paths), { ok: false, refusal: "request_paths_invalid" }, JSON.stringify(paths));
-  for (const bad of ["relative/r1", "/var/lib/../r1", "/var/./r1", "/var//r1", "/var/r1/", "/", "/var/r\n1", "/var/r\u00001", "", null, 7]) {
-    invalid(OPENAI, { ...codexPaths, requestDirectory: bad });
-    invalid(OPENAI, { ...codexPaths, temporaryDirectory: bad });
+test("the plan refuses an unknown instance and anything but the app's request id", () => {
+  assert.deepEqual(dmExecutionPlan("decision-maker-gemini", CODEX_REQUEST), { ok: false, refusal: "instance_unknown" });
+  for (const bad of [
+    "r1",
+    "../6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+    "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b/..",
+    "6F1C2A3B-4D5E-4F60-8A7B-9C0D1E2F3A4B",
+    "/var/lib/amux-dm/requests/6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+    { requestDirectory: "/var/lib/amux-dm/requests/r1" },
+    "",
+    null,
+    7,
+  ]) {
+    assert.deepEqual(dmExecutionPlan(OPENAI, bad), { ok: false, refusal: "request_id_invalid" }, JSON.stringify(bad));
   }
-  // -o lives directly in the vendor account's temporary directory.
-  invalid(OPENAI, { ...codexPaths, outputFile: "/var/lib/amux-dm/requests/r1/out.json" });
-  invalid(OPENAI, { ...codexPaths, outputFile: "/var/lib/amux-dm/scratch/codex/r1/sub/out.json" });
-  invalid(OPENAI, { ...codexPaths, outputFile: null });
-  invalid(ANTHROPIC, { ...claudePaths, outputFile: "/var/lib/amux-dm/scratch/claude/r2/out.json" });
-  // The two directories are disjoint.
-  invalid(OPENAI, { ...codexPaths, temporaryDirectory: "/var/lib/amux-dm/requests/r1/tmp", outputFile: "/var/lib/amux-dm/requests/r1/tmp/o" });
-  invalid(ANTHROPIC, { ...claudePaths, temporaryDirectory: claudePaths.requestDirectory });
-  // Both directories are deleted whole: neither may be or hold the home, the executable or the schema.
-  for (const directory of ["/home/amux-dm-openai", "/home", "/opt/tomverse-amux-dm", "/opt"]) {
-    invalid(OPENAI, { ...codexPaths, requestDirectory: directory });
-    invalid(OPENAI, { ...codexPaths, temporaryDirectory: directory, outputFile: `${directory}/o.json` });
-  }
-  invalid(ANTHROPIC, { ...claudePaths, temporaryDirectory: "/home/amux-dm-anthropic" });
-  // The account's own temporary directory may live inside its home.
-  assert.equal(
-    dmExecutionPlan(OPENAI, { ...codexPaths, temporaryDirectory: "/home/amux-dm-openai/requests/r1", outputFile: "/home/amux-dm-openai/requests/r1/o.json" }).ok,
-    true,
-  );
-  // Exactly the three keys.
-  invalid(OPENAI, { ...codexPaths, cwd: "/tmp" });
-  invalid(ANTHROPIC, { requestDirectory: claudePaths.requestDirectory, temporaryDirectory: claudePaths.temporaryDirectory });
+  assert.throws(() => dmRequestPaths(OPENAI, ".."));
 });
 
 /** A refused entry as it would be mixed in, with a value where the flag takes one. */
@@ -287,12 +306,12 @@ const insertAt = (cli, entry, argv) => {
   return argv.length - (cli === "codex" ? 1 : 0);
 };
 
-for (const [cli, instance, paths, list] of [
-  ["codex", OPENAI, codexPaths, DM_CODEX_REFUSED_ARGV],
-  ["claude", ANTHROPIC, claudePaths, DM_CLAUDE_REFUSED_ARGV],
+for (const [cli, instance, requestId, list] of [
+  ["codex", OPENAI, CODEX_REQUEST, DM_CODEX_REFUSED_ARGV],
+  ["claude", ANTHROPIC, CLAUDE_REQUEST, DM_CLAUDE_REFUSED_ARGV],
 ]) {
   test(`every §5a refused ${cli} entry, mixed into the fixed argv, is refused and named`, () => {
-    const plan = planFor(instance, paths);
+    const plan = planFor(instance, requestId);
     for (const entry of list) {
       const mixed = MIXES[cli][entry] ?? entry.split(" ");
       const argv = [...plan.argv];
@@ -310,13 +329,13 @@ for (const [cli, instance, paths, list] of [
 }
 
 test("codex: the sandbox value and claude's --tools value are refused when changed in place", () => {
-  const codex = planFor(OPENAI, codexPaths);
+  const codex = planFor(OPENAI, CODEX_REQUEST);
   for (const value of ["workspace-write", "danger-full-access"]) {
     const argv = codex.argv.map((token, index) => (index === codex.argv.indexOf("read-only") ? value : token));
     assert.deepEqual(dmCommandRefusals(codex, commandOf(codex, { argv })), ["argv_not_fixed"]);
     assert.deepEqual(dmForbiddenArgv("codex", argv), [`-s ${value}`]);
   }
-  const claude = planFor(ANTHROPIC, claudePaths);
+  const claude = planFor(ANTHROPIC, CLAUDE_REQUEST);
   for (const value of ["Bash", "default", "Read,Write"]) {
     const argv = claude.argv.map((token, index) => (index === claude.argv.indexOf("--tools") + 1 ? value : token));
     assert.deepEqual(dmCommandRefusals(claude, commandOf(claude, { argv })), ["argv_not_fixed"]);
@@ -328,7 +347,7 @@ test("codex: the sandbox value and claude's --tools value are refused when chang
 });
 
 test("any other difference in the argv is refused: order, a dropped or doubled token, another model or path", () => {
-  const plan = planFor(OPENAI, codexPaths);
+  const plan = planFor(OPENAI, CODEX_REQUEST);
   const variants = [
     plan.argv.slice(0, -1),
     [...plan.argv, "-"],
@@ -340,21 +359,21 @@ test("any other difference in the argv is refused: order, a dropped or doubled t
     plan.argv.map((token) => (token === "--ignore-user-config" ? "--ignore-user-config " : token)),
   ];
   for (const argv of variants) assert.deepEqual(dmCommandRefusals(plan, commandOf(plan, { argv })), ["argv_not_fixed"]);
-  const claude = planFor(ANTHROPIC, claudePaths);
+  const claude = planFor(ANTHROPIC, CLAUDE_REQUEST);
   const schemaAt = claude.argv.indexOf("--json-schema") + 1;
   const loosened = claude.argv.map((token, index) => (index === schemaAt ? token.replace('"additionalProperties":false,', "") : token));
   assert.deepEqual(dmCommandRefusals(claude, commandOf(claude, { argv: loosened })), ["argv_not_fixed"]);
 });
 
 test("the executable is the root-owned copy, never the account's own", () => {
-  const plan = planFor(OPENAI, codexPaths);
+  const plan = planFor(OPENAI, CODEX_REQUEST);
   for (const executable of ["/home/amux-dm-openai/.local/bin/codex", "codex", "/usr/bin/codex"]) {
     assert.deepEqual(dmCommandRefusals(plan, commandOf(plan, { executable })), ["executable_not_fixed"]);
   }
 });
 
 test("§5a: an environment other than the four fixed values is refused", () => {
-  const plan = planFor(ANTHROPIC, claudePaths);
+  const plan = planFor(ANTHROPIC, CLAUDE_REQUEST);
   const fixed = plan.environment;
   const variants = [
     [...fixed, ["LD_PRELOAD", "/tmp/x.so"]],
@@ -377,7 +396,7 @@ test("§5a: an environment other than the four fixed values is refused", () => {
   // Order does not matter; the set does.
   assert.deepEqual(dmCommandRefusals(plan, commandOf(plan, { environment: [...fixed].reverse() })), []);
   // The account's home belongs to its own instance.
-  const openai = planFor(OPENAI, codexPaths);
+  const openai = planFor(OPENAI, CODEX_REQUEST);
   assert.deepEqual(dmCommandRefusals(openai, commandOf(openai, { environment: plan.environment })), ["environment_not_fixed"]);
 });
 
@@ -481,6 +500,7 @@ test("unwrapping: the wrapper's value is the §6 output; anything else goes whol
 // ---------------------------------------------------------------------------
 
 const KEY = Buffer.alloc(32, 7);
+const OPENAI_PLAN = { instance: OPENAI, requestId: "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b" };
 const PAYLOAD = Buffer.from("A synthetic question.\n", "utf8");
 const evidence = (overrides = {}) => ({
   requestId: "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b",
@@ -492,7 +512,7 @@ const evidence = (overrides = {}) => ({
 });
 
 test("§10: the intent recorded for these exact bytes is the only permission to start", () => {
-  assert.equal(dmTransmitIntentRefusal(OPENAI, evidence(), KEY, PAYLOAD), null);
+  assert.equal(dmTransmitIntentRefusal(OPENAI_PLAN, evidence(), KEY, PAYLOAD), null);
   const missing = [
     undefined,
     null,
@@ -508,15 +528,21 @@ test("§10: the intent recorded for these exact bytes is the only permission to 
     { ...evidence(), extra: 1 },
     without(evidence(), "recorded"),
   ];
-  for (const value of missing) assert.equal(dmTransmitIntentRefusal(OPENAI, value, KEY, PAYLOAD), "transmit_intent_missing", JSON.stringify(value));
+  for (const value of missing) assert.equal(dmTransmitIntentRefusal(OPENAI_PLAN, value, KEY, PAYLOAD), "transmit_intent_missing", JSON.stringify(value));
   // Without the request key nothing can be checked.
-  assert.equal(dmTransmitIntentRefusal(OPENAI, evidence(), undefined, PAYLOAD), "transmit_intent_missing");
-  assert.equal(dmTransmitIntentRefusal(OPENAI, evidence(), Buffer.alloc(31), PAYLOAD), "transmit_intent_missing");
+  assert.equal(dmTransmitIntentRefusal(OPENAI_PLAN, evidence(), undefined, PAYLOAD), "transmit_intent_missing");
+  assert.equal(dmTransmitIntentRefusal(OPENAI_PLAN, evidence(), Buffer.alloc(31), PAYLOAD), "transmit_intent_missing");
   // Another instance's intent, other bytes, another key.
-  assert.equal(dmTransmitIntentRefusal(ANTHROPIC, evidence(), KEY, PAYLOAD), "transmit_intent_mismatch");
-  assert.equal(dmTransmitIntentRefusal(OPENAI, evidence(), KEY, Buffer.from("A synthetic question!\n")), "transmit_intent_mismatch");
-  assert.equal(dmTransmitIntentRefusal(OPENAI, evidence(), Buffer.alloc(32, 8), PAYLOAD), "transmit_intent_mismatch");
-  assert.equal(dmTransmitIntentRefusal(OPENAI, evidence(), KEY, Buffer.concat([PAYLOAD, Buffer.from("x")])), "transmit_intent_mismatch");
+  assert.equal(dmTransmitIntentRefusal({ instance: ANTHROPIC, requestId: OPENAI_PLAN.requestId }, evidence(), KEY, PAYLOAD), "transmit_intent_mismatch");
+  assert.equal(dmTransmitIntentRefusal(OPENAI_PLAN, evidence(), KEY, Buffer.from("A synthetic question!\n")), "transmit_intent_mismatch");
+  assert.equal(dmTransmitIntentRefusal(OPENAI_PLAN, evidence(), Buffer.alloc(32, 8), PAYLOAD), "transmit_intent_mismatch");
+  assert.equal(dmTransmitIntentRefusal(OPENAI_PLAN, evidence(), KEY, Buffer.concat([PAYLOAD, Buffer.from("x")])), "transmit_intent_mismatch");
+  // Another request's intent, even for the same bytes and instance.
+  assert.equal(dmTransmitIntentRefusal({ ...OPENAI_PLAN, requestId: "0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d" }, evidence(), KEY, PAYLOAD), "transmit_intent_mismatch");
+  // Bytes that are not bytes cannot be the recorded ones.
+  for (const payload of [PAYLOAD.toString("utf8"), [...PAYLOAD], null, undefined]) {
+    assert.equal(dmTransmitIntentRefusal(OPENAI_PLAN, evidence(), KEY, payload), "transmit_intent_mismatch");
+  }
 });
 
 // ---------------------------------------------------------------------------

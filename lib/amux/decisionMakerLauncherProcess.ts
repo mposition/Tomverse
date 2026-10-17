@@ -14,26 +14,34 @@ import {
 } from "./decisionMakerLauncherCore.ts";
 import {
   DM_SYSTEM_HOST,
-  dmCleanup,
+  dmCleanupVendor,
+  dmCreateTemporaryDirectory,
   dmHostPath,
   dmPreflightRefusals,
-  dmReadOutputFile,
+  dmReadRequestOutput,
   type DmLauncherHost,
 } from "./decisionMakerLauncherFs.ts";
 
 /**
  * The AMUX Decision Maker launcher's process half, the minimum:
  * docs/policy/amux-decision-maker.md policy version 2, §5 ("hard timeout",
- * "요청 디렉터리 삭제") and §5a, stage S2-3a.
+ * "요청 디렉터리 삭제") and §5a, stage S2-3a. It runs as the vendor account.
  *
- * One call is one request: plan, preflight (every check, all reported), and
- * only on an empty refusal list start the planned command with the question
+ * One call is one request: copy the payload, plan, preflight (every check,
+ * all reported), and only on an empty refusal list make the account's
+ * temporary directory and start the planned command with the copied payload
  * on stdin; kill the process group at the hard timeout; read the result from
  * its one place; and on every exit path -- refusal, spawn failure, a fault in
- * this module, a timeout -- delete the request's directories and the vendor
- * account's CLI state and verify that nothing is left. The report carries the
- * result and the cleanup outcome separately: `cleanup_unknown` is the
- * broker's to report (§5 latches the instance `off`), whatever the result.
+ * this module, a timeout -- delete the temporary directory and the account's
+ * CLI state and verify that nothing is left. The report carries the result
+ * and the cleanup outcome separately: `cleanup_unknown` is the broker's to
+ * report (§5 latches the instance `off`), whatever the result.
+ *
+ * The request directory is the broker's: the broker deletes it with
+ * `dmCleanupRequestDirectory()` (lib/amux/decisionMakerLauncherFs.ts) after
+ * this returns, on every path. This function never throws for anything a
+ * request can cause, so that call is always reached; it throws only when a
+ * caller passes a test seam on the system host.
  *
  * Not here: the broker daemon, the bridge socket, the app routes, the
  * snapshot (S2b), the installation (root-owned files, accounts, units,
@@ -51,12 +59,13 @@ export const DM_LAUNCH_STDOUT_CLOSE_GRACE_MS = 5_000;
 
 export type DmLaunchInput = {
   instance: unknown;
-  paths: unknown;
+  /** The app's request id. The request's two directories derive from it. */
+  requestId: unknown;
   /** The transmissions route's recorded answer (lib/amux/decisionMakerLauncherCore.ts `DmTransmitIntentEvidence`). */
   evidence: unknown;
   /** K_R, from the assignment response. */
   requestKey: unknown;
-  /** The exact bytes the process reads on stdin, and whose digest the intent recorded. */
+  /** The bytes whose digest the intent recorded. Copied once, at the call; later changes to it are not sent. */
   payload: Uint8Array;
 };
 
@@ -97,7 +106,7 @@ const runProcess = (
   host: DmLauncherHost,
   plan: DmExecutionPlan,
   command: DmCommand,
-  payload: Uint8Array,
+  payload: Buffer,
   timeoutMs: number,
 ): Promise<DmProcessObservation> =>
   new Promise((resolve) => {
@@ -119,10 +128,7 @@ const runProcess = (
       stdout: Buffer.concat(chunks),
       stdoutTruncated,
       stdoutClosed,
-      outputFile:
-        plan.cli === "codex" && plan.paths.outputFile !== null
-          ? dmReadOutputFile(dmHostPath(host, plan.paths.outputFile), DM_LAUNCH_OUTPUT_MAX_BYTES)
-          : null,
+      outputFile: dmReadRequestOutput(host, plan, DM_LAUNCH_OUTPUT_MAX_BYTES),
     });
 
     let child: ChildProcess;
@@ -179,7 +185,8 @@ const runProcess = (
       child.stdin?.on("error", () => {
         stdinFailed = true;
       });
-      child.stdin?.end(Buffer.from(payload));
+      // The launcher's own copy, the one the intent check digested.
+      child.stdin?.end(payload);
     });
 
     child.once("exit", (exitCode, signal) => {
@@ -201,13 +208,18 @@ const runProcess = (
   });
 
 /**
- * One request, start to cleanup. Never throws for anything the request can
- * cause; a fault here is `launcher_fault`, and cleanup still runs.
+ * One request, start to the vendor account's cleanup. Never throws for
+ * anything the request can cause; a fault here is `launcher_fault`, and
+ * cleanup still runs.
  */
 export async function launchDecisionMaker(
   input: DmLaunchInput,
   options: DmLaunchOptions = {},
 ): Promise<DmLaunchReport> {
+  // §2-4 "그 바이트 그대로": one copy, taken before anything asynchronous, is
+  // what the intent check digests and what stdin receives. The caller's
+  // buffer is not read again.
+  const payload: Buffer | null = input.payload instanceof Uint8Array ? Buffer.from(input.payload) : null;
   const host = options.host ?? DM_SYSTEM_HOST;
   // Both test seams are refused on the system host before anything is read or deleted.
   const timeoutMs = timeoutFor(host, options.timeoutMs);
@@ -221,9 +233,9 @@ export async function launchDecisionMaker(
     };
   }
   const instance = input.instance;
-  const planned = dmExecutionPlan(instance, input.paths);
+  const planned = dmExecutionPlan(instance, input.requestId);
   if (!planned.ok) {
-    return { result: { outcome: "refused", refusals: [planned.refusal] }, cleanup: dmCleanup(host, instance, null) };
+    return { result: { outcome: "refused", refusals: [planned.refusal] }, cleanup: dmCleanupVendor(host, instance, null) };
   }
   const { plan } = planned;
   const command: DmCommand = { executable: plan.executable, argv: plan.argv, environment: plan.environment };
@@ -231,15 +243,15 @@ export async function launchDecisionMaker(
   try {
     const refusals = dmPreflightRefusals(
       host,
-      { plan, command, evidence: input.evidence, requestKey: input.requestKey, payload: input.payload },
+      { plan, command, evidence: input.evidence, requestKey: input.requestKey, payload },
       options.expectedExecutableSha256 === undefined ? {} : { expectedExecutableSha256: options.expectedExecutableSha256 },
     );
-    result =
-      refusals.length > 0
-        ? { outcome: "refused", refusals }
-        : dmClassifyProcess(plan.cli, await runProcess(host, plan, command, input.payload, timeoutMs));
+    if (refusals.length > 0) result = { outcome: "refused", refusals };
+    else if (payload === null) result = { outcome: "refused", refusals: ["transmit_intent_mismatch"] };
+    else if (!dmCreateTemporaryDirectory(host, plan)) result = { outcome: "refused", refusals: ["request_directories_unusable"] };
+    else result = dmClassifyProcess(plan.cli, await runProcess(host, plan, command, payload, timeoutMs));
   } catch {
     result = { outcome: "unavailable", reason: "launcher_fault" };
   }
-  return { result, cleanup: dmCleanup(host, instance, plan.paths) };
+  return { result, cleanup: dmCleanupVendor(host, instance, plan.requestId) };
 }
