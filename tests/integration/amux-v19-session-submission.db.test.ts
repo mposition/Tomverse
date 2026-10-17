@@ -579,7 +579,7 @@ test("session claim insert binds its audit to the exact UTC budget month", async
   const previous = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findFirstOrThrow({
     where: { reservationId: committedReservationId, invocationOrdinal: 0 },
   });
-  await assert.rejects(prisma.$transaction(async (tx) => {
+  const tryClaim = (auditMonth: Date) => prisma.$transaction(async (tx) => {
     const ideaId = randomUUID();
     const submission = await commitAmuxIdeaSessionSubmission(tx, {
       inspected: inspect(ideaId), expectedAuthority: authority,
@@ -599,8 +599,7 @@ test("session claim insert binds its audit to the exact UTC budget month", async
       metadata: { reservationId: reservation.reservationId,
         invocationOrdinal: 0, requestId,
         namespace: previous.namespace,
-        monthStart: new Date(previous.monthStart.getTime() + 32 * 86_400_000)
-          .toISOString(),
+        monthStart: auditMonth.toISOString(),
         priceVersionId: previous.priceVersionId,
         reservedMicroUsd: previous.reservedMicroUsd.toString() },
     });
@@ -622,23 +621,35 @@ test("session claim insert binds its audit to the exact UTC budget month", async
       reservedMicroUsd: previous.reservedMicroUsd,
       status: "in_flight", claimAuditLogId: auditId,
     } });
-    throw new Error("synthetic rollback if month guard regresses");
-  }), (error: unknown) => sqlState(error) === "23514");
+    throw new Error("valid month control rolled back");
+  });
+  await assert.rejects(tryClaim(previous.monthStart),
+    (error: unknown) => error instanceof Error &&
+      error.message === "valid month control rolled back");
+  const nextMonth = new Date(Date.UTC(previous.monthStart.getUTCFullYear(),
+    previous.monthStart.getUTCMonth() + 1, 1));
+  await assert.rejects(tryClaim(nextMonth),
+    (error: unknown) => sqlState(error) === "23514");
 });
 
 test("known session outcome cannot settle at zero even with lifecycle trigger bypassed", async () => {
   const known = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findFirstOrThrow({
     where: { reservationId: committedReservationId, status: "succeeded" },
   });
-  await assert.rejects(prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(
-      'ALTER TABLE "AmuxIdeaSessionAnalysisBudgetClaim" DISABLE TRIGGER "AmuxIdeaSessionAnalysisBudgetClaim_guard"');
-    await tx.amuxIdeaSessionAnalysisBudgetClaim.update({
-      where: { id: known.id },
-      data: { settledMicroUsd: BigInt(0) },
+  const tryZeroSettlement = (status: "succeeded" | "failed") =>
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'ALTER TABLE "AmuxIdeaSessionAnalysisBudgetClaim" DISABLE TRIGGER "AmuxIdeaSessionAnalysisBudgetClaim_guard"');
+      await tx.amuxIdeaSessionAnalysisBudgetClaim.update({
+        where: { id: known.id },
+        data: { status, settledMicroUsd: BigInt(0) },
+      });
+      throw new Error("synthetic rollback if positive settlement check regresses");
     });
-    throw new Error("synthetic rollback if positive settlement check regresses");
-  }), (error: unknown) => sqlState(error) === "23514");
+  for (const status of ["succeeded", "failed"] as const) {
+    await assert.rejects(tryZeroSettlement(status),
+      (error: unknown) => sqlState(error) === "23514");
+  }
 });
 
 test("queue guard rejects missing and null system audit identity", async () => {
