@@ -136,7 +136,10 @@ const runProcess = (
       child = spawn(dmHostPath(host, command.executable), command.argv.slice(1), {
         argv0: command.argv[0],
         cwd: dmHostPath(host, plan.workingDirectory),
-        env: Object.fromEntries(command.environment),
+        // Exactly the four fixed variables (§5a). Next's augmentation makes
+        // ProcessEnv require NODE_ENV; adding it would break the fixed
+        // environment, so only the type is widened here.
+        env: Object.fromEntries(command.environment) as NodeJS.ProcessEnv,
         stdio: ["pipe", "pipe", "ignore"],
         detached: process.platform !== "win32",
         shell: false,
