@@ -82,6 +82,8 @@ test("local v19 poll rejects redirects, unbounded or content-bearing responses",
       { kind: "unavailable" });
     assert.deepEqual(await poll({ fetchImpl: async () => new Response(null, { status: 409 }) }),
       { kind: "disabled" });
+    assert.deepEqual(await poll({ after: "stale_cursor", fetchImpl: async () =>
+      new Response(null, { status: 400 }) }), { kind: "cursor_rejected" });
     assert.deepEqual(await poll({ fetchImpl: async () => { throw Error("sensitive transport"); } }),
       { kind: "unavailable" });
     for (const body of [
