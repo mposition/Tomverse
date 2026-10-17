@@ -181,8 +181,9 @@ export async function purgeDueAmuxOrphanReadManifestKeys(
       catch { await retryDelete(target); }
       await completeClaim(item, item.claimAuditLogId);
       keysDeleted += 1;
-    } catch {
-      firstError ??= new AmuxContentRetirementError("outcome_unknown", target);
+    } catch (error) {
+      firstError ??= error instanceof AmuxContentRetirementError ? error :
+        new AmuxContentRetirementError("outcome_unknown", target);
     }
   }
   const due = await prisma.$queryRaw<IntentIdentity[]>`
@@ -207,8 +208,9 @@ export async function purgeDueAmuxOrphanReadManifestKeys(
       await deleteKey(target);
       await completeClaim(item, claimAuditLogId);
       keysDeleted += 1;
-    } catch {
-      firstError ??= new AmuxContentRetirementError("outcome_unknown", target);
+    } catch (error) {
+      firstError ??= error instanceof AmuxContentRetirementError ? error :
+        new AmuxContentRetirementError("outcome_unknown", target);
     }
   }
   if (firstError) throw firstError;

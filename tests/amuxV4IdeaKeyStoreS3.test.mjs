@@ -100,11 +100,14 @@ test("claimed read-manifest retirement retries exact S3 versions", async () => {
   const versions = new Set(["key-version-1"]);
   const deletes = [];
   let failMode = "before";
+  let versioningStatus = "Enabled";
+  let unversionedPresent = false;
   const server = createServer((request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     if (request.method === "GET" && url.searchParams.has("versioning")) {
       response.writeHead(200, { "Content-Type": "application/xml" });
-      response.end("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>");
+      response.end(`<VersioningConfiguration>${versioningStatus ?
+        `<Status>${versioningStatus}</Status>` : ""}</VersioningConfiguration>`);
     } else if (request.method === "GET" && url.searchParams.has("versions")) {
       const key = url.searchParams.get("prefix");
       response.writeHead(200, { "Content-Type": "application/xml" });
@@ -112,7 +115,8 @@ test("claimed read-manifest retirement retries exact S3 versions", async () => {
         [...versions].map((version) => `<Version><Key>${key}</Key><VersionId>${version}</VersionId></Version>`).join("")
       }</ListVersionsResult>`);
     } else if (request.method === "HEAD") {
-      response.writeHead(versions.size ? 200 : 404); response.end();
+      response.writeHead(versions.size || unversionedPresent ? 200 : 404);
+      response.end();
     } else if (request.method === "DELETE") {
       const version = url.searchParams.get("versionId");
       deletes.push(version);
@@ -120,7 +124,8 @@ test("claimed read-manifest retirement retries exact S3 versions", async () => {
         failMode = "none";
         response.writeHead(503); response.end(); return;
       }
-      versions.delete(version);
+      if (version === null) unversionedPresent = false;
+      else versions.delete(version);
       if (failMode === "after") {
         failMode = "none";
         response.writeHead(503); response.end(); return;
@@ -157,6 +162,22 @@ test("claimed read-manifest retirement retries exact S3 versions", async () => {
     assert.deepEqual(deletes, ["key-version-1", "key-version-1",
       "key-version-2"], "a lost success never creates another delete marker");
     assert.equal(versions.size, 0);
+    versioningStatus = "Suspended";
+    versions.add("null");
+    await retireClaimedAmuxReadManifestKey(identity, env);
+    assert.equal(deletes.at(-1), "null");
+    assert.equal(versions.size, 0);
+    versioningStatus = "";
+    unversionedPresent = true;
+    await retireClaimedAmuxReadManifestKey(identity, env);
+    assert.equal(deletes.at(-1), null);
+    assert.equal(unversionedPresent, false);
+    versioningStatus = "Unknown";
+    versions.add("unexpected-status-key");
+    const priorDeletes = deletes.length;
+    await assert.rejects(retireClaimedAmuxReadManifestKey(identity, env),
+      { code: "outcome_unknown" });
+    assert.equal(deletes.length, priorDeletes);
   } finally {
     await new Promise((resolve, reject) => server.close((error) =>
       error ? reject(error) : resolve()));
