@@ -8,6 +8,7 @@ import {
   marketingCompetitorDisplayNameSchema,
   marketingCompetitorHostsSchema,
   marketingCompetitorIdSchema,
+  marketingCompetitorPagesSchema,
   MarketingCompetitorRefusedError,
 } from "@/lib/marketingCompetitorCore";
 import { createApprovedMarketingCompetitor } from "@/lib/marketingCompetitorStore";
@@ -17,6 +18,7 @@ const schema = z
     competitorId: marketingCompetitorIdSchema,
     displayName: marketingCompetitorDisplayNameSchema,
     officialHosts: marketingCompetitorHostsSchema,
+    trackedPages: marketingCompetitorPagesSchema,
   })
   .strict();
 
@@ -25,7 +27,7 @@ const schema = z
  * created (S3f-R3). Its hosts become sources for market facts, which starts
  * something, so the kill switch refuses it.
  *
- * The audit row records the name and hosts after normalisation -- the same
+ * The audit row records the name, hosts and pages after normalisation -- the same
  * values the store writes -- because the registry's write guard compares the
  * two exactly.
  */
@@ -43,6 +45,7 @@ export async function POST(req: Request) {
       previousDecisionAuditLogId: MARKETING_COMPETITOR_NO_DECISION,
       displayName: body.displayName,
       officialHosts: body.officialHosts,
+      trackedPages: body.trackedPages,
     }),
     refusal: (error) =>
       error instanceof MarketingCompetitorRefusedError

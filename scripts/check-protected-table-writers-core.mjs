@@ -2151,6 +2151,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
   },
   {
+    path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "Replaces the registry's write guard so tracked pages move only into an approval and match the person's audit row. Its one AdminAuditLog mention is that guard's read of the decision's own audit row. No audit row is written.",
+  },
+  {
+    path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
+    table: "MarketingCompetitor",
+    tableMentions: 4,
+    writeVerbs: 4,
+    reason:
+      "Adds the tracked-pages column, its two checks (pages on the row's own hosts; a proposal tracks nothing) and the replaced write guard. It writes no row.",
+  },
+  {
     path: "prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -2333,6 +2349,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
+    count: 1,
+    reason:
+      "The replaced write guard's one read of the decision's own AdminAuditLog row, with EXECUTE over a name built from TG_TABLE_SCHEMA because the function pins search_path to pg_catalog, pg_temp. The schema is quoted with %I and the id is bound with USING. It reads and never writes.",
+  },
   {
     path: "prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql",
     count: 1,

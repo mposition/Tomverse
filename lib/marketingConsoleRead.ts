@@ -560,6 +560,7 @@ export async function readMarketingConsole(
         id: true,
         displayName: true,
         officialHosts: true,
+        trackedPages: true,
         status: true,
         proposedBy: true,
         proposedRunId: true,

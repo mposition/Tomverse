@@ -1422,6 +1422,10 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   승인한 host이고, `knownIds`는 상태와 무관하게 등록부가 아는 id 전부이며 자르지 않습니다(거절도 답이므로 다시 제안하지 않게;
   크기는 문맥 route의 byte 상한이 자르지 않고 거절합니다).
   host는 이름이지 URL이 아니며, A5 메시지에는 싣지 않습니다(`tests/marketingGeneratorDraftingCore.test.mjs`).
+- **S3f-R5a(추적 페이지)**: `prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql`,
+  `MarketingCompetitor.trackedPages`(운영자 결정 2026-10-17: 사실은 사람이 승인한 고정 페이지에서, 웹 검색은 신규 경쟁사 탐색에만).
+  페이지는 그 행의 공식 host 위의 https URL이고(DB CHECK), 제안 상태에는 없으며, 이름·host처럼 승인으로만 바뀌고 승인 감사 행의
+  `trackedPages`와 정확히 대조됩니다. 생성기 문맥에서 URL이 나오는 곳은 이 페이지뿐이며 A5에는 가지 않습니다.
 
 # 엔지니어링 Agent
 

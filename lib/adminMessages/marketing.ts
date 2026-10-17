@@ -197,6 +197,10 @@ export const adminMarketingMessages = defineAdminMessages({
     fieldOfficialHosts: "Official hosts",
     hintCompetitorId: "Lower case letters, digits, - and _.",
     hintOfficialHosts: "Exact host names, comma separated. A subdomain is a different host.",
+    fieldTrackedPages: "Pages A3 reads",
+    hintTrackedPages:
+      "Up to 10 https URLs, one per line, each on one of the hosts above (a pricing page, a changelog). Facts come only from these pages.",
+    colTrackedPages: "Tracked pages:",
     unavailableS4:
       "Comment monitoring is built in stage S4. Nothing writes this section yet, so it is empty because it is unbuilt rather than because nothing is waiting.",
     unavailableS5:
@@ -444,6 +448,10 @@ export const adminMarketingMessages = defineAdminMessages({
     fieldOfficialHosts: "공식 host",
     hintCompetitorId: "영어 소문자, 숫자, -와 _만 씁니다.",
     hintOfficialHosts: "정확한 host 이름을 쉼표로 구분합니다. 하위 도메인은 다른 host입니다.",
+    fieldTrackedPages: "A3가 읽을 페이지",
+    hintTrackedPages:
+      "https URL을 한 줄에 하나씩 최대 10개, 위 host 중 하나에 있는 페이지(가격 페이지, 변경 기록 등)입니다. 시장 사실은 이 페이지에서만 나옵니다.",
+    colTrackedPages: "추적 페이지:",
     unavailableS4:
       "댓글 모니터링은 S4 단계에서 만듭니다. 아직 이 구획에 쓰는 것이 없으므로, 기다리는 일이 없어서가 아니라 아직 만들지 않아서 비어 있습니다.",
     unavailableS5:
