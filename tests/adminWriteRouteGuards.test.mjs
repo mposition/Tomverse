@@ -107,8 +107,11 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
 // no new write or outbound capability, and both latch states stay pinned.
 // v19 orphan-key retirement adds a readback-only S3 verifier to the existing
 // key-store module; the preview closure still has 13 files and no new call.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "73c2164d38f0314f4bad28cc6bd87019a9278140b5334efc40bbb7eb2080caf2";
-const SOURCE_SCOPE_DISABLED_DIGEST = "1e2ba205de679513f2e2c15cdfd632590015bbcd360bb73c7f0a488ce293f6f6";
+// The orphan sweeper's version-specific delete is exported from the same key
+// store but is not called by this read-only preview; its 13-file closure and
+// route's read-only transaction remain fixed in both latch states.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "68800dbe53836b6db12615ccac1a7a2969642d4f98dac26b831b0f4be5f4bc37";
+const SOURCE_SCOPE_DISABLED_DIGEST = "3ce80f0e6aee081a1fe251b962531614fe78d9001a2325f13b912710605c0e8c";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -162,8 +165,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // does not add a writer, import, or outbound call to the resolution preview.
 // The same verifier changes the existing 17-file closure without changing
 // the preview's route, imports, writer scan, or outbound-call guard.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "ab78e97fef13e9144d0d07a7e4276b7a9e585259bde98a6d99b244f619b3040b";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "a9194bf90f95fe2df6f1771fe174195f9c2e4a793158d483e08f741bfd4d793e";
+// The exact-version retirement export is not invoked by the resolution
+// reader. Its 17-file closure and read-only route/service guards remain fixed.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "2f4810eef7154e220c45aad3a537b7c48f977b78db5b67a10616b0705926585e";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "ced20122d2f98361c787a8a32d378bc71dd2846242b1fb74a876efe2c4298b4c";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
