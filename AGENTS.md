@@ -1706,6 +1706,31 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   것은 운영자의 `amux.decision.latch_release`뿐입니다. cleanup_unknown 보고는 원장 사건 종류가 필요해 migration을 갖는 별도
   조각입니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 + setup + fence이고, request unit 테스트가 그 셈을, request·body
   DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
+- **S2-3a(전용 launcher의 결정적 핵심)**: `lib/amux/decisionMakerLauncherCore.ts`,
+  `lib/amux/decisionMakerLauncherFs.ts`, `lib/amux/decisionMakerLauncherProcess.ts`,
+  `tests/amuxDecisionMakerLauncherCore.test.mjs`, `tests/amuxDecisionMakerLauncherFs.test.mjs`,
+  `tests/amuxDecisionMakerLauncherProcess.test.mjs`, `tests/support/amuxDmLauncherFixture.mjs`.
+  정책 버전 2의 고정 실행 조건(docs/policy/amux-decision-maker.md §5a)을 코드로 옮긴 것이며, **core 테스트가 그 절의 본문을 읽어
+  argv·실행 파일 sha256·고정 환경·삭제/남김 목록·거부 argv를 대조합니다** — 정책과 코드 한쪽만 바꾸면 실패합니다. 시작 허가는
+  preflight의 빈 거부 목록 하나뿐이고, 그 목록은 모든 검사를 돌려 전부 보고합니다. 실행 digest(`amux-json-v1`의 sha256)는 앱의
+  `amuxCanonicalJson`으로 계산하고 기록값은 core의 상수이며, 그 값을 테스트가 다시 고정합니다. **전송 의도는
+  route의 기록 응답이 이 요청 id·인스턴스의 것이고, 그 payload digest가 stdin으로 보낼 바이트의 `dmPayloadDigest(K_R, …)`와
+  같을 때만 증거입니다.** payload는 호출 순간 첫 비동기 경계 전에 한 번 복사하고, 그 복사본 하나로 digest를 검사하고 stdin에
+  보냅니다 — 호출자가 그 뒤 버퍼를 바꿔도 보내는 바이트는 기록과 같습니다. **요청은 경로를 넘기지 않습니다.** 요청 디렉터리는
+  S0이 만든 broker 소유 `/var/lib/amux-dm/requests` 아래, 임시 디렉터리는 계정 홈의 `dm-scratch` 아래에 요청 id 한 단계로만
+  생기고, 읽기·만들기·지우기 전에 `/`부터 각 디렉터리를 lstat로 확인합니다(link 아님, S0의 소유자, 그룹·다른 사용자 쓰기 없음,
+  홈과 임시 디렉터리는 `0700`). 지울 대상도 같은 기준을 통과해야 하고, 확인한 부모 안에서 옆 이름으로 rename한 뒤 inode가
+  같아야 합니다. **재귀 `rm`은 쓰지 않습니다** — 직접 깊이 우선으로 돌며 link·파일·특수 파일은 unlink만 하고, 하위 디렉터리는
+  정리 계정 소유이고 그룹·다른 사용자 쓰기가 없을 때만, link를 따르지 않고 연 inode가 lstat과 같을 때만 들어가 비운 뒤 `rmdir`합니다.
+  그래서 정리 중에 항목을 바꿔치기할 수 있는 주체는 root와 정리하는 계정의 다른 프로세스뿐입니다. 확인에 실패하면 그 자리에서
+  멈추고 아무것도 읽거나 지우지 않으며 `cleanup_unknown`입니다. 결과는
+  codex `-o` 파일과 claude `structured_output`에서만 읽고, 스키마의 `output` 감싸개만 벗겨 앱의 출력 검증
+  (docs/policy/amux-decision-maker.md §6)에 넘깁니다. 정리는 둘로 나뉩니다 — launcher(공급사 계정)는 거부·실패·시간 초과·
+  launcher 오류를 포함한 모든 종료 경로에서 임시 디렉터리와 CLI 상태를 지우고 확인하며, broker는 launcher가 돌아온 뒤 언제나
+  `dmCleanupRequestDirectory()`로 요청 디렉터리를 지웁니다. 남김 목록 밖에 무엇이든 남거나 확인하지 못하면 `cleanup_unknown`을
+  결과와 따로 보고합니다(latch는 앱의 일). 실행 파일·스키마의 root 소유 경로와 임시 디렉터리 위치는 정책 본문에 없는 launcher
+  상수입니다. 테스트용 host만 다른 실행 파일 sha256·timeout·소유자를 받고, 시스템 host에서는 sha256·timeout override가 거부됩니다.
+  broker·bridge·route 호출·설치·unit은 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 
