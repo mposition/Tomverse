@@ -12,6 +12,7 @@ let role = "owner";
 let readCount = 0;
 let writeCount = 0;
 let readError = null;
+let writeError = null;
 let originAllowed = true;
 
 class AmuxSessionBudgetResolutionError extends Error {
@@ -46,6 +47,7 @@ mock.module("@/lib/amux/ideaSessionAnalysisBudgetResolutionService", {
     },
     commitAmuxSessionBudgetUnknownResolution: async () => {
       writeCount += 1;
+      if (writeError) throw writeError;
       return { claimId, status: "owner_consumed", settledMicroUsd: "5000" };
     },
   },
@@ -103,6 +105,7 @@ test("owner GET requires one exact claim ID and returns content-free unknown rea
 
 test("owner POST is separately switched, same-origin and exact-body gated", async () => {
   const route = await routePromise;
+  process.env[readSwitch] = "enabled";
   const body = { claimId, verification: "not_proven",
     localEvidenceDigest: "b".repeat(64), readbackDigest: "a".repeat(64),
     ownerConfirmed: true };
@@ -123,12 +126,16 @@ test("owner POST is separately switched, same-origin and exact-body gated", asyn
   assert.equal(response.status, 201);
   assert.equal((await response.json()).retryAutomatically, false);
   assert.equal(writeCount, 1);
+  writeError = { code: "reauth" };
+  const stepUp = await send({ "content-type": "application/json" });
+  assert.equal(stepUp.status, 428);
+  writeError = null;
 });
 
-test("owner GET maps step-up and integrity failures without exposing claim content", async () => {
+test("owner GET maps integrity failures without exposing claim content", async () => {
   const route = await routePromise;
+  process.env[readSwitch] = "enabled";
   for (const [error, status] of [
-    [{ code: "reauth" }, 428],
     [new AmuxSessionBudgetResolutionError("integrity_unavailable"), 503],
     [new AmuxSessionBudgetResolutionError("not_resolvable"), 409],
   ]) {
