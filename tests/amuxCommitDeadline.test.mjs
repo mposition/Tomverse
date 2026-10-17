@@ -469,6 +469,11 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
 });
 
 test("only the named AMUX receipt and admission routes open direct transactions", () => {
+  const assertBefore = (source, guard, transaction = "prisma.$transaction") => {
+    assert.ok(source.includes(guard), `missing guard: ${guard}`);
+    assert.ok(source.includes(transaction), `missing transaction: ${transaction}`);
+    assert.ok(source.indexOf(guard) < source.indexOf(transaction));
+  };
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
@@ -485,10 +490,8 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   ]);
   const stopPoll = withoutComments(read(
     "app/api/internal/amux/v19/analysis-stop/route.ts"));
-  assert.ok(stopPoll.indexOf("isAmuxV4AnalysisAgentAuthorized") <
-    stopPoll.indexOf("prisma.$transaction"));
-  assert.ok(stopPoll.indexOf('process.env[READ_ENV] !== "enabled"') <
-    stopPoll.indexOf("prisma.$transaction"));
+  assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized");
+  assertBefore(stopPoll, 'process.env[READ_ENV] !== "enabled"');
   assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   const checkoutEvidence = withoutComments(read(
     "app/api/internal/amux/v19/checkout-evidence/route.ts"));
@@ -496,14 +499,10 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "export async function POST", "export async function GET");
   const evidenceRead = checkoutEvidence.slice(
     checkoutEvidence.indexOf("export async function GET"));
-  assert.ok(evidenceWrite.indexOf("authorized(request)") <
-    evidenceWrite.indexOf("prisma.$transaction"));
-  assert.ok(evidenceWrite.indexOf('process.env[WRITE_ENV] !== "enabled"') <
-    evidenceWrite.indexOf("prisma.$transaction"));
-  assert.ok(evidenceWrite.indexOf('process.env[READ_ENV] !== "enabled"') <
-    evidenceWrite.indexOf("prisma.$transaction"));
-  assert.ok(evidenceRead.indexOf('process.env[READ_ENV] !== "enabled"') <
-    evidenceRead.indexOf("prisma.$transaction"));
+  assertBefore(evidenceWrite, "authorized(request)");
+  assertBefore(evidenceWrite, 'process.env[WRITE_ENV] !== "enabled"');
+  assertBefore(evidenceWrite, 'process.env[READ_ENV] !== "enabled"');
+  assertBefore(evidenceRead, 'process.env[READ_ENV] !== "enabled"');
   assert.ok(!evidenceRead.includes("process.env[WRITE_ENV]"));
   assert.match(evidenceWrite, /maxWait: 3_000, timeout: 12_000/);
   assert.match(evidenceRead, /maxWait: 3_000, timeout: 10_000/);
