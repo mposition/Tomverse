@@ -7,12 +7,14 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   DM_SWITCH_AUDIT_TARGET_TYPE,
+  decisionMakerSwitchReadFromRows,
   decisionMakerSwitchStateFromRows,
   dmOperatorSwitchAction,
   dmSwitchAuditMetadata,
   parseDmOperatorSwitchChange,
   parseDmSwitchLatch,
   unreadableDecisionMakerSwitches,
+  type DecisionMakerSwitchRead,
   type DecisionMakerSwitchState,
   type DmSwitchActorKind,
 } from "@/lib/amux/decisionMakerSwitchCore";
@@ -76,6 +78,31 @@ export async function readDecisionMakerSwitches(
   } catch {
     return unreadableDecisionMakerSwitches();
   }
+}
+
+/**
+ * The switch state and each instance's newest event with its actor and
+ * database clock, in one statement: what the request ledger's writers read
+ * (lib/amux/decisionMakerRequestStore.ts) -- the state for §6's table, and
+ * the boundary §8's validation count starts from, so a routing or a
+ * transmission intent can refuse an instance whose latch is owed without a
+ * statement more (docs/policy/amux-decision-maker.md §8, §9). The caller
+ * holds the audit chain lock, which every switch change takes before it
+ * writes, so what is read here is still the newest when it commits. A row the
+ * mapping does not accept is the unreadable read; a statement that fails is
+ * not caught, as above.
+ */
+export async function readDecisionMakerSwitchesWithBoundariesOrThrow(
+  client: SwitchReader,
+): Promise<DecisionMakerSwitchRead> {
+  const rows = await client.$queryRaw<Array<{ scope: string; value: string; actorKind: string; createdAtEpochMs: bigint }>>`
+    SELECT DISTINCT ON ("scope")
+      "scope", "value", "actorKind",
+      floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"
+    FROM "AmuxDecisionMakerSwitchEvent"
+    ORDER BY "scope", "sequence" DESC
+  `;
+  return decisionMakerSwitchReadFromRows(rows);
 }
 
 export class DecisionMakerSwitchWriteError extends Error {
@@ -190,8 +217,10 @@ export async function recordDecisionMakerSwitchByOperator(
  * failures; §5: a request directory whose deletion could not be confirmed).
  * The latch is always written, even over an instance that is already `off`:
  * the operator then has to release it before the instance can propose again,
- * and a second cause is a second record. The audit comes first, under the
- * instance's own actor, then the event naming it.
+ * and a second cause is a second record. Whether a latch is due is the
+ * caller's decision (lib/amux/decisionMakerRequestStore.ts): §8's count does
+ * not latch an instance whose newest event is already a latch. The audit
+ * comes first, under the instance's own actor, then the event naming it.
  *
  * Statements: the system writer's 3 (4 with an integrity key), 1 insert --
  * 4, or 5.

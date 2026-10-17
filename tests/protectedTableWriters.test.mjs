@@ -1080,14 +1080,25 @@ test("every append-only ledger table is one an exact migration protects", () => 
     "AmuxV22ReadOnlyLaunchProof",
   ]);
   const apiAccessTables = new Set(["AmuxV22ApiModelAccessEvidence"]);
-  const trackedCheckoutTables = new Set(["AmuxIdeaTrackedCheckoutEvidence"]);
+  const trackedCheckoutTables = new Set([
+    "AmuxIdeaTrackedCheckoutEvidence",
+    "AmuxIdeaTrackedCheckoutReadManifest",
+  ]);
+  const trackedCheckoutReadSql = readFileSync(
+    new URL(
+      "../prisma/migrations/20261017010000_amux_v19_tracked_checkout_read_manifest/migration.sql",
+      import.meta.url
+    ), "utf8"
+  );
   const sessionAnalysisReservationTables =
     new Set(["AmuxIdeaSessionAnalysisReservation"]);
   for (const table of APPEND_ONLY_LEDGER_TABLES) {
     const sql = recoveryTables.has(table) ? recoverySql :
       riskRetryTables.has(table) ? riskRetrySql :
         apiAccessTables.has(table) ? apiAccessSql :
-          trackedCheckoutTables.has(table) ? trackedCheckoutSql :
+          trackedCheckoutTables.has(table) ?
+            table === "AmuxIdeaTrackedCheckoutReadManifest" ? trackedCheckoutReadSql :
+              trackedCheckoutSql :
             sessionAnalysisReservationTables.has(table)
               ? sessionAnalysisReservationSql : emailSql;
     assert.match(

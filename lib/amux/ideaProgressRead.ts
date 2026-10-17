@@ -18,6 +18,15 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   reviewPullRequests: Array<{ number: number; displayKey: string | null }>;
   /** The idea's Task cards in registration order, for its detail view. */
   taskRows: Array<{ displayKey: string | null; status: string; reviewPrNumber: number | null; merged: boolean }>;
+  /** Content-free proof for each prepared v19 reference, in source order. */
+  checkoutEvidence: Array<{
+    referenceOrdinal: number;
+    pinnedCommitSha: string;
+    excludedCount: number;
+    excludedReasons: { secretPath: number; secretContent: number;
+      nonRegular: number; unscannableContent: number };
+    readManifest: { fileCount: number; digest: string; bodyPurged: boolean } | null;
+  }>;
 };
 
 /**
@@ -60,9 +69,17 @@ type SqlCard = {
   id: string; cardType: string | null; status: string; reviewPrNumber: number | null;
   terminal: boolean; displayKey: string | null;
 };
+type SqlCheckoutEvidence = {
+  referenceOrdinal: number; pinnedCommitSha: string; excludedCount: number;
+  secretPath: number; secretContent: number; nonRegular: number;
+  unscannableContent: number;
+  readFileCount: number | null; readDigest: string | null;
+  readBodyPurged: boolean;
+};
 type SqlIdea = {
   id: string; requestId: string; state: string; submittedAtMs: number; cancelled: boolean;
   proposedUnits: number; chunks: SqlChunk[] | null; cards: SqlCard[] | null;
+  checkoutEvidence: SqlCheckoutEvidence[] | null;
 };
 
 export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
@@ -102,7 +119,22 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
           'displayKey', w."displayKey") ORDER BY w."createdAt" ASC, w."id" ASC)
         FROM "AmuxIdeaUnitDecision" d
         JOIN "AmuxWorkItem" w ON w."id" = d."registeredWorkItemId"
-        WHERE d."ideaId" = n."id" AND d."action" = 'register_card' AND d."state" = 'consumed') AS "cards"
+        WHERE d."ideaId" = n."id" AND d."action" = 'register_card' AND d."state" = 'consumed') AS "cards",
+      (SELECT json_agg(json_build_object(
+          'referenceOrdinal', e."referenceOrdinal",
+          'pinnedCommitSha', e."pinnedCommitSha",
+          'excludedCount', e."excludedCount",
+          'secretPath', e."excludedSecretPathCount",
+          'secretContent', e."excludedSecretContentCount",
+          'nonRegular', e."excludedNonRegularCount",
+          'unscannableContent', e."excludedUnscannableCount",
+          'readFileCount', m."fileCount", 'readDigest', m."digest",
+          'readBodyPurged', m."bodyPurgedAt" IS NOT NULL)
+          ORDER BY e."referenceOrdinal")
+        FROM "AmuxIdeaTrackedCheckoutEvidence" e
+        LEFT JOIN "AmuxIdeaTrackedCheckoutReadManifest" m
+          ON m."ideaId" = e."ideaId" AND m."referenceOrdinal" = e."referenceOrdinal"
+        WHERE e."ideaId" = n."id") AS "checkoutEvidence"
     FROM newest n
     ORDER BY n."submittedAt" DESC, n."id" ASC
   `;
@@ -128,6 +160,17 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey })),
       taskRows: own.filter((card) => card.cardType !== "story").map((card) => ({ displayKey: card.displayKey,
         status: card.status, reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
+      checkoutEvidence: (idea.checkoutEvidence ?? []).map((evidence) => ({
+        referenceOrdinal: evidence.referenceOrdinal,
+        pinnedCommitSha: evidence.pinnedCommitSha,
+        excludedCount: evidence.excludedCount,
+        excludedReasons: { secretPath: evidence.secretPath,
+          secretContent: evidence.secretContent, nonRegular: evidence.nonRegular,
+          unscannableContent: evidence.unscannableContent },
+        readManifest: evidence.readFileCount !== null && evidence.readDigest !== null
+          ? { fileCount: evidence.readFileCount, digest: evidence.readDigest,
+            bodyPurged: evidence.readBodyPurged } : null,
+      })),
     };
   });
 }

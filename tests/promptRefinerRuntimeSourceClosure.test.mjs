@@ -588,9 +588,11 @@ const compilerOptions = parsedConfig.options;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
+// AMUX v19 repository-read and session-reservation additions shift source
+// positions in the reviewed closure. The position-free digest stays fixed.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "c31af2dcbd53278f4ae6d148733041ba",
-  "0ebc2187fb06810a077ccdcca65a6f44",
+  "dec9001b3edc3f5d93feeb6a25c2d737",
+  "91bd761aac8a6a2aaab0fb95093add2f",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

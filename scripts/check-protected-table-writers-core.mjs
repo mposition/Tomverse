@@ -150,6 +150,7 @@ export const APPEND_ONLY_LEDGER_TABLES = [
   "AmuxV22ApiModelAccessEvidence",
   "AmuxIdeaSessionAnalysisReservation",
   "AmuxIdeaTrackedCheckoutEvidence",
+  "AmuxIdeaTrackedCheckoutReadManifest",
 ];
 
 /**
@@ -197,6 +198,12 @@ export const PROTECTED_TABLES = [
     table: "AmuxIdeaTrackedCheckoutEvidence",
     delegate: "amuxIdeaTrackedCheckoutEvidence",
     writers: ["lib/amux/ideaTrackedCheckoutEvidenceStore.ts"],
+    contract: "docs/policy/amux-intake.md v19 items 3 and 7",
+  },
+  {
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    delegate: "amuxIdeaTrackedCheckoutReadManifest",
+    writers: ["lib/amux/ideaTrackedCheckoutReadManifestStore.ts"],
     contract: "docs/policy/amux-intake.md v19 items 3 and 7",
   },
   {
@@ -563,6 +570,12 @@ export const EXCLUDED_PREFIXES = [
 export const DELEGATE_NAME_ALLOWLIST = [
   {
     path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxIdeaTrackedCheckoutReadManifest",
+    count: 1,
+    reason: "Account export domain key only; no client is indexed or database connection opened in this metadata file.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     delegate: "amuxIdeaSessionAnalysisReservation",
     count: 1,
     reason: "Account export domain key only; no client is indexed and no database connection or writer exists in this metadata file.",
@@ -664,6 +677,41 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261017020100_amux_v19_read_manifest_active_insert_guard/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The additive trigger DDL rejects an inserted already-purged manifest; it performs no row DML.",
+  },
+  {
+    path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The sole manifest writer locks and reads pinned checkout evidence; its SQL does not modify the evidence row.",
+  },
+  {
+    path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason: "The sole manifest writer uses SQL only to lock the row; guarded insert and purge use Prisma delegates in audited transactions.",
+  },
+  {
+    path: "prisma/migrations/20261017020000_amux_v19_read_manifest_retention/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 5,
+    writeVerbs: 15,
+    reason: "The additive migration changes manifest shape and guard DDL; it performs no manifest row DML.",
+  },
+  {
+    path: "prisma/migrations/20261017020000_amux_v19_read_manifest_retention/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 15,
+    reason: "The retention guard reads a canonical audit row created by the application; the migration writes no audit row.",
+  },
+  {
     path: "prisma/migrations/20261016130000_amux_v52_review_record/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -710,6 +758,41 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 2,
     reason:
       "The closed v19 intake actor manifest names this audit target once. It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason: "The account export registry describes this model; it opens no database connection or SQL writer.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The closed system actor manifest names the audit target; it executes no SQL.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_tracked_checkout_read_manifest/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 2,
+    writeVerbs: 11,
+    reason: "The manifest migration references and reads the existing immutable checkout proof; its DDL writes only the new manifest table.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_tracked_checkout_read_manifest/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 7,
+    writeVerbs: 11,
+    reason: "The migration creates the append-only manifest table and insert guard; it inserts no manifest row.",
+  },
+  {
+    path: "prisma/migrations/20261017010000_amux_v19_tracked_checkout_read_manifest/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 11,
+    reason: "The new table references and reads the canonical audit; its DDL never writes an audit row.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
@@ -1993,10 +2076,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerSwitchStore.ts",
     table: "AmuxDecisionMakerSwitchEvent",
-    tableMentions: 4,
+    tableMentions: 5,
     writeVerbs: 3,
     reason:
-      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is two constant SELECTs (the newest event of every scope, and of one scope) and two constant INSERT ... RETURNING statements, a person's event and a latch; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is three constant SELECTs (the newest event of every scope; of one scope for a person's change; and since 2026-10-17 the newest event of every scope with its actor and clock, which the request ledger's writers read for the boundary section 8's validation count starts from) and two constant INSERT ... RETURNING statements, a person's event and a latch; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
@@ -2057,10 +2140,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
     table: "AmuxDecisionMakerRequestEvent",
-    tableMentions: 6,
+    tableMentions: 8,
     writeVerbs: 4,
     reason:
-      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08; a judgment's closing kinds since S1e), in the stale-close candidates' NOT EXISTS over the same closing kinds (S1g, 2026-10-12), in the proposal timeline of section 4's report (S1e), in the events of Admin's newest requests (S2, 2026-10-13), and in its one constant INSERT ... RETURNING of an event; every value is a bound parameter. It never updates or deletes an event; a judgment's closing event is written by the judgment table's trigger.",
+      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08; a judgment's closing kinds since S1e), in the stale-close candidates' NOT EXISTS over the same closing kinds (S1g, 2026-10-12), in the proposal timeline of section 4's report (S1e), in the events of Admin's newest requests (S2, 2026-10-13), in one instance's newest terminal result kinds -- a bounded SELECT section 8's validation latch counts, read on its own and inside the routing's throughput SELECT (2026-10-17) -- and in its one constant INSERT ... RETURNING of an event; every value is a bound parameter. It never updates or deletes an event; a judgment's closing event is written by the judgment table's trigger.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
@@ -2885,7 +2968,7 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/amux-v4-activation-preflight.mjs",
-    sha256: "f2a9503f7add087b0b077185aa9561ec43428fdae8f65ced13da2630291599b5",
+    sha256: "e4bae3b801195230c4b8c9e097ce42aae50e14193b9ae81ee1b8f384dd8f8bdf",
     count: 1,
     reason:
       "AMUX v4 activation diagnostic: one pg import; a fixed allowlist of ciphertext/key columns yields counts only inside BEGIN REPEATABLE READ READ ONLY with statement and idle-transaction timeouts. No audit, model call, switch or body write. The S3 operation is a read-only version-listing probe in an unused namespace, not key deletion evidence. Fingerprint is bound to the complete reviewed script.",

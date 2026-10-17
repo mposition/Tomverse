@@ -84,6 +84,7 @@ const fakeDeps = ({
   return {
     calls,
     deps: {
+      validationLatch: (instance) => answer("validationLatch", instance, { latched: false, reason: "no_streak" }),
       readCandidates: () => {
         calls.push(["read"]);
         return candidates instanceof Error ? Promise.reject(candidates) : Promise.resolve(candidates);
@@ -112,7 +113,12 @@ const quiet = async (work) => {
   }
 };
 
-test("one sweep: read once, then rotate, close, purge and destroy, each candidate once, in that order", async () => {
+const LATCH_CHECKS = [
+  ["validationLatch", "decision-maker-openai"],
+  ["validationLatch", "decision-maker-anthropic"],
+];
+
+test("one sweep: §8's latch check for each instance, then read once, rotate, close, purge and destroy, each candidate once, in that order", async () => {
   const { deps, calls } = fakeDeps({
     candidates: {
       staleRequestIds: [REQUEST_A, REQUEST_B],
@@ -123,6 +129,7 @@ test("one sweep: read once, then rotate, close, purge and destroy, each candidat
   });
   const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
   assert.deepEqual(calls, [
+    ...LATCH_CHECKS,
     ["read"],
     ["keyRing"],
     ["rotate", CURRENT],
@@ -133,6 +140,8 @@ test("one sweep: read once, then rotate, close, purge and destroy, each candidat
     ["destroy", CURRENT - 2],
   ]);
   assert.deepEqual(value, {
+    validationLatched: 0,
+    validationLatchUnsettled: 0,
     keyRing: "loaded",
     keysRotated: 2,
     staleClosed: 1,
@@ -142,6 +151,79 @@ test("one sweep: read once, then rotate, close, purge and destroy, each candidat
     stopped: null,
   });
   assert.deepEqual(warned, []);
+});
+
+test("§8's latch check counts the instances it latched, and an instance already latched is not a refusal", async () => {
+  const { deps, calls } = fakeDeps({
+    answers: {
+      "validationLatch:decision-maker-openai": { latched: true, event: { eventId: "e" } },
+      "validationLatch:decision-maker-anthropic": { latched: false, reason: "already_latched" },
+    },
+  });
+  const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
+  assert.deepEqual(calls.slice(0, 3), [...LATCH_CHECKS, ["read"]]);
+  assert.equal(value.validationLatched, 1);
+  assert.equal(value.refused, 0);
+  assert.equal(value.stopped, null);
+  assert.deepEqual(warned, []);
+});
+
+test("a latch check that fails holds back neither the other instance's check nor any of the retention work", async () => {
+  // Review r-20261017-015440-e7035c: a switch read or a result that fails every
+  // run must not stop the expiry purge, the stale close or the key destruction
+  // (docs/policy/amux-decision-maker.md §10).
+  const candidates = {
+    staleRequestIds: [REQUEST_A],
+    purgeRequestIds: [REQUEST_C],
+    registry: registry([entry(CURRENT - 2)]),
+  };
+  const retention = [
+    ["read"],
+    ["keyRing"],
+    ["rotate", CURRENT],
+    ["rotate", CURRENT + 1],
+    ["staleClose", REQUEST_A],
+    ["purge", REQUEST_C],
+    ["destroy", CURRENT - 2],
+  ];
+  for (const [failing, codes] of [
+    [["decision-maker-openai"], ["AMUX_DB_OUTCOME_UNKNOWN"]],
+    [["decision-maker-anthropic"], ["AMUX_DB_OUTCOME_UNKNOWN"]],
+    [["decision-maker-openai", "decision-maker-anthropic"], ["AMUX_DB_OUTCOME_UNKNOWN", "AMUX_DB_OUTCOME_UNKNOWN"]],
+  ]) {
+    const answers = Object.fromEntries(
+      failing.map((instance) => [`validationLatch:${instance}`, new AmuxDbBoundaryError("AMUX_DB_OUTCOME_UNKNOWN", "test")]),
+    );
+    const { deps, calls } = fakeDeps({ candidates, answers });
+    const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
+    // Both checks are tried, once each, and the retention work runs through.
+    assert.deepEqual(calls, [...LATCH_CHECKS, ...retention], failing.join());
+    assert.equal(value.stopped, null, failing.join());
+    assert.equal(value.validationLatchUnsettled, failing.length, failing.join());
+    assert.deepEqual([value.staleClosed, value.purged, value.keysDestroyed, value.keysRotated], [1, 1, 1, 2], failing.join());
+    // One line per failed check: the instance and the code, nothing else.
+    assert.deepEqual(
+      warned.map((line) => JSON.parse(line)),
+      failing.map((instance, index) => ({
+        subsystem: "amux",
+        event: "decision_maker_validation_latch_check_failed",
+        instance,
+        code: codes[index],
+      })),
+      failing.join(),
+    );
+  }
+  // An error the sweep does not know reports no code, never its message.
+  const { deps } = fakeDeps({ answers: { "validationLatch:decision-maker-openai": new Error("relation with a value in it") } });
+  const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
+  assert.equal(value.stopped, null);
+  assert.deepEqual(JSON.parse(warned[0]), {
+    subsystem: "amux",
+    event: "decision_maker_validation_latch_check_failed",
+    instance: "decision-maker-openai",
+    code: null,
+  });
+  assert.doesNotMatch(warned.join("\n"), /value in it/);
 });
 
 test("an error stops the sweep where it is: nothing after it, nothing sent again, nothing thrown", async () => {
@@ -174,10 +256,10 @@ test("an error stops the sweep where it is: nothing after it, nothing sent again
   }
 });
 
-test("a failed read writes nothing", async () => {
+test("a failed read writes nothing after the latch checks", async () => {
   const { deps, calls } = fakeDeps({ candidates: new AmuxDbBoundaryError("AMUX_DB_READ_BUSY", "test") });
   const { value } = await quiet(() => runDecisionMakerRetentionSweep(deps));
-  assert.deepEqual(calls, [["read"]]);
+  assert.deepEqual(calls, [...LATCH_CHECKS, ["read"]]);
   assert.deepEqual(value.stopped, { step: "read", code: "AMUX_DB_READ_BUSY" });
   assert.equal(value.keysRotated + value.staleClosed + value.purged + value.keysDestroyed, 0);
 });
@@ -254,10 +336,13 @@ test("the sweep writes only through the stores, reads no switch, and is on the m
   const sweep = readFileSync(join(process.cwd(), "lib/amux/decisionMakerRetentionSweep.ts"), "utf8");
   // No SQL of its own: every read and write is a store's.
   assert.doesNotMatch(sweep, /\$queryRaw|\$executeRaw|INSERT|UPDATE|DELETE FROM/);
-  // §6's table allows all of it under the kill switch, so no switch is read.
-  assert.doesNotMatch(sweep, /readDecisionMakerSwitches|decisionMakerSwitchStore/);
+  // §6's table allows all of it under the kill switch, and a latch only turns an
+  // instance off, so no switch is read here; the latch check is the request store's.
+  assert.doesNotMatch(sweep, /readDecisionMakerSwitches|decisionMakerSwitchStore|latchDecisionMakerInstanceOff/);
+  assert.match(sweep, /recordDecisionMakerValidationLatch\(tx, \{ instance \}\)/);
   // Each write is in its own boundary transaction.
   for (const boundary of [
+    "decisionMakerValidationLatch",
     "decisionMakerRetentionRead",
     "decisionMakerDigestKeyRotate",
     "decisionMakerStaleClose",
