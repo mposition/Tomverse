@@ -1,0 +1,18 @@
+[Unit]
+Description=Tomverse AMUX Decision Maker launcher socket, decision-maker-anthropic (installed, not enabled)
+
+[Socket]
+# docs/policy/amux-decision-maker.md §5: only the broker reaches a launcher.
+# One connection starts one amux-dm-launcher-anthropic@.service as the vendor
+# account, and only one may run at a time.
+ListenStream=/run/amux-dm-launcher/decision-maker-anthropic.sock
+SocketUser=amux-dm-broker
+SocketGroup=amux-dm-broker
+SocketMode=0600
+DirectoryMode=0755
+Accept=yes
+MaxConnections=1
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

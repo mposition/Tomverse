@@ -1,0 +1,17 @@
+[Unit]
+Description=Tomverse AMUX Decision Maker broker socket (bridge to broker; installed, not enabled)
+
+[Socket]
+# docs/policy/amux-decision-maker.md §5: only the bridge reaches the broker.
+# systemd makes the socket: the broker's account, the bridge's group, 0660.
+ListenStream=/run/amux-dm-broker/broker.sock
+SocketUser=amux-dm-broker
+SocketGroup=tomverse-bridge
+SocketMode=0660
+DirectoryMode=0755
+Accept=no
+RemoveOnStop=true
+Service=amux-dm-broker.service
+
+[Install]
+WantedBy=sockets.target
