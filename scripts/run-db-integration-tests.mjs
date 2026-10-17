@@ -741,6 +741,10 @@ run(
     // and keyed by the app, a market fact kept only from an official host, a
     // resend read back after the gates close, and the deadline enforced.
     "tests/integration/marketing-intel-reports.db.test.ts",
+    // The competitor registry (S3f): A3 proposes, a person decides on their own
+    // audit row (action, row, predecessor, and an approval's exact name and
+    // hosts), and only approved hosts are a source. Needs a real audit chain.
+    "tests/integration/marketing-competitor-registry.db.test.ts",
     // The rows a draft's price and model facts rest on, held FOR SHARE until
     // the reading transaction ends (S3a2): only two connections can show it.
     "tests/integration/marketing-fact-row-hold.db.test.ts",
