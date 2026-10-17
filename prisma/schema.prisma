@@ -2445,6 +2445,7 @@ model AdminAuditLog {
   amuxIdeaSessionAnalysisReservations AmuxIdeaSessionAnalysisReservation[] @relation("AmuxIdeaSessionAnalysisReservationAudit")
   amuxIdeaSystemRegistrations AmuxIdeaSubmission[] @relation("AmuxIdeaSystemRegistrationAudit")
   amuxIdeaTrackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[] @relation("AmuxIdeaTrackedCheckoutAudit")
+  amuxIdeaTrackedCheckoutReadManifest AmuxIdeaTrackedCheckoutReadManifest[] @relation("AmuxIdeaTrackedCheckoutReadManifestAudit")
   amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
   amuxV4ContentPurgeAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4ContentPurgeAudit")
   amuxV4KeyDeleteAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4KeyDeleteAudit")
@@ -9774,6 +9775,7 @@ model AmuxIdeaSubmission {
   unitDecisions     AmuxIdeaUnitDecision[]
   registrationRefusals AmuxIdeaRegistrationRefusal[]
   trackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[]
+  trackedCheckoutReadManifests AmuxIdeaTrackedCheckoutReadManifest[]
   sessionAnalysisReservation AmuxIdeaSessionAnalysisReservation?
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
   contentKeyRetirements AmuxIdeaContentKeyRetirement[]
@@ -9816,7 +9818,7 @@ model AmuxIdeaSessionAnalysisReservation {
 
 /// Content-free evidence for one fixed Git reference prepared for v19 direct
 /// analysis. Paths, repository names, checkout directories and file contents
-/// never enter this row. A future read-event manifest is a separate contract.
+/// never enter this row. Read-event paths use a separate encrypted row.
 model AmuxIdeaTrackedCheckoutEvidence {
   id                         String   @id @db.Uuid
   ideaId                     String
@@ -9834,6 +9836,31 @@ model AmuxIdeaTrackedCheckoutEvidence {
 
   idea  AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   audit AdminAuditLog      @relation("AmuxIdeaTrackedCheckoutAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  readManifest AmuxIdeaTrackedCheckoutReadManifest?
+
+  @@unique([ideaId, referenceOrdinal])
+  @@index([ideaId, createdAt])
+}
+
+/// Encrypted CLI-observed read paths for one pinned reference. The verified
+/// host result is recorded once; plaintext paths never enter audit metadata.
+model AmuxIdeaTrackedCheckoutReadManifest {
+  id                 String   @id @db.Uuid
+  ideaId             String
+  referenceOrdinal   Int
+  pinnedCommitSha    String
+  fileCount          Int
+  ciphertext         Bytes
+  keyId              String
+  keyVersion         Int
+  digest             String
+  digestKeyId        String
+  auditLogId         String   @unique
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+
+  idea     AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [ideaId, referenceOrdinal], references: [ideaId, referenceOrdinal], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaTrackedCheckoutReadManifest_evidence_fkey")
+  audit    AdminAuditLog @relation("AmuxIdeaTrackedCheckoutReadManifestAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([ideaId, referenceOrdinal])
   @@index([ideaId, createdAt])

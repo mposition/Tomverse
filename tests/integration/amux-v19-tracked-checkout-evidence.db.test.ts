@@ -21,6 +21,13 @@ import { readAmuxIdeaProgressInTx } from "@/lib/amux/ideaProgressRead";
 import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
+import { openAmuxContent, verifyAmuxContentDigest } from "@/lib/amux/ideaCrypto";
+import { parseAmuxTrackedCheckoutReadManifest } from
+  "@/lib/amux/ideaTrackedCheckoutReadManifestCore";
+import { amuxTrackedCheckoutReadManifestKeyIdentity,
+  AmuxTrackedCheckoutReadManifestError,
+  recordAmuxTrackedCheckoutReadManifest } from
+  "@/lib/amux/ideaTrackedCheckoutReadManifestStore";
 import {
   commitAmuxOperatingScope,
   readAmuxOperatingScopeAuthority,
@@ -180,6 +187,89 @@ test("pinned checkout evidence and its canonical system audit commit atomically"
     [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 4,
       excludedReasons: { secretPath: 1, secretContent: 1,
         nonRegular: 1, unscannableContent: 1 } }]);
+});
+
+test("verified CLI read paths persist encrypted with one canonical audit", async () => {
+  const manifestId = randomUUID();
+  const readKeys = { masterKeyId: amuxContentUnitKeyId(
+    amuxTrackedCheckoutReadManifestKeyIdentity(ideaId, manifestId)),
+    masterKeyVersion: 1, masterKey: randomBytes(32),
+    digestKeyId: "synthetic-checkout-read-digest", digestKey: randomBytes(32) };
+  const input = { manifestId, ideaId, referenceOrdinal: 0,
+    pinnedCommitSha: "a".repeat(40),
+    observed: { kind: "verified_success" as const,
+      readFiles: ["src/read.ts", "README.md"] } };
+  try {
+    const receipt = await prisma.$transaction((tx) =>
+      recordAmuxTrackedCheckoutReadManifest(tx, input, readKeys));
+    assert.equal(receipt.fileCount, 2);
+    const row = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
+      where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
+    });
+    const audit = await prisma.adminAuditLog.findUniqueOrThrow({
+      where: { id: receipt.auditLogId },
+    });
+    assert.equal(row.id, manifestId);
+    assert.equal(row.pinnedCommitSha, "a".repeat(40));
+    assert.equal(row.keyId, readKeys.masterKeyId);
+    assert.equal(audit.action, "amux.v19.read_manifest.recorded");
+    assert.equal(audit.targetId, manifestId);
+    assert.equal(JSON.stringify(audit.metadata).includes("README.md"), false);
+    assert.equal(Buffer.from(row.ciphertext).includes(Buffer.from("README.md")), false);
+    const plain = openAmuxContent({ ciphertext: Buffer.from(row.ciphertext),
+      keyId: row.keyId, keyVersion: row.keyVersion },
+    "repository_read_manifest", manifestId, readKeys);
+    assert.equal(verifyAmuxContentDigest(plain, "repository_read_manifest",
+      manifestId, row.digest, row.digestKeyId, readKeys), true);
+    assert.deepEqual(parseAmuxTrackedCheckoutReadManifest(plain, row.fileCount),
+      ["README.md", "src/read.ts"]);
+    assert.equal(await prisma.amuxIdeaTrackedCheckoutReadManifest.findFirst({
+      where: { ideaId, referenceOrdinal: 0,
+        idea: { actorUserId: "wrong-owner" } },
+    }), null);
+
+    const beforeAuditCount = await prisma.adminAuditLog.count();
+    await assert.rejects(prisma.$transaction((tx) =>
+      recordAmuxTrackedCheckoutReadManifest(tx, input, readKeys)),
+    (error: unknown) => error instanceof AmuxTrackedCheckoutReadManifestError &&
+      error.code === "already_recorded");
+    await assert.rejects(prisma.$transaction((tx) =>
+      recordAmuxTrackedCheckoutReadManifest(tx,
+        { ...input, pinnedCommitSha: "c".repeat(40) }, readKeys)),
+    (error: unknown) => error instanceof AmuxTrackedCheckoutReadManifestError &&
+      error.code === "evidence_unavailable");
+    assert.equal(await prisma.adminAuditLog.count(), beforeAuditCount);
+    await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.update({
+      where: { id: manifestId }, data: { fileCount: 1 },
+    }), /append only/);
+    await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.delete({
+      where: { id: manifestId },
+    }), /append only/);
+    await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
+      data: { id: randomUUID(), ideaId, referenceOrdinal: 0,
+        pinnedCommitSha: "a".repeat(40), fileCount: 1,
+        ciphertext: Uint8Array.from(row.ciphertext), keyId: row.keyId,
+        keyVersion: row.keyVersion, digest: row.digest,
+        digestKeyId: row.digestKeyId, auditLogId: row.auditLogId },
+    }), /audit evidence mismatch/);
+    await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
+      data: { id: randomUUID(), ideaId, referenceOrdinal: 0,
+        pinnedCommitSha: "c".repeat(40), fileCount: row.fileCount,
+        ciphertext: Uint8Array.from(row.ciphertext), keyId: row.keyId,
+        keyVersion: row.keyVersion, digest: row.digest,
+        digestKeyId: row.digestKeyId, auditLogId: row.auditLogId },
+    }), /pinned reference mismatch/);
+    await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
+      data: { id: randomUUID(), ideaId: randomUUID(), referenceOrdinal: 0,
+        pinnedCommitSha: "a".repeat(40), fileCount: row.fileCount,
+        ciphertext: Uint8Array.from(row.ciphertext), keyId: row.keyId,
+        keyVersion: row.keyVersion, digest: row.digest,
+        digestKeyId: row.digestKeyId, auditLogId: row.auditLogId },
+    }), /idea is unavailable/);
+  } finally {
+    readKeys.masterKey.fill(0);
+    readKeys.digestKey.fill(0);
+  }
 });
 
 test("duplicate or out-of-range reference evidence leaves no extra audit", async () => {
