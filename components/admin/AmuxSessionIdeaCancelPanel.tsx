@@ -37,7 +37,8 @@ export function AmuxSessionIdeaCancelPanel({ ideaId }: { ideaId: string }) {
         setPhase("cancelled");
         if (uncertain) window.location.reload();
       } else if (response.ok && body && typeof body === "object" &&
-          (body as { state?: unknown }).state === "queued") {
+          (body as { state?: unknown }).state === "queued" &&
+          (body as { ideaId?: unknown }).ideaId === ideaId) {
         setPhase(uncertain ? "unknown" : "queued");
       } else if (response.ok && body && typeof body === "object" &&
           (body as { state?: unknown }).state === "not_visible") {

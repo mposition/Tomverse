@@ -18,6 +18,8 @@ const task = (overrides = {}) => ({ cardType: "task", status: "todo", reviewPrNu
 test("each idea is at exactly one of the six stages, and a human step still open always comes first", () => {
   const stage = (value) => { const result = amuxIdeaProgress(facts(value)); return [result.stage, result.waitingFor]; };
   assert.deepEqual(stage({}), ["execution_approval", "execution_approval"], "saved, nothing approved yet");
+  assert.deepEqual(stage({ submissionOrigin: "session" }), ["analysis", null],
+    "v19 queued session intake does not require an execution approval");
   assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "prepared", holdStatus: null })] }),
     ["execution_approval", "execution_approval"]);
   assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "expired", holdStatus: "released" })] }),

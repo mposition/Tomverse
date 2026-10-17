@@ -19,8 +19,8 @@ const EXCLUSION_REASONS = ["secretPath", "secretContent", "nonRegular",
  * The top of one idea's detail (approved backlog redesign, B3): where the idea
  * is on the six steps, which of them are a person's, and its Tasks with their
  * PRs. Everything here is read from the progress snapshot; there is no action
- * besides opening GitHub, because the human steps have their own panels below
- * and a merge is observed by the app rather than approved again here.
+ * besides opening GitHub and cancelling a queued v19 session idea, because
+ * other human steps have their own panels below and merge is observed here.
  */
 export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages);
@@ -59,7 +59,8 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
         })}
       </ol>
       {row.stage === "cancelled" ? <p>{m.stages.cancelled}</p> : null}
-      <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} />
+      {row.submissionOrigin === "session" ?
+        <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
       {row.checkoutEvidence.length > 0 ? (
         <section aria-labelledby="amux-checkout-evidence-heading" data-testid="amux-checkout-evidence"
           className="space-y-2 border-t border-zinc-800 pt-3">

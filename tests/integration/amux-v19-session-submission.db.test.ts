@@ -23,6 +23,7 @@ import {
   type AmuxOperatingScopeAuthority,
 } from "@/lib/amux/ideaOperatingScopeStore";
 import { commitAmuxDueRawIdeaPurge } from "@/lib/amux/ideaRawRetentionService";
+import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { commitAmuxIdeaSessionCancellation,
   readAmuxIdeaSessionCancellationReceipt,
   AmuxIdeaSessionCancellationError } from
@@ -720,6 +721,10 @@ test("owner cancellation removes a queued session idea and makes raw purge due",
   });
   assert.ok((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
     (candidate) => candidate.reservationId === created.reservationId));
+  const beforeCancel = (await readAmuxIdeaProgressForOwner(ownerId)).find(
+    (row) => row.ideaId === ideaId);
+  assert.equal(beforeCancel?.stage, "analysis");
+  assert.equal(beforeCancel?.waitingFor, null);
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
       state: "queued", ideaId, retryWrite: false,
@@ -742,6 +747,8 @@ test("owner cancellation removes a queued session idea and makes raw purge due",
   assert.equal(JSON.stringify(audit.metadata).includes("Synthetic session idea"), false);
   assert.equal((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
     (candidate) => candidate.reservationId === created.reservationId), false);
+  assert.equal((await readAmuxIdeaProgressForOwner(ownerId)).find(
+    (row) => row.ideaId === ideaId)?.stage, "cancelled");
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
       state: "cancelled", ideaId, cancelledAt: cancellation.cancelledAt,

@@ -55,9 +55,6 @@ export async function commitAmuxIdeaSessionCancellation(
   if (!idea || idea.actorUserId !== actorId || idea.submissionOrigin !== "session") {
     throw new AmuxIdeaSessionCancellationError("not_found");
   }
-  if (!locked[0]!.hasRaw || !locked[0]!.hasSource) {
-    throw new AmuxIdeaSessionCancellationError("integrity_unavailable");
-  }
   const clock = await tx.$queryRaw<Array<{ now: Date }>>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
   `;
@@ -74,6 +71,9 @@ export async function commitAmuxIdeaSessionCancellation(
       idea.sessionAnalysisReservation?.status !== "queued" ||
       now >= idea.analysisDeadlineAt) {
     throw new AmuxIdeaSessionCancellationError("not_cancellable");
+  }
+  if (!locked[0]!.hasRaw || !locked[0]!.hasSource) {
+    throw new AmuxIdeaSessionCancellationError("integrity_unavailable");
   }
   const auditId = await writeAdminAuditLog({ tx, session: input.session,
     request: input.request, action: ACTION, targetType: "AmuxIdeaSubmission",
@@ -112,7 +112,7 @@ export async function readAmuxIdeaSessionCancellationReceipt(
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
     select: { actorUserId: true, submissionOrigin: true, state: true,
       requestId: true, cancelledAt: true, analysisCompletedAt: true,
-      analysisDeadlineAt: true, rawPurgedAt: true,
+      analysisDeadlineAt: true, rawPurgeAfter: true, rawPurgedAt: true,
       currentSourcePlanRevisionId: true,
       sessionAnalysisReservation: { select: { id: true, status: true } },
       _count: { select: { chunks: true, previews: true } } } });
@@ -121,7 +121,9 @@ export async function readAmuxIdeaSessionCancellationReceipt(
       !idea.analysisCompletedAt && !idea.rawPurgedAt &&
       !idea.currentSourcePlanRevisionId && idea._count.chunks === 0 &&
       idea._count.previews === 0 &&
-      idea.sessionAnalysisReservation?.status === "queued") {
+      idea.sessionAnalysisReservation?.status === "queued" &&
+      idea.rawPurgeAfter !== null &&
+      idea.rawPurgeAfter <= idea.analysisDeadlineAt) {
     const bodies = await tx.$queryRaw<Array<{ hasRaw: boolean;
       hasSource: boolean }>>`
       SELECT ("rawCiphertext" IS NOT NULL) AS "hasRaw",
