@@ -472,12 +472,13 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // Analysis admission and the v19 stop snapshot own bounded read-only
-  // transactions; the commit-deadline boundary still governs task execution.
+  // Analysis admission, v19 stop snapshot and checkout evidence have their
+  // own bounded transactions; the commit-deadline boundary still governs task execution.
   assert.deepEqual(direct, [
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
     "app/api/internal/amux/v19/analysis-stop/route.ts",
+    "app/api/internal/amux/v19/checkout-evidence/route.ts",
     "app/api/internal/amux/v22/execution/result/route.ts",
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
@@ -489,6 +490,23 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   assert.ok(stopPoll.indexOf('process.env[READ_ENV] !== "enabled"') <
     stopPoll.indexOf("prisma.$transaction"));
   assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
+  const checkoutEvidence = withoutComments(read(
+    "app/api/internal/amux/v19/checkout-evidence/route.ts"));
+  const evidenceWrite = between(checkoutEvidence,
+    "export async function POST", "export async function GET");
+  const evidenceRead = checkoutEvidence.slice(
+    checkoutEvidence.indexOf("export async function GET"));
+  assert.ok(evidenceWrite.indexOf("authorized(request)") <
+    evidenceWrite.indexOf("prisma.$transaction"));
+  assert.ok(evidenceWrite.indexOf('process.env[WRITE_ENV] !== "enabled"') <
+    evidenceWrite.indexOf("prisma.$transaction"));
+  assert.ok(evidenceWrite.indexOf('process.env[READ_ENV] !== "enabled"') <
+    evidenceWrite.indexOf("prisma.$transaction"));
+  assert.ok(evidenceRead.indexOf('process.env[READ_ENV] !== "enabled"') <
+    evidenceRead.indexOf("prisma.$transaction"));
+  assert.ok(!evidenceRead.includes("process.env[WRITE_ENV]"));
+  assert.match(evidenceWrite, /maxWait: 3_000, timeout: 12_000/);
+  assert.match(evidenceRead, /maxWait: 3_000, timeout: 10_000/);
   // Intake v15 opens only the code latches. The independent runtime write
   // and receipt-read switches still fail closed before a transaction opens.
   // Both transaction bounds remain independent of execution commit deadlines.
