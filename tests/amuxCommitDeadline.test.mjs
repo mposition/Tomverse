@@ -502,6 +502,7 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   assertBefore(evidenceWrite, "authorized(request)");
   assertBefore(evidenceWrite, 'process.env[WRITE_ENV] !== "enabled"');
   assertBefore(evidenceWrite, 'process.env[READ_ENV] !== "enabled"');
+  assertBefore(evidenceRead, "authorized(request)");
   assertBefore(evidenceRead, 'process.env[READ_ENV] !== "enabled"');
   assert.ok(!evidenceRead.includes("process.env[WRITE_ENV]"));
   assert.match(evidenceWrite, /maxWait: 3_000, timeout: 12_000/);
