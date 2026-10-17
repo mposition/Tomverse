@@ -467,6 +467,12 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
     }));
   assert.equal(settled.status, "succeeded");
   assert.equal(settled.settledMicroUsd, "50");
+  const settledReadback = await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetResolution(tx, {
+      claimId: first.claimId, session }));
+  assert.equal(settledReadback.status, "succeeded");
+  assert.equal(settledReadback.settledMicroUsd, "50");
+  assert.match(settledReadback.readbackDigest, /^[a-f0-9]{64}$/);
   const secondClaim = await prisma.$transaction((tx) =>
     commitAmuxSessionBudgetClaim(tx, {
       claimId: randomUUID(), requestId: randomUUID(),
@@ -553,6 +559,12 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
     }));
   assert.equal(consumed.status, "owner_consumed");
   assert.equal(consumed.settledMicroUsd, "5000");
+  const consumedReadback = await prisma.$transaction((tx) =>
+    readAmuxSessionBudgetResolution(tx, {
+      claimId: thirdClaim.claimId, session }));
+  assert.equal(consumedReadback.status, "owner_consumed");
+  assert.equal(consumedReadback.settledMicroUsd, "5000");
+  assert.match(consumedReadback.readbackDigest, /^[a-f0-9]{64}$/);
   const finalWindow = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
     where: { namespace_monthStart: { namespace: "agent/amux-intake",
       monthStart: windowBefore.monthStart } },
