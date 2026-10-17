@@ -195,7 +195,7 @@ test("pinned checkout evidence and its canonical system audit commit atomically"
   assert.deepEqual(progress.find((row) => row.ideaId === ideaId)?.checkoutEvidence,
     [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 4,
       excludedReasons: { secretPath: 1, secretContent: 1,
-        nonRegular: 1, unscannableContent: 1 } }]);
+        nonRegular: 1, unscannableContent: 1 }, readManifest: null }]);
 });
 
 test("verified CLI read paths persist encrypted with one canonical audit", async () => {
@@ -235,6 +235,11 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
       manifestId, row.digest, row.digestKeyId, readKeys), true);
     assert.deepEqual(parseAmuxTrackedCheckoutReadManifest(plain, row.fileCount),
       ["README.md", "src/read.ts"]);
+    const progress = await prisma.$transaction((tx) =>
+      readAmuxIdeaProgressInTx(tx, authority.approvedByUserId, new Date()));
+    assert.deepEqual(progress.find((item) => item.ideaId === ideaId)
+      ?.checkoutEvidence[0]?.readManifest,
+    { fileCount: 2, digest: row.digest, bodyPurged: false });
     assert.equal(await prisma.amuxIdeaTrackedCheckoutReadManifest.findFirst({
       where: { ideaId, referenceOrdinal: 0,
         idea: { actorUserId: "wrong-owner" } },
@@ -442,6 +447,11 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
   assert.equal(purged.fileCount, 2);
   assert.equal(purged.digest, manifest.digest);
   assert.equal(purged.auditLogId, manifest.auditLogId);
+  const progress = await prisma.$transaction((tx) =>
+    readAmuxIdeaProgressInTx(tx, authority.approvedByUserId, new Date()));
+  assert.deepEqual(progress.find((item) => item.ideaId === ideaId)
+    ?.checkoutEvidence[0]?.readManifest,
+  { fileCount: 2, digest: manifest.digest, bodyPurged: true });
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxIdeaRetentionHoldScope(tx, ideaId)),
   { remainingBodies: 1, alreadyPurgedBodies: 2 });

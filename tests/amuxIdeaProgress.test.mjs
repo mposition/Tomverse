@@ -82,7 +82,8 @@ test("the list is one statement in one bounded snapshot that never reads idea te
       { id: "c1", cardType: "story", status: "backlog", reviewPrNumber: null, terminal: false, displayKey: "AMUX-ADM-001" },
       { id: "c2", cardType: "task", status: "review", reviewPrNumber: 2540, terminal: false, displayKey: "AMUX-ADM-002" }],
     checkoutEvidence: [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 2,
-      secretPath: 1, secretContent: 1, nonRegular: 0, unscannableContent: 0 }],
+      secretPath: 1, secretContent: 1, nonRegular: 0, unscannableContent: 0,
+      readFileCount: 2, readDigest: "b".repeat(64), readBodyPurged: false }],
   }, {
     // An idea with no chunk and no card comes back with SQL NULL aggregates.
     id: "idea-2", requestId: "22222222-2222-4222-8222-222222222222", state: "submitted",
@@ -102,6 +103,7 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.ok(sql.includes(`ORDER BY c."chunkIndex"`));
   assert.ok(sql.includes(`ORDER BY w."createdAt" ASC, w."id" ASC`));
   assert.ok(sql.includes(`FROM "AmuxIdeaTrackedCheckoutEvidence" e`));
+  assert.ok(sql.includes(`LEFT JOIN "AmuxIdeaTrackedCheckoutReadManifest" m`));
   assert.ok(sql.includes(`ORDER BY e."referenceOrdinal"`));
   assert.deepEqual([row.stage, row.displayKey, row.reviewPullRequests, row.submittedAt],
     ["review", "AMUX-ADM-001", [{ number: 2540, displayKey: "AMUX-ADM-002" }], "2026-10-15T00:00:00.123Z"]);
@@ -109,7 +111,8 @@ test("the list is one statement in one bounded snapshot that never reads idea te
     "the detail lists Tasks only, never stories");
   assert.deepEqual(row.checkoutEvidence, [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
     excludedCount: 2, excludedReasons: { secretPath: 1, secretContent: 1,
-      nonRegular: 0, unscannableContent: 0 } }]);
+      nonRegular: 0, unscannableContent: 0 },
+    readManifest: { fileCount: 2, digest: "b".repeat(64), bodyPurged: false } }]);
   assert.deepEqual([empty.stage, empty.displayKey, empty.taskRows], ["execution_approval", null, []]);
   assert.deepEqual(empty.checkoutEvidence, []);
 });

@@ -25,6 +25,7 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
     excludedCount: number;
     excludedReasons: { secretPath: number; secretContent: number;
       nonRegular: number; unscannableContent: number };
+    readManifest: { fileCount: number; digest: string; bodyPurged: boolean } | null;
   }>;
 };
 
@@ -72,6 +73,8 @@ type SqlCheckoutEvidence = {
   referenceOrdinal: number; pinnedCommitSha: string; excludedCount: number;
   secretPath: number; secretContent: number; nonRegular: number;
   unscannableContent: number;
+  readFileCount: number | null; readDigest: string | null;
+  readBodyPurged: boolean;
 };
 type SqlIdea = {
   id: string; requestId: string; state: string; submittedAtMs: number; cancelled: boolean;
@@ -124,9 +127,13 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
           'secretPath', e."excludedSecretPathCount",
           'secretContent', e."excludedSecretContentCount",
           'nonRegular', e."excludedNonRegularCount",
-          'unscannableContent', e."excludedUnscannableCount")
+          'unscannableContent', e."excludedUnscannableCount",
+          'readFileCount', m."fileCount", 'readDigest', m."digest",
+          'readBodyPurged', m."bodyPurgedAt" IS NOT NULL)
           ORDER BY e."referenceOrdinal")
         FROM "AmuxIdeaTrackedCheckoutEvidence" e
+        LEFT JOIN "AmuxIdeaTrackedCheckoutReadManifest" m
+          ON m."ideaId" = e."ideaId" AND m."referenceOrdinal" = e."referenceOrdinal"
         WHERE e."ideaId" = n."id") AS "checkoutEvidence"
     FROM newest n
     ORDER BY n."submittedAt" DESC, n."id" ASC
@@ -160,6 +167,9 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         excludedReasons: { secretPath: evidence.secretPath,
           secretContent: evidence.secretContent, nonRegular: evidence.nonRegular,
           unscannableContent: evidence.unscannableContent },
+        readManifest: evidence.readFileCount !== null && evidence.readDigest !== null
+          ? { fileCount: evidence.readFileCount, digest: evidence.readDigest,
+            bodyPurged: evidence.readBodyPurged } : null,
       })),
     };
   });
