@@ -17,6 +17,7 @@ import {
   readAmuxTrackedCheckoutEvidence,
   recordAmuxTrackedCheckoutEvidence,
 } from "@/lib/amux/ideaTrackedCheckoutEvidenceStore";
+import { readAmuxIdeaProgressInTx } from "@/lib/amux/ideaProgressRead";
 import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
@@ -172,6 +173,13 @@ test("pinned checkout evidence and its canonical system audit commit atomically"
   assert.equal(audit.targetId, stored.evidenceId);
   assert.equal(JSON.stringify(audit.metadata).includes(".env"), false);
   assert.equal(JSON.stringify(audit.metadata).includes("/tmp"), false);
+
+  const progress = await prisma.$transaction((tx) =>
+    readAmuxIdeaProgressInTx(tx, authority.approvedByUserId, new Date()));
+  assert.deepEqual(progress.find((row) => row.ideaId === ideaId)?.checkoutEvidence,
+    [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 4,
+      excludedReasons: { secretPath: 1, secretContent: 1,
+        nonRegular: 1, unscannableContent: 1 } }]);
 });
 
 test("duplicate or out-of-range reference evidence leaves no extra audit", async () => {
