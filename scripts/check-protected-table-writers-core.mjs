@@ -268,6 +268,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/marketing-automation.md §5",
   },
   {
+    table: "MarketingCompetitor",
+    delegate: "marketingCompetitor",
+    writers: ["lib/marketingCompetitorStore.ts"],
+    contract: "docs/policy/marketing-automation.md §3",
+  },
+  {
     table: "MarketingChannel",
     delegate: "marketingChannel",
     writers: ["lib/marketingStore.ts"],
@@ -2145,6 +2151,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
   },
   {
+    path: "prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 14,
+    reason:
+      "Creates the competitor registry. Its one AdminAuditLog mention is the decision check's read of a person's own audit row (action, target, actor, recorded predecessor and approved hosts). No audit row is written.",
+  },
+  {
+    path: "prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql",
+    table: "MarketingCompetitor",
+    tableMentions: 16,
+    writeVerbs: 14,
+    reason:
+      "Creates the competitor registry, its checks, the one insert-and-update guard and the delete guard, and inserts the eleven seed proposals (status proposed, no decision) the market analysis of 2026-10-17 found. Every other mention names the table to constrain or refuse a write.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "MarketingCompetitor",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed system-actor manifest names the competitor proposal target for marketing-generator. It executes no SQL; canonical audit mutation remains in lib/adminAudit.ts.",
+  },
+  {
     path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 2,
@@ -2303,6 +2333,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql",
+    count: 1,
+    reason:
+      "One read in the registry's decision check: the decision's own AdminAuditLog row, with EXECUTE over a name built from the trigger's TG_TABLE_SCHEMA because the function pins search_path to pg_catalog, pg_temp. The schema is quoted with %I and the id is bound with USING. It reads and never writes.",
+  },
   {
     path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
     count: 1,

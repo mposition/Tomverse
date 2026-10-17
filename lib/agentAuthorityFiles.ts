@@ -296,8 +296,6 @@ export const RESERVED_DECISION_CONSTANTS: ReadonlyArray<{
   },
   { name: "CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED", definedIn: ["lib/modelPricing.ts"] },
   { name: "MARKETING_LLM_PRICE_PINS", definedIn: ["lib/marketingLlmBudgetCore.ts"] },
-  // Which competitors A3 tracks and which of their hosts are official (S3f).
-  { name: "MARKETING_COMPETITOR_SOURCE_HOSTS", definedIn: ["lib/marketingIntelReportCore.ts"] },
   { name: "STATIC_CATALOG_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
   { name: "OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
   { name: "RESERVATION_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },

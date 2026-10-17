@@ -663,6 +663,10 @@ run(
     // and keyed by the app, a market fact kept only from an official host, a
     // resend read back after the gates close, and the deadline enforced.
     "tests/integration/marketing-intel-reports.db.test.ts",
+    // The competitor registry (S3f): A3 proposes, a person decides on their own
+    // audit row (action, row, predecessor, and an approval's exact name and
+    // hosts), and only approved hosts are a source. Needs a real audit chain.
+    "tests/integration/marketing-competitor-registry.db.test.ts",
     // The rows a draft's price and model facts rest on, held FOR SHARE until
     // the reading transaction ends (S3a2): only two connections can show it.
     "tests/integration/marketing-fact-row-hold.db.test.ts",
@@ -880,6 +884,24 @@ run(
     "tests/integration/refund-decision-route.db.test.ts",
   ],
   "Running the administrator refund decision transaction and its outbox"
+);
+// Also its own process: it replaces next-auth. The competitor registry's Admin
+// routes (S3f-R3): a person's add, approve, reject and retire through the
+// marketing mutation wrapper, whose audit row the registry's write guard
+// checks; a stale page and a disallowed move are 409s, and the kill switch
+// refuses only what makes a host a source.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/marketing-competitor-routes.db.test.ts",
+  ],
+  "Running the marketing competitor registry Admin routes"
 );
 // Also its own process, and for the same reason: it replaces next-auth. What
 // it pins is which requests reach the lift at all -- a stale cause set, a dead
