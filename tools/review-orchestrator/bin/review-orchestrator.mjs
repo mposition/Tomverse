@@ -35,7 +35,7 @@ const print = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function decodeRpc(token) {
-  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{1,20000}$/.test(token)) {
+  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{1,65536}$/.test(token)) {
     throw new UsageError("rpc_invalid");
   }
   let request;

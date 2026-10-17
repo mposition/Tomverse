@@ -15,7 +15,7 @@ type ReasonCode = typeof REASONS[number];
 export class AmuxIdeaRetentionHoldError extends Error {
   constructor(readonly code: "forbidden" | "not_found" | "invalid_hold" |
     "already_held" | "nothing_to_hold" | "not_releasable" |
-    "key_retirement_in_progress" | "integrity_unavailable") {
+    "integrity_unavailable") {
     super(code);
     this.name = "AmuxIdeaRetentionHoldError";
   }
@@ -105,13 +105,6 @@ export async function commitAmuxIdeaRetentionHold(tx: Prisma.TransactionClient,
     throw new AmuxIdeaRetentionHoldError("invalid_hold");
   }
   await armAndLockIdea(tx, input.ideaId);
-  const pendingKey = await tx.amuxIdeaReadManifestKeyIntent.findFirst({
-    where: { ideaId: input.ideaId, keyRetirementClaimedAt: { not: null },
-      keyDeletedAt: null }, select: { id: true },
-  });
-  if (pendingKey) {
-    throw new AmuxIdeaRetentionHoldError("key_retirement_in_progress");
-  }
   const now = await dbNow(tx);
   const active = await tx.amuxIdeaRetentionHold.findFirst({
     where: { ideaId: input.ideaId, releasedAt: null,

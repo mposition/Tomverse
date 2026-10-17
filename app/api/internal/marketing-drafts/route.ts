@@ -17,6 +17,7 @@ import {
   readMarketingGeneratorBody,
 } from "@/lib/marketingGeneratorAuth";
 import { intakeMarketingGeneratorDraft } from "@/lib/marketingDraftIntakeStore";
+import { reportMarketingPriceSourceRefusal } from "@/lib/marketingPriceAlert";
 import { runMarketingTransaction } from "@/lib/marketingStore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
@@ -76,6 +77,10 @@ export async function POST(request: Request) {
         { maxWait: 5_000, timeout: 15_000 },
       );
       results.push({ logicalDraftId: draft.logicalDraftId, ...outcome });
+      // After the commit, never inside it: the alert is a network call.
+      if ("priceSourceRefused" in outcome && outcome.priceSourceRefused) {
+        await reportMarketingPriceSourceRefusal({ postId: outcome.postId });
+      }
     } catch (error) {
       // This draft's outcome is unknown; the ones before it are answered. The
       // generator resends the whole submission and each key is read back.

@@ -79,7 +79,7 @@ test("v52 catalog approval requires one route grade matching the worker registry
   assert.deepEqual(inspectV52TaskCatalogGrades({ ...exact, extra: true }, registry),
     { ok: false, code: "schema_rejected" });
   assert.equal(inspectV4TaskCostCatalog(catalog()).ok, true,
-    "the existing catalog parser remains compatible while the v52 latch is off");
+    "the existing catalog parser remains compatible independently of the v52 grade gate");
 });
 
 test("catalog parser computes its own digest and derives a ceiling from grade caps", () => {

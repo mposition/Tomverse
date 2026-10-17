@@ -144,3 +144,15 @@ test("the stoppable child bridge refuses a prompt pipe failure", {
   });
   assert.deepEqual(observed, { kind: "outcome_unknown" });
 });
+
+test("invalid observer setup kills an already-spawned child", {
+  skip: process.platform !== "linux",
+}, async () => {
+  const process = fakeRunnableChild();
+  const observed = await awaitAmuxTrackedCheckoutChild({ ...input,
+    modelId: "unapproved-model", child: process,
+    prompt: Buffer.from("synthetic-only"), stopCheck: async () => false,
+  });
+  assert.deepEqual(observed, { kind: "outcome_unknown" });
+  assert.equal(process.kills, 1);
+});

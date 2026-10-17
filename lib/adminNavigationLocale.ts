@@ -204,6 +204,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       accounts: { label: "계정", description: "브랜드 계정과 모드, 정지된 계정이 왜 정지됐는지" },
       experiments: { label: "실험", description: "랜딩 문구 실험과 결과" },
       reports: { label: "보고서", description: "주간 요약, 경쟁사 사실, 보존 실행 기록" },
+      competitors: { label: "경쟁사", description: "시장 분석 에이전트가 추적하는 경쟁사와 사람이 승인한 공식 host" },
       comments: { label: "댓글", description: "모니터가 올린 댓글 알림 중 아무도 답하지 않은 것" },
     },
   },

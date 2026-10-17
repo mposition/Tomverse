@@ -621,9 +621,6 @@ test("an uncommitted manifest leaves a seven-day key identity and audited deleti
     await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
     await tx.amuxIdeaSubmission.update({ where: { id: orphanIdeaId }, data: {
       submittedAt, analysisDeadlineAt, rawPurgeAfter: analysisDeadlineAt,
-      rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
-      sourceProvenanceCiphertext: null, sourceProvenanceKeyId: null,
-      sourceProvenanceKeyVersion: null, rawPurgedAt: new Date(),
     } });
     await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" ENABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
   });
@@ -642,11 +639,18 @@ test("an uncommitted manifest leaves a seven-day key identity and audited deleti
   assert.equal(claimAudit.action,
     "amux.v19.read_manifest.orphan_key_retirement_claimed");
   assert.equal(JSON.stringify(claimAudit.metadata).includes("docs/orphan.md"), false);
-  await assert.rejects(prisma.$transaction((tx) =>
-    commitAmuxIdeaRetentionHold(tx, { session, request, id: randomUUID(),
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaRetentionHoldScope(tx, orphanIdeaId)),
+  { remainingBodies: 1, alreadyPurgedBodies: 0 });
+  const holdId = randomUUID();
+  const held = await prisma.$transaction((tx) =>
+    commitAmuxIdeaRetentionHold(tx, { session, request, id: holdId,
       ideaId: orphanIdeaId, reasonCode: "legal_request", days: 1,
-      expectedRemainingBodies: 1, expectedAlreadyPurgedBodies: 0 })),
-  { code: "key_retirement_in_progress" });
+      expectedRemainingBodies: 1, expectedAlreadyPurgedBodies: 0 }));
+  assert.equal(held.holdId, holdId);
+  assert.ok((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: orphanIdeaId },
+  })).rawCiphertext);
   await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
     data: { id: manifestId, ideaId: orphanIdeaId, referenceOrdinal: 0,
       pinnedCommitSha: "a".repeat(40), fileCount: 1,

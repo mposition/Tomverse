@@ -269,26 +269,4 @@ BEGIN
 END;
 $$;
 
--- A legal hold approved after retirement has been claimed would otherwise
--- race the external deletion. Serialize on the same idea row and fail closed
--- until the version-aware retry verifies and records key deletion.
-CREATE FUNCTION "amux_v19_key_claim_hold_guard"() RETURNS trigger
-LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
-BEGIN
-  PERFORM 1 FROM "AmuxIdeaSubmission" WHERE "id" = NEW."ideaId" FOR UPDATE;
-  IF EXISTS (SELECT 1 FROM "AmuxIdeaReadManifestKeyIntent" k
-    WHERE k."ideaId" = NEW."ideaId" AND
-      k."keyRetirementClaimedAt" IS NOT NULL AND k."keyDeletedAt" IS NULL) THEN
-    RAISE EXCEPTION 'AMUX v19 read-manifest key retirement is in progress'
-      USING ERRCODE = '23514',
-        CONSTRAINT = 'AmuxIdeaRetentionHold_read_manifest_key_claim';
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER "AmuxIdeaRetentionHold_read_manifest_key_claim_guard"
-  BEFORE INSERT ON "AmuxIdeaRetentionHold"
-  FOR EACH ROW EXECUTE FUNCTION "amux_v19_key_claim_hold_guard"();
-
 COMMIT;

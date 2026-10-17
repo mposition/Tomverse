@@ -39,13 +39,13 @@ import {
   MARKETING_AUTO_PUBLISH_KEY,
   MARKETING_DRAFTS_KEY,
   MARKETING_EXPERIMENTS_KEY,
-  MARKETING_PRICE_FALLBACK_ALERT_READY,
   MARKETING_PUBLISH_KEY,
   marketingAutomationEnabledFromValue,
   resolveMarketingAutomationAccess,
   type MarketingAutomationAccessReason,
   type ReadResult,
 } from "@/lib/marketingAutomationAccess";
+import { marketingPriceAlertReadyInput } from "@/lib/marketingPriceAlertCore";
 import { MARKETING_NO_AUTONOMY_CHANNELS } from "@/lib/marketingAutomationSchema";
 import {
   insertAutonomousScheduledMarketingPost,
@@ -182,10 +182,8 @@ const admissionDecisionsFrom = (
     // S3 owns generation and its budget; nothing here drafts.
     llmGenerationBudgetAvailable: unreadable,
     generatorAuthenticated: unreadable,
-    priceFallbackAlertReady: {
-      ok: true,
-      value: MARKETING_PRICE_FALLBACK_ALERT_READY,
-    },
+    // The operator alert path (S3d): ready when it has a recipient.
+    priceFallbackAlertReady: marketingPriceAlertReadyInput(),
     // No person is present. The two admin inputs are false rather than
     // unreadable: it is not that we could not find out, it is that there is
     // nobody, and that is the whole point of this path.

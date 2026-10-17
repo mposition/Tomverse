@@ -17,10 +17,10 @@ import { cancelOverdueAmuxIdeaAnalyses, purgeDueAmuxRawIdeas } from
   "@/lib/amux/ideaRawRetentionService";
 import { notifyDueAmuxRetentionHolds } from
   "@/lib/amux/ideaRetentionHoldNoticeService";
-import { purgeDueAmuxV22TaskResults } from
-  "@/lib/amux/v22TaskResultRetention";
 import { purgeDueAmuxReadManifests } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestRetention";
+import { purgeDueAmuxV22TaskResults } from
+  "@/lib/amux/v22TaskResultRetention";
 import { purgeDueAmuxOrphanReadManifestKeys } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention";
 

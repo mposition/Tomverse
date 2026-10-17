@@ -6,6 +6,7 @@
  * pin provider ids with --reviewer; server-side eligibility checks still apply.
  *
  *   node tools/review-orchestrator/client/review.mjs submit --author codex [--base <rev>] [--head <rev>]
+ *                                          [--head-ref refs/amux-v52-review/<attemptId>]
  *                                          [--reviewers 2] [--scope "..."] [--author-vendor xai]
  *                                          [--focus <rev>]   review only <rev>..HEAD
  *                                          [--reviewer claude] [--reviewer copilot]
@@ -23,7 +24,8 @@
  * Exit codes are the server's: 0 accept, 1 reject, 2 unknown, 3 pending, 64 usage, 65 error.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { createReadStream, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { createReadStream, mkdtempSync, readFileSync, realpathSync,
+  rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
@@ -71,15 +73,55 @@ export function repoNameFromRemote(url) {
  * Bundle `base..head` under a ref name unique to this submit, so two submits
  * from worktrees sharing one ref store cannot bundle each other's head.
  */
-function createBundle(base, head) {
+function createBundle(base, head, headRef) {
+  if (headRef && (!/^refs\/amux-v52-review\/[0-9a-f-]{36}$/i.test(headRef) ||
+      git(["rev-parse", "--verify", `${headRef}^{commit}`]) !== head))
+    throw new Error("head ref does not match the reviewed commit");
   const dir = mkdtempSync(join(tmpdir(), "review-orch-"));
   const path = join(dir, "review.bundle");
   const ref = `refs/review-orchestrator/${randomBytes(8).toString("hex")}`;
-  git(["update-ref", ref, head]);
   try {
-    git(["bundle", "create", path, ref, `^${base}`]);
+    if (!headRef) git(["update-ref", ref, head]);
+    if (headRef && git(["rev-parse", "--is-bare-repository"]) === "true") {
+      // Git bundle omits objects held only in an alternate object directory.
+      // The bridge's isolated bare repo reads worker objects as data; pack the
+      // reviewed delta explicitly so the server receives every new object.
+      const packed = spawnSync("git", ["pack-objects", "--stdout", "--revs"], {
+        input: `${headRef}\n^${base}\n`, maxBuffer: 64 * 1024 * 1024,
+        timeout: 10_000,
+      });
+      if (packed.status !== 0 || !packed.stdout?.subarray(0, 4)
+        .equals(Buffer.from("PACK")))
+        throw new Error("review pack unavailable");
+      writeFileSync(path, Buffer.concat([
+        Buffer.from(`# v2 git bundle\n-${base} base\n${head} ${ref}\n\n`),
+        packed.stdout,
+      ]));
+      git(["bundle", "verify", path]);
+    } else git(["bundle", "create", path, headRef ?? ref, `^${base}`]);
+    if (headRef && git(["rev-parse", "--is-bare-repository"]) !== "true") {
+      // Git requires a named source ref for an unreachable local commit.
+      // Rename only the bundle header to the server's short-lived namespace;
+      // its pack data and source repository remain untouched.
+      const bundle = readFileSync(path);
+      const boundary = bundle.indexOf("\n\n");
+      if (boundary < 0 || boundary > 4_096)
+        throw new Error("review bundle header invalid");
+      const header = bundle.subarray(0, boundary + 2).toString("utf8");
+      const sourceLine = `${head} ${headRef}\n`;
+      if (header.split(sourceLine).length !== 2)
+        throw new Error("review bundle head missing");
+      writeFileSync(path, Buffer.concat([
+        Buffer.from(header.replace(sourceLine, `${head} ${ref}\n`)),
+        bundle.subarray(boundary + 2),
+      ]));
+      git(["bundle", "verify", path]);
+    }
+  } catch (error) {
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
   } finally {
-    spawnSync("git", ["update-ref", "-d", ref]);
+    if (!headRef) spawnSync("git", ["update-ref", "-d", ref]);
   }
   return { path, ref, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
@@ -127,9 +169,12 @@ function transport(token, stdinPath, { capture = false } = {}) {
     args = ["-o", "BatchMode=yes", host, process.env.REVIEW_ORCH_REMOTE || "review-orchestrator", "rpc", token];
   }
   return new Promise((resolve, reject) => {
+    const remoteEnv = { ...process.env };
+    delete remoteEnv.GIT_ALTERNATE_OBJECT_DIRECTORIES;
     const child = spawn(command, args, {
       stdio: [stdinPath ? "pipe" : "ignore", capture ? "pipe" : "inherit", "inherit"],
       timeout: capture ? 30_000 : undefined,
+      env: remoteEnv,
     });
     let stdout = "";
     if (capture) child.stdout.on("data", (chunk) => {
@@ -171,11 +216,12 @@ async function submit(options) {
   // --focus <rev>: show the reviewer only <rev>..HEAD (say, what changed since
   // the last review round). The server checks it lies between base and HEAD.
   const focus = options.focus ? git(["rev-parse", "--verify", `${options.focus}^{commit}`]) : undefined;
-  if (git(["status", "--porcelain", "--untracked-files=no"]) !== "") {
+  if (git(["rev-parse", "--is-bare-repository"]) !== "true" &&
+      git(["status", "--porcelain", "--untracked-files=no"]) !== "") {
     process.stderr.write("warning: uncommitted changes are not part of the review; only committed work is sent\n");
   }
   const repo = options.repo ?? repoNameFromRemote(git(["remote", "get-url", "origin"]));
-  const bundle = createBundle(base, head);
+  const bundle = createBundle(base, head, options["head-ref"]);
   try {
     const request = {
       command: "submit",

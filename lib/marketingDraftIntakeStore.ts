@@ -24,7 +24,6 @@ import { Prisma } from "@prisma/client";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import {
   MARKETING_DRAFTS_KEY,
-  MARKETING_PRICE_FALLBACK_ALERT_READY,
   resolveMarketingAutomationAccess,
   type ReadResult,
 } from "@/lib/marketingAutomationAccess";
@@ -42,6 +41,10 @@ import {
 } from "@/lib/marketingDraftIntakeCore";
 import { resolveMarketingFactsWithSnapshot } from "@/lib/marketingFactResolution";
 import { guardDraft } from "@/lib/marketingGuardCore";
+import {
+  MARKETING_PRICE_SOURCE_REFUSAL_CODE,
+  marketingPriceAlertReadyInput,
+} from "@/lib/marketingPriceAlertCore";
 import { resolveMarketingGuardContext } from "@/lib/marketingGuardContext";
 import {
   appendMarketingPostHistory,
@@ -75,6 +78,12 @@ export type MarketingDraftIntakeOutcome =
       readonly status: "queued" | "rejected";
       readonly postId: string;
       readonly existing: boolean;
+      /**
+       * A new draft the Guard refused because a price it names is not a
+       * stored value; the route raises the operator alert for it
+       * (docs/policy/marketing-automation.md §7.2(2)). Never true on a read-back.
+       */
+      readonly priceSourceRefused?: true;
     };
 
 const unreadable: ReadResult<never> = { ok: false };
@@ -163,7 +172,8 @@ const BUILD_READERS: MarketingDraftIntakeReaders = {
     parseMarketingLlmMonthlyCap(process.env[MARKETING_LLM_MONTHLY_CAP_ENV]) === null
       ? unreadable
       : { ok: true, value: true },
-  priceFallbackAlertReady: async () => ({ ok: true, value: MARKETING_PRICE_FALLBACK_ALERT_READY }),
+  // S3d: the operational alert path, ready when it has a recipient.
+  priceFallbackAlertReady: async () => marketingPriceAlertReadyInput(),
 };
 
 /** `draftIntake`, from inputs read inside the caller's transaction. */
@@ -415,5 +425,12 @@ export async function intakeMarketingGeneratorDraft(
     },
   });
 
-  return { status: rejected ? "rejected" : "queued", postId: created.id, existing: false };
+  const priceSourceRefused =
+    rejected && "codes" in verdict && verdict.codes.includes(MARKETING_PRICE_SOURCE_REFUSAL_CODE);
+  return {
+    status: rejected ? "rejected" : "queued",
+    postId: created.id,
+    existing: false,
+    ...(priceSourceRefused ? { priceSourceRefused: true as const } : {}),
+  };
 }
