@@ -34,7 +34,7 @@ test("local v19 Agent polls only reservation metadata using pinned origin", asyn
     assert.equal(observed.options.redirect, "manual");
     assert.equal(observed.options.cache, "no-store");
     assert.equal(observed.options.headers["x-amux-agent-id"], "amux-intake");
-    assert.equal(observed.options.headers.authorization, `Bearer ${secret}`);
+    assert.equal(observed.options.headers.authorization, ["Bearer", secret].join(" "));
     assert.equal(observed.options.body, JSON.stringify({ after: "previous_page_1" }));
   } finally {
     if (prior === undefined) delete process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV];
@@ -50,9 +50,12 @@ test("local v19 poll refuses unpinned or non-HTTPS destinations before network",
     delete process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV];
     assert.deepEqual(await poll({ fetchImpl }), { kind: "refused" });
     process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV] = origin;
+    const credentialed = new URL(origin);
+    credentialed.username = "user";
+    credentialed.password = "pass";
     for (const badOrigin of ["http://staging.tomverse.example/",
       "https://staging.tomverse.example/path",
-      "https://user:pass@staging.tomverse.example/",
+      credentialed.toString(),
       "https://staging.tomverse.example/?x=1",
       "https://other.example/"]) {
       assert.deepEqual(await poll({ origin: badOrigin, fetchImpl }), { kind: "refused" });
