@@ -595,7 +595,7 @@ test("session claim insert binds its audit to the exact UTC budget month", async
       tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
       action: AMUX_V19_SESSION_BUDGET_CLAIM_ACTION,
       targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: claimId,
-      summary: "Synthetic claim with a mismatched budget month.",
+      summary: "Synthetic claim to test exact budget-month audit binding.",
       metadata: { reservationId: reservation.reservationId,
         invocationOrdinal: 0, requestId,
         namespace: previous.namespace,
@@ -636,18 +636,22 @@ test("known session outcome cannot settle at zero even with lifecycle trigger by
   const known = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findFirstOrThrow({
     where: { reservationId: committedReservationId, status: "succeeded" },
   });
-  const tryZeroSettlement = (status: "succeeded" | "failed") =>
+  const trySettlement = (status: "succeeded" | "failed",
+    settledMicroUsd: bigint) =>
     prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         'ALTER TABLE "AmuxIdeaSessionAnalysisBudgetClaim" DISABLE TRIGGER "AmuxIdeaSessionAnalysisBudgetClaim_guard"');
       await tx.amuxIdeaSessionAnalysisBudgetClaim.update({
         where: { id: known.id },
-        data: { status, settledMicroUsd: BigInt(0) },
+        data: { status, settledMicroUsd },
       });
-      throw new Error("synthetic rollback if positive settlement check regresses");
+      throw new Error("positive settlement control rolled back");
     });
   for (const status of ["succeeded", "failed"] as const) {
-    await assert.rejects(tryZeroSettlement(status),
+    await assert.rejects(trySettlement(status, BigInt(1)),
+      (error: unknown) => error instanceof Error &&
+        error.message === "positive settlement control rolled back");
+    await assert.rejects(trySettlement(status, BigInt(0)),
       (error: unknown) => sqlState(error) === "23514");
   }
 });
