@@ -85,8 +85,8 @@ export const marketingAutomationEnabledFromValue = (
   value: string | null | undefined,
 ): boolean => value === "true";
 
-/** S2/S3 wires the operator alert delivery used by price fallback refusal. */
-export const MARKETING_PRICE_FALLBACK_ALERT_READY = false;
+// The price alert's readiness is read from its delivery path (S3d):
+// lib/marketingPriceAlertCore.ts.
 
 /**
  * The S2e receiver, dedupe, storage, mapping and status-query comparison, and
