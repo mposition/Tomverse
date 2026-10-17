@@ -1,0 +1,33 @@
+{
+  "recordId": "2026-10-14__zernio-youtube-platform-published-main",
+  "executor": "claude-staging-session",
+  "stagingCommitSha": "6a1740e0960d5082dc83ed33d2af1cf3a2e72012",
+  "observedScope": [
+    {
+      "eventType": "post.platform.published",
+      "channelId": "cmuqszzy8001q02taeknyo0vs"
+    }
+  ],
+  "conditions": {
+    "c1": "pass",
+    "c2": "pass",
+    "c3": "pass",
+    "c4": "pass",
+    "c5": "pass"
+  },
+  "evidenceRefs": [
+    "probe:signed_byte_appended:2026-10-14T09:54:54.584Z:401:signature_invalid",
+    "probe:signed_byte_changed:2026-10-14T09:54:53.899Z:401:signature_invalid",
+    "probe:signed_control:2026-10-14T09:54:51.131Z:200:channel_unknown",
+    "probe:unsigned_not_json:2026-10-14T09:54:51.906Z:401:signature_invalid",
+    "probe:wrong_signature_event:2026-10-14T09:54:53.240Z:401:signature_invalid",
+    "probe:wrong_signature_not_json:2026-10-14T09:54:52.574Z:401:signature_invalid",
+    "zernio-webhook-log:09f2e5a5-cf46-42e8-bf83-df60b24d7e44:2026-10-14T09:51:09.000Z:200:recorded",
+    "zernio-webhook-log:09f2e5a5-cf46-42e8-bf83-df60b24d7e44:2026-10-14T09:51:35.000Z:200:duplicate",
+    "zernio-webhook-log:1b84162b-84a8-4947-a9ff-5d663081820a:2026-10-14T09:53:11.000Z:200:shadow_off",
+    "zernio-webhook-log:1b84162b-84a8-4947-a9ff-5d663081820a:2026-10-14T09:54:25.000Z:503:deliberate_fault",
+    "zernio-webhook-log:1b84162b-84a8-4947-a9ff-5d663081820a:2026-10-14T09:54:32.000Z:200:recorded"
+  ],
+  "pipelineFingerprint": "e100f8169d0ca2ba39dad302c3a3ab64d3cda88ad4192d4f6aa3a7d473be55b9",
+  "stagingConfigSnapshotDigest": "5a9d58a2ba32c18c9cb9393b6a17c8c0296dfa319176ed225bcc30de9a1546f1"
+}

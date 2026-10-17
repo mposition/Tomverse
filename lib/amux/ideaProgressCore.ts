@@ -33,6 +33,7 @@ export type AmuxIdeaWaitingFor = "execution_approval" | "continuation" | "owner_
 
 export type AmuxIdeaProgressFacts = {
   state: string;
+  submissionOrigin?: "owner" | "session";
   cancelled: boolean;
   chunks: Array<{
     chunkIndex: number; state: string; coverageStatus: string | null;
@@ -99,6 +100,11 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
   // An analysis that finished with nothing left to decide (rejected, or every
   // proposal refused or expired) waits for nobody.
   if (latest && FINISHED.has(latest.state)) return at("plan_approval");
+  // v19 session submissions have no per-idea execution approval. Their
+  // append-only reservation waits for automatic analysis, not a human step.
+  if (facts.submissionOrigin === "session" && facts.state === "submitted") {
+    return at("analysis");
+  }
   return at("execution_approval", "execution_approval");
 }
 
