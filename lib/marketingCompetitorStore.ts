@@ -77,6 +77,24 @@ export async function readMarketingCompetitorsForGenerator(
   return rows.map((row) => ({ competitorId: row.id, displayName: row.displayName, officialHosts: [...row.officialHosts] }));
 }
 
+/** How many registry ids the generator is told it already knows. */
+export const MARKETING_COMPETITOR_KNOWN_ID_LIMIT = 200;
+
+/**
+ * Every competitor id the registry holds, in any status, so A3 proposes only
+ * what it has not proposed before. A rejected id is in the list on purpose: a
+ * person's rejection is an answer, and asking again is the generator reopening
+ * it. Newest first, so a registry past the limit keeps what is current.
+ */
+export async function readKnownMarketingCompetitorIds(db: CompetitorReader): Promise<string[]> {
+  const rows = await db.marketingCompetitor.findMany({
+    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    take: MARKETING_COMPETITOR_KNOWN_ID_LIMIT,
+    select: { id: true },
+  });
+  return rows.map((row) => row.id).sort();
+}
+
 /**
  * Store A3's candidates as proposals. A competitor id the registry already has
  * -- proposed, approved, rejected or retired -- is left as it is: A3 cannot

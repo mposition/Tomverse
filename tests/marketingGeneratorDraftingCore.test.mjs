@@ -29,6 +29,10 @@ const context = marketingGeneratorContextSchema.parse({
   ],
   brief: { topicIds: ["topic_compare"], claimIds: [], sourceDigests: [] },
   marketIntel: null,
+  competitors: {
+    tracked: [{ competitorId: "poe", displayName: "Poe", officialHosts: ["poe.com"] }],
+    knownIds: ["poe"],
+  },
 });
 const SCOPE = { channelId: "chn_li", locale: "en", count: 3, callIndex: 0 };
 
@@ -51,6 +55,16 @@ test("the model is given a fixed instruction and only this account's slice of th
   assert.deepEqual(data.claims.map((claim) => claim.id), ["claim_compare"]);
   assert.deepEqual(data.assets.map((asset) => asset.id), ["asset_hero"]);
   assert.deepEqual(data.brief, context.brief);
+  // A5 writes posts; it is told nothing about the competitor registry, so no
+  // host name can reach a post.
+  assert.equal("competitors" in data, false);
+  assert.equal(user.content.includes("poe.com"), false);
+});
+
+test("an answer without the registry still parses, for a service deployed before the app", () => {
+  const older = { ...context };
+  delete older.competitors;
+  assert.equal(marketingGeneratorContextSchema.safeParse(older).success, true);
 });
 
 test("the post count is bounded, and an account or locale outside the context is refused", () => {
