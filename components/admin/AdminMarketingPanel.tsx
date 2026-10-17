@@ -116,8 +116,7 @@ const COMPETITOR_DECISION = (id: unknown) =>
  */
 const pageList = (value: string) =>
   value
-    .split(/?
-/u)
+    .split("\n")
     .map((page) => page.trim())
     .filter((page) => page !== "");
 
