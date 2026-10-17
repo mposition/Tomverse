@@ -14,6 +14,7 @@ let mode = "stop";
 let spawnCount = 0;
 let stageCount = 0;
 let sandboxCount = 0;
+let sandboxInput;
 let cleanupPath;
 let gitStarted;
 let checkoutSignal;
@@ -62,9 +63,10 @@ mock.module(mod("lib/amux/ideaLocalApprovedCliCatalog.mjs"), {
   }) },
 });
 mock.module(mod("lib/amux/ideaLocalIsolatedCliRunner.mjs"), {
-  namedExports: { stageAmuxV19ClaudeCli: async () => {
+  namedExports: { stageAmuxV19ClaudeCli: async (path) => {
     stageCount += 1;
-    return { authPath: "/tmp/synthetic-auth" };
+    return { path, sha256: "a".repeat(64),
+      authPath: "/tmp/synthetic-auth" };
   } },
 });
 mock.module(mod("lib/amux/ideaTrackedCheckoutProcessResult.mjs"), {
@@ -74,8 +76,9 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutProcessResult.mjs"), {
   }) },
 });
 mock.module(mod("lib/amux/ideaTrackedCheckoutSandbox.mjs"), {
-  namedExports: { verifiedAmuxTrackedCheckoutSandbox: async () => {
+  namedExports: { verifiedAmuxTrackedCheckoutSandbox: async (input) => {
     sandboxCount += 1;
+    sandboxInput = input;
     return [];
   } },
 });
@@ -146,6 +149,7 @@ test("cleanup failure after child spawn preserves the provider-use signal", {
   spawnCount = 0;
   stageCount = 0;
   sandboxCount = 0;
+  sandboxInput = null;
   await assert.rejects(runAmuxV19TrackedCheckoutAnalysis(input(
     async () => false)), (error) => {
     assert.ok(error instanceof AmuxTrackedCheckoutHostError);
@@ -157,4 +161,7 @@ test("cleanup failure after child spawn preserves the provider-use signal", {
   assert.equal(spawnCount, 1);
   assert.equal(stageCount, 1);
   assert.equal(sandboxCount, 1);
+  assert.deepEqual(Object.keys(sandboxInput.cliMount).sort(),
+    ["path", "sha256"]);
+  assert.equal(sandboxInput.authPath, "/tmp/synthetic-auth");
 }));
