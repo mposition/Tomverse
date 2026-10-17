@@ -478,6 +478,11 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
 });
 
 test("only the named AMUX receipt and admission routes open direct transactions", () => {
+  const assertBefore = (source, guard, transaction = "prisma.$transaction") => {
+    assert.ok(source.includes(guard), `missing guard: ${guard}`);
+    assert.ok(source.includes(transaction), `missing transaction: ${transaction}`);
+    assert.ok(source.indexOf(guard) < source.indexOf(transaction));
+  };
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
@@ -494,17 +499,13 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   ]);
   const stopPoll = withoutComments(read(
     "app/api/internal/amux/v19/analysis-stop/route.ts"));
-  assert.ok(stopPoll.indexOf("isAmuxV4AnalysisAgentAuthorized") <
-    stopPoll.indexOf("prisma.$transaction"));
-  assert.ok(stopPoll.indexOf('process.env[READ_ENV] !== "enabled"') <
-    stopPoll.indexOf("prisma.$transaction"));
+  assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized");
+  assertBefore(stopPoll, 'process.env[READ_ENV] !== "enabled"');
   assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   const budgetReceipt = withoutComments(read(
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts"));
-  assert.ok(budgetReceipt.indexOf("isAmuxV4AnalysisAgentAuthorized") <
-    budgetReceipt.indexOf("prisma.$transaction"));
-  assert.ok(budgetReceipt.indexOf('process.env[READ_ENV] !== "enabled"') <
-    budgetReceipt.indexOf("prisma.$transaction"));
+  assertBefore(budgetReceipt, "isAmuxV4AnalysisAgentAuthorized");
+  assertBefore(budgetReceipt, 'process.env[READ_ENV] !== "enabled"');
   assert.match(budgetReceipt, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   // Intake v15 opens only the code latches. The independent runtime write
   // and receipt-read switches still fail closed before a transaction opens.
