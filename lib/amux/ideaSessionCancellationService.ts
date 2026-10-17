@@ -36,8 +36,11 @@ export async function commitAmuxIdeaSessionCancellation(
            set_config('idle_in_transaction_session_timeout', '10000', true)
   `;
   await takeAuditChainLock(tx);
-  const locked = await tx.$queryRaw<Array<{ id: string }>>`
-    SELECT "id" FROM "AmuxIdeaSubmission" WHERE "id" = ${input.ideaId} FOR UPDATE
+  const locked = await tx.$queryRaw<Array<{ id: string; hasRaw: boolean;
+    hasSource: boolean }>>`
+    SELECT "id", ("rawCiphertext" IS NOT NULL) AS "hasRaw",
+           ("sourceProvenanceCiphertext" IS NOT NULL) AS "hasSource"
+    FROM "AmuxIdeaSubmission" WHERE "id" = ${input.ideaId} FOR UPDATE
   `;
   if (locked.length !== 1) throw new AmuxIdeaSessionCancellationError("not_found");
   const idea = await tx.amuxIdeaSubmission.findUnique({
@@ -52,12 +55,16 @@ export async function commitAmuxIdeaSessionCancellation(
   if (!idea || idea.actorUserId !== actorId || idea.submissionOrigin !== "session") {
     throw new AmuxIdeaSessionCancellationError("not_found");
   }
+  if (!locked[0]!.hasRaw || !locked[0]!.hasSource) {
+    throw new AmuxIdeaSessionCancellationError("integrity_unavailable");
+  }
   const clock = await tx.$queryRaw<Array<{ now: Date }>>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
   `;
   const now = clock[0]?.now;
   if (!(now instanceof Date) || !Number.isFinite(now.getTime()) ||
-      !(idea.analysisDeadlineAt instanceof Date) || !(idea.rawPurgeAfter instanceof Date)) {
+      !(idea.analysisDeadlineAt instanceof Date) || !(idea.rawPurgeAfter instanceof Date) ||
+      idea.rawPurgeAfter > idea.analysisDeadlineAt) {
     throw new AmuxIdeaSessionCancellationError("integrity_unavailable");
   }
   if (idea.state !== "submitted" || idea.cancelledAt !== null ||
@@ -94,17 +101,42 @@ export async function commitAmuxIdeaSessionCancellation(
 export async function readAmuxIdeaSessionCancellationReceipt(
   tx: Prisma.TransactionClient, session: Session, ideaId: string,
 ): Promise<{ state: "cancelled"; ideaId: string; cancelledAt: string;
-  auditId: string; retryWrite: false } | { state: "not_visible"; retryWrite: false }> {
+  auditId: string; retryWrite: false } | { state: "queued"; ideaId: string;
+    retryWrite: false } | { state: "not_visible"; retryWrite: false }> {
   const actorId = session.user?.id;
   if (!actorId || !isAdminSession(session) || getAdminRole(session) !== "owner") {
     throw new AmuxIdeaSessionCancellationError("forbidden");
   }
   await assertRecentAdminAuthentication(session);
-  if (!UUID.test(ideaId)) throw new AmuxIdeaSessionCancellationError("not_found");
+  if (!UUID.test(ideaId)) throw new AmuxIdeaSessionCancellationError("not_cancellable");
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
     select: { actorUserId: true, submissionOrigin: true, state: true,
-      requestId: true, cancelledAt: true,
-      sessionAnalysisReservation: { select: { id: true } } } });
+      requestId: true, cancelledAt: true, analysisCompletedAt: true,
+      analysisDeadlineAt: true, rawPurgedAt: true,
+      currentSourcePlanRevisionId: true,
+      sessionAnalysisReservation: { select: { id: true, status: true } },
+      _count: { select: { chunks: true, previews: true } } } });
+  if (idea && idea.actorUserId === actorId && idea.submissionOrigin === "session" &&
+      idea.state === "submitted" && !idea.cancelledAt &&
+      !idea.analysisCompletedAt && !idea.rawPurgedAt &&
+      !idea.currentSourcePlanRevisionId && idea._count.chunks === 0 &&
+      idea._count.previews === 0 &&
+      idea.sessionAnalysisReservation?.status === "queued") {
+    const bodies = await tx.$queryRaw<Array<{ hasRaw: boolean;
+      hasSource: boolean }>>`
+      SELECT ("rawCiphertext" IS NOT NULL) AS "hasRaw",
+             ("sourceProvenanceCiphertext" IS NOT NULL) AS "hasSource"
+      FROM "AmuxIdeaSubmission" WHERE "id" = ${ideaId}
+    `;
+    const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+    `;
+    if (bodies[0]?.hasRaw && bodies[0]?.hasSource &&
+        clock[0]?.now instanceof Date &&
+        clock[0].now < idea.analysisDeadlineAt) {
+      return { state: "queued", ideaId, retryWrite: false };
+    }
+  }
   if (!idea || idea.actorUserId !== actorId || idea.submissionOrigin !== "session" ||
       idea.state !== "cancelled" || !idea.cancelledAt ||
       !idea.sessionAnalysisReservation) return { state: "not_visible", retryWrite: false };

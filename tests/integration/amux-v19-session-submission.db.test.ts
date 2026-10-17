@@ -720,6 +720,10 @@ test("owner cancellation removes a queued session idea and makes raw purge due",
   });
   assert.ok((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
     (candidate) => candidate.reservationId === created.reservationId));
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
+      state: "queued", ideaId, retryWrite: false,
+    });
   const cancellation = await prisma.$transaction((tx) =>
     commitAmuxIdeaSessionCancellation(tx, { session, request, ideaId,
       ownerConfirmed: true }));

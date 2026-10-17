@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
 import { AMUX_IDEA_PROGRESS_STAGES, amuxIdeaProgressStep } from "@/lib/amux/ideaProgressCore";
@@ -58,6 +59,7 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
         })}
       </ol>
       {row.stage === "cancelled" ? <p>{m.stages.cancelled}</p> : null}
+      <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} />
       {row.checkoutEvidence.length > 0 ? (
         <section aria-labelledby="amux-checkout-evidence-heading" data-testid="amux-checkout-evidence"
           className="space-y-2 border-t border-zinc-800 pt-3">
