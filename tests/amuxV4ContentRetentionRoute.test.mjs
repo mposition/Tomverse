@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import { POST } from "../app/api/internal/amux/v4/content-retention/route.ts";
 import { AMUX_V4_CONTENT_RETENTION_AGENT_ID,
+  amuxV19ReadManifestRetentionEnabled,
   amuxV4ContentRetentionEnabled,
   amuxV22TaskResultRetentionEnabled,
   isAmuxV4ContentRetentionAuthorized } from
@@ -52,4 +53,10 @@ test("v15 does not activate v22 task result or patch retention", () => {
     "../app/api/internal/amux/v4/content-retention/route.ts", import.meta.url), "utf8");
   assert.match(route, /amuxV22TaskResultRetentionEnabled\(\s*process\.env\[AMUX_V22_TASK_RESULT_RETENTION_ENV\]\)/);
   assert.match(route, /\? await purgeDueAmuxV22TaskResults\(\)/);
+});
+
+test("v19 read-manifest cleanup is separately default-off", () => {
+  assert.equal(amuxV19ReadManifestRetentionEnabled(undefined), false);
+  assert.equal(amuxV19ReadManifestRetentionEnabled("disabled"), false);
+  assert.equal(amuxV19ReadManifestRetentionEnabled("enabled"), true);
 });

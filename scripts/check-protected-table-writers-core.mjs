@@ -200,6 +200,13 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/amux-intake.md v19 items 3 and 7",
   },
   {
+    table: "AmuxIdeaReadManifestKeyIntent",
+    delegate: "amuxIdeaReadManifestKeyIntent",
+    writers: ["lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
+      "lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention.ts"],
+    contract: "docs/policy/amux-intake.md v19 item 3 read-path key retention",
+  },
+  {
     table: "AmuxIdeaOperatingScopeSetting",
     delegate: "amuxIdeaOperatingScopeSetting",
     writers: ["lib/amux/ideaOperatingScopeStore.ts"],
@@ -664,6 +671,27 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention.ts",
+    table: "AmuxIdeaReadManifestKeyIntent",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason: "This authorised intent-retirement writer selects due intent IDs and locks an exact intent row with bound parameters; its only intent update uses the Prisma delegate in the canonical audited transaction.",
+  },
+  {
+    path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
+    table: "AmuxIdeaReadManifestKeyIntent",
+    tableMentions: 9,
+    writeVerbs: 14,
+    reason: "The migration creates the guarded key-intent table and validates its one audited deletion transition; it seeds no row and writes no other protected table.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxIdeaReadManifestKeyIntent",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason: "The closed system-actor manifest names the intent and retirement audit targets; it executes no SQL.",
+  },
+  {
     path: "prisma/migrations/20261017020100_amux_v19_read_manifest_active_insert_guard/migration.sql",
     table: "AmuxIdeaTrackedCheckoutReadManifest",
     tableMentions: 1,
@@ -673,9 +701,37 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
     table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason: "The manifest and key-intent writers lock and read pinned checkout evidence; their SQL does not modify the evidence row.",
+  },
+  {
+    path: "lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention.ts",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
     tableMentions: 1,
     writeVerbs: 2,
-    reason: "The sole manifest writer locks and reads pinned checkout evidence; its SQL does not modify the evidence row.",
+    reason: "The orphan-key sweeper only reads the manifest table to prove no body was committed before deleting the external key; it updates only the key-intent table.",
+  },
+  {
+    path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 2,
+    writeVerbs: 14,
+    reason: "The new intent table references and reads the immutable checkout evidence; migration DDL never writes an evidence row.",
+  },
+  {
+    path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 2,
+    writeVerbs: 14,
+    reason: "The new intent guard only reads whether a manifest exists; migration DDL never writes a manifest row.",
+  },
+  {
+    path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 14,
+    reason: "The intent guard validates canonical audit rows from the same transaction and references them with restrictive foreign keys; migration DDL never writes an audit row.",
   },
   {
     path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",

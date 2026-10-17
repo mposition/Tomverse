@@ -228,6 +228,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // The next migration closes an insert-only purged-shape loophole on that
   // same manifest table; it does not alter commit-deadline evidence.
   "20261017020100_amux_v19_read_manifest_active_insert_guard",
+  // A durable key intent and its audited orphan-key retirement are independent
+  // of the AMUX commit-deadline marker and trigger.
+  "20261017021000_amux_v19_read_manifest_key_intent",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -478,6 +481,8 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
     "app/api/internal/amux/v19/analysis-stop/route.ts",
+    "app/api/internal/amux/v19/checkout-evidence/route.ts",
+    "app/api/internal/amux/v19/read-manifest/route.ts",
     "app/api/internal/amux/v22/execution/result/route.ts",
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
@@ -489,6 +494,38 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   assert.ok(stopPoll.indexOf('process.env[READ_ENV] !== "enabled"') <
     stopPoll.indexOf("prisma.$transaction"));
   assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
+  const evidenceRoute = withoutComments(read(
+    "app/api/internal/amux/v19/checkout-evidence/route.ts"));
+  const evidencePost = between(evidenceRoute, "export async function POST",
+    "export async function GET");
+  const evidenceGet = evidenceRoute.slice(evidenceRoute.indexOf(
+    "export async function GET"));
+  assert.ok(evidencePost.indexOf("authorized(request)") <
+    evidencePost.indexOf("prisma.$transaction"));
+  assert.ok(evidencePost.indexOf("process.env[WRITE_ENV]") <
+    evidencePost.indexOf("prisma.$transaction"));
+  assert.ok(evidencePost.indexOf("process.env[READ_ENV]") <
+    evidencePost.indexOf("prisma.$transaction"));
+  assert.ok(evidenceGet.indexOf("process.env[READ_ENV]") <
+    evidenceGet.indexOf("prisma.$transaction"));
+  assert.match(evidencePost, /maxWait: 3_000, timeout: 12_000/);
+  assert.match(evidenceGet, /maxWait: 3_000, timeout: 10_000/);
+  const manifestRoute = withoutComments(read(
+    "app/api/internal/amux/v19/read-manifest/route.ts"));
+  const manifestPost = between(manifestRoute, "export async function POST",
+    "export async function GET");
+  const manifestGet = manifestRoute.slice(manifestRoute.indexOf(
+    "export async function GET"));
+  assert.ok(manifestPost.indexOf("authorized(request)") <
+    manifestPost.indexOf("prisma.$transaction"));
+  assert.ok(manifestPost.indexOf("process.env[WRITE_ENV]") <
+    manifestPost.indexOf("prisma.$transaction"));
+  assert.ok(manifestPost.indexOf("process.env[READ_ENV]") <
+    manifestPost.indexOf("prisma.$transaction"));
+  assert.ok(manifestGet.indexOf("process.env[READ_ENV]") <
+    manifestGet.indexOf("prisma.$transaction"));
+  assert.match(manifestPost, /maxWait: 3_000, timeout: 12_000/);
+  assert.match(manifestGet, /maxWait: 3_000, timeout: 10_000/);
   // Intake v15 opens only the code latches. The independent runtime write
   // and receipt-read switches still fail closed before a transaction opens.
   // Both transaction bounds remain independent of execution commit deadlines.

@@ -7,7 +7,7 @@ import { takeAuditChainLock, writeSystemAuditLog } from "../adminAudit.ts";
 import { openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { amuxContentUnitKeyId, createAmuxContentUnitKeys,
-  deleteAmuxContentUnitKey, loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
+  loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { AmuxContentRetirementError, recordAmuxContentBodyPurge } from
   "./ideaContentKeyRetirementService.ts";
 import { amuxIdeaHasActiveRetentionHold } from "./ideaRetentionHoldRead.ts";
@@ -22,6 +22,9 @@ import {
   parseAmuxTrackedCheckoutReadManifest,
   type AmuxTrackedCheckoutVerifiedReadInput,
 } from "./ideaTrackedCheckoutReadManifestCore.ts";
+import { AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION,
+  AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET } from
+  "../adminAuditSystemActors.ts";
 
 export class AmuxTrackedCheckoutReadManifestError extends Error {
   constructor(readonly code: "invalid_manifest" | "idea_unavailable" |
@@ -110,18 +113,65 @@ export async function prepareAmuxTrackedCheckoutReadManifest(
   const inspected = inspectAmuxTrackedCheckoutReadManifest(prepared);
   if (!inspected) throw new AmuxTrackedCheckoutReadManifestError("invalid_manifest");
   inspected.plaintext.fill(0);
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+             set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
+    `;
+    await recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, prepared);
+  }, { maxWait: 3_000, timeout: 12_000 });
   const keys = await createAmuxContentUnitKeys(
     amuxTrackedCheckoutReadManifestKeyIdentity(input.ideaId, manifestId));
   return { input: prepared, keys };
 }
 
-/** Only a definitively rolled-back write may discard its fresh key. An
- * uncertain COMMIT must be read back and must never use this path. */
-export async function discardUncommittedAmuxReadManifestKey(
-  ideaId: string, manifestId: string,
+/** Commit the key's non-content identity before the external key is written.
+ * This row remains discoverable even if PutObject or the manifest COMMIT is
+ * uncertain; the seven-day sweeper can then address the exact key. */
+export async function recordAmuxTrackedCheckoutReadManifestKeyIntent(
+  tx: Prisma.TransactionClient, input: AmuxTrackedCheckoutVerifiedReadInput,
 ): Promise<void> {
-  await deleteAmuxContentUnitKey(
-    amuxTrackedCheckoutReadManifestKeyIdentity(ideaId, manifestId));
+  const inspected = inspectAmuxTrackedCheckoutReadManifest(input);
+  if (!inspected) throw new AmuxTrackedCheckoutReadManifestError("invalid_manifest");
+  try {
+    await takeAuditChainLock(tx);
+    const locked = await tx.$queryRaw<Array<{ pinnedCommitSha: string }>>`
+      SELECT e."pinnedCommitSha" FROM "AmuxIdeaTrackedCheckoutEvidence" e
+      JOIN "AmuxIdeaSubmission" i ON i."id" = e."ideaId"
+      WHERE e."ideaId" = ${inspected.ideaId}
+        AND e."referenceOrdinal" = ${inspected.referenceOrdinal}
+        AND i."submissionOrigin" = 'session'
+        AND i."cancelledAt" IS NULL AND i."analysisCompletedAt" IS NULL
+        AND i."analysisDeadlineAt" > (clock_timestamp() AT TIME ZONE 'UTC')
+        AND i."submittedAt" + INTERVAL '7 days' > clock_timestamp()
+      FOR KEY SHARE OF i
+    `;
+    if (locked.length !== 1) {
+      throw new AmuxTrackedCheckoutReadManifestError("idea_unavailable");
+    }
+    if (locked[0].pinnedCommitSha !== inspected.pinnedCommitSha) {
+      throw new AmuxTrackedCheckoutReadManifestError("evidence_unavailable");
+    }
+    if (await tx.amuxIdeaReadManifestKeyIntent.findUnique({
+      where: { ideaId_referenceOrdinal: { ideaId: inspected.ideaId,
+        referenceOrdinal: inspected.referenceOrdinal } }, select: { id: true },
+    })) throw new AmuxTrackedCheckoutReadManifestError("already_recorded");
+    const auditLogId = await writeSystemAuditLog({ tx,
+      systemActor: AMUX_V19_READ_MANIFEST_AUDIT_ACTOR,
+      action: AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION,
+      targetType: AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET,
+      targetId: inspected.manifestId,
+      summary: "Reserved an AMUX v19 read-manifest content key identity.",
+      metadata: { policyVersion: 19, manifestId: inspected.manifestId,
+        ideaId: inspected.ideaId, referenceOrdinal: inspected.referenceOrdinal,
+        pinnedCommitSha: inspected.pinnedCommitSha },
+    });
+    await tx.amuxIdeaReadManifestKeyIntent.create({ data: {
+      id: inspected.manifestId, ideaId: inspected.ideaId,
+      referenceOrdinal: inspected.referenceOrdinal,
+      pinnedCommitSha: inspected.pinnedCommitSha, auditLogId,
+    } });
+  } finally { inspected.plaintext.fill(0); }
 }
 
 /** Persist one verified read observation with its canonical audit. No path or
@@ -152,6 +202,16 @@ export async function recordAmuxTrackedCheckoutReadManifest(
     throw new AmuxTrackedCheckoutReadManifestError("idea_unavailable");
   }
   if (locked[0].pinnedCommitSha !== inspected.pinnedCommitSha) {
+    throw new AmuxTrackedCheckoutReadManifestError("evidence_unavailable");
+  }
+  const intent = await tx.amuxIdeaReadManifestKeyIntent.findUnique({
+    where: { id: inspected.manifestId }, select: { ideaId: true,
+      referenceOrdinal: true, pinnedCommitSha: true, keyDeletedAt: true },
+  });
+  if (!intent || intent.ideaId !== inspected.ideaId ||
+      intent.referenceOrdinal !== inspected.referenceOrdinal ||
+      intent.pinnedCommitSha !== inspected.pinnedCommitSha ||
+      intent.keyDeletedAt) {
     throw new AmuxTrackedCheckoutReadManifestError("evidence_unavailable");
   }
   if (await tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
@@ -207,6 +267,18 @@ export async function readAmuxTrackedCheckoutReadManifestReceipt(
   });
 }
 
+/** A content-free pending-key receipt when the manifest write never reached
+ * its audit transaction. Its existence forbids blind key creation retries. */
+export async function readAmuxTrackedCheckoutReadManifestKeyIntentReceipt(
+  tx: Prisma.TransactionClient, ideaId: string, referenceOrdinal: number,
+) {
+  return tx.amuxIdeaReadManifestKeyIntent.findUnique({
+    where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal } },
+    select: { id: true, ideaId: true, referenceOrdinal: true,
+      pinnedCommitSha: true, keyDeletedAt: true },
+  });
+}
+
 /** Owner-scoped Admin read. Key retrieval happens after the read transaction,
  * since the external key store must not occupy a DB transaction. */
 export async function readAmuxTrackedCheckoutReadManifestForOwner(
@@ -220,8 +292,17 @@ export async function readAmuxTrackedCheckoutReadManifestForOwner(
   if (!row.ciphertext || !row.keyId || !row.keyVersion) {
     throw new Error("read_manifest_integrity_unavailable");
   }
-  const keys = await loadAmuxContentUnitKeys(
-    amuxTrackedCheckoutReadManifestKeyIdentity(row.ideaId, row.id));
+  let keys: AmuxContentKeys;
+  try {
+    keys = await loadAmuxContentUnitKeys(
+      amuxTrackedCheckoutReadManifestKeyIdentity(row.ideaId, row.id));
+  } catch (error) {
+    const current = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUnique({
+      where: { id: row.id }, select: { bodyPurgedAt: true },
+    });
+    if (current?.bodyPurgedAt) return null;
+    throw error;
+  }
   const plain = openAmuxContent({ ciphertext: Buffer.from(row.ciphertext),
     keyId: row.keyId, keyVersion: row.keyVersion },
   "repository_read_manifest", row.id, keys);

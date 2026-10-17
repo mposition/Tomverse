@@ -3,11 +3,16 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
+import { AMUX_V19_READ_MANIFEST_RETENTION_ENV,
+  AMUX_V4_CONTENT_RETENTION_ENV,
+  amuxV19ReadManifestRetentionEnabled,
+  amuxV4ContentRetentionEnabled } from
+  "@/lib/amux/ideaContentRetentionCore";
 import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
   isAmuxV4AnalysisAgentAuthorized } from "@/lib/amux/ideaAnalysisQueueCore";
 import { AmuxTrackedCheckoutReadManifestError,
-  discardUncommittedAmuxReadManifestKey,
   prepareAmuxTrackedCheckoutReadManifest,
+  readAmuxTrackedCheckoutReadManifestKeyIntentReceipt,
   readAmuxTrackedCheckoutReadManifestReceipt,
   recordAmuxTrackedCheckoutReadManifest } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestStore";
@@ -34,7 +39,10 @@ function authorized(request: Request): boolean {
  * after an uncertain key-store write or COMMIT; GET provides exact-ref recovery. */
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (process.env[WRITE_ENV] !== "enabled" || process.env[READ_ENV] !== "enabled") {
+  if (process.env[WRITE_ENV] !== "enabled" || process.env[READ_ENV] !== "enabled" ||
+      !amuxV4ContentRetentionEnabled(process.env[AMUX_V4_CONTENT_RETENTION_ENV]) ||
+      !amuxV19ReadManifestRetentionEnabled(
+        process.env[AMUX_V19_READ_MANIFEST_RETENTION_ENV])) {
     return amuxJsonNoStore({ available: false,
       reason: "read_manifest_write_disabled" }, 409);
   }
@@ -77,12 +85,9 @@ export async function POST(request: Request): Promise<Response> {
       fileCount: receipt.fileCount });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxTrackedCheckoutReadManifestError) {
-      try {
-        await discardUncommittedAmuxReadManifestKey(body.ideaId,
-          prepared.input.manifestId);
-      } catch {
-        return amuxJsonNoStore({ error: "outcome_unknown", retryWrite: false }, 503);
-      }
+      // The durable intent retains the key until seven-day retirement. An
+      // immediate DeleteObject would create a second versioned-bucket delete
+      // marker when the orphan sweeper later visits the same identity.
       return amuxJsonNoStore({ error: error.code, retryWrite: false }, 409);
     }
     return amuxJsonNoStore({ error: "outcome_unknown", retryWrite: false }, 503);
@@ -108,16 +113,29 @@ export async function GET(request: Request): Promise<Response> {
     return amuxJsonNoStore({ error: "Invalid request." }, 400);
   }
   try {
-    const receipt = await prisma.$transaction(async (tx) => {
+    const readback = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`
         SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
                set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
       `;
-      return readAmuxTrackedCheckoutReadManifestReceipt(tx,
+      const receipt = await readAmuxTrackedCheckoutReadManifestReceipt(tx,
         parsed.data.ideaId, parsed.data.referenceOrdinal);
+      if (receipt) return { receipt, intent: null };
+      const intent = await readAmuxTrackedCheckoutReadManifestKeyIntentReceipt(tx,
+        parsed.data.ideaId, parsed.data.referenceOrdinal);
+      return { receipt: null, intent };
     }, { maxWait: 3_000, timeout: 10_000 });
-    if (!receipt) return amuxJsonNoStore({ status: "absent",
-      ...parsed.data, retryWrite: false }, 404);
+    if (!readback.receipt) {
+      if (readback.intent) return amuxJsonNoStore({ status: "key_intent",
+        manifestId: readback.intent.id, ideaId: readback.intent.ideaId,
+        referenceOrdinal: readback.intent.referenceOrdinal,
+        pinnedCommitSha: readback.intent.pinnedCommitSha,
+        keyRetirementRecorded: readback.intent.keyDeletedAt !== null,
+        retryWrite: false });
+      return amuxJsonNoStore({ status: "absent",
+        ...parsed.data, retryWrite: false }, 404);
+    }
+    const receipt = readback.receipt;
     return amuxJsonNoStore({ status: "recorded", manifestId: receipt.id,
       ideaId: receipt.ideaId, referenceOrdinal: receipt.referenceOrdinal,
       pinnedCommitSha: receipt.pinnedCommitSha, fileCount: receipt.fileCount,

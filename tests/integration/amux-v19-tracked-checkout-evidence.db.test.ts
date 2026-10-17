@@ -33,10 +33,13 @@ import { parseAmuxTrackedCheckoutReadManifest } from
 import { amuxTrackedCheckoutReadManifestKeyIdentity,
   AmuxTrackedCheckoutReadManifestError,
   amuxReadManifestDueAt, commitAmuxDueReadManifestPurge,
+  recordAmuxTrackedCheckoutReadManifestKeyIntent,
   recordAmuxTrackedCheckoutReadManifest } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestStore";
 import { purgeDueAmuxReadManifests } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestRetention";
+import { purgeDueAmuxOrphanReadManifestKeys } from
+  "@/lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention";
 import {
   commitAmuxOperatingScope,
   readAmuxOperatingScopeAuthority,
@@ -209,12 +212,31 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
     observed: { kind: "verified_success" as const,
       readFiles: ["src/read.ts", "README.md"] } };
   try {
+    await prisma.$transaction((tx) =>
+      recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, input));
+    assert.equal(await prisma.amuxIdeaTrackedCheckoutReadManifest.count({
+      where: { id: manifestId },
+    }), 0, "key identity must commit before the encrypted manifest");
     const receipt = await prisma.$transaction((tx) =>
       recordAmuxTrackedCheckoutReadManifest(tx, input, readKeys));
     assert.equal(receipt.fileCount, 2);
     const row = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
       where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
     });
+    const intent = await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
+      where: { id: manifestId },
+    });
+    const intentAudit = await prisma.adminAuditLog.findUniqueOrThrow({
+      where: { id: intent.auditLogId },
+    });
+    assert.equal(intent.ideaId, ideaId);
+    assert.equal(intent.referenceOrdinal, 0);
+    assert.equal(intentAudit.action, "amux.v19.read_manifest.key_intent");
+    assert.equal(intentAudit.targetId, manifestId);
+    assert.equal(JSON.stringify(intentAudit.metadata).includes("README.md"), false);
+    await assert.rejects(prisma.amuxIdeaReadManifestKeyIntent.update({
+      where: { id: manifestId }, data: { pinnedCommitSha: "b".repeat(40) },
+    }), /append only/);
     if (!row.ciphertext || !row.keyId || !row.keyVersion) {
       throw new Error("Synthetic read manifest was unexpectedly purged");
     }
@@ -374,11 +396,16 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
     masterKeyVersion: 1, masterKey: randomBytes(32),
     digestKeyId: "synthetic-checkout-read-digest", digestKey: randomBytes(32) };
   try {
-    await prisma.$transaction((tx) => recordAmuxTrackedCheckoutReadManifest(tx, {
+    await prisma.$transaction(async (tx) => {
+      const input = {
       manifestId: secondManifestId, ideaId, referenceOrdinal: 1,
       pinnedCommitSha: "a".repeat(40),
-      observed: { kind: "verified_success", readFiles: ["docs/second.md"] },
-    }, secondKeys));
+      observed: { kind: "verified_success" as const,
+        readFiles: ["docs/second.md"] },
+      };
+      await recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, input);
+      return recordAmuxTrackedCheckoutReadManifest(tx, input, secondKeys);
+    });
   } finally {
     secondKeys.masterKey.fill(0);
     secondKeys.digestKey.fill(0);
@@ -507,11 +534,16 @@ test("a full pending-key batch leaves due manifest bodies for the next tick", as
       masterKeyVersion: 1, masterKey: randomBytes(32),
       digestKeyId: "synthetic-checkout-read-digest", digestKey: randomBytes(32) };
     try {
-      await prisma.$transaction((tx) => recordAmuxTrackedCheckoutReadManifest(tx, {
+      await prisma.$transaction(async (tx) => {
+        const input = {
         manifestId, ideaId: batchIdeaId, referenceOrdinal: ordinal,
         pinnedCommitSha: "a".repeat(40),
-        observed: { kind: "verified_success", readFiles: [`docs/${ordinal}.md`] },
-      }, readKeys));
+        observed: { kind: "verified_success" as const,
+          readFiles: [`docs/${ordinal}.md`] },
+        };
+        await recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, input);
+        return recordAmuxTrackedCheckoutReadManifest(tx, input, readKeys);
+      });
     } finally {
       readKeys.masterKey.fill(0);
       readKeys.digestKey.fill(0);
@@ -549,4 +581,79 @@ test("a full pending-key batch leaves due manifest bodies for the next tick", as
   assert.deepEqual(second, { bodiesPurged: 1, keysDeleted: 1, scanned: 1,
     batchLimit: 8 });
   assert.deepEqual([...deleted].sort(), [...manifestIds].sort());
+});
+
+test("an uncommitted manifest leaves a seven-day key identity and audited deletion", async () => {
+  const orphanIdeaId = randomUUID();
+  const repository = authority.scope.repositories[0];
+  if (!repository) throw new Error("Synthetic repository unavailable");
+  const inspected = inspectAmuxIdeaSessionSubmission({
+    version: 1, requestId: randomUUID(),
+    input: { version: 1, idea: "Synthetic orphan read-manifest key",
+      repositories: [repository], pullRequests: [] },
+    source: { toolName: "Codex", modelProvider: "OpenAI",
+      sessionDisplay: "AMUX v19 orphan-key retention DB test" },
+  });
+  if (!inspected.ok) throw new Error("Synthetic session input rejected");
+  await prisma.$transaction((tx) => commitAmuxIdeaSessionSubmission(tx, {
+    inspected, expectedAuthority: authority, ideaId: orphanIdeaId,
+    keys: keysFor(orphanIdeaId),
+  }));
+  await prisma.$transaction((tx) =>
+    recordAmuxTrackedCheckoutEvidence(tx, evidenceInput(orphanIdeaId)));
+  const manifestId = randomUUID();
+  await prisma.$transaction((tx) =>
+    recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, {
+      manifestId, ideaId: orphanIdeaId, referenceOrdinal: 0,
+      pinnedCommitSha: "a".repeat(40),
+      observed: { kind: "verified_success", readFiles: ["docs/orphan.md"] },
+    }));
+  assert.equal(await prisma.amuxIdeaTrackedCheckoutReadManifest.count({
+    where: { id: manifestId },
+  }), 0);
+  assert.deepEqual(await purgeDueAmuxOrphanReadManifestKeys(async () => {
+    throw new Error("not due: must not touch object store");
+  }), { keysDeleted: 0, scanned: 0, batchLimit: 8 });
+
+  const submittedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+  const analysisDeadlineAt = amuxReadManifestDueAt(submittedAt);
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+    await tx.amuxIdeaSubmission.update({ where: { id: orphanIdeaId }, data: {
+      submittedAt, analysisDeadlineAt, rawPurgeAfter: analysisDeadlineAt,
+      rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
+      sourceProvenanceCiphertext: null, sourceProvenanceKeyId: null,
+      sourceProvenanceKeyVersion: null, rawPurgedAt: new Date(),
+    } });
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" ENABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+  });
+  await assert.rejects(purgeDueAmuxOrphanReadManifestKeys(async () => {
+    throw new Error("synthetic S3 outcome unknown");
+  }), /key_store_unavailable/);
+  assert.equal((await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
+    where: { id: manifestId },
+  })).keyDeletedAt, null);
+
+  const deleted: string[] = [];
+  assert.deepEqual(await purgeDueAmuxOrphanReadManifestKeys(async (identity) => {
+    deleted.push(identity.subjectId);
+  }), { keysDeleted: 1, scanned: 1, batchLimit: 8 });
+  assert.deepEqual(deleted, [manifestId]);
+  const intent = await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
+    where: { id: manifestId },
+  });
+  assert.ok(intent.keyDeletedAt);
+  assert.ok(intent.keyDeleteAuditLogId);
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({
+    where: { id: intent.keyDeleteAuditLogId },
+  });
+  assert.equal(audit.action, "amux.v19.read_manifest.orphan_key_retired");
+  assert.equal(audit.targetId, manifestId);
+  assert.equal(JSON.stringify(audit.metadata).includes("docs/orphan.md"), false);
+  assert.deepEqual(await purgeDueAmuxOrphanReadManifestKeys(async () => {
+    throw new Error("deleted key must not be revisited");
+  }), { keysDeleted: 0, scanned: 0, batchLimit: 8 });
+  await assert.rejects(prisma.amuxIdeaReadManifestKeyIntent.update({
+    where: { id: manifestId }, data: { keyDeletedAt: new Date() },
+  }));
 });

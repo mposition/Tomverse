@@ -13,18 +13,19 @@ const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
 const manifestId = "dc86a25b-919f-4714-a3d8-45ef5a18b175";
 const envNames = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
   "TOMVERSE_AMUX_SYNC_SECRET", "TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE",
-  "TOMVERSE_AMUX_V19_READ_MANIFEST_READ"] as const;
+  "TOMVERSE_AMUX_V19_READ_MANIFEST_READ",
+  "TOMVERSE_AMUX_V4_CONTENT_RETENTION",
+  "TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION"] as const;
 const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
 let prepares = 0;
 let writes = 0;
 let reads = 0;
-let discarded = 0;
 let stored: Record<string, unknown> | null = null;
+let intentStored = false;
 let writeCode: string | null = null;
 let prepareFails = false;
 let unknownCommit = false;
 let readFails = false;
-let discardFails = false;
 
 class SyntheticManifestError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -32,13 +33,6 @@ class SyntheticManifestError extends Error {
 
 mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestStore.ts"), { namedExports: {
   AmuxTrackedCheckoutReadManifestError: SyntheticManifestError,
-  discardUncommittedAmuxReadManifestKey: async (receivedIdeaId: string,
-    receivedManifestId: string) => {
-    assert.equal(receivedIdeaId, ideaId);
-    assert.equal(receivedManifestId, manifestId);
-    discarded += 1;
-    if (discardFails) throw new Error("synthetic uncertain key deletion");
-  },
   prepareAmuxTrackedCheckoutReadManifest: async (body: Record<string, unknown>) => {
     prepares += 1;
     const input = { ...body, manifestId };
@@ -46,6 +40,7 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestStore.ts"), { namedExpo
       typeof inspectAmuxTrackedCheckoutReadManifest>[0]);
     if (!inspected) throw new SyntheticManifestError("invalid_manifest");
     inspected.plaintext.fill(0);
+    intentStored = true;
     if (prepareFails) throw new Error("synthetic uncertain key write");
     return { input, keys: {} };
   },
@@ -71,6 +66,14 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestStore.ts"), { namedExpo
     if (readFails) throw new Error("synthetic DB failure with private detail");
     return stored;
   },
+  readAmuxTrackedCheckoutReadManifestKeyIntentReceipt: async (_tx: unknown,
+    receivedIdeaId: string, ordinal: number) => {
+    assert.equal(receivedIdeaId, ideaId);
+    assert.equal(ordinal, 0);
+    return intentStored ? { id: manifestId, ideaId,
+      referenceOrdinal: 0, pinnedCommitSha: body.pinnedCommitSha,
+      keyDeletedAt: null } : null;
+  },
 } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   $transaction: async (callback: (tx: unknown) => Promise<unknown>) => {
@@ -92,13 +95,16 @@ after(() => {
 });
 
 const reset = () => {
-  prepares = 0; writes = 0; reads = 0; discarded = 0; stored = null;
+  prepares = 0; writes = 0; reads = 0; stored = null;
+  intentStored = false;
   writeCode = null; prepareFails = false; unknownCommit = false;
-  readFails = false; discardFails = false;
+  readFails = false;
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
   process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE = "enabled";
   process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_READ = "enabled";
+  process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION = "enabled";
+  process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION = "enabled";
 };
 const body = { ideaId, referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
   observed: { kind: "verified_success", readFiles: ["docs/guide.md"] } };
@@ -128,6 +134,12 @@ test("dedicated worker auth and both gates guard manifest writes", async () => {
   process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE = "enabled";
   assert.equal((await route.POST(post())).status, 409);
   assert.equal((await route.GET(get())).status, 409);
+  reset();
+  delete process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION;
+  assert.equal((await route.POST(post())).status, 409);
+  reset();
+  delete process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION;
+  assert.equal((await route.POST(post())).status, 409);
   assert.equal(prepares, 0);
 });
 
@@ -193,10 +205,10 @@ test("known refusals and uncertain key or commit outcomes forbid blind retries",
     assert.equal(refused.status, 409);
     assert.deepEqual(await refused.json(), { error: code, retryWrite: false });
   }
-  assert.equal(discarded, 3);
-  discardFails = true;
-  assert.deepEqual(await (await route.POST(post())).json(), {
-    error: "outcome_unknown", retryWrite: false });
+  assert.deepEqual(await (await route.GET(get())).json(), {
+    status: "key_intent", manifestId, ideaId, referenceOrdinal: 0,
+    pinnedCommitSha: body.pinnedCommitSha, keyRetirementRecorded: false,
+    retryWrite: false });
   reset();
   prepareFails = true;
   const keyFailure = await route.POST(post());
@@ -204,6 +216,10 @@ test("known refusals and uncertain key or commit outcomes forbid blind retries",
   assert.deepEqual(await keyFailure.json(), {
     error: "outcome_unknown", retryWrite: false });
   assert.equal(writes, 0);
+  assert.deepEqual(await (await route.GET(get())).json(), {
+    status: "key_intent", manifestId, ideaId, referenceOrdinal: 0,
+    pinnedCommitSha: body.pinnedCommitSha, keyRetirementRecorded: false,
+    retryWrite: false });
   reset();
   unknownCommit = true;
   const uncertain = await route.POST(post());
@@ -211,7 +227,6 @@ test("known refusals and uncertain key or commit outcomes forbid blind retries",
   assert.deepEqual(await uncertain.json(), {
     error: "outcome_unknown", retryWrite: false });
   assert.equal(writes, 1);
-  assert.equal(discarded, 0, "an uncertain COMMIT must retain its key");
   unknownCommit = false;
   assert.equal((await route.GET(get())).status, 200);
   readFails = true;
