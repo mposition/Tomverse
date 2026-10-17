@@ -252,3 +252,17 @@ test("a report never exceeds the route's byte limit; the facts that do not fit a
   assert.equal(summary.factsKept + summary.unrepresentable, 240);
   assert.equal(marketingGeneratorReportSchema.safeParse(report).success, true);
 });
+
+test("a call released before dispatch is A3 running out of time, not an unknown outcome", async () => {
+  const { deps, seen } = ports({ callLlm: async () => ({ status: "released", callId: "c" }) });
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  // The worker carries on with A5 on a deadline stop, and stops on llm or submit.
+  assert.deepEqual(summary.stoppedAt, { stage: "deadline", detail: "released_before_dispatch" });
+  assert.equal(seen.reports.length, 0);
+  // A release whose answer was lost is not a release.
+  const lost = ports({ callLlm: async () => ({ status: "stopped", stage: "release", callId: "c", requestKey: "k" }) });
+  assert.deepEqual((await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, lost.deps)).stoppedAt, {
+    stage: "llm",
+    detail: "stopped",
+  });
+});

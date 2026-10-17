@@ -203,6 +203,11 @@ export async function runMarketingA3Cycle(
       return summary({ stage: "llm", detail: "threw" });
     }
     if (outcome.status === "refused") return summary({ stage: "llm", detail: `${outcome.stage}:${outcome.code}` });
+    // Given up before dispatch and the reservation released: nothing reached
+    // the provider and the ledger is closed, so this is A3 running out of
+    // time, not an unknown -- A5 still runs. A release whose answer was lost
+    // comes back as `stopped` and does stop the run.
+    if (outcome.status === "released") return summary({ stage: "deadline", detail: "released_before_dispatch" });
     if (outcome.status !== "answered") return summary({ stage: "llm", detail: outcome.status });
     const read = readMarketingA3Answer(outcome.content, { competitorId: competitor.competitorId, pages, checkedAt });
     // An answer that is not the JSON asked for found nothing usable: counted, not guessed at.
