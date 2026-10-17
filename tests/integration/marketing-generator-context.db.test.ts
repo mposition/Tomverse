@@ -215,3 +215,16 @@ test("the context tells A3 whom to track on which hosts, and every id it already
     assert.deepEqual(context.competitors.knownIds, ["alpha", "poe"]);
     assert.equal(/https?:\/\//.test(text), false, "a host is a name, not a URL");
   }));
+
+test("every known id reaches A3, however large the registry and however old the answer", () =>
+  withSecret(async () => {
+    // The first row written, then 250 newer ones: any page cut at fewer than
+    // 251 rows, newest first, would leave out the one written first.
+    await propose("aaa-oldest");
+    for (let index = 0; index < 250; index += 1) await propose(`c${String(index).padStart(3, "0")}`);
+    const response = await call({ generatorRunId: "run-3" });
+    assert.equal(response.status, 200);
+    const { context } = (await response.json()) as { context: { competitors: { knownIds: string[] } } };
+    assert.equal(context.competitors.knownIds.length, 251);
+    assert.equal(context.competitors.knownIds.includes("aaa-oldest"), true);
+  }));
