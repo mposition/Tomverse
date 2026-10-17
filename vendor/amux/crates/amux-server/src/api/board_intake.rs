@@ -97,8 +97,11 @@ where
     // AF-616's auto-fold hazard with a requester attached: there, a capture was
     // folded into an unrelated finding carded in the same minute, and the trail
     // from the report to its fix ran through a card about something else.
+    // `typed_ask` is a typed question's Decision Maker extension; folding it
+    // would attach one question's options to another card's question.
     let structured = ["depends_on", "gate", "callback", "due", "due_time", "reviewer", "shepherd",
-        "ask_actor", "ask_type", "ask_question", "ask_unblocks", "tags", "request_to", "next_action", "acceptance_criteria"].iter()
+        "ask_actor", "ask_type", "ask_question", "ask_unblocks", "tags", "request_to", "next_action", "acceptance_criteria",
+        "typed_ask"].iter()
         .any(|key| map.get(*key).is_some_and(|v| !v.is_null() && v != "" && v != &serde_json::json!([])))
         || matches!(item_type, "epic" | "watch" | "tripwire");
     if structured {
