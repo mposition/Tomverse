@@ -15,13 +15,15 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 import { z } from "zod";
 
-import { MARKETING_REPORT_PAYLOAD_SCHEMAS } from "@/lib/marketingAutomationSchema";
+// Relative imports, so the generator service can load this with
+// --experimental-strip-types and sign its reports with the same bytes.
+import { MARKETING_REPORT_PAYLOAD_SCHEMAS } from "./marketingAutomationSchema.ts";
 import {
   MARKETING_COMPETITOR_MAX_CANDIDATES,
   marketingCompetitorCandidateSchema,
   type MarketingCompetitorCandidate,
   type MarketingCompetitorSourceHosts,
-} from "@/lib/marketingCompetitorCore";
+} from "./marketingCompetitorCore.ts";
 
 /** The largest body read; the route abandons the stream at the first byte over. */
 export const MARKETING_INTEL_REPORT_MAX_BODY_BYTES = 128 * 1024;
