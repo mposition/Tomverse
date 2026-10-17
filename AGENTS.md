@@ -1762,6 +1762,21 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   확인하지 못하면 `results/unknown`입니다. **경계 상한은 각 store 연산의 무결성 키 포함 최대 문장 수 + setup + fence**이고,
   request·body unit 테스트가 그 셈을, body DB 테스트가 하나 줄인 상한의 거부를 고정합니다. 전달·판정 route와 worker에게 가는
   경로는 없습니다.
+- **S2-3a(전용 launcher의 결정적 핵심)**: `lib/amux/decisionMakerLauncherCore.ts`,
+  `lib/amux/decisionMakerLauncherFs.ts`, `lib/amux/decisionMakerLauncherProcess.ts`,
+  `tests/amuxDecisionMakerLauncherCore.test.mjs`, `tests/amuxDecisionMakerLauncherFs.test.mjs`,
+  `tests/amuxDecisionMakerLauncherProcess.test.mjs`, `tests/support/amuxDmLauncherFixture.mjs`.
+  정책 버전 2의 고정 실행 조건(docs/policy/amux-decision-maker.md §5a)을 코드로 옮긴 것이며, **core 테스트가 그 절의 본문을 읽어
+  argv·실행 파일 sha256·고정 환경·삭제/남김 목록·거부 argv를 대조합니다** — 정책과 코드 한쪽만 바꾸면 실패합니다. 시작 허가는
+  preflight의 빈 거부 목록 하나뿐이고, 그 목록은 모든 검사를 돌려 전부 보고합니다. 실행 digest(`amux-json-v1`의 sha256)는 앱의
+  `amuxCanonicalJson`으로 계산하고 기록값은 core의 상수이며, 그 값을 테스트가 다시 고정합니다. **전송 의도는
+  route의 기록 응답과, 그 payload digest가 stdin으로 보낼 바이트의 `dmPayloadDigest(K_R, …)`와 같을 때만 증거입니다.** 결과는
+  codex `-o` 파일과 claude `structured_output`에서만 읽고, 스키마의 `output` 감싸개만 벗겨 앱의 출력 검증
+  (docs/policy/amux-decision-maker.md §6)에 넘깁니다. 거부·실패·
+  시간 초과·launcher 오류를 포함한 모든 종료 경로에서 요청의 두 디렉터리와 계정의 CLI 상태를 지우고, 남김 목록 밖에 무엇이든
+  남거나 확인하지 못하면 `cleanup_unknown`을 결과와 따로 보고합니다(latch는 앱의 일). link를 따라 읽거나 지우지 않습니다.
+  실행 파일·스키마의 root 소유 경로는 정책 본문에 없는 launcher 상수이며 digest에 들어갑니다. 테스트용 host만 다른 실행 파일
+  sha256과 timeout을 받고, 시스템 host에서는 그 둘이 거부됩니다. broker·bridge·route 호출·설치·unit은 없습니다.
 
 # AMUX 카드 표시 번호
 
