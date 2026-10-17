@@ -17,6 +17,7 @@ let spawnCount = 0;
 let stageCount = 0;
 let sandboxCount = 0;
 let sandboxInput;
+let sandboxVerificationError;
 let cleanupPath;
 let gitStarted;
 let checkoutSignal;
@@ -85,7 +86,8 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutSandbox.mjs"), {
   namedExports: { verifiedAmuxTrackedCheckoutSandbox: async (input) => {
     sandboxCount += 1;
     sandboxInput = input;
-    await verifyAmuxV4StagedCliBinary(input.cliMount);
+    try { await verifyAmuxV4StagedCliBinary(input.cliMount); }
+    catch (error) { sandboxVerificationError = error; throw error; }
     return [];
   } },
 });
@@ -180,9 +182,14 @@ test("staged CLI digest mismatch refuses before any child spawn", {
   spawnCount = 0;
   stageCount = 0;
   sandboxCount = 0;
-  assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis(input(
-    async () => false)), { kind: "outcome_unknown", cliStarted: false });
-  assert.equal(stageCount, 1);
-  assert.equal(sandboxCount, 1);
-  assert.equal(spawnCount, 0);
+  sandboxVerificationError = null;
+  try {
+    assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis(input(
+      async () => false)), { kind: "outcome_unknown", cliStarted: false });
+    assert.equal(stageCount, 1);
+    assert.equal(sandboxCount, 1);
+    assert.equal(spawnCount, 0);
+    assert.ok(sandboxVerificationError instanceof TypeError);
+    assert.match(sandboxVerificationError.message, /CLI binary digest changed/);
+  } finally { mode = "stop"; }
 }));
