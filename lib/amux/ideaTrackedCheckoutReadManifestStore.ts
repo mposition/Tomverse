@@ -1,6 +1,5 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "../adminAudit.ts";
@@ -106,10 +105,9 @@ export async function commitAmuxDueReadManifestPurge(tx: Prisma.TransactionClien
 /** Prepare an independently deletable content key outside the DB transaction.
  * An uncertain key-store write or COMMIT is never retried blindly. */
 export async function prepareAmuxTrackedCheckoutReadManifest(
-  input: Omit<AmuxTrackedCheckoutVerifiedReadInput, "manifestId">,
+  input: AmuxTrackedCheckoutVerifiedReadInput,
 ) {
-  const manifestId = randomUUID();
-  const prepared = { ...input, manifestId };
+  const prepared = input;
   const inspected = inspectAmuxTrackedCheckoutReadManifest(prepared);
   if (!inspected) throw new AmuxTrackedCheckoutReadManifestError("invalid_manifest");
   inspected.plaintext.fill(0);
@@ -121,7 +119,7 @@ export async function prepareAmuxTrackedCheckoutReadManifest(
     await recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, prepared);
   }, { maxWait: 3_000, timeout: 12_000 });
   const keys = await createAmuxContentUnitKeys(
-    amuxTrackedCheckoutReadManifestKeyIdentity(input.ideaId, manifestId));
+    amuxTrackedCheckoutReadManifestKeyIdentity(input.ideaId, input.manifestId));
   return { input: prepared, keys };
 }
 

@@ -35,27 +35,26 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestStore.ts"), { namedExpo
   AmuxTrackedCheckoutReadManifestError: SyntheticManifestError,
   prepareAmuxTrackedCheckoutReadManifest: async (body: Record<string, unknown>) => {
     prepares += 1;
-    const input = { ...body, manifestId };
-    const inspected = inspectAmuxTrackedCheckoutReadManifest(input as Parameters<
+    const inspected = inspectAmuxTrackedCheckoutReadManifest(body as Parameters<
       typeof inspectAmuxTrackedCheckoutReadManifest>[0]);
     if (!inspected) throw new SyntheticManifestError("invalid_manifest");
     inspected.plaintext.fill(0);
     intentStored = true;
     if (prepareFails) throw new Error("synthetic uncertain key write");
-    return { input, keys: {} };
+    return { input: body, keys: {} };
   },
   recordAmuxTrackedCheckoutReadManifest: async (_tx: unknown,
-    input: { ideaId: string; referenceOrdinal: number; pinnedCommitSha: string;
+    input: { manifestId: string; ideaId: string; referenceOrdinal: number; pinnedCommitSha: string;
       observed: { readFiles: string[] } }) => {
     writes += 1;
     if (writeCode) throw new SyntheticManifestError(writeCode);
-    stored = { id: manifestId, ideaId: input.ideaId,
+    stored = { id: input.manifestId, ideaId: input.ideaId,
       referenceOrdinal: input.referenceOrdinal,
       pinnedCommitSha: input.pinnedCommitSha,
       fileCount: input.observed.readFiles.length, digest: "d".repeat(64),
       digestKeyId: "synthetic-digest-key", bodyPurgedAt: null,
       ciphertext: "must never leave the route", auditLogId: "private-audit-id" };
-    return { manifestId, fileCount: input.observed.readFiles.length,
+    return { manifestId: input.manifestId, fileCount: input.observed.readFiles.length,
       auditLogId: "private-audit-id" };
   },
   readAmuxTrackedCheckoutReadManifestReceipt: async (_tx: unknown,
@@ -107,6 +106,7 @@ const reset = () => {
   process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION = "enabled";
 };
 const body = { ideaId, referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
+  manifestId,
   observed: { kind: "verified_success", readFiles: ["docs/guide.md"] } };
 const headers = { authorization: `Bearer ${secret}`,
   "x-amux-agent-id": "amux-intake" };
@@ -146,6 +146,9 @@ test("dedicated worker auth and both gates guard manifest writes", async () => {
 test("malformed observations and lookups stop before key creation", async () => {
   reset();
   for (const payload of [{ ...body, ideaId: "bad" },
+    { ...body, manifestId: "bad" },
+    { ideaId, referenceOrdinal: 0, pinnedCommitSha: body.pinnedCommitSha,
+      observed: body.observed },
     { ...body, referenceOrdinal: 2_147_483_648 },
     { ...body, pinnedCommitSha: "short" },
     { ...body, observed: { kind: "unverified", readFiles: [] } },
@@ -194,6 +197,19 @@ test("large verified read list is accepted without an arbitrary byte or file cap
   stored = { ...stored, bodyPurgedAt: new Date() };
   assert.equal((await (await route.GET(get())).json() as { bodyPurged: boolean })
     .bodyPurged, true);
+});
+
+test("receipt and readback retain the caller-generated manifest ID", async () => {
+  reset();
+  const callerId = "fc86a25b-919f-4714-a3d8-45ef5a18b175";
+  const response = await route.POST(post({ ...body, manifestId: callerId }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { manifestId: callerId,
+    ideaId, referenceOrdinal: 0, fileCount: 1 });
+  const readback = await route.GET(get());
+  assert.equal(readback.status, 200);
+  assert.equal((await readback.json() as { manifestId: string }).manifestId,
+    callerId);
 });
 
 test("known refusals and uncertain key or commit outcomes forbid blind retries", async () => {

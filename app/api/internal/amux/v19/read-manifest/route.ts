@@ -22,6 +22,7 @@ const id = z.string().uuid();
 const ordinal = z.number().int().min(0).max(2_147_483_647);
 const lookupSchema = z.object({ ideaId: id, referenceOrdinal: ordinal }).strict();
 const bodySchema = lookupSchema.extend({
+  manifestId: id,
   pinnedCommitSha: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
   observed: z.object({ kind: z.literal("verified_success"),
     readFiles: z.array(z.string()) }).strict(),
@@ -33,8 +34,9 @@ function authorized(request: Request): boolean {
     process.env.TOMVERSE_AMUX_SYNC_SECRET);
 }
 
-/** Persist an already verified host observation. The host never retries a POST
- * after an uncertain key-store write or COMMIT; GET provides exact-ref recovery. */
+/** Persist an already verified host observation. The client-generated
+ * manifestId binds an uncertain POST to its exact-reference GET receipt. The
+ * host never retries a POST after an uncertain key-store write or COMMIT. */
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   if (process.env[WRITE_ENV] !== "enabled" || process.env[READ_ENV] !== "enabled" ||
