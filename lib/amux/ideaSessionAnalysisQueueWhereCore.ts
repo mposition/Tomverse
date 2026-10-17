@@ -8,6 +8,13 @@ export function buildAmuxSessionAnalysisQueueWhere(now: Date,
   Prisma.AmuxIdeaSessionAnalysisReservationWhereInput {
   return {
     status: "queued",
+    // Only a verified prior chunk can progress automatically. A failed or
+    // owner-resolved unknown claim stays terminal; no automatic replay occurs.
+    AND: [{ OR: [
+      { budgetClaims: { none: {} }, idea: { state: "submitted" } },
+      { budgetClaims: { some: { status: "succeeded" },
+        every: { status: "succeeded" } }, idea: { state: "analyzing" } },
+    ] }],
     idea: { submissionOrigin: "session", state: { in: ["submitted", "analyzing"] },
       cancelledAt: null, analysisCompletedAt: null, analysisDeadlineAt: { gt: now },
       rawCiphertext: { not: null }, rawPurgedAt: null,

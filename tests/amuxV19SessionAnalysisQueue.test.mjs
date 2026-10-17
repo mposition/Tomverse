@@ -26,6 +26,11 @@ test("v19 session queue filters expired, cancelled, purged and owner ideas", () 
     reservationId: "00000000-0000-4000-8000-000000000001" };
   assert.deepEqual(buildAmuxSessionAnalysisQueueWhere(now, cursor), {
     status: "queued",
+    AND: [{ OR: [
+      { budgetClaims: { none: {} }, idea: { state: "submitted" } },
+      { budgetClaims: { some: { status: "succeeded" },
+        every: { status: "succeeded" } }, idea: { state: "analyzing" } },
+    ] }],
     idea: { submissionOrigin: "session", state: { in: ["submitted", "analyzing"] },
       cancelledAt: null, analysisCompletedAt: null, analysisDeadlineAt: { gt: now },
       rawCiphertext: { not: null }, rawPurgedAt: null,

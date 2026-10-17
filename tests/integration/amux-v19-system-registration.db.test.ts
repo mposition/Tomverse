@@ -13,6 +13,8 @@ import { auditRowActorKind,
   "@/lib/adminAuditSystemActors";
 import { commitAmuxIdeaAnalysisBudgetReservation } from
   "@/lib/amux/ideaAnalysisBudgetReservationService";
+import { commitAnalysisBudgetSetting, readAnalysisMonthlyBudgetSetting } from
+  "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { commitAmuxIdeaOnlyAnalysisClaim } from
   "@/lib/amux/ideaAnalysisClaimService";
 import { commitAmuxIdeaAnalysisResult } from
@@ -172,6 +174,14 @@ before(async () => {
   request = new Request("https://tomverse.test/api/admin/amux/ideas", {
     method: "POST", headers: { "user-agent": "synthetic-system-registration" },
   });
+  // The session-budget suite deliberately leaves a US$0.01 owner setting in
+  // this shared test database. This suite needs its own explicit fixture.
+  const budget = await prisma.$transaction((tx) =>
+    readAnalysisMonthlyBudgetSetting(tx));
+  await prisma.$transaction((tx) => commitAnalysisBudgetSetting(tx, {
+    session, request, id: randomUUID(), expectedPreviousVersion: budget.version,
+    monthlyUsd: "100.00", ownerConfirmed: true,
+  }));
 });
 
 after(async () => {

@@ -581,6 +581,8 @@ const compilerOptions = parsedConfig.options;
 // target and scope extend lib/adminAuditSystemActors.ts above the same reviewed
 // computed access. Count 228 and the position-free inventory remain unchanged;
 // only source positions are repinned.
+// 2026-10-17, the closed v19 session budget audit actions move those same
+// accesses again. The count and position-free digest still match unchanged.
 // 2026-10-17, AMUX v19 session analysis reservation: its closed system action,
 // target and scope extend lib/adminAuditSystemActors.ts above the same reviewed
 // computed access. Count 228 and the position-free inventory remain unchanged;
@@ -591,8 +593,8 @@ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
 // AMUX v19 repository-read and session-reservation additions shift source
 // positions in the reviewed closure. The position-free digest stays fixed.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "dec9001b3edc3f5d93feeb6a25c2d737",
-  "91bd761aac8a6a2aaab0fb95093add2f",
+  "9286b845822b101eb714d2d3e4051df6",
+  "1253d2f4c5d744df24ca0a80f11bdf81",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

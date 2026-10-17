@@ -234,6 +234,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Intake v19 session analysis queue reservation is append-only and bound to
   // the submission transaction; it adds no commit-deadline mechanism.
   "20261017010000_amux_v19_session_analysis_reservation",
+  // v19 session CLI claims share the monthly ledger but add no deadline
+  // classifier, marker, function or trigger to the commit-deadline protocol.
+  "20261017070000_amux_v19_session_budget_claim",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
