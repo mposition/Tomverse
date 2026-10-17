@@ -65,7 +65,7 @@ test("refuses to certify search or listing from incomplete file events", () => {
 test("rejects unauthorized paths, tools, unmatched results and missing final result", () => {
   const cases = [
     [use("x", "Read", { file_path: `${directory}/src/../secrets.txt` })],
-    [use("x", "Read", { file_path: "/run/amux-cli/anthropic-api-key" })],
+    [use("x", "Read", { file_path: "/run/amux-cli/claude-oauth-token" })],
     [use("x", "Write", { file_path: file })],
     [reply("unknown")],
     [use("x", "Read", { file_path: file })],
