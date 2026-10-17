@@ -10,8 +10,9 @@ import { AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION,
 import { prisma } from "@/lib/prisma";
 import { AmuxContentRetirementError } from
   "./ideaContentKeyRetirementService.ts";
-import { retireClaimedAmuxReadManifestKey,
-  verifyAmuxContentUnitKeyAbsent } from "./ideaKeyStore.ts";
+import { finishClaimedAmuxReadManifestKeyRetirement,
+  retireClaimedAmuxReadManifestKey,
+  verifyAmuxReadManifestKeyRetired } from "./ideaKeyStore.ts";
 import { amuxIdeaHasActiveRetentionHold } from "./ideaRetentionHoldRead.ts";
 import { amuxReadManifestDueAt,
   amuxTrackedCheckoutReadManifestKeyIdentity } from
@@ -123,7 +124,7 @@ async function completeClaim(item: IntentIdentity, claimAuditLogId: string) {
         action: AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_ACTION,
         targetType: AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_TARGET,
         targetId: intent.id,
-        summary: "Verified deletion of an orphan AMUX v19 read-manifest content key.",
+        summary: "Verified retirement of an orphan AMUX v19 read-manifest content key.",
         metadata: { policyVersion: 19, manifestId: intent.id,
           ideaId: intent.ideaId, referenceOrdinal: intent.referenceOrdinal,
           pinnedCommitSha: intent.pinnedCommitSha,
@@ -151,15 +152,15 @@ async function completeClaim(item: IntentIdentity, claimAuditLogId: string) {
   }
 }
 
-/** The claim commits before S3 is touched. A retry only deletes the same
- * listed version IDs (or an unversioned key), never a new delete marker. */
+/** The claim commits before S3 is touched. A retry reads the fixed fence,
+ * replaces only a confirmed missing or old key, then removes old versions. */
 export async function purgeDueAmuxOrphanReadManifestKeys(
   deleteKey: typeof retireClaimedAmuxReadManifestKey =
     retireClaimedAmuxReadManifestKey,
-  verifyAbsent: typeof verifyAmuxContentUnitKeyAbsent =
-    verifyAmuxContentUnitKeyAbsent,
-  retryDelete: typeof retireClaimedAmuxReadManifestKey =
-    retireClaimedAmuxReadManifestKey,
+  verifyRetired: typeof verifyAmuxReadManifestKeyRetired =
+    verifyAmuxReadManifestKeyRetired,
+  finishRetirement: typeof finishClaimedAmuxReadManifestKeyRetirement =
+    finishClaimedAmuxReadManifestKeyRetirement,
 ) {
   const pending = await prisma.amuxIdeaReadManifestKeyIntent.findMany({
     where: { keyRetirementClaimedAt: { not: null }, keyDeletedAt: null },
@@ -177,8 +178,8 @@ export async function purgeDueAmuxOrphanReadManifestKeys(
       continue;
     }
     try {
-      try { await verifyAbsent(target); }
-      catch { await retryDelete(target); }
+      try { await verifyRetired(target); }
+      catch { await finishRetirement(target); }
       await completeClaim(item, item.claimAuditLogId);
       keysDeleted += 1;
     } catch (error) {
