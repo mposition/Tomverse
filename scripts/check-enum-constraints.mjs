@@ -2004,6 +2004,20 @@ const REGISTRY = {
     reason:
       "Which aggregate a report row is. It is also the key into MARKETING_REPORT_PAYLOAD_SCHEMAS and into the retention periods of docs/policy/marketing-automation.md §12.2, so a kind the list does not know would be a row with no schema to parse it and no date to delete it by -- which is why MarketingReport_retentionUntil_check's CASE has no ELSE.",
   },
+  MarketingCompetitor_status_check: {
+    owner: "list",
+    module: "lib/marketingCompetitorCore.ts",
+    list: "MARKETING_COMPETITOR_STATUSES",
+    reason:
+      "Where a competitor stands. Only `approved` makes its hosts a source for a market fact, and MarketingCompetitor_write_guard checks each move against the person's audit action 'marketing_competitor.' || status, so a status the list did not know would be one no audit action could ever prove.",
+  },
+  MarketingCompetitor_proposedBy_check: {
+    owner: "list",
+    module: "lib/marketingCompetitorCore.ts",
+    list: "MARKETING_COMPETITOR_PROPOSERS",
+    reason:
+      "Who put the row there. Only `operator` may be born approved, and only `generator` carries a run id, so the value decides which of the write guard's rules apply.",
+  },
   AiVisibilityRun_locale_check: {
     owner: "list",
     module: "lib/marketingAutomationSchema.ts",

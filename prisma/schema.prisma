@@ -7321,6 +7321,28 @@ model MarketingLlmCall {
   @@index([retentionUntil])
 }
 
+/// A competitor the market-intelligence agent (A3) tracks, and the official
+/// hosts a fact about it may come from (S3 plan, S3f; operator 2026-10-17).
+/// A3 proposes, a person approves: only an approved row's hosts make a market
+/// fact storable. The decision is a person's audit row, checked by trigger
+/// rather than by a relation (AdminAuditLog is in the webhook schema slice).
+model MarketingCompetitor {
+  id                 String    @id
+  displayName        String
+  officialHosts      String[]
+  status             String
+  proposedBy         String
+  proposedRunId      String?
+  evidenceUrls       String[]
+  rationale          String?
+  decisionAuditLogId String?   @unique
+  decidedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([status])
+}
+
 model AmuxWorkerRuntime {
   workerName     String   @id
   instanceId     String

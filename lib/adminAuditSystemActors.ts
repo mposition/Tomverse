@@ -501,5 +501,6 @@ function marketingGeneratorAuditScope(actor: unknown, action: unknown, targetTyp
   return actor !== "marketing-generator" ||
     (typeof action === "string" && MARKETING_GENERATOR_AUDIT_ACTIONS.includes(action) &&
       targetType === "MarketingLlmCall") ||
-    (action === "marketing_report.generator_recorded" && targetType === "MarketingReport");
+    (action === "marketing_report.generator_recorded" && targetType === "MarketingReport") ||
+    (action === "marketing_competitor.proposed" && targetType === "MarketingCompetitor");
 }
