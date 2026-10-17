@@ -49,6 +49,8 @@ export type MarketingConsoleView = {
   configGeneration: number | null;
   /** Staging only; null everywhere else (lib/marketingConsoleRead.ts). */
   webhookStaging: WebhookStagingView | null;
+  /** Rows were left out at the section's limit (lib/marketingConsoleRead.ts). */
+  truncated?: boolean;
 };
 
 type WebhookStagingView = {
@@ -264,6 +266,9 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
               String(view.pageSize)
             )}
           </p>
+          {view.truncated ? (
+            <p className="mt-1 text-xs font-bold text-amber-300">{m.truncatedAtLimit}</p>
+          ) : null}
           {view.rows.length === 0 ? (
             <p className="mt-4 text-sm text-zinc-400">{m.empty}</p>
           ) : (

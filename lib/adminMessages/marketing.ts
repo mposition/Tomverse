@@ -174,6 +174,8 @@ export const adminMarketingMessages = defineAdminMessages({
     showing: "Newest {count} of this section, not a total.",
     showingByStatus:
       "Up to {count} competitors: approved first, then proposals, rejections and retirements.",
+    truncatedAtLimit:
+      "More rows exist than this screen lists. The ones past the limit cannot be acted on here.",
     competitorsTitle: "Competitors",
     competitorsDescription:
       "Who the market-intelligence agent tracks. It proposes; a person approves, edits, rejects or retires. Only an approved competitor's hosts are sources for market facts.",
@@ -422,6 +424,7 @@ export const adminMarketingMessages = defineAdminMessages({
     empty: "아직 아무것도 없습니다.",
     showing: "이 구획의 최신 {count}건이며 전체 수가 아닙니다.",
     showingByStatus: "경쟁사 최대 {count}건입니다. 승인된 것이 먼저, 그다음 제안·거절·은퇴 순입니다.",
+    truncatedAtLimit: "이 화면이 보여 주는 것보다 행이 더 있습니다. 상한을 넘은 행은 여기서 처리할 수 없습니다.",
     competitorsTitle: "경쟁사",
     competitorsDescription:
       "시장 분석 에이전트가 추적하는 경쟁사입니다. 에이전트는 제안만 하고, 사람이 승인·수정·거절·은퇴를 정합니다. 승인된 경쟁사의 host만 시장 사실의 출처가 됩니다.",

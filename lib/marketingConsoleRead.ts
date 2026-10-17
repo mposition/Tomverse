@@ -143,6 +143,12 @@ export type MarketingConsolePayload = {
   configGeneration: number | null;
   /** Null outside staging; see `MarketingWebhookStagingView`. */
   webhookStaging: MarketingWebhookStagingView | null;
+  /**
+   * Whether rows were left out at the section's limit. Said only where the
+   * limit is not a "newest N" page: a registry row past the cut is one the
+   * screen cannot act on, and stating the cap alone would not say it was hit.
+   */
+  truncated?: boolean;
 };
 
 const state = (
@@ -542,12 +548,14 @@ export async function readMarketingConsole(
 
   if (section === "competitors") {
     // Approved first, then proposals, rejections and retirements (the status
-    // names sort that way), newest change first within each. Everything a
+    // names sort that way, which tests/marketingCompetitorCore.test.mjs pins),
+    // newest change first within each. One row past the limit is read to tell
+    // a full page from a cut one. Everything a
     // decision compares against travels with the row: the decision the page
     // showed is what a change is checked against.
     const competitors = await prisma.marketingCompetitor.findMany({
       orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
-      take: MARKETING_COMPETITOR_READ_LIMIT,
+      take: MARKETING_COMPETITOR_READ_LIMIT + 1,
       select: {
         id: true,
         displayName: true,
@@ -571,7 +579,8 @@ export async function readMarketingConsole(
       configGeneration,
       webhookStaging,
       canWrite,
-      rows: competitors.map((competitor) => ({
+      truncated: competitors.length > MARKETING_COMPETITOR_READ_LIMIT,
+      rows: competitors.slice(0, MARKETING_COMPETITOR_READ_LIMIT).map((competitor) => ({
         ...competitor,
         decidedAt: competitor.decidedAt?.toISOString() ?? null,
         createdAt: competitor.createdAt.toISOString(),
