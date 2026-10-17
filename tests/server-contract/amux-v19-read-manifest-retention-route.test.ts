@@ -8,6 +8,7 @@ const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const secret = ["synthetic", "retention", "secret", "0123456789"].join("-");
 const envNames = ["TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET",
   "TOMVERSE_AMUX_V4_CONTENT_RETENTION",
+  "TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION",
   "TOMVERSE_AMUX_V4_COLLECTION_AGENT_SECRET", "TOMVERSE_AMUX_SYNC_SECRET",
   "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET"] as const;
 const priorEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
@@ -32,6 +33,12 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestRetention.ts"), {
   namedExports: { purgeDueAmuxReadManifests: async () => {
     calls.push("read-manifests");
     if (manifestFailure) throw new Error("synthetic external key outcome unknown");
+    return counts;
+  } },
+});
+mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention.ts"), {
+  namedExports: { purgeDueAmuxOrphanReadManifestKeys: async () => {
+    calls.push("orphan-keys");
     return counts;
   } },
 });
@@ -71,21 +78,24 @@ const enable = () => {
   manifestFailure = false;
   process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET = secret;
   process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION = "enabled";
+  process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION = "enabled";
   delete process.env.TOMVERSE_AMUX_V4_COLLECTION_AGENT_SECRET;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
   delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET;
 };
 
-test("retention tick purges read manifests and preserves the deployed response shape", async () => {
+test("retention tick runs separately enabled v19 manifest and orphan-key cleanup", async () => {
   enable();
   const response = await route.POST(request());
   assert.equal(response.status, 200);
-  assert.deepEqual(calls, ["holds", "cancellation", "raw", "read-manifests", "analysis"]);
+  assert.deepEqual(calls, ["holds", "cancellation", "raw", "analysis",
+    "read-manifests", "orphan-keys"]);
   assert.deepEqual(await response.json(), {
     holdNotices: { sent: 0, scanned: 0, batchLimit: 8 },
     cancellation: { cancelled: 0, scanned: 0, batchLimit: 8 },
     raw: counts, analysis: counts,
     taskResults: { available: false, reason: "v22_task_result_retention_disabled" },
+    readManifests: { manifests: counts, orphanKeys: counts },
   });
 });
 
@@ -94,8 +104,19 @@ test("unknown manifest key outcome halts the tick without exposing key details",
   manifestFailure = true;
   const response = await route.POST(request());
   assert.equal(response.status, 503);
-  assert.deepEqual(calls, ["holds", "cancellation", "raw", "read-manifests"]);
+  assert.deepEqual(calls, ["holds", "cancellation", "raw", "analysis",
+    "read-manifests"]);
   assert.deepEqual(await response.json(), {
     error: "content_retention_outcome_unknown", retry: false,
   });
+});
+
+test("v4 retention alone does not enable v19 path and key cleanup", async () => {
+  enable();
+  delete process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION;
+  const response = await route.POST(request());
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, ["holds", "cancellation", "raw", "analysis"]);
+  assert.deepEqual((await response.json()).readManifests,
+    { available: false, reason: "v19_read_manifest_retention_disabled" });
 });

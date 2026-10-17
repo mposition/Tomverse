@@ -2448,6 +2448,9 @@ model AdminAuditLog {
   amuxIdeaSystemRegistrations AmuxIdeaSubmission[] @relation("AmuxIdeaSystemRegistrationAudit")
   amuxIdeaTrackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[] @relation("AmuxIdeaTrackedCheckoutAudit")
   amuxIdeaTrackedCheckoutReadManifest AmuxIdeaTrackedCheckoutReadManifest[] @relation("AmuxIdeaTrackedCheckoutReadManifestAudit")
+  amuxIdeaReadManifestKeyIntents AmuxIdeaReadManifestKeyIntent[] @relation("AmuxIdeaReadManifestKeyIntentAudit")
+  amuxIdeaReadManifestKeyClaims AmuxIdeaReadManifestKeyIntent[] @relation("AmuxIdeaReadManifestKeyClaimAudit")
+  amuxIdeaReadManifestKeyDeletions AmuxIdeaReadManifestKeyIntent[] @relation("AmuxIdeaReadManifestKeyDeleteAudit")
   amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
   amuxV4ContentPurgeAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4ContentPurgeAudit")
   amuxV4KeyDeleteAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4KeyDeleteAudit")
@@ -9800,6 +9803,7 @@ model AmuxIdeaSubmission {
   registrationRefusals AmuxIdeaRegistrationRefusal[]
   trackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[]
   trackedCheckoutReadManifests AmuxIdeaTrackedCheckoutReadManifest[]
+  readManifestKeyIntents AmuxIdeaReadManifestKeyIntent[]
   sessionAnalysisReservation AmuxIdeaSessionAnalysisReservation?
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
   contentKeyRetirements AmuxIdeaContentKeyRetirement[]
@@ -9862,6 +9866,7 @@ model AmuxIdeaTrackedCheckoutEvidence {
   idea  AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   audit AdminAuditLog      @relation("AmuxIdeaTrackedCheckoutAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   readManifest AmuxIdeaTrackedCheckoutReadManifest?
+  readManifestKeyIntent AmuxIdeaReadManifestKeyIntent?
 
   @@unique([ideaId, referenceOrdinal])
   @@index([ideaId, createdAt])
@@ -9891,6 +9896,30 @@ model AmuxIdeaTrackedCheckoutReadManifest {
   @@unique([ideaId, referenceOrdinal])
   @@index([ideaId, createdAt])
   @@index([bodyPurgedAt, createdAt])
+}
+
+/// Durable identity for the external key before its creation. Even an
+/// uncertain object-store write or DB COMMIT leaves a seven-day cleanup target.
+model AmuxIdeaReadManifestKeyIntent {
+  id                  String    @id @db.Uuid
+  ideaId              String
+  referenceOrdinal    Int
+  pinnedCommitSha     String
+  auditLogId          String    @unique
+  createdAt           DateTime  @default(now()) @db.Timestamptz(3)
+  keyRetirementClaimedAt DateTime? @db.Timestamptz(3)
+  claimAuditLogId     String?   @unique
+  keyDeletedAt        DateTime? @db.Timestamptz(3)
+  keyDeleteAuditLogId String?   @unique
+
+  idea AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [ideaId, referenceOrdinal], references: [ideaId, referenceOrdinal], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaReadManifestKeyIntent_evidence_fkey")
+  audit AdminAuditLog @relation("AmuxIdeaReadManifestKeyIntentAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claimAudit AdminAuditLog? @relation("AmuxIdeaReadManifestKeyClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  keyDeleteAudit AdminAuditLog? @relation("AmuxIdeaReadManifestKeyDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([ideaId, referenceOrdinal])
+  @@index([keyDeletedAt, createdAt])
 }
 
 /// A DB body purge and its external per-unit key deletion are separate
