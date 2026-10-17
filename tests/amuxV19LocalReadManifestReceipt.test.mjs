@@ -125,3 +125,22 @@ test("another attempt's receipt and pending key intent never certify this POST",
     assert.deepEqual(methods, ["POST", "GET"]);
   }
 });
+
+test("a purged manifest readback cannot release an analysis result", async () => {
+  const methods = [];
+  let manifestId;
+  const fetchImpl = async (_url, options) => {
+    methods.push(options.method);
+    if (options.method === "POST") {
+      manifestId = JSON.parse(options.body).manifestId;
+      throw new Error("synthetic lost response after retention purge");
+    }
+    return json({ status: "recorded", manifestId, ideaId,
+      referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
+      fileCount: 1, digest: "d".repeat(64), digestKeyId: "digest-key",
+      bodyPurged: true });
+  };
+  assert.deepEqual(await recordAmuxV19LocalReadManifest(input(fetchImpl)),
+    { kind: "outcome_unknown", manifestId });
+  assert.deepEqual(methods, ["POST", "GET"]);
+});
