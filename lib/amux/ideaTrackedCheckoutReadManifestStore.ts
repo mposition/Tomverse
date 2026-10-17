@@ -7,7 +7,7 @@ import { takeAuditChainLock, writeSystemAuditLog } from "../adminAudit.ts";
 import { openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { amuxContentUnitKeyId, createAmuxContentUnitKeys,
-  loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
+  deleteAmuxContentUnitKey, loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { AmuxContentRetirementError, recordAmuxContentBodyPurge } from
   "./ideaContentKeyRetirementService.ts";
 import { amuxIdeaHasActiveRetentionHold } from "./ideaRetentionHoldRead.ts";
@@ -113,6 +113,15 @@ export async function prepareAmuxTrackedCheckoutReadManifest(
   const keys = await createAmuxContentUnitKeys(
     amuxTrackedCheckoutReadManifestKeyIdentity(input.ideaId, manifestId));
   return { input: prepared, keys };
+}
+
+/** Only a definitively rolled-back write may discard its fresh key. An
+ * uncertain COMMIT must be read back and must never use this path. */
+export async function discardUncommittedAmuxReadManifestKey(
+  ideaId: string, manifestId: string,
+): Promise<void> {
+  await deleteAmuxContentUnitKey(
+    amuxTrackedCheckoutReadManifestKeyIdentity(ideaId, manifestId));
 }
 
 /** Persist one verified read observation with its canonical audit. No path or

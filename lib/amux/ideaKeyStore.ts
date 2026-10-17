@@ -210,7 +210,8 @@ export async function loadAmuxContentUnitKeys(input: AmuxContentKeyIdentity,
   } finally { client.destroy(); }
 }
 
-/** Retention calls this only after the active DB body has been cleared. */
+/** Call only after the active DB body is cleared or its write definitely rolled
+ * back. An uncertain COMMIT is never grounds for deleting its key. */
 export async function deleteAmuxContentUnitKey(input: AmuxContentKeyIdentity,
   env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const { objectKey } = identity(input);

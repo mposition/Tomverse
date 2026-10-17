@@ -6,6 +6,7 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
   isAmuxV4AnalysisAgentAuthorized } from "@/lib/amux/ideaAnalysisQueueCore";
 import { AmuxTrackedCheckoutReadManifestError,
+  discardUncommittedAmuxReadManifestKey,
   prepareAmuxTrackedCheckoutReadManifest,
   readAmuxTrackedCheckoutReadManifestReceipt,
   recordAmuxTrackedCheckoutReadManifest } from
@@ -76,6 +77,12 @@ export async function POST(request: Request): Promise<Response> {
       fileCount: receipt.fileCount });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxTrackedCheckoutReadManifestError) {
+      try {
+        await discardUncommittedAmuxReadManifestKey(body.ideaId,
+          prepared.input.manifestId);
+      } catch {
+        return amuxJsonNoStore({ error: "outcome_unknown", retryWrite: false }, 503);
+      }
       return amuxJsonNoStore({ error: error.code, retryWrite: false }, 409);
     }
     return amuxJsonNoStore({ error: "outcome_unknown", retryWrite: false }, 503);

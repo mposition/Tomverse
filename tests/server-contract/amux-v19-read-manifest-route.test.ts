@@ -18,11 +18,13 @@ const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env
 let prepares = 0;
 let writes = 0;
 let reads = 0;
+let discarded = 0;
 let stored: Record<string, unknown> | null = null;
 let writeCode: string | null = null;
 let prepareFails = false;
 let unknownCommit = false;
 let readFails = false;
+let discardFails = false;
 
 class SyntheticManifestError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -30,6 +32,13 @@ class SyntheticManifestError extends Error {
 
 mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestStore.ts"), { namedExports: {
   AmuxTrackedCheckoutReadManifestError: SyntheticManifestError,
+  discardUncommittedAmuxReadManifestKey: async (receivedIdeaId: string,
+    receivedManifestId: string) => {
+    assert.equal(receivedIdeaId, ideaId);
+    assert.equal(receivedManifestId, manifestId);
+    discarded += 1;
+    if (discardFails) throw new Error("synthetic uncertain key deletion");
+  },
   prepareAmuxTrackedCheckoutReadManifest: async (body: Record<string, unknown>) => {
     prepares += 1;
     const input = { ...body, manifestId };
@@ -83,8 +92,9 @@ after(() => {
 });
 
 const reset = () => {
-  prepares = 0; writes = 0; reads = 0; stored = null;
-  writeCode = null; prepareFails = false; unknownCommit = false; readFails = false;
+  prepares = 0; writes = 0; reads = 0; discarded = 0; stored = null;
+  writeCode = null; prepareFails = false; unknownCommit = false;
+  readFails = false; discardFails = false;
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
   process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_WRITE = "enabled";
@@ -183,6 +193,10 @@ test("known refusals and uncertain key or commit outcomes forbid blind retries",
     assert.equal(refused.status, 409);
     assert.deepEqual(await refused.json(), { error: code, retryWrite: false });
   }
+  assert.equal(discarded, 3);
+  discardFails = true;
+  assert.deepEqual(await (await route.POST(post())).json(), {
+    error: "outcome_unknown", retryWrite: false });
   reset();
   prepareFails = true;
   const keyFailure = await route.POST(post());
@@ -197,6 +211,7 @@ test("known refusals and uncertain key or commit outcomes forbid blind retries",
   assert.deepEqual(await uncertain.json(), {
     error: "outcome_unknown", retryWrite: false });
   assert.equal(writes, 1);
+  assert.equal(discarded, 0, "an uncertain COMMIT must retain its key");
   unknownCommit = false;
   assert.equal((await route.GET(get())).status, 200);
   readFails = true;
