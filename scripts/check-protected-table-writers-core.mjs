@@ -838,9 +838,9 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
     table: "AmuxIdeaTrackedCheckoutReadManifest",
-    tableMentions: 2,
+    tableMentions: 3,
     writeVerbs: 2,
-    reason: "The sole manifest writer uses SQL only to lock the row; guarded insert and purge use Prisma delegates in audited transactions.",
+    reason: "The manifest writer uses SQL only to lock the row, and the additional owner access query only SELECTs retention state; guarded insert and purge use Prisma delegates in audited transactions.",
   },
   {
     path: "prisma/migrations/20261017020000_amux_v19_read_manifest_retention/migration.sql",

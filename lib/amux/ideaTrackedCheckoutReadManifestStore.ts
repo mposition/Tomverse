@@ -279,6 +279,26 @@ export async function readAmuxTrackedCheckoutReadManifestKeyIntentReceipt(
   });
 }
 
+/** Database-clock access fence, shared by the Admin reader and DB test. */
+export async function ownerMayReadManifest(
+  actorUserId: string, ideaId: string, manifestId: string,
+): Promise<boolean> {
+  const rows = await prisma.$queryRaw<Array<{ allowed: boolean }>>`
+    WITH clock AS (SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS "now")
+    SELECT (m."bodyPurgedAt" IS NULL AND
+      (i."submittedAt" + INTERVAL '7 days' > clock."now" OR
+        EXISTS (SELECT 1 FROM "AmuxIdeaRetentionHold" h
+          WHERE h."ideaId" = i."id" AND h."releasedAt" IS NULL
+            AND h."expiresAt" > clock."now"))) AS "allowed"
+    FROM "AmuxIdeaTrackedCheckoutReadManifest" m
+    JOIN "AmuxIdeaSubmission" i ON i."id" = m."ideaId"
+    CROSS JOIN clock
+    WHERE m."id" = ${manifestId} AND m."ideaId" = ${ideaId}
+      AND i."actorUserId" = ${actorUserId}
+  `;
+  return rows.length === 1 && rows[0].allowed === true;
+}
+
 /** Owner-scoped Admin read. Key retrieval happens after the read transaction,
  * since the external key store must not occupy a DB transaction. */
 export async function readAmuxTrackedCheckoutReadManifestForOwner(
@@ -288,7 +308,9 @@ export async function readAmuxTrackedCheckoutReadManifestForOwner(
     where: { ideaId, referenceOrdinal, idea: { actorUserId } },
   });
   if (!row) return null;
-  if (row.bodyPurgedAt) return null;
+  // The retention worker may be delayed. Its lag never extends Admin access
+  // beyond the absolute seven-day deadline unless a valid hold is active.
+  if (!await ownerMayReadManifest(actorUserId, ideaId, row.id)) return null;
   if (!row.ciphertext || !row.keyId || !row.keyVersion) {
     throw new Error("read_manifest_integrity_unavailable");
   }
@@ -297,10 +319,7 @@ export async function readAmuxTrackedCheckoutReadManifestForOwner(
     keys = await loadAmuxContentUnitKeys(
       amuxTrackedCheckoutReadManifestKeyIdentity(row.ideaId, row.id));
   } catch (error) {
-    const current = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUnique({
-      where: { id: row.id }, select: { bodyPurgedAt: true },
-    });
-    if (current?.bodyPurgedAt) return null;
+    if (!await ownerMayReadManifest(actorUserId, ideaId, row.id)) return null;
     throw error;
   }
   const plain = openAmuxContent({ ciphertext: Buffer.from(row.ciphertext),
@@ -309,6 +328,9 @@ export async function readAmuxTrackedCheckoutReadManifestForOwner(
   try {
     if (!verifyAmuxContentDigest(plain, "repository_read_manifest", row.id,
       row.digest, row.digestKeyId, keys)) throw new Error("invalid_read_manifest");
+    // Key retrieval and decryption can cross the deadline or a hold release.
+    // Recheck before materializing path strings for the response.
+    if (!await ownerMayReadManifest(actorUserId, ideaId, row.id)) return null;
     return { pinnedCommitSha: row.pinnedCommitSha,
       files: parseAmuxTrackedCheckoutReadManifest(plain, row.fileCount) };
   } finally { plain.fill(0); }
