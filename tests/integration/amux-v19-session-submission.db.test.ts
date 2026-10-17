@@ -23,6 +23,11 @@ import {
   type AmuxOperatingScopeAuthority,
 } from "@/lib/amux/ideaOperatingScopeStore";
 import { commitAmuxDueRawIdeaPurge } from "@/lib/amux/ideaRawRetentionService";
+import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
+import { commitAmuxIdeaSessionCancellation,
+  readAmuxIdeaSessionCancellationReceipt,
+  AmuxIdeaSessionCancellationError } from
+  "@/lib/amux/ideaSessionCancellationService";
 import {
   commitAmuxIdeaSessionSubmission,
   readAmuxIdeaSessionSubmissionRequest,
@@ -41,6 +46,11 @@ import {
   commitAmuxSessionAnalysisReservation,
   AmuxSessionAnalysisReservationError,
 } from "@/lib/amux/ideaSessionAnalysisReservationStore";
+import { listAmuxSessionAnalysisCandidates } from
+  "@/lib/amux/ideaSessionAnalysisQueueService";
+import { encodeAmuxSessionAnalysisQueueCursor,
+  parseAmuxSessionAnalysisQueueCursor } from
+  "@/lib/amux/ideaSessionAnalysisQueueCursorCore";
 import { prisma } from "@/lib/prisma";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -300,6 +310,58 @@ test("session submission queues one content-free analysis reservation in the sam
   });
   assert.doesNotMatch(JSON.stringify(audit.metadata),
     /mposition\/Tomverse|Codex|sessionDisplay|reservedMicroUsd|ideaText/);
+});
+
+test("session analysis queue lists the live reservation and advances past its DB position", async () => {
+  const [reservation, idea] = await Promise.all([
+    prisma.amuxIdeaSessionAnalysisReservation.findUniqueOrThrow({
+      where: { id: committedReservationId }, select: { createdAt: true },
+    }),
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({
+      where: { id: committedIdeaId }, select: { analysisDeadlineAt: true },
+    }),
+  ]);
+  const first = await listAmuxSessionAnalysisCandidates(null);
+  assert.deepEqual(first, {
+    candidates: [{ reservationId: committedReservationId, ideaId: committedIdeaId,
+      modelId, expiresAt: idea.analysisDeadlineAt.toISOString() }],
+    hasMore: false, nextCursor: null,
+  });
+  const cursor = encodeAmuxSessionAnalysisQueueCursor({
+    createdAt: reservation.createdAt, reservationId: committedReservationId,
+  });
+  const parsed = parseAmuxSessionAnalysisQueueCursor(cursor);
+  assert.ok(parsed);
+  const after = await listAmuxSessionAnalysisCandidates(parsed);
+  assert.equal(after.candidates.some((candidate) =>
+    candidate.reservationId === committedReservationId), false);
+
+  const switches = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
+    "TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ", "TOMVERSE_AMUX_SESSION_INTAKE",
+    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ"];
+  const previous = new Map(switches.map((key) => [key, process.env[key]]));
+  const secret = "synthetic-amux-session-queue-secret-0123456789";
+  try {
+    process.env[switches[0]] = secret;
+    for (const key of switches.slice(1)) process.env[key] = "enabled";
+    const { POST } = await import("@/app/api/internal/amux/v19/analysis-queue/route");
+    const poll = (body: object) => POST(new Request(
+      "https://tomverse.test/api/internal/amux/v19/analysis-queue", {
+        method: "POST", headers: { authorization: `Bearer ${secret}`,
+          "x-amux-agent-id": "amux-intake", "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }));
+    const response = await poll({});
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), first);
+    const next = await poll({ after: cursor });
+    assert.equal(next.status, 200);
+    assert.deepEqual(await next.json(), after);
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
 });
 
 test("queue guard rejects missing and null system audit identity", async () => {
@@ -644,6 +706,68 @@ test("database refuses fake-human, wrong-owner and extra-metadata evidence", asy
   }), (error: unknown) => error === rollbackForgedEvidence);
 });
 
+test("owner cancellation removes a queued session idea and makes raw purge due", async () => {
+  const ideaId = randomUUID();
+  const inspected = inspect(ideaId);
+  const created = await prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected, expectedAuthority: authority, ideaId, keys: keysFor(ideaId),
+    });
+    const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: inspected.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+    return reservation;
+  });
+  assert.ok((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === created.reservationId));
+  const beforeCancel = (await readAmuxIdeaProgressForOwner(ownerId)).find(
+    (row) => row.ideaId === ideaId);
+  assert.equal(beforeCancel?.stage, "analysis");
+  assert.equal(beforeCancel?.waitingFor, null);
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
+      state: "queued", ideaId, retryWrite: false,
+    });
+  const cancellation = await prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionCancellation(tx, { session, request, ideaId,
+      ownerConfirmed: true }));
+  const [idea, reservation, audit] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } }),
+    prisma.amuxIdeaSessionAnalysisReservation.findUniqueOrThrow({ where: { ideaId } }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: cancellation.auditId } }),
+  ]);
+  assert.equal(idea.state, "cancelled");
+  assert.equal(idea.cancelledAt?.toISOString(), cancellation.cancelledAt);
+  assert.equal(idea.rawPurgeAfter?.toISOString(), cancellation.cancelledAt);
+  assert.equal(reservation.status, "queued", "append-only queue evidence is retained");
+  assert.equal(auditRowActorKind(audit), "human");
+  assert.equal(audit.actorUserId, ownerId);
+  assert.equal(audit.action, "amux.idea.session_cancelled_before_analysis");
+  assert.equal(JSON.stringify(audit.metadata).includes("Synthetic session idea"), false);
+  assert.equal((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === created.reservationId), false);
+  assert.equal((await readAmuxIdeaProgressForOwner(ownerId)).find(
+    (row) => row.ideaId === ideaId)?.stage, "cancelled");
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
+      state: "cancelled", ideaId, cancelledAt: cancellation.cancelledAt,
+      auditId: cancellation.auditId, retryWrite: false,
+    });
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionCancellation(tx, { session, request, ideaId,
+      ownerConfirmed: true })), (error: unknown) =>
+    error instanceof AmuxIdeaSessionCancellationError &&
+    error.code === "not_cancellable");
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueRawIdeaPurge(tx, ideaId)), "purged");
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaSessionCancellationReceipt(tx, session, ideaId)), {
+      state: "cancelled", ideaId, cancelledAt: cancellation.cancelledAt,
+      auditId: cancellation.auditId, retryWrite: false,
+    });
+});
+
 test("audited identity and encrypted bodies are immutable except for one complete raw purge", async () => {
   for (const data of [
     { rawDigest: "f".repeat(64) },
@@ -672,6 +796,8 @@ test("audited identity and encrypted bodies are immutable except for one complet
   assert.equal(purged.sourceProvenanceCiphertext, null);
   assert.equal(purged.sourceProvenanceKeyId, null);
   assert.ok(purged.sourceProvenanceDigest);
+  assert.equal((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === committedReservationId), false);
   assert.deepEqual(await readAmuxIdeaSessionSubmissionRequest(committedRequestId), {
     requestId: committedRequestId,
     status: "committed",

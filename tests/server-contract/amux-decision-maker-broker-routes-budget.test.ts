@@ -95,6 +95,7 @@ async function loadRoute(path: string): Promise<{ POST: (request: Request) => Pr
         recordDecisionMakerTransmitOutcome: unreachable,
         lookupDecisionMakerResult: unreachable,
         recordDecisionMakerResultUnknown: unreachable,
+        recordDecisionMakerValidationLatch: unreachable,
       },
     });
     mock.method(console, "error", () => {});

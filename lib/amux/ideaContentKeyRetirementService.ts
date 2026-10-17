@@ -13,7 +13,7 @@ import { deleteAmuxContentUnitKey,
 
 export type AmuxRetirableContent = AmuxContentKeyIdentity & {
   purpose: "transfer_payload" | "analysis_freeform" | "analysis_draft" |
-    "task_result" | "task_patch";
+    "task_result" | "task_patch" | "repository_read_manifest";
 };
 
 export class AmuxContentRetirementError extends Error {
@@ -38,8 +38,8 @@ async function nowInDb(tx: Prisma.TransactionClient): Promise<Date> {
   return rows[0].now;
 }
 
-/** Called only after the corresponding due ciphertext was cleared in the same
- * transaction. No body or storage key path is copied into the audit. */
+/** Called within the transaction that clears the due ciphertext. No body or
+ * storage key path is copied into the audit. */
 export async function recordAmuxContentBodyPurge(tx: Prisma.TransactionClient,
   target: AmuxRetirableContent, purgedAt: Date,
   digest?: string, digestKeyId?: string): Promise<void> {
@@ -66,6 +66,15 @@ export async function recordAmuxContentBodyPurge(tx: Prisma.TransactionClient,
 
 async function sourcePurgedAt(tx: Prisma.TransactionClient,
   target: AmuxRetirableContent): Promise<Date | null> {
+  if (target.purpose === "repository_read_manifest") {
+    const row = await tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
+      where: { id: target.subjectId },
+      select: { ideaId: true, ciphertext: true, keyId: true,
+        keyVersion: true, bodyPurgedAt: true },
+    });
+    return row?.ideaId === target.ideaId && row.ciphertext === null &&
+      row.keyId === null && row.keyVersion === null ? row.bodyPurgedAt : null;
+  }
   if (target.purpose === "task_result") {
     const row = await tx.amuxV22TaskResult.findUnique({
       where: { attemptId: target.subjectId },

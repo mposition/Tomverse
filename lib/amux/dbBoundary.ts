@@ -365,11 +365,14 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 9,
     isolation: "mutation",
   },
-  // A transmission intent (lock, state, the switches, the instance's audit 4,
-  // the event: 8, pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  // A transmission intent (lock, state, the switches, the instance's results
+  // since its newest switch event -- added 2026-10-17 for the owed latch of
+  // docs/policy/amux-decision-maker.md §8 -- then the instance's audit 4 and the
+  // event, or the owed latch's audit 4 and switch event: 9, pinned by
+  // tests/amuxDecisionMakerRequest.test.mjs).
   decisionMakerTransmitIntent: {
     operation: "decision_maker_transmit_intent",
-    prismaCallCeiling: 10,
+    prismaCallCeiling: 11,
     isolation: "mutation",
   },
   // A transmission receipt or unknown (lock, state, the instance's audit 4,
@@ -400,6 +403,16 @@ export const AMUX_DB_BOUNDARIES = {
   decisionMakerResultUnknown: {
     operation: "decision_maker_result_unknown",
     prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // The validation latch of docs/policy/amux-decision-maker.md §8, which the
+  // result route runs after a validation failure commits and the maintenance
+  // sweep runs for each instance (lock, the switches with each instance's
+  // newest event, its results, the instance's audit 4, the switch event: 8,
+  // pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerValidationLatch: {
+    operation: "decision_maker_validation_latch",
+    prismaCallCeiling: 10,
     isolation: "mutation",
   },
   // Stage S2's judgment route: setup + a person's judgment at its largest

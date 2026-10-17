@@ -468,6 +468,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0082_task_classification_provenance",
         sql: include_str!("../../migrations/0082_task_classification_provenance.sql"),
     },
+    Migration {
+        version: 83,
+        name: "0083_decision_maker_typed_ask",
+        sql: include_str!("../../migrations/0083_decision_maker_typed_ask.sql"),
+    },
 ];
 
 /// Migrations embedded in THIS binary that the DB has not recorded yet.

@@ -14,6 +14,7 @@ pub mod auth;
 pub mod board;
 pub mod board_intake;
 pub mod board_lifecycle;
+pub mod board_typed_ask;
 pub mod criteria;
 pub mod dependency_audit;
 pub mod browser;
