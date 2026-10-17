@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn as realSpawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import * as realFs from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,6 +8,7 @@ import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
+import { verifyAmuxV4StagedCliBinary } from "../../lib/amux/ideaLocalSandboxArgs.mjs";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
@@ -14,6 +16,8 @@ let mode = "stop";
 let spawnCount = 0;
 let stageCount = 0;
 let sandboxCount = 0;
+let sandboxInput;
+let sandboxVerificationError;
 let cleanupPath;
 let gitStarted;
 let checkoutSignal;
@@ -62,9 +66,14 @@ mock.module(mod("lib/amux/ideaLocalApprovedCliCatalog.mjs"), {
   }) },
 });
 mock.module(mod("lib/amux/ideaLocalIsolatedCliRunner.mjs"), {
-  namedExports: { stageAmuxV19ClaudeCli: async () => {
+  namedExports: { stageAmuxV19ClaudeCli: async (path) => {
     stageCount += 1;
-    return { authPath: "/tmp/synthetic-auth" };
+    const binary = Buffer.from("synthetic staged CLI");
+    await realFs.writeFile(path, binary, { mode: 0o500 });
+    await realFs.chmod(path, 0o500);
+    return { path, sha256: mode === "invalid_mount" ? "0".repeat(64) :
+      createHash("sha256").update(binary).digest("hex"),
+      authPath: "/tmp/synthetic-auth" };
   } },
 });
 mock.module(mod("lib/amux/ideaTrackedCheckoutProcessResult.mjs"), {
@@ -74,8 +83,11 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutProcessResult.mjs"), {
   }) },
 });
 mock.module(mod("lib/amux/ideaTrackedCheckoutSandbox.mjs"), {
-  namedExports: { verifiedAmuxTrackedCheckoutSandbox: async () => {
+  namedExports: { verifiedAmuxTrackedCheckoutSandbox: async (input) => {
     sandboxCount += 1;
+    sandboxInput = input;
+    try { await verifyAmuxV4StagedCliBinary(input.cliMount); }
+    catch (error) { sandboxVerificationError = error; throw error; }
     return [];
   } },
 });
@@ -146,6 +158,7 @@ test("cleanup failure after child spawn preserves the provider-use signal", {
   spawnCount = 0;
   stageCount = 0;
   sandboxCount = 0;
+  sandboxInput = null;
   await assert.rejects(runAmuxV19TrackedCheckoutAnalysis(input(
     async () => false)), (error) => {
     assert.ok(error instanceof AmuxTrackedCheckoutHostError);
@@ -157,4 +170,26 @@ test("cleanup failure after child spawn preserves the provider-use signal", {
   assert.equal(spawnCount, 1);
   assert.equal(stageCount, 1);
   assert.equal(sandboxCount, 1);
+  assert.deepEqual(Object.keys(sandboxInput.cliMount).sort(),
+    ["path", "sha256"]);
+  assert.equal(sandboxInput.authPath, "/tmp/synthetic-auth");
+}));
+
+test("staged CLI digest mismatch refuses before any child spawn", {
+  skip: process.platform !== "linux", timeout: 5_000,
+}, async () => withSwitch(async () => {
+  mode = "invalid_mount";
+  spawnCount = 0;
+  stageCount = 0;
+  sandboxCount = 0;
+  sandboxVerificationError = null;
+  try {
+    assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis(input(
+      async () => false)), { kind: "outcome_unknown", cliStarted: false });
+    assert.equal(stageCount, 1);
+    assert.equal(sandboxCount, 1);
+    assert.equal(spawnCount, 0);
+    assert.ok(sandboxVerificationError instanceof TypeError);
+    assert.match(sandboxVerificationError.message, /CLI binary digest changed/);
+  } finally { mode = "stop"; }
 }));
