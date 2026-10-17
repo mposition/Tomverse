@@ -47,6 +47,10 @@ export async function readApprovedMarketingCompetitorHosts(
  * a host change waits for the facts read against the old hosts to commit,
  * rather than landing between the read and the write (READ COMMITTED reads
  * each statement afresh, so a plain read would not hold).
+ *
+ * Only rows approved when it reads are held. A competitor approved after that
+ * is not, on purpose: this record kept nothing from its hosts, and the next
+ * report reads it.
  */
 export async function holdApprovedMarketingCompetitorHosts(
   tx: MarketingTransaction,

@@ -123,6 +123,27 @@ test("market facts may carry up to five signed competitor candidates, each once"
     marketingGeneratorReportDigest(a),
     marketingGeneratorReportDigest({ ...a, competitorCandidates: [candidate({ officialHosts: ["evil.example"] })] }),
   );
+  // A candidate is sent in its stored form, so the signed bytes are the
+  // verified bytes: anything normalisation would change is refused.
+  for (const overrides of [
+    { officialHosts: ["www.alpha.example", "alpha.example"] },
+    { officialHosts: ["Alpha.example"] },
+    { officialHosts: ["alpha.example", "alpha.example"] },
+    { displayName: " Alpha" },
+    { rationale: "Sells the same comparison. " },
+  ]) {
+    assert.equal(
+      marketingGeneratorReportSchema.safeParse(signed({ competitorCandidates: [candidate(overrides)] })).success,
+      false,
+      JSON.stringify(overrides),
+    );
+  }
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse(
+      signed({ competitorCandidates: [candidate({ officialHosts: ["alpha.example", "www.alpha.example"] })] }),
+    ).success,
+    true,
+  );
   // Proposing nothing leaves the bytes as they were before candidates existed.
   assert.equal(marketingGeneratorReportDigest(unsigned()), marketingGeneratorReportDigest({ ...unsigned(), competitorCandidates: undefined }));
 });

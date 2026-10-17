@@ -19,6 +19,7 @@ import { MARKETING_REPORT_PAYLOAD_SCHEMAS } from "@/lib/marketingAutomationSchem
 import {
   MARKETING_COMPETITOR_MAX_CANDIDATES,
   marketingCompetitorCandidateSchema,
+  type MarketingCompetitorCandidate,
   type MarketingCompetitorSourceHosts,
 } from "@/lib/marketingCompetitorCore";
 
@@ -73,6 +74,30 @@ const base = {
   provenance: hex64,
 };
 
+const canonical = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, inner]) => [key, canonical(inner)]),
+    );
+  }
+  return value;
+};
+
+/**
+ * A candidate exactly as the registry would store it, or refused. The
+ * candidate schema normalises (hosts lower-cased, deduplicated and sorted,
+ * text trimmed), and a signature is over the bytes as sent: a report that
+ * normalisation would change is refused as malformed, so the bytes the route
+ * verifies are the bytes the generator signed.
+ */
+const canonicalCandidate = z.custom<MarketingCompetitorCandidate>((value) => {
+  const parsed = marketingCompetitorCandidateSchema.safeParse(value);
+  return parsed.success && JSON.stringify(canonical(parsed.data)) === JSON.stringify(canonical(value));
+}, "A competitor candidate is sent in its stored form: lower-case sorted unique hosts, trimmed text");
+
 export const marketingGeneratorReportSchema = z
   .discriminatedUnion("kind", [
     z.object({ ...base, kind: z.literal("brief"), payload: briefPayload }).strict(),
@@ -88,7 +113,7 @@ export const marketingGeneratorReportSchema = z
          * the payload rather than in it: the payload schema is the schema
          * module's, which the webhook fingerprint watches.
          */
-        competitorCandidates: z.array(marketingCompetitorCandidateSchema).max(MARKETING_COMPETITOR_MAX_CANDIDATES).optional(),
+        competitorCandidates: z.array(canonicalCandidate).max(MARKETING_COMPETITOR_MAX_CANDIDATES).optional(),
       })
       .strict(),
   ])
@@ -109,17 +134,6 @@ export type MarketingGeneratorReport = z.infer<typeof marketingGeneratorReportSc
 /** A market fact as the schema has it. */
 type MarketIntelFact = MarketIntelPayload["facts"][number];
 
-const canonical = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([key, inner]) => [key, canonical(inner)]),
-    );
-  }
-  return value;
-};
 
 const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
@@ -189,7 +203,8 @@ export const marketingGeneratorReportProvenanceDigest = (provenance: string): st
 
 /**
  * Whether a market fact cites one of the official hosts a person approved for
- * its competitor (`readApprovedMarketingCompetitorHosts`). There is no default:
+ * its competitor (`holdApprovedMarketingCompetitorHosts` in a writing
+ * transaction, which holds them until it commits). There is no default:
  * a caller that has not read the registry has no hosts to allow.
  *
  * Hosts are matched exactly, lower case, with no subdomain wildcard: a page on

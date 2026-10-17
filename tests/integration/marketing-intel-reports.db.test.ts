@@ -299,6 +299,23 @@ test("candidates become proposals once, and a known competitor is not touched", 
       where: { action: MARKETING_COMPETITOR_ACTIONS.proposed, targetId: "alpha", metadata: { path: ["generatorRunId"], equals: RUN } },
     });
     assert.equal(proposals, 1);
+    // A candidate the registry would store differently is malformed, not a
+    // bad signature: the generator signs exactly what is stored.
+    const unsorted = await call(
+      sign(intel({ reportId: "intel-unsorted", competitorCandidates: [{ ...candidate("beta", "www.beta.example"), officialHosts: ["www.beta.example", "beta.example"] }] })),
+    );
+    assert.equal(unsorted.status, 400);
+    const sorted = (await (
+      await call(
+        sign(intel({ reportId: "intel-sorted", competitorCandidates: [{ ...candidate("beta", "beta.example"), officialHosts: ["beta.example", "www.beta.example"] }] })),
+      )
+    ).json()) as { result: { status: string; proposedCompetitorCount: number } };
+    assert.equal(sorted.result.status, "recorded");
+    assert.equal(sorted.result.proposedCompetitorCount, 1);
+    assert.deepEqual((await prisma.marketingCompetitor.findUniqueOrThrow({ where: { id: "beta" } })).officialHosts, [
+      "beta.example",
+      "www.beta.example",
+    ]);
     // A proposal is never a source.
     assert.deepEqual(Object.keys(await runMarketingTransaction(prisma, (tx) => holdApprovedMarketingCompetitorHosts(tx))), ["poe"]);
   }));
