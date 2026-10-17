@@ -11,7 +11,6 @@ const completed = {
   holdNotices: { sent: 0, scanned: 0, batchLimit: 8 },
   cancellation: { cancelled: 0, scanned: 0, batchLimit: 8 },
   raw: { bodiesPurged: 0, keysDeleted: 0, scanned: 0, batchLimit: 8 },
-  readManifests: { bodiesPurged: 1, keysDeleted: 1, scanned: 1, batchLimit: 8 },
   analysis: { bodiesPurged: 0, keysDeleted: 0, scanned: 0, batchLimit: 8 },
   taskResults: { available: false, reason: "v22_task_result_retention_disabled" },
 };
@@ -94,7 +93,7 @@ test("retention accepts the deployed route shape only with v22 retention disable
   const route = readFileSync(new URL(
     "../app/api/internal/amux/v4/content-retention/route.ts", import.meta.url), "utf8");
   assert.match(route, /available: false, reason: "v22_task_result_retention_disabled"/);
-  assert.match(route, /amuxJsonNoStore\(\{ holdNotices, cancellation, raw, readManifests, analysis,\s*taskResults \}\)/);
+  assert.match(route, /amuxJsonNoStore\(\{ holdNotices, cancellation, raw, analysis,\s*taskResults \}\)/);
   const state = marker();
   assert.deepEqual(await runAmuxV4LocalRetentionOnce({ origin, secret, ...state,
     fetchImpl: async () => Response.json(completed) }), { kind: "completed" });
@@ -123,21 +122,6 @@ test("missing, active, or malformed task retention results halt without retry", 
     assert.equal(state.isMarked(), true);
     assert.deepEqual(await runAmuxV4LocalRetentionOnce(input), { kind: "halted" });
     assert.equal(calls, 1);
-  }
-});
-
-test("missing or malformed read-manifest retirement outcome retains the halt marker", async () => {
-  const absent = { ...completed };
-  delete absent.readManifests;
-  for (const body of [absent,
-    { ...completed, readManifests: { bodiesPurged: 1, keysDeleted: 1,
-      scanned: -1, batchLimit: 8 } },
-    { ...completed, readManifests: { ...completed.readManifests,
-      objectKey: "must-not-leak" } }]) {
-    const state = marker();
-    assert.deepEqual(await runAmuxV4LocalRetentionOnce({ origin, secret,
-      ...state, fetchImpl: async () => Response.json(body) }), { kind: "halted" });
-    assert.equal(state.isMarked(), true);
   }
 });
 
