@@ -1494,7 +1494,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   route sweep이 `refusal` 안의 호출과 store 식별자를 막기 때문입니다.
 - **S3f-R3b(경쟁사 Admin 화면)**: `/admin/marketing?tab=competitors` — `lib/marketingConsoleSections.ts`,
   `lib/marketingConsoleRead.ts`, `components/admin/AdminMarketingPanel.tsx`, `lib/adminMessages/marketing.ts`. 승인된 것이
-  먼저, 최대 `MARKETING_COMPETITOR_READ_LIMIT`건이고 화면이 그 수를 말합니다. 행마다 그 행이 보여 준
+  먼저, 최대 100건이고 화면이 그 수와, 잘렸다면 잘렸다는 사실을 말합니다. 행마다 그 행이 보여 준
   `decisionAuditLogId`로 결정하며, 승인은 이름·host를 고쳐서 보낼 수 있습니다. A3의 근거 URL은 링크가 아니라 텍스트로
   보입니다 — 생성기가 읽은 것은 판정할 데이터이지 따라갈 링크가 아닙니다.
 
