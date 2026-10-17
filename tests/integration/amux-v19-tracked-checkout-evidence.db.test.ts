@@ -285,7 +285,7 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
       where: { id: manifestId },
     }), /append only/);
     await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
-      data: { id: randomUUID(), ideaId, referenceOrdinal: 0,
+      data: { id: manifestId, ideaId, referenceOrdinal: 0,
         pinnedCommitSha: "a".repeat(40), fileCount: 1,
         ciphertext: Uint8Array.from(row.ciphertext), keyId: row.keyId,
         keyVersion: row.keyVersion, digest: row.digest,
@@ -304,14 +304,14 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
         ciphertext: Uint8Array.from(row.ciphertext), keyId: row.keyId,
         keyVersion: row.keyVersion, digest: row.digest,
         digestKeyId: row.digestKeyId, auditLogId: row.auditLogId },
-    }), /pinned reference mismatch/);
+    }), /key is unavailable/);
     await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
       data: { id: randomUUID(), ideaId: randomUUID(), referenceOrdinal: 0,
         pinnedCommitSha: "a".repeat(40), fileCount: row.fileCount,
         ciphertext: Uint8Array.from(row.ciphertext), keyId: row.keyId,
         keyVersion: row.keyVersion, digest: row.digest,
         digestKeyId: row.digestKeyId, auditLogId: row.auditLogId },
-    }), /idea is unavailable/);
+    }), /key is unavailable/);
   } finally {
     readKeys.masterKey.fill(0);
     readKeys.digestKey.fill(0);
@@ -630,15 +630,41 @@ test("an uncommitted manifest leaves a seven-day key identity and audited deleti
   await assert.rejects(purgeDueAmuxOrphanReadManifestKeys(async () => {
     throw new Error("synthetic S3 outcome unknown");
   }), /key_store_unavailable/);
+  const claimed = await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
+    where: { id: manifestId },
+  });
+  assert.equal(claimed.keyDeletedAt, null);
+  assert.ok(claimed.keyRetirementClaimedAt);
+  assert.ok(claimed.claimAuditLogId);
+  const claimAudit = await prisma.adminAuditLog.findUniqueOrThrow({
+    where: { id: claimed.claimAuditLogId },
+  });
+  assert.equal(claimAudit.action,
+    "amux.v19.read_manifest.orphan_key_retirement_claimed");
+  assert.equal(JSON.stringify(claimAudit.metadata).includes("docs/orphan.md"), false);
+  await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
+    data: { id: manifestId, ideaId: orphanIdeaId, referenceOrdinal: 0,
+      pinnedCommitSha: "a".repeat(40), fileCount: 1,
+      ciphertext: Uint8Array.of(1), keyId: amuxContentUnitKeyId(
+        amuxTrackedCheckoutReadManifestKeyIdentity(orphanIdeaId, manifestId)),
+      keyVersion: 1, digest: "d".repeat(64),
+      digestKeyId: "synthetic-checkout-read-digest",
+      auditLogId: claimed.auditLogId },
+  }), /read manifest key is unavailable/);
+  await assert.rejects(purgeDueAmuxOrphanReadManifestKeys(async () => {
+    throw new Error("a claimed key must never be deleted twice");
+  }, async () => { throw new Error("synthetic key still present"); }),
+  /outcome_unknown/);
   assert.equal((await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
     where: { id: manifestId },
   })).keyDeletedAt, null);
 
-  const deleted: string[] = [];
-  assert.deepEqual(await purgeDueAmuxOrphanReadManifestKeys(async (identity) => {
-    deleted.push(identity.subjectId);
-  }), { keysDeleted: 1, scanned: 1, batchLimit: 8 });
-  assert.deepEqual(deleted, [manifestId]);
+  const verified: string[] = [];
+  assert.deepEqual(await purgeDueAmuxOrphanReadManifestKeys(async () => {
+    throw new Error("a claimed key must never be deleted twice");
+  }, async (identity) => { verified.push(identity.subjectId); }),
+  { keysDeleted: 1, scanned: 1, batchLimit: 8 });
+  assert.deepEqual(verified, [manifestId]);
   const intent = await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
     where: { id: manifestId },
   });

@@ -72,7 +72,7 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestStore.ts"), { namedExpo
     assert.equal(ordinal, 0);
     return intentStored ? { id: manifestId, ideaId,
       referenceOrdinal: 0, pinnedCommitSha: body.pinnedCommitSha,
-      keyDeletedAt: null } : null;
+      keyRetirementClaimedAt: null, keyDeletedAt: null } : null;
   },
 } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
@@ -139,8 +139,8 @@ test("dedicated worker auth and both gates guard manifest writes", async () => {
   assert.equal((await route.POST(post())).status, 409);
   reset();
   delete process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION;
-  assert.equal((await route.POST(post())).status, 409);
-  assert.equal(prepares, 0);
+  assert.equal((await route.POST(post())).status, 200);
+  assert.equal(prepares, 1);
 });
 
 test("malformed observations and lookups stop before key creation", async () => {
@@ -207,7 +207,8 @@ test("known refusals and uncertain key or commit outcomes forbid blind retries",
   }
   assert.deepEqual(await (await route.GET(get())).json(), {
     status: "key_intent", manifestId, ideaId, referenceOrdinal: 0,
-    pinnedCommitSha: body.pinnedCommitSha, keyRetirementRecorded: false,
+    pinnedCommitSha: body.pinnedCommitSha,
+    keyRetirementClaimed: false, keyRetirementRecorded: false,
     retryWrite: false });
   reset();
   prepareFails = true;
@@ -218,7 +219,8 @@ test("known refusals and uncertain key or commit outcomes forbid blind retries",
   assert.equal(writes, 0);
   assert.deepEqual(await (await route.GET(get())).json(), {
     status: "key_intent", manifestId, ideaId, referenceOrdinal: 0,
-    pinnedCommitSha: body.pinnedCommitSha, keyRetirementRecorded: false,
+    pinnedCommitSha: body.pinnedCommitSha,
+    keyRetirementClaimed: false, keyRetirementRecorded: false,
     retryWrite: false });
   reset();
   unknownCommit = true;

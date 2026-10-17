@@ -105,8 +105,10 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
 // The encrypted v19 read manifest adds a content purpose to ideaCrypto and
 // ideaKeyStore. This preview's reviewed closure still has the same 13 files,
 // no new write or outbound capability, and both latch states stay pinned.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "0f0101f6a475f5b8d60364f5909111d3d7f27a9bedaf1632272d7c96b29aef53";
-const SOURCE_SCOPE_DISABLED_DIGEST = "6e8cdefe8d4edb8627a8da93ab258a4a491f930b10821bcf55c39daea346f9a5";
+// v19 orphan-key retirement adds a readback-only S3 verifier to the existing
+// key-store module; the preview closure still has 13 files and no new call.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "73c2164d38f0314f4bad28cc6bd87019a9278140b5334efc40bbb7eb2080caf2";
+const SOURCE_SCOPE_DISABLED_DIGEST = "1e2ba205de679513f2e2c15cdfd632590015bbcd360bb73c7f0a488ce293f6f6";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -158,8 +160,10 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // read-only scan and both latch states remain explicitly pinned.
 // The same v19 content-purpose extension changes these reviewed sources, but
 // does not add a writer, import, or outbound call to the resolution preview.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "0db5b10676e171ddab08971d620a3cfe9a9bfd372bc8dae87346b1f3bf3836fb";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "62a88919072aa92bb8cbf565a63e5ac38f40315d075d5018b715cde14f40e40c";
+// The same verifier changes the existing 17-file closure without changing
+// the preview's route, imports, writer scan, or outbound-call guard.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "ab78e97fef13e9144d0d07a7e4276b7a9e585259bde98a6d99b244f619b3040b";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "a9194bf90f95fe2df6f1771fe174195f9c2e4a793158d483e08f741bfd4d793e";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

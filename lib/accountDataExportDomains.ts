@@ -783,6 +783,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaReadManifestKeyIntent",
+    publicName: "amux_idea_read_manifest_key_intents",
+    prismaModel: "AmuxIdeaReadManifestKeyIntent",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaAnalysisChunk",
     publicName: "amux_idea_analysis_chunks",
     prismaModel: "AmuxIdeaAnalysisChunk",

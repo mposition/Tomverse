@@ -218,31 +218,44 @@ export async function deleteAmuxContentUnitKey(input: AmuxContentKeyIdentity,
   const { bucket, client } = connection(env);
   try {
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey }));
-    try {
-      await client.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey }));
-      throw new AmuxIdeaKeyStoreError("outcome_unknown");
-    } catch (error) {
-      if (error instanceof AmuxIdeaKeyStoreError) throw error;
-      if (typeof error === "object" && error !== null &&
-          "$metadata" in error && (error as { $metadata?: { httpStatusCode?: number } })
-            .$metadata?.httpStatusCode === 404) {
-        // HEAD only proves that the current key is absent. A delete marker in
-        // a versioned bucket can hide a restorable older data key, so require
-        // a complete version listing before recording irreversible deletion.
-        const versions = await client.send(new ListObjectVersionsCommand({
-          Bucket: bucket, Prefix: objectKey, MaxKeys: 1000,
-        }));
-        if (versions.IsTruncated === false &&
-            !versions.Versions?.some((item) => item.Key === objectKey) &&
-            !versions.DeleteMarkers?.some((item) => item.Key === objectKey)) {
-          return;
-        }
-        throw new AmuxIdeaKeyStoreError("outcome_unknown");
-      }
-      throw new AmuxIdeaKeyStoreError("outcome_unknown");
-    }
+    await verifyAbsentContentKey(client, bucket, objectKey);
   } catch (error) {
     if (error instanceof AmuxIdeaKeyStoreError) throw error;
     throw new AmuxIdeaKeyStoreError("outcome_unknown");
   } finally { client.destroy(); }
+}
+
+/** Readback only: a claimed deletion whose audit result was lost must not
+ * issue a second DeleteObject. HEAD alone is insufficient for versioned keys. */
+export async function verifyAmuxContentUnitKeyAbsent(
+  input: AmuxContentKeyIdentity, env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const { objectKey } = identity(input);
+  const { bucket, client } = connection(env);
+  try { await verifyAbsentContentKey(client, bucket, objectKey); }
+  catch (error) {
+    if (error instanceof AmuxIdeaKeyStoreError) throw error;
+    throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  }
+  finally { client.destroy(); }
+}
+
+async function verifyAbsentContentKey(client: S3Client, bucket: string,
+  objectKey: string): Promise<void> {
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey }));
+  } catch (error) {
+    if (typeof error === "object" && error !== null &&
+        "$metadata" in error && (error as { $metadata?: { httpStatusCode?: number } })
+          .$metadata?.httpStatusCode === 404) {
+      const versions = await client.send(new ListObjectVersionsCommand({
+        Bucket: bucket, Prefix: objectKey, MaxKeys: 1000,
+      }));
+      if (versions.IsTruncated === false &&
+          !versions.Versions?.some((item) => item.Key === objectKey) &&
+          !versions.DeleteMarkers?.some((item) => item.Key === objectKey)) return;
+    }
+    throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  }
+  throw new AmuxIdeaKeyStoreError("outcome_unknown");
 }

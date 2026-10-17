@@ -2445,6 +2445,7 @@ model AdminAuditLog {
   amuxIdeaTrackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[] @relation("AmuxIdeaTrackedCheckoutAudit")
   amuxIdeaTrackedCheckoutReadManifest AmuxIdeaTrackedCheckoutReadManifest[] @relation("AmuxIdeaTrackedCheckoutReadManifestAudit")
   amuxIdeaReadManifestKeyIntents AmuxIdeaReadManifestKeyIntent[] @relation("AmuxIdeaReadManifestKeyIntentAudit")
+  amuxIdeaReadManifestKeyClaims AmuxIdeaReadManifestKeyIntent[] @relation("AmuxIdeaReadManifestKeyClaimAudit")
   amuxIdeaReadManifestKeyDeletions AmuxIdeaReadManifestKeyIntent[] @relation("AmuxIdeaReadManifestKeyDeleteAudit")
   amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
   amuxV4ContentPurgeAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4ContentPurgeAudit")
@@ -9828,12 +9829,15 @@ model AmuxIdeaReadManifestKeyIntent {
   pinnedCommitSha     String
   auditLogId          String    @unique
   createdAt           DateTime  @default(now()) @db.Timestamptz(3)
+  keyRetirementClaimedAt DateTime? @db.Timestamptz(3)
+  claimAuditLogId     String?   @unique
   keyDeletedAt        DateTime? @db.Timestamptz(3)
   keyDeleteAuditLogId String?   @unique
 
   idea AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [ideaId, referenceOrdinal], references: [ideaId, referenceOrdinal], onDelete: Restrict, onUpdate: Restrict)
   audit AdminAuditLog @relation("AmuxIdeaReadManifestKeyIntentAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claimAudit AdminAuditLog? @relation("AmuxIdeaReadManifestKeyClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   keyDeleteAudit AdminAuditLog? @relation("AmuxIdeaReadManifestKeyDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([ideaId, referenceOrdinal])

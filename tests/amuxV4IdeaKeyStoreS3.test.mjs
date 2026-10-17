@@ -5,11 +5,13 @@ import test from "node:test";
 
 import { openAmuxContent, sealAmuxContent } from "../lib/amux/ideaCrypto.ts";
 import { createAmuxContentUnitKeys, deleteAmuxContentUnitKey,
-  loadAmuxContentUnitKeys } from "../lib/amux/ideaKeyStore.ts";
+  loadAmuxContentUnitKeys, verifyAmuxContentUnitKeyAbsent } from
+  "../lib/amux/ideaKeyStore.ts";
 
 test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () => {
   const objects = new Map();
   let listing = "empty";
+  let deleteCount = 0;
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     const key = url.pathname;
@@ -35,6 +37,7 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
     } else if (request.method === "HEAD") {
       response.writeHead(objects.has(key) ? 200 : 404); response.end();
     } else if (request.method === "DELETE") {
+      deleteCount += 1;
       objects.delete(key); response.writeHead(204); response.end();
     } else { response.writeHead(405); response.end(); }
   });
@@ -66,7 +69,12 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
       identity.subjectId, loaded), Buffer.from("synthetic proposal"));
     await assert.rejects(createAmuxContentUnitKeys(identity, env),
       { code: "conflict" });
+    await assert.rejects(verifyAmuxContentUnitKeyAbsent(identity, env),
+      { code: "outcome_unknown" });
+    assert.equal(deleteCount, 0, "readback never sends DeleteObject");
     await deleteAmuxContentUnitKey(identity, env);
+    await verifyAmuxContentUnitKeyAbsent(identity, env);
+    assert.equal(deleteCount, 1, "verified readback does not repeat deletion");
     assert.equal(objects.size, 0);
     await assert.rejects(loadAmuxContentUnitKeys(identity, env),
       { code: "missing" });
@@ -76,6 +84,10 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
       await createAmuxContentUnitKeys(identity, env);
       await assert.rejects(deleteAmuxContentUnitKey(identity, env),
         { code: "outcome_unknown" });
+      const priorDeletes = deleteCount;
+      await assert.rejects(verifyAmuxContentUnitKeyAbsent(identity, env),
+        { code: "outcome_unknown" });
+      assert.equal(deleteCount, priorDeletes);
     }
   } finally {
     await new Promise((resolve, reject) => server.close((error) =>

@@ -4,9 +4,7 @@ import { z } from "zod";
 
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import { AMUX_V19_READ_MANIFEST_RETENTION_ENV,
-  AMUX_V4_CONTENT_RETENTION_ENV,
-  amuxV19ReadManifestRetentionEnabled,
-  amuxV4ContentRetentionEnabled } from
+  amuxV19ReadManifestRetentionEnabled } from
   "@/lib/amux/ideaContentRetentionCore";
 import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
   isAmuxV4AnalysisAgentAuthorized } from "@/lib/amux/ideaAnalysisQueueCore";
@@ -40,7 +38,6 @@ function authorized(request: Request): boolean {
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   if (process.env[WRITE_ENV] !== "enabled" || process.env[READ_ENV] !== "enabled" ||
-      !amuxV4ContentRetentionEnabled(process.env[AMUX_V4_CONTENT_RETENTION_ENV]) ||
       !amuxV19ReadManifestRetentionEnabled(
         process.env[AMUX_V19_READ_MANIFEST_RETENTION_ENV])) {
     return amuxJsonNoStore({ available: false,
@@ -130,6 +127,7 @@ export async function GET(request: Request): Promise<Response> {
         manifestId: readback.intent.id, ideaId: readback.intent.ideaId,
         referenceOrdinal: readback.intent.referenceOrdinal,
         pinnedCommitSha: readback.intent.pinnedCommitSha,
+        keyRetirementClaimed: readback.intent.keyRetirementClaimedAt !== null,
         keyRetirementRecorded: readback.intent.keyDeletedAt !== null,
         retryWrite: false });
       return amuxJsonNoStore({ status: "absent",

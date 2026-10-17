@@ -30,9 +30,11 @@ test("retention route has a separate secret and stays closed without its environ
   assert.equal(amuxV4ContentRetentionEnabled(undefined), false);
   const previousSecret = process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET;
   const previousSwitch = process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION;
+  const previousV19 = process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION;
   try {
     process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET = secret;
     delete process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION;
+    delete process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION;
     const response = await POST(request());
     assert.equal(response.status, 409);
     assert.deepEqual(await response.json(), {
@@ -42,6 +44,8 @@ test("retention route has a separate secret and stays closed without its environ
     else process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET = previousSecret;
     if (previousSwitch === undefined) delete process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION;
     else process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION = previousSwitch;
+    if (previousV19 === undefined) delete process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION;
+    else process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION = previousV19;
   }
 });
 

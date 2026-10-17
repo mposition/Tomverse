@@ -206,12 +206,13 @@ export async function recordAmuxTrackedCheckoutReadManifest(
   }
   const intent = await tx.amuxIdeaReadManifestKeyIntent.findUnique({
     where: { id: inspected.manifestId }, select: { ideaId: true,
-      referenceOrdinal: true, pinnedCommitSha: true, keyDeletedAt: true },
+      referenceOrdinal: true, pinnedCommitSha: true,
+      keyRetirementClaimedAt: true, keyDeletedAt: true },
   });
   if (!intent || intent.ideaId !== inspected.ideaId ||
       intent.referenceOrdinal !== inspected.referenceOrdinal ||
       intent.pinnedCommitSha !== inspected.pinnedCommitSha ||
-      intent.keyDeletedAt) {
+      intent.keyRetirementClaimedAt || intent.keyDeletedAt) {
     throw new AmuxTrackedCheckoutReadManifestError("evidence_unavailable");
   }
   if (await tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
@@ -275,7 +276,8 @@ export async function readAmuxTrackedCheckoutReadManifestKeyIntentReceipt(
   return tx.amuxIdeaReadManifestKeyIntent.findUnique({
     where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal } },
     select: { id: true, ideaId: true, referenceOrdinal: true,
-      pinnedCommitSha: true, keyDeletedAt: true },
+      pinnedCommitSha: true, keyRetirementClaimedAt: true,
+      keyDeletedAt: true },
   });
 }
 
