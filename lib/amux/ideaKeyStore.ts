@@ -1,7 +1,8 @@
 import "server-only";
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand,
+import { DeleteObjectCommand, GetBucketVersioningCommand, GetObjectCommand,
+  HeadObjectCommand,
   ListObjectVersionsCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 import { amuxContentKeyCoordinate, type AmuxContentKeys,
@@ -240,17 +241,60 @@ export async function verifyAmuxContentUnitKeyAbsent(
   finally { client.destroy(); }
 }
 
-async function verifyAbsentContentKey(client: S3Client, bucket: string,
-  objectKey: string): Promise<void> {
+/** A claimed orphan has no live body. Retries must address the same object
+ * versions, not create a fresh delete marker on each unknown S3 outcome. */
+export async function retireClaimedAmuxReadManifestKey(
+  input: AmuxContentKeyIdentity, env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  if (input.purpose !== "repository_read_manifest") {
+    throw new AmuxIdeaKeyStoreError("integrity_unavailable");
+  }
+  const { objectKey } = identity(input);
+  const { bucket, client } = connection(env);
+  const abortSignal = AbortSignal.timeout(30_000);
   try {
-    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey }));
+    const versioning = await client.send(new GetBucketVersioningCommand({
+      Bucket: bucket }), { abortSignal });
+    if (versioning.Status === undefined) {
+      // A bucket that has never enabled versioning cannot create delete markers.
+      await client.send(new DeleteObjectCommand({ Bucket: bucket,
+        Key: objectKey }), { abortSignal });
+    } else if (versioning.Status === "Enabled" || versioning.Status === "Suspended") {
+      const listed = await client.send(new ListObjectVersionsCommand({
+        Bucket: bucket, Prefix: objectKey, MaxKeys: 1000,
+      }), { abortSignal });
+      if (listed.IsTruncated !== false || listed.NextKeyMarker ||
+          listed.NextVersionIdMarker) throw new AmuxIdeaKeyStoreError("outcome_unknown");
+      const versions = [...(listed.Versions ?? []),
+        ...(listed.DeleteMarkers ?? [])]
+        .filter((item) => item.Key === objectKey);
+      for (const version of versions) {
+        if (!version.VersionId) throw new AmuxIdeaKeyStoreError("outcome_unknown");
+        await client.send(new DeleteObjectCommand({ Bucket: bucket,
+          Key: objectKey, VersionId: version.VersionId }), { abortSignal });
+      }
+    } else {
+      throw new AmuxIdeaKeyStoreError("outcome_unknown");
+    }
+    await verifyAbsentContentKey(client, bucket, objectKey, abortSignal);
+  } catch (error) {
+    if (error instanceof AmuxIdeaKeyStoreError) throw error;
+    throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  } finally { client.destroy(); }
+}
+
+async function verifyAbsentContentKey(client: S3Client, bucket: string,
+  objectKey: string, abortSignal?: AbortSignal): Promise<void> {
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey }),
+      { abortSignal });
   } catch (error) {
     if (typeof error === "object" && error !== null &&
         "$metadata" in error && (error as { $metadata?: { httpStatusCode?: number } })
           .$metadata?.httpStatusCode === 404) {
       const versions = await client.send(new ListObjectVersionsCommand({
         Bucket: bucket, Prefix: objectKey, MaxKeys: 1000,
-      }));
+      }), { abortSignal });
       if (versions.IsTruncated === false &&
           !versions.Versions?.some((item) => item.Key === objectKey) &&
           !versions.DeleteMarkers?.some((item) => item.Key === objectKey)) return;

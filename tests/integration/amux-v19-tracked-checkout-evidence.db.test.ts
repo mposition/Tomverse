@@ -629,7 +629,7 @@ test("an uncommitted manifest leaves a seven-day key identity and audited deleti
   });
   await assert.rejects(purgeDueAmuxOrphanReadManifestKeys(async () => {
     throw new Error("synthetic S3 outcome unknown");
-  }), /key_store_unavailable/);
+  }), /outcome_unknown/);
   const claimed = await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
     where: { id: manifestId },
   });
@@ -642,6 +642,11 @@ test("an uncommitted manifest leaves a seven-day key identity and audited deleti
   assert.equal(claimAudit.action,
     "amux.v19.read_manifest.orphan_key_retirement_claimed");
   assert.equal(JSON.stringify(claimAudit.metadata).includes("docs/orphan.md"), false);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaRetentionHold(tx, { session, request, id: randomUUID(),
+      ideaId: orphanIdeaId, reasonCode: "legal_request", days: 1,
+      expectedRemainingBodies: 1, expectedAlreadyPurgedBodies: 0 })),
+  { code: "key_retirement_in_progress" });
   await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.create({
     data: { id: manifestId, ideaId: orphanIdeaId, referenceOrdinal: 0,
       pinnedCommitSha: "a".repeat(40), fileCount: 1,
@@ -659,12 +664,13 @@ test("an uncommitted manifest leaves a seven-day key identity and audited deleti
     where: { id: manifestId },
   })).keyDeletedAt, null);
 
-  const verified: string[] = [];
+  const retried: string[] = [];
   assert.deepEqual(await purgeDueAmuxOrphanReadManifestKeys(async () => {
     throw new Error("a claimed key must never be deleted twice");
-  }, async (identity) => { verified.push(identity.subjectId); }),
+  }, async () => { throw new Error("synthetic key still present"); },
+  async (identity) => { retried.push(identity.subjectId); }),
   { keysDeleted: 1, scanned: 1, batchLimit: 8 });
-  assert.deepEqual(verified, [manifestId]);
+  assert.deepEqual(retried, [manifestId]);
   const intent = await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
     where: { id: manifestId },
   });

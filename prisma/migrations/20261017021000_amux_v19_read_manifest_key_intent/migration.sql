@@ -271,7 +271,7 @@ $$;
 
 -- A legal hold approved after retirement has been claimed would otherwise
 -- race the external deletion. Serialize on the same idea row and fail closed
--- until the claim has been verified or manually reconciled.
+-- until the version-aware retry verifies and records key deletion.
 CREATE FUNCTION "amux_v19_key_claim_hold_guard"() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN

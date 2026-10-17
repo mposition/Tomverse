@@ -10,7 +10,7 @@ import { AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION,
 import { prisma } from "@/lib/prisma";
 import { AmuxContentRetirementError } from
   "./ideaContentKeyRetirementService.ts";
-import { deleteAmuxContentUnitKey,
+import { retireClaimedAmuxReadManifestKey,
   verifyAmuxContentUnitKeyAbsent } from "./ideaKeyStore.ts";
 import { amuxIdeaHasActiveRetentionHold } from "./ideaRetentionHoldRead.ts";
 import { amuxReadManifestDueAt,
@@ -151,33 +151,40 @@ async function completeClaim(item: IntentIdentity, claimAuditLogId: string) {
   }
 }
 
-/** The claim commits before S3 is touched. A second tick never issues a
- * second DeleteObject for a claimed identity; it only verifies absence. */
+/** The claim commits before S3 is touched. A retry only deletes the same
+ * listed version IDs (or an unversioned key), never a new delete marker. */
 export async function purgeDueAmuxOrphanReadManifestKeys(
-  deleteKey: typeof deleteAmuxContentUnitKey = deleteAmuxContentUnitKey,
+  deleteKey: typeof retireClaimedAmuxReadManifestKey =
+    retireClaimedAmuxReadManifestKey,
   verifyAbsent: typeof verifyAmuxContentUnitKeyAbsent =
     verifyAmuxContentUnitKeyAbsent,
+  retryDelete: typeof retireClaimedAmuxReadManifestKey =
+    retireClaimedAmuxReadManifestKey,
 ) {
   const pending = await prisma.amuxIdeaReadManifestKeyIntent.findMany({
     where: { keyRetirementClaimedAt: { not: null }, keyDeletedAt: null },
     orderBy: [{ keyRetirementClaimedAt: "asc" }, { id: "asc" }],
-    take: BATCH_SIZE,
+    take: BATCH_SIZE / 2,
     select: { id: true, ideaId: true, referenceOrdinal: true,
       claimAuditLogId: true },
   });
   let keysDeleted = 0;
+  let firstError: AmuxContentRetirementError | null = null;
   for (const item of pending) {
     const target = amuxTrackedCheckoutReadManifestKeyIdentity(item.ideaId, item.id);
     if (!item.claimAuditLogId) {
-      throw new AmuxContentRetirementError("integrity_unavailable", target);
+      firstError ??= new AmuxContentRetirementError("integrity_unavailable", target);
+      continue;
     }
-    try { await verifyAbsent(target); }
-    catch { throw new AmuxContentRetirementError("outcome_unknown", target); }
-    await completeClaim(item, item.claimAuditLogId);
-    keysDeleted += 1;
+    try {
+      try { await verifyAbsent(target); }
+      catch { await retryDelete(target); }
+      await completeClaim(item, item.claimAuditLogId);
+      keysDeleted += 1;
+    } catch {
+      firstError ??= new AmuxContentRetirementError("outcome_unknown", target);
+    }
   }
-  if (pending.length === BATCH_SIZE) return { keysDeleted,
-    scanned: pending.length, batchLimit: BATCH_SIZE };
   const due = await prisma.$queryRaw<IntentIdentity[]>`
     SELECT k."id", k."ideaId", k."referenceOrdinal"
     FROM "AmuxIdeaReadManifestKeyIntent" k
@@ -193,14 +200,18 @@ export async function purgeDueAmuxOrphanReadManifestKeys(
     ORDER BY k."createdAt", k."id" LIMIT ${BATCH_SIZE - pending.length}
   `;
   for (const item of due) {
-    const claimAuditLogId = await claimDueIntent(item);
-    if (!claimAuditLogId) continue;
     const target = amuxTrackedCheckoutReadManifestKeyIdentity(item.ideaId, item.id);
-    try { await deleteKey(target); }
-    catch { throw new AmuxContentRetirementError("key_store_unavailable", target); }
-    await completeClaim(item, claimAuditLogId);
-    keysDeleted += 1;
+    try {
+      const claimAuditLogId = await claimDueIntent(item);
+      if (!claimAuditLogId) continue;
+      await deleteKey(target);
+      await completeClaim(item, claimAuditLogId);
+      keysDeleted += 1;
+    } catch {
+      firstError ??= new AmuxContentRetirementError("outcome_unknown", target);
+    }
   }
+  if (firstError) throw firstError;
   return { keysDeleted, scanned: pending.length + due.length,
     batchLimit: BATCH_SIZE };
 }

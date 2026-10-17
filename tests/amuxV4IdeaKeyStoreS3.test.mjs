@@ -5,7 +5,8 @@ import test from "node:test";
 
 import { openAmuxContent, sealAmuxContent } from "../lib/amux/ideaCrypto.ts";
 import { createAmuxContentUnitKeys, deleteAmuxContentUnitKey,
-  loadAmuxContentUnitKeys, verifyAmuxContentUnitKeyAbsent } from
+  loadAmuxContentUnitKeys, retireClaimedAmuxReadManifestKey,
+  verifyAmuxContentUnitKeyAbsent } from
   "../lib/amux/ideaKeyStore.ts";
 
 test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () => {
@@ -89,6 +90,73 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
         { code: "outcome_unknown" });
       assert.equal(deleteCount, priorDeletes);
     }
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) =>
+      error ? reject(error) : resolve()));
+  }
+});
+
+test("claimed read-manifest retirement retries exact S3 versions", async () => {
+  const versions = new Set(["key-version-1"]);
+  const deletes = [];
+  let failMode = "before";
+  const server = createServer((request, response) => {
+    const url = new URL(request.url, "http://127.0.0.1");
+    if (request.method === "GET" && url.searchParams.has("versioning")) {
+      response.writeHead(200, { "Content-Type": "application/xml" });
+      response.end("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>");
+    } else if (request.method === "GET" && url.searchParams.has("versions")) {
+      const key = url.searchParams.get("prefix");
+      response.writeHead(200, { "Content-Type": "application/xml" });
+      response.end(`<ListVersionsResult><IsTruncated>false</IsTruncated>${
+        [...versions].map((version) => `<Version><Key>${key}</Key><VersionId>${version}</VersionId></Version>`).join("")
+      }</ListVersionsResult>`);
+    } else if (request.method === "HEAD") {
+      response.writeHead(versions.size ? 200 : 404); response.end();
+    } else if (request.method === "DELETE") {
+      const version = url.searchParams.get("versionId");
+      deletes.push(version);
+      if (failMode === "before") {
+        failMode = "none";
+        response.writeHead(503); response.end(); return;
+      }
+      versions.delete(version);
+      if (failMode === "after") {
+        failMode = "none";
+        response.writeHead(503); response.end(); return;
+      }
+      response.writeHead(204); response.end();
+    } else { response.writeHead(405); response.end(); }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const env = {
+      NODE_ENV: "test", AMUX_V4_KEY_STORE_BUCKET: "amux-test-keys",
+      AMUX_V4_KEY_STORE_REGION: "test-region",
+      AMUX_V4_KEY_STORE_ENDPOINT: `http://127.0.0.1:${address.port}`,
+      AMUX_V4_KEY_STORE_ACCESS_KEY_ID: "synthetic-access",
+      AMUX_V4_KEY_STORE_SECRET_ACCESS_KEY: "synthetic-secret",
+      AMUX_V4_KEY_STORE_URL_STYLE: "path",
+    };
+    const identity = { ideaId: "1e5f6f12-4281-4879-ae75-8ab0d2a57b44",
+      purpose: "repository_read_manifest",
+      subjectId: "1f8c9c77-2e86-483e-8fbb-2d5e2c32ad78" };
+    await assert.rejects(retireClaimedAmuxReadManifestKey(identity, env),
+      { code: "outcome_unknown" });
+    assert.deepEqual(deletes, ["key-version-1"]);
+    await retireClaimedAmuxReadManifestKey(identity, env);
+    assert.deepEqual(deletes, ["key-version-1", "key-version-1"]);
+    assert.equal(versions.size, 0);
+    versions.add("key-version-2");
+    failMode = "after";
+    await assert.rejects(retireClaimedAmuxReadManifestKey(identity, env),
+      { code: "outcome_unknown" });
+    await retireClaimedAmuxReadManifestKey(identity, env);
+    assert.deepEqual(deletes, ["key-version-1", "key-version-1",
+      "key-version-2"], "a lost success never creates another delete marker");
+    assert.equal(versions.size, 0);
   } finally {
     await new Promise((resolve, reject) => server.close((error) =>
       error ? reject(error) : resolve()));
