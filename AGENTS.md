@@ -1762,15 +1762,13 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   확인하지 못하면 `results/unknown`입니다. **경계 상한은 각 store 연산의 무결성 키 포함 최대 문장 수 + setup + fence**이고,
   request·body unit 테스트가 그 셈을, body DB 테스트가 하나 줄인 상한의 거부를 고정합니다. 전달·판정 route와 worker에게 가는
   경로는 없습니다.
-- **S2-2a2(latch 호출)**: request store의 `recordDecisionMakerValidationLatch()`·`recordDecisionMakerCleanupUnknown()`·
+- **S2-2a2(latch 호출)**: request store의 `recordDecisionMakerValidationLatch()`·
   `readDecisionMakerInstanceResultKinds()`·`readDecisionMakerInstanceLoad()`(이전 `readDecisionMakerThroughput()`), switch store의
-  `readDecisionMakerSwitchesWithBoundariesOrThrow()`·`readDecisionMakerCleanupLatch()`, switch core의
-  `decisionMakerSwitchReadFromRows()`, request core의 `dmValidationLatchDecision()`·`dmSwitchInputWithOwedLatch()`·
-  `dmCleanupUnknownRefusal()`, `lib/amux/decisionMakerInternalRoute.ts`의 `settleDmValidationLatch()`,
-  `app/api/internal/amux/decision-maker/cleanups/unknown/route.ts`, `lib/amux/dbBoundary.ts`의
-  `decisionMakerValidationLatch`(상한 10)·`decisionMakerCleanupUnknown`(10)·`decisionMakerTransmitIntent`(11),
-  `lib/amux/decisionMakerRetentionSweep.ts`의 첫 단계. docs/policy/amux-decision-maker.md §8의 검증 실패 연속 3건과
-  docs/policy/amux-decision-maker.md §5의 요청 디렉터리 삭제 미확인이 인스턴스를 `off`로 latch합니다. **연속은 그 인스턴스의
+  `readDecisionMakerSwitchesWithBoundariesOrThrow()`, switch core의 `decisionMakerSwitchReadFromRows()`, request core의
+  `dmValidationLatchDecision()`·`dmSwitchInputWithOwedLatch()`, `lib/amux/decisionMakerInternalRoute.ts`의
+  `settleDmValidationLatch()`, `lib/amux/dbBoundary.ts`의 `decisionMakerValidationLatch`(상한 10)·`decisionMakerTransmitIntent`(11),
+  `lib/amux/decisionMakerRetentionSweep.ts`의 첫 단계. docs/policy/amux-decision-maker.md §8의 검증 실패 연속 3건이 인스턴스를
+  `off`로 latch합니다. **연속은 그 인스턴스의
   종결 결과를 원장 순서로, 인스턴스의 가장 새 스위치 사건부터 셉니다** — 다른 종결 결과(제안·이관·시간 초과·DM 불가)가 끼면
   끊기고, 거절·unknown 결과는 세지도 끊지도 않습니다. 가장 새 사건이 시스템 latch면 아무것도 쓰지 않으므로 같은 실패열은 한 번만
   latch되고, 사람의 변경(해제 포함)부터 다시 셉니다. 경계와 결과는 DB 시계 ms로 비교하며 같은 ms의 결과는 셉니다(latch가 빨라지는
@@ -1780,16 +1778,13 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   문장을 더해 의도를 쓰지 않고 `instance_off`로 거부하면서 그 latch를 같은 트랜잭션에 씁니다(이 함수에서 쓰기가 있는 유일한
   거부). 그래서 세 번째 실패의 commit과 latch 사이에도 공급사 전송이 없습니다. 결과 route는 검증 실패 결과의 commit 뒤 별도
   경계에서 latch를 확인하고(결과 제출 트랜잭션은 이미 10문장이라 docs/policy/amux-decision-maker.md §9의 12를 넘음, 실패해도 결과
-  응답은 그대로이며 로그는 코드만), 15분 보존 sweep이 두 인스턴스를 보존 작업보다 먼저 다시 확인합니다. 이 막음은 store가 하며
-  DB trigger는 원장 삽입 때 밀린 latch를 보지 않습니다. cleanup은 broker가 부르는 내부 route이고 S2-2a와 모양이 같습니다
-  (`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409). **기록은 요청당 한 번입니다** — audit chain lock 뒤에
-  그 요청을 감사 metadata `request_id`로 이름 대는 `cleanup_latch`가 이미 있으면 아무것도 쓰지 않고 `existing`과 첫 latch를
-  돌려주므로, 응답을 잃은 재전송이나 운영자 해제 뒤 늦게 온 재전송이 인스턴스를 다시 끄지 않습니다. 기록은 그 latch
-  하나이고 `amux.decision.cleanup_unknown` 감사는 쓰지 않습니다: 감사 append가 무결성 키와 함께 4문장이라 lock·상태·확인·감사
-  둘·스위치 사건이 12, 경계 포함 14로 docs/policy/amux-decision-maker.md §9의 12를 넘습니다. 원장 사건도 쓰지 않으며 요청
-  상태로서의 `cleanup_unknown`은 원장 종류와 migration이 필요해 이 단계에 없습니다. 두 latch는 끄기만 하므로 kill switch를
-  보지 않고, 다시 켜는 것은 운영자의 `amux.decision.latch_release`뿐입니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 +
-  setup + fence이고, request unit 테스트가 그 셈을, request·body DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
+  응답은 그대로이며 로그는 코드만), 15분 보존 sweep이 두 인스턴스를 보존 작업보다 먼저 다시 확인합니다. **sweep의 latch 확인은
+  인스턴스마다 실패 경계가 따로입니다** — 한 인스턴스 확인이 실패하면 코드만 담은 구조화 로그를 남기고 세기만 하며, 다른 인스턴스
+  확인과 docs/policy/amux-decision-maker.md §10의 보존 정리(키 교체·stale 종료·본문 삭제·키 파기)는 그대로 진행합니다. 이 막음은
+  store가 하며 DB trigger는 원장 삽입 때 밀린 latch를 보지 않습니다. latch는 끄기만 하므로 kill switch를 보지 않고, 다시 켜는
+  것은 운영자의 `amux.decision.latch_release`뿐입니다. cleanup_unknown 보고는 원장 사건 종류가 필요해 migration을 갖는 별도
+  조각입니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 + setup + fence이고, request unit 테스트가 그 셈을, request·body
+  DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
 
 # AMUX 카드 표시 번호
 

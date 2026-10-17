@@ -42,11 +42,6 @@ const ROUTES = [
     "app/api/internal/amux/decision-maker/results/unknown/route.ts",
     { request_id: REQUEST_ID, instance: "decision-maker-openai", result_digest: "c".repeat(64) },
   ],
-  [
-    "cleanups/unknown",
-    "app/api/internal/amux/decision-maker/cleanups/unknown/route.ts",
-    { request_id: REQUEST_ID, instance: "decision-maker-openai" },
-  ],
 ] as const;
 
 type World = { transactionsAsked: number; storeCalls: number };
@@ -100,7 +95,6 @@ async function loadRoute(path: string): Promise<{ POST: (request: Request) => Pr
         recordDecisionMakerTransmitOutcome: unreachable,
         lookupDecisionMakerResult: unreachable,
         recordDecisionMakerResultUnknown: unreachable,
-        recordDecisionMakerCleanupUnknown: unreachable,
         recordDecisionMakerValidationLatch: unreachable,
       },
     });

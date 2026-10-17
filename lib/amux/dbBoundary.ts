@@ -415,15 +415,6 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
-  // An unconfirmed request directory, docs/policy/amux-decision-maker.md §5,
-  // latched once per request (lock, the request state, the cleanup latch
-  // already naming the request, the latch's audit 4, the switch event: 8,
-  // pinned by tests/amuxDecisionMakerRequest.test.mjs).
-  decisionMakerCleanupUnknown: {
-    operation: "decision_maker_cleanup_unknown",
-    prismaCallCeiling: 10,
-    isolation: "mutation",
-  },
   // Stage S2's judgment route: setup + a person's judgment at its largest
   // (an edited confirmation with an integrity key: the audit chain lock, the
   // request state, the switches, the proposal, the administrator audit's 4,

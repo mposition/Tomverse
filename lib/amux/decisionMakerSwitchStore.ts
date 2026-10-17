@@ -11,8 +11,6 @@ import {
   decisionMakerSwitchStateFromRows,
   dmOperatorSwitchAction,
   dmSwitchAuditMetadata,
-  isDmInstanceScope,
-  isDmSwitchLatchRequestId,
   parseDmOperatorSwitchChange,
   parseDmSwitchLatch,
   unreadableDecisionMakerSwitches,
@@ -105,46 +103,6 @@ export async function readDecisionMakerSwitchesWithBoundariesOrThrow(
     ORDER BY "scope", "sequence" DESC
   `;
   return decisionMakerSwitchReadFromRows(rows);
-}
-
-/**
- * The cleanup latch that names `requestId` -- §5's record of a request
- * directory whose deletion could not be confirmed -- in one statement, or
- * null when there is none: its switch event id and database clock. The latch
- * names the request in its own `amux.decision.latch` audit (`request_id`),
- * which the switch guard requires of the instance's own actor in the latch's
- * transaction. Read after the audit chain lock, so a report of the same
- * request in flight has committed or waits. The first one stands.
- */
-export async function readDecisionMakerCleanupLatch(
-  client: SwitchReader,
-  input: { instance: unknown; requestId: unknown },
-): Promise<{ eventId: string; createdAt: string } | null> {
-  if (!isDmInstanceScope(input.instance) || !isDmSwitchLatchRequestId(input.requestId)) {
-    throw new DecisionMakerSwitchWriteError("invalid_latch");
-  }
-  const rows = await client.$queryRaw<Array<{ id: unknown; createdAtEpochMs: unknown }>>`
-    SELECT e."id", floor(extract(epoch FROM e."createdAt") * 1000)::bigint AS "createdAtEpochMs"
-    FROM "AmuxDecisionMakerSwitchEvent" e
-    JOIN "AdminAuditLog" a ON a."id" = e."auditLogId"
-    WHERE e."scope" = ${input.instance}
-      AND e."actorKind" = 'system'
-      AND e."reasonCode" = 'cleanup_latch'
-      AND a."action" = 'amux.decision.latch'
-      AND a."metadata" ->> 'request_id' = ${input.requestId}
-    ORDER BY e."sequence"
-    LIMIT 1
-  `;
-  const row = rows[0];
-  if (!row) return null;
-  const createdAtMs =
-    typeof row.createdAtEpochMs === "bigint" || typeof row.createdAtEpochMs === "number"
-      ? Number(row.createdAtEpochMs)
-      : Number.NaN;
-  if (!isDmSwitchLatchRequestId(row.id) || !Number.isSafeInteger(createdAtMs)) {
-    throw new Error("AMUX Decision Maker cleanup latch is unreadable");
-  }
-  return { eventId: row.id, createdAt: new Date(createdAtMs).toISOString() };
 }
 
 export class DecisionMakerSwitchWriteError extends Error {
@@ -261,26 +219,18 @@ export async function recordDecisionMakerSwitchByOperator(
  * the operator then has to release it before the instance can propose again,
  * and a second cause is a second record. Whether a latch is due is the
  * caller's decision (lib/amux/decisionMakerRequestStore.ts): §8's count does
- * not latch an instance whose newest event is already a latch, and §5's
- * cleanup latch is written once per request (`readDecisionMakerCleanupLatch()`).
- * The audit comes first, under the instance's own actor, then the event naming
- * it; a latch one request caused names that request in its audit
- * (`requestId`).
+ * not latch an instance whose newest event is already a latch. The audit
+ * comes first, under the instance's own actor, then the event naming it.
  *
  * Statements: the system writer's 3 (4 with an integrity key), 1 insert --
  * 4, or 5.
  */
 export async function latchDecisionMakerInstanceOff(
   tx: Prisma.TransactionClient,
-  input: { instance: unknown; reason: unknown; requestId?: unknown },
+  input: { instance: unknown; reason: unknown },
 ): Promise<DecisionMakerSwitchEventRecord> {
   const latch = parseDmSwitchLatch(input.instance, input.reason);
   if (!latch) throw new DecisionMakerSwitchWriteError("invalid_latch");
-  let requestId: string | null = null;
-  if (input.requestId !== undefined && input.requestId !== null) {
-    if (!isDmSwitchLatchRequestId(input.requestId)) throw new DecisionMakerSwitchWriteError("invalid_latch");
-    requestId = input.requestId;
-  }
 
   const eventId = randomUUID();
   const auditLogId = await writeDecisionMakerLatchAudit(tx, {
@@ -291,7 +241,6 @@ export async function latchDecisionMakerInstanceOff(
       scope: latch.instance,
       value: "off",
       reason_code: latch.reason,
-      request_id: requestId,
     }),
   });
   const inserted = await tx.$queryRaw<InsertedRow[]>`

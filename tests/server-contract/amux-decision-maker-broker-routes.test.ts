@@ -6,12 +6,12 @@ import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
 // AMUX Decision Maker policy version 1 (docs/policy/amux-decision-maker.md),
-// sections 2, 5, 8, 9 and 10: the internal
+// sections 2, 8, 9 and 10: the internal
 // routes the bridge and the broker call after the routing -- assignment,
 // assignment discard, transmission intent, transmission outcome, result
-// submission, result lookup, result unknown and (since 2026-10-17) cleanup
-// unknown, and the validation latch check the result route runs after a
-// validation failure. Only the sync token reaches
+// submission, result lookup and result unknown -- and (since 2026-10-17) the
+// validation latch check the result route runs after a validation failure.
+// Only the sync token reaches
 // them; each stays closed until the operator enables it and then touches
 // nothing; a body outside its strict shape or size never reaches the store;
 // each runs its one store operation in its own DB boundary inside the route
@@ -370,28 +370,6 @@ const ROUTES: Route[] = [
       [{ recorded: false, reason: "not_transmitted" }, 409, "not_transmitted"],
     ],
   },
-  {
-    // §5: a request directory whose deletion the broker could not confirm.
-    name: "cleanup unknown",
-    path: "app/api/internal/amux/decision-maker/cleanups/unknown/route.ts",
-    url: "/api/internal/amux/decision-maker/cleanups/unknown",
-    boundary: "decisionMakerCleanupUnknown",
-    operation: "decision_maker_cleanup_unknown",
-    store: "recordDecisionMakerCleanupUnknown",
-    envelope: "recorded",
-    maxBodyBytes: 1_024,
-    body: { request_id: REQUEST_ID, instance: "decision-maker-openai" },
-    input: { requestId: REQUEST_ID, instance: "decision-maker-openai" },
-    keyRing: false,
-    success: { recorded: true, status: "recorded", latch: { eventId: LATCH_EVENT.eventId, createdAt: LATCH_EVENT.createdAt } },
-    // The latch's switch event; never an audit id.
-    answer: { recorded: true, status: "recorded", latch_event_id: LATCH_EVENT.eventId, created_at: LATCH_EVENT.createdAt },
-    refusals: [
-      [{ recorded: false, reason: "unknown_request" }, 404, "unknown_request"],
-      [{ recorded: false, reason: "instance_mismatch" }, 409, "instance_mismatch"],
-      [{ recorded: false, reason: "not_assigned" }, 409, "not_assigned"],
-    ],
-  },
 ];
 
 /** The latch check's own boundary, which no route above names as its own. */
@@ -459,7 +437,6 @@ async function loadRoute(route: Route): Promise<{ POST: (request: Request) => Pr
         recordDecisionMakerTransmitOutcome: fakeStore("recordDecisionMakerTransmitOutcome"),
         lookupDecisionMakerResult: fakeStore("lookupDecisionMakerResult"),
         recordDecisionMakerResultUnknown: fakeStore("recordDecisionMakerResultUnknown"),
-        recordDecisionMakerCleanupUnknown: fakeStore("recordDecisionMakerCleanupUnknown"),
         recordDecisionMakerValidationLatch: fakeLatch,
       },
     });
@@ -773,21 +750,6 @@ test("the routes write no SQL, read no switch, judge nothing and reach no worker
       path,
     );
   }
-});
-
-test("a cleanup report already latched answers existing with the first latch, as a 200", async () => {
-  const route = ROUTES.find((entry) => entry.name === "cleanup unknown")!;
-  const { POST } = await loadRoute(route);
-  reset({ storeResult: { recorded: true, status: "existing", latch: { eventId: LATCH_EVENT.eventId, createdAt: LATCH_EVENT.createdAt } } });
-  const answer = await POST(post(route, route.body));
-  assert.equal(answer.status, 200);
-  assert.deepEqual(await answer.json(), {
-    recorded: true,
-    status: "existing",
-    latch_event_id: LATCH_EVENT.eventId,
-    created_at: LATCH_EVENT.createdAt,
-  });
-  assert.deepEqual(world.boundaries, [{ operation: route.operation, inBudget: true }]);
 });
 
 test("an intent refused for an owed latch answers instance_off like any switch refusal", async () => {

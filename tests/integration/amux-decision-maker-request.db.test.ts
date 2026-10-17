@@ -27,7 +27,6 @@ import {
   lookupDecisionMakerResult,
   readDecisionMakerRequestState,
   readDecisionMakerInstanceLoad,
-  recordDecisionMakerCleanupUnknown,
   recordDecisionMakerRequest,
   recordDecisionMakerResultUnknown,
   recordDecisionMakerTransmitIntent,
@@ -1695,107 +1694,6 @@ test("§8: the latch check's boundary is the check at its largest; one call fewe
     assert.equal((await switchEventsOf(OPENAI)).length, before);
     const written = await withAmuxDbBoundary(boundary, (tx) => recordDecisionMakerValidationLatch(tx, { instance: OPENAI }));
     assert.equal(written.latched, true);
-    assert.equal((await switchEventsOf(OPENAI)).length, before + 1);
-  });
-});
-
-const cleanup = (requestId: string, instance: string = OPENAI) =>
-  prisma.$transaction((tx) => recordDecisionMakerCleanupUnknown(tx, { requestId, instance }));
-
-test("§5: an unconfirmed request directory latches its instance off once, whatever the switches say", async () => {
-  const assigned = await STATE_BUILDERS.assigned!();
-  const closed = await STATE_BUILDERS.discarded!();
-  const fresh = await insertRequest();
-
-  // A request that cannot have had a directory writes nothing.
-  const before = (await switchEventsOf(OPENAI)).length;
-  const beforeAnthropic = (await switchEventsOf(ANTHROPIC)).length;
-  assert.deepEqual(await cleanup(randomUUID()), { recorded: false, reason: "unknown_request" });
-  assert.deepEqual(await cleanup(fresh), { recorded: false, reason: "not_assigned" });
-  assert.deepEqual(await cleanup(assigned, ANTHROPIC), { recorded: false, reason: "instance_mismatch" });
-  assert.equal((await switchEventsOf(OPENAI)).length, before);
-  assert.equal((await switchEventsOf(ANTHROPIC)).length, beforeAnthropic);
-
-  // Under the kill switch too: a latch only turns an instance off.
-  await setSwitch("kill_switch", "on");
-  const recorded = await cleanup(assigned);
-  assert.ok(recorded.recorded);
-  assert.equal(recorded.status, "recorded");
-  assert.deepEqual((await readDecisionMakerSwitches(prisma)).instances, { [OPENAI]: "off", [ANTHROPIC]: "proposal" });
-  const latch = (await switchEventsOf(OPENAI)).at(-1)!;
-  assert.deepEqual([latch.value, latch.reasonCode, latch.actorKind], ["off", "cleanup_latch", "system"]);
-  // The latch is the record: its audit names the request.
-  const latchAudit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: latch.auditLogId } });
-  assert.equal(latchAudit.action, "amux.decision.latch");
-  assert.deepEqual(latchAudit.metadata, {
-    event_id: recorded.latch.eventId,
-    scope: OPENAI,
-    value: "off",
-    reason_code: "cleanup_latch",
-    request_id: assigned,
-    systemActor: "amux-decision-maker-openai",
-  });
-  // The ledger does not change: the request's state is not a cleanup state.
-  assert.deepEqual((await rowsOf(assigned)).map((row) => row.kind), ["assign"]);
-
-  // The same report again -- a lost answer, sent once more -- returns the first latch and writes nothing.
-  const latchesBefore = (await switchEventsOf(OPENAI)).length;
-  const again = await cleanup(assigned);
-  assert.ok(again.recorded);
-  assert.deepEqual([again.status, again.latch], ["existing", recorded.latch]);
-  assert.equal((await switchEventsOf(OPENAI)).length, latchesBefore);
-
-  // Another request's directory is its own record, even on an instance already latched.
-  const closedLatch = await cleanup(closed);
-  assert.ok(closedLatch.recorded);
-  assert.equal(closedLatch.status, "recorded");
-  const latches = (await switchEventsOf(OPENAI)).filter((row) => row.actorKind === "system");
-  assert.deepEqual(latches.map((row) => row.reasonCode), ["cleanup_latch", "cleanup_latch"]);
-  // The person's first change after it is the release.
-  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
-});
-
-test("§5: a report that arrives again after the operator released the latch does not turn the instance off again", async () => {
-  const assigned = await STATE_BUILDERS.assigned!();
-  const first = await cleanup(assigned);
-  assert.ok(first.recorded);
-  await pause();
-  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
-  const eventsAfterRelease = (await switchEventsOf(OPENAI)).length;
-  // A delayed resend of the same report: the first answer, and the release stands.
-  const late = await cleanup(assigned);
-  assert.ok(late.recorded);
-  assert.deepEqual([late.status, late.latch], ["existing", first.latch]);
-  assert.equal((await switchEventsOf(OPENAI)).length, eventsAfterRelease);
-  assert.equal((await readDecisionMakerSwitches(prisma)).instances[OPENAI], "proposal");
-});
-
-test("§5: two reports of one request at once latch once", async () => {
-  const assigned = await STATE_BUILDERS.assigned!();
-  const [one, two] = await Promise.all([cleanup(assigned), cleanup(assigned)]);
-  assert.ok(one.recorded && two.recorded);
-  assert.deepEqual([one.status, two.status].sort(), ["existing", "recorded"]);
-  assert.equal(one.latch.eventId, two.latch.eventId);
-  assert.equal((await switchEventsOf(OPENAI)).filter((row) => row.actorKind === "system").length, 1);
-});
-
-test("§5: the cleanup report's boundary is the report at its largest, and one call fewer writes nothing", async () => {
-  await withIntegrityKey(async () => {
-    const assigned = await STATE_BUILDERS.assigned!();
-    const boundary = AMUX_DB_BOUNDARIES.decisionMakerCleanupUnknown;
-    assert.equal(boundary.prismaCallCeiling, 10);
-    const before = (await switchEventsOf(OPENAI)).length;
-    await assert.rejects(
-      withAmuxDbBoundary({ ...boundary, prismaCallCeiling: boundary.prismaCallCeiling - 1 }, (tx) =>
-        recordDecisionMakerCleanupUnknown(tx, { requestId: assigned, instance: OPENAI }),
-      ),
-      (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
-    );
-    assert.equal((await switchEventsOf(OPENAI)).length, before);
-    const recorded = await withAmuxDbBoundary(boundary, (tx) =>
-      recordDecisionMakerCleanupUnknown(tx, { requestId: assigned, instance: OPENAI }),
-    );
-    assert.ok(recorded.recorded);
     assert.equal((await switchEventsOf(OPENAI)).length, before + 1);
   });
 });

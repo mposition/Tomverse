@@ -859,7 +859,7 @@ export const dmResultSubmissionOutcome = (
 };
 
 // ---------------------------------------------------------------------------
-// The two latches (§5, §8)
+// §8's validation latch
 // ---------------------------------------------------------------------------
 
 /** §8: this many validation failures in a row latch the instance `off`. */
@@ -927,30 +927,6 @@ export const dmSwitchInputWithOwedLatch = <T extends { killSwitch: boolean | nul
   switches: T,
   latchOwed: boolean,
 ): T => (latchOwed && switches.instanceMode !== null ? { ...switches, instanceMode: "off" } : switches);
-
-/**
- * §5: the broker could not confirm that a request's directory was deleted.
- * The record is the cleanup latch of the request's instance, whose
- * `amux.decision.latch` audit names the request; one per request. It is not a
- * ledger event: the request's state does not change.
- */
-export type DmCleanupUnknownRefusal = "instance_mismatch" | "not_assigned";
-
-/**
- * Whether a cleanup report names a request that can have had a directory:
- * the request's own instance, and assigned -- the broker makes the directory
- * only after the assignment (§2-4), so a request routed to the operator or
- * never assigned had none. Closed or not, with a result or not: a directory
- * outlives any of those, and the report is accepted after them.
- */
-export const dmCleanupUnknownRefusal = (
-  state: DmRequestState,
-  instance: DmInstanceScope,
-): DmCleanupUnknownRefusal | null => {
-  if (state.instance !== instance) return "instance_mismatch";
-  if (!state.assigned) return "not_assigned";
-  return null;
-};
 
 /** §9: what a submitter that lost a response learns from the (request, digest) pair. */
 export type DmResultLookup =

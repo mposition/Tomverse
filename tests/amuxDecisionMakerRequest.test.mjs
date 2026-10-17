@@ -41,7 +41,6 @@ import {
   DM_VALIDATION_LATCH_WINDOW,
   DM_VENDORS,
   DM_VENDOR_FOR_INSTANCE,
-  dmCleanupUnknownRefusal,
   dmEventAuditAction,
   dmEventAuditActor,
   dmEventAuditMetadata,
@@ -68,7 +67,6 @@ import {
   readDecisionMakerInstanceLoad,
   readDecisionMakerInstanceResultKinds,
   readDecisionMakerRequestState,
-  recordDecisionMakerCleanupUnknown,
   recordDecisionMakerRequest,
   recordDecisionMakerResultUnknown,
   recordDecisionMakerTransmitIntent,
@@ -1027,13 +1025,13 @@ test("one store module reads and writes both tables; nothing else in the applica
   const audit = read(AUDIT_MODULE);
   assert.equal((audit.match(/writeSystemAuditLog\(\{/g) ?? []).length, 2);
   assert.doesNotMatch(audit, /writeAdminAuditLog/);
-  // The two latches turn an instance off only through the switch store's
-  // latch: §8's check and the intent that finds a latch owed, and §5's
-  // cleanup. The ledger store never names the switch table (the switch test
-  // fails on any other reader or writer of it).
+  // §8's latch turns an instance off only through the switch store's latch:
+  // the check, and the intent that finds a latch owed. The ledger store never
+  // names the switch table (the switch test fails on any other reader or
+  // writer of it). §5's cleanup latch has no caller in this stage.
   assert.equal((store.match(/latchDecisionMakerInstanceOff\(tx, \{ instance, reason: "validation_latch" \}\)/g) ?? []).length, 2);
-  assert.equal((store.match(/latchDecisionMakerInstanceOff\(tx, \{ instance, reason: "cleanup_latch", requestId \}\)/g) ?? []).length, 1);
-  assert.equal((store.match(/latchDecisionMakerInstanceOff\(/g) ?? []).length, 3);
+  assert.equal((store.match(/latchDecisionMakerInstanceOff\(/g) ?? []).length, 2);
+  assert.doesNotMatch(store, /cleanup_latch/);
   // Nothing updates or deletes a row.
   assert.doesNotMatch(withoutComments(store), /UPDATE "AmuxDecisionMakerRequest|DELETE FROM "AmuxDecisionMakerRequest/);
 });
@@ -1082,10 +1080,8 @@ const recordingTx = ({
   throughput = { lastHour: 3n, lastDay: 7n },
   createdAtMs = NOW,
   // §8's latch: the instance's terminal results since its newest switch event
-  // (each switch row's actor and clock below), and §5's cleanup latch already
-  // naming a request.
+  // (each switch row's actor and clock below).
   resultKinds = [],
-  cleanupLatch = [],
 } = {}) => {
   const sent = [];
   const tx = {
@@ -1101,7 +1097,6 @@ const recordingTx = ({
       if (sql.includes('INSERT INTO "AmuxDecisionMakerSwitchEvent"')) {
         return Promise.resolve([{ sequence: 77n, createdAtEpochMs: BigInt(NOW + 9) }]);
       }
-      if (sql.includes('JOIN "AdminAuditLog" a')) return Promise.resolve(cleanupLatch);
       // The routing's throughput statement, which carries the result kinds too.
       if (sql.includes("count(*) FILTER")) return Promise.resolve([{ ...throughput, resultKinds }]);
       if (sql.includes('SELECT ev."resultKind"')) return Promise.resolve(resultKinds.map((resultKind) => ({ resultKind })));
@@ -1882,23 +1877,6 @@ test("§8: an owed latch is the instance off for a routing and an intent; nothin
   assert.deepEqual(dmSwitchInputWithOwedLatch({ killSwitch: null, instanceMode: null }, true), { killSwitch: null, instanceMode: null });
   assert.deepEqual(dmTransmitSwitchRefusal(dmSwitchInputWithOwedLatch(proposing, true)), "instance_off");
 });
-
-test("§5: a cleanup report names an assigned request of its own instance, open or closed", () => {
-  for (const name of ["assigned", "transmitted", "receipted", "terminal", "resultUnknown", "discarded", "staleClosed", "transmittedLate"]) {
-    assert.equal(dmCleanupUnknownRefusal(state(name), OPENAI), null, name);
-    assert.equal(dmCleanupUnknownRefusal(state(name), "decision-maker-anthropic"), "instance_mismatch", name);
-  }
-  // No assignment, no directory: the broker makes it after the assignment (§2-4).
-  for (const name of ["fresh", "assignmentLate", "stale"]) {
-    assert.equal(dmCleanupUnknownRefusal(state(name), OPENAI), "not_assigned", name);
-  }
-  // A request routed to the operator was never assigned; one from an unverified provider has no instance at all.
-  assert.equal(dmCleanupUnknownRefusal(state("operator"), OPENAI), "not_assigned");
-  const unverified = dmRequestStateFromRow(stateRow({ route: "operator", instance: null, askingProvider: "gemini" }));
-  assert.equal(dmCleanupUnknownRefusal(unverified, OPENAI), "instance_mismatch");
-});
-
-const CLEANUP_LATCH_READ = /FROM "AmuxDecisionMakerSwitchEvent" e\s+JOIN "AdminAuditLog" a ON a\."id" = e\."auditLogId"/;
 const RESULT_KINDS = /SELECT ev\."resultKind"\s+FROM "AmuxDecisionMakerRequestEvent" ev\s+WHERE ev\."kind" = 'result'\s+AND ev\."instance" = \$\s+AND ev\."createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'\s+ORDER BY ev\."sequence" DESC\s+LIMIT \$/;
 
 test("an instance's results since a boundary are one bounded statement, newest first", async () => {
@@ -1991,74 +1969,7 @@ for (const [label, key] of [
       assert.deepEqual(unset.sent[2].values, [OPENAI, 0, DM_VALIDATION_LATCH_WINDOW]);
     });
   });
-
-  test(`§5's cleanup report sends ${7 + extra} statements ${label} an integrity key: the lock, the request, the check, the latch`, async () => {
-    await withIntegrityKey(key, async () => {
-      const { tx, sent } = recordingTx({ state: STATES.terminal });
-      const recorded = await recordDecisionMakerCleanupUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI });
-      assert.equal(sent.length, 7 + extra);
-      assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12);
-      assert.deepEqual(kindsOf(sent), ["execute", "query", "query", ...auditKinds, "query"]);
-      // The chain lock first, so two reports of one request at once latch once.
-      assert.match(sent[0].sql, LOCK);
-      assert.match(sent[1].sql, /CROSS JOIN LATERAL/);
-      assert.deepEqual(sent[1].values, [null, REQUEST_ID]);
-      assert.match(sent[2].sql, CLEANUP_LATCH_READ);
-      assert.deepEqual(sent[2].values, [OPENAI, REQUEST_ID]);
-      // One audit: the latch's, naming the request. No cleanup_unknown entry beside it.
-      const audits = sent.filter((statement) => statement.kind === "create").map((statement) => statement.data);
-      assert.equal(audits.length, 1);
-      assert.equal(audits[0].action, "amux.decision.latch");
-      assert.deepEqual(audits[0].metadata, {
-        event_id: recorded.latch.eventId,
-        scope: OPENAI,
-        value: "off",
-        reason_code: "cleanup_latch",
-        request_id: REQUEST_ID,
-        systemActor: "amux-decision-maker-openai",
-      });
-      assert.deepEqual(sent.at(-1).values, [recorded.latch.eventId, OPENAI, "cleanup_latch", "audit-row-1"]);
-      assert.deepEqual(recorded, {
-        recorded: true,
-        status: "recorded",
-        latch: { eventId: recorded.latch.eventId, createdAt: new Date(NOW + 9).toISOString() },
-      });
-    });
-  });
 }
-
-test("§5's cleanup report writes nothing for an unknown request, another instance, a request never assigned, or one already latched", async () => {
-  for (const [row, instance, reason] of [
-    [null, OPENAI, "unknown_request"],
-    [STATES.assigned, "decision-maker-anthropic", "instance_mismatch"],
-    [STATES.fresh, OPENAI, "not_assigned"],
-    [STATES.operator, OPENAI, "not_assigned"],
-  ]) {
-    const { tx, sent } = recordingTx({ state: row });
-    assert.deepEqual(await recordDecisionMakerCleanupUnknown(tx, { requestId: REQUEST_ID, instance }), { recorded: false, reason });
-    assert.deepEqual(kindsOf(sent), ["execute", "query"], reason);
-  }
-  // The same report again: the first latch, and nothing written (a release since stands).
-  const first = { id: TERMINAL_EVENT_ID, createdAtEpochMs: BigInt(NOW - 5) };
-  const again = recordingTx({ state: STATES.assigned, cleanupLatch: [first] });
-  assert.deepEqual(await recordDecisionMakerCleanupUnknown(again.tx, { requestId: REQUEST_ID, instance: OPENAI }), {
-    recorded: true,
-    status: "existing",
-    latch: { eventId: TERMINAL_EVENT_ID, createdAt: new Date(NOW - 5).toISOString() },
-  });
-  assert.deepEqual(kindsOf(again.sent), ["execute", "query", "query"]);
-  // A first report latches whatever the switches say: a latch, never a read of them.
-  const { tx, sent } = recordingTx({ state: STATES.assigned, switches: [{ scope: "kill_switch", value: "on" }] });
-  assert.equal((await recordDecisionMakerCleanupUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI })).recorded, true);
-  assert.ok(!sent.some((statement) => SWITCH_READ.test(statement.sql)));
-  // A cleanup latch read it cannot understand stops the report, writing nothing.
-  const bad = recordingTx({ state: STATES.assigned, cleanupLatch: [{ id: "not-an-id", createdAtEpochMs: 1n }] });
-  await assert.rejects(
-    recordDecisionMakerCleanupUnknown(bad.tx, { requestId: REQUEST_ID, instance: OPENAI }),
-    (error) => error instanceof DecisionMakerRequestWriteError && error.code === "settings_unreadable",
-  );
-  assert.ok(!bad.sent.some((statement) => statement.kind === "create"));
-});
 
 test("§8: while a latch is owed, a routing goes to the operator as instance_off, in the routing's own statements", async () => {
   const owed = [FAILURE, FAILURE, FAILURE];
@@ -2146,38 +2057,31 @@ test("§8's latch check stops at a switch event or a result it cannot read, writ
     );
     assert.deepEqual(kindsOf(sent), ["execute", "query", "query"]);
   }
-  for (const run of [
-    (tx) => recordDecisionMakerValidationLatch(tx, { instance: "kill_switch" }),
-    (tx) => recordDecisionMakerCleanupUnknown(tx, { requestId: "request-1", instance: OPENAI }),
-    (tx) => recordDecisionMakerCleanupUnknown(tx, { requestId: REQUEST_ID, instance: "decision-maker-gemini" }),
-  ]) {
+  {
     const { tx, sent } = recordingTx();
-    await assert.rejects(run(tx), (error) => error instanceof DecisionMakerRequestWriteError && error.code === "invalid_input");
+    await assert.rejects(
+      recordDecisionMakerValidationLatch(tx, { instance: "kill_switch" }),
+      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "invalid_input",
+    );
     assert.equal(sent.length, 0);
   }
 });
 
-test("the two latches run in boundaries of their own: each at its largest, with an integrity key, plus setup and fence", async () => {
+test("the latch check runs in a boundary of its own: the check at its largest, with an integrity key, plus setup and fence", async () => {
   // A ceiling below the count refuses every call; one above it lets a statement the tests here never counted run.
   const largest = await withIntegrityKey("unit-test-integrity-key", async () => {
     const due = recordingTx({ resultKinds: [FAILURE, FAILURE, FAILURE] });
     await recordDecisionMakerValidationLatch(due.tx, { instance: OPENAI });
-    const cleanup = recordingTx({ state: STATES.assigned });
-    await recordDecisionMakerCleanupUnknown(cleanup.tx, { requestId: REQUEST_ID, instance: OPENAI });
-    return { validation: due.sent.length, cleanup: cleanup.sent.length };
+    return due.sent.length;
   });
-  assert.deepEqual(largest, { validation: 8, cleanup: 8 });
+  assert.equal(largest, 8);
   assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerValidationLatch, {
     operation: "decision_maker_validation_latch",
-    prismaCallCeiling: largest.validation + BOUNDARY_STATEMENTS,
+    prismaCallCeiling: largest + BOUNDARY_STATEMENTS,
     isolation: "mutation",
   });
-  assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerCleanupUnknown, {
-    operation: "decision_maker_cleanup_unknown",
-    prismaCallCeiling: largest.cleanup + BOUNDARY_STATEMENTS,
-    isolation: "mutation",
-  });
-  // Both within docs/policy/amux-decision-maker.md §9's 12.
+  // Within docs/policy/amux-decision-maker.md §9's 12.
   assert.ok(AMUX_DB_BOUNDARIES.decisionMakerValidationLatch.prismaCallCeiling <= 12);
-  assert.ok(AMUX_DB_BOUNDARIES.decisionMakerCleanupUnknown.prismaCallCeiling <= 12);
+  // §5's cleanup report has no route, store operation or boundary in this stage.
+  assert.equal(Object.hasOwn(AMUX_DB_BOUNDARIES, "decisionMakerCleanupUnknown"), false);
 });

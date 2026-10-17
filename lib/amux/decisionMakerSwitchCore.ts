@@ -202,17 +202,6 @@ export const parseDmSwitchLatch = (instance: unknown, reason: unknown): DmSwitch
     : null;
 
 /**
- * The request a latch names in its audit, when one request caused it -- a
- * request directory whose deletion could not be confirmed
- * (docs/policy/amux-decision-maker.md §5). The request ledger's id format: a
- * lowercase UUID, so it is also a short audit token.
- */
-const LATCH_REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-export const isDmSwitchLatchRequestId = (value: unknown): value is string =>
-  typeof value === "string" && LATCH_REQUEST_ID.test(value);
-
-/**
  * Which audit action a person's change is recorded under: the release of a
  * latch when the scope's newest event is the system's, otherwise a mode
  * change. The trigger refuses the event under any other action.
@@ -222,17 +211,13 @@ export const dmOperatorSwitchAction = (
 ): (typeof DM_SWITCH_AUDIT_ACTIONS)["mode" | "latchRelease"] =>
   newestActorKind === "system" ? DM_SWITCH_AUDIT_ACTIONS.latchRelease : DM_SWITCH_AUDIT_ACTIONS.mode;
 
-/**
- * The only keys a switch audit entry carries. No free text. `request_id` is a
- * latch's, when one request caused it (section 5's cleanup latch).
- */
+/** The only keys a switch audit entry carries. No free text. */
 export const DM_SWITCH_AUDIT_METADATA_KEYS = [
   "event_id",
   "scope",
   "value",
   "reason_code",
   "previous_value",
-  "request_id",
 ] as const;
 export type DmSwitchAuditMetadataKey = (typeof DM_SWITCH_AUDIT_METADATA_KEYS)[number];
 

@@ -12,7 +12,6 @@ import {
   DM_STALE_CLOSE_AFTER_MS,
   DM_VALIDATION_LATCH_WINDOW,
   DM_VENDOR_FOR_INSTANCE,
-  dmCleanupUnknownRefusal,
   dmEventAuditMetadata,
   dmEventRefusal,
   dmRequestAuditMetadata,
@@ -30,7 +29,6 @@ import {
   parseDmRoutingBinding,
   parseDmResultSubmission,
   parseDmTransmission,
-  type DmCleanupUnknownRefusal,
   type DmEventAttempt,
   type DmEventRefusal,
   type DmRequestRoute,
@@ -54,7 +52,6 @@ import {
 } from "@/lib/amux/decisionMakerSwitchCore";
 import {
   latchDecisionMakerInstanceOff,
-  readDecisionMakerCleanupLatch,
   readDecisionMakerSwitchesWithBoundariesOrThrow,
   type DecisionMakerSwitchEventRecord,
 } from "@/lib/amux/decisionMakerSwitchStore";
@@ -101,11 +98,13 @@ import {
  * order: the audit chain lock, the switch gate (in the triggers), then the
  * per-request or per-scope lock.
  *
- * Since 2026-10-17 it also decides the two latches that follow from the
- * ledger (§5, §8): three validation failures in a row, and a request
- * directory whose deletion the broker could not confirm. It decides on its own
- * reads and the switch store's, and turns the instance off through the switch
- * store's latch -- it never names the switch table. A latch that is owed but
+ * Since 2026-10-17 it also decides §8's validation latch, which follows from
+ * the ledger: three validation failures in a row. It decides on its own reads
+ * and the switch store's, and turns the instance off through the switch
+ * store's latch -- it never names the switch table. (§5's report of a request
+ * directory whose deletion could not be confirmed is not here: the request's
+ * `cleanup_unknown` state needs a ledger event kind, and so a migration, of
+ * its own stage.) A latch that is owed but
  * not yet written already holds the instance off for a routing and a
  * transmission intent (`dmSwitchInputWithOwedLatch()`): the switch read those
  * writers take carries each instance's newest event, and the result kinds
@@ -1111,7 +1110,7 @@ export async function staleCloseDecisionMakerRequest(
 }
 
 // ---------------------------------------------------------------------------
-// The two latches (§5, §8)
+// §8's validation latch
 // ---------------------------------------------------------------------------
 
 /**
@@ -1195,65 +1194,4 @@ export async function recordDecisionMakerValidationLatch(
   if (decision === null) throw new DecisionMakerRequestWriteError("state_unreadable");
   if (!decision.latch) return { latched: false, reason: decision.reason };
   return { latched: true, event: await latchDecisionMakerInstanceOff(tx, { instance, reason: "validation_latch" }) };
-}
-
-export type DecisionMakerCleanupUnknownWrite =
-  | {
-      recorded: true;
-      /** `recorded` by this call, or `existing`: the request's first report already latched. */
-      status: "recorded" | "existing";
-      latch: { eventId: string; createdAt: string };
-    }
-  | { recorded: false; reason: DmCleanupUnknownRefusal | "unknown_request" };
-
-/**
- * §5: the broker could not confirm that a request's directory -- the card,
- * the snapshot, the prompt and the temporary output -- was deleted. The
- * record is a cleanup latch of the request's instance whose
- * `amux.decision.latch` audit names the request; once per request. In the
- * caller's transaction, in this order: the audit chain lock; the request's
- * state; the cleanup latch already naming the request, if any -- returned as
- * `existing`, and nothing is written; then the latch (`cleanup_latch`).
- *
- * Once per request, because a report can arrive again: the broker lost the
- * answer and asks once more, or a resend was delayed. A second latch then
- * would turn off an instance the operator has released since -- reversing a
- * person's decision -- so the same report returns the first latch instead
- * (foundation principle 7: an outcome that is not known is settled by
- * looking, not by doing again). The read follows the audit chain lock, which
- * every latch takes first, so two reports of one request at once latch once.
- *
- * A first report is latched whatever the instance's switch says -- already
- * `off`, or latched for another cause or another request: each unconfirmed
- * directory is its own record, and an instance is never left on with one. A
- * latch only turns an instance off, so the kill switch is not read.
- *
- * Why the latch alone is the record, without an `amux.decision.cleanup_unknown`
- * entry beside it: each audit append is four statements with an integrity key,
- * and the lock, the state, the check, two appends and the switch event are 12
- * -- 14 with the boundary's two, over §9's 12. The latch's audit already says
- * which request and why (`reason_code: cleanup_latch`, `request_id`).
- *
- * Statements: 1 lock, 1 state read -- 2 for a refusal; 1 cleanup latch read --
- * 3 when it exists; then the latch's 4 (5 with an integrity key) -- 7, or 8.
- */
-export async function recordDecisionMakerCleanupUnknown(
-  tx: Prisma.TransactionClient,
-  input: { requestId: unknown; instance: unknown },
-): Promise<DecisionMakerCleanupUnknownWrite> {
-  const requestId = requireRequestId(input.requestId);
-  const instance = requireInstance(input.instance);
-  const state = await lockAndRead(tx, requestId);
-  if (!state) return { recorded: false, reason: "unknown_request" };
-  const refusal = dmCleanupUnknownRefusal(state, instance);
-  if (refusal) return { recorded: false, reason: refusal };
-  let existing: Awaited<ReturnType<typeof readDecisionMakerCleanupLatch>>;
-  try {
-    existing = await readDecisionMakerCleanupLatch(tx, { instance, requestId });
-  } catch {
-    throw new DecisionMakerRequestWriteError("settings_unreadable");
-  }
-  if (existing) return { recorded: true, status: "existing", latch: existing };
-  const latch = await latchDecisionMakerInstanceOff(tx, { instance, reason: "cleanup_latch", requestId });
-  return { recorded: true, status: "recorded", latch: { eventId: latch.eventId, createdAt: latch.createdAt } };
 }

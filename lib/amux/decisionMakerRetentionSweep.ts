@@ -34,7 +34,12 @@ import { DM_INSTANCE_SCOPES, type DmInstanceScope } from "@/lib/amux/decisionMak
  * route checks it once a validation failure commits, and this is the check
  * that writes a latch whose first check did not commit (the request store
  * finds any run of three since the instance's newest switch event). It comes
- * before the retention work so that a retention error cannot hold it back.
+ * before the retention work so that a retention error cannot hold it back,
+ * and it has a failure boundary of its own, per instance: a check that fails
+ * -- a switch read, a result it cannot read, a transaction -- is logged by its
+ * code and counted, and neither the other instance's check nor any retention
+ * step waits on it. An owed latch is not left to this check meanwhile: a
+ * routing and a transmission intent refuse the instance themselves.
  *
  * Every candidate is read first, in one read transaction, and each is then
  * written in a transaction of its own inside the AMUX DB boundary, by the
@@ -44,7 +49,7 @@ import { DM_INSTANCE_SCOPES, type DmInstanceScope } from "@/lib/amux/decisionMak
  * off, so no switch is read here; the latch check reads the instance's newest
  * switch event in its own store.
  *
- * An error stops the sweep where it is (foundation principle 7). Nothing is
+ * An error of the retention work stops it where it is (foundation principle 7). Nothing is
  * sent again in the same run: a write whose outcome is unknown is settled by
  * the next run's read, which no longer lists what committed (§10: "결과를
  * 모르면 다시 읽어 행이 남았는지로 확정한다"). The sweep never throws.
@@ -106,11 +111,13 @@ export const dmKeyPeriodsToDestroy = (registry: DecisionMakerDigestKeyRegistry):
     )
     .map((entry) => entry.keyPeriod);
 
-export type DmRetentionSweepStep = "validation_latch" | "read" | "rotate" | "stale_close" | "purge" | "destroy";
+export type DmRetentionSweepStep = "read" | "rotate" | "stale_close" | "purge" | "destroy";
 
 export type DecisionMakerRetentionSweepResult = {
   /** Instances §8's validation latch turned off in this run. */
   validationLatched: number;
+  /** Instances whose latch check failed in this run; each is logged by its code. */
+  validationLatchUnsettled: number;
   /** Whether the key ring could be loaded; without it no key is rotated in. */
   keyRing: "loaded" | "not_configured" | "malformed";
   keysRotated: number;
@@ -195,6 +202,7 @@ export async function runDecisionMakerRetentionSweep(
 ): Promise<DecisionMakerRetentionSweepResult> {
   const result: DecisionMakerRetentionSweepResult = {
     validationLatched: 0,
+    validationLatchUnsettled: 0,
     keyRing: "not_configured",
     keysRotated: 0,
     staleClosed: 0,
@@ -210,12 +218,26 @@ export async function runDecisionMakerRetentionSweep(
       throw new SweepStop(name, error);
     }
   };
-  try {
-    for (const instance of DM_INSTANCE_SCOPES) {
-      const written = await step("validation_latch", () => deps.validationLatch(instance));
+  // §8's latch check, one failure boundary per instance: a failed check is
+  // counted and logged by its code, and stops nothing else.
+  for (const instance of DM_INSTANCE_SCOPES) {
+    try {
+      const written = await deps.validationLatch(instance);
       if (written.latched) result.validationLatched += 1;
+    } catch (error) {
+      result.validationLatchUnsettled += 1;
+      console.warn(
+        JSON.stringify({
+          subsystem: "amux",
+          event: "decision_maker_validation_latch_check_failed",
+          instance,
+          code: errorCode(error),
+        }),
+      );
     }
+  }
 
+  try {
     const candidates = await step("read", deps.readCandidates);
 
     // No ring is the state until the operator sets AMUX_DM_DIGEST_KEYS, and
