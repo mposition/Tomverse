@@ -916,14 +916,24 @@ export const dmValidationLatchDecision = (input: {
 };
 
 /**
- * §5, §10: the broker could not confirm that a request's directory was
- * deleted. Recorded under the request's own instance as
- * `amux.decision.cleanup_unknown`, targeting the request, beside the cleanup
- * latch of that instance. It is an audit action of §10's list and not a ledger
- * event kind: the request's state does not change.
+ * §8 before the latch is written: an instance whose latch is owed is off for
+ * a routing and a transmission intent, as if the latch were already there.
+ * The latch is written by its own check (after a validation failure, by the
+ * maintenance sweep, or by the intent that finds it owed); until then this is
+ * what keeps a question from being routed to that instance and a card from
+ * being sent to its vendor. An unreadable mode stays unreadable.
  */
-export const DM_CLEANUP_UNKNOWN_AUDIT_ACTION = "amux.decision.cleanup_unknown" as const;
+export const dmSwitchInputWithOwedLatch = <T extends { killSwitch: boolean | null; instanceMode: "off" | "proposal" | null }>(
+  switches: T,
+  latchOwed: boolean,
+): T => (latchOwed && switches.instanceMode !== null ? { ...switches, instanceMode: "off" } : switches);
 
+/**
+ * §5: the broker could not confirm that a request's directory was deleted.
+ * The record is the cleanup latch of the request's instance, whose
+ * `amux.decision.latch` audit names the request; one per request. It is not a
+ * ledger event: the request's state does not change.
+ */
 export type DmCleanupUnknownRefusal = "instance_mismatch" | "not_assigned";
 
 /**

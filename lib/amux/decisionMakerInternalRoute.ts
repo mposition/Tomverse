@@ -61,10 +61,12 @@ export type DmValidationLatchSettlement = "latched" | "not_due" | "unsettled";
  * request store's validation latch, in a boundary transaction of its own --
  * the result's own transaction is already at §9's 12 statements. It never
  * changes the result's answer, which is the ledger's whatever this does. A
- * latch that could not be written is logged by its code and stays owed: the
- * check finds any run of three since the instance's newest switch event, so
- * the next one writes it -- after the instance's next validation failure, or
- * the maintenance sweep's within fifteen minutes. Never throws.
+ * latch that could not be written is logged by its code and stays owed: a
+ * routing and a transmission intent treat the instance as off while it is
+ * owed (the intent also writes it), and the check finds any run of three
+ * since the instance's newest switch event, so the next one writes it -- after
+ * the instance's next validation failure, or the maintenance sweep's within
+ * fifteen minutes. Never throws.
  */
 export const settleDmValidationLatch = async (instance: unknown): Promise<DmValidationLatchSettlement> => {
   try {
@@ -78,7 +80,11 @@ export const settleDmValidationLatch = async (instance: unknown): Promise<DmVali
   }
 };
 
-/** A refusal: nothing was written, and `reason` says why. */
+/**
+ * A refusal: the operation was not recorded, and `reason` says why. Nothing
+ * was written, but for one case: a transmission intent refused as
+ * `instance_off` for an owed §8 latch has written that latch.
+ */
 export type DmRouteRefusal = (status: number, reason: string) => Response;
 
 /** The refusal answer under one envelope key (`recorded`, `submitted`, `found`). */

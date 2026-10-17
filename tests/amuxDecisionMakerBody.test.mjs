@@ -835,7 +835,8 @@ const recordingTx = ({
       if (sql.includes('LEFT JOIN "AmuxDecisionMakerRequest" r')) {
         return Promise.resolve([{ ...ROUTING_NO_REQUEST, ...(existing ?? {}), dbNowEpochMs: BigInt(NOW) }]);
       }
-      if (sql.includes('AS "lastHour"')) return Promise.resolve([{ lastHour: 0n, lastDay: 0n }]);
+      // The routing's throughput read carries the instance's result kinds since 2026-10-17 (none here).
+      if (sql.includes('AS "lastHour"')) return Promise.resolve([{ lastHour: 0n, lastDay: 0n, resultKinds: [] }]);
       if (sql.includes('INSERT INTO "AmuxDecisionMakerResultDetail"')) {
         return Promise.resolve([{ details: registryHoldsKey ? 1n : 0n, fields: registryHoldsKey ? values[DETAIL.fields] : [] }]);
       }
@@ -858,7 +859,10 @@ const recordingTx = ({
       if (sql.includes('"holdSets"')) return Promise.resolve([retentionValues]);
       if (sql.includes('"heldRequests"')) return Promise.resolve([key]);
       if (sql.includes('AS "open"')) return Promise.resolve([{ open }]);
-      if (sql.includes("SELECT DISTINCT ON")) return Promise.resolve(switches);
+      // The ledger's switch read carries each scope's newest actor and clock (2026-10-17): a person's, a minute ago.
+      if (sql.includes("SELECT DISTINCT ON")) {
+        return Promise.resolve(switches.map((row) => ({ actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000), ...row })));
+      }
       if (sql.includes('ORDER BY re."retentionUntil"')) return Promise.resolve(candidates);
       if (sql.includes('FROM "AmuxDecisionMakerBody"')) return Promise.resolve([]);
       if (sql.includes('FROM "AmuxDecisionMakerResultDetail"')) return Promise.resolve([]);

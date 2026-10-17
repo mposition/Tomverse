@@ -22,16 +22,18 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * AMUX Decision Maker cleanup unknown (docs/policy/amux-decision-maker.md §5,
  * §10): the broker could not confirm that a request's directory -- the card,
  * the snapshot, the prompt and the temporary output -- was deleted. The
- * request store's `recordDecisionMakerCleanupUnknown()` records
- * `amux.decision.cleanup_unknown` under the request's instance and latches
- * that instance `off` in the same transaction; only the operator releases the
- * latch. A request of another instance, or one never assigned, had no
- * directory and records nothing. This route only authenticates, reads the
- * body and runs that one transaction in the route budget and its DB boundary.
+ * request store's `recordDecisionMakerCleanupUnknown()` latches the request's
+ * instance `off` with a cleanup latch whose audit names the request; only the
+ * operator releases it. A request of another instance, or one never assigned,
+ * had no directory and records nothing. This route only authenticates, reads
+ * the body and runs that one transaction in the route budget and its DB
+ * boundary.
  *
- * A report sent again records another pair; it only turns the instance off,
- * so a broker that lost this answer sends it again rather than leave the
- * instance on. The answer carries the latch's switch event, never an audit id.
+ * Once per request: the same report again -- a lost answer asked once more, or
+ * a resend that arrives late -- answers `existing` with the first latch and
+ * writes nothing, so it never turns off an instance the operator released
+ * since. A broker that lost this answer sends the same report to learn what
+ * happened. The answer carries the latch's switch event, never an audit id.
  *
  * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
@@ -67,6 +69,7 @@ export async function POST(request: Request) {
       if (!cleanup.recorded) return refused(dmReturnedRefusalStatus(cleanup.reason), cleanup.reason);
       return amuxJsonNoStore({
         recorded: true,
+        status: cleanup.status,
         latch_event_id: cleanup.latch.eventId,
         created_at: cleanup.latch.createdAt,
       });

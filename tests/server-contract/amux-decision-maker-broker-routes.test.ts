@@ -383,9 +383,9 @@ const ROUTES: Route[] = [
     body: { request_id: REQUEST_ID, instance: "decision-maker-openai" },
     input: { requestId: REQUEST_ID, instance: "decision-maker-openai" },
     keyRing: false,
-    success: { recorded: true, auditLogId: "audit-row-1", latch: LATCH_EVENT },
+    success: { recorded: true, status: "recorded", latch: { eventId: LATCH_EVENT.eventId, createdAt: LATCH_EVENT.createdAt } },
     // The latch's switch event; never an audit id.
-    answer: { recorded: true, latch_event_id: LATCH_EVENT.eventId, created_at: LATCH_EVENT.createdAt },
+    answer: { recorded: true, status: "recorded", latch_event_id: LATCH_EVENT.eventId, created_at: LATCH_EVENT.createdAt },
     refusals: [
       [{ recorded: false, reason: "unknown_request" }, 404, "unknown_request"],
       [{ recorded: false, reason: "instance_mismatch" }, 409, "instance_mismatch"],
@@ -773,6 +773,31 @@ test("the routes write no SQL, read no switch, judge nothing and reach no worker
       path,
     );
   }
+});
+
+test("a cleanup report already latched answers existing with the first latch, as a 200", async () => {
+  const route = ROUTES.find((entry) => entry.name === "cleanup unknown")!;
+  const { POST } = await loadRoute(route);
+  reset({ storeResult: { recorded: true, status: "existing", latch: { eventId: LATCH_EVENT.eventId, createdAt: LATCH_EVENT.createdAt } } });
+  const answer = await POST(post(route, route.body));
+  assert.equal(answer.status, 200);
+  assert.deepEqual(await answer.json(), {
+    recorded: true,
+    status: "existing",
+    latch_event_id: LATCH_EVENT.eventId,
+    created_at: LATCH_EVENT.createdAt,
+  });
+  assert.deepEqual(world.boundaries, [{ operation: route.operation, inBudget: true }]);
+});
+
+test("an intent refused for an owed latch answers instance_off like any switch refusal", async () => {
+  const route = ROUTES.find((entry) => entry.name === "transmission intent")!;
+  const { POST } = await loadRoute(route);
+  reset({ storeResult: { recorded: false, reason: "instance_off", latch: { ...LATCH_EVENT, resultDeadlineAt: null } } });
+  const answer = await POST(post(route, route.body));
+  assert.equal(answer.status, 409);
+  // The broker starts nothing; the answer names no switch event or audit.
+  assert.deepEqual(await answer.json(), { recorded: false, reason: "instance_off" });
 });
 
 test("a validation failure the ledger holds runs §8's latch check in a boundary of its own, and the answer stays the result's", async () => {

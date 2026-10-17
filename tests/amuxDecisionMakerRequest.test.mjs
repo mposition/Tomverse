@@ -37,7 +37,6 @@ import {
   DM_ROUTING_REFUSAL_CODES,
   DM_SNAPSHOT_STATES,
   DM_STALE_CLOSE_AFTER_MS,
-  DM_CLEANUP_UNKNOWN_AUDIT_ACTION,
   DM_VALIDATION_LATCH_THRESHOLD,
   DM_VALIDATION_LATCH_WINDOW,
   DM_VENDORS,
@@ -52,6 +51,7 @@ import {
   dmRequestStateFromRow,
   dmResultLookup,
   dmResultSubmissionOutcome,
+  dmSwitchInputWithOwedLatch,
   dmTransmitSwitchRefusal,
   dmValidationLatchDecision,
   parseDmRequestBinding,
@@ -65,9 +65,9 @@ import {
   countOpenDecisionMakerRequestsCreatedBetween,
   discardDecisionMakerAssignment,
   lookupDecisionMakerResult,
+  readDecisionMakerInstanceLoad,
   readDecisionMakerInstanceResultKinds,
   readDecisionMakerRequestState,
-  readDecisionMakerThroughput,
   recordDecisionMakerCleanupUnknown,
   recordDecisionMakerRequest,
   recordDecisionMakerResultUnknown,
@@ -1025,15 +1025,15 @@ test("one store module reads and writes both tables; nothing else in the applica
   // The store names no system actor; its audit entries come from their own module.
   assert.doesNotMatch(store, /systemActor|writeSystemAuditLog|writeAdminAuditLog/);
   const audit = read(AUDIT_MODULE);
-  // The route, each event, and since 2026-10-17 §5's cleanup_unknown.
-  assert.equal((audit.match(/writeSystemAuditLog\(\{/g) ?? []).length, 3);
+  assert.equal((audit.match(/writeSystemAuditLog\(\{/g) ?? []).length, 2);
   assert.doesNotMatch(audit, /writeAdminAuditLog/);
   // The two latches turn an instance off only through the switch store's
-  // latch; the ledger store never names the switch table (the switch test
+  // latch: §8's check and the intent that finds a latch owed, and §5's
+  // cleanup. The ledger store never names the switch table (the switch test
   // fails on any other reader or writer of it).
-  assert.match(store, /latchDecisionMakerInstanceOff\(tx, \{ instance, reason: "validation_latch" \}\)/);
-  assert.match(store, /latchDecisionMakerInstanceOff\(tx, \{ instance, reason: "cleanup_latch", requestId \}\)/);
-  assert.equal((store.match(/latchDecisionMakerInstanceOff\(/g) ?? []).length, 2);
+  assert.equal((store.match(/latchDecisionMakerInstanceOff\(tx, \{ instance, reason: "validation_latch" \}\)/g) ?? []).length, 2);
+  assert.equal((store.match(/latchDecisionMakerInstanceOff\(tx, \{ instance, reason: "cleanup_latch", requestId \}\)/g) ?? []).length, 1);
+  assert.equal((store.match(/latchDecisionMakerInstanceOff\(/g) ?? []).length, 3);
   // Nothing updates or deletes a row.
   assert.doesNotMatch(withoutComments(store), /UPDATE "AmuxDecisionMakerRequest|DELETE FROM "AmuxDecisionMakerRequest/);
 });
@@ -1081,10 +1081,11 @@ const recordingTx = ({
   failSwitchRead = false,
   throughput = { lastHour: 3n, lastDay: 7n },
   createdAtMs = NOW,
-  // §8's latch: the instance's newest switch event, and its results since.
-  newestSwitchEvent = [{ actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000) }],
-  failNewestSwitchEvent = false,
+  // §8's latch: the instance's terminal results since its newest switch event
+  // (each switch row's actor and clock below), and §5's cleanup latch already
+  // naming a request.
   resultKinds = [],
+  cleanupLatch = [],
 } = {}) => {
   const sent = [];
   const tx = {
@@ -1100,9 +1101,9 @@ const recordingTx = ({
       if (sql.includes('INSERT INTO "AmuxDecisionMakerSwitchEvent"')) {
         return Promise.resolve([{ sequence: 77n, createdAtEpochMs: BigInt(NOW + 9) }]);
       }
-      if (sql.includes('SELECT "actorKind", floor(')) {
-        return failNewestSwitchEvent ? Promise.reject(new Error("switch read failed")) : Promise.resolve(newestSwitchEvent);
-      }
+      if (sql.includes('JOIN "AdminAuditLog" a')) return Promise.resolve(cleanupLatch);
+      // The routing's throughput statement, which carries the result kinds too.
+      if (sql.includes("count(*) FILTER")) return Promise.resolve([{ ...throughput, resultKinds }]);
       if (sql.includes('SELECT ev."resultKind"')) return Promise.resolve(resultKinds.map((resultKind) => ({ resultKind })));
       if (sql.includes('INSERT INTO "AmuxDecisionMakerRequestEvent"')) {
         return Promise.resolve([{ sequence: 41n, createdAtEpochMs: BigInt(NOW + 5), resultDeadlineAtEpochMs: null }]);
@@ -1112,12 +1113,14 @@ const recordingTx = ({
       }
       if (sql.includes("CROSS JOIN LATERAL")) return Promise.resolve(row === null ? [] : [row]);
       if (sql.includes('SELECT DISTINCT ON ("scope")')) {
-        return failSwitchRead ? Promise.reject(new Error("switch read failed")) : Promise.resolve(switches);
+        // Each scope's newest event carries its actor and clock: a person's, a minute ago, unless a row says otherwise.
+        return failSwitchRead
+          ? Promise.reject(new Error("switch read failed"))
+          : Promise.resolve(switches.map((row) => ({ actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000), ...row })));
       }
       if (sql.includes('LEFT JOIN "AmuxDecisionMakerRequest" r')) {
         return Promise.resolve([existing[0] ? { dbNowEpochMs: BigInt(NOW), ...existing[0] } : { ...NO_REQUEST, dbNowEpochMs: BigInt(NOW) }]);
       }
-      if (sql.includes("count(*) FILTER")) return Promise.resolve([throughput]);
       return Promise.reject(new Error(`unexpected statement: ${sql}`));
     },
     adminAuditLog: {
@@ -1222,15 +1225,24 @@ test("stage S2's internal routes run each ledger operation in a boundary of its 
 const kindsOf = (sent) => sent.map((statement) => statement.kind);
 const auditOf = (sent) => sent.find((statement) => statement.kind === "create").data;
 const LOCK = /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/;
-const SWITCH_READ = /SELECT DISTINCT ON \("scope"\) "scope", "value"\s+FROM "AmuxDecisionMakerSwitchEvent"/;
+// The routing's throughput statement carries the instance's result kinds since its boundary (2026-10-17).
+const RESULT_KINDS_IN_LOAD = /ARRAY\(\s+SELECT ev\."resultKind"\s+FROM "AmuxDecisionMakerRequestEvent" ev\s+WHERE ev\."kind" = 'result'\s+AND ev\."instance" = \$\s+AND ev\."createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'\s+ORDER BY ev\."sequence" DESC\s+LIMIT \$\s+\) AS "resultKinds"/;
+// The ledger's switch read (since 2026-10-17 with each scope's newest actor and clock).
+const SWITCH_READ = /SELECT DISTINCT ON \("scope"\)\s+"scope", "value", "actorKind",\s+floor\(extract\(epoch FROM "createdAt"\) \* 1000\)::bigint AS "createdAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent"/;
 
 test("the reads are one statement each", async () => {
   {
     const { tx, sent } = recordingTx();
-    assert.deepEqual(await readDecisionMakerThroughput(tx, OPENAI), { lastHour: 3, lastDay: 7 });
+    assert.deepEqual(await readDecisionMakerInstanceLoad(tx, { instance: OPENAI, sinceMs: NOW - 5 }), {
+      lastHour: 3,
+      lastDay: 7,
+      resultKindsNewestFirst: [],
+    });
     assert.equal(sent.length, 1);
     assert.match(sent[0].sql, /WHERE r\."route" = 'dm_proposal'\s+AND r\."instance" = \$/);
-    assert.deepEqual(sent[0].values, [OPENAI]);
+    // The throughput and, in the same statement, the instance's newest result kinds since the boundary.
+    assert.match(sent[0].sql, RESULT_KINDS_IN_LOAD);
+    assert.deepEqual(sent[0].values, [OPENAI, OPENAI, NOW - 5, DM_VALIDATION_LATCH_WINDOW]);
   }
   {
     const { tx, sent } = recordingTx({ state: STATES.terminal });
@@ -1281,7 +1293,8 @@ for (const [label, key] of [
       assert.deepEqual(sent[1].values, ["card-41", 3]);
       assert.match(sent[2].sql, SWITCH_READ);
       assert.match(sent[3].sql, /count\(\*\) FILTER/);
-      assert.deepEqual(sent[3].values, [OPENAI]);
+      // The throughput statement carries the instance's result kinds since its newest switch event (§8).
+      assert.deepEqual(sent[3].values, [OPENAI, OPENAI, NOW - 60_000, DM_VALIDATION_LATCH_WINDOW]);
       const audit = auditOf(sent);
       assert.equal(audit.action, "amux.decision.route");
       assert.equal(audit.targetType, "AmuxDecisionMakerRequest");
@@ -1413,6 +1426,8 @@ for (const [label, key] of [
           name: "transmit_intent",
           row: STATES.assigned,
           switchRead: true,
+          // §8 (2026-10-17): the instance's results since its newest switch event, for an owed latch.
+          resultRead: true,
           run: (tx, lease) =>
             recordDecisionMakerTransmitIntent(tx, {
               requestId: REQUEST_ID,
@@ -1509,8 +1524,9 @@ for (const [label, key] of [
         const { tx, sent } = recordingTx({ state: entry.row, switches: entry.switches });
         const lease = leases();
         const result = await entry.run(tx, lease.requireLeaseAt);
-        // 6 (7) without a switch read, 7 (8) with one; 9 (10) at most with the boundary.
-        const expected = (entry.switchRead ? 7 : 6) + extra;
+        // 6 (7) without a switch read, 7 (8) with one, 8 (9) with the intent's result read too;
+        // 11 at most with the boundary.
+        const expected = (entry.switchRead ? 7 : 6) + (entry.resultRead ? 1 : 0) + extra;
         assert.equal(sent.length, expected, entry.name);
         assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12, entry.name);
         // The retention sweep closes stale requests, and stage S2's internal
@@ -1525,7 +1541,7 @@ for (const [label, key] of [
         }
         assert.deepEqual(
           kindsOf(sent),
-          ["execute", "query", ...(entry.switchRead ? ["query"] : []), ...auditKinds, "query"],
+          ["execute", "query", ...(entry.switchRead ? ["query"] : []), ...(entry.resultRead ? ["query"] : []), ...auditKinds, "query"],
           entry.name,
         );
         assert.match(sent[0].sql, LOCK, entry.name);
@@ -1533,6 +1549,10 @@ for (const [label, key] of [
         // The switches are read after the lock, by the switch store's reader.
         if (entry.switchRead) assert.match(sent[2].sql, SWITCH_READ, entry.name);
         else assert.ok(!sent.some((statement) => SWITCH_READ.test(statement.sql)), entry.name);
+        if (entry.resultRead) {
+          assert.match(sent[3].sql, RESULT_KINDS, entry.name);
+          assert.deepEqual(sent[3].values, [OPENAI, NOW - 60_000, DM_VALIDATION_LATCH_WINDOW], entry.name);
+        }
         const audit = auditOf(sent);
         const eventId = result.event?.eventId;
         assert.ok(eventId, entry.name);
@@ -1708,8 +1728,10 @@ test("the switches cannot be handed to the writers", () => {
   // one, whose unreadable state would let a writer go on in an aborted
   // transaction.
   assert.doesNotMatch(store, /killSwitch:\s*(boolean|unknown)|switches:\s*\{/);
-  assert.equal((store.match(/await readSwitchesForWrite\(tx\)/g) ?? []).length, 3);
-  assert.equal((store.match(/await readDecisionMakerSwitchesOrThrow\(tx\)/g) ?? []).length, 1);
+  // The routing, the intent, the result and §8's latch check.
+  assert.equal((store.match(/await readSwitchesForWrite\(tx\)/g) ?? []).length, 4);
+  assert.equal((store.match(/await readDecisionMakerSwitchesWithBoundariesOrThrow\(tx\)/g) ?? []).length, 1);
+  assert.doesNotMatch(store, /readDecisionMakerSwitchesOrThrow/);
   assert.doesNotMatch(store, /readDecisionMakerSwitches\(/);
 });
 
@@ -1771,7 +1793,8 @@ test("a malformed input sends nothing at all", async () => {
     (tx) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission() }),
     (tx) => recordDecisionMakerResultUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI, resultDigest: "x" }),
     (tx) => staleCloseDecisionMakerRequest(tx, { requestId: null }),
-    (tx) => readDecisionMakerThroughput(tx, "decision-maker-gemini"),
+    (tx) => readDecisionMakerInstanceLoad(tx, { instance: "decision-maker-gemini", sinceMs: null }),
+    (tx) => readDecisionMakerInstanceLoad(tx, { instance: OPENAI, sinceMs: -1 }),
     (tx) => readDecisionMakerRequestState(tx, REQUEST_ID, "x"),
   ];
   for (const [index, run] of cases.entries()) {
@@ -1850,8 +1873,17 @@ test("§8: a result kind the ledger cannot hold is unreadable, latched or not", 
   }
 });
 
+test("§8: an owed latch is the instance off for a routing and an intent; nothing else changes", () => {
+  const proposing = { killSwitch: false, instanceMode: "proposal" };
+  assert.deepEqual(dmSwitchInputWithOwedLatch(proposing, true), { killSwitch: false, instanceMode: "off" });
+  assert.equal(dmSwitchInputWithOwedLatch(proposing, false), proposing);
+  // The kill switch is the kill switch's; an unreadable mode stays unreadable (the router refuses it as such).
+  assert.deepEqual(dmSwitchInputWithOwedLatch({ killSwitch: true, instanceMode: "proposal" }, true), { killSwitch: true, instanceMode: "off" });
+  assert.deepEqual(dmSwitchInputWithOwedLatch({ killSwitch: null, instanceMode: null }, true), { killSwitch: null, instanceMode: null });
+  assert.deepEqual(dmTransmitSwitchRefusal(dmSwitchInputWithOwedLatch(proposing, true)), "instance_off");
+});
+
 test("§5: a cleanup report names an assigned request of its own instance, open or closed", () => {
-  assert.equal(DM_CLEANUP_UNKNOWN_AUDIT_ACTION, "amux.decision.cleanup_unknown");
   for (const name of ["assigned", "transmitted", "receipted", "terminal", "resultUnknown", "discarded", "staleClosed", "transmittedLate"]) {
     assert.equal(dmCleanupUnknownRefusal(state(name), OPENAI), null, name);
     assert.equal(dmCleanupUnknownRefusal(state(name), "decision-maker-anthropic"), "instance_mismatch", name);
@@ -1866,7 +1898,7 @@ test("§5: a cleanup report names an assigned request of its own instance, open 
   assert.equal(dmCleanupUnknownRefusal(unverified, OPENAI), "instance_mismatch");
 });
 
-const SWITCH_NEWEST = /SELECT "actorKind", floor\(extract\(epoch FROM "createdAt"\) \* 1000\)::bigint AS "createdAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent"/;
+const CLEANUP_LATCH_READ = /FROM "AmuxDecisionMakerSwitchEvent" e\s+JOIN "AdminAuditLog" a ON a\."id" = e\."auditLogId"/;
 const RESULT_KINDS = /SELECT ev\."resultKind"\s+FROM "AmuxDecisionMakerRequestEvent" ev\s+WHERE ev\."kind" = 'result'\s+AND ev\."instance" = \$\s+AND ev\."createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'\s+ORDER BY ev\."sequence" DESC\s+LIMIT \$/;
 
 test("an instance's results since a boundary are one bounded statement, newest first", async () => {
@@ -1908,16 +1940,14 @@ for (const [label, key] of [
 
   test(`§8's latch check sends 3 statements when nothing is due and ${7 + extra} when it latches, ${label} an integrity key`, async () => {
     await withIntegrityKey(key, async () => {
-      const boundary = { actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000) };
-      // Due: the lock, the newest switch event, the results since it, then the latch under the instance's actor.
-      const due = recordingTx({ newestSwitchEvent: [boundary], resultKinds: ["proposal", FAILURE, FAILURE, FAILURE] });
+      // Due: the lock, the switches with each instance's newest event, the results since it, then the latch under the instance's actor.
+      const due = recordingTx({ resultKinds: ["proposal", FAILURE, FAILURE, FAILURE] });
       const latched = await recordDecisionMakerValidationLatch(due.tx, { instance: "decision-maker-anthropic" });
       assert.equal(due.sent.length, 7 + extra);
       assert.ok(due.sent.length + BOUNDARY_STATEMENTS <= 12);
       assert.deepEqual(kindsOf(due.sent), ["execute", "query", "query", ...auditKinds, "query"]);
       assert.match(due.sent[0].sql, LOCK);
-      assert.match(due.sent[1].sql, SWITCH_NEWEST);
-      assert.deepEqual(due.sent[1].values, ["decision-maker-anthropic"]);
+      assert.match(due.sent[1].sql, SWITCH_READ);
       assert.match(due.sent[2].sql, RESULT_KINDS);
       // The results are counted from the newest switch event's database clock.
       assert.deepEqual(due.sent[2].values, ["decision-maker-anthropic", NOW - 60_000, DM_VALIDATION_LATCH_WINDOW]);
@@ -1938,8 +1968,17 @@ for (const [label, key] of [
 
       // Not due, or already latched: the three reads and nothing else.
       for (const [options, reason] of [
-        [{ newestSwitchEvent: [boundary], resultKinds: [FAILURE, FAILURE, "timeout", FAILURE] }, "no_streak"],
-        [{ newestSwitchEvent: [{ actorKind: "system", createdAtEpochMs: BigInt(NOW) }], resultKinds: [FAILURE, FAILURE, FAILURE] }, "already_latched"],
+        [{ resultKinds: [FAILURE, FAILURE, "timeout", FAILURE] }, "no_streak"],
+        [
+          {
+            switches: [
+              { scope: "kill_switch", value: "off" },
+              { scope: OPENAI, value: "off", actorKind: "system", createdAtEpochMs: BigInt(NOW) },
+            ],
+            resultKinds: [FAILURE, FAILURE, FAILURE],
+          },
+          "already_latched",
+        ],
       ]) {
         const { tx, sent } = recordingTx(options);
         assert.deepEqual(await recordDecisionMakerValidationLatch(tx, { instance: OPENAI }), { latched: false, reason });
@@ -1947,32 +1986,30 @@ for (const [label, key] of [
         assert.ok(!sent.some((statement) => statement.kind === "create"));
       }
       // With no switch event the count starts at the epoch.
-      const unset = recordingTx({ newestSwitchEvent: [], resultKinds: [FAILURE, FAILURE, FAILURE] });
+      const unset = recordingTx({ switches: [{ scope: "kill_switch", value: "off" }], resultKinds: [FAILURE, FAILURE, FAILURE] });
       assert.equal((await recordDecisionMakerValidationLatch(unset.tx, { instance: OPENAI })).latched, true);
       assert.deepEqual(unset.sent[2].values, [OPENAI, 0, DM_VALIDATION_LATCH_WINDOW]);
     });
   });
 
-  test(`§5's cleanup report sends ${8 + 2 * extra} statements ${label} an integrity key: the request, its audit, the latch`, async () => {
+  test(`§5's cleanup report sends ${7 + extra} statements ${label} an integrity key: the lock, the request, the check, the latch`, async () => {
     await withIntegrityKey(key, async () => {
       const { tx, sent } = recordingTx({ state: STATES.terminal });
       const recorded = await recordDecisionMakerCleanupUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI });
-      assert.equal(sent.length, 8 + 2 * extra);
-      // With the boundary's setup and fence, at most §9's 12 -- exactly 12 with an integrity key.
+      assert.equal(sent.length, 7 + extra);
       assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12);
-      assert.deepEqual(kindsOf(sent), ["query", ...auditKinds, ...auditKinds, "query"]);
-      // The state read first; the first audit append then takes the chain lock.
-      assert.match(sent[0].sql, /CROSS JOIN LATERAL/);
-      assert.deepEqual(sent[0].values, [null, REQUEST_ID]);
-      assert.match(sent[1].sql, LOCK);
-      const [cleanup, latch] = sent.filter((statement) => statement.kind === "create").map((statement) => statement.data);
-      assert.equal(cleanup.action, "amux.decision.cleanup_unknown");
-      assert.equal(cleanup.targetType, "AmuxDecisionMakerRequest");
-      assert.equal(cleanup.targetId, REQUEST_ID);
-      assert.equal(cleanup.actorUserId, null);
-      assert.deepEqual(cleanup.metadata, { request_id: REQUEST_ID, instance: OPENAI, systemActor: "amux-decision-maker-openai" });
-      assert.equal(latch.action, "amux.decision.latch");
-      assert.deepEqual(latch.metadata, {
+      assert.deepEqual(kindsOf(sent), ["execute", "query", "query", ...auditKinds, "query"]);
+      // The chain lock first, so two reports of one request at once latch once.
+      assert.match(sent[0].sql, LOCK);
+      assert.match(sent[1].sql, /CROSS JOIN LATERAL/);
+      assert.deepEqual(sent[1].values, [null, REQUEST_ID]);
+      assert.match(sent[2].sql, CLEANUP_LATCH_READ);
+      assert.deepEqual(sent[2].values, [OPENAI, REQUEST_ID]);
+      // One audit: the latch's, naming the request. No cleanup_unknown entry beside it.
+      const audits = sent.filter((statement) => statement.kind === "create").map((statement) => statement.data);
+      assert.equal(audits.length, 1);
+      assert.equal(audits[0].action, "amux.decision.latch");
+      assert.deepEqual(audits[0].metadata, {
         event_id: recorded.latch.eventId,
         scope: OPENAI,
         value: "off",
@@ -1981,13 +2018,16 @@ for (const [label, key] of [
         systemActor: "amux-decision-maker-openai",
       });
       assert.deepEqual(sent.at(-1).values, [recorded.latch.eventId, OPENAI, "cleanup_latch", "audit-row-1"]);
-      assert.equal(recorded.recorded, true);
-      assert.equal(recorded.auditLogId, "audit-row-1");
+      assert.deepEqual(recorded, {
+        recorded: true,
+        status: "recorded",
+        latch: { eventId: recorded.latch.eventId, createdAt: new Date(NOW + 9).toISOString() },
+      });
     });
   });
 }
 
-test("§5's cleanup report writes nothing for an unknown request, another instance or a request never assigned", async () => {
+test("§5's cleanup report writes nothing for an unknown request, another instance, a request never assigned, or one already latched", async () => {
   for (const [row, instance, reason] of [
     [null, OPENAI, "unknown_request"],
     [STATES.assigned, "decision-maker-anthropic", "instance_mismatch"],
@@ -1996,17 +2036,94 @@ test("§5's cleanup report writes nothing for an unknown request, another instan
   ]) {
     const { tx, sent } = recordingTx({ state: row });
     assert.deepEqual(await recordDecisionMakerCleanupUnknown(tx, { requestId: REQUEST_ID, instance }), { recorded: false, reason });
-    assert.deepEqual(kindsOf(sent), ["query"], reason);
+    assert.deepEqual(kindsOf(sent), ["execute", "query"], reason);
   }
-  // The latch is written whatever the switches say: a latch, never a read of them.
+  // The same report again: the first latch, and nothing written (a release since stands).
+  const first = { id: TERMINAL_EVENT_ID, createdAtEpochMs: BigInt(NOW - 5) };
+  const again = recordingTx({ state: STATES.assigned, cleanupLatch: [first] });
+  assert.deepEqual(await recordDecisionMakerCleanupUnknown(again.tx, { requestId: REQUEST_ID, instance: OPENAI }), {
+    recorded: true,
+    status: "existing",
+    latch: { eventId: TERMINAL_EVENT_ID, createdAt: new Date(NOW - 5).toISOString() },
+  });
+  assert.deepEqual(kindsOf(again.sent), ["execute", "query", "query"]);
+  // A first report latches whatever the switches say: a latch, never a read of them.
   const { tx, sent } = recordingTx({ state: STATES.assigned, switches: [{ scope: "kill_switch", value: "on" }] });
   assert.equal((await recordDecisionMakerCleanupUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI })).recorded, true);
   assert.ok(!sent.some((statement) => SWITCH_READ.test(statement.sql)));
+  // A cleanup latch read it cannot understand stops the report, writing nothing.
+  const bad = recordingTx({ state: STATES.assigned, cleanupLatch: [{ id: "not-an-id", createdAtEpochMs: 1n }] });
+  await assert.rejects(
+    recordDecisionMakerCleanupUnknown(bad.tx, { requestId: REQUEST_ID, instance: OPENAI }),
+    (error) => error instanceof DecisionMakerRequestWriteError && error.code === "settings_unreadable",
+  );
+  assert.ok(!bad.sent.some((statement) => statement.kind === "create"));
 });
+
+test("§8: while a latch is owed, a routing goes to the operator as instance_off, in the routing's own statements", async () => {
+  const owed = [FAILURE, FAILURE, FAILURE];
+  const routing = recordingTx({ resultKinds: owed });
+  const routed = await recordDecisionMakerRequest(routing.tx, { binding: routingBinding(), card: routedCard(), keyRing: RING });
+  assert.deepEqual([routed.route, routed.instance, routed.refusalCodes], ["operator", OPENAI, ["instance_off"]]);
+  // Nothing more than any routing: the result kinds ride in the throughput statement.
+  assert.deepEqual(kindsOf(routing.sent).slice(0, 4), ["execute", "query", "query", "query"]);
+  assert.match(routing.sent[3].sql, RESULT_KINDS_IN_LOAD);
+  // A run broken later is still owed; a run that is not three is not.
+  for (const [resultKinds, switches, route] of [
+    [["proposal", FAILURE, FAILURE, FAILURE], undefined, "operator"],
+    [[FAILURE, FAILURE, "proposal", FAILURE], undefined, "dm_proposal"],
+  ]) {
+    const { tx } = recordingTx({ resultKinds, switches });
+    assert.equal((await recordDecisionMakerRequest(tx, { binding: routingBinding(), card: routedCard(), keyRing: RING })).route, route);
+  }
+  // A result kind the ledger could not hold writes nothing.
+  const unreadable = recordingTx({ resultKinds: [FAILURE, "autonomous"] });
+  await assert.rejects(
+    recordDecisionMakerRequest(unreadable.tx, { binding: routingBinding(), card: routedCard(), keyRing: RING }),
+    (error) => error instanceof DecisionMakerRequestWriteError && error.code === "state_unreadable",
+  );
+  assert.ok(!unreadable.sent.some((statement) => statement.kind === "create"));
+});
+
+for (const [label, key] of [
+  ["without", null],
+  ["with", "unit-test-integrity-key"],
+]) {
+  const extra = key === null ? 0 : WITH_KEY;
+  const auditKinds = key === null ? ["execute", "query", "create"] : ["execute", "query", "findFirst", "create"];
+  test(`§8: while a latch is owed, an intent is refused as instance_off and writes the latch, in ${8 + extra} statements ${label} an integrity key`, async () => {
+    await withIntegrityKey(key, async () => {
+      const lease = leases();
+      const { tx, sent } = recordingTx({ state: STATES.assigned, resultKinds: [FAILURE, FAILURE, FAILURE] });
+      const refused = await recordDecisionMakerTransmitIntent(tx, {
+        requestId: REQUEST_ID,
+        instance: OPENAI,
+        transmission: { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B },
+        requireLeaseAt: lease.requireLeaseAt,
+      });
+      assert.equal(sent.length, 8 + extra);
+      assert.ok(sent.length + BOUNDARY_STATEMENTS <= AMUX_DB_BOUNDARIES.decisionMakerTransmitIntent.prismaCallCeiling);
+      assert.deepEqual(kindsOf(sent), ["execute", "query", "query", "query", ...auditKinds, "query"]);
+      assert.match(sent[2].sql, SWITCH_READ);
+      assert.match(sent[3].sql, RESULT_KINDS);
+      // No intent: the one write is the owed latch, under the instance's own actor.
+      assert.ok(!sent.some((statement) => statement.sql?.includes('INSERT INTO "AmuxDecisionMakerRequestEvent"')));
+      assert.match(sent.at(-1).sql, /INSERT INTO "AmuxDecisionMakerSwitchEvent"/);
+      const audit = auditOf(sent);
+      assert.equal(audit.action, "amux.decision.latch");
+      assert.equal(audit.metadata.reason_code, "validation_latch");
+      assert.equal(audit.metadata.systemActor, "amux-decision-maker-openai");
+      assert.equal(refused.recorded, false);
+      assert.equal(refused.reason, "instance_off");
+      assert.equal(refused.latch?.eventId, audit.metadata.event_id);
+      assert.deepEqual(lease.seen, []);
+    });
+  });
+}
 
 test("§8's latch check stops at a switch event or a result it cannot read, writing nothing", async () => {
   {
-    const { tx, sent } = recordingTx({ failNewestSwitchEvent: true });
+    const { tx, sent } = recordingTx({ failSwitchRead: true });
     await assert.rejects(
       recordDecisionMakerValidationLatch(tx, { instance: OPENAI }),
       (error) => error instanceof DecisionMakerRequestWriteError && error.code === "settings_unreadable",
@@ -2014,7 +2131,7 @@ test("§8's latch check stops at a switch event or a result it cannot read, writ
     assert.deepEqual(kindsOf(sent), ["execute", "query"]);
   }
   {
-    const { tx, sent } = recordingTx({ newestSwitchEvent: [{ actorKind: "operator", createdAtEpochMs: 1n }] });
+    const { tx, sent } = recordingTx({ switches: [{ scope: OPENAI, value: "proposal", actorKind: "operator" }] });
     await assert.rejects(
       recordDecisionMakerValidationLatch(tx, { instance: OPENAI }),
       (error) => error instanceof DecisionMakerRequestWriteError && error.code === "settings_unreadable",
@@ -2049,7 +2166,7 @@ test("the two latches run in boundaries of their own: each at its largest, with 
     await recordDecisionMakerCleanupUnknown(cleanup.tx, { requestId: REQUEST_ID, instance: OPENAI });
     return { validation: due.sent.length, cleanup: cleanup.sent.length };
   });
-  assert.deepEqual(largest, { validation: 8, cleanup: 10 });
+  assert.deepEqual(largest, { validation: 8, cleanup: 8 });
   assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerValidationLatch, {
     operation: "decision_maker_validation_latch",
     prismaCallCeiling: largest.validation + BOUNDARY_STATEMENTS,

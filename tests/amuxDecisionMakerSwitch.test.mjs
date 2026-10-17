@@ -33,6 +33,7 @@ import {
   DM_SWITCH_REASON_CODES,
   DM_SWITCH_SCOPES,
   DM_SWITCH_VALUES,
+  decisionMakerSwitchReadFromRows,
   decisionMakerSwitchStateFromRows,
   defaultDecisionMakerSwitches,
   dmOperatorSwitchAction,
@@ -46,9 +47,10 @@ import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
 import {
   DecisionMakerSwitchWriteError,
   latchDecisionMakerInstanceOff,
-  readDecisionMakerInstanceNewestEvent,
+  readDecisionMakerCleanupLatch,
   readDecisionMakerSwitches,
   readDecisionMakerSwitchesOrThrow,
+  readDecisionMakerSwitchesWithBoundariesOrThrow,
   recordDecisionMakerSwitchByOperator,
 } from "../lib/amux/decisionMakerSwitchStore.ts";
 
@@ -414,7 +416,7 @@ test("one store module reads and writes the table; nothing else in the applicati
 // Statements per operation (§9: 12 at most, pinned exactly)
 // ---------------------------------------------------------------------------
 
-const recordingTx = ({ newest = [], newestAt = [], failRead = false } = {}) => {
+const recordingTx = ({ newest = [], boundaryRows = [], cleanupRows = [], failRead = false } = {}) => {
   const sent = [];
   const tx = {
     $executeRaw: (strings, ...values) => {
@@ -430,7 +432,8 @@ const recordingTx = ({ newest = [], newestAt = [], failRead = false } = {}) => {
         return Promise.resolve([{ sequence: 41n, createdAtEpochMs: 1_790_000_000_000n }]);
       }
       if (sql.includes('SELECT "actorKind", "value"')) return Promise.resolve(newest);
-      if (sql.includes('SELECT "actorKind", floor(')) return Promise.resolve(newestAt);
+      if (sql.includes('JOIN "AdminAuditLog" a')) return Promise.resolve(cleanupRows);
+      if (sql.includes("DISTINCT ON") && sql.includes('"createdAtEpochMs"')) return Promise.resolve(boundaryRows);
       if (sql.includes("DISTINCT ON")) return Promise.resolve([{ scope: "decision-maker-openai", value: "proposal" }]);
       return Promise.reject(new Error(`unexpected statement: ${sql}`));
     },
@@ -669,38 +672,85 @@ test("a latch one request caused names it in its audit, and its statements are t
   }
 });
 
-test("an instance's newest event is one statement: its actor and its database clock, or null", async () => {
+const at = (row, createdAtEpochMs = 1_790_000_000_123n, actorKind = "human") => ({ actorKind, createdAtEpochMs, ...row });
+
+test("the ledger's switch read is the state and each instance's newest actor and clock, from one statement", async () => {
+  const { tx, sent } = recordingTx({
+    boundaryRows: [
+      at({ scope: "kill_switch", value: "off" }, 1n),
+      at({ scope: "decision-maker-openai", value: "off" }, 1_790_000_000_123n, "system"),
+      at({ scope: "decision-maker-anthropic", value: "proposal" }, 1_790_000_000_456n),
+    ],
+  });
+  assert.deepEqual(await readDecisionMakerSwitchesWithBoundariesOrThrow(tx), {
+    state: { killSwitch: false, instances: { "decision-maker-openai": "off", "decision-maker-anthropic": "proposal" } },
+    newest: {
+      "decision-maker-openai": { actorKind: "system", createdAtMs: 1_790_000_000_123 },
+      "decision-maker-anthropic": { actorKind: "human", createdAtMs: 1_790_000_000_456 },
+    },
+  });
+  assert.equal(sent.length, 1);
+  assert.match(
+    sent[0].sql,
+    /SELECT DISTINCT ON \("scope"\)\s+"scope", "value", "actorKind",\s+floor\(extract\(epoch FROM "createdAt"\) \* 1000\)::bigint AS "createdAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+ORDER BY "scope", "sequence" DESC/,
+  );
+  // A failed statement is not caught: it has aborted the caller's transaction.
+  await assert.rejects(readDecisionMakerSwitchesWithBoundariesOrThrow(recordingTx({ failRead: true }).tx), /relation does not exist/);
+});
+
+test("an instance with no event has no boundary; a row the CHECKs could not have produced makes the whole read unreadable", () => {
+  assert.deepEqual(decisionMakerSwitchReadFromRows([]), {
+    state: { killSwitch: false, instances: { "decision-maker-openai": "off", "decision-maker-anthropic": "off" } },
+    newest: { "decision-maker-openai": null, "decision-maker-anthropic": null },
+  });
+  const unreadable = { state: unreadableDecisionMakerSwitches(), newest: { "decision-maker-openai": null, "decision-maker-anthropic": null } };
+  for (const rows of [
+    null,
+    [{ scope: "decision-maker-openai", value: "proposal" }],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, 1n, "operator")],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, "1")],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, 2n ** 60n)],
+    // A bad state row is unreadable whatever its clock.
+    [at({ scope: "decision-maker-openai", value: "autonomous" })],
+    // And one bad boundary spoils a good state.
+    [at({ scope: "kill_switch", value: "off" }), at({ scope: "decision-maker-anthropic", value: "proposal" }, 1n, "robot")],
+  ]) {
+    assert.deepEqual(decisionMakerSwitchReadFromRows(rows), unreadable, JSON.stringify(rows, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  }
+});
+
+test("the cleanup latch naming a request is one statement over the latch and its audit, or null", async () => {
+  const REQUEST = "11111111-2222-4333-8444-555555555555";
+  const EVENT = "99999999-2222-4333-8444-555555555555";
   {
-    const { tx, sent } = recordingTx({ newestAt: [{ actorKind: "system", createdAtEpochMs: 1_790_000_000_123n }] });
-    assert.deepEqual(await readDecisionMakerInstanceNewestEvent(tx, "decision-maker-anthropic"), {
-      actorKind: "system",
-      createdAtMs: 1_790_000_000_123,
+    const { tx, sent } = recordingTx({ cleanupRows: [{ id: EVENT, createdAtEpochMs: 1_790_000_000_123n }] });
+    assert.deepEqual(await readDecisionMakerCleanupLatch(tx, { instance: "decision-maker-openai", requestId: REQUEST }), {
+      eventId: EVENT,
+      createdAt: new Date(1_790_000_000_123).toISOString(),
     });
     assert.equal(sent.length, 1);
     assert.match(
       sent[0].sql,
-      /SELECT "actorKind", floor\(extract\(epoch FROM "createdAt"\) \* 1000\)::bigint AS "createdAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+WHERE "scope" = \$\s+ORDER BY "sequence" DESC\s+LIMIT 1/,
+      /FROM "AmuxDecisionMakerSwitchEvent" e\s+JOIN "AdminAuditLog" a ON a\."id" = e\."auditLogId"\s+WHERE e\."scope" = \$\s+AND e\."actorKind" = 'system'\s+AND e\."reasonCode" = 'cleanup_latch'\s+AND a\."action" = 'amux\.decision\.latch'\s+AND a\."metadata" ->> 'request_id' = \$\s+ORDER BY e\."sequence"\s+LIMIT 1/,
     );
-    assert.deepEqual(sent[0].values, ["decision-maker-anthropic"]);
+    assert.deepEqual(sent[0].values, ["decision-maker-openai", REQUEST]);
+    // It only reads.
+    assert.doesNotMatch(sent[0].sql, /INSERT|UPDATE|DELETE/);
   }
-  {
-    const { tx } = recordingTx({ newestAt: [] });
-    assert.equal(await readDecisionMakerInstanceNewestEvent(tx, "decision-maker-openai"), null);
+  assert.equal(await readDecisionMakerCleanupLatch(recordingTx().tx, { instance: "decision-maker-openai", requestId: REQUEST }), null);
+  for (const row of [{ id: "e", createdAtEpochMs: 1n }, { id: EVENT, createdAtEpochMs: "1" }]) {
+    await assert.rejects(
+      readDecisionMakerCleanupLatch(recordingTx({ cleanupRows: [row] }).tx, { instance: "decision-maker-openai", requestId: REQUEST }),
+      /unreadable/,
+    );
   }
-  // A row the CHECKs could not have produced is not decided on.
-  for (const row of [
-    { actorKind: "operator", createdAtEpochMs: 1n },
-    { actorKind: "human", createdAtEpochMs: "1" },
-    { actorKind: "human", createdAtEpochMs: 2n ** 60n },
+  for (const input of [
+    { instance: "kill_switch", requestId: REQUEST },
+    { instance: "decision-maker-openai", requestId: "request-1" },
   ]) {
-    const { tx } = recordingTx({ newestAt: [row] });
-    await assert.rejects(readDecisionMakerInstanceNewestEvent(tx, "decision-maker-openai"), /unreadable/, JSON.stringify(row, (_, v) => String(v)));
-  }
-  // Only an instance has a latch boundary; nothing is sent for anything else.
-  for (const scope of ["kill_switch", "decision-maker-gemini", null]) {
     const { tx, sent } = recordingTx();
     await assert.rejects(
-      readDecisionMakerInstanceNewestEvent(tx, scope),
+      readDecisionMakerCleanupLatch(tx, input),
       (error) => error instanceof DecisionMakerSwitchWriteError && error.code === "invalid_latch",
     );
     assert.equal(sent.length, 0);

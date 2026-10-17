@@ -1985,10 +1985,18 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerSwitchStore.ts",
     table: "AmuxDecisionMakerSwitchEvent",
-    tableMentions: 5,
+    tableMentions: 6,
     writeVerbs: 3,
     reason:
-      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is three constant SELECTs (the newest event of every scope, of one scope for a person's change, and -- since 2026-10-17 -- one instance's newest actor and clock, the boundary section 8's validation latch counts from) and two constant INSERT ... RETURNING statements, a person's event and a latch; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is four constant SELECTs (the newest event of every scope; of one scope for a person's change; since 2026-10-17 the newest event of every scope with its actor and clock, which the request ledger's writers read for the boundary section 8's validation count starts from; and the cleanup latch already naming a request, joined to its audit row) and two constant INSERT ... RETURNING statements, a person's event and a latch; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+  },
+  {
+    path: "lib/amux/decisionMakerSwitchStore.ts",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "One constant SELECT joins a cleanup latch to its own AdminAuditLog row (a.\"id\" = e.\"auditLogId\") and reads the row's action and metadata ->> 'request_id', so section 5's report of one request latches once (docs/policy/amux-decision-maker.md §5, added 2026-10-17); every value is a bound parameter. The file's three write verbs are the switch event INSERTs and the word in the error raised when an insert returns no row, none of them on the audit table. It writes the audit log only through writeAdminAuditLog and lib/amux/decisionMakerSwitchSystemAudit.ts.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
@@ -2049,10 +2057,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
     table: "AmuxDecisionMakerRequestEvent",
-    tableMentions: 7,
+    tableMentions: 8,
     writeVerbs: 4,
     reason:
-      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08; a judgment's closing kinds since S1e), in the stale-close candidates' NOT EXISTS over the same closing kinds (S1g, 2026-10-12), in the proposal timeline of section 4's report (S1e), in the events of Admin's newest requests (S2, 2026-10-13), in one instance's newest terminal result kinds, a bounded SELECT section 8's validation latch counts (2026-10-17), and in its one constant INSERT ... RETURNING of an event; every value is a bound parameter. It never updates or deletes an event; a judgment's closing event is written by the judgment table's trigger.",
+      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08; a judgment's closing kinds since S1e), in the stale-close candidates' NOT EXISTS over the same closing kinds (S1g, 2026-10-12), in the proposal timeline of section 4's report (S1e), in the events of Admin's newest requests (S2, 2026-10-13), in one instance's newest terminal result kinds -- a bounded SELECT section 8's validation latch counts, read on its own and inside the routing's throughput SELECT (2026-10-17) -- and in its one constant INSERT ... RETURNING of an event; every value is a bound parameter. It never updates or deletes an event; a judgment's closing event is written by the judgment table's trigger.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
