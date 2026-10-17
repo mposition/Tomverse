@@ -1748,7 +1748,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `app/api/internal/amux/decision-maker/results/route.ts`, `app/api/internal/amux/decision-maker/results/lookup/route.ts`,
   `app/api/internal/amux/decision-maker/results/unknown/route.ts`, `lib/amux/decisionMakerInternalRoute.ts`,
   `lib/amux/dbBoundary.ts`의 `decisionMakerAssignment`(상한 11)·`decisionMakerAssignmentDiscard`(9)·
-  `decisionMakerTransmitIntent`(11, S2-2b에서 10에서 올림)·`decisionMakerTransmitOutcome`(9)·`decisionMakerResultSubmission`(12)·
+  `decisionMakerTransmitIntent`(11, S2-2a2에서 10에서 올림)·`decisionMakerTransmitOutcome`(9)·`decisionMakerResultSubmission`(12)·
   `decisionMakerResultLookupRead`(3)·`decisionMakerResultUnknown`(9),
   `tests/server-contract/amux-decision-maker-broker-routes.test.ts`,
   `tests/server-contract/amux-decision-maker-broker-routes-budget.test.ts`. 라우팅 뒤에 bridge·broker가 부르는 원장 기록
@@ -1762,7 +1762,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   확인하지 못하면 `results/unknown`입니다. **경계 상한은 각 store 연산의 무결성 키 포함 최대 문장 수 + setup + fence**이고,
   request·body unit 테스트가 그 셈을, body DB 테스트가 하나 줄인 상한의 거부를 고정합니다. 전달·판정 route와 worker에게 가는
   경로는 없습니다.
-- **S2-2b(latch 호출)**: request store의 `recordDecisionMakerValidationLatch()`·`recordDecisionMakerCleanupUnknown()`·
+- **S2-2a2(latch 호출)**: request store의 `recordDecisionMakerValidationLatch()`·`recordDecisionMakerCleanupUnknown()`·
   `readDecisionMakerInstanceResultKinds()`·`readDecisionMakerInstanceLoad()`(이전 `readDecisionMakerThroughput()`), switch store의
   `readDecisionMakerSwitchesWithBoundariesOrThrow()`·`readDecisionMakerCleanupLatch()`, switch core의
   `decisionMakerSwitchReadFromRows()`, request core의 `dmValidationLatchDecision()`·`dmSwitchInputWithOwedLatch()`·
