@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn as realSpawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import * as realFs from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,6 +8,7 @@ import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
+import { verifyAmuxV4StagedCliBinary } from "../../lib/amux/ideaLocalSandboxArgs.mjs";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
@@ -65,7 +67,10 @@ mock.module(mod("lib/amux/ideaLocalApprovedCliCatalog.mjs"), {
 mock.module(mod("lib/amux/ideaLocalIsolatedCliRunner.mjs"), {
   namedExports: { stageAmuxV19ClaudeCli: async (path) => {
     stageCount += 1;
-    return { path, sha256: "a".repeat(64),
+    const binary = Buffer.from("synthetic staged CLI");
+    await realFs.writeFile(path, binary, { mode: 0o500 });
+    await realFs.chmod(path, 0o500);
+    return { path, sha256: createHash("sha256").update(binary).digest("hex"),
       authPath: "/tmp/synthetic-auth" };
   } },
 });
@@ -79,6 +84,7 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutSandbox.mjs"), {
   namedExports: { verifiedAmuxTrackedCheckoutSandbox: async (input) => {
     sandboxCount += 1;
     sandboxInput = input;
+    await verifyAmuxV4StagedCliBinary(input.cliMount);
     return [];
   } },
 });
