@@ -1475,6 +1475,16 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   같은 run의 draft용이고 닫혀 있으며 아직 소비되지 않았거나 이 제출이 소비했을 때만 받고, 같은 트랜잭션에서 소비를
   기록합니다. 응답을 잃은 생성기는 서명된 같은 제출을 그대로 다시 보냅니다(deadline이 다르면 다른 제출이라 conflict).
   예산 reader는 이제 "상한을 읽을 수 있다"이고, 월 상한으로 막는 것은 예약입니다.
+- **S3f-R1(경쟁사 등록부)**: `lib/marketingCompetitorCore.ts`, `lib/marketingCompetitorStore.ts`,
+  `prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql`, `tests/marketingCompetitorCore.test.mjs`,
+  `tests/integration/marketing-competitor-registry.db.test.ts`(운영자 결정 2026-10-17: 경쟁사는 상수가 아니라 DB 등록부와
+  사람의 승인). **A3는 제안만 하고 사람이 정합니다** — 제안은 `marketing-generator`의
+  `marketing_competitor.proposed` 감사와 함께 `proposed`로 들어가고, 이미 있는 id는 그대로 둡니다(거절을 다시 여는
+  제안 없음). 승인·거절·은퇴·추가는 사람의 감사 행이 있어야 하며, `MarketingCompetitor_write_guard`가 그 행의
+  action·대상·actor·`previousDecisionAuditLogId`(없으면 `':none'`)와 **승인이면 이름과 host까지** 대조합니다. 화면이
+  본 결정과 현재 결정이 다르면 `competitor_decision_conflict`입니다. 행은 지우지 않고 은퇴시킵니다. migration은 시장
+  분석의 11개를 `seed` 제안으로만 넣으며 아무것도 승인하지 않습니다. route·Admin 화면·사실 필터 연결은 아직 없습니다
+  (`MARKETING_COMPETITOR_SOURCE_HOSTS`는 R2가 DB 읽기로 바꿉니다).
 
 # 엔지니어링 Agent
 
