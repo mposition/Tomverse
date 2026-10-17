@@ -183,6 +183,11 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 26,
     isolation: "mutation",
   },
+  v52ReviewRecord: {
+    operation: "v52_review_record",
+    prismaCallCeiling: 20,
+    isolation: "mutation",
+  },
   executionRecoveryRead: {
     operation: "execution_recovery_read",
     prismaCallCeiling: 4,

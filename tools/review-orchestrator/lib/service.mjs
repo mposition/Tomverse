@@ -176,7 +176,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         reviewers,
         reviewerProviders,
         touchesContract,
-        scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
+        scope: typeof scope === "string" ? scope.slice(0, 8192) : "",
         fileCount: files.length,
         focusFileCount: focusFiles.length,
         focusReviewed,

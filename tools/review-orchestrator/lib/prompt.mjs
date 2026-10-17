@@ -10,7 +10,7 @@ export function buildPrompt({ job, files, instructions = { paths: [], text: "" }
   const diffBytes = Buffer.byteLength(diff, "utf8");
   const truncated = diffBytes > budget;
   const shownDiff = truncated ? Buffer.from(diff, "utf8").subarray(0, budget).toString("utf8") : diff;
-  const scope = (job.scope ?? "").slice(0, 4000);
+  const scope = (job.scope ?? "").slice(0, 8192);
   return [
     "You are an independent code reviewer. Someone else wrote the change below; you did not.",
     "Review only. Do not modify, create or delete any file, and do not run anything that writes.",
