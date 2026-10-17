@@ -1298,6 +1298,7 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
     // router, not guessed: capsule/verifications are GET, artifacts is
     // GET+POST, artifacts/{aid} is PATCH+DELETE.
     RouteEntry { path: "/api/board/{id}/capsule", methods: &["GET"] },
+    RouteEntry { path: "/api/board/{id}/typed-ask", methods: &["GET"] },
     RouteEntry { path: "/api/board/{id}/verifications", methods: &["GET"] },
     RouteEntry { path: "/api/board/{id}/artifacts", methods: &["GET", "POST"] },
     RouteEntry { path: "/api/board/{id}/artifacts/{aid}", methods: &["PATCH", "DELETE"] },

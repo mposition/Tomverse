@@ -28,11 +28,13 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * sent again.
  *
  * The decision -- the request's state, the switches read after the audit
- * chain lock (kill switch on, instance off), the result deadline -- is the
- * request store's `recordDecisionMakerTransmitIntent()`; this route only
- * authenticates, reads the body and runs that one transaction in the route
- * budget and its DB boundary, whose commit fence holds the result deadline.
- * Anything but a recorded intent means the broker starts nothing.
+ * chain lock (kill switch on, instance off), an owed §8 latch (three
+ * validation failures in a row not yet latched: refused as `instance_off`,
+ * and the store writes that latch in the same transaction), the result
+ * deadline -- is the request store's `recordDecisionMakerTransmitIntent()`;
+ * this route only authenticates, reads the body and runs that one transaction
+ * in the route budget and its DB boundary, whose commit fence holds the result
+ * deadline. Anything but a recorded intent means the broker starts nothing.
  *
  * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */

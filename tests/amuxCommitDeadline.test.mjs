@@ -216,6 +216,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration v52: audited execution-grade revision only, with no
   // commit-deadline marker, trigger, guard or classifier change.
   "20261016090000_amux_v52_grade_escalation_guard",
+  // Orchestration v52: the immutable review receipt table and constraints use
+  // the existing mutation boundary without changing commit-deadline behavior.
+  "20261016130000_amux_v52_review_record",
   // Intake v19 direct-read checkout evidence is append-only and audit-bound;
   // it adds no commit-deadline marker, trigger or classifier change.
   "20261017000000_amux_v19_tracked_checkout_evidence",
@@ -231,6 +234,12 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // A durable key intent and its audited orphan-key retirement are independent
   // of the AMUX commit-deadline marker and trigger.
   "20261017021000_amux_v19_read_manifest_key_intent",
+  // Intake v19 session analysis queue reservation is append-only and bound to
+  // the submission transaction; it adds no commit-deadline mechanism.
+  "20261017010000_amux_v19_session_analysis_reservation",
+  // v19 session CLI claims share the monthly ledger but add no deadline
+  // classifier, marker, function or trigger to the commit-deadline protocol.
+  "20261017070000_amux_v19_session_budget_claim",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -472,14 +481,20 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
 });
 
 test("only the named AMUX receipt and admission routes open direct transactions", () => {
+  const assertBefore = (source, guard, transaction = "prisma.$transaction") => {
+    assert.ok(source.includes(guard), `missing guard: ${guard}`);
+    assert.ok(source.includes(transaction), `missing transaction: ${transaction}`);
+    assert.ok(source.indexOf(guard) < source.indexOf(transaction));
+  };
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // Analysis admission and the v19 stop snapshot own bounded read-only
-  // transactions; the commit-deadline boundary still governs task execution.
+  // Analysis admission, v19 stop and budget receipts, and checkout evidence
+  // own bounded transactions; the commit-deadline boundary still governs task execution.
   assert.deepEqual(direct, [
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
+    "app/api/internal/amux/v19/analysis-budget/claim/route.ts",
     "app/api/internal/amux/v19/analysis-stop/route.ts",
     "app/api/internal/amux/v19/checkout-evidence/route.ts",
     "app/api/internal/amux/v19/read-manifest/route.ts",
@@ -489,10 +504,8 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   ]);
   const stopPoll = withoutComments(read(
     "app/api/internal/amux/v19/analysis-stop/route.ts"));
-  assert.ok(stopPoll.indexOf("isAmuxV4AnalysisAgentAuthorized") <
-    stopPoll.indexOf("prisma.$transaction"));
-  assert.ok(stopPoll.indexOf('process.env[READ_ENV] !== "enabled"') <
-    stopPoll.indexOf("prisma.$transaction"));
+  assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
+  assertBefore(stopPoll, 'process.env[READ_ENV] !== "enabled"');
   assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   const evidenceRoute = withoutComments(read(
     "app/api/internal/amux/v19/checkout-evidence/route.ts"));
@@ -508,6 +521,8 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     evidencePost.indexOf("prisma.$transaction"));
   assert.ok(evidenceGet.indexOf("process.env[READ_ENV]") <
     evidenceGet.indexOf("prisma.$transaction"));
+  assertBefore(evidenceGet, "authorized(request)");
+  assert.ok(!evidenceGet.includes("process.env[WRITE_ENV]"));
   assert.match(evidencePost, /maxWait: 3_000, timeout: 12_000/);
   assert.match(evidenceGet, /maxWait: 3_000, timeout: 10_000/);
   const manifestRoute = withoutComments(read(
@@ -526,6 +541,11 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     manifestGet.indexOf("prisma.$transaction"));
   assert.match(manifestPost, /maxWait: 3_000, timeout: 12_000/);
   assert.match(manifestGet, /maxWait: 3_000, timeout: 10_000/);
+  const budgetReceipt = withoutComments(read(
+    "app/api/internal/amux/v19/analysis-budget/claim/route.ts"));
+  assertBefore(budgetReceipt, "isAmuxV4AnalysisAgentAuthorized(request");
+  assertBefore(budgetReceipt, 'process.env[READ_ENV] !== "enabled"');
+  assert.match(budgetReceipt, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   // Intake v15 opens only the code latches. The independent runtime write
   // and receipt-read switches still fail closed before a transaction opens.
   // Both transaction bounds remain independent of execution commit deadlines.

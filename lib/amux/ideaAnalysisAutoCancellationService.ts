@@ -10,6 +10,9 @@ import {
 } from "@/lib/adminAuditSystemActors";
 import { commitAmuxIdeaAnalysisUnknownOutcome,
   AmuxIdeaAnalysisUnknownOutcomeError } from "./ideaAnalysisUnknownOutcomeService.ts";
+import { commitAmuxSessionBudgetOutcome,
+  AmuxSessionBudgetSettlementError } from
+  "./ideaSessionAnalysisBudgetSettlementService.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const UNFINISHED_STATES = ["submitted", "collecting", "awaiting_preview", "analyzing"];
@@ -69,6 +72,7 @@ export async function commitAmuxOverdueIdeaAnalysisCancellation(
     throw new AmuxIdeaAutoCancellationError("integrity_unavailable");
   }
   let inFlightHoldId: string | null = null;
+  let inFlightSessionClaimId: string | null = null;
   if (inFlight.length === 1) {
     const chunk = inFlight[0]!;
     const preview = await tx.amuxIdeaTransferPreview.findUnique({
@@ -100,16 +104,42 @@ export async function commitAmuxOverdueIdeaAnalysisCancellation(
     }
     inFlightHoldId = preview.analysisBudgetHold.id;
   }
+  if (idea.submissionOrigin === "session") {
+    const claims = await tx.amuxIdeaSessionAnalysisBudgetClaim.findMany({
+      where: { reservation: { ideaId }, status: "in_flight" },
+      select: { id: true }, take: 2,
+    });
+    if (claims.length > 1) {
+      throw new AmuxIdeaAutoCancellationError("integrity_unavailable");
+    }
+    if (claims[0]) {
+      try {
+        await commitAmuxSessionBudgetOutcome(tx, {
+          claimId: claims[0].id, outcome: "outcome_unknown",
+          inputTokens: null, outputTokens: null,
+        });
+      } catch (error) {
+        if (error instanceof AmuxSessionBudgetSettlementError) {
+          throw new AmuxIdeaAutoCancellationError("integrity_unavailable");
+        }
+        throw error;
+      }
+      inFlightSessionClaimId = claims[0].id;
+    }
+  }
   const auditId = await writeSystemAuditLog({
     tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
     action: AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
     targetType: AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
     targetId: ideaId,
-    summary: "Stopped an unfinished AMUX v4 idea analysis at its seven-day deadline.",
+    summary: idea.submissionOrigin === "session"
+      ? "Stopped an unfinished AMUX v19 session analysis at its seven-day deadline."
+      : "Stopped an unfinished AMUX v4 idea analysis at its seven-day deadline.",
     metadata: { submittedAt: idea.submittedAt.toISOString(),
       analysisDeadlineAt: idea.analysisDeadlineAt.toISOString(),
       rawPurgeAfter: idea.rawPurgeAfter.toISOString(),
-      ...(inFlightHoldId ? { inFlightHoldId } : {}) },
+      ...(inFlightHoldId ? { inFlightHoldId } : {}),
+      ...(inFlightSessionClaimId ? { inFlightSessionClaimId } : {}) },
   });
   const updated = await tx.amuxIdeaSubmission.updateMany({
     where: { id: ideaId, state: { in: UNFINISHED_STATES },

@@ -395,4 +395,11 @@ export const FIXTURE_MARKETING = {
     kind: "weekly_kpi",
     sourceVersion: "e2e-1",
   },
+  /** A competitor A3 proposed and nobody has decided on. */
+  competitor: {
+    id: "e2e-competitor",
+    displayName: "E2E Competitor",
+    host: "e2e-competitor.example",
+    rationale: "Sells the same comparison, seen on its pricing page.",
+  },
 } as const;

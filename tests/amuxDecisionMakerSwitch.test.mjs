@@ -33,6 +33,7 @@ import {
   DM_SWITCH_REASON_CODES,
   DM_SWITCH_SCOPES,
   DM_SWITCH_VALUES,
+  decisionMakerSwitchReadFromRows,
   decisionMakerSwitchStateFromRows,
   defaultDecisionMakerSwitches,
   dmOperatorSwitchAction,
@@ -48,6 +49,7 @@ import {
   latchDecisionMakerInstanceOff,
   readDecisionMakerSwitches,
   readDecisionMakerSwitchesOrThrow,
+  readDecisionMakerSwitchesWithBoundariesOrThrow,
   recordDecisionMakerSwitchByOperator,
 } from "../lib/amux/decisionMakerSwitchStore.ts";
 
@@ -405,7 +407,7 @@ test("one store module reads and writes the table; nothing else in the applicati
 // Statements per operation (§9: 12 at most, pinned exactly)
 // ---------------------------------------------------------------------------
 
-const recordingTx = ({ newest = [], failRead = false } = {}) => {
+const recordingTx = ({ newest = [], boundaryRows = [], failRead = false } = {}) => {
   const sent = [];
   const tx = {
     $executeRaw: (strings, ...values) => {
@@ -421,6 +423,8 @@ const recordingTx = ({ newest = [], failRead = false } = {}) => {
         return Promise.resolve([{ sequence: 41n, createdAtEpochMs: 1_790_000_000_000n }]);
       }
       if (sql.includes('SELECT "actorKind", "value"')) return Promise.resolve(newest);
+      // The request ledger's switch read, with each scope's newest actor and clock (2026-10-17).
+      if (sql.includes("DISTINCT ON") && sql.includes('"createdAtEpochMs"')) return Promise.resolve(boundaryRows);
       if (sql.includes("DISTINCT ON")) return Promise.resolve([{ scope: "decision-maker-openai", value: "proposal" }]);
       return Promise.reject(new Error(`unexpected statement: ${sql}`));
     },
@@ -613,5 +617,52 @@ test("a refused change or latch sends nothing at all", async () => {
       (error) => error instanceof DecisionMakerSwitchWriteError && error.code === "invalid_latch",
     );
     assert.equal(sent.length, 0);
+  }
+});
+
+const at = (row, createdAtEpochMs = 1_790_000_000_123n, actorKind = "human") => ({ actorKind, createdAtEpochMs, ...row });
+
+test("the ledger's switch read is the state and each instance's newest actor and clock, from one statement", async () => {
+  const { tx, sent } = recordingTx({
+    boundaryRows: [
+      at({ scope: "kill_switch", value: "off" }, 1n),
+      at({ scope: "decision-maker-openai", value: "off" }, 1_790_000_000_123n, "system"),
+      at({ scope: "decision-maker-anthropic", value: "proposal" }, 1_790_000_000_456n),
+    ],
+  });
+  assert.deepEqual(await readDecisionMakerSwitchesWithBoundariesOrThrow(tx), {
+    state: { killSwitch: false, instances: { "decision-maker-openai": "off", "decision-maker-anthropic": "proposal" } },
+    newest: {
+      "decision-maker-openai": { actorKind: "system", createdAtMs: 1_790_000_000_123 },
+      "decision-maker-anthropic": { actorKind: "human", createdAtMs: 1_790_000_000_456 },
+    },
+  });
+  assert.equal(sent.length, 1);
+  assert.match(
+    sent[0].sql,
+    /SELECT DISTINCT ON \("scope"\)\s+"scope", "value", "actorKind",\s+floor\(extract\(epoch FROM "createdAt"\) \* 1000\)::bigint AS "createdAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+ORDER BY "scope", "sequence" DESC/,
+  );
+  // A failed statement is not caught: it has aborted the caller's transaction.
+  await assert.rejects(readDecisionMakerSwitchesWithBoundariesOrThrow(recordingTx({ failRead: true }).tx), /relation does not exist/);
+});
+
+test("an instance with no event has no boundary; a row the CHECKs could not have produced makes the whole read unreadable", () => {
+  assert.deepEqual(decisionMakerSwitchReadFromRows([]), {
+    state: { killSwitch: false, instances: { "decision-maker-openai": "off", "decision-maker-anthropic": "off" } },
+    newest: { "decision-maker-openai": null, "decision-maker-anthropic": null },
+  });
+  const unreadable = { state: unreadableDecisionMakerSwitches(), newest: { "decision-maker-openai": null, "decision-maker-anthropic": null } };
+  for (const rows of [
+    null,
+    [{ scope: "decision-maker-openai", value: "proposal" }],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, 1n, "operator")],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, "1")],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, 2n ** 60n)],
+    // A bad state row is unreadable whatever its clock.
+    [at({ scope: "decision-maker-openai", value: "autonomous" })],
+    // And one bad boundary spoils a good state.
+    [at({ scope: "kill_switch", value: "off" }), at({ scope: "decision-maker-anthropic", value: "proposal" }, 1n, "robot")],
+  ]) {
+    assert.deepEqual(decisionMakerSwitchReadFromRows(rows), unreadable, JSON.stringify(rows, (_, v) => (typeof v === "bigint" ? String(v) : v)));
   }
 });

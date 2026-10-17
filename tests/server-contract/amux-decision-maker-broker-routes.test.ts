@@ -6,10 +6,12 @@ import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
 // AMUX Decision Maker policy version 1 (docs/policy/amux-decision-maker.md),
-// sections 2, 9 and 10: the internal
+// sections 2, 8, 9 and 10: the internal
 // routes the bridge and the broker call after the routing -- assignment,
 // assignment discard, transmission intent, transmission outcome, result
-// submission, result lookup and result unknown. Only the sync token reaches
+// submission, result lookup and result unknown -- and (since 2026-10-17) the
+// validation latch check the result route runs after a validation failure.
+// Only the sync token reaches
 // them; each stays closed until the operator enables it and then touches
 // nothing; a body outside its strict shape or size never reaches the store;
 // each runs its one store operation in its own DB boundary inside the route
@@ -56,6 +58,12 @@ const EVENT = {
   resultDeadlineAt: null,
 };
 const ASSIGN_EVENT = { ...EVENT, resultDeadlineAt: "2026-10-16T00:30:00.000Z" };
+const LATCH_EVENT = {
+  eventId: "33333333-4444-4555-8666-777777777777",
+  auditLogId: "audit-row-2",
+  sequence: "11",
+  createdAt: "2026-10-17T00:00:00.000Z",
+};
 const OPTIONS = [
   { id: "a", label: "Model id only" },
   { id: "b", label: "Model id and locale" },
@@ -96,6 +104,9 @@ type World = {
   keyRingError: Error | null;
   storeResult: unknown;
   storeError: Error | null;
+  /** §8's latch check, which the result route runs after a validation failure. */
+  latchResult: unknown;
+  latchError: Error | null;
   internalErrors: Array<{ operation: string; error: unknown }>;
   logged: string[];
 };
@@ -111,6 +122,8 @@ const reset = (changes: Partial<World> = {}) => {
     keyRingError: null,
     storeResult: undefined,
     storeError: null,
+    latchResult: { latched: false, reason: "no_streak" },
+    latchError: null,
     internalErrors: [],
     logged: [],
     ...changes,
@@ -359,6 +372,16 @@ const ROUTES: Route[] = [
   },
 ];
 
+/** The latch check's own boundary, which no route above names as its own. */
+const LATCH_BOUNDARY = { name: "decisionMakerValidationLatch", operation: "decision_maker_validation_latch" };
+
+const fakeLatch = async (tx: unknown, input: Record<string, unknown>) => {
+  assert.deepEqual(tx, FAKE_TX);
+  world.calls.push({ store: "recordDecisionMakerValidationLatch", input });
+  if (world.latchError) throw world.latchError;
+  return world.latchResult;
+};
+
 const fakeStore =
   (store: string) =>
   async (tx: unknown, input: Record<string, unknown>) => {
@@ -378,7 +401,10 @@ async function loadRoute(route: Route): Promise<{ POST: (request: Request) => Pr
     });
     mock.module(mod("lib/amux/dbBoundary.ts"), {
       namedExports: {
-        AMUX_DB_BOUNDARIES: Object.fromEntries(ROUTES.map((entry) => [entry.boundary, { operation: entry.operation }])),
+        AMUX_DB_BOUNDARIES: Object.fromEntries([
+          ...ROUTES.map((entry) => [entry.boundary, { operation: entry.operation }]),
+          [LATCH_BOUNDARY.name, { operation: LATCH_BOUNDARY.operation }],
+        ]),
         withAmuxRouteBudget: async (work: () => Promise<unknown>) => {
           world.budgetDepth += 1;
           try {
@@ -411,6 +437,7 @@ async function loadRoute(route: Route): Promise<{ POST: (request: Request) => Pr
         recordDecisionMakerTransmitOutcome: fakeStore("recordDecisionMakerTransmitOutcome"),
         lookupDecisionMakerResult: fakeStore("lookupDecisionMakerResult"),
         recordDecisionMakerResultUnknown: fakeStore("recordDecisionMakerResultUnknown"),
+        recordDecisionMakerValidationLatch: fakeLatch,
       },
     });
     mock.module(mod("lib/amux/decisionMakerDigestKeys.ts"), {
@@ -710,14 +737,111 @@ test("the routes write no SQL, read no switch, judge nothing and reach no worker
     assert.doesNotMatch(source, /\b(recordDecisionMakerRequest|assignDecisionMakerRequest|submitDecisionMakerResult)\(/, path);
     // No judgment, delivery or card write: nothing here reaches a worker (§1, §12).
     assert.doesNotMatch(source, /decisionMakerJudgment|deliver|AmuxWorkItem/i, path);
-    // No log line but the key ring loader's code.
+    // No log line but the key ring loader's code and, since 2026-10-17, the latch check's.
     const logs = source.match(/console\.\w+\([^;]*;/g) ?? [];
     assert.deepEqual(
       logs,
       path.startsWith("lib/")
-        ? ['console.error(JSON.stringify({ subsystem: "amux", event: "dm_digest_keys_unavailable", code: error.code }));']
+        ? [
+            'console.warn(JSON.stringify({ subsystem: "amux", event: "dm_validation_latch_unsettled", code: latchErrorCode(error) }));',
+            'console.error(JSON.stringify({ subsystem: "amux", event: "dm_digest_keys_unavailable", code: error.code }));',
+          ]
         : [],
       path,
     );
   }
+});
+
+test("an intent refused for an owed latch answers instance_off like any switch refusal", async () => {
+  const route = ROUTES.find((entry) => entry.name === "transmission intent")!;
+  const { POST } = await loadRoute(route);
+  reset({ storeResult: { recorded: false, reason: "instance_off", latch: { ...LATCH_EVENT, resultDeadlineAt: null } } });
+  const answer = await POST(post(route, route.body));
+  assert.equal(answer.status, 409);
+  // The broker starts nothing; the answer names no switch event or audit.
+  assert.deepEqual(await answer.json(), { recorded: false, reason: "instance_off" });
+});
+
+test("a validation failure the ledger holds runs §8's latch check in a boundary of its own, and the answer stays the result's", async () => {
+  const route = ROUTES.find((entry) => entry.name === "result submission")!;
+  const { POST } = await loadRoute(route);
+  const submitted = (result: Record<string, unknown>, resultKind: string) => ({
+    status: "submitted",
+    resultKind,
+    validationFailure: resultKind === "validation_failure" ? "unknown_option" : null,
+    resultDigest: DIGEST_C,
+    result,
+    detail: null,
+    storedFields: [],
+  });
+  const failure = (status: "accepted" | "existing") =>
+    submitted(
+      status === "accepted"
+        ? { status, event: EVENT, resultKind: "validation_failure" }
+        : { status, eventId: EVENT.eventId, resultKind: "validation_failure" },
+      "validation_failure",
+    );
+  const expected = (status: string) => ({
+    submitted: true,
+    status,
+    result_kind: "validation_failure",
+    validation_failure: "unknown_option",
+    result_digest: DIGEST_C,
+    event_id: EVENT.eventId,
+    reason: null,
+  });
+
+  // Accepted now or already: the check runs for the instance, after the result's own boundary.
+  for (const status of ["accepted", "existing"] as const) {
+    for (const latchResult of [{ latched: true, event: LATCH_EVENT }, { latched: false, reason: "no_streak" }, { latched: false, reason: "already_latched" }]) {
+      reset({ storeResult: failure(status), latchResult });
+      const answer = await POST(post(route, route.body));
+      assert.equal(answer.status, 200, status);
+      // The same answer whatever the check did: no latch field, no switch event id.
+      assert.deepEqual(await answer.json(), expected(status), status);
+      assert.deepEqual(world.boundaries, [
+        { operation: route.operation, inBudget: true },
+        { operation: LATCH_BOUNDARY.operation, inBudget: true },
+      ]);
+      assert.deepEqual(world.calls.map((call) => call.store), ["submitDecisionMakerOutput", "recordDecisionMakerValidationLatch"]);
+      assert.deepEqual(world.calls[1]!.input, { instance: "decision-maker-openai" });
+      assert.deepEqual(world.logged, []);
+    }
+  }
+
+  // A check that cannot be written leaves the answer alone, and logs its code only.
+  for (const [error, code] of [
+    [Object.assign(new Error("database said something with a value in it"), { name: "AmuxDbBoundaryError", code: "AMUX_DB_OUTCOME_UNKNOWN" }), "AMUX_DB_OUTCOME_UNKNOWN"],
+    [new FakeRequestWriteError("settings_unreadable"), null],
+    [new Error("relation does not exist"), null],
+  ] as const) {
+    reset({ storeResult: failure("accepted"), latchError: error });
+    const answer = await POST(post(route, route.body));
+    assert.equal(answer.status, 200);
+    assert.deepEqual(await answer.json(), expected("accepted"));
+    assert.deepEqual(world.logged.map((line) => JSON.parse(line)), [
+      { subsystem: "amux", event: "dm_validation_latch_unsettled", code },
+    ]);
+    assert.doesNotMatch(world.logged.join("\n"), /value in it|relation/);
+    assert.deepEqual(world.internalErrors, []);
+  }
+
+  // Any other answer of the ledger is not a validation failure it holds: no check.
+  for (const storeResult of [
+    submitted({ status: "accepted", event: EVENT, resultKind: "proposal" }, "proposal"),
+    submitted({ status: "existing", eventId: EVENT.eventId, resultKind: "escalate" }, "escalate"),
+    submitted({ status: "accepted", event: EVENT, resultKind: "timeout" }, "timeout"),
+    submitted({ status: "rejected", event: EVENT, reason: "deadline_passed" }, "validation_failure"),
+    submitted({ status: "already_rejected", reason: "request_closed" }, "validation_failure"),
+  ]) {
+    reset({ storeResult });
+    assert.equal((await POST(post(route, route.body))).status, 200);
+    assert.deepEqual(world.boundaries, [{ operation: route.operation, inBudget: true }], JSON.stringify(storeResult.result));
+    assert.deepEqual(world.calls.map((call) => call.store), ["submitDecisionMakerOutput"]);
+  }
+
+  // A refusal writes nothing, so it runs no check either.
+  reset({ storeResult: { status: "option_set_mismatch" } });
+  assert.equal((await POST(post(route, route.body))).status, 409);
+  assert.deepEqual(world.calls.map((call) => call.store), ["submitDecisionMakerOutput"]);
 });

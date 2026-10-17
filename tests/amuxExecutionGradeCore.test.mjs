@@ -29,13 +29,15 @@ const task = (overrides = {}) => ({
   ...overrides,
 });
 
-test("S1 ships the code latch off", () => {
-  assert.equal(AMUX_EXECUTION_GRADE_CODE_LATCH, false);
+test("v52 code latch requires the exact enabled operation switch", () => {
+  assert.equal(AMUX_EXECUTION_GRADE_CODE_LATCH, true);
   assert.equal(AMUX_EXECUTION_GRADE_ENV, "TOMVERSE_AMUX_EXECUTION_GRADE");
-  assert.equal(amuxExecutionGradeRoutingEnabled("enabled"), false);
+  assert.equal(amuxExecutionGradeRoutingEnabled("enabled"), true);
   assert.equal(amuxExecutionGradeRoutingOpen(true, "enabled"), true);
-  for (const value of [undefined, "", "true", "ENABLED", " enabled"])
+  for (const value of [undefined, "", "true", "ENABLED", " enabled"]) {
+    assert.equal(amuxExecutionGradeRoutingEnabled(value), false);
     assert.equal(amuxExecutionGradeRoutingOpen(true, value), false);
+  }
   assert.equal(amuxExecutionGradeRoutingOpen(false, "enabled"), false);
 });
 

@@ -140,6 +140,26 @@ test.describe("marketing console", () => {
     await expect(page.getByText(/stage S5/)).toBeVisible();
   });
 
+  test("the competitors section shows a proposal with its decisions, and says how many rows it lists", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    await page.goto("/admin/marketing?tab=competitors");
+
+    await expect(page.getByText(FIXTURE_MARKETING.competitor.rationale)).toBeVisible();
+    await expect(
+      page.getByText(FIXTURE_MARKETING.competitor.host, { exact: false }).first()
+    ).toBeVisible();
+    await expect(page.getByText(/Up to 100 competitors/)).toBeVisible();
+    // A proposal can be approved or rejected, not retired: only an approval
+    // has sources to take away.
+    await expect(page.getByTestId("marketing-action-competitor-approve")).toBeVisible();
+    await expect(page.getByTestId("marketing-action-competitor-reject")).toBeVisible();
+    await expect(page.getByTestId("marketing-action-competitor-retire")).toHaveCount(0);
+    await expect(page.getByTestId("marketing-competitor-create")).toBeVisible();
+  });
+
   test("an administrator without marketing:write still reads the queue", async ({
     page,
     signInAs,

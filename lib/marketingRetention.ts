@@ -14,6 +14,14 @@
  * purged twenty-four months after publication, and attempt and webhook entries
  * in a post's history summarised after ninety days.
  *
+ * **Nothing runs while the marketing kill switch is on.** The switch stops
+ * everything but reading the record (docs/policy/marketing-automation.md §6.1),
+ * and retention is the one step whose effect cannot be undone: a row, a post's
+ * content or its history detail deleted during an incident is gone from the
+ * investigation. The run says it was skipped rather than reporting zeros, so
+ * "nothing was due" and "nothing was allowed" stay different answers; the
+ * rows wait for the next run after the switch is off.
+ *
  * Not here yet: the public image bucket, which has no port to delete through.
  */
 
@@ -21,6 +29,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import { purgeExpiredMarketingLlmCalls } from "@/lib/marketingLlmBudgetStore";
 import {
   compactMarketingPostHistory,
@@ -36,14 +45,32 @@ const TABLES: readonly MarketingRetentionTable[] = [
   "MarketingPost",
 ];
 
-/** What one run changed, by step: rows deleted, or posts changed in place. */
-export type MarketingRetentionResult = Record<
-  MarketingRetentionTable | "MarketingLlmCall" | "MarketingPostContent" | "MarketingPostHistory",
-  number
->;
+type MarketingRetentionStep =
+  | MarketingRetentionTable
+  | "MarketingLlmCall"
+  | "MarketingPostContent"
+  | "MarketingPostHistory";
 
-export async function runMarketingRetention(client: PrismaClient): Promise<MarketingRetentionResult> {
-  const purged = {} as MarketingRetentionResult;
+/**
+ * What one run changed, by step -- rows deleted, or posts changed in place --
+ * or that it did not run because the kill switch was on.
+ */
+export type MarketingRetentionResult =
+  | ({ readonly skipped: null } & Record<MarketingRetentionStep, number>)
+  | { readonly skipped: "kill_switch" };
+
+/** The same reading as every marketing gate: any non-empty value is on. */
+const killSwitchOn = (env: Readonly<Record<string, string | undefined>>) => {
+  const value = env[MARKETING_AUTOMATION_KILL_SWITCH_ENV];
+  return typeof value === "string" && value.trim().length > 0;
+};
+
+export async function runMarketingRetention(
+  client: PrismaClient,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<MarketingRetentionResult> {
+  if (killSwitchOn(env)) return { skipped: "kill_switch" };
+  const purged = {} as Record<MarketingRetentionStep, number>;
   for (const table of TABLES) {
     const result = await runMarketingTransaction(
       client,
@@ -69,5 +96,5 @@ export async function runMarketingRetention(client: PrismaClient): Promise<Marke
     { maxWait: 5_000, timeout: 60_000 },
   );
   purged.MarketingPostHistory = history.compacted;
-  return purged;
+  return { skipped: null, ...purged };
 }

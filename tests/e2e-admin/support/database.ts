@@ -1278,6 +1278,19 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
     },
   });
 
+  await prisma.marketingCompetitor.create({
+    data: {
+      id: FIXTURE_MARKETING.competitor.id,
+      displayName: FIXTURE_MARKETING.competitor.displayName,
+      officialHosts: [FIXTURE_MARKETING.competitor.host],
+      status: "proposed",
+      proposedBy: "generator",
+      proposedRunId: "e2e-run",
+      evidenceUrls: [`https://${FIXTURE_MARKETING.competitor.host}/pricing`],
+      rationale: FIXTURE_MARKETING.competitor.rationale,
+    },
+  });
+
   return { seededAt: new Date(now) };
 };
 
