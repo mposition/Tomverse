@@ -41,6 +41,11 @@ import {
   commitAmuxSessionAnalysisReservation,
   AmuxSessionAnalysisReservationError,
 } from "@/lib/amux/ideaSessionAnalysisReservationStore";
+import { listAmuxSessionAnalysisCandidates } from
+  "@/lib/amux/ideaSessionAnalysisQueueService";
+import { encodeAmuxSessionAnalysisQueueCursor,
+  parseAmuxSessionAnalysisQueueCursor } from
+  "@/lib/amux/ideaSessionAnalysisQueueCursorCore";
 import { prisma } from "@/lib/prisma";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -300,6 +305,58 @@ test("session submission queues one content-free analysis reservation in the sam
   });
   assert.doesNotMatch(JSON.stringify(audit.metadata),
     /mposition\/Tomverse|Codex|sessionDisplay|reservedMicroUsd|ideaText/);
+});
+
+test("session analysis queue lists the live reservation and advances past its DB position", async () => {
+  const [reservation, idea] = await Promise.all([
+    prisma.amuxIdeaSessionAnalysisReservation.findUniqueOrThrow({
+      where: { id: committedReservationId }, select: { createdAt: true },
+    }),
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({
+      where: { id: committedIdeaId }, select: { analysisDeadlineAt: true },
+    }),
+  ]);
+  const first = await listAmuxSessionAnalysisCandidates(null);
+  assert.deepEqual(first, {
+    candidates: [{ reservationId: committedReservationId, ideaId: committedIdeaId,
+      modelId, expiresAt: idea.analysisDeadlineAt.toISOString() }],
+    hasMore: false, nextCursor: null,
+  });
+  const cursor = encodeAmuxSessionAnalysisQueueCursor({
+    createdAt: reservation.createdAt, reservationId: committedReservationId,
+  });
+  const parsed = parseAmuxSessionAnalysisQueueCursor(cursor);
+  assert.ok(parsed);
+  const after = await listAmuxSessionAnalysisCandidates(parsed);
+  assert.equal(after.candidates.some((candidate) =>
+    candidate.reservationId === committedReservationId), false);
+
+  const switches = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
+    "TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ", "TOMVERSE_AMUX_SESSION_INTAKE",
+    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ"];
+  const previous = new Map(switches.map((key) => [key, process.env[key]]));
+  const secret = "synthetic-amux-session-queue-secret-0123456789";
+  try {
+    process.env[switches[0]] = secret;
+    for (const key of switches.slice(1)) process.env[key] = "enabled";
+    const { POST } = await import("@/app/api/internal/amux/v19/analysis-queue/route");
+    const poll = (body: object) => POST(new Request(
+      "https://tomverse.test/api/internal/amux/v19/analysis-queue", {
+        method: "POST", headers: { authorization: `Bearer ${secret}`,
+          "x-amux-agent-id": "amux-intake", "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }));
+    const response = await poll({});
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), first);
+    const next = await poll({ after: cursor });
+    assert.equal(next.status, 200);
+    assert.deepEqual(await next.json(), after);
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
 });
 
 test("queue guard rejects missing and null system audit identity", async () => {
@@ -672,6 +729,8 @@ test("audited identity and encrypted bodies are immutable except for one complet
   assert.equal(purged.sourceProvenanceCiphertext, null);
   assert.equal(purged.sourceProvenanceKeyId, null);
   assert.ok(purged.sourceProvenanceDigest);
+  assert.equal((await listAmuxSessionAnalysisCandidates(null)).candidates.some(
+    (candidate) => candidate.reservationId === committedReservationId), false);
   assert.deepEqual(await readAmuxIdeaSessionSubmissionRequest(committedRequestId), {
     requestId: committedRequestId,
     status: "committed",
