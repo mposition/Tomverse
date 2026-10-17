@@ -499,12 +499,12 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   ]);
   const stopPoll = withoutComments(read(
     "app/api/internal/amux/v19/analysis-stop/route.ts"));
-  assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized");
+  assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
   assertBefore(stopPoll, 'process.env[READ_ENV] !== "enabled"');
   assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   const budgetReceipt = withoutComments(read(
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts"));
-  assertBefore(budgetReceipt, "isAmuxV4AnalysisAgentAuthorized");
+  assertBefore(budgetReceipt, "isAmuxV4AnalysisAgentAuthorized(request");
   assertBefore(budgetReceipt, 'process.env[READ_ENV] !== "enabled"');
   assert.match(budgetReceipt, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   // Intake v15 opens only the code latches. The independent runtime write
