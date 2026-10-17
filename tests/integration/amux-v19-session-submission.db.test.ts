@@ -575,6 +575,72 @@ test("database refuses a second CLI claim while the idea remains submitted", asy
   }), 1);
 });
 
+test("session claim insert binds its audit to the exact UTC budget month", async () => {
+  const previous = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findFirstOrThrow({
+    where: { reservationId: committedReservationId, invocationOrdinal: 0 },
+  });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const ideaId = randomUUID();
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(ideaId), expectedAuthority: authority,
+      ideaId, keys: keysFor(ideaId),
+    });
+    const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+    const claimId = randomUUID();
+    const requestId = randomUUID();
+    const auditId = await writeSystemAuditLog({
+      tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      action: AMUX_V19_SESSION_BUDGET_CLAIM_ACTION,
+      targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: claimId,
+      summary: "Synthetic claim with a mismatched budget month.",
+      metadata: { reservationId: reservation.reservationId,
+        invocationOrdinal: 0, requestId,
+        namespace: previous.namespace,
+        monthStart: new Date(previous.monthStart.getTime() + 32 * 86_400_000)
+          .toISOString(),
+        priceVersionId: previous.priceVersionId,
+        reservedMicroUsd: previous.reservedMicroUsd.toString() },
+    });
+    await tx.amuxIdeaAnalysisBudgetWindow.update({
+      where: { namespace_monthStart: {
+        namespace: previous.namespace, monthStart: previous.monthStart,
+      } },
+      data: { reservedMicroUsd: { increment: previous.reservedMicroUsd } },
+    });
+    await tx.amuxIdeaSessionAnalysisBudgetClaim.create({ data: {
+      id: claimId, requestId, reservationId: reservation.reservationId,
+      invocationOrdinal: 0, namespace: previous.namespace,
+      monthStart: previous.monthStart, priceVersionId: previous.priceVersionId,
+      provider: previous.provider, modelId: previous.modelId,
+      inputTokensCap: previous.inputTokensCap,
+      outputTokensCap: previous.outputTokensCap,
+      inputMicroUsdPerMillion: previous.inputMicroUsdPerMillion,
+      outputMicroUsdPerMillion: previous.outputMicroUsdPerMillion,
+      reservedMicroUsd: previous.reservedMicroUsd,
+      status: "in_flight", claimAuditLogId: auditId,
+    } });
+    throw new Error("synthetic rollback if month guard regresses");
+  }), (error: unknown) => sqlState(error) === "23514");
+});
+
+test("known session outcome cannot settle at zero even with lifecycle trigger bypassed", async () => {
+  const known = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findFirstOrThrow({
+    where: { reservationId: committedReservationId, status: "succeeded" },
+  });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(
+      'ALTER TABLE "AmuxIdeaSessionAnalysisBudgetClaim" DISABLE TRIGGER "AmuxIdeaSessionAnalysisBudgetClaim_guard"');
+    await tx.amuxIdeaSessionAnalysisBudgetClaim.update({
+      where: { id: known.id },
+      data: { settledMicroUsd: BigInt(0) },
+    });
+    throw new Error("synthetic rollback if positive settlement check regresses");
+  }), (error: unknown) => sqlState(error) === "23514");
+});
+
 test("queue guard rejects missing and null system audit identity", async () => {
   const rollbackFixtures = new Error("rollback null audit identity fixtures");
   const ideaIds = Array.from({ length: 5 }, () => randomUUID());
