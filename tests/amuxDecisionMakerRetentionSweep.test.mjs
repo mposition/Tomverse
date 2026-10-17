@@ -84,6 +84,7 @@ const fakeDeps = ({
   return {
     calls,
     deps: {
+      cleanupLatch: (instance) => answer("cleanupLatch", instance, { latched: false, reason: "no_cleanup_unknown" }),
       validationLatch: (instance) => answer("validationLatch", instance, { latched: false, reason: "no_streak" }),
       readCandidates: () => {
         calls.push(["read"]);
@@ -113,8 +114,11 @@ const quiet = async (work) => {
   }
 };
 
+// Since stage S2-2a3 each instance has two checks, §5's cleanup latch first and then §8's.
 const LATCH_CHECKS = [
+  ["cleanupLatch", "decision-maker-openai"],
   ["validationLatch", "decision-maker-openai"],
+  ["cleanupLatch", "decision-maker-anthropic"],
   ["validationLatch", "decision-maker-anthropic"],
 ];
 
@@ -140,6 +144,8 @@ test("one sweep: §8's latch check for each instance, then read once, rotate, cl
     ["destroy", CURRENT - 2],
   ]);
   assert.deepEqual(value, {
+    cleanupLatched: 0,
+    cleanupLatchUnsettled: 0,
     validationLatched: 0,
     validationLatchUnsettled: 0,
     keyRing: "loaded",
@@ -161,7 +167,7 @@ test("§8's latch check counts the instances it latched, and an instance already
     },
   });
   const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
-  assert.deepEqual(calls.slice(0, 3), [...LATCH_CHECKS, ["read"]]);
+  assert.deepEqual(calls.slice(0, 5), [...LATCH_CHECKS, ["read"]]);
   assert.equal(value.validationLatched, 1);
   assert.equal(value.refused, 0);
   assert.equal(value.stopped, null);
@@ -223,6 +229,34 @@ test("a latch check that fails holds back neither the other instance's check nor
     instance: "decision-maker-openai",
     code: null,
   });
+  assert.doesNotMatch(warned.join("\n"), /value in it/);
+});
+
+test("§5's cleanup latch check comes before §8's for each instance, is counted on its own, and fails on its own", async () => {
+  {
+    const { deps, calls } = fakeDeps({
+      answers: {
+        "cleanupLatch:decision-maker-anthropic": { latched: true, event: { eventId: "e" } },
+        "cleanupLatch:decision-maker-openai": { latched: false, reason: "settled" },
+      },
+    });
+    const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
+    assert.deepEqual(calls.slice(0, 5), [...LATCH_CHECKS, ["read"]]);
+    assert.deepEqual([value.cleanupLatched, value.validationLatched, value.refused, value.stopped], [1, 0, 0, null]);
+    assert.deepEqual(warned, []);
+  }
+  // A cleanup check that fails holds back neither that instance's validation check, the other
+  // instance's checks nor the retention work, and logs the instance and the code only.
+  const { deps, calls } = fakeDeps({
+    candidates: { staleRequestIds: [REQUEST_A], purgeRequestIds: [], registry: registry() },
+    answers: { "cleanupLatch:decision-maker-openai": new AmuxDbBoundaryError("AMUX_DB_OUTCOME_UNKNOWN", "test with a value in it") },
+  });
+  const { value, warned } = await quiet(() => runDecisionMakerRetentionSweep(deps));
+  assert.deepEqual(calls.slice(0, 5), [...LATCH_CHECKS, ["read"]]);
+  assert.deepEqual([value.cleanupLatchUnsettled, value.validationLatchUnsettled, value.staleClosed, value.stopped], [1, 0, 1, null]);
+  assert.deepEqual(warned.map((line) => JSON.parse(line)), [
+    { subsystem: "amux", event: "decision_maker_cleanup_latch_check_failed", instance: "decision-maker-openai", code: "AMUX_DB_OUTCOME_UNKNOWN" },
+  ]);
   assert.doesNotMatch(warned.join("\n"), /value in it/);
 });
 
@@ -340,8 +374,10 @@ test("the sweep writes only through the stores, reads no switch, and is on the m
   // instance off, so no switch is read here; the latch check is the request store's.
   assert.doesNotMatch(sweep, /readDecisionMakerSwitches|decisionMakerSwitchStore|latchDecisionMakerInstanceOff/);
   assert.match(sweep, /recordDecisionMakerValidationLatch\(tx, \{ instance \}\)/);
+  assert.match(sweep, /recordDecisionMakerCleanupLatch\(tx, \{ instance \}\)/);
   // Each write is in its own boundary transaction.
   for (const boundary of [
+    "decisionMakerCleanupLatch",
     "decisionMakerValidationLatch",
     "decisionMakerRetentionRead",
     "decisionMakerDigestKeyRotate",

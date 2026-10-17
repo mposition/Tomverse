@@ -10,7 +10,9 @@ import { mock, test } from "node:test";
 // routes the bridge and the broker call after the routing -- assignment,
 // assignment discard, transmission intent, transmission outcome, result
 // submission, result lookup and result unknown -- and (since 2026-10-17) the
-// validation latch check the result route runs after a validation failure.
+// validation latch check the result route runs after a validation failure,
+// and (since stage S2-2a3) section 5's cleanup report with the cleanup latch
+// check its route runs after it.
 // Only the sync token reaches
 // them; each stays closed until the operator enables it and then touches
 // nothing; a body outside its strict shape or size never reaches the store;
@@ -107,6 +109,9 @@ type World = {
   /** §8's latch check, which the result route runs after a validation failure. */
   latchResult: unknown;
   latchError: Error | null;
+  /** §5's latch check, which the cleanup route runs after a report. */
+  cleanupLatchResult: unknown;
+  cleanupLatchError: Error | null;
   internalErrors: Array<{ operation: string; error: unknown }>;
   logged: string[];
 };
@@ -124,6 +129,8 @@ const reset = (changes: Partial<World> = {}) => {
     storeError: null,
     latchResult: { latched: false, reason: "no_streak" },
     latchError: null,
+    cleanupLatchResult: { latched: false, reason: "settled" },
+    cleanupLatchError: null,
     internalErrors: [],
     logged: [],
     ...changes,
@@ -156,6 +163,8 @@ type Route = {
   answer: Record<string, unknown>;
   /** Refusals the store returns: what it returned, the status, the reason. */
   refusals: Array<[unknown, number, string]>;
+  /** The latch check a route runs after its own transaction on success, in a boundary of its own. */
+  latch?: { boundary: string; operation: string; store: string };
 };
 
 const ROUTES: Route[] = [
@@ -370,6 +379,27 @@ const ROUTES: Route[] = [
       [{ recorded: false, reason: "not_transmitted" }, 409, "not_transmitted"],
     ],
   },
+  {
+    name: "cleanup unknown",
+    path: "app/api/internal/amux/decision-maker/cleanup/unknown/route.ts",
+    url: "/api/internal/amux/decision-maker/cleanup/unknown",
+    boundary: "decisionMakerCleanupUnknown",
+    operation: "decision_maker_cleanup_unknown",
+    store: "recordDecisionMakerCleanupUnknown",
+    envelope: "recorded",
+    maxBodyBytes: 1_024,
+    body: { request_id: REQUEST_ID, instance: "decision-maker-openai" },
+    input: { requestId: REQUEST_ID, instance: "decision-maker-openai" },
+    keyRing: false,
+    success: { status: "recorded", event: EVENT },
+    answer: { recorded: true, status: "recorded", event_id: EVENT.eventId, created_at: EVENT.createdAt },
+    refusals: [
+      [{ status: "refused", reason: "unknown_request" }, 404, "unknown_request"],
+      [{ status: "refused", reason: "not_assigned" }, 409, "not_assigned"],
+      [{ status: "refused", reason: "instance_mismatch" }, 409, "instance_mismatch"],
+    ],
+    latch: { boundary: "decisionMakerCleanupLatch", operation: "decision_maker_cleanup_latch", store: "recordDecisionMakerCleanupLatch" },
+  },
 ];
 
 /** The latch check's own boundary, which no route above names as its own. */
@@ -380,6 +410,13 @@ const fakeLatch = async (tx: unknown, input: Record<string, unknown>) => {
   world.calls.push({ store: "recordDecisionMakerValidationLatch", input });
   if (world.latchError) throw world.latchError;
   return world.latchResult;
+};
+
+const fakeCleanupLatch = async (tx: unknown, input: Record<string, unknown>) => {
+  assert.deepEqual(tx, FAKE_TX);
+  world.calls.push({ store: "recordDecisionMakerCleanupLatch", input });
+  if (world.cleanupLatchError) throw world.cleanupLatchError;
+  return world.cleanupLatchResult;
 };
 
 const fakeStore =
@@ -403,6 +440,7 @@ async function loadRoute(route: Route): Promise<{ POST: (request: Request) => Pr
       namedExports: {
         AMUX_DB_BOUNDARIES: Object.fromEntries([
           ...ROUTES.map((entry) => [entry.boundary, { operation: entry.operation }]),
+          ...ROUTES.flatMap((entry) => (entry.latch ? [[entry.latch.boundary, { operation: entry.latch.operation }]] : [])),
           [LATCH_BOUNDARY.name, { operation: LATCH_BOUNDARY.operation }],
         ]),
         withAmuxRouteBudget: async (work: () => Promise<unknown>) => {
@@ -438,6 +476,8 @@ async function loadRoute(route: Route): Promise<{ POST: (request: Request) => Pr
         lookupDecisionMakerResult: fakeStore("lookupDecisionMakerResult"),
         recordDecisionMakerResultUnknown: fakeStore("recordDecisionMakerResultUnknown"),
         recordDecisionMakerValidationLatch: fakeLatch,
+        recordDecisionMakerCleanupUnknown: fakeStore("recordDecisionMakerCleanupUnknown"),
+        recordDecisionMakerCleanupLatch: fakeCleanupLatch,
       },
     });
     mock.module(mod("lib/amux/decisionMakerDigestKeys.ts"), {
@@ -509,10 +549,25 @@ test("an enabled route runs its one store operation in its own boundary inside t
     assert.equal(answer.status, 200, route.name);
     assert.equal(answer.headers.get("cache-control"), "no-store", route.name);
     assert.deepEqual(await answer.json(), route.answer, route.name);
-    assert.deepEqual(world.boundaries, [{ operation: route.operation, inBudget: true }], route.name);
+    // A route with a latch check runs it after its own transaction, in a boundary of its own.
+    assert.deepEqual(
+      world.boundaries,
+      [
+        { operation: route.operation, inBudget: true },
+        ...(route.latch ? [{ operation: route.latch.operation, inBudget: true }] : []),
+      ],
+      route.name,
+    );
     // The body's values as they came -- every judgement is the store's -- and the boundary's own
     // lease callback for a deadline write, the key ring for a keyed one.
-    assert.deepEqual(world.calls, [{ store: route.store, input: route.input }], route.name);
+    assert.deepEqual(
+      world.calls,
+      [
+        { store: route.store, input: route.input },
+        ...(route.latch ? [{ store: route.latch.store, input: { instance: route.body.instance } }] : []),
+      ],
+      route.name,
+    );
     assert.equal(world.keyRingLoads, route.keyRing ? 1 : 0, route.name);
     assert.deepEqual(world.logged, [], route.name);
     assert.deepEqual(world.internalErrors, [], route.name);
@@ -744,6 +799,7 @@ test("the routes write no SQL, read no switch, judge nothing and reach no worker
       path.startsWith("lib/")
         ? [
             'console.warn(JSON.stringify({ subsystem: "amux", event: "dm_validation_latch_unsettled", code: latchErrorCode(error) }));',
+            'console.warn(JSON.stringify({ subsystem: "amux", event: "dm_cleanup_latch_unsettled", code: latchErrorCode(error) }));',
             'console.error(JSON.stringify({ subsystem: "amux", event: "dm_digest_keys_unavailable", code: error.code }));',
           ]
         : [],
@@ -844,4 +900,57 @@ test("a validation failure the ledger holds runs §8's latch check in a boundary
   reset({ storeResult: { status: "option_set_mismatch" } });
   assert.equal((await POST(post(route, route.body))).status, 409);
   assert.deepEqual(world.calls.map((call) => call.store), ["submitDecisionMakerOutput"]);
+});
+
+test("a cleanup report recorded or found runs §5's latch check in a boundary of its own, and the answer stays the report's", async () => {
+  const route = ROUTES.find((entry) => entry.name === "cleanup unknown")!;
+  const { POST } = await loadRoute(route);
+  const answers = {
+    recorded: [{ status: "recorded", event: EVENT }, { recorded: true, status: "recorded", event_id: EVENT.eventId, created_at: EVENT.createdAt }],
+    // The same report sent again: the one recorded, and the check again -- it latches only a report still owed.
+    existing: [
+      { status: "existing", eventId: EVENT.eventId, createdAt: EVENT.createdAt },
+      { recorded: true, status: "existing", event_id: EVENT.eventId, created_at: EVENT.createdAt },
+    ],
+  } as const;
+  for (const [storeResult, answer] of Object.values(answers)) {
+    for (const cleanupLatchResult of [{ latched: true, event: LATCH_EVENT }, { latched: false, reason: "settled" }, { latched: false, reason: "no_cleanup_unknown" }]) {
+      reset({ storeResult, cleanupLatchResult });
+      const response = await POST(post(route, route.body));
+      assert.equal(response.status, 200);
+      // The same answer whatever the check did: no latch field, no switch event id.
+      assert.deepEqual(await response.json(), answer);
+      assert.deepEqual(world.boundaries, [
+        { operation: "decision_maker_cleanup_unknown", inBudget: true },
+        { operation: "decision_maker_cleanup_latch", inBudget: true },
+      ]);
+      assert.deepEqual(world.calls.map((call) => call.store), ["recordDecisionMakerCleanupUnknown", "recordDecisionMakerCleanupLatch"]);
+      assert.deepEqual(world.logged, []);
+    }
+  }
+
+  // A check that cannot be written leaves the answer alone, and logs its code only.
+  for (const [error, code] of [
+    [Object.assign(new Error("database said something with a value in it"), { name: "AmuxDbBoundaryError", code: "AMUX_DB_OUTCOME_UNKNOWN" }), "AMUX_DB_OUTCOME_UNKNOWN"],
+    [new FakeRequestWriteError("settings_unreadable"), null],
+    [new Error("relation does not exist"), null],
+  ] as const) {
+    reset({ storeResult: answers.recorded[0], cleanupLatchError: error });
+    const response = await POST(post(route, route.body));
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), answers.recorded[1]);
+    assert.deepEqual(world.logged.map((line) => JSON.parse(line)), [{ subsystem: "amux", event: "dm_cleanup_latch_unsettled", code }]);
+    assert.doesNotMatch(world.logged.join("\n"), /value in it|relation/);
+    assert.deepEqual(world.internalErrors, []);
+  }
+
+  // A refusal writes nothing, so it runs no check; nor does an error of the report's own transaction.
+  for (const changes of [{ storeResult: { status: "refused", reason: "not_assigned" } }, { storeError: new Error("boundary failure") }]) {
+    reset(changes);
+    await POST(post(route, route.body));
+    assert.deepEqual(world.calls.map((call) => call.store), ["recordDecisionMakerCleanupUnknown"]);
+    assert.deepEqual(world.boundaries, [{ operation: "decision_maker_cleanup_unknown", inBudget: true }]);
+  }
+  // The validation latch check is the result route's, never this one's.
+  assert.ok(!world.calls.some((call) => call.store === "recordDecisionMakerValidationLatch"));
 });

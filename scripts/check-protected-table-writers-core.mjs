@@ -2216,10 +2216,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
     table: "AmuxDecisionMakerRequestEvent",
-    tableMentions: 8,
+    tableMentions: 12,
     writeVerbs: 4,
     reason:
-      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08; a judgment's closing kinds since S1e), in the stale-close candidates' NOT EXISTS over the same closing kinds (S1g, 2026-10-12), in the proposal timeline of section 4's report (S1e), in the events of Admin's newest requests (S2, 2026-10-13), in one instance's newest terminal result kinds -- a bounded SELECT section 8's validation latch counts, read on its own and inside the routing's throughput SELECT (2026-10-17) -- and in its one constant INSERT ... RETURNING of an event; every value is a bound parameter. It never updates or deletes an event; a judgment's closing event is written by the judgment table's trigger.",
+      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08; a judgment's closing kinds since S1e), in the stale-close candidates' NOT EXISTS over the same closing kinds (S1g, 2026-10-12), in the proposal timeline of section 4's report (S1e), in the events of Admin's newest requests (S2, 2026-10-13), in one instance's newest terminal result kinds -- a bounded SELECT section 8's validation latch counts, read on its own and inside the routing's throughput SELECT (2026-10-17) -- in the database clock of one instance's newest cleanup_unknown report, an aggregate SELECT section 5's latch reads on its own, inside the routing's throughput SELECT and beside the result kinds in the transmission intent's one latch read (stage S2-2a3), and in its one constant INSERT ... RETURNING of an event, which since S2-2a3 also records section 5's report; every value is a bound parameter. It never updates or deletes an event; a judgment's closing event is written by the judgment table's trigger.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
@@ -2444,6 +2444,46 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 40,
     reason:
       "Creates the delivery event table, its CHECKs, its partial unique indexes (one decision, one outcome, one resolution per request) and foreign keys, and its guard, which refuses every update and delete and holds the delivery graph. Nothing here writes a delivery event.",
+  },
+  {
+    path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "Replaces the Decision Maker request event guard's body with the same body and section 5's cleanup_unknown transition (docs/policy/amux-decision-maker.md §5, §10, stage S2-2a3). Its two AdminAuditLog mentions are the guard's two SELECT EXISTS reads, the judgment audit join and the system audit check, unchanged from 20261008130100; the report's audit is the system check's existing rule. It never writes AdminAuditLog; its verbs are the kind CHECK's ALTER TABLE and DROP CONSTRAINT and the 'INSERT' the guard compares TG_OP with.",
+  },
+  {
+    path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The same function body reads the newest kill switch and instance events under the shared switch gate, unchanged from 20261008130100; a cleanup report reads neither. It writes no switch event: the report's latch is the switch store's, written by the application.",
+  },
+  {
+    path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
+    table: "AmuxDecisionMakerRequest",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The same function body reads the request row and names the request as a judgment audit's target type, unchanged from 20261008130100. It writes no request.",
+  },
+  {
+    path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
+    table: "AmuxDecisionMakerRequestEvent",
+    tableMentions: 5,
+    writeVerbs: 3,
+    reason:
+      "Replaces the request event table's kind CHECK with cleanup_unknown added, adds its one-per-request partial unique index and the partial index on the instance and clock of its reports, and replaces the event guard, which reads the request's events after the per-request lock and names the event table as a system audit's target type. Nothing here inserts, updates or deletes an event.",
+  },
+  {
+    path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
+    table: "AmuxDecisionMakerJudgment",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The same function body reads a judgment's closing event beside its judgment row, unchanged from 20261008130100. Nothing here writes a judgment.",
   },
   {
     path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
@@ -2969,6 +3009,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 36,
     reason:
       "Thirty-six statements in the judgment and delivery migration's functions, all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp. Thirty-five read: the replaced event guard's request row, event aggregate and switch events, the audit read for a judgment's closing event and the audit read for a system event (5); the replaced body guard's three delete-time and seven insert-time reads, as in S1d (10); the replaced retention guard's four (4) and key guard's five (5), as in S1d; the judgment guard's request row, event aggregate, result detail, kill switch, bodies and person's audit (6); and the delivery guard's judgment, delivery aggregate and kill switch, the audit read for a person's resolution and the audit read for the router's events (5). One writes: the judgment's AFTER INSERT trigger inserts the request's closing event, whose guard then checks it. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING.",
+  },
+  {
+    path: "prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql",
+    count: 5,
+    reason:
+      "The five reads of the Decision Maker request event guard, unchanged from 20261008130100 but for section 5's cleanup_unknown flag in its event aggregate (stage S2-2a3): EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp -- the request row, the aggregate of its events after the per-request lock, the newest kill switch and instance events under the shared switch gate, the audit read for a judgment's closing event and the audit read for a system event. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",

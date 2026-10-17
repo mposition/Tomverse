@@ -1814,6 +1814,29 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   것은 운영자의 `amux.decision.latch_release`뿐입니다. cleanup_unknown 보고는 원장 사건 종류가 필요해 migration을 갖는 별도
   조각입니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 + setup + fence이고, request unit 테스트가 그 셈을, request·body
   DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
+- **S2-2a3(cleanup_unknown)**: `prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql`,
+  `app/api/internal/amux/decision-maker/cleanup/unknown/route.ts`, request store의 `recordDecisionMakerCleanupUnknown()`·
+  `recordDecisionMakerCleanupLatch()`·`readDecisionMakerInstanceLatchInputs()`·`readDecisionMakerInstanceNewestCleanupUnknown()`,
+  request core의 `dmCleanupLatchDecision()`·`dmOwedLatchReason()`, `lib/amux/decisionMakerInternalRoute.ts`의
+  `settleDmCleanupLatch()`, `lib/amux/dbBoundary.ts`의 `decisionMakerCleanupUnknown`(상한 9)·`decisionMakerCleanupLatch`(10),
+  `lib/amux/decisionMakerRetentionSweep.ts`의 인스턴스별 첫 확인. docs/policy/amux-decision-maker.md §5의 "지웠는지 확인하지 못하면
+  `cleanup_unknown`으로 두고 그 인스턴스를 `off`로 latch한다"입니다. broker가 요청 자신의 인스턴스로 보고하면 원장에 사건 종류
+  `cleanup_unknown`(열세 번째 종류)이 그 인스턴스 actor의 `amux.decision.cleanup_unknown` 감사와 같은 트랜잭션에 남습니다. **요청당
+  하나이고**(부분 유일 index와 trigger), 배정 뒤에만 받으며(broker는 전송 의도 전에 요청 디렉터리를 만듭니다), 마감이 없고, 요청이
+  닫힌 뒤·결과 뒤·kill switch 중에도 받습니다. **닫힘 종류가 아닙니다** — docs/policy/amux-decision-maker.md §6의 종결 결과도 사람의 판정도 아니므로 보고 전에 저장된
+  제안은 운영자에게 열린 채 남고, 닫힌 뒤 온 보고도 기록됩니다. 그래서 닫힘 목록과 그것을 쓰는 guard·store 읽기는 바뀌지 않습니다.
+  같은 보고를 다시 보내면 기록된 사건을 돌려주고 아무것도 쓰지 않으며, 다른 인스턴스의 보고는 그 전에 거절합니다. **latch는 보고가
+  commit된 뒤 별도 경계에서 씁니다**(보고 7 + 스위치 읽기 + latch 5는 setup·fence와 15로 docs/policy/amux-decision-maker.md §9의 12를
+  넘음) — route는 기록했든 이미 있었든 그 확인을 돌리고, 실패해도 답은 보고의 것이며 로그는 코드만입니다. 판정 입력은 인스턴스의
+  가장 새 보고 하나뿐입니다: 가장 새 스위치 사건 뒤의 보고는 밀린(owed) latch이고, 그 뒤의 latch나 사람의 변경(해제 포함)이 있으면
+  끝난 것입니다. 그래서 재전송·재확인·해제 뒤 늦은 재전송은 다시 끄지 않습니다. 같은 ms면 사람의 사건은 밀린 쪽(latch가 빨라지는
+  쪽), 시스템 사건은 끝난 쪽입니다. docs/policy/amux-decision-maker.md §8과 달리 다른 원인의 latch 뒤에 온 보고는 다시 latch합니다(두 번째 원인은 두 번째 기록).
+  **밀린 latch는 쓰이기 전에도 인스턴스를 끕니다** — 라우팅은 처리량 문장에, 전송 의도는 결과 종류 읽기 문장에 가장 새 보고 시계를
+  실어(문장 수 그대로) `instance_off`로 막고, 전송 의도는 밀린 latch를 같은 트랜잭션에 씁니다. 둘 다 밀렸으면 `cleanup_latch`가
+  먼저입니다. 15분 sweep은 인스턴스마다 정리 latch 확인 뒤 docs/policy/amux-decision-maker.md §8 확인을 하며 각 확인이 따로 실패 경계입니다. DB trigger는 원장 삽입 때
+  밀린 latch를 보지 않고, latch는 끄기만 하므로 kill switch를 보지 않습니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 +
+  setup + fence이고, request unit 테스트가 그 셈을, request DB 테스트가 하나 줄인 상한의 거부를 고정합니다. Admin 화면 표시는
+  없습니다.
 - **S2-3a(전용 launcher의 결정적 핵심)**: `lib/amux/decisionMakerLauncherCore.ts`,
   `lib/amux/decisionMakerLauncherFs.ts`, `lib/amux/decisionMakerLauncherProcess.ts`,
   `tests/amuxDecisionMakerLauncherCore.test.mjs`, `tests/amuxDecisionMakerLauncherFs.test.mjs`,

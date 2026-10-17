@@ -767,6 +767,8 @@ const requestRow = (overrides = {}) => ({
   terminalResultKind: null,
   terminalResultDigest: null,
   resultUnknown: false,
+  cleanupUnknownEventId: null,
+  cleanupUnknownAtEpochMs: null,
   closingKind: null,
   probedRejection: null,
   ...overrides,
@@ -835,8 +837,11 @@ const recordingTx = ({
       if (sql.includes('LEFT JOIN "AmuxDecisionMakerRequest" r')) {
         return Promise.resolve([{ ...ROUTING_NO_REQUEST, ...(existing ?? {}), dbNowEpochMs: BigInt(NOW) }]);
       }
-      // The routing's throughput read carries the instance's result kinds since 2026-10-17 (none here).
-      if (sql.includes('AS "lastHour"')) return Promise.resolve([{ lastHour: 0n, lastDay: 0n, resultKinds: [] }]);
+      // The routing's throughput read carries the instance's result kinds since 2026-10-17, and its newest
+      // cleanup report since stage S2-2a3 (none here).
+      if (sql.includes('AS "lastHour"')) {
+        return Promise.resolve([{ lastHour: 0n, lastDay: 0n, resultKinds: [], newestCleanupUnknownAtEpochMs: null }]);
+      }
       if (sql.includes('INSERT INTO "AmuxDecisionMakerResultDetail"')) {
         return Promise.resolve([{ details: registryHoldsKey ? 1n : 0n, fields: registryHoldsKey ? values[DETAIL.fields] : [] }]);
       }
