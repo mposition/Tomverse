@@ -110,7 +110,18 @@ const ACCOUNT = (id: unknown, action: string) =>
 const COMPETITOR_DECISION = (id: unknown) =>
   `/api/admin/marketing/competitors/${encodeURIComponent(String(id))}/decision`;
 
-/** What the person typed into a host or page box, as the list the route parses. */
+/**
+ * What the person typed into a page box: one URL per line. Not split on
+ * commas, which a URL may contain.
+ */
+const pageList = (value: string) =>
+  value
+    .split(/?
+/u)
+    .map((page) => page.trim())
+    .filter((page) => page !== "");
+
+/** What the person typed into a host box, as the list the route parses. */
 const hostList = (value: string) =>
   value
     .split(/[\s,]+/u)
@@ -815,7 +826,7 @@ function MarketingCompetitorCreate({
       competitorId: values.competitorId.trim(),
       displayName: values.displayName,
       officialHosts: hostList(values.officialHosts),
-      trackedPages: hostList(values.trackedPages),
+      trackedPages: pageList(values.trackedPages),
     }),
   };
 
@@ -890,7 +901,7 @@ function competitorActions(row: Row, m: Record<string, string>): MarketingAction
       ...expected,
       displayName: values.displayName,
       officialHosts: hostList(values.officialHosts),
-      trackedPages: hostList(values.trackedPages),
+      trackedPages: pageList(values.trackedPages),
     }),
   };
   if (row.status === "proposed") {
