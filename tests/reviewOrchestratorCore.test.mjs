@@ -240,6 +240,10 @@ test("rpc round-trips and the SSH command yields only its token", () => {
   const request = { command: "submit", scope: "spaces; and `quotes` $(nope)" };
   const token = encodeRpc(request);
   assert.deepEqual(decodeRpc(token), request);
+  const longScope = "\u0001".repeat(6_000);
+  assert.deepEqual(decodeRpc(encodeRpc({ command: "submit", scope: longScope })),
+    { command: "submit", scope: longScope });
+  assert.throws(() => decodeRpc("A".repeat(65_537)), /rpc_invalid/);
   assert.equal(tokenFromSshCommand(`review-orchestrator rpc ${token}`), token);
   assert.throws(() => tokenFromSshCommand("rm -rf /"), /rpc_missing/);
   assert.throws(() => decodeRpc(encodeRpc({ command: "daemon" })), /rpc_command_invalid/);

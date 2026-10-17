@@ -3,7 +3,8 @@ import { after, beforeEach, test } from "node:test";
 
 import { Prisma } from "@prisma/client";
 
-import { runMarketingRetention } from "@/lib/marketingRetention";
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
+import { runMarketingRetention, type MarketingRetentionResult } from "@/lib/marketingRetention";
 import {
   MARKETING_RETENTION_ACTIONS,
   createMarketingChannel,
@@ -13,6 +14,13 @@ import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
 
 const DIGEST = "b".repeat(64);
+
+/** A run that was allowed to run, with its counts. */
+async function ran(): Promise<Extract<MarketingRetentionResult, { skipped: null }>> {
+  const result = await runMarketingRetention(prisma, {});
+  assert.equal(result.skipped, null);
+  return result as Extract<MarketingRetentionResult, { skipped: null }>;
+}
 const DAY = 24 * 60 * 60 * 1000;
 
 const reset = () =>
@@ -144,6 +152,7 @@ test("expired reports and old rejected drafts go, each with its audit row, and t
 
   const result = await runMarketingRetention(prisma);
   assert.deepEqual(result, {
+    skipped: null,
     MarketingReport: 1,
     AiVisibilityRun: 0,
     MarketingPost: 1,
@@ -188,6 +197,7 @@ test("a run with nothing due writes nothing", async () => {
   await channel();
   const result = await runMarketingRetention(prisma);
   assert.deepEqual(result, {
+    skipped: null,
     MarketingReport: 0,
     AiVisibilityRun: 0,
     MarketingPost: 0,
@@ -196,6 +206,34 @@ test("a run with nothing due writes nothing", async () => {
     MarketingPostHistory: 0,
   });
   assert.equal(await prisma.marketingReport.count({ where: { kind: "retention_run" } }), 0);
+});
+
+test("with the kill switch on, retention changes nothing at all and says it was skipped", async () => {
+  const row = await channel();
+  const expired = await agedShadowReport();
+  const oldDraft = await agedPost(row.id, 100);
+  const contentDue = await agedPost(row.id, 800, {
+    status: "removed_by_platform",
+    publishAttempt: 1,
+    publishedAt: new Date(Date.now() - 770 * DAY),
+    ...(() => {
+      const key = `post-${Math.random().toString(36).slice(2)}`;
+      return { logicalKey: key, providerRequestKey: key };
+    })(),
+  });
+
+  const result = await runMarketingRetention(prisma, { [MARKETING_AUTOMATION_KILL_SWITCH_ENV]: "incident-2026-10-17" });
+  assert.deepEqual(result, { skipped: "kill_switch" });
+
+  assert.equal(await prisma.marketingReport.count({ where: { id: expired.id } }), 1);
+  assert.equal(await prisma.marketingPost.count({ where: { id: oldDraft.id } }), 1);
+  const still = await prisma.marketingPost.findUniqueOrThrow({ where: { id: contentDue.id } });
+  assert.notEqual(still.envelope, null);
+  assert.equal(await prisma.marketingReport.count({ where: { kind: "retention_run" } }), 0);
+
+  // Off again, the same rows go on the next run.
+  const after = await runMarketingRetention(prisma, {});
+  assert.equal(after.skipped, null);
 });
 
 test("outside retention the same deletes are refused by the database", async () => {
@@ -244,7 +282,7 @@ test("content goes twenty-four months after publication; the row, its digest and
     ],
   });
 
-  const result = await runMarketingRetention(prisma);
+  const result = await ran();
   assert.equal(result.MarketingPostContent, 1);
 
   const after = await prisma.marketingPost.findUniqueOrThrow({ where: { id: due.id } });
@@ -282,7 +320,7 @@ test("content goes twenty-four months after publication; the row, its digest and
   );
 
   // Done once: the next run finds nothing.
-  assert.equal((await runMarketingRetention(prisma)).MarketingPostContent, 0);
+  assert.equal((await ran()).MarketingPostContent, 0);
 });
 
 test("attempt and webhook entries older than ninety days become a summary, and only those", async () => {
@@ -309,7 +347,7 @@ test("attempt and webhook entries older than ninety days become a summary, and o
     history: [draftEntry, { ...oldAttempt, outcome: "failed" }],
   });
 
-  const result = await runMarketingRetention(prisma);
+  const result = await ran();
   assert.equal(result.MarketingPostHistory, 1);
 
   const after = await prisma.marketingPost.findUniqueOrThrow({ where: { id: due.id } });
@@ -342,7 +380,7 @@ test("attempt and webhook entries older than ninety days become a summary, and o
   assert.equal((audits[0].metadata as { removedEntryCount?: number }).removedEntryCount, 2);
 
   // The summaries stay, the young entry is still young: nothing more to do.
-  assert.equal((await runMarketingRetention(prisma)).MarketingPostHistory, 0);
+  assert.equal((await ran()).MarketingPostHistory, 0);
 });
 
 test("outside retention the same content purge is refused by the database", async () => {

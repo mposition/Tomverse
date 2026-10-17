@@ -147,7 +147,9 @@ test("market facts are recorded with the facts from no official host counted, no
     assert.equal(metadata.kind, "market_intel");
     assert.equal(metadata.droppedFactCount, 1);
     assert.match(String(metadata.reportDigest), /^[0-9a-f]{64}$/);
-    assert.equal(JSON.stringify(metadata).includes("poe.com"), false, "no source URL in the audit row");
+    // No value in the audit row is a URL: the source stays with the report.
+    const values = Object.values(metadata).filter((value): value is string => typeof value === "string");
+    assert.equal(values.some((value) => /^[a-z][a-z0-9+.-]*:\/\//iu.test(value)), false, "no URL in the audit row");
   }));
 
 test("a resend is the same report only if it is the same bytes, and is read back after the gates close", () =>
