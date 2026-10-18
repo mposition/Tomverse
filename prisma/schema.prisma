@@ -8800,6 +8800,13 @@ model AmuxDecisionMakerSwitchEvent {
   /// cleanup latch (a CHECK), once per report, and only a report of the
   /// latch's own instance (the guard).
   cleanupEventId String?  @unique
+  /// Since migration 20261017200000_amux_decision_maker_validation_count_boundary:
+  /// the newest request ledger event sequence committed before this event (0
+  /// with none), set by the insert trigger whatever the writer supplies; NULL
+  /// on an event written before that migration. After a release, the
+  /// validation count of docs/policy/amux-decision-maker.md §8 reads the
+  /// results above it.
+  ledgerSequence BigInt?
   /// Overwritten by the insert trigger from the database clock.
   createdAt   DateTime @default(now()) @db.Timestamptz(3)
 

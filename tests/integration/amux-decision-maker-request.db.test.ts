@@ -1272,13 +1272,13 @@ test("throughput counts requests routed to one instance for a proposal in the tr
   await backdatedRequest(25 * 60 * MINUTE);
   await insertRequest(requestRow({ route: "operator", refusalCodes: ["instance_off"] }));
   await insertRequest(requestRow({ askingProvider: "codex", instance: ANTHROPIC }));
-  assert.deepEqual(await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, sinceMs: null }), {
+  assert.deepEqual(await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary: { kind: "none" } }), {
     lastHour: 2,
     lastDay: 3,
     resultKindsNewestFirst: [],
     newestCleanupUnknownEventId: null,
   });
-  assert.deepEqual(await readDecisionMakerInstanceLoad(prisma, { instance: ANTHROPIC, sinceMs: null }), {
+  assert.deepEqual(await readDecisionMakerInstanceLoad(prisma, { instance: ANTHROPIC, boundary: { kind: "none" } }), {
     lastHour: 1,
     lastDay: 1,
     resultKindsNewestFirst: [],
@@ -1286,21 +1286,42 @@ test("throughput counts requests routed to one instance for a proposal in the tr
   });
 });
 
-test("the routing's load read carries the instance's result kinds since a boundary, newest first", async () => {
+test("the routing's load read carries the instance's result kinds inside a boundary, newest first", async () => {
   // The database clock as epoch milliseconds, read in SQL as the stores read it.
   const dbClockMs = async () =>
     Number((await prisma.$queryRaw<Array<{ ms: bigint }>>`SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "ms"`)[0]!.ms);
+  const newestLedgerSequence = async () =>
+    String((await prisma.$queryRaw<Array<{ s: bigint }>>`SELECT coalesce(max("sequence"), 0) AS "s" FROM "AmuxDecisionMakerRequestEvent"`)[0]!.s);
+  await resultFor(await transmittedFor(), "validation_failure");
   const before = await dbClockMs();
+  const watermark = await newestLedgerSequence();
   await pause();
   await resultFor(await transmittedFor(), "validation_failure");
   await resultFor(await transmittedFor(), "proposal");
   await resultFor(await transmittedFor(ANTHROPIC), "timeout", ANTHROPIC);
-  const load = await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, sinceMs: before });
-  assert.deepEqual(load.resultKindsNewestFirst, ["proposal", "validation_failure"]);
+  // No validation latch, or one standing: every result of the instance (the decision ignores them while it stands).
+  for (const boundary of [{ kind: "none" }, { kind: "latched" }] as const) {
+    const load = await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary });
+    assert.deepEqual(load.resultKindsNewestFirst, ["proposal", "validation_failure", "validation_failure"]);
+  }
+  // After a release: above the ledger sequence it was written after (stage S2-2a4) ...
+  const released = { kind: "released", afterLedgerSequence: watermark, releasedAtMs: 0 } as const;
+  assert.deepEqual((await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary: released })).resultKindsNewestFirst, [
+    "proposal",
+    "validation_failure",
+  ]);
+  // ... or, for a release written before that number was recorded, at or after its clock.
+  const legacy = { kind: "released", afterLedgerSequence: null, releasedAtMs: before + 1 } as const;
+  assert.deepEqual((await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary: legacy })).resultKindsNewestFirst, [
+    "proposal",
+    "validation_failure",
+  ]);
   // A boundary after them reads none of them.
   await pause();
-  const later = await dbClockMs();
-  assert.deepEqual((await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, sinceMs: later })).resultKindsNewestFirst, []);
+  const later = { kind: "released", afterLedgerSequence: null, releasedAtMs: await dbClockMs() } as const;
+  assert.deepEqual((await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary: later })).resultKindsNewestFirst, []);
+  const above = { kind: "released", afterLedgerSequence: await newestLedgerSequence(), releasedAtMs: 0 } as const;
+  assert.deepEqual((await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary: above })).resultKindsNewestFirst, []);
 });
 
 // ---------------------------------------------------------------------------
@@ -1981,8 +2002,9 @@ test("§5: between a report and its latch, a routing goes to the operator and an
   // The check that follows owes nothing: one latch.
   assert.deepEqual(await cleanupLatch(), { latched: false, reason: "latched" });
 
-  // Released, then a validation run and a new report both owed: the report's latch is the one written,
-  // and §8's check finds the instance latched.
+  // Released, then a validation run and a new report both owed: the report's latch is the one written
+  // first. Since stage S2-2a4 it does not settle the run -- only a validation latch does -- so §8's
+  // check writes that latch too, and then owes nothing.
   await pause();
   await setSwitch(OPENAI, "proposal");
   await pause();
@@ -1993,6 +2015,8 @@ test("§5: between a report and its latch, a routing goes to the operator and an
   );
   assert.equal(refused.recorded, false);
   assert.deepEqual((await systemLatchesOf(OPENAI)).map((row) => row.reasonCode), ["cleanup_latch", "cleanup_latch"]);
+  assert.equal((await validationLatch()).latched, true);
+  assert.deepEqual((await systemLatchesOf(OPENAI)).map((row) => row.reasonCode), ["cleanup_latch", "cleanup_latch", "validation_latch"]);
   assert.deepEqual(await validationLatch(), { latched: false, reason: "already_latched" });
 });
 
@@ -2196,4 +2220,255 @@ test("§5: a cleanup latch names a cleanup_unknown report of its own instance, o
     SELECT "cleanupEventId" FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = ${OPENAI} AND "actorKind" = 'system'
   `;
   assert.deepEqual(named, [{ cleanupEventId: report.id }]);
+});
+
+// ---------------------------------------------------------------------------
+// §8's count boundary (stage S2-2a4): "해제는 운영자만" -- only a validation
+// latch and the release that follows it bound the count. A person's ordinary
+// mode change, a cleanup latch and its release do not; a failure is placed
+// before or after a release by the ledger's sequence, not by a clock.
+// ---------------------------------------------------------------------------
+
+const validationLatchesOf = async (scope: string) =>
+  (await switchEventsOf(scope)).filter((row) => row.reasonCode === "validation_latch");
+
+const routeOne = () => prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { keyRing: RING, binding: binding(), card: CARD }));
+
+const intentFor = (requestId: string) =>
+  prisma.$transaction((tx) =>
+    recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission: TRANSMISSION_NONE, requireLeaseAt: noLease }),
+  );
+
+test("§8 S2-2a4: a mode saved after the third failure is not a release; routing and intent refuse as off, and the intent writes the latch", async () => {
+  const pending = await STATE_BUILDERS.assigned!();
+  for (let index = 0; index < 3; index += 1) await resultFor(await transmittedFor(), "validation_failure");
+  // The latch check after the third failure did not commit, and the operator saves the instance's mode again.
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.mode");
+  await pause();
+  assert.deepEqual(await validationLatchesOf(OPENAI), []);
+
+  const routed = await routeOne();
+  assert.deepEqual([routed.route, routed.refusalCodes], ["operator", ["instance_off"]]);
+  const intent = await intentFor(pending);
+  assert.deepEqual([intent.recorded, intent.recorded ? null : intent.reason], [false, "instance_off"]);
+  assert.deepEqual((await rowsOf(pending)).map((row) => row.kind), ["assign"]);
+  assert.equal((await validationLatchesOf(OPENAI)).length, 1);
+  assert.equal((await readDecisionMakerSwitches(prisma)).instances[OPENAI], "off");
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "already_latched" });
+});
+
+test("§8 S2-2a4: off and back to proposal after the third failure is not a release; the check writes the latch", async () => {
+  for (let index = 0; index < 3; index += 1) await resultFor(await transmittedFor(), "validation_failure");
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "off")).action, "amux.decision.mode");
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.mode");
+  await pause();
+  assert.equal((await validationLatch()).latched, true);
+  assert.equal((await validationLatchesOf(OPENAI)).length, 1);
+  assert.equal((await readDecisionMakerSwitches(prisma)).instances[OPENAI], "off");
+  assert.deepEqual(await decisionMakerRetentionSweepDeps().validationLatch(OPENAI), { latched: false, reason: "already_latched" });
+});
+
+test("§8 S2-2a4: after a release, a mode change does not restart the count; a failure after the release counts with the next ones", async () => {
+  const inFlight = await transmittedFor();
+  for (let index = 0; index < 3; index += 1) await resultFor(await transmittedFor(), "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+  // The operator releases the latch and keeps the instance off.
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "off")).action, "amux.decision.latch_release");
+  await pause();
+  await resultFor(inFlight, "validation_failure");
+  // Proposal again: an ordinary mode change, which the count does not start from.
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.mode");
+  await pause();
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+  assert.equal((await validationLatchesOf(OPENAI)).length, 2);
+});
+
+test("§8 S2-2a4: a released run is not counted again, nor the failures that arrived while it stood", async () => {
+  const inFlight = [await transmittedFor(), await transmittedFor()];
+  for (let index = 0; index < 3; index += 1) await resultFor(await transmittedFor(), "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+  for (const id of inFlight) await resultFor(id, "validation_failure");
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "already_latched" });
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+  await pause();
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
+  assert.equal((await routeOne()).route, "dm_proposal");
+  // A later ordinary mode change leaves the release as the boundary.
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.mode");
+  await pause();
+  await resultFor(await transmittedFor(), "validation_failure");
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+});
+
+// A failure that committed before the release can share its database millisecond. The guard sets
+// every event's clock, so the failure is moved to the release's millisecond by hand, with the guard
+// disabled for that one update in the test's own transaction; its sequence stays before the release.
+const moveEventClock = (eventId: string, createdAt: Date) =>
+  prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerRequestEvent" DISABLE TRIGGER "amux_decision_maker_request_event_guard"`);
+    await tx.$executeRaw`UPDATE "AmuxDecisionMakerRequestEvent" SET "createdAt" = ${createdAt} WHERE "id" = ${eventId}`;
+    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerRequestEvent" ENABLE TRIGGER "amux_decision_maker_request_event_guard"`);
+  });
+
+const newestSwitchEventOf = async (scope: string) =>
+  (
+    await prisma.$queryRaw<Array<{ createdAt: Date; actorKind: string }>>`
+      SELECT "createdAt", "actorKind" FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = ${scope} ORDER BY "sequence" DESC LIMIT 1
+    `
+  )[0]!;
+
+const resultEventOf = async (requestId: string) => (await rowsOf(requestId)).find((row) => row.kind === "result")!;
+
+test("§8 S2-2a4: a failure recorded before the release, in the release's millisecond, is not counted after it", async () => {
+  const inFlight = await transmittedFor();
+  for (let index = 0; index < 3; index += 1) await resultFor(await transmittedFor(), "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+  await resultFor(inFlight, "validation_failure");
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+  const release = await newestSwitchEventOf(OPENAI);
+  await moveEventClock((await resultEventOf(inFlight)).id, release.createdAt);
+  assert.equal((await resultEventOf(inFlight)).createdAt.getTime(), release.createdAt.getTime(), "the failure shares the release's millisecond");
+
+  await resultFor(await transmittedFor(), "validation_failure");
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
+  assert.equal((await routeOne()).route, "dm_proposal");
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+});
+
+test("§8 S2-2a4: the latched run's own last failure in the release's millisecond is not latched again", async () => {
+  const third = await transmittedFor();
+  await resultFor(await transmittedFor(), "validation_failure");
+  await resultFor(await transmittedFor(), "validation_failure");
+  await resultFor(third, "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+  const release = await newestSwitchEventOf(OPENAI);
+  await moveEventClock((await resultEventOf(third)).id, release.createdAt);
+  await resultFor(await transmittedFor(), "validation_failure");
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
+  assert.equal((await validationLatchesOf(OPENAI)).length, 1);
+});
+
+test("§8 S2-2a4: a cleanup latch does not settle three validation failures; the check writes their own latch, and one release ends both", async () => {
+  for (let index = 0; index < 3; index += 1) await resultFor(await transmittedFor(), "validation_failure");
+  await reportCleanup(await transmittedFor());
+  assert.equal((await cleanupLatch()).latched, true);
+  assert.equal((await validationLatch()).latched, true);
+  assert.deepEqual((await systemLatchesOf(OPENAI)).map((row) => row.reasonCode), ["cleanup_latch", "validation_latch"]);
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+  await pause();
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
+  assert.deepEqual(await cleanupLatch(), { latched: false, reason: "latched" });
+  assert.equal((await routeOne()).route, "dm_proposal");
+});
+
+const ledgerSequencesOf = (scope: string) =>
+  prisma.$queryRaw<Array<{ ledgerSequence: bigint | null; actorKind: string }>>`
+    SELECT "ledgerSequence", "actorKind" FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = ${scope} ORDER BY "sequence"
+  `;
+
+const newestLedgerSequence = async () =>
+  (await prisma.$queryRaw<Array<{ s: bigint }>>`SELECT coalesce(max("sequence"), 0) AS "s" FROM "AmuxDecisionMakerRequestEvent"`)[0]!.s;
+
+test("§8 S2-2a4: every switch event records the newest ledger sequence committed before it, whatever the writer sent", async () => {
+  // beforeEach's two events, written on an empty ledger.
+  assert.deepEqual((await ledgerSequencesOf(OPENAI)).map((row) => row.ledgerSequence), [BigInt(0)]);
+  assert.deepEqual((await ledgerSequencesOf(ANTHROPIC)).map((row) => row.ledgerSequence), [BigInt(0)]);
+  // Any instance's events move it: it is the ledger's, not the scope's.
+  await resultFor(await transmittedFor(ANTHROPIC), "proposal", ANTHROPIC);
+  await setSwitch(OPENAI, "proposal");
+  const afterAnthropic = await newestLedgerSequence();
+  assert.ok(afterAnthropic > BigInt(0));
+  assert.equal((await ledgerSequencesOf(OPENAI)).at(-1)!.ledgerSequence, afterAnthropic);
+  // A latch written by hand with a number of its own gets the ledger's instead.
+  await resultFor(await transmittedFor(), "validation_failure");
+  await prisma.$transaction(async (tx) => {
+    const id = randomUUID();
+    const auditLogId = await writeSystemAuditLog({
+      tx,
+      systemActor: "amux-decision-maker-openai",
+      action: "amux.decision.latch",
+      targetType: "AmuxDecisionMakerSwitchEvent",
+      targetId: id,
+      summary: "test",
+    });
+    await tx.$executeRaw`
+      INSERT INTO "AmuxDecisionMakerSwitchEvent"
+        ("id", "scope", "value", "reasonCode", "actorKind", "actorUserId", "auditLogId", "ledgerSequence")
+      VALUES (${id}, ${OPENAI}, 'off', 'validation_latch', 'system', NULL, ${auditLogId}, 999999)
+    `;
+  });
+  assert.deepEqual((await ledgerSequencesOf(OPENAI)).at(-1), { ledgerSequence: await newestLedgerSequence(), actorKind: "system" });
+  // The release after it, through the store, the same.
+  await resultFor(await transmittedFor(ANTHROPIC), "timeout", ANTHROPIC);
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+  assert.deepEqual((await ledgerSequencesOf(OPENAI)).at(-1), { ledgerSequence: await newestLedgerSequence(), actorKind: "human" });
+});
+
+// A release written before migration 20261017200000 has no ledger sequence. The guard sets it on every
+// insert, so it is cleared by hand, with the guard disabled for that one update in the test's own
+// transaction; the count then falls back to the release's clock, a shared millisecond counted.
+const clearLedgerSequenceOfNewest = (scope: string) =>
+  prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerSwitchEvent" DISABLE TRIGGER "amux_decision_maker_switch_event_guard"`);
+    await tx.$executeRaw`
+      UPDATE "AmuxDecisionMakerSwitchEvent" SET "ledgerSequence" = NULL
+      WHERE "sequence" = (SELECT max("sequence") FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = ${scope})
+    `;
+    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerSwitchEvent" ENABLE TRIGGER "amux_decision_maker_switch_event_guard"`);
+  });
+
+test("§8 S2-2a4: a release with no ledger sequence (written before it was recorded) is placed by its clock, a shared millisecond counted", async () => {
+  const inFlight = await transmittedFor();
+  for (let index = 0; index < 3; index += 1) await resultFor(await transmittedFor(), "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+  await resultFor(inFlight, "validation_failure");
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+  await clearLedgerSequenceOfNewest(OPENAI);
+  const release = await newestSwitchEventOf(OPENAI);
+  assert.equal((await ledgerSequencesOf(OPENAI)).at(-1)!.ledgerSequence, null);
+  // A failure before it, in its millisecond, counts after it: the side that latches sooner.
+  await moveEventClock((await resultEventOf(inFlight)).id, release.createdAt);
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+});
+
+test("§8 S2-2a4: releasing a cleanup latch does not restart the validation count", async () => {
+  const pending = await STATE_BUILDERS.assigned!();
+  await resultFor(await transmittedFor(), "validation_failure");
+  await resultFor(await transmittedFor(), "validation_failure");
+  await reportCleanup(await transmittedFor());
+  assert.equal((await cleanupLatch()).latched, true);
+  await pause();
+  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+  await pause();
+  await resultFor(await transmittedFor(), "validation_failure");
+  // Three in a row: owed before the check runs, so a routing and an intent refuse, and the intent writes it.
+  assert.deepEqual((await routeOne()).refusalCodes, ["instance_off"]);
+  const intent = await intentFor(pending);
+  assert.deepEqual([intent.recorded, intent.recorded ? null : intent.reason], [false, "instance_off"]);
+  assert.deepEqual((await systemLatchesOf(OPENAI)).map((row) => row.reasonCode), ["cleanup_latch", "validation_latch"]);
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "already_latched" });
 });

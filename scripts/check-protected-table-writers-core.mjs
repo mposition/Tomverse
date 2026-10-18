@@ -2152,10 +2152,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerSwitchStore.ts",
     table: "AmuxDecisionMakerSwitchEvent",
-    tableMentions: 6,
+    tableMentions: 8,
     writeVerbs: 3,
     reason:
-      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is three constant SELECTs (the newest event of every scope; of one scope for a person's change; and since 2026-10-17 the newest event of every scope with its actor and clock, which the request ledger's writers read for the boundary section 8's validation count starts from -- since stage S2-2a3 with, in a subquery of the same statement, the cleanup_unknown report each scope's newest cleanup_latch names, the one report that latch settles) and two constant INSERT ... RETURNING statements, a person's event and a latch, which since S2-2a3 names a cleanup latch's report; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is three constant SELECTs (the newest event of every scope; of one scope for a person's change; and since 2026-10-17 the newest value of every scope, which the request ledger's writers read with -- since stage S2-2a3, in a subquery of the same statement -- the cleanup_unknown report each scope's newest cleanup_latch names, the one report that latch settles, and -- since stage S2-2a4, in two LATERAL subqueries of the same statement over the same table -- the scope's newest validation_latch and the first person's event after it with that release's ledger sequence and clock, where section 8's validation count starts) and two constant INSERT ... RETURNING statements, a person's event and a latch, which since S2-2a3 names a cleanup latch's report; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
@@ -2484,6 +2484,30 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 10,
     reason:
       "The same function body reads a judgment's closing event beside its judgment row, unchanged from 20261008130100. Nothing here writes a judgment.",
+  },
+  {
+    path: "prisma/migrations/20261017200000_amux_decision_maker_validation_count_boundary/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "Replaces the Decision Maker switch event guard's body with the same body and the newest request ledger sequence recorded on every switch event (docs/policy/amux-decision-maker.md §8, §10, stage S2-2a4). Its two AdminAuditLog mentions are the guard's SELECT EXISTS reads of a person's and of the system's audit row, unchanged from 20261017160000. It never writes AdminAuditLog; its verbs are the switch event's ALTER TABLE ... ADD COLUMN, the 'INSERT' the guard compares TG_OP with, and a word of a comment in the function body.",
+  },
+  {
+    path: "prisma/migrations/20261017200000_amux_decision_maker_validation_count_boundary/migration.sql",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 4,
+    writeVerbs: 3,
+    reason:
+      "Adds the switch event's ledgerSequence -- the newest request ledger sequence committed before the event, where section 8's count places a result after a release -- and replaces the switch event guard with its previous body (20261017160000), which reads the scope's newest event and names the table as both audits' target type, plus the line that sets the column as the guard sets the clock. Nothing here inserts, updates or deletes a switch event.",
+  },
+  {
+    path: "prisma/migrations/20261017200000_amux_decision_maker_validation_count_boundary/migration.sql",
+    table: "AmuxDecisionMakerRequestEvent",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The replaced switch guard reads whether a cleanup latch's named event is a cleanup_unknown report of its instance, unchanged from 20261017160000, and since stage S2-2a4 the request event table's highest sequence, which it records on the switch event. Nothing here inserts, updates or deletes a request event.",
   },
   {
     path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
@@ -3015,6 +3039,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 9,
     reason:
       "Nine reads in the two replaced guards (stage S2-2a3), all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp. The request event guard's five, unchanged from 20261008130100 but for section 5's cleanup_unknown flag in its event aggregate: the request row, the aggregate of its events after the per-request lock, the newest kill switch and instance events under the shared switch gate, the audit read for a judgment's closing event and the audit read for a system event. The switch event guard's four: its three unchanged from 20261008090000 (the scope's newest event after the per-scope lock, the person's audit, the system audit) and whether a cleanup latch's named event is a cleanup_unknown report of its instance. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261017200000_amux_decision_maker_validation_count_boundary/migration.sql",
+    count: 5,
+    reason:
+      "Five reads in the replaced switch event guard (stage S2-2a4), all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: its four unchanged from 20261017160000 (the scope's newest event after the per-scope lock, whether a cleanup latch's named event is a cleanup_unknown report of its instance, the person's audit, the system audit) and the request event table's highest sequence, which it records on the switch event. The schema is the trigger's own, quoted with %I; the values are bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",

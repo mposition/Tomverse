@@ -241,6 +241,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // no commit deadline: the report holds no deadline, and the ledger's
   // deferred check is unchanged and does not cover the new kind.
   "20261017160000_amux_decision_maker_cleanup_unknown",
+  // AMUX Decision Maker S2-2a4: the switch event's ledger sequence, where
+  // section 8's validation count starts after a release. It adds no commit
+  // deadline: a switch event holds none, and the ledger's deferred check is
+  // unchanged.
+  "20261017200000_amux_decision_maker_validation_count_boundary",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
