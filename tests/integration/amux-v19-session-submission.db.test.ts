@@ -58,7 +58,8 @@ import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
 import { readAmuxSessionAnalysisStopState,
   AmuxSessionAnalysisStopReadError } from
   "@/lib/amux/ideaSessionAnalysisStopRead";
-import { commitAmuxSessionBudgetOutcome } from
+import { AmuxSessionBudgetSettlementError,
+  commitAmuxSessionBudgetOutcome } from
   "@/lib/amux/ideaSessionAnalysisBudgetSettlementService";
 import { AmuxSessionBudgetResolutionError,
   commitAmuxSessionBudgetUnknownResolution,
@@ -463,10 +464,22 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
       priceVersionId, runner,
     })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
       error.code === "not_ready");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetOutcome(tx, {
+      claimId: first.claimId, outcome: "outcome_unknown",
+      inputTokens: null, outputTokens: null,
+      exactAgentClaim: { requestId: first.requestId,
+        reservationId: first.reservationId, ideaId: secondIdeaId,
+        invocationOrdinal: 0 },
+    })), (error: unknown) => error instanceof AmuxSessionBudgetSettlementError &&
+      error.code === "not_settleable");
   const settled = await prisma.$transaction((tx) =>
     commitAmuxSessionBudgetOutcome(tx, {
       claimId: first.claimId, outcome: "verified_success",
       inputTokens: 10, outputTokens: 20,
+      exactAgentClaim: { requestId: first.requestId,
+        reservationId: first.reservationId, ideaId: committedIdeaId,
+        invocationOrdinal: 0 },
     }));
   assert.equal(settled.status, "succeeded");
   assert.equal(settled.settledMicroUsd, "50");
