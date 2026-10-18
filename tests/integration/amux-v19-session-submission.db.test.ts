@@ -1878,10 +1878,12 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     digestKeyId: "synthetic-max-result-digest", digestKey: randomBytes(32) };
   let savedResult: Awaited<ReturnType<typeof commitAmuxMaxSessionResult>>;
   try {
-    savedResult = await prisma.$transaction((tx) =>
-      commitAmuxMaxSessionResult(tx, { ...resultIdentity,
+    savedResult = await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'Australia/Brisbane'");
+      return commitAmuxMaxSessionResult(tx, { ...resultIdentity,
         rawModelOutput: "{\"units\":[]}", inputTokens: 1001,
-        outputTokens: 1, keys: resultKeys }));
+        outputTokens: 1, keys: resultKeys });
+    });
   } finally {
     resultKeys.masterKey.fill(0);
     resultKeys.digestKey.fill(0);
