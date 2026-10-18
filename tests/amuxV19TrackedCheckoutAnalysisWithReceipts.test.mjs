@@ -1,19 +1,27 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { finishAmuxV19TrackedCheckoutWithReceipts,
+import { bindAmuxV19ClaimStopCheck,
+  finishAmuxV19TrackedCheckoutWithReceipts,
   runAmuxV19TrackedCheckoutAnalysisWithReceipts } from
   "../lib/amux/ideaLocalTrackedCheckoutAnalysisWithReceipts.mjs";
 
 const originEnv = "TOMVERSE_AMUX_V4_ANALYSIS_APP_ORIGIN";
 const previousOrigin = process.env[originEnv];
+const sessionOriginEnv = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN";
+const previousSessionOrigin = process.env[sessionOriginEnv];
 process.env[originEnv] = "https://tomverse.test/";
+process.env[sessionOriginEnv] = "https://tomverse.test/";
 after(() => {
   if (previousOrigin === undefined) delete process.env[originEnv];
   else process.env[originEnv] = previousOrigin;
+  if (previousSessionOrigin === undefined) delete process.env[sessionOriginEnv];
+  else process.env[sessionOriginEnv] = previousSessionOrigin;
 });
 
 const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
+const claimId = "ea86a25b-919f-4714-a3d8-45ef5a18b176";
+const reservationId = "ea86a25b-919f-4714-a3d8-45ef5a18b177";
 const evidenceId = "fbd49038-b8e0-4796-8530-a2adcb7d0dbd";
 const observed = {
   kind: "verified_success", cliStarted: true,
@@ -26,7 +34,8 @@ const observed = {
 };
 const input = (fetchImpl) => ({ origin: "https://tomverse.test/",
   agentSecret: "v19_analysis_agent_secret_01234567890123456789",
-  ideaId, referenceOrdinal: 0, commitSha: observed.commitSha,
+  ideaId, claimId, reservationId, referenceOrdinal: 0,
+  commitSha: observed.commitSha,
   excludedPathDigestKeyId: "checkout-digest-v1", fetchImpl });
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { "content-type": "application/json" },
@@ -40,6 +49,8 @@ test("invalid receipt binding refuses before the CLI can run", async () => {
     { ...input(fetchImpl), excludedPathDigestKeyId: undefined },
     { ...input(fetchImpl), excludedPathDigestKeyId: null },
     { ...input(fetchImpl), ideaId: undefined },
+    { ...input(fetchImpl), claimId: undefined },
+    { ...input(fetchImpl), reservationId: undefined },
   ]) {
     assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysisWithReceipts(invalid),
       { kind: "refused" });
@@ -47,6 +58,35 @@ test("invalid receipt binding refuses before the CLI can run", async () => {
       { kind: "refused" });
   }
   assert.equal(calls, 0);
+});
+
+test("checkout supervisor binds its stop check to the exact claim", async () => {
+  const urls = [];
+  const base = input(async (url) => {
+    urls.push(url);
+    return json({ claimId, reservationId, stop: false });
+  });
+  const stopCheck = bindAmuxV19ClaimStopCheck({
+    ...base, stopCheck: async () => false,
+  });
+  assert.equal(typeof stopCheck, "function");
+  assert.equal(await stopCheck(), false);
+  assert.deepEqual(urls, [
+    `https://tomverse.test/api/internal/amux/v19/session-analysis-stop?claimId=${claimId}&reservationId=${reservationId}`,
+  ]);
+  const mutable = { ...base };
+  const pinned = bindAmuxV19ClaimStopCheck(mutable);
+  mutable.claimId = ideaId;
+  assert.equal(await pinned(), false);
+  assert.equal(urls[1], urls[0]);
+  assert.equal(bindAmuxV19ClaimStopCheck({ ...base,
+    reservationId: undefined }), null);
+  assert.equal(bindAmuxV19ClaimStopCheck({ ...base,
+    origin: "https://other.test/" }), null);
+  assert.equal(await bindAmuxV19ClaimStopCheck({ ...base,
+    fetchImpl: async () => json({ claimId, reservationId, stop: true }) })(), true);
+  assert.equal(await bindAmuxV19ClaimStopCheck({ ...base,
+    fetchImpl: async () => { throw new Error("offline"); } })(), true);
 });
 
 test("the closed host switch returns a refusal without writing receipts", async () => {
