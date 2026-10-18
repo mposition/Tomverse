@@ -1933,15 +1933,19 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   쓰기(배정·폐기·전송 의도·영수증·`results/unknown`)의 결과를 모르거나 cleanup 보고가 기록되지 않으면(그 인스턴스의 latch를 확인하지
   못함) 다시 보내지 않고 **relay만 멈춥니다** — 새 질문을
   받지 않고 표시 해제만 계속하며, 사람이 bridge를 다시 시작할 때까지입니다. worker loop는 멈추지 않습니다. 표시는 결과와 무관하게
-  해제하고, 결과 마감이 broker 응답보다 먼저 오면 그때 해제한 뒤 broker 응답(정리 보고)은 계속 기다립니다. 해제를 확인하지 못한
-  표시와 이전 프로세스가 남긴 표시는 다음 scan 전에 풉니다. broker 응답은 이 요청·인스턴스의 것이고 결과 digest가 K_R로 다시 계산한
+  해제하고, 결과 마감이 broker 응답보다 먼저 오면 그때 해제한 뒤 broker 응답(정리 보고)은 계속 기다립니다. **매 tick 처음에 로컬
+  AMUX의 표시 목록 전체(`GET /api/dm-relay/pending`)를 읽어 모두 풉니다** — 질문 사이에는 진행 중인 요청이 없으므로 남은 표시는 전부
+  해제를 확인하지 못했거나 멈춘 프로세스가 남긴 것이고, 목록은 표의 것이라 카드의 위치·상태·revision과 무관합니다(검토
+  r-20261018-022220-384dfe). **scan은 카드 id 순서로 직전 scan이 연 마지막 카드 다음부터 최대 100개를 열고**(끝에서 처음으로
+  돌아감) 라우팅할 첫 질문에서 멈추므로, 처리한 질문이 `needsyou`에 남아 앞에 쌓여도 뒤의 질문이 굶지 않고, 한 scan의 일은
+  질문 하나입니다. broker 응답은 이 요청·인스턴스의 것이고 결과 digest가 K_R로 다시 계산한
   값과 같을 때만 믿으며, 그 밖은 잃은 응답(전송 결과 불명, DM 불가, cleanup 불명 보고)입니다. 영수증은 프로세스가 돌고 끝났을 때만
   `receipt`이고, 시작하지 않은 경우도 앱 어휘에 없어 `unknown`(보낸 것으로 침, docs/policy/amux-decision-maker.md §10)입니다. payload는
   고정 지시문과 한 줄 JSON 카드이며, 지시문은 카드가 데이터이고 그 안의 지시를 따르지 말라고 적습니다
-  (docs/policy/amux-decision-maker.md §5). 지시문의 sha256은 `DM_INSTRUCTION_SHA256`이고 Rust 테스트가 고정합니다. 로컬 AMUX의 두 route(`/api/dm-relay/pending`,
+  (docs/policy/amux-decision-maker.md §5). 지시문의 sha256은 `DM_INSTRUCTION_SHA256`이고 Rust 테스트가 고정합니다. 로컬 AMUX의 route(`/api/dm-relay/pending`의 GET 목록·POST 설정,
   `/api/dm-relay/pending/release`)는 `/api/board` 밖에 있고 relay 토큰(헤더 `x-amux-dm-relay-token`, bridge 환경 파일의
   `TOMVERSE_AMUX_DM_RELAY_LOCAL_TOKEN`)을 요구합니다. AMUX 서버는 그 토큰의 SHA-256(`AMUX_DM_RELAY_TOKEN_SHA256`)만 갖고, 값이
-  없거나 형식이 틀리면 두 route가 닫힙니다. 두 route에는 결과를 받는 필드가 없으므로 DM 출력이 worker에게 가는 경로는 없습니다.
+  없거나 형식이 틀리면 모든 route가 닫힙니다. 어느 route에도 결과를 받는 필드가 없으므로 DM 출력이 worker에게 가는 경로는 없습니다.
   앱 규칙을 Rust로 옮긴 값(digest, 상한, 소켓 경로, broker 기한, route와 응답 envelope, 정책 버전, 선택지 효과 필드)은 node 테스트가
   앱 모듈에 대조합니다. **선택지 `effect`·`paths`(`DM_SEND_OPTION_EFFECTS`)와 결과 결속의 정책 버전(`DM_REQUEST_POLICY_VERSION`)은
   S2-2b1과 함께 바뀝니다** — 앱의 라우팅·배정 응답에 저장된 정책 버전이 없어 relay는 앱 상수와 같은 값을 갖고, 두 앱 버전이 함께

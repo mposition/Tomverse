@@ -13,8 +13,8 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::flow::{
-    relay_candidate, release_marker, scan, AppRoute, DmApp, DmBroker, DmLocal, LocalRead,
-    LocalRoute, MarkerKey, RelayEnd,
+    listed_markers, relay_candidate, release_marker, scan, AppRoute, DmApp, DmBroker, DmLocal,
+    LocalRead, LocalRoute, MarkerKey, RelayEnd, LOCAL_MARKER_LIST_PATH,
 };
 use super::wire::{BrokerExchange, HttpAnswer, DM_RESULT_LINE_MAX_BYTES};
 
@@ -144,12 +144,15 @@ impl HttpLocalAmux {
 
 /// A local read the relay may make.
 pub fn local_read_allowed(path: &str) -> bool {
-    path == "/api/sessions" || path == "/api/board?status=needsyou" || {
-        path.strip_prefix("/api/board/").is_some_and(|rest| {
-            let id = rest.strip_suffix("/typed-ask").unwrap_or(rest);
-            crate::local_card::valid_local_card_id(id)
-        })
-    }
+    path == "/api/sessions"
+        || path == "/api/board?status=needsyou"
+        || path == LOCAL_MARKER_LIST_PATH
+        || {
+            path.strip_prefix("/api/board/").is_some_and(|rest| {
+                let id = rest.strip_suffix("/typed-ask").unwrap_or(rest);
+                crate::local_card::valid_local_card_id(id)
+            })
+        }
 }
 
 /// A local write the relay may make: the marker's two routes and nothing in
@@ -175,7 +178,12 @@ impl DmLocal for HttpLocalAmux {
         if !local_read_allowed(path) {
             return LocalRead::Failed;
         }
-        let Ok(response) = self.client.get(format!("{}{path}", self.base)).send().await else {
+        let mut request = self.client.get(format!("{}{path}", self.base));
+        // The relay's routes want the relay's token; the board reads never get it.
+        if path.starts_with("/api/dm-relay/") {
+            request = request.header(DM_RELAY_LOCAL_TOKEN_HEADER, &self.token);
+        }
+        let Ok(response) = request.send().await else {
             return LocalRead::Failed;
         };
         if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -300,6 +308,8 @@ pub struct Relay<A, L, B> {
     owed: BTreeSet<MarkerKey>,
     /// Why the relay stopped taking questions, once it has.
     halt: Option<&'static str>,
+    /// Where the next scan's window starts (`flow::scan_window`).
+    cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,6 +330,7 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             settled: BTreeSet::new(),
             owed: BTreeSet::new(),
             halt: None,
+            cursor: None,
         }
     }
 
@@ -341,28 +352,50 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         self.owed = still;
     }
 
-    /// Releases owed and stale markers, then carries the first question the
-    /// app gives a DM, one at a time. A halted relay only releases markers.
+    /// Releases every marker left over, then carries at most one question --
+    /// the first one in this scan's window the app gives a DM. A halted relay
+    /// only releases markers.
     pub async fn tick(&mut self) -> Tick {
         self.release_owed().await;
+        // Nothing is in flight between questions, so every marker the local
+        // AMUX holds now was left by a request this process no longer runs: a
+        // release that failed, or a bridge that stopped mid-request. The list
+        // is the local AMUX's own, so a restart finds a marker on any card,
+        // however far down the board or whatever its state (review
+        // r-20261018-022220-384dfe).
+        if let Some(markers) = listed_markers(&self.local).await {
+            for marker in markers {
+                if !release_marker(&self.local, &marker).await {
+                    self.owed.insert(marker);
+                }
+            }
+        }
         if self.halt.is_some() {
             return Tick::Idle;
         }
-        let Some(scan) = scan(&self.local, &self.settled, self.with_option_effects).await else {
+        let Some(scan) = scan(
+            &self.local,
+            &self.settled,
+            self.cursor.as_deref(),
+            self.with_option_effects,
+        )
+        .await
+        else {
             return Tick::Idle;
         };
         self.settled
             .retain(|(card, _)| scan.needsyou.contains(card));
+        // The next scan opens the cards after the last one this scan opened,
+        // so questions settled in front never starve those behind them.
+        self.cursor = scan.next_cursor.clone();
         for marker in scan.stale_markers {
-            // Nothing is in flight between questions, so every marker on a
-            // current question is one this process no longer runs.
             if !release_marker(&self.local, &marker).await {
                 self.owed.insert(marker);
             }
         }
         // One question per scan: the next scan reads the board again, so a
         // question is never routed on a reading minutes old.
-        let Some(candidate) = scan.candidates.into_iter().next() else {
+        let Some(candidate) = scan.candidate else {
             return Tick::Idle;
         };
         let run = relay_candidate(&self.app, &self.local, &self.broker, &candidate).await;
@@ -556,10 +589,13 @@ mod tests {
                 "title": "Pick the index store", "type": "task", "tags": ["needs:you"], "session": "claude-impl",
                 "archived": 0, "attempts": [{"attempt": 2}], "desc": "not sent to the DM"}),
                 ),
-                ("POST", "/api/dm-relay/pending") | ("POST", "/api/dm-relay/pending/release")
+                (_, "/api/dm-relay/pending") | (_, "/api/dm-relay/pending/release")
                     if seen.header(DM_RELAY_LOCAL_TOKEN_HEADER) != Some(LOCAL_TOKEN) =>
                 {
                     Reply::Json(403, json!({"error": "dm relay token refused"}))
+                }
+                ("GET", "/api/dm-relay/pending") => {
+                    Reply::Json(200, json!({"markers": [], "truncated": false}))
                 }
                 ("POST", "/api/dm-relay/pending") => Reply::Json(200, json!({"outcome": "set"})),
                 ("POST", "/api/dm-relay/pending/release") => {
@@ -767,9 +803,28 @@ mod tests {
         assert!(payload.starts_with(DM_INSTRUCTION.as_bytes()));
         // The marker's routes got the relay's token, the app's got the sync token.
         let local = local_seen.lock().unwrap().clone();
+        let listed = local
+            .iter()
+            .find(|seen| seen.method == "GET" && seen.path == "/api/dm-relay/pending")
+            .expect("every tick reads the local marker list");
+        assert_eq!(
+            listed.header(DM_RELAY_LOCAL_TOKEN_HEADER),
+            Some(LOCAL_TOKEN)
+        );
+        for read in local
+            .iter()
+            .filter(|seen| seen.path.starts_with("/api/board") || seen.path == "/api/sessions")
+        {
+            assert_eq!(
+                read.header(DM_RELAY_LOCAL_TOKEN_HEADER),
+                None,
+                "{}",
+                read.path
+            );
+        }
         let set = local
             .iter()
-            .find(|seen| seen.path == "/api/dm-relay/pending")
+            .find(|seen| seen.method == "POST" && seen.path == "/api/dm-relay/pending")
             .unwrap();
         assert_eq!(set.header(DM_RELAY_LOCAL_TOKEN_HEADER), Some(LOCAL_TOKEN));
         assert_eq!(
@@ -1042,5 +1097,110 @@ mod tests {
             "a lost routing answer is asked again, not a halt"
         );
         assert!(relay.local.writes.lock().unwrap().is_empty());
+    }
+
+    /// A local board of `count` typed `needsyou` cards, `AMUX-000` upwards,
+    /// each at question revision 1, owned by a `claude` worker; `pending`
+    /// puts a marker on the named card's current question.
+    fn board_of(count: usize, pending: Option<&str>) -> crate::dm_relay::flow::tests::FakeLocal {
+        let local = crate::dm_relay::flow::tests::FakeLocal::default();
+        {
+            let mut reads = local.reads.lock().unwrap();
+            let ids: Vec<String> = (0..count).map(|index| format!("AMUX-{index:03}")).collect();
+            reads.insert(
+                "/api/board?status=needsyou".into(),
+                LocalRead::Found(Value::Array(
+                    ids.iter()
+                        .map(|id| json!({"id": id, "status": "needsyou"}))
+                        .collect(),
+                )),
+            );
+            reads.insert(
+                "/api/sessions".into(),
+                LocalRead::Found(json!([{"name": "claude-impl", "provider": "claude"}])),
+            );
+            for id in &ids {
+                let mut state = typed_ask();
+                state["card_id"] = json!(id);
+                state["current_revision"]["question_revision"] = json!(1);
+                if pending == Some(id.as_str()) {
+                    state["pending"] = json!({"issue_id": id, "question_revision": 1,
+                        "request_id": REQUEST_ID, "instance": INSTANCE, "set_at": 1});
+                }
+                reads.insert(
+                    format!("/api/board/{id}/typed-ask"),
+                    LocalRead::Found(state),
+                );
+                reads.insert(
+                    format!("/api/board/{id}"),
+                    LocalRead::Found(
+                        json!({"id": id, "status": "needsyou", "title": "T", "type": "task",
+                        "tags": [], "session": "claude-impl", "archived": 0}),
+                    ),
+                );
+            }
+        }
+        local
+    }
+
+    struct SilentBroker;
+    #[async_trait]
+    impl DmBroker for SilentBroker {
+        async fn exchange(&self, _line: Vec<u8>) -> BrokerExchange {
+            panic!("these tests route to the operator; nothing is sent")
+        }
+    }
+
+    /// Review r-20261018-022220-384dfe: the scan opened the first 100 cards of
+    /// the list every time, and a settled question stays in `needsyou`, so 100
+    /// settled cards in front of a new question starved it for good.
+    #[tokio::test]
+    async fn settled_questions_never_starve_a_new_one_behind_them() {
+        use crate::dm_relay::flow::tests::{routed, FakeApp};
+        use crate::dm_relay::flow::AppRoute;
+        let local = board_of(101, None);
+        let app = FakeApp::with(vec![(AppRoute::Requests, routed("operator"))]);
+        let mut relay = Relay::new(app, local, SilentBroker, false);
+        for index in 0..100 {
+            relay.settled.insert((format!("AMUX-{index:03}"), 1));
+        }
+        for _ in 0..3 {
+            relay.tick().await;
+        }
+        let calls = relay.app.calls.lock().unwrap().clone();
+        assert_eq!(calls.len(), 1, "the one new question was routed once");
+        assert_eq!(calls[0].1["binding"]["cardId"], json!("AMUX-100"));
+        // One question per scan still: no scan opened more than the window.
+        assert!(relay.settled.contains(&("AMUX-100".to_owned(), 1)));
+    }
+
+    /// The same review: a marker a stopped process left on a card past the
+    /// scan window was never found, so it stayed set after a restart.
+    #[tokio::test]
+    async fn a_marker_left_past_the_scan_window_is_released_on_the_first_tick_after_a_restart() {
+        use crate::dm_relay::flow::tests::FakeApp;
+        use crate::dm_relay::flow::LocalRoute;
+        let local = board_of(160, Some("AMUX-150"));
+        local.reads.lock().unwrap().insert(
+            "/api/dm-relay/pending".into(),
+            LocalRead::Found(
+                json!({"markers": [{"card_id": "AMUX-150", "question_revision": 1,
+                "request_id": REQUEST_ID, "instance": INSTANCE, "set_at": 1}], "truncated": false}),
+            ),
+        );
+        // Every question is settled already, so the tick routes nothing.
+        let mut relay = Relay::new(FakeApp::default(), local, SilentBroker, false);
+        for index in 0..160 {
+            relay.settled.insert((format!("AMUX-{index:03}"), 1));
+        }
+        relay.tick().await;
+        let writes = relay.local.writes.lock().unwrap().clone();
+        assert_eq!(writes.len(), 1, "{writes:?}");
+        assert_eq!(writes[0].0, LocalRoute::ReleasePending);
+        assert_eq!(
+            writes[0].1,
+            json!({"card_id": "AMUX-150", "question_revision": 1, "request_id": REQUEST_ID})
+        );
+        assert!(relay.app.calls.lock().unwrap().is_empty());
     }
 }

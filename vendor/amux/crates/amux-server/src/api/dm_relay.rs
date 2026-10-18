@@ -1,19 +1,22 @@
-//! `POST /api/dm-relay/pending` and `POST /api/dm-relay/pending/release`: the
-//! HTTP verbs of the Decision Maker's DM-pending marker (crate::db::dm_ask,
-//! docs/policy/amux-decision-maker.md §2-3 and §2-5), for the Tomverse bridge's
-//! relay (apps/tomverse-orchestrator/src/dm_relay in the Tomverse repository)
-//! and nobody else.
+//! `POST /api/dm-relay/pending`, `POST /api/dm-relay/pending/release` and
+//! `GET /api/dm-relay/pending`: the HTTP verbs of the Decision Maker's
+//! DM-pending marker (crate::db::dm_ask, docs/policy/amux-decision-maker.md
+//! §2-3 and §2-5) -- set, release, and the list of every marker -- for the
+//! Tomverse bridge's relay (apps/tomverse-orchestrator/src/dm_relay in the
+//! Tomverse repository) and nobody else. The list is what a restarted relay
+//! releases from: a marker on any card in any state, not only on the cards
+//! its board scan opens.
 //!
 //! WHO MAY CALL. The bridge never posts to `/api/board`, so the marker lives
 //! here. Loopback alone admits every local process, including the worker
-//! sessions whose questions these are, so both routes also demand the
+//! sessions whose questions these are, so every route here also demands the
 //! relay's own token in `x-amux-dm-relay-token`. This server holds only its
 //! SHA-256, in `AMUX_DM_RELAY_TOKEN_SHA256`; the token itself is in the
 //! bridge's environment file, which the worker account cannot read
 //! (orchestration policy v23: "AMUX가 loopback API에 별도 토큰을 요구하면 bridge
 //! 전용 토큰을 격리 계정의 환경 파일에 두고 worker 홈에서 읽지 않는다"). A
 //! process that reads this server's environment learns the digest, which
-//! opens nothing. With the digest unset or malformed both routes are closed.
+//! opens nothing. With the digest unset or malformed every route is closed.
 //!
 //! The token is not a wall against the worker account itself: that account
 //! runs this server and owns its database file. What the routes guarantee is
@@ -31,7 +34,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
@@ -46,9 +49,13 @@ pub const TOKEN_HEADER: &str = "x-amux-dm-relay-token";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/pending", post(set_marker))
+        .route("/pending", get(list_markers).post(set_marker))
         .route("/pending/release", post(release_marker))
 }
+
+/// At most this many markers per answer. The relay releases what it reads,
+/// so a longer table is read whole over successive ticks.
+pub const MARKER_LIST_LIMIT: usize = 500;
 
 fn configured_digest() -> Option<String> {
     std::env::var(TOKEN_DIGEST_ENV).ok()
@@ -126,6 +133,49 @@ fn now_secs() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs() as i64)
         .unwrap_or(0)
+}
+
+async fn list_markers(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    list_markers_with(&state, configured_digest().as_deref(), &headers).await
+}
+
+/// Every marker (`dm_ask::pending_markers`), oldest first: card, question
+/// revision, request, instance and when it was set. A read; it changes
+/// nothing. `truncated` says the table held more than one answer carries.
+pub(crate) async fn list_markers_with(
+    state: &AppState,
+    configured: Option<&str>,
+    headers: &HeaderMap,
+) -> Response {
+    if let Err(response) = admit(configured, headers) {
+        return response;
+    }
+    let read = state
+        .store
+        .read_async(|conn| Ok(dm_ask::pending_markers(conn, MARKER_LIST_LIMIT + 1)?))
+        .await;
+    let Ok(mut markers) = read else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "dm relay marker read failed" })),
+        )
+            .into_response();
+    };
+    let truncated = markers.len() > MARKER_LIST_LIMIT;
+    markers.truncate(MARKER_LIST_LIMIT);
+    let markers: Vec<_> = markers
+        .into_iter()
+        .map(|marker| {
+            json!({
+                "card_id": marker.issue_id,
+                "question_revision": marker.question_revision,
+                "request_id": marker.request_id,
+                "instance": marker.instance,
+                "set_at": marker.set_at,
+            })
+        })
+        .collect();
+    Json(json!({ "markers": markers, "truncated": truncated })).into_response()
 }
 
 async fn set_marker(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
@@ -380,6 +430,96 @@ mod tests {
             assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
             assert_eq!(body["reason"], "dm_relay_not_configured", "{uri}");
         }
+        let (status, body) = call(&app, "GET", "/api/dm-relay/pending", None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["reason"], "dm_relay_not_configured");
+    }
+
+    /// Review r-20261018-022220-384dfe: a restarted relay must find every
+    /// marker, not only those on the cards its board scan opens. The list is
+    /// the table's, so a marker on a question the card no longer asks is in it
+    /// too, and a table longer than one answer is read over successive ticks.
+    #[tokio::test]
+    async fn the_marker_list_holds_every_marker_behind_the_token() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let card = asking_card(&app).await;
+        let digest = digest();
+        let headers = token_headers(TOKEN);
+        let (_, set) = json_of(
+            set_marker_with(&state, Some(&digest), &headers, &body(&card, 1, REQUEST)).await,
+        )
+        .await;
+        assert_eq!(set["outcome"], "set");
+        // The worker re-asks: revision 2 is current and shows no marker, but
+        // revision 1's marker is still in the table.
+        let (status, patched) = call(
+            &app,
+            "PATCH",
+            &format!("/api/board/{card}"),
+            Some(json!({"ask_question": "Should the index be dropped instead?"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{patched}");
+        let (_, typed) = call(&app, "GET", &format!("/api/board/{card}/typed-ask"), None).await;
+        assert_eq!(typed["current_revision"]["question_revision"], 2, "{typed}");
+        assert!(typed["pending"].is_null(), "{typed}");
+
+        let (status, refused) =
+            json_of(list_markers_with(&state, Some(&digest), &HeaderMap::new()).await).await;
+        assert_eq!(
+            (status, refused["reason"].as_str()),
+            (StatusCode::FORBIDDEN, Some("dm_relay_token_missing"))
+        );
+        let (status, listed) =
+            json_of(list_markers_with(&state, Some(&digest), &headers).await).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            listed,
+            json!({"markers": [{"card_id": card, "question_revision": 1, "request_id": REQUEST,
+                "instance": "decision-maker-openai", "set_at": listed["markers"][0]["set_at"]}],
+                "truncated": false})
+        );
+        // Released by its request, it leaves the list.
+        let (_, released) = json_of(
+            release_marker_with(
+                &state,
+                Some(&digest),
+                &headers,
+                &release_body(&card, 1, REQUEST),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(released["outcome"], "released");
+        let (_, listed) = json_of(list_markers_with(&state, Some(&digest), &headers).await).await;
+        assert_eq!(listed["markers"], json!([]));
+
+        // More rows than one answer carries: the first page, and `truncated`.
+        state
+            .store
+            .write(|conn| {
+                for index in 0..=MARKER_LIST_LIMIT {
+                    conn.execute(
+                        "INSERT INTO _amux_dm_pending (issue_id, question_revision, request_id, instance, set_at) \
+                         VALUES (?1, 1, ?2, 'decision-maker-openai', ?3)",
+                        rusqlite::params![format!("AMUX-T{index:04}"), REQUEST, index as i64],
+                    )?;
+                }
+                Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+            })
+            .unwrap();
+        let (_, listed) = json_of(list_markers_with(&state, Some(&digest), &headers).await).await;
+        assert_eq!(
+            listed["markers"].as_array().unwrap().len(),
+            MARKER_LIST_LIMIT
+        );
+        assert_eq!(listed["truncated"], true);
+        assert_eq!(
+            listed["markers"][0]["card_id"], "AMUX-T0000",
+            "oldest first"
+        );
     }
 
     #[tokio::test]

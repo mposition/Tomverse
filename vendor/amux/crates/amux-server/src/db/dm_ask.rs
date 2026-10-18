@@ -909,6 +909,27 @@ pub fn pending_for(
     .optional()
 }
 
+/// Every marker the table holds, on any card in any state and on any question
+/// revision, oldest first, at most `limit`. The bridge relay reads this after
+/// a restart: a marker its stopped process left is found wherever its card is,
+/// not only on a card its board scan happens to open.
+pub fn pending_markers(conn: &Connection, limit: usize) -> rusqlite::Result<Vec<Pending>> {
+    let mut statement = conn.prepare(
+        "SELECT issue_id, question_revision, request_id, instance, set_at FROM _amux_dm_pending \
+         ORDER BY set_at, issue_id, question_revision LIMIT ?1",
+    )?;
+    let rows = statement.query_map(params![limit as i64], |r| {
+        Ok(Pending {
+            issue_id: r.get(0)?,
+            question_revision: r.get(1)?,
+            request_id: r.get(2)?,
+            instance: r.get(3)?,
+            set_at: r.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
 /// Set the marker with one compare-and-swap: the card is in `needsyou`, its
 /// current question revision is `question_revision`, nobody has answered that
 /// revision, and no other request holds the marker. Runs inside the writer's

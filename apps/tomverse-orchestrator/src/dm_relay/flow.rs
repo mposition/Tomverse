@@ -117,6 +117,10 @@ impl LocalRoute {
     }
 }
 
+/// The local AMUX's list of every DM-pending marker (a read, behind the same
+/// relay token as the two writes).
+pub const LOCAL_MARKER_LIST_PATH: &str = "/api/dm-relay/pending";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum LocalRead {
     Found(Value),
@@ -167,24 +171,53 @@ pub struct Scan {
     /// Every card in `needsyou` the list showed, to forget settled questions
     /// of cards that left it.
     pub needsyou: BTreeSet<String>,
-    pub candidates: Vec<Candidate>,
+    /// The first question in this scan's window the relay can route. One per
+    /// scan: the next scan reads the board again.
+    pub candidate: Option<Candidate>,
     /// Markers on current questions while nothing is in flight: left by a
     /// request this process no longer runs (a release that failed, a bridge
-    /// that stopped mid-request). Released before anything is routed.
+    /// that stopped mid-request). Released before anything is routed. The
+    /// window sees only some cards; every marker, wherever its card is, comes
+    /// from the local AMUX's marker list (`listed_markers`).
     pub stale_markers: Vec<MarkerKey>,
+    /// The last card this scan opened: the next scan starts after it.
+    pub next_cursor: Option<String>,
 }
 
 /// At most this many `needsyou` cards are opened per scan.
 pub const DM_SCAN_CARD_LIMIT: usize = 100;
 
-/// Reads the board, the session list and each `needsyou` card's typed ask.
-/// `None` when the board list or the session list could not be read: the
-/// scan is skipped, nothing is written. A card whose own reads fail, or whose
-/// question the relay cannot state in the app's grammar, is skipped (the
-/// operator has it as always).
+/// One scan's window: the card ids in order, starting after `cursor` and
+/// wrapping round, each at most once, at most `limit`. The order is the ids'
+/// own, not the list's, so the next scan's start is defined even when the
+/// cursor's card has left `needsyou`. Consecutive windows walk the whole list,
+/// so every card is opened within ceil(cards / limit) scans however many
+/// settled questions stay in `needsyou` in front of it (review
+/// r-20261018-022220-384dfe: a window that always began at the front let 100
+/// settled cards starve every question behind them).
+pub fn scan_window(ids: &BTreeSet<String>, cursor: Option<&str>, limit: usize) -> Vec<String> {
+    let sorted: Vec<&String> = ids.iter().collect();
+    let start = cursor.map_or(0, |cursor| {
+        sorted.partition_point(|id| id.as_str() <= cursor)
+    });
+    sorted[start..]
+        .iter()
+        .chain(sorted[..start].iter())
+        .take(limit)
+        .map(|id| (*id).clone())
+        .collect()
+}
+
+/// Reads the board, the session list and the typed ask of each card in this
+/// scan's window, until it finds one question it can route. `None` when the
+/// board list or the session list could not be read: the scan is skipped,
+/// nothing is written. A card whose own reads fail, or whose question the
+/// relay cannot state in the app's grammar, is skipped (the operator has it
+/// as always).
 pub async fn scan<L: DmLocal + ?Sized>(
     local: &L,
     settled: &BTreeSet<(String, i64)>,
+    cursor: Option<&str>,
     with_option_effects: bool,
 ) -> Option<Scan> {
     let LocalRead::Found(list) = local.get("/api/board?status=needsyou").await else {
@@ -196,10 +229,11 @@ pub async fn scan<L: DmLocal + ?Sized>(
     };
     let providers: BTreeMap<String, String> = parse_session_providers(&sessions)?;
     let mut scan = Scan {
-        needsyou: ids.iter().cloned().collect(),
+        needsyou: ids.into_iter().collect(),
         ..Scan::default()
     };
-    for id in ids.into_iter().take(DM_SCAN_CARD_LIMIT) {
+    for id in scan_window(&scan.needsyou, cursor, DM_SCAN_CARD_LIMIT) {
+        scan.next_cursor = Some(id.clone());
         let LocalRead::Found(state) = local.get(&format!("/api/board/{id}/typed-ask")).await else {
             continue;
         };
@@ -250,12 +284,36 @@ pub async fn scan<L: DmLocal + ?Sized>(
         let Some(binding) = routing_binding(&question, &card, provider) else {
             continue;
         };
-        scan.candidates.push(Candidate {
+        scan.candidate = Some(Candidate {
             card: dm_card(&question, &card, with_option_effects),
             binding,
         });
+        break;
     }
     Some(scan)
+}
+
+/// Every DM-pending marker the local AMUX holds (`GET /api/dm-relay/pending`),
+/// on any card in any state: what a restart has to release, found without the
+/// board or the scan window. `None` when the list could not be read; the next
+/// tick asks again. A truncated list is the first page; what it releases
+/// leaves the rest for the next tick.
+pub async fn listed_markers<L: DmLocal + ?Sized>(local: &L) -> Option<Vec<MarkerKey>> {
+    let LocalRead::Found(value) = local.get(LOCAL_MARKER_LIST_PATH).await else {
+        return None;
+    };
+    value
+        .get("markers")?
+        .as_array()?
+        .iter()
+        .map(|marker| {
+            Some(MarkerKey {
+                card_id: marker.get("card_id")?.as_str()?.to_owned(),
+                question_revision: marker.get("question_revision")?.as_i64()?,
+                request_id: marker.get("request_id")?.as_str()?.to_owned(),
+            })
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1508,7 +1566,7 @@ pub(crate) mod tests {
         reads.insert(
             "/api/board?status=needsyou".to_owned(),
             LocalRead::Found(json!([
-                {"id": "AMUX-1", "status": "needsyou"}, {"id": "AMUX-2", "status": "needsyou"},
+                {"id": "AMUX-7", "status": "needsyou"}, {"id": "AMUX-2", "status": "needsyou"},
                 {"id": "AMUX-3", "status": "needsyou"}, {"id": "AMUX-4", "status": "needsyou"},
                 {"id": "AMUX-5", "status": "needsyou"}, {"id": "AMUX-6", "status": "done"}
             ])),
@@ -1518,12 +1576,12 @@ pub(crate) mod tests {
             LocalRead::Found(json!([{"name": "claude-impl", "provider": "claude"}, {"name": "codex-impl", "provider": "codex"}])),
         );
         reads.insert(
-            "/api/board/AMUX-1/typed-ask".to_owned(),
-            LocalRead::Found(question("AMUX-1", Value::Null, Value::Null)),
+            "/api/board/AMUX-7/typed-ask".to_owned(),
+            LocalRead::Found(question("AMUX-7", Value::Null, Value::Null)),
         );
         reads.insert(
-            "/api/board/AMUX-1".to_owned(),
-            LocalRead::Found(detail("AMUX-1", "claude-impl")),
+            "/api/board/AMUX-7".to_owned(),
+            LocalRead::Found(detail("AMUX-7", "claude-impl")),
         );
         reads.insert(
             "/api/board/AMUX-2/typed-ask".to_owned(),
@@ -1557,10 +1615,13 @@ pub(crate) mod tests {
         );
         *local.reads.lock().unwrap() = reads;
         let settled: BTreeSet<(String, i64)> = [("AMUX-5".to_owned(), 2)].into_iter().collect();
-        let scan = scan(&local, &settled, false).await.unwrap();
-        assert_eq!(scan.candidates.len(), 1);
-        assert_eq!(scan.candidates[0].binding.card_id, "AMUX-1");
-        assert_eq!(scan.candidates[0].binding.asking_provider, "claude");
+        // The list shows AMUX-7 first; the window goes by id, so the cards in
+        // front of it are opened first and the scan stops at it.
+        let scan = scan(&local, &settled, None, false).await.unwrap();
+        let candidate = scan.candidate.clone().unwrap();
+        assert_eq!(candidate.binding.card_id, "AMUX-7");
+        assert_eq!(candidate.binding.asking_provider, "claude");
+        assert_eq!(scan.next_cursor.as_deref(), Some("AMUX-7"));
         assert_eq!(
             scan.stale_markers,
             vec![MarkerKey {
@@ -1571,6 +1632,12 @@ pub(crate) mod tests {
         );
         assert!(scan.needsyou.contains("AMUX-5") && !scan.needsyou.contains("AMUX-6"));
         assert!(local.writes.lock().unwrap().is_empty(), "a scan only reads");
+        // The next scan starts after AMUX-7 and wraps round to the front.
+        let next = super::scan(&local, &settled, Some("AMUX-7"), false)
+            .await
+            .unwrap();
+        assert_eq!(next.stale_markers.len(), 1);
+        assert_eq!(next.candidate.unwrap().binding.card_id, "AMUX-7");
 
         // No board list, no scan.
         local
@@ -1578,6 +1645,30 @@ pub(crate) mod tests {
             .lock()
             .unwrap()
             .remove("/api/board?status=needsyou");
-        assert!(super::scan(&local, &settled, false).await.is_none());
+        assert!(super::scan(&local, &settled, None, false).await.is_none());
+    }
+
+    #[test]
+    fn consecutive_windows_walk_every_card_whatever_the_cursor() {
+        let ids: BTreeSet<String> = (0..250).map(|index| format!("AMUX-{index:03}")).collect();
+        let mut cursor: Option<String> = None;
+        let mut seen = BTreeSet::new();
+        for _ in 0..3 {
+            let window = scan_window(&ids, cursor.as_deref(), 100);
+            assert!(window.len() <= 100);
+            seen.extend(window.iter().cloned());
+            cursor = window.last().cloned();
+        }
+        assert_eq!(seen, ids, "three windows of 100 cover 250 cards");
+        // A cursor whose card has left the list still has a place in the order.
+        assert_eq!(
+            scan_window(&ids, Some("AMUX-0995"), 2),
+            vec!["AMUX-100", "AMUX-101"]
+        );
+        // Past the last id it wraps to the front; a short list is opened once.
+        assert_eq!(scan_window(&ids, Some("AMUX-249"), 1), vec!["AMUX-000"]);
+        let few: BTreeSet<String> = ["A", "B", "C"].iter().map(|id| id.to_string()).collect();
+        assert_eq!(scan_window(&few, Some("B"), 100), vec!["C", "A", "B"]);
+        assert!(scan_window(&BTreeSet::new(), Some("B"), 100).is_empty());
     }
 }

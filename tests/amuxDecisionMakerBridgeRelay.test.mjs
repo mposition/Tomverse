@@ -134,8 +134,12 @@ test("the relay writes the local AMUX only through the marker's routes, outside 
   assert.deepEqual(local, ["/api/dm-relay/pending", "/api/dm-relay/pending/release"]);
   for (const path of local) assert.equal(path.includes("/api/board"), false);
   const server = read("vendor/amux/crates/amux-server/src/api/dm_relay.rs");
-  assert.match(server, /\.route\("\/pending", post\(set_marker\)\)/);
+  assert.match(server, /\.route\("\/pending", get\(list_markers\)\.post\(set_marker\)\)/);
   assert.match(server, /\.route\("\/pending\/release", post\(release_marker\)\)/);
+  // The one local read under the relay's prefix: every marker, for a restart.
+  assert.equal(stringConstant(flow, "LOCAL_MARKER_LIST_PATH"), "/api/dm-relay/pending");
+  const routeTable = read("vendor/amux/crates/amux-server/src/api/request_log.rs");
+  assert.match(routeTable, /RouteEntry \{ path: "\/api\/dm-relay\/pending", methods: &\["GET", "POST"\] \}/);
   assert.equal(stringConstant(io, "DM_RELAY_LOCAL_TOKEN_HEADER"), "x-amux-dm-relay-token");
   assert.match(server, /pub const TOKEN_HEADER: &str = "x-amux-dm-relay-token";/);
   // Off unless exactly `enabled`.
