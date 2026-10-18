@@ -23,15 +23,17 @@ export async function GET(request: Request): Promise<Response> {
   const params = new URL(request.url).searchParams;
   const claimId = params.get("claimId");
   const reservationId = params.get("reservationId");
-  if (params.size !== 2 || params.getAll("claimId").length !== 1 ||
+  const ideaId = params.get("ideaId");
+  if (params.size !== 3 || params.getAll("claimId").length !== 1 ||
       params.getAll("reservationId").length !== 1 ||
-      !claimId || !reservationId || !UUID.test(claimId) ||
-      !UUID.test(reservationId)) {
+      params.getAll("ideaId").length !== 1 ||
+      !claimId || !reservationId || !ideaId || !UUID.test(claimId) ||
+      !UUID.test(reservationId) || !UUID.test(ideaId)) {
     return amuxJsonNoStore({ error: "Invalid request." }, 400);
   }
   try {
     const state = await prisma.$transaction((tx) =>
-      readAmuxSessionAnalysisStopState(tx, claimId, reservationId),
+      readAmuxSessionAnalysisStopState(tx, claimId, reservationId, ideaId),
     { maxWait: 5_000, timeout: 10_000 });
     return amuxJsonNoStore(state);
   } catch (error) {

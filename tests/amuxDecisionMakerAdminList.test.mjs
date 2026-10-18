@@ -546,8 +546,8 @@ const CARD_TEXT = dmCardText(
     title: "Pick a cache key layout",
     question: "Should the cache key include the locale?",
     options: [
-      { id: "a", label: "Model id only" },
-      { id: "b", label: "Model id and locale" },
+      { id: "a", label: "Model id only", effect: "choice_only", paths: [] },
+      { id: "b", label: "Model id and locale", effect: "branch_code_change", paths: ["lib/cache.ts"] },
     ],
     unblocks: "The cache module can be finished.",
     context: "Both layouts pass.",

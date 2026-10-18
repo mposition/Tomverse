@@ -369,7 +369,7 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "mutation",
   },
   // A transmission intent (lock, state, the switches, the instance's results
-  // since its newest switch event -- added 2026-10-17 for the owed latch of
+  // inside its count boundary -- added 2026-10-17 for the owed latch of
   // docs/policy/amux-decision-maker.md §8 -- then the instance's audit 4 and the
   // event, or the owed latch's audit 4 and switch event: 9, pinned by
   // tests/amuxDecisionMakerRequest.test.mjs).
@@ -411,7 +411,7 @@ export const AMUX_DB_BOUNDARIES = {
   // The validation latch of docs/policy/amux-decision-maker.md §8, which the
   // result route runs after a validation failure commits and the maintenance
   // sweep runs for each instance (lock, the switches with each instance's
-  // newest event, its results, the instance's audit 4, the switch event: 8,
+  // count boundary, its results, the instance's audit 4, the switch event: 8,
   // pinned by tests/amuxDecisionMakerRequest.test.mjs).
   decisionMakerValidationLatch: {
     operation: "decision_maker_validation_latch",
@@ -428,7 +428,7 @@ export const AMUX_DB_BOUNDARIES = {
   },
   // The latch §5's report owes, which the cleanup route runs after the report
   // and the maintenance sweep runs for each instance (lock, the switches with
-  // each instance's newest event, its newest report, the instance's audit 4,
+  // each instance's newest cleanup latch, its newest report, the instance's audit 4,
   // the switch event: 8, pinned by tests/amuxDecisionMakerRequest.test.mjs).
   decisionMakerCleanupLatch: {
     operation: "decision_maker_cleanup_latch",

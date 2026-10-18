@@ -204,7 +204,8 @@ const CARD = {
   tags: [] as string[],
   title: "Pick a cache key layout",
   question: "Should the cache key include the locale or only the model id?",
-  options: OPTIONS,
+  // The card's options carry their effect class and paths (stage S2-2b1); a result names OPTIONS.
+  options: OPTIONS.map((option) => ({ ...option, effect: "choice_only", paths: [] as string[] })),
   unblocks: "The cache module can be finished.",
   context: "Both layouts pass the current tests.",
   contextPaths: ["lib/cache.ts"],

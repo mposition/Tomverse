@@ -58,7 +58,8 @@ import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
 import { readAmuxSessionAnalysisStopState,
   AmuxSessionAnalysisStopReadError } from
   "@/lib/amux/ideaSessionAnalysisStopRead";
-import { commitAmuxSessionBudgetOutcome } from
+import { AmuxSessionBudgetSettlementError,
+  commitAmuxSessionBudgetOutcome } from
   "@/lib/amux/ideaSessionAnalysisBudgetSettlementService";
 import { AmuxSessionBudgetResolutionError,
   commitAmuxSessionBudgetUnknownResolution,
@@ -463,10 +464,22 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
       priceVersionId, runner,
     })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
       error.code === "not_ready");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSessionBudgetOutcome(tx, {
+      claimId: first.claimId, outcome: "outcome_unknown",
+      inputTokens: null, outputTokens: null,
+      exactAgentClaim: { requestId: first.requestId,
+        reservationId: first.reservationId, ideaId: secondIdeaId,
+        invocationOrdinal: 0 },
+    })), (error: unknown) => error instanceof AmuxSessionBudgetSettlementError &&
+      error.code === "not_settleable");
   const settled = await prisma.$transaction((tx) =>
     commitAmuxSessionBudgetOutcome(tx, {
       claimId: first.claimId, outcome: "verified_success",
       inputTokens: 10, outputTokens: 20,
+      exactAgentClaim: { requestId: first.requestId,
+        reservationId: first.reservationId, ideaId: committedIdeaId,
+        invocationOrdinal: 0 },
     }));
   assert.equal(settled.status, "succeeded");
   assert.equal(settled.settledMicroUsd, "50");
@@ -486,6 +499,9 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
     commitAmuxSessionBudgetOutcome(tx, {
       claimId: secondClaim.claimId, outcome: "outcome_unknown",
       inputTokens: null, outputTokens: null,
+      exactAgentClaim: { requestId: secondClaim.requestId,
+        reservationId: secondClaim.reservationId, ideaId: secondIdeaId,
+        invocationOrdinal: 0 },
     }));
   assert.equal(unknown.status, "outcome_unknown");
   const secondReadback = await prisma.$transaction((tx) =>
@@ -499,6 +515,12 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
   });
   assert.equal(windowAfter.reservedMicroUsd, BigInt(5000));
   assert.equal(windowAfter.spentMicroUsd, BigInt(50));
+  const unresolved = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findUniqueOrThrow({
+    where: { id: secondClaim.claimId }, select: { closedAt: true,
+      settledMicroUsd: true },
+  });
+  assert.equal(unresolved.closedAt, null);
+  assert.equal(unresolved.settledMicroUsd, null);
   const thirdIdeaId = randomUUID();
   const thirdInspected = inspect(thirdIdeaId);
   const third = await prisma.$transaction(async (tx) => {
@@ -1198,11 +1220,15 @@ test("session stop poll follows the exact active claim and stops after settlemen
       runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
     });
     assert.deepEqual(await readAmuxSessionAnalysisStopState(tx,
-      claim.claimId, reservation.reservationId), {
+      claim.claimId, reservation.reservationId, ideaId), {
       claimId: claim.claimId, reservationId: reservation.reservationId, stop: false,
     });
     await assert.rejects(readAmuxSessionAnalysisStopState(tx,
-      claim.claimId, randomUUID()),
+      claim.claimId, randomUUID(), ideaId),
+    (error: unknown) => error instanceof AmuxSessionAnalysisStopReadError &&
+      error.code === "not_found");
+    await assert.rejects(readAmuxSessionAnalysisStopState(tx,
+      claim.claimId, reservation.reservationId, randomUUID()),
     (error: unknown) => error instanceof AmuxSessionAnalysisStopReadError &&
       error.code === "not_found");
     await commitAmuxSessionBudgetOutcome(tx, {
@@ -1210,7 +1236,7 @@ test("session stop poll follows the exact active claim and stops after settlemen
       inputTokens: 10, outputTokens: 1,
     });
     assert.equal((await readAmuxSessionAnalysisStopState(tx,
-      claim.claimId, reservation.reservationId)).stop, true);
+      claim.claimId, reservation.reservationId, ideaId)).stop, true);
     throw rollback;
   }), (error: unknown) => error === rollback);
 });

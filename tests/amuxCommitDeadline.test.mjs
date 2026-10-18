@@ -244,6 +244,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // no commit deadline: the report holds no deadline, and the ledger's
   // deferred check is unchanged and does not cover the new kind.
   "20261017160000_amux_decision_maker_cleanup_unknown",
+  // AMUX Decision Maker S2-2a4: a result's switch sequence, where section 8's
+  // validation count places it against a release. It adds no commit
+  // deadline: the event guard's deadline lines and the ledger's deferred
+  // check are unchanged.
+  "20261017200000_amux_decision_maker_validation_count_boundary",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -499,6 +504,7 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts",
+    "app/api/internal/amux/v19/analysis-budget/unknown/route.ts",
     "app/api/internal/amux/v19/analysis-stop/route.ts",
     "app/api/internal/amux/v19/checkout-evidence/route.ts",
     "app/api/internal/amux/v19/read-manifest/route.ts",
@@ -517,6 +523,12 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   assertBefore(sessionStopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
   assertBefore(sessionStopPoll, 'process.env[READ_ENV] !== "enabled"');
   assert.match(sessionStopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
+  const sessionUnknown = withoutComments(read(
+    "app/api/internal/amux/v19/analysis-budget/unknown/route.ts"));
+  assertBefore(sessionUnknown, "isAmuxV4AnalysisAgentAuthorized(request");
+  assertBefore(sessionUnknown, 'process.env[WRITE_ENV] !== "enabled"');
+  assertBefore(sessionUnknown, 'process.env[READ_ENV] !== "enabled"');
+  assert.match(sessionUnknown, /\{ maxWait: 5_000, timeout: 15_000 \}/);
   const evidenceRoute = withoutComments(read(
     "app/api/internal/amux/v19/checkout-evidence/route.ts"));
   const evidencePost = between(evidenceRoute, "export async function POST",
