@@ -1,5 +1,44 @@
 # AMUX intake
 
+## v22 — v19 읽은 파일 manifest의 출처: 고정 seccomp 아래의 파일 열기 관측 [결정, 운영자 mposition 2026-10-18]
+
+approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 22
+
+운영자 mposition이 2026-10-19(AEST, UTC 2026-10-18) 대화에서 이 절을 승인했다.
+
+**배경.** v19 3항은 CLI가 실제로 읽은 파일 목록을 "CLI 이벤트에서" 받는다고 정했다. CLI
+이벤트는 Read 대상 파일만 이름을 대고, Grep·Glob이 훑은 파일은 응답에 나오지 않는다. 그래서
+이벤트만으로는 빠짐없는 목록이 되지 않고, 구현은 분석 프로세스 트리의 파일 열기를 호스트에서
+관측한다. 2026-10-19 v19 runner 측정에서 Node 22(libuv)가 io_uring으로 파일을 읽어 관측이
+불가능했고, io_uring을 거절하는 고정 seccomp 필터를 두자 읽기가 관측되는 open 경로로 돌아왔다.
+
+1. **manifest의 출처(v19 3항 개정).**
+   - sandbox 안의 분석 프로세스 트리 전체(bridge와 CLI)가 한 open 계열 시스템 호출을 호스트가
+     관측한 결과가 manifest의 출처다. 관측 기록은 private FIFO로만 흐르고 파일로 남기지 않으며,
+     원문 줄은 판정 즉시 버린다.
+   - sandbox는 시작 전에 저장소에 고정된 seccomp 프로그램(`lib/amux/ideaTrackedCheckoutSeccomp.mjs`)을
+     건다. io_uring(setup·enter·register)과 handle 기반 열기는 ENOSYS로 거절하고, x86_64가 아닌
+     ABI와 x32 호출은 프로세스를 종료하며, 그 밖은 허용한다. 격리 경계는 계속 namespace·읽기 전용
+     mount·읽기 도구 한정이고, 이 필터는 관측 경로를 고정하는 장치다. 프로그램은 digest로 테스트에
+     고정하며, 바뀌면 이 절의 개정 대상이다. 호출자는 다른 seccomp 프로그램을 넘길 수 없다.
+   - manifest는 다음을 모두 만족할 때만 complete다. 관측 스트림이 끝까지 닫혔다. io_uring·handle
+     열기가 모두 거절됐다. checkout 안에서 연 파일이 전부 준비된 checkout 목록 안에 있고 읽기
+     전용이며 장치 파일이 아니다. 해석하지 못한 열기 줄이 없다. 하나라도 어긋나면 unverified이고,
+     그 호출은 성공으로 기록하지 않고 결과 불명으로 다루며 다시 보내지 않는다.
+2. **CLI 이벤트는 대조용이다.** CLI가 성공으로 보고한 Read의 대상 파일이 관측 manifest에 없으면
+   unverified다. Grep·Glob은 관측 manifest로만 인정한다. 관측 없이 CLI 이벤트만으로 manifest를
+   complete로 기록하지 않는다.
+3. **진단.** 진단 모드는 고정된 사유 코드 하나만 남기며, 경로·원문·관측 줄을 남기지 않는다.
+4. **바뀌지 않는 것.** v19의 고정 SHA와 추적 파일 checkout, 비밀 경로 제외, 읽기 도구 한정,
+   쓰기·shell·네트워크 차단, 시간 제한 없음과 분석 중지 버튼, 입력 후 절대 7일 보존과 경로 목록
+   삭제, v21 shadow 예산, 스위치와 kill switch.
+5. **승인 범위.** 위 관측 방식과 seccomp 필터를 쓰는 코드를 승인한다. 병합, 배포, 스위치 켜기,
+   모델 호출은 각각 별개다.
+
+**공통 기반 설계 체크리스트 중 이 개정이 바꾸는 항목.** 결정적 Guard(4)는 manifest 판정이 관측
+결과와 고정 규칙만으로 정해진다는 점이 더해진다. 결과 불명(10)은 unverified manifest를 결과 불명으로
+다루는 것이 더해진다. 나머지 항목은 v21까지의 답이 그대로다.
+
 ## v21 — v19 Max 세션 분석의 월 shadow 예산 예외 [결정, 운영자 mposition 2026-10-18]
 
 approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 21
