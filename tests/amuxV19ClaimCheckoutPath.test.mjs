@@ -58,6 +58,17 @@ test("only a claim repository under the configured root selects checkout bytes",
     }
     execFileSync("git", ["-C", selected, "remote", "set-url", "origin",
       "https://github.com/owner/repo.git"]);
+    // A valid-looking parent origin must not make a non-repo child eligible.
+    execFileSync("git", ["init", "--quiet", join(root, "owner")]);
+    execFileSync("git", ["-C", join(root, "owner"), "remote", "add",
+      "origin", "https://github.com/owner/fallback.git"]);
+    await mkdir(join(root, "owner", "fallback"));
+    assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/fallback"), null);
+    // Gitdir pointer files are refused even if they name a valid local repo.
+    await mkdir(join(root, "owner", "pointer"));
+    await writeFile(join(root, "owner", "pointer", ".git"),
+      `gitdir: ${join(selected, ".git")}\n`);
+    assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/pointer"), null);
     assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/notdir"), null);
     for (const slug of ["owner/..", "../repo", "owner/missing",
       "owner/repo/extra", "owner\\repo"]) {
