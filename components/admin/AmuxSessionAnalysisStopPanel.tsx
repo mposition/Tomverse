@@ -10,8 +10,12 @@ import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 type Phase = "checking" | "running" | "sending" | "unknown" | "stopped" |
   "hidden" | "unavailable";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** Analysis starts, and later invocations follow, while the page is open. */
-const REFRESH_MS = 10_000;
+/** Analysis starts, and later invocations follow, while the page is open.
+ * One visible tab polls at most 2,880 times a day, inside the route's
+ * 5,000-read daily limit; a hidden tab does not poll. */
+const REFRESH_MS = 30_000;
+/** Used when a rate-limit response carries no usable Retry-After. */
+const RATE_LIMIT_PAUSE_MS = 5 * 60_000;
 const REFRESHED_PHASES: ReadonlySet<Phase> = new Set(["hidden", "running",
   "stopped", "unavailable"]);
 
@@ -39,10 +43,13 @@ export function AmuxSessionAnalysisStopPanel({ ideaId }: { ideaId: string }) {
   const [refused, setRefused] = useState(false);
   const [needsReauthentication, setNeedsReauthentication] = useState(false);
   const inFlight = useRef(false);
+  const pausedUntil = useRef(0);
   const storageKey = `amux-v19-session-analysis-stop:${ideaId}`;
 
-  const readBack = async () => {
+  const readBack = async (automatic = false) => {
     if (inFlight.current) return;
+    if (automatic && (document.visibilityState !== "visible" ||
+        Date.now() < pausedUntil.current)) return;
     let pending: string | null;
     try { pending = window.sessionStorage.getItem(storageKey); }
     catch { setPhase("unavailable"); return; }
@@ -54,7 +61,12 @@ export function AmuxSessionAnalysisStopPanel({ ideaId }: { ideaId: string }) {
       const body: unknown = await response.json().catch(() => null);
       const row = body && typeof body === "object" && !Array.isArray(body)
         ? body as Record<string, unknown> : null;
-      if (response.status === 428) {
+      if (response.status === 429) {
+        const seconds = Number(response.headers.get("Retry-After"));
+        pausedUntil.current = Date.now() + (Number.isFinite(seconds) && seconds > 0
+          ? Math.min(seconds * 1000, 24 * 60 * 60_000) : RATE_LIMIT_PAUSE_MS);
+        setPhase(pending ? "unknown" : "unavailable");
+      } else if (response.status === 428) {
         setNeedsReauthentication(true);
         setPhase(pending ? "unknown" : "unavailable");
       } else if (response.ok && row?.state === "stopped" && row.ideaId === ideaId &&
@@ -92,8 +104,13 @@ export function AmuxSessionAnalysisStopPanel({ ideaId }: { ideaId: string }) {
 
   useEffect(() => {
     if (!REFRESHED_PHASES.has(phase)) return;
-    const timer = window.setInterval(() => { void readBack(); }, REFRESH_MS);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(() => { void readBack(true); }, REFRESH_MS);
+    const shown = () => { void readBack(true); };
+    document.addEventListener("visibilitychange", shown);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", shown);
+    };
     // readBack reads only refs, storage and props.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, ideaId]);

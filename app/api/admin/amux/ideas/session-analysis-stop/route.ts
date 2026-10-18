@@ -60,7 +60,8 @@ export async function GET(request: Request): Promise<Response> {
     if (session === "forbidden") return NextResponse.json({ error: "forbidden" },
       { status: 403, headers: noStore });
     await consumeApiRateLimit(request, session.user!.id!,
-      "admin-amux-v19-session-analysis-stop-read", { minute: 30, day: 500 });
+      // The open control polls every 30 s while visible (2,880 a day per tab).
+      "admin-amux-v19-session-analysis-stop-read", { minute: 30, day: 5_000 });
     const params = new URL(request.url).searchParams;
     if ([...params.keys()].length !== 1 || params.getAll("ideaId").length !== 1) {
       return NextResponse.json({ error: "schema_rejected" },
