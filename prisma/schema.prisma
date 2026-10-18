@@ -2626,7 +2626,6 @@ model AdminAuditLog {
   marketingLlmCallCloses       MarketingLlmCall[] @relation("MarketingLlmCallCloseAudit")
   marketingLlmCallLegalHolds   MarketingLlmCall[] @relation("MarketingLlmCallLegalHoldAudit")
   promptRefinerProductOperationalGuard PromptRefinerProductOperationalGuard? @relation("PromptRefinerProductOperationalGuardTransitionAudit")
-
   chatUnifiedOptimizerRunAdmissions ChatUnifiedOptimizerRun[] @relation("ChatUnifiedOptimizerRunAdmissionAudit")
   chatUnifiedOptimizerRoleClaims ChatUnifiedOptimizerRoleJob[] @relation("ChatUnifiedOptimizerRoleClaimAudit")
   chatUnifiedOptimizerRoleTerminals ChatUnifiedOptimizerRoleJob[] @relation("ChatUnifiedOptimizerRoleTerminalAudit")
