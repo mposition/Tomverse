@@ -88,6 +88,12 @@ async function main() {
       cliStarted: observed.cliStarted === true,
       failureStage: observed.kind === "outcome_unknown"
         ? observed.failureStage ?? "unavailable" : null,
+      childExitCode: observed.kind === "outcome_unknown"
+        ? observed.childExitCode ?? null : null,
+      approvedConnects: observed.kind === "outcome_unknown"
+        ? observed.approvedConnects ?? null : null,
+      deniedConnects: observed.kind === "outcome_unknown"
+        ? observed.deniedConnects ?? null : null,
       answerMatches: observed.kind === "verified_success"
         ? observed.rawModelOutput.trim() === "S0_OK" : null,
       traceRead: observed.kind === "verified_success"

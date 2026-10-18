@@ -84,6 +84,7 @@ test("synthetic diagnostic distinguishes child failure from parser refusal witho
   await send(failed);
   assert.deepEqual(first.finish({ code: 2, signal: null }), {
     kind: "outcome_unknown", failureStage: "child_nonzero",
+    childExitCode: 2,
   });
   const malformed = child();
   const second = observeAmuxTrackedCheckoutChild(malformed,
@@ -92,6 +93,7 @@ test("synthetic diagnostic distinguishes child failure from parser refusal witho
   await new Promise((resolve) => malformed.stdout.once("end", resolve));
   assert.deepEqual(second.finish({ code: 0, signal: null }), {
     kind: "outcome_unknown", failureStage: "parser_rejected",
+    childExitCode: null,
   });
 });
 
