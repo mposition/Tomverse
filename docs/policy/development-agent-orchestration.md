@@ -33,7 +33,8 @@
 상태(v51 이력): **v51 아이디어당 사람 결정 0: 세션 접수와 무인 분석·등록.** 2026-10-16 운영자 `mposition`이 아래 v51 절을 `amux-intake.md` v19와 같은 결정으로 승인했다. 아이디어마다 하던 실행 승인과 계획 승인을 owner의 운영 범위 설정 한 번으로 바꾸고, 결정적 Guard를 통과한 계획은 시스템 actor가 등록한다. 사람 결정은 PR마다 GitHub review·병합(v49·v50)과 Guard에 걸린 계획의 검토뿐이다. 이전 v50 상태 줄은 이력이다.
 상태(v52 이력): **v52 v4 Task 실행 등급 판정, 같은 등급 배정, 검토 서버 연결.** 2026-10-16 운영자 `mposition`이 아래 v52 절을 승인했다. v4 Task는 결정적 함수가 정한 실행 등급 하나를 갖고 같은 등급의 worker만 맡으며, 실행 뒤 contract 경로에 닿은 변경은 버리고 `frontier`로 다시 실행한다. AMUX의 review 단계 대신 runner가 독립 검토 서버를 호출하고, `done`은 v49·v50의 병합 관측 그대로다. 버전 16은 철회됐다. 코드 래치와 운영 스위치는 꺼진 채이며, 이 승인 자체로 켜지 않는다. 이전 v51 상태 줄은 이력이다.
 상태(v53 이력): **v53 R1·R2b 관측 종료와 R2c 배정 카탈로그 전환.** 2026-10-17 운영자 `mposition`이 아래 v53 절을 승인했다. R1(2026-10-13 08:52~10-16 08:52 AEST)과 R2b(2026-10-14 18:21~10-17 18:21 AEST)의 관측이 불일치 없이 끝났다. R2c 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH`가 true가 되어 버전 35의 일곱 사용처가 등록부에서 유도한 카탈로그로 배정한다. 카탈로그 환경 변수는 R2e까지 남고, 래치를 끄면 배정은 환경 변수로 돌아간다. R2d는 바뀌지 않는다. 이전 v52 상태 줄은 이력이다.
-상태(최신): **v54 R2d bridge 세션 목록 켜기.** 2026-10-18 운영자 `mposition`이 아래 v54 절을 승인했다. 운영자가 같은 날 두 경로의 bridge 바이너리를 main `d6c99aa1f` 빌드로 교체한 뒤다. R2d 코드 래치 `AMUX_WORKER_SESSION_LIST_LATCH`가 true가 되어, bridge는 유도 카탈로그의 세션 목록과 `TOMVERSE_AMUX_WSL_SESSIONS`의 교집합만 등록·배정한다. 관측은 이 래치를 담은 production 배포부터 3일이다. 2026-10-18 기준으로 바뀌는 배정은 없다. 이전 v53 상태 줄은 이력이다.
+상태(v54 이력): **v54 R2d bridge 세션 목록 켜기.** 2026-10-18 운영자 `mposition`이 아래 v54 절을 승인했다. 운영자가 같은 날 두 경로의 bridge 바이너리를 main `d6c99aa1f` 빌드로 교체한 뒤다. R2d 코드 래치 `AMUX_WORKER_SESSION_LIST_LATCH`가 true가 되어, bridge는 유도 카탈로그의 세션 목록과 `TOMVERSE_AMUX_WSL_SESSIONS`의 교집합만 등록·배정한다. 관측은 이 래치를 담은 production 배포부터 3일이다. 2026-10-18 기준으로 바뀌는 배정은 없다. 이전 v53 상태 줄은 이력이다.
+상태(최신): **v55 worker별 bridge와 DB가 정하는 담당 범위.** 2026-10-18 운영자 `mposition`이 아래 v55 절을 승인했다. worker 목록은 Admin 등록부 하나에서 관리하고, `TOMVERSE_AMUX_WSL_SESSIONS`는 옮기지 않고 없앤다. bridge는 worker마다 하나(`tomverse-amux-bridge@`, `--worker %i`)이며 담당과 종류는 새 `bridge-scope` route가 등록부·능력에서 정한다. 승인 자체로 코드 래치(`AMUX_WORKER_BRIDGE_SCOPE_LATCH`, false로 출고)나 호스트를 바꾸지 않는다. 이전 v54 상태 줄은 이력이다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -85,6 +86,7 @@ approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 51
 approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 52
 approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 53
 approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 54
+approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 55
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -142,6 +144,7 @@ approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 54
 | 52 | 2026-10-16 mposition | v4 Task는 실행 등급 하나(`routine`·`advanced`·`frontier`)를 갖고 같은 등급의 worker만 맡으며, 위 등급으로 넘기지 않고 기다린다. 등급은 결정적 함수가 contract 경로 목록·역할·예상 경로로 정하고 intake의 제안은 신호다(정해진 범위 안에서는 하향도 받는다). 실행 뒤 변경이 contract 경로에 닿으면 버리고 `frontier`로 다시 실행한다. AMUX의 review 단계 대신 runner가 독립 검토 서버를 호출한다. `done`은 v49·v50의 병합 관측 그대로다. 버전 16을 철회하고, legacy 카드는 바꾸지 않는다. |
 | 53 | 2026-10-17 mposition | R1 관측(2026-10-13 08:52~10-16 08:52 AEST)과 R2b 동등 관측(2026-10-14 18:21~10-17 18:21 AEST)의 종료를 운영자 확인으로 기록하고, R2c 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH`를 켜 버전 35의 일곱 사용처가 등록부에서 유도한 카탈로그로 배정한다. 카탈로그 환경 변수는 R2e까지 남고, 래치를 끄면 배정은 환경 변수로 돌아간다. R2d와 FIRST Task 재시도 경로는 바꾸지 않는다. |
 | 54 | 2026-10-18 mposition | R2d 코드 래치 `AMUX_WORKER_SESSION_LIST_LATCH`를 켜 bridge가 유도 카탈로그의 세션 목록과 `TOMVERSE_AMUX_WSL_SESSIONS`의 교집합만 등록·배정하게 한다. 운영자가 두 경로의 bridge 바이너리를 main `d6c99aa1f` 빌드로 교체하며, 관측은 래치 배포와 교체가 모두 끝난 뒤 3일이다. 2026-10-18 기준으로 바뀌는 배정은 없다. |
+| 55 | 2026-10-18 mposition | worker 목록을 Admin 등록부 하나에서 관리한다. `TOMVERSE_AMUX_WSL_SESSIONS`를 옮기지 않고 없애며, bridge는 통합하지 않고 worker마다 하나(새 템플릿 `tomverse-amux-bridge@`, `--worker %i`)로 둔다. 담당과 종류(`session`·`v22`)는 새 읽기 전용 route `bridge-scope`가 등록부·능력에서 정한다. 장애 복구는 2026-10-14의 자동 재시작이 맡는다. 단계는 S1~S4이고 승인 자체로 아무것도 켜지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -3151,3 +3154,135 @@ accept했다. 이 승인을 기록하는 commit이 래치를 true로 바꾼다.
 - 래치를 false로 되돌리면 route가 `session_list_off`를 답하고, bridge는 환경 변수 목록만 따른다. 쓰는 것이
   없으므로 남는 것도 없다.
 - 바이너리는 교체할 때 남긴 백업으로 되돌린다.
+
+## 버전 55 — worker별 bridge와 DB가 정하는 담당 범위
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-18`. 2026-10-18 작성, 작성자 Claude. 운영자가
+2026-10-18에 정한 결정(0항)을 옮기고, 같은 날 이 절을 승인했다. 작성자와 다른 공급사의 독립 검토는 세 회차였다.
+r-20261018-062308-f70466과 r-20261018-062521-848df3에서 codex가 reject했고(인스턴스 전환의 drain 조건, R2 종료
+기록이 두 삭제를 모두 기다려야 함, 끼어든 attempt 위로 bridge를 다시 켜지 않음), 고친 뒤
+r-20261018-063042-a41ba9에서 codex와 copilot이 둘 다 accept했다. 이 승인 자체로 코드 래치를 켜거나 호스트를
+바꾸지 않는다.
+
+### 0. 운영자 결정 (2026-10-18)
+
+1. worker 목록은 Admin 등록부 하나에서 관리한다. 고정된 환경 변수 값을 고치거나 배포해야 바뀌는 worker 목록을
+   두지 않는다.
+2. 그러므로 버전 35 4항이 "R2를 끝낼 때 지운다"고 한 `TOMVERSE_AMUX_WSL_SESSIONS`는 다른 변수로 옮기지 않고
+   없앤다. 이 변수는 지금 목록을 좁히는 장치이면서 bridge 인스턴스마다 맡을 worker를 정하는 유일한 수단이다.
+   그 두 역할을 DB와 systemd 인스턴스 이름이 나누어 맡는다.
+3. bridge는 통합하지 않고 worker마다 하나를 둔다. 통합 bridge는 한 worker의 장애(panic, hang, 느린 호출로 밀린
+   heartbeat)가 모든 worker를 멈추게 하고, 결과를 모르는 경우의 정지를 worker 단위로 바꾸려면 버전 20 11항을
+   다시 써야 한다. sidecar는 어느 쪽이든 worker마다 있어 조정기도 어느 쪽이든 필요하므로, 통합해서 줄어드는
+   부품은 적다.
+4. codex worker도 같은 방식으로 바꾼다. codex 셋을 한 프로세스로 묶은 세션 bridge(`tomverse-bridge.service`)가
+   손으로 적은 목록을 가진 유일한 예외이기 때문이다.
+5. 장애 복구는 2026-10-14에 승인된 자동 재시작(`docs/ops/amux/bridge-monitoring.md` 5절)이 맡는다. 대기
+   bridge(hot standby)는 두지 않는다.
+
+### 1. 담당 범위 route
+
+- 새 내부 route `GET /api/internal/amux/workers/bridge-scope`를 둔다. bridge bearer로 호출하고 읽기 전용이다.
+- 답은 정확히 셋 중 하나다. `session-list`와 같은 모양이다.
+  - `{ "listed": true, "workers": [{ "name": "<worker>", "kind": "session" | "v22" }] }`
+  - `{ "listed": false, "reason": "bridge_scope_off" }`: 코드 래치가 꺼져 있다.
+  - `{ "listed": false, "reason": "worker_catalog_unavailable" }`: 유도 카탈로그를 읽지 못했다.
+- 이름은 버전 35 3항의 유도 카탈로그에서 오며 `engineering-runner`는 빠진다. `kind`는 그 worker의 능력에
+  v22 프로필이 있으면 `v22`, 없으면 `session`이다. 둘 다 owner가 Admin에서 편집하는 등록부와 능력 표에서
+  결정적으로 나온다.
+- 이 route는 코드 래치 `AMUX_WORKER_BRIDGE_SCOPE_LATCH`를 false로 둔 채 출고한다.
+- 기존 `session-list` route는 바꾸지 않는다. 지금 설치된 bridge는 그 답의 키가 정확히 `listed`·`workers`일 때만
+  목록으로 인정하므로, 거기에 필드를 더하면 모든 bridge가 등록을 멈춘다. 새 bridge만 새 route를 부른다.
+
+### 2. worker별 bridge
+
+- bridge 바이너리는 그대로 하나이고, 인스턴스마다 `--worker <name>` 인자로 자기 worker를 안다.
+- 인스턴스는 새 템플릿 unit `tomverse-amux-bridge@.service` 하나로 띄운다. `ExecStart`는
+  `/usr/local/libexec/tomverse-wsl-bridge --worker %i`이고, 템플릿에는 worker별 값이 없다. worker를 더해도 unit
+  파일을 고치지 않는다.
+- `--worker`로 시작한 bridge는 매 회차 `bridge-scope`를 읽는다.
+  - 자기 이름이 `kind: "v22"`로 있으면 sidecar 소켓 `/run/tomverse-amux-v22-<name>/task.sock`에 붙는다. 경로는
+    이름에서 계산하므로 `TOMVERSE_AMUX_V22_SIDECAR_SOCKET`은 필요 없다.
+  - `kind: "session"`이면 로컬 AMUX의 같은 이름 세션에 붙는다.
+  - 목록에 없거나, 목록이 꺼졌거나, 읽지 못하면 등록하지 않는다. 이미 등록돼 있으면 `dispatch_ready: false`로
+    heartbeat하고 진행 중인 attempt는 끝낸다. 어느 경우도 정지(종료 코드 3)가 아니다.
+- `--worker` 없이 시작한 bridge는 지금과 똑같이 동작한다(환경 변수 목록과 `session-list`). 전환 기간의 호환이다.
+- 정지 계약(버전 20 11항), lease(90초), 자격증명 경계(버전 23), sidecar의 실행 격리는 바꾸지 않는다. 프로세스가
+  worker마다 따로이므로 정지도 그 worker에만 미친다.
+
+### 3. 호스트 (운영자, root 한 번)
+
+1. 새 템플릿 `tomverse-amux-bridge@.service`를 설치한다. `enable`하지 않는다(버전 31 4항).
+2. 자동 재시작과 watchdog의 대상에 `tomverse-amux-bridge@*`를 넣고, polkit 규칙도 그 이름으로 고친다.
+3. 활성화(5항) 때 옛 `tomverse-bridge.service`와 `tomverse-amux-v22-bridge@*` 인스턴스에서
+   `tomverse-amux-bridge@<worker>` 인스턴스로 옮긴다. 옮기는 조건과 순서는 3.1이다.
+4. 관측이 끝나면 옛 unit 파일과 그 안의 `TOMVERSE_AMUX_WSL_SESSIONS`·`TOMVERSE_AMUX_V22_SIDECAR_SOCKET`을
+   지운다.
+
+### 3.1 소유권 전환과 되돌리기의 조건
+
+옛 bridge를 멈춰도 로컬 AMUX 세션이나 sidecar의 작업은 끝나지 않는다. 새 bridge의 등록은 generation을 올려 진행
+중인 attempt의 heartbeat와 정산을 막는다. 그래서 전환은 진행 중인 일이 없음을 확인한 단위로만 한다.
+
+- **전환 단위.** codex 셋은 옛 unit 하나(`tomverse-bridge.service`)를 함께 쓰므로 셋이 한 단위다. v22 worker는
+  worker 하나가 한 단위다.
+- **순서.** 단위마다 다음을 모두 확인한 뒤에만 새 인스턴스를 시작한다.
+  1. 단위의 모든 worker에 열린 attempt가 없고, 그 worker가 소유한 `todo`·`doing` 카드가 없으며, 미해결
+     orchestrator 쓰기와 열린 halt가 없음을 앱의 read-back으로 확인한다.
+  2. 옛 인스턴스를 멈추고, 그 worker들의 runtime lease가 만료된 것(90초)을 확인한다. lease가 남은 동안에는 새
+     claim이 그 runtime에 갈 수 있으므로, 만료 뒤 1번을 다시 확인한다.
+     - 그 사이 attempt가 생겼으면 옛 인스턴스도 새 인스턴스도 시작하지 않는다. 어느 쪽이든 시작하면 등록이
+       generation을 올리고, bridge는 진행 중인 작업 목록을 비운 채 시작하므로 그 attempt를 이어받지 못한 채
+       heartbeat와 정산을 막는다.
+     - 그 attempt와 로컬 작업은 기존 복구 절차(버전 37~48의 recovery, 사람 Review)로 정리한 뒤 1~3을 처음부터 다시
+       확인한다.
+  3. 로컬 AMUX 세션(codex)이나 sidecar(v22)에 진행 중인 작업이 없음을 호스트에서 확인한다.
+  4. 그 뒤에 새 인스턴스를 시작한다.
+- **되돌리기.** 같은 조건을 반대 방향으로 따른다. 1번을 먼저 확인하고, 그 뒤 새 인스턴스를 멈추고, lease 만료와
+  1번 재확인(2번, attempt가 생겼으면 어느 인스턴스도 시작하지 않고 복구 절차로 정리)과 3번을 거쳐 옛 인스턴스를
+  시작한다.
+  래치를 끄는 것만으로는 되돌리기가 아니다. 래치가 꺼져도 이미 등록된 새 bridge는 진행 중인 attempt를 끝내려고
+  계속 돌기 때문에, 옛 bridge를 바로 다시 켜면 두 프로세스가 같은 worker를 등록하려 한다.
+- 어느 확인이든 하지 못하면 멈추고 사람이 판단한다(공통 기반 원칙 7).
+
+### 4. 버전 31과 버전 35를 바꾸는 점
+
+- 버전 31 4항의 조정기 대상 템플릿은 `tomverse-amux-v22-bridge@`·`tomverse-amux-v22-sidecar@`에서
+  `tomverse-amux-bridge@`·`tomverse-amux-v22-sidecar@`로 바뀐다. 조정기가 켜는 bridge는 이 템플릿 하나다.
+- 버전 35 4항의 세션 bridge와 worker별 v22 bridge의 구분, 그리고 `TOMVERSE_AMUX_WSL_SESSIONS`와의 교집합은 이
+  버전의 활성화 뒤로 쓰지 않는다. R2의 종료 조건(버전 31 8항, "환경 변수 목록 삭제")은 이 버전만으로 채워지지 않는다.
+  R2 종료 기록의 조건은 5항이다.
+
+### 5. 단계
+
+각 단계는 작성자와 다른 공급사의 독립 검토를 거친다.
+
+| 단계 | 내용 | 끝나는 조건 |
+|---|---|---|
+| S1 | 앱: `bridge-scope` route, 래치 false | develop 병합 |
+| S2 | Rust: `--worker` 모드, 새 템플릿과 자동 재시작·watchdog 변경 파일 | develop 병합, 운영자가 바이너리와 3항 1·2번 설치 |
+| S3 | 활성화 기록(새 정책 버전): 래치 true, 3항 3번의 인스턴스 전환 | 3일(72시간) 동안 Agent Office의 AMUX 층이 전환 전과 같음 |
+| S4 | 옛 unit·두 변수·`--worker` 없는 경로와 `session-list` 삭제 | 호스트와 코드에 `TOMVERSE_AMUX_WSL_SESSIONS`·`TOMVERSE_AMUX_V22_SIDECAR_SOCKET`이 남지 않음 |
+
+- S1·S2는 버전 54의 R2d 관측과 함께 진행할 수 있다. 배정과 bridge 동작을 바꾸지 않기 때문이다.
+- S1~S4와 버전 56(예정, R2e의 앱 몫: 카탈로그 환경 변수 경로 삭제)의 작업은 서로 기다리지 않는다.
+- R2 종료 기록(새 정책 버전)은 둘을 모두 기다린다. 이 버전의 S4, 버전 56의 코드 삭제와 그 배포, IaC 항목 삭제,
+  Railway에서 두 카탈로그 환경 변수의 삭제가 모두 끝난 것을 확인한 뒤에만 쓴다.
+
+### 6. 이 버전으로 끝나지 않는 것
+
+- 새 worker의 bridge·sidecar 인스턴스를 켜는 일은 버전 31의 R4~R6 조정기가 등록부를 보고 한다. R6의 끝나는
+  조건이 "새 worker 하나를 등록부만으로 추가"이고, 그때 운영자 결정 1이 완성된다. 그 전까지 인스턴스 시작은
+  운영자가 한다. unit 파일을 고치지는 않는다.
+- 로컬 AMUX 서버의 세션(`session` 종류 worker의 실행 환경)을 만드는 일은 이 버전의 범위가 아니다.
+
+### 7. 공통 기반 체크리스트 (이 버전이 바꾸는 항목)
+
+- **6 자격증명**: bridge 계정과 그 환경 파일은 그대로다. 프로세스 수는 worker 수만큼이고, 지금과 같다.
+- **9 스위치**: `AMUX_WORKER_BRIDGE_SCOPE_LATCH`(false로 출고). 끄면 `--worker` bridge는 새로 등록하지 않는다.
+  되돌리기는 래치만으로 되지 않고 3.1의 조건을 따른다.
+- **10 결과 불명**: 정지 계약은 그대로이고 worker 단위다. 목록을 읽지 못하면 등록하지 않을 뿐 정지하지 않는다.
+- **15 실행 위치**: 전용 Ubuntu runner(버전 23) 그대로다.
+- **16 상태 위치**: 담당 범위는 본 앱 DB(등록부·능력)에서 나온다.
+
+그 밖의 항목은 이 버전이 바꾸지 않는다.
