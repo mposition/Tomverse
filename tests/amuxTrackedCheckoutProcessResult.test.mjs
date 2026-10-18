@@ -25,6 +25,11 @@ const events = [init,
     { type: "tool_result", tool_use_id: "read_1", is_error: false,
       content: "untrusted source text" },
   ] } }, result];
+const noCliError = { assistantError: null, resultIsError: null,
+  apiErrorStatus: null, terminalReason: null, permissionDenials: null,
+  turns: null, toolUses: { Read: 0, Grep: 0, Glob: 0 } };
+const sentCliError = { ...noCliError, resultIsError: false, turns: 2,
+  toolUses: { Read: 1, Grep: 0, Glob: 0 } };
 const child = () => Object.assign(new EventEmitter(), {
   stdout: new PassThrough(), stderr: new PassThrough(),
 });
@@ -84,7 +89,7 @@ test("synthetic diagnostic distinguishes child failure from parser refusal witho
   await send(failed);
   assert.deepEqual(first.finish({ code: 2, signal: null }), {
     kind: "outcome_unknown", failureStage: "child_nonzero",
-    childExitCode: 2,
+    childExitCode: 2, cliError: sentCliError,
   });
   const malformed = child();
   const second = observeAmuxTrackedCheckoutChild(malformed,
@@ -93,7 +98,7 @@ test("synthetic diagnostic distinguishes child failure from parser refusal witho
   await new Promise((resolve) => malformed.stdout.once("end", resolve));
   assert.deepEqual(second.finish({ code: 0, signal: null }), {
     kind: "outcome_unknown", failureStage: "parser_rejected",
-    childExitCode: null,
+    childExitCode: null, cliError: noCliError,
   });
 });
 
@@ -108,8 +113,49 @@ test("synthetic stderr reports only a bounded failure class", async () => {
   const failure = observed.finish({ code: 1, signal: null });
   assert.deepEqual(failure, { kind: "outcome_unknown",
     failureStage: "child_nonzero", childExitCode: 1,
-    stderrClass: "authentication" });
+    stderrClass: "authentication", cliError: sentCliError });
   assert.equal(JSON.stringify(failure).includes("private"), false);
+});
+
+test("a failed CLI turn reports only its fixed error codes and counts", async () => {
+  const process = child();
+  const observed = observeAmuxTrackedCheckoutChild(process,
+    { ...input, diagnostic: true });
+  await send(process, [init,
+    { type: "assistant", error: "authentication_failed", message: {
+      role: "assistant", content: [{ type: "text", text: "private login text" }] } },
+    { type: "result", subtype: "success", is_error: true, num_turns: 1,
+      api_error_status: 401, terminal_reason: "api_error",
+      permission_denials: [{ tool: "private" }], result: "private result text" }]);
+  const failure = observed.finish({ code: 1, signal: null });
+  assert.deepEqual(failure, { kind: "outcome_unknown",
+    failureStage: "child_nonzero", childExitCode: 1,
+    cliError: { assistantError: "authentication_failed", resultIsError: true,
+      apiErrorStatus: 401, terminalReason: "api_error", permissionDenials: 1,
+      turns: 1, toolUses: { Read: 0, Grep: 0, Glob: 0 } } });
+  assert.equal(JSON.stringify(failure).includes("private"), false);
+  // An unlisted error code or a free-text reason collapses to "other".
+  const odd = child();
+  const second = observeAmuxTrackedCheckoutChild(odd, { ...input, diagnostic: true });
+  await send(odd, [init,
+    { type: "assistant", error: "Private Text!", message: { role: "assistant",
+      content: [{ type: "text", text: "x" }] } },
+    { type: "result", subtype: "success", is_error: true, num_turns: 1,
+      api_error_status: "401", terminal_reason: "Private reason", result: "x" }]);
+  assert.deepEqual(second.finish({ code: 1, signal: null }).cliError, {
+    ...noCliError, assistantError: "other", resultIsError: true,
+    terminalReason: "other", turns: 1 });
+});
+
+test("a diagnostic success also reports file tool counts; a normal one does not", async () => {
+  const process = child();
+  const observed = observeAmuxTrackedCheckoutChild(process, { ...input, diagnostic: true });
+  await send(process);
+  assert.deepEqual(observed.finish({ code: 0, signal: null, stopped: false }), {
+    kind: "verified_success", rawModelOutput: result.result,
+    readFiles: ["src/a.ts"], inputTokens: 14, outputTokens: 2,
+    toolUses: { Read: 1, Grep: 0, Glob: 0 },
+  });
 });
 
 test("stderr transport errors invalidate an otherwise complete result", async () => {
