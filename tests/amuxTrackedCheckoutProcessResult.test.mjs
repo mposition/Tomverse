@@ -99,7 +99,7 @@ test("synthetic diagnostic distinguishes child failure from parser refusal witho
   assert.deepEqual(second.finish({ code: 0, signal: null }), {
     kind: "outcome_unknown", failureStage: "parser_rejected",
     childExitCode: null, cliError: noCliError,
-    parserReason: { code: "stream_invalid_json", usageModels: null, traceReason: null },
+    parserReason: { code: "stream_invalid_json", also: ["result_text_missing"], usageModels: null, traceReason: null },
   });
 });
 
@@ -172,7 +172,7 @@ test("result codes survive a stream the validator already rejected", async () =>
     kind: "outcome_unknown", failureStage: "parser_rejected", childExitCode: null,
     cliError: { ...noCliError, resultIsError: true, terminalReason: "max_turns",
       permissionDenials: 0, turns: 3, toolUses: { Read: 1, Grep: 0, Glob: 0 } },
-    parserReason: { code: "stream_tool_result_error", usageModels: null,
+    parserReason: { code: "stream_tool_result_error", also: ["usage_incomplete"], usageModels: [],
       traceReason: null },
   });
 });

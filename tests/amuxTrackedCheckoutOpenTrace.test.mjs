@@ -191,3 +191,53 @@ test("a device annotation outside the checkout is decoded; a device inside is re
     `123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY) = 4<${directory}/src/a.ts<pipe:[1]>>\n`));
   assert.deepEqual(odd.finish({ traceComplete: true }), { kind: "unverified", reason: "undecoded_open" });
 });
+
+test("a call strace splits across threads is paired by PID and judged whole", () => {
+  const run = (text) => {
+    const observer = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files, diagnostic: true });
+    observer.observeChunk(Buffer.from(text));
+    return observer.finish({ traceComplete: true });
+  };
+  // Measured shape from the v19 runner, two threads interleaved.
+  assert.deepEqual(run(
+    `11 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY|O_CLOEXEC <unfinished ...>\n` +
+    `12 openat(AT_FDCWD<${directory}>, "src/b.ts", O_RDONLY|O_CLOEXEC <unfinished ...>\n` +
+    `13 statx(AT_FDCWD<${directory}>, "src/a.ts", AT_STATX_SYNC_AS_STAT <unfinished ...>\n` +
+    `12 <... openat resumed>)           = 22<${directory}/src/b.ts>\n` +
+    `13 <... statx resumed>, {stx_mask=STATX_ALL}) = 0\n` +
+    `11 <... openat resumed>)           = 21<${directory}/src/a.ts>\n`),
+  { kind: "complete", files: ["src/a.ts", "src/b.ts"] });
+  // A split open of an unlisted file is still refused.
+  assert.deepEqual(run(
+    `11 openat(AT_FDCWD<${directory}>, "src/c.ts", O_RDONLY <unfinished ...>\n` +
+    `11 <... openat resumed>) = 3<${directory}/src/c.ts>\n`),
+  { kind: "unverified", reason: "unlisted_open" });
+  // A split io_uring setup counts only when the kernel refused it.
+  assert.deepEqual(run(`11 io_uring_setup(256, 0x7ffd <unfinished ...>\n` +
+    `11 <... io_uring_setup resumed>) = -1 ENOSYS (Function not implemented)\n`),
+  { kind: "complete", files: [] });
+  assert.deepEqual(run(`11 io_uring_setup(256, 0x7ffd <unfinished ...>\n` +
+    `11 <... io_uring_setup resumed>) = 5<anon_inode:[io_uring]>\n`),
+  { kind: "unverified", reason: "unobservable_io_uring_setup" });
+});
+
+test("an unpaired resume or a split open that never resumed is never certified", () => {
+  const run = (text) => {
+    const observer = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files, diagnostic: true });
+    observer.observeChunk(Buffer.from(text));
+    return observer.finish({ traceComplete: true });
+  };
+  assert.deepEqual(run(`11 <... openat resumed>) = 3<${directory}/src/a.ts>\n`),
+    { kind: "unverified", reason: "unpaired_resume" });
+  assert.deepEqual(run(`11 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY <unfinished ...>\n` +
+    `11 <... openat2 resumed>) = 3<${directory}/src/a.ts>\n`),
+  { kind: "unverified", reason: "unpaired_resume" });
+  assert.deepEqual(run(`11 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY <unfinished ...>\n` +
+    `11 openat(AT_FDCWD<${directory}>, "src/b.ts", O_RDONLY <unfinished ...>\n`),
+  { kind: "unverified", reason: "unpaired_resume" });
+  assert.deepEqual(run(`11 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY <unfinished ...>\n`),
+    { kind: "unverified", reason: "unfinished_open" });
+  // A killed thread's open reports `= ?`, which is not a decoded result.
+  assert.deepEqual(run(`11 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY <unfinished ...>\n` +
+    `11 <... openat resumed>) = ?\n`), { kind: "unverified", reason: "undecoded_open" });
+});

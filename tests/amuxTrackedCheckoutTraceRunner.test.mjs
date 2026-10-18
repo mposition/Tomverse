@@ -82,6 +82,45 @@ test("Node's io_uring is refused and its read is still observed as a complete ma
   }
 });
 
+test("concurrent reads that strace splits across threads still form a complete manifest", {
+  skip: process.platform !== "linux",
+}, async () => {
+  // The sixth Max S0 call ended `undecoded_open`: strace -f writes a call that
+  // another thread interrupts as `<unfinished ...>` plus `<... resumed>`.
+  const directory = await mkdtemp("/tmp/amux-v19-checkout-");
+  const files = Array.from({ length: 24 }, (_, index) => `f${index}.txt`);
+  let launched;
+  try {
+    for (const file of files) await writeFile(join(directory, file), "x\n", { mode: 0o400 });
+    launched = await launchAmuxV19TracedSandbox({ directory, files, diagnostic: true, args: [
+      "--unshare-all", "--die-with-parent", "--cap-drop", "ALL", "--clearenv",
+      "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib",
+      "--ro-bind", "/lib64", "/lib64", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+      "--ro-bind", directory, directory, "--chdir", directory,
+      "--setenv", "PATH", "/usr/bin:/bin", "--", "/usr/bin/node", "-e",
+      `Promise.all(${JSON.stringify(files)}.map((f) => require('fs').promises.readFile(f)))` +
+        ".then((all) => process.stdout.write(String(all.length)))",
+    ] });
+    const child = launched.child;
+    let output = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { output += chunk; });
+    child.stderr.resume();
+    child.stdin.end();
+    const exit = await new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    assert.deepEqual(exit, { code: 0, signal: null });
+    assert.equal(output, String(files.length));
+    assert.deepEqual(await launched.finishTrace(exit),
+      { kind: "complete", files: [...files].sort() });
+  } finally {
+    await launched?.cleanup();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("a caller cannot pass its own seccomp program", async () => {
   await assert.rejects(launchAmuxV19TracedSandbox({ directory: "/tmp/amux-v19-checkout-Ab12c3",
     files: [], args: ["--seccomp", "4", "--", "/usr/bin/true"] }), TypeError);

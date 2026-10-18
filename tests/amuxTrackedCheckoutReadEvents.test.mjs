@@ -365,3 +365,31 @@ test("analysis stream invalidates a result if bytes arrive after finish", () => 
   observer.observeChunk(Buffer.from("late"));
   assert.deepEqual(observer.finish(), { kind: "outcome_unknown" });
 });
+
+test("a content-free ui_invalidate event is accepted; one paid run names every failing check", () => {
+  // Measured in the sixth Max S0 call (CLI 2.1.288).
+  const rest = [use("read_1", "Read", { file_path: file }), reply("read_1")];
+  assert.equal(analyze([analysisInit, { type: "system", subtype: "ui_invalidate" },
+    ...rest, analysisResult]).kind, "verified_success");
+  const capability = createAmuxTrackedCheckoutAnalysisStreamObserver({
+    directory, files: ["src/a.ts"], modelId });
+  capability.observeChunk(Buffer.from([analysisInit,
+    { type: "system", subtype: "ui_invalidate", tools: ["Bash"] }, ...rest, analysisResult]
+    .map(JSON.stringify).join("\n")));
+  assert.deepEqual(capability.finish({ exitCode: 0, stdoutComplete: true }),
+    { kind: "outcome_unknown" });
+  assert.equal(capability.rejectReason().code, "system_event_ui_invalidate");
+  const several = createAmuxTrackedCheckoutAnalysisStreamObserver({
+    directory, files: ["src/a.ts"], modelId });
+  several.observeChunk(Buffer.from([analysisInit, { type: "system", subtype: "hook_started" },
+    use("grep_1", "Grep", { pattern: "x" }), reply("grep_1"),
+    { ...analysisResult, modelUsage: { ...analysisResult.modelUsage,
+      "claude-haiku-4-5-20251001": { inputTokens: 1, outputTokens: 1 } } }]
+    .map(JSON.stringify).join("\n")));
+  assert.deepEqual(several.finish({ exitCode: 0, stdoutComplete: true,
+    openTrace: { kind: "unverified", reason: "undecoded_open" } }), { kind: "outcome_unknown" });
+  const reason = several.rejectReason();
+  assert.equal(reason.code, "system_event_hook_started");
+  assert.ok(reason.also.includes("stream_trace_unverified"));
+  assert.ok(reason.also.includes("usage_model_count") || reason.also.includes("usage_incomplete"));
+});
