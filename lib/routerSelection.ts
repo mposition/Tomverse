@@ -54,7 +54,7 @@ import {
     type RouterTieBreakCriterion,
     type RouterTieBreakSignals,
 } from "@/lib/routerScorePolicy";
-import type { TaskProfile } from "@/lib/taskProfileCore";
+import type { TaskKind, TaskProfile } from "@/lib/taskProfileCore";
 
 /** Bump with any change to the rule or the tie-break. */
 export const ROUTER_SELECTION_VERSION = "router-selection-v3";
@@ -494,16 +494,37 @@ export const rankCandidates = (
     };
 };
 
-export function selectRouterModel(input: {
+export type RouterSelectionInput = {
     profile: TaskProfile;
     eligible: readonly RouterCandidate[];
     sticky?: RouterStickyState | null;
     /** Measured inputs for tie-break criteria 2 to 5. See the policy module. */
     signals?: RouterTieBreakSignals;
-}): RouterSelectionResult {
+};
+
+/** Internal server composition supplies already verified, versioned cells. */
+export type RouterSelectionScoreContext = Readonly<{
+    version: string;
+    kind: TaskKind;
+    cellFor: (modelId: string) => Readonly<RouterScoreCell>;
+    minimumHysteresisTurns?: number;
+}>;
+
+export function selectRouterModel(input: RouterSelectionInput): RouterSelectionResult {
+    return selectRouterModelInternal(input);
+}
+
+/** Same ranking and hysteresis; this pure seam grants no evidence authority. */
+export function selectRouterModelWithScoreContext(input: RouterSelectionInput,
+    context: RouterSelectionScoreContext): RouterSelectionResult {
+    return selectRouterModelInternal(input, context);
+}
+
+function selectRouterModelInternal(input: RouterSelectionInput,
+    context?: RouterSelectionScoreContext): RouterSelectionResult {
     const base = {
-        version: ROUTER_SELECTION_VERSION,
-        policyVersion: ROUTER_SCORE_POLICY_VERSION,
+        version: context ? "router-selection-unified-v1" : ROUTER_SELECTION_VERSION,
+        policyVersion: context?.version ?? ROUTER_SCORE_POLICY_VERSION,
         turnsFavouringChallenger: 0,
     };
 
@@ -523,10 +544,12 @@ export function selectRouterModel(input: {
     const signals = input.signals ?? {};
     // A kind nothing supported does not steer the ranking; it falls back to
     // the general column. See `rankingKindFor`.
-    const kind = rankingKindFor(input.profile);
+    const kind = context?.kind ?? rankingKindFor(input.profile);
+    const cellFor = (modelId: string) => context
+        ? context.cellFor(modelId) : getRouterScoreCell(modelId, kind);
     const scored = input.eligible.map((candidate) => ({
         modelId: candidate.modelId,
-        cell: getRouterScoreCell(candidate.modelId, kind),
+        cell: cellFor(candidate.modelId),
     }));
     const ranking = rankCandidates(scored, signals);
     const ranked = ranking.ranked;
@@ -571,9 +594,10 @@ export function selectRouterModel(input: {
     // that is the scale the margin is stated on -- a cheaper or faster model
     // is not a reason to change a conversation's model mid-way, only a reason
     // to have started somewhere else.
-    const stickyBand = getRouterScoreCell(sticky.modelId, kind).qualityBand;
+    const stickyBand = cellFor(sticky.modelId).qualityBand;
     const challengerMargin = bandOf(winner) - stickyBand;
-    const requiredTurns = stickyHysteresisTurnsFor(input.profile);
+    const requiredTurns = Math.max(stickyHysteresisTurnsFor(input.profile),
+        context?.minimumHysteresisTurns ?? 0);
     const streak =
         challengerMargin >= ROUTER_STICKY_SWITCH_MARGIN_BANDS
             ? sticky.turnsFavouringChallenger + 1
@@ -581,8 +605,8 @@ export function selectRouterModel(input: {
 
     if (streak >= requiredTurns) {
         return {
-            version: ROUTER_SELECTION_VERSION,
-            policyVersion: ROUTER_SCORE_POLICY_VERSION,
+            version: base.version,
+            policyVersion: base.policyVersion,
             selectedModelId: winner.modelId,
             reason: naturalReason,
             margin: challengerMargin,
@@ -597,8 +621,8 @@ export function selectRouterModel(input: {
     }
 
     return {
-        version: ROUTER_SELECTION_VERSION,
-        policyVersion: ROUTER_SCORE_POLICY_VERSION,
+        version: base.version,
+        policyVersion: base.policyVersion,
         selectedModelId: sticky.modelId,
         reason: "sticky",
         margin: challengerMargin,

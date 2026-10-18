@@ -55,8 +55,10 @@ import {
 } from "@/lib/routerScorePolicy";
 import {
   selectRouterModel,
+  selectRouterModelWithScoreContext,
   ROUTER_SELECTION_VERSION,
   type RouterStickyState,
+  type RouterSelectionScoreContext,
   type SelectionReason,
 } from "@/lib/routerSelection";
 import {
@@ -223,6 +225,21 @@ export function decideRouterModel(
     webSearchRequested: input.webSearchRequested,
   });
 
+  return decideRouterModelWithProfile(input, profile, null, now, startedAt);
+}
+
+/**
+ * Pure composition only. The server entry point owns source/evidence trust;
+ * callers cannot turn a profile or score callback into dispatch authority.
+ */
+export function decideRouterModelWithProfile(
+  input: RouterDecisionInput,
+  profile: TaskProfile,
+  scoreContext: RouterSelectionScoreContext | null,
+  now: () => number = Date.now,
+  startedAt = now(),
+): RouterDecision {
+
   const candidates = filterRouterCandidates({
     models: input.models,
     plan: input.plan,
@@ -237,7 +254,7 @@ export function decideRouterModel(
     creditsByModelId: input.creditsByModelId,
   });
 
-  const selection = selectRouterModel({
+  const selectionInput = {
     profile,
     eligible: candidates.eligible,
     sticky: input.sticky ?? null,
@@ -253,10 +270,17 @@ export function decideRouterModel(
       }),
       ...input.signals,
     },
-  });
+  };
+  const selection = scoreContext === null ? selectRouterModel(selectionInput)
+    : selectRouterModelWithScoreContext(selectionInput, scoreContext);
 
   const record: RouterDecisionRecord = {
-    versions: ROUTER_VERSIONS,
+    versions: scoreContext === null && profile.version === ROUTER_VERSIONS.taskProfile
+      ? ROUTER_VERSIONS : {
+      ...ROUTER_VERSIONS, decision: "router-decision-unified-v1",
+      taskProfile: profile.version, selection: selection.version,
+      scorePolicy: selection.policyVersion,
+    },
     taskKind: profile.kind,
     taskConfidence: profile.kindConfidence,
     needsCurrentInformation: profile.needsCurrentInformation,

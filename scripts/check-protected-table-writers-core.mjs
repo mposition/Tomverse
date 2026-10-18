@@ -119,6 +119,13 @@ import { createHash } from "node:crypto";
 
 import ts from "typescript";
 
+import {
+  CHAT_UNIFIED_APPEND_ONLY_TABLES,
+  CHAT_UNIFIED_PROTECTED_TABLES,
+  CHAT_UNIFIED_RAW_SQL_ALLOWLIST,
+  CHAT_UNIFIED_RUNTIME_SQL_ALLOWLIST,
+} from "./chat-unified-protected-table-allowlist.mjs";
+
 /**
  * Tables whose append-only claim a row trigger cannot defend on its own.
  *
@@ -134,6 +141,7 @@ import ts from "typescript";
  * What is closed here is the vector this repository controls.
  */
 export const APPEND_ONLY_LEDGER_TABLES = [
+  ...CHAT_UNIFIED_APPEND_ONLY_TABLES,
   "EmailPermissionEvent",
   "EmailSendApproval",
   "EmailSendApprovalMember",
@@ -188,6 +196,7 @@ export const findTruncateStatements = ({ sources }) => {
 };
 
 export const PROTECTED_TABLES = [
+  ...CHAT_UNIFIED_PROTECTED_TABLES,
   {
     table: "AmuxIdeaSessionAnalysisBudgetClaim",
     delegate: "amuxIdeaSessionAnalysisBudgetClaim",
@@ -578,6 +587,11 @@ export const EXCLUDED_PREFIXES = [
       "This check. It names the tables, delegates, verbs and raw methods it forbids, and opens no database connection. An exact path, not a prefix, so a similarly named file is still scanned.",
   },
   {
+    path: "scripts/chat-unified-protected-table-allowlist.mjs",
+    reason:
+      "Exact-count U21 protected-table registry data imported by this checker; it opens no database connection or executes SQL.",
+  },
+  {
     path: "scripts/check-protected-table-writers.mjs",
     reason: "The runner. Reads files and prints findings; opens no database connection.",
   },
@@ -709,6 +723,7 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  ...CHAT_UNIFIED_RAW_SQL_ALLOWLIST,
   {
     path: "lib/accountDataExportDomains.ts",
     table: "AmuxIdeaReadManifestKeyIntent",
@@ -2967,6 +2982,7 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  ...CHAT_UNIFIED_RUNTIME_SQL_ALLOWLIST,
   {
     path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
     count: 1,

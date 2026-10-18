@@ -61,6 +61,17 @@ export const promptRefinerProductChatDecisionSchema = z.object({
   decision: z.enum(["accepted", "kept_original"]),
 }).strict();
 
+/**
+ * Browser reference to one server-held unified Router + Refiner result. It is
+ * an identifier tuple only; the analysis and execution text stay server-side.
+ */
+export const chatUnifiedRouterRefinerDecisionSchema = z.object({
+  resultId: uuid,
+  scopeId: uuid,
+  epoch,
+  draftRevision,
+}).strict();
+
 export const promptRefinerProductPrepareRequestSchema =
   promptRefinerProductProposalRequestSchema;
 
@@ -72,6 +83,14 @@ export const promptRefinerProductPrepareResponseSchema = z.discriminatedUnion(
       decision: promptRefinerProductChatDecisionSchema.extend({
         decision: z.literal("accepted"),
       }).strict(),
+      clientRequestId: uuid,
+    }).strict(),
+    z.object({
+      outcome: z.literal("unified_held"),
+      resultId: uuid,
+      scopeId: uuid,
+      epoch,
+      draftRevision,
       clientRequestId: uuid,
     }).strict(),
     z.object({
@@ -95,6 +114,9 @@ export type PromptRefinerProductFallbackReason = z.infer<
 >;
 export type PromptRefinerProductChatDecision = z.infer<
   typeof promptRefinerProductChatDecisionSchema
+>;
+export type ChatUnifiedRouterRefinerDecision = z.infer<
+  typeof chatUnifiedRouterRefinerDecisionSchema
 >;
 export type PromptRefinerProductPrepareResponse = z.infer<
   typeof promptRefinerProductPrepareResponseSchema

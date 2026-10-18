@@ -325,6 +325,12 @@ model Conversation {
   /// the cohort falls back to its own model choice rather than failing.
   selectionMode String @default("manual")
 
+  /// Monotonic server fence for unified Router/Refiner work. The database
+  /// advances it on every real selectionMode transition, including Auto ->
+  /// Manual -> Auto, so work captured before either edge cannot publish or
+  /// consume after the conversation returns to the same visible mode.
+  chatUnifiedRouterRefinerModeEpoch Int @default(0)
+
   /// Auto's sticky state, from lib/routerSelection.ts. `routerModelId` is the
   /// model this conversation is currently on and `routerChallengerTurns` the
   /// consecutive turns a challenger has cleared the switch margin. Both are
@@ -1213,12 +1219,735 @@ model PromptRefinerProductAttempt {
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   scope PromptRefinerChatScope @relation(fields: [scopeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   suggestion PromptRefinerChatSuggestion? @relation(fields: [suggestionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  unifiedResult ChatUnifiedRouterRefinerResult?
 
   @@unique([userId, scopeId, scopeEpoch, draftId, draftRevision, mode])
   @@unique([clientRequestId])
   @@index([scopeId, state])
   @@index([expiresAt, state])
   @@index([state, createdAt])
+}
+
+/// Private, ephemeral authority for one settled unified preprocessing result.
+/// The categorical profile is content-free. Source and optional rewrite bytes
+/// are purged when the result is consumed or made stale.
+model ChatUnifiedRouterRefinerResult {
+  id                      String   @id
+  attemptId               String   @unique
+  userId                  String
+  conversationId          String
+  scopeId                 String
+  scopeEpoch              Int
+  recoveryEpoch           Int
+  modeEpoch               Int      @default(0)
+  draftId                 String
+  draftRevision           Int
+  sourceMessageId         String
+  sourcePrompt            String?
+  schemaVersion           String
+  promptVersion           String
+  candidateDigest         String
+  adapterConfigDigest     String
+  pricePinDigest          String
+  runtimeDeploymentId     String
+  holdId                  String   @unique
+  analysisKind            String
+  analysisDifficulty      String
+  expectedOutputLength    String
+  needsCurrentInformation Boolean
+  rewriteDecision         String
+  rewritePrompt           String?
+  state                   String
+  publishDeadlineAt       DateTime @db.Timestamptz(3)
+  createdAt               DateTime @default(dbgenerated("(clock_timestamp() AT TIME ZONE 'UTC'::text)")) @db.Timestamp(3)
+  expiresAt               DateTime @db.Timestamp(3)
+  consumedAt              DateTime? @db.Timestamp(3)
+  consumptionAuditLogId   String?   @unique
+
+  attempt    PromptRefinerProductAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  budgetHold PromptRefinerAutoBudgetHold  @relation(fields: [holdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  consumptionAudit AdminAuditLog? @relation("ChatUnifiedRouterRefinerConsumptionAudit", fields: [consumptionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([scopeId, state])
+  @@index([draftId, state])
+  @@index([expiresAt, state])
+}
+
+/// Content-free immutable execution fact for the unified Router/Refiner stage.
+/// This is separate from the closed legacy Prompt Refiner receipt contract.
+model ChatUnifiedExecutionReceipt {
+  id                    String   @id
+  receiptVersion        String
+  requestId             String   @unique
+  resultId              String?  @unique
+  stageVersion          String
+  schemaVersion         String
+  promptVersion         String
+  parserVersion         String
+  candidateDigest       String
+  adapterConfigDigest   String
+  pricePinDigest        String
+  provider              String?
+  modelId               String?
+  adapterVersion        String?
+  outcome               String
+  failureCode           String?
+  rewriteDecision       String?
+  requestedAt           DateTime @db.Timestamptz(3)
+  dispatchedAt          DateTime? @db.Timestamptz(3)
+  completedAt           DateTime @db.Timestamptz(3)
+  preparationLatencyMs  Int
+  inputTokens           BigInt?
+  cachedInputTokens     BigInt?
+  outputTokens          BigInt?
+  reasoningTokens       BigInt?
+  actualCostMicroUsd    BigInt?
+  costStatus            String
+  retryCount            Int
+  auditLogId            String   @unique
+
+  routingReceipt ChatUnifiedRoutingReceipt?
+  auditLog AdminAuditLog @relation("ChatUnifiedExecutionReceiptAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([outcome, completedAt])
+  @@index([completedAt])
+}
+
+/// Content-free immutable final routing fact for one consumed unified result.
+model ChatUnifiedRoutingReceipt {
+  id                      String   @id
+  receiptVersion          String
+  executionReceiptId      String   @unique
+  requestId               String   @unique
+  resultId                String   @unique
+  observedAt              DateTime @db.Timestamptz(3)
+  outcome                 String
+  profileSource           String?
+  taskKind                String?
+  difficulty              String?
+  taskProfileVersion      String?
+  candidateFilterVersion  String?
+  selectionVersion        String?
+  scorePolicyVersion      String?
+  evidenceRef             String?
+  evidencePayloadDigest   String?
+  selectedModelId         String?
+  auditLogId              String   @unique
+
+  executionReceipt ChatUnifiedExecutionReceipt @relation(fields: [executionReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog @relation("ChatUnifiedRoutingReceiptAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([outcome, observedAt])
+  @@index([observedAt])
+}
+
+/// One provider-free optimizer validation cycle. This metadata ledger grants
+/// no paid execution, external dispatch, promotion or product-runtime authority.
+model ChatUnifiedOptimizerCycle {
+  id                         String    @id @db.Uuid
+  ledgerVersion              String
+  policyVersion              Int
+  purpose                    String
+  registrationRequestId      String    @unique @db.Uuid
+  registrationDigest         String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  promotionAuthorized        Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+  terminalAt                 DateTime? @db.Timestamptz(3)
+
+  candidate ChatUnifiedOptimizerCandidate?
+  runs      ChatUnifiedOptimizerRun[]
+  evidence  ChatUnifiedOptimizerEvidence[]
+  comparisonVerdict ChatUnifiedOptimizerComparisonVerdict?
+  engineeringDraft ChatUnifiedOptimizerEngineeringDraft?
+  costPlans ChatUnifiedOptimizerCostPlan[]
+  canaryRollouts ChatUnifiedOptimizerCanaryRollout[]
+  queuedCloseIntent ChatUnifiedOptimizerQueuedCloseIntent?
+
+  @@index([state, createdAt])
+}
+
+/// Durable first-attempt fence for an expired, untransmitted role closure.
+/// An unresolved closure is read back; the coordinator never issues it again.
+model ChatUnifiedOptimizerQueuedCloseIntent {
+  cycleId            String   @id @db.Uuid
+  requestId          String   @unique @db.Uuid
+  closeRequestDigest String
+  auditLogId         String   @unique
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+
+  cycle ChatUnifiedOptimizerCycle @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  audit AdminAuditLog @relation("ChatUnifiedOptimizerQueuedCloseIntentAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// Frozen candidate identity only. Candidate source, examples and hidden
+/// evaluation material never enter this table.
+model ChatUnifiedOptimizerCandidate {
+  id                   String   @id @db.Uuid
+  cycleId              String   @unique @db.Uuid
+  candidateVersion     String
+  bundleVersion        String
+  candidateDigest      String
+  bundleDigest         String   @unique
+  controlsDigest       String
+  schemaVersion        String
+  promptVersion        String
+  stageCandidateDigest String
+  adapterConfigDigest  String
+  pricePinDigest       String
+  sourceCommitSha      String
+  sourceRepositoryId   BigInt?
+  sourceBlobSha        String?
+  sourceSha256         String?
+  runtimeAuthorized    Boolean  @default(false)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+
+  cycle             ChatUnifiedOptimizerCycle              @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  payload           ChatUnifiedOptimizerCandidatePayload?
+  retentionHold     ChatUnifiedOptimizerCandidateRetentionHold?
+  retentionReceipt  ChatUnifiedOptimizerCandidateRetentionReceipt?
+  canaryRollouts     ChatUnifiedOptimizerCanaryRollout[]
+  evidence          ChatUnifiedOptimizerEvidence[]
+  comparisonVerdict ChatUnifiedOptimizerComparisonVerdict?
+  activePointer     ChatUnifiedOptimizerActivePointer?
+  promotionReceipts ChatUnifiedOptimizerPromotionReceipt[]
+
+  @@index([candidateDigest])
+}
+
+/// Candidate-authored public bundle bytes are separate from the content-free
+/// optimizer ledger. This row grants no source, evaluation or runtime authority.
+model ChatUnifiedOptimizerCandidatePayload {
+  candidateId          String   @id @db.Uuid
+  bundleDigest         String
+  bodySha256           String
+  bundleJson           String   @db.Text
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+
+  candidate ChatUnifiedOptimizerCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// A separate hold keeps proposal bytes past their normal expiry. A future
+/// owner-only writer must audit setting/releasing it; released rows remain.
+model ChatUnifiedOptimizerCandidateRetentionHold {
+  candidateId       String    @id @db.Uuid
+  heldAt            DateTime  @default(now()) @db.Timestamptz(3)
+  releasedAt        DateTime? @db.Timestamptz(3)
+  holdAuditLogId    String    @unique
+  releaseAuditLogId String?   @unique
+
+  candidate    ChatUnifiedOptimizerCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  holdAudit    AdminAuditLog @relation("ChatUnifiedOptimizerCandidateHoldAudit", fields: [holdAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  releaseAudit AdminAuditLog? @relation("ChatUnifiedOptimizerCandidateHoldReleaseAudit", fields: [releaseAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// The body is removed; this content-free receipt preserves the audited fact.
+model ChatUnifiedOptimizerCandidateRetentionReceipt {
+  candidateId String   @id @db.Uuid
+  auditLogId  String   @unique
+  deletedAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  candidate ChatUnifiedOptimizerCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog  AdminAuditLog @relation("ChatUnifiedOptimizerCandidateRetentionAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// The first provider-free validation run in a cycle. Three independent paid
+/// evaluation runs remain a later admission contract; this row does not waive it.
+model ChatUnifiedOptimizerRun {
+  id                         String    @id @db.Uuid
+  cycleId                    String    @db.Uuid
+  ordinal                    Int
+  purpose                    String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  admissionAuditLogId        String    @unique
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+  terminalAt                 DateTime? @db.Timestamptz(3)
+
+  cycle          ChatUnifiedOptimizerCycle      @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  admissionAudit AdminAuditLog                  @relation("ChatUnifiedOptimizerRunAdmissionAudit", fields: [admissionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  jobs           ChatUnifiedOptimizerRoleJob[]
+  evidence       ChatUnifiedOptimizerEvidence[]
+  costRuns       ChatUnifiedOptimizerCostRun[]
+
+  @@unique([cycleId, ordinal])
+  @@index([state, createdAt])
+}
+
+/// One closed optimizer role job. A claim is single-use and carries no vendor
+/// or paid-dispatch authority. There is no lease/requeue transition in v1.
+model ChatUnifiedOptimizerRoleJob {
+  id                         String    @id @db.Uuid
+  runId                      String    @db.Uuid
+  role                       String
+  purpose                    String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  claimRequestId             String?   @unique @db.Uuid
+  claimRequestDigest         String?
+  claimToken                 String?   @unique @db.Uuid
+  claimAuditLogId            String?   @unique
+  claimedAt                  DateTime? @db.Timestamptz(3)
+  terminalRequestId          String?   @unique @db.Uuid
+  terminalRequestDigest      String?
+  terminalOutcome            String?
+  terminalAuditLogId         String?   @unique
+  terminalAt                 DateTime? @db.Timestamptz(3)
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+
+  run           ChatUnifiedOptimizerRun       @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claimAudit    AdminAuditLog?                @relation("ChatUnifiedOptimizerRoleClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  terminalAudit AdminAuditLog?                @relation("ChatUnifiedOptimizerRoleTerminalAudit", fields: [terminalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence      ChatUnifiedOptimizerEvidence?
+  costCalls     ChatUnifiedOptimizerCostCall[]
+
+  @@unique([runId, role])
+  @@index([state, createdAt])
+}
+
+/// Content-free terminal evidence identity for one known role-job outcome.
+/// The evidence body and any provider prose live outside this ledger.
+model ChatUnifiedOptimizerEvidence {
+  id                 String   @id @db.Uuid
+  jobId              String   @unique @db.Uuid
+  runId              String   @db.Uuid
+  cycleId            String   @db.Uuid
+  candidateId        String   @db.Uuid
+  outcome            String
+  evidenceRef        String
+  payloadDigest      String
+  terminalAuditLogId String   @unique
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+
+  job           ChatUnifiedOptimizerRoleJob   @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  run           ChatUnifiedOptimizerRun       @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cycle         ChatUnifiedOptimizerCycle     @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  candidate     ChatUnifiedOptimizerCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  terminalAudit AdminAuditLog                 @relation("ChatUnifiedOptimizerEvidenceTerminalAudit", fields: [terminalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([cycleId, createdAt])
+  @@index([runId, createdAt])
+}
+
+/// One content-free aggregate verdict for a frozen candidate cycle. It is an
+/// observation, never a candidate-pointer, product, paid or publisher grant.
+model ChatUnifiedOptimizerComparisonVerdict {
+  cycleId          String   @id @db.Uuid
+  candidateId      String   @unique @db.Uuid
+  requestId        String   @unique @db.Uuid
+  requestDigest    String
+  candidateDigest  String
+  pointerRevision  Int
+  incumbentKind    String
+  incumbentDigest  String
+  evidenceRef      String
+  summaryDigest    String
+  protocolDigest   String
+  decision         String
+  reasonCodes      String[]
+  auditLogId       String   @unique
+  createdAt        DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  cycle     ChatUnifiedOptimizerCycle     @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  candidate ChatUnifiedOptimizerCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog  AdminAuditLog                 @relation("ChatUnifiedOptimizerComparisonVerdictAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  engineeringDraft ChatUnifiedOptimizerEngineeringDraft?
+
+  @@index([decision, createdAt])
+}
+
+/// Case-blind code-change suggestion for an owner to register manually in
+/// AMUX. This row cannot register an AMUX task or authorize a Publisher.
+model ChatUnifiedOptimizerEngineeringDraft {
+  cycleId        String   @id @db.Uuid
+  requestId      String   @unique @db.Uuid
+  requestDigest  String
+  summaryDigest  String
+  targetArea     String
+  proposalKind   String
+  auditLogId     String   @unique
+  createdAt      DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  cycle      ChatUnifiedOptimizerCycle @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  verdict    ChatUnifiedOptimizerComparisonVerdict @relation(fields: [cycleId], references: [cycleId], onDelete: Restrict, onUpdate: Restrict, map: "ChatUnifiedOptimizerEngineeringDraft_verdict_fkey")
+  auditLog   AdminAuditLog @relation("ChatUnifiedOptimizerEngineeringDraftAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([createdAt])
+}
+
+/// Prepared optimizer candidate pointer. Product runtime does not read this
+/// row before the separately approved U35 activation and the row cannot grant
+/// runtime authority by itself.
+model ChatUnifiedOptimizerActivePointer {
+  productKey              String   @id
+  revision                Int
+  incumbentKind           String
+  candidateId             String?  @unique @db.Uuid
+  candidateDigest         String
+  bundleDigest            String?
+  sourceSha               String
+  baseSha                 String
+  schemaVersion           String
+  schemaDigest            String
+  promptVersion           String
+  controlsDigest          String
+  policyVersion           Int
+  protocolDigest          String
+  authorizationExpiresAt DateTime @db.Timestamptz(3)
+  runtimeAuthorized       Boolean  @default(false)
+  promotionRequestId      String   @unique @db.Uuid
+  promotionAuditLogId     String   @unique
+  updatedAt               DateTime @default(now()) @db.Timestamptz(3)
+
+  candidate      ChatUnifiedOptimizerCandidate? @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  promotionAudit AdminAuditLog                 @relation("ChatUnifiedOptimizerActivePointerAudit", fields: [promotionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// Append-only, content-free identity of one runtime-disabled prepared pointer
+/// transition. Signed evidence bodies remain in their restricted evidence store.
+model ChatUnifiedOptimizerPromotionReceipt {
+  id                           String   @id @db.Uuid
+  requestId                    String   @unique @db.Uuid
+  requestDigest                String
+  productKey                   String
+  fromRevision                 Int
+  toRevision                   Int
+  incumbentKind                String
+  incumbentDigest              String
+  candidateId                  String   @db.Uuid
+  candidateDigest              String
+  candidateBundleDigest        String
+  cycleId                      String   @db.Uuid
+  sourceSha                    String
+  baseSha                      String
+  schemaVersion                String
+  schemaDigest                 String
+  promptVersion                String
+  controlsDigest               String
+  policyVersion                Int
+  promotionMode                String
+  protocolDigest               String
+  calibrationLabelSetDigest    String
+  judgePanelDigest             String
+  priceSetDigest               String
+  modelPoolDigest              String
+  strataDigest                 String
+  metricsDigest                String
+  routerEvidenceDigest         String
+  evidenceRef                  String
+  evidencePayloadDigest        String
+  signerKeyId                  String
+  signedPayloadDigest          String
+  signatureDigest              String
+  prerequisiteBindingDigest    String
+  comparisonRunBindingDigest   String
+  authorizationExpiresAt       DateTime @db.Timestamptz(3)
+  runtimeAuthorized            Boolean  @default(false)
+  auditLogId                   String   @unique
+  createdAt                    DateTime @default(now()) @db.Timestamptz(3)
+
+  candidate ChatUnifiedOptimizerCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog  AdminAuditLog                 @relation("ChatUnifiedOptimizerPromotionReceiptAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  canaryRollout ChatUnifiedOptimizerCanaryRollout?
+
+  @@index([candidateId, createdAt])
+  @@index([productKey, toRevision])
+}
+
+/// An audited, inert rollout binding is prepared with a candidate promotion.
+/// A later owner action must start the clock and enable the pointer; this row
+/// cannot route traffic while phase is prepared.
+model ChatUnifiedOptimizerCanaryRollout {
+  promotionReceiptId String    @id @db.Uuid
+  productKey         String
+  pointerRevision    Int
+  cycleId            String    @db.Uuid
+  candidateId        String    @db.Uuid
+  candidateDigest    String
+  bundleDigest       String
+  assignmentSalt     String    @db.Uuid
+  phase              String    @default("prepared")
+  phaseRevision      Int       @default(0)
+  canaryStartedAt    DateTime? @db.Timestamptz(3)
+  phaseStartedAt     DateTime? @db.Timestamptz(3)
+  activationAuditLogId String?
+  lastAuditLogId     String
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+
+  promotionReceipt ChatUnifiedOptimizerPromotionReceipt @relation(fields: [promotionReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cycle            ChatUnifiedOptimizerCycle @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  candidate        ChatUnifiedOptimizerCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  lastAudit        AdminAuditLog @relation("ChatUnifiedOptimizerCanaryRolloutAudit", fields: [lastAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  activationAudit  AdminAuditLog? @relation("ChatUnifiedOptimizerCanaryActivationAudit", fields: [activationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([productKey, pointerRevision])
+  @@index([candidateId, createdAt])
+}
+
+/// Immutable exact pointer state at each revision. A missing prior revision
+/// refuses rollback; the app never fabricates an incumbent from a digest.
+model ChatUnifiedOptimizerPointerSnapshot {
+  productKey              String
+  revision                Int
+  incumbentKind           String
+  candidateId             String?  @db.Uuid
+  candidateDigest         String
+  bundleDigest            String?
+  sourceSha               String
+  baseSha                 String
+  schemaVersion           String
+  schemaDigest            String
+  promptVersion           String
+  controlsDigest          String
+  policyVersion           Int
+  protocolDigest          String
+  authorizationExpiresAt DateTime @db.Timestamptz(3)
+  runtimeAuthorized       Boolean
+  promotionRequestId      String   @db.Uuid
+  promotionAuditLogId     String
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+
+  @@id([productKey, revision])
+}
+
+/// One append-only, content-free rollback of a prepared candidate pointer.
+model ChatUnifiedOptimizerRollbackReceipt {
+  id                  String   @id @db.Uuid
+  requestId           String   @unique @db.Uuid
+  requestDigest       String
+  productKey          String
+  fromRevision        Int
+  toRevision          Int
+  targetRevision      Int
+  failedCandidateId   String   @db.Uuid
+  failedCycleId       String   @db.Uuid
+  failedPromotionId   String   @db.Uuid
+  targetKind          String
+  targetCandidateId   String?  @db.Uuid
+  targetDigest        String
+  evidenceDigest      String
+  signerKeyId         String
+  signedPayloadDigest String
+  auditLogId          String   @unique
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+}
+
+/// A candidate's optimizer cycle remains latched after rollback until the
+/// owner makes a separate audited resume decision.
+model ChatUnifiedOptimizerCycleLatch {
+  cycleId       String   @id @db.Uuid
+  rollbackId    String   @unique @db.Uuid
+  auditLogId    String   @unique
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+}
+
+/// Content-free approved cost plan. This row never grants external dispatch.
+model ChatUnifiedOptimizerCostPlan {
+  id                         String    @id @db.Uuid
+  cycleId                    String    @db.Uuid
+  requestId                  String    @unique @db.Uuid
+  registrationDigest         String    @unique
+  planDigest                 String
+  policyVersion              Int
+  purpose                    String
+  sourceApprovalTarget       String
+  baseSha                    String
+  priceSetDigest             String
+  wholePlanQuotedMicroUsd    BigInt
+  state                      String
+  activationDigest           String
+  activationAuditLogId       String    @unique
+  registrationAuditLogId     String    @unique
+  externalDispatchAuthorized Boolean   @default(false)
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+  terminalAt                 DateTime? @db.Timestamptz(3)
+
+  cycle             ChatUnifiedOptimizerCycle           @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  activationAudit   AdminAuditLog                       @relation("ChatUnifiedOptimizerCostActivationAudit", fields: [activationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  registrationAudit AdminAuditLog                       @relation("ChatUnifiedOptimizerCostPlanRegistrationAudit", fields: [registrationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  runs              ChatUnifiedOptimizerCostRun[]
+  quotaContracts    ChatUnifiedOptimizerQuotaContract[]
+  calls             ChatUnifiedOptimizerCostCall[]
+  holds             ChatUnifiedOptimizerDispatchHold[]
+
+  @@index([state, createdAt])
+}
+
+model ChatUnifiedOptimizerCostRun {
+  id             String    @id @db.Uuid
+  planId         String    @db.Uuid
+  optimizerRunId String    @db.Uuid
+  ordinal        Int
+  quoteDigest    String
+  corpusSlotId   String    @unique @db.Uuid
+  questionCount  Int
+  quotedMicroUsd BigInt
+  state          String
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  startedAt      DateTime? @db.Timestamptz(3)
+  terminalAt     DateTime? @db.Timestamptz(3)
+
+  plan         ChatUnifiedOptimizerCostPlan       @relation(fields: [planId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  optimizerRun ChatUnifiedOptimizerRun            @relation(fields: [optimizerRunId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  calls        ChatUnifiedOptimizerCostCall[]
+  holds        ChatUnifiedOptimizerDispatchHold[]
+
+  @@unique([planId, ordinal])
+  @@unique([planId, quoteDigest])
+  @@index([planId, state])
+}
+
+model ChatUnifiedOptimizerQuotaContract {
+  id                    String   @id @db.Uuid
+  planId                String   @db.Uuid
+  bindingDigest         String
+  quotaContractDigest   String
+  role                  String
+  billingMode           String
+  vendorId              String
+  adapterId             String
+  modelId               String
+  measurementState      String
+  afterReadbackRequired Boolean
+  callsPerRunCap        Int
+  inputTokensPerRunCap  Int?
+  outputTokensPerRunCap Int?
+  provenanceDigest      String
+  provenanceObservedAt  DateTime @db.Timestamptz(3)
+  provenanceExpiresAt   DateTime @db.Timestamptz(3)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+
+  plan  ChatUnifiedOptimizerCostPlan   @relation(fields: [planId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  calls ChatUnifiedOptimizerCostCall[]
+
+  @@unique([planId, bindingDigest])
+  @@unique([planId, quotaContractDigest])
+}
+
+model ChatUnifiedOptimizerCostCall {
+  id                       String   @id @db.Uuid
+  planId                   String   @db.Uuid
+  runId                    String   @db.Uuid
+  quotaContractId          String   @db.Uuid
+  optimizerRoleJobId       String   @db.Uuid
+  role                     String
+  billingMode              String
+  costMeaning              String
+  vendorId                 String
+  adapterId                String
+  modelId                  String
+  bindingDigest            String
+  priceSetDigest           String
+  priceQuoteDigest         String
+  priceVerifiedAt          DateTime @db.Timestamptz(3)
+  priceExpiresAt           DateTime @db.Timestamptz(3)
+  calls                    Int
+  inputTokensCapPerCall    Int
+  outputTokensCapPerCall   Int
+  worstCaseMicroUsdPerCall BigInt
+  createdAt                DateTime @default(now()) @db.Timestamptz(3)
+
+  plan             ChatUnifiedOptimizerCostPlan       @relation(fields: [planId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  run              ChatUnifiedOptimizerCostRun        @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  quotaContract    ChatUnifiedOptimizerQuotaContract  @relation(fields: [quotaContractId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  optimizerRoleJob ChatUnifiedOptimizerRoleJob        @relation(fields: [optimizerRoleJobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  holds            ChatUnifiedOptimizerDispatchHold[]
+
+  @@index([planId, bindingDigest])
+  @@index([runId])
+}
+
+model ChatUnifiedOptimizerCostWindow {
+  period            String
+  periodStart       DateTime @db.Timestamptz(3)
+  committedMicroUsd BigInt   @default(0)
+  revision          Int      @default(0)
+  updatedAt         DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@id([period, periodStart])
+}
+
+model ChatUnifiedOptimizerDispatchHold {
+  id                              String    @id @db.Uuid
+  planId                          String    @db.Uuid
+  runId                           String    @db.Uuid
+  callBucketId                    String    @db.Uuid
+  invocationOrdinal               Int
+  reservationRequestId            String    @unique @db.Uuid
+  reservationRequestDigest        String
+  intentId                        String    @unique @db.Uuid
+  payloadManifestDigest           String
+  reservedMicroUsd                BigInt
+  settledMicroUsd                 BigInt?
+  settledInputTokens              Int?
+  settledOutputTokens             Int?
+  inputTokensCap                  Int
+  outputTokensCap                 Int
+  dayStart                        DateTime  @db.Timestamptz(3)
+  monthStart                      DateTime  @db.Timestamptz(3)
+  preQuotaObservationDigest       String
+  preQuotaObservedAt              DateTime  @db.Timestamptz(3)
+  preQuotaExpiresAt               DateTime  @db.Timestamptz(3)
+  preQuotaCallsRemaining          Int
+  preQuotaInputTokensRemaining    Int?
+  preQuotaOutputTokensRemaining   Int?
+  state                           String
+  terminalRequestId               String?   @unique @db.Uuid
+  terminalRequestDigest           String?
+  terminalObservationDigest       String?
+  afterQuotaObservedAt            DateTime? @db.Timestamptz(3)
+  afterQuotaExpiresAt             DateTime? @db.Timestamptz(3)
+  afterQuotaCallsRemaining        Int?
+  afterQuotaInputTokensRemaining  Int?
+  afterQuotaOutputTokensRemaining Int?
+  reservationAuditLogId           String    @unique
+  intentAuditLogId                String    @unique
+  terminalAuditLogId              String?   @unique
+  externalDispatchAuthorized      Boolean   @default(false)
+  createdAt                       DateTime  @default(now()) @db.Timestamptz(3)
+  terminalAt                      DateTime? @db.Timestamptz(3)
+
+  plan             ChatUnifiedOptimizerCostPlan @relation(fields: [planId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  run              ChatUnifiedOptimizerCostRun  @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  call             ChatUnifiedOptimizerCostCall @relation(fields: [callBucketId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reservationAudit AdminAuditLog                @relation("ChatUnifiedOptimizerCostReservationAudit", fields: [reservationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  intentAudit      AdminAuditLog                @relation("ChatUnifiedOptimizerCostIntentAudit", fields: [intentAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  terminalAudit    AdminAuditLog?               @relation("ChatUnifiedOptimizerCostTerminalAudit", fields: [terminalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  protectedHandoff ChatUnifiedOptimizerProtectedHandoff?
+
+  @@unique([callBucketId, invocationOrdinal])
+  @@index([planId, state])
+  @@index([runId, state])
+  @@index([dayStart, state])
+  @@index([monthStart, state])
+}
+
+/// Content-free, single-use bridge handoff. Consumption never grants vendor
+/// authority; the separately activated protected launcher owns that gate.
+model ChatUnifiedOptimizerProtectedHandoff {
+  intentId              String    @id @db.Uuid
+  nonce                 String    @unique @db.Uuid
+  signedPayloadDigest   String
+  launcherProfileDigest String
+  workerGeneration      Int
+  state                 String
+  issuedAt              DateTime  @db.Timestamptz(3)
+  expiresAt             DateTime  @db.Timestamptz(3)
+  preparedAt            DateTime  @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  consumedAt            DateTime? @db.Timestamptz(3)
+  preparedAuditLogId    String    @unique
+  consumedAuditLogId    String?   @unique
+
+  hold          ChatUnifiedOptimizerDispatchHold @relation(fields: [intentId], references: [intentId], onDelete: Restrict, onUpdate: Restrict)
+  preparedAudit AdminAuditLog                    @relation("ChatUnifiedOptimizerProtectedPreparedAudit", fields: [preparedAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  consumedAudit AdminAuditLog?                   @relation("ChatUnifiedOptimizerProtectedConsumedAudit", fields: [consumedAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }
 
 /// Content-free immutable product execution fact. It deliberately has no
@@ -1314,6 +2043,7 @@ model ChatResponseAttempt {
   finishReason        String?
   failureCode         String?
   terminalAt          DateTime?
+  /// Original Chat POST arrival, before admission or dispatch. Historical rows are null.
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -2427,6 +3157,10 @@ model AdminAuditLog {
   entryHash    String?  @unique
   createdAt    DateTime @default(now())
 
+  chatUnifiedCandidateHolds ChatUnifiedOptimizerCandidateRetentionHold[] @relation("ChatUnifiedOptimizerCandidateHoldAudit")
+  chatUnifiedCandidateHoldReleases ChatUnifiedOptimizerCandidateRetentionHold[] @relation("ChatUnifiedOptimizerCandidateHoldReleaseAudit")
+  chatUnifiedCandidateRetentionReceipts ChatUnifiedOptimizerCandidateRetentionReceipt[] @relation("ChatUnifiedOptimizerCandidateRetentionAudit")
+
   promptRefinerReservationStage PromptRefinerReservationStage?
   amuxReviewDecision            AmuxReviewDecision?
   amuxV52ReviewRecord           AmuxV52ReviewRecord?
@@ -2494,6 +3228,27 @@ model AdminAuditLog {
   marketingLlmCallCloses       MarketingLlmCall[] @relation("MarketingLlmCallCloseAudit")
   marketingLlmCallLegalHolds   MarketingLlmCall[] @relation("MarketingLlmCallLegalHoldAudit")
   promptRefinerProductOperationalGuard PromptRefinerProductOperationalGuard? @relation("PromptRefinerProductOperationalGuardTransitionAudit")
+  chatUnifiedRouterRefinerConsumptions ChatUnifiedRouterRefinerResult[] @relation("ChatUnifiedRouterRefinerConsumptionAudit")
+  chatUnifiedExecutionReceipts ChatUnifiedExecutionReceipt[] @relation("ChatUnifiedExecutionReceiptAudit")
+  chatUnifiedRoutingReceipts ChatUnifiedRoutingReceipt[] @relation("ChatUnifiedRoutingReceiptAudit")
+  chatUnifiedOptimizerRunAdmissions ChatUnifiedOptimizerRun[] @relation("ChatUnifiedOptimizerRunAdmissionAudit")
+  chatUnifiedOptimizerRoleClaims ChatUnifiedOptimizerRoleJob[] @relation("ChatUnifiedOptimizerRoleClaimAudit")
+  chatUnifiedOptimizerRoleTerminals ChatUnifiedOptimizerRoleJob[] @relation("ChatUnifiedOptimizerRoleTerminalAudit")
+  chatUnifiedOptimizerEvidenceTerminals ChatUnifiedOptimizerEvidence[] @relation("ChatUnifiedOptimizerEvidenceTerminalAudit")
+  chatUnifiedOptimizerComparisonVerdicts ChatUnifiedOptimizerComparisonVerdict[] @relation("ChatUnifiedOptimizerComparisonVerdictAudit")
+  chatUnifiedOptimizerEngineeringDrafts ChatUnifiedOptimizerEngineeringDraft[] @relation("ChatUnifiedOptimizerEngineeringDraftAudit")
+  chatUnifiedOptimizerCostActivations ChatUnifiedOptimizerCostPlan[] @relation("ChatUnifiedOptimizerCostActivationAudit")
+  chatUnifiedOptimizerCostPlanRegistrations ChatUnifiedOptimizerCostPlan[] @relation("ChatUnifiedOptimizerCostPlanRegistrationAudit")
+  chatUnifiedOptimizerCostReservations ChatUnifiedOptimizerDispatchHold[] @relation("ChatUnifiedOptimizerCostReservationAudit")
+  chatUnifiedOptimizerCostIntents ChatUnifiedOptimizerDispatchHold[] @relation("ChatUnifiedOptimizerCostIntentAudit")
+  chatUnifiedOptimizerCostTerminals ChatUnifiedOptimizerDispatchHold[] @relation("ChatUnifiedOptimizerCostTerminalAudit")
+  chatUnifiedOptimizerProtectedPreparations ChatUnifiedOptimizerProtectedHandoff[] @relation("ChatUnifiedOptimizerProtectedPreparedAudit")
+  chatUnifiedOptimizerProtectedConsumptions ChatUnifiedOptimizerProtectedHandoff[] @relation("ChatUnifiedOptimizerProtectedConsumedAudit")
+  chatUnifiedOptimizerActivePointers ChatUnifiedOptimizerActivePointer[] @relation("ChatUnifiedOptimizerActivePointerAudit")
+  chatUnifiedOptimizerPromotionReceipts ChatUnifiedOptimizerPromotionReceipt[] @relation("ChatUnifiedOptimizerPromotionReceiptAudit")
+  chatUnifiedOptimizerCanaryRollouts ChatUnifiedOptimizerCanaryRollout[] @relation("ChatUnifiedOptimizerCanaryRolloutAudit")
+  chatUnifiedOptimizerCanaryActivations ChatUnifiedOptimizerCanaryRollout[] @relation("ChatUnifiedOptimizerCanaryActivationAudit")
+  chatUnifiedOptimizerQueuedCloseIntents ChatUnifiedOptimizerQueuedCloseIntent[] @relation("ChatUnifiedOptimizerQueuedCloseIntentAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -6237,6 +6992,7 @@ model PromptRefinerAutoBudgetHold {
   dispatchAudit    AdminAuditLog? @relation("PromptRefinerAutoBudgetDispatchAudit", fields: [dispatchAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   unknownAudit     AdminAuditLog? @relation("PromptRefinerAutoBudgetUnknownAudit", fields: [unknownAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   settlementAudit  AdminAuditLog? @relation("PromptRefinerAutoBudgetSettlementAudit", fields: [settlementAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  unifiedResult    ChatUnifiedRouterRefinerResult?
 
   @@index([status, createdAt])
   @@index([dayStart])
