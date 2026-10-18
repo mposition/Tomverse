@@ -2,7 +2,10 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { resolvePostgresConnectionConfig } from '@/lib/postgresConnectionConfigCore.mjs';
+import {
+    resolvePostgresConnectionConfig,
+    resolvePrismaTransactionOptions,
+} from '@/lib/postgresConnectionConfigCore.mjs';
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 const validLogLevels = new Set(["query", "info", "warn", "error"]);
@@ -24,6 +27,10 @@ const pool = new Pool({
     options: postgresConfig.poolOptions,
 });
 
+const transactionOptions = resolvePrismaTransactionOptions(
+    process.env.PRISMA_TRANSACTION_MAX_WAIT_MS
+);
+
 const adapter = new PrismaPg(
     pool,
     postgresConfig.schema ? { schema: postgresConfig.schema } : undefined
@@ -33,6 +40,7 @@ export const prisma =
     globalForPrisma.prisma ||
     new PrismaClient({
         adapter,
+        ...(transactionOptions ? { transactionOptions } : {}),
         log: prismaLogLevels.length > 0 ? prismaLogLevels : undefined,
     });
 

@@ -7,7 +7,30 @@ import {
   isSamePostgresDatabaseTarget,
   PostgresConnectionConfigurationError,
   resolvePostgresConnectionConfig,
+  resolvePrismaTransactionOptions,
 } from "../lib/postgresConnectionConfigCore.mjs";
+
+test("an unset transaction wait keeps Prisma's own default", () => {
+  for (const raw of [undefined, null, "", "  "]) {
+    assert.equal(resolvePrismaTransactionOptions(raw), undefined);
+  }
+});
+
+test("a transaction wait in range becomes the client's maxWait", () => {
+  assert.deepEqual(resolvePrismaTransactionOptions("8000"), { maxWait: 8000 });
+  assert.deepEqual(resolvePrismaTransactionOptions(" 2000 "), { maxWait: 2000 });
+  assert.deepEqual(resolvePrismaTransactionOptions("15000"), { maxWait: 15000 });
+});
+
+test("a malformed or out-of-range transaction wait is refused, not ignored", () => {
+  for (const raw of ["1999", "15001", "8s", "8000.5", "-8000", "1e4", "0"]) {
+    assert.throws(
+      () => resolvePrismaTransactionOptions(raw),
+      PostgresConnectionConfigurationError,
+      raw
+    );
+  }
+});
 
 test("schema parameters become both adapter schema and a no-fallback search_path", () => {
   const config = resolvePostgresConnectionConfig(
