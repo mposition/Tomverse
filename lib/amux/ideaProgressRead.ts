@@ -139,8 +139,9 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
           AND a."targetType" = 'AmuxIdeaSubmission'
           AND a."targetId" = n."id"
           AND a."entryHash" IS NOT NULL) AS "referencePins",
-      (SELECT CASE WHEN a."metadata" ? 'pinnedCommitShas' THEN 'declared'
-          ELSE 'legacy' END FROM "AdminAuditLog" a
+      (SELECT CASE WHEN jsonb_typeof(a."metadata") = 'object'
+          AND NOT (a."metadata" ? 'pinnedCommitShas') THEN 'legacy'
+          ELSE 'declared' END FROM "AdminAuditLog" a
         WHERE a."id" = n."submissionAuditLogId"
           AND a."action" = 'amux.idea.session_submitted'
           AND a."targetType" = 'AmuxIdeaSubmission'

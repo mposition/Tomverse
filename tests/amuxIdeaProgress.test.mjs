@@ -93,10 +93,16 @@ test("the list is one statement in one bounded snapshot that never reads idea te
     submittedAtMs: Date.parse("2026-10-14T00:00:00Z"), cancelled: false, proposedUnits: 0, chunks: null, cards: null,
     checkoutEvidence: null, referencePins: null,
     referencePinAuditStatus: "legacy",
+  }, {
+    id: "idea-3", requestId: "33333333-3333-4333-8333-333333333333", state: "submitted",
+    submittedAtMs: Date.parse("2026-10-13T00:00:00Z"), cancelled: false,
+    proposedUnits: 0, chunks: null, cards: null,
+    checkoutEvidence: null, referencePins: null,
+    referencePinAuditStatus: "declared",
   }];
   const tx = { $queryRaw: async (strings, ...values) => { calls.push({ sql: strings.join("?"), values }); return rows; } };
   const now = new Date("2026-10-15T03:00:00Z");
-  const [row, empty] = await readAmuxIdeaProgressInTx(tx, "owner-1", now);
+  const [row, empty, damaged] = await readAmuxIdeaProgressInTx(tx, "owner-1", now);
   assert.equal(calls.length, 1, "one statement, however many ideas");
   const { sql, values } = calls[0];
   assert.equal(/Ciphertext|"title"|"body"|bodyDigest|rawDigest/i.test(sql), false, "no idea text or digest is read");
@@ -108,7 +114,8 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.ok(sql.includes(`ORDER BY w."createdAt" ASC, w."id" ASC`));
   assert.ok(sql.includes(`FROM "AmuxIdeaTrackedCheckoutEvidence" e`));
   assert.ok(sql.includes(`a."metadata"->'pinnedCommitShas'`));
-  assert.ok(sql.includes(`a."metadata" ? 'pinnedCommitShas'`));
+  assert.ok(sql.includes(`jsonb_typeof(a."metadata") = 'object'`));
+  assert.ok(sql.includes(`NOT (a."metadata" ? 'pinnedCommitShas')`));
   assert.ok(sql.includes(`LEFT JOIN "AmuxIdeaTrackedCheckoutReadManifest" m`));
   assert.ok(sql.includes(`ORDER BY e."referenceOrdinal"`));
   assert.deepEqual([row.stage, row.displayKey, row.reviewPullRequests, row.submittedAt],
@@ -123,6 +130,7 @@ test("the list is one statement in one bounded snapshot that never reads idea te
     pinnedCommitSha: "a".repeat(40) }]);
   assert.equal(row.referencePinsLegacy, false);
   assert.equal(empty.referencePinsLegacy, true);
+  assert.equal(damaged.referencePinsLegacy, false);
   assert.equal(empty.referencePins, null);
   assert.deepEqual([empty.stage, empty.displayKey, empty.taskRows], ["execution_approval", null, []]);
   assert.deepEqual(empty.checkoutEvidence, []);
