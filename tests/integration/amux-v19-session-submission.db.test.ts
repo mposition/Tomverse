@@ -453,6 +453,14 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
     reservationId: committedReservationId, ideaId: committedIdeaId,
     referenceOrdinal: 0,
   }), null, "a claimed reservation is no longer a preflight read target");
+  assert.deepEqual(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: 0, claimId: first.claimId,
+  }), { referenceCount: 1, pinnedCommitSha: "a".repeat(40) });
+  assert.equal(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: 0, claimId: randomUUID(),
+  }), null, "a different claim cannot reveal an in-flight pin");
   assert.equal(first.reservedMicroUsd, "5000");
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxSessionBudgetClaimReceipt(tx, {

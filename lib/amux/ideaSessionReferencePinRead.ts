@@ -11,6 +11,7 @@ const SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
  * a budget, without accepting a caller-supplied SHA as authority. */
 export async function readAmuxSessionReferencePin(input: {
   reservationId: string; ideaId: string; referenceOrdinal: number;
+  claimId?: string;
 }): Promise<{ referenceCount: number; pinnedCommitSha: string | null } | null> {
   if (!Number.isSafeInteger(input.referenceOrdinal) ||
       input.referenceOrdinal < 0 || input.referenceOrdinal > 2_147_483_647) return null;
@@ -31,7 +32,15 @@ export async function readAmuxSessionReferencePin(input: {
     });
     if (!latestScope) return null;
     const reservation = await tx.amuxIdeaSessionAnalysisReservation.findFirst({
-      where: { ...buildAmuxSessionAnalysisQueueWhere(now, null),
+      where: { ...(input.claimId ? {
+        status: "queued", idea: { submissionOrigin: "session",
+          state: { in: ["submitted", "analyzing"] }, cancelledAt: null,
+          analysisCompletedAt: null, analysisDeadlineAt: { gt: now },
+          rawCiphertext: { not: null }, rawPurgedAt: null,
+          sourceProvenanceCiphertext: { not: null } },
+        budgetClaims: { some: { id: input.claimId, status: "in_flight",
+          closedAt: null, resolutionAuditLogId: null } },
+      } : buildAmuxSessionAnalysisQueueWhere(now, null)),
         id: input.reservationId, ideaId: input.ideaId,
         operatingScopeSettingId: latestScope.id },
       select: { idea: { select: { submissionAuditLogId: true } } },

@@ -8,6 +8,7 @@ const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const secret = "v19_reference_pin_agent_secret_0123456789012345";
 const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
 const reservationId = "dc86a25b-919f-4714-a3d8-45ef5a18b175";
+const claimId = "bc86a25b-919f-4714-a3d8-45ef5a18b175";
 const names = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
   "TOMVERSE_AMUX_SYNC_SECRET", "TOMVERSE_AMUX_V19_REFERENCE_PIN_READ",
   "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ",
@@ -15,9 +16,11 @@ const names = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
 const prior = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 let reads = 0;
 let fail = false;
+let received: unknown;
 mock.module(mod("lib/amux/ideaSessionReferencePinRead.ts"), { namedExports: {
-  readAmuxSessionReferencePin: async () => {
+  readAmuxSessionReferencePin: async (input: unknown) => {
     reads += 1;
+    received = input;
     if (fail) throw new Error("synthetic private DB error");
     return { referenceCount: 1, pinnedCommitSha: "a".repeat(40) };
   },
@@ -30,7 +33,7 @@ after(() => { for (const name of names) {
   else process.env[name] = prior[name];
 } });
 const reset = () => {
-  reads = 0; fail = false;
+  reads = 0; fail = false; received = undefined;
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
   for (const name of names.slice(2)) process.env[name] = "enabled";
@@ -59,7 +62,8 @@ test("reference-pin read refuses malformed identities before storage", async () 
   for (const body of [{ ideaId, reservationId, referenceOrdinal: -1 },
     { ideaId, reservationId, referenceOrdinal: 2_147_483_648 },
     { ideaId, reservationId, referenceOrdinal: 0, extra: true },
-    { ideaId: "wrong", reservationId, referenceOrdinal: 0 }]) {
+    { ideaId: "wrong", reservationId, referenceOrdinal: 0 },
+    { ideaId, reservationId, referenceOrdinal: 0, claimId: "wrong" }]) {
     assert.equal((await route.POST(post(body))).status, 400);
   }
   assert.equal((await route.POST(post(undefined,
@@ -75,6 +79,12 @@ test("reference-pin read returns only a bounded content-free pin", async () => {
   assert.deepEqual(await response.json(), { referenceCount: 1,
     pinnedCommitSha: "a".repeat(40) });
   assert.equal(reads, 1);
+  assert.deepEqual(received, { ideaId, reservationId, referenceOrdinal: 0 });
+  const claimed = await route.POST(post({ ideaId, reservationId,
+    referenceOrdinal: 0, claimId }));
+  assert.equal(claimed.status, 200);
+  assert.deepEqual(received, { ideaId, reservationId,
+    referenceOrdinal: 0, claimId });
   fail = true;
   assert.deepEqual(await (await route.POST(post())).json(),
     { error: "reference_pin_unavailable" });
