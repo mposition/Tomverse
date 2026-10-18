@@ -55,6 +55,9 @@ import { listAmuxSessionAnalysisCandidates } from
 import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
   AmuxSessionBudgetClaimError } from
   "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
+import { readAmuxSessionAnalysisStopState,
+  AmuxSessionAnalysisStopReadError } from
+  "@/lib/amux/ideaSessionAnalysisStopRead";
 import { commitAmuxSessionBudgetOutcome } from
   "@/lib/amux/ideaSessionAnalysisBudgetSettlementService";
 import { AmuxSessionBudgetResolutionError,
@@ -1168,6 +1171,46 @@ test("session claim normalizes a non-UTC transaction before price admission", as
       runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
     });
     assert.equal(claim.reservationId, reservation.reservationId);
+    throw rollback;
+  }), (error: unknown) => error === rollback);
+});
+
+test("session stop poll follows the exact active claim and stops after settlement", async () => {
+  const price = await prisma.amuxIdeaAnalysisPriceVersion.findFirstOrThrow({
+    where: { modelId, mode: "subscription_cli", status: "approved" },
+    select: { id: true },
+  });
+  const rollback = new Error("rollback synthetic session stop poll");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const ideaId = randomUUID();
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(ideaId), expectedAuthority: authority,
+      ideaId, keys: keysFor(ideaId),
+    });
+    const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+    const claim = await commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: reservation.reservationId,
+      invocationOrdinal: 0, priceVersionId: price.id,
+      runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
+    });
+    assert.deepEqual(await readAmuxSessionAnalysisStopState(tx,
+      claim.claimId, reservation.reservationId), {
+      claimId: claim.claimId, reservationId: reservation.reservationId, stop: false,
+    });
+    await assert.rejects(readAmuxSessionAnalysisStopState(tx,
+      claim.claimId, randomUUID()),
+    (error: unknown) => error instanceof AmuxSessionAnalysisStopReadError &&
+      error.code === "not_found");
+    await commitAmuxSessionBudgetOutcome(tx, {
+      claimId: claim.claimId, outcome: "verified_success",
+      inputTokens: 10, outputTokens: 1,
+    });
+    assert.equal((await readAmuxSessionAnalysisStopState(tx,
+      claim.claimId, reservation.reservationId)).stop, true);
     throw rollback;
   }), (error: unknown) => error === rollback);
 });

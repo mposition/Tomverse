@@ -33,6 +33,8 @@ import { parseAmuxTrackedCheckoutReadManifest } from
 import { amuxTrackedCheckoutReadManifestKeyIdentity,
   AmuxTrackedCheckoutReadManifestError,
   amuxReadManifestDueAt, commitAmuxDueReadManifestPurge,
+  ownerMayReadManifest,
+  readAmuxTrackedCheckoutReadManifestForOwner,
   recordAmuxTrackedCheckoutReadManifestKeyIntent,
   recordAmuxTrackedCheckoutReadManifest } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestStore";
@@ -388,6 +390,10 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
   const manifest = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
     where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
   });
+  assert.equal(await ownerMayReadManifest(authority.approvedByUserId,
+    ideaId, manifest.id), true);
+  assert.equal(await ownerMayReadManifest("another-owner",
+    ideaId, manifest.id), false);
   await prisma.$transaction((tx) =>
     recordAmuxTrackedCheckoutEvidence(tx, evidenceInput(ideaId, 1)));
   const secondManifestId = randomUUID();
@@ -443,9 +449,17 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
   }), /retention is not due/);
   assert.equal(await prisma.$transaction((tx) =>
     commitAmuxDueReadManifestPurge(tx, manifest.id)), "skipped");
+  assert.equal(await ownerMayReadManifest(authority.approvedByUserId,
+    ideaId, manifest.id), true);
   await prisma.$transaction((tx) => commitAmuxIdeaRetentionHoldRelease(tx, {
     session, request, holdId, ideaId,
   }));
+  assert.equal(await ownerMayReadManifest(authority.approvedByUserId,
+    ideaId, manifest.id), false);
+  // Access expires at the database clock boundary even if retention has not
+  // purged the ciphertext or retired its external key yet.
+  assert.equal(await readAmuxTrackedCheckoutReadManifestForOwner(
+    authority.approvedByUserId, ideaId, 0), null);
   await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.update({
     where: { id: manifest.id }, data: { ciphertext: null, keyId: null,
       keyVersion: null, bodyPurgedAt: new Date() },

@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
+import { AmuxReadManifestPathsPanel } from "@/components/admin/AmuxReadManifestPathsPanel";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
 import { AMUX_IDEA_PROGRESS_STAGES, amuxIdeaProgressStep } from "@/lib/amux/ideaProgressCore";
@@ -19,7 +20,7 @@ const EXCLUSION_REASONS = ["secretPath", "secretContent", "nonRegular",
  * The top of one idea's detail (approved backlog redesign, B3): where the idea
  * is on the six steps, which of them are a person's, and its Tasks with their
  * PRs. Everything here is read from the progress snapshot; there is no action
- * besides opening GitHub and cancelling a queued v19 session idea, because
+ * besides opening GitHub, reading its own CLI manifest, and cancelling a queued v19 session idea, because
  * other human steps have their own panels below and merge is observed here.
  */
 export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
@@ -89,6 +90,11 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
                     <p>{evidence.readManifest.bodyPurged ? m.checkoutReadPurged : m.checkoutReadEncrypted}</p>
                     <p>{m.checkoutReadDigest}: <code className="break-all text-zinc-100">
                       {evidence.readManifest.digest}</code></p>
+                    {!evidence.readManifest.bodyPurged ? (
+                      <AmuxReadManifestPathsPanel ideaId={row.ideaId}
+                        referenceOrdinal={evidence.referenceOrdinal}
+                        fileCount={evidence.readManifest.fileCount} />
+                    ) : null}
                   </div>
                 ) : null}
               </li>
