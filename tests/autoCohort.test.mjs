@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import test from "node:test";
 
 import {
@@ -14,10 +15,10 @@ import {
   autoRolloutReadiness,
   autoRolloutReadinessProblems,
 } from "../lib/autoRolloutReadiness.ts";
-import {
+const {
   CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS,
   mintChatRefinerInitialAutoRouterAuthority,
-} from "../lib/chatRefinerInitialAutoRouterAuthority.ts";
+} = createRequire(import.meta.url)("@/lib/chatRefinerInitialAutoRouterAuthority");
 
 // The cohort boundary is the only thing standing between "Auto works in
 // shadow" and "Auto answers a real person". These tests are about the ways it

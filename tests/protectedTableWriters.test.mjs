@@ -1069,6 +1069,15 @@ test("every append-only ledger table is one an exact migration protects", () => 
     ),
     "utf8"
   );
+  const optimizerSqlByTable = new Map([
+    ["ChatUnifiedOptimizerPromotionReceipt", "20261016206000_chat_unified_optimizer_promotion"],
+    ["ChatUnifiedOptimizerProtectedHandoff", "20261016212000_chat_unified_optimizer_protected_handoff"],
+    ["ChatUnifiedOptimizerComparisonVerdict", "20261017081000_chat_unified_optimizer_comparison_verdict"],
+    ["ChatUnifiedOptimizerEngineeringDraft", "20261017090000_chat_unified_optimizer_engineering_draft"],
+    ["ChatUnifiedOptimizerQueuedCloseIntent", "20261017091000_chat_unified_optimizer_queued_close_intent"],
+  ].map(([table, migration]) => [table, readFileSync(new URL(
+    `../prisma/migrations/${migration}/migration.sql`, import.meta.url), "utf8")]
+  ));
   const recoveryTables = new Set([
     "AmuxV22TaskRecoveryInspectionRequest",
     "AmuxV22TaskRecoveryEvidence",
@@ -1093,14 +1102,14 @@ test("every append-only ledger table is one an exact migration protects", () => 
   const sessionAnalysisReservationTables =
     new Set(["AmuxIdeaSessionAnalysisReservation"]);
   for (const table of APPEND_ONLY_LEDGER_TABLES) {
-    const sql = recoveryTables.has(table) ? recoverySql :
+    const sql = optimizerSqlByTable.get(table) ?? (recoveryTables.has(table) ? recoverySql :
       riskRetryTables.has(table) ? riskRetrySql :
         apiAccessTables.has(table) ? apiAccessSql :
           trackedCheckoutTables.has(table) ?
             table === "AmuxIdeaTrackedCheckoutReadManifest" ? trackedCheckoutReadSql :
               trackedCheckoutSql :
             sessionAnalysisReservationTables.has(table)
-              ? sessionAnalysisReservationSql : emailSql;
+              ? sessionAnalysisReservationSql : emailSql);
     assert.match(
       sql,
       new RegExp(`BEFORE (?:INSERT OR )?UPDATE OR DELETE(?: OR TRUNCATE)?\\s+ON "${table}"`),

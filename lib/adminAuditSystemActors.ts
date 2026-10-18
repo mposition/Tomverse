@@ -62,6 +62,16 @@ export const AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR = "amux-v22-recovery-contr
 /** Policy v42: records only content-free, exact FIRST model-access evidence. */
 export const AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR = "amux-v22-api-model-access" as const;
 
+/** Provider-free CHAT-01 optimizer metadata only. The scoped actions below
+ * cannot authorize a paid call, external dispatch or candidate promotion
+ * (docs/policy/chat-unified-router-refiner-v1.md §§7, 12). */
+export const CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR =
+  "chat-unified-optimizer" as const;
+/** Prepared candidate pointer transitions and canary rollback only. This is
+ * distinct from the validation writer and cannot grant runtime authority (§11). */
+export const CHAT_UNIFIED_CANDIDATE_PROMOTER_AUDIT_ACTOR =
+  "chat-unified-candidate-promoter" as const;
+
 /**
  * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
  * names the service or app path whose action the entry records; none of them
@@ -223,6 +233,8 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR,
   AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
   AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR,
+  CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR,
+  CHAT_UNIFIED_CANDIDATE_PROMOTER_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
@@ -382,9 +394,54 @@ export const systemAuditActionAllowed = (
   (actor !== AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.api_model_access_observed" &&
       targetType === "AmuxV22ApiModelAccessEvidence")) &&
+  (actor !== CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR ||
+    (action === "chat.unified_optimizer.run_admitted" &&
+      targetType === "ChatUnifiedOptimizerRun") ||
+    (action === "chat.unified_optimizer.comparison_verdict_recorded" &&
+      targetType === "ChatUnifiedOptimizerComparisonVerdict") ||
+    (action === "chat.unified_optimizer.engineering_draft_recorded" &&
+      targetType === "ChatUnifiedOptimizerEngineeringDraft") ||
+    (action === "chat.unified_optimizer.cost_plan_registered" &&
+      targetType === "ChatUnifiedOptimizerCostPlan") ||
+    (action === "chat.unified_optimizer.candidate_body_expired" &&
+      targetType === "ChatUnifiedOptimizerCandidatePayload") ||
+    (action === "chat.unified_optimizer.queued_closure_intended" &&
+      targetType === "ChatUnifiedOptimizerQueuedCloseIntent") ||
+    (action === "chat.unified_optimizer.retention_failure_latched" &&
+      targetType === "AppSetting") ||
+    ((action === "chat.unified_optimizer.call_reserved" ||
+      action === "chat.unified_optimizer.call_dispatch_intended" ||
+      action === "chat.unified_optimizer.call_settled" ||
+      action === "chat.unified_optimizer.call_outcome_unknown" ||
+      action === "chat.unified_optimizer.call_quota_outcome_unknown") &&
+      targetType === "ChatUnifiedOptimizerDispatchHold") ||
+    ((action === "chat.unified_optimizer.protected_job_prepared" ||
+      action === "chat.unified_optimizer.protected_job_consumed") &&
+      targetType === "ChatUnifiedOptimizerProtectedHandoff") ||
+    ((action === "chat.unified_optimizer.dispatch_intended" ||
+      action === "chat.unified_optimizer.run_terminal" ||
+      action === "chat.unified_optimizer.queued_before_dispatch_terminal") &&
+      targetType === "ChatUnifiedOptimizerRoleJob")) &&
+  (actor !== CHAT_UNIFIED_CANDIDATE_PROMOTER_AUDIT_ACTOR ||
+    (action === "chat.unified_optimizer.candidate_pointer_prepared" &&
+      targetType === "ChatUnifiedOptimizerPromotionReceipt") ||
+    (action === "chat.unified_optimizer.canary_rollout_prepared" &&
+      targetType === "ChatUnifiedOptimizerCanaryRollout") ||
+    (action === "chat.unified_optimizer.canary_started" &&
+      targetType === "ChatUnifiedOptimizerCanaryRollout") ||
+    (action === "chat.unified_optimizer.canary_phase_advanced" &&
+      targetType === "ChatUnifiedOptimizerCanaryRollout") ||
+    (action === "chat.unified_candidate.rolled_back" &&
+      targetType === "ChatUnifiedOptimizerRollbackReceipt") ||
+    (action === "chat.unified_candidate.cycle_latched" &&
+      targetType === "ChatUnifiedOptimizerCycleLatch")) &&
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||
     (action === "prompt_refiner.product_disposition_recorded" && targetType === "PromptRefinerProductDispositionReceipt") ||
+    (action === "chat.unified_router_refiner_result_consumed" && targetType === "ChatUnifiedRouterRefinerResult") ||
+    (action === "chat.unified_router_refiner_result_expired" && targetType === "ChatUnifiedRouterRefinerResult") ||
+    (action === "chat.unified_router_refiner_receipt_recorded" &&
+      (targetType === "ChatUnifiedExecutionReceipt" || targetType === "ChatUnifiedRoutingReceipt")) ||
     ((action === "prompt_refiner.product_auto_paused" || action === "prompt_refiner.product_auto_guard_observed") && targetType === "PromptRefinerProductOperationalGuard") ||
      ((action === "prompt_refiner.product_attempt_claimed" || action === "prompt_refiner.product_attempt_transitioned" || action === "prompt_refiner.product_source_bound") && targetType === "PromptRefinerProductAttempt")) &&
   (actor !== "prompt-refiner-auto-budget" ||

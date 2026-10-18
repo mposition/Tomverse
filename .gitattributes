@@ -112,3 +112,7 @@ scripts/prompt-refiner-shadow-harness.mjs text eol=lf
 # checkout used to fail three of its comparisons on Windows.
 docs/policy/email-consent-copy-draft.md text eol=lf
 tests/emailConsentCopy.test.mjs text eol=lf
+
+# This frozen SQL migration contains CRLF bytes in its reviewed checksum.
+# Keep those bytes while allowing whitespace checks on the rest of the release.
+prisma/migrations/20261016205000_chat_unified_optimizer_usage_overrun/migration.sql whitespace=-blank-at-eol
