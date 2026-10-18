@@ -46,6 +46,7 @@
     "build:amux-v4-egress-s0": "esbuild scripts/amux-v4-egress-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-egress-s0.mjs",
     "build:amux-v4-cli-binary-s0": "esbuild scripts/amux-v4-cli-binary-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-cli-binary-s0.mjs",
     "build:amux-v4-cli-model-s0": "esbuild scripts/amux-v4-cli-model-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-cli-model-s0.mjs",
+    "build:amux-v19-max-synthetic-s0": "esbuild scripts/amux-v19-max-synthetic-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v19-max-synthetic-s0.mjs",
     "build:amux-v4-analysis-agent-once": "esbuild scripts/amux-v4-analysis-agent-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-analysis-agent-once.mjs",
     "build:amux-v19-session-queue-once": "esbuild scripts/amux-v19-session-queue-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v19-session-queue-once.mjs",
     "build:amux-v22-task-sidecar": "esbuild scripts/amux-v22-task-sidecar.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v22-task-sidecar.mjs",
