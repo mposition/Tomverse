@@ -10282,12 +10282,12 @@ model AmuxIdeaSessionResultOrphanKeyRetirement {
   claimedAt           DateTime  @db.Timestamptz(3)
   claimAuditLogId     String    @unique
   keyDeletedAt        DateTime? @db.Timestamptz(3)
-  keyDeleteAuditLogId String?   @unique
+  keyDeleteAuditLogId String?   @unique(map: "AmuxIdeaSessionResultOrphanKeyRetiremen_keyDeleteAuditLogId_key")
 
   claim AmuxIdeaSessionAnalysisBudgetClaim @relation(fields: [claimId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   idea AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   claimAudit AdminAuditLog @relation("AmuxV19SessionResultOrphanClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  keyDeleteAudit AdminAuditLog? @relation("AmuxV19SessionResultOrphanDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  keyDeleteAudit AdminAuditLog? @relation("AmuxV19SessionResultOrphanDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionResultOrphanKeyRetirement_keyDeleteAuditLogId_fk")
 
   @@index([keyDeletedAt, claimedAt], map: "AmuxIdeaSessionResultOrphanKeyRetirement_pending_idx")
 }
