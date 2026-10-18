@@ -180,6 +180,7 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
       reject: "Rejected",
       assign_discarded: "Assignment discarded",
       stale_close: "Closed as stale",
+      direct_answer_close: "Closed: the operator answered directly",
     },
     deliveries: {
       not_applicable: "Nothing to deliver",
@@ -189,6 +190,7 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
       unknown: "Delivery unknown",
       resolved_delivered: "Confirmed delivered by a person",
       resolved_not_delivered: "Confirmed not delivered by a person",
+      not_sent: "Not sent",
     },
   },
   ko: {
@@ -231,6 +233,7 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
       reject: "거절",
       assign_discarded: "배정 버림",
       stale_close: "기한 경과로 닫힘",
+      direct_answer_close: "운영자가 직접 답해 닫힘",
     },
     deliveries: {
       not_applicable: "전달할 것 없음",
@@ -240,6 +243,7 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
       unknown: "전달 불명",
       resolved_delivered: "사람이 전달됨으로 확인",
       resolved_not_delivered: "사람이 전달 안 됨으로 확인",
+      not_sent: "보내지 않음",
     },
   },
 });
@@ -281,6 +285,25 @@ export const adminAmuxDecisionMakerRequestDetailMessages = defineAdminMessages({
     snapshotAt: (state: string, sha: string) => `${state} at ${sha}`,
     judgeable: "This proposal is waiting for a person's judgment.",
     notJudgeable: "There is nothing to judge on this request now.",
+    notSent: "The confirmed answer was not sent",
+    notSentReasons: {
+      answered_by_operator: "The operator answered the question directly first, so this answer was refused.",
+      question_changed: "The worker no longer asks this question: it asked again, or the card left the queue.",
+      binding_changed: "The card was given to another worker or attempt.",
+      lane_refused: "The worker's session refused automated input before this answer claimed the question; nothing was typed into it.",
+      send_refused: "This answer claimed the question, then the worker's session refused the send; nothing was typed into it.",
+      local_refused: "The local AMUX refused or failed before it claimed or sent anything.",
+    },
+    // What the operator does next. Only a send refused after the claim leaves
+    // the question held, so only that reason sends the operator elsewhere.
+    notSentNext: {
+      answered_by_operator: "The operator's own answer holds this question. Nothing more goes to the worker from this request.",
+      question_changed: "Nothing more goes to the worker from this request. If the worker's new question needs an answer, answer it directly in AMUX.",
+      binding_changed: "Nothing more goes to the worker from this request. If the card still asks, answer it directly in AMUX.",
+      lane_refused: "Nothing holds the question. Once the session takes input again, answer it directly in AMUX.",
+      send_refused: "This answer still holds the question, so AMUX refuses a direct answer to it as well. The worker has to ask again (a new question revision) before anyone can answer.",
+      local_refused: "Nothing holds the question. If the worker still needs an answer, answer it directly in AMUX.",
+    },
     cleanupUnknown: "Cleanup not confirmed",
     cleanupUnknownAt: (at: string) =>
       `At ${at} (database clock) the Decision Maker reported that it could not confirm this request's working directories were deleted. Such a report turns its instance off until a person releases it; the switches above show whether it still is.`,
@@ -321,6 +344,23 @@ export const adminAmuxDecisionMakerRequestDetailMessages = defineAdminMessages({
     snapshotAt: (state: string, sha: string) => `${state}, ${sha}`,
     judgeable: "이 제안은 사람의 판정을 기다립니다.",
     notJudgeable: "이 요청에는 지금 판정할 것이 없습니다.",
+    notSent: "확정한 답을 보내지 않았습니다",
+    notSentReasons: {
+      answered_by_operator: "운영자가 그 질문에 먼저 직접 답해서 이 답은 거절됐습니다.",
+      question_changed: "worker가 더는 이 질문을 묻지 않습니다. 다시 물었거나 카드가 대기열을 떠났습니다.",
+      binding_changed: "카드가 다른 worker나 시도에 넘어갔습니다.",
+      lane_refused: "이 답이 질문을 차지하기 전에 worker 세션이 자동 입력을 거부했습니다. 세션에 아무것도 입력되지 않았습니다.",
+      send_refused: "이 답이 질문을 차지한 뒤 worker 세션이 전송을 거부했습니다. 세션에 아무것도 입력되지 않았습니다.",
+      local_refused: "로컬 AMUX가 답변 기록이나 전송 전에 거부했거나 실패했습니다.",
+    },
+    notSentNext: {
+      answered_by_operator: "운영자의 직접 답이 이 질문을 차지했습니다. 이 요청에서 worker에게 가는 것은 더 없습니다.",
+      question_changed: "이 요청에서 worker에게 가는 것은 더 없습니다. worker의 새 질문에 답이 필요하면 AMUX에서 직접 답하세요.",
+      binding_changed: "이 요청에서 worker에게 가는 것은 더 없습니다. 카드가 아직 묻고 있으면 AMUX에서 직접 답하세요.",
+      lane_refused: "질문을 차지한 답은 없습니다. 세션이 다시 입력을 받으면 AMUX에서 직접 답하세요.",
+      send_refused: "이 답이 아직 질문을 차지하고 있어 AMUX가 직접 답도 거절합니다. worker가 다시 물어야(새 질문 revision) 누구든 답할 수 있습니다.",
+      local_refused: "질문을 차지한 답은 없습니다. worker에게 아직 답이 필요하면 AMUX에서 직접 답하세요.",
+    },
     cleanupUnknown: "정리 확인 못 함",
     cleanupUnknownAt: (at: string) =>
       `DB 시계 기준 ${at}에 Decision Maker가 이 요청의 작업 디렉터리를 지웠는지 확인하지 못했다고 보고했습니다. 이런 보고는 사람이 해제하기 전까지 그 인스턴스를 끄며, 지금도 꺼져 있는지는 위 스위치에서 봅니다.`,

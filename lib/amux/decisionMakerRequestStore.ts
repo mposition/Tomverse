@@ -27,6 +27,7 @@ import {
   dmResultSubmissionOutcome,
   isDmDeadlineResultKind,
   isDmDigest,
+  isDmLedgerIdentifier,
   isDmRequestId,
   parseDmRequestRecord,
   parseDmRoutingBinding,
@@ -309,9 +310,10 @@ export async function readDecisionMakerInstanceLoad(
  * and what its events add up to. `probeDigest` also reports the rejection
  * already recorded for that result digest, if any. Null when no such request
  * exists; a row the core cannot read throws. Its closing kind is the router's
- * (assign_discarded, stale_close) or, since stage S1e, a person's judgment
- * (confirm, edit_confirm, reject), which the database writes beside the
- * judgment row -- one per request either way. Since stage S2-2a3 it also
+ * (assign_discarded, stale_close, and since stage S2-2b4 direct_answer_close)
+ * or, since stage S1e, a person's judgment (confirm, edit_confirm, reject),
+ * which the database writes beside the judgment row -- one per request either
+ * way. Since stage S2-2a3 it also
  * carries the request's one `cleanup_unknown` report (§5), with its database
  * clock; that report closes nothing.
  */
@@ -354,7 +356,7 @@ export async function readDecisionMakerRequestState(
         floor(extract(epoch FROM max(ev."createdAt") FILTER (WHERE ev."kind" = 'cleanup_unknown')) * 1000)::bigint
           AS "cleanupUnknownAtEpochMs",
         max(ev."kind") FILTER (
-          WHERE ev."kind" IN ('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject')
+          WHERE ev."kind" IN ('assign_discarded', 'stale_close', 'direct_answer_close', 'confirm', 'edit_confirm', 'reject')
         ) AS "closingKind",
         min(ev."rejectionReason") FILTER (
           WHERE ev."kind" = 'result_rejected' AND ev."resultDigest" = ${probeDigest}::text
@@ -387,7 +389,8 @@ export async function lookupDecisionMakerResult(
  * no closing event has closed, in one statement. Stage S1d's digest-key
  * destruction reads it for one key period (§10): a body can still be stored
  * for an open request, so a period's key is not destroyed while one is open.
- * A judgment closes a request as well (stage S1e), as the key guard counts it.
+ * A judgment closes a request as well (stage S1e), and an operator's direct
+ * answer (stage S2-2b4), as the key guard counts them.
  * Bounds are epoch milliseconds, added to the epoch as an interval so the
  * comparison is exact.
  */
@@ -412,7 +415,7 @@ export async function countOpenDecisionMakerRequestsCreatedBetween(
       AND NOT EXISTS (
         SELECT 1 FROM "AmuxDecisionMakerRequestEvent" ev
         WHERE ev."requestId" = r."id"
-          AND ev."kind" IN ('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject')
+          AND ev."kind" IN ('assign_discarded', 'stale_close', 'direct_answer_close', 'confirm', 'edit_confirm', 'reject')
       )
   `;
   const row = rows[0];
@@ -443,7 +446,7 @@ export async function listDecisionMakerStaleCloseCandidates(
       AND NOT EXISTS (
         SELECT 1 FROM "AmuxDecisionMakerRequestEvent" ev
         WHERE ev."requestId" = r."id"
-          AND ev."kind" IN ('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject')
+          AND ev."kind" IN ('assign_discarded', 'stale_close', 'direct_answer_close', 'confirm', 'edit_confirm', 'reject')
       )
     ORDER BY r."createdAt", r."id"
     LIMIT ${input.limit}
@@ -500,7 +503,7 @@ export async function readRecentDecisionMakerRequestLedger(
         max(ev."resultKind") FILTER (WHERE ev."kind" = 'result') AS "resultKind",
         coalesce(bool_or(ev."kind" = 'result_unknown'), false) AS "resultUnknown",
         max(ev."kind") FILTER (
-          WHERE ev."kind" IN ('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject')
+          WHERE ev."kind" IN ('assign_discarded', 'stale_close', 'direct_answer_close', 'confirm', 'edit_confirm', 'reject')
         ) AS "closingKind",
         floor(extract(epoch FROM max(ev."createdAt") FILTER (WHERE ev."kind" = 'cleanup_unknown')) * 1000)::bigint
           AS "cleanupUnknownAtEpochMs"
@@ -1179,6 +1182,59 @@ export async function recordDecisionMakerResultUnknown(
     recorded: true,
     event: await appendEvent(tx, requestId, { ...NO_COLUMNS, kind: "result_unknown", instance, resultDigest }),
   };
+}
+
+/**
+ * Stage S2-2b4, §2-7: "운영자의 직접 답과 확정된 DM 답이 모두 그 기록을 먼저
+ * 써야 보낸다 ... 운영자의 직접 답이 먼저면 요청은 닫힌다". The bridge found the
+ * local AMUX's answer record of a question revision naming the operator, and
+ * reports the question; the router closes that question's request -- the one
+ * request of (card, question revision), §9 -- once, whatever it was waiting
+ * for: its assignment, its result, or a person's judgment of its proposal.
+ * Closed, it takes no judgment, so a proposal nobody confirmed can never be
+ * delivered after the operator answered, and a late result is rejected as
+ * `request_closed`. The router's `direct_answer_close` event, under the
+ * router's `amux.decision.assign_discarded` (`dmEventAuditAction()`).
+ *
+ * No request for the question is `unknown_request`; a request routed to the
+ * operator is `not_routed_to_dm` (closed from its creation); one already
+ * closed -- by a judgment, a discarded assignment, a stale close or an earlier
+ * report -- is `closed`. None of these writes anything, so a report sent
+ * again is a read. The kill switch is not read: §6's table allows the
+ * operator's direct answer and every record of what already happened.
+ *
+ * Statements: 1 lock, 1 request lookup -- 2 when there is none; 1 state read
+ * -- 3 for a refusal; the router's audit 3 (4 with an integrity key) and 1
+ * insert -- 7, or 8.
+ */
+export async function closeDecisionMakerRequestOnDirectAnswer(
+  tx: Prisma.TransactionClient,
+  input: { cardId: unknown; questionRevision: unknown },
+): Promise<DecisionMakerEventWrite> {
+  const { cardId, questionRevision } = input;
+  if (
+    !isDmLedgerIdentifier(cardId) ||
+    typeof questionRevision !== "number" ||
+    !Number.isInteger(questionRevision) ||
+    questionRevision < 0 ||
+    questionRevision > 2_147_483_647
+  ) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  await takeAuditChainLock(tx);
+  const found = await tx.$queryRaw<Array<{ id: unknown }>>`
+    SELECT "id" FROM "AmuxDecisionMakerRequest"
+    WHERE "cardId" = ${cardId} AND "questionRevision" = ${questionRevision}
+  `;
+  if (found.length === 0) return { recorded: false, reason: "unknown_request" };
+  const requestId = found[0]!.id;
+  if (!isDmRequestId(requestId)) throw new DecisionMakerRequestWriteError("state_unreadable");
+  const state = await readDecisionMakerRequestState(tx, requestId);
+  // Requests are never deleted: the row just found is still there.
+  if (!state) throw new DecisionMakerRequestWriteError("state_unreadable");
+  const refusal = dmEventRefusal(state, { kind: "direct_answer_close" });
+  if (refusal) return { recorded: false, reason: refusal };
+  return { recorded: true, event: await appendEvent(tx, requestId, { kind: "direct_answer_close", ...NO_COLUMNS }) };
 }
 
 /**

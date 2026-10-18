@@ -1801,10 +1801,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
     table: "AmuxDecisionMakerRequest",
-    tableMentions: 8,
+    tableMentions: 9,
     writeVerbs: 4,
     reason:
-      "The request ledger's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the request table in seven constant SELECTs (the throughput count, the request state, the request already recorded for a card revision, -- since S1d, 2026-10-08 -- the open requests created in a key period, read for a digest key's destruction, -- since S1e -- each instance's proposals for section 4's report, -- since S1g, 2026-10-12 -- the stale-close candidates the retention sweep reads, and -- since S2, 2026-10-13 -- Admin's newest requests) and one constant INSERT ... RETURNING; every value is a bound parameter. The other verbs are the event INSERT and the word in the two errors raised when an insert returns no row. It never updates or deletes a request, and it writes the audit log only through lib/amux/decisionMakerRequestSystemAudit.ts.",
+      "The request ledger's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the request table in eight constant SELECTs (the throughput count, the request state, the request already recorded for a card revision, -- since S1d, 2026-10-08 -- the open requests created in a key period, read for a digest key's destruction, -- since S1e -- each instance's proposals for section 4's report, -- since S1g, 2026-10-12 -- the stale-close candidates the retention sweep reads, -- since S2, 2026-10-13 -- Admin's newest requests, and -- since S2-2b4, 2026-10-18 -- the id of the one request of a (card, question revision) the operator answered directly, which the store then closes with an event) and one constant INSERT ... RETURNING; every value is a bound parameter. The other verbs are the event INSERT and the word in the two errors raised when an insert returns no row. It never updates or deletes a request, and it writes the audit log only through lib/amux/decisionMakerRequestSystemAudit.ts.",
   },
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
@@ -1913,10 +1913,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerJudgmentStore.ts",
     table: "AmuxDecisionMakerDeliveryEvent",
-    tableMentions: 5,
+    tableMentions: 7,
     writeVerbs: 5,
     reason:
-      "The same module names the delivery event table in its three constant delivery reads (a request's, -- since S2, 2026-10-13 -- those of Admin's newest requests, and -- since S2-2b3, 2026-10-18 -- the NOT EXISTS of a decision beside the next confirmation) and in two constant INSERT ... RETURNING statements, the system's decision, receipt or unknown outcome and a person's resolution; every value is a bound parameter. It never updates or deletes a delivery event.",
+      "The same module names the delivery event table in its four constant delivery reads (a request's, -- since S2, 2026-10-13 -- those of Admin's newest requests, -- since S2-2b3, 2026-10-18 -- the NOT EXISTS of a decision beside the next confirmation, and -- since S2-2b4, 2026-10-18 -- the oldest decision with no outcome and the NOT EXISTS of its outcome, which the bridge settles at its start) and in two constant INSERT ... RETURNING statements, the system's decision, receipt, unknown or not-sent outcome and a person's resolution; every value is a bound parameter. It never updates or deletes a delivery event.",
   },
   {
     path: "prisma/migrations/20261008130000_amux_decision_maker_stale_close_hours/migration.sql",
@@ -2109,6 +2109,86 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 2,
     reason:
       "The same function body reads a judgment's closing event beside its judgment row, unchanged from 20261017160000. Nothing here writes a judgment.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 13,
+    writeVerbs: 23,
+    reason:
+      "The S2-2b4 migration (docs/policy/amux-decision-maker.md §2-7, §9, §10). Its AdminAuditLog mentions are the six replaced guards' SELECT EXISTS reads and joins, each unchanged from the body it replaces but for the audit action a direct answer's close is checked under (the router's amux.decision.assign_discarded, in the event guard and the retention guard). It never writes AdminAuditLog; its write verbs are the DDL (the replaced CHECKs, indexes and closing trigger, the new column and CHECKs), the trigger event, the guards' TG_OP comparisons, the unchanged judgment close's INSERT reference and words of comments inside the function bodies.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 4,
+    writeVerbs: 23,
+    reason:
+      "The replaced event guard, judgment guard and delivery guard read the newest kill switch and instance events under the shared switch gate, unchanged from their previous bodies; a direct answer's close and a not-sent outcome read no switch. Nothing here writes a switch event.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    table: "AmuxDecisionMakerRequest",
+    tableMentions: 12,
+    writeVerbs: 23,
+    reason:
+      "The replaced guards read the request row and name the request as an audit's target type, unchanged from their previous bodies; the key guard counts the open requests of a period, now with a direct answer's close among the closing kinds. Nothing here writes a request.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    table: "AmuxDecisionMakerRequestEvent",
+    tableMentions: 14,
+    writeVerbs: 23,
+    reason:
+      "Replaces the request event table's kind and instance/kind CHECKs and its one-closing partial unique index with the router's direct_answer_close (section 2-7), recreates the S1d closing trigger with it, and replaces the guards that read a request's events or closing kinds -- the event guard (which allows the close once on an open DM request, under the router's audit), the body guard, the retention guard, the key guard and the judgment guard. Nothing here inserts, updates or deletes an event.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    table: "AmuxDecisionMakerBody",
+    tableMentions: 3,
+    writeVerbs: 23,
+    reason:
+      "The replaced body guard (a direct answer's close closes the request for a body) and the judgment guard's read of a request's body digests, unchanged but for the closing kinds. Nothing here writes a body.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    table: "AmuxDecisionMakerRetentionEvent",
+    tableMentions: 4,
+    writeVerbs: 23,
+    reason:
+      "The replaced retention guard, which accepts a retention_set named by a direct answer's close and the router's audit, and the replaced key guard's open-hold read. Nothing here writes a retention event; the S1d closing trigger does, recreated with the new kind.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    table: "AmuxDecisionMakerDigestKeyEvent",
+    tableMentions: 3,
+    writeVerbs: 23,
+    reason:
+      "The replaced key guard and the replaced body guard read the period's registry, unchanged but for the closing kinds. Nothing here writes a registry event.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    table: "AmuxDecisionMakerResultDetail",
+    tableMentions: 1,
+    writeVerbs: 23,
+    reason:
+      "The replaced judgment guard reads the proposal's S1d detail, unchanged. Nothing here writes a detail.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    table: "AmuxDecisionMakerJudgment",
+    tableMentions: 2,
+    writeVerbs: 23,
+    reason:
+      "The replaced event guard's judgment audit join and the replaced delivery guard's read of a request's judgment, unchanged. Nothing here writes a judgment.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    table: "AmuxDecisionMakerDeliveryEvent",
+    tableMentions: 8,
+    writeVerbs: 23,
+    reason:
+      "Adds the delivery event's notSentReason with its two CHECKs, replaces the kind CHECK and the one-outcome partial unique index with the third outcome delivery_not_sent (sections 2-7 and 9), and replaces the delivery guard, which allows it once after the decision. Nothing here inserts, updates or deletes a delivery event.",
   },
   {
     path: "prisma/migrations/20261001102600_amux_v4_unit_decisions/migration.sql",
@@ -2644,6 +2724,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 6,
     reason:
       "Six reads in the replaced request event guard (stage S2-2a4), all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: its five unchanged from 20261017160000 (the request row, the aggregate of its events after the per-request lock, the newest kill switch and instance events under the shared switch gate, the audit read for a judgment's closing event and the audit read for a system event) and, for a result, the highest sequence of its instance's switch events under the same gate, which it records on the result. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql",
+    count: 36,
+    reason:
+      "Thirty-six statements in the six replaced guards (stage S2-2b4), all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp, and each the same as in the body it replaces: the event guard's six (20261017200000), the body guard's ten, the retention guard's four, the key guard's five, the judgment guard's six and the delivery guard's five (20261008130100). Only the closing kinds, a direct answer's close's audit action and the delivery guard's third outcome change in them. The schema is the trigger's own, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",

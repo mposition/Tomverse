@@ -26,7 +26,9 @@ import {
   DM_DELIVERY_MESSAGE_MAX_BYTES,
   dmDeliveryHeader,
 } from "../lib/amux/decisionMakerDeliveryCore.ts";
+import { DM_DELIVERY_NOT_SENT_REASONS } from "../lib/amux/decisionMakerJudgmentCore.ts";
 import { DM_LAUNCH_OUTPUT_MAX_BYTES } from "../lib/amux/decisionMakerLauncherCore.ts";
+import { DM_STALE_CLOSE_AFTER_MS } from "../lib/amux/decisionMakerRequestCore.ts";
 import { parseDmCard } from "../lib/amux/decisionMakerRequestCore.ts";
 import { DM_INSTANCE_SCOPES } from "../lib/amux/decisionMakerSwitchCore.ts";
 
@@ -35,6 +37,7 @@ const wire = read("apps/tomverse-orchestrator/src/dm_relay/wire.rs");
 const flow = read("apps/tomverse-orchestrator/src/dm_relay/flow.rs");
 const io = read("apps/tomverse-orchestrator/src/dm_relay/io.rs");
 const delivery = read("apps/tomverse-orchestrator/src/dm_relay/delivery.rs");
+const direct = read("apps/tomverse-orchestrator/src/dm_relay/direct.rs");
 
 /** A Rust integer expression of literals and `*` (`128 * 1024`, `34 * 60 * 1000`). */
 const product = (expression) =>
@@ -81,11 +84,19 @@ test("the relay never sends a result body the result route would refuse unread",
 });
 
 test("every route the relay calls exists and answers under the envelope the relay reads", () => {
-  // rustfmt wraps a long arm in braces; both shapes are the same mapping.
-  const routes = [...flow.matchAll(/AppRoute::(\w+) => \{?\s*"\/api\/internal\/amux\/decision-maker\/([a-z/]+)"/g)];
-  // Nine for a question (stage S2-2b2), three for a confirmed answer's delivery (S2-2b3).
-  assert.equal(routes.length, 12);
-  const envelopes = { Requests: "routed", Results: "submitted", ResultLookup: "found", DeliveriesNext: "found" };
+  // rustfmt wraps a long arm in braces; both shapes are the same mapping. A path may hold a hyphen
+  // (requests/direct-answer).
+  const routes = [...flow.matchAll(/AppRoute::(\w+) => \{?\s*"\/api\/internal\/amux\/decision-maker\/([a-z/-]+)"/g)];
+  // Nine for a question (stage S2-2b2), three for a confirmed answer's delivery (S2-2b3), and the
+  // unsettled read and the direct answer's report (S2-2b4).
+  assert.equal(routes.length, 14);
+  const envelopes = {
+    Requests: "routed",
+    Results: "submitted",
+    ResultLookup: "found",
+    DeliveriesNext: "found",
+    DeliveriesUnsettled: "found",
+  };
   for (const [, name, path] of routes) {
     const file = `app/api/internal/amux/decision-maker/${path}/route.ts`;
     assert.ok(existsSync(new URL(`../${file}`, import.meta.url)), file);
@@ -146,6 +157,9 @@ test("the relay writes the local AMUX only through the relay's own routes, outsi
     "/api/dm-relay/answers/check",
     "/api/dm-relay/answers",
     "/api/dm-relay/answers/unknown",
+    // Stage S2-2b4: two reads by POST, the operator's answer records and one decision's records.
+    "/api/dm-relay/answers/operator",
+    "/api/dm-relay/answers/receipt",
   ]);
   for (const path of local) assert.equal(path.includes("/api/board"), false);
   const server = read("vendor/amux/crates/amux-server/src/api/dm_relay.rs");
@@ -154,11 +168,19 @@ test("the relay writes the local AMUX only through the relay's own routes, outsi
   assert.match(server, /\.route\("\/answers", post\(deliver_answer\)\)/);
   assert.match(server, /\.route\("\/answers\/check", post\(check_answer\)\)/);
   assert.match(server, /\.route\("\/answers\/unknown", post\(answer_unknown\)\)/);
+  assert.match(server, /\.route\("\/answers\/operator", post\(operator_answers\)\)/);
+  assert.match(server, /\.route\("\/answers\/receipt", post\(answer_receipt\)\)/);
   // The one local read under the relay's prefix: every marker, for a restart.
   assert.equal(stringConstant(flow, "LOCAL_MARKER_LIST_PATH"), "/api/dm-relay/pending");
   const routeTable = read("vendor/amux/crates/amux-server/src/api/request_log.rs");
   assert.match(routeTable, /RouteEntry \{ path: "\/api\/dm-relay\/pending", methods: &\["GET", "POST"\] \}/);
-  for (const path of ["/api/dm-relay/answers", "/api/dm-relay/answers/check", "/api/dm-relay/answers/unknown"]) {
+  for (const path of [
+    "/api/dm-relay/answers",
+    "/api/dm-relay/answers/check",
+    "/api/dm-relay/answers/unknown",
+    "/api/dm-relay/answers/operator",
+    "/api/dm-relay/answers/receipt",
+  ]) {
     assert.ok(routeTable.includes(`RouteEntry { path: "${path}", methods: &["POST"] }`), path);
   }
   assert.equal(stringConstant(io, "DM_RELAY_LOCAL_TOKEN_HEADER"), "x-amux-dm-relay-token");
@@ -227,4 +249,28 @@ test("a confirmed answer's message id, cap, labels and header are the app's, on 
   assert.ok(answer.indexOf("_focusObserveQuestion(item)") < answer.indexOf("showFormModal("));
   // The claim's body is the observed revision.
   assert.match(dashboard, /body: JSON\.stringify\(\{ question_revision: revision \}\)/);
+});
+
+test("stage S2-2b4: the relay records a not-sent outcome only under the app's reasons, and reads back what it reports", () => {
+  // The reasons the relay sends are the app's closed list, in its order.
+  const reasons = [...constant(delivery, "DM_DELIVERY_NOT_SENT_REASONS").matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(reasons, [...DM_DELIVERY_NOT_SENT_REASONS]);
+  const mapped = new Set([...delivery.matchAll(/Some\("([a-z_]+)"\)/g)].map((match) => match[1]).filter((value) => reasons.includes(value)));
+  assert.deepEqual([...mapped].sort(), [...DM_DELIVERY_NOT_SENT_REASONS].sort(), "every reason is one the relay can send");
+  // The not-sent outcome travels as the outcome route reads it.
+  const outcomeRoute = read("app/api/internal/amux/decision-maker/deliveries/outcome/route.ts");
+  assert.match(outcomeRoute, /reason: z\.unknown\(\)\.optional\(\)/);
+  assert.match(delivery, /"outcome": "not_sent", "reason": reason/);
+  // The unsettled read's fields, from the app's answer to the relay's parse.
+  const unsettledRoute = read("app/api/internal/amux/decision-maker/deliveries/unsettled/route.ts");
+  for (const field of ["request_id", "decided_at_ms", "card_id", "question_revision", "worker", "session", "session_attempt", "message_id"]) {
+    assert.ok(unsettledRoute.includes(`${field}: read.`), field);
+    assert.ok(delivery.includes(`get("${field}")`), field);
+  }
+  // The direct answer's report: the card and the revision, no text.
+  const directRoute = read("app/api/internal/amux/decision-maker/requests/direct-answer/route.ts");
+  assert.match(directRoute, /card_id: z\.unknown\(\),\s+question_revision: z\.unknown\(\),\s+\}\)\s+\.strict\(\)/);
+  assert.match(direct, /json!\(\{"card_id": answer\.card_id, "question_revision": answer\.question_revision\}\)/);
+  // The walk looks back past the stale close, a day's margin over the 720 hours.
+  assert.equal(product(constant(direct, "DM_DIRECT_ANSWER_LOOKBACK_SECS")) * 1000, DM_STALE_CLOSE_AFTER_MS + 24 * 60 * 60 * 1000);
 });

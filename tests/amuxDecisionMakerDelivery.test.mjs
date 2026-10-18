@@ -1,5 +1,7 @@
 // AMUX Decision Maker stage S2-2b3: delivering an operator-confirmed answer to
-// the asking worker (docs/policy/amux-decision-maker.md §2-7, §6, §7, §9).
+// the asking worker (docs/policy/amux-decision-maker.md §2-7, §6, §7, §9), and
+// stage S2-2b4's gaps: a decided delivery that sent nothing, a request the
+// operator's direct answer closes, and a decision with no outcome read back.
 //
 // Runs without a database: §7's header, sentence and model table held to the
 // policy's own text; the candidate a confirmation makes and everything that is
@@ -30,14 +32,19 @@ import {
   dmDeliveryMessageId,
   parseDmDeliveryCursor,
 } from "../lib/amux/decisionMakerDeliveryCore.ts";
-import { readDecisionMakerDeliveryCandidate } from "../lib/amux/decisionMakerDeliveryRead.ts";
+import { readDecisionMakerDeliveryCandidate, readDecisionMakerUnsettledDelivery } from "../lib/amux/decisionMakerDeliveryRead.ts";
 import {
   DecisionMakerJudgmentWriteError,
   readNextDecisionMakerDeliveryJudgment,
+  readNextDecisionMakerUnsettledDelivery,
   recordDecisionMakerDelivery,
   recordDecisionMakerDeliveryOutcome,
 } from "../lib/amux/decisionMakerJudgmentStore.ts";
 import { DM_ASSIGNMENT_WINDOW_MS, dmRequestStateFromRow } from "../lib/amux/decisionMakerRequestCore.ts";
+import {
+  DecisionMakerRequestWriteError,
+  closeDecisionMakerRequestOnDirectAnswer,
+} from "../lib/amux/decisionMakerRequestStore.ts";
 import { DM_INSTANCE_SCOPES } from "../lib/amux/decisionMakerSwitchCore.ts";
 
 const root = process.cwd();
@@ -305,7 +312,9 @@ const recordingTx = ({
   request = requestRow(),
   detail = { resultKind: "proposal", outputKind: "free_text", optionId: null, irreversible: false, keyPeriod: dmKeyPeriodOf(NOW), createdAtEpochMs: BigInt(NOW - 2_000) },
   bodies = [{ field: "dm_answer", text: "Use the model id only.", digest: "d".repeat(64), keyPeriod: dmKeyPeriodOf(NOW), createdAtEpochMs: BigInt(NOW - 2_000) }],
-  delivery = { judgmentKind: "confirm", delivered: false, outcomeKind: null, resolution: null },
+  delivery = { judgmentKind: "confirm", delivered: false, outcomeKind: null, notSentReason: null, resolution: null },
+  unsettled = { requestId: REQUEST_ID, decidedAtEpochMs: BigInt(NOW - 500) },
+  lookup = [{ id: REQUEST_ID }],
 } = {}) => {
   const sent = [];
   const tx = {
@@ -319,6 +328,11 @@ const recordingTx = ({
       if (sql.includes("AT TIME ZONE 'UTC'")) return Promise.resolve([{ createdAt: new Date("2026-10-08T00:00:00.000Z") }]);
       if (sql.includes('SELECT DISTINCT ON ("scope")')) return Promise.resolve(switches);
       if (sql.includes('INSERT INTO "AmuxDecisionMakerDeliveryEvent"')) return Promise.resolve([{ sequence: 12n, createdAtEpochMs: BigInt(NOW + 6) }]);
+      if (sql.includes('INSERT INTO "AmuxDecisionMakerRequestEvent"')) {
+        return Promise.resolve([{ sequence: 13n, createdAtEpochMs: BigInt(NOW + 7), resultDeadlineAtEpochMs: null }]);
+      }
+      if (sql.includes('"decidedAtEpochMs"')) return Promise.resolve(unsettled === null ? [] : [unsettled]);
+      if (sql.includes('SELECT "id" FROM "AmuxDecisionMakerRequest"')) return Promise.resolve(lookup);
       // The delivery state read names the judgment table in a subquery too; the candidate read alone has a LIMIT.
       if (sql.includes('FROM "AmuxDecisionMakerJudgment" j') && sql.includes("LIMIT 1")) {
         return Promise.resolve(candidate === null ? [] : [candidate]);
@@ -452,9 +466,9 @@ test("the decision and the outcome routes' boundaries are their largest operatio
         assert.equal((await recordDecisionMakerDelivery(tx, { requestId: REQUEST_ID })).recorded, true);
         largest.decision = Math.max(largest.decision, sent.length);
       }
-      for (const outcome of ["receipt", "unknown"]) {
-        const { tx, sent } = recordingTx({ delivery: { judgmentKind: "confirm", delivered: true, outcomeKind: null, resolution: null } });
-        assert.equal((await recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome })).recorded, true, outcome);
+      for (const [outcome, reason] of [["receipt"], ["unknown"], ["not_sent", "answered_by_operator"]]) {
+        const { tx, sent } = recordingTx({ delivery: { judgmentKind: "confirm", delivered: true, outcomeKind: null, notSentReason: null, resolution: null } });
+        assert.equal((await recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome, reason })).recorded, true, outcome);
         largest.outcome = Math.max(largest.outcome, sent.length);
       }
     });
@@ -487,6 +501,8 @@ test("the delivery read and route hold no SQL, no table name and no log of the m
     "app/api/internal/amux/decision-maker/deliveries/next/route.ts",
     "app/api/internal/amux/decision-maker/deliveries/route.ts",
     "app/api/internal/amux/decision-maker/deliveries/outcome/route.ts",
+    "app/api/internal/amux/decision-maker/deliveries/unsettled/route.ts",
+    "app/api/internal/amux/decision-maker/requests/direct-answer/route.ts",
   ]) {
     const source = read(path);
     // A call or a tagged template; the read's client type names `"$queryRaw"` as a key.
@@ -498,9 +514,116 @@ test("the delivery read and route hold no SQL, no table name and no log of the m
     "app/api/internal/amux/decision-maker/deliveries/next/route.ts",
     "app/api/internal/amux/decision-maker/deliveries/route.ts",
     "app/api/internal/amux/decision-maker/deliveries/outcome/route.ts",
+    "app/api/internal/amux/decision-maker/deliveries/unsettled/route.ts",
+    "app/api/internal/amux/decision-maker/requests/direct-answer/route.ts",
   ]) {
     const source = read(path);
     assert.ok(source.indexOf("dmInternalRoutesEnabled()") < source.indexOf("readLimitedJson("), path);
     assert.ok(source.indexOf("isAmuxSyncAuthorized(request)") < source.indexOf("dmInternalRoutesEnabled()"), path);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Stage S2-2b4
+// ---------------------------------------------------------------------------
+
+test("stage S2-2b4: a decision with no outcome is two statements in a read boundary of four, and carries no answer", async () => {
+  {
+    const { tx, sent } = recordingTx();
+    const read = await readDecisionMakerUnsettledDelivery(tx);
+    assert.deepEqual(read, {
+      status: "unsettled",
+      requestId: REQUEST_ID,
+      decidedAtMs: NOW - 500,
+      cardId: "AMUX-12",
+      questionRevision: 3,
+      askingWorkerId: "claude-impl",
+      session: "claude-impl",
+      sessionAttempt: 1,
+      messageId: `dm-answer:${REQUEST_ID}`,
+    });
+    assert.equal(sent.length, 2);
+    // The decision, then the request: a 'deliver' with none of the three outcomes after it, oldest first.
+    assert.match(sent[0].sql, /FROM "AmuxDecisionMakerDeliveryEvent" d\s+WHERE d\."kind" = 'deliver'/);
+    assert.match(sent[0].sql, /o\."kind" IN \('delivery_receipt', 'delivery_unknown', 'delivery_not_sent'\)/);
+    assert.match(sent[0].sql, /ORDER BY d\."sequence"\s+LIMIT 1/);
+    assert.match(sent[1].sql, /CROSS JOIN LATERAL/);
+    for (const statement of sent) assert.doesNotMatch(statement.sql, /INSERT|UPDATE|DELETE|"AmuxDecisionMakerBody"|SELECT DISTINCT ON/);
+    assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerDeliveryUnsettledRead, {
+      operation: "decision_maker_delivery_unsettled_read",
+      prismaCallCeiling: sent.length + BOUNDARY_STATEMENTS,
+      isolation: "read",
+    });
+  }
+  {
+    const { tx, sent } = recordingTx({ unsettled: null });
+    assert.deepEqual(await readDecisionMakerUnsettledDelivery(tx), { status: "none" });
+    assert.equal(sent.length, 1);
+  }
+  // A decision beside a request no confirmation closed is not one the stores could write.
+  for (const request of [requestRow({ closingKind: "reject" }), requestRow({ closingKind: null }), requestRow({ closingKind: "direct_answer_close" })]) {
+    const { tx } = recordingTx({ request });
+    await assert.rejects(readDecisionMakerUnsettledDelivery(tx), (error) => error.code === "state_unreadable");
+  }
+  {
+    const { tx } = recordingTx({ unsettled: { requestId: "x", decidedAtEpochMs: 1n } });
+    await assert.rejects(readNextDecisionMakerUnsettledDelivery(tx), (error) => error.code === "state_unreadable");
+  }
+});
+
+test("stage S2-2b4: a direct answer's close is the store's pinned statements, within a boundary of ten", async () => {
+  let largest = 0;
+  for (const key of [null, ["unit", "test", "integrity"].join("-")]) {
+    await withIntegrityKey(key, async () => {
+      const { tx, sent } = recordingTx({ request: requestRow({ closingKind: null }) });
+      const closed = await closeDecisionMakerRequestOnDirectAnswer(tx, { cardId: "AMUX-12", questionRevision: 3 });
+      assert.equal(closed.recorded, true, JSON.stringify(closed));
+      largest = Math.max(largest, sent.length);
+      // The audit chain lock, the question's request, its state, the router's audit, the event.
+      assert.match(sent[0].sql, /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/);
+      assert.match(sent[1].sql, /SELECT "id" FROM "AmuxDecisionMakerRequest"\s+WHERE "cardId" = \$ AND "questionRevision" = \$/);
+      assert.deepEqual(sent[1].values, ["AMUX-12", 3]);
+      assert.match(sent[2].sql, /CROSS JOIN LATERAL/);
+      const audit = sent.find((statement) => statement.kind === "create").data;
+      // §10 names no action of its own: the router's .assign_discarded, told apart by the kind.
+      assert.equal(audit.action, "amux.decision.assign_discarded");
+      assert.equal(audit.targetType, "AmuxDecisionMakerRequestEvent");
+      assert.equal(audit.metadata.kind, "direct_answer_close");
+      assert.equal(audit.metadata.systemActor, "amux-decision-router");
+      const insert = sent.at(-1);
+      assert.match(insert.sql, /INSERT INTO "AmuxDecisionMakerRequestEvent"/);
+      assert.equal(insert.values[2], "direct_answer_close");
+      assert.equal(insert.values[3], null, "a router's event names no instance");
+      // The kill switch is never read: section 6's table allows the operator's direct answer.
+      assert.ok(!sent.some((statement) => statement.sql?.includes("SELECT DISTINCT ON")));
+    });
+  }
+  assert.equal(largest, 8);
+  assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerDirectAnswerClose, {
+    operation: "decision_maker_direct_answer_close",
+    prismaCallCeiling: largest + BOUNDARY_STATEMENTS,
+    isolation: "mutation",
+  });
+  // Nothing to close writes nothing: no request for the question, one kept with the operator, one closed.
+  for (const [label, options, reason, statements] of [
+    ["no request", { lookup: [] }, "unknown_request", 2],
+    ["kept with the operator", { request: requestRow({ route: "operator", instance: null, closingKind: null }) }, "not_routed_to_dm", 3],
+    ["judged", { request: requestRow({ closingKind: "confirm" }) }, "closed", 3],
+    ["closed by an earlier report", { request: requestRow({ closingKind: "direct_answer_close" }) }, "closed", 3],
+  ]) {
+    const { tx, sent } = recordingTx(options);
+    assert.deepEqual(await closeDecisionMakerRequestOnDirectAnswer(tx, { cardId: "AMUX-12", questionRevision: 3 }), { recorded: false, reason }, label);
+    assert.equal(sent.length, statements, label);
+    assert.ok(!sent.some((statement) => statement.kind === "create" || /INSERT/.test(statement.sql ?? "")), label);
+  }
+  // A malformed question sends nothing.
+  for (const input of [{ cardId: "../x", questionRevision: 3 }, { cardId: "AMUX-12", questionRevision: -1 }, { cardId: "AMUX-12", questionRevision: 1.5 }, { cardId: "AMUX-12" }]) {
+    const { tx, sent } = recordingTx();
+    await assert.rejects(
+      closeDecisionMakerRequestOnDirectAnswer(tx, input),
+      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "invalid_input",
+      JSON.stringify(input),
+    );
+    assert.equal(sent.length, 0);
   }
 });

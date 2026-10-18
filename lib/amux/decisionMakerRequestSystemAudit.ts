@@ -19,7 +19,9 @@ import type { DmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
  * (docs/policy/amux-decision-maker.md §10): `amux.decision.route` for a
  * request, and `amux.decision.<kind>` for each request event -- by the router
  * for assignment and closing, by the request's own instance for transmission,
- * results and (since stage S2-2a3) §5's cleanup report. Migration
+ * results and (since stage S2-2a3) §5's cleanup report. Since stage S2-2b4 a
+ * direct answer's close is the router's `amux.decision.assign_discarded`
+ * (`dmEventAuditAction()`: §10 names no action of its own for it). Migration
  * 20261008090100_amux_decision_maker_request_ledger
  * requires exactly that action and actor, in the same transaction, naming the
  * row.
@@ -43,6 +45,7 @@ const EVENT_SUMMARIES: Readonly<Record<DmRequestEventKind, string>> = {
   result_unknown: "Recorded an AMUX Decision Maker result of unknown outcome.",
   stale_close: "Closed a stale AMUX Decision Maker request.",
   cleanup_unknown: "Recorded an AMUX Decision Maker request cleanup of unknown outcome.",
+  direct_answer_close: "Closed an AMUX Decision Maker request the operator answered directly.",
 };
 
 export const writeDecisionMakerRouteAudit = (
