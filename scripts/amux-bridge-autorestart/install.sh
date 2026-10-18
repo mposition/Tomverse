@@ -118,7 +118,10 @@ refused() {
 }
 granted tomverse-bridge.service restart
 granted tomverse-amux-v22-bridge@claude-impl.service restart
+granted tomverse-amux-bridge@codex-impl.service restart
 refused tomverse-bridge.service stop
+refused tomverse-amux-bridge@codex-impl.service stop
+refused tomverse-amux-bridge@codex-impl.service start
 refused ssh.service restart
 refused tomverse-amux-v22-sidecar@claude-impl.service restart
 stop_subject

@@ -162,8 +162,59 @@ test("an unreadable unit list never sends up", { skip: noBash }, () => {
   assert.deepEqual(result.requests, []);
   assert.match(
     result.output,
-    /the v22 unit list is unreadable \(systemctl: Failed to list units: Access denied\)/
+    /the instance unit list is unreadable \(systemctl: Failed to list units: Access denied\)/
   );
+});
+
+// Orchestration policy version 55: one bridge per worker from one template,
+// tomverse-amux-bridge@<worker>. The older names stay for the transition, so
+// both sets are watched together.
+const WORKER = [
+  "tomverse-amux-bridge@codex-impl.service",
+  "tomverse-amux-bridge@claude-impl.service",
+];
+const allActiveWithWorkers = Object.fromEntries(
+  [MAIN, ...V22, ...WORKER].map((unit) => [unit, "active"])
+);
+
+test("the per-worker bridges are watched beside the older units", { skip: noBash }, () => {
+  const result = run({ states: allActiveWithWorkers });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(result.requests, [URL_VALUE]);
+  assert.match(result.output, /6 unit\(s\), 0 down, 0 in transition or unreadable; sent up/);
+  assert.deepEqual(
+    script.match(/^unit_patterns=\(([\s\S]*?)\)$/m)?.[1].match(/'[^']+'/g),
+    [
+      "'tomverse-amux-v22-bridge@*.service'",
+      "'tomverse-amux-v22-sidecar@*.service'",
+      "'tomverse-amux-bridge@*.service'",
+    ]
+  );
+});
+
+for (const unit of WORKER) {
+  test(`a failed ${unit} sends the failure signal`, { skip: noBash }, () => {
+    const result = run({ states: { ...allActiveWithWorkers, [unit]: "failed" } });
+    assert.equal(result.status, 0, result.output);
+    assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+    assert.ok(result.output.includes(`${unit} is failed`), result.output);
+  });
+}
+
+test("a per-worker bridge in transition with nothing down sends nothing", { skip: noBash }, () => {
+  const result = run({ states: { ...allActiveWithWorkers, [WORKER[0]]: "activating" } });
+  assert.deepEqual(result.requests, []);
+});
+
+test("a listed name outside the per-worker bridge's grammar is ignored", { skip: noBash }, () => {
+  for (const unit of [
+    "tomverse-amux-bridge@x;y.service",
+    "tomverse-amux-bridgex@codex-impl.service",
+    "tomverse-amux-sidecar@codex-impl.service",
+  ]) {
+    const result = run({ states: { ...allActiveWithWorkers, [unit]: "failed" } });
+    assert.deepEqual(result.requests, [URL_VALUE], unit);
+  }
 });
 
 test("an unreadable unit list still reports a confirmed stop", { skip: noBash }, () => {

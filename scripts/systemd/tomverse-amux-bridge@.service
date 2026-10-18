@@ -1,0 +1,64 @@
+[Unit]
+Description=Tomverse AMUX worker bridge (%i)
+Documentation=https://github.com/mposition/Tomverse/blob/develop/docs/ops/amux/wsl-execution-bridge.md
+Wants=network-online.target
+After=network-online.target
+# docs/policy/development-agent-orchestration.md version 55, section 2: one
+# bridge per worker, one template for both kinds. The instance name is the
+# worker. Every round the bridge reads the app's bridge scope for whether it
+# may serve that worker and as which kind: a v22 worker's sidecar socket is
+# computed from the name, a session worker uses the local AMUX session of the
+# same name. Nothing below differs by worker or by kind, so adding a worker
+# never edits this file.
+#
+# No Requires= or After= on tomverse-amux-v22-sidecar@%i.service, and no
+# ExecStartPre= test of its socket: a session worker has no sidecar, and the
+# kind is known only to the app. Instead the bridge registers nothing while a
+# worker listed as v22 has no socket, and asks again every round (not a halt).
+
+[Service]
+Type=simple
+User=tomverse-bridge
+Group=tomverse-bridge
+# The v22 sidecar sockets are group amux-v22-ipc. One template cannot give
+# the group to v22 instances only, so session instances carry it as well; the
+# bridge connects only to the socket computed from its own name, and only
+# once the app lists it as v22.
+SupplementaryGroups=amux-v22-ipc
+EnvironmentFile=/etc/tomverse-bridge/bridge.env
+ExecStartPre=/usr/bin/curl --silent --show-error --fail --insecure --max-time 5 --output /dev/null https://127.0.0.1:8824/health
+ExecStart=/usr/local/libexec/tomverse-wsl-bridge --worker %i
+Restart=on-failure
+RestartSec=60
+# Exit 3 is a halt on an unknown outcome. It waits for a person (version 20,
+# section 11), or for the auto-restart's approved causes
+# (docs/ops/amux/bridge-monitoring.md, section 5).
+RestartPreventExitStatus=3
+TimeoutStopSec=10
+KillMode=control-group
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectHome=yes
+ProtectSystem=strict
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# The per-worker v22 unit named each worker's state directory
+# (/var/lib/tomverse-amux-v22-<worker>) in InaccessiblePaths=. A template has
+# no list of workers, so /var/lib as a whole is an empty read-only tmpfs here,
+# which hides every worker's state, including workers added later. The
+# sidecar unit hides /var/lib the same way. Everything the bridge opens is
+# under /run. A path under /var/lib that a later bridge feature needs must be
+# bound in by name, by a new version of this file.
+TemporaryFileSystem=/var/lib:ro
+UMask=0077
+
+# Intentionally no [Install] (version 31, section 4): an enabled instance would
+# start at boot without anyone checking its worker's halt latch. Instances are
+# started by the operator, and later by the reconciler.
