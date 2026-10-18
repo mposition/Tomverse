@@ -12,6 +12,8 @@ const SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 export async function readAmuxSessionReferencePin(input: {
   reservationId: string; ideaId: string; referenceOrdinal: number;
 }): Promise<{ referenceCount: number; pinnedCommitSha: string | null } | null> {
+  if (!Number.isSafeInteger(input.referenceOrdinal) ||
+      input.referenceOrdinal < 0 || input.referenceOrdinal > 2_147_483_647) return null;
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`
       SELECT set_config('statement_timeout', '2000', true) AS statement_limit,

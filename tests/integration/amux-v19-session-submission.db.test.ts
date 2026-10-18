@@ -361,6 +361,10 @@ test("session analysis queue lists the live reservation and advances past its DB
     referenceOrdinal: 1,
   }), null);
   assert.equal(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: -1,
+  }), null);
+  assert.equal(await readAmuxSessionReferencePin({
     reservationId: committedReservationId, ideaId: randomUUID(),
     referenceOrdinal: 0,
   }), null);
