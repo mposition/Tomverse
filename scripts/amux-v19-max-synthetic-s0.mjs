@@ -13,7 +13,8 @@ import { verifyAmuxV19ClaudeMaxAuthSource,
   AMUX_V19_CLAUDE_MAX_AUTH_PATH } from
   "../lib/amux/ideaV19ClaudeMaxAuth.mjs";
 import { runAmuxV19TrackedCheckoutAnalysis,
-  AMUX_V19_TRACKED_CHECKOUT_CLI_ENV } from
+  AMUX_V19_TRACKED_CHECKOUT_CLI_ENV,
+  AmuxTrackedCheckoutHostError } from
   "../lib/amux/ideaTrackedCheckoutHostRunner.mjs";
 
 const run = promisify(execFile);
@@ -23,6 +24,10 @@ const CLAIM_DIR = "/home/tommy/.amux-cli-profiles";
 const CLAIM_MARKER = "v19-max-synthetic-20261018.claimed";
 const APPROVAL_EXPIRES_AT = Date.parse("2026-10-19T00:00:00.000Z");
 const MAX_PROBE_MS = 120_000;
+const gitEnvironment = { PATH: "/usr/bin:/bin",
+  GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
+const git = (args) => run("/usr/bin/git", args,
+  { env: gitEnvironment, timeout: 10_000 });
 
 async function pinnedCliPresent() {
   const hash = createHash("sha256");
@@ -46,12 +51,12 @@ async function main() {
     "Read TRACE.txt, then reply with exactly S0_OK and nothing else.", "utf8");
   try {
     await writeFile(join(fixture, "TRACE.txt"), "S0_OK\n", { flag: "wx", mode: 0o400 });
-    await run("/usr/bin/git", ["init", "-q", fixture]);
-    await run("/usr/bin/git", ["-C", fixture, "add", "TRACE.txt"]);
-    await run("/usr/bin/git", ["-C", fixture, "-c", "user.name=AMUX S0",
+    await git(["-c", "init.templateDir=/dev/null", "init", "-q", fixture]);
+    await git(["-C", fixture, "add", "TRACE.txt"]);
+    await git(["-C", fixture, "-c", "core.hooksPath=/dev/null",
+      "-c", "commit.gpgsign=false", "-c", "user.name=AMUX S0",
       "-c", "user.email=amux-s0@example.invalid", "commit", "-qm", "S0 fixture"]);
-    const { stdout } = await run("/usr/bin/git", ["-C", fixture,
-      "rev-parse", "HEAD"]);
+    const { stdout } = await git(["-C", fixture, "rev-parse", "HEAD"]);
     const commitSha = stdout.trim();
     if (!/^[a-f0-9]{40}$/.test(commitSha) ||
         !await claimAmuxV4SyntheticS0Once({ directory: CLAIM_DIR,
@@ -67,6 +72,9 @@ async function main() {
       modelId: "claude-opus-5-5", reasoningEffort: "high",
       stopCheck: async () => Date.now() - start >= MAX_PROBE_MS,
     });
+    const passed = observed.kind === "verified_success" &&
+      observed.rawModelOutput.trim() === "S0_OK" &&
+      observed.readFiles.length === 1 && observed.readFiles[0] === "TRACE.txt";
     process.stdout.write(JSON.stringify({ status: observed.kind,
       cliStarted: observed.cliStarted === true,
       answerMatches: observed.kind === "verified_success"
@@ -79,10 +87,7 @@ async function main() {
       outputTokens: observed.kind === "verified_success"
         ? observed.outputTokens : null,
     }) + "\n");
-    if (observed.kind !== "verified_success" ||
-        observed.rawModelOutput.trim() !== "S0_OK" ||
-        observed.readFiles.length !== 1 ||
-        observed.readFiles[0] !== "TRACE.txt") process.exitCode = 1;
+    if (!passed) process.exitCode = 1;
   } finally {
     prompt.fill(0);
     delete process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV];
@@ -92,6 +97,10 @@ async function main() {
 
 try { await main(); }
 catch (error) {
-  process.stderr.write(`AMUX_V19_MAX_SYNTHETIC_S0_FAIL:${error?.message ?? "unknown"}\n`);
+  if (error instanceof AmuxTrackedCheckoutHostError) {
+    process.stdout.write(JSON.stringify({ status: "outcome_unknown",
+      cliStarted: error.cliStarted === true }) + "\n");
+  }
+  process.stderr.write("AMUX_V19_MAX_SYNTHETIC_S0_FAIL\n");
   process.exitCode = 1;
 }
