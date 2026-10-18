@@ -3,15 +3,23 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
-import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV } from
+import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
+  AMUX_V4_ANALYSIS_QUEUE_READ_ENV,
+  amuxV4AnalysisQueueReadEnabled } from
   "@/lib/amux/ideaAnalysisQueueCore";
 import { AMUX_V19_MAX_LAUNCHER_SECRET_ENV,
   isAmuxV19MaxLauncherAuthorized } from
   "@/lib/amux/ideaSessionMaxLauncherAuth";
 import { readAmuxV19MaxIdea } from
   "@/lib/amux/ideaSessionMaxIdeaRead";
+import { AMUX_SESSION_INTAKE_ENV } from
+  "@/lib/amux/ideaSessionSubmissionCore";
 
 const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_MAX_IDEA_READ";
+const SESSION_QUEUE_READ_ENV =
+  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ";
+const CLAIM_READ_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ";
+const STOP_READ_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ";
 const bodySchema = z.object({ reservationId: z.string().uuid(),
   ideaId: z.string().uuid(), claimId: z.string().uuid() }).strict();
 
@@ -24,7 +32,13 @@ export async function POST(request: Request): Promise<Response> {
     process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (process.env[READ_ENV] !== "enabled") {
+  if (process.env[READ_ENV] !== "enabled" ||
+      process.env[SESSION_QUEUE_READ_ENV] !== "enabled" ||
+      process.env[CLAIM_READ_ENV] !== "enabled" ||
+      process.env[STOP_READ_ENV] !== "enabled" ||
+      process.env[AMUX_SESSION_INTAKE_ENV] !== "enabled" ||
+      !amuxV4AnalysisQueueReadEnabled(
+        process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV])) {
     return amuxJsonNoStore({ available: false,
       reason: "session_max_idea_read_disabled" }, 409);
   }
