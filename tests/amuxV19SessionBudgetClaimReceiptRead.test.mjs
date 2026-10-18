@@ -51,6 +51,17 @@ test("absent and partial never authorize another claim write", async () => {
   }
 });
 
+test("readback accepts the server's case-insensitive UUID grammar", async () => {
+  const nonV4ClaimId = "ea86a25b-919f-1714-a3d8-45ef5a18b177";
+  assert.deepEqual(await readAmuxV19SessionBudgetClaimReceipt({
+    ...input(async () => Response.json({ status: "committed",
+      claimId: nonV4ClaimId, claimStatus: "succeeded" })),
+    requestId: requestId.toUpperCase(),
+    reservationId: reservationId.toUpperCase(),
+  }), { kind: "committed", claimId: nonV4ClaimId,
+    claimStatus: "succeeded", retryWrite: false });
+});
+
 test("invalid identity and uncertain responses fail closed", async () => {
   let calls = 0;
   const fetchImpl = async () => { calls += 1; throw new Error("network"); };
@@ -58,6 +69,8 @@ test("invalid identity and uncertain responses fail closed", async () => {
     { ...input(fetchImpl), requestId: "wrong" },
     { ...input(fetchImpl), origin: "https://other.test/" },
     { ...input(fetchImpl), invocationOrdinal: -1 },
+    { ...input(fetchImpl), agentSecret: "bad" },
+    { ...input(fetchImpl), fetchImpl: undefined },
   ]) assert.deepEqual(await readAmuxV19SessionBudgetClaimReceipt(candidate),
     { kind: "refused" });
   assert.equal(calls, 0);
@@ -72,6 +85,11 @@ test("invalid identity and uncertain responses fail closed", async () => {
       headers: { "content-type": "text/plain" } }),
     new Response("x".repeat(513), {
       headers: { "content-type": "application/json" } }),
+    new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode("x".repeat(300)));
+      controller.enqueue(new TextEncoder().encode("x".repeat(300)));
+      controller.close();
+    } }), { headers: { "content-type": "application/json" } }),
     new Response(null, { status: 503 }),
   ]) {
     assert.deepEqual(await readAmuxV19SessionBudgetClaimReceipt(input(
