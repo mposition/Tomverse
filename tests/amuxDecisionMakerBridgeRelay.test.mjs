@@ -202,9 +202,16 @@ test("a confirmed answer's message id, cap, labels and header are the app's, on 
   for (const handler of ["_focusAnswer", "_focusDecide"]) {
     const start = dashboard.indexOf(`async function ${handler}(`);
     const body = dashboard.slice(start, dashboard.indexOf("\nasync function ", start + 1));
-    const claim = body.indexOf("await _focusClaimAnswer(item)");
-    assert.ok(claim > 0, `${handler} claims the answer record`);
+    // Review r-20261018-062643-057a27, finding 1: the claim names the revision observed first.
+    const observed = body.indexOf("await _focusObserveQuestion(item)");
+    const claim = body.indexOf("await _focusClaimAnswer(item, seen.revision)");
+    assert.ok(observed > 0 && claim > observed, `${handler} claims the revision it observed`);
     assert.ok(claim < body.indexOf("_focusSend("), `${handler} claims before it sends`);
     assert.ok(claim < body.indexOf("_focusPatch("), `${handler} claims before it records`);
   }
+  // The answer dialog reads the question before it opens, and shows it.
+  const answer = dashboard.slice(dashboard.indexOf("async function _focusAnswer("));
+  assert.ok(answer.indexOf("_focusObserveQuestion(item)") < answer.indexOf("showFormModal("));
+  // The claim's body is the observed revision.
+  assert.match(dashboard, /body: JSON\.stringify\(\{ question_revision: revision \}\)/);
 });

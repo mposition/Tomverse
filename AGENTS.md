@@ -2024,10 +2024,16 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `dm-answer:<요청 id>`를 `send_dedup`에 예약하고 lane의 boundary 전송(automation, `from_steering`, 큐 없음)을 한 뒤 검증된 전송만
   영수증으로 받습니다. 결과가 불명확하면(응답 유실, 미검증, 입력창에 남음) 다시 보내지 않고 앱에 `delivery_unknown`을 기록한 뒤
   `answers/unknown`이 **그 세션을 먼저 일시 정지(AMUX pause)하고 나서** 메시지 id의 영수증을 읽습니다(docs/policy/amux-decision-maker.md §9).
-  일시 정지가 확인되지 않으면 relay가 멈춥니다. **직접 답과 확정 답은 같은 답변 기록을 먼저 써야 보냅니다** — 대시보드의 직접 답(Answer와
-  Approve/Reject)도 보내기 전에 `typed-ask/answer`로 그 카드의 현재 revision을 운영자 이름으로 claim하고, 확정 DM 답이 이미 있으면
-  보내지 않고 운영자에게 알립니다. typed revision이 없는 카드는 claim할 것이 없고 그대로 보냅니다. worker 신원 header가 있는 요청은
-  운영자 claim을 할 수 없습니다. **남은 것(migration 필요, 이 조각에서 멈춤)**: 전달 결정 뒤 claim이 지거나 lane이 그 사이 거부해
+  일시 정지가 확인되지 않으면 relay가 멈춥니다. **영수증과 `unknown`은 앱이 기록했다고 답한 것만 기록입니다** — 거절(DB busy 503,
+  route 꺼짐 409)이든 응답 유실이든 기록이 아니므로 relay가 멈추고 빠진 기록을 코드로 남기며(`delivery_receipt_record_refused`·
+  `delivery_unknown_record_refused` 등), 세션 pause는 그대로 합니다. 결정이 있는 요청은 다시 읽히지 않으므로 계속 진행하면 결과 기록이
+  영구히 빠집니다(검토 r-20261018-062643-057a27). **직접 답과 확정 답은 같은 답변 기록을 먼저 써야 보냅니다** — 대시보드의 직접 답(Answer와
+  Approve/Reject)도 보내기 전에 `typed-ask/answer`로 claim합니다. 대시보드는 typed-ask GET으로 질문 revision을 읽어(Answer는 창을 열기 전에
+  읽고 창에 그 질문을 보임, Approve/Reject는 누를 때) 그 revision을 body(`{"question_revision": <n> | null}`)에 싣고, 서버는 claim
+  트랜잭션 안에서 그 revision이 현재 revision일 때만 claim합니다. 다르면 `question_changed`로 아무것도 claim하지 않고 보내지도 않습니다 —
+  창을 연 뒤 worker가 다시 물은 새 질문을 옛 답이 차지하지 않게 하기 위해서입니다(같은 검토). 확정 DM 답이 이미 있으면 보내지 않고
+  운영자에게 알립니다. typed revision이 없는 카드는 claim할 것이 없고 그대로 보냅니다. worker 신원 header가 있는 요청은 운영자 claim을
+  할 수 없습니다. **남은 것(migration 필요, 이 조각에서 멈춤)**: 전달 결정 뒤 claim이 지거나 lane이 그 사이 거부해
   아무것도 보내지 않은 경우를 앱의 전달 기록이 말할 어휘가 없습니다(영수증도 `unknown`도 사실이 아님). 그 경우 결정만 남고 relay가
   멈추며, 확인 단계가 그 창을 결정 직전 한 번의 왕복으로 줄입니다. bridge가 결정과 영수증 사이에 죽은 결정은 자동으로 정리하지 않으며,
   운영자의 직접 답이 먼저일 때 앱 요청을 닫는 것(docs/policy/amux-decision-maker.md §2-7 마지막 문장)도 아직 없습니다.

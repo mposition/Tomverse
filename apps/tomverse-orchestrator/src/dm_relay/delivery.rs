@@ -24,8 +24,10 @@
 //! records `unknown`, the local AMUX pauses the worker's session and then
 //! reads the message id's receipt, and a person resolves it in Admin.
 //!
-//! Halts: an app write whose outcome is unknown, a session whose pause was
-//! not confirmed, a reading the relay cannot understand, and a delivery the
+//! Halts: a decision whose outcome is unknown, a receipt or `unknown` the app
+//! did not answer as recorded (refused or lost alike: the decision is never
+//! offered again, so a missing outcome stays missing), a session whose pause
+//! was not confirmed, a reading the relay cannot understand, and a delivery the
 //! local AMUX refused after the decision (the record's claim lost a race, or
 //! the lane stopped taking input in between). The last has no outcome the
 //! app's delivery record can name -- it holds a receipt or `unknown`, and
@@ -210,6 +212,13 @@ impl DeliveryRun {
         self.halt.get_or_insert(cause);
         self
     }
+
+    /// An outcome the app did not record: the run's log line names it, and
+    /// the relay stops.
+    fn missing(mut self, cause: &'static str) -> Self {
+        self.code = cause;
+        self.halted(cause)
+    }
 }
 
 async fn app_write<A: DmApp + ?Sized>(app: &A, route: AppRoute, body: Value) -> AppAnswer {
@@ -327,41 +336,69 @@ where
         _ => return record_unknown(app, local, &delivery).await,
     }
 
-    // 5. The receipt.
+    // 5. The receipt. Only a recorded answer is a receipt.
     let mut run = DeliveryRun::about(&delivery, "delivered");
     run.delivered = true;
-    if app_write(
+    if let Some(missing) = record_outcome(
         app,
-        AppRoute::DeliveryOutcome,
-        json!({"request_id": delivery.request_id(), "outcome": "receipt"}),
+        &delivery,
+        "receipt",
+        "delivery_receipt_record_refused",
+        "delivery_receipt_outcome_unknown",
     )
     .await
-        == AppAnswer::Unknown
     {
-        run = run.halted("delivery_receipt_outcome_unknown");
+        run = run.missing(missing);
     }
     run
 }
 
+/// Records the delivery's outcome; `None` only when the app answered that it
+/// recorded it. A refusal is not a record -- a busy database (503) or the
+/// routes closed (409) wrote nothing -- and the decision is never offered
+/// again, so a missing outcome would stay missing: the caller stops the relay
+/// and names the record (review r-20261018-062643-057a27, finding 2).
+async fn record_outcome<A: DmApp + ?Sized>(
+    app: &A,
+    delivery: &Delivery,
+    outcome: &str,
+    refused: &'static str,
+    unknown: &'static str,
+) -> Option<&'static str> {
+    match app_write(
+        app,
+        AppRoute::DeliveryOutcome,
+        json!({"request_id": delivery.request_id(), "outcome": outcome}),
+    )
+    .await
+    {
+        AppAnswer::Done(_) => None,
+        AppAnswer::Refused(_) => Some(refused),
+        AppAnswer::Unknown => Some(unknown),
+    }
+}
+
 /// §9: "그 요청을 delivery_unknown으로 두고, 그 worker 세션을 일시 정지(AMUX
 /// pause)한 뒤 로컬 메시지 멱등 키로 전달 영수증을 조회한다". The app's record
-/// first, then the pause and the receipt in one local call. A session whose
-/// pause was not confirmed could take another answer, so the relay stops.
+/// first, then the pause and the receipt in one local call. An unknown the app
+/// did not record, and a session whose pause was not confirmed, stop the
+/// relay; the session is paused either way.
 async fn record_unknown<A, L>(app: &A, local: &L, delivery: &Delivery) -> DeliveryRun
 where
     A: DmApp + ?Sized,
     L: DmLocal + ?Sized,
 {
     let mut run = DeliveryRun::about(delivery, "delivery_unknown");
-    if app_write(
+    if let Some(missing) = record_outcome(
         app,
-        AppRoute::DeliveryOutcome,
-        json!({"request_id": delivery.request_id(), "outcome": "unknown"}),
+        delivery,
+        "unknown",
+        "delivery_unknown_record_refused",
+        "delivery_unknown_outcome_unknown",
     )
     .await
-        == AppAnswer::Unknown
     {
-        run = run.halted("delivery_unknown_outcome_unknown");
+        run = run.missing(missing);
     }
     let paused = local
         .post(
@@ -789,5 +826,86 @@ mod tests {
         wrong["delivery"]["message_id"] = json!(format!("dm-answer:{REQUEST}"));
         wrong["delivery"]["card_id"] = json!("../x");
         assert_eq!(parse_next_delivery(&wrong), None);
+    }
+
+    /// Review r-20261018-062643-057a27, finding 2: a refusal of the outcome
+    /// write is not a record. A busy database (503) or the routes closed (409)
+    /// leave the decision with no outcome, and the next read never offers it
+    /// again (it is decided), so carrying on would lose §9's `delivery_unknown`
+    /// and the person's resolution for good. Whatever answer short of a
+    /// recorded one -- refused or unknown -- the session is still paused, and
+    /// the relay stops and says which record is missing.
+    #[tokio::test]
+    async fn an_unknown_outcome_the_app_did_not_record_pauses_the_session_and_stops_the_relay() {
+        for (answer, halt) in [
+            (
+                refused(503, "recorded", "amux_database_busy"),
+                "delivery_unknown_record_refused",
+            ),
+            (
+                refused(409, "recorded", "dm_routing_disabled"),
+                "delivery_unknown_record_refused",
+            ),
+            (HttpAnswer::Lost, "delivery_unknown_outcome_unknown"),
+        ] {
+            let app = FakeApp::with(vec![
+                (AppRoute::DeliveriesNext, ready()),
+                (AppRoute::Deliveries, recorded()),
+                (AppRoute::DeliveryOutcome, answer),
+            ]);
+            let local = local_with(vec![
+                (LocalRoute::AnswerCheck, deliverable(true)),
+                (LocalRoute::Answers, HttpAnswer::Lost),
+                (
+                    LocalRoute::AnswerUnknown,
+                    answered(200, json!({"paused": true, "receipt": "not_accepted"})),
+                ),
+            ]);
+            let run = deliver_next(&app, &local, None).await;
+            assert_eq!(run.halt, Some(halt));
+            assert_eq!(run.code, halt, "the log line names the missing record");
+            assert_eq!(
+                local_routes(&local),
+                vec![
+                    LocalRoute::AnswerCheck,
+                    LocalRoute::Answers,
+                    LocalRoute::AnswerUnknown
+                ],
+                "the session is paused all the same"
+            );
+        }
+    }
+
+    /// The same finding for the receipt: only a recorded answer is a receipt.
+    #[tokio::test]
+    async fn a_receipt_the_app_did_not_record_stops_the_relay() {
+        for (answer, halt) in [
+            (
+                refused(503, "recorded", "amux_database_busy"),
+                "delivery_receipt_record_refused",
+            ),
+            (
+                refused(409, "recorded", "dm_routing_disabled"),
+                "delivery_receipt_record_refused",
+            ),
+            (HttpAnswer::Lost, "delivery_receipt_outcome_unknown"),
+        ] {
+            let app = FakeApp::with(vec![
+                (AppRoute::DeliveriesNext, ready()),
+                (AppRoute::Deliveries, recorded()),
+                (AppRoute::DeliveryOutcome, answer),
+            ]);
+            let local = local_with(vec![
+                (LocalRoute::AnswerCheck, deliverable(true)),
+                (
+                    LocalRoute::Answers,
+                    answered(200, json!({"outcome": "delivered"})),
+                ),
+            ]);
+            let run = deliver_next(&app, &local, None).await;
+            assert!(run.delivered, "the answer reached the worker");
+            assert_eq!(run.halt, Some(halt));
+            assert_eq!(run.code, halt, "the log line names the missing record");
+        }
     }
 }
