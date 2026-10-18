@@ -268,17 +268,18 @@ test("a capability the store would not accept leaves no catalog but keeps the re
   assert.equal(whole.derived?.legacy.length, 8);
 });
 
-test("version 54 turns R2d's bridge session list on, the policy records it, and the route only reads", () => {
+test("R2d's session list latch moves only with version 54's approval record, and the route only reads", () => {
   // Orchestration policy version 35, section 4; version 54 is the operator's
-  // activation record. The latch may be true only with that approval
-  // recorded: a candidate still awaiting it fails here, so it cannot merge.
-  assert.equal(AMUX_WORKER_SESSION_LIST_LATCH, true);
-  assert.equal(amuxWorkerSessionListOpen(), true);
+  // activation record. The candidate keeps the latch off; the commit that
+  // records the approval turns it on. Either one changing alone fails here.
   const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8");
   const lines = policy.split(String.fromCharCode(13)).join("").split(String.fromCharCode(10));
   const heading = lines.indexOf("## 버전 54 — R2d bridge 세션 목록 켜기");
   assert.ok(heading >= 0, "version 54 section");
-  assert.match(lines[heading + 2] ?? "", /^승인 기록: `approvedBy: mposition`, `approvedAt: \d{4}-\d{2}-\d{2}`/, "version 54 approval record");
+  const record = lines.slice(heading + 1).find((line) => line.startsWith("승인 기록:")) ?? "";
+  const approved = /^승인 기록: `approvedBy: mposition`, `approvedAt: \d{4}-\d{2}-\d{2}`/.test(record);
+  assert.equal(AMUX_WORKER_SESSION_LIST_LATCH, approved, "the latch and version 54's approval record move together");
+  assert.equal(amuxWorkerSessionListOpen(), approved);
   const route = readFileSync(new URL("../app/api/internal/amux/workers/session-list/route.ts", import.meta.url), "utf8");
   assert.match(route, /export async function GET\(request: Request\)/);
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)/);
