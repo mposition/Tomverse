@@ -10289,7 +10289,7 @@ model AmuxIdeaSessionResultOrphanKeyRetirement {
   claimAudit AdminAuditLog @relation("AmuxV19SessionResultOrphanClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   keyDeleteAudit AdminAuditLog? @relation("AmuxV19SessionResultOrphanDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
-  @@index([keyDeletedAt, claimedAt])
+  @@index([keyDeletedAt, claimedAt], map: "AmuxIdeaSessionResultOrphanKeyRetirement_pending_idx")
 }
 
 /// One worst-case reservation for one exact, owner-confirmed preview. Unknown

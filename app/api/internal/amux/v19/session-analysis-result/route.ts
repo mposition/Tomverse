@@ -100,12 +100,16 @@ export async function GET(request: Request): Promise<Response> {
       names.some((name) => url.searchParams.getAll(name).length !== 1)) {
     return amuxJsonNoStore({ error: "Invalid request." }, 400);
   }
+  const ordinal = url.searchParams.get("invocationOrdinal");
+  if (!ordinal || !/^(?:0|[1-9][0-9]*)$/.test(ordinal)) {
+    return amuxJsonNoStore({ error: "Invalid request." }, 400);
+  }
   const parsed = receiptSchema.safeParse({
     claimId: url.searchParams.get("claimId"),
     requestId: url.searchParams.get("requestId"),
     reservationId: url.searchParams.get("reservationId"),
     ideaId: url.searchParams.get("ideaId"),
-    invocationOrdinal: Number(url.searchParams.get("invocationOrdinal")),
+    invocationOrdinal: Number(ordinal),
   });
   if (!parsed.success) return amuxJsonNoStore({ error: "Invalid request." }, 400);
   try {

@@ -69,3 +69,19 @@ test("usage-only settlement refuses a Max success when result persistence is ena
   assert.equal(response.status, 409);
   assert.deepEqual(await response.json(), { error: "session_result_required" });
 });
+
+test("result receipt refuses noncanonical invocation ordinals before database access", async () => {
+  process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
+  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ = "enabled";
+  for (const ordinal of ["", " 0", "1e2", "01", "-1"]) {
+    const query = new URLSearchParams({
+      claimId: "d57eac94-9808-4688-a9f8-940aa3c22188",
+      requestId: "fd31e8e8-3e71-4af6-b0a2-c834170b9a92",
+      reservationId: "0b82536e-8cf9-4afa-a5b5-f022c73c9ec0",
+      ideaId: "aeb93a68-a941-40ed-9782-9abbb3f2139f",
+      invocationOrdinal: ordinal,
+    });
+    assert.equal((await GET(new Request(`${endpoint}?${query}`,
+      { headers }))).status, 400);
+  }
+});
