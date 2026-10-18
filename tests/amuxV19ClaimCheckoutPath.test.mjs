@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,6 +15,7 @@ test("only a claim repository under the configured root selects checkout bytes",
     const root = join(directory, "mirrors");
     const selected = join(root, "owner", "repo");
     await mkdir(selected, { recursive: true });
+    await writeFile(join(root, "owner", "notdir"), "synthetic");
     const outside = join(directory, "outside");
     await mkdir(outside);
     try {
@@ -22,9 +23,12 @@ test("only a claim repository under the configured root selects checkout bytes",
         process.platform === "win32" ? "junction" : "dir");
       await symlink(selected, join(root, "owner", "alias"),
         process.platform === "win32" ? "junction" : "dir");
+      await symlink(join(root, "owner"), join(root, "aliasowner"),
+        process.platform === "win32" ? "junction" : "dir");
       process.env[AMUX_V19_TRACKED_REPOSITORY_ROOT_ENV] = root;
       assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/escape"), null);
       assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/alias"), null);
+      assert.equal(await resolveAmuxV19ClaimCheckoutPath("aliasowner/repo"), null);
     } catch (error) {
       if (!["EPERM", "EACCES"].includes(error?.code)) throw error;
     }
@@ -33,6 +37,7 @@ test("only a claim repository under the configured root selects checkout bytes",
       await realpath(selected));
     assert.equal(await resolveAmuxV19ClaimCheckoutPath("OWNER/REPO"),
       await realpath(selected));
+    assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/notdir"), null);
     for (const slug of ["owner/..", "../repo", "owner/missing",
       "owner/repo/extra", "owner\\repo"]) {
       assert.equal(await resolveAmuxV19ClaimCheckoutPath(slug), null);
