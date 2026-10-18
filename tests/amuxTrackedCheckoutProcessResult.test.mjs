@@ -145,17 +145,47 @@ test("a failed CLI turn reports only its fixed error codes and counts", async ()
   assert.deepEqual(second.finish({ code: 1, signal: null }).cliError, {
     ...noCliError, assistantError: "other", resultIsError: true,
     terminalReason: "other", turns: 1 });
+  // A code-shaped value outside the CLI's own list is not passed through.
+  const shaped = child();
+  const third = observeAmuxTrackedCheckoutChild(shaped, { ...input, diagnostic: true });
+  await send(shaped, [init, { type: "result", subtype: "success", is_error: true,
+    num_turns: 1, terminal_reason: "private_customer_identifier", result: "x" }]);
+  const shapedFailure = third.finish({ code: 1, signal: null });
+  assert.equal(shapedFailure.cliError.terminalReason, "other");
+  assert.equal(JSON.stringify(shapedFailure).includes("private"), false);
+});
+
+test("result codes survive a stream the validator already rejected", async () => {
+  const process = child();
+  const observed = observeAmuxTrackedCheckoutChild(process, { ...input, diagnostic: true });
+  await send(process, [init,
+    { type: "assistant", message: { role: "assistant", content: [
+      { type: "tool_use", id: "read_1", name: "Read",
+        input: { file_path: `${directory}/src/a.ts` } }] } },
+    // A failed tool result makes the validator stop parsing later lines.
+    { type: "user", message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "read_1", is_error: true, content: "x" }] } },
+    { type: "result", subtype: "success", is_error: true, num_turns: 3,
+      terminal_reason: "max_turns", permission_denials: [], result: "x" }]);
+  assert.deepEqual(observed.finish({ code: 0, signal: null, stopped: false }), {
+    kind: "outcome_unknown", failureStage: "parser_rejected", childExitCode: null,
+    cliError: { ...noCliError, resultIsError: true, terminalReason: "max_turns",
+      permissionDenials: 0, turns: 3, toolUses: { Read: 1, Grep: 0, Glob: 0 } },
+  });
 });
 
 test("a diagnostic success also reports file tool counts; a normal one does not", async () => {
+  const verified = { kind: "verified_success", rawModelOutput: result.result,
+    readFiles: ["src/a.ts"], inputTokens: 14, outputTokens: 2 };
   const process = child();
   const observed = observeAmuxTrackedCheckoutChild(process, { ...input, diagnostic: true });
   await send(process);
-  assert.deepEqual(observed.finish({ code: 0, signal: null, stopped: false }), {
-    kind: "verified_success", rawModelOutput: result.result,
-    readFiles: ["src/a.ts"], inputTokens: 14, outputTokens: 2,
-    toolUses: { Read: 1, Grep: 0, Glob: 0 },
-  });
+  assert.deepEqual(observed.finish({ code: 0, signal: null, stopped: false }),
+    { ...verified, toolUses: { Read: 1, Grep: 0, Glob: 0 } });
+  const normal = child();
+  const plain = observeAmuxTrackedCheckoutChild(normal, input);
+  await send(normal);
+  assert.deepEqual(plain.finish({ code: 0, signal: null, stopped: false }), verified);
 });
 
 test("stderr transport errors invalidate an otherwise complete result", async () => {
