@@ -7,8 +7,7 @@ import { adminAmuxIntakeMessages } from "@/lib/adminMessages/amuxIntake";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { adminFetch } from "@/lib/adminFetch";
 
-// Retained for legacy API contract coverage, not mounted in the Admin console.
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas");
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-u21-test-card");
 
 type IntakeBody = {
   outcome?: string;
@@ -27,6 +26,7 @@ type IntakeBody = {
   priority?: string | null;
   sourceVersion?: string | null;
   sourceDigest?: string | null;
+  cardId?: string;
 };
 
 export function AmuxIntakePanel() {
@@ -65,7 +65,7 @@ export function AmuxIntakePanel() {
           id="amux-intake-request"
           className="min-h-40 w-full rounded-md border border-zinc-300 bg-white p-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           value={requestText}
-          onChange={(event) => setRequestText(event.target.value)}
+          onChange={(event) => { setRequestText(event.target.value); setResult(null); }}
         />
       </label>
       <div className="flex flex-wrap gap-2">
@@ -108,6 +108,13 @@ export function AmuxIntakePanel() {
           {result.unitCount === 1 && result.priority ? <p>{messages.priority(result.priority)}</p> : null}
           {result.unitCount === 1 && result.sourceVersion ? <p>{messages.sourceVersion(result.sourceVersion)}</p> : null}
           {result.unitCount === 1 && result.sourceDigest ? <p>{messages.sourceDigest(result.sourceDigest)}</p> : null}
+          {result.cardId ? (
+            <p>
+              <a className="font-medium underline" href={`/admin/amux-execution?tab=cards&taskId=${encodeURIComponent(result.cardId)}`}>
+                {result.cardId}
+              </a>
+            </p>
+          ) : null}
         </div>
       ) : null}
     </section>
