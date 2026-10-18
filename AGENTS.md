@@ -1920,9 +1920,9 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   unit을 enable·start하지 않고, CLI는 `--version`만(nobody, 네트워크 없는 namespace, 빈
   환경) 실행하며, 앱의 `TOMVERSE_AMUX_DM_ROUTING`은 그대로 꺼져 있습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
   없습니다.
-- **S2-2b1(선택지별 효과 등급·경로와 정책 버전 2)**: `lib/amux/decisionMakerCore.ts`의 `DmCardOption`·`DM_EFFECT_CLASSES`·
-  `DM_CHANGE_EFFECT_CLASSES`·`DM_CHANGE_PATHS_MIN`/`DM_CHANGE_PATHS_MAX`·`dmOptionEffectWellFormed()`·카드 텍스트 형식
-  `amux-dm-card-text-v2`·`DM_POLICY_VERSION`, request core의 `parseDmCard()`, `tests/amuxDecisionMakerCardFields.test.mjs`.
+- **S2-2b1(선택지별 효과 등급·경로와 정책 버전 2)**: `lib/amux/decisionMakerCore.ts`의 `DmCardOption`, 효과 등급 목록과 변경
+  경로 상한, `dmOptionEffectWellFormed()`, 카드 텍스트 형식 `amux-dm-card-text-v2`, 정책 버전 상수, request core의 `parseDmCard()`,
+  `tests/amuxDecisionMakerCardFields.test.mjs`.
   카드의 선택지는 `{ id, label, effect, paths }`입니다(docs/policy/amux-decision-maker.md §4, §5). **이름은 앱의 camelCase이고,
   로컬 AMUX가 저장하는 snake_case(`context_paths`)는 bridge relay(S2-2b2)가 바꿉니다** — 선택지의 네 키는 양쪽이 같은 단어입니다.
   효과 등급은 정책 표의 여섯이고 변경 등급(`branch_code_change`·`docs_change`·`test_change`)만 경로 1~50개를 갖습니다. **로컬
@@ -1934,7 +1934,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   직접 읽어 대조하므로 한쪽만 바꾸면 실패합니다. **결과 제출의 선택지는 계속 `{ id, label }`이고 선택지 집합 digest도 그 둘만
   묶습니다** — 등급·경로가 바뀌면 로컬 AMUX에서 새 질문 revision, 곧 새 요청입니다. 카드 텍스트 v1(선택지 `{ id, label }`)은 읽지
   않습니다. 그것을 쓰는 경로는 처음부터 `TOMVERSE_AMUX_DM_ROUTING`으로 닫힌 라우팅 route 하나였고, 읽지 못한 텍스트는 Admin에
-  카드가 아니라 unreadable로 보입니다. **`DM_POLICY_VERSION`은 2입니다**(2026-10-17 승인) — 새 요청 행이 그 값을 결속 값으로 남기고,
+  카드가 아니라 unreadable로 보입니다. **정책 버전 상수는 2입니다**(2026-10-17 승인) — 새 요청 행이 그 값을 결속 값으로 남기고,
   결과는 상수가 아니라 행에 저장된 값과 대조하므로 이전 행은 자기 버전으로 결속됩니다. bridge relay는 결과 결속에 저장된 값을
   보내야 합니다. 요청 행의 CHECK는 `>= 1`이라 migration이 없습니다. 용어 목록·비밀 경로 목록·경로 문법·출력 상한은 바뀌지
   않았습니다. Admin 화면의 등급·경로 표시와 docs/policy/amux-decision-maker.md §4의 경로별 분류 기록은 없습니다.
