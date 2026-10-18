@@ -205,7 +205,7 @@ test("the public apply path checks the shipped latch before the commit", () => {
   assert.equal(route.includes("commitAmuxIntakeRegistration"), false);
   assert.equal(route.includes("retry: false"), true);
   assert.equal(route.includes("codeLatch: true"), false);
-  assert.match(panel, /registerReady = result\?\.applyPermitted === true/);
+  assert.match(panel, /registerReady = previewedText === requestText &&\s*result\?\.outcome === "allow" && result\.applyPermitted === true/);
   assert.match(panel, /registerReady \? messages\.registerPermitted : messages\.registerDisabled/);
   assert.match(panel, /disabled=\{pending \|\| locked \|\| !registerReady\}/);
   assert.match(panel, /error: action === "register" \? "outcome_unknown" : "intake_failed"/);

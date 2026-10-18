@@ -4,9 +4,10 @@ export const adminAmuxIntakeMessages = defineAdminMessages({
   en: {
     title: "AMUX intake",
     description:
-      "Preview shows one explicit registration and writes nothing. Register creates one backlog card only after the server reports that intake apply is permitted. This screen cannot promote the card or start a worker.",
+      "Preview shows one explicit registration and writes nothing. Confirm that preview, then register after the server permits it. Registration creates one backlog card; this screen cannot promote it or start a worker.",
     requestLabel: "Intake draft",
     preview: "Preview",
+    confirmPreview: "Confirm preview",
     register: "Register",
     registerDisabled: "Register is disabled. The server refuses it even if this control is bypassed.",
     registerPermitted: "Register creates one backlog card. It does not promote the card or start a worker.",
@@ -28,9 +29,10 @@ export const adminAmuxIntakeMessages = defineAdminMessages({
   ko: {
     title: "AMUX 등록",
     description:
-      "미리보기는 명시적 등록 한 건을 보여주고 아무것도 쓰지 않습니다. 등록은 서버가 intake 적용을 허용했다고 보고한 뒤에 backlog 카드 한 건만 만듭니다. 이 화면은 카드를 승격하거나 워커를 시작하지 않습니다.",
+      "미리보기에서 등록 내용 한 건을 확인하고, 미리보기 확인을 누른 뒤 서버가 허용하면 등록하세요. 등록은 backlog 카드 한 건만 만들며 이 화면은 카드를 승격하거나 워커를 시작하지 않습니다.",
     requestLabel: "등록 초안",
     preview: "미리보기",
+    confirmPreview: "미리보기 확인",
     register: "등록",
     registerDisabled: "등록은 꺼져 있습니다. 이 버튼을 우회해도 서버가 거절합니다.",
     registerPermitted: "등록은 backlog 카드 한 건을 만듭니다. 카드를 승격하거나 워커를 시작하지 않습니다.",

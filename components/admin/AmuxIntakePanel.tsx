@@ -7,6 +7,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxIntakeMessages } from "@/lib/adminMessages/amuxIntake";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { adminFetch } from "@/lib/adminFetch";
+import { confirmAmuxIntakePreview } from "./amuxIntakeConfirmation";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-u21-test-card");
 
@@ -27,6 +28,7 @@ type IntakeBody = {
   priority?: string | null;
   sourceVersion?: string | null;
   sourceDigest?: string | null;
+  draftDigest?: string | null;
   cardId?: string;
 };
 
@@ -35,10 +37,11 @@ export function AmuxIntakePanel() {
   const [requestText, setRequestText] = useState("");
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<IntakeBody | null>(null);
+  const [previewedText, setPreviewedText] = useState<string | null>(null);
   const inFlight = useRef(false);
   const terminal = useRef(false);
 
-  const send = async (action: string) => {
+  const send = async (action: string, bodyText = requestText) => {
     if (inFlight.current || terminal.current) return;
     inFlight.current = true;
     setPending(true);
@@ -46,12 +49,13 @@ export function AmuxIntakePanel() {
       const response = await adminFetch(`/api/admin/amux/intake?action=${action}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: requestText,
+        body: bodyText,
       });
       const body = (await response.json()) as IntakeBody;
       const ambiguous = action === "register" &&
         (response.status >= 500 || body.retry === false || (response.ok && !body.cardId));
       if (action === "register" && (ambiguous || !!body.cardId)) terminal.current = true;
+      setPreviewedText(bodyText);
       setResult(ambiguous ? {
         ...body,
         code: body.code ?? (body.error === "outcome_unknown" ? undefined : body.error),
@@ -60,6 +64,7 @@ export function AmuxIntakePanel() {
     } catch {
       // A register request may have committed before its reply was lost.
       if (action === "register") terminal.current = true;
+      setPreviewedText(bodyText);
       setResult({ error: action === "register" ? "outcome_unknown" : "intake_failed" });
     } finally {
       inFlight.current = false;
@@ -67,11 +72,25 @@ export function AmuxIntakePanel() {
     }
   };
 
+  const confirm = () => {
+    if (!result) return;
+    const confirmed = confirmAmuxIntakePreview(requestText,
+      previewedText, result);
+    if (!confirmed) return;
+    setRequestText(confirmed);
+    setResult(null);
+    setPreviewedText(null);
+    void send("preview", confirmed);
+  };
+
   const refusedForStepUp =
     result?.code === "ADMIN_REAUTHENTICATION_REQUIRED" || result?.error === "ADMIN_REAUTHENTICATION_REQUIRED";
   // An ambiguous write needs exact read-back, never an in-page resubmit.
   const locked = result?.error === "outcome_unknown" || !!result?.cardId;
-  const registerReady = result?.applyPermitted === true;
+  const registerReady = previewedText === requestText &&
+    result?.outcome === "allow" && result.applyPermitted === true;
+  const confirmReady = result !== null &&
+    confirmAmuxIntakePreview(requestText, previewedText, result) !== null;
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-intake-panel">
@@ -83,8 +102,9 @@ export function AmuxIntakePanel() {
           id="amux-intake-request"
           className="min-h-40 w-full rounded-md border border-zinc-300 bg-white p-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           value={requestText}
-          disabled={locked}
-          onChange={(event) => { setRequestText(event.target.value); setResult(null); }}
+          disabled={pending || locked}
+          onChange={(event) => { setRequestText(event.target.value);
+            setResult(null); setPreviewedText(null); }}
         />
       </label>
       <div className="flex flex-wrap gap-2">
@@ -95,6 +115,14 @@ export function AmuxIntakePanel() {
           onClick={() => send("preview")}
         >
           {messages.preview}
+        </button>
+        <button
+          type="button"
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          disabled={pending || locked || !confirmReady}
+          onClick={confirm}
+        >
+          {messages.confirmPreview}
         </button>
         <button
           type="button"
