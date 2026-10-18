@@ -44,16 +44,27 @@ pub mod wire;
 /// Starts the relay beside the bridge when its switch says so. The local
 /// AMUX client and base URL are the bridge's own (loopback only, no proxy,
 /// no redirect), and the app client is the bridge's `TomverseApi` with its
-/// sync token.
+/// sync token. `bridge_worker` is this bridge's `--worker` name; only the
+/// bridge `TOMVERSE_AMUX_DM_RELAY_WORKER` names runs the relay.
 pub fn start_from_env(
     api: &crate::tomverse_api::TomverseApi,
     local_client: &reqwest::Client,
     local_base: &str,
+    bridge_worker: Option<&str>,
 ) {
     let enabled = std::env::var(io::DM_RELAY_ENV).ok();
+    let relay_worker = std::env::var(io::DM_RELAY_WORKER_ENV).ok();
     let token = std::env::var(io::DM_RELAY_LOCAL_TOKEN_ENV).ok();
-    match io::relay_activation(enabled.as_deref(), token.as_deref()) {
+    match io::relay_activation(
+        enabled.as_deref(),
+        relay_worker.as_deref(),
+        bridge_worker,
+        token.as_deref(),
+    ) {
         io::RelayActivation::Off => {}
+        io::RelayActivation::OtherBridge => {
+            println!("amux dm relay runs in another bridge");
+        }
         io::RelayActivation::Misconfigured(name) => {
             eprintln!("amux dm relay is not started: {name} is missing or malformed");
         }
