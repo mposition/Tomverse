@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "../adminAudit.ts";
+import { AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+  AMUX_SESSION_IDEA_SUBMITTED_TARGET } from "../adminAuditSystemActors.ts";
 import {
   AMUX_V19_TRACKED_CHECKOUT_AUDIT_ACTOR,
   AMUX_V19_TRACKED_CHECKOUT_AUDIT_SUMMARY,
@@ -15,7 +17,8 @@ import {
 } from "./ideaTrackedCheckoutEvidenceCore.ts";
 
 export class AmuxTrackedCheckoutEvidenceError extends Error {
-  constructor(readonly code: "invalid_evidence" | "idea_unavailable" | "already_recorded") {
+  constructor(readonly code: "invalid_evidence" | "idea_unavailable" |
+    "reference_unpinned" | "already_recorded") {
     super(code);
     this.name = "AmuxTrackedCheckoutEvidenceError";
   }
@@ -86,6 +89,26 @@ export async function recordAmuxTrackedCheckoutEvidence(
   `;
   if (locked.length !== 1) {
     throw new AmuxTrackedCheckoutEvidenceError("idea_unavailable");
+  }
+  const idea = await tx.amuxIdeaSubmission.findUnique({
+    where: { id: inspected.ideaId },
+    select: { submissionAuditLogId: true },
+  });
+  const submission = idea?.submissionAuditLogId
+    ? await tx.adminAuditLog.findUnique({ where: { id: idea.submissionAuditLogId },
+      select: { action: true, targetType: true, targetId: true,
+        entryHash: true, metadata: true } }) : null;
+  const metadata = submission?.metadata;
+  const pinned = metadata && typeof metadata === "object" &&
+    !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>).pinnedCommitShas : null;
+  if (!submission?.entryHash ||
+      submission.action !== AMUX_SESSION_IDEA_SUBMITTED_ACTION ||
+      submission.targetType !== AMUX_SESSION_IDEA_SUBMITTED_TARGET ||
+      submission.targetId !== inspected.ideaId ||
+      !Array.isArray(pinned) ||
+      pinned[inspected.referenceOrdinal] !== inspected.pinnedCommitSha) {
+    throw new AmuxTrackedCheckoutEvidenceError("reference_unpinned");
   }
   if (await readAmuxTrackedCheckoutEvidence(tx, inspected.ideaId,
     inspected.referenceOrdinal)) {

@@ -21,6 +21,7 @@ import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { amuxContentKeyRing, createAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { amuxIdeaReferencesOutsideScope,
   amuxOperatingScopeSelection } from "./ideaOperatingScopeCore.ts";
+import { pinAmuxSessionReferences } from "./ideaSessionReferencePinning.ts";
 import { readAmuxOperatingScopeAuthority,
   type AmuxOperatingScopeAuthority } from "./ideaOperatingScopeStore.ts";
 import { AMUX_IDEA_STANDARD_TRANSACTION } from "./ideaRequestTimeoutsCore.ts";
@@ -56,6 +57,7 @@ export class AmuxIdeaSessionSubmissionError extends Error {
       | "scope_unavailable"
       | "outside_scope"
       | "model_not_approved"
+      | "reference_snapshot_unavailable"
       | "key_store_unavailable"
       | "request_already_seen"
       | "outcome_unknown",
@@ -127,6 +129,7 @@ export async function commitAmuxIdeaSessionSubmission(
     expectedAuthority: AmuxOperatingScopeAuthority;
     ideaId: string;
     keys: AmuxContentKeys;
+    pinnedCommitShas: readonly string[];
   },
 ): Promise<CommittedAmuxIdeaSessionSubmission> {
   await takeAuditChainLock(tx);
@@ -135,6 +138,14 @@ export async function commitAmuxIdeaSessionSubmission(
     throw new AmuxIdeaSessionSubmissionError("scope_unavailable");
   }
   requireInputWithinScope(authority, input.inspected);
+  const referenceCount = input.inspected.counts.repositoryCount +
+    input.inspected.counts.pullRequestCount;
+  if (!Array.isArray(input.pinnedCommitShas) ||
+      input.pinnedCommitShas.length !== referenceCount ||
+      input.pinnedCommitShas.some((sha) => typeof sha !== "string" ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sha))) {
+    throw new AmuxIdeaSessionSubmissionError("reference_snapshot_unavailable");
+  }
   await requireCurrentModel(authority, tx);
   const existing = await tx.amuxIdeaSubmission.findUnique({
     where: { requestId: input.inspected.requestId },
@@ -170,6 +181,7 @@ export async function commitAmuxIdeaSessionSubmission(
       ideaBytes: input.inspected.counts.ideaBytes,
       repositoryCount: input.inspected.counts.repositoryCount,
       pullRequestCount: input.inspected.counts.pullRequestCount,
+      pinnedCommitShas: [...input.pinnedCommitShas],
     },
   });
   await tx.amuxIdeaSubmission.create({ data: {
@@ -242,6 +254,11 @@ export async function readAmuxIdeaSessionSubmissionRequest(requestId: string): P
       values.operatingScopeSettingId !== row.sessionOperatingScopeSettingId ||
       !Number.isSafeInteger(repositoryCount) || (repositoryCount as number) < 0 ||
       !Number.isSafeInteger(pullRequestCount) || (pullRequestCount as number) < 0 ||
+      !Array.isArray(values.pinnedCommitShas) ||
+      values.pinnedCommitShas.length !==
+        (repositoryCount as number) + (pullRequestCount as number) ||
+      values.pinnedCommitShas.some((sha) => typeof sha !== "string" ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sha)) ||
       (!activeSource && !purgedSource)) {
     return { requestId, status: "partial", ideaId: row.id };
   }
@@ -320,6 +337,13 @@ export async function submitAmuxIdeaFromSession(input: {
   if (!expectedAuthority) throw new AmuxIdeaSessionSubmissionError("scope_unavailable");
   requireInputWithinScope(expectedAuthority, input.inspected);
   await requireCurrentModel(expectedAuthority);
+  let pinnedCommitShas: string[];
+  try {
+    pinnedCommitShas = await pinAmuxSessionReferences(input.inspected.input,
+      process.env.TOMVERSE_AMUX_V19_GITHUB_READ_TOKEN);
+  } catch {
+    throw new AmuxIdeaSessionSubmissionError("reference_snapshot_unavailable");
+  }
 
   const global = loadCurrentAmuxContentKeys(process.env);
   const ideaId = randomUUID();
@@ -336,7 +360,7 @@ export async function submitAmuxIdeaFromSession(input: {
     return await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`;
       const committed = await commitAmuxIdeaSessionSubmission(tx, {
-        ...input, expectedAuthority, ideaId, keys,
+        ...input, expectedAuthority, ideaId, keys, pinnedCommitShas,
       });
       const reservation = await commitAmuxSessionAnalysisReservation(tx, {
         ideaId: committed.ideaId,
