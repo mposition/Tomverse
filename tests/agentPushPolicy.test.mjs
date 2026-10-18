@@ -45,6 +45,16 @@ test("control-plane, unclassified and unknown top-level paths are T2", () => {
       "control_plane_path",
     ),
   );
+  for (const path of [
+    "lib/chatUnifiedOptimizerAmuxCandidateStore.ts",
+    "lib/chatUnifiedOptimizerAmuxSourcePin.ts",
+    "tests/chatUnifiedOptimizerAmuxCandidateStore.test.mjs",
+    "tests/chatUnifiedOptimizerAmuxSourcePin.test.mjs",
+  ]) {
+    const verdict = decideTier(clean([change({ path })]));
+    assert.equal(verdict.tier, "T2", path);
+    assert.ok(reasons(verdict).includes("control_plane_path"), path);
+  }
   assert.ok(
     reasons(decideTier(clean([change({ path: "public/robots.txt" })]))).includes(
       "unclassified_path",

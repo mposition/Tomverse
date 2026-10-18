@@ -590,14 +590,20 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-17, AMUX v19 read-manifest orphan-key audit actions move the existing
 // computed access in lib/adminAuditSystemActors.ts from line 424 to 454. The
 // count and position-free inventory remain unchanged; only its position moves.
+// 2026-10-18, the Chat optimizer adds a scoped audit actor above the existing
+// computed access in lib/adminAuditSystemActors.ts. The count and position-free
+// digest remain unchanged; only source positions move.
+// 2026-10-19, correcting the Chat optimizer schema separator restores the
+// marketing fingerprint and removes the mistaken provenance comment. The
+// already reviewed computed access inventory is unchanged; its positions move.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 // AMUX v19 repository-read and session-reservation additions shift source
 // positions in the reviewed closure. The position-free digest stays fixed.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "93b601659c97d6ad9beb1a2ce73cd938",
-  "d51c6dc976aba1d8b16258235a298ec0",
+  "e6cedea8264b539dee2dba2d661a6ce",
+  "60d3e5d5194b2b02a055744ef746ac894",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

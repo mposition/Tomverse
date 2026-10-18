@@ -370,6 +370,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
 export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   Record<(typeof ADMIN_DETAIL_ROUTES)[number]["id"], { label: string; description: string }>
 > = {
+  "amux-u21-test-card": {
+    label: "AMUX U21 테스트 카드",
+    description: "소유자 전용 합성 후보 수신 진단",
+  },
   "prompt-refiner-shadow": {
     label: "Prompt Refiner shadow 실행",
     description: "동결된 합성 shadow run의 owner 전용 승인과 실행",

@@ -431,10 +431,13 @@ mod tests {
 
         #[cfg(windows)]
         let (program, args) = (
-            "cmd.exe",
+            "powershell.exe",
             vec![
-                "/C".to_string(),
-                format!("echo executed > \"{}\"", marker.display()),
+                "-NoProfile".to_string(),
+                "-NonInteractive".to_string(),
+                "-Command".to_string(),
+                format!("Set-Content -LiteralPath '{}' -Value executed",
+                    marker.display().to_string().replace('\'', "''")),
             ],
         );
 

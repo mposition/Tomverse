@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use reqwest::{Client, StatusCode, header};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use uuid::Uuid;
 
@@ -1253,6 +1254,131 @@ impl TomverseApi {
         bail!("v22 result read-back conflict")
     }
 
+    /// Metadata-only gate. The local card's result is never sent unless the
+    /// app identifies this exact live attempt as CHAT-01's Codex worker.
+    pub async fn chat_optimizer_candidate_eligibility(
+        &self, attempt_id: &str,
+    ) -> Result<Option<Value>> {
+        let response = self.client
+            .get(format!("{}/api/internal/chat-optimization/amux-candidate/eligibility",
+                self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&[("attemptId", attempt_id)])
+            .send().await.context("optimizer eligibility unavailable")?;
+        let answer = read_raw_answer(response, 4096).await?;
+        if answer.status != StatusCode::OK {
+            bail!("optimizer eligibility refused");
+        }
+        let body: Value = serde_json::from_slice(&answer.body)?;
+        if body.get("eligible").and_then(Value::as_bool) == Some(false) {
+            if body.get("target").and_then(Value::as_bool) == Some(true) &&
+                body.as_object().is_some_and(|object| object.keys().all(|key|
+                    key == "eligible" || key == "target" || key == "reason")) {
+                bail!("optimizer target attempt is not eligible");
+            }
+            if body.as_object().is_some_and(|object| object.len() == 1) {
+                return Ok(None);
+            }
+        }
+        let pin = body.get("sourcePin").context("optimizer source pin absent")?;
+        if body.get("eligible").and_then(Value::as_bool) != Some(true) ||
+            body.get("attemptId").and_then(Value::as_str) != Some(attempt_id) ||
+            body.as_object().is_none_or(|object| object.len() != 3) ||
+            pin.as_object().is_none_or(|object| object.len() != 4) ||
+            !pin.get("repositoryId").and_then(Value::as_u64).is_some_and(|n| n > 0) ||
+            ![ ("commitSha", 40), ("blobSha", 40), ("sha256", 64) ]
+                .iter().all(|(key, len)| pin.get(*key).and_then(Value::as_str)
+                    .is_some_and(|value| value.len() == *len &&
+                        value.bytes().all(|byte| byte.is_ascii_hexdigit() &&
+                            !byte.is_ascii_uppercase()))) {
+            bail!("optimizer eligibility invariant failed");
+        }
+        Ok(Some(pin.clone()))
+    }
+
+    pub async fn chat_optimizer_candidate_readback(
+        &self, attempt_id: &str, result_sha256: &str,
+    ) -> Result<V22UsageRecord> {
+        let response = self.client
+            .get(format!("{}/api/internal/chat-optimization/amux-candidate", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&[("attemptId", attempt_id)])
+            .send().await.context("optimizer candidate read-back unavailable")?;
+        let answer = read_raw_answer(response, 4096).await?;
+        if answer.status != StatusCode::OK {
+            bail!("optimizer candidate read-back refused");
+        }
+        let body: Value = serde_json::from_slice(&answer.body)?;
+        if body.get("status").and_then(Value::as_str) == Some("recorded") &&
+            body.as_object().is_some_and(|fields| fields.len() == 7) &&
+            body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+            body.get("cycleId").and_then(Value::as_str)
+                .is_some_and(|id| Uuid::parse_str(id).is_ok()) &&
+            body.get("resultSha256").and_then(Value::as_str) == Some(result_sha256) &&
+            body.get("authorshipVerified").and_then(Value::as_bool) == Some(false) &&
+            ["candidateDigest", "bundleDigest"].iter().all(|key|
+                body.get(*key).and_then(Value::as_str).is_some_and(|digest|
+                    digest.len() == 64 && digest.bytes().all(|b|
+                        b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))) {
+            return Ok(V22UsageRecord::Recorded);
+        }
+        if body.get("status").and_then(Value::as_str) == Some("absent") {
+            return Ok(V22UsageRecord::Rejected);
+        }
+        bail!("optimizer candidate read-back conflict")
+    }
+
+    /// One POST; an ambiguous response is resolved by exact read-back. Never
+    /// repost a result or infer success from an acknowledgement alone.
+    pub async fn chat_optimizer_candidate_record_once(
+        &self, delivery: &PulledDelivery, instance_id: &str, generation: i64,
+        source_pin: &Value, result_text: &str, result_sha256: &str,
+    ) -> Result<V22UsageRecord> {
+        // Both legacy and assigned v22 deliveries use this envelope. The app
+        // pins the exact card and verifies its sealed brief/result binding.
+        if delivery.worker != "codex-impl" ||
+            result_text.is_empty() || result_text.len() > 65_536 ||
+            result_text.contains('\0') || result_sha256.len() != 64 ||
+            !result_sha256.bytes().all(|b| b.is_ascii_hexdigit()) ||
+            hex::encode(Sha256::digest(result_text.as_bytes())) != result_sha256 {
+            bail!("invalid optimizer candidate envelope");
+        }
+        let payload = serde_json::json!({
+            "attemptId": delivery.attempt_id, "worker": delivery.worker,
+            "instanceId": instance_id, "generation": generation,
+            "taskRevision": delivery.task_revision, "sourcePin": source_pin,
+            "resultText": result_text, "resultSha256": result_sha256,
+        });
+        let response = self.client
+            .post(format!("{}/api/internal/chat-optimization/amux-candidate",
+                self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(&payload).send().await;
+        let mut definitely_rejected = false;
+        if let Ok(response) = response {
+            definitely_rejected = matches!(response.status(),
+                StatusCode::BAD_REQUEST | StatusCode::CONFLICT | StatusCode::UNAUTHORIZED);
+            // Drain and bound even a positive acknowledgement. Read-back is
+            // still authoritative and carries the exact raw result digest.
+            // The write may have committed even when its answer is malformed,
+            // oversized, or lost. The exact read-back below decides the outcome.
+            let _ = read_raw_answer(response, 4096).await;
+        }
+        match self.chat_optimizer_candidate_readback(
+            &delivery.attempt_id, result_sha256).await? {
+            V22UsageRecord::Recorded => Ok(V22UsageRecord::Recorded),
+            V22UsageRecord::Rejected if definitely_rejected =>
+                Ok(V22UsageRecord::Rejected),
+            V22UsageRecord::Rejected =>
+                bail!("optimizer candidate write outcome unknown; read-back absent"),
+            V22UsageRecord::PrivateOnly =>
+                bail!("optimizer candidate read-back private-only invariant"),
+        }
+    }
+
     /// A result is sent at most once. A lost answer is resolved by exact
     /// attempt/digest read-back; the model is never called again for recovery.
     pub async fn v22_task_result_record_once(
@@ -1940,6 +2066,143 @@ mod tests {
             .await.unwrap();
         assert_eq!(recorded, V22UsageRecord::PrivateOnly);
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn optimizer_eligibility_accepts_only_the_exact_public_pin() {
+        let pin = serde_json::json!({"repositoryId": 123,
+            "commitSha": "a".repeat(40), "blobSha": "b".repeat(40),
+            "sha256": "c".repeat(64)});
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+            "eligible": true, "attemptId": "attempt-1", "sourcePin": pin,
+        }).to_string());
+        assert_eq!(api.chat_optimizer_candidate_eligibility("attempt-1")
+            .await.unwrap(), Some(pin));
+        server.join().unwrap();
+
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+            "eligible": true, "attemptId": "other", "sourcePin": {
+                "repositoryId": 123, "commitSha": "a".repeat(40),
+                "blobSha": "b".repeat(40), "sha256": "c".repeat(64),
+            },
+        }).to_string());
+        assert!(api.chat_optimizer_candidate_eligibility("attempt-1")
+            .await.is_err());
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn optimizer_target_disabled_halts_but_unrelated_task_skips() {
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+            "eligible": false, "target": true,
+            "reason": "amux_candidate_write_disabled",
+        }).to_string());
+        assert!(api.chat_optimizer_candidate_eligibility("attempt-1")
+            .await.is_err());
+        server.join().unwrap();
+
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+            "eligible": false,
+        }).to_string());
+        assert!(api.chat_optimizer_candidate_eligibility("attempt-1")
+            .await.unwrap().is_none());
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn optimizer_readback_requires_the_raw_result_digest() {
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+            "status": "recorded", "attemptId": "attempt-1",
+            "cycleId": "22222222-2222-4222-8222-222222222222",
+            "resultSha256": "a".repeat(64),
+            "candidateDigest": "b".repeat(64),
+            "bundleDigest": "c".repeat(64), "authorshipVerified": false,
+        }).to_string());
+        assert_eq!(api.chat_optimizer_candidate_readback("attempt-1",
+            &"a".repeat(64)).await.unwrap(), V22UsageRecord::Recorded);
+        server.join().unwrap();
+
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+            "status": "recorded", "attemptId": "attempt-1",
+            "cycleId": "22222222-2222-4222-8222-222222222222",
+            "resultSha256": "d".repeat(64),
+            "candidateDigest": "b".repeat(64),
+            "bundleDigest": "c".repeat(64), "authorshipVerified": false,
+        }).to_string());
+        assert!(api.chat_optimizer_candidate_readback("attempt-1",
+            &"a".repeat(64)).await.is_err());
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn optimizer_readback_rejects_incomplete_or_extended_receipts() {
+        let receipt = serde_json::json!({
+            "status": "recorded", "attemptId": "attempt-1",
+            "cycleId": "22222222-2222-4222-8222-222222222222",
+            "resultSha256": "a".repeat(64),
+            "candidateDigest": "b".repeat(64),
+            "bundleDigest": "c".repeat(64), "authorshipVerified": false,
+        });
+        for rejected in [
+            { let mut value = receipt.clone(); value.as_object_mut().unwrap().remove("cycleId"); value },
+            { let mut value = receipt.clone(); value["cycleId"] = serde_json::json!("not-a-uuid"); value },
+            { let mut value = receipt.clone(); value["extra"] = serde_json::json!(true); value },
+            { let mut value = receipt.clone(); value["candidateDigest"] = serde_json::json!("B".repeat(64)); value },
+        ] {
+            let (api, server) = answer_once("200 OK", rejected.to_string());
+            assert!(api.chat_optimizer_candidate_readback("attempt-1",
+                &"a".repeat(64)).await.is_err());
+            server.join().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn optimizer_lost_write_answer_reads_back_without_reposting() {
+        for (post_status, post_body) in [
+            ("503 Service Unavailable", "{}".to_owned()),
+            ("200 OK", "x".repeat(4097)),
+        ] {
+            let result_digest = hex::encode(Sha256::digest(b"{}"));
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server_digest = result_digest.clone();
+            let server = thread::spawn(move || {
+                for (method, status, body) in [
+                    ("POST", post_status, post_body),
+                    ("GET", "200 OK", serde_json::json!({
+                        "status": "recorded", "attemptId": "attempt-1",
+                        "cycleId": "22222222-2222-4222-8222-222222222222",
+                        "resultSha256": server_digest,
+                        "candidateDigest": "b".repeat(64),
+                        "bundleDigest": "c".repeat(64), "authorshipVerified": false,
+                    }).to_string()),
+                ] {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let mut request = Vec::new();
+                    loop {
+                        let mut chunk = [0_u8; 4096];
+                        let count = stream.read(&mut chunk).unwrap();
+                        assert!(count > 0);
+                        request.extend_from_slice(&chunk[..count]);
+                        if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") { break; }
+                    }
+                    assert!(String::from_utf8_lossy(&request).starts_with(method));
+                    write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()).unwrap();
+                }
+            });
+            let api = TomverseApi::for_test_with_timeouts(format!("http://{address}"),
+                Duration::from_secs(1), Duration::from_secs(3));
+            let delivery = PulledDelivery { attempt_id: "attempt-1".into(),
+                assignment_id: None, recovery_approval_id: None, v22_execution: None,
+                task_id: "task-1".into(), worker: "codex-impl".into(),
+                task_revision: 1, prompt: String::new(), receipt_id: "r".into(),
+                lease_expires_at: "2026-11-01T00:00:00Z".into() };
+            assert_eq!(api.chat_optimizer_candidate_record_once(&delivery, "instance", 1,
+                &serde_json::json!({}), "{}", &result_digest).await.unwrap(),
+                V22UsageRecord::Recorded);
+            server.join().unwrap();
+        }
     }
 
     #[tokio::test]

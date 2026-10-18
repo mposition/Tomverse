@@ -9,6 +9,7 @@ import { defineAdminMessages } from "@/lib/adminLocale";
  */
 export const adminAmuxWorkspaceMessages = defineAdminMessages({
   en: {
+    testCardIntake: "Register U21 test card",
     status: {
       preview_apply_off: "Preview · apply off",
       apply_on: "Apply on",
@@ -23,6 +24,7 @@ export const adminAmuxWorkspaceMessages = defineAdminMessages({
     },
   },
   ko: {
+    testCardIntake: "U21 테스트 카드 등록",
     status: {
       preview_apply_off: "미리보기 · 적용 꺼짐",
       apply_on: "적용 켜짐",

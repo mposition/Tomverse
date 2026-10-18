@@ -1221,6 +1221,138 @@ model PromptRefinerProductAttempt {
   @@index([state, createdAt])
 }
 
+/// One provider-free optimizer validation cycle. This metadata ledger grants
+/// no paid execution, external dispatch, promotion or product-runtime authority.
+model ChatUnifiedOptimizerCycle {
+  id                         String    @id @db.Uuid
+  ledgerVersion              String
+  policyVersion              Int
+  purpose                    String
+  registrationRequestId      String    @unique @db.Uuid
+  registrationDigest         String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  promotionAuthorized        Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+  terminalAt                 DateTime? @db.Timestamptz(3)
+
+  candidate ChatUnifiedOptimizerCandidate?
+  runs      ChatUnifiedOptimizerRun[]
+  evidence  ChatUnifiedOptimizerEvidence[]
+
+  @@index([state, createdAt])
+}
+
+/// Frozen candidate identity only. Candidate source, examples and hidden
+/// evaluation material never enter this table.
+model ChatUnifiedOptimizerCandidate {
+  id                   String   @id @db.Uuid
+  cycleId              String   @unique @db.Uuid
+  candidateVersion     String
+  bundleVersion        String
+  candidateDigest      String
+  bundleDigest         String   @unique
+  controlsDigest       String
+  schemaVersion        String
+  promptVersion        String
+  stageCandidateDigest String
+  adapterConfigDigest  String
+  pricePinDigest       String
+  sourceCommitSha      String
+  sourceRepositoryId   BigInt?
+  sourceBlobSha        String?
+  sourceSha256         String?
+  runtimeAuthorized    Boolean  @default(false)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+
+  cycle    ChatUnifiedOptimizerCycle      @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence ChatUnifiedOptimizerEvidence[]
+
+  @@index([candidateDigest])
+}
+
+/// The first provider-free validation run in a cycle. Three independent paid
+/// evaluation runs remain a later admission contract; this row does not waive it.
+model ChatUnifiedOptimizerRun {
+  id                         String    @id @db.Uuid
+  cycleId                    String    @db.Uuid
+  ordinal                    Int
+  purpose                    String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  admissionAuditLogId        String    @unique
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+  terminalAt                 DateTime? @db.Timestamptz(3)
+
+  cycle          ChatUnifiedOptimizerCycle      @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  admissionAudit AdminAuditLog                  @relation("ChatUnifiedOptimizerRunAdmissionAudit", fields: [admissionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  jobs           ChatUnifiedOptimizerRoleJob[]
+  evidence       ChatUnifiedOptimizerEvidence[]
+
+  @@unique([cycleId, ordinal])
+  @@index([state, createdAt])
+}
+
+/// One closed optimizer role job. A claim is single-use and carries no vendor
+/// or paid-dispatch authority. There is no lease/requeue transition in v1.
+model ChatUnifiedOptimizerRoleJob {
+  id                         String    @id @db.Uuid
+  runId                      String    @db.Uuid
+  role                       String
+  purpose                    String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  claimRequestId             String?   @unique @db.Uuid
+  claimRequestDigest         String?
+  claimToken                 String?   @unique @db.Uuid
+  claimAuditLogId            String?   @unique
+  claimedAt                  DateTime? @db.Timestamptz(3)
+  terminalRequestId          String?   @unique @db.Uuid
+  terminalRequestDigest      String?
+  terminalOutcome            String?
+  terminalAuditLogId         String?   @unique
+  terminalAt                 DateTime? @db.Timestamptz(3)
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+
+  run           ChatUnifiedOptimizerRun       @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claimAudit    AdminAuditLog?                @relation("ChatUnifiedOptimizerRoleClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  terminalAudit AdminAuditLog?                @relation("ChatUnifiedOptimizerRoleTerminalAudit", fields: [terminalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence      ChatUnifiedOptimizerEvidence?
+
+  @@unique([runId, role])
+  @@index([state, createdAt])
+}
+
+/// Content-free terminal evidence identity for one known role-job outcome.
+/// The evidence body and any provider prose live outside this ledger.
+model ChatUnifiedOptimizerEvidence {
+  id                 String   @id @db.Uuid
+  jobId              String   @unique @db.Uuid
+  runId              String   @db.Uuid
+  cycleId            String   @db.Uuid
+  candidateId        String   @db.Uuid
+  outcome            String
+  evidenceRef        String
+  payloadDigest      String
+  terminalAuditLogId String   @unique
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+
+  job           ChatUnifiedOptimizerRoleJob   @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  run           ChatUnifiedOptimizerRun       @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cycle         ChatUnifiedOptimizerCycle     @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  candidate     ChatUnifiedOptimizerCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  terminalAudit AdminAuditLog                 @relation("ChatUnifiedOptimizerEvidenceTerminalAudit", fields: [terminalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([cycleId, createdAt])
+  @@index([runId, createdAt])
+}
+
 /// Content-free immutable product execution fact. It deliberately has no
 /// user, conversation, session, attachment, prompt or digest column.
 model PromptRefinerProductExecutionReceipt {
@@ -2494,6 +2626,10 @@ model AdminAuditLog {
   marketingLlmCallCloses       MarketingLlmCall[] @relation("MarketingLlmCallCloseAudit")
   marketingLlmCallLegalHolds   MarketingLlmCall[] @relation("MarketingLlmCallLegalHoldAudit")
   promptRefinerProductOperationalGuard PromptRefinerProductOperationalGuard? @relation("PromptRefinerProductOperationalGuardTransitionAudit")
+  chatUnifiedOptimizerRunAdmissions ChatUnifiedOptimizerRun[] @relation("ChatUnifiedOptimizerRunAdmissionAudit")
+  chatUnifiedOptimizerRoleClaims ChatUnifiedOptimizerRoleJob[] @relation("ChatUnifiedOptimizerRoleClaimAudit")
+  chatUnifiedOptimizerRoleTerminals ChatUnifiedOptimizerRoleJob[] @relation("ChatUnifiedOptimizerRoleTerminalAudit")
+  chatUnifiedOptimizerEvidenceTerminals ChatUnifiedOptimizerEvidence[] @relation("ChatUnifiedOptimizerEvidenceTerminalAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
