@@ -29270,14 +29270,63 @@ async function _focusResolveTag(item) {
   const keep = (item.tags || []).filter(t => !_NEEDS_HUMAN_TAGS.has(String(t).toLowerCase()));
   await _focusPatch(item.id, { tags: keep });
 }
+// The typed question the card asks right now, read when the operator starts
+// to answer: { revision, question }, with revision null for a card that asks
+// no typed question; null when it could not be read. The answer is bound to
+// this revision (see _focusClaimAnswer).
+async function _focusObserveQuestion(item) {
+  try {
+    const r = await _directInteractionFetch(API + '/api/board/' + encodeURIComponent(item.id) + '/typed-ask',
+      { headers: _authHeaders({}), signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    const b = await r.json();
+    const current = b && b.current_revision;
+    if (!current) return { revision: null, question: null };
+    if (!Number.isInteger(current.question_revision)) return null;
+    return { revision: current.question_revision, question: current.ask_question || '' };
+  } catch (e) { return null; }
+}
+// A typed question revision gets one answer (docs/policy/amux-decision-maker.md
+// §2-7 in the Tomverse repository): this direct answer and an operator-confirmed
+// Decision Maker answer each claim the card's answer record before anything is
+// sent, and only the first is delivered. The claim names the revision the
+// operator was shown, and holds only while the card still asks it: a worker
+// that re-asked meanwhile gets nothing sent to its new question. A card with
+// no typed revision has nothing to claim. Only the claim this answer won
+// sends: a revision already answered -- by a Decision Maker answer, or by the
+// operator in another tab or an earlier click -- sends nothing and says so.
+// Any failure to claim sends nothing.
+async function _focusClaimAnswer(item, revision) {
+  try {
+    const r = await _directInteractionFetch(API + '/api/board/' + encodeURIComponent(item.id) + '/typed-ask/answer',
+      { method: 'POST', headers: _authHeaders({'Content-Type':'application/json'}),
+        body: JSON.stringify({ question_revision: revision }), signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return 'Could not record the answer for ' + item.id + ' (HTTP ' + r.status + '); nothing was sent.';
+    const b = await r.json();
+    if (b.outcome === 'claimed' || b.outcome === 'no_typed_revision') return null;
+    if (b.outcome === 'already_answered' && b.answer && b.answer.source === 'operator') return item.id + ' was already answered (from another tab or an earlier click); nothing was sent.';
+    if (b.outcome === 'already_answered') return item.id + ' was already answered by an operator-confirmed Decision Maker answer; nothing was sent.';
+    if (b.outcome === 'question_changed') return 'The question on ' + item.id + ' changed after you opened it; nothing was sent. Open it again to answer the new question.';
+    return 'Could not record the answer for ' + item.id + ' (' + (b.reason || b.outcome || 'refused') + '); nothing was sent.';
+  } catch (e) { return 'Could not record the answer for ' + item.id + '; nothing was sent.'; }
+}
 async function _focusAnswer() {
   const item = _focusList[_focusIdx]; if (!item) return;
+  // The question this answer is for: read now, shown in the dialog, and
+  // named in the claim, so the answer cannot land on a question the worker
+  // asks after the dialog opened.
+  const seen = await _focusObserveQuestion(item);
+  if (!seen) { showToast('Could not read the question on ' + item.id + '; nothing was sent.'); return; }
   const sess = item.session;
   const ok = await showFormModal('Answer ' + item.id + (sess ? ' \u2192 ' + sess : ''),
-    '<textarea id="focus-ans" class="bw-in" style="width:100%;min-height:90px;box-sizing:border-box" '
+    (seen.revision === null ? '' : '<div class="focus-ask-label">Answering question revision '
+      + seen.revision + ': ' + esc(seen.question) + '</div>')
+    + '<textarea id="focus-ans" class="bw-in" style="width:100%;min-height:90px;box-sizing:border-box" '
     + 'placeholder="Your reply — sent to the owning worker and recorded on the card"></textarea>', 'Send');
   const ans = (document.getElementById('focus-ans') || {}).value || '';
   if (!ok || !ans.trim()) return;
+  const refused = await _focusClaimAnswer(item, seen.revision);
+  if (refused) { showToast(refused); return; }
   if (sess) { try { await _focusSend(sess, '[Ethan, re ' + item.id + '] ' + ans); } catch(e) {} }
   await _focusPatch(item.id, { desc_append: '`answered` Ethan: ' + ans });
   await _focusResolveTag(item);
@@ -29287,6 +29336,12 @@ async function _focusAnswer() {
 }
 async function _focusDecide(verdict) {
   const item = _focusList[_focusIdx]; if (!item) return;
+  // Read at the click: the decision is bound to the revision the card asks
+  // as it is made, and claimed only if it still asks it.
+  const seen = await _focusObserveQuestion(item);
+  if (!seen) { showToast('Could not read the question on ' + item.id + '; nothing was sent.'); return; }
+  const refused = await _focusClaimAnswer(item, seen.revision);
+  if (refused) { showToast(refused); return; }
   await _focusPatch(item.id, { desc_append: '`decision` Ethan ' + verdict.toUpperCase() + ' ' + new Date().toISOString().slice(0,10) });
   if (item.session) { try { await _focusSend(item.session, '[Ethan decision on ' + item.id + '] ' + verdict.toUpperCase() + ' — proceed accordingly.'); } catch(e) {} }
   await _focusResolveTag(item);
