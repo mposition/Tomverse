@@ -1,4 +1,5 @@
 pub mod board_driver;
+pub mod dm_relay;
 pub mod executor;
 pub mod local_card;
 pub mod orchestrator_halt;
