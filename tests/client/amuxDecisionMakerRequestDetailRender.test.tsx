@@ -8,6 +8,7 @@ import {
   DM_ADMIN_REQUEST_LIST_HREF,
   type DmAdminRequestDetailView,
 } from "@/components/admin/AmuxDecisionMakerRequestDetailPanel";
+import { dmReportInstant } from "@/components/admin/AmuxDecisionMakerReportPanel";
 import {
   adminAmuxDecisionMakerRequestDetailMessages,
   adminAmuxDecisionMakerRequestsMessages,
@@ -103,6 +104,7 @@ const row = (overrides: Record<string, unknown>): DmAdminRequestRow => {
     delivered: false,
     deliveryOutcomeKind: null,
     deliveryResolution: null,
+    cleanupUnknownAtEpochMs: null,
     ...overrides,
   });
   assert.ok(parsed);
@@ -150,6 +152,28 @@ for (const locale of ["en", "ko"] as const) {
     // Each option as the card worded it.
     const options = textBy(tree, "amux-dm-detail-options");
     assert.ok(options.includes("Model id only") && options.includes("Model id and locale"));
+  });
+
+  test(`${locale}: a request whose cleanup was not confirmed says when, and what to check, without naming a path`, () => {
+    const at = NOW - 90_000;
+    const tree = AmuxDecisionMakerRequestDetailView({
+      m,
+      list,
+      view: detail({ row: row({ cleanupUnknownAtEpochMs: at }) }),
+    });
+    const ids = propsOf(tree).map((props) => props["data-testid"]).filter((id): id is string => typeof id === "string");
+    // It comes before the card and the proposal, as the irreversible mark does.
+    assert.ok(ids.indexOf("amux-dm-detail-cleanup-unknown") >= 0);
+    assert.ok(ids.indexOf("amux-dm-detail-cleanup-unknown") < ids.indexOf("amux-dm-detail-card"));
+    assert.ok(ids.indexOf("amux-dm-detail-cleanup-unknown") < ids.indexOf("amux-dm-detail-proposal"));
+    assert.equal(textBy(tree, "amux-dm-detail-cleanup-unknown-at"), m.cleanupUnknownAt(dmReportInstant(at)));
+    assert.equal(textBy(tree, "amux-dm-detail-cleanup-unknown-steps"), m.cleanupUnknownSteps);
+    // The status is still the ledger's own.
+    assert.equal(textBy(tree, "amux-dm-detail-status").includes(list.statuses.proposal), true);
+    // Words only: no directory, path or command is part of the screen text.
+    assert.doesNotMatch(textBy(tree, "amux-decision-maker-request-detail"), /\/var\/|\/home\/|rm -|requests\//);
+    // Without a report there is no block.
+    assert.equal(byTestId(AmuxDecisionMakerRequestDetailView({ m, list, view: detail() }), "amux-dm-detail-cleanup-unknown").length, 0);
   });
 
   test(`${locale}: an irreversible proposal says so before the card and the proposal`, () => {

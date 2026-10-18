@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxDecisionMakerJudgmentPanel } from "@/components/admin/AmuxDecisionMakerJudgmentPanel";
+import { dmReportInstant } from "@/components/admin/AmuxDecisionMakerReportPanel";
 import {
   adminAmuxDecisionMakerRequestDetailMessages,
   adminAmuxDecisionMakerRequestsMessages,
@@ -143,6 +144,18 @@ export function AmuxDecisionMakerRequestDetailView({
         {field(m.status, list.statuses[status], "amux-dm-detail-status")}
         {field(m.delivery, list.deliveries[delivery], "amux-dm-detail-delivery")}
       </dl>
+
+      {/* §5: shown to every administrator who can open the detail; it names no directory or path. */}
+      {row.cleanupUnknownAtMs !== null ? (
+        <div
+          className="flex flex-col gap-2 rounded border border-amber-400 px-3 py-2 text-sm text-amber-900 dark:border-amber-600 dark:text-amber-200"
+          data-testid="amux-dm-detail-cleanup-unknown"
+        >
+          <p className="font-semibold">{m.cleanupUnknown}</p>
+          <p data-testid="amux-dm-detail-cleanup-unknown-at">{m.cleanupUnknownAt(dmReportInstant(row.cleanupUnknownAtMs))}</p>
+          <p data-testid="amux-dm-detail-cleanup-unknown-steps">{m.cleanupUnknownSteps}</p>
+        </div>
+      ) : null}
 
       {card === null ? (
         <p className={textClass} data-testid="amux-dm-detail-no-card">
