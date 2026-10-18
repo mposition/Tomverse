@@ -486,6 +486,10 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
   });
   assert.equal(await prisma.$transaction((tx) =>
     readAmuxSessionCheckoutReferenceInTx(tx,
+      { ...checkoutIdentity, requiredBudgetMode: "max_shadow" },
+      checkoutPin, keysFor(committedIdeaId))), null);
+  assert.equal(await prisma.$transaction((tx) =>
+    readAmuxSessionCheckoutReferenceInTx(tx,
       { ...checkoutIdentity, claimId: randomUUID() },
       checkoutPin, keysFor(committedIdeaId))), null);
   assert.equal(await prisma.$transaction((tx) =>
@@ -1301,6 +1305,10 @@ test("session stop poll follows the exact active claim and stops after settlemen
       claimId: claim.claimId, reservationId: reservation.reservationId, stop: false,
     });
     await assert.rejects(readAmuxSessionAnalysisStopState(tx,
+      claim.claimId, reservation.reservationId, ideaId, "max_shadow"),
+    (error: unknown) => error instanceof AmuxSessionAnalysisStopReadError &&
+      error.code === "not_found");
+    await assert.rejects(readAmuxSessionAnalysisStopState(tx,
       claim.claimId, randomUUID(), ideaId),
     (error: unknown) => error instanceof AmuxSessionAnalysisStopReadError &&
       error.code === "not_found");
@@ -1697,6 +1705,21 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
         pinnedCommitSha: maxPinnedSha }, keysFor(ideaId)));
     assert.equal(maxReference?.repository, "mposition/Tomverse");
     assert.equal(maxReference?.pinnedCommitSha, maxPinnedSha);
+    assert.equal(await prisma.$transaction((tx) =>
+      readAmuxSessionCheckoutReferenceInTx(tx, {
+        ...readIdentity, referenceOrdinal: 0,
+        requiredBudgetMode: "bounded" },
+      { referenceCount: maxPin.referenceCount,
+        pinnedCommitSha: maxPinnedSha }, keysFor(ideaId))), null);
+    assert.deepEqual(await prisma.$transaction((tx) =>
+      readAmuxSessionAnalysisStopState(tx, claimId,
+        reservation.reservationId, ideaId, "max_shadow")),
+    { claimId, reservationId: reservation.reservationId, stop: false });
+    await assert.rejects(prisma.$transaction((tx) =>
+      readAmuxSessionAnalysisStopState(tx, claimId,
+        reservation.reservationId, ideaId, "bounded")),
+    (error: unknown) => error instanceof AmuxSessionAnalysisStopReadError &&
+      error.code === "not_found");
     const wrongCredentialResponse = await postMaxIdeaRoute(new Request(
       ideaEndpoint, { method: "POST", headers: {
         authorization: "Bearer syntheticV4Secret_0123456789abcdefgh",
@@ -1746,6 +1769,10 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     }
   }
   assert.equal(outcome.status, "succeeded");
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxSessionAnalysisStopState(tx, claimId,
+      reservation.reservationId, ideaId, "max_shadow")),
+  { claimId, reservationId: reservation.reservationId, stop: true });
   assert.equal(await prisma.$transaction((tx) =>
     readAmuxV19MaxIdeaInTx(tx, { reservationId: reservation.reservationId,
       ideaId, claimId }, keysFor(ideaId))), null,

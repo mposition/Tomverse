@@ -52,7 +52,7 @@ export async function POST(request: Request): Promise<Response> {
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
   try {
     const reference = await readAmuxSessionCheckoutReference({ ...body,
-      ...(maxAuthorized ? { requiredBudgetMode: "max_shadow" as const } : {}) });
+      requiredBudgetMode: maxAuthorized ? "max_shadow" : "bounded" });
     return reference ? amuxJsonNoStore(reference) :
       amuxJsonNoStore({ error: "not_ready" }, 409);
   } catch {

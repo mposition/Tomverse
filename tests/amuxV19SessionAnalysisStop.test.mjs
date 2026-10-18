@@ -3,7 +3,8 @@ import test from "node:test";
 
 import { shouldAmuxSessionAnalysisStop } from
   "../lib/amux/ideaSessionAnalysisStopRead.ts";
-import { shouldStopAmuxV19SessionAnalysis } from
+import { shouldStopAmuxV19SessionAnalysis,
+  shouldStopAmuxV19MaxSessionAnalysis } from
   "../lib/amux/ideaLocalSessionAnalysisStopPoll.mjs";
 import { AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalSessionAnalysisQueuePoll.mjs";
@@ -77,6 +78,33 @@ test("session stop client accepts only exact pinned continue receipt", async () 
   }
 });
 
+test("Max stop client uses only its dedicated credential and stops on missing auth", async () => {
+  const originName = AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV;
+  const secretName = "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET";
+  const previousOrigin = process.env[originName];
+  const previousSecret = process.env[secretName];
+  const maxSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
+  const base = { origin, claimId, reservationId, ideaId };
+  try {
+    process.env[originName] = origin;
+    delete process.env[secretName];
+    assert.equal(await shouldStopAmuxV19MaxSessionAnalysis({ ...base,
+      fetchImpl: async () => { throw new Error("unexpected network"); } }), true);
+    process.env[secretName] = maxSecret;
+    assert.equal(await shouldStopAmuxV19MaxSessionAnalysis({ ...base,
+      fetchImpl: async (_url, request) => {
+        assert.equal(request.headers.authorization, `Bearer ${maxSecret}`);
+        assert.equal(request.headers["x-amux-agent-id"], "amux-intake-max");
+        return Response.json({ claimId, reservationId, stop: false });
+      } }), false);
+  } finally {
+    if (previousOrigin === undefined) delete process.env[originName];
+    else process.env[originName] = previousOrigin;
+    if (previousSecret === undefined) delete process.env[secretName];
+    else process.env[secretName] = previousSecret;
+  }
+});
+
 test("session stop route admits exact IDs and denies unauthorised or malformed polls", async () => {
   const imported = await import(
     "../app/api/internal/amux/v19/session-analysis-stop/route.ts");
@@ -84,7 +112,10 @@ test("session stop route admits exact IDs and denies unauthorised or malformed p
   const secretKey = "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET";
   const readKey = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ";
   const syncKey = "TOMVERSE_AMUX_SYNC_SECRET";
-  const previous = [secretKey, readKey, syncKey].map((key) =>
+  const maxSecretKey = "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET";
+  const maxReadKey = "TOMVERSE_AMUX_V19_MAX_STOP_POLL_READ";
+  const previous = [secretKey, readKey, syncKey,
+    maxSecretKey, maxReadKey].map((key) =>
     [key, process.env[key]]);
   const endpoint = "https://tomverse.example/api/internal/amux/v19/session-analysis-stop";
   const headers = { authorization: `Bearer ${agentSecret}`,
@@ -123,6 +154,13 @@ test("session stop route admits exact IDs and denies unauthorised or malformed p
       assert.equal(valid.status, 200);
       assert.deepEqual(await valid.json(), { claimId, reservationId, stop: false });
       assert.equal(dbCalls, 1);
+      process.env[maxSecretKey] = "syntheticMaxLauncherSecret_0123456789abcdefgh";
+      const maxHeaders = { authorization: `Bearer ${process.env[maxSecretKey]}`,
+        "x-amux-agent-id": "amux-intake-max" };
+      assert.equal((await GET(request(query, maxHeaders))).status, 409);
+      process.env[maxReadKey] = "enabled";
+      assert.equal((await GET(request(query, maxHeaders))).status, 200);
+      assert.equal(dbCalls, 2);
     } finally {
       prisma.$transaction = transaction;
     }

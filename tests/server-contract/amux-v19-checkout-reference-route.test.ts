@@ -84,7 +84,7 @@ test("dedicated Max credential requires its switch and max-shadow claim mode", a
     referenceOrdinal: 0, requiredBudgetMode: "max_shadow" });
   assert.equal((await route.POST(post())).status, 200);
   assert.deepEqual(received, { ideaId, reservationId, claimId,
-    referenceOrdinal: 0 });
+    referenceOrdinal: 0, requiredBudgetMode: "bounded" });
 });
 
 test("checkout reference requires an exact claim and bounded request", async () => {
@@ -107,7 +107,7 @@ test("checkout reference returns one no-store target and hides read failures", a
   assert.match(response.headers.get("cache-control") ?? "", /no-store/);
   assert.deepEqual(await response.json(), reference);
   assert.deepEqual(received, { ideaId, reservationId, claimId,
-    referenceOrdinal: 0 });
+    referenceOrdinal: 0, requiredBudgetMode: "bounded" });
   missing = true;
   const notReady = await route.POST(post());
   assert.equal(notReady.status, 409);

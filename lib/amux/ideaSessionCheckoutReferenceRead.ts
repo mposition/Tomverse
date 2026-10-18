@@ -21,7 +21,7 @@ const PIN_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
  * repository/PR identity. Neither a queue hint nor the caller names a repo. */
 export async function readAmuxSessionCheckoutReference(input: {
   reservationId: string; ideaId: string; claimId: string;
-  referenceOrdinal: number; requiredBudgetMode?: "max_shadow";
+  referenceOrdinal: number; requiredBudgetMode?: "bounded" | "max_shadow";
 }): Promise<AmuxSessionCheckoutReference | null> {
   const pin = await readAmuxSessionReferencePin(input);
   if (!pin || !pin.pinnedCommitSha) return null;
@@ -40,7 +40,7 @@ export async function readAmuxSessionCheckoutReference(input: {
 export async function readAmuxSessionCheckoutReferenceInTx(
   tx: Prisma.TransactionClient,
   input: { reservationId: string; ideaId: string; claimId: string;
-    referenceOrdinal: number; requiredBudgetMode?: "max_shadow" },
+    referenceOrdinal: number; requiredBudgetMode?: "bounded" | "max_shadow" },
   pin: { referenceCount: number; pinnedCommitSha: string },
   keys: AmuxContentKeys,
 ): Promise<AmuxSessionCheckoutReference | null> {
