@@ -1198,11 +1198,15 @@ test("session stop poll follows the exact active claim and stops after settlemen
       runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
     });
     assert.deepEqual(await readAmuxSessionAnalysisStopState(tx,
-      claim.claimId, reservation.reservationId), {
+      claim.claimId, reservation.reservationId, ideaId), {
       claimId: claim.claimId, reservationId: reservation.reservationId, stop: false,
     });
     await assert.rejects(readAmuxSessionAnalysisStopState(tx,
-      claim.claimId, randomUUID()),
+      claim.claimId, randomUUID(), ideaId),
+    (error: unknown) => error instanceof AmuxSessionAnalysisStopReadError &&
+      error.code === "not_found");
+    await assert.rejects(readAmuxSessionAnalysisStopState(tx,
+      claim.claimId, reservation.reservationId, randomUUID()),
     (error: unknown) => error instanceof AmuxSessionAnalysisStopReadError &&
       error.code === "not_found");
     await commitAmuxSessionBudgetOutcome(tx, {
@@ -1210,7 +1214,7 @@ test("session stop poll follows the exact active claim and stops after settlemen
       inputTokens: 10, outputTokens: 1,
     });
     assert.equal((await readAmuxSessionAnalysisStopState(tx,
-      claim.claimId, reservation.reservationId)).stop, true);
+      claim.claimId, reservation.reservationId, ideaId)).stop, true);
     throw rollback;
   }), (error: unknown) => error === rollback);
 });

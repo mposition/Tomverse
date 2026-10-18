@@ -72,7 +72,7 @@ test("checkout supervisor binds its stop check to the exact claim", async () => 
   assert.equal(typeof stopCheck, "function");
   assert.equal(await stopCheck(), false);
   assert.deepEqual(urls, [
-    `https://tomverse.test/api/internal/amux/v19/session-analysis-stop?claimId=${claimId}&reservationId=${reservationId}`,
+    `https://tomverse.test/api/internal/amux/v19/session-analysis-stop?claimId=${claimId}&reservationId=${reservationId}&ideaId=${ideaId}`,
   ]);
   const mutable = { ...base };
   const pinned = bindAmuxV19ClaimStopCheck(mutable);
@@ -81,6 +81,8 @@ test("checkout supervisor binds its stop check to the exact claim", async () => 
   assert.equal(urls[1], urls[0]);
   assert.equal(bindAmuxV19ClaimStopCheck({ ...base,
     reservationId: undefined }), null);
+  assert.equal(bindAmuxV19ClaimStopCheck({ ...base,
+    ideaId: undefined }), null);
   assert.equal(bindAmuxV19ClaimStopCheck({ ...base,
     origin: "https://other.test/" }), null);
   assert.equal(await bindAmuxV19ClaimStopCheck({ ...base,
