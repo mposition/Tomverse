@@ -67,6 +67,10 @@ import { POST as postMaxUnknownRoute } from
   "@/app/api/internal/amux/v19/analysis-budget/unknown/route";
 import { GET as getMaxPriceRoute } from
   "@/app/api/internal/amux/v19/analysis-price/route";
+import { POST as postMaxIdeaRoute } from
+  "@/app/api/internal/amux/v19/analysis-idea/route";
+import { readAmuxV19MaxIdeaInTx } from
+  "@/lib/amux/ideaSessionMaxIdeaRead";
 import { AMUX_V19_MAX_LAUNCHER_ID } from
   "@/lib/amux/ideaSessionMaxLauncherAuth";
 import { signAmuxV19MaxClaimAttestation } from
@@ -1634,6 +1638,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   const envNames = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
+    "TOMVERSE_AMUX_V19_SESSION_MAX_IDEA_READ",
     "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ"] as const;
   const oldEnv = Object.fromEntries(envNames.map((name) =>
     [name, process.env[name]]));
@@ -1652,6 +1657,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
     process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE = "enabled";
     process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
+    process.env.TOMVERSE_AMUX_V19_SESSION_MAX_IDEA_READ = "enabled";
     process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
     const headers = { authorization: `Bearer ${launcherSecret}`,
       "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID };
@@ -1670,6 +1676,24 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     assert.equal(readback.status, 200);
     assert.deepEqual(await readback.json(), { status: "committed", claimId,
       claimStatus: "in_flight" });
+    const ideaEndpoint = "https://test.invalid/api/internal/amux/v19/analysis-idea";
+    const readIdentity = { reservationId: reservation.reservationId,
+      ideaId, claimId };
+    assert.deepEqual(await prisma.$transaction((tx) =>
+      readAmuxV19MaxIdeaInTx(tx, readIdentity, keysFor(ideaId))),
+    { idea: inspect(ideaId).input.idea });
+    assert.equal(await prisma.$transaction((tx) =>
+      readAmuxV19MaxIdeaInTx(tx, { ...readIdentity,
+        claimId: randomUUID() }, keysFor(ideaId))), null);
+    const wrongCredentialResponse = await postMaxIdeaRoute(new Request(
+      ideaEndpoint, { method: "POST", headers: {
+        authorization: "Bearer syntheticV4Secret_0123456789abcdefgh",
+        "x-amux-agent-id": "amux-intake-max",
+        "content-type": "application/json" },
+      body: JSON.stringify({ reservationId: reservation.reservationId,
+        ideaId, claimId }),
+    }));
+    assert.equal(wrongCredentialResponse.status, 401);
   } finally {
     for (const name of envNames) {
       if (oldEnv[name] === undefined) delete process.env[name];
@@ -1710,6 +1734,10 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     }
   }
   assert.equal(outcome.status, "succeeded");
+  assert.equal(await prisma.$transaction((tx) =>
+    readAmuxV19MaxIdeaInTx(tx, { reservationId: reservation.reservationId,
+      ideaId, claimId }, keysFor(ideaId))), null,
+  "settled claim cannot read plaintext again");
   assert.equal(outcome.settledMicroUsd, "1002000");
   const row = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findUniqueOrThrow({
     where: { id: claim.claimId },
