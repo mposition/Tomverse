@@ -2,16 +2,11 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 
-import { getConfiguredAmuxV22WorkerCatalog, getConfiguredAmuxWorkerCatalog } from "@/lib/amux/workerCatalogVariables";
 import {
   amuxWorkerCapabilitiesFromNewestJsonOrThrow,
   amuxWorkerCapabilityNewestJsonSql,
 } from "@/lib/amux/workerCapabilityStore";
-import {
-  amuxWorkerDerivedCatalogAssignmentOpen,
-  deriveAmuxWorkerCatalog,
-  type AmuxDerivedCatalog,
-} from "@/lib/amux/workerDerivedCatalogCore";
+import { deriveAmuxWorkerCatalog, type AmuxDerivedCatalog } from "@/lib/amux/workerDerivedCatalogCore";
 import type { AmuxWorkerRegistration, AmuxWorkerRoleCeiling } from "@/lib/amux/workerRegistryCore";
 import {
   amuxWorkerLatchNewestJsonSql,
@@ -20,32 +15,60 @@ import {
 } from "@/lib/amux/workerRegistryStore";
 
 /**
- * Orchestration policy version 35, section 3 (stage R2c): the one place the
- * assignment paths ask for the worker catalog. With R2c's code latch off it
- * returns the catalog variables exactly as before and sends no statement.
- * With it on, it reads the registry, the stop latches and the capabilities in
- * one statement inside the caller's existing AMUX DB boundary (so each
- * boundary's statement ceiling grows by one) and derives the catalog.
+ * Orchestration policy version 35, section 3: the one place the assignment
+ * paths ask for the worker catalog. It reads the registry, the stop latches
+ * and the capabilities in one statement inside the caller's existing AMUX DB
+ * boundary and derives the catalog. Stage R2c (version 53) switched every
+ * consumer to it; stage R2e removed the catalog variables it replaced, so
+ * there is no other source to fall back to.
  *
- * A catalog that cannot be derived is absent (null) -- the same answer as an
- * unreadable catalog variable today, which assigns no one. A statement that
- * fails is not caught: inside the boundary it has aborted the transaction.
- * Rows the stores would not accept make the catalog absent, not shorter.
+ * A catalog that cannot be derived is absent (null), which assigns no one. A
+ * statement that fails is not caught: inside the boundary it has aborted the
+ * transaction. Rows the stores would not accept make the catalog absent, not
+ * shorter.
  */
 
 type CatalogReader = Pick<Prisma.TransactionClient, "$queryRaw">;
 
-export type AmuxConfiguredWorker = NonNullable<ReturnType<typeof getConfiguredAmuxWorkerCatalog>>[number];
-export type AmuxConfiguredV22Worker = NonNullable<ReturnType<typeof getConfiguredAmuxV22WorkerCatalog>>[number];
+/**
+ * One assignment catalog entry, in the shape its consumers read: a static row
+ * that starts stopped and not ready, which the live runtime snapshot overlays.
+ * The derived catalog never holds a worker back with the four hold flags --
+ * the registry's desired state and stop latch stand for them (version 35,
+ * section 2) -- so they are always false; the consumers still read them.
+ */
+export type AmuxConfiguredWorker = {
+  worker_name: string;
+  provider: string;
+  model: string | null;
+  routing_roles: string[];
+  tool_capabilities: string[];
+  running: boolean;
+  status: string;
+  dispatch_ready: boolean;
+  archived: boolean;
+  paused: boolean;
+  isolated: boolean;
+  blocked: boolean;
+};
+
+/**
+ * A worker's v22 one-shot profile overlaid on its entry: the entry's shape
+ * intersected with the profile's, as the overlay has always been typed.
+ */
+export type AmuxConfiguredV22Worker = AmuxConfiguredWorker & {
+  provider: "anthropic";
+  model: string;
+  routing_roles: string[];
+  tool_capabilities: Array<"repo_read" | "repo_write">;
+};
 
 export type AmuxAssignmentCatalogs = {
-  source: "variables" | "derived";
   workers: AmuxConfiguredWorker[] | null;
   v22: AmuxConfiguredV22Worker[] | null;
   /**
    * Each registered worker's role ceiling, for the selection-time check
-   * (orchestration policy version 45). Null while the catalog is the
-   * variables, which carry no ceiling, and when the catalog is absent.
+   * (orchestration policy version 45). Null when the catalog is absent.
    */
   ceilings: ReadonlyMap<string, AmuxWorkerRoleCeiling> | null;
 };
@@ -97,7 +120,7 @@ export async function readAmuxDerivedWorkerCatalog(client: CatalogReader): Promi
   return (await readAmuxRegistryAndDerivedCatalog(client)).derived;
 }
 
-/** The derived catalog in the shapes the catalog variables' readers return. */
+/** The derived catalog in the shapes the assignment paths read. */
 export function amuxDerivedCatalogAsConfigured(derived: AmuxDerivedCatalog): {
   workers: AmuxConfiguredWorker[];
   v22: AmuxConfiguredV22Worker[];
@@ -108,8 +131,8 @@ export function amuxDerivedCatalogAsConfigured(derived: AmuxDerivedCatalog): {
     model: entry.model,
     routing_roles: [...entry.routing_roles],
     tool_capabilities: [...entry.tool_capabilities],
-    // As the variables' parser does: a static row starts stopped and not
-    // ready, and the live runtime snapshot overlays it.
+    // A static row starts stopped and not ready; the live runtime snapshot
+    // overlays it.
     running: false,
     status: "stopped",
     dispatch_ready: false,
@@ -144,35 +167,19 @@ export type AmuxWorkerCatalogRefusal = "worker_catalog_unavailable" | "worker_no
 export async function amuxWorkerCatalogRefusal(
   client: CatalogReader,
   workerName: string,
-  open: boolean = amuxWorkerDerivedCatalogAssignmentOpen(),
 ): Promise<AmuxWorkerCatalogRefusal | null> {
-  const { workers } = await readAmuxAssignmentCatalogs(client, open);
+  const { workers } = await readAmuxAssignmentCatalogs(client);
   if (workers === null) return "worker_catalog_unavailable";
   return workers.some((worker) => worker.worker_name === workerName) ? null : "worker_not_configured";
 }
 
-/**
- * The assignment catalog for an assignment path. `open` is the code latch;
- * a test passes it to reach both branches.
- */
-export async function readAmuxAssignmentCatalogs(
-  client: CatalogReader,
-  open: boolean = amuxWorkerDerivedCatalogAssignmentOpen(),
-): Promise<AmuxAssignmentCatalogs> {
-  if (!open) {
-    return {
-      source: "variables",
-      workers: getConfiguredAmuxWorkerCatalog(),
-      v22: getConfiguredAmuxV22WorkerCatalog(),
-      ceilings: null,
-    };
-  }
+/** The assignment catalog for an assignment path: one statement, always. */
+export async function readAmuxAssignmentCatalogs(client: CatalogReader): Promise<AmuxAssignmentCatalogs> {
   const { registrations, derived } = await readAmuxRegistryAndDerivedCatalog(client);
   if (derived === null || registrations === null) {
-    return { source: "derived", workers: null, v22: null, ceilings: null };
+    return { workers: null, v22: null, ceilings: null };
   }
   return {
-    source: "derived",
     ...amuxDerivedCatalogAsConfigured(derived),
     ceilings: new Map(registrations.map((registration) => [registration.workerName, registration.roleCeiling])),
   };

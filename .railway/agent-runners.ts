@@ -175,18 +175,20 @@ const MARKETING_PUBLISHER_VARIABLES = ["MARKETING_PUBLISH_SECRET", "MARKETING_PU
 
 /**
  * The AMUX orchestrator's variables (development-agent-orchestration.md,
- * version 28): the four it had in production when it moved here, and
- * TOMVERSE_AMUX_CLAIM, which the claim-only mode reads (version 15). The names
- * that make it run commands -- TOMVERSE_AMUX_EXECUTE,
+ * version 28): three of the four it had in production when it moved here,
+ * and TOMVERSE_AMUX_CLAIM, which the claim-only mode reads (version 15). The
+ * names that make it run commands -- TOMVERSE_AMUX_EXECUTE,
  * TOMVERSE_AMUX_EXECUTOR_COMMANDS_JSON and the TOMVERSE_AMUX_WSL_* names -- are
  * absent, so an apply deletes any of them set here: commands run on the
- * dedicated runner (version 23), never in this service.
+ * dedicated runner (version 23), never in this service. The fourth,
+ * TOMVERSE_AMUX_WORKER_CATALOG_JSON, left the list at stage R2e (version 35,
+ * section 5): the orchestrator binary never read it and the app no longer
+ * does, so the next apply deletes it here too, as R2e requires.
  */
 const AMUX_ORCHESTRATOR_VARIABLES = [
   "TOMVERSE_AMUX_ENABLED",
   "TOMVERSE_AMUX_SYNC_SECRET",
   "TOMVERSE_INTERNAL_URL",
-  "TOMVERSE_AMUX_WORKER_CATALOG_JSON",
   "TOMVERSE_AMUX_CLAIM",
 ] as const;
 
