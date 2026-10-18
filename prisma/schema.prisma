@@ -9063,18 +9063,22 @@ model AmuxDecisionMakerJudgment {
 /// kill switch for the decision, the router's or the person's audit of the
 /// same transaction naming the event, an increasing sequence, READ COMMITTED
 /// only, no update or delete. `actorUserId` is the operator's id on a
-/// resolution and intentionally has no User foreign key.
+/// resolution and intentionally has no User foreign key. Since stage S2-2b4
+/// (migration 20261018120000_amux_decision_maker_delivery_gaps) the outcome
+/// may also be `delivery_not_sent`, one of the three once, with
+/// `notSentReason` from a closed list exactly on that kind.
 model AmuxDecisionMakerDeliveryEvent {
-  id          String   @id
-  sequence    BigInt   @unique @default(autoincrement())
-  requestId   String
-  kind        String
-  outcome     String?
-  actorKind   String
-  actorUserId String?
-  auditLogId  String   @unique
+  id            String   @id
+  sequence      BigInt   @unique @default(autoincrement())
+  requestId     String
+  kind          String
+  outcome       String?
+  actorKind     String
+  actorUserId   String?
+  notSentReason String?
+  auditLogId    String   @unique
   /// Overwritten by the insert trigger from the database clock.
-  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
 
   request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)

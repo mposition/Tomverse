@@ -191,6 +191,55 @@ export type DmDeliveryCandidate =
     };
 
 /**
+ * Stage S2-2b4 (§9): a delivery decision with no outcome, as the bridge reads
+ * it at its start -- the request, the database clock of the decision, and §9's
+ * binding the local AMUX looks up: the card and question revision whose answer
+ * record it reads, the session whose receipt of `messageId` it reads and which
+ * it pauses for an unknown outcome. No answer: nothing here is sent again.
+ */
+export type DmUnsettledDelivery = {
+  status: "unsettled";
+  requestId: string;
+  decidedAtMs: number;
+  cardId: string;
+  questionRevision: number;
+  askingWorkerId: string;
+  session: string;
+  sessionAttempt: number;
+  messageId: string;
+};
+
+/**
+ * The unsettled delivery from the decision and the request's state, or null
+ * when they do not agree with what the stores could have written: a decision
+ * follows only a confirmation that closed its own request (§2-6), of a request
+ * routed to a DM, with the binding's identifiers in the ledger's grammar.
+ */
+export const dmUnsettledDelivery = (input: {
+  decision: { requestId: string; decidedAtMs: number };
+  state: DmRequestState | null;
+}): DmUnsettledDelivery | null => {
+  const { decision, state } = input;
+  if (!state || state.requestId !== decision.requestId) return null;
+  if (state.route !== "dm_proposal" || !isDmConfirmingJudgmentKind(state.closing)) return null;
+  if (!Number.isSafeInteger(decision.decidedAtMs) || decision.decidedAtMs < 0) return null;
+  const { cardId, askingWorkerId, amuxSessionId: session, amuxSessionAttempt: sessionAttempt } = state.binding;
+  if (!CARD_ID.test(cardId) || !CARD_ID.test(askingWorkerId) || !CARD_ID.test(session)) return null;
+  if (!Number.isSafeInteger(sessionAttempt) || sessionAttempt < 0) return null;
+  return {
+    status: "unsettled",
+    requestId: decision.requestId,
+    decidedAtMs: decision.decidedAtMs,
+    cardId,
+    questionRevision: state.binding.questionRevision,
+    askingWorkerId,
+    session,
+    sessionAttempt,
+    messageId: dmDeliveryMessageId(decision.requestId),
+  };
+};
+
+/**
  * What a confirmation gives the bridge, from the four reads the delivery read
  * composes: the confirmation itself, the request's state, its terminal
  * result's detail, and its bodies. Null when the reads do not agree with what

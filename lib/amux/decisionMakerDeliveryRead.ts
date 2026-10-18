@@ -5,13 +5,16 @@ import type { Prisma } from "@prisma/client";
 import { readDecisionMakerBodies, readDecisionMakerResultDetail } from "@/lib/amux/decisionMakerBodyStore";
 import {
   dmDeliveryCandidate,
+  dmUnsettledDelivery,
   type DmDeliveryBodies,
   type DmDeliveryCandidate,
   type DmDeliveryCursor,
+  type DmUnsettledDelivery,
 } from "@/lib/amux/decisionMakerDeliveryCore";
 import {
   DecisionMakerJudgmentWriteError,
   readNextDecisionMakerDeliveryJudgment,
+  readNextDecisionMakerUnsettledDelivery,
 } from "@/lib/amux/decisionMakerJudgmentStore";
 import { readDecisionMakerRequestState } from "@/lib/amux/decisionMakerRequestStore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
@@ -73,4 +76,28 @@ export async function readDecisionMakerDeliveryCandidate(
   const candidate = dmDeliveryCandidate({ judgment, state, detail, bodies });
   if (!candidate) throw new DecisionMakerJudgmentWriteError("state_unreadable");
   return candidate;
+}
+
+/**
+ * Stage S2-2b4 (§9): the oldest delivery decision with no outcome, with §9's
+ * binding -- what a bridge that stopped between a decision and its outcome
+ * left behind, and settles at its next start from the local AMUX's own records
+ * (the receipt of the request's message id, the question revision's answer
+ * record), never by sending again. Two statements on the caller's read
+ * transaction -- the decision from the judgment store, the request's state
+ * from the ledger's reader -- so the DB boundary is 2 + setup + fence
+ * (`decisionMakerDeliveryUnsettledRead`), pinned by
+ * tests/amuxDecisionMakerDelivery.test.mjs. It returns no answer and reads no
+ * switch: recording what already happened is allowed under the kill switch
+ * (§6's table).
+ */
+export async function readDecisionMakerUnsettledDelivery(
+  client: DeliveryReader,
+): Promise<{ status: "none" } | DmUnsettledDelivery> {
+  const decision = await readNextDecisionMakerUnsettledDelivery(client);
+  if (!decision) return { status: "none" };
+  const state = await readDecisionMakerRequestState(client, decision.requestId);
+  const unsettled = dmUnsettledDelivery({ decision, state });
+  if (!unsettled) throw new DecisionMakerJudgmentWriteError("state_unreadable");
+  return unsettled;
 }
