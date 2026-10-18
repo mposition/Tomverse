@@ -2055,7 +2055,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   검토 r-20261018-065705-65cb2a; `tests/amuxDecisionMakerDashboardAnswer.test.mjs`가 app.js의 함수를 직접 실행해 고정). typed revision이 없는
   카드는 claim할 것이 없고 그대로 보냅니다. worker 신원 header가 있는 요청은 운영자 claim을 할 수 없습니다. **전달된 답의 카드 기록이 실패하면**
   영수증(worker에게는 도착했으므로 사실)은 기록하되 relay가 `delivery_card_record_failed`로 멈춥니다 — 결정이 있는 요청은 다시 읽히지 않아
-  §7의 카드 기록이 영구히 빠지므로, 재시도 route 대신 명시적으로 멈춥니다(재시도는 bridge 재시작에도 남는 밀린 기록 저장소가 필요합니다). **남은 것(migration 필요, 이 조각에서 멈춤)**: 전달 결정 뒤 claim이 지거나 lane이 그 사이 거부해
+  docs/policy/amux-decision-maker.md §7의 카드 기록이 영구히 빠지므로, 재시도 route 대신 명시적으로 멈춥니다(재시도는 bridge 재시작에도 남는 밀린 기록 저장소가 필요합니다). **남은 것(migration 필요, 이 조각에서 멈춤)**: 전달 결정 뒤 claim이 지거나 lane이 그 사이 거부해
   아무것도 보내지 않은 경우를 앱의 전달 기록이 말할 어휘가 없습니다(영수증도 `unknown`도 사실이 아님). 그 경우 결정만 남고 relay가
   멈추며, 확인 단계가 그 창을 결정 직전 한 번의 왕복으로 줄입니다. bridge가 결정과 영수증 사이에 죽은 결정은 자동으로 정리하지 않으며,
   운영자의 직접 답이 먼저일 때 앱 요청을 닫는 것(docs/policy/amux-decision-maker.md §2-7 마지막 문장)도 아직 없습니다.
