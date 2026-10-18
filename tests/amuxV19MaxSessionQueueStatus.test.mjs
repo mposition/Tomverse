@@ -43,14 +43,16 @@ test("Linux Max queue entrypoint emits only a fixed refusal without credentials"
   const entry = fileURLToPath(new URL(
     "../scripts/amux-v19-max-session-queue-once.mjs", import.meta.url));
   const home = mkdtempSync(join(tmpdir(), "amux-max-queue-entry-"));
-  const env = { ...process.env, HOME: home };
+  const env = { ...process.env, HOME: home, NODE_NO_WARNINGS: "1" };
   delete env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET;
   delete env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN;
   try {
     const child = spawnSync(process.execPath, [entry], {
       encoding: "utf8", env, timeout: 5_000 });
+    assert.equal(child.error, undefined);
     assert.equal(child.status, 1);
     assert.equal(child.stdout, "AMUX_V19_MAX_SESSION_QUEUE_refused\n");
+    assert.equal(child.stderr, "");
   } finally {
     for (const path of [
       join(home, ".local/state/tomverse-amux-v19-max-analysis"),
