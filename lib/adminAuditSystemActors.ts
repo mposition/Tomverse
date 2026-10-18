@@ -128,6 +128,11 @@ export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET =
   "AmuxIdeaTrackedCheckoutEvidence" as const;
 export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_SCOPE =
   "tracked-checkout-evidence-v1" as const;
+/** Links an already fenced Max claim to the checkout proof in the same chain. */
+export const AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION =
+  "amux.v19.tracked_checkout.max_claim_bound" as const;
+export const AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_SCOPE =
+  "tracked-checkout-max-claim-bound-v1" as const;
 export const AMUX_V19_READ_MANIFEST_RECORDED_ACTION =
   "amux.v19.read_manifest.recorded" as const;
 export const AMUX_V19_READ_MANIFEST_RECORDED_TARGET =
@@ -286,6 +291,10 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V19_TRACKED_CHECKOUT_RECORDED_ACTION &&
       targetType === AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET) {
     return AMUX_V19_TRACKED_CHECKOUT_RECORDED_SCOPE;
+  }
+  if (action === AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION &&
+      targetType === AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET) {
+    return AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_SCOPE;
   }
   if (action === AMUX_V19_READ_MANIFEST_RECORDED_ACTION &&
       targetType === AMUX_V19_READ_MANIFEST_RECORDED_TARGET) {

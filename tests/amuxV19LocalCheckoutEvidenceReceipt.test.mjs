@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
 import { recordAmuxV19LocalCheckoutEvidence,
+  recordAmuxV19MaxLocalCheckoutEvidence,
   recordAmuxV19VerifiedCheckoutReceipts } from
   "../lib/amux/ideaLocalCheckoutEvidenceReceipt.mjs";
 
@@ -15,6 +16,10 @@ after(() => {
 
 const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
 const evidenceId = "fbd49038-b8e0-4796-8530-a2adcb7d0dbd";
+const maxClaim = { claimId: "8a58e063-374d-4c6c-b1bd-57e8daa55c48",
+  requestId: "a12ae2bc-5e33-44a2-9836-6a3648061820",
+  reservationId: "ceb12ab5-d7fb-482f-bc5b-feb279cc043d",
+  invocationOrdinal: 0 };
 const secret = "v19_evidence_agent_secret_01234567890123456789";
 const evidence = {
   ideaId, referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
@@ -155,4 +160,51 @@ test("unknown checkout proof never submits read paths", async () => {
     "POST /api/internal/amux/v19/checkout-evidence",
     "GET /api/internal/amux/v19/checkout-evidence",
   ]);
+});
+
+test("Max checkout proof requires a complete exact claim before network access", async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls += 1; throw new Error("unexpected network"); };
+  for (const maxClaimCandidate of [null,
+    { ...maxClaim, claimId: "bad" },
+    { ...maxClaim, invocationOrdinal: 2_147_483_648 },
+    { ...maxClaim, extra: "private" }]) {
+    assert.deepEqual(await recordAmuxV19MaxLocalCheckoutEvidence({
+      ...input(fetchImpl), maxClaim: maxClaimCandidate }), { kind: "refused" });
+  }
+  assert.equal(calls, 0);
+});
+
+test("Max checkout proof sends aggregate data under Max identity", async () => {
+  const fetchImpl = async (url, options) => {
+    assert.equal(url,
+      "https://tomverse.test/api/internal/amux/v19/max-checkout-evidence");
+    assert.equal(options.method, "POST");
+    assert.equal(options.headers["x-amux-agent-id"], "amux-intake-max");
+    assert.deepEqual(JSON.parse(options.body), { ...maxClaim, ...evidence });
+    assert.doesNotMatch(options.body, /docs\/guide|never send model text/);
+    return json({ evidenceId, ideaId, referenceOrdinal: 0 });
+  };
+  assert.deepEqual(await recordAmuxV19MaxLocalCheckoutEvidence({
+    ...input(fetchImpl), maxClaim }),
+  { kind: "recorded", evidenceId, via: "post" });
+});
+
+test("uncertain Max proof reads back its claim without retrying POST", async () => {
+  const methods = [];
+  const fetchImpl = async (url, options) => {
+    methods.push(options.method);
+    if (options.method === "POST") throw new Error("lost reply");
+    const query = new URL(url).searchParams;
+    for (const [key, value] of Object.entries(maxClaim)) {
+      assert.equal(query.get(key), String(value));
+    }
+    assert.equal(query.get("ideaId"), ideaId);
+    assert.equal(query.get("referenceOrdinal"), "0");
+    return json({ status: "recorded", evidenceId, ...evidence });
+  };
+  assert.deepEqual(await recordAmuxV19MaxLocalCheckoutEvidence({
+    ...input(fetchImpl), maxClaim }),
+  { kind: "recorded", evidenceId, via: "readback" });
+  assert.deepEqual(methods, ["POST", "GET"]);
 });
