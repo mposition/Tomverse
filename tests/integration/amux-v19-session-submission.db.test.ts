@@ -1687,15 +1687,16 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
         claimId: randomUUID() }, keysFor(ideaId))), null);
     const maxPin = await readAmuxSessionReferencePin({ ...readIdentity,
       referenceOrdinal: 0 });
-    if (!maxPin?.pinnedCommitSha) throw new Error("Max reference pin missing");
+    const maxPinnedSha = maxPin?.pinnedCommitSha;
+    if (!maxPinnedSha) throw new Error("Max reference pin missing");
     const maxReference = await prisma.$transaction((tx) =>
       readAmuxSessionCheckoutReferenceInTx(tx, {
         ...readIdentity, referenceOrdinal: 0,
         requiredBudgetMode: "max_shadow" },
       { referenceCount: maxPin.referenceCount,
-        pinnedCommitSha: maxPin.pinnedCommitSha }, keysFor(ideaId)));
+        pinnedCommitSha: maxPinnedSha }, keysFor(ideaId)));
     assert.equal(maxReference?.repository, "mposition/Tomverse");
-    assert.equal(maxReference?.pinnedCommitSha, maxPin.pinnedCommitSha);
+    assert.equal(maxReference?.pinnedCommitSha, maxPinnedSha);
     const wrongCredentialResponse = await postMaxIdeaRoute(new Request(
       ideaEndpoint, { method: "POST", headers: {
         authorization: "Bearer syntheticV4Secret_0123456789abcdefgh",
