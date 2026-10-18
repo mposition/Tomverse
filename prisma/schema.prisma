@@ -2445,6 +2445,9 @@ model AdminAuditLog {
   amuxIdeaSessionAnalysisReservations AmuxIdeaSessionAnalysisReservation[] @relation("AmuxIdeaSessionAnalysisReservationAudit")
   amuxV19SessionBudgetClaims AmuxIdeaSessionAnalysisBudgetClaim[] @relation("AmuxV19SessionBudgetClaimAudit")
   amuxV19SessionBudgetResolutions AmuxIdeaSessionAnalysisBudgetClaim[] @relation("AmuxV19SessionBudgetResolutionAudit")
+  amuxV19SessionAnalysisResults AmuxIdeaSessionAnalysisResult[] @relation("AmuxV19SessionAnalysisResultAudit")
+  amuxV19SessionResultOrphanClaims AmuxIdeaSessionResultOrphanKeyRetirement[] @relation("AmuxV19SessionResultOrphanClaimAudit")
+  amuxV19SessionResultOrphanDeletes AmuxIdeaSessionResultOrphanKeyRetirement[] @relation("AmuxV19SessionResultOrphanDeleteAudit")
   amuxIdeaSystemRegistrations AmuxIdeaSubmission[] @relation("AmuxIdeaSystemRegistrationAudit")
   amuxIdeaTrackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[] @relation("AmuxIdeaTrackedCheckoutAudit")
   amuxIdeaTrackedCheckoutReadManifest AmuxIdeaTrackedCheckoutReadManifest[] @relation("AmuxIdeaTrackedCheckoutReadManifestAudit")
@@ -9821,6 +9824,8 @@ model AmuxIdeaSubmission {
   registrationRefusals AmuxIdeaRegistrationRefusal[]
   trackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[]
   trackedCheckoutReadManifests AmuxIdeaTrackedCheckoutReadManifest[]
+  sessionAnalysisResults AmuxIdeaSessionAnalysisResult[]
+  sessionResultOrphanKeyRetirements AmuxIdeaSessionResultOrphanKeyRetirement[]
   readManifestKeyIntents AmuxIdeaReadManifestKeyIntent[]
   sessionAnalysisReservation AmuxIdeaSessionAnalysisReservation?
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
@@ -9885,6 +9890,7 @@ model AmuxIdeaTrackedCheckoutEvidence {
   audit AdminAuditLog      @relation("AmuxIdeaTrackedCheckoutAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   readManifest AmuxIdeaTrackedCheckoutReadManifest?
   readManifestKeyIntent AmuxIdeaReadManifestKeyIntent?
+  sessionAnalysisResults AmuxIdeaSessionAnalysisResult[]
 
   @@unique([ideaId, referenceOrdinal])
   @@index([ideaId, createdAt])
@@ -9910,6 +9916,7 @@ model AmuxIdeaTrackedCheckoutReadManifest {
   idea     AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [ideaId, referenceOrdinal], references: [ideaId, referenceOrdinal], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaTrackedCheckoutReadManifest_evidence_fkey")
   audit    AdminAuditLog @relation("AmuxIdeaTrackedCheckoutReadManifestAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sessionAnalysisResults AmuxIdeaSessionAnalysisResult[]
 
   @@unique([ideaId, referenceOrdinal])
   @@index([ideaId, createdAt])
@@ -10229,9 +10236,60 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
   priceVersion   AmuxIdeaAnalysisPriceVersion       @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_price_fkey")
   claimAudit     AdminAuditLog                      @relation("AmuxV19SessionBudgetClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_claim_audit_fkey")
   resolutionAudit AdminAuditLog?                    @relation("AmuxV19SessionBudgetResolutionAudit", fields: [resolutionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_resolution_audit_fkey")
+  analysisResult AmuxIdeaSessionAnalysisResult?
+  resultOrphanKeyRetirement AmuxIdeaSessionResultOrphanKeyRetirement?
 
   @@index([namespace, monthStart, status], map: "AmuxIdeaSessionAnalysisBudgetClaim_window_status_idx")
   @@unique([reservationId, invocationOrdinal], map: "AmuxIdeaSessionAnalysisBudgetClaim_reservation_ordinal_key")
+}
+
+/// One Max CLI output bound to its budget claim and observed reference. The
+/// body is encrypted under a claim-specific external key and purged on the
+/// idea's absolute retention clock; only digest and aggregate usage remain.
+model AmuxIdeaSessionAnalysisResult {
+  claimId          String    @id @db.Uuid
+  reservationId    String    @db.Uuid
+  ideaId           String
+  referenceOrdinal Int
+  evidenceId       String    @db.Uuid
+  manifestId       String    @db.Uuid
+  ciphertext       Bytes?
+  keyId            String?
+  keyVersion       Int?
+  digest           String
+  digestKeyId      String
+  inputTokens      Int
+  outputTokens     Int
+  auditLogId       String    @unique
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
+  bodyPurgedAt     DateTime? @db.Timestamptz(3)
+
+  claim    AmuxIdeaSessionAnalysisBudgetClaim @relation(fields: [claimId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea     AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [evidenceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  manifest AmuxIdeaTrackedCheckoutReadManifest @relation(fields: [manifestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  audit    AdminAuditLog @relation("AmuxV19SessionAnalysisResultAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([ideaId, createdAt])
+  @@index([bodyPurgedAt, createdAt])
+}
+
+/// Durable terminal fence for a Max claim whose external result key may have
+/// been created before a failed or uncertain result transaction.
+model AmuxIdeaSessionResultOrphanKeyRetirement {
+  claimId             String    @id @db.Uuid
+  ideaId              String
+  claimedAt           DateTime  @db.Timestamptz(3)
+  claimAuditLogId     String    @unique
+  keyDeletedAt        DateTime? @db.Timestamptz(3)
+  keyDeleteAuditLogId String?   @unique
+
+  claim AmuxIdeaSessionAnalysisBudgetClaim @relation(fields: [claimId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claimAudit AdminAuditLog @relation("AmuxV19SessionResultOrphanClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  keyDeleteAudit AdminAuditLog? @relation("AmuxV19SessionResultOrphanDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([keyDeletedAt, claimedAt])
 }
 
 /// One worst-case reservation for one exact, owner-confirmed preview. Unknown

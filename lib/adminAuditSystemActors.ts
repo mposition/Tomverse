@@ -147,6 +147,20 @@ export const AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION =
   "amux.v19.read_manifest.max_claim_bound" as const;
 export const AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_SCOPE =
   "read-manifest-max-claim-bound-v1" as const;
+export const AMUX_V19_SESSION_ANALYSIS_RESULT_ACTION =
+  "amux.v19.session_analysis.result_recorded" as const;
+export const AMUX_V19_SESSION_ANALYSIS_RESULT_TARGET =
+  "AmuxIdeaSessionAnalysisResult" as const;
+export const AMUX_V19_SESSION_ANALYSIS_RESULT_SCOPE =
+  "session-analysis-result-v1" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_CLAIM_ACTION =
+  "amux.v19.session_analysis.orphan_key_claimed" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_RETIRE_ACTION =
+  "amux.v19.session_analysis.orphan_key_retired" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_TARGET =
+  "AmuxIdeaSessionResultOrphanKeyRetirement" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_SCOPE =
+  "session-result-orphan-key-v1" as const;
 export const AMUX_V19_READ_MANIFEST_KEY_INTENT_SCOPE =
   "tracked-checkout-read-manifest-key-intent-v1" as const;
 export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION =
@@ -311,6 +325,15 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION &&
       targetType === AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET) {
     return AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_SCOPE;
+  }
+  if (action === AMUX_V19_SESSION_ANALYSIS_RESULT_ACTION &&
+      targetType === AMUX_V19_SESSION_ANALYSIS_RESULT_TARGET) {
+    return AMUX_V19_SESSION_ANALYSIS_RESULT_SCOPE;
+  }
+  if ((action === AMUX_V19_SESSION_RESULT_ORPHAN_KEY_CLAIM_ACTION ||
+       action === AMUX_V19_SESSION_RESULT_ORPHAN_KEY_RETIRE_ACTION) &&
+      targetType === AMUX_V19_SESSION_RESULT_ORPHAN_KEY_TARGET) {
+    return AMUX_V19_SESSION_RESULT_ORPHAN_KEY_SCOPE;
   }
   if (action === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION &&
       targetType === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_TARGET) {

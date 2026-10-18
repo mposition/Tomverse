@@ -27,6 +27,13 @@ import {
   type AmuxOperatingScopeAuthority,
 } from "@/lib/amux/ideaOperatingScopeStore";
 import { commitAmuxDueRawIdeaPurge } from "@/lib/amux/ideaRawRetentionService";
+import { readAmuxContentPurgeOutcome } from
+  "@/lib/amux/ideaContentKeyRetirementService";
+import { commitAmuxDueSessionAnalysisResultPurge,
+  purgeDueAmuxSessionAnalysisResults } from
+  "@/lib/amux/ideaSessionAnalysisResultRetention";
+import { purgeDueAmuxOrphanSessionResultKeys } from
+  "@/lib/amux/ideaSessionAnalysisResultOrphanRetention";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { commitAmuxIdeaSessionCancellation,
   readAmuxIdeaSessionCancellationReceipt,
@@ -93,6 +100,10 @@ import { readAmuxSessionAnalysisStopState,
 import { AmuxSessionBudgetSettlementError,
   commitAmuxSessionBudgetOutcome } from
   "@/lib/amux/ideaSessionAnalysisBudgetSettlementService";
+import { commitAmuxMaxSessionResult,
+  preflightAmuxMaxSessionResult,
+  readAmuxMaxSessionResultReceipt } from
+  "@/lib/amux/ideaSessionAnalysisResultService";
 import { AmuxSessionBudgetResolutionError,
   commitAmuxSessionBudgetUnknownResolution,
   readAmuxSessionBudgetResolution } from
@@ -1854,6 +1865,41 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   const before = await prisma.$transaction((tx) => readAnalysisBudgetSnapshot(tx));
   assert.equal(BigInt(before.spentMicroUsd) + BigInt(before.reservedMicroUsd),
     BigInt(before.limitMicroUsd));
+  const resultIdentity = { claimId: claim.claimId,
+    requestId: claim.requestId, reservationId: claim.reservationId,
+    ideaId, invocationOrdinal: 0, referenceOrdinal: 0,
+    evidenceId: maxEvidenceId, manifestId: maxManifestId };
+  await assert.rejects(prisma.$transaction((tx) =>
+    preflightAmuxMaxSessionResult(tx, { ...resultIdentity,
+      evidenceId: randomUUID() })));
+  const resultKeys = { masterKeyId: amuxContentUnitKeyId({
+    ideaId, purpose: "analysis_result", subjectId: claim.claimId }),
+    masterKeyVersion: 1, masterKey: randomBytes(32),
+    digestKeyId: "synthetic-max-result-digest", digestKey: randomBytes(32) };
+  let savedResult: Awaited<ReturnType<typeof commitAmuxMaxSessionResult>>;
+  try {
+    savedResult = await prisma.$transaction((tx) =>
+      commitAmuxMaxSessionResult(tx, { ...resultIdentity,
+        rawModelOutput: "{\"units\":[]}", inputTokens: 1001,
+        outputTokens: 1, keys: resultKeys }));
+  } finally {
+    resultKeys.masterKey.fill(0);
+    resultKeys.digestKey.fill(0);
+  }
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxMaxSessionResultReceipt(tx, resultIdentity)), {
+    status: "committed", claimId: claim.claimId,
+    digest: savedResult.digest, digestKeyId: savedResult.digestKeyId,
+  });
+  const storedResult = await prisma.amuxIdeaSessionAnalysisResult.findUniqueOrThrow({
+    where: { claimId: claim.claimId },
+  });
+  assert.ok(storedResult.ciphertext && storedResult.ciphertext.length > 0);
+  assert.equal(storedResult.inputTokens, 1001);
+  assert.equal(storedResult.outputTokens, 1);
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: ideaId }, select: { state: true },
+  })).state, "analyzing");
   const resultEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
@@ -1876,8 +1922,13 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
           ideaId, invocationOrdinal: 0, outcome: "verified_success",
           inputTokens: 1001, outputTokens: 1 }),
       }));
-    assert.equal(response.status, 200);
-    outcome = await response.json();
+    assert.equal(response.status, 409,
+      "a settled claim cannot be re-POSTed through the usage-only writer");
+    const settled = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findUniqueOrThrow({
+      where: { id: claim.claimId }, select: { status: true,
+        settledMicroUsd: true } });
+    outcome = { status: settled.status,
+      settledMicroUsd: String(settled.settledMicroUsd) };
   } finally {
     for (const name of resultEnv) {
       if (resultOldEnv[name] === undefined) delete process.env[name];
@@ -1998,4 +2049,49 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     }));
   assert.equal(ownerResolution.status, "released");
   assert.equal(ownerResolution.settledMicroUsd, "0");
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueSessionAnalysisResultPurge(tx, claim.claimId)), "skipped");
+  assert.deepEqual(await purgeDueAmuxOrphanSessionResultKeys(async () => {
+    throw new Error("premature orphan retirement");
+  }), { keysDeleted: 0, scanned: 0, batchLimit: 8 });
+  const oldSubmission = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+  const oldDeadline = new Date(oldSubmission.getTime() + 7 * 24 * 60 * 60_000);
+  // Synthetic clock advancement only in this disposable test DB. The real
+  // identity trigger is restored before exercising the retention guards.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+    for (const targetId of [ideaId, unknownIdeaId]) {
+      await tx.amuxIdeaSubmission.update({ where: { id: targetId }, data: {
+        submittedAt: oldSubmission, analysisDeadlineAt: oldDeadline,
+        rawPurgeAfter: oldDeadline,
+        rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
+        sourceProvenanceCiphertext: null,
+        sourceProvenanceKeyId: null, sourceProvenanceKeyVersion: null,
+        rawPurgedAt: new Date(),
+      } });
+    }
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" ENABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+  });
+  await assert.rejects(prisma.amuxIdeaSessionAnalysisResult.update({
+    where: { claimId: claim.claimId }, data: { ciphertext: null,
+      keyId: null, keyVersion: null, bodyPurgedAt: new Date() },
+  }), /retirement is missing/);
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueSessionAnalysisResultPurge(tx, claim.claimId)), "purged");
+  assert.equal(await readAmuxContentPurgeOutcome({ ideaId,
+    purpose: "analysis_result", subjectId: claim.claimId }), "purged");
+  const retiredKeys: string[] = [];
+  assert.deepEqual(await purgeDueAmuxSessionAnalysisResults(async (key) => {
+    retiredKeys.push(key.subjectId);
+  }), { bodiesPurged: 0, keysDeleted: 1, scanned: 1, batchLimit: 8 });
+  assert.deepEqual(retiredKeys, [claim.claimId]);
+  const fencedKeys: string[] = [];
+  const orphan = await purgeDueAmuxOrphanSessionResultKeys(async (key) => {
+    fencedKeys.push(key.subjectId);
+  }, async () => {}, async () => {});
+  assert.deepEqual(orphan, { keysDeleted: 1, scanned: 1, batchLimit: 8 });
+  assert.deepEqual(fencedKeys, [unknownClaim.claimId]);
+  const orphanRow = await prisma.amuxIdeaSessionResultOrphanKeyRetirement
+    .findUniqueOrThrow({ where: { claimId: unknownClaim.claimId } });
+  assert.ok(orphanRow.keyDeletedAt && orphanRow.keyDeleteAuditLogId);
 });

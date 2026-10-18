@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { finishAmuxV19MaxTrackedCheckoutWithReceipts } from
+import { finalizeAmuxV19MaxSessionResultWithReceipts,
+  finishAmuxV19MaxTrackedCheckoutWithReceipts } from
   "../lib/amux/ideaLocalMaxTrackedCheckoutReceipts.mjs";
 
 const names = ["TOMVERSE_AMUX_V4_ANALYSIS_APP_ORIGIN",
@@ -71,6 +72,49 @@ test("a verified Max observation releases output after both claim-bound receipts
     "GET /api/internal/amux/v19/session-analysis-stop",
     "POST /api/internal/amux/v19/max-read-manifest",
     "GET /api/internal/amux/v19/session-analysis-stop",
+  ]);
+});
+
+test("Max output is posted only after both exact source receipts", async () => {
+  const calls = [];
+  const digest = "c".repeat(64);
+  const result = await finalizeAmuxV19MaxSessionResultWithReceipts(
+    input(async (url, options) => {
+      const path = new URL(url).pathname;
+      calls.push(`${options.method} ${path}`);
+      if (path.endsWith("/session-analysis-stop")) return Response.json({
+        claimId: identity.claimId, reservationId: identity.reservationId,
+        stop: false });
+      const body = JSON.parse(options.body);
+      if (path.endsWith("/max-checkout-evidence")) {
+        assert.doesNotMatch(options.body, /private answer/);
+        return Response.json({ evidenceId, ideaId: identity.ideaId,
+          referenceOrdinal: 0 });
+      }
+      if (path.endsWith("/max-read-manifest")) {
+        assert.doesNotMatch(options.body, /private answer/);
+        return Response.json({ manifestId: body.manifestId,
+          ideaId: identity.ideaId, referenceOrdinal: 0, fileCount: 1 });
+      }
+      assert.ok(path.endsWith("/session-analysis-result"));
+      assert.equal(body.rawModelOutput, "private answer");
+      assert.equal(body.evidenceId, evidenceId);
+      assert.match(body.manifestId, /^[a-f0-9-]{36}$/);
+      return Response.json({ claimId: identity.claimId,
+        resultAuditId: "clsyntheticresult123",
+        settlementAuditId: "clsyntheticsettlement123",
+        digest, digestKeyId: "synthetic-digest" });
+    }), observed);
+  assert.deepEqual(result, { kind: "recorded", recovered: false,
+    retryWrite: false, digest, digestKeyId: "synthetic-digest" });
+  assert.deepEqual(calls, [
+    "GET /api/internal/amux/v19/session-analysis-stop",
+    "POST /api/internal/amux/v19/max-checkout-evidence",
+    "GET /api/internal/amux/v19/session-analysis-stop",
+    "POST /api/internal/amux/v19/max-read-manifest",
+    "GET /api/internal/amux/v19/session-analysis-stop",
+    "GET /api/internal/amux/v19/session-analysis-stop",
+    "POST /api/internal/amux/v19/session-analysis-result",
   ]);
 });
 

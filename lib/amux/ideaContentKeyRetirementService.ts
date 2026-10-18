@@ -13,7 +13,8 @@ import { deleteAmuxContentUnitKey,
 
 export type AmuxRetirableContent = AmuxContentKeyIdentity & {
   purpose: "transfer_payload" | "analysis_freeform" | "analysis_draft" |
-    "task_result" | "task_patch" | "repository_read_manifest";
+    "task_result" | "task_patch" | "repository_read_manifest" |
+    "analysis_result";
 };
 
 export class AmuxContentRetirementError extends Error {
@@ -66,6 +67,15 @@ export async function recordAmuxContentBodyPurge(tx: Prisma.TransactionClient,
 
 async function sourcePurgedAt(tx: Prisma.TransactionClient,
   target: AmuxRetirableContent): Promise<Date | null> {
+  if (target.purpose === "analysis_result") {
+    const row = await tx.amuxIdeaSessionAnalysisResult.findUnique({
+      where: { claimId: target.subjectId },
+      select: { ideaId: true, ciphertext: true, keyId: true,
+        keyVersion: true, bodyPurgedAt: true },
+    });
+    return row?.ideaId === target.ideaId && row.ciphertext === null &&
+      row.keyId === null && row.keyVersion === null ? row.bodyPurgedAt : null;
+  }
   if (target.purpose === "repository_read_manifest") {
     const row = await tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
       where: { id: target.subjectId },

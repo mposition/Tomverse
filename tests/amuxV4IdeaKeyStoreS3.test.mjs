@@ -71,6 +71,7 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
       identity.subjectId, loaded), Buffer.from("synthetic proposal"));
     await assert.rejects(createAmuxContentUnitKeys(identity, env),
       { code: "conflict" });
+
     await assert.rejects(verifyAmuxContentUnitKeyAbsent(identity, env),
       { code: "outcome_unknown" });
     assert.equal(deleteCount, 0, "readback never sends DeleteObject");
@@ -210,6 +211,16 @@ test("retired read-manifest key fences delayed creates and removes old versions"
     await assert.rejects(createAmuxContentUnitKeys(identity, env),
       { code: "conflict" });
 
+    const maxResult = { ...identity, purpose: "analysis_result",
+      subjectId: "0f8c9c77-2e86-483e-8fbb-2d5e2c32ad78" };
+    await createAmuxContentUnitKeys(maxResult, env);
+    await retireClaimedAmuxReadManifestKey(maxResult, env);
+    await verifyAmuxReadManifestKeyRetired(maxResult, env);
+    await assert.rejects(loadAmuxContentUnitKeys(maxResult, env),
+      { code: "integrity_unavailable" });
+    await assert.rejects(createAmuxContentUnitKeys(maxResult, env),
+      { code: "conflict" });
+
     const delayed = { ...identity,
       subjectId: "2f8c9c77-2e86-483e-8fbb-2d5e2c32ad78" };
     holdNextCreate = true;
@@ -219,9 +230,9 @@ test("retired read-manifest key fences delayed creates and removes old versions"
     releaseCreate();
     await assert.rejects(creation, { code: "conflict" });
     await verifyAmuxReadManifestKeyRetired(delayed, env);
-    assert.equal(fenceWrites, 2);
+    assert.equal(fenceWrites, 3);
     await finishClaimedAmuxReadManifestKeyRetirement(delayed, env);
-    assert.equal(fenceWrites, 2, "readback recovery never rewrites the fence");
+    assert.equal(fenceWrites, 3, "readback recovery never rewrites the fence");
 
     const interrupted = { ...identity,
       subjectId: "3f8c9c77-2e86-483e-8fbb-2d5e2c32ad78" };

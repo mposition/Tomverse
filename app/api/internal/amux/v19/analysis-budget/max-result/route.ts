@@ -48,6 +48,13 @@ export async function POST(request: Request): Promise<Response> {
   let body: z.infer<typeof bodySchema>;
   try { body = await readLimitedJson(request, 1_024, bodySchema); }
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
+  if (body.outcome === "verified_success" &&
+      process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE === "enabled" &&
+      process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ === "enabled" &&
+      process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION === "enabled" &&
+      process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION === "enabled") {
+    return amuxJsonNoStore({ error: "session_result_required" }, 409);
+  }
   let callbackReturned = false;
   try {
     const result = await prisma.$transaction(async (tx) => {

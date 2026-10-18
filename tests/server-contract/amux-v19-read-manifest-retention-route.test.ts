@@ -9,6 +9,7 @@ const secret = ["synthetic", "retention", "secret", "0123456789"].join("-");
 const envNames = ["TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET",
   "TOMVERSE_AMUX_V4_CONTENT_RETENTION",
   "TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION",
+  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION",
   "TOMVERSE_AMUX_V4_COLLECTION_AGENT_SECRET", "TOMVERSE_AMUX_SYNC_SECRET",
   "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET"] as const;
 const priorEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
@@ -40,6 +41,18 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention.ts"), {
   namedExports: { purgeDueAmuxOrphanReadManifestKeys: async () => {
     calls.push("orphan-keys");
     return counts;
+  } },
+});
+mock.module(mod("lib/amux/ideaSessionAnalysisResultRetention.ts"), {
+  namedExports: { purgeDueAmuxSessionAnalysisResults: async () => {
+    calls.push("session-results");
+    return counts;
+  } },
+});
+mock.module(mod("lib/amux/ideaSessionAnalysisResultOrphanRetention.ts"), {
+  namedExports: { purgeDueAmuxOrphanSessionResultKeys: async () => {
+    calls.push("orphan-session-result-keys");
+    return { keysDeleted: 0, scanned: 0, batchLimit: 8 };
   } },
 });
 mock.module(mod("lib/amux/ideaAnalysisContentPurgeService.ts"), { namedExports: {
@@ -79,6 +92,7 @@ const enable = () => {
   process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET = secret;
   process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION = "enabled";
   process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION = "enabled";
+  delete process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION;
   delete process.env.TOMVERSE_AMUX_V4_COLLECTION_AGENT_SECRET;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
   delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET;
@@ -96,6 +110,22 @@ test("retention tick runs separately enabled v19 manifest and orphan-key cleanup
     raw: counts, analysis: counts,
     taskResults: { available: false, reason: "v22_task_result_retention_disabled" },
     readManifests: { manifests: counts, orphanKeys: counts },
+    sessionResults: { available: false,
+      reason: "v19_session_result_retention_disabled" },
+  });
+});
+
+test("session result retention has an independent default-off switch", async () => {
+  enable();
+  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION = "enabled";
+  const response = await route.POST(request());
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, ["holds", "cancellation", "raw", "analysis",
+    "read-manifests", "orphan-keys", "session-results",
+    "orphan-session-result-keys"]);
+  assert.deepEqual((await response.json()).sessionResults, {
+    results: counts,
+    orphanKeys: { keysDeleted: 0, scanned: 0, batchLimit: 8 },
   });
 });
 
