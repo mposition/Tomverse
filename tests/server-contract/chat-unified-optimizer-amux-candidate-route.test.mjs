@@ -51,7 +51,8 @@ mock.module(mod("lib/chatUnifiedOptimizerAmuxCandidateStore.ts"), {
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   chatUnifiedOptimizerCycle: { findUnique: async query => {
     readbackQuery = query;
-    return cycle;
+    return cycle && { ...cycle, runs: cycle.runs.filter(
+      run => run.ordinal === query.select.runs.where.ordinal) };
   } },
 } } });
 mock.module(mod("lib/chatUnifiedOptimizerAmuxSourcePin.ts"), {
@@ -180,15 +181,22 @@ test("readback exposes only content-free candidate and author-job state", async 
   assert.equal(response.status, 200);
   assert.equal(readbackQuery.select.runs.select.jobs.where.role,
     "candidate_author");
+  assert.equal(readbackQuery.select.runs.where.ordinal, 1);
   const body = await response.json();
   assert.equal(body.status, "recorded");
   assert.equal(body.resultSha256, "c".repeat(64));
   assert.equal(body.authorshipVerified, false);
   assert.equal(JSON.stringify(body).includes("taskGuidance"), false);
   const originalRun = cycle.runs[0];
+  cycle.runs = [originalRun, { ...originalRun, ordinal: 2, id: "later-run" }];
+  const afterLaterRun = await handler.GET(new Request(
+    "https://tomverse.test/api/internal/chat-optimization/amux-candidate" +
+    "?attemptId=33333333-3333-4333-8333-333333333333"));
+  assert.equal(afterLaterRun.status, 200);
+  assert.equal((await afterLaterRun.json()).status, "recorded");
+  cycle.runs = [originalRun];
   for (const runs of [
     [{ ...originalRun, ordinal: 2 }],
-    [originalRun, { ...originalRun, id: "extra-run" }],
     [{ ...originalRun, jobs: [{ ...originalRun.jobs[0], role: "judge" }] }],
     [{ ...originalRun, jobs: [...originalRun.jobs,
       { ...originalRun.jobs[0], id: "extra-job" }] }],

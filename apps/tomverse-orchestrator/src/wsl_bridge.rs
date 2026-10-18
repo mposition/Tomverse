@@ -3053,6 +3053,10 @@ pub async fn run_from_env() -> i32 {
                             still_running.push(entry);
                             continue;
                         };
+                        // This opt-in probe is deliberately fail-closed even for a
+                        // non-target Codex card when the app cannot classify it.
+                        // Enable only for the isolated U21 test window: an app
+                        // eligibility outage will halt unrelated settlements too.
                         if entry.delivery.assignment_id.is_none() && outcome == "succeeded" &&
                             to_status == "review" &&
                             std::env::var("TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_CANDIDATE_BRIDGE")
@@ -3150,6 +3154,8 @@ pub async fn run_from_env() -> i32 {
                                     },
                                     other => other,
                                 };
+                                // The same fail-closed blast radius applies to
+                                // v22 results while this opt-in switch is on.
                                 if outcome == "succeeded" &&
                                     matches!(&result_record,
                                         Ok(crate::tomverse_api::V22UsageRecord::Recorded)) &&
