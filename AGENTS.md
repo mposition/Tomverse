@@ -1690,11 +1690,13 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `settleDmValidationLatch()`, `lib/amux/dbBoundary.ts`의 `decisionMakerValidationLatch`(상한 10)·`decisionMakerTransmitIntent`(11),
   `lib/amux/decisionMakerRetentionSweep.ts`의 첫 단계. docs/policy/amux-decision-maker.md §8의 검증 실패 연속 3건이 인스턴스를
   `off`로 latch합니다. **연속은 그 인스턴스의
-  종결 결과를 원장 순서로, 인스턴스의 가장 새 스위치 사건부터 셉니다** — 다른 종결 결과(제안·이관·시간 초과·DM 불가)가 끼면
-  끊기고, 거절·unknown 결과는 세지도 끊지도 않습니다. 가장 새 사건이 시스템 latch면 아무것도 쓰지 않으므로 같은 실패열은 한 번만
-  latch되고, 사람의 변경(해제 포함)부터 다시 셉니다. 경계와 결과는 DB 시계 ms로 비교하며 같은 ms의 결과는 셉니다(latch가 빨라지는
-  쪽). 최근 100건 안에 3연속이 하나라도 있으면 latch가 밀린(owed) 것입니다. **밀린 latch는 쓰이기 전에도 인스턴스를 끕니다** —
-  라우팅과 전송 의도가 쓰는 스위치 읽기 한 문장이 인스턴스마다 가장 새 사건(actor·DB 시계)을 함께 돌려주고, 라우팅은 처리량
+  종결 결과를 원장 순서로 셉니다** — 다른 종결 결과(제안·이관·시간 초과·DM 불가)가 끼면
+  끊기고, 거절·unknown 결과는 세지도 끊지도 않습니다. 어디서부터 세는지는 S2-2a4가 고쳤습니다(아래 항목): 가장 새 validation
+  latch와 그 뒤의 `amux.decision.latch_release`만 경계이고, 사람의 일반 mode 변경은 경계가 아닙니다(이 조각의 처음 구현은 사람의
+  변경이면 무엇이든 경계로 삼아 docs/policy/amux-decision-maker.md §8을 어겼습니다). 풀리지 않은 validation latch가 있으면 아무것도
+  쓰지 않으므로 같은 실패열은 한 번만 latch됩니다. 최근 100건 안에 3연속이 하나라도 있으면 latch가 밀린(owed) 것입니다. **밀린
+  latch는 쓰이기 전에도 인스턴스를 끕니다** —
+  라우팅과 전송 의도가 쓰는 스위치 읽기 한 문장이 인스턴스마다 셈의 경계를 함께 돌려주고, 라우팅은 처리량
   문장에 결과 종류 배열을 실어(문장 수 그대로) 밀린 latch를 `instance_off`로 운영자에게 보내며, 전송 의도는 결과 종류 읽기 한
   문장을 더해 의도를 쓰지 않고 `instance_off`로 거부하면서 그 latch를 같은 트랜잭션에 씁니다(이 함수에서 쓰기가 있는 유일한
   거부). 그래서 세 번째 실패의 commit과 latch 사이에도 공급사 전송이 없습니다. 결과 route는 검증 실패 결과의 commit 뒤 별도
@@ -1736,6 +1738,30 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   밀린 latch를 보지 않고, latch는 끄기만 하므로 kill switch를 보지 않습니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 +
   setup + fence이고, request unit 테스트가 그 셈을, request DB 테스트가 하나 줄인 상한의 거부를 고정합니다. Admin 화면 표시는
   없습니다.
+- **S2-2a4(검증 실패 셈의 경계)**: `prisma/migrations/20261017200000_amux_decision_maker_validation_count_boundary/migration.sql`,
+  switch core의 `DmValidationCountBoundary`·`decisionMakerSwitchReadFromRows()`, switch store의
+  `readDecisionMakerSwitchesWithBoundariesOrThrow()`, request core의 `dmValidationCountWindow()`·`dmValidationLatchDecision()`·
+  `dmOwedLatchReason()`, request store의 세 결과 읽기(`readDecisionMakerInstanceLoad()`·`readDecisionMakerInstanceResultKinds()`·
+  `readDecisionMakerInstanceLatchInputs()`), `prisma/schema.prisma`의 원장 사건 `switchSequence`. docs/policy/amux-decision-maker.md §8의
+  "해제는 운영자만"입니다. **셈은 인스턴스의 가장 새 `validation_latch`와 그 뒤 첫 사람의 사건부터만 시작합니다** — 스위치 guard가
+  시스템 사건 뒤 첫 사람의 사건을 `amux.decision.latch_release`로만 받으므로 그 사건이 곧 해제입니다. validation latch가 없으면
+  모든 결과(최근 100건)를 세고, 풀리지 않았으면 아무것도 밀리지 않으며(같은 실패열은 한 번만), 풀렸으면 그 해제 뒤의 결과만
+  셉니다. 사람의 일반 mode 변경(같은 값 재저장, off 뒤 proposal, 해제 뒤의 변경), `cleanup_latch`와 그 해제는 경계가 아닙니다 —
+  세 번째 실패 뒤 latch가 쓰이기 전에 mode를 다시 저장하면 latch가 사라지던 결함이 이것이고, `cleanup_latch`는 검증 실패열을
+  처리하지 않으므로 둘 다 밀렸으면 둘 다 씁니다. **해제 앞뒤는 결과가 받아들여질 때 본 스위치 상태로 가릅니다** — 시각도 원장
+  sequence도 아닙니다. 해제 전에 commit된 실패가 해제와 같은 DB ms에 놓일 수 있고, 원장 sequence는 INSERT가 시작될 때 뽑혀
+  guard가 gate를 기다리기 전이므로 audit chain lock이 없으면(entryHash 없는 감사 행은 잡지 않음) commit 순서가 아닙니다 — 실패가
+  N을 뽑고 해제가 쥔 gate를 기다리는 동안 gate를 잡지 않는 다른 요청의 assign이 N+1로 commit할 수 있습니다(검토
+  r-20261018-012448-8f45bd, 처음 구현의 `ledgerSequence`가 이 경로로 해제 뒤 실패를 영구히 빠뜨렸습니다). 그래서 교체한 원장
+  guard가 결과마다, 이미 결과에 공유로 잡는 스위치 gate 뒤에 그 인스턴스의 가장 새 스위치 사건 sequence를 읽어
+  `switchSequence`에 씁니다(writer가 준 값과 상관없이, 다른 종류는 NULL). 스위치 변경은 gate를 exclusive로 commit까지 쥐므로
+  해제는 결과의 읽기보다 통째로 앞이거나(결과가 해제나 그 뒤 사건을 봄) 통째로 뒤이며, 해제 뒤 셈은 `switchSequence`가 해제의
+  sequence 이상인 결과입니다. migration 전에 쓰인 결과(값 없음)만 해제의 DB 시계로 가르며 같은 ms의 결과는 셉니다(latch가
+  빨라지는 쪽). migration은 원장 guard 하나를 바꾸므로 이전 본문 digest(20261017160000의 본문)를 첫 DO 블록에서 대조하고, 새 열
+  때문에 baseline guard의 schema 비교에 보이므로 header 선언은 두지 않습니다. 문장 수는 그대로입니다 — 경계는 이미 보내던 스위치
+  읽기 한 문장의 LATERAL 두 개에, 해제 sequence는 이미 보내던 결과 읽기의 조건에 실렸고 trigger 안의 읽기는 셈에 들지 않으므로
+  라우팅 12·전송 의도 11·latch 확인 10·결과 제출 12(각각 setup·fence 포함)가 바뀌지 않습니다. 이 조각이 바꾸는
+  것은 검증 실패 latch의 셈뿐이며 kill switch와 인스턴스 `off`의 판정, 해제 action의 판정은 바꾸지 않습니다.
 - **S2-3a(전용 launcher의 결정적 핵심)**: `lib/amux/decisionMakerLauncherCore.ts`,
   `lib/amux/decisionMakerLauncherFs.ts`, `lib/amux/decisionMakerLauncherProcess.ts`,
   `tests/amuxDecisionMakerLauncherCore.test.mjs`, `tests/amuxDecisionMakerLauncherFs.test.mjs`,

@@ -8834,6 +8834,14 @@ model AmuxDecisionMakerRequestEvent {
   /// Set by the insert trigger on an assignment: its `createdAt` plus 30 minutes.
   resultDeadlineAt       DateTime? @db.Timestamptz(3)
   auditLogId             String    @unique
+  /// Since migration 20261017200000_amux_decision_maker_validation_count_boundary:
+  /// on a result, the sequence of its instance's newest switch event it was
+  /// admitted under (0 with none), read by the insert trigger under the shared
+  /// switch gate whatever the writer supplies; NULL on every other kind and on
+  /// a result written before that migration. After a release, the validation
+  /// count of docs/policy/amux-decision-maker.md §8 reads the results at or
+  /// above the release's sequence.
+  switchSequence         BigInt?
   /// Overwritten by the insert trigger from the database clock.
   createdAt              DateTime  @default(now()) @db.Timestamptz(3)
 
