@@ -4,7 +4,9 @@ import test from "node:test";
 import type { ReactNode } from "react";
 
 import {
+  AmuxWorkerCapabilityEditor,
   AmuxWorkerCapabilityView,
+  runAmuxWorkerCapabilityEdit,
   runAmuxWorkerCapabilityImport,
   type AmuxWorkerCapabilityImport,
   type AmuxWorkerCapabilityIo,
@@ -18,6 +20,7 @@ import {
   type AmuxWorkerCapabilityAdminView,
 } from "@/lib/amux/workerCapabilityCore";
 import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "@/lib/amux/workerRegistryCore";
+import { amuxWorkerCapabilityFormFromRow, type AmuxWorkerCapabilityForm } from "@/lib/amux/workerCapabilityEditCore";
 
 /**
  * AMUX › Execution › Workers, capabilities (orchestration policy version 35,
@@ -176,4 +179,89 @@ test("the preview shows the tools, so a tools-only change is visible", () => {
   const row = byTestId(tree, "amux-worker-capability-row-codex-impl")[0]!;
   assert.match(textOf(row.children as ReactNode), /tools: shell/);
   assert.match(textOf(byTestId(tree, "amux-worker-capability-status-codex-impl")[0]!.children as ReactNode), /will be recorded/);
+});
+
+// Version 35 R2a, "Admin 편집" (version 36): the owner edits one worker's
+// capability in the Workers tab; the save is a single audited change.
+
+const CHORE_ROW = VIEW.rows.find((row) => row.workerName === "claude-chore")!;
+const renderEditing = (editing: AmuxWorkerCapabilityForm | null, overrides: Partial<{ isOwner: boolean; view: AmuxWorkerCapabilityAdminView }> = {}) => {
+  const started: string[] = [];
+  const tree = AmuxWorkerCapabilityView({
+    m,
+    view: overrides.view ?? VIEW,
+    isOwner: overrides.isOwner ?? true,
+    pending: null,
+    notice: null,
+    refusal: null,
+    failure: null,
+    onImport: () => {},
+    onReread: () => {},
+    editing,
+    onEditStart: (row) => started.push(row.workerName),
+  });
+  return { tree, started };
+};
+
+test("the owner gets an edit control per worker; a non-owner none; latched off or mid-edit, it is held", () => {
+  const { tree, started } = renderEditing(null);
+  const button = byTestId(tree, "amux-worker-capability-edit-cursor-impl")[0]!;
+  assert.equal(button.disabled, false);
+  assert.equal(button["aria-label"], m.editLabel("cursor-impl"));
+  (button.onClick as () => void)();
+  assert.deepEqual(started, ["cursor-impl"]);
+  assert.equal(byTestId(renderEditing(null, { isOwner: false }).tree, "amux-worker-capability-edit-cursor-impl").length, 0);
+  assert.equal(byTestId(renderEditing(null, { view: { ...VIEW, writesLatch: false } }).tree, "amux-worker-capability-edit-cursor-impl")[0]!.disabled, true);
+  const mid = renderEditing(amuxWorkerCapabilityFormFromRow(CHORE_ROW)).tree;
+  assert.equal(byTestId(mid, "amux-worker-capability-edit-cursor-impl")[0]!.disabled, true);
+  const editor = propsOf(mid).find((props) => props.form !== undefined && props.row !== undefined)!;
+  assert.equal((editor.row as { workerName: string }).workerName, "claude-chore");
+});
+
+const renderEditor = (form: AmuxWorkerCapabilityForm, row = CHORE_ROW, busy = false) => {
+  const saved: AmuxWorkerCapabilityForm[] = [];
+  const tree = AmuxWorkerCapabilityEditor({
+    m, row, form, busy, writesLatch: true,
+    onChange: () => {}, onCancel: () => {}, onSave: (sent) => saved.push(sent),
+  });
+  return { tree, saved };
+};
+
+test("the editor says why the store would refuse before sending, and holds the save", () => {
+  const blank = amuxWorkerCapabilityFormFromRow(CHORE_ROW);
+  assert.equal(byTestId(renderEditor(blank).tree, "amux-worker-capability-edit-save")[0]!.disabled, true);
+  const above = { ...blank, routingTags: ["implementation"] };
+  const refused = renderEditor(above).tree;
+  assert.match(textOf(byTestId(refused, "amux-worker-capability-edit-refusal")[0]!.children as ReactNode), /tag_above_ceiling/);
+  assert.equal(byTestId(refused, "amux-worker-capability-edit-save")[0]!.disabled, true);
+  const fine = { ...blank, routingTags: ["chore"], tools: "shell, git" };
+  const { tree, saved } = renderEditor(fine);
+  assert.equal(byTestId(tree, "amux-worker-capability-edit-refusal").length, 0);
+  assert.equal(byTestId(tree, "amux-worker-capability-edit-save")[0]!.disabled, false);
+  assert.match(textOf(byTestId(tree, "amux-worker-capability-edit-preview")[0]!.children as ReactNode), /tools: git, shell/);
+  const form = propsOf(tree).find((props) => props["data-testid"] === "amux-worker-capability-editor")!;
+  (form.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
+  assert.deepEqual(saved, [fine]);
+});
+
+test("an edit is one change against the recorded revision, receipt-checked and read back", async () => {
+  const recorded = buildAmuxWorkerCapabilityAdminView({
+    registrations: REGISTRY,
+    current: new Map([["codex-impl", { revision: 3, capability: { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null }, changedAt: "2026-10-13T00:00:00.000Z" }]]),
+    legacy: [], v22: [], writesLatch: true,
+  });
+  const row = recorded.rows.find((candidate) => candidate.workerName === "codex-impl")!;
+  const form = { ...amuxWorkerCapabilityFormFromRow(row), tools: "shell" };
+  const posted: AmuxWorkerCapabilityImport[] = [];
+  const io = (answer: (entry: AmuxWorkerCapabilityImport) => Response): AmuxWorkerCapabilityIo => ({
+    post: async (entry) => { posted.push(entry); return answer(entry); },
+    read: async () => recorded,
+    failureOf: async () => FAILURE,
+    networkFailure: () => FAILURE,
+  });
+  assert.equal(await runAmuxWorkerCapabilityEdit(form, io(receipt), () => {}), true);
+  assert.deepEqual(posted, [{ workerName: "codex-impl", expectedRevision: 3, capability: { model: null, routingTags: ["implementation"], toolCapabilities: ["shell"], v22: null } }]);
+  assert.equal(await runAmuxWorkerCapabilityEdit(form, io(() => json(409, { error: "stale_revision" })), () => {}), false);
+  assert.equal(await runAmuxWorkerCapabilityEdit(form, io(() => json(503, { error: "outcome_unknown" })), () => {}), false);
+  assert.equal(posted.length, 3);
 });
