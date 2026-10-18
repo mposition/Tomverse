@@ -3,8 +3,8 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 export const adminAmuxAnalysisMonthlyBudgetMessages = defineAdminMessages({
   en: {
     title: "Analysis monthly budget", hint: "Agent analysis only; no user credits. Saving applies to the current UTC month and future months. It preserves usage and never starts a model or clears a halt.",
-    month: "UTC month", current: "Current ceiling (USD)", spent: "Recorded internal cost (USD)", reserved: "Reserved (USD)", remaining: "Available (USD)", version: "Setting version",
-    billing: "Recorded internal cost can include conservative unknown-outcome settlements; it is not the vendor's invoice.",
+    month: "UTC month", current: "Current monthly threshold (USD)", spent: "Recorded internal cost (USD)", reserved: "Reserved (USD)", remaining: "Available (USD)", shadowOverrun: "Max shadow overrun (USD)", version: "Setting version",
+    billing: "Max subscription analysis may exceed this shadow threshold. Recorded cost can include conservative unknown-outcome settlements; it is not the vendor's invoice.",
     limit: "New monthly ceiling (USD)", inputHint: "Positive USD amount, up to two decimal places. The proposed US$1,000 is not active until saved.",
     confirm: "I approve this monthly analysis ceiling and have checked the existing cost and reservations",
     save: "Save monthly ceiling", refresh: "Refresh budget", readBack: "Read back this exact save",
@@ -18,8 +18,8 @@ export const adminAmuxAnalysisMonthlyBudgetMessages = defineAdminMessages({
   },
   ko: {
     title: "분석 월 예산", hint: "Agent 분석 전용이며 사용자 크레딧과 무관합니다. 저장하면 이번 UTC 월과 이후 월에 적용됩니다. 기존 사용액은 유지하며 모델 호출이나 정지 해제를 하지 않습니다.",
-    month: "UTC 기준 월", current: "현재 월 상한 (USD)", spent: "기록된 내부 비용 (USD)", reserved: "예약액 (USD)", remaining: "잔여액 (USD)", version: "설정 버전",
-    billing: "내부 비용에는 결과 불명 예약의 보수적 정산이 포함될 수 있으며 공급자의 실제 청구액이 아닙니다.",
+    month: "UTC 기준 월", current: "현재 월 기준액 (USD)", spent: "기록된 내부 비용 (USD)", reserved: "예약액 (USD)", remaining: "잔여액 (USD)", shadowOverrun: "Max shadow 초과액 (USD)", version: "설정 버전",
+    billing: "Max 구독 분석은 이 shadow 기준액을 넘을 수 있습니다. 내부 비용에는 결과 불명 예약의 보수적 정산이 포함될 수 있으며 공급자의 실제 청구액이 아닙니다.",
     limit: "새 월 상한 (USD)", inputHint: "0보다 큰 USD 금액을 소수점 두 자리까지 입력하세요. 제안된 US$1,000은 저장 전에는 적용되지 않습니다.",
     confirm: "기존 사용액·예약액을 확인했고 이 분석 월 상한을 승인합니다",
     save: "월 상한 저장", refresh: "예산 새로고침", readBack: "이 저장 요청 재조회",

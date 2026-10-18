@@ -26,6 +26,7 @@ export function analysisBudgetMicroUsdToUsd(value: string): string {
 export type AnalysisBudgetSnapshot = {
   version: number; limitMicroUsd: string; monthStart: string;
   spentMicroUsd: string; reservedMicroUsd: string; remainingMicroUsd: string;
+  shadowOverrunMicroUsd: string;
 };
 
 export type PendingAnalysisBudgetSetting = {
@@ -58,15 +59,21 @@ export function readAnalysisBudgetSnapshotReply(value: unknown): (AnalysisBudget
   if (row.state !== "snapshot" || !Number.isSafeInteger(row.version) || (row.version as number) < 0 ||
     typeof row.monthStart !== "string" || !/^\d{4}-\d{2}-01T00:00:00\.000Z$/.test(row.monthStart) ||
     !Number.isFinite(Date.parse(row.monthStart)) || typeof row.writeEnabled !== "boolean") return null;
-  for (const key of ["limitMicroUsd", "spentMicroUsd", "reservedMicroUsd", "remainingMicroUsd"]) {
+  for (const key of ["limitMicroUsd", "spentMicroUsd", "reservedMicroUsd",
+    "remainingMicroUsd", "shadowOverrunMicroUsd"]) {
     if (typeof row[key] !== "string" || !/^(0|[1-9]\d{0,18})$/.test(row[key] as string) ||
       BigInt(row[key] as string) > MAX_BIGINT) return null;
   }
   const limit = BigInt(row.limitMicroUsd as string);
-  if (limit <= BigInt(0) || limit !== BigInt(row.spentMicroUsd as string) +
-    BigInt(row.reservedMicroUsd as string) + BigInt(row.remainingMicroUsd as string)) return null;
+  const spent = BigInt(row.spentMicroUsd as string);
+  const reserved = BigInt(row.reservedMicroUsd as string);
+  const remaining = limit > spent + reserved ? limit - spent - reserved : BigInt(0);
+  if (limit <= BigInt(0) ||
+      BigInt(row.shadowOverrunMicroUsd as string) > spent ||
+      remaining !== BigInt(row.remainingMicroUsd as string)) return null;
   return { version: row.version as number, monthStart: row.monthStart,
     limitMicroUsd: row.limitMicroUsd as string, spentMicroUsd: row.spentMicroUsd as string,
     reservedMicroUsd: row.reservedMicroUsd as string, remainingMicroUsd: row.remainingMicroUsd as string,
+    shadowOverrunMicroUsd: row.shadowOverrunMicroUsd as string,
     writeEnabled: row.writeEnabled };
 }

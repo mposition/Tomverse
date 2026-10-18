@@ -8,6 +8,7 @@ import { AMUX_V4_IDEA_SYSTEM_ACTOR,
 import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE,
   assessAmuxIdeaAnalysisBudget } from "./ideaAnalysisBudgetCore.ts";
+import { assessSessionShadowBudget } from "./ideaSessionShadowBudgetCore.ts";
 import { readAnalysisMonthlyBudgetSetting } from
   "./ideaAnalysisBudgetSettingStore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from
@@ -81,7 +82,8 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   reservationId: string;
   invocationOrdinal: number;
   priceVersionId: string;
-  runner: { tokenCapsEnforceable: boolean; billableToolsDisabled: boolean };
+  runner: { tokenCapsEnforceable: boolean; billableToolsDisabled: boolean;
+    maxSubscriptionAuthenticated?: boolean };
 }): Promise<{ claimId: string; reservationId: string; requestId: string;
   invocationOrdinal: number; reservedMicroUsd: string; auditId: string }> {
   if (!UUID.test(input.claimId) || !UUID.test(input.requestId) ||
@@ -165,8 +167,9 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
       reservedMicroUsd: BigInt(0) }], skipDuplicates: true,
   });
   const rows = await tx.$queryRaw<Array<{ limitMicroUsd: bigint;
-    spentMicroUsd: bigint; reservedMicroUsd: bigint }>>`
-    SELECT "limitMicroUsd", "spentMicroUsd", "reservedMicroUsd"
+    spentMicroUsd: bigint; reservedMicroUsd: bigint;
+    shadowOverrunMicroUsd: bigint }>>`
+    SELECT "limitMicroUsd", "spentMicroUsd", "reservedMicroUsd", "shadowOverrunMicroUsd"
     FROM "AmuxIdeaAnalysisBudgetWindow"
     WHERE "namespace" = ${AMUX_V4_ANALYSIS_NAMESPACE}
       AND "monthStart" = ${monthStart} FOR UPDATE
@@ -199,30 +202,52 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
     throw new AmuxSessionBudgetClaimError(failureStreak === "stopped"
       ? "not_ready" : "integrity_unavailable");
   }
-  const decision = assessAmuxIdeaAnalysisBudget({
-    ...price.price, ...input.runner,
+  const maxShadow = price.price.provider === "anthropic" &&
+    input.runner.maxSubscriptionAuthenticated === true &&
+    input.runner.tokenCapsEnforceable === false;
+  const usageState = v4Unknown || sessionUnknown ? "unknown" as const : "known" as const;
+  const decision = maxShadow ? assessSessionShadowBudget({
+    mode: "subscription_cli", provider: "anthropic",
+    asOfIso: now.toISOString(),
+    pricingVerifiedAt: price.price.pricingVerifiedAt,
+    pricingExpiresAt: price.price.pricingExpiresAt,
+    inputMicroUsdPerMillion: price.price.inputMicroUsdPerMillion,
+    outputMicroUsdPerMillion: price.price.outputMicroUsdPerMillion,
+    worstTierVerified: price.price.worstTierVerified,
+    billableToolsDisabled: input.runner.billableToolsDisabled,
+    consumedMicroUsd: window.spentMicroUsd.toString(),
+    reservedMicroUsd: window.reservedMicroUsd.toString(),
+    shadowOverrunMicroUsd: window.shadowOverrunMicroUsd.toString(),
+    monthlyLimitMicroUsd: window.limitMicroUsd.toString(), usageState,
+  }) : assessAmuxIdeaAnalysisBudget({
+    ...price.price, tokenCapsEnforceable: input.runner.tokenCapsEnforceable,
+    billableToolsDisabled: input.runner.billableToolsDisabled,
     namespace: AMUX_V4_ANALYSIS_NAMESPACE,
     asOfIso: now.toISOString(),
     windowStartsAtIso: monthStart.toISOString(),
-    consumedMicroUsd: window.spentMicroUsd.toString(),
+    consumedMicroUsd: (window.spentMicroUsd + window.shadowOverrunMicroUsd).toString(),
     reservedMicroUsd: window.reservedMicroUsd.toString(),
-    monthlyLimitMicroUsd: window.limitMicroUsd.toString(),
-    usageState: v4Unknown || sessionUnknown ? "unknown" : "known",
+    monthlyLimitMicroUsd: window.limitMicroUsd.toString(), usageState,
   });
-  if (decision.decision !== "reservation_candidate") {
+  if (decision.decision === "hold") {
     throw new AmuxSessionBudgetClaimError("budget_hold", decision.reason);
   }
+  const reservedMicroUsd = decision.decision === "occupy_headroom"
+    ? decision.reservedMicroUsd : decision.worstCaseMicroUsd;
+  const budgetMode = maxShadow ? "max_shadow" : "bounded";
   const auditId = await writeSystemAuditLog({
     tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
     action: AMUX_V19_SESSION_BUDGET_CLAIM_ACTION,
     targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: input.claimId,
-    summary: "Claimed one bounded v19 session analysis against the shared Agent monthly budget.",
+    summary: maxShadow
+      ? "Occupied monthly shadow headroom for one Max subscription analysis."
+      : "Claimed one bounded v19 session analysis against the shared Agent monthly budget.",
     metadata: { reservationId: input.reservationId,
       invocationOrdinal: input.invocationOrdinal,
       requestId: input.requestId, namespace: AMUX_V4_ANALYSIS_NAMESPACE,
       monthStart: monthStart.toISOString(), priceVersionId: input.priceVersionId,
       modelId: reservation.modelId,
-      reservedMicroUsd: decision.worstCaseMicroUsd,
+      reservedMicroUsd, budgetMode,
       amountMeaning: decision.amountMeaning, modelCallStarted: false },
   });
   const incremented = await tx.amuxIdeaAnalysisBudgetWindow.updateMany({
@@ -230,7 +255,7 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
       limitMicroUsd: window.limitMicroUsd,
       spentMicroUsd: window.spentMicroUsd,
       reservedMicroUsd: window.reservedMicroUsd },
-    data: { reservedMicroUsd: { increment: BigInt(decision.worstCaseMicroUsd) } },
+    data: { reservedMicroUsd: { increment: BigInt(reservedMicroUsd) } },
   });
   if (incremented.count !== 1) {
     throw new AmuxSessionBudgetClaimError("budget_unavailable");
@@ -245,11 +270,11 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
     outputTokensCap: price.price.outputTokensCap,
     inputMicroUsdPerMillion: price.price.inputMicroUsdPerMillion,
     outputMicroUsdPerMillion: price.price.outputMicroUsdPerMillion,
-    reservedMicroUsd: BigInt(decision.worstCaseMicroUsd),
+    reservedMicroUsd: BigInt(reservedMicroUsd), budgetMode,
     status: "in_flight", claimAuditLogId: auditId,
   } });
   return { claimId: input.claimId, reservationId: input.reservationId,
     requestId: input.requestId, invocationOrdinal: input.invocationOrdinal,
-    reservedMicroUsd: decision.worstCaseMicroUsd,
+    reservedMicroUsd,
     auditId };
 }

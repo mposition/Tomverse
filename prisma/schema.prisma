@@ -10151,6 +10151,8 @@ model AmuxIdeaAnalysisBudgetWindow {
   limitMicroUsd    BigInt
   spentMicroUsd    BigInt   @default(0)
   reservedMicroUsd BigInt   @default(0)
+  /// Observed v19 Max API-equivalent usage beyond the occupied headroom.
+  shadowOverrunMicroUsd BigInt @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -10211,6 +10213,8 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
   inputMicroUsdPerMillion  Int
   outputMicroUsdPerMillion Int
   reservedMicroUsd         BigInt
+  /// bounded for historical claims; max_shadow has no per-call cost ceiling.
+  budgetMode               String   @default("bounded")
   settledMicroUsd          BigInt?
   inputTokens              Int?
   outputTokens             Int?

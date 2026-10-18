@@ -71,7 +71,7 @@ import { commitAmuxIdeaAnalysisPriceApproval } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { readAmuxIdeaAnalysisFailureStreak } from
   "@/lib/amux/ideaAnalysisFailureStreakService";
-import { commitAnalysisBudgetSetting } from
+import { commitAnalysisBudgetSetting, readAnalysisBudgetSnapshot } from
   "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { encodeAmuxSessionAnalysisQueueCursor,
   parseAmuxSessionAnalysisQueueCursor } from
@@ -1478,4 +1478,93 @@ test("a superseded operating scope removes stale reservations from dispatch hint
   const queue = await listAmuxSessionAnalysisCandidates(null);
   assert.equal(queue.candidates.some((candidate) =>
     candidate.reservationId === committedReservationId), false);
+});
+
+test("Max shadow claim records measured overrun while the bounded ledger remains capped", async () => {
+  const maxModelId = "synthetic-max-shadow-" + randomUUID();
+  const frontier = inspectFrontierCatalogWrite(JSON.stringify({
+    schemaVersion: 1, action: "approve", approvalId: randomUUID(),
+    provider: "anthropic", modelId: maxModelId, allowedEfforts: ["high"],
+    expectedPreviousVersion: 0, ownerConfirmedFrontierEligibility: true,
+  }));
+  if (!frontier.ok) throw new Error("Synthetic Max model rejected: " + frontier.code);
+  await prisma.$transaction((tx) =>
+    commitFrontierCatalogDecision(tx, { session, request, decision: frontier.request }));
+  const current = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
+  assert.ok(current);
+  await prisma.$transaction((tx) => commitAmuxOperatingScope(tx, {
+    session, request, id: randomUUID(), expectedPreviousVersion: current.version,
+    scope: { ...scope, model: { provider: "anthropic", modelId: maxModelId,
+      reasoningEffort: "high" } }, ownerConfirmed: true,
+  }));
+  const maxAuthority = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
+  assert.ok(maxAuthority);
+  const latestBudget = await prisma.amuxIdeaAnalysisBudgetSetting.findFirst({
+    orderBy: { version: "desc" }, select: { version: true },
+  });
+  await prisma.$transaction((tx) => commitAnalysisBudgetSetting(tx, {
+    session, request, id: randomUUID(),
+    expectedPreviousVersion: latestBudget?.version ?? 0,
+    monthlyUsd: "1", ownerConfirmed: true,
+  }));
+  const ideaId = randomUUID();
+  const inspected = inspect(ideaId);
+  const reservation = await prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected, expectedAuthority: maxAuthority, ideaId, keys: keysFor(ideaId),
+    });
+    return commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority: maxAuthority,
+    });
+  });
+  const priceVersionId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisPriceApproval(tx, {
+    session, request, approval: {
+      id: priceVersionId, provider: "anthropic", modelId: maxModelId,
+      mode: "subscription_cli", expectedPreviousVersion: 0,
+      inputTokensCap: 1, outputTokensCap: 1,
+      inputMicroUsdPerMillion: 1_000_000_000,
+      outputMicroUsdPerMillion: 1_000_000_000,
+      evidenceDigest: randomBytes(32).toString("hex"),
+      ownerConfirmedWorstTier: true,
+      verifiedAt: new Date(Date.now() - 60_000),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
+    },
+  }));
+  const claim = await prisma.$transaction((tx) => commitAmuxSessionBudgetClaim(tx, {
+    claimId: randomUUID(), requestId: randomUUID(),
+    reservationId: reservation.reservationId, invocationOrdinal: 0,
+    priceVersionId, runner: { tokenCapsEnforceable: false,
+      billableToolsDisabled: true, maxSubscriptionAuthenticated: true },
+  }));
+  const before = await prisma.$transaction((tx) => readAnalysisBudgetSnapshot(tx));
+  assert.equal(BigInt(before.spentMicroUsd) + BigInt(before.reservedMicroUsd),
+    BigInt(before.limitMicroUsd));
+  const outcome = await prisma.$transaction((tx) => commitAmuxSessionBudgetOutcome(tx, {
+    claimId: claim.claimId, outcome: "verified_success",
+    inputTokens: 1001, outputTokens: 1,
+    exactAgentClaim: { requestId: claim.requestId,
+      reservationId: claim.reservationId, ideaId, invocationOrdinal: 0 },
+  }));
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.settledMicroUsd, "1002000");
+  const row = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findUniqueOrThrow({
+    where: { id: claim.claimId },
+  });
+  assert.equal(row.budgetMode, "max_shadow");
+  assert.equal(row.settledMicroUsd, BigInt("1002000"));
+  const after = await prisma.$transaction((tx) => readAnalysisBudgetSnapshot(tx));
+  assert.equal(after.reservedMicroUsd, "0");
+  assert.equal(after.remainingMicroUsd, "0");
+  assert.equal(BigInt(after.shadowOverrunMicroUsd),
+    BigInt("1002000") - BigInt(claim.reservedMicroUsd));
+  assert.equal(BigInt(after.spentMicroUsd),
+    BigInt(before.spentMicroUsd) + BigInt("1002000"));
+  await assert.rejects(prisma.amuxIdeaAnalysisBudgetWindow.update({
+    where: { namespace_monthStart: { namespace: "agent/amux-intake",
+      monthStart: new Date(after.monthStart) } },
+    data: { shadowOverrunMicroUsd: { increment: BigInt(1) } },
+  }), (error: unknown) => sqlState(error) === "23514",
+  "shadow overrun cannot be changed without the exact measured audit");
 });
