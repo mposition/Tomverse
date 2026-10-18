@@ -21,7 +21,7 @@ const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ";
 const STOP_READ_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ";
 const uuid = z.string().uuid();
 const identity = z.object({ requestId: uuid, reservationId: uuid,
-  invocationOrdinal: z.number().int().safe().nonnegative() }).strict();
+  invocationOrdinal: z.number().int().min(0).max(2_147_483_647) }).strict();
 const claimBody = identity.extend({ claimId: uuid, ideaId: uuid,
   priceVersionId: z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/),
   modelId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/),
