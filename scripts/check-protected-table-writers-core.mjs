@@ -2221,10 +2221,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerSwitchStore.ts",
     table: "AmuxDecisionMakerSwitchEvent",
-    tableMentions: 6,
+    tableMentions: 7,
     writeVerbs: 3,
     reason:
-      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is three constant SELECTs (the newest event of every scope; of one scope for a person's change; and since 2026-10-17 the newest event of every scope with its actor and clock, which the request ledger's writers read for the boundary section 8's validation count starts from -- since stage S2-2a3 with, in a subquery of the same statement, the cleanup_unknown report each scope's newest cleanup_latch names, the one report that latch settles) and two constant INSERT ... RETURNING statements, a person's event and a latch, which since S2-2a3 names a cleanup latch's report; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is four constant SELECTs (the newest event of every scope; since stage S2-4c the same with each event's actor and reason, for Admin's switch panel; of one scope for a person's change; and since 2026-10-17 the newest event of every scope with its actor and clock, which the request ledger's writers read for the boundary section 8's validation count starts from -- since stage S2-2a3 with, in a subquery of the same statement, the cleanup_unknown report each scope's newest cleanup_latch names, the one report that latch settles) and two constant INSERT ... RETURNING statements, a person's event and a latch, which since S2-2a3 names a cleanup latch's report; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
