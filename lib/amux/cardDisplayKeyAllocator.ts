@@ -25,6 +25,15 @@ type AllocatorClient = Pick<Prisma.TransactionClient, "$queryRaw">;
  * transaction; the unique index on `AmuxWorkItem.displayKey` refuses a reuse
  * even if the counter were ever wrong.
  *
+ * The same statement takes the audit chain's lock before it touches the
+ * counter row. Every caller writes an audit entry after allocating, and the
+ * backfill writes its entry before allocating; `lib/adminAudit.ts` orders that
+ * lock before any row lock. Taking the counter row first would let a
+ * registration and the backfill each hold what the other waits for. The lock
+ * is the one `takeAuditChainLock()` takes, re-entrant and held to commit, and
+ * folding it in here keeps the allocation one statement for every bounded
+ * caller.
+ *
  * It only allocates. Which prefix a card uses (its Feature's, or its
  * registration path's) is the caller's decision.
  */
@@ -33,8 +42,11 @@ export async function allocateAmuxCardDisplayKey(tx: AllocatorClient, prefix: st
     throw new Error("AMUX card display prefix is invalid");
   }
   const rows = await tx.$queryRaw<Array<{ lastNumber: number }>>`
+    WITH "auditChainLock" AS MATERIALIZED (
+      SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))
+    )
     INSERT INTO "AmuxCardDisplayKeyCounter" ("prefix", "lastNumber")
-    VALUES (${prefix}, 1)
+    SELECT ${prefix}, 1 FROM "auditChainLock"
     ON CONFLICT ("prefix") DO UPDATE
       SET "lastNumber" = "AmuxCardDisplayKeyCounter"."lastNumber" + 1
     RETURNING "lastNumber"
