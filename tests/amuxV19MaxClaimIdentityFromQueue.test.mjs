@@ -42,6 +42,10 @@ test("Max claim identity rejects stale or mismatched queue selections", () => {
       expiresAt: "2026-10-18T00:00:00.000Z" } },
     { candidate: { ...selection.candidate,
       expiresAt: "October 18, 2026 01:00 UTC" } },
+    { candidate: { ...selection.candidate,
+      expiresAt: "2099-02-30T01:00:00.000Z" } },
+    { candidate: { ...selection.candidate,
+      expiresAt: "2026-10-18T11:00:00.000+10:00" } },
     { candidate: { ...selection.candidate, ideaId: "not-a-uuid" } },
     { candidate: { ...selection.candidate,
       nextInvocationOrdinal: 2_147_483_648 } },
@@ -60,9 +64,11 @@ test("Max claim identity rejects stale or mismatched queue selections", () => {
     now, newId: () => { throw new Error("no entropy"); },
   }), { kind: "refused" });
   for (const reused of [reservationId, ideaId]) {
-    const ids = [reused, requestId];
-    assert.deepEqual(createAmuxV19MaxClaimIdentityFromQueue(selection, {
-      now, newId: () => ids.shift(),
-    }), { kind: "refused" });
+    for (const ids of [[reused, requestId], [claimId, reused]]) {
+      const values = [...ids];
+      assert.deepEqual(createAmuxV19MaxClaimIdentityFromQueue(selection, {
+        now, newId: () => values.shift(),
+      }), { kind: "refused" });
+    }
   }
 });

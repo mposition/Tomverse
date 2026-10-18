@@ -36,7 +36,11 @@ test("fresh queue selection becomes exactly one guarded claim", async () => {
   assert.equal(calls, 1);
   assert.equal(result.kind, "claimed");
   assert.equal(result.identity.reservationId, reservationId);
-  assert.equal(result.reservedMicroUsd, "1000000");
+  assert.equal(result.claim.claimId, result.identity.claimId);
+  assert.equal(result.claim.requestId, result.identity.requestId);
+  assert.equal(result.claim.reservationId, reservationId);
+  assert.equal(result.claim.reservedMicroUsd, "1000000");
+  assert.equal(result.claim.recovered, false);
   assert.equal(result.retryWrite, false);
 });
 
@@ -64,6 +68,10 @@ test("uncertain or mismatched claim is never reported as safe to retry",
         claimId: identity.claimId, requestId: identity.requestId,
         reservationId: ideaId, reservedMicroUsd: "1000000",
         recovered: false, retryWrite: false }),
+      async ({ identity }) => ({ kind: "claimed",
+        claimId: identity.claimId, requestId: identity.requestId,
+        reservationId: identity.reservationId, reservedMicroUsd: null,
+        recovered: true, retryWrite: false }),
     ]) {
       const result = await claimAmuxV19MaxQueueSelectionOnce(selection, {},
         claimOnce);

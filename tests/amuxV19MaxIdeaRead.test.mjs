@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readAmuxV19MaxIdeaOnce } from
+import { readAmuxV19MaxClaimedIdeaOnce, readAmuxV19MaxIdeaOnce } from
   "../lib/amux/ideaLocalMaxIdeaRead.mjs";
 
 const origin = "https://synthetic-amux.example.test/";
@@ -60,4 +60,32 @@ test("wrong origin refuses before network and malformed response stays unavailab
       reservationId, ideaId, claimId,
       fetchImpl: async () => Response.json({ idea: "", extra: true }),
     }), { kind: "unavailable" });
+  }));
+
+test("only an exact fresh Max claim may fetch the idea", async () =>
+  withEnv(async () => {
+    const requestId = "44c72436-c011-4cfc-b52f-e3345c22fc80";
+    const selection = { kind: "claimed", retryWrite: false,
+      identity: { claimId, requestId, reservationId, ideaId },
+      claim: { kind: "claimed", claimId, requestId, reservationId,
+        recovered: false, retryWrite: false } };
+    let calls = 0;
+    const fetchImpl = async (url, options) => {
+      calls++;
+      assert.equal(new URL(url).pathname,
+        "/api/internal/amux/v19/analysis-idea");
+      assert.deepEqual(JSON.parse(options.body), { reservationId, ideaId,
+        claimId });
+      return Response.json({ idea: "synthetic idea" });
+    };
+    for (const invalid of [
+      { ...selection, claim: { ...selection.claim, recovered: true } },
+      { ...selection, claim: { ...selection.claim, claimId: ideaId } },
+      { ...selection, kind: "outcome_unknown" },
+    ]) assert.deepEqual(await readAmuxV19MaxClaimedIdeaOnce({ origin,
+      selection: invalid, fetchImpl }), { kind: "refused" });
+    assert.equal(calls, 0);
+    assert.deepEqual(await readAmuxV19MaxClaimedIdeaOnce({ origin,
+      selection, fetchImpl }), { kind: "ready", idea: "synthetic idea" });
+    assert.equal(calls, 1);
   }));
