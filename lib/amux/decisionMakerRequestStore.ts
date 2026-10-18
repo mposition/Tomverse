@@ -1266,8 +1266,13 @@ export async function recordDecisionMakerCleanupUnknown(
  * the release or a later switch event of the instance, which it records on the
  * result under the shared switch gate), newest first, at most
  * DM_VALIDATION_LATCH_WINDOW, in one statement: what §8's count reads
- * (`dmValidationLatchDecision()`). Every ledger write takes the audit chain
- * lock first, so the sequence is the order the results committed in. A result
+ * (`dmValidationLatchDecision()`). The sequence is drawn when a result's INSERT
+ * starts, before its guard waits for the switch gate, and an audit row without
+ * an integrity key takes no chain lock, so the sequence is not commit order:
+ * which results come after a release is decided by `switchSequence`, not by
+ * it. The newest-first ORDER BY below still uses the sequence, so two results
+ * of one instance admitted concurrently may be counted in the order they drew
+ * their sequences rather than the order they committed. A result
  * event names its request's own instance, which the event guard requires.
  * The kinds are returned as read; the core refuses one outside §6's five.
  * The validation latch check reads it; a routing reads the same kinds inside
