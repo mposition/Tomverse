@@ -211,6 +211,9 @@ test("the public apply path checks the shipped latch before the commit", () => {
   assert.match(panel, /error: action === "register" \? "outcome_unknown" : "intake_failed"/);
   assert.match(panel, /result\.error === "outcome_unknown"/);
   assert.match(panel, /messages\.outcomeUnknown/);
+  assert.match(panel, /result\.readBack === "absent"/);
+  assert.match(panel, /result\.readBack === "partial"/);
+  assert.match(panel, /href="\/admin\/amux-execution\?tab=cards"/);
   assert.match(panel, /locked = result\?\.error === "outcome_unknown" \|\| !!result\?\.cardId/);
   assert.match(panel, /if \(inFlight\.current \|\| terminal\.current\) return/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);

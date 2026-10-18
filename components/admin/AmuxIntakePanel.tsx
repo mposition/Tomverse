@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxIntakeMessages } from "@/lib/adminMessages/amuxIntake";
@@ -51,7 +52,11 @@ export function AmuxIntakePanel() {
       const ambiguous = action === "register" &&
         (response.status >= 500 || body.retry === false || (response.ok && !body.cardId));
       if (action === "register" && (ambiguous || !!body.cardId)) terminal.current = true;
-      setResult(ambiguous ? { ...body, error: "outcome_unknown" } : body);
+      setResult(ambiguous ? {
+        ...body,
+        code: body.code ?? (body.error === "outcome_unknown" ? undefined : body.error),
+        error: "outcome_unknown",
+      } : body);
     } catch {
       // A register request may have committed before its reply was lost.
       if (action === "register") terminal.current = true;
@@ -112,7 +117,16 @@ export function AmuxIntakePanel() {
       {result ? (
         <div className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100" role="status">
           {result.error === "outcome_unknown" ? <p>{messages.outcomeUnknown}</p> : null}
-          {result.error ? <p>{messages.error(result.error)}</p> : null}
+          {result.error === "outcome_unknown" && result.readBack === "absent" ?
+            <p>{messages.readBackAbsent}</p> : null}
+          {result.error === "outcome_unknown" && result.readBack === "partial" ?
+            <p>{messages.readBackPartial}</p> : null}
+          {result.error === "outcome_unknown" ? (
+            <Link className="font-medium underline" href="/admin/amux-execution?tab=cards">
+              {messages.inspectCards}
+            </Link>
+          ) : null}
+          {result.error && result.error !== "outcome_unknown" ? <p>{messages.error(result.error)}</p> : null}
           {result.code ? <p>{messages.error(result.code)}</p> : null}
           {result.inactive ? <p>{messages.inactive}</p> : null}
           {result.reconfirmRequired ? <p>{messages.reconfirm}</p> : null}
