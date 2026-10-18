@@ -77,8 +77,15 @@ pub enum AppRoute {
     DeliveriesNext,
     /// Stage S2-2b3: the request's one delivery decision.
     Deliveries,
-    /// Stage S2-2b3: the delivery's receipt or unknown outcome.
+    /// Stage S2-2b3: the delivery's receipt or unknown outcome (since S2-2b4
+    /// also a not-sent outcome with its reason).
     DeliveryOutcome,
+    /// Stage S2-2b4: the oldest decision with no outcome (a read), settled at
+    /// the relay's start.
+    DeliveriesUnsettled,
+    /// Stage S2-2b4: the operator answered a question directly; its request
+    /// closes (§2-7).
+    DirectAnswer,
 }
 
 impl AppRoute {
@@ -98,6 +105,10 @@ impl AppRoute {
             AppRoute::DeliveriesNext => "/api/internal/amux/decision-maker/deliveries/next",
             AppRoute::Deliveries => "/api/internal/amux/decision-maker/deliveries",
             AppRoute::DeliveryOutcome => "/api/internal/amux/decision-maker/deliveries/outcome",
+            AppRoute::DeliveriesUnsettled => {
+                "/api/internal/amux/decision-maker/deliveries/unsettled"
+            }
+            AppRoute::DirectAnswer => "/api/internal/amux/decision-maker/requests/direct-answer",
         }
     }
 
@@ -108,6 +119,7 @@ impl AppRoute {
             AppRoute::Results => "submitted",
             AppRoute::ResultLookup => "found",
             AppRoute::DeliveriesNext => "found",
+            AppRoute::DeliveriesUnsettled => "found",
             _ => "recorded",
         }
     }
@@ -119,8 +131,10 @@ pub trait DmApp: Send + Sync {
 }
 
 /// The local routes the relay may write, all outside `/api/board`: the
-/// marker's two, and (stage S2-2b3) the delivery of an operator-confirmed
-/// answer's three. No question's DM output goes to any of them.
+/// marker's two, (stage S2-2b3) the delivery of an operator-confirmed
+/// answer's three, and (stage S2-2b4) two reads by POST -- the operator's
+/// answer records and one decided delivery's records. No question's DM
+/// output goes to any of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalRoute {
     SetPending,
@@ -131,6 +145,12 @@ pub enum LocalRoute {
     Answers,
     /// A delivery whose result is unknown: pause the session, read the receipt.
     AnswerUnknown,
+    /// Stage S2-2b4: the operator's answer records after a cursor (a read).
+    OperatorAnswers,
+    /// Stage S2-2b4: what the local AMUX holds of one decided delivery -- its
+    /// message id's reservation and the question revision's answer record --
+    /// without pausing or sending anything (a read).
+    AnswerReceipt,
 }
 
 impl LocalRoute {
@@ -141,6 +161,8 @@ impl LocalRoute {
             LocalRoute::AnswerCheck => "/api/dm-relay/answers/check",
             LocalRoute::Answers => "/api/dm-relay/answers",
             LocalRoute::AnswerUnknown => "/api/dm-relay/answers/unknown",
+            LocalRoute::OperatorAnswers => "/api/dm-relay/answers/operator",
+            LocalRoute::AnswerReceipt => "/api/dm-relay/answers/receipt",
         }
     }
 }
@@ -942,7 +964,11 @@ pub(crate) mod tests {
                     .unwrap()
                     .pop_front()
                     .unwrap_or_else(|| answered(200, json!({"outcome": "released"}))),
-                LocalRoute::AnswerCheck | LocalRoute::Answers | LocalRoute::AnswerUnknown => self
+                LocalRoute::AnswerCheck
+                | LocalRoute::Answers
+                | LocalRoute::AnswerUnknown
+                | LocalRoute::OperatorAnswers
+                | LocalRoute::AnswerReceipt => self
                     .answers
                     .lock()
                     .unwrap()

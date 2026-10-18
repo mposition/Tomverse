@@ -1163,6 +1163,37 @@ pub fn claim_answer(
     }))
 }
 
+/// Stage S2-2b4: the operator's answer records recorded at or after `since`
+/// (seconds), in the order of their time and then their card and revision, at
+/// most `limit`. The Tomverse bridge relay reads them to close the app's
+/// Decision Maker request of each question the operator answered directly
+/// (docs/policy/amux-decision-maker.md §2-7: "운영자의 직접 답이 먼저면 요청은
+/// 닫힌다"). The order is the records' own values, not their row numbers,
+/// which a vacuum may change. A read.
+pub fn operator_answers_since(
+    conn: &Connection,
+    since: i64,
+    limit: usize,
+) -> rusqlite::Result<Vec<AnswerRecord>> {
+    let mut statement = conn.prepare(
+        "SELECT issue_id, question_revision, source, request_id, actor, recorded_at \
+         FROM _amux_dm_answers WHERE source = 'operator' AND recorded_at >= ?1 \
+         ORDER BY recorded_at, issue_id, question_revision LIMIT ?2",
+    )?;
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let records = statement.query_map(params![since, limit], |r| {
+        Ok(AnswerRecord {
+            issue_id: r.get(0)?,
+            question_revision: r.get(1)?,
+            source: r.get(2)?,
+            request_id: r.get(3)?,
+            actor: r.get(4)?,
+            recorded_at: r.get(5)?,
+        })
+    })?;
+    records.collect()
+}
+
 /// Everything this module knows about a card, for the read endpoint.
 pub fn state_json(conn: &Connection, issue_id: &str) -> rusqlite::Result<Value> {
     let draft = draft_for(conn, issue_id)?;
@@ -2001,6 +2032,49 @@ mod tests {
     }
 
     // -- the answer record --------------------------------------------------------
+
+    /// Stage S2-2b4: the operator's records only, from a time on, in the
+    /// order of their time and then their question -- what the bridge reads to
+    /// close the app's request of each question the operator answered directly.
+    #[test]
+    fn the_operators_answer_records_are_listed_by_time_without_the_confirmed_ones() {
+        let conn = db();
+        for (id, entered) in [("DM-21", 100), ("DM-22", 100), ("DM-23", 100), ("DM-24", 100)] {
+            card(&conn, id, "needsyou", entered);
+            write_draft(&conn, id, &TypedAskInput::Set(ask(two_options())), entered).unwrap();
+            sync_question_revision(&conn, id, entered).unwrap();
+        }
+        let confirmed = AnswerSource::DmConfirmed {
+            request_id: REQUEST_A.into(),
+        };
+        // Written in this order; two share a second, and the later-written one sorts first.
+        claim_answer(&conn, "DM-23", 1, &AnswerSource::Operator, "Ethan", 300).unwrap();
+        claim_answer(&conn, "DM-24", 1, &AnswerSource::Operator, "Ethan", 300).unwrap();
+        claim_answer(&conn, "DM-22", 1, &AnswerSource::Operator, "Ethan", 300).unwrap();
+        // A confirmed answer's record is not the operator's.
+        claim_answer(&conn, "DM-21", 1, &confirmed, "amux-dm-relay", 250).unwrap();
+        let listed = |since: i64, limit: usize| -> Vec<(String, i64, i64)> {
+            operator_answers_since(&conn, since, limit)
+                .unwrap()
+                .into_iter()
+                .map(|record| {
+                    assert_eq!(record.source, "operator");
+                    assert_eq!(record.request_id, None);
+                    (record.issue_id, record.question_revision, record.recorded_at)
+                })
+                .collect()
+        };
+        assert_eq!(
+            listed(0, 10),
+            vec![
+                ("DM-22".to_string(), 1, 300),
+                ("DM-23".to_string(), 1, 300),
+                ("DM-24".to_string(), 1, 300),
+            ]
+        );
+        assert_eq!(listed(301, 10), Vec::<(String, i64, i64)>::new());
+        assert_eq!(listed(300, 2).len(), 2);
+    }
 
     /// docs/policy/amux-decision-maker.md §12, blocking criterion: a direct
     /// answer and a confirmed answer arriving together deliver one answer.

@@ -1164,7 +1164,8 @@ test("the delivery graph: one decision after a confirmation, one outcome after i
     assert.equal(dmDeliveryStateFromRow(REQUEST_ID, deliveryRow(overrides)), null, JSON.stringify(overrides));
   }
   // A row without the reason's column is not the read's.
-  const { notSentReason: _column, ...withoutReason } = deliveryRow();
+  const withoutReason = deliveryRow();
+  delete withoutReason.notSentReason;
   assert.equal(dmDeliveryStateFromRow(REQUEST_ID, withoutReason), null);
 });
 

@@ -51,6 +51,17 @@
 //!   the bridge does not know: it pauses the worker's session (AMUX pause)
 //!   first, then reads the receipt of the message id. It sends nothing.
 //!
+//! STAGE S2-2b4: TWO READS BY POST, behind the same token.
+//!
+//! - `POST /api/dm-relay/answers/operator` lists the operator's answer
+//!   records from a time on, so the bridge can report each question to the
+//!   app, whose router closes its open request (§2-7: "운영자의 직접 답이
+//!   먼저면 요청은 닫힌다").
+//! - `POST /api/dm-relay/answers/receipt` reads what this AMUX holds of one
+//!   decided delivery -- its message id's reservation and the question
+//!   revision's answer record -- for a bridge that stopped between the app's
+//!   decision and its outcome. It pauses nothing and sends nothing.
+//!
 //! The answer route takes the message text and nothing that is a Decision
 //! Maker result: the bridge reads that text from the app only after a person
 //! confirmed it and sends it only after the app recorded the delivery
@@ -85,6 +96,8 @@ pub fn routes() -> Router<AppState> {
         .route("/answers", post(deliver_answer))
         .route("/answers/check", post(check_answer))
         .route("/answers/unknown", post(answer_unknown))
+        .route("/answers/operator", post(operator_answers))
+        .route("/answers/receipt", post(answer_receipt))
 }
 
 /// At most this many markers per answer. The relay releases what it reads,
@@ -409,6 +422,11 @@ pub trait AnswerLane: Send + Sync {
     async fn pause(&self, state: &AppState, session: &str) -> bool;
     /// The message id's receipt: `accepted`, `not_accepted` or `unreadable`.
     async fn receipt(&self, state: &AppState, session: &str, message_id: &str) -> &'static str;
+    /// Stage S2-2b4: the message id's reservation, without pausing anything:
+    /// `accepted` (reserved and acknowledged on a verified delivery),
+    /// `pending` (reserved, never acknowledged), `none` (never reserved, or
+    /// forgotten after a send that typed nothing) or `unreadable`.
+    async fn reservation(&self, state: &AppState, session: &str, message_id: &str) -> &'static str;
 }
 
 /// The session layer: the same gates every automated sender meets
@@ -501,6 +519,31 @@ impl AnswerLane for FleetLane {
             (StatusCode::OK, Some(true)) => "accepted",
             (StatusCode::ACCEPTED, Some(false)) => "not_accepted",
             _ => "unreadable",
+        }
+    }
+
+    async fn reservation(&self, state: &AppState, session: &str, message_id: &str) -> &'static str {
+        let (session, message_id) = (session.to_string(), message_id.to_string());
+        // The send ledger `send_receipt` reads: a row is a reservation, and its
+        // receipt id is set only by `send_dedup_accept` on a verified delivery.
+        let read = state
+            .store
+            .read_async(move |conn| {
+                use rusqlite::OptionalExtension;
+                Ok(conn
+                    .query_row(
+                        "SELECT receipt_id FROM send_dedup WHERE session=?1 AND msg_id=?2",
+                        rusqlite::params![session, message_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .optional()?)
+            })
+            .await;
+        match read {
+            Ok(Some(Some(_))) => "accepted",
+            Ok(Some(None)) => "pending",
+            Ok(None) => "none",
+            Err(_) => "unreadable",
         }
     }
 }
@@ -869,6 +912,137 @@ pub(crate) async fn answer_unknown_with<L: AnswerLane>(
         "receipt": receipt,
         "claimed_by_request": claimed,
         "answer_source": answer.map(|record| record.source),
+    }))
+    .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Stage S2-2b4: the operator's answers and one decided delivery's records
+// ---------------------------------------------------------------------------
+
+/// At most this many operator answer records per answer; the bridge reads on
+/// from the last one's time.
+pub const OPERATOR_ANSWER_LIST_LIMIT: usize = 50;
+
+async fn operator_answers(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    operator_answers_with(&state, configured_digest().as_deref(), &headers, &body).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OperatorAnswersBody {
+    since: i64,
+}
+
+/// `POST /api/dm-relay/answers/operator` with `{since}` (seconds): the
+/// operator's answer records from that time on (`dm_ask::operator_answers_since`),
+/// in the order of their time and then their question, at most
+/// [`OPERATOR_ANSWER_LIST_LIMIT`] -- `{answers: [{card_id, question_revision,
+/// recorded_at}], truncated}`. The bridge reports each question to the app,
+/// whose router closes its open Decision Maker request
+/// (docs/policy/amux-decision-maker.md §2-7: "운영자의 직접 답이 먼저면 요청은
+/// 닫힌다"). A read: it changes nothing, and carries no answer text.
+pub(crate) async fn operator_answers_with(
+    state: &AppState,
+    configured: Option<&str>,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Response {
+    if let Err(response) = admit(configured, headers) {
+        return response;
+    }
+    let Ok(body) = serde_json::from_slice::<OperatorAnswersBody>(body) else {
+        return invalid();
+    };
+    let since = body.since;
+    let read = state
+        .store
+        .read_async(move |conn| Ok(dm_ask::operator_answers_since(conn, since, OPERATOR_ANSWER_LIST_LIMIT + 1)?))
+        .await;
+    let Ok(mut records) = read else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "dm relay answer record read failed" })),
+        )
+            .into_response();
+    };
+    let truncated = records.len() > OPERATOR_ANSWER_LIST_LIMIT;
+    records.truncate(OPERATOR_ANSWER_LIST_LIMIT);
+    let answers: Vec<_> = records
+        .into_iter()
+        .map(|record| {
+            json!({
+                "card_id": record.issue_id,
+                "question_revision": record.question_revision,
+                "recorded_at": record.recorded_at,
+            })
+        })
+        .collect();
+    Json(json!({ "answers": answers, "truncated": truncated })).into_response()
+}
+
+async fn answer_receipt(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    answer_receipt_with(&state, &FleetLane, configured_digest().as_deref(), &headers, &body).await
+}
+
+/// `POST /api/dm-relay/answers/receipt` with the same body as
+/// `answers/unknown`: what this AMUX holds of one decided delivery, for a
+/// bridge that stopped between the app's delivery decision and its outcome
+/// (stage S2-2b4, docs/policy/amux-decision-maker.md §9) -- the reservation of
+/// the request's message id in the session's send ledger (`accepted`,
+/// `pending`, `none` or `unreadable`), the question revision's answer record
+/// (`answer_source`, and whether this request holds it), and whether the card
+/// still asks that revision. A read: unlike `answers/unknown` it pauses
+/// nothing, and like every route here it sends nothing. The bridge records
+/// the outcome these prove, and pauses the session through `answers/unknown`
+/// when they prove none.
+pub(crate) async fn answer_receipt_with<L: AnswerLane>(
+    state: &AppState,
+    lane: &L,
+    configured: Option<&str>,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Response {
+    if let Err(response) = admit(configured, headers) {
+        return response;
+    }
+    let Ok(body) = serde_json::from_slice::<AnswerUnknownBody>(body) else {
+        return invalid();
+    };
+    if !is_card_id(&body.card_id)
+        || body.question_revision < 1
+        || !dm_ask::is_request_id(&body.request_id)
+        || !is_session_name(&body.session)
+    {
+        return invalid();
+    }
+    let reservation = lane
+        .reservation(state, &body.session, &answer_message_id(&body.request_id))
+        .await;
+    let (card, revision) = (body.card_id.clone(), body.question_revision);
+    let read = state
+        .store
+        .read_async(move |conn| {
+            let answer = dm_ask::answer_for(conn, &card, revision)?;
+            let current = dm_ask::current_revision(conn, &card)?.map(|current| current.question_revision);
+            Ok((answer, current == Some(revision)))
+        })
+        .await;
+    let Ok((answer, question_current)) = read else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "dm relay answer record read failed" })),
+        )
+            .into_response();
+    };
+    let claimed = answer
+        .as_ref()
+        .is_some_and(|record| record.request_id.as_deref() == Some(body.request_id.as_str()));
+    Json(json!({
+        "reservation": reservation,
+        "answer_source": answer.map(|record| record.source),
+        "claimed_by_request": claimed,
+        "question_current": question_current,
     }))
     .into_response()
 }
@@ -1329,6 +1503,8 @@ mod tests {
         /// The operator's direct answer, claimed while the lane is checked:
         /// the race between the delivery's read and its claim.
         operator_answers_during_check: Option<(String, i64)>,
+        /// Stage S2-2b4: the message id's reservation the send ledger holds.
+        reservation: &'static str,
         /// The card given to another worker while the lane is checked: the
         /// race between the delivery's binding check and its claim.
         reassigned_during_check: Option<(String, String)>,
@@ -1344,6 +1520,7 @@ mod tests {
                 paused: true,
                 receipt: "not_accepted",
                 operator_answers_during_check: None,
+                reservation: "none",
                 reassigned_during_check: None,
                 calls: Arc::new(Mutex::new(Vec::new())),
             }
@@ -1405,6 +1582,10 @@ mod tests {
         async fn receipt(&self, _state: &AppState, _session: &str, message_id: &str) -> &'static str {
             self.calls.lock().unwrap().push(format!("receipt {message_id}"));
             self.receipt
+        }
+        async fn reservation(&self, _state: &AppState, session: &str, message_id: &str) -> &'static str {
+            self.calls.lock().unwrap().push(format!("reservation {session} {message_id}"));
+            self.reservation
         }
     }
 
@@ -1779,5 +1960,118 @@ mod tests {
         assert_eq!(lane.sends(), 0);
         let (_, typed) = call(&app, "GET", &format!("/api/board/{card}/typed-ask"), None).await;
         assert!(typed["answer"].is_null(), "nothing was claimed: {typed}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Stage S2-2b4: the operator's answers and one decided delivery's records
+    // -----------------------------------------------------------------------
+
+    fn claim_as(state: &AppState, card: &str, revision: i64, source: AnswerSource, at: i64) {
+        let card = card.to_string();
+        state
+            .store
+            .write(move |conn| {
+                let claim = dm_ask::claim_answer(conn, &card, revision, &source, "Ethan", at)?;
+                assert!(matches!(claim, AnswerClaim::Claimed(_)), "{claim:?}");
+                Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+            })
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_operator_answer_list_is_the_operators_records_by_time_behind_the_relay_token() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let digest = digest();
+        let headers = token_headers(TOKEN);
+        let first = owned_card(&app, &state).await;
+        let confirmed = owned_card(&app, &state).await;
+        let second = owned_card(&app, &state).await;
+        claim_as(&state, &first, 1, AnswerSource::Operator, 500);
+        claim_as(&state, &confirmed, 1, AnswerSource::DmConfirmed { request_id: REQUEST.into() }, 450);
+        claim_as(&state, &second, 1, AnswerSource::Operator, 400);
+        // Behind the relay's token, like every route here.
+        for (configured, headers, reason) in [
+            (None, token_headers(TOKEN), "dm_relay_not_configured"),
+            (Some(digest.as_str()), HeaderMap::new(), "dm_relay_token_missing"),
+            (Some(digest.as_str()), token_headers("not-the-relay-token"), "dm_relay_token_refused"),
+        ] {
+            let (status, body) = json_of(operator_answers_with(&state, configured, &headers, br#"{"since": 0}"#).await).await;
+            assert_eq!((status, body["reason"].as_str()), (StatusCode::FORBIDDEN, Some(reason)));
+        }
+        // The operator's records only, by time; a confirmed answer's record is not one.
+        let (status, listed) = json_of(operator_answers_with(&state, Some(&digest), &headers, br#"{"since": 0}"#).await).await;
+        assert_eq!(status, StatusCode::OK, "{listed}");
+        assert_eq!(
+            listed,
+            json!({"answers": [
+                {"card_id": second, "question_revision": 1, "recorded_at": 400},
+                {"card_id": first, "question_revision": 1, "recorded_at": 500},
+            ], "truncated": false})
+        );
+        let (_, later) = json_of(operator_answers_with(&state, Some(&digest), &headers, br#"{"since": 401}"#).await).await;
+        assert_eq!(later["answers"].as_array().unwrap().len(), 1);
+        assert_eq!(later["answers"][0]["card_id"], json!(first));
+        // Nothing but a time: no other field, and a time it is.
+        for bad in [&br#"{}"#[..], br#"{"since": 0, "card_id": "x"}"#, br#"{"since": "0"}"#, b"x"] {
+            let (status, _) = json_of(operator_answers_with(&state, Some(&digest), &headers, bad).await).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{}", String::from_utf8_lossy(bad));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_receipt_read_reports_the_reservation_and_the_record_and_never_pauses_or_sends() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let digest = digest();
+        let headers = token_headers(TOKEN);
+        let card = owned_card(&app, &state).await;
+        let message_id = answer_message_id(REQUEST);
+        let read = |lane: FakeLane, revision: i64, card: String| {
+            let state = state.clone();
+            let (digest, headers) = (digest.clone(), headers.clone());
+            async move {
+                let response = answer_receipt_with(&state, &lane, Some(&digest), &headers, &unknown_body(&card, revision, REQUEST)).await;
+                (json_of(response).await, lane)
+            }
+        };
+        // Nothing recorded, the question still open, never reserved.
+        let ((status, open), lane) = read(FakeLane::ready(), 1, card.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{open}");
+        assert_eq!(
+            open,
+            json!({"reservation": "none", "answer_source": null, "claimed_by_request": false, "question_current": true})
+        );
+        // It reads: the reservation of this request's message id in its session, and nothing else.
+        assert_eq!(lane.calls(), vec![format!("reservation {SESSION} {message_id}")]);
+        // A revision the card no longer asks.
+        let ((_, moved), _) = read(FakeLane::ready(), 2, card.clone()).await;
+        assert_eq!(moved["question_current"], json!(false));
+        // This request's claim, reserved and never acknowledged.
+        claim_as(&state, &card, 1, AnswerSource::DmConfirmed { request_id: REQUEST.into() }, 600);
+        let mut pending = FakeLane::ready();
+        pending.reservation = "pending";
+        let ((_, claimed), lane) = read(pending, 1, card.clone()).await;
+        assert_eq!(
+            claimed,
+            json!({"reservation": "pending", "answer_source": "dm_confirmed", "claimed_by_request": true, "question_current": true})
+        );
+        assert!(lane.calls().iter().all(|call| call.starts_with("reservation ")), "never paused, reserved or sent");
+        // The operator's record on another card.
+        let other = owned_card(&app, &state).await;
+        claim_as(&state, &other, 1, AnswerSource::Operator, 610);
+        let ((_, operator), _) = read(FakeLane::ready(), 1, other).await;
+        assert_eq!(operator["answer_source"], json!("operator"));
+        assert_eq!(operator["claimed_by_request"], json!(false));
+        // Behind the token, and a strict body.
+        let lane = FakeLane::ready();
+        let (status, _) = json_of(answer_receipt_with(&state, &lane, None, &headers, &unknown_body(&card, 1, REQUEST)).await).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let extra = json!({"card_id": card, "question_revision": 1, "request_id": REQUEST, "session": SESSION, "message": "x"}).to_string();
+        let (status, _) = json_of(answer_receipt_with(&state, &lane, Some(&digest), &headers, extra.as_bytes()).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(lane.calls().is_empty());
     }
 }
