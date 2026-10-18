@@ -268,10 +268,17 @@ test("a capability the store would not accept leaves no catalog but keeps the re
   assert.equal(whole.derived?.legacy.length, 8);
 });
 
-test("R2d ships with the bridge session list latched off, and the route only reads", () => {
-  // Orchestration policy version 35, section 4.
-  assert.equal(AMUX_WORKER_SESSION_LIST_LATCH, false);
-  assert.equal(amuxWorkerSessionListOpen(), false);
+test("version 54 turns R2d's bridge session list on, the policy records it, and the route only reads", () => {
+  // Orchestration policy version 35, section 4; version 54 is the operator's
+  // activation record. The latch may be true only with that approval
+  // recorded: a candidate still awaiting it fails here, so it cannot merge.
+  assert.equal(AMUX_WORKER_SESSION_LIST_LATCH, true);
+  assert.equal(amuxWorkerSessionListOpen(), true);
+  const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8");
+  const lines = policy.split(String.fromCharCode(13)).join("").split(String.fromCharCode(10));
+  const heading = lines.indexOf("## 버전 54 — R2d bridge 세션 목록 켜기");
+  assert.ok(heading >= 0, "version 54 section");
+  assert.match(lines[heading + 2] ?? "", /^승인 기록: `approvedBy: mposition`, `approvedAt: \d{4}-\d{2}-\d{2}`/, "version 54 approval record");
   const route = readFileSync(new URL("../app/api/internal/amux/workers/session-list/route.ts", import.meta.url), "utf8");
   assert.match(route, /export async function GET\(request: Request\)/);
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)/);
