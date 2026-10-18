@@ -217,6 +217,12 @@ Date / timezone:    ____________________
       hashed insert links to the chain head
       (`prisma/migrations/20260918090000_admin_audit_log_append_only`)
       (docs/policy/marketing-automation.md §6)
+- [ ] `npm run check:marketing-admission-code` — the admission code manifest
+      describes the code that decides an autonomous admission as it is in this
+      release. Its digest is what a scheduled autonomous post carries and what
+      dispatch compares with the running build (`lib/marketingAutonomousAdmission.ts`),
+      so a stale one would let a changed rule dispatch a post admitted under
+      the old one. Regenerate with `npm run generate:marketing-admission-code`
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:starter-catalog` — proves every Chat starter card is still
       true: its flag key is a constant some module exports rather than a
