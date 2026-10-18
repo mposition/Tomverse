@@ -247,7 +247,7 @@ test("claimed dispatch resolves every reference before the default-closed host",
     try {
       delete process.env[switchName];
       assert.deepEqual(await runAmuxV19MaxClaimedTrackedCheckoutOnce(input),
-        { kind: "refused" });
+        { kind: "refused", cliStarted: false });
       assert.equal(calls.filter((path) =>
         path.endsWith("/checkout-reference")).length, 2);
       calls.length = 0;
