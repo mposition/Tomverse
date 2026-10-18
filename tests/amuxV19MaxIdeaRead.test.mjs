@@ -36,6 +36,7 @@ test("Max launcher reads only its claim-bound plaintext without a v4 byte cap", 
         assert.equal(url,
           "https://synthetic-amux.example.test/api/internal/amux/v19/analysis-idea");
         assert.equal(options.method, "POST");
+        assert.equal(options.headers.authorization, `Bearer ${secret}`);
         assert.equal(options.headers["x-amux-agent-id"], "amux-intake-max");
         assert.deepEqual(JSON.parse(options.body), { reservationId, ideaId,
           claimId });
