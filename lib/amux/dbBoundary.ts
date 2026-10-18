@@ -279,7 +279,10 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "mutation",
   },
   // Decision Maker switches (docs/policy/amux-decision-maker.md §8): setup +
-  // the newest event of every scope + fence.
+  // the newest event of every scope + fence. Admin's panel reads the same one
+  // statement with each event's actor and reason (stage S2-4c,
+  // readDecisionMakerSwitchesForAdmin), pinned by
+  // tests/amuxDecisionMakerAdminList.test.mjs.
   decisionMakerSwitchRead: {
     operation: "decision_maker_switch_read",
     prismaCallCeiling: 3,
