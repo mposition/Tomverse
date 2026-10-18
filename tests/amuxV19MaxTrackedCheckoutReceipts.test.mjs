@@ -205,22 +205,73 @@ test("a multi-reference Max answer follows both claim-bound receipt pairs", asyn
   assert.equal(calls.length, 5);
 });
 
-test("invalid multi-reference read roots are refused before any receipt write", async () => {
+test("invalid multi-reference roots and pins cause no receipt write", async () => {
   let calls = 0;
   const references = [{ referenceOrdinal: 0, commitSha: "a".repeat(40) },
     { referenceOrdinal: 1, commitSha: "c".repeat(40) }];
-  const bad = { ...observed, references: references.map((reference) => ({
+  const checked = references.map((reference) => ({
     ...reference, excludedCount: observed.excludedCount,
     excludedPathDigest: observed.excludedPathDigest,
     excludedReasons: observed.excludedReasons,
-  })), readFiles: ["reference-0/docs/guide.md",
-    "reference-1/../secret"] };
-  const result = await finalizeAmuxV19MaxSessionResultWithReceipts({
-    ...input(async () => { calls++; throw new Error("unexpected request"); }),
-    references,
-  }, bad);
-  assert.deepEqual(result, { kind: "outcome_unknown", retryWrite: false });
+  }));
+  const invalid = [
+    { readFiles: ["reference-0/docs/guide.md", "reference-1/../secret"] },
+    { readFiles: ["reference-0/docs/guide.md", "reference-2/README.md"] },
+    { readFiles: ["reference-0/docs/guide.md", "reference-01/README.md"] },
+    { readFiles: ["reference-0/docs/guide.md", "reference-1//abs"] },
+    { readFiles: ["reference-0/docs/guide.md", "reference-1/path/"] },
+    { readFiles: ["reference-0/docs/guide.md", "reference-1/.git/config"] },
+    { readFiles: ["reference-0/docs/guide.md", "reference-1/\u0001bad"] },
+    { readFiles: ["reference-0/docs/guide.md",
+      "reference-1/README.md", "reference-1/README.md"] },
+    { references: checked.slice(0, 1) },
+    { references: [checked[0], { ...checked[1], commitSha: "d".repeat(40) }] },
+  ];
+  for (const mutation of invalid) {
+    const result = await finalizeAmuxV19MaxSessionResultWithReceipts({
+      ...input(async () => { calls++; throw new Error("unexpected request"); }),
+      references,
+    }, { ...observed, references: checked,
+      readFiles: ["reference-0/docs/guide.md",
+        "reference-1/README.md"], ...mutation });
+    assert.deepEqual(result, { kind: "outcome_unknown", retryWrite: false });
+  }
   assert.equal(calls, 0);
+});
+
+test("an unread reference still receives an empty manifest receipt", async () => {
+  const references = [{ referenceOrdinal: 0, commitSha: "a".repeat(40) },
+    { referenceOrdinal: 1, commitSha: "c".repeat(40) }];
+  const manifests = [];
+  const result = await finalizeAmuxV19MaxSessionResultWithReceipts({
+    ...input(async (url, options) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith("/session-analysis-stop")) return Response.json({
+        claimId: identity.claimId, reservationId: identity.reservationId,
+        stop: false });
+      const body = JSON.parse(options.body);
+      if (path.endsWith("/max-checkout-evidence")) return Response.json({
+        evidenceId, ideaId: identity.ideaId,
+        referenceOrdinal: body.referenceOrdinal });
+      if (path.endsWith("/max-read-manifest")) {
+        manifests.push(body.observed.readFiles);
+        return Response.json({ manifestId: body.manifestId,
+          ideaId: identity.ideaId, referenceOrdinal: body.referenceOrdinal,
+          fileCount: body.observed.readFiles.length });
+      }
+      assert.ok(path.endsWith("/session-analysis-result"));
+      return Response.json({ claimId: identity.claimId,
+        resultAuditId: "clsyntheticresult123",
+        settlementAuditId: "clsyntheticsettlement123",
+        digest: "c".repeat(64), digestKeyId: "synthetic-digest" });
+    }), references,
+  }, { ...observed, references: references.map((reference) => ({
+    ...reference, excludedCount: observed.excludedCount,
+    excludedPathDigest: observed.excludedPathDigest,
+    excludedReasons: observed.excludedReasons,
+  })), readFiles: ["reference-0/docs/guide.md"] });
+  assert.equal(result.kind, "recorded");
+  assert.deepEqual(manifests, [["docs/guide.md"], []]);
 });
 
 test("a missing second reference receipt never releases the Max answer", async () => {

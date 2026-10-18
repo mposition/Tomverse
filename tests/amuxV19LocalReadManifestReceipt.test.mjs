@@ -6,11 +6,16 @@ import { recordAmuxV19LocalReadManifest,
   "../lib/amux/ideaLocalReadManifestReceipt.mjs";
 
 const originEnv = "TOMVERSE_AMUX_V4_ANALYSIS_APP_ORIGIN";
+const maxOriginEnv = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN";
 const previousOrigin = process.env[originEnv];
+const previousMaxOrigin = process.env[maxOriginEnv];
 process.env[originEnv] = "https://tomverse.test/";
+process.env[maxOriginEnv] = "https://tomverse.test/";
 after(() => {
   if (previousOrigin === undefined) delete process.env[originEnv];
   else process.env[originEnv] = previousOrigin;
+  if (previousMaxOrigin === undefined) delete process.env[maxOriginEnv];
+  else process.env[maxOriginEnv] = previousMaxOrigin;
 });
 
 const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
