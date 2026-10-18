@@ -73,6 +73,7 @@ test("exact Max claim, stop and repository pin prepare one local checkout", asyn
     assert.equal(result.kind, "ready");
     assert.equal(result.repositoryPath, expectedPath);
     assert.equal(result.commitSha, pin);
+    assert.equal(result.referenceCount, 1);
     assert.equal(await result.stopCheck(), false);
     assert.deepEqual(calls.map((entry) => entry.split(" ")[1]), [
       "/api/internal/amux/v19/analysis-budget/claim",
