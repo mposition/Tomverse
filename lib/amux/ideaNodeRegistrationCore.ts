@@ -22,6 +22,7 @@ export function inspectAmuxV4NodeCreation(input: {
   digestKey: AmuxDigestKey;
 }): { ok: true; plan: { id: string; parentId: string | null;
   level: AmuxAnalysisNode["level"]; title: string; description: string;
+  displayPrefix: string | null;
   decisionId: string; ideaId: string; draftUnitId: string } } |
   { ok: false; code: "reconfirm" | "reject" | "halt" | "proposal_mismatch" } {
   const check = checkAmuxIdeaUnitConsume(input.prepared, {
@@ -58,6 +59,9 @@ export function inspectAmuxV4NodeCreation(input: {
   }
   return { ok: true, plan: { id: node.id, parentId: node.parentId,
     level: node.level, title: proposal.title,
-    description: proposal.description, decisionId: prepared.id,
+    description: proposal.description,
+    // amux-intake v17: the proposal's Feature prefix, bound by the unit digest above.
+    displayPrefix: proposal.level === "feature" ? proposal.displayPrefix ?? null : null,
+    decisionId: prepared.id,
     ideaId: prepared.ideaId, draftUnitId: prepared.draftUnitId } };
 }

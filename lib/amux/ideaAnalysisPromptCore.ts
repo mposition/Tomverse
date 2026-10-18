@@ -1,4 +1,5 @@
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { AMUX_CARD_DISPLAY_RESERVED_PREFIXES } from "./cardDisplayKeyCore.ts";
 import {
   AMUX_ANALYSIS_CHUNK_CARD_CAP,
   AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP,
@@ -18,7 +19,7 @@ import {
  * runner must bind this exact data to an owner-confirmed, unconsumed receipt,
  * repeat current source/model/budget checks, and spawn a tool-less CLI in a
  * credential-free sandbox. No live runner imports this module today. */
-export const AMUX_V4_ANALYSIS_PROMPT_VERSION = "amux-v4-analysis-prompt-v4" as const;
+export const AMUX_V4_ANALYSIS_PROMPT_VERSION = "amux-v4-analysis-prompt-v5" as const;
 export const AMUX_V4_ANALYSIS_DATA_MAX_BYTES = 16 * 1024;
 export const AMUX_V4_ANALYSIS_SOURCE_CAP = 12;
 export const AMUX_V4_ANALYSIS_TARGET_CAP = 96;
@@ -140,7 +141,8 @@ Return exactly one JSON object and no Markdown. Its top-level keys are schemaVer
 
 Each unit must have a localId beginning c<chunkIndex>: followed by its matching kind and a canonical nonnegative integer, for example c<chunkIndex>:card-0; no leading zeroes. Each unit needs at least one sourceRefId listed in the confirmed data. References may point only to confirmed permittedTargetRefs or units in this same output. permittedTargetRefs may include prior-chunk Story or Task proposal IDs, so an output-continuation Task can refer to an earlier Story or dependency without duplicating it. Such refs establish only identity and type within this package, never approval, registration, or execution permission. Use at most ${AMUX_ANALYSIS_CHUNK_CARD_CAP} card units, ${AMUX_ANALYSIS_CHUNK_NODE_CAP} node units, and ${AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP} evidence units. Do not treat those per-chunk limits as an idea-wide card limit.
 
-Node keys: kind="node", localId, level (initiative|epic|feature), parentRef (null for initiative), title, description, sourceRefIds, portfolioSignal.
+Node keys: kind="node", localId, level (initiative|epic|feature), parentRef (null for initiative), title, description, sourceRefIds, portfolioSignal, and for a feature only, displayPrefix.
+displayPrefix names the Feature in its cards' numbers, such as GITHUB in AMUX-GITHUB-001: 2 to 16 characters, uppercase A-Z and digits only, short and recognisable from the Feature's subject. Never use any of ${AMUX_CARD_DISPLAY_RESERVED_PREFIXES.join(", ")}. An initiative or epic has no displayPrefix key.
 Card keys: kind="card", localId, cardType (story|task), storyKind (general|bug for Story, null for Task), title, problem, scopeIn, scopeOut, completionCriteria, featureRef, parentStoryRef (nullable for Task, null for Story), dependencyRefs (Task dependencies; required empty array for Story), duplicateCandidateRefs, taskRole (design|implement|test|review|verify|investigate|operate for Task, null for Story), executionGrade (routine|advanced|frontier for Task, null for Story), executionBrief (nonempty for Task, null for Story), sourceRefIds, portfolioSignal.
 Evidence keys: kind="evidence", localId, evidenceType (observed_error|source_finding), summary, cardRef, sourceRefIds. An observed_error belongs to a Bug Story.
 

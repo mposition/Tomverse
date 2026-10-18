@@ -107,6 +107,7 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
   "lib/adminAuditIntegrityCore.ts",
   "lib/amux/boardImportCore.ts",
+  "lib/amux/cardDisplayKeyCore.ts",
   "lib/amux/ideaAnalysisChunkCore.ts",
   "lib/amux/ideaAnalysisDraftSealCore.ts",
   "lib/amux/ideaAnalysisResultReadCore.ts",
@@ -125,8 +126,11 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // Intake v15 changes only ideaAnalysisResultReadCore's code latch in this
 // unchanged 14-file closure (r-20261009-040434-905dfc accepted that activation).
 // Repin both resolution-preview states without exempting a new file or writer.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "33db27df6a4f83d5bb9aff204c0e1190b96586560c03dc37c065fa250cbe82e8";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "5af599e128c96f62f326afa783c6348eb296821a3443aa42dfe346bf75328d8a";
+// docs/policy/amux-intake.md v17 adds lib/amux/cardDisplayKeyCore.ts to the
+// closure through ideaAnalysisChunkCore's Feature prefix check: a pure module
+// with no import, I/O or writer. Repinned for that 15-file closure only.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "d67dc3e773f95508cdbffab9c84ba3fe8892065a312a58d81b0f14b8796e5996";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "37537b37803c99e7d390e4c58966c6da40760697172ca162e17a74d673be68b2";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

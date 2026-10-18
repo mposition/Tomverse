@@ -116,6 +116,8 @@ test("registration writes one backlog card and leaves execution and credit uncha
   assert.equal(card?.claimedAt, null);
   assert.equal(card?.executionBrief, null);
   assert.equal(card?.title, title);
+  // docs/policy/amux-card-display-key.md §4: a conversation intake card is INTAKE.
+  assert.match(card?.displayKey ?? "", /^AMUX-INTAKE-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,8})$/);
   const after = await untouchedCounts();
   assert.deepEqual(after, before);
   const draft = await prisma.$queryRaw<Array<{ title: string | null; status: string }>>`

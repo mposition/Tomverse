@@ -99,9 +99,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       (SELECT json_agg(json_build_object(
           'id', w."id", 'cardType', w."cardType", 'status', w."status",
           'reviewPrNumber', w."reviewPrNumber", 'terminal', (w."v4TerminalAt" IS NOT NULL),
-          -- main has no card display numbers yet (AmuxWorkItem."displayKey" ships with them);
-          -- until then every card reads as unnumbered rather than failing the whole list.
-          'displayKey', NULL::text) ORDER BY w."createdAt" ASC, w."id" ASC)
+          'displayKey', w."displayKey") ORDER BY w."createdAt" ASC, w."id" ASC)
         FROM "AmuxIdeaUnitDecision" d
         JOIN "AmuxWorkItem" w ON w."id" = d."registeredWorkItemId"
         WHERE d."ideaId" = n."id" AND d."action" = 'register_card' AND d."state" = 'consumed') AS "cards"

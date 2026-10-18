@@ -1,4 +1,5 @@
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { isAmuxFeatureDisplayPrefix } from "./cardDisplayKeyCore.ts";
 import { scanAmuxV4Input } from "./localIntakeCore.ts";
 
 /**
@@ -7,7 +8,8 @@ import { scanAmuxV4Input } from "./localIntakeCore.ts";
  * The trusted caller supplies the source-ref allowlist from the confirmed
  * transfer preview; the model cannot grant itself another source.
  */
-export const AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION = 3 as const;
+// 4 (amux-intake v17): a Feature node may propose its card number prefix.
+export const AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION = 4 as const;
 export const AMUX_ANALYSIS_CHUNK_MAX_BYTES = 65_536;
 export const AMUX_ANALYSIS_CHUNK_CARD_CAP = 8;
 export const AMUX_ANALYSIS_CHUNK_NODE_CAP = 16;
@@ -106,6 +108,8 @@ export type AmuxAnalysisNode = {
   description: string;
   sourceRefIds: string[];
   portfolioSignal?: AmuxPortfolioModelSignal;
+  /** Feature only, chunk schema 4 (amux-intake v17): the model's card number prefix proposal. */
+  displayPrefix?: string;
 };
 
 export type AmuxAnalysisCard = {
@@ -147,7 +151,7 @@ export type AmuxAnalysisEvidence = {
 };
 
 export type AmuxAnalysisChunk = {
-  schemaVersion: 2 | typeof AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION;
+  schemaVersion: 2 | 3 | typeof AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION;
   previewId: string;
   chunkIndex: number;
   outcome: "propose" | "needs_information" | "reject";
@@ -301,9 +305,16 @@ const modelSignal = (value: unknown, metricNames: readonly string[],
 const parseNode = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: number): AmuxAnalysisNode => {
   const hasSignal = value !== null && typeof value === "object" &&
     Object.hasOwn(value, "portfolioSignal");
+  const hasPrefix = value !== null && typeof value === "object" &&
+    Object.hasOwn(value, "displayPrefix");
   const data = object(value, ["kind", "localId", "level", "parentRef", "title", "description", "sourceRefIds",
-    ...(hasSignal ? ["portfolioSignal"] : [])]);
+    ...(hasSignal ? ["portfolioSignal"] : []), ...(hasPrefix ? ["displayPrefix"] : [])]);
   const level = oneOf(data.level, ["initiative", "epic", "feature"] as const);
+  // amux-intake v17: a Feature's proposed card number prefix, never a reserved
+  // registration-path prefix (docs/policy/amux-card-display-key.md §4).
+  if (hasPrefix && (level !== "feature" || !isAmuxFeatureDisplayPrefix(data.displayPrefix))) {
+    reject("schema_rejected");
+  }
   const parentRef = nullableRef(data.parentRef);
   if ((level === "initiative") !== (parentRef === null)) reject("schema_rejected");
   const unitSources = sourceRefs(data.sourceRefIds, permitted);
@@ -317,6 +328,7 @@ const parseNode = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
     sourceRefIds: unitSources,
     ...(hasSignal ? { portfolioSignal: modelSignal(data.portfolioSignal,
       ["value"], unitSources) } : {}),
+    ...(hasPrefix ? { displayPrefix: data.displayPrefix as string } : {}),
   };
 };
 
@@ -544,7 +556,7 @@ export function inspectAmuxAnalysisChunk(
       "schemaVersion", "previewId", "chunkIndex", "outcome", "coverageStatus", "continuationKind", "ownerQuestion",
       "coveredScope", "remainingScope", "units",
     ]);
-    if ((data.schemaVersion !== 2 &&
+    if ((data.schemaVersion !== 2 && data.schemaVersion !== 3 &&
          data.schemaVersion !== AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION) ||
         data.previewId !== expectedPreviewId || data.chunkIndex !== expectedChunkIndex) {
       reject("schema_rejected");
@@ -552,8 +564,14 @@ export function inspectAmuxAnalysisChunk(
     const permitted = new Set(sourceRefs);
     const units = list(data.units, AMUX_ANALYSIS_CHUNK_CARD_CAP + AMUX_ANALYSIS_CHUNK_NODE_CAP +
       AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP, 0, (unit) => parseUnit(unit, permitted, expectedChunkIndex));
-    if (data.schemaVersion === AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION &&
+    // Schema 3 made portfolio signals mandatory; schema 4 keeps that.
+    if (data.schemaVersion !== 2 &&
         units.some((unit) => unit.kind !== "evidence" && !unit.portfolioSignal)) {
+      reject("schema_rejected");
+    }
+    // A Feature prefix proposal exists only from schema 4 (amux-intake v17).
+    if (data.schemaVersion !== AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION &&
+        units.some((unit) => unit.kind === "node" && unit.displayPrefix !== undefined)) {
       reject("schema_rejected");
     }
     const counts = {
@@ -586,7 +604,7 @@ export function inspectAmuxAnalysisChunk(
         (outcome === "propose" && units.length === 0) ||
         (outcome === "reject" && units.length !== 0)) reject("schema_rejected");
     const chunk: AmuxAnalysisChunk = {
-      schemaVersion: data.schemaVersion as 2 | typeof AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION,
+      schemaVersion: data.schemaVersion as AmuxAnalysisChunk["schemaVersion"],
       previewId: expectedPreviewId,
       chunkIndex: expectedChunkIndex,
       outcome,

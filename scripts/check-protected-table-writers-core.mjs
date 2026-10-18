@@ -376,6 +376,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/development-agent-orchestration.md 버전 35",
   },
   {
+    table: "AmuxCardDisplayKeyCounter",
+    delegate: "amuxCardDisplayKeyCounter",
+    writers: ["lib/amux/cardDisplayKeyAllocator.ts"],
+    contract: "docs/policy/amux-card-display-key.md §3",
+  },
+  {
     table: "AmuxDecisionMakerRequest",
     delegate: "amuxDecisionMakerRequest",
     writers: ["lib/amux/decisionMakerRequestStore.ts"],
@@ -678,6 +684,30 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 2,
     reason:
       "The capability event table's single writer (orchestration policy version 35, section 2). Its raw SQL is two constant SELECTs (the newest capability of every worker, and one worker's newest revision), one constant INSERT ... RETURNING and one constant SELECT subquery (the newest capability of every worker as JSON) that the assignment catalog reader composes into its one statement (version 35, section 3); every value is a bound parameter. The second verb is the word in the error raised when the insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog.",
+  },
+  {
+    path: "lib/amux/cardDisplayKeyAllocator.ts",
+    table: "AmuxCardDisplayKeyCounter",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The card number counter's single writer (docs/policy/amux-card-display-key.md §3). Its raw SQL is one constant INSERT ... SELECT ... ON CONFLICT DO UPDATE ... RETURNING, led by a CTE that takes the audit chain's advisory lock before the counter row, whose only value, the prefix, is a bound parameter; the two table mentions are the INSERT target and the qualified column in the increment. Its other raw SQL is a read-only SELECT of taken Feature prefixes from AmuxPortfolioNode (docs/policy/amux-intake.md v17 item 3). It never deletes a counter.",
+  },
+  {
+    path: "lib/amux/cardDisplayKeyBackfillService.ts",
+    table: "AmuxCardDisplayKeyCounter",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The card number backfill (docs/policy/amux-card-display-key.md §5) names the counter's delegate once, in the Pick of the reader type, to read every counter with findMany for the plan. It writes counters only through allocateAmuxCardDisplayKey; its raw UPDATEs set AmuxPortfolioNode.displayPrefix and AmuxWorkItem.displayKey.",
+  },
+  {
+    path: "prisma/migrations/20261014100000_amux_card_display_key/migration.sql",
+    table: "AmuxCardDisplayKeyCounter",
+    tableMentions: 3,
+    writeVerbs: 20,
+    reason:
+      "The card number migration (docs/policy/amux-card-display-key.md S2). It creates the counter table and its two triggers, which refuse an insert not at 1, an update that does anything but add one, every delete and every truncate. Its write verbs are the trigger events, the guard's TG_OP comparisons, the column ALTER TABLEs, the issued-number ledger's trigger INSERT (into that ledger, not the counter), comments about INSERT ... ON CONFLICT and other words of comments; it writes no counter row.",
   },
   {
     path: "lib/accountDataExportDomains.ts",
@@ -2634,6 +2664,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 1,
     reason:
       "The AMUX commit deadline trigger deletes its own AmuxCommitDeadline row during COMMIT with EXECUTE over TG_TABLE_SCHEMA and TG_TABLE_NAME -- the table the trigger is attached to -- because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. Both names are the trigger's own, never input, quoted with %I; the transaction id is bound with USING. It touches no protected table.",
+  },
+  {
+    path: "prisma/migrations/20261014100000_amux_card_display_key/migration.sql",
+    count: 1,
+    reason:
+      "The card number issue trigger records a card's first number in AmuxCardDisplayKeyIssued with EXECUTE over TG_TABLE_SCHEMA and that constant table name, because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. The schema is the trigger's own, never input, quoted with %I; both values are bound with USING. It writes only that append-only ledger and touches no protected table.",
   },
   {
     path: "prisma/migrations/20260930120000_amux_orchestrator_halt/migration.sql",

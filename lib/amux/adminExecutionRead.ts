@@ -23,7 +23,7 @@ import {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const cardSelect = {
-  id: true, title: true, sourceKey: true, sourceSystem: true,
+  id: true, title: true, displayKey: true, sourceKey: true, sourceSystem: true,
   sourceSnapshot: true, status: true, priority: true, kind: true,
   cardType: true, storyKind: true, parentFeatureNodeId: true,
   parentStoryCardId: true, taskRole: true, executionGrade: true,
@@ -122,6 +122,7 @@ async function cardSummaries(rows: CardRow[]) {
   return rows.map((row, index) => ({
     id: row.id,
     title: titles[index],
+    displayKey: row.displayKey,
     sourceKey: row.sourceKey,
     status: row.status,
     priority: row.priority,
@@ -206,13 +207,14 @@ const nodeSelect = {
   contentDigest: true, contentDigestKeyId: true,
 } as const;
 
-async function nodeTitles(rows: NodeRow[]) {
+async function nodeTitles(rows: NodeRow[],
+  db: Pick<typeof prisma, "amuxPortfolioNodeRevision" | "amuxIdeaUnitDecision"> = prisma) {
   if (rows.length === 0) return [];
-  const revisions = await prisma.amuxPortfolioNodeRevision.findMany({
+  const revisions = await db.amuxPortfolioNodeRevision.findMany({
     where: { OR: rows.map((row) => ({ nodeId: row.id, revision: row.revision })) },
     select: { nodeId: true, revision: true, decisionId: true },
   });
-  const decisions = await prisma.amuxIdeaUnitDecision.findMany({
+  const decisions = await db.amuxIdeaUnitDecision.findMany({
     where: { id: { in: revisions.map((row) => row.decisionId) } },
     select: { id: true, ideaId: true },
   });
@@ -371,9 +373,9 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       v4BodyDigest: true, v4BodyDigestKeyId: true,
       v4BriefCiphertext: true, v4BriefKeyId: true, v4BriefKeyVersion: true,
       v4BriefDigestKeyId: true, revision: true,
-      dependencies: { select: { dependency: { select: { id: true,
+      dependencies: { select: { dependency: { select: { id: true, displayKey: true,
         sourceKey: true, status: true } } } },
-      dependents: { select: { task: { select: { id: true,
+      dependents: { select: { task: { select: { id: true, displayKey: true,
         sourceKey: true, status: true } } } },
       executionAttempts: { orderBy: { startedAt: "desc" as const }, take: 20,
         select: { id: true, worker: true, attemptNumber: true,
@@ -624,3 +626,6 @@ export async function readAmuxExecutionFeedback(parent: {
   return { parent, complete: true, reason: null,
     rollup: rollupAmuxTaskFeedback(feedback) };
 }
+
+/** The digest-verified title reader the card number backfill shares (docs/policy/amux-card-display-key.md §5). */
+export { nodeSelect as amuxNodeTitleSelect, nodeTitles as readAmuxNodeTitles };

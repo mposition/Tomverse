@@ -179,6 +179,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration policy v46: a legacy safe stop binds the profile's live
   // runtime; it changes no commit-deadline mechanism.
   "20261014140000_amux_v22_legacy_safe_stop_live_runtime",
+  // docs/policy/amux-card-display-key.md S2: readable card numbers. Two
+  // columns, a counter table and immutability guards; it changes no
+  // commit-deadline mechanism.
+  "20261014100000_amux_card_display_key",
   // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
   // no commit deadline and continues to use the existing mutation fence.
   "20261012170000_amux_verified_no_commit_halt_auto_clear",

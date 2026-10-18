@@ -2023,6 +2023,38 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   없으므로 되감는 창(10분)보다 늦게 commit된 운영자 기록은 보고되지 않을 수 있습니다 — 그 요청은 판정되거나 stale로 닫힐 때까지 열려
   있고, 답변 기록이 질문을 차지하고 있어 확정 제안이 전달되지는 않습니다.
 
+# AMUX 카드 표시 번호
+
+`AmuxWorkItem.displayKey`, Feature의 `displayPrefix`, `AmuxCardDisplayKeyCounter`, 그리고 카드를
+만드는 경로의 번호 할당을 건드리기 전에 읽습니다.
+
+- `docs/policy/amux-card-display-key.md`
+
+- **번호는 표시용 이름이고 Task ID를 대체하지 않습니다.** API·링크·로그·복구 기록·승인 결속은
+  계속 Task ID를 씁니다.
+- **한 번 쓴 번호와 Feature PREFIX는 바뀌지 않습니다.** DB trigger가 변경과 비우기를 거부하고,
+  카드에 쓰인 번호는 `AmuxCardDisplayKeyIssued`에 남아 카드가 삭제돼도 다시 쓰이지 않습니다.
+  카운터는 1씩만 증가하며 지워지지 않습니다.
+- **할당은 `allocateAmuxCardDisplayKey(tx, prefix)` 하나이고 카드를 쓰는 트랜잭션 안에서 합니다.**
+  카운터에 직접 쓰지 않습니다(`npm run check:protected-table-writers`).
+- **Feature 없는 카드의 PREFIX는 등록 경로별 고정 목록입니다**
+  (`lib/amux/cardDisplayKeyCore.ts`의 예약 목록). 새 등록 경로는 `docs/policy/amux-card-display-key.md §4`를 먼저 개정합니다.
+- **S2(schema와 할당기)**: `lib/amux/cardDisplayKeyCore.ts`, `lib/amux/cardDisplayKeyAllocator.ts`,
+  `prisma/migrations/20261014100000_amux_card_display_key/migration.sql`,
+  `tests/amuxCardDisplayKeyCore.test.mjs`, `tests/integration/amux-card-display-key.db.test.ts`.
+- **S3a(고정 PREFIX 경로)**: 대화 intake(INTAKE), 로컬 intake(LOCAL), engineering agent(ENG),
+  workboard import(WORKBOARD), AMUX snapshot 동기화(SYNC)가 새 카드에 번호를 줍니다.
+  `tests/amuxCardDisplayKeyWriters.test.mjs`가 카드를 만드는 모든 파일을 찾아, 번호를 주지 않는
+  새 경로를 실패로 만듭니다.
+- **S3b(v4 Feature PREFIX)**: `docs/policy/amux-intake.md` v17 절. 분석 chunk schema 4에서 Feature 제안이
+  `displayPrefix`를 가질 수 있고, `create_node`가 같은 트랜잭션에서 Feature에 쓰며(이미 쓰인 값이면
+  `chooseAmuxFeatureDisplayPrefix()`가 고르는 번호 붙은 값), v4 카드는 그 Feature의 PREFIX로 번호를 받습니다.
+  PREFIX 없는 Feature 아래 카드는 번호 없이 등록되고 S4 backfill이 채웁니다.
+- **S4(backfill)**: `/admin/amux-execution?tab=cards`의 owner 전용 패널과
+  `app/api/admin/amux/card-display-key-backfill/route.ts`. 계획은 `lib/amux/cardDisplayKeyBackfillCore.ts`
+  (순수)가 정하고, 적용은 같은 트랜잭션에서 계획을 다시 계산해 운영자가 본 digest와 같을 때만 쓰며 사람
+  감사를 남깁니다. raw UPDATE로 `updatedAt`과 다른 컬럼을 건드리지 않습니다.
+
 # AI Review (교차검토) 품질과 M5
 
 AI Review의 프롬프트·reviewer 패널·인용 검증·평가·운영 계측·항목 피드백,
