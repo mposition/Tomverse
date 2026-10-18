@@ -65,6 +65,8 @@ import { POST as postMaxResultRoute } from
   "@/app/api/internal/amux/v19/analysis-budget/max-result/route";
 import { POST as postMaxUnknownRoute } from
   "@/app/api/internal/amux/v19/analysis-budget/unknown/route";
+import { GET as getMaxPriceRoute } from
+  "@/app/api/internal/amux/v19/analysis-price/route";
 import { AMUX_V19_MAX_LAUNCHER_ID } from
   "@/lib/amux/ideaSessionMaxLauncherAuth";
 import { signAmuxV19MaxClaimAttestation } from
@@ -1561,6 +1563,30 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
     },
   }));
+  const priceReadSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
+  const oldPriceReadSecret = process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET;
+  const oldPriceReadSwitch = process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ;
+  try {
+    process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = priceReadSecret;
+    process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ = "enabled";
+    const headers = { authorization: `Bearer ${priceReadSecret}`,
+      "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID };
+    const endpoint = `https://test.invalid/api/internal/amux/v19/analysis-price?reservationId=${reservation.reservationId}&ideaId=${ideaId}`;
+    const selected = await getMaxPriceRoute(new Request(endpoint, { headers }));
+    assert.equal(selected.status, 200);
+    assert.deepEqual(await selected.json(), { kind: "ready", priceVersionId,
+      modelId: maxModelId, reasoningEffort: "high" });
+    const wrong = await getMaxPriceRoute(new Request(
+      endpoint.replace(ideaId, randomUUID()), { headers }));
+    assert.equal(wrong.status, 409);
+  } finally {
+    if (oldPriceReadSecret === undefined)
+      delete process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET;
+    else process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = oldPriceReadSecret;
+    if (oldPriceReadSwitch === undefined)
+      delete process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ;
+    else process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ = oldPriceReadSwitch;
+  }
   const apiPriceVersionId = randomUUID();
   await prisma.$transaction((tx) => commitAmuxIdeaAnalysisPriceApproval(tx, {
     session, request, approval: {
