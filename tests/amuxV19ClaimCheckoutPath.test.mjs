@@ -20,6 +20,11 @@ test("only a claim repository under the configured root selects checkout bytes",
     execFileSync("git", ["init", "--quiet", selected]);
     execFileSync("git", ["-C", selected, "remote", "add", "origin",
       "https://github.com/owner/repo.git"]);
+    if (process.platform === "linux") {
+      for (const path of [root, join(root, "owner"), selected,
+        join(selected, ".git")]) await chmod(path, 0o755);
+      await chmod(join(selected, ".git", "config"), 0o644);
+    }
     await writeFile(join(root, "owner", "notdir"), "synthetic");
     const outside = join(directory, "outside");
     await mkdir(outside);
