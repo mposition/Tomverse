@@ -8,6 +8,7 @@ import {
   inspectAmuxIdeaSessionInput,
   inspectAmuxIdeaSessionSource,
   inspectAmuxIdeaSessionSubmission,
+  inspectSealedAmuxIdeaSessionInput,
   sameAmuxOperatingScopeAuthority,
 } from "@/lib/amux/ideaSessionSubmissionCore";
 
@@ -88,6 +89,15 @@ test("session email refusal preserves its existing address boundaries", () => {
   ]) {
     assert.equal(inspectAmuxIdeaSessionSubmission(submission(idea({ idea: value }))).ok, true);
   }
+});
+
+test("a sealed v1 body retains its intake-time content decision", () => {
+  const stored = idea({ idea: "person@example.test" });
+  assert.deepEqual(inspectAmuxIdeaSessionInput(stored),
+    { ok: false, code: "content_refused" });
+  assert.equal(inspectSealedAmuxIdeaSessionInput(stored).ok, true);
+  assert.equal(inspectSealedAmuxIdeaSessionInput({ ...stored,
+    repositories: ["not-a-repository"] }).ok, false);
 });
 
 test("session parser scans multi-megabyte non-email content without quadratic slowdown", () => {

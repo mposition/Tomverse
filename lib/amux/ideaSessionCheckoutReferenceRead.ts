@@ -11,7 +11,7 @@ import { selectAmuxSessionCheckoutReference,
   "./ideaSessionCheckoutReferenceCore.ts";
 import { readAmuxSessionReferencePin } from
   "./ideaSessionReferencePinRead.ts";
-import { inspectAmuxIdeaSessionInput } from
+import { inspectSealedAmuxIdeaSessionInput } from
   "./ideaSessionSubmissionCore.ts";
 
 /** Release one repository identity only for the exact in-flight claim. The
@@ -88,7 +88,9 @@ export async function readAmuxSessionCheckoutReferenceInTx(
         typeof metadata !== "object" || Array.isArray(metadata)) return null;
     const values = metadata as Record<string, unknown>;
     const pins = values.pinnedCommitShas;
-    if (!Array.isArray(pins) || pins.length !== pin.referenceCount ||
+    if (values.rawDigest !== idea.rawDigest ||
+        values.rawDigestKeyId !== idea.rawDigestKeyId ||
+        !Array.isArray(pins) || pins.length !== pin.referenceCount ||
         pins[input.referenceOrdinal] !== pin.pinnedCommitSha ||
         !Number.isSafeInteger(values.repositoryCount) ||
         !Number.isSafeInteger(values.pullRequestCount) ||
@@ -108,8 +110,11 @@ export async function readAmuxSessionCheckoutReferenceInTx(
       let parsed: unknown;
       try { parsed = JSON.parse(plain.toString("utf8")); }
       catch { return null; }
-      const inspected = inspectAmuxIdeaSessionInput(parsed);
+      const inspected = inspectSealedAmuxIdeaSessionInput(parsed);
       if (!inspected.ok) return null;
+      if (inspected.counts.repositoryCount !== values.repositoryCount ||
+          inspected.counts.pullRequestCount !== values.pullRequestCount ||
+          inspected.counts.ideaBytes !== values.ideaBytes) return null;
       return selectAmuxSessionCheckoutReference({ idea: inspected.input,
         referenceCount: pin.referenceCount,
         pinnedCommitSha: pin.pinnedCommitSha,

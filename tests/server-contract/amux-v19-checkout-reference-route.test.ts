@@ -17,6 +17,7 @@ const names = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
 const prior = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 let reads = 0;
 let fail = false;
+let missing = false;
 let received: unknown;
 const reference = { referenceCount: 1, kind: "repository",
   repository: "mposition/Tomverse", pullRequestNumber: null,
@@ -26,6 +27,7 @@ mock.module(mod("lib/amux/ideaSessionCheckoutReferenceRead.ts"), { namedExports:
     reads += 1;
     received = input;
     if (fail) throw new Error("synthetic private DB error");
+    if (missing) return null;
     return reference;
   },
 } });
@@ -37,7 +39,7 @@ after(() => { for (const name of names) {
   else process.env[name] = prior[name];
 } });
 const reset = () => {
-  reads = 0; fail = false; received = undefined;
+  reads = 0; fail = false; missing = false; received = undefined;
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
   for (const name of names.slice(2)) process.env[name] = "enabled";
@@ -55,10 +57,12 @@ test("checkout reference is closed without the exact agent and all read switches
   assert.equal((await route.POST(post(undefined, { authorization: "" }))).status, 401);
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
   assert.equal((await route.POST(post())).status, 401);
-  reset();
-  delete process.env.TOMVERSE_AMUX_V19_CHECKOUT_REFERENCE_READ;
-  assert.equal((await route.POST(post())).status, 409);
-  assert.equal(reads, 0);
+  for (const name of names.slice(2)) {
+    reset();
+    delete process.env[name];
+    assert.equal((await route.POST(post())).status, 409, name);
+    assert.equal(reads, 0, name);
+  }
 });
 
 test("checkout reference requires an exact claim and bounded request", async () => {
@@ -82,6 +86,10 @@ test("checkout reference returns one no-store target and hides read failures", a
   assert.deepEqual(await response.json(), reference);
   assert.deepEqual(received, { ideaId, reservationId, claimId,
     referenceOrdinal: 0 });
+  missing = true;
+  assert.deepEqual(await (await route.POST(post())).json(),
+    { error: "not_ready" });
+  missing = false;
   fail = true;
   assert.deepEqual(await (await route.POST(post())).json(),
     { error: "checkout_reference_unavailable" });

@@ -90,7 +90,8 @@ export function inspectAmuxIdeaSessionSource(value: unknown):
  * This admits the same exact idea shape and content refusals as owner intake,
  * without importing the digest-pinned owner parser or inheriting its limits.
  */
-export function inspectAmuxIdeaSessionInput(value: unknown): AmuxIdeaSessionInputInspection {
+function inspectAmuxIdeaSessionInputV1(value: unknown,
+  enforceCurrentContentRules: boolean): AmuxIdeaSessionInputInspection {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, code: "schema_rejected" };
   }
@@ -102,7 +103,9 @@ export function inspectAmuxIdeaSessionInput(value: unknown): AmuxIdeaSessionInpu
   }
   const idea = candidate.idea.trim();
   if (idea.length === 0) return { ok: false, code: "metadata_incomplete" };
-  if (!contentAdmitted(idea)) return { ok: false, code: "content_refused" };
+  if (enforceCurrentContentRules && !contentAdmitted(idea)) {
+    return { ok: false, code: "content_refused" };
+  }
   if (!candidate.repositories.every((entry): entry is string =>
     typeof entry === "string" && validRepository(entry)) ||
       new Set(candidate.repositories.map((entry) => entry.toLowerCase())).size !== candidate.repositories.length) {
@@ -127,6 +130,17 @@ export function inspectAmuxIdeaSessionInput(value: unknown): AmuxIdeaSessionInpu
     input: { version: 1, idea, repositories: candidate.repositories, pullRequests },
     counts: { ideaBytes: Buffer.byteLength(idea, "utf8"),
       repositoryCount: candidate.repositories.length, pullRequestCount: pullRequests.length } };
+}
+
+export function inspectAmuxIdeaSessionInput(value: unknown): AmuxIdeaSessionInputInspection {
+  return inspectAmuxIdeaSessionInputV1(value, true);
+}
+
+/** A sealed, digest-verified v19 body keeps its intake-time content decision.
+ * New refusal patterns must not retroactively hide a previously accepted
+ * checkout target. Only the immutable v1 structure is checked here. */
+export function inspectSealedAmuxIdeaSessionInput(value: unknown): AmuxIdeaSessionInputInspection {
+  return inspectAmuxIdeaSessionInputV1(value, false);
 }
 
 export function inspectAmuxIdeaSessionSubmission(value: unknown): AmuxIdeaSessionSubmissionInspection {
