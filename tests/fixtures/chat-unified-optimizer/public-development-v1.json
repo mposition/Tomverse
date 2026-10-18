@@ -1,0 +1,33 @@
+{
+  "version": "chat-unified-public-development-set-v1",
+  "examples": [
+    {
+      "fixtureRef": "public:synthetic-greeting",
+      "sourceText": "Write a short greeting.",
+      "output": {
+        "schemaVersion": "unified-router-refiner-v1",
+        "analysis": {
+          "kind": "writing",
+          "difficulty": "simple",
+          "expectedOutputLength": "short",
+          "needsCurrentInformation": false
+        },
+        "rewrite": { "decision": "keep_original", "text": null }
+      }
+    },
+    {
+      "fixtureRef": "public:synthetic-format",
+      "sourceText": "Return exactly the word hello as plain text.",
+      "output": {
+        "schemaVersion": "unified-router-refiner-v1",
+        "analysis": {
+          "kind": "writing",
+          "difficulty": "simple",
+          "expectedOutputLength": "short",
+          "needsCurrentInformation": false
+        },
+        "rewrite": { "decision": "keep_original", "text": null }
+      }
+    }
+  ]
+}
