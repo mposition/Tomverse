@@ -26,6 +26,7 @@ import {
   dmAdminSwitchLatchesFromRows,
 } from "../lib/amux/decisionMakerAdminCore.ts";
 import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
+import { DM_DELIVERY_NOT_SENT_REASONS } from "../lib/amux/decisionMakerJudgmentCore.ts";
 import { DM_CLOSING_EVENT_KINDS } from "../lib/amux/decisionMakerRequestCore.ts";
 import {
   DecisionMakerAdminReadError,
@@ -65,6 +66,7 @@ const listRow = (overrides = {}) => ({
   declarationAccuracy: null,
   delivered: false,
   deliveryOutcomeKind: null,
+  deliveryNotSentReason: null,
   deliveryResolution: null,
   cleanupUnknownAtEpochMs: null,
   ...overrides,
@@ -80,7 +82,7 @@ const parsed = (overrides = {}) => {
 };
 
 const DETAIL_KEYS = ["outputKind", "irreversible"];
-const JUDGMENT_KEYS = ["declarationAccuracy", "delivered", "deliveryOutcomeKind", "deliveryResolution"];
+const JUDGMENT_KEYS = ["declarationAccuracy", "delivered", "deliveryOutcomeKind", "deliveryNotSentReason", "deliveryResolution"];
 
 /**
  * A transaction that answers each store's statement from the combined rows:
@@ -210,7 +212,7 @@ test("a row the ledger could not have produced refuses the whole list", async ()
   const query = stray.tx.$queryRaw;
   stray.tx.$queryRaw = (strings, ...values) =>
     strings.join("$").includes("unnest(")
-      ? Promise.resolve([{ requestId: "1b6f2a3e-5d1c-4e8f-9a7b-2c3d4e5f6a7b", declarationAccuracy: null, delivered: false, deliveryOutcomeKind: null, deliveryResolution: null }])
+      ? Promise.resolve([{ requestId: "1b6f2a3e-5d1c-4e8f-9a7b-2c3d4e5f6a7b", declarationAccuracy: null, delivered: false, deliveryOutcomeKind: null, deliveryNotSentReason: null, deliveryResolution: null }])
       : query(strings, ...values);
   await assert.rejects(listDecisionMakerRequestsForAdmin(stray.tx), /state_unreadable/);
 });
@@ -285,6 +287,8 @@ test("the status follows the events in one order: closing, unknown result, resul
     [{ snapshotState: "none", resultKind: "proposal", outputKind: "free_text", irreversible: false, closingKind: "reject", declarationAccuracy: "not_judged" }, "reject"],
     [{ assigned: false, closingKind: "assign_discarded" }, "assign_discarded"],
     [{ resultKind: "timeout", closingKind: "stale_close" }, "stale_close"],
+    // Stage S2-2b4: the operator answered directly, from any open state -- a proposal nobody judged included.
+    [{ snapshotState: "none", resultKind: "proposal", outputKind: "select", irreversible: false, closingKind: "direct_answer_close" }, "direct_answer_close"],
   ];
   const seen = new Set(["routed_to_operator"]);
   for (const [overrides, expected] of cases) {
@@ -313,6 +317,8 @@ test("only a confirmed answer is ever delivered, and the delivery status follows
     [{ ...confirmed, delivered: true, deliveryOutcomeKind: "delivery_unknown" }, "unknown"],
     [{ ...confirmed, delivered: true, deliveryOutcomeKind: "delivery_unknown", deliveryResolution: "delivered" }, "resolved_delivered"],
     [{ ...confirmed, delivered: true, deliveryOutcomeKind: "delivery_unknown", deliveryResolution: "not_delivered" }, "resolved_not_delivered"],
+    // Stage S2-2b4: a decided answer the local AMUX proved it never sent, with its reason.
+    [{ ...confirmed, delivered: true, deliveryOutcomeKind: "delivery_not_sent", deliveryNotSentReason: "answered_by_operator" }, "not_sent"],
   ];
   const seen = new Set();
   for (const [overrides, expected] of cases) {
@@ -326,6 +332,22 @@ test("only a confirmed answer is ever delivered, and the delivery status follows
     dmAdminRequestRowFromRow(listRow({ ...confirmed, delivered: true, deliveryOutcomeKind: "delivery_receipt", deliveryResolution: "delivered" })),
     null,
   );
+  // A not-sent outcome carries its reason, and nothing else does; a request a direct answer closed has no judgment
+  // and so no declaration accuracy.
+  for (const overrides of [
+    { ...confirmed, delivered: true, deliveryOutcomeKind: "delivery_not_sent" },
+    { ...confirmed, delivered: true, deliveryOutcomeKind: "delivery_receipt", deliveryNotSentReason: "lane_refused" },
+    { ...confirmed, delivered: true, deliveryOutcomeKind: "delivery_not_sent", deliveryNotSentReason: "because" },
+    { ...confirmed, delivered: true, deliveryOutcomeKind: "delivery_not_sent", deliveryNotSentReason: "lane_refused", deliveryResolution: "delivered" },
+    { ...confirmed, closingKind: "direct_answer_close" },
+  ]) {
+    assert.equal(dmAdminRequestRowFromRow(listRow(overrides)), null, show(overrides));
+  }
+  // The not-sent reason words exist in both locales, one per reason.
+  for (const locale of ["en", "ko"]) {
+    const reasons = adminAmuxDecisionMakerRequestDetailMessages[locale].notSentReasons;
+    assert.deepEqual(Object.keys(reasons).sort(), [...DM_DELIVERY_NOT_SENT_REASONS].sort(), locale);
+  }
 });
 
 test("a cleanup_unknown report is a flag and a time beside any status, and only an assigned DM request can carry one", () => {

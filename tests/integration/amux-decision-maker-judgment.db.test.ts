@@ -814,6 +814,7 @@ test("delivery: one decision after a confirmation and never under the kill switc
     judgmentKind: "confirm",
     delivered: true,
     outcome: "unknown",
+    notSentReason: null,
     resolution: "not_delivered",
   });
   const rows = await prisma.$queryRaw<Array<{ kind: string; outcome: string | null; actorKind: string; actorUserId: string | null }>>`

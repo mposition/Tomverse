@@ -26,12 +26,14 @@ import {
   dmJudgmentStateRefusal,
   dmJudgmentSwitchRefusal,
   dmJudgmentTalliesFromRows,
+  isDmDeliveryNotSentReason,
   isDmJudgmentKind,
   parseDmDeclarationAccuracy,
   parseDmJudgmentInput,
   type DmDeclarationAccuracy,
   type DmDeclarationAccuracyReport,
   type DmDeliveryAttempt,
+  type DmDeliveryNotSentReason,
   type DmDeliveryRefusal,
   type DmDeliveryResolveOutcome,
   type DmDeliveryState,
@@ -382,7 +384,8 @@ export async function readDecisionMakerDeliveryState(
     SELECT
       (SELECT j."kind" FROM "AmuxDecisionMakerJudgment" j WHERE j."requestId" = ${requestId}) AS "judgmentKind",
       coalesce(bool_or(d."kind" = 'deliver'), false) AS "delivered",
-      max(d."kind") FILTER (WHERE d."kind" IN ('delivery_receipt', 'delivery_unknown')) AS "outcomeKind",
+      max(d."kind") FILTER (WHERE d."kind" IN ('delivery_receipt', 'delivery_unknown', 'delivery_not_sent')) AS "outcomeKind",
+      max(d."notSentReason") FILTER (WHERE d."kind" = 'delivery_not_sent') AS "notSentReason",
       max(d."outcome") FILTER (WHERE d."kind" = 'delivery_unknown_resolve') AS "resolution"
     FROM "AmuxDecisionMakerDeliveryEvent" d
     WHERE d."requestId" = ${requestId}
@@ -438,6 +441,37 @@ export async function readNextDecisionMakerDeliveryJudgment(
 }
 
 /**
+ * Stage S2-2b4 (§9): the oldest delivery decision with no outcome yet -- no
+ * receipt, no unknown outcome and no not-sent outcome -- in one statement, by
+ * the decision's sequence; null when every decision has one. A decision gets
+ * its outcome in the same bridge step that recorded it, so one without is
+ * what a bridge that stopped between the two left behind; the bridge settles
+ * each at its next start from the local AMUX's own records, and never sends
+ * again. Reads only; returns no answer.
+ */
+export async function readNextDecisionMakerUnsettledDelivery(
+  client: JudgmentReader,
+): Promise<{ requestId: string; decidedAtMs: number } | null> {
+  const rows = await client.$queryRaw<Array<{ requestId: unknown; decidedAtEpochMs: bigint | number }>>`
+    SELECT d."requestId", floor(extract(epoch FROM d."createdAt") * 1000)::bigint AS "decidedAtEpochMs"
+    FROM "AmuxDecisionMakerDeliveryEvent" d
+    WHERE d."kind" = 'deliver'
+      AND NOT EXISTS (
+        SELECT 1 FROM "AmuxDecisionMakerDeliveryEvent" o
+        WHERE o."requestId" = d."requestId" AND o."kind" IN ('delivery_receipt', 'delivery_unknown', 'delivery_not_sent')
+      )
+    ORDER BY d."sequence"
+    LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  if (!isDmRequestId(row.requestId)) throw new DecisionMakerJudgmentWriteError("state_unreadable");
+  const decidedAtMs = safeInteger(row.decidedAtEpochMs, "clock");
+  if (decidedAtMs < 0) throw new DecisionMakerJudgmentWriteError("state_unreadable");
+  return { requestId: row.requestId, decidedAtMs };
+}
+
+/**
  * The judgment and delivery records of the given requests (at most 100), in
  * one statement: their half of Admin's request list (stage S2,
  * lib/amux/decisionMakerAdminRead.ts). For each request, its judgment's
@@ -460,7 +494,8 @@ export async function readDecisionMakerJudgmentsForAdmin(
       ids."id" AS "requestId",
       (SELECT j."declarationAccuracy" FROM "AmuxDecisionMakerJudgment" j WHERE j."requestId" = ids."id") AS "declarationAccuracy",
       coalesce(bool_or(d."kind" = 'deliver'), false) AS "delivered",
-      max(d."kind") FILTER (WHERE d."kind" IN ('delivery_receipt', 'delivery_unknown')) AS "deliveryOutcomeKind",
+      max(d."kind") FILTER (WHERE d."kind" IN ('delivery_receipt', 'delivery_unknown', 'delivery_not_sent')) AS "deliveryOutcomeKind",
+      max(d."notSentReason") FILTER (WHERE d."kind" = 'delivery_not_sent') AS "deliveryNotSentReason",
       max(d."outcome") FILTER (WHERE d."kind" = 'delivery_unknown_resolve') AS "deliveryResolution"
     FROM unnest(${[...requestIds]}::text[]) AS ids("id")
     LEFT JOIN "AmuxDecisionMakerDeliveryEvent" d ON d."requestId" = ids."id"
@@ -506,24 +541,29 @@ const deliveryRecord = (
   };
 };
 
-/** The system's delivery event: its audit by the router, then the event naming it. 4 statements, or 5. */
+/**
+ * The system's delivery event: its audit by the router, then the event naming
+ * it, with a not-sent outcome's reason (stage S2-2b4; null on every other
+ * kind). 4 statements, or 5.
+ */
 const appendSystemDeliveryEvent = async (
   tx: Prisma.TransactionClient,
   requestId: string,
   kind: DmDeliverySystemEventKind,
   judgmentKind: DmJudgmentKind,
+  notSentReason: DmDeliveryNotSentReason | null = null,
 ): Promise<DecisionMakerDeliveryEventRecord> => {
   const eventId = randomUUID();
   const auditLogId = await writeDecisionMakerDeliveryAudit(tx, {
     kind,
     eventId,
-    metadata: dmDeliveryAuditMetadata({ eventId, requestId, kind, judgmentKind, outcome: null }),
+    metadata: dmDeliveryAuditMetadata({ eventId, requestId, kind, judgmentKind, outcome: null, notSentReason }),
   });
   const inserted = await tx.$queryRaw<InsertedDeliveryRow[]>`
     INSERT INTO "AmuxDecisionMakerDeliveryEvent"
-      ("id", "requestId", "kind", "outcome", "actorKind", "actorUserId", "auditLogId")
+      ("id", "requestId", "kind", "outcome", "actorKind", "actorUserId", "notSentReason", "auditLogId")
     VALUES
-      (${eventId}, ${requestId}, ${kind}, NULL, 'system', NULL, ${auditLogId})
+      (${eventId}, ${requestId}, ${kind}, NULL, 'system', NULL, ${notSentReason}::text, ${auditLogId})
     RETURNING
       "sequence",
       floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"
@@ -566,29 +606,44 @@ export async function recordDecisionMakerDelivery(
 }
 
 /**
- * §2-7, §9: after the decision, the delivery's receipt, or -- when the
- * delivery's result is unclear -- `unknown`, one of the two once. Recorded
- * under the kill switch as well: each records what already happened. An
- * unknown delivery is never retried; a person resolves it.
+ * §2-7, §9: after the decision, its one outcome -- the delivery's receipt;
+ * `unknown` when the delivery's result is unclear; or, since stage S2-2b4,
+ * `not_sent` with its reason when the local AMUX proved that nothing was sent
+ * (the operator's direct answer won the claim, the question or §9's binding
+ * changed, the lane refused) -- one of the three once. Recorded under the kill
+ * switch as well: each records what already happened. An unknown delivery is
+ * never retried; a person resolves it. A not-sent answer is never retried
+ * either: the request's one decision is spent, and the operator answers
+ * directly (§2-7: "다른 쪽은 거절되어 운영자에게 보인다").
  *
  * Statements: 1 lock, 1 delivery read -- 2 for a refusal; the system writer's
  * 3 (4 with an integrity key) and 1 insert -- 6, or 7.
  */
 export async function recordDecisionMakerDeliveryOutcome(
   tx: Prisma.TransactionClient,
-  input: { requestId: unknown; outcome: unknown },
+  input: { requestId: unknown; outcome: unknown; reason?: unknown },
 ): Promise<DecisionMakerDeliveryWrite> {
   const requestId = requireRequestId(input.requestId);
-  if (input.outcome !== "receipt" && input.outcome !== "unknown") {
+  let attempt: DmDeliveryAttempt;
+  if (input.outcome === "not_sent") {
+    if (!isDmDeliveryNotSentReason(input.reason)) throw new DecisionMakerJudgmentWriteError("invalid_input");
+    attempt = { kind: "delivery_not_sent", reason: input.reason };
+  } else if ((input.outcome === "receipt" || input.outcome === "unknown") && input.reason === undefined) {
+    attempt = { kind: input.outcome === "receipt" ? "delivery_receipt" : "delivery_unknown" };
+  } else {
     throw new DecisionMakerJudgmentWriteError("invalid_input");
   }
-  const kind = input.outcome === "receipt" ? "delivery_receipt" : "delivery_unknown";
   await takeAuditChainLock(tx);
   const state = await readDecisionMakerDeliveryState(tx, requestId);
-  const refusal = dmDeliveryRefusal(state, { kind });
+  const refusal = dmDeliveryRefusal(state, attempt);
   if (refusal) return { recorded: false, reason: refusal };
   const judgmentKind = state.judgmentKind as DmJudgmentKind;
-  return { recorded: true, event: await appendSystemDeliveryEvent(tx, requestId, kind, judgmentKind), judgmentKind };
+  const notSentReason = attempt.kind === "delivery_not_sent" ? attempt.reason : null;
+  return {
+    recorded: true,
+    event: await appendSystemDeliveryEvent(tx, requestId, attempt.kind as DmDeliverySystemEventKind, judgmentKind, notSentReason),
+    judgmentKind,
+  };
 }
 
 export type DecisionMakerDeliveryResolution =
