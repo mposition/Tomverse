@@ -9,7 +9,7 @@ import { AmuxSessionAnalysisStopReadError,
 import { prisma } from "@/lib/prisma";
 
 const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ";
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request: Request): Promise<Response> {
   if (!isAmuxV4AnalysisAgentAuthorized(request,

@@ -70,7 +70,7 @@ test("session stop client accepts only exact pinned continue receipt", async () 
   }
 });
 
-test("session stop route denies unauthorised and malformed polls before DB", async () => {
+test("session stop route admits exact IDs and denies unauthorised or malformed polls", async () => {
   const imported = await import(
     "../app/api/internal/amux/v19/session-analysis-stop/route.ts");
   const GET = imported.GET ?? imported.default.GET;
@@ -101,6 +101,22 @@ test("session stop route denies unauthorised and malformed polls before DB", asy
       const response = await GET(request(bad));
       assert.equal(response.status, 400, bad);
       assert.match(response.headers.get("cache-control") ?? "", /no-store/);
+    }
+    const prismaModule = await import("../lib/prisma.ts");
+    const prisma = prismaModule.prisma ?? prismaModule.default.prisma;
+    const transaction = prisma.$transaction;
+    let dbCalls = 0;
+    try {
+      prisma.$transaction = async () => {
+        dbCalls += 1;
+        return { claimId, reservationId, stop: false };
+      };
+      const valid = await GET(request(query));
+      assert.equal(valid.status, 200);
+      assert.deepEqual(await valid.json(), { claimId, reservationId, stop: false });
+      assert.equal(dbCalls, 1);
+    } finally {
+      prisma.$transaction = transaction;
     }
     process.env[syncKey] = agentSecret;
     assert.equal((await GET(request(query))).status, 401);
