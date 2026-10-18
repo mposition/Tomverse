@@ -79,7 +79,11 @@ test("only an exact fresh Max claim may fetch the idea", async () =>
       return Response.json({ idea: "synthetic idea" });
     };
     for (const invalid of [
+      { ...selection, identity: undefined,
+        claim: { kind: "claimed", recovered: false,
+          retryWrite: false } },
       { ...selection, claim: { ...selection.claim, recovered: true } },
+      { ...selection, claim: { ...selection.claim, retryWrite: true } },
       { ...selection, claim: { ...selection.claim, claimId: ideaId } },
       { ...selection, kind: "outcome_unknown" },
     ]) assert.deepEqual(await readAmuxV19MaxClaimedIdeaOnce({ origin,

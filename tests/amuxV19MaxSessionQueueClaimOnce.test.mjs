@@ -72,10 +72,18 @@ test("uncertain or mismatched claim is never reported as safe to retry",
         claimId: identity.claimId, requestId: identity.requestId,
         reservationId: identity.reservationId, reservedMicroUsd: null,
         recovered: true, retryWrite: false }),
+      async ({ identity }) => ({ kind: "claimed",
+        claimId: identity.claimId, requestId: identity.requestId,
+        reservationId: identity.reservationId, reservedMicroUsd: "invalid",
+        recovered: false, retryWrite: false }),
     ]) {
       const result = await claimAmuxV19MaxQueueSelectionOnce(selection, {},
         claimOnce);
       assert.deepEqual(result, { kind: "outcome_unknown",
         retryWrite: false });
     }
+    assert.deepEqual(await claimAmuxV19MaxQueueSelectionOnce(selection, {},
+      async () => ({ kind: "outcome_unknown", receiptStatus: "partial",
+        retryWrite: false })), { kind: "outcome_unknown",
+      receiptStatus: "partial", retryWrite: false });
   });
