@@ -21,10 +21,11 @@ const run = promisify(execFile);
 const CLI = "/home/tommy/.local/share/claude/versions/2.1.288";
 const CLI_SHA256 = "0298068b686e7fdbaf9402a7a587bb7f49c0b0e084de09f69145a0719207640c";
 const CLAIM_DIR = "/home/tommy/.amux-cli-profiles";
-// Four separately approved calls consumed markers -01..-04 and ended
-// outcome_unknown. The operator approved this fifth call on 2026-10-19 (AEST):
+// Five separately approved calls consumed markers -01..-05. The fifth
+// completed in the CLI but the validator refused two shapes of CLI 2.1.288,
+// since fixed. The operator approved this sixth call on 2026-10-19 (AEST):
 // one attempt that exercises Glob, Grep and Read under the v22 open trace.
-const CLAIM_MARKER = "v19-max-synthetic-20261019-05.claimed";
+const CLAIM_MARKER = "v19-max-synthetic-20261019-06.claimed";
 const APPROVAL_EXPIRES_AT = Date.parse("2026-10-21T00:00:00.000Z");
 // A probe stop, not an analysis deadline (v19 has none): three tool turns at
 // high effort need more than the earlier single-Read probe's two minutes.
@@ -55,7 +56,7 @@ async function pinnedCliPresent() {
 async function main() {
   if (process.platform !== "linux" || process.getuid?.() === 0 ||
       hostname() !== "tomverseagent" ||
-      process.env.AMUX_V19_MAX_SYNTHETIC_S0_APPROVED !== "5" ||
+      process.env.AMUX_V19_MAX_SYNTHETIC_S0_APPROVED !== "6" ||
       process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV] !== undefined ||
       process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN ||
       process.env.CLAUDE_CODE_OAUTH_TOKEN) {
