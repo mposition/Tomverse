@@ -112,6 +112,37 @@ test("a zero-reference idea remains a discoverable analysis candidate", async (t
     pin: { kind: "no_references", referenceCount: 0 } });
 });
 
+test("an unavailable pin does not starve a later claimable candidate", async (t) => {
+  const stateDirectory = await mkdtemp(join(tmpdir(), "amux-v19-queue-test-"));
+  t.after(() => rm(stateDirectory, { recursive: true, force: true }));
+  const first = { reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
+    ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
+    modelId: "claude-opus-5-5", expiresAt: "2026-10-18T00:00:00.000Z" };
+  const second = { ...first,
+    reservationId: "ec61a12d-d02a-478f-a499-aea9dd752271",
+    ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b176" };
+  const pins = [];
+  const result = await runAmuxV19SessionQueueEntryOnce({
+    origin, agentSecret: "a".repeat(32), stateDirectory,
+    fetchImpl: async (url, init) => {
+      if (new URL(url).pathname.endsWith("/analysis-queue")) {
+        return Response.json({ candidates: [first, second], hasMore: false,
+          nextCursor: null });
+      }
+      const body = JSON.parse(init.body);
+      pins.push(body.reservationId);
+      return body.reservationId === first.reservationId
+        ? new Response(null, { status: 409 })
+        : Response.json({ referenceCount: 1,
+          pinnedCommitSha: "a".repeat(40) });
+    },
+  });
+  assert.deepEqual(result, { kind: "discovered", candidate: second,
+    pin: { kind: "pinned", referenceCount: 1,
+      commitSha: "a".repeat(40) } });
+  assert.deepEqual(pins, [first.reservationId, second.reservationId]);
+});
+
 test("a stale server cursor and a corrupt local hint recover without a claim", async (t) => {
   const stateDirectory = await mkdtemp(join(tmpdir(), "amux-v19-queue-test-"));
   t.after(() => rm(stateDirectory, { recursive: true, force: true }));
