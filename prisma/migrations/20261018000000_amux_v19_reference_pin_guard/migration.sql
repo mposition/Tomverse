@@ -1,3 +1,4 @@
+-- baseline-check: present-if-function "amux_v19_tracked_checkout_pin_guard"
 -- A checkout receipt must match the SHA captured by the session intake,
 -- not merely any syntactically valid commit supplied by the analysis worker.
 BEGIN;

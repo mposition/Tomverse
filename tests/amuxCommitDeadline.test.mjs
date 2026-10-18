@@ -249,6 +249,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // deadline: the event guard's deadline lines and the ledger's deferred
   // check are unchanged.
   "20261017200000_amux_decision_maker_validation_count_boundary",
+  // Intake v19 pins checkout evidence to the submission audit without
+  // changing the commit-deadline marker, classifier or deferred trigger.
+  "20261018000000_amux_v19_reference_pin_guard",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
