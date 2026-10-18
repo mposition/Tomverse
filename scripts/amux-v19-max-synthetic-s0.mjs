@@ -24,6 +24,11 @@ const CLAIM_DIR = "/home/tommy/.amux-cli-profiles";
 const CLAIM_MARKER = "v19-max-synthetic-20261018.claimed";
 const APPROVAL_EXPIRES_AT = Date.parse("2026-10-19T00:00:00.000Z");
 const MAX_PROBE_MS = 120_000;
+const SAFE_PREFLIGHT_REASONS = new Set([
+  "synthetic_s0_refused", "synthetic_s0_cli_unavailable",
+  "synthetic_s0_once_unavailable",
+]);
+let modelAttemptArmed = false;
 const gitEnvironment = { PATH: "/usr/bin:/bin",
   GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
 const git = (args) => run("/usr/bin/git", args,
@@ -51,7 +56,7 @@ async function main() {
     "Read TRACE.txt, then reply with exactly S0_OK and nothing else.", "utf8");
   try {
     await writeFile(join(fixture, "TRACE.txt"), "S0_OK\n", { flag: "wx", mode: 0o400 });
-    await git(["-c", "init.templateDir=/dev/null", "init", "-q", fixture]);
+    await git(["init", "-q", "--template=", fixture]);
     await git(["-C", fixture, "add", "TRACE.txt"]);
     await git(["-C", fixture, "-c", "core.hooksPath=/dev/null",
       "-c", "commit.gpgsign=false", "-c", "user.name=AMUX S0",
@@ -65,6 +70,7 @@ async function main() {
     }
     // Process-local admission only. No persistent operational switch changes.
     process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV] = "enabled";
+    modelAttemptArmed = true;
     const start = Date.now();
     const observed = await runAmuxV19TrackedCheckoutAnalysis({
       repositoryPath: fixture, commitSha,
@@ -100,6 +106,13 @@ catch (error) {
   if (error instanceof AmuxTrackedCheckoutHostError) {
     process.stdout.write(JSON.stringify({ status: "outcome_unknown",
       cliStarted: error.cliStarted === true }) + "\n");
+  } else if (modelAttemptArmed) {
+    process.stdout.write(JSON.stringify({ status: "outcome_unknown",
+      cliStarted: null }) + "\n");
+  } else {
+    process.stdout.write(JSON.stringify({ status: "refused",
+      reason: SAFE_PREFLIGHT_REASONS.has(error?.message)
+        ? error.message : "preflight_unavailable", cliStarted: false }) + "\n");
   }
   process.stderr.write("AMUX_V19_MAX_SYNTHETIC_S0_FAIL\n");
   process.exitCode = 1;
