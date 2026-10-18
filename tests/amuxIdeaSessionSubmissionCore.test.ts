@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   amuxSessionIntakeWritePermitted,
+  inspectAmuxIdeaSessionInput,
   inspectAmuxIdeaSessionSource,
   inspectAmuxIdeaSessionSubmission,
   sameAmuxOperatingScopeAuthority,
@@ -65,6 +66,9 @@ test("session input does not inherit the owner parser's byte or item caps", () =
   assert.equal(inspected.counts.repositoryCount, 9);
   assert.equal(inspected.counts.pullRequestCount, 17);
   assert.equal(inspected.input.idea, longIdea);
+  assert.deepEqual(inspectAmuxIdeaSessionInput(idea({ idea: longIdea,
+    repositories: manyRepositories, pullRequests: manyPullRequests })),
+  { ok: true, input: inspected.input, counts: inspected.counts });
 });
 
 test("session email refusal preserves its existing address boundaries", () => {

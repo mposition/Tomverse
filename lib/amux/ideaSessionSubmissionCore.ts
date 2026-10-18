@@ -24,6 +24,11 @@ export type AmuxIdeaSessionSubmissionInspection =
       counts: { ideaBytes: number; repositoryCount: number; pullRequestCount: number } }
   | { ok: false; code: "schema_rejected" | "content_refused" | "metadata_incomplete" };
 
+export type AmuxIdeaSessionInputInspection =
+  | { ok: true; input: IdeaInput;
+      counts: { ideaBytes: number; repositoryCount: number; pullRequestCount: number } }
+  | { ok: false; code: "schema_rejected" | "content_refused" | "metadata_incomplete" };
+
 const exactKeys = (value: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(value).length === keys.length &&
   keys.every((key) => Object.hasOwn(value, key));
@@ -85,20 +90,12 @@ export function inspectAmuxIdeaSessionSource(value: unknown):
  * This admits the same exact idea shape and content refusals as owner intake,
  * without importing the digest-pinned owner parser or inheriting its limits.
  */
-export function inspectAmuxIdeaSessionSubmission(value: unknown): AmuxIdeaSessionSubmissionInspection {
-  if (!value || typeof value !== "object" || Array.isArray(value) ||
-      !exactKeys(value as Record<string, unknown>, ["version", "requestId", "input", "source"])) {
+export function inspectAmuxIdeaSessionInput(value: unknown): AmuxIdeaSessionInputInspection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, code: "schema_rejected" };
   }
-  const record = value as Record<string, unknown>;
-  if (record.version !== 1 || typeof record.requestId !== "string" ||
-      !isAmuxIdeaRequestId(record.requestId) || !record.input ||
-      typeof record.input !== "object" || Array.isArray(record.input)) {
-    return { ok: false, code: "schema_rejected" };
-  }
-  const source = inspectAmuxIdeaSessionSource(record.source);
-  const candidate = record.input as Record<string, unknown>;
-  if (!source.ok || !exactKeys(candidate, ["version", "idea", "repositories", "pullRequests"]) ||
+  const candidate = value as Record<string, unknown>;
+  if (!exactKeys(candidate, ["version", "idea", "repositories", "pullRequests"]) ||
       candidate.version !== 1 || typeof candidate.idea !== "string" ||
       !Array.isArray(candidate.repositories) || !Array.isArray(candidate.pullRequests)) {
     return { ok: false, code: "schema_rejected" };
@@ -126,11 +123,27 @@ export function inspectAmuxIdeaSessionSubmission(value: unknown): AmuxIdeaSessio
   }
   if (new Set(pullRequests.map((item) => `${item.repository.toLowerCase()}#${item.number}`)).size !==
       pullRequests.length) return { ok: false, code: "schema_rejected" };
-  return { ok: true, requestId: record.requestId,
+  return { ok: true,
     input: { version: 1, idea, repositories: candidate.repositories, pullRequests },
-    source: source.source,
     counts: { ideaBytes: Buffer.byteLength(idea, "utf8"),
       repositoryCount: candidate.repositories.length, pullRequestCount: pullRequests.length } };
+}
+
+export function inspectAmuxIdeaSessionSubmission(value: unknown): AmuxIdeaSessionSubmissionInspection {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !exactKeys(value as Record<string, unknown>, ["version", "requestId", "input", "source"])) {
+    return { ok: false, code: "schema_rejected" };
+  }
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1 || typeof record.requestId !== "string" ||
+      !isAmuxIdeaRequestId(record.requestId)) {
+    return { ok: false, code: "schema_rejected" };
+  }
+  const source = inspectAmuxIdeaSessionSource(record.source);
+  if (!source.ok) return { ok: false, code: "schema_rejected" };
+  const inspected = inspectAmuxIdeaSessionInput(record.input);
+  if (!inspected.ok) return inspected;
+  return { ...inspected, requestId: record.requestId, source: source.source };
 }
 
 export const sameAmuxOperatingScopeAuthority = (
