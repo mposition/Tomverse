@@ -143,6 +143,10 @@ export const AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION =
   "amux.v19.read_manifest.key_intent" as const;
 export const AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET =
   "AmuxIdeaReadManifestKeyIntent" as const;
+export const AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION =
+  "amux.v19.read_manifest.max_claim_bound" as const;
+export const AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_SCOPE =
+  "read-manifest-max-claim-bound-v1" as const;
 export const AMUX_V19_READ_MANIFEST_KEY_INTENT_SCOPE =
   "tracked-checkout-read-manifest-key-intent-v1" as const;
 export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION =
@@ -303,6 +307,10 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION &&
       targetType === AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET) {
     return AMUX_V19_READ_MANIFEST_KEY_INTENT_SCOPE;
+  }
+  if (action === AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION &&
+      targetType === AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET) {
+    return AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_SCOPE;
   }
   if (action === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION &&
       targetType === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_TARGET) {

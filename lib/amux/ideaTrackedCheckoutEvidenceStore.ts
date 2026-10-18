@@ -174,7 +174,7 @@ export async function recordAmuxTrackedCheckoutEvidence(
 }
 
 /** The audit lock precedes this claim lock, matching budget settlement. */
-async function requireActiveMaxCheckoutClaim(tx: Prisma.TransactionClient,
+export async function requireActiveMaxCheckoutClaim(tx: Prisma.TransactionClient,
   ideaId: string, claim: AmuxMaxCheckoutClaim): Promise<void> {
   if (!Number.isSafeInteger(claim.invocationOrdinal) ||
       claim.invocationOrdinal < 0 || claim.invocationOrdinal > 2_147_483_647) {

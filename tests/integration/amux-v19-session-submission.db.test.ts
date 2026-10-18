@@ -72,8 +72,15 @@ import { POST as postMaxIdeaRoute } from
 import { GET as readMaxCheckoutEvidenceRoute,
   POST as postMaxCheckoutEvidenceRoute } from
   "@/app/api/internal/amux/v19/max-checkout-evidence/route";
+import { GET as readMaxManifestRoute } from
+  "@/app/api/internal/amux/v19/max-read-manifest/route";
 import { readAmuxMaxTrackedCheckoutEvidence } from
   "@/lib/amux/ideaTrackedCheckoutEvidenceStore";
+import { amuxTrackedCheckoutReadManifestKeyIdentity,
+  readAmuxMaxManifestIntentBinding,
+  recordAmuxTrackedCheckoutReadManifestKeyIntent,
+  recordAmuxTrackedCheckoutReadManifest } from
+  "@/lib/amux/ideaTrackedCheckoutReadManifestStore";
 import { readAmuxV19MaxIdeaInTx } from
   "@/lib/amux/ideaSessionMaxIdeaRead";
 import { AMUX_V19_MAX_LAUNCHER_ID } from
@@ -1668,6 +1675,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   let claim!: { claimId: string; requestId: string; reservationId: string;
     reservedMicroUsd: string };
   let maxEvidenceId!: string;
+  let maxManifestId!: string;
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
     process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE = "enabled";
@@ -1727,6 +1735,8 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       "TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_READ",
       "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE",
       "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ",
+      "TOMVERSE_AMUX_V19_MAX_READ_MANIFEST_READ",
+      "TOMVERSE_AMUX_V19_READ_MANIFEST_READ",
     ] as const;
     const oldCheckoutSwitches = Object.fromEntries(checkoutSwitches.map(
       (name) => [name, process.env[name]]));
@@ -1764,6 +1774,56 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       assert.equal((await readMaxCheckoutEvidenceRoute(new Request(
         `${evidenceEndpoint}?${query}`,
         { headers: evidenceHeaders }))).status, 404);
+      maxManifestId = randomUUID();
+      const manifestInput = { manifestId: maxManifestId, ideaId,
+        referenceOrdinal: 0, pinnedCommitSha: maxPinnedSha,
+        observed: { kind: "verified_success" as const,
+          readFiles: ["README.md"] } };
+      const maxClaim = { claimId, requestId: claimRequestId,
+        reservationId: reservation.reservationId, invocationOrdinal: 0 };
+      await assert.rejects(prisma.$transaction((tx) =>
+        recordAmuxTrackedCheckoutReadManifestKeyIntent(tx,
+          manifestInput, { ...maxClaim, requestId: randomUUID() })));
+      await prisma.$transaction((tx) =>
+        recordAmuxTrackedCheckoutReadManifestKeyIntent(tx,
+          manifestInput, maxClaim));
+      const manifestKeys = {
+        masterKeyId: amuxContentUnitKeyId(
+          amuxTrackedCheckoutReadManifestKeyIdentity(ideaId, maxManifestId)),
+        masterKeyVersion: 1, masterKey: randomBytes(32),
+        digestKeyId: "synthetic-max-read-digest", digestKey: randomBytes(32),
+      };
+      try {
+        const saved = await prisma.$transaction((tx) =>
+          recordAmuxTrackedCheckoutReadManifest(tx, manifestInput,
+            manifestKeys, maxClaim));
+        assert.equal(saved.manifestId, maxManifestId);
+        const intent = await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
+          where: { id: maxManifestId }, select: { auditLogId: true } });
+        assert.equal(await prisma.$transaction((tx) =>
+          readAmuxMaxManifestIntentBinding(tx, ideaId, 0,
+            maxManifestId, intent.auditLogId, maxClaim)), true);
+        assert.equal(await prisma.$transaction((tx) =>
+          readAmuxMaxManifestIntentBinding(tx, ideaId, 0,
+            maxManifestId, intent.auditLogId,
+            { ...maxClaim, requestId: randomUUID() })), false);
+        const manifestEndpoint =
+          "https://test.invalid/api/internal/amux/v19/max-read-manifest";
+        const manifestQuery = new URLSearchParams(Object.entries(identity).map(
+          ([key, value]) => [key, String(value)]));
+        const routeReceipt = await readMaxManifestRoute(new Request(
+          `${manifestEndpoint}?${manifestQuery}`,
+          { headers: evidenceHeaders }));
+        assert.equal(routeReceipt.status, 200);
+        assert.equal((await routeReceipt.json()).manifestId, maxManifestId);
+        manifestQuery.set("requestId", randomUUID());
+        assert.equal((await readMaxManifestRoute(new Request(
+          `${manifestEndpoint}?${manifestQuery}`,
+          { headers: evidenceHeaders }))).status, 404);
+      } finally {
+        manifestKeys.masterKey.fill(0);
+        manifestKeys.digestKey.fill(0);
+      }
     } finally {
       for (const name of checkoutSwitches) {
         const old = oldCheckoutSwitches[name];
@@ -1831,6 +1891,14 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       reservationId: reservation.reservationId, invocationOrdinal: 0,
     })))?.evidenceId, maxEvidenceId,
   "exact-claim evidence readback survives budget settlement");
+  const settledIntent = await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
+    where: { id: maxManifestId }, select: { auditLogId: true } });
+  assert.equal(await prisma.$transaction((tx) =>
+    readAmuxMaxManifestIntentBinding(tx, ideaId, 0,
+      maxManifestId, settledIntent.auditLogId, {
+        claimId, requestId: claimRequestId,
+        reservationId: reservation.reservationId, invocationOrdinal: 0,
+      })), true, "manifest readback survives claim settlement");
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxSessionAnalysisStopState(tx, claimId,
       reservation.reservationId, ideaId, "max_shadow")),

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { recordAmuxV19LocalReadManifest } from
+import { recordAmuxV19LocalReadManifest,
+  recordAmuxV19MaxLocalReadManifest } from
   "../lib/amux/ideaLocalReadManifestReceipt.mjs";
 
 const originEnv = "TOMVERSE_AMUX_V4_ANALYSIS_APP_ORIGIN";
@@ -14,6 +15,10 @@ after(() => {
 
 const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
 const secret = "v19_manifest_agent_secret_01234567890123456789";
+const maxClaim = { claimId: "8a58e063-374d-4c6c-b1bd-57e8daa55c48",
+  requestId: "a12ae2bc-5e33-44a2-9836-6a3648061820",
+  reservationId: "ceb12ab5-d7fb-482f-bc5b-feb279cc043d",
+  invocationOrdinal: 0 };
 const input = (fetchImpl, observed = { kind: "verified_success",
   readFiles: ["docs/guide.md"], rawModelOutput: "never send model text" }) => ({
   origin: "https://tomverse.test/", agentSecret: secret, ideaId,
@@ -142,5 +147,65 @@ test("a purged manifest readback cannot release an analysis result", async () =>
   };
   assert.deepEqual(await recordAmuxV19LocalReadManifest(input(fetchImpl)),
     { kind: "outcome_unknown", manifestId });
+  assert.deepEqual(methods, ["POST", "GET"]);
+});
+
+test("Max manifest refuses missing or malformed claim before network access", async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls += 1; throw new Error("unexpected network"); };
+  for (const claim of [null, { ...maxClaim, requestId: "bad" },
+    { ...maxClaim, invocationOrdinal: 2_147_483_648 },
+    { ...maxClaim, extra: "private" }]) {
+    assert.deepEqual(await recordAmuxV19MaxLocalReadManifest({
+      ...input(fetchImpl), maxClaim: claim }), { kind: "refused" });
+  }
+  assert.equal(calls, 0);
+});
+
+test("Max manifest sends verified paths with its exact identity", async () => {
+  const fetchImpl = async (url, options) => {
+    assert.equal(url,
+      "https://tomverse.test/api/internal/amux/v19/max-read-manifest");
+    assert.equal(options.method, "POST");
+    assert.equal(options.headers["x-amux-agent-id"], "amux-intake-max");
+    const body = JSON.parse(options.body);
+    for (const [key, value] of Object.entries(maxClaim)) {
+      assert.equal(body[key], value);
+    }
+    assert.deepEqual(body.observed, { kind: "verified_success",
+      readFiles: ["docs/guide.md"] });
+    assert.doesNotMatch(options.body, /never send model text/);
+    return json({ manifestId: body.manifestId, ideaId,
+      referenceOrdinal: 0, fileCount: 1 });
+  };
+  const result = await recordAmuxV19MaxLocalReadManifest({
+    ...input(fetchImpl), maxClaim });
+  assert.equal(result.kind, "recorded");
+  assert.equal(result.via, "post");
+});
+
+test("uncertain Max manifest reads its claim and never retries key creation", async () => {
+  const methods = [];
+  let manifestId;
+  const fetchImpl = async (url, options) => {
+    methods.push(options.method);
+    if (options.method === "POST") {
+      manifestId = JSON.parse(options.body).manifestId;
+      throw new Error("lost reply");
+    }
+    const query = new URL(url).searchParams;
+    for (const [key, value] of Object.entries(maxClaim)) {
+      assert.equal(query.get(key), String(value));
+    }
+    assert.equal(query.get("ideaId"), ideaId);
+    assert.equal(query.get("referenceOrdinal"), "0");
+    return json({ status: "recorded", manifestId, ideaId,
+      referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
+      fileCount: 1, digest: "d".repeat(64), digestKeyId: "digest-key",
+      bodyPurged: false });
+  };
+  assert.deepEqual(await recordAmuxV19MaxLocalReadManifest({
+    ...input(fetchImpl), maxClaim }),
+  { kind: "recorded", manifestId, fileCount: 1, via: "readback" });
   assert.deepEqual(methods, ["POST", "GET"]);
 });
