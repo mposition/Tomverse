@@ -49,6 +49,35 @@ export const amuxWorkerDerivedCatalogAssignmentOpen = (): boolean => AMUX_WORKER
 export const AMUX_WORKER_SESSION_LIST_LATCH = true;
 export const amuxWorkerSessionListOpen = (): boolean => AMUX_WORKER_SESSION_LIST_LATCH;
 
+/**
+ * Orchestration policy version 55, section 1 (stage S1): the bridge-scope
+ * route ships with its own code latch off. While it is false the route
+ * answers `bridge_scope_off`, and a bridge started with `--worker` registers
+ * nothing; bridges started without it never call the route. The activation
+ * record (stage S3, a new policy version) turns it on.
+ */
+export const AMUX_WORKER_BRIDGE_SCOPE_LATCH = false;
+export const amuxWorkerBridgeScopeOpen = (): boolean => AMUX_WORKER_BRIDGE_SCOPE_LATCH;
+
+/** Which bridge kind serves a worker (version 55, section 1). */
+export type AmuxWorkerBridgeKind = "session" | "v22";
+export type AmuxWorkerBridgeScopeEntry = { name: string; kind: AmuxWorkerBridgeKind };
+
+/**
+ * Version 55, section 1: every worker the derived catalog lists, without the
+ * code constants, with its kind -- `v22` when its capability carries a v22
+ * profile, `session` otherwise. Both come from what the owner records in
+ * Admin (the registry and the capability table). Pure; name order.
+ */
+export function amuxWorkerBridgeScope(derived: AmuxDerivedCatalog): AmuxWorkerBridgeScopeEntry[] {
+  const v22 = new Set(derived.v22.map((entry) => entry.worker_name));
+  return derived.legacy
+    .map((entry) => entry.worker_name)
+    .filter((name) => !amuxDerivedCatalogEntryIsConstant(name))
+    .sort()
+    .map((name) => ({ name, kind: v22.has(name) ? "v22" : "session" }));
+}
+
 /** One entry in the shape the legacy catalog's consumers read. */
 export type AmuxDerivedCatalogEntry = {
   worker_name: string;

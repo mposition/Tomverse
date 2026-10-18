@@ -114,6 +114,58 @@ bridge는 시작할 때와 heartbeat를 보내는 매 회차에 `GET /api/intern
 
 404를 "꺼짐"으로 읽으므로 앱 배포와 호스트 바이너리 교체의 순서는 상관없다. 바이너리 교체는 운영자가 한다(버전 23).
 
+### worker별 bridge: `--worker` 모드 (정책 버전 55, S2)
+
+같은 바이너리를 `--worker <worker 이름>`으로 시작하면 그 worker 하나만 맡는다. 인자는 둘 중 하나만 받는다. 인자가 없으면 위의 세션 bridge와 v22 bridge 그대로이고(전환 기간의 호환), `--worker <이름>`이면 이 절이다. 그 밖의 인자나 세션 이름 문법(영숫자와 `.` `_` `:` `-`)에 맞지 않는 이름은 시작하지 않는다(종료 코드 1).
+
+`--worker` bridge는 시작할 때와 매 회차에 `GET /api/internal/amux/workers/bridge-scope`를 bridge bearer로 읽는다. `TOMVERSE_AMUX_WSL_SESSIONS`와 `TOMVERSE_AMUX_V22_SIDECAR_SOCKET`은 읽지 않으며 `session-list`도 부르지 않는다. 답은 정확히 세 모양만 인정한다. 다른 키, 다른 kind, 같은 이름이 두 번 나온 목록, 404, 응답 없음은 모두 "읽지 못함"이다(세션 목록과 달리 404를 "꺼짐"으로 읽지 않는다).
+
+| 답 | `--worker` bridge의 동작 |
+|---|---|
+| 목록에 자기 이름이 `kind: "v22"`로 있음 | sidecar 소켓을 `/run/tomverse-amux-v22-<이름>/task.sock`으로 이름에서 계산해 지금의 v22 bridge와 같이 동작한다. 그 소켓이 없으면 등록하지 않고 다음 회차에 다시 본다. |
+| 목록에 자기 이름이 `kind: "session"`으로 있음 | 로컬 AMUX의 같은 이름 세션 하나만 맡는 세션 bridge와 같이 동작한다. |
+| 목록에 없음, `bridge_scope_off`, `worker_catalog_unavailable`, 읽지 못함 | 새로 등록하지 않는다. 이미 등록돼 있으면 `dispatch_ready: false`로 heartbeat하고 진행 중인 attempt는 끝낸다. |
+| 처음 받아들여진 kind와 다른 kind로 목록에 있음 | 새 배정을 받지 않고 `dispatch_ready: false`로 둔다. 진행 중인 attempt만 끝내고, 그 프로세스는 다시 배정 대상이 되지 않는다. 처음 붙은 sidecar는 진행 중인 attempt의 정산을 위해 그대로 둔다. 다시 시작할지는 사람이나 조정기가 정한다. |
+
+어느 경우도 halt(종료 코드 3)가 아니다. 상태가 바뀔 때마다 stderr에 `amux wsl bridge warn: worker <이름> …, not halted` 한 줄을 남긴다. 이 줄은 `bridge-monitoring.md` 5절의 자동 재시작이 무해한 줄로 읽는 모양이다.
+
+그 밖의 동작은 인자 없는 bridge와 같은 코드다. 정지 계약(버전 20 11항), lease 90초, busy 답의 재시도, 결과 불명의 halt는 바뀌지 않는다. 프로세스가 worker마다 따로이므로 halt도 그 worker에만 미친다.
+
+#### unit 템플릿
+
+파일: `scripts/systemd/tomverse-amux-bridge@.service`. 테스트: `tests/amuxWorkerBridgeTemplate.test.mjs`.
+
+- `ExecStart=/usr/local/libexec/tomverse-wsl-bridge --worker %i`. 인스턴스 이름이 worker다. 템플릿에는 worker별 값도, kind별 값도 없으므로 worker를 더해도 파일을 고치지 않는다.
+- 계정·환경 파일·재시작 규칙은 지금의 두 unit과 같다. `User=tomverse-bridge`, `EnvironmentFile=/etc/tomverse-bridge/bridge.env`, `Restart=on-failure`, `RestartSec=60`, `RestartPreventExitStatus=3`. 로컬 AMUX `/health`를 기다리는 `ExecStartPre`도 같다.
+- `[Install]`이 없다(버전 31 4항). `enable`하지 않는다.
+- sidecar unit과의 `Requires=`·`After=`, 소켓의 `test -S`는 두지 않는다. session kind에는 sidecar가 없고 kind는 앱만 안다. 대신 bridge가 v22로 나열됐는데 소켓이 없으면 등록하지 않는다(위 표).
+- 한 템플릿이 두 kind를 맡으므로 `SupplementaryGroups=amux-v22-ipc`가 session 인스턴스에도 붙는다. bridge는 자기 이름에서 계산한 소켓에만, 앱이 v22로 나열했을 때만 접속한다.
+- 지금의 v22 unit은 worker 넷의 상태 디렉터리를 이름으로 `InaccessiblePaths=`에 적었다. 템플릿은 이름을 적을 수 없으므로 `/var/lib` 전체를 빈 읽기 전용 tmpfs로 덮는다(`TemporaryFileSystem=/var/lib:ro`, sidecar unit과 같은 방식). 나중에 더해질 worker의 디렉터리도 가려진다. bridge가 여는 경로는 모두 `/run` 아래다.
+- 나머지 제약은 두 unit의 합집합이다(`NoNewPrivileges`, `CapabilityBoundingSet=`, `ProtectSystem=strict`, `ProtectHome`, `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`, `UMask=0077`, `TimeoutStopSec=10`, `KillMode=control-group` 등).
+
+#### 설치 (운영자, S2)
+
+정책 버전 55 3항의 1·2번이다. 이 단계는 **설치만 한다.** 활성화 기록(S3, 새 정책 버전) 전에는 `tomverse-amux-bridge@` 인스턴스를 하나도 시작하지 않는다. 앱의 `bridge-scope` 래치가 꺼져 있는 동안 시작한 인스턴스는 `bridge_scope_off`를 받아 아무것도 등록하지 않지만, 지금의 bridge와 같은 worker를 맡게 되는 순간이 3.1의 전환이므로 그 순서 밖에서 시작하지 않는다.
+
+1. 바이너리. 이 절이 들어 있는 develop 병합 commit에서 빌드한 `tomverse-wsl-bridge`(`cargo build --release --locked --bin tomverse-wsl-bridge`, 자격증명 불필요)로 Ubuntu 호스트(192.168.0.7)의 `/usr/local/libexec/tomverse-wsl-bridge`를 교체한다. 빌드한 파일의 sha256을 운영 기록에 남기고, worker 계정이 바꿀 수 없는 상태에서 설치 직전에 같은 값인지 확인한다. 설치는 관리자 계정 `tomverse-admin`의 sudo로 root 소유 0755로 하고, 이전 파일은 날짜를 붙인 백업으로 남긴다(버전 23의 root 소유 경계, 버전 54의 교체와 같은 방식).
+   - 지금 돌고 있는 `tomverse-bridge.service`는 다시 시작하지 않는다. 디스크의 파일을 바꿔도 실행 중인 프로세스는 옛 바이너리로 계속 돈다. 나중에 그 unit이 다시 시작돼도 인자가 없으므로 동작은 같다.
+   - v22 bridge의 `/opt/tomverse-amux-v22/tomverse-wsl-bridge`는 이 단계에서 바꿀 필요가 없다. 템플릿은 그 경로를 쓰지 않는다.
+2. 템플릿. 같은 관리자 계정에서 `scripts/systemd/tomverse-amux-bridge@.service`를 같은 commit에서 받아 `/etc/systemd/system/`에 root 소유 0644로 두고 `systemctl daemon-reload`만 한다. `enable`과 `start`는 하지 않는다. `systemd-analyze verify`로 인스턴스 이름 하나(예: `tomverse-amux-bridge@codex-impl.service`)를 검사할 수 있다.
+3. 감시 장치. `bridge-monitoring.md` 1.2절(watchdog)과 5.1절(자동 재시작)의 설치 명령을 같은 commit SHA로 다시 실행한다. watchdog은 로드된 `tomverse-amux-bridge@*` 인스턴스도 보고, 자동 재시작과 polkit 규칙은 그 인스턴스의 restart만 더 허용한다. start·stop은 계속 거부이며, 설치 스크립트가 polkit에 직접 물어 확인한다.
+
+S2가 끝나는 조건은 develop 병합과 위 1~3의 설치다(정책 버전 55 5항).
+
+#### 활성화와 전환 (S3, 이 단계에서 하지 않음)
+
+S3의 활성화 기록이 래치를 켠 뒤, 옛 `tomverse-bridge.service`와 `tomverse-amux-v22-bridge@*`에서 `tomverse-amux-bridge@<worker>`로 옮기는 순서는 정책 버전 55 3.1항을 그대로 따른다. 요약하면 다음과 같다.
+
+- 단위: codex 셋은 옛 unit 하나를 함께 쓰므로 한 단위, v22 worker는 worker 하나가 한 단위다.
+- 단위마다, 앱의 read-back으로 열린 attempt·소유한 `todo`·`doing` 카드·미해결 orchestrator 쓰기·열린 halt가 없음을 확인한다. 옛 인스턴스를 멈추고 runtime lease(90초)가 끝난 것을 확인한 뒤 같은 확인을 다시 한다. 그 사이 attempt가 생겼으면 옛 인스턴스도 새 인스턴스도 시작하지 않고 기존 복구 절차로 정리한 뒤 처음부터 다시 확인한다. 로컬 AMUX 세션이나 sidecar에 진행 중인 작업이 없음을 호스트에서 확인한 뒤에만 새 인스턴스를 시작한다.
+- 되돌리기는 같은 조건을 반대로 따른다. 래치를 끄는 것만으로는 되돌리기가 아니다.
+- 어느 확인이든 하지 못하면 멈추고 사람이 판단한다.
+
+S3에서 함께 정해야 하는 것이 있다. watchdog은 `tomverse-bridge.service`를 이름으로 늘 확인하므로, codex 단위를 옮긴 뒤 옛 unit을 멈추면 down 알림이 계속 나간다. 옮기는 순간에 맞춰 watchdog의 그 확인을 바꾸는 변경이 필요하다.
+
 ## 활성화
 
 버전 14가 코드 래치를 켰다. `tomverse-wsl-bridge`는 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이고 `TOMVERSE_AMUX_WSL_LOCAL_URL`이 loopback일 때만 `run_from_env`로 들어간다. 그 함수는 `bridge_tick_sourced`를 호출하고, 실행 attempt의 전달 본문은 Tomverse의 delivery pull로 받는다. `bridge_tick`은 고정 본문을 받는 테스트용 진입점이다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 환경 변수가 없으면 바이너리와 `scripts/amux-wsl-bridge.mjs`는 소켓을 열지 않고 끝난다.

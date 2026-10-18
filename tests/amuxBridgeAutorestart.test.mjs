@@ -36,6 +36,9 @@ const MAIN = "tomverse-bridge.service";
 const IMPL = "tomverse-amux-v22-bridge@claude-impl.service";
 const REVIEW = "tomverse-amux-v22-bridge@claude-review.service";
 const SIDECAR = "tomverse-amux-v22-sidecar@claude-impl.service";
+// Orchestration policy version 55: one bridge per worker, from one template.
+const WORKER_CODEX = "tomverse-amux-bridge@codex-impl.service";
+const WORKER_CLAUDE = "tomverse-amux-bridge@claude-impl.service";
 
 const invocation = (n) => n.toString(16).padStart(32, "0");
 
@@ -107,6 +110,16 @@ const HALT = {
     halt("worker_runtime_lease_lost"),
   ],
   // Every harmless line the bridges printed on 2026-10-10..13, then a halt.
+  // A --worker bridge (version 55) explains its scope in its own lines, as
+  // WorkerScope::gate_line in apps/tomverse-orchestrator/src/wsl_bridge.rs
+  // prints them, before an approved halt.
+  workerScopeThenLeaseLost: [
+    "amux wsl bridge warn: worker codex-impl is not served by this bridge now (bridge_scope_off); nothing new registers or is offered for dispatch, not halted",
+    "amux wsl bridge warn: worker codex-impl is not served by this bridge now (sidecar_socket_missing); nothing new registers or is offered for dispatch, not halted",
+    "amux wsl bridge warn: worker codex-impl is listed as v22 but this bridge serves it as session; no new assignment until a person restarts this bridge, not halted",
+    noted("worker_runtime_lease_lost"),
+    halt("worker_runtime_lease_lost"),
+  ],
   harmlessNoise: [
     "amux v22 quota source unavailable for claude-chore",
     "amux v22 quota observation recorded for claude-chore",
@@ -236,6 +249,66 @@ test("a restart is asked for without waiting on the unit", { skip: noBash }, () 
 test("every harmless line the bridges print still allows a restart", { skip: noBash }, () => {
   const result = run({ units: [halted(IMPL, 2)], journals: { [invocation(2)]: HALT.harmlessNoise } });
   assert.deepEqual(result.restarts, [IMPL], result.output);
+});
+
+test("a per-worker bridge halted for an approved cause is restarted", { skip: noBash }, () => {
+  const result = run({
+    units: [active(MAIN), halted(WORKER_CODEX, 6), halted(WORKER_CLAUDE, 7)],
+    journals: {
+      [invocation(6)]: HALT.workerScopeThenLeaseLost,
+      [invocation(7)]: HALT.tickNothingCommitted,
+    },
+  });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(result.restarts, [WORKER_CODEX, WORKER_CLAUDE]);
+  assert.match(
+    result.output,
+    /tomverse-amux-bridge@codex-impl\.service halted with cause=worker_runtime_lease_lost; restarted/
+  );
+});
+
+test("a per-worker bridge halted for an unknown outcome stays halted", { skip: noBash }, () => {
+  const result = run({
+    units: [halted(WORKER_CLAUDE, 8)],
+    journals: { [invocation(8)]: HALT.dispatchUnknown },
+  });
+  assert.deepEqual(result.restarts, []);
+  assert.match(result.output, /tomverse-amux-bridge@claude-impl\.service halted; cause=dispatch_outcome_unknown/);
+});
+
+test("the per-worker bridges are judged beside the older units", () => {
+  assert.match(
+    script,
+    /^unit_patterns=\('tomverse-amux-v22-bridge@\*\.service' 'tomverse-amux-bridge@\*\.service'\)$/m
+  );
+  assert.match(
+    script,
+    /^unit_name='\^\(tomverse-amux-v22-bridge\|tomverse-amux-bridge\)@\[A-Za-z0-9_\.-\]\+\\\.service\$'$/m
+  );
+  assert.match(script, /"\$\{unit_patterns\[@\]\}"/);
+  // Never a sidecar.
+  assert.doesNotMatch(script.match(/^unit_patterns=.*$/m)[0], /sidecar/);
+});
+
+test("the --worker scope lines above are the ones the bridge prints", () => {
+  // Fixed to the format strings in WorkerScope::gate_line, so the two cannot
+  // drift apart: a line the bridge prints that this script does not know
+  // holds the bridge.
+  const bridge = readFileSync(
+    new URL("../apps/tomverse-orchestrator/src/wsl_bridge.rs", import.meta.url),
+    "utf8"
+  );
+  const formats = [
+    "amux wsl bridge warn: worker {} is not served by this bridge now ({}); nothing new registers or is offered for dispatch, not halted",
+    "amux wsl bridge warn: worker {} is listed as {} but this bridge serves it as {}; no new assignment until a person restarts this bridge, not halted",
+  ];
+  for (const format of formats) assert.ok(bridge.includes(`"${format}"`), format);
+  const filled = HALT.workerScopeThenLeaseLost.slice(0, 3);
+  const pattern = (format) =>
+    new RegExp(`^${format.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replaceAll("{}", "[a-z0-9_-]+")}$`);
+  assert.match(filled[0], pattern(formats[0]));
+  assert.match(filled[1], pattern(formats[0]));
+  assert.match(filled[2], pattern(formats[1]));
 });
 
 for (const [name, lines, reason] of [
@@ -375,7 +448,8 @@ const polkitDecision = (user, unit, verb, actionId = "org.freedesktop.systemd1.m
 };
 
 test("polkit lets the account restart the bridge units", () => {
-  for (const unit of [MAIN, IMPL, REVIEW, "tomverse-amux-v22-bridge@codex-x.1.service"]) {
+  for (const unit of [MAIN, IMPL, REVIEW, "tomverse-amux-v22-bridge@codex-x.1.service",
+    WORKER_CODEX, WORKER_CLAUDE]) {
     assert.equal(polkitDecision("tomverse-bridge-autorestart", unit, "restart"), "yes", unit);
   }
 });
@@ -384,10 +458,14 @@ test("polkit grants nothing else", () => {
   const user = "tomverse-bridge-autorestart";
   for (const verb of ["start", "stop", "reload", "reload-or-restart", "try-restart"]) {
     assert.equal(polkitDecision(user, MAIN, verb), "no answer", verb);
+    assert.equal(polkitDecision(user, WORKER_CODEX, verb), "no answer", `${verb} ${WORKER_CODEX}`);
   }
   for (const unit of [SIDECAR, "ssh.service", "tomverse-bridge-watchdog.service",
     "tomverse-amux-v22-bridge@x.service.d", "xtomverse-bridge.service",
-    "tomverse-amux-v22-bridge@a/b.service", undefined]) {
+    "tomverse-amux-v22-bridge@a/b.service", "tomverse-amux-bridge@a/b.service",
+    "tomverse-amux-bridge@.service", "tomverse-amux-bridge@x.service.d",
+    "xtomverse-amux-bridge@codex-impl.service", "tomverse-amux-sidecar@codex-impl.service",
+    undefined]) {
     assert.equal(polkitDecision(user, unit, "restart"), "no answer", String(unit));
   }
   assert.equal(polkitDecision("tommy", MAIN, "restart"), "no answer");
@@ -414,7 +492,10 @@ test("the installer proves the rule's reach before it enables the timer", () => 
   for (const check of [
     "granted tomverse-bridge.service restart",
     "granted tomverse-amux-v22-bridge@claude-impl.service restart",
+    "granted tomverse-amux-bridge@codex-impl.service restart",
     "refused tomverse-bridge.service stop",
+    "refused tomverse-amux-bridge@codex-impl.service stop",
+    "refused tomverse-amux-bridge@codex-impl.service start",
     "refused ssh.service restart",
     "refused tomverse-amux-v22-sidecar@claude-impl.service restart",
   ]) {
