@@ -32,7 +32,8 @@
 상태(v50 이력): **v50 졸업한 v22 코드 작업의 develop 자동 병합을 완료로 인정.** 2026-10-15 운영자 `mposition`이 아래 v50 절을 승인했다. `engineering-agent.md` v6 3항의 조건을 모두 충족해 게시 서비스가 `develop`에 병합한 v22 `implement` Task는 본 앱이 그 병합을 관측하면 `done`·`v4TerminalAt`이 된다. 그 밖의 경로는 v49 그대로다.
 상태(v51 이력): **v51 아이디어당 사람 결정 0: 세션 접수와 무인 분석·등록.** 2026-10-16 운영자 `mposition`이 아래 v51 절을 `amux-intake.md` v19와 같은 결정으로 승인했다. 아이디어마다 하던 실행 승인과 계획 승인을 owner의 운영 범위 설정 한 번으로 바꾸고, 결정적 Guard를 통과한 계획은 시스템 actor가 등록한다. 사람 결정은 PR마다 GitHub review·병합(v49·v50)과 Guard에 걸린 계획의 검토뿐이다. 이전 v50 상태 줄은 이력이다.
 상태(v52 이력): **v52 v4 Task 실행 등급 판정, 같은 등급 배정, 검토 서버 연결.** 2026-10-16 운영자 `mposition`이 아래 v52 절을 승인했다. v4 Task는 결정적 함수가 정한 실행 등급 하나를 갖고 같은 등급의 worker만 맡으며, 실행 뒤 contract 경로에 닿은 변경은 버리고 `frontier`로 다시 실행한다. AMUX의 review 단계 대신 runner가 독립 검토 서버를 호출하고, `done`은 v49·v50의 병합 관측 그대로다. 버전 16은 철회됐다. 코드 래치와 운영 스위치는 꺼진 채이며, 이 승인 자체로 켜지 않는다. 이전 v51 상태 줄은 이력이다.
-상태(최신): **v53 R1·R2b 관측 종료와 R2c 배정 카탈로그 전환.** 2026-10-17 운영자 `mposition`이 아래 v53 절을 승인했다. R1(2026-10-13 08:52~10-16 08:52 AEST)과 R2b(2026-10-14 18:21~10-17 18:21 AEST)의 관측이 불일치 없이 끝났다. R2c 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH`가 true가 되어 버전 35의 일곱 사용처가 등록부에서 유도한 카탈로그로 배정한다. 카탈로그 환경 변수는 R2e까지 남고, 래치를 끄면 배정은 환경 변수로 돌아간다. R2d는 바뀌지 않는다. 이전 v52 상태 줄은 이력이다.
+상태(v53 이력): **v53 R1·R2b 관측 종료와 R2c 배정 카탈로그 전환.** 2026-10-17 운영자 `mposition`이 아래 v53 절을 승인했다. R1(2026-10-13 08:52~10-16 08:52 AEST)과 R2b(2026-10-14 18:21~10-17 18:21 AEST)의 관측이 불일치 없이 끝났다. R2c 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH`가 true가 되어 버전 35의 일곱 사용처가 등록부에서 유도한 카탈로그로 배정한다. 카탈로그 환경 변수는 R2e까지 남고, 래치를 끄면 배정은 환경 변수로 돌아간다. R2d는 바뀌지 않는다. 이전 v52 상태 줄은 이력이다.
+상태(최신): **v54 R2d bridge 세션 목록 켜기.** 2026-10-18 운영자 `mposition`이 아래 v54 절을 승인했다. 운영자가 같은 날 두 경로의 bridge 바이너리를 main `d6c99aa1f` 빌드로 교체한 뒤다. R2d 코드 래치 `AMUX_WORKER_SESSION_LIST_LATCH`가 true가 되어, bridge는 유도 카탈로그의 세션 목록과 `TOMVERSE_AMUX_WSL_SESSIONS`의 교집합만 등록·배정한다. 관측은 이 래치를 담은 production 배포부터 3일이다. 2026-10-18 기준으로 바뀌는 배정은 없다. 이전 v53 상태 줄은 이력이다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -83,6 +84,7 @@ approvedBy: mposition · approvedAt: 2026-10-15 · 정책 버전: 50
 approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 51
 approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 52
 approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 53
+approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 54
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -139,6 +141,7 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 53
 | 51 | 2026-10-16 mposition | 아이디어당 사람 결정을 0으로 한다(`amux-intake.md` v19). 접수는 Admin 화면이나 코딩 도구 세션에서 들어오고, owner가 한 번 저장한 운영 범위 설정(허용 저장소·분석 모델) 안에서 분석과 카드 등록이 사람 없이 이어진다. Guard에 걸린 계획만 운영자 검토로 간다. v22 편입 규칙과 PR review·병합의 사람 결정(v49·v50)은 바뀌지 않는다. |
 | 52 | 2026-10-16 mposition | v4 Task는 실행 등급 하나(`routine`·`advanced`·`frontier`)를 갖고 같은 등급의 worker만 맡으며, 위 등급으로 넘기지 않고 기다린다. 등급은 결정적 함수가 contract 경로 목록·역할·예상 경로로 정하고 intake의 제안은 신호다(정해진 범위 안에서는 하향도 받는다). 실행 뒤 변경이 contract 경로에 닿으면 버리고 `frontier`로 다시 실행한다. AMUX의 review 단계 대신 runner가 독립 검토 서버를 호출한다. `done`은 v49·v50의 병합 관측 그대로다. 버전 16을 철회하고, legacy 카드는 바꾸지 않는다. |
 | 53 | 2026-10-17 mposition | R1 관측(2026-10-13 08:52~10-16 08:52 AEST)과 R2b 동등 관측(2026-10-14 18:21~10-17 18:21 AEST)의 종료를 운영자 확인으로 기록하고, R2c 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH`를 켜 버전 35의 일곱 사용처가 등록부에서 유도한 카탈로그로 배정한다. 카탈로그 환경 변수는 R2e까지 남고, 래치를 끄면 배정은 환경 변수로 돌아간다. R2d와 FIRST Task 재시도 경로는 바꾸지 않는다. |
+| 54 | 2026-10-18 mposition | R2d 코드 래치 `AMUX_WORKER_SESSION_LIST_LATCH`를 켜 bridge가 유도 카탈로그의 세션 목록과 `TOMVERSE_AMUX_WSL_SESSIONS`의 교집합만 등록·배정하게 한다. 운영자가 두 경로의 bridge 바이너리를 main `d6c99aa1f` 빌드로 교체하며, 관측은 래치 배포와 교체가 모두 끝난 뒤 3일이다. 2026-10-18 기준으로 바뀌는 배정은 없다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -3114,3 +3117,69 @@ reject했고(승인과 관측 종료 전에 래치가 켜질 수 있음, 날짜�
 - R2d의 활성화는 별도 기록이다. 운영자가 호스트의 orchestrator 바이너리를 바꾼 뒤에 쓴다.
 - **되돌리기.** 래치를 false로 되돌리는 변경은 배정을 환경 변수로 돌려놓는다. 이 버전은 아무것도 쓰지
   않으므로 남는 것이 없다. R2e 뒤에는 이 되돌리기가 없다.
+
+## 버전 54 — R2d bridge 세션 목록 켜기
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-18`. 2026-10-18 작성, 작성자 Claude. 운영자는
+2026-10-18 13:00 AEST에 두 경로의 bridge 바이너리를 교체한 뒤(버전 53 5항의 순서) 같은 날 이 절을 승인했다.
+작성자와 다른 공급사의 독립 검토는 두 회차였다. r-20261018-024451-a082ea에서 codex가 reject했고(활성화 기록
+전에 래치가 true), 후보는 래치를 false로 두도록 고친 뒤 r-20261018-025153-3c7d42에서 codex와 copilot이 둘 다
+accept했다. 이 승인을 기록하는 commit이 래치를 true로 바꾼다.
+`tests/amuxWorkerAssignmentCatalog.test.mjs`는 래치 값과 이 절의 승인 기록이 함께 움직이기를 요구하므로, 한쪽만
+바뀐 트리는 CI를 통과하지 못한다.
+
+이 버전은 버전 35 5항의 R2d를 켠다. R2d는 코드 래치 `AMUX_WORKER_SESSION_LIST_LATCH`
+(`lib/amux/workerDerivedCatalogCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다. 이 기록이
+버전 35 5항이 말하는 그 조각의 운영자 활성화 기록이다.
+
+### 1. 앞선 조건
+
+- **R2c.** 버전 53의 래치를 담은 production 배포가 2026-10-18 12:14 AEST(#2665)에 끝났고, 그때부터 배정은
+  등록부에서 유도한 카탈로그로 이뤄진다(버전 53 5항).
+  운영자는 2026-10-18 배포 뒤 유도 카탈로그 패널의 여덟 행이 모두 "같음"이고 Agent Office의 AMUX 좌석이 13개임을
+  확인했다.
+- **호스트 바이너리.** bridge 바이너리는 두 경로에 있다. 세션 bridge(`tomverse-bridge.service`)의
+  `/usr/local/libexec/tomverse-wsl-bridge`와, worker별 v22 bridge(`tomverse-amux-v22-bridge@`)의
+  `/opt/tomverse-amux-v22/tomverse-wsl-bridge`다. 2026-10-18 기준 둘은 같은 파일이며 세션 목록 route를 부르지
+  않는다. 운영자가 main `d6c99aa1f`에서 빌드한 바이너리(sha256
+  `563cfeac2bfc045964331a56df38f163683e2a829f74381f7ccbb51c874fd825`)로 둘 다 교체한다(버전 23의 root 소유
+  경계). 래치가 꺼진 동안 새 바이너리는 `session_list_off`를 받아 지금과 같이 동작하므로, 교체는 이 버전의
+  승인 전에 해도 배정을 바꾸지 않는다(`docs/ops/amux/wsl-execution-bridge.md`의 세션 목록 절).
+  - 운영자는 2026-10-18 13:00 AEST(03:00Z)에 두 경로를 교체했다. 이전 파일은 `.before-20261018`로 남았다. 교체 뒤
+    두 경로의 sha256은 위 값과 같았고, 세션 bridge와 v22 bridge 셋(`claude-contract`, `claude-impl`,
+    `claude-review`)이 새 바이너리로 다시 시작했다. `claude-review`는 첫 시작에서 로컬 AMUX `/health`의 일시적
+    503으로 한 번 실패했고, 60초 뒤 자동 재시도에서 시작했다.
+
+### 2. 열리는 것
+
+- 세션 목록 route가 유도 카탈로그의 이름을 돌려준다. `engineering-runner`는 빠진다.
+- 각 bridge는 그 목록과 `TOMVERSE_AMUX_WSL_SESSIONS`의 교집합만 등록하고 배정 대상으로 내놓는다. 목록 밖이 된
+  등록 세션은 `dispatch_ready: false`로 heartbeat하고 진행 중인 attempt는 끝낸다. 목록을 읽지 못하면 새로
+  등록하지 않는다. 어느 답도 halt가 아니다(버전 35 4항).
+- 2026-10-18 기준으로 이 전환이 바꾸는 배정은 없다. 세션 bridge의 환경 변수 목록(`codex-impl`,
+  `codex-chore`, `codex-contract`)과 v22 bridge 넷(`claude-chore`, `claude-contract`, `claude-impl`,
+  `claude-review`)이 모두 등록부의 `active` 일곱에 들고, 유도 카탈로그에 있다.
+
+### 3. 관측
+
+- 버전 35 활성화 게이트 2대로 3일, 곧 72시간이다. 이 래치를 담은 production 배포와 두 바이너리 교체가 모두
+  끝난 시각부터 센다.
+- 운영자는 Agent Office(`/admin/office`)의 AMUX 층에서, 활성화 전에 "배정 가능"이던 여섯 worker(`codex-impl`,
+  `codex-chore`, `codex-contract`, `claude-contract`, `claude-impl`, `claude-review`)가 그대로 "배정 가능"인지 본다.
+  이 화면은 runtime lease의 만료를 반영한다. AMUX › 실행 › 배정 탭의 "작업자 근거" 표는 마지막으로 저장된 runtime
+  상태를 lease 만료와 상관없이 보이므로 관측에 쓰지 않는다(2026-10-18 운영자 결정. 10-14부터 bridge가 꺼진
+  `claude-chore`가 그 표에서는 "전달 준비됨"으로 보였다).
+- 여섯 가운데 하나라도 까닭 없이 "배정 가능"이 아니게 되면 원인을 고친 뒤 처음부터 다시 센다. 10-14부터 꺼져
+  있는 `claude-chore`의 "배정 연결 끊김"은 이 관측의 대상이 아니다.
+- 기간을 채우면 운영자가 R2d 종료를 기록한다. 그 뒤가 R2e다.
+
+### 4. 바뀌지 않는 것
+
+- `TOMVERSE_AMUX_WSL_SESSIONS`는 목록을 좁히기만 하는 이중 장치로 남는다. 지우는 것은 R2e다.
+- 카탈로그 환경 변수, 배정, 등록부, 능력 표, 역할 상한, 버전 20의 bridge 정지 계약은 바꾸지 않는다.
+
+### 5. 되돌리기
+
+- 래치를 false로 되돌리면 route가 `session_list_off`를 답하고, bridge는 환경 변수 목록만 따른다. 쓰는 것이
+  없으므로 남는 것도 없다.
+- 바이너리는 교체할 때 남긴 백업으로 되돌린다.
