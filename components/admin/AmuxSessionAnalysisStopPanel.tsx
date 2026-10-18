@@ -8,8 +8,12 @@ import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgr
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
 type Phase = "checking" | "running" | "sending" | "unknown" | "stopped" |
-  "hidden" | "unavailable" | "refused";
+  "hidden" | "unavailable";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Analysis starts, and later invocations follow, while the page is open. */
+const REFRESH_MS = 10_000;
+const REFRESHED_PHASES: ReadonlySet<Phase> = new Set(["hidden", "running",
+  "stopped", "unavailable"]);
 
 function duration(startedAt: string | null, now: number): string {
   const start = startedAt ? Date.parse(startedAt) : NaN;
@@ -20,9 +24,11 @@ function duration(startedAt: string | null, now: number): string {
 }
 
 /** docs/policy/amux-intake.md v19 item 3: start time, elapsed time and one
- * confirmed stop for an in-flight v19 session analysis. There is no time
- * limit; this button is the stop. A lost POST response becomes read-back only,
- * including after a page reload, and a missing receipt never enables another
+ * confirmed stop for the in-flight v19 session analysis. There is no time
+ * limit; this button is the stop. The state is re-read while the page is open,
+ * so a run that starts later, or the next invocation of the same idea, can be
+ * stopped without reloading. A lost POST response makes that claim read-back
+ * only, including after a reload: a missing receipt never enables another
  * POST for the same claim. */
 export function AmuxSessionAnalysisStopPanel({ ideaId }: { ideaId: string }) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages).sessionStop;
@@ -30,12 +36,16 @@ export function AmuxSessionAnalysisStopPanel({ ideaId }: { ideaId: string }) {
   const [claimId, setClaimId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [now, setNow] = useState(0);
+  const [refused, setRefused] = useState(false);
   const [needsReauthentication, setNeedsReauthentication] = useState(false);
   const inFlight = useRef(false);
   const storageKey = `amux-v19-session-analysis-stop:${ideaId}`;
 
-  const readBack = async (uncertain: boolean) => {
+  const readBack = async () => {
     if (inFlight.current) return;
+    let pending: string | null;
+    try { pending = window.sessionStorage.getItem(storageKey); }
+    catch { setPhase("unavailable"); return; }
     inFlight.current = true;
     try {
       const response = await adminFetch(
@@ -46,7 +56,7 @@ export function AmuxSessionAnalysisStopPanel({ ideaId }: { ideaId: string }) {
         ? body as Record<string, unknown> : null;
       if (response.status === 428) {
         setNeedsReauthentication(true);
-        setPhase(uncertain ? "unknown" : "unavailable");
+        setPhase(pending ? "unknown" : "unavailable");
       } else if (response.ok && row?.state === "stopped" && row.ideaId === ideaId &&
           typeof row.claimId === "string" && UUID.test(row.claimId)) {
         window.sessionStorage.removeItem(storageKey);
@@ -55,27 +65,38 @@ export function AmuxSessionAnalysisStopPanel({ ideaId }: { ideaId: string }) {
       } else if (response.ok && row?.state === "running" && row.ideaId === ideaId &&
           typeof row.claimId === "string" && UUID.test(row.claimId) &&
           typeof row.startedAt === "string") {
-        setClaimId(row.claimId);
-        setStartedAt(row.startedAt);
-        // A pending stop for this exact claim is unresolved: read back only.
-        setPhase(uncertain ? "unknown" : "running");
+        if (pending === row.claimId) {
+          // An unresolved stop for this exact claim stays read-back only.
+          setPhase("unknown");
+        } else {
+          // A different claim is running: the stored stop no longer names it.
+          if (pending !== null) window.sessionStorage.removeItem(storageKey);
+          setClaimId(row.claimId);
+          setStartedAt(row.startedAt);
+          setPhase("running");
+        }
       } else if (response.ok && row?.state === "not_visible") {
-        setPhase(uncertain ? "unknown" : "hidden");
+        setPhase(pending ? "unknown" : "hidden");
       } else {
-        setPhase(uncertain ? "unknown" : "unavailable");
+        setPhase(pending ? "unknown" : "unavailable");
       }
-    } catch { setPhase(uncertain ? "unknown" : "unavailable"); }
+    } catch { setPhase(pending ? "unknown" : "unavailable"); }
     finally { inFlight.current = false; }
   };
 
   useEffect(() => {
-    let uncertain = false;
-    try { uncertain = window.sessionStorage.getItem(storageKey) !== null; }
-    catch { queueMicrotask(() => setPhase("unavailable")); return; }
-    queueMicrotask(() => { void readBack(uncertain); });
+    queueMicrotask(() => { void readBack(); });
     // The opened idea has a stable key; switching ideas remounts this panel.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ideaId]);
+
+  useEffect(() => {
+    if (!REFRESHED_PHASES.has(phase)) return;
+    const timer = window.setInterval(() => { void readBack(); }, REFRESH_MS);
+    return () => window.clearInterval(timer);
+    // readBack reads only refs, storage and props.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, ideaId]);
 
   useEffect(() => {
     if (phase !== "running") return;
@@ -92,7 +113,9 @@ export function AmuxSessionAnalysisStopPanel({ ideaId }: { ideaId: string }) {
     catch { setPhase("unavailable"); return; }
     inFlight.current = true;
     setPhase("sending");
+    setRefused(false);
     setNeedsReauthentication(false);
+    let refresh = false;
     try {
       const response = await adminFetch("/api/admin/amux/ideas/session-analysis-stop", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -107,18 +130,22 @@ export function AmuxSessionAnalysisStopPanel({ ideaId }: { ideaId: string }) {
         window.sessionStorage.removeItem(storageKey);
         setPhase("stopped");
       } else if ([400, 403, 404, 409, 415, 428, 429].includes(response.status)) {
+        // Decided before or by a refused transaction: show what runs now.
         window.sessionStorage.removeItem(storageKey);
         setNeedsReauthentication(response.status === 428);
-        setPhase("refused");
+        setRefused(true);
+        refresh = true;
       } else setPhase("unknown");
     } catch { setPhase("unknown"); }
     finally { inFlight.current = false; }
+    if (refresh) await readBack();
   };
 
-  if (phase === "hidden") return null;
+  if (phase === "hidden" && !refused) return null;
   return <section className="space-y-2 rounded-xl border border-zinc-700 bg-zinc-900 p-4 text-sm"
     data-testid="amux-v19-session-analysis-stop" data-state={phase}>
     {phase === "checking" || phase === "sending" ? <p role="status">{m.title}</p> : null}
+    {refused ? <p role="alert">{m.refused}</p> : null}
     {phase === "running" ? <>
       <p className="font-medium text-zinc-100">{m.title}</p>
       <p className="text-zinc-300">{m.startedAt(startedAt ?? "—")}</p>
@@ -131,11 +158,10 @@ export function AmuxSessionAnalysisStopPanel({ ideaId }: { ideaId: string }) {
     {phase === "stopped" ? <p role="status" className="text-zinc-100">{m.stopped}</p> : null}
     {phase === "unknown" ? <>
       <p role="alert" className="text-amber-200">{m.unknown}</p>
-      <button type="button" onClick={() => void readBack(true)}
+      <button type="button" onClick={() => void readBack()}
         className="min-h-11 rounded-lg border border-zinc-600 px-4">{m.readBack}</button>
     </> : null}
-    {phase === "unavailable" || phase === "refused" ? <p role="alert">
-      {phase === "refused" ? m.refused : m.unavailable}</p> : null}
+    {phase === "unavailable" ? <p role="alert">{m.unavailable}</p> : null}
     {needsReauthentication ? <a className="underline text-blue-200"
       href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>
       {m.reauthenticate}</a> : null}
