@@ -216,3 +216,11 @@ test("an opened idea leads with its read-only detail, and the list follows its f
   assert.ok(detail.includes("AMUX_IDEA_PROGRESS_STAGES.map"), "all six steps are drawn");
   assert.ok(detail.includes("amuxIdeaHasUnsavedDraft() && !window.confirm(m.leaveDraft)"), "leaving a draft asks first");
 });
+
+test("on main the progress read names no card display number column", () => {
+  // main has no AmuxWorkItem."displayKey" (card numbers ship separately); naming it
+  // failed every production read of the list.
+  const source = readFileSync(new URL("../lib/amux/ideaProgressRead.ts", import.meta.url), "utf8");
+  assert.equal(source.includes('w."displayKey"'), false);
+  assert.ok(source.includes("'displayKey', NULL::text"));
+});
