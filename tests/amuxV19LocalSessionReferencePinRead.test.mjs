@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { readAmuxV19ClaimReferencePin } from
+import { readAmuxV19SessionReferencePin } from
   "../lib/amux/ideaLocalSessionReferencePinRead.mjs";
 
 const name = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN";
@@ -31,10 +31,25 @@ test("the in-flight worker reads its exact canonical pin before checkout", async
     });
     return Response.json({ referenceCount: 1, pinnedCommitSha: "a".repeat(40) });
   });
-  assert.deepEqual(await readAmuxV19ClaimReferencePin(candidate), {
+  assert.deepEqual(await readAmuxV19SessionReferencePin(candidate), {
     kind: "pinned", referenceCount: 1, commitSha: "a".repeat(40),
   });
   assert.equal(calls, 1);
+});
+
+test("queue preflight omits a claim and still requires a complete pin", async () => {
+  const candidate = input(async (_url, request) => {
+    assert.deepEqual(JSON.parse(request.body), {
+      reservationId: candidate.reservationId, ideaId: candidate.ideaId,
+      referenceOrdinal: 0,
+    });
+    return Response.json({ referenceCount: 2,
+      pinnedCommitSha: "b".repeat(40) });
+  });
+  delete candidate.claimId;
+  assert.deepEqual(await readAmuxV19SessionReferencePin(candidate), {
+    kind: "pinned", referenceCount: 2, commitSha: "b".repeat(40),
+  });
 });
 
 test("uncertain, malformed, and cross-origin pin reads fail closed", async () => {
@@ -43,10 +58,10 @@ test("uncertain, malformed, and cross-origin pin reads fail closed", async () =>
     calls += 1;
     return Response.json({ referenceCount: 1, pinnedCommitSha: "a".repeat(40) });
   };
-  assert.deepEqual(await readAmuxV19ClaimReferencePin({
+  assert.deepEqual(await readAmuxV19SessionReferencePin({
     ...input(fetchImpl), origin: "https://other.test/",
   }), { kind: "unavailable" });
-  assert.deepEqual(await readAmuxV19ClaimReferencePin({
+  assert.deepEqual(await readAmuxV19SessionReferencePin({
     ...input(fetchImpl), claimId: "not-a-claim",
   }), { kind: "unavailable" });
   assert.equal(calls, 0);
@@ -59,7 +74,7 @@ test("uncertain, malformed, and cross-origin pin reads fail closed", async () =>
       "content-type": "application/json" } }),
     new Response(null, { status: 503 }),
   ]) {
-    assert.deepEqual(await readAmuxV19ClaimReferencePin(input(
+    assert.deepEqual(await readAmuxV19SessionReferencePin(input(
       async () => response)), { kind: "unavailable" });
   }
 });
