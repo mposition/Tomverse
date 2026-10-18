@@ -38,14 +38,15 @@ export const AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH = true;
 export const amuxWorkerDerivedCatalogAssignmentOpen = (): boolean => AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH;
 
 /**
- * R2d ships with its own code latch off (version 35 section 5). While it is
- * false the bridge session list route answers that the list is off, and the
- * bridge keeps its environment allowlist as before. Version 54 is the
- * operator's activation record: the commit that records its approval, after
- * the host bridge binaries are replaced, sets this true, and the latch test
- * fails unless the two move together.
+ * R2d shipped with its own code latch off (version 35 section 5); version 54
+ * (approved 2026-10-18, after the host bridge binaries were replaced) is the
+ * operator's activation record and sets it true, so the bridge session list
+ * route answers the derived catalog's names (without the engineering runner).
+ * While it is false the route answers that the list is off, and the bridge
+ * keeps its environment allowlist as before. The latch test fails unless the
+ * latch and version 54's approval record move together.
  */
-export const AMUX_WORKER_SESSION_LIST_LATCH = false;
+export const AMUX_WORKER_SESSION_LIST_LATCH = true;
 export const amuxWorkerSessionListOpen = (): boolean => AMUX_WORKER_SESSION_LIST_LATCH;
 
 /** One entry in the shape the legacy catalog's consumers read. */
