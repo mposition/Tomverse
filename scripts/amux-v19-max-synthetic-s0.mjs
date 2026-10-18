@@ -76,6 +76,7 @@ async function main() {
       repositoryPath: fixture, commitSha,
       digestSecret: randomBytes(32).toString("hex"), prompt,
       modelId: "claude-opus-5-5", reasoningEffort: "high",
+      diagnostic: true,
       stopCheck: async () => Date.now() - start >= MAX_PROBE_MS,
     });
     const passed = observed.kind === "verified_success" &&
@@ -83,6 +84,8 @@ async function main() {
       observed.readFiles.length === 1 && observed.readFiles[0] === "TRACE.txt";
     process.stdout.write(JSON.stringify({ status: observed.kind,
       cliStarted: observed.cliStarted === true,
+      failureStage: observed.kind === "outcome_unknown"
+        ? observed.failureStage ?? "unavailable" : null,
       answerMatches: observed.kind === "verified_success"
         ? observed.rawModelOutput.trim() === "S0_OK" : null,
       traceRead: observed.kind === "verified_success"

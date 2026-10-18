@@ -77,6 +77,24 @@ test("stop, signal and incomplete stdout never release model output", async () =
   process.stdout.destroy();
 });
 
+test("synthetic diagnostic distinguishes child failure from parser refusal without content", async () => {
+  const failed = child();
+  const first = observeAmuxTrackedCheckoutChild(failed,
+    { ...input, diagnostic: true });
+  await send(failed);
+  assert.deepEqual(first.finish({ code: 2, signal: null }), {
+    kind: "outcome_unknown", failureStage: "child_nonzero",
+  });
+  const malformed = child();
+  const second = observeAmuxTrackedCheckoutChild(malformed,
+    { ...input, diagnostic: true });
+  malformed.stdout.end("private malformed output");
+  await new Promise((resolve) => malformed.stdout.once("end", resolve));
+  assert.deepEqual(second.finish({ code: 0, signal: null }), {
+    kind: "outcome_unknown", failureStage: "parser_rejected",
+  });
+});
+
 test("stderr transport errors invalidate an otherwise complete result", async () => {
   const process = child();
   const observed = observeAmuxTrackedCheckoutChild(process, input);
