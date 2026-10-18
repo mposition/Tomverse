@@ -1,6 +1,6 @@
 {
   "measured": true,
-  "n_considered": 2044,
+  "n_considered": 2045,
   "command_handlers": {
     "_applyEmbedView": {
       "kind": "command._applyEmbedView",
@@ -934,6 +934,12 @@
     },
     "_focusAnswer": {
       "kind": "command._focusAnswer",
+      "feedback_required": true,
+      "target": "control-or-request",
+      "queue_policy": "transport-declared"
+    },
+    "_focusClaimAnswer": {
+      "kind": "command._focusClaimAnswer",
       "feedback_required": true,
       "target": "control-or-request",
       "queue_policy": "transport-declared"

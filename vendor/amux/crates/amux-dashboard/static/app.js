@@ -29270,6 +29270,26 @@ async function _focusResolveTag(item) {
   const keep = (item.tags || []).filter(t => !_NEEDS_HUMAN_TAGS.has(String(t).toLowerCase()));
   await _focusPatch(item.id, { tags: keep });
 }
+// A typed question revision gets one answer (docs/policy/amux-decision-maker.md
+// §2-7 in the Tomverse repository): this direct answer and an operator-confirmed
+// Decision Maker answer each claim the card's answer record before anything is
+// sent, and only the first is delivered. A card with no typed revision has
+// nothing to claim. A Decision Maker answer already delivered wins: nothing is
+// sent and the operator is told. The operator's own earlier claim does not stop
+// a second direct answer. Any failure to claim sends nothing.
+async function _focusClaimAnswer(item) {
+  try {
+    const r = await _directInteractionFetch(API + '/api/board/' + encodeURIComponent(item.id) + '/typed-ask/answer',
+      { method: 'POST', headers: _authHeaders({'Content-Type':'application/json'}), body: '{}',
+        signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return 'Could not record the answer for ' + item.id + ' (HTTP ' + r.status + '); nothing was sent.';
+    const b = await r.json();
+    if (b.outcome === 'claimed' || b.outcome === 'no_typed_revision') return null;
+    if (b.outcome === 'already_answered' && b.answer && b.answer.source === 'operator') return null;
+    if (b.outcome === 'already_answered') return item.id + ' was already answered by an operator-confirmed Decision Maker answer; nothing was sent.';
+    return 'Could not record the answer for ' + item.id + ' (' + (b.reason || b.outcome || 'refused') + '); nothing was sent.';
+  } catch (e) { return 'Could not record the answer for ' + item.id + '; nothing was sent.'; }
+}
 async function _focusAnswer() {
   const item = _focusList[_focusIdx]; if (!item) return;
   const sess = item.session;
@@ -29278,6 +29298,8 @@ async function _focusAnswer() {
     + 'placeholder="Your reply — sent to the owning worker and recorded on the card"></textarea>', 'Send');
   const ans = (document.getElementById('focus-ans') || {}).value || '';
   if (!ok || !ans.trim()) return;
+  const refused = await _focusClaimAnswer(item);
+  if (refused) { showToast(refused); return; }
   if (sess) { try { await _focusSend(sess, '[Ethan, re ' + item.id + '] ' + ans); } catch(e) {} }
   await _focusPatch(item.id, { desc_append: '`answered` Ethan: ' + ans });
   await _focusResolveTag(item);
@@ -29287,6 +29309,8 @@ async function _focusAnswer() {
 }
 async function _focusDecide(verdict) {
   const item = _focusList[_focusIdx]; if (!item) return;
+  const refused = await _focusClaimAnswer(item);
+  if (refused) { showToast(refused); return; }
   await _focusPatch(item.id, { desc_append: '`decision` Ethan ' + verdict.toUpperCase() + ' ' + new Date().toISOString().slice(0,10) });
   if (item.session) { try { await _focusSend(item.session, '[Ethan decision on ' + item.id + '] ' + verdict.toUpperCase() + ' — proceed accordingly.'); } catch(e) {} }
   await _focusResolveTag(item);

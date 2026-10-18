@@ -1951,6 +1951,42 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   S2-2b1과 함께 바뀝니다** — 앱의 라우팅·배정 응답에 저장된 정책 버전이 없어 relay는 앱 상수와 같은 값을 갖고, 두 앱 버전이 함께
   받는 카드 형식이 없으므로 그 병합과 같은 변경에서 둘을 올리며 테스트가 이를 강제합니다. 운영자 확정 뒤 전달(S2-2b3), 스냅샷(S2b),
   Admin 화면은 없습니다.
+- **S2-2b3(확정 답 전달)**: `app/api/internal/amux/decision-maker/deliveries/next/route.ts`,
+  `app/api/internal/amux/decision-maker/deliveries/route.ts`, `app/api/internal/amux/decision-maker/deliveries/outcome/route.ts`,
+  `lib/amux/decisionMakerDeliveryCore.ts`, `lib/amux/decisionMakerDeliveryRead.ts`, `lib/amux/decisionMakerDeliveryRoute.ts`,
+  judgment store의 `readNextDecisionMakerDeliveryJudgment()`, `lib/amux/dbBoundary.ts`의 `decisionMakerDeliveryCandidateRead`(상한 7)·
+  `decisionMakerDeliveryDecision`(10)·`decisionMakerDeliveryOutcome`(9), `apps/tomverse-orchestrator/src/dm_relay/delivery.rs`와
+  relay의 `tick`, `vendor/amux/crates/amux-server/src/api/dm_relay.rs`의 `/api/dm-relay/answers`·`/answers/check`·`/answers/unknown`,
+  `vendor/amux/crates/amux-server/src/api/board_typed_ask.rs`의 `POST /api/board/{id}/typed-ask/answer`, 대시보드 `_focusAnswer`·
+  `_focusDecide`의 `_focusClaimAnswer`, `tests/amuxDecisionMakerDelivery.test.mjs`,
+  `tests/server-contract/amux-decision-maker-delivery-routes.test.ts`, `tests/integration/amux-decision-maker-delivery.db.test.ts`.
+  relay의 매 tick이 question scan **앞에서** 운영자가 확정한 답을 최대 하나 전달합니다: 다음 확정 답 읽기 → 로컬 확인 → 앱의 전달
+  결정 → 로컬 전달(답변 기록 claim, 그 claim을 이긴 경우에만 전송과 카드 기록) → 영수증. **읽기 route는 `confirm`·`edit_confirm`
+  판정이 있고 전달 결정이 없는 요청만 돌려주고**, 그 판정이 요청을 닫은 사건과 같은지 다시 확인하며(아니면 읽지 못한 상태), kill
+  switch 중에는 스위치만 읽고 409 `kill_switch_on`입니다(docs/policy/amux-decision-maker.md §6 표의 "bridge의 확정 답 조회·전달").
+  **relay는 앱이 전달 결정을 기록했다고 답한 뒤에만 로컬 전달 route를 부릅니다** — 결정 응답을 잃으면 보내지 않고 멈춥니다. 각 표는
+  그것을 쓰는 store가 한 문장씩 읽고(`decisionMakerDeliveryRead.ts`에는 SQL이 없음), 읽기는 스위치·판정·요청·결과 상세·본문
+  5문장 + setup + fence입니다. 결정은 8문장, 결과는 7문장(무결성 키 포함)이고 경계 상한은 각각 + 2이며, unit 테스트가 그 셈을, DB
+  테스트가 하나 줄인 상한의 거부를 고정합니다. **worker 메시지는 앱이 만듭니다** — `[Decision Maker <인스턴스> (<모델>) 제안,
+  <operator-confirmed|operator-edited>, re <카드>]` 다음 줄에 답(select는 `선택지: <id>`, free text는 DM의 답, 고쳐서 확정은 운영자의
+  답), 빈 줄 뒤 "승인 계약의 승인이 아니다. 사람 승인이 필요한 게이트는 따로 요청한다."이며, 모델 이름과 문장은 unit 테스트가
+  docs/policy/amux-decision-maker.md §7의 표와 본문에 대조합니다. bridge는 첫 줄이 그 인스턴스·판정·카드의 머리말인지, 로컬 AMUX는 그
+  카드를 이름 대는 머리말인지 확인합니다. 카드 기록은 같은 글을 `` `answered` ``로 붙이며(session header 없는 PATCH라 알림 없음),
+  답 본문이 지워진 확정은 `undeliverable`로 건너뜁니다. 로컬 route는 S2-2b2의 relay 토큰 뒤에 있고 `/api/board` 밖입니다.
+  **확인(`answers/check`)은 읽기만 합니다** — 카드가 아직 그 질문 revision을 묻고 아무도 답하지 않았는지, 그리고 lane이 자동 전송을
+  받는지(`deliver_automated`과 같은 관문: archived·paused·isolated·not running·permission dialog면 거부, turn 경계가 아니면 `busy`).
+  아니면 relay는 결정을 쓰지 않고 cursor로 지나갑니다(앱 판정 시각·요청 id 순, 끝나면 처음부터). **전달(`answers`)은 요청당 한 번만
+  부릅니다** — 같은 확인 뒤 `dm_ask::claim_answer(DmConfirmed{request_id})`, 이 요청이 이긴 claim에서만 메시지 id
+  `dm-answer:<요청 id>`를 `send_dedup`에 예약하고 lane의 boundary 전송(automation, `from_steering`, 큐 없음)을 한 뒤 검증된 전송만
+  영수증으로 받습니다. 결과가 불명확하면(응답 유실, 미검증, 입력창에 남음) 다시 보내지 않고 앱에 `delivery_unknown`을 기록한 뒤
+  `answers/unknown`이 **그 세션을 먼저 일시 정지(AMUX pause)하고 나서** 메시지 id의 영수증을 읽습니다(docs/policy/amux-decision-maker.md §9).
+  일시 정지가 확인되지 않으면 relay가 멈춥니다. **직접 답과 확정 답은 같은 답변 기록을 먼저 써야 보냅니다** — 대시보드의 직접 답(Answer와
+  Approve/Reject)도 보내기 전에 `typed-ask/answer`로 그 카드의 현재 revision을 운영자 이름으로 claim하고, 확정 DM 답이 이미 있으면
+  보내지 않고 운영자에게 알립니다. typed revision이 없는 카드는 claim할 것이 없고 그대로 보냅니다. worker 신원 header가 있는 요청은
+  운영자 claim을 할 수 없습니다. **남은 것(migration 필요, 이 조각에서 멈춤)**: 전달 결정 뒤 claim이 지거나 lane이 그 사이 거부해
+  아무것도 보내지 않은 경우를 앱의 전달 기록이 말할 어휘가 없습니다(영수증도 `unknown`도 사실이 아님). 그 경우 결정만 남고 relay가
+  멈추며, 확인 단계가 그 창을 결정 직전 한 번의 왕복으로 줄입니다. bridge가 결정과 영수증 사이에 죽은 결정은 자동으로 정리하지 않으며,
+  운영자의 직접 답이 먼저일 때 앱 요청을 닫는 것(docs/policy/amux-decision-maker.md §2-7 마지막 문장)도 아직 없습니다.
 
 # AMUX 카드 표시 번호
 

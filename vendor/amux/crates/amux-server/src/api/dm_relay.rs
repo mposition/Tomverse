@@ -25,23 +25,51 @@
 //! takes a request id and an instance, the release a request id, and neither
 //! changes the card.
 //!
-//! WHAT THIS MUST NEVER GROW: an answer route. Claiming the answer record and
-//! sending an operator-confirmed answer to a worker are stage S2-2b3's, with
-//! their own decision about who may call them.
+//! STAGE S2-2b3: DELIVERING AN OPERATOR-CONFIRMED ANSWER
+//! (docs/policy/amux-decision-maker.md §2-7, §7, §9). Three more routes behind
+//! the same token:
+//!
+//! - `POST /api/dm-relay/answers/check` reads whether a confirmed answer could
+//!   be delivered now -- the card still asks that question revision and nobody
+//!   has answered it, and the worker's lane takes automated input at a turn
+//!   boundary. The bridge asks before it records the app's delivery decision,
+//!   so a question the operator already answered is never decided at all.
+//! - `POST /api/dm-relay/answers` delivers one: the same checks again, then
+//!   the answer record's claim for that revision (`dm_ask::claim_answer`, as
+//!   `dm_confirmed` with the app's request id), and only on a claim this
+//!   request won, the message through the lane's own automated send path
+//!   under the message id `dm-answer:<request id>` (the local idempotency key,
+//!   reserved before the send and acknowledged only on a verified delivery),
+//!   and then the same text appended to the card as its record. An answer
+//!   already recorded, by the operator or by this request before, is never
+//!   sent. The bridge calls it once per request and never again, whatever
+//!   came back.
+//! - `POST /api/dm-relay/answers/unknown` is §9 for a delivery whose result
+//!   the bridge does not know: it pauses the worker's session (AMUX pause)
+//!   first, then reads the receipt of the message id. It sends nothing.
+//!
+//! The answer route takes the message text and nothing that is a Decision
+//! Maker result: the bridge reads that text from the app only after a person
+//! confirmed it and sends it only after the app recorded the delivery
+//! decision, and the message's first line must name the card it answers. The
+//! operator's direct answer claims the same record first
+//! (`POST /api/board/{id}/typed-ask/answer`), so whichever comes first is the
+//! one delivered (§12: "직접 답과 확정 답이 함께 와도 하나만 전달된다").
 
 use super::AppState;
+use async_trait::async_trait;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
-use crate::db::dm_ask::{self, PendingRelease, PendingSet};
+use crate::db::dm_ask::{self, AnswerClaim, AnswerSource, PendingRelease, PendingSet};
 
 /// The relay token's SHA-256, lowercase hex.
 pub const TOKEN_DIGEST_ENV: &str = "AMUX_DM_RELAY_TOKEN_SHA256";
@@ -51,6 +79,9 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/pending", get(list_markers).post(set_marker))
         .route("/pending/release", post(release_marker))
+        .route("/answers", post(deliver_answer))
+        .route("/answers/check", post(check_answer))
+        .route("/answers/unknown", post(answer_unknown))
 }
 
 /// At most this many markers per answer. The relay releases what it reads,
@@ -299,6 +330,441 @@ pub(crate) async fn release_marker_with(
         }
         _ => store_failed(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Stage S2-2b3: delivering an operator-confirmed answer
+// ---------------------------------------------------------------------------
+
+/// The local message id of a delivery: the app's `dmDeliveryMessageId()`
+/// (lib/amux/decisionMakerDeliveryCore.ts in the Tomverse repository), one
+/// per request, 46 characters inside the send path's 64.
+pub const ANSWER_MESSAGE_ID_PREFIX: &str = "dm-answer:";
+
+/// The app's `DM_DELIVERY_MESSAGE_MAX_BYTES`: an 8 KiB answer, §7's header
+/// and sentence, with room to spare.
+pub const ANSWER_MESSAGE_MAX_BYTES: usize = 16 * 1024;
+
+/// Who the answer record names as the writer of a confirmed answer: the
+/// bridge relay, which carries a person's confirmation from the app.
+pub const ANSWER_ACTOR: &str = "amux-dm-relay";
+
+/// §7's header opens every message the relay delivers, and names the card.
+const ANSWER_HEADER_PREFIX: &str = "[Decision Maker ";
+
+pub fn answer_message_id(request_id: &str) -> String {
+    format!("{ANSWER_MESSAGE_ID_PREFIX}{request_id}")
+}
+
+/// True when the message is one the relay may deliver to this card: within
+/// the cap, and its first line §7's header naming the card
+/// (`[Decision Maker ... re <card>]`).
+pub fn message_names_card(message: &str, card_id: &str) -> bool {
+    let first = message.split('\n').next().unwrap_or_default();
+    !message.trim().is_empty()
+        && message.len() <= ANSWER_MESSAGE_MAX_BYTES
+        && first.starts_with(ANSWER_HEADER_PREFIX)
+        && first.ends_with(&format!(", re {card_id}]"))
+}
+
+/// What a send through the lane did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaneSend {
+    /// Verified submitted to the worker.
+    Delivered,
+    /// Refused before anything was typed into the lane.
+    Refused,
+    /// Anything else: typed and not submitted, not verified, or queued.
+    Unknown,
+}
+
+/// The send path's own verdict, read the way `send_post` reads it
+/// (`submit_verdict_of`): a refusal types nothing, so only a refusal is
+/// `Refused`, and only a verified or retried submit is `Delivered`.
+pub fn lane_send_verdict(ok: bool, message: &str) -> LaneSend {
+    match (ok, super::session_verbs::submit_verdict_of(message)) {
+        (true, Some("confirmed" | "retried")) => LaneSend::Delivered,
+        (false, None) => LaneSend::Refused,
+        _ => LaneSend::Unknown,
+    }
+}
+
+/// What a delivery needs from the worker's lane. The server's is [`FleetLane`],
+/// the session layer itself; tests give their own.
+#[async_trait]
+pub trait AnswerLane: Send + Sync {
+    /// Whether the lane takes automated input now, and if not, why.
+    async fn deliverable(&self, state: &AppState, session: &str) -> Result<(), &'static str>;
+    /// Reserves the message id before the send; false when it could not be.
+    async fn reserve(&self, state: &AppState, session: &str, message_id: &str) -> bool;
+    async fn send(&self, state: &AppState, session: &str, text: &str) -> LaneSend;
+    /// Records the reservation's receipt once the message was delivered.
+    async fn accept(&self, state: &AppState, session: &str, message_id: &str);
+    /// Releases a reservation whose send typed nothing.
+    async fn forget(&self, state: &AppState, session: &str, message_id: &str);
+    /// AMUX pause (§9); true when the lane is paused.
+    async fn pause(&self, state: &AppState, session: &str) -> bool;
+    /// The message id's receipt: `accepted`, `not_accepted` or `unreadable`.
+    async fn receipt(&self, state: &AppState, session: &str, message_id: &str) -> &'static str;
+}
+
+/// The session layer: the same gates every automated sender meets
+/// (`deliver_automated`), the boundary-only send that refuses rather than
+/// type into a turn, the message id reservation and receipt of `send_post`,
+/// and the worker lifecycle's pause.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FleetLane;
+
+#[async_trait]
+impl AnswerLane for FleetLane {
+    async fn deliverable(&self, state: &AppState, session: &str) -> Result<(), &'static str> {
+        use super::session_verbs as fleet;
+        if !fleet::valid_session_name(session) {
+            return Err("invalid_session");
+        }
+        if !fleet::env_path(session).exists() {
+            return Err("session_missing");
+        }
+        if fleet::lane_is_archived(session) {
+            return Err("archived");
+        }
+        if fleet::lane_is_paused(session) {
+            return Err("paused");
+        }
+        if fleet::session_is_isolated(session) {
+            return Err("isolated");
+        }
+        if !fleet::is_running(session).await {
+            return Err("not_running");
+        }
+        // A permission dialog is never answered by a delivery (§13).
+        if fleet::lane_is_blocked(state, session) {
+            return Err("blocked");
+        }
+        if fleet::steer_delivery_for(state, session, 0.0).await != fleet::SteerDelivery::AtBoundary {
+            return Err("busy");
+        }
+        Ok(())
+    }
+
+    async fn reserve(&self, state: &AppState, session: &str, message_id: &str) -> bool {
+        super::session_verbs::send_dedup_gate(state, session, message_id)
+            .await
+            .is_none()
+    }
+
+    async fn send(&self, state: &AppState, session: &str, text: &str) -> LaneSend {
+        use super::session_verbs as fleet;
+        // The scheduler's boundary send (`deliver_automated`): automation, so
+        // a paused, isolated or blocked lane refuses; from the steering side,
+        // so a turn that started since the check refuses instead of being
+        // typed into; never queued.
+        let mode = fleet::SendMode {
+            defer_if_busy: false,
+            from_steering: true,
+            allow_mid_turn: false,
+            hook_confirmed_idle: false,
+            origin: fleet::SendOrigin::Automation,
+        };
+        let (ok, message) = fleet::send_text_inner(state, session, text, mode).await;
+        lane_send_verdict(ok, &message)
+    }
+
+    async fn accept(&self, state: &AppState, session: &str, message_id: &str) {
+        super::session_verbs::send_dedup_accept(state, session, message_id, message_id).await;
+    }
+
+    async fn forget(&self, state: &AppState, session: &str, message_id: &str) {
+        super::session_verbs::send_dedup_forget(state, session, message_id).await;
+    }
+
+    async fn pause(&self, state: &AppState, session: &str) -> bool {
+        super::workers::pause_worker(State(state.clone()), Path(session.to_string()))
+            .await
+            .status()
+            .is_success()
+    }
+
+    async fn receipt(&self, state: &AppState, session: &str, message_id: &str) -> &'static str {
+        let response = super::session_verbs::send_receipt(state, session, message_id);
+        let status = response.status();
+        let Ok(bytes) = axum::body::to_bytes(response.into_body(), 64 * 1024).await else {
+            return "unreadable";
+        };
+        let accepted = serde_json::from_slice::<Value>(&bytes)
+            .ok()
+            .and_then(|value| value.get("accepted").and_then(Value::as_bool));
+        match (status, accepted) {
+            (StatusCode::OK, Some(true)) => "accepted",
+            (StatusCode::ACCEPTED, Some(false)) => "not_accepted",
+            _ => "unreadable",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnswerCheckBody {
+    card_id: String,
+    question_revision: i64,
+    session: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnswerBody {
+    card_id: String,
+    question_revision: i64,
+    request_id: String,
+    session: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnswerUnknownBody {
+    card_id: String,
+    question_revision: i64,
+    request_id: String,
+    session: String,
+}
+
+fn is_session_name(session: &str) -> bool {
+    !session.trim().is_empty() && session.len() <= 128
+}
+
+/// Whether the card still asks this question revision and nobody answered
+/// it: the answer record's own conditions, read without claiming.
+async fn question_open(state: &AppState, card_id: &str, question_revision: i64) -> Result<(), &'static str> {
+    let card = card_id.to_string();
+    let read = state
+        .store
+        .read_async(move |conn| {
+            if let Some(existing) = dm_ask::answer_for(conn, &card, question_revision)? {
+                return Ok(Err(if existing.source == "operator" { "answered_by_operator" } else { "answered" }));
+            }
+            let current = dm_ask::current_revision(conn, &card)?.map(|revision| revision.question_revision);
+            Ok(if current == Some(question_revision) { Ok(()) } else { Err("question_changed") })
+        })
+        .await;
+    read.unwrap_or(Err("store_unreadable"))
+}
+
+async fn check_answer(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    check_answer_with(&state, &FleetLane, configured_digest().as_deref(), &headers, &body).await
+}
+
+/// `{deliverable: true}`, or `{deliverable: false, reason}`. Reads only.
+pub(crate) async fn check_answer_with<L: AnswerLane>(
+    state: &AppState,
+    lane: &L,
+    configured: Option<&str>,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Response {
+    if let Err(response) = admit(configured, headers) {
+        return response;
+    }
+    let Ok(body) = serde_json::from_slice::<AnswerCheckBody>(body) else {
+        return invalid();
+    };
+    if !is_card_id(&body.card_id) || body.question_revision < 1 || !is_session_name(&body.session) {
+        return invalid();
+    }
+    let verdict = match question_open(state, &body.card_id, body.question_revision).await {
+        Ok(()) => lane.deliverable(state, &body.session).await,
+        Err(reason) => Err(reason),
+    };
+    Json(match verdict {
+        Ok(()) => json!({ "deliverable": true }),
+        Err(reason) => json!({ "deliverable": false, "reason": reason }),
+    })
+    .into_response()
+}
+
+async fn deliver_answer(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    deliver_answer_with(&state, FleetLane, configured_digest().as_deref(), &headers, &body).await
+}
+
+/// One delivery, at most once per request: the checks, the claim, and only
+/// on a claim this request won, the reservation, the send and the card
+/// record. It runs in its own task, so a bridge that gives up mid-delivery
+/// cannot stop it between the claim and the send; the bridge reads a lost
+/// answer as unknown and never calls again. Every answer it gives is a 200
+/// naming what happened; anything else is the bridge's unknown.
+pub(crate) async fn deliver_answer_with<L: AnswerLane + Clone + 'static>(
+    state: &AppState,
+    lane: L,
+    configured: Option<&str>,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Response {
+    if let Err(response) = admit(configured, headers) {
+        return response;
+    }
+    let Ok(body) = serde_json::from_slice::<AnswerBody>(body) else {
+        return invalid();
+    };
+    if !is_card_id(&body.card_id)
+        || body.question_revision < 1
+        || !dm_ask::is_request_id(&body.request_id)
+        || !is_session_name(&body.session)
+        || !message_names_card(&body.message, &body.card_id)
+    {
+        return invalid();
+    }
+    let state = state.clone();
+    let now = now_secs();
+    match tokio::spawn(async move { deliver(&state, &lane, &body, now).await }).await {
+        Ok(answer) => Json(answer).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "dm relay delivery ended without answering" })),
+        )
+            .into_response(),
+    }
+}
+
+async fn deliver<L: AnswerLane>(state: &AppState, lane: &L, body: &AnswerBody, now: i64) -> Value {
+    if let Err(reason) = question_open(state, &body.card_id, body.question_revision).await {
+        return json!({ "outcome": "not_deliverable", "reason": reason });
+    }
+    if let Err(reason) = lane.deliverable(state, &body.session).await {
+        return json!({ "outcome": "not_deliverable", "reason": reason });
+    }
+
+    // The answer record first: whoever claims the revision is the one answer.
+    let slot: Arc<Mutex<Option<AnswerClaim>>> = Arc::new(Mutex::new(None));
+    let out = slot.clone();
+    let (card, revision, request_id) = (body.card_id.clone(), body.question_revision, body.request_id.clone());
+    let written = state
+        .store
+        .write_async(move |conn| {
+            let source = AnswerSource::DmConfirmed { request_id };
+            let claim = dm_ask::claim_answer(conn, &card, revision, &source, ANSWER_ACTOR, now)?;
+            let applied = matches!(claim, AnswerClaim::Claimed(_));
+            *out.lock().expect("dm relay answer slot") = Some(claim);
+            Ok(crate::db::WriteOutcome { applied, events: vec![] })
+        })
+        .await;
+    let claim = slot.lock().expect("dm relay answer slot").take();
+    match (written, claim) {
+        (Ok(_), Some(AnswerClaim::Claimed(_))) => {}
+        (Ok(_), Some(AnswerClaim::AlreadyAnswered(existing))) => {
+            return json!({
+                "outcome": "answered",
+                "source": existing.source,
+                "same_request": existing.request_id.as_deref() == Some(body.request_id.as_str()),
+            });
+        }
+        (Ok(_), Some(AnswerClaim::Refused(reason))) => {
+            return json!({ "outcome": "claim_refused", "reason": reason });
+        }
+        // The writer's transaction rolled back: no claim, and nothing sent.
+        _ => return json!({ "outcome": "not_sent", "reason": "claim_store_failed" }),
+    }
+    tracing::info!(
+        target: "amux::dm_relay",
+        card = %body.card_id,
+        question_revision = body.question_revision,
+        request = %body.request_id,
+        verdict = "dm_answer_claimed",
+        "a confirmed Decision Maker answer claimed its question revision; sending it"
+    );
+
+    let message_id = answer_message_id(&body.request_id);
+    if !lane.reserve(state, &body.session, &message_id).await {
+        // Reserved before, or not at all: either way the send is not this call's to make.
+        return json!({ "outcome": "unknown", "stage": "reservation" });
+    }
+    match lane.send(state, &body.session, &body.message).await {
+        LaneSend::Delivered => {
+            lane.accept(state, &body.session, &message_id).await;
+            let card_recorded = record_on_card(state, &body.card_id, &body.message).await;
+            json!({ "outcome": "delivered", "message_id": message_id, "card_recorded": card_recorded })
+        }
+        LaneSend::Refused => {
+            lane.forget(state, &body.session, &message_id).await;
+            json!({ "outcome": "not_sent", "reason": "send_refused" })
+        }
+        LaneSend::Unknown => json!({ "outcome": "unknown", "stage": "send" }),
+    }
+}
+
+/// §7: "카드 기록도 같은 표시를 쓴다" -- the card's record is the delivered text,
+/// appended as the operator's direct answer is. The PATCH carries no session
+/// header, so it notifies nobody.
+async fn record_on_card(state: &AppState, card_id: &str, message: &str) -> bool {
+    super::board::patch_item(
+        State(state.clone()),
+        Path(card_id.to_string()),
+        HeaderMap::new(),
+        Json(json!({ "desc_append": format!("`answered` {message}") })),
+    )
+    .await
+    .status()
+    .is_success()
+}
+
+async fn answer_unknown(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    answer_unknown_with(&state, &FleetLane, configured_digest().as_deref(), &headers, &body).await
+}
+
+/// §9: a delivery whose result is unknown is never sent again. The worker's
+/// session is paused first ("그 worker 세션을 일시 정지(AMUX pause)한 뒤"), then
+/// the receipt of the message id is read, and what the answer record holds for
+/// the revision. Sends nothing; a person resumes the session.
+pub(crate) async fn answer_unknown_with<L: AnswerLane>(
+    state: &AppState,
+    lane: &L,
+    configured: Option<&str>,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Response {
+    if let Err(response) = admit(configured, headers) {
+        return response;
+    }
+    let Ok(body) = serde_json::from_slice::<AnswerUnknownBody>(body) else {
+        return invalid();
+    };
+    if !is_card_id(&body.card_id)
+        || body.question_revision < 1
+        || !dm_ask::is_request_id(&body.request_id)
+        || !is_session_name(&body.session)
+    {
+        return invalid();
+    }
+    let paused = lane.pause(state, &body.session).await;
+    let receipt = lane.receipt(state, &body.session, &answer_message_id(&body.request_id)).await;
+    let card = body.card_id.clone();
+    let revision = body.question_revision;
+    let answer = state
+        .store
+        .read_async(move |conn| Ok(dm_ask::answer_for(conn, &card, revision)?))
+        .await
+        .ok()
+        .flatten();
+    let claimed = answer
+        .as_ref()
+        .is_some_and(|record| record.request_id.as_deref() == Some(body.request_id.as_str()));
+    tracing::warn!(
+        target: "amux::dm_relay",
+        card = %body.card_id,
+        question_revision = body.question_revision,
+        request = %body.request_id,
+        paused,
+        receipt,
+        claimed,
+        verdict = "dm_answer_delivery_unknown",
+        "a confirmed Decision Maker answer's delivery is unknown; the session is paused and the operator decides"
+    );
+    Json(json!({
+        "paused": paused,
+        "receipt": receipt,
+        "claimed_by_request": claimed,
+        "answer_source": answer.map(|record| record.source),
+    }))
+    .into_response()
 }
 
 #[cfg(test)]
@@ -740,5 +1206,380 @@ mod tests {
         )
         .await;
         assert_eq!(answer["reason"], "unknown_instance");
+    }
+
+    // -----------------------------------------------------------------------
+    // Stage S2-2b3: delivering an operator-confirmed answer
+    // -----------------------------------------------------------------------
+
+    /// A lane whose answers are set by the test, recording every call.
+    #[derive(Clone)]
+    struct FakeLane {
+        deliverable: Result<(), &'static str>,
+        reserve: bool,
+        send: LaneSend,
+        paused: bool,
+        receipt: &'static str,
+        /// The operator's direct answer, claimed while the lane is checked:
+        /// the race between the delivery's read and its claim.
+        operator_answers_during_check: Option<(String, i64)>,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl FakeLane {
+        fn ready() -> Self {
+            Self {
+                deliverable: Ok(()),
+                reserve: true,
+                send: LaneSend::Delivered,
+                paused: true,
+                receipt: "not_accepted",
+                operator_answers_during_check: None,
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        fn sends(&self) -> usize {
+            self.calls().iter().filter(|call| call.starts_with("send")).count()
+        }
+    }
+
+    #[async_trait]
+    impl AnswerLane for FakeLane {
+        async fn deliverable(&self, state: &AppState, _session: &str) -> Result<(), &'static str> {
+            self.calls.lock().unwrap().push("deliverable".into());
+            if let Some((card, revision)) = self.operator_answers_during_check.clone() {
+                state
+                    .store
+                    .write_async(move |conn| {
+                        dm_ask::claim_answer(conn, &card, revision, &AnswerSource::Operator, "Ethan", 1)?;
+                        Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+                    })
+                    .await
+                    .unwrap();
+            }
+            self.deliverable
+        }
+        async fn reserve(&self, _state: &AppState, _session: &str, message_id: &str) -> bool {
+            self.calls.lock().unwrap().push(format!("reserve {message_id}"));
+            self.reserve
+        }
+        async fn send(&self, _state: &AppState, session: &str, text: &str) -> LaneSend {
+            self.calls.lock().unwrap().push(format!("send {session} {text}"));
+            self.send
+        }
+        async fn accept(&self, _state: &AppState, _session: &str, message_id: &str) {
+            self.calls.lock().unwrap().push(format!("accept {message_id}"));
+        }
+        async fn forget(&self, _state: &AppState, _session: &str, message_id: &str) {
+            self.calls.lock().unwrap().push(format!("forget {message_id}"));
+        }
+        async fn pause(&self, _state: &AppState, session: &str) -> bool {
+            self.calls.lock().unwrap().push(format!("pause {session}"));
+            self.paused
+        }
+        async fn receipt(&self, _state: &AppState, _session: &str, message_id: &str) -> &'static str {
+            self.calls.lock().unwrap().push(format!("receipt {message_id}"));
+            self.receipt
+        }
+    }
+
+    const SESSION: &str = "claude-impl";
+
+    fn message_for(card: &str) -> String {
+        format!(
+            "[Decision Maker decision-maker-openai (GPT-6 Astra) 제안, operator-confirmed, re {card}]\n선택지: sqlite\n\n승인 계약의 승인이 아니다. 사람 승인이 필요한 게이트는 따로 요청한다."
+        )
+    }
+
+    fn check_body(card: &str, revision: i64) -> Vec<u8> {
+        json!({"card_id": card, "question_revision": revision, "session": SESSION})
+            .to_string()
+            .into_bytes()
+    }
+
+    fn answer_body(card: &str, revision: i64, request: &str, message: &str) -> Vec<u8> {
+        json!({"card_id": card, "question_revision": revision, "request_id": request,
+            "session": SESSION, "message": message})
+        .to_string()
+        .into_bytes()
+    }
+
+    fn unknown_body(card: &str, revision: i64, request: &str) -> Vec<u8> {
+        json!({"card_id": card, "question_revision": revision, "request_id": request, "session": SESSION})
+            .to_string()
+            .into_bytes()
+    }
+
+    #[tokio::test]
+    async fn the_answer_routes_are_closed_without_the_relay_token() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let card = asking_card(&app).await;
+        let lane = FakeLane::ready();
+        let digest = digest();
+        for (configured, headers, reason) in [
+            (None, token_headers(TOKEN), "dm_relay_not_configured"),
+            (Some(digest.as_str()), HeaderMap::new(), "dm_relay_token_missing"),
+            (Some(digest.as_str()), token_headers("not-the-relay-token"), "dm_relay_token_refused"),
+        ] {
+            for response in [
+                check_answer_with(&state, &lane, configured, &headers, &check_body(&card, 1)).await,
+                deliver_answer_with(&state, lane.clone(), configured, &headers, &answer_body(&card, 1, REQUEST, &message_for(&card))).await,
+                answer_unknown_with(&state, &lane, configured, &headers, &unknown_body(&card, 1, REQUEST)).await,
+            ] {
+                let (status, body) = json_of(response).await;
+                assert_eq!((status, body["reason"].as_str()), (StatusCode::FORBIDDEN, Some(reason)));
+            }
+        }
+        assert!(lane.calls().is_empty(), "a refused call reaches no lane");
+        let (_, typed) = call(&app, "GET", &format!("/api/board/{card}/typed-ask"), None).await;
+        assert!(typed["answer"].is_null(), "{typed}");
+    }
+
+    #[tokio::test]
+    async fn a_confirmed_answer_is_claimed_then_sent_once_and_recorded_on_the_card() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let card = asking_card(&app).await;
+        let digest = digest();
+        let headers = token_headers(TOKEN);
+        let lane = FakeLane::ready();
+
+        let (_, check) = json_of(check_answer_with(&state, &lane, Some(&digest), &headers, &check_body(&card, 1)).await).await;
+        assert_eq!(check, json!({"deliverable": true}));
+
+        let message = message_for(&card);
+        let (status, delivered) = json_of(
+            deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message)).await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{delivered}");
+        assert_eq!(delivered["outcome"], "delivered", "{delivered}");
+        assert_eq!(delivered["message_id"], format!("dm-answer:{REQUEST}"));
+        assert_eq!(delivered["card_recorded"], true);
+        let message_id = answer_message_id(REQUEST);
+        assert_eq!(
+            lane.calls(),
+            vec![
+                "deliverable".to_string(),
+                "deliverable".to_string(),
+                format!("reserve {message_id}"),
+                format!("send {SESSION} {message}"),
+                format!("accept {message_id}"),
+            ]
+        );
+        // The record names this request; the card carries the same text.
+        let (_, typed) = call(&app, "GET", &format!("/api/board/{card}/typed-ask"), None).await;
+        assert_eq!(typed["answer"]["source"], "dm_confirmed", "{typed}");
+        assert_eq!(typed["answer"]["request_id"], REQUEST);
+        assert_eq!(typed["answer"]["actor"], ANSWER_ACTOR);
+        let (_, detail) = call(&app, "GET", &format!("/api/board/{card}"), None).await;
+        assert!(
+            detail["desc"].as_str().unwrap_or("").contains(&format!("`answered` {message}")),
+            "{detail}"
+        );
+
+        // Never twice: the same request again, and another request, send nothing.
+        for request in [REQUEST, OTHER_REQUEST] {
+            let (_, again) = json_of(
+                deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, request, &message)).await,
+            )
+            .await;
+            assert_eq!(again, json!({"outcome": "not_deliverable", "reason": "answered"}));
+        }
+        assert_eq!(lane.sends(), 1);
+        let (_, check) = json_of(check_answer_with(&state, &lane, Some(&digest), &headers, &check_body(&card, 1)).await).await;
+        assert_eq!(check, json!({"deliverable": false, "reason": "answered"}));
+    }
+
+    /// §12: "직접 답과 확정 답이 함께 와도 하나만 전달된다", both orders, on the
+    /// route the bridge calls: the operator's answer first -- before the
+    /// delivery reads the card, or between its read and its claim -- and the
+    /// confirmed answer is never sent.
+    #[tokio::test]
+    async fn a_direct_answer_first_stops_the_confirmed_one_whenever_it_lands() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let digest = digest();
+        let headers = token_headers(TOKEN);
+
+        // Before the delivery reads the card.
+        let card = asking_card(&app).await;
+        let claimed = card.clone();
+        state
+            .store
+            .write(move |conn| {
+                dm_ask::claim_answer(conn, &claimed, 1, &AnswerSource::Operator, "Ethan", 1)?;
+                Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+            })
+            .unwrap();
+        let lane = FakeLane::ready();
+        let (_, refused) = json_of(
+            deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message_for(&card))).await,
+        )
+        .await;
+        assert_eq!(refused, json!({"outcome": "not_deliverable", "reason": "answered_by_operator"}));
+        assert_eq!(lane.sends(), 0);
+
+        // Between the delivery's read and its claim: the claim loses.
+        let card = asking_card(&app).await;
+        let mut lane = FakeLane::ready();
+        lane.operator_answers_during_check = Some((card.clone(), 1));
+        let (_, lost) = json_of(
+            deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message_for(&card))).await,
+        )
+        .await;
+        assert_eq!(lost, json!({"outcome": "answered", "source": "operator", "same_request": false}));
+        assert_eq!(lane.sends(), 0);
+        assert_eq!(lane.calls(), vec!["deliverable".to_string()]);
+        let (_, typed) = call(&app, "GET", &format!("/api/board/{card}/typed-ask"), None).await;
+        assert_eq!(typed["answer"]["source"], "operator", "{typed}");
+    }
+
+    #[tokio::test]
+    async fn a_send_that_typed_nothing_releases_its_reservation_and_an_unknown_one_keeps_it() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let digest = digest();
+        let headers = token_headers(TOKEN);
+        let message_id = answer_message_id(REQUEST);
+        for (send, outcome, last) in [
+            (LaneSend::Refused, json!({"outcome": "not_sent", "reason": "send_refused"}), Some(format!("forget {message_id}"))),
+            (LaneSend::Unknown, json!({"outcome": "unknown", "stage": "send"}), None),
+        ] {
+            let card = asking_card(&app).await;
+            let mut lane = FakeLane::ready();
+            lane.send = send;
+            let (_, answer) = json_of(
+                deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message_for(&card))).await,
+            )
+            .await;
+            assert_eq!(answer, outcome);
+            let calls = lane.calls();
+            assert!(calls.last().unwrap().starts_with(match &last {
+                Some(last) => last.as_str(),
+                None => "send",
+            }), "{calls:?}");
+            assert!(!calls.iter().any(|call| call.starts_with("accept")), "{calls:?}");
+            // Either way the revision is answered: the claim came first and is never undone.
+            let (_, typed) = call(&app, "GET", &format!("/api/board/{card}/typed-ask"), None).await;
+            assert_eq!(typed["answer"]["source"], "dm_confirmed", "{typed}");
+            let (_, detail) = call(&app, "GET", &format!("/api/board/{card}"), None).await;
+            assert!(!detail["desc"].as_str().unwrap_or("").contains("[Decision Maker"), "no card record without a delivery");
+        }
+        // A reservation that already existed is not this call's to send.
+        let card = asking_card(&app).await;
+        let mut lane = FakeLane::ready();
+        lane.reserve = false;
+        let (_, answer) = json_of(
+            deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message_for(&card))).await,
+        )
+        .await;
+        assert_eq!(answer, json!({"outcome": "unknown", "stage": "reservation"}));
+        assert_eq!(lane.sends(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_lane_that_cannot_take_input_or_a_changed_question_claims_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let digest = digest();
+        let headers = token_headers(TOKEN);
+        let card = asking_card(&app).await;
+        let mut lane = FakeLane::ready();
+        lane.deliverable = Err("busy");
+        let (_, check) = json_of(check_answer_with(&state, &lane, Some(&digest), &headers, &check_body(&card, 1)).await).await;
+        assert_eq!(check, json!({"deliverable": false, "reason": "busy"}));
+        let (_, answer) = json_of(
+            deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message_for(&card))).await,
+        )
+        .await;
+        assert_eq!(answer, json!({"outcome": "not_deliverable", "reason": "busy"}));
+        // A revision the card no longer asks is changed, whatever the lane says.
+        let (_, stale) = json_of(check_answer_with(&state, &FakeLane::ready(), Some(&digest), &headers, &check_body(&card, 2)).await).await;
+        assert_eq!(stale, json!({"deliverable": false, "reason": "question_changed"}));
+        let (_, typed) = call(&app, "GET", &format!("/api/board/{card}/typed-ask"), None).await;
+        assert!(typed["answer"].is_null(), "{typed}");
+        assert_eq!(lane.sends(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_message_that_does_not_name_its_card_never_reaches_the_lane() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let digest = digest();
+        let headers = token_headers(TOKEN);
+        let card = asking_card(&app).await;
+        let lane = FakeLane::ready();
+        for message in [
+            message_for("AMUX-OTHER"),
+            "sqlite".to_string(),
+            String::new(),
+            format!("{}\n{}", message_for(&card), "x".repeat(ANSWER_MESSAGE_MAX_BYTES)),
+        ] {
+            let (status, _) = json_of(
+                deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message)).await,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+        }
+        // Nothing else rides along: no result, no output field.
+        let with_output = json!({"card_id": card, "question_revision": 1, "request_id": REQUEST,
+            "session": SESSION, "message": message_for(&card), "output": "select sqlite"})
+        .to_string();
+        let (status, _) = json_of(deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, with_output.as_bytes()).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(lane.calls().is_empty());
+        assert!(message_names_card(&message_for(&card), &card));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_delivery_pauses_the_session_before_reading_the_receipt_and_sends_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let digest = digest();
+        let headers = token_headers(TOKEN);
+        let card = asking_card(&app).await;
+        let mut lane = FakeLane::ready();
+        lane.send = LaneSend::Unknown;
+        deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message_for(&card))).await;
+        let after_delivery = lane.calls().len();
+        let (_, unknown) = json_of(
+            answer_unknown_with(&state, &lane, Some(&digest), &headers, &unknown_body(&card, 1, REQUEST)).await,
+        )
+        .await;
+        assert_eq!(
+            unknown,
+            json!({"paused": true, "receipt": "not_accepted", "claimed_by_request": true, "answer_source": "dm_confirmed"})
+        );
+        assert_eq!(
+            lane.calls()[after_delivery..].to_vec(),
+            vec![format!("pause {SESSION}"), format!("receipt {}", answer_message_id(REQUEST))]
+        );
+        assert_eq!(lane.sends(), 1, "the unknown route sends nothing");
+    }
+
+    #[test]
+    fn the_send_paths_own_verdict_decides_delivered_refused_or_unknown() {
+        assert_eq!(lane_send_verdict(true, "sent"), LaneSend::Delivered);
+        assert_eq!(lane_send_verdict(true, "sent (Enter landed on retry)"), LaneSend::Delivered);
+        assert_eq!(lane_send_verdict(false, "session at a selector — retry at next idle boundary"), LaneSend::Refused);
+        assert_eq!(lane_send_verdict(false, "target is paused: amux automation is not delivered into a paused worker."), LaneSend::Refused);
+        assert_eq!(lane_send_verdict(false, "not submitted — the text is in the composer"), LaneSend::Unknown);
+        assert_eq!(lane_send_verdict(true, "sent but could not be verified"), LaneSend::Unknown);
+        assert_eq!(lane_send_verdict(true, "queued (steering) — delivers later"), LaneSend::Unknown);
+        assert_eq!(answer_message_id(REQUEST).len(), 46);
     }
 }

@@ -443,6 +443,30 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
+  // Stage S2-2b3's delivery routes for the bridge (app/api/internal/amux/
+  // decision-maker/deliveries/**). The read of the next confirmed answer:
+  // setup + the switches, the confirmation, the request state, the result
+  // detail and the bodies (5, lib/amux/decisionMakerDeliveryRead.ts) + fence,
+  // one REPEATABLE READ snapshot. The decision (lock, delivery read, the
+  // switches, the router's audit 4, the event: 8) and the receipt or unknown
+  // outcome (lock, delivery read, the router's audit 4, the event: 7), each +
+  // setup + fence. All pinned by tests/amuxDecisionMakerDelivery.test.mjs,
+  // within docs/policy/amux-decision-maker.md §9's 12.
+  decisionMakerDeliveryCandidateRead: {
+    operation: "decision_maker_delivery_candidate_read",
+    prismaCallCeiling: 7,
+    isolation: "read",
+  },
+  decisionMakerDeliveryDecision: {
+    operation: "decision_maker_delivery_decision",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  decisionMakerDeliveryOutcome: {
+    operation: "decision_maker_delivery_outcome",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment
   // tallies + the proposal timeline with the database clock + fence, pinned
   // by tests/amuxDecisionMakerJudgment.test.mjs.
