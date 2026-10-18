@@ -10,8 +10,12 @@ import { readAmuxSessionCheckoutReference } from
   "@/lib/amux/ideaSessionCheckoutReferenceRead";
 import { AMUX_SESSION_INTAKE_ENV } from
   "@/lib/amux/ideaSessionSubmissionCore";
+import { AMUX_V19_MAX_LAUNCHER_SECRET_ENV,
+  isAmuxV19MaxLauncherAuthorized } from
+  "@/lib/amux/ideaSessionMaxLauncherAuth";
 
 const READ_ENV = "TOMVERSE_AMUX_V19_CHECKOUT_REFERENCE_READ";
+const MAX_READ_ENV = "TOMVERSE_AMUX_V19_MAX_CHECKOUT_REFERENCE_READ";
 const QUEUE_READ_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ";
 const PIN_READ_ENV = "TOMVERSE_AMUX_V19_REFERENCE_PIN_READ";
 const bodySchema = z.object({ reservationId: z.string().uuid(),
@@ -21,12 +25,17 @@ const bodySchema = z.object({ reservationId: z.string().uuid(),
 /** Agent-only lookup after a budget claim. It returns one sealed intake
  * reference's repository identity and canonical pin; no idea body or path. */
 export async function POST(request: Request): Promise<Response> {
-  if (!isAmuxV4AnalysisAgentAuthorized(request,
+  const maxAuthorized = isAmuxV19MaxLauncherAuthorized(request,
+    process.env[AMUX_V19_MAX_LAUNCHER_SECRET_ENV],
+    process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
+    process.env.TOMVERSE_AMUX_SYNC_SECRET);
+  if (!maxAuthorized && !isAmuxV4AnalysisAgentAuthorized(request,
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
     process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
   if (process.env[READ_ENV] !== "enabled" ||
+      (maxAuthorized && process.env[MAX_READ_ENV] !== "enabled") ||
       process.env[QUEUE_READ_ENV] !== "enabled" ||
       process.env[PIN_READ_ENV] !== "enabled" ||
       process.env[AMUX_SESSION_INTAKE_ENV] !== "enabled" ||
@@ -42,7 +51,8 @@ export async function POST(request: Request): Promise<Response> {
   try { body = await readLimitedJson(request, 1_024, bodySchema); }
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
   try {
-    const reference = await readAmuxSessionCheckoutReference(body);
+    const reference = await readAmuxSessionCheckoutReference({ ...body,
+      ...(maxAuthorized ? { requiredBudgetMode: "max_shadow" as const } : {}) });
     return reference ? amuxJsonNoStore(reference) :
       amuxJsonNoStore({ error: "not_ready" }, 409);
   } catch {
