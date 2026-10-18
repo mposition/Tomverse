@@ -6,7 +6,7 @@ import { mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 
 const moduleUrl = (path) => pathToFileURL(resolve(import.meta.dirname,
-  "..", path)).href;
+  "..", "..", path)).href;
 let hostInput;
 mock.module(moduleUrl("lib/amux/ideaTrackedCheckoutHostRunner.mjs"), {
   namedExports: {

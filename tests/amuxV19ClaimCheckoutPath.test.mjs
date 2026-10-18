@@ -20,13 +20,18 @@ test("only a claim repository under the configured root selects checkout bytes",
     try {
       await symlink(outside, join(root, "owner", "escape"),
         process.platform === "win32" ? "junction" : "dir");
+      await symlink(selected, join(root, "owner", "alias"),
+        process.platform === "win32" ? "junction" : "dir");
       process.env[AMUX_V19_TRACKED_REPOSITORY_ROOT_ENV] = root;
       assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/escape"), null);
+      assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/alias"), null);
     } catch (error) {
       if (!["EPERM", "EACCES"].includes(error?.code)) throw error;
     }
     process.env[AMUX_V19_TRACKED_REPOSITORY_ROOT_ENV] = root;
     assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/repo"),
+      await realpath(selected));
+    assert.equal(await resolveAmuxV19ClaimCheckoutPath("OWNER/REPO"),
       await realpath(selected));
     for (const slug of ["owner/..", "../repo", "owner/missing",
       "owner/repo/extra", "owner\\repo"]) {
