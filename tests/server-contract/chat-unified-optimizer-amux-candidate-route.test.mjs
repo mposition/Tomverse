@@ -13,6 +13,7 @@ let authorized = false;
 let calls = 0;
 let recordOutcome = "recorded";
 let cycle = null;
+let readbackQuery = null;
 let eligible = true;
 let target = true;
 let sourcePinAvailable = true;
@@ -48,7 +49,10 @@ mock.module(mod("lib/chatUnifiedOptimizerAmuxCandidateStore.ts"), {
   },
 });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
-  chatUnifiedOptimizerCycle: { findUnique: async () => cycle },
+  chatUnifiedOptimizerCycle: { findUnique: async query => {
+    readbackQuery = query;
+    return cycle;
+  } },
 } } });
 mock.module(mod("lib/chatUnifiedOptimizerAmuxSourcePin.ts"), {
   namedExports: { readChatUnifiedOptimizerAmuxSourcePin: () => {
@@ -174,6 +178,8 @@ test("readback exposes only content-free candidate and author-job state", async 
     "https://tomverse.test/api/internal/chat-optimization/amux-candidate" +
     "?attemptId=33333333-3333-4333-8333-333333333333"));
   assert.equal(response.status, 200);
+  assert.equal(readbackQuery.select.runs.select.jobs.where.role,
+    "candidate_author");
   const body = await response.json();
   assert.equal(body.status, "recorded");
   assert.equal(body.resultSha256, "c".repeat(64));

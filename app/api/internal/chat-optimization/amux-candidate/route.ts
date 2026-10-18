@@ -39,6 +39,7 @@ export async function GET(request: Request): Promise<Response> {
           sourceCommitSha: true, sourceRepositoryId: true,
           sourceBlobSha: true, sourceSha256: true } },
         runs: { select: { id: true, ordinal: true, jobs: {
+          where: { role: "candidate_author" },
           select: { id: true, role: true, state: true, terminalOutcome: true,
             claimRequestId: true, claimRequestDigest: true,
             claimToken: true, terminalRequestId: true,
