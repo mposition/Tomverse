@@ -1920,6 +1920,24 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   unit을 enable·start하지 않고, CLI는 `--version`만(nobody, 네트워크 없는 namespace, 빈
   환경) 실행하며, 앱의 `TOMVERSE_AMUX_DM_ROUTING`은 그대로 꺼져 있습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
   없습니다.
+- **S2-2b1(선택지별 효과 등급·경로와 정책 버전 2)**: `lib/amux/decisionMakerCore.ts`의 `DmCardOption`·`DM_EFFECT_CLASSES`·
+  `DM_CHANGE_EFFECT_CLASSES`·`DM_CHANGE_PATHS_MIN`/`DM_CHANGE_PATHS_MAX`·`dmOptionEffectWellFormed()`·카드 텍스트 형식
+  `amux-dm-card-text-v2`·`DM_POLICY_VERSION`, request core의 `parseDmCard()`, `tests/amuxDecisionMakerCardFields.test.mjs`.
+  카드의 선택지는 `{ id, label, effect, paths }`입니다(docs/policy/amux-decision-maker.md §4, §5). **이름은 앱의 camelCase이고,
+  로컬 AMUX가 저장하는 snake_case(`context_paths`)는 bridge relay(S2-2b2)가 바꿉니다** — 선택지의 네 키는 양쪽이 같은 단어입니다.
+  효과 등급은 정책 표의 여섯이고 변경 등급(`branch_code_change`·`docs_change`·`test_change`)만 경로 1~50개를 갖습니다. **로컬
+  AMUX는 선언을 거절하지 않고 없거나 틀린 선언을 `other`·경로 없음으로 기록하므로**(`dm_ask.rs`의 `recorded_effect`), 앱에 오는
+  선택지는 언제나 그 기록 형식입니다. 라우터는 등급으로 라우팅하지 않고(docs/policy/amux-decision-maker.md §4, 버전 2도 같음)
+  그 형식 밖의 선택지만 `input_limit_exceeded`로 운영자에게 보내며 `other`로 고쳐 쓰지 않습니다 — 본문 저장소의 카드 텍스트가
+  라우터가 판정한 카드여야 하기 때문입니다. 선택지의 경로는 맥락 경로와 같은 경로 문법을 따르고, 카드 secret 검사와 16 KiB 카드
+  텍스트에 들어가며, 용어 목록의 입력은 아닙니다(맥락 경로도 아님). 테스트가 로컬 `dm_ask.rs`의 목록·상한과 정책의 효과 등급 표를
+  직접 읽어 대조하므로 한쪽만 바꾸면 실패합니다. **결과 제출의 선택지는 계속 `{ id, label }`이고 선택지 집합 digest도 그 둘만
+  묶습니다** — 등급·경로가 바뀌면 로컬 AMUX에서 새 질문 revision, 곧 새 요청입니다. 카드 텍스트 v1(선택지 `{ id, label }`)은 읽지
+  않습니다. 그것을 쓰는 경로는 처음부터 `TOMVERSE_AMUX_DM_ROUTING`으로 닫힌 라우팅 route 하나였고, 읽지 못한 텍스트는 Admin에
+  카드가 아니라 unreadable로 보입니다. **`DM_POLICY_VERSION`은 2입니다**(2026-10-17 승인) — 새 요청 행이 그 값을 결속 값으로 남기고,
+  결과는 상수가 아니라 행에 저장된 값과 대조하므로 이전 행은 자기 버전으로 결속됩니다. bridge relay는 결과 결속에 저장된 값을
+  보내야 합니다. 요청 행의 CHECK는 `>= 1`이라 migration이 없습니다. 용어 목록·비밀 경로 목록·경로 문법·출력 상한은 바뀌지
+  않았습니다. Admin 화면의 등급·경로 표시와 docs/policy/amux-decision-maker.md §4의 경로별 분류 기록은 없습니다.
 
 # AMUX 카드 표시 번호
 

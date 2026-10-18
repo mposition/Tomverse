@@ -16,6 +16,7 @@ import {
   type DmEventRefusal,
 } from "@/lib/amux/decisionMakerRequestCore";
 import { dmKeyPeriodOf } from "@/lib/amux/decisionMakerBodyCore";
+import { DM_POLICY_VERSION } from "@/lib/amux/decisionMakerCore";
 import { dmSwitchRoutingInput } from "@/lib/amux/decisionMakerSwitchCore";
 import {
   latchDecisionMakerInstanceOff,
@@ -405,8 +406,8 @@ const CARD = {
   title: "Pick a cache key layout",
   question: "Should the cache key include the locale or only the model id?",
   options: [
-    { id: "a", label: "Model id only" },
-    { id: "b", label: "Model id and locale" },
+    { id: "a", label: "Model id only", effect: "choice_only", paths: [] },
+    { id: "b", label: "Model id and locale", effect: "branch_code_change", paths: ["lib/cache.ts"] },
   ],
   unblocks: "The cache module can be finished.",
   context: "Both layouts pass the current tests.",
@@ -1074,7 +1075,7 @@ test("through the AMUX boundary, the store's result commits on time and its dead
         instance: OPENAI,
         resultKind: "proposal",
         resultDigest: DIGEST_C,
-        binding: { ...requestBinding, policyVersion: 1, transmission },
+        binding: { ...requestBinding, policyVersion: DM_POLICY_VERSION, transmission },
       },
     }),
   );
@@ -1122,7 +1123,7 @@ test("a request has one terminal result; its pair returns it, another digest is 
           instance: OPENAI,
           resultKind: "proposal",
           resultDigest,
-          binding: { ...requestBinding, policyVersion: 1, transmission, ...overrides },
+          binding: { ...requestBinding, policyVersion: DM_POLICY_VERSION, transmission, ...overrides },
         },
       }),
     );
@@ -1203,7 +1204,7 @@ test("an unknown result hands the request to the operator; no later result is ac
         instance: ANTHROPIC,
         resultKind: "proposal",
         resultDigest: DIGEST_C,
-        binding: { ...requestBinding, policyVersion: 1, transmission },
+        binding: { ...requestBinding, policyVersion: DM_POLICY_VERSION, transmission },
       },
     }),
   );

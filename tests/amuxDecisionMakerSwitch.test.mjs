@@ -237,8 +237,8 @@ test("the router reads the state fail-closed: unreadable and default both reach 
     title: "Pick a cache key layout",
     question: "Should the cache key include the locale or only the model id?",
     options: [
-      { id: "a", label: "Model id only" },
-      { id: "b", label: "Model id and locale" },
+      { id: "a", label: "Model id only", effect: "choice_only", paths: [] },
+      { id: "b", label: "Model id and locale", effect: "choice_only", paths: [] },
     ],
     unblocks: "The cache module can be finished.",
     context: "Both layouts pass the current tests.",
