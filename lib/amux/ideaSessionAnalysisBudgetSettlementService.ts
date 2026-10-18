@@ -28,6 +28,7 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
   outcome: "verified_success" | "invocation_failed" | "outcome_unknown";
   inputTokens: number | null;
   outputTokens: number | null;
+  requiredBudgetMode?: "bounded" | "max_shadow";
   exactAgentClaim?: { requestId: string; reservationId: string;
     ideaId: string; invocationOrdinal: number };
 }): Promise<{ claimId: string; status: "succeeded" | "failed" |
@@ -60,6 +61,8 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
     } }, ideaId: true } } },
   });
   if (!claim || claim.namespace !== AMUX_V4_ANALYSIS_NAMESPACE ||
+      (input.requiredBudgetMode &&
+        claim.budgetMode !== input.requiredBudgetMode) ||
       claim.status !== "in_flight" || claim.closedAt !== null ||
       claim.resolutionAuditLogId !== null ||
       (input.exactAgentClaim &&

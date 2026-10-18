@@ -61,6 +61,10 @@ import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
   "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
 import { GET as readMaxClaimRoute, POST as postMaxClaimRoute } from
   "@/app/api/internal/amux/v19/analysis-budget/claim/route";
+import { POST as postMaxResultRoute } from
+  "@/app/api/internal/amux/v19/analysis-budget/max-result/route";
+import { POST as postMaxUnknownRoute } from
+  "@/app/api/internal/amux/v19/analysis-budget/unknown/route";
 import { AMUX_V19_MAX_LAUNCHER_ID } from
   "@/lib/amux/ideaSessionMaxLauncherAuth";
 import { signAmuxV19MaxClaimAttestation } from
@@ -1649,12 +1653,36 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   const before = await prisma.$transaction((tx) => readAnalysisBudgetSnapshot(tx));
   assert.equal(BigInt(before.spentMicroUsd) + BigInt(before.reservedMicroUsd),
     BigInt(before.limitMicroUsd));
-  const outcome = await prisma.$transaction((tx) => commitAmuxSessionBudgetOutcome(tx, {
-    claimId: claim.claimId, outcome: "verified_success",
-    inputTokens: 1001, outputTokens: 1,
-    exactAgentClaim: { requestId: claim.requestId,
-      reservationId: claim.reservationId, ideaId, invocationOrdinal: 0 },
-  }));
+  const resultEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
+    "TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE",
+    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
+    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ"] as const;
+  const resultOldEnv = Object.fromEntries(resultEnv.map((name) =>
+    [name, process.env[name]]));
+  let outcome!: { status: string; settledMicroUsd: string };
+  try {
+    process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
+    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE = "enabled";
+    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
+    process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
+    const response = await postMaxResultRoute(new Request(
+      "https://test.invalid/api/internal/amux/v19/analysis-budget/max-result", {
+        method: "POST", headers: { authorization: `Bearer ${launcherSecret}`,
+          "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID,
+          "content-type": "application/json" },
+        body: JSON.stringify({ claimId: claim.claimId,
+          requestId: claim.requestId, reservationId: claim.reservationId,
+          ideaId, invocationOrdinal: 0, outcome: "verified_success",
+          inputTokens: 1001, outputTokens: 1 }),
+      }));
+    assert.equal(response.status, 200);
+    outcome = await response.json();
+  } finally {
+    for (const name of resultEnv) {
+      if (resultOldEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = resultOldEnv[name];
+    }
+  }
   assert.equal(outcome.status, "succeeded");
   assert.equal(outcome.settledMicroUsd, "1002000");
   const row = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findUniqueOrThrow({
@@ -1704,9 +1732,35 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,
         maxSubscriptionAuthenticated: true },
     }));
-  const unknown = await prisma.$transaction((tx) =>
-    commitAmuxSessionBudgetOutcome(tx, { claimId: unknownClaim.claimId,
-      outcome: "outcome_unknown", inputTokens: null, outputTokens: null }));
+  const unknownEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
+    "TOMVERSE_AMUX_V19_SESSION_BUDGET_UNKNOWN_WRITE",
+    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ"] as const;
+  const unknownOldEnv = Object.fromEntries(unknownEnv.map((name) =>
+    [name, process.env[name]]));
+  let unknown!: { status: string };
+  try {
+    process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
+    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_UNKNOWN_WRITE = "enabled";
+    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
+    const response = await postMaxUnknownRoute(new Request(
+      "https://test.invalid/api/internal/amux/v19/analysis-budget/unknown", {
+        method: "POST", headers: { authorization: `Bearer ${launcherSecret}`,
+          "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID,
+          "content-type": "application/json" },
+        body: JSON.stringify({ claimId: unknownClaim.claimId,
+          requestId: unknownClaim.requestId,
+          reservationId: unknownClaim.reservationId, ideaId: unknownIdeaId,
+          invocationOrdinal: 0, outcome: "outcome_unknown",
+          inputTokens: null, outputTokens: null }),
+      }));
+    assert.equal(response.status, 200);
+    unknown = await response.json();
+  } finally {
+    for (const name of unknownEnv) {
+      if (unknownOldEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = unknownOldEnv[name];
+    }
+  }
   assert.equal(unknown.status, "outcome_unknown");
   const unknownReadback = await prisma.$transaction((tx) =>
     readAmuxSessionBudgetResolution(tx, {
