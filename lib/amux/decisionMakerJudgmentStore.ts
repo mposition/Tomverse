@@ -39,6 +39,11 @@ import {
   type DmJudgmentKind,
   type DmJudgmentRefusal,
 } from "@/lib/amux/decisionMakerJudgmentCore";
+import {
+  dmDeliveryJudgmentFromRow,
+  type DmDeliveryCursor,
+  type DmDeliveryJudgment,
+} from "@/lib/amux/decisionMakerDeliveryCore";
 import { writeDecisionMakerDeliveryAudit } from "@/lib/amux/decisionMakerJudgmentSystemAudit";
 import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
 import {
@@ -385,6 +390,51 @@ export async function readDecisionMakerDeliveryState(
   const state = dmDeliveryStateFromRow(requestId, rows[0]);
   if (!state) throw new DecisionMakerJudgmentWriteError("state_unreadable");
   return state;
+}
+
+/**
+ * Stage S2-2b3 (§2-7): the next confirmation the bridge may deliver, in one
+ * statement -- a judgment of kind `confirm` or `edit_confirm` whose request
+ * has no delivery decision yet, the first after `after` in the order of the
+ * judgment's database clock and then its request id; null when there is
+ * none. A rejection is never read here, and neither is a request with no
+ * judgment, so no proposal a person has not confirmed can come out of it.
+ * The bridge passes the last candidate it was given as `after`, so one it
+ * cannot deliver yet never holds back those behind it, and starts again from
+ * the beginning (`after` null) once this returns null. Reads only; the
+ * kill switch is the caller's (lib/amux/decisionMakerDeliveryRead.ts).
+ */
+export async function readNextDecisionMakerDeliveryJudgment(
+  client: JudgmentReader,
+  input: { after: DmDeliveryCursor | null },
+): Promise<DmDeliveryJudgment | null> {
+  const after = input.after;
+  if (
+    after !== null &&
+    (!isDmRequestId(after.requestId) || !Number.isSafeInteger(after.judgedAtMs) || after.judgedAtMs < 0)
+  ) {
+    throw new DecisionMakerJudgmentWriteError("invalid_input");
+  }
+  // (-1, '') sorts before every judgment: database clocks are not negative.
+  const afterMs = after === null ? -1 : after.judgedAtMs;
+  const afterRequestId = after === null ? "" : after.requestId;
+  const rows = await client.$queryRaw<unknown[]>`
+    SELECT j."requestId", j."kind", j."instance",
+           floor(extract(epoch FROM j."createdAt") * 1000)::bigint AS "judgedAtEpochMs"
+    FROM "AmuxDecisionMakerJudgment" j
+    WHERE j."kind" IN ('confirm', 'edit_confirm')
+      AND NOT EXISTS (
+        SELECT 1 FROM "AmuxDecisionMakerDeliveryEvent" d
+        WHERE d."requestId" = j."requestId" AND d."kind" = 'deliver'
+      )
+      AND (floor(extract(epoch FROM j."createdAt") * 1000)::bigint, j."requestId") > (${afterMs}::bigint, ${afterRequestId}::text)
+    ORDER BY "judgedAtEpochMs", j."requestId"
+    LIMIT 1
+  `;
+  if (rows.length === 0) return null;
+  const judgment = dmDeliveryJudgmentFromRow(rows[0]);
+  if (!judgment) throw new DecisionMakerJudgmentWriteError("state_unreadable");
+  return judgment;
 }
 
 /**

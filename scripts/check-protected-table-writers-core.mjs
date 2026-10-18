@@ -1869,18 +1869,18 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerJudgmentStore.ts",
     table: "AmuxDecisionMakerJudgment",
-    tableMentions: 5,
+    tableMentions: 6,
     writeVerbs: 5,
     reason:
-      "The Decision Maker judgment and delivery store's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the judgment table in one constant INSERT ... RETURNING of a person's judgment, whose trigger writes the request's closing event, and in four constant SELECTs (a request's judgment, the judgment kind beside a request's delivery events, section 4's per-instance tally, and -- since S2, 2026-10-13 -- the declaration accuracy of Admin's newest requests); every value is a bound parameter. The other verbs are the delivery INSERTs and the word in the errors raised when an insert returns no row. It never updates or deletes a judgment, and it writes the audit log only through writeAdminAuditLog and lib/amux/decisionMakerJudgmentSystemAudit.ts.",
+      "The Decision Maker judgment and delivery store's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the judgment table in one constant INSERT ... RETURNING of a person's judgment, whose trigger writes the request's closing event, and in five constant SELECTs (a request's judgment, the judgment kind beside a request's delivery events, section 4's per-instance tally, -- since S2, 2026-10-13 -- the declaration accuracy of Admin's newest requests, and -- since S2-2b3, 2026-10-18 -- the next confirmation with no delivery decision, which the bridge delivers); every value is a bound parameter. The other verbs are the delivery INSERTs and the word in the errors raised when an insert returns no row. It never updates or deletes a judgment, and it writes the audit log only through writeAdminAuditLog and lib/amux/decisionMakerJudgmentSystemAudit.ts.",
   },
   {
     path: "lib/amux/decisionMakerJudgmentStore.ts",
     table: "AmuxDecisionMakerDeliveryEvent",
-    tableMentions: 4,
+    tableMentions: 5,
     writeVerbs: 5,
     reason:
-      "The same module names the delivery event table in its two constant delivery reads (a request's, and -- since S2, 2026-10-13 -- those of Admin's newest requests) and in two constant INSERT ... RETURNING statements, the system's decision, receipt or unknown outcome and a person's resolution; every value is a bound parameter. It never updates or deletes a delivery event.",
+      "The same module names the delivery event table in its three constant delivery reads (a request's, -- since S2, 2026-10-13 -- those of Admin's newest requests, and -- since S2-2b3, 2026-10-18 -- the NOT EXISTS of a decision beside the next confirmation) and in two constant INSERT ... RETURNING statements, the system's decision, receipt or unknown outcome and a person's resolution; every value is a bound parameter. It never updates or deletes a delivery event.",
   },
   {
     path: "prisma/migrations/20261008130000_amux_decision_maker_stale_close_hours/migration.sql",

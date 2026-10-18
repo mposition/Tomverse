@@ -349,6 +349,11 @@ run(
     // delivery decision once and its outcome once, §4's report, and the stale
     // close at 720 hours across a daylight-saving change.
     "tests/integration/amux-decision-maker-judgment.db.test.ts",
+    // AMUX Decision Maker delivery to the worker (docs/policy/amux-decision-maker.md
+    // §2-7, §6, §9), stage S2-2b3: only a confirmation is ever read as an answer
+    // to deliver, nothing under the kill switch, the decision once and its
+    // outcome once, each through its route's own DB boundary.
+    "tests/integration/amux-decision-maker-delivery.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.
