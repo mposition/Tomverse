@@ -29292,10 +29292,10 @@ async function _focusObserveQuestion(item) {
 // sent, and only the first is delivered. The claim names the revision the
 // operator was shown, and holds only while the card still asks it: a worker
 // that re-asked meanwhile gets nothing sent to its new question. A card with
-// no typed revision has nothing to claim. A Decision Maker answer already
-// delivered wins: nothing is sent and the operator is told. The operator's own
-// earlier claim does not stop a second direct answer. Any failure to claim
-// sends nothing.
+// no typed revision has nothing to claim. Only the claim this answer won
+// sends: a revision already answered -- by a Decision Maker answer, or by the
+// operator in another tab or an earlier click -- sends nothing and says so.
+// Any failure to claim sends nothing.
 async function _focusClaimAnswer(item, revision) {
   try {
     const r = await _directInteractionFetch(API + '/api/board/' + encodeURIComponent(item.id) + '/typed-ask/answer',
@@ -29304,7 +29304,7 @@ async function _focusClaimAnswer(item, revision) {
     if (!r.ok) return 'Could not record the answer for ' + item.id + ' (HTTP ' + r.status + '); nothing was sent.';
     const b = await r.json();
     if (b.outcome === 'claimed' || b.outcome === 'no_typed_revision') return null;
-    if (b.outcome === 'already_answered' && b.answer && b.answer.source === 'operator') return null;
+    if (b.outcome === 'already_answered' && b.answer && b.answer.source === 'operator') return item.id + ' was already answered (from another tab or an earlier click); nothing was sent.';
     if (b.outcome === 'already_answered') return item.id + ' was already answered by an operator-confirmed Decision Maker answer; nothing was sent.';
     if (b.outcome === 'question_changed') return 'The question on ' + item.id + ' changed after you opened it; nothing was sent. Open it again to answer the new question.';
     return 'Could not record the answer for ' + item.id + ' (' + (b.reason || b.outcome || 'refused') + '); nothing was sent.';

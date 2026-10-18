@@ -188,6 +188,19 @@ test("a confirmed answer's message id, cap, labels and header are the app's, on 
   assert.ok(delivery.includes('first.ends_with(&format!(") 제안, {label}, re {card_id}]"))'));
   assert.ok(server.includes('const ANSWER_HEADER_PREFIX: &str = "[Decision Maker ";'));
   assert.ok(server.includes('first.ends_with(&format!(", re {card_id}]"))'));
+  // §9's binding travels under the same names from the app's read, through
+  // the bridge, to the local AMUX's check and claim (review r-20261018-065705-65cb2a).
+  const nextRoute = read("app/api/internal/amux/decision-maker/deliveries/next/route.ts");
+  assert.match(nextRoute, /worker: read\.askingWorkerId,/);
+  assert.match(nextRoute, /session_attempt: read\.sessionAttempt,/);
+  assert.match(delivery, /let worker = delivery\.get\("worker"\)\?\.as_str\(\)\?;/);
+  assert.match(delivery, /let session_attempt = delivery\.get\("session_attempt"\)\?\.as_i64\(\)\?;/);
+  assert.equal((delivery.match(/"session_attempt": delivery\.session_attempt/g) ?? []).length, 2, "the check and the claim");
+  for (const struct of ["AnswerCheckBody", "AnswerBody"]) {
+    const body = server.slice(server.indexOf(`struct ${struct} {`), server.indexOf("}", server.indexOf(`struct ${struct} {`)));
+    assert.match(body, /worker: String,/, struct);
+    assert.match(body, /session_attempt: i64,/, struct);
+  }
   // The relay's delivery routes are the app's three and the local AMUX's three.
   for (const route of ["DeliveriesNext", "Deliveries", "DeliveryOutcome"]) {
     assert.ok(delivery.includes(`AppRoute::${route}`), route);

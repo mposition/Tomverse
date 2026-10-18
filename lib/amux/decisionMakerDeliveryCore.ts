@@ -169,8 +169,16 @@ export type DmDeliveryCandidate =
       instance: DmInstanceScope;
       cardId: string;
       questionRevision: number;
-      /** The asking worker's AMUX session, the one the answer is for. */
+      /**
+       * §9's binding as the request recorded it at routing -- the asking
+       * worker, its AMUX session (the one the answer is for) and its session
+       * attempt. The local AMUX claims and sends only while the card's owner
+       * session and newest attempt are still these (a card given to another
+       * worker keeps its question revision).
+       */
+      askingWorkerId: string;
       session: string;
+      sessionAttempt: number;
       messageId: string;
       message: string;
     }
@@ -227,8 +235,11 @@ export const dmDeliveryCandidate = (input: {
     return { status: "undeliverable", ...base, reason: "answer_body_missing" };
   }
   const cardId = state.binding.cardId;
+  const askingWorkerId = state.binding.askingWorkerId;
   const session = state.binding.amuxSessionId;
-  if (!CARD_ID.test(cardId) || !CARD_ID.test(session)) return null;
+  const sessionAttempt = state.binding.amuxSessionAttempt;
+  if (!CARD_ID.test(cardId) || !CARD_ID.test(askingWorkerId) || !CARD_ID.test(session)) return null;
+  if (!Number.isSafeInteger(sessionAttempt) || sessionAttempt < 0) return null;
   const message = dmDeliveryMessage({ instance: judgment.instance, judgmentKind: judgment.judgmentKind, cardId, answer });
   if (Buffer.byteLength(message, "utf8") > DM_DELIVERY_MESSAGE_MAX_BYTES) {
     return { status: "undeliverable", ...base, reason: "message_too_long" };
@@ -240,7 +251,9 @@ export const dmDeliveryCandidate = (input: {
     instance: judgment.instance,
     cardId,
     questionRevision: state.binding.questionRevision,
+    askingWorkerId,
     session,
+    sessionAttempt,
     messageId: dmDeliveryMessageId(judgment.requestId),
     message,
   };

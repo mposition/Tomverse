@@ -212,7 +212,12 @@ test("a confirmation delivers the DM's answer or option, an edited confirmation 
     instance: "decision-maker-openai",
     cardId: "AMUX-12",
     questionRevision: 3,
+    // §9's binding the local AMUX holds the card to before it claims (review
+    // r-20261018-065705-65cb2a, finding 2): the asking worker, its session and
+    // the card's attempt, as the relay routed them.
+    askingWorkerId: "claude-impl",
     session: "claude-impl",
+    sessionAttempt: 1,
     messageId: `dm-answer:${REQUEST_ID}`,
     message:
       "[Decision Maker decision-maker-openai (GPT-6 Astra) 제안, operator-confirmed, re AMUX-12]\nUse the model id only.\n\n" +

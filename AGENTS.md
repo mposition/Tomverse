@@ -2033,8 +2033,13 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   답 본문이 지워진 확정은 `undeliverable`로 건너뜁니다. 로컬 route는 S2-2b2의 relay 토큰 뒤에 있고 `/api/board` 밖입니다.
   **확인(`answers/check`)은 읽기만 합니다** — 카드가 아직 그 질문 revision을 묻고 아무도 답하지 않았는지, 그리고 lane이 자동 전송을
   받는지(`deliver_automated`과 같은 관문: archived·paused·isolated·not running·permission dialog면 거부, turn 경계가 아니면 `busy`).
-  아니면 relay는 결정을 쓰지 않고 cursor로 지나갑니다(앱 판정 시각·요청 id 순, 끝나면 처음부터). **전달(`answers`)은 요청당 한 번만
-  부릅니다** — 같은 확인 뒤 `dm_ask::claim_answer(DmConfirmed{request_id})`, 이 요청이 이긴 claim에서만 메시지 id
+  아니면 relay는 결정을 쓰지 않고 cursor로 지나갑니다(앱 판정 시각·요청 id 순, 끝나면 처음부터). **질문 revision만으로는 소유자 변경을
+  보지 못합니다** — 카드를 다른 worker나 attempt에 넘겨도 revision은 그대로이므로, 앱의 읽기가 docs/policy/amux-decision-maker.md §9의 결속 값
+  (`worker`=묻는 worker, `session`=AMUX 세션, `session_attempt`=시도 번호, S2-2b2 relay가 라우팅 때 보낸 카드 owner session과 최신 task attempt)을
+  싣고, 확인과 claim 모두 현재 카드의 owner session(`issues.session`)이 worker이자 session이고 최신 `task_attempts` 번호가 그 attempt일 때만
+  통과합니다(아니면 `owner_changed`·`attempt_changed`, 검토 r-20261018-065705-65cb2a). **전달(`answers`)은 요청당 한 번만
+  부릅니다** — 같은 확인 뒤 한 트랜잭션에서 결속을 다시 읽고(바뀌었으면 `binding_changed`로 아무것도 claim하지 않음)
+  `dm_ask::claim_answer(DmConfirmed{request_id})`, 이 요청이 이긴 claim에서만 메시지 id
   `dm-answer:<요청 id>`를 `send_dedup`에 예약하고 lane의 boundary 전송(automation, `from_steering`, 큐 없음)을 한 뒤 검증된 전송만
   영수증으로 받습니다. 결과가 불명확하면(응답 유실, 미검증, 입력창에 남음) 다시 보내지 않고 앱에 `delivery_unknown`을 기록한 뒤
   `answers/unknown`이 **그 세션을 먼저 일시 정지(AMUX pause)하고 나서** 메시지 id의 영수증을 읽습니다(docs/policy/amux-decision-maker.md §9).
@@ -2045,9 +2050,12 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   Approve/Reject)도 보내기 전에 `typed-ask/answer`로 claim합니다. 대시보드는 typed-ask GET으로 질문 revision을 읽어(Answer는 창을 열기 전에
   읽고 창에 그 질문을 보임, Approve/Reject는 누를 때) 그 revision을 body(`{"question_revision": <n> | null}`)에 싣고, 서버는 claim
   트랜잭션 안에서 그 revision이 현재 revision일 때만 claim합니다. 다르면 `question_changed`로 아무것도 claim하지 않고 보내지도 않습니다 —
-  창을 연 뒤 worker가 다시 물은 새 질문을 옛 답이 차지하지 않게 하기 위해서입니다(같은 검토). 확정 DM 답이 이미 있으면 보내지 않고
-  운영자에게 알립니다. typed revision이 없는 카드는 claim할 것이 없고 그대로 보냅니다. worker 신원 header가 있는 요청은 운영자 claim을
-  할 수 없습니다. **남은 것(migration 필요, 이 조각에서 멈춤)**: 전달 결정 뒤 claim이 지거나 lane이 그 사이 거부해
+  창을 연 뒤 worker가 다시 물은 새 질문을 옛 답이 차지하지 않게 하기 위해서입니다(같은 검토). **대시보드는 `claimed`일 때만 보냅니다** —
+  `already_answered`는 확정 DM 답이든 운영자 자신의 앞선 답(다른 탭, 두 번 누름)이든 보내지 않고 알립니다(질문 revision 하나에 답 한 번,
+  검토 r-20261018-065705-65cb2a; `tests/amuxDecisionMakerDashboardAnswer.test.mjs`가 app.js의 함수를 직접 실행해 고정). typed revision이 없는
+  카드는 claim할 것이 없고 그대로 보냅니다. worker 신원 header가 있는 요청은 운영자 claim을 할 수 없습니다. **전달된 답의 카드 기록이 실패하면**
+  영수증(worker에게는 도착했으므로 사실)은 기록하되 relay가 `delivery_card_record_failed`로 멈춥니다 — 결정이 있는 요청은 다시 읽히지 않아
+  §7의 카드 기록이 영구히 빠지므로, 재시도 route 대신 명시적으로 멈춥니다(재시도는 bridge 재시작에도 남는 밀린 기록 저장소가 필요합니다). **남은 것(migration 필요, 이 조각에서 멈춤)**: 전달 결정 뒤 claim이 지거나 lane이 그 사이 거부해
   아무것도 보내지 않은 경우를 앱의 전달 기록이 말할 어휘가 없습니다(영수증도 `unknown`도 사실이 아님). 그 경우 결정만 남고 relay가
   멈추며, 확인 단계가 그 창을 결정 직전 한 번의 왕복으로 줄입니다. bridge가 결정과 영수증 사이에 죽은 결정은 자동으로 정리하지 않으며,
   운영자의 직접 답이 먼저일 때 앱 요청을 닫는 것(docs/policy/amux-decision-maker.md §2-7 마지막 문장)도 아직 없습니다.

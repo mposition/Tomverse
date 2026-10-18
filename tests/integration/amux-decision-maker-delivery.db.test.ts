@@ -242,7 +242,10 @@ test("a confirmed answer is read with §7's header, decided once, and its receip
   assert.equal(candidate.requestId, basis.requestId);
   assert.equal(candidate.cardId, basis.cardId);
   assert.equal(candidate.questionRevision, 3);
+  // §9's binding as the request recorded it at routing.
+  assert.equal(candidate.askingWorkerId, "claude-impl");
   assert.equal(candidate.session, "claude-impl");
+  assert.equal(candidate.sessionAttempt, 1);
   assert.equal(candidate.messageId, `dm-answer:${basis.requestId}`);
   const label = basis.instance === "decision-maker-openai" ? "GPT-6 Astra" : "Claude Fable 5.1";
   assert.equal(

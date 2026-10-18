@@ -78,9 +78,10 @@ fn observed_revision(body: &[u8]) -> Option<Option<i64>> {
 ///
 /// - `claimed`: this answer owns the revision; the dashboard sends it.
 /// - `already_answered` with the record: an operator-confirmed Decision Maker
-///   answer owns it, and the dashboard sends nothing and says so; or the
-///   operator's own earlier answer owns it, and the dashboard may answer again
-///   (the record keeps the Decision Maker out, it does not ration the operator).
+///   answer owns it, or the operator's own earlier answer (another tab, a
+///   second click) does, and either way the dashboard sends nothing and says
+///   so -- one answer per question revision, whoever wrote it first (review
+///   r-20261018-065705-65cb2a).
 /// - `question_changed` with the card's current revision (null when it asks
 ///   none): the worker re-asked, or stopped asking, since the dashboard read
 ///   the card. Nothing is claimed and the dashboard sends nothing, so an
@@ -279,7 +280,8 @@ mod tests {
                 Ok(crate::db::WriteOutcome { applied: false, events: vec![] })
             });
         assert!(late.is_ok());
-        // The operator answering again is told it already answered; the dashboard may send again.
+        // The operator answering again (another tab) is told who already answered; the
+        // dashboard sends nothing (tests/amuxDecisionMakerDashboardAnswer.test.mjs).
         let (_, again) = owner_call(&app, &uri, json!({"question_revision": 1})).await;
         assert_eq!(again["outcome"], "already_answered");
         assert_eq!(again["answer"]["source"], "operator");

@@ -82,7 +82,13 @@ pub struct Delivery {
     pub cursor: DeliveryCursor,
     pub card_id: String,
     pub question_revision: i64,
+    /// §9's binding as the request recorded it at routing (`routing_binding`
+    /// in `wire`): the asking worker, its AMUX session -- both the card's
+    /// owner session -- and the card's newest attempt. The local AMUX claims
+    /// and sends only while the card is still these.
+    pub worker: String,
     pub session: String,
+    pub session_attempt: i64,
     pub message: String,
 }
 
@@ -143,13 +149,17 @@ pub fn parse_next_delivery(value: &Value) -> Option<NextDelivery> {
             let instance = delivery.get("instance")?.as_str()?;
             let card_id = delivery.get("card_id")?.as_str()?;
             let question_revision = delivery.get("question_revision")?.as_i64()?;
+            let worker = delivery.get("worker")?.as_str()?;
             let session = delivery.get("session")?.as_str()?;
+            let session_attempt = delivery.get("session_attempt")?.as_i64()?;
             let message_id = delivery.get("message_id")?.as_str()?;
             let message = delivery.get("message")?.as_str()?;
             let ok = is_instance(instance)
                 && crate::local_card::valid_local_card_id(card_id)
                 && question_revision >= 1
+                && is_ledger_identifier(worker)
                 && is_ledger_identifier(session)
+                && session_attempt >= 0
                 && message_id == format!("{DM_DELIVERY_MESSAGE_ID_PREFIX}{}", cursor.request_id)
                 && message_is_confirmed_answer(message, instance, label, card_id);
             ok.then(|| {
@@ -157,7 +167,9 @@ pub fn parse_next_delivery(value: &Value) -> Option<NextDelivery> {
                     cursor,
                     card_id: card_id.to_owned(),
                     question_revision,
+                    worker: worker.to_owned(),
                     session: session.to_owned(),
+                    session_attempt,
                     message: message.to_owned(),
                 })
             })
@@ -278,7 +290,8 @@ where
         .post(
             LocalRoute::AnswerCheck,
             json!({"card_id": delivery.card_id, "question_revision": delivery.question_revision,
-                "session": delivery.session}),
+                "worker": delivery.worker, "session": delivery.session,
+                "session_attempt": delivery.session_attempt}),
         )
         .await;
     let deliverable = match &check {
@@ -310,23 +323,29 @@ where
         }
     }
 
-    // 4. The delivery: called once, never again, whatever comes back.
+    // 4. The delivery: called once, never again, whatever comes back. The
+    // local AMUX holds the card to the binding in the claim's own transaction.
     let answer = local
         .post(
             LocalRoute::Answers,
             json!({"card_id": delivery.card_id, "question_revision": delivery.question_revision,
-                "request_id": delivery.request_id(), "session": delivery.session,
+                "request_id": delivery.request_id(), "worker": delivery.worker,
+                "session": delivery.session, "session_attempt": delivery.session_attempt,
                 "message": delivery.message}),
         )
         .await;
-    match local_outcome(&answer) {
-        Some((outcome, _)) if outcome == "delivered" => {}
-        // Nothing was sent, and the app's delivery record has no outcome for
-        // that: the decision stays without one, and the relay stops.
+    let card_recorded = match local_outcome(&answer) {
+        Some((outcome, value)) if outcome == "delivered" => {
+            value.get("card_recorded").and_then(Value::as_bool) == Some(true)
+        }
+        // Nothing was sent -- the question was answered or changed, the card
+        // was given to another worker or attempt, or the lane refused -- and
+        // the app's delivery record has no outcome for that: the decision
+        // stays without one, and the relay stops.
         Some((outcome, _))
             if matches!(
                 outcome.as_str(),
-                "not_deliverable" | "answered" | "claim_refused" | "not_sent"
+                "not_deliverable" | "answered" | "claim_refused" | "binding_changed" | "not_sent"
             ) =>
         {
             return DeliveryRun::about(&delivery, "delivery_not_sent_after_decision")
@@ -334,7 +353,7 @@ where
         }
         // Unclear (§9): never sent again.
         _ => return record_unknown(app, local, &delivery).await,
-    }
+    };
 
     // 5. The receipt. Only a recorded answer is a receipt.
     let mut run = DeliveryRun::about(&delivery, "delivered");
@@ -348,7 +367,15 @@ where
     )
     .await
     {
-        run = run.missing(missing);
+        return run.missing(missing);
+    }
+    // §7's card record: "카드 기록도 같은 표시를 쓴다". The answer reached the
+    // worker, so the receipt stands; a card the local AMUX could not append
+    // to would stay without its record, since a decided request is never
+    // offered again -- the relay stops and names it (review
+    // r-20261018-065705-65cb2a, finding 3).
+    if !card_recorded {
+        run = run.missing("delivery_card_record_failed");
     }
     run
 }
@@ -435,7 +462,8 @@ mod tests {
             json!({"found": true, "status": "ready", "delivery": {
                 "request_id": REQUEST, "judged_at_ms": 7, "judgment_kind": kind,
                 "instance": "decision-maker-openai", "card_id": "AMUX-12", "question_revision": 3,
-                "session": SESSION, "message_id": format!("dm-answer:{REQUEST}"),
+                "worker": SESSION, "session": SESSION, "session_attempt": 2,
+                "message_id": format!("dm-answer:{REQUEST}"),
                 "message": message("AMUX-12", label)}}),
         )
     }
@@ -516,13 +544,72 @@ mod tests {
             local_routes(&local),
             vec![LocalRoute::AnswerCheck, LocalRoute::Answers]
         );
-        // The message goes as the app composed it, to the asking worker's session.
+        // The message goes as the app composed it, to the asking worker's
+        // session, with §9's binding the local AMUX holds the card to (review
+        // r-20261018-065705-65cb2a, finding 2): the check and the claim both
+        // name the worker, its session and the card's attempt.
         let writes = local.writes.lock().unwrap().clone();
+        assert_eq!(
+            writes[0].1,
+            json!({"card_id": "AMUX-12", "question_revision": 3, "worker": SESSION,
+                "session": SESSION, "session_attempt": 2})
+        );
         assert_eq!(
             writes[1].1,
             json!({"card_id": "AMUX-12", "question_revision": 3, "request_id": REQUEST,
-                "session": SESSION, "message": message("AMUX-12", DM_DELIVERY_CONFIRMED_LABEL)})
+                "worker": SESSION, "session": SESSION, "session_attempt": 2,
+                "message": message("AMUX-12", DM_DELIVERY_CONFIRMED_LABEL)})
         );
+    }
+
+    /// Review r-20261018-065705-65cb2a, finding 3: a delivered answer whose
+    /// card record the local AMUX could not append is delivered -- its receipt
+    /// is recorded -- but the card lacks §7's record, and the decided request
+    /// is never offered again, so the relay stops and names it.
+    #[tokio::test]
+    async fn a_delivery_whose_card_record_failed_records_its_receipt_and_stops_the_relay() {
+        for answer in [
+            json!({"outcome": "delivered", "card_recorded": false}),
+            json!({"outcome": "delivered"}),
+        ] {
+            let app = FakeApp::with(vec![
+                (AppRoute::DeliveriesNext, ready()),
+                (AppRoute::Deliveries, recorded()),
+                (AppRoute::DeliveryOutcome, recorded()),
+            ]);
+            let local = local_with(vec![
+                (LocalRoute::AnswerCheck, deliverable(true)),
+                (LocalRoute::Answers, answered(200, answer.clone())),
+            ]);
+            let run = deliver_next(&app, &local, None).await;
+            assert!(run.delivered, "{answer}");
+            assert_eq!(
+                app.body(AppRoute::DeliveryOutcome),
+                json!({"request_id": REQUEST, "outcome": "receipt"}),
+                "the answer reached the worker: that is the receipt"
+            );
+            assert_eq!(run.halt, Some("delivery_card_record_failed"), "{answer}");
+            assert_eq!(run.code, "delivery_card_record_failed");
+        }
+    }
+
+    /// A read without the binding is not one the app gives.
+    #[test]
+    fn a_delivery_without_its_binding_is_unreadable() {
+        let body = match &ready() {
+            HttpAnswer::Answered { body, .. } => body.clone(),
+            HttpAnswer::Lost => unreachable!(),
+        };
+        let value = serde_json::from_slice::<Value>(&body).unwrap();
+        assert!(parse_next_delivery(&value).is_some());
+        for field in ["worker", "session_attempt"] {
+            let mut missing = value.clone();
+            missing["delivery"].as_object_mut().unwrap().remove(field);
+            assert_eq!(parse_next_delivery(&missing), None, "{field}");
+        }
+        let mut negative = value.clone();
+        negative["delivery"]["session_attempt"] = json!(-1);
+        assert_eq!(parse_next_delivery(&negative), None);
     }
 
     /// §12: "운영자 확정 없이는 어떤 DM 출력도 worker에게 전달되지 않는다". The
@@ -720,6 +807,8 @@ mod tests {
             json!({"outcome": "not_deliverable", "reason": "busy"}),
             json!({"outcome": "claim_refused", "reason": "stale_revision"}),
             json!({"outcome": "not_sent", "reason": "send_refused"}),
+            // The card was given to another worker or attempt between the check and the claim.
+            json!({"outcome": "binding_changed", "reason": "owner_changed"}),
         ] {
             let app = FakeApp::with(vec![
                 (AppRoute::DeliveriesNext, ready()),

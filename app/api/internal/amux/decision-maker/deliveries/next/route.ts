@@ -84,7 +84,10 @@ export async function POST(request: Request) {
               instance: read.instance,
               card_id: read.cardId,
               question_revision: read.questionRevision,
+              // §9's binding: the local AMUX holds the card to it before it claims.
+              worker: read.askingWorkerId,
               session: read.session,
+              session_attempt: read.sessionAttempt,
               message_id: read.messageId,
               message: read.message,
             },

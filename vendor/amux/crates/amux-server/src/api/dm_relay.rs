@@ -31,12 +31,15 @@
 //!
 //! - `POST /api/dm-relay/answers/check` reads whether a confirmed answer could
 //!   be delivered now -- the card still asks that question revision and nobody
-//!   has answered it, and the worker's lane takes automated input at a turn
-//!   boundary. The bridge asks before it records the app's delivery decision,
-//!   so a question the operator already answered is never decided at all.
-//! - `POST /api/dm-relay/answers` delivers one: the same checks again, then
-//!   the answer record's claim for that revision (`dm_ask::claim_answer`, as
-//!   `dm_confirmed` with the app's request id), and only on a claim this
+//!   has answered it, the card is still §9's binding (its owner session is the
+//!   asking worker's session and its newest attempt the request's), and the
+//!   worker's lane takes automated input at a turn boundary. The bridge asks
+//!   before it records the app's delivery decision, so a question the
+//!   operator already answered is never decided at all.
+//! - `POST /api/dm-relay/answers` delivers one: the same checks again, then,
+//!   in one transaction, the binding once more and the answer record's claim
+//!   for that revision (`dm_ask::claim_answer`, as `dm_confirmed` with the
+//!   app's request id), and only on a claim this
 //!   request won, the message through the lane's own automated send path
 //!   under the message id `dm-answer:<request id>` (the local idempotency key,
 //!   reserved before the send and acknowledged only on a verified delivery),
@@ -502,12 +505,18 @@ impl AnswerLane for FleetLane {
     }
 }
 
+/// §9's binding of a request, as the relay routed it (the Tomverse
+/// repository's apps/tomverse-orchestrator/src/dm_relay/wire.rs
+/// `routing_binding`): the asking worker and its AMUX session, both the card's
+/// owner session, and the card's newest task attempt (0 with none).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AnswerCheckBody {
     card_id: String,
     question_revision: i64,
+    worker: String,
     session: String,
+    session_attempt: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -516,8 +525,79 @@ struct AnswerBody {
     card_id: String,
     question_revision: i64,
     request_id: String,
+    worker: String,
     session: String,
+    session_attempt: i64,
     message: String,
+}
+
+/// The card's owner session and newest task attempt, the two values the
+/// relay's binding was made of; `None` when the card is gone.
+fn card_owner(conn: &rusqlite::Connection, card_id: &str) -> rusqlite::Result<Option<(Option<String>, i64)>> {
+    use rusqlite::OptionalExtension;
+    let session = conn
+        .query_row(
+            "SELECT session FROM issues WHERE id = ?1 AND deleted IS NULL",
+            [card_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+    let Some(session) = session else {
+        return Ok(None);
+    };
+    let attempt = crate::db::attempts::list_for_card(conn, card_id)?
+        .iter()
+        .map(|attempt| attempt.attempt)
+        .max()
+        .unwrap_or(0);
+    Ok(Some((session, attempt)))
+}
+
+/// Why the card is no longer the binding's, or `None` when it still is: its
+/// owner session is the binding's session and the binding's worker (the relay
+/// routes them as one), and its newest attempt is the binding's. A card
+/// given to another worker or attempt keeps its question revision, so the
+/// revision alone cannot tell (review r-20261018-065705-65cb2a).
+fn binding_refusal(
+    owner: Option<&(Option<String>, i64)>,
+    worker: &str,
+    session: &str,
+    session_attempt: i64,
+) -> Option<&'static str> {
+    let Some((owner_session, attempt)) = owner else {
+        return Some("question_changed");
+    };
+    if owner_session.as_deref() != Some(session) || worker != session {
+        return Some("owner_changed");
+    }
+    (*attempt != session_attempt).then_some("attempt_changed")
+}
+
+/// [`binding_refusal`] on a read of the card.
+async fn binding_holds(
+    state: &AppState,
+    card_id: &str,
+    worker: &str,
+    session: &str,
+    session_attempt: i64,
+) -> Result<(), &'static str> {
+    let card = card_id.to_string();
+    let owner = state
+        .store
+        .read_async(move |conn| Ok(card_owner(conn, &card)?))
+        .await
+        .map_err(|_| "store_unreadable")?;
+    match binding_refusal(owner.as_ref(), worker, session, session_attempt) {
+        Some(reason) => Err(reason),
+        None => Ok(()),
+    }
+}
+
+/// What the claim's transaction did.
+enum ClaimStep {
+    /// The card stopped being the binding's: nothing was claimed.
+    BindingChanged(&'static str),
+    Claim(AnswerClaim),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -568,11 +648,19 @@ pub(crate) async fn check_answer_with<L: AnswerLane>(
     let Ok(body) = serde_json::from_slice::<AnswerCheckBody>(body) else {
         return invalid();
     };
-    if !is_card_id(&body.card_id) || body.question_revision < 1 || !is_session_name(&body.session) {
+    if !is_card_id(&body.card_id)
+        || body.question_revision < 1
+        || !is_session_name(&body.session)
+        || !is_session_name(&body.worker)
+        || body.session_attempt < 0
+    {
         return invalid();
     }
     let verdict = match question_open(state, &body.card_id, body.question_revision).await {
-        Ok(()) => lane.deliverable(state, &body.session).await,
+        Ok(()) => match binding_holds(state, &body.card_id, &body.worker, &body.session, body.session_attempt).await {
+            Ok(()) => lane.deliverable(state, &body.session).await,
+            Err(reason) => Err(reason),
+        },
         Err(reason) => Err(reason),
     };
     Json(match verdict {
@@ -609,6 +697,8 @@ pub(crate) async fn deliver_answer_with<L: AnswerLane + Clone + 'static>(
         || body.question_revision < 1
         || !dm_ask::is_request_id(&body.request_id)
         || !is_session_name(&body.session)
+        || !is_session_name(&body.worker)
+        || body.session_attempt < 0
         || !message_names_card(&body.message, &body.card_id)
     {
         return invalid();
@@ -629,35 +719,51 @@ async fn deliver<L: AnswerLane>(state: &AppState, lane: &L, body: &AnswerBody, n
     if let Err(reason) = question_open(state, &body.card_id, body.question_revision).await {
         return json!({ "outcome": "not_deliverable", "reason": reason });
     }
+    if let Err(reason) =
+        binding_holds(state, &body.card_id, &body.worker, &body.session, body.session_attempt).await
+    {
+        return json!({ "outcome": "not_deliverable", "reason": reason });
+    }
     if let Err(reason) = lane.deliverable(state, &body.session).await {
         return json!({ "outcome": "not_deliverable", "reason": reason });
     }
 
     // The answer record first: whoever claims the revision is the one answer.
-    let slot: Arc<Mutex<Option<AnswerClaim>>> = Arc::new(Mutex::new(None));
+    // The binding is read again in the claim's own transaction, so a card
+    // given to another worker or attempt since the check is never claimed.
+    let slot: Arc<Mutex<Option<ClaimStep>>> = Arc::new(Mutex::new(None));
     let out = slot.clone();
     let (card, revision, request_id) = (body.card_id.clone(), body.question_revision, body.request_id.clone());
+    let (worker, session, session_attempt) = (body.worker.clone(), body.session.clone(), body.session_attempt);
     let written = state
         .store
         .write_async(move |conn| {
+            let owner = card_owner(conn, &card)?;
+            if let Some(reason) = binding_refusal(owner.as_ref(), &worker, &session, session_attempt) {
+                *out.lock().expect("dm relay answer slot") = Some(ClaimStep::BindingChanged(reason));
+                return Ok(crate::db::WriteOutcome { applied: false, events: vec![] });
+            }
             let source = AnswerSource::DmConfirmed { request_id };
             let claim = dm_ask::claim_answer(conn, &card, revision, &source, ANSWER_ACTOR, now)?;
             let applied = matches!(claim, AnswerClaim::Claimed(_));
-            *out.lock().expect("dm relay answer slot") = Some(claim);
+            *out.lock().expect("dm relay answer slot") = Some(ClaimStep::Claim(claim));
             Ok(crate::db::WriteOutcome { applied, events: vec![] })
         })
         .await;
     let claim = slot.lock().expect("dm relay answer slot").take();
     match (written, claim) {
-        (Ok(_), Some(AnswerClaim::Claimed(_))) => {}
-        (Ok(_), Some(AnswerClaim::AlreadyAnswered(existing))) => {
+        (Ok(_), Some(ClaimStep::Claim(AnswerClaim::Claimed(_)))) => {}
+        (Ok(_), Some(ClaimStep::BindingChanged(reason))) => {
+            return json!({ "outcome": "binding_changed", "reason": reason });
+        }
+        (Ok(_), Some(ClaimStep::Claim(AnswerClaim::AlreadyAnswered(existing)))) => {
             return json!({
                 "outcome": "answered",
                 "source": existing.source,
                 "same_request": existing.request_id.as_deref() == Some(body.request_id.as_str()),
             });
         }
-        (Ok(_), Some(AnswerClaim::Refused(reason))) => {
+        (Ok(_), Some(ClaimStep::Claim(AnswerClaim::Refused(reason)))) => {
             return json!({ "outcome": "claim_refused", "reason": reason });
         }
         // The writer's transaction rolled back: no claim, and nothing sent.
@@ -1223,6 +1329,9 @@ mod tests {
         /// The operator's direct answer, claimed while the lane is checked:
         /// the race between the delivery's read and its claim.
         operator_answers_during_check: Option<(String, i64)>,
+        /// The card given to another worker while the lane is checked: the
+        /// race between the delivery's binding check and its claim.
+        reassigned_during_check: Option<(String, String)>,
         calls: Arc<Mutex<Vec<String>>>,
     }
 
@@ -1235,6 +1344,7 @@ mod tests {
                 paused: true,
                 receipt: "not_accepted",
                 operator_answers_during_check: None,
+                reassigned_during_check: None,
                 calls: Arc::new(Mutex::new(Vec::new())),
             }
         }
@@ -1257,6 +1367,16 @@ mod tests {
                     .store
                     .write_async(move |conn| {
                         dm_ask::claim_answer(conn, &card, revision, &AnswerSource::Operator, "Ethan", 1)?;
+                        Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+                    })
+                    .await
+                    .unwrap();
+            }
+            if let Some((card, session)) = self.reassigned_during_check.clone() {
+                state
+                    .store
+                    .write_async(move |conn| {
+                        conn.execute("UPDATE issues SET session = ?2 WHERE id = ?1", rusqlite::params![card, session])?;
                         Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
                     })
                     .await
@@ -1296,17 +1416,42 @@ mod tests {
         )
     }
 
+    /// §9's binding as the relay routed it: the card's owner session is the
+    /// asking worker and its session, with the card's newest attempt (none: 0).
     fn check_body(card: &str, revision: i64) -> Vec<u8> {
-        json!({"card_id": card, "question_revision": revision, "session": SESSION})
-            .to_string()
-            .into_bytes()
+        check_body_bound(card, revision, SESSION, SESSION, 0)
+    }
+
+    fn check_body_bound(card: &str, revision: i64, worker: &str, session: &str, attempt: i64) -> Vec<u8> {
+        json!({"card_id": card, "question_revision": revision, "worker": worker,
+            "session": session, "session_attempt": attempt})
+        .to_string()
+        .into_bytes()
     }
 
     fn answer_body(card: &str, revision: i64, request: &str, message: &str) -> Vec<u8> {
         json!({"card_id": card, "question_revision": revision, "request_id": request,
-            "session": SESSION, "message": message})
+            "worker": SESSION, "session": SESSION, "session_attempt": 0, "message": message})
         .to_string()
         .into_bytes()
+    }
+
+    /// An asking card owned by `SESSION`, as a worker's own typed ask is.
+    async fn owned_card(app: &Router, state: &AppState) -> String {
+        let card = asking_card(app).await;
+        own(state, &card, SESSION);
+        card
+    }
+
+    fn own(state: &AppState, card: &str, session: &str) {
+        let (card, session) = (card.to_string(), session.to_string());
+        state
+            .store
+            .write(move |conn| {
+                conn.execute("UPDATE issues SET session = ?2 WHERE id = ?1", rusqlite::params![card, session])?;
+                Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+            })
+            .unwrap();
     }
 
     fn unknown_body(card: &str, revision: i64, request: &str) -> Vec<u8> {
@@ -1320,7 +1465,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home = crate::api::settings::test_env::set_home(home.path());
         let (app, state, _dir) = app();
-        let card = asking_card(&app).await;
+        let card = owned_card(&app, &state).await;
         let lane = FakeLane::ready();
         let digest = digest();
         for (configured, headers, reason) in [
@@ -1347,7 +1492,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home = crate::api::settings::test_env::set_home(home.path());
         let (app, state, _dir) = app();
-        let card = asking_card(&app).await;
+        let card = owned_card(&app, &state).await;
         let digest = digest();
         let headers = token_headers(TOKEN);
         let lane = FakeLane::ready();
@@ -1412,7 +1557,7 @@ mod tests {
         let headers = token_headers(TOKEN);
 
         // Before the delivery reads the card.
-        let card = asking_card(&app).await;
+        let card = owned_card(&app, &state).await;
         let claimed = card.clone();
         state
             .store
@@ -1430,7 +1575,7 @@ mod tests {
         assert_eq!(lane.sends(), 0);
 
         // Between the delivery's read and its claim: the claim loses.
-        let card = asking_card(&app).await;
+        let card = owned_card(&app, &state).await;
         let mut lane = FakeLane::ready();
         lane.operator_answers_during_check = Some((card.clone(), 1));
         let (_, lost) = json_of(
@@ -1456,7 +1601,7 @@ mod tests {
             (LaneSend::Refused, json!({"outcome": "not_sent", "reason": "send_refused"}), Some(format!("forget {message_id}"))),
             (LaneSend::Unknown, json!({"outcome": "unknown", "stage": "send"}), None),
         ] {
-            let card = asking_card(&app).await;
+            let card = owned_card(&app, &state).await;
             let mut lane = FakeLane::ready();
             lane.send = send;
             let (_, answer) = json_of(
@@ -1477,7 +1622,7 @@ mod tests {
             assert!(!detail["desc"].as_str().unwrap_or("").contains("[Decision Maker"), "no card record without a delivery");
         }
         // A reservation that already existed is not this call's to send.
-        let card = asking_card(&app).await;
+        let card = owned_card(&app, &state).await;
         let mut lane = FakeLane::ready();
         lane.reserve = false;
         let (_, answer) = json_of(
@@ -1495,7 +1640,7 @@ mod tests {
         let (app, state, _dir) = app();
         let digest = digest();
         let headers = token_headers(TOKEN);
-        let card = asking_card(&app).await;
+        let card = owned_card(&app, &state).await;
         let mut lane = FakeLane::ready();
         lane.deliverable = Err("busy");
         let (_, check) = json_of(check_answer_with(&state, &lane, Some(&digest), &headers, &check_body(&card, 1)).await).await;
@@ -1520,7 +1665,7 @@ mod tests {
         let (app, state, _dir) = app();
         let digest = digest();
         let headers = token_headers(TOKEN);
-        let card = asking_card(&app).await;
+        let card = owned_card(&app, &state).await;
         let lane = FakeLane::ready();
         for message in [
             message_for("AMUX-OTHER"),
@@ -1551,7 +1696,7 @@ mod tests {
         let (app, state, _dir) = app();
         let digest = digest();
         let headers = token_headers(TOKEN);
-        let card = asking_card(&app).await;
+        let card = owned_card(&app, &state).await;
         let mut lane = FakeLane::ready();
         lane.send = LaneSend::Unknown;
         deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message_for(&card))).await;
@@ -1581,5 +1726,58 @@ mod tests {
         assert_eq!(lane_send_verdict(true, "sent but could not be verified"), LaneSend::Unknown);
         assert_eq!(lane_send_verdict(true, "queued (steering) — delivers later"), LaneSend::Unknown);
         assert_eq!(answer_message_id(REQUEST).len(), 46);
+    }
+
+    /// Review r-20261018-065705-65cb2a, finding 2: the question revision does
+    /// not change when a card is given to another worker or attempt, so the
+    /// revision alone would send the confirmed answer to a session that no
+    /// longer owns the question. §9's binding -- the asking worker, its AMUX
+    /// session and the card's attempt, as the relay routed them -- must still
+    /// be the card's, at the check and again in the claim's own transaction.
+    #[tokio::test]
+    async fn a_card_given_to_another_worker_or_attempt_is_never_answered_into_the_old_session() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::api::settings::test_env::set_home(home.path());
+        let (app, state, _dir) = app();
+        let digest = digest();
+        let headers = token_headers(TOKEN);
+
+        // The card was given to another worker; the question is the same.
+        let card = owned_card(&app, &state).await;
+        own(&state, &card, "codex-impl");
+        let (_, typed) = call(&app, "GET", &format!("/api/board/{card}/typed-ask"), None).await;
+        assert_eq!(typed["current_revision"]["question_revision"], 1, "{typed}");
+        let lane = FakeLane::ready();
+        let (_, check) = json_of(check_answer_with(&state, &lane, Some(&digest), &headers, &check_body(&card, 1)).await).await;
+        assert_eq!(check, json!({"deliverable": false, "reason": "owner_changed"}));
+        let (_, answer) = json_of(
+            deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message_for(&card))).await,
+        )
+        .await;
+        assert_eq!(answer, json!({"outcome": "not_deliverable", "reason": "owner_changed"}));
+
+        // Another attempt of the same owner, and a binding whose worker is not the owner.
+        own(&state, &card, SESSION);
+        for (body, reason) in [
+            (check_body_bound(&card, 1, SESSION, SESSION, 1), "attempt_changed"),
+            (check_body_bound(&card, 1, "someone-else", SESSION, 0), "owner_changed"),
+        ] {
+            let (_, check) = json_of(check_answer_with(&state, &lane, Some(&digest), &headers, &body).await).await;
+            assert_eq!(check, json!({"deliverable": false, "reason": reason}));
+        }
+        let (_, check) = json_of(check_answer_with(&state, &lane, Some(&digest), &headers, &check_body(&card, 1)).await).await;
+        assert_eq!(check, json!({"deliverable": true}), "the binding is the card's again");
+
+        // Given away between the check and the claim: the claim's own transaction refuses it.
+        let mut lane = FakeLane::ready();
+        lane.reassigned_during_check = Some((card.clone(), "codex-impl".to_string()));
+        let (_, answer) = json_of(
+            deliver_answer_with(&state, lane.clone(), Some(&digest), &headers, &answer_body(&card, 1, REQUEST, &message_for(&card))).await,
+        )
+        .await;
+        assert_eq!(answer, json!({"outcome": "binding_changed", "reason": "owner_changed"}));
+        assert_eq!(lane.sends(), 0);
+        let (_, typed) = call(&app, "GET", &format!("/api/board/{card}/typed-ask"), None).await;
+        assert!(typed["answer"].is_null(), "nothing was claimed: {typed}");
     }
 }

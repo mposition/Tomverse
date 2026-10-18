@@ -1308,7 +1308,8 @@ mod tests {
             json!({"found": true, "status": "ready", "delivery": {
                 "request_id": REQUEST_ID, "judged_at_ms": 9, "judgment_kind": "confirm",
                 "instance": INSTANCE, "card_id": "AMUX-12", "question_revision": 3,
-                "session": "claude-impl", "message_id": format!("dm-answer:{REQUEST_ID}"),
+                "worker": "claude-impl", "session": "claude-impl", "session_attempt": 2,
+                "message_id": format!("dm-answer:{REQUEST_ID}"),
                 "message": message}}),
         );
         let (app_base, app_seen) = serve(app_handler(vec![("deliveries/next", ready)])).await;
@@ -1376,7 +1377,8 @@ mod tests {
         assert_eq!(
             deliver.body,
             json!({"card_id": "AMUX-12", "question_revision": 3, "request_id": REQUEST_ID,
-                "session": "claude-impl", "message": message})
+                "worker": "claude-impl", "session": "claude-impl", "session_attempt": 2,
+                "message": message})
         );
         // The bridge still never posts to /api/board.
         assert!(local

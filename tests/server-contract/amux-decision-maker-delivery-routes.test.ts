@@ -53,7 +53,9 @@ const READY = {
   instance: "decision-maker-openai",
   cardId: "AMUX-12",
   questionRevision: 3,
+  askingWorkerId: "claude-impl",
   session: "claude-impl",
+  sessionAttempt: 2,
   messageId: `dm-answer:${REQUEST_ID}`,
   message: MESSAGE,
 };
@@ -129,7 +131,10 @@ const ROUTES: Route[] = [
         instance: "decision-maker-openai",
         card_id: "AMUX-12",
         question_revision: 3,
+        // The binding the local AMUX holds the card to (review r-20261018-065705-65cb2a).
+        worker: "claude-impl",
         session: "claude-impl",
+        session_attempt: 2,
         message_id: READY.messageId,
         message: MESSAGE,
       },
