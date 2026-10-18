@@ -16,7 +16,8 @@ const agentSecret = "v19_session_stop_012345678901234567890123456789";
 const active = { namespace: "agent/amux-intake", claimStatus: "in_flight",
   closedAt: null, resolutionAuditLogId: null, reservationStatus: "queued",
   operatingScopeSettingId: "scope_1", latestScopeId: "scope_1",
-  ideaState: "submitted", cancelledAt: null, analysisCompletedAt: null,
+  submissionOrigin: "session", ideaState: "submitted",
+  cancelledAt: null, analysisCompletedAt: null,
   analysisDeadlineAt: new Date(now.getTime() + 1), rawAvailable: true,
   provenanceAvailable: true, rawPurgedAt: null, now };
 
@@ -28,6 +29,7 @@ test("session stop decision loses permission on cancellation, expiry and claim c
     { namespace: "other" }, { claimStatus: "outcome_unknown" },
     { closedAt: now }, { resolutionAuditLogId: "audit_1" },
     { reservationStatus: "cancelled" }, { latestScopeId: "scope_2" },
+    { submissionOrigin: "admin" },
     { ideaState: "registered" }, { cancelledAt: now },
     { analysisCompletedAt: now }, { analysisDeadlineAt: now },
     { rawAvailable: false }, { provenanceAvailable: false },

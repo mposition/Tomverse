@@ -13,6 +13,7 @@ type StopSnapshot = {
   reservationStatus: string;
   operatingScopeSettingId: string;
   latestScopeId: string | null;
+  submissionOrigin: string;
   ideaState: string;
   cancelledAt: Date | null;
   analysisCompletedAt: Date | null;
@@ -36,6 +37,7 @@ export function shouldAmuxSessionAnalysisStop(row: StopSnapshot): boolean {
     row.claimStatus === "in_flight" && row.closedAt === null &&
     row.resolutionAuditLogId === null && row.reservationStatus === "queued" &&
     row.latestScopeId === row.operatingScopeSettingId &&
+    row.submissionOrigin === "session" &&
     ["submitted", "analyzing"].includes(row.ideaState) &&
     row.cancelledAt === null && row.analysisCompletedAt === null &&
     row.analysisDeadlineAt > row.now && row.rawAvailable === true &&
@@ -60,7 +62,8 @@ export async function readAmuxSessionAnalysisStopState(
            r."operatingScopeSettingId",
            (SELECT s."id" FROM "AmuxIdeaOperatingScopeSetting" s
             ORDER BY s."version" DESC LIMIT 1) AS "latestScopeId",
-           i."state" AS "ideaState", i."cancelledAt", i."analysisCompletedAt",
+           i."submissionOrigin", i."state" AS "ideaState",
+           i."cancelledAt", i."analysisCompletedAt",
            i."analysisDeadlineAt", i."rawPurgedAt",
            i."rawCiphertext" IS NOT NULL AS "rawAvailable",
            i."sourceProvenanceCiphertext" IS NOT NULL AS "provenanceAvailable",
