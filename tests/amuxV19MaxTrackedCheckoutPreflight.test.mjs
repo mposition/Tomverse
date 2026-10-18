@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { chmod, mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -25,12 +26,21 @@ async function withEnvironment(fn) {
     "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
     "TOMVERSE_AMUX_V19_TRACKED_REPOSITORY_ROOT"];
   const old = Object.fromEntries(names.map((name) => [name, process.env[name]]));
-  await mkdir(join(root, "mposition", "tomverse"), { recursive: true });
+  const checkout = join(root, "mposition", "tomverse");
+  await mkdir(checkout, { recursive: true });
+  execFileSync("git", ["init", "--quiet", checkout]);
+  execFileSync("git", ["-C", checkout, "remote", "add", "origin",
+    "https://github.com/mposition/Tomverse.git"]);
+  if (process.platform === "linux") {
+    for (const path of [root, join(root, "mposition"), checkout,
+      join(checkout, ".git")]) await chmod(path, 0o755);
+    await chmod(join(checkout, ".git", "config"), 0o644);
+  }
   try {
     process.env[names[0]] = origin;
     process.env[names[1]] = secret;
     process.env[names[2]] = root;
-    await fn(join(root, "mposition", "tomverse"));
+    await fn(checkout);
   } finally {
     for (const name of names) {
       if (old[name] === undefined) delete process.env[name];
