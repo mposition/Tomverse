@@ -33,7 +33,7 @@ import { commitAmuxIdeaSessionCancellation,
   AmuxIdeaSessionCancellationError } from
   "@/lib/amux/ideaSessionCancellationService";
 import {
-  commitAmuxIdeaSessionSubmission,
+  commitAmuxIdeaSessionSubmission as commitPinnedSessionSubmission,
   readAmuxIdeaSessionSubmissionRequest,
   AmuxIdeaSessionSubmissionError,
   type CommittedAmuxIdeaSessionSubmission,
@@ -77,6 +77,13 @@ import { encodeAmuxSessionAnalysisQueueCursor,
 import { buildAmuxSessionAnalysisQueueWhere } from
   "@/lib/amux/ideaSessionAnalysisQueueWhereCore";
 import { prisma } from "@/lib/prisma";
+
+const commitAmuxIdeaSessionSubmission = (
+  tx: Parameters<typeof commitPinnedSessionSubmission>[0],
+  input: Omit<Parameters<typeof commitPinnedSessionSubmission>[1], "pinnedCommitShas">,
+) => commitPinnedSessionSubmission(tx, { ...input,
+  pinnedCommitShas: Array(input.inspected.counts.repositoryCount +
+    input.inspected.counts.pullRequestCount).fill("a".repeat(40)) });
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const url = testUrl ? new URL(testUrl) : null;
