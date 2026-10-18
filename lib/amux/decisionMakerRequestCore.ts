@@ -54,10 +54,13 @@ export const DM_ROUTING_REFUSAL_CODES = [
 
 /**
  * The request event kinds. Each is named after its §10 audit action
- * (`amux.decision.<kind>`), and the trigger requires exactly that action.
- * The first nine are stage S1c's; `cleanup_unknown` is §5's report of a
- * request whose directories the broker could not confirm deleted (stage
- * S2-2a3, migration 20261017160000_amux_decision_maker_cleanup_unknown).
+ * (`amux.decision.<kind>`), and the trigger requires exactly that action --
+ * but for `direct_answer_close`, below. The first nine are stage S1c's;
+ * `cleanup_unknown` is §5's report of a request whose directories the broker
+ * could not confirm deleted (stage S2-2a3, migration
+ * 20261017160000_amux_decision_maker_cleanup_unknown); `direct_answer_close`
+ * is §2-7's close of a request whose question the operator answered directly
+ * (stage S2-2b4, migration 20261018120000_amux_decision_maker_delivery_gaps).
  */
 export const DM_REQUEST_EVENT_KINDS = [
   "assign",
@@ -70,11 +73,12 @@ export const DM_REQUEST_EVENT_KINDS = [
   "result_unknown",
   "stale_close",
   "cleanup_unknown",
+  "direct_answer_close",
 ] as const;
 export type DmRequestEventKind = (typeof DM_REQUEST_EVENT_KINDS)[number];
 
 /** Recorded by the router's actor; every other kind by the request's instance. */
-export const DM_ROUTER_EVENT_KINDS = ["assign", "assign_discarded", "stale_close"] as const;
+export const DM_ROUTER_EVENT_KINDS = ["assign", "assign_discarded", "stale_close", "direct_answer_close"] as const;
 
 /**
  * A person's judgment of the request's proposal (§2-6, stage S1e), each named
@@ -90,12 +94,16 @@ export type DmJudgmentEventKind = (typeof DM_JUDGMENT_EVENT_KINDS)[number];
 
 /**
  * Every kind the event table holds, as its kind CHECK lists them since stage
- * S2-2a3: this module's ten and a judgment's three.
+ * S2-2b4: this module's eleven and a judgment's three.
  */
 export const DM_LEDGER_EVENT_KINDS = [...DM_REQUEST_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS] as const;
 
-/** The router's closing events (stage S1c). */
-export const DM_ROUTER_CLOSING_EVENT_KINDS = ["assign_discarded", "stale_close"] as const;
+/**
+ * The router's closing events: stage S1c's discarded assignment and stale
+ * close, and stage S2-2b4's close on the operator's direct answer (§2-7:
+ * "운영자의 직접 답이 먼저면 요청은 닫힌다").
+ */
+export const DM_ROUTER_CLOSING_EVENT_KINDS = ["assign_discarded", "stale_close", "direct_answer_close"] as const;
 
 /**
  * Events that close a request: the router's, and since stage S1e a person's
@@ -104,7 +112,8 @@ export const DM_ROUTER_CLOSING_EVENT_KINDS = ["assign_discarded", "stale_close"]
  * `cleanup_unknown` is not one: §6 names five terminal results and a person's
  * judgment closes a proposal, and an unconfirmed cleanup is neither -- a
  * proposal stored before the report stays open for the operator, and a
- * report after a closing is still recorded.
+ * report after a closing is still recorded. Every guard and store read that
+ * asks whether a request is closed lists exactly these (AGENTS.md, stage S1e).
  */
 export const DM_CLOSING_EVENT_KINDS = [...DM_ROUTER_CLOSING_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS] as const;
 
@@ -153,7 +162,17 @@ export const DM_ROUTER_SYSTEM_ACTOR = "amux-decision-router" as const;
 export const DM_REQUEST_AUDIT_ACTION = "amux.decision.route" as const;
 export const DM_REQUEST_AUDIT_TARGET_TYPE = "AmuxDecisionMakerRequest" as const;
 export const DM_REQUEST_EVENT_AUDIT_TARGET_TYPE = "AmuxDecisionMakerRequestEvent" as const;
-export const dmEventAuditAction = (kind: DmRequestEventKind): string => `amux.decision.${kind}`;
+/**
+ * `amux.decision.<kind>`, but for one kind. §10 closes its list of actions
+ * and names none for a direct answer's close (stage S2-2b4), so it is the
+ * router's `amux.decision.assign_discarded` -- the action §2-3 gives the close
+ * of a request whose card the operator answered first -- told apart by the
+ * event's kind and the audit metadata's `kind`, as a delivery receipt is
+ * recorded under `.deliver`. The event guard and the retention guard map it
+ * the same way.
+ */
+export const dmEventAuditAction = (kind: DmRequestEventKind): string =>
+  kind === "direct_answer_close" ? "amux.decision.assign_discarded" : `amux.decision.${kind}`;
 
 /** §2, §9: the database-clock windows. */
 export const DM_ASSIGNMENT_WINDOW_MS = 2 * 60 * 1000;
@@ -588,7 +607,8 @@ export type DmEventAttempt =
   | { kind: "result_rejected"; instance: DmInstanceScope; resultDigest: string; rejectionReason: DmResultRejectionReason }
   | { kind: "result_unknown"; instance: DmInstanceScope; resultDigest: string }
   | { kind: "stale_close" }
-  | { kind: "cleanup_unknown"; instance: DmInstanceScope };
+  | { kind: "cleanup_unknown"; instance: DmInstanceScope }
+  | { kind: "direct_answer_close" };
 
 /** Why the graph refuses an event. Each names one clause of the trigger. */
 export type DmEventRefusal =
@@ -645,6 +665,10 @@ export const isDmDeadlineResultKind = (kind: DmResultKind): boolean =>
  *   before. A fact about local files whatever happened since, so like a
  *   transmission receipt it is accepted after the request closed or its
  *   result arrived, holds no deadline, and closes nothing.
+ * - `direct_answer_close` (stage S2-2b4, §2-7: "운영자의 직접 답이 먼저면
+ *   요청은 닫힌다"): a request routed to a DM and open, whatever it was waiting
+ *   for -- its assignment, its result, or a person's judgment of its proposal.
+ *   Closes the request, once.
  *
  * A request routed to the operator is closed from its creation, so only a
  * rejection can ever be recorded against it. A person's judgment (stage S1e)
@@ -728,6 +752,10 @@ export const dmEventRefusal = (state: DmRequestState, attempt: DmEventAttempt): 
     case "cleanup_unknown":
       if (!state.assigned) return "not_assigned";
       if (state.cleanupUnknown !== null) return "cleanup_unknown_recorded";
+      return null;
+    case "direct_answer_close":
+      if (state.route !== "dm_proposal") return "not_routed_to_dm";
+      if (closed) return "closed";
       return null;
   }
 };

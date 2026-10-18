@@ -276,10 +276,13 @@ test("the triggers use the core's period, retention, total and actions, and the 
   for (const name of ["amux_decision_maker_body_guard", "amux_decision_maker_retention_event_guard"]) {
     assert.ok(functionBody(sql, name).includes("'tomverse-amux-decision-maker-request:' ||"), name);
   }
-  // The closing trigger fires on exactly the router's closing kinds. Stage S1e recreated it with a
-  // judgment's three as well (20261008130100_amux_decision_maker_judgment_delivery,
-  // tests/amuxDecisionMakerJudgment.test.mjs).
-  assert.match(sql, new RegExp(`WHEN \\(NEW\\."kind" IN \\(${DM_ROUTER_CLOSING_EVENT_KINDS.map((kind) => `'${kind}'`).join(", ")}\\)\\)`));
+  // The closing trigger fires on exactly the router's closing kinds of stage S1d. Stage S1e recreated
+  // it with a judgment's three as well (20261008130100_amux_decision_maker_judgment_delivery), and
+  // stage S2-2b4 with a direct answer's close, the router's third
+  // (20261018120000_amux_decision_maker_delivery_gaps; both in tests/amuxDecisionMakerJudgment.test.mjs).
+  const s1dRouterClosing = DM_ROUTER_CLOSING_EVENT_KINDS.filter((kind) => kind !== "direct_answer_close");
+  assert.deepEqual(s1dRouterClosing, ["assign_discarded", "stale_close"]);
+  assert.match(sql, new RegExp(`WHEN \\(NEW\\."kind" IN \\(${s1dRouterClosing.map((kind) => `'${kind}'`).join(", ")}\\)\\)`));
   assert.match(sql, /AFTER INSERT ON "AmuxDecisionMakerRequestEvent"/);
 });
 

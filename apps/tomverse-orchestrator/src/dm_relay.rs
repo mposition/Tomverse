@@ -26,9 +26,17 @@
 //! writes only the marker, and the delivery sends only what the app gives out
 //! for a confirmation, after the app recorded the delivery decision.
 //!
+//! Stage S2-2b4: a delivery the local AMUX proved sent nothing is recorded as
+//! `not_sent` with its reason (`delivery`); at its start the relay settles
+//! every decision a stopped bridge left without an outcome, from the local
+//! records and never by sending again (`delivery::settle_unsettled`); and each
+//! tick it reports the operator's direct answer records so the app closes
+//! their questions' requests (`direct`, §2-7).
+//!
 //! Not here: the repository snapshot (stage S2b) and any Admin screen.
 
 pub mod delivery;
+pub mod direct;
 pub mod flow;
 pub mod io;
 pub mod wire;

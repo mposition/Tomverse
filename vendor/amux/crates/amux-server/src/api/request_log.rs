@@ -1311,6 +1311,10 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
     RouteEntry { path: "/api/dm-relay/answers", methods: &["POST"] },
     RouteEntry { path: "/api/dm-relay/answers/check", methods: &["POST"] },
     RouteEntry { path: "/api/dm-relay/answers/unknown", methods: &["POST"] },
+    // Stage S2-2b4, same token, two reads by POST: the operator's answer
+    // records, and one decided delivery's records for a restarted bridge.
+    RouteEntry { path: "/api/dm-relay/answers/operator", methods: &["POST"] },
+    RouteEntry { path: "/api/dm-relay/answers/receipt", methods: &["POST"] },
     RouteEntry { path: "/api/board/{id}/verifications", methods: &["GET"] },
     RouteEntry { path: "/api/board/{id}/artifacts", methods: &["GET", "POST"] },
     RouteEntry { path: "/api/board/{id}/artifacts/{aid}", methods: &["PATCH", "DELETE"] },

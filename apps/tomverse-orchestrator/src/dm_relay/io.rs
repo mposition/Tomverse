@@ -12,7 +12,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use super::delivery::{deliver_next, CursorMove, DeliveryCursor};
+use super::delivery::{deliver_next, settle_unsettled, CursorMove, DeliveryCursor, Settle};
+use super::direct::{report_direct_answers, DirectCursor};
 use super::flow::{
     listed_markers, relay_candidate, release_marker, scan, AppRoute, DmApp, DmBroker, DmLocal,
     LocalRead, LocalRoute, MarkerKey, RelayEnd, LOCAL_MARKER_LIST_PATH,
@@ -314,6 +315,11 @@ pub struct Relay<A, L, B> {
     cursor: Option<String>,
     /// Where the walk over the operator-confirmed answers stands (stage S2-2b3).
     delivery_cursor: Option<DeliveryCursor>,
+    /// Stage S2-2b4: every decision a stopped bridge left without an outcome
+    /// has been settled since this process started.
+    settled_start: bool,
+    /// Stage S2-2b4: where the walk over the operator's answer records stands.
+    direct_cursor: DirectCursor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -336,6 +342,8 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             halt: None,
             cursor: None,
             delivery_cursor: None,
+            settled_start: false,
+            direct_cursor: DirectCursor::starting_at(now_secs()),
         }
     }
 
@@ -379,9 +387,24 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         if self.halt.is_some() {
             return Tick::Idle;
         }
+        // Stage S2-2b4: at the start, every decision a stopped bridge left
+        // without an outcome is settled -- one per tick, from the local AMUX's
+        // own records, nothing sent again -- before anything is delivered, so
+        // a session whose delivery is unknown is paused before another answer
+        // could reach it (§9).
+        if !self.settled_start {
+            match self.settle().await {
+                Settle::Nothing => self.settled_start = true,
+                Settle::Settled => return Tick::Busy,
+                Settle::Retry => return Tick::Idle,
+            }
+        }
+        // Stage S2-2b4 (§2-7): the operator's direct answers close their
+        // questions' requests before a confirmation could be delivered.
+        let closed = self.report_direct().await;
         // A person's confirmed answer goes before a new question: it is the
         // end of a question already asked.
-        let delivered = self.deliver().await;
+        let delivered = self.deliver().await || closed;
         if self.halt.is_some() {
             return Tick::Idle;
         }
@@ -389,6 +412,40 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             Tick::Idle if delivered => Tick::Busy,
             tick => tick,
         }
+    }
+
+    /// One decision a stopped bridge left without an outcome (stage S2-2b4,
+    /// `delivery::settle_unsettled`).
+    async fn settle(&mut self) -> Settle {
+        let run = settle_unsettled(&self.app, &self.local).await;
+        // Card id, revision and a code: no answer, message or key.
+        if let Some((card, revision)) = &run.question {
+            println!(
+                "amux dm relay: unsettled delivery for card {card} revision {revision}: {}",
+                run.code
+            );
+        }
+        if let Some(cause) = run.halt {
+            self.halt = Some(cause);
+            eprintln!(
+                "amux dm relay halt: {cause}; nothing more is delivered or relayed until the bridge restarts. Read the request in Admin first."
+            );
+        }
+        run.settle
+    }
+
+    /// One page of the operator's answer records (stage S2-2b4,
+    /// `direct::report_direct_answers`); true when a request was closed or a
+    /// full page held records not seen before.
+    async fn report_direct(&mut self) -> bool {
+        let run = report_direct_answers(&self.app, &self.local, &mut self.direct_cursor).await;
+        if run.reported > 0 || run.skipped > 0 || run.code != "direct_answers_reported" {
+            println!(
+                "amux dm relay: direct answers: {} reported, {} closed, {} passed: {}",
+                run.reported, run.closed, run.skipped, run.code
+            );
+        }
+        run.closed > 0 || run.more
     }
 
     /// One step of the confirmed-answer walk (`delivery::deliver_next`); true
@@ -474,6 +531,15 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             Tick::Idle
         }
     }
+}
+
+/// Seconds since the epoch by this host's clock: where the walk over the
+/// operator's answer records starts looking back from (stage S2-2b4).
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Runs beside the bridge's worker loop until the process ends. A process
@@ -646,6 +712,12 @@ mod tests {
                 ("POST", "/api/dm-relay/pending/release") => {
                     Reply::Json(200, json!({"outcome": "released"}))
                 }
+                // Stage S2-2b4: no operator answer record, unless a test says so.
+                ("POST", "/api/dm-relay/answers/operator")
+                    if seen.header(DM_RELAY_LOCAL_TOKEN_HEADER) == Some(LOCAL_TOKEN) =>
+                {
+                    Reply::Json(200, json!({"answers": [], "truncated": false}))
+                }
                 _ => Reply::Json(404, json!({"error": "not found"})),
             },
         )
@@ -700,6 +772,11 @@ mod tests {
                     json!({"found": true, "status": "not_recorded",
                     "result_kind": null, "event_id": null, "reason": null}),
                 ),
+                // Stage S2-2b4: no decision is left without an outcome, unless a test says so.
+                "deliveries/unsettled" => Reply::Json(
+                    200,
+                    json!({"found": true, "status": "none", "delivery": null}),
+                ),
                 // Stage S2-2b3: no confirmed answer waits, unless a test says so.
                 "deliveries/next" => Reply::Json(
                     200,
@@ -714,12 +791,13 @@ mod tests {
         })
     }
 
-    /// Every path the app was asked, without the confirmed-answer read each
-    /// tick begins with (stage S2-2b3).
+    /// Every path the app was asked, without the reads each tick begins with:
+    /// the confirmed-answer read (stage S2-2b3) and the first tick's unsettled
+    /// read (stage S2-2b4).
     fn question_paths(seen: &Arc<Mutex<Vec<Seen>>>) -> Vec<String> {
         app_paths(seen)
             .into_iter()
-            .filter(|path| path != "deliveries/next")
+            .filter(|path| path != "deliveries/next" && path != "deliveries/unsettled")
             .collect()
     }
 
@@ -810,11 +888,13 @@ mod tests {
             .collect()
     }
 
+    /// Every local call that writes: not a GET, and not the operator answer
+    /// list (stage S2-2b4), which is a read by POST.
     fn local_writes(seen: &Arc<Mutex<Vec<Seen>>>) -> Vec<String> {
         seen.lock()
             .unwrap()
             .iter()
-            .filter(|seen| seen.method != "GET")
+            .filter(|seen| seen.method != "GET" && seen.path != "/api/dm-relay/answers/operator")
             .map(|seen| seen.path.clone())
             .collect()
     }
@@ -826,8 +906,12 @@ mod tests {
             relay_with(vec![], json!({"status": "verified"})).await;
         assert_eq!(relay.tick().await, Tick::Busy);
         assert_eq!(relay.halt(), None);
-        // Each tick asks for a confirmed answer first (stage S2-2b3); there is none.
-        assert_eq!(app_paths(&app_seen)[0], "deliveries/next");
+        // The first tick settles the start (stage S2-2b4), then asks for a confirmed
+        // answer (stage S2-2b3); there is neither.
+        assert_eq!(
+            app_paths(&app_seen)[..2],
+            ["deliveries/unsettled", "deliveries/next"]
+        );
         assert_eq!(
             question_paths(&app_seen),
             vec![
@@ -999,7 +1083,10 @@ mod tests {
         )
         .await;
         assert_eq!(relay.tick().await, Tick::Idle);
-        assert_eq!(app_paths(&app_seen), vec!["deliveries/next", "requests"]);
+        assert_eq!(
+            app_paths(&app_seen),
+            vec!["deliveries/unsettled", "deliveries/next", "requests"]
+        );
         assert!(local_writes(&local_seen).is_empty() && lines.lock().unwrap().is_empty());
         assert_eq!(relay.halt(), None);
     }
@@ -1167,6 +1254,8 @@ mod tests {
         // Every app answer is lost: the confirmed-answer read is asked again
         // next tick, and so is the one routing.
         let mut relay = Relay::new(FakeApp::default(), local, NoBroker, false);
+        // The start is settled (stage S2-2b4; its own test asks the app first).
+        relay.settled_start = true;
         assert_eq!(relay.tick().await, Tick::Idle);
         assert_eq!(
             relay.app.routes(),
@@ -1177,7 +1266,12 @@ mod tests {
             None,
             "a lost routing answer is asked again, not a halt"
         );
-        assert!(relay.local.writes.lock().unwrap().is_empty());
+        // The operator answer list is a read, and the only local call.
+        assert!(relay
+            .local
+            .routes()
+            .iter()
+            .all(|route| *route == crate::dm_relay::flow::LocalRoute::OperatorAnswers));
     }
 
     /// A local board of `count` typed `needsyou` cards, `AMUX-000` upwards,
@@ -1242,6 +1336,7 @@ mod tests {
         let local = board_of(101, None);
         let app = FakeApp::with(vec![(AppRoute::Requests, routed("operator"))]);
         let mut relay = Relay::new(app, local, SilentBroker, false);
+        relay.settled_start = true;
         for index in 0..100 {
             relay.settled.insert((format!("AMUX-{index:03}"), 1));
         }
@@ -1279,11 +1374,21 @@ mod tests {
         );
         // Every question is settled already, so the tick routes nothing.
         let mut relay = Relay::new(FakeApp::default(), local, SilentBroker, false);
+        relay.settled_start = true;
         for index in 0..160 {
             relay.settled.insert((format!("AMUX-{index:03}"), 1));
         }
         relay.tick().await;
-        let writes = relay.local.writes.lock().unwrap().clone();
+        // The operator answer list (stage S2-2b4) is a read; every write is a release.
+        let writes: Vec<_> = relay
+            .local
+            .writes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(route, _, _)| *route != LocalRoute::OperatorAnswers)
+            .cloned()
+            .collect();
         assert_eq!(writes.len(), 1, "{writes:?}");
         assert_eq!(writes[0].0, LocalRoute::ReleasePending);
         assert_eq!(
@@ -1350,19 +1455,26 @@ mod tests {
         assert_eq!(relay.tick().await, Tick::Busy);
         assert_eq!(relay.halt(), None);
         let paths = app_paths(&app_seen);
+        // Stage S2-2b4: the start's unsettled read comes first, once.
         assert_eq!(
-            paths[..3],
-            ["deliveries/next", "deliveries", "deliveries/outcome"]
+            paths[..4],
+            [
+                "deliveries/unsettled",
+                "deliveries/next",
+                "deliveries",
+                "deliveries/outcome"
+            ]
         );
         assert_eq!(
-            paths[3], "requests",
+            paths[4], "requests",
             "the question comes after the delivery"
         );
         let app = app_seen.lock().unwrap().clone();
-        assert_eq!(app[0].body, json!({"after": null}));
-        assert_eq!(app[1].body, json!({"request_id": REQUEST_ID}));
+        assert_eq!(app[0].body, json!({}));
+        assert_eq!(app[1].body, json!({"after": null}));
+        assert_eq!(app[2].body, json!({"request_id": REQUEST_ID}));
         assert_eq!(
-            app[2].body,
+            app[3].body,
             json!({"request_id": REQUEST_ID, "outcome": "receipt"})
         );
         let local = local_seen.lock().unwrap().clone();
@@ -1396,5 +1508,122 @@ mod tests {
             second.body,
             json!({"after": {"judged_at_ms": 9, "request_id": REQUEST_ID}})
         );
+    }
+
+    /// Stage S2-2b4: a restarted relay settles every decision a stopped bridge
+    /// left without an outcome -- one per tick, from the local records, nothing
+    /// sent again -- before it delivers anything, and from then on reports the
+    /// operator's direct answers before each delivery.
+    #[tokio::test]
+    async fn a_restart_settles_every_unsettled_decision_before_any_delivery() {
+        use crate::dm_relay::flow::tests::{answered, recorded, FakeApp, FakeBroker, FakeLocal};
+        let unsettled = answered(
+            200,
+            json!({"found": true, "status": "unsettled", "delivery": {
+                "request_id": REQUEST_ID, "decided_at_ms": 9, "card_id": "AMUX-12", "question_revision": 3,
+                "worker": "claude-impl", "session": "claude-impl", "session_attempt": 2,
+                "message_id": format!("dm-answer:{REQUEST_ID}")}}),
+        );
+        let none = answered(
+            200,
+            json!({"found": true, "status": "none", "delivery": null}),
+        );
+        let app = FakeApp::with(vec![
+            (AppRoute::DeliveriesUnsettled, unsettled),
+            (AppRoute::DeliveriesUnsettled, none.clone()),
+            (AppRoute::DeliveryOutcome, recorded()),
+            (AppRoute::DirectAnswer, recorded()),
+            (AppRoute::DeliveriesNext, none.clone()),
+            (AppRoute::DeliveriesNext, none),
+        ]);
+        let local = FakeLocal::default();
+        for (route, answer) in [
+            (
+                LocalRoute::AnswerReceipt,
+                answered(
+                    200,
+                    json!({"reservation": "none", "answer_source": "operator",
+                    "claimed_by_request": false, "question_current": true}),
+                ),
+            ),
+            (
+                LocalRoute::OperatorAnswers,
+                answered(
+                    200,
+                    json!({"answers": [{"card_id": "AMUX-7", "question_revision": 1,
+                    "recorded_at": 1_790_000_000}], "truncated": false}),
+                ),
+            ),
+            (
+                LocalRoute::OperatorAnswers,
+                answered(200, json!({"answers": [], "truncated": false})),
+            ),
+        ] {
+            local
+                .answers
+                .lock()
+                .unwrap()
+                .entry(route.path())
+                .or_default()
+                .push_back(answer);
+        }
+        let mut relay = Relay::new(
+            app,
+            local,
+            FakeBroker::answering(|_| BrokerExchange::Lost),
+            false,
+        );
+        // Tick one: the decision is settled from the local records, and nothing else happens.
+        assert_eq!(relay.tick().await, Tick::Busy);
+        assert_eq!(relay.halt(), None);
+        assert_eq!(
+            relay.app.routes(),
+            vec![AppRoute::DeliveriesUnsettled, AppRoute::DeliveryOutcome]
+        );
+        assert_eq!(
+            relay.app.body(AppRoute::DeliveryOutcome),
+            json!({"request_id": REQUEST_ID, "outcome": "not_sent", "reason": "answered_by_operator"})
+        );
+        // Tick two: none left; the direct answer is reported before the delivery read.
+        relay.tick().await;
+        assert_eq!(
+            relay.app.routes(),
+            vec![
+                AppRoute::DeliveriesUnsettled,
+                AppRoute::DeliveryOutcome,
+                AppRoute::DeliveriesUnsettled,
+                AppRoute::DirectAnswer,
+                AppRoute::DeliveriesNext
+            ]
+        );
+        // Tick three: the start is settled once; the walk, at the end of the list, reads the
+        // window before the newest record again.
+        relay.tick().await;
+        assert_eq!(
+            relay
+                .app
+                .routes()
+                .iter()
+                .filter(|route| **route == AppRoute::DeliveriesUnsettled)
+                .count(),
+            2
+        );
+        let operator_reads: Vec<Value> = relay
+            .local
+            .writes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(route, _, _)| *route == LocalRoute::OperatorAnswers)
+            .map(|(_, body, _)| body.clone())
+            .collect();
+        assert_eq!(operator_reads.len(), 2);
+        assert_eq!(
+            operator_reads[1],
+            json!({"after": {"recorded_at": 1_790_000_000 - crate::dm_relay::direct::DM_DIRECT_ANSWER_REWIND_SECS,
+                "card_id": "", "question_revision": i64::MIN}})
+        );
+        // Nothing is ever sent again: the delivery route is never called.
+        assert!(!relay.local.routes().contains(&LocalRoute::Answers));
     }
 }

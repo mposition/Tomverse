@@ -1163,7 +1163,7 @@ const REGISTRY = {
     module: "lib/amux/decisionMakerRequestCore.ts",
     list: "DM_LEDGER_EVENT_KINDS",
     reason:
-      "The request lifecycle, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>): the nine of stage S1c, which the request store writes and dmEventRefusal() mirrors, since stage S1e (migration 20261008130100_amux_decision_maker_judgment_delivery, which recreated this CHECK) a person's judgment -- confirm, edit_confirm, reject -- which the judgment table's trigger writes beside the judgment row and which closes the request, and since stage S2-2a3 (migration 20261017160000_amux_decision_maker_cleanup_unknown, which recreated it again) section 5's cleanup_unknown, which the request store writes once per request and which closes nothing. Deliveries, retention and body events have tables of their own and are not values here.",
+      "The request lifecycle, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>): the nine of stage S1c, which the request store writes and dmEventRefusal() mirrors, since stage S1e (migration 20261008130100_amux_decision_maker_judgment_delivery, which recreated this CHECK) a person's judgment -- confirm, edit_confirm, reject -- which the judgment table's trigger writes beside the judgment row and which closes the request, and since stage S2-2a3 (migration 20261017160000_amux_decision_maker_cleanup_unknown, which recreated it again) section 5's cleanup_unknown, which the request store writes once per request and which closes nothing, and since stage S2-2b4 (migration 20261018120000_amux_decision_maker_delivery_gaps) section 2-7's direct_answer_close, the router's close of a request whose question the operator answered directly -- the one kind not named after its own action: section 10 names none for it, so it is audited under the router's amux.decision.assign_discarded, which the guard maps. Deliveries, retention and body events have tables of their own and are not values here.",
   },
   AmuxDecisionMakerRequestEvent_instance_check: {
     owner: "list",
@@ -1275,7 +1275,14 @@ const REGISTRY = {
     module: "lib/amux/decisionMakerJudgmentCore.ts",
     list: "DM_DELIVERY_EVENT_KINDS",
     reason:
-      "Sections 2-7 and 9: the delivery decision of a confirmed answer, then its receipt or an unknown outcome, then a person's resolution of an unknown outcome -- each once per request by a partial unique index, in that order by the guard.",
+      "Sections 2-7 and 9: the delivery decision of a confirmed answer, then its receipt, an unknown outcome or -- since stage S2-2b4 (migration 20261018120000_amux_decision_maker_delivery_gaps, which recreated this CHECK) -- a delivery the local AMUX proved sent nothing, one of the three, then a person's resolution of an unknown outcome -- each once per request by a partial unique index, in that order by the guard.",
+  },
+  AmuxDecisionMakerDeliveryEvent_not_sent_reason_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_DELIVERY_NOT_SENT_REASONS",
+    reason:
+      "Stage S2-2b4 (sections 2-7 and 9): why a decided delivery sent nothing -- the operator's direct answer won the answer record's claim, the question or section 9's binding changed, the worker's lane refused before typing, or the local AMUX refused before claiming -- each a fact the local AMUX proved; an unproved result stays delivery_unknown. NULL on every other kind; a shape CHECK requires it exactly on delivery_not_sent, and the bridge maps the local answer to one of these.",
   },
   AmuxDecisionMakerDeliveryEvent_outcome_check: {
     owner: "list",

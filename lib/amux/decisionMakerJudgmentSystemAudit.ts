@@ -13,8 +13,9 @@ import { DM_ROUTER_SYSTEM_ACTOR } from "@/lib/amux/decisionMakerRequestCore";
 /**
  * The system audit of the Decision Maker's delivery records
  * (docs/policy/amux-decision-maker.md §9, §10): `amux.decision.deliver` for the
- * delivery decision and for its receipt (§10 names no action of its own for
- * the receipt), and `amux.decision.delivery_unknown` -- by the router's actor,
+ * delivery decision, for its receipt and (stage S2-2b4) for a delivery that
+ * sent nothing (§10 names no action of its own for either outcome), and
+ * `amux.decision.delivery_unknown` -- by the router's actor,
  * the Decision Maker's one actor that is not a DM instance: the confirmed
  * answer is the operator's, not a DM's. Migration
  * 20261008130100_amux_decision_maker_judgment_delivery requires exactly that
@@ -31,6 +32,7 @@ const SUMMARIES: Readonly<Record<DmDeliverySystemEventKind, string>> = {
   deliver: "Released a confirmed AMUX Decision Maker answer for delivery.",
   delivery_receipt: "Recorded the delivery receipt of a confirmed AMUX Decision Maker answer.",
   delivery_unknown: "Recorded a confirmed AMUX Decision Maker answer whose delivery is unknown.",
+  delivery_not_sent: "Recorded a confirmed AMUX Decision Maker answer that was not sent.",
 };
 
 export const writeDecisionMakerDeliveryAudit = (

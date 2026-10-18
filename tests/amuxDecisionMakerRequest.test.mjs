@@ -145,10 +145,20 @@ test("the ledger's vocabularies are the policy's, and no list holds an autonomou
     "stale_close",
     // Stage S2-2a3, §5.
     "cleanup_unknown",
+    // Stage S2-2b4, §2-7.
+    "direct_answer_close",
   ]);
-  assert.deepEqual([...DM_ROUTER_EVENT_KINDS], ["assign", "assign_discarded", "stale_close"]);
-  // Stage S1e adds a person's judgment to the closing kinds (tests/amuxDecisionMakerJudgment.test.mjs).
-  assert.deepEqual([...DM_CLOSING_EVENT_KINDS], ["assign_discarded", "stale_close", "confirm", "edit_confirm", "reject"]);
+  assert.deepEqual([...DM_ROUTER_EVENT_KINDS], ["assign", "assign_discarded", "stale_close", "direct_answer_close"]);
+  // Stage S1e adds a person's judgment to the closing kinds, and stage S2-2b4 the router's close on the
+  // operator's direct answer (tests/amuxDecisionMakerJudgment.test.mjs).
+  assert.deepEqual([...DM_CLOSING_EVENT_KINDS], [
+    "assign_discarded",
+    "stale_close",
+    "direct_answer_close",
+    "confirm",
+    "edit_confirm",
+    "reject",
+  ]);
   assert.deepEqual([...DM_RESULT_KINDS], ["proposal", "escalate", "validation_failure", "timeout", "unavailable"]);
   assert.deepEqual([...DM_DEADLINE_RESULT_KINDS], ["proposal", "escalate", "validation_failure"]);
   assert.deepEqual([...DM_SNAPSHOT_STATES], ["none", "worker_head", "develop"]);
@@ -172,12 +182,18 @@ test("every event kind is a §10 audit action, by the router or by the request's
   const section10 = read("docs/policy/amux-decision-maker.md");
   const systemLine = section10.slice(section10.indexOf("**감사 action**"), section10.indexOf("사람: `.confirm`"));
   for (const kind of DM_REQUEST_EVENT_KINDS) {
-    assert.equal(dmEventAuditAction(kind), `amux.decision.${kind}`);
+    // §10 closes its list and names no action for a direct answer's close (stage S2-2b4): it is
+    // the router's .assign_discarded, the action §2-3 gives the close of a request the operator
+    // answered first. Every other kind is its own action.
+    const action = dmEventAuditAction(kind);
+    assert.equal(action, kind === "direct_answer_close" ? "amux.decision.assign_discarded" : `amux.decision.${kind}`);
+    const short = action.replace("amux.decision", "");
     assert.ok(
-      systemLine.includes(`\`.${kind}\``) || systemLine.includes(`\`amux.decision.${kind}\``),
-      `${kind} is a §10 system action`,
+      systemLine.includes(`\`${short}\``) || systemLine.includes(`\`${action}\``),
+      `${kind} is recorded under a §10 system action`,
     );
   }
+  assert.ok(!read("docs/policy/amux-decision-maker.md").includes(".direct_answer_close"), "§10 names no such action");
   assert.ok(systemLine.includes(`\`${DM_REQUEST_AUDIT_ACTION}\``));
   assert.equal(DM_REQUEST_AUDIT_TARGET_TYPE, "AmuxDecisionMakerRequest");
   assert.equal(DM_REQUEST_EVENT_AUDIT_TARGET_TYPE, "AmuxDecisionMakerRequestEvent");
@@ -248,10 +264,11 @@ test("the ledger migration's CHECKs hold exactly the core's lists", () => {
   const inList = (name) => quoted(checkBody(sql, name).replace(/^CHECK \(\s*"\w+" IS NULL OR /, "CHECK ("));
   assert.deepEqual(inList("AmuxDecisionMakerRequest_route_check"), [...DM_REQUEST_ROUTES]);
   assert.deepEqual(inList("AmuxDecisionMakerRequest_instance_check"), [...DM_INSTANCE_SCOPES]);
-  // S1c's nine; stage S2-2a3 adds cleanup_unknown in a CHECK of its own (below).
+  // S1c's nine; stage S2-2a3 adds cleanup_unknown and stage S2-2b4 direct_answer_close, each in a CHECK
+  // of its own (below, and tests/amuxDecisionMakerJudgment.test.mjs).
   assert.deepEqual(
     inList("AmuxDecisionMakerRequestEvent_kind_check"),
-    DM_REQUEST_EVENT_KINDS.filter((kind) => kind !== "cleanup_unknown"),
+    DM_REQUEST_EVENT_KINDS.filter((kind) => kind !== "cleanup_unknown" && kind !== "direct_answer_close"),
   );
   assert.deepEqual(inList("AmuxDecisionMakerRequestEvent_instance_check"), [...DM_INSTANCE_SCOPES]);
   assert.deepEqual(inList("AmuxDecisionMakerRequestEvent_vendor_check"), [...DM_VENDORS]);
@@ -281,8 +298,11 @@ test("the ledger migration's CHECKs hold exactly the core's lists", () => {
   for (const [instance, vendorName] of Object.entries(DM_VENDOR_FOR_INSTANCE)) {
     assert.ok(vendor.includes(`("vendor" = '${vendorName}' AND "instance" IS NOT DISTINCT FROM '${instance}')`));
   }
-  // The router's kinds name no instance.
-  assert.deepEqual(quoted(checkBody(sql, "AmuxDecisionMakerRequestEvent_instance_kind_check")), [...DM_ROUTER_EVENT_KINDS]);
+  // The router's kinds of stage S1c name no instance.
+  assert.deepEqual(
+    quoted(checkBody(sql, "AmuxDecisionMakerRequestEvent_instance_kind_check")),
+    DM_ROUTER_EVENT_KINDS.filter((kind) => kind !== "direct_answer_close"),
+  );
 });
 
 test("the ledger migration is additive, and its triggers hold the core's rules", () => {
@@ -501,7 +521,8 @@ test("stage S2-2a3's migration adds cleanup_unknown to the kinds, once per reque
     sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"'),
     sql.indexOf("));", sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"')),
   );
-  assert.deepEqual(quoted(kindCheck), [...DM_LEDGER_EVENT_KINDS]);
+  // Its thirteen; stage S2-2b4 recreated it again with direct_answer_close (tests/amuxDecisionMakerJudgment.test.mjs).
+  assert.deepEqual(quoted(kindCheck), DM_LEDGER_EVENT_KINDS.filter((kind) => kind !== "direct_answer_close"));
   assert.match(sql, /DROP CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check",\n\s+ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"/);
   assert.deepEqual([...sql.matchAll(/\bDROP (CONSTRAINT|INDEX|TRIGGER) "([A-Za-z_]+)"/g)].map((match) => match[2]), [
     "AmuxDecisionMakerRequestEvent_kind_check",
@@ -543,10 +564,10 @@ test("stage S2-2a3's migration adds cleanup_unknown to the kinds, once per reque
   assert.ok(!DM_CLOSING_EVENT_KINDS.includes("cleanup_unknown"));
 
   // No migration between each previous one and this one redefines its guard, and none after this one
-  // but stage S2-2a4's for the event guard, whose own test below holds it to this body: these are the
-  // bodies the database runs, or the one the next replacement is pinned to.
+  // but stage S2-2a4's and stage S2-2b4's for the event guard, whose own tests hold each to its previous
+  // body: these are the bodies the database runs, or the one the next replacement is pinned to.
   for (const [name, previous, successors] of [
-    ["amux_decision_maker_request_event_guard", JUDGMENT_MIGRATION_NAME, [BOUNDARY_MIGRATION_NAME]],
+    ["amux_decision_maker_request_event_guard", JUDGMENT_MIGRATION_NAME, [BOUNDARY_MIGRATION_NAME, DELIVERY_GAPS_MIGRATION_NAME]],
     ["amux_decision_maker_switch_event_guard", SWITCH_SERIALIZATION_MIGRATION_NAME, []],
   ]) {
     const redefining = readdirSync(join(root, "prisma/migrations"))
@@ -563,6 +584,8 @@ test("stage S2-2a3's migration adds cleanup_unknown to the kinds, once per reque
 });
 
 const BOUNDARY_MIGRATION_NAME = "20261017200000_amux_decision_maker_validation_count_boundary";
+// Stage S2-2b4 replaces the event guard again, pinned to S2-2a4's body (tests/amuxDecisionMakerJudgment.test.mjs).
+const DELIVERY_GAPS_MIGRATION_NAME = "20261018120000_amux_decision_maker_delivery_gaps";
 
 test("stage S2-2a4's migration records on a result the switch state it was admitted under, and changes the event guard for that alone", () => {
   const raw = read(`prisma/migrations/${BOUNDARY_MIGRATION_NAME}/migration.sql`);
@@ -632,9 +655,10 @@ test("stage S2-2a4's migration records on a result the switch state it was admit
   assert.match(sql, /^BEGIN;$/m);
   assert.match(sql, /^COMMIT;$/m);
 
-  // No later migration redefines the event guard: this is the body the database runs.
+  // No later migration but stage S2-2b4's redefines the event guard; that one's own test holds it to this
+  // body, line by line.
   const redefining = readdirSync(join(root, "prisma/migrations"))
-    .filter((migration) => migration > BOUNDARY_MIGRATION_NAME)
+    .filter((migration) => migration > BOUNDARY_MIGRATION_NAME && migration !== DELIVERY_GAPS_MIGRATION_NAME)
     .filter((migration) => {
       try {
         return /FUNCTION "amux_decision_maker_request_event_guard"\(/.test(read(`prisma/migrations/${migration}/migration.sql`));
@@ -2199,8 +2223,8 @@ test("the open requests of a key period are counted in one statement, from [from
   assert.match(sent[0].sql, /r\."route" = 'dm_proposal'/);
   assert.match(sent[0].sql, /"createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'/);
   assert.match(sent[0].sql, /"createdAt" < 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'/);
-  // A judgment closes a request too (stage S1e).
-  assert.match(sent[0].sql, /ev\."kind" IN \('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject'\)/);
+  // A judgment closes a request too (stage S1e), and an operator's direct answer (stage S2-2b4).
+  assert.match(sent[0].sql, /ev\."kind" IN \('assign_discarded', 'stale_close', 'direct_answer_close', 'confirm', 'edit_confirm', 'reject'\)/);
   for (const input of [{ fromMs: -1, toMs: 5 }, { fromMs: 5, toMs: 5 }, { fromMs: 1.5, toMs: 5 }, { fromMs: 0, toMs: Number.MAX_VALUE }]) {
     await assert.rejects(
       countOpenDecisionMakerRequestsCreatedBetween(tx, input),
