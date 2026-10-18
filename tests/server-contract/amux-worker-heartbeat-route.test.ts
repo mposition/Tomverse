@@ -13,11 +13,14 @@ mock.module(mod("lib/amux/guard.ts"), { namedExports: {
 mock.module(mod("lib/amux/executionGate.ts"), { namedExports: {
   isAmuxExecutionApiEnabled: () => true,
 } });
-mock.module(mod("lib/amux/routing.ts"), { namedExports: {
-  getConfiguredAmuxWorkerCatalog: () => [{ worker_name: "worker-one" }],
+// The derived catalog check runs inside the heartbeat's own transaction
+// (orchestration policy version 35, section 3), through `listed`.
+mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
+  amuxWorkerCatalogRefusal: async () => null,
 } });
 mock.module(mod("lib/amux/workerRuntime.ts"), { namedExports: {
-  heartbeatAmuxWorkerRuntime: async (input: { protocolCapabilities: string[] }) => {
+  heartbeatAmuxWorkerRuntime: async (input: { protocolCapabilities: string[]; listed?: unknown }) => {
+    assert.equal(typeof input.listed, "function");
     recordedCapabilities = input.protocolCapabilities;
     return { accepted: true,
       leaseExpiresAt: new Date("2026-10-13T12:01:30.000Z") };

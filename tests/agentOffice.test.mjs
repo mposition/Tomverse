@@ -832,14 +832,17 @@ test("the display-only v27 roster shows thirteen residents without admitting new
   assert.match(view.note, /정책 v27/);
   assert.ok(view.workers.filter((worker) => worker.state === "not_admitted").every((worker) => worker.status === "waiting" && !worker.dim));
   const officeReader = readFunction("readAmuxWorkers");
-  // While R2c is off the display roster is the seat list; once it is on,
-  // orchestration policy version 35 (section 3) seats every registered worker
-  // that is not retired. Either way the seats are display only: they choose
-  // which runtime rows are read, never who may be assigned.
+  // Orchestration policy version 35 (section 3) seats every registered worker
+  // that is not retired, against the derived catalog; the display roster is
+  // the seat list only when the registry cannot be read. Either way the seats
+  // are display only: they choose which runtime rows are read, never who may
+  // be assigned.
   assert.match(officeReader, /let roster: readonly \{ name: string; provider: string \}\[\] = AGENT_OFFICE_AMUX_ROSTER;/);
   assert.match(officeReader, /roster\.filter\(\(worker\) => admitted\.has\(worker\.name\)\)/);
   assert.match(officeReader, /agentOfficeAmuxState\(\{ catalog, roster, runtimes, now: new Date\(\) \}\)/);
-  assert.match(officeReader, /if \(amuxWorkerDerivedCatalogAssignmentOpen\(\)\) \{/);
+  assert.match(officeReader, /const read = await readAmuxRegistryAndDerivedCatalog\(prisma\);/);
+  // R2e removed R2c's latch and the catalog variable it fell back to.
+  assert.doesNotMatch(officeReader, /amuxWorkerDerivedCatalogAssignmentOpen|getConfiguredAmuxWorkerCatalog/);
   for (const path of ["lib/amux/routing.ts", "app/api/internal/amux/workers/register/route.ts"]) {
     assert.doesNotMatch(readFileSync(path, "utf8"), /agentOffice\/amuxRoster|AGENT_OFFICE_AMUX_ROSTER/);
   }
@@ -921,7 +924,7 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
 
 test("the office reads AMUX workers' runtime state, never their work, and draws them outside the demo", () => {
   const amux = readFunction("readAmuxWorkers");
-  assert.match(amux, /getConfiguredAmuxWorkerCatalog\(\)/);
+  assert.match(amux, /readAmuxRegistryAndDerivedCatalog\(prisma\)/);
   assert.match(
     amux,
     /select: \{ workerName: true, status: true, dispatchReady: true, heartbeatAt: true, leaseExpiresAt: true \}/

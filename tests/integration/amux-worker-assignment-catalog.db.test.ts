@@ -19,7 +19,7 @@ import {
 } from "@/lib/amux/workerRuntime";
 import { prisma } from "@/lib/prisma";
 
-// Orchestration policy version 35, section 3 (stage R2c), against PostgreSQL
+// Orchestration policy version 35, section 3 (stages R2c and R2e), against PostgreSQL
 // through the migration history, in the agents lane: the registry, the stop
 // latches and the capabilities are read in one statement -- the capability
 // read boundary allows setup, one statement and its fence -- and the catalog
@@ -105,10 +105,9 @@ test("one statement derives the catalog from what the owner recorded", async () 
     ["claude-impl", "anthropic", "claude-opus-5-5", ["implement"], ["repo_write"]],
   ]);
 
-  // The assignment reader, latched on, gives the configured shapes in the
-  // same single statement.
-  const catalogs = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerCapabilityRead, (tx) => readAmuxAssignmentCatalogs(tx, true));
-  assert.equal(catalogs.source, "derived");
+  // The assignment reader gives the configured shapes in the same single
+  // statement; since R2e it has no other source.
+  const catalogs = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerCapabilityRead, (tx) => readAmuxAssignmentCatalogs(tx));
   assert.deepEqual(catalogs.workers?.map((worker) => [worker.worker_name, worker.running, worker.dispatch_ready]), [
     ["claude-impl", false, false],
     ["codex-chore", false, false],
@@ -117,13 +116,13 @@ test("one statement derives the catalog from what the owner recorded", async () 
   assert.deepEqual(catalogs.v22?.map((worker) => worker.worker_name), ["claude-impl"]);
 });
 
-test("latched on, registration and heartbeat ask the derived catalog inside their own transaction", async () => {
+test("registration and heartbeat ask the derived catalog inside their own transaction", async () => {
   const session = owner();
   await register(session, "claude-impl", "implementation", "active");
   await record(session, "claude-impl", { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null });
-  const admit = (name: string) => (tx: Parameters<typeof amuxWorkerCatalogRefusal>[0]) => amuxWorkerCatalogRefusal(tx, name, true);
+  const admit = (name: string) => (tx: Parameters<typeof amuxWorkerCatalogRefusal>[0]) => amuxWorkerCatalogRefusal(tx, name);
   const listed = (name: string) => async (tx: Parameters<typeof amuxWorkerCatalogRefusal>[0]) =>
-    (await amuxWorkerCatalogRefusal(tx, name, true)) === null;
+    (await amuxWorkerCatalogRefusal(tx, name)) === null;
 
   // A name the catalog does not list is refused and nothing is written.
   await assert.rejects(
