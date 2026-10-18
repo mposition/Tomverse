@@ -1,0 +1,37 @@
+[Unit]
+Description=Tomverse AMUX Decision Maker launcher, decision-maker-openai (one request per connection)
+ConditionFileNotEmpty=/opt/tomverse-amux-dm/launcher.mjs
+
+[Service]
+Type=simple
+User=amux-dm-openai
+Group=amux-dm-openai
+ExecStart=/usr/bin/node /opt/tomverse-amux-dm/launcher.mjs decision-maker-openai
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amux-dm-launcher-openai
+Restart=no
+# docs/policy/amux-decision-maker.md §5 "hard timeout": the launcher kills the
+# CLI's process group at 30 minutes; this unit's control group is the
+# backstop -- everything in it is stopped at 32 minutes, and on any exit of
+# the launcher, so no CLI process outlives its request.
+KillMode=control-group
+RuntimeMaxSec=32min
+TimeoutStopSec=10s
+UMask=0077
+# §5: the vendor account writes only its own home (CLI state, its temporary
+# directories); the request directory is read-only to it by mode as well.
+ProtectSystem=strict
+ReadWritePaths=/home/amux-dm-openai
+PrivateTmp=true
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectProc=invisible
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# No [Install]: amux-dm-launcher-openai.socket starts one per connection.

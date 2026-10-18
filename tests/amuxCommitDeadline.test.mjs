@@ -188,6 +188,15 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration v52: the immutable review receipt table and constraints use
   // the existing mutation boundary without changing commit-deadline behavior.
   "20261016130000_amux_v52_review_record",
+  // AMUX Decision Maker S2-2a3: section 5's cleanup_unknown report. It adds
+  // no commit deadline: the report holds no deadline, and the ledger's
+  // deferred check is unchanged and does not cover the new kind.
+  "20261017160000_amux_decision_maker_cleanup_unknown",
+  // AMUX Decision Maker S2-2a4: a result's switch sequence, where section 8's
+  // validation count places it against a release. It adds no commit
+  // deadline: the event guard's deadline lines and the ledger's deferred
+  // check are unchanged.
+  "20261017200000_amux_decision_maker_validation_count_boundary",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

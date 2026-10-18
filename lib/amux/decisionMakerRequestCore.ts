@@ -9,6 +9,8 @@ import {
   DM_SWITCH_LATCH_ACTOR_FOR_INSTANCE,
   isDmInstanceScope,
   type DmInstanceScope,
+  type DmSwitchLatchReason,
+  type DmValidationCountBoundary,
 } from "./decisionMakerSwitchCore.ts";
 
 /**
@@ -53,6 +55,9 @@ export const DM_ROUTING_REFUSAL_CODES = [
 /**
  * The request event kinds. Each is named after its §10 audit action
  * (`amux.decision.<kind>`), and the trigger requires exactly that action.
+ * The first nine are stage S1c's; `cleanup_unknown` is §5's report of a
+ * request whose directories the broker could not confirm deleted (stage
+ * S2-2a3, migration 20261017160000_amux_decision_maker_cleanup_unknown).
  */
 export const DM_REQUEST_EVENT_KINDS = [
   "assign",
@@ -64,6 +69,7 @@ export const DM_REQUEST_EVENT_KINDS = [
   "result_rejected",
   "result_unknown",
   "stale_close",
+  "cleanup_unknown",
 ] as const;
 export type DmRequestEventKind = (typeof DM_REQUEST_EVENT_KINDS)[number];
 
@@ -84,7 +90,7 @@ export type DmJudgmentEventKind = (typeof DM_JUDGMENT_EVENT_KINDS)[number];
 
 /**
  * Every kind the event table holds, as its kind CHECK lists them since stage
- * S1e: this module's nine and a judgment's three.
+ * S2-2a3: this module's ten and a judgment's three.
  */
 export const DM_LEDGER_EVENT_KINDS = [...DM_REQUEST_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS] as const;
 
@@ -95,6 +101,10 @@ export const DM_ROUTER_CLOSING_EVENT_KINDS = ["assign_discarded", "stale_close"]
  * Events that close a request: the router's, and since stage S1e a person's
  * judgment. A request routed to the operator is closed from its creation.
  * One per request (the partial unique index of the closing kinds).
+ * `cleanup_unknown` is not one: §6 names five terminal results and a person's
+ * judgment closes a proposal, and an unconfirmed cleanup is neither -- a
+ * proposal stored before the report stays open for the operator, and a
+ * report after a closing is still recorded.
  */
 export const DM_CLOSING_EVENT_KINDS = [...DM_ROUTER_CLOSING_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS] as const;
 
@@ -348,9 +358,10 @@ const CARD_KEYS = [
 
 /**
  * The typed ask `routeDmQuestion()` reads, checked for shape only: strings,
- * string lists and `{ id, label }` options, nothing else. Sizes, terms,
- * paths and secrets are the router's own checks, which send an oversize or
- * unsafe card to the operator rather than refuse it here. The card is routed
+ * string lists and `{ id, label, effect, paths }` options (`effect` a string,
+ * `paths` a string list), nothing else. Sizes, terms, paths, effect classes
+ * and secrets are the router's own checks, which send an oversize, malformed
+ * or unsafe card to the operator rather than refuse it here. The card is routed
  * and never stored (§10: "본문은 원장에 넣지 않는다").
  */
 export const parseDmCard = (value: unknown): DmCard | null => {
@@ -370,9 +381,11 @@ export const parseDmCard = (value: unknown): DmCard | null => {
         option !== null &&
         typeof option === "object" &&
         !Array.isArray(option) &&
-        ownKeysAre(option, ["id", "label"]) &&
+        ownKeysAre(option, ["id", "label", "effect", "paths"]) &&
         typeof (option as { id: unknown }).id === "string" &&
-        typeof (option as { label: unknown }).label === "string",
+        typeof (option as { label: unknown }).label === "string" &&
+        typeof (option as { effect: unknown }).effect === "string" &&
+        isStringArray((option as { paths: unknown }).paths),
     ) ||
     typeof card.unblocks !== "string" ||
     typeof card.context !== "string" ||
@@ -442,6 +455,8 @@ export type DmRequestState = {
   transmitOutcome: "receipt" | "unknown" | null;
   terminal: { eventId: string; resultKind: DmResultKind; resultDigest: string } | null;
   resultUnknown: boolean;
+  /** §5's report that the broker could not confirm the request's directories deleted; one per request. */
+  cleanupUnknown: { eventId: string; createdAtMs: number } | null;
   /** Why the request is closed; a request routed to the operator is closed from its creation. */
   closing: DmRequestClosing | null;
   /** The rejection already recorded for the digest the read probed, if any. */
@@ -509,6 +524,17 @@ export const dmRequestStateFromRow = (row: unknown): DmRequestState | null => {
     terminal = { eventId: r.terminalEventId, resultKind: r.terminalResultKind, resultDigest: r.terminalResultDigest };
   }
 
+  // Both or neither: the event's id and its database clock. A row without the
+  // columns is not the state read's.
+  let cleanupUnknown: DmRequestState["cleanupUnknown"] = null;
+  const cleanupUnknownAtMs = nullableEpochMs(r.cleanupUnknownAtEpochMs);
+  if (r.cleanupUnknownEventId === null) {
+    if (cleanupUnknownAtMs !== null) return null;
+  } else {
+    if (!isDmRequestId(r.cleanupUnknownEventId) || cleanupUnknownAtMs === null || cleanupUnknownAtMs === undefined) return null;
+    cleanupUnknown = { eventId: r.cleanupUnknownEventId, createdAtMs: cleanupUnknownAtMs };
+  }
+
   let closing: DmRequestClosing | null = null;
   if (r.closingKind !== null) {
     if (!isOneOf(DM_CLOSING_EVENT_KINDS, r.closingKind)) return null;
@@ -536,6 +562,7 @@ export const dmRequestStateFromRow = (row: unknown): DmRequestState | null => {
     transmitOutcome,
     terminal,
     resultUnknown: r.resultUnknown,
+    cleanupUnknown,
     closing,
     probedRejection,
   };
@@ -560,7 +587,8 @@ export type DmEventAttempt =
     }
   | { kind: "result_rejected"; instance: DmInstanceScope; resultDigest: string; rejectionReason: DmResultRejectionReason }
   | { kind: "result_unknown"; instance: DmInstanceScope; resultDigest: string }
-  | { kind: "stale_close" };
+  | { kind: "stale_close" }
+  | { kind: "cleanup_unknown"; instance: DmInstanceScope };
 
 /** Why the graph refuses an event. Each names one clause of the trigger. */
 export type DmEventRefusal =
@@ -574,6 +602,7 @@ export type DmEventRefusal =
   | "transmit_outcome_recorded"
   | "result_recorded"
   | "result_unknown_recorded"
+  | "cleanup_unknown_recorded"
   | "payload_mismatch"
   | "reason_inconsistent"
   | "not_stale"
@@ -610,6 +639,12 @@ export const isDmDeadlineResultKind = (kind: DmResultKind): boolean =>
  *   an unknown result, no intent, or the deadline reached.
  * - `result_unknown`: assigned, open, no result and no earlier unknown.
  * - `stale_close`: open, and 720 hours after creation.
+ * - `cleanup_unknown` (stage S2-2a3, §5): assigned -- the broker builds the
+ *   request directory only for an assigned request, before the intent, so it
+ *   may have one to delete when no intent was recorded -- and not reported
+ *   before. A fact about local files whatever happened since, so like a
+ *   transmission receipt it is accepted after the request closed or its
+ *   result arrived, holds no deadline, and closes nothing.
  *
  * A request routed to the operator is closed from its creation, so only a
  * rejection can ever be recorded against it. A person's judgment (stage S1e)
@@ -689,6 +724,10 @@ export const dmEventRefusal = (state: DmRequestState, attempt: DmEventAttempt): 
     case "stale_close":
       if (closed) return "closed";
       if (state.dbNowMs < state.createdAtMs + DM_STALE_CLOSE_AFTER_MS) return "not_stale";
+      return null;
+    case "cleanup_unknown":
+      if (!state.assigned) return "not_assigned";
+      if (state.cleanupUnknown !== null) return "cleanup_unknown_recorded";
       return null;
   }
 };
@@ -856,6 +895,196 @@ export const dmResultSubmissionOutcome = (
   }
   if (submission.resultKind === "proposal" && killSwitch !== false) return { outcome: "reject", reason: "kill_switch" };
   return { outcome: "accept" };
+};
+
+// ---------------------------------------------------------------------------
+// §8's validation latch
+// ---------------------------------------------------------------------------
+
+/** §8: this many validation failures in a row latch the instance `off`. */
+export const DM_VALIDATION_LATCH_THRESHOLD = 3;
+
+/**
+ * How many of an instance's newest terminal results the latch reads. §3-6
+ * caps an instance at 100 routed requests a day, so this covers at least a
+ * day of its results -- far longer than the fifteen minutes before the
+ * maintenance sweep checks again -- and bounds the read whatever the age of
+ * the instance's count boundary.
+ */
+export const DM_VALIDATION_LATCH_WINDOW = 100;
+
+export type DmValidationLatchDecision =
+  | { latch: true }
+  | { latch: false; reason: "already_latched" | "no_streak" };
+
+const isValidationCountBoundary = (value: unknown): value is DmValidationCountBoundary => {
+  if (value === null || typeof value !== "object") return false;
+  const boundary = value as Record<string, unknown>;
+  if (boundary.kind === "none" || boundary.kind === "latched") return true;
+  return (
+    boundary.kind === "released" &&
+    typeof boundary.releaseSequence === "string" &&
+    /^[1-9][0-9]{0,18}$/.test(boundary.releaseSequence) &&
+    typeof boundary.releasedAtMs === "number" &&
+    Number.isSafeInteger(boundary.releasedAtMs) &&
+    boundary.releasedAtMs >= 0
+  );
+};
+
+/**
+ * Which of an instance's terminal results §8's count reads, as the store
+ * binds them (stage S2-2a4): those whose recorded switch sequence -- the
+ * sequence of the instance's newest switch event the ledger's guard read
+ * under the shared switch gate when it admitted the result -- is at or above
+ * `fromSwitchSequence`; and those recorded before that number was kept (no
+ * switch sequence) whose database clock is at or after `sinceMs`.
+ *
+ * After a release, the release's own sequence and clock: a result the gate
+ * admitted after the release read it or a later event, and one admitted
+ * before it could not -- an order neither a clock (a shared millisecond) nor
+ * the ledger's sequence (drawn before the guard waits on the gate, review
+ * r-20261018-012448-8f45bd) gives. An older result without the number falls
+ * back to the clock, a shared millisecond counted (the side that latches
+ * sooner). Otherwise every result (both bounds zero). Null for a boundary the
+ * switch read could not have produced.
+ */
+export const dmValidationCountWindow = (
+  boundary: unknown,
+): { fromSwitchSequence: string; sinceMs: number } | null => {
+  if (!isValidationCountBoundary(boundary)) return null;
+  if (boundary.kind !== "released") return { fromSwitchSequence: "0", sinceMs: 0 };
+  return { fromSwitchSequence: boundary.releaseSequence, sinceMs: boundary.releasedAtMs };
+};
+
+/**
+ * §8: whether three validation failures in a row latch an instance now.
+ *
+ * - The count runs over the instance's terminal results (§6: one per
+ *   request), in the order the ledger recorded them. Any other terminal
+ *   result -- a proposal, an escalation, a timeout, an unavailable DM --
+ *   breaks a run. A rejected or unknown result is not a terminal result and
+ *   neither counts nor breaks one: the ledger keeps no output kind for it.
+ * - It starts at the instance's validation count boundary
+ *   (`DmValidationCountBoundary`, stage S2-2a4): every result when the
+ *   instance has never been latched for a run; nothing at all while its newest
+ *   validation latch stands unreleased -- the run is latched, and one run is
+ *   never latched twice; and after the release that ended that latch, which
+ *   only a person writes ("해제는 운영자만"). A person's ordinary mode change
+ *   is not a release and moves nothing: before stage S2-2a4 it restarted the
+ *   count, so a mode saved between the third failure and its latch dropped
+ *   the latch. Nor does a cleanup latch, or its release, settle a run.
+ * - Any run of three among the results read is due, not only one at the newest
+ *   end: a latch whose write failed after its third failure was recorded is
+ *   still owed when a later result breaks the run, and the next check writes
+ *   it.
+ *
+ * `resultKindsNewestFirst` is what the store read inside
+ * `dmValidationCountWindow(boundary)`, newest first, at most
+ * DM_VALIDATION_LATCH_WINDOW. A kind outside §6's five, or a boundary the
+ * switch read could not have produced, makes the decision unreadable (null),
+ * and nothing is latched on it.
+ */
+export const dmValidationLatchDecision = (input: {
+  validationBoundary: unknown;
+  resultKindsNewestFirst: readonly unknown[];
+}): DmValidationLatchDecision | null => {
+  if (!input.resultKindsNewestFirst.every((kind) => isOneOf(DM_RESULT_KINDS, kind))) return null;
+  if (!isValidationCountBoundary(input.validationBoundary)) return null;
+  if (input.validationBoundary.kind === "latched") return { latch: false, reason: "already_latched" };
+  let run = 0;
+  for (const kind of input.resultKindsNewestFirst) {
+    run = kind === "validation_failure" ? run + 1 : 0;
+    if (run >= DM_VALIDATION_LATCH_THRESHOLD) return { latch: true };
+  }
+  return { latch: false, reason: "no_streak" };
+};
+
+/**
+ * §8 before the latch is written: an instance whose latch is owed is off for
+ * a routing and a transmission intent, as if the latch were already there.
+ * Since stage S2-2a3 the owed latch is §8's or §5's (`dmOwedLatchReason()`).
+ * The latch is written by its own check (after a validation failure or a
+ * cleanup report, by the maintenance sweep, or by the intent that finds it
+ * owed); until then this is
+ * what keeps a question from being routed to that instance and a card from
+ * being sent to its vendor. An unreadable mode stays unreadable.
+ */
+export const dmSwitchInputWithOwedLatch = <T extends { killSwitch: boolean | null; instanceMode: "off" | "proposal" | null }>(
+  switches: T,
+  latchOwed: boolean,
+): T => (latchOwed && switches.instanceMode !== null ? { ...switches, instanceMode: "off" } : switches);
+
+// ---------------------------------------------------------------------------
+// §5's cleanup latch (stage S2-2a3)
+// ---------------------------------------------------------------------------
+
+export type DmCleanupLatchDecision =
+  | { latch: true; cleanupEventId: string }
+  | { latch: false; reason: "no_cleanup_unknown" | "latched" };
+
+/**
+ * §5: "지웠는지 확인하지 못하면 cleanup_unknown으로 두고 그 인스턴스를 off로
+ * latch한다" -- whether the instance's newest `cleanup_unknown` report
+ * latches it now.
+ *
+ * - A cleanup latch names the ledger event id of the report it settles, and
+ *   settles that report and no other. The instance's newest report is owed
+ *   unless its newest cleanup latch names it.
+ * - Nothing but that latch settles a report: not a person's ordinary mode
+ *   change -- the same mode saved again, off and back to proposal (review
+ *   r-20261017-115136-888d76) -- not a latch of another cause, and not a
+ *   cleanup latch of an earlier report, even one that shares the new report's
+ *   database millisecond: a report is accepted with the instance off, and a
+ *   clock cannot tell the two apart (review r-20261017-123200-7609b7).
+ * - A person's release can only follow a latch (the switch guard makes the
+ *   first change after a system latch `amux.decision.latch_release`), so a
+ *   report whose own latch was released stays settled. A report is one per
+ *   request, so the same report sent again -- after a lost response, or after
+ *   that release -- is the same event and never latches the instance twice.
+ * - Comparing with the newest cleanup latch alone is exact: a latch is only
+ *   ever written for the newest report the writer read under the audit chain
+ *   lock, which every report write also takes first, so no cleanup latch names
+ *   a report older than one an earlier latch named.
+ *
+ * `cleanupLatchedEventId` is the report the instance's newest cleanup latch
+ * names, or null when it has none (the switch store's read);
+ * `newestCleanupUnknownEventId` the id of its newest report by the ledger's
+ * sequence, or null (the ledger's). Anything but null or a ledger event id is
+ * unreadable (null), and nothing is latched on it. When a latch is due, the
+ * decision names the report it settles.
+ */
+export const dmCleanupLatchDecision = (input: {
+  cleanupLatchedEventId: unknown;
+  newestCleanupUnknownEventId: unknown;
+}): DmCleanupLatchDecision | null => {
+  const report = input.newestCleanupUnknownEventId;
+  const latched = input.cleanupLatchedEventId;
+  if ((report !== null && !isDmRequestId(report)) || (latched !== null && !isDmRequestId(latched))) return null;
+  if (report === null) return { latch: false, reason: "no_cleanup_unknown" };
+  if (latched !== report) return { latch: true, cleanupEventId: report };
+  return { latch: false, reason: "latched" };
+};
+
+/**
+ * The latch a routing and a transmission intent hold an instance off for
+ * before it is written (`dmSwitchInputWithOwedLatch()`), and the one the
+ * intent then writes: §5's cleanup latch, naming the report it settles, when a
+ * report is owed -- the more specific cause, written first -- otherwise §8's
+ * validation latch when a run is owed, otherwise none. Null when either input
+ * is unreadable.
+ */
+export const dmOwedLatchReason = (input: {
+  validationBoundary: unknown;
+  cleanupLatchedEventId: unknown;
+  resultKindsNewestFirst: readonly unknown[];
+  newestCleanupUnknownEventId: unknown;
+}): { reason: DmSwitchLatchReason; cleanupEventId: string | null } | { reason: null } | null => {
+  const cleanup = dmCleanupLatchDecision(input);
+  const validation = dmValidationLatchDecision(input);
+  if (cleanup === null || validation === null) return null;
+  if (cleanup.latch) return { reason: "cleanup_latch", cleanupEventId: cleanup.cleanupEventId };
+  if (validation.latch) return { reason: "validation_latch", cleanupEventId: null };
+  return { reason: null };
 };
 
 /** §9: what a submitter that lost a response learns from the (request, digest) pair. */

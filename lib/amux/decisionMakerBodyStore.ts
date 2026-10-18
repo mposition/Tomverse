@@ -344,6 +344,64 @@ export async function listDecisionMakerPurgeCandidates(
   return rows.map((row) => requireRequestId(row.requestId));
 }
 
+export type DecisionMakerDigestKeyRegistry = {
+  /** The database clock when the registry was read. */
+  dbNowMs: number;
+  periods: Array<{ keyPeriod: number; rotated: boolean; destroyed: boolean; hasBodies: boolean }>;
+};
+
+/**
+ * Every key period the registry names -- whether its key was put in use,
+ * whether it was destroyed, and whether a body of the period remains -- oldest
+ * first, with the database clock, in one statement. For the system sweep
+ * (lib/amux/decisionMakerRetentionSweep.ts), which rotates in the current and
+ * the next period's key when the ring holds one and the registry does not,
+ * and asks to destroy an ended period's key once no body of it remains. Each
+ * is then decided again, under the audit chain lock, by
+ * `rotateDecisionMakerDigestKey()` or `destroyDecisionMakerDigestKey()`.
+ */
+export async function readDecisionMakerDigestKeyRegistry(client: BodyReader): Promise<DecisionMakerDigestKeyRegistry> {
+  const rows = await client.$queryRaw<unknown[]>`
+    WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS "now"),
+    periods AS (
+      SELECT
+        k."keyPeriod",
+        bool_or(k."kind" = 'rotate') AS "rotated",
+        bool_or(k."kind" = 'destroy') AS "destroyed",
+        EXISTS (SELECT 1 FROM "AmuxDecisionMakerBody" b WHERE b."keyPeriod" = k."keyPeriod") AS "hasBodies"
+      FROM "AmuxDecisionMakerDigestKeyEvent" k
+      GROUP BY k."keyPeriod"
+    )
+    SELECT
+      floor(extract(epoch FROM c."now") * 1000)::bigint AS "dbNowEpochMs",
+      p."keyPeriod", p."rotated", p."destroyed", p."hasBodies"
+    FROM db_clock c
+    LEFT JOIN periods p ON true
+    ORDER BY p."keyPeriod"
+  `;
+  const first = rows[0] as Record<string, unknown> | undefined;
+  if (!first) throw new DecisionMakerBodyWriteError("state_unreadable");
+  const dbNowMs = safeInteger(first.dbNowEpochMs as bigint | number, "clock");
+  const periods: DecisionMakerDigestKeyRegistry["periods"] = [];
+  for (const row of rows as Array<Record<string, unknown>>) {
+    if (row.keyPeriod === null) {
+      if (rows.length !== 1) throw new DecisionMakerBodyWriteError("state_unreadable");
+      continue;
+    }
+    const keyPeriod = Number(row.keyPeriod);
+    if (
+      !isDmKeyPeriod(keyPeriod) ||
+      typeof row.rotated !== "boolean" ||
+      typeof row.destroyed !== "boolean" ||
+      typeof row.hasBodies !== "boolean"
+    ) {
+      throw new DecisionMakerBodyWriteError("state_unreadable");
+    }
+    periods.push({ keyPeriod, rotated: row.rotated, destroyed: row.destroyed, hasBodies: row.hasBodies });
+  }
+  return { dbNowMs, periods };
+}
+
 // ---------------------------------------------------------------------------
 // Retention: legal hold, expiry purge, privacy erase
 // ---------------------------------------------------------------------------
@@ -764,7 +822,11 @@ export async function assignDecisionMakerRequestWithDigestKey(
 
 /**
  * What the broker submits: the DM's output as the exact bytes it produced,
- * with the card's options as the DM received them, or no output.
+ * with the card's options as the DM received them, or no output. Each option
+ * is its `{ id, label }` only, the pair the option set digest binds: an
+ * option's effect class and paths (DmCard, stage S2-2b1) do not take part in
+ * checking an output, and a change to them is a new question revision, so a
+ * new request, on the local AMUX side.
  */
 export type DecisionMakerOutput =
   | { kind: "output"; raw: string; options: ReadonlyArray<{ id: string; label: string }> }
@@ -1053,6 +1115,56 @@ export async function readDecisionMakerResultDetail(
     keyPeriod: safeInteger(row.keyPeriod, "key period"),
     createdAt: isoOf(safeInteger(row.createdAtEpochMs, "clock")),
   };
+}
+
+/**
+ * The result details of the given requests (at most 100), in one statement:
+ * the result detail half of Admin's request list (stage S2,
+ * lib/amux/decisionMakerAdminRead.ts). Only the output kind and the
+ * irreversible flag, which Admin shows before anything else about a proposal
+ * (docs/policy/amux-decision-maker.md §6), with the result kind the detail was
+ * written for; no option id, key or body. A request without a terminal result
+ * has no row. A row the result detail's CHECKs could
+ * not have produced refuses the read.
+ */
+export async function readDecisionMakerResultDetailsForAdmin(
+  client: BodyReader,
+  requestIds: readonly string[],
+): Promise<Map<string, { resultKind: DmResultKind; outputKind: DmResultDetail["outputKind"]; irreversible: boolean | null }>> {
+  if (requestIds.length > 100 || !requestIds.every((id) => isDmRequestId(id))) {
+    throw new DecisionMakerBodyWriteError("invalid_input");
+  }
+  const details = new Map<string, { resultKind: DmResultKind; outputKind: DmResultDetail["outputKind"]; irreversible: boolean | null }>();
+  if (requestIds.length === 0) return details;
+  const rows = await client.$queryRaw<
+    Array<{ requestId: string; resultKind: string; outputKind: string | null; optionId: string | null; irreversible: boolean | null }>
+  >`
+    SELECT "requestId", "resultKind", "outputKind", "optionId", "irreversible"
+    FROM "AmuxDecisionMakerResultDetail"
+    WHERE "requestId" = ANY(${[...requestIds]}::text[])
+  `;
+  for (const row of rows) {
+    const detail: DmResultDetail = {
+      outputKind: (row.outputKind ?? null) as DmResultDetail["outputKind"],
+      optionId: row.optionId ?? null,
+      irreversible: row.irreversible ?? null,
+    };
+    if (
+      !requestIds.includes(row.requestId) ||
+      details.has(row.requestId) ||
+      !(DM_RESULT_KINDS as readonly string[]).includes(row.resultKind) ||
+      !(row.outputKind === null || (DM_OUTPUT_KINDS as readonly string[]).includes(row.outputKind)) ||
+      !dmResultDetailShapeValid(row.resultKind, detail)
+    ) {
+      throw new DecisionMakerBodyWriteError("state_unreadable");
+    }
+    details.set(row.requestId, {
+      resultKind: row.resultKind as DmResultKind,
+      outputKind: detail.outputKind,
+      irreversible: detail.irreversible,
+    });
+  }
+  return details;
 }
 
 // ---------------------------------------------------------------------------

@@ -37,6 +37,7 @@ import { runImageAssetMaintenanceQuietly } from "@/lib/imageAssetLifecycle";
 import { runKnowledgeMaintenanceQuietly } from "@/lib/assistantKnowledgeLifecycle";
 import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactStorage";
 import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
+import { runDecisionMakerRetentionMaintenanceQuietly } from "@/lib/amux/decisionMakerRetentionSweep";
 import { runMarketingLlmExpiryQuietly } from "@/lib/marketingLlmExpiry";
 
 const isAuthorized = (request: Request) => {
@@ -145,6 +146,14 @@ export async function POST(request: Request) {
     // stayed dead for the same, against a ten-minute staleness threshold.
     // The bucket-listing arm is deliberately not here; it stays daily.
     const knowledge = await runKnowledgeMaintenanceQuietly();
+    // The AMUX Decision Maker's retention (docs/policy/amux-decision-maker.md
+    // §10): put the current and next period's digest key into use, close
+    // requests left open for 720 hours, delete bodies whose 90-day retention
+    // has passed and record a spent key's destruction -- each in its own AMUX
+    // DB boundary transaction. A DB-only sweep, allowed under the kill switch,
+    // and never throws, so it cannot turn a successful reconciliation into a
+    // failed one.
+    const decisionMakerRetention = await runDecisionMakerRetentionMaintenanceQuietly();
     // The marketing LLM cost ledger: release reservations never dispatched in
     // 15 minutes and keep dispatches never reported in an hour at their
     // reservation (docs/policy/marketing-automation.md §5). DB-only, skipped
@@ -233,6 +242,7 @@ export async function POST(request: Request) {
         generatedArtifacts,
         messageAttachments,
         knowledge,
+        decisionMakerRetention,
         marketingLlmExpiry,
         externalImportStaging,
         memoryExtractionProviderCalls,
@@ -254,6 +264,7 @@ export async function POST(request: Request) {
         generatedArtifacts,
         messageAttachments,
         knowledge,
+        decisionMakerRetention,
         marketingLlmExpiry,
         externalImportStaging,
         memoryExtractionProviderCalls,

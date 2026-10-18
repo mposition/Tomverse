@@ -279,7 +279,10 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "mutation",
   },
   // Decision Maker switches (docs/policy/amux-decision-maker.md §8): setup +
-  // the newest event of every scope + fence.
+  // the newest event of every scope + fence. Admin's panel reads the same one
+  // statement with each event's actor and reason (stage S2-4c,
+  // readDecisionMakerSwitchesForAdmin), pinned by
+  // tests/amuxDecisionMakerAdminList.test.mjs.
   decisionMakerSwitchRead: {
     operation: "decision_maker_switch_read",
     prismaCallCeiling: 3,
@@ -350,12 +353,145 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
+  // Stage S2's internal routes for the bridge and the broker
+  // (app/api/internal/amux/decision-maker/**): each is setup + its one store
+  // operation at its largest, with an integrity key + fence, so a ceiling
+  // below it refuses every such call and one above it would let a statement
+  // nobody counted run inside the budget. All are within
+  // docs/policy/amux-decision-maker.md §9's 12.
+  // The keyed assignment (the request, the key registry, then the ledger's
+  // assignment: lock, state, the router's audit 4, the event: 9, pinned by
+  // tests/amuxDecisionMakerBody.test.mjs).
+  decisionMakerAssignment: {
+    operation: "decision_maker_assignment",
+    prismaCallCeiling: 11,
+    isolation: "mutation",
+  },
+  // A discarded assignment (lock, state, the router's audit 4, the event: 7,
+  // pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerAssignmentDiscard: {
+    operation: "decision_maker_assignment_discard",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // A transmission intent (lock, state, the switches, the instance's results
+  // inside its count boundary -- added 2026-10-17 for the owed latch of
+  // docs/policy/amux-decision-maker.md §8 -- then the instance's audit 4 and the
+  // event, or the owed latch's audit 4 and switch event: 9, pinned by
+  // tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerTransmitIntent: {
+    operation: "decision_maker_transmit_intent",
+    prismaCallCeiling: 11,
+    isolation: "mutation",
+  },
+  // A transmission receipt or unknown (lock, state, the instance's audit 4,
+  // the event: 7, pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerTransmitOutcome: {
+    operation: "decision_maker_transmit_outcome",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // A DM output accepted as the request's result (the request, then the
+  // ledger's submission: lock, state, the switches, the instance's audit 4,
+  // the event; then its detail and bodies: 10, pinned by
+  // tests/amuxDecisionMakerBody.test.mjs).
+  decisionMakerResultSubmission: {
+    operation: "decision_maker_result_submission",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // §9's lookup of a (request, result digest) pair: the state read (1, pinned
+  // by tests/amuxDecisionMakerRequest.test.mjs). It writes nothing.
+  decisionMakerResultLookupRead: {
+    operation: "decision_maker_result_lookup_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // §9's result_unknown (lock, state, the instance's audit 4, the event: 7,
+  // pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerResultUnknown: {
+    operation: "decision_maker_result_unknown",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // The validation latch of docs/policy/amux-decision-maker.md §8, which the
+  // result route runs after a validation failure commits and the maintenance
+  // sweep runs for each instance (lock, the switches with each instance's
+  // count boundary, its results, the instance's audit 4, the switch event: 8,
+  // pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerValidationLatch: {
+    operation: "decision_maker_validation_latch",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // §5's cleanup report of docs/policy/amux-decision-maker.md, stage S2-2a3
+  // (lock, state, the instance's audit 4, the event: 7, pinned by
+  // tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerCleanupUnknown: {
+    operation: "decision_maker_cleanup_unknown",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // The latch §5's report owes, which the cleanup route runs after the report
+  // and the maintenance sweep runs for each instance (lock, the switches with
+  // each instance's newest cleanup latch, its newest report, the instance's audit 4,
+  // the switch event: 8, pinned by tests/amuxDecisionMakerRequest.test.mjs).
+  decisionMakerCleanupLatch: {
+    operation: "decision_maker_cleanup_latch",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // Stage S2's judgment route: setup + a person's judgment at its largest
+  // (an edited confirmation with an integrity key: the audit chain lock, the
+  // request state, the switches, the proposal, the administrator audit's 4,
+  // the operator answer body and the judgment insert: 10, pinned by
+  // tests/amuxDecisionMakerJudgment.test.mjs) + fence. 12 is also
+  // docs/policy/amux-decision-maker.md §9's ceiling for one DM operation.
+  decisionMakerJudgment: {
+    operation: "decision_maker_judgment",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // Stage S2-2b3's delivery routes for the bridge (app/api/internal/amux/
+  // decision-maker/deliveries/**). The read of the next confirmed answer:
+  // setup + the switches, the confirmation, the request state, the result
+  // detail and the bodies (5, lib/amux/decisionMakerDeliveryRead.ts) + fence,
+  // one REPEATABLE READ snapshot. The decision (lock, delivery read, the
+  // switches, the router's audit 4, the event: 8) and the receipt or unknown
+  // outcome (lock, delivery read, the router's audit 4, the event: 7), each +
+  // setup + fence. All pinned by tests/amuxDecisionMakerDelivery.test.mjs,
+  // within docs/policy/amux-decision-maker.md §9's 12.
+  decisionMakerDeliveryCandidateRead: {
+    operation: "decision_maker_delivery_candidate_read",
+    prismaCallCeiling: 7,
+    isolation: "read",
+  },
+  decisionMakerDeliveryDecision: {
+    operation: "decision_maker_delivery_decision",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  decisionMakerDeliveryOutcome: {
+    operation: "decision_maker_delivery_outcome",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment
   // tallies + the proposal timeline with the database clock + fence, pinned
   // by tests/amuxDecisionMakerJudgment.test.mjs.
   decisionMakerReportRead: {
     operation: "decision_maker_report_read",
     prismaCallCeiling: 4,
+    isolation: "read",
+  },
+  // Stage S2's Admin request list (lib/amux/decisionMakerAdminRead.ts): setup
+  // + the newest requests with the database clock + their result details +
+  // their judgments and deliveries + fence, pinned by
+  // tests/amuxDecisionMakerAdminList.test.mjs. REPEATABLE READ makes the three
+  // reads one snapshot.
+  decisionMakerRequestListRead: {
+    operation: "decision_maker_request_list_read",
+    prismaCallCeiling: 5,
     isolation: "read",
   },
   // The Ideas tab's progress list (lib/amux/ideaProgressRead.ts): setup + the
@@ -366,6 +502,50 @@ export const AMUX_DB_BOUNDARIES = {
     operation: "idea_progress_list_read",
     prismaCallCeiling: 9,
     isolation: "read",
+  },
+  // Stage S2's one request for the person who judges it
+  // (readDecisionMakerRequestDetailForAdmin): setup + its ledger row with the
+  // database clock + its result detail + its judgment and deliveries + its
+  // bodies + its state + fence, pinned by
+  // tests/amuxDecisionMakerAdminList.test.mjs.
+  decisionMakerRequestDetailRead: {
+    operation: "decision_maker_request_detail_read",
+    prismaCallCeiling: 7,
+    isolation: "read",
+  },
+  // §10's system sweep (lib/amux/decisionMakerRetentionSweep.ts). Its read:
+  // setup + the stale candidates + the purge candidates + the key registry
+  // with the database clock + fence, pinned by
+  // tests/amuxDecisionMakerRetentionSweep.test.mjs.
+  decisionMakerRetentionRead: {
+    operation: "decision_maker_retention_read",
+    prismaCallCeiling: 5,
+    isolation: "read",
+  },
+  // Each write of the sweep is the store operation at its largest (with an
+  // integrity key) + setup + fence: the stale close's 7, pinned by
+  // tests/amuxDecisionMakerRequest.test.mjs; the purge's 7, the key
+  // rotation's 7 and the key destruction's 8, pinned by
+  // tests/amuxDecisionMakerBody.test.mjs.
+  decisionMakerStaleClose: {
+    operation: "decision_maker_stale_close",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  decisionMakerBodyPurge: {
+    operation: "decision_maker_body_purge",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  decisionMakerDigestKeyRotate: {
+    operation: "decision_maker_digest_key_rotate",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  decisionMakerDigestKeyDestroy: {
+    operation: "decision_maker_digest_key_destroy",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
   },
 } as const satisfies Record<string, AmuxDbBoundary>;
 

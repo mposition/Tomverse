@@ -26,6 +26,9 @@ import {
   validateDmOutput,
 } from "../lib/amux/decisionMakerCore.ts";
 
+// An option as local AMUX records it (stage S2-1): id, label, effect class, paths.
+const option = (id, label, effect = "choice_only", paths = []) => ({ id, label, effect, paths });
+
 const card = (overrides = {}) => ({
   askType: "decision",
   resolution: null,
@@ -34,8 +37,8 @@ const card = (overrides = {}) => ({
   title: "Pick a cache key layout",
   question: "Should the cache key include the locale or only the model id?",
   options: [
-    { id: "a", label: "Model id only" },
-    { id: "b", label: "Model id and locale" },
+    option("a", "Model id only"),
+    option("b", "Model id and locale", "branch_code_change", ["lib/cache.ts"]),
   ],
   unblocks: "The cache module can be finished.",
   context: "Both layouts pass the current tests.",
@@ -52,8 +55,9 @@ const input = (overrides = {}) => ({
   ...overrides,
 });
 
-test("policy version 1 and the closed type lists match the policy", () => {
-  assert.equal(DM_POLICY_VERSION, 1);
+test("policy version 2 and the closed type lists match the policy", () => {
+  // docs/policy/amux-decision-maker.md, approved 2026-10-17 as version 2.
+  assert.equal(DM_POLICY_VERSION, 2);
   assert.deepEqual([...AMUX_ASK_TYPES].sort(), ["access", "budget", "credential", "customer_outbound", "decision", "external", "judgment"]);
   assert.ok(!DM_ALLOWED_ASK_TYPES.includes("customer_outbound"));
   assert.equal(DM_ALLOWED_ASK_TYPES.length, 6);
@@ -74,7 +78,7 @@ test("the DM is always the other vendor, and other providers go to the operator"
   }
 });
 
-test("there is no autonomous route in policy version 1", () => {
+test("there is no autonomous route in policy version 1 or 2", () => {
   const routes = new Set();
   for (const askType of AMUX_ASK_TYPES) {
     for (const resolution of [null, "decision_only", "needs_secret"]) {
@@ -161,7 +165,7 @@ test("the term check reads every card text field, including options and context"
     { context: "This needs a refund" },
     { tags: ["production"] },
     { type: "migration" },
-    { options: [{ id: "a", label: "Drop the table" }] },
+    { options: [option("a", "Drop the table")] },
   ]) {
     const decision = routeDmQuestion(input({ card: card({ ...field, options: field.options ?? card().options }) }));
     assert.ok(decision.refusals.includes("irreversible_term"), JSON.stringify(field));
@@ -189,7 +193,14 @@ test("input limits: card bytes, context path count and path grammar", () => {
 
 test("a secret in the card is never sent", () => {
   const key = `ghp_${"a".repeat(36)}`;
-  for (const field of [{ context: `token ${key}` }, { question: key }, { options: [{ id: "a", label: key }] }, { contextPaths: [`lib/${key}.ts`] }]) {
+  for (const field of [
+    { context: `token ${key}` },
+    { question: key },
+    { options: [option("a", key)] },
+    { contextPaths: [`lib/${key}.ts`] },
+    // Section 3-8 scans the whole card, a change option's paths included.
+    { options: [option("a", "Edit", "branch_code_change", [`lib/${key}.ts`])] },
+  ]) {
     const decision = routeDmQuestion(input({ card: card({ ...field, options: field.options ?? card().options }) }));
     assert.ok(decision.refusals.includes("card_secret_detected"), JSON.stringify(Object.keys(field)));
   }
@@ -202,7 +213,8 @@ test("a secret in the card is never sent", () => {
 // ---------------------------------------------------------------------------
 
 test("the card text is one JSON object, format first and every card field in a fixed order", () => {
-  assert.equal(DM_CARD_TEXT_FORMAT, "amux-dm-card-text-v1");
+  // v2 since stage S2-2b1 (2026-10-18): each option carries its effect class and paths.
+  assert.equal(DM_CARD_TEXT_FORMAT, "amux-dm-card-text-v2");
   assert.deepEqual(
     [...DM_CARD_TEXT_KEYS],
     ["format", "askType", "resolution", "type", "tags", "title", "question", "options", "unblocks", "context", "contextPaths"],
@@ -210,20 +222,27 @@ test("the card text is one JSON object, format first and every card field in a f
   // Pinned bytes: a change of layout is a new format value, never a silent one.
   assert.equal(
     dmCardText(card()),
-    '{"format":"amux-dm-card-text-v1","askType":"decision","resolution":null,"type":"task","tags":["needs:you"],' +
+    '{"format":"amux-dm-card-text-v2","askType":"decision","resolution":null,"type":"task","tags":["needs:you"],' +
       '"title":"Pick a cache key layout","question":"Should the cache key include the locale or only the model id?",' +
-      '"options":[{"id":"a","label":"Model id only"},{"id":"b","label":"Model id and locale"}],' +
+      '"options":[{"id":"a","label":"Model id only","effect":"choice_only","paths":[]},' +
+      '{"id":"b","label":"Model id and locale","effect":"branch_code_change","paths":["lib/cache.ts"]}],' +
       '"unblocks":"The cache module can be finished.","context":"Both layouts pass the current tests.",' +
       '"contextPaths":["lib/cache.ts"]}',
   );
   assert.deepEqual(Object.keys(JSON.parse(dmCardText(card()))), [...DM_CARD_TEXT_KEYS]);
+  // An option's keys in local AMUX's order (TypedAskOption: id, label, effect, paths).
+  for (const stored of JSON.parse(dmCardText(card())).options) assert.deepEqual(Object.keys(stored), ["id", "label", "effect", "paths"]);
   // Deterministic: the same card is the same bytes whatever order its keys were written in.
   const reordered = Object.fromEntries(Object.entries(card()).reverse());
-  reordered.options = card().options.map(({ id, label }) => ({ label, id }));
+  reordered.options = card().options.map(({ id, label, effect, paths }) => ({ paths, effect, label, id }));
   assert.equal(dmCardText(reordered), dmCardText(card()));
   assert.equal(dmCardText(card()), dmCardText(card()));
   // Only the card's fields: nothing else an object carries reaches the text.
-  assert.equal(dmCardText({ ...card(), extra: "x", options: card().options.map((option) => ({ ...option, effect: "x" })) }), dmCardText(card()));
+  assert.equal(dmCardText({ ...card(), extra: "x", options: card().options.map((entry) => ({ ...entry, note: "x" })) }), dmCardText(card()));
+  // A change option's paths keep the worker's order; another order is another text.
+  const twoPaths = card({ options: [option("a", "Edit", "docs_change", ["docs/b.md", "docs/a.md"])] });
+  assert.match(dmCardText(twoPaths), /"paths":\["docs\/b\.md","docs\/a\.md"\]/);
+  assert.notEqual(dmCardText(twoPaths), dmCardText(card({ options: [option("a", "Edit", "docs_change", ["docs/a.md", "docs/b.md"])] })));
   assert.equal(dmCardTextBytes(card()), Buffer.byteLength(dmCardText(card()), "utf8"));
 });
 
@@ -236,15 +255,18 @@ test("no field's text can pass for another field's, or for the text's structure"
       card({ tags: ["a,b"] }),
       card({ tags: ["a", "b"] }),
       card({ tags: ['a","b'] }),
-      card({ options: [{ id: "a", label: 'x"},{"id":"b","label":"y' }] }),
-      card({ options: [{ id: "a", label: "x" }, { id: "b", label: "y" }] }),
+      card({ options: [option("a", 'x","effect":"choice_only","paths":[]},{"id":"b","label":"y')] }),
+      card({ options: [option("a", "x"), option("b", "y")] }),
       card({ contextPaths: ["lib/a.ts", "lib/b.ts"] }),
       card({ context: '"],"contextPaths":["lib/b.ts', contextPaths: ["lib/a.ts"] }),
       card({ resolution: null }),
       card({ resolution: "null" }),
+      card({ options: [option("a", "x", "docs_change", ["a,b"])] }),
+      card({ options: [option("a", "x", "docs_change", ["a", "b"])] }),
+      card({ options: [option("a", "x", 'docs_change","paths":["a')] }),
     ].map(dmCardText),
   );
-  assert.equal(texts.size, 12);
+  assert.equal(texts.size, 15);
   // Whatever a field holds comes back as that field, and as nothing else.
   for (const tricky of [
     'a","question":"b',
@@ -263,7 +285,7 @@ test("no field's text can pass for another field's, or for the text's structure"
       assert.equal(text.includes("\u0000"), false, JSON.stringify(tricky));
       assert.deepEqual(parseDmCardText(text), value, `${field}: ${JSON.stringify(tricky)}`);
     }
-    const inOptions = card({ tags: [tricky], options: [{ id: "a", label: tricky }] });
+    const inOptions = card({ tags: [tricky], options: [option("a", tricky, tricky, [tricky])] });
     assert.deepEqual(parseDmCardText(dmCardText(inOptions)), inOptions, JSON.stringify(tricky));
   }
 });
@@ -275,22 +297,36 @@ test("a stored card text reads back only as the exact text the serializer writes
   const variants = [
     JSON.stringify(object, null, 1), // whitespace
     text.replace('"Model id only"', '"\\u004dodel id only"'), // the same string, escaped otherwise
-    JSON.stringify({ ...object, format: "amux-dm-card-text-v2" }),
+    JSON.stringify({ ...object, format: "amux-dm-card-text-v3" }),
+    JSON.stringify({ ...object, format: "amux-dm-card-text-v1" }),
+    // The v1 layout itself, options without effect and paths: not read back.
+    JSON.stringify({ ...object, format: "amux-dm-card-text-v1", options: object.options.map(({ id, label }) => ({ id, label })) }),
+    JSON.stringify({ ...object, options: object.options.map(({ id, label }) => ({ id, label })) }),
     JSON.stringify(Object.fromEntries(Object.entries(object).reverse())), // key order
     JSON.stringify({ ...object, extra: "x" }),
     JSON.stringify(Object.fromEntries(Object.entries(object).filter(([key]) => key !== "contextPaths"))),
     JSON.stringify({ ...object, options: [{ id: "a", label: "x", effect: "y" }] }),
+    JSON.stringify({ ...object, options: [{ id: "a", label: "x", paths: [] }] }),
+    JSON.stringify({ ...object, options: [{ id: "a", label: "x", effect: "choice_only", paths: [], note: "y" }] }),
+    JSON.stringify({ ...object, options: [{ id: "a", label: "x", paths: [], effect: "choice_only" }] }), // option key order
+    JSON.stringify({ ...object, options: [{ id: "a", label: "x", effect: null, paths: [] }] }),
+    JSON.stringify({ ...object, options: [{ id: "a", label: "x", effect: "docs_change", paths: "docs/a.md" }] }),
+    JSON.stringify({ ...object, options: [{ id: "a", label: "x", effect: "docs_change", paths: [1] }] }),
     JSON.stringify({ ...object, options: [{ id: "a" }] }),
     JSON.stringify({ ...object, tags: "needs:you" }),
     JSON.stringify({ ...object, resolution: 1 }),
-    text.replace('"format":"amux-dm-card-text-v1"', '"format":"amux-dm-card-text-v1","format":"amux-dm-card-text-v1"'),
+    text.replace(`"format":"${DM_CARD_TEXT_FORMAT}"`, `"format":"${DM_CARD_TEXT_FORMAT}","format":"${DM_CARD_TEXT_FORMAT}"`),
     `${text} `,
     text.slice(0, -1),
     "[]",
     "null",
     "",
   ];
-  for (const variant of variants) assert.equal(parseDmCardText(variant), null, variant.slice(0, 80));
+  for (const variant of variants) {
+    // A replace that matched nothing would leave the text itself, which proves nothing.
+    assert.notEqual(variant, text);
+    assert.equal(parseDmCardText(variant), null, variant.slice(0, 80));
+  }
   for (const value of [null, undefined, 1, {}, Buffer.from(text)]) assert.equal(parseDmCardText(value), null);
 });
 
@@ -316,7 +352,7 @@ test("§5's 16 KiB is measured on the card text: a card exactly at it goes to a 
   // The card text's own bytes count: fields whose plain sum is well under the cap, written as
   // text that escapes past it, are over it.
   const escaped = card({ context: "\n".repeat(9_000) });
-  const plainSum = ["task", "needs:you", card().title, card().question, card().unblocks, "\n".repeat(9_000), "a", "Model id only", "b", "Model id and locale", "lib/cache.ts"]
+  const plainSum = ["task", "needs:you", card().title, card().question, card().unblocks, "\n".repeat(9_000), "a", "Model id only", "choice_only", "b", "Model id and locale", "branch_code_change", "lib/cache.ts", "lib/cache.ts"]
     .reduce((sum, value) => sum + Buffer.byteLength(value, "utf8"), 0);
   assert.ok(plainSum < DM_CARD_TEXT_MAX_BYTES);
   assert.ok(dmCardTextBytes(escaped) > DM_CARD_TEXT_MAX_BYTES);
@@ -454,8 +490,8 @@ test("an option id is a short token, and a card with another or a repeated one i
   assert.equal(dmCardOptionsWellFormed([{ id: "a" }, { id: "a" }]), false);
   assert.equal(dmCardOptionsWellFormed([]), true);
   for (const options of [
-    [{ id: "Use the model id only", label: "x" }],
-    [{ id: "a", label: "x" }, { id: "a", label: "y" }],
+    [option("Use the model id only", "x")],
+    [option("a", "x"), option("a", "y")],
   ]) {
     assert.deepEqual(routeDmQuestion(input({ card: card({ options }) })).refusals, ["input_limit_exceeded"]);
   }

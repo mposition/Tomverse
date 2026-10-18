@@ -2879,6 +2879,11 @@ async fn run_bridge(mut scope: BridgeScope) -> i32 {
             return 1;
         }
     };
+    // The AMUX Decision Maker relay (crate::dm_relay), off unless
+    // TOMVERSE_AMUX_DM_RELAY is exactly `enabled`: one task beside this loop,
+    // with this loop's clients. It never halts this loop, and this loop's
+    // exit ends it.
+    crate::dm_relay::start_from_env(&api, &client, &base);
     // Sessions whose registration answered busy: it did not happen, so they
     // register next tick with the same instance id.
     let mut awaiting_registration: Vec<(String, String)> = Vec::new();
@@ -3760,7 +3765,9 @@ fn bridge_tick_warning(result: &BridgeTickResult) -> Option<String> {
     }
 }
 
-fn local_client(local_url: &str) -> Result<reqwest::Client> {
+/// The loopback client: no proxy, no redirect. The Decision Maker relay
+/// (crate::dm_relay) uses the same one.
+pub(crate) fn local_client(local_url: &str) -> Result<reqwest::Client> {
     let url = reqwest::Url::parse(local_url).context("invalid local AMUX url")?;
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())

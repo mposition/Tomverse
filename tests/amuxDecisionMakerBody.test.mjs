@@ -735,6 +735,15 @@ const OPTIONS = [
   { id: "b", label: "Model id and locale" },
 ];
 const OPTION_SET = dmOptionSetDigest(dmRequestDigestKey(KEY, REQUEST_ID), OPTIONS);
+/**
+ * The same options as the card carries them since stage S2-2b1, with each
+ * one's effect class and paths. The option set digest reads ids and labels
+ * only, so it is OPTION_SET for these too, and a result still names OPTIONS.
+ */
+const CARD_OPTIONS = [
+  { ...OPTIONS[0], effect: "choice_only", paths: [] },
+  { ...OPTIONS[1], effect: "branch_code_change", paths: ["lib/cache.ts"] },
+];
 
 /** The S1c state read's row, as tests/amuxDecisionMakerRequest.test.mjs shapes it. */
 const requestRow = (overrides = {}) => ({
@@ -767,6 +776,8 @@ const requestRow = (overrides = {}) => ({
   terminalResultKind: null,
   terminalResultDigest: null,
   resultUnknown: false,
+  cleanupUnknownEventId: null,
+  cleanupUnknownAtEpochMs: null,
   closingKind: null,
   probedRejection: null,
   ...overrides,
@@ -835,7 +846,11 @@ const recordingTx = ({
       if (sql.includes('LEFT JOIN "AmuxDecisionMakerRequest" r')) {
         return Promise.resolve([{ ...ROUTING_NO_REQUEST, ...(existing ?? {}), dbNowEpochMs: BigInt(NOW) }]);
       }
-      if (sql.includes('AS "lastHour"')) return Promise.resolve([{ lastHour: 0n, lastDay: 0n }]);
+      // The routing's throughput read carries the instance's result kinds since 2026-10-17, and its newest
+      // cleanup report since stage S2-2a3 (none here).
+      if (sql.includes('AS "lastHour"')) {
+        return Promise.resolve([{ lastHour: 0n, lastDay: 0n, resultKinds: [], newestCleanupUnknownEventId: null }]);
+      }
       if (sql.includes('INSERT INTO "AmuxDecisionMakerResultDetail"')) {
         return Promise.resolve([{ details: registryHoldsKey ? 1n : 0n, fields: registryHoldsKey ? values[DETAIL.fields] : [] }]);
       }
@@ -858,7 +873,19 @@ const recordingTx = ({
       if (sql.includes('"holdSets"')) return Promise.resolve([retentionValues]);
       if (sql.includes('"heldRequests"')) return Promise.resolve([key]);
       if (sql.includes('AS "open"')) return Promise.resolve([{ open }]);
-      if (sql.includes("SELECT DISTINCT ON")) return Promise.resolve(switches);
+      // The ledger's switch read carries each scope's newest cleanup latch's report (stage S2-2a3) and §8
+      // count boundary (stage S2-2a4): none of either.
+      if (sql.includes("SELECT DISTINCT ON")) {
+        return Promise.resolve(
+          switches.map((row) => ({
+            newestCleanupLatchEventId: null,
+            newestValidationLatchSequence: null,
+            validationReleaseSequence: null,
+            validationReleasedAtEpochMs: null,
+            ...row,
+          })),
+        );
+      }
       if (sql.includes('ORDER BY re."retentionUntil"')) return Promise.resolve(candidates);
       if (sql.includes('FROM "AmuxDecisionMakerBody"')) return Promise.resolve([]);
       if (sql.includes('FROM "AmuxDecisionMakerResultDetail"')) return Promise.resolve([]);
@@ -896,6 +923,13 @@ const withIntegrityKey = async (key, work) => {
 // The route transaction around each operation adds the boundary's setup and
 // commit fence (lib/amux/dbBoundary.ts): two more statements.
 const BOUNDARY_STATEMENTS = 2;
+
+/** The writes the retention sweep makes, and the boundary each runs in. */
+const SWEEP_BOUNDARIES = {
+  "expiry purge": "decisionMakerBodyPurge",
+  "key rotation": "decisionMakerDigestKeyRotate",
+  "key destruction": "decisionMakerDigestKeyDestroy",
+};
 const LOCK = /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/;
 const kindsOf = (sent) => sent.map((statement) => statement.kind);
 const auditOf = (sent) => sent.find((statement) => statement.kind === "create").data;
@@ -937,7 +971,7 @@ const ROUTED_CARD = Object.freeze({
   tags: ["needs:you"],
   title: "Pick a cache key layout",
   question: "Should the cache key include the locale or only the model id?",
-  options: OPTIONS,
+  options: CARD_OPTIONS,
   unblocks: "The cache module can be finished.",
   context: "Both layouts pass the current tests.",
   contextPaths: ["lib/cache.ts"],
@@ -1076,6 +1110,14 @@ for (const [label, integrityKey] of [
         assert.ok(result.recorded === true || result.deleted === true, `${entry.name}: ${JSON.stringify(result)}`);
         assert.deepEqual(kindsOf(sent), entry.kinds, entry.name);
         assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12, entry.name);
+        // The retention sweep's boundary for this write is the write at its
+        // largest -- with an integrity key -- plus setup and fence
+        // (lib/amux/decisionMakerRetentionSweep.ts).
+        const sweepBoundary = SWEEP_BOUNDARIES[entry.name];
+        if (sweepBoundary) {
+          assert.ok(sent.length + BOUNDARY_STATEMENTS <= AMUX_DB_BOUNDARIES[sweepBoundary].prismaCallCeiling, entry.name);
+          if (integrityKey !== null) assert.equal(sent.length + BOUNDARY_STATEMENTS, AMUX_DB_BOUNDARIES[sweepBoundary].prismaCallCeiling, entry.name);
+        }
         assert.match(sent[0].sql, LOCK, entry.name);
         const audit = auditOf(sent);
         assert.equal(audit.action, entry.action, entry.name);
@@ -1104,6 +1146,18 @@ for (const [label, integrityKey] of [
         assert.deepEqual(kindsOf(sent), ["query", "query", "execute", "query", ...auditKinds, "query"]);
         assert.equal(sent.length, 8 + extra);
         assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12);
+        // Stage S2's assignment route holds this at its largest, with nothing to spare.
+        const ceiling = AMUX_DB_BOUNDARIES.decisionMakerAssignment.prismaCallCeiling;
+        assert.ok(sent.length + BOUNDARY_STATEMENTS <= ceiling);
+        if (integrityKey !== null) assert.equal(sent.length + BOUNDARY_STATEMENTS, ceiling);
+        assert.deepEqual(
+          [AMUX_DB_BOUNDARIES.decisionMakerAssignment.operation, AMUX_DB_BOUNDARIES.decisionMakerAssignment.isolation],
+          ["decision_maker_assignment", "mutation"],
+        );
+        assert.deepEqual(
+          [AMUX_DB_BOUNDARIES.decisionMakerResultSubmission.operation, AMUX_DB_BOUNDARIES.decisionMakerResultSubmission.isolation],
+          ["decision_maker_result_submission", "mutation"],
+        );
         assert.deepEqual(sent[1].values.slice(0, 1), [PERIOD]);
         assert.equal(lease.seen.length, 1);
       }
@@ -1133,6 +1187,10 @@ for (const [label, integrityKey] of [
         assert.deepEqual(kindsOf(sent), ["query", "execute", "query", "query", ...auditKinds, "query", "query"]);
         assert.equal(sent.length, 9 + extra);
         assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12);
+        // Stage S2's result route holds an accepted output -- the largest submission -- with nothing to spare.
+        const ceiling = AMUX_DB_BOUNDARIES.decisionMakerResultSubmission.prismaCallCeiling;
+        assert.ok(sent.length + BOUNDARY_STATEMENTS <= ceiling);
+        if (integrityKey !== null) assert.equal(sent.length + BOUNDARY_STATEMENTS, ceiling);
         const written = sent.at(-1);
         assert.equal(written, detailInsertOf(sent));
         // The detail and the bodies only while the registry holds this key, undestroyed.
@@ -1286,7 +1344,8 @@ test("the routing and the stored text read one copy of the card: a change to the
     const { tx, sent } = recordingTx();
     const pending = recordDecisionMakerRequestWithCardText(tx, { binding: ROUTING_BINDING, card, keyRing: RING });
     card.question = "Deploy the cache to production?";
-    card.options.push({ id: "c", label: "Something else" });
+    card.options.push({ id: "c", label: "Something else", effect: "choice_only", paths: [] });
+    card.options[1].paths.push("lib/other.ts");
     const result = await pending;
     assert.equal(result.route, "dm_proposal");
     assert.equal(cardInsertOf(sent).values[CARD_INSERT.text], dmCardText(ROUTED_CARD));
@@ -1341,12 +1400,19 @@ test("Admin reads a request's card text back as the card it was routed with, in 
     assert.equal(await readDecisionMakerCardText(tx, REQUEST_ID), null);
   }
   // A text the serializer did not write, or a digest the table could not hold, is never shown.
+  const v1Layout = JSON.parse(text);
+  v1Layout.format = "amux-dm-card-text-v1";
+  v1Layout.options = v1Layout.options.map(({ id, label }) => ({ id, label }));
   for (const tampered of [
     { ...row, text: JSON.stringify(JSON.parse(text), null, 1) },
-    { ...row, text: text.replace("amux-dm-card-text-v1", "amux-dm-card-text-v0") },
+    { ...row, text: text.replace(/"format":"amux-dm-card-text-v\d+"/, '"format":"amux-dm-card-text-v0"') },
+    // Stage S2-2b1's format v2 does not read the v1 layout, whose options had no class or paths.
+    { ...row, text: JSON.stringify(v1Layout) },
     { ...row, text: "Pick a cache key layout" },
     { ...row, digest: "C".repeat(64) },
   ]) {
+    // A replace that matched nothing would leave the stored row itself, which proves nothing.
+    assert.ok(tampered.text !== text || tampered.digest !== row.digest);
     const { tx } = recordingTx({ cardTextRows: [tampered] });
     await assert.rejects(readDecisionMakerCardText(tx, REQUEST_ID), (error) => error instanceof DecisionMakerBodyWriteError && error.code === "state_unreadable");
   }

@@ -1163,7 +1163,7 @@ const REGISTRY = {
     module: "lib/amux/decisionMakerRequestCore.ts",
     list: "DM_LEDGER_EVENT_KINDS",
     reason:
-      "The request lifecycle, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>): the nine of stage S1c, which the request store writes and dmEventRefusal() mirrors, and since stage S1e (migration 20261008130100_amux_decision_maker_judgment_delivery, which recreated this CHECK) a person's judgment -- confirm, edit_confirm, reject -- which the judgment table's trigger writes beside the judgment row and which closes the request. Deliveries, retention and body events have tables of their own and are not values here.",
+      "The request lifecycle, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>): the nine of stage S1c, which the request store writes and dmEventRefusal() mirrors, since stage S1e (migration 20261008130100_amux_decision_maker_judgment_delivery, which recreated this CHECK) a person's judgment -- confirm, edit_confirm, reject -- which the judgment table's trigger writes beside the judgment row and which closes the request, and since stage S2-2a3 (migration 20261017160000_amux_decision_maker_cleanup_unknown, which recreated it again) section 5's cleanup_unknown, which the request store writes once per request and which closes nothing. Deliveries, retention and body events have tables of their own and are not values here.",
   },
   AmuxDecisionMakerRequestEvent_instance_check: {
     owner: "list",

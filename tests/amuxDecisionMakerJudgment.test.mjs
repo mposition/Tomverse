@@ -358,7 +358,9 @@ test("each replaced function is its previous body with only the listed lines cha
 test("the request event table's kinds, instance rule and one closing take a judgment's three kinds", () => {
   const sql = withoutSqlComments(read(MIGRATION));
   const kindCheck = sql.slice(sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"'), sql.indexOf("));", sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"')));
-  assert.deepEqual(quoted(kindCheck), [...DM_LEDGER_EVENT_KINDS]);
+  // The twelve of this stage; stage S2-2a3 adds cleanup_unknown in a CHECK of its own
+  // (tests/amuxDecisionMakerRequest.test.mjs), which check:enum-constraints compares with the list.
+  assert.deepEqual(quoted(kindCheck), DM_LEDGER_EVENT_KINDS.filter((kind) => kind !== "cleanup_unknown"));
   assert.match(sql, /DROP CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check",\n\s+ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"/);
   const instanceKind = sql.slice(sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_instance_kind_check"'), sql.indexOf(") IS TRUE);", sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_instance_kind_check"')) + 11);
   assert.deepEqual(quoted(instanceKind), [...DM_ROUTER_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS]);
@@ -375,9 +377,9 @@ test("the request event table's kinds, instance rule and one closing take a judg
     ),
   );
   assert.doesNotMatch(sql, /FUNCTION "amux_decision_maker_request_closing_retention"\(\)\nRETURNS/);
-  // The closing kinds the state read, the open count and the guards use are the core's.
+  // The closing kinds the state read, the open count, the stale candidates, Admin's recent requests and the guards use are the core's.
   const requestStore = read("lib/amux/decisionMakerRequestStore.ts");
-  assert.equal((requestStore.match(new RegExp(`"kind" IN \\(${sqlList(DM_CLOSING_EVENT_KINDS)}\\)`, "g")) ?? []).length, 2);
+  assert.equal((requestStore.match(new RegExp(`"kind" IN \\(${sqlList(DM_CLOSING_EVENT_KINDS)}\\)`, "g")) ?? []).length, 4);
   for (const name of ["amux_decision_maker_request_event_guard", "amux_decision_maker_body_guard", "amux_decision_maker_judgment_guard", "amux_decision_maker_digest_key_event_guard"]) {
     assert.ok(functionOf(sql, name).includes(`"kind" IN (${doubledList(DM_CLOSING_EVENT_KINDS)})`), name);
   }
@@ -683,6 +685,8 @@ const requestRow = (overrides = {}) => ({
   terminalResultKind: "proposal",
   terminalResultDigest: "c".repeat(64),
   resultUnknown: false,
+  cleanupUnknownEventId: null,
+  cleanupUnknownAtEpochMs: null,
   closingKind: null,
   probedRejection: null,
   ...overrides,
@@ -1521,4 +1525,31 @@ test("the reads are one statement each", async () => {
     assert.equal(await readDecisionMakerJudgment(tx, REQUEST_ID), null);
     assert.equal(sent.length, 1);
   }
+});
+
+test("the judgment route's DB boundary is the largest judgment's statements plus setup and fence", async () => {
+  // An edited confirmation with an integrity key is the largest (the cases above).
+  // A ceiling below it refuses every edit; one above it lets a statement the tests
+  // here never counted run inside the budget.
+  let largest = 0;
+  for (const keyValue of [null, integrityKey]) {
+    await withIntegrityKey(keyValue, async () => {
+      for (const input of [
+        { kind: "confirm", shown: shownFor() },
+        { kind: "edit_confirm", shown: shownFor(), operatorAnswer: "Use the model id." },
+        { kind: "reject" },
+      ]) {
+        const { tx, sent } = recordingTx();
+        const result = await recordDecisionMakerJudgment(tx, { session, requestId: REQUEST_ID, keyRing: RING, ...input });
+        assert.equal(result.recorded, true, input.kind);
+        largest = Math.max(largest, sent.length);
+      }
+    });
+  }
+  assert.equal(largest, 10);
+  assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerJudgment, {
+    operation: "decision_maker_judgment",
+    prismaCallCeiling: largest + BOUNDARY_STATEMENTS,
+    isolation: "mutation",
+  });
 });
