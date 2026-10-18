@@ -124,7 +124,9 @@ async function completeClaim(item: IntentIdentity, claimAuditLogId: string) {
         action: AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_ACTION,
         targetType: AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_TARGET,
         targetId: intent.id,
-        summary: "Verified retirement of an orphan AMUX v19 read-manifest content key.",
+        // The key-intent trigger requires this exact summary
+        // (prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent).
+        summary: "Verified deletion of an orphan AMUX v19 read-manifest content key.",
         metadata: { policyVersion: 19, manifestId: intent.id,
           ideaId: intent.ideaId, referenceOrdinal: intent.referenceOrdinal,
           pinnedCommitSha: intent.pinnedCommitSha,
