@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use super::delivery::{deliver_next, CursorMove, DeliveryCursor};
 use super::flow::{
     listed_markers, relay_candidate, release_marker, scan, AppRoute, DmApp, DmBroker, DmLocal,
     LocalRead, LocalRoute, MarkerKey, RelayEnd, LOCAL_MARKER_LIST_PATH,
@@ -123,9 +124,10 @@ impl DmApp for HttpApp {
 // ---------------------------------------------------------------------------
 
 /// The local AMUX over loopback, with the bridge's client (no proxy, no
-/// redirect). Reads only the board and the session list; writes only the two
-/// relay routes, which are outside `/api/board` -- the bridge never posts to
-/// `/api/board` (orchestration policy version 14).
+/// redirect). Reads only the board and the session list; writes only the
+/// relay routes under `/api/dm-relay/` -- the marker's, and since stage
+/// S2-2b3 a confirmed answer's -- which are outside `/api/board`: the bridge
+/// never posts to `/api/board` (orchestration policy version 14).
 pub struct HttpLocalAmux {
     client: reqwest::Client,
     base: String,
@@ -310,6 +312,8 @@ pub struct Relay<A, L, B> {
     halt: Option<&'static str>,
     /// Where the next scan's window starts (`flow::scan_window`).
     cursor: Option<String>,
+    /// Where the walk over the operator-confirmed answers stands (stage S2-2b3).
+    delivery_cursor: Option<DeliveryCursor>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,6 +335,7 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
             owed: BTreeSet::new(),
             halt: None,
             cursor: None,
+            delivery_cursor: None,
         }
     }
 
@@ -352,9 +357,10 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         self.owed = still;
     }
 
-    /// Releases every marker left over, then carries at most one question --
-    /// the first one in this scan's window the app gives a DM. A halted relay
-    /// only releases markers.
+    /// Releases every marker left over, then delivers at most one
+    /// operator-confirmed answer (stage S2-2b3), then carries at most one
+    /// question -- the first one in this scan's window the app gives a DM. A
+    /// halted relay only releases markers.
     pub async fn tick(&mut self) -> Tick {
         self.release_owed().await;
         // Nothing is in flight between questions, so every marker the local
@@ -373,6 +379,45 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
         if self.halt.is_some() {
             return Tick::Idle;
         }
+        // A person's confirmed answer goes before a new question: it is the
+        // end of a question already asked.
+        let delivered = self.deliver().await;
+        if self.halt.is_some() {
+            return Tick::Idle;
+        }
+        match self.question().await {
+            Tick::Idle if delivered => Tick::Busy,
+            tick => tick,
+        }
+    }
+
+    /// One step of the confirmed-answer walk (`delivery::deliver_next`); true
+    /// when an answer was delivered.
+    async fn deliver(&mut self) -> bool {
+        let run = deliver_next(&self.app, &self.local, self.delivery_cursor.as_ref()).await;
+        match run.cursor {
+            CursorMove::Keep => {}
+            CursorMove::Reset => self.delivery_cursor = None,
+            CursorMove::Advance(cursor) => self.delivery_cursor = Some(cursor),
+        }
+        // Card id, revision and a code: no message, answer or key.
+        if let Some((card, revision)) = &run.question {
+            println!(
+                "amux dm relay: delivery for card {card} revision {revision}: {}",
+                run.code
+            );
+        }
+        if let Some(cause) = run.halt {
+            self.halt = Some(cause);
+            eprintln!(
+                "amux dm relay halt: {cause}; nothing more is delivered or relayed until the bridge restarts. Read the request in Admin first."
+            );
+        }
+        run.delivered
+    }
+
+    /// The question half of a tick (stage S2-2b2).
+    async fn question(&mut self) -> Tick {
         let Some(scan) = scan(
             &self.local,
             &self.settled,
@@ -655,9 +700,27 @@ mod tests {
                     json!({"found": true, "status": "not_recorded",
                     "result_kind": null, "event_id": null, "reason": null}),
                 ),
+                // Stage S2-2b3: no confirmed answer waits, unless a test says so.
+                "deliveries/next" => Reply::Json(
+                    200,
+                    json!({"found": true, "status": "none", "delivery": null}),
+                ),
+                "deliveries" | "deliveries/outcome" => Reply::Json(
+                    200,
+                    json!({"recorded": true, "event_id": EVENT_ID, "created_at": "2026-10-18T00:40:00.000Z"}),
+                ),
                 _ => Reply::Json(404, json!({"error": "not found"})),
             }
         })
+    }
+
+    /// Every path the app was asked, without the confirmed-answer read each
+    /// tick begins with (stage S2-2b3).
+    fn question_paths(seen: &Arc<Mutex<Vec<Seen>>>) -> Vec<String> {
+        app_paths(seen)
+            .into_iter()
+            .filter(|path| path != "deliveries/next")
+            .collect()
     }
 
     /// The broker's side of a socket pair: reads the launch line, checks the
@@ -763,8 +826,10 @@ mod tests {
             relay_with(vec![], json!({"status": "verified"})).await;
         assert_eq!(relay.tick().await, Tick::Busy);
         assert_eq!(relay.halt(), None);
+        // Each tick asks for a confirmed answer first (stage S2-2b3); there is none.
+        assert_eq!(app_paths(&app_seen)[0], "deliveries/next");
         assert_eq!(
-            app_paths(&app_seen),
+            question_paths(&app_seen),
             vec![
                 "requests",
                 "assignments",
@@ -787,7 +852,11 @@ mod tests {
         }
         // The routed card is the typed ask's fields; the card's description is not in it.
         let app = app_seen.lock().unwrap().clone();
-        let routed = &app[0].body;
+        let routed = &app
+            .iter()
+            .find(|seen| seen.path.ends_with("/decision-maker/requests"))
+            .unwrap()
+            .body;
         assert_eq!(
             routed["card"]["question"],
             json!("Which store should the index use?")
@@ -834,7 +903,7 @@ mod tests {
         );
         // A settled question is not routed again.
         assert_eq!(relay.tick().await, Tick::Idle);
-        assert_eq!(app_paths(&app_seen).len(), 5);
+        assert_eq!(question_paths(&app_seen).len(), 5);
     }
 
     #[tokio::test]
@@ -848,16 +917,17 @@ mod tests {
         assert_eq!(relay.halt(), Some("transmit_intent_outcome_unknown"));
         assert!(lines.lock().unwrap().is_empty());
         assert_eq!(
-            app_paths(&app_seen),
+            question_paths(&app_seen),
             vec!["requests", "assignments", "transmissions"]
         );
         assert_eq!(
             local_writes(&local_seen),
             vec!["/api/dm-relay/pending", "/api/dm-relay/pending/release"]
         );
-        // Halted: the next tick routes nothing.
+        // Halted: the next tick neither delivers nor routes anything.
+        let before = app_paths(&app_seen).len();
         relay.tick().await;
-        assert_eq!(app_paths(&app_seen).len(), 3);
+        assert_eq!(app_paths(&app_seen).len(), before);
     }
 
     #[tokio::test]
@@ -869,7 +939,7 @@ mod tests {
         .await;
         assert_eq!(relay.tick().await, Tick::Busy);
         assert_eq!(
-            app_paths(&app_seen),
+            question_paths(&app_seen),
             vec![
                 "requests",
                 "assignments",
@@ -902,7 +972,7 @@ mod tests {
         .await;
         assert_eq!(relay.tick().await, Tick::Busy);
         assert_eq!(
-            app_paths(&app_seen),
+            question_paths(&app_seen),
             vec![
                 "requests",
                 "assignments",
@@ -929,7 +999,7 @@ mod tests {
         )
         .await;
         assert_eq!(relay.tick().await, Tick::Idle);
-        assert_eq!(app_paths(&app_seen), vec!["requests"]);
+        assert_eq!(app_paths(&app_seen), vec!["deliveries/next", "requests"]);
         assert!(local_writes(&local_seen).is_empty() && lines.lock().unwrap().is_empty());
         assert_eq!(relay.halt(), None);
     }
@@ -976,8 +1046,15 @@ mod tests {
         assert!(local_read_allowed("/api/sessions"));
         assert!(!local_read_allowed("/api/board/AMUX-12/../x"));
         assert!(!local_read_allowed("/api/sessions/claude-impl/send"));
-        for route in [LocalRoute::SetPending, LocalRoute::ReleasePending] {
+        for route in [
+            LocalRoute::SetPending,
+            LocalRoute::ReleasePending,
+            LocalRoute::AnswerCheck,
+            LocalRoute::Answers,
+            LocalRoute::AnswerUnknown,
+        ] {
             assert!(local_write_allowed(route.path()));
+            assert!(!route.path().contains("/api/board"));
         }
         assert!(!local_write_allowed("/api/board/AMUX-12"));
         assert!(!local_write_allowed("/api/sessions/claude-impl/send"));
@@ -1087,10 +1164,14 @@ mod tests {
                 panic!("nothing is routed, so nothing is sent")
             }
         }
-        // Every app answer is lost.
+        // Every app answer is lost: the confirmed-answer read is asked again
+        // next tick, and so is the one routing.
         let mut relay = Relay::new(FakeApp::default(), local, NoBroker, false);
         assert_eq!(relay.tick().await, Tick::Idle);
-        assert_eq!(relay.app.routes(), vec![AppRoute::Requests]);
+        assert_eq!(
+            relay.app.routes(),
+            vec![AppRoute::DeliveriesNext, AppRoute::Requests]
+        );
         assert_eq!(
             relay.halt(),
             None,
@@ -1167,7 +1248,15 @@ mod tests {
         for _ in 0..3 {
             relay.tick().await;
         }
-        let calls = relay.app.calls.lock().unwrap().clone();
+        let calls: Vec<_> = relay
+            .app
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(route, _)| *route == AppRoute::Requests)
+            .cloned()
+            .collect();
         assert_eq!(calls.len(), 1, "the one new question was routed once");
         assert_eq!(calls[0].1["binding"]["cardId"], json!("AMUX-100"));
         // One question per scan still: no scan opened more than the window.
@@ -1201,6 +1290,111 @@ mod tests {
             writes[0].1,
             json!({"card_id": "AMUX-150", "question_revision": 1, "request_id": REQUEST_ID})
         );
-        assert!(relay.app.calls.lock().unwrap().is_empty());
+        // Only the confirmed-answer read, which wrote nothing; no routing.
+        assert_eq!(
+            relay.app.routes(),
+            vec![crate::dm_relay::flow::AppRoute::DeliveriesNext]
+        );
+    }
+
+    /// Stage S2-2b3 over HTTP: a confirmed answer the app gives out is checked,
+    /// decided, delivered through the local relay routes with the relay's
+    /// token, and its receipt recorded -- before the tick's question.
+    #[tokio::test]
+    async fn end_to_end_a_confirmed_answer_is_delivered_before_the_question_with_the_relay_token() {
+        let message = "[Decision Maker decision-maker-openai (GPT-6 Astra) 제안, operator-confirmed, re AMUX-12]\n선택지: sqlite\n\n승인 계약의 승인이 아니다. 사람 승인이 필요한 게이트는 따로 요청한다.";
+        let ready = Reply::Json(
+            200,
+            json!({"found": true, "status": "ready", "delivery": {
+                "request_id": REQUEST_ID, "judged_at_ms": 9, "judgment_kind": "confirm",
+                "instance": INSTANCE, "card_id": "AMUX-12", "question_revision": 3,
+                "worker": "claude-impl", "session": "claude-impl", "session_attempt": 2,
+                "message_id": format!("dm-answer:{REQUEST_ID}"),
+                "message": message}}),
+        );
+        let (app_base, app_seen) = serve(app_handler(vec![("deliveries/next", ready)])).await;
+        let base_local = local_handler();
+        let (local_base, local_seen) = serve(Arc::new(move |seen: &Seen| {
+            match (seen.method.as_str(), seen.path.as_str()) {
+                (_, path)
+                    if path.starts_with("/api/dm-relay/answers")
+                        && seen.header(DM_RELAY_LOCAL_TOKEN_HEADER) != Some(LOCAL_TOKEN) =>
+                {
+                    Reply::Json(403, json!({"error": "dm relay token refused"}))
+                }
+                ("POST", "/api/dm-relay/answers/check") => {
+                    Reply::Json(200, json!({"deliverable": true}))
+                }
+                ("POST", "/api/dm-relay/answers") => {
+                    Reply::Json(200, json!({"outcome": "delivered", "card_recorded": true}))
+                }
+                _ => base_local(seen),
+            }
+        }))
+        .await;
+        let api = crate::tomverse_api::TomverseApi::for_test_with_timeouts(
+            app_base,
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+        );
+        let client = crate::wsl_bridge::local_client(&local_base).unwrap();
+        let mut relay = Relay::new(
+            HttpApp::new(api),
+            HttpLocalAmux::new(client, local_base, LOCAL_TOKEN.to_owned()),
+            PairBroker {
+                cleanup: json!({"status": "verified"}),
+                lines: Arc::new(Mutex::new(Vec::new())),
+            },
+            false,
+        );
+        assert_eq!(relay.tick().await, Tick::Busy);
+        assert_eq!(relay.halt(), None);
+        let paths = app_paths(&app_seen);
+        assert_eq!(
+            paths[..3],
+            ["deliveries/next", "deliveries", "deliveries/outcome"]
+        );
+        assert_eq!(
+            paths[3], "requests",
+            "the question comes after the delivery"
+        );
+        let app = app_seen.lock().unwrap().clone();
+        assert_eq!(app[0].body, json!({"after": null}));
+        assert_eq!(app[1].body, json!({"request_id": REQUEST_ID}));
+        assert_eq!(
+            app[2].body,
+            json!({"request_id": REQUEST_ID, "outcome": "receipt"})
+        );
+        let local = local_seen.lock().unwrap().clone();
+        let deliver = local
+            .iter()
+            .find(|seen| seen.method == "POST" && seen.path == "/api/dm-relay/answers")
+            .expect("the answer was delivered through the local relay route");
+        assert_eq!(
+            deliver.header(DM_RELAY_LOCAL_TOKEN_HEADER),
+            Some(LOCAL_TOKEN)
+        );
+        assert_eq!(
+            deliver.body,
+            json!({"card_id": "AMUX-12", "question_revision": 3, "request_id": REQUEST_ID,
+                "worker": "claude-impl", "session": "claude-impl", "session_attempt": 2,
+                "message": message})
+        );
+        // The bridge still never posts to /api/board.
+        assert!(local
+            .iter()
+            .all(|seen| seen.method == "GET" || !seen.path.contains("/api/board")));
+        // The next read starts after the delivered confirmation.
+        relay.tick().await;
+        let app = app_seen.lock().unwrap().clone();
+        let second = app
+            .iter()
+            .filter(|seen| seen.path.ends_with("/deliveries/next"))
+            .nth(1)
+            .unwrap();
+        assert_eq!(
+            second.body,
+            json!({"after": {"judged_at_ms": 9, "request_id": REQUEST_ID}})
+        );
     }
 }

@@ -1,5 +1,5 @@
-//! AMUX Decision Maker bridge relay, stage S2-2b2
-//! (docs/policy/amux-decision-maker.md §2-1 to §2-5, §3, §5, §9, §10).
+//! AMUX Decision Maker bridge relay, stages S2-2b2 and S2-2b3
+//! (docs/policy/amux-decision-maker.md §2, §3, §5, §7, §9, §10).
 //!
 //! The bridge's half of a Decision Maker request, from a worker's typed ask
 //! on the local AMUX to the DM's result in the app's ledger: route the card,
@@ -16,10 +16,19 @@
 //! (the `tomverse-bridge` service) as one task beside the worker loop and
 //! never halts that loop; its own halt stops only new questions.
 //!
-//! Not here: delivering an operator-confirmed answer to the worker (stage
-//! S2-2b3), the repository snapshot (stage S2b) and any Admin screen. No path
-//! from a DM output to a worker exists in this module.
+//! Stage S2-2b3 (`delivery`, §2-7, §7, §9): each tick, before its question
+//! scan, the relay carries at most one operator-confirmed answer to the
+//! asking worker -- read from the app (confirmations only, nothing under the
+//! kill switch), checked on the local AMUX, decided in the app, claimed and
+//! sent by the local AMUX, and its receipt recorded; an unclear delivery is
+//! recorded unknown and its session paused, never sent again. No DM output a
+//! person has not confirmed reaches a worker: the question flow (`flow`)
+//! writes only the marker, and the delivery sends only what the app gives out
+//! for a confirmation, after the app recorded the delivery decision.
+//!
+//! Not here: the repository snapshot (stage S2b) and any Admin screen.
 
+pub mod delivery;
 pub mod flow;
 pub mod io;
 pub mod wire;

@@ -54,6 +54,8 @@ import { listAmuxSessionAnalysisCandidates } from
   "@/lib/amux/ideaSessionAnalysisQueueService";
 import { readAmuxSessionReferencePin } from
   "@/lib/amux/ideaSessionReferencePinRead";
+import { readAmuxSessionCheckoutReferenceInTx } from
+  "@/lib/amux/ideaSessionCheckoutReferenceRead";
 import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
   AmuxSessionBudgetClaimError } from
   "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
@@ -457,6 +459,23 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
     reservationId: committedReservationId, ideaId: committedIdeaId,
     referenceOrdinal: 0, claimId: first.claimId,
   }), { referenceCount: 1, pinnedCommitSha: "a".repeat(40) });
+  const checkoutIdentity = { reservationId: committedReservationId,
+    ideaId: committedIdeaId, referenceOrdinal: 0, claimId: first.claimId };
+  const checkoutPin = { referenceCount: 1, pinnedCommitSha: "a".repeat(40) };
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxSessionCheckoutReferenceInTx(tx, checkoutIdentity,
+      checkoutPin, keysFor(committedIdeaId))), {
+    referenceCount: 1, kind: "repository", repository: "mposition/Tomverse",
+    pullRequestNumber: null, pinnedCommitSha: "a".repeat(40),
+  });
+  assert.equal(await prisma.$transaction((tx) =>
+    readAmuxSessionCheckoutReferenceInTx(tx,
+      { ...checkoutIdentity, claimId: randomUUID() },
+      checkoutPin, keysFor(committedIdeaId))), null);
+  assert.equal(await prisma.$transaction((tx) =>
+    readAmuxSessionCheckoutReferenceInTx(tx, checkoutIdentity,
+      { ...checkoutPin, pinnedCommitSha: "b".repeat(40) },
+      keysFor(committedIdeaId))), null);
   assert.equal(await readAmuxSessionReferencePin({
     reservationId: committedReservationId, ideaId: committedIdeaId,
     referenceOrdinal: 0, claimId: randomUUID(),
