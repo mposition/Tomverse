@@ -502,6 +502,7 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "app/api/internal/amux/v19/analysis-stop/route.ts",
     "app/api/internal/amux/v19/checkout-evidence/route.ts",
     "app/api/internal/amux/v19/read-manifest/route.ts",
+    "app/api/internal/amux/v19/session-analysis-stop/route.ts",
     "app/api/internal/amux/v22/execution/result/route.ts",
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
@@ -511,6 +512,11 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
   assertBefore(stopPoll, 'process.env[READ_ENV] !== "enabled"');
   assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
+  const sessionStopPoll = withoutComments(read(
+    "app/api/internal/amux/v19/session-analysis-stop/route.ts"));
+  assertBefore(sessionStopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
+  assertBefore(sessionStopPoll, 'process.env[READ_ENV] !== "enabled"');
+  assert.match(sessionStopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   const evidenceRoute = withoutComments(read(
     "app/api/internal/amux/v19/checkout-evidence/route.ts"));
   const evidencePost = between(evidenceRoute, "export async function POST",
