@@ -73,7 +73,8 @@ test("directory traversals and metadata-only opens do not count as reads", () =>
     `123 openat(3<${directory}>, "src", O_RDONLY|O_DIRECTORY) = ` +
     `4<${directory}/src>\n` +
     `123 openat(4<${directory}/src>, "a.ts", O_PATH) = ` +
-    `5<${directory}/src/a.ts>\n`));
+    `5<${directory}/src/a.ts>\n` +
+    `123 openat(AT_FDCWD, "${directory}", O_PATH) = 6<${directory}>\n`));
   assert.deepEqual(observer.finish({ traceComplete: true }), {
     kind: "complete", files: [],
   });
@@ -90,6 +91,7 @@ test("open trace refuses an extra file, unparseable checkout line or partial str
     line("secret.txt"),
     `123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY <unfinished ...>\n`,
     `123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY) = 3</usr/elsewhere>\n`,
+    `123 openat(AT_FDCWD, "relative", O_RDONLY) = 3\n`,
   ]) {
     const observer = make();
     observer.observeChunk(Buffer.from(input));
