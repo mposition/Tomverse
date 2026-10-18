@@ -3,7 +3,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -21,11 +21,21 @@ const run = promisify(execFile);
 const CLI = "/home/tommy/.local/share/claude/versions/2.1.288";
 const CLI_SHA256 = "0298068b686e7fdbaf9402a7a587bb7f49c0b0e084de09f69145a0719207640c";
 const CLAIM_DIR = "/home/tommy/.amux-cli-profiles";
-// The first three separately approved calls consumed their markers and ended
-// outcome_unknown. This fourth diagnostic attempt stays closed until approved.
-const CLAIM_MARKER = "v19-max-synthetic-20261018-04.claimed";
-const APPROVAL_EXPIRES_AT = Date.parse("2026-10-20T00:00:00.000Z");
-const MAX_PROBE_MS = 120_000;
+// Four separately approved calls consumed markers -01..-04 and ended
+// outcome_unknown. The operator approved this fifth call on 2026-10-19 (AEST):
+// one attempt that exercises Glob, Grep and Read under the v22 open trace.
+const CLAIM_MARKER = "v19-max-synthetic-20261019-05.claimed";
+const APPROVAL_EXPIRES_AT = Date.parse("2026-10-21T00:00:00.000Z");
+// A probe stop, not an analysis deadline (v19 has none): three tool turns at
+// high effort need more than the earlier single-Read probe's two minutes.
+const MAX_PROBE_MS = 600_000;
+// Synthetic fixture: beta.md is the only file the prompt asks to Read, so a
+// manifest naming alpha.md or README.md proves the trace saw Grep's opens.
+const FIXTURE = Object.freeze({
+  "README.md": "AMUX S0 fixture.\n",
+  "notes/alpha.md": "colour: red\n",
+  "notes/beta.md": "token: S0_MARKER_7Q\n",
+});
 const SAFE_PREFLIGHT_REASONS = new Set([
   "synthetic_s0_refused", "synthetic_s0_cli_unavailable",
   "synthetic_s0_once_unavailable",
@@ -45,7 +55,7 @@ async function pinnedCliPresent() {
 async function main() {
   if (process.platform !== "linux" || process.getuid?.() === 0 ||
       hostname() !== "tomverseagent" ||
-      process.env.AMUX_V19_MAX_SYNTHETIC_S0_APPROVED !== "4" ||
+      process.env.AMUX_V19_MAX_SYNTHETIC_S0_APPROVED !== "5" ||
       process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV] !== undefined ||
       process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN ||
       process.env.CLAUDE_CODE_OAUTH_TOKEN) {
@@ -54,12 +64,16 @@ async function main() {
   await verifyAmuxV19ClaudeMaxAuthSource(AMUX_V19_CLAUDE_MAX_AUTH_PATH);
   if (!await pinnedCliPresent()) throw new Error("synthetic_s0_cli_unavailable");
   const fixture = await mkdtemp("/tmp/amux-v19-s0-repo-");
-  const prompt = Buffer.from(
-    "Read TRACE.txt, then reply with exactly S0_OK and nothing else.", "utf8");
+  const prompt = Buffer.from("Use the Glob tool to list notes/*.md. Then use " +
+    "the Grep tool to find the file that contains S0_MARKER_7Q. Then use the " +
+    "Read tool to read that file. Reply with exactly S0_OK and nothing else.",
+  "utf8");
   try {
-    await writeFile(join(fixture, "TRACE.txt"), "S0_OK\n", { flag: "wx", mode: 0o400 });
+    await mkdir(join(fixture, "notes"), { mode: 0o700 });
+    for (const [path, text] of Object.entries(FIXTURE))
+      await writeFile(join(fixture, path), text, { flag: "wx", mode: 0o400 });
     await git(["init", "-q", "--template=", fixture]);
-    await git(["-C", fixture, "add", "TRACE.txt"]);
+    await git(["-C", fixture, "add", "--", ...Object.keys(FIXTURE)]);
     await git(["-C", fixture, "-c", "core.hooksPath=/dev/null",
       "-c", "commit.gpgsign=false", "-c", "user.name=AMUX S0",
       "-c", "user.email=amux-s0@example.invalid", "commit", "-qm", "S0 fixture"]);
@@ -81,9 +95,12 @@ async function main() {
       diagnostic: true,
       stopCheck: async () => Date.now() - start >= MAX_PROBE_MS,
     });
-    const passed = observed.kind === "verified_success" &&
-      observed.rawModelOutput.trim() === "S0_OK" &&
-      observed.readFiles.length === 1 && observed.readFiles[0] === "TRACE.txt";
+    const success = observed.kind === "verified_success";
+    const uses = success ? observed.toolUses ?? null : null;
+    const passed = success && observed.rawModelOutput.trim() === "S0_OK" &&
+      observed.readFiles.includes("notes/beta.md") &&
+      observed.readFiles.every((path) => Object.hasOwn(FIXTURE, path)) &&
+      uses?.Glob >= 1 && uses?.Grep >= 1 && uses?.Read >= 1;
     process.stdout.write(JSON.stringify({ status: observed.kind,
       cliStarted: observed.cliStarted === true,
       failureStage: observed.kind === "outcome_unknown"
@@ -96,11 +113,13 @@ async function main() {
         ? observed.deniedConnects ?? null : null,
       stderrClass: observed.kind === "outcome_unknown"
         ? observed.stderrClass ?? null : null,
-      answerMatches: observed.kind === "verified_success"
-        ? observed.rawModelOutput.trim() === "S0_OK" : null,
-      traceRead: observed.kind === "verified_success"
-        ? observed.readFiles.length === 1 &&
-          observed.readFiles[0] === "TRACE.txt" : null,
+      cliError: observed.kind === "outcome_unknown"
+        ? observed.cliError ?? null : null,
+      answerMatches: success ? observed.rawModelOutput.trim() === "S0_OK" : null,
+      // Synthetic fixture names only; never a repository path.
+      manifest: success ? observed.readFiles : null,
+      toolUses: uses,
+      passed,
       inputTokens: observed.kind === "verified_success"
         ? observed.inputTokens : null,
       outputTokens: observed.kind === "verified_success"
