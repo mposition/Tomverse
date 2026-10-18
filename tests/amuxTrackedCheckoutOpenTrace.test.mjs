@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAmuxTrackedCheckoutOpenTraceObserver } from
+import { AMUX_V19_OPEN_TRACE_SYSCALLS,
+  createAmuxTrackedCheckoutOpenTraceObserver } from
   "../lib/amux/ideaTrackedCheckoutOpenTrace.mjs";
 
 const directory = "/tmp/amux-v19-checkout-Ab12c3";
@@ -42,6 +43,46 @@ test("open trace accepts successful open and openat2 file descriptors", () => {
   assert.deepEqual(observer.finish({ traceComplete: true }), {
     kind: "complete", files: ["src/a.ts", "src/b.ts"],
   });
+});
+
+test("trace scope includes handle opens, compat opens and io_uring", () => {
+  assert.match(AMUX_V19_OPEN_TRACE_SYSCALLS, /%file/);
+  assert.match(AMUX_V19_OPEN_TRACE_SYSCALLS, /io_uring_enter/);
+  const observer = make();
+  observer.observeChunk(Buffer.from(
+    `123 open64("${directory}/src/a.ts", O_RDONLY) = 3<${directory}/src/a.ts>\n` +
+    `124 openat64(AT_FDCWD<${directory}>, "src/b.ts", O_RDONLY) = ` +
+    `4<${directory}/src/b.ts>\n`));
+  assert.deepEqual(observer.finish({ traceComplete: true }), {
+    kind: "complete", files: ["src/a.ts", "src/b.ts"],
+  });
+  for (const call of ["open_by_handle_at", "io_uring_setup",
+    "io_uring_enter", "io_uring_register"]) {
+    const bypass = make();
+    bypass.observeChunk(Buffer.from(`125 ${call}(...) = -1 EPERM\n`));
+    assert.deepEqual(bypass.finish({ traceComplete: true }),
+      { kind: "unverified" });
+  }
+});
+
+test("directory traversals and metadata-only opens do not count as reads", () => {
+  const observer = make();
+  observer.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD, "${directory}", O_RDONLY|O_DIRECTORY) = ` +
+    `3<${directory}>\n` +
+    `123 openat(3<${directory}>, "src", O_RDONLY|O_DIRECTORY) = ` +
+    `4<${directory}/src>\n` +
+    `123 openat(4<${directory}/src>, "a.ts", O_PATH) = ` +
+    `5<${directory}/src/a.ts>\n`));
+  assert.deepEqual(observer.finish({ traceComplete: true }), {
+    kind: "complete", files: [],
+  });
+  const writable = make();
+  writable.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD, "${directory}/src/a.ts", O_WRONLY) = ` +
+    `3<${directory}/src/a.ts>\n`));
+  assert.deepEqual(writable.finish({ traceComplete: true }),
+    { kind: "unverified" });
 });
 
 test("open trace refuses an extra file, unparseable checkout line or partial stream", () => {

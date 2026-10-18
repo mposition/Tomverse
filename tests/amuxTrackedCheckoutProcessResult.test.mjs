@@ -125,6 +125,30 @@ test("the stoppable child bridge verifies a synthetic complete stream", {
   assert.deepEqual(observed.readFiles, ["src/a.ts"]);
 });
 
+test("the stoppable child bridge requires a complete trace when supplied", {
+  skip: process.platform !== "linux",
+}, async () => {
+  const output = Buffer.from(events.map(JSON.stringify).join("\n")).toString("base64");
+  const script = "process.stdin.resume(); process.stdin.on('end', () => " +
+    "process.stdout.end(Buffer.from(process.argv[1], 'base64')))";
+  const childProcess = spawn(process.execPath, ["-e", script, output], {
+    detached: true, shell: false, stdio: ["pipe", "pipe", "pipe"],
+  });
+  let traceFinished = false;
+  const observed = await awaitAmuxTrackedCheckoutChild({ ...input,
+    child: childProcess, prompt: Buffer.from("synthetic-only"),
+    stopCheck: async () => false,
+    finishOpenTrace: async (exit) => {
+      traceFinished = true;
+      assert.equal(exit.code, 0);
+      return { kind: "complete", files: ["src/a.ts"] };
+    },
+  });
+  assert.equal(traceFinished, true);
+  assert.equal(observed.kind, "verified_success");
+  assert.deepEqual(observed.readFiles, ["src/a.ts"]);
+});
+
 test("the stoppable child bridge refuses an operator stop", {
   skip: process.platform !== "linux",
 }, async () => {

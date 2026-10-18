@@ -62,6 +62,31 @@ test("refuses to certify search or listing from incomplete file events", () => {
   }
 });
 
+test("complete file-open trace certifies Grep/Glob and must include successful Reads", () => {
+  for (const name of ["Grep", "Glob"]) {
+    const observer = make();
+    observe(observer, use("tool_1", name, { pattern: "needle" }));
+    observe(observer, reply("tool_1"));
+    observe(observer, { type: "result", subtype: "success", is_error: false });
+    assert.deepEqual(observer.finish({ openTrace: { kind: "complete",
+      files: ["src/b.ts", "src/a.ts"] } }), {
+      kind: "complete", files: ["src/a.ts", "src/b.ts"],
+    });
+  }
+  const missing = make();
+  observe(missing, use("read_1", "Read", { file_path: file }));
+  observe(missing, reply("read_1"));
+  observe(missing, { type: "result", subtype: "success", is_error: false });
+  assert.deepEqual(missing.finish({ openTrace: { kind: "complete", files: [] } }),
+    { kind: "unverified" });
+  const invalid = make();
+  observe(invalid, use("tool_1", "Glob", { pattern: "*" }));
+  observe(invalid, reply("tool_1"));
+  observe(invalid, { type: "result", subtype: "success", is_error: false });
+  assert.deepEqual(invalid.finish({ openTrace: { kind: "unverified" } }),
+    { kind: "unverified" });
+});
+
 test("rejects unauthorized paths, tools, unmatched results and missing final result", () => {
   const cases = [
     [use("x", "Read", { file_path: `${directory}/src/../secrets.txt` })],
@@ -195,6 +220,18 @@ test("analysis stream returns result, measured usage and exact successful Read m
     kind: "verified_success", rawModelOutput: analysisResult.result,
     readFiles: ["src/a.ts"], inputTokens: 14, outputTokens: 2,
   });
+});
+
+test("analysis stream accepts Grep only with a complete checkout open trace", () => {
+  const events = [analysisInit, use("grep_1", "Grep", { pattern: "x" }),
+    reply("grep_1"), analysisResult];
+  assert.deepEqual(analyze(events, { openTrace: { kind: "complete",
+    files: ["src/a.ts"] } }), {
+    kind: "verified_success", rawModelOutput: analysisResult.result,
+    readFiles: ["src/a.ts"], inputTokens: 14, outputTokens: 2,
+  });
+  assert.deepEqual(analyze(events, { openTrace: { kind: "unverified" } }),
+    { kind: "outcome_unknown" });
 });
 
 test("analysis stream accepts only the pinned inert Claude metadata shape", () => {
