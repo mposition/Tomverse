@@ -202,7 +202,10 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
     throw new AmuxSessionBudgetClaimError(failureStreak === "stopped"
       ? "not_ready" : "integrity_unavailable");
   }
-  const maxShadow = price.price.provider === "anthropic" &&
+  // Keep the narrow Max mode predicate adjacent to the exception even though
+  // price admission above already rejects non-subscription versions.
+  const maxShadow = price.price.mode === "subscription_cli" &&
+    price.price.provider === "anthropic" &&
     input.runner.maxSubscriptionAuthenticated === true &&
     input.runner.tokenCapsEnforceable === false;
   const usageState = v4Unknown || sessionUnknown ? "unknown" as const : "known" as const;

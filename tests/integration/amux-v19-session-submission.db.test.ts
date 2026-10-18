@@ -1532,6 +1532,28 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
     },
   }));
+  const apiPriceVersionId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisPriceApproval(tx, {
+    session, request, approval: {
+      id: apiPriceVersionId, provider: "anthropic", modelId: maxModelId,
+      mode: "api", expectedPreviousVersion: 0,
+      inputTokensCap: 1, outputTokensCap: 1,
+      inputMicroUsdPerMillion: 1_000_000_000,
+      outputMicroUsdPerMillion: 1_000_000_000,
+      evidenceDigest: randomBytes(32).toString("hex"),
+      ownerConfirmedWorstTier: true,
+      verifiedAt: new Date(Date.now() - 60_000),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
+    },
+  }));
+  await assert.rejects(prisma.$transaction((tx) => commitAmuxSessionBudgetClaim(tx, {
+    claimId: randomUUID(), requestId: randomUUID(),
+    reservationId: reservation.reservationId, invocationOrdinal: 0,
+    priceVersionId: apiPriceVersionId,
+    runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,
+      maxSubscriptionAuthenticated: true },
+  })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
+    error.code === "budget_hold" && error.reason === "price_unverified");
   const claim = await prisma.$transaction((tx) => commitAmuxSessionBudgetClaim(tx, {
     claimId: randomUUID(), requestId: randomUUID(),
     reservationId: reservation.reservationId, invocationOrdinal: 0,

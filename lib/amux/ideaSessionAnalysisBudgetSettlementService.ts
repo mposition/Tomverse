@@ -152,10 +152,12 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
       settledMicroUsd,
       reservedMicroUsd: claim.reservedMicroUsd.toString(),
       budgetMode: claim.budgetMode,
-      shadowOverrunMicroUsd: shadowOverrun.toString(),
-      monthlyShadowExceeded: measured &&
-        window.spentMicroUsd + boundedSpent + window.shadowOverrunMicroUsd +
-          shadowOverrun >= window.limitMicroUsd,
+      ...(claim.budgetMode === "max_shadow" ? {
+        shadowOverrunMicroUsd: shadowOverrun.toString(),
+        monthlyShadowExceeded: measured &&
+          window.spentMicroUsd + boundedSpent + window.shadowOverrunMicroUsd +
+            shadowOverrun >= window.limitMicroUsd,
+      } : {}),
       amountMeaning: claim.budgetMode === "max_shadow"
         ? "cli_shadow_observed_not_ceiling" : "cli_api_conversion_estimate" },
   });
