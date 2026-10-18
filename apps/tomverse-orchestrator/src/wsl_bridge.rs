@@ -459,6 +459,14 @@ pub enum BridgeScope {
 }
 
 impl BridgeScope {
+    /// The `--worker` name; `None` for a bridge started without it.
+    fn worker(&self) -> Option<&str> {
+        match self {
+            BridgeScope::SessionList { .. } => None,
+            BridgeScope::Worker(scope) => Some(&scope.worker),
+        }
+    }
+
     fn allowlist(&self) -> Option<Vec<String>> {
         match self {
             BridgeScope::SessionList { .. } => {
@@ -2881,10 +2889,11 @@ async fn run_bridge(mut scope: BridgeScope) -> i32 {
         }
     };
     // The AMUX Decision Maker relay (crate::dm_relay), off unless
-    // TOMVERSE_AMUX_DM_RELAY is exactly `enabled`: one task beside this loop,
+    // TOMVERSE_AMUX_DM_RELAY is exactly `enabled` and this is the --worker
+    // bridge TOMVERSE_AMUX_DM_RELAY_WORKER names: one task beside this loop,
     // with this loop's clients. It never halts this loop, and this loop's
     // exit ends it.
-    crate::dm_relay::start_from_env(&api, &client, &base);
+    crate::dm_relay::start_from_env(&api, &client, &base, scope.worker());
     // Sessions whose registration answered busy: it did not happen, so they
     // register next tick with the same instance id.
     let mut awaiting_registration: Vec<(String, String)> = Vec::new();

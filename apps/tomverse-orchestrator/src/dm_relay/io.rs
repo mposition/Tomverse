@@ -31,6 +31,13 @@ pub const DM_RELAY_ENV: &str = "TOMVERSE_AMUX_DM_RELAY";
 pub const DM_RELAY_LOCAL_TOKEN_ENV: &str = "TOMVERSE_AMUX_DM_RELAY_LOCAL_TOKEN";
 pub const DM_RELAY_LOCAL_TOKEN_HEADER: &str = "x-amux-dm-relay-token";
 
+/// The one worker whose `--worker` bridge runs the relay. Every worker's
+/// bridge unit reads the same environment file, and the relay releases every
+/// local marker at the start of each tick, so a second relay would release
+/// the first one's marker in the middle of its question. Naming the bridge
+/// keeps it to one.
+pub const DM_RELAY_WORKER_ENV: &str = "TOMVERSE_AMUX_DM_RELAY_WORKER";
+
 /// `DM_BROKER_SOCKET_PATH` of lib/amux/decisionMakerBrokerCore.ts: systemd's
 /// socket, the broker's account and the bridge's group, `0660`.
 pub const DM_BROKER_SOCKET_PATH: &str = "/run/amux-dm-broker/broker.sock";
@@ -60,15 +67,30 @@ pub const DM_RELAY_IDLE: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RelayActivation {
     Off,
+    /// Enabled, but this bridge is not the one named to run it.
+    OtherBridge,
     Misconfigured(&'static str),
     On { local_token: String },
 }
 
 /// Off by default: the relay starts only on `TOMVERSE_AMUX_DM_RELAY=enabled`
-/// exactly, and then only with a usable local token.
-pub fn relay_activation(enabled: Option<&str>, local_token: Option<&str>) -> RelayActivation {
+/// exactly, only in the `--worker` bridge that `TOMVERSE_AMUX_DM_RELAY_WORKER`
+/// names (`bridge_worker` is `None` for a bridge started without `--worker`,
+/// which never runs it), and then only with a usable local token.
+pub fn relay_activation(
+    enabled: Option<&str>,
+    relay_worker: Option<&str>,
+    bridge_worker: Option<&str>,
+    local_token: Option<&str>,
+) -> RelayActivation {
     if enabled != Some("enabled") {
         return RelayActivation::Off;
+    }
+    let Some(relay_worker) = relay_worker.filter(|name| !name.is_empty()) else {
+        return RelayActivation::Misconfigured(DM_RELAY_WORKER_ENV);
+    };
+    if bridge_worker != Some(relay_worker) {
+        return RelayActivation::OtherBridge;
     }
     match local_token {
         Some(token)
@@ -1094,34 +1116,73 @@ mod tests {
     #[test]
     fn the_relay_is_off_unless_exactly_enabled_with_a_token() {
         let token = "x".repeat(32);
-        assert_eq!(relay_activation(None, Some(&token)), RelayActivation::Off);
+        let named = |enabled: Option<&str>, token: Option<&str>| {
+            relay_activation(enabled, Some("claude-impl"), Some("claude-impl"), token)
+        };
+        assert_eq!(named(None, Some(&token)), RelayActivation::Off);
+        assert_eq!(named(Some("1"), Some(&token)), RelayActivation::Off);
+        assert_eq!(named(Some("enabled "), Some(&token)), RelayActivation::Off);
+        assert_eq!(named(Some("Enabled"), Some(&token)), RelayActivation::Off);
         assert_eq!(
-            relay_activation(Some("1"), Some(&token)),
-            RelayActivation::Off
-        );
-        assert_eq!(
-            relay_activation(Some("enabled "), Some(&token)),
-            RelayActivation::Off
-        );
-        assert_eq!(
-            relay_activation(Some("Enabled"), Some(&token)),
-            RelayActivation::Off
-        );
-        assert_eq!(
-            relay_activation(Some("enabled"), None),
+            named(Some("enabled"), None),
             RelayActivation::Misconfigured(DM_RELAY_LOCAL_TOKEN_ENV)
         );
         assert_eq!(
-            relay_activation(Some("enabled"), Some("short")),
+            named(Some("enabled"), Some("short")),
             RelayActivation::Misconfigured(DM_RELAY_LOCAL_TOKEN_ENV)
         );
         assert_eq!(
-            relay_activation(Some("enabled"), Some(&format!("{token} x"))),
+            named(Some("enabled"), Some(&format!("{token} x"))),
             RelayActivation::Misconfigured(DM_RELAY_LOCAL_TOKEN_ENV)
         );
         assert_eq!(
-            relay_activation(Some("enabled"), Some(&token)),
+            named(Some("enabled"), Some(&token)),
             RelayActivation::On { local_token: token }
+        );
+    }
+
+    #[test]
+    fn only_the_named_workers_bridge_runs_the_relay() {
+        let token = "x".repeat(32);
+        let on = RelayActivation::On {
+            local_token: token.clone(),
+        };
+        // Every bridge unit reads the same environment file: of the bridges
+        // that see `enabled`, the one named runs it and no other one does.
+        assert_eq!(
+            relay_activation(Some("enabled"), Some("claude-impl"), Some("claude-impl"), Some(&token)),
+            on
+        );
+        assert_eq!(
+            relay_activation(Some("enabled"), Some("claude-impl"), Some("codex-impl"), Some(&token)),
+            RelayActivation::OtherBridge
+        );
+        // A bridge started without --worker never runs it.
+        assert_eq!(
+            relay_activation(Some("enabled"), Some("claude-impl"), None, Some(&token)),
+            RelayActivation::OtherBridge
+        );
+        // Enabled with no bridge named is a configuration error in every
+        // bridge, never a relay in each of them.
+        for bridge in [Some("claude-impl"), None] {
+            assert_eq!(
+                relay_activation(Some("enabled"), None, bridge, Some(&token)),
+                RelayActivation::Misconfigured(DM_RELAY_WORKER_ENV)
+            );
+            assert_eq!(
+                relay_activation(Some("enabled"), Some(""), bridge, Some(&token)),
+                RelayActivation::Misconfigured(DM_RELAY_WORKER_ENV)
+            );
+        }
+        // The name is compared exactly.
+        assert_eq!(
+            relay_activation(Some("enabled"), Some("claude-impl "), Some("claude-impl"), Some(&token)),
+            RelayActivation::OtherBridge
+        );
+        // Off stays off whatever is named.
+        assert_eq!(
+            relay_activation(None, Some("claude-impl"), Some("claude-impl"), Some(&token)),
+            RelayActivation::Off
         );
     }
 
