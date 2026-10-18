@@ -145,6 +145,19 @@ export function AmuxDecisionMakerRequestDetailView({
         {field(m.delivery, list.deliveries[delivery], "amux-dm-detail-delivery")}
       </dl>
 
+      {/* §2-7, stage S2-2b4: a decided answer the local AMUX proved it never sent, with why. */}
+      {row.deliveryOutcome === "not_sent" && row.deliveryNotSentReason !== null ? (
+        <div
+          className="flex flex-col gap-2 rounded border border-amber-400 px-3 py-2 text-sm text-amber-900 dark:border-amber-600 dark:text-amber-200"
+          data-testid="amux-dm-detail-not-sent"
+          data-reason={row.deliveryNotSentReason}
+        >
+          <p className="font-semibold">{m.notSent}</p>
+          <p>{m.notSentReasons[row.deliveryNotSentReason]}</p>
+          <p>{m.notSentNext}</p>
+        </div>
+      ) : null}
+
       {/* §5: shown to every administrator who can open the detail; it names no directory or path. */}
       {row.cleanupUnknownAtMs !== null ? (
         <div

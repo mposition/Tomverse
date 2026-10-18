@@ -85,6 +85,7 @@ const row = (overrides: Record<string, unknown>): DmAdminRequestRow => {
     declarationAccuracy: null,
     delivered: false,
     deliveryOutcomeKind: null,
+    deliveryNotSentReason: null,
     deliveryResolution: null,
     cleanupUnknownAtEpochMs: null,
     ...overrides,

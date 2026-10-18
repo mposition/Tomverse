@@ -103,6 +103,7 @@ const row = (overrides: Record<string, unknown>): DmAdminRequestRow => {
     declarationAccuracy: null,
     delivered: false,
     deliveryOutcomeKind: null,
+    deliveryNotSentReason: null,
     deliveryResolution: null,
     cleanupUnknownAtEpochMs: null,
     ...overrides,
@@ -174,6 +175,27 @@ for (const locale of ["en", "ko"] as const) {
     assert.doesNotMatch(textBy(tree, "amux-decision-maker-request-detail"), /\/var\/|\/home\/|rm -|requests\//);
     // Without a report there is no block.
     assert.equal(byTestId(AmuxDecisionMakerRequestDetailView({ m, list, view: detail() }), "amux-dm-detail-cleanup-unknown").length, 0);
+  });
+
+  test(`${locale}: a confirmed answer the local AMUX never sent says so, why, and that the operator answers directly`, () => {
+    // Stage S2-2b4, §2-7: "다른 쪽은 거절되어 운영자에게 보인다".
+    const notSent = row({
+      closingKind: "confirm",
+      declarationAccuracy: "not_judged",
+      delivered: true,
+      deliveryOutcomeKind: "delivery_not_sent",
+      deliveryNotSentReason: "answered_by_operator",
+    });
+    const tree = AmuxDecisionMakerRequestDetailView({ m, list, view: detail({ row: notSent, shown: null }) });
+    assert.equal(byTestId(tree, "amux-dm-detail-not-sent")[0]!["data-reason"], "answered_by_operator");
+    const text = textBy(tree, "amux-dm-detail-not-sent");
+    assert.ok(text.includes(m.notSent) && text.includes(m.notSentReasons.answered_by_operator) && text.includes(m.notSentNext));
+    assert.ok(textBy(tree, "amux-dm-detail-delivery").includes(list.deliveries.not_sent));
+    // Only a not-sent outcome has the block.
+    assert.equal(byTestId(AmuxDecisionMakerRequestDetailView({ m, list, view: detail() }), "amux-dm-detail-not-sent").length, 0);
+    // A request the operator's direct answer closed says so as its status.
+    const closed = row({ closingKind: "direct_answer_close" });
+    assert.ok(textBy(AmuxDecisionMakerRequestDetailView({ m, list, view: detail({ row: closed, shown: null }) }), "amux-dm-detail-status").includes(list.statuses.direct_answer_close));
   });
 
   test(`${locale}: an irreversible proposal says so before the card and the proposal`, () => {

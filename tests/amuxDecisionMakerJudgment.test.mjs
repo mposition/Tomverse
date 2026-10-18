@@ -36,6 +36,8 @@ import {
   DM_DELIVERY_AUDIT_METADATA_KEYS,
   DM_DELIVERY_EVENT_AUDIT_TARGET_TYPE,
   DM_DELIVERY_EVENT_KINDS,
+  DM_DELIVERY_NOT_SENT_REASONS,
+  DM_DELIVERY_OUTCOME_EVENT_KINDS,
   DM_DELIVERY_RESOLVE_OUTCOMES,
   DM_DELIVERY_SYSTEM_EVENT_KINDS,
   DM_JUDGMENT_AUDIT_METADATA_KEYS,
@@ -134,6 +136,10 @@ const replaceOnce = (text, from, to, label) => {
   return parts.join(to);
 };
 const sqlList = (values) => values.map((value) => `'${value}'`).join(", ");
+/** The closing kinds and delivery kinds stage S1e's migration holds; stage S2-2b4 adds one to each. */
+const S1E_CLOSING_EVENT_KINDS = DM_CLOSING_EVENT_KINDS.filter((kind) => kind !== "direct_answer_close");
+const S1E_ROUTER_EVENT_KINDS = DM_ROUTER_EVENT_KINDS.filter((kind) => kind !== "direct_answer_close");
+const S1E_DELIVERY_EVENT_KINDS = DM_DELIVERY_EVENT_KINDS.filter((kind) => kind !== "delivery_not_sent");
 const doubledList = (values) => values.map((value) => `''${value}''`).join(", ");
 
 // ---------------------------------------------------------------------------
@@ -147,17 +153,21 @@ test("the judgment, accuracy and delivery vocabularies are the policy's, and non
   assert.deepEqual([...DM_DECLARATION_ACCURACIES], ["matched", "mismatched", "not_judged"]);
   assert.equal(DM_DEFAULT_DECLARATION_ACCURACY, "not_judged");
   assert.deepEqual([...DM_DECLARATION_ITEMS], ["effect_class", "resolution", "paths"]);
-  assert.deepEqual([...DM_DELIVERY_EVENT_KINDS], ["deliver", "delivery_receipt", "delivery_unknown", "delivery_unknown_resolve"]);
-  assert.deepEqual([...DM_DELIVERY_SYSTEM_EVENT_KINDS], ["deliver", "delivery_receipt", "delivery_unknown"]);
+  // Stage S2-2b4 adds the decision's third outcome, a delivery that sent nothing, with its closed reasons.
+  assert.deepEqual([...DM_DELIVERY_EVENT_KINDS], ["deliver", "delivery_receipt", "delivery_unknown", "delivery_unknown_resolve", "delivery_not_sent"]);
+  assert.deepEqual([...DM_DELIVERY_SYSTEM_EVENT_KINDS], ["deliver", "delivery_receipt", "delivery_unknown", "delivery_not_sent"]);
+  assert.deepEqual([...DM_DELIVERY_OUTCOME_EVENT_KINDS], ["delivery_receipt", "delivery_unknown", "delivery_not_sent"]);
+  assert.deepEqual([...DM_DELIVERY_NOT_SENT_REASONS], ["answered_by_operator", "question_changed", "binding_changed", "lane_refused", "local_refused"]);
   assert.deepEqual([...DM_DELIVERY_RESOLVE_OUTCOMES], ["delivered", "not_delivered"]);
   assert.deepEqual([...DM_DELIVERY_ACTOR_KINDS], ["human", "system"]);
-  for (const list of [DM_JUDGMENT_KINDS, DM_DECLARATION_ACCURACIES, DM_DELIVERY_EVENT_KINDS, DM_DELIVERY_RESOLVE_OUTCOMES]) {
+  for (const list of [DM_JUDGMENT_KINDS, DM_DECLARATION_ACCURACIES, DM_DELIVERY_EVENT_KINDS, DM_DELIVERY_RESOLVE_OUTCOMES, DM_DELIVERY_NOT_SENT_REASONS]) {
     assert.equal(list.some((value) => /autonom|graduat|eligib/i.test(value)), false);
   }
-  // The ledger: the S1c nine, a judgment's three, and every closing kind once.
+  // The ledger: the request store's kinds, a judgment's three, and every closing kind once -- since
+  // stage S2-2b4 with the router's close on the operator's direct answer.
   assert.deepEqual([...DM_LEDGER_EVENT_KINDS], [...DM_REQUEST_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS]);
-  assert.deepEqual([...DM_ROUTER_CLOSING_EVENT_KINDS], ["assign_discarded", "stale_close"]);
-  assert.deepEqual([...DM_CLOSING_EVENT_KINDS], ["assign_discarded", "stale_close", "confirm", "edit_confirm", "reject"]);
+  assert.deepEqual([...DM_ROUTER_CLOSING_EVENT_KINDS], ["assign_discarded", "stale_close", "direct_answer_close"]);
+  assert.deepEqual([...DM_CLOSING_EVENT_KINDS], ["assign_discarded", "stale_close", "direct_answer_close", "confirm", "edit_confirm", "reject"]);
   assert.equal(DM_STALE_CLOSE_AFTER_MS, 720 * 60 * 60 * 1000);
 });
 
@@ -178,13 +188,16 @@ test("every judgment and delivery audit action is section 10's, by the right kin
     delivery_receipt: "amux.decision.deliver",
     delivery_unknown: "amux.decision.delivery_unknown",
     delivery_unknown_resolve: "amux.decision.delivery_unknown_resolve",
+    delivery_not_sent: "amux.decision.deliver",
   });
   for (const kind of DM_DELIVERY_SYSTEM_EVENT_KINDS) {
     assert.ok(systemLine.includes(`\`${DM_DELIVERY_AUDIT_ACTIONS[kind].replace("amux.decision", "")}\``), kind);
   }
   assert.ok(humanLine.includes("`.delivery_unknown_resolve`"));
-  // Section 10 closes the list: no action of its own for a receipt.
+  // Section 10 closes the list: no action of its own for a receipt, or (stage S2-2b4) for a delivery
+  // that sent nothing.
   assert.ok(!policy.includes(".delivery_receipt"));
+  assert.ok(!policy.includes(".delivery_not_sent"));
   assert.equal(DM_JUDGMENT_AUDIT_TARGET_TYPE, "AmuxDecisionMakerRequest");
   assert.equal(DM_DELIVERY_EVENT_AUDIT_TARGET_TYPE, "AmuxDecisionMakerDeliveryEvent");
 });
@@ -360,28 +373,30 @@ test("the request event table's kinds, instance rule and one closing take a judg
   const kindCheck = sql.slice(sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"'), sql.indexOf("));", sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"')));
   // The twelve of this stage; stage S2-2a3 adds cleanup_unknown in a CHECK of its own
   // (tests/amuxDecisionMakerRequest.test.mjs), which check:enum-constraints compares with the list.
-  assert.deepEqual(quoted(kindCheck), DM_LEDGER_EVENT_KINDS.filter((kind) => kind !== "cleanup_unknown"));
+  assert.deepEqual(quoted(kindCheck), DM_LEDGER_EVENT_KINDS.filter((kind) => kind !== "cleanup_unknown" && kind !== "direct_answer_close"));
   assert.match(sql, /DROP CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check",\n\s+ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"/);
   const instanceKind = sql.slice(sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_instance_kind_check"'), sql.indexOf(") IS TRUE);", sql.indexOf('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_instance_kind_check"')) + 11);
-  assert.deepEqual(quoted(instanceKind), [...DM_ROUTER_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS]);
+  assert.deepEqual(quoted(instanceKind), [...S1E_ROUTER_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS]);
   assert.match(instanceKind.replace(/\s+/g, " "), /CHECK \(\(\( "kind" IN \([^)]*\) \) = \("instance" IS NULL\)\) IS TRUE\);$/);
   assert.ok(
     sql.includes(
-      `DROP INDEX "AmuxDecisionMakerRequestEvent_one_closing_key";\nCREATE UNIQUE INDEX "AmuxDecisionMakerRequestEvent_one_closing_key"\n  ON "AmuxDecisionMakerRequestEvent"("requestId") WHERE "kind" IN (${sqlList(DM_CLOSING_EVENT_KINDS)});`,
+      `DROP INDEX "AmuxDecisionMakerRequestEvent_one_closing_key";\nCREATE UNIQUE INDEX "AmuxDecisionMakerRequestEvent_one_closing_key"\n  ON "AmuxDecisionMakerRequestEvent"("requestId") WHERE "kind" IN (${sqlList(S1E_CLOSING_EVENT_KINDS)});`,
     ),
   );
   // The S1d closing trigger, recreated: the same function on every closing kind.
   assert.ok(
     sql.includes(
-      `DROP TRIGGER "amux_decision_maker_request_closing_retention" ON "AmuxDecisionMakerRequestEvent";\nCREATE TRIGGER "amux_decision_maker_request_closing_retention"\n    AFTER INSERT ON "AmuxDecisionMakerRequestEvent"\n    FOR EACH ROW\n    WHEN (NEW."kind" IN (${sqlList(DM_CLOSING_EVENT_KINDS)}))\n    EXECUTE FUNCTION "amux_decision_maker_request_closing_retention"();`,
+      `DROP TRIGGER "amux_decision_maker_request_closing_retention" ON "AmuxDecisionMakerRequestEvent";\nCREATE TRIGGER "amux_decision_maker_request_closing_retention"\n    AFTER INSERT ON "AmuxDecisionMakerRequestEvent"\n    FOR EACH ROW\n    WHEN (NEW."kind" IN (${sqlList(S1E_CLOSING_EVENT_KINDS)}))\n    EXECUTE FUNCTION "amux_decision_maker_request_closing_retention"();`,
     ),
   );
   assert.doesNotMatch(sql, /FUNCTION "amux_decision_maker_request_closing_retention"\(\)\nRETURNS/);
-  // The closing kinds the state read, the open count, the stale candidates, Admin's recent requests and the guards use are the core's.
+  // The closing kinds the state read, the open count, the stale candidates and Admin's recent requests use
+  // are the core's; the guards of this migration held stage S1e's five (stage S2-2b4's test below holds
+  // the six of its replacements).
   const requestStore = read("lib/amux/decisionMakerRequestStore.ts");
   assert.equal((requestStore.match(new RegExp(`"kind" IN \\(${sqlList(DM_CLOSING_EVENT_KINDS)}\\)`, "g")) ?? []).length, 4);
   for (const name of ["amux_decision_maker_request_event_guard", "amux_decision_maker_body_guard", "amux_decision_maker_judgment_guard", "amux_decision_maker_digest_key_event_guard"]) {
-    assert.ok(functionOf(sql, name).includes(`"kind" IN (${doubledList(DM_CLOSING_EVENT_KINDS)})`), name);
+    assert.ok(functionOf(sql, name).includes(`"kind" IN (${doubledList(S1E_CLOSING_EVENT_KINDS)})`), name);
   }
   // The only DROPs are the ones replaced in place.
   assert.deepEqual(
@@ -404,7 +419,7 @@ test("the new tables' CHECKs and indexes hold the core's lists", () => {
   assert.deepEqual(inList("AmuxDecisionMakerJudgment_declaration_accuracy_check"), [...DM_DECLARATION_ACCURACIES]);
   assert.deepEqual(inList("AmuxDecisionMakerJudgment_shown_snapshot_state_check"), [...DM_SNAPSHOT_STATES]);
   assert.deepEqual(quoted(checkBody(sql, "AmuxDecisionMakerJudgment_shown_option_id_format_check")), [DM_OPTION_ID_PATTERN.source]);
-  assert.deepEqual(inList("AmuxDecisionMakerDeliveryEvent_kind_check"), [...DM_DELIVERY_EVENT_KINDS]);
+  assert.deepEqual(inList("AmuxDecisionMakerDeliveryEvent_kind_check"), S1E_DELIVERY_EVENT_KINDS);
   assert.deepEqual(inList("AmuxDecisionMakerDeliveryEvent_outcome_check"), [...DM_DELIVERY_RESOLVE_OUTCOMES]);
   assert.deepEqual(inList("AmuxDecisionMakerDeliveryEvent_actor_kind_check"), [...DM_DELIVERY_ACTOR_KINDS]);
   // The array CHECK of the mismatched items; check:enum-constraints does not read arrays.
@@ -534,6 +549,245 @@ test("every new guard refuses an update, reads only under READ COMMITTED, pins s
   }
   // Every reading is through TG_TABLE_SCHEMA, never a hard-coded schema.
   assert.doesNotMatch(withoutSqlComments(sql), /"public"\.|public\."/);
+});
+
+// ---------------------------------------------------------------------------
+// Stage S2-2b4: 20261018120000_amux_decision_maker_delivery_gaps
+// ---------------------------------------------------------------------------
+
+const GAPS_MIGRATION_NAME = "20261018120000_amux_decision_maker_delivery_gaps";
+const GAPS_MIGRATION = `${MIGRATIONS}/${GAPS_MIGRATION_NAME}/migration.sql`;
+const BOUNDARY_MIGRATION_NAME = "20261017200000_amux_decision_maker_validation_count_boundary";
+const BOUNDARY_MIGRATION = `${MIGRATIONS}/${BOUNDARY_MIGRATION_NAME}/migration.sql`;
+/** Each function stage S2-2b4 replaces, and the migration that wrote the body it replaces. */
+const GAPS_REPLACED = [
+  ["amux_decision_maker_request_event_guard", BOUNDARY_MIGRATION],
+  ["amux_decision_maker_body_guard", MIGRATION],
+  ["amux_decision_maker_retention_event_guard", MIGRATION],
+  ["amux_decision_maker_digest_key_event_guard", MIGRATION],
+  ["amux_decision_maker_judgment_guard", MIGRATION],
+  ["amux_decision_maker_delivery_event_guard", MIGRATION],
+];
+
+test("stage S2-2b4's migration pins each of its six functions to the body it replaces, and no later migration redefines one", () => {
+  const raw = read(GAPS_MIGRATION);
+  const pins = Object.fromEntries([...raw.matchAll(/^ {12}\('([0-9a-f]{64})', '(amux_decision_maker_[a-z_]+)'\),?$/gm)].map((match) => [match[2], match[1]]));
+  assert.deepEqual(pins, Object.fromEntries(GAPS_REPLACED.map(([name, from]) => [name, sha256(bodyOf(functionOf(read(from), name)))])));
+  const statements = withoutSqlComments(raw);
+  assert.ok(statements.indexOf("DO $pin$") < statements.indexOf("ALTER TABLE"));
+  assert.match(statements, /pg_catalog\.encode\(pg_catalog\.sha256\(pg_catalog\.convert_to\(p\.prosrc, 'UTF8'\)\), 'hex'\)/);
+  assert.match(statements, /RAISE EXCEPTION 'AMUX_DM_UNEXPECTED_FUNCTION_BODY %', pinned\."name";/);
+  // The new column makes the migration visible to the baseline guard's schema comparison: no probe.
+  assert.doesNotMatch(raw.split("\n")[0], /baseline-check/);
+  assert.deepEqual([...statements.matchAll(/^CREATE OR REPLACE FUNCTION "([a-z_]+)"/gm)].map((match) => match[1]), GAPS_REPLACED.map(([name]) => name));
+  // The body each replaces is the one the database runs: no migration between its writer and this one
+  // redefines it, and none after this one.
+  for (const [name, from] of GAPS_REPLACED) {
+    const writer = from.split("/")[2];
+    const redefining = readdirSync(join(root, MIGRATIONS))
+      .filter((migration) => migration > writer && migration !== GAPS_MIGRATION_NAME)
+      .filter((migration) => {
+        try {
+          return new RegExp(`FUNCTION "${name}"\\(`).test(read(`${MIGRATIONS}/${migration}/migration.sql`));
+        } catch {
+          return false;
+        }
+      });
+    assert.deepEqual(redefining, [], name);
+  }
+});
+
+test("stage S2-2b4's six functions are their previous bodies with only the listed lines changed", () => {
+  const after = (name) => functionOf(read(GAPS_MIGRATION), name);
+  const before = Object.fromEntries(GAPS_REPLACED.map(([name, from]) => [name, functionOf(read(from), name)]));
+  const s1e = doubledList(S1E_CLOSING_EVENT_KINDS);
+  const now = doubledList(DM_CLOSING_EVENT_KINDS);
+
+  // The request event guard: the closing aggregate, the graph, and the router's audit under
+  // .assign_discarded for a direct answer's close.
+  let event = before.amux_decision_maker_request_event_guard;
+  event = replaceOnce(event, `coalesce(bool_or("kind" IN (${s1e})), false)`, `coalesce(bool_or("kind" IN (${now})), false)`, "event closing");
+  event = replaceOnce(
+    event,
+    "        WHEN 'stale_close' THEN\n",
+    "        -- Stage S2-2b4, section 2-7: \"운영자의 직접 답이 먼저면 요청은\n" +
+      "        -- 닫힌다\". The bridge reports that the local AMUX's answer record\n" +
+      "        -- names the operator for the request's question; the router closes\n" +
+      "        -- the request once, whatever it was waiting for. A request routed to\n" +
+      "        -- the operator is closed from its creation.\n" +
+      "        WHEN 'direct_answer_close' THEN\n" +
+      "            request_route = 'dm_proposal' AND NOT closed\n" +
+      "        WHEN 'stale_close' THEN\n",
+    "event graph",
+  );
+  event = replaceOnce(
+    event,
+    "        expected_actor := CASE\n            WHEN NEW.\"kind\" IN ('assign', 'assign_discarded', 'stale_close') THEN 'amux-decision-router'\n",
+    "        -- Section 10 closes its list of actions and names none for a direct\n" +
+      "        -- answer's close (stage S2-2b4): it is the router's\n" +
+      "        -- amux.decision.assign_discarded, the action section 2-3 gives the\n" +
+      "        -- close of a request whose card the operator answered first, told\n" +
+      "        -- apart by the event's kind and the audit metadata's kind.\n" +
+      `        expected_actor := CASE\n            WHEN NEW."kind" IN (${sqlList(DM_ROUTER_EVENT_KINDS)}) THEN 'amux-decision-router'\n`,
+    "event actor",
+  );
+  event = replaceOnce(
+    event,
+    ") INTO audited USING NEW.\"auditLogId\", 'amux.decision.' || NEW.\"kind\", 'AmuxDecisionMakerRequestEvent', NEW.\"id\", expected_actor;",
+    ") INTO audited USING NEW.\"auditLogId\", 'amux.decision.' || CASE NEW.\"kind\" WHEN 'direct_answer_close' THEN 'assign_discarded' ELSE NEW.\"kind\" END, 'AmuxDecisionMakerRequestEvent', NEW.\"id\", expected_actor;",
+    "event action",
+  );
+  assert.equal(after("amux_decision_maker_request_event_guard"), event);
+
+  // The body guard: a direct answer's close closes the request for a body.
+  let body = before.amux_decision_maker_body_guard;
+  body = replaceOnce(body, `"kind" IN (${s1e}))',`, `"kind" IN (${now}))',`, "body closing");
+  body = replaceOnce(
+    body,
+    "    -- judgment, in the same transaction, and nothing after it.\n",
+    "    -- judgment, in the same transaction, and nothing after it. Since stage\n    -- S2-2b4 an operator's direct answer closes it as well.\n",
+    "body comment",
+  );
+  assert.equal(after("amux_decision_maker_body_guard"), body);
+
+  // The retention guard: a retention_set named by a direct answer's close and the router's
+  // .assign_discarded naming it.
+  let retention = before.amux_decision_maker_retention_event_guard;
+  retention = replaceOnce(
+    retention,
+    "        -- judgment. The retention starts at the close.\n",
+    "        -- judgment, or since stage S2-2b4 the router's\n" +
+      "        -- amux.decision.assign_discarded naming the event for a direct\n" +
+      "        -- answer's close (section 10 names no action of its own for it).\n" +
+      "        -- The retention starts at the close.\n",
+    "retention comment",
+  );
+  retention = replaceOnce(
+    retention,
+    `AND a."action" = ''amux.decision.'' || e."kind" AND`,
+    `AND a."action" = ''amux.decision.'' || CASE e."kind" WHEN ''direct_answer_close'' THEN ''assign_discarded'' ELSE e."kind" END AND`,
+    "retention action",
+  );
+  retention = replaceOnce(
+    retention,
+    `|| '(e."kind" IN (''assign_discarded'', ''stale_close'') AND`,
+    `|| '(e."kind" IN (${doubledList(DM_ROUTER_CLOSING_EVENT_KINDS)}) AND`,
+    "retention router kinds",
+  );
+  assert.equal(after("amux_decision_maker_retention_event_guard"), retention);
+
+  // The key guard: a request closed by a direct answer is not open.
+  let key = before.amux_decision_maker_digest_key_event_guard;
+  key = replaceOnce(key, `e."kind" IN (${s1e}))',`, `e."kind" IN (${now}))',`, "key closing");
+  key = replaceOnce(
+    key,
+    "        -- person's judgment closes a request as well.\n",
+    "        -- person's judgment closes a request as well, and since stage S2-2b4\n        -- an operator's direct answer.\n",
+    "key comment",
+  );
+  assert.equal(after("amux_decision_maker_digest_key_event_guard"), key);
+
+  // The judgment guard: a request closed by a direct answer takes no judgment.
+  let judgment = before.amux_decision_maker_judgment_guard;
+  judgment = replaceOnce(judgment, `'SELECT coalesce(bool_or("kind" IN (${s1e})), false),`, `'SELECT coalesce(bool_or("kind" IN (${now})), false),`, "judgment closing");
+  judgment = replaceOnce(
+    judgment,
+    "    -- operator is closed from its creation, and an earlier judgment closed it.\n",
+    "    -- operator is closed from its creation, and an earlier judgment closed it.\n    -- Since stage S2-2b4 an operator's direct answer closes it too.\n",
+    "judgment comment",
+  );
+  assert.equal(after("amux_decision_maker_judgment_guard"), judgment);
+
+  // The delivery guard: not sent is the decision's third outcome, once, after the decision.
+  let delivery = before.amux_decision_maker_delivery_event_guard;
+  delivery = replaceOnce(
+    delivery,
+    `coalesce(bool_or("kind" IN (''delivery_receipt'', ''delivery_unknown'')), false),`,
+    `coalesce(bool_or("kind" IN (${doubledList(DM_DELIVERY_OUTCOME_EVENT_KINDS)})), false),`,
+    "delivery settled",
+  );
+  delivery = replaceOnce(
+    delivery,
+    "    -- receipt or an unknown outcome, one of the two once; then, after an\n",
+    "    -- receipt, an unknown outcome or (stage S2-2b4) a delivery that sent\n    -- nothing, one of the three once; then, after an\n",
+    "delivery comment",
+  );
+  delivery = replaceOnce(
+    delivery,
+    "        WHEN 'delivery_unknown' THEN\n            delivered AND NOT settled\n",
+    "        WHEN 'delivery_unknown' THEN\n            delivered AND NOT settled\n" +
+      "        -- Stage S2-2b4: the local AMUX proved the decided delivery sent\n" +
+      "        -- nothing; its reason is the row's, held by the CHECKs.\n" +
+      "        WHEN 'delivery_not_sent' THEN\n            delivered AND NOT settled\n",
+    "delivery graph",
+  );
+  delivery = replaceOnce(
+    delivery,
+    "        -- The router's amux.decision.deliver (the decision and the receipt)\n",
+    "        -- The router's amux.decision.deliver (the decision, the receipt and,\n        -- since stage S2-2b4, a not-sent outcome)\n",
+    "delivery audit comment",
+  );
+  assert.equal(after("amux_decision_maker_delivery_event_guard"), delivery);
+  // A not-sent outcome is audited under the router's .deliver: the unchanged CASE's ELSE.
+  assert.ok(delivery.includes(`CASE NEW."kind" WHEN 'delivery_unknown' THEN 'amux.decision.delivery_unknown' ELSE 'amux.decision.deliver' END`));
+});
+
+test("stage S2-2b4's CHECKs, indexes and closing trigger hold the core's lists, and nothing else changes", () => {
+  const raw = read(GAPS_MIGRATION);
+  const sql = withoutSqlComments(raw);
+  const after = (marker) => sql.slice(sql.indexOf(marker), sql.indexOf(";", sql.indexOf(marker)) + 1);
+  // The request event table: the kinds, the router's no-instance side, one closing of the six.
+  assert.deepEqual(quoted(after('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_kind_check"')), [...DM_LEDGER_EVENT_KINDS]);
+  const instanceKind = after('ADD CONSTRAINT "AmuxDecisionMakerRequestEvent_instance_kind_check"');
+  assert.deepEqual(quoted(instanceKind), [...DM_ROUTER_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS]);
+  assert.match(instanceKind.replace(/\s+/g, " "), /CHECK \(\(\( "kind" IN \([^)]*\) \) = \("instance" IS NULL\)\) IS TRUE\);$/);
+  assert.ok(
+    sql.includes(
+      `DROP INDEX "AmuxDecisionMakerRequestEvent_one_closing_key";\nCREATE UNIQUE INDEX "AmuxDecisionMakerRequestEvent_one_closing_key"\n  ON "AmuxDecisionMakerRequestEvent"("requestId") WHERE "kind" IN (${sqlList(DM_CLOSING_EVENT_KINDS)});`,
+    ),
+  );
+  assert.ok(
+    sql.includes(
+      `DROP TRIGGER "amux_decision_maker_request_closing_retention" ON "AmuxDecisionMakerRequestEvent";\nCREATE TRIGGER "amux_decision_maker_request_closing_retention"\n    AFTER INSERT ON "AmuxDecisionMakerRequestEvent"\n    FOR EACH ROW\n    WHEN (NEW."kind" IN (${sqlList(DM_CLOSING_EVENT_KINDS)}))\n    EXECUTE FUNCTION "amux_decision_maker_request_closing_retention"();`,
+    ),
+  );
+  // The delivery table: the kinds, the reason's closed list on its own column, the reason exactly on
+  // not_sent (held to IS TRUE), and one outcome of the three.
+  assert.ok(sql.includes(`ALTER TABLE "AmuxDecisionMakerDeliveryEvent" ADD COLUMN "notSentReason" TEXT;`));
+  assert.deepEqual(quoted(after('ADD CONSTRAINT "AmuxDecisionMakerDeliveryEvent_kind_check"')), [...DM_DELIVERY_EVENT_KINDS]);
+  const reason = after('ADD CONSTRAINT "AmuxDecisionMakerDeliveryEvent_not_sent_reason_check"');
+  assert.match(reason, /CHECK \("notSentReason" IS NULL OR "notSentReason" IN \(/);
+  assert.deepEqual(quoted(reason), [...DM_DELIVERY_NOT_SENT_REASONS]);
+  assert.ok(
+    after('ADD CONSTRAINT "AmuxDecisionMakerDeliveryEvent_not_sent_shape_check"').includes(
+      `CHECK ((("kind" = 'delivery_not_sent') = ("notSentReason" IS NOT NULL)) IS TRUE);`,
+    ),
+  );
+  assert.ok(
+    sql.includes(
+      `DROP INDEX "AmuxDecisionMakerDeliveryEvent_one_outcome_key";\nCREATE UNIQUE INDEX "AmuxDecisionMakerDeliveryEvent_one_outcome_key"\n  ON "AmuxDecisionMakerDeliveryEvent"("requestId") WHERE "kind" IN (${sqlList(DM_DELIVERY_OUTCOME_EVENT_KINDS)});`,
+    ),
+  );
+  // The only DROPs are the ones replaced in place; no table, row or validation.
+  assert.deepEqual(
+    [...sql.matchAll(/\bDROP (CONSTRAINT|INDEX|TRIGGER) "([A-Za-z_]+)"/g)].map((match) => match[2]),
+    [
+      "AmuxDecisionMakerRequestEvent_kind_check",
+      "AmuxDecisionMakerRequestEvent_instance_kind_check",
+      "AmuxDecisionMakerRequestEvent_one_closing_key",
+      "amux_decision_maker_request_closing_retention",
+      "AmuxDecisionMakerDeliveryEvent_kind_check",
+      "AmuxDecisionMakerDeliveryEvent_one_outcome_key",
+    ],
+  );
+  assert.equal((sql.match(/^ALTER TABLE /gm) ?? []).length, 6);
+  assert.equal((sql.match(/^CREATE (UNIQUE )?INDEX /gm) ?? []).length, 2);
+  assert.doesNotMatch(sql, /^CREATE TABLE |^CREATE CONSTRAINT TRIGGER |\bTRUNCATE\b|\bVALIDATE\b|^INSERT\b|^UPDATE\b|^DELETE\b|DROP TABLE|DROP FUNCTION|DROP COLUMN/im);
+  assert.match(sql, /^BEGIN;$/m);
+  assert.match(sql, /^COMMIT;$/m);
+  // No interval is counted in days, months or years, and nothing names a schema.
+  assert.doesNotMatch(sql, /INTERVAL '{1,2}[^']*\b(day|days|month|months|year|years|mon|mons)\b/i);
+  assert.doesNotMatch(sql, /"public"\.|public\."/);
 });
 
 // ---------------------------------------------------------------------------
@@ -831,7 +1085,14 @@ test("the stored proposal decides the rest: its detail, no operator answer yet, 
 // Delivery
 // ---------------------------------------------------------------------------
 
-const deliveryRow = (overrides = {}) => ({ judgmentKind: "confirm", delivered: false, outcomeKind: null, resolution: null, ...overrides });
+const deliveryRow = (overrides = {}) => ({
+  judgmentKind: "confirm",
+  delivered: false,
+  outcomeKind: null,
+  notSentReason: null,
+  resolution: null,
+  ...overrides,
+});
 const deliveryOf = (overrides = {}) => {
   const state = dmDeliveryStateFromRow(REQUEST_ID, deliveryRow(overrides));
   assert.ok(state, JSON.stringify(overrides));
@@ -848,22 +1109,27 @@ test("the delivery graph: one decision after a confirmation, one outcome after i
     received: deliveryOf({ delivered: true, outcomeKind: "delivery_receipt" }),
     unknown: deliveryOf({ delivered: true, outcomeKind: "delivery_unknown" }),
     resolved: deliveryOf({ delivered: true, outcomeKind: "delivery_unknown", resolution: "not_delivered" }),
+    // Stage S2-2b4: the decision's third outcome.
+    notSent: deliveryOf({ delivered: true, outcomeKind: "delivery_not_sent", notSentReason: "answered_by_operator" }),
   };
   const attempts = {
     deliver: { kind: "deliver" },
     delivery_receipt: { kind: "delivery_receipt" },
     delivery_unknown: { kind: "delivery_unknown" },
+    delivery_not_sent: { kind: "delivery_not_sent", reason: "lane_refused" },
     delivery_unknown_resolve: { kind: "delivery_unknown_resolve", outcome: "delivered" },
   };
+  const outcomes = (value) => ({ delivery_receipt: value, delivery_unknown: value, delivery_not_sent: value });
   const expected = {
-    none: { deliver: "not_confirmed", delivery_receipt: "not_delivered", delivery_unknown: "not_delivered", delivery_unknown_resolve: "not_unknown" },
-    rejected: { deliver: "not_confirmed", delivery_receipt: "not_delivered", delivery_unknown: "not_delivered", delivery_unknown_resolve: "not_unknown" },
-    confirmed: { deliver: null, delivery_receipt: "not_delivered", delivery_unknown: "not_delivered", delivery_unknown_resolve: "not_unknown" },
-    edited: { deliver: null, delivery_receipt: "not_delivered", delivery_unknown: "not_delivered", delivery_unknown_resolve: "not_unknown" },
-    delivered: { deliver: "already_delivered", delivery_receipt: null, delivery_unknown: null, delivery_unknown_resolve: "not_unknown" },
-    received: { deliver: "already_delivered", delivery_receipt: "outcome_recorded", delivery_unknown: "outcome_recorded", delivery_unknown_resolve: "not_unknown" },
-    unknown: { deliver: "already_delivered", delivery_receipt: "outcome_recorded", delivery_unknown: "outcome_recorded", delivery_unknown_resolve: null },
-    resolved: { deliver: "already_delivered", delivery_receipt: "outcome_recorded", delivery_unknown: "outcome_recorded", delivery_unknown_resolve: "already_resolved" },
+    none: { deliver: "not_confirmed", ...outcomes("not_delivered"), delivery_unknown_resolve: "not_unknown" },
+    rejected: { deliver: "not_confirmed", ...outcomes("not_delivered"), delivery_unknown_resolve: "not_unknown" },
+    confirmed: { deliver: null, ...outcomes("not_delivered"), delivery_unknown_resolve: "not_unknown" },
+    edited: { deliver: null, ...outcomes("not_delivered"), delivery_unknown_resolve: "not_unknown" },
+    delivered: { deliver: "already_delivered", ...outcomes(null), delivery_unknown_resolve: "not_unknown" },
+    received: { deliver: "already_delivered", ...outcomes("outcome_recorded"), delivery_unknown_resolve: "not_unknown" },
+    unknown: { deliver: "already_delivered", ...outcomes("outcome_recorded"), delivery_unknown_resolve: null },
+    resolved: { deliver: "already_delivered", ...outcomes("outcome_recorded"), delivery_unknown_resolve: "already_resolved" },
+    notSent: { deliver: "already_delivered", ...outcomes("outcome_recorded"), delivery_unknown_resolve: "not_unknown" },
   };
   for (const [stateName, state] of Object.entries(states)) {
     for (const [attemptName, attempt] of Object.entries(attempts)) {
@@ -874,7 +1140,7 @@ test("the delivery graph: one decision after a confirmation, one outcome after i
   assert.equal(dmDeliverySwitchRefusal(attempts.deliver, false), null);
   assert.equal(dmDeliverySwitchRefusal(attempts.deliver, true), "kill_switch_on");
   assert.equal(dmDeliverySwitchRefusal(attempts.deliver, null), "settings_unreadable");
-  for (const attempt of [attempts.delivery_receipt, attempts.delivery_unknown, attempts.delivery_unknown_resolve]) {
+  for (const attempt of [attempts.delivery_receipt, attempts.delivery_unknown, attempts.delivery_not_sent, attempts.delivery_unknown_resolve]) {
     assert.equal(dmDeliverySwitchRefusal(attempt, true), null, attempt.kind);
     assert.equal(dmDeliverySwitchRefusal(attempt, null), null, attempt.kind);
   }
@@ -888,9 +1154,18 @@ test("the delivery graph: one decision after a confirmation, one outcome after i
     { delivered: true, outcomeKind: "deliver" },
     { delivered: true, outcomeKind: "delivery_receipt", resolution: "delivered" },
     { delivered: true, outcomeKind: "delivery_unknown", resolution: "maybe" },
+    // Stage S2-2b4: a reason exactly on the not-sent outcome, from the list, and nothing to resolve after it.
+    { delivered: true, outcomeKind: "delivery_not_sent" },
+    { delivered: true, outcomeKind: "delivery_receipt", notSentReason: "lane_refused" },
+    { delivered: true, outcomeKind: "delivery_not_sent", notSentReason: "because" },
+    { delivered: true, outcomeKind: "delivery_not_sent", notSentReason: "lane_refused", resolution: "delivered" },
+    { notSentReason: "lane_refused" },
   ]) {
     assert.equal(dmDeliveryStateFromRow(REQUEST_ID, deliveryRow(overrides)), null, JSON.stringify(overrides));
   }
+  // A row without the reason's column is not the read's.
+  const { notSentReason: _column, ...withoutReason } = deliveryRow();
+  assert.equal(dmDeliveryStateFromRow(REQUEST_ID, withoutReason), null);
 });
 
 // ---------------------------------------------------------------------------
@@ -996,7 +1271,7 @@ test("tallies are read one row per instance and refused when they cannot add up"
 
 test("audit metadata is closed keys and closed values: never a digest, an answer or free text", () => {
   assert.deepEqual([...DM_JUDGMENT_AUDIT_METADATA_KEYS], ["request_id", "judgment_id", "kind", "instance", "declaration_accuracy", "mismatched_items"]);
-  assert.deepEqual([...DM_DELIVERY_AUDIT_METADATA_KEYS], ["event_id", "request_id", "kind", "judgment_kind", "outcome"]);
+  assert.deepEqual([...DM_DELIVERY_AUDIT_METADATA_KEYS], ["event_id", "request_id", "kind", "judgment_kind", "outcome", "not_sent_reason"]);
   const judgment = dmJudgmentAuditMetadata({
     requestId: REQUEST_ID,
     judgmentId: TERMINAL_ID,
@@ -1043,6 +1318,18 @@ test("audit metadata is closed keys and closed values: never a digest, an answer
     { event_id: TERMINAL_ID, request_id: REQUEST_ID, kind: "deliver", judgment_kind: "edit_confirm" },
   );
   assert.throws(() => dmDeliveryAuditMetadata({ eventId: TERMINAL_ID, requestId: REQUEST_ID, kind: "deliver", judgmentKind: null, outcome: "maybe" }));
+  // Stage S2-2b4: a not-sent outcome names its reason, a closed value, and only it does.
+  assert.deepEqual(
+    dmDeliveryAuditMetadata({ eventId: TERMINAL_ID, requestId: REQUEST_ID, kind: "delivery_not_sent", judgmentKind: "confirm", outcome: null, notSentReason: "binding_changed" }),
+    { event_id: TERMINAL_ID, request_id: REQUEST_ID, kind: "delivery_not_sent", judgment_kind: "confirm", not_sent_reason: "binding_changed" },
+  );
+  for (const fields of [
+    { kind: "delivery_not_sent", notSentReason: null },
+    { kind: "delivery_not_sent", notSentReason: "Use the locale" },
+    { kind: "delivery_receipt", notSentReason: "lane_refused" },
+  ]) {
+    assert.throws(() => dmDeliveryAuditMetadata({ eventId: TERMINAL_ID, requestId: REQUEST_ID, judgmentKind: "confirm", outcome: null, ...fields }), JSON.stringify(fields));
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1299,7 +1586,7 @@ for (const [label, keyValue] of [
           kind: "deliver",
           actor: null,
           systemActor: "amux-decision-router",
-          insert: (event) => [event.eventId, REQUEST_ID, "deliver", "audit-row-1"],
+          insert: (event) => [event.eventId, REQUEST_ID, "deliver", null, "audit-row-1"],
         },
         {
           name: "receipt",
@@ -1310,7 +1597,7 @@ for (const [label, keyValue] of [
           kind: "delivery_receipt",
           actor: null,
           systemActor: "amux-decision-router",
-          insert: (event) => [event.eventId, REQUEST_ID, "delivery_receipt", "audit-row-1"],
+          insert: (event) => [event.eventId, REQUEST_ID, "delivery_receipt", null, "audit-row-1"],
         },
         {
           name: "unknown",
@@ -1321,7 +1608,20 @@ for (const [label, keyValue] of [
           kind: "delivery_unknown",
           actor: null,
           systemActor: "amux-decision-router",
-          insert: (event) => [event.eventId, REQUEST_ID, "delivery_unknown", "audit-row-1"],
+          insert: (event) => [event.eventId, REQUEST_ID, "delivery_unknown", null, "audit-row-1"],
+        },
+        {
+          // Stage S2-2b4: recorded under the kill switch as well, under the router's .deliver.
+          name: "not sent",
+          options: { delivery: deliveryRow({ delivered: true }), switches: KILLED },
+          run: (tx) => recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome: "not_sent", reason: "answered_by_operator" }),
+          kinds: ["execute", "query", ...auditKinds, "query"],
+          action: "amux.decision.deliver",
+          kind: "delivery_not_sent",
+          actor: null,
+          systemActor: "amux-decision-router",
+          insert: (event) => [event.eventId, REQUEST_ID, "delivery_not_sent", "answered_by_operator", "audit-row-1"],
+          notSentReason: "answered_by_operator",
         },
         {
           name: "resolution",
@@ -1350,6 +1650,7 @@ for (const [label, keyValue] of [
         assert.equal(systemActor, entry.systemActor, entry.name);
         assert.equal(metadata.kind, entry.kind, entry.name);
         assert.ok(Object.keys(metadata).every((key) => DM_DELIVERY_AUDIT_METADATA_KEYS.includes(key)), entry.name);
+        assert.equal(metadata.not_sent_reason, entry.notSentReason, entry.name);
         assert.deepEqual(sent.at(-1).values, entry.insert(result.event), entry.name);
         // Only the decision reads the switches.
         assert.equal(sent.some((statement) => statement.sql?.includes("SELECT DISTINCT ON")), entry.name === "decision", entry.name);
@@ -1390,6 +1691,11 @@ test("a refusal writes nothing, in the statements up to the read that refused it
     ["unknown after a receipt", { delivery: deliveryRow({ delivered: true, outcomeKind: "delivery_receipt" }) }, (tx) => recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome: "unknown" }), { recorded: false, reason: "outcome_recorded" }, 2],
     ["a resolution without an unknown outcome", { delivery: deliveryRow({ delivered: true, outcomeKind: "delivery_receipt" }) }, (tx) => resolveDecisionMakerDeliveryUnknown(tx, { session, requestId: REQUEST_ID, outcome: "delivered" }), { recorded: false, reason: "not_unknown" }, 2],
     ["a second resolution", { delivery: deliveryRow({ delivered: true, outcomeKind: "delivery_unknown", resolution: "delivered" }) }, (tx) => resolveDecisionMakerDeliveryUnknown(tx, { session, requestId: REQUEST_ID, outcome: "delivered" }), { recorded: false, reason: "already_resolved" }, 2],
+    // Stage S2-2b4: not sent is the decision's outcome, one of the three, and leaves nothing to resolve.
+    ["not sent before the decision", {}, (tx) => recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome: "not_sent", reason: "lane_refused" }), { recorded: false, reason: "not_delivered" }, 2],
+    ["not sent after a receipt", { delivery: deliveryRow({ delivered: true, outcomeKind: "delivery_receipt" }) }, (tx) => recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome: "not_sent", reason: "lane_refused" }), { recorded: false, reason: "outcome_recorded" }, 2],
+    ["a receipt after not sent", { delivery: deliveryRow({ delivered: true, outcomeKind: "delivery_not_sent", notSentReason: "lane_refused" }) }, (tx) => recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome: "receipt" }), { recorded: false, reason: "outcome_recorded" }, 2],
+    ["a resolution after not sent", { delivery: deliveryRow({ delivered: true, outcomeKind: "delivery_not_sent", notSentReason: "lane_refused" }) }, (tx) => resolveDecisionMakerDeliveryUnknown(tx, { session, requestId: REQUEST_ID, outcome: "delivered" }), { recorded: false, reason: "not_unknown" }, 2],
   ];
   for (const [name, options, run, expected, statements] of cases) {
     const { tx, sent } = recordingTx(options);
@@ -1456,6 +1762,10 @@ test("a malformed input sends nothing at all", async () => {
     (tx) => recordDecisionMakerJudgment(tx, { session, requestId: REQUEST_ID, kind: "edit_confirm", shown: shownFor(), operatorAnswer: "x", keyRing: { [PERIOD]: KEY } }),
     (tx) => recordDecisionMakerDelivery(tx, { requestId: null }),
     (tx) => recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome: "delivered" }),
+    // Stage S2-2b4: a reason exactly with not_sent, from the closed list.
+    (tx) => recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome: "not_sent" }),
+    (tx) => recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome: "not_sent", reason: "the lane was busy" }),
+    (tx) => recordDecisionMakerDeliveryOutcome(tx, { requestId: REQUEST_ID, outcome: "receipt", reason: "lane_refused" }),
     (tx) => resolveDecisionMakerDeliveryUnknown(tx, { session, requestId: REQUEST_ID, outcome: "receipt" }),
     (tx) => readDecisionMakerDeliveryState(tx, "not-a-uuid"),
     (tx) => readDecisionMakerJudgment(tx, "not-a-uuid"),
@@ -1516,7 +1826,7 @@ test("the reads are one statement each", async () => {
   {
     const { tx, sent } = recordingTx({ delivery: deliveryRow({ delivered: true, outcomeKind: "delivery_unknown" }) });
     const state = await readDecisionMakerDeliveryState(tx, REQUEST_ID);
-    assert.deepEqual(state, { requestId: REQUEST_ID, judgmentKind: "confirm", delivered: true, outcome: "unknown", resolution: null });
+    assert.deepEqual(state, { requestId: REQUEST_ID, judgmentKind: "confirm", delivered: true, outcome: "unknown", notSentReason: null, resolution: null });
     assert.equal(sent.length, 1);
     assert.deepEqual(sent[0].values, [REQUEST_ID, REQUEST_ID]);
   }

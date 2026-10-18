@@ -15,7 +15,7 @@ import {
   submitDecisionMakerOutput,
 } from "@/lib/amux/decisionMakerBodyStore";
 import { DM_DELIVERY_NOT_AN_APPROVAL } from "@/lib/amux/decisionMakerDeliveryCore";
-import { readDecisionMakerDeliveryCandidate } from "@/lib/amux/decisionMakerDeliveryRead";
+import { readDecisionMakerDeliveryCandidate, readDecisionMakerUnsettledDelivery } from "@/lib/amux/decisionMakerDeliveryRead";
 import type { DmShownProposal } from "@/lib/amux/decisionMakerJudgmentCore";
 import {
   readDecisionMakerDeliveryState,
@@ -23,7 +23,12 @@ import {
   recordDecisionMakerDeliveryOutcome,
   recordDecisionMakerJudgment,
 } from "@/lib/amux/decisionMakerJudgmentStore";
-import { readDecisionMakerRequestState, recordDecisionMakerTransmitIntent } from "@/lib/amux/decisionMakerRequestStore";
+import { writeDecisionMakerDeliveryAudit } from "@/lib/amux/decisionMakerJudgmentSystemAudit";
+import {
+  closeDecisionMakerRequestOnDirectAnswer,
+  readDecisionMakerRequestState,
+  recordDecisionMakerTransmitIntent,
+} from "@/lib/amux/decisionMakerRequestStore";
 import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
 import { prisma } from "@/lib/prisma";
 
@@ -228,6 +233,7 @@ test("no DM output a person has not confirmed is ever read as an answer to deliv
       judgmentKind: requestId === rejected.requestId ? "reject" : null,
       delivered: false,
       outcome: null,
+      notSentReason: null,
       resolution: null,
     });
   }
@@ -265,6 +271,7 @@ test("a confirmed answer is read with §7's header, decided once, and its receip
     judgmentKind: "confirm",
     delivered: true,
     outcome: "receipt",
+    notSentReason: null,
     resolution: null,
   });
 });
@@ -320,6 +327,251 @@ test("the walk steps past a confirmation it cannot deliver yet, and one whose an
     judgedAtMs: one.judgedAtMs,
     reason: "answer_body_missing",
   });
+});
+
+const notSent = (requestId: string, reason: string) =>
+  withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerDeliveryOutcome, (tx) =>
+    recordDecisionMakerDeliveryOutcome(tx, { requestId, outcome: "not_sent", reason }),
+  );
+
+test("stage S2-2b4: a decision that sent nothing records not_sent with its reason, as the request's one outcome", async () => {
+  const basis = await proposed(SELECT);
+  await judge(basis.requestId, "confirm");
+  // Not before the decision: nothing was released to be not sent.
+  assert.deepEqual(await notSent(basis.requestId, "answered_by_operator"), { recorded: false, reason: "not_delivered" });
+  assert.equal((await decide(basis.requestId)).recorded, true);
+  const recorded = await notSent(basis.requestId, "answered_by_operator");
+  assert.equal(recorded.recorded, true, JSON.stringify(recorded));
+  // One outcome per request: receipt, unknown and not_sent are one of three.
+  assert.deepEqual(await settle(basis.requestId, "receipt"), { recorded: false, reason: "outcome_recorded" });
+  assert.deepEqual(await settle(basis.requestId, "unknown"), { recorded: false, reason: "outcome_recorded" });
+  assert.deepEqual(await notSent(basis.requestId, "lane_refused"), { recorded: false, reason: "outcome_recorded" });
+  assert.deepEqual(await readDecisionMakerDeliveryState(prisma, basis.requestId), {
+    requestId: basis.requestId,
+    judgmentKind: "confirm",
+    delivered: true,
+    outcome: "not_sent",
+    notSentReason: "answered_by_operator",
+    resolution: null,
+  });
+  // The router's amux.decision.deliver, naming the event and the reason (§10 names no action of its own).
+  const audits = await prisma.$queryRaw<Array<{ action: string; metadata: Record<string, string> }>>`
+    SELECT a."action", a."metadata" FROM "AmuxDecisionMakerDeliveryEvent" d
+    JOIN "AdminAuditLog" a ON a."id" = d."auditLogId"
+    WHERE d."requestId" = ${basis.requestId} AND d."kind" = 'delivery_not_sent'
+  `;
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0]!.action, "amux.decision.deliver");
+  assert.equal(audits[0]!.metadata.kind, "delivery_not_sent");
+  assert.equal(audits[0]!.metadata.not_sent_reason, "answered_by_operator");
+  assert.equal(audits[0]!.metadata.systemActor, "amux-decision-router");
+  // Nothing is left to resolve: a resolution follows an unknown outcome only.
+  assert.equal((await nextCandidate()).status, "none");
+});
+
+test("stage S2-2b4: the database holds not_sent to a closed reason, after a decision, once", async () => {
+  const basis = await proposed();
+  await judge(basis.requestId, "confirm");
+  assert.equal((await decide(basis.requestId)).recorded, true);
+  // An unknown reason is refused before anything is written.
+  await assert.rejects(notSent(basis.requestId, "because"), (error: unknown) => (error as { code?: string }).code === "invalid_input");
+  // The CHECKs refuse what the store would never send, past the guard (the router's audit of the same
+  // transaction): not_sent without a reason, a reason on another kind, a reason outside the list.
+  const rawInsert = (kind: "delivery_not_sent" | "delivery_receipt", reason: string | null) =>
+    prisma.$transaction(async (tx) => {
+      const eventId = randomUUID();
+      const auditLogId = await writeDecisionMakerDeliveryAudit(tx, {
+        kind,
+        eventId,
+        metadata: { event_id: eventId, request_id: basis.requestId, kind },
+      });
+      await tx.$executeRaw`INSERT INTO "AmuxDecisionMakerDeliveryEvent" ("id", "requestId", "kind", "actorKind", "notSentReason", "auditLogId")
+        VALUES (${eventId}, ${basis.requestId}, ${kind}, 'system', ${reason}, ${auditLogId})`;
+    });
+  await assert.rejects(rawInsert("delivery_not_sent", null), /AmuxDecisionMakerDeliveryEvent_not_sent_shape_check/);
+  await assert.rejects(rawInsert("delivery_receipt", "lane_refused"), /AmuxDecisionMakerDeliveryEvent_not_sent_shape_check/);
+  await assert.rejects(rawInsert("delivery_not_sent", "because"), /AmuxDecisionMakerDeliveryEvent_not_sent_reason_check/);
+  assert.equal((await readDecisionMakerDeliveryState(prisma, basis.requestId)).outcome, null);
+  // Recorded under the kill switch as well: it records what already happened.
+  await setSwitch("kill_switch", "on");
+  assert.equal((await notSent(basis.requestId, "binding_changed")).recorded, true);
+});
+
+// ---------------------------------------------------------------------------
+// Stage S2-2b4, section 2-7: "운영자의 직접 답이 먼저면 요청은 닫힌다"
+// ---------------------------------------------------------------------------
+
+const directAnswer = (cardId: string, questionRevision = 3) =>
+  withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerDirectAnswerClose, (tx) =>
+    closeDecisionMakerRequestOnDirectAnswer(tx, { cardId, questionRevision }),
+  );
+
+test("stage S2-2b4: the operator's direct answer closes its question's open request once, and its proposal is never confirmed or delivered", async () => {
+  const basis = await proposed(SELECT);
+  const shown = await shownOf(basis.requestId);
+  const closed = await directAnswer(basis.cardId);
+  assert.equal(closed.recorded, true, JSON.stringify(closed));
+  assert.equal((await readDecisionMakerRequestState(prisma, basis.requestId))!.closing, "direct_answer_close");
+  // Once: the same report again finds it closed and writes nothing.
+  assert.deepEqual(await directAnswer(basis.cardId), { recorded: false, reason: "closed" });
+  // §12: no DM output reaches a worker without the operator's confirmation -- and the operator
+  // answered instead, so the proposal can no longer be confirmed, rejected or delivered.
+  for (const input of [{ kind: "confirm", shown }, { kind: "reject" }]) {
+    const judged = await prisma.$transaction((tx) =>
+      recordDecisionMakerJudgment(tx, { session: operator(), requestId: basis.requestId, keyRing: RING, ...input }),
+    );
+    assert.deepEqual(judged, { recorded: false, reason: "closed" }, input.kind);
+  }
+  assert.deepEqual(await nextCandidate(), { status: "none" });
+  assert.deepEqual(await decide(basis.requestId), { recorded: false, reason: "not_confirmed" });
+  // The router's close under section 10's amux.decision.assign_discarded, told apart by its kind;
+  // the closing trigger starts the retention at the close.
+  const audits = await prisma.$queryRaw<Array<{ action: string; targetType: string; metadata: Record<string, string> }>>`
+    SELECT a."action", a."targetType", a."metadata" FROM "AmuxDecisionMakerRequestEvent" e
+    JOIN "AdminAuditLog" a ON a."id" = e."auditLogId"
+    WHERE e."requestId" = ${basis.requestId} AND e."kind" = 'direct_answer_close'
+  `;
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0]!.action, "amux.decision.assign_discarded");
+  assert.equal(audits[0]!.targetType, "AmuxDecisionMakerRequestEvent");
+  assert.equal(audits[0]!.metadata.kind, "direct_answer_close");
+  assert.equal(audits[0]!.metadata.systemActor, "amux-decision-router");
+  const retention = await prisma.$queryRaw<Array<{ hours: number }>>`
+    SELECT extract(epoch FROM r."retentionUntil" - e."createdAt") / 3600 AS "hours"
+    FROM "AmuxDecisionMakerRetentionEvent" r
+    JOIN "AmuxDecisionMakerRequestEvent" e ON e."auditLogId" = r."auditLogId"
+    WHERE r."requestId" = ${basis.requestId} AND r."kind" = 'retention_set'
+  `;
+  assert.deepEqual(retention.map((row) => Number(row.hours)), [2160]);
+});
+
+test("stage S2-2b4: a direct answer closes the request from any open state, and nothing else", async () => {
+  const binding = (cardId: string) => ({
+    cardId,
+    questionRevision: 3,
+    askingWorkerId: "claude-impl",
+    amuxSessionId: "claude-impl",
+    amuxSessionAttempt: 1,
+    askingProvider: "claude",
+    termListVersion: "v1",
+    classificationVersion: "authority-manifest-1",
+    scannerVersion: "v1",
+  });
+  // Routed to a DM and never assigned.
+  const unassigned = await prisma.$transaction((tx) =>
+    recordDecisionMakerRequestWithCardText(tx, { binding: binding("AMUX-unassigned"), card: CARD, keyRing: RING }),
+  );
+  assert.equal(unassigned.route, "dm_proposal");
+  assert.equal((await directAnswer("AMUX-unassigned")).recorded, true);
+  // An escalation the operator now answers.
+  const escalated = await proposed({ kind: "escalate", reason: "The operator must choose the cache owner." });
+  assert.equal((await directAnswer(escalated.cardId)).recorded, true);
+  // A question kept with the operator is closed from its creation; there is nothing to close.
+  const kept = await prisma.$transaction((tx) =>
+    recordDecisionMakerRequestWithCardText(tx, { binding: { ...binding("AMUX-kept"), askingProvider: "gemini" }, card: CARD, keyRing: RING }),
+  );
+  assert.equal(kept.route, "operator");
+  assert.deepEqual(await directAnswer("AMUX-kept"), { recorded: false, reason: "not_routed_to_dm" });
+  // No request for the question, or for another revision of it.
+  assert.deepEqual(await directAnswer("AMUX-nobody"), { recorded: false, reason: "unknown_request" });
+  assert.deepEqual(await directAnswer(escalated.cardId, 4), { recorded: false, reason: "unknown_request" });
+  // Section 6's table: the operator's direct answer is allowed under the kill switch.
+  const proposal = await proposed();
+  await setSwitch("kill_switch", "on");
+  assert.equal((await directAnswer(proposal.cardId)).recorded, true);
+  // A malformed question is refused before anything is read.
+  await assert.rejects(directAnswer("../x"), (error: unknown) => (error as { code?: string }).code === "invalid_input");
+});
+
+test("stage S2-2b4: a request a direct answer closed in flight rejects the DM's late result", async () => {
+  const cardId = "AMUX-in-flight";
+  const routed = await prisma.$transaction((tx) =>
+    recordDecisionMakerRequestWithCardText(tx, {
+      binding: {
+        cardId,
+        questionRevision: 3,
+        askingWorkerId: "claude-impl",
+        amuxSessionId: "claude-impl",
+        amuxSessionAttempt: 1,
+        askingProvider: "claude",
+        termListVersion: "v1",
+        classificationVersion: "authority-manifest-1",
+        scannerVersion: "v1",
+      },
+      card: CARD,
+      keyRing: RING,
+    }),
+  );
+  const instance = routed.instance!;
+  const assigned = await prisma.$transaction((tx) =>
+    assignDecisionMakerRequestWithDigestKey(tx, { requestId: routed.requestId, requireLeaseAt: () => {}, keyRing: RING }),
+  );
+  const requestKey = (assigned as { requestKey: Buffer }).requestKey;
+  const transmission = {
+    snapshotState: "none",
+    snapshotTargetSha: null,
+    snapshotManifestDigest: null,
+    inputPayloadDigest: dmBodyDigest(requestKey, "card_text", "payload"),
+  };
+  assert.equal(
+    (await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId: routed.requestId, instance, transmission, requireLeaseAt: () => {} }))).recorded,
+    true,
+  );
+  assert.equal((await directAnswer(cardId)).recorded, true);
+  const stored: Record<string, unknown> = { ...(await readDecisionMakerRequestState(prisma, routed.requestId))!.binding };
+  delete stored.askingProvider;
+  const submitted = await prisma.$transaction((tx) =>
+    submitDecisionMakerOutput(tx, {
+      requestId: routed.requestId,
+      instance,
+      binding: { ...stored, transmission },
+      output: { kind: "output", raw: JSON.stringify(FREE_TEXT), options: OPTIONS },
+      requireLeaseAt: () => {},
+      keyRing: RING,
+    }),
+  );
+  assert.equal(submitted.status === "submitted" && submitted.result.status, "rejected");
+  assert.equal(submitted.status === "submitted" && submitted.result.status === "rejected" && submitted.result.reason, "request_closed");
+});
+
+// ---------------------------------------------------------------------------
+// Stage S2-2b4, section 9: a decision whose outcome the bridge never recorded
+// ---------------------------------------------------------------------------
+
+const unsettled = () =>
+  withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerDeliveryUnsettledRead, (tx) => readDecisionMakerUnsettledDelivery(tx));
+
+test("stage S2-2b4: a decision with no outcome is read back with its binding until an outcome settles it", async () => {
+  assert.deepEqual(await unsettled(), { status: "none" });
+  const first = await proposed(SELECT);
+  await judge(first.requestId, "confirm");
+  const second = await proposed(FREE_TEXT);
+  await judge(second.requestId, "confirm");
+  // A confirmation with no decision is the delivery read's, not this one's.
+  assert.deepEqual(await unsettled(), { status: "none" });
+  assert.equal((await decide(first.requestId)).recorded, true);
+  assert.equal((await decide(second.requestId)).recorded, true);
+  assert.equal((await settle(first.requestId, "receipt")).recorded, true);
+  const read = await unsettled();
+  assert.equal(read.status, "unsettled");
+  if (read.status !== "unsettled") return;
+  assert.equal(read.requestId, second.requestId);
+  assert.equal(read.cardId, second.cardId);
+  assert.equal(read.questionRevision, 3);
+  // §9's binding, as the request recorded it at routing: the local AMUX reads the receipt of
+  // dm-answer:<request id> in this session, and pauses this session for an unknown outcome.
+  assert.equal(read.askingWorkerId, "claude-impl");
+  assert.equal(read.session, "claude-impl");
+  assert.equal(read.sessionAttempt, 1);
+  assert.equal(read.messageId, `dm-answer:${second.requestId}`);
+  assert.ok(Number.isSafeInteger(read.decidedAtMs) && read.decidedAtMs > 0);
+  // It carries no answer: nothing to send, only what to look up.
+  assert.ok(!JSON.stringify(read).includes(FREE_TEXT.kind === "free_text" ? FREE_TEXT.answer : "x"));
+  // Read under the kill switch as well: recording what happened is allowed (section 6's table).
+  await setSwitch("kill_switch", "on");
+  assert.equal((await unsettled()).status, "unsettled");
+  assert.equal((await notSent(second.requestId, "question_changed")).recorded, true);
+  assert.deepEqual(await unsettled(), { status: "none" });
 });
 
 test("each delivery route's boundary takes its operation, and one call fewer refuses it", async () => {

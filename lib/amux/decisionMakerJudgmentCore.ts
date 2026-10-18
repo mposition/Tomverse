@@ -54,20 +54,53 @@ export type DmDeclarationItem = (typeof DM_DECLARATION_ITEMS)[number];
 
 /**
  * §2-7, §9, §10: one delivery decision per request (the confirmed answer
- * released for delivery, consumed once), then one receipt or one unknown
- * outcome, and for an unknown outcome one person's resolution.
+ * released for delivery, consumed once), then one outcome -- a receipt, an
+ * unknown outcome, or (stage S2-2b4) a delivery that sent nothing -- and for
+ * an unknown outcome one person's resolution.
  */
 export const DM_DELIVERY_EVENT_KINDS = [
   "deliver",
   "delivery_receipt",
   "delivery_unknown",
   "delivery_unknown_resolve",
+  "delivery_not_sent",
 ] as const;
 export type DmDeliveryEventKind = (typeof DM_DELIVERY_EVENT_KINDS)[number];
 
 /** Recorded by the system (the router's actor); the resolution is a person's. */
-export const DM_DELIVERY_SYSTEM_EVENT_KINDS = ["deliver", "delivery_receipt", "delivery_unknown"] as const;
+export const DM_DELIVERY_SYSTEM_EVENT_KINDS = ["deliver", "delivery_receipt", "delivery_unknown", "delivery_not_sent"] as const;
 export type DmDeliverySystemEventKind = (typeof DM_DELIVERY_SYSTEM_EVENT_KINDS)[number];
+
+/** The decision's one outcome (§9: "한 번만 소비"), one of the three once. */
+export const DM_DELIVERY_OUTCOME_EVENT_KINDS = ["delivery_receipt", "delivery_unknown", "delivery_not_sent"] as const;
+export type DmDeliveryOutcomeEventKind = (typeof DM_DELIVERY_OUTCOME_EVENT_KINDS)[number];
+
+/**
+ * Stage S2-2b4 (§2-7: "먼저 쓴 쪽만 전달되고, 다른 쪽은 거절되어 운영자에게
+ * 보인다"): why a decided delivery sent nothing, each a fact the local AMUX
+ * proved before anything was typed into the worker's lane. A delivery whose
+ * result is not proved stays `delivery_unknown` (§9) and is never one of these.
+ *
+ * - `answered_by_operator`: the operator's direct answer holds the question
+ *   revision's answer record, so this answer's claim could not win.
+ * - `question_changed`: the card no longer asks that question revision (asked
+ *   again, left `needsyou`, or gone), so nothing could claim it.
+ * - `binding_changed`: the card's owner session or newest attempt is no longer
+ *   §9's binding.
+ * - `lane_refused`: the worker's lane refused automated input -- before the
+ *   claim, or at the send, which typed nothing.
+ * - `local_refused`: the local AMUX refused or failed before any claim or
+ *   send (its store unreadable, the claim refused for its input, the claim's
+ *   transaction rolled back).
+ */
+export const DM_DELIVERY_NOT_SENT_REASONS = [
+  "answered_by_operator",
+  "question_changed",
+  "binding_changed",
+  "lane_refused",
+  "local_refused",
+] as const;
+export type DmDeliveryNotSentReason = (typeof DM_DELIVERY_NOT_SENT_REASONS)[number];
 
 /** What a person found when they checked an unknown delivery (§9: "운영자가 확인하고"). */
 export const DM_DELIVERY_RESOLVE_OUTCOMES = ["delivered", "not_delivered"] as const;
@@ -83,7 +116,9 @@ export const DM_DELIVERY_ACTOR_KINDS = ["human", "system"] as const;
  * `.delivery_unknown` for the system and `.delivery_unknown_resolve` for a
  * person; it names no action of its own for the receipt, so the receipt is
  * recorded under `.deliver` too, told apart by its event kind and the audit
- * metadata's `kind`.
+ * metadata's `kind`. Stage S2-2b4's `delivery_not_sent` is the same: the
+ * decision's other recorded outcome, under `.deliver`, with its reason in the
+ * metadata.
  */
 export const dmJudgmentAuditAction = (kind: DmJudgmentKind): string => `amux.decision.${kind}`;
 export const DM_JUDGMENT_AUDIT_TARGET_TYPE = "AmuxDecisionMakerRequest" as const;
@@ -93,6 +128,7 @@ export const DM_DELIVERY_AUDIT_ACTIONS = Object.freeze({
   delivery_receipt: "amux.decision.deliver",
   delivery_unknown: "amux.decision.delivery_unknown",
   delivery_unknown_resolve: "amux.decision.delivery_unknown_resolve",
+  delivery_not_sent: "amux.decision.deliver",
 } as const satisfies Record<DmDeliveryEventKind, string>);
 
 const isOneOf = <T extends string>(list: readonly T[], value: unknown): value is T =>
@@ -349,11 +385,16 @@ export type DmDeliveryState = {
   /** The request's judgment; null when none is recorded (or no such request exists). */
   judgmentKind: DmJudgmentKind | null;
   delivered: boolean;
-  /** The receipt or the unknown outcome after the decision; null before either. */
-  outcome: "receipt" | "unknown" | null;
+  /** The decision's one outcome -- a receipt, unknown, or (stage S2-2b4) not sent; null before any. */
+  outcome: "receipt" | "unknown" | "not_sent" | null;
+  /** Why nothing was sent, exactly when the outcome is `not_sent`. */
+  notSentReason: DmDeliveryNotSentReason | null;
   /** A person's resolution of an unknown outcome; null before it. */
   resolution: DmDeliveryResolveOutcome | null;
 };
+
+export const isDmDeliveryNotSentReason = (value: unknown): value is DmDeliveryNotSentReason =>
+  isOneOf(DM_DELIVERY_NOT_SENT_REASONS, value);
 
 /** Null when the row holds anything the delivery table's rules could not have produced. */
 export const dmDeliveryStateFromRow = (requestId: string, row: unknown): DmDeliveryState | null => {
@@ -364,8 +405,15 @@ export const dmDeliveryStateFromRow = (requestId: string, row: unknown): DmDeliv
   let outcome: DmDeliveryState["outcome"] = null;
   if (r.outcomeKind === "delivery_receipt") outcome = "receipt";
   else if (r.outcomeKind === "delivery_unknown") outcome = "unknown";
+  else if (r.outcomeKind === "delivery_not_sent") outcome = "not_sent";
   else if (r.outcomeKind !== null) return null;
   if (r.resolution !== null && !isOneOf(DM_DELIVERY_RESOLVE_OUTCOMES, r.resolution)) return null;
+  // The read returns the column for every row; a missing key is not a row this reader was written for.
+  if (r.notSentReason === undefined || (r.notSentReason !== null && !isDmDeliveryNotSentReason(r.notSentReason))) {
+    return null;
+  }
+  // The shape CHECK: a reason exactly on the not-sent outcome.
+  if ((outcome === "not_sent") !== (r.notSentReason !== null)) return null;
   // The guard's order: a decision only after a confirmation, an outcome only
   // after the decision, a resolution only after an unknown outcome.
   if (r.delivered && !isDmConfirmingJudgmentKind(r.judgmentKind)) return null;
@@ -376,6 +424,7 @@ export const dmDeliveryStateFromRow = (requestId: string, row: unknown): DmDeliv
     judgmentKind: r.judgmentKind as DmJudgmentKind | null,
     delivered: r.delivered,
     outcome,
+    notSentReason: r.notSentReason as DmDeliveryNotSentReason | null,
     resolution: r.resolution as DmDeliveryResolveOutcome | null,
   };
 };
@@ -384,6 +433,7 @@ export type DmDeliveryAttempt =
   | { kind: "deliver" }
   | { kind: "delivery_receipt" }
   | { kind: "delivery_unknown" }
+  | { kind: "delivery_not_sent"; reason: DmDeliveryNotSentReason }
   | { kind: "delivery_unknown_resolve"; outcome: DmDeliveryResolveOutcome };
 
 export type DmDeliveryRefusal =
@@ -397,9 +447,10 @@ export type DmDeliveryRefusal =
 /**
  * The delivery graph the guard enforces (§2-7, §9): the decision once, only
  * after a confirmation or an edited confirmation (a rejection is never
- * delivered); then a receipt or an unknown outcome, one of the two once; and
- * a person's resolution once, only after an unknown outcome. Single
- * consumption is also the database's partial unique indexes.
+ * delivered); then one outcome -- a receipt, an unknown outcome or, since
+ * stage S2-2b4, a delivery that sent nothing -- one of the three once; and a
+ * person's resolution once, only after an unknown outcome. Single consumption
+ * is also the database's partial unique indexes.
  */
 export const dmDeliveryRefusal = (state: DmDeliveryState, attempt: DmDeliveryAttempt): DmDeliveryRefusal | null => {
   switch (attempt.kind) {
@@ -409,6 +460,7 @@ export const dmDeliveryRefusal = (state: DmDeliveryState, attempt: DmDeliveryAtt
       return null;
     case "delivery_receipt":
     case "delivery_unknown":
+    case "delivery_not_sent":
       if (!state.delivered) return "not_delivered";
       if (state.outcome !== null) return "outcome_recorded";
       return null;
@@ -422,8 +474,9 @@ export const dmDeliveryRefusal = (state: DmDeliveryState, attempt: DmDeliveryAtt
 /**
  * §6's table: "bridge의 확정 답 조회·전달 — 거부" under the kill switch. Only
  * the decision releases an answer, so only the decision reads the switch; a
- * receipt and an unknown outcome record what already happened, and the
- * resolution is a person's operation, which the table allows.
+ * receipt, an unknown outcome and a not-sent outcome record what already
+ * happened, and the resolution is a person's operation, which the table
+ * allows.
  */
 export const dmDeliverySwitchRefusal = (
   attempt: DmDeliveryAttempt,
@@ -609,6 +662,7 @@ export const DM_DELIVERY_AUDIT_METADATA_KEYS = [
   "kind",
   "judgment_kind",
   "outcome",
+  "not_sent_reason",
 ] as const;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -646,20 +700,28 @@ export const dmJudgmentAuditMetadata = (fields: {
   };
 };
 
-/** A delivery event's audit metadata: ids, the event kind, the judgment kind and a resolution's outcome. */
+/**
+ * A delivery event's audit metadata: ids, the event kind, the judgment kind, a
+ * resolution's outcome and (stage S2-2b4) a not-sent outcome's reason -- each
+ * a closed value, the reason exactly on `delivery_not_sent`.
+ */
 export const dmDeliveryAuditMetadata = (fields: {
   eventId: string;
   requestId: string;
   kind: DmDeliveryEventKind;
   judgmentKind: DmJudgmentKind | null;
   outcome: DmDeliveryResolveOutcome | null;
+  notSentReason?: DmDeliveryNotSentReason | null;
 }): Record<string, string> => {
+  const notSentReason = fields.notSentReason ?? null;
   if (
     !UUID.test(fields.eventId) ||
     !UUID.test(fields.requestId) ||
     !isOneOf(DM_DELIVERY_EVENT_KINDS, fields.kind) ||
     (fields.judgmentKind !== null && !isDmJudgmentKind(fields.judgmentKind)) ||
-    (fields.outcome !== null && !isOneOf(DM_DELIVERY_RESOLVE_OUTCOMES, fields.outcome))
+    (fields.outcome !== null && !isOneOf(DM_DELIVERY_RESOLVE_OUTCOMES, fields.outcome)) ||
+    (notSentReason !== null && !isDmDeliveryNotSentReason(notSentReason)) ||
+    (fields.kind === "delivery_not_sent") !== (notSentReason !== null)
   ) {
     throw new Error("AMUX Decision Maker delivery audit metadata value refused");
   }
@@ -670,5 +732,6 @@ export const dmDeliveryAuditMetadata = (fields: {
   };
   if (fields.judgmentKind !== null) metadata.judgment_kind = fields.judgmentKind;
   if (fields.outcome !== null) metadata.outcome = fields.outcome;
+  if (notSentReason !== null) metadata.not_sent_reason = notSentReason;
   return metadata;
 };
