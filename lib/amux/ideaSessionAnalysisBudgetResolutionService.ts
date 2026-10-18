@@ -102,8 +102,9 @@ export async function readAmuxSessionBudgetResolution(tx: Tx, input: {
 }
 
 /** The owner records an exact claim read-back and local execution proof. Only
- * positive evidence of no CLI start releases zero; otherwise the full API
- * conversion ceiling is consumed. This never retries or resumes that claim. */
+ * positive evidence of no CLI start releases zero; otherwise the full
+ * reservation (bounded ceiling or Max shadow occupancy) is consumed. This
+ * never retries or resumes that claim. */
 export async function commitAmuxSessionBudgetUnknownResolution(tx: Tx, input: {
   claimId: string;
   session: Session;

@@ -84,6 +84,8 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   priceVersionId: string;
   runner: { tokenCapsEnforceable: boolean; billableToolsDisabled: boolean;
     maxSubscriptionAuthenticated?: boolean };
+  maxLauncherIdentity?: { ideaId: string; modelId: string;
+    reasoningEffort: string; authEvidenceDigest: string };
 }): Promise<{ claimId: string; reservationId: string; requestId: string;
   invocationOrdinal: number; reservedMicroUsd: string; auditId: string }> {
   if (!UUID.test(input.claimId) || !UUID.test(input.requestId) ||
@@ -117,6 +119,14 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
       analysisDeadlineAt: true, analysisCompletedAt: true,
       submissionOrigin: true } } },
   });
+  if (input.runner.maxSubscriptionAuthenticated === true &&
+      (!input.maxLauncherIdentity ||
+       input.maxLauncherIdentity.ideaId !== reservation?.ideaId ||
+       input.maxLauncherIdentity.modelId !== reservation?.modelId ||
+       input.maxLauncherIdentity.reasoningEffort !== reservation?.reasoningEffort ||
+       !/^[a-f0-9]{64}$/.test(input.maxLauncherIdentity.authEvidenceDigest))) {
+    throw new AmuxSessionBudgetClaimError("not_ready");
+  }
   // Presence only: no unbounded idea or provenance plaintext/ciphertext enters
   // this cost writer. The migration repeats the predicate at the write fence.
   const rawAvailable = reservation ?
@@ -251,6 +261,10 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
       monthStart: monthStart.toISOString(), priceVersionId: input.priceVersionId,
       modelId: reservation.modelId,
       reservedMicroUsd, budgetMode,
+      ...(maxShadow ? { ideaId: reservation.ideaId,
+        reasoningEffort: reservation.reasoningEffort,
+        maxAuthProfile: "claude-max-oauth",
+        maxAuthEvidenceDigest: input.maxLauncherIdentity!.authEvidenceDigest } : {}),
       amountMeaning: decision.amountMeaning, modelCallStarted: false },
   });
   const incremented = await tx.amuxIdeaAnalysisBudgetWindow.updateMany({

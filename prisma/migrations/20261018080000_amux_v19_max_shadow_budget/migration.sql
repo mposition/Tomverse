@@ -88,7 +88,7 @@ CREATE TRIGGER "AmuxIdeaAnalysisBudgetWindow_shadow_overrun_guard"
 
 CREATE FUNCTION "amux_v21_session_claim_mode_guard"() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
-DECLARE window_row record; audit_row record;
+DECLARE window_row record; audit_row record; reservation_row record;
 BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'session budget claims cannot be deleted' USING ERRCODE = '23514';
@@ -101,11 +101,27 @@ BEGIN
     WHERE "namespace" = NEW."namespace" AND "monthStart" = NEW."monthStart";
   IF TG_OP = 'INSERT' THEN
     SELECT * INTO audit_row FROM "AdminAuditLog" WHERE "id" = NEW."claimAuditLogId";
+    SELECT "ideaId", "reasoningEffort" INTO reservation_row
+      FROM "AmuxIdeaSessionAnalysisReservation"
+      WHERE "id" = NEW."reservationId";
     IF window_row."limitMicroUsd" IS NULL OR
        window_row."spentMicroUsd"::numeric +
          window_row."reservedMicroUsd"::numeric +
          window_row."shadowOverrunMicroUsd"::numeric <> window_row."limitMicroUsd" OR
        NEW."provider" <> 'anthropic' OR
+       audit_row."id" IS NULL OR
+       audit_row.xmin <> pg_current_xact_id()::xid OR
+       audit_row."action" <> 'amux.v19.session_budget.claimed' OR
+       audit_row."targetType" <> 'AmuxIdeaSessionAnalysisBudgetClaim' OR
+       audit_row."targetId" IS DISTINCT FROM NEW."id"::text OR
+       audit_row."actorUserId" IS NOT NULL OR
+       audit_row."metadata"->>'maxAuthProfile' IS DISTINCT FROM 'claude-max-oauth' OR
+       NOT COALESCE((audit_row."metadata"->>'maxAuthEvidenceDigest') ~
+         '^[a-f0-9]{64}$', false) OR
+       audit_row."metadata"->>'ideaId' IS DISTINCT FROM reservation_row."ideaId" OR
+       audit_row."metadata"->>'modelId' IS DISTINCT FROM NEW."modelId" OR
+       audit_row."metadata"->>'reasoningEffort' IS DISTINCT FROM
+         reservation_row."reasoningEffort" OR
        audit_row."metadata"->>'budgetMode' IS DISTINCT FROM 'max_shadow' OR
        audit_row."metadata"->>'amountMeaning' IS DISTINCT FROM
          'cli_shadow_headroom_not_ceiling' THEN
