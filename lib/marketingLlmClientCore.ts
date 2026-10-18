@@ -107,13 +107,26 @@ export type MarketingLlmCallOutcome =
   | { readonly status: "refused"; readonly stage: "reserve" | "dispatch"; readonly code: string }
   /** Given up before dispatch, and the reservation released. */
   | { readonly status: "released"; readonly callId: string }
-  /** The provider answered and the answer is recorded. */
+  /** The provider answered and the ledger settled it: the answer may be used. */
   | {
       readonly status: "answered";
       readonly callId: string;
       readonly requestKey: string;
       readonly content: string;
-      /** `settled`, or `unknown_retained` when the answer did not match the pin. */
+      /** Always `settled`: any other ledger state comes back as `retained`. */
+      readonly ledgerState: "settled";
+    }
+  /**
+   * The provider answered, but the ledger closed the call as anything other
+   * than `settled` (`unknown_retained`: tokens over the reservation, another
+   * model, another tier). The cost is not what the pin says, so the answer is
+   * not returned and the caller stops: an unconfirmed result is not used
+   * (agent foundation rule 7).
+   */
+  | {
+      readonly status: "retained";
+      readonly callId: string;
+      readonly requestKey: string;
       readonly ledgerState: string;
     }
   /** Nothing usable came back; the call is recorded as unknown at its reservation. */
@@ -287,13 +300,9 @@ export async function runMarketingLlmCall(
       reportedOutputTokens: answer.outputTokens,
     });
     if (!ok(settled)) return stop("settle", callId, answer.content);
-    return {
-      status: "answered",
-      callId,
-      requestKey,
-      content: answer.content,
-      ledgerState: String(settled.body.state ?? "settled"),
-    };
+    const ledgerState = String(settled.body.state ?? "");
+    if (ledgerState !== "settled") return { status: "retained", callId, requestKey, ledgerState };
+    return { status: "answered", callId, requestKey, content: answer.content, ledgerState: "settled" };
   } catch {
     return stop("settle", callId, answer.content);
   }

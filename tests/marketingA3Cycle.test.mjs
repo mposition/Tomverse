@@ -266,3 +266,13 @@ test("a call released before dispatch is A3 running out of time, not an unknown 
     detail: "stopped",
   });
 });
+
+test("an answer the ledger retained as unknown stops the run and is not used", async () => {
+  const { deps, seen } = ports({
+    callLlm: async () => ({ status: "retained", callId: "c", requestKey: "k", ledgerState: "unknown_retained" }),
+  });
+  const summary = await runMarketingA3Cycle({ generatorRunId: "run-1", deadlineAt: DEADLINE }, deps);
+  assert.deepEqual(summary.stoppedAt, { stage: "llm", detail: "retained" });
+  assert.equal(summary.factsKept, 0);
+  assert.equal(seen.reports.length, 0);
+});

@@ -201,15 +201,25 @@ test("a settle the ledger has already closed stops, keeping the answer it cannot
   assert.deepEqual(b.actions(), ["reserve", "dispatch", "settle"]);
 });
 
-test("an answer the ledger keeps as unknown is still the answer, with the ledger's state", async () => {
+test("an answer the ledger keeps as unknown is not returned: the caller stops on it", async () => {
   const b = budget({
     settle: { httpStatus: 200, body: { status: "ok", replay: false, callId: "call0000000000000000001", state: "unknown_retained", reason: "tier_mismatch" } },
   });
   const p = provider(() => jsonResponse(200, completion({ service_tier: "priority" })));
   const outcome = await run(b, p);
-  assert.equal(outcome.status, "answered");
+  assert.equal(outcome.status, "retained");
   assert.equal(outcome.ledgerState, "unknown_retained");
+  assert.equal("content" in outcome, false, "the unconfirmed answer is not handed back");
   assert.equal(b.calls[2].fields.reportedServiceTier, "priority");
+});
+
+test("a settle answer that names no state is not taken as settled", async () => {
+  const b = budget({
+    settle: { httpStatus: 200, body: { status: "ok", replay: false, callId: "call0000000000000000001" } },
+  });
+  const outcome = await run(b, provider(() => jsonResponse(200, completion())));
+  assert.equal(outcome.status, "retained");
+  assert.equal("content" in outcome, false);
 });
 
 test("the HTTP budget port signs each action the way the app's route verifies it", async () => {
