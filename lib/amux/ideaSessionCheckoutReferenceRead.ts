@@ -14,6 +14,8 @@ import { readAmuxSessionReferencePin } from
 import { inspectSealedAmuxIdeaSessionInput } from
   "./ideaSessionSubmissionCore.ts";
 
+const PIN_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+
 /** Release one repository identity only for the exact in-flight claim. The
  * intake audit supplies the SHA; the sealed, digest-checked idea supplies the
  * repository/PR identity. Neither a queue hint nor the caller names a repo. */
@@ -91,6 +93,7 @@ export async function readAmuxSessionCheckoutReferenceInTx(
     if (values.rawDigest !== idea.rawDigest ||
         values.rawDigestKeyId !== idea.rawDigestKeyId ||
         !Array.isArray(pins) || pins.length !== pin.referenceCount ||
+        !pins.every((sha) => typeof sha === "string" && PIN_SHA.test(sha)) ||
         pins[input.referenceOrdinal] !== pin.pinnedCommitSha ||
         !Number.isSafeInteger(values.repositoryCount) ||
         !Number.isSafeInteger(values.pullRequestCount) ||

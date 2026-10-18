@@ -46,6 +46,10 @@ test("a PR target retains its repository, number and pinned head SHA", async () 
   assert.deepEqual(await readAmuxV19SessionCheckoutReference({
     ...input(async () => Response.json(target)), referenceOrdinal: 1,
   }), target);
+  assert.deepEqual(await readAmuxV19SessionCheckoutReference({
+    ...input(async () => Response.json({ ...target,
+      pinnedCommitSha: "b".repeat(64) })), referenceOrdinal: 1,
+  }), { ...target, pinnedCommitSha: "b".repeat(64) });
 });
 
 test("missing authority, malformed targets and uncertain transport fail closed", async () => {
@@ -67,11 +71,19 @@ test("missing authority, malformed targets and uncertain transport fail closed",
     repository: "mposition/Tomverse", pullRequestNumber: null,
     pinnedCommitSha: sha };
   for (const response of [
+    Response.redirect("https://other.test/", 302),
+    Object.defineProperty(Response.json(valid), "url", {
+      value: "https://other.test/" }),
+    new Response(JSON.stringify(valid), { headers: {
+      "content-type": "text/plain" } }),
     Response.json({ ...valid, pinnedCommitSha: "b".repeat(39) }),
     Response.json({ ...valid, repository: "../private" }),
+    Response.json({ ...valid, repository: "owner/.." }),
+    Response.json({ ...valid, referenceCount: 0 }),
     Response.json({ ...valid, pullRequestNumber: 37 }),
     Response.json({ ...valid, extra: true }),
     Response.json({ ...valid, kind: "pull_request" }),
+    Response.json({ ...valid, kind: "pull_request", pullRequestNumber: 0 }),
     new Response("x".repeat(513), { headers: {
       "content-type": "application/json" } }),
     new Response(null, { status: 503 }),

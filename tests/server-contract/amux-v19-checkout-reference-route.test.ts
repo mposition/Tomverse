@@ -87,8 +87,9 @@ test("checkout reference returns one no-store target and hides read failures", a
   assert.deepEqual(received, { ideaId, reservationId, claimId,
     referenceOrdinal: 0 });
   missing = true;
-  assert.deepEqual(await (await route.POST(post())).json(),
-    { error: "not_ready" });
+  const notReady = await route.POST(post());
+  assert.equal(notReady.status, 409);
+  assert.deepEqual(await notReady.json(), { error: "not_ready" });
   missing = false;
   fail = true;
   assert.deepEqual(await (await route.POST(post())).json(),
