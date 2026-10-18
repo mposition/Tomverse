@@ -8,6 +8,8 @@ import test from "node:test";
 import { prepareAmuxV19MaxTrackedCheckout,
   prepareAmuxV19MaxTrackedCheckouts } from
   "../lib/amux/ideaLocalMaxTrackedCheckoutPreflight.mjs";
+import { runAmuxV19MaxClaimedTrackedCheckoutOnce } from
+  "../lib/amux/ideaLocalMaxClaimedTrackedCheckoutOnce.mjs";
 
 const origin = "https://amux.example.test/";
 const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
@@ -216,4 +218,45 @@ test("v19 Max preflight does not inherit the v4 24-reference ceiling", async () 
     assert.equal(result.kind, "ready");
     assert.equal(result.references.length, 25);
     assert.equal(references, 25);
+  }));
+
+test("claimed dispatch resolves every reference before the default-closed host", async () =>
+  withEnvironment(async () => {
+    const calls = [];
+    const input = { origin, identity, claim, modelId: "claude-opus-5-5",
+      reasoningEffort: "high", prompt: Buffer.from("synthetic"),
+      digestSecret: "d".repeat(32),
+      fetchImpl: async (url) => {
+        const path = new URL(url).pathname;
+        calls.push(path);
+        if (path.endsWith("/analysis-budget/claim")) return Response.json({
+          status: "committed", claimId: identity.claimId,
+          claimStatus: "in_flight" });
+        if (path.endsWith("/session-analysis-stop")) return Response.json({
+          claimId: identity.claimId, reservationId: identity.reservationId,
+          stop: false });
+        const referenceOrdinal = calls.filter((item) =>
+          item.endsWith("/checkout-reference")).length - 1;
+        return Response.json({ referenceCount: 2, kind: "repository",
+          repository: "mposition/Tomverse", pullRequestNumber: null,
+          pinnedCommitSha: referenceOrdinal === 0 ? pin : "b".repeat(40) });
+      },
+    };
+    const switchName = "TOMVERSE_AMUX_V19_TRACKED_CHECKOUT_CLI";
+    const old = process.env[switchName];
+    try {
+      delete process.env[switchName];
+      assert.deepEqual(await runAmuxV19MaxClaimedTrackedCheckoutOnce(input),
+        { kind: "refused" });
+      assert.equal(calls.filter((path) =>
+        path.endsWith("/checkout-reference")).length, 2);
+      calls.length = 0;
+      assert.deepEqual(await runAmuxV19MaxClaimedTrackedCheckoutOnce({
+        ...input, claim: { ...claim, recovered: true },
+      }), { kind: "refused", cliStarted: false });
+      assert.equal(calls.length, 0);
+    } finally {
+      if (old === undefined) delete process.env[switchName];
+      else process.env[switchName] = old;
+    }
   }));
