@@ -358,9 +358,10 @@ const CARD_KEYS = [
 
 /**
  * The typed ask `routeDmQuestion()` reads, checked for shape only: strings,
- * string lists and `{ id, label }` options, nothing else. Sizes, terms,
- * paths and secrets are the router's own checks, which send an oversize or
- * unsafe card to the operator rather than refuse it here. The card is routed
+ * string lists and `{ id, label, effect, paths }` options (`effect` a string,
+ * `paths` a string list), nothing else. Sizes, terms, paths, effect classes
+ * and secrets are the router's own checks, which send an oversize, malformed
+ * or unsafe card to the operator rather than refuse it here. The card is routed
  * and never stored (§10: "본문은 원장에 넣지 않는다").
  */
 export const parseDmCard = (value: unknown): DmCard | null => {
@@ -380,9 +381,11 @@ export const parseDmCard = (value: unknown): DmCard | null => {
         option !== null &&
         typeof option === "object" &&
         !Array.isArray(option) &&
-        ownKeysAre(option, ["id", "label"]) &&
+        ownKeysAre(option, ["id", "label", "effect", "paths"]) &&
         typeof (option as { id: unknown }).id === "string" &&
-        typeof (option as { label: unknown }).label === "string",
+        typeof (option as { label: unknown }).label === "string" &&
+        typeof (option as { effect: unknown }).effect === "string" &&
+        isStringArray((option as { paths: unknown }).paths),
     ) ||
     typeof card.unblocks !== "string" ||
     typeof card.context !== "string" ||

@@ -3,17 +3,25 @@ import { z } from "zod";
 import { detectSecretsInFields } from "../engineeringAgentSecretPatterns.ts";
 
 /**
- * Deterministic core of the AMUX Decision Maker (DM), policy version 1.
+ * Deterministic core of the AMUX Decision Maker (DM), policy version 2.
  *
- * docs/policy/amux-decision-maker.md. Version 1 is proposal-only: a DM drafts
+ * docs/policy/amux-decision-maker.md. The policy is proposal-only: a DM drafts
  * an answer to a worker's typed ask and nothing reaches the worker before the
  * operator confirms it in Admin. This module decides, without an LLM, whether
  * a question goes to a DM for a proposal (section 3), which instance gets it
- * (section 7), whether snapshot inputs are well formed (section 5), and
- * whether a DM output is valid (section 6). It has no I/O.
+ * (section 7), whether the card and snapshot inputs are well formed (sections
+ * 4 and 5), and whether a DM output is valid (section 6). It has no I/O.
  */
 
-export const DM_POLICY_VERSION = 1;
+/**
+ * The policy version a request row records as a section 9 binding value.
+ * Version 2 (approved 2026-10-17) changed only the fixed execution conditions
+ * of sections 5 and 5a; the routing, the effect classes, the card and the
+ * output schema here read the same in both versions. A row keeps the version
+ * it was routed under, and a result binds to that stored value, not to this
+ * constant. Raised from 1 on 2026-10-18 (stage S2-2b1).
+ */
+export const DM_POLICY_VERSION = 2;
 
 /** The seven `ask_type`s a local AMUX typed ask accepts (`ASK_TYPES`). */
 export const AMUX_ASK_TYPES = [
@@ -84,6 +92,56 @@ export const isDmOptionId = (value: unknown): value is string =>
 export const dmCardOptionsWellFormed = (options: ReadonlyArray<{ id: string }>): boolean =>
   options.every((option) => isDmOptionId(option.id)) && new Set(options.map((option) => option.id)).size === options.length;
 
+/**
+ * Section 4's effect classes, in the table's order. The worker declares one
+ * per option, and a class that changes files names the repository paths it
+ * would change, 1 to 50 of them. The list is the policy's table, so changing
+ * it is a change of the policy; section 1 also names the vocabulary among what
+ * a DM cannot change.
+ */
+export const DM_EFFECT_CLASSES = [
+  "choice_only",
+  "wait_or_defer",
+  "branch_code_change",
+  "docs_change",
+  "test_change",
+  "other",
+] as const;
+export type DmEffectClass = (typeof DM_EFFECT_CLASSES)[number];
+
+/** The classes that change files on the worker's branch, and so name paths. */
+export const DM_CHANGE_EFFECT_CLASSES = ["branch_code_change", "docs_change", "test_change"] as const;
+export const DM_CHANGE_PATHS_MIN = 1;
+export const DM_CHANGE_PATHS_MAX = 50;
+
+/**
+ * An option's effect declaration in the form local AMUX records it (stage
+ * S2-1, `recorded_effect` in vendor/amux/crates/amux-server/src/db/dm_ask.rs):
+ * one of the six classes, with paths exactly when the class is a change class
+ * -- 1 to 50 of them, each passing the repository path grammar of section 5,
+ * none repeated -- and no path otherwise. Local AMUX never refuses a
+ * declaration: a missing or malformed one is recorded as `other` with no paths
+ * (section 4's `other` row), so every option it relays is in this form.
+ *
+ * The router does not route on which class an option declares (section 4: "v1에서
+ * 이 선언은 라우팅에 쓰지 않는다", unchanged in version 2), so any well-formed
+ * declaration routes the same. An option outside the form was not written by
+ * that recording, and the router sends its card to the operator as an input it
+ * does not take (section 3-7, as for an option id outside the grammar); it
+ * never rewrites the option into `other` itself, because the card text the body
+ * store keeps must be the card the router decided on.
+ */
+export const dmOptionEffectWellFormed = (option: { effect: string; paths: readonly string[] }): boolean => {
+  if (!(DM_EFFECT_CLASSES as readonly string[]).includes(option.effect)) return false;
+  if (!(DM_CHANGE_EFFECT_CLASSES as readonly string[]).includes(option.effect)) return option.paths.length === 0;
+  return (
+    option.paths.length >= DM_CHANGE_PATHS_MIN &&
+    option.paths.length <= DM_CHANGE_PATHS_MAX &&
+    option.paths.every((path) => repositoryPathRefusal(path) === null) &&
+    new Set(option.paths).size === option.paths.length
+  );
+};
+
 /** Section 10: body field caps, which also bound the DM output (section 6). */
 export const DM_ANSWER_MAX_BYTES = 8 * 1024;
 export const DM_RATIONALE_MAX_BYTES = 4 * 1024;
@@ -125,7 +183,27 @@ export const irreversibleTermCategories = (text: string): string[] =>
     .filter((entry) => entry.korean.some((term) => text.includes(term)) || entry.english.some((pattern) => pattern.test(text)))
     .map((entry) => entry.category);
 
-/** The structured fields of a typed ask that a DM may read (section 5). */
+/**
+ * One option of a card. `effect` and `paths` are section 4's declaration as
+ * local AMUX recorded it; the router checks the form (`dmOptionEffectWellFormed`).
+ */
+export type DmCardOption = {
+  id: string;
+  label: string;
+  effect: string;
+  paths: readonly string[];
+};
+
+/**
+ * The structured fields of a typed ask that a DM may read (section 5: type,
+ * question, options with their effect classes and paths, resolution, unblocks,
+ * the worker's context and its context paths).
+ *
+ * The names are the app's camelCase. Local AMUX stores the extension in
+ * snake_case (`context_paths`, vendor/amux/crates/amux-server/src/db/dm_ask.rs);
+ * the bridge relay renames it, and an option's four keys (`id`, `label`,
+ * `effect`, `paths`) are the same words on both sides.
+ */
 export type DmCard = {
   askType: string;
   resolution: string | null;
@@ -133,7 +211,7 @@ export type DmCard = {
   tags: readonly string[];
   title: string;
   question: string;
-  options: ReadonlyArray<{ id: string; label: string }>;
+  options: ReadonlyArray<DmCardOption>;
   unblocks: string;
   context: string;
   contextPaths: readonly string[];
@@ -151,8 +229,9 @@ const utf8Bytes = (value: string) => Buffer.byteLength(value, "utf8");
  * It is the JSON text of one object whose keys are, in this order, `format`
  * (always `DM_CARD_TEXT_FORMAT`), then every field of `DmCard` -- §5's card
  * fields a DM receives: `askType`, `resolution`, `type`, `tags`, `title`,
- * `question`, `options` (each `{ id, label }`, in the card's order),
- * `unblocks`, `context` and `contextPaths`. `JSON.stringify` is fully
+ * `question`, `options` (each `{ id, label, effect, paths }`, in the card's
+ * order and with its paths in the order the worker wrote them), `unblocks`,
+ * `context` and `contextPaths`. `JSON.stringify` is fully
  * specified (ECMA-262), so the same card is the same bytes on every run; a
  * string is always quoted with `"` and `\` escaped, so no field's text can
  * end a field or start another, and the escaping of control characters and
@@ -161,9 +240,16 @@ const utf8Bytes = (value: string) => Buffer.byteLength(value, "utf8");
  *
  * §5's 16 KiB is measured on these bytes (`dmCardTextBytes`), never on the
  * sum of the fields: the stored text is what the cap is about, and a card the
- * body store could not hold is never routed to a DM.
+ * body store could not hold is never routed to a DM. The effect classes and
+ * paths count towards it, as section 5 lists them among the card's fields.
+ *
+ * Format `amux-dm-card-text-v2` (2026-10-18, stage S2-2b1) added each option's
+ * `effect` and `paths`. The v1 layout, whose options were `{ id, label }`, is
+ * not read back: its only writer was the routing route, closed by
+ * `TOMVERSE_AMUX_DM_ROUTING` since it was added, and a stored text this module
+ * cannot read is shown as unreadable, never as a card.
  */
-export const DM_CARD_TEXT_FORMAT = "amux-dm-card-text-v1";
+export const DM_CARD_TEXT_FORMAT = "amux-dm-card-text-v2";
 
 /** The order of the card text's keys, `format` first. */
 export const DM_CARD_TEXT_KEYS = [
@@ -189,7 +275,12 @@ export const dmCardText = (card: DmCard): string =>
     tags: [...card.tags],
     title: card.title,
     question: card.question,
-    options: card.options.map((option) => ({ id: option.id, label: option.label })),
+    options: card.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      effect: option.effect,
+      paths: [...option.paths],
+    })),
     unblocks: card.unblocks,
     context: card.context,
     contextPaths: [...card.contextPaths],
@@ -234,9 +325,11 @@ export const parseDmCardText = (text: unknown): DmCard | null => {
     !value.options.every(
       (option) =>
         isPlainRecord(option) &&
-        Object.keys(option).length === 2 &&
+        Object.keys(option).length === 4 &&
         typeof option.id === "string" &&
-        typeof option.label === "string",
+        typeof option.label === "string" &&
+        typeof option.effect === "string" &&
+        isStringList(option.paths),
     ) ||
     typeof value.unblocks !== "string" ||
     typeof value.context !== "string" ||
@@ -251,7 +344,7 @@ export const parseDmCardText = (text: unknown): DmCard | null => {
     tags: value.tags,
     title: value.title,
     question: value.question,
-    options: (value.options as Array<{ id: string; label: string }>).map(({ id, label }) => ({ id, label })),
+    options: (value.options as DmCardOption[]).map(({ id, label, effect, paths }) => ({ id, label, effect, paths })),
     unblocks: value.unblocks,
     context: value.context,
     contextPaths: value.contextPaths,
@@ -276,6 +369,10 @@ const cardTextFields = (card: DmCard): Record<string, string> => {
   card.options.forEach((option, index) => {
     fields[`option.${index}.id`] = option.id;
     fields[`option.${index}.label`] = option.label;
+    fields[`option.${index}.effect`] = option.effect;
+    option.paths.forEach((path, pathIndex) => {
+      fields[`option.${index}.path.${pathIndex}`] = path;
+    });
   });
   card.contextPaths.forEach((path, index) => {
     fields[`contextPath.${index}`] = path;
@@ -314,7 +411,7 @@ export type DmRoutingDecision =
 /**
  * Section 3. Every check runs, and any hit routes to the operator; the
  * decision records all of them so a refusal is never explained by only the
- * first reason. There is no autonomous route in policy version 1.
+ * first reason. There is no autonomous route in policy version 1 or 2.
  */
 export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
   const refusals: DmRoutingRefusal[] = [];
@@ -331,6 +428,9 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
     refusals.push("ask_type_not_allowed");
   }
 
+  // Section 3-3's inputs. An option's effect class and paths are not among
+  // them: they are section 4's declaration, which the router does not route on,
+  // and a path is no more prose than a context path, which is not read either.
   const termCategories = irreversibleTermCategories(
     [card.type, ...card.tags, card.title, card.question, ...card.options.map((option) => option.label), card.unblocks, card.context].join("\n"),
   );
@@ -350,13 +450,17 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
   // card routed to a DM always fits its `card_text` row (§10).
   // `resolution` is a closed list for every ask type, so a free-form value can
   // never ride into the stored card text on a type that skips the §3-4 check.
+  // An option's effect declaration must be in the form local AMUX records
+  // (`dmOptionEffectWellFormed`): section 4's classes, and section 5's path
+  // grammar on the paths a change option declares.
   const cardText = dmCardText(card);
   if (
     (card.resolution !== null && !(DM_RESOLUTIONS as readonly string[]).includes(card.resolution)) ||
     utf8Bytes(cardText) > DM_CARD_TEXT_MAX_BYTES ||
     card.contextPaths.length > DM_CONTEXT_PATHS_MAX ||
     card.contextPaths.some((path) => repositoryPathRefusal(path) !== null) ||
-    !dmCardOptionsWellFormed(card.options)
+    !dmCardOptionsWellFormed(card.options) ||
+    !card.options.every(dmOptionEffectWellFormed)
   ) {
     refusals.push("input_limit_exceeded");
   }

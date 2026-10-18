@@ -205,8 +205,8 @@ test("the refusal codes are exactly the ones routeDmQuestion() records", () => {
     title: "Pick a cache key layout",
     question: "Should the cache key include the locale or only the model id?",
     options: [
-      { id: "a", label: "Model id only" },
-      { id: "b", label: "Model id and locale" },
+      { id: "a", label: "Model id only", effect: "choice_only", paths: [] },
+      { id: "b", label: "Model id and locale", effect: "choice_only", paths: [] },
     ],
     unblocks: "The cache module can be finished.",
     context: "Both layouts pass the current tests.",
@@ -1500,8 +1500,8 @@ const routedCard = (overrides = {}) => ({
   title: "Pick a cache key layout",
   question: "Should the cache key include the locale or only the model id?",
   options: [
-    { id: "a", label: "Model id only" },
-    { id: "b", label: "Model id and locale" },
+    { id: "a", label: "Model id only", effect: "choice_only", paths: [] },
+    { id: "b", label: "Model id and locale", effect: "choice_only", paths: [] },
   ],
   unblocks: "The cache module can be finished.",
   context: "Both layouts pass the current tests.",
@@ -1797,7 +1797,12 @@ for (const [label, key] of [
       const same = recordingTx({ existing: [storedRow] });
       assert.equal((await recordDecisionMakerRequest(same.tx, { binding: routingBinding(), card: routedCard(), keyRing: RING })).sameBinding, true);
       // Another label is another option set; without that period's key the set cannot be confirmed.
-      const otherOptions = routedCard({ options: [{ id: "a", label: "Model id only" }, { id: "b", label: "Locale only" }] });
+      const otherOptions = routedCard({
+        options: [
+          { id: "a", label: "Model id only", effect: "choice_only", paths: [] },
+          { id: "b", label: "Locale only", effect: "choice_only", paths: [] },
+        ],
+      });
       const relabelled = recordingTx({ existing: [storedRow] });
       assert.equal((await recordDecisionMakerRequest(relabelled.tx, { binding: routingBinding(), card: otherOptions, keyRing: RING })).sameBinding, false);
       const keyless = recordingTx({ existing: [storedRow] });
