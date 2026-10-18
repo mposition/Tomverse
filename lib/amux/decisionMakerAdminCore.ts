@@ -19,7 +19,13 @@ import {
   type DmResultKind,
   type DmSnapshotState,
 } from "./decisionMakerRequestCore.ts";
-import { isDmInstanceScope, type DmInstanceScope } from "./decisionMakerSwitchCore.ts";
+import {
+  DM_SWITCH_LATCH_REASONS,
+  isDmInstanceScope,
+  isDmSwitchScope,
+  type DmInstanceScope,
+  type DmSwitchLatchReason,
+} from "./decisionMakerSwitchCore.ts";
 
 /**
  * The AMUX Decision Maker's Admin request list, stage S2
@@ -64,6 +70,13 @@ export type DmAdminRequestRow = {
   delivered: boolean;
   deliveryOutcome: "receipt" | "unknown" | null;
   deliveryResolution: DmDeliveryResolveOutcome | null;
+  /**
+   * The database clock of the request's `cleanup_unknown` report (§5: the
+   * broker could not confirm that the request's directories were deleted); null
+   * when none was reported. A closed flag and a time, not a body: it is shown
+   * with the status, whatever the request's status is.
+   */
+  cleanupUnknownAtMs: number | null;
 };
 
 export type DmAdminRequestList = {
@@ -111,6 +124,12 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
   const createdAtMs = epochMs(r.createdAtEpochMs);
   const assignmentDeadlineAtMs = epochMs(r.assignmentDeadlineAtEpochMs);
   if (createdAtMs === null || assignmentDeadlineAtMs === null) return null;
+  // The statement returns the column for every row (null when no report), so a
+  // missing key is not a row this reader was written for.
+  const cleanupUnknownAtMs = r.cleanupUnknownAtEpochMs === null ? null : epochMs(r.cleanupUnknownAtEpochMs);
+  if (r.cleanupUnknownAtEpochMs === undefined || (r.cleanupUnknownAtEpochMs !== null && cleanupUnknownAtMs === null)) {
+    return null;
+  }
   if (typeof r.assigned !== "boolean" || typeof r.resultUnknown !== "boolean" || typeof r.delivered !== "boolean") {
     return null;
   }
@@ -151,6 +170,9 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
     return null;
   }
   if (snapshotState !== null && !r.assigned) return null;
+  // §5, S2-2a3: a cleanup report is received only for an assigned request, so
+  // an operator route (no events) or an unassigned request cannot carry one.
+  if (cleanupUnknownAtMs !== null && (r.route === "operator" || !r.assigned)) return null;
   if (transmitOutcome !== null && snapshotState === null) return null;
   if ((outputKind !== null || r.irreversible !== null) && resultKind === null) return null;
   const judged = closingKind === "confirm" || closingKind === "edit_confirm" || closingKind === "reject";
@@ -183,6 +205,7 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
     delivered: r.delivered,
     deliveryOutcome,
     deliveryResolution,
+    cleanupUnknownAtMs,
   };
 };
 
@@ -247,4 +270,47 @@ export const dmAdminDeliveryStatus = (row: DmAdminRequestRow): DmAdminDeliverySt
   if (row.deliveryOutcome === "receipt") return "delivered";
   if (row.deliveryResolution === null) return "unknown";
   return row.deliveryResolution === "delivered" ? "resolved_delivered" : "resolved_not_delivered";
+};
+
+/**
+ * The newest switch event of one scope, as the Admin switch read returns it
+ * (lib/amux/decisionMakerSwitchStore.ts, `readDecisionMakerSwitchRowsForAdmin()`).
+ */
+export type DmAdminSwitchRow = { scope: unknown; value: unknown; actorKind: unknown; reasonCode: unknown };
+
+/**
+ * Why an instance is off when the system turned it off and no person has
+ * released it since (§8, §5): the reason of its newest switch event when that
+ * event is a system latch. A person's newest event is a release or an
+ * ordinary change, so it is null; an instance with no event is null.
+ */
+export type DmAdminSwitchLatches = Record<DmInstanceScope, DmSwitchLatchReason | null>;
+
+/**
+ * The instances' latch reasons from the newest event of each scope, or null
+ * when any row could not have been written by the switch table's CHECKs (a
+ * system event that is not a latch reason, an instance latch that is not
+ * `off`, a person's event with a reason, an event in a scope outside the
+ * lists). Null shows no reason at all: the switch state itself is read
+ * separately and still decides what the screen offers.
+ */
+export const dmAdminSwitchLatchesFromRows = (rows: unknown): DmAdminSwitchLatches | null => {
+  if (!Array.isArray(rows)) return null;
+  const latches: DmAdminSwitchLatches = { "decision-maker-openai": null, "decision-maker-anthropic": null };
+  const seen = new Set<string>();
+  for (const row of rows as unknown[]) {
+    if (row === null || typeof row !== "object") return null;
+    const { scope, value, actorKind, reasonCode } = row as Partial<DmAdminSwitchRow>;
+    if (!isDmSwitchScope(scope) || seen.has(scope)) return null;
+    seen.add(scope);
+    if (actorKind === "human") {
+      if (reasonCode !== "operator") return null;
+      continue;
+    }
+    if (actorKind !== "system" || !isOneOf(DM_SWITCH_LATCH_REASONS, reasonCode)) return null;
+    // The table accepts a system event only as an instance turned off.
+    if (!isDmInstanceScope(scope) || value !== "off") return null;
+    latches[scope] = reasonCode;
+  }
+  return latches;
 };

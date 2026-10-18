@@ -107,6 +107,28 @@ test("the closed host switch returns a refusal without writing receipts", async 
   }
 });
 
+test("an enabled host refuses a different intake pin before checkout", async () => {
+  const switchName = "TOMVERSE_AMUX_V19_TRACKED_CHECKOUT_CLI";
+  const previousSwitch = process.env[switchName];
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { ...platform, value: "linux" });
+  process.env[switchName] = "enabled";
+  const paths = [];
+  try {
+    const result = await runAmuxV19TrackedCheckoutAnalysisWithReceipts(
+      input(async (url) => {
+        paths.push(new URL(url).pathname);
+        return json({ referenceCount: 1, pinnedCommitSha: "b".repeat(40) });
+      }));
+    assert.deepEqual(result, { kind: "outcome_unknown", cliStarted: false });
+    assert.deepEqual(paths, ["/api/internal/amux/v19/reference-pin"]);
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    if (previousSwitch === undefined) delete process.env[switchName];
+    else process.env[switchName] = previousSwitch;
+  }
+});
+
 test("verified model output is returned only after both receipts", async () => {
   const calls = [];
   let manifestId;

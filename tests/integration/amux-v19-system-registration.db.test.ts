@@ -39,7 +39,7 @@ import { commitAmuxOperatingScope, readAmuxOperatingScopeAuthority,
   "@/lib/amux/ideaOperatingScopeStore";
 import { inspectAmuxIdeaSessionSubmission } from
   "@/lib/amux/ideaSessionSubmissionCore";
-import { commitAmuxIdeaSessionSubmission } from
+import { commitAmuxIdeaSessionSubmission as commitPinnedSessionSubmission } from
   "@/lib/amux/ideaSessionSubmissionService";
 import { commitAmuxV19CompletedIdeaSystemRegistrationForTest,
   readAmuxV19SystemRegistration } from
@@ -62,6 +62,13 @@ import { commitIdeaOnlyTransferPreview } from
 import { commitIdeaTransferConfirmation } from
   "@/lib/amux/ideaTransferConfirmationService";
 import { prisma } from "@/lib/prisma";
+
+const commitAmuxIdeaSessionSubmission = (
+  tx: Parameters<typeof commitPinnedSessionSubmission>[0],
+  input: Omit<Parameters<typeof commitPinnedSessionSubmission>[1], "pinnedCommitShas">,
+) => commitPinnedSessionSubmission(tx, { ...input,
+  pinnedCommitShas: Array(input.inspected.counts.repositoryCount +
+    input.inspected.counts.pullRequestCount).fill("a".repeat(40)) });
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const url = testUrl ? new URL(testUrl) : null;

@@ -42,6 +42,12 @@ export const adminAmuxDecisionMakerMessages = defineAdminMessages({
       "The change may or may not have been recorded, and the state could not be read again. Read it again before you change anything.",
     invalidChange: "That value is not allowed for this switch.",
     changeFailed: "The switch was not changed.",
+    latchReasons: {
+      validation_latch:
+        "Turned off by the system after repeated output validation failures. It stays off until a person sets it again.",
+      cleanup_latch:
+        "Turned off by the system because a request's working directories could not be confirmed deleted (see the flagged requests below). It stays off until a person sets it again, after the leftover directories are gone.",
+    },
   },
   ko: {
     title: "Decision Maker 스위치",
@@ -78,6 +84,12 @@ export const adminAmuxDecisionMakerMessages = defineAdminMessages({
       "변경이 기록됐는지 알 수 없고, 상태도 다시 읽지 못했습니다. 다른 것을 바꾸기 전에 다시 읽으세요.",
     invalidChange: "이 스위치에 허용되지 않는 값입니다.",
     changeFailed: "스위치를 바꾸지 못했습니다.",
+    latchReasons: {
+      validation_latch:
+        "출력 검증 실패가 이어져 시스템이 껐습니다. 사람이 다시 설정하기 전에는 꺼진 채로 있습니다.",
+      cleanup_latch:
+        "요청의 작업 디렉터리를 지웠는지 확인하지 못해 시스템이 껐습니다(아래 표시된 요청 참고). 남은 디렉터리를 치운 뒤 사람이 다시 설정하기 전에는 꺼진 채로 있습니다.",
+    },
   },
 });
 
@@ -146,6 +158,9 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
     operator: "Operator",
     revision: (revision: number) => `revision ${revision}`,
     irreversible: "Irreversible",
+    cleanupUnknown: "Cleanup not confirmed",
+    cleanupUnknownNotice: (count: number) =>
+      `Cleanup could not be confirmed for ${count} of the requests shown. Directories the Decision Maker made for ${count === 1 ? "it" : "them"} may still be on the runner. Such a report turns its instance off until a person releases it; the switches above show whether it still is. Open a flagged request to see what to check.`,
     keptBecause: (codes: string) => `Kept with the operator: ${codes}`,
     statuses: {
       routed_to_operator: "With the operator",
@@ -194,6 +209,9 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
     operator: "운영자",
     revision: (revision: number) => `revision ${revision}`,
     irreversible: "되돌릴 수 없음",
+    cleanupUnknown: "정리 확인 못 함",
+    cleanupUnknownNotice: (count: number) =>
+      `표시된 요청 중 ${count}건은 정리를 확인하지 못했습니다. Decision Maker가 만든 디렉터리가 runner에 남아 있을 수 있습니다. 이런 보고는 사람이 해제하기 전까지 그 인스턴스를 끄며, 지금도 꺼져 있는지는 위 스위치에서 봅니다. 표시된 요청을 열어 무엇을 확인할지 보세요.`,
     keptBecause: (codes: string) => `운영자에게 둔 이유: ${codes}`,
     statuses: {
       routed_to_operator: "운영자 대기",
@@ -263,6 +281,11 @@ export const adminAmuxDecisionMakerRequestDetailMessages = defineAdminMessages({
     snapshotAt: (state: string, sha: string) => `${state} at ${sha}`,
     judgeable: "This proposal is waiting for a person's judgment.",
     notJudgeable: "There is nothing to judge on this request now.",
+    cleanupUnknown: "Cleanup not confirmed",
+    cleanupUnknownAt: (at: string) =>
+      `At ${at} (database clock) the Decision Maker reported that it could not confirm this request's working directories were deleted. Such a report turns its instance off until a person releases it; the switches above show whether it still is.`,
+    cleanupUnknownSteps:
+      "If the instance is still off for this: on the runner host, check whether a directory is left over from this request (this card and the time above tell which one), delete whatever is left, and only then set the instance again in the switches above (owner or ops role, recent sign-in). While a leftover directory exists, the broker refuses every later request.",
   },
   ko: {
     title: (cardId: string, revision: number) => `${cardId}의 요청, revision ${revision}`,
@@ -298,6 +321,11 @@ export const adminAmuxDecisionMakerRequestDetailMessages = defineAdminMessages({
     snapshotAt: (state: string, sha: string) => `${state}, ${sha}`,
     judgeable: "이 제안은 사람의 판정을 기다립니다.",
     notJudgeable: "이 요청에는 지금 판정할 것이 없습니다.",
+    cleanupUnknown: "정리 확인 못 함",
+    cleanupUnknownAt: (at: string) =>
+      `DB 시계 기준 ${at}에 Decision Maker가 이 요청의 작업 디렉터리를 지웠는지 확인하지 못했다고 보고했습니다. 이런 보고는 사람이 해제하기 전까지 그 인스턴스를 끄며, 지금도 꺼져 있는지는 위 스위치에서 봅니다.`,
+    cleanupUnknownSteps:
+      "이 일로 인스턴스가 아직 꺼져 있다면 runner 호스트에서 이 요청이 남긴 디렉터리가 있는지 확인하고(이 카드와 위의 시각으로 어느 것인지 가립니다), 남은 것을 지운 뒤에야 위 스위치에서 인스턴스를 다시 설정하세요(owner나 ops 역할, 최근 로그인 필요). 남은 디렉터리가 있는 동안 broker는 이후 모든 요청을 거부합니다.",
   },
 });
 

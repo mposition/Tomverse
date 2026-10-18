@@ -964,6 +964,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The v19 tracked-checkout evidence migration adds one restrictive audit foreign key and reads the immutable submission audit plus the same-transaction evidence audit. Its DDL and trigger verbs affect only the new evidence table; it never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261018000000_amux_v19_reference_pin_guard/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The migration adds an INSERT refusal trigger to the existing evidence table. It writes no evidence row; the runtime writer remains lib/amux/ideaTrackedCheckoutEvidenceStore.ts.",
+  },
+  {
+    path: "prisma/migrations/20261018000000_amux_v19_reference_pin_guard/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The replacement submission guard reads the current approved scope and refuses mismatched intake rows. It never writes an operating-scope row.",
+  },
+  {
+    path: "prisma/migrations/20261018000000_amux_v19_reference_pin_guard/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The replacement submission guard and new evidence pin guard read canonical audit rows. Neither function inserts, updates or deletes AdminAuditLog.",
+  },
+  {
     path: "lib/adminAuditSystemActors.ts",
     table: "AmuxIdeaTrackedCheckoutEvidence",
     tableMentions: 1,
@@ -2221,10 +2245,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerSwitchStore.ts",
     table: "AmuxDecisionMakerSwitchEvent",
-    tableMentions: 8,
+    tableMentions: 9,
     writeVerbs: 3,
     reason:
-      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is three constant SELECTs (the newest event of every scope; of one scope for a person's change; and since 2026-10-17 the newest value of every scope, which the request ledger's writers read with -- since stage S2-2a3, in a subquery of the same statement -- the cleanup_unknown report each scope's newest cleanup_latch names, the one report that latch settles, and -- since stage S2-2a4, in two LATERAL subqueries of the same statement over the same table -- the scope's newest validation_latch and the first person's event after it with that release's sequence and clock, where section 8's validation count starts) and two constant INSERT ... RETURNING statements, a person's event and a latch, which since S2-2a3 names a cleanup latch's report; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is four constant SELECTs (the newest event of every scope; since stage S2-4c the same with each event's actor and reason, for Admin's switch panel; of one scope for a person's change; and since 2026-10-17 the newest value of every scope, which the request ledger's writers read with -- since stage S2-2a3, in a subquery of the same statement -- the cleanup_unknown report each scope's newest cleanup_latch names, the one report that latch settles, and -- since stage S2-2a4, in two LATERAL subqueries of the same statement over the same table -- the scope's newest validation_latch and the first person's event after it with that release's sequence and clock, where section 8's validation count starts) and two constant INSERT ... RETURNING statements, a person's event and a latch, which since S2-2a3 names a cleanup latch's report; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",

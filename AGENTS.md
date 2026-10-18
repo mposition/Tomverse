@@ -1785,6 +1785,20 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   돌려줍니다(`runDmJudgment()`). 화면은 확정한 답이 승인 계약의 승인이 아님을 적습니다. 이 route는 전달 경로를 부르지 않으므로
   여기서 worker에게 가는 것은 없습니다. 상한 12는 무결성 키가 있는 고친 답 확정의 10문장 + setup + fence이고, judgment unit
   테스트가 그 셈을, judgment DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
+- **S2-4c(Admin의 cleanup_unknown 표시)**: `lib/amux/decisionMakerAdminCore.ts`의 `cleanupUnknownAtMs`·`dmAdminSwitchLatchesFromRows()`,
+  request store의 `readRecentDecisionMakerRequestLedger()`가 같은 문장에서 싣는 `cleanupUnknownAtEpochMs`, switch store의
+  `readDecisionMakerSwitchRowsForAdmin()`과 `decisionMakerAdminRead.ts`의 `readDecisionMakerSwitchesForAdmin()`,
+  `AmuxDecisionMakerRequestsPanel.tsx`·`AmuxDecisionMakerRequestDetailPanel.tsx`·`AmuxDecisionMakerSwitchPanel.tsx`, 각 messages의
+  `cleanupUnknown*`·`latchReasons`, `tests/amuxDecisionMakerAdminList.test.mjs`와 세 client render 테스트. S2-2a3가 원장에 남긴
+  `cleanup_unknown` 보고를 운영자가 봅니다. **요청 목록은 상태 옆에 "정리 확인 못 함" 표시를 더하고(상태를 대체하지 않음) 표시된 요청 중
+  몇 건인지 한 문장으로 말하며, 상세는 보고 시각과 해야 할 일을 문구로만 적습니다.** 표시는 본문이 아니라 닫힌 플래그와 DB 시계이므로
+  목록에서 모든 관리자에게 보이고, 해야 할 일의 문구는 상세(`ops:write`)에 있습니다. **디렉터리 경로·요청 디렉터리 이름·명령은 화면에
+  넣지 않습니다** — 요청 id는 화면 글자로 쓰지 않는 기존 관례를 따르며, 운영자는 카드 id와 보고 시각으로 runner에서 가립니다.
+  스위치 패널은 시스템이 끈 인스턴스에 그 이유(`cleanup_latch`·`validation_latch`)를 보입니다 — 이전에는 이유를 아예 읽지 않았습니다.
+  이유는 인스턴스의 **가장 새 스위치 사건**이 시스템의 latch일 때만이고(사람이 해제하거나 바꾸면 사라짐), 상태와 같은 문장에서 읽으므로
+  `decisionMakerSwitchRead`의 상한(3)은 그대로입니다. 패널이 변경·재읽기로 상태를 API에서 다시 받은 뒤에는 이유를 보이지 않습니다(API 응답은
+  이유를 싣지 않음). 요청 목록·상세의 문장 수와 경계(5·7)도 그대로입니다: 새 열은 기존 원장 문장의 집계에 들어갑니다. 새 열이 없는 행은
+  원장이 만든 행이 아닌 것으로 보아 목록 전체를 읽지 못한 것으로 둡니다.
 - **S2-2a(bridge·broker 내부 route)**: `app/api/internal/amux/decision-maker/assignments/route.ts`,
   `app/api/internal/amux/decision-maker/assignments/discard/route.ts`,
   `app/api/internal/amux/decision-maker/transmissions/route.ts`,
@@ -1860,7 +1874,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   먼저입니다. 15분 sweep은 인스턴스마다 정리 latch 확인 뒤 docs/policy/amux-decision-maker.md §8 확인을 하며 각 확인이 따로 실패 경계입니다. DB trigger는 원장 삽입 때
   밀린 latch를 보지 않고, latch는 끄기만 하므로 kill switch를 보지 않습니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 +
   setup + fence이고, request unit 테스트가 그 셈을, request DB 테스트가 하나 줄인 상한의 거부를 고정합니다. Admin 화면 표시는
-  없습니다.
+  S2-4c입니다.
 - **S2-2a4(검증 실패 셈의 경계)**: `prisma/migrations/20261017200000_amux_decision_maker_validation_count_boundary/migration.sql`,
   switch core의 `DmValidationCountBoundary`·`decisionMakerSwitchReadFromRows()`, switch store의
   `readDecisionMakerSwitchesWithBoundariesOrThrow()`, request core의 `dmValidationCountWindow()`·`dmValidationLatchDecision()`·
@@ -1964,6 +1978,37 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   결과는 상수가 아니라 행에 저장된 값과 대조하므로 이전 행은 자기 버전으로 결속됩니다. bridge relay는 결과 결속에 저장된 값을
   보내야 합니다. 요청 행의 CHECK는 `>= 1`이라 migration이 없습니다. 용어 목록·비밀 경로 목록·경로 문법·출력 상한은 바뀌지
   않았습니다. Admin 화면의 등급·경로 표시와 docs/policy/amux-decision-maker.md §4의 경로별 분류 기록은 없습니다.
+- **S2-2b2(bridge relay)**: `apps/tomverse-orchestrator/src/dm_relay.rs`, `apps/tomverse-orchestrator/src/dm_relay/wire.rs`,
+  `apps/tomverse-orchestrator/src/dm_relay/flow.rs`, `apps/tomverse-orchestrator/src/dm_relay/io.rs`,
+  `apps/tomverse-orchestrator/src/tomverse_api.rs`의 Decision Maker POST 도우미, `apps/tomverse-orchestrator/src/wsl_bridge.rs`의 시작
+  한 줄, `vendor/amux/crates/amux-server/src/api/dm_relay.rs`(로컬 표시 route와 그 등록), `tests/amuxDecisionMakerBridgeRelay.test.mjs`.
+  bridge 프로세스(`tomverse-bridge`) 안의 task 하나가 로컬 AMUX의 `needsyou` typed ask를 **한 번에 하나씩** 앱 원장으로 옮깁니다:
+  라우팅 → 배정 → 로컬 DM 대기 표시(compare-and-swap, 실패하면 배정 폐기) → payload → 전송 의도 → broker → 결과 → cleanup_unknown
+  보고 → 전송 영수증 → 표시 해제. **`TOMVERSE_AMUX_DM_RELAY=enabled`가 아니면 아무것도 읽지도 쓰지도 않습니다**(앱의 라우팅
+  스위치는 별개이고 둘 다 꺼져 있습니다). **broker는 전송 의도의 기록 응답을 받은 뒤에만 부릅니다** — 그 응답을 잃으면 보내지 않습니다.
+  **결과 응답을 잃으면 다시 제출하지 않고** `results/lookup`으로만 확정하며, 확정하지 못하면 `results/unknown`입니다
+  (docs/policy/amux-decision-maker.md §9). 라우팅은 질문당 하나라 결과를 모르면 다음 scan에서 다시 묻는 것이 조회이고, 그 밖의 앱
+  쓰기(배정·폐기·전송 의도·영수증·`results/unknown`)의 결과를 모르거나 cleanup 보고가 기록되지 않으면(그 인스턴스의 latch를 확인하지
+  못함) 다시 보내지 않고 **relay만 멈춥니다** — 새 질문을
+  받지 않고 표시 해제만 계속하며, 사람이 bridge를 다시 시작할 때까지입니다. worker loop는 멈추지 않습니다. 표시는 결과와 무관하게
+  해제하고, 결과 마감이 broker 응답보다 먼저 오면 그때 해제한 뒤 broker 응답(정리 보고)은 계속 기다립니다. **매 tick 처음에 로컬
+  AMUX의 표시 목록 전체(`GET /api/dm-relay/pending`)를 읽어 모두 풉니다** — 질문 사이에는 진행 중인 요청이 없으므로 남은 표시는 전부
+  해제를 확인하지 못했거나 멈춘 프로세스가 남긴 것이고, 목록은 표의 것이라 카드의 위치·상태·revision과 무관합니다(검토
+  r-20261018-022220-384dfe). **scan은 카드 id 순서로 직전 scan이 연 마지막 카드 다음부터 최대 100개를 열고**(끝에서 처음으로
+  돌아감) 라우팅할 첫 질문에서 멈추므로, 처리한 질문이 `needsyou`에 남아 앞에 쌓여도 뒤의 질문이 굶지 않고, 한 scan의 일은
+  질문 하나입니다. broker 응답은 이 요청·인스턴스의 것이고 결과 digest가 K_R로 다시 계산한
+  값과 같을 때만 믿으며, 그 밖은 잃은 응답(전송 결과 불명, DM 불가, cleanup 불명 보고)입니다. 영수증은 프로세스가 돌고 끝났을 때만
+  `receipt`이고, 시작하지 않은 경우도 앱 어휘에 없어 `unknown`(보낸 것으로 침, docs/policy/amux-decision-maker.md §10)입니다. payload는
+  고정 지시문과 한 줄 JSON 카드이며, 지시문은 카드가 데이터이고 그 안의 지시를 따르지 말라고 적습니다
+  (docs/policy/amux-decision-maker.md §5). 지시문의 sha256은 `DM_INSTRUCTION_SHA256`이고 Rust 테스트가 고정합니다. 로컬 AMUX의 route(`/api/dm-relay/pending`의 GET 목록·POST 설정,
+  `/api/dm-relay/pending/release`)는 `/api/board` 밖에 있고 relay 토큰(헤더 `x-amux-dm-relay-token`, bridge 환경 파일의
+  `TOMVERSE_AMUX_DM_RELAY_LOCAL_TOKEN`)을 요구합니다. AMUX 서버는 그 토큰의 SHA-256(`AMUX_DM_RELAY_TOKEN_SHA256`)만 갖고, 값이
+  없거나 형식이 틀리면 모든 route가 닫힙니다. 어느 route에도 결과를 받는 필드가 없으므로 DM 출력이 worker에게 가는 경로는 없습니다.
+  앱 규칙을 Rust로 옮긴 값(digest, 상한, 소켓 경로, broker 기한, route와 응답 envelope, 정책 버전, 선택지 효과 필드)은 node 테스트가
+  앱 모듈에 대조합니다. **선택지 `effect`·`paths`(`DM_SEND_OPTION_EFFECTS`)와 결과 결속의 정책 버전(`DM_REQUEST_POLICY_VERSION`)은
+  S2-2b1과 함께 바뀝니다** — 앱의 라우팅·배정 응답에 저장된 정책 버전이 없어 relay는 앱 상수와 같은 값을 갖고, 두 앱 버전이 함께
+  받는 카드 형식이 없으므로 그 병합과 같은 변경에서 둘을 올리며 테스트가 이를 강제합니다. 운영자 확정 뒤 전달(S2-2b3), 스냅샷(S2b),
+  Admin 화면은 없습니다.
 
 # AMUX 카드 표시 번호
 

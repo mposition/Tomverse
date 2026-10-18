@@ -31,9 +31,9 @@ import { readDecisionMakerDeclarationAccuracyReport } from "@/lib/amux/decisionM
 import {
   listDecisionMakerRequestsForAdmin,
   readDecisionMakerRequestDetailForAdmin,
+  readDecisionMakerSwitchesForAdmin,
 } from "@/lib/amux/decisionMakerAdminRead";
 import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
-import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import {
   AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
   AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT,
@@ -129,9 +129,9 @@ export default async function AdminAmuxSettingsPage({
       if (read === null) return { kind: "unavailable" };
       return read.detail === null ? { kind: "not_found" } : { kind: "detail", detail: read.detail };
     };
-    const [state, report, requests, detailView] = await Promise.all([
+    const [switches, report, requests, detailView] = await Promise.all([
       withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead,
-        (tx) => readDecisionMakerSwitchesOrThrow(tx)).catch(failed("decision_maker_switch_read_failed")),
+        (tx) => readDecisionMakerSwitchesForAdmin(tx)).catch(failed("decision_maker_switch_read_failed")),
       withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerReportRead,
         (tx) => readDecisionMakerDeclarationAccuracyReport(tx))
         .catch(failed("decision_maker_report_read_failed")),
@@ -141,7 +141,8 @@ export default async function AdminAmuxSettingsPage({
       readDetail(),
     ]);
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
-      <AmuxDecisionMakerSwitchPanel state={state} canChange={canChange} />
+      <AmuxDecisionMakerSwitchPanel state={switches?.state ?? null} latches={switches?.latches ?? null}
+        canChange={canChange} />
       {detailView !== null ? <AmuxDecisionMakerRequestDetailPanel view={detailView} /> : null}
       <AmuxDecisionMakerRequestsPanel list={requests} />
       <AmuxDecisionMakerReportPanel report={report} /></div>;

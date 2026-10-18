@@ -13,7 +13,32 @@ const row = (checkoutEvidence: AmuxIdeaProgressRow["checkoutEvidence"]): AmuxIde
     proposedUnits: 0, cards: [] }),
   ideaId: "idea-1", requestId: "11111111-1111-4111-8111-111111111111",
   submittedAt: "2026-10-16T00:00:00.000Z", displayKey: null,
-  reviewPullRequests: [], taskRows: [], checkoutEvidence,
+  reviewPullRequests: [], taskRows: [], checkoutEvidence, referencePins: null,
+});
+
+test("Admin shows the intake SHA before checkout evidence exists", () => {
+  const sessionRow = { ...row([]), submissionOrigin: "session" as const,
+    referencePins: [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40) }] };
+  const markup = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: sessionRow }));
+  assert.match(markup, /data-testid="amux-intake-pins"/);
+  assert.ok(markup.includes("a".repeat(40)));
+  assert.doesNotMatch(markup, /data-testid="amux-checkout-evidence"/);
+});
+
+test("Admin distinguishes an older unpinned idea from a damaged pin", () => {
+  const legacy = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), submissionOrigin: "session",
+      referencePinsLegacy: true } }));
+  const unknown = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), submissionOrigin: "session",
+      referencePinsLegacy: false } }));
+  const m = legacy.includes(adminAmuxIdeaProgressMessages.ko.intakePinsLegacy)
+    ? adminAmuxIdeaProgressMessages.ko : adminAmuxIdeaProgressMessages.en;
+  assert.ok(legacy.includes(m.intakePinsLegacy));
+  assert.doesNotMatch(legacy, /role="alert"/);
+  assert.ok(unknown.includes(m.intakePinsUnavailable));
+  assert.match(unknown, /role="alert"/);
 });
 
 test("Admin idea detail shows pinned SHA and exclusion reasons without private paths", () => {

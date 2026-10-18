@@ -33,7 +33,7 @@ import { commitAmuxIdeaSessionCancellation,
   AmuxIdeaSessionCancellationError } from
   "@/lib/amux/ideaSessionCancellationService";
 import {
-  commitAmuxIdeaSessionSubmission,
+  commitAmuxIdeaSessionSubmission as commitPinnedSessionSubmission,
   readAmuxIdeaSessionSubmissionRequest,
   AmuxIdeaSessionSubmissionError,
   type CommittedAmuxIdeaSessionSubmission,
@@ -52,6 +52,8 @@ import {
 } from "@/lib/amux/ideaSessionAnalysisReservationStore";
 import { listAmuxSessionAnalysisCandidates } from
   "@/lib/amux/ideaSessionAnalysisQueueService";
+import { readAmuxSessionReferencePin } from
+  "@/lib/amux/ideaSessionReferencePinRead";
 import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
   AmuxSessionBudgetClaimError } from
   "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
@@ -77,6 +79,13 @@ import { encodeAmuxSessionAnalysisQueueCursor,
 import { buildAmuxSessionAnalysisQueueWhere } from
   "@/lib/amux/ideaSessionAnalysisQueueWhereCore";
 import { prisma } from "@/lib/prisma";
+
+const commitAmuxIdeaSessionSubmission = (
+  tx: Parameters<typeof commitPinnedSessionSubmission>[0],
+  input: Omit<Parameters<typeof commitPinnedSessionSubmission>[1], "pinnedCommitShas">,
+) => commitPinnedSessionSubmission(tx, { ...input,
+  pinnedCommitShas: Array(input.inspected.counts.repositoryCount +
+    input.inspected.counts.pullRequestCount).fill("a".repeat(40)) });
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const url = testUrl ? new URL(testUrl) : null;
@@ -282,6 +291,11 @@ test("session submission encrypts idea and provenance under the scope owner with
     reservationId: committedReservationId,
     hasExternalSources: true,
   });
+  const progress = (await readAmuxIdeaProgressForOwner(ownerId)).find((item) =>
+    item.ideaId === committedIdeaId);
+  assert.deepEqual(progress?.referencePins, [{ referenceOrdinal: 0,
+    pinnedCommitSha: "a".repeat(40) }]);
+  assert.deepEqual(progress?.checkoutEvidence, []);
 });
 
 test("session submission queues one content-free analysis reservation in the same transaction", async () => {
@@ -338,6 +352,22 @@ test("session submission queues one content-free analysis reservation in the sam
 });
 
 test("session analysis queue lists the live reservation and advances past its DB position", async () => {
+  assert.deepEqual(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: 0,
+  }), { referenceCount: 1, pinnedCommitSha: "a".repeat(40) });
+  assert.equal(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: 1,
+  }), null);
+  assert.equal(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: -1,
+  }), null);
+  assert.equal(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: randomUUID(),
+    referenceOrdinal: 0,
+  }), null);
   const [reservation, idea] = await Promise.all([
     prisma.amuxIdeaSessionAnalysisReservation.findUniqueOrThrow({
       where: { id: committedReservationId }, select: { createdAt: true },
@@ -419,6 +449,18 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
       reservationId: committedReservationId, invocationOrdinal: 0,
       priceVersionId, runner,
     }));
+  assert.equal(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: 0,
+  }), null, "a claimed reservation is no longer a preflight read target");
+  assert.deepEqual(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: 0, claimId: first.claimId,
+  }), { referenceCount: 1, pinnedCommitSha: "a".repeat(40) });
+  assert.equal(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: 0, claimId: randomUUID(),
+  }), null, "a different claim cannot reveal an in-flight pin");
   assert.equal(first.reservedMicroUsd, "5000");
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxSessionBudgetClaimReceipt(tx, {

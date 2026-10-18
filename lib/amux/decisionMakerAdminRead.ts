@@ -6,8 +6,10 @@ import {
   DM_ADMIN_REQUEST_LIST_LIMIT,
   dmAdminRequestRowFromRow,
   dmAdminRequestStatus,
+  dmAdminSwitchLatchesFromRows,
   type DmAdminRequestList,
   type DmAdminRequestRow,
+  type DmAdminSwitchLatches,
 } from "@/lib/amux/decisionMakerAdminCore";
 import {
   readDecisionMakerBodies,
@@ -22,6 +24,11 @@ import {
   readDecisionMakerRequestState,
   readRecentDecisionMakerRequestLedger,
 } from "@/lib/amux/decisionMakerRequestStore";
+import {
+  decisionMakerSwitchStateFromRows,
+  type DecisionMakerSwitchState,
+} from "@/lib/amux/decisionMakerSwitchCore";
+import { readDecisionMakerSwitchRowsForAdmin } from "@/lib/amux/decisionMakerSwitchStore";
 
 /**
  * Admin's request list for the AMUX Decision Maker, stage S2
@@ -48,6 +55,25 @@ export class DecisionMakerAdminReadError extends Error {
     this.name = "DecisionMakerAdminReadError";
     this.code = code;
   }
+}
+
+/**
+ * The switch panel's read (stage S2-4c): the switch state and, for each
+ * instance, why the system turned it off when it did and no person has
+ * released it since. One statement inside the AMUX DB boundary
+ * `decisionMakerSwitchRead`, the same count as the state alone, so both come
+ * from one snapshot of the newest events. A row the table's CHECKs could not
+ * have produced leaves `latches` null (no reason is shown); the state is
+ * mapped exactly as every other reader maps it.
+ */
+export async function readDecisionMakerSwitchesForAdmin(
+  client: LedgerReader,
+): Promise<{ state: DecisionMakerSwitchState; latches: DmAdminSwitchLatches | null }> {
+  const rows = await readDecisionMakerSwitchRowsForAdmin(client);
+  const state = decisionMakerSwitchStateFromRows(rows);
+  // A state the mapping refuses is unreadable (every field null): no reason is
+  // read from rows that state could not trust either.
+  return { state, latches: state.killSwitch === null ? null : dmAdminSwitchLatchesFromRows(rows) };
 }
 
 export async function listDecisionMakerRequestsForAdmin(client: LedgerReader): Promise<DmAdminRequestList> {
