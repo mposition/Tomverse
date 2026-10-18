@@ -39,23 +39,41 @@ test("the claim slug, never the caller path, selects the host checkout", async (
     process.env[switchEnv] = "enabled";
     Object.defineProperty(process, "platform", { ...platform, value: "linux" });
     const sha = "a".repeat(40);
+    const paths = [];
     const input = {
       origin: "https://tomverse.test/",
       agentSecret: "v19_analysis_agent_secret_01234567890123456789",
       ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
       claimId: "ea86a25b-919f-4714-a3d8-45ef5a18b176",
       reservationId: "ea86a25b-919f-4714-a3d8-45ef5a18b177",
+      requestId: "ea86a25b-919f-4714-a3d8-45ef5a18b178",
+      invocationOrdinal: 0,
       referenceOrdinal: 0, commitSha: sha,
       repositoryPath: join(directory, "wrong"),
       excludedPathDigestKeyId: "checkout-digest-v1",
-      fetchImpl: async () => Response.json({ referenceCount: 1,
-        kind: "repository", repository: "owner/repo",
-        pullRequestNumber: null, pinnedCommitSha: sha }),
+      fetchImpl: async (url) => {
+        const endpoint = new URL(url);
+        paths.push(endpoint.pathname);
+        if (endpoint.pathname.endsWith("/analysis-budget/claim")) {
+          assert.equal(endpoint.searchParams.get("requestId"), input.requestId);
+          assert.equal(endpoint.searchParams.get("reservationId"), input.reservationId);
+          assert.equal(endpoint.searchParams.get("invocationOrdinal"), "0");
+          return Response.json({ status: "committed", claimId: input.claimId,
+            claimStatus: "in_flight" });
+        }
+        return Response.json({ referenceCount: 1,
+          kind: "repository", repository: "owner/repo",
+          pullRequestNumber: null, pinnedCommitSha: sha });
+      },
     };
     assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysisWithReceipts(input),
       { kind: "outcome_unknown", cliStarted: false });
     assert.equal(hostInput.repositoryPath, await realpath(selected));
     assert.notEqual(hostInput.repositoryPath, input.repositoryPath);
+    assert.deepEqual(paths, [
+      "/api/internal/amux/v19/analysis-budget/claim",
+      "/api/internal/amux/v19/checkout-reference",
+    ]);
   } finally {
     Object.defineProperty(process, "platform", platform);
     for (const name of names) {
