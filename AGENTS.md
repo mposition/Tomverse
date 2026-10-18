@@ -1386,8 +1386,9 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `tests/integration/marketing-intel-reports.db.test.ts`. 생성기 secret으로 쓸 수 있는 보고서는 `brief`·`market_intel`
   둘뿐입니다. key는 앱이 종류·run·보고서 id로 유도하고, 같은 key에 다른 바이트가 오면 conflict이며, 이미 기록된
   보고서는 모든 게이트보다 먼저 되읽습니다. 마감은 draft 접수와 같은 helper로 겁니다. **시장 사실은 사람이 승인한
-  경쟁사의 공식 host에서 온 것만 저장합니다** — host는 같은 트랜잭션에서 등록부의 승인 행을 FOR SHARE로 읽은
-  것이고(S3f-R1·R2), 그 밖의 사실은 저장하지 않고 `unrepresentableFactCount`에 더합니다. `market_intel` 보고서는
+  경쟁사의 추적 페이지에서, 그 경쟁사의 공식 host 위에서 온 것만 저장합니다** — 둘 다 같은 트랜잭션에서 등록부의
+  승인 행을 FOR SHARE로 읽은 것이고(`holdApprovedMarketingCompetitorSources()`), 승인된 host의 다른 페이지는 출처가
+  아닙니다(docs/policy/marketing-automation.md §4.1). 그 밖의 사실은 저장하지 않고 `unrepresentableFactCount`에 더합니다. `market_intel` 보고서는
   후보(`competitorCandidates`, 최대 5개)를 함께 서명해 보낼 수 있고, 후보는 제안으로만 저장됩니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
   `marketing-generator`이고 범위는 `MarketingReport`의 `marketing_report.generator_recorded` 하나입니다.
 - **S3e1(생성기 LLM adapter)**: `lib/marketingLlmClientCore.ts`, `tests/marketingLlmClientCore.test.mjs`. 생성기
