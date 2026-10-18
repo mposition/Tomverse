@@ -1399,6 +1399,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   정한 pin(모든 tier 중 최악 단가)으로 가격이 정해지고 예약 snapshot이 tier를 기록하므로,
   `scripts/check-processing-tier-core.mjs`가 이 파일의 원장 상수 한 줄만 예외로 받고 literal이나 다른 파일은
   그대로 실패시킵니다. 모델 선택·첫 pin·서비스 배선은 S3e2 이후입니다(D4).
+  **원장이 `settled`로 닫지 않은 답은 쓰지 않습니다**(2026-10-18) — `unknown_retained`(token 초과·모델·tier 불일치)이면 client는
+  본문 없이 `retained`를 돌려주고 A3·A5는 실행을 멈춥니다. 비용이 pin과 다르다는 뜻이므로 확인되지 않은 결과입니다(공통 기반 규칙 7).
 - **S3e2(A5 문안 생성 core)**: `lib/marketingGeneratorDraftingCore.ts`, `tests/marketingGeneratorDraftingCore.test.mjs`.
   모델에게는 고정 system 지시와, S3b 문맥 중 그 계정·locale의 조각을 **데이터로** 줍니다. 답은 하나의 JSON 객체만
   받고(아니면 통째로 거절), 초안마다 링크·문맥에 없는 claim·asset id·접수 schema 위반이면 그 초안만 버리고 사유별로
