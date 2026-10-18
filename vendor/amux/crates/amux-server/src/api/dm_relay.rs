@@ -921,7 +921,7 @@ pub(crate) async fn answer_unknown_with<L: AnswerLane>(
 // ---------------------------------------------------------------------------
 
 /// At most this many operator answer records per answer; the bridge reads on
-/// from the last one's time.
+/// from the last one it passed.
 pub const OPERATOR_ANSWER_LIST_LIMIT: usize = 50;
 
 async fn operator_answers(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
@@ -931,15 +931,24 @@ async fn operator_answers(State(state): State<AppState>, headers: HeaderMap, bod
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OperatorAnswersBody {
-    since: i64,
+    after: OperatorAnswerKey,
 }
 
-/// `POST /api/dm-relay/answers/operator` with `{since}` (seconds): the
-/// operator's answer records from that time on (`dm_ask::operator_answers_since`),
-/// in the order of their time and then their question, at most
-/// [`OPERATOR_ANSWER_LIST_LIMIT`] -- `{answers: [{card_id, question_revision,
-/// recorded_at}], truncated}`. The bridge reports each question to the app,
-/// whose router closes its open Decision Maker request
+/// A record's place in the list: its time (seconds), card and revision.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OperatorAnswerKey {
+    recorded_at: i64,
+    card_id: String,
+    question_revision: i64,
+}
+
+/// `POST /api/dm-relay/answers/operator` with `{after: {recorded_at, card_id,
+/// question_revision}}`: the operator's answer records after that one
+/// (`dm_ask::operator_answers_after`), in the order of their time, card and
+/// revision, at most [`OPERATOR_ANSWER_LIST_LIMIT`] -- `{answers: [{card_id,
+/// question_revision, recorded_at}], truncated}`. The bridge reports each
+/// question to the app, whose router closes its open Decision Maker request
 /// (docs/policy/amux-decision-maker.md §2-7: "운영자의 직접 답이 먼저면 요청은
 /// 닫힌다"). A read: it changes nothing, and carries no answer text.
 pub(crate) async fn operator_answers_with(
@@ -954,10 +963,16 @@ pub(crate) async fn operator_answers_with(
     let Ok(body) = serde_json::from_slice::<OperatorAnswersBody>(body) else {
         return invalid();
     };
-    let since = body.since;
+    let after = body.after;
     let read = state
         .store
-        .read_async(move |conn| Ok(dm_ask::operator_answers_since(conn, since, OPERATOR_ANSWER_LIST_LIMIT + 1)?))
+        .read_async(move |conn| {
+            Ok(dm_ask::operator_answers_after(
+                conn,
+                (after.recorded_at, after.card_id.as_str(), after.question_revision),
+                OPERATOR_ANSWER_LIST_LIMIT + 1,
+            )?)
+        })
         .await;
     let Ok(mut records) = read else {
         return (
@@ -1978,6 +1993,11 @@ mod tests {
             .unwrap();
     }
 
+    /// The operator list's body: the records after this one.
+    fn after(at: i64, card: &str, revision: i64) -> Vec<u8> {
+        serde_json::to_vec(&json!({"after": {"recorded_at": at, "card_id": card, "question_revision": revision}})).unwrap()
+    }
+
     #[tokio::test]
     async fn the_operator_answer_list_is_the_operators_records_by_time_behind_the_relay_token() {
         let home = tempfile::tempdir().unwrap();
@@ -1997,11 +2017,11 @@ mod tests {
             (Some(digest.as_str()), HeaderMap::new(), "dm_relay_token_missing"),
             (Some(digest.as_str()), token_headers("not-the-relay-token"), "dm_relay_token_refused"),
         ] {
-            let (status, body) = json_of(operator_answers_with(&state, configured, &headers, br#"{"since": 0}"#).await).await;
+            let (status, body) = json_of(operator_answers_with(&state, configured, &headers, &after(0, "", i64::MIN)).await).await;
             assert_eq!((status, body["reason"].as_str()), (StatusCode::FORBIDDEN, Some(reason)));
         }
         // The operator's records only, by time; a confirmed answer's record is not one.
-        let (status, listed) = json_of(operator_answers_with(&state, Some(&digest), &headers, br#"{"since": 0}"#).await).await;
+        let (status, listed) = json_of(operator_answers_with(&state, Some(&digest), &headers, &after(0, "", i64::MIN)).await).await;
         assert_eq!(status, StatusCode::OK, "{listed}");
         assert_eq!(
             listed,
@@ -2010,11 +2030,20 @@ mod tests {
                 {"card_id": first, "question_revision": 1, "recorded_at": 500},
             ], "truncated": false})
         );
-        let (_, later) = json_of(operator_answers_with(&state, Some(&digest), &headers, br#"{"since": 401}"#).await).await;
+        // Strictly after the record the reader passed.
+        let (_, later) = json_of(operator_answers_with(&state, Some(&digest), &headers, &after(400, &second, 1)).await).await;
         assert_eq!(later["answers"].as_array().unwrap().len(), 1);
         assert_eq!(later["answers"][0]["card_id"], json!(first));
-        // Nothing but a time: no other field, and a time it is.
-        for bad in [&br#"{}"#[..], br#"{"since": 0, "card_id": "x"}"#, br#"{"since": "0"}"#, b"x"] {
+        // Nothing but a record's key: no other field, and each of the three typed.
+        for bad in [
+            &br#"{}"#[..],
+            br#"{"since": 0}"#,
+            br#"{"after": {"recorded_at": 0, "card_id": "", "question_revision": 0}, "card_id": "x"}"#,
+            br#"{"after": {"recorded_at": "0", "card_id": "", "question_revision": 0}}"#,
+            br#"{"after": {"recorded_at": 0, "question_revision": 0}}"#,
+            br#"{"after": {"recorded_at": 0, "card_id": "", "question_revision": 0, "x": 1}}"#,
+            b"x",
+        ] {
             let (status, _) = json_of(operator_answers_with(&state, Some(&digest), &headers, bad).await).await;
             assert_eq!(status, StatusCode::BAD_REQUEST, "{}", String::from_utf8_lossy(bad));
         }

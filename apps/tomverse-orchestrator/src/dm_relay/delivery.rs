@@ -257,11 +257,12 @@ fn local_outcome(answer: &HttpAnswer) -> Option<(String, Value)> {
 
 /// `DM_DELIVERY_NOT_SENT_REASONS` of lib/amux/decisionMakerJudgmentCore.ts:
 /// why a decided delivery sent nothing (stage S2-2b4), in its order.
-pub const DM_DELIVERY_NOT_SENT_REASONS: [&str; 5] = [
+pub const DM_DELIVERY_NOT_SENT_REASONS: [&str; 6] = [
     "answered_by_operator",
     "question_changed",
     "binding_changed",
     "lane_refused",
+    "send_refused",
     "local_refused",
 ];
 
@@ -337,8 +338,9 @@ pub fn local_delivery(answer: &HttpAnswer) -> LocalDelivery {
             _ => None,
         },
         "not_sent" => match reason {
-            // `lane_send_verdict`: a refusal types nothing.
-            "send_refused" => Some("lane_refused"),
+            // `lane_send_verdict`: a refusal types nothing, but this request's
+            // claim stays, so it is not the lane refusal before the claim.
+            "send_refused" => Some("send_refused"),
             // The claim's transaction rolled back: no claim, nothing sent.
             "claim_store_failed" => Some("local_refused"),
             _ => None,
@@ -1419,7 +1421,7 @@ mod tests {
             ),
             (
                 json!({"outcome": "not_sent", "reason": "send_refused"}),
-                "lane_refused",
+                "send_refused",
             ),
             (
                 json!({"outcome": "not_deliverable", "reason": "store_unreadable"}),

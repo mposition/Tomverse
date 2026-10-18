@@ -157,7 +157,7 @@ test("the judgment, accuracy and delivery vocabularies are the policy's, and non
   assert.deepEqual([...DM_DELIVERY_EVENT_KINDS], ["deliver", "delivery_receipt", "delivery_unknown", "delivery_unknown_resolve", "delivery_not_sent"]);
   assert.deepEqual([...DM_DELIVERY_SYSTEM_EVENT_KINDS], ["deliver", "delivery_receipt", "delivery_unknown", "delivery_not_sent"]);
   assert.deepEqual([...DM_DELIVERY_OUTCOME_EVENT_KINDS], ["delivery_receipt", "delivery_unknown", "delivery_not_sent"]);
-  assert.deepEqual([...DM_DELIVERY_NOT_SENT_REASONS], ["answered_by_operator", "question_changed", "binding_changed", "lane_refused", "local_refused"]);
+  assert.deepEqual([...DM_DELIVERY_NOT_SENT_REASONS], ["answered_by_operator", "question_changed", "binding_changed", "lane_refused", "send_refused", "local_refused"]);
   assert.deepEqual([...DM_DELIVERY_RESOLVE_OUTCOMES], ["delivered", "not_delivered"]);
   assert.deepEqual([...DM_DELIVERY_ACTOR_KINDS], ["human", "system"]);
   for (const list of [DM_JUDGMENT_KINDS, DM_DECLARATION_ACCURACIES, DM_DELIVERY_EVENT_KINDS, DM_DELIVERY_RESOLVE_OUTCOMES, DM_DELIVERY_NOT_SENT_REASONS]) {

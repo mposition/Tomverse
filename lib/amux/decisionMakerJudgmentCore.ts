@@ -87,8 +87,12 @@ export type DmDeliveryOutcomeEventKind = (typeof DM_DELIVERY_OUTCOME_EVENT_KINDS
  *   again, left `needsyou`, or gone), so nothing could claim it.
  * - `binding_changed`: the card's owner session or newest attempt is no longer
  *   §9's binding.
- * - `lane_refused`: the worker's lane refused automated input -- before the
- *   claim, or at the send, which typed nothing.
+ * - `lane_refused`: the worker's lane refused automated input before the
+ *   claim, so nothing holds the question revision.
+ * - `send_refused`: this answer claimed the question revision, then the lane
+ *   refused the send, which typed nothing. The claim stays (answer records are
+ *   never changed), so the dashboard's direct answer to that revision is
+ *   refused too: the worker has to ask again.
  * - `local_refused`: the local AMUX refused or failed before any claim or
  *   send (its store unreadable, the claim refused for its input, the claim's
  *   transaction rolled back).
@@ -98,6 +102,7 @@ export const DM_DELIVERY_NOT_SENT_REASONS = [
   "question_changed",
   "binding_changed",
   "lane_refused",
+  "send_refused",
   "local_refused",
 ] as const;
 export type DmDeliveryNotSentReason = (typeof DM_DELIVERY_NOT_SENT_REASONS)[number];

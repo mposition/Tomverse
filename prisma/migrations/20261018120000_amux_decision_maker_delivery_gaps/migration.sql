@@ -175,7 +175,7 @@ ALTER TABLE "AmuxDecisionMakerDeliveryEvent"
     CHECK ("kind" IN ('deliver', 'delivery_receipt', 'delivery_unknown', 'delivery_unknown_resolve', 'delivery_not_sent'));
 ALTER TABLE "AmuxDecisionMakerDeliveryEvent"
   ADD CONSTRAINT "AmuxDecisionMakerDeliveryEvent_not_sent_reason_check"
-    CHECK ("notSentReason" IS NULL OR "notSentReason" IN ('answered_by_operator', 'question_changed', 'binding_changed', 'lane_refused', 'local_refused'));
+    CHECK ("notSentReason" IS NULL OR "notSentReason" IN ('answered_by_operator', 'question_changed', 'binding_changed', 'lane_refused', 'send_refused', 'local_refused'));
 ALTER TABLE "AmuxDecisionMakerDeliveryEvent"
   ADD CONSTRAINT "AmuxDecisionMakerDeliveryEvent_not_sent_shape_check"
     CHECK ((("kind" = 'delivery_not_sent') = ("notSentReason" IS NOT NULL)) IS TRUE);

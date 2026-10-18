@@ -16,7 +16,7 @@ import {
 } from "@/lib/amux/decisionMakerBodyStore";
 import { DM_DELIVERY_NOT_AN_APPROVAL } from "@/lib/amux/decisionMakerDeliveryCore";
 import { readDecisionMakerDeliveryCandidate, readDecisionMakerUnsettledDelivery } from "@/lib/amux/decisionMakerDeliveryRead";
-import type { DmShownProposal } from "@/lib/amux/decisionMakerJudgmentCore";
+import { DM_DELIVERY_NOT_SENT_REASONS, type DmShownProposal } from "@/lib/amux/decisionMakerJudgmentCore";
 import {
   readDecisionMakerDeliveryState,
   recordDecisionMakerDelivery,
@@ -392,6 +392,13 @@ test("stage S2-2b4: the database holds not_sent to a closed reason, after a deci
   await assert.rejects(rawInsert("delivery_receipt", "lane_refused"), /AmuxDecisionMakerDeliveryEvent_not_sent_shape_check/);
   await assert.rejects(rawInsert("delivery_not_sent", "because"), /AmuxDecisionMakerDeliveryEvent_not_sent_reason_check/);
   assert.equal((await readDecisionMakerDeliveryState(prisma, basis.requestId)).outcome, null);
+  // The database's closed list is the application's, in its order -- send_refused, the send refused
+  // after the claim, apart from the lane's refusal before it (review r-20261018-121437-f0d9ce).
+  const [check] = await prisma.$queryRaw<Array<{ definition: string }>>`
+    SELECT pg_get_constraintdef(c."oid") AS "definition" FROM pg_constraint c
+    WHERE c."conname" = 'AmuxDecisionMakerDeliveryEvent_not_sent_reason_check'
+  `;
+  assert.deepEqual([...check!.definition.matchAll(/'([a-z_]+)'::text/g)].map((match) => match[1]), [...DM_DELIVERY_NOT_SENT_REASONS]);
   // Recorded under the kill switch as well: it records what already happened.
   await setSwitch("kill_switch", "on");
   assert.equal((await notSent(basis.requestId, "binding_changed")).recorded, true);

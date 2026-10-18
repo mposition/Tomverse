@@ -14,6 +14,7 @@ import {
   adminAmuxDecisionMakerRequestsMessages,
 } from "@/lib/adminMessages/amuxDecisionMaker";
 import { dmAdminRequestRowFromRow, type DmAdminRequestRow } from "@/lib/amux/decisionMakerAdminCore";
+import { DM_DELIVERY_NOT_SENT_REASONS } from "@/lib/amux/decisionMakerJudgmentCore";
 import type { DmAdminRequestDetail } from "@/lib/amux/decisionMakerAdminRead";
 import type { DmCard } from "@/lib/amux/decisionMakerCore";
 
@@ -177,20 +178,27 @@ for (const locale of ["en", "ko"] as const) {
     assert.equal(byTestId(AmuxDecisionMakerRequestDetailView({ m, list, view: detail() }), "amux-dm-detail-cleanup-unknown").length, 0);
   });
 
-  test(`${locale}: a confirmed answer the local AMUX never sent says so, why, and that the operator answers directly`, () => {
+  test(`${locale}: a confirmed answer the local AMUX never sent says so, why, and what the operator does next`, () => {
     // Stage S2-2b4, §2-7: "다른 쪽은 거절되어 운영자에게 보인다".
-    const notSent = row({
-      closingKind: "confirm",
-      declarationAccuracy: "not_judged",
-      delivered: true,
-      deliveryOutcomeKind: "delivery_not_sent",
-      deliveryNotSentReason: "answered_by_operator",
-    });
-    const tree = AmuxDecisionMakerRequestDetailView({ m, list, view: detail({ row: notSent, shown: null }) });
-    assert.equal(byTestId(tree, "amux-dm-detail-not-sent")[0]!["data-reason"], "answered_by_operator");
-    const text = textBy(tree, "amux-dm-detail-not-sent");
-    assert.ok(text.includes(m.notSent) && text.includes(m.notSentReasons.answered_by_operator) && text.includes(m.notSentNext));
-    assert.ok(textBy(tree, "amux-dm-detail-delivery").includes(list.deliveries.not_sent));
+    for (const reason of DM_DELIVERY_NOT_SENT_REASONS) {
+      const notSent = row({
+        closingKind: "confirm",
+        declarationAccuracy: "not_judged",
+        delivered: true,
+        deliveryOutcomeKind: "delivery_not_sent",
+        deliveryNotSentReason: reason,
+      });
+      const tree = AmuxDecisionMakerRequestDetailView({ m, list, view: detail({ row: notSent, shown: null }) });
+      assert.equal(byTestId(tree, "amux-dm-detail-not-sent")[0]!["data-reason"], reason);
+      const text = textBy(tree, "amux-dm-detail-not-sent");
+      assert.ok(text.includes(m.notSent) && text.includes(m.notSentReasons[reason]) && text.includes(m.notSentNext[reason]), reason);
+      assert.ok(textBy(tree, "amux-dm-detail-delivery").includes(list.deliveries.not_sent));
+    }
+    // Only a send refused after the claim leaves the question held, so no other
+    // reason may give its next step (review r-20261018-121437-f0d9ce).
+    for (const reason of DM_DELIVERY_NOT_SENT_REASONS.filter((reason) => reason !== "send_refused")) {
+      assert.notEqual(m.notSentNext[reason], m.notSentNext.send_refused);
+    }
     // Only a not-sent outcome has the block.
     assert.equal(byTestId(AmuxDecisionMakerRequestDetailView({ m, list, view: detail() }), "amux-dm-detail-not-sent").length, 0);
     // A request the operator's direct answer closed says so as its status.

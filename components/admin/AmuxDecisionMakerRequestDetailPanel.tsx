@@ -154,7 +154,7 @@ export function AmuxDecisionMakerRequestDetailView({
         >
           <p className="font-semibold">{m.notSent}</p>
           <p>{m.notSentReasons[row.deliveryNotSentReason]}</p>
-          <p>{m.notSentNext}</p>
+          <p>{m.notSentNext[row.deliveryNotSentReason]}</p>
         </div>
       ) : null}
 

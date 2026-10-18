@@ -1163,25 +1163,30 @@ pub fn claim_answer(
     }))
 }
 
-/// Stage S2-2b4: the operator's answer records recorded at or after `since`
-/// (seconds), in the order of their time and then their card and revision, at
-/// most `limit`. The Tomverse bridge relay reads them to close the app's
-/// Decision Maker request of each question the operator answered directly
+/// Stage S2-2b4: the operator's answer records after `after` -- (time in
+/// seconds, card, question revision) -- in that order, at most `limit`. The
+/// Tomverse bridge relay reads them to close the app's Decision Maker request
+/// of each question the operator answered directly
 /// (docs/policy/amux-decision-maker.md §2-7: "운영자의 직접 답이 먼저면 요청은
-/// 닫힌다"). The order is the records' own values, not their row numbers,
-/// which a vacuum may change. A read.
-pub fn operator_answers_since(
+/// 닫힌다"). The key is the records' own values, never their row numbers,
+/// which a vacuum may change, and a record's card and revision are its primary
+/// key, so a read that starts strictly after the last record the reader passed
+/// always moves on, however many records share a second. A read.
+pub fn operator_answers_after(
     conn: &Connection,
-    since: i64,
+    after: (i64, &str, i64),
     limit: usize,
 ) -> rusqlite::Result<Vec<AnswerRecord>> {
     let mut statement = conn.prepare(
         "SELECT issue_id, question_revision, source, request_id, actor, recorded_at \
-         FROM _amux_dm_answers WHERE source = 'operator' AND recorded_at >= ?1 \
-         ORDER BY recorded_at, issue_id, question_revision LIMIT ?2",
+         FROM _amux_dm_answers WHERE source = 'operator' \
+         AND (recorded_at > ?1 OR (recorded_at = ?1 AND (issue_id > ?2 \
+              OR (issue_id = ?2 AND question_revision > ?3)))) \
+         ORDER BY recorded_at, issue_id, question_revision LIMIT ?4",
     )?;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-    let records = statement.query_map(params![since, limit], |r| {
+    let (at, card, revision) = after;
+    let records = statement.query_map(params![at, card, revision, limit], |r| {
         Ok(AnswerRecord {
             issue_id: r.get(0)?,
             question_revision: r.get(1)?,
@@ -2053,8 +2058,8 @@ mod tests {
         claim_answer(&conn, "DM-22", 1, &AnswerSource::Operator, "Ethan", 300).unwrap();
         // A confirmed answer's record is not the operator's.
         claim_answer(&conn, "DM-21", 1, &confirmed, "amux-dm-relay", 250).unwrap();
-        let listed = |since: i64, limit: usize| -> Vec<(String, i64, i64)> {
-            operator_answers_since(&conn, since, limit)
+        let listed = |after: (i64, &str, i64), limit: usize| -> Vec<(String, i64, i64)> {
+            operator_answers_after(&conn, after, limit)
                 .unwrap()
                 .into_iter()
                 .map(|record| {
@@ -2064,16 +2069,34 @@ mod tests {
                 })
                 .collect()
         };
+        let all = listed((0, "", i64::MIN), 10);
         assert_eq!(
-            listed(0, 10),
+            all,
             vec![
                 ("DM-22".to_string(), 1, 300),
                 ("DM-23".to_string(), 1, 300),
                 ("DM-24".to_string(), 1, 300),
             ]
         );
-        assert_eq!(listed(301, 10), Vec::<(String, i64, i64)>::new());
-        assert_eq!(listed(300, 2).len(), 2);
+        // Strictly after a record: the rest of its second, then later seconds.
+        assert_eq!(
+            listed((300, "DM-22", 1), 10),
+            vec![("DM-23".to_string(), 1, 300), ("DM-24".to_string(), 1, 300)]
+        );
+        assert_eq!(listed((300, "DM-24", 1), 10), Vec::<(String, i64, i64)>::new());
+        // Pages of one move on inside a single second: a read by time alone never
+        // left a second that held a full page (review r-20261018-121437-f0d9ce).
+        let mut after = (0_i64, String::new(), i64::MIN);
+        let mut walked = Vec::new();
+        loop {
+            let page = listed((after.0, after.1.as_str(), after.2), 1);
+            let Some((card, revision, at)) = page.last().cloned() else {
+                break;
+            };
+            walked.extend(page);
+            after = (at, card, revision);
+        }
+        assert_eq!(walked, all);
     }
 
     /// docs/policy/amux-decision-maker.md §12, blocking criterion: a direct

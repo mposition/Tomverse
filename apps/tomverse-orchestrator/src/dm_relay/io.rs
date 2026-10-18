@@ -435,16 +435,17 @@ impl<A: DmApp, L: DmLocal, B: DmBroker> Relay<A, L, B> {
     }
 
     /// One page of the operator's answer records (stage S2-2b4,
-    /// `direct::report_direct_answers`); true when a request was closed.
+    /// `direct::report_direct_answers`); true when a request was closed or a
+    /// full page held records not seen before.
     async fn report_direct(&mut self) -> bool {
         let run = report_direct_answers(&self.app, &self.local, &mut self.direct_cursor).await;
-        if run.reported > 0 || run.code != "direct_answers_reported" {
+        if run.reported > 0 || run.skipped > 0 || run.code != "direct_answers_reported" {
             println!(
-                "amux dm relay: direct answers: {} reported, {} closed: {}",
-                run.reported, run.closed, run.code
+                "amux dm relay: direct answers: {} reported, {} closed, {} passed: {}",
+                run.reported, run.closed, run.skipped, run.code
             );
         }
-        run.closed > 0
+        run.closed > 0 || run.more
     }
 
     /// One step of the confirmed-answer walk (`delivery::deliver_next`); true
@@ -1595,7 +1596,8 @@ mod tests {
                 AppRoute::DeliveriesNext
             ]
         );
-        // Tick three: the start is settled once; the walk reads on from its cursor.
+        // Tick three: the start is settled once; the walk, at the end of the list, reads the
+        // window before the newest record again.
         relay.tick().await;
         assert_eq!(
             relay
@@ -1616,7 +1618,11 @@ mod tests {
             .map(|(_, body, _)| body.clone())
             .collect();
         assert_eq!(operator_reads.len(), 2);
-        assert_eq!(operator_reads[1], json!({"since": 1_790_000_000}));
+        assert_eq!(
+            operator_reads[1],
+            json!({"after": {"recorded_at": 1_790_000_000 - crate::dm_relay::direct::DM_DIRECT_ANSWER_REWIND_SECS,
+                "card_id": "", "question_revision": i64::MIN}})
+        );
         // Nothing is ever sent again: the delivery route is never called.
         assert!(!relay.local.routes().contains(&LocalRoute::Answers));
     }
