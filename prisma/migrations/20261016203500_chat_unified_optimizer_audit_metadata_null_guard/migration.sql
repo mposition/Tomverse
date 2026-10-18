@@ -1,3 +1,4 @@
+-- baseline-check: replace-function-if-body-sha256 "chat_unified_optimizer_run_guard" "362c3883d0b9afc10822c370aa89d5537904f54b20da0175b6dc1715dcaf1866"
 -- Repair missing audit metadata: SQL NULL must fail exact binding.
 -- Existing function signatures and triggers remain unchanged.
 

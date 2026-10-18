@@ -616,9 +616,12 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * that moved this value without changing a webhook decision; under the new
  * scope none of them would have. A change to a webhook module, a declaration
  * it uses or a watched column still moves it, and still re-opens verification.
+ * 2026-10-18: the provider-free Chat optimizer adds one scoped system audit
+ * actor in the shared audit helper. Marketing admission decisions are unchanged,
+ * but the imported helper's bytes move and prior signed evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "643befaf99794fbb478b6ad914996f6e1e4e6575122c88d6c2c14f35d447eb73";
+  "1f23727e914992275423baa9913a93ad37f4f69e01ac6fa1e73798604bad1cf9";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
