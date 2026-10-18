@@ -156,3 +156,107 @@ test("an uncertain manifest write reads once but never replays or releases outpu
   assert.equal(calls.filter((call) => call.startsWith("GET") &&
     call.endsWith("/max-read-manifest")).length, 1);
 });
+
+test("a multi-reference Max answer follows both claim-bound receipt pairs", async () => {
+  const calls = [];
+  const references = [{ referenceOrdinal: 0, commitSha: "a".repeat(40) },
+    { referenceOrdinal: 1, commitSha: "c".repeat(40) }];
+  const multi = { ...observed, references: references.map((reference) => ({
+    ...reference, excludedCount: observed.excludedCount,
+    excludedPathDigest: observed.excludedPathDigest,
+    excludedReasons: observed.excludedReasons,
+  })), readFiles: ["reference-0/docs/guide.md",
+    "reference-1/README.md"] };
+  const result = await finalizeAmuxV19MaxSessionResultWithReceipts({
+    ...input(async (url, options) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith("/session-analysis-stop")) return Response.json({
+        claimId: identity.claimId, reservationId: identity.reservationId,
+        stop: false });
+      const body = JSON.parse(options.body);
+      calls.push({ path, body });
+      if (path.endsWith("/max-checkout-evidence")) {
+        assert.equal(body.pinnedCommitSha,
+          references[body.referenceOrdinal].commitSha);
+        return Response.json({ evidenceId, ideaId: identity.ideaId,
+          referenceOrdinal: body.referenceOrdinal });
+      }
+      if (path.endsWith("/max-read-manifest")) {
+        assert.equal(body.pinnedCommitSha,
+          references[body.referenceOrdinal].commitSha);
+        assert.deepEqual(body.observed.readFiles,
+          body.referenceOrdinal === 0 ? ["docs/guide.md"] : ["README.md"]);
+        return Response.json({ manifestId: body.manifestId,
+          ideaId: identity.ideaId, referenceOrdinal: body.referenceOrdinal,
+          fileCount: 1 });
+      }
+      assert.ok(path.endsWith("/session-analysis-result"));
+      assert.equal(body.referenceOrdinal, 0);
+      assert.equal(body.rawModelOutput, "private answer");
+      assert.deepEqual(calls.slice(0, 4).map((call) =>
+        call.body.referenceOrdinal), [0, 0, 1, 1]);
+      return Response.json({ claimId: identity.claimId,
+        resultAuditId: "clsyntheticresult123",
+        settlementAuditId: "clsyntheticsettlement123",
+        digest: "c".repeat(64), digestKeyId: "synthetic-digest" });
+    }), references,
+  }, multi);
+  assert.equal(result.kind, "recorded");
+  assert.equal(calls.length, 5);
+});
+
+test("invalid multi-reference read roots are refused before any receipt write", async () => {
+  let calls = 0;
+  const references = [{ referenceOrdinal: 0, commitSha: "a".repeat(40) },
+    { referenceOrdinal: 1, commitSha: "c".repeat(40) }];
+  const bad = { ...observed, references: references.map((reference) => ({
+    ...reference, excludedCount: observed.excludedCount,
+    excludedPathDigest: observed.excludedPathDigest,
+    excludedReasons: observed.excludedReasons,
+  })), readFiles: ["reference-0/docs/guide.md",
+    "reference-1/../secret"] };
+  const result = await finalizeAmuxV19MaxSessionResultWithReceipts({
+    ...input(async () => { calls++; throw new Error("unexpected request"); }),
+    references,
+  }, bad);
+  assert.deepEqual(result, { kind: "outcome_unknown", retryWrite: false });
+  assert.equal(calls, 0);
+});
+
+test("a missing second reference receipt never releases the Max answer", async () => {
+  const writes = [];
+  const references = [{ referenceOrdinal: 0, commitSha: "a".repeat(40) },
+    { referenceOrdinal: 1, commitSha: "c".repeat(40) }];
+  const multi = { ...observed, references: references.map((reference) => ({
+    ...reference, excludedCount: observed.excludedCount,
+    excludedPathDigest: observed.excludedPathDigest,
+    excludedReasons: observed.excludedReasons,
+  })), readFiles: ["reference-0/docs/guide.md",
+    "reference-1/README.md"] };
+  const result = await finalizeAmuxV19MaxSessionResultWithReceipts({
+    ...input(async (url, options) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith("/session-analysis-stop")) return Response.json({
+        claimId: identity.claimId, reservationId: identity.reservationId,
+        stop: false });
+      if (options.method === "GET") return Response.json({ status: "absent" },
+        { status: 404 });
+      const body = JSON.parse(options.body);
+      writes.push({ path, ordinal: body.referenceOrdinal });
+      assert.doesNotMatch(options.body, /private answer/);
+      if (path.endsWith("/max-checkout-evidence")) return Response.json({
+        evidenceId, ideaId: identity.ideaId,
+        referenceOrdinal: body.referenceOrdinal });
+      if (body.referenceOrdinal === 1) throw new Error("lost response");
+      return Response.json({ manifestId: body.manifestId,
+        ideaId: identity.ideaId, referenceOrdinal: 0, fileCount: 1 });
+    }), references,
+  }, multi);
+  assert.deepEqual(result, { kind: "outcome_unknown", retryWrite: false });
+  assert.deepEqual(writes, [
+    { path: "/api/internal/amux/v19/max-checkout-evidence", ordinal: 0 },
+    { path: "/api/internal/amux/v19/max-read-manifest", ordinal: 0 },
+    { path: "/api/internal/amux/v19/max-checkout-evidence", ordinal: 1 },
+    { path: "/api/internal/amux/v19/max-read-manifest", ordinal: 1 },
+  ]);
+});
