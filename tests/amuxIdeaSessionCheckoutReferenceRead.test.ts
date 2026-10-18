@@ -36,11 +36,10 @@ function fixture() {
     rawCiphertext: sealed.ciphertext, rawKeyId: sealed.keyId,
     rawKeyVersion: sealed.keyVersion, rawDigest: sealed.digest,
     rawDigestKeyId: sealed.digestKeyId };
-  let clockReads = 0;
-  const tx = { $queryRaw: async () => {
-    clockReads += 1;
-    return clockReads === 2 ? [{ now: new Date("2026-10-18T00:00:00Z") }] : [];
-  }, amuxIdeaOperatingScopeSetting: { findFirst: async () => ({ id: "scope-1" }) },
+  const tx = { $queryRaw: async (query: TemplateStringsArray) =>
+    query.join("").includes("clock_timestamp()")
+      ? [{ now: new Date("2026-10-18T00:00:00Z") }] : [],
+  amuxIdeaOperatingScopeSetting: { findFirst: async () => ({ id: "scope-1" }) },
   amuxIdeaSessionAnalysisReservation: { findFirst: async () => ({ idea }) },
   adminAuditLog: { findUnique: async () => audit } } as unknown as Prisma.TransactionClient;
   return { tx, metadata, idea };
@@ -69,4 +68,25 @@ test("audit digest, reference split and sibling SHA divergence deny checkout", a
     assert.equal(await readAmuxSessionCheckoutReferenceInTx(tx, input,
       { referenceCount: 2, pinnedCommitSha: a }, keys), null);
   }
+});
+
+test("the complete pin array must match its count and selected SHA", async () => {
+  for (const candidate of [
+    { pin: { referenceCount: 1, pinnedCommitSha: a } },
+    { pin: { referenceCount: 2, pinnedCommitSha: b } },
+    { pin: { referenceCount: 2, pinnedCommitSha: a },
+      siblingSha: "C".repeat(40) },
+  ]) {
+    const { tx, metadata } = fixture();
+    if (candidate.siblingSha) metadata.pinnedCommitShas[1] = candidate.siblingSha;
+    assert.equal(await readAmuxSessionCheckoutReferenceInTx(tx, input,
+      candidate.pin, keys), null);
+  }
+  const { tx, metadata } = fixture();
+  metadata.pinnedCommitShas = ["c".repeat(64), "d".repeat(64)];
+  assert.deepEqual(await readAmuxSessionCheckoutReferenceInTx(tx, input,
+    { referenceCount: 2, pinnedCommitSha: "c".repeat(64) }, keys), {
+    referenceCount: 2, kind: "repository", repository: "owner/repo",
+    pullRequestNumber: null, pinnedCommitSha: "c".repeat(64),
+  });
 });
