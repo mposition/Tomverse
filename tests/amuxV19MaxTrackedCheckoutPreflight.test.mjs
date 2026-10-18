@@ -195,3 +195,25 @@ test("changed reference count and stop mid-list refuse the whole set", async () 
       assert.equal(references, failure === "stop" ? 1 : 2);
     }
   }));
+
+test("v19 Max preflight does not inherit the v4 24-reference ceiling", async () =>
+  withEnvironment(async () => {
+    let references = 0;
+    const result = await prepareAmuxV19MaxTrackedCheckouts({ origin,
+      identity, claim, fetchImpl: async (url) => {
+        const path = new URL(url).pathname;
+        if (path.endsWith("/analysis-budget/claim")) return Response.json({
+          status: "committed", claimId: identity.claimId,
+          claimStatus: "in_flight" });
+        if (path.endsWith("/session-analysis-stop")) return Response.json({
+          claimId: identity.claimId, reservationId: identity.reservationId,
+          stop: false });
+        references += 1;
+        return Response.json({ referenceCount: 25, kind: "repository",
+          repository: "mposition/Tomverse", pullRequestNumber: null,
+          pinnedCommitSha: pin });
+      } });
+    assert.equal(result.kind, "ready");
+    assert.equal(result.references.length, 25);
+    assert.equal(references, 25);
+  }));
