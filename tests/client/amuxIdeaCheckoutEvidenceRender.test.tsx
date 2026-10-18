@@ -99,3 +99,26 @@ test("both Admin locales distinguish retained and deleted read-file paths", () =
   assert.notEqual(adminAmuxIdeaProgressMessages.ko.checkoutReadEncrypted,
     adminAmuxIdeaProgressMessages.ko.checkoutReadPurged);
 });
+
+test("a session idea carries the analysis stop control; a v4 idea does not", () => {
+  const session = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), submissionOrigin: "session" } }));
+  assert.match(session, /data-testid="amux-v19-session-analysis-stop" data-state="checking"/);
+  // Nothing is offered before the server says a claim is running.
+  const m = session.includes(adminAmuxIdeaProgressMessages.ko.sessionStop.title)
+    ? adminAmuxIdeaProgressMessages.ko : adminAmuxIdeaProgressMessages.en;
+  assert.ok(!session.includes(m.sessionStop.action));
+  assert.doesNotMatch(renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: row([]) })), /amux-v19-session-analysis-stop/);
+});
+
+test("both Admin locales state what a stop does before it is sent", () => {
+  for (const locale of [adminAmuxIdeaProgressMessages.en, adminAmuxIdeaProgressMessages.ko]) {
+    assert.deepEqual(Object.keys(locale.sessionStop).sort(),
+      Object.keys(adminAmuxIdeaProgressMessages.en.sessionStop).sort());
+    assert.ok(locale.sessionStop.startedAt("2026-10-19T00:00:00.000Z").includes("2026-10-19"));
+    assert.ok(locale.sessionStop.elapsed("01:02:03").includes("01:02:03"));
+  }
+  assert.match(adminAmuxIdeaProgressMessages.en.sessionStop.confirm, /never sent again/);
+  assert.match(adminAmuxIdeaProgressMessages.ko.sessionStop.confirm, /다시 보내지 않고/);
+});

@@ -104,6 +104,9 @@ import { AmuxMaxSessionResultError, commitAmuxMaxSessionResult,
   preflightAmuxMaxSessionResult,
   readAmuxMaxSessionResultReceipt } from
   "@/lib/amux/ideaSessionAnalysisResultService";
+import { AmuxIdeaSessionAnalysisStopError, commitAmuxIdeaSessionAnalysisStop,
+  readAmuxIdeaSessionAnalysisStopState } from
+  "@/lib/amux/ideaSessionAnalysisStopService";
 import { AmuxSessionBudgetResolutionError,
   commitAmuxSessionBudgetUnknownResolution,
   readAmuxSessionBudgetResolution } from
@@ -1346,6 +1349,88 @@ test("session stop poll follows the exact active claim and stops after settlemen
     });
     assert.equal((await readAmuxSessionAnalysisStopState(tx,
       claim.claimId, reservation.reservationId, ideaId)).stop, true);
+    throw rollback;
+  }), (error: unknown) => error === rollback);
+});
+
+test("owner stop holds an in-flight session claim and the database refuses a late result", async () => {
+  const price = await prisma.amuxIdeaAnalysisPriceVersion.findFirstOrThrow({
+    where: { modelId, mode: "subscription_cli", status: "approved" },
+    select: { id: true },
+  });
+  const rollback = new Error("rollback synthetic session analysis stop");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const ideaId = randomUUID();
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(ideaId), expectedAuthority: authority,
+      ideaId, keys: keysFor(ideaId),
+    });
+    const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority,
+    });
+    assert.deepEqual(await readAmuxIdeaSessionAnalysisStopState(tx, session, ideaId),
+      { state: "not_visible", retryWrite: false });
+    const claim = await commitAmuxSessionBudgetClaim(tx, {
+      claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: reservation.reservationId,
+      invocationOrdinal: 0, priceVersionId: price.id,
+      runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
+    });
+    const running = await readAmuxIdeaSessionAnalysisStopState(tx, session, ideaId);
+    assert.equal(running.state, "running");
+    assert.equal(running.state === "running" && running.claimId, claim.claimId);
+    assert.ok(running.state === "running" && Number.isFinite(Date.parse(running.startedAt)));
+    // Another owner-role account sees no such idea, and a claim named under
+    // another idea is refused the same way.
+    const stranger = { ...session, user: { ...session.user,
+      id: "synthetic-stranger-" + randomUUID() } } as Session;
+    await assert.rejects(commitAmuxIdeaSessionAnalysisStop(tx, { session: stranger,
+      request, ideaId, claimId: claim.claimId, ownerConfirmed: true }),
+    (error: unknown) => error instanceof AmuxIdeaSessionAnalysisStopError &&
+      error.code === "not_found");
+    await assert.rejects(commitAmuxIdeaSessionAnalysisStop(tx, { session,
+      request, ideaId: randomUUID(), claimId: claim.claimId, ownerConfirmed: true }),
+    (error: unknown) => error instanceof AmuxIdeaSessionAnalysisStopError &&
+      error.code === "not_found");
+
+    const stopped = await commitAmuxIdeaSessionAnalysisStop(tx, { session, request,
+      ideaId, claimId: claim.claimId, ownerConfirmed: true });
+    const [claimRow, stopAudit, resolutionAudit] = await Promise.all([
+      tx.amuxIdeaSessionAnalysisBudgetClaim.findUniqueOrThrow({ where: { id: claim.claimId } }),
+      tx.adminAuditLog.findUniqueOrThrow({ where: { id: stopped.auditId } }),
+      tx.adminAuditLog.findUniqueOrThrow({ where: { id: stopped.resolutionAuditId } }),
+    ]);
+    assert.equal(claimRow.status, "outcome_unknown");
+    assert.equal(claimRow.closedAt, null, "the reserved cost stays held");
+    assert.equal(auditRowActorKind(stopAudit), "human");
+    assert.equal(stopAudit.actorUserId, ownerId);
+    assert.equal(stopAudit.targetId, claim.claimId);
+    assert.equal(auditRowActorKind(resolutionAudit), "system");
+    assert.equal(resolutionAudit.action, AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION);
+    assert.equal((await readAmuxSessionAnalysisStopState(tx,
+      claim.claimId, reservation.reservationId, ideaId)).stop, true);
+    assert.deepEqual(await readAmuxIdeaSessionAnalysisStopState(tx, session, ideaId), {
+      state: "stopped", ideaId, claimId: claim.claimId,
+      stoppedAt: stopAudit.createdAt.toISOString(), auditId: stopped.auditId,
+      retryWrite: false,
+    });
+    // A second stop, and the runner's late success, are both refused.
+    await assert.rejects(commitAmuxIdeaSessionAnalysisStop(tx, { session, request,
+      ideaId, claimId: claim.claimId, ownerConfirmed: true }),
+    (error: unknown) => error instanceof AmuxIdeaSessionAnalysisStopError &&
+      error.code === "not_stoppable");
+    await assert.rejects(commitAmuxSessionBudgetOutcome(tx, {
+      claimId: claim.claimId, outcome: "verified_success",
+      inputTokens: 10, outputTokens: 1,
+    }), (error: unknown) => error instanceof AmuxSessionBudgetSettlementError &&
+      error.code === "not_settleable");
+    // Even a writer that skips the service cannot turn it into a success.
+    await tx.$executeRawUnsafe("SAVEPOINT late_success");
+    await assert.rejects(tx.$executeRaw`
+      UPDATE "AmuxIdeaSessionAnalysisBudgetClaim" SET "status" = 'succeeded'
+      WHERE "id" = ${claim.claimId}::uuid`, /transition refused/);
+    await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT late_success");
     throw rollback;
   }), (error: unknown) => error === rollback);
 });
