@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, stat, symlink,
+  writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -73,6 +74,19 @@ test("only a claim repository under the configured root selects checkout bytes",
     for (const slug of ["owner/..", "../repo", "owner/missing",
       "owner/repo/extra", "owner\\repo"]) {
       assert.equal(await resolveAmuxV19ClaimCheckoutPath(slug), null);
+    }
+    if (process.platform === "linux") {
+      for (const writable of [root, join(root, "owner"), selected,
+        join(selected, ".git"), join(selected, ".git", "config")]) {
+        const originalMode = (await stat(writable)).mode & 0o777;
+        try {
+          await chmod(writable, originalMode | 0o020);
+          assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/repo"),
+            null);
+        } finally { await chmod(writable, originalMode); }
+      }
+      assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/repo"),
+        await realpath(selected));
     }
     process.env[AMUX_V19_TRACKED_REPOSITORY_ROOT_ENV] = "relative/path";
     assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/repo"), null);
