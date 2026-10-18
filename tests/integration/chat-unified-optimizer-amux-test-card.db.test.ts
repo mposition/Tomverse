@@ -13,6 +13,7 @@ import { boardPromotionExecutionBriefDigest } from "@/lib/amux/boardPromotionCor
 import { buildAmuxDeliveryPrompt } from "@/lib/amux/deliveryPrompt";
 import {
   chatUnifiedOptimizerAmuxCandidateBrief,
+  chatUnifiedOptimizerAmuxCandidateRequestId,
   classifyChatUnifiedOptimizerAmuxCandidateAttempt,
   recordChatUnifiedOptimizerAmuxCandidate,
 } from "@/lib/chatUnifiedOptimizerAmuxCandidateStore";
@@ -54,41 +55,51 @@ test("a disposable AMUX test card records an exact public candidate and readback
     process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_V4_TASK_ID;
   const previousTestTaskId =
     process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_TEST_TASK_ID;
-  let disposableCycleId: string | null = null;
+  const attemptId = randomUUID();
   process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_PUBLIC_PIN =
     JSON.stringify(sourcePin);
   process.env.TOMVERSE_AMUX_SYNC_SECRET = "amux-test-card-local-secret-only-000000000000";
   delete process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_V4_TASK_ID;
   t.after(async () => {
-    if (disposableCycleId) {
-      const { closeChatUnifiedOptimizerQueuedJobs } = await import(
-        "@/lib/chatUnifiedOptimizerLedgerStore");
-      const closed = await closeChatUnifiedOptimizerQueuedJobs({
-        requestId: randomUUID(), cycleId: disposableCycleId,
-        reason: "cancelled_before_dispatch",
+    try {
+      const cycle = await prisma.chatUnifiedOptimizerCycle.findUnique({
+        where: { registrationRequestId:
+          chatUnifiedOptimizerAmuxCandidateRequestId(attemptId,
+            "registration") },
+        select: { id: true, state: true },
       });
-      assert.equal(closed.outcome, "closed");
-      assert.equal(closed.cycleState, "failed");
+      if (cycle) {
+        assert.equal(cycle.state, "active");
+        const { closeChatUnifiedOptimizerQueuedJobs } = await import(
+          "@/lib/chatUnifiedOptimizerLedgerStore");
+        const closed = await closeChatUnifiedOptimizerQueuedJobs({
+          requestId: randomUUID(), cycleId: cycle.id,
+          reason: "cancelled_before_dispatch",
+        });
+        assert.equal(closed.outcome, "closed");
+        assert.equal(closed.cycleState, "failed");
+      }
+    } finally {
+      if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previousDatabaseUrl;
+      if (previousAuthSecret === undefined) delete process.env.NEXTAUTH_SECRET;
+      else process.env.NEXTAUTH_SECRET = previousAuthSecret;
+      if (previousPin === undefined)
+        delete process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_PUBLIC_PIN;
+      else process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_PUBLIC_PIN = previousPin;
+      if (previousSecret === undefined)
+        delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+      else process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
+      if (previousV4TaskId === undefined)
+        delete process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_V4_TASK_ID;
+      else process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_V4_TASK_ID =
+        previousV4TaskId;
+      if (previousTestTaskId === undefined)
+        delete process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_TEST_TASK_ID;
+      else process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_TEST_TASK_ID =
+        previousTestTaskId;
+      await prisma.$disconnect();
     }
-    if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
-    else process.env.DATABASE_URL = previousDatabaseUrl;
-    if (previousAuthSecret === undefined) delete process.env.NEXTAUTH_SECRET;
-    else process.env.NEXTAUTH_SECRET = previousAuthSecret;
-    if (previousPin === undefined)
-      delete process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_PUBLIC_PIN;
-    else process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_PUBLIC_PIN = previousPin;
-    if (previousSecret === undefined)
-      delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-    else process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
-    if (previousV4TaskId === undefined)
-      delete process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_V4_TASK_ID;
-    else process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_V4_TASK_ID =
-      previousV4TaskId;
-    if (previousTestTaskId === undefined)
-      delete process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_TEST_TASK_ID;
-    else process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_TEST_TASK_ID =
-      previousTestTaskId;
-    await prisma.$disconnect();
   });
 
   const brief = chatUnifiedOptimizerAmuxCandidateBrief(sourcePin);
@@ -127,7 +138,6 @@ test("a disposable AMUX test card records an exact public candidate and readback
     data: { status: "doing", owner: "codex-impl", kind: "code", revision: 1,
       executionBrief: brief, executionBriefDigest: digest } });
   process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_TEST_TASK_ID = card.id;
-  const attemptId = randomUUID();
   const instanceId = randomUUID();
   const startedAt = new Date(Date.now() - 1_000);
   const acknowledgedAt = new Date();
@@ -193,7 +203,6 @@ test("a disposable AMUX test card records an exact public candidate and readback
   const recorded = await recordChatUnifiedOptimizerAmuxCandidate(input,
     { collector });
   assert.equal(recorded.outcome, "recorded");
-  disposableCycleId = recorded.cycleId;
   assert.equal(recorded.completion, "write");
   assert.equal(recorded.proposalValidationReceipt.authorshipVerified, false);
   const readbackRoute = await import(
