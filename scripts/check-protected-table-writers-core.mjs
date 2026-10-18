@@ -964,6 +964,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The v19 tracked-checkout evidence migration adds one restrictive audit foreign key and reads the immutable submission audit plus the same-transaction evidence audit. Its DDL and trigger verbs affect only the new evidence table; it never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261018000000_amux_v19_reference_pin_guard/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The migration adds an INSERT refusal trigger to the existing evidence table. It writes no evidence row; the runtime writer remains lib/amux/ideaTrackedCheckoutEvidenceStore.ts.",
+  },
+  {
+    path: "prisma/migrations/20261018000000_amux_v19_reference_pin_guard/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The replacement submission guard reads the current approved scope and refuses mismatched intake rows. It never writes an operating-scope row.",
+  },
+  {
+    path: "prisma/migrations/20261018000000_amux_v19_reference_pin_guard/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The replacement submission guard and new evidence pin guard read canonical audit rows. Neither function inserts, updates or deletes AdminAuditLog.",
+  },
+  {
     path: "lib/adminAuditSystemActors.ts",
     table: "AmuxIdeaTrackedCheckoutEvidence",
     tableMentions: 1,

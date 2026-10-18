@@ -20,6 +20,10 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   reviewPullRequests: Array<{ number: number; displayKey: string | null }>;
   /** The idea's Task cards in registration order, for its detail view. */
   taskRows: Array<{ displayKey: string | null; status: string; reviewPrNumber: number | null; merged: boolean }>;
+  /** Session reference SHAs fixed at intake, before a checkout exists. */
+  referencePins: Array<{ referenceOrdinal: number; pinnedCommitSha: string }> | null;
+  /** Valid pre-pinning audit, distinct from a damaged or unavailable pin. */
+  referencePinsLegacy?: boolean;
   /** Content-free proof for each prepared v19 reference, in source order. */
   checkoutEvidence: Array<{
     referenceOrdinal: number;
@@ -82,8 +86,12 @@ type SqlIdea = {
   id: string; requestId: string; state: string; submissionOrigin: "owner" | "session";
   submittedAtMs: number; cancelled: boolean;
   proposedUnits: number; chunks: SqlChunk[] | null; cards: SqlCard[] | null;
+  referencePins: unknown;
+  referencePinAuditStatus: "declared" | "legacy" | null;
   checkoutEvidence: SqlCheckoutEvidence[] | null;
 };
+
+const PIN_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   actorUserId: string, now: Date): Promise<AmuxIdeaProgressRow[]> {
@@ -94,7 +102,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   // nobody. Chunks keep their index order and cards their registration order.
   const ideas = await tx.$queryRaw<SqlIdea[]>`
     WITH newest AS (
-      SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt"
+      SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt",
+        "submissionAuditLogId"
       FROM "AmuxIdeaSubmission"
       WHERE "actorUserId" = ${actorUserId}
       ORDER BY "submittedAt" DESC, "id" ASC
@@ -124,6 +133,20 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         FROM "AmuxIdeaUnitDecision" d
         JOIN "AmuxWorkItem" w ON w."id" = d."registeredWorkItemId"
         WHERE d."ideaId" = n."id" AND d."action" = 'register_card' AND d."state" = 'consumed') AS "cards",
+      (SELECT a."metadata"->'pinnedCommitShas' FROM "AdminAuditLog" a
+        WHERE a."id" = n."submissionAuditLogId"
+          AND a."action" = 'amux.idea.session_submitted'
+          AND a."targetType" = 'AmuxIdeaSubmission'
+          AND a."targetId" = n."id"
+          AND a."entryHash" IS NOT NULL) AS "referencePins",
+      (SELECT CASE WHEN jsonb_typeof(a."metadata") = 'object'
+          AND NOT (a."metadata" ? 'pinnedCommitShas') THEN 'legacy'
+          ELSE 'declared' END FROM "AdminAuditLog" a
+        WHERE a."id" = n."submissionAuditLogId"
+          AND a."action" = 'amux.idea.session_submitted'
+          AND a."targetType" = 'AmuxIdeaSubmission'
+          AND a."targetId" = n."id"
+          AND a."entryHash" IS NOT NULL) AS "referencePinAuditStatus",
       (SELECT json_agg(json_build_object(
           'referenceOrdinal', e."referenceOrdinal",
           'pinnedCommitSha', e."pinnedCommitSha",
@@ -145,6 +168,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
 
   return ideas.map((idea) => {
     const own = idea.cards ?? [];
+    const pins = idea.referencePins;
     const progress = amuxIdeaProgress({
       state: idea.state,
       submissionOrigin: idea.submissionOrigin,
@@ -166,6 +190,11 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey })),
       taskRows: own.filter((card) => card.cardType !== "story").map((card) => ({ displayKey: card.displayKey,
         status: card.status, reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
+      referencePins: Array.isArray(pins) && pins.every((sha) =>
+        typeof sha === "string" && PIN_SHA.test(sha))
+        ? pins.map((sha, referenceOrdinal) => ({ referenceOrdinal,
+          pinnedCommitSha: sha as string })) : null,
+      referencePinsLegacy: idea.referencePinAuditStatus === "legacy",
       checkoutEvidence: (idea.checkoutEvidence ?? []).map((evidence) => ({
         referenceOrdinal: evidence.referenceOrdinal,
         pinnedCommitSha: evidence.pinnedCommitSha,

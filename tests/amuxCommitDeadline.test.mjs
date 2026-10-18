@@ -249,6 +249,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // deadline: the event guard's deadline lines and the ledger's deferred
   // check are unchanged.
   "20261017200000_amux_decision_maker_validation_count_boundary",
+  // Intake v19 pins checkout evidence to the submission audit without
+  // changing the commit-deadline marker, classifier or deferred trigger.
+  "20261018000000_amux_v19_reference_pin_guard",
   // AMUX Decision Maker S2-2b4: a direct answer's close and a delivery that
   // sent nothing. It adds no commit deadline: neither kind holds one, the
   // event guard's deadline lines are unchanged, and the ledger's deferred

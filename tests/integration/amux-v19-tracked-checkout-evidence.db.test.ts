@@ -48,12 +48,19 @@ import {
   type AmuxOperatingScopeAuthority,
 } from "@/lib/amux/ideaOperatingScopeStore";
 import {
-  commitAmuxIdeaSessionSubmission,
+  commitAmuxIdeaSessionSubmission as commitPinnedSessionSubmission,
 } from "@/lib/amux/ideaSessionSubmissionService";
 import {
   inspectAmuxIdeaSessionSubmission,
 } from "@/lib/amux/ideaSessionSubmissionCore";
 import { prisma } from "@/lib/prisma";
+
+const commitAmuxIdeaSessionSubmission = (
+  tx: Parameters<typeof commitPinnedSessionSubmission>[0],
+  input: Omit<Parameters<typeof commitPinnedSessionSubmission>[1], "pinnedCommitShas">,
+) => commitPinnedSessionSubmission(tx, { ...input,
+  pinnedCommitShas: Array(input.inspected.counts.repositoryCount +
+    input.inspected.counts.pullRequestCount).fill("a".repeat(40)) });
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const url = testUrl ? new URL(testUrl) : null;
@@ -171,6 +178,13 @@ after(async () => {
 });
 
 test("pinned checkout evidence and its canonical system audit commit atomically", async () => {
+  const beforeRefusal = await prisma.adminAuditLog.count();
+  await assert.rejects(prisma.$transaction((tx) =>
+    recordAmuxTrackedCheckoutEvidence(tx, { ...evidenceInput(ideaId),
+      pinnedCommitSha: "b".repeat(40) })),
+  (error: unknown) => error instanceof AmuxTrackedCheckoutEvidenceError &&
+    error.code === "reference_unpinned");
+  assert.equal(await prisma.adminAuditLog.count(), beforeRefusal);
   const stored = await prisma.$transaction((tx) =>
     recordAmuxTrackedCheckoutEvidence(tx, evidenceInput(ideaId)));
   assert.equal(stored.ideaId, ideaId);
@@ -334,6 +348,38 @@ test("duplicate or out-of-range reference evidence leaves no extra audit", async
   assert.equal(await prisma.amuxIdeaTrackedCheckoutEvidence.count({
     where: { ideaId },
   }), 1);
+});
+
+test("database refuses a checkout SHA different from the intake pin", async () => {
+  const beforeAuditCount = await prisma.adminAuditLog.count();
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const input = evidenceInput(ideaId, 1);
+    input.pinnedCommitSha = "c".repeat(40);
+    const inspected = inspectAmuxTrackedCheckoutEvidence(input);
+    assert.ok(inspected);
+    const evidenceId = randomUUID();
+    const auditLogId = await writeSystemAuditLog({ tx,
+      systemActor: AMUX_V19_TRACKED_CHECKOUT_AUDIT_ACTOR,
+      action: AMUX_V19_TRACKED_CHECKOUT_RECORDED_ACTION,
+      targetType: AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET,
+      targetId: evidenceId,
+      summary: AMUX_V19_TRACKED_CHECKOUT_AUDIT_SUMMARY,
+      metadata: amuxTrackedCheckoutEvidenceAuditMetadata(evidenceId, inspected),
+    });
+    await tx.amuxIdeaTrackedCheckoutEvidence.create({ data: {
+      id: evidenceId, ideaId, referenceOrdinal: 1,
+      pinnedCommitSha: inspected.pinnedCommitSha,
+      excludedCount: inspected.excludedCount,
+      excludedSecretPathCount: inspected.excludedSecretPathCount,
+      excludedSecretContentCount: inspected.excludedSecretContentCount,
+      excludedNonRegularCount: inspected.excludedNonRegularCount,
+      excludedUnscannableCount: inspected.excludedUnscannableCount,
+      excludedPathDigest: inspected.excludedPathDigest,
+      excludedPathDigestKeyId: inspected.excludedPathDigestKeyId,
+      auditLogId,
+    } });
+  }), /AMUX v19 checkout SHA differs from session intake/);
+  assert.equal(await prisma.adminAuditLog.count(), beforeAuditCount);
 });
 
 test("database rejects mismatched canonical audit and mutation of stored evidence", async () => {
