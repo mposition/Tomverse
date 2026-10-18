@@ -1,0 +1,53 @@
+[Unit]
+Description=Tomverse AMUX Decision Maker relay
+Documentation=https://github.com/mposition/Tomverse/blob/develop/docs/policy/amux-decision-maker.md
+Wants=network-online.target
+After=network-online.target
+# docs/policy/amux-decision-maker.md section 2 and stage S2: the relay moves
+# the local AMUX's typed asks to the app's ledger, one at a time, and hands
+# each to the broker. It is its own process, never a task inside a worker
+# bridge: every bridge unit reads the same /etc/tomverse-bridge/bridge.env,
+# and the relay releases every local Decision Maker marker at the start of
+# each tick, so a relay per bridge would release another relay's marker in
+# the middle of its question. One unit, one relay.
+#
+# The relay's switch and its local token live in their own file, read by
+# this unit only, so no worker bridge holds the token. bridge.env still gives
+# the app URL, the sync token and the local AMUX URL the relay shares with
+# the bridges.
+
+[Service]
+Type=simple
+User=tomverse-bridge
+Group=tomverse-bridge
+EnvironmentFile=/etc/tomverse-bridge/bridge.env
+EnvironmentFile=/etc/tomverse-bridge/dm-relay.env
+ExecStartPre=/usr/bin/curl --silent --show-error --fail --insecure --max-time 5 --output /dev/null https://127.0.0.1:8824/health
+ExecStart=/usr/local/libexec/tomverse-wsl-bridge --dm-relay
+Restart=on-failure
+RestartSec=60
+# Exit 2 is the relay enabled without a usable token: a configuration error
+# that waits for a person rather than retrying every minute.
+RestartPreventExitStatus=2
+TimeoutStopSec=10
+KillMode=control-group
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectHome=yes
+ProtectSystem=strict
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# The app over HTTPS, the local AMUX over loopback, the broker's socket.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Nothing the relay opens is under /var/lib; the broker's socket is under /run.
+TemporaryFileSystem=/var/lib:ro
+UMask=0077
+
+# Intentionally no [Install]: like the bridges, the relay starts when the
+# operator starts it, never at boot without anyone looking.
