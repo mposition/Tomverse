@@ -34,6 +34,7 @@
 상태(v52 이력): **v52 v4 Task 실행 등급 판정, 같은 등급 배정, 검토 서버 연결.** 2026-10-16 운영자 `mposition`이 아래 v52 절을 승인했다. v4 Task는 결정적 함수가 정한 실행 등급 하나를 갖고 같은 등급의 worker만 맡으며, 실행 뒤 contract 경로에 닿은 변경은 버리고 `frontier`로 다시 실행한다. AMUX의 review 단계 대신 runner가 독립 검토 서버를 호출하고, `done`은 v49·v50의 병합 관측 그대로다. 버전 16은 철회됐다. 코드 래치와 운영 스위치는 꺼진 채이며, 이 승인 자체로 켜지 않는다. 이전 v51 상태 줄은 이력이다.
 상태(v53 이력): **v53 R1·R2b 관측 종료와 R2c 배정 카탈로그 전환.** 2026-10-17 운영자 `mposition`이 아래 v53 절을 승인했다. R1(2026-10-13 08:52~10-16 08:52 AEST)과 R2b(2026-10-14 18:21~10-17 18:21 AEST)의 관측이 불일치 없이 끝났다. R2c 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH`가 true가 되어 버전 35의 일곱 사용처가 등록부에서 유도한 카탈로그로 배정한다. 카탈로그 환경 변수는 R2e까지 남고, 래치를 끄면 배정은 환경 변수로 돌아간다. R2d는 바뀌지 않는다. 이전 v52 상태 줄은 이력이다.
 상태(최신): **v54 R2d bridge 세션 목록 켜기.** 2026-10-18 운영자 `mposition`이 아래 v54 절을 승인했다. 운영자가 같은 날 두 경로의 bridge 바이너리를 main `d6c99aa1f` 빌드로 교체한 뒤다. R2d 코드 래치 `AMUX_WORKER_SESSION_LIST_LATCH`가 true가 되어, bridge는 유도 카탈로그의 세션 목록과 `TOMVERSE_AMUX_WSL_SESSIONS`의 교집합만 등록·배정한다. 관측은 이 래치를 담은 production 배포부터 3일이다. 2026-10-18 기준으로 바뀌는 배정은 없다. 이전 v53 상태 줄은 이력이다.
+상태(v56 후보): **v56 R2e: 카탈로그 환경 변수 경로 삭제 — 승인 대기.** 아래 v56 절은 앱이 두 카탈로그 환경 변수를 읽는 경로, R2c·R2b 코드 래치, 환경 변수에만 의미가 있던 비교·가져오기 기능, IaC 항목을 지우는 후보다. 승인은 R2d 관측이 끝나고 능력의 Admin 편집 화면이 생긴 뒤이며, 그 전에는 테스트가 병합을 막는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -142,6 +143,7 @@ approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 54
 | 52 | 2026-10-16 mposition | v4 Task는 실행 등급 하나(`routine`·`advanced`·`frontier`)를 갖고 같은 등급의 worker만 맡으며, 위 등급으로 넘기지 않고 기다린다. 등급은 결정적 함수가 contract 경로 목록·역할·예상 경로로 정하고 intake의 제안은 신호다(정해진 범위 안에서는 하향도 받는다). 실행 뒤 변경이 contract 경로에 닿으면 버리고 `frontier`로 다시 실행한다. AMUX의 review 단계 대신 runner가 독립 검토 서버를 호출한다. `done`은 v49·v50의 병합 관측 그대로다. 버전 16을 철회하고, legacy 카드는 바꾸지 않는다. |
 | 53 | 2026-10-17 mposition | R1 관측(2026-10-13 08:52~10-16 08:52 AEST)과 R2b 동등 관측(2026-10-14 18:21~10-17 18:21 AEST)의 종료를 운영자 확인으로 기록하고, R2c 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH`를 켜 버전 35의 일곱 사용처가 등록부에서 유도한 카탈로그로 배정한다. 카탈로그 환경 변수는 R2e까지 남고, 래치를 끄면 배정은 환경 변수로 돌아간다. R2d와 FIRST Task 재시도 경로는 바꾸지 않는다. |
 | 54 | 2026-10-18 mposition | R2d 코드 래치 `AMUX_WORKER_SESSION_LIST_LATCH`를 켜 bridge가 유도 카탈로그의 세션 목록과 `TOMVERSE_AMUX_WSL_SESSIONS`의 교집합만 등록·배정하게 한다. 운영자가 두 경로의 bridge 바이너리를 main `d6c99aa1f` 빌드로 교체하며, 관측은 래치 배포와 교체가 모두 끝난 뒤 3일이다. 2026-10-18 기준으로 바뀌는 배정은 없다. |
+| 56 | 승인 대기 | R2e의 앱 몫. 두 카탈로그 환경 변수를 읽는 경로와 R2c·R2b 코드 래치, R1 일치 보고·R2b shadow 비교·환경 변수 가져오기, IaC의 `TOMVERSE_AMUX_WORKER_CATALOG_JSON`을 지운다. 이 뒤에는 환경 변수로 돌아가는 래치가 없다. 운영자는 배포 뒤 Railway의 변수를 지운다. 호스트의 `TOMVERSE_AMUX_WSL_SESSIONS`는 버전 55가 다룬다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -3151,3 +3153,58 @@ accept했다. 이 승인을 기록하는 commit이 래치를 true로 바꾼다.
 - 래치를 false로 되돌리면 route가 `session_list_off`를 답하고, bridge는 환경 변수 목록만 따른다. 쓰는 것이
   없으므로 남는 것도 없다.
 - 바이너리는 교체할 때 남긴 백업으로 되돌린다.
+
+## 버전 56 — R2e: 카탈로그 환경 변수 경로 삭제
+
+승인 기록: **승인 대기.** 2026-10-18 작성, 작성자 Claude. `approvedBy`·`approvedAt`은 운영자가 승인할 때
+채우며, `approvedAt`은 병합하는 UTC 날짜다. 승인은 버전 54의 R2d 관측(3항)이 끝난 뒤에 한다. 이 버전이 지우는
+경로는 래치로 끌 수 없으므로, `tests/amuxWorkerAssignmentCatalog.test.mjs`는 그 경로가 없는 트리에서 이 절의 승인
+기록을 요구한다. 승인 전 후보는 CI를 통과하지 못한다.
+
+이 버전은 버전 35 5항의 R2e 가운데 앱이 하는 몫을 켠다. 호스트의 `TOMVERSE_AMUX_WSL_SESSIONS`는 버전 55가
+다룬다.
+
+### 1. 앞선 조건
+
+- R2c는 2026-10-18 12:14 AEST(#2665) production 배포 뒤 배정을 등록부에서 유도한 카탈로그로 하고 있다(버전 53).
+- R2d는 버전 54대로 켜졌고, 그 관측(Agent Office의 AMUX 층, 3일)이 끝났다. 끝난 시각과 운영자 확인은 승인할 때
+  이 항에 적는다.
+- 능력의 Admin 편집 화면(버전 35 5항 R2a의 "Admin 편집", 버전 36)이 있다. 2항이 "환경 변수에서 능력 가져오기"를
+  지우면 그 화면이 owner가 Admin에서 능력을 바꾸는 유일한 수단이 되기 때문이다. 이 조건을 채우기 전에는 이
+  버전을 병합하지 않는다.
+
+### 2. 이 버전이 지우는 것
+
+- 배정 경로의 환경 변수 분기와 R2c 코드 래치 `AMUX_WORKER_DERIVED_CATALOG_ASSIGNMENT_LATCH`. 버전 35 3항의 일곱
+  사용처와 FIRST Task 재시도 경로는 등록부에서 유도한 카탈로그만 읽는다.
+- 두 카탈로그 환경 변수의 파서 모듈(이 변경으로 삭제)과 v22 변수 이름 상수.
+- 환경 변수에만 의미가 있던 세 기능: R1의 등록부·카탈로그 일치 보고, R2b의 유도 카탈로그 shadow 비교(코드 래치
+  `AMUX_WORKER_DERIVED_CATALOG_SHADOW_LATCH` 포함), R2a의 "환경 변수에서 능력 가져오기". 등록부와 능력의 owner
+  편집은 남는다.
+- 버전 28 IaC(`.railway/agent-runners.ts`)의 AMUX Orchestrator 변수 목록에 있던 `TOMVERSE_AMUX_WORKER_CATALOG_JSON`.
+- `engineering-runner`는 버전 34·35대로 코드 상수로 남는다. `AMUX_WORKER_CATALOG_EXEMPT`는 이제 "비교 제외"가 아니라
+  "등록부에 들지 않는 코드 상수"의 목록이다.
+
+### 3. 운영자가 하는 것과 순서
+
+1. 이 버전을 담은 배포가 production에 끝난 것을 확인한다. 그 전에는 변수를 지우지 않는다. 앞선 코드가 아직 읽을 수
+   있기 때문이다.
+2. 앱 서비스에서 `TOMVERSE_AMUX_WORKER_CATALOG_JSON`과 `TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON`을 지운다.
+3. Agents의 AMUX Orchestrator 서비스에서 `TOMVERSE_AMUX_WORKER_CATALOG_JSON`을 지운다. IaC 목록에서 빠졌으므로
+   다음 agents apply가 그 값을 지운다. apply 전에 값을 남겨 둘지 정하고, `docs/ops/dev-test-lanes.md`를 먼저 읽는다.
+4. 지운 뒤 Admin › AMUX › 실행 › Worker 탭과 Agent Office의 AMUX 층이 지우기 전과 같은지 본다. Railway 변수 변경은
+  그 뒤에 만들어지는 배포에만 닿으므로, 같은지 보는 것은 다음 배포 뒤에도 한 번 더 한다.
+
+### 4. 이 버전이 하지 않는 것과 그 이유
+
+- **`TOMVERSE_AMUX_WSL_SESSIONS`(호스트).** 버전 55가 worker별 bridge와 `bridge-scope`로 없앤다. 버전 31 8항의 R2
+  종료 조건("환경 변수 목록 삭제")은 이 버전과 버전 55가 모두 끝나야 채워지며, R2 종료 기록은 버전 55 5항의
+  조건을 따른다.
+- 등록부·능력·래치 store, migration, 역할 상한, bridge 정지 계약, R2d 래치는 바꾸지 않는다.
+
+### 5. 되돌리기
+
+- 이 버전 뒤에는 환경 변수로 돌아가는 래치가 없다(버전 53 5항이 예고한 대로). 배정은 등록부만 따르고, 등록부를
+  읽지 못하면 아무도 배정하지 않는다(fail-closed).
+- 문제가 생기면 등록부와 능력을 owner 편집으로 고친다. 코드를 되돌려야 하면 이 버전 이전 코드를 다시 배포하고, 그
+  전에 지운 변수를 다시 넣는다.
