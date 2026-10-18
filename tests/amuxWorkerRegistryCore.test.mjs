@@ -1,8 +1,9 @@
 // Orchestration policy version 31, stage R1: the worker registry's pure core
 // (docs/policy/development-agent-orchestration.md, "버전 31").
 //
-// Runs without a database: the class table, the name grammar, the change rule,
-// the effective assignment rule and the registry-vs-catalog comparison.
+// Runs without a database: the class table, the name grammar, the change rule
+// and the effective assignment rule. R1's registry-vs-catalog comparison went
+// with the catalog variable at R2e (version 35, section 5).
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -22,7 +23,6 @@ import {
   AMUX_WORKER_TRIAL_CARD_COUNT,
   AMUX_WORKER_TRIAL_COST_CAP_MICRO_USD,
   AMUX_WORKER_REGISTRY_WRITES_LATCH,
-  amuxCatalogProviderClass,
   amuxWorkerRegistryWritesOpen,
   amuxWorkerSeedEntriesToRegister,
   buildAmuxWorkerRegistryAdminView,
@@ -33,7 +33,6 @@ import {
   amuxWorkerRegistryAuditAction,
   amuxWorkerRegistryAuditMetadata,
   amuxWorkerRegistryChangeRefusal,
-  compareAmuxWorkerRegistryWithCatalog,
   isAmuxWorkerName,
   parseAmuxWorkerRegistryChange,
 } from "../lib/amux/workerRegistryCore.ts";
@@ -262,74 +261,6 @@ test("a worker is assigned only when active, unlatched and last observed ok -- e
   );
 });
 
-test("catalog providers map to classes only by their known spellings", () => {
-  assert.equal(amuxCatalogProviderClass("anthropic"), "claude");
-  assert.equal(amuxCatalogProviderClass("openai"), "codex");
-  assert.equal(amuxCatalogProviderClass("github-copilot"), "copilot");
-  assert.equal(amuxCatalogProviderClass("devin"), null);
-  assert.equal(amuxCatalogProviderClass("constructor"), null);
-  assert.equal(amuxCatalogProviderClass("__proto__"), null);
-});
-
-const catalogEntry = (worker_name, provider, flags = {}) => ({
-  worker_name,
-  provider,
-  archived: false,
-  paused: false,
-  isolated: false,
-  blocked: false,
-  ...flags,
-});
-
-test("the registry and the catalog agree when they assign the same workers", () => {
-  const registry = [
-    registration("claude-impl", "active", "implementation"),
-    registration("codex-impl", "active", "implementation"),
-    registration("cursor-impl", "requested", "implementation"),
-  ];
-  const catalog = [catalogEntry("claude-impl", "claude"), catalogEntry("codex-impl", "openai")];
-  const result = compareAmuxWorkerRegistryWithCatalog(registry, catalog);
-  assert.equal(result.status, "match");
-  assert.deepEqual(result.rows.map((row) => [row.workerName, row.registryState, row.catalog, row.verdict]), [
-    ["claude-impl", "active", "assignable", "match"],
-    ["codex-impl", "active", "assignable", "match"],
-    ["cursor-impl", "requested", "absent", "match"],
-  ]);
-});
-
-test("every way they can disagree is named", () => {
-  const registry = [
-    registration("claude-impl", "active", "implementation"),
-    registration("claude-chore", "active", "chore"),
-    registration("codex-impl", "paused", "implementation"),
-    registration("codex-chore", "active", "chore"),
-    registration("cursor-impl", "requested", "implementation"),
-  ];
-  const catalog = [
-    catalogEntry("claude-impl", "claude", { paused: true }),
-    catalogEntry("codex-impl", "codex"),
-    catalogEntry("codex-chore", "claude"),
-    catalogEntry("claude-review", "claude", { archived: true }),
-    catalogEntry("cursor-impl", "cursor", { blocked: true }),
-  ];
-  const result = compareAmuxWorkerRegistryWithCatalog(registry, catalog);
-  assert.equal(result.status, "mismatch");
-  assert.deepEqual(Object.fromEntries(result.rows.map((row) => [row.workerName, row.verdict])), {
-    "claude-chore": "registry_only",
-    "claude-impl": "registry_only",
-    "claude-review": "unregistered",
-    "codex-chore": "provider_mismatch",
-    "codex-impl": "catalog_only",
-    "cursor-impl": "match",
-  });
-});
-
-test("an unreadable side is reported as unreadable, never as empty", () => {
-  assert.deepEqual(compareAmuxWorkerRegistryWithCatalog(null, []), { status: "registry_unreadable", rows: [] });
-  assert.deepEqual(compareAmuxWorkerRegistryWithCatalog([], null), { status: "catalog_unreadable", rows: [] });
-  assert.deepEqual(compareAmuxWorkerRegistryWithCatalog([], []), { status: "match", rows: [] });
-});
-
 test("version 32 turns R1's registry writes on, and the policy records it", () => {
   // Version 31 section 8: R1 shipped latched off; version 32 is the operator's
   // activation record. The latch and its record move together.
@@ -351,7 +282,6 @@ test("the Admin view shows desired and effective state apart, and offers only un
     ],
     latches: new Map([["claude-impl", "opened"]]),
     observations: new Map([["claude-impl", "ok"]]),
-    catalog: [catalogEntry("claude-impl", "claude")],
   });
   // Defaults to the code latch (true since version 32).
   assert.equal(view.writesLatch, AMUX_WORKER_REGISTRY_WRITES_LATCH);
@@ -365,7 +295,7 @@ test("the Admin view shows desired and effective state apart, and offers only un
   assert.deepEqual(claude.reasons, ["latch_open"]);
   assert.equal(view.rows[1].verified, false);
   assert.deepEqual(view.rows[1].reasons, ["not_active", "no_observation"]);
-  assert.equal(view.comparison.status, "match");
+  assert.equal("comparison" in view, false, "R1's comparison went with the catalog variable at R2e");
   assert.equal(amuxWorkerSeedEntriesToRegister(view).length, 11);
   assert.equal(view.seed.filter((entry) => entry.registered).length, 2);
 });
@@ -375,14 +305,12 @@ test("an unreadable registry offers nothing to register", () => {
     registrations: null,
     latches: new Map(),
     observations: new Map(),
-    catalog: [],
     writesLatch: true,
   });
   assert.deepEqual(view, {
     writesLatch: true,
     registryReadable: false,
     rows: [],
-    comparison: { status: "registry_unreadable", rows: [] },
     seed: null,
   });
   assert.deepEqual(amuxWorkerSeedEntriesToRegister(view), []);
@@ -396,41 +324,19 @@ test("the catalog name rule is the AMUX machine-id rule, and wider than the regi
   }
 });
 
-test("version 34: the engineering adapter's runner is exempt by name and counts as agreement; devin-worker is not", () => {
+test("version 34: the engineering adapter's runner is a code constant by name and can never be a registry entry", () => {
   assert.deepEqual([...AMUX_WORKER_CATALOG_EXEMPT], ["engineering-runner"]);
   assert.ok(Object.isFrozen(AMUX_WORKER_CATALOG_EXEMPT));
   // An exempt name can never also be a registry entry: the grammar (and the
-  // migration's CHECK) refuse it, so "exempt only when unregistered" is the
-  // whole rule, not a gap.
+  // migration's CHECK) refuse it, so the derived catalog's constant entry
+  // and the ceiling check's exception cannot collide with a registered worker.
   for (const name of AMUX_WORKER_CATALOG_EXEMPT) {
     assert.equal(isAmuxWorkerName(name), false, name);
     assert.equal(parseAmuxWorkerRegistryChange({ workerName: name, roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 }), null, name);
   }
-  // The production catalog read on 2026-10-13: the seven, devin-worker and engineering-runner.
-  const registry = AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => registration(entry.workerName, entry.desiredState, entry.roleCeiling));
-  const seven = AMUX_WORKER_REGISTRY_V31_SEED.filter((entry) => entry.desiredState === "active")
-    .map((entry) => catalogEntry(entry.workerName, amuxWorkerProviderClassOf(entry.workerName)));
-  const production = compareAmuxWorkerRegistryWithCatalog(registry, [
-    ...seven,
-    catalogEntry("devin-worker", "devin"),
-    catalogEntry("engineering-runner", "claude"),
-  ]);
-  assert.equal(production.status, "mismatch");
-  const verdicts = Object.fromEntries(production.rows.map((row) => [row.workerName, row.verdict]));
-  assert.equal(verdicts["engineering-runner"], "exempt");
-  assert.equal(verdicts["devin-worker"], "unregistered");
-  // With devin-worker removed from the catalog, the two agree.
-  const cleaned = compareAmuxWorkerRegistryWithCatalog(registry, [...seven, catalogEntry("engineering-runner", "claude")]);
-  assert.equal(cleaned.status, "match");
-  // Exemption is by name only: a held runner is still exempt, and no other name is.
-  assert.equal(
-    compareAmuxWorkerRegistryWithCatalog(registry, [...seven, catalogEntry("engineering-runner", "claude", { paused: true })]).status,
-    "match",
-  );
-  assert.equal(
-    compareAmuxWorkerRegistryWithCatalog(registry, [...seven, catalogEntry("engineering-runner-2", "claude")]).status,
-    "mismatch",
-  );
+  // No other name is: devin-worker, removed in version 27, is neither a constant nor registrable.
+  assert.equal(AMUX_WORKER_CATALOG_EXEMPT.includes("devin-worker"), false);
+  assert.equal(isAmuxWorkerName("devin-worker"), false);
 });
 
 test("version 34 is recorded in the policy with the exempt name", () => {
