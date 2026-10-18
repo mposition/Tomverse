@@ -17,6 +17,7 @@ import {
 } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminAmuxDecisionMakerMessages } from "@/lib/adminMessages/amuxDecisionMaker";
+import type { DmAdminSwitchLatches } from "@/lib/amux/decisionMakerAdminCore";
 import type { DecisionMakerSwitchState } from "@/lib/amux/decisionMakerSwitchCore";
 
 /**
@@ -73,6 +74,7 @@ const UNREADABLE: DecisionMakerSwitchState = {
 const render = (
   overrides: Partial<{
     state: DecisionMakerSwitchState | null;
+    latches: DmAdminSwitchLatches | null;
     canChange: boolean;
     pending: DmSwitchPending;
     notice: DmSwitchNotice;
@@ -337,4 +339,40 @@ test("reading again replaces the state, and a failed read leaves none", async ()
   assert.deepEqual(ok.at(-1), { pending: null });
   const failed = await run(null);
   assert.deepEqual(failed.find((changes) => "state" in changes), { state: null });
+});
+
+test("an instance the system turned off says why, only while it is still off, and never for the kill switch", () => {
+  const latches = { "decision-maker-openai": "cleanup_latch", "decision-maker-anthropic": "validation_latch" } as const;
+  const tree = render({ latches });
+  for (const [scope, reason] of Object.entries(latches)) {
+    const note = byTestId(tree, `amux-dm-switch-latch-${scope}`);
+    assert.equal(note.length, 1, scope);
+    assert.equal(note[0]!["data-latch-reason"], reason);
+    assert.equal(textOf(note[0]!.children as ReactNode), m.latchReasons[reason]);
+  }
+  assert.equal(byTestId(tree, "amux-dm-switch-latch-kill_switch").length, 0);
+  // A person released one: its mode is no longer the latch's, so the reason goes.
+  const released = render({
+    latches,
+    state: { killSwitch: false, instances: { "decision-maker-openai": "proposal", "decision-maker-anthropic": "off" } },
+  });
+  assert.equal(byTestId(released, "amux-dm-switch-latch-decision-maker-openai").length, 0);
+  assert.equal(byTestId(released, "amux-dm-switch-latch-decision-maker-anthropic").length, 1);
+  // Nothing known, nothing shown; the buttons are the same either way.
+  assert.equal(propsOf(render({ latches: null })).filter((p) => String(p["data-testid"] ?? "").startsWith("amux-dm-switch-latch-")).length, 0);
+  assert.deepEqual(
+    buttonsOf(render({ latches })).map((props) => props["data-testid"]),
+    buttonsOf(render()).map((props) => props["data-testid"]),
+  );
+});
+
+test("every latch reason has words in both locales, and none names a path", () => {
+  for (const locale of ["en", "ko"] as const) {
+    const reasons = adminAmuxDecisionMakerMessages[locale].latchReasons;
+    assert.deepEqual(Object.keys(reasons).sort(), ["cleanup_latch", "validation_latch"]);
+    for (const text of Object.values(reasons)) {
+      assert.ok(text.length > 0);
+      assert.doesNotMatch(text, /\/var\/|\/home\/|rm -/);
+    }
+  }
 });

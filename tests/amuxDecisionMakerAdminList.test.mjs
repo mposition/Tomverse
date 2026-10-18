@@ -12,7 +12,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { adminAmuxDecisionMakerRequestsMessages } from "../lib/adminMessages/amuxDecisionMaker.ts";
+import {
+  adminAmuxDecisionMakerRequestDetailMessages,
+  adminAmuxDecisionMakerRequestsMessages,
+} from "../lib/adminMessages/amuxDecisionMaker.ts";
 import {
   DM_ADMIN_DELIVERY_STATUSES,
   DM_ADMIN_REQUEST_LIST_LIMIT,
@@ -20,6 +23,7 @@ import {
   dmAdminDeliveryStatus,
   dmAdminRequestRowFromRow,
   dmAdminRequestStatus,
+  dmAdminSwitchLatchesFromRows,
 } from "../lib/amux/decisionMakerAdminCore.ts";
 import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
 import { DM_CLOSING_EVENT_KINDS } from "../lib/amux/decisionMakerRequestCore.ts";
@@ -27,6 +31,7 @@ import {
   DecisionMakerAdminReadError,
   listDecisionMakerRequestsForAdmin,
   readDecisionMakerRequestDetailForAdmin,
+  readDecisionMakerSwitchesForAdmin,
 } from "../lib/amux/decisionMakerAdminRead.ts";
 import { dmCardText } from "../lib/amux/decisionMakerCore.ts";
 
@@ -61,6 +66,7 @@ const listRow = (overrides = {}) => ({
   delivered: false,
   deliveryOutcomeKind: null,
   deliveryResolution: null,
+  cleanupUnknownAtEpochMs: null,
   ...overrides,
 });
 
@@ -322,6 +328,62 @@ test("only a confirmed answer is ever delivered, and the delivery status follows
   );
 });
 
+test("a cleanup_unknown report is a flag and a time beside any status, and only an assigned DM request can carry one", () => {
+  const at = NOW - 45_000;
+  // Beside a status it does not replace: a timed-out request, a closed one and one still open.
+  for (const [overrides, status] of [
+    [{ snapshotState: "none", resultKind: "timeout" }, "timeout"],
+    [{ snapshotState: "none", resultKind: "proposal", outputKind: "free_text", irreversible: false }, "proposal"],
+    [{ snapshotState: "none", resultKind: "proposal", outputKind: "free_text", irreversible: false, closingKind: "reject", declarationAccuracy: "not_judged" }, "reject"],
+    [{}, "assigned"],
+  ]) {
+    const row = parsed({ ...overrides, cleanupUnknownAtEpochMs: BigInt(at) });
+    assert.equal(row.cleanupUnknownAtMs, at, show(overrides));
+    assert.equal(dmAdminRequestStatus(row, NOW), status, show(overrides));
+    assert.equal(parsed(overrides).cleanupUnknownAtMs, null);
+  }
+  // A number and a decimal string read the same as the store's bigint.
+  assert.equal(parsed({ cleanupUnknownAtEpochMs: at }).cleanupUnknownAtMs, at);
+  assert.equal(parsed({ cleanupUnknownAtEpochMs: String(at) }).cleanupUnknownAtMs, at);
+  // §5 receives the report for an assigned request only: no report on an operator route or before an assignment.
+  for (const overrides of [
+    { route: "operator", assigned: false, refusalCodes: ["ask_type_not_allowed"], cleanupUnknownAtEpochMs: BigInt(at) },
+    { assigned: false, cleanupUnknownAtEpochMs: BigInt(at) },
+    { cleanupUnknownAtEpochMs: "soon" },
+    { cleanupUnknownAtEpochMs: Number.NaN },
+    { cleanupUnknownAtEpochMs: 1.5 },
+    { cleanupUnknownAtEpochMs: undefined },
+  ]) {
+    assert.equal(dmAdminRequestRowFromRow(listRow(overrides)), null, show(overrides));
+  }
+});
+
+test("the ledger read carries the cleanup_unknown time in the statement it already sends, and the list shows it", async () => {
+  const at = NOW - 45_000;
+  const flagged = listRow({ snapshotState: "none", resultKind: "timeout", cleanupUnknownAtEpochMs: BigInt(at) });
+  const { tx, sent } = recordingTx([flagged, listRow({ id: "1b6f2a3e-5d1c-4e8f-9a7b-2c3d4e5f6a7b" })]);
+  const list = await listDecisionMakerRequestsForAdmin(tx);
+  assert.deepEqual(list.rows.map((row) => row.cleanupUnknownAtMs), [at, null]);
+  // No statement more: the boundary's ceiling is unchanged (setup + the three reads + fence).
+  assert.equal(sent.length, 3);
+  assert.equal(AMUX_DB_BOUNDARIES.decisionMakerRequestListRead.prismaCallCeiling, 5);
+  assert.equal(AMUX_DB_BOUNDARIES.decisionMakerRequestDetailRead.prismaCallCeiling, 7);
+  // The column is the newest cleanup report's database clock, from the request's own events, and no text.
+  assert.match(sent[0].sql, /max\(ev\."createdAt"\) FILTER \(WHERE ev\."kind" = 'cleanup_unknown'\)\) \* 1000\)::bigint\s+AS "cleanupUnknownAtEpochMs"/);
+  assert.match(sent[0].sql, /e\."closingKind",\s+e\."cleanupUnknownAtEpochMs"\s+FROM db_clock/);
+});
+
+test("the detail reads the same flag with the same ledger row", async () => {
+  const at = NOW - 45_000;
+  const { tx } = detailTx({
+    ledger: [listRow({ snapshotState: "worker_head", transmitOutcome: "transmit_receipt", resultKind: "proposal", outputKind: "free_text", irreversible: false, cleanupUnknownAtEpochMs: BigInt(at) })],
+  });
+  const detail = await readDecisionMakerRequestDetailForAdmin(tx, REQUEST_ID);
+  assert.equal(detail.row.cleanupUnknownAtMs, at);
+  // It does not change what a person may judge.
+  assert.notEqual(detail.shown, null);
+});
+
 test("every status and delivery code has words in both locales, and no other key", () => {
   for (const locale of ["en", "ko"]) {
     const m = adminAmuxDecisionMakerRequestsMessages[locale];
@@ -331,6 +393,103 @@ test("every status and delivery code has words in both locales, and no other key
       assert.ok(typeof text === "string" && text.length > 0, locale);
     }
   }
+});
+
+test("the cleanup_unknown words exist in both locales and name neither a path nor a command", () => {
+  for (const locale of ["en", "ko"]) {
+    const list = adminAmuxDecisionMakerRequestsMessages[locale];
+    const detail = adminAmuxDecisionMakerRequestDetailMessages[locale];
+    const texts = [
+      list.cleanupUnknown,
+      list.cleanupUnknownNotice(1),
+      list.cleanupUnknownNotice(3),
+      detail.cleanupUnknown,
+      detail.cleanupUnknownAt("2026-10-13 06:00"),
+      detail.cleanupUnknownSteps,
+    ];
+    for (const text of texts) {
+      assert.ok(typeof text === "string" && text.length > 0, locale);
+      assert.doesNotMatch(text, /\/var\/|\/home\/|\/tmp\/|rm -|requests\//, locale);
+    }
+    assert.ok(list.cleanupUnknownNotice(3).includes("3"), locale);
+    assert.ok(detail.cleanupUnknownAt("2026-10-13 06:00").includes("2026-10-13 06:00"), locale);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The switch panel's latch reasons (stage S2-4c)
+// ---------------------------------------------------------------------------
+
+const switchRow = (scope, value, actorKind, reasonCode) => ({ scope, value, actorKind, reasonCode });
+const OPENAI = "decision-maker-openai";
+const ANTHROPIC = "decision-maker-anthropic";
+
+test("an instance's latch reason is the reason of its newest event when the system wrote it, and null once a person did", () => {
+  assert.deepEqual(dmAdminSwitchLatchesFromRows([]), { [OPENAI]: null, [ANTHROPIC]: null });
+  assert.deepEqual(
+    dmAdminSwitchLatchesFromRows([
+      switchRow("kill_switch", "off", "human", "operator"),
+      switchRow(OPENAI, "off", "system", "cleanup_latch"),
+      switchRow(ANTHROPIC, "off", "system", "validation_latch"),
+    ]),
+    { [OPENAI]: "cleanup_latch", [ANTHROPIC]: "validation_latch" },
+  );
+  // A person's newest event (a release, or an ordinary change) leaves no reason.
+  assert.deepEqual(
+    dmAdminSwitchLatchesFromRows([switchRow(OPENAI, "proposal", "human", "operator"), switchRow(ANTHROPIC, "off", "human", "operator")]),
+    { [OPENAI]: null, [ANTHROPIC]: null },
+  );
+});
+
+test("a switch row the table's CHECKs could not have produced leaves no reason at all", () => {
+  const bad = [
+    switchRow(OPENAI, "off", "system", "operator"),
+    switchRow(OPENAI, "off", "system", "no_such_reason"),
+    switchRow(OPENAI, "proposal", "system", "cleanup_latch"),
+    switchRow("kill_switch", "on", "system", "cleanup_latch"),
+    switchRow(OPENAI, "off", "human", "cleanup_latch"),
+    switchRow(OPENAI, "off", "robot", "operator"),
+    switchRow("somewhere", "off", "human", "operator"),
+    null,
+    "row",
+  ];
+  for (const row of bad) {
+    assert.equal(dmAdminSwitchLatchesFromRows([switchRow(ANTHROPIC, "off", "system", "cleanup_latch"), row]), null, show(row));
+  }
+  // Two newest events for one scope are not what the read returns.
+  assert.equal(
+    dmAdminSwitchLatchesFromRows([switchRow(OPENAI, "off", "system", "cleanup_latch"), switchRow(OPENAI, "off", "system", "cleanup_latch")]),
+    null,
+  );
+  assert.equal(dmAdminSwitchLatchesFromRows(undefined), null);
+  assert.equal(dmAdminSwitchLatchesFromRows({}), null);
+});
+
+test("the panel's switch read is one statement on the switch table, maps the state as every reader does, and fits the switch boundary", async () => {
+  const sent = [];
+  const rows = [switchRow("kill_switch", "off", "human", "operator"), switchRow(OPENAI, "off", "system", "cleanup_latch")];
+  const tx = {
+    $queryRaw: (strings, ...values) => {
+      sent.push({ sql: strings.join("$"), values });
+      return Promise.resolve(rows);
+    },
+  };
+  const read = await readDecisionMakerSwitchesForAdmin(tx);
+  assert.equal(sent.length, 1);
+  assert.deepEqual(read.state, { killSwitch: false, instances: { [OPENAI]: "off", [ANTHROPIC]: "off" } });
+  assert.deepEqual(read.latches, { [OPENAI]: "cleanup_latch", [ANTHROPIC]: null });
+  assert.deepEqual(sent[0].values, []);
+  assert.deepEqual([...new Set([...sent[0].sql.matchAll(/"(AmuxDecisionMaker[A-Za-z]+)"/g)].map((match) => match[1]))], ["AmuxDecisionMakerSwitchEvent"]);
+  assert.match(sent[0].sql, /SELECT DISTINCT ON \("scope"\) "scope", "value", "actorKind", "reasonCode"/);
+  assert.match(sent[0].sql, /ORDER BY "scope", "sequence" DESC/);
+  // Same count as the state alone, so the existing boundary (setup + one statement + fence) is the right size.
+  assert.equal(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead.prismaCallCeiling, sent.length + 2);
+  // A row the state mapping refuses makes the state unreadable and shows no reason; it does not throw.
+  const bad = await readDecisionMakerSwitchesForAdmin({
+    $queryRaw: () => Promise.resolve([switchRow(OPENAI, "on", "human", "operator")]),
+  });
+  assert.equal(bad.state.killSwitch, null);
+  assert.equal(bad.latches, null);
 });
 
 // ---------------------------------------------------------------------------

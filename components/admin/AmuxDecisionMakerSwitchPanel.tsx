@@ -11,13 +11,16 @@ import {
 } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxDecisionMakerMessages } from "@/lib/adminMessages/amuxDecisionMaker";
+import type { DmAdminSwitchLatches } from "@/lib/amux/decisionMakerAdminCore";
 import {
   DM_INSTANCE_MODES,
   DM_INSTANCE_SCOPES,
   DM_KILL_SWITCH_SCOPE,
   DM_KILL_SWITCH_VALUES,
+  isDmInstanceScope,
   type DecisionMakerSwitchState,
   type DmInstanceMode,
+  type DmSwitchLatchReason,
   type DmSwitchScope,
 } from "@/lib/amux/decisionMakerSwitchCore";
 
@@ -87,6 +90,17 @@ const changeLabel = (m: Messages, change: DmSwitchChange) =>
 const valueText = (m: Messages, value: string | null) =>
   value === null ? m.unreadable : `${m.value[value as keyof Messages["value"]]} (${value})`;
 
+/**
+ * The reason the system turned an instance off, shown only while the instance
+ * is still off: a mode a person set since has no reason, and the kill switch
+ * is never latched.
+ */
+const latchReason = (
+  latches: DmAdminSwitchLatches | null,
+  row: { scope: DmSwitchScope; current: string | null },
+): DmSwitchLatchReason | null =>
+  latches !== null && isDmInstanceScope(row.scope) && row.current === "off" ? latches[row.scope] : null;
+
 const cellClass = "border-b border-zinc-200 px-2 py-2 align-top dark:border-zinc-700";
 const buttonClass =
   "inline-flex min-h-11 items-center rounded-md border border-zinc-400 px-3 py-1 text-xs font-bold disabled:opacity-60 dark:border-zinc-500";
@@ -111,9 +125,15 @@ export function AmuxDecisionMakerSwitchView({
   failure,
   onChange,
   onReread,
+  latches = null,
 }: {
   m: Messages;
   state: DecisionMakerSwitchState | null;
+  /**
+   * Why the system turned an instance off, as read with `state` (stage S2-4c);
+   * null when nothing is known, and then no reason is shown.
+   */
+  latches?: DmAdminSwitchLatches | null;
   canChange: boolean;
   pending: DmSwitchPending;
   notice: DmSwitchNotice;
@@ -171,7 +191,20 @@ export function AmuxDecisionMakerSwitchView({
                   {row.label}
                 </th>
                 <td className={cellClass} data-testid={`amux-dm-switch-value-${row.scope}`}>
-                  {valueText(m, row.current)}
+                  {latchReason(latches, row) === null ? (
+                    valueText(m, row.current)
+                  ) : (
+                    <>
+                      {valueText(m, row.current)}
+                      <span
+                        className="mt-1 block text-xs text-amber-900 dark:text-amber-200"
+                        data-testid={`amux-dm-switch-latch-${row.scope}`}
+                        data-latch-reason={latchReason(latches, row)}
+                      >
+                        {m.latchReasons[latchReason(latches, row) as DmSwitchLatchReason]}
+                      </span>
+                    </>
+                  )}
                 </td>
                 <td className={cellClass}>
                   {canChange ? (
@@ -333,9 +366,12 @@ export async function runDmSwitchReread(
  */
 export function AmuxDecisionMakerSwitchPanel({
   state,
+  latches = null,
   canChange,
 }: {
   state: DecisionMakerSwitchState | null;
+  /** The reasons read with `state`; they describe that state only, so they are not shown after a change or a re-read. */
+  latches?: DmAdminSwitchLatches | null;
   canChange: boolean;
 }) {
   const m = useAdminMessages(adminAmuxDecisionMakerMessages) as Messages;
@@ -377,6 +413,7 @@ export function AmuxDecisionMakerSwitchPanel({
     <AmuxDecisionMakerSwitchView
       m={m}
       state={current}
+      latches={current === state ? latches : null}
       canChange={canChange}
       pending={pending}
       notice={notice}

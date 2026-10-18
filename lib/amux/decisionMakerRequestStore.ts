@@ -439,7 +439,8 @@ export async function listDecisionMakerStaleCloseCandidates(
 /**
  * The newest requests, newest first, at most `limit` (1 to 100) -- or the one
  * request `requestId` names -- with what their events add up to and the
- * database clock, in one statement: the
+ * database clock, in one statement (each row carries the database clock of its
+ * `cleanup_unknown` report, null when it has none: stage S2-4c): the
  * ledger's half of Admin's request list (stage S2,
  * lib/amux/decisionMakerAdminRead.ts, which joins the result detail and the
  * judgment and delivery halves read by their own stores in the same
@@ -472,7 +473,8 @@ export async function readRecentDecisionMakerRequestLedger(
       floor(extract(epoch FROM r."createdAt") * 1000)::bigint AS "createdAtEpochMs",
       floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs",
       floor(extract(epoch FROM db_clock."now") * 1000)::bigint AS "dbNowEpochMs",
-      e."assigned", e."snapshotState", e."transmitOutcome", e."resultKind", e."resultUnknown", e."closingKind"
+      e."assigned", e."snapshotState", e."transmitOutcome", e."resultKind", e."resultUnknown", e."closingKind",
+      e."cleanupUnknownAtEpochMs"
     FROM db_clock
     LEFT JOIN recent r ON true
     CROSS JOIN LATERAL (
@@ -484,7 +486,9 @@ export async function readRecentDecisionMakerRequestLedger(
         coalesce(bool_or(ev."kind" = 'result_unknown'), false) AS "resultUnknown",
         max(ev."kind") FILTER (
           WHERE ev."kind" IN ('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject')
-        ) AS "closingKind"
+        ) AS "closingKind",
+        floor(extract(epoch FROM max(ev."createdAt") FILTER (WHERE ev."kind" = 'cleanup_unknown')) * 1000)::bigint
+          AS "cleanupUnknownAtEpochMs"
       FROM "AmuxDecisionMakerRequestEvent" ev
       WHERE ev."requestId" = r."id"
     ) e

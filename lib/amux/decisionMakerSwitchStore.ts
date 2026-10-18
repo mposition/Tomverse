@@ -81,6 +81,24 @@ export async function readDecisionMakerSwitches(
 }
 
 /**
+ * The newest event of each scope with its actor and reason, in one statement,
+ * for Admin's switch panel (stage S2-4c): the same rows
+ * `readDecisionMakerSwitchesOrThrow()` maps to the state, so the state and
+ * the reason an instance was latched off come from one read
+ * (lib/amux/decisionMakerAdminRead.ts maps both). Reads only; a statement
+ * that fails is not caught.
+ */
+export async function readDecisionMakerSwitchRowsForAdmin(
+  client: SwitchReader,
+): Promise<Array<{ scope: string; value: string; actorKind: string; reasonCode: string }>> {
+  return client.$queryRaw<Array<{ scope: string; value: string; actorKind: string; reasonCode: string }>>`
+    SELECT DISTINCT ON ("scope") "scope", "value", "actorKind", "reasonCode"
+    FROM "AmuxDecisionMakerSwitchEvent"
+    ORDER BY "scope", "sequence" DESC
+  `;
+}
+
+/**
  * The switch state and each instance's newest event with its actor and
  * database clock, in one statement: what the request ledger's writers read
  * (lib/amux/decisionMakerRequestStore.ts) -- the state for §6's table, and

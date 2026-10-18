@@ -1785,6 +1785,20 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   돌려줍니다(`runDmJudgment()`). 화면은 확정한 답이 승인 계약의 승인이 아님을 적습니다. 이 route는 전달 경로를 부르지 않으므로
   여기서 worker에게 가는 것은 없습니다. 상한 12는 무결성 키가 있는 고친 답 확정의 10문장 + setup + fence이고, judgment unit
   테스트가 그 셈을, judgment DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
+- **S2-4c(Admin의 cleanup_unknown 표시)**: `lib/amux/decisionMakerAdminCore.ts`의 `cleanupUnknownAtMs`·`dmAdminSwitchLatchesFromRows()`,
+  request store의 `readRecentDecisionMakerRequestLedger()`가 같은 문장에서 싣는 `cleanupUnknownAtEpochMs`, switch store의
+  `readDecisionMakerSwitchRowsForAdmin()`과 `decisionMakerAdminRead.ts`의 `readDecisionMakerSwitchesForAdmin()`,
+  `AmuxDecisionMakerRequestsPanel.tsx`·`AmuxDecisionMakerRequestDetailPanel.tsx`·`AmuxDecisionMakerSwitchPanel.tsx`, 각 messages의
+  `cleanupUnknown*`·`latchReasons`, `tests/amuxDecisionMakerAdminList.test.mjs`와 세 client render 테스트. S2-2a3가 원장에 남긴
+  `cleanup_unknown` 보고를 운영자가 봅니다. **요청 목록은 상태 옆에 "정리 확인 못 함" 표시를 더하고(상태를 대체하지 않음) 표시된 요청 중
+  몇 건인지 한 문장으로 말하며, 상세는 보고 시각과 해야 할 일을 문구로만 적습니다.** 표시는 본문이 아니라 닫힌 플래그와 DB 시계이므로
+  목록에서 모든 관리자에게 보이고, 해야 할 일의 문구는 상세(`ops:write`)에 있습니다. **디렉터리 경로·요청 디렉터리 이름·명령은 화면에
+  넣지 않습니다** — 요청 id는 화면 글자로 쓰지 않는 기존 관례를 따르며, 운영자는 카드 id와 보고 시각으로 runner에서 가립니다.
+  스위치 패널은 시스템이 끈 인스턴스에 그 이유(`cleanup_latch`·`validation_latch`)를 보입니다 — 이전에는 이유를 아예 읽지 않았습니다.
+  이유는 인스턴스의 **가장 새 스위치 사건**이 시스템의 latch일 때만이고(사람이 해제하거나 바꾸면 사라짐), 상태와 같은 문장에서 읽으므로
+  `decisionMakerSwitchRead`의 상한(3)은 그대로입니다. 패널이 변경·재읽기로 상태를 API에서 다시 받은 뒤에는 이유를 보이지 않습니다(API 응답은
+  이유를 싣지 않음). 요청 목록·상세의 문장 수와 경계(5·7)도 그대로입니다: 새 열은 기존 원장 문장의 집계에 들어갑니다. 새 열이 없는 행은
+  원장이 만든 행이 아닌 것으로 보아 목록 전체를 읽지 못한 것으로 둡니다.
 - **S2-2a(bridge·broker 내부 route)**: `app/api/internal/amux/decision-maker/assignments/route.ts`,
   `app/api/internal/amux/decision-maker/assignments/discard/route.ts`,
   `app/api/internal/amux/decision-maker/transmissions/route.ts`,
@@ -1858,7 +1872,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   먼저입니다. 15분 sweep은 인스턴스마다 정리 latch 확인 뒤 docs/policy/amux-decision-maker.md §8 확인을 하며 각 확인이 따로 실패 경계입니다. DB trigger는 원장 삽입 때
   밀린 latch를 보지 않고, latch는 끄기만 하므로 kill switch를 보지 않습니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 +
   setup + fence이고, request unit 테스트가 그 셈을, request DB 테스트가 하나 줄인 상한의 거부를 고정합니다. Admin 화면 표시는
-  없습니다.
+  S2-4c입니다.
 - **S2-3a(전용 launcher의 결정적 핵심)**: `lib/amux/decisionMakerLauncherCore.ts`,
   `lib/amux/decisionMakerLauncherFs.ts`, `lib/amux/decisionMakerLauncherProcess.ts`,
   `tests/amuxDecisionMakerLauncherCore.test.mjs`, `tests/amuxDecisionMakerLauncherFs.test.mjs`,
