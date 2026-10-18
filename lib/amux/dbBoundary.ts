@@ -320,6 +320,13 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 3,
     isolation: "read",
   },
+  // setup + the derived worker catalog in one statement (orchestration policy
+  // version 55, section 1: the bridge scope) + fence
+  workerBridgeScopeRead: {
+    operation: "worker_bridge_scope_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
   // setup + the newest capability of each worker (1, pinned by
   // tests/amuxWorkerCapabilityStore.test.mjs) + fence (orchestration policy
   // version 35, section 2)
