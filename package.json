@@ -10,7 +10,7 @@
     "node": "22.x"
   },
   "scripts": {
-    "test:chat-unified-optimizer": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/chatUnifiedOptimizerCandidate.test.mjs tests/chatUnifiedOptimizerLedgerCore.test.mjs tests/chatUnifiedOptimizerAmuxSourcePin.test.mjs tests/chatUnifiedOptimizerCandidateGeneration.test.mjs tests/chatUnifiedOptimizerPublicCollector.test.mjs tests/server-contract/chat-unified-optimizer-candidate-generation-store.test.mjs",
+    "test:chat-unified-optimizer": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/chatUnifiedOptimizerCandidate.test.mjs tests/chatUnifiedOptimizerLedgerCore.test.mjs tests/chatUnifiedOptimizerAmuxSourcePin.test.mjs tests/chatUnifiedOptimizerCandidateGeneration.test.mjs tests/chatUnifiedOptimizerPublicCollector.test.mjs tests/chatUnifiedOptimizerAmuxCandidateStore.test.mjs tests/server-contract/chat-unified-optimizer-candidate-generation-store.test.mjs tests/server-contract/chat-unified-optimizer-amux-candidate-route.test.mjs",
     "test:chat-unified-optimizer-db": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/chat-unified-optimizer-ledger.db.test.ts",
     "dev": "next dev --webpack",
     "predev": "node scripts/generate-build-info.mjs",
