@@ -59,9 +59,13 @@ test("trace scope includes handle opens, compat opens and io_uring", () => {
   for (const call of ["open_by_handle_at", "io_uring_setup",
     "io_uring_enter", "io_uring_register"]) {
     const bypass = make();
-    bypass.observeChunk(Buffer.from(`125 ${call}(...) = -1 EPERM\n`));
+    bypass.observeChunk(Buffer.from(`125 ${call}(...) = 3\n`));
     assert.deepEqual(bypass.finish({ traceComplete: true }),
       { kind: "unverified" });
+    const denied = make();
+    denied.observeChunk(Buffer.from(`125 ${call}(...) = -1 EPERM\n`));
+    assert.deepEqual(denied.finish({ traceComplete: true }),
+      { kind: "complete", files: [] });
   }
 });
 
@@ -114,4 +118,76 @@ test("open trace refuses invalid UTF-8 and unsupported checkout shapes", () => {
   for (const badFiles of [["../escape"], ["src\\a.ts"], ["src/a.ts", "src/a.ts"]])
     assert.throws(() => createAmuxTrackedCheckoutOpenTraceObserver({
       directory, files: badFiles }));
+});
+
+test("a failed result counts only at the end of the line, never inside a path", () => {
+  // Review r-20261018-135342-5151e2: a path containing ") = -1 " must not make a
+  // successful but undecoded open look failed.
+  const crafted = make();
+  crafted.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD<${directory}>, "x) = -1 ENOENT (y)", O_RDONLY) = 3\n`));
+  assert.deepEqual(crafted.finish({ traceComplete: true }), { kind: "unverified" });
+  // The real strace shape with a description still counts as a failed open.
+  const described = make();
+  described.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD<${directory}>, "missing.ts", O_RDONLY) = -1 ENOENT (No such file or directory)\n`));
+  assert.deepEqual(described.finish({ traceComplete: true }), { kind: "complete", files: [] });
+});
+
+test("only a refused io_uring or handle open leaves the manifest complete", () => {
+  // The v19 seccomp filter answers ENOSYS; a kernel with io_uring disabled
+  // answers EPERM. Success, another errno or a refusal text inside the
+  // arguments are all unverified.
+  for (const call of ["io_uring_setup", "io_uring_enter", "io_uring_register", "open_by_handle_at"]) {
+    for (const result of ["-1 ENOSYS (Function not implemented)", "-1 EPERM (Operation not permitted)", "-1 ENOSYS"]) {
+      const refused = make();
+      refused.observeChunk(Buffer.from(`125 ${call}(16, {}) = ${result}\n`));
+      assert.deepEqual(refused.finish({ traceComplete: true }), { kind: "complete", files: [] }, `${call} ${result}`);
+    }
+    for (const line of [`125 ${call}(16, {}) = 7\n`, `125 ${call}(16, {}) = -1 EFAULT (Bad address)\n`,
+      `125 ${call}("x) = -1 ENOSYS (y)", {}) = 7\n`, `125 ${call}(16, {}) = ?\n`]) {
+      const observer = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files, diagnostic: true });
+      observer.observeChunk(Buffer.from(line));
+      assert.deepEqual(observer.finish({ traceComplete: true }),
+        { kind: "unverified", reason: `unobservable_${call}` }, line);
+    }
+  }
+});
+
+test("diagnostic reasons are fixed codes and appear only when asked for", () => {
+  const cases = [
+    [`123 openat(AT_FDCWD<${directory}>, "src/c.ts", O_RDONLY) = 3<${directory}/src/c.ts>\n`, "unlisted_open"],
+    [`123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_WRONLY) = 3<${directory}/src/a.ts>\n`, "non_read_open"],
+    [`123 openat(AT_FDCWD<${directory}>, "../x", O_RDONLY) = 3</tmp/x>\n`, "escaped_checkout"],
+    [`123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY) = 3\n`, "undecoded_open"],
+  ];
+  for (const [text, reason] of cases) {
+    const quiet = make();
+    quiet.observeChunk(Buffer.from(text));
+    assert.deepEqual(quiet.finish({ traceComplete: true }), { kind: "unverified" });
+    const loud = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files, diagnostic: true });
+    loud.observeChunk(Buffer.from(text));
+    assert.deepEqual(loud.finish({ traceComplete: true }), { kind: "unverified", reason });
+  }
+  const incomplete = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files, diagnostic: true });
+  assert.deepEqual(incomplete.finish({ traceComplete: false }), { kind: "unverified", reason: "trace_incomplete" });
+  assert.deepEqual(incomplete.finish({ traceComplete: true }), { kind: "unverified", reason: "duplicate_finish" });
+});
+
+test("a device annotation outside the checkout is decoded; a device inside is refused", () => {
+  // Measured on the v19 runner: Node opens /dev/null relative to the checkout.
+  const outside = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files, diagnostic: true });
+  outside.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD<${directory}>, "/dev/null", O_RDONLY|O_CLOEXEC) = 17</dev/null<char 1:3>>\n` +
+    line("src/a.ts")));
+  assert.deepEqual(outside.finish({ traceComplete: true }), { kind: "complete", files: ["src/a.ts"] });
+  const inside = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files, diagnostic: true });
+  inside.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY) = 4<${directory}/src/a.ts<block 8:1>>\n`));
+  assert.deepEqual(inside.finish({ traceComplete: true }), { kind: "unverified", reason: "device_open" });
+  // Any other annotation shape is not decoded and stays fail-closed.
+  const odd = createAmuxTrackedCheckoutOpenTraceObserver({ directory, files, diagnostic: true });
+  odd.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY) = 4<${directory}/src/a.ts<pipe:[1]>>\n`));
+  assert.deepEqual(odd.finish({ traceComplete: true }), { kind: "unverified", reason: "undecoded_open" });
 });
