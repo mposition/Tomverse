@@ -8,6 +8,7 @@ import { adminAmuxIntakeMessages } from "@/lib/adminMessages/amuxIntake";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { adminFetch } from "@/lib/adminFetch";
 import { confirmAmuxIntakePreview } from "./amuxIntakeConfirmation";
+import { createAmuxU21TestDraft } from "./amuxU21TestDraft";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-u21-test-card");
 
@@ -108,6 +109,18 @@ export function AmuxIntakePanel() {
         />
       </label>
       <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          disabled={pending || locked || requestText.trim().length > 0}
+          onClick={() => {
+            setRequestText(createAmuxU21TestDraft(crypto.randomUUID()));
+            setResult(null);
+            setPreviewedText(null);
+          }}
+        >
+          {messages.prepareTestDraft}
+        </button>
         <button
           type="button"
           className="min-h-11 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"

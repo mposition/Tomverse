@@ -6,6 +6,7 @@ export const adminAmuxIntakeMessages = defineAdminMessages({
     description:
       "Preview shows one explicit registration and writes nothing. Confirm that preview, then register after the server permits it. Registration creates one backlog card; this screen cannot promote it or start a worker.",
     requestLabel: "Intake draft",
+    prepareTestDraft: "Prepare U21 test draft",
     preview: "Preview",
     confirmPreview: "Confirm preview",
     register: "Register",
@@ -31,6 +32,7 @@ export const adminAmuxIntakeMessages = defineAdminMessages({
     description:
       "미리보기에서 등록 내용 한 건을 확인하고, 미리보기 확인을 누른 뒤 서버가 허용하면 등록하세요. 등록은 backlog 카드 한 건만 만들며 이 화면은 카드를 승격하거나 워커를 시작하지 않습니다.",
     requestLabel: "등록 초안",
+    prepareTestDraft: "U21 테스트 초안 만들기",
     preview: "미리보기",
     confirmPreview: "미리보기 확인",
     register: "등록",

@@ -4,6 +4,8 @@ import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { confirmAmuxIntakePreview } from
   "../../components/admin/amuxIntakeConfirmation.ts";
+import { createAmuxU21TestDraft } from
+  "../../components/admin/amuxU21TestDraft.ts";
 import { amuxIntakeDraftDigest, parseAmuxIntakeDraft } from
   "../../lib/amux/intakeCore.ts";
 import { previewAmuxIntake } from
@@ -94,4 +96,20 @@ test("explicit preview confirmation enables only the same U21 draft", () => {
   assert.equal(second.applyPermitted, true);
   assert.equal(confirmAmuxIntakePreview(raw + " ", raw, first), null);
   assert.equal(confirmAmuxIntakePreview(confirmed, confirmed, first), null);
+});
+
+test("prepared U21 test draft is one valid disposable registration", () => {
+  const first = createAmuxU21TestDraft("11111111-1111-4111-8111-111111111111");
+  const second = createAmuxU21TestDraft("22222222-2222-4222-8222-222222222222");
+  const parsed = parseAmuxIntakeDraft(first);
+  assert.equal(parsed.ok, true);
+  assert.notEqual(JSON.parse(first).sourceTaskId, JSON.parse(second).sourceTaskId);
+  if (!parsed.ok) return;
+  assert.equal(parsed.draft.workItem, null);
+  assert.equal(parsed.draft.proposal.priority, "p3");
+  assert.equal(parsed.draft.confirmationDigest, undefined);
+  const preview = previewAmuxIntake(first,
+    "u21-test-intake-secret-000000000000", "enabled");
+  assert.equal(preview.outcome, "approval_required");
+  assert.equal(preview.applyPermitted, false);
 });
