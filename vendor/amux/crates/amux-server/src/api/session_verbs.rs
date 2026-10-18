@@ -5972,7 +5972,7 @@ async fn steer_enqueue_precond_with_id(
 /// Reserve one transport identity before acting, then acknowledge it only once
 /// the terminal accepted it or the server queue durably stored it. A concurrent
 /// retry must never turn the first request's reservation into "already sent".
-async fn send_dedup_gate(state: &AppState, name: &str, msg_id: &str) -> Option<Response> {
+pub(crate) async fn send_dedup_gate(state: &AppState, name: &str, msg_id: &str) -> Option<Response> {
     if msg_id.is_empty() { return None; }
     let (session, identity) = (name.to_string(), msg_id.to_string());
     let reply = state.store.write_async(move |conn| {
@@ -6019,7 +6019,7 @@ async fn send_dedup_gate(state: &AppState, name: &str, msg_id: &str) -> Option<R
 
 // Read the durable acceptance fact without repeating the send or waiting for
 // downstream semantic board intake to finish the original HTTP request.
-fn send_receipt(state: &AppState, name: &str, msg_id: &str) -> Response {
+pub(crate) fn send_receipt(state: &AppState, name: &str, msg_id: &str) -> Response {
     if msg_id.is_empty() || msg_id.len() > 256 {
         return jresp(StatusCode::BAD_REQUEST, json!({"error":"a valid msg_id is required"}));
     }
@@ -6224,7 +6224,7 @@ async fn send_receipt_resolving(state: &AppState, name: &str, msg_id: &str, text
     }
 }
 
-async fn send_dedup_accept(state: &AppState, name: &str, msg_id: &str, receipt_id: &str) {
+pub(crate) async fn send_dedup_accept(state: &AppState, name: &str, msg_id: &str, receipt_id: &str) {
     if msg_id.is_empty() { return; }
     let (session,identity,receipt)=(name.to_string(),msg_id.to_string(),receipt_id.to_string());
     let result=state.store.write_async(move |conn| {
@@ -6241,7 +6241,7 @@ async fn send_dedup_accept(state: &AppState, name: &str, msg_id: &str, receipt_i
     }
 }
 
-async fn send_dedup_forget(state: &AppState, name: &str, msg_id: &str) {
+pub(crate) async fn send_dedup_forget(state: &AppState, name: &str, msg_id: &str) {
     let session = name.to_string();
     let msg_id = msg_id.to_string();
     let _ = state
@@ -7934,7 +7934,7 @@ fn lane_send_lock(name: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
     guard.entry(name.to_string()).or_default().clone()
 }
 
-async fn send_text_inner(
+pub(crate) async fn send_text_inner(
     state: &AppState,
     name: &str,
     text: &str,

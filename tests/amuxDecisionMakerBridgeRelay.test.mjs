@@ -20,6 +20,12 @@ import {
   DM_PAYLOAD_MAX_BYTES,
   DM_RESULT_LINE_MAX_BYTES,
 } from "../lib/amux/decisionMakerBrokerCore.ts";
+import {
+  DM_DELIVERY_JUDGMENT_LABELS,
+  DM_DELIVERY_MESSAGE_ID_PREFIX,
+  DM_DELIVERY_MESSAGE_MAX_BYTES,
+  dmDeliveryHeader,
+} from "../lib/amux/decisionMakerDeliveryCore.ts";
 import { DM_LAUNCH_OUTPUT_MAX_BYTES } from "../lib/amux/decisionMakerLauncherCore.ts";
 import { parseDmCard } from "../lib/amux/decisionMakerRequestCore.ts";
 import { DM_INSTANCE_SCOPES } from "../lib/amux/decisionMakerSwitchCore.ts";
@@ -28,6 +34,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const wire = read("apps/tomverse-orchestrator/src/dm_relay/wire.rs");
 const flow = read("apps/tomverse-orchestrator/src/dm_relay/flow.rs");
 const io = read("apps/tomverse-orchestrator/src/dm_relay/io.rs");
+const delivery = read("apps/tomverse-orchestrator/src/dm_relay/delivery.rs");
 
 /** A Rust integer expression of literals and `*` (`128 * 1024`, `34 * 60 * 1000`). */
 const product = (expression) =>
@@ -76,8 +83,9 @@ test("the relay never sends a result body the result route would refuse unread",
 test("every route the relay calls exists and answers under the envelope the relay reads", () => {
   // rustfmt wraps a long arm in braces; both shapes are the same mapping.
   const routes = [...flow.matchAll(/AppRoute::(\w+) => \{?\s*"\/api\/internal\/amux\/decision-maker\/([a-z/]+)"/g)];
-  assert.equal(routes.length, 9);
-  const envelopes = { Requests: "routed", Results: "submitted", ResultLookup: "found" };
+  // Nine for a question (stage S2-2b2), three for a confirmed answer's delivery (S2-2b3).
+  assert.equal(routes.length, 12);
+  const envelopes = { Requests: "routed", Results: "submitted", ResultLookup: "found", DeliveriesNext: "found" };
   for (const [, name, path] of routes) {
     const file = `app/api/internal/amux/decision-maker/${path}/route.ts`;
     assert.ok(existsSync(new URL(`../${file}`, import.meta.url)), file);
@@ -129,20 +137,94 @@ test("option effects go on the wire exactly when the app's routing parser takes 
   assert.equal(flag === "true", parseDmCard(card) !== null);
 });
 
-test("the relay writes the local AMUX only through the marker's routes, outside /api/board", () => {
+test("the relay writes the local AMUX only through the relay's own routes, outside /api/board", () => {
   const local = [...flow.matchAll(/LocalRoute::\w+ => "([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(local, ["/api/dm-relay/pending", "/api/dm-relay/pending/release"]);
+  assert.deepEqual(local, [
+    "/api/dm-relay/pending",
+    "/api/dm-relay/pending/release",
+    // Stage S2-2b3: a confirmed answer's check, delivery and unknown delivery.
+    "/api/dm-relay/answers/check",
+    "/api/dm-relay/answers",
+    "/api/dm-relay/answers/unknown",
+  ]);
   for (const path of local) assert.equal(path.includes("/api/board"), false);
   const server = read("vendor/amux/crates/amux-server/src/api/dm_relay.rs");
   assert.match(server, /\.route\("\/pending", get\(list_markers\)\.post\(set_marker\)\)/);
   assert.match(server, /\.route\("\/pending\/release", post\(release_marker\)\)/);
+  assert.match(server, /\.route\("\/answers", post\(deliver_answer\)\)/);
+  assert.match(server, /\.route\("\/answers\/check", post\(check_answer\)\)/);
+  assert.match(server, /\.route\("\/answers\/unknown", post\(answer_unknown\)\)/);
   // The one local read under the relay's prefix: every marker, for a restart.
   assert.equal(stringConstant(flow, "LOCAL_MARKER_LIST_PATH"), "/api/dm-relay/pending");
   const routeTable = read("vendor/amux/crates/amux-server/src/api/request_log.rs");
   assert.match(routeTable, /RouteEntry \{ path: "\/api\/dm-relay\/pending", methods: &\["GET", "POST"\] \}/);
+  for (const path of ["/api/dm-relay/answers", "/api/dm-relay/answers/check", "/api/dm-relay/answers/unknown"]) {
+    assert.ok(routeTable.includes(`RouteEntry { path: "${path}", methods: &["POST"] }`), path);
+  }
   assert.equal(stringConstant(io, "DM_RELAY_LOCAL_TOKEN_HEADER"), "x-amux-dm-relay-token");
   assert.match(server, /pub const TOKEN_HEADER: &str = "x-amux-dm-relay-token";/);
   // Off unless exactly `enabled`.
   assert.equal(stringConstant(io, "DM_RELAY_ENV"), "TOMVERSE_AMUX_DM_RELAY");
   assert.match(io, /if enabled != Some\("enabled"\) \{\s*return RelayActivation::Off;/);
+});
+
+test("a confirmed answer's message id, cap, labels and header are the app's, on the bridge and the local AMUX (stage S2-2b3)", () => {
+  const server = read("vendor/amux/crates/amux-server/src/api/dm_relay.rs");
+  assert.equal(stringConstant(delivery, "DM_DELIVERY_MESSAGE_ID_PREFIX"), DM_DELIVERY_MESSAGE_ID_PREFIX);
+  assert.equal(stringConstant(server, "ANSWER_MESSAGE_ID_PREFIX"), DM_DELIVERY_MESSAGE_ID_PREFIX);
+  assert.equal(product(constant(delivery, "DM_DELIVERY_MESSAGE_MAX_BYTES")), DM_DELIVERY_MESSAGE_MAX_BYTES);
+  assert.equal(product(constant(server, "ANSWER_MESSAGE_MAX_BYTES")), DM_DELIVERY_MESSAGE_MAX_BYTES);
+  assert.equal(stringConstant(delivery, "DM_DELIVERY_CONFIRMED_LABEL"), DM_DELIVERY_JUDGMENT_LABELS.confirm);
+  assert.equal(stringConstant(delivery, "DM_DELIVERY_EDITED_LABEL"), DM_DELIVERY_JUDGMENT_LABELS.edit_confirm);
+  // What the bridge and the local AMUX check of the header is what the app writes.
+  for (const instance of DM_INSTANCE_SCOPES) {
+    for (const kind of ["confirm", "edit_confirm"]) {
+      const header = dmDeliveryHeader({ instance, judgmentKind: kind, cardId: "AMUX-12" });
+      assert.ok(header.startsWith(`[Decision Maker ${instance} (`), header);
+      assert.ok(header.endsWith(`) 제안, ${DM_DELIVERY_JUDGMENT_LABELS[kind]}, re AMUX-12]`), header);
+    }
+  }
+  assert.ok(delivery.includes('first.starts_with(&format!("[Decision Maker {instance} ("))'));
+  assert.ok(delivery.includes('first.ends_with(&format!(") 제안, {label}, re {card_id}]"))'));
+  assert.ok(server.includes('const ANSWER_HEADER_PREFIX: &str = "[Decision Maker ";'));
+  assert.ok(server.includes('first.ends_with(&format!(", re {card_id}]"))'));
+  // §9's binding travels under the same names from the app's read, through
+  // the bridge, to the local AMUX's check and claim (review r-20261018-065705-65cb2a).
+  const nextRoute = read("app/api/internal/amux/decision-maker/deliveries/next/route.ts");
+  assert.match(nextRoute, /worker: read\.askingWorkerId,/);
+  assert.match(nextRoute, /session_attempt: read\.sessionAttempt,/);
+  assert.match(delivery, /let worker = delivery\.get\("worker"\)\?\.as_str\(\)\?;/);
+  assert.match(delivery, /let session_attempt = delivery\.get\("session_attempt"\)\?\.as_i64\(\)\?;/);
+  assert.equal((delivery.match(/"session_attempt": delivery\.session_attempt/g) ?? []).length, 2, "the check and the claim");
+  for (const struct of ["AnswerCheckBody", "AnswerBody"]) {
+    const body = server.slice(server.indexOf(`struct ${struct} {`), server.indexOf("}", server.indexOf(`struct ${struct} {`)));
+    assert.match(body, /worker: String,/, struct);
+    assert.match(body, /session_attempt: i64,/, struct);
+  }
+  // The relay's delivery routes are the app's three and the local AMUX's three.
+  for (const route of ["DeliveriesNext", "Deliveries", "DeliveryOutcome"]) {
+    assert.ok(delivery.includes(`AppRoute::${route}`), route);
+  }
+  for (const route of ["AnswerCheck", "Answers", "AnswerUnknown"]) {
+    assert.ok(delivery.includes(`LocalRoute::${route}`), route);
+  }
+  // The dashboard's direct answer claims the same record first, behind the board's own route.
+  const board = read("vendor/amux/crates/amux-server/src/api/board.rs");
+  assert.match(board, /"\/\{id\}\/typed-ask\/answer",\s*post\(super::board_typed_ask::claim_operator_answer\)/);
+  const dashboard = read("vendor/amux/crates/amux-dashboard/static/app.js");
+  for (const handler of ["_focusAnswer", "_focusDecide"]) {
+    const start = dashboard.indexOf(`async function ${handler}(`);
+    const body = dashboard.slice(start, dashboard.indexOf("\nasync function ", start + 1));
+    // Review r-20261018-062643-057a27, finding 1: the claim names the revision observed first.
+    const observed = body.indexOf("await _focusObserveQuestion(item)");
+    const claim = body.indexOf("await _focusClaimAnswer(item, seen.revision)");
+    assert.ok(observed > 0 && claim > observed, `${handler} claims the revision it observed`);
+    assert.ok(claim < body.indexOf("_focusSend("), `${handler} claims before it sends`);
+    assert.ok(claim < body.indexOf("_focusPatch("), `${handler} claims before it records`);
+  }
+  // The answer dialog reads the question before it opens, and shows it.
+  const answer = dashboard.slice(dashboard.indexOf("async function _focusAnswer("));
+  assert.ok(answer.indexOf("_focusObserveQuestion(item)") < answer.indexOf("showFormModal("));
+  // The claim's body is the observed revision.
+  assert.match(dashboard, /body: JSON\.stringify\(\{ question_revision: revision \}\)/);
 });

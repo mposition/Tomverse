@@ -30,10 +30,12 @@
 //! Admin (common foundation principle 7).
 //!
 //! WHAT THIS MUST NEVER GROW: a path from a DM output to a worker. Policy
-//! version 1 is proposal-only (§1). The relay posts to exactly two local
-//! routes, the marker's set and release, neither of which takes a result;
-//! the DM output goes to the app's result route and nowhere else.
-//! Delivering an operator-confirmed answer is stage S2-2b3.
+//! version 1 is proposal-only (§1). A question's flow here posts to exactly
+//! two local routes, the marker's set and release, neither of which takes a
+//! result; the DM output goes to the app's result route and nowhere else.
+//! Delivering an operator-confirmed answer is stage S2-2b3's `delivery`
+//! module: it sends only a message the app gives out for a person's
+//! confirmation, and only after the app recorded the delivery decision.
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -66,6 +68,12 @@ pub enum AppRoute {
     ResultLookup,
     ResultUnknown,
     CleanupUnknown,
+    /// Stage S2-2b3: the next operator-confirmed answer (a read).
+    DeliveriesNext,
+    /// Stage S2-2b3: the request's one delivery decision.
+    Deliveries,
+    /// Stage S2-2b3: the delivery's receipt or unknown outcome.
+    DeliveryOutcome,
 }
 
 impl AppRoute {
@@ -82,6 +90,9 @@ impl AppRoute {
             AppRoute::ResultLookup => "/api/internal/amux/decision-maker/results/lookup",
             AppRoute::ResultUnknown => "/api/internal/amux/decision-maker/results/unknown",
             AppRoute::CleanupUnknown => "/api/internal/amux/decision-maker/cleanup/unknown",
+            AppRoute::DeliveriesNext => "/api/internal/amux/decision-maker/deliveries/next",
+            AppRoute::Deliveries => "/api/internal/amux/decision-maker/deliveries",
+            AppRoute::DeliveryOutcome => "/api/internal/amux/decision-maker/deliveries/outcome",
         }
     }
 
@@ -91,6 +102,7 @@ impl AppRoute {
             AppRoute::Requests => "routed",
             AppRoute::Results => "submitted",
             AppRoute::ResultLookup => "found",
+            AppRoute::DeliveriesNext => "found",
             _ => "recorded",
         }
     }
@@ -101,11 +113,19 @@ pub trait DmApp: Send + Sync {
     async fn post(&self, route: AppRoute, body: Value) -> HttpAnswer;
 }
 
-/// The two local routes the relay may write. Both are outside `/api/board`.
+/// The local routes the relay may write, all outside `/api/board`: the
+/// marker's two, and (stage S2-2b3) the delivery of an operator-confirmed
+/// answer's three. No question's DM output goes to any of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalRoute {
     SetPending,
     ReleasePending,
+    /// Whether a confirmed answer could be delivered now (a read).
+    AnswerCheck,
+    /// The answer record's claim, then the send, for one confirmed answer.
+    Answers,
+    /// A delivery whose result is unknown: pause the session, read the receipt.
+    AnswerUnknown,
 }
 
 impl LocalRoute {
@@ -113,6 +133,9 @@ impl LocalRoute {
         match self {
             LocalRoute::SetPending => "/api/dm-relay/pending",
             LocalRoute::ReleasePending => "/api/dm-relay/pending/release",
+            LocalRoute::AnswerCheck => "/api/dm-relay/answers/check",
+            LocalRoute::Answers => "/api/dm-relay/answers",
+            LocalRoute::AnswerUnknown => "/api/dm-relay/answers/unknown",
         }
     }
 }
@@ -841,11 +864,14 @@ pub(crate) mod tests {
     }
 
     /// A local AMUX whose marker routes answer as scripted (set first, then
-    /// release), recording every write; reads are served from `reads`.
+    /// release), recording every write; reads are served from `reads`, and
+    /// the delivery routes (stage S2-2b3) answer from `answers` in order, by
+    /// path, and are lost when nothing is scripted.
     #[derive(Default)]
     pub(crate) struct FakeLocal {
         pub set_answer: Mutex<Option<HttpAnswer>>,
         pub release_answers: Mutex<VecDeque<HttpAnswer>>,
+        pub answers: Mutex<BTreeMap<&'static str, VecDeque<HttpAnswer>>>,
         pub reads: Mutex<BTreeMap<String, LocalRead>>,
         pub writes: Mutex<Vec<(LocalRoute, Value, Instant)>>,
     }
@@ -896,6 +922,13 @@ pub(crate) mod tests {
                     .unwrap()
                     .pop_front()
                     .unwrap_or_else(|| answered(200, json!({"outcome": "released"}))),
+                LocalRoute::AnswerCheck | LocalRoute::Answers | LocalRoute::AnswerUnknown => self
+                    .answers
+                    .lock()
+                    .unwrap()
+                    .get_mut(route.path())
+                    .and_then(VecDeque::pop_front)
+                    .unwrap_or(HttpAnswer::Lost),
             }
         }
     }
