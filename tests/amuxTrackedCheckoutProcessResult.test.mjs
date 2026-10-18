@@ -291,3 +291,30 @@ test("invalid observer setup kills an already-spawned child", {
   assert.deepEqual(observed, { kind: "outcome_unknown" });
   assert.equal(process.kills, 1);
 });
+
+test("the diagnostic parser never throws and enforces its line limit on every line", async () => {
+  const { createAmuxTrackedCheckoutCliDiagnosticObserver } = await import(
+    "../lib/amux/ideaTrackedCheckoutReadEvents.mjs");
+  const odd = createAmuxTrackedCheckoutCliDiagnosticObserver();
+  // A valid JSON event whose tool name is an object with a broken toString.
+  odd.observeChunk(Buffer.from(JSON.stringify({ type: "assistant", message: {
+    content: [{ type: "tool_use", name: { toString: null } }] } }) + "\n"));
+  odd.observeChunk(Buffer.from('{"type":"result","is_error":true,"num_turns":2}\n'));
+  assert.deepEqual(odd.finish(), { assistantError: null, resultIsError: true,
+    apiErrorStatus: null, terminalReason: null, permissionDenials: null,
+    turns: 2, toolUses: { Read: 0, Grep: 0, Glob: 0 } });
+  // A line over the limit is skipped even when its newline arrives in the
+  // same chunk as its last bytes; the next line still counts.
+  const line = JSON.stringify({ type: "result", terminal_reason: "max_turns",
+    num_turns: 9, pad: "x".repeat(64) });
+  const limited = createAmuxTrackedCheckoutCliDiagnosticObserver({ maxLine: line.length - 1 });
+  limited.observeChunk(Buffer.from(line.slice(0, line.length - 2)));
+  limited.observeChunk(Buffer.from(line.slice(line.length - 2) + "\n"));
+  assert.equal(limited.finish().terminalReason, null);
+  const whole = createAmuxTrackedCheckoutCliDiagnosticObserver({ maxLine: line.length - 1 });
+  whole.observeChunk(Buffer.from(line + "\n" + '{"type":"result","num_turns":1}\n'));
+  assert.deepEqual([whole.finish().terminalReason, whole.finish().turns], [null, 1]);
+  const exact = createAmuxTrackedCheckoutCliDiagnosticObserver({ maxLine: line.length });
+  exact.observeChunk(Buffer.from(line + "\n"));
+  assert.equal(exact.finish().terminalReason, "max_turns");
+});
