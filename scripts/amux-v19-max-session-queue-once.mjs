@@ -6,22 +6,23 @@ import { runAmuxV19MaxSessionQueueEntryOnce } from
   "../lib/amux/ideaLocalMaxSessionQueueEntry.mjs";
 import { AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalSessionAnalysisQueuePoll.mjs";
+import { amuxV19MaxQueueStatus } from
+  "./amux-v19-max-session-queue-status.mjs";
 
 if (process.platform !== "linux") {
   process.stderr.write("AMUX_V19_MAX_SESSION_QUEUE_REFUSED\n");
   process.exitCode = 2;
 } else {
-  let kind = "unavailable";
+  let result = { kind: "unavailable" };
   try {
-    const result = await runAmuxV19MaxSessionQueueEntryOnce({
+    result = await runAmuxV19MaxSessionQueueEntryOnce({
       origin: process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV],
       fetchImpl: fetch,
       stateDirectory: join(homedir(),
         ".local/state/tomverse-amux-v19-max-analysis"),
     });
-    kind = result.kind;
   } catch { /* Never emit queue IDs, price data, or response bodies. */ }
-  process.stdout.write(`AMUX_V19_MAX_SESSION_QUEUE_${kind}\n`);
-  if (!["idle", "discovered", "disabled", "catalog_unapproved",
-      "more_unexamined"].includes(kind)) process.exitCode = 1;
+  const status = amuxV19MaxQueueStatus(result);
+  process.stdout.write(status.line);
+  process.exitCode = status.exitCode;
 }
