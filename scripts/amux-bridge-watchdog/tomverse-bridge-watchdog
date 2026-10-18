@@ -14,7 +14,9 @@
 # be there, and every loaded instance of tomverse-amux-v22-bridge@ and
 # tomverse-amux-v22-sidecar@ (one pair per v22 worker). A production deploy on
 # 2026-10-12 halted all five bridges at once; one unit alone would have missed
-# four of them.
+# four of them. Orchestration policy version 55 adds one bridge per worker,
+# tomverse-amux-bridge@<worker>; every loaded instance of it is checked too.
+# The older names stay for the transition.
 #
 # Sending nothing is a signal too: the monitor turns a silence longer than its
 # grace period into an alert, which is also what the host going down, losing
@@ -30,8 +32,9 @@
 set -euo pipefail
 
 main_unit=tomverse-bridge.service
-unit_patterns=('tomverse-amux-v22-bridge@*.service' 'tomverse-amux-v22-sidecar@*.service')
-unit_name='^tomverse-amux-v22-(bridge|sidecar)@[A-Za-z0-9_.-]+\.service$'
+unit_patterns=('tomverse-amux-v22-bridge@*.service' 'tomverse-amux-v22-sidecar@*.service'
+  'tomverse-amux-bridge@*.service')
+unit_name='^(tomverse-amux-v22-(bridge|sidecar)|tomverse-amux-bridge)@[A-Za-z0-9_.-]+\.service$'
 # A plain https URL: host, optional port, path segments. No query string, no
 # fragment, no credentials -- the check's own ping URL never needs them.
 url_pattern='^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)+$'
@@ -50,8 +53,8 @@ down=0
 pending=0
 
 # The main unit is always checked, listed or not: a unit that is not loaded
-# reads as inactive, which is a stop. The v22 instances are whatever is loaded.
-# A listing that fails is not an empty listing: it leaves the v22 units
+# reads as inactive, which is a stop. The instances are whatever is loaded.
+# A listing that fails is not an empty listing: it leaves the instance units
 # unknown, so it counts as unreadable and the run cannot send up.
 units=("$main_unit")
 if listing=$(systemctl list-units --all --plain --no-legend --type=service \
@@ -62,7 +65,7 @@ if listing=$(systemctl list-units --all --plain --no-legend --type=service \
 else
   pending=$((pending + 1))
   reason=${listing%%$'\n'*}
-  echo "tomverse-bridge-watchdog: the v22 unit list is unreadable (systemctl: ${reason:0:200})"
+  echo "tomverse-bridge-watchdog: the instance unit list is unreadable (systemctl: ${reason:0:200})"
 fi
 
 for unit in "${units[@]}"; do
