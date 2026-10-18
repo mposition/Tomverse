@@ -94,6 +94,8 @@ async function main() {
         ? observed.approvedConnects ?? null : null,
       deniedConnects: observed.kind === "outcome_unknown"
         ? observed.deniedConnects ?? null : null,
+      stderrClass: observed.kind === "outcome_unknown"
+        ? observed.stderrClass ?? null : null,
       answerMatches: observed.kind === "verified_success"
         ? observed.rawModelOutput.trim() === "S0_OK" : null,
       traceRead: observed.kind === "verified_success"

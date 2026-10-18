@@ -97,6 +97,21 @@ test("synthetic diagnostic distinguishes child failure from parser refusal witho
   });
 });
 
+test("synthetic stderr reports only a bounded failure class", async () => {
+  const process = child();
+  const observed = observeAmuxTrackedCheckoutChild(process,
+    { ...input, diagnostic: true });
+  process.stderr.write("private-token=never-retain authenti");
+  process.stderr.end("cation_error private-content=discard\n");
+  await new Promise((resolve) => process.stderr.once("end", resolve));
+  await send(process);
+  const failure = observed.finish({ code: 1, signal: null });
+  assert.deepEqual(failure, { kind: "outcome_unknown",
+    failureStage: "child_nonzero", childExitCode: 1,
+    stderrClass: "authentication" });
+  assert.equal(JSON.stringify(failure).includes("private"), false);
+});
+
 test("stderr transport errors invalidate an otherwise complete result", async () => {
   const process = child();
   const observed = observeAmuxTrackedCheckoutChild(process, input);
