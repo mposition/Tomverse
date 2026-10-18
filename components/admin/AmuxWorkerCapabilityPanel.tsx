@@ -535,7 +535,15 @@ export function AmuxWorkerCapabilityPanel({ view, isOwner }: { view: AmuxWorkerC
   const [editing, setEditing] = useState<AmuxWorkerCapabilityForm | null>(null);
 
   const apply = (changes: AmuxWorkerCapabilityUpdate) => {
-    if ("view" in changes) setCurrent(changes.view ?? null);
+    if ("view" in changes) {
+      const next = changes.view ?? null;
+      setCurrent(next);
+      // A worker that left the list (retired elsewhere) cannot be edited, and
+      // its editor would no longer render a way out: let the edit go.
+      if (next !== null) {
+        setEditing((form) => (form !== null && next.rows.some((row) => row.workerName === form.workerName) ? form : null));
+      }
+    }
     if ("notice" in changes) setNotice(changes.notice ?? null);
     if ("refusal" in changes) setRefusal(changes.refusal ?? null);
     if ("failure" in changes) setFailure(changes.failure ?? null);

@@ -89,3 +89,10 @@ test("toggling keeps a list sorted and unique", () => {
   assert.deepEqual(amuxToggleListValue(["chore", "tests"], "chore", true), ["chore", "tests"]);
   assert.deepEqual(amuxToggleListValue(["chore", "tests"], "chore", false), ["tests"]);
 });
+
+test("a recorded tool with a comma in it survives a save that does not touch the tools", () => {
+  const withComma = { ...recorded, capability: { ...recorded.capability, toolCapabilities: ["a,b", "shell"] } };
+  const form = { ...amuxWorkerCapabilityFormFromRow(row({ current: withComma })), model: "claude-opus-5-6" };
+  assert.deepEqual(amuxWorkerCapabilityFromForm(form).toolCapabilities, ["a,b", "shell"]);
+  assert.deepEqual(amuxWorkerCapabilityFromForm({ ...form, tools: "a, b, shell" }).toolCapabilities, ["a", "b", "shell"]);
+});

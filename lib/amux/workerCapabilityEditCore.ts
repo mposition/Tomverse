@@ -23,6 +23,12 @@ export type AmuxWorkerCapabilityForm = {
   routingTags: string[];
   /** Tools as typed: comma-separated. */
   tools: string;
+  /**
+   * The recorded tools. While `tools` still reads exactly as they were
+   * shown, these are kept as they are -- a recorded tool may itself contain
+   * a comma, which splitting the text would change.
+   */
+  recordedTools: string[];
   v22Enabled: boolean;
   v22Model: string;
   v22Roles: string[];
@@ -40,6 +46,7 @@ export function amuxWorkerCapabilityFormFromRow(row: AmuxWorkerCapabilityAdminRo
     model: capability?.model ?? "",
     routingTags: [...(capability?.routingTags ?? [])],
     tools: (capability?.toolCapabilities ?? []).join(", "),
+    recordedTools: [...(capability?.toolCapabilities ?? [])],
     v22Enabled: capability?.v22 != null,
     v22Model: capability?.v22?.model ?? "",
     v22Roles: [...(capability?.v22?.roles ?? [])],
@@ -53,7 +60,9 @@ export function amuxWorkerCapabilityFromForm(form: AmuxWorkerCapabilityForm): Am
   return {
     model: model.length > 0 ? model : null,
     routingTags: sortedUnique(form.routingTags),
-    toolCapabilities: sortedUnique(form.tools.split(",").map((tool) => tool.trim()).filter((tool) => tool.length > 0)),
+    toolCapabilities: form.tools === form.recordedTools.join(", ")
+      ? sortedUnique(form.recordedTools)
+      : sortedUnique(form.tools.split(",").map((tool) => tool.trim()).filter((tool) => tool.length > 0)),
     v22: form.v22Enabled
       ? { model: form.v22Model.trim(), roles: sortedUnique(form.v22Roles), tools: sortedUnique(form.v22Tools) }
       : null,
