@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -33,6 +34,9 @@ test("the claim slug, never the caller path, selects the host checkout", async (
   try {
     const selected = join(directory, "owner", "repo");
     await mkdir(selected, { recursive: true });
+    execFileSync("git", ["init", "--quiet", selected]);
+    execFileSync("git", ["-C", selected, "remote", "add", "origin",
+      "https://github.com/owner/repo.git"]);
     process.env[rootEnv] = directory;
     process.env[originEnv] = "https://tomverse.test/";
     process.env[v4OriginEnv] = "https://tomverse.test/";

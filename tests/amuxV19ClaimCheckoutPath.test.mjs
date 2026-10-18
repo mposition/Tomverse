@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +16,9 @@ test("only a claim repository under the configured root selects checkout bytes",
     const root = join(directory, "mirrors");
     const selected = join(root, "owner", "repo");
     await mkdir(selected, { recursive: true });
+    execFileSync("git", ["init", "--quiet", selected]);
+    execFileSync("git", ["-C", selected, "remote", "add", "origin",
+      "https://github.com/owner/repo.git"]);
     await writeFile(join(root, "owner", "notdir"), "synthetic");
     const outside = join(directory, "outside");
     await mkdir(outside);
@@ -37,6 +41,23 @@ test("only a claim repository under the configured root selects checkout bytes",
       await realpath(selected));
     assert.equal(await resolveAmuxV19ClaimCheckoutPath("OWNER/REPO"),
       await realpath(selected));
+    execFileSync("git", ["-C", selected, "remote", "set-url", "origin",
+      "git@github.com:owner/repo.git"]);
+    assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/repo"),
+      await realpath(selected));
+    execFileSync("git", ["-C", selected, "remote", "remove", "origin"]);
+    assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/repo"), null);
+    execFileSync("git", ["-C", selected, "remote", "add", "origin",
+      "https://github.com/owner/repo.git"]);
+    for (const remote of ["https://github.com/other/repo.git",
+      "https://credential@github.com/owner/repo.git",
+      "https://other.example/owner/repo.git"]) {
+      execFileSync("git", ["-C", selected, "remote", "set-url", "origin",
+        remote]);
+      assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/repo"), null);
+    }
+    execFileSync("git", ["-C", selected, "remote", "set-url", "origin",
+      "https://github.com/owner/repo.git"]);
     assert.equal(await resolveAmuxV19ClaimCheckoutPath("owner/notdir"), null);
     for (const slug of ["owner/..", "../repo", "owner/missing",
       "owner/repo/extra", "owner\\repo"]) {
