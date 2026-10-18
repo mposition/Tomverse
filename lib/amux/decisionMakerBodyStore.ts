@@ -822,7 +822,11 @@ export async function assignDecisionMakerRequestWithDigestKey(
 
 /**
  * What the broker submits: the DM's output as the exact bytes it produced,
- * with the card's options as the DM received them, or no output.
+ * with the card's options as the DM received them, or no output. Each option
+ * is its `{ id, label }` only, the pair the option set digest binds: an
+ * option's effect class and paths (DmCard, stage S2-2b1) do not take part in
+ * checking an output, and a change to them is a new question revision, so a
+ * new request, on the local AMUX side.
  */
 export type DecisionMakerOutput =
   | { kind: "output"; raw: string; options: ReadonlyArray<{ id: string; label: string }> }

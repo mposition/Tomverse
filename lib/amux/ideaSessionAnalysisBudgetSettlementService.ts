@@ -27,9 +27,16 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
   outcome: "verified_success" | "invocation_failed" | "outcome_unknown";
   inputTokens: number | null;
   outputTokens: number | null;
+  exactAgentClaim?: { requestId: string; reservationId: string;
+    ideaId: string; invocationOrdinal: number };
 }): Promise<{ claimId: string; status: "succeeded" | "failed" |
   "outcome_unknown"; settledMicroUsd: string | null; auditId: string }> {
-  if (!UUID.test(input.claimId)) {
+  if (!UUID.test(input.claimId) || (input.exactAgentClaim &&
+      (!UUID.test(input.exactAgentClaim.requestId) ||
+       !UUID.test(input.exactAgentClaim.reservationId) ||
+       !UUID.test(input.exactAgentClaim.ideaId) ||
+       !Number.isSafeInteger(input.exactAgentClaim.invocationOrdinal) ||
+       input.exactAgentClaim.invocationOrdinal < 0))) {
     throw new AmuxSessionBudgetSettlementError("not_settleable");
   }
   await tx.$queryRaw`
@@ -49,11 +56,16 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
     where: { id: input.claimId },
     include: { reservation: { select: { idea: { select: {
       state: true, cancelledAt: true, analysisDeadlineAt: true,
-    } } } } },
+    } }, ideaId: true } } },
   });
   if (!claim || claim.namespace !== AMUX_V4_ANALYSIS_NAMESPACE ||
       claim.status !== "in_flight" || claim.closedAt !== null ||
-      claim.resolutionAuditLogId !== null) {
+      claim.resolutionAuditLogId !== null ||
+      (input.exactAgentClaim &&
+        (claim.requestId !== input.exactAgentClaim.requestId ||
+         claim.reservationId !== input.exactAgentClaim.reservationId ||
+         claim.reservation.ideaId !== input.exactAgentClaim.ideaId ||
+         claim.invocationOrdinal !== input.exactAgentClaim.invocationOrdinal))) {
     throw new AmuxSessionBudgetSettlementError("not_settleable");
   }
   const windowRows = await tx.$queryRaw<Array<{ spentMicroUsd: bigint;

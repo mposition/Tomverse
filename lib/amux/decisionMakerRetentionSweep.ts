@@ -34,7 +34,8 @@ import { DM_INSTANCE_SCOPES, type DmInstanceScope } from "@/lib/amux/decisionMak
  * First, since 2026-10-17, §8's validation latch for each instance: the result
  * route checks it once a validation failure commits, and this is the check
  * that writes a latch whose first check did not commit (the request store
- * finds any run of three since the instance's newest switch event). It comes
+ * finds any run of three inside the instance's count boundary, which since
+ * stage S2-2a4 a person's mode change does not move). It comes
  * before the retention work so that a retention error cannot hold it back,
  * and it has a failure boundary of its own, per instance: a check that fails
  * -- a switch read, a result it cannot read, a transaction -- is logged by its
