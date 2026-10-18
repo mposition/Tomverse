@@ -3209,18 +3209,38 @@ accept했다. 이 승인을 기록하는 commit이 래치를 true로 바꾼다.
 
 1. 새 템플릿 `tomverse-amux-bridge@.service`를 설치한다. `enable`하지 않는다(버전 31 4항).
 2. 자동 재시작과 watchdog의 대상에 `tomverse-amux-bridge@*`를 넣고, polkit 규칙도 그 이름으로 고친다.
-3. 활성화(5항) 때 worker마다 `tomverse-amux-bridge@<worker>`를 시작하고, 옛 `tomverse-bridge.service`와
-   `tomverse-amux-v22-bridge@*` 인스턴스를 멈춘다. 같은 worker를 옛 bridge와 새 bridge가 동시에 등록하지 않도록,
-   한 worker씩 옛 인스턴스를 멈춘 뒤 새 인스턴스를 시작한다.
+3. 활성화(5항) 때 옛 `tomverse-bridge.service`와 `tomverse-amux-v22-bridge@*` 인스턴스에서
+   `tomverse-amux-bridge@<worker>` 인스턴스로 옮긴다. 옮기는 조건과 순서는 3.1이다.
 4. 관측이 끝나면 옛 unit 파일과 그 안의 `TOMVERSE_AMUX_WSL_SESSIONS`·`TOMVERSE_AMUX_V22_SIDECAR_SOCKET`을
    지운다.
+
+### 3.1 소유권 전환과 되돌리기의 조건
+
+옛 bridge를 멈춰도 로컬 AMUX 세션이나 sidecar의 작업은 끝나지 않는다. 새 bridge의 등록은 generation을 올려 진행
+중인 attempt의 heartbeat와 정산을 막는다. 그래서 전환은 진행 중인 일이 없음을 확인한 단위로만 한다.
+
+- **전환 단위.** codex 셋은 옛 unit 하나(`tomverse-bridge.service`)를 함께 쓰므로 셋이 한 단위다. v22 worker는
+  worker 하나가 한 단위다.
+- **순서.** 단위마다 다음을 모두 확인한 뒤에만 새 인스턴스를 시작한다.
+  1. 단위의 모든 worker에 열린 attempt가 없고, 그 worker가 소유한 `todo`·`doing` 카드가 없으며, 미해결
+     orchestrator 쓰기와 열린 halt가 없음을 앱의 read-back으로 확인한다.
+  2. 옛 인스턴스를 멈추고, 그 worker들의 runtime lease가 만료된 것(90초)을 확인한다. lease가 남은 동안에는 새
+     claim이 그 runtime에 갈 수 있으므로, 만료 뒤 1번을 다시 확인한다. 그 사이 attempt가 생겼으면 옛 인스턴스를
+     다시 시작하고 전환을 미룬다.
+  3. 로컬 AMUX 세션(codex)이나 sidecar(v22)에 진행 중인 작업이 없음을 호스트에서 확인한다.
+  4. 그 뒤에 새 인스턴스를 시작한다.
+- **되돌리기.** 같은 조건을 반대 방향으로 따른다. 새 인스턴스를 멈추고 1~3을 확인한 뒤 옛 인스턴스를 시작한다.
+  래치를 끄는 것만으로는 되돌리기가 아니다. 래치가 꺼져도 이미 등록된 새 bridge는 진행 중인 attempt를 끝내려고
+  계속 돌기 때문에, 옛 bridge를 바로 다시 켜면 두 프로세스가 같은 worker를 등록하려 한다.
+- 어느 확인이든 하지 못하면 멈추고 사람이 판단한다(공통 기반 원칙 7).
 
 ### 4. 버전 31과 버전 35를 바꾸는 점
 
 - 버전 31 4항의 조정기 대상 템플릿은 `tomverse-amux-v22-bridge@`·`tomverse-amux-v22-sidecar@`에서
   `tomverse-amux-bridge@`·`tomverse-amux-v22-sidecar@`로 바뀐다. 조정기가 켜는 bridge는 이 템플릿 하나다.
 - 버전 35 4항의 세션 bridge와 worker별 v22 bridge의 구분, 그리고 `TOMVERSE_AMUX_WSL_SESSIONS`와의 교집합은 이
-  버전의 활성화 뒤로 쓰지 않는다. R2의 종료 조건(버전 31 8항, "환경 변수 목록 삭제")은 3항 4번과 6항 S4로 채운다.
+  버전의 활성화 뒤로 쓰지 않는다. R2의 종료 조건(버전 31 8항, "환경 변수 목록 삭제")은 이 버전만으로 채워지지 않는다.
+  R2 종료 기록의 조건은 5항이다.
 
 ### 5. 단계
 
@@ -3231,10 +3251,12 @@ accept했다. 이 승인을 기록하는 commit이 래치를 true로 바꾼다.
 | S1 | 앱: `bridge-scope` route, 래치 false | develop 병합 |
 | S2 | Rust: `--worker` 모드, 새 템플릿과 자동 재시작·watchdog 변경 파일 | develop 병합, 운영자가 바이너리와 3항 1·2번 설치 |
 | S3 | 활성화 기록(새 정책 버전): 래치 true, 3항 3번의 인스턴스 전환 | 3일(72시간) 동안 Agent Office의 AMUX 층이 전환 전과 같음 |
-| S4 | 옛 unit·두 변수·`--worker` 없는 경로와 `session-list` 삭제, R2 종료 기록 | 버전 31 8항 R2의 종료 조건 |
+| S4 | 옛 unit·두 변수·`--worker` 없는 경로와 `session-list` 삭제 | 호스트와 코드에 `TOMVERSE_AMUX_WSL_SESSIONS`·`TOMVERSE_AMUX_V22_SIDECAR_SOCKET`이 남지 않음 |
 
 - S1·S2는 버전 54의 R2d 관측과 함께 진행할 수 있다. 배정과 bridge 동작을 바꾸지 않기 때문이다.
-- 버전 56(예정, R2e의 앱 몫: 카탈로그 환경 변수 경로 삭제)과는 서로 기다리지 않는다.
+- S1~S4와 버전 56(예정, R2e의 앱 몫: 카탈로그 환경 변수 경로 삭제)의 작업은 서로 기다리지 않는다.
+- R2 종료 기록(새 정책 버전)은 둘을 모두 기다린다. 이 버전의 S4, 버전 56의 코드 삭제와 그 배포, IaC 항목 삭제,
+  Railway에서 두 카탈로그 환경 변수의 삭제가 모두 끝난 것을 확인한 뒤에만 쓴다.
 
 ### 6. 이 버전으로 끝나지 않는 것
 
@@ -3246,8 +3268,8 @@ accept했다. 이 승인을 기록하는 commit이 래치를 true로 바꾼다.
 ### 7. 공통 기반 체크리스트 (이 버전이 바꾸는 항목)
 
 - **6 자격증명**: bridge 계정과 그 환경 파일은 그대로다. 프로세스 수는 worker 수만큼이고, 지금과 같다.
-- **9 스위치**: `AMUX_WORKER_BRIDGE_SCOPE_LATCH`(false로 출고). 끄면 `--worker` bridge는 아무 worker도 등록하지
-  않으므로, 되돌릴 때는 옛 인스턴스를 다시 시작한다.
+- **9 스위치**: `AMUX_WORKER_BRIDGE_SCOPE_LATCH`(false로 출고). 끄면 `--worker` bridge는 새로 등록하지 않는다.
+  되돌리기는 래치만으로 되지 않고 3.1의 조건을 따른다.
 - **10 결과 불명**: 정지 계약은 그대로이고 worker 단위다. 목록을 읽지 못하면 등록하지 않을 뿐 정지하지 않는다.
 - **15 실행 위치**: 전용 Ubuntu runner(버전 23) 그대로다.
 - **16 상태 위치**: 담당 범위는 본 앱 DB(등록부·능력)에서 나온다.
