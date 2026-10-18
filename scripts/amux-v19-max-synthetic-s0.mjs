@@ -21,8 +21,10 @@ const run = promisify(execFile);
 const CLI = "/home/tommy/.local/share/claude/versions/2.1.288";
 const CLI_SHA256 = "0298068b686e7fdbaf9402a7a587bb7f49c0b0e084de09f69145a0719207640c";
 const CLAIM_DIR = "/home/tommy/.amux-cli-profiles";
-const CLAIM_MARKER = "v19-max-synthetic-20261018.claimed";
-const APPROVAL_EXPIRES_AT = Date.parse("2026-10-19T00:00:00.000Z");
+// A first approved call consumed the 20261018 marker but its result was
+// unknown. This separate diagnostic attempt stays closed until approved.
+const CLAIM_MARKER = "v19-max-synthetic-20261018-02.claimed";
+const APPROVAL_EXPIRES_AT = Date.parse("2026-10-20T00:00:00.000Z");
 const MAX_PROBE_MS = 120_000;
 const SAFE_PREFLIGHT_REASONS = new Set([
   "synthetic_s0_refused", "synthetic_s0_cli_unavailable",
@@ -43,7 +45,7 @@ async function pinnedCliPresent() {
 async function main() {
   if (process.platform !== "linux" || process.getuid?.() === 0 ||
       hostname() !== "tomverseagent" ||
-      process.env.AMUX_V19_MAX_SYNTHETIC_S0_APPROVED !== "1" ||
+      process.env.AMUX_V19_MAX_SYNTHETIC_S0_APPROVED !== "2" ||
       process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV] !== undefined ||
       process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN ||
       process.env.CLAUDE_CODE_OAUTH_TOKEN) {
