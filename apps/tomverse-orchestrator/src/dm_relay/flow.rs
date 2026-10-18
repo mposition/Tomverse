@@ -27,7 +27,12 @@
 //! it was in the operator's queue (§2-1). An app write whose outcome is
 //! unknown is never sent again; the relay halts (it takes no new question
 //! until the bridge is restarted by a person) and the request is read in
-//! Admin (common foundation principle 7).
+//! Admin (common foundation principle 7). Since stage S2-2b4 the same holds
+//! for a record the app refused after the step it records already happened --
+//! the discard, the transmission receipt and `results/unknown`: a refusal
+//! wrote nothing, so it is not counted as the record; the relay halts and
+//! names it, unless the refusal itself says the ledger already holds what the
+//! write was for.
 //!
 //! WHAT THIS MUST NEVER GROW: a path from a DM output to a worker. Policy
 //! version 1 is proposal-only (§1). A question's flow here posts to exactly
@@ -386,8 +391,12 @@ async fn app_write<A: DmApp + ?Sized>(app: &A, route: AppRoute, body: Value) -> 
     read_app_answer(&answer, route.envelope())
 }
 
-/// Closes a request whose card the relay will not send (§2-3). A refusal is
-/// a known answer; an unknown one halts.
+/// Closes a request whose card the relay will not send (§2-3). Only the app's
+/// recorded answer is a record (stage S2-2b4): a refusal -- a busy database,
+/// the routes closed -- wrote nothing and leaves the request open and
+/// assigned, so the relay stops and names the missing record, as it does for
+/// an answer it never got. A request the ledger already closed is what the
+/// discard was for.
 async fn discard<A: DmApp + ?Sized>(app: &A, request_id: &str, code: &'static str) -> RelayRun {
     let run = RelayRun::end(RelayEnd::Settled(code));
     match app_write(
@@ -397,7 +406,9 @@ async fn discard<A: DmApp + ?Sized>(app: &A, request_id: &str, code: &'static st
     )
     .await
     {
-        AppAnswer::Done(_) | AppAnswer::Refused(_) => run,
+        AppAnswer::Done(_) => run,
+        AppAnswer::Refused(reason) if reason == "closed" => run,
+        AppAnswer::Refused(_) => run.halted("assignment_discard_record_refused"),
         AppAnswer::Unknown => run.halted("assignment_discard_outcome_unknown"),
     }
 }
@@ -683,16 +694,21 @@ where
         run = run.halted("cleanup_unknown_report_unconfirmed");
     }
 
-    // 9. §10's receipt.
-    if app_write(
+    // 9. §10's receipt. Only the app's recorded answer is a record (stage
+    // S2-2b4): a refusal wrote nothing, and the request would keep an intent
+    // with no receipt, so the relay stops and names it. An outcome the ledger
+    // already holds is a record.
+    match app_write(
         app,
         AppRoute::TransmissionOutcome,
         json!({"request_id": request_id, "instance": instance, "outcome": transmit_outcome(outcome.transmission)}),
     )
     .await
-        == AppAnswer::Unknown
     {
-        run = run.halted("transmit_outcome_unknown");
+        AppAnswer::Done(_) => {}
+        AppAnswer::Refused(reason) if reason == "transmit_outcome_recorded" => {}
+        AppAnswer::Refused(_) => run = run.halted("transmit_outcome_record_refused"),
+        AppAnswer::Unknown => run = run.halted("transmit_outcome_unknown"),
     }
     run
 }
@@ -739,7 +755,11 @@ async fn submit_result<A: DmApp + ?Sized>(
         {
             RelayRun::end(RelayEnd::Settled("result_found_by_lookup"))
         }
-        AppAnswer::Refused(_) => RelayRun::end(RelayEnd::Settled("result_unknown_refused")),
+        // Stage S2-2b4: any other refusal wrote nothing, and the request keeps
+        // no result and no unknown -- the DM's output is lost from the ledger
+        // -- so it is no settled answer: the relay stops and names it.
+        AppAnswer::Refused(_) => RelayRun::end(RelayEnd::Settled("result_unknown_record_refused"))
+            .halted("result_unknown_record_refused"),
         AppAnswer::Unknown => RelayRun::end(RelayEnd::Settled("result_unknown_outcome_unknown"))
             .halted("result_unknown_outcome_unknown"),
     }
@@ -1306,6 +1326,136 @@ pub(crate) mod tests {
             local.routes(),
             vec![LocalRoute::SetPending, LocalRoute::ReleasePending]
         );
+    }
+
+    /// Stage S2-2b4: a discard the app refused is not a record. A busy
+    /// database (503) or the routes closed (409) left the request open and
+    /// assigned, so the relay stops and names the missing record. A request
+    /// the ledger already closed is what the discard was for, and is no stop.
+    #[tokio::test]
+    async fn a_refused_discard_is_not_a_record_and_halts_the_relay() {
+        for (discarded, halt) in [
+            (
+                refused(503, "recorded", "amux_database_busy"),
+                Some("assignment_discard_record_refused"),
+            ),
+            (
+                refused(409, "recorded", "dm_routing_disabled"),
+                Some("assignment_discard_record_refused"),
+            ),
+            (refused(409, "recorded", "closed"), None),
+            (recorded(), None),
+        ] {
+            let app = FakeApp::with(vec![
+                (AppRoute::Requests, routed("dm_proposal")),
+                (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+                (AppRoute::AssignmentDiscard, discarded.clone()),
+            ]);
+            let local = FakeLocal::default();
+            *local.set_answer.lock().unwrap() = Some(answered(
+                200,
+                json!({"outcome": "discarded", "reason": "stale_revision"}),
+            ));
+            let broker = FakeBroker::answering(|_| BrokerExchange::Lost);
+            let run = relay_candidate(&app, &local, &broker, &candidate()).await;
+            assert_eq!(run.end, RelayEnd::Settled("marker_discarded"));
+            assert_eq!(run.halt, halt, "{discarded:?}");
+            assert!(!broker.called());
+        }
+    }
+
+    /// Stage S2-2b4: §10's transmission receipt the app refused is not a
+    /// record either. An outcome already on the ledger is.
+    #[tokio::test]
+    async fn a_refused_transmission_receipt_is_not_a_record_and_halts_the_relay() {
+        for (outcome, halt) in [
+            (
+                refused(503, "recorded", "amux_database_busy"),
+                Some("transmit_outcome_record_refused"),
+            ),
+            (
+                refused(409, "recorded", "dm_routing_disabled"),
+                Some("transmit_outcome_record_refused"),
+            ),
+            (refused(409, "recorded", "transmit_outcome_recorded"), None),
+            (HttpAnswer::Lost, Some("transmit_outcome_unknown")),
+            (recorded(), None),
+        ] {
+            let app = FakeApp::with(vec![
+                (AppRoute::Requests, routed("dm_proposal")),
+                (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+                (AppRoute::Transmissions, recorded()),
+                (AppRoute::Results, submitted("accepted")),
+                (AppRoute::TransmissionOutcome, outcome.clone()),
+            ]);
+            let local = FakeLocal::marking();
+            let broker = FakeBroker::answering(|_| {
+                broker_says(proposal(), "process_ended", json!({"status": "verified"}))
+            });
+            let run = relay_candidate(&app, &local, &broker, &candidate()).await;
+            assert_eq!(run.end, RelayEnd::Settled("result_recorded"));
+            assert_eq!(run.halt, halt, "{outcome:?}");
+            // The marker is released whatever the receipt's record says.
+            assert_eq!(
+                local.routes(),
+                vec![LocalRoute::SetPending, LocalRoute::ReleasePending]
+            );
+        }
+    }
+
+    /// Stage S2-2b4: a `results/unknown` the app refused leaves the request
+    /// with no result and no unknown -- open, with the DM's output lost from
+    /// the ledger -- so it is not a settled answer: the relay stops. A pair
+    /// the ledger already accepted or rejected is found, and is no stop.
+    #[tokio::test]
+    async fn a_refused_result_unknown_is_not_a_record_and_halts_the_relay() {
+        for (unknown, end, halt) in [
+            (
+                refused(503, "recorded", "amux_database_busy"),
+                "result_unknown_record_refused",
+                Some("result_unknown_record_refused"),
+            ),
+            (
+                refused(409, "recorded", "not_assigned"),
+                "result_unknown_record_refused",
+                Some("result_unknown_record_refused"),
+            ),
+            (
+                refused(409, "recorded", "already_rejected"),
+                "result_found_by_lookup",
+                None,
+            ),
+            (
+                refused(409, "recorded", "already_accepted"),
+                "result_found_by_lookup",
+                None,
+            ),
+        ] {
+            let app = FakeApp::with(vec![
+                (AppRoute::Requests, routed("dm_proposal")),
+                (AppRoute::Assignments, assigned(Duration::from_secs(1800))),
+                (AppRoute::Transmissions, recorded()),
+                (AppRoute::Results, HttpAnswer::Lost),
+                (AppRoute::ResultLookup, HttpAnswer::Lost),
+                (AppRoute::ResultUnknown, unknown.clone()),
+                (AppRoute::TransmissionOutcome, recorded()),
+            ]);
+            let local = FakeLocal::marking();
+            let broker = FakeBroker::answering(|_| {
+                broker_says(proposal(), "process_ended", json!({"status": "verified"}))
+            });
+            let run = relay_candidate(&app, &local, &broker, &candidate()).await;
+            assert_eq!(run.end, RelayEnd::Settled(end), "{unknown:?}");
+            assert_eq!(run.halt, halt, "{unknown:?}");
+            // Submitted once, whatever came after.
+            assert_eq!(
+                app.routes()
+                    .iter()
+                    .filter(|route| **route == AppRoute::Results)
+                    .count(),
+                1
+            );
+        }
     }
 
     #[tokio::test]
