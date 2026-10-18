@@ -134,43 +134,43 @@ export function AmuxIdeaUnitRejectionPanel({ ideaId, unit }: {
     } catch { setUnknown(true); }
     finally { setBusy(false); }
   };
-  return <section className="space-y-2 rounded border border-zinc-300 p-3 dark:border-zinc-700">
+  return <section className="space-y-2 rounded border p-3 border-zinc-700">
     <h5 className="font-medium">{m.unitRejectTitle} · {unit.localRef}</h5>
     <p className="text-xs">{m.unitRejectHint}</p>
     {!prepared && !rejected && !cancelled ? <label className="block">{m.unitRejectReason}
       <textarea value={reason} maxLength={500} disabled={busy || unknown}
         onChange={(event) => setReason(event.target.value)}
-        className="mt-1 w-full rounded border border-zinc-400 bg-transparent p-2" />
+        className="mt-1 w-full rounded border border-zinc-600 bg-transparent p-2" />
     </label> : null}
     {!prepared && !rejected && !cancelled ? <button type="button" onClick={() => void prepare()}
       disabled={busy || unknown || reason.trim().length < 3}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.unitRejectPrepare}</button> : null}
     {prepared ? <div className="space-y-1">
       <p>{m.storyRegistrationDigest}: <code>{prepared.confirmationDigest}</code></p>
       <p>{m.storyRegistrationExpires}: {prepared.expiresAt}</p>
       {!rejected ? <button type="button" onClick={() => void consume()}
         disabled={busy || unknown}
-        className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+        className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
         {m.unitRejectConsume}</button> : null}
     </div> : null}
     {requestId ? <p className="break-all text-xs">{m.storyRegistrationRequestId}: {requestId}</p> : null}
     {!prepared && !requestId ? <label className="block text-xs">{m.storyRegistrationRecoveryId}
       <input value={recoveryId} onChange={(event) => setRecoveryId(event.target.value)}
-        className="mt-1 min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2" />
+        className="mt-1 min-h-11 w-full rounded border border-zinc-600 bg-transparent px-2" />
     </label> : null}
     {unknown ? <p role="alert">{m.storyRegistrationUnknown}</p> : null}
     {rejected ? <p role="status">{m.unitRejectDone}</p> : null}
     {cancelled ? <p role="status">{m.storyRegistrationCancelled}</p> : null}
     {unknown || prepared || recoveryId ? <button type="button"
       onClick={() => void readBack()} disabled={busy}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.storyRegistrationReadBack}</button> : null}
     {readbackPreparedId ? <p className="break-all text-xs">
       {m.storyRegistrationDecisionId}: {readbackPreparedId}</p> : null}
     {(prepared || readbackPreparedId) && !rejected && !cancelled ? <button type="button"
       onClick={() => void cancel()} disabled={busy}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.storyRegistrationCancel}</button> : null}
     {reauth ? <a className="underline"
       href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>

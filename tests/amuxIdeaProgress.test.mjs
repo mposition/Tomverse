@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
-import { amuxIdeaProgress, amuxIdeaProgressStep } from "../lib/amux/ideaProgressCore.ts";
+import { amuxIdeaProgress, amuxIdeaProgressFailureLog, amuxIdeaProgressStep } from "../lib/amux/ideaProgressCore.ts";
 import { AMUX_IDEA_PROGRESS_LIMIT, readAmuxIdeaProgressInTx } from "../lib/amux/ideaProgressRead.ts";
 
 const root = process.cwd();
@@ -67,61 +67,136 @@ test("an unknown outcome is flagged, never a decision to retry", () => {
   assert.deepEqual(["execution_approval", "done", "cancelled"].map(amuxIdeaProgressStep), [1, 6, null]);
 });
 
-test("the list is one bounded snapshot of seven reads that never reads idea text", async () => {
+test("the list is one statement in one bounded snapshot that never reads idea text", async () => {
+  // Seven reads made eight gaps under the boundary's 100 ms idle-in-transaction
+  // timeout and the production read failed; one statement has the two gaps of
+  // every other read boundary: setup + the statement + fence.
   assert.deepEqual(AMUX_DB_BOUNDARIES.ideaProgressListRead,
-    { operation: "idea_progress_list_read", prismaCallCeiling: 9, isolation: "read" });
-  const ideaId = "idea-1";
+    { operation: "idea_progress_list_read", prismaCallCeiling: 3, isolation: "read" });
   const calls = [];
-  const rows = {
-    amuxIdeaSubmission: [{ id: ideaId, requestId: "11111111-1111-4111-8111-111111111111", state: "awaiting_owner",
-      submittedAt: new Date("2026-10-15T00:00:00Z"), analysisCompletedAt: new Date(), cancelledAt: null }],
-    amuxIdeaAnalysisChunk: [{ ideaId, chunkIndex: 0, state: "decided", coverageStatus: "complete", currentPreviewId: "p1" }],
-    amuxIdeaTransferPreview: [{ id: "p1", ideaId, state: "completed" }],
-    amuxIdeaAnalysisBudgetHold: [{ previewId: "p1", status: "succeeded" }],
-    amuxIdeaUnitDecision: [{ ideaId, registeredWorkItemId: "c1" }, { ideaId, registeredWorkItemId: "c2" }],
-    amuxWorkItem: [
-      { id: "c1", cardType: "story", status: "backlog", reviewPrNumber: null, v4TerminalAt: null,
-        displayKey: "AMUX-ADM-001", createdAt: new Date(1) },
-      { id: "c2", cardType: "task", status: "review", reviewPrNumber: 2540, v4TerminalAt: null,
-        displayKey: "AMUX-ADM-002", createdAt: new Date(2) }],
-  };
-  const tx = new Proxy({}, { get: (_target, model) => ({
-    findMany: async (args) => { calls.push([model, args]); return rows[model] ?? []; },
-    groupBy: async (args) => { calls.push([model, args]); return []; },
-  }) });
+  const rows = [{
+    id: "idea-1", requestId: "11111111-1111-4111-8111-111111111111", state: "awaiting_owner",
+    submittedAtMs: Date.parse("2026-10-15T00:00:00.123Z"), cancelled: false, proposedUnits: 0,
+    chunks: [{ chunkIndex: 0, state: "decided", coverageStatus: "complete", previewState: "completed", holdStatus: "succeeded" }],
+    cards: [
+      { id: "c1", cardType: "story", status: "backlog", reviewPrNumber: null, terminal: false, displayKey: "AMUX-ADM-001" },
+      { id: "c2", cardType: "task", status: "review", reviewPrNumber: 2540, terminal: false, displayKey: "AMUX-ADM-002" }],
+  }, {
+    // An idea with no chunk and no card comes back with SQL NULL aggregates.
+    id: "idea-2", requestId: "22222222-2222-4222-8222-222222222222", state: "submitted",
+    submittedAtMs: Date.parse("2026-10-14T00:00:00Z"), cancelled: false, proposedUnits: 0, chunks: null, cards: null,
+  }];
+  const tx = { $queryRaw: async (strings, ...values) => { calls.push({ sql: strings.join("?"), values }); return rows; } };
   const now = new Date("2026-10-15T03:00:00Z");
-  const [row] = await readAmuxIdeaProgressInTx(tx, "owner-1", now);
-  assert.equal(calls.length, 7);
-  assert.deepEqual(calls[0][1].where, { actorUserId: "owner-1" });
-  assert.equal(calls[0][1].take, AMUX_IDEA_PROGRESS_LIMIT);
-  for (const [, args] of calls) {
-    const selected = Object.keys(args.select ?? {});
-    assert.equal(selected.some((key) => /Ciphertext|title|body/i.test(key)), false, `no text: ${selected}`);
-  }
-  assert.equal(calls.find(([model]) => model === "amuxIdeaUnitDecision")[1].where.action, "register_card");
-  assert.deepEqual(calls.find(([model]) => model === "amuxIdeaDraftUnit")[1].where.expiresAt, { gt: now },
-    "an expired proposal waits for nobody");
-  assert.deepEqual([row.stage, row.displayKey, row.reviewPullRequests],
-    ["review", "AMUX-ADM-001", [{ number: 2540, displayKey: "AMUX-ADM-002" }]]);
+  const [row, empty] = await readAmuxIdeaProgressInTx(tx, "owner-1", now);
+  assert.equal(calls.length, 1, "one statement, however many ideas");
+  const { sql, values } = calls[0];
+  assert.equal(/Ciphertext|"title"|"body"|bodyDigest|rawDigest/i.test(sql), false, "no idea text or digest is read");
+  assert.ok(values.includes("owner-1") && values.includes(AMUX_IDEA_PROGRESS_LIMIT), "owner scoped and bounded");
+  assert.ok(values.includes(now.toISOString()), "the proposal expiry is compared with the database clock");
+  assert.ok(sql.includes(`u."expiresAt" > (?::timestamptz AT TIME ZONE 'UTC')`), "an expired proposal waits for nobody");
+  assert.ok(sql.includes(`d."action" = 'register_card' AND d."state" = 'consumed'`));
+  assert.ok(sql.includes(`ORDER BY c."chunkIndex"`));
+  assert.ok(sql.includes(`ORDER BY w."createdAt" ASC, w."id" ASC`));
+  assert.deepEqual([row.stage, row.displayKey, row.reviewPullRequests, row.submittedAt],
+    ["review", "AMUX-ADM-001", [{ number: 2540, displayKey: "AMUX-ADM-002" }], "2026-10-15T00:00:00.123Z"]);
   assert.deepEqual(row.taskRows, [{ displayKey: "AMUX-ADM-002", status: "review", reviewPrNumber: 2540, merged: false }],
     "the detail lists Tasks only, never stories");
+  assert.deepEqual([empty.stage, empty.displayKey, empty.taskRows], ["execution_approval", null, []]);
 });
 
-test("the Ideas tab shows the inbox and list above the input, and opens a row's idea by its request id", () => {
+test("a failed read is tried once more, outside a route too, except for the boundary's own deterministic refusals", () => {
+  const source = read("lib/amux/ideaProgressRead.ts");
+  const body = source.slice(source.indexOf("export async function readAmuxIdeaProgressForOwner"), source.indexOf("type SqlChunk"));
+  assert.ok(body.includes("return attempt();"), "one more attempt");
+  assert.ok(body.includes('"AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"') && body.includes('"AMUX_DB_COMMIT_CHECK_MISSING"'));
+  assert.equal((body.match(/\battempt\(\)/g) ?? []).length, 2, "called twice at most");
+  assert.equal(/\b(?:while|for)\s*\(/.test(body), false, "never a loop");
+  assert.equal(body.includes("isAmuxDbBusyError"), false,
+    "the page runs outside a route budget, where a dropped session is a plain Error and never classified busy");
+});
+
+test("a failed read logs a reason made of codes and class names only", () => {
+  const log = amuxIdeaProgressFailureLog(Object.assign(new Error("SELECT secret FROM t"), {
+    name: "AmuxDbBoundaryError", code: "AMUX_DB_READ_BUSY",
+    cause: Object.assign(new Error("password=hunter2"), { code: "P2010", meta: { code: "25P03" } }),
+  }));
+  assert.deepEqual(log, { subsystem: "amux", event: "idea_progress_read_failed", name: "AmuxDbBoundaryError",
+    boundaryCode: "AMUX_DB_READ_BUSY", prismaCode: "P2010", sqlState: "25P03", signal: null });
+  assert.equal(JSON.stringify(log).includes("secret") || JSON.stringify(log).includes("hunter2"), false);
+  assert.deepEqual(amuxIdeaProgressFailureLog("boom"), { subsystem: "amux", event: "idea_progress_read_failed",
+    name: null, boundaryCode: null, prismaCode: null, sqlState: null, signal: null });
+  // A session ended for idling reaches the pg client as a plain Error with no code; only its class is logged.
+  const closed = amuxIdeaProgressFailureLog(new Error("Client has encountered a connection error and is not queryable: SELECT x"));
+  assert.deepEqual([closed.name, closed.signal, closed.sqlState], ["Error", "connection_closed", null]);
+  assert.equal(JSON.stringify(closed).includes("SELECT"), false);
+  const page = read("app/(site)/(application)/admin/amux-backlog/page.tsx");
+  assert.ok(page.includes("amuxIdeaProgressFailureLog(error)"), "the page logs the reason, not the bare event");
+});
+
+test("the Ideas main follows the approved mockup: inbox on top, input beside the list, and opens a row's idea by its request id", () => {
   const page = read("app/(site)/(application)/admin/amux-backlog/page.tsx");
   assert.match(page, /tab\.id === "ideas" && ideaReadBackAvailable && !hasRecentAdminAuthentication\(session\)\) \{\n    ideaProgress = "reauthenticate";/,
     "a stale sign-in reads nothing");
   assert.match(page, /\} else if \(tab\.id === "ideas" && ideaReadBackAvailable\) \{/, "read only for the open Ideas tab, behind its switch");
   assert.match(page, /readAmuxIdeaProgressForOwner\(session\.user\.id\)\.catch/);
-  assert.ok(page.indexOf("<AmuxIdeaProgressPanel") < page.indexOf("<AmuxIdeaInputPanel"));
-  assert.match(page, /<AmuxIdeaInputPanel key=\{openRequestId \?\? "new"\} openRequestId=\{openRequestId\}/);
+  assert.equal(page.split("readAmuxIdeaProgressForOwner(").length - 1, 1, "a single server read feeds the inbox and the list");
+  // Not opened: the inbox leads at full width, then the input with the list beside it.
+  assert.ok(page.indexOf("<AmuxIdeaInbox") < page.indexOf("<AmuxIdeaInputPanel"));
+  assert.ok(page.includes("progressRows={openedIdea ? undefined : ideaProgress}"), "the list sits beside the input only on the main view");
+  // Opened: its detail and flow lead; the inbox and list follow in one panel.
+  assert.ok(page.indexOf("<AmuxIdeaInputPanel") < page.indexOf("<AmuxIdeaProgressPanel"));
+  assert.ok(page.includes('<AmuxIdeaInputPanel key={openRequestId ?? "new"} openRequestId={openRequestId}'));
   const panel = read("components/admin/AmuxIdeaProgressPanel.tsx");
-  assert.match(panel, /if \(rows === null\)/, "a failed read is shown, not an empty list");
+  assert.ok(panel.includes("if (rows === null)"), "a failed read is shown, not an empty list");
+  assert.match(panel, /data-testid="amux-idea-list-unavailable"/, "the list keeps its card when the read failed");
   assert.equal(/adminFetch|method:/.test(panel), false, "the list only links; it never writes");
   const input = read("components/admin/AmuxIdeaInputPanel.tsx");
+  assert.ok(input.includes("lg:grid-cols-[minmax(0,1fr)_23.75rem]"), "two columns from the desktop width, one on a phone");
+  assert.equal(input.includes("{messages.step}") || input.includes("{messages.description}"), false,
+    "the old panel header (eyebrow, large title, long description) is gone; the console page has its own h1");
+  assert.ok(input.indexOf("<AmuxIdeaList") < input.indexOf("<AmuxInitialPlanPanel"), "the flow panels follow below the two columns");
+  assert.ok(input.includes("data-testid=\"amux-idea-settings-footnote\""), "the footnote points to Analysis settings");
   const recover = input.slice(input.indexOf("const recoverFromReceipts"), input.indexOf("useEffect(() => {", input.indexOf("const recoverFromReceipts")));
   assert.ok(recover.indexOf('recovered.kind === "pending"') < recover.indexOf("openRequestId &&"),
     "an unresolved request always comes before the idea a row opened");
+});
+
+test("the Ideas components are dark-only: the console is always dark, so no light surface or dark: pair", () => {
+  // AdminConsoleShell draws bg-zinc-950 text-zinc-100 whatever the product theme is. A `dark:` variant
+  // follows the product theme instead, so a light theme gave white cards under near-white text.
+  const files = ["AmuxIdeaInputPanel", "AmuxIdeaRequestStatusCard", "AmuxIdeaProgressPanel", "AmuxIdeaDetailSummary",
+    "AmuxFrontierModelsPanel", "AmuxInitialPlanPanel", "AmuxIdeaPlanApprovalPanel", "AmuxIdeaAnalysisResultPanel",
+    "AmuxFrontierModelRegistrationPanel", "AmuxIdeaCardLinkPanel", "AmuxIdeaDerivationPanel", "AmuxIdeaNodeRegistrationPanel",
+    "AmuxIdeaNodeSelectionPanel", "AmuxIdeaResolutionPanel", "AmuxIdeaStoryRegistrationPanel", "AmuxIdeaUnitRejectionPanel"];
+  const hue = "(?:zinc|slate|gray|neutral|stone|red|amber|yellow|orange|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)";
+  for (const name of files) {
+    const source = read(`components/admin/${name}.tsx`);
+    assert.equal(/\bdark:/.test(source), false, `${name} has a dark: variant`);
+    assert.equal(new RegExp(`\\b(?:bg-white|bg-zinc-(?:50|100|200)|bg-${hue}-(?:50|100))(?![\\w/-])`).test(source), false,
+      `${name} draws a light surface`);
+    assert.equal(new RegExp(`\\btext-${hue}-(?:600|700|800|900|950)\\b`).test(source), false,
+      `${name} sets a dark text colour on the dark console`);
+  }
+});
+
+test("the exact transfer payload is readable: an explicit text colour on a dark surface", () => {
+  const source = read("components/admin/AmuxFrontierModelsPanel.tsx");
+  const pre = /<pre className="([^"]+)">/.exec(source);
+  assert.ok(pre, "the payload block is a <pre>");
+  const classes = pre[1].split(/\s+/);
+  assert.ok(classes.includes("text-zinc-100"), "an explicit light text colour");
+  assert.ok(classes.includes("bg-zinc-900"), "a dark surface");
+  assert.ok(classes.includes("border-zinc-800"));
+  assert.equal(classes.some((name) => /^(?:dark:)?bg-zinc-(?:50|100)$/.test(name)), false, "the empty light box is gone");
+  assert.ok(source.includes("{preview.value.prompt}"));
+  // Every other code block of the Ideas flow sets its own colour too.
+  for (const file of ["AmuxIdeaInputPanel", "AmuxIdeaAnalysisResultPanel"]) {
+    const text = read(`components/admin/${file}.tsx`);
+    for (const block of text.matchAll(/<(?:pre|code) className="([^"]*bg-zinc-900[^"]*)"/g)) {
+      assert.ok(block[1].split(/\s+/).includes("text-zinc-100"), `${file}: ${block[1]}`);
+    }
+  }
 });
 
 test("the list asks before it leaves an unsaved draft", () => {
@@ -140,4 +215,12 @@ test("an opened idea leads with its read-only detail, and the list follows its f
   assert.equal(/adminFetch|method:|<button/.test(detail), false, "the detail only reads and links");
   assert.ok(detail.includes("AMUX_IDEA_PROGRESS_STAGES.map"), "all six steps are drawn");
   assert.ok(detail.includes("amuxIdeaHasUnsavedDraft() && !window.confirm(m.leaveDraft)"), "leaving a draft asks first");
+});
+
+test("on main the progress read names no card display number column", () => {
+  // main has no AmuxWorkItem."displayKey" (card numbers ship separately); naming it
+  // failed every production read of the list.
+  const source = readFileSync(new URL("../lib/amux/ideaProgressRead.ts", import.meta.url), "utf8");
+  assert.equal(source.includes('w."displayKey"'), false);
+  assert.ok(source.includes("'displayKey', NULL::text"));
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxIdeaResolutionPanel } from "@/components/admin/AmuxIdeaResolutionPanel";
@@ -21,6 +21,7 @@ import { AmuxIdeaDerivationPanel } from
 import { AmuxIdeaPlanApprovalPanel } from
   "@/components/admin/AmuxIdeaPlanApprovalPanel";
 import { adminFetch } from "@/lib/adminFetch";
+import { analysisPollDelayMs, analysisPollWanted } from "@/lib/amux/ideaAnalysisPollCore";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { parseAmuxIdeaAnalysisResultView,
@@ -32,8 +33,14 @@ const list = (values: string[]) => <ul className="list-disc pl-5">
 
 /** Owner-only page section. Model-derived text is rendered as React text,
  * never as HTML; the separate Story panel owns the gated confirmation flow. */
-export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
+export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady, watchToken = 0, watchChunk = 0 }: {
   ideaId: string; onContinuationReady?: (chunkIndex: number) => void;
+  /**
+   * Counts the recorded execution approvals of this idea (one per analysis page): each new value starts a fresh
+   * watch of the page `watchChunk` (lib/amux/ideaAnalysisPollCore.ts). 0 means no approval yet: nothing is watched.
+   */
+  watchToken?: number;
+  watchChunk?: number;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const [loading, setLoading] = useState(false);
@@ -41,9 +48,30 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
   const [view, setView] = useState<AmuxIdeaAnalysisResultView | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [needsReauthentication, setNeedsReauthentication] = useState(false);
+  // The watch: reads done so far, whether it was ended by a failed or refused read, and whether the tab is visible.
+  const [readsDone, setReadsDone] = useState(0);
+  const [watchEnded, setWatchEnded] = useState(false);
+  const [tabVisible, setTabVisible] = useState(true);
+  // A new approval (the next page of a multi-page analysis) restarts the watch from a clean state, and the page it
+  // waits for is shown as running until its own result arrives. Adjusted during render, not in an effect.
+  const [seenToken, setSeenToken] = useState(0);
+  if (watchToken !== seenToken) {
+    setSeenToken(watchToken);
+    setReadsDone(0);
+    setWatchEnded(false);
+    setView(null);
+    setUnavailable(false);
+  }
+  const autoPoll = watchToken > 0;
+
+  // The latest approval's token: a read issued under an earlier one is answered after the watch restarted, and its
+  // answer (the page that was current before the approval) must not overwrite the restarted view.
+  const latestToken = useRef(watchToken);
+  useEffect(() => { latestToken.current = watchToken; }, [watchToken]);
 
   const refresh = async (page = chunkIndex) => {
     if (loading) return;
+    const issuedUnder = watchToken;
     setLoading(true);
     setUnavailable(false);
     setNeedsReauthentication(false);
@@ -51,35 +79,61 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
       const params = new URLSearchParams({ ideaId, chunkIndex: String(page) });
       const response = await adminFetch(`/api/admin/amux/ideas/analysis-result?${params}`,
         { cache: "no-store" });
+      if (latestToken.current !== issuedUnder) return;
       if (response.status === 428) {
         setView(null);
         setNeedsReauthentication(true);
+        setWatchEnded(true);
         return;
       }
-      const parsed = parseAmuxIdeaAnalysisResultView(response.status,
-        await response.json(), ideaId);
-      if (!parsed) { setView(null); setUnavailable(true); }
+      const body: unknown = await response.json();
+      if (latestToken.current !== issuedUnder) return;
+      const parsed = parseAmuxIdeaAnalysisResultView(response.status, body, ideaId);
+      if (!parsed) { setView(null); setUnavailable(true); setWatchEnded(true); }
       else {
         setView(parsed); setChunkIndex(page);
         if (parsed.state === "partial") onContinuationReady?.(parsed.nextChunkIndex);
       }
-    } catch { setView(null); setUnavailable(true); }
+    } catch { setView(null); setUnavailable(true); setWatchEnded(true); }
     finally { setLoading(false); }
   };
 
-  return <section className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
+  useEffect(() => {
+    const onVisibility = () => setTabVisible(!document.hidden);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  // After the execution approval the result is read on a gentle schedule until it arrives, so the plan
+  // approval screen opens by itself. A hidden tab, a failed or refused read and any terminal state stop the
+  // reads; the manual button stays. Nothing is ever written here.
+  const watching = autoPoll && !watchEnded && tabVisible && analysisPollWanted(view?.state ?? null);
+  useEffect(() => {
+    if (!watching || loading) return;
+    const delay = analysisPollDelayMs(readsDone);
+    if (delay === null) return;
+    const timer = window.setTimeout(() => { setReadsDone((count) => count + 1); void refresh(watchChunk); },
+      readsDone === 0 ? 0 : delay);
+    return () => window.clearTimeout(timer);
+    // refresh closes over the latest state each render; the watch only depends on what decides it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watching, loading, view, readsDone]);
+  const watchOver = autoPoll && analysisPollWanted(view?.state ?? null) &&
+    (watchEnded || analysisPollDelayMs(readsDone) === null);
+
+  return <section className="space-y-3 rounded-xl border p-4 text-sm border-zinc-800"
     aria-labelledby="amux-v4-analysis-result-heading">
-    <h3 id="amux-v4-analysis-result-heading" className="font-semibold text-zinc-900 dark:text-zinc-100">
+    <h3 id="amux-v4-analysis-result-heading" className="font-semibold text-zinc-100">
       {m.analysisResultTitle}
     </h3>
-    <p className="text-zinc-700 dark:text-zinc-300">{m.analysisResultHint}</p>
+    <p className="text-zinc-300">{m.analysisResultHint}</p>
     <button type="button" onClick={() => void refresh()} disabled={loading}
-      className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+      className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
       {m.analysisResultRefresh}
     </button>
     {chunkIndex > 0 ? <button type="button" disabled={loading}
       onClick={() => void refresh(chunkIndex - 1)}
-      className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+      className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
       {m.analysisResultPreviousPage}
     </button> : null}
     {loading ? <p role="status">{m.analysisResultLoading}</p> : null}
@@ -88,6 +142,9 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
       {m.analysisResultReauth}
     </a> : null}
     {unavailable ? <p role="alert">{m.analysisResultUnavailable}</p> : null}
+    {autoPoll && !watchOver && analysisPollWanted(view?.state ?? null) ? <p role="status" data-testid="amux-analysis-running"
+      className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-blue-200">{m.analysisRunning}</p> : null}
+    {watchOver ? <p role="status" data-testid="amux-analysis-watch-ended">{m.analysisWatchEnded}</p> : null}
     {view?.state === "pending" ? <p role="status">{m.analysisResultPending}</p> : null}
     {view?.state === "cancelled" ? <p role="status">{m.analysisResultCancelled}</p> : null}
     {view?.state === "provider_failed" ? <p role="alert">{m.analysisResultProviderFailed}</p> : null}
@@ -96,7 +153,7 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
     </p> : null}
     {view?.state === "ready" || view?.state === "partial" ||
       view?.state === "needs_owner_input" ? <div className="space-y-3">
-      <p className="text-xs text-zinc-600 dark:text-zinc-400">
+      <p className="text-xs text-zinc-400">
         {view.completedAt} · {view.previewId}
       </p>
       {view.state === "partial" ? <div role="status" className="space-y-1">
@@ -105,7 +162,7 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
         <p className="whitespace-pre-wrap">{view.remainingScope ?? m.analysisResultScopeExpired}</p>
         <button type="button" disabled={loading}
           onClick={() => void refresh(view.nextChunkIndex)}
-          className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+          className="min-h-11 rounded-lg border px-4 disabled:opacity-50 border-zinc-600">
           {m.analysisResultNextPage}
         </button>
       </div> : null}
@@ -121,8 +178,8 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
         ideaId={ideaId} onChanged={() => void refresh()} /> : null}
       <ol className="space-y-2">
         {view.units.map((unit) => <li key={unit.id}
-          className="rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
-          <p className="text-xs text-zinc-600 dark:text-zinc-400">
+          className="rounded-lg border p-3 border-zinc-700">
+          <p className="text-xs text-zinc-400">
             {unit.localRef} · {unit.decisionState}
           </p>
           {!unit.proposal ? <p>{m.analysisResultBodyExpired}</p> : null}
@@ -154,12 +211,12 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
             <p className="text-xs">{unit.proposal.cardRef}</p>
           </div> : null}
           {unit.proposal?.kind !== "evidence" &&
-            unit.proposal?.portfolioSignal ? <div className="space-y-1 rounded border border-zinc-300 p-2 dark:border-zinc-700">
+            unit.proposal?.portfolioSignal ? <div className="space-y-1 rounded border p-2 border-zinc-700">
             <p className="font-medium">{m.portfolioSignalTitle}</p>
             <p>{m.portfolioSignalHint}</p>
             <p className="break-all font-mono text-xs">{unit.bodyDigest}</p>
             <p className="whitespace-pre-wrap">{unit.proposal.portfolioSignal.rationale}</p>
-            <pre className="overflow-auto whitespace-pre-wrap break-all text-xs">
+            <pre className="overflow-auto whitespace-pre-wrap break-all rounded border border-zinc-800 bg-zinc-900 p-2 text-xs text-zinc-100">
               {JSON.stringify({ metrics: unit.proposal.portfolioSignal.metrics,
                 uncertainty: unit.proposal.portfolioSignal.uncertainty,
                 evidenceRefIds: unit.proposal.portfolioSignal.evidenceRefIds }, null, 2)}
@@ -196,7 +253,7 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
           key={`reject:${unit.id}`} ideaId={ideaId} unit={unit} />) : null}
       {view.outcome === "propose" ? <AmuxIdeaUnknownDecisionRecoveryPanel
         ideaId={ideaId} /> : null}
-      <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.analysisResultNoApproval}</p>
+      <p className="text-xs text-zinc-400">{m.analysisResultNoApproval}</p>
     </div> : null}
   </section>;
 }

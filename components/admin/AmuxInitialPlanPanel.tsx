@@ -140,18 +140,18 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
 
   if (!ideaId && state.kind === "idle") return null;
   return (
-    <section className="space-y-2 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
+    <section className="space-y-2 rounded-xl border p-4 text-sm border-zinc-800"
       aria-labelledby="amux-v4-initial-plan-heading">
-      <h3 id="amux-v4-initial-plan-heading" className="font-semibold text-zinc-900 dark:text-zinc-100">{m.initialPlanTitle}</h3>
-      <p className="text-zinc-700 dark:text-zinc-300">{m.initialPlanHint}</p>
+      <h3 id="amux-v4-initial-plan-heading" className="font-semibold text-zinc-100">{m.initialPlanTitle}</h3>
+      <p className="text-zinc-300">{m.initialPlanHint}</p>
       {ideaId && declaredExternalSources ? <p>{m.initialPlanExternalScope}</p> : null}
       {ideaId && !declaredExternalSources && state.kind === "idle" ? (
         <button type="button" onClick={prepare} disabled={!available || !recoveryChecked || checkedIdeaId !== ideaId}
-          className="min-h-11 rounded-lg border border-blue-700 px-4 font-medium text-blue-800 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200">
+          className="min-h-11 rounded-lg border px-4 font-medium disabled:opacity-50 border-blue-400 text-blue-200">
           {m.initialPlanPrepare}
         </button>
       ) : null}
-      {!available ? <p className="text-zinc-600 dark:text-zinc-400">{m.initialPlanUnavailable}</p> : null}
+      {!available ? <p className="text-zinc-400">{m.initialPlanUnavailable}</p> : null}
       {state.kind === "pending" ? <p role="status">{m.initialPlanPreparing}</p> : null}
       {state.kind === "committed" ? <p role="status">{m.initialPlanCommitted(state.ideaId)}</p> : null}
       {state.kind === "refused" && !failure ? <p role="alert">{m.initialPlanRefused(state.code)}</p> : null}
@@ -161,7 +161,7 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
         <div role="alert" className="space-y-2">
           <p>{m.initialPlanUnknown(state.ideaId)}</p>
           <button type="button" onClick={() => readBack(state.ideaId)} disabled={readBackPending}
-            className="min-h-11 rounded-lg border border-amber-700 px-3 font-medium disabled:opacity-50 dark:border-amber-300">
+            className="min-h-11 rounded-lg border px-3 font-medium disabled:opacity-50 border-amber-500/30">
             {m.checkSubmissionStatus}
           </button>
         </div>

@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { amuxIdeaProgress, type AmuxIdeaProgress } from "@/lib/amux/ideaProgressCore";
 
 /** How many of the owner's newest ideas the Ideas tab lists. */
@@ -23,86 +23,113 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
 /**
  * The owner's newest ideas and the stage each is at, for the Ideas tab
  * (approved backlog redesign). One REPEATABLE READ snapshot inside the AMUX DB
- * boundary: setup + seven reads + fence, pinned by tests/amuxIdeaProgress.test.mjs.
+ * boundary: setup + ONE statement + fence, pinned by tests/amuxIdeaProgress.test.mjs.
+ *
+ * Why one statement: a boundary sets idle_in_transaction_session_timeout to
+ * 100 ms (lib/amux/dbBoundary.ts), and a gap longer than that between two of
+ * its statements ends the session with 25P03. Seven sequential reads made
+ * eight such gaps, and over the production round trip the Ideas list failed
+ * to read; a single statement has the same two gaps as every other boundary.
+ *
  * It reads no idea text, title or body (all encrypted or purged); a failed read
- * throws, and the page shows it as unavailable, never as an empty list.
+ * throws, and the page shows it as unavailable, never as an empty list. One
+ * more attempt is made after a failure, which is safe because nothing was
+ * written. Outside a route budget (the page has none) the boundary does not
+ * classify a dropped session as busy: the pg client reports it as a plain Error
+ * with no code, so the retry cannot wait for a "busy" answer. Only the
+ * boundary's own deterministic refusals (call ceiling, commit check) are not
+ * retried.
  */
 export async function readAmuxIdeaProgressForOwner(actorUserId: string): Promise<AmuxIdeaProgressRow[]> {
-  return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.ideaProgressListRead,
+  const attempt = () => withAmuxDbBoundary(AMUX_DB_BOUNDARIES.ideaProgressListRead,
     (tx, { dbNow }) => readAmuxIdeaProgressInTx(tx, actorUserId, dbNow));
+  try {
+    return await attempt();
+  } catch (error) {
+    if (error instanceof AmuxDbBoundaryError && (error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED" ||
+        error.code === "AMUX_DB_COMMIT_CHECK_MISSING")) throw error;
+    return attempt();
+  }
 }
+
+type SqlChunk = {
+  chunkIndex: number; state: string; coverageStatus: string | null;
+  previewState: string | null; holdStatus: string | null;
+};
+type SqlCard = {
+  id: string; cardType: string | null; status: string; reviewPrNumber: number | null;
+  terminal: boolean; displayKey: string | null;
+};
+type SqlIdea = {
+  id: string; requestId: string; state: string; submittedAtMs: number; cancelled: boolean;
+  proposedUnits: number; chunks: SqlChunk[] | null; cards: SqlCard[] | null;
+};
 
 export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   actorUserId: string, now: Date): Promise<AmuxIdeaProgressRow[]> {
-  const ideas = await tx.amuxIdeaSubmission.findMany({
-    where: { actorUserId }, orderBy: [{ submittedAt: "desc" }, { id: "asc" }],
-    take: AMUX_IDEA_PROGRESS_LIMIT,
-    select: { id: true, requestId: true, state: true, submittedAt: true, cancelledAt: true },
-  });
-  if (ideas.length === 0) return [];
-  const ideaIds = ideas.map((idea) => idea.id);
-  const chunks = await tx.amuxIdeaAnalysisChunk.findMany({
-    where: { ideaId: { in: ideaIds } },
-    select: { ideaId: true, chunkIndex: true, state: true, coverageStatus: true, currentPreviewId: true },
-  });
-  const previewIds = chunks.flatMap((chunk) => chunk.currentPreviewId ? [chunk.currentPreviewId] : []);
-  const previews = await tx.amuxIdeaTransferPreview.findMany({
-    where: { id: { in: previewIds } }, select: { id: true, state: true },
-  });
-  const holds = await tx.amuxIdeaAnalysisBudgetHold.findMany({
-    where: { previewId: { in: previewIds } }, select: { previewId: true, status: true },
-  });
-  const proposed = await tx.amuxIdeaDraftUnit.groupBy({
-    // An expired proposal can no longer be approved, so it waits for nobody.
-    by: ["ideaId"], where: { ideaId: { in: ideaIds }, state: "proposed", expiresAt: { gt: now } },
-    _count: { _all: true },
-  });
-  const decisions = await tx.amuxIdeaUnitDecision.findMany({
-    where: { ideaId: { in: ideaIds }, action: "register_card", state: "consumed",
-      registeredWorkItemId: { not: null } },
-    select: { ideaId: true, registeredWorkItemId: true },
-  });
-  const cardIds = decisions.flatMap((decision) => decision.registeredWorkItemId ? [decision.registeredWorkItemId] : []);
-  const cards = await tx.amuxWorkItem.findMany({
-    where: { id: { in: cardIds } },
-    select: { id: true, cardType: true, status: true, reviewPrNumber: true, v4TerminalAt: true,
-      displayKey: true, createdAt: true },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-  });
+  // The columns are timestamp(3) without a time zone holding UTC, so the
+  // instant is converted to a naive UTC value before it is compared, and every
+  // timestamp leaves as epoch milliseconds (a double, never a session-zone
+  // string). An expired proposal can no longer be approved, so it waits for
+  // nobody. Chunks keep their index order and cards their registration order.
+  const ideas = await tx.$queryRaw<SqlIdea[]>`
+    WITH newest AS (
+      SELECT "id", "requestId", "state", "submittedAt", "cancelledAt"
+      FROM "AmuxIdeaSubmission"
+      WHERE "actorUserId" = ${actorUserId}
+      ORDER BY "submittedAt" DESC, "id" ASC
+      LIMIT ${AMUX_IDEA_PROGRESS_LIMIT}
+    )
+    SELECT
+      n."id" AS "id",
+      n."requestId"::text AS "requestId",
+      n."state" AS "state",
+      (extract(epoch FROM n."submittedAt") * 1000)::double precision AS "submittedAtMs",
+      (n."cancelledAt" IS NOT NULL) AS "cancelled",
+      (SELECT count(*)::int FROM "AmuxIdeaDraftUnit" u
+        WHERE u."ideaId" = n."id" AND u."state" = 'proposed'
+          AND u."expiresAt" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')) AS "proposedUnits",
+      (SELECT json_agg(json_build_object(
+          'chunkIndex', c."chunkIndex", 'state', c."state", 'coverageStatus', c."coverageStatus",
+          'previewState', p."state", 'holdStatus', h."status") ORDER BY c."chunkIndex")
+        FROM "AmuxIdeaAnalysisChunk" c
+        LEFT JOIN "AmuxIdeaTransferPreview" p ON p."id" = c."currentPreviewId"
+        LEFT JOIN "AmuxIdeaAnalysisBudgetHold" h ON h."previewId" = p."id"
+        WHERE c."ideaId" = n."id") AS "chunks",
+      (SELECT json_agg(json_build_object(
+          'id', w."id", 'cardType', w."cardType", 'status', w."status",
+          'reviewPrNumber', w."reviewPrNumber", 'terminal', (w."v4TerminalAt" IS NOT NULL),
+          -- main has no card display numbers yet (AmuxWorkItem."displayKey" ships with them);
+          -- until then every card reads as unnumbered rather than failing the whole list.
+          'displayKey', NULL::text) ORDER BY w."createdAt" ASC, w."id" ASC)
+        FROM "AmuxIdeaUnitDecision" d
+        JOIN "AmuxWorkItem" w ON w."id" = d."registeredWorkItemId"
+        WHERE d."ideaId" = n."id" AND d."action" = 'register_card' AND d."state" = 'consumed') AS "cards"
+    FROM newest n
+    ORDER BY n."submittedAt" DESC, n."id" ASC
+  `;
 
-  const holdOf = new Map(holds.map((hold) => [hold.previewId, hold.status]));
-  const previewOf = new Map(previews.map((preview) => [preview.id, preview.state]));
-  const cardById = new Map(cards.map((card) => [card.id, card]));
   return ideas.map((idea) => {
-    const own = decisions.filter((decision) => decision.ideaId === idea.id)
-      .flatMap((decision) => {
-        const card = decision.registeredWorkItemId ? cardById.get(decision.registeredWorkItemId) : undefined;
-        return card ? [card] : [];
-      })
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
+    const own = idea.cards ?? [];
     const progress = amuxIdeaProgress({
       state: idea.state,
-      cancelled: idea.cancelledAt !== null,
-      chunks: chunks.filter((chunk) => chunk.ideaId === idea.id).map((chunk) => ({
-        chunkIndex: chunk.chunkIndex, state: chunk.state, coverageStatus: chunk.coverageStatus,
-        previewState: chunk.currentPreviewId ? previewOf.get(chunk.currentPreviewId) ?? null : null,
-        holdStatus: chunk.currentPreviewId ? holdOf.get(chunk.currentPreviewId) ?? null : null,
-      })),
-      proposedUnits: proposed.find((row) => row.ideaId === idea.id)?._count._all ?? 0,
+      cancelled: idea.cancelled,
+      chunks: (idea.chunks ?? []).map((chunk) => ({ ...chunk })),
+      proposedUnits: idea.proposedUnits,
       cards: own.map((card) => ({ cardType: card.cardType, status: card.status,
-        reviewPrNumber: card.reviewPrNumber, merged: card.v4TerminalAt !== null })),
+        reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
     });
     return {
       ...progress,
       ideaId: idea.id,
       requestId: idea.requestId,
-      submittedAt: idea.submittedAt.toISOString(),
+      submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,
-      reviewPullRequests: own.filter((card) => card.cardType !== "story" && card.v4TerminalAt === null &&
+      reviewPullRequests: own.filter((card) => card.cardType !== "story" && !card.terminal &&
         card.status === "review" && card.reviewPrNumber !== null)
         .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey })),
       taskRows: own.filter((card) => card.cardType !== "story").map((card) => ({ displayKey: card.displayKey,
-        status: card.status, reviewPrNumber: card.reviewPrNumber, merged: card.v4TerminalAt !== null })),
+        status: card.status, reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
     };
   });
 }

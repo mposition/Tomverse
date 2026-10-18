@@ -193,7 +193,7 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
     } catch { setUnknown(true); }
     finally { setBusy(false); }
   };
-  return <section className="space-y-2 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
+  return <section className="space-y-2 rounded-lg border p-3 border-zinc-700">
     <h5 className="font-medium">{isTask ? m.taskRegistrationTitle :
       m.storyRegistrationTitle} · {proposal.title}</h5>
     <p className="text-sm">{isTask ? m.taskRegistrationHint :
@@ -202,13 +202,13 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
       {proposal.parentStoryRef ?? m.taskRegistrationNoStory} ·
       {proposal.dependencyRefs.join(", ") || m.taskRegistrationNoDependencies}</p> : null}
     <button type="button" onClick={() => void load()} disabled={busy || unknown}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.resolutionLoad}</button>
     {features.length ? <label className="block">{m.storyRegistrationFeature}
       <select value={featureId} disabled={busy || !!prepared || unknown}
         onChange={(event) => { setFeatureId(event.target.value);
           setDuplicateIds([]); setReason(""); }}
-        className="mt-1 min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2">
+        className="mt-1 min-h-11 w-full rounded border border-zinc-600 bg-transparent px-2">
         <option value="">{m.resolutionChoose}</option>
         {features.map((entry) => <option key={entry.ref} value={entry.ref}>
           {entry.ref} · r{entry.revision}</option>)}
@@ -219,7 +219,7 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
       <label className="block">{m.resolutionReason}
       <textarea value={reason} maxLength={500} disabled={busy || unknown}
         onChange={(event) => setReason(event.target.value)}
-        className="mt-1 w-full rounded border border-zinc-400 bg-transparent p-2" />
+        className="mt-1 w-full rounded border border-zinc-600 bg-transparent p-2" />
     </label> : null}
     {isTask && proposal.taskRole === "implement" && !prepared && !closed ?
       <label className="flex items-start gap-2 text-sm">
@@ -231,7 +231,7 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
     {featureId && !prepared && !closed ? <button type="button" onClick={() => void prepare()}
       disabled={busy || unknown || (duplicateIds.length > 0 &&
         reason.trim().length < 3)}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {isTask ? m.taskRegistrationPrepare : m.storyRegistrationPrepare}</button> : null}
     {prepared ? <div className="space-y-2 text-sm">
       <p role="status">{m.storyRegistrationPrepared}</p>
@@ -254,7 +254,7 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
       </div> : null}
       {!registered ? <button type="button" onClick={() => void consume()}
         disabled={busy || unknown}
-        className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+        className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
         {isTask ? m.taskRegistrationConsume : m.storyRegistrationConsume}</button> : null}
     </div> : null}
     {registered ? <p role="status">{isTask ? m.taskRegistrationRegistered :
@@ -267,14 +267,14 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
       {m.storyRegistrationRecoveryId}
       <input value={recoveryRequestId} onChange={(event) =>
         setRecoveryRequestId(event.target.value)}
-        className="mt-1 min-h-11 w-full rounded border border-zinc-400 bg-transparent px-2" />
+        className="mt-1 min-h-11 w-full rounded border border-zinc-600 bg-transparent px-2" />
     </label> : null}
     {unknown || prepared || recoveryRequestId ? <button type="button" onClick={() => void readBack()}
-      disabled={busy} className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      disabled={busy} className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.storyRegistrationReadBack}</button> : null}
     {((prepared && !unknown) || readbackPreparedId) && !registered && !closed ? <button type="button"
       onClick={() => void cancel()} disabled={busy}
-      className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
+      className="min-h-11 rounded border border-zinc-600 px-3 disabled:opacity-50">
       {m.storyRegistrationCancel}</button> : null}
     {reauth ? <a className="underline"
       href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>
