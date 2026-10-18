@@ -78,6 +78,10 @@ test("claim body cannot supply its own Max authentication assertion", async () =
     assert.equal((await POST(request({ ...identity, authVerifiedAt,
       authProof, ideaId: "2d5580cf-19c8-4e9a-9ee4-159dd2799980" }))).status,
     400);
+    const oversized = { ...identity, invocationOrdinal: 2_147_483_648 };
+    assert.equal((await POST(request({ ...oversized, authVerifiedAt,
+      authProof: signAmuxV19MaxClaimAttestation(secret, oversized,
+        authVerifiedAt) }))).status, 400);
     const stale = new Date(Date.now() - 6 * 60_000).toISOString();
     assert.equal(verifyAmuxV19MaxClaimAttestation(secret, identity, stale,
       signAmuxV19MaxClaimAttestation(secret, identity, stale)), null);
