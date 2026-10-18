@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -16,6 +16,7 @@ const candidate = (ordinal) => ({
   ideaId: `ea86a25b-919f-4714-a3d8-${String(ordinal).padStart(12, "0")}`,
   modelId: "claude-opus-5-5",
   expiresAt: "2026-10-19T00:00:00.000Z",
+  nextInvocationOrdinal: 0,
 });
 const price = { kind: "ready", priceVersionId: "approved-price",
   modelId: "claude-opus-5-5", reasoningEffort: "high" };
@@ -50,7 +51,8 @@ test("Max queue entry selects only an exact approved price without a claim", asy
           ["Bearer", secret].join(" "));
         assert.equal(options.headers["x-amux-agent-id"], "amux-intake-max");
         if (target.pathname.endsWith("/analysis-queue")) {
-          return Response.json({ candidates: [candidate(1), candidate(2)],
+          return Response.json({ candidates: [candidate(1),
+            { ...candidate(2), nextInvocationOrdinal: 1 }],
             hasMore: false, nextCursor: null });
         }
         assert.equal(target.pathname,
@@ -60,8 +62,8 @@ test("Max queue entry selects only an exact approved price without a claim", asy
           : price);
       },
     });
-    assert.deepEqual(result, { kind: "discovered", candidate: candidate(2),
-      price });
+    assert.deepEqual(result, { kind: "discovered",
+      candidate: { ...candidate(2), nextInvocationOrdinal: 1 }, price });
     assert.deepEqual(calls, ["/api/internal/amux/v19/analysis-queue",
       "/api/internal/amux/v19/analysis-price",
       "/api/internal/amux/v19/analysis-price"]);
@@ -102,4 +104,29 @@ test("Max queue entry refuses missing launcher secret before network", async (t)
       stateDirectory, fetchImpl: async () => { calls++; return Response.json({}); },
     }), { kind: "refused" });
     assert.equal(calls, 0);
+  }));
+
+test("Max queue entry drops rejected and corrupt cursor hints without a claim", async (t) =>
+  withState(t, async (stateDirectory) => {
+    const state = amuxV19QueueCursorState(stateDirectory);
+    await state.save("stale-cursor");
+    let calls = 0;
+    assert.deepEqual(await runAmuxV19MaxSessionQueueEntryOnce({ origin,
+      stateDirectory, fetchImpl: async () => {
+        calls++;
+        return new Response(null, { status: 400 });
+      },
+    }), { kind: "unavailable" });
+    assert.equal(calls, 1);
+    assert.equal(await state.read(), null);
+    await writeFile(join(stateDirectory, "queue-cursor"), "invalid cursor\n",
+      { mode: 0o600 });
+    assert.deepEqual(await runAmuxV19MaxSessionQueueEntryOnce({ origin,
+      stateDirectory, fetchImpl: async () => {
+        calls++;
+        throw new Error("unexpected network");
+      },
+    }), { kind: "unavailable" });
+    assert.equal(calls, 1);
+    assert.equal(await state.read(), null);
   }));

@@ -12,6 +12,7 @@ const candidate = (index) => ({
   reservationId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
   ideaId: `idea_${index}`, modelId: "frontier-model",
   expiresAt: "2026-10-18T00:00:00.000Z",
+  nextInvocationOrdinal: 0,
 });
 const page = { candidates: Array.from({ length: 32 }, (_, index) => candidate(index)),
   hasMore: true, nextCursor: "next_page_1" };
@@ -127,6 +128,10 @@ test("local v19 poll rejects redirects, unbounded or content-bearing responses",
       { ...page, candidates: [{ ...candidate(0), prompt: "bad" },
         ...page.candidates.slice(1)] },
       { ...page, candidates: [{ ...candidate(0), reservationId: "bad/id" },
+        ...page.candidates.slice(1)] },
+      { ...page, candidates: [{ ...candidate(0), nextInvocationOrdinal: -1 },
+        ...page.candidates.slice(1)] },
+      { ...page, candidates: [{ ...candidate(0), nextInvocationOrdinal: 2_147_483_648 },
         ...page.candidates.slice(1)] },
       { ...page, huge: "x".repeat(65_536) },
     ]) {

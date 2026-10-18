@@ -397,7 +397,8 @@ test("session analysis queue lists the live reservation and advances past its DB
   const first = await listAmuxSessionAnalysisCandidates(null);
   assert.deepEqual(first, {
     candidates: [{ reservationId: committedReservationId, ideaId: committedIdeaId,
-      modelId, expiresAt: idea.analysisDeadlineAt.toISOString() }],
+      modelId, expiresAt: idea.analysisDeadlineAt.toISOString(),
+      nextInvocationOrdinal: 0 }],
     hasMore: false, nextCursor: null,
   });
   const cursor = encodeAmuxSessionAnalysisQueueCursor({
