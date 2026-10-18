@@ -34,6 +34,15 @@ const statusCell = (m: Messages, row: DmAdminRequestRow, dbNowMs: number) => {
           </span>
         ) : null}
         <span>{m.statuses[status]}</span>
+        {/* §5: a request whose directories were not confirmed deleted, whatever its status. */}
+        {row.cleanupUnknownAtMs !== null ? (
+          <span
+            className="w-fit rounded border border-amber-400 px-1.5 py-0.5 text-xs font-semibold text-amber-900 dark:border-amber-600 dark:text-amber-200"
+            data-testid={`amux-dm-request-cleanup-unknown-${row.requestId}`}
+          >
+            {m.cleanupUnknown}
+          </span>
+        ) : null}
         {row.route === "operator" && row.refusalCodes.length > 0 ? (
           <span className="text-xs text-zinc-600 dark:text-zinc-400">
             {m.keptBecause(row.refusalCodes.join(", "))}
@@ -55,6 +64,7 @@ const statusCell = (m: Messages, row: DmAdminRequestRow, dbNowMs: number) => {
  * shows and that they are not totals (docs/ui-contracts/admin-console-ia.md).
  */
 export function AmuxDecisionMakerRequestsView({ m, list }: { m: Messages; list: DmAdminRequestList | null }) {
+  const cleanupUnknownCount = list === null ? 0 : list.rows.filter((row) => row.cleanupUnknownAtMs !== null).length;
   return (
     <section
       className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4"
@@ -72,6 +82,14 @@ export function AmuxDecisionMakerRequestsView({ m, list }: { m: Messages; list: 
           <p className="text-xs text-zinc-600 dark:text-zinc-400" data-testid="amux-dm-requests-shown">
             {`${m.shown(list.rows.length, DM_ADMIN_REQUEST_LIST_LIMIT)} ${m.computedAt(dmReportInstant(list.dbNowMs))}`}
           </p>
+          {cleanupUnknownCount > 0 ? (
+            <p
+              className="rounded border border-amber-400 px-3 py-2 text-sm text-amber-900 dark:border-amber-600 dark:text-amber-200"
+              data-testid="amux-dm-requests-cleanup-unknown-notice"
+            >
+              {m.cleanupUnknownNotice(cleanupUnknownCount)}
+            </p>
+          ) : null}
           {list.rows.length === 0 ? (
             <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-dm-requests-empty">
               {m.empty}
