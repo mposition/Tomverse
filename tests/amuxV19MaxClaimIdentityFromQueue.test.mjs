@@ -34,19 +34,35 @@ test("Max queue selection becomes a fresh content-free claim identity", () => {
 test("Max claim identity rejects stale or mismatched queue selections", () => {
   const invalid = [
     { kind: "idle" },
+    { price: { ...selection.price, kind: "unavailable" } },
     { price: { ...selection.price, modelId: "claude-sonnet-5" } },
     { candidate: { ...selection.candidate,
       expiresAt: "2026-10-17T23:59:59.000Z" } },
+    { candidate: { ...selection.candidate,
+      expiresAt: "2026-10-18T00:00:00.000Z" } },
+    { candidate: { ...selection.candidate,
+      expiresAt: "October 18, 2026 01:00 UTC" } },
     { candidate: { ...selection.candidate, ideaId: "not-a-uuid" } },
     { candidate: { ...selection.candidate,
       nextInvocationOrdinal: 2_147_483_648 } },
+    { price: { ...selection.price, reasoningEffort: "low" } },
   ];
   for (const change of invalid) {
+    const ids = [claimId, requestId];
     assert.deepEqual(createAmuxV19MaxClaimIdentityFromQueue({
       ...selection, ...change,
-    }, { now, newId: () => claimId }), { kind: "refused" });
+    }, { now, newId: () => ids.shift() }), { kind: "refused" });
   }
   assert.deepEqual(createAmuxV19MaxClaimIdentityFromQueue(selection, {
     now, newId: () => claimId,
   }), { kind: "refused" }, "a duplicate request ID is never a claim");
+  assert.deepEqual(createAmuxV19MaxClaimIdentityFromQueue(selection, {
+    now, newId: () => { throw new Error("no entropy"); },
+  }), { kind: "refused" });
+  for (const reused of [reservationId, ideaId]) {
+    const ids = [reused, requestId];
+    assert.deepEqual(createAmuxV19MaxClaimIdentityFromQueue(selection, {
+      now, newId: () => ids.shift(),
+    }), { kind: "refused" });
+  }
 });
