@@ -22,6 +22,15 @@ mock.module(mod("lib/amux/guard.ts"), { namedExports: { isAmuxSyncAuthorized: ()
 mock.module(mod("lib/amux/routing.ts"), { namedExports: {
   getConfiguredAmuxV22WorkerCatalog: () => [{ worker_name: "claude-chore", provider: "anthropic" }],
 } });
+// R2c (orchestration policy version 53): the route checks the worker against
+// the derived catalog, read inside the write's own transaction.
+mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
+  readAmuxAssignmentCatalogs: async (client: unknown, open: boolean) => {
+    assert.equal(client, tx); assert.equal(open, true); lockOrder.push("catalog");
+    return { source: "derived", workers: null, ceilings: null,
+      v22: [{ worker_name: "claude-chore", provider: "anthropic" }] };
+  },
+} });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
   takeAuditChainLock: async (client: unknown) => { assert.equal(client, tx); lockOrder.push("audit"); },
   writeSystemAuditLog: async (input: { tx: unknown; action: string }) => {
@@ -80,7 +89,8 @@ test("quota report authenticates, stores and audits once, and supports exact los
   assert.equal((await post()).status, 200);
   // The bridge allows 15 s for a quota POST: the lifecycle route budget.
   assert.deepEqual(routeBudgetsUsed, [LIFECYCLE_BUDGET_MS]);
-  assert.deepEqual(lockOrder.slice(0, 2), ["audit", "observation"]);
+  // The derived catalog is read before anything is locked or written.
+  assert.deepEqual(lockOrder.slice(0, 3), ["catalog", "audit", "observation"]);
   assert.equal(writeCalls, 1); assert.equal(auditCalls, 1);
   assert.equal((await post()).status, 200, "same observation must be idempotent");
   assert.equal(writeCalls, 1); assert.equal(auditCalls, 1);

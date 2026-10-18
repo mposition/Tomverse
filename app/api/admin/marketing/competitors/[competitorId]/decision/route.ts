@@ -7,6 +7,7 @@ import {
   MARKETING_COMPETITOR_NO_DECISION,
   marketingCompetitorDisplayNameSchema,
   marketingCompetitorHostsSchema,
+  marketingCompetitorPagesSchema,
   MarketingCompetitorRefusedError,
 } from "@/lib/marketingCompetitorCore";
 import { decideMarketingCompetitor } from "@/lib/marketingCompetitorStore";
@@ -24,6 +25,8 @@ const schema = z.discriminatedUnion("decision", [
       /** What the person approves, edited or as proposed: the store writes exactly this. */
       displayName: marketingCompetitorDisplayNameSchema,
       officialHosts: marketingCompetitorHostsSchema,
+      /** The pages A3 reads, each on one of these hosts. */
+      trackedPages: marketingCompetitorPagesSchema,
     })
     .strict(),
   z.object({ decision: z.literal("rejected"), expectedDecisionAuditLogId }).strict(),
@@ -56,7 +59,8 @@ export async function POST(req: Request, context: RouteContext) {
     schema,
     metadata: (body) => ({
       previousDecisionAuditLogId: body.expectedDecisionAuditLogId ?? MARKETING_COMPETITOR_NO_DECISION,
-      ...(body.decision === "approved" ? { displayName: body.displayName, officialHosts: body.officialHosts } : {}),
+      ...(body.decision === "approved" ? { displayName: body.displayName, officialHosts: body.officialHosts, trackedPages: body.trackedPages }
+        : {}),
     }),
     refusal: (error) =>
       error instanceof MarketingCompetitorRefusedError
@@ -68,7 +72,9 @@ export async function POST(req: Request, context: RouteContext) {
         decision: body.decision,
         expectedDecisionAuditLogId: body.expectedDecisionAuditLogId,
         auditLogId,
-        ...(body.decision === "approved" ? { displayName: body.displayName, officialHosts: body.officialHosts } : {}),
+        ...(body.decision === "approved"
+          ? { displayName: body.displayName, officialHosts: body.officialHosts, trackedPages: body.trackedPages }
+          : {}),
       }),
   });
 }

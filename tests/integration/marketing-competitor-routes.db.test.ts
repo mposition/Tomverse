@@ -95,6 +95,7 @@ test("a person approves a proposal with edited hosts, and the audit row records 
     expectedDecisionAuditLogId: null,
     displayName: " Alpha AI ",
     officialHosts: ["WWW.alpha.example", "alpha.example"],
+    trackedPages: ["https://alpha.example/pricing"],
   });
   assert.equal(response.status, 200, await response.clone().text());
   const alpha = await row("alpha");
@@ -108,7 +109,9 @@ test("a person approves a proposal with edited hosts, and the audit row records 
     previousDecisionAuditLogId: ":none",
     displayName: "Alpha AI",
     officialHosts: ["alpha.example", "www.alpha.example"],
+    trackedPages: ["https://alpha.example/pricing"],
   });
+  assert.deepEqual(alpha.trackedPages, ["https://alpha.example/pricing"]);
 });
 
 test("a decision from a stale page is a 409 and leaves no audit row", async () => {
@@ -120,6 +123,7 @@ test("a decision from a stale page is a 409 and leaves no audit row", async () =
     expectedDecisionAuditLogId: null,
     displayName: "Alpha",
     officialHosts: ["alpha.example"],
+    trackedPages: [],
   });
   assert.equal(stale.status, 409);
   assert.equal(((await stale.json()) as { code: string }).code, "competitor_decision_conflict");
@@ -135,6 +139,7 @@ test("a decision from a stale page is a 409 and leaves no audit row", async () =
         expectedDecisionAuditLogId: current,
         displayName: "Alpha",
         officialHosts: ["alpha.example"],
+        trackedPages: [],
       })
     ).status,
     200,
@@ -159,6 +164,7 @@ test("the kill switch refuses an approval or an addition, never a rejection or a
         expectedDecisionAuditLogId: null,
         displayName: "Beta",
         officialHosts: ["beta.example"],
+        trackedPages: [],
       })
     ).status,
     200,
@@ -169,11 +175,12 @@ test("the kill switch refuses an approval or an addition, never a rejection or a
     expectedDecisionAuditLogId: null,
     displayName: "Alpha",
     officialHosts: ["alpha.example"],
+    trackedPages: [],
   });
   assert.equal(approval.status, 409);
   assert.equal(((await approval.json()) as { code: string }).code, "MARKETING_KILL_SWITCH");
   assert.equal(
-    (await add({ competitorId: "gamma", displayName: "Gamma", officialHosts: ["gamma.example"] })).status,
+    (await add({ competitorId: "gamma", displayName: "Gamma", officialHosts: ["gamma.example"], trackedPages: [] })).status,
     409,
   );
   assert.equal((await decide("alpha", { decision: "rejected", expectedDecisionAuditLogId: null })).status, 200);
@@ -186,10 +193,10 @@ test("the kill switch refuses an approval or an addition, never a rejection or a
 });
 
 test("a person adds a competitor once, and the request is strict", async () => {
-  const first = await add({ competitorId: "delta", displayName: "Delta", officialHosts: ["delta.example"] });
+  const first = await add({ competitorId: "delta", displayName: "Delta", officialHosts: ["delta.example"], trackedPages: [] });
   assert.equal(first.status, 200, await first.clone().text());
   assert.equal((await row("delta")).proposedBy, "operator");
-  const again = await add({ competitorId: "delta", displayName: "Delta", officialHosts: ["delta.example"] });
+  const again = await add({ competitorId: "delta", displayName: "Delta", officialHosts: ["delta.example"], trackedPages: [] });
   assert.equal(again.status, 409);
   assert.equal(((await again.json()) as { code: string }).code, "competitor_exists");
   for (const body of [
@@ -232,6 +239,7 @@ test("the console lists approved competitors first, with the decision each chang
     expectedDecisionAuditLogId: null,
     displayName: "Beta",
     officialHosts: ["beta.example"],
+    trackedPages: [],
   });
   const view = await readMarketingConsole("competitors", true);
   assert.equal(view.ordering, "by-status");
@@ -244,4 +252,31 @@ test("the console lists approved competitors first, with the decision each chang
   );
   assert.equal(view.rows[0].decisionAuditLogId, (await row("beta")).decisionAuditLogId);
   assert.equal(view.rows[1].decisionAuditLogId, null);
+});
+
+test("a tracked page off the competitor's own hosts is a 400 and writes nothing", async () => {
+  await proposal("alpha");
+  const response = await decide("alpha", {
+    decision: "approved",
+    expectedDecisionAuditLogId: null,
+    displayName: "Alpha",
+    officialHosts: ["alpha.example"],
+    trackedPages: ["https://elsewhere.example/pricing"],
+  });
+  assert.equal(response.status, 400);
+  assert.equal(((await response.json()) as { code: string }).code, "competitor_pages_off_hosts");
+  // The wrapper's audit row rolled back with the refused write.
+  assert.equal(await prisma.adminAuditLog.count(), 0);
+  assert.equal((await row("alpha")).status, "proposed");
+  assert.equal(
+    (
+      await add({
+        competitorId: "gamma",
+        displayName: "Gamma",
+        officialHosts: ["gamma.example"],
+        trackedPages: ["https://gamma.example.evil.example/"],
+      })
+    ).status,
+    400,
+  );
 });

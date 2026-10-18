@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
+import type { Session } from "next-auth";
+
 import { POST } from "@/app/api/internal/marketing-generator-context/route";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
+import { MARKETING_COMPETITOR_ACTIONS } from "@/lib/marketingCompetitorCore";
+import { createApprovedMarketingCompetitor } from "@/lib/marketingCompetitorStore";
 import { marketingGeneratorContextAllowed } from "@/lib/marketingGeneratorContext";
-import { createMarketingChannel, insertMarketingReport } from "@/lib/marketingStore";
+import { createMarketingChannel, insertMarketingReport, runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
 
@@ -14,7 +19,7 @@ const DIGEST = "b".repeat(64);
 const reset = () =>
   resetTestFixture(
     prisma,
-    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun" RESTART IDENTITY CASCADE`,
+    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun", "MarketingCompetitor" RESTART IDENTITY CASCADE`,
   );
 
 beforeEach(reset);
@@ -156,3 +161,82 @@ test("the context gate follows the resolver's kill-switch rule", () => {
   assert.equal(marketingGeneratorContextAllowed({ ok: true, value: "on" }), false);
   assert.equal(marketingGeneratorContextAllowed({ ok: false }), false);
 });
+
+// An approval needs a person's audit row on a real chain.
+process.env.ADMIN_AUDIT_INTEGRITY_KEY ||= ["generator", "context", "audit", "test"].join("-");
+const operator = {
+  user: { id: "marketing-operator", email: "owner@example.test" },
+  expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+} as Session;
+
+const approve = (competitorId: string, displayName: string, officialHosts: string[], trackedPages: string[] = []) =>
+  runMarketingTransaction(prisma, async (tx) => {
+    const auditLogId = await writeAdminAuditLog({
+      session: operator,
+      request: new Request("https://tomverse.app/api/admin/marketing/competitors"),
+      action: MARKETING_COMPETITOR_ACTIONS.approved,
+      targetType: "MarketingCompetitor",
+      targetId: competitorId,
+      summary: "Approved a competitor.",
+      metadata: { actorHadMarketingWrite: true, previousDecisionAuditLogId: ":none", displayName, officialHosts, trackedPages },
+      tx,
+    });
+    await createApprovedMarketingCompetitor(tx, { competitorId, displayName, officialHosts, trackedPages, auditLogId });
+  });
+
+const propose = (id: string, status: "proposed" = "proposed") =>
+  prisma.$executeRawUnsafe(
+    `INSERT INTO "MarketingCompetitor" ("id", "displayName", "officialHosts", "status", "proposedBy", "evidenceUrls", "updatedAt")
+     VALUES ($1, $1, ARRAY[$2], $3, 'seed', ARRAY[]::TEXT[], CURRENT_TIMESTAMP)`,
+    id,
+    `${id}.example`,
+    status,
+  );
+
+test("the context tells A3 whom to track on which hosts, and every id it already knows", () =>
+  withSecret(async () => {
+    await approve("poe", "Poe", ["poe.com"]);
+    await propose("alpha");
+    const response = await call({ generatorRunId: "run-2" });
+    assert.equal(response.status, 200);
+    const text = await response.text();
+    const { context } = JSON.parse(text) as {
+      context: {
+        competitors: {
+          tracked: Array<{ competitorId: string; displayName: string; officialHosts: string[]; trackedPages: string[] }>;
+          knownIds: string[];
+        };
+      };
+    };
+    // Only the approved one is tracked; the proposal is known but not a source.
+    assert.deepEqual(context.competitors.tracked, [
+      { competitorId: "poe", displayName: "Poe", officialHosts: ["poe.com"], trackedPages: [] },
+    ]);
+    assert.deepEqual(context.competitors.knownIds, ["alpha", "poe"]);
+    assert.equal(/https?:\/\//.test(text), false, "a host is a name, not a URL");
+  }));
+
+test("every known id reaches A3, however large the registry and however old the answer", () =>
+  withSecret(async () => {
+    // The first row written, then 250 newer ones: any page cut at fewer than
+    // 251 rows, newest first, would leave out the one written first.
+    await propose("aaa-oldest");
+    for (let index = 0; index < 250; index += 1) await propose(`c${String(index).padStart(3, "0")}`);
+    const response = await call({ generatorRunId: "run-3" });
+    assert.equal(response.status, 200);
+    const { context } = (await response.json()) as { context: { competitors: { knownIds: string[] } } };
+    assert.equal(context.competitors.knownIds.length, 251);
+    assert.equal(context.competitors.knownIds.includes("aaa-oldest"), true);
+  }));
+
+test("A3 is given the pages a person approved, and those are the context's only URLs", () =>
+  withSecret(async () => {
+    await approve("poe", "Poe", ["poe.com"], ["https://poe.com/pricing"]);
+    const response = await call({ generatorRunId: "run-4" });
+    const text = await response.text();
+    const { context } = JSON.parse(text) as {
+      context: { competitors: { tracked: Array<{ trackedPages: string[] }> } };
+    };
+    assert.deepEqual(context.competitors.tracked[0].trackedPages, ["https://poe.com/pricing"]);
+    assert.deepEqual(text.match(/https?:\/\/[^"]*/gu), ["https://poe.com/pricing"]);
+  }));

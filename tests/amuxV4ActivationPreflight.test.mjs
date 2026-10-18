@@ -58,23 +58,41 @@ test("incomplete or unsupported version listing never proves availability", () =
 
 test("read-only success is not deletion proof or activation permission", async () => {
   const result = await activationPreflight({ env: keys(), readCounts: async () => rows(),
-    listVersions: async () => ({ IsTruncated: false }) });
+    listVersions: async () => ({ IsTruncated: false }),
+    getVersioning: async () => ({ Status: "Enabled" }) });
   assert.equal(result.appContentKeysConfigured, true);
   assert.equal(result.databaseCountsAvailable, true);
   assert.equal(result.keyStoreVersionListingAvailable, true);
+  assert.equal(result.keyStoreVersioningStatusAvailable, true);
   assert.equal(result.cryptographicDeletionVerified, false);
   assert.equal(result.runtimeActivated, false);
+});
+
+test("v19 key-retirement preflight requires readable supported bucket versioning", async () => {
+  for (const status of [undefined, "Enabled", "Suspended", "Unknown"]) {
+    const result = await activationPreflight({ env: keys(), readCounts: async () => rows(),
+      listVersions: async () => ({ IsTruncated: false }),
+      getVersioning: async () => ({ Status: status }) });
+    assert.equal(result.keyStoreVersioningStatusAvailable, status !== "Unknown");
+  }
+  const denied = await activationPreflight({ env: keys(), readCounts: async () => rows(),
+    listVersions: async () => ({ IsTruncated: false }),
+    getVersioning: async () => { throw new Error("secret-access-key"); } });
+  assert.equal(denied.keyStoreVersioningStatusAvailable, false);
+  assert.doesNotMatch(JSON.stringify(denied), /secret/);
 });
 
 test("missing/equal keys and runtime exceptions fail closed without leaking values", async () => {
   for (const env of [{}, { ...keys(), AMUX_V4_CONTENT_DIGEST_KEY_B64:
       keys().AMUX_V4_CONTENT_MASTER_KEY_B64 }]) {
     const result = await activationPreflight({ env, readCounts: async () => { throw new Error("secret-db-url"); },
-      listVersions: async () => { throw new Error("secret-access-key"); } });
+      listVersions: async () => { throw new Error("secret-access-key"); },
+      getVersioning: async () => { throw new Error("secret-access-key"); } });
     assert.equal(result.appContentKeysConfigured, false);
     assert.equal(result.databaseCountsAvailable, false);
     assert.equal(result.encryptedBodies, null);
     assert.equal(result.keyStoreVersionListingAvailable, false);
+    assert.equal(result.keyStoreVersioningStatusAvailable, false);
     assert.doesNotMatch(JSON.stringify(result), /secret/);
   }
 });

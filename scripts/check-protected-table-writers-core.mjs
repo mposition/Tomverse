@@ -215,6 +215,13 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/amux-intake.md v19 items 3 and 7",
   },
   {
+    table: "AmuxIdeaReadManifestKeyIntent",
+    delegate: "amuxIdeaReadManifestKeyIntent",
+    writers: ["lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
+      "lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention.ts"],
+    contract: "docs/policy/amux-intake.md v19 item 3 read-path key retention",
+  },
+  {
     table: "AmuxIdeaOperatingScopeSetting",
     delegate: "amuxIdeaOperatingScopeSetting",
     writers: ["lib/amux/ideaOperatingScopeStore.ts"],
@@ -584,6 +591,12 @@ export const EXCLUDED_PREFIXES = [
 export const DELEGATE_NAME_ALLOWLIST = [
   {
     path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxIdeaReadManifestKeyIntent",
+    count: 1,
+    reason: "Account export domain key only; this metadata file has no Prisma client or database connection.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
     delegate: "amuxIdeaSessionAnalysisBudgetClaim",
     count: 1,
     reason: "Account export domain key only; no client is indexed or database connection opened in this metadata file.",
@@ -697,6 +710,34 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxIdeaReadManifestKeyIntent",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason: "The export declaration names this model beside descriptive write-language only; this metadata file imports no Prisma client and runs no SQL.",
+  },
+  {
+    path: "lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention.ts",
+    table: "AmuxIdeaReadManifestKeyIntent",
+    tableMentions: 3,
+    writeVerbs: 3,
+    reason: "This authorised intent-retirement writer selects due intent IDs and locks exact intent rows with bound parameters; its claim and verified-deletion updates use the Prisma delegate in canonical audited transactions.",
+  },
+  {
+    path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
+    table: "AmuxIdeaReadManifestKeyIntent",
+    tableMentions: 12,
+    writeVerbs: 18,
+    reason: "The migration creates the guarded key-intent table, validates claim and deletion transitions, and serializes manifest inserts against claims; it seeds no row.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "AmuxIdeaReadManifestKeyIntent",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason: "The closed system-actor manifest names the intent and retirement audit targets; it executes no SQL.",
+  },
+  {
     path: "lib/amux/ideaSessionAnalysisBudgetClaimService.ts",
     table: "AmuxIdeaSessionAnalysisReservation",
     tableMentions: 1,
@@ -762,9 +803,37 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
     table: "AmuxIdeaTrackedCheckoutEvidence",
-    tableMentions: 1,
+    tableMentions: 2,
     writeVerbs: 2,
-    reason: "The sole manifest writer locks and reads pinned checkout evidence; its SQL does not modify the evidence row.",
+    reason: "The manifest and key-intent writers lock and read pinned checkout evidence; their SQL does not modify the evidence row.",
+  },
+  {
+    path: "lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention.ts",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason: "The orphan-key sweeper only reads the manifest table to prove no body was committed before deleting the external key; it updates only the key-intent table.",
+  },
+  {
+    path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutEvidence",
+    tableMentions: 2,
+    writeVerbs: 18,
+    reason: "The new intent table references and reads the immutable checkout evidence; migration DDL never writes an evidence row.",
+  },
+  {
+    path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
+    table: "AmuxIdeaTrackedCheckoutReadManifest",
+    tableMentions: 3,
+    writeVerbs: 18,
+    reason: "The intent guard only reads whether a manifest exists, and the manifest insert guard locks the intent; migration DDL never writes a manifest row.",
+  },
+  {
+    path: "prisma/migrations/20261017021000_amux_v19_read_manifest_key_intent/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 6,
+    writeVerbs: 18,
+    reason: "The intent guard validates canonical audit rows from the same transaction and references them with restrictive foreign keys; migration DDL never writes an audit row.",
   },
   {
     path: "lib/amux/ideaTrackedCheckoutReadManifestStore.ts",
@@ -2660,6 +2729,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The migration that creates the marketing LLM cost ledger and the triggers that bound it. It names INSERT, UPDATE, DELETE and TRUNCATE to constrain or refuse them; it writes no row. Applied history, so an edit changes a count.",
   },
   {
+    path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "Replaces the registry's write guard so tracked pages move only into an approval and match the person's audit row. Its one AdminAuditLog mention is that guard's read of the decision's own audit row. No audit row is written.",
+  },
+  {
+    path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
+    table: "MarketingCompetitor",
+    tableMentions: 4,
+    writeVerbs: 4,
+    reason:
+      "Adds the tracked-pages column, its two checks (pages on the row's own hosts; a proposal tracks nothing) and the replaced write guard. It writes no row.",
+  },
+  {
     path: "prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -2842,6 +2927,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql",
+    count: 1,
+    reason:
+      "The replaced write guard's one read of the decision's own AdminAuditLog row, with EXECUTE over a name built from TG_TABLE_SCHEMA because the function pins search_path to pg_catalog, pg_temp. The schema is quoted with %I and the id is bound with USING. It reads and never writes.",
+  },
   {
     path: "prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql",
     count: 1,
@@ -3150,10 +3241,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/amux-v4-activation-preflight.mjs",
-    sha256: "e4bae3b801195230c4b8c9e097ce42aae50e14193b9ae81ee1b8f384dd8f8bdf",
+    sha256: "bed0339ae4be9422b2fec2846c78f424246cfbfae6465ae4020db98a3e27bb92",
     count: 1,
     reason:
-      "AMUX v4 activation diagnostic: one pg import; a fixed allowlist of ciphertext/key columns yields counts only inside BEGIN REPEATABLE READ READ ONLY with statement and idle-transaction timeouts. No audit, model call, switch or body write. The S3 operation is a read-only version-listing probe in an unused namespace, not key deletion evidence. Fingerprint is bound to the complete reviewed script.",
+      "AMUX v4 activation diagnostic: one pg import; a fixed allowlist of ciphertext/key columns yields counts only inside BEGIN REPEATABLE READ READ ONLY with statement and idle-transaction timeouts. No audit, model call, switch or body write. S3 probes only version listing in an unused namespace and bucket versioning status; neither proves key deletion. Fingerprint is bound to the complete reviewed script.",
   },
   {
     path: "scripts/baseline-existing-database.mjs",

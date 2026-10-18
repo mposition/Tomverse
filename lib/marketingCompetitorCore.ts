@@ -43,6 +43,31 @@ export const marketingCompetitorHostsSchema = z
   .transform((hosts) => [...new Set(hosts)].sort());
 export const marketingCompetitorDisplayNameSchema = z.string().trim().min(1).max(80);
 
+/** Tracked pages one competitor may have (the database's limit too). */
+export const MARKETING_COMPETITOR_MAX_TRACKED_PAGES = 10;
+
+/**
+ * The pages A3 reads for an approved competitor (operator decision
+ * 2026-10-17). Each must be an https URL on one of that competitor's own
+ * official hosts -- checked against the hosts in the same request by
+ * `marketingCompetitorPagesOnHosts`, and again by the database.
+ */
+export const marketingCompetitorPagesSchema = z
+  .array(z.string().trim().min(1).max(500))
+  .max(MARKETING_COMPETITOR_MAX_TRACKED_PAGES);
+
+/**
+ * Whether every page is an https URL whose host part is exactly one of the
+ * hosts: no port, no user name, the host spelled the way it is stored. The
+ * same rule as the database's `marketing_competitor_pages_valid`.
+ */
+export function marketingCompetitorPagesOnHosts(pages: readonly string[], hosts: readonly string[]): boolean {
+  return pages.every((page) => {
+    const match = /^https:\/\/([^/?#]+)([/?#].*)?$/u.exec(page);
+    return match !== null && hosts.includes(match[1]);
+  });
+}
+
 /**
  * A competitor A3 proposes: who, which hosts it believes are official, where
  * it saw them, and why it thinks the competitor matters. All of it is data: a

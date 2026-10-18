@@ -134,6 +134,24 @@ export const AMUX_V19_READ_MANIFEST_RECORDED_TARGET =
   "AmuxIdeaTrackedCheckoutReadManifest" as const;
 export const AMUX_V19_READ_MANIFEST_RECORDED_SCOPE =
   "tracked-checkout-read-manifest-v1" as const;
+export const AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION =
+  "amux.v19.read_manifest.key_intent" as const;
+export const AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET =
+  "AmuxIdeaReadManifestKeyIntent" as const;
+export const AMUX_V19_READ_MANIFEST_KEY_INTENT_SCOPE =
+  "tracked-checkout-read-manifest-key-intent-v1" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION =
+  "amux.v19.read_manifest.orphan_key_retirement_claimed" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_TARGET =
+  "AmuxIdeaReadManifestKeyIntent" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_SCOPE =
+  "tracked-checkout-read-manifest-orphan-key-claim-v1" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_ACTION =
+  "amux.v19.read_manifest.orphan_key_retired" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_TARGET =
+  "AmuxIdeaReadManifestKeyIntent" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_SCOPE =
+  "tracked-checkout-read-manifest-orphan-key-retire-v1" as const;
 /** One complete, normalized first analysis is stored as independently purgeable units. */
 export const AMUX_V4_FIRST_DRAFT_SAVED_ACTION = "AMUX_V4_FIRST_ANALYSIS_DRAFT_SAVED" as const;
 export const AMUX_V4_FIRST_DRAFT_SAVED_TARGET = "AmuxIdeaAnalysisChunk" as const;
@@ -272,6 +290,18 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V19_READ_MANIFEST_RECORDED_ACTION &&
       targetType === AMUX_V19_READ_MANIFEST_RECORDED_TARGET) {
     return AMUX_V19_READ_MANIFEST_RECORDED_SCOPE;
+  }
+  if (action === AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION &&
+      targetType === AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET) {
+    return AMUX_V19_READ_MANIFEST_KEY_INTENT_SCOPE;
+  }
+  if (action === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION &&
+      targetType === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_TARGET) {
+    return AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_SCOPE;
+  }
+  if (action === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_ACTION &&
+      targetType === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_TARGET) {
+    return AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_SCOPE;
   }
   if (action === AMUX_V4_FIRST_DRAFT_SAVED_ACTION &&
       targetType === AMUX_V4_FIRST_DRAFT_SAVED_TARGET) {

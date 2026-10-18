@@ -231,6 +231,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // The next migration closes an insert-only purged-shape loophole on that
   // same manifest table; it does not alter commit-deadline evidence.
   "20261017020100_amux_v19_read_manifest_active_insert_guard",
+  // A durable key intent and its audited orphan-key retirement are independent
+  // of the AMUX commit-deadline marker and trigger.
+  "20261017021000_amux_v19_read_manifest_key_intent",
   // Intake v19 session analysis queue reservation is append-only and bound to
   // the submission transaction; it adds no commit-deadline mechanism.
   "20261017010000_amux_v19_session_analysis_reservation",
@@ -503,6 +506,7 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts",
     "app/api/internal/amux/v19/analysis-stop/route.ts",
     "app/api/internal/amux/v19/checkout-evidence/route.ts",
+    "app/api/internal/amux/v19/read-manifest/route.ts",
     "app/api/internal/amux/v22/execution/result/route.ts",
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
@@ -512,20 +516,40 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
   assertBefore(stopPoll, 'process.env[READ_ENV] !== "enabled"');
   assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
-  const checkoutEvidence = withoutComments(read(
+  const evidenceRoute = withoutComments(read(
     "app/api/internal/amux/v19/checkout-evidence/route.ts"));
-  const evidenceWrite = between(checkoutEvidence,
-    "export async function POST", "export async function GET");
-  const evidenceRead = checkoutEvidence.slice(
-    checkoutEvidence.indexOf("export async function GET"));
-  assertBefore(evidenceWrite, "authorized(request)");
-  assertBefore(evidenceWrite, 'process.env[WRITE_ENV] !== "enabled"');
-  assertBefore(evidenceWrite, 'process.env[READ_ENV] !== "enabled"');
-  assertBefore(evidenceRead, "authorized(request)");
-  assertBefore(evidenceRead, 'process.env[READ_ENV] !== "enabled"');
-  assert.ok(!evidenceRead.includes("process.env[WRITE_ENV]"));
-  assert.match(evidenceWrite, /maxWait: 3_000, timeout: 12_000/);
-  assert.match(evidenceRead, /maxWait: 3_000, timeout: 10_000/);
+  const evidencePost = between(evidenceRoute, "export async function POST",
+    "export async function GET");
+  const evidenceGet = evidenceRoute.slice(evidenceRoute.indexOf(
+    "export async function GET"));
+  assert.ok(evidencePost.indexOf("authorized(request)") <
+    evidencePost.indexOf("prisma.$transaction"));
+  assert.ok(evidencePost.indexOf("process.env[WRITE_ENV]") <
+    evidencePost.indexOf("prisma.$transaction"));
+  assert.ok(evidencePost.indexOf("process.env[READ_ENV]") <
+    evidencePost.indexOf("prisma.$transaction"));
+  assert.ok(evidenceGet.indexOf("process.env[READ_ENV]") <
+    evidenceGet.indexOf("prisma.$transaction"));
+  assertBefore(evidenceGet, "authorized(request)");
+  assert.ok(!evidenceGet.includes("process.env[WRITE_ENV]"));
+  assert.match(evidencePost, /maxWait: 3_000, timeout: 12_000/);
+  assert.match(evidenceGet, /maxWait: 3_000, timeout: 10_000/);
+  const manifestRoute = withoutComments(read(
+    "app/api/internal/amux/v19/read-manifest/route.ts"));
+  const manifestPost = between(manifestRoute, "export async function POST",
+    "export async function GET");
+  const manifestGet = manifestRoute.slice(manifestRoute.indexOf(
+    "export async function GET"));
+  assert.ok(manifestPost.indexOf("authorized(request)") <
+    manifestPost.indexOf("prisma.$transaction"));
+  assert.ok(manifestPost.indexOf("process.env[WRITE_ENV]") <
+    manifestPost.indexOf("prisma.$transaction"));
+  assert.ok(manifestPost.indexOf("process.env[READ_ENV]") <
+    manifestPost.indexOf("prisma.$transaction"));
+  assert.ok(manifestGet.indexOf("process.env[READ_ENV]") <
+    manifestGet.indexOf("prisma.$transaction"));
+  assert.match(manifestPost, /maxWait: 3_000, timeout: 12_000/);
+  assert.match(manifestGet, /maxWait: 3_000, timeout: 10_000/);
   const budgetReceipt = withoutComments(read(
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts"));
   assertBefore(budgetReceipt, "isAmuxV4AnalysisAgentAuthorized(request");

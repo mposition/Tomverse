@@ -1,9 +1,31 @@
+import { randomUUID } from "node:crypto";
+
+import { AMUX_WORKER_REGISTRY_V31_SEED } from "@/lib/amux/workerRegistryCore";
+
 import { expect, test } from "./support/console";
 import { adminFixtureDatabase } from "./support/database";
 
 test("the AMUX floor shows the resident roster, not obsolete runtime workers", async ({ page, signInAs }) => {
   const now = new Date();
-  await adminFixtureDatabase().amuxWorkerRuntime.createMany({
+  // Orchestration policy version 35, section 3 (R2c): the floor seats every
+  // registered worker that is not retired, so the registry holds the thirteen
+  // production registered in R1 (seven active, six requested). Each event
+  // points at an audit row; the fixture schema has no triggers to require more.
+  const database = adminFixtureDatabase();
+  for (const entry of AMUX_WORKER_REGISTRY_V31_SEED) {
+    const audit = await database.adminAuditLog.create({
+      data: { action: "amux.worker.register", targetType: "AmuxWorker", targetId: entry.workerName,
+        summary: "office e2e registry seed" },
+    });
+    await database.amuxWorkerRegistryEvent.create({
+      data: {
+        id: randomUUID(), workerName: entry.workerName, providerClass: entry.workerName.split("-")[0]!,
+        roleCeiling: entry.roleCeiling, desiredState: entry.desiredState, revision: 1,
+        actorUserId: "office-e2e-owner", auditLogId: audit.id,
+      },
+    });
+  }
+  await database.amuxWorkerRuntime.createMany({
     data: ["devin-worker", "engineering-runner", "cursor-worker"].map((workerName) => ({
       workerName, instanceId: "office-e2e", status: "idle", dispatchReady: true,
       heartbeatAt: now, leaseExpiresAt: new Date(now.getTime() + 90_000),

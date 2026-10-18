@@ -1,7 +1,8 @@
 import "server-only";
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand,
+import { DeleteObjectCommand, GetBucketVersioningCommand, GetObjectCommand,
+  HeadObjectCommand,
   ListObjectVersionsCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 import { amuxContentKeyCoordinate, type AmuxContentKeys,
@@ -21,6 +22,9 @@ const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const KEY_BYTES = 32;
 const STORED_BYTES = MAGIC.length + IV_BYTES + TAG_BYTES + KEY_BYTES;
+// This fixed, non-secret body occupies a retired read-manifest key's object
+// coordinate so an earlier conditional PutObject cannot recreate key material.
+const RETIRED_READ_MANIFEST_KEY = Buffer.from("AMUX-READ-MANIFEST-KEY-RETIRED-v1", "ascii");
 
 export type AmuxContentKeyIdentity = {
   ideaId: string;
@@ -210,38 +214,223 @@ export async function loadAmuxContentUnitKeys(input: AmuxContentKeyIdentity,
   } finally { client.destroy(); }
 }
 
-/** Retention calls this only after the active DB body has been cleared. */
+/** Call only after the active DB body is cleared or its write definitely rolled
+ * back. An uncertain COMMIT is never grounds for deleting its key. */
 export async function deleteAmuxContentUnitKey(input: AmuxContentKeyIdentity,
   env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const { objectKey } = identity(input);
   const { bucket, client } = connection(env);
   try {
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey }));
-    try {
-      await client.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey }));
-      throw new AmuxIdeaKeyStoreError("outcome_unknown");
-    } catch (error) {
-      if (error instanceof AmuxIdeaKeyStoreError) throw error;
-      if (typeof error === "object" && error !== null &&
-          "$metadata" in error && (error as { $metadata?: { httpStatusCode?: number } })
-            .$metadata?.httpStatusCode === 404) {
-        // HEAD only proves that the current key is absent. A delete marker in
-        // a versioned bucket can hide a restorable older data key, so require
-        // a complete version listing before recording irreversible deletion.
-        const versions = await client.send(new ListObjectVersionsCommand({
-          Bucket: bucket, Prefix: objectKey, MaxKeys: 1000,
-        }));
-        if (versions.IsTruncated === false &&
-            !versions.Versions?.some((item) => item.Key === objectKey) &&
-            !versions.DeleteMarkers?.some((item) => item.Key === objectKey)) {
-          return;
-        }
-        throw new AmuxIdeaKeyStoreError("outcome_unknown");
-      }
-      throw new AmuxIdeaKeyStoreError("outcome_unknown");
-    }
+    await verifyAbsentContentKey(client, bucket, objectKey);
   } catch (error) {
     if (error instanceof AmuxIdeaKeyStoreError) throw error;
     throw new AmuxIdeaKeyStoreError("outcome_unknown");
   } finally { client.destroy(); }
+}
+
+/** Readback only: a claimed deletion whose audit result was lost must not
+ * issue a second DeleteObject. HEAD alone is insufficient for versioned keys. */
+export async function verifyAmuxContentUnitKeyAbsent(
+  input: AmuxContentKeyIdentity, env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const { objectKey } = identity(input);
+  const { bucket, client } = connection(env);
+  try { await verifyAbsentContentKey(client, bucket, objectKey); }
+  catch (error) {
+    if (error instanceof AmuxIdeaKeyStoreError) throw error;
+    throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  }
+  finally { client.destroy(); }
+}
+
+/** A claimed orphan has no live body. Replace its key with a non-secret fence
+ * before removing old versions; a delayed IfNoneMatch create then conflicts. */
+export async function retireClaimedAmuxReadManifestKey(
+  input: AmuxContentKeyIdentity, env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  if (input.purpose !== "repository_read_manifest") {
+    throw new AmuxIdeaKeyStoreError("integrity_unavailable");
+  }
+  const { objectKey } = identity(input);
+  const { bucket, client } = connection(env);
+  const abortSignal = AbortSignal.timeout(30_000);
+  try {
+    await client.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey,
+      Body: RETIRED_READ_MANIFEST_KEY,
+      ContentType: "application/octet-stream", CacheControl: "no-store" }),
+    { abortSignal });
+    await finishClaimedReadManifestRetirement(client, bucket, objectKey,
+      isCloudflareR2(env), abortSignal);
+  } catch (error) {
+    if (error instanceof AmuxIdeaKeyStoreError) throw error;
+    throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  } finally { client.destroy(); }
+}
+
+/** Readback after an uncertain write; this function never writes. */
+export async function verifyAmuxReadManifestKeyRetired(
+  input: AmuxContentKeyIdentity, env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  if (input.purpose !== "repository_read_manifest") {
+    throw new AmuxIdeaKeyStoreError("integrity_unavailable");
+  }
+  const { objectKey } = identity(input);
+  const { bucket, client } = connection(env);
+  try {
+    await verifyRetiredReadManifestKey(client, bucket, objectKey,
+      isCloudflareR2(env), AbortSignal.timeout(30_000));
+  } catch (error) {
+    if (error instanceof AmuxIdeaKeyStoreError) throw error;
+    throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  } finally { client.destroy(); }
+}
+
+/** Reconcile a claimed intent, including claims left by the old delete flow.
+ * A confirmed missing or old key may be replaced with the fixed non-secret
+ * fence; an unavailable read must stop rather than guess. */
+export async function finishClaimedAmuxReadManifestKeyRetirement(
+  input: AmuxContentKeyIdentity, env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  if (input.purpose !== "repository_read_manifest") {
+    throw new AmuxIdeaKeyStoreError("integrity_unavailable");
+  }
+  const { objectKey } = identity(input);
+  const { bucket, client } = connection(env);
+  const abortSignal = AbortSignal.timeout(30_000);
+  try {
+    if (await inspectRetiredFence(client, bucket, objectKey,
+      abortSignal) === "needs_fence") {
+      await client.send(new PutObjectCommand({ Bucket: bucket,
+        Key: objectKey, Body: RETIRED_READ_MANIFEST_KEY,
+        ContentType: "application/octet-stream", CacheControl: "no-store" }),
+      { abortSignal });
+    }
+    await finishClaimedReadManifestRetirement(client, bucket, objectKey,
+      isCloudflareR2(env), abortSignal);
+  } catch (error) {
+    if (error instanceof AmuxIdeaKeyStoreError) throw error;
+    throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  } finally { client.destroy(); }
+}
+
+function isCloudflareR2(env: NodeJS.ProcessEnv): boolean {
+  try {
+    return new URL(env.AMUX_V4_KEY_STORE_ENDPOINT ?? "").hostname
+      .endsWith(".r2.cloudflarestorage.com");
+  } catch { return false; }
+}
+
+async function inspectRetiredFence(client: S3Client, bucket: string,
+  objectKey: string, abortSignal: AbortSignal):
+  Promise<"retired" | "needs_fence"> {
+  let result;
+  try {
+    result = await client.send(new GetObjectCommand({ Bucket: bucket,
+      Key: objectKey }), { abortSignal });
+  } catch (error) {
+    if (typeof error === "object" && error !== null &&
+        "$metadata" in error && (error as {
+          $metadata?: { httpStatusCode?: number }
+        }).$metadata?.httpStatusCode === 404) return "needs_fence";
+    throw error;
+  }
+  if (!result.Body) throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  const bytes = Buffer.from(await result.Body.transformToByteArray());
+  try {
+    return bytes.equals(RETIRED_READ_MANIFEST_KEY) ?
+      "retired" : "needs_fence";
+  } finally { bytes.fill(0); }
+}
+
+async function readRetiredFence(client: S3Client, bucket: string,
+  objectKey: string, abortSignal: AbortSignal): Promise<void> {
+  if (await inspectRetiredFence(client, bucket, objectKey,
+    abortSignal) !== "retired") {
+    throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  }
+}
+
+async function readVersioning(client: S3Client, bucket: string,
+  r2: boolean, abortSignal: AbortSignal): Promise<"none" | "versioned"> {
+  if (r2) return "none"; // R2 does not implement GetBucketVersioning.
+  const versioning = await client.send(new GetBucketVersioningCommand({
+    Bucket: bucket }), { abortSignal });
+  if (versioning.Status === undefined) return "none";
+  if (versioning.Status === "Enabled" || versioning.Status === "Suspended") {
+    return "versioned";
+  }
+  throw new AmuxIdeaKeyStoreError("outcome_unknown");
+}
+
+async function listedReadManifestVersions(client: S3Client, bucket: string,
+  objectKey: string, abortSignal: AbortSignal) {
+  const listed = await client.send(new ListObjectVersionsCommand({
+    Bucket: bucket, Prefix: objectKey, MaxKeys: 1000,
+  }), { abortSignal });
+  if (listed.IsTruncated !== false || listed.NextKeyMarker ||
+      listed.NextVersionIdMarker) throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  return [
+    ...(listed.Versions ?? []).filter((item) => item.Key === objectKey)
+      .map((item) => ({ versionId: item.VersionId,
+        isLatest: item.IsLatest, deleteMarker: false })),
+    ...(listed.DeleteMarkers ?? []).filter((item) => item.Key === objectKey)
+      .map((item) => ({ versionId: item.VersionId,
+        isLatest: item.IsLatest, deleteMarker: true })),
+  ];
+}
+
+async function verifyRetiredReadManifestKey(client: S3Client, bucket: string,
+  objectKey: string, r2: boolean, abortSignal: AbortSignal): Promise<void> {
+  await readRetiredFence(client, bucket, objectKey, abortSignal);
+  if (await readVersioning(client, bucket, r2, abortSignal) === "none") return;
+  const versions = await listedReadManifestVersions(client, bucket, objectKey,
+    abortSignal);
+  if (versions.length !== 1 || !versions[0].isLatest ||
+      !versions[0].versionId || versions[0].deleteMarker) {
+    throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  }
+}
+
+async function finishClaimedReadManifestRetirement(client: S3Client,
+  bucket: string, objectKey: string, r2: boolean,
+  abortSignal: AbortSignal): Promise<void> {
+  await readRetiredFence(client, bucket, objectKey, abortSignal);
+  if (await readVersioning(client, bucket, r2, abortSignal) === "versioned") {
+    const versions = await listedReadManifestVersions(client, bucket, objectKey,
+      abortSignal);
+    const latest = versions.filter((item) => item.isLatest);
+    if (latest.length !== 1 || latest[0].deleteMarker ||
+        !versions.every((item) => !!item.versionId)) {
+      throw new AmuxIdeaKeyStoreError("outcome_unknown");
+    }
+    for (const version of versions) {
+      if (version === latest[0]) continue;
+      await client.send(new DeleteObjectCommand({ Bucket: bucket,
+        Key: objectKey, VersionId: version.versionId }), { abortSignal });
+    }
+  }
+  await verifyRetiredReadManifestKey(client, bucket, objectKey, r2,
+    abortSignal);
+}
+
+async function verifyAbsentContentKey(client: S3Client, bucket: string,
+  objectKey: string, abortSignal?: AbortSignal): Promise<void> {
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey }),
+      { abortSignal });
+  } catch (error) {
+    if (typeof error === "object" && error !== null &&
+        "$metadata" in error && (error as { $metadata?: { httpStatusCode?: number } })
+          .$metadata?.httpStatusCode === 404) {
+      const versions = await client.send(new ListObjectVersionsCommand({
+        Bucket: bucket, Prefix: objectKey, MaxKeys: 1000,
+      }), { abortSignal });
+      if (versions.IsTruncated === false &&
+          !versions.Versions?.some((item) => item.Key === objectKey) &&
+          !versions.DeleteMarkers?.some((item) => item.Key === objectKey)) return;
+    }
+    throw new AmuxIdeaKeyStoreError("outcome_unknown");
+  }
+  throw new AmuxIdeaKeyStoreError("outcome_unknown");
 }
