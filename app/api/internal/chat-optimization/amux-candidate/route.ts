@@ -38,9 +38,8 @@ export async function GET(request: Request): Promise<Response> {
         select: { id: true, candidateDigest: true, bundleDigest: true,
           sourceCommitSha: true, sourceRepositoryId: true,
           sourceBlobSha: true, sourceSha256: true } },
-        runs: { where: { ordinal: 1 }, select: { id: true, jobs: {
-          where: { role: "candidate_author" },
-          select: { id: true, state: true, terminalOutcome: true,
+        runs: { select: { id: true, ordinal: true, jobs: {
+          select: { id: true, role: true, state: true, terminalOutcome: true,
             claimRequestId: true, claimRequestDigest: true,
             claimToken: true, terminalRequestId: true,
             terminalRequestDigest: true, terminalAuditLogId: true,
@@ -60,7 +59,8 @@ export async function GET(request: Request): Promise<Response> {
     const terminalRequestId = chatUnifiedOptimizerAmuxCandidateRequestId(
       attemptId.data, "terminal");
     if (cycle.purpose !== CHAT_UNIFIED_OPTIMIZER_PURPOSE ||
-        cycle.runs.length !== 1 || run?.jobs.length !== 1 ||
+        cycle.runs.length !== 1 || run?.ordinal !== 1 ||
+        run.jobs.length !== 1 || job?.role !== "candidate_author" ||
         !cycle.candidate ||
         cycle.candidate.sourceRepositoryId !== BigInt(sourcePin.repositoryId) ||
         cycle.candidate.sourceCommitSha !== sourcePin.commitSha ||

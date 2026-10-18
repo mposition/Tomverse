@@ -154,7 +154,8 @@ test("readback exposes only content-free candidate and author-job state", async 
       bundleDigest: "b".repeat(64), sourceCommitSha: pin.commitSha,
       sourceRepositoryId: BigInt(pin.repositoryId),
       sourceBlobSha: pin.blobSha, sourceSha256: pin.sha256 },
-    runs: [{ id: runId, jobs: [{ id: jobId, state: "succeeded",
+    runs: [{ id: runId, ordinal: 1, jobs: [{ id: jobId,
+      role: "candidate_author", state: "succeeded",
       terminalOutcome: "succeeded", claimRequestId,
       claimRequestDigest: chatUnifiedOptimizerClaimDigest({
         requestId: claimRequestId, jobId }), claimToken,
@@ -178,6 +179,22 @@ test("readback exposes only content-free candidate and author-job state", async 
   assert.equal(body.resultSha256, "c".repeat(64));
   assert.equal(body.authorshipVerified, false);
   assert.equal(JSON.stringify(body).includes("taskGuidance"), false);
+  const originalRun = cycle.runs[0];
+  for (const runs of [
+    [{ ...originalRun, ordinal: 2 }],
+    [originalRun, { ...originalRun, id: "extra-run" }],
+    [{ ...originalRun, jobs: [{ ...originalRun.jobs[0], role: "judge" }] }],
+    [{ ...originalRun, jobs: [...originalRun.jobs,
+      { ...originalRun.jobs[0], id: "extra-job" }] }],
+  ]) {
+    cycle.runs = runs;
+    const stale = await handler.GET(new Request(
+      "https://tomverse.test/api/internal/chat-optimization/amux-candidate" +
+      "?attemptId=33333333-3333-4333-8333-333333333333"));
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).status, "incomplete");
+  }
+  cycle.runs = [originalRun];
   const candidate = cycle.candidate;
   for (const changed of [
     { sourceRepositoryId: 124n },
