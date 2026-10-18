@@ -51,7 +51,7 @@ test("absent and partial never authorize another claim write", async () => {
   }
 });
 
-test("readback canonicalizes UUIDs for exact server receipt matching", async () => {
+test("readback accepts server UUID versions while retaining exact identity", async () => {
   const nonV4ClaimId = "ea86a25b-919f-1714-a3d8-45ef5a18b177";
   assert.deepEqual(await readAmuxV19SessionBudgetClaimReceipt({
     ...input(async (url) => {
@@ -61,8 +61,6 @@ test("readback canonicalizes UUIDs for exact server receipt matching", async () 
       return Response.json({ status: "committed",
         claimId: nonV4ClaimId.toUpperCase(), claimStatus: "succeeded" });
     }),
-    requestId: requestId.toUpperCase(),
-    reservationId: reservationId.toUpperCase(),
   }), { kind: "committed", claimId: nonV4ClaimId.toUpperCase(),
     claimStatus: "succeeded", retryWrite: false });
 });
@@ -72,6 +70,8 @@ test("invalid identity and uncertain responses fail closed", async () => {
   const fetchImpl = async () => { calls += 1; throw new Error("network"); };
   for (const candidate of [
     { ...input(fetchImpl), requestId: "wrong" },
+    { ...input(fetchImpl), requestId: requestId.toUpperCase() },
+    { ...input(fetchImpl), reservationId: reservationId.toUpperCase() },
     { ...input(fetchImpl), requestId:
       "ea86a25b-919f-0714-a3d8-45ef5a18b175" },
     { ...input(fetchImpl), reservationId:
