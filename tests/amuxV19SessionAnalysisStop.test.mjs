@@ -11,6 +11,7 @@ import { AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV } from
 const now = new Date("2026-10-18T00:00:00.000Z");
 const claimId = "00000000-0000-4000-8000-000000000001";
 const reservationId = "00000000-0000-4000-8000-000000000002";
+const ideaId = "00000000-0000-4000-8000-000000000003";
 const origin = "https://tomverse.example/";
 const agentSecret = "v19_session_stop_012345678901234567890123456789";
 const active = { namespace: "agent/amux-intake", claimStatus: "in_flight",
@@ -41,7 +42,7 @@ test("session stop decision loses permission on cancellation, expiry and claim c
 test("session stop client accepts only exact pinned continue receipt", async () => {
   const prior = process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV];
   process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV] = origin;
-  const base = { origin, claimId, reservationId, agentSecret };
+  const base = { origin, claimId, reservationId, ideaId, agentSecret };
   const reply = { claimId, reservationId, stop: false };
   try {
     let requested;
@@ -50,7 +51,7 @@ test("session stop client accepts only exact pinned continue receipt", async () 
         requested = { url, options }; return Response.json(reply);
       } }), false);
     assert.equal(requested.url,
-      `https://tomverse.example/api/internal/amux/v19/session-analysis-stop?claimId=${claimId}&reservationId=${reservationId}`);
+      `https://tomverse.example/api/internal/amux/v19/session-analysis-stop?claimId=${claimId}&reservationId=${reservationId}&ideaId=${ideaId}`);
     assert.equal(requested.options.redirect, "manual");
     assert.equal(requested.options.headers.authorization, `Bearer ${agentSecret}`);
     for (const response of [Response.json({ ...reply, stop: true }),
@@ -64,6 +65,10 @@ test("session stop client accepts only exact pinned continue receipt", async () 
     }
     assert.equal(await shouldStopAmuxV19SessionAnalysis({ ...base,
       origin: "https://other.example/", fetchImpl: async () => {
+        throw new Error("must not fetch");
+      } }), true);
+    assert.equal(await shouldStopAmuxV19SessionAnalysis({ ...base,
+      ideaId: undefined, fetchImpl: async () => {
         throw new Error("must not fetch");
       } }), true);
   } finally {
@@ -90,13 +95,14 @@ test("session stop route admits exact IDs and denies unauthorised or malformed p
     process.env[secretKey] = agentSecret;
     delete process.env[readKey];
     delete process.env[syncKey];
-    const query = `?claimId=${claimId}&reservationId=${reservationId}`;
+    const query = `?claimId=${claimId}&reservationId=${reservationId}&ideaId=${ideaId}`;
     assert.equal((await GET(request(query, {}))).status, 401);
     const dark = await GET(request(query));
     assert.equal(dark.status, 409);
     assert.match(dark.headers.get("cache-control") ?? "", /no-store/);
     process.env[readKey] = "enabled";
     for (const bad of ["", `?claimId=${claimId}`,
+      `?claimId=${claimId}&reservationId=${reservationId}`,
       `?claimId=${claimId}&reservationId=bad/id`,
       `?claimId=${claimId}&claimId=${claimId}&reservationId=${reservationId}`,
       `${query}&extra=1`]) {

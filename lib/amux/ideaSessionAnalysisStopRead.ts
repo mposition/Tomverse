@@ -47,8 +47,9 @@ export function shouldAmuxSessionAnalysisStop(row: StopSnapshot): boolean {
 /** Content-free, transaction-scoped stop poll for one exact v19 claim. */
 export async function readAmuxSessionAnalysisStopState(
   tx: Prisma.TransactionClient, claimId: string, reservationId: string,
+  ideaId: string,
 ): Promise<{ claimId: string; reservationId: string; stop: boolean }> {
-  if (!UUID.test(claimId) || !UUID.test(reservationId)) {
+  if (!UUID.test(claimId) || !UUID.test(reservationId) || !UUID.test(ideaId)) {
     throw new AmuxSessionAnalysisStopReadError("not_found");
   }
   await tx.$queryRaw`
@@ -72,6 +73,7 @@ export async function readAmuxSessionAnalysisStopState(
     JOIN "AmuxIdeaSessionAnalysisReservation" r ON r."id" = c."reservationId"
     JOIN "AmuxIdeaSubmission" i ON i."id" = r."ideaId"
     WHERE c."id" = ${claimId} AND c."reservationId" = ${reservationId}
+      AND r."ideaId" = ${ideaId}
   `;
   if (rows.length !== 1) throw new AmuxSessionAnalysisStopReadError("not_found");
   const row = rows[0]!;
