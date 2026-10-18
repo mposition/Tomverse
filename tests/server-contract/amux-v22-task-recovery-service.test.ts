@@ -19,6 +19,7 @@ import { amuxV22ApiModelAccessResult } from
   "../../lib/amux/v22ApiModelAccessProtocol.mjs";
 import { runAmuxV22RecoveryCheckerOnce } from "../../lib/amux/v22RecoveryHost.mjs";
 import { inspectV4TaskCostCatalog } from "../../lib/amux/v4TaskCostCatalogCore.ts";
+import { getConfiguredAmuxV22WorkerCatalog } from "../../lib/amux/workerCatalogVariables.ts";
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const owner = {
   user: { id: "owner-1" },
@@ -286,6 +287,15 @@ function load() {
       allowed: world.costAdmission, reason: "cost_budget_exhausted" }),
   } });
   mock.module(mod("lib/amux/workerRuntime.ts"), { namedExports: { AMUX_WORKER_RUNTIME_LEASE_MS: 90_000 } });
+  // Orchestration policy version 53, section 4: the recovery path reads the
+  // assignment catalog inside its own transaction, as the claim path does.
+  // The catalog this world configures is the one that read returns.
+  mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
+    readAmuxAssignmentCatalogs: async (client: unknown) => {
+      assert.equal(client, tx);
+      return { source: "derived", workers: null, ceilings: null, v22: getConfiguredAmuxV22WorkerCatalog() };
+    },
+  } });
   loaded = import(mod("lib/amux/v22TaskRecoveryService.ts")); return loaded;
 }
 async function loadApiAccess() {

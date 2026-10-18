@@ -253,6 +253,14 @@ test("quota and the engineering adapter keep the variable while R2c is off, and 
     "      : undefined,"].join(String.fromCharCode(10)));
 });
 
+test("the FIRST Task recovery path reads the assignment catalog in its transaction, never the v22 variable directly", () => {
+  // Orchestration policy version 53, section 4: R2e deletes the catalog
+  // variables, so this path must read what the claim path reads first.
+  const recovery = readFileSync(new URL("../lib/amux/v22TaskRecoveryService.ts", import.meta.url), "utf8");
+  assert.equal(recovery.includes("getConfiguredAmuxV22WorkerCatalog"), false);
+  assert.equal(recovery.split("readAmuxAssignmentCatalogs(tx)").length - 1, 3);
+});
+
 test("a capability the store would not accept leaves no catalog but keeps the registry read beside it", async () => {
   const badCapability = await readAmuxRegistryAndDerivedCatalog(
     fakeClient(statement(REGISTRY_ROWS, [], [{ ...CAPABILITY_ROWS[0], routingTags: [] }])),
