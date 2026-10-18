@@ -115,6 +115,8 @@ async function main() {
         ? observed.stderrClass ?? null : null,
       cliError: observed.kind === "outcome_unknown"
         ? observed.cliError ?? null : null,
+      parserReason: observed.kind === "outcome_unknown"
+        ? observed.parserReason ?? null : null,
       answerMatches: success ? observed.rawModelOutput.trim() === "S0_OK" : null,
       // Synthetic fixture names only; never a repository path.
       manifest: success ? observed.readFiles : null,
