@@ -3104,6 +3104,8 @@ accept했다. 이 승인을 기록하는 commit이 래치를 true로 바꾼다.
 
 - **R2c.** 버전 53의 래치를 담은 production 배포가 2026-10-18 12:14 AEST(#2665)에 끝났고, 그때부터 배정은
   등록부에서 유도한 카탈로그로 이뤄진다(버전 53 5항).
+  운영자는 2026-10-18 배포 뒤 유도 카탈로그 패널의 여덟 행이 모두 "같음"이고 Agent Office의 AMUX 좌석이 13개임을
+  확인했다.
 - **호스트 바이너리.** bridge 바이너리는 두 경로에 있다. 세션 bridge(`tomverse-bridge.service`)의
   `/usr/local/libexec/tomverse-wsl-bridge`와, worker별 v22 bridge(`tomverse-amux-v22-bridge@`)의
   `/opt/tomverse-amux-v22/tomverse-wsl-bridge`다. 2026-10-18 기준 둘은 같은 파일이며 세션 목록 route를 부르지
