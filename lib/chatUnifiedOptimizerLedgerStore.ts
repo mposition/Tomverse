@@ -229,6 +229,9 @@ export async function registerChatUnifiedOptimizerCycle(input: Readonly<{
   candidateBundleJson: string;
   expectedBundleDigest: string;
   sourceCommitSha: string;
+  sourceRepositoryId?: number;
+  sourceBlobSha?: string;
+  sourceSha256?: string;
   deadlineAt: Date;
 }>, db: Db = prisma): Promise<Readonly<{
   outcome: "created" | "replayed";
@@ -243,6 +246,9 @@ export async function registerChatUnifiedOptimizerCycle(input: Readonly<{
     requestId: input.requestId,
     expectedBundleDigest: input.expectedBundleDigest,
     sourceCommitSha: input.sourceCommitSha,
+    sourceRepositoryId: input.sourceRepositoryId,
+    sourceBlobSha: input.sourceBlobSha,
+    sourceSha256: input.sourceSha256,
     deadlineAt: input.deadlineAt,
   });
   if (!parsed.success) return refuse("input_invalid");
@@ -266,6 +272,9 @@ export async function registerChatUnifiedOptimizerCycle(input: Readonly<{
     adapterConfigDigest: CHAT_UNIFIED_OPTIMIZER_CONTROLS.adapterConfigDigest,
     pricePinDigest: CHAT_UNIFIED_OPTIMIZER_CONTROLS.pricePinDigest,
     sourceCommitSha: parsed.data.sourceCommitSha,
+    sourceRepositoryId: parsed.data.sourceRepositoryId,
+    sourceBlobSha: parsed.data.sourceBlobSha,
+    sourceSha256: parsed.data.sourceSha256,
     deadlineAt: parsed.data.deadlineAt,
   });
 
@@ -348,6 +357,7 @@ export async function registerChatUnifiedOptimizerCycle(input: Readonly<{
         "candidateDigest", "bundleDigest", "controlsDigest",
         "schemaVersion", "promptVersion", "stageCandidateDigest",
         "adapterConfigDigest", "pricePinDigest", "sourceCommitSha",
+        "sourceRepositoryId", "sourceBlobSha", "sourceSha256",
         "runtimeAuthorized", "createdAt")
       VALUES (${candidateId}::uuid, ${cycleId}::uuid,
         ${CHAT_UNIFIED_OPTIMIZER_CANDIDATE_VERSION},
@@ -358,7 +368,11 @@ export async function registerChatUnifiedOptimizerCycle(input: Readonly<{
         ${CHAT_UNIFIED_OPTIMIZER_CONTROLS.stageCandidateDigest},
         ${CHAT_UNIFIED_OPTIMIZER_CONTROLS.adapterConfigDigest},
         ${CHAT_UNIFIED_OPTIMIZER_CONTROLS.pricePinDigest},
-        ${parsed.data.sourceCommitSha}, FALSE, clock_timestamp())
+        ${parsed.data.sourceCommitSha},
+        ${parsed.data.sourceRepositoryId === undefined ? null :
+          BigInt(parsed.data.sourceRepositoryId)},
+        ${parsed.data.sourceBlobSha ?? null},
+        ${parsed.data.sourceSha256 ?? null}, FALSE, clock_timestamp())
     `;
     await tx.$executeRaw`
       INSERT INTO "ChatUnifiedOptimizerRun" (

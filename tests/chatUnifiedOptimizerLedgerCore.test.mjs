@@ -12,11 +12,29 @@ import {
   chatUnifiedOptimizerQueuedCloseSchema,
   chatUnifiedOptimizerQueuedJobEvidenceDigest,
   chatUnifiedOptimizerQueuedJobTerminalDigest,
+  chatUnifiedOptimizerRegistrationSchema,
   chatUnifiedOptimizerTerminalDigest,
   chatUnifiedOptimizerTerminalSchema,
 } from "../lib/chatUnifiedOptimizerLedgerCore.ts";
 
 const DIGEST = "a".repeat(64);
+
+test("public source pin is all-or-nothing at registration", () => {
+  const base = { requestId: randomUUID(), expectedBundleDigest: DIGEST,
+    sourceCommitSha: "a".repeat(40), deadlineAt: new Date(Date.now() + 60_000) };
+  const pin = { sourceRepositoryId: 123,
+    sourceBlobSha: "b".repeat(40), sourceSha256: "c".repeat(64) };
+  assert.equal(chatUnifiedOptimizerRegistrationSchema.safeParse(base).success, true);
+  assert.equal(chatUnifiedOptimizerRegistrationSchema.safeParse({
+    ...base, ...pin,
+  }).success, true);
+  for (const key of Object.keys(pin)) {
+    const partial = { ...base, ...pin };
+    delete partial[key];
+    assert.equal(chatUnifiedOptimizerRegistrationSchema.safeParse(partial).success,
+      false);
+  }
+});
 
 test("optimizer ledger roles and purpose are closed provider-free values", () => {
   assert.equal(CHAT_UNIFIED_OPTIMIZER_PURPOSE, "provider_free_validation");

@@ -45,8 +45,17 @@ export const chatUnifiedOptimizerRegistrationSchema = z.object({
   requestId: uuid,
   expectedBundleDigest: digest,
   sourceCommitSha,
+  sourceRepositoryId: z.number().int().positive().safe().optional(),
+  sourceBlobSha: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+  sourceSha256: digest.optional(),
   deadlineAt: z.date(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (new Set([value.sourceRepositoryId === undefined,
+    value.sourceBlobSha === undefined,
+    value.sourceSha256 === undefined]).size !== 1) {
+    context.addIssue({ code: "custom", message: "partial_source_pin" });
+  }
+});
 
 export const chatUnifiedOptimizerClaimSchema = z.object({
   requestId: uuid,
@@ -95,8 +104,17 @@ export function chatUnifiedOptimizerRegistrationDigest(input: Readonly<{
   adapterConfigDigest: string;
   pricePinDigest: string;
   sourceCommitSha: string;
+  sourceRepositoryId?: number;
+  sourceBlobSha?: string;
+  sourceSha256?: string;
   deadlineAt: Date;
 }>): string {
+  const sourcePinFields = [input.sourceRepositoryId,
+    input.sourceBlobSha, input.sourceSha256];
+  if (sourcePinFields.some(value => value !== undefined) &&
+      sourcePinFields.some(value => value === undefined)) {
+    throw new Error("optimizer_registration_source_pin_partial");
+  }
   return sha256(canonicalBenchmarkJson({
     version: CHAT_UNIFIED_OPTIMIZER_LEDGER_VERSION,
     policyVersion: CHAT_UNIFIED_OPTIMIZER_POLICY_VERSION,
@@ -111,6 +129,11 @@ export function chatUnifiedOptimizerRegistrationDigest(input: Readonly<{
     adapterConfigDigest: input.adapterConfigDigest,
     pricePinDigest: input.pricePinDigest,
     sourceCommitSha: input.sourceCommitSha,
+    ...(input.sourceRepositoryId !== undefined ? {
+      sourceRepositoryId: input.sourceRepositoryId,
+      sourceBlobSha: input.sourceBlobSha,
+      sourceSha256: input.sourceSha256,
+    } : {}),
     deadlineAt: input.deadlineAt.toISOString(),
     roles: CHAT_UNIFIED_OPTIMIZER_ROLES,
     externalDispatchAuthorized: false,

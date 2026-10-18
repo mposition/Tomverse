@@ -84,11 +84,14 @@ test("provider-free optimizer ledger enforces frozen identity, CAS and unknown s
 
   const firstBundle = bundle("first");
   const firstRequestId = randomUUID();
+  const sourcePin = { sourceRepositoryId: 123,
+    sourceBlobSha: "b".repeat(40), sourceSha256: "c".repeat(64) };
   const first = await ledger.registerChatUnifiedOptimizerCycle({
     requestId: firstRequestId,
     candidateBundleJson: JSON.stringify(firstBundle),
     expectedBundleDigest: firstBundle.bundleDigest,
     sourceCommitSha: SOURCE_SHA,
+    ...sourcePin,
     deadlineAt: new Date(Date.now() + 60_000),
   });
 
@@ -100,6 +103,7 @@ test("provider-free optimizer ledger enforces frozen identity, CAS and unknown s
       candidateBundleJson: JSON.stringify(firstBundle),
       expectedBundleDigest: firstBundle.bundleDigest,
       sourceCommitSha: SOURCE_SHA,
+      ...sourcePin,
       deadlineAt: first.deadlineAt,
     });
     assert.equal(replay.outcome, "replayed");
@@ -109,6 +113,7 @@ test("provider-free optimizer ledger enforces frozen identity, CAS and unknown s
       candidateBundleJson: JSON.stringify(firstBundle),
       expectedBundleDigest: firstBundle.bundleDigest,
       sourceCommitSha: SOURCE_SHA,
+      ...sourcePin,
       deadlineAt: new Date(first.deadlineAt.getTime() + 1),
     }), (error: unknown) => error instanceof ledger.ChatUnifiedOptimizerLedgerError &&
       error.code === "registration_conflict");
@@ -117,7 +122,11 @@ test("provider-free optimizer ledger enforces frozen identity, CAS and unknown s
       SELECT * FROM "ChatUnifiedOptimizerCandidate"
       WHERE "id" = ${first.candidateId}::uuid
     `;
-    const persisted = JSON.stringify(stored);
+    assert.equal(stored.sourceRepositoryId, BigInt(123));
+    assert.equal(stored.sourceBlobSha, sourcePin.sourceBlobSha);
+    assert.equal(stored.sourceSha256, sourcePin.sourceSha256);
+    const persisted = JSON.stringify(stored,
+      (_, value) => typeof value === "bigint" ? value.toString() : value);
     assert.equal(persisted.includes("Synthetic source first."), false);
     assert.equal(persisted.includes(CHAT_UNIFIED_ROUTER_REFINER_TASK_GUIDANCE), false);
     assert.equal(persisted.includes("runtimeAuthorized\":true"), false);

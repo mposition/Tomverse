@@ -1261,6 +1261,9 @@ model ChatUnifiedOptimizerCandidate {
   adapterConfigDigest  String
   pricePinDigest       String
   sourceCommitSha      String
+  sourceRepositoryId   BigInt?
+  sourceBlobSha        String?
+  sourceSha256         String?
   runtimeAuthorized    Boolean  @default(false)
   createdAt            DateTime @default(now()) @db.Timestamptz(3)
 

@@ -3055,6 +3055,13 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 2,
     reason: "The closed U18 system-actor predicate names this content-free provider-free ledger audit target. It executes no SQL and grants no paid call, external dispatch, promotion or product-runtime authority.",
   })),
+  {
+    path: "prisma/migrations/20261016211000_chat_unified_optimizer_source_pin/migration.sql",
+    table: "ChatUnifiedOptimizerCandidate",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason: "The migration only adds nullable public-source pin columns and an all-or-none constraint. It writes no candidate row and grants no runtime or provider authority.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
