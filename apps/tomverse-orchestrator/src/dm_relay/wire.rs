@@ -25,13 +25,13 @@ use sha2::{Digest, Sha256};
 /// routing nor the assignment answer carries it, so the relay cannot repeat a
 /// value it received; it carries the app's constant instead, and
 /// tests/amuxDecisionMakerBridgeRelay.test.mjs fails the build the moment the
-/// two differ. On develop it is 1; stage S2-2b1 raises it to 2 together with
-/// the card's option fields (`DM_SEND_OPTION_EFFECTS`), so both change in the
-/// change that merges S2-2b1. A bridge and an app deployed at different
+/// two differ. Stage S2-2b1 (#2669) raised the app's constant to 2 together
+/// with the card's option fields (`DM_SEND_OPTION_EFFECTS`), and both changed
+/// here when that stage merged. A bridge and an app deployed at different
 /// versions fail safe: the app records the result as rejected
 /// (`binding_mismatch`), nothing is stored as a proposal, and the question is
 /// the operator's as always. Turn both switches on only with both deployed.
-pub const DM_REQUEST_POLICY_VERSION: i64 = 1;
+pub const DM_REQUEST_POLICY_VERSION: i64 = 2;
 
 /// docs/policy/amux-decision-maker.md §3-3 calls its term list "the v1 list".
 /// The app records this caller-supplied label and checks only its grammar;
@@ -52,15 +52,15 @@ pub const DM_SCANNER_VERSION: &str = "v1";
 /// Whether the card's options carry `effect` and `paths`, in that order after
 /// `id` and `label` (docs/policy/amux-decision-maker.md §4, §5), as the local
 /// AMUX recorded them (a missing or malformed declaration is `other` with no
-/// paths there). The app's routing parser on develop takes exactly
-/// `{ id, label }` per option; stage S2-2b1 makes it take exactly
-/// `{ id, label, effect, paths }`. No app version takes both, so this flips in
-/// the change that merges S2-2b1 (with `DM_REQUEST_POLICY_VERSION`), and
+/// paths there). Since stage S2-2b1 (#2669) the app's routing parser takes
+/// exactly `{ id, label, effect, paths }` per option (before it, exactly
+/// `{ id, label }`; no app version takes both), so this flipped when S2-2b1
+/// merged (with `DM_REQUEST_POLICY_VERSION`), and
 /// tests/amuxDecisionMakerBridgeRelay.test.mjs holds it to the app's parser.
 /// Either way the card routed, scanned and sent is one card, and the result
 /// submission repeats `{ id, label }` only (the pair the option set digest
 /// binds).
-pub const DM_SEND_OPTION_EFFECTS: bool = false;
+pub const DM_SEND_OPTION_EFFECTS: bool = true;
 
 /// The two instances (`DM_INSTANCE_SCOPES`).
 pub const DM_INSTANCES: [&str; 2] = ["decision-maker-openai", "decision-maker-anthropic"];
@@ -1112,12 +1112,12 @@ mod tests {
     }
 
     #[test]
-    fn card_is_the_revision_and_the_cards_fields_without_effects_while_the_app_refuses_them() {
-        // Turning the switch on fails this build: the change comes with the
-        // S2-2b1 merge and rewrites this test with it.
+    fn card_is_the_revision_and_the_cards_fields_with_option_effects() {
+        // S2-2b1 (#2669) merged: the app's parser takes exactly
+        // `{ id, label, effect, paths }`, so the relay sends them.
         const _: () = assert!(
-            !DM_SEND_OPTION_EFFECTS,
-            "S2-2b1 is not merged: the app refuses effect and paths"
+            DM_SEND_OPTION_EFFECTS,
+            "S2-2b1 is merged: the app requires effect and paths"
         );
         let wire = dm_card(&question(), &card(), DM_SEND_OPTION_EFFECTS);
         assert_eq!(
@@ -1130,8 +1130,8 @@ mod tests {
                 "title": "Pick the index store",
                 "question": "Which store should the index use?",
                 "options": [
-                    {"id": "sqlite", "label": "Keep SQLite"},
-                    {"id": "pg", "label": "Move to Postgres"}
+                    {"id": "sqlite", "label": "Keep SQLite", "effect": "choice_only", "paths": []},
+                    {"id": "pg", "label": "Move to Postgres", "effect": "branch_code_change", "paths": ["crates/db.rs"]}
                 ],
                 "unblocks": "The owner names the store.",
                 "context": "The index grows 40 MB a week.",

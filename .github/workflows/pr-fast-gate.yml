@@ -623,6 +623,18 @@ jobs:
         timeout-minutes: 5
         run: npm run check:protected-table-writers
 
+      # The admission code manifest is the digest a scheduled autonomous post
+      # carries, and dispatch compares it with the running build's
+      # (lib/marketingAutonomousAdmission.ts). A change to a file it hashes
+      # that merges without regenerating it leaves the digest describing code
+      # that no longer exists, so a changed rule could dispatch a post admitted
+      # under the old one. Nothing ran this check, and develop drifted twice
+      # (fixed by #2648 and #2655). Regenerate with
+      # npm run generate:marketing-admission-code.
+      - name: Marketing admission code manifest
+        timeout-minutes: 5
+        run: npm run check:marketing-admission-code
+
       # The readiness register is the only thing standing between "Auto works
       # in shadow" and "Auto answers a real person", which makes it worth
       # attacking, and the attack is one word: pending -> passed. So a passed

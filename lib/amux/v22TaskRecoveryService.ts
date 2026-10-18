@@ -41,7 +41,7 @@ import { AMUX_V22_RECOVERY_HOST_SCOPE, AMUX_V22_TASK_RECOVERY_POLICY_VERSION,
   type AmuxV22ReadOnlyLaunchProofInput,
   type AmuxV22RecoveryRead } from "./v22TaskRecoveryCore.ts";
 import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
-import { getConfiguredAmuxV22WorkerCatalog } from "./routing.ts";
+import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
 import { amuxV22OneShotRouteSupported, amuxV22RequiredTool,
   chooseAmuxV22WorkerRoute } from "./v22WorkerClaimCore.ts";
 import { AMUX_V22_READ_ONLY_API_CAPABILITY,
@@ -288,7 +288,9 @@ async function createAmuxV22ReadOnlyLaunchCheck(tx: Prisma.TransactionClient, no
       risk.additionalCapMicroUsd !== AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD ||
       risk.worstExposureMicroUsd !== AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD)
     throw new BoardImportError("read_only_launch_binding_changed", 409);
-  const catalog = getConfiguredAmuxV22WorkerCatalog();
+  // Orchestration policy version 53, section 4: the same catalog the claim
+  // path reads -- derived from the registry once R2c is on.
+  const { v22: catalog } = await readAmuxAssignmentCatalogs(tx);
   if (!catalog) return null;
   // The check stores requestedAt = now; every later step recomputes the receipt
   // as of that instant so its time-stamped digest still matches (v47).
@@ -1222,7 +1224,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
           catalogApprovalId: current.approvalId, receipt: current.receipt,
           routeId: launchCheck.routeId, workerName: launchCheck.workerName,
           provider: launchCheck.provider, modelId: launchCheck.modelId });
-        const catalogWorker = getConfiguredAmuxV22WorkerCatalog()?.find((entry) =>
+        const catalogWorker = (await readAmuxAssignmentCatalogs(tx)).v22?.find((entry) =>
           entry.worker_name === launchCheck.workerName);
         const profile = configuredAmuxV22RecoveryProfile(launchCheck.workerName);
         const nominalScope = amuxV22ReadOnlyLaunchScopeSchema.safeParse(launchCheck.launchScope);
@@ -1438,7 +1440,7 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
         launchProof.report) : null;
       const nominalLaunchScope = launchCheck ? amuxV22ReadOnlyLaunchScopeSchema.safeParse(
         launchCheck.launchScope) : null;
-      const catalog = getConfiguredAmuxV22WorkerCatalog();
+      const catalog = launchCheck ? (await readAmuxAssignmentCatalogs(tx)).v22 : null;
       const worker = launchCheck && catalog?.find((entry) =>
         entry.worker_name === launchCheck!.workerName);
       const selectedFenced = launchCheck ? await amuxV22SafeStopFencedWorkers(tx,

@@ -1130,7 +1130,10 @@ pub(crate) mod tests {
                 &[("sqlite".into(), "Keep SQLite".into())]
             ))
         );
-        assert_eq!(submission["binding"]["policyVersion"], json!(1));
+        assert_eq!(
+            submission["binding"]["policyVersion"],
+            json!(super::super::wire::DM_REQUEST_POLICY_VERSION)
+        );
         assert!(submission["binding"].get("askingProvider").is_none());
         assert_eq!(submission["output"]["kind"], json!("output"));
         assert_eq!(
