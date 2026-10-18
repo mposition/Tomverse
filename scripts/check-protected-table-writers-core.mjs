@@ -691,7 +691,7 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 2,
     writeVerbs: 2,
     reason:
-      "The card number counter's single writer (docs/policy/amux-card-display-key.md §3). Its raw SQL is one constant INSERT ... ON CONFLICT DO UPDATE ... RETURNING whose only value, the prefix, is a bound parameter; the two table mentions are the INSERT target and the qualified column in the increment. Its other raw SQL is a read-only SELECT of taken Feature prefixes from AmuxPortfolioNode (docs/policy/amux-intake.md v17 item 3). It never deletes a counter.",
+      "The card number counter's single writer (docs/policy/amux-card-display-key.md §3). Its raw SQL is one constant INSERT ... SELECT ... ON CONFLICT DO UPDATE ... RETURNING, led by a CTE that takes the audit chain's advisory lock before the counter row, whose only value, the prefix, is a bound parameter; the two table mentions are the INSERT target and the qualified column in the increment. Its other raw SQL is a read-only SELECT of taken Feature prefixes from AmuxPortfolioNode (docs/policy/amux-intake.md v17 item 3). It never deletes a counter.",
   },
   {
     path: "lib/amux/cardDisplayKeyBackfillService.ts",

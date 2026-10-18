@@ -141,14 +141,20 @@ test("the migration is additive and writes no row", () => {
   assert.match(statements, /BEFORE TRUNCATE ON "AmuxCardDisplayKeyCounter"/);
 });
 
-test("the allocator is one bound INSERT ... ON CONFLICT that advances by one", () => {
+test("the allocator is one bound INSERT ... ON CONFLICT that advances by one, after the audit chain lock", () => {
   const allocator = readFileSync("lib/amux/cardDisplayKeyAllocator.ts", "utf8").replace(/\r\n/g, "\n");
   // Two statements: the counter's one INSERT, and the read-only Feature prefix lookup.
   assert.equal((allocator.match(/\.\$queryRaw\b/g) ?? []).length, 2);
   assert.equal((allocator.match(/\bINSERT INTO\b/g) ?? []).length, 1);
   assert.match(allocator, /SELECT "displayPrefix" FROM "AmuxPortfolioNode"\n\s+WHERE "displayPrefix" = ANY\(\$\{candidates\}::TEXT\[\]\)/);
   assert.doesNotMatch(allocator, /\$queryRawUnsafe|\$executeRawUnsafe|Prisma\.raw/);
-  assert.match(allocator, /VALUES \(\$\{prefix\}, 1\)/);
+  // The audit chain's lock comes first, in the same statement, before the
+  // counter row: lib/adminAudit.ts orders that lock before any row lock.
+  assert.match(allocator,
+    /WITH "auditChainLock" AS MATERIALIZED \(\n\s+SELECT pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)\n\s+\)\n\s+INSERT INTO "AmuxCardDisplayKeyCounter" \("prefix", "lastNumber"\)\n\s+SELECT \$\{prefix\}, 1 FROM "auditChainLock"\n/);
+  // The same lock key the audit chain's own writer takes.
+  assert.match(readFileSync("lib/adminAudit.ts", "utf8"),
+    /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/);
   assert.match(allocator,
     /ON CONFLICT \("prefix"\) DO UPDATE\n\s+SET "lastNumber" = "AmuxCardDisplayKeyCounter"\."lastNumber" \+ 1\n\s+RETURNING "lastNumber"/);
   assert.match(allocator, /if \(!isAmuxCardDisplayPrefix\(prefix\)\)/);
