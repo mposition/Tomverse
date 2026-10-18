@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { prepareAmuxV19MaxTrackedCheckout } from
+import { prepareAmuxV19MaxTrackedCheckout,
+  prepareAmuxV19MaxTrackedCheckouts } from
   "../lib/amux/ideaLocalMaxTrackedCheckoutPreflight.mjs";
 
 const origin = "https://amux.example.test/";
@@ -134,4 +135,63 @@ test("settled claim cannot resolve a checkout even with a matching ID", async ()
     { kind: "unavailable" });
     assert.deepEqual(calls,
       ["/api/internal/amux/v19/analysis-budget/claim"]);
+  }));
+
+test("one fresh Max claim resolves every pinned reference before dispatch", async () =>
+  withEnvironment(async (expectedPath) => {
+    const calls = [];
+    const fetchImpl = async (url, options) => {
+      const path = new URL(url).pathname;
+      calls.push(path);
+      assert.equal(options.headers["x-amux-agent-id"], "amux-intake-max");
+      if (path.endsWith("/analysis-budget/claim")) return Response.json({
+        status: "committed", claimId: identity.claimId,
+        claimStatus: "in_flight" });
+      if (path.endsWith("/session-analysis-stop")) return Response.json({
+        claimId: identity.claimId, reservationId: identity.reservationId,
+        stop: false });
+      const ordinal = JSON.parse(options.body).referenceOrdinal;
+      assert.ok(ordinal === 0 || ordinal === 1);
+      return Response.json({ referenceCount: 2, kind: "repository",
+        repository: "mposition/Tomverse", pullRequestNumber: null,
+        pinnedCommitSha: ordinal === 0 ? pin : "b".repeat(40) });
+    };
+    const result = await prepareAmuxV19MaxTrackedCheckouts({ origin,
+      identity, claim, fetchImpl });
+    assert.equal(result.kind, "ready");
+    assert.deepEqual(result.references, [
+      { referenceOrdinal: 0, repositoryPath: expectedPath, commitSha: pin },
+      { referenceOrdinal: 1, repositoryPath: expectedPath,
+        commitSha: "b".repeat(40) },
+    ]);
+    assert.equal(typeof result.stopCheck, "function");
+    assert.equal(calls.filter((path) => path.endsWith("/checkout-reference"))
+      .length, 2);
+  }));
+
+test("changed reference count and stop mid-list refuse the whole set", async () =>
+  withEnvironment(async () => {
+    for (const failure of ["count", "stop"]) {
+      let stopReads = 0;
+      let references = 0;
+      const result = await prepareAmuxV19MaxTrackedCheckouts({ origin,
+        identity, claim,
+        fetchImpl: async (url) => {
+          const path = new URL(url).pathname;
+          if (path.endsWith("/analysis-budget/claim")) return Response.json({
+            status: "committed", claimId: identity.claimId,
+            claimStatus: "in_flight" });
+          if (path.endsWith("/session-analysis-stop")) return Response.json({
+            claimId: identity.claimId, reservationId: identity.reservationId,
+            stop: failure === "stop" && ++stopReads >= 3 });
+          references += 1;
+          return Response.json({ referenceCount: failure === "count" &&
+            references === 2 ? 3 : 2, kind: "repository",
+          repository: "mposition/Tomverse", pullRequestNumber: null,
+          pinnedCommitSha: pin });
+        },
+      });
+      assert.deepEqual(result, { kind: "unavailable" });
+      assert.equal(references, failure === "stop" ? 1 : 2);
+    }
   }));
