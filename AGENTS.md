@@ -1475,6 +1475,14 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
 - DM은 승인 게이트에서 사람으로 인정되지 않고, 운영자가 확정한 답도 승인 계약의 승인이 아닙니다.
 - 구현 단계와 각 단계의 대상 경로는 docs/policy/amux-decision-maker.md §12를 따르며, 새 경로는 그
   단계의 PR이 이 절에 추가합니다.
+- **S0(계정 격리 실측)**: `scripts/amux-decision-maker-s0/measure-isolation`,
+  `scripts/amux-decision-maker-s0/isolation.conf.example`, `docs/ops/amux/decision-maker-s0.md`,
+  `tests/amuxDecisionMakerS0Isolation.test.mjs`. 운영자가 Ubuntu runner에서 root로 실행하며 유료 turn이 없습니다
+  (CLI에는 `--version`만). **`isolated`는 모든 control이 성공하고 모든 격리 검사가 막혔을 때뿐입니다** — control이
+  하나라도 실패하면 거부가 아무것도 증명하지 않으므로 `incomplete`입니다. 거부를 보는 대상마다 그 대상이 실재한다는 control(경로 존재, root에서의
+  endpoint 응답, root로의 process 읽기)이 먼저입니다. 보호 디렉터리는 목록·진입·안쪽 파일 읽기를 따로 잽니다. 설정은 해석만 하고 실행하지 않으며, 출력에
+  파일 내용·환경·자격증명이 없습니다. sudo 권한은 root가 `sudo -l -U`로 묻고 계정이 직접 시도하지 않습니다.
+  실측 기록은 `docs/ops/amux/decision-maker-s0-records/`에 두며, 서명 전의 기록은 S2 선행 조건의 증거가 아닙니다.
 - **S1a(결정적 핵심)**: `lib/amux/decisionMakerCore.ts`, `tests/amuxDecisionMakerCore.test.mjs`.
   I/O가 없습니다. DB·route·DM 호출은 다음 단계입니다.
 - **S1b(스위치 저장소)**: `lib/amux/decisionMakerSwitchCore.ts`, `lib/amux/decisionMakerSwitchStore.ts`,
@@ -1550,7 +1558,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   닫습니다** — 판정 표의 trigger가 같은 문장에서 같은 종류의 닫힘 사건을 원장에 쓰고, 원장의 event
   guard는 그 판정 행 옆에서만 받으며, S1d 닫힘 trigger가 그때부터 보존(2160시간)을 시작합니다. 원장의
   닫힘 종류는 다섯이고(request core의 닫힘 목록과 같음), event guard·본문 guard·보존 guard·키 guard와
-  request store의 두 읽기가 같은 목록을 씁니다 — 한쪽만 바꾸지 않습니다. 확정(`confirm`·`edit_confirm`)은 kill switch 중 거부되고 거절은
+  request store의 네 읽기(상태, 열린 요청 수, stale 후보, Admin의 최근 요청)가 같은 목록을 씁니다 — 한쪽만 바꾸지 않습니다. 확정(`confirm`·`edit_confirm`)은 kill switch 중 거부되고 거절은
   허용되며, Admin이 보여 준 값(답·근거 본문의 keyed digest, select의 선택지, `irreversible`, 스냅샷
   상태·SHA·manifest digest)이 저장값과 모두 같을 때만 됩니다. 고친 답은 S1d 본문 store가 판정 직전 같은
   트랜잭션에 쓰고 판정이 그 digest를 기록합니다. 선언 정확도는 기본 `not_judged`, `mismatched`면
@@ -1609,6 +1617,325 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   docs/policy/amux-decision-maker.md §0-2의 졸업 기준과 비교하지 않습니다. **경계 상한 4는 보고의 두 문장 +
   setup + fence이고**, `tests/amuxDecisionMakerJudgment.test.mjs`가 그 셈을, judgment DB 테스트가 kill
   switch 중의 읽기와 하나 줄인 상한의 거부를 고정합니다. 제안 열람·판정 화면은 S2입니다.
+- **S1g(보존 정리 sweep)**: `lib/amux/decisionMakerRetentionSweep.ts`, request store의
+  `listDecisionMakerStaleCloseCandidates()`, body store의 `readDecisionMakerDigestKeyRegistry()`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerRetentionRead`(상한 5)·`decisionMakerStaleClose`(9)·
+  `decisionMakerBodyPurge`(9)·`decisionMakerDigestKeyRotate`(9)·`decisionMakerDigestKeyDestroy`(10),
+  `app/api/internal/maintenance/credit-reservations/route.ts`의 연결, `tests/amuxDecisionMakerRetentionSweep.test.mjs`.
+  docs/policy/amux-decision-maker.md §10의 시스템 정리를 15분 maintenance 실행에 붙였습니다: 현재·다음 key period
+  키를 쓰기 시작하고(ring에 있고 registry에 없을 때), 720시간 열린 요청을 `stale_close`로 닫고, 보존이 지난 본문을
+  지우고, 본문이 남지 않은 끝난 period의 키 파기를 기록합니다. **후보는 한 읽기 트랜잭션에서 읽고 쓰기는 항목마다
+  자기 경계 트랜잭션에서 store가 lock 아래 다시 판정합니다** — sweep 파일에는 SQL이 없고 스위치를 읽지 않습니다
+  (docs/policy/amux-decision-maker.md §6 표상 kill switch 중에도 허용). 오류가 나면 그 자리에서 멈추고 같은 실행에서 다시 보내지 않으며, 결과를 모르는
+  쓰기는 다음 실행의 읽기가 정합니다. 경계 상한은 각 쓰기의 무결성 키 포함 최대 문장 수 + setup + fence이고,
+  request·body 테스트의 문장 수 loop가 고정합니다. 키 파기 기록 뒤 `AMUX_DM_DIGEST_KEYS`에서 그 period를 지우는 것은
+  운영자입니다.
+- **S2-4a(Admin 요청 목록)**: `lib/amux/decisionMakerAdminCore.ts`, `lib/amux/decisionMakerAdminRead.ts`,
+  request store의 `readRecentDecisionMakerRequestLedger()`, body store의 `readDecisionMakerResultDetailsForAdmin()`,
+  judgment store의 `readDecisionMakerJudgmentsForAdmin()`, `components/admin/AmuxDecisionMakerRequestsPanel.tsx`,
+  `lib/adminMessages/amuxDecisionMaker.ts`의 `adminAmuxDecisionMakerRequestsMessages`, `lib/amux/dbBoundary.ts`의
+  `decisionMakerRequestListRead`(상한 5), `/admin/amux-settings?tab=decision-maker`,
+  `tests/amuxDecisionMakerAdminList.test.mjs`, `tests/client/amuxDecisionMakerRequestsRender.test.tsx`. 최근 요청 50건의
+  라우팅·상태·전달을 보이며, 보이는 건수와 그것이 전체 수가 아님을 화면에 적습니다. **각 표는 그것을 쓰는 store만
+  읽습니다** — 요청과 사건은 request store, 결과 상세는 body store, 판정과 전달은 judgment store가 한 문장씩 읽고,
+  `decisionMakerAdminRead.ts`는 SQL 없이 셋을 합칩니다. read 경계의 REPEATABLE READ가 세 문장을 한 snapshot으로
+  묶으므로, 상한은 세 문장 + setup + fence입니다. 본문은 읽지 않고, 원장이 만들 수 없는 행(인스턴스와 공급사의 대응,
+  `provider_unverified`와 빈 인스턴스, 사건 순서)이 하나라도 있으면 목록 전체를 읽지 못한 것으로 보입니다. 되돌릴 수
+  없는 제안은 상태보다 먼저 표시합니다. 제안 열람·판정은 S2-4b입니다.
+- **S2-4b1(Admin 요청 상세)**: `lib/amux/decisionMakerAdminRead.ts`의 `readDecisionMakerRequestDetailForAdmin()`,
+  `components/admin/AmuxDecisionMakerRequestDetailPanel.tsx`, `adminAmuxDecisionMakerRequestDetailMessages`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerRequestDetailRead`(상한 7),
+  `/admin/amux-settings?tab=decision-maker&request=<id>`, `tests/client/amuxDecisionMakerRequestDetailRender.test.tsx`.
+  요청 하나의 카드·DM 답·근거·이관 사유·고친 답·스냅샷을 보이며, 목록과 같은 원장 읽기를 그 id로 좁혀 쓰고 같은 검사를
+  지납니다. **본문은 판정할 수 있는 관리자(`ops:write`)에게만 읽어 보입니다** — 그 밖의 관리자에게는 본문을 읽지 않고
+  이유만 보입니다. 판정에 넘길 값(`shown`: 답·근거 본문의 keyed digest, select의 선택지, `irreversible`, 스냅샷 상태·SHA·
+  manifest digest)은 열린 제안의 본문과 전송이 모두 있을 때만 계산하며, judgment DB 테스트가 그 값으로 판정 store가 확정을
+  기록함을 고정합니다. worker와 모델이 쓴 글은 markup이 아닌 글자로만 보입니다. 판정 route와 버튼은 S2-4b2입니다.
+- **S2-4b2(Admin 판정)**: `app/api/admin/amux/decision-maker/judgments/route.ts`,
+  `components/admin/AmuxDecisionMakerJudgmentPanel.tsx`, `adminAmuxDecisionMakerJudgmentMessages`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerJudgment`(상한 12), `tests/server-contract/admin-amux-decision-maker-judgments-route.test.ts`,
+  `tests/client/amuxDecisionMakerJudgmentRender.test.tsx`. 상세 화면의 열린 제안에서 그대로 확정·고쳐서 확정·거절과 선언 정확도를
+  기록합니다. route는 `ops:write`와 최근 step-up을 body보다 먼저 검사하고(낡은 step-up은 428과 재인증 링크), 고친 답일 때만
+  DB 전에 digest key ring을 읽으며, 판정은 S1e store가 한 트랜잭션에서 씁니다. **확정은 상세 화면이 보인 `shown` 값을 그대로
+  보내고**, store가 저장값과 다르면 거절합니다. store의 거절은 409와 그 이유입니다. **판정은 한 번만 보냅니다** — 기록·거절·결과
+  불명 뒤에는 모든 버튼을 잠그고 다시 읽기 링크만 두며, 트랜잭션 전 거절(400·403·404·413·428·429)과 rollback을 말한 503만 버튼을
+  돌려줍니다(`runDmJudgment()`). 화면은 확정한 답이 승인 계약의 승인이 아님을 적습니다. 이 route는 전달 경로를 부르지 않으므로
+  여기서 worker에게 가는 것은 없습니다. 상한 12는 무결성 키가 있는 고친 답 확정의 10문장 + setup + fence이고, judgment unit
+  테스트가 그 셈을, judgment DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
+- **S2-4c(Admin의 cleanup_unknown 표시)**: `lib/amux/decisionMakerAdminCore.ts`의 `cleanupUnknownAtMs`·`dmAdminSwitchLatchesFromRows()`,
+  request store의 `readRecentDecisionMakerRequestLedger()`가 같은 문장에서 싣는 `cleanupUnknownAtEpochMs`, switch store의
+  `readDecisionMakerSwitchRowsForAdmin()`과 `decisionMakerAdminRead.ts`의 `readDecisionMakerSwitchesForAdmin()`,
+  `AmuxDecisionMakerRequestsPanel.tsx`·`AmuxDecisionMakerRequestDetailPanel.tsx`·`AmuxDecisionMakerSwitchPanel.tsx`, 각 messages의
+  `cleanupUnknown*`·`latchReasons`, `tests/amuxDecisionMakerAdminList.test.mjs`와 세 client render 테스트. S2-2a3가 원장에 남긴
+  `cleanup_unknown` 보고를 운영자가 봅니다. **요청 목록은 상태 옆에 "정리 확인 못 함" 표시를 더하고(상태를 대체하지 않음) 표시된 요청 중
+  몇 건인지 한 문장으로 말하며, 상세는 보고 시각과 해야 할 일을 문구로만 적습니다.** 표시는 본문이 아니라 닫힌 플래그와 DB 시계이므로
+  목록에서 모든 관리자에게 보이고, 해야 할 일의 문구는 상세(`ops:write`)에 있습니다. **디렉터리 경로·요청 디렉터리 이름·명령은 화면에
+  넣지 않습니다** — 요청 id는 화면 글자로 쓰지 않는 기존 관례를 따르며, 운영자는 카드 id와 보고 시각으로 runner에서 가립니다.
+  스위치 패널은 시스템이 끈 인스턴스에 그 이유(`cleanup_latch`·`validation_latch`)를 보입니다 — 이전에는 이유를 아예 읽지 않았습니다.
+  이유는 인스턴스의 **가장 새 스위치 사건**이 시스템의 latch일 때만이고(사람이 해제하거나 바꾸면 사라짐), 상태와 같은 문장에서 읽으므로
+  `decisionMakerSwitchRead`의 상한(3)은 그대로입니다. 패널이 변경·재읽기로 상태를 API에서 다시 받은 뒤에는 이유를 보이지 않습니다(API 응답은
+  이유를 싣지 않음). 요청 목록·상세의 문장 수와 경계(5·7)도 그대로입니다: 새 열은 기존 원장 문장의 집계에 들어갑니다. 새 열이 없는 행은
+  원장이 만든 행이 아닌 것으로 보아 목록 전체를 읽지 못한 것으로 둡니다.
+- **S2-2a(bridge·broker 내부 route)**: `app/api/internal/amux/decision-maker/assignments/route.ts`,
+  `app/api/internal/amux/decision-maker/assignments/discard/route.ts`,
+  `app/api/internal/amux/decision-maker/transmissions/route.ts`,
+  `app/api/internal/amux/decision-maker/transmissions/outcome/route.ts`,
+  `app/api/internal/amux/decision-maker/results/route.ts`, `app/api/internal/amux/decision-maker/results/lookup/route.ts`,
+  `app/api/internal/amux/decision-maker/results/unknown/route.ts`, `lib/amux/decisionMakerInternalRoute.ts`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerAssignment`(상한 11)·`decisionMakerAssignmentDiscard`(9)·
+  `decisionMakerTransmitIntent`(11, S2-2a2에서 10에서 올림)·`decisionMakerTransmitOutcome`(9)·`decisionMakerResultSubmission`(12)·
+  `decisionMakerResultLookupRead`(3)·`decisionMakerResultUnknown`(9),
+  `tests/server-contract/amux-decision-maker-broker-routes.test.ts`,
+  `tests/server-contract/amux-decision-maker-broker-routes-budget.test.ts`. 라우팅 뒤에 bridge·broker가 부르는 원장 기록
+  route이며, S1f3과 같이 **`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409 `dm_routing_disabled`**이고 key
+  ring도 DB도 건드리지 않습니다. route는 인증·body·key ring·예산·경계만 하고 판정은 동작마다 store 함수 하나입니다 — 배정과
+  결과 제출은 body store의 조합, 나머지는 request store이며, route에는 SQL도 스위치 읽기도 없습니다. store가 돌려준 거절은
+  `unknown_request` 404, `digest_key_unavailable`·`settings_unreadable` 503, 그 밖은 409이고, 결과 제출은 원장의 확정
+  답(accepted·existing·rejected·already_rejected)이 모두 200과 그 status입니다. **요청 키 K_R은 배정 응답에만 있습니다** —
+  broker가 payload·manifest·결과 digest를 keyed로 만들고 잃은 결과를 조회하는 데 쓰며, period 키는 어떤 응답에도 없고 로그에는
+  key ring 오류 코드만 남습니다. 결과 응답을 잃으면 다시 제출하지 않고 `results/lookup`(읽기 경계, 쓰기 없음)으로 확인하고,
+  확인하지 못하면 `results/unknown`입니다. **경계 상한은 각 store 연산의 무결성 키 포함 최대 문장 수 + setup + fence**이고,
+  request·body unit 테스트가 그 셈을, body DB 테스트가 하나 줄인 상한의 거부를 고정합니다. 전달·판정 route와 worker에게 가는
+  경로는 없습니다.
+- **S2-2a2(latch 호출)**: request store의 `recordDecisionMakerValidationLatch()`·
+  `readDecisionMakerInstanceResultKinds()`·`readDecisionMakerInstanceLoad()`(이전 `readDecisionMakerThroughput()`), switch store의
+  `readDecisionMakerSwitchesWithBoundariesOrThrow()`, switch core의 `decisionMakerSwitchReadFromRows()`, request core의
+  `dmValidationLatchDecision()`·`dmSwitchInputWithOwedLatch()`, `lib/amux/decisionMakerInternalRoute.ts`의
+  `settleDmValidationLatch()`, `lib/amux/dbBoundary.ts`의 `decisionMakerValidationLatch`(상한 10)·`decisionMakerTransmitIntent`(11),
+  `lib/amux/decisionMakerRetentionSweep.ts`의 첫 단계. docs/policy/amux-decision-maker.md §8의 검증 실패 연속 3건이 인스턴스를
+  `off`로 latch합니다. **연속은 그 인스턴스의
+  종결 결과를 원장 순서로 셉니다** — 다른 종결 결과(제안·이관·시간 초과·DM 불가)가 끼면
+  끊기고, 거절·unknown 결과는 세지도 끊지도 않습니다. 어디서부터 세는지는 S2-2a4가 고쳤습니다(아래 항목): 가장 새 validation
+  latch와 그 뒤의 `amux.decision.latch_release`만 경계이고, 사람의 일반 mode 변경은 경계가 아닙니다(이 조각의 처음 구현은 사람의
+  변경이면 무엇이든 경계로 삼아 docs/policy/amux-decision-maker.md §8을 어겼습니다). 풀리지 않은 validation latch가 있으면 아무것도
+  쓰지 않으므로 같은 실패열은 한 번만 latch됩니다. 최근 100건 안에 3연속이 하나라도 있으면 latch가 밀린(owed) 것입니다. **밀린
+  latch는 쓰이기 전에도 인스턴스를 끕니다** —
+  라우팅과 전송 의도가 쓰는 스위치 읽기 한 문장이 인스턴스마다 셈의 경계를 함께 돌려주고, 라우팅은 처리량
+  문장에 결과 종류 배열을 실어(문장 수 그대로) 밀린 latch를 `instance_off`로 운영자에게 보내며, 전송 의도는 결과 종류 읽기 한
+  문장을 더해 의도를 쓰지 않고 `instance_off`로 거부하면서 그 latch를 같은 트랜잭션에 씁니다(이 함수에서 쓰기가 있는 유일한
+  거부). 그래서 세 번째 실패의 commit과 latch 사이에도 공급사 전송이 없습니다. 결과 route는 검증 실패 결과의 commit 뒤 별도
+  경계에서 latch를 확인하고(결과 제출 트랜잭션은 이미 10문장이라 docs/policy/amux-decision-maker.md §9의 12를 넘음, 실패해도 결과
+  응답은 그대로이며 로그는 코드만), 15분 보존 sweep이 두 인스턴스를 보존 작업보다 먼저 다시 확인합니다. **sweep의 latch 확인은
+  인스턴스마다 실패 경계가 따로입니다** — 한 인스턴스 확인이 실패하면 코드만 담은 구조화 로그를 남기고 세기만 하며, 다른 인스턴스
+  확인과 docs/policy/amux-decision-maker.md §10의 보존 정리(키 교체·stale 종료·본문 삭제·키 파기)는 그대로 진행합니다. 이 막음은
+  store가 하며 DB trigger는 원장 삽입 때 밀린 latch를 보지 않습니다. latch는 끄기만 하므로 kill switch를 보지 않고, 다시 켜는
+  것은 운영자의 `amux.decision.latch_release`뿐입니다. cleanup_unknown 보고는 원장 사건 종류가 필요해 migration을 갖는 별도
+  조각입니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 + setup + fence이고, request unit 테스트가 그 셈을, request·body
+  DB 테스트가 하나 줄인 상한의 거부를 고정합니다.
+- **S2-2a3(cleanup_unknown)**: `prisma/migrations/20261017160000_amux_decision_maker_cleanup_unknown/migration.sql`,
+  `app/api/internal/amux/decision-maker/cleanup/unknown/route.ts`, request store의 `recordDecisionMakerCleanupUnknown()`·
+  `recordDecisionMakerCleanupLatch()`·`readDecisionMakerInstanceLatchInputs()`·`readDecisionMakerInstanceNewestCleanupUnknown()`,
+  request core의 `dmCleanupLatchDecision()`·`dmOwedLatchReason()`, `lib/amux/decisionMakerInternalRoute.ts`의
+  `settleDmCleanupLatch()`, `lib/amux/dbBoundary.ts`의 `decisionMakerCleanupUnknown`(상한 9)·`decisionMakerCleanupLatch`(10),
+  `lib/amux/decisionMakerRetentionSweep.ts`의 인스턴스별 첫 확인, switch store·core의 `cleanupEventId`(latch가 처리한 보고)와
+  그것을 싣는 스위치 읽기, `prisma/schema.prisma`의 그 열과 관계. docs/policy/amux-decision-maker.md §5의 "지웠는지 확인하지 못하면
+  `cleanup_unknown`으로 두고 그 인스턴스를 `off`로 latch한다"입니다. broker가 요청 자신의 인스턴스로 보고하면 원장에 사건 종류
+  `cleanup_unknown`(열세 번째 종류)이 그 인스턴스 actor의 `amux.decision.cleanup_unknown` 감사와 같은 트랜잭션에 남습니다. **요청당
+  하나이고**(부분 유일 index와 trigger), 배정 뒤에만 받으며(broker는 전송 의도 전에 요청 디렉터리를 만듭니다), 마감이 없고, 요청이
+  닫힌 뒤·결과 뒤·kill switch 중에도 받습니다. **닫힘 종류가 아닙니다** — docs/policy/amux-decision-maker.md §6의 종결 결과도 사람의 판정도 아니므로 보고 전에 저장된
+  제안은 운영자에게 열린 채 남고, 닫힌 뒤 온 보고도 기록됩니다. 그래서 닫힘 목록과 그것을 쓰는 guard·store 읽기는 바뀌지 않습니다.
+  같은 보고를 다시 보내면 기록된 사건을 돌려주고 아무것도 쓰지 않으며, 다른 인스턴스의 보고는 그 전에 거절합니다. **latch는 보고가
+  commit된 뒤 별도 경계에서 씁니다**(보고 7 + 스위치 읽기 + latch 5는 setup·fence와 15로 docs/policy/amux-decision-maker.md §9의 12를
+  넘음) — route는 기록했든 이미 있었든 그 확인을 돌리고, 실패해도 답은 보고의 것이며 로그는 코드만입니다. **`cleanup_latch`는 자기가
+  처리한 보고의 원장 사건 id를 스위치 사건의 `cleanupEventId`에 담고, 보고를 처리한 것으로 치는 것은 그 이름이 붙은 latch 하나뿐입니다**
+  — 시각으로 비교하지 않습니다. 이전 보고의 latch와 다음 보고가 같은 DB ms에 놓일 수 있기 때문입니다(검토 r-20261017-123200-7609b7,
+  보고는 off 중에도 받음). 판정은 "인스턴스의 가장 새 보고(원장 sequence 순) id = 가장 새 `cleanup_latch`가 담은 id"이고, latch는 언제나
+  audit chain lock 아래 읽은 가장 새 보고를 이름 대므로 가장 새 latch와만 비교해도 정확합니다. DB는 그 이름을 `cleanup_latch`에만
+  있게(CHECK), 보고당 한 번(unique), 지울 수 없는 원장 사건을(제한 FK), 그리고 latch와 같은 인스턴스의 `cleanup_unknown` 보고만(교체한
+  스위치 guard) 받습니다. 그래서 사람의 일반 mode 변경(같은 값 재저장, off 뒤 proposal, 검토 r-20261017-115136-888d76)과 다른 원인의
+  latch, 다른 보고의 latch는 보고를 처리하지 않고 latch는 밀린 채 남아 다음 라우팅·전송 의도·sweep이 씁니다. 보고는 요청당 하나라
+  재전송은 같은 사건이므로, 재전송·재확인·해제 뒤 늦은 재전송은 다시 끄지 않습니다. migration은 두 함수(원장 event guard와 스위치
+  guard)를 바꾸므로 이전 본문 digest를 첫 DO 블록에서 대조하고, 새 열 때문에 baseline guard의 schema 비교에 보이므로 header 선언은
+  두지 않습니다. **밀린 latch는 쓰이기 전에도 인스턴스를 끕니다** — 라우팅은 처리량 문장에, 전송 의도는 결과 종류 읽기 문장에 가장 새
+  보고 id를, 스위치 읽기는 가장 새 latch가 담은 id를 실어(문장 수 그대로) `instance_off`로 막고, 전송 의도는 밀린 latch를 같은 트랜잭션에 씁니다. 둘 다 밀렸으면 `cleanup_latch`가
+  먼저입니다. 15분 sweep은 인스턴스마다 정리 latch 확인 뒤 docs/policy/amux-decision-maker.md §8 확인을 하며 각 확인이 따로 실패 경계입니다. DB trigger는 원장 삽입 때
+  밀린 latch를 보지 않고, latch는 끄기만 하므로 kill switch를 보지 않습니다. 경계 상한은 각 연산의 무결성 키 포함 최대 문장 수 +
+  setup + fence이고, request unit 테스트가 그 셈을, request DB 테스트가 하나 줄인 상한의 거부를 고정합니다. Admin 화면 표시는
+  S2-4c입니다.
+- **S2-2a4(검증 실패 셈의 경계)**: `prisma/migrations/20261017200000_amux_decision_maker_validation_count_boundary/migration.sql`,
+  switch core의 `DmValidationCountBoundary`·`decisionMakerSwitchReadFromRows()`, switch store의
+  `readDecisionMakerSwitchesWithBoundariesOrThrow()`, request core의 `dmValidationCountWindow()`·`dmValidationLatchDecision()`·
+  `dmOwedLatchReason()`, request store의 세 결과 읽기(`readDecisionMakerInstanceLoad()`·`readDecisionMakerInstanceResultKinds()`·
+  `readDecisionMakerInstanceLatchInputs()`), `prisma/schema.prisma`의 원장 사건 `switchSequence`. docs/policy/amux-decision-maker.md §8의
+  "해제는 운영자만"입니다. **셈은 인스턴스의 가장 새 `validation_latch`와 그 뒤 첫 사람의 사건부터만 시작합니다** — 스위치 guard가
+  시스템 사건 뒤 첫 사람의 사건을 `amux.decision.latch_release`로만 받으므로 그 사건이 곧 해제입니다. validation latch가 없으면
+  모든 결과(최근 100건)를 세고, 풀리지 않았으면 아무것도 밀리지 않으며(같은 실패열은 한 번만), 풀렸으면 그 해제 뒤의 결과만
+  셉니다. 사람의 일반 mode 변경(같은 값 재저장, off 뒤 proposal, 해제 뒤의 변경), `cleanup_latch`와 그 해제는 경계가 아닙니다 —
+  세 번째 실패 뒤 latch가 쓰이기 전에 mode를 다시 저장하면 latch가 사라지던 결함이 이것이고, `cleanup_latch`는 검증 실패열을
+  처리하지 않으므로 둘 다 밀렸으면 둘 다 씁니다. **해제 앞뒤는 결과가 받아들여질 때 본 스위치 상태로 가릅니다** — 시각도 원장
+  sequence도 아닙니다. 해제 전에 commit된 실패가 해제와 같은 DB ms에 놓일 수 있고, 원장 sequence는 INSERT가 시작될 때 뽑혀
+  guard가 gate를 기다리기 전이므로 audit chain lock이 없으면(entryHash 없는 감사 행은 잡지 않음) commit 순서가 아닙니다 — 실패가
+  N을 뽑고 해제가 쥔 gate를 기다리는 동안 gate를 잡지 않는 다른 요청의 assign이 N+1로 commit할 수 있습니다(검토
+  r-20261018-012448-8f45bd, 처음 구현의 `ledgerSequence`가 이 경로로 해제 뒤 실패를 영구히 빠뜨렸습니다). 그래서 교체한 원장
+  guard가 결과마다, 이미 결과에 공유로 잡는 스위치 gate 뒤에 그 인스턴스의 가장 새 스위치 사건 sequence를 읽어
+  `switchSequence`에 씁니다(writer가 준 값과 상관없이, 다른 종류는 NULL). 스위치 변경은 gate를 exclusive로 commit까지 쥐므로
+  해제는 결과의 읽기보다 통째로 앞이거나(결과가 해제나 그 뒤 사건을 봄) 통째로 뒤이며, 해제 뒤 셈은 `switchSequence`가 해제의
+  sequence 이상인 결과입니다. migration 전에 쓰인 결과(값 없음)만 해제의 DB 시계로 가르며 같은 ms의 결과는 셉니다(latch가
+  빨라지는 쪽). migration은 원장 guard 하나를 바꾸므로 이전 본문 digest(20261017160000의 본문)를 첫 DO 블록에서 대조하고, 새 열
+  때문에 baseline guard의 schema 비교에 보이므로 header 선언은 두지 않습니다. 문장 수는 그대로입니다 — 경계는 이미 보내던 스위치
+  읽기 한 문장의 LATERAL 두 개에, 해제 sequence는 이미 보내던 결과 읽기의 조건에 실렸고 trigger 안의 읽기는 셈에 들지 않으므로
+  라우팅 12·전송 의도 11·latch 확인 10·결과 제출 12(각각 setup·fence 포함)가 바뀌지 않습니다. 이 조각이 바꾸는
+  것은 검증 실패 latch의 셈뿐이며 kill switch와 인스턴스 `off`의 판정, 해제 action의 판정은 바꾸지 않습니다.
+- **S2-3a(전용 launcher의 결정적 핵심)**: `lib/amux/decisionMakerLauncherCore.ts`,
+  `lib/amux/decisionMakerLauncherFs.ts`, `lib/amux/decisionMakerLauncherProcess.ts`,
+  `tests/amuxDecisionMakerLauncherCore.test.mjs`, `tests/amuxDecisionMakerLauncherFs.test.mjs`,
+  `tests/amuxDecisionMakerLauncherProcess.test.mjs`, `tests/support/amuxDmLauncherFixture.mjs`.
+  정책 버전 2의 고정 실행 조건(docs/policy/amux-decision-maker.md §5a)을 코드로 옮긴 것이며, **core 테스트가 그 절의 본문을 읽어
+  argv·실행 파일 sha256·고정 환경·삭제/남김 목록·거부 argv를 대조합니다** — 정책과 코드 한쪽만 바꾸면 실패합니다. 시작 허가는
+  preflight의 빈 거부 목록 하나뿐이고, 그 목록은 모든 검사를 돌려 전부 보고합니다. 실행 digest(`amux-json-v1`의 sha256)는 앱의
+  `amuxCanonicalJson`으로 계산하고 기록값은 core의 상수이며, 그 값을 테스트가 다시 고정합니다. **전송 의도는
+  route의 기록 응답이 이 요청 id·인스턴스의 것이고, 그 payload digest가 stdin으로 보낼 바이트의 `dmPayloadDigest(K_R, …)`와
+  같을 때만 증거입니다.** payload는 호출 순간 첫 비동기 경계 전에 한 번 복사하고, 그 복사본 하나로 digest를 검사하고 stdin에
+  보냅니다 — 호출자가 그 뒤 버퍼를 바꿔도 보내는 바이트는 기록과 같습니다. **요청은 경로를 넘기지 않습니다.** 요청 디렉터리는
+  S0이 만든 broker 소유 `/var/lib/amux-dm/requests` 아래, 임시 디렉터리는 계정 홈의 `dm-scratch` 아래에 요청 id 한 단계로만
+  생기고, 읽기·만들기·지우기 전에 `/`부터 각 디렉터리를 lstat로 확인합니다(link 아님, S0의 소유자, 그룹·다른 사용자 쓰기 없음,
+  홈과 임시 디렉터리는 `0700`). 지울 대상도 같은 기준을 통과해야 하고, 확인한 부모 안에서 옆 이름으로 rename한 뒤 inode가
+  같아야 합니다. **재귀 `rm`은 쓰지 않습니다** — 직접 깊이 우선으로 돌며 link·파일·특수 파일은 unlink만 하고, 하위 디렉터리는
+  정리 계정 소유이고 그룹·다른 사용자 쓰기가 없을 때만, link를 따르지 않고 연 inode가 lstat과 같을 때만 들어가 비운 뒤 `rmdir`합니다.
+  그래서 정리 중에 항목을 바꿔치기할 수 있는 주체는 root와 정리하는 계정의 다른 프로세스뿐입니다. 확인에 실패하면 그 자리에서
+  멈추고 아무것도 읽거나 지우지 않으며 `cleanup_unknown`입니다. 결과는
+  codex `-o` 파일과 claude `structured_output`에서만 읽고, 스키마의 `output` 감싸개만 벗겨 앱의 출력 검증
+  (docs/policy/amux-decision-maker.md §6)에 넘깁니다. 정리는 둘로 나뉩니다 — launcher(공급사 계정)는 거부·실패·시간 초과·
+  launcher 오류를 포함한 모든 종료 경로에서 임시 디렉터리와 CLI 상태를 지우고 확인하며, broker는 launcher가 돌아온 뒤 언제나
+  `dmCleanupRequestDirectory()`로 요청 디렉터리를 지웁니다. 남김 목록 밖에 무엇이든 남거나 확인하지 못하면 `cleanup_unknown`을
+  결과와 따로 보고합니다(latch는 앱의 일). 실행 파일·스키마의 root 소유 경로와 임시 디렉터리 위치는 정책 본문에 없는 launcher
+  상수입니다. 테스트용 host만 다른 실행 파일 sha256·timeout·소유자를 받고, 시스템 host에서는 sha256·timeout override가 거부됩니다.
+  broker·bridge·route 호출·설치·unit은 없습니다.
+- **S2-3b(broker와 runner 설치 파일)**: `lib/amux/decisionMakerBrokerCore.ts`, `lib/amux/decisionMakerBroker.ts`,
+  `lib/amux/decisionMakerLauncherService.ts`, `lib/amux/decisionMakerSocketLine.ts`, launcher Fs의
+  `dmCreateRequestDirectory()`·`dmRequestRootState()`·`dmVendorGroupId()`, `scripts/amux-dm-broker.mjs`,
+  `scripts/amux-dm-launcher.mjs`, `scripts/build-amux-decision-maker.mjs`(`npm run build:amux-decision-maker`),
+  `scripts/install-amux-decision-maker.sh`, `scripts/systemd/amux-dm-broker.{socket,service}`,
+  `scripts/systemd/amux-dm-launcher-{openai,anthropic}.socket`·`@.service`, `tests/amuxDecisionMakerBrokerCore.test.mjs`,
+  `tests/amuxDecisionMakerBroker.test.mjs`, `tests/amuxDecisionMakerInstall.test.mjs`, `tests/amuxDecisionMakerInstallShell.test.mjs`,
+  `scripts/amux-decision-maker-release-out.mjs`, `tests/amuxDecisionMakerReleaseOut.test.mjs`, `tests/support/amuxDmBrokerFixture.mjs`.
+  **sudo·setuid 없이 계정을 나누는 것은 systemd입니다** — bridge는 broker 소켓(`/run/amux-dm-broker/broker.sock`, broker 소유·
+  `tomverse-bridge` 그룹·`0660`)에, broker만 공급사별 launcher 소켓(`/run/amux-dm-launcher/<instance>.sock`, broker 소유·`0600`)에
+  닿고, launcher 소켓은 `Accept=yes`·`MaxConnections=1`이라 연결마다 그 공급사 계정의 unit 하나가 뜹니다. 그 unit의
+  `KillMode=control-group`·`RuntimeMaxSec=32min`이 launcher가 죽어도 CLI가 요청을 넘어 살지 못하게 하는 backstop입니다(launcher
+  자신은 30분에 죽임). 소켓 파일의 소유·권한은 systemd가 만들고 broker는 넘겨받은 fd에서만 듣습니다. **프로토콜은 연결 하나에
+  요청 하나, 양쪽 한 줄씩**(JSON 한 줄, 줄마다 상한과 기한)입니다. launcher는 먼저 자기 인스턴스로 `ready`를 보내고 그 뒤에만
+  요청을 읽으므로, `ready` 전에 끊긴 연결은 아무것도 보내지 않은 것이 증명됩니다. broker는 앱 route를 부르지 않습니다 — bridge가
+  전송 의도를 기록한 뒤 그 바이트·K_R·의도 응답을 보내면, broker가 의도를 그 바이트와 대조하고(아니면 디렉터리도 launcher도 없음),
+  요청 루트에 진행 중이 아닌 것이 없음을 확인하고(있으면 거부와 `cleanup_unknown`), S0이 만든 홈의 그룹으로 빈 요청 디렉터리
+  (broker 소유, `0750`)를 만들고, launcher의 한 답을 받은 뒤 **어떤 경로에서든** 그 디렉터리를 지우고 bridge에 한 줄로 답합니다.
+  답에는 `transmission`(`process_ended`·`not_started`·`unknown` — 영수증 기록용), docs/policy/amux-decision-maker.md §9의 결과 digest를 붙인 결과(출력·시간 초과·DM 불가),
+  `cleanup`(범위와 종류만, 경로 없음)이 있습니다. 같은 인스턴스의 두 번째 요청은 아무것도 건드리지 않고 `busy`입니다. 카드는
+  stdin으로만 가고 요청 디렉터리는 비어 있으며, S2b 스냅샷은 없습니다. **설치는 dry run이 기본입니다** — build가 만든 릴리스 디렉터리
+  (번들·스키마·unit·설치기·`manifest.sha256`)를 root 소유 위치로 옮겨 그 manifest의 sha256을 주고 실행하며, `--apply`일 때만
+  docs/policy/amux-decision-maker.md §5a의 경로로 CLI를 복사(복사본의 sha256을 정책 값과 대조)하고 `daemon-reload`까지만 합니다.
+  **같은 바이트만으로는 그대로 두지 않습니다** — root 소유·root 그룹·정확한 mode·링크 1개인 일반 파일일 때만 `same`이고, 바이트가
+  같아도 그 밖이면 `repair`로 다른 바이트(`replace`)처럼 `/var/backups/tomverse-amux-dm/<시각>/`에 보존한 뒤 목적지 디렉터리 안에서
+  만든 사본을 rename으로 원자 교체합니다. 목적지의 link·디렉터리는 거부합니다. **목적지와 백업으로 가는 길의 이미 있는 모든 디렉터리**는
+  link 아님·root 소유·그룹/기타 쓰기 없음이어야 하며, dry run이 보고하고 apply가 첫 변경 직전과 각 이동 직전에 다시 확인합니다
+  (검토 r-20261017-113433-e16efc 1·2). release의 `systemd/`도 같은 검사를 받고, 백업 디렉터리는 실행마다 새로 만들며 이미 있으면
+  멈춥니다(재검토 r-20261017-114940-a271fb의 sweep). 빌드의 `--out`은 저장소·홈·파일시스템 루트와 그 조상을 언제나 거부하고, **경로 자신과
+  이미 있는 모든 조상 중 하나라도 link이거나 realpath가 적힌 경로와 다르면 기본 경로라도 거부합니다**. 비어 있지 않은 디렉터리는 빌드가 남긴
+  표식(`.amux-decision-maker-release`)이 있고 그 밖의 항목이 모두 release 자신의 일반 파일일 때만 쓰며, 재귀 삭제 없이 그 파일들만 이름으로
+  지웁니다(검토 3, 재검토). 표식을 포함해 이름이 둘 이상인(hard link) 항목이 있으면 `hard_link`로 거부하고, 빌드는 기존 항목을 먼저 unlink한
+  뒤 모든 파일을 배타적 생성(`wx`, `COPYFILE_EXCL`)으로만 씁니다 — 기존 파일 안에 쓰지 않습니다(세 번째 검토 r-20261017-121031-9ff0a9).
+  unit을 enable·start하지 않고, CLI는 `--version`만(nobody, 네트워크 없는 namespace, 빈
+  환경) 실행하며, 앱의 `TOMVERSE_AMUX_DM_ROUTING`은 그대로 꺼져 있습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
+  없습니다.
+- **S2-2b1(선택지별 효과 등급·경로와 정책 버전 2)**: `lib/amux/decisionMakerCore.ts`의 `DmCardOption`, 효과 등급 목록과 변경
+  경로 상한, `dmOptionEffectWellFormed()`, 카드 텍스트 형식 `amux-dm-card-text-v2`, 정책 버전 상수, request core의 `parseDmCard()`,
+  `tests/amuxDecisionMakerCardFields.test.mjs`.
+  카드의 선택지는 `{ id, label, effect, paths }`입니다(docs/policy/amux-decision-maker.md §4, §5). **이름은 앱의 camelCase이고,
+  로컬 AMUX가 저장하는 snake_case(`context_paths`)는 bridge relay(S2-2b2)가 바꿉니다** — 선택지의 네 키는 양쪽이 같은 단어입니다.
+  효과 등급은 정책 표의 여섯이고 변경 등급(`branch_code_change`·`docs_change`·`test_change`)만 경로 1~50개를 갖습니다. **로컬
+  AMUX는 선언을 거절하지 않고 없거나 틀린 선언을 `other`·경로 없음으로 기록하므로**(`dm_ask.rs`의 `recorded_effect`), 앱에 오는
+  선택지는 언제나 그 기록 형식입니다. 라우터는 등급으로 라우팅하지 않고(docs/policy/amux-decision-maker.md §4, 버전 2도 같음)
+  그 형식 밖의 선택지만 `input_limit_exceeded`로 운영자에게 보내며 `other`로 고쳐 쓰지 않습니다 — 본문 저장소의 카드 텍스트가
+  라우터가 판정한 카드여야 하기 때문입니다. 선택지의 경로는 맥락 경로와 같은 경로 문법을 따르고, 카드 secret 검사와 16 KiB 카드
+  텍스트에 들어가며, 용어 목록의 입력은 아닙니다(맥락 경로도 아님). 테스트가 로컬 `dm_ask.rs`의 목록·상한과 정책의 효과 등급 표를
+  직접 읽어 대조하므로 한쪽만 바꾸면 실패합니다. **결과 제출의 선택지는 계속 `{ id, label }`이고 선택지 집합 digest도 그 둘만
+  묶습니다** — 등급·경로가 바뀌면 로컬 AMUX에서 새 질문 revision, 곧 새 요청입니다. 카드 텍스트 v1(선택지 `{ id, label }`)은 읽지
+  않습니다. 그것을 쓰는 경로는 처음부터 `TOMVERSE_AMUX_DM_ROUTING`으로 닫힌 라우팅 route 하나였고, 읽지 못한 텍스트는 Admin에
+  카드가 아니라 unreadable로 보입니다. **정책 버전 상수는 2입니다**(2026-10-17 승인) — 새 요청 행이 그 값을 결속 값으로 남기고,
+  결과는 상수가 아니라 행에 저장된 값과 대조하므로 이전 행은 자기 버전으로 결속됩니다. bridge relay는 결과 결속에 저장된 값을
+  보내야 합니다. 요청 행의 CHECK는 `>= 1`이라 migration이 없습니다. 용어 목록·비밀 경로 목록·경로 문법·출력 상한은 바뀌지
+  않았습니다. Admin 화면의 등급·경로 표시와 docs/policy/amux-decision-maker.md §4의 경로별 분류 기록은 없습니다.
+- **S2-2b2(bridge relay)**: `apps/tomverse-orchestrator/src/dm_relay.rs`, `apps/tomverse-orchestrator/src/dm_relay/wire.rs`,
+  `apps/tomverse-orchestrator/src/dm_relay/flow.rs`, `apps/tomverse-orchestrator/src/dm_relay/io.rs`,
+  `apps/tomverse-orchestrator/src/tomverse_api.rs`의 Decision Maker POST 도우미, `apps/tomverse-orchestrator/src/wsl_bridge.rs`의 시작
+  한 줄, `vendor/amux/crates/amux-server/src/api/dm_relay.rs`(로컬 표시 route와 그 등록), `tests/amuxDecisionMakerBridgeRelay.test.mjs`.
+  bridge 프로세스(`tomverse-bridge`) 안의 task 하나가 로컬 AMUX의 `needsyou` typed ask를 **한 번에 하나씩** 앱 원장으로 옮깁니다:
+  라우팅 → 배정 → 로컬 DM 대기 표시(compare-and-swap, 실패하면 배정 폐기) → payload → 전송 의도 → broker → 결과 → cleanup_unknown
+  보고 → 전송 영수증 → 표시 해제. **`TOMVERSE_AMUX_DM_RELAY=enabled`가 아니면 아무것도 읽지도 쓰지도 않습니다**(앱의 라우팅
+  스위치는 별개이고 둘 다 꺼져 있습니다). **broker는 전송 의도의 기록 응답을 받은 뒤에만 부릅니다** — 그 응답을 잃으면 보내지 않습니다.
+  **결과 응답을 잃으면 다시 제출하지 않고** `results/lookup`으로만 확정하며, 확정하지 못하면 `results/unknown`입니다
+  (docs/policy/amux-decision-maker.md §9). 라우팅은 질문당 하나라 결과를 모르면 다음 scan에서 다시 묻는 것이 조회이고, 그 밖의 앱
+  쓰기(배정·폐기·전송 의도·영수증·`results/unknown`)의 결과를 모르거나 cleanup 보고가 기록되지 않으면(그 인스턴스의 latch를 확인하지
+  못함) 다시 보내지 않고 **relay만 멈춥니다** — 새 질문을
+  받지 않고 표시 해제만 계속하며, 사람이 bridge를 다시 시작할 때까지입니다. worker loop는 멈추지 않습니다. 표시는 결과와 무관하게
+  해제하고, 결과 마감이 broker 응답보다 먼저 오면 그때 해제한 뒤 broker 응답(정리 보고)은 계속 기다립니다. **매 tick 처음에 로컬
+  AMUX의 표시 목록 전체(`GET /api/dm-relay/pending`)를 읽어 모두 풉니다** — 질문 사이에는 진행 중인 요청이 없으므로 남은 표시는 전부
+  해제를 확인하지 못했거나 멈춘 프로세스가 남긴 것이고, 목록은 표의 것이라 카드의 위치·상태·revision과 무관합니다(검토
+  r-20261018-022220-384dfe). **scan은 카드 id 순서로 직전 scan이 연 마지막 카드 다음부터 최대 100개를 열고**(끝에서 처음으로
+  돌아감) 라우팅할 첫 질문에서 멈추므로, 처리한 질문이 `needsyou`에 남아 앞에 쌓여도 뒤의 질문이 굶지 않고, 한 scan의 일은
+  질문 하나입니다. broker 응답은 이 요청·인스턴스의 것이고 결과 digest가 K_R로 다시 계산한
+  값과 같을 때만 믿으며, 그 밖은 잃은 응답(전송 결과 불명, DM 불가, cleanup 불명 보고)입니다. 영수증은 프로세스가 돌고 끝났을 때만
+  `receipt`이고, 시작하지 않은 경우도 앱 어휘에 없어 `unknown`(보낸 것으로 침, docs/policy/amux-decision-maker.md §10)입니다. payload는
+  고정 지시문과 한 줄 JSON 카드이며, 지시문은 카드가 데이터이고 그 안의 지시를 따르지 말라고 적습니다
+  (docs/policy/amux-decision-maker.md §5). 지시문의 sha256은 `DM_INSTRUCTION_SHA256`이고 Rust 테스트가 고정합니다. 로컬 AMUX의 route(`/api/dm-relay/pending`의 GET 목록·POST 설정,
+  `/api/dm-relay/pending/release`)는 `/api/board` 밖에 있고 relay 토큰(헤더 `x-amux-dm-relay-token`, bridge 환경 파일의
+  `TOMVERSE_AMUX_DM_RELAY_LOCAL_TOKEN`)을 요구합니다. AMUX 서버는 그 토큰의 SHA-256(`AMUX_DM_RELAY_TOKEN_SHA256`)만 갖고, 값이
+  없거나 형식이 틀리면 모든 route가 닫힙니다. 어느 route에도 결과를 받는 필드가 없으므로 DM 출력이 worker에게 가는 경로는 없습니다.
+  앱 규칙을 Rust로 옮긴 값(digest, 상한, 소켓 경로, broker 기한, route와 응답 envelope, 정책 버전, 선택지 효과 필드)은 node 테스트가
+  앱 모듈에 대조합니다. **선택지 `effect`·`paths`(`DM_SEND_OPTION_EFFECTS`)와 결과 결속의 정책 버전(`DM_REQUEST_POLICY_VERSION`)은
+  S2-2b1과 함께 바뀝니다** — 앱의 라우팅·배정 응답에 저장된 정책 버전이 없어 relay는 앱 상수와 같은 값을 갖고, 두 앱 버전이 함께
+  받는 카드 형식이 없으므로 그 병합과 같은 변경에서 둘을 올리며 테스트가 이를 강제합니다. 운영자 확정 뒤 전달(S2-2b3), 스냅샷(S2b),
+  Admin 화면은 없습니다.
+- **S2-2b3(확정 답 전달)**: `app/api/internal/amux/decision-maker/deliveries/next/route.ts`,
+  `app/api/internal/amux/decision-maker/deliveries/route.ts`, `app/api/internal/amux/decision-maker/deliveries/outcome/route.ts`,
+  `lib/amux/decisionMakerDeliveryCore.ts`, `lib/amux/decisionMakerDeliveryRead.ts`, `lib/amux/decisionMakerDeliveryRoute.ts`,
+  judgment store의 `readNextDecisionMakerDeliveryJudgment()`, `lib/amux/dbBoundary.ts`의 `decisionMakerDeliveryCandidateRead`(상한 7)·
+  `decisionMakerDeliveryDecision`(10)·`decisionMakerDeliveryOutcome`(9), `apps/tomverse-orchestrator/src/dm_relay/delivery.rs`와
+  relay의 `tick`, `vendor/amux/crates/amux-server/src/api/dm_relay.rs`의 `/api/dm-relay/answers`·`/answers/check`·`/answers/unknown`,
+  `vendor/amux/crates/amux-server/src/api/board_typed_ask.rs`의 `POST /api/board/{id}/typed-ask/answer`, 대시보드 `_focusAnswer`·
+  `_focusDecide`의 `_focusClaimAnswer`, `tests/amuxDecisionMakerDelivery.test.mjs`,
+  `tests/server-contract/amux-decision-maker-delivery-routes.test.ts`, `tests/integration/amux-decision-maker-delivery.db.test.ts`.
+  relay의 매 tick이 question scan **앞에서** 운영자가 확정한 답을 최대 하나 전달합니다: 다음 확정 답 읽기 → 로컬 확인 → 앱의 전달
+  결정 → 로컬 전달(답변 기록 claim, 그 claim을 이긴 경우에만 전송과 카드 기록) → 영수증. **읽기 route는 `confirm`·`edit_confirm`
+  판정이 있고 전달 결정이 없는 요청만 돌려주고**, 그 판정이 요청을 닫은 사건과 같은지 다시 확인하며(아니면 읽지 못한 상태), kill
+  switch 중에는 스위치만 읽고 409 `kill_switch_on`입니다(docs/policy/amux-decision-maker.md §6 표의 "bridge의 확정 답 조회·전달").
+  **relay는 앱이 전달 결정을 기록했다고 답한 뒤에만 로컬 전달 route를 부릅니다** — 결정 응답을 잃으면 보내지 않고 멈춥니다. 각 표는
+  그것을 쓰는 store가 한 문장씩 읽고(`decisionMakerDeliveryRead.ts`에는 SQL이 없음), 읽기는 스위치·판정·요청·결과 상세·본문
+  5문장 + setup + fence입니다. 결정은 8문장, 결과는 7문장(무결성 키 포함)이고 경계 상한은 각각 + 2이며, unit 테스트가 그 셈을, DB
+  테스트가 하나 줄인 상한의 거부를 고정합니다. **worker 메시지는 앱이 만듭니다** — `[Decision Maker <인스턴스> (<모델>) 제안,
+  <operator-confirmed|operator-edited>, re <카드>]` 다음 줄에 답(select는 `선택지: <id>`, free text는 DM의 답, 고쳐서 확정은 운영자의
+  답), 빈 줄 뒤 "승인 계약의 승인이 아니다. 사람 승인이 필요한 게이트는 따로 요청한다."이며, 모델 이름과 문장은 unit 테스트가
+  docs/policy/amux-decision-maker.md §7의 표와 본문에 대조합니다. bridge는 첫 줄이 그 인스턴스·판정·카드의 머리말인지, 로컬 AMUX는 그
+  카드를 이름 대는 머리말인지 확인합니다. 카드 기록은 같은 글을 `` `answered` ``로 붙이며(session header 없는 PATCH라 알림 없음),
+  답 본문이 지워진 확정은 `undeliverable`로 건너뜁니다. 로컬 route는 S2-2b2의 relay 토큰 뒤에 있고 `/api/board` 밖입니다.
+  **확인(`answers/check`)은 읽기만 합니다** — 카드가 아직 그 질문 revision을 묻고 아무도 답하지 않았는지, 그리고 lane이 자동 전송을
+  받는지(`deliver_automated`과 같은 관문: archived·paused·isolated·not running·permission dialog면 거부, turn 경계가 아니면 `busy`).
+  아니면 relay는 결정을 쓰지 않고 cursor로 지나갑니다(앱 판정 시각·요청 id 순, 끝나면 처음부터). **질문 revision만으로는 소유자 변경을
+  보지 못합니다** — 카드를 다른 worker나 attempt에 넘겨도 revision은 그대로이므로, 앱의 읽기가 docs/policy/amux-decision-maker.md §9의 결속 값
+  (`worker`=묻는 worker, `session`=AMUX 세션, `session_attempt`=시도 번호, S2-2b2 relay가 라우팅 때 보낸 카드 owner session과 최신 task attempt)을
+  싣고, 확인과 claim 모두 현재 카드의 owner session(`issues.session`)이 worker이자 session이고 최신 `task_attempts` 번호가 그 attempt일 때만
+  통과합니다(아니면 `owner_changed`·`attempt_changed`, 검토 r-20261018-065705-65cb2a). **전달(`answers`)은 요청당 한 번만
+  부릅니다** — 같은 확인 뒤 한 트랜잭션에서 결속을 다시 읽고(바뀌었으면 `binding_changed`로 아무것도 claim하지 않음)
+  `dm_ask::claim_answer(DmConfirmed{request_id})`, 이 요청이 이긴 claim에서만 메시지 id
+  `dm-answer:<요청 id>`를 `send_dedup`에 예약하고 lane의 boundary 전송(automation, `from_steering`, 큐 없음)을 한 뒤 검증된 전송만
+  영수증으로 받습니다. 결과가 불명확하면(응답 유실, 미검증, 입력창에 남음) 다시 보내지 않고 앱에 `delivery_unknown`을 기록한 뒤
+  `answers/unknown`이 **그 세션을 먼저 일시 정지(AMUX pause)하고 나서** 메시지 id의 영수증을 읽습니다(docs/policy/amux-decision-maker.md §9).
+  일시 정지가 확인되지 않으면 relay가 멈춥니다. **영수증과 `unknown`은 앱이 기록했다고 답한 것만 기록입니다** — 거절(DB busy 503,
+  route 꺼짐 409)이든 응답 유실이든 기록이 아니므로 relay가 멈추고 빠진 기록을 코드로 남기며(`delivery_receipt_record_refused`·
+  `delivery_unknown_record_refused` 등), 세션 pause는 그대로 합니다. 결정이 있는 요청은 다시 읽히지 않으므로 계속 진행하면 결과 기록이
+  영구히 빠집니다(검토 r-20261018-062643-057a27). **직접 답과 확정 답은 같은 답변 기록을 먼저 써야 보냅니다** — 대시보드의 직접 답(Answer와
+  Approve/Reject)도 보내기 전에 `typed-ask/answer`로 claim합니다. 대시보드는 typed-ask GET으로 질문 revision을 읽어(Answer는 창을 열기 전에
+  읽고 창에 그 질문을 보임, Approve/Reject는 누를 때) 그 revision을 body(`{"question_revision": <n> | null}`)에 싣고, 서버는 claim
+  트랜잭션 안에서 그 revision이 현재 revision일 때만 claim합니다. 다르면 `question_changed`로 아무것도 claim하지 않고 보내지도 않습니다 —
+  창을 연 뒤 worker가 다시 물은 새 질문을 옛 답이 차지하지 않게 하기 위해서입니다(같은 검토). **대시보드는 `claimed`일 때만 보냅니다** —
+  `already_answered`는 확정 DM 답이든 운영자 자신의 앞선 답(다른 탭, 두 번 누름)이든 보내지 않고 알립니다(질문 revision 하나에 답 한 번,
+  검토 r-20261018-065705-65cb2a; `tests/amuxDecisionMakerDashboardAnswer.test.mjs`가 app.js의 함수를 직접 실행해 고정). typed revision이 없는
+  카드는 claim할 것이 없고 그대로 보냅니다. worker 신원 header가 있는 요청은 운영자 claim을 할 수 없습니다. **전달된 답의 카드 기록이 실패하면**
+  영수증(worker에게는 도착했으므로 사실)은 기록하되 relay가 `delivery_card_record_failed`로 멈춥니다 — 결정이 있는 요청은 다시 읽히지 않아
+  docs/policy/amux-decision-maker.md §7의 카드 기록이 영구히 빠지므로, 재시도 route 대신 명시적으로 멈춥니다(재시도는 bridge 재시작에도 남는 밀린 기록 저장소가 필요합니다). **남은 것(migration 필요, 이 조각에서 멈춤)**: 전달 결정 뒤 claim이 지거나 lane이 그 사이 거부해
+  아무것도 보내지 않은 경우를 앱의 전달 기록이 말할 어휘가 없습니다(영수증도 `unknown`도 사실이 아님). 그 경우 결정만 남고 relay가
+  멈추며, 확인 단계가 그 창을 결정 직전 한 번의 왕복으로 줄입니다. bridge가 결정과 영수증 사이에 죽은 결정은 자동으로 정리하지 않으며,
+  운영자의 직접 답이 먼저일 때 앱 요청을 닫는 것(docs/policy/amux-decision-maker.md §2-7 마지막 문장)도 아직 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 

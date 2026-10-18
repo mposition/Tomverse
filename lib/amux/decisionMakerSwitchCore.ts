@@ -114,6 +114,157 @@ export const decisionMakerSwitchStateFromRows = (rows: unknown): DecisionMakerSw
 };
 
 /**
+ * Where §8's validation count of an instance starts (stage S2-2a4,
+ * docs/policy/amux-decision-maker.md §8: "검증 실패(§6)가 연속 3건이면 그
+ * 인스턴스를 off로 latch한다. 해제는 운영자만"):
+ *
+ * - `none`: the instance has no validation latch; every result counts.
+ * - `latched`: its newest validation latch has no person's event after it --
+ *   the run it latched stands, and nothing is owed until it is released.
+ * - `released`: the first person's event after that latch, which the switch
+ *   guard requires to be `amux.decision.latch_release`. The count starts at
+ *   it: the results admitted under that release or a later switch event of
+ *   the instance -- each result records the sequence of its instance's newest
+ *   switch event, read by the ledger's guard under the shared switch gate
+ *   (`switchSequence`, migration 20261017200000), and those at or above
+ *   `releaseSequence` (a decimal string; it is a BIGINT) are counted. The
+ *   gate, not the audit chain lock, orders a release and a result (review
+ *   r-20261018-012448-8f45bd); a clock and the ledger's own sequence cannot.
+ *   A result written before that migration has no number and is placed by
+ *   its clock against `releasedAtMs`, a shared millisecond counted.
+ *
+ * Nothing else moves it: not a person's ordinary mode change -- the same mode
+ * saved again, off and back to proposal, a change after the release -- not a
+ * cleanup latch and not a cleanup latch's own release. Until stage S2-2a4 the
+ * count started at the instance's newest switch event of any kind, so a mode
+ * saved between the third failure and its latch dropped the latch without a
+ * release.
+ */
+export type DmValidationCountBoundary =
+  | { kind: "none" }
+  | { kind: "latched" }
+  | { kind: "released"; releaseSequence: string; releasedAtMs: number };
+
+/**
+ * What the request ledger's writers read in one statement
+ * (docs/policy/amux-decision-maker.md §6, §8): the switch state, and each
+ * instance's validation count boundary (`DmValidationCountBoundary`; since
+ * stage S2-2a4, in place of its newest event).
+ *
+ * Since stage S2-2a3 the same statement also carries, per instance, the
+ * ledger event id of the `cleanup_unknown` report its newest `cleanup_latch`
+ * names (§5): a cleanup latch settles the report it names and no other. Not a
+ * person's ordinary mode change (review r-20261017-115136-888d76), and not a
+ * clock -- a later report can share a latch's database millisecond (review
+ * r-20261017-123200-7609b7).
+ */
+export type DecisionMakerSwitchRead = {
+  state: DecisionMakerSwitchState;
+  validationBoundary: Record<DmInstanceScope, DmValidationCountBoundary>;
+  cleanupLatchedEventId: Record<DmInstanceScope, string | null>;
+};
+
+/**
+ * No validation latch on either instance. An unreadable read carries it too:
+ * every result counts, the side that latches sooner, and the unreadable state
+ * already sends every question to the operator.
+ */
+const noValidationLatches = (): DecisionMakerSwitchRead["validationBoundary"] => ({
+  "decision-maker-openai": { kind: "none" },
+  "decision-maker-anthropic": { kind: "none" },
+});
+
+const noCleanupLatches = (): DecisionMakerSwitchRead["cleanupLatchedEventId"] => ({
+  "decision-maker-openai": null,
+  "decision-maker-anthropic": null,
+});
+
+const epochClock = (value: unknown): number =>
+  typeof value === "bigint" || typeof value === "number" ? Number(value) : Number.NaN;
+
+/** A ledger event id: the request ledger's id format (migration 20261008090100). */
+const LEDGER_EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const isDmLedgerEventId = (value: unknown): value is string =>
+  typeof value === "string" && LEDGER_EVENT_ID.test(value);
+
+/** A switch event's sequence as the read returned it (a positive BIGINT), as a decimal string; undefined when it is not one. */
+const switchSequenceOf = (value: unknown): string | undefined => {
+  if (typeof value === "bigint") return value > BigInt(0) && value <= BigInt("9223372036854775807") ? String(value) : undefined;
+  if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? String(value) : undefined;
+  if (typeof value === "string" && /^[1-9][0-9]{0,18}$/.test(value) && BigInt(value) <= BigInt("9223372036854775807")) return value;
+  return undefined;
+};
+
+/**
+ * One scope's validation count boundary from its row's three columns: the
+ * sequence of its newest validation latch, and the sequence and database
+ * clock of the first person's event after that latch. Undefined for a
+ * combination the read could not have produced: a release without a latch, a
+ * release with only one of its two values, a release numbered at or below its
+ * latch, or any of them on the kill switch.
+ */
+const validationBoundaryOf = (row: {
+  scope: unknown;
+  newestValidationLatchSequence?: unknown;
+  validationReleaseSequence?: unknown;
+  validationReleasedAtEpochMs?: unknown;
+}): DmValidationCountBoundary | undefined => {
+  const latch = row.newestValidationLatchSequence;
+  const release = row.validationReleaseSequence;
+  const releasedAt = row.validationReleasedAtEpochMs;
+  if (latch === null) {
+    return release === null && releasedAt === null ? { kind: "none" } : undefined;
+  }
+  const latchSequence = switchSequenceOf(latch);
+  if (!isDmInstanceScope(row.scope) || latchSequence === undefined) return undefined;
+  if (release === null && releasedAt === null) return { kind: "latched" };
+  const releaseSequence = switchSequenceOf(release);
+  const releasedAtMs = epochClock(releasedAt);
+  if (releaseSequence === undefined || !Number.isSafeInteger(releasedAtMs)) return undefined;
+  if (BigInt(releaseSequence) <= BigInt(latchSequence)) return undefined;
+  return { kind: "released", releaseSequence, releasedAtMs };
+};
+
+/**
+ * The state from the newest event of each scope, each instance's validation
+ * count boundary (stage S2-2a4), and the report each instance's newest
+ * cleanup latch names. Any row the state mapping refuses, or whose boundary
+ * or named report the table and its guard could not have produced -- a column
+ * missing from the row, a named report that is not a ledger event id, a
+ * release without a latch, either on the kill switch -- makes the whole read
+ * unreadable: every state field null, every boundary `none` and no cleanup
+ * latch, as `decisionMakerSwitchStateFromRows()` does for one bad row.
+ */
+export const decisionMakerSwitchReadFromRows = (rows: unknown): DecisionMakerSwitchRead => {
+  const unreadable = {
+    state: unreadableDecisionMakerSwitches(),
+    validationBoundary: noValidationLatches(),
+    cleanupLatchedEventId: noCleanupLatches(),
+  };
+  const state = decisionMakerSwitchStateFromRows(rows);
+  if (state.killSwitch === null || !Array.isArray(rows)) return unreadable;
+  const validationBoundary = noValidationLatches();
+  const cleanupLatchedEventId = noCleanupLatches();
+  for (const row of rows as Array<{
+    scope: unknown;
+    newestCleanupLatchEventId?: unknown;
+    newestValidationLatchSequence?: unknown;
+    validationReleaseSequence?: unknown;
+    validationReleasedAtEpochMs?: unknown;
+  }>) {
+    const boundary = validationBoundaryOf(row);
+    if (boundary === undefined) return unreadable;
+    const named = row.newestCleanupLatchEventId;
+    if (named !== null && (!isDmLedgerEventId(named) || !isDmInstanceScope(row.scope))) return unreadable;
+    if (isDmInstanceScope(row.scope)) {
+      validationBoundary[row.scope] = boundary;
+      cleanupLatchedEventId[row.scope] = named;
+    }
+  }
+  return { state, validationBoundary, cleanupLatchedEventId };
+};
+
+/**
  * The two switch inputs of `routeDmQuestion()` for the instance a question
  * would be assigned to. An instance that is not a DM instance (an unverified
  * provider) reads as `null`; the router refuses that question for its provider.
@@ -144,15 +295,25 @@ export const parseDmOperatorSwitchChange = (
   return null;
 };
 
-export type DmSwitchLatch = { instance: DmInstanceScope; reason: DmSwitchLatchReason };
+/**
+ * A system latch. Since stage S2-2a3 a `cleanup_latch` names the ledger event
+ * id of the `cleanup_unknown` report it settles (§5), and no other latch names
+ * one; the migration's CHECK holds the same pairing.
+ */
+export type DmSwitchLatch = { instance: DmInstanceScope; reason: DmSwitchLatchReason; cleanupEventId: string | null };
 
-/** A system latch, or null when the instance or the reason is outside the lists. */
-export const parseDmSwitchLatch = (instance: unknown, reason: unknown): DmSwitchLatch | null =>
-  isDmInstanceScope(instance) &&
-  typeof reason === "string" &&
-  (DM_SWITCH_LATCH_REASONS as readonly string[]).includes(reason)
-    ? { instance, reason: reason as DmSwitchLatchReason }
-    : null;
+/**
+ * A system latch, or null when the instance or the reason is outside the
+ * lists, or the named report is missing from a cleanup latch, malformed, or
+ * given with another reason.
+ */
+export const parseDmSwitchLatch = (instance: unknown, reason: unknown, cleanupEventId: unknown = null): DmSwitchLatch | null => {
+  if (!isDmInstanceScope(instance) || typeof reason !== "string" || !(DM_SWITCH_LATCH_REASONS as readonly string[]).includes(reason)) {
+    return null;
+  }
+  if (reason === "cleanup_latch" ? !isDmLedgerEventId(cleanupEventId) : cleanupEventId !== null) return null;
+  return { instance, reason: reason as DmSwitchLatchReason, cleanupEventId: reason === "cleanup_latch" ? (cleanupEventId as string) : null };
+};
 
 /**
  * Which audit action a person's change is recorded under: the release of a

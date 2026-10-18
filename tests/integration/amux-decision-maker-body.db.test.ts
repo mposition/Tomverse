@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
-import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary, type AmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import {
   DM_KEY_PERIOD_MS,
   dmBodyDigest,
@@ -34,11 +34,18 @@ import {
 } from "@/lib/amux/decisionMakerBodyStore";
 import { dmCardText } from "@/lib/amux/decisionMakerCore";
 import {
+  decisionMakerRetentionSweepDeps,
+  runDecisionMakerRetentionSweep,
+} from "@/lib/amux/decisionMakerRetentionSweep";
+import {
   DecisionMakerRequestWriteError,
   discardDecisionMakerAssignment,
+  lookupDecisionMakerResult,
   readDecisionMakerRequestState,
   recordDecisionMakerRequest,
+  recordDecisionMakerResultUnknown,
   recordDecisionMakerTransmitIntent,
+  recordDecisionMakerTransmitOutcome,
   staleCloseDecisionMakerRequest,
 } from "@/lib/amux/decisionMakerRequestStore";
 import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
@@ -59,7 +66,9 @@ import { prisma } from "@/lib/prisma";
 // hold or an open request of its period remains, no update, READ COMMITTED
 // only, and every operation section 6's table allows under the kill switch.
 // The S1c review minor (a switch read that fails aborts the transaction) is
-// exercised here too. The writer's own statements are counted in
+// exercised here too, and so is §10's system sweep
+// (lib/amux/decisionMakerRetentionSweep.ts) end to end, through the AMUX DB
+// boundary. The writer's own statements are counted in
 // tests/amuxDecisionMakerBody.test.mjs.
 
 const requireDedicatedAmuxTestDatabase = () => {
@@ -461,8 +470,8 @@ const ROUTED_CARD = {
   title: "Pick a cache key layout",
   question: "Should the cache key include the locale or only the model id?",
   options: [
-    { id: "a", label: "Model id only" },
-    { id: "b", label: "Model id and locale" },
+    { id: "a", label: "Model id only", effect: "choice_only", paths: [] },
+    { id: "b", label: "Model id and locale", effect: "branch_code_change", paths: ["lib/cache.ts"] },
   ],
   unblocks: "The cache module can be finished.",
   context: "Both layouts pass the current tests.\nQuoted \"exactly\", with a back\\slash.",
@@ -576,6 +585,128 @@ test("the routing route's boundary is the routing at its largest: one call fewer
   }
 });
 
+/**
+ * Stage S2's internal routes for the bridge and the broker
+ * (app/api/internal/amux/decision-maker/**): each runs one store operation in
+ * a boundary of its own, whose ceiling is that operation at its largest --
+ * with an integrity key -- plus setup and fence. The statements are counted in
+ * tests/amuxDecisionMakerBody.test.mjs and tests/amuxDecisionMakerRequest.test.mjs;
+ * here the real database and the real boundary agree with that count.
+ */
+test("stage S2's internal route boundaries hold each operation at its largest: one call fewer refuses it and leaves nothing", async () => {
+  const names = ["ADMIN_AUDIT_INTEGRITY_KEY", "ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = "dm-internal-routes-db-test-key";
+  delete process.env.ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS;
+  try {
+    const period = await currentPeriod();
+    const ring = new Map([[period, KEY]]);
+    const B = AMUX_DB_BOUNDARIES;
+    const kinds = async (requestId: string) =>
+      (
+        await prisma.$queryRaw<Array<{ kind: string }>>`
+          SELECT "kind" FROM "AmuxDecisionMakerRequestEvent" WHERE "requestId" = ${requestId} ORDER BY "sequence"
+        `
+      ).map((row) => row.kind);
+    /** One call fewer refuses the operation and leaves the request's events as they were; its own boundary runs it. */
+    const atCeiling = async <T,>(
+      boundary: AmuxDbBoundary,
+      requestId: string,
+      work: (tx: Prisma.TransactionClient, context: { requireLeaseAt: (deadline: Date) => void }) => Promise<T>,
+    ): Promise<T> => {
+      const before = await kinds(requestId);
+      await assert.rejects(
+        withAmuxDbBoundary({ ...boundary, prismaCallCeiling: boundary.prismaCallCeiling - 1 }, work),
+        (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+        boundary.operation,
+      );
+      assert.deepEqual(await kinds(requestId), before, boundary.operation);
+      return withAmuxDbBoundary(boundary, work);
+    };
+    const route = async () => {
+      const routed = await prisma.$transaction((tx) =>
+        recordDecisionMakerRequestWithCardText(tx, { binding: routingBindingFor(), card: ROUTED_CARD, keyRing: ring }),
+      );
+      assert.equal(routed.route, "dm_proposal");
+      return routed.requestId;
+    };
+    const assign = (requestId: string) =>
+      withAmuxDbBoundary(B.decisionMakerAssignment, (tx, context) =>
+        assignDecisionMakerRequestWithDigestKey(tx, { requestId, requireLeaseAt: context.requireLeaseAt, keyRing: ring }),
+      );
+    const transmission = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
+    const intend = (requestId: string, context: { requireLeaseAt: (deadline: Date) => void }, tx: Prisma.TransactionClient) =>
+      recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, requireLeaseAt: context.requireLeaseAt });
+
+    // The assignment, the intent, the receipt, the result and its lookup, each in its route's boundary.
+    const requestId = await route();
+    const assigned = await atCeiling(B.decisionMakerAssignment, requestId, (tx, context) =>
+      assignDecisionMakerRequestWithDigestKey(tx, { requestId, requireLeaseAt: context.requireLeaseAt, keyRing: ring }),
+    );
+    if (!assigned.recorded) throw new Error(`assignment refused: ${assigned.reason}`);
+    assert.equal((await atCeiling(B.decisionMakerTransmitIntent, requestId, (tx, context) => intend(requestId, context, tx))).recorded, true);
+    const receipt = await atCeiling(B.decisionMakerTransmitOutcome, requestId, (tx) =>
+      recordDecisionMakerTransmitOutcome(tx, { requestId, instance: OPENAI, outcome: "receipt" }),
+    );
+    assert.equal(receipt.recorded, true);
+    const stored: Record<string, unknown> = { ...(await readDecisionMakerRequestState(prisma, requestId))!.binding };
+    delete stored.askingProvider;
+    const raw = JSON.stringify({ kind: "free_text", answer: "Use the model id only.", rationale: "The locale is already in the path.", irreversible: false });
+    const submitted = await atCeiling(B.decisionMakerResultSubmission, requestId, (tx, context) =>
+      submitDecisionMakerOutput(tx, {
+        requestId,
+        instance: OPENAI,
+        binding: { ...stored, transmission },
+        // A result names the options by id and label, the pair the option set digest binds.
+        output: { kind: "output", raw, options: ROUTED_CARD.options.map(({ id, label }) => ({ id, label })) },
+        requireLeaseAt: context.requireLeaseAt,
+        keyRing: ring,
+      }),
+    );
+    if (submitted.status !== "submitted" || submitted.result.status !== "accepted") {
+      throw new Error(`result not accepted: ${JSON.stringify(submitted.status)}`);
+    }
+    // The refused submission left no detail and no body either.
+    assert.deepEqual(await bodyFields(requestId), ["card_text", "dm_answer", "dm_rationale"]);
+    const details = await prisma.$queryRaw<Array<{ n: bigint }>>`
+      SELECT count(*)::bigint AS "n" FROM "AmuxDecisionMakerResultDetail" WHERE "requestId" = ${requestId}
+    `;
+    assert.equal(Number(details[0]!.n), 1);
+    // The request key the assignment handed out is what lets a broker that lost this answer look the pair up (§9).
+    const brokerDigest = dmResultDigest(assigned.requestKey, { kind: "output", raw });
+    assert.equal(submitted.resultDigest, brokerDigest);
+    const lookup = await atCeiling(B.decisionMakerResultLookupRead, requestId, (tx) =>
+      lookupDecisionMakerResult(tx, { requestId, resultDigest: brokerDigest }),
+    );
+    assert.deepEqual(lookup, { status: "accepted", eventId: submitted.result.event.eventId, resultKind: "proposal" });
+    assert.deepEqual(await kinds(requestId), ["assign", "transmit_intent", "transmit_receipt", "result"]);
+
+    // A discarded assignment.
+    const discardId = await route();
+    assert.equal((await assign(discardId)).recorded, true);
+    const discarded = await atCeiling(B.decisionMakerAssignmentDiscard, discardId, (tx) =>
+      discardDecisionMakerAssignment(tx, { requestId: discardId }),
+    );
+    assert.equal(discarded.recorded, true);
+    assert.deepEqual(await kinds(discardId), ["assign", "assign_discarded"]);
+
+    // A result the broker could not settle by its pair.
+    const unknownId = await route();
+    assert.equal((await assign(unknownId)).recorded, true);
+    assert.equal((await withAmuxDbBoundary(B.decisionMakerTransmitIntent, (tx, context) => intend(unknownId, context, tx))).recorded, true);
+    const unknown = await atCeiling(B.decisionMakerResultUnknown, unknownId, (tx) =>
+      recordDecisionMakerResultUnknown(tx, { requestId: unknownId, instance: OPENAI, resultDigest: DIGEST_A }),
+    );
+    assert.equal(unknown.recorded, true);
+    assert.deepEqual(await kinds(unknownId), ["assign", "transmit_intent", "result_unknown"]);
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});
+
 test("a question routed to the operator stores no card text, and one the registry cannot key leaves no request", async () => {
   const period = await currentPeriod();
   const ring = new Map([[period, KEY]]);
@@ -650,7 +781,7 @@ const routeAssignAndTransmit = async (ring: Map<number, Buffer>) => {
     tags: [],
     title: "Pick a cache key layout",
     question: "Should the cache key include the locale or only the model id?",
-    options: OPTIONS,
+    options: OPTIONS.map((option) => ({ ...option, effect: "choice_only", paths: [] })),
     unblocks: "The cache module can be finished.",
     context: "Both layouts pass the current tests.",
     contextPaths: ["lib/cache.ts"],
@@ -1310,7 +1441,7 @@ test("a switch read that fails reaches the caller as settings_unreadable, throug
     tags: [],
     title: "Pick a cache key layout",
     question: "Should the cache key include the locale or only the model id?",
-    options: [{ id: "a", label: "Model id only" }],
+    options: [{ id: "a", label: "Model id only", effect: "choice_only", paths: [] }],
     unblocks: "The cache module can be finished.",
     context: "Both layouts pass the current tests.",
     contextPaths: [],
@@ -1347,4 +1478,89 @@ test("the key period is the request's own, from its database clock", async () =>
   assert.equal(created.keyPeriod, dmKeyPeriodOf(created.createdAtMs));
   assert.ok(Math.abs(created.createdAtMs - now) < 60_000);
   assert.equal(DM_KEY_PERIOD_MS, 30 * DAY);
+});
+
+// ---------------------------------------------------------------------------
+// §10's system sweep, end to end
+// ---------------------------------------------------------------------------
+
+test("the retention sweep rotates the next key in, closes a stale request, purges an expired body and destroys a spent key, under the kill switch, and then rests", async () => {
+  const current = await rotateRecentPeriods(5);
+  // §6's table: the stale close, the purge and the key registry all stay
+  // allowed under the kill switch.
+  await setSwitch("kill_switch", "on");
+  const card = "Pick a cache key layout.";
+  // Open for 721 hours: stale.
+  const stale = await backdatedRequest(721 * 60 * 60 * 1000, { card });
+  // In the period four back, closed 91 days ago: its retention has passed.
+  const { period: expiredPeriod, ageMs } = await ageIntoPeriod(4);
+  const expired = await backdatedRequest(ageMs, { card });
+  await backdatedClose(expired.id, 91 * DAY);
+  // Opened now: neither stale nor closed.
+  const fresh = await backdatedRequest(0, { card });
+
+  const withBodies = new Set(
+    (await prisma.$queryRaw<Array<{ keyPeriod: number }>>`SELECT DISTINCT "keyPeriod" FROM "AmuxDecisionMakerBody"`).map((row) => Number(row.keyPeriod)),
+  );
+  const ended = [1, 2, 3, 4, 5].map((back) => current - back);
+  const ring = new Map([...ended, current, current + 1].map((period) => [period, KEY]));
+  const sweep = () => runDecisionMakerRetentionSweep(decisionMakerRetentionSweepDeps({ loadKeyRing: () => ring }));
+  const events = async (requestId: string) =>
+    (await prisma.$queryRaw<Array<{ kind: string }>>`SELECT "kind" FROM "AmuxDecisionMakerRequestEvent" WHERE "requestId" = ${requestId} ORDER BY "sequence"`).map((row) => row.kind);
+  const keyEvents = async () =>
+    prisma.$queryRaw<Array<{ keyPeriod: number; kind: string }>>`SELECT "keyPeriod", "kind" FROM "AmuxDecisionMakerDigestKeyEvent" ORDER BY "sequence"`;
+
+  const first = await sweep();
+  assert.deepEqual(first, {
+    // No instance has a cleanup report or a validation failure, so neither latch check latches anything.
+    cleanupLatched: 0,
+    cleanupLatchUnsettled: 0,
+    validationLatched: 0,
+    validationLatchUnsettled: 0,
+    keyRing: "loaded",
+    keysRotated: 1,
+    staleClosed: 1,
+    purged: 1,
+    // The ended periods with no body when the sweep read the registry; the
+    // expired request's period still had its card then.
+    keysDestroyed: ended.filter((period) => !withBodies.has(period)).length,
+    refused: 0,
+    stopped: null,
+  });
+  assert.deepEqual((await keyEvents()).filter((row) => row.kind === "rotate").map((row) => Number(row.keyPeriod)).at(-1), current + 1);
+  assert.equal((await events(stale.id)).at(-1), "stale_close");
+  assert.deepEqual((await retentionRows(stale.id)).map((row) => row.kind), ["retention_set"]);
+  assert.deepEqual(await bodyFields(stale.id), ["card_text"]);
+  assert.deepEqual(await bodyFields(expired.id), []);
+  assert.deepEqual(await events(fresh.id), []);
+  assert.deepEqual(await bodyFields(fresh.id), ["card_text"]);
+  const destroyed = new Set((await keyEvents()).filter((row) => row.kind === "destroy").map((row) => Number(row.keyPeriod)));
+  assert.ok(!destroyed.has(expiredPeriod));
+  for (const period of withBodies) assert.ok(!destroyed.has(period), String(period));
+
+  // The next run finds the expired request's period empty and destroys its key; the one after finds nothing.
+  const second = await sweep();
+  assert.deepEqual(second, { cleanupLatched: 0, cleanupLatchUnsettled: 0, validationLatched: 0, validationLatchUnsettled: 0, keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 1, refused: 0, stopped: null });
+  assert.ok(new Set((await keyEvents()).filter((row) => row.kind === "destroy").map((row) => Number(row.keyPeriod))).has(expiredPeriod));
+  const third = await sweep();
+  assert.deepEqual(third, { cleanupLatched: 0, cleanupLatchUnsettled: 0, validationLatched: 0, validationLatchUnsettled: 0, keyRing: "loaded", keysRotated: 0, staleClosed: 0, purged: 0, keysDestroyed: 0, refused: 0, stopped: null });
+
+  // Each write is the router's own, under the audit its row names.
+  const audits = await prisma.$queryRaw<Array<{ action: string; systemActor: string | null }>>`
+    SELECT a."action", a."metadata"->>'systemActor' AS "systemActor"
+    FROM "AmuxDecisionMakerRequestEvent" ev JOIN "AdminAuditLog" a ON a."id" = ev."auditLogId"
+    WHERE ev."requestId" = ${stale.id} AND ev."kind" = 'stale_close'
+    UNION ALL
+    SELECT a."action", a."metadata"->>'systemActor'
+    FROM "AmuxDecisionMakerDigestKeyEvent" k JOIN "AdminAuditLog" a ON a."id" = k."auditLogId"
+    WHERE k."keyPeriod" = ${current + 1} OR k."kind" = 'destroy'
+    UNION ALL
+    SELECT a."action", a."metadata"->>'systemActor'
+    FROM "AdminAuditLog" a WHERE a."action" = 'amux.decision.body_purge' AND a."targetId" = ${expired.id}
+  `;
+  assert.deepEqual(
+    [...new Set(audits.map((row) => row.action))].sort(),
+    ["amux.decision.body_purge", "amux.decision.digest_key_destroy", "amux.decision.digest_key_rotate", "amux.decision.stale_close"],
+  );
+  assert.ok(audits.every((row) => row.systemActor === "amux-decision-router"));
 });

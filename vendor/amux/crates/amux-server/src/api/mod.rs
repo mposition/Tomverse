@@ -14,8 +14,10 @@ pub mod auth;
 pub mod board;
 pub mod board_intake;
 pub mod board_lifecycle;
+pub mod board_typed_ask;
 pub mod criteria;
 pub mod dependency_audit;
+pub mod dm_relay;
 pub mod browser;
 pub mod browser_import;
 pub mod calendar;
@@ -136,6 +138,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sync", axum::routing::get(sync::delta_sync))
         .route("/api/events", axum::routing::get(sse::events))
         .nest("/api/board", board::routes())
+        // The Decision Maker marker's set and release, for the Tomverse
+        // bridge relay only: outside /api/board, behind the relay's token
+        // (api/dm_relay.rs).
+        .nest("/api/dm-relay", dm_relay::routes())
         // Dead-letter routes merge into the workers nest (RR-0068): same
         // /api/workers prefix, second nest at one path is an axum conflict.
         .nest(

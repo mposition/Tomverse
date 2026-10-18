@@ -7,12 +7,14 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   DM_SWITCH_AUDIT_TARGET_TYPE,
+  decisionMakerSwitchReadFromRows,
   decisionMakerSwitchStateFromRows,
   dmOperatorSwitchAction,
   dmSwitchAuditMetadata,
   parseDmOperatorSwitchChange,
   parseDmSwitchLatch,
   unreadableDecisionMakerSwitches,
+  type DecisionMakerSwitchRead,
   type DecisionMakerSwitchState,
   type DmSwitchActorKind,
 } from "@/lib/amux/decisionMakerSwitchCore";
@@ -76,6 +78,101 @@ export async function readDecisionMakerSwitches(
   } catch {
     return unreadableDecisionMakerSwitches();
   }
+}
+
+/**
+ * The newest event of each scope with its actor and reason, in one statement,
+ * for Admin's switch panel (stage S2-4c): the same rows
+ * `readDecisionMakerSwitchesOrThrow()` maps to the state, so the state and
+ * the reason an instance was latched off come from one read
+ * (lib/amux/decisionMakerAdminRead.ts maps both). Reads only; a statement
+ * that fails is not caught.
+ */
+export async function readDecisionMakerSwitchRowsForAdmin(
+  client: SwitchReader,
+): Promise<Array<{ scope: string; value: string; actorKind: string; reasonCode: string }>> {
+  return client.$queryRaw<Array<{ scope: string; value: string; actorKind: string; reasonCode: string }>>`
+    SELECT DISTINCT ON ("scope") "scope", "value", "actorKind", "reasonCode"
+    FROM "AmuxDecisionMakerSwitchEvent"
+    ORDER BY "scope", "sequence" DESC
+  `;
+}
+
+/**
+ * The switch state and each instance's §8 validation count boundary, in one
+ * statement: what the request ledger's writers read
+ * (lib/amux/decisionMakerRequestStore.ts) -- the state for §6's table, and
+ * where §8's count starts, so a routing or a transmission intent can refuse an
+ * instance whose latch is owed without a statement more
+ * (docs/policy/amux-decision-maker.md §8, §9). The caller holds the audit
+ * chain lock, which every switch change takes before it writes, so what is
+ * read here is still the newest when it commits. A row the mapping does not
+ * accept is the unreadable read; a statement that fails is not caught, as
+ * above.
+ *
+ * Since stage S2-2a3 each row also carries the ledger event id its scope's
+ * newest `cleanup_latch` names: a cleanup latch settles the `cleanup_unknown`
+ * report it names and no other (§5) -- not a person's ordinary mode change
+ * (review r-20261017-115136-888d76), and not a report that shares its
+ * database millisecond (review r-20261017-123200-7609b7).
+ *
+ * Since stage S2-2a4 the boundary is the scope's newest `validation_latch`
+ * and the first person's event after it -- which the switch guard requires to
+ * be `amux.decision.latch_release` -- with that release's own sequence and
+ * database clock (`DmValidationCountBoundary`), in place of the scope's
+ * newest event of any kind: a person's ordinary mode change, a cleanup latch
+ * and its release are not where §8's count starts. A result is placed against
+ * the release by the switch sequence the ledger's guard recorded on it under
+ * the switch gate. Subqueries on the scope's index, for each newest row; they
+ * ride in this statement because a routing already sends §9's 12 with setup
+ * and fence.
+ */
+export async function readDecisionMakerSwitchesWithBoundariesOrThrow(
+  client: SwitchReader,
+): Promise<DecisionMakerSwitchRead> {
+  const rows = await client.$queryRaw<
+    Array<{
+      scope: string;
+      value: string;
+      newestCleanupLatchEventId: string | null;
+      newestValidationLatchSequence: bigint | null;
+      validationReleaseSequence: bigint | null;
+      validationReleasedAtEpochMs: bigint | null;
+    }>
+  >`
+    SELECT
+      n."scope", n."value",
+      (
+        SELECT c."cleanupEventId"
+        FROM "AmuxDecisionMakerSwitchEvent" c
+        WHERE c."scope" = n."scope" AND c."reasonCode" = 'cleanup_latch'
+        ORDER BY c."sequence" DESC
+        LIMIT 1
+      ) AS "newestCleanupLatchEventId",
+      v."sequence" AS "newestValidationLatchSequence",
+      r."sequence" AS "validationReleaseSequence",
+      r."releasedAtEpochMs" AS "validationReleasedAtEpochMs"
+    FROM (
+      SELECT DISTINCT ON ("scope") "scope", "value"
+      FROM "AmuxDecisionMakerSwitchEvent"
+      ORDER BY "scope", "sequence" DESC
+    ) n
+    LEFT JOIN LATERAL (
+      SELECT l."sequence"
+      FROM "AmuxDecisionMakerSwitchEvent" l
+      WHERE l."scope" = n."scope" AND l."reasonCode" = 'validation_latch'
+      ORDER BY l."sequence" DESC
+      LIMIT 1
+    ) v ON true
+    LEFT JOIN LATERAL (
+      SELECT h."sequence", floor(extract(epoch FROM h."createdAt") * 1000)::bigint AS "releasedAtEpochMs"
+      FROM "AmuxDecisionMakerSwitchEvent" h
+      WHERE h."scope" = n."scope" AND h."actorKind" = 'human' AND h."sequence" > v."sequence"
+      ORDER BY h."sequence" ASC
+      LIMIT 1
+    ) r ON true
+  `;
+  return decisionMakerSwitchReadFromRows(rows);
 }
 
 export class DecisionMakerSwitchWriteError extends Error {
@@ -190,17 +287,26 @@ export async function recordDecisionMakerSwitchByOperator(
  * failures; §5: a request directory whose deletion could not be confirmed).
  * The latch is always written, even over an instance that is already `off`:
  * the operator then has to release it before the instance can propose again,
- * and a second cause is a second record. The audit comes first, under the
- * instance's own actor, then the event naming it.
+ * and a second cause is a second record. Whether a latch is due is the
+ * caller's decision (lib/amux/decisionMakerRequestStore.ts): §8's count does
+ * not latch an instance whose newest validation latch nobody has released
+ * (since stage S2-2a4; before it, whose newest event of any kind was a
+ * latch). The audit comes first, under the instance's own actor, then the
+ * event naming it.
+ *
+ * Since stage S2-2a3 a cleanup latch names the ledger event id of the
+ * `cleanup_unknown` report it settles, and no other latch names one; the
+ * database refuses a cleanup latch that names anything but a report of its
+ * own instance, and a second latch naming the same report.
  *
  * Statements: the system writer's 3 (4 with an integrity key), 1 insert --
  * 4, or 5.
  */
 export async function latchDecisionMakerInstanceOff(
   tx: Prisma.TransactionClient,
-  input: { instance: unknown; reason: unknown },
+  input: { instance: unknown; reason: unknown; cleanupEventId?: unknown },
 ): Promise<DecisionMakerSwitchEventRecord> {
-  const latch = parseDmSwitchLatch(input.instance, input.reason);
+  const latch = parseDmSwitchLatch(input.instance, input.reason, input.cleanupEventId ?? null);
   if (!latch) throw new DecisionMakerSwitchWriteError("invalid_latch");
 
   const eventId = randomUUID();
@@ -216,9 +322,9 @@ export async function latchDecisionMakerInstanceOff(
   });
   const inserted = await tx.$queryRaw<InsertedRow[]>`
     INSERT INTO "AmuxDecisionMakerSwitchEvent"
-      ("id", "scope", "value", "reasonCode", "actorKind", "actorUserId", "auditLogId")
+      ("id", "scope", "value", "reasonCode", "actorKind", "actorUserId", "cleanupEventId", "auditLogId")
     VALUES
-      (${eventId}, ${latch.instance}, 'off', ${latch.reason}, 'system', NULL, ${auditLogId})
+      (${eventId}, ${latch.instance}, 'off', ${latch.reason}, 'system', NULL, ${latch.cleanupEventId}, ${auditLogId})
     RETURNING
       "sequence",
       floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"
