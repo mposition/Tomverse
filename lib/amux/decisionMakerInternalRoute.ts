@@ -66,7 +66,9 @@ export type DmLatchSettlement = "latched" | "not_due" | "unsettled";
  * latch that could not be written is logged by its code and stays owed: a
  * routing and a transmission intent treat the instance as off while it is
  * owed (the intent also writes it), and the check finds any run of three
- * since the instance's newest switch event, so the next one writes it -- after
+ * inside the instance's count boundary -- its newest validation latch and the
+ * release after it, which a mode change does not move -- so the next one
+ * writes it -- after
  * the instance's next validation failure, or the maintenance sweep's within
  * fifteen minutes. Never throws.
  */
