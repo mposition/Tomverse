@@ -499,6 +499,9 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
     commitAmuxSessionBudgetOutcome(tx, {
       claimId: secondClaim.claimId, outcome: "outcome_unknown",
       inputTokens: null, outputTokens: null,
+      exactAgentClaim: { requestId: secondClaim.requestId,
+        reservationId: secondClaim.reservationId, ideaId: secondIdeaId,
+        invocationOrdinal: 0 },
     }));
   assert.equal(unknown.status, "outcome_unknown");
   const secondReadback = await prisma.$transaction((tx) =>
@@ -512,6 +515,12 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
   });
   assert.equal(windowAfter.reservedMicroUsd, BigInt(5000));
   assert.equal(windowAfter.spentMicroUsd, BigInt(50));
+  const unresolved = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findUniqueOrThrow({
+    where: { id: secondClaim.claimId }, select: { closedAt: true,
+      settledMicroUsd: true },
+  });
+  assert.equal(unresolved.closedAt, null);
+  assert.equal(unresolved.settledMicroUsd, null);
   const thirdIdeaId = randomUUID();
   const thirdInspected = inspect(thirdIdeaId);
   const third = await prisma.$transaction(async (tx) => {
