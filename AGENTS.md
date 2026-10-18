@@ -1306,10 +1306,11 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `lib/marketingIntelReportStore.ts`, `tests/marketingIntelReportCore.test.mjs`,
   `tests/integration/marketing-intel-reports.db.test.ts`. 생성기 secret으로 쓸 수 있는 보고서는 `brief`·`market_intel`
   둘뿐입니다. key는 앱이 종류·run·보고서 id로 유도하고, 같은 key에 다른 바이트가 오면 conflict이며, 이미 기록된
-  보고서는 모든 게이트보다 먼저 되읽습니다. 마감은 draft 접수와 같은 helper로 겁니다. **시장 사실은 앱의 공식 host
-  목록에 있는 출처만 저장합니다** — `MARKETING_COMPETITOR_SOURCE_HOSTS`는 비어 있고(어느 경쟁사를 추적하고 어느
-  host가 공식인지는 사람이 그 항목을 넣는 변경에서 정합니다), 목록 밖의 사실은 저장하지 않고
-  `unrepresentableFactCount`에 더합니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
+  보고서는 모든 게이트보다 먼저 되읽습니다. 마감은 draft 접수와 같은 helper로 겁니다. **시장 사실은 사람이 승인한
+  경쟁사의 추적 페이지에서, 그 경쟁사의 공식 host 위에서 온 것만 저장합니다** — 둘 다 같은 트랜잭션에서 등록부의
+  승인 행을 FOR SHARE로 읽은 것이고(`holdApprovedMarketingCompetitorSources()`), 승인된 host의 다른 페이지는 출처가
+  아닙니다(docs/policy/marketing-automation.md §4.1). 그 밖의 사실은 저장하지 않고 `unrepresentableFactCount`에 더합니다. `market_intel` 보고서는
+  후보(`competitorCandidates`, 최대 5개)를 함께 서명해 보낼 수 있고, 후보는 제안으로만 저장됩니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
   `marketing-generator`이고 범위는 `MarketingReport`의 `marketing_report.generator_recorded` 하나입니다.
 - **S3e1(생성기 LLM adapter)**: `lib/marketingLlmClientCore.ts`, `tests/marketingLlmClientCore.test.mjs`. 생성기
   서비스가 `--experimental-strip-types`로 불러 쓰는 `MarketingLlmClient`이며, 순서가 계약입니다: 예약 → (포기하면
@@ -1320,6 +1321,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   정한 pin(모든 tier 중 최악 단가)으로 가격이 정해지고 예약 snapshot이 tier를 기록하므로,
   `scripts/check-processing-tier-core.mjs`가 이 파일의 원장 상수 한 줄만 예외로 받고 literal이나 다른 파일은
   그대로 실패시킵니다. 모델 선택·첫 pin·서비스 배선은 S3e2 이후입니다(D4).
+  **원장이 `settled`로 닫지 않은 답은 쓰지 않습니다**(2026-10-18) — `unknown_retained`(token 초과·모델·tier 불일치)이면 client는
+  본문 없이 `retained`를 돌려주고 A3·A5는 실행을 멈춥니다. 비용이 pin과 다르다는 뜻이므로 확인되지 않은 결과입니다(공통 기반 규칙 7).
 - **S3e2(A5 문안 생성 core)**: `lib/marketingGeneratorDraftingCore.ts`, `tests/marketingGeneratorDraftingCore.test.mjs`.
   모델에게는 고정 system 지시와, S3b 문맥 중 그 계정·locale의 조각을 **데이터로** 줍니다. 답은 하나의 JSON 객체만
   받고(아니면 통째로 거절), 초안마다 링크·문맥에 없는 claim·asset id·접수 schema 위반이면 그 초안만 버리고 사유별로
@@ -1334,6 +1337,13 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   게시기와 같은 모양으로 마감에 worker를 SIGKILL하고, worker에는 변수 넷만 넘깁니다. **worker는 가격 pin이 있는 모델이
   아니면 시작하지 않습니다** — 지금은 pin이 없어 항상 거절합니다. `.railway/agent-runners.ts` 배선은 D4(전용 OpenAI
   프로젝트·키·pin) 뒤입니다.
+- **S3d(가격 경보)**: `lib/marketingPriceAlertCore.ts`, `lib/marketingPriceAlert.ts`, `tests/marketingPriceAlert.test.mjs`.
+  가격 출처 거절(docs/policy/marketing-automation.md §7.2(2))은 **기존 운영 알림**으로 보냅니다(운영자 결정 D5, 2026-10-17) —
+  `reportOperationalIncident()`가 `OPS_ALERT_EMAIL`(없으면 `ADMIN_ALERT_EMAIL`)과 설정된 chat webhook으로 직접 보내고,
+  본문은 Admin 링크와 게시물 id뿐입니다. **준비 상태는 그 수신자 변수가 있는가**이며, Guard 문맥·draft 접수·자율
+  admission이 같은 판정을 읽습니다(고정 상수는 지웠고, 위치가 밀리지 않게 같은 줄 수의 주석으로 남김). 수신자가 없으면
+  Guard는 가격 claim을 `alert_path_not_ready`로 승인에 보내고 draft 접수는 닫혀 있습니다. 경보는 접수 트랜잭션이
+  commit된 뒤 route가 보내며, 실패해도 접수 결과를 바꾸지 않습니다.
 - **S3h1(보존 정리)**: `lib/marketingRetention.ts`, store의 `purgeExpiredMarketingRows()`,
   `lib/maintenance.ts`의 `marketing_retention` 단계, `tests/integration/marketing-retention.db.test.ts`.
   **무엇을 지울지는 DB가 정합니다** — 보존 기한·legal hold·플랫폼 도달·draft 상태·90일 규칙은 delete trigger가
@@ -1389,6 +1399,43 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   같은 run의 draft용이고 닫혀 있으며 아직 소비되지 않았거나 이 제출이 소비했을 때만 받고, 같은 트랜잭션에서 소비를
   기록합니다. 응답을 잃은 생성기는 서명된 같은 제출을 그대로 다시 보냅니다(deadline이 다르면 다른 제출이라 conflict).
   예산 reader는 이제 "상한을 읽을 수 있다"이고, 월 상한으로 막는 것은 예약입니다.
+- **S3f-R1(경쟁사 등록부)**: `lib/marketingCompetitorCore.ts`, `lib/marketingCompetitorStore.ts`,
+  `prisma/migrations/20261017120000_marketing_competitor_registry/migration.sql`, `tests/marketingCompetitorCore.test.mjs`,
+  `tests/integration/marketing-competitor-registry.db.test.ts`(운영자 결정 2026-10-17: 경쟁사는 상수가 아니라 DB 등록부와
+  사람의 승인). **A3는 제안만 하고 사람이 정합니다** — 제안은 `marketing-generator`의
+  `marketing_competitor.proposed` 감사와 함께 `proposed`로 들어가고, 이미 있는 id는 그대로 둡니다(거절을 다시 여는
+  제안 없음). 승인·거절·은퇴·추가는 사람의 감사 행이 있어야 하며, `MarketingCompetitor_write_guard`가 그 행의
+  action·대상·actor·`previousDecisionAuditLogId`(없으면 `':none'`)와 **승인이면 이름과 host까지** 대조합니다. 화면이
+  본 결정과 현재 결정이 다르면 `competitor_decision_conflict`입니다. 행은 지우지 않고 은퇴시킵니다. migration은 시장
+  분석의 11개를 `seed` 제안으로만 넣으며 아무것도 승인하지 않습니다. 사실 필터는 R2부터 이 등록부를 읽고, 사람이
+  결정하는 Admin 화면과 route는 R3입니다.
+- **S3f-R3a(경쟁사 결정 route)**: `app/api/admin/marketing/competitors/route.ts`(사람이 승인된 경쟁사를 추가),
+  `app/api/admin/marketing/competitors/[competitorId]/decision/route.ts`(승인·거절·은퇴),
+  `tests/integration/marketing-competitor-routes.db.test.ts`. 둘 다 `runMarketingAdminMutation`을 지나고, 감사 metadata는
+  정규화된 뒤의 이름·host를 적습니다(write guard가 저장값과 정확히 대조). **승인·추가는 host를 출처로 만드는 시작이라 kill
+  switch가 막고, 거절·은퇴는 출처를 줄이는 정지라 아무것도 막지 않습니다.** 화면이 본 결정과 다르거나 상태가 허락하지
+  않는 이동은 409이고 감사 행을 남기지 않습니다. 거절의 상태 코드는 `MarketingCompetitorRefusedError`가 들고 다닙니다 —
+  route sweep이 `refusal` 안의 호출과 store 식별자를 막기 때문입니다.
+- **S3f-R3b(경쟁사 Admin 화면)**: `/admin/marketing?tab=competitors` — `lib/marketingConsoleSections.ts`,
+  `lib/marketingConsoleRead.ts`, `components/admin/AdminMarketingPanel.tsx`, `lib/adminMessages/marketing.ts`. 승인된 것이
+  먼저, 최대 100건이고 화면이 그 수와, 잘렸다면 잘렸다는 사실을 말합니다. 행마다 그 행이 보여 준
+  `decisionAuditLogId`로 결정하며, 승인은 이름·host를 고쳐서 보낼 수 있습니다. A3의 근거 URL은 링크가 아니라 텍스트로
+  보입니다 — 생성기가 읽은 것은 판정할 데이터이지 따라갈 링크가 아닙니다.
+- **S3f-R4(생성기 문맥의 등록부)**: `lib/marketingGeneratorContext.ts`의 `competitors`. `tracked`는 승인된 경쟁사와 사람이
+  승인한 host이고, `knownIds`는 상태와 무관하게 등록부가 아는 id 전부이며 자르지 않습니다(거절도 답이므로 다시 제안하지 않게;
+  크기는 문맥 route의 byte 상한이 자르지 않고 거절합니다).
+  host는 이름이지 URL이 아니며, A5 메시지에는 싣지 않습니다(`tests/marketingGeneratorDraftingCore.test.mjs`).
+- **S3f-R5a(추적 페이지)**: `prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql`,
+  `MarketingCompetitor.trackedPages`(운영자 결정 2026-10-17: 사실은 사람이 승인한 고정 페이지에서, 웹 검색은 신규 경쟁사 탐색에만).
+  페이지는 그 행의 공식 host 위의 https URL이고(DB CHECK), 제안 상태에는 없으며, 이름·host처럼 승인으로만 바뀌고 승인 감사 행의
+  `trackedPages`와 정확히 대조됩니다. 생성기 문맥에서 URL이 나오는 곳은 이 페이지뿐이며 A5에는 가지 않습니다.
+- **S3f-R5b(A3 실행)**: `lib/marketingA3Core.ts`, `lib/marketingA3CycleCore.ts`, `scripts/marketing-generator-worker.mjs`,
+  `tests/marketingA3Core.test.mjs`, `tests/marketingA3Cycle.test.mjs`. 서비스가 추적 페이지를 직접 읽습니다 — https·승인 host만,
+  redirect도 승인 host로만, IP 주소 host 거부, 자격증명·앱 header 없음, 바이트·시간 상한. 페이지 텍스트는 A3 추출 메시지에만
+  데이터로 들어가고, 사실의 경쟁사 id·확인 시각은 서비스가 정하며 출처는 실제로 읽은 페이지여야 합니다. 경쟁사당 한 번 원장을
+  거쳐 호출하고(`market_intel` 목적), 실행당 서명된 보고서 하나를 제출합니다. 결과를 모르는 호출이나 답이 없는 제출은
+  실행 전체를 멈추고 보고서를 내지 않으며, 시간 몫(20분)을 넘기면 보고서 없이 A5로 넘어갑니다. pin이 없으면(D4) worker는
+  시작하지 않습니다.
 
 # 엔지니어링 Agent
 

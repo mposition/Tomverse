@@ -56,6 +56,24 @@ export const marketingGeneratorContextSchema = z.object({
   ),
   brief: z.unknown().nullable(),
   marketIntel: z.unknown().nullable(),
+  /**
+   * Optional so a service deployed before the app still reads an older
+   * answer. A3 reads it; A5's messages below do not carry it, so no host
+   * reaches a post.
+   */
+  competitors: z
+    .object({
+      tracked: z.array(
+        z.object({
+          competitorId: z.string(),
+          displayName: z.string(),
+          officialHosts: z.array(z.string()),
+          trackedPages: z.array(z.string()).default([]),
+        }),
+      ),
+      knownIds: z.array(z.string()),
+    })
+    .optional(),
 });
 export type MarketingGeneratorContextAnswer = z.infer<typeof marketingGeneratorContextSchema>;
 

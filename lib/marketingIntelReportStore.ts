@@ -18,6 +18,7 @@ import { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { marketingClaimById } from "@/lib/marketingClaims";
+import { holdApprovedMarketingCompetitorSources, proposeMarketingCompetitors } from "@/lib/marketingCompetitorStore";
 import {
   boundMarketingGeneratorStatements,
   boundMarketingGeneratorWriteByDeadline,
@@ -43,6 +44,8 @@ export type MarketingGeneratorReportOutcome =
       readonly reportRowId: string;
       readonly existing: boolean;
       readonly droppedFactCount: number;
+      /** Candidates this report added to the registry as proposals. */
+      readonly proposedCompetitorCount: number;
     };
 
 const killSwitchOn = (value: string | undefined) =>
@@ -76,13 +79,19 @@ export async function recordMarketingGeneratorReport(
     // The same report only if it was the same bytes. Answered before every
     // gate, so a record whose answer was lost is learned after the kill
     // switch is on or the deadline has passed -- it is not a new success.
-    const metadata = recorded.metadata as { reportDigest?: unknown; droppedFactCount?: unknown } | null;
+    const metadata = recorded.metadata as {
+      reportDigest?: unknown;
+      droppedFactCount?: unknown;
+      proposedCompetitorCount?: unknown;
+    } | null;
     if (metadata?.reportDigest !== reportDigest || !recorded.targetId) return { status: "conflict" };
     return {
       status: "recorded",
       reportRowId: recorded.targetId,
       existing: true,
       droppedFactCount: typeof metadata.droppedFactCount === "number" ? metadata.droppedFactCount : 0,
+      proposedCompetitorCount:
+        typeof metadata.proposedCompetitorCount === "number" ? metadata.proposedCompetitorCount : 0,
     };
   }
 
@@ -99,7 +108,12 @@ export async function recordMarketingGeneratorReport(
     return { status: "refused", reasons: ["report_claim_unknown"] };
   }
 
-  const stored = marketingGeneratorReportStoredPayload(report);
+  // Which hosts and pages are sources is a person's decision in the registry,
+  // read here and held until this record commits; a fact counts only from an
+  // approved page, whatever the generator says it read. A brief cites no source.
+  const sources =
+    report.kind === "market_intel" ? await holdApprovedMarketingCompetitorSources(tx) : { hosts: {}, pages: {} };
+  const stored = marketingGeneratorReportStoredPayload(report, sources);
   const row = await insertMarketingReport(tx, {
     kind: report.kind,
     periodStart: new Date(report.periodStart),
@@ -107,6 +121,15 @@ export async function recordMarketingGeneratorReport(
     payload: stored.payload,
     sourceVersion: MARKETING_GENERATOR_REPORT_SOURCE_VERSION,
   });
+
+  // What A3 found that the registry may not know, kept as proposals for a
+  // person. A known id is left as it is, so a proposal cannot reopen a
+  // rejection or rename an approved competitor.
+  const candidates = report.kind === "market_intel" ? (report.competitorCandidates ?? []) : [];
+  const proposals =
+    candidates.length > 0
+      ? await proposeMarketingCompetitors(tx, { generatorRunId: report.generatorRunId, candidates })
+      : { proposed: [] };
 
   // The last statement before the audit row, as in the draft intake: past the
   // deadline by the database's clock, the whole record rolls back.
@@ -135,8 +158,15 @@ export async function recordMarketingGeneratorReport(
       kind: report.kind,
       provenanceDigest: marketingGeneratorReportProvenanceDigest(report.provenance),
       droppedFactCount: stored.droppedFactCount,
+      proposedCompetitorCount: proposals.proposed.length,
     },
   });
 
-  return { status: "recorded", reportRowId: row.id, existing: false, droppedFactCount: stored.droppedFactCount };
+  return {
+    status: "recorded",
+    reportRowId: row.id,
+    existing: false,
+    droppedFactCount: stored.droppedFactCount,
+    proposedCompetitorCount: proposals.proposed.length,
+  };
 }

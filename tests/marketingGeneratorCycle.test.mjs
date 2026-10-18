@@ -101,6 +101,14 @@ for (const status of ["unknown", "stopped"]) {
   });
 }
 
+test("an answer the ledger retained as unknown ends the run: nothing is submitted and no later account is asked", async () => {
+  const h = harness({ outcomes: [{ status: "retained", ledgerState: "unknown_retained" }] });
+  const summary = await cycle(h);
+  assert.deepEqual(summary.stoppedAt, { stage: "llm", detail: "retained" });
+  assert.equal(h.asked.length, 1);
+  assert.equal(h.submitted.length, 0);
+});
+
 test("a lost or 5xx submission is resent as the same signed bytes, never as a new call", async () => {
   let sends = 0;
   const h = harness({

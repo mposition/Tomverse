@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  MARKETING_COMPETITOR_SOURCE_HOSTS,
   marketIntelSourceAllowed,
   marketingGeneratorReportDigest,
   marketingGeneratorReportKey,
@@ -14,6 +13,8 @@ import {
 
 const SECRET = "g".repeat(48);
 const HOSTS = Object.freeze({ poe: ["poe.com"] });
+const PAGES = Object.freeze({ poe: ["https://poe.com/blog/launch", "https://POE.com/x"] });
+const SOURCES = Object.freeze({ hosts: HOSTS, pages: PAGES });
 
 const fact = (overrides = {}) => ({
   competitorId: "poe",
@@ -81,16 +82,83 @@ test("the key names the report; the digest names its bytes", () => {
   );
 });
 
-test("the official host list is empty, so no fact is kept until a person adds one", () => {
-  assert.deepEqual(Object.keys(MARKETING_COMPETITOR_SOURCE_HOSTS), []);
-  assert.equal(Object.isFrozen(MARKETING_COMPETITOR_SOURCE_HOSTS), true);
-  const stored = marketingGeneratorReportStoredPayload(signed());
+test("with no approved competitor, no fact is kept", () => {
+  const stored = marketingGeneratorReportStoredPayload(signed(), { hosts: {}, pages: {} });
   assert.deepEqual(stored, { payload: { facts: [], unrepresentableFactCount: 1 }, droppedFactCount: 1 });
 });
 
-test("a fact is kept only for an exact official host of its own competitor", () => {
-  assert.equal(marketIntelSourceAllowed(fact(), HOSTS), true);
-  assert.equal(marketIntelSourceAllowed(fact({ sourceUrl: "https://POE.com/x" }), HOSTS), true);
+const candidate = (overrides = {}) => ({
+  competitorId: "alpha",
+  displayName: "Alpha",
+  officialHosts: ["alpha.example"],
+  evidenceUrls: ["https://alpha.example/pricing"],
+  rationale: "Sells the same comparison.",
+  ...overrides,
+});
+
+test("market facts may carry up to five signed competitor candidates, each once", () => {
+  assert.equal(marketingGeneratorReportSchema.safeParse(signed({ competitorCandidates: [candidate()] })).success, true);
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse(
+      signed({ competitorCandidates: Array.from({ length: 6 }, (_, i) => candidate({ competitorId: `c${i}` })) }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse(signed({ competitorCandidates: [candidate(), candidate()] })).success,
+    false,
+  );
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse(signed({ competitorCandidates: [candidate({ status: "approved" })] })).success,
+    false,
+  );
+  // A brief proposes nothing.
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse(
+      signed({ kind: "brief", payload: { topicIds: ["t"], claimIds: [], sourceDigests: [] }, competitorCandidates: [] }),
+    ).success,
+    false,
+  );
+  // The candidates are signed: changing one changes the report.
+  const a = unsigned({ competitorCandidates: [candidate()] });
+  assert.notEqual(
+    marketingGeneratorReportDigest(a),
+    marketingGeneratorReportDigest({ ...a, competitorCandidates: [candidate({ officialHosts: ["evil.example"] })] }),
+  );
+  // A candidate is sent in its stored form, so the signed bytes are the
+  // verified bytes: anything normalisation would change is refused.
+  for (const overrides of [
+    { officialHosts: ["www.alpha.example", "alpha.example"] },
+    { officialHosts: ["Alpha.example"] },
+    { officialHosts: ["alpha.example", "alpha.example"] },
+    { displayName: " Alpha" },
+    { rationale: "Sells the same comparison. " },
+  ]) {
+    assert.equal(
+      marketingGeneratorReportSchema.safeParse(signed({ competitorCandidates: [candidate(overrides)] })).success,
+      false,
+      JSON.stringify(overrides),
+    );
+  }
+  assert.equal(
+    marketingGeneratorReportSchema.safeParse(
+      signed({ competitorCandidates: [candidate({ officialHosts: ["alpha.example", "www.alpha.example"] })] }),
+    ).success,
+    true,
+  );
+  // Proposing nothing leaves the bytes as they were before candidates existed.
+  assert.equal(marketingGeneratorReportDigest(unsigned()), marketingGeneratorReportDigest({ ...unsigned(), competitorCandidates: undefined }));
+});
+
+test("a fact is kept only for an approved page on an exact official host of its own competitor", () => {
+  assert.equal(marketIntelSourceAllowed(fact(), HOSTS, PAGES), true);
+  assert.equal(marketIntelSourceAllowed(fact({ sourceUrl: "https://POE.com/x" }), HOSTS, PAGES), true);
+  // An approved host is not enough: another page on it, or a page not tracked
+  // for this competitor, is not a source.
+  assert.equal(marketIntelSourceAllowed(fact({ sourceUrl: "https://poe.com/pricing" }), HOSTS, PAGES), false);
+  assert.equal(marketIntelSourceAllowed(fact(), HOSTS, { poe: [] }), false);
+  assert.equal(marketIntelSourceAllowed(fact(), HOSTS, {}), false);
+  assert.equal(marketIntelSourceAllowed(fact(), {}, PAGES), false);
   for (const sourceUrl of [
     "https://blog.poe.com/launch",
     "https://poe.com.example.net/launch",
@@ -99,21 +167,25 @@ test("a fact is kept only for an exact official host of its own competitor", () 
     "http://poe.com/launch",
     "not a url",
   ]) {
-    assert.equal(marketIntelSourceAllowed(fact({ sourceUrl }), HOSTS), false, sourceUrl);
+    assert.equal(
+      marketIntelSourceAllowed(fact({ sourceUrl }), HOSTS, { poe: [...PAGES.poe, sourceUrl] }),
+      false,
+      sourceUrl,
+    );
   }
-  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "other" }), HOSTS), false);
-  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "constructor" }), HOSTS), false);
-  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "__proto__" }), HOSTS), false);
+  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "other" }), HOSTS, PAGES), false);
+  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "constructor" }), HOSTS, PAGES), false);
+  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "__proto__" }), HOSTS, PAGES), false);
 });
 
 test("facts that cannot be kept are counted with the unrepresentable ones, a brief is kept as sent", () => {
   const report = signed({
     payload: { facts: [fact(), fact({ sourceUrl: "https://elsewhere.example/x" })], unrepresentableFactCount: 2 },
   });
-  assert.deepEqual(marketingGeneratorReportStoredPayload(report, HOSTS), {
+  assert.deepEqual(marketingGeneratorReportStoredPayload(report, SOURCES), {
     payload: { facts: [fact()], unrepresentableFactCount: 3 },
     droppedFactCount: 1,
   });
   const brief = signed({ kind: "brief", payload: { topicIds: ["t"], claimIds: [], sourceDigests: [] } });
-  assert.deepEqual(marketingGeneratorReportStoredPayload(brief, HOSTS), { payload: brief.payload, droppedFactCount: 0 });
+  assert.deepEqual(marketingGeneratorReportStoredPayload(brief, SOURCES), { payload: brief.payload, droppedFactCount: 0 });
 });
