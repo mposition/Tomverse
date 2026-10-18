@@ -52,6 +52,8 @@ import {
 } from "@/lib/amux/ideaSessionAnalysisReservationStore";
 import { listAmuxSessionAnalysisCandidates } from
   "@/lib/amux/ideaSessionAnalysisQueueService";
+import { readAmuxSessionReferencePin } from
+  "@/lib/amux/ideaSessionReferencePinRead";
 import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
   AmuxSessionBudgetClaimError } from
   "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
@@ -350,6 +352,18 @@ test("session submission queues one content-free analysis reservation in the sam
 });
 
 test("session analysis queue lists the live reservation and advances past its DB position", async () => {
+  assert.deepEqual(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: 0,
+  }), { referenceCount: 1, pinnedCommitSha: "a".repeat(40) });
+  assert.equal(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: 1,
+  }), null);
+  assert.equal(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: randomUUID(),
+    referenceOrdinal: 0,
+  }), null);
   const [reservation, idea] = await Promise.all([
     prisma.amuxIdeaSessionAnalysisReservation.findUniqueOrThrow({
       where: { id: committedReservationId }, select: { createdAt: true },
@@ -431,6 +445,10 @@ test("session claims share the monthly ledger, settle known usage and hold unkno
       reservationId: committedReservationId, invocationOrdinal: 0,
       priceVersionId, runner,
     }));
+  assert.equal(await readAmuxSessionReferencePin({
+    reservationId: committedReservationId, ideaId: committedIdeaId,
+    referenceOrdinal: 0,
+  }), null, "a claimed reservation is no longer a preflight read target");
   assert.equal(first.reservedMicroUsd, "5000");
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxSessionBudgetClaimReceipt(tx, {
