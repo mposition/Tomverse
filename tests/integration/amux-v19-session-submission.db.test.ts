@@ -100,7 +100,7 @@ import { readAmuxSessionAnalysisStopState,
 import { AmuxSessionBudgetSettlementError,
   commitAmuxSessionBudgetOutcome } from
   "@/lib/amux/ideaSessionAnalysisBudgetSettlementService";
-import { commitAmuxMaxSessionResult,
+import { AmuxMaxSessionResultError, commitAmuxMaxSessionResult,
   preflightAmuxMaxSessionResult,
   readAmuxMaxSessionResultReceipt } from
   "@/lib/amux/ideaSessionAnalysisResultService";
@@ -1575,7 +1575,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     monthlyUsd: "1", ownerConfirmed: true,
   }));
   const ideaId = randomUUID();
-  const inspected = inspect(ideaId);
+  const inspected = inspect(ideaId, scope.repositories);
   const reservation = await prisma.$transaction(async (tx) => {
     const submission = await commitAmuxIdeaSessionSubmission(tx, {
       inspected, expectedAuthority: maxAuthority, ideaId, keys: keysFor(ideaId),
@@ -1834,6 +1834,45 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       } finally {
         manifestKeys.masterKey.fill(0);
         manifestKeys.digestKey.fill(0);
+      }
+      await assert.rejects(prisma.$transaction((tx) =>
+        preflightAmuxMaxSessionResult(tx, { ...identity,
+          evidenceId: maxEvidenceId, manifestId: maxManifestId })),
+      (error: unknown) => error instanceof AmuxMaxSessionResultError &&
+        error.code === "not_ready",
+      "one reference receipt cannot authorize a two-reference result");
+      const secondPin = await readAmuxSessionReferencePin({ ...readIdentity,
+        referenceOrdinal: 1 });
+      assert.equal(secondPin?.referenceCount, 2);
+      if (!secondPin?.pinnedCommitSha) throw new Error("Second Max pin missing");
+      const secondEvidence = await postMaxCheckoutEvidenceRoute(new Request(
+        evidenceEndpoint, { method: "POST", headers: evidenceHeaders,
+          body: JSON.stringify({ ...proof, referenceOrdinal: 1,
+            pinnedCommitSha: secondPin.pinnedCommitSha }) }));
+      assert.equal(secondEvidence.status, 200);
+      const secondEvidenceId = (await secondEvidence.json()).evidenceId;
+      assert.match(secondEvidenceId, /^[a-f0-9-]{36}$/);
+      const secondManifestId = randomUUID();
+      const secondManifest = { ...manifestInput,
+        manifestId: secondManifestId, referenceOrdinal: 1,
+        pinnedCommitSha: secondPin.pinnedCommitSha };
+      await prisma.$transaction((tx) =>
+        recordAmuxTrackedCheckoutReadManifestKeyIntent(tx,
+          secondManifest, maxClaim));
+      const secondKeys = {
+        masterKeyId: amuxContentUnitKeyId(
+          amuxTrackedCheckoutReadManifestKeyIdentity(ideaId, secondManifestId)),
+        masterKeyVersion: 1, masterKey: randomBytes(32),
+        digestKeyId: "synthetic-max-read-digest", digestKey: randomBytes(32),
+      };
+      try {
+        const saved = await prisma.$transaction((tx) =>
+          recordAmuxTrackedCheckoutReadManifest(tx, secondManifest,
+            secondKeys, maxClaim));
+        assert.equal(saved.manifestId, secondManifestId);
+      } finally {
+        secondKeys.masterKey.fill(0);
+        secondKeys.digestKey.fill(0);
       }
     } finally {
       for (const name of checkoutSwitches) {

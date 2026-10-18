@@ -3,6 +3,8 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_V4_IDEA_SYSTEM_ACTOR,
+  AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+  AMUX_SESSION_IDEA_SUBMITTED_TARGET,
   AMUX_V19_SESSION_ANALYSIS_RESULT_ACTION,
   AMUX_V19_SESSION_ANALYSIS_RESULT_TARGET,
   auditRowActorKind } from "@/lib/adminAuditSystemActors";
@@ -19,6 +21,7 @@ import { commitAmuxSessionBudgetOutcome } from
   "./ideaSessionAnalysisBudgetSettlementService.ts";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+const SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 type Tx = Prisma.TransactionClient;
 export type AmuxMaxSessionResultIdentity = AmuxMaxCheckoutClaim & {
   ideaId: string; referenceOrdinal: number; evidenceId: string;
@@ -47,30 +50,73 @@ function validIdentity(input: AmuxMaxSessionResultIdentity): boolean {
     input.referenceOrdinal >= 0 && input.referenceOrdinal <= 2_147_483_647;
 }
 
-/** No content key is created until the live claim and both source receipts
- * have been checked. The claim itself is the durable key identity. */
+async function readPinnedSessionReferenceShas(tx: Tx,
+  ideaId: string): Promise<string[]> {
+  const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: ideaId },
+    select: { submissionOrigin: true, submissionAuditLogId: true } });
+  if (idea?.submissionOrigin !== "session" || !idea.submissionAuditLogId) {
+    throw new AmuxMaxSessionResultError("not_ready");
+  }
+  const audit = await tx.adminAuditLog.findUnique({
+    where: { id: idea.submissionAuditLogId },
+    select: { action: true, targetType: true, targetId: true,
+      entryHash: true, metadata: true, actorUserId: true,
+      actorEmail: true, ipAddress: true, userAgent: true },
+  });
+  const metadata = audit?.metadata && typeof audit.metadata === "object" &&
+    !Array.isArray(audit.metadata)
+    ? audit.metadata as Record<string, unknown> : null;
+  const pins = metadata?.pinnedCommitShas;
+  const repositoryCount = metadata?.repositoryCount;
+  const pullRequestCount = metadata?.pullRequestCount;
+  if (!audit?.entryHash ||
+      audit.action !== AMUX_SESSION_IDEA_SUBMITTED_ACTION ||
+      audit.targetType !== AMUX_SESSION_IDEA_SUBMITTED_TARGET ||
+      audit.targetId !== ideaId || auditRowActorKind(audit) !== "system" ||
+      !Array.isArray(pins) || pins.length < 1 ||
+      pins.length > 2_147_483_647 ||
+      typeof repositoryCount !== "number" ||
+      !Number.isSafeInteger(repositoryCount) || repositoryCount < 0 ||
+      typeof pullRequestCount !== "number" ||
+      !Number.isSafeInteger(pullRequestCount) || pullRequestCount < 0 ||
+      pins.length !== repositoryCount + pullRequestCount ||
+      !pins.every((pin) => typeof pin === "string" && SHA.test(pin))) {
+    throw new AmuxMaxSessionResultError("not_ready");
+  }
+  return pins as string[];
+}
+
+/** No content key is created until the live claim and every pinned reference's
+ * checkout evidence and read manifest have been checked. The claim is the
+ * durable key identity. */
 export async function preflightAmuxMaxSessionResult(tx: Tx,
   input: AmuxMaxSessionResultIdentity): Promise<void> {
   if (!validIdentity(input)) throw new AmuxMaxSessionResultError("invalid_result");
   await takeAuditChainLock(tx);
   try {
     await requireActiveMaxCheckoutClaim(tx, input.ideaId, input);
-    const [evidence, manifest, intent] = await Promise.all([
-      readAmuxMaxTrackedCheckoutEvidence(tx, input.ideaId,
-        input.referenceOrdinal, input),
-      readAmuxTrackedCheckoutReadManifestReceipt(tx,
-        input.ideaId, input.referenceOrdinal),
-      readAmuxTrackedCheckoutReadManifestKeyIntentReceipt(tx,
-        input.ideaId, input.referenceOrdinal),
-    ]);
-    if (!evidence || evidence.evidenceId !== input.evidenceId ||
-        !manifest || manifest.id !== input.manifestId ||
-        manifest.bodyPurgedAt ||
-        evidence.pinnedCommitSha !== manifest.pinnedCommitSha ||
-        !intent || intent.id !== manifest.id ||
-        !await readAmuxMaxManifestIntentBinding(tx, input.ideaId,
-          input.referenceOrdinal, manifest.id, intent.auditLogId, input)) {
+    const pins = await readPinnedSessionReferenceShas(tx, input.ideaId);
+    if (input.referenceOrdinal >= pins.length) {
       throw new AmuxMaxSessionResultError("not_ready");
+    }
+    for (let ordinal = 0; ordinal < pins.length; ordinal += 1) {
+      const evidence = await readAmuxMaxTrackedCheckoutEvidence(tx,
+        input.ideaId, ordinal, input);
+      const manifest = await readAmuxTrackedCheckoutReadManifestReceipt(tx,
+        input.ideaId, ordinal);
+      const intent = await readAmuxTrackedCheckoutReadManifestKeyIntentReceipt(tx,
+        input.ideaId, ordinal);
+      if (!evidence || !manifest || manifest.bodyPurgedAt ||
+          evidence.pinnedCommitSha !== pins[ordinal] ||
+          manifest.pinnedCommitSha !== pins[ordinal] ||
+          !intent || intent.id !== manifest.id ||
+          !await readAmuxMaxManifestIntentBinding(tx, input.ideaId,
+            ordinal, manifest.id, intent.auditLogId, input) ||
+          (ordinal === input.referenceOrdinal &&
+            (evidence.evidenceId !== input.evidenceId ||
+             manifest.id !== input.manifestId))) {
+        throw new AmuxMaxSessionResultError("not_ready");
+      }
     }
   } catch {
     throw new AmuxMaxSessionResultError("not_ready");
