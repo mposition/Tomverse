@@ -22,6 +22,8 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   taskRows: Array<{ displayKey: string | null; status: string; reviewPrNumber: number | null; merged: boolean }>;
   /** Session reference SHAs fixed at intake, before a checkout exists. */
   referencePins: Array<{ referenceOrdinal: number; pinnedCommitSha: string }> | null;
+  /** Valid pre-pinning audit, distinct from a damaged or unavailable pin. */
+  referencePinsLegacy?: boolean;
   /** Content-free proof for each prepared v19 reference, in source order. */
   checkoutEvidence: Array<{
     referenceOrdinal: number;
@@ -85,6 +87,7 @@ type SqlIdea = {
   submittedAtMs: number; cancelled: boolean;
   proposedUnits: number; chunks: SqlChunk[] | null; cards: SqlCard[] | null;
   referencePins: unknown;
+  referencePinAuditStatus: "declared" | "legacy" | null;
   checkoutEvidence: SqlCheckoutEvidence[] | null;
 };
 
@@ -136,6 +139,13 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
           AND a."targetType" = 'AmuxIdeaSubmission'
           AND a."targetId" = n."id"
           AND a."entryHash" IS NOT NULL) AS "referencePins",
+      (SELECT CASE WHEN a."metadata" ? 'pinnedCommitShas' THEN 'declared'
+          ELSE 'legacy' END FROM "AdminAuditLog" a
+        WHERE a."id" = n."submissionAuditLogId"
+          AND a."action" = 'amux.idea.session_submitted'
+          AND a."targetType" = 'AmuxIdeaSubmission'
+          AND a."targetId" = n."id"
+          AND a."entryHash" IS NOT NULL) AS "referencePinAuditStatus",
       (SELECT json_agg(json_build_object(
           'referenceOrdinal', e."referenceOrdinal",
           'pinnedCommitSha', e."pinnedCommitSha",
@@ -183,6 +193,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         typeof sha === "string" && PIN_SHA.test(sha))
         ? pins.map((sha, referenceOrdinal) => ({ referenceOrdinal,
           pinnedCommitSha: sha as string })) : null,
+      referencePinsLegacy: idea.referencePinAuditStatus === "legacy",
       checkoutEvidence: (idea.checkoutEvidence ?? []).map((evidence) => ({
         referenceOrdinal: evidence.referenceOrdinal,
         pinnedCommitSha: evidence.pinnedCommitSha,

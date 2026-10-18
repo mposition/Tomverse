@@ -62,7 +62,12 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
       {row.stage === "cancelled" ? <p>{m.stages.cancelled}</p> : null}
       {row.submissionOrigin === "session" ?
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
-      {row.submissionOrigin === "session" && row.referencePins === null ? (
+      {row.submissionOrigin === "session" && row.referencePins === null &&
+          row.referencePinsLegacy ? (
+        <p className="text-zinc-400">{m.intakePinsLegacy}</p>
+      ) : null}
+      {row.submissionOrigin === "session" && row.referencePins === null &&
+          !row.referencePinsLegacy ? (
         <p role="alert" className="text-red-200">{m.intakePinsUnavailable}</p>
       ) : null}
       {row.submissionOrigin === "session" && row.referencePins && row.referencePins.length > 0 ? (

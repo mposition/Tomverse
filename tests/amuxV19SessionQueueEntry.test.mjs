@@ -95,6 +95,23 @@ test("queue discovery refuses a candidate without its canonical pin", async (t) 
   ]);
 });
 
+test("a zero-reference idea remains a discoverable analysis candidate", async (t) => {
+  const stateDirectory = await mkdtemp(join(tmpdir(), "amux-v19-queue-test-"));
+  t.after(() => rm(stateDirectory, { recursive: true, force: true }));
+  const candidate = { reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
+    ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
+    modelId: "claude-opus-5-5", expiresAt: "2026-10-18T00:00:00.000Z" };
+  const result = await runAmuxV19SessionQueueEntryOnce({
+    origin, agentSecret: "a".repeat(32), stateDirectory,
+    fetchImpl: async (url) => new URL(url).pathname.endsWith("/analysis-queue")
+      ? Response.json({ candidates: [candidate], hasMore: false,
+        nextCursor: null })
+      : Response.json({ referenceCount: 0, pinnedCommitSha: null }),
+  });
+  assert.deepEqual(result, { kind: "discovered", candidate,
+    pin: { kind: "no_references", referenceCount: 0 } });
+});
+
 test("a stale server cursor and a corrupt local hint recover without a claim", async (t) => {
   const stateDirectory = await mkdtemp(join(tmpdir(), "amux-v19-queue-test-"));
   t.after(() => rm(stateDirectory, { recursive: true, force: true }));

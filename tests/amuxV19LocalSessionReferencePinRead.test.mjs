@@ -52,6 +52,15 @@ test("queue preflight omits a claim and still requires a complete pin", async ()
   });
 });
 
+test("a zero-reference session is distinct from a missing pin", async () => {
+  const candidate = input(async () => Response.json({ referenceCount: 0,
+    pinnedCommitSha: null }));
+  delete candidate.claimId;
+  assert.deepEqual(await readAmuxV19SessionReferencePin(candidate), {
+    kind: "no_references", referenceCount: 0,
+  });
+});
+
 test("uncertain, malformed, and cross-origin pin reads fail closed", async () => {
   let calls = 0;
   const fetchImpl = async () => {
@@ -67,7 +76,7 @@ test("uncertain, malformed, and cross-origin pin reads fail closed", async () =>
   assert.equal(calls, 0);
   for (const response of [
     Response.json({ referenceCount: 1, pinnedCommitSha: "b".repeat(39) }),
-    Response.json({ referenceCount: 0, pinnedCommitSha: null }),
+    Response.json({ referenceCount: 0, pinnedCommitSha: "a".repeat(40) }),
     Response.json({ referenceCount: 1, pinnedCommitSha: "a".repeat(40),
       extra: true }),
     new Response("x".repeat(257), { headers: {

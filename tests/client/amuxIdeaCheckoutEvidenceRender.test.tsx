@@ -26,6 +26,21 @@ test("Admin shows the intake SHA before checkout evidence exists", () => {
   assert.doesNotMatch(markup, /data-testid="amux-checkout-evidence"/);
 });
 
+test("Admin distinguishes an older unpinned idea from a damaged pin", () => {
+  const legacy = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), submissionOrigin: "session",
+      referencePinsLegacy: true } }));
+  const unknown = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), submissionOrigin: "session",
+      referencePinsLegacy: false } }));
+  const m = legacy.includes(adminAmuxIdeaProgressMessages.ko.intakePinsLegacy)
+    ? adminAmuxIdeaProgressMessages.ko : adminAmuxIdeaProgressMessages.en;
+  assert.ok(legacy.includes(m.intakePinsLegacy));
+  assert.doesNotMatch(legacy, /role="alert"/);
+  assert.ok(unknown.includes(m.intakePinsUnavailable));
+  assert.match(unknown, /role="alert"/);
+});
+
 test("Admin idea detail shows pinned SHA and exclusion reasons without private paths", () => {
   const markup = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary, { row: row([{
     referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 2,
