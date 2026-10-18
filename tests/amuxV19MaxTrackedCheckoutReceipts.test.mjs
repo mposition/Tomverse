@@ -8,7 +8,7 @@ const names = ["TOMVERSE_AMUX_V4_ANALYSIS_APP_ORIGIN",
   "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN",
   "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"];
 const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
-process.env[names[0]] = "https://amux.example.test/";
+delete process.env[names[0]];
 process.env[names[1]] = "https://amux.example.test/";
 process.env[names[2]] = "syntheticMaxLauncherSecret_0123456789abcdefgh";
 after(() => {
