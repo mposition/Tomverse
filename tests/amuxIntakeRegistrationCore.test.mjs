@@ -207,10 +207,12 @@ test("the public apply path checks the shipped latch before the commit", () => {
   assert.equal(route.includes("codeLatch: true"), false);
   assert.match(panel, /registerReady = result\?\.applyPermitted === true/);
   assert.match(panel, /registerReady \? messages\.registerPermitted : messages\.registerDisabled/);
-  assert.match(panel, /disabled=\{pending \|\| !registerReady\}/);
+  assert.match(panel, /disabled=\{pending \|\| locked \|\| !registerReady\}/);
+  assert.match(panel, /error: action === "register" \? "outcome_unknown" : "intake_failed"/);
   assert.match(panel, /result\.error === "outcome_unknown"/);
   assert.match(panel, /messages\.outcomeUnknown/);
-  assert.equal(panel.slice(panel.indexOf("outcome_unknown")).includes('send("register")'), false);
+  assert.match(panel, /locked = result\?\.error === "outcome_unknown" \|\| !!result\?\.cardId/);
+  assert.match(panel, /if \(inFlight\.current \|\| terminal\.current\) return/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(panel, /adminRecentAuthenticationHref/);
   // The legacy JSON screen is retired; its old address opens Ideas.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxIntakeMessages } from "@/lib/adminMessages/amuxIntake";
@@ -34,8 +34,12 @@ export function AmuxIntakePanel() {
   const [requestText, setRequestText] = useState("");
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<IntakeBody | null>(null);
+  const inFlight = useRef(false);
+  const terminal = useRef(false);
 
   const send = async (action: string) => {
+    if (inFlight.current || terminal.current) return;
+    inFlight.current = true;
     setPending(true);
     try {
       const response = await adminFetch(`/api/admin/amux/intake?action=${action}`, {
@@ -43,16 +47,25 @@ export function AmuxIntakePanel() {
         headers: { "content-type": "application/json" },
         body: requestText,
       });
-      setResult((await response.json()) as IntakeBody);
+      const body = (await response.json()) as IntakeBody;
+      const ambiguous = action === "register" &&
+        (response.status >= 500 || body.retry === false || (response.ok && !body.cardId));
+      if (action === "register" && (ambiguous || !!body.cardId)) terminal.current = true;
+      setResult(ambiguous ? { ...body, error: "outcome_unknown" } : body);
     } catch {
-      setResult({ error: "intake_failed" });
+      // A register request may have committed before its reply was lost.
+      if (action === "register") terminal.current = true;
+      setResult({ error: action === "register" ? "outcome_unknown" : "intake_failed" });
     } finally {
+      inFlight.current = false;
       setPending(false);
     }
   };
 
   const refusedForStepUp =
     result?.code === "ADMIN_REAUTHENTICATION_REQUIRED" || result?.error === "ADMIN_REAUTHENTICATION_REQUIRED";
+  // An ambiguous write needs exact read-back, never an in-page resubmit.
+  const locked = result?.error === "outcome_unknown" || !!result?.cardId;
   const registerReady = result?.applyPermitted === true;
 
   return (
@@ -65,6 +78,7 @@ export function AmuxIntakePanel() {
           id="amux-intake-request"
           className="min-h-40 w-full rounded-md border border-zinc-300 bg-white p-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           value={requestText}
+          disabled={locked}
           onChange={(event) => { setRequestText(event.target.value); setResult(null); }}
         />
       </label>
@@ -72,7 +86,7 @@ export function AmuxIntakePanel() {
         <button
           type="button"
           className="min-h-11 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
-          disabled={pending || requestText.trim().length === 0}
+          disabled={pending || locked || requestText.trim().length === 0}
           onClick={() => send("preview")}
         >
           {messages.preview}
@@ -80,7 +94,7 @@ export function AmuxIntakePanel() {
         <button
           type="button"
           className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
-          disabled={pending || !registerReady}
+          disabled={pending || locked || !registerReady}
           aria-describedby="amux-intake-register-reason"
           onClick={() => send("register")}
         >
