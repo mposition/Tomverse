@@ -219,6 +219,126 @@ test("provider-free optimizer ledger enforces frozen identity, CAS and unknown s
       runState: "succeeded", runtimeAuthorized: false }]);
   });
 
+  await t.test("six untransmitted jobs expire atomically and exact replay is read-only", async () => {
+    const expiryBundle = bundle("queued-expiry");
+    const expiry = await ledger.registerChatUnifiedOptimizerCycle({
+      requestId: randomUUID(),
+      candidateBundleJson: JSON.stringify(expiryBundle),
+      expectedBundleDigest: expiryBundle.bundleDigest,
+      sourceCommitSha: "4".repeat(40),
+      deadlineAt: new Date(Date.now() + 1_200),
+    });
+    await assert.rejects(ledger.closeChatUnifiedOptimizerQueuedJobs({
+      requestId: randomUUID(), cycleId: expiry.cycleId,
+      reason: "expired_before_dispatch",
+    }), (error: unknown) => error instanceof ledger.ChatUnifiedOptimizerLedgerError &&
+      error.code === "deadline_not_elapsed");
+    await new Promise(resolve => setTimeout(resolve, 1_300));
+    const requestId = randomUUID();
+    const closed = await ledger.closeChatUnifiedOptimizerQueuedJobs({
+      requestId, cycleId: expiry.cycleId,
+      reason: "expired_before_dispatch",
+    });
+    assert.equal(closed.outcome, "closed");
+    assert.equal(closed.closedJobIds.length, 6);
+    const replay = await ledger.closeChatUnifiedOptimizerQueuedJobs({
+      requestId, cycleId: expiry.cycleId,
+      reason: "expired_before_dispatch",
+    });
+    assert.equal(replay.outcome, "replayed");
+    assert.equal(replay.closeRequestDigest, closed.closeRequestDigest);
+    assert.deepEqual(replay.closedJobIds, closed.closedJobIds);
+    await assert.rejects(ledger.closeChatUnifiedOptimizerQueuedJobs({
+      requestId: randomUUID(), cycleId: expiry.cycleId,
+      reason: "expired_before_dispatch",
+    }), (error: unknown) => error instanceof ledger.ChatUnifiedOptimizerLedgerError &&
+      error.code === "close_conflict");
+    const [state] = await prisma.$queryRaw<Array<{ cycleState: string;
+      runState: string; failedJobs: bigint; evidence: bigint;
+      queuedClosureAudits: bigint }>>`
+      SELECT c."state" AS "cycleState", r."state" AS "runState",
+        COUNT(*) FILTER (WHERE j."state" = 'failed')::bigint AS "failedJobs",
+        (SELECT COUNT(*)::bigint FROM "ChatUnifiedOptimizerEvidence" e
+          WHERE e."cycleId" = c."id") AS "evidence",
+        (SELECT COUNT(*)::bigint FROM "AdminAuditLog" a
+          WHERE a."action" =
+            'chat.unified_optimizer.queued_before_dispatch_terminal'
+            AND a."metadata"->>'cycleId' = c."id"::text)
+          AS "queuedClosureAudits"
+      FROM "ChatUnifiedOptimizerCycle" c
+      JOIN "ChatUnifiedOptimizerRun" r ON r."cycleId" = c."id"
+      JOIN "ChatUnifiedOptimizerRoleJob" j ON j."runId" = r."id"
+      WHERE c."id" = ${expiry.cycleId}::uuid
+      GROUP BY c."id", c."state", r."state"
+    `;
+    assert.deepEqual(state, { cycleState: "failed", runState: "failed",
+      failedJobs: BigInt(6), evidence: BigInt(6),
+      queuedClosureAudits: BigInt(6) });
+  });
+
+  await t.test("cancel refuses direct SQL and a concurrent claimed job without partial closure", async () => {
+    const cancelBundle = bundle("queued-cancel");
+    const cancel = await ledger.registerChatUnifiedOptimizerCycle({
+      requestId: randomUUID(),
+      candidateBundleJson: JSON.stringify(cancelBundle),
+      expectedBundleDigest: cancelBundle.bundleDigest,
+      sourceCommitSha: "5".repeat(40),
+      deadlineAt: new Date(Date.now() + 60_000),
+    });
+    const directJobId = cancel.jobIds.case_author;
+    await assert.rejects(prisma.$transaction(async tx => {
+      await tx.$executeRaw`
+        UPDATE "ChatUnifiedOptimizerRoleJob"
+        SET "state" = 'failed', "terminalOutcome" = 'failed',
+          "terminalRequestId" = ${randomUUID()}::uuid,
+          "terminalRequestDigest" = ${"d".repeat(64)},
+          "terminalAuditLogId" = ${`forged-${randomUUID()}`},
+          "terminalAt" = clock_timestamp()
+        WHERE "id" = ${directJobId}::uuid AND "state" = 'queued'
+      `;
+    }), /chat_unified_optimizer_queued_terminal_invalid/);
+    const cancelled = await ledger.closeChatUnifiedOptimizerQueuedJobs({
+      requestId: randomUUID(), cycleId: cancel.cycleId,
+      reason: "cancelled_before_dispatch",
+    });
+    assert.equal(cancelled.closedJobIds.length, 6);
+
+    const raceBundle = bundle("claim-race");
+    const race = await ledger.registerChatUnifiedOptimizerCycle({
+      requestId: randomUUID(),
+      candidateBundleJson: JSON.stringify(raceBundle),
+      expectedBundleDigest: raceBundle.bundleDigest,
+      sourceCommitSha: "6".repeat(40),
+      deadlineAt: new Date(Date.now() + 60_000),
+    });
+    const claim = await ledger.claimChatUnifiedOptimizerRoleJob({
+      requestId: randomUUID(), jobId: race.jobIds.judge_primary,
+    });
+    await assert.rejects(ledger.closeChatUnifiedOptimizerQueuedJobs({
+      requestId: randomUUID(), cycleId: race.cycleId,
+      reason: "cancelled_before_dispatch",
+    }), (error: unknown) => error instanceof ledger.ChatUnifiedOptimizerLedgerError &&
+      error.code === "claimed_readback_required");
+    const [unchanged] = await prisma.$queryRaw<Array<{ claimed: bigint;
+      queued: bigint; closureAudits: bigint }>>`
+      SELECT COUNT(*) FILTER (WHERE j."state" = 'claimed')::bigint AS "claimed",
+        COUNT(*) FILTER (WHERE j."state" = 'queued')::bigint AS "queued",
+        (SELECT COUNT(*)::bigint FROM "AdminAuditLog" a
+          WHERE a."action" =
+            'chat.unified_optimizer.queued_before_dispatch_terminal'
+            AND a."metadata"->>'cycleId' = ${race.cycleId}) AS "closureAudits"
+      FROM "ChatUnifiedOptimizerRoleJob" j
+      WHERE j."runId" = ${race.runId}::uuid
+    `;
+    assert.deepEqual(unchanged, { claimed: BigInt(1), queued: BigInt(5),
+      closureAudits: BigInt(0) });
+    await ledger.recordChatUnifiedOptimizerRoleJobTerminal({
+      requestId: randomUUID(), jobId: claim.jobId,
+      claimToken: claim.claimToken, outcome: "failed",
+      evidenceRef: "synthetic:claim-race", evidencePayloadDigest: EVIDENCE_DIGEST,
+    });
+  });
+
   await t.test("deferred DB clock rejects late success and unknown closes", async () => {
     const secondBundle = bundle("second");
     const second = await ledger.registerChatUnifiedOptimizerCycle({
@@ -242,8 +362,8 @@ test("provider-free optimizer ledger enforces frozen identity, CAS and unknown s
     const claim = await ledger.claimChatUnifiedOptimizerRoleJob({
       requestId: randomUUID(), jobId: second.jobIds.case_author,
     });
-    let armed: { transactionMs: number; statementMs: number;
-      idleMs: number } | undefined;
+    let armed: { serverVersionNum: number; transactionMs: number | null;
+      statementMs: number; idleMs: number } | undefined;
     const delayedCommitDb = {
       $queryRaw: prisma.$queryRaw.bind(prisma),
       $transaction: async (
@@ -252,8 +372,9 @@ test("provider-free optimizer ledger enforces frozen identity, CAS and unknown s
       ) => prisma.$transaction(async tx => {
         const result = await work(tx);
         [armed] = await tx.$queryRaw<Array<{ transactionMs: number;
-          statementMs: number; idleMs: number }>>`
+          serverVersionNum: number; statementMs: number; idleMs: number }>>`
           SELECT
+            current_setting('server_version_num')::int AS "serverVersionNum",
             (SELECT setting::int FROM pg_settings
               WHERE name = 'transaction_timeout') AS "transactionMs",
             (SELECT setting::int FROM pg_settings
@@ -277,8 +398,12 @@ test("provider-free optimizer ledger enforces frozen identity, CAS and unknown s
       claimToken: claim.claimToken, outcome: "succeeded",
       evidenceRef: "synthetic:late", evidencePayloadDigest: EVIDENCE_DIGEST,
     }, delayedCommitDb), /chat_unified_optimizer_deadline_elapsed/);
-    assert.deepEqual(armed, { transactionMs: 5_000, statementMs: 4_000,
-      idleMs: 4_000 });
+    assert.ok(armed);
+    assert.deepEqual({ transactionMs: armed.transactionMs,
+      statementMs: armed.statementMs, idleMs: armed.idleMs }, {
+      transactionMs: armed.serverVersionNum >= 170000 ? 5_000 : null,
+      statementMs: 4_000, idleMs: 4_000,
+    });
     const [rolledBack] = await prisma.$queryRaw<Array<{ state: string;
       terminalAt: Date | null; evidenceCount: bigint; auditCount: bigint }>>`
       SELECT j."state", j."terminalAt",
@@ -340,6 +465,7 @@ test("provider-free optimizer ledger enforces frozen identity, CAS and unknown s
         "chat.unified_optimizer.run_admitted",
         "chat.unified_optimizer.dispatch_intended",
         "chat.unified_optimizer.run_terminal",
+        "chat.unified_optimizer.queued_before_dispatch_terminal",
       ] } },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });

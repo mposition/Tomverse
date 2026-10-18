@@ -29,6 +29,13 @@ export const CHAT_UNIFIED_OPTIMIZER_TERMINAL_OUTCOMES = Object.freeze([
 export type ChatUnifiedOptimizerTerminalOutcome =
   (typeof CHAT_UNIFIED_OPTIMIZER_TERMINAL_OUTCOMES)[number];
 
+export const CHAT_UNIFIED_OPTIMIZER_QUEUED_CLOSE_REASONS = Object.freeze([
+  "expired_before_dispatch",
+  "cancelled_before_dispatch",
+] as const);
+export type ChatUnifiedOptimizerQueuedCloseReason =
+  (typeof CHAT_UNIFIED_OPTIMIZER_QUEUED_CLOSE_REASONS)[number];
+
 const uuid = z.string().uuid();
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const sourceCommitSha = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
@@ -44,6 +51,12 @@ export const chatUnifiedOptimizerRegistrationSchema = z.object({
 export const chatUnifiedOptimizerClaimSchema = z.object({
   requestId: uuid,
   jobId: uuid,
+}).strict();
+
+export const chatUnifiedOptimizerQueuedCloseSchema = z.object({
+  requestId: uuid,
+  cycleId: uuid,
+  reason: z.enum(CHAT_UNIFIED_OPTIMIZER_QUEUED_CLOSE_REASONS),
 }).strict();
 
 export const chatUnifiedOptimizerTerminalSchema = z.object({
@@ -117,6 +130,78 @@ export function chatUnifiedOptimizerClaimDigest(input: Readonly<{
     jobId: input.jobId,
     externalDispatchAuthorized: false,
     paidAuthorized: false,
+  }));
+}
+
+export function chatUnifiedOptimizerQueuedCloseDigest(input: Readonly<{
+  requestId: string;
+  cycleId: string;
+  reason: ChatUnifiedOptimizerQueuedCloseReason;
+}>): string {
+  return sha256(canonicalBenchmarkJson({
+    version: CHAT_UNIFIED_OPTIMIZER_LEDGER_VERSION,
+    purpose: CHAT_UNIFIED_OPTIMIZER_PURPOSE,
+    operation: "queued_before_dispatch_terminal",
+    requestId: input.requestId,
+    cycleId: input.cycleId,
+    reason: input.reason,
+    externalDispatchAuthorized: false,
+    paidAuthorized: false,
+    promotionAuthorized: false,
+  }));
+}
+
+export function chatUnifiedOptimizerQueuedJobTerminalDigest(input: Readonly<{
+  closeRequestDigest: string;
+  cycleId: string;
+  runId: string;
+  jobId: string;
+  role: ChatUnifiedOptimizerRole;
+  reason: ChatUnifiedOptimizerQueuedCloseReason;
+  evidenceRef: string;
+  evidencePayloadDigest: string;
+}>): string {
+  return sha256(canonicalBenchmarkJson({
+    version: CHAT_UNIFIED_OPTIMIZER_LEDGER_VERSION,
+    purpose: CHAT_UNIFIED_OPTIMIZER_PURPOSE,
+    operation: "queued_before_dispatch_terminal",
+    closeRequestDigest: input.closeRequestDigest,
+    cycleId: input.cycleId,
+    runId: input.runId,
+    jobId: input.jobId,
+    role: input.role,
+    reason: input.reason,
+    outcome: "failed",
+    evidenceRef: input.evidenceRef,
+    evidencePayloadDigest: input.evidencePayloadDigest,
+    externalDispatchAuthorized: false,
+    paidAuthorized: false,
+    promotionAuthorized: false,
+  }));
+}
+
+export function chatUnifiedOptimizerQueuedJobEvidenceDigest(input: Readonly<{
+  closeRequestDigest: string;
+  cycleId: string;
+  runId: string;
+  candidateId: string;
+  jobId: string;
+  role: ChatUnifiedOptimizerRole;
+  reason: ChatUnifiedOptimizerQueuedCloseReason;
+}>): string {
+  return sha256(canonicalBenchmarkJson({
+    version: CHAT_UNIFIED_OPTIMIZER_LEDGER_VERSION,
+    purpose: CHAT_UNIFIED_OPTIMIZER_PURPOSE,
+    fact: "queued_before_dispatch_terminal",
+    closeRequestDigest: input.closeRequestDigest,
+    cycleId: input.cycleId,
+    runId: input.runId,
+    candidateId: input.candidateId,
+    jobId: input.jobId,
+    role: input.role,
+    reason: input.reason,
+    externalDispatchOccurred: false,
+    paidCallOccurred: false,
   }));
 }
 

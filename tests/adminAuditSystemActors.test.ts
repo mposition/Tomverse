@@ -76,6 +76,9 @@ test("the unified optimizer actor is limited to provider-free ledger facts", () 
     "chat.unified_optimizer.run_terminal",
     "ChatUnifiedOptimizerRoleJob"), true);
   assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.queued_before_dispatch_terminal",
+    "ChatUnifiedOptimizerRoleJob"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
     "chat.unified_candidate.promoted", "ChatUnifiedOptimizerCandidate"), false);
   assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
     "chat.unified_optimizer.dispatch_intended", "AdminAuditLog"), false);

@@ -148,3 +148,8 @@ test("no lane is large enough to put the timeout back where it was", () => {
         `the largest lane holds ${largest} of ${onDisk.length} suites; rebalance the rules`
     );
 });
+
+test("the optimizer ledger DB suite runs with the agent suites", () => {
+    assert.equal(dbIntegrationGroupOf(
+        "tests/integration/chat-unified-optimizer-ledger.db.test.ts"), "agents");
+});

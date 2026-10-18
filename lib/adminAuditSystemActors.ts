@@ -393,7 +393,8 @@ export const systemAuditActionAllowed = (
     (action === "chat.unified_optimizer.run_admitted" &&
       targetType === "ChatUnifiedOptimizerRun") ||
     ((action === "chat.unified_optimizer.dispatch_intended" ||
-      action === "chat.unified_optimizer.run_terminal") &&
+      action === "chat.unified_optimizer.run_terminal" ||
+      action === "chat.unified_optimizer.queued_before_dispatch_terminal") &&
       targetType === "ChatUnifiedOptimizerRoleJob")) &&
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||

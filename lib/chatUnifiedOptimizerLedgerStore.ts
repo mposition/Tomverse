@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { Prisma } from "@prisma/client";
 
@@ -18,11 +18,16 @@ import {
   CHAT_UNIFIED_OPTIMIZER_ROLES,
   chatUnifiedOptimizerClaimDigest,
   chatUnifiedOptimizerClaimSchema,
+  chatUnifiedOptimizerQueuedCloseDigest,
+  chatUnifiedOptimizerQueuedCloseSchema,
+  chatUnifiedOptimizerQueuedJobEvidenceDigest,
+  chatUnifiedOptimizerQueuedJobTerminalDigest,
   chatUnifiedOptimizerRegistrationDigest,
   chatUnifiedOptimizerRegistrationSchema,
   chatUnifiedOptimizerTerminalDigest,
   chatUnifiedOptimizerTerminalSchema,
   type ChatUnifiedOptimizerRole,
+  type ChatUnifiedOptimizerQueuedCloseReason,
   type ChatUnifiedOptimizerTerminalOutcome,
 } from "@/lib/chatUnifiedOptimizerLedgerCore";
 import { prisma } from "@/lib/prisma";
@@ -32,6 +37,8 @@ const RUN_ADMITTED_ACTION = "chat.unified_optimizer.run_admitted" as const;
 const DISPATCH_INTENDED_ACTION =
   "chat.unified_optimizer.dispatch_intended" as const;
 const RUN_TERMINAL_ACTION = "chat.unified_optimizer.run_terminal" as const;
+const QUEUED_TERMINAL_ACTION =
+  "chat.unified_optimizer.queued_before_dispatch_terminal" as const;
 const DB_STATEMENT_TIMEOUT_MS = 4_000;
 const DB_IDLE_TIMEOUT_MS = 4_000;
 const DB_TRANSACTION_TIMEOUT_MS = 5_000;
@@ -51,6 +58,10 @@ export class ChatUnifiedOptimizerLedgerError extends Error {
     | "terminal_conflict"
     | "claim_authority_invalid"
     | "late_terminal"
+    | "close_conflict"
+    | "close_unavailable"
+    | "deadline_not_elapsed"
+    | "claimed_readback_required"
     | "database_boundary_unavailable") {
     super(code);
     this.name = "ChatUnifiedOptimizerLedgerError";
@@ -102,6 +113,28 @@ type JobLockRow = Readonly<{
   cycleState: string;
   claimToken: string | null;
 }>;
+
+type QueuedClosureJobRow = JobLockRow & Readonly<{
+  claimRequestId: string | null;
+  terminalRequestId: string | null;
+  terminalRequestDigest: string | null;
+  terminalOutcome: string | null;
+  terminalAt: Date | null;
+  terminalAuditAction: string | null;
+  closeRequestDigest: string | null;
+  closeReason: string | null;
+  evidenceRef: string | null;
+  evidencePayloadDigest: string | null;
+}>;
+
+const deterministicUuid = (scope: string, value: string): string => {
+  const hex = createHash("sha256").update(`${scope}\0${value}`, "utf8")
+    .digest("hex").slice(0, 32).split("");
+  hex[12] = "5";
+  hex[16] = ((Number.parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16);
+  const joined = hex.join("");
+  return `${joined.slice(0, 8)}-${joined.slice(8, 12)}-${joined.slice(12, 16)}-${joined.slice(16, 20)}-${joined.slice(20)}`;
+};
 
 const lockLedger = async (tx: Prisma.TransactionClient): Promise<void> => {
   await takeAuditChainLock(tx);
@@ -474,6 +507,233 @@ export async function claimChatUnifiedOptimizerRoleJob(input: Readonly<{
     return { outcome: "claimed", jobId: job.id, role: job.role,
       claimToken, claimDigest, deadlineAt: job.deadlineAt,
       claimedAt: updated[0].claimedAt } as const;
+  }, transactionOptions);
+}
+
+const queuedClosureRows = async (
+  tx: Prisma.TransactionClient,
+  cycleId: string,
+): Promise<QueuedClosureJobRow[]> => tx.$queryRaw<QueuedClosureJobRow[]>`
+  SELECT j."id"::text AS "id", j."runId"::text AS "runId",
+    r."cycleId"::text AS "cycleId", k."id"::text AS "candidateId",
+    j."role", j."state", j."deadlineAt", r."state" AS "runState",
+    c."state" AS "cycleState", j."claimToken"::text AS "claimToken",
+    j."claimRequestId"::text AS "claimRequestId",
+    j."terminalRequestId"::text AS "terminalRequestId",
+    j."terminalRequestDigest", j."terminalOutcome", j."terminalAt",
+    a."action" AS "terminalAuditAction",
+    a."metadata"->>'closeRequestDigest' AS "closeRequestDigest",
+    a."metadata"->>'closeReason' AS "closeReason",
+    e."evidenceRef", e."payloadDigest" AS "evidencePayloadDigest"
+  FROM "ChatUnifiedOptimizerCycle" c
+  JOIN "ChatUnifiedOptimizerRun" r
+    ON r."cycleId" = c."id" AND r."ordinal" = 1
+  JOIN "ChatUnifiedOptimizerCandidate" k ON k."cycleId" = c."id"
+  JOIN "ChatUnifiedOptimizerRoleJob" j ON j."runId" = r."id"
+  LEFT JOIN "AdminAuditLog" a ON a."id" = j."terminalAuditLogId"
+  LEFT JOIN "ChatUnifiedOptimizerEvidence" e ON e."jobId" = j."id"
+  WHERE c."id" = ${cycleId}::uuid
+  ORDER BY j."role"
+  FOR UPDATE OF c, r, j
+`;
+
+const queuedClosureFacts = (
+  job: QueuedClosureJobRow,
+  closeRequestDigest: string,
+  reason: ChatUnifiedOptimizerQueuedCloseReason,
+) => {
+  const evidenceRef = `optimizer:queued:${reason}:${job.id}`;
+  const evidencePayloadDigest = chatUnifiedOptimizerQueuedJobEvidenceDigest({
+    closeRequestDigest,
+    cycleId: job.cycleId,
+    runId: job.runId,
+    candidateId: job.candidateId,
+    jobId: job.id,
+    role: job.role,
+    reason,
+  });
+  const terminalRequestDigest = chatUnifiedOptimizerQueuedJobTerminalDigest({
+    closeRequestDigest,
+    cycleId: job.cycleId,
+    runId: job.runId,
+    jobId: job.id,
+    role: job.role,
+    reason,
+    evidenceRef,
+    evidencePayloadDigest,
+  });
+  return Object.freeze({
+    evidenceRef,
+    evidencePayloadDigest,
+    terminalRequestDigest,
+    terminalRequestId: deterministicUuid(
+      "chat-unified-optimizer-queued-terminal-v1",
+      `${closeRequestDigest}:${job.id}`,
+    ),
+  });
+};
+
+/**
+ * Closes only jobs whose provider-free role work was never dispatched. An
+ * expiry is valid only once the DB deadline has elapsed; an explicit cancel
+ * must commit before it. A claimed job is never guessed failed here: it keeps
+ * the cycle latched for terminal read-back through the claimed-job writer.
+ */
+export async function closeChatUnifiedOptimizerQueuedJobs(input: Readonly<{
+  requestId: string;
+  cycleId: string;
+  reason: ChatUnifiedOptimizerQueuedCloseReason;
+}>, db: Db = prisma): Promise<Readonly<{
+  outcome: "closed" | "replayed";
+  cycleId: string;
+  runId: string;
+  reason: ChatUnifiedOptimizerQueuedCloseReason;
+  closeRequestDigest: string;
+  closedJobIds: readonly string[];
+  cycleState: "failed";
+  terminalAt: Date;
+}>> {
+  const parsed = chatUnifiedOptimizerQueuedCloseSchema.safeParse(input);
+  if (!parsed.success) return refuse("input_invalid");
+  const closeRequestDigest = chatUnifiedOptimizerQueuedCloseDigest(parsed.data);
+  return db.$transaction(async tx => {
+    await armLedgerTransaction(tx);
+    await lockLedger(tx);
+    const jobs = await queuedClosureRows(tx, parsed.data.cycleId);
+    if (jobs.length !== CHAT_UNIFIED_OPTIMIZER_ROLES.length) {
+      return refuse("close_unavailable");
+    }
+    const runId = jobs[0]!.runId;
+    if (jobs.some(job => job.runId !== runId ||
+        job.cycleId !== parsed.data.cycleId)) {
+      return refuse("close_conflict");
+    }
+
+    if (jobs[0]!.cycleState === "failed" && jobs[0]!.runState === "failed") {
+      const closed = jobs.filter(job => job.claimRequestId === null &&
+        job.state === "failed");
+      if (closed.length === 0 || jobs.some(job => {
+        if (job.state === "succeeded" && job.claimRequestId !== null) {
+          return false;
+        }
+        if (job.claimRequestId !== null || job.state !== "failed" ||
+            job.terminalAuditAction !== QUEUED_TERMINAL_ACTION ||
+            job.closeRequestDigest !== closeRequestDigest ||
+            job.closeReason !== parsed.data.reason) return true;
+        const facts = queuedClosureFacts(job, closeRequestDigest,
+          parsed.data.reason);
+        return job.terminalRequestId !== facts.terminalRequestId ||
+          job.terminalRequestDigest !== facts.terminalRequestDigest ||
+          job.evidenceRef !== facts.evidenceRef ||
+          job.evidencePayloadDigest !== facts.evidencePayloadDigest;
+      })) return refuse("close_conflict");
+      const terminalAt = closed.reduce((latest, job) =>
+        !latest || (job.terminalAt && job.terminalAt > latest)
+          ? job.terminalAt : latest, null as Date | null);
+      if (!terminalAt) return refuse("close_conflict");
+      return { outcome: "replayed", cycleId: parsed.data.cycleId, runId,
+        reason: parsed.data.reason, closeRequestDigest,
+        closedJobIds: Object.freeze(closed.map(job => job.id)),
+        cycleState: "failed", terminalAt } as const;
+    }
+
+    if (jobs[0]!.cycleState !== "active" || jobs[0]!.runState !== "active") {
+      return refuse("close_unavailable");
+    }
+    if (jobs.some(job => job.state === "claimed" ||
+        job.state === "outcome_unknown")) {
+      return refuse("claimed_readback_required");
+    }
+    if (jobs.some(job => job.state !== "queued" &&
+        job.state !== "succeeded")) return refuse("close_conflict");
+    const queued = jobs.filter(job => job.state === "queued");
+    if (queued.length === 0) return refuse("close_unavailable");
+    const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT clock_timestamp() AS "now"
+    `;
+    if (!clock) return refuse("close_unavailable");
+    const deadline = jobs[0]!.deadlineAt;
+    if (jobs.some(job => job.deadlineAt.getTime() !== deadline.getTime())) {
+      return refuse("close_conflict");
+    }
+    if (parsed.data.reason === "expired_before_dispatch" &&
+        clock.now.getTime() < deadline.getTime()) {
+      return refuse("deadline_not_elapsed");
+    }
+    if (parsed.data.reason === "cancelled_before_dispatch" &&
+        clock.now.getTime() >= deadline.getTime()) {
+      return refuse("deadline_elapsed");
+    }
+
+    let terminalAt: Date | null = null;
+    for (const job of queued) {
+      const facts = queuedClosureFacts(job, closeRequestDigest,
+        parsed.data.reason);
+      const terminalAuditLogId = await writeSystemAuditLog({
+        tx,
+        systemActor: SYSTEM_ACTOR,
+        action: QUEUED_TERMINAL_ACTION,
+        targetType: "ChatUnifiedOptimizerRoleJob",
+        targetId: job.id,
+        summary: "Closed one queued, untransmitted provider-free optimizer role job.",
+        metadata: {
+          ledgerVersion: CHAT_UNIFIED_OPTIMIZER_LEDGER_VERSION,
+          purpose: CHAT_UNIFIED_OPTIMIZER_PURPOSE,
+          role: job.role,
+          outcome: "failed",
+          closeReason: parsed.data.reason,
+          closeRequestDigest,
+          terminalRequestDigest: facts.terminalRequestDigest,
+          cycleId: job.cycleId,
+          runId: job.runId,
+          evidenceRef: facts.evidenceRef,
+          evidencePayloadDigest: facts.evidencePayloadDigest,
+          externalDispatchAuthorized: false,
+          paidAuthorized: false,
+          promotionAuthorized: false,
+        },
+      });
+      const updated = await tx.$queryRaw<Array<{ terminalAt: Date }>>`
+        UPDATE "ChatUnifiedOptimizerRoleJob"
+        SET "state" = 'failed',
+          "terminalRequestId" = ${facts.terminalRequestId}::uuid,
+          "terminalRequestDigest" = ${facts.terminalRequestDigest},
+          "terminalOutcome" = 'failed',
+          "terminalAuditLogId" = ${terminalAuditLogId},
+          "terminalAt" = clock_timestamp()
+        WHERE "id" = ${job.id}::uuid AND "state" = 'queued'
+          AND "claimRequestId" IS NULL
+        RETURNING "terminalAt"
+      `;
+      if (!updated[0]) return refuse("close_conflict");
+      terminalAt = updated[0].terminalAt;
+      await tx.$executeRaw`
+        INSERT INTO "ChatUnifiedOptimizerEvidence" (
+          "id", "jobId", "runId", "cycleId", "candidateId", "outcome",
+          "evidenceRef", "payloadDigest", "terminalAuditLogId", "createdAt")
+        VALUES (${randomUUID()}::uuid, ${job.id}::uuid, ${job.runId}::uuid,
+          ${job.cycleId}::uuid, ${job.candidateId}::uuid, 'failed',
+          ${facts.evidenceRef}, ${facts.evidencePayloadDigest},
+          ${terminalAuditLogId}, clock_timestamp())
+      `;
+    }
+    const runUpdated = await tx.$executeRaw`
+      UPDATE "ChatUnifiedOptimizerRun"
+      SET "state" = 'failed', "terminalAt" = clock_timestamp()
+      WHERE "id" = ${runId}::uuid AND "state" = 'active'
+    `;
+    if (runUpdated !== 1) return refuse("close_conflict");
+    const cycleUpdated = await tx.$executeRaw`
+      UPDATE "ChatUnifiedOptimizerCycle"
+      SET "state" = 'failed', "terminalAt" = clock_timestamp()
+      WHERE "id" = ${parsed.data.cycleId}::uuid AND "state" = 'active'
+    `;
+    if (cycleUpdated !== 1) return refuse("close_conflict");
+    if (!terminalAt) return refuse("close_conflict");
+    return { outcome: "closed", cycleId: parsed.data.cycleId, runId,
+      reason: parsed.data.reason, closeRequestDigest,
+      closedJobIds: Object.freeze(queued.map(job => job.id)),
+      cycleState: "failed", terminalAt } as const;
   }, transactionOptions);
 }
 
