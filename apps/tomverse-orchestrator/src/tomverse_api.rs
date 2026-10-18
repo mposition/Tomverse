@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -2889,6 +2889,93 @@ pub fn plan_worker_session_list(body: &Value) -> WorkerSessionList {
     }
 }
 
+/// Which bridge kind serves a worker (orchestration policy version 55,
+/// section 1): `v22` when the worker's capability carries a v22 profile, so
+/// its bridge talks to that worker's one-shot sidecar, and `session`
+/// otherwise, so its bridge sends to the local AMUX session of that name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerBridgeKind {
+    Session,
+    V22,
+}
+
+impl WorkerBridgeKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            WorkerBridgeKind::Session => "session",
+            WorkerBridgeKind::V22 => "v22",
+        }
+    }
+}
+
+/// What a bridge started with `--worker` acts on from the bridge-scope route
+/// (orchestration policy version 55, sections 1 and 2). None of the four is
+/// a halt; only `Listed` can let a worker register or be offered for
+/// dispatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkerBridgeScope {
+    /// The workers the derived catalog lists, each with its kind.
+    Listed(BTreeMap<String, WorkerBridgeKind>),
+    /// `bridge_scope_off`: the route's code latch is off.
+    Off,
+    /// `worker_catalog_unavailable`: the app could not derive the catalog.
+    CatalogUnavailable,
+    /// Any other answer, including a 404 and no answer at all.
+    Unreadable,
+}
+
+/// The one reading of a 200 body from the bridge-scope route: exactly
+/// `{ "listed": true, "workers": [{ "name": <string>, "kind": "session" | "v22" }] }`,
+/// `{ "listed": false, "reason": "bridge_scope_off" }` or
+/// `{ "listed": false, "reason": "worker_catalog_unavailable" }`. As with the
+/// session list, a field set to null is not an absent field, and anything
+/// else -- another key in the body or in a worker, another kind, another
+/// reason, a name listed twice -- is unreadable, never a scope.
+pub fn plan_worker_bridge_scope(body: &Value) -> WorkerBridgeScope {
+    let Some(object) = body.as_object() else {
+        return WorkerBridgeScope::Unreadable;
+    };
+    let keys: BTreeSet<&str> = object.keys().map(String::as_str).collect();
+    match object.get("listed") {
+        Some(Value::Bool(true)) if keys == BTreeSet::from(["listed", "workers"]) => {
+            let Some(rows) = object.get("workers").and_then(Value::as_array) else {
+                return WorkerBridgeScope::Unreadable;
+            };
+            let mut listed = BTreeMap::new();
+            for row in rows {
+                let Some(row) = row.as_object() else {
+                    return WorkerBridgeScope::Unreadable;
+                };
+                let row_keys: BTreeSet<&str> = row.keys().map(String::as_str).collect();
+                if row_keys != BTreeSet::from(["kind", "name"]) {
+                    return WorkerBridgeScope::Unreadable;
+                }
+                let Some(name) = row.get("name").and_then(Value::as_str) else {
+                    return WorkerBridgeScope::Unreadable;
+                };
+                let kind = match row.get("kind").and_then(Value::as_str) {
+                    Some("session") => WorkerBridgeKind::Session,
+                    Some("v22") => WorkerBridgeKind::V22,
+                    _ => return WorkerBridgeScope::Unreadable,
+                };
+                // A name listed twice could name two kinds; neither is the answer.
+                if listed.insert(name.to_owned(), kind).is_some() {
+                    return WorkerBridgeScope::Unreadable;
+                }
+            }
+            WorkerBridgeScope::Listed(listed)
+        }
+        Some(Value::Bool(false)) if keys == BTreeSet::from(["listed", "reason"]) => {
+            match object.get("reason").and_then(Value::as_str) {
+                Some("bridge_scope_off") => WorkerBridgeScope::Off,
+                Some("worker_catalog_unavailable") => WorkerBridgeScope::CatalogUnavailable,
+                _ => WorkerBridgeScope::Unreadable,
+            }
+        }
+        _ => WorkerBridgeScope::Unreadable,
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct WorkerHeartbeatRequest<'a> {
     worker_name: &'a str,
@@ -3297,6 +3384,34 @@ impl TomverseApi {
         {
             Ok((_, body)) => plan_worker_session_list(&body),
             Err(_) => WorkerSessionList::Unreadable,
+        }
+    }
+
+    /// Orchestration policy version 55, sections 1 and 2: whether a bridge
+    /// started with `--worker` may serve its worker, and as which kind.
+    /// Read-only. Unlike the session list, a 404 is not "off": only a
+    /// bridge-scope answer can let a worker in, and an app that does not
+    /// serve the route has not said anything.
+    pub async fn worker_bridge_scope(&self) -> WorkerBridgeScope {
+        let response = match self
+            .client
+            .get(format!(
+                "{}/api/internal/amux/workers/bridge-scope",
+                self.base_url
+            ))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(_) => return WorkerBridgeScope::Unreadable,
+        };
+        match read_bounded_json::<Value>(response, &[StatusCode::OK], MAX_LIFECYCLE_RESPONSE_BYTES)
+            .await
+        {
+            Ok((_, body)) => plan_worker_bridge_scope(&body),
+            Err(_) => WorkerBridgeScope::Unreadable,
         }
     }
 
