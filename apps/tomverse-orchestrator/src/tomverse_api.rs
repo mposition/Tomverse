@@ -1397,6 +1397,34 @@ impl TomverseApi {
         bail!("v22 usage write outcome unknown or conflicting read-back")
     }
 
+    /// One POST to an AMUX Decision Maker internal route
+    /// (app/api/internal/amux/decision-maker/**) for the bridge relay
+    /// (crate::dm_relay): the sync bearer like every other call here, the
+    /// answer read whole and bounded whatever its status. Never retried here:
+    /// a transport failure or an answer over `max_bytes` is an error, which
+    /// the relay reads as a lost answer and settles by its own rules.
+    pub(crate) async fn post_decision_maker(
+        &self,
+        path: &str,
+        body: &Value,
+        timeout: Duration,
+        max_bytes: usize,
+    ) -> Result<RawAnswer> {
+        if !path.starts_with("/api/internal/amux/decision-maker/") {
+            bail!("the Decision Maker relay calls only the Decision Maker routes");
+        }
+        let response = self
+            .client
+            .post(format!("{}{path}", self.base_url))
+            .timeout(timeout)
+            .bearer_auth(&self.secret)
+            .json(body)
+            .send()
+            .await
+            .context("Decision Maker route request failed")?;
+        read_raw_answer(response, max_bytes).await
+    }
+
     fn with_timeouts(
         base_url: String,
         secret: String,

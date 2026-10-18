@@ -1299,6 +1299,11 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
     // GET+POST, artifacts/{aid} is PATCH+DELETE.
     RouteEntry { path: "/api/board/{id}/capsule", methods: &["GET"] },
     RouteEntry { path: "/api/board/{id}/typed-ask", methods: &["GET"] },
+    // The Decision Maker marker's verbs, for the Tomverse bridge relay only
+    // (api/dm_relay.rs): outside /api/board, behind the relay token. GET is
+    // the list of every marker a restarted relay releases.
+    RouteEntry { path: "/api/dm-relay/pending", methods: &["GET", "POST"] },
+    RouteEntry { path: "/api/dm-relay/pending/release", methods: &["POST"] },
     RouteEntry { path: "/api/board/{id}/verifications", methods: &["GET"] },
     RouteEntry { path: "/api/board/{id}/artifacts", methods: &["GET", "POST"] },
     RouteEntry { path: "/api/board/{id}/artifacts/{aid}", methods: &["PATCH", "DELETE"] },
