@@ -62,6 +62,23 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
       {row.stage === "cancelled" ? <p>{m.stages.cancelled}</p> : null}
       {row.submissionOrigin === "session" ?
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
+      {row.submissionOrigin === "session" && row.referencePins === null ? (
+        <p role="alert" className="text-red-200">{m.intakePinsUnavailable}</p>
+      ) : null}
+      {row.submissionOrigin === "session" && row.referencePins && row.referencePins.length > 0 ? (
+        <section aria-labelledby="amux-intake-pins-heading" data-testid="amux-intake-pins"
+          className="space-y-2 border-t border-zinc-800 pt-3">
+          <h3 id="amux-intake-pins-heading" className="font-medium text-zinc-100">
+            {m.intakePinsTitle}
+          </h3>
+          <ol className="space-y-1 text-xs text-zinc-300">
+            {row.referencePins.map((pin) => <li key={pin.referenceOrdinal}>
+              {m.checkoutReference(pin.referenceOrdinal)}: <code className="break-all text-zinc-100">
+                {pin.pinnedCommitSha}</code>
+            </li>)}
+          </ol>
+        </section>
+      ) : null}
       {row.checkoutEvidence.length > 0 ? (
         <section aria-labelledby="amux-checkout-evidence-heading" data-testid="amux-checkout-evidence"
           className="space-y-2 border-t border-zinc-800 pt-3">

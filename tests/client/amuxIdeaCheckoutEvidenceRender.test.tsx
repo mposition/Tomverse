@@ -13,7 +13,17 @@ const row = (checkoutEvidence: AmuxIdeaProgressRow["checkoutEvidence"]): AmuxIde
     proposedUnits: 0, cards: [] }),
   ideaId: "idea-1", requestId: "11111111-1111-4111-8111-111111111111",
   submittedAt: "2026-10-16T00:00:00.000Z", displayKey: null,
-  reviewPullRequests: [], taskRows: [], checkoutEvidence,
+  reviewPullRequests: [], taskRows: [], checkoutEvidence, referencePins: null,
+});
+
+test("Admin shows the intake SHA before checkout evidence exists", () => {
+  const sessionRow = { ...row([]), submissionOrigin: "session" as const,
+    referencePins: [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40) }] };
+  const markup = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: sessionRow }));
+  assert.match(markup, /data-testid="amux-intake-pins"/);
+  assert.ok(markup.includes("a".repeat(40)));
+  assert.doesNotMatch(markup, /data-testid="amux-checkout-evidence"/);
 });
 
 test("Admin idea detail shows pinned SHA and exclusion reasons without private paths", () => {

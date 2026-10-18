@@ -289,6 +289,11 @@ test("session submission encrypts idea and provenance under the scope owner with
     reservationId: committedReservationId,
     hasExternalSources: true,
   });
+  const progress = (await readAmuxIdeaProgressForOwner(ownerId)).find((item) =>
+    item.ideaId === committedIdeaId);
+  assert.deepEqual(progress?.referencePins, [{ referenceOrdinal: 0,
+    pinnedCommitSha: "a".repeat(40) }]);
+  assert.deepEqual(progress?.checkoutEvidence, []);
 });
 
 test("session submission queues one content-free analysis reservation in the same transaction", async () => {
