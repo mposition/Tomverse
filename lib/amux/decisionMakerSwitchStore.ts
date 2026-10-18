@@ -100,12 +100,14 @@ export async function readDecisionMakerSwitches(
  *
  * Since stage S2-2a4 the boundary is the scope's newest `validation_latch`
  * and the first person's event after it -- which the switch guard requires to
- * be `amux.decision.latch_release` -- with the ledger sequence that release
- * was written after and its database clock (`DmValidationCountBoundary`), in
- * place of the scope's newest event of any kind: a person's ordinary mode
- * change, a cleanup latch and its release are not where §8's count starts.
- * Subqueries on the scope's index, for each newest row; they ride in this
- * statement because a routing already sends §9's 12 with setup and fence.
+ * be `amux.decision.latch_release` -- with that release's own sequence and
+ * database clock (`DmValidationCountBoundary`), in place of the scope's
+ * newest event of any kind: a person's ordinary mode change, a cleanup latch
+ * and its release are not where §8's count starts. A result is placed against
+ * the release by the switch sequence the ledger's guard recorded on it under
+ * the switch gate. Subqueries on the scope's index, for each newest row; they
+ * ride in this statement because a routing already sends §9's 12 with setup
+ * and fence.
  */
 export async function readDecisionMakerSwitchesWithBoundariesOrThrow(
   client: SwitchReader,
@@ -116,7 +118,7 @@ export async function readDecisionMakerSwitchesWithBoundariesOrThrow(
       value: string;
       newestCleanupLatchEventId: string | null;
       newestValidationLatchSequence: bigint | null;
-      validationReleaseLedgerSequence: bigint | null;
+      validationReleaseSequence: bigint | null;
       validationReleasedAtEpochMs: bigint | null;
     }>
   >`
@@ -130,7 +132,7 @@ export async function readDecisionMakerSwitchesWithBoundariesOrThrow(
         LIMIT 1
       ) AS "newestCleanupLatchEventId",
       v."sequence" AS "newestValidationLatchSequence",
-      r."ledgerSequence" AS "validationReleaseLedgerSequence",
+      r."sequence" AS "validationReleaseSequence",
       r."releasedAtEpochMs" AS "validationReleasedAtEpochMs"
     FROM (
       SELECT DISTINCT ON ("scope") "scope", "value"
@@ -145,7 +147,7 @@ export async function readDecisionMakerSwitchesWithBoundariesOrThrow(
       LIMIT 1
     ) v ON true
     LEFT JOIN LATERAL (
-      SELECT h."ledgerSequence", floor(extract(epoch FROM h."createdAt") * 1000)::bigint AS "releasedAtEpochMs"
+      SELECT h."sequence", floor(extract(epoch FROM h."createdAt") * 1000)::bigint AS "releasedAtEpochMs"
       FROM "AmuxDecisionMakerSwitchEvent" h
       WHERE h."scope" = n."scope" AND h."actorKind" = 'human' AND h."sequence" > v."sequence"
       ORDER BY h."sequence" ASC
@@ -272,10 +274,7 @@ export async function recordDecisionMakerSwitchByOperator(
  * not latch an instance whose newest validation latch nobody has released
  * (since stage S2-2a4; before it, whose newest event of any kind was a
  * latch). The audit comes first, under the instance's own actor, then the
- * event naming it. The insert trigger records, as it does the clock, the
- * newest request ledger sequence the event was written after
- * (`ledgerSequence`, migration 20261017200000), which places a result before
- * or after a release without a clock.
+ * event naming it.
  *
  * Since stage S2-2a3 a cleanup latch names the ledger event id of the
  * `cleanup_unknown` report it settles, and no other latch names one; the

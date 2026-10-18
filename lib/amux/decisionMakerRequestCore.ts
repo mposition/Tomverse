@@ -920,8 +920,8 @@ const isValidationCountBoundary = (value: unknown): value is DmValidationCountBo
   if (boundary.kind === "none" || boundary.kind === "latched") return true;
   return (
     boundary.kind === "released" &&
-    (boundary.afterLedgerSequence === null ||
-      (typeof boundary.afterLedgerSequence === "string" && /^(0|[1-9][0-9]{0,18})$/.test(boundary.afterLedgerSequence))) &&
+    typeof boundary.releaseSequence === "string" &&
+    /^[1-9][0-9]{0,18}$/.test(boundary.releaseSequence) &&
     typeof boundary.releasedAtMs === "number" &&
     Number.isSafeInteger(boundary.releasedAtMs) &&
     boundary.releasedAtMs >= 0
@@ -930,23 +930,27 @@ const isValidationCountBoundary = (value: unknown): value is DmValidationCountBo
 
 /**
  * Which of an instance's terminal results §8's count reads, as the store
- * binds them (stage S2-2a4): those whose ledger sequence is above
- * `afterLedgerSequence` and whose database clock is at or after `sinceMs`.
- * After a release, the sequence the release was written after -- so a result
- * that committed before it is not counted, even in its millisecond -- or, for
- * a release written before that number was recorded, its clock, a shared
- * millisecond counted (the side that latches sooner). Otherwise every result
- * (both bounds zero). Null for a boundary the switch read could not have
- * produced.
+ * binds them (stage S2-2a4): those whose recorded switch sequence -- the
+ * sequence of the instance's newest switch event the ledger's guard read
+ * under the shared switch gate when it admitted the result -- is at or above
+ * `fromSwitchSequence`; and those recorded before that number was kept (no
+ * switch sequence) whose database clock is at or after `sinceMs`.
+ *
+ * After a release, the release's own sequence and clock: a result the gate
+ * admitted after the release read it or a later event, and one admitted
+ * before it could not -- an order neither a clock (a shared millisecond) nor
+ * the ledger's sequence (drawn before the guard waits on the gate, review
+ * r-20261018-012448-8f45bd) gives. An older result without the number falls
+ * back to the clock, a shared millisecond counted (the side that latches
+ * sooner). Otherwise every result (both bounds zero). Null for a boundary the
+ * switch read could not have produced.
  */
 export const dmValidationCountWindow = (
   boundary: unknown,
-): { afterLedgerSequence: string; sinceMs: number } | null => {
+): { fromSwitchSequence: string; sinceMs: number } | null => {
   if (!isValidationCountBoundary(boundary)) return null;
-  if (boundary.kind !== "released") return { afterLedgerSequence: "0", sinceMs: 0 };
-  return boundary.afterLedgerSequence === null
-    ? { afterLedgerSequence: "0", sinceMs: boundary.releasedAtMs }
-    : { afterLedgerSequence: boundary.afterLedgerSequence, sinceMs: 0 };
+  if (boundary.kind !== "released") return { fromSwitchSequence: "0", sinceMs: 0 };
+  return { fromSwitchSequence: boundary.releaseSequence, sinceMs: boundary.releasedAtMs };
 };
 
 /**

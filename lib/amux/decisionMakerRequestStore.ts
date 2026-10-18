@@ -219,11 +219,11 @@ const isoOf = (epochMs: number) => new Date(epochMs).toISOString();
 
 /**
  * The results §8's count reads, as bound parameters
- * (`dmValidationCountWindow()`): above a ledger sequence, at or after a
- * database clock. A boundary the switch read could not have produced is the
- * caller's error.
+ * (`dmValidationCountWindow()`): admitted at or above a switch sequence, or,
+ * recorded before that number was kept, at or after a database clock. A
+ * boundary the switch read could not have produced is the caller's error.
  */
-const requireCountWindow = (boundary: unknown): { afterLedgerSequence: string; sinceMs: number } => {
+const requireCountWindow = (boundary: unknown): { fromSwitchSequence: string; sinceMs: number } => {
   const window = dmValidationCountWindow(boundary);
   if (window === null) throw new DecisionMakerRequestWriteError("invalid_input");
   return window;
@@ -234,9 +234,10 @@ const requireCountWindow = (boundary: unknown): { afterLedgerSequence: string; s
  * for a proposal in the trailing hour and day by the database clock -- the
  * throughput input of `routeDmQuestion()` (§3-6) -- and, since 2026-10-17,
  * the kinds of its terminal results inside its §8 count boundary (since stage
- * S2-2a4 `dmValidationCountWindow(boundary)`: above the ledger sequence its
- * newest validation latch's release was written after), newest first, at
- * most DM_VALIDATION_LATCH_WINDOW: whether §8's latch is owed -- and, since
+ * S2-2a4 `dmValidationCountWindow(boundary)`: after a release, those the
+ * ledger's guard admitted under that release or a later switch event of the
+ * instance), newest first, at most DM_VALIDATION_LATCH_WINDOW: whether §8's
+ * latch is owed -- and, since
  * stage S2-2a3, the ledger event id of its newest `cleanup_unknown` report:
  * whether §5's latch is owed. All ride in the statement the routing already
  * sent, so the routing's count is unchanged.
@@ -275,8 +276,10 @@ export async function readDecisionMakerInstanceLoad(
         FROM "AmuxDecisionMakerRequestEvent" ev
         WHERE ev."kind" = 'result'
           AND ev."instance" = ${input.instance}
-          AND ev."sequence" > ${count.afterLedgerSequence}::bigint
-          AND ev."createdAt" >= 'epoch'::timestamptz + ${count.sinceMs} * INTERVAL '1 millisecond'
+          AND (
+            ev."switchSequence" >= ${count.fromSwitchSequence}::bigint
+            OR (ev."switchSequence" IS NULL AND ev."createdAt" >= 'epoch'::timestamptz + ${count.sinceMs} * INTERVAL '1 millisecond')
+          )
         ORDER BY ev."sequence" DESC
         LIMIT ${DM_VALIDATION_LATCH_WINDOW}
       ) AS "resultKinds",
@@ -1259,8 +1262,9 @@ export async function recordDecisionMakerCleanupUnknown(
 /**
  * The kinds of an instance's terminal results inside its §8 count boundary
  * (`dmValidationCountWindow(boundary)`, stage S2-2a4: every one when it has no
- * validation latch; after a release, those above the ledger sequence the
- * release was written after), newest first, at most
+ * validation latch; after a release, those the ledger's guard admitted under
+ * the release or a later switch event of the instance, which it records on the
+ * result under the shared switch gate), newest first, at most
  * DM_VALIDATION_LATCH_WINDOW, in one statement: what §8's count reads
  * (`dmValidationLatchDecision()`). Every ledger write takes the audit chain
  * lock first, so the sequence is the order the results committed in. A result
@@ -1282,8 +1286,10 @@ export async function readDecisionMakerInstanceResultKinds(
     FROM "AmuxDecisionMakerRequestEvent" ev
     WHERE ev."kind" = 'result'
       AND ev."instance" = ${input.instance}
-      AND ev."sequence" > ${count.afterLedgerSequence}::bigint
-      AND ev."createdAt" >= 'epoch'::timestamptz + ${count.sinceMs} * INTERVAL '1 millisecond'
+      AND (
+        ev."switchSequence" >= ${count.fromSwitchSequence}::bigint
+        OR (ev."switchSequence" IS NULL AND ev."createdAt" >= 'epoch'::timestamptz + ${count.sinceMs} * INTERVAL '1 millisecond')
+      )
     ORDER BY ev."sequence" DESC
     LIMIT ${DM_VALIDATION_LATCH_WINDOW}
   `;
@@ -1308,12 +1314,15 @@ export type DecisionMakerValidationLatchWrite =
  * and the release after it, never its newest switch event of any kind:
  * "해제는 운영자만" (§8), and a person's ordinary mode change -- saved between
  * the third failure and this check -- is not a release, nor is a cleanup
- * latch's. After a release, a result is placed by the ledger sequence the
- * release was written after, not by a clock, so a failure that committed
- * before the release in its millisecond is not counted after it; only a
- * release written before migration 20261017200000 recorded that sequence
- * falls back to its clock, a shared millisecond counted (the side that
- * latches sooner).
+ * latch's. After a release, a result is placed by the switch state the
+ * ledger's guard admitted it under (`switchSequence`, read under the shared
+ * switch gate the release holds exclusive), not by a clock and not by the
+ * ledger's sequence: a failure that committed before the release in its
+ * millisecond is not counted after it, and one that drew its sequence before
+ * the release but committed after it is (review r-20261018-012448-8f45bd),
+ * with or without the audit chain lock. Only a result written before
+ * migration 20261017200000 recorded that number falls back to its clock, a
+ * shared millisecond counted (the side that latches sooner).
  *
  * Two callers, each in a boundary transaction of its own: the result route,
  * once a validation failure it recorded has committed
@@ -1373,8 +1382,10 @@ export async function readDecisionMakerInstanceLatchInputs(
         FROM "AmuxDecisionMakerRequestEvent" ev
         WHERE ev."kind" = 'result'
           AND ev."instance" = ${input.instance}
-          AND ev."sequence" > ${count.afterLedgerSequence}::bigint
-          AND ev."createdAt" >= 'epoch'::timestamptz + ${count.sinceMs} * INTERVAL '1 millisecond'
+          AND (
+            ev."switchSequence" >= ${count.fromSwitchSequence}::bigint
+            OR (ev."switchSequence" IS NULL AND ev."createdAt" >= 'epoch'::timestamptz + ${count.sinceMs} * INTERVAL '1 millisecond')
+          )
         ORDER BY ev."sequence" DESC
         LIMIT ${DM_VALIDATION_LATCH_WINDOW}
       ) AS "resultKinds",

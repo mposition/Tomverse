@@ -642,20 +642,20 @@ test("a refused change or latch sends nothing at all", async () => {
 /**
  * One row of the ledger's switch read: the scope's newest value, the report its newest cleanup latch
  * names, and its §8 count boundary -- its newest validation latch and the first person's event after
- * it, with that release's ledger sequence and clock (stage S2-2a4). None of them unless given.
+ * it, with that release's own sequence and clock (stage S2-2a4). None of them unless given.
  */
 const at = (row, boundary = {}, newestCleanupLatchEventId = null) => ({
   newestCleanupLatchEventId,
   newestValidationLatchSequence: null,
-  validationReleaseLedgerSequence: null,
+  validationReleaseSequence: null,
   validationReleasedAtEpochMs: null,
   ...boundary,
   ...row,
 });
 const LATCHED_AT_7 = { newestValidationLatchSequence: 7n };
-const RELEASED_AFTER_LEDGER_40 = {
+const RELEASED_AT_40 = {
   newestValidationLatchSequence: 7n,
-  validationReleaseLedgerSequence: 40n,
+  validationReleaseSequence: 40n,
   validationReleasedAtEpochMs: 1_790_000_000_456n,
 };
 
@@ -664,15 +664,15 @@ test("the ledger's switch read is the state and each instance's §8 count bounda
     boundaryRows: [
       at({ scope: "kill_switch", value: "off" }),
       at({ scope: "decision-maker-openai", value: "off" }, LATCHED_AT_7, REPORT),
-      at({ scope: "decision-maker-anthropic", value: "proposal" }, RELEASED_AFTER_LEDGER_40),
+      at({ scope: "decision-maker-anthropic", value: "proposal" }, RELEASED_AT_40),
     ],
   });
   assert.deepEqual(await readDecisionMakerSwitchesWithBoundariesOrThrow(tx), {
     state: { killSwitch: false, instances: { "decision-maker-openai": "off", "decision-maker-anthropic": "proposal" } },
-    // Stage S2-2a4: a validation latch nobody has released, and one a person released after ledger event 40.
+    // Stage S2-2a4: a validation latch nobody has released, and one a person released in switch event 40.
     validationBoundary: {
       "decision-maker-openai": { kind: "latched" },
-      "decision-maker-anthropic": { kind: "released", afterLedgerSequence: "40", releasedAtMs: 1_790_000_000_456 },
+      "decision-maker-anthropic": { kind: "released", releaseSequence: "40", releasedAtMs: 1_790_000_000_456 },
     },
     // Stage S2-2a3: the report each instance's newest cleanup latch names, the one report it settles.
     cleanupLatchedEventId: { "decision-maker-openai": REPORT, "decision-maker-anthropic": null },
@@ -688,11 +688,11 @@ test("the ledger's switch read is the state and each instance's §8 count bounda
         String.raw`SELECT\s+n\."scope", n\."value",`,
         String.raw`\(\s+SELECT c\."cleanupEventId"\s+FROM "AmuxDecisionMakerSwitchEvent" c\s+WHERE c\."scope" = n\."scope" AND c\."reasonCode" = 'cleanup_latch'\s+ORDER BY c\."sequence" DESC\s+LIMIT 1\s+\) AS "newestCleanupLatchEventId",`,
         String.raw`v\."sequence" AS "newestValidationLatchSequence",`,
-        String.raw`r\."ledgerSequence" AS "validationReleaseLedgerSequence",`,
+        String.raw`r\."sequence" AS "validationReleaseSequence",`,
         String.raw`r\."releasedAtEpochMs" AS "validationReleasedAtEpochMs"`,
         String.raw`FROM \(\s+SELECT DISTINCT ON \("scope"\) "scope", "value"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+ORDER BY "scope", "sequence" DESC\s+\) n`,
         String.raw`LEFT JOIN LATERAL \(\s+SELECT l\."sequence"\s+FROM "AmuxDecisionMakerSwitchEvent" l\s+WHERE l\."scope" = n\."scope" AND l\."reasonCode" = 'validation_latch'\s+ORDER BY l\."sequence" DESC\s+LIMIT 1\s+\) v ON true`,
-        String.raw`LEFT JOIN LATERAL \(\s+SELECT h\."ledgerSequence", floor\(extract\(epoch FROM h\."createdAt"\) \* 1000\)::bigint AS "releasedAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent" h\s+WHERE h\."scope" = n\."scope" AND h\."actorKind" = 'human' AND h\."sequence" > v\."sequence"\s+ORDER BY h\."sequence" ASC\s+LIMIT 1\s+\) r ON true`,
+        String.raw`LEFT JOIN LATERAL \(\s+SELECT h\."sequence", floor\(extract\(epoch FROM h\."createdAt"\) \* 1000\)::bigint AS "releasedAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent" h\s+WHERE h\."scope" = n\."scope" AND h\."actorKind" = 'human' AND h\."sequence" > v\."sequence"\s+ORDER BY h\."sequence" ASC\s+LIMIT 1\s+\) r ON true`,
       ].join(String.raw`\s+`),
     ),
   );
@@ -707,13 +707,15 @@ test("an instance with no validation latch counts every result; a row the table 
     validationBoundary: none,
     cleanupLatchedEventId: { "decision-maker-openai": null, "decision-maker-anthropic": null },
   });
-  // A release written before migration 20261017200000 has no ledger sequence; its clock bounds the count.
-  assert.deepEqual(
-    decisionMakerSwitchReadFromRows([
-      at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AFTER_LEDGER_40, validationReleaseLedgerSequence: null }),
-    ]).validationBoundary["decision-maker-openai"],
-    { kind: "released", afterLedgerSequence: null, releasedAtMs: 1_790_000_000_456 },
-  );
+  // The sequence read back as a number or a decimal string is the same boundary.
+  for (const release of [40, "40"]) {
+    assert.deepEqual(
+      decisionMakerSwitchReadFromRows([
+        at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AT_40, validationReleaseSequence: release }),
+      ]).validationBoundary["decision-maker-openai"],
+      { kind: "released", releaseSequence: "40", releasedAtMs: 1_790_000_000_456 },
+    );
+  }
   const unreadable = {
     state: unreadableDecisionMakerSwitches(),
     validationBoundary: none,
@@ -726,17 +728,21 @@ test("an instance with no validation latch counts every result; a row the table 
     [{ ...at({ scope: "decision-maker-openai", value: "proposal" }), validationReleasedAtEpochMs: undefined }],
     // A bad state row is unreadable whatever its boundary.
     [at({ scope: "decision-maker-openai", value: "autonomous" })],
-    // And one bad boundary spoils a good state: a release with no latch before it, a release's number
-    // without its clock, a latch without a release's clock but with its number, values the columns
-    // cannot hold, and any of them on the kill switch.
+    // And one bad boundary spoils a good state: a release with no latch before it, a release with one of
+    // its two values, a release numbered at or below its latch, values the columns cannot hold, and any
+    // of them on the kill switch.
     [at({ scope: "kill_switch", value: "off" }), at({ scope: "decision-maker-anthropic", value: "proposal" }, { validationReleasedAtEpochMs: 1n })],
-    [at({ scope: "decision-maker-openai", value: "proposal" }, { validationReleaseLedgerSequence: 4n })],
-    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...LATCHED_AT_7, validationReleaseLedgerSequence: 4n })],
-    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AFTER_LEDGER_40, validationReleasedAtEpochMs: "1" })],
-    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AFTER_LEDGER_40, validationReleasedAtEpochMs: 2n ** 60n })],
-    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AFTER_LEDGER_40, validationReleaseLedgerSequence: -1n })],
-    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AFTER_LEDGER_40, validationReleaseLedgerSequence: "04" })],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, { validationReleaseSequence: 40n })],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...LATCHED_AT_7, validationReleaseSequence: 40n })],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...LATCHED_AT_7, validationReleasedAtEpochMs: 1n })],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AT_40, validationReleaseSequence: 7n })],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AT_40, validationReleaseSequence: 4n })],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AT_40, validationReleasedAtEpochMs: "1" })],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AT_40, validationReleasedAtEpochMs: 2n ** 60n })],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AT_40, validationReleaseSequence: -1n })],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, { ...RELEASED_AT_40, validationReleaseSequence: "040" })],
     [at({ scope: "decision-maker-openai", value: "proposal" }, { newestValidationLatchSequence: "seven" })],
+    [at({ scope: "decision-maker-openai", value: "proposal" }, { newestValidationLatchSequence: 0n })],
     [at({ scope: "kill_switch", value: "off" }, LATCHED_AT_7)],
     // Stage S2-2a3: the named report is in every row, a ledger event id, and only on an instance.
     [{ ...at({ scope: "decision-maker-openai", value: "proposal" }), newestCleanupLatchEventId: undefined }],

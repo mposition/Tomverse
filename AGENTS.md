@@ -1865,21 +1865,25 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   switch core의 `DmValidationCountBoundary`·`decisionMakerSwitchReadFromRows()`, switch store의
   `readDecisionMakerSwitchesWithBoundariesOrThrow()`, request core의 `dmValidationCountWindow()`·`dmValidationLatchDecision()`·
   `dmOwedLatchReason()`, request store의 세 결과 읽기(`readDecisionMakerInstanceLoad()`·`readDecisionMakerInstanceResultKinds()`·
-  `readDecisionMakerInstanceLatchInputs()`), `prisma/schema.prisma`의 `ledgerSequence`. docs/policy/amux-decision-maker.md §8의
+  `readDecisionMakerInstanceLatchInputs()`), `prisma/schema.prisma`의 원장 사건 `switchSequence`. docs/policy/amux-decision-maker.md §8의
   "해제는 운영자만"입니다. **셈은 인스턴스의 가장 새 `validation_latch`와 그 뒤 첫 사람의 사건부터만 시작합니다** — 스위치 guard가
   시스템 사건 뒤 첫 사람의 사건을 `amux.decision.latch_release`로만 받으므로 그 사건이 곧 해제입니다. validation latch가 없으면
   모든 결과(최근 100건)를 세고, 풀리지 않았으면 아무것도 밀리지 않으며(같은 실패열은 한 번만), 풀렸으면 그 해제 뒤의 결과만
   셉니다. 사람의 일반 mode 변경(같은 값 재저장, off 뒤 proposal, 해제 뒤의 변경), `cleanup_latch`와 그 해제는 경계가 아닙니다 —
   세 번째 실패 뒤 latch가 쓰이기 전에 mode를 다시 저장하면 latch가 사라지던 결함이 이것이고, `cleanup_latch`는 검증 실패열을
-  처리하지 않으므로 둘 다 밀렸으면 둘 다 씁니다. **해제 앞뒤는 시각이 아니라 원장 sequence로 가릅니다** — 해제 전에 commit된
-  실패가 해제와 같은 DB ms에 놓일 수 있기 때문입니다. 그래서 모든 스위치 사건이 자기보다 먼저 commit된 원장의 가장 큰
-  sequence(`ledgerSequence`, 원장이 비면 0)를 갖고, 교체한 스위치 guard가 시각을 쓰듯 writer가 준 값과 상관없이 그 값을 씁니다.
-  정확한 근거는 audit chain lock입니다: 스위치 사건과 원장 사건 모두 같은 트랜잭션의 감사 행이 필요하고 감사 append는 그 lock을
-  먼저 잡으므로, 스위치 사건을 넣는 동안 진행 중인 원장 사건이 없습니다. migration 전에 쓰인 해제(값 없음)만 그 해제의 DB
-  시계로 가르며 같은 ms의 결과는 셉니다(latch가 빨라지는 쪽). migration은 스위치 guard 하나를 바꾸므로 이전 본문
-  digest(20261017160000의 본문)를 첫 DO 블록에서 대조하고, 새 열 때문에 baseline guard의 schema 비교에 보이므로 header 선언은
-  두지 않습니다. 문장 수는 그대로입니다 — 경계는 이미 보내던 스위치 읽기 한 문장의 LATERAL 두 개에, 해제 sequence는 이미 보내던
-  결과 읽기의 조건에 실렸으므로 라우팅 12·전송 의도 11·latch 확인 10(각각 setup·fence 포함)이 바뀌지 않습니다. 이 조각이 바꾸는
+  처리하지 않으므로 둘 다 밀렸으면 둘 다 씁니다. **해제 앞뒤는 결과가 받아들여질 때 본 스위치 상태로 가릅니다** — 시각도 원장
+  sequence도 아닙니다. 해제 전에 commit된 실패가 해제와 같은 DB ms에 놓일 수 있고, 원장 sequence는 INSERT가 시작될 때 뽑혀
+  guard가 gate를 기다리기 전이므로 audit chain lock이 없으면(entryHash 없는 감사 행은 잡지 않음) commit 순서가 아닙니다 — 실패가
+  N을 뽑고 해제가 쥔 gate를 기다리는 동안 gate를 잡지 않는 다른 요청의 assign이 N+1로 commit할 수 있습니다(검토
+  r-20261018-012448-8f45bd, 처음 구현의 `ledgerSequence`가 이 경로로 해제 뒤 실패를 영구히 빠뜨렸습니다). 그래서 교체한 원장
+  guard가 결과마다, 이미 결과에 공유로 잡는 스위치 gate 뒤에 그 인스턴스의 가장 새 스위치 사건 sequence를 읽어
+  `switchSequence`에 씁니다(writer가 준 값과 상관없이, 다른 종류는 NULL). 스위치 변경은 gate를 exclusive로 commit까지 쥐므로
+  해제는 결과의 읽기보다 통째로 앞이거나(결과가 해제나 그 뒤 사건을 봄) 통째로 뒤이며, 해제 뒤 셈은 `switchSequence`가 해제의
+  sequence 이상인 결과입니다. migration 전에 쓰인 결과(값 없음)만 해제의 DB 시계로 가르며 같은 ms의 결과는 셉니다(latch가
+  빨라지는 쪽). migration은 원장 guard 하나를 바꾸므로 이전 본문 digest(20261017160000의 본문)를 첫 DO 블록에서 대조하고, 새 열
+  때문에 baseline guard의 schema 비교에 보이므로 header 선언은 두지 않습니다. 문장 수는 그대로입니다 — 경계는 이미 보내던 스위치
+  읽기 한 문장의 LATERAL 두 개에, 해제 sequence는 이미 보내던 결과 읽기의 조건에 실렸고 trigger 안의 읽기는 셈에 들지 않으므로
+  라우팅 12·전송 의도 11·latch 확인 10·결과 제출 12(각각 setup·fence 포함)가 바뀌지 않습니다. 이 조각이 바꾸는
   것은 검증 실패 latch의 셈뿐이며 kill switch와 인스턴스 `off`의 판정, 해제 action의 판정은 바꾸지 않습니다.
 - **S2-3a(전용 launcher의 결정적 핵심)**: `lib/amux/decisionMakerLauncherCore.ts`,
   `lib/amux/decisionMakerLauncherFs.ts`, `lib/amux/decisionMakerLauncherProcess.ts`,

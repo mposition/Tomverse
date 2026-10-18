@@ -871,7 +871,7 @@ const recordingTx = ({
           switches.map((row) => ({
             newestCleanupLatchEventId: null,
             newestValidationLatchSequence: null,
-            validationReleaseLedgerSequence: null,
+            validationReleaseSequence: null,
             validationReleasedAtEpochMs: null,
             ...row,
           })),

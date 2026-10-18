@@ -543,11 +543,11 @@ test("stage S2-2a3's migration adds cleanup_unknown to the kinds, once per reque
   assert.ok(!DM_CLOSING_EVENT_KINDS.includes("cleanup_unknown"));
 
   // No migration between each previous one and this one redefines its guard, and none after this one
-  // but stage S2-2a4's for the switch guard, whose own test below holds it to this body: these are the
+  // but stage S2-2a4's for the event guard, whose own test below holds it to this body: these are the
   // bodies the database runs, or the one the next replacement is pinned to.
   for (const [name, previous, successors] of [
-    ["amux_decision_maker_request_event_guard", JUDGMENT_MIGRATION_NAME, []],
-    ["amux_decision_maker_switch_event_guard", SWITCH_SERIALIZATION_MIGRATION_NAME, [BOUNDARY_MIGRATION_NAME]],
+    ["amux_decision_maker_request_event_guard", JUDGMENT_MIGRATION_NAME, [BOUNDARY_MIGRATION_NAME]],
+    ["amux_decision_maker_switch_event_guard", SWITCH_SERIALIZATION_MIGRATION_NAME, []],
   ]) {
     const redefining = readdirSync(join(root, "prisma/migrations"))
       .filter((migration) => migration > previous && migration !== CLEANUP_MIGRATION_NAME && !successors.includes(migration))
@@ -564,54 +564,66 @@ test("stage S2-2a3's migration adds cleanup_unknown to the kinds, once per reque
 
 const BOUNDARY_MIGRATION_NAME = "20261017200000_amux_decision_maker_validation_count_boundary";
 
-test("stage S2-2a4's migration adds the switch event's ledger sequence and its one guard change alone", () => {
+test("stage S2-2a4's migration records on a result the switch state it was admitted under, and changes the event guard for that alone", () => {
   const raw = read(`prisma/migrations/${BOUNDARY_MIGRATION_NAME}/migration.sql`);
   const sql = withoutSqlComments(raw);
-  const before = functionBody(read(CLEANUP_MIGRATION), "amux_decision_maker_switch_event_guard");
-  const after = functionBody(raw, "amux_decision_maker_switch_event_guard");
+  const before = functionBody(read(CLEANUP_MIGRATION), "amux_decision_maker_request_event_guard");
+  const after = functionBody(raw, "amux_decision_maker_request_event_guard");
 
   // The DO block pins the replaced function to its previous body, before anything changes, by what the
   // baseline guard compares. The new column makes the migration visible to the schema comparison, so
   // the header declares no probe.
   const pins = Object.fromEntries([...raw.matchAll(/^ {12}\('([0-9a-f]{64})', '(amux_decision_maker_[a-z_]+)'\),?$/gm)].map((match) => [match[2], match[1]]));
-  assert.deepEqual(pins, { amux_decision_maker_switch_event_guard: sha256(bodyOf(before)) });
+  assert.deepEqual(pins, { amux_decision_maker_request_event_guard: sha256(bodyOf(before)) });
   assert.ok(sql.indexOf("DO $pin$") < sql.indexOf("ALTER TABLE"));
   assert.match(sql, /pg_catalog\.encode\(pg_catalog\.sha256\(pg_catalog\.convert_to\(p\.prosrc, 'UTF8'\)\), 'hex'\)/);
   assert.match(sql, /RAISE EXCEPTION 'AMUX_DM_UNEXPECTED_FUNCTION_BODY %', pinned\."name";/);
   assert.doesNotMatch(raw.split("\n")[0], /baseline-check/);
 
-  // The switch guard is its previous body with the ledger sequence declared, read after the switch gate
-  // and the scope's lock, and set on the event as its clock is -- whatever the writer supplied -- and
-  // nothing else.
+  // The event guard is its previous body with the admitted switch sequence declared, read for a result
+  // and set on every event -- whatever the writer supplied -- and nothing else (review
+  // r-20261018-012448-8f45bd: the switch gate orders a release and a result; the ledger's sequence
+  // does not without the audit chain lock).
   let expected = before;
-  expected = replaceOnce(expected, "    named BOOLEAN;\n", "    named BOOLEAN;\n    ledger_sequence BIGINT;\n", "declare");
   expected = replaceOnce(
     expected,
-    '    NEW."createdAt" := pg_catalog.clock_timestamp();\n',
-    "    -- Stage S2-2a4, section 8: the newest request ledger event committed\n" +
-      "    -- before this one, by the ledger's sequence (0 when there is none).\n" +
-      "    -- Read after the switch gate, in a statement of its own, by a\n" +
-      "    -- transaction holding the audit chain lock that every ledger write\n" +
-      "    -- holds from its audit row to its commit: every ledger event at or\n" +
-      "    -- below it committed before this event, and every later one commits\n" +
-      "    -- after it.\n" +
-      "    EXECUTE pg_catalog.format(\n" +
-      "        'SELECT coalesce(max(\"sequence\"), 0) FROM %I.%I',\n" +
-      "        TG_TABLE_SCHEMA,\n" +
-      "        'AmuxDecisionMakerRequestEvent'\n" +
-      "    ) INTO ledger_sequence;\n" +
-      '    NEW."ledgerSequence" := ledger_sequence;\n\n' +
-      '    NEW."createdAt" := pg_catalog.clock_timestamp();\n',
-    "ledger sequence",
+    "    switch_refused BOOLEAN := false;\n",
+    "    switch_refused BOOLEAN := false;\n    admitted_switch_sequence BIGINT;\n",
+    "declare",
+  );
+  expected = replaceOnce(
+    expected,
+    '    NEW."createdAt" := now_at;\n',
+    "    -- Stage S2-2a4, section 8: a result records the newest switch event of\n" +
+      "    -- its instance it was admitted under (0 when there is none), read after\n" +
+      "    -- the shared switch gate taken above, in a statement of its own. A\n" +
+      "    -- switch change takes the gate exclusive, so a latch's release commits\n" +
+      "    -- wholly before this result, which then reads the release or a later\n" +
+      "    -- event, or wholly after it -- whatever sequence either drew, and with\n" +
+      "    -- or without the audit chain lock. Every other kind records none,\n" +
+      "    -- whatever the writer supplied.\n" +
+      "    IF NEW.\"kind\" = 'result' THEN\n" +
+      "        EXECUTE pg_catalog.format(\n" +
+      "            'SELECT coalesce(max(\"sequence\"), 0) FROM %I.%I WHERE \"scope\" = $1',\n" +
+      "            TG_TABLE_SCHEMA,\n" +
+      "            'AmuxDecisionMakerSwitchEvent'\n" +
+      "        ) INTO admitted_switch_sequence USING request_instance;\n" +
+      "    END IF;\n" +
+      '    NEW."switchSequence" := admitted_switch_sequence;\n\n' +
+      '    NEW."createdAt" := now_at;\n',
+    "admitted switch sequence",
   );
   assert.equal(after, expected);
-  assert.ok(after.indexOf(`hashtext('${SWITCH_GATE}')`) < after.indexOf("max(\"sequence\")"));
+  // Every result takes the gate shared before the read, as before this stage.
+  assert.ok(after.includes(`IF NEW."kind" IN ('transmit_intent', 'result', 'result_rejected') THEN`));
+  assert.ok(after.indexOf(`hashtext('${SWITCH_GATE}')`) < after.indexOf(`INTO admitted_switch_sequence`));
 
-  // One nullable column, one function; no table, index, trigger, constraint or row change.
-  assert.ok(sql.includes(`ALTER TABLE "AmuxDecisionMakerSwitchEvent" ADD COLUMN "ledgerSequence" BIGINT;`));
+  // One nullable column, one function; no table, index, trigger, constraint or row change, and the
+  // switch guard untouched.
+  assert.ok(sql.includes(`ALTER TABLE "AmuxDecisionMakerRequestEvent" ADD COLUMN "switchSequence" BIGINT;`));
   assert.equal((sql.match(/^ALTER TABLE /gm) ?? []).length, 1);
   assert.deepEqual([...sql.matchAll(/^CREATE OR REPLACE FUNCTION "([a-z_]+)"/gm)].map((match) => match[1]), [
-    "amux_decision_maker_switch_event_guard",
+    "amux_decision_maker_request_event_guard",
   ]);
   assert.doesNotMatch(
     sql,
@@ -620,12 +632,12 @@ test("stage S2-2a4's migration adds the switch event's ledger sequence and its o
   assert.match(sql, /^BEGIN;$/m);
   assert.match(sql, /^COMMIT;$/m);
 
-  // No later migration redefines the switch guard: this is the body the database runs.
+  // No later migration redefines the event guard: this is the body the database runs.
   const redefining = readdirSync(join(root, "prisma/migrations"))
     .filter((migration) => migration > BOUNDARY_MIGRATION_NAME)
     .filter((migration) => {
       try {
-        return /FUNCTION "amux_decision_maker_switch_event_guard"\(/.test(read(`prisma/migrations/${migration}/migration.sql`));
+        return /FUNCTION "amux_decision_maker_request_event_guard"\(/.test(read(`prisma/migrations/${migration}/migration.sql`));
       } catch {
         return false;
       }
@@ -1370,20 +1382,20 @@ const MISSING_COLUMN = Symbol("missing column");
 
 // §8 count boundaries (stage S2-2a4), as the switch read returns them.
 const NO_LATCH = { kind: "none" };
-const RELEASED_AFTER_40 = { kind: "released", afterLedgerSequence: "40", releasedAtMs: NOW - 60_000 };
+const RELEASED_AT_40 = { kind: "released", releaseSequence: "40", releasedAtMs: NOW - 60_000 };
 
 // A switch row's §8 count boundary columns (stage S2-2a4): no validation latch.
 const NO_VALIDATION_LATCH = {
   newestValidationLatchSequence: null,
-  validationReleaseLedgerSequence: null,
+  validationReleaseSequence: null,
   validationReleasedAtEpochMs: null,
 };
 // Its newest validation latch, not released.
 const VALIDATION_LATCHED = { ...NO_VALIDATION_LATCH, newestValidationLatchSequence: 12n };
-// Its newest validation latch, released by a person after ledger event 40.
+// Its newest validation latch (switch event 12), released by a person in switch event 40.
 const VALIDATION_RELEASED = {
   newestValidationLatchSequence: 12n,
-  validationReleaseLedgerSequence: 40n,
+  validationReleaseSequence: 40n,
   validationReleasedAtEpochMs: BigInt(NOW - 60_000),
 };
 
@@ -1555,8 +1567,9 @@ const kindsOf = (sent) => sent.map((statement) => statement.kind);
 const auditOf = (sent) => sent.find((statement) => statement.kind === "create").data;
 const LOCK = /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/;
 // The routing's throughput statement carries the instance's result kinds inside its boundary (2026-10-17;
-// since stage S2-2a4 above a ledger sequence as well as at or after a clock).
-const RESULT_KINDS_IN_LOAD = /ARRAY\(\s+SELECT ev\."resultKind"\s+FROM "AmuxDecisionMakerRequestEvent" ev\s+WHERE ev\."kind" = 'result'\s+AND ev\."instance" = \$\s+AND ev\."sequence" > \$::bigint\s+AND ev\."createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'\s+ORDER BY ev\."sequence" DESC\s+LIMIT \$\s+\) AS "resultKinds"/;
+// since stage S2-2a4 those admitted at or above a switch sequence, or, recorded without one, at or after
+// a clock).
+const RESULT_KINDS_IN_LOAD = /ARRAY\(\s+SELECT ev\."resultKind"\s+FROM "AmuxDecisionMakerRequestEvent" ev\s+WHERE ev\."kind" = 'result'\s+AND ev\."instance" = \$\s+AND \(\s+ev\."switchSequence" >= \$::bigint\s+OR \(ev\."switchSequence" IS NULL AND ev\."createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'\)\s+\)\s+ORDER BY ev\."sequence" DESC\s+LIMIT \$\s+\) AS "resultKinds"/;
 // Since stage S2-2a3 the routing's throughput statement and the intent's latch read also carry the
 // ledger event id of the instance's newest cleanup report by the ledger's sequence, whatever its age.
 const NEWEST_REPORT_SUBQUERY = String.raw`\(\s+SELECT c\."id"\s+FROM "AmuxDecisionMakerRequestEvent" c\s+WHERE c\."kind" = 'cleanup_unknown'\s+AND c\."instance" = \$\s+ORDER BY c\."sequence" DESC\s+LIMIT 1\s+\) AS "newestCleanupUnknownEventId"`;
@@ -1566,25 +1579,25 @@ const CLEANUP_REPORT_READ = new RegExp(String.raw`^\s+SELECT ${NEWEST_REPORT_SUB
 // The ledger's switch read. Since stage S2-2a3 it carries the report each scope's newest cleanup latch
 // names: a cleanup latch settles that report and no other (reviews r-20261017-115136-888d76 and
 // r-20261017-123200-7609b7). Since stage S2-2a4 it carries each scope's §8 count boundary -- its newest
-// validation latch and the first person's event after it, with the ledger sequence and clock of that
-// release -- in place of its newest event's actor and clock.
+// validation latch and the first person's event after it, with that release's own sequence and clock --
+// in place of its newest event's actor and clock.
 const SWITCH_READ = new RegExp(
   [
     String.raw`SELECT\s+n\."scope", n\."value",`,
     String.raw`\(\s+SELECT c\."cleanupEventId"\s+FROM "AmuxDecisionMakerSwitchEvent" c\s+WHERE c\."scope" = n\."scope" AND c\."reasonCode" = 'cleanup_latch'\s+ORDER BY c\."sequence" DESC\s+LIMIT 1\s+\) AS "newestCleanupLatchEventId",`,
     String.raw`v\."sequence" AS "newestValidationLatchSequence",`,
-    String.raw`r\."ledgerSequence" AS "validationReleaseLedgerSequence",`,
+    String.raw`r\."sequence" AS "validationReleaseSequence",`,
     String.raw`r\."releasedAtEpochMs" AS "validationReleasedAtEpochMs"`,
     String.raw`FROM \(\s+SELECT DISTINCT ON \("scope"\) "scope", "value"\s+FROM "AmuxDecisionMakerSwitchEvent"\s+ORDER BY "scope", "sequence" DESC\s+\) n`,
     String.raw`LEFT JOIN LATERAL \(\s+SELECT l\."sequence"\s+FROM "AmuxDecisionMakerSwitchEvent" l\s+WHERE l\."scope" = n\."scope" AND l\."reasonCode" = 'validation_latch'\s+ORDER BY l\."sequence" DESC\s+LIMIT 1\s+\) v ON true`,
-    String.raw`LEFT JOIN LATERAL \(\s+SELECT h\."ledgerSequence", floor\(extract\(epoch FROM h\."createdAt"\) \* 1000\)::bigint AS "releasedAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent" h\s+WHERE h\."scope" = n\."scope" AND h\."actorKind" = 'human' AND h\."sequence" > v\."sequence"\s+ORDER BY h\."sequence" ASC\s+LIMIT 1\s+\) r ON true`,
+    String.raw`LEFT JOIN LATERAL \(\s+SELECT h\."sequence", floor\(extract\(epoch FROM h\."createdAt"\) \* 1000\)::bigint AS "releasedAtEpochMs"\s+FROM "AmuxDecisionMakerSwitchEvent" h\s+WHERE h\."scope" = n\."scope" AND h\."actorKind" = 'human' AND h\."sequence" > v\."sequence"\s+ORDER BY h\."sequence" ASC\s+LIMIT 1\s+\) r ON true`,
   ].join(String.raw`\s+`),
 );
 
 test("the reads are one statement each", async () => {
   {
     const { tx, sent } = recordingTx({ reportId: REPORT_A });
-    assert.deepEqual(await readDecisionMakerInstanceLoad(tx, { instance: OPENAI, boundary: RELEASED_AFTER_40 }), {
+    assert.deepEqual(await readDecisionMakerInstanceLoad(tx, { instance: OPENAI, boundary: RELEASED_AT_40 }), {
       lastHour: 3,
       lastDay: 7,
       resultKindsNewestFirst: [],
@@ -1593,16 +1606,16 @@ test("the reads are one statement each", async () => {
     assert.equal(sent.length, 1);
     assert.match(sent[0].sql, /WHERE r\."route" = 'dm_proposal'\s+AND r\."instance" = \$/);
     // The throughput and, in the same statement, the instance's newest result kinds inside the boundary
-    // -- after a release, above the ledger sequence it was written after -- and its newest cleanup report.
+    // -- after a release, those admitted under it or a later switch event, and an older result without
+    // that number by its clock -- and its newest cleanup report.
     assert.match(sent[0].sql, RESULT_KINDS_IN_LOAD);
     assert.match(sent[0].sql, NEWEST_REPORT_IN_READ);
-    assert.deepEqual(sent[0].values, [OPENAI, OPENAI, "40", 0, DM_VALIDATION_LATCH_WINDOW, OPENAI]);
+    assert.deepEqual(sent[0].values, [OPENAI, OPENAI, "40", NOW - 60_000, DM_VALIDATION_LATCH_WINDOW, OPENAI]);
   }
   {
-    // The intent's latch inputs: the same two, in one statement without the throughput. A release
-    // written before its ledger sequence was recorded bounds the count by its clock instead.
+    // The intent's latch inputs: the same two, in one statement without the throughput.
     const { tx, sent } = recordingTx({ resultKinds: ["validation_failure"], reportId: null });
-    const legacy = { kind: "released", afterLedgerSequence: null, releasedAtMs: NOW - 5 };
+    const legacy = { kind: "released", releaseSequence: "41", releasedAtMs: NOW - 5 };
     assert.deepEqual(await readDecisionMakerInstanceLatchInputs(tx, { instance: OPENAI, boundary: legacy }), {
       resultKindsNewestFirst: ["validation_failure"],
       newestCleanupUnknownEventId: null,
@@ -1611,7 +1624,7 @@ test("the reads are one statement each", async () => {
     assert.match(sent[0].sql, RESULT_KINDS_IN_LOAD);
     assert.match(sent[0].sql, NEWEST_REPORT_IN_READ);
     assert.doesNotMatch(sent[0].sql, /count\(\*\)/);
-    assert.deepEqual(sent[0].values, [OPENAI, "0", NOW - 5, DM_VALIDATION_LATCH_WINDOW, OPENAI]);
+    assert.deepEqual(sent[0].values, [OPENAI, "41", NOW - 5, DM_VALIDATION_LATCH_WINDOW, OPENAI]);
   }
   {
     // §5's latch check: the newest report alone.
@@ -2226,7 +2239,7 @@ test("a malformed input sends nothing at all", async () => {
     (tx) => recordDecisionMakerResultUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI, resultDigest: "x" }),
     (tx) => staleCloseDecisionMakerRequest(tx, { requestId: null }),
     (tx) => readDecisionMakerInstanceLoad(tx, { instance: "decision-maker-gemini", boundary: NO_LATCH }),
-    (tx) => readDecisionMakerInstanceLoad(tx, { instance: OPENAI, boundary: { kind: "released", afterLedgerSequence: "-1", releasedAtMs: 0 } }),
+    (tx) => readDecisionMakerInstanceLoad(tx, { instance: OPENAI, boundary: { kind: "released", releaseSequence: "-1", releasedAtMs: 0 } }),
     // Before stage S2-2a4 the count's input was a clock; it is now the boundary the switch read returned.
     (tx) => readDecisionMakerInstanceLoad(tx, { instance: OPENAI, sinceMs: 0 }),
     (tx) => readDecisionMakerRequestState(tx, REQUEST_ID, "x"),
@@ -2286,8 +2299,8 @@ test("§8: three validation failures in a row latch, and any other terminal resu
   assert.deepEqual(latchFor([FAILURE, FAILURE, FAILURE]), { latch: true });
   assert.deepEqual(latchFor([FAILURE, FAILURE, FAILURE, FAILURE]), { latch: true });
   // After a release, the results the store read above it count the same way.
-  assert.deepEqual(latchFor([FAILURE, FAILURE, FAILURE], RELEASED_AFTER_40), { latch: true });
-  assert.deepEqual(latchFor([FAILURE, FAILURE], RELEASED_AFTER_40), { latch: false, reason: "no_streak" });
+  assert.deepEqual(latchFor([FAILURE, FAILURE, FAILURE], RELEASED_AT_40), { latch: true });
+  assert.deepEqual(latchFor([FAILURE, FAILURE], RELEASED_AT_40), { latch: false, reason: "no_streak" });
   assert.deepEqual(latchFor([FAILURE, FAILURE]), { latch: false, reason: "no_streak" });
   assert.deepEqual(latchFor([]), { latch: false, reason: "no_streak" });
   for (const other of DM_RESULT_KINDS.filter((kind) => kind !== FAILURE)) {
@@ -2321,30 +2334,29 @@ test("§8: a result kind the ledger cannot hold, or a boundary the switch read c
     { actorKind: "human" },
     { actorKind: "system" },
     { kind: "since", sinceMs: 0 },
-    { kind: "released", afterLedgerSequence: "-1", releasedAtMs: 0 },
-    { kind: "released", afterLedgerSequence: "01", releasedAtMs: 0 },
-    { kind: "released", afterLedgerSequence: 40, releasedAtMs: 0 },
-    { kind: "released", afterLedgerSequence: "40", releasedAtMs: 1.5 },
-    { kind: "released", afterLedgerSequence: null, releasedAtMs: -1 },
-    { kind: "released", afterLedgerSequence: null },
+    { kind: "released", releaseSequence: "-1", releasedAtMs: 0 },
+    { kind: "released", releaseSequence: "0", releasedAtMs: 0 },
+    { kind: "released", releaseSequence: "01", releasedAtMs: 0 },
+    { kind: "released", releaseSequence: 40, releasedAtMs: 0 },
+    { kind: "released", releaseSequence: null, releasedAtMs: 0 },
+    { kind: "released", releaseSequence: "40", releasedAtMs: 1.5 },
+    { kind: "released", releaseSequence: "40", releasedAtMs: -1 },
+    { kind: "released", releaseSequence: "40" },
+    { kind: "released", afterLedgerSequence: "40", releasedAtMs: 0 },
   ]) {
     assert.equal(dmValidationLatchDecision({ validationBoundary: bad, resultKindsNewestFirst: [FAILURE, FAILURE, FAILURE] }), null, JSON.stringify(bad));
     assert.equal(dmValidationCountWindow(bad), null, JSON.stringify(bad));
   }
 });
 
-test("§8 (stage S2-2a4): the results a count reads -- after a release, by the ledger sequence it was written after", () => {
+test("§8 (stage S2-2a4): the results a count reads -- after a release, those the switch gate admitted under it", () => {
   // No validation latch, or one standing: every result (the decision ignores them while it stands).
-  assert.deepEqual(dmValidationCountWindow(NO_LATCH), { afterLedgerSequence: "0", sinceMs: 0 });
-  assert.deepEqual(dmValidationCountWindow(LATCHED), { afterLedgerSequence: "0", sinceMs: 0 });
-  // A release: those above the ledger sequence it was written after, whatever their clocks -- a result
-  // that committed before it in its millisecond is not after it.
-  assert.deepEqual(dmValidationCountWindow(RELEASED_AFTER_40), { afterLedgerSequence: "40", sinceMs: 0 });
-  // A release written before that number was recorded: its clock, a shared millisecond counted.
-  assert.deepEqual(dmValidationCountWindow({ kind: "released", afterLedgerSequence: null, releasedAtMs: NOW }), {
-    afterLedgerSequence: "0",
-    sinceMs: NOW,
-  });
+  assert.deepEqual(dmValidationCountWindow(NO_LATCH), { fromSwitchSequence: "0", sinceMs: 0 });
+  assert.deepEqual(dmValidationCountWindow(LATCHED), { fromSwitchSequence: "0", sinceMs: 0 });
+  // A release: the results admitted under it or a later switch event of the instance, whatever their
+  // clocks or ledger sequences (review r-20261018-012448-8f45bd); its clock places only a result recorded
+  // before that number was kept, a shared millisecond counted.
+  assert.deepEqual(dmValidationCountWindow(RELEASED_AT_40), { fromSwitchSequence: "40", sinceMs: NOW - 60_000 });
 });
 
 test("§8: an owed latch is the instance off for a routing and an intent; nothing else changes", () => {
@@ -2356,15 +2368,15 @@ test("§8: an owed latch is the instance off for a routing and an intent; nothin
   assert.deepEqual(dmSwitchInputWithOwedLatch({ killSwitch: null, instanceMode: null }, true), { killSwitch: null, instanceMode: null });
   assert.deepEqual(dmTransmitSwitchRefusal(dmSwitchInputWithOwedLatch(proposing, true)), "instance_off");
 });
-const RESULT_KINDS = /SELECT ev\."resultKind"\s+FROM "AmuxDecisionMakerRequestEvent" ev\s+WHERE ev\."kind" = 'result'\s+AND ev\."instance" = \$\s+AND ev\."sequence" > \$::bigint\s+AND ev\."createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'\s+ORDER BY ev\."sequence" DESC\s+LIMIT \$/;
+const RESULT_KINDS = /SELECT ev\."resultKind"\s+FROM "AmuxDecisionMakerRequestEvent" ev\s+WHERE ev\."kind" = 'result'\s+AND ev\."instance" = \$\s+AND \(\s+ev\."switchSequence" >= \$::bigint\s+OR \(ev\."switchSequence" IS NULL AND ev\."createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'\)\s+\)\s+ORDER BY ev\."sequence" DESC\s+LIMIT \$/;
 
 test("an instance's results inside a boundary are one bounded statement, newest first", async () => {
   {
     const { tx, sent } = recordingTx({ resultKinds: [FAILURE, "proposal"] });
-    assert.deepEqual(await readDecisionMakerInstanceResultKinds(tx, { instance: OPENAI, boundary: RELEASED_AFTER_40 }), [FAILURE, "proposal"]);
+    assert.deepEqual(await readDecisionMakerInstanceResultKinds(tx, { instance: OPENAI, boundary: RELEASED_AT_40 }), [FAILURE, "proposal"]);
     assert.equal(sent.length, 1);
     assert.match(sent[0].sql, RESULT_KINDS);
-    assert.deepEqual(sent[0].values, [OPENAI, "40", 0, DM_VALIDATION_LATCH_WINDOW]);
+    assert.deepEqual(sent[0].values, [OPENAI, "40", NOW - 60_000, DM_VALIDATION_LATCH_WINDOW]);
   }
   {
     // No validation latch: every result counts.
@@ -2374,8 +2386,8 @@ test("an instance's results inside a boundary are one bounded statement, newest 
   }
   for (const input of [
     { instance: "kill_switch", boundary: NO_LATCH },
-    { instance: OPENAI, boundary: { kind: "released", afterLedgerSequence: "-1", releasedAtMs: 0 } },
-    { instance: OPENAI, boundary: { kind: "released", afterLedgerSequence: null, releasedAtMs: 1.5 } },
+    { instance: OPENAI, boundary: { kind: "released", releaseSequence: "-1", releasedAtMs: 0 } },
+    { instance: OPENAI, boundary: { kind: "released", releaseSequence: "40", releasedAtMs: 1.5 } },
     { instance: OPENAI, boundary: null },
     { instance: OPENAI, sinceMs: 0 },
   ]) {
@@ -2448,13 +2460,13 @@ for (const [label, key] of [
       const unset = recordingTx({ switches: [{ scope: "kill_switch", value: "off" }], resultKinds: [FAILURE, FAILURE, FAILURE] });
       assert.equal((await recordDecisionMakerValidationLatch(unset.tx, { instance: OPENAI })).latched, true);
       assert.deepEqual(unset.sent[2].values, [OPENAI, "0", 0, DM_VALIDATION_LATCH_WINDOW]);
-      // Released by a person: the results above the ledger sequence the release was written after.
+      // Released by a person: the results admitted under the release or a later switch event.
       const released = recordingTx({
         switches: openaiSwitches({ ...VALIDATION_RELEASED }),
         resultKinds: [FAILURE, FAILURE, FAILURE],
       });
       assert.equal((await recordDecisionMakerValidationLatch(released.tx, { instance: OPENAI })).latched, true);
-      assert.deepEqual(released.sent[2].values, [OPENAI, "40", 0, DM_VALIDATION_LATCH_WINDOW]);
+      assert.deepEqual(released.sent[2].values, [OPENAI, "40", NOW - 60_000, DM_VALIDATION_LATCH_WINDOW]);
       // A cleanup latch is not a validation latch: it settles no run (stage S2-2a4).
       const cleanupOnly = recordingTx({
         switches: openaiSwitches({ value: "off", newestCleanupLatchEventId: REPORT_A }),
@@ -2628,7 +2640,7 @@ test("§5 before §8: the latch an owed report holds the instance off for comes 
   assert.deepEqual(owed([FAILURE, FAILURE, FAILURE], null, LATCHED), { reason: null });
   assert.deepEqual(owed([FAILURE, FAILURE, FAILURE], REPORT_B, LATCHED), { reason: "cleanup_latch", cleanupEventId: REPORT_B });
   // Released: the run read above the release is owed again.
-  assert.deepEqual(owed([FAILURE, FAILURE, FAILURE], null, RELEASED_AFTER_40), { reason: "validation_latch", cleanupEventId: null });
+  assert.deepEqual(owed([FAILURE, FAILURE, FAILURE], null, RELEASED_AT_40), { reason: "validation_latch", cleanupEventId: null });
   // Either input unreadable is unreadable.
   assert.equal(owed([FAILURE, "autonomous"], null), null);
   assert.equal(owed([], "soon"), null);
@@ -2781,7 +2793,7 @@ test("§5's latch check stops at a switch event or a report id it cannot read, w
   }
   for (const switches of [
     // A release with no validation latch before it (stage S2-2a4).
-    [{ scope: OPENAI, value: "proposal", validationReleaseLedgerSequence: 4, validationReleasedAtEpochMs: NOW }],
+    [{ scope: OPENAI, value: "proposal", validationReleaseSequence: 4, validationReleasedAtEpochMs: NOW }],
     // A named report that is not a ledger event id, or one named on the kill switch.
     openaiSwitches({ newestCleanupLatchEventId: "not-a-uuid" }),
     [{ scope: "kill_switch", value: "off", newestCleanupLatchEventId: REPORT_A }],

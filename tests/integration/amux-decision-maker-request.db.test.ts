@@ -1287,15 +1287,12 @@ test("throughput counts requests routed to one instance for a proposal in the tr
 });
 
 test("the routing's load read carries the instance's result kinds inside a boundary, newest first", async () => {
-  // The database clock as epoch milliseconds, read in SQL as the stores read it.
-  const dbClockMs = async () =>
-    Number((await prisma.$queryRaw<Array<{ ms: bigint }>>`SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "ms"`)[0]!.ms);
-  const newestLedgerSequence = async () =>
-    String((await prisma.$queryRaw<Array<{ s: bigint }>>`SELECT coalesce(max("sequence"), 0) AS "s" FROM "AmuxDecisionMakerRequestEvent"`)[0]!.s);
+  const newestSwitchSequence = async () =>
+    String((await prisma.$queryRaw<Array<{ s: bigint }>>`SELECT max("sequence") AS "s" FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = ${OPENAI}`)[0]!.s);
   await resultFor(await transmittedFor(), "validation_failure");
-  const before = await dbClockMs();
-  const watermark = await newestLedgerSequence();
-  await pause();
+  // A switch event of the instance between them: the results after it are admitted under it.
+  await setSwitch(OPENAI, "proposal");
+  const boundaryEvent = await newestSwitchSequence();
   await resultFor(await transmittedFor(), "validation_failure");
   await resultFor(await transmittedFor(), "proposal");
   await resultFor(await transmittedFor(ANTHROPIC), "timeout", ANTHROPIC);
@@ -1304,24 +1301,15 @@ test("the routing's load read carries the instance's result kinds inside a bound
     const load = await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary });
     assert.deepEqual(load.resultKindsNewestFirst, ["proposal", "validation_failure", "validation_failure"]);
   }
-  // After a release: above the ledger sequence it was written after (stage S2-2a4) ...
-  const released = { kind: "released", afterLedgerSequence: watermark, releasedAtMs: 0 } as const;
+  // After a release (stage S2-2a4): the results admitted under that switch event or a later one,
+  // whatever their clocks -- the release's clock only places a result recorded without the number.
+  const released = { kind: "released", releaseSequence: boundaryEvent, releasedAtMs: 0 } as const;
   assert.deepEqual((await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary: released })).resultKindsNewestFirst, [
     "proposal",
     "validation_failure",
   ]);
-  // ... or, for a release written before that number was recorded, at or after its clock.
-  const legacy = { kind: "released", afterLedgerSequence: null, releasedAtMs: before + 1 } as const;
-  assert.deepEqual((await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary: legacy })).resultKindsNewestFirst, [
-    "proposal",
-    "validation_failure",
-  ]);
-  // A boundary after them reads none of them.
-  await pause();
-  const later = { kind: "released", afterLedgerSequence: null, releasedAtMs: await dbClockMs() } as const;
+  const later = { kind: "released", releaseSequence: String(BigInt(boundaryEvent) + BigInt(1)), releasedAtMs: 0 } as const;
   assert.deepEqual((await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary: later })).resultKindsNewestFirst, []);
-  const above = { kind: "released", afterLedgerSequence: await newestLedgerSequence(), releasedAtMs: 0 } as const;
-  assert.deepEqual((await readDecisionMakerInstanceLoad(prisma, { instance: OPENAI, boundary: above })).resultKindsNewestFirst, []);
 });
 
 // ---------------------------------------------------------------------------
@@ -2381,74 +2369,197 @@ test("§8 S2-2a4: a cleanup latch does not settle three validation failures; the
   assert.equal((await routeOne()).route, "dm_proposal");
 });
 
-const ledgerSequencesOf = (scope: string) =>
-  prisma.$queryRaw<Array<{ ledgerSequence: bigint | null; actorKind: string }>>`
-    SELECT "ledgerSequence", "actorKind" FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = ${scope} ORDER BY "sequence"
+const switchSequencesOf = (requestId: string) =>
+  prisma.$queryRaw<Array<{ kind: string; switchSequence: bigint | null }>>`
+    SELECT "kind", "switchSequence" FROM "AmuxDecisionMakerRequestEvent" WHERE "requestId" = ${requestId} ORDER BY "sequence"
   `;
 
-const newestLedgerSequence = async () =>
-  (await prisma.$queryRaw<Array<{ s: bigint }>>`SELECT coalesce(max("sequence"), 0) AS "s" FROM "AmuxDecisionMakerRequestEvent"`)[0]!.s;
+const newestScopeSequence = async (scope: string) =>
+  (await prisma.$queryRaw<Array<{ s: bigint }>>`SELECT max("sequence") AS "s" FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = ${scope}`)[0]!.s;
 
-test("§8 S2-2a4: every switch event records the newest ledger sequence committed before it, whatever the writer sent", async () => {
-  // beforeEach's two events, written on an empty ledger.
-  assert.deepEqual((await ledgerSequencesOf(OPENAI)).map((row) => row.ledgerSequence), [BigInt(0)]);
-  assert.deepEqual((await ledgerSequencesOf(ANTHROPIC)).map((row) => row.ledgerSequence), [BigInt(0)]);
-  // Any instance's events move it: it is the ledger's, not the scope's.
-  await resultFor(await transmittedFor(ANTHROPIC), "proposal", ANTHROPIC);
-  await setSwitch(OPENAI, "proposal");
-  const afterAnthropic = await newestLedgerSequence();
-  assert.ok(afterAnthropic > BigInt(0));
-  assert.equal((await ledgerSequencesOf(OPENAI)).at(-1)!.ledgerSequence, afterAnthropic);
-  // A latch written by hand with a number of its own gets the ledger's instead.
-  await resultFor(await transmittedFor(), "validation_failure");
-  await prisma.$transaction(async (tx) => {
+/** An event written by hand with a switch sequence of the writer's own. */
+const eventSupplyingSwitchSequence = (requestId: string, event: EventRow) =>
+  prisma.$transaction(async (tx) => {
     const id = randomUUID();
-    const auditLogId = await writeSystemAuditLog({
-      tx,
-      systemActor: "amux-decision-maker-openai",
-      action: "amux.decision.latch",
-      targetType: "AmuxDecisionMakerSwitchEvent",
-      targetId: id,
-      summary: "test",
-    });
+    const auditLogId = await writeAudit(tx, eventAudit(event), EVENT, id);
     await tx.$executeRaw`
-      INSERT INTO "AmuxDecisionMakerSwitchEvent"
-        ("id", "scope", "value", "reasonCode", "actorKind", "actorUserId", "auditLogId", "ledgerSequence")
-      VALUES (${id}, ${OPENAI}, 'off', 'validation_latch', 'system', NULL, ${auditLogId}, 999999)
+      INSERT INTO "AmuxDecisionMakerRequestEvent"
+        ("id", "requestId", "kind", "instance", "resultKind", "resultDigest", "inputPayloadDigest", "auditLogId", "switchSequence")
+      VALUES (${id}, ${requestId}, ${event.kind}, ${event.instance ?? null}, ${event.resultKind ?? null},
+              ${event.resultDigest ?? null}, ${event.inputPayloadDigest ?? null}, ${auditLogId}, 999999)
     `;
   });
-  assert.deepEqual((await ledgerSequencesOf(OPENAI)).at(-1), { ledgerSequence: await newestLedgerSequence(), actorKind: "system" });
-  // The release after it, through the store, the same.
-  await resultFor(await transmittedFor(ANTHROPIC), "timeout", ANTHROPIC);
-  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
-  assert.deepEqual((await ledgerSequencesOf(OPENAI)).at(-1), { ledgerSequence: await newestLedgerSequence(), actorKind: "human" });
+
+test("§8 S2-2a4: a result records its instance's newest switch event it was admitted under; no other kind records one, whatever the writer sent", async () => {
+  const first = await transmittedFor();
+  await resultFor(first, "validation_failure");
+  assert.deepEqual(await switchSequencesOf(first), [
+    { kind: "assign", switchSequence: null },
+    { kind: "transmit_intent", switchSequence: null },
+    { kind: "result", switchSequence: await newestScopeSequence(OPENAI) },
+  ]);
+  // Another scope's events -- the kill switch, the other instance -- do not move it.
+  const second = await transmittedFor();
+  await setSwitch("kill_switch", "off");
+  await setSwitch(ANTHROPIC, "proposal");
+  const before = await newestScopeSequence(OPENAI);
+  await resultFor(second, "timeout");
+  assert.equal((await switchSequencesOf(second)).at(-1)!.switchSequence, before);
+  // The instance's own do, and a number the writer supplies is replaced by the one the guard read.
+  const third = await transmittedFor();
+  await setSwitch(OPENAI, "proposal");
+  await eventSupplyingSwitchSequence(third, FAILURE_EVENT);
+  const recorded = (await switchSequencesOf(third)).at(-1)!.switchSequence;
+  assert.equal(recorded, await newestScopeSequence(OPENAI));
+  assert.ok(recorded! > before);
+  // Any other kind records none.
+  const routed = await insertRequest();
+  await eventSupplyingSwitchSequence(routed, { kind: "assign" });
+  assert.deepEqual(await switchSequencesOf(routed), [{ kind: "assign", switchSequence: null }]);
 });
 
-// A release written before migration 20261017200000 has no ledger sequence. The guard sets it on every
+// A result written before migration 20261017200000 has no switch sequence. The guard sets it on every
 // insert, so it is cleared by hand, with the guard disabled for that one update in the test's own
-// transaction; the count then falls back to the release's clock, a shared millisecond counted.
-const clearLedgerSequenceOfNewest = (scope: string) =>
+// transaction; the count then places that result by its clock against the release's.
+const clearSwitchSequence = (eventId: string, createdAt: Date | null) =>
   prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerSwitchEvent" DISABLE TRIGGER "amux_decision_maker_switch_event_guard"`);
+    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerRequestEvent" DISABLE TRIGGER "amux_decision_maker_request_event_guard"`);
     await tx.$executeRaw`
-      UPDATE "AmuxDecisionMakerSwitchEvent" SET "ledgerSequence" = NULL
-      WHERE "sequence" = (SELECT max("sequence") FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = ${scope})
+      UPDATE "AmuxDecisionMakerRequestEvent" SET "switchSequence" = NULL, "createdAt" = coalesce(${createdAt}::timestamptz, "createdAt")
+      WHERE "id" = ${eventId}
     `;
-    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerSwitchEvent" ENABLE TRIGGER "amux_decision_maker_switch_event_guard"`);
+    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerRequestEvent" ENABLE TRIGGER "amux_decision_maker_request_event_guard"`);
   });
 
-test("§8 S2-2a4: a release with no ledger sequence (written before it was recorded) is placed by its clock, a shared millisecond counted", async () => {
+for (const [label, inReleaseMillisecond] of [
+  ["before the release's clock is not counted after it", false],
+  ["in the release's millisecond is counted after it, the side that latches sooner", true],
+] as const) {
+  test(`§8 S2-2a4: a result with no switch sequence (written before it was recorded) ${label}`, async () => {
+    const inFlight = await transmittedFor();
+    for (let index = 0; index < 3; index += 1) await resultFor(await transmittedFor(), "validation_failure");
+    assert.equal((await validationLatch()).latched, true);
+    await resultFor(inFlight, "validation_failure");
+    await pause();
+    assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
+    const release = await newestSwitchEventOf(OPENAI);
+    await clearSwitchSequence((await resultEventOf(inFlight)).id, inReleaseMillisecond ? release.createdAt : null);
+    assert.equal((await switchSequencesOf(inFlight)).at(-1)!.switchSequence, null);
+    await resultFor(await transmittedFor(), "validation_failure");
+    if (inReleaseMillisecond) {
+      assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
+      await resultFor(await transmittedFor(), "validation_failure");
+      assert.equal((await validationLatch()).latched, true);
+    } else {
+      await resultFor(await transmittedFor(), "validation_failure");
+      assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
+      await resultFor(await transmittedFor(), "validation_failure");
+      assert.equal((await validationLatch()).latched, true);
+    }
+  });
+}
+
+// Review r-20261018-012448-8f45bd (major): without the audit chain lock -- an audit row with no entry
+// hash takes none (unchainedAudit above) -- a ledger event's sequence is drawn when its INSERT starts,
+// before its guard waits on the switch gate, so the ledger's sequence is not its commit order. A
+// failure can draw N, wait on the gate a release holds, and commit after the release while another
+// request's assignment, which takes no gate, commits N + 1 before it.
+const advisoryWaiters = async () =>
+  (
+    await prisma.$queryRaw<Array<{ n: number }>>`
+      SELECT count(*)::int AS "n" FROM pg_stat_activity
+      WHERE "datname" = current_database() AND "wait_event_type" = 'Lock' AND "wait_event" = 'advisory'
+    `
+  )[0]!.n;
+
+const waitForAdvisoryWaiters = async (count: number) => {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    if ((await advisoryWaiters()) >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail(`fewer than ${count} transaction(s) waited on an advisory lock`);
+};
+
+/** A person's release of OPENAI's latch, its audit unchained. */
+const unchainedRelease = async (tx: Prisma.TransactionClient) => {
+  const id = randomUUID();
+  const userId = `dm-operator-${randomUUID()}`;
+  const auditLogId = await unchainedAudit(tx, {
+    action: "amux.decision.latch_release",
+    targetType: "AmuxDecisionMakerSwitchEvent",
+    targetId: id,
+    actorUserId: userId,
+  });
+  await tx.$executeRaw`
+    INSERT INTO "AmuxDecisionMakerSwitchEvent" ("id", "scope", "value", "reasonCode", "actorKind", "actorUserId", "auditLogId")
+    VALUES (${id}, ${OPENAI}, 'proposal', 'operator', 'human', ${userId}, ${auditLogId})
+  `;
+};
+
+const unchainedEvent = async (tx: Prisma.TransactionClient, requestId: string, event: EventRow) => {
+  const id = randomUUID();
+  const auditLogId = await unchainedAudit(tx, {
+    action: `amux.decision.${event.kind}`,
+    targetType: EVENT,
+    targetId: id,
+    systemActor: actorFor(event.kind, event.instance),
+  });
+  await insertEventRow(tx, id, requestId, event, auditLogId);
+};
+
+const FAILURE_EVENT: EventRow = { kind: "result", instance: OPENAI, resultKind: "validation_failure", resultDigest: DIGEST_C, inputPayloadDigest: DIGEST_B };
+
+test("§8 S2-2a4 review r-20261018-012448-8f45bd: a failure that drew its sequence before a release and committed after it counts after it, without the audit chain lock", async () => {
+  const inFlight = await transmittedFor();
+  // Routed before the latch, which the database refuses a routing to the instance after.
+  const other = await insertRequest();
+  for (let index = 0; index < 3; index += 1) await resultFor(await transmittedFor(), "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+
+  // A third connection holds the instance's per-scope switch lock, so the release, once its guard has
+  // the switch gate exclusive, waits on the next lock with the gate held.
+  const scopeLocked = deferred();
+  const scopeFree = deferred();
+  const scopeHolder = prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`tomverse-amux-decision-maker-switch:${OPENAI}`}))`;
+    scopeLocked.resolve();
+    await scopeFree.promise;
+  }, OPEN);
+  await scopeLocked.promise;
+  const release = prisma.$transaction((tx) => unchainedRelease(tx), OPEN);
+  await waitForAdvisoryWaiters(1);
+  // The failure draws its sequence and waits on the gate the release holds.
+  const failure = prisma.$transaction((tx) => unchainedEvent(tx, inFlight, FAILURE_EVENT), OPEN);
+  await waitForAdvisoryWaiters(2);
+  // Another request's assignment takes no gate: it draws a higher sequence and commits meanwhile.
+  await prisma.$transaction((tx) => unchainedEvent(tx, other, { kind: "assign" }), OPEN);
+  scopeFree.resolve();
+  await scopeHolder;
+  await release;
+  await failure;
+
+  const failed = await resultEventOf(inFlight);
+  const assigned = (await rowsOf(other)).find((row) => row.kind === "assign")!;
+  assert.ok(failed.sequence < assigned.sequence, "the failure drew its sequence before the assignment");
+  assert.equal((await newestSwitchEventOf(OPENAI)).actorKind, "human");
+  // It committed after the release, so it is the first of the count after it.
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
+  await resultFor(await transmittedFor(), "validation_failure");
+  assert.equal((await validationLatch()).latched, true);
+});
+
+test("§8 S2-2a4 review r-20261018-012448-8f45bd: a failure admitted before a release, which waited for it, is not counted after it, without the audit chain lock", async () => {
   const inFlight = await transmittedFor();
   for (let index = 0; index < 3; index += 1) await resultFor(await transmittedFor(), "validation_failure");
   assert.equal((await validationLatch()).latched, true);
-  await resultFor(inFlight, "validation_failure");
-  await pause();
-  assert.equal((await setSwitch(OPENAI, "proposal")).action, "amux.decision.latch_release");
-  await clearLedgerSequenceOfNewest(OPENAI);
-  const release = await newestSwitchEventOf(OPENAI);
-  assert.equal((await ledgerSequencesOf(OPENAI)).at(-1)!.ledgerSequence, null);
-  // A failure before it, in its millisecond, counts after it: the side that latches sooner.
-  await moveEventClock((await resultEventOf(inFlight)).id, release.createdAt);
+  const outcome = await race(
+    (tx) => unchainedEvent(tx, inFlight, FAILURE_EVENT),
+    () => prisma.$transaction((tx) => unchainedRelease(tx), OPEN),
+  );
+  assert.equal(outcome.error, null, String(outcome.error));
+  assert.equal((await newestSwitchEventOf(OPENAI)).actorKind, "human");
+  await resultFor(await transmittedFor(), "validation_failure");
   await resultFor(await transmittedFor(), "validation_failure");
   assert.deepEqual(await validationLatch(), { latched: false, reason: "no_streak" });
   await resultFor(await transmittedFor(), "validation_failure");

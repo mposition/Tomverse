@@ -122,12 +122,16 @@ export const decisionMakerSwitchStateFromRows = (rows: unknown): DecisionMakerSw
  * - `latched`: its newest validation latch has no person's event after it --
  *   the run it latched stands, and nothing is owed until it is released.
  * - `released`: the first person's event after that latch, which the switch
- *   guard requires to be `amux.decision.latch_release`. The count starts
- *   after it: the results whose ledger sequence is above
- *   `afterLedgerSequence`, the newest the release was written after (a
- *   decimal string; it is a BIGINT) -- or, for a release written before
- *   migration 20261017200000 recorded that number (null), the results at or
- *   after its database clock `releasedAtMs`, a shared millisecond counted.
+ *   guard requires to be `amux.decision.latch_release`. The count starts at
+ *   it: the results admitted under that release or a later switch event of
+ *   the instance -- each result records the sequence of its instance's newest
+ *   switch event, read by the ledger's guard under the shared switch gate
+ *   (`switchSequence`, migration 20261017200000), and those at or above
+ *   `releaseSequence` (a decimal string; it is a BIGINT) are counted. The
+ *   gate, not the audit chain lock, orders a release and a result (review
+ *   r-20261018-012448-8f45bd); a clock and the ledger's own sequence cannot.
+ *   A result written before that migration has no number and is placed by
+ *   its clock against `releasedAtMs`, a shared millisecond counted.
  *
  * Nothing else moves it: not a person's ordinary mode change -- the same mode
  * saved again, off and back to proposal, a change after the release -- not a
@@ -139,7 +143,7 @@ export const decisionMakerSwitchStateFromRows = (rows: unknown): DecisionMakerSw
 export type DmValidationCountBoundary =
   | { kind: "none" }
   | { kind: "latched" }
-  | { kind: "released"; afterLedgerSequence: string | null; releasedAtMs: number };
+  | { kind: "released"; releaseSequence: string; releasedAtMs: number };
 
 /**
  * What the request ledger's writers read in one statement
@@ -183,40 +187,42 @@ const LEDGER_EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 export const isDmLedgerEventId = (value: unknown): value is string =>
   typeof value === "string" && LEDGER_EVENT_ID.test(value);
 
-/** A BIGINT the read returned, as a decimal string; undefined when it is not one. */
-const ledgerSequenceOf = (value: unknown): string | undefined => {
-  if (typeof value === "bigint") return value >= BigInt(0) ? String(value) : undefined;
-  if (typeof value === "number") return Number.isSafeInteger(value) && value >= 0 ? String(value) : undefined;
-  if (typeof value === "string" && /^(0|[1-9][0-9]{0,18})$/.test(value)) return value;
+/** A switch event's sequence as the read returned it (a positive BIGINT), as a decimal string; undefined when it is not one. */
+const switchSequenceOf = (value: unknown): string | undefined => {
+  if (typeof value === "bigint") return value > BigInt(0) && value <= BigInt("9223372036854775807") ? String(value) : undefined;
+  if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? String(value) : undefined;
+  if (typeof value === "string" && /^[1-9][0-9]{0,18}$/.test(value) && BigInt(value) <= BigInt("9223372036854775807")) return value;
   return undefined;
 };
 
 /**
  * One scope's validation count boundary from its row's three columns: the
- * sequence of its newest validation latch, and the ledger sequence and
- * database clock of the first person's event after that latch. Undefined for
- * a combination the read could not have produced: a release without a latch,
- * a release's number without its clock, or any of them on the kill switch.
+ * sequence of its newest validation latch, and the sequence and database
+ * clock of the first person's event after that latch. Undefined for a
+ * combination the read could not have produced: a release without a latch, a
+ * release with only one of its two values, a release numbered at or below its
+ * latch, or any of them on the kill switch.
  */
 const validationBoundaryOf = (row: {
   scope: unknown;
   newestValidationLatchSequence?: unknown;
-  validationReleaseLedgerSequence?: unknown;
+  validationReleaseSequence?: unknown;
   validationReleasedAtEpochMs?: unknown;
 }): DmValidationCountBoundary | undefined => {
   const latch = row.newestValidationLatchSequence;
-  const releaseSequence = row.validationReleaseLedgerSequence;
+  const release = row.validationReleaseSequence;
   const releasedAt = row.validationReleasedAtEpochMs;
   if (latch === null) {
-    return releaseSequence === null && releasedAt === null ? { kind: "none" } : undefined;
+    return release === null && releasedAt === null ? { kind: "none" } : undefined;
   }
-  if (!isDmInstanceScope(row.scope) || ledgerSequenceOf(latch) === undefined) return undefined;
-  if (releasedAt === null) return releaseSequence === null ? { kind: "latched" } : undefined;
+  const latchSequence = switchSequenceOf(latch);
+  if (!isDmInstanceScope(row.scope) || latchSequence === undefined) return undefined;
+  if (release === null && releasedAt === null) return { kind: "latched" };
+  const releaseSequence = switchSequenceOf(release);
   const releasedAtMs = epochClock(releasedAt);
-  if (!Number.isSafeInteger(releasedAtMs)) return undefined;
-  if (releaseSequence === null) return { kind: "released", afterLedgerSequence: null, releasedAtMs };
-  const afterLedgerSequence = ledgerSequenceOf(releaseSequence);
-  return afterLedgerSequence === undefined ? undefined : { kind: "released", afterLedgerSequence, releasedAtMs };
+  if (releaseSequence === undefined || !Number.isSafeInteger(releasedAtMs)) return undefined;
+  if (BigInt(releaseSequence) <= BigInt(latchSequence)) return undefined;
+  return { kind: "released", releaseSequence, releasedAtMs };
 };
 
 /**
@@ -243,7 +249,7 @@ export const decisionMakerSwitchReadFromRows = (rows: unknown): DecisionMakerSwi
     scope: unknown;
     newestCleanupLatchEventId?: unknown;
     newestValidationLatchSequence?: unknown;
-    validationReleaseLedgerSequence?: unknown;
+    validationReleaseSequence?: unknown;
     validationReleasedAtEpochMs?: unknown;
   }>) {
     const boundary = validationBoundaryOf(row);
