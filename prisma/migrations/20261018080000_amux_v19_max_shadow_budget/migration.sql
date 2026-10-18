@@ -68,6 +68,11 @@ BEGIN
       a."actorUserId" IS NULL AND a."entryHash" IS NOT NULL AND
       a."metadata"->>'budgetMode' = 'max_shadow' AND
       a."metadata"->>'shadowOverrunMicroUsd' = delta::text AND
+      a."metadata"->>'reservationId' = c."reservationId"::text AND
+      a."metadata"->>'reservedMicroUsd' = c."reservedMicroUsd"::text AND
+      a."metadata"->>'status' IN ('succeeded', 'failed') AND
+      GREATEST((a."metadata"->>'settledMicroUsd')::numeric -
+        c."reservedMicroUsd"::numeric, 0)::text = delta::text AND
       a."metadata"->>'namespace' = NEW."namespace" AND
       ((a."metadata"->>'monthStart')::timestamptz AT TIME ZONE 'UTC') = NEW."monthStart"
   ) THEN
