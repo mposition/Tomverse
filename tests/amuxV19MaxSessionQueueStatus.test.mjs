@@ -51,5 +51,13 @@ test("Linux Max queue entrypoint emits only a fixed refusal without credentials"
       encoding: "utf8", env, timeout: 5_000 });
     assert.equal(child.status, 1);
     assert.equal(child.stdout, "AMUX_V19_MAX_SESSION_QUEUE_refused\n");
-  } finally { rmdirSync(home); }
+  } finally {
+    for (const path of [
+      join(home, ".local/state/tomverse-amux-v19-max-analysis"),
+      join(home, ".local/state"), join(home, ".local"), home,
+    ]) {
+      try { rmdirSync(path); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
+  }
 });
