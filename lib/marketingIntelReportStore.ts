@@ -18,7 +18,7 @@ import { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { marketingClaimById } from "@/lib/marketingClaims";
-import { holdApprovedMarketingCompetitorHosts, proposeMarketingCompetitors } from "@/lib/marketingCompetitorStore";
+import { holdApprovedMarketingCompetitorSources, proposeMarketingCompetitors } from "@/lib/marketingCompetitorStore";
 import {
   boundMarketingGeneratorStatements,
   boundMarketingGeneratorWriteByDeadline,
@@ -108,10 +108,12 @@ export async function recordMarketingGeneratorReport(
     return { status: "refused", reasons: ["report_claim_unknown"] };
   }
 
-  // Which hosts are official is a person's decision in the registry, read here
-  // and held until this record commits. A brief cites no source.
-  const hosts = report.kind === "market_intel" ? await holdApprovedMarketingCompetitorHosts(tx) : {};
-  const stored = marketingGeneratorReportStoredPayload(report, hosts);
+  // Which hosts and pages are sources is a person's decision in the registry,
+  // read here and held until this record commits; a fact counts only from an
+  // approved page, whatever the generator says it read. A brief cites no source.
+  const sources =
+    report.kind === "market_intel" ? await holdApprovedMarketingCompetitorSources(tx) : { hosts: {}, pages: {} };
+  const stored = marketingGeneratorReportStoredPayload(report, sources);
   const row = await insertMarketingReport(tx, {
     kind: report.kind,
     periodStart: new Date(report.periodStart),

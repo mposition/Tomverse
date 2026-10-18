@@ -13,6 +13,8 @@ import {
 
 const SECRET = "g".repeat(48);
 const HOSTS = Object.freeze({ poe: ["poe.com"] });
+const PAGES = Object.freeze({ poe: ["https://poe.com/blog/launch", "https://POE.com/x"] });
+const SOURCES = Object.freeze({ hosts: HOSTS, pages: PAGES });
 
 const fact = (overrides = {}) => ({
   competitorId: "poe",
@@ -81,7 +83,7 @@ test("the key names the report; the digest names its bytes", () => {
 });
 
 test("with no approved competitor, no fact is kept", () => {
-  const stored = marketingGeneratorReportStoredPayload(signed(), {});
+  const stored = marketingGeneratorReportStoredPayload(signed(), { hosts: {}, pages: {} });
   assert.deepEqual(stored, { payload: { facts: [], unrepresentableFactCount: 1 }, droppedFactCount: 1 });
 });
 
@@ -148,9 +150,15 @@ test("market facts may carry up to five signed competitor candidates, each once"
   assert.equal(marketingGeneratorReportDigest(unsigned()), marketingGeneratorReportDigest({ ...unsigned(), competitorCandidates: undefined }));
 });
 
-test("a fact is kept only for an exact official host of its own competitor", () => {
-  assert.equal(marketIntelSourceAllowed(fact(), HOSTS), true);
-  assert.equal(marketIntelSourceAllowed(fact({ sourceUrl: "https://POE.com/x" }), HOSTS), true);
+test("a fact is kept only for an approved page on an exact official host of its own competitor", () => {
+  assert.equal(marketIntelSourceAllowed(fact(), HOSTS, PAGES), true);
+  assert.equal(marketIntelSourceAllowed(fact({ sourceUrl: "https://POE.com/x" }), HOSTS, PAGES), true);
+  // An approved host is not enough: another page on it, or a page not tracked
+  // for this competitor, is not a source.
+  assert.equal(marketIntelSourceAllowed(fact({ sourceUrl: "https://poe.com/pricing" }), HOSTS, PAGES), false);
+  assert.equal(marketIntelSourceAllowed(fact(), HOSTS, { poe: [] }), false);
+  assert.equal(marketIntelSourceAllowed(fact(), HOSTS, {}), false);
+  assert.equal(marketIntelSourceAllowed(fact(), {}, PAGES), false);
   for (const sourceUrl of [
     "https://blog.poe.com/launch",
     "https://poe.com.example.net/launch",
@@ -159,21 +167,25 @@ test("a fact is kept only for an exact official host of its own competitor", () 
     "http://poe.com/launch",
     "not a url",
   ]) {
-    assert.equal(marketIntelSourceAllowed(fact({ sourceUrl }), HOSTS), false, sourceUrl);
+    assert.equal(
+      marketIntelSourceAllowed(fact({ sourceUrl }), HOSTS, { poe: [...PAGES.poe, sourceUrl] }),
+      false,
+      sourceUrl,
+    );
   }
-  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "other" }), HOSTS), false);
-  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "constructor" }), HOSTS), false);
-  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "__proto__" }), HOSTS), false);
+  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "other" }), HOSTS, PAGES), false);
+  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "constructor" }), HOSTS, PAGES), false);
+  assert.equal(marketIntelSourceAllowed(fact({ competitorId: "__proto__" }), HOSTS, PAGES), false);
 });
 
 test("facts that cannot be kept are counted with the unrepresentable ones, a brief is kept as sent", () => {
   const report = signed({
     payload: { facts: [fact(), fact({ sourceUrl: "https://elsewhere.example/x" })], unrepresentableFactCount: 2 },
   });
-  assert.deepEqual(marketingGeneratorReportStoredPayload(report, HOSTS), {
+  assert.deepEqual(marketingGeneratorReportStoredPayload(report, SOURCES), {
     payload: { facts: [fact()], unrepresentableFactCount: 3 },
     droppedFactCount: 1,
   });
   const brief = signed({ kind: "brief", payload: { topicIds: ["t"], claimIds: [], sourceDigests: [] } });
-  assert.deepEqual(marketingGeneratorReportStoredPayload(brief, HOSTS), { payload: brief.payload, droppedFactCount: 0 });
+  assert.deepEqual(marketingGeneratorReportStoredPayload(brief, SOURCES), { payload: brief.payload, droppedFactCount: 0 });
 });
