@@ -152,7 +152,7 @@ for (const commit of commits) {
     Object.keys(CONVENTION_VERSIONS).map((name) => [name, lock.packages?.[`node_modules/${name}`]?.version ?? null]),
   );
   const documents = baseFiles
-    .filter((file) => file.path === "AGENTS.md" || /^docs\/(?:policy|ui-contracts)\//.test(file.path))
+    .filter((file) => file.path === "AGENTS.md" || file.path === "docs/agents/machine-index.md" || /^docs\/(?:policy|ui-contracts)\//.test(file.path))
     .map((file) => file.text);
 
   const input = (credentialView) => ({
