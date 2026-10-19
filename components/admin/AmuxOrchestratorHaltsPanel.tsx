@@ -24,7 +24,8 @@ export type HaltAttention = "automatic_pending" | "operator_required" | "cause_r
 /** Presentation only; the server and database decide whether a halt is cleared. */
 export function amuxHaltAttention(halt: AmuxOrchestratorAdminHalt): HaltAttention {
   if (halt.reasonCode === "contract_violation" || halt.reasonCode === "selection_read_failures") return "cause_required";
-  if (!amuxOrchestratorHaltReasonAllowsAutoClear(halt.reasonCode) || halt.requestId === null) return "operator_required";
+  if (!amuxOrchestratorHaltReasonAllowsAutoClear(halt.reasonCode) || halt.requestId === null
+    || halt.haltKey !== halt.requestId) return "operator_required";
   // 2026-10-20 amendment: no admission means the server admits a placeholder and clears it.
   if (halt.write === null) return "automatic_pending";
   if (halt.write.requestId === halt.requestId

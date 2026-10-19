@@ -50,6 +50,8 @@ test("committed changes and halts outside the automatic list remain human decisi
 });
 test("a result-unknown halt whose request never reached the server is cleared by the server", () => {
   assert.equal(amuxHaltAttention(halt()), "automatic_pending");
+  // The server writes the placeholder only when the halt is keyed by its request.
+  assert.equal(amuxHaltAttention(halt({ haltKey: "00000000-0000-4000-8000-000000000009" })), "operator_required");
   const tree = render({ ...empty, openCount: 1, open: [halt()] });
   assert.match(textOf(tree), /never reached the server/);
   assert.equal(propsOf(tree).filter(p => p.haltId === halt().haltId).length, 0);
