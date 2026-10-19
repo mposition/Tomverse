@@ -32,6 +32,8 @@ import {
     AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD,
     AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
     AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
+    AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS,
+    optimizerCycleView,
     admitOptimizerReservation,
     autoRouterGeneratorMessage,
     autoRouterGeneratorSchema,
@@ -67,7 +69,7 @@ const GENERATOR_TIMEOUT_MS = 90_000;
 const JUDGE_MAX_OUTPUT_TOKENS = 40;
 const JUDGE_TIMEOUT_MS = 30_000;
 /** A cycle still `running` after this was cut off by a restart. */
-const STALE_RUNNING_MS = 15 * 60_000;
+const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
 const OPTIMIZER_LOCK = "auto-router-optimizer";
 
 export async function readOptimizerModelId(): Promise<string | null> {
@@ -832,6 +834,7 @@ export async function readAutoRouterOptimizerState() {
         },
         cycles: cycles.map((cycle): OptimizerCycleView => ({
             ...cycle,
+            ...optimizerCycleView(cycle, now),
             createdAt: cycle.createdAt.toISOString(),
             finishedAt: cycle.finishedAt?.toISOString() ?? null,
             promotedAt: cycle.promotedAt?.toISOString() ?? null,
