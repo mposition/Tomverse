@@ -210,14 +210,21 @@ export const admitRouterRewrite = (raw: unknown, prompt: string): string | null 
 
 /**
  * The execution view with the latest user message's text replaced by the
- * rewrite. Only a plain-text latest user message is rewritten: a turn whose
- * content is structured (attachments, parts) keeps its original view.
- * Returns the same array when nothing changes. Never mutates its input.
+ * rewrite. Only a plain-text conversation is rewritten: if any message carries
+ * attachments (Chat sends them beside a string `content`) or the latest user
+ * content is structured, the router never saw what "this file" or "the code"
+ * may refer to, so the original view is kept. Returns the same array when
+ * nothing changes. Never mutates its input.
  */
-export const withRouterRewrite = <M extends { role: string; content: unknown }>(
+export const withRouterRewrite = <
+    M extends { role: string; content: unknown; attachments?: unknown }
+>(
     messages: readonly M[],
     rewrite: string
 ): readonly M[] => {
+    if (messages.some((message) => Array.isArray(message.attachments) && message.attachments.length > 0)) {
+        return messages;
+    }
     let index = messages.length - 1;
     while (index >= 0 && messages[index]?.role !== "user") index -= 1;
     if (index < 0 || typeof messages[index].content !== "string") return messages;

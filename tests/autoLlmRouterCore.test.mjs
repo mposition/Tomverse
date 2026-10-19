@@ -197,3 +197,20 @@ test("the rewrite replaces only the latest plain-text user message", async () =>
   assert.equal(withRouterRewrite(structured, "Describe the image."), structured);
   assert.deepEqual(withRouterRewrite([{ role: "assistant", content: "hi" }], "x"), [{ role: "assistant", content: "hi" }]);
 });
+
+test("a conversation with attachments anywhere is never rewritten", async () => {
+  const { withRouterRewrite } = await import("../lib/autoLlmRouterCore.ts");
+  // The shape Chat sends: string content, attachments beside it.
+  const withFile = [
+    { role: "user", content: "이 코드 고쳐 줘", attachments: [{ uploadId: "u1", name: "main.py", mimeType: "text/x-python" }] },
+  ];
+  assert.equal(withRouterRewrite(withFile, "Fix the code in the previous answer."), withFile);
+  const earlierFile = [
+    { role: "user", content: "review this", attachments: [{ uploadId: "u1", name: "a.ts", mimeType: "text/plain" }] },
+    { role: "assistant", content: "Looks fine." },
+    { role: "user", content: "fix it" },
+  ];
+  assert.equal(withRouterRewrite(earlierFile, "Fix the issues in a.ts."), earlierFile);
+  const emptyList = [{ role: "user", content: "fix it", attachments: [] }];
+  assert.equal(withRouterRewrite(emptyList, "Fix the parser.")[0].content, "Fix the parser.");
+});

@@ -135,6 +135,11 @@ export async function pickAutoModelWithLlm(input: {
     userId: string | null;
     conversationId: string | null;
     traceId: string;
+    /**
+     * False when the turn cannot be rewritten (attachments anywhere in the
+     * conversation): the call then does not ask for one at all.
+     */
+    rewriteAllowed?: boolean;
 }): Promise<{ modelId: string; rewrite: string | null } | null> {
     const routerModel = resolveAutoLlmRouterModel(
         input.models,
@@ -156,7 +161,9 @@ export async function pickAutoModelWithLlm(input: {
     // Rewriting pays off on short, context-dependent turns; a long message is
     // routed as it is.
     const rewrite =
-        rewriteOn && input.prompt.trim().length <= AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS;
+        rewriteOn &&
+        input.rewriteAllowed === true &&
+        input.prompt.trim().length <= AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS;
     const version =
         autoLlmRouterVersionFor(AUTO_LLM_ROUTER_VERSION, active.cycleId) + (rewrite ? "+rewrite" : "");
     const startedAt = Date.now();

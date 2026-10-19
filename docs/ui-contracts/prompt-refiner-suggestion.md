@@ -424,7 +424,10 @@ Auto LLM router(`lib/autoLlmRouter.ts`)는 모델을 고르는 같은 호출에�
   전에 `admitRouterRewrite()`로 길이(1,500자 이하), 빈 값, 원문과의 동일 여부를 확인한다.
 - **§1·§6 예외: 자동 채택 권한이 Admin 스위치다.** 서명된 release 권한 대신 위 스위치가
   정한다. 적용 대상은 로그인 사용자의 Auto 라우팅 턴, 1,500자 이하의 일반 텍스트 메시지,
-  기존 Refiner 제안이 이미 적용되지 않은 턴뿐이다. guest Smart Adaptive 경로는 바뀌지 않는다.
+  기존 Refiner 제안이 이미 적용되지 않은 턴뿐이다. 대화의 어느 메시지에든 첨부(Chat이 문자열
+  `content` 옆에 보내는 `attachments`)가 있으면 재작성을 요청하지도 적용하지도 않는다. router는
+  첨부 내용을 읽지 않으므로 "이 파일"이나 "그 코드"가 무엇인지 알 수 없기 때문이다. guest Smart
+  Adaptive 경로는 바뀌지 않는다.
 
 다음은 이 경로에서도 그대로 지킨다.
 

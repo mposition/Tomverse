@@ -2040,6 +2040,7 @@ async function handleChatPost(
                       userId: session?.user?.id ?? null,
                       conversationId: conversationId ?? null,
                       traceId,
+                      rewriteAllowed: !turnCarriesAttachments(autoRoutingMessages),
                   })
             : null;
         const autoSelection = applyLlmModelPick(
