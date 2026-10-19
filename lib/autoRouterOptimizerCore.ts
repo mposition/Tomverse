@@ -10,8 +10,8 @@
  * proposal may be promoted -- promotion itself is a person's click in Admin.
  *
  * Pure: the calls are injected, so the whole cycle runs under test without a
- * provider. The money boundary is here too: no call starts unless its worst
- * case still fits the cycle's budget.
+ * provider. The money boundary is here too: no call starts once what the
+ * cycle has actually spent reaches its budget.
  */
 
 import type { AutoLlmRouterCandidate, AutoLlmRouterSession } from "@/lib/autoLlmRouterCore";
@@ -94,10 +94,10 @@ export type OptimizerCycleResult = {
     cases: OptimizerCase[];
     summary: OptimizerSummary;
     spentMicroUsd: number;
-    /** By call kind, so each provider's budget is settled with its own calls. */
+    /** By call kind, so each provider's budget records its own calls. */
     spentByKind: Record<OptimizerCallKind, number>;
-    /** Calls whose reported cost exceeded their worst-case bound. */
-    overrunCalls: number;
+    /** Calls that threw; their cost is unknown and counted as nothing. */
+    failedCalls: number;
 };
 
 export type OptimizerCallKind = "generate" | "route" | "judge";
@@ -175,7 +175,7 @@ export const autoLlmRouterVersionFor = (baseVersion: string, cycleId: string | n
 /**
  * A cycle still marked running after this long was cut off -- typically by a
  * redeploy, which ends the background calls with the container. The next
- * reservation closes it at its full reservation; until then it is shown as
+ * start closes it with the spend it had recorded; until then it is shown as
  * interrupted, so it neither blocks a new run nor reads as still working.
  */
 export const AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS = 15 * 60_000;
@@ -386,41 +386,14 @@ export const optimizerGateFailure = (summary: OptimizerSummary): OptimizerFailur
     return null;
 };
 
-/**
- * Input tokens added to every call's bound for what the request carries
- * besides the text: role framing, the JSON schema, provider wrapping.
- */
-export const AUTO_ROUTER_CALL_OVERHEAD_TOKENS = 1_000;
-
-/**
- * Worst-case micro-USD of one call: full output used, and an input token
- * count bounded by the UTF-8 byte length of the text -- a byte-level
- * tokenizer never needs more than one token per byte, which a character count
- * does not bound for Korean or emoji -- plus the fixed overhead.
- */
-export const worstCaseCallMicroUsd = (input: {
-    inputText: string;
-    maxOutputTokens: number;
-    inputUsdPerMillionTokens: number;
-    outputUsdPerMillionTokens: number;
-}) =>
-    Math.ceil(
-        (new TextEncoder().encode(input.inputText).length + AUTO_ROUTER_CALL_OVERHEAD_TOKENS) *
-            input.inputUsdPerMillionTokens +
-            input.maxOutputTokens * input.outputUsdPerMillionTokens
-    );
-
-/** Actual micro-USD from reported usage; unknown usage is charged as the worst case. */
+/** Actual micro-USD from reported usage; unknown usage counts as nothing. */
 export const callCostMicroUsd = (input: {
     inputTokens: number | undefined;
     outputTokens: number | undefined;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
-    worstCaseMicroUsd: number;
 }) => {
-    if (input.inputTokens === undefined || input.outputTokens === undefined) {
-        return input.worstCaseMicroUsd;
-    }
+    if (input.inputTokens === undefined || input.outputTokens === undefined) return 0;
     return Math.ceil(
         input.inputTokens * input.inputUsdPerMillionTokens +
             input.outputTokens * input.outputUsdPerMillionTokens
@@ -428,28 +401,25 @@ export const callCostMicroUsd = (input: {
 };
 
 /**
- * The budget a new cycle reserves -- its whole worst case -- or the cap that
- * refuses it. A cycle whose worst case does not fit one run's cap does not
- * start: one that ran out part-way would have spent money on a result that can
- * never pass.
+ * A new cycle's budget from what earlier cycles actually spent, or the cap
+ * that refuses it: a cap already reached refuses; otherwise the budget is the
+ * room left under the run, day and month caps, whichever is smallest.
  */
-export const admitOptimizerReservation = (input: {
-    worstCaseMicroUsd: number;
+export const admitOptimizerCycle = (input: {
     spentTodayMicroUsd: number;
     spentThisMonthMicroUsd: number;
-}): { reservedMicroUsd: number } | { refused: "run_cap" | "day_cap" | "month_cap" } => {
-    const reservedMicroUsd = Math.ceil(input.worstCaseMicroUsd);
-    if (reservedMicroUsd > AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD) return { refused: "run_cap" };
-    if (input.spentTodayMicroUsd + reservedMicroUsd > AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD) {
-        return { refused: "day_cap" };
-    }
-    if (
-        input.spentThisMonthMicroUsd + reservedMicroUsd >
-        AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD
-    ) {
+}): { budgetMicroUsd: number } | { refused: "day_cap" | "month_cap" } => {
+    if (input.spentTodayMicroUsd >= AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD) return { refused: "day_cap" };
+    if (input.spentThisMonthMicroUsd >= AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD) {
         return { refused: "month_cap" };
     }
-    return { reservedMicroUsd };
+    return {
+        budgetMicroUsd: Math.min(
+            AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
+            AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD - input.spentTodayMicroUsd,
+            AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD - input.spentThisMonthMicroUsd
+        ),
+    };
 };
 
 export type OptimizerCallResult<T> = { value: T | null; costMicroUsd: number };
@@ -458,7 +428,6 @@ export type OptimizerCycleDeps = {
     generate: (message: string) => Promise<OptimizerCallResult<string>>;
     route: (guidance: string, decision: OptimizerDecision) => Promise<OptimizerCallResult<string>>;
     judge: (message: string) => Promise<OptimizerCallResult<JudgeWinner>>;
-    worstCaseMicroUsd: { generate: number; route: number; judge: number };
     budgetMicroUsd: number;
 };
 
@@ -480,40 +449,36 @@ export async function runOptimizerCycle(
     input: { decisions: readonly OptimizerDecision[]; incumbentGuidance: string },
     deps: OptimizerCycleDeps
 ): Promise<OptimizerCycleResult> {
-    // Spent plus what is in flight: a call may start only if its worst case
-    // still fits, so concurrent calls can never overrun the reservation. Out
-    // of budget is not thrown: every started call is awaited, so every cost
-    // is counted before the cycle reports what it spent.
-    // What a call actually cost is recorded as reported, never cut to its
-    // bound: an overrun is a fact the budgets downstream must see.
+    // A call starts only while what has actually been spent is under the
+    // budget. Calls already in flight (up to the concurrency limit, two judge
+    // orders each) may finish past it; the owner accepted that overshoot on
+    // 2026-10-19. Out of budget is not thrown: every started call is awaited,
+    // so every cost is counted before the cycle reports what it spent.
     let spent = 0;
-    let committed = 0;
     let exhausted = false;
-    let overrunCalls = 0;
+    let failedCalls = 0;
     const spentByKind: Record<OptimizerCallKind, number> = { generate: 0, route: 0, judge: 0 };
     const call = async <T>(
         kind: OptimizerCallKind,
         run: () => Promise<OptimizerCallResult<T>>
     ): Promise<T | null> => {
-        const worstCase = deps.worstCaseMicroUsd[kind];
-        if (exhausted || committed + worstCase > deps.budgetMicroUsd) {
+        if (exhausted || spent >= deps.budgetMicroUsd) {
             exhausted = true;
             return null;
         }
-        committed += worstCase;
-        // A call that throws is charged its worst case: its cost is unknown.
-        let cost = worstCase;
+        // A call that throws costs nothing here: its cost is unknown.
+        let cost = 0;
         try {
             const result = await run();
-            cost = Math.max(result.costMicroUsd, 0);
+            // A cost that is not a number would stop `spent` ever reaching the budget.
+            cost = Number.isFinite(result.costMicroUsd) ? Math.max(Math.ceil(result.costMicroUsd), 0) : 0;
             return result.value;
         } catch {
+            failedCalls += 1;
             return null;
         } finally {
-            if (cost > worstCase) overrunCalls += 1;
             spent += cost;
             spentByKind[kind] += cost;
-            committed += cost - worstCase;
         }
     };
 
@@ -531,7 +496,7 @@ export async function runOptimizerCycle(
         summary: summarizeOptimizerCases(cases, byId),
         spentMicroUsd: spent,
         spentByKind: { ...spentByKind },
-        overrunCalls,
+        failedCalls,
     });
 
     const proposal = await call("generate", () =>
