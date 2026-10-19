@@ -2035,6 +2035,10 @@ async function handleChatPost(
                       models: routerCandidateInputs.models,
                       creditsByModelId:
                           deterministicAutoSelection.candidateCreditsByModelId,
+                      ruleModelId: deterministicAutoSelection.modelId,
+                      taskKind: deterministicAutoSelection.record.taskKind,
+                      userId: session?.user?.id ?? null,
+                      conversationId: conversationId ?? null,
                       traceId,
                   })
                 : null
