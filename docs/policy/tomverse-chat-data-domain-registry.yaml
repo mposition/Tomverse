@@ -3340,6 +3340,35 @@ domains:
       widened past one column name. Every axis is unverified: nobody has
       decided this one yet, and that is what the state means.
 
+  - domain: modelCatalogEntry
+    prismaModel: ModelCatalogEntry
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last edited a dynamic catalogue row (image or coding), by id and address. Same shape as
+      modelRegistryEntry; registered with the table on 2026-10-19 and undecided on every axis.
+
+  - domain: modelCatalogPriceRevision
+    prismaModel: ModelCatalogPriceRevision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The operator who wrote an append-only price revision, by id and address. The rows are price
+      history and a database trigger refuses UPDATE and DELETE, so an erasure decision here needs a
+      migration; undecided on every axis.
+
   - domain: providerBillingConfig
     prismaModel: ProviderBillingConfig
     userLinkageRole: actor
