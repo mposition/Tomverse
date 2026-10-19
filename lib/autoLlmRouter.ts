@@ -16,6 +16,7 @@ import {
     AUTO_LLM_ROUTER_VERSION,
     autoLlmRouterCandidates,
     autoLlmRouterOutputSchema,
+    autoLlmRouterProviderOptions,
     autoLlmRouterSession,
     autoLlmRouterUserMessage,
     buildAutoLlmRouterSystem,
@@ -44,6 +45,8 @@ export async function callAutoLlmRouter(input: {
     previousAnswer: string | null;
     candidates: readonly AutoLlmRouterCandidate[];
     session: AutoLlmRouterSession | null;
+    /** The live turn's deadline unless given; the optimizer's replay waits longer. */
+    timeoutMs?: number;
 }): Promise<AutoLlmRouterCallResult> {
     try {
         const generated = await generateText({
@@ -57,14 +60,14 @@ export async function callAutoLlmRouter(input: {
             ),
             maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
             maxRetries: 0,
-            abortSignal: AbortSignal.timeout(AUTO_LLM_ROUTER_TIMEOUT_MS),
+            abortSignal: AbortSignal.timeout(input.timeoutMs ?? AUTO_LLM_ROUTER_TIMEOUT_MS),
             output: Output.object({
                 schema: jsonSchema(
                     autoLlmRouterOutputSchema(input.candidates) as unknown as JSONSchema7
                 ),
                 name: "auto_model_choice",
             }),
-            providerOptions: { openai: { strictJsonSchema: true } },
+            providerOptions: autoLlmRouterProviderOptions(input.routerModel.provider),
         });
         const usage = generated.usage as AutoLlmRouterCallResult["usage"];
         const pick = parseAutoLlmRouterOutput(generated.output, input.candidates);
