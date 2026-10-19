@@ -552,9 +552,12 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
   const batch = await purgeDueAmuxReadManifests(async (identity) => {
     deleted.push(identity.subjectId);
   });
-  assert.equal(batch.bodiesPurged, 1);
-  assert.equal(batch.keysDeleted, 2);
-  assert.deepEqual(deleted, [manifest.id, secondManifestId]);
+  // The sweep is database-wide; a suite sharing this database may leave its
+  // own due manifests, so only this idea's rows are asserted exactly.
+  assert.ok(batch.bodiesPurged >= 1);
+  assert.ok(batch.keysDeleted >= 2);
+  assert.deepEqual(deleted.filter((id) => [manifest.id, secondManifestId].includes(id)),
+    [manifest.id, secondManifestId]);
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxIdeaRetentionHoldScope(tx, ideaId)),
   { remainingBodies: 0, alreadyPurgedBodies: 3 });

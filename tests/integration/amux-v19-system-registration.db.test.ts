@@ -19,7 +19,8 @@ import { commitAmuxIdeaOnlyAnalysisClaim } from
   "@/lib/amux/ideaAnalysisClaimService";
 import { commitAmuxIdeaAnalysisResult } from
   "@/lib/amux/ideaAnalysisResultService";
-import { commitAmuxIdeaAnalysisPriceApproval } from
+import { commitAmuxIdeaAnalysisPriceApproval,
+  commitAmuxIdeaAnalysisPriceRevocation } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { inspectV4TaskCostCatalog } from
   "@/lib/amux/v4TaskCostCatalogCore";
@@ -296,10 +297,19 @@ async function completedSessionIdea(options: {
     where: { provider: authority.scope.model.provider,
       modelId: authority.scope.model.modelId, mode: "subscription_cli" },
     orderBy: { version: "desc" }, select: { id: true, version: true,
-      status: true, expiresAt: true },
+      status: true, expiresAt: true, inputTokensCap: true, outputTokensCap: true },
   });
+  // Another suite sharing this database may have approved a tighter price
+  // for the same model; reuse only one whose caps cover this fixture's usage.
   let priceVersionId = currentPrice?.status === "approved" &&
-    currentPrice.expiresAt > new Date() ? currentPrice.id : null;
+    currentPrice.expiresAt > new Date() && currentPrice.inputTokensCap >= 1_000 &&
+    currentPrice.outputTokensCap >= 2_000 ? currentPrice.id : null;
+  if (!priceVersionId && currentPrice?.status === "approved") {
+    // A newer version needs the tighter one revoked first.
+    await prisma.$transaction((tx) => commitAmuxIdeaAnalysisPriceRevocation(tx, {
+      session, request, priceVersionId: currentPrice.id,
+      expectedVersion: currentPrice.version }));
+  }
   if (!priceVersionId) {
     priceVersionId = randomUUID();
     await prisma.$transaction((tx) => commitAmuxIdeaAnalysisPriceApproval(tx, {
