@@ -796,6 +796,9 @@ run(
     // What an automatic disable leaves behind: the queue row, its notice
     // requirement, and the account count that decides it.
     "tests/integration/model-lifecycle-auto-disable.db.test.ts",
+    // The Auto router optimizer's money and audit steps: one cycle at a time,
+    // the run/day/month caps, promotion as a compare-and-set, one-step rollback.
+    "tests/integration/auto-router-optimizer.db.test.ts",
     // Excluding a discovered model and reviewing it again: the structured
     // decision record, a rescan that leaves the exclusion alone, and the
     // history constraints that refuse a decision without its record.

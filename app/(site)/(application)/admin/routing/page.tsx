@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AdminRoutingShadowPanel } from "@/components/admin/AdminRoutingShadowPanel";
 import { AdminAdaptiveStatisticsPanel } from "@/components/admin/AdminAdaptiveStatisticsPanel";
 import { AdminAutoLlmRouterPanel } from "@/components/admin/AdminAutoLlmRouterPanel";
+import { AdminAutoRouterOptimizerPanel } from "@/components/admin/AdminAutoRouterOptimizerPanel";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { getAdminRole } from "@/lib/adminAuth";
@@ -39,6 +40,7 @@ export default async function AdminRoutingPage() {
         {m.routingMoved.after}
       </p>
       <AdminAutoLlmRouterPanel />
+      <AdminAutoRouterOptimizerPanel />
       {getAdminRole(session) === "owner" && <AdminAdaptiveStatisticsPanel />}
       <AdminRoutingShadowPanel />
     </div>

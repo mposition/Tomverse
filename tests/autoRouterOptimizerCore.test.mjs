@@ -212,3 +212,16 @@ test("a call that throws is charged its worst case and reads as no answer", asyn
   assert.equal(result.summary.unrouted, 12);
   assert.equal(result.spentMicroUsd, 100 + 24 * 50);
 });
+
+test("a stored guidance record is read only when it is complete and valid", async () => {
+  const { parseActiveRouterGuidance, autoLlmRouterVersionFor } = await import("../lib/autoRouterOptimizerCore.ts");
+  const record = { guidance: NEW_GUIDANCE, cycleId: "c1", previous: { guidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, cycleId: null } };
+  assert.deepEqual(parseActiveRouterGuidance(JSON.stringify(record)), record);
+  assert.equal(parseActiveRouterGuidance(null), null);
+  assert.equal(parseActiveRouterGuidance("{not json"), null);
+  assert.equal(parseActiveRouterGuidance(JSON.stringify({ ...record, cycleId: null })), null);
+  assert.equal(parseActiveRouterGuidance(JSON.stringify({ ...record, guidance: "short" })), null);
+  assert.deepEqual(parseActiveRouterGuidance(JSON.stringify({ ...record, previous: { guidance: 1 } })), { ...record, previous: null });
+  assert.equal(autoLlmRouterVersionFor("auto-llm-router-v1", null), "auto-llm-router-v1");
+  assert.equal(autoLlmRouterVersionFor("auto-llm-router-v1", "c1"), "auto-llm-router-v1+c1");
+});

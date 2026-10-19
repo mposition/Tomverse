@@ -90,6 +90,44 @@ export type OptimizerCycleResult = {
     spentMicroUsd: number;
 };
 
+/**
+ * The guidance the router uses now, and the one before it for a one-step
+ * rollback. `cycleId` null is the code default. Stored as JSON in AppSetting
+ * `auto.llmRouterGuidance` (lib/autoLlmRouterGuidance.ts).
+ */
+export type ActiveRouterGuidance = {
+    guidance: string;
+    cycleId: string | null;
+    previous: { guidance: string; cycleId: string | null } | null;
+};
+
+/** The stored value, or null when absent or not a valid guidance record. */
+export const parseActiveRouterGuidance = (raw: string | null | undefined): ActiveRouterGuidance | null => {
+    if (!raw) return null;
+    let value: unknown;
+    try {
+        value = JSON.parse(raw);
+    } catch {
+        return null;
+    }
+    const record = value as Partial<ActiveRouterGuidance> | null;
+    const guidance = admitGuidance(record?.guidance);
+    const cycleId = typeof record?.cycleId === "string" ? record.cycleId : null;
+    if (!guidance || !cycleId) return null;
+    const previousGuidance = admitGuidance(record?.previous?.guidance);
+    const previous = previousGuidance
+        ? {
+              guidance: previousGuidance,
+              cycleId: typeof record?.previous?.cycleId === "string" ? record.previous.cycleId : null,
+          }
+        : null;
+    return { guidance, cycleId, previous };
+};
+
+/** Decision rows say which guidance produced them: the cycle that promoted it. */
+export const autoLlmRouterVersionFor = (baseVersion: string, cycleId: string | null) =>
+    cycleId ? `${baseVersion}+${cycleId}` : baseVersion;
+
 /** Newest first in, alternating out: both halves span the same period. */
 export const splitOptimizerDecisions = <T>(decisions: readonly T[]) => {
     const sample = decisions.slice(0, AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX);
