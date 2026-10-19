@@ -6,7 +6,7 @@
 
 S-M1은 **판정만 하고 병합하지 않는** 단계입니다. 서비스는 10분마다 후보를 고르고 본 앱에 지시를 요청하지만, develop 레인
 스위치가 꺼져 있으므로 본 앱이 지시를 거절하고, 서비스는 `instruction_refused`와 함께 **병합했을 PR 번호와 head**를 출력합니다.
-그 판정과 사람이 실제로 병합한 것을 7일 이상 비교해 어긋남이 0건이어야 S-M2로 갑니다.
+그 판정과 사람이 실제로 병합한 것을 3일 이상 비교해 어긋남이 0건이어야 S-M2로 갑니다.
 
 ## 순서와 되돌림
 
@@ -224,9 +224,9 @@ production Admin → Agent digest → QA·릴리스 → 제어 revision 기록.
 
 ## S-M1 동안
 
-- 7일 이상, `instruction_refused`가 고른 PR(번호·head)과 사람이 merge train으로 실제 병합한 것을 비교합니다. 어긋남이 0건이어야
+- 3일 이상(운영자 결정 2026-10-19), `instruction_refused`가 고른 PR(번호·head)과 사람이 merge train으로 실제 병합한 것을 비교합니다. 어긋남이 0건이어야
   S-M2(정책 9절)입니다.
 - 멈출 때: 병합 레인 서비스의 `QA_RELEASE_MERGE_LANE_KILL_SWITCH`에 아무 값을 넣습니다(다음 회차부터 정지). 또는 병합 레인
   서비스를 끈 새 revision을 기록합니다.
 - S-M2 전에 필요한 것: 8절 8항의 변경(merge train의 develop 레인 삭제, AGENTS.md의 병합 주체 문장), 8절 3항의 dev 복구
-  runbook.
+  runbook(`docs/ops/qa-release-merge-lane-dev-recovery.md`).
