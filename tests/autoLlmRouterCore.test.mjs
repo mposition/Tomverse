@@ -230,3 +230,25 @@ test("the router asks an OpenAI model for low reasoning effort and leaves others
   assert.deepEqual(autoLlmRouterProviderOptions("anthropic"), { openai: { strictJsonSchema: true } });
   assert.ok(AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS > AUTO_LLM_ROUTER_TIMEOUT_MS);
 });
+
+test("a router call's worst case bounds input by bytes and output by its token cap", async () => {
+  const { autoLlmRouterWorstCaseMicroUsd } = await import("../lib/autoLlmRouterCore.ts");
+  // 3 + 6 UTF-8 bytes ("abc" + two Hangul syllables), 200 output tokens.
+  const cost = autoLlmRouterWorstCaseMicroUsd({
+    system: "abc",
+    prompt: "안녕",
+    maxOutputTokens: 200,
+    inputUsdPerMillionTokens: 1,
+    outputUsdPerMillionTokens: 4,
+  });
+  assert.equal(cost, 9 * 1 + 200 * 4);
+  // An unpriced model is not called, and a free one still holds something.
+  assert.equal(autoLlmRouterWorstCaseMicroUsd({
+    system: "", prompt: "x", maxOutputTokens: 200,
+    inputUsdPerMillionTokens: 0, outputUsdPerMillionTokens: 4,
+  }), null);
+  assert.equal(autoLlmRouterWorstCaseMicroUsd({
+    system: "", prompt: "", maxOutputTokens: 0,
+    inputUsdPerMillionTokens: 0.01, outputUsdPerMillionTokens: 0.01,
+  }), 1);
+});
