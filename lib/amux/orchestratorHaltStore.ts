@@ -9,8 +9,13 @@ import {
   AMUX_ORCHESTRATOR_AUDIT_ACTIONS,
   AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES,
   AMUX_ORCHESTRATOR_DEADLINE_GRACE_MS,
+  AMUX_ORCHESTRATOR_PLACEHOLDER_BUDGET_MS,
+  AMUX_ORCHESTRATOR_PLACEHOLDER_INSTANCE_ID,
   AMUX_ORCHESTRATOR_RECEIPT_TARGET_KINDS,
+  AMUX_ORCHESTRATOR_SELF_ACKNOWLEDGED_CALL_KINDS,
   amuxOrchestratorAuditMetadata,
+  amuxOrchestratorCallKindForHaltReason,
+  amuxOrchestratorCallKindSelfAcknowledges,
   amuxOrchestratorHaltKeyPrefixMatches,
   decideAmuxOrchestratorAck,
   judgeAmuxOrchestratorWrite,
@@ -213,41 +218,64 @@ async function countAmuxOrchestratorReceipts(
 }
 
 /**
- * Admissions the resolver may decide now: neither acknowledged nor resolved,
- * past their deadline plus the grace on the database clock, and with no
- * committed receipt -- one with a receipt can only ever need a person, so it
- * is not a candidate and cannot crowd out the ones that can be decided.
- * Oldest deadline first. A receipt that commits after this list is read is
- * still counted: the resolver counts again under the row lock.
+ * Requests the resolver may act on now, oldest first:
+ *
+ * - admissions neither acknowledged nor resolved, past their deadline plus the
+ *   grace on the database clock, with no committed receipt -- or, for a call
+ *   kind the server acknowledges itself (the 2026-10-20 amendment), with receipts too. Any
+ *   other admission with a receipt can only ever need a person, so it is not
+ *   a candidate and cannot crowd out the ones that can be decided;
+ * - admissions already resolved `no_commit` whose eligible halt is still open;
+ * - eligible open halts whose request has no admission at all (the 2026-10-20 amendment):
+ *   the resolver writes the placeholder admission for them.
+ *
+ * A receipt that commits after this list is read is still counted: the
+ * resolver counts again under the row lock.
  */
 export async function listAmuxOrchestratorResolveCandidates(
   tx: Prisma.TransactionClient,
   limit: number,
 ): Promise<string[]> {
+  const autoClearReasons = Prisma.join([...AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES]);
   const rows = await tx.$queryRaw<Array<{ requestId: string }>>`
-    SELECT w."requestId"
-    FROM "AmuxOrchestratorWrite" w
-    WHERE (
-      w."ackedAt" IS NULL
-      AND w."resolvedAt" IS NULL
-      AND w."deadlineAt" + ${AMUX_ORCHESTRATOR_DEADLINE_GRACE_MS} * INTERVAL '1 millisecond'
-        <= clock_timestamp()
-      AND NOT EXISTS (
-        SELECT 1 FROM "AmuxOrchestratorWriteReceipt" r WHERE r."requestId" = w."requestId"
+    SELECT c."requestId"
+    FROM (
+      SELECT w."requestId", w."deadlineAt" AS "orderAt"
+      FROM "AmuxOrchestratorWrite" w
+      WHERE (
+        w."ackedAt" IS NULL
+        AND w."resolvedAt" IS NULL
+        AND w."deadlineAt" + ${AMUX_ORCHESTRATOR_DEADLINE_GRACE_MS} * INTERVAL '1 millisecond'
+          <= clock_timestamp()
+        AND (
+          w."callKind" IN (${Prisma.join([...AMUX_ORCHESTRATOR_SELF_ACKNOWLEDGED_CALL_KINDS])})
+          OR NOT EXISTS (
+            SELECT 1 FROM "AmuxOrchestratorWriteReceipt" r WHERE r."requestId" = w."requestId"
+          )
+        )
+      ) OR (
+        w."ackedAt" IS NULL
+        AND w."resolvedAt" IS NOT NULL
+        AND w."resolution" = 'no_commit'
+        AND EXISTS (
+          SELECT 1
+          FROM "AmuxOrchestratorHalt" h
+          WHERE h."requestId" = w."requestId"
+            AND h."clearedAt" IS NULL
+            AND h."reasonCode" IN (${autoClearReasons})
+        )
       )
-    ) OR (
-      w."ackedAt" IS NULL
-      AND w."resolvedAt" IS NOT NULL
-      AND w."resolution" = 'no_commit'
-      AND EXISTS (
-        SELECT 1
-        FROM "AmuxOrchestratorHalt" h
-        WHERE h."requestId" = w."requestId"
-          AND h."clearedAt" IS NULL
-          AND h."reasonCode" IN (${Prisma.join([...AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES])})
-      )
-    )
-    ORDER BY w."deadlineAt" ASC, w."requestId" ASC
+      UNION ALL
+      SELECT h."requestId", h."openedAt" AS "orderAt"
+      FROM "AmuxOrchestratorHalt" h
+      WHERE h."clearedAt" IS NULL
+        AND h."requestId" IS NOT NULL
+        AND h."reasonCode" IN (${autoClearReasons})
+        AND NOT EXISTS (
+          SELECT 1 FROM "AmuxOrchestratorWrite" w WHERE w."requestId" = h."requestId"
+        )
+    ) c
+    ORDER BY c."orderAt" ASC, c."requestId" ASC
     LIMIT ${limit}
   `;
   return rows.map((row) => row.requestId);
@@ -314,18 +342,74 @@ async function autoClearNoCommitHaltLocked(
 }
 
 /**
+ * 2026-10-20 amendment: an eligible open halt whose request the server never admitted.
+ * With the halt row locked (the human clear's lock order: halt, then
+ * admission), the server writes the request's admission itself. Only one of
+ * this insert and the real request's admission can commit under the primary
+ * key; if the real one won, this inserts nothing and the ordinary resolver
+ * decides that admission. Otherwise the real request, should it still arrive,
+ * is refused `duplicate_request` before any change, so the placeholder's
+ * zero receipts are the request's, and the next state read past its deadline
+ * resolves it `no_commit` and clears the halt through version 33's path.
+ */
+async function admitPlaceholderForHaltLocked(
+  tx: Prisma.TransactionClient,
+  requestId: string,
+): Promise<"pending" | "closed"> {
+  const halts = await tx.$queryRaw<
+    Array<{ id: string; haltKey: string; reasonCode: AmuxOrchestratorHaltReasonCode }>
+  >`
+    SELECT "id", "haltKey", "reasonCode"
+    FROM "AmuxOrchestratorHalt"
+    WHERE "requestId" = ${requestId}
+      AND "haltKey" = ${requestId}
+      AND "clearedAt" IS NULL
+      AND "reasonCode" IN (${Prisma.join([...AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES])})
+    FOR UPDATE
+  `;
+  const halt = halts[0];
+  const callKind = halt ? amuxOrchestratorCallKindForHaltReason(halt.reasonCode) : null;
+  if (!halt || !callKind) return "closed";
+  const admission = await insertAmuxOrchestratorAdmission(tx, {
+    requestId,
+    instanceId: AMUX_ORCHESTRATOR_PLACEHOLDER_INSTANCE_ID,
+    callKind,
+    budgetMs: AMUX_ORCHESTRATOR_PLACEHOLDER_BUDGET_MS,
+  });
+  if (!admission.admitted) return "pending";
+  await writeAmuxOrchestratorSystemAudit(tx, {
+    action: AMUX_ORCHESTRATOR_AUDIT_ACTIONS.placeholderAdmitted,
+    targetType: "AmuxOrchestratorWrite",
+    targetId: requestId,
+    summary: "Admitted a halted AMUX orchestrator request that never reached the server, so it can no longer change anything.",
+    metadata: amuxOrchestratorAuditMetadata({
+      halt_id: halt.id,
+      halt_key: halt.haltKey,
+      request_id: requestId,
+      reason_code: halt.reasonCode,
+      call_kind: callKind,
+    }),
+  });
+  return "pending";
+}
+
+/**
  * Section 4, the resolver for one admission, under its row lock and on the
  * database clock. The lock serialises the judgement with every state-changing
  * transaction of the request: one that is committing holds the row, so the
  * receipts are counted after it has committed or rolled back. A rollback
  * confirmed by the evidence writes `no_commit` and the system audit
- * `amux.orchestrator.write_resolved` in this transaction; a receipt leaves the
- * row for a person. Writes nothing otherwise.
+ * `amux.orchestrator.write_resolved` in this transaction. A receipt leaves the
+ * row for a person, except for a call kind the server acknowledges itself
+ * (the 2026-10-20 amendment), which it acknowledges with the system audit
+ * `amux.orchestrator.write_auto_acknowledged`. A request with no admission
+ * and an eligible open halt gets its placeholder admission (the 2026-10-20 amendment).
+ * Writes nothing otherwise.
  */
 export async function resolveAmuxOrchestratorWriteLocked(
   tx: Prisma.TransactionClient,
   requestId: string,
-): Promise<AmuxOrchestratorJudgement | "closed"> {
+): Promise<AmuxOrchestratorJudgement | "acknowledged" | "closed"> {
   const locked = await tx.$queryRaw<
     Array<{
       callKind: string;
@@ -346,7 +430,7 @@ export async function resolveAmuxOrchestratorWriteLocked(
     FOR UPDATE
   `;
   const row = locked[0];
-  if (!row) return "closed";
+  if (!row) return admitPlaceholderForHaltLocked(tx, requestId);
   if (row.open !== true) {
     if (row.acked || row.resolution !== "no_commit") return "closed";
     const resolutionAuditId = await findAmuxNoCommitResolutionAuditId(tx, requestId);
@@ -375,6 +459,27 @@ export async function resolveAmuxOrchestratorWriteLocked(
     deadlineAtMs: epochMs(row.deadlineAtEpochMs),
     receiptCount: Number(counted[0]?.receiptCount ?? 0),
   });
+  if (judgement === "human_required" && amuxOrchestratorCallKindSelfAcknowledges(row.callKind)) {
+    await writeAmuxOrchestratorSystemAudit(tx, {
+      action: AMUX_ORCHESTRATOR_AUDIT_ACTIONS.writeAutoAcknowledged,
+      targetType: "AmuxOrchestratorWrite",
+      targetId: requestId,
+      summary: "Acknowledged an AMUX orchestrator recovery sweep whose answer was lost; its changes need no person.",
+      metadata: amuxOrchestratorAuditMetadata({
+        request_id: requestId,
+        call_kind: row.callKind,
+      }),
+    });
+    const acked = await tx.$executeRaw`
+      UPDATE "AmuxOrchestratorWrite"
+      SET "ackedAt" = clock_timestamp()
+      WHERE "requestId" = ${requestId} AND "ackedAt" IS NULL AND "resolvedAt" IS NULL
+    `;
+    if (acked !== 1) {
+      throw new Error("AMUX orchestrator write changed under its own row lock");
+    }
+    return "acknowledged";
+  }
   if (judgement !== "no_commit") return judgement;
   const resolutionAuditId = await writeAmuxOrchestratorSystemAudit(tx, {
     action: AMUX_ORCHESTRATOR_AUDIT_ACTIONS.writeResolved,
@@ -585,6 +690,9 @@ export async function readAmuxOrchestratorHaltState(
   tx: Prisma.TransactionClient,
   haltKeys: readonly string[],
 ): Promise<AmuxOrchestratorHaltState> {
+  // 2026-10-20 amendment: a self-acknowledged call kind never needs a person. Past its
+  // grace with receipts it stays undecided until the resolver acknowledges it.
+  const selfAcknowledged = Prisma.join([...AMUX_ORCHESTRATOR_SELF_ACKNOWLEDGED_CALL_KINDS]);
   const open = await tx.$queryRaw<RawHaltRow[]>`
     SELECT
       "id",
@@ -619,8 +727,11 @@ export async function readAmuxOrchestratorHaltState(
           w."deadlineAt" + ${AMUX_ORCHESTRATOR_DEADLINE_GRACE_MS} * INTERVAL '1 millisecond'
             <= (SELECT "now" FROM clock)
         ) AS "pastGrace",
-        EXISTS (
-          SELECT 1 FROM "AmuxOrchestratorWriteReceipt" r WHERE r."requestId" = w."requestId"
+        (
+          EXISTS (
+            SELECT 1 FROM "AmuxOrchestratorWriteReceipt" r WHERE r."requestId" = w."requestId"
+          )
+          AND w."callKind" NOT IN (${selfAcknowledged})
         ) AS "hasReceipt"
       FROM "AmuxOrchestratorWrite" w
       WHERE w."ackedAt" IS NULL AND w."resolvedAt" IS NULL
@@ -652,6 +763,7 @@ export async function readAmuxOrchestratorHaltState(
       AND w."resolvedAt" IS NULL
       AND w."deadlineAt" + ${AMUX_ORCHESTRATOR_DEADLINE_GRACE_MS} * INTERVAL '1 millisecond'
         <= clock_timestamp()
+      AND w."callKind" NOT IN (${selfAcknowledged})
       AND EXISTS (
         SELECT 1 FROM "AmuxOrchestratorWriteReceipt" r WHERE r."requestId" = w."requestId"
       )
@@ -885,6 +997,7 @@ const iso = (value: Date | null): string | null => (value ? value.toISOString() 
  */
 export async function readAmuxOrchestratorHaltsForAdmin(): Promise<AmuxOrchestratorAdminView> {
   const graceCutoffSql = Prisma.sql`clock_timestamp() - ${AMUX_ORCHESTRATOR_DEADLINE_GRACE_MS} * INTERVAL '1 millisecond'`;
+  const selfAcknowledgedSql = Prisma.join([...AMUX_ORCHESTRATOR_SELF_ACKNOWLEDGED_CALL_KINDS]);
   const [openCount, clearedCount, open, cleared, humanIds, humanCount] = await Promise.all([
     prisma.amuxOrchestratorHalt.count({ where: { clearedAt: null } }),
     prisma.amuxOrchestratorHalt.count({ where: { clearedAt: { not: null } } }),
@@ -904,6 +1017,7 @@ export async function readAmuxOrchestratorHaltsForAdmin(): Promise<AmuxOrchestra
       WHERE w."ackedAt" IS NULL
         AND w."resolvedAt" IS NULL
         AND w."deadlineAt" <= ${graceCutoffSql}
+        AND w."callKind" NOT IN (${selfAcknowledgedSql})
         AND EXISTS (SELECT 1 FROM "AmuxOrchestratorWriteReceipt" r WHERE r."requestId" = w."requestId")
       ORDER BY w."deadlineAt" ASC, w."requestId" ASC
       LIMIT ${AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT}
@@ -914,6 +1028,7 @@ export async function readAmuxOrchestratorHaltsForAdmin(): Promise<AmuxOrchestra
       WHERE w."ackedAt" IS NULL
         AND w."resolvedAt" IS NULL
         AND w."deadlineAt" <= ${graceCutoffSql}
+        AND w."callKind" NOT IN (${selfAcknowledgedSql})
         AND EXISTS (SELECT 1 FROM "AmuxOrchestratorWriteReceipt" r WHERE r."requestId" = w."requestId")
     `,
   ]);
