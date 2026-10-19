@@ -39,6 +39,8 @@ export type TriageLlmInput = {
 };
 
 export type TriageLlmAnswer = {
+  /** Every candidate id the model was shown; the row records them all. */
+  readonly contextIds: readonly string[];
   readonly lane: TriageLane;
   readonly duplicateOf: readonly string[];
   readonly replyDraft: string;
@@ -88,6 +90,7 @@ export const parseTriageAnswer = (value: unknown, candidateIds: ReadonlySet<stri
   if (!Array.isArray(duplicateOf) || typeof replyDraft !== "string") return null;
   const duplicates = [...new Set(duplicateOf.filter((id): id is string => typeof id === "string" && candidateIds.has(id)))];
   return {
+    contextIds: [...candidateIds],
     lane: lane as TriageLane,
     duplicateOf: duplicates.slice(0, DUPLICATES_MAX),
     replyDraft: replyDraft.trim().slice(0, REPLY_DRAFT_MAX_CHARS),
@@ -108,7 +111,7 @@ export const supportTriageLlmFromEnv = async (
     return null;
   }
   return async (input) => {
-    const candidateIds = new Set(input.candidates.map((c) => c.id));
+    const candidateIds = new Set(input.candidates.slice(0, DUPLICATE_CANDIDATES_MAX).map((c) => c.id));
     try {
       const generated = await generateText({
         model: getActiveAiModel(model),

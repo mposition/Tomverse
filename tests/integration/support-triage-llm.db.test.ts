@@ -49,7 +49,12 @@ test("the model's lane, duplicates and draft are written with the ready row", as
   const llm: TriageLlm = async (input) => {
     seen.push(input);
     const other = input.candidates.find((c) => c.id.startsWith(PREFIX));
-    return { lane: "bug_unverified", duplicateOf: other ? [other.id] : [], replyDraft: "Thanks, we are looking into it." };
+    return {
+      contextIds: input.candidates.map((c) => c.id),
+      lane: "bug_unverified",
+      duplicateOf: other ? [other.id] : [],
+      replyDraft: "Thanks, we are looking into it.",
+    };
   };
   const result = await runSupportTriageWorker({ llm });
   assert.equal(result.ready, 2);
@@ -81,7 +86,12 @@ test("the model's lane, duplicates and draft are written with the ready row", as
 
 test("a money keyword keeps the billing lane whatever the model says", async () => {
   await report("pay", { type: "other", message: "I was charged twice, please refund me." });
-  const llm: TriageLlm = async () => ({ lane: "feature_request", duplicateOf: [], replyDraft: "Noted." });
+  const llm: TriageLlm = async (input) => ({
+    contextIds: input.candidates.map((c) => c.id),
+    lane: "feature_request",
+    duplicateOf: [],
+    replyDraft: "Noted.",
+  });
   await runSupportTriageWorker({ llm });
   const [row] = await rows();
   assert.equal(row.lane, "billing_human");
@@ -115,4 +125,50 @@ test("an answer is kept only where it fits: a known lane, offered ids, a bounded
   );
   assert.deepEqual(answer?.duplicateOf, ["x", "y"]);
   assert.equal(answer?.replyDraft.length, 2000);
+});
+
+const answering =
+  (lane: "bug_verified" | "bug_unverified" | "other", draft = "Draft."): TriageLlm =>
+  async (input) => ({ contextIds: input.candidates.map((c) => c.id), lane, duplicateOf: [], replyDraft: draft });
+
+test("the model cannot raise an unverified report to a verified bug", async () => {
+  await report("a");
+  await runSupportTriageWorker({ llm: answering("bug_verified") });
+  const [row] = await rows();
+  assert.equal(row.lane, "bug_unverified");
+  assert.equal(row.laneSource, "llm");
+});
+
+test("deleting the account of a report the model was shown deletes the suggestion that saw it", async () => {
+  await report("seen", { message: "Something only this person wrote." });
+  await report("a");
+  await runSupportTriageWorker({ llm: answering("other") });
+  const before = await prisma.supportTriageSuggestion.findFirstOrThrow({
+    where: { feedbackId: `${PREFIX}a` },
+    select: { contextFeedbackIds: true },
+  });
+  assert.ok(before.contextFeedbackIds.includes(`${PREFIX}seen`));
+  const { deleteSupportTriageDataForAccount } = await import("@/lib/supportTriageAccountDeletion");
+  const counts = await prisma.$transaction((tx) => deleteSupportTriageDataForAccount(tx, [`${PREFIX}seen`]));
+  // Its own suggestion and the one that was shown it.
+  assert.equal(counts.suggestions, 2);
+  assert.equal(await prisma.supportTriageSuggestion.count({ where: { feedbackId: `${PREFIX}a` } }), 0);
+});
+
+test("an answer whose shown report was deleted before the result is written is dropped", async () => {
+  await report("seen", { message: "Something only this person wrote." });
+  await report("a");
+  const { startSupportTriageRun } = await import("@/lib/supportTriageRunStore");
+  const { claimSupportTriageBatch, runTriageLlm, writeSupportTriageResults } = await import("@/lib/supportTriageWorker");
+  const run = await startSupportTriageRun("worker");
+  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`]);
+  const answered = await runTriageLlm(answering("other", "Mentions what seen wrote."), batch.claimed, batch.reports);
+  assert.ok(answered[0].llm?.contextIds.includes(`${PREFIX}seen`));
+  // The shown report's account is deleted while the model was answering.
+  await prisma.feedback.update({ where: { id: `${PREFIX}seen` }, data: { message: "[deleted account]" } });
+  const result = await writeSupportTriageResults(run, batch.token as string, answered);
+  assert.equal(result.ready, 1);
+  const [row] = await rows();
+  assert.equal(row.laneSource, "keyword");
+  assert.equal(row.replyDraft, null);
 });

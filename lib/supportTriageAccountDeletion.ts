@@ -51,8 +51,11 @@ export const deleteSupportTriageDataForAccount = async (
 ): Promise<SupportTriageDeletionCounts> => {
   if (anonymisedReportIds.length === 0) return { suggestions: 0, groups: 0, decisionRecords: 0 };
   const ids = [...anonymisedReportIds];
+  // The account's own suggestions, and every other report's suggestion that
+  // showed one of the account's reports to the model: its draft may carry
+  // what that report said.
   const suggestions = await tx.supportTriageSuggestion.deleteMany({
-    where: { feedbackId: { in: ids } },
+    where: { OR: [{ feedbackId: { in: ids } }, { contextFeedbackIds: { hasSome: ids } }] },
   });
   // Every group the reports are in, or were in before it ended, whatever its
   // state and cooldown: no deleted report's id survives in a key, a list, a

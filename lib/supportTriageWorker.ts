@@ -646,6 +646,11 @@ const HUMAN_LANES: readonly TriageLane[] = ["billing_human", "trust_safety_human
  */
 export const finalLane = (row: ClaimedRow): { finalLane: TriageLane; laneSource: LaneSource } => {
   if (!row.llm || HUMAN_LANES.includes(row.lane)) return { finalLane: row.lane, laneSource: "keyword" };
+  // Verified is a server fact: the keyword rule reads it from the report, the
+  // model only from the prompt. The model cannot raise a report to verified.
+  if (row.llm.lane === "bug_verified" && row.lane !== "bug_verified") {
+    return { finalLane: "bug_unverified", laneSource: "llm" };
+  }
   return { finalLane: row.llm.lane, laneSource: "llm" };
 };
 
@@ -690,12 +695,26 @@ export const writeSupportTriageResults = (
 ) =>
   transaction(async (tx) => {
     await armSupportTriageTransaction(tx, "worker");
-    const lockIds = [...new Set([...rows.map((row) => row.feedbackId), ...(grouping.peerIds ?? [])])];
+    // The batch, its group peers and every report the model was shown, in one
+    // id-ordered lock: an account deletion of a shown report either waits for
+    // this commit (and then deletes this row by contextFeedbackIds) or has
+    // already marked it, which drops the answer below.
+    const lockIds = [
+      ...new Set([
+        ...rows.map((row) => row.feedbackId),
+        ...(grouping.peerIds ?? []),
+        ...rows.flatMap((row) => row.llm?.contextIds ?? []),
+      ]),
+    ];
     const locked = await lockEligibleReports(tx, lockIds);
     // Still eligible, and the same input the lane and flags were computed from.
     const current = new Map(locked.map((row) => [row.id, digestOf(row)]));
     const writable = rows
       .filter((row) => current.get(row.feedbackId) === row.inputDigest)
+      // An answer whose context lost a report (deleted or closed since) is not kept.
+      .map((row) =>
+        row.llm && !row.llm.contextIds.every((id) => current.has(id)) ? { ...row, llm: undefined } : row
+      )
       .map((row) => ({ ...row, ...finalLane(row) }));
     const ready =
       writable.length === 0
@@ -705,6 +724,8 @@ export const writeSupportTriageResults = (
                SET "state" = 'ready', "lane" = c."lane", "laneSource" = c."laneSource",
                    "keywordFlags" = CASE WHEN c."flags" = '' THEN ARRAY[]::text[]
                                          ELSE pg_catalog.string_to_array(c."flags", ',') END,
+                   "contextFeedbackIds" = CASE WHEN c."context" = '' THEN ARRAY[]::text[]
+                                               ELSE pg_catalog.string_to_array(c."context", ',') END,
                    "duplicateOfFeedbackIds" = CASE WHEN c."duplicates" = '' THEN ARRAY[]::text[]
                                                    ELSE pg_catalog.string_to_array(c."duplicates", ',') END,
                    "replyDraft" = NULLIF(c."replyDraft", '')
@@ -712,9 +733,10 @@ export const writeSupportTriageResults = (
                                      ${writable.map((row) => row.finalLane)}::text[],
                                      ${writable.map((row) => row.laneSource)}::text[],
                                      ${writable.map((row) => row.flags.join(","))}::text[],
+                                     ${writable.map((row) => (row.llm?.contextIds ?? []).join(","))}::text[],
                                      ${writable.map((row) => (row.llm?.duplicateOf ?? []).join(","))}::text[],
                                      ${writable.map((row) => row.llm?.replyDraft ?? "")}::text[])
-                   AS c("id", "lane", "laneSource", "flags", "duplicates", "replyDraft")
+                   AS c("id", "lane", "laneSource", "flags", "context", "duplicates", "replyDraft")
              WHERE s."id" = c."id" AND s."state" = 'claimed' AND s."claimToken" = ${token}
             RETURNING s."id"`;
     const readyIds = new Set(ready.map((row) => row.id));

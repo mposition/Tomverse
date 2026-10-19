@@ -121,6 +121,9 @@ export const SUPPORT_TRIAGE_DELETION_MANIFEST: readonly ManifestEntry[] = Object
       lane: "report_derived",
       keywordFlags: "report_derived",
       laneSource: "lifecycle",
+      // Ids of every other report the model was shown; account deletion of any
+      // of them deletes this row (lib/supportTriageAccountDeletion.ts).
+      contextFeedbackIds: "identifier",
       // Ids of other open reports the model named: identifiers, not content.
       duplicateOfFeedbackIds: "identifier",
       // Written by the model from the report's text.
