@@ -461,8 +461,8 @@ async function runInBackground(input: {
             outputTokens: usage?.outputTokens,
             ...prices,
         });
-    // What the cycle is known to have spent, for the row if recording fails.
-    let knownSpentMicroUsd = 0;
+    // What the cycle is known to have spent, for the recovery if recording fails.
+    let known = { spentMicroUsd: 0, spentByProvider: new Map<string, number>() };
     try {
         const result = await runOptimizerCycle(
             { decisions: input.decisions, incumbentGuidance: input.incumbentGuidance },
@@ -533,12 +533,12 @@ async function runInBackground(input: {
                 },
             }
         );
-        knownSpentMicroUsd = result.spentMicroUsd;
         const spentByProvider = new Map<string, number>();
         const add = (provider: string, microUsd: number) =>
             spentByProvider.set(provider, (spentByProvider.get(provider) ?? 0) + microUsd);
         add(input.optimizerModel.provider, result.spentByKind.generate + result.spentByKind.judge);
         add(input.routerModel.provider, result.spentByKind.route);
+        known = { spentMicroUsd: result.spentMicroUsd, spentByProvider };
         const recorded = await finishOptimizerCycle({
             cycleId: input.cycleId,
             data: {
@@ -577,27 +577,28 @@ async function runInBackground(input: {
             decided: result.summary.decided,
         }));
     } catch (error) {
-        // The cycle could not record its own result. The row keeps only the
-        // spend known by then (none if the calls themselves failed to finish);
-        // the conditional update is a no-op if the recording did commit, and
-        // nothing is retried.
+        // The cycle could not record its own result. Nothing was reserved, so
+        // the spend known by then goes to the row and the provider buckets
+        // together, through the same compare-and-set as a normal finish: if
+        // the first recording did commit, the cycle is no longer running and
+        // this changes nothing. If this fails too, the amounts are in the log.
         console.error(JSON.stringify({
             event: "auto_router_optimizer_cycle_failed",
             cycleId: input.cycleId,
             error: error instanceof Error ? error.name : "unknown",
-            knownSpentMicroUsd,
+            knownSpentMicroUsd: known.spentMicroUsd,
+            knownSpentByProvider: Object.fromEntries(known.spentByProvider),
         }));
-        await prisma.autoRouterOptimizerCycle
-            .updateMany({
-                where: { id: input.cycleId, status: "running" },
-                data: {
-                    status: "error",
-                    failure: "run_error",
-                    spentMicroUsd: knownSpentMicroUsd,
-                    finishedAt: new Date(),
-                },
-            })
-            .catch(() => undefined);
+        await finishOptimizerCycle({
+            cycleId: input.cycleId,
+            data: {
+                status: "error",
+                failure: "run_error",
+                spentMicroUsd: known.spentMicroUsd,
+                finishedAt: new Date(),
+            },
+            spentByProvider: known.spentByProvider,
+        }).catch(() => undefined);
     }
 }
 

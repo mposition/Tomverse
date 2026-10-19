@@ -146,6 +146,29 @@ test("a finished cycle adds what each provider was actually paid to its buckets,
   assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-day"), 5_300);
 });
 
+test("a cycle that cannot record its result still books its known spend to the row and the buckets, once", async () => {
+  const started = await reserve();
+  assert.ok("cycle" in started);
+  // The recovery path in runInBackground: the same finish, as a run error.
+  const recover = () =>
+    finishOptimizerCycle({
+      cycleId: started.cycle.id,
+      data: { status: "error", failure: "run_error", spentMicroUsd: 800, finishedAt: new Date() },
+      spentByProvider: new Map([[OPTIMIZER_PROVIDER, 500], [ROUTER_PROVIDER, 300]]),
+    });
+  assert.equal(await recover(), true);
+  const row = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: started.cycle.id } });
+  assert.equal(row.status, "error");
+  assert.equal(row.failure, "run_error");
+  assert.equal(row.spentMicroUsd, 800);
+  assert.equal(await bucket(OPTIMIZER_PROVIDER, "provider-cost-day"), 500);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-month"), 300);
+  // Had the first recording committed after all, the recovery adds nothing.
+  assert.equal(await recover(), false);
+  assert.equal(await bucket(OPTIMIZER_PROVIDER, "provider-cost-day"), 500);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-month"), 300);
+});
+
 test("a cycle cut off by a restart is closed without changing its recorded spend, then a new one may start", async () => {
   const stale = await seedCycle({
     status: "running",
