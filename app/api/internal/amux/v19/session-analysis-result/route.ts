@@ -16,6 +16,8 @@ import { AmuxMaxSessionResultError,
 import { amuxAnalysisFreeformSubjectId } from
   "@/lib/amux/ideaAnalysisDraftSealCore";
 import { createAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
+import { reportAmuxSessionIdeaNeedsOperator } from
+  "@/lib/amux/ideaSessionAnalysisAlert";
 import { amuxV19SystemRegistrationEnabled } from
   "@/lib/amux/ideaSystemRegistrationCore";
 import { AmuxV19SystemRegistrationError,
@@ -110,9 +112,24 @@ export async function POST(request: Request): Promise<Response> {
     }
     return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
   }
-  return amuxJsonNoStore({ ...result,
-    registration: result.plan.state === "plan_ready"
-      ? await registerSessionPlan(body.ideaId) : { state: "not_planned" } });
+  const registration = result.plan.state === "plan_ready"
+    ? await registerSessionPlan(body.ideaId) : { state: "not_planned" };
+  if (registration.state !== "committed") {
+    await alertOperator(body.ideaId, result.plan.state === "plan_refused"
+      ? result.plan.reason : registration.state);
+  }
+  return amuxJsonNoStore({ ...result, registration });
+}
+
+/** v19 item 7: anything short of a registered plan is for the operator; the
+ * alert carries the Admin link and a closed reason word only. */
+async function alertOperator(ideaId: string, reason: string): Promise<void> {
+  try {
+    const idea = await prisma.amuxIdeaSubmission.findUnique({
+      where: { id: ideaId }, select: { requestId: true } });
+    if (idea) await reportAmuxSessionIdeaNeedsOperator({
+      requestId: idea.requestId, reason });
+  } catch { /* The committed result answer never depends on the alert. */ }
 }
 
 /** v19 item 5: the committed plan goes straight to the deterministic

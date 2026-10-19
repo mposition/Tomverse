@@ -29,7 +29,8 @@ export const AMUX_IDEA_PROGRESS_STAGES = [
 ] as const;
 export type AmuxIdeaProgressStage = typeof AMUX_IDEA_PROGRESS_STAGES[number] | "cancelled";
 /** What a person must do next, when anything. */
-export type AmuxIdeaWaitingFor = "execution_approval" | "continuation" | "owner_input" | "plan_approval";
+export type AmuxIdeaWaitingFor = "execution_approval" | "continuation" | "owner_input" | "plan_approval" |
+  "session_review";
 
 export type AmuxIdeaProgressFacts = {
   state: string;
@@ -104,6 +105,13 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
   // append-only reservation waits for automatic analysis, not a human step.
   if (facts.submissionOrigin === "session" && facts.state === "submitted") {
     return at("analysis");
+  }
+  // A v19 session answer that could not become a plan (invalid, an owner
+  // question or a continuation page) leaves the queue with no plan rows; the
+  // operator decides what to do with the idea.
+  if (facts.submissionOrigin === "session" && facts.state === "awaiting_owner" &&
+      facts.chunks.length === 0) {
+    return at("analysis", "session_review");
   }
   return at("execution_approval", "execution_approval");
 }
