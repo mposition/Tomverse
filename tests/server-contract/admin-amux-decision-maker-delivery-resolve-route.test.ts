@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
-// AMUX Decision Maker §2-7, §9: a person resolves an unknown delivery as
+// docs/policy/amux-decision-maker.md §2-7, §9: a person resolves an unknown delivery as
 // delivered or not delivered. `ops:write` and a recent step-up before the body
 // is read; the store's refusal is 409 with its reason; an unknown outcome says
 // so. The store and the DB boundary are faked; the boundary around the real

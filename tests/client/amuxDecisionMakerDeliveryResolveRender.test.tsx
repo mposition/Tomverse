@@ -9,6 +9,7 @@ import {
   type DmDeliveryResolveState,
 } from "@/components/admin/AmuxDecisionMakerDeliveryResolvePanel";
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
+import type { DmDeliveryResolveOutcome } from "@/lib/amux/decisionMakerJudgmentCore";
 import { adminAmuxDecisionMakerAttentionMessages } from "@/lib/adminMessages/amuxDecisionMaker";
 
 /**
@@ -38,14 +39,14 @@ const one = (tree: ReactNode, id: string) => {
 };
 
 const RELOAD = "/admin/amux-execution?dmRequest=r-1";
-const view = (d: (typeof adminAmuxDecisionMakerAttentionMessages)["en"], state: DmDeliveryResolveState, onResolve = () => {}) =>
+const view = (d: (typeof adminAmuxDecisionMakerAttentionMessages)["en"], state: DmDeliveryResolveState, onResolve: (outcome: DmDeliveryResolveOutcome) => void = () => {}) =>
   AmuxDecisionMakerDeliveryResolveView({ d, state, failure: null, reloadHref: RELOAD, onResolve });
 
 for (const locale of ["en", "ko"] as const) {
   const d = adminAmuxDecisionMakerAttentionMessages[locale];
 
   test(`${locale}: both outcomes are offered while idle, as 44px targets, and send what they say`, () => {
-    const sent: string[] = [];
+    const sent: DmDeliveryResolveOutcome[] = [];
     const tree = view(d, { phase: "idle" }, (outcome) => sent.push(outcome));
     for (const outcome of ["delivered", "not_delivered"]) {
       const button = one(tree, `amux-dm-delivery-resolve-${outcome}`);
