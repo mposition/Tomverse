@@ -315,6 +315,8 @@ export const zh = {
         copyCode: "复制代码",
         responseCopied: "已复制",
         tryAnotherModelHint: "你也可以选择其他模型后再试。",
+        concurrencyRetryWaiting: "正在生成的回复完成后即可重试。",
+        concurrencyRetryReady: "现在可以重试了。",
         guestQuotaLoginBenefitHint: "登录后可获得更高的每日额度，并且此对话会保存到你的账户中。",
         send: "发送",
         creditUnit: "积分",

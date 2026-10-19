@@ -300,6 +300,8 @@ export const ko = {
         copyCode: "코드 복사",
         responseCopied: "복사됨",
         tryAnotherModelHint: "다른 모델을 선택해 다시 시도할 수도 있습니다.",
+        concurrencyRetryWaiting: "진행 중인 답변이 끝나면 다시 시도할 수 있습니다.",
+        concurrencyRetryReady: "이제 다시 시도할 수 있습니다.",
         guestQuotaLoginBenefitHint: "로그인하면 훨씬 더 많은 일일 사용량을 받고, 이 대화도 계정에 저장됩니다.",
         send: "전송",
         creditUnit: "크레딧",
