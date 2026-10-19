@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -6,8 +8,23 @@ import test from "node:test";
 import { launchAmuxV19TracedSandbox } from
   "../lib/amux/ideaTrackedCheckoutTraceRunner.mjs";
 
+// These run the real traced sandbox: strace following bwrap with unprivileged
+// user namespaces. The v19 Ubuntu runner has both; a host without them (the
+// hosted CI runner restricts unprivileged user namespaces) skips with the
+// reason instead of reporting a sandbox it could not build as a trace failure.
+const sandboxUnavailable = (() => {
+  if (process.platform !== "linux") return "linux only";
+  if (!existsSync("/usr/bin/strace") || !existsSync("/usr/bin/bwrap"))
+    return "strace or bwrap is not installed";
+  try {
+    execFileSync("/usr/bin/strace", ["-f", "-qq", "-o", "/dev/null", "/usr/bin/bwrap",
+      "--unshare-all", "--ro-bind", "/", "/", "/bin/true"], { stdio: "ignore", timeout: 15_000 });
+    return false;
+  } catch { return "strace cannot follow an unprivileged bwrap sandbox on this host"; }
+})();
+
 test("isolated traced child streams opened checkout paths without a log", {
-  skip: process.platform !== "linux",
+  skip: sandboxUnavailable,
 }, async () => {
   const directory = await mkdtemp("/tmp/amux-v19-checkout-");
   let launched;
@@ -47,7 +64,7 @@ test("isolated traced child streams opened checkout paths without a log", {
 });
 
 test("Node's io_uring is refused and its read is still observed as a complete manifest", {
-  skip: process.platform !== "linux",
+  skip: sandboxUnavailable,
 }, async () => {
   // Measured 2026-10-19 on the v19 runner: without the seccomp filter Node 22's
   // libuv io_uring_setup succeeds and the manifest could not be certified.
@@ -83,7 +100,7 @@ test("Node's io_uring is refused and its read is still observed as a complete ma
 });
 
 test("concurrent reads that strace splits across threads still form a complete manifest", {
-  skip: process.platform !== "linux",
+  skip: sandboxUnavailable,
 }, async () => {
   // The sixth Max S0 call ended `undecoded_open`: strace -f writes a call that
   // another thread interrupts as `<unfinished ...>` plus `<... resumed>`.
