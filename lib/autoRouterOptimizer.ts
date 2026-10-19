@@ -38,6 +38,7 @@ import {
     AUTO_ROUTER_SYNTHESIZER_SYSTEM,
     optimizerCycleView,
     admitOptimizerCycle,
+    autoRouterAnswerSystem,
     autoRouterGeneratorSchema,
     autoRouterJudgeSchema,
     autoRouterSynthesizerSchema,
@@ -623,7 +624,7 @@ async function runInBackground(input: {
                 // The picked model answers as itself: its own provider, its
                 // own price, no tools. Paid to that provider, which may be
                 // neither the optimizer's nor the router's.
-                answer: async (modelId, message) => {
+                answer: async (modelId, turn) => {
                     const model = answerModels.get(modelId);
                     const prices = model ? pricesOf(model) : null;
                     // No call without a price: its spend could not be recorded.
@@ -632,7 +633,8 @@ async function runInBackground(input: {
                     }
                     const generated = await traced("answer", () => generateText({
                         model: getActiveAiModel(model),
-                        prompt: message,
+                        system: autoRouterAnswerSystem(turn.previousAnswer),
+                        prompt: turn.message,
                         maxOutputTokens: ANSWER_MAX_OUTPUT_TOKENS,
                         maxRetries: 0,
                         abortSignal: AbortSignal.timeout(ANSWER_TIMEOUT_MS),
