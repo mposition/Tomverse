@@ -70,6 +70,11 @@ test.describe("admin console account menu", () => {
     await expect(page.getByTestId("admin-account-menu-locale-en")).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(page.getByTestId("admin-account-menu-locale-ko")).toBeFocused();
+    // Then the console theme, its own group.
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByTestId("admin-account-menu-theme-dark")).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByTestId("admin-account-menu-theme-light")).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(page.getByTestId("admin-account-menu-home")).toBeFocused();
     await page.keyboard.press("ArrowDown");
