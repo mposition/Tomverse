@@ -296,6 +296,9 @@ pub struct Scheduler {
     /// What this tick's selection reads did so far. Set by
     /// `handle_selection_read`, read once by `tick` when the tick ends.
     tick_selection: TickSelection,
+    /// Recovery sweeps in a row whose outcome was unknown (the 2026-10-20 amendment). Only
+    /// logged: such a sweep is skipped, never halted on.
+    consecutive_unknown_recoveries: u32,
     /// The halts this process holds until the server returns a verified clear.
     halts: HaltBook,
     error_log: ErrorLogClock,
@@ -326,6 +329,7 @@ impl Scheduler {
             execution_enabled: execution_enabled(),
             consecutive_selection_skips: 0,
             tick_selection: TickSelection::Untouched,
+            consecutive_unknown_recoveries: 0,
             halts: HaltBook::default(),
             error_log: ErrorLogClock::default(),
         }
@@ -704,11 +708,29 @@ impl Scheduler {
     }
 
     /// One recovery sweep, a write call since version 20. The three "nothing
-    /// committed" answers skip the pass; every other answer outside section 1
-    /// halts `recovery_outcome_unknown`.
+    /// committed" answers skip the pass. Since the 2026-10-20 amendment an answer outside
+    /// section 1 skips it too instead of halting: the sweep only releases
+    /// what has already expired, so running it again next interval is safe
+    /// whatever this one committed. It is not acknowledged; the server
+    /// resolves the admission by itself (`no_commit` without receipts, a
+    /// system acknowledgement with them).
     async fn recovery_step(&mut self) -> Flow {
         let ids = self.new_write_ids();
         let answer = write_answer(self.api.execution_recover(ids).await, classify_recover);
+        if let WriteAnswer::Unknown(class) = answer {
+            self.consecutive_unknown_recoveries += 1;
+            warn!(
+                endpoint = "execution_recover",
+                request_id = %ids.request_id,
+                error_class = class,
+                consecutive = self.consecutive_unknown_recoveries,
+                measured = false,
+                verdict = "recovery_outcome_unknown_skipped",
+                "Tomverse AMUX recovery sweep outcome is unknown; not halting, the next interval sweeps again"
+            );
+            return Flow::Continue;
+        }
+        self.consecutive_unknown_recoveries = 0;
         match self
             .settle_write(CallKind::Recover, ids.request_id, answer)
             .await
@@ -1814,27 +1836,48 @@ mod tests {
             assert_eq!(seen.last().unwrap().path, CLAIM_PATH, "{status} {body}");
         }
 
-        // Recover and the tick halt on theirs.
-        for (path, status, body, reason) in [
-            (RECOVER_PATH, "503 Service Unavailable", OUTCOME_UNKNOWN_BODY, HaltReason::RecoveryOutcomeUnknown),
-            (RECOVER_PATH, "409 Conflict", r#"{"recovered":false,"reason":"other","quota_observations_deleted":0}"#, HaltReason::RecoveryOutcomeUnknown),
-            (RECOVER_PATH, "DROP", "", HaltReason::RecoveryOutcomeUnknown),
-            (TICK_PATH, "500 Internal Server Error", r#"{"promoted":false,"reason":"audit_unbound","expired":0}"#, HaltReason::PromotionOutcomeUnknown),
-            (TICK_PATH, "409 Conflict", r#"{"promoted":false,"reason":"outcome_unknown","expired":0}"#, HaltReason::PromotionOutcomeUnknown),
-            (TICK_PATH, "409 Conflict", r#"{"promoted":false,"reason":"expiry_outcome_unknown","expired":1}"#, HaltReason::PromotionOutcomeUnknown),
-            (TICK_PATH, "429 Too Many Requests", "{}", HaltReason::PromotionOutcomeUnknown),
+        // The tick halts on its own.
+        for (status, body) in [
+            ("500 Internal Server Error", r#"{"promoted":false,"reason":"audit_unbound","expired":0}"#),
+            ("409 Conflict", r#"{"promoted":false,"reason":"outcome_unknown","expired":0}"#),
+            ("409 Conflict", r#"{"promoted":false,"reason":"expiry_outcome_unknown","expired":1}"#),
+            ("429 Too Many Requests", "{}"),
         ] {
             let body = body.to_owned();
-            let (base_url, log) = serve(handler(move |seen| (seen.path == path).then(|| (status, body.clone())))).await;
+            let (base_url, log) = serve(handler(move |seen| (seen.path == TICK_PATH).then(|| (status, body.clone())))).await;
             let mut scheduler = scheduler_for(base_url);
-            let flow = if path == RECOVER_PATH {
-                scheduler.recovery_step().await
-            } else {
-                scheduler.auto_promotion_step().await
-            };
-            assert_eq!(flow, Flow::Halted, "{path} {status}");
-            assert_eq!(only_halt(&scheduler).reason, reason);
+            assert_eq!(scheduler.auto_promotion_step().await, Flow::Halted, "{status}");
+            assert_eq!(only_halt(&scheduler).reason, HaltReason::PromotionOutcomeUnknown);
             assert!(log.lock().unwrap().iter().all(|seen| seen.path != ACK_PATH));
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unknown_recovery_outcome_skips_the_sweep_without_a_halt_or_an_ack() {
+        // 2026-10-20 amendment: the sweep only releases what has expired, so the next
+        // interval runs it again; the server resolves the admission itself.
+        for (status, body) in [
+            ("503 Service Unavailable", OUTCOME_UNKNOWN_BODY),
+            ("409 Conflict", r#"{"recovered":false,"reason":"other","quota_observations_deleted":0}"#),
+            ("500 Internal Server Error", r#"{"error":"Internal server error."}"#),
+            ("DROP", ""),
+        ] {
+            let body = body.to_owned();
+            let (base_url, log) = serve(handler(move |seen| (seen.path == RECOVER_PATH).then(|| (status, body.clone())))).await;
+            let mut scheduler = scheduler_for(base_url);
+            assert_eq!(scheduler.recovery_step().await, Flow::Continue, "{status}");
+            assert_eq!(scheduler.recovery_step().await, Flow::Continue, "{status}");
+            assert!(scheduler.halts.is_empty(), "{status}");
+            assert_eq!(scheduler.consecutive_unknown_recoveries, 2, "{status}");
+            let seen = log.lock().unwrap().clone();
+            assert!(seen.iter().all(|seen| seen.path != ACK_PATH && seen.path != HALT_PATH), "{status}");
+            // Each pass is a new write with its own request id, not a resend.
+            let ids: std::collections::HashSet<_> = seen
+                .iter()
+                .filter(|seen| seen.path == RECOVER_PATH)
+                .map(|seen| seen.request_id.clone().unwrap())
+                .collect();
+            assert_eq!(ids.len(), 2, "{status}");
         }
     }
 

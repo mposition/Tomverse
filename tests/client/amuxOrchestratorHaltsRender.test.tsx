@@ -38,13 +38,21 @@ test("failed evidence reads are unknown alerts, never a zero-halt success", () =
   assert.equal(propsOf(tree).find(p => p["data-testid"] === "amux-halt-status")?.role, "alert");
   assert.match(textOf(render(empty)), /Execution switches and other admission conditions/);
 });
-test("missing admissions and committed changes remain human decisions", () => {
-  assert.equal(amuxHaltAttention(halt()), "operator_required");
-  assert.equal(amuxHaltAttention(halt({ write: { ...write, receiptCount: 1 } })), "operator_required");
-  const tree = render({ ...empty, openCount: 1, open: [halt()] });
+test("committed changes and halts outside the automatic list remain human decisions", () => {
+  const committed = halt({ write: { ...write, receiptCount: 1 } });
+  assert.equal(amuxHaltAttention(committed), "operator_required");
+  const unacked = halt({ reasonCode: "unacked_write_receipt" });
+  assert.equal(amuxHaltAttention(unacked), "operator_required");
+  const tree = render({ ...empty, openCount: 1, open: [unacked] });
   assert.match(textOf(tree), /not confirmation of no change/);
-  assert.equal(propsOf(tree).filter(p => p.haltId === halt().haltId).length, 1);
-  assert.equal(propsOf(render({ ...empty, openCount: 1, open: [halt()] }, false)).filter(p => p.haltId === halt().haltId).length, 0);
+  assert.equal(propsOf(tree).filter(p => p.haltId === unacked.haltId).length, 1);
+  assert.equal(propsOf(render({ ...empty, openCount: 1, open: [unacked] }, false)).filter(p => p.haltId === unacked.haltId).length, 0);
+});
+test("a result-unknown halt whose request never reached the server is cleared by the server", () => {
+  assert.equal(amuxHaltAttention(halt()), "automatic_pending");
+  const tree = render({ ...empty, openCount: 1, open: [halt()] });
+  assert.match(textOf(tree), /never reached the server/);
+  assert.equal(propsOf(tree).filter(p => p.haltId === halt().haltId).length, 0);
 });
 test("pending zero-receipt decisions offer no manual clear while the server verifies them", () => {
   const item = halt({ write });
