@@ -5,13 +5,20 @@ import { recordAmuxV19LocalCheckoutEvidence,
   recordAmuxV19MaxLocalCheckoutEvidence,
   recordAmuxV19VerifiedCheckoutReceipts } from
   "../lib/amux/ideaLocalCheckoutEvidenceReceipt.mjs";
+import { AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV } from
+  "../lib/amux/ideaLocalSessionAnalysisQueuePoll.mjs";
 
-const originEnv = "TOMVERSE_AMUX_V4_ANALYSIS_APP_ORIGIN";
-const previousOrigin = process.env[originEnv];
-process.env[originEnv] = "https://tomverse.test/";
+// v4 receipts use the v4 app origin; Max (v19 session) receipts use the v19
+// session origin. Both point at the same synthetic app here.
+const originEnvs = ["TOMVERSE_AMUX_V4_ANALYSIS_APP_ORIGIN",
+  AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV];
+const previousOrigins = originEnvs.map((name) => process.env[name]);
+for (const name of originEnvs) process.env[name] = "https://tomverse.test/";
 after(() => {
-  if (previousOrigin === undefined) delete process.env[originEnv];
-  else process.env[originEnv] = previousOrigin;
+  originEnvs.forEach((name, index) => {
+    if (previousOrigins[index] === undefined) delete process.env[name];
+    else process.env[name] = previousOrigins[index];
+  });
 });
 
 const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
