@@ -67,6 +67,16 @@ export type FeedbackRow = {
   errorClassificationSource: string | null;
   clientErrorCode: string | null;
   evidenceAvailability: string | null;
+  /**
+   * The support-triage proposal: a lane, the open reports the model named as
+   * duplicates, and a reply draft. Shown to the operator only; nothing is sent.
+   */
+  triage?: {
+    lane: string;
+    laneSource: string | null;
+    duplicateOf: string[];
+    replyDraft: string | null;
+  } | null;
   /** Phase 2 diagnosis-only shadow case, when one was queued. Observational:
    * no auto-fix pipeline exists, and the panel says so in words. */
   autoFixCase: {
@@ -641,6 +651,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-200">
                       {feedback.message}
                     </p>
+                    {feedback.triage ? <TriageProposal triage={feedback.triage} m={m} /> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -1161,6 +1172,69 @@ function FeedbackCompletionDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The support-triage proposal under a report: its lane and where the lane
+ * came from, links to the reports the model named as duplicates, and the
+ * reply draft with a copy button. Read-only: nothing here sends or changes
+ * the report.
+ */
+function TriageProposal({
+  triage,
+  m,
+}: {
+  triage: NonNullable<FeedbackRow["triage"]>;
+  m: FeedbackInboxMessages;
+}) {
+  const laneLabel =
+    (m.triageLanes as Record<string, string>)[triage.lane] ?? triage.lane;
+  return (
+    <div
+      className="mt-3 rounded-xl border border-blue-500/25 bg-blue-500/5 p-3"
+      data-testid="feedback-triage-proposal"
+    >
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-bold text-blue-100">{m.triageTitle}</span>
+        <span className="rounded-full border border-blue-500/30 px-2 py-0.5 font-bold text-blue-100">
+          {laneLabel}
+        </span>
+        <span className="text-zinc-400">
+          {triage.laneSource === "llm" ? m.triageByModel : m.triageByKeyword}
+        </span>
+      </div>
+      {triage.duplicateOf.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-300">
+          <span>{m.triageDuplicates}:</span>
+          {triage.duplicateOf.map((id) => (
+            <a
+              key={id}
+              href={`/admin/support?tab=feedback&q=${encodeURIComponent(id)}`}
+              className="font-mono text-blue-200 underline underline-offset-2 hover:text-blue-100"
+            >
+              {id.slice(0, 10)}
+            </a>
+          ))}
+        </div>
+      ) : null}
+      {triage.replyDraft ? (
+        <div className="mt-2">
+          <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
+            <span>{m.triageDraft}</span>
+            <button
+              type="button"
+              onClick={() => void navigator.clipboard?.writeText(triage.replyDraft ?? "")}
+              className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2 py-1 font-bold text-zinc-200 transition hover:bg-zinc-800"
+            >
+              <Clipboard className="h-3 w-3" />
+              {m.triageCopyDraft}
+            </button>
+          </div>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-200">{triage.replyDraft}</p>
+        </div>
+      ) : null}
     </div>
   );
 }
