@@ -15,6 +15,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 5 | 2026-10-05 mposition | 부록 A에 `components/admin/QaRelease*`를 더함 — S-M0에서 만든 병합 레인 Admin 화면(`components/admin/QaReleaseMergeLaneSection.tsx`, latch 표시와 사람의 latch 해제 양식)이 기존 패턴(`components/admin/AdminAgentDigests*`) 밖에 있어, 이 Agent의 판정 표시를 바꾸는 PR이 무인 병합 제외에서 빠지던 것을 바로잡음. 그 밖의 본문 변경 없음 |
 | 6 | 2026-10-05 mposition | 버전 5의 재기록, 본문 변경 없음 — 버전 5 승인 기록(#2093)이 2026-10-04 23:53 UTC에 병합되어 승인 판정 5번(`approvedAt`과 병합의 UTC 날짜)을 통과하지 못했으므로, 같은 내용을 새 버전으로 다시 기록함 |
 | 7 | 2026-10-07 mposition | 버전 5·6의 재기록, 본문 변경 없음 — 버전 6 승인 기록(#2102)이 2026-10-06 22:18 UTC에 병합되어 승인 판정 5번(`approvedAt`과 병합의 UTC 날짜)을 통과하지 못했으므로, 같은 내용을 병합할 UTC 날짜로 다시 기록함 |
+| 7 (버전 유지) | 2026-10-19 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): develop의 배포 환경은 2026-10-13부터 Railway `dev`이므로 8절이 dev를 가리킴, S-M2에 필요한 S-M1 기간 7일 → 3일, 8절 3항의 복구 runbook은 `docs/ops/qa-release-merge-lane-dev-recovery.md`, 머리말의 개정 규칙을 AGENTS.md에 맞춤 |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950,
 버전 3 #1986, 버전 4 #2042, 버전 5 #2093, 버전 6 #2102)의 git 기록에 있으며, 효력이 없습니다. 이 버전의 승인 기록이 `develop`에 병합되는 순간 이 파일 전체가

@@ -32,7 +32,8 @@ $env:DIRECT_DATABASE_URL = "<dev의 DIRECT_DATABASE_URL — 1-2에서 확인한 
 npx prisma migrate resolve --rolled-back <실패한 migration 이름>
 ```
 
-창을 닫으면 `$env:DIRECT_DATABASE_URL`은 사라집니다. 이 값을 대화에 붙이지 않습니다.
+Prisma CLI는 `prisma.config.ts`가 고르는 `DIRECT_DATABASE_URL`만 씁니다. 앱용 `DATABASE_URL`은 필요 없습니다. 창을 닫으면
+`$env:DIRECT_DATABASE_URL`은 사라집니다. 이 값을 대화에 붙이지 않습니다.
 
 ## 3-나. Neon 시점 복원
 
@@ -46,8 +47,17 @@ npx prisma migrate resolve --rolled-back <실패한 migration 이름>
 
 1. GitHub에서 병합된 PR을 **Revert** 해 develop PR을 만들고 사람이 병합합니다. 이 PR은 병합 레인이 다루지 않습니다
    (`docs/policy/**`·migration을 건드리면 레인의 제외 대상이고, 그렇지 않아도 latch 중에는 레인이 병합하지 않습니다).
-2. dev 재배포가 성공하는지 Railway에서 봅니다.
-3. schema 비교로 drift가 0인지 확인합니다. **실행 위치:** 로컬 PC의 PowerShell, clone 폴더 안, `npm ci` 완료.
+2. dev 재배포가 성공하는지 Railway에서 봅니다. 성공한 배포의 commit SHA(revert가 들어간 develop)를 적어 둡니다.
+3. 로컬 checkout을 **그 SHA로** 맞춥니다. 비교는 로컬 `prisma/migrations`로 scratch DB를 만들므로, 실패한 migration이 남은
+   checkout으로 비교하면 같은 migration에서 다시 실패하거나 복구된 dev와 차이를 보고합니다.
+
+   ```powershell
+   git fetch origin develop
+   git switch --detach <2에서 적은 SHA>
+   npm ci
+   ```
+
+4. schema 비교로 drift가 0인지 확인합니다. **실행 위치:** 로컬 PC의 PowerShell, 3에서 맞춘 clone 폴더 안.
    dev DB는 읽기만 하고, 두 번째 URL은 **비어 있고 버려도 되는** DB(예: Neon에서 만든 빈 branch)여야 합니다 — 그 내용은 지워집니다.
 
    ```powershell
