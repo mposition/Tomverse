@@ -1,26 +1,31 @@
 # CI auto-fix for develop pull requests from agent sessions.
 #
 # When a required CI workflow fails on a ready pull request into develop whose
-# head is claude/to-develop/** or codex/to-develop/**, this reads the failed
-# job logs, asks Claude Code for the smallest fix, and pushes it to the pull
+# head is claude/to-develop/** or codex/to-develop/**, Claude Code reads the
+# failed job logs and proposes the smallest fix, which is pushed to the pull
 # request's own branch as one "auto-fix(ci): " commit. The QA-release merge
 # lane then merges the pull request once its checks pass.
 #
 # Owner approval 2026-10-20 (AGENTS.md approval list: a new autonomous
 # permission and a paid model call). Off unless the repository variable
-# PR_AUTO_FIX_ENABLED is exactly "true".
+# PR_AUTO_FIX_ENABLED is exactly "true". A workflow_run workflow runs from the
+# default branch, so this acts only once it is on main.
 #
-# What keeps it bounded:
-# - scripts/pr-ci-auto-fix-guard.mjs decides twice: whether the pull request
-#   is served (same repository, develop base, not draft, agent branch, fewer
-#   than two auto-fix commits) and whether the diff may be pushed (no gate
-#   path -- the merge lane's own list --, no test file, no deletion, no
-#   binary, at most 400 changed lines).
-# - The model step holds only its API key. GH_AUTOMATION_PAT exists in the
-#   push step alone, and the push is leased to the commit CI ran on, so a
-#   newer push by a person wins.
-# - Logs and pull request text are data for the model, never instructions to
-#   this workflow.
+# Three jobs on three runners, so nothing the pull request or the model runs
+# can reach the push credential or the judgement:
+# - target: a trusted checkout of the default branch decides whether the pull
+#   request is served (same repository, develop base, not draft, agent
+#   branch, every commit read, fewer than two auto-fix commits). No pull
+#   request code runs here.
+# - propose: checks out the failed commit, runs npm ci and Claude Code with
+#   only the model key, and hands back a patch file. No push credential.
+# - publish: a fresh runner with a trusted checkout runs
+#   scripts/pr-ci-auto-fix-guard.mjs against the patch applied to a clean
+#   checkout of the pull request (no gate path -- the merge lane's own list --,
+#   no test file, no deletion, no binary, at most 400 changed lines) and only
+#   then pushes with GH_AUTOMATION_PAT, leased to the commit CI ran on. It
+#   installs and runs nothing from the pull request.
+# Logs and pull request text are data for the model, never instructions.
 
 name: PR CI Auto-Fix
 
@@ -44,20 +49,61 @@ concurrency:
   group: pr-ci-auto-fix-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
+env:
+  HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+  HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+  RUN_ID: ${{ github.event.workflow_run.id }}
+  WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+
 jobs:
-  fix:
+  target:
     if: >-
       vars.PR_AUTO_FIX_ENABLED == 'true' &&
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      served: ${{ steps.decide.outputs.served }}
+      number: ${{ steps.decide.outputs.number }}
+    steps:
+      - name: Trusted checkout of the default branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Decide whether the pull request is served
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${HEAD_BRANCH}" --jq '.[0] // empty' > /tmp/pr-list.json
+          if [ ! -s /tmp/pr-list.json ]; then echo "No open pull request for ${HEAD_BRANCH}."; echo "served=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          number=$(jq -r .number /tmp/pr-list.json)
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${number}" > /tmp/pr.json
+          if [ "$(jq -r .head.sha /tmp/pr.json)" != "$HEAD_SHA" ]; then
+            echo "The branch moved on after this run; its own CI decides."; echo "served=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls/${number}/commits?per_page=100" > /tmp/commits.json
+          if node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target /tmp/pr.json /tmp/commits.json; then
+            echo "served=true" >> "$GITHUB_OUTPUT"
+            echo "number=${number}" >> "$GITHUB_OUTPUT"
+          else
+            echo "served=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  propose:
+    needs: target
+    if: needs.target.outputs.served == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 40
-    env:
-      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-      RUN_ID: ${{ github.event.workflow_run.id }}
-      WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
     steps:
       - name: Checkout the commit CI failed on
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -71,26 +117,7 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
-      - name: Find the pull request and decide whether it is served
-        id: target
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${HEAD_BRANCH}" --jq '.[0] // empty' > /tmp/pr.json
-          if [ ! -s /tmp/pr.json ]; then echo "No open pull request for ${HEAD_BRANCH}."; echo "served=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if [ "$(jq -r .head.sha /tmp/pr.json)" != "$HEAD_SHA" ]; then
-            echo "The branch moved on after this run; its own CI decides."; echo "served=false" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          gh api "repos/${GITHUB_REPOSITORY}/pulls/$(jq -r .number /tmp/pr.json)/commits?per_page=100" > /tmp/commits.json
-          if node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target /tmp/pr.json /tmp/commits.json; then
-            echo "served=true" >> "$GITHUB_OUTPUT"
-            echo "number=$(jq -r .number /tmp/pr.json)" >> "$GITHUB_OUTPUT"
-          else
-            echo "served=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Collect the failed job logs
-        if: steps.target.outputs.served == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -98,12 +125,9 @@ jobs:
           tail -c 60000 /tmp/ci-full.log > /tmp/ci.log
           if [ ! -s /tmp/ci.log ]; then echo "::error::No failed-job log could be read."; exit 1; fi
 
-      - name: Install dependencies
-        if: steps.target.outputs.served == 'true'
-        run: npm ci
-
+      # Outside the checkout: a tarball in the tree would land in the patch.
       - name: Install Claude Code CLI
-        if: steps.target.outputs.served == 'true'
+        working-directory: /tmp
         env:
           CLAUDE_CODE_VERSION: "2.1.220"
           CLAUDE_CODE_INTEGRITY: "sha512-ogBrvwkqF9f8okmnXKxmRNHuvtFxFEffe5pWdqOV3iQDxlUOKirFqnyWC7NGXXnDA4WkkbPH8pvSbwyCR2Auyw=="
@@ -113,8 +137,10 @@ jobs:
           if [ "$actual" != "$CLAUDE_CODE_INTEGRITY" ]; then echo "Claude Code package integrity mismatch."; exit 1; fi
           npm install -g "./$package"
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Ask Claude Code for the smallest fix
-        if: steps.target.outputs.served == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.PR_AUTO_FIX_ANTHROPIC_API_KEY }}
         run: |
@@ -129,22 +155,68 @@ jobs:
             --output-format json > /tmp/claude.json
           jq -r '.result // empty' /tmp/claude.json | tail -c 4000 >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Decide whether the diff may be pushed
-        id: diff
-        if: steps.target.outputs.served == 'true'
+      - name: Export the proposed change as a patch
         run: |
-          if node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs diff; then
+          git add --all
+          git diff --cached --binary HEAD > /tmp/fix.patch
+          wc -c /tmp/fix.patch
+
+      - name: Hand the patch to the publish job
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-ci-auto-fix-patch
+          path: /tmp/fix.patch
+          retention-days: 3
+
+  publish:
+    needs: [target, propose]
+    if: needs.target.outputs.served == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trusted checkout of the default branch (the guard)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: trusted
+          persist-credentials: false
+
+      - name: Clean checkout of the commit CI failed on
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: pr
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Receive the patch
+        uses: actions/download-artifact@v8
+        with:
+          name: pr-ci-auto-fix-patch
+          path: patch
+
+      - name: Apply and judge the patch
+        id: judge
+        run: |
+          if [ ! -s patch/fix.patch ]; then echo "The model proposed no change."; echo "push=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git -C pr apply --binary --index "$GITHUB_WORKSPACE/patch/fix.patch"
+          if node --experimental-strip-types trusted/scripts/pr-ci-auto-fix-guard.mjs diff pr; then
             echo "push=true" >> "$GITHUB_OUTPUT"
           else
             echo "push=false" >> "$GITHUB_OUTPUT"
-            git diff --stat HEAD >> "$GITHUB_STEP_SUMMARY" || true
+            git -C pr diff --cached --stat HEAD >> "$GITHUB_STEP_SUMMARY" || true
           fi
 
       - name: Commit and push to the pull request branch
-        if: steps.diff.outputs.push == 'true'
+        if: steps.judge.outputs.push == 'true'
+        working-directory: pr
         env:
           GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
-          PR_NUMBER: ${{ steps.target.outputs.number }}
+          PR_NUMBER: ${{ needs.target.outputs.number }}
         run: |
           git config user.name "tomverse-pr-auto-fix"
           git config user.email "pr-auto-fix@users.noreply.github.com"

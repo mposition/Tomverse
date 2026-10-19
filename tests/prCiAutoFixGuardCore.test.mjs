@@ -37,7 +37,7 @@ test("gate paths, tests, deletions, binaries, empty and large diffs are refused"
 });
 
 test("only same-repository, ready develop pull requests from agent branches, at most twice", () => {
-  const base = { headBranch: "claude/to-develop/x", baseBranch: "develop", draft: false, sameRepository: true, commitMessages: [] };
+  const base = { headBranch: "claude/to-develop/x", baseBranch: "develop", draft: false, sameRepository: true, commitMessages: ["feat: a"], commitCount: 1 };
   assert.deepEqual(judgePrCiAutoFixTarget(base), { push: true });
   assert.deepEqual(judgePrCiAutoFixTarget({ ...base, headBranch: "codex/to-develop/y" }), { push: true });
   for (const [change, reason] of [
@@ -46,11 +46,13 @@ test("only same-repository, ready develop pull requests from agent branches, at 
     [{ draft: true }, "draft"],
     [{ headBranch: "dependabot/npm/x" }, "branch_not_served"],
     [{ headBranch: "release/2026-10-20-x" }, "branch_not_served"],
-    [{ commitMessages: [`${PR_CI_AUTO_FIX_COMMIT_PREFIX}a`, "feat: b", `${PR_CI_AUTO_FIX_COMMIT_PREFIX}c`] }, "attempts_exhausted"],
+    [{ commitMessages: [`${PR_CI_AUTO_FIX_COMMIT_PREFIX}a`, "feat: b", `${PR_CI_AUTO_FIX_COMMIT_PREFIX}c`], commitCount: 3 }, "attempts_exhausted"],
+    // A list cut short by paging cannot prove the attempt count.
+    [{ commitMessages: ["feat: a"], commitCount: 251 }, "commits_incomplete"],
   ]) {
     const verdict = judgePrCiAutoFixTarget({ ...base, ...change });
     assert.equal(verdict.push, false, JSON.stringify(change));
     assert.ok(verdict.reasons.includes(reason));
   }
-  assert.deepEqual(judgePrCiAutoFixTarget({ ...base, commitMessages: [`${PR_CI_AUTO_FIX_COMMIT_PREFIX}a`] }), { push: true });
+  assert.deepEqual(judgePrCiAutoFixTarget({ ...base, commitMessages: [`${PR_CI_AUTO_FIX_COMMIT_PREFIX}a`], commitCount: 1 }), { push: true });
 });

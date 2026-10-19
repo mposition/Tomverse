@@ -60,12 +60,15 @@ export function judgePrCiAutoFixTarget(input: {
   draft: boolean;
   sameRepository: boolean;
   commitMessages: readonly string[];
+  /** The number of commits GitHub says the pull request has; the attempt count is only trusted when every one was read. */
+  commitCount: number;
 }): PrCiAutoFixVerdict {
   const reasons: string[] = [];
   if (!input.sameRepository) reasons.push("fork");
   if (input.baseBranch !== "develop") reasons.push("base_not_develop");
   if (input.draft) reasons.push("draft");
   if (!PR_CI_AUTO_FIX_BRANCH.test(input.headBranch)) reasons.push("branch_not_served");
+  if (!Number.isInteger(input.commitCount) || input.commitMessages.length !== input.commitCount) reasons.push("commits_incomplete");
   const attempts = input.commitMessages.filter((m) => m.startsWith(PR_CI_AUTO_FIX_COMMIT_PREFIX)).length;
   if (attempts >= PR_CI_AUTO_FIX_MAX_ATTEMPTS) reasons.push("attempts_exhausted");
   return reasons.length === 0 ? { push: true } : { push: false, reasons };
