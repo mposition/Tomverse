@@ -27,6 +27,8 @@ const API = "https://api.github.com/repos/mposition/Tomverse";
 const RAW = `https://raw.githubusercontent.com/mposition/Tomverse/${SHA}`;
 const enc = (value) => new TextEncoder().encode(value);
 const blob = (text) => gitBlobId(enc(text));
+/** Whether a call read a file: its host, compared exactly. */
+const isRawRead = (url) => new URL(url).host === "raw.githubusercontent.com";
 
 /** A fake GitHub: `files` are the raw bodies, `tree` is derived unless overridden. */
 const github = ({ files = {}, tree, head = SHA, commit = SHA, truncated = false, fail = {} } = {}) => {
@@ -97,7 +99,7 @@ test("the target is a full lowercase commit id that the commit lookup answers wi
     const { http, calls } = github({ files: { "a.md": "a" }, ...options });
     const snapshot = await buildDmSnapshot(["a.md"], http);
     assert.deepEqual([snapshot.state, snapshot.reason], ["none", "target_unavailable"], JSON.stringify(options));
-    assert.equal(calls.some((url) => url.includes("raw.githubusercontent.com")), false, "no file is read");
+    assert.equal(calls.some(isRawRead), false, "no file is read");
   }
   const truncated = await buildDmSnapshot(["a.md"], github({ files: { "a.md": "a" }, truncated: true }).http);
   assert.deepEqual([truncated.state, truncated.reason], ["none", "tree_truncated"]);
@@ -187,7 +189,7 @@ test("files not reached within the snapshot's time budget are left out, never wa
   let clock = 0;
   const { http } = github({ files: { "a.md": "a", "b.md": "b", "c.md": "c" } });
   const slow = async (url) => {
-    if (url.includes("raw.githubusercontent.com")) clock += 40_000;
+    if (isRawRead(url)) clock += 40_000;
     return http(url);
   };
   const snapshot = await buildDmSnapshot(["a.md", "b.md", "c.md"], slow, () => clock);
