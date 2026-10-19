@@ -28,7 +28,7 @@ const SOLID = [500, 600, 700];
 
 export function adminThemeCss(themeCss) {
   const value = (name) => {
-    const match = themeCss.match(new RegExp(`--color-${name}:\s*([^;]+);`));
+    const match = themeCss.match(new RegExp(`--color-${name}:\\s*([^;]+);`));
     if (!match) throw new Error(`Tailwind has no --color-${name}`);
     return match[1].trim();
   };
