@@ -430,7 +430,10 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: MARKETING_GENERATOR_VARIABLES,
       staging: MARKETING_GENERATOR_VARIABLES,
-      // Not on dev: every run can spend on the LLM.
+      // On dev too (operator decision 2026-10-19): the first runs are tried
+      // there. Spend is still the ledger's -- nothing runs until a pinned
+      // model and a cap are set in that environment's Admin Console.
+      dev: MARKETING_GENERATOR_VARIABLES,
     },
   },
   {

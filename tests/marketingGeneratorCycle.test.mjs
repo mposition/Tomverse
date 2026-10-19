@@ -270,12 +270,12 @@ test("a worker that finishes in time is not killed, and gets only its own variab
   assert.equal(outcome.code, 0);
 });
 
-test("the Railway service gives the worker exactly its variables, never on dev", () => {
+test("the Railway service gives the worker exactly its variables in every environment it runs in", () => {
   const runners = AGENT_RUNNER_SERVICES.filter((runner) => runner.key === "marketing_generator");
   assert.equal(runners.length, 1);
   const [runner] = runners;
   assert.equal(runner.startCommand, "node --experimental-strip-types scripts/marketing-generator-service.mjs");
-  assert.deepEqual(Object.keys(runner.environments).sort(), ["production", "staging"]);
+  assert.deepEqual(Object.keys(runner.environments).sort(), ["dev", "production", "staging"]);
   for (const variables of Object.values(runner.environments)) {
     assert.deepEqual([...variables].sort(), [...MARKETING_GENERATOR_WORKER_VARIABLES].sort());
   }
