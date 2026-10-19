@@ -119,6 +119,9 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "docs/policy/**",
   "docs/ui-contracts/**",
   "docs/ops/cross-review/**",
+  // The per-area agent instructions AGENTS.md indexes (moved out of the root
+  // AGENTS.md on 2026-10-19); a root file was control-plane on its own terms.
+  "docs/agents/**",
   // §4-4: this agent's own gates, state, authentication, publishing and
   // registration, and the tests that pin them.
   "lib/agent*",
