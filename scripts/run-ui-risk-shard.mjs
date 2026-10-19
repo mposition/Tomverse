@@ -40,8 +40,11 @@ import { spawnSync } from "node:child_process";
  *   mobile-chromium  2/2    7m35s job  (30%)
  *
  * So the worst job went from 81% of the budget to 41%, and the split held to
- * 53/47 on the machine that matters. A third shard would buy a few minutes
- * against a fixed ~1m30s of setup and build per job, and cost another runner.
+ * 53/47 on the machine that matters -- for a while. The tier kept growing,
+ * the heavy files sort into shard 1, and on 2026-10-20 desktop moved to three
+ * shards while mobile stayed at two with recalibrated weights. The shard
+ * count and weights now live per project in the workflow's matrix, with the
+ * measurements in the job's comment; this script still needed no change.
  *
  * Desktop is still the project to watch: the two are not symmetric in cost
  * even though the tag selects the same list in both. Re-measure from the
