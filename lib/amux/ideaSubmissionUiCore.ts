@@ -6,8 +6,13 @@ export function canOpenSavedIdea(state: Parameters<typeof canStartAnotherIdea>[0
     /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(requestId);
 }
 
+/** Where a saved idea went: the v4 owner path, or the v19 session queue the
+ * Admin input joins while session intake is on (amux-intake v19 item 1). */
+export type IdeaSubmissionOrigin = "owner" | "session";
+
 type PostDecision =
-  | { kind: "submitted"; ideaId: string; hasExternalSources: boolean }
+  | { kind: "submitted"; ideaId: string; hasExternalSources: boolean;
+      origin: IdeaSubmissionOrigin }
   | { kind: "refused"; code: string }
   | { kind: "verify" };
 
@@ -52,7 +57,16 @@ const PREWRITE_REFUSALS: Record<string, number> = {
   content_refused: 400,
   metadata_incomplete: 400,
   audit_unavailable: 503,
+  // v19 session intake through the Admin input, all before its transaction.
+  references_required: 400,
+  scope_unavailable: 409,
+  outside_scope: 409,
+  model_not_approved: 409,
+  reference_snapshot_unavailable: 503,
 };
+
+const originOf = (body: Record<string, unknown>): IdeaSubmissionOrigin =>
+  body.origin === "session" ? "session" : "owner";
 
 /** True for an error the submission route returns before its transaction. */
 export function isIdeaSubmissionPrewriteRefusal(code: unknown, status: number): boolean {
@@ -64,7 +78,8 @@ export function classifyIdeaSubmissionPost(reply: Reply, requestId: string): Pos
   if (reply.status === 201 && body?.state === "submitted" &&
       body.requestId === requestId && typeof body.ideaId === "string" && body.ideaId.length > 0 &&
       typeof body.hasExternalSources === "boolean" && body.transferReady === false) {
-    return { kind: "submitted", ideaId: body.ideaId, hasExternalSources: body.hasExternalSources };
+    return { kind: "submitted", ideaId: body.ideaId, hasExternalSources: body.hasExternalSources,
+      origin: originOf(body) };
   }
   if (typeof body?.error === "string" && PREWRITE_REFUSALS[body.error] === reply.status) {
     return { kind: "refused", code: body.error };
@@ -75,12 +90,14 @@ export function classifyIdeaSubmissionPost(reply: Reply, requestId: string): Pos
 /** A negative read is not permission to retry: the first COMMIT can still be
  * in flight. Only a canonical submission plus its audit confirms success. */
 export function classifyIdeaSubmissionReadBack(reply: Reply, requestId: string):
-  { kind: "submitted"; ideaId: string; hasExternalSources: boolean } | { kind: "outcome_unknown" } {
+  { kind: "submitted"; ideaId: string; hasExternalSources: boolean;
+    origin: IdeaSubmissionOrigin } | { kind: "outcome_unknown" } {
   const body = record(reply.body);
   if (reply.status === 200 && body?.status === "committed" && body.requestId === requestId &&
       typeof body.ideaId === "string" && body.ideaId.length > 0 &&
       typeof body.hasExternalSources === "boolean") {
-    return { kind: "submitted", ideaId: body.ideaId, hasExternalSources: body.hasExternalSources };
+    return { kind: "submitted", ideaId: body.ideaId, hasExternalSources: body.hasExternalSources,
+      origin: originOf(body) };
   }
   return { kind: "outcome_unknown" };
 }
