@@ -121,6 +121,28 @@ test("Chat request omits empty assistant placeholders without deleting their UI 
     ["original", "error", "cancelled", "partial", "file-only", "assistant-file", "retry"]);
 });
 
+test("a concurrency-refused turn is never sent, and its retry reuses the question bubble", () => {
+  const question = { id: "q", role: "user", content: "Why does this not compile?" };
+  const refusedReview = { id: "refused-review", role: "assistant", status: "error",
+    errorCode: "CHAT_CONCURRENCY_EXCEEDED", content: "A response is already being generated." };
+  const refusedGuestIp = { id: "refused-ip", role: "assistant", status: "error",
+    errorCode: "CHAT_IP_CONCURRENCY_EXCEEDED", content: "This network is busy." };
+  const earlier = [
+    { id: "u0", role: "user", content: "Earlier" },
+    { id: "a0", role: "assistant", content: "Earlier answer", status: "normal" },
+  ];
+  // The retry is sent under the same id as the bubble already on screen.
+  const retry = { ...question };
+  for (const scope of ["model", "conversation"]) {
+    assert.deepEqual(
+      transcriptRecovery
+        .requestTranscriptForScope([...earlier, refusedGuestIp, question, refusedReview], retry, scope)
+        .map(row => row.id),
+      ["u0", "a0", "q"]
+    );
+  }
+});
+
 test("recovery index preserves imported boundaries, blank questions, duplicate ids and the last unanswered user", () => {
   const rows = [
     { id: "orphan", role: "assistant", content: "", status: "error" },
