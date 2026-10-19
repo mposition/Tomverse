@@ -1,5 +1,5 @@
 //! The local AMUX half of the Decision Maker's typed ask (stage S2-1,
-//! migration 0083).
+//! migration 0084).
 //!
 //! docs/policy/amux-decision-maker.md §12 names the local AMUX part of stage
 //! S2, and this module is it, as store functions on the writer's connection:
@@ -15,7 +15,7 @@
 //!    a revision is an immutable snapshot of what the card was asking, taken
 //!    when a typed card enters `needsyou` or changes its ask while there. It
 //!    is bound to two counters the database keeps for every writer (a status
-//!    epoch and an ask epoch, migration 0083), never to a clock or to the
+//!    epoch and an ask epoch, migration 0084), never to a clock or to the
 //!    wording, so any status change or rewording by any door ends it.
 //! 3. **The DM-pending marker**, set by one compare-and-swap against the
 //!    card's current question revision and removed by the request that set it,
@@ -485,7 +485,7 @@ pub fn parse_typed_ask(value: &Value) -> Result<TypedAskInput, TypedAskRefusal> 
 // ---------------------------------------------------------------------------
 
 /// The card's base ask, from the row as stored, with the card's two epochs
-/// (migration 0083: the status epoch moves on every status change and the ask
+/// (migration 0084: the status epoch moves on every status change and the ask
 /// epoch on every change of the base ask, whoever writes the row).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CardAsk {
