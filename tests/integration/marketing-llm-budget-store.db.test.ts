@@ -125,6 +125,42 @@ test("a reservation is the pin's maximum, audited by the generator actor, and re
   assert.equal(await prisma.adminAuditLog.count(), 1);
 });
 
+test("a web-search reservation adds every search the pin allows, and a pin without a search price refuses it", async () => {
+  const webPin: MarketingLlmPricePin = { ...PIN, webSearchMicroUsdPerCall: 10_000, maxWebSearchCalls: 3 };
+  const webPayload = { ...payload(1), adapterProfile: "web-search-v1" };
+  const web = await tx((client) =>
+    reserveMarketingLlmCall(client, { payload: webPayload, deadlineAt: deadline() }, { ...OPEN, pins: [webPin] }),
+  );
+  assert.equal(web.status, "ok");
+  if (web.status !== "ok") return;
+  // Four passes over the window, the output cap once and three searches.
+  assert.equal(web.value.reservedMicroUsd, 452_708);
+  const stored = await row(web.value.callId);
+  assert.equal((stored.configSnapshot as Record<string, unknown>).adapterProfile, "web-search-v1");
+  assert.equal(stored.reservedInputTokens, 4 * 128_000);
+  // Dispatch binds to the web-search config, search cap included.
+  const webAdapter = marketingLlmAdapterConfigDigest(
+    marketingLlmConfigSnapshot({ pin: webPin, adapterVersion: MARKETING_LLM_ADAPTER_VERSION, adapterProfile: "web-search-v1" }),
+  );
+  assert.equal(
+    marketingLlmAdapterConfigDigest(stored.configSnapshot as Parameters<typeof marketingLlmAdapterConfigDigest>[0]),
+    webAdapter,
+  );
+  // Input read over several passes -- more than one window -- still settles.
+  const webEnv = { ...OPEN, pins: [webPin] };
+  assert.equal((await dispatch(web.value.callId, 1, 1, webEnv, webAdapter)).status, "ok");
+  const settled = await settle(web.value.callId, 1, observation(1, { reportedInputTokens: 400_000 }), webEnv);
+  assert.equal(settled.status, "ok");
+  assert.equal((await row(web.value.callId)).state, "settled");
+
+  // The text-only pin has no search price: no web search, and nothing written.
+  const refused = await tx((client) =>
+    reserveMarketingLlmCall(client, { payload: { ...webPayload, requestKey: uuid(2) }, deadlineAt: deadline() }, OPEN),
+  );
+  assert.deepEqual(refused, { status: "refused", code: "adapter_profile_unknown" });
+  assert.equal(await prisma.marketingLlmCall.count(), 1);
+});
+
 test("new reservations are refused without a switch, cap, pin or time, and leave nothing behind", async () => {
   assert.deepEqual(await reserve(1, { ...OPEN, killSwitchOn: true }), { status: "refused", code: "kill_switch" });
   assert.deepEqual(await reserve(1, { ...OPEN, killSwitchOn: null }), { status: "refused", code: "kill_switch" });

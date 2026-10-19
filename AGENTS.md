@@ -1408,9 +1408,9 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `tests/integration/marketing-intel-reports.db.test.ts`. 생성기 secret으로 쓸 수 있는 보고서는 `brief`·`market_intel`
   둘뿐입니다. key는 앱이 종류·run·보고서 id로 유도하고, 같은 key에 다른 바이트가 오면 conflict이며, 이미 기록된
   보고서는 모든 게이트보다 먼저 되읽습니다. 마감은 draft 접수와 같은 helper로 겁니다. **시장 사실은 사람이 승인한
-  경쟁사의 추적 페이지에서, 그 경쟁사의 공식 host 위에서 온 것만 저장합니다** — 둘 다 같은 트랜잭션에서 등록부의
-  승인 행을 FOR SHARE로 읽은 것이고(`holdApprovedMarketingCompetitorSources()`), 승인된 host의 다른 페이지는 출처가
-  아닙니다(docs/policy/marketing-automation.md §4.1). 그 밖의 사실은 저장하지 않고 `unrepresentableFactCount`에 더합니다. `market_intel` 보고서는
+  경쟁사의 공식 host 위에서 온 것만 저장합니다** — 같은 트랜잭션에서 등록부의 승인 행을 FOR SHARE로 읽은
+  host입니다(`holdApprovedMarketingCompetitorHosts()`; 운영자 결정 2026-10-19로 A3가 웹 검색을 쓰므로 고정 페이지 대조는
+  하지 않습니다). 그 밖의 사실은 저장하지 않고 `unrepresentableFactCount`에 더합니다. `market_intel` 보고서는
   후보(`competitorCandidates`, 최대 5개)를 함께 서명해 보낼 수 있고, 후보는 제안으로만 저장됩니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
   `marketing-generator`이고 범위는 `MarketingReport`의 `marketing_report.generator_recorded` 하나입니다.
 - **S3e1(생성기 LLM adapter)**: `lib/marketingLlmClientCore.ts`, `tests/marketingLlmClientCore.test.mjs`. 생성기
@@ -1526,17 +1526,18 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   승인한 host이고, `knownIds`는 상태와 무관하게 등록부가 아는 id 전부이며 자르지 않습니다(거절도 답이므로 다시 제안하지 않게;
   크기는 문맥 route의 byte 상한이 자르지 않고 거절합니다).
   host는 이름이지 URL이 아니며, A5 메시지에는 싣지 않습니다(`tests/marketingGeneratorDraftingCore.test.mjs`).
-- **S3f-R5a(추적 페이지)**: `prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql`,
+- **S3f-R5a(추적 페이지, 지금은 쓰지 않음)**: `prisma/migrations/20261017180000_marketing_competitor_tracked_pages/migration.sql`,
   `MarketingCompetitor.trackedPages`(운영자 결정 2026-10-17: 사실은 사람이 승인한 고정 페이지에서, 웹 검색은 신규 경쟁사 탐색에만).
   페이지는 그 행의 공식 host 위의 https URL이고(DB CHECK), 제안 상태에는 없으며, 이름·host처럼 승인으로만 바뀌고 승인 감사 행의
-  `trackedPages`와 정확히 대조됩니다. 생성기 문맥에서 URL이 나오는 곳은 이 페이지뿐이며 A5에는 가지 않습니다.
+  `trackedPages`와 정확히 대조됩니다. 2026-10-19 운영자 결정으로 A3가 웹 검색으로 바뀌어 이 열은 읽히지 않습니다.
 - **S3f-R5b(A3 실행)**: `lib/marketingA3Core.ts`, `lib/marketingA3CycleCore.ts`, `scripts/marketing-generator-worker.mjs`,
-  `tests/marketingA3Core.test.mjs`, `tests/marketingA3Cycle.test.mjs`. 서비스가 추적 페이지를 직접 읽습니다 — https·승인 host만,
-  redirect도 승인 host로만, IP 주소 host 거부, 자격증명·앱 header 없음, 바이트·시간 상한. 페이지 텍스트는 A3 추출 메시지에만
-  데이터로 들어가고, 사실의 경쟁사 id·확인 시각은 서비스가 정하며 출처는 실제로 읽은 페이지여야 합니다. 경쟁사당 한 번 원장을
-  거쳐 호출하고(`market_intel` 목적), 실행당 서명된 보고서 하나를 제출합니다. 결과를 모르는 호출이나 답이 없는 제출은
-  실행 전체를 멈추고 보고서를 내지 않으며, 시간 몫(20분)을 넘기면 보고서 없이 A5로 넘어갑니다. pin이 없으면(D4) worker는
-  시작하지 않습니다.
+  `tests/marketingA3Core.test.mjs`, `tests/marketingA3Cycle.test.mjs`. **경쟁사마다 LLM 웹 검색 한 번입니다**(운영자 결정
+  2026-10-19: LLM이 할 수 있는 일은 LLM 호출로, 직접 crawling 코드는 지움). 검색은 그 경쟁사의 공식 domain으로
+  제한되고(`allowed_domains`) 호출당 검색 횟수는 pin의 `maxWebSearchCalls`로 묶이며, 원장은 모델이 검색 뒤마다 다시 읽는 입력(컨텍스트 창 ×
+  (검색 수 + 1))과 출력 상한, 검색 단가를 합친 최대 비용을 예약합니다(adapter profile `web-search-v1`; pin에 검색 단가가 없으면 예약 거절). 사실의 경쟁사 id·확인 시각은 서비스가
+  정하고, 출처는 공급사가 실제로 인용한 URL이면서 공식 host 위여야 합니다(query·fragment 제거). 결과를 모르는 호출이나 답이
+  없는 제출은 실행 전체를 멈추고 보고서를 내지 않으며, 시간 몫(20분)을 넘기면 보고서 없이 A5로 넘어갑니다. pin이 없으면(D4)
+  worker는 시작하지 않습니다.
 
 # 엔지니어링 Agent
 
