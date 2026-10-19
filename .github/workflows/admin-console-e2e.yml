@@ -327,8 +327,14 @@ jobs:
   # The name branch protection requires on develop and main. A matrix renames
   # its checks, so the original name stays here as the conjunction of the
   # shards; always() so a failed or cancelled shard reports red, not pending.
+  # Pull requests only (2026-10-20). This job exists for branch protection,
+  # which reads checks on pull requests, never on pushes. On a develop or main
+  # push it did nothing but wait for a runner after the shards had finished --
+  # 9+ minutes on 2026-10-20 behind the PR queue -- and Railway's Wait for CI
+  # held the deployment until it did. Skipped on push, the run concludes when
+  # the shards do, and a failing one still fails the run.
   admin-console-e2e:
-    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop'))
+    if: always() && github.event_name == 'pull_request' && (!github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop'))
     name: Admin Console E2E (PostgreSQL)
     runs-on: ubuntu-latest
     timeout-minutes: 5
