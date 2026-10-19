@@ -13,14 +13,19 @@ import { handleMarketingLlmBudgetRequest, MARKETING_LLM_BUDGET_MAX_BODY_BYTES } 
 import type { MarketingLlmBudgetEnvironment } from "@/lib/marketingLlmBudgetStore";
 import { MARKETING_GENERATOR_SECRET_ENV } from "@/lib/marketingGeneratorAuth";
 import { prisma } from "@/lib/prisma";
+import { clearMarketingLlmSettings, setMarketingLlmSettings } from "./marketingLlmSettingsFixture";
 import { resetTestFixture } from "./resetTestFixture";
 
 const SECRET = "g".repeat(48);
 const reset = () =>
   resetTestFixture(prisma, `TRUNCATE TABLE "MarketingLlmCall", "AdminAuditLog" RESTART IDENTITY CASCADE`);
-beforeEach(reset);
+beforeEach(async () => {
+  await reset();
+  await setMarketingLlmSettings(prisma, PIN.model, "1");
+});
 after(async () => {
   await reset();
+  await clearMarketingLlmSettings(prisma);
   await prisma.$disconnect();
 });
 
@@ -41,7 +46,7 @@ const PIN: MarketingLlmPricePin = {
   expiresAt: new Date(verifiedAt + 90 * day).toISOString(),
   source: "https://example.invalid/pricing",
 };
-const BUDGET: MarketingLlmBudgetEnvironment = { killSwitchOn: false, monthlyCapRaw: "1", pins: [PIN] };
+const BUDGET: MarketingLlmBudgetEnvironment = { killSwitchOn: false, pins: [PIN] };
 const ENV = { [MARKETING_GENERATOR_SECRET_ENV]: SECRET };
 
 const deadlineAt = () => new Date(Date.now() + 60_000).toISOString();
@@ -139,8 +144,8 @@ test("unauthenticated, oversized, malformed and badly signed requests write noth
 test("the route as built pins no model, so every reservation is refused", async () => {
   const previous = process.env[MARKETING_GENERATOR_SECRET_ENV];
   process.env[MARKETING_GENERATOR_SECRET_ENV] = SECRET;
-  const previousCap = process.env.MARKETING_LLM_MONTHLY_USD_CAP;
-  process.env.MARKETING_LLM_MONTHLY_USD_CAP = "100";
+  // A model selected and a cap set in the Admin Console; the build pins none.
+  await setMarketingLlmSettings(prisma, PIN.model, "100");
   try {
     const response = await POST(post(reserveBody()));
     assert.equal(response.status, 200);
@@ -149,8 +154,6 @@ test("the route as built pins no model, so every reservation is refused", async 
   } finally {
     if (previous === undefined) delete process.env[MARKETING_GENERATOR_SECRET_ENV];
     else process.env[MARKETING_GENERATOR_SECRET_ENV] = previous;
-    if (previousCap === undefined) delete process.env.MARKETING_LLM_MONTHLY_USD_CAP;
-    else process.env.MARKETING_LLM_MONTHLY_USD_CAP = previousCap;
   }
   assert.equal(await prisma.marketingLlmCall.count(), 0);
 });
