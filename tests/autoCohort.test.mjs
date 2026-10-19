@@ -109,7 +109,7 @@ test("an outstanding readiness gate refuses everyone, at any percentage", () => 
   }
 });
 
-test("dev and staging skip pending readiness gates, and say so on the decision", () => {
+test("dev skips pending readiness gates, and says so on the decision", () => {
   const decision = decideAutoCohort(subject({
     readiness: notReady,
     config: config({ readinessWaivedOutsideProduction: true }),
@@ -145,11 +145,14 @@ test("the readiness waiver leaves every rollout control in force", () => {
   );
 });
 
-test("only a deployment explicitly named dev or staging waives readiness", () => {
+test("only a deployment explicitly named dev waives readiness", () => {
   const waives = (env) => autoCohortConfig(env).readinessWaivedOutsideProduction;
   assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "dev" }), true);
-  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "staging" }), true);
-  assert.equal(waives({ APP_ENV: "staging" }), true);
+  assert.equal(waives({ APP_ENV: "dev" }), true);
+  // Staging holds the release candidate and keeps the gate (the drill is its
+  // exception); tests/server-contract/chat-route-fallback-liveness relies on it.
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "staging" }), false);
+  assert.equal(waives({ APP_ENV: "staging" }), false);
   // Production keeps the gate, however it is named.
   assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "production" }), false);
   assert.equal(waives({ APP_ENV: "production", RAILWAY_ENVIRONMENT_NAME: "dev" }), false);

@@ -76,7 +76,7 @@ export type AutoCohortDecision =
       drillOverride?: typeof DRILL_OVERRIDE_REASON;
       /** Exact-deployment owner authority, separate from the staging drill. */
       initialReleaseAuthority?: typeof CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS;
-      /** Present when an outstanding gate was skipped on a dev/staging deployment. */
+      /** Present when an outstanding gate was skipped on the dev deployment. */
       nonProductionReadinessWaiver?: true;
       /** The separately approved, artifact-bound release path. */
       limitedReleaseException?: Readonly<{
@@ -115,14 +115,16 @@ export type AutoCohortConfig = {
   /** Separate product authority; never inferred from the rollout fields. */
   limitedRelease?: AutoRouterLimitedReleaseAdmission;
   /**
-   * True on a deployment explicitly named `dev` or `staging`.
+   * True on a deployment explicitly named `dev`.
    *
-   * The readiness register gates a *production* rollout. Holding the
-   * non-production environments to it meant Auto could not be turned on
-   * anywhere it could be tried, so they skip it; the rollout fields (UI flag,
-   * percentage, plans, salt, kill switch) still apply there. Only an explicit
-   * name counts: an unnamed production build resolves to production in
-   * lib/deploymentEnvironment.ts and keeps the gate. Owner decision
+   * The readiness register gates a *production* rollout. Holding `dev` -- the
+   * environment every develop merge lands on -- to it meant Auto could not be
+   * turned on anywhere it could be tried, so dev skips it; the rollout fields
+   * (UI flag, percentage, plans, salt, kill switch) still apply there.
+   * Staging keeps the gate: it holds the release candidate and should answer
+   * as production will, with the drill as its narrow exception. Only an
+   * explicit name counts: an unnamed production build resolves to production
+   * in lib/deploymentEnvironment.ts and keeps the gate. Owner decision
    * 2026-10-19.
    */
   readinessWaivedOutsideProduction?: boolean;
@@ -134,7 +136,7 @@ const readinessWaivedOutsideProduction = (
   const named =
     validateEnvironment(env.APP_ENV) ??
     validateEnvironment(env.RAILWAY_ENVIRONMENT_NAME);
-  return named === "dev" || named === "staging";
+  return named === "dev";
 };
 
 const parsePercent = (raw: string | undefined): number => {
