@@ -651,7 +651,22 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-200">
                       {feedback.message}
                     </p>
-                    {feedback.triage ? <TriageProposal triage={feedback.triage} m={m} /> : null}
+                    {feedback.triage ? (
+                      <TriageProposal
+                        triage={feedback.triage}
+                        m={m}
+                        onUseDraft={
+                          isTerminalFeedbackStatus(feedback.status)
+                            ? undefined
+                            : (userReply) =>
+                                setCloseTarget({
+                                  feedback,
+                                  status: "resolved",
+                                  draft: { outcomeCode: feedback.type === "bug" ? "fixed" : "answered", userReply },
+                                })
+                        }
+                      />
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -1185,9 +1200,12 @@ function FeedbackCompletionDialog({
 function TriageProposal({
   triage,
   m,
+  onUseDraft,
 }: {
   triage: NonNullable<FeedbackRow["triage"]>;
   m: FeedbackInboxMessages;
+  /** Opens the closing dialog with the draft as the reply; absent on a closed report. */
+  onUseDraft?: (userReply: string) => void;
 }) {
   const laneLabel =
     (m.triageLanes as Record<string, string>)[triage.lane] ?? triage.lane;
@@ -1223,6 +1241,18 @@ function TriageProposal({
         <div className="mt-2">
           <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
             <span>{m.triageDraft}</span>
+            <span className="flex flex-wrap gap-2">
+            {onUseDraft ? (
+              <button
+                type="button"
+                data-testid="feedback-triage-use-draft"
+                onClick={() => onUseDraft(triage.replyDraft ?? "")}
+                className="inline-flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2 py-1 font-bold text-blue-100 transition hover:bg-blue-500/20"
+              >
+                <Mail className="h-3 w-3" />
+                {m.triageUseDraft}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void navigator.clipboard?.writeText(triage.replyDraft ?? "")}
@@ -1231,6 +1261,7 @@ function TriageProposal({
               <Clipboard className="h-3 w-3" />
               {m.triageCopyDraft}
             </button>
+            </span>
           </div>
           <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-200">{triage.replyDraft}</p>
         </div>
