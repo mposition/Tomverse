@@ -4578,6 +4578,38 @@ model AutoRouterDecision {
   @@index([traceId])
 }
 
+/// One improvement cycle of the Auto LLM router's guidance
+/// (lib/autoRouterOptimizerCore.ts). Holds no user content: evaluated decisions
+/// are named by AutoRouterDecision id only, and who started or promoted a cycle
+/// is in AdminAuditLog (targetId = this id).
+model AutoRouterOptimizerCycle {
+  id                String    @id @default(cuid())
+  createdAt         DateTime  @default(now())
+  finishedAt        DateTime?
+  /// running | passed | failed | error
+  status            String
+  /// The cycle's gate failure or run error code; null when passed or running.
+  failure           String?
+  optimizerModelId  String
+  routerModelId     String
+  incumbentGuidance String
+  candidateGuidance String?
+  /// [{ decisionId, incumbentPick, candidatePick, verdict }]
+  cases             Json?
+  summary           Json?
+  /// Worst case reserved against the day and month caps when the cycle started.
+  reservedMicroUsd  Int
+  /// [{ provider, microUsd, dayStart, monthStart }] held in each provider budget until settled.
+  providerReservations Json?
+  /// person | system -- who started it; the daily automation may start one a day.
+  startedBy         String    @default("person")
+  spentMicroUsd     Int       @default(0)
+  promotedAt        DateTime?
+
+  @@index([createdAt])
+  @@index([status])
+}
+
 /// One dual-estimate observation for prompt-token estimator calibration (G1 in
 /// docs/policy/tomverse-chat-model-capability-inventory.md).
 ///
