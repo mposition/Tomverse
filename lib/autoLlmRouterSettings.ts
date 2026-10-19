@@ -30,20 +30,45 @@ export async function readAutoLlmRouterModelId(): Promise<string | null> {
     }
 }
 
-/** Null turns the LLM pick off by removing the row. */
-export async function writeAutoLlmRouterModelId(
+/**
+ * Sets the router model (null turns the LLM pick off by removing the row)
+ * together with its audit entry, behind the audit chain lock: Auto never
+ * starts or stops a paid call without a record of who changed it. False when
+ * the stored value already was `modelId`; nothing is written then.
+ */
+export async function updateAutoLlmRouterModelId(
+    actor: { session: Session; request: Request },
     modelId: string | null
-): Promise<void> {
-    if (modelId === null) {
-        await prisma.appSetting.deleteMany({
-            where: { key: AUTO_LLM_ROUTER_MODEL_SETTING_KEY },
+): Promise<boolean> {
+    return prisma.$transaction(async (tx) => {
+        await takeAuditChainLock(tx);
+        const before =
+            (await tx.appSetting.findUnique({
+                where: { key: AUTO_LLM_ROUTER_MODEL_SETTING_KEY },
+                select: { value: true },
+            }))?.value.trim() || null;
+        if (before === modelId) return false;
+        if (modelId === null) {
+            await tx.appSetting.deleteMany({ where: { key: AUTO_LLM_ROUTER_MODEL_SETTING_KEY } });
+        } else {
+            await tx.appSetting.upsert({
+                where: { key: AUTO_LLM_ROUTER_MODEL_SETTING_KEY },
+                create: { key: AUTO_LLM_ROUTER_MODEL_SETTING_KEY, value: modelId },
+                update: { value: modelId },
+            });
+        }
+        await writeAdminAuditLog({
+            ...actor,
+            tx,
+            action: "auto.llm_router_model.updated",
+            targetType: "AppSettings",
+            targetId: AUTO_LLM_ROUTER_MODEL_SETTING_KEY,
+            summary: modelId
+                ? `Set the Auto LLM router model to ${modelId}.`
+                : "Turned the Auto LLM router off.",
+            metadata: { before, after: modelId },
         });
-        return;
-    }
-    await prisma.appSetting.upsert({
-        where: { key: AUTO_LLM_ROUTER_MODEL_SETTING_KEY },
-        create: { key: AUTO_LLM_ROUTER_MODEL_SETTING_KEY, value: modelId },
-        update: { value: modelId },
+        return true;
     });
 }
 
